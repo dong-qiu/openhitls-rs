@@ -1,0 +1,17 @@
+[package]
+name = "hitls-utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Utility functions for openHiTLS: ASN.1, Base64, PEM, OID"
+
+[dependencies]
+hitls-types = { path = "../hitls-types" }
+
+[features]
+default = ["asn1", "base64", "pem", "oid"]
+asn1 = []
+base64 = []
+pem = ["base64"]
+oid = []

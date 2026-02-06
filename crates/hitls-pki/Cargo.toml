@@ -1,0 +1,19 @@
+[package]
+name = "hitls-pki"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "PKI certificate management for openHiTLS"
+
+[dependencies]
+hitls-types = { path = "../hitls-types" }
+hitls-crypto = { path = "../hitls-crypto" }
+hitls-utils = { path = "../hitls-utils" }
+zeroize = { version = "1.8", features = ["derive"] }
+
+[features]
+default = ["x509", "pkcs12", "cms"]
+x509 = []
+pkcs12 = []
+cms = []

@@ -1,0 +1,27 @@
+[package]
+name = "hitls-tls"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "TLS protocol implementation for openHiTLS"
+
+[dependencies]
+hitls-types = { path = "../hitls-types" }
+hitls-crypto = { path = "../hitls-crypto" }
+hitls-pki = { path = "../hitls-pki" }
+log = "0.4"
+zeroize = { version = "1.8", features = ["derive"] }
+
+[dependencies.tokio]
+version = "1"
+features = ["io-util", "net"]
+optional = true
+
+[features]
+default = ["tls13"]
+tls12 = []
+tls13 = []
+dtls12 = []
+tlcp = []
+async = ["tokio"]

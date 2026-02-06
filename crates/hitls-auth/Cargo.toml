@@ -1,0 +1,18 @@
+[package]
+name = "hitls-auth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Authentication protocols for openHiTLS"
+
+[dependencies]
+hitls-types = { path = "../hitls-types" }
+hitls-crypto = { path = "../hitls-crypto" }
+zeroize = { version = "1.8", features = ["derive"] }
+
+[features]
+default = ["otp", "spake2plus"]
+otp = []
+spake2plus = []
+privpass = []

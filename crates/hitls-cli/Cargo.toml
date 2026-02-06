@@ -1,0 +1,20 @@
+[package]
+name = "hitls-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Command-line tool for openHiTLS"
+
+[[bin]]
+name = "hitls"
+path = "src/main.rs"
+
+[dependencies]
+hitls-types = { path = "../hitls-types" }
+hitls-crypto = { path = "../hitls-crypto" }
+hitls-tls = { path = "../hitls-tls" }
+hitls-pki = { path = "../hitls-pki" }
+hitls-auth = { path = "../hitls-auth" }
+hitls-utils = { path = "../hitls-utils" }
+clap = { version = "4", features = ["derive"] }

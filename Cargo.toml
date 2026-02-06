@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hitls-types",
+    "crates/hitls-utils",
+    "crates/hitls-bignum",
+    "crates/hitls-crypto",
+    "crates/hitls-tls",
+    "crates/hitls-pki",
+    "crates/hitls-auth",
+    "crates/hitls-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MulanPSL-2.0"
+repository = "https://gitee.com/openhitls/openhitls"
+description = "A production-grade cryptography and TLS library"
+
+[workspace.dependencies]
+# Internal crates
+hitls-types = { path = "crates/hitls-types" }
+hitls-utils = { path = "crates/hitls-utils" }
+hitls-bignum = { path = "crates/hitls-bignum" }
+hitls-crypto = { path = "crates/hitls-crypto" }
+hitls-tls = { path = "crates/hitls-tls" }
+hitls-pki = { path = "crates/hitls-pki" }
+hitls-auth = { path = "crates/hitls-auth" }
+
+# External dependencies
+zeroize = { version = "1.8", features = ["derive"] }
+subtle = "2.6"
+getrandom = "0.2"
+thiserror = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
+criterion = "0.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+lto = true
+codegen-units = 1

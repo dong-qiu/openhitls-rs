@@ -1,0 +1,13 @@
+[package]
+name = "hitls-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Common types, error codes, algorithm identifiers, and constants for openHiTLS"
+
+[dependencies]
+thiserror = "2"
+
+[features]
+default = []

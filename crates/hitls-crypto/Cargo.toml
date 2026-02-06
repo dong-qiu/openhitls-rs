@@ -1,0 +1,72 @@
+[package]
+name = "hitls-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Cryptographic algorithm library for openHiTLS"
+
+[dependencies]
+hitls-types = { path = "../hitls-types" }
+hitls-bignum = { path = "../hitls-bignum", optional = true }
+zeroize = { version = "1.8", features = ["derive"] }
+subtle = "2.6"
+getrandom = "0.2"
+
+[features]
+default = ["aes", "sha2", "rsa", "ecdsa", "hmac"]
+
+# Symmetric ciphers
+aes = []
+sm4 = []
+chacha20 = []
+
+# Hash algorithms
+md5 = []
+sha1 = []
+sha2 = []
+sha3 = []
+sm3 = []
+
+# MAC algorithms
+hmac = []
+cmac = []
+gmac = []
+siphash = []
+
+# Asymmetric algorithms
+rsa = ["hitls-bignum"]
+dsa = ["hitls-bignum"]
+ecc = ["hitls-bignum"]
+ecdsa = ["ecc"]
+ecdh = ["ecc"]
+dh = ["hitls-bignum"]
+ed25519 = []
+x25519 = []
+sm2 = ["ecc", "sm3"]
+sm9 = ["ecc", "sm3"]
+paillier = ["hitls-bignum"]
+elgamal = ["hitls-bignum"]
+
+# Post-quantum algorithms
+pqc = ["mlkem", "mldsa"]
+mlkem = []
+mldsa = []
+slh-dsa = []
+xmss = []
+frodokem = []
+mceliece = []
+hybridkem = []
+
+# KDF and DRBG
+hkdf = ["hmac"]
+pbkdf2 = ["hmac"]
+scrypt = ["pbkdf2"]
+drbg = []
+hpke = []
+
+# Modes of operation
+modes = []
+
+# Expose low-level internals
+hazmat = []

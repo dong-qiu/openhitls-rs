@@ -1,0 +1,15 @@
+[package]
+name = "hitls-bignum"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Cryptography-safe big number arithmetic library for openHiTLS"
+
+[dependencies]
+hitls-types = { path = "../hitls-types" }
+zeroize = { version = "1.8", features = ["derive"] }
+subtle = "2.6"
+
+[features]
+default = []
