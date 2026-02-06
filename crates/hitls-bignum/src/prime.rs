@@ -37,7 +37,7 @@ impl BigNum {
         let mut d = n_minus_one.clone();
         let mut r = 0usize;
         while d.limbs()[0] & 1 == 0 {
-            shift_right_one(&mut d);
+            d = d.shr(1);
             r += 1;
         }
 
@@ -71,20 +71,6 @@ impl BigNum {
         }
 
         Ok(true)
-    }
-}
-
-/// Shift a BigNum right by 1 bit in-place.
-fn shift_right_one(n: &mut BigNum) {
-    let limbs = n.limbs_mut();
-    let len = limbs.len();
-    for i in 0..len - 1 {
-        limbs[i] = (limbs[i] >> 1) | (limbs[i + 1] << 63);
-    }
-    limbs[len - 1] >>= 1;
-    // Normalize
-    while limbs.len() > 1 && *limbs.last().unwrap() == 0 {
-        limbs.pop();
     }
 }
 

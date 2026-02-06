@@ -10,6 +10,7 @@ description = "Cryptography-safe big number arithmetic library for openHiTLS"
 hitls-types = { path = "../hitls-types" }
 zeroize = { version = "1.8", features = ["derive"] }
 subtle = "2.6"
+getrandom = "0.2"
 
 [features]
 default = []

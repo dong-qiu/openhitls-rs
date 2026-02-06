@@ -123,8 +123,54 @@ impl BigNum {
         self.negative = neg;
     }
 
+    /// Create a BigNum from a vector of little-endian limbs.
+    pub fn from_limbs(limbs: Vec<Limb>) -> Self {
+        let mut bn = Self {
+            limbs: if limbs.is_empty() { vec![0] } else { limbs },
+            negative: false,
+        };
+        bn.normalize();
+        bn
+    }
+
+    /// Return true if this number equals 1.
+    pub fn is_one(&self) -> bool {
+        !self.negative && self.limbs.len() == 1 && self.limbs[0] == 1
+    }
+
+    /// Return true if this number is even.
+    pub fn is_even(&self) -> bool {
+        self.limbs[0] & 1 == 0
+    }
+
+    /// Return true if this number is odd.
+    pub fn is_odd(&self) -> bool {
+        self.limbs[0] & 1 == 1
+    }
+
+    /// Get bit at position `idx` (0-indexed from LSB).
+    pub fn get_bit(&self, idx: usize) -> u64 {
+        let limb_idx = idx / LIMB_BITS;
+        let bit_idx = idx % LIMB_BITS;
+        if limb_idx >= self.limbs.len() {
+            0
+        } else {
+            (self.limbs[limb_idx] >> bit_idx) & 1
+        }
+    }
+
+    /// Set bit at position `idx` (0-indexed from LSB).
+    pub fn set_bit(&mut self, idx: usize) {
+        let limb_idx = idx / LIMB_BITS;
+        let bit_idx = idx % LIMB_BITS;
+        if limb_idx >= self.limbs.len() {
+            self.limbs.resize(limb_idx + 1, 0);
+        }
+        self.limbs[limb_idx] |= 1u64 << bit_idx;
+    }
+
     /// Remove leading zero limbs.
-    fn normalize(&mut self) {
+    pub(crate) fn normalize(&mut self) {
         while self.limbs.len() > 1 && *self.limbs.last().unwrap() == 0 {
             self.limbs.pop();
         }
@@ -153,6 +199,56 @@ impl PartialEq for BigNum {
 }
 
 impl Eq for BigNum {}
+
+impl PartialOrd for BigNum {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for BigNum {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        let self_neg = self.is_negative();
+        let other_neg = other.is_negative();
+        match (self_neg, other_neg) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            (false, false) => {
+                // Both non-negative: compare absolute values
+                let a_bits = self.bit_len();
+                let b_bits = other.bit_len();
+                if a_bits != b_bits {
+                    return a_bits.cmp(&b_bits);
+                }
+                for i in (0..self.limbs.len().max(other.limbs.len())).rev() {
+                    let a = if i < self.limbs.len() { self.limbs[i] } else { 0 };
+                    let b = if i < other.limbs.len() { other.limbs[i] } else { 0 };
+                    if a != b {
+                        return a.cmp(&b);
+                    }
+                }
+                Ordering::Equal
+            }
+            (true, true) => {
+                // Both negative: larger absolute value is smaller
+                let a_bits = self.bit_len();
+                let b_bits = other.bit_len();
+                if a_bits != b_bits {
+                    return b_bits.cmp(&a_bits);
+                }
+                for i in (0..self.limbs.len().max(other.limbs.len())).rev() {
+                    let a = if i < self.limbs.len() { self.limbs[i] } else { 0 };
+                    let b = if i < other.limbs.len() { other.limbs[i] } else { 0 };
+                    if a != b {
+                        return b.cmp(&a);
+                    }
+                }
+                Ordering::Equal
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
