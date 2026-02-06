@@ -86,6 +86,8 @@ pub enum CryptoError {
     InvalidTagLength,
     #[error("aead: tag verification failed")]
     AeadTagVerifyFail,
+    #[error("invalid padding")]
+    InvalidPadding,
 
     // DRBG errors
     #[error("drbg: invalid state")]

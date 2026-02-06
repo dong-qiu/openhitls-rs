@@ -140,8 +140,179 @@ openhitls-rs/
 └── .github/workflows/ci.yml       # CI pipeline
 ```
 
-### Next Steps (Phase 1)
-- Verify the workspace compiles successfully with `cargo check`
-- Fix any compilation issues
-- Implement ASN.1 decoder tests with real certificate data
-- Begin implementing SHA-256 algorithm
+---
+
+## Phase 1–2: Tooling + BigNum (Session 2026-02-06)
+
+### Goals
+- Fix compilation issues from Phase 0 scaffolding
+- Improve BigNum: Montgomery multiplication, modular exponentiation, prime generation
+- Add constant-time operations for side-channel safety
+
+### Completed Steps
+
+#### BigNum Improvements (`hitls-bignum`)
+- `montgomery.rs` — Full Montgomery context: N' via Newton's method, to/from Montgomery form, Montgomery multiplication, modular exponentiation with sliding window
+- `prime.rs` — Miller-Rabin primality test with configurable rounds + small prime sieve
+- `rand.rs` — Cryptographic random BigNum generation (random_bits, random_odd, random_range) using `getrandom`
+- `ct.rs` — Constant-time operations: ct_eq, ct_select, ct_sub_if_gte
+- `ops.rs` — Added: sqr (squaring), mod_add, mod_sub, mod_mul, shl, shr, RSA small example test
+- `gcd.rs` — GCD + modular inverse via extended Euclidean algorithm
+
+### Build Status
+- 45 bignum tests passing
+- 11 utils tests passing
+- Total: 56 workspace tests
+
+---
+
+## Phase 3: Hash + HMAC (Session 2026-02-06)
+
+### Goals
+- Implement complete SHA-2 family (SHA-256/224/512/384)
+- Implement SM3 (Chinese national standard hash)
+- Implement SHA-1 and MD5 (legacy, needed for TLS compatibility)
+- Implement HMAC with generic hash support
+
+### Completed Steps
+
+#### 1. SHA-2 Family (`sha2/mod.rs`)
+- SHA-256: FIPS 180-4 compliant, 64-round compression, MD padding
+- SHA-224: Truncated SHA-256 with different initial values
+- SHA-512: 80-round compression with u64 state words
+- SHA-384: Truncated SHA-512 with different initial values
+- Shared `update_32`/`finish_32` and `update_64`/`finish_64` helpers
+- Implements `Digest` trait for all four variants
+- **Tests**: RFC 6234 vectors — empty, "abc", two-block, incremental
+
+#### 2. SM3 (`sm3/mod.rs`)
+- GB/T 32905-2012 compliant, 64-round compression
+- P0/P1 permutation functions, FF/GG boolean functions
+- **Tests**: empty, "abc", 64-byte input
+
+#### 3. SHA-1 (`sha1/mod.rs`)
+- RFC 3174 compliant, 80-round compression with W[80] expansion
+- **Tests**: empty, "abc", two-block, incremental
+
+#### 4. MD5 (`md5/mod.rs`)
+- RFC 1321 compliant, little-endian byte order
+- 4 round functions (F/G/H/I), 64 sin-based constants, G_IDX message schedule
+- **Tests**: RFC 1321 vectors — empty, "a", "abc", "message digest", alphabet, alphanumeric, numeric, incremental
+
+#### 5. HMAC (`hmac/mod.rs`)
+- RFC 2104 compliant
+- Generic via `Box<dyn Digest>` + factory closure pattern
+- Key hashing (keys > block_size), ipad/opad XOR
+- `new`, `update`, `finish`, `reset`, `mac` (one-shot) API
+- Zeroize key material on drop
+- **Tests**: RFC 4231 test cases 1-4, 6-7 + reset functionality
+
+### Bug Fixes
+- Clippy `needless_range_loop` in SHA-1 (w[j] indexing) — fixed with enumerate
+- Clippy `needless_range_loop` in SHA-2 (state[i] indexing) — fixed with enumerate+take
+- Formatting fixes across all files via `cargo fmt`
+
+### Build Status
+- 30 hitls-crypto tests passing (new)
+- 45 bignum + 11 utils = 56 (unchanged)
+- **Total: 86 workspace tests**
+
+---
+
+## Phase 4: Symmetric Ciphers + Block Cipher Modes + KDF (Session 2026-02-06)
+
+### Goals
+- Implement AES-128/192/256 and SM4 block ciphers
+- Implement ECB, CBC, CTR, GCM block cipher modes
+- Implement HKDF and PBKDF2 key derivation functions
+
+### Completed Steps
+
+#### 1. AES Block Cipher (`aes/mod.rs`)
+- FIPS 197 compliant AES-128/192/256
+- S-box based implementation (no T-box): SBOX[256], INV_SBOX[256], RCON[10]
+- Key expansion: Nk=key_len/4, Nr=Nk+6, SubWord + RotWord + RCON
+- Encrypt: AddRoundKey → (SubBytes→ShiftRows→MixColumns→AddRoundKey)×(Nr-1) → SubBytes→ShiftRows→AddRoundKey
+- Decrypt: AddRoundKey(Nr) → (InvShiftRows→InvSubBytes→AddRoundKey→InvMixColumns)×(Nr-1) → InvShiftRows→InvSubBytes→AddRoundKey(0)
+- MixColumns via xtime, InvMixColumns via gf_mul
+- `BlockCipher` trait implementation
+- **Tests**: FIPS 197 Appendix B/C — AES-128 encrypt/decrypt, AES-256 encrypt/roundtrip, AES-192 roundtrip, invalid key
+
+#### 2. SM4 Block Cipher (`sm4/mod.rs`)
+- GB/T 32907-2016 compliant
+- SBOX[256] + L/L' linear transforms, τ (parallel S-box substitution)
+- 32-round Feistel structure with FK[4] and CK[32] constants
+- Encrypt/decrypt share `crypt_block`; decrypt reverses round keys
+- `BlockCipher` trait implementation
+- **Tests**: GB/T 32907 Appendix A — encrypt, decrypt, roundtrip, invalid key
+
+#### 3. ECB Mode (`modes/ecb.rs`)
+- Simple block-by-block AES encryption/decryption
+- Input must be multiple of block size (no padding)
+- **Tests**: NIST SP 800-38A F.1 — AES-128, multi-block, invalid length
+
+#### 4. CBC Mode (`modes/cbc.rs`)
+- PKCS#7 padding on encrypt, constant-time unpad on decrypt
+- Uses `subtle::ConstantTimeEq` for padding validation (prevents padding oracle)
+- **Tests**: NIST SP 800-38A F.2 — roundtrip, short/aligned padding, empty, invalid IV, NIST vector
+
+#### 5. CTR Mode (`modes/ctr.rs`)
+- 128-bit big-endian counter increment
+- Encrypt = decrypt (XOR keystream)
+- **Tests**: NIST SP 800-38A F.5 — AES-128, multi-block, partial block, empty
+
+#### 6. GCM Mode (`modes/gcm.rs`)
+- NIST SP 800-38D compliant AES-GCM
+- GHASH: 4-bit precomputed table (16 Gf128 entries), TABLE_P4[16] reduction constants
+- `Gf128` struct (h: u64, l: u64) for GF(2^128) arithmetic
+- GCM flow: H=Encrypt(0), J0 from nonce (12-byte fast path or GHASH), EK0=Encrypt(J0), CTR encrypt with inc32, GHASH over AAD+CT+lengths, tag=GHASH^EK0
+- Constant-time tag verification via `subtle::ConstantTimeEq`
+- **Tests**: NIST SP 800-38D — cases 1 (empty), 2 (16-byte PT), 4 (60-byte PT with AAD), auth failure, short ciphertext
+
+#### 7. HKDF (`hkdf/mod.rs`)
+- RFC 5869 compliant
+- Extract: HMAC-SHA-256(salt, ikm), empty salt → hash_len zero bytes
+- Expand: iterative HMAC(PRK, T_prev||info||counter_byte)
+- One-shot `derive(salt, ikm, info, okm_len)` convenience method
+- Zeroize PRK on drop
+- **Tests**: RFC 5869 Appendix A — test cases 1, 2, 3
+
+#### 8. PBKDF2 (`pbkdf2/mod.rs`)
+- RFC 8018 compliant with HMAC-SHA-256 as PRF
+- F(P, S, c, i) = U1 ^ U2 ^ ... ^ Uc, uses HMAC reset optimization
+- Zeroize intermediate U and T values
+- **Tests**: PBKDF2-HMAC-SHA256 with c=1 and c=80000 (verified against OpenSSL + Python), short output, invalid params
+
+### Bug Fixes
+- **Error variant mismatches**: `InvalidLength` → `InvalidArg`, `InvalidKeyLength` needs struct fields `{ expected, got }`, `VerifyFailed` → `AeadTagVerifyFail`
+- **Added `InvalidPadding`** variant to `CryptoError` enum for CBC padding errors
+- **GCM GHASH byte iteration order**: Changed from left-to-right to right-to-left (LSB-first), matching the C reference `noasm_ghash.c`
+- **GCM test case 3**: Originally mixed NIST Test Case 3 (64-byte PT, no AAD) with Test Case 4 (60-byte PT + AAD) — corrected to proper Test Case 4 parameters
+- **PBKDF2 test vector**: Expected value for c=1, dkLen=64 was incorrect — verified correct value against OpenSSL and Python (both `hashlib.pbkdf2_hmac` and manual implementation)
+- **Clippy `needless_range_loop`** in SM4 `crypt_block` — fixed with `for &rk_i in rk.iter()`
+
+### Files Modified
+| File | Operation |
+|------|-----------|
+| `crates/hitls-types/src/error.rs` | Added `InvalidPadding` variant |
+| `crates/hitls-crypto/src/aes/mod.rs` | Full AES implementation (~350 lines) |
+| `crates/hitls-crypto/src/sm4/mod.rs` | Full SM4 implementation (~200 lines) |
+| `crates/hitls-crypto/src/modes/ecb.rs` | ECB mode (~85 lines) |
+| `crates/hitls-crypto/src/modes/cbc.rs` | CBC mode with PKCS#7 (~155 lines) |
+| `crates/hitls-crypto/src/modes/ctr.rs` | CTR mode (~110 lines) |
+| `crates/hitls-crypto/src/modes/gcm.rs` | GCM mode + GHASH (~350 lines) |
+| `crates/hitls-crypto/src/hkdf/mod.rs` | HKDF (~140 lines) |
+| `crates/hitls-crypto/src/pbkdf2/mod.rs` | PBKDF2 (~100 lines) |
+
+### Build Status
+- 65 hitls-crypto tests passing (35 new)
+- 45 bignum + 11 utils = 56 (unchanged)
+- **Total: 121 workspace tests**
+- Clippy: zero warnings
+- Fmt: clean
+
+### Next Steps (Phase 5)
+- Implement RSA key generation, encryption, and signing
+- Implement ECDSA / ECDH (P-256, P-384)
+- Implement SM2 (signature + encryption)
+- Implement Ed25519 / X25519

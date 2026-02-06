@@ -148,3 +148,118 @@ Committed as `bad1d4c` and pushed to `origin/main`.
 > 请将我输入的所有提示词和运行结果记录到PROMPT_LOG.md中
 
 **Result**: Updated this file with Session 3 entries (Prompts 12–15).
+
+---
+
+## Session 4: Phase 3 — Hash + HMAC
+
+*This session continued from a previous session where SHA-256/224/512/384 and SM3 had already been implemented. SHA-1, MD5, and HMAC were pending.*
+
+### Prompt 16: Continue Phase 3 (session continuation)
+> *(Automatic continuation from previous session)*
+
+**Result**: Completed the remaining Phase 3 modules:
+
+1. **SHA-1** (`sha1/mod.rs`) — RFC 3174 compliant, 80-round compression with W[80] expansion. Tests: empty, "abc", two-block, incremental.
+2. **MD5** (`md5/mod.rs`) — RFC 1321 compliant, little-endian byte order, 4 round functions (F/G/H/I), 64 sin-based T constants. Tests: RFC 1321 vectors (empty, "a", "abc", "message digest", alphabet, alphanumeric, numeric, incremental).
+3. **HMAC** (`hmac/mod.rs`) — RFC 2104 compliant, generic via `Box<dyn Digest>` + factory closure pattern. Key hashing for keys > block_size, ipad/opad XOR. Tests: RFC 4231 test cases 1-4, 6-7, reset functionality.
+
+**Bug fixes during Phase 3**:
+- Clippy `needless_range_loop` in SHA-1 (`for j in 0..80` indexing `w[j]`) — fixed with `enumerate`
+- Clippy `needless_range_loop` in SHA-2 (`for i in 0..words_needed` indexing `state[i]`) — fixed with `enumerate+take` (2 instances)
+- `cargo fmt` formatting differences across all files — fixed with `cargo fmt --all`
+
+**Test results**: 86 workspace tests passing (30 crypto + 45 bignum + 11 utils). Clippy clean, fmt clean.
+
+### Prompt 17: Commit and push to remote
+> 请提交并推送远程
+
+**Result**: Committed as `174c343` — "feat: implement SHA-1, MD5, and HMAC (Phase 3 complete)". Pushed to `origin/main`.
+
+---
+
+## Session 5: Phase 4 — Symmetric Ciphers + Block Cipher Modes + KDF
+
+### Prompt 18: Continue with Phase 4
+> 请继续Phase 4
+
+**Result**: Entered plan mode. Explored remaining stubs and C reference implementations. Designed comprehensive Phase 4 plan covering 8 modules:
+- AES-128/192/256 block cipher
+- SM4 block cipher
+- ECB, CBC, CTR, GCM block cipher modes
+- HKDF and PBKDF2 key derivation functions
+
+Plan included dependency graph, C reference file paths, struct definitions, algorithm details, test vectors from NIST/RFC standards. User approved the plan.
+
+### Prompt 19: *(Plan approved, implementation started)*
+
+**Result**: Wrote all 8 implementation files:
+
+| File | Description | Approx Lines |
+|------|-------------|-------------|
+| `aes/mod.rs` | AES-128/192/256 with SBOX, key expansion, encrypt/decrypt | ~350 |
+| `sm4/mod.rs` | SM4 with SBOX + L/L' transforms, 32-round Feistel | ~200 |
+| `modes/ecb.rs` | ECB mode, no padding | ~85 |
+| `modes/cbc.rs` | CBC mode with PKCS#7 + constant-time unpad | ~155 |
+| `modes/ctr.rs` | CTR mode with 128-bit BE counter | ~110 |
+| `modes/gcm.rs` | GCM mode with 4-bit GHASH table | ~350 |
+| `hkdf/mod.rs` | HKDF extract + expand with HMAC-SHA-256 | ~140 |
+| `pbkdf2/mod.rs` | PBKDF2 with HMAC-SHA-256 | ~100 |
+
+*Session ran out of context before tests could be run.*
+
+---
+
+## Session 6: Phase 4 — Testing, Bug Fixes, and Completion
+
+### Prompt 20: *(Automatic continuation — run tests)*
+
+**First test run** (`cargo test -p hitls-crypto`): 15 compilation errors.
+
+**Compilation fixes**:
+- `CryptoError::InvalidKeyLength` is a struct variant needing `{ expected, got }` fields — changed AES to use `CryptoError::InvalidKey`, SM4 to use `InvalidKeyLength { expected: 16, got: key.len() }`
+- `CryptoError::InvalidLength` doesn't exist — changed to `CryptoError::InvalidArg` across all files (AES, SM4, ECB, CBC, GCM)
+- `CryptoError::InvalidPadding` doesn't exist — added new variant to `CryptoError` enum in `hitls-types/src/error.rs`
+- `CryptoError::VerifyFailed` doesn't exist — changed to `CryptoError::AeadTagVerifyFail` in GCM
+- `CryptoError::InvalidLength` in HKDF — changed to `CryptoError::KdfDkLenOverflow`
+- Fixed unused assignment warning in GCM `ghash_data` (moved `let mut block` inside the loop)
+
+**Second test run**: 62 passed, 3 failed:
+1. `test_gcm_case2` — tag mismatch
+2. `test_gcm_case3` — tag mismatch
+3. `test_pbkdf2_sha256_c1` — output mismatch for second block
+
+**GCM GHASH bug**: Byte iteration order was left-to-right (MSB-first), but the 4-bit table multiplication requires right-to-left (LSB-first) processing. Confirmed by reading C reference code in `crypto/modes/src/noasm_ghash.c`. Fix: changed `x_bytes.iter()` to `x_bytes.iter().rev()`.
+
+**Third test run**: 64 passed, 1 failed (`test_gcm_case3` still wrong).
+
+**GCM test vector bug**: Test case 3 mixed parameters from two different NIST SP 800-38D test cases — used 64-byte PT with AAD (neither Test Case 3 nor Test Case 4). Verified with PyCryptodome:
+- NIST Test Case 3: 64-byte PT, **no AAD** → tag = `4d5c2af327cd64a62cf35abd2ba6fab4`
+- NIST Test Case 4: **60-byte PT**, with AAD → tag = `5bc94fbc3221a5db94fae95ae7121a47`
+
+Fix: Changed test to use correct NIST Test Case 4 parameters (60-byte PT + AAD + correct expected tag).
+
+**PBKDF2 test vector bug**: The expected value for c=1, dkLen=64 was incorrect. Verified against three independent sources:
+- OpenSSL `kdf` command — matches our output
+- Python `hashlib.pbkdf2_hmac` — matches our output
+- Python manual PBKDF2 implementation — matches our output
+
+All three confirm our code produces the correct result. Fix: Updated expected value in test.
+
+**Clippy fix**: `needless_range_loop` in SM4 `crypt_block` (`for i in 0..32` indexing `rk[i]`) — changed to `for &rk_i in rk.iter()`.
+
+**Formatting**: Ran `cargo fmt --all` to fix formatting differences in AES (RCON array, long hex strings).
+
+**Final test run**: **121 workspace tests passing** (65 crypto + 45 bignum + 11 utils). Clippy clean, fmt clean.
+
+### Prompt 21: Sync development process to dev_log.md
+> 在每次任务后，将开发过程同步到dev_log.md中
+
+**Result**: Updated both dev log files:
+- `DEV_LOG.md` (workspace root) — Added detailed entries for Phase 1-2, Phase 3, and Phase 4 with full implementation details, bug fixes, file listings, and test counts
+- `memory/dev-log.md` (Claude memory) — Added concise summaries for Phase 1-4
+
+### Prompt 22: Sync all prompts and responses to PROMPT_LOG.md
+> 同步将所有的Prompt和响应写入到Prompt_log.md中
+
+**Result**: Updated this file with Session 4–6 entries (Prompts 16–22).

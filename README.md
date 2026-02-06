@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Early Development (Phase 0 — Scaffolding Complete)**
+> **Status: Active Development (Phase 4 Complete)**
 >
-> The workspace structure, type definitions, and module skeletons are in place. Algorithm implementations are being actively developed.
+> Core cryptographic primitives implemented: hash functions (SHA-2, SM3, SHA-1, MD5), HMAC, symmetric ciphers (AES, SM4), block cipher modes (ECB, CBC, CTR, GCM), and KDFs (HKDF, PBKDF2). 121 tests passing. Asymmetric cryptography (RSA, ECC, SM2) is next.
 
 ## Goals
 
@@ -20,47 +20,50 @@ A production-grade cryptographic and TLS library written in pure Rust, rewritten
 openhitls-rs/
 ├── crates/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error types, constants
-│   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID
-│   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
-│   ├── hitls-crypto/    # Cryptographic algorithms (30+ algorithms)
-│   ├── hitls-tls/       # TLS 1.2/1.3, DTLS, TLCP protocol implementation
+│   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (11 tests)
+│   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (45 tests)
+│   ├── hitls-crypto/    # Crypto: AES, SM4, GCM, SHA-2, HMAC, HKDF... (65 tests)
+│   ├── hitls-tls/       # TLS 1.2/1.3, DTLS, TLCP protocol
 │   ├── hitls-pki/       # X.509, PKCS#12, CMS/PKCS#7
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
 │   └── hitls-cli/       # Command-line tool (openssl-like interface)
 ├── tests/vectors/       # Standard test vectors (NIST CAVP, Wycheproof, GM/T)
-├── benches/             # Performance benchmarks
-└── fuzz/                # Fuzz testing targets
+└── benches/             # Performance benchmarks
 ```
 
 ## Supported Algorithms
 
 ### Hash
 
-| Algorithm | Feature Flag | Status |
-|-----------|-------------|--------|
-| SHA-224 / SHA-256 / SHA-384 / SHA-512 | `sha2` (default) | Stub |
-| SHA3-224 / SHA3-256 / SHA3-384 / SHA3-512 / SHAKE128 / SHAKE256 | `sha3` | Stub |
-| SM3 | `sm3` | Stub |
-| SHA-1 | `sha1` | Stub |
-| MD5 | `md5` | Stub |
+| Algorithm | Feature Flag | Status | Tests |
+|-----------|-------------|--------|-------|
+| SHA-256 / SHA-224 | `sha2` (default) | **Done** | FIPS 180-4 / RFC 6234 |
+| SHA-512 / SHA-384 | `sha2` (default) | **Done** | FIPS 180-4 / RFC 6234 |
+| SM3 | `sm3` | **Done** | GB/T 32905-2012 |
+| SHA-1 | `sha1` | **Done** | RFC 3174 |
+| MD5 | `md5` | **Done** | RFC 1321 |
+| SHA3 / SHAKE | `sha3` | Stub | — |
 
 ### Symmetric Ciphers & Modes
 
-| Algorithm | Feature Flag | Status |
-|-----------|-------------|--------|
-| AES-128 / AES-192 / AES-256 | `aes` (default) | Stub |
-| SM4 | `sm4` | Stub |
-| ChaCha20 | `chacha20` | Stub |
-| Modes: ECB, CBC, CTR, CFB, OFB, GCM, CCM, XTS, Key Wrap | `modes` | Stub |
+| Algorithm | Feature Flag | Status | Tests |
+|-----------|-------------|--------|-------|
+| AES-128 / AES-192 / AES-256 | `aes` (default) | **Done** | FIPS 197 |
+| SM4 | `sm4` | **Done** | GB/T 32907-2016 |
+| ECB mode | `modes` | **Done** | NIST SP 800-38A |
+| CBC mode (PKCS#7) | `modes` | **Done** | NIST SP 800-38A |
+| CTR mode | `modes` | **Done** | NIST SP 800-38A |
+| GCM mode (AEAD) | `modes` | **Done** | NIST SP 800-38D |
+| ChaCha20-Poly1305 | `chacha20` | Stub | — |
+| CFB, OFB, CCM, XTS | `modes` | Stub | — |
 
 ### MAC
 
-| Algorithm | Feature Flag | Status |
-|-----------|-------------|--------|
-| HMAC | `hmac` (default) | Stub |
-| CMAC | `cmac` | Stub |
-| GMAC | `gmac` | Stub |
-| SipHash | `siphash` | Stub |
+| Algorithm | Feature Flag | Status | Tests |
+|-----------|-------------|--------|-------|
+| HMAC-SHA-256 | `hmac` (default) | **Done** | RFC 4231 |
+| CMAC | `cmac` | Stub | — |
+| GMAC | `gmac` | Stub | — |
 
 ### Asymmetric / Public Key
 
@@ -91,13 +94,24 @@ openhitls-rs/
 
 ### KDF & DRBG
 
-| Algorithm | Feature Flag | Status |
-|-----------|-------------|--------|
-| HKDF | `hkdf` | Stub |
-| PBKDF2 | `pbkdf2` | Stub |
-| scrypt | `scrypt` | Stub |
-| DRBG (Hash, HMAC, CTR) | `drbg` | Stub |
-| HPKE | `hpke` | Stub |
+| Algorithm | Feature Flag | Status | Tests |
+|-----------|-------------|--------|-------|
+| HKDF | `hkdf` | **Done** | RFC 5869 |
+| PBKDF2 | `pbkdf2` | **Done** | Verified with OpenSSL |
+| scrypt | `scrypt` | Stub | — |
+| DRBG (Hash, HMAC, CTR) | `drbg` | Stub | — |
+| HPKE | `hpke` | Stub | — |
+
+### Big Number Arithmetic (`hitls-bignum`)
+
+| Component | Status | Tests |
+|-----------|--------|-------|
+| Basic ops (add, sub, mul, div, mod) | **Done** | Knuth Algorithm D |
+| Montgomery multiplication & exponentiation | **Done** | Fermat's theorem, RSA example |
+| Miller-Rabin primality test | **Done** | Small + large primes |
+| GCD & modular inverse | **Done** | Extended Euclidean |
+| Constant-time operations | **Done** | ct_eq, ct_select |
+| Cryptographic random generation | **Done** | random_bits, random_range |
 
 ### Protocols
 
@@ -127,12 +141,19 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests
-cargo test --all
+# Run all tests (121 tests)
+cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-bignum
-cargo test -p hitls-utils
+cargo test -p hitls-crypto --all-features   # 65 tests
+cargo test -p hitls-bignum                  # 45 tests
+cargo test -p hitls-utils                   # 11 tests
+
+# Lint
+RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
+
+# Format check
+cargo fmt --all -- --check
 ```
 
 ## Feature Flags
