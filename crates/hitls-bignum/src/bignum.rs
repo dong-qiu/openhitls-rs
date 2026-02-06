@@ -222,8 +222,16 @@ impl Ord for BigNum {
                     return a_bits.cmp(&b_bits);
                 }
                 for i in (0..self.limbs.len().max(other.limbs.len())).rev() {
-                    let a = if i < self.limbs.len() { self.limbs[i] } else { 0 };
-                    let b = if i < other.limbs.len() { other.limbs[i] } else { 0 };
+                    let a = if i < self.limbs.len() {
+                        self.limbs[i]
+                    } else {
+                        0
+                    };
+                    let b = if i < other.limbs.len() {
+                        other.limbs[i]
+                    } else {
+                        0
+                    };
                     if a != b {
                         return a.cmp(&b);
                     }
@@ -238,8 +246,16 @@ impl Ord for BigNum {
                     return b_bits.cmp(&a_bits);
                 }
                 for i in (0..self.limbs.len().max(other.limbs.len())).rev() {
-                    let a = if i < self.limbs.len() { self.limbs[i] } else { 0 };
-                    let b = if i < other.limbs.len() { other.limbs[i] } else { 0 };
+                    let a = if i < self.limbs.len() {
+                        self.limbs[i]
+                    } else {
+                        0
+                    };
+                    let b = if i < other.limbs.len() {
+                        other.limbs[i]
+                    } else {
+                        0
+                    };
                     if a != b {
                         return b.cmp(&a);
                     }

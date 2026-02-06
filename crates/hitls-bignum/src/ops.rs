@@ -451,7 +451,7 @@ fn knuth_div_rem(a: &[Limb], b: &[Limb]) -> (BigNum, BigNum) {
             let prod = qhat * v[i] as DoubleLimb;
             let diff = u[j + i] as i128 - borrow - prod as u64 as i128;
             u[j + i] = diff as u64;
-            borrow = (prod >> LIMB_BITS) as i128 - (diff >> LIMB_BITS) as i128;
+            borrow = (prod >> LIMB_BITS) as i128 - (diff >> LIMB_BITS);
         }
         let diff = u[j + n] as i128 - borrow;
         u[j + n] = diff as u64;
@@ -632,8 +632,10 @@ mod tests {
     #[test]
     fn test_div_large() {
         // q*b + r == a for multi-limb numbers
-        let a = BigNum::from_bytes_be(&[0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
-                                        0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10]);
+        let a = BigNum::from_bytes_be(&[
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54,
+            0x32, 0x10,
+        ]);
         let b = BigNum::from_bytes_be(&[0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01]);
         let (q, r) = a.div_rem(&b).unwrap();
         let reconstructed = q.mul(&b).add(&r);
@@ -650,7 +652,7 @@ mod tests {
         // Test encrypt/decrypt for several messages
         for m_val in [42u64, 100, 1234, 3000] {
             let m = BigNum::from_u64(m_val);
-            let c = m.mod_exp(&e, &n).unwrap();        // encrypt
+            let c = m.mod_exp(&e, &n).unwrap(); // encrypt
             let decrypted = c.mod_exp(&d, &n).unwrap(); // decrypt
             assert_eq!(decrypted, m, "RSA roundtrip failed for m={m_val}");
         }

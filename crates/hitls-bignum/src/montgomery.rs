@@ -279,7 +279,9 @@ mod tests {
         let ctx = MontgomeryCtx::new(&modulus).unwrap();
 
         // 3^4 = 81 mod 97 = 81
-        let result = ctx.mont_exp(&BigNum::from_u64(3), &BigNum::from_u64(4)).unwrap();
+        let result = ctx
+            .mont_exp(&BigNum::from_u64(3), &BigNum::from_u64(4))
+            .unwrap();
         assert_eq!(result, BigNum::from_u64(81));
     }
 

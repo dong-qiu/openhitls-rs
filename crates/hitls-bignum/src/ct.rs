@@ -12,12 +12,22 @@ impl BigNum {
         let mut result: u8 = 1;
 
         // Compare sign
-        result &= (self.is_negative() as u8).ct_eq(&(other.is_negative() as u8)).unwrap_u8();
+        result &= (self.is_negative() as u8)
+            .ct_eq(&(other.is_negative() as u8))
+            .unwrap_u8();
 
         // Compare limbs
         for i in 0..max_len {
-            let a = if i < self.limbs().len() { self.limbs()[i] } else { 0 };
-            let b = if i < other.limbs().len() { other.limbs()[i] } else { 0 };
+            let a = if i < self.limbs().len() {
+                self.limbs()[i]
+            } else {
+                0
+            };
+            let b = if i < other.limbs().len() {
+                other.limbs()[i]
+            } else {
+                0
+            };
             result &= a.ct_eq(&b).unwrap_u8();
         }
 
@@ -56,7 +66,11 @@ impl BigNum {
         let self_limbs = self.limbs();
         let mod_limbs = modulus.limbs();
         for (i, d) in diff.iter_mut().enumerate() {
-            let a = if i < self_limbs.len() { self_limbs[i] } else { 0 };
+            let a = if i < self_limbs.len() {
+                self_limbs[i]
+            } else {
+                0
+            };
             let b = if i < mod_limbs.len() { mod_limbs[i] } else { 0 };
             let (d1, b1) = a.overflowing_sub(b);
             let (d2, b2) = d1.overflowing_sub(borrow);
