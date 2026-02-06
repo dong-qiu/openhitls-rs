@@ -1,4 +1,7 @@
 #![doc = "Cryptographic algorithm library for openHiTLS."]
+// Allow dead code and unused variables during the stub/scaffolding phase.
+// These will be removed as algorithms are implemented.
+#![allow(dead_code, unused_variables, clippy::new_without_default)]
 
 // Core traits
 pub mod provider;

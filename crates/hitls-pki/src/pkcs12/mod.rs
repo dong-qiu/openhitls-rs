@@ -17,8 +17,8 @@ impl Pkcs12 {
         todo!("PKCS#12 parsing")
     }
 
-    /// Create a PKCS#12 container.
-    pub fn new(
+    /// Create a PKCS#12 container, returning the DER-encoded bytes.
+    pub fn create(
         _private_key: Option<&[u8]>,
         _certificates: &[&[u8]],
         _password: &str,

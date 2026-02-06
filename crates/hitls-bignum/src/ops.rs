@@ -220,7 +220,7 @@ fn div_rem_unsigned(a: &[Limb], b: &[Limb]) -> (BigNum, BigNum) {
 
     let bits = a_bn.bit_len();
     let mut quotient = BigNum::zero();
-    *quotient.limbs_mut() = vec![0u64; (bits + LIMB_BITS - 1) / LIMB_BITS];
+    *quotient.limbs_mut() = vec![0u64; bits.div_ceil(LIMB_BITS)];
     let mut remainder = BigNum::zero();
 
     for i in (0..bits).rev() {

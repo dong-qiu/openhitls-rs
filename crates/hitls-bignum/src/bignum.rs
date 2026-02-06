@@ -45,7 +45,7 @@ impl BigNum {
             return Self::zero();
         }
 
-        let num_limbs = (bytes.len() + 7) / 8;
+        let num_limbs = bytes.len().div_ceil(8);
         let mut limbs = vec![0u64; num_limbs];
 
         for (i, &byte) in bytes.iter().rev().enumerate() {
@@ -69,7 +69,7 @@ impl BigNum {
             return vec![0];
         }
 
-        let num_bytes = (bits + 7) / 8;
+        let num_bytes = bits.div_ceil(8);
         let mut bytes = vec![0u8; num_bytes];
 
         for i in 0..num_bytes {

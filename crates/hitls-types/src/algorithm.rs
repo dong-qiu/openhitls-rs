@@ -272,15 +272,10 @@ pub enum KdfAlgId {
 }
 
 /// Elliptic curve point encoding formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum PointFormat {
     Compressed,
+    #[default]
     Uncompressed,
     Hybrid,
-}
-
-impl Default for PointFormat {
-    fn default() -> Self {
-        Self::Uncompressed
-    }
 }
