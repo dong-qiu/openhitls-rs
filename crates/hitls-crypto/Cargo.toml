@@ -57,14 +57,14 @@ slh-dsa = []
 xmss = []
 frodokem = []
 mceliece = []
-hybridkem = []
+hybridkem = ["x25519", "mlkem", "sha2"]
 
 # KDF and DRBG
 hkdf = ["hmac"]
 pbkdf2 = ["hmac"]
 scrypt = ["pbkdf2"]
 drbg = ["hmac", "sha2"]
-hpke = []
+hpke = ["hkdf", "x25519", "sha2", "aes", "modes"]
 
 # Modes of operation
 modes = ["aes"]

@@ -1134,7 +1134,67 @@ New tests (30):
 | Classic McEliece | Stub | — |
 | Hybrid KEM | Stub | — |
 
+---
+
+## Phase 11: HPKE + AES Key Wrap + HybridKEM + Paillier + ElGamal (Session 2026-02-06)
+
+### Goals
+- Implement 5 remaining crypto utility modules
+- Complete all crypto primitives needed before PKI/TLS phases
+
+### Implementation
+
+#### AES Key Wrap (RFC 3394)
+- `modes/wrap.rs`: `key_wrap()`, `key_unwrap()` with 6-round Feistel structure
+- Default IV = 0xA6 repeated 8 times
+- Constant-time IV verification using `subtle::ConstantTimeEq`
+- 3 tests: RFC 3394 §4.1/4.2/4.3 (128/192/256-bit KEK)
+
+#### HPKE (RFC 9180)
+- `hpke/mod.rs`: Full DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-128-GCM
+- Base mode (0x00) and PSK mode (0x01)
+- `LabeledExtract`/`LabeledExpand` with proper suite_id construction
+- KEM: `DeriveKeyPair`, `ExtractAndExpand` (eae_prk label), `Encap`/`Decap`
+- Key schedule: `psk_id_hash`, `info_hash`, `ks_context`, `secret`, `key`, `base_nonce`, `exporter_secret`
+- Seal/Open with nonce = base_nonce XOR I2OSP(seq, Nn)
+- Export secret via `LabeledExpand(exporter_secret, "sec", ctx, L)`
+- Added `Hkdf::from_prk()` for extract-then-expand pattern
+- 7 tests: RFC 9180 A.1 vectors (KEM derive, encap/decap, key schedule, seal seq0/seq1, export, roundtrip)
+- **Bug found**: ExtractAndExpand extract label is `"eae_prk"`, NOT `"shared_secret"`
+
+#### HybridKEM (X25519 + ML-KEM-768)
+- `hybridkem/mod.rs`: Combines X25519 DH + ML-KEM-768 encapsulation
+- Shared secret = SHA-256(ss_classical || ss_pq)
+- Ciphertext = X25519 ephemeral pk (32 bytes) || ML-KEM ciphertext
+- Public key = X25519 pk (32 bytes) || ML-KEM ek (1184 bytes)
+- 4 tests: roundtrip, public key length, tampered ciphertext, invalid length
+
+#### Paillier (Additive Homomorphic Encryption)
+- `paillier/mod.rs`: g = n+1 simplification
+- `from_primes()` for fast testing with known primes
+- Encrypt: c = (1 + m*n) * r^n mod n^2
+- Decrypt: m = L(c^lambda mod n^2) * mu mod n
+- Homomorphic addition: E(m1+m2) = E(m1) * E(m2) mod n^2
+- 6 tests (1 ignored): encrypt/decrypt, zero, homomorphic add, large message, overflow check, 512-bit keygen
+
+#### ElGamal (Discrete-Log Encryption)
+- `elgamal/mod.rs`: Standard ElGamal with safe prime support
+- `from_params()` and `from_private_key()` for testing
+- `generate()` with safe prime generation (p = 2q + 1)
+- Ciphertext format: 4-byte c1_len || c1 || c2
+- 7 tests (1 ignored): small params, random params, message=1, large message, invalid input, deterministic pubkey, safe prime keygen
+
+### Cargo.toml Changes
+```toml
+hpke = ["hkdf", "x25519", "sha2", "aes", "modes"]
+hybridkem = ["x25519", "mlkem", "sha2"]
+```
+
+### Test Results
+- **287 tests total** (46 bignum + 230 crypto + 11 utils), 3 ignored
+- All clippy warnings resolved, formatting clean
+
 ### Next Steps
-- Implement SLH-DSA (SPHINCS+) or other PQC algorithms
-- Begin TLS 1.3 protocol implementation
-- PKI (X.509 certificates)
+- Phase 12: X.509 Certificate Parsing + Basic PKI (critical path)
+- Phase 13: X.509 Verification + Chain Building
+- Phase 14: TLS 1.3 Key Schedule + Crypto Adapter

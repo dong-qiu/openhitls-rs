@@ -673,3 +673,30 @@ Total: ~21,480 new lines, ~200 new tests, reaching ~40,000 lines / ~462 tests. P
 **Result**: Updated both files:
 - `README.md` — Added "Roadmap" section with Phase 11-20 summary table
 - `PROMPT_LOG.md` — Added Session 13 entries (Prompts 40–44)
+
+---
+
+## Session 14 — Phase 11 Implementation (2026-02-07)
+
+### Prompt 45: Start Phase 11
+> 请开始Phase 11的工作
+
+**Result**: Implemented all 5 Phase 11 modules:
+
+1. **AES Key Wrap** (`modes/wrap.rs`): RFC 3394, 3 tests with §4 test vectors
+2. **HPKE** (`hpke/mod.rs`): RFC 9180 DHKEM(X25519)+HKDF-SHA256+AES-128-GCM, Base/PSK modes, 7 tests with A.1 test vectors
+3. **HybridKEM** (`hybridkem/mod.rs`): X25519+ML-KEM-768, SHA-256 combiner, 4 tests
+4. **Paillier** (`paillier/mod.rs`): Additive homomorphic encryption, g=n+1 simplification, 6 tests (1 ignored)
+5. **ElGamal** (`elgamal/mod.rs`): Discrete-log encryption with safe prime support, 7 tests (1 ignored)
+
+Updated `Cargo.toml` features:
+- `hpke = ["hkdf", "x25519", "sha2", "aes", "modes"]`
+- `hybridkem = ["x25519", "mlkem", "sha2"]`
+
+Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
+
+**Tests**: 287 total (46 bignum + 230 crypto + 11 utils), 3 ignored. Clippy clean, fmt clean.
+
+**Key bugs found**:
+- HPKE ExtractAndExpand: extract label is `"eae_prk"`, not `"shared_secret"` (RFC 9180 §4.1)
+- SHA-256 API: `finish()` returns `Result<[u8; 32]>`, not `finish(&mut [u8])` (recalled from memory)

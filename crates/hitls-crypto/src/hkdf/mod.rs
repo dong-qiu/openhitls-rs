@@ -21,6 +21,17 @@ pub struct Hkdf {
 }
 
 impl Hkdf {
+    /// Create an HKDF instance from an existing PRK (skip the extract step).
+    ///
+    /// This is useful when the extract step has already been performed externally
+    /// (e.g., in HPKE's LabeledExtract).
+    pub fn from_prk(prk: &[u8]) -> Self {
+        Self {
+            prk: prk.to_vec(),
+            hash_len: 32,
+        }
+    }
+
     /// Create a new HKDF instance by performing the extract step with SHA-256.
     /// If `salt` is empty, uses a hash-length zero-filled salt.
     pub fn new(salt: &[u8], ikm: &[u8]) -> Result<Self, CryptoError> {

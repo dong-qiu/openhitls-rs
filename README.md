@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Active Development (Phase 10 Complete)**
+> **Status: Active Development (Phase 11 Complete)**
 >
-> Core cryptographic primitives implemented: hash functions (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric ciphers (AES, SM4, ChaCha20), block cipher modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS), ChaCha20-Poly1305 AEAD, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), HMAC-DRBG, ML-KEM (FIPS 203), and ML-DSA (FIPS 204). 262 tests passing (46 bignum + 205 crypto + 11 utils).
+> Core cryptographic primitives implemented: hash functions (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric ciphers (AES, SM4, ChaCha20), block cipher modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS), AES Key Wrap (RFC 3394), ChaCha20-Poly1305 AEAD, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), HMAC-DRBG, ML-KEM (FIPS 203), ML-DSA (FIPS 204), HPKE (RFC 9180), HybridKEM (X25519+ML-KEM-768), Paillier, and ElGamal. 287 tests passing (46 bignum + 230 crypto + 11 utils).
 
 ## Goals
 
@@ -22,7 +22,7 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error types, constants
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (11 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
-│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, DRBG, ML-KEM, ML-DSA... (205 tests)
+│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, DRBG, ML-KEM, ML-DSA, HPKE, HybridKEM, Paillier, ElGamal... (230 tests)
 │   ├── hitls-tls/       # TLS 1.2/1.3, DTLS, TLCP protocol
 │   ├── hitls-pki/       # X.509, PKCS#12, CMS/PKCS#7
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
@@ -60,6 +60,7 @@ openhitls-rs/
 | OFB mode | `modes` | **Done** | NIST SP 800-38A |
 | CCM mode (AEAD) | `modes` | **Done** | NIST SP 800-38C |
 | XTS mode | `modes` | **Done** | NIST SP 800-38E |
+| AES Key Wrap | `modes` | **Done** | RFC 3394 |
 
 ### MAC
 
@@ -84,7 +85,8 @@ openhitls-rs/
 | DSA (FIPS 186-4) | `dsa` | **Done** |
 | SM2 (Sign, Verify, Encrypt, Decrypt) | `sm2` | **Done** |
 | SM9 | `sm9` | Stub |
-| Paillier / ElGamal | `paillier` / `elgamal` | Stub |
+| Paillier (Homomorphic) | `paillier` | **Done** |
+| ElGamal | `elgamal` | **Done** |
 
 ### Post-Quantum
 
@@ -96,7 +98,7 @@ openhitls-rs/
 | XMSS / XMSS^MT | `xmss` | Stub |
 | FrodoKEM | `frodokem` | Stub |
 | Classic McEliece | `mceliece` | Stub |
-| Hybrid KEM (X25519+ML-KEM, etc.) | `hybridkem` | Stub |
+| Hybrid KEM (X25519+ML-KEM-768) | `hybridkem` | **Done** |
 
 ### KDF & DRBG
 
@@ -106,7 +108,7 @@ openhitls-rs/
 | PBKDF2 | `pbkdf2` | **Done** | Verified with OpenSSL |
 | scrypt | `scrypt` | **Done** | RFC 7914 |
 | HMAC-DRBG (SP 800-90A) | `drbg` | **Done** | NIST SP 800-90A |
-| HPKE | `hpke` | Stub | — |
+| HPKE (RFC 9180) | `hpke` | **Done** | RFC 9180 A.1 |
 
 ### Big Number Arithmetic (`hitls-bignum`)
 
@@ -148,11 +150,11 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (262 tests)
+# Run all tests (287 tests)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 205 tests (1 ignored)
+cargo test -p hitls-crypto --all-features   # 230 tests (3 ignored)
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 11 tests
 
@@ -191,11 +193,10 @@ Convenience feature groups:
 
 ## Roadmap
 
-Phase 0–10 complete. Remaining phases:
+Phase 0–11 complete. Remaining phases:
 
 | Phase | Name | Est. LOC | Est. Tests | Critical Path |
 |-------|------|----------|------------|---------------|
-| 11 | HPKE + AES Key Wrap + HybridKEM + Paillier + ElGamal | ~1,650 | ~25 | Partial |
 | 12 | X.509 Certificate Parsing + Basic PKI | ~1,750 | ~20 | **Yes** |
 | 13 | X.509 Verification + Chain Building | ~1,000 | ~15 | **Yes** |
 | 14 | TLS 1.3 Key Schedule + Crypto Adapter | ~1,030 | ~15 | **Yes** |
