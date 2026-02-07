@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Active Development (Phase 7 Complete)**
+> **Status: Active Development (Phase 8 Complete)**
 >
-> Core cryptographic primitives implemented: hash functions (SHA-2, SM3, SHA-1, MD5), HMAC, symmetric ciphers (AES, SM4), block cipher modes (ECB, CBC, CTR, GCM), KDFs (HKDF, PBKDF2), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, and DH (ffdhe2048/3072). 171 tests passing (46 bignum + 114 crypto + 11 utils).
+> Core cryptographic primitives implemented: hash functions (SHA-2, SM3, SHA-1, MD5), HMAC, symmetric ciphers (AES, SM4), block cipher modes (ECB, CBC, CTR, GCM), KDFs (HKDF, PBKDF2), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), and HMAC-DRBG. 189 tests passing (46 bignum + 132 crypto + 11 utils).
 
 ## Goals
 
@@ -22,7 +22,7 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error types, constants
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (11 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
-│   ├── hitls-crypto/    # Crypto: AES, SM4, GCM, SHA-2, HMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH... (114 tests)
+│   ├── hitls-crypto/    # Crypto: AES, SM4, GCM, SHA-2, HMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, DRBG... (132 tests)
 │   ├── hitls-tls/       # TLS 1.2/1.3, DTLS, TLCP protocol
 │   ├── hitls-pki/       # X.509, PKCS#12, CMS/PKCS#7
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
@@ -76,8 +76,8 @@ openhitls-rs/
 | Ed25519 (RFC 8032) | `ed25519` | **Done** |
 | X25519 (RFC 7748) | `x25519` | **Done** |
 | DH (ffdhe2048, ffdhe3072) | `dh` | **Done** |
-| DSA | `dsa` | Stub |
-| SM2 (Sign, Encrypt, Key Exchange) | `sm2` | Stub |
+| DSA (FIPS 186-4) | `dsa` | **Done** |
+| SM2 (Sign, Verify, Encrypt, Decrypt) | `sm2` | **Done** |
 | SM9 | `sm9` | Stub |
 | Paillier / ElGamal | `paillier` / `elgamal` | Stub |
 
@@ -100,7 +100,7 @@ openhitls-rs/
 | HKDF | `hkdf` | **Done** | RFC 5869 |
 | PBKDF2 | `pbkdf2` | **Done** | Verified with OpenSSL |
 | scrypt | `scrypt` | Stub | — |
-| DRBG (Hash, HMAC, CTR) | `drbg` | Stub | — |
+| HMAC-DRBG (SP 800-90A) | `drbg` | **Done** | NIST SP 800-90A |
 | HPKE | `hpke` | Stub | — |
 
 ### Big Number Arithmetic (`hitls-bignum`)
@@ -143,11 +143,11 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (171 tests)
+# Run all tests (189 tests)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 114 tests (1 ignored)
+cargo test -p hitls-crypto --all-features   # 132 tests (1 ignored)
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 11 tests
 
@@ -173,7 +173,7 @@ Convenience feature groups:
 |---------|----------|
 | `default` | `aes`, `sha2`, `rsa`, `ecdsa`, `hmac` |
 | `pqc` | `mlkem`, `mldsa` |
-| `sm2` | `ecc`, `sm3` |
+| `sm2` | `ecc`, `sm3`, `hitls-utils` |
 | `tlcp` | `sm2`, `sm3`, `sm4` (via `hitls-tls`) |
 
 ## Design Principles

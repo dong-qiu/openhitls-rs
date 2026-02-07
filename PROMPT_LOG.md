@@ -431,3 +431,53 @@ Clippy clean, fmt clean.
 **Result**: Updated both files to reflect Phase 7 completion:
 - `README.md` — Status banner updated to Phase 7, Ed25519/X25519/DH marked as Done, test counts updated (171 total)
 - `PROMPT_LOG.md` — Added Session 9 entries (Prompts 30–32)
+
+---
+
+## Session 10: Phase 8 — DSA + SM2 + HMAC-DRBG
+
+### Prompt 33: Continue Phase 8
+> 请继续Phase 8的工作
+
+**Result**: Entered plan mode. Explored C reference code and existing Rust stubs for DSA, SM2, and DRBG. Designed Phase 8 plan covering:
+- SM2P256V1 curve parameters (added to `ecc/curves.rs`)
+- DSA signing/verification (FIPS 186-4)
+- SM2 signing/verification/encryption/decryption (GB/T 32918)
+- HMAC-DRBG (NIST SP 800-90A)
+
+User approved the plan. Implementation completed across 5 files:
+
+| File | Description | Approx Lines |
+|------|-------------|-------------|
+| `ecc/curves.rs` | Added SM2P256V1 curve parameters | +15 |
+| `dsa/mod.rs` | DSA sign/verify (FIPS 186-4) | ~320 |
+| `sm2/mod.rs` | SM2 sign/verify/encrypt/decrypt (GB/T 32918) | ~450 |
+| `drbg/mod.rs` | HMAC-DRBG (NIST SP 800-90A) | ~245 |
+| `Cargo.toml` | Updated feature deps (dsa, sm2, drbg) | +3 |
+
+**Bug found and fixed**:
+- **DSA tamper detection test**: With small q=11 (bit_len=4), `digest_to_bignum` shifts 1-byte digests right by 4. Both `[0x01]` and `[0x05]` truncated to 0, making different digests indistinguishable. Fixed by using digests where the top nibble differs (`[0x10]` → e=1, `[0x20]` → e=2, etc.) and testing multiple tampered values for statistical reliability.
+
+**Clippy fixes** (1 warning):
+- `explicit_auto_deref` in DSA test → removed `*` from closure parameter
+
+**Cargo.toml changes**:
+```toml
+dsa = ["hitls-bignum", "hitls-utils"]
+sm2 = ["ecc", "sm3", "hitls-utils"]
+drbg = ["hmac", "sha2"]
+```
+
+**Test results**: 189 tests passing (46 bignum + 132 crypto + 11 utils), 1 ignored. 18 new tests:
+- DSA (5): sign/verify, tamper detection, pubkey-only verify, DER roundtrip, invalid params
+- SM2 (7): sign/verify, custom ID, tamper detection, pubkey-only verify, encrypt/decrypt, tampered decrypt rejection, short message encrypt
+- HMAC-DRBG (6): instantiate, generate, reseed, additional input, deterministic, large output
+
+Clippy clean, fmt clean.
+
+### Prompt 34: Refresh README and PROMPT_LOG
+> 请同步刷新readme.md和prompt.md
+
+**Result**: Updated both files to reflect Phase 8 completion:
+- `README.md` — Status banner updated to Phase 8, DSA/SM2 marked as Done, HMAC-DRBG marked as Done, test counts updated (189 total), sm2 feature updated to include hitls-utils
+- `PROMPT_LOG.md` — Added Session 10 entries (Prompts 33–34)

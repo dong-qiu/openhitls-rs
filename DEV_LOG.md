@@ -660,3 +660,97 @@ New tests (24):
 - Implement DSA (digital signature algorithm)
 - Implement SM2 (signature + encryption + key exchange)
 - Implement DRBG (deterministic random bit generator)
+
+---
+
+## Phase 8: DSA + SM2 + HMAC-DRBG (Session 2026-02-06)
+
+### Goals
+- Implement DSA signing and verification (FIPS 186-4)
+- Implement SM2 signing, verification, encryption, and decryption (GB/T 32918)
+- Implement HMAC-DRBG (NIST SP 800-90A)
+
+### Completed Steps
+
+#### 1. SM2P256V1 Curve Parameters (`ecc/curves.rs`)
+- Added SM2P256V1 (GB/T 32918.5-2017) parameters to existing `get_curve_params`
+- `EccCurveId::Sm2Prime256` → full CurveParams with p, a, b, gx, gy, n, h=1, field_size=32
+- SM2 curve has a = p - 3, so existing Jacobian point_double optimization works directly
+
+#### 2. DSA Signing & Verification (`dsa/mod.rs`)
+- `DsaParams` struct: p (prime modulus), q (subgroup order), g (generator)
+- `DsaKeyPair`: generate, from_private_key, from_public_key
+- **Signing** (FIPS 186-4): r = (g^k mod p) mod q, s = k^(-1)·(e + x·r) mod q
+- **Verification**: w = s^(-1), u1 = e·w, u2 = r·w, v = (g^u1 · y^u2 mod p) mod q, check v == r
+- `digest_to_bignum()` — truncates digest to q's bit length (right-shift)
+- DER signature encoding/decoding via hitls-utils ASN.1
+- **Tests** (5): sign/verify, tamper detection, public-key-only verify, DER roundtrip, invalid params
+
+#### 3. SM2 Signature + Encryption (`sm2/mod.rs`)
+- `Sm2KeyPair` struct: EcGroup, private_key (BigNum), public_key (EcPoint)
+- **ZA computation** (GB/T 32918.2 §5.5): ZA = SM3(ENTLA || IDA || a || b || xG || yG || xA || yA)
+  - Default IDA = "1234567812345678" (16 bytes)
+- **Signing** (GB/T 32918.2 §6.1):
+  - e = SM3(ZA || M), k random, (x1, _) = k·G
+  - r = (e + x1) mod n, s = (1+d)^(-1) · (k - r·d) mod n
+  - Note: different from ECDSA! s uses (1+d)^(-1), not k^(-1)
+- **Verification** (GB/T 32918.2 §7.1):
+  - t = (r + s) mod n, (x1', _) = s·G + t·PA (Shamir's trick), R' = (e + x1') mod n, check R' == r
+- **Encryption** (GB/T 32918.4, new format C1||C3||C2):
+  - k random, C1 = k·G, (x2, y2) = k·PB
+  - t = KDF(x2 || y2, len(M)), C2 = M ⊕ t, C3 = SM3(x2 || M || y2)
+- **Decryption**: (x2, y2) = dB · C1, reverse KDF, constant-time C3 comparison
+- **SM2 KDF**: counter-mode SM3(x2 || y2 || counter_be32)
+- **Tests** (7): sign/verify, custom ID, tamper detection, pubkey-only verify, encrypt/decrypt, tampered decrypt rejection, short message encrypt
+
+#### 4. HMAC-DRBG (`drbg/mod.rs`)
+- `HmacDrbg` struct: K (32 bytes), V (32 bytes), reseed_counter
+- **Instantiate** (SP 800-90A §10.1.2.1): K=0x00..00, V=0x01..01, update(seed_material)
+- **Update** (SP 800-90A §10.1.2.2): two-round HMAC for non-empty data
+- **Generate** (SP 800-90A §10.1.2.5): produce output blocks via V=HMAC(K,V), final update
+- **Reseed** (SP 800-90A §10.1.2.4): update(entropy || additional_input)
+- Reseed interval: 2^48
+- `from_system_entropy()` convenience constructor using getrandom
+- **Tests** (6): instantiate, generate, reseed, additional input, deterministic, large output
+
+### Bug Found & Fixed
+
+#### DSA Tamper Detection with Small Groups
+- **Problem**: Test used 1-byte digests `[0x01]` and `[0x05]` with q=11 (bit_len=4). `digest_to_bignum` shifts right by 4, producing 0 for both — identical after truncation!
+- **Fix**: Use digests where the top nibble differs (`[0x10]` → e=1, `[0x20]` → e=2, etc.) and test multiple tampered values to handle ~1/11 collision probability with small q.
+
+### Cargo.toml Changes
+```toml
+dsa = ["hitls-bignum", "hitls-utils"]
+sm2 = ["ecc", "sm3", "hitls-utils"]
+drbg = ["hmac", "sha2"]
+```
+
+### Files Created/Modified
+
+| File | Operation | Approx Lines |
+|------|-----------|-------------|
+| `crates/hitls-crypto/src/ecc/curves.rs` | Modified: added SM2P256V1 | +15 |
+| `crates/hitls-crypto/src/dsa/mod.rs` | Rewrite: DSA sign/verify | ~320 |
+| `crates/hitls-crypto/src/sm2/mod.rs` | Rewrite: SM2 sign/verify/encrypt/decrypt | ~450 |
+| `crates/hitls-crypto/src/drbg/mod.rs` | Rewrite: HMAC-DRBG | ~245 |
+| `crates/hitls-crypto/Cargo.toml` | Modified: feature deps | +3 |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 132 (+18, 1 ignored) | All pass |
+| hitls-utils | 11 | All pass |
+| **Total** | **189** | **All pass** |
+
+New tests (18):
+- DSA (5): sign/verify, tamper detection, pubkey-only verify, DER roundtrip, invalid params
+- SM2 (7): sign/verify, custom ID, tamper, pubkey-only verify, encrypt/decrypt, tampered decrypt, short message
+- HMAC-DRBG (6): instantiate, generate, reseed, additional input, deterministic, large output
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 189 workspace tests passing
