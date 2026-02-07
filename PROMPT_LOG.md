@@ -700,3 +700,62 @@ Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
 **Key bugs found**:
 - HPKE ExtractAndExpand: extract label is `"eae_prk"`, not `"shared_secret"` (RFC 9180 §4.1)
 - SHA-256 API: `finish()` returns `Result<[u8; 32]>`, not `finish(&mut [u8])` (recalled from memory)
+
+---
+
+## Session 13: Phase 11 Commit + CLAUDE.md + Phase 12
+
+### Prompt 46: Commit and push Phase 11
+> 请提交修改并推送至远程仓库
+
+**Result**: Staged 10 files, committed as `f987aac`, pushed to origin/main. +1383/-88 lines (DEV_LOG, PROMPT_LOG, README, Cargo.toml, hpke, hybridkem, paillier, elgamal, wrap, hkdf).
+
+### Prompt 47: Create CLAUDE.md
+> 请检查项目中是否存在CLAUDE.md？如果没有的话，请补充
+
+**Result**: Created `CLAUDE.md` (104 lines) with project overview, build/test commands, code style conventions, API patterns, C reference location, and migration roadmap.
+
+### Prompt 48: Commit CLAUDE.md
+> 需要提交
+
+**Result**: Committed as `c35fb34`, pushed to origin/main.
+
+### Prompt 49: Start Phase 12
+> 请开始Phase 12的工作
+
+**Result**: Implemented X.509 Certificate Parsing + Signature Verification:
+
+**ASN.1 Decoder extensions** (`hitls-utils/src/asn1/decoder.rs`, +170 lines):
+- `peek_tag()` — non-consuming peek at next tag
+- `read_set()` — for SET in Distinguished Names
+- `read_boolean()` — for extension critical flags
+- `read_context_specific(tag_num, constructed)` — for explicit tagged values
+- `try_read_context_specific(tag_num, constructed)` — peek-then-read for OPTIONAL fields
+- `read_string()` — UTF8String, PrintableString, IA5String, T61String, BMPString → String
+- `read_time()` — UTCTime/GeneralizedTime → UNIX timestamp (with datetime_to_unix helper)
+- 12 new decoder tests
+
+**OID additions** (`hitls-utils/src/oid/mod.rs`, +68 lines):
+- 7 extension OIDs: basicConstraints, keyUsage, extKeyUsage, subjectAltName, subjectKeyIdentifier, authorityKeyIdentifier, crlDistributionPoints
+- 8 DN attribute OIDs: CN, C, O, OU, ST, L, serialNumber, emailAddress
+- 2 additional signature OIDs: sha1WithRSAEncryption, ecdsaWithSHA512
+- `oid_to_dn_short_name()` helper function
+
+**X.509 implementation** (`hitls-pki/src/x509/mod.rs`, ~750 lines):
+- `Certificate::from_der()` — full RFC 5280 TBSCertificate parsing
+- `Certificate::from_pem()` — PEM wrapper using hitls_utils::pem
+- `Certificate::verify_signature()` — RSA PKCS#1v15 (SHA-1/256/384/512), ECDSA (P-256/P-384), Ed25519
+- Helper functions: parse_algorithm_identifier, parse_name, parse_validity, parse_subject_public_key_info, parse_extensions
+- Added fields to Certificate struct: tbs_raw, signature_algorithm, signature_params, signature_value
+- TBS byte extraction using `remaining()` before/after technique
+- `DistinguishedName::get()` and `Display` impl
+- 12 X.509 tests with OpenSSL-generated RSA and ECDSA self-signed certificates
+
+**PKI Cargo.toml**: Added `sha1`, `ed25519` features to hitls-crypto dependency.
+
+**Tests**: 310 total (46 bignum + 230 crypto + 22 utils + 12 pki), 3 ignored. Clippy clean, fmt clean.
+
+### Prompt 50: Check PROMPT_LOG.md
+> Prompt_log.md是否更新了？
+
+**Result**: Updated PROMPT_LOG.md with Phase 12 session entries.

@@ -188,6 +188,79 @@ pub mod known {
     pub fn pkcs7_enveloped_data() -> Oid {
         Oid::new(&[1, 2, 840, 113549, 1, 7, 3])
     }
+
+    // Additional signature OIDs
+    pub fn sha1_with_rsa_encryption() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 1, 5])
+    }
+    pub fn ecdsa_with_sha512() -> Oid {
+        Oid::new(&[1, 2, 840, 10045, 4, 3, 4])
+    }
+
+    // X.509 Extension OIDs (RFC 5280)
+    pub fn basic_constraints() -> Oid {
+        Oid::new(&[2, 5, 29, 19])
+    }
+    pub fn key_usage() -> Oid {
+        Oid::new(&[2, 5, 29, 15])
+    }
+    pub fn ext_key_usage() -> Oid {
+        Oid::new(&[2, 5, 29, 37])
+    }
+    pub fn subject_alt_name() -> Oid {
+        Oid::new(&[2, 5, 29, 17])
+    }
+    pub fn subject_key_identifier() -> Oid {
+        Oid::new(&[2, 5, 29, 14])
+    }
+    pub fn authority_key_identifier() -> Oid {
+        Oid::new(&[2, 5, 29, 35])
+    }
+    pub fn crl_distribution_points() -> Oid {
+        Oid::new(&[2, 5, 29, 31])
+    }
+
+    // DN Attribute Type OIDs (X.520)
+    pub fn common_name() -> Oid {
+        Oid::new(&[2, 5, 4, 3])
+    }
+    pub fn country_name() -> Oid {
+        Oid::new(&[2, 5, 4, 6])
+    }
+    pub fn organization_name() -> Oid {
+        Oid::new(&[2, 5, 4, 10])
+    }
+    pub fn organizational_unit_name() -> Oid {
+        Oid::new(&[2, 5, 4, 11])
+    }
+    pub fn state_or_province_name() -> Oid {
+        Oid::new(&[2, 5, 4, 8])
+    }
+    pub fn locality_name() -> Oid {
+        Oid::new(&[2, 5, 4, 7])
+    }
+    pub fn serial_number_attr() -> Oid {
+        Oid::new(&[2, 5, 4, 5])
+    }
+    pub fn email_address() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 9, 1])
+    }
+
+    /// Map a well-known DN attribute OID to its short name.
+    pub fn oid_to_dn_short_name(oid: &super::Oid) -> Option<&'static str> {
+        let arcs = oid.arcs();
+        match arcs {
+            [2, 5, 4, 3] => Some("CN"),
+            [2, 5, 4, 6] => Some("C"),
+            [2, 5, 4, 10] => Some("O"),
+            [2, 5, 4, 11] => Some("OU"),
+            [2, 5, 4, 8] => Some("ST"),
+            [2, 5, 4, 7] => Some("L"),
+            [2, 5, 4, 5] => Some("serialNumber"),
+            [1, 2, 840, 113549, 1, 9, 1] => Some("emailAddress"),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

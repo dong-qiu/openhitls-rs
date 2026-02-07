@@ -1198,3 +1198,82 @@ hybridkem = ["x25519", "mlkem", "sha2"]
 - Phase 12: X.509 Certificate Parsing + Basic PKI (critical path)
 - Phase 13: X.509 Verification + Chain Building
 - Phase 14: TLS 1.3 Key Schedule + Crypto Adapter
+
+---
+
+## Phase 12: X.509 Certificate Parsing + Signature Verification
+
+**Date**: 2026-02-07
+
+### Overview
+Implemented X.509 certificate parsing from DER/PEM and signature verification using issuer's public key. Extended the ASN.1 decoder with 7 new methods required for X.509 structure parsing.
+
+### ASN.1 Decoder Extensions (`hitls-utils/src/asn1/decoder.rs`)
+Added 7 methods to `Decoder<'a>`:
+- `peek_tag()` — non-consuming tag peek for detecting optional fields
+- `read_set()` — SET parsing (for RDN in Distinguished Names)
+- `read_boolean()` — BOOLEAN parsing (for extension critical flag)
+- `read_context_specific(tag_num, constructed)` — context-specific tagged value
+- `try_read_context_specific(tag_num, constructed)` — peek-then-read for OPTIONAL fields
+- `read_string()` — UTF8String/PrintableString/IA5String/T61String/BMPString → String
+- `read_time()` — UTCTime/GeneralizedTime → UNIX timestamp
+
+Helper function `datetime_to_unix()` converts (year, month, day, hour, min, sec) to UNIX timestamp using Gregorian calendar formula with epoch offset 719468.
+
+### OID Additions (`hitls-utils/src/oid/mod.rs`)
+- 7 extension OIDs: basicConstraints(2.5.29.19), keyUsage(2.5.29.15), extKeyUsage(2.5.29.37), subjectAltName(2.5.29.17), subjectKeyIdentifier(2.5.29.14), authorityKeyIdentifier(2.5.29.35), crlDistributionPoints(2.5.29.31)
+- 8 DN attribute OIDs: CN(2.5.4.3), C(2.5.4.6), O(2.5.4.10), OU(2.5.4.11), ST(2.5.4.8), L(2.5.4.7), serialNumber(2.5.4.5), emailAddress(1.2.840.113549.1.9.1)
+- 2 signature OIDs: sha1WithRSAEncryption, ecdsaWithSHA512
+- `oid_to_dn_short_name()` maps OID arcs to "CN", "C", "O", etc.
+
+### X.509 Implementation (`hitls-pki/src/x509/mod.rs`)
+
+#### Certificate Struct Extensions
+Added 4 new fields (additive, existing fields unchanged):
+- `tbs_raw: Vec<u8>` — raw TBS bytes for signature verification
+- `signature_algorithm: Vec<u8>` — outer signature algorithm OID
+- `signature_params: Option<Vec<u8>>` — outer signature algorithm params
+- `signature_value: Vec<u8>` — signature bytes
+
+#### Parsing (`Certificate::from_der`)
+1. Decode outer SEQUENCE
+2. Extract TBS raw bytes using `remaining()` before/after technique
+3. Parse TBS: version[0], serialNumber, signature AlgId, issuer Name, validity, subject Name, SPKI, extensions[3]
+4. Parse outer signatureAlgorithm + signatureValue
+
+Key technique for TBS byte extraction:
+```rust
+let remaining_before = outer.remaining();
+let tbs_tlv = outer.read_tlv()?;
+let tbs_consumed = remaining_before.len() - outer.remaining().len();
+let tbs_raw = remaining_before[..tbs_consumed].to_vec();
+```
+
+#### Distinguished Name Parsing
+- RDNSequence: SEQUENCE OF SET OF SEQUENCE { OID, string }
+- Maps OID to short name via `oid_to_dn_short_name()`
+- `DistinguishedName::get("CN")` accessor
+- `Display` impl: "CN=Test, O=OpenHiTLS, C=CN"
+
+#### Signature Verification (`Certificate::verify_signature`)
+Supports:
+- SHA-1/256/384/512 with RSA PKCS#1 v1.5
+- ECDSA with SHA-256/384/512 (P-256, P-384 curves)
+- Ed25519 (raw message, no pre-hashing)
+
+RSA key parsing: SPKI public_key → DER SEQUENCE { modulus INTEGER, exponent INTEGER } → RsaPublicKey::new(n, e)
+EC key parsing: SPKI algorithm_params → curve OID → EccCurveId, public_key → uncompressed point
+
+### Test Certificates
+Generated with OpenSSL, embedded as hex constants:
+- Self-signed RSA 2048 (SHA-256, CN=Test RSA, O=OpenHiTLS, C=CN, 36500-day validity)
+- Self-signed ECDSA P-256 (SHA-256, CN=Test ECDSA, O=OpenHiTLS, C=CN)
+
+### Test Results
+- **310 tests total** (46 bignum + 230 crypto + 22 utils + 12 pki), 3 ignored
+- 12 new ASN.1 decoder tests + 12 new X.509 tests
+- All clippy warnings resolved, formatting clean
+
+### Next Steps
+- Phase 13: X.509 Verification + Chain Building
+- Phase 14: TLS 1.3 Key Schedule + Crypto Adapter

@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 11 complete — core crypto primitives done, PKI/TLS in progress
+- **Status**: Phase 12 complete — core crypto + X.509 parsing done, TLS in progress
 
 ## Workspace Structure
 
@@ -33,7 +33,7 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (287 tests, 3 ignored for slow keygen)
+# Run all tests (310 tests, 3 ignored for slow keygen)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
@@ -96,8 +96,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-11 complete. Remaining critical path:
-- Phase 12: X.509 Certificate Parsing
+Phases 0-12 complete. Remaining critical path:
 - Phase 13: X.509 Verification + Chain Building
 - Phase 14-17: TLS 1.3 (Key Schedule, Record Layer, Handshake)
 
