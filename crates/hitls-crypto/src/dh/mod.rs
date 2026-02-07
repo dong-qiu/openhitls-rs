@@ -73,19 +73,30 @@ impl DhKeyPair {
     /// Generate a new DH key pair from the given parameters.
     ///
     /// Private key x is random in [2, p-2], public key y = g^x mod p.
+    /// Retries if y falls outside the valid range [2, p-2].
     pub fn generate(params: &DhParams) -> Result<Self, CryptoError> {
-        let p_minus_2 = params.p.sub(&BigNum::from_u64(2));
-        let mut x = BigNum::random_range(&p_minus_2)?;
-        if x < BigNum::from_u64(2) {
-            x = BigNum::from_u64(2);
+        let two = BigNum::from_u64(2);
+        let p_minus_1 = params.p.sub(&BigNum::from_u64(1));
+        let p_minus_2 = params.p.sub(&two);
+
+        for _ in 0..100 {
+            let mut x = BigNum::random_range(&p_minus_2)?;
+            if x < two {
+                x = BigNum::from_u64(2);
+            }
+
+            let y = params.g.mod_exp(&x, &params.p)?;
+
+            // Ensure y is in valid range [2, p-2] (reject 0, 1, p-1)
+            if y > BigNum::from_u64(1) && y < p_minus_1 {
+                return Ok(DhKeyPair {
+                    private_key: x,
+                    public_key: y,
+                });
+            }
         }
 
-        let y = params.g.mod_exp(&x, &params.p)?;
-
-        Ok(DhKeyPair {
-            private_key: x,
-            public_key: y,
-        })
+        Err(CryptoError::BnRandGenFail)
     }
 
     /// Compute the shared secret from the peer's public value.
