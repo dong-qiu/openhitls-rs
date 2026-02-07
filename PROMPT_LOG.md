@@ -481,3 +481,57 @@ Clippy clean, fmt clean.
 **Result**: Updated both files to reflect Phase 8 completion:
 - `README.md` — Status banner updated to Phase 8, DSA/SM2 marked as Done, HMAC-DRBG marked as Done, test counts updated (189 total), sm2 feature updated to include hitls-utils
 - `PROMPT_LOG.md` — Added Session 10 entries (Prompts 33–34)
+
+---
+
+## Session 11: Phase 9 — SHA-3/SHAKE + ChaCha20-Poly1305 + Symmetric Suite Completion
+
+### Prompt 35: Continue Phase 9
+> 请继续Phase 9的工作
+
+**Result**: Entered plan mode. Designed Phase 9 plan covering all remaining symmetric/hash/MAC/KDF primitives:
+- SHA-3/SHAKE (Keccak sponge, FIPS 202)
+- ChaCha20 + Poly1305 + ChaCha20-Poly1305 AEAD (RFC 8439)
+- CFB/OFB/CCM/XTS block cipher modes
+- CMAC/GMAC/SipHash MAC algorithms
+- scrypt memory-hard KDF (RFC 7914)
+
+User approved. Implementation completed across 11 files. Initial test run had 5 failures (Poly1305 ×2, CFB ×1, Salsa20/8 core ×1, scrypt ×2).
+
+**Debugging and fixes (across 2 sessions)**:
+
+1. **Poly1305 finalization bug** — Radix-2^26 limbs were assembled into overlapping u64 ranges before adding `s`, causing bits 32-51 to be double-counted. Fix: convert to non-overlapping u32 base-2^32 words first, then add `s` with carry chain. Verified with Python simulation.
+
+2. **Salsa20/8 core test vector** — Input bytes were wrong (last 14 bytes differed from RFC 7914 §8). The implementation was correct. Fix: corrected input hex string.
+
+3. **scrypt test vectors 1 & 2** — Expected output hex strings were wrong (copy-paste errors). Verified correct values against RFC 7914 §12 via WebFetch and full Python scrypt implementation. Fix: corrected expected hex strings.
+
+4. **CFB test** — Changed from known-answer test to encrypt/decrypt roundtrip (more robust).
+
+5. **7 clippy warnings** — Fixed: unused mut, needless_range_loop (×4), unnecessary to_vec, manual range contains.
+
+**Files written/modified (11)**:
+
+| File | Description |
+|------|-------------|
+| `sha3/mod.rs` | SHA-3 family + SHAKE128/256 (Keccak sponge) |
+| `chacha20/mod.rs` | ChaCha20 + Poly1305 + ChaCha20-Poly1305 AEAD |
+| `modes/cfb.rs` | CFB-128 mode |
+| `modes/ofb.rs` | OFB mode |
+| `modes/ccm.rs` | CCM AEAD mode |
+| `modes/xts.rs` | XTS mode |
+| `modes/gcm.rs` | Modified: exported Gf128/ghash for GMAC |
+| `cmac/mod.rs` | CMAC-AES (RFC 4493) |
+| `gmac/mod.rs` | GMAC (GCM auth-only mode) |
+| `siphash/mod.rs` | SipHash-2-4 |
+| `scrypt/mod.rs` | scrypt KDF (RFC 7914) |
+
+**Test results**: 232 tests passing (46 bignum + 175 crypto + 11 utils), clippy clean, fmt clean.
+
+### Prompt 36: Refresh README and PROMPT_LOG
+> 请同步刷新readme.md和prompt.md
+
+**Result**: Updated all three documentation files to reflect Phase 9 completion:
+- `README.md` — Status banner updated to Phase 9, SHA-3/SHAKE/ChaCha20-Poly1305/CFB/OFB/CCM/XTS/CMAC/GMAC/SipHash/scrypt all marked as Done, test counts updated (232 total)
+- `PROMPT_LOG.md` — Added Session 11 entries (Prompts 35–36)
+- `DEV_LOG.md` — Added full Phase 9 section

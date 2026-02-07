@@ -31,8 +31,8 @@ sm3 = []
 
 # MAC algorithms
 hmac = []
-cmac = []
-gmac = []
+cmac = ["aes"]
+gmac = ["aes", "modes"]
 siphash = []
 
 # Asymmetric algorithms
@@ -67,7 +67,7 @@ drbg = ["hmac", "sha2"]
 hpke = []
 
 # Modes of operation
-modes = []
+modes = ["aes"]
 
 # Expose low-level internals
 hazmat = []

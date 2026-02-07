@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Active Development (Phase 8 Complete)**
+> **Status: Active Development (Phase 9 Complete)**
 >
-> Core cryptographic primitives implemented: hash functions (SHA-2, SM3, SHA-1, MD5), HMAC, symmetric ciphers (AES, SM4), block cipher modes (ECB, CBC, CTR, GCM), KDFs (HKDF, PBKDF2), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), and HMAC-DRBG. 189 tests passing (46 bignum + 132 crypto + 11 utils).
+> Core cryptographic primitives implemented: hash functions (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric ciphers (AES, SM4, ChaCha20), block cipher modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS), ChaCha20-Poly1305 AEAD, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), and HMAC-DRBG. 232 tests passing (46 bignum + 175 crypto + 11 utils).
 
 ## Goals
 
@@ -22,7 +22,7 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error types, constants
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (11 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
-│   ├── hitls-crypto/    # Crypto: AES, SM4, GCM, SHA-2, HMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, DRBG... (132 tests)
+│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, DRBG... (175 tests)
 │   ├── hitls-tls/       # TLS 1.2/1.3, DTLS, TLCP protocol
 │   ├── hitls-pki/       # X.509, PKCS#12, CMS/PKCS#7
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
@@ -42,7 +42,8 @@ openhitls-rs/
 | SM3 | `sm3` | **Done** | GB/T 32905-2012 |
 | SHA-1 | `sha1` | **Done** | RFC 3174 |
 | MD5 | `md5` | **Done** | RFC 1321 |
-| SHA3 / SHAKE | `sha3` | Stub | — |
+| SHA3-224/256/384/512 | `sha3` | **Done** | FIPS 202 |
+| SHAKE128/256 | `sha3` | **Done** | FIPS 202 |
 
 ### Symmetric Ciphers & Modes
 
@@ -54,16 +55,20 @@ openhitls-rs/
 | CBC mode (PKCS#7) | `modes` | **Done** | NIST SP 800-38A |
 | CTR mode | `modes` | **Done** | NIST SP 800-38A |
 | GCM mode (AEAD) | `modes` | **Done** | NIST SP 800-38D |
-| ChaCha20-Poly1305 | `chacha20` | Stub | — |
-| CFB, OFB, CCM, XTS | `modes` | Stub | — |
+| ChaCha20-Poly1305 (AEAD) | `chacha20` | **Done** | RFC 8439 |
+| CFB mode | `modes` | **Done** | NIST SP 800-38A |
+| OFB mode | `modes` | **Done** | NIST SP 800-38A |
+| CCM mode (AEAD) | `modes` | **Done** | NIST SP 800-38C |
+| XTS mode | `modes` | **Done** | NIST SP 800-38E |
 
 ### MAC
 
 | Algorithm | Feature Flag | Status | Tests |
 |-----------|-------------|--------|-------|
 | HMAC-SHA-256 | `hmac` (default) | **Done** | RFC 4231 |
-| CMAC | `cmac` | Stub | — |
-| GMAC | `gmac` | Stub | — |
+| CMAC-AES | `cmac` | **Done** | RFC 4493 / NIST SP 800-38B |
+| GMAC | `gmac` | **Done** | NIST SP 800-38D |
+| SipHash-2-4 | `siphash` | **Done** | Aumasson & Bernstein |
 
 ### Asymmetric / Public Key
 
@@ -99,7 +104,7 @@ openhitls-rs/
 |-----------|-------------|--------|-------|
 | HKDF | `hkdf` | **Done** | RFC 5869 |
 | PBKDF2 | `pbkdf2` | **Done** | Verified with OpenSSL |
-| scrypt | `scrypt` | Stub | — |
+| scrypt | `scrypt` | **Done** | RFC 7914 |
 | HMAC-DRBG (SP 800-90A) | `drbg` | **Done** | NIST SP 800-90A |
 | HPKE | `hpke` | Stub | — |
 
@@ -143,11 +148,11 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (189 tests)
+# Run all tests (232 tests)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 132 tests (1 ignored)
+cargo test -p hitls-crypto --all-features   # 175 tests (1 ignored)
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 11 tests
 

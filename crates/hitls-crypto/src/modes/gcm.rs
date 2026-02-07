@@ -31,20 +31,20 @@ const TABLE_P4: [u64; 16] = [
 
 /// GF(2^128) element as (high, low) u64 pair.
 #[derive(Clone, Copy, Default)]
-struct Gf128 {
+pub(crate) struct Gf128 {
     h: u64,
     l: u64,
 }
 
 impl Gf128 {
-    fn from_bytes(b: &[u8; 16]) -> Self {
+    pub(crate) fn from_bytes(b: &[u8; 16]) -> Self {
         Self {
             h: u64::from_be_bytes(b[..8].try_into().unwrap()),
             l: u64::from_be_bytes(b[8..].try_into().unwrap()),
         }
     }
 
-    fn to_bytes(self) -> [u8; 16] {
+    pub(crate) fn to_bytes(self) -> [u8; 16] {
         let mut out = [0u8; 16];
         out[..8].copy_from_slice(&self.h.to_be_bytes());
         out[8..].copy_from_slice(&self.l.to_be_bytes());
@@ -68,12 +68,12 @@ impl Gf128 {
 }
 
 /// Precomputed GHASH table (16 entries for 4-bit multiplication).
-struct GhashTable {
+pub(crate) struct GhashTable {
     table: [Gf128; 16],
 }
 
 impl GhashTable {
-    fn new(h: &[u8; 16]) -> Self {
+    pub(crate) fn new(h: &[u8; 16]) -> Self {
         let mut table = [Gf128::default(); 16];
         // table[0] = 0 (already default)
         table[8] = Gf128::from_bytes(h);
@@ -106,7 +106,7 @@ impl GhashTable {
     }
 
     /// GHASH multiplication: result = result XOR block, then multiply by H.
-    fn ghash_block(&self, state: &mut Gf128, block: &[u8; 16]) {
+    pub(crate) fn ghash_block(&self, state: &mut Gf128, block: &[u8; 16]) {
         let input = Gf128::from_bytes(block);
         let mut z = Gf128::default();
         let x = state.xor(input);
@@ -133,7 +133,7 @@ impl GhashTable {
     }
 
     /// GHASH over variable-length data (pad to block boundary).
-    fn ghash_data(&self, state: &mut Gf128, data: &[u8]) {
+    pub(crate) fn ghash_data(&self, state: &mut Gf128, data: &[u8]) {
         for chunk in data.chunks(16) {
             let mut block = [0u8; 16];
             block[..chunk.len()].copy_from_slice(chunk);

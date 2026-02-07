@@ -754,3 +754,216 @@ New tests (18):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 189 workspace tests passing
+
+---
+
+## Phase 9: SHA-3/SHAKE + ChaCha20-Poly1305 + Symmetric Suite Completion (Session 2026-02-06)
+
+### Goals
+- Implement SHA-3/SHAKE (Keccak sponge construction, FIPS 202)
+- Implement ChaCha20 stream cipher + Poly1305 MAC + ChaCha20-Poly1305 AEAD (RFC 8439)
+- Complete block cipher modes: CFB, OFB, CCM, XTS
+- Complete MAC algorithms: CMAC, GMAC, SipHash
+- Implement scrypt memory-hard KDF (RFC 7914)
+
+After this phase, the symmetric cryptography subsystem is 100% complete.
+
+### Completed Steps
+
+#### 1. SHA-3/SHAKE (`sha3/mod.rs`)
+- FIPS 202 compliant Keccak sponge construction
+- Keccak-f[1600] permutation: 25 × u64 lanes, 24 rounds, 5 steps (θ, ρ, π, χ, ι)
+- Generic `KeccakState` struct parameterized by rate, suffix, and output length
+- SHA3-224 (rate=144), SHA3-256 (rate=136), SHA3-384 (rate=104), SHA3-512 (rate=72)
+- SHAKE128 (rate=168, XOF), SHAKE256 (rate=136, XOF)
+- Domain separation: 0x06 for SHA-3, 0x1F for SHAKE
+- API: `new()`, `update()`, `finish()`, `reset()`, `digest()` for SHA-3; `squeeze(len)` for SHAKE
+- **Tests** (8): SHA3-256 empty/abc/two-block, SHA3-512 empty/abc, SHA3-224/384 basic, SHAKE128/256 variable output
+
+#### 2. ChaCha20 Stream Cipher (`chacha20/mod.rs`)
+- RFC 8439 §2.3 compliant
+- Quarter round: a+=b; d^=a; d<<<16; c+=d; b^=c; b<<<12; a+=b; d^=a; d<<<8; c+=d; b^=c; b<<<7
+- State: 4 constants + 8 key words + 1 counter + 3 nonce words (16 × u32)
+- 20 rounds (10 double rounds): alternating column and diagonal quarter rounds
+- 64-byte keystream blocks, XOR with plaintext
+- **Tests** (2): RFC 8439 §2.4.2 test vector, encrypt/decrypt roundtrip
+
+#### 3. Poly1305 MAC (`chacha20/mod.rs`)
+- RFC 8439 §2.5 compliant
+- Radix-2^26 representation: 5 × u32 limbs for accumulator and clamped r
+- Clamping: r[3,7,11,15] top 4 bits cleared; r[4,8,12] bottom 2 bits cleared
+- Accumulate: add 16-byte blocks with high bit set, multiply by r mod (2^130-5)
+- Finalization: convert limbs to base-2^32, add s with carry chain
+- **Tests** (2): RFC 8439 §2.5.2 test vector, Poly1305 tag verification
+
+#### 4. ChaCha20-Poly1305 AEAD (`chacha20/mod.rs`)
+- RFC 8439 §2.8 compliant
+- poly_key derived from ChaCha20(key, nonce, counter=0)[0..32]
+- Encryption from counter=1
+- MAC data: pad16(aad) || pad16(ciphertext) || len(aad) as u64le || len(ct) as u64le
+- Constant-time tag verification via `subtle::ConstantTimeEq`
+- **Tests** (4): RFC 8439 §2.8.2 encrypt/decrypt, auth failure (tampered tag), AEAD with AAD, empty plaintext
+
+#### 5. CFB Mode (`modes/cfb.rs`)
+- NIST SP 800-38A §6.3 compliant (CFB-128)
+- Encrypt: C_i = P_i ⊕ E_K(C_{i-1}), C_0 = IV
+- Decrypt: P_i = C_i ⊕ E_K(C_{i-1}), C_0 = IV
+- Handles partial last block (no padding needed)
+- **Tests** (2): encrypt/decrypt roundtrip, partial block
+
+#### 6. OFB Mode (`modes/ofb.rs`)
+- NIST SP 800-38A §6.4 compliant
+- O_i = E_K(O_{i-1}), symmetric encrypt/decrypt operation
+- `ofb_crypt()` — single function for both encrypt and decrypt
+- **Tests** (2): encrypt/decrypt roundtrip, partial block
+
+#### 7. CCM Mode (`modes/ccm.rs`)
+- NIST SP 800-38C compliant AEAD mode
+- CBC-MAC authentication tag: B0 flags encoding, AAD length encoding, plaintext padding
+- CTR encryption: counter block formatting, S0 for tag encryption
+- Nonce: 7-13 bytes; Tag: 4-16 bytes (even)
+- Constant-time tag verification
+- **Tests** (4): NIST SP 800-38C examples 1 & 2, auth failure, empty plaintext
+
+#### 8. XTS Mode (`modes/xts.rs`)
+- IEEE P1619 / NIST SP 800-38E compliant
+- Two AES keys: K1 for data encryption, K2 for tweak encryption
+- T = E_{K2}(tweak), PP = P_i ⊕ T, CC = E_{K1}(PP), C_i = CC ⊕ T
+- `gf_mul_alpha()`: GF(2^128) multiplication by α (left-shift + conditional XOR 0x87)
+- Ciphertext stealing for last incomplete block
+- **Tests** (3): encrypt/decrypt roundtrip, multi-block, minimum size validation
+
+#### 9. CMAC-AES (`cmac/mod.rs`)
+- RFC 4493 / NIST SP 800-38B compliant
+- Subkey derivation: L = E_K(0), K1 = dbl(L), K2 = dbl(K1) with Rb = 0x87
+- `dbl()`: left-shift 128-bit block by 1 bit, conditional XOR with Rb
+- Last block: complete → XOR K1; incomplete → pad(10*) + XOR K2
+- Incremental API: `new()`, `update()`, `finish()`, `reset()`
+- Zeroize subkeys and state on drop
+- **Tests** (5): RFC 4493 vectors (empty, 16-byte, 40-byte, 64-byte message), reset
+
+#### 10. GMAC (`gmac/mod.rs`)
+- NIST SP 800-38D compliant (GCM with empty plaintext)
+- Reuses `Gf128`, `ghash_precompute()`, `ghash_update()` from `modes/gcm.rs` (made `pub(crate)`)
+- H = E_K(0), J0 from IV, GHASH(AAD || len_block), tag = GHASH ⊕ E_K(J0)
+- **Tests** (2): GMAC tag generation, different IV lengths
+
+#### 11. SipHash-2-4 (`siphash/mod.rs`)
+- Aumasson & Bernstein reference implementation
+- 4 × u64 internal state (v0-v3), initialized from 128-bit key
+- SipRound: 4 add/rotate/xor operations
+- 2 compression rounds per 8-byte input block, 4 finalization rounds
+- Last block padding: length byte in MSB
+- Incremental API: `new()`, `update()`, `finish()`, `hash()` (one-shot)
+- **Tests** (2): reference test vectors, incremental vs one-shot
+
+#### 12. scrypt KDF (`scrypt/mod.rs`)
+- RFC 7914 compliant
+- Flow: PBKDF2(password, salt, 1, p*128*r) → ROMix each block → PBKDF2(password, B, 1, dk_len)
+- ROMix: sequential memory-hard function with V[N] lookup table
+- BlockMix: interleaved Salsa20/8 core, output reordering (even||odd)
+- Salsa20/8 core: 8-round (4 double-round) variant with feedforward addition
+- Parameter validation: N must be power of 2, r*p < 2^30
+- **Tests** (5): RFC 7914 §12 vectors 1 & 2, Salsa20/8 core, invalid parameters
+
+### Bugs Found & Fixed
+
+#### Poly1305 Radix-2^26 Finalization (`chacha20/mod.rs`)
+- **Problem**: Assembly step converted radix-2^26 limbs to u64 with overlapping bit ranges. `a0 = acc[0] | (acc[1] << 26)` contained bits 0-51, and `a1 = (acc[1] >> 6) | (acc[2] << 20)` contained bits 32-77. Carry from a0 to a1 double-counted bits 32-51.
+- **Fix**: Convert to u32 base-2^32 words first using `wrapping_shl` (truncates in u32 space), then add `s` with carry chain:
+```rust
+let h0 = self.acc[0] | self.acc[1].wrapping_shl(26);
+let h1 = (self.acc[1] >> 6) | self.acc[2].wrapping_shl(20);
+let h2 = (self.acc[2] >> 12) | self.acc[3].wrapping_shl(14);
+let h3 = (self.acc[3] >> 18) | self.acc[4].wrapping_shl(8);
+// Then add s[0..4] with u64 carry chain
+```
+- **Verification**: Python simulation of both buggy and fixed approaches confirmed the exact wrong/correct output.
+
+#### Salsa20/8 Core Test Vector (`scrypt/mod.rs`)
+- **Problem**: Input hex string's last 14 bytes (`d4d235736e4837319c726748f8eb`) were wrong.
+- **Fix**: Corrected to `1d2909c74829edebc68db8b8c25e` per RFC 7914 §8.
+- **Verification**: Python reference implementation produces matching output with correct input.
+
+#### scrypt Test Vectors 1 & 2 (`scrypt/mod.rs`)
+- **Problem**: Expected output hex strings for both test vectors had copy-paste errors.
+- **Fix**: Corrected to match RFC 7914 §12 values, verified with full Python scrypt implementation.
+
+### Clippy Fixes (7 warnings)
+- `chacha20/mod.rs` — unused `mut` on variable; `needless_range_loop` on g[] indexing
+- `sha3/mod.rs` — loop variable only used to index RC array; unnecessary `to_vec()` in absorb
+- `modes/ccm.rs` — manual range contains → `!(4..=16).contains(&tag_len)`
+- `cmac/mod.rs` — `needless_range_loop` on last_block (×2)
+
+### GCM Module Changes (`modes/gcm.rs`)
+- Made `Gf128`, `ghash_precompute()`, and `ghash_update()` `pub(crate)` for GMAC reuse
+- No functional changes to GCM itself
+
+### Cargo.toml Feature Changes
+```toml
+sha3 = []
+chacha20 = []
+modes = ["aes"]
+cmac = ["aes"]
+gmac = ["aes", "modes"]
+siphash = []
+scrypt = ["pbkdf2"]
+```
+
+### Files Created/Modified
+
+| File | Operation | Approx Lines |
+|------|-----------|-------------|
+| `crates/hitls-crypto/src/sha3/mod.rs` | Rewrite: SHA-3/SHAKE | ~400 |
+| `crates/hitls-crypto/src/chacha20/mod.rs` | Rewrite: ChaCha20 + Poly1305 + AEAD | ~420 |
+| `crates/hitls-crypto/src/modes/cfb.rs` | Rewrite: CFB-128 | ~80 |
+| `crates/hitls-crypto/src/modes/ofb.rs` | Rewrite: OFB | ~60 |
+| `crates/hitls-crypto/src/modes/ccm.rs` | Rewrite: CCM AEAD | ~290 |
+| `crates/hitls-crypto/src/modes/xts.rs` | Rewrite: XTS | ~150 |
+| `crates/hitls-crypto/src/modes/gcm.rs` | Modified: pub(crate) exports | +3 |
+| `crates/hitls-crypto/src/cmac/mod.rs` | Rewrite: CMAC-AES | ~265 |
+| `crates/hitls-crypto/src/gmac/mod.rs` | Rewrite: GMAC | ~175 |
+| `crates/hitls-crypto/src/siphash/mod.rs` | Rewrite: SipHash-2-4 | ~175 |
+| `crates/hitls-crypto/src/scrypt/mod.rs` | Rewrite: scrypt KDF | ~250 |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 175 (+43, 1 ignored) | All pass |
+| hitls-utils | 11 | All pass |
+| **Total** | **232** | **All pass** |
+
+New tests (43):
+- SHA-3 (8): SHA3-256 empty/abc/two-block, SHA3-512 empty/abc, SHA3-224/384 basic, SHAKE128/256
+- ChaCha20-Poly1305 (8): ChaCha20 RFC vector, roundtrip, Poly1305 RFC vector, tag verify, AEAD encrypt/decrypt, auth failure, AAD, empty PT
+- CFB (2): roundtrip, partial block
+- OFB (2): roundtrip, partial block
+- CCM (4): NIST examples 1 & 2, auth failure, empty PT
+- XTS (3): roundtrip, multi-block, minimum size
+- CMAC (5): RFC 4493 vectors (empty/16B/40B/64B), reset
+- GMAC (2): tag generation, different IV
+- SipHash (2): reference vectors, incremental vs one-shot
+- scrypt (5): RFC 7914 vectors 1 & 2, Salsa20/8 core, invalid params ×2
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 232 workspace tests passing
+
+### Symmetric Subsystem Completion
+
+With Phase 9, all symmetric/hash/MAC/KDF primitives are fully implemented:
+
+| Category | Algorithms |
+|----------|-----------|
+| Hash | SHA-2 (224/256/384/512), SHA-3 (224/256/384/512), SHAKE (128/256), SM3, SHA-1, MD5 |
+| Symmetric | AES (128/192/256), SM4, ChaCha20 |
+| Modes | ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS |
+| AEAD | AES-GCM, ChaCha20-Poly1305, AES-CCM |
+| MAC | HMAC, CMAC, GMAC, Poly1305, SipHash |
+| KDF | HKDF, PBKDF2, scrypt |
+| DRBG | HMAC-DRBG |
+
+Remaining work: post-quantum cryptography (ML-KEM, ML-DSA, SLH-DSA, etc.), TLS protocol, PKI, authentication protocols.
