@@ -116,12 +116,12 @@ impl MontgomeryCtx {
             }
         }
 
-        // Result is in work[m..2m]
-        let result_limbs: Vec<u64> = work[m..m + m].to_vec();
+        // Result is in work[m..2m+1] (may have an extra carry limb)
+        let result_limbs: Vec<u64> = work[m..].to_vec();
         let mut result = BigNum::from_limbs(result_limbs);
 
         // Final subtraction if result >= modulus
-        if result >= self.modulus {
+        while result >= self.modulus {
             result = result.sub(&self.modulus);
         }
 

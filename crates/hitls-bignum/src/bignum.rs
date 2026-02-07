@@ -1,5 +1,6 @@
 //! Big number type and basic operations.
 
+use hitls_types::CryptoError;
 use zeroize::Zeroize;
 
 /// Limb type for big number representation (64-bit on 64-bit platforms).
@@ -169,6 +170,21 @@ impl BigNum {
         self.limbs[limb_idx] |= 1u64 << bit_idx;
     }
 
+    /// Export to big-endian bytes, left-padded with zeros to exactly `len` bytes.
+    /// Returns error if the number requires more than `len` bytes.
+    pub fn to_bytes_be_padded(&self, len: usize) -> Result<Vec<u8>, CryptoError> {
+        let raw = self.to_bytes_be();
+        if raw.len() > len {
+            return Err(CryptoError::BufferTooSmall {
+                need: raw.len(),
+                got: len,
+            });
+        }
+        let mut out = vec![0u8; len];
+        out[len - raw.len()..].copy_from_slice(&raw);
+        Ok(out)
+    }
+
     /// Remove leading zero limbs.
     pub(crate) fn normalize(&mut self) {
         while self.limbs.len() > 1 && *self.limbs.last().unwrap() == 0 {
@@ -290,5 +306,19 @@ mod tests {
         let n = BigNum::from_bytes_be(&bytes);
         let out = n.to_bytes_be();
         assert_eq!(bytes, out);
+    }
+
+    #[test]
+    fn test_to_bytes_be_padded() {
+        let n = BigNum::from_u64(0xFF);
+        // Pad to 4 bytes
+        let padded = n.to_bytes_be_padded(4).unwrap();
+        assert_eq!(padded, vec![0x00, 0x00, 0x00, 0xFF]);
+        // Exact size
+        let exact = n.to_bytes_be_padded(1).unwrap();
+        assert_eq!(exact, vec![0xFF]);
+        // Too small should error
+        let big = BigNum::from_bytes_be(&[0x01, 0x02, 0x03]);
+        assert!(big.to_bytes_be_padded(2).is_err());
     }
 }

@@ -311,8 +311,132 @@ openhitls-rs/
 - Clippy: zero warnings
 - Fmt: clean
 
-### Next Steps (Phase 5)
-- Implement RSA key generation, encryption, and signing
-- Implement ECDSA / ECDH (P-256, P-384)
-- Implement SM2 (signature + encryption)
+---
+
+## Phase 5: RSA Asymmetric Cryptography (Session 2026-02-06)
+
+### Goals
+- Implement RSA key generation (2048/3072/4096-bit)
+- Implement RSA raw operations with CRT optimization
+- Implement PKCS#1 v1.5 padding (signatures + encryption)
+- Implement OAEP padding (encryption)
+- Implement PSS padding (signatures)
+- Implement MGF1 mask generation function
+
+### Completed Steps
+
+#### 0. BigNum Supplement: `to_bytes_be_padded`
+- Added `to_bytes_be_padded(len)` method to `BigNum` in `hitls-bignum/src/bignum.rs`
+- Exports big-endian bytes left-padded with zeros to exactly `len` bytes
+- Required by RSA: output must always be k bytes (modulus byte length)
+- Added test `test_to_bytes_be_padded`
+
+#### 1. RSA Core (`rsa/mod.rs`)
+- **Data structures**:
+  - `RsaPublicKey` — n, e (BigNum), bits, k (modulus byte length)
+  - `RsaPrivateKey` — n, d, e, p, q, dp, dq, qinv (CRT parameters), bits, k
+  - `RsaPadding` enum — Pkcs1v15Encrypt, Pkcs1v15Sign, Oaep, Pss, None
+  - `RsaHashAlg` enum — Sha1, Sha256, Sha384, Sha512
+- **Key generation** (`RsaPrivateKey::generate(bits)`):
+  - e = 65537
+  - Random prime generation with Miller-Rabin (5 rounds for >= 1024-bit) + gcd(p-1, e) = 1 check
+  - CRT parameters: dp = d mod (p-1), dq = d mod (q-1), qinv = q^(-1) mod p
+  - Retry up to 5000 candidates per prime
+- **Raw operations**:
+  - `raw_encrypt`: c = m^e mod n (Montgomery exponentiation)
+  - `raw_decrypt`: CRT — m1 = c^dp mod p, m2 = c^dq mod q, h = qinv*(m1-m2+p) mod p, m = m2+h*q
+- **Public API**: `encrypt(padding, pt)`, `decrypt(padding, ct)`, `sign(padding, digest)`, `verify(padding, digest, sig)`, `public_key()`, `new()`, `generate()`
+
+#### 2. MGF1 Mask Generation Function
+- `mgf1_sha256(seed, mask_len)` — RFC 8017 B.2.1
+- SHA-256 based, deterministic: T = Hash(seed || counter_be32) for counter = 0, 1, ...
+- ~20 lines, used by OAEP and PSS
+
+#### 3. PKCS#1 v1.5 Padding (`rsa/pkcs1v15.rs`)
+- **Signatures** (EMSA-PKCS1-v1_5, RFC 8017 §9.2):
+  - `pkcs1v15_sign_pad(digest, k)` — EM = 0x00 || 0x01 || PS(0xFF...) || 0x00 || DigestInfo
+  - `pkcs1v15_verify_unpad(em, digest, k)` — constant-time comparison via `subtle::ConstantTimeEq`
+  - DigestInfo DER prefixes for SHA-1/256/384/512
+- **Encryption** (RSAES-PKCS1-v1_5, RFC 8017 §7.2):
+  - `pkcs1v15_encrypt_pad(msg, k)` — EM = 0x00 || 0x02 || PS(random non-zero) || 0x00 || M
+  - `pkcs1v15_decrypt_unpad(em)` — finds 0x00 separator, verifies PS >= 8 bytes
+
+#### 4. OAEP Padding (`rsa/oaep.rs`)
+- **Encryption** (EME-OAEP, RFC 8017 §7.1.1):
+  - `oaep_encrypt_pad(msg, k)` — lHash = SHA-256(""), DB = lHash || PS || 0x01 || M, seed → MGF1 masking
+- **Decryption** (EME-OAEP, RFC 8017 §7.1.2):
+  - `oaep_decrypt_unpad(em)` — reverse MGF1 masking, constant-time lHash comparison
+
+#### 5. PSS Padding (`rsa/pss.rs`)
+- **Signing** (EMSA-PSS-ENCODE, RFC 8017 §9.1.1):
+  - `pss_sign_pad(digest, em_bits)` — M' = 0x00(x8) || mHash || salt, H = Hash(M'), maskedDB = DB XOR MGF1(H), EM = maskedDB || H || 0xbc
+  - Salt length = hash length (32 bytes) by default
+- **Verification** (EMSA-PSS-VERIFY, RFC 8017 §9.1.2):
+  - `pss_verify_unpad(em, digest, em_bits)` — recovers salt from DB, recomputes H', constant-time comparison
+
+### Critical Bug Fix: Montgomery REDC Overflow
+
+**File**: `hitls-bignum/src/montgomery.rs`
+
+**Problem**: `mont_reduce()` extracted only `work[m..m+m]` (exactly m limbs) for the result. For multi-limb moduli (> 64 bits), the REDC algorithm can produce results up to 2N, which may require m+1 limbs. The carry at position 2m was silently dropped.
+
+**Symptoms**: All single-limb modulus tests passed (small numbers), but RSA-1024 raw encrypt/decrypt produced incorrect results. The bug only manifested with multi-limb moduli where carry propagation reached position 2m.
+
+**Fix**:
+```rust
+// BEFORE (buggy):
+let result_limbs: Vec<u64> = work[m..m + m].to_vec();
+if result >= self.modulus {
+    result = result.sub(&self.modulus);
+}
+
+// AFTER (fixed):
+let result_limbs: Vec<u64> = work[m..].to_vec();
+while result >= self.modulus {
+    result = result.sub(&self.modulus);
+}
+```
+
+**Debugging journey**: Raw RSA encrypt/decrypt failed → generated valid OpenSSL RSA-1024 test key → removed CRT to isolate bug → traced to `mod_exp` → isolated to `mont_reduce` → found overflow limb being truncated.
+
+### Files Modified/Created
+
+| File | Operation | Lines |
+|------|-----------|-------|
+| `crates/hitls-bignum/src/bignum.rs` | Modified: added `to_bytes_be_padded` | +15 |
+| `crates/hitls-bignum/src/montgomery.rs` | Modified: REDC overflow fix | +2/-2 |
+| `crates/hitls-crypto/src/rsa/mod.rs` | Rewrite from stub | ~400 |
+| `crates/hitls-crypto/src/rsa/pkcs1v15.rs` | New file | ~155 |
+| `crates/hitls-crypto/src/rsa/oaep.rs` | New file | ~135 |
+| `crates/hitls-crypto/src/rsa/pss.rs` | New file | ~195 |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-bignum | 46 (+1) | All pass |
+| hitls-crypto | 73 (+8 RSA, 1 ignored) | All pass |
+| **Total** | **119** | **All pass** |
+
+RSA tests (8 pass, 1 ignored):
+- `test_rsa_raw_encrypt_decrypt` — raw encrypt/decrypt roundtrip with 1024-bit key
+- `test_rsa_pkcs1v15_sign_verify` — PKCS#1 v1.5 sign + verify + tamper detection
+- `test_rsa_pkcs1v15_encrypt_decrypt` — PKCS#1 v1.5 encrypt/decrypt roundtrip
+- `test_rsa_oaep_encrypt_decrypt` — OAEP encrypt/decrypt roundtrip
+- `test_rsa_pss_sign_verify` — PSS sign + verify + tamper detection
+- `test_rsa_public_key_extraction` — public key from private key
+- `test_rsa_invalid_key_sizes` — rejects < 2048 bits and odd sizes
+- `test_mgf1_sha256` — deterministic, correct length, prefix property
+- `test_rsa_keygen_basic` — *ignored* (too slow in debug mode, ~minutes for 2048-bit)
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 119 workspace tests passing
+
+### Next Steps (Phase 6)
+- Implement ECC (elliptic curve arithmetic over P-256, P-384)
+- Implement ECDSA (signing / verification)
+- Implement ECDH (key agreement)
 - Implement Ed25519 / X25519
+- Implement SM2 (signature + encryption + key exchange)
