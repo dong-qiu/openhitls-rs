@@ -311,3 +311,56 @@ All three confirm our code produces the correct result. Fix: Updated expected va
 - `README.md` — Status banner updated to Phase 5, RSA marked as Done, test counts updated (119 total), BigNum table updated with `to_bytes_be_padded`
 - `DEV_LOG.md` — Added full Phase 5 section covering RSA implementation, Montgomery REDC bug fix, files modified, test results
 - `PROMPT_LOG.md` — Added Session 7 entries (Prompts 23–25)
+
+### Prompt 26: Commit and push Phase 5
+> 请提交并推送至远程仓库
+
+**Result**: Committed as `1b442fb` — "feat(hitls-crypto): implement Phase 5 — RSA asymmetric cryptography". Pushed to `origin/main`.
+
+---
+
+## Session 8: Phase 6 — ECC + ECDSA + ECDH
+
+### Prompt 27: Continue Phase 6
+> 请继续Phase 6的工作
+
+**Result**: Entered plan mode. Explored C reference implementations (ecc_point, ecc_para, ecdsa, ecdh, curve25519, sm2) and existing Rust stubs. Designed Phase 6 plan covering:
+- ECC curve parameters (P-256, P-384) in `ecc/curves.rs`
+- Jacobian point arithmetic (add, double, scalar_mul, Shamir's trick) in `ecc/point.rs`
+- ECC public API (EcGroup, EcPoint) in `ecc/mod.rs`
+- ECDH key agreement in `ecdh/mod.rs`
+- ECDSA sign/verify in `ecdsa/mod.rs`
+
+Scope: Weierstrass curves only (P-256, P-384). Ed25519/X25519/SM2 deferred. User approved.
+
+### Prompt 28: *(Plan approved, implementation started)*
+
+**Result**: Implemented all 5 files:
+
+| File | Description | Approx Lines |
+|------|-------------|-------------|
+| `ecc/curves.rs` | P-256/P-384 curve parameters (CurveParams struct) | ~75 |
+| `ecc/point.rs` | Jacobian point arithmetic (add, double, scalar_mul, Shamir's trick) | ~235 |
+| `ecc/mod.rs` | EcGroup + EcPoint public API with encoding/decoding | ~320 |
+| `ecdsa/mod.rs` | ECDSA sign/verify with DER encoding via hitls-utils ASN.1 | ~300 |
+| `ecdh/mod.rs` | ECDH key agreement (generate, compute_shared_secret) | ~145 |
+
+**Compilation fixes** (27 errors):
+- BigNum `mod_mul`/`mod_add`/`mod_sub` return `Result`, not `BigNum` — added `?` operator at all call sites in point.rs, ecc/mod.rs, ecdsa/mod.rs
+- `hitls-utils` not listed as dependency for ecdsa feature — added optional dep + feature flag
+- `CurveParams` missing `Clone` derive — added `#[derive(Clone)]`
+
+**Test results**: 136 tests passing (46 bignum + 90 crypto, 1 ignored). 17 new tests:
+- ECC core (9): generator on curve (P-256/P-384), 2G==G+G, n·G=infinity, encoding roundtrip, invalid point, small scalars, infinity encoding, unsupported curve
+- ECDSA (5): sign/verify P-256, sign/verify P-384, tamper detection, public-key-only verify, DER roundtrip
+- ECDH (3): P-256 shared secret (Alice==Bob), P-384 shared secret, from_private_key roundtrip
+
+Clippy clean, fmt clean.
+
+### Prompt 29: Refresh README, DEV_LOG, PROMPT_LOG
+> 请刷新readme.md, dev_log.md和prompt_log.md这几个文件
+
+**Result**: Updated all three files to reflect Phase 6 completion:
+- `README.md` — Status banner updated to Phase 6, ECDSA/ECDH/ECC marked as Done, test counts updated (136 total)
+- `DEV_LOG.md` — Added full Phase 6 section covering ECC/ECDSA/ECDH implementation, compilation fixes, files created, test results
+- `PROMPT_LOG.md` — Added Session 8 entries (Prompts 26–29)

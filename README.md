@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Active Development (Phase 5 Complete)**
+> **Status: Active Development (Phase 6 Complete)**
 >
-> Core cryptographic primitives implemented: hash functions (SHA-2, SM3, SHA-1, MD5), HMAC, symmetric ciphers (AES, SM4), block cipher modes (ECB, CBC, CTR, GCM), KDFs (HKDF, PBKDF2), and RSA (key generation, PKCS#1 v1.5, OAEP, PSS). 119 tests passing (46 bignum + 73 crypto). ECC/ECDSA is next.
+> Core cryptographic primitives implemented: hash functions (SHA-2, SM3, SHA-1, MD5), HMAC, symmetric ciphers (AES, SM4), block cipher modes (ECB, CBC, CTR, GCM), KDFs (HKDF, PBKDF2), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, and ECDH. 136 tests passing (46 bignum + 90 crypto).
 
 ## Goals
 
@@ -22,7 +22,7 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error types, constants
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (11 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
-│   ├── hitls-crypto/    # Crypto: AES, SM4, GCM, SHA-2, HMAC, RSA... (73 tests)
+│   ├── hitls-crypto/    # Crypto: AES, SM4, GCM, SHA-2, HMAC, RSA, ECDSA, ECDH... (90 tests)
 │   ├── hitls-tls/       # TLS 1.2/1.3, DTLS, TLCP protocol
 │   ├── hitls-pki/       # X.509, PKCS#12, CMS/PKCS#7
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
@@ -70,8 +70,9 @@ openhitls-rs/
 | Algorithm | Feature Flag | Status |
 |-----------|-------------|--------|
 | RSA (PKCS#1 v1.5, PSS, OAEP) | `rsa` (default) | **Done** |
-| ECDSA (P-256, P-384, P-521, Brainpool) | `ecdsa` (default) | Stub |
-| ECDH | `ecdh` | Stub |
+| ECDSA (P-256, P-384) | `ecdsa` (default) | **Done** |
+| ECDH (P-256, P-384) | `ecdh` | **Done** |
+| ECC core (Jacobian, Weierstrass) | `ecc` | **Done** |
 | Ed25519 | `ed25519` | Stub |
 | X25519 | `x25519` | Stub |
 | DSA | `dsa` | Stub |
@@ -142,11 +143,11 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (119 tests)
+# Run all tests (136 tests)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 73 tests (1 ignored)
+cargo test -p hitls-crypto --all-features   # 90 tests (1 ignored)
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 11 tests
 

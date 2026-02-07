@@ -438,5 +438,108 @@ RSA tests (8 pass, 1 ignored):
 - Implement ECC (elliptic curve arithmetic over P-256, P-384)
 - Implement ECDSA (signing / verification)
 - Implement ECDH (key agreement)
-- Implement Ed25519 / X25519
+
+---
+
+## Phase 6: ECC + ECDSA + ECDH (Session 2026-02-06)
+
+### Goals
+- Implement elliptic curve arithmetic over NIST P-256 and P-384 (Weierstrass curves)
+- Implement ECDSA signing and verification (FIPS 186-4)
+- Implement ECDH key agreement (NIST SP 800-56A)
+
+### Completed Steps
+
+#### 1. ECC Curve Parameters (`ecc/curves.rs`)
+- `CurveParams` struct: p, a, b, gx, gy, n, h, field_size
+- Hard-coded NIST P-256 (secp256r1) and P-384 (secp384r1) constants
+- `get_curve_params(EccCurveId)` factory function
+- Both curves satisfy a = p - 3 (enables optimized point doubling)
+
+#### 2. Jacobian Point Arithmetic (`ecc/point.rs`)
+- `JacobianPoint` struct: (X, Y, Z) representing affine (X/Z², Y/Z³), infinity at Z=0
+- **Point addition** (`point_add`): U1/U2/S1/S2/H/R formula, ~20 modular operations
+- **Point doubling** (`point_double`): Optimized for a = -3, uses M = 3·(X+Z²)·(X-Z²)
+- **Scalar multiplication** (`scalar_mul`): Double-and-add (MSB → LSB)
+- **Combined scalar mul** (`scalar_mul_add`): Shamir's trick for k1·G + k2·Q (ECDSA verification)
+- **Jacobian → affine**: z_inv = Z⁻¹ mod p, x = X·z_inv², y = Y·z_inv³
+- All functions return `Result<JacobianPoint, CryptoError>` (BigNum mod ops return Result)
+
+#### 3. ECC Public API (`ecc/mod.rs`)
+- `EcGroup` — Curve instance with parameters, provides scalar multiplication API
+  - `new(curve_id)`, `generator()`, `order()`, `field_size()`
+  - `scalar_mul(k, point)`, `scalar_mul_base(k)`, `scalar_mul_add(k1, k2, q)`
+- `EcPoint` — Affine point (x, y, infinity flag)
+  - `new(x, y)`, `infinity()`, `is_infinity()`, `x()`, `y()`
+  - `is_on_curve(group)` — Verifies y² ≡ x³ + ax + b (mod p)
+  - `to_uncompressed(group)` → `0x04 || x || y`
+  - `from_uncompressed(group, data)` — Decode + on-curve validation
+- **Tests** (9): generator on curve (P-256/P-384), 2G == G+G, n·G = infinity, encoding roundtrip, invalid point rejection, small scalar values, infinity encoding error, unsupported curve
+
+#### 4. ECDH Key Agreement (`ecdh/mod.rs`)
+- `EcdhKeyPair` struct with EcGroup, private_key (BigNum), public_key (EcPoint)
+- `generate(curve_id)` — Random d ∈ [1, n-1], Q = d·G
+- `from_private_key(curve_id, bytes)` — Import with validation (d ∈ [1, n-1])
+- `compute_shared_secret(peer_pub_bytes)` → x-coordinate of d·Q_peer, padded to field_size
+- Public key zeroized on drop via `Zeroize` trait
+- **Tests** (3): P-256 shared secret (Alice==Bob), P-384 shared secret, from_private_key roundtrip
+
+#### 5. ECDSA Signing & Verification (`ecdsa/mod.rs`)
+- `EcdsaKeyPair` struct with EcGroup, private_key (BigNum), public_key (EcPoint)
+- `generate(curve_id)` — Random key pair
+- `from_private_key(curve_id, bytes)` — Import private key
+- `from_public_key(curve_id, bytes)` — Import public key (verify-only)
+- **Signing** (FIPS 186-4):
+  1. e = truncate(digest, bit_len(n))
+  2. k = random [1, n-1]
+  3. (x1, _) = k·G; r = x1 mod n (retry if r=0)
+  4. s = k⁻¹·(e + d·r) mod n (retry if s=0)
+  5. Return DER(SEQUENCE { INTEGER r, INTEGER s })
+- **Verification**:
+  1. Validate r, s ∈ [1, n-1]
+  2. w = s⁻¹ mod n, u1 = e·w, u2 = r·w
+  3. (x1, _) = u1·G + u2·Q (Shamir's trick)
+  4. Check x1 mod n == r
+- `truncate_digest()` — Truncates hash to curve order bit length
+- DER encoding/decoding via `hitls-utils` ASN.1 `Encoder`/`Decoder`
+- Private key zeroized on drop
+- **Tests** (5): sign/verify P-256, sign/verify P-384, tamper detection, public-key-only verify, DER roundtrip
+
+### Compilation Fixes
+- **BigNum `mod_mul`/`mod_add`/`mod_sub` return `Result`** — All 27 call sites in point.rs, ecc/mod.rs, ecdsa/mod.rs needed `?` operator
+- **`hitls-utils` not a dependency for `ecdsa`** — Added `hitls-utils` as optional dependency, added `"hitls-utils"` to ecdsa feature
+- **`CurveParams` needs `Clone`** — Added `#[derive(Clone)]` to CurveParams
+
+### Files Created/Modified
+
+| File | Operation | Approx Lines |
+|------|-----------|-------------|
+| `crates/hitls-crypto/src/ecc/curves.rs` | New: P-256/P-384 parameters | ~75 |
+| `crates/hitls-crypto/src/ecc/point.rs` | New: Jacobian point arithmetic | ~235 |
+| `crates/hitls-crypto/src/ecc/mod.rs` | Rewrite: EcGroup + EcPoint | ~320 |
+| `crates/hitls-crypto/src/ecdsa/mod.rs` | Rewrite: ECDSA sign/verify | ~300 |
+| `crates/hitls-crypto/src/ecdh/mod.rs` | Rewrite: ECDH key agreement | ~145 |
+| `crates/hitls-crypto/Cargo.toml` | Modified: added hitls-utils dep | +2 |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 90 (+17, 1 ignored) | All pass |
+| **Total** | **136** | **All pass** |
+
+New tests (17):
+- ECC core (9): generator on curve ×2, double==add, n·G=infinity, encoding roundtrip, invalid point, small scalars, infinity encoding, unsupported curve
+- ECDSA (5): sign/verify P-256, sign/verify P-384, tamper detection, public-key-only verify, DER roundtrip
+- ECDH (3): P-256 shared secret, P-384 shared secret, from_private_key roundtrip
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 136 workspace tests passing
+
+### Next Steps (Phase 7)
+- Implement Ed25519 / X25519 (Montgomery/Edwards curves)
 - Implement SM2 (signature + encryption + key exchange)
+- Implement DSA / DH

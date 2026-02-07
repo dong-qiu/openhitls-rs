@@ -166,6 +166,7 @@ dependencies = [
  "getrandom",
  "hitls-bignum",
  "hitls-types",
+ "hitls-utils",
  "subtle",
  "zeroize",
 ]

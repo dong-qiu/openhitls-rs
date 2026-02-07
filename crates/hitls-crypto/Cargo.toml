@@ -9,6 +9,7 @@ description = "Cryptographic algorithm library for openHiTLS"
 [dependencies]
 hitls-types = { path = "../hitls-types" }
 hitls-bignum = { path = "../hitls-bignum", optional = true }
+hitls-utils = { path = "../hitls-utils", optional = true }
 zeroize = { version = "1.8", features = ["derive"] }
 subtle = "2.6"
 getrandom = "0.2"
@@ -38,7 +39,7 @@ siphash = []
 rsa = ["hitls-bignum"]
 dsa = ["hitls-bignum"]
 ecc = ["hitls-bignum"]
-ecdsa = ["ecc"]
+ecdsa = ["ecc", "hitls-utils"]
 ecdh = ["ecc"]
 dh = ["hitls-bignum"]
 ed25519 = []
