@@ -178,6 +178,14 @@ pub enum PkiError {
     CmsError(String),
     #[error("asn1 parse error: {0}")]
     Asn1Error(String),
+    #[error("issuer certificate not found")]
+    IssuerNotFound,
+    #[error("basic constraints violation: {0}")]
+    BasicConstraintsViolation(String),
+    #[error("key usage violation: {0}")]
+    KeyUsageViolation(String),
+    #[error("max chain depth exceeded: {0}")]
+    MaxDepthExceeded(u32),
     #[error("crypto error: {0}")]
     CryptoError(#[from] CryptoError),
 }

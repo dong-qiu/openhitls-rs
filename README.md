@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Active Development (Phase 12 Complete)**
+> **Status: Active Development (Phase 13 Complete)**
 >
-> Core cryptographic primitives implemented: hash functions (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric ciphers (AES, SM4, ChaCha20), block cipher modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS), AES Key Wrap (RFC 3394), ChaCha20-Poly1305 AEAD, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), HMAC-DRBG, ML-KEM (FIPS 203), ML-DSA (FIPS 204), HPKE (RFC 9180), HybridKEM (X25519+ML-KEM-768), Paillier, ElGamal, and X.509 certificate parsing/verification (RSA, ECDSA, Ed25519). 310 tests passing (46 bignum + 230 crypto + 22 utils + 12 pki).
+> Core cryptographic primitives implemented: hash functions (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric ciphers (AES, SM4, ChaCha20), block cipher modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS), AES Key Wrap (RFC 3394), ChaCha20-Poly1305 AEAD, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), HMAC-DRBG, ML-KEM (FIPS 203), ML-DSA (FIPS 204), HPKE (RFC 9180), HybridKEM (X25519+ML-KEM-768), Paillier, ElGamal, X.509 certificate parsing/verification (RSA, ECDSA, Ed25519), and X.509 chain building/verification with trust store, BasicConstraints, KeyUsage, and time validation. 326 tests passing (46 bignum + 230 crypto + 22 utils + 28 pki).
 
 ## Goals
 
@@ -24,7 +24,7 @@ openhitls-rs/
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
 │   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, DRBG, ML-KEM, ML-DSA, HPKE, HybridKEM, Paillier, ElGamal... (230 tests)
 │   ├── hitls-tls/       # TLS 1.2/1.3, DTLS, TLCP protocol
-│   ├── hitls-pki/       # X.509 (parse, verify), PKCS#12, CMS/PKCS#7 (12 tests)
+│   ├── hitls-pki/       # X.509 (parse, verify, chain build), PKCS#12, CMS/PKCS#7 (28 tests)
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
 │   └── hitls-cli/       # Command-line tool (openssl-like interface)
 ├── tests/vectors/       # Standard test vectors (NIST CAVP, Wycheproof, GM/T)
@@ -130,7 +130,7 @@ openhitls-rs/
 | TLS 1.2 | `hitls-tls` | Skeleton |
 | DTLS 1.2 | `hitls-tls` | Skeleton |
 | TLCP (GM/T 0024) | `hitls-tls` | Skeleton |
-| X.509 Certificates | `hitls-pki` | **Done** (parse + verify) |
+| X.509 Certificates | `hitls-pki` | **Done** (parse + verify + chain) |
 | PKCS#12 | `hitls-pki` | Skeleton |
 | CMS/PKCS#7 | `hitls-pki` | Skeleton |
 
@@ -150,12 +150,12 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (310 tests)
+# Run all tests (326 tests)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 230 tests (3 ignored)
-cargo test -p hitls-pki --all-features      # 12 tests
+cargo test -p hitls-pki --all-features      # 28 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 22 tests
 
@@ -194,11 +194,10 @@ Convenience feature groups:
 
 ## Roadmap
 
-Phase 0–12 complete. Remaining phases:
+Phase 0–13 complete. Remaining phases:
 
 | Phase | Name | Est. LOC | Est. Tests | Critical Path |
 |-------|------|----------|------------|---------------|
-| 13 | X.509 Verification + Chain Building | ~1,000 | ~15 | **Yes** |
 | 14 | TLS 1.3 Key Schedule + Crypto Adapter | ~1,030 | ~15 | **Yes** |
 | 15 | TLS Record Layer Encryption | ~700 | ~12 | **Yes** |
 | 16 | TLS 1.3 Client Handshake | ~2,640 | ~15 | **Yes** |
@@ -207,7 +206,7 @@ Phase 0–12 complete. Remaining phases:
 | 19 | Remaining PQC (SLH-DSA, XMSS, FrodoKEM, McEliece, SM9) | ~7,000 | ~35 | No |
 | 20 | CLI Tool + Integration Tests | ~1,910 | ~20 | No |
 
-Target: ~40,000 lines of Rust, ~462 tests. See [plan file](.claude/plans/) for details.
+Target: ~40,000 lines of Rust, ~470+ tests. See [plan file](.claude/plans/) for details.
 
 ## Minimum Supported Rust Version
 

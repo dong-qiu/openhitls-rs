@@ -1,5 +1,7 @@
 //! X.509 certificate, CRL, and CSR management.
 
+pub mod verify;
+
 use hitls_types::{CryptoError, EccCurveId, PkiError};
 use hitls_utils::asn1::{tags, Decoder, TagClass};
 use hitls_utils::oid::known;
@@ -107,6 +109,142 @@ impl DistinguishedName {
             .map(|(_, v)| v.as_str())
     }
 }
+
+// ---------------------------------------------------------------------------
+// Extension types
+// ---------------------------------------------------------------------------
+
+/// Parsed BasicConstraints extension (RFC 5280 §4.2.1.9).
+#[derive(Debug, Clone)]
+pub struct BasicConstraints {
+    pub is_ca: bool,
+    pub path_len_constraint: Option<u32>,
+}
+
+/// Parsed KeyUsage extension (RFC 5280 §4.2.1.3) as a bit-flag mask.
+#[derive(Debug, Clone, Copy)]
+pub struct KeyUsage(pub u16);
+
+impl KeyUsage {
+    // BIT STRING bit numbering: bit 0 = MSB of first byte (0x80).
+    pub const DIGITAL_SIGNATURE: u16 = 0x0080;
+    pub const NON_REPUDIATION: u16 = 0x0040;
+    pub const KEY_ENCIPHERMENT: u16 = 0x0020;
+    pub const DATA_ENCIPHERMENT: u16 = 0x0010;
+    pub const KEY_AGREEMENT: u16 = 0x0008;
+    pub const KEY_CERT_SIGN: u16 = 0x0004;
+    pub const CRL_SIGN: u16 = 0x0002;
+    pub const ENCIPHER_ONLY: u16 = 0x0001;
+    pub const DECIPHER_ONLY: u16 = 0x8000;
+
+    pub fn has(&self, flag: u16) -> bool {
+        self.0 & flag != 0
+    }
+}
+
+/// Parse BasicConstraints from the extension value bytes.
+/// `SEQUENCE { cA BOOLEAN DEFAULT FALSE, pathLenConstraint INTEGER OPTIONAL }`
+fn parse_basic_constraints(value: &[u8]) -> Result<BasicConstraints, PkiError> {
+    let mut dec = Decoder::new(value)
+        .read_sequence()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    let mut is_ca = false;
+    let mut path_len_constraint = None;
+    if !dec.is_empty() {
+        let tag = dec
+            .peek_tag()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        if tag.class == TagClass::Universal && tag.number == tags::BOOLEAN as u32 {
+            is_ca = dec
+                .read_boolean()
+                .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        }
+    }
+    if !dec.is_empty() {
+        let bytes = dec
+            .read_integer()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let mut val: u32 = 0;
+        for &b in bytes {
+            val = val.checked_shl(8).unwrap_or(u32::MAX) | b as u32;
+        }
+        path_len_constraint = Some(val);
+    }
+    Ok(BasicConstraints {
+        is_ca,
+        path_len_constraint,
+    })
+}
+
+/// Parse KeyUsage from the extension value bytes.
+/// `BIT STRING` — first byte is unused-bits count, remaining bytes are the mask.
+fn parse_key_usage(value: &[u8]) -> Result<KeyUsage, PkiError> {
+    let mut dec = Decoder::new(value);
+    let (unused_bits, data) = dec
+        .read_bit_string()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    let mut mask: u16 = 0;
+    if !data.is_empty() {
+        mask |= data[0] as u16;
+    }
+    if data.len() > 1 {
+        mask |= (data[1] as u16) << 8;
+    }
+    // Clear unused bits in the last byte
+    if unused_bits > 0 && !data.is_empty() {
+        let last_idx = data.len() - 1;
+        if last_idx == 0 {
+            mask &= !((1u16 << unused_bits) - 1);
+        } else {
+            let high = (data[last_idx] as u16) << (last_idx as u16 * 8);
+            let cleared = high & !((1u16 << unused_bits) - 1);
+            mask = (mask & !(0xFF << (last_idx * 8))) | cleared;
+        }
+    }
+    Ok(KeyUsage(mask))
+}
+
+// ---------------------------------------------------------------------------
+// Certificate extension convenience methods
+// ---------------------------------------------------------------------------
+
+impl Certificate {
+    /// Parse the BasicConstraints extension, if present.
+    pub fn basic_constraints(&self) -> Option<BasicConstraints> {
+        let bc_oid = known::basic_constraints().to_der_value();
+        self.extensions
+            .iter()
+            .find(|e| e.oid == bc_oid)
+            .and_then(|e| parse_basic_constraints(&e.value).ok())
+    }
+
+    /// Parse the KeyUsage extension, if present.
+    pub fn key_usage(&self) -> Option<KeyUsage> {
+        let ku_oid = known::key_usage().to_der_value();
+        self.extensions
+            .iter()
+            .find(|e| e.oid == ku_oid)
+            .and_then(|e| parse_key_usage(&e.value).ok())
+    }
+
+    /// Returns true if this certificate is a CA (BasicConstraints present with isCA=true).
+    pub fn is_ca(&self) -> bool {
+        self.basic_constraints().is_some_and(|bc| bc.is_ca)
+    }
+
+    /// Returns true if this certificate is self-signed (issuer DN == subject DN).
+    pub fn is_self_signed(&self) -> bool {
+        self.issuer.entries == self.subject.entries
+    }
+}
+
+impl PartialEq for DistinguishedName {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries
+    }
+}
+
+impl Eq for DistinguishedName {}
 
 // ---------------------------------------------------------------------------
 // AlgorithmIdentifier parsing

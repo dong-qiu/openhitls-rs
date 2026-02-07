@@ -1277,3 +1277,61 @@ Generated with OpenSSL, embedded as hex constants:
 ### Next Steps
 - Phase 13: X.509 Verification + Chain Building
 - Phase 14: TLS 1.3 Key Schedule + Crypto Adapter
+
+---
+
+## Phase 13: X.509 Verification + Chain Building (Session 2026-02-07)
+
+### Goals
+- Build and verify X.509 certificate chains (end-entity → intermediate → root CA)
+- Parse BasicConstraints and KeyUsage extensions into structured types
+- Implement trust store, time validity checking, and path length enforcement
+
+### Completed Steps
+
+#### 1. Extension Types and Parsing (`hitls-pki/src/x509/mod.rs`)
+- `BasicConstraints` struct: `is_ca: bool`, `path_len_constraint: Option<u32>`
+- `KeyUsage` struct with BIT STRING MSB-first flag constants (DIGITAL_SIGNATURE=0x80, KEY_CERT_SIGN=0x04, etc.)
+- `parse_basic_constraints()` — SEQUENCE { BOOLEAN, INTEGER? } from extension value bytes
+- `parse_key_usage()` — BIT STRING → u16 mask with unused-bits handling
+- Certificate convenience methods: `basic_constraints()`, `key_usage()`, `is_ca()`, `is_self_signed()`
+- `PartialEq`/`Eq` for `DistinguishedName` (needed for issuer/subject matching)
+
+#### 2. PkiError Extensions (`hitls-types/src/error.rs`)
+Added 4 new variants:
+- `IssuerNotFound` — issuer certificate not in intermediates or trust store
+- `BasicConstraintsViolation(String)` — non-CA cert used as issuer
+- `KeyUsageViolation(String)` — CA lacks keyCertSign bit
+- `MaxDepthExceeded(u32)` — chain exceeds configured depth limit
+
+#### 3. CertificateVerifier + Chain Building (`hitls-pki/src/x509/verify.rs`, ~200 lines)
+- `CertificateVerifier` struct with trust store, max_depth (default 10), verification_time
+- Builder-style API: `add_trusted_cert()`, `add_trusted_certs_pem()`, `set_max_depth()`, `set_verification_time()`
+- `verify_cert(cert, intermediates)` → `Result<Vec<Certificate>, PkiError>` chain building algorithm:
+  1. Start with end-entity, find issuer by DN matching
+  2. Verify each signature in chain
+  3. Check time validity if configured
+  4. Validate BasicConstraints (is_ca) and KeyUsage (keyCertSign) for all CA certs
+  5. Enforce pathLenConstraint
+  6. Enforce max depth, circular reference protection (100 iteration limit)
+- `parse_certs_pem()` utility to parse multiple certs from a single PEM string
+
+### Bug Found & Fixed
+- **KeyUsage BIT STRING MSB numbering**: BIT STRING bit 0 = MSB of first byte (0x80), not LSB. Original constants used `1 << n` (LSB-first), causing keyCertSign check to fail. Fixed by using MSB-first values: DIGITAL_SIGNATURE=0x0080, KEY_CERT_SIGN=0x0004, CRL_SIGN=0x0002, etc.
+
+### Test Certificates
+Used real 3-cert RSA chain from C project (`testcode/testdata/tls/certificate/pem/rsa_sha256/`):
+- Root CA: CN=certificate.testca.com (self-signed, pathLen=30)
+- Intermediate CA: CN=certificate.testin.com (CA=true)
+- End-entity: CN=certificate.testend22.com
+
+### Test Results
+- **326 tests total** (46 bignum + 230 crypto + 22 utils + 28 pki), 3 ignored
+- 16 new chain verification tests:
+  - Extension parsing: basic_constraints (CA/intermediate/EE), key_usage, is_ca, is_self_signed
+  - Chain verification: full 3-cert chain, self-signed root, missing intermediate, expired cert, max depth exceeded, wrong trust anchor, direct trust, time within validity, parse multi-cert PEM, add_trusted_certs_pem
+- All clippy warnings resolved, formatting clean
+
+### Next Steps
+- Phase 14: TLS 1.3 Key Schedule + Crypto Adapter
+- Phase 15: TLS Record Layer Encryption

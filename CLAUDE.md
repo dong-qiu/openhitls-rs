@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 12 complete — core crypto + X.509 parsing done, TLS in progress
+- **Status**: Phase 13 complete — core crypto + X.509 chain verification done, TLS in progress
 
 ## Workspace Structure
 
@@ -20,7 +20,7 @@ openhitls-rs/
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
 │   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated)
 │   ├── hitls-tls/       # TLS 1.2/1.3, DTLS, TLCP (skeleton)
-│   ├── hitls-pki/       # X.509, PKCS#12, CMS (skeleton)
+│   ├── hitls-pki/       # X.509 (parse, verify, chain), PKCS#12, CMS
 │   ├── hitls-auth/      # OTP, SPAKE2+, Privacy Pass (skeleton)
 │   └── hitls-cli/       # Command-line tool (skeleton)
 ├── tests/vectors/       # Standard test vectors
@@ -33,13 +33,14 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (310 tests, 3 ignored for slow keygen)
+# Run all tests (326 tests, 3 ignored for slow keygen)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features
-cargo test -p hitls-bignum
-cargo test -p hitls-utils
+cargo test -p hitls-crypto --all-features   # 230 tests
+cargo test -p hitls-pki --all-features      # 28 tests
+cargo test -p hitls-bignum                  # 46 tests
+cargo test -p hitls-utils                   # 22 tests
 
 # Lint (must pass with zero warnings)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
@@ -96,8 +97,8 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-12 complete. Remaining critical path:
-- Phase 13: X.509 Verification + Chain Building
-- Phase 14-17: TLS 1.3 (Key Schedule, Record Layer, Handshake)
+Phases 0-13 complete. Remaining critical path:
+- Phase 14: TLS 1.3 Key Schedule + Crypto Adapter
+- Phase 15-17: TLS Record Layer, Handshake, Application Data
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

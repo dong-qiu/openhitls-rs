@@ -759,3 +759,36 @@ Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
 > Prompt_log.md是否更新了？
 
 **Result**: Updated PROMPT_LOG.md with Phase 12 session entries.
+
+---
+
+## Session 14: Phase 13 — X.509 Chain Verification
+
+### Prompt 51: Start Phase 13
+> 请开始Phase 13的工作
+
+**Result**: Entered plan mode. Explored C reference code for chain building (`pki/pki_x509_verify.c`), test certificates, and extension parsing needs. Designed 4-step plan: extension types, PkiError variants, CertificateVerifier + chain builder, and tests.
+
+### Prompt 52: Approve Phase 13 plan
+> (Approved plan)
+
+**Result**: Implemented Phase 13 in 4 steps:
+
+**Extension types** (`hitls-pki/src/x509/mod.rs`):
+- `BasicConstraints` struct (is_ca, path_len_constraint)
+- `KeyUsage` struct with MSB-first BIT STRING flag constants
+- Parsing functions: `parse_basic_constraints()`, `parse_key_usage()`
+- Certificate methods: `basic_constraints()`, `key_usage()`, `is_ca()`, `is_self_signed()`
+- `PartialEq`/`Eq` for `DistinguishedName`
+
+**PkiError variants** (`hitls-types/src/error.rs`):
+- IssuerNotFound, BasicConstraintsViolation, KeyUsageViolation, MaxDepthExceeded
+
+**CertificateVerifier** (`hitls-pki/src/x509/verify.rs`, ~200 lines):
+- Trust store with builder API
+- Chain building: DN matching, signature verification, time checks, BasicConstraints/KeyUsage validation, depth enforcement
+- `parse_certs_pem()` utility
+
+**Bug fixed**: KeyUsage BIT STRING uses MSB-first numbering (bit 0=0x80), not LSB-first (1<<0=0x01).
+
+**Tests**: 16 new tests using real 3-cert RSA chain from C project. 326 total (46 bignum + 230 crypto + 22 utils + 28 pki). Clippy clean, fmt clean.
