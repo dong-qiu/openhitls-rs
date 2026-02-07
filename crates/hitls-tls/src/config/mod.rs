@@ -2,6 +2,42 @@
 
 use crate::crypt::{NamedGroup, SignatureScheme};
 use crate::{CipherSuite, TlsRole, TlsVersion};
+use hitls_types::EccCurveId;
+use zeroize::Zeroize;
+
+/// Server private key material for CertificateVerify signing.
+#[derive(Debug, Clone)]
+pub enum ServerPrivateKey {
+    /// Ed25519 32-byte seed.
+    Ed25519(Vec<u8>),
+    /// ECDSA private key bytes + curve identifier.
+    Ecdsa {
+        curve_id: EccCurveId,
+        private_key: Vec<u8>,
+    },
+    /// RSA private key components (all big-endian).
+    Rsa {
+        n: Vec<u8>,
+        d: Vec<u8>,
+        e: Vec<u8>,
+        p: Vec<u8>,
+        q: Vec<u8>,
+    },
+}
+
+impl Drop for ServerPrivateKey {
+    fn drop(&mut self) {
+        match self {
+            ServerPrivateKey::Ed25519(seed) => seed.zeroize(),
+            ServerPrivateKey::Ecdsa { private_key, .. } => private_key.zeroize(),
+            ServerPrivateKey::Rsa { d, p, q, .. } => {
+                d.zeroize();
+                p.zeroize();
+                q.zeroize();
+            }
+        }
+    }
+}
 
 /// TLS configuration.
 #[derive(Debug, Clone)]
@@ -28,6 +64,10 @@ pub struct TlsConfig {
     pub verify_peer: bool,
     /// Trusted CA certificates (DER-encoded).
     pub trusted_certs: Vec<Vec<u8>>,
+    /// Server certificate chain (DER-encoded, leaf first).
+    pub certificate_chain: Vec<Vec<u8>>,
+    /// Server private key for CertificateVerify signing.
+    pub private_key: Option<ServerPrivateKey>,
 }
 
 impl TlsConfig {
@@ -51,6 +91,8 @@ pub struct TlsConfigBuilder {
     supported_groups: Vec<NamedGroup>,
     verify_peer: bool,
     trusted_certs: Vec<Vec<u8>>,
+    certificate_chain: Vec<Vec<u8>>,
+    private_key: Option<ServerPrivateKey>,
 }
 
 impl Default for TlsConfigBuilder {
@@ -75,6 +117,8 @@ impl Default for TlsConfigBuilder {
             supported_groups: vec![NamedGroup::X25519],
             verify_peer: true,
             trusted_certs: Vec::new(),
+            certificate_chain: Vec::new(),
+            private_key: None,
         }
     }
 }
@@ -135,6 +179,16 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn certificate_chain(mut self, certs: Vec<Vec<u8>>) -> Self {
+        self.certificate_chain = certs;
+        self
+    }
+
+    pub fn private_key(mut self, key: ServerPrivateKey) -> Self {
+        self.private_key = Some(key);
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -148,6 +202,8 @@ impl TlsConfigBuilder {
             supported_groups: self.supported_groups,
             verify_peer: self.verify_peer,
             trusted_certs: self.trusted_certs,
+            certificate_chain: self.certificate_chain,
+            private_key: self.private_key,
         }
     }
 }
@@ -165,6 +221,29 @@ mod tests {
         assert!(!config.signature_algorithms.is_empty());
         assert!(!config.supported_groups.is_empty());
         assert_eq!(config.supported_groups[0], NamedGroup::X25519);
+    }
+
+    #[test]
+    fn test_config_builder_server_defaults() {
+        let config = TlsConfig::builder().role(TlsRole::Server).build();
+        assert_eq!(config.role, TlsRole::Server);
+        assert!(config.certificate_chain.is_empty());
+        assert!(config.private_key.is_none());
+    }
+
+    #[test]
+    fn test_config_builder_with_server_cert() {
+        let config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .build();
+        assert_eq!(config.certificate_chain.len(), 1);
+        assert!(config.private_key.is_some());
+        match config.private_key.as_ref().unwrap() {
+            ServerPrivateKey::Ed25519(seed) => assert_eq!(seed.len(), 32),
+            _ => panic!("expected Ed25519"),
+        }
     }
 
     #[test]

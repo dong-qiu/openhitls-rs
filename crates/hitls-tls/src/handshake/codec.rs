@@ -104,7 +104,7 @@ pub fn parse_handshake_header(data: &[u8]) -> Result<(HandshakeType, &[u8], usiz
 }
 
 /// Wrap a handshake body with the 4-byte header.
-fn wrap_handshake(msg_type: HandshakeType, body: &[u8]) -> Vec<u8> {
+pub(crate) fn wrap_handshake(msg_type: HandshakeType, body: &[u8]) -> Vec<u8> {
     let len = body.len();
     let mut out = Vec::with_capacity(4 + len);
     out.push(msg_type as u8);
@@ -355,7 +355,7 @@ pub fn encode_finished(verify_data: &[u8]) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 
 /// Encode a list of extensions to bytes.
-fn encode_extensions(exts: &[Extension]) -> Vec<u8> {
+pub(crate) fn encode_extensions(exts: &[Extension]) -> Vec<u8> {
     let mut buf = Vec::new();
     for ext in exts {
         buf.extend_from_slice(&ext.extension_type.0.to_be_bytes());
@@ -366,7 +366,7 @@ fn encode_extensions(exts: &[Extension]) -> Vec<u8> {
 }
 
 /// Parse extensions from data that starts with a 2-byte length prefix.
-fn parse_extensions_from(data: &[u8]) -> Result<Vec<Extension>, TlsError> {
+pub(crate) fn parse_extensions_from(data: &[u8]) -> Result<Vec<Extension>, TlsError> {
     if data.len() < 2 {
         return Ok(vec![]);
     }
@@ -380,7 +380,7 @@ fn parse_extensions_from(data: &[u8]) -> Result<Vec<Extension>, TlsError> {
 }
 
 /// Parse a raw extension list (no length prefix).
-fn parse_extensions_list(data: &[u8]) -> Result<Vec<Extension>, TlsError> {
+pub(crate) fn parse_extensions_list(data: &[u8]) -> Result<Vec<Extension>, TlsError> {
     let mut exts = Vec::new();
     let mut pos = 0;
     while pos + 4 <= data.len() {
@@ -400,8 +400,179 @@ fn parse_extensions_list(data: &[u8]) -> Result<Vec<Extension>, TlsError> {
 }
 
 /// Read a 3-byte big-endian integer.
-fn read_u24(data: &[u8]) -> u32 {
+pub(crate) fn read_u24(data: &[u8]) -> u32 {
     ((data[0] as u32) << 16) | ((data[1] as u32) << 8) | (data[2] as u32)
+}
+
+// ---------------------------------------------------------------------------
+// Decode ClientHello
+// ---------------------------------------------------------------------------
+
+/// Decode a ClientHello from handshake body bytes (after header).
+pub fn decode_client_hello(data: &[u8]) -> Result<ClientHello, TlsError> {
+    let mut pos = 0;
+    let err = |msg: &str| TlsError::HandshakeFailed(format!("ClientHello: {msg}"));
+
+    // legacy_version (2)
+    if data.len() < pos + 2 {
+        return Err(err("too short for version"));
+    }
+    pos += 2; // skip legacy_version
+
+    // random (32)
+    if data.len() < pos + 32 {
+        return Err(err("too short for random"));
+    }
+    let mut random = [0u8; 32];
+    random.copy_from_slice(&data[pos..pos + 32]);
+    pos += 32;
+
+    // legacy_session_id
+    if data.len() < pos + 1 {
+        return Err(err("too short for session_id length"));
+    }
+    let sid_len = data[pos] as usize;
+    pos += 1;
+    if data.len() < pos + sid_len {
+        return Err(err("too short for session_id"));
+    }
+    let legacy_session_id = data[pos..pos + sid_len].to_vec();
+    pos += sid_len;
+
+    // cipher_suites
+    if data.len() < pos + 2 {
+        return Err(err("too short for cipher_suites length"));
+    }
+    let suites_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+    pos += 2;
+    if data.len() < pos + suites_len || suites_len % 2 != 0 {
+        return Err(err("invalid cipher_suites length"));
+    }
+    let mut cipher_suites = Vec::with_capacity(suites_len / 2);
+    for i in (0..suites_len).step_by(2) {
+        cipher_suites.push(CipherSuite(u16::from_be_bytes([
+            data[pos + i],
+            data[pos + i + 1],
+        ])));
+    }
+    pos += suites_len;
+
+    // legacy_compression_methods
+    if data.len() < pos + 1 {
+        return Err(err("too short for compression length"));
+    }
+    let comp_len = data[pos] as usize;
+    pos += 1 + comp_len;
+
+    // extensions
+    let extensions = if data.len() > pos {
+        parse_extensions_from(&data[pos..])?
+    } else {
+        vec![]
+    };
+
+    Ok(ClientHello {
+        random,
+        legacy_session_id,
+        cipher_suites,
+        extensions,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Encode ServerHello
+// ---------------------------------------------------------------------------
+
+/// Encode a ServerHello as a complete handshake message (header + body).
+pub fn encode_server_hello(sh: &ServerHello) -> Vec<u8> {
+    let mut body = Vec::with_capacity(128);
+
+    // legacy_version = 0x0303
+    body.extend_from_slice(&0x0303u16.to_be_bytes());
+
+    // random
+    body.extend_from_slice(&sh.random);
+
+    // legacy_session_id_echo
+    body.push(sh.legacy_session_id.len() as u8);
+    body.extend_from_slice(&sh.legacy_session_id);
+
+    // cipher_suite
+    body.extend_from_slice(&sh.cipher_suite.0.to_be_bytes());
+
+    // legacy_compression_method = 0
+    body.push(0);
+
+    // extensions
+    let ext_data = encode_extensions(&sh.extensions);
+    body.extend_from_slice(&(ext_data.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ext_data);
+
+    wrap_handshake(HandshakeType::ServerHello, &body)
+}
+
+// ---------------------------------------------------------------------------
+// Encode EncryptedExtensions
+// ---------------------------------------------------------------------------
+
+/// Encode an EncryptedExtensions message as a complete handshake message.
+pub fn encode_encrypted_extensions(ee: &EncryptedExtensions) -> Vec<u8> {
+    let ext_data = encode_extensions(&ee.extensions);
+    let mut body = Vec::with_capacity(2 + ext_data.len());
+    body.extend_from_slice(&(ext_data.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ext_data);
+    wrap_handshake(HandshakeType::EncryptedExtensions, &body)
+}
+
+// ---------------------------------------------------------------------------
+// Encode Certificate
+// ---------------------------------------------------------------------------
+
+/// Encode a Certificate message as a complete handshake message.
+pub fn encode_certificate(cert_msg: &CertificateMsg) -> Vec<u8> {
+    let mut body = Vec::with_capacity(256);
+
+    // certificate_request_context
+    body.push(cert_msg.certificate_request_context.len() as u8);
+    body.extend_from_slice(&cert_msg.certificate_request_context);
+
+    // Build certificate list
+    let mut list = Vec::new();
+    for entry in &cert_msg.certificate_list {
+        // cert_data (3-byte length)
+        let cert_len = entry.cert_data.len();
+        list.push((cert_len >> 16) as u8);
+        list.push((cert_len >> 8) as u8);
+        list.push(cert_len as u8);
+        list.extend_from_slice(&entry.cert_data);
+
+        // extensions (2-byte length)
+        let ext_data = encode_extensions(&entry.extensions);
+        list.extend_from_slice(&(ext_data.len() as u16).to_be_bytes());
+        list.extend_from_slice(&ext_data);
+    }
+
+    // certificate_list (3-byte length)
+    let list_len = list.len();
+    body.push((list_len >> 16) as u8);
+    body.push((list_len >> 8) as u8);
+    body.push(list_len as u8);
+    body.extend_from_slice(&list);
+
+    wrap_handshake(HandshakeType::Certificate, &body)
+}
+
+// ---------------------------------------------------------------------------
+// Encode CertificateVerify
+// ---------------------------------------------------------------------------
+
+/// Encode a CertificateVerify message as a complete handshake message.
+pub fn encode_certificate_verify(cv: &CertificateVerifyMsg) -> Vec<u8> {
+    let mut body = Vec::with_capacity(4 + cv.signature.len());
+    body.extend_from_slice(&cv.algorithm.0.to_be_bytes());
+    body.extend_from_slice(&(cv.signature.len() as u16).to_be_bytes());
+    body.extend_from_slice(&cv.signature);
+    wrap_handshake(HandshakeType::CertificateVerify, &body)
 }
 
 // ---------------------------------------------------------------------------
@@ -543,6 +714,101 @@ mod tests {
 
         // Too short
         assert!(decode_finished(&[0x00; 16], 32).is_err());
+    }
+
+    #[test]
+    fn test_decode_client_hello_roundtrip() {
+        let ch = ClientHello {
+            random: [0xCC; 32],
+            legacy_session_id: vec![0x01, 0x02],
+            cipher_suites: vec![
+                CipherSuite::TLS_AES_128_GCM_SHA256,
+                CipherSuite::TLS_CHACHA20_POLY1305_SHA256,
+            ],
+            extensions: vec![Extension {
+                extension_type: ExtensionType::SUPPORTED_VERSIONS,
+                data: vec![0x02, 0x03, 0x04],
+            }],
+        };
+        let encoded = encode_client_hello(&ch);
+        let (msg_type, body, _) = parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ClientHello);
+        let decoded = decode_client_hello(body).unwrap();
+        assert_eq!(decoded.random, [0xCC; 32]);
+        assert_eq!(decoded.legacy_session_id, vec![0x01, 0x02]);
+        assert_eq!(decoded.cipher_suites.len(), 2);
+        assert_eq!(
+            decoded.cipher_suites[0],
+            CipherSuite::TLS_AES_128_GCM_SHA256
+        );
+        assert_eq!(decoded.extensions.len(), 1);
+    }
+
+    #[test]
+    fn test_encode_server_hello() {
+        let sh = ServerHello {
+            random: [0xDD; 32],
+            legacy_session_id: vec![],
+            cipher_suite: CipherSuite::TLS_AES_128_GCM_SHA256,
+            extensions: vec![Extension {
+                extension_type: ExtensionType::SUPPORTED_VERSIONS,
+                data: vec![0x03, 0x04],
+            }],
+        };
+        let encoded = encode_server_hello(&sh);
+        let (msg_type, body, total) = parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ServerHello);
+        assert_eq!(total, encoded.len());
+        // Verify body structure
+        assert_eq!(&body[0..2], &[0x03, 0x03]); // legacy_version
+        assert_eq!(&body[2..34], &[0xDD; 32]); // random
+        assert_eq!(body[34], 0); // session_id length = 0
+
+        // Decode it back
+        let decoded = decode_server_hello(body).unwrap();
+        assert_eq!(decoded.random, [0xDD; 32]);
+        assert_eq!(decoded.cipher_suite, CipherSuite::TLS_AES_128_GCM_SHA256);
+    }
+
+    #[test]
+    fn test_encode_certificate_verify_roundtrip() {
+        let cv = CertificateVerifyMsg {
+            algorithm: SignatureScheme::ED25519,
+            signature: vec![0xAB; 64],
+        };
+        let encoded = encode_certificate_verify(&cv);
+        let (msg_type, body, _) = parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::CertificateVerify);
+        let decoded = decode_certificate_verify(body).unwrap();
+        assert_eq!(decoded.algorithm, SignatureScheme::ED25519);
+        assert_eq!(decoded.signature, vec![0xAB; 64]);
+    }
+
+    #[test]
+    fn test_encode_certificate_roundtrip() {
+        let cert_msg = CertificateMsg {
+            certificate_request_context: vec![],
+            certificate_list: vec![
+                CertificateEntry {
+                    cert_data: vec![0x30, 0x82, 0x01, 0x00],
+                    extensions: vec![],
+                },
+                CertificateEntry {
+                    cert_data: vec![0x30, 0x82, 0x02, 0x00, 0xFF],
+                    extensions: vec![],
+                },
+            ],
+        };
+        let encoded = encode_certificate(&cert_msg);
+        let (msg_type, body, _) = parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::Certificate);
+        let decoded = decode_certificate(body).unwrap();
+        assert_eq!(decoded.certificate_list.len(), 2);
+        assert_eq!(
+            decoded.certificate_list[0].cert_data,
+            vec![0x30, 0x82, 0x01, 0x00]
+        );
+        assert_eq!(decoded.certificate_list[1].cert_data.len(), 5);
     }
 
     #[test]

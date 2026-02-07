@@ -915,3 +915,33 @@ Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
 **Cargo.toml**: Added x25519, ecdsa, rsa, ed25519 features + hitls-utils + getrandom deps.
 
 **Tests**: 23 new tests (7 codec, 7 extensions, 2 key exchange, 1 verify, 3 client, 2 config, 1 connection). 377 total (46 bignum + 230 crypto + 22 utils + 28 pki + 51 tls). Clippy clean, fmt clean.
+
+---
+
+## Session 18: Phase 17 — TLS 1.3 Server Handshake + Application Data
+
+### Prompt 60: Start Phase 17
+> Update the following 4 files in the openhitls-rs workspace to reflect Phase 17 completion. Phase 17 added TLS 1.3 Server Handshake + Application Data.
+
+**Result**: Implemented Phase 17 — TLS 1.3 Server Handshake + Application Data:
+
+**New files**:
+- `handshake/server.rs` — Server handshake state machine (process_client_hello, process_client_finished)
+- `handshake/signing.rs` — Server CertificateVerify signing (Ed25519, ECDSA P-256/P-384, RSA-PSS SHA-256/SHA-384)
+
+**Modified files**:
+- `config/mod.rs` — Added `ServerPrivateKey` enum, `certificate_chain`, `private_key` fields with builder methods
+- `handshake/codec.rs` — Added `decode_client_hello()`, `encode_server_hello()`, `encode_encrypted_extensions()`, `encode_certificate()`, `encode_certificate_verify()`
+- `handshake/extensions_codec.rs` — ServerHello extension builders (`build_supported_versions_sh`, `build_key_share_sh`), ClientHello extension parsers (`parse_supported_versions_ch`, `parse_supported_groups_ch`, `parse_signature_algorithms_ch`, `parse_key_share_ch`, `parse_server_name_ch`)
+- `connection.rs` — Added `TlsServerConnection<S>` implementing `TlsConnection` trait
+- `handshake/mod.rs` — Added `WaitClientFinished` state, `pub mod server;` and `pub mod signing;`
+
+**Key features**:
+- Server handshake state machine with full 1-RTT server-side flow
+- TlsServerConnection with handshake orchestration and encrypted read/write
+- Server-side CertificateVerify signing for Ed25519, ECDSA, RSA-PSS
+- Full client-server handshake interop with bidirectional application data exchange
+
+**Scope**: X25519 only, no HRR, no client cert auth, no PSK/0-RTT.
+
+**Tests**: 21 new TLS tests. 398 total (46 bignum + 230 crypto + 22 utils + 28 pki + 72 tls). Clippy clean, fmt clean.

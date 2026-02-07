@@ -4,6 +4,8 @@ pub mod client;
 pub mod codec;
 pub mod extensions_codec;
 pub mod key_exchange;
+pub mod server;
+pub mod signing;
 pub mod verify;
 
 /// Handshake message types.
@@ -40,6 +42,8 @@ pub enum HandshakeState {
     WaitFinished,
     /// Server: waiting for ClientHello.
     WaitClientHello,
+    /// Server: waiting for client Finished.
+    WaitClientFinished,
     /// Handshake complete.
     Connected,
     /// Connection closed.

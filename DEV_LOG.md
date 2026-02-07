@@ -1565,3 +1565,80 @@ Used real 3-cert RSA chain from C project (`testcode/testdata/tls/certificate/pe
 
 ### Next Steps
 - Phase 17: TLS 1.3 Server Handshake + Application Data
+
+---
+
+## Phase 17: TLS 1.3 Server Handshake + Application Data (Session 2026-02-08)
+
+### Goals
+- Implement TLS 1.3 server handshake state machine (RFC 8446)
+- Server-side CertificateVerify signing (Ed25519, ECDSA, RSA-PSS)
+- TlsServerConnection with Read + Write transport
+- Full client-server handshake interop with bidirectional application data exchange
+
+### Completed Steps
+
+#### 1. Server Handshake State Machine (`handshake/server.rs`)
+- `ServerHandshakeState` enum: Start, WaitClientHello, WaitClientFinished, Connected
+- `ServerHandshake` struct with full 1-RTT server-side flow
+- `process_client_hello()` — parses ClientHello, selects cipher suite, performs X25519 key exchange, builds ServerHello + EncryptedExtensions + Certificate + CertificateVerify + Finished
+- `process_client_finished()` — verifies client Finished verify_data, derives application traffic keys
+- Key schedule integration: early secret -> handshake secret (with DHE) -> handshake traffic keys -> master secret -> application traffic keys
+- Transcript hash maintained across all handshake messages
+
+#### 2. Server CertificateVerify Signing (`handshake/signing.rs`)
+- `sign_certificate_verify(private_key, algorithm, transcript_hash)` — produces server CertificateVerify signature
+- Constructs signing message: 64 spaces + "TLS 1.3, server CertificateVerify" + 0x00 + transcript_hash (RFC 8446 section 4.4.3)
+- Supports Ed25519, ECDSA (P-256/P-384), RSA-PSS (SHA-256/SHA-384) signature schemes
+- `ServerPrivateKey` enum in config for holding server key material
+
+#### 3. Extended Handshake Codec (`handshake/codec.rs`)
+- `decode_client_hello()` — parses ClientHello message (protocol_version, random, session_id, cipher_suites, compression_methods, extensions)
+- `encode_server_hello()` — builds ServerHello message
+- `encode_encrypted_extensions()` — builds EncryptedExtensions message
+- `encode_certificate()` — builds Certificate message with DER certificate entries
+- `encode_certificate_verify()` — builds CertificateVerify message (algorithm + signature)
+
+#### 4. Extended Extensions Codec (`handshake/extensions_codec.rs`)
+- ServerHello extension builders: `build_supported_versions_sh()`, `build_key_share_sh()`
+- ClientHello extension parsers: `parse_supported_versions_ch()`, `parse_supported_groups_ch()`, `parse_signature_algorithms_ch()`, `parse_key_share_ch()`, `parse_server_name_ch()`
+
+#### 5. TlsServerConnection (`connection.rs`)
+- `TlsServerConnection<S: Read + Write>` implementing `TlsConnection` trait
+- Full `handshake()` orchestration: reads ClientHello, sends server flight (SH + EE + Cert + CV + Finished), reads client Finished
+- Post-handshake `read()`/`write()` for encrypted application data
+- `shutdown()` for close_notify
+
+#### 6. Config Extensions (`config/mod.rs`)
+- `ServerPrivateKey` enum: Ed25519(bytes), EcdsaP256(bytes), EcdsaP384(bytes), RsaPss(bytes)
+- Added `certificate_chain: Vec<Vec<u8>>` — DER-encoded server certificate chain
+- Added `private_key: Option<ServerPrivateKey>` — server signing key
+- Builder methods: `with_certificate_chain()`, `with_private_key()`
+
+#### 7. Handshake Module Updates (`handshake/mod.rs`)
+- Added `WaitClientFinished` state to handshake state enum
+- Added `pub mod server;` and `pub mod signing;` module declarations
+
+### Scope Constraints
+- X25519 key exchange only (no P-256/P-384 ECDHE)
+- No HelloRetryRequest (HRR) handling
+- No client certificate authentication
+- No PSK or 0-RTT resumption
+
+### Files Created/Modified
+- **NEW**: `handshake/server.rs`, `handshake/signing.rs`
+- **MODIFIED**: `config/mod.rs`, `handshake/codec.rs`, `handshake/extensions_codec.rs`, `connection.rs`, `handshake/mod.rs`
+
+### Test Results
+- **398 tests total** (46 bignum + 230 crypto + 22 utils + 28 pki + 72 tls), 3 ignored
+- 21 new TLS tests covering:
+  - ClientHello decoding, ServerHello/EncryptedExtensions/Certificate/CertificateVerify encoding
+  - ServerHello extension builders, ClientHello extension parsers
+  - Server CertificateVerify signing (Ed25519, ECDSA, RSA-PSS)
+  - Server handshake state machine transitions
+  - TlsServerConnection handshake flow
+  - Full client-server handshake interop with bidirectional application data exchange
+- All clippy warnings resolved, formatting clean
+
+### Next Steps
+- Phase 18: PKCS#12 + CMS + Auth Protocols
