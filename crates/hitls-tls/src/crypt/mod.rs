@@ -2,6 +2,73 @@
 //!
 //! Bridges the TLS protocol with the underlying `hitls-crypto` primitives.
 
+pub mod aead;
+pub mod hkdf;
+pub mod key_schedule;
+pub mod traffic_keys;
+pub mod transcript;
+
+use crate::CipherSuite;
+use hitls_crypto::provider::Digest;
+use hitls_crypto::sha2::{Sha256, Sha384};
+use hitls_types::TlsError;
+
+/// A factory closure that creates fresh Digest instances.
+pub type HashFactory = Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>;
+
+/// Parameters associated with a TLS 1.3 cipher suite.
+#[derive(Debug, Clone)]
+pub struct CipherSuiteParams {
+    /// The cipher suite identifier.
+    pub suite: CipherSuite,
+    /// Hash output size in bytes (32 for SHA-256, 48 for SHA-384).
+    pub hash_len: usize,
+    /// AEAD key length in bytes.
+    pub key_len: usize,
+    /// AEAD IV/nonce length in bytes (always 12 for TLS 1.3).
+    pub iv_len: usize,
+    /// AEAD tag length in bytes (always 16).
+    pub tag_len: usize,
+}
+
+impl CipherSuiteParams {
+    /// Look up parameters for a TLS 1.3 cipher suite.
+    pub fn from_suite(suite: CipherSuite) -> Result<Self, TlsError> {
+        match suite {
+            CipherSuite::TLS_AES_128_GCM_SHA256 => Ok(Self {
+                suite,
+                hash_len: 32,
+                key_len: 16,
+                iv_len: 12,
+                tag_len: 16,
+            }),
+            CipherSuite::TLS_AES_256_GCM_SHA384 => Ok(Self {
+                suite,
+                hash_len: 48,
+                key_len: 32,
+                iv_len: 12,
+                tag_len: 16,
+            }),
+            CipherSuite::TLS_CHACHA20_POLY1305_SHA256 => Ok(Self {
+                suite,
+                hash_len: 32,
+                key_len: 32,
+                iv_len: 12,
+                tag_len: 16,
+            }),
+            _ => Err(TlsError::NoSharedCipherSuite),
+        }
+    }
+
+    /// Create a HashFactory for this cipher suite's hash algorithm.
+    pub fn hash_factory(&self) -> HashFactory {
+        match self.hash_len {
+            48 => Box::new(|| Box::new(Sha384::new()) as Box<dyn Digest>),
+            _ => Box::new(|| Box::new(Sha256::new()) as Box<dyn Digest>),
+        }
+    }
+}
+
 /// TLS named group identifiers (for key exchange).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NamedGroup(pub u16);

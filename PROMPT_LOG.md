@@ -792,3 +792,44 @@ Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
 **Bug fixed**: KeyUsage BIT STRING uses MSB-first numbering (bit 0=0x80), not LSB-first (1<<0=0x01).
 
 **Tests**: 16 new tests using real 3-cert RSA chain from C project. 326 total (46 bignum + 230 crypto + 22 utils + 28 pki). Clippy clean, fmt clean.
+
+---
+
+## Session 15: Phase 14 — TLS 1.3 Key Schedule + Crypto Adapter
+
+### Prompt 53: Start Phase 14
+> 请开始Phase 14的工作
+
+**Result**: Entered plan mode. Explored C reference code for TLS key schedule, designed 7-step plan: Cargo.toml/CipherSuiteParams, HKDF primitives, TranscriptHash, KeySchedule, AEAD adapter, TrafficKeys, tests.
+
+### Prompt 54: Approve Phase 14 plan
+> (Approved plan)
+
+**Result**: Implemented Phase 14 in 7 steps:
+
+**CipherSuiteParams** (`crypt/mod.rs`):
+- Maps TLS 1.3 suite IDs to hash_len/key_len/iv_len/tag_len
+- `hash_factory()` returns `Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>`
+
+**HKDF primitives** (`crypt/hkdf.rs`, ~180 lines):
+- Inline HMAC implementation (avoids `hitls_crypto::Hmac` `'static` requirement)
+- `hkdf_extract`, `hkdf_expand`, `hkdf_expand_label`, `derive_secret`
+
+**TranscriptHash** (`crypt/transcript.rs`):
+- Buffer-replay design: `update()` appends to buffer, `current_hash()` replays through fresh hasher
+
+**KeySchedule** (`crypt/key_schedule.rs`, ~270 lines):
+- Stage-enforced transitions: Initial → EarlySecret → HandshakeSecret → MasterSecret
+- Derives all traffic secrets, finished keys, verify_data, traffic update
+
+**AEAD adapter** (`crypt/aead.rs`):
+- `TlsAead` trait wrapping AES-GCM and ChaCha20-Poly1305
+
+**TrafficKeys** (`crypt/traffic_keys.rs`):
+- Derives AEAD key + IV from traffic secret
+
+**Bugs fixed**:
+1. `Hmac::new` requires `'static` closures — solved with inline HMAC implementation
+2. RFC 8448 test vector transcription errors — verified against RFC text + OpenSSL
+
+**Tests**: 16 new tests with full RFC 8448 verification. 342 total (46 bignum + 230 crypto + 22 utils + 28 pki + 16 tls). Clippy clean, fmt clean.

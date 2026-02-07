@@ -8,9 +8,10 @@ description = "TLS protocol implementation for openHiTLS"
 
 [dependencies]
 hitls-types = { path = "../hitls-types" }
-hitls-crypto = { path = "../hitls-crypto" }
+hitls-crypto = { path = "../hitls-crypto", features = ["modes", "chacha20"] }
 hitls-pki = { path = "../hitls-pki" }
 log = "0.4"
+subtle = { workspace = true }
 zeroize = { version = "1.8", features = ["derive"] }
 
 [dependencies.tokio]

@@ -1335,3 +1335,83 @@ Used real 3-cert RSA chain from C project (`testcode/testdata/tls/certificate/pe
 ### Next Steps
 - Phase 14: TLS 1.3 Key Schedule + Crypto Adapter
 - Phase 15: TLS Record Layer Encryption
+
+---
+
+## Phase 14: TLS 1.3 Key Schedule + Crypto Adapter (Session 2026-02-06)
+
+### Goals
+- Implement TLS 1.3 key schedule (RFC 8446 §7.1): Early → Handshake → Master → Traffic Secrets
+- Build HKDF primitives (Extract, Expand, Expand-Label, Derive-Secret) directly in hitls-tls
+- Create transcript hash abstraction for running hash over handshake messages
+- Build AEAD adapter wrapping AES-GCM and ChaCha20-Poly1305
+- Derive concrete traffic keys (AEAD key + IV) from traffic secrets
+- Validate against RFC 8448 (TLS 1.3 Example Handshake Traces)
+
+### Completed Steps
+
+#### 1. Cargo.toml + CipherSuiteParams (`crypt/mod.rs`, ~70 lines)
+- Added `hitls-crypto` features `modes` and `chacha20` + `subtle` dependency
+- `CipherSuiteParams` struct: suite, hash_len, key_len, iv_len, tag_len
+- `from_suite()`: TLS_AES_128_GCM_SHA256→(32,16,12,16), TLS_AES_256_GCM_SHA384→(48,32,12,16), TLS_CHACHA20_POLY1305_SHA256→(32,32,12,16)
+- `hash_factory()`: returns `Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>` for SHA-256 or SHA-384
+- `HashFactory` type alias for the factory closure type
+
+#### 2. HKDF Primitives (`crypt/hkdf.rs`, ~180 lines)
+- **Inline HMAC implementation**: `hmac_hash(factory, key, data)` — avoids `hitls_crypto::Hmac` which requires `'static` closures
+- `prepare_key_block()` — hash-or-pad key to block_size, returns (key_block, block_size, output_size)
+- `hkdf_extract(factory, salt, ikm)` — HMAC(salt, ikm); empty salt → hash_len zero bytes
+- `hkdf_expand(factory, prk, info, length)` — iterative HMAC expansion per RFC 5869
+- `encode_hkdf_label(length, label, context)` — TLS 1.3 HkdfLabel binary encoding with "tls13 " prefix
+- `hkdf_expand_label(factory, secret, label, context, length)` — HKDF-Expand with HkdfLabel
+- `derive_secret(factory, secret, label, transcript_hash)` — HKDF-Expand-Label(secret, label, hash, hash_len)
+- 6 tests: RFC 5869 vectors (extract, expand, empty salt), SHA-384 extract, label encoding, derive_secret
+
+#### 3. Transcript Hash (`crypt/transcript.rs`, ~65 lines)
+- `TranscriptHash` struct: factory + message_buffer + hash_len
+- `update(data)` — appends to buffer
+- `current_hash()` — replays all buffered data through fresh hasher (non-destructive)
+- `empty_hash()` — Hash("") for Derive-Secret(secret, "derived", "")
+- Buffer-replay design since `Box<dyn Digest>` doesn't support Clone
+- 2 tests: empty hash (SHA-256("") = e3b0c442...), incremental non-destructive
+
+#### 4. Key Schedule (`crypt/key_schedule.rs`, ~270 lines)
+- `KeyScheduleStage` enum: Initial, EarlySecret, HandshakeSecret, MasterSecret
+- `KeySchedule` struct: params + hash_factory + stage + current_secret (zeroized on drop)
+- Stage-enforced transitions:
+  - `derive_early_secret(psk)` — Initial → EarlySecret: HKDF-Extract(salt=0, IKM=psk or 0)
+  - `derive_handshake_secret(dhe)` — EarlySecret → HandshakeSecret: Derive-Secret(ES, "derived", "") → salt → Extract(salt, DHE)
+  - `derive_master_secret()` — HandshakeSecret → MasterSecret: Derive-Secret(HS, "derived", "") → salt → Extract(salt, 0)
+- Non-mutating derivations: `derive_handshake_traffic_secrets()`, `derive_app_traffic_secrets()`, `derive_exporter_master_secret()`, `derive_resumption_master_secret()`
+- `derive_finished_key(base_key)` — HKDF-Expand-Label(key, "finished", "", hash_len)
+- `compute_finished_verify_data(finished_key, hash)` — HMAC(key, hash) using inline hmac_hash
+- `update_traffic_secret(current)` — HKDF-Expand-Label(secret, "traffic upd", "", hash_len)
+- 5 tests: full RFC 8448 key schedule (early→HS→master→app traffic secrets), finished key, stage enforcement, traffic update, SHA-384 path
+
+#### 5. AEAD Adapter (`crypt/aead.rs`, ~115 lines)
+- `TlsAead` trait: encrypt(nonce, aad, plaintext), decrypt(nonce, aad, ct_with_tag), tag_size()
+- `AesGcmAead` — wraps `hitls_crypto::modes::gcm::gcm_encrypt/decrypt`, key zeroized on drop
+- `ChaCha20Poly1305Aead` — wraps `hitls_crypto::chacha20::ChaCha20Poly1305`
+- `create_aead(suite, key)` — factory function dispatching by cipher suite
+- 2 tests: AES-GCM and ChaCha20-Poly1305 roundtrip
+
+#### 6. Traffic Keys (`crypt/traffic_keys.rs`, ~40 lines)
+- `TrafficKeys` struct: key + iv (both zeroized on drop)
+- `derive(params, traffic_secret)` — key = HKDF-Expand-Label(secret, "key", "", key_len), iv = HKDF-Expand-Label(secret, "iv", "", iv_len)
+- 1 test: RFC 8448 server HS traffic secret → key/iv verification
+
+### Bugs Found & Fixed
+
+1. **`Hmac::new`/`Hmac::mac` require `'static` closures**: `hitls_crypto::Hmac` boxes the factory closure internally, requiring `'static`. But HKDF functions pass `&dyn Fn()` references with non-static lifetimes. Solved by implementing HMAC inline in hkdf.rs using direct `Digest` trait calls (ipad/opad XOR + inner/outer hash).
+
+2. **RFC 8448 test vector transcription errors**: Initial transcription of server_handshake_traffic_secret had byte 20 as `dd` instead of correct `de`. The transcript hash at CH..SF was completely wrong (`96083e22...` vs correct `9608102a...`). Verified against RFC 8448 text and OpenSSL to confirm our implementation was correct.
+
+### Test Results
+- **342 tests total** (46 bignum + 230 crypto + 22 utils + 28 pki + 16 tls), 3 ignored
+- 16 new TLS tests across 5 modules
+- All clippy warnings resolved, formatting clean
+- Full RFC 8448 Section 3 verification: early_secret, handshake_secret, client/server HS traffic secrets, master_secret, client/server app traffic secrets, traffic keys (key + iv)
+
+### Next Steps
+- Phase 15: TLS Record Layer Encryption
+- Phase 16: TLS 1.3 Client Handshake
