@@ -541,5 +541,122 @@ New tests (17):
 
 ### Next Steps (Phase 7)
 - Implement Ed25519 / X25519 (Montgomery/Edwards curves)
+- Implement DH (finite field Diffie-Hellman)
+
+---
+
+## Phase 7: Ed25519 + X25519 + DH (Session 2026-02-06)
+
+### Goals
+- Implement Curve25519 field arithmetic (GF(2^255-19), Fp51 representation)
+- Implement Edwards curve point operations for Ed25519
+- Implement Ed25519 signing and verification (RFC 8032)
+- Implement X25519 key exchange (RFC 7748)
+- Implement classic DH key exchange with RFC 7919 predefined groups
+
+### Completed Steps
+
+#### 1. Curve25519 Field Arithmetic (`curve25519/field.rs`)
+- `Fe25519` type: 5 × u64 limbs (Fp51), each limb ≤ 51 bits
+- Operations: add, sub, mul, square, neg, invert (Fermat), pow25523, mul121666
+- Encoding: from_bytes/to_bytes (32-byte little-endian)
+- Utilities: reduce, conditional_swap (constant-time), is_negative, is_zero
+- Fp51 multiplication: schoolbook 5×5, overflow limbs ×19 fold-back, u128 intermediates
+- Inversion via addition chain: z^(p-2) = z^(2^255-21)
+- **Tests** (7): zero/one, mul identity, mul/square consistency, invert, encode/decode roundtrip, add/sub roundtrip, conditional swap
+
+#### 2. Edwards Curve Point Operations (`curve25519/edwards.rs`)
+- Twisted Edwards curve: -x² + y² = 1 + d·x²·y² (d = -121665/121666)
+- `GeExtended` type: extended coordinates (X, Y, Z, T) where T = XY/Z
+- Point operations: identity, basepoint, point_add (Hisil 2008), point_double (dbl-2008-hwcd for a=-1)
+- Scalar multiplication: double-and-add (MSB → LSB), plus base-point variant
+- Point encoding/decoding: y-coordinate + x sign bit, sqrt recovery via pow25523
+- Constants: D, D2, SQRT_M1, BASE_X, BASE_Y (all as Fe25519 Fp51 limbs)
+- **Tests** (5): identity encoding, basepoint roundtrip, double==add, scalar_mul ×1, scalar_mul ×2
+
+#### 3. Ed25519 Signing & Verification (`ed25519/mod.rs`)
+- `Ed25519KeyPair` struct: 32-byte seed + 32-byte public key
+- Key derivation: SHA-512(seed) → clamp(h[0..32]) → scalar_mul_base → public key
+- **Signing** (RFC 8032 §5.1.6): r = SHA-512(prefix||msg) mod L, R = r·B, k = SHA-512(R||A||msg) mod L, S = (r + k·a) mod L
+- **Verification** (RFC 8032 §5.1.7): Check S·B == R + k·A
+- Scalar mod L via BigNum (512-bit reduction)
+- `scalar_muladd(a, b, c)`: (a*b + c) mod L
+- `scalar_is_canonical(s)`: check s < L
+- **Tests** (6): RFC 8032 §7.1 vectors 1 & 2, sign/verify roundtrip, tamper detection, public-key-only verify, invalid signature rejection
+
+#### 4. X25519 Key Exchange (`x25519/mod.rs`)
+- `X25519PrivateKey` / `X25519PublicKey` types (32 bytes each)
+- Montgomery ladder scalar multiplication (RFC 7748 §5)
+- Key generation, public key derivation, Diffie-Hellman shared secret
+- All-zero output check (point at infinity rejection)
+- **Tests** (3): RFC 7748 §6.1 test vector, key exchange symmetry, basepoint determinism
+
+#### 5. DH Key Exchange (`dh/mod.rs`, `dh/groups.rs`)
+- `DhParams` struct: prime p, generator g (BigNum)
+- `DhKeyPair`: private x ∈ [2, p-2], public y = g^x mod p
+- Predefined groups: RFC 7919 ffdhe2048 and ffdhe3072 (g = 2)
+- Shared secret: s = peer_pub^x mod p, padded to prime_size
+- Peer public key validation: 2 ≤ peer_pub ≤ p-2
+- **Tests** (3): ffdhe2048 exchange, custom params (p=23, g=5), from_group construction
+
+### Critical Bugs Found & Fixed
+
+#### Fp51 Inversion Addition Chain (`field.rs`)
+- **Bug**: After computing z^(2^250-1), the chain did 2 squares + mul(f) + 3 squares + mul(z11) = z^(2^255-13)
+- **Fix**: 5 squares + mul(z11) = z^(2^255-32+11) = z^(2^255-21) = z^(p-2)
+
+#### Edwards Curve Constants (`edwards.rs`)
+- **Bug**: D[3], D[4], BASE_Y[1-3], BASE_X[3-4] had incorrect Fp51 limb values
+- **Fix**: Recomputed all constants from first principles using Python, verified against known encodings
+
+#### Edwards Point Doubling Formula (`edwards.rs`)
+- **Bug**: Used a=1 doubling formula on a=-1 twisted Edwards curve
+- **Fix**: Switched to "dbl-2008-hwcd" formula: D=-A, G=D+B, F=G-C, H=D-B
+
+#### X25519 Montgomery Ladder (`x25519/mod.rs`)
+- **Bug**: `z_2 = E * (AA + 121666*E)` — AA should be BB
+- **Fix**: `z_2 = E * (BB + 121666*E)` — verified by deriving from Montgomery curve doubling formula
+
+#### Sub Function Constants (`field.rs`)
+- **Bug**: 2p constants for non-negative subtraction had wrong values
+- **Fix**: Recomputed correct 2p limb values
+
+### Files Created/Modified
+
+| File | Operation | Approx Lines |
+|------|-----------|-------------|
+| `crates/hitls-crypto/src/curve25519/mod.rs` | New: module declarations | ~5 |
+| `crates/hitls-crypto/src/curve25519/field.rs` | New: Fp51 field arithmetic | ~550 |
+| `crates/hitls-crypto/src/curve25519/edwards.rs` | New: Edwards point operations | ~280 |
+| `crates/hitls-crypto/src/ed25519/mod.rs` | Rewrite: Ed25519 sign/verify | ~380 |
+| `crates/hitls-crypto/src/x25519/mod.rs` | Rewrite: X25519 key exchange | ~210 |
+| `crates/hitls-crypto/src/dh/mod.rs` | Rewrite: DH key exchange | ~165 |
+| `crates/hitls-crypto/src/dh/groups.rs` | New: RFC 7919 ffdhe parameters | ~90 |
+| `crates/hitls-crypto/src/lib.rs` | Modified: added curve25519 module | +2 |
+| `crates/hitls-crypto/Cargo.toml` | Modified: ed25519 feature deps | +1 |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 114 (+24, 1 ignored) | All pass |
+| hitls-utils | 11 | All pass |
+| **Total** | **171** | **All pass** |
+
+New tests (24):
+- Curve25519 field (7): zero/one, mul identity, mul/square, invert, encode/decode, add/sub, cswap
+- Edwards points (5): identity, basepoint roundtrip, double==add, scalar×1, scalar×2
+- Ed25519 (6): RFC 8032 vectors 1 & 2, roundtrip, tamper, pubkey-only, invalid sig
+- X25519 (3): RFC 7748 vector, symmetry, determinism
+- DH (3): ffdhe2048, custom params, from_group
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 171 workspace tests passing
+
+### Next Steps (Phase 8)
+- Implement DSA (digital signature algorithm)
 - Implement SM2 (signature + encryption + key exchange)
-- Implement DSA / DH
+- Implement DRBG (deterministic random bit generator)

@@ -364,3 +364,70 @@ Clippy clean, fmt clean.
 - `README.md` — Status banner updated to Phase 6, ECDSA/ECDH/ECC marked as Done, test counts updated (136 total)
 - `DEV_LOG.md` — Added full Phase 6 section covering ECC/ECDSA/ECDH implementation, compilation fixes, files created, test results
 - `PROMPT_LOG.md` — Added Session 8 entries (Prompts 26–29)
+
+---
+
+## Session 9: Phase 7 — Ed25519 + X25519 + DH
+
+### Prompt 30: Continue Phase 7
+> 请继续Phase 7的工作
+
+**Result**: Entered plan mode. Designed Phase 7 plan covering:
+- Curve25519 field arithmetic (GF(2^255-19), Fp51 representation)
+- Edwards curve point operations (twisted Edwards, extended coordinates)
+- Ed25519 signing/verification (RFC 8032)
+- X25519 key exchange (RFC 7748 Montgomery ladder)
+- Classic DH key exchange (RFC 7919 ffdhe2048/3072)
+
+User approved the plan.
+
+### Prompt 31: *(Plan approved, implementation started)*
+
+**Result**: Implemented all 9 files across multiple sessions:
+
+| File | Description | Approx Lines |
+|------|-------------|-------------|
+| `curve25519/mod.rs` | Module declarations | ~5 |
+| `curve25519/field.rs` | Fp51 field arithmetic (GF(2^255-19)) | ~550 |
+| `curve25519/edwards.rs` | Edwards curve point operations | ~280 |
+| `ed25519/mod.rs` | Ed25519 sign/verify (RFC 8032) | ~380 |
+| `x25519/mod.rs` | X25519 key exchange (RFC 7748) | ~210 |
+| `dh/mod.rs` | DH key exchange | ~165 |
+| `dh/groups.rs` | RFC 7919 ffdhe2048/3072 parameters | ~90 |
+| `lib.rs` | Added curve25519 module | +2 |
+| `Cargo.toml` | ed25519 feature deps (sha2 + hitls-bignum) | +1 |
+
+**Critical bugs found and fixed** (5 total):
+
+1. **Fp51 `sub` constants** (`field.rs`): 2p limb values for ensuring non-negative subtraction were wrong. Fixed with correct values computed from first principles.
+
+2. **Fp51 `invert` addition chain** (`field.rs`): After z^(2^250-1), the chain did 2 squares + mul(f) + 3 squares + mul(z11) = z^(2^255-13) instead of z^(p-2) = z^(2^255-21). Fixed to: 5 squares + mul(z11).
+
+3. **Edwards curve constants** (`edwards.rs`): D[3], D[4], BASE_Y[1-3], BASE_X[3-4] had incorrect Fp51 limb values. Recomputed all constants from first principles using Python.
+
+4. **Edwards `point_double` formula** (`edwards.rs`): Used a=1 formula on a=-1 twisted Edwards curve. Changed to "dbl-2008-hwcd" formula for a=-1: D=-A, G=D+B, F=G-C, H=D-B.
+
+5. **X25519 Montgomery ladder** (`x25519/mod.rs`): Formula `z_2 = E*(AA + 121666*E)` was wrong — AA should be BB. Verified by deriving from Montgomery curve doubling equation. RFC 7748 has a subtle notation issue.
+
+Additionally, Ed25519 test vector expected hex strings were corrected to match actual RFC 8032 values.
+
+**Clippy fixes** (3 warnings):
+- `manual_div_ceil` in DH → `.div_ceil(8)`
+- `wrong_self_convention` in Fe25519 `to_bytes` → changed `&self` to `self` (Copy type)
+- `needless_range_loop` in Fe25519 `to_bytes` → changed to `for (i, &word) in bits.iter().enumerate()`
+
+**Test results**: 171 tests passing (46 bignum + 114 crypto + 11 utils), 1 ignored (RSA keygen). 24 new tests:
+- Curve25519 field (7): zero/one, mul identity, mul/square consistency, invert, encode/decode roundtrip, add/sub roundtrip, conditional swap
+- Edwards points (5): identity encoding, basepoint roundtrip, double==add, scalar×1, scalar×2
+- Ed25519 (6): RFC 8032 §7.1 vectors 1 & 2, sign/verify roundtrip, tamper detection, public-key-only verify, invalid signature rejection
+- X25519 (3): RFC 7748 §6.1 test vector, key exchange symmetry, basepoint determinism
+- DH (3): ffdhe2048 exchange, custom params (p=23, g=5), from_group construction
+
+Clippy clean, fmt clean.
+
+### Prompt 32: Refresh README and PROMPT_LOG
+> 请同步刷新readme.md和prompt.md
+
+**Result**: Updated both files to reflect Phase 7 completion:
+- `README.md` — Status banner updated to Phase 7, Ed25519/X25519/DH marked as Done, test counts updated (171 total)
+- `PROMPT_LOG.md` — Added Session 9 entries (Prompts 30–32)

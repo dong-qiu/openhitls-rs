@@ -53,6 +53,8 @@ pub mod mac {
 }
 
 // Asymmetric algorithms
+#[cfg(any(feature = "ed25519", feature = "x25519"))]
+pub(crate) mod curve25519;
 #[cfg(feature = "dh")]
 pub mod dh;
 #[cfg(feature = "dsa")]
