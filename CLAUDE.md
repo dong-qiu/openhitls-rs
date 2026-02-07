@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 15 complete — core crypto + X.509 chain + TLS key schedule + record encryption done
+- **Status**: Phase 16 complete — core crypto + X.509 chain + TLS 1.3 client handshake done
 
 ## Workspace Structure
 
@@ -19,7 +19,7 @@ openhitls-rs/
 │   ├── hitls-utils/     # ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
 │   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption (28 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client handshake (51 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain), PKCS#12, CMS
 │   ├── hitls-auth/      # OTP, SPAKE2+, Privacy Pass (skeleton)
 │   └── hitls-cli/       # Command-line tool (skeleton)
@@ -33,12 +33,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (354 tests, 3 ignored for slow keygen)
+# Run all tests (377 tests, 3 ignored for slow keygen)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 230 tests
-cargo test -p hitls-tls --all-features      # 28 tests
+cargo test -p hitls-tls --all-features      # 51 tests
 cargo test -p hitls-pki --all-features      # 28 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 22 tests
@@ -98,8 +98,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-15 complete. Remaining critical path:
-- Phase 16: TLS 1.3 Client Handshake
+Phases 0-16 complete. Remaining critical path:
 - Phase 17: TLS 1.3 Server + Application Data
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

@@ -862,3 +862,56 @@ Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
 - `open_record()` — parse + decrypt from wire
 
 **Tests**: 12 new tests (roundtrip AES-GCM/ChaCha20, content type hiding, padding, seq increment, nonce/AAD construction, max size, ciphertext overflow, plaintext mode, key change, tampered record). 354 total (46 bignum + 230 crypto + 22 utils + 28 pki + 28 tls). Clippy clean, fmt clean.
+
+### Prompt 57: Commit and push Phase 15
+> 请提交修改并推送至远程仓库
+
+**Result**: Committed as `ce56aa7` and pushed to origin/main.
+
+---
+
+## Session 17: Phase 16 — TLS 1.3 Client Handshake
+
+### Prompt 58: Start Phase 16
+> 请开始Phase 16的工作
+
+**Result**: Entered plan mode. Explored C reference code for TLS 1.3 handshake and current Rust TLS crate state. Designed 8-step plan: codec, extensions codec, key exchange, CertificateVerify, config extension, client state machine, connection wrapper, module wiring.
+
+### Prompt 59: Approve Phase 16 plan
+> (Approved plan)
+
+**Result**: Implemented Phase 16 in 6 new files + 4 modified:
+
+**handshake/codec.rs** (~350 lines incl. tests):
+- Types: ClientHello, ServerHello, EncryptedExtensions, CertificateEntry, CertificateMsg, CertificateVerifyMsg, FinishedMsg
+- `encode_client_hello()`, `decode_server_hello()`, `decode_encrypted_extensions()`, `decode_certificate()`, `decode_certificate_verify()`, `decode_finished()`, `encode_finished()`
+- `parse_handshake_header()` — 4-byte header parsing
+
+**handshake/extensions_codec.rs** (~200 lines incl. tests):
+- `build_supported_versions_ch()`, `build_supported_groups()`, `build_signature_algorithms()`, `build_key_share_ch()`, `build_server_name()`
+- `parse_supported_versions_sh()`, `parse_key_share_sh()`, `parse_extensions()`
+
+**handshake/key_exchange.rs** (~80 lines):
+- `KeyExchange` — X25519 ephemeral key generation + shared secret
+
+**handshake/verify.rs** (~140 lines):
+- `build_verify_content()` — CertificateVerify content (64 spaces || context || 0x00 || hash)
+- `verify_certificate_verify()` — dispatches to RSA-PSS, ECDSA, Ed25519
+
+**handshake/client.rs** (~450 lines):
+- `ClientHandshake` state machine: Idle → WaitServerHello → WaitEncryptedExtensions → WaitCertCertReq → WaitCertVerify → WaitFinished → Connected
+- `build_client_hello()`, `process_server_hello()`, `process_encrypted_extensions()`, `process_certificate()`, `process_certificate_verify()`, `process_finished()`
+- Returns `ServerHelloActions` and `FinishedActions` for key activation
+
+**connection.rs** (~220 lines):
+- `TlsClientConnection<S: Read + Write>` implementing `TlsConnection` trait
+- Full `handshake()` orchestration, `read()`/`write()` for application data, `shutdown()` for close_notify
+- Handles multiple handshake messages packed in one record via `hs_buffer`
+
+**config/mod.rs** (extended):
+- Added `signature_algorithms`, `supported_groups`, `verify_peer`, `trusted_certs` fields
+- Builder methods with sensible defaults
+
+**Cargo.toml**: Added x25519, ecdsa, rsa, ed25519 features + hitls-utils + getrandom deps.
+
+**Tests**: 23 new tests (7 codec, 7 extensions, 2 key exchange, 1 verify, 3 client, 2 config, 1 connection). 377 total (46 bignum + 230 crypto + 22 utils + 28 pki + 51 tls). Clippy clean, fmt clean.

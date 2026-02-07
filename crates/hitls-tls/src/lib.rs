@@ -3,6 +3,7 @@
 
 pub mod alert;
 pub mod config;
+pub mod connection;
 pub mod crypt;
 pub mod extensions;
 pub mod handshake;

@@ -1,5 +1,11 @@
 //! TLS handshake protocol state machine.
 
+pub mod client;
+pub mod codec;
+pub mod extensions_codec;
+pub mod key_exchange;
+pub mod verify;
+
 /// Handshake message types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]

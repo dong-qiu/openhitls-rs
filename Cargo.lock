@@ -185,9 +185,11 @@ dependencies = [
 name = "hitls-tls"
 version = "0.1.0"
 dependencies = [
+ "getrandom",
  "hitls-crypto",
  "hitls-pki",
  "hitls-types",
+ "hitls-utils",
  "log",
  "subtle",
  "tokio",

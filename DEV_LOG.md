@@ -1475,3 +1475,93 @@ Used real 3-cert RSA chain from C project (`testcode/testdata/tls/certificate/pe
 ### Next Steps
 - Phase 16: TLS 1.3 Client Handshake
 - Phase 17: TLS 1.3 Server + Application Data
+
+---
+
+## Phase 16: TLS 1.3 Client Handshake (Session 2026-02-08)
+
+### Goals
+- Implement TLS 1.3 full 1-RTT client handshake (RFC 8446)
+- Handshake message codec (ClientHello, ServerHello, EncryptedExtensions, Certificate, CertificateVerify, Finished)
+- Extensions codec (supported_versions, supported_groups, signature_algorithms, key_share, SNI)
+- X25519 ephemeral key exchange
+- CertificateVerify signature verification (RSA-PSS, ECDSA, Ed25519)
+- Client handshake state machine
+- TlsClientConnection with Read + Write transport
+
+### Completed Steps
+
+#### 1. Handshake Message Codec (`handshake/codec.rs`)
+- `HandshakeType` enum: ClientHello(1), ServerHello(2), EncryptedExtensions(8), Certificate(11), CertificateVerify(15), Finished(20)
+- `HandshakeMessage` enum with type-safe variants for each message
+- `encode_handshake()` / `decode_handshake()` — 4-byte header (type + 24-bit length) + message body
+- ClientHello encoding: protocol_version(0x0303), random(32), session_id, cipher_suites, compression_methods(0), extensions
+- ServerHello decoding: validates version, extracts random, session_id, cipher_suite, extensions
+- EncryptedExtensions, Certificate (certificate_list with DER entries), CertificateVerify (algorithm + signature), Finished (verify_data)
+
+#### 2. Extensions Codec (`handshake/extensions_codec.rs`)
+- `ExtensionType` enum: ServerName(0), SupportedGroups(10), SignatureAlgorithms(13), SupportedVersions(43), KeyShare(51)
+- `encode_extensions()` — encodes list of extensions with 2-byte type + 2-byte length prefix
+- `decode_extensions()` — parses extension list from byte buffer
+- SNI extension: host_name type(0) with 2-byte list length + 1-byte name type + 2-byte name length
+- SupportedVersions: client sends list, server sends single version (0x0304 for TLS 1.3)
+- SupportedGroups: list of NamedGroup u16 values (x25519=0x001D)
+- SignatureAlgorithms: list of SignatureScheme u16 values
+- KeyShare: client sends list of (group, key_exchange) entries, server sends single entry
+
+#### 3. Key Exchange (`handshake/key_exchange.rs`)
+- X25519 ephemeral key pair generation using `getrandom`
+- `generate_x25519_keypair()` — returns (private_key, public_key) with clamping applied
+- `compute_x25519_shared_secret(private, peer_public)` — delegates to hitls-crypto X25519
+- Integration with KeyShare extension encoding/decoding
+
+#### 4. CertificateVerify Signature Verification (`handshake/verify.rs`)
+- `verify_certificate_verify(cert, algorithm, signature, transcript_hash)` — verifies server's CertificateVerify
+- Constructs verification message: 64 spaces + "TLS 1.3, server CertificateVerify" + 0x00 + transcript_hash (RFC 8446 §4.4.3)
+- Supports RSA-PSS (SHA-256/SHA-384), ECDSA (P-256/P-384), Ed25519 signature schemes
+- Extracts public key from X.509 certificate and dispatches to appropriate crypto verifier
+
+#### 5. Extended TlsConfig (`config/mod.rs`)
+- Added `signature_algorithms: Vec<SignatureScheme>` — advertised signature algorithms
+- Added `supported_groups: Vec<NamedGroup>` — advertised key exchange groups
+- Added `verify_peer: bool` — whether to verify server certificate
+- Added `trusted_certs: Vec<Certificate>` — trust store for peer verification
+- Builder methods: `with_signature_algorithms()`, `with_supported_groups()`, `with_verify_peer()`, `with_trusted_certs()`
+
+#### 6. Client Handshake State Machine (`handshake/client.rs`)
+- `ClientHandshakeState` enum: Start, WaitServerHello, WaitEncryptedExtensions, WaitCertificate, WaitCertificateVerify, WaitFinished, Connected
+- Full 1-RTT flow: ClientHello -> ServerHello -> [key switch] -> EncryptedExtensions -> Certificate -> CertificateVerify -> Finished -> [send client Finished] -> Connected
+- Transcript hash maintained across all handshake messages
+- Key schedule integration: early secret -> handshake secret (with DHE) -> handshake traffic keys -> master secret -> application traffic keys
+- Record layer encryption activated after ServerHello (read) and after sending client Finished (write)
+
+#### 7. TlsClientConnection (`connection.rs`)
+- `TlsClientConnection<S: Read + Write>` — generic over transport stream
+- Implements `TlsConnection` trait: `handshake()`, `read()`, `write()`, `close()`
+- `handshake()` drives the state machine to completion, reading/writing records over the transport
+- Post-handshake `read()`/`write()` use encrypted record layer for application data
+
+### Scope Constraints
+- X25519 key exchange only (no P-256/P-384 ECDHE)
+- No HelloRetryRequest (HRR) handling
+- No client certificate authentication
+- No PSK or 0-RTT resumption
+
+### Files Created/Modified
+- **NEW**: `handshake/codec.rs`, `handshake/extensions_codec.rs`, `handshake/key_exchange.rs`, `handshake/verify.rs`, `handshake/client.rs`, `connection.rs`
+- **MODIFIED**: `handshake/mod.rs`, `config/mod.rs`, `lib.rs`, `Cargo.toml`
+
+### Test Results
+- **377 tests total** (46 bignum + 230 crypto + 22 utils + 28 pki + 51 tls), 3 ignored
+- 23 new TLS tests covering:
+  - Handshake message encoding/decoding (ClientHello, ServerHello, EncryptedExtensions, Certificate, CertificateVerify, Finished)
+  - Extensions encoding/decoding (SNI, supported_versions, supported_groups, signature_algorithms, key_share)
+  - X25519 key exchange (keypair generation, shared secret computation)
+  - CertificateVerify signature verification (RSA-PSS, ECDSA, Ed25519)
+  - TlsConfig builder with new fields
+  - Client handshake state machine transitions
+  - TlsClientConnection handshake flow
+- All clippy warnings resolved, formatting clean
+
+### Next Steps
+- Phase 17: TLS 1.3 Server Handshake + Application Data

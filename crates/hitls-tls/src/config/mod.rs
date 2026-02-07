@@ -1,5 +1,6 @@
 //! TLS configuration with builder pattern.
 
+use crate::crypt::{NamedGroup, SignatureScheme};
 use crate::{CipherSuite, TlsRole, TlsVersion};
 
 /// TLS configuration.
@@ -19,6 +20,14 @@ pub struct TlsConfig {
     pub alpn_protocols: Vec<Vec<u8>>,
     /// Server name for SNI extension.
     pub server_name: Option<String>,
+    /// Supported signature algorithms (in preference order).
+    pub signature_algorithms: Vec<SignatureScheme>,
+    /// Supported named groups for key exchange.
+    pub supported_groups: Vec<NamedGroup>,
+    /// Whether to verify the peer's certificate.
+    pub verify_peer: bool,
+    /// Trusted CA certificates (DER-encoded).
+    pub trusted_certs: Vec<Vec<u8>>,
 }
 
 impl TlsConfig {
@@ -38,6 +47,10 @@ pub struct TlsConfigBuilder {
     session_resumption: bool,
     alpn_protocols: Vec<Vec<u8>>,
     server_name: Option<String>,
+    signature_algorithms: Vec<SignatureScheme>,
+    supported_groups: Vec<NamedGroup>,
+    verify_peer: bool,
+    trusted_certs: Vec<Vec<u8>>,
 }
 
 impl Default for TlsConfigBuilder {
@@ -54,6 +67,14 @@ impl Default for TlsConfigBuilder {
             session_resumption: true,
             alpn_protocols: Vec::new(),
             server_name: None,
+            signature_algorithms: vec![
+                SignatureScheme::RSA_PSS_RSAE_SHA256,
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+                SignatureScheme::ED25519,
+            ],
+            supported_groups: vec![NamedGroup::X25519],
+            verify_peer: true,
+            trusted_certs: Vec::new(),
         }
     }
 }
@@ -94,6 +115,26 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn signature_algorithms(mut self, schemes: &[SignatureScheme]) -> Self {
+        self.signature_algorithms = schemes.to_vec();
+        self
+    }
+
+    pub fn supported_groups(mut self, groups: &[NamedGroup]) -> Self {
+        self.supported_groups = groups.to_vec();
+        self
+    }
+
+    pub fn verify_peer(mut self, verify: bool) -> Self {
+        self.verify_peer = verify;
+        self
+    }
+
+    pub fn trusted_cert(mut self, der_cert: Vec<u8>) -> Self {
+        self.trusted_certs.push(der_cert);
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -103,6 +144,44 @@ impl TlsConfigBuilder {
             session_resumption: self.session_resumption,
             alpn_protocols: self.alpn_protocols,
             server_name: self.server_name,
+            signature_algorithms: self.signature_algorithms,
+            supported_groups: self.supported_groups,
+            verify_peer: self.verify_peer,
+            trusted_certs: self.trusted_certs,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_builder_defaults() {
+        let config = TlsConfig::builder().build();
+        assert_eq!(config.role, TlsRole::Client);
+        assert_eq!(config.max_version, TlsVersion::Tls13);
+        assert!(config.verify_peer);
+        assert!(!config.signature_algorithms.is_empty());
+        assert!(!config.supported_groups.is_empty());
+        assert_eq!(config.supported_groups[0], NamedGroup::X25519);
+    }
+
+    #[test]
+    fn test_config_builder_new_fields() {
+        let config = TlsConfig::builder()
+            .signature_algorithms(&[SignatureScheme::ED25519])
+            .supported_groups(&[NamedGroup::X25519, NamedGroup::SECP256R1])
+            .verify_peer(false)
+            .trusted_cert(vec![0x30, 0x82])
+            .server_name("example.com")
+            .build();
+
+        assert_eq!(config.signature_algorithms.len(), 1);
+        assert_eq!(config.signature_algorithms[0], SignatureScheme::ED25519);
+        assert_eq!(config.supported_groups.len(), 2);
+        assert!(!config.verify_peer);
+        assert_eq!(config.trusted_certs.len(), 1);
+        assert_eq!(config.server_name.as_deref(), Some("example.com"));
     }
 }
