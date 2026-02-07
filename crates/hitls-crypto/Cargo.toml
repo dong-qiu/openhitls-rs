@@ -51,8 +51,8 @@ elgamal = ["hitls-bignum"]
 
 # Post-quantum algorithms
 pqc = ["mlkem", "mldsa"]
-mlkem = []
-mldsa = []
+mlkem = ["sha3"]
+mldsa = ["sha3"]
 slh-dsa = []
 xmss = []
 frodokem = []

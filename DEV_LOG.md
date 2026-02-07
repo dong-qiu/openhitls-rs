@@ -966,4 +966,175 @@ With Phase 9, all symmetric/hash/MAC/KDF primitives are fully implemented:
 | KDF | HKDF, PBKDF2, scrypt |
 | DRBG | HMAC-DRBG |
 
-Remaining work: post-quantum cryptography (ML-KEM, ML-DSA, SLH-DSA, etc.), TLS protocol, PKI, authentication protocols.
+Remaining work: post-quantum cryptography (SLH-DSA, etc.), TLS protocol, PKI, authentication protocols.
+
+---
+
+## Phase 10: ML-KEM (FIPS 203) + ML-DSA (FIPS 204) (Session 2026-02-07)
+
+### Goals
+- Implement ML-KEM (Module-Lattice Key Encapsulation Mechanism, FIPS 203)
+- Implement ML-DSA (Module-Lattice Digital Signature Algorithm, FIPS 204)
+- Support all parameter sets: ML-KEM-512/768/1024 and ML-DSA-44/65/87
+
+### Completed Steps
+
+#### 1. ML-KEM NTT (`mlkem/ntt.rs`)
+- Z_q[X]/(X^256+1) over q = 3329, using Montgomery arithmetic (R = 2^16)
+- 7-layer NTT (Cooley-Tukey) and INTT (Gentleman-Sande)
+- Barrett reduction, Montgomery reduction (QINV = -3327)
+- Basemul for degree-1 polynomial pairs in NTT domain
+- `to_mont()` for converting to Montgomery representation
+- F_INV128 = 1441 (R²/128 mod q) for INTT normalization
+- ZETAS[128] table in Montgomery form (ζ = 17, primitive 256th root of unity)
+- **Tests** (3): NTT/INTT roundtrip, Barrett reduce, Montgomery reduce
+
+#### 2. ML-KEM Polynomial Operations (`mlkem/poly.rs`)
+- **CBD sampling**: cbd2 (η=2, 128 bytes → 256 coefficients), cbd3 (η=3, 192 bytes)
+- **Compress/Decompress**: round(x·2^d/q) and round(y·q/2^d) for d ∈ {1,4,5,10,11,12}
+- **ByteEncode/ByteDecode**: generic bit-packing for d-bit coefficients
+- **Rejection sampling** (ExpandA): SHAKE128 XOF → 3 bytes → 2 candidates (12-bit, reject ≥ q)
+- **PRF**: SHAKE256(seed || nonce) for CBD input
+- **Tests** (1): compress/decompress roundtrip
+
+#### 3. ML-KEM Main (`mlkem/mod.rs`)
+- **K-PKE** (internal public-key encryption):
+  - KeyGen: (ρ,σ) = G(d), A = ExpandA(ρ), s/e = CBD(σ), t̂ = Â·ŝ + ê
+  - Encrypt: r̂ = NTT(r), u = INTT(Â^T·r̂) + e1, v = INTT(t̂·r̂) + e2 + Decompress(m,1)·⌈q/2⌉
+  - Decrypt: w = v - INTT(ŝ·NTT(u)), m = Compress(w, 1)
+- **ML-KEM** (outer KEM with FO transform):
+  - KeyGen: ek = ek_pke, dk = dk_pke || ek || H(ek) || z
+  - Encaps: (K, r) = G(m || H(ek)), ct = Encrypt(ek, m, r)
+  - Decaps: m' = Decrypt(dk, ct), re-encrypt + compare → K or J(z||ct)
+- Parameter sets: ML-KEM-512 (k=2), ML-KEM-768 (k=3), ML-KEM-1024 (k=4)
+- **Tests** (10): 512/768/1024 encaps/decaps roundtrip, tampered ciphertext (implicit rejection), key lengths, invalid params, encoding
+
+#### 4. ML-DSA NTT (`mldsa/ntt.rs`)
+- Z_q[X]/(X^256+1) over q = 8380417, using Montgomery arithmetic (R = 2^32)
+- 8-layer NTT (Cooley-Tukey) and INTT (Gentleman-Sande)
+- Barrett-like reduce32, conditional add (caddq), freeze
+- Pointwise multiplication and multiply-accumulate
+- F_INV256 = 41978 (R²/256 mod q) for INTT normalization
+- ZETAS[256] table (ψ = 1753, primitive 512th root of unity)
+- QINV = 58728449 (q^{-1} mod 2^32)
+- **Tests** (4): NTT/INTT roundtrip, Montgomery reduce, reduce32, freeze
+
+#### 5. ML-DSA Polynomial Operations (`mldsa/poly.rs`)
+- **Power2Round** (Algorithm 35): decompose r = r1·2^D + r0, D=13
+- **Decompose** (Algorithm 36): a = a1·2γ₂ + a0, centered mod
+- **HighBits/LowBits**: extract high/low parts of decomposition
+- **MakeHint/UseHint**: hint encoding for signature verification
+- **Rejection sampling**: ExpandA (SHAKE128, 23-bit), ExpandS (SHAKE256, nibble rejection), ExpandMask (18/20-bit), SampleInBall (sparse ±1)
+- **Bit packing**: pack/unpack for t1 (10-bit), t0 (13-bit signed), eta (3/4-bit), z (18/20-bit), w1 (4/6-bit)
+- **Tests** (6): power2round, decompose, pack/unpack t1, t0, eta, z
+
+#### 6. ML-DSA Main (`mldsa/mod.rs`)
+- **KeyGen** (Algorithm 1): ξ → (ρ,ρ',K), A = ExpandA(ρ), s1/s2 = ExpandS(ρ'), t = A·s1+s2, (t1,t0) = Power2Round(t)
+- **Sign** (Algorithm 2): deterministic signing with Fiat-Shamir, rejection sampling loop:
+  1. y = ExpandMask(ρ', κ), w = A·NTT(y), w1 = HighBits(w)
+  2. c̃ = H(μ || w1), c = SampleInBall(c̃)
+  3. z = y + c·s1, check ||z||∞ < γ₁-β
+  4. Check ||LowBits(w-c·s2)||∞ < γ₂-β
+  5. Check ||c·t0||∞ < γ₂, compute hints
+- **Verify** (Algorithm 3): w' = A·z - c·t1·2^D, w1' = UseHint(h, w'), check c̃' = c̃
+- Parameter sets: ML-DSA-44 (k=4,l=4), ML-DSA-65 (k=6,l=5), ML-DSA-87 (k=8,l=7)
+- **Tests** (6): 44/65/87 sign/verify roundtrip, tampered signature, key lengths, invalid params
+
+### Critical Bugs Found & Fixed
+
+#### ML-KEM CBD2 Coefficient Extraction (`mlkem/poly.rs`)
+- **Bug**: Loop was `N/4=64` iterations, each reading 4 bytes and producing 4 coefficients. But buffer is only 128 bytes (64×4 = 256 bytes needed, only 128 available).
+- **Fix**: Changed to `N/8=32` iterations producing 8 coefficients per 32-bit word (bit-pair extraction: `(d >> 4j) & 3` for both halves of each nibble pair).
+
+#### ML-KEM Montgomery Domain Mismatch (`mlkem/mod.rs`)
+- **Bug**: `basemul_acc` introduces R^{-1} factor. Adding `e_hat` (normal NTT domain) to `t_hat` (with R^{-1} from basemul) is a domain mismatch.
+- **Fix**: Added `ntt::to_mont(&mut t_hat[i])` after basemul to cancel R^{-1} before adding `e_hat`.
+- **Key insight**: `to_mont` multiplies by R via `fqmul(coeff, R²_mod_q)`, which produces `coeff * R² * R^{-1} = coeff * R`.
+
+#### ML-DSA sample_mask_poly 18-bit Extraction (`mldsa/poly.rs`)
+- **Bug**: For gamma1=2^17, only extracted 10 bits per coefficient (buf[off] | (buf[off+1] & 0x03) << 8) instead of 18 bits. Used 5 bytes for 4 coefficients instead of 9 bytes.
+- **Impact**: All mask polynomial values clustered in [gamma1-1023, gamma1] instead of being uniformly distributed in [-gamma1+1, gamma1]. This caused ||z||∞ to always be near gamma1, making the signing loop never terminate.
+- **Fix**: Correct 9-byte extraction pattern: `buf[off] | (buf[off+1] << 8) | ((buf[off+2] & 0x03) << 16)` for first coefficient, etc.
+
+#### ML-DSA ct_len Parameter (`mldsa/mod.rs`)
+- **Bug**: `ct_len: 32` for all three parameter sets. FIPS 204 specifies c̃ length = λ/4 bytes.
+- **Impact**: ML-DSA-65/87 signatures had wrong length (3293 vs 3309, 4563 vs 4627), causing `decode_sig` to reject them.
+- **Fix**: ML-DSA-44: ct_len=32 (λ=128), ML-DSA-65: ct_len=48 (λ=192), ML-DSA-87: ct_len=64 (λ=256).
+
+#### ML-DSA make_hint Reduction (`mldsa/poly.rs`)
+- **Bug**: `highbits(caddq(r + z))` — `caddq` only adds q to negative values. But `r ∈ [0,q)` and `z ∈ (-q/2, q/2)`, so `r+z` can be in `(q, 3q/2)` which `caddq` doesn't handle.
+- **Fix**: Changed to `highbits(freeze(r + z))` which applies full Barrett reduction + conditional add.
+
+#### ML-DSA kappa Overflow (`mldsa/mod.rs`)
+- **Bug**: `kappa: u16` overflowed when the signing loop iterated many times.
+- **Fix**: Changed to `kappa: u32`.
+
+### Montgomery Arithmetic Design Notes
+
+**ML-KEM** (q=3329, R=2^16):
+- 7-layer NTT (len 128→2), basemul for degree-1 polynomial pairs
+- F_INV128 = R²/128 mod q = 1441
+- `to_mont` needed in keygen: t_hat stays in NTT domain, must cancel basemul's R^{-1} before adding e_hat
+
+**ML-DSA** (q=8380417, R=2^32):
+- 8-layer NTT (len 128→1), pointwise multiplication
+- F_INV256 = R²/256 mod q = 41978
+- After `pointwise_mul` + `invntt`: result is correct (value × R^{-1} × 256 × R²/256 × R^{-1} = value)
+- Standalone NTT→INTT: returns result × R (apply `montgomery_reduce` to recover)
+
+### Cargo.toml Feature Changes
+```toml
+mlkem = ["sha3"]
+mldsa = ["sha3"]
+```
+
+### Files Created/Modified
+
+| File | Operation | Approx Lines |
+|------|-----------|-------------|
+| `crates/hitls-crypto/src/mlkem/ntt.rs` | New: NTT/INTT (q=3329) | ~130 |
+| `crates/hitls-crypto/src/mlkem/poly.rs` | New: CBD, compress, encode, sampling | ~320 |
+| `crates/hitls-crypto/src/mlkem/mod.rs` | Rewrite: ML-KEM KeyGen/Encaps/Decaps | ~410 |
+| `crates/hitls-crypto/src/mldsa/ntt.rs` | New: NTT/INTT (q=8380417) | ~250 |
+| `crates/hitls-crypto/src/mldsa/poly.rs` | New: Power2Round, Decompose, hints, sampling, packing | ~570 |
+| `crates/hitls-crypto/src/mldsa/mod.rs` | Rewrite: ML-DSA KeyGen/Sign/Verify | ~600 |
+| `crates/hitls-crypto/Cargo.toml` | Modified: mlkem/mldsa features | +2 |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 205 (+30, 1 ignored) | All pass |
+| hitls-utils | 11 | All pass |
+| **Total** | **262** | **All pass** |
+
+New tests (30):
+- ML-KEM NTT (3): roundtrip, Barrett, Montgomery
+- ML-KEM poly (1): compress/decompress
+- ML-KEM KEM (10): 512/768/1024 roundtrip, tampered CT, key lengths, invalid params, encoding
+- ML-DSA NTT (4): roundtrip, Montgomery, reduce32, freeze
+- ML-DSA poly (6): power2round, decompose, pack/unpack t1/t0/eta/z
+- ML-DSA DSA (6): 44/65/87 roundtrip, tampered sig, key lengths, invalid params
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 262 workspace tests passing
+
+### Post-Quantum Cryptography Status
+
+| Algorithm | Status | Parameter Sets |
+|-----------|--------|---------------|
+| ML-KEM (FIPS 203) | **Done** | 512, 768, 1024 |
+| ML-DSA (FIPS 204) | **Done** | 44, 65, 87 |
+| SLH-DSA (SPHINCS+) | Stub | — |
+| XMSS / XMSS^MT | Stub | — |
+| FrodoKEM | Stub | — |
+| Classic McEliece | Stub | — |
+| Hybrid KEM | Stub | — |
+
+### Next Steps
+- Implement SLH-DSA (SPHINCS+) or other PQC algorithms
+- Begin TLS 1.3 protocol implementation
+- PKI (X.509 certificates)

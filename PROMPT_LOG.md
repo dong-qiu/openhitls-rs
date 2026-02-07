@@ -535,3 +535,74 @@ User approved. Implementation completed across 11 files. Initial test run had 5 
 - `README.md` — Status banner updated to Phase 9, SHA-3/SHAKE/ChaCha20-Poly1305/CFB/OFB/CCM/XTS/CMAC/GMAC/SipHash/scrypt all marked as Done, test counts updated (232 total)
 - `PROMPT_LOG.md` — Added Session 11 entries (Prompts 35–36)
 - `DEV_LOG.md` — Added full Phase 9 section
+
+---
+
+## Session 12: Phase 10 — ML-KEM (FIPS 203) + ML-DSA (FIPS 204)
+
+### Prompt 37: Continue Phase 10
+> 请继续Phase 10的工作
+
+**Result**: Entered plan mode. Designed Phase 10 plan covering two NIST post-quantum cryptographic standards:
+- ML-KEM (FIPS 203): Module-Lattice KEM, replacing ECDH/RSA-KEM
+- ML-DSA (FIPS 204): Module-Lattice Digital Signatures, replacing ECDSA/RSA-PSS
+
+Both algorithms share similar NTT-based structure but have different parameters (q, coefficient width, sampling). Plan covered NTT, polynomial ops, and full KEM/DSA for all parameter sets. User approved.
+
+### Prompt 38: *(Plan approved, implementation across multiple sessions)*
+
+**Result**: Implemented all 6 files across 3 sessions:
+
+| File | Description | Approx Lines |
+|------|-------------|-------------|
+| `mlkem/ntt.rs` | NTT/INTT for q=3329, basemul, Barrett/Montgomery | ~130 |
+| `mlkem/poly.rs` | CBD, compress/decompress, byte encode/decode, sampling | ~320 |
+| `mlkem/mod.rs` | K-PKE + ML-KEM-512/768/1024 (KeyGen, Encaps, Decaps) | ~410 |
+| `mldsa/ntt.rs` | NTT/INTT for q=8380417, pointwise ops, Montgomery | ~250 |
+| `mldsa/poly.rs` | Power2Round, Decompose, hints, rejection sampling, bit packing | ~570 |
+| `mldsa/mod.rs` | ML-DSA-44/65/87 (KeyGen, Sign, Verify) | ~600 |
+
+**Critical bugs found and fixed** (6 total):
+
+1. **ML-KEM CBD2 coefficient extraction** (`mlkem/poly.rs`): Loop was `N/4=64` iterations reading 4 bytes each from 128-byte buffer. Fixed to `N/8=32` iterations producing 8 coefficients per 32-bit word.
+
+2. **ML-KEM Montgomery domain mismatch** (`mlkem/mod.rs`): After `basemul_acc`, `t_hat` has an extra R^{-1} factor. Adding `e_hat` (normal NTT domain) directly was a domain mismatch. Fixed by adding `ntt::to_mont(&mut t_hat[i])` after basemul, before adding `e_hat`.
+
+3. **ML-DSA `sample_mask_poly` 18-bit extraction** (`mldsa/poly.rs`): For gamma1=2^17, only 10 bits were extracted per coefficient (5 bytes for 4 coefficients) instead of 18 bits (9 bytes for 4 coefficients). All mask values clustered near gamma1, causing the signing loop to never terminate. Fixed with correct 9-byte extraction pattern matching the reference implementation.
+
+4. **ML-DSA `ct_len` parameter** (`mldsa/mod.rs`): Was 32 for all parameter sets, but FIPS 204 specifies λ/4: ML-DSA-44=32, ML-DSA-65=48, ML-DSA-87=64. Wrong ct_len caused signature length mismatch, making `decode_sig` reject all signatures for -65/-87.
+
+5. **ML-DSA `make_hint` reduction** (`mldsa/poly.rs`): Used `caddq(r+z)` which only handles negative values, but `r+z` can exceed q. Fixed to use `freeze(r+z)` which applies full Barrett reduction + conditional add.
+
+6. **ML-DSA `kappa` overflow** (`mldsa/mod.rs`): `kappa: u16` overflowed when the signing loop iterated many times. Changed to `kappa: u32`.
+
+**Clippy fixes** (21 warnings across 6 files):
+- `needless_range_loop` — Multiple instances in poly.rs, mod.rs, ntt.rs tests → converted to `iter_mut().enumerate()`
+- `type_complexity` — decode_sk and decode_sig return types → added `#[allow(clippy::type_complexity)]`
+- `unnecessary_cast` — `gamma2 as i32` where gamma2 is already i32
+- `manual_assign` — `a[j] = a[j] + t` → `a[j] += t`
+- Applied `cargo fmt --all` for formatting consistency
+
+**Cargo.toml feature changes**:
+```toml
+mlkem = ["sha3"]
+mldsa = ["sha3"]
+```
+
+**Test results**: 262 tests passing (46 bignum + 205 crypto + 11 utils), 1 ignored (RSA keygen).
+
+New tests (30):
+- ML-KEM NTT (3): NTT/INTT roundtrip, Barrett reduce, Montgomery reduce
+- ML-KEM poly (1): compress/decompress roundtrip
+- ML-KEM KEM (10): 512/768/1024 encaps/decaps roundtrip, tampered ciphertext (implicit rejection), key lengths, invalid params, encapsulation key encoding
+- ML-DSA NTT (4): NTT/INTT roundtrip, Montgomery reduce, reduce32, freeze
+- ML-DSA poly (6): power2round, decompose/highbits/lowbits, pack/unpack t1, t0, eta, z
+- ML-DSA DSA (6): 44/65/87 sign/verify roundtrip, tampered signature, key lengths, invalid params
+
+### Prompt 39: Refresh README and PROMPT_LOG
+> 请同步刷新readme.md和prompt.md
+
+**Result**: Updated all three documentation files to reflect Phase 10 completion:
+- `README.md` — Status banner updated to Phase 10, ML-KEM/ML-DSA marked as Done, test counts updated (262 total)
+- `PROMPT_LOG.md` — Added Session 12 entries (Prompts 37–39)
+- `DEV_LOG.md` — Added full Phase 10 section
