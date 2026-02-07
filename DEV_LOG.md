@@ -1415,3 +1415,63 @@ Used real 3-cert RSA chain from C project (`testcode/testdata/tls/certificate/pe
 ### Next Steps
 - Phase 15: TLS Record Layer Encryption
 - Phase 16: TLS 1.3 Client Handshake
+
+---
+
+## Phase 15: TLS Record Layer Encryption (Session 2026-02-08)
+
+### Goals
+- Implement TLS 1.3 record-layer AEAD encryption/decryption (RFC 8446 §5)
+- Nonce construction: IV XOR zero-padded sequence number (§5.3)
+- Inner plaintext framing: content type hiding + padding (§5.4)
+- AAD generation for TLS 1.3 (§5.2)
+- Sequence number management with overflow protection
+- Transparent plaintext/encrypted mode switching in RecordLayer
+
+### Completed Steps
+
+#### 1. Constants and Helper Functions (`record/encryption.rs`)
+- `MAX_PLAINTEXT_LENGTH = 16384` (2^14), `MAX_CIPHERTEXT_OVERHEAD = 256`, `MAX_CIPHERTEXT_LENGTH = 16640`
+- `build_nonce_from_iv_seq(iv, seq)` — 12-byte nonce = IV XOR [0000 || seq_be64]
+- `build_aad(ciphertext_len)` — 5-byte AAD: [0x17, 0x03, 0x03, len_hi, len_lo]
+- `build_inner_plaintext(content_type, plaintext, padding_len)` — content || type || zeros
+- `parse_inner_plaintext(inner)` — scan from end for first non-zero byte (real content type)
+
+#### 2. RecordEncryptor (~80 lines)
+- Holds `Box<dyn TlsAead>` + IV (zeroized on drop) + 64-bit sequence number
+- `new(suite, keys)` — creates AEAD via `create_aead(suite, &keys.key)`
+- `encrypt_record(content_type, plaintext)` — builds inner plaintext, constructs nonce/AAD, AEAD encrypts, returns Record with outer type ApplicationData + version 0x0303
+- Validates plaintext ≤ 16384, ciphertext ≤ 16640, checks seq overflow before increment
+
+#### 3. RecordDecryptor (~80 lines)
+- Same structure as encryptor (AEAD + IV + seq)
+- `decrypt_record(record)` — validates ApplicationData outer type, constructs nonce/AAD, AEAD decrypts, strips inner plaintext padding, returns (real_content_type, plaintext)
+- Validates fragment size bounds, plaintext size after decryption
+
+#### 4. Enhanced RecordLayer (`record/mod.rs`, +55 lines)
+- Added `pub mod encryption;` submodule
+- Extended `RecordLayer` with optional `encryptor`/`decryptor` fields
+- `activate_write_encryption(suite, keys)` / `activate_read_decryption(suite, keys)` — sets up AEAD for each direction
+- `seal_record(content_type, plaintext)` — encrypt (if active) + serialize to wire bytes
+- `open_record(data)` — parse + decrypt (if active), returns (content_type, plaintext, consumed)
+- Existing `parse_record()`/`serialize_record()` unchanged, used internally
+
+### Test Results
+- **354 tests total** (46 bignum + 230 crypto + 22 utils + 28 pki + 28 tls), 3 ignored
+- 12 new record encryption tests:
+  - Encrypt/decrypt roundtrip (AES-128-GCM, ChaCha20-Poly1305)
+  - Content type hiding (all types → ApplicationData outer)
+  - Padding handling (build + parse inner plaintext)
+  - Sequence number increment tracking
+  - Nonce construction (manual XOR verification)
+  - AAD construction (byte-level check)
+  - Max record size enforcement (16384 OK, 16385 rejected)
+  - Ciphertext overflow detection
+  - Plaintext mode passthrough
+  - Key change mid-stream (seq reset, old key fails)
+  - Tampered record authentication failure
+- All clippy warnings resolved, formatting clean
+
+### Next Steps
+- Phase 16: TLS 1.3 Client Handshake
+- Phase 17: TLS 1.3 Server + Application Data

@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Active Development (Phase 14 Complete)**
+> **Status: Active Development (Phase 15 Complete)**
 >
-> Core cryptographic primitives implemented: hash functions (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric ciphers (AES, SM4, ChaCha20), block cipher modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS), AES Key Wrap (RFC 3394), ChaCha20-Poly1305 AEAD, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), HMAC-DRBG, ML-KEM (FIPS 203), ML-DSA (FIPS 204), HPKE (RFC 9180), HybridKEM (X25519+ML-KEM-768), Paillier, ElGamal, X.509 certificate parsing/verification (RSA, ECDSA, Ed25519), X.509 chain building/verification with trust store, and TLS 1.3 key schedule (RFC 8446/8448) with HKDF, transcript hash, AEAD adapter, and traffic key derivation. 342 tests passing (46 bignum + 230 crypto + 22 utils + 28 pki + 16 tls).
+> Core cryptographic primitives implemented: hash functions (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric ciphers (AES, SM4, ChaCha20), block cipher modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS), AES Key Wrap (RFC 3394), ChaCha20-Poly1305 AEAD, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), HMAC-DRBG, ML-KEM (FIPS 203), ML-DSA (FIPS 204), HPKE (RFC 9180), HybridKEM (X25519+ML-KEM-768), Paillier, ElGamal, X.509 certificate parsing/verification (RSA, ECDSA, Ed25519), X.509 chain building/verification with trust store, TLS 1.3 key schedule (RFC 8446/8448) with HKDF, transcript hash, AEAD adapter, and TLS 1.3 record layer encryption with nonce construction, content type hiding, and sequence number management. 354 tests passing (46 bignum + 230 crypto + 22 utils + 28 pki + 28 tls).
 
 ## Goals
 
@@ -23,7 +23,7 @@ openhitls-rs/
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (22 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
 │   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, DRBG, ML-KEM, ML-DSA, HPKE, HybridKEM, Paillier, ElGamal... (230 tests)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, AEAD, transcript hash, traffic keys (16 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, AEAD, traffic keys (28 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain build), PKCS#12, CMS/PKCS#7 (28 tests)
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
 │   └── hitls-cli/       # Command-line tool (openssl-like interface)
@@ -126,7 +126,7 @@ openhitls-rs/
 
 | Protocol | Crate | Status |
 |----------|-------|--------|
-| TLS 1.3 | `hitls-tls` | Key Schedule done |
+| TLS 1.3 | `hitls-tls` | Key Schedule + Record Encryption done |
 | TLS 1.2 | `hitls-tls` | Skeleton |
 | DTLS 1.2 | `hitls-tls` | Skeleton |
 | TLCP (GM/T 0024) | `hitls-tls` | Skeleton |
@@ -150,12 +150,12 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (342 tests)
+# Run all tests (354 tests)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 230 tests (3 ignored)
-cargo test -p hitls-tls --all-features      # 16 tests
+cargo test -p hitls-tls --all-features      # 28 tests
 cargo test -p hitls-pki --all-features      # 28 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 22 tests
@@ -195,11 +195,10 @@ Convenience feature groups:
 
 ## Roadmap
 
-Phase 0–14 complete. Remaining phases:
+Phase 0–15 complete. Remaining phases:
 
 | Phase | Name | Est. LOC | Est. Tests | Critical Path |
 |-------|------|----------|------------|---------------|
-| 15 | TLS Record Layer Encryption | ~700 | ~12 | **Yes** |
 | 16 | TLS 1.3 Client Handshake | ~2,640 | ~15 | **Yes** |
 | 17 | TLS 1.3 Server + Application Data | ~1,350 | ~18 | **Yes** |
 | 18 | PKCS#12 + CMS + Auth Protocols | ~2,450 | ~25 | No |

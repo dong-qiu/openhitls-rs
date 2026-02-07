@@ -833,3 +833,32 @@ Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
 2. RFC 8448 test vector transcription errors — verified against RFC text + OpenSSL
 
 **Tests**: 16 new tests with full RFC 8448 verification. 342 total (46 bignum + 230 crypto + 22 utils + 28 pki + 16 tls). Clippy clean, fmt clean.
+
+---
+
+## Session 16: Phase 15 — TLS Record Layer Encryption
+
+### Prompt 55: Start Phase 15
+> 请开始Phase 15的工作
+
+**Result**: Entered plan mode. Explored C reference code for record layer (`tls/record/src/rec_crypto_aead.c`, `rec_crypto.c`). Designed 5-step plan: constants/helpers, RecordEncryptor, RecordDecryptor, enhanced RecordLayer, tests.
+
+### Prompt 56: Approve Phase 15 plan
+> (Approved plan)
+
+**Result**: Implemented Phase 15 in 2 files:
+
+**record/encryption.rs** (~540 lines incl. tests):
+- Constants: MAX_PLAINTEXT_LENGTH (16384), MAX_CIPHERTEXT_LENGTH (16640)
+- `build_nonce_from_iv_seq()` — IV XOR zero-padded sequence number
+- `build_aad()`, `build_inner_plaintext()`, `parse_inner_plaintext()`
+- `RecordEncryptor` — AEAD + IV + seq, `encrypt_record()` wraps in TLS 1.3 format
+- `RecordDecryptor` — AEAD + IV + seq, `decrypt_record()` unwraps inner plaintext
+
+**record/mod.rs** (+55 lines):
+- Extended `RecordLayer` with optional encryptor/decryptor
+- `activate_write_encryption()` / `activate_read_decryption()`
+- `seal_record()` — encrypt + serialize to wire
+- `open_record()` — parse + decrypt from wire
+
+**Tests**: 12 new tests (roundtrip AES-GCM/ChaCha20, content type hiding, padding, seq increment, nonce/AAD construction, max size, ciphertext overflow, plaintext mode, key change, tampered record). 354 total (46 bignum + 230 crypto + 22 utils + 28 pki + 28 tls). Clippy clean, fmt clean.
