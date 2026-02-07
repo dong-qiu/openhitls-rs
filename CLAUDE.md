@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 17 complete — core crypto + X.509 chain + TLS 1.3 client & server handshake done
+- **Status**: Phase 18 complete — core crypto + X.509 chain + TLS 1.3 client & server handshake + PKCS#12 + CMS + OTP + SPAKE2+ done
 
 ## Workspace Structure
 
@@ -20,8 +20,8 @@ openhitls-rs/
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
 │   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated)
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake (72 tests)
-│   ├── hitls-pki/       # X.509 (parse, verify, chain), PKCS#12, CMS
-│   ├── hitls-auth/      # OTP, SPAKE2+, Privacy Pass (skeleton)
+│   ├── hitls-pki/       # X.509 (parse, verify, chain), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (47 tests)
+│   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (skeleton)
 ├── tests/vectors/       # Standard test vectors
 └── benches/             # Performance benchmarks
@@ -33,15 +33,16 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (398 tests, 3 ignored for slow keygen)
+# Run all tests (441 tests, 3 ignored for slow keygen)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 230 tests
 cargo test -p hitls-tls --all-features      # 72 tests
-cargo test -p hitls-pki --all-features      # 28 tests
+cargo test -p hitls-pki --all-features      # 47 tests
 cargo test -p hitls-bignum                  # 46 tests
-cargo test -p hitls-utils                   # 22 tests
+cargo test -p hitls-utils                   # 26 tests
+cargo test -p hitls-auth --all-features     # 20 tests
 
 # Lint (must pass with zero warnings)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
@@ -98,8 +99,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-17 complete. Remaining phases:
-- Phase 18: PKCS#12 + CMS + Auth Protocols
+Phases 0-18 complete. Remaining phases:
 - Phase 19: Remaining PQC (SLH-DSA, XMSS, FrodoKEM, McEliece, SM9)
 - Phase 20: CLI Tool + Integration Tests
 

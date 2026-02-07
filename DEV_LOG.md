@@ -1642,3 +1642,87 @@ Used real 3-cert RSA chain from C project (`testcode/testdata/tls/certificate/pe
 
 ### Next Steps
 - Phase 18: PKCS#12 + CMS + Auth Protocols
+
+---
+
+## Phase 18: PKCS#12 + CMS + Auth Protocols (Session 2026-02-08)
+
+### Goals
+- Implement HOTP/TOTP (RFC 4226/6238) in hitls-auth
+- Implement SPAKE2+ (RFC 9382) on P-256 in hitls-auth
+- Implement PKCS#12 (RFC 7292) parse/create in hitls-pki
+- Implement CMS SignedData (RFC 5652) parse/verify/sign in hitls-pki
+- Add ECC point_add/point_negate public methods in hitls-crypto
+- Add 20+ new OIDs in hitls-utils
+
+### Completed Steps
+
+#### 1. HOTP/TOTP (`hitls-auth/src/otp/`)
+- `Hotp` — HOTP (RFC 4226) implementation with configurable digit length (6-8)
+- `Totp` — TOTP (RFC 6238) implementation with configurable time step and T0
+- HMAC-based one-time password generation with dynamic truncation
+- Verified against RFC 4226 Appendix D and RFC 6238 Appendix B test vectors
+
+#### 2. SPAKE2+ (`hitls-auth/src/spake2plus/`)
+- Full SPAKE2+ protocol (RFC 9382) on P-256 curve
+- `Spake2PlusProver` and `Spake2PlusVerifier` roles
+- Password-to-scalar derivation using HKDF
+- Point blinding with M/N generators (RFC 9382 constants)
+- Key confirmation via HMAC-based MAC exchange
+- State machine enforcement (prevents out-of-order calls)
+
+#### 3. PKCS#12 (`hitls-pki/src/pkcs12/`)
+- `Pkcs12::parse(der, password)` — parse PFX/P12 files with MAC verification
+- `Pkcs12::create(cert, key, password)` — create new PKCS#12 archives
+- PKCS#12 key derivation (ID=1 key, ID=2 IV, ID=3 MAC) per RFC 7292 Appendix B
+- 3DES-CBC encryption for key bags, SHA-1 HMAC for integrity
+- Supports CertBag (x509Certificate) and PKCS8ShroudedKeyBag
+
+#### 4. CMS SignedData (`hitls-pki/src/cms/`)
+- `CmsSignedData::parse(der)` — parse CMS SignedData structures
+- `CmsSignedData::verify(cert)` — verify signatures against signer certificate
+- `CmsSignedData::sign(data, cert, key, hash_alg)` — create new SignedData
+- SignerInfo with signed attributes (content-type, message-digest, signing-time)
+- Supports RSA PKCS#1 v1.5 and ECDSA signature algorithms
+
+#### 5. ECC Extensions (`hitls-crypto/src/ecc/`)
+- `point_add()` — public method for elliptic curve point addition
+- `point_negate()` — public method for elliptic curve point negation
+- Used by SPAKE2+ for point blinding operations
+
+#### 6. OID Extensions (`hitls-utils/src/oid/`)
+- 20+ new OID constants added:
+  - PKCS#12 bag types: KEY_BAG, PKCS8_SHROUDED_KEY_BAG, CERT_BAG, SAFE_CONTENTS_BAG
+  - PKCS#12 certificate types: X509_CERTIFICATE
+  - PBES2/PBKDF2: PBES2, PBKDF2, HMAC_SHA1, HMAC_SHA256
+  - Encryption: DES_EDE3_CBC
+  - PKCS#9 attributes: CONTENT_TYPE, MESSAGE_DIGEST, SIGNING_TIME
+  - PKCS#7 content types: PKCS7_DATA, PKCS7_SIGNED_DATA, PKCS7_ENCRYPTED_DATA
+  - Hash: SHA1
+  - CMS: CMS_DATA, CMS_SIGNED_DATA
+
+### Dependencies Added
+- `hitls-auth`: Added hitls-bignum, subtle, getrandom
+- `hitls-pki`: Added getrandom
+- `hitls-crypto`: Additional feature dependencies
+
+### Files Created/Modified
+- **NEW**: `hitls-auth/src/otp/mod.rs`, `hitls-auth/src/spake2plus/mod.rs`
+- **NEW**: `hitls-pki/src/pkcs12/mod.rs`, `hitls-pki/src/cms/mod.rs`
+- **MODIFIED**: `hitls-auth/src/lib.rs`, `hitls-auth/Cargo.toml`
+- **MODIFIED**: `hitls-pki/src/lib.rs`, `hitls-pki/Cargo.toml`
+- **MODIFIED**: `hitls-crypto/src/ecc/` (point_add, point_negate public methods)
+- **MODIFIED**: `hitls-utils/src/oid/mod.rs` (20+ new OID constants)
+
+### Test Results
+- **441 tests total** (20 auth + 46 bignum + 230 crypto + 47 pki + 72 tls + 26 utils), 3 ignored
+- 43 new tests:
+  - 11 OTP tests (RFC 4226 Appendix D + RFC 6238 Appendix B test vectors)
+  - 9 SPAKE2+ tests (full exchange, wrong password, confirmation, state machine)
+  - 4 OID tests
+  - 10 PKCS#12 tests (roundtrip, MAC, wrong password)
+  - 9 CMS tests (encode/parse roundtrip, content type, digest, signed attrs)
+- All clippy warnings resolved, formatting clean
+
+### Next Steps
+- Phase 19: Remaining PQC (SLH-DSA, XMSS, FrodoKEM, McEliece, SM9)

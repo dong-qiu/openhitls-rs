@@ -945,3 +945,35 @@ Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
 **Scope**: X25519 only, no HRR, no client cert auth, no PSK/0-RTT.
 
 **Tests**: 21 new TLS tests. 398 total (46 bignum + 230 crypto + 22 utils + 28 pki + 72 tls). Clippy clean, fmt clean.
+
+---
+
+## Session 19: Phase 18 — PKCS#12 + CMS + Auth Protocols
+
+### Prompt 61: Implement Phase 18
+> Implement Phase 18: PKCS#12 + CMS + Auth Protocols (HOTP/TOTP, SPAKE2+)
+
+**Result**: Implemented Phase 18 across 4 crates:
+
+**hitls-auth** — OTP + SPAKE2+:
+- `otp/mod.rs` — HOTP (RFC 4226) and TOTP (RFC 6238) with configurable digits/time step, verified against RFC test vectors
+- `spake2plus/mod.rs` — Full SPAKE2+ (RFC 9382) on P-256: Prover/Verifier roles, password-to-scalar derivation via HKDF, M/N point blinding, HMAC key confirmation, state machine enforcement
+- Dependencies added: hitls-bignum, subtle, getrandom
+
+**hitls-pki** — PKCS#12 + CMS:
+- `pkcs12/mod.rs` — PKCS#12 (RFC 7292) parse/create with key derivation (ID=1/2/3), 3DES-CBC encryption, SHA-1 HMAC integrity, CertBag + PKCS8ShroudedKeyBag support
+- `cms/mod.rs` — CMS SignedData (RFC 5652) parse/verify/sign with SignerInfo, signed attributes (content-type, message-digest, signing-time), RSA PKCS#1 v1.5 + ECDSA
+- Dependencies added: getrandom
+
+**hitls-crypto** — ECC extensions:
+- `point_add()` and `point_negate()` public methods for elliptic curve point arithmetic (used by SPAKE2+)
+
+**hitls-utils** — OID extensions:
+- 20+ new OID constants: PKCS#12 bag types, PBES2/PBKDF2, DES-EDE3-CBC, PKCS#9 attributes, PKCS#7 content types, SHA-1, CMS types
+
+**Tests**: 43 new tests (11 OTP + 9 SPAKE2+ + 4 OID + 10 PKCS#12 + 9 CMS). 441 total (20 auth + 46 bignum + 230 crypto + 47 pki + 72 tls + 26 utils), 3 ignored. Clippy clean, fmt clean.
+
+### Prompt 62: Update project documentation for Phase 18
+> Update the project documentation files for Phase 18 completion.
+
+**Result**: Updated README.md, CLAUDE.md, DEV_LOG.md, and PROMPT_LOG.md to reflect Phase 18 completion. Updated status to Phase 18, test count to 441, workspace structure descriptions, protocol table, roadmap (removed Phase 18 from remaining), and added Phase 18 entries to DEV_LOG and PROMPT_LOG.

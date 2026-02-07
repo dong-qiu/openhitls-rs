@@ -246,6 +246,69 @@ pub mod known {
         Oid::new(&[1, 2, 840, 113549, 1, 9, 1])
     }
 
+    // PKCS#12 bag types (1.2.840.113549.1.12.10.1.*)
+    pub fn pkcs12_bag_type_key() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 12, 10, 1, 1])
+    }
+    pub fn pkcs12_bag_type_pkcs8_shrouded_key() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 12, 10, 1, 2])
+    }
+    pub fn pkcs12_bag_type_cert() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 12, 10, 1, 3])
+    }
+    pub fn pkcs12_bag_type_crl() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 12, 10, 1, 4])
+    }
+    pub fn x509_certificate() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 9, 22, 1])
+    }
+
+    // PKCS#5 / PBES2
+    pub fn pbes2() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 5, 13])
+    }
+    pub fn pbkdf2_oid() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 5, 12])
+    }
+    pub fn hmac_sha256_oid() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 2, 9])
+    }
+    pub fn hmac_sha1_oid() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 2, 7])
+    }
+
+    // PKCS#7 additional
+    pub fn pkcs7_encrypted_data() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 7, 6])
+    }
+
+    // CMS / PKCS#9 attributes
+    pub fn pkcs9_content_type() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 9, 3])
+    }
+    pub fn pkcs9_message_digest() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 9, 4])
+    }
+    pub fn pkcs9_signing_time() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 9, 5])
+    }
+    pub fn pkcs9_friendly_name() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 9, 20])
+    }
+    pub fn pkcs9_local_key_id() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 9, 21])
+    }
+
+    // SHA-1
+    pub fn sha1_oid() -> Oid {
+        Oid::new(&[1, 3, 14, 3, 2, 26])
+    }
+
+    // AES-192-CBC
+    pub fn aes192_cbc() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 1, 22])
+    }
+
     /// Map a well-known DN attribute OID to its short name.
     pub fn oid_to_dn_short_name(oid: &super::Oid) -> Option<&'static str> {
         let arcs = oid.arcs();
@@ -287,5 +350,59 @@ mod tests {
         let oid = known::rsa_encryption();
         let der = oid.to_der_value();
         assert_eq!(der, &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01]);
+    }
+
+    #[test]
+    fn test_pkcs12_bag_oid_roundtrip() {
+        let oids = [
+            known::pkcs12_bag_type_key(),
+            known::pkcs12_bag_type_pkcs8_shrouded_key(),
+            known::pkcs12_bag_type_cert(),
+            known::pkcs12_bag_type_crl(),
+        ];
+        for oid in &oids {
+            let der = oid.to_der_value();
+            let parsed = Oid::from_der_value(&der).unwrap();
+            assert_eq!(oid, &parsed);
+        }
+    }
+
+    #[test]
+    fn test_pbes2_pbkdf2_oid_roundtrip() {
+        let oids = [
+            known::pbes2(),
+            known::pbkdf2_oid(),
+            known::hmac_sha256_oid(),
+        ];
+        for oid in &oids {
+            let der = oid.to_der_value();
+            let parsed = Oid::from_der_value(&der).unwrap();
+            assert_eq!(oid, &parsed);
+        }
+    }
+
+    #[test]
+    fn test_pkcs9_oid_roundtrip() {
+        let oids = [
+            known::pkcs9_content_type(),
+            known::pkcs9_message_digest(),
+            known::pkcs9_signing_time(),
+            known::pkcs9_friendly_name(),
+            known::pkcs9_local_key_id(),
+        ];
+        for oid in &oids {
+            let der = oid.to_der_value();
+            let parsed = Oid::from_der_value(&der).unwrap();
+            assert_eq!(oid, &parsed);
+        }
+    }
+
+    #[test]
+    fn test_sha1_oid_roundtrip() {
+        let oid = known::sha1_oid();
+        assert_eq!(oid.to_dot_string(), "1.3.14.3.2.26");
+        let der = oid.to_der_value();
+        let parsed = Oid::from_der_value(&der).unwrap();
+        assert_eq!(oid, parsed);
     }
 }

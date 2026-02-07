@@ -11,7 +11,7 @@ use hitls_bignum::BigNum;
 use hitls_types::{CryptoError, EccCurveId};
 
 use curves::{get_curve_params, CurveParams};
-use point::{scalar_mul, scalar_mul_add, JacobianPoint};
+use point::{point_add as jac_point_add, scalar_mul, scalar_mul_add, JacobianPoint};
 
 /// An elliptic curve group (curve and its parameters).
 #[derive(Clone)]
@@ -84,6 +84,29 @@ impl EcGroup {
         let g = JacobianPoint::from_affine(&self.params.gx, &self.params.gy);
         let result = scalar_mul(k, &g, &self.params)?;
         jacobian_to_ecpoint(&result, &self.params)
+    }
+
+    /// Point addition: R = P + Q.
+    pub fn point_add(&self, p: &EcPoint, q: &EcPoint) -> Result<EcPoint, CryptoError> {
+        if p.infinity {
+            return Ok(q.clone());
+        }
+        if q.infinity {
+            return Ok(p.clone());
+        }
+        let jp = JacobianPoint::from_affine(&p.x, &p.y);
+        let jq = JacobianPoint::from_affine(&q.x, &q.y);
+        let result = jac_point_add(&jp, &jq, &self.params)?;
+        jacobian_to_ecpoint(&result, &self.params)
+    }
+
+    /// Point negation: R = -P (returns (x, p - y)).
+    pub fn point_negate(&self, point: &EcPoint) -> Result<EcPoint, CryptoError> {
+        if point.infinity {
+            return Ok(EcPoint::infinity());
+        }
+        let neg_y = self.params.p.sub(&point.y);
+        Ok(EcPoint::new(point.x.clone(), neg_y))
     }
 
     /// Combined scalar multiplication: R = k1*G + k2*Q (Shamir's trick).
