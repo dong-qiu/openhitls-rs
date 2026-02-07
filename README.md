@@ -189,6 +189,25 @@ Convenience feature groups:
 - **Strong error types** — `CryptoError`, `TlsError`, `PkiError` with `thiserror` for clear, actionable error messages
 - **Builder pattern** — TLS configuration uses builder pattern for ergonomic and safe construction
 
+## Roadmap
+
+Phase 0–10 complete. Remaining phases:
+
+| Phase | Name | Est. LOC | Est. Tests | Critical Path |
+|-------|------|----------|------------|---------------|
+| 11 | HPKE + AES Key Wrap + HybridKEM + Paillier + ElGamal | ~1,650 | ~25 | Partial |
+| 12 | X.509 Certificate Parsing + Basic PKI | ~1,750 | ~20 | **Yes** |
+| 13 | X.509 Verification + Chain Building | ~1,000 | ~15 | **Yes** |
+| 14 | TLS 1.3 Key Schedule + Crypto Adapter | ~1,030 | ~15 | **Yes** |
+| 15 | TLS Record Layer Encryption | ~700 | ~12 | **Yes** |
+| 16 | TLS 1.3 Client Handshake | ~2,640 | ~15 | **Yes** |
+| 17 | TLS 1.3 Server + Application Data | ~1,350 | ~18 | **Yes** |
+| 18 | PKCS#12 + CMS + Auth Protocols | ~2,450 | ~25 | No |
+| 19 | Remaining PQC (SLH-DSA, XMSS, FrodoKEM, McEliece, SM9) | ~7,000 | ~35 | No |
+| 20 | CLI Tool + Integration Tests | ~1,910 | ~20 | No |
+
+Target: ~40,000 lines of Rust, ~462 tests. See [plan file](.claude/plans/) for details.
+
 ## Minimum Supported Rust Version
 
 **MSRV: 1.75**

@@ -606,3 +606,70 @@ New tests (30):
 - `README.md` — Status banner updated to Phase 10, ML-KEM/ML-DSA marked as Done, test counts updated (262 total)
 - `PROMPT_LOG.md` — Added Session 12 entries (Prompts 37–39)
 - `DEV_LOG.md` — Added full Phase 10 section
+
+---
+
+## Session 13: Migration Roadmap Planning (Phase 11-20)
+
+### Prompt 40: Commit and push Phase 10
+> 请提交修改并推送至远程仓库
+
+**Result**: Committed as `d676010` — "feat(hitls-crypto): implement Phase 10 — ML-KEM (FIPS 203) + ML-DSA (FIPS 204)". 10 files changed, +2693/-16 lines. Pushed to `origin/main`.
+
+### Prompt 41: Check remaining tasks
+> 请看看还有什么遗留任务
+
+**Result**: Comprehensive analysis of remaining work:
+- **hitls-crypto**: 10 stub modules (SLH-DSA, XMSS, FrodoKEM, McEliece, HybridKEM, SM9, Paillier, ElGamal, HPKE, AES Key Wrap)
+- **hitls-tls**: Almost entirely stubs (~459 lines vs ~63K C lines). Only type definitions exist.
+- **hitls-pki**: Stubs only (~167 lines vs ~18K C). No DER parsing, verification, or PKCS#12/CMS handling.
+- **hitls-auth**: All stub (OTP, SPAKE2+, Privacy Pass)
+- **hitls-cli**: All commands are TODO
+
+### Prompt 42: Analyze migration progress
+> 请分析目前迁移工作完成多少了
+
+**Result**: Detailed progress analysis:
+- **C source total**: ~280,000 lines (crypto 130K + TLS 63K + PKI 18K + BSL 19K + headers 23K)
+- **Rust implemented**: ~18,650 lines (14,643 real + 3,583 test + 424 stub)
+- **Crypto primitives**: ~70% complete (all production-critical algorithms done)
+- **Overall project**: ~25-30% complete (crypto solid, TLS/PKI/Auth not started)
+
+Key metrics by module:
+| Module | Completion |
+|--------|-----------|
+| hitls-crypto | ~65% |
+| hitls-bignum | 100% |
+| hitls-utils | ~80% |
+| hitls-tls | ~2% |
+| hitls-pki | ~1% |
+| hitls-auth | ~0% |
+
+### Prompt 43: Create migration roadmap
+> 基于剩余的工作，请制定接下来的迁移计划
+
+**Result**: Entered plan mode. Launched 3 parallel exploration agents to analyze:
+1. C TLS/PKI architecture (dependency chain, state machine design, record layer, handshake states)
+2. Remaining C crypto modules (SLH-DSA, SM9, HPKE, XMSS, FrodoKEM, McEliece, Provider/EAL)
+3. Existing Rust patterns (ASN.1 maturity, TLS type stubs, provider traits, inter-crate deps)
+
+Created comprehensive 10-phase roadmap (Phase 11-20):
+- **Phase 11**: HPKE + AES Key Wrap + HybridKEM + Paillier + ElGamal (~1,650 LOC)
+- **Phase 12**: X.509 Certificate Parsing (~1,750 LOC) — **TLS blocker**
+- **Phase 13**: X.509 Verification + Chain Building (~1,000 LOC) — **TLS blocker**
+- **Phase 14**: TLS 1.3 Key Schedule + Crypto Adapter (~1,030 LOC)
+- **Phase 15**: TLS Record Layer Encryption (~700 LOC)
+- **Phase 16**: TLS 1.3 Client Handshake (~2,640 LOC) — largest phase
+- **Phase 17**: TLS 1.3 Server + Application Data (~1,350 LOC)
+- **Phase 18**: PKCS#12 + CMS + Auth Protocols (~2,450 LOC)
+- **Phase 19**: Remaining PQC: SLH-DSA, XMSS, FrodoKEM, McEliece, SM9 (~7,000 LOC)
+- **Phase 20**: CLI Tool + Integration Tests (~1,910 LOC)
+
+Total: ~21,480 new lines, ~200 new tests, reaching ~40,000 lines / ~462 tests. Plan saved to `.claude/plans/wise-napping-lecun.md`. User approved.
+
+### Prompt 44: Update README and PROMPT_LOG
+> 请先更新readme.md和prompt_log.md
+
+**Result**: Updated both files:
+- `README.md` — Added "Roadmap" section with Phase 11-20 summary table
+- `PROMPT_LOG.md` — Added Session 13 entries (Prompts 40–44)
