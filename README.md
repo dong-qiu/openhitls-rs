@@ -127,11 +127,12 @@ openhitls-rs/
 
 | Protocol | Crate | Status |
 |----------|-------|--------|
-| TLS 1.3 | `hitls-tls` | Key Schedule + Record Encryption + Client & Server Handshake done |
-| TLS 1.2 | `hitls-tls` | Skeleton |
-| DTLS 1.2 | `hitls-tls` | Skeleton |
-| TLCP (GM/T 0024) | `hitls-tls` | Skeleton |
+| TLS 1.3 | `hitls-tls` | **Done** — Key Schedule + Record + Client & Server Handshake (no PSK/HRR/0-RTT yet) |
+| TLS 1.2 | `hitls-tls` | Planned (Phase 25) |
+| DTLS 1.2 | `hitls-tls` | Planned (Phase 26) |
+| TLCP (GM/T 0024) | `hitls-tls` | Planned (Phase 27) |
 | X.509 Certificates | `hitls-pki` | **Done** (parse + verify + chain) |
+| CRL | `hitls-pki` | Planned (Phase 24) |
 | PKCS#12 (RFC 7292) | `hitls-pki` | **Done** (parse + create) |
 | CMS SignedData (RFC 5652) | `hitls-pki` | **Done** (parse + verify + sign) |
 | HOTP (RFC 4226) | `hitls-auth` | **Done** |
@@ -201,7 +202,100 @@ Convenience feature groups:
 
 ## Roadmap
 
-All 21 phases (0-20) complete. 499 tests passing across 9 crates.
+### Completed (Phase 0-20)
+
+All cryptographic primitives, X.509, PKCS#12, CMS, TLS 1.3, auth protocols, PQC, and CLI tool implemented. 499 tests passing across 9 crates.
+
+### Remaining Migration Work
+
+The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls)) contains ~460K lines covering 48 crypto modules, 6 TLS protocol versions, and full PKI infrastructure. The Rust port currently covers ~70% of features by TLS 1.3-focused deployments. The following phases outline the remaining work to reach full parity.
+
+#### Phase 21: TLS 1.3 Completeness
+
+| Feature | RFC | Status |
+|---------|-----|--------|
+| PSK / Session Tickets | RFC 8446 §4.6.1 | Not implemented |
+| HelloRetryRequest (HRR) | RFC 8446 §4.1.4 | Not implemented |
+| 0-RTT Early Data | RFC 8446 §4.2.10 | Not implemented |
+| Post-Handshake Client Auth | RFC 8446 §4.6.2 | Not implemented |
+| KeyUpdate | RFC 8446 §4.6.3 | Stub only |
+| Certificate Compression | RFC 8879 | Not implemented |
+
+#### Phase 22: ECC Curve Additions
+
+| Curve | Standard | Status |
+|-------|----------|--------|
+| P-521 (secp521r1) | FIPS 186-4 | Not implemented |
+| Brainpool P-256r1 | RFC 5639 | Not implemented |
+| Brainpool P-384r1 | RFC 5639 | Not implemented |
+| Brainpool P-512r1 | RFC 5639 | Not implemented |
+| P-224 (secp224r1) | FIPS 186-4 | Not implemented |
+
+#### Phase 23: DRBG Variants & Cipher Modes
+
+| Component | Standard | Status |
+|-----------|----------|--------|
+| CTR-DRBG (AES-based) | NIST SP 800-90A | Not implemented (only HMAC-DRBG done) |
+| Hash-DRBG | NIST SP 800-90A | Not implemented |
+| PKCS#8 Key Parsing | RFC 5958 | Not implemented |
+
+#### Phase 24: CRL & OCSP
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| CRL Parsing | RFC 5280 §5 | Not implemented |
+| CRL Validation | RFC 5280 §6.3 | Not implemented |
+| Revocation Checking | RFC 5280 | Not implemented |
+| OCSP (basic) | RFC 6960 | Not implemented |
+
+#### Phase 25: TLS 1.2
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLS 1.2 Handshake | RFC 5246 | Not implemented |
+| TLS 1.2 Cipher Suites (50+) | RFC 5246 | Not implemented |
+| Session Resumption (ID-based) | RFC 5246 §7.4.1.2 | Not implemented |
+| Renegotiation | RFC 5746 | Not implemented |
+| TLS 1.2 Record Protocol | RFC 5246 §6 | Not implemented |
+
+#### Phase 26: DTLS
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| DTLS 1.2 Record Layer | RFC 6347 | Not implemented |
+| Message Fragmentation/Reassembly | RFC 6347 §4.2.3 | Not implemented |
+| Retransmission Timers | RFC 6347 §4.2.4 | Not implemented |
+| Cookie Exchange | RFC 6347 §4.2.1 | Not implemented |
+
+#### Phase 27: TLCP (GM/T 0024)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLCP Handshake | GM/T 0024 | Not implemented |
+| SM2/SM3/SM4 Cipher Suites | GM/T 0024 | Not implemented |
+| Double Certificate | GM/T 0024 | Not implemented |
+
+#### Phase 28: Hardware Acceleration & Production Hardening
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| AES-NI | x86-64 AES hardware instructions | Not implemented |
+| ARM NEON | ECC scalar multiplication | Not implemented |
+| AVX-512 Poly1305 | x86-64 SIMD for Poly1305 | Not implemented |
+| CPU Capability Detection | Runtime feature detection | Not implemented |
+| Network I/O Layer | Async/sync socket abstraction | Not implemented |
+| Provider/Engine System | Pluggable algorithm dispatch | Basic only |
+| Wycheproof Test Vectors | Comprehensive edge-case tests | Partial |
+| Fuzzing Harnesses | libfuzzer/AFL targets | Not implemented |
+
+### Coverage Summary (vs. C Implementation)
+
+| Component | C (lines) | Rust (lines) | Feature Coverage |
+|-----------|-----------|--------------|------------------|
+| Crypto Algorithms | ~132K | ~24K | ~90% |
+| TLS Protocol | ~52K | ~3.5K | ~30% (TLS 1.3 only) |
+| PKI / X.509 | ~17K | ~3.3K | ~60% |
+| Total | ~460K | ~27K | ~70% (TLS 1.3 deployments) |
 
 ## Minimum Supported Rust Version
 
