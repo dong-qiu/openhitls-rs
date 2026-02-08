@@ -154,6 +154,7 @@ name = "hitls-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "getrandom",
  "hitls-auth",
  "hitls-crypto",
  "hitls-pki",
@@ -172,6 +173,19 @@ dependencies = [
  "hitls-utils",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "hitls-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "hitls-auth",
+ "hitls-bignum",
+ "hitls-crypto",
+ "hitls-pki",
+ "hitls-tls",
+ "hitls-types",
+ "hitls-utils",
 ]
 
 [[package]]

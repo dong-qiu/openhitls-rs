@@ -1,5 +1,13 @@
 use clap::{Parser, Subcommand};
 
+mod crl;
+mod dgst;
+mod enc;
+mod genpkey;
+mod pkey;
+mod verify;
+mod x509cmd;
+
 /// openHiTLS command-line tool for cryptographic operations.
 #[derive(Parser)]
 #[command(name = "hitls")]
@@ -13,7 +21,7 @@ struct Cli {
 enum Commands {
     /// Hash/digest operations.
     Dgst {
-        /// Hash algorithm (sha256, sha384, sha512, sm3, etc.).
+        /// Hash algorithm (sha256, sha384, sha512, sm3, md5, sha1, sha3-256, sha3-512).
         #[arg(short, long, default_value = "sha256")]
         algorithm: String,
         /// Input file (use - for stdin).
@@ -21,7 +29,7 @@ enum Commands {
     },
     /// Symmetric encryption/decryption.
     Enc {
-        /// Cipher algorithm (aes-128-cbc, aes-256-gcm, sm4-cbc, etc.).
+        /// Cipher algorithm (aes-256-gcm).
         #[arg(short, long)]
         cipher: String,
         /// Decrypt mode.
@@ -36,13 +44,13 @@ enum Commands {
     },
     /// Generate a private key.
     Genpkey {
-        /// Algorithm (rsa, ec, ed25519, sm2, ml-kem, ml-dsa, etc.).
+        /// Algorithm (rsa, ec, ed25519, x25519, ml-kem, ml-dsa).
         #[arg(short, long)]
         algorithm: String,
         /// Key size in bits (for RSA).
         #[arg(short = 'b', long)]
         bits: Option<u32>,
-        /// Named curve (for EC algorithms).
+        /// Named curve or parameter set (for EC: P-256, P-384; for PQ: 512, 768, 1024, 44, 65, 87).
         #[arg(short, long)]
         curve: Option<String>,
         /// Output file.
@@ -130,62 +138,55 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
-    match &cli.command {
-        Commands::Dgst { algorithm, file } => {
-            eprintln!("TODO: hash {file} with {algorithm}");
-        }
+    let result = match &cli.command {
+        Commands::Dgst { algorithm, file } => dgst::run(algorithm, file),
         Commands::Enc {
             cipher,
             decrypt,
             input,
             output,
-        } => {
-            let op = if *decrypt { "decrypt" } else { "encrypt" };
-            eprintln!("TODO: {op} {input} -> {output} with {cipher}");
-        }
+        } => enc::run(cipher, *decrypt, input, output),
         Commands::Genpkey {
             algorithm,
             bits,
             curve,
             output,
-        } => {
-            eprintln!(
-                "TODO: generate {algorithm} key (bits={bits:?}, curve={curve:?}, out={output:?})"
-            );
-        }
+        } => genpkey::run(algorithm, *bits, curve.as_deref(), output.as_deref()),
         Commands::Pkey {
             input,
             pubout,
             text,
-        } => {
-            eprintln!("TODO: show key {input} (pubout={pubout}, text={text})");
-        }
+        } => pkey::run(input, *pubout, *text),
         Commands::Req {
             new,
             key,
             subj,
             output,
         } => {
-            eprintln!("TODO: CSR (new={new}, key={key:?}, subj={subj:?}, out={output:?})");
+            eprintln!(
+                "CSR generation is not yet implemented (new={new}, key={key:?}, subj={subj:?}, out={output:?})"
+            );
+            Ok(())
         }
         Commands::X509 {
             input,
             text,
             fingerprint,
-        } => {
-            eprintln!("TODO: x509 {input} (text={text}, fp={fingerprint})");
-        }
-        Commands::Verify { ca_file, cert } => {
-            eprintln!("TODO: verify {cert} against {ca_file}");
-        }
-        Commands::Crl { input, text } => {
-            eprintln!("TODO: CRL {input} (text={text})");
-        }
+        } => x509cmd::run(input, *text, *fingerprint),
+        Commands::Verify { ca_file, cert } => verify::run(ca_file, cert),
+        Commands::Crl { input, text } => crl::run(input, *text),
         Commands::SClient { connect, alpn } => {
-            eprintln!("TODO: TLS client connect to {connect} (alpn={alpn:?})");
+            eprintln!("TLS client is not yet implemented (connect={connect}, alpn={alpn:?})");
+            Ok(())
         }
         Commands::SServer { port, cert, key } => {
-            eprintln!("TODO: TLS server on :{port} (cert={cert}, key={key})");
+            eprintln!("TLS server is not yet implemented (port={port}, cert={cert}, key={key})");
+            Ok(())
         }
+    };
+
+    if let Err(e) = result {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
     }
 }

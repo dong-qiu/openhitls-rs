@@ -9,6 +9,7 @@ members = [
     "crates/hitls-pki",
     "crates/hitls-auth",
     "crates/hitls-cli",
+    "tests/interop",
 ]
 
 [workspace.package]

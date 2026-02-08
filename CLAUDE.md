@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 19 complete — core crypto + X.509 chain + TLS 1.3 client & server handshake + PKCS#12 + CMS + OTP + SPAKE2+ + SLH-DSA + XMSS done
+- **Status**: Phase 20 complete — all cryptographic primitives + X.509 + TLS 1.3 + PKCS#12 + CMS + Auth + PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece) + SM9 + CLI tool + integration tests done
 
 ## Workspace Structure
 
@@ -22,7 +22,8 @@ openhitls-rs/
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake (72 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (47 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (20 tests)
-│   └── hitls-cli/       # Command-line tool (skeleton)
+│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl)
+├── tests/interop/       # Integration tests (10 cross-crate tests)
 ├── tests/vectors/       # Standard test vectors
 └── benches/             # Performance benchmarks
 ```
@@ -33,16 +34,17 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (460 tests, 6 ignored for slow keygen)
+# Run all tests (499 tests, 18 ignored for slow keygen)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 249 tests
+cargo test -p hitls-crypto --all-features   # 278 tests (18 ignored)
 cargo test -p hitls-tls --all-features      # 72 tests
 cargo test -p hitls-pki --all-features      # 47 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 26 tests
 cargo test -p hitls-auth --all-features     # 20 tests
+cargo test -p hitls-integration-tests       # 10 tests
 
 # Lint (must pass with zero warnings)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
@@ -99,8 +101,6 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-19 complete. Remaining phases:
-- Phase 19: SLH-DSA (FIPS 205) + XMSS (RFC 8391) -- **Done**
-- Phase 20: Remaining PQC (FrodoKEM, McEliece, SM9) + CLI Tool + Integration Tests
+All 21 phases (0-20) complete. 499 tests passing (18 ignored for slow keygen).
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

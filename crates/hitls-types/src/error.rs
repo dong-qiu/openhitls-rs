@@ -128,6 +128,12 @@ pub enum CryptoError {
     XmssKeyExpired,
     #[error("xmss: merkle tree root mismatch")]
     XmssMerkleRootMismatch,
+
+    // McEliece errors
+    #[error("mceliece: keygen failed")]
+    McElieceKeygenFail,
+    #[error("mceliece: decode failed")]
+    McElieceDecodeFail,
 }
 
 /// TLS protocol errors.
