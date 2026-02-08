@@ -1906,3 +1906,50 @@ Used real 3-cert RSA chain from C project (`testcode/testdata/tls/certificate/pe
 
 ### Migration Complete
 All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
+
+---
+
+## Phase 21, Step 3: PSK / Session Tickets
+
+- Implemented PSK session resumption for TLS 1.3 (RFC 8446 §4.2.11, §4.6.1)
+- Added NewSessionTicket codec (encode/decode), ticket encryption/decryption (XOR + HMAC)
+- Added PSK extension codec: pre_shared_key (CH/SH), psk_key_exchange_modes
+- Added KeySchedule methods: derive_binder_key, derive_resumption_psk
+- Client: PSK in ClientHello with binder computation, PSK mode detection, NST processing
+- Server: PSK verification (binder check), PSK mode (skip cert/CV), NST generation
+- Connection: server sends NST post-handshake, client handles NST in read() loop
+- InMemorySessionCache with max-size eviction
+- 8 new tests: session resumption roundtrip, NST generation, ticket encrypt/decrypt, binder computation, cache operations, PSK extension codec, resumption_master_secret derivation
+- 97 TLS tests, 524 workspace total
+
+---
+
+## Phase 21, Step 4: 0-RTT Early Data
+
+- Implemented 0-RTT Early Data for TLS 1.3 (RFC 8446 §4.2.10, §2.3)
+- Added EndOfEarlyData codec (encode/decode) for handshake message type
+- Added KeySchedule method: derive_early_traffic_secret (client_early_traffic_secret from PSK-based early secret)
+- Added early_data extension support in ClientHello, EncryptedExtensions, and NewSessionTicket
+- Connection integration: queue_early_data for client-side 0-RTT data, EndOfEarlyData (EOED) flow for transitioning out of early data
+- Server-side: early data acceptance/rejection logic in EncryptedExtensions
+- 5 new tests: test_end_of_early_data_codec, test_early_data_accepted, test_early_data_rejected, test_early_data_multiple_records, test_early_data_nst_extension
+- **Key bugs fixed:**
+  1. Server early traffic secret was derived from Hash(CH||SH) instead of Hash(CH) — fixed by moving early key derivation before ServerHello in build_server_flight
+  2. Client app traffic secrets were derived from Hash(CH..SF..EOED) instead of Hash(CH..SF) — fixed by reordering EOED transcript update to after app secret derivation per RFC 8446 §7.1
+- 102 TLS tests, 529 workspace total
+
+---
+
+## Phase 21, Step 5: Post-Handshake Client Auth
+
+- Implemented Post-Handshake Client Authentication for TLS 1.3 (RFC 8446 §4.6.2)
+- CertificateRequest codec (encode/decode) in codec.rs
+- build_post_handshake_auth() extension in extensions_codec.rs
+- Config additions: client_certificate_chain, client_private_key, post_handshake_auth
+- is_server parameter added to sign_certificate_verify and verify_certificate_verify
+- Client: handle_post_hs_cert_request method, builds Certificate + CertificateVerify + Finished response
+- Server: request_client_auth() method on TlsServerConnection, sends CertificateRequest, reads/verifies client response
+- Helper: build_ed25519_der_cert() for building test certs
+- **Bug fixed**: SPKI construction in cert builder was missing AlgorithmIdentifier SEQUENCE wrapper
+- 6 new tests: test_certificate_request_codec, test_post_hs_auth_codec, test_post_hs_auth_roundtrip, test_post_hs_auth_no_cert, test_post_hs_auth_not_offered, test_post_hs_auth_server_not_connected
+- 108 TLS tests, 535 workspace total

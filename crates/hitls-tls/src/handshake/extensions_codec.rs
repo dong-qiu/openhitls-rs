@@ -105,6 +105,197 @@ pub fn build_key_share_sh(group: NamedGroup, public_key: &[u8]) -> Extension {
     }
 }
 
+/// Build a `key_share` extension for HelloRetryRequest (selected group only, no key data).
+/// Format: group(2) — just the selected NamedGroup.
+pub fn build_key_share_hrr(group: NamedGroup) -> Extension {
+    Extension {
+        extension_type: ExtensionType::KEY_SHARE,
+        data: group.0.to_be_bytes().to_vec(),
+    }
+}
+
+/// Build a `cookie` extension (RFC 8446 §4.2.2).
+/// Format: cookie_length(2) || cookie
+pub fn build_cookie(cookie: &[u8]) -> Extension {
+    let mut data = Vec::with_capacity(2 + cookie.len());
+    data.extend_from_slice(&(cookie.len() as u16).to_be_bytes());
+    data.extend_from_slice(cookie);
+    Extension {
+        extension_type: ExtensionType::COOKIE,
+        data,
+    }
+}
+
+/// Parse a `cookie` extension from data.
+/// Format: cookie_length(2) || cookie
+pub fn parse_cookie(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    if data.len() < 2 {
+        return Err(TlsError::HandshakeFailed("cookie: too short".into()));
+    }
+    let len = u16::from_be_bytes([data[0], data[1]]) as usize;
+    if data.len() < 2 + len {
+        return Err(TlsError::HandshakeFailed("cookie: truncated".into()));
+    }
+    Ok(data[2..2 + len].to_vec())
+}
+
+/// Parse the `key_share` extension from HelloRetryRequest.
+/// Format: selected_group(2) — just the group ID, no key data.
+pub fn parse_key_share_hrr(data: &[u8]) -> Result<NamedGroup, TlsError> {
+    if data.len() < 2 {
+        return Err(TlsError::HandshakeFailed("key_share HRR: too short".into()));
+    }
+    Ok(NamedGroup(u16::from_be_bytes([data[0], data[1]])))
+}
+
+// ---------------------------------------------------------------------------
+// PSK extensions
+// ---------------------------------------------------------------------------
+
+/// Build the `psk_key_exchange_modes` extension (RFC 8446 §4.2.9).
+/// Advertises psk_dhe_ke (1) mode only.
+pub fn build_psk_key_exchange_modes() -> Extension {
+    // Format: list_length(1) || mode(1)
+    Extension {
+        extension_type: ExtensionType::PSK_KEY_EXCHANGE_MODES,
+        data: vec![0x01, 0x01], // length=1, psk_dhe_ke=1
+    }
+}
+
+/// Parse `psk_key_exchange_modes` extension.
+/// Returns the list of PSK modes.
+pub fn parse_psk_key_exchange_modes(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    if data.is_empty() {
+        return Err(TlsError::HandshakeFailed(
+            "psk_key_exchange_modes: empty".into(),
+        ));
+    }
+    let list_len = data[0] as usize;
+    if data.len() < 1 + list_len {
+        return Err(TlsError::HandshakeFailed(
+            "psk_key_exchange_modes: truncated".into(),
+        ));
+    }
+    Ok(data[1..1 + list_len].to_vec())
+}
+
+/// Build the `pre_shared_key` extension for ClientHello (RFC 8446 §4.2.11).
+///
+/// `identities`: list of (identity, obfuscated_ticket_age).
+/// `binders`: list of binder values (HMAC hashes).
+///
+/// **This extension MUST be the last extension in the ClientHello.**
+pub fn build_pre_shared_key_ch(identities: &[(Vec<u8>, u32)], binders: &[Vec<u8>]) -> Extension {
+    let mut data = Vec::new();
+
+    // Identities list
+    let mut id_buf = Vec::new();
+    for (identity, age) in identities {
+        id_buf.extend_from_slice(&(identity.len() as u16).to_be_bytes());
+        id_buf.extend_from_slice(identity);
+        id_buf.extend_from_slice(&age.to_be_bytes());
+    }
+    data.extend_from_slice(&(id_buf.len() as u16).to_be_bytes());
+    data.extend_from_slice(&id_buf);
+
+    // Binders list
+    let mut binder_buf = Vec::new();
+    for binder in binders {
+        binder_buf.push(binder.len() as u8);
+        binder_buf.extend_from_slice(binder);
+    }
+    data.extend_from_slice(&(binder_buf.len() as u16).to_be_bytes());
+    data.extend_from_slice(&binder_buf);
+
+    Extension {
+        extension_type: ExtensionType::PRE_SHARED_KEY,
+        data,
+    }
+}
+
+/// PSK identity: (ticket bytes, obfuscated ticket age).
+pub type PskIdentity = (Vec<u8>, u32);
+
+/// Parse the `pre_shared_key` extension from ClientHello.
+/// Returns (identities, binders) where identities = [(identity, age)].
+pub fn parse_pre_shared_key_ch(data: &[u8]) -> Result<(Vec<PskIdentity>, Vec<Vec<u8>>), TlsError> {
+    let err = |msg: &str| TlsError::HandshakeFailed(format!("pre_shared_key CH: {msg}"));
+    let mut pos = 0;
+
+    // Identities
+    if data.len() < 2 {
+        return Err(err("too short for identities length"));
+    }
+    let id_list_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+    pos += 2;
+    if data.len() < pos + id_list_len {
+        return Err(err("truncated identities"));
+    }
+    let id_end = pos + id_list_len;
+    let mut identities = Vec::new();
+    while pos < id_end {
+        if id_end - pos < 2 {
+            return Err(err("truncated identity length"));
+        }
+        let id_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+        pos += 2;
+        if id_end - pos < id_len + 4 {
+            return Err(err("truncated identity"));
+        }
+        let identity = data[pos..pos + id_len].to_vec();
+        pos += id_len;
+        let age = u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+        pos += 4;
+        identities.push((identity, age));
+    }
+
+    // Binders
+    if data.len() < pos + 2 {
+        return Err(err("too short for binders length"));
+    }
+    let binder_list_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+    pos += 2;
+    if data.len() < pos + binder_list_len {
+        return Err(err("truncated binders"));
+    }
+    let binder_end = pos + binder_list_len;
+    let mut binders = Vec::new();
+    while pos < binder_end {
+        if binder_end - pos < 1 {
+            return Err(err("truncated binder length"));
+        }
+        let binder_len = data[pos] as usize;
+        pos += 1;
+        if binder_end - pos < binder_len {
+            return Err(err("truncated binder"));
+        }
+        binders.push(data[pos..pos + binder_len].to_vec());
+        pos += binder_len;
+    }
+
+    Ok((identities, binders))
+}
+
+/// Build the `pre_shared_key` extension for ServerHello (RFC 8446 §4.2.11).
+/// Contains the selected identity index (2 bytes).
+pub fn build_pre_shared_key_sh(selected_identity: u16) -> Extension {
+    Extension {
+        extension_type: ExtensionType::PRE_SHARED_KEY,
+        data: selected_identity.to_be_bytes().to_vec(),
+    }
+}
+
+/// Parse the `pre_shared_key` extension from ServerHello.
+/// Returns the selected identity index.
+pub fn parse_pre_shared_key_sh(data: &[u8]) -> Result<u16, TlsError> {
+    if data.len() < 2 {
+        return Err(TlsError::HandshakeFailed(
+            "pre_shared_key SH: too short".into(),
+        ));
+    }
+    Ok(u16::from_be_bytes([data[0], data[1]]))
+}
+
 // ---------------------------------------------------------------------------
 // Parse extensions from ClientHello
 // ---------------------------------------------------------------------------
@@ -274,6 +465,47 @@ fn parse_extensions_raw(data: &[u8]) -> Result<Vec<Extension>, TlsError> {
 }
 
 // ---------------------------------------------------------------------------
+// Early Data (0-RTT) extensions
+// ---------------------------------------------------------------------------
+
+/// Build `early_data` extension for ClientHello (empty, just indicates intent).
+pub fn build_early_data_ch() -> Extension {
+    Extension {
+        extension_type: ExtensionType::EARLY_DATA,
+        data: vec![],
+    }
+}
+
+/// Build `early_data` extension for EncryptedExtensions (empty, indicates server acceptance).
+pub fn build_early_data_ee() -> Extension {
+    Extension {
+        extension_type: ExtensionType::EARLY_DATA,
+        data: vec![],
+    }
+}
+
+/// Build `early_data` extension for NewSessionTicket (4-byte max_early_data_size).
+pub fn build_early_data_nst(max_size: u32) -> Extension {
+    Extension {
+        extension_type: ExtensionType::EARLY_DATA,
+        data: max_size.to_be_bytes().to_vec(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Post-Handshake Auth extension
+// ---------------------------------------------------------------------------
+
+/// Build post_handshake_auth extension (empty, for ClientHello).
+/// Indicates client willingness to respond to post-handshake CertificateRequest.
+pub fn build_post_handshake_auth() -> Extension {
+    Extension {
+        extension_type: ExtensionType::POST_HANDSHAKE_AUTH,
+        data: vec![],
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -413,5 +645,67 @@ mod tests {
         let (group, key) = parse_key_share_sh(&data).unwrap();
         assert_eq!(group, NamedGroup::X25519);
         assert_eq!(key, vec![0x42; 32]);
+    }
+
+    #[test]
+    fn test_build_parse_key_share_hrr() {
+        let ext = build_key_share_hrr(NamedGroup::SECP256R1);
+        assert_eq!(ext.extension_type, ExtensionType::KEY_SHARE);
+        // HRR key_share: just group(2), no key data
+        assert_eq!(ext.data.len(), 2);
+        let group = parse_key_share_hrr(&ext.data).unwrap();
+        assert_eq!(group, NamedGroup::SECP256R1);
+    }
+
+    #[test]
+    fn test_build_parse_cookie() {
+        let cookie = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03];
+        let ext = build_cookie(&cookie);
+        assert_eq!(ext.extension_type, ExtensionType::COOKIE);
+        let parsed = parse_cookie(&ext.data).unwrap();
+        assert_eq!(parsed, cookie);
+
+        // Empty cookie
+        let ext2 = build_cookie(&[]);
+        let parsed2 = parse_cookie(&ext2.data).unwrap();
+        assert!(parsed2.is_empty());
+
+        // Truncated data
+        assert!(parse_cookie(&[0x00]).is_err());
+    }
+
+    #[test]
+    fn test_build_parse_psk_key_exchange_modes() {
+        let ext = build_psk_key_exchange_modes();
+        assert_eq!(ext.extension_type, ExtensionType::PSK_KEY_EXCHANGE_MODES);
+        let modes = parse_psk_key_exchange_modes(&ext.data).unwrap();
+        assert_eq!(modes, vec![0x01]); // psk_dhe_ke
+    }
+
+    #[test]
+    fn test_build_parse_pre_shared_key_ch() {
+        let identities = vec![(vec![0xAA; 32], 12345u32)];
+        let binders = vec![vec![0xBB; 32]];
+        let ext = build_pre_shared_key_ch(&identities, &binders);
+        assert_eq!(ext.extension_type, ExtensionType::PRE_SHARED_KEY);
+
+        let (parsed_ids, parsed_binders) = parse_pre_shared_key_ch(&ext.data).unwrap();
+        assert_eq!(parsed_ids.len(), 1);
+        assert_eq!(parsed_ids[0].0, vec![0xAA; 32]);
+        assert_eq!(parsed_ids[0].1, 12345);
+        assert_eq!(parsed_binders.len(), 1);
+        assert_eq!(parsed_binders[0], vec![0xBB; 32]);
+    }
+
+    #[test]
+    fn test_build_parse_pre_shared_key_sh() {
+        let ext = build_pre_shared_key_sh(0);
+        assert_eq!(ext.extension_type, ExtensionType::PRE_SHARED_KEY);
+        let idx = parse_pre_shared_key_sh(&ext.data).unwrap();
+        assert_eq!(idx, 0);
+
+        let ext2 = build_pre_shared_key_sh(3);
+        let idx2 = parse_pre_shared_key_sh(&ext2.data).unwrap();
+        assert_eq!(idx2, 3);
     }
 }

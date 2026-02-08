@@ -62,6 +62,51 @@ pub struct FinishedMsg {
     pub verify_data: Vec<u8>,
 }
 
+/// SHA-256 hash of "HelloRetryRequest" — magic random value for HRR (RFC 8446 §4.1.3).
+pub const HELLO_RETRY_REQUEST_RANDOM: [u8; 32] = [
+    0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11, 0xBE, 0x1D, 0x8C, 0x02, 0x1E, 0x65, 0xB8, 0x91,
+    0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB, 0x8C, 0x5E, 0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C,
+];
+
+/// NewSessionTicket message (RFC 8446 §4.6.1).
+#[derive(Debug, Clone)]
+pub struct NewSessionTicketMsg {
+    /// Ticket lifetime in seconds (max 604800 = 7 days).
+    pub ticket_lifetime: u32,
+    /// Random value added to the ticket age for obfuscation.
+    pub ticket_age_add: u32,
+    /// Ticket nonce (for PSK derivation).
+    pub ticket_nonce: Vec<u8>,
+    /// Opaque ticket value.
+    pub ticket: Vec<u8>,
+    /// Extensions (e.g., early_data max_size).
+    pub extensions: Vec<Extension>,
+}
+
+/// CertificateRequest message (RFC 8446 §4.3.2 / §4.6.2).
+#[derive(Debug, Clone)]
+pub struct CertificateRequestMsg {
+    /// certificate_request_context (opaque, 0-255 bytes).
+    /// Empty for in-handshake CertReq; random for post-handshake.
+    pub certificate_request_context: Vec<u8>,
+    /// Extensions (must include signature_algorithms).
+    pub extensions: Vec<Extension>,
+}
+
+/// KeyUpdate request type (RFC 8446 §4.6.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum KeyUpdateRequest {
+    UpdateNotRequested = 0,
+    UpdateRequested = 1,
+}
+
+/// KeyUpdate message.
+#[derive(Debug, Clone)]
+pub struct KeyUpdateMsg {
+    pub request_update: KeyUpdateRequest,
+}
+
 // ---------------------------------------------------------------------------
 // Handshake header
 // ---------------------------------------------------------------------------
@@ -348,6 +393,189 @@ pub fn decode_finished(data: &[u8], hash_len: usize) -> Result<FinishedMsg, TlsE
 /// Encode a Finished message as a complete handshake message.
 pub fn encode_finished(verify_data: &[u8]) -> Vec<u8> {
     wrap_handshake(HandshakeType::Finished, verify_data)
+}
+
+// ---------------------------------------------------------------------------
+// Encode/Decode KeyUpdate
+// ---------------------------------------------------------------------------
+
+/// Encode a KeyUpdate message as a complete handshake message.
+pub fn encode_key_update(ku: &KeyUpdateMsg) -> Vec<u8> {
+    wrap_handshake(HandshakeType::KeyUpdate, &[ku.request_update as u8])
+}
+
+/// Decode a KeyUpdate message from handshake body bytes.
+pub fn decode_key_update(data: &[u8]) -> Result<KeyUpdateMsg, TlsError> {
+    if data.is_empty() {
+        return Err(TlsError::HandshakeFailed("KeyUpdate: empty body".into()));
+    }
+    let request_update = match data[0] {
+        0 => KeyUpdateRequest::UpdateNotRequested,
+        1 => KeyUpdateRequest::UpdateRequested,
+        v => {
+            return Err(TlsError::HandshakeFailed(format!(
+                "KeyUpdate: invalid request_update: {v}"
+            )))
+        }
+    };
+    Ok(KeyUpdateMsg { request_update })
+}
+
+// ---------------------------------------------------------------------------
+// Encode/Decode NewSessionTicket
+// ---------------------------------------------------------------------------
+
+/// Encode a NewSessionTicket message as a complete handshake message.
+pub fn encode_new_session_ticket(nst: &NewSessionTicketMsg) -> Vec<u8> {
+    let mut body = Vec::with_capacity(32 + nst.ticket_nonce.len() + nst.ticket.len());
+
+    // ticket_lifetime (4)
+    body.extend_from_slice(&nst.ticket_lifetime.to_be_bytes());
+    // ticket_age_add (4)
+    body.extend_from_slice(&nst.ticket_age_add.to_be_bytes());
+    // ticket_nonce (1-byte len + nonce)
+    body.push(nst.ticket_nonce.len() as u8);
+    body.extend_from_slice(&nst.ticket_nonce);
+    // ticket (2-byte len + ticket)
+    body.extend_from_slice(&(nst.ticket.len() as u16).to_be_bytes());
+    body.extend_from_slice(&nst.ticket);
+    // extensions (2-byte len + extensions)
+    let ext_data = encode_extensions(&nst.extensions);
+    body.extend_from_slice(&(ext_data.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ext_data);
+
+    wrap_handshake(HandshakeType::NewSessionTicket, &body)
+}
+
+/// Decode a NewSessionTicket message from handshake body bytes.
+pub fn decode_new_session_ticket(data: &[u8]) -> Result<NewSessionTicketMsg, TlsError> {
+    let mut pos = 0;
+    let err = |msg: &str| TlsError::HandshakeFailed(format!("NewSessionTicket: {msg}"));
+
+    // ticket_lifetime (4)
+    if data.len() < pos + 4 {
+        return Err(err("too short for lifetime"));
+    }
+    let ticket_lifetime =
+        u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+    pos += 4;
+
+    // ticket_age_add (4)
+    if data.len() < pos + 4 {
+        return Err(err("too short for age_add"));
+    }
+    let ticket_age_add =
+        u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+    pos += 4;
+
+    // ticket_nonce (1-byte len + nonce)
+    if data.len() < pos + 1 {
+        return Err(err("too short for nonce length"));
+    }
+    let nonce_len = data[pos] as usize;
+    pos += 1;
+    if data.len() < pos + nonce_len {
+        return Err(err("truncated nonce"));
+    }
+    let ticket_nonce = data[pos..pos + nonce_len].to_vec();
+    pos += nonce_len;
+
+    // ticket (2-byte len + ticket)
+    if data.len() < pos + 2 {
+        return Err(err("too short for ticket length"));
+    }
+    let ticket_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+    pos += 2;
+    if data.len() < pos + ticket_len {
+        return Err(err("truncated ticket"));
+    }
+    let ticket = data[pos..pos + ticket_len].to_vec();
+    pos += ticket_len;
+
+    // extensions (2-byte len + extensions)
+    let extensions = if data.len() > pos {
+        parse_extensions_from(&data[pos..])?
+    } else {
+        vec![]
+    };
+
+    Ok(NewSessionTicketMsg {
+        ticket_lifetime,
+        ticket_age_add,
+        ticket_nonce,
+        ticket,
+        extensions,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Encode EndOfEarlyData
+// ---------------------------------------------------------------------------
+
+/// Encode an EndOfEarlyData message as a complete handshake message (empty body).
+pub fn encode_end_of_early_data() -> Vec<u8> {
+    wrap_handshake(HandshakeType::EndOfEarlyData, &[])
+}
+
+// ---------------------------------------------------------------------------
+// Encode/Decode CertificateRequest
+// ---------------------------------------------------------------------------
+
+/// Encode a CertificateRequest as a complete handshake message (header + body).
+///
+/// Format: context_len(1) || context || extensions_len(2) || extensions
+pub fn encode_certificate_request(cr: &CertificateRequestMsg) -> Vec<u8> {
+    let mut body = Vec::new();
+
+    // certificate_request_context (1-byte length prefix)
+    body.push(cr.certificate_request_context.len() as u8);
+    body.extend_from_slice(&cr.certificate_request_context);
+
+    // extensions (2-byte length prefix)
+    let ext_bytes = encode_extensions(&cr.extensions);
+    body.extend_from_slice(&(ext_bytes.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ext_bytes);
+
+    wrap_handshake(HandshakeType::CertificateRequest, &body)
+}
+
+/// Decode a CertificateRequest from handshake body bytes (after header).
+pub fn decode_certificate_request(data: &[u8]) -> Result<CertificateRequestMsg, TlsError> {
+    let mut pos = 0;
+    let err = |msg: &str| TlsError::HandshakeFailed(format!("CertificateRequest: {msg}"));
+
+    if data.is_empty() {
+        return Err(err("empty"));
+    }
+
+    // certificate_request_context
+    let ctx_len = data[pos] as usize;
+    pos += 1;
+    if data.len() < pos + ctx_len {
+        return Err(err("truncated context"));
+    }
+    let certificate_request_context = data[pos..pos + ctx_len].to_vec();
+    pos += ctx_len;
+
+    // extensions
+    if data.len() < pos + 2 {
+        return Err(err("truncated extensions length"));
+    }
+    let ext_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+    pos += 2;
+    if data.len() < pos + ext_len {
+        return Err(err("truncated extensions"));
+    }
+    let extensions = if ext_len > 0 {
+        parse_extensions_list(&data[pos..pos + ext_len])?
+    } else {
+        vec![]
+    };
+
+    Ok(CertificateRequestMsg {
+        certificate_request_context,
+        extensions,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -819,5 +1047,96 @@ mod tests {
         assert_eq!(ty, HandshakeType::Finished);
         assert_eq!(parsed_body, &body);
         assert_eq!(consumed, msg.len());
+    }
+
+    #[test]
+    fn test_key_update_codec_roundtrip() {
+        // UpdateRequested
+        let ku = KeyUpdateMsg {
+            request_update: KeyUpdateRequest::UpdateRequested,
+        };
+        let encoded = encode_key_update(&ku);
+        let (msg_type, body, total) = parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::KeyUpdate);
+        assert_eq!(total, encoded.len());
+        assert_eq!(body.len(), 1);
+        let decoded = decode_key_update(body).unwrap();
+        assert_eq!(decoded.request_update, KeyUpdateRequest::UpdateRequested);
+
+        // UpdateNotRequested
+        let ku2 = KeyUpdateMsg {
+            request_update: KeyUpdateRequest::UpdateNotRequested,
+        };
+        let encoded2 = encode_key_update(&ku2);
+        let (_, body2, _) = parse_handshake_header(&encoded2).unwrap();
+        let decoded2 = decode_key_update(body2).unwrap();
+        assert_eq!(
+            decoded2.request_update,
+            KeyUpdateRequest::UpdateNotRequested
+        );
+
+        // Invalid value
+        assert!(decode_key_update(&[2]).is_err());
+        assert!(decode_key_update(&[]).is_err());
+    }
+
+    #[test]
+    fn test_end_of_early_data_codec() {
+        let encoded = encode_end_of_early_data();
+        let (msg_type, body, total) = parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::EndOfEarlyData);
+        assert_eq!(total, 4); // 4-byte header, empty body
+        assert_eq!(encoded.len(), 4);
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn test_new_session_ticket_codec_roundtrip() {
+        let nst = NewSessionTicketMsg {
+            ticket_lifetime: 3600,
+            ticket_age_add: 0xDEADBEEF,
+            ticket_nonce: vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08],
+            ticket: vec![0xAA; 64],
+            extensions: vec![],
+        };
+        let encoded = encode_new_session_ticket(&nst);
+        let (msg_type, body, total) = parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::NewSessionTicket);
+        assert_eq!(total, encoded.len());
+
+        let decoded = decode_new_session_ticket(body).unwrap();
+        assert_eq!(decoded.ticket_lifetime, 3600);
+        assert_eq!(decoded.ticket_age_add, 0xDEADBEEF);
+        assert_eq!(
+            decoded.ticket_nonce,
+            vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+        );
+        assert_eq!(decoded.ticket, vec![0xAA; 64]);
+        assert!(decoded.extensions.is_empty());
+    }
+
+    #[test]
+    fn test_certificate_request_codec() {
+        use crate::extensions::ExtensionType;
+
+        let cr = CertificateRequestMsg {
+            certificate_request_context: vec![0x01, 0x02, 0x03],
+            extensions: vec![Extension {
+                extension_type: ExtensionType::SIGNATURE_ALGORITHMS,
+                data: vec![0x00, 0x02, 0x08, 0x07], // list_len=2, ed25519=0x0807
+            }],
+        };
+        let encoded = encode_certificate_request(&cr);
+        let (msg_type, body, total) = parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::CertificateRequest);
+        assert_eq!(total, encoded.len());
+
+        let decoded = decode_certificate_request(body).unwrap();
+        assert_eq!(decoded.certificate_request_context, vec![0x01, 0x02, 0x03]);
+        assert_eq!(decoded.extensions.len(), 1);
+        assert_eq!(
+            decoded.extensions[0].extension_type,
+            ExtensionType::SIGNATURE_ALGORITHMS
+        );
     }
 }

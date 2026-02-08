@@ -28,18 +28,19 @@ pub fn build_verify_content(transcript_hash: &[u8], is_server: bool) -> Vec<u8> 
     content
 }
 
-/// Verify a server's CertificateVerify signature.
+/// Verify a CertificateVerify signature.
 ///
-/// Parses the server certificate's public key, constructs the verify content
+/// Parses the certificate's public key, constructs the verify content
 /// from the transcript hash, and verifies the signature using the appropriate
-/// algorithm.
+/// algorithm. `is_server` selects the context string.
 pub fn verify_certificate_verify(
     cert: &Certificate,
     scheme: SignatureScheme,
     signature: &[u8],
     transcript_hash: &[u8],
+    is_server: bool,
 ) -> Result<(), TlsError> {
-    let content = build_verify_content(transcript_hash, true);
+    let content = build_verify_content(transcript_hash, is_server);
     let spki = &cert.public_key;
 
     let ok = match scheme {

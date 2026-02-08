@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 20 complete — all cryptographic primitives + X.509 + TLS 1.3 + PKCS#12 + CMS + Auth + PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece) + SM9 + CLI tool + integration tests done
+- **Status**: Phase 21 complete — all TLS 1.3 features
 
 ## Workspace Structure
 
@@ -19,7 +19,7 @@ openhitls-rs/
 │   ├── hitls-utils/     # ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
 │   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake (72 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth (108 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (47 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl)
@@ -34,12 +34,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (499 tests, 18 ignored for slow keygen)
+# Run all tests (535 tests, 18 ignored for slow keygen)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 278 tests (18 ignored)
-cargo test -p hitls-tls --all-features      # 72 tests
+cargo test -p hitls-tls --all-features      # 108 tests
 cargo test -p hitls-pki --all-features      # 47 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 26 tests
@@ -101,6 +101,6 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-All 21 phases (0-20) complete. 499 tests passing (18 ignored for slow keygen).
+All 21 phases (0-20) complete, plus Phase 21 Steps 3-5 (PSK/Session Tickets, 0-RTT Early Data, Post-Handshake Client Auth). 535 tests passing (18 ignored for slow keygen).
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

@@ -252,6 +252,64 @@ impl KeySchedule {
         hmac_hash(&*self.hash_factory, finished_key, transcript_hash)
     }
 
+    /// Derive the client early traffic secret (for 0-RTT data).
+    ///
+    /// `transcript_hash` = Hash(ClientHello).
+    ///
+    /// `client_early_traffic_secret = Derive-Secret(ES, "c e traffic", CH_hash)`
+    pub fn derive_early_traffic_secret(&self, transcript_hash: &[u8]) -> Result<Vec<u8>, TlsError> {
+        if self.stage != KeyScheduleStage::EarlySecret {
+            return Err(TlsError::HandshakeFailed(
+                "derive_early_traffic_secret: wrong stage".into(),
+            ));
+        }
+        derive_secret(
+            &*self.hash_factory,
+            &self.current_secret,
+            b"c e traffic",
+            transcript_hash,
+        )
+    }
+
+    /// Derive binder key from the Early Secret (for PSK binder verification).
+    ///
+    /// For resumption PSK: label = "res binder".
+    /// For external PSK: label = "ext binder".
+    pub fn derive_binder_key(&self, external: bool) -> Result<Vec<u8>, TlsError> {
+        if self.stage != KeyScheduleStage::EarlySecret {
+            return Err(TlsError::HandshakeFailed(
+                "derive_binder_key: wrong stage".into(),
+            ));
+        }
+        let label: &[u8] = if external {
+            b"ext binder"
+        } else {
+            b"res binder"
+        };
+        let empty_hash = self.empty_hash()?;
+        derive_secret(
+            &*self.hash_factory,
+            &self.current_secret,
+            label,
+            &empty_hash,
+        )
+    }
+
+    /// Derive resumption PSK from the resumption master secret and a ticket nonce.
+    ///
+    /// `resumption_psk = HKDF-Expand-Label(rms, "resumption", nonce, Hash.length)`
+    ///
+    /// This can be called at any stage since it doesn't use the current secret.
+    pub fn derive_resumption_psk(&self, rms: &[u8], nonce: &[u8]) -> Result<Vec<u8>, TlsError> {
+        hkdf_expand_label(
+            &*self.hash_factory,
+            rms,
+            b"resumption",
+            nonce,
+            self.params.hash_len,
+        )
+    }
+
     /// Update traffic secret for post-handshake key update.
     ///
     /// `new_secret = HKDF-Expand-Label(current_secret, "traffic upd", "", Hash.length)`

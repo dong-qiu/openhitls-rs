@@ -18,20 +18,43 @@ use zeroize::Zeroize;
 
 use super::codec::{
     decode_certificate, decode_certificate_verify, decode_encrypted_extensions, decode_finished,
-    decode_server_hello, encode_client_hello, encode_finished, ClientHello,
+    decode_new_session_ticket, decode_server_hello, encode_client_hello, encode_end_of_early_data,
+    encode_finished, ClientHello, HELLO_RETRY_REQUEST_RANDOM,
 };
 use super::extensions_codec::{
-    build_key_share_ch, build_server_name, build_signature_algorithms, build_supported_groups,
-    build_supported_versions_ch, parse_key_share_sh, parse_supported_versions_sh,
+    build_cookie, build_early_data_ch, build_key_share_ch, build_post_handshake_auth,
+    build_pre_shared_key_ch, build_psk_key_exchange_modes, build_server_name,
+    build_signature_algorithms, build_supported_groups, build_supported_versions_ch, parse_cookie,
+    parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh, parse_supported_versions_sh,
 };
 use super::key_exchange::KeyExchange;
 use super::verify::verify_certificate_verify;
 use super::HandshakeState;
 
+use crate::session::TlsSession;
+
+/// Result from processing ServerHello: either normal or HRR.
+pub enum ServerHelloResult {
+    /// Normal ServerHello — activate handshake encryption.
+    Actions(ServerHelloActions),
+    /// HelloRetryRequest — need to send a new ClientHello.
+    RetryNeeded(RetryActions),
+}
+
 /// Actions to take after processing ServerHello.
 pub struct ServerHelloActions {
     pub server_hs_keys: TrafficKeys,
     pub client_hs_keys: TrafficKeys,
+    pub suite: CipherSuite,
+}
+
+/// Info for building the retried ClientHello after HRR.
+pub struct RetryActions {
+    /// The group the server selected for key exchange.
+    pub selected_group: NamedGroup,
+    /// Cookie from the HRR (if present).
+    pub cookie: Option<Vec<u8>>,
+    /// The negotiated cipher suite.
     pub suite: CipherSuite,
 }
 
@@ -42,6 +65,17 @@ pub struct FinishedActions {
     pub client_app_keys: TrafficKeys,
     pub server_app_keys: TrafficKeys,
     pub suite: CipherSuite,
+    /// Raw client application traffic secret (for key updates).
+    pub client_app_secret: Vec<u8>,
+    /// Raw server application traffic secret (for key updates).
+    pub server_app_secret: Vec<u8>,
+    /// Cipher suite parameters (for key updates).
+    pub cipher_params: CipherSuiteParams,
+    /// Resumption master secret (for deriving PSKs from NewSessionTickets).
+    pub resumption_master_secret: Vec<u8>,
+    /// EndOfEarlyData message to send (if 0-RTT was accepted).
+    /// Must be sent encrypted with 0-RTT write key before switching to HS write key.
+    pub end_of_early_data_msg: Option<Vec<u8>>,
 }
 
 /// Client handshake state machine.
@@ -60,12 +94,28 @@ pub struct ClientHandshake {
     client_hs_secret: Vec<u8>,
     /// Server handshake traffic secret (for finished key).
     server_hs_secret: Vec<u8>,
+    /// Whether a HelloRetryRequest has been processed.
+    hrr_done: bool,
+    /// PSK for session resumption (stored during build_client_hello).
+    psk: Option<Vec<u8>>,
+    /// Whether PSK mode was accepted by the server.
+    psk_mode: bool,
+    /// Whether we offered 0-RTT early data in the ClientHello.
+    offered_early_data: bool,
+    /// Whether the server accepted 0-RTT early data.
+    early_data_accepted: bool,
+    /// Client early traffic secret (for 0-RTT encryption).
+    early_traffic_secret: Vec<u8>,
 }
 
 impl Drop for ClientHandshake {
     fn drop(&mut self) {
         self.client_hs_secret.zeroize();
         self.server_hs_secret.zeroize();
+        self.early_traffic_secret.zeroize();
+        if let Some(ref mut psk) = self.psk {
+            psk.zeroize();
+        }
     }
 }
 
@@ -87,12 +137,34 @@ impl ClientHandshake {
             client_hello_msg: Vec::new(),
             client_hs_secret: Vec::new(),
             server_hs_secret: Vec::new(),
+            hrr_done: false,
+            psk: None,
+            psk_mode: false,
+            offered_early_data: false,
+            early_data_accepted: false,
+            early_traffic_secret: Vec::new(),
         }
     }
 
     /// Current handshake state.
     pub fn state(&self) -> HandshakeState {
         self.state
+    }
+
+    /// Whether 0-RTT early data was offered in the ClientHello.
+    pub fn offered_early_data(&self) -> bool {
+        self.offered_early_data
+    }
+
+    /// Whether the server accepted 0-RTT early data.
+    pub fn early_data_accepted(&self) -> bool {
+        self.early_data_accepted
+    }
+
+    /// The client early traffic secret (for 0-RTT encryption).
+    /// Only valid if `offered_early_data()` is true.
+    pub fn early_traffic_secret(&self) -> &[u8] {
+        &self.early_traffic_secret
     }
 
     /// Build the ClientHello handshake message.
@@ -128,6 +200,24 @@ impl ClientHandshake {
         if let Some(ref name) = self.config.server_name {
             extensions.push(build_server_name(name));
         }
+        if self.config.post_handshake_auth {
+            extensions.push(build_post_handshake_auth());
+        }
+
+        // PSK extensions (pre_shared_key MUST be last)
+        let has_psk = self.config.resumption_session.is_some();
+        let offer_early_data = has_psk
+            && self
+                .config
+                .resumption_session
+                .as_ref()
+                .is_some_and(|s| s.max_early_data > 0);
+        if has_psk {
+            extensions.push(build_psk_key_exchange_modes());
+        }
+        if offer_early_data {
+            extensions.push(build_early_data_ch());
+        }
 
         let ch = ClientHello {
             random,
@@ -136,7 +226,126 @@ impl ClientHandshake {
             extensions,
         };
 
-        let msg = encode_client_hello(&ch);
+        let mut msg = encode_client_hello(&ch);
+
+        // If we have a resumption session, append PSK extension with binder
+        if let Some(ref session) = self.config.resumption_session {
+            let psk = session.psk.clone();
+            let ticket = session.ticket.clone().unwrap_or_default();
+            let age_add = session.ticket_age_add;
+
+            // Compute obfuscated ticket age
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let real_age_ms = now.saturating_sub(session.created_at) * 1000;
+            let obfuscated_age = (real_age_ms as u32).wrapping_add(age_add);
+
+            // Determine hash length from the session's cipher suite
+            let params = CipherSuiteParams::from_suite(session.cipher_suite)?;
+            let hash_len = params.hash_len;
+
+            // Build pre_shared_key extension with placeholder binder
+            let placeholder_binder = vec![0u8; hash_len];
+            let psk_ext =
+                build_pre_shared_key_ch(&[(ticket, obfuscated_age)], &[placeholder_binder]);
+
+            // Append the PSK extension to the CH message
+            // The CH message format: type(1) || len(3) || body
+            // body: version(2) || random(32) || session_id_len(1) || session_id ||
+            //       suites_len(2) || suites || comp_len(1) || comp || ext_len(2) || extensions...
+            // We need to:
+            // 1. Encode the extension
+            // 2. Append it to the extensions block
+            // 3. Update the extensions length and the handshake message length
+            let ext_data = {
+                let mut buf = Vec::new();
+                buf.extend_from_slice(&psk_ext.extension_type.0.to_be_bytes());
+                buf.extend_from_slice(&(psk_ext.data.len() as u16).to_be_bytes());
+                buf.extend_from_slice(&psk_ext.data);
+                buf
+            };
+
+            // Update extensions length (last 2 bytes before extensions start)
+            // Find extensions_len position: it's at msg[4 + body_offset]
+            // Easier approach: update the raw bytes
+            // Current msg length before adding PSK ext
+            let old_msg_len = msg.len();
+
+            // Append extension bytes
+            msg.extend_from_slice(&ext_data);
+
+            // Update handshake message length (bytes 1..4, 3 bytes big-endian)
+            let new_body_len = msg.len() - 4;
+            msg[1] = ((new_body_len >> 16) & 0xFF) as u8;
+            msg[2] = ((new_body_len >> 8) & 0xFF) as u8;
+            msg[3] = (new_body_len & 0xFF) as u8;
+
+            // Update extensions length
+            // Extensions length is a 2-byte field right before the first extension
+            // We need to find it. In the CH body (starting at msg[4]):
+            // version(2) + random(32) + session_id_len(1) + session_id +
+            // suites_len(2) + suites + comp_len(1) + comp + ext_len(2) + extensions
+            let body = &msg[4..];
+            let mut pos = 2 + 32; // version + random
+            let sid_len = body[pos] as usize;
+            pos += 1 + sid_len;
+            let suites_len = u16::from_be_bytes([body[pos], body[pos + 1]]) as usize;
+            pos += 2 + suites_len;
+            let comp_len = body[pos] as usize;
+            pos += 1 + comp_len;
+            // pos now points to extensions_length (2 bytes)
+            let ext_len_pos = 4 + pos; // absolute position in msg
+            let old_ext_len = u16::from_be_bytes([msg[ext_len_pos], msg[ext_len_pos + 1]]) as usize;
+            let new_ext_len = old_ext_len + ext_data.len();
+            msg[ext_len_pos] = ((new_ext_len >> 8) & 0xFF) as u8;
+            msg[ext_len_pos + 1] = (new_ext_len & 0xFF) as u8;
+
+            // Now compute the binder
+            // Truncated CH = msg minus the binder tail (2 + 1 + hash_len bytes)
+            let binder_tail_size = 2 + 1 + hash_len;
+            let truncated_ch = &msg[..msg.len() - binder_tail_size];
+
+            // Set up temp KeySchedule for binder computation
+            let mut ks = KeySchedule::new(params.clone());
+            ks.derive_early_secret(Some(&psk))?;
+            let binder_key = ks.derive_binder_key(false)?;
+            let finished_key = ks.derive_finished_key(&binder_key)?;
+
+            // Hash truncated CH
+            let factory = params.hash_factory();
+            let mut hasher = (*factory)();
+            hasher.update(truncated_ch).map_err(TlsError::CryptoError)?;
+            let mut hash = vec![0u8; hash_len];
+            hasher.finish(&mut hash).map_err(TlsError::CryptoError)?;
+
+            // Compute binder
+            let binder = ks.compute_finished_verify_data(&finished_key, &hash)?;
+
+            // Write binder into msg (replacing placeholder)
+            let binder_start = msg.len() - hash_len;
+            msg[binder_start..].copy_from_slice(&binder);
+
+            // Store PSK for later use in process_server_hello
+            self.psk = Some(psk);
+
+            // Derive early traffic secret for 0-RTT if offering early data
+            if offer_early_data {
+                // Hash the full CH (with real binder) for the early traffic secret
+                let mut ch_hasher = (*factory)();
+                ch_hasher.update(&msg).map_err(TlsError::CryptoError)?;
+                let mut ch_hash = vec![0u8; hash_len];
+                ch_hasher
+                    .finish(&mut ch_hash)
+                    .map_err(TlsError::CryptoError)?;
+                self.early_traffic_secret = ks.derive_early_traffic_secret(&ch_hash)?;
+                self.offered_early_data = true;
+            }
+
+            let _ = old_msg_len; // suppress unused warning
+        }
+
         self.client_hello_msg = msg.clone();
         self.key_exchange = Some(kx);
         self.state = HandshakeState::WaitServerHello;
@@ -144,14 +353,11 @@ impl ClientHandshake {
         Ok(msg)
     }
 
-    /// Process a ServerHello message.
+    /// Process a ServerHello message (or HelloRetryRequest).
     ///
     /// `msg_data` is the full handshake message including the 4-byte header.
-    /// Returns actions for the connection to activate handshake encryption.
-    pub fn process_server_hello(
-        &mut self,
-        msg_data: &[u8],
-    ) -> Result<ServerHelloActions, TlsError> {
+    /// Returns either handshake actions or a retry request.
+    pub fn process_server_hello(&mut self, msg_data: &[u8]) -> Result<ServerHelloResult, TlsError> {
         if self.state != HandshakeState::WaitServerHello {
             return Err(TlsError::HandshakeFailed(
                 "process_server_hello: wrong state".into(),
@@ -184,15 +390,24 @@ impl ClientHandshake {
             return Err(TlsError::NoSharedCipherSuite);
         }
 
+        // Detect HelloRetryRequest by magic random
+        if sh.random == HELLO_RETRY_REQUEST_RANDOM {
+            return self.process_hello_retry_request(msg_data, &sh, suite);
+        }
+
         let params = CipherSuiteParams::from_suite(suite)?;
 
         // If the cipher suite uses SHA-384, re-initialize the transcript
-        if params.hash_len == 48 {
+        if params.hash_len == 48 && !self.hrr_done {
             self.transcript = TranscriptHash::new(|| Box::new(hitls_crypto::sha2::Sha384::new()));
         }
 
         // Feed ClientHello + ServerHello to transcript
-        self.transcript.update(&self.client_hello_msg)?;
+        // (If HRR already done, transcript already contains MessageHash + HRR + CH2,
+        //  so we only feed CH on the first time.)
+        if !self.hrr_done {
+            self.transcript.update(&self.client_hello_msg)?;
+        }
         self.transcript.update(msg_data)?;
 
         // Extract key_share from ServerHello
@@ -217,9 +432,30 @@ impl ClientHandshake {
         // Compute shared secret
         let shared_secret = kx.compute_shared_secret(&server_pub_key)?;
 
+        // Check for pre_shared_key extension in ServerHello
+        let psk_selected = sh
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::PRE_SHARED_KEY)
+            .map(|e| parse_pre_shared_key_sh(&e.data))
+            .transpose()?;
+        if let Some(idx) = psk_selected {
+            if idx != 0 {
+                return Err(TlsError::HandshakeFailed(
+                    "server selected unexpected PSK identity".into(),
+                ));
+            }
+            if self.psk.is_none() {
+                return Err(TlsError::HandshakeFailed(
+                    "server accepted PSK but we didn't offer one".into(),
+                ));
+            }
+            self.psk_mode = true;
+        }
+
         // Key schedule: Early Secret → Handshake Secret
         let mut ks = KeySchedule::new(params.clone());
-        ks.derive_early_secret(None)?;
+        ks.derive_early_secret(self.psk.as_deref())?;
         ks.derive_handshake_secret(&shared_secret)?;
 
         // Derive handshake traffic secrets
@@ -239,11 +475,105 @@ impl ClientHandshake {
         self.negotiated_suite = Some(suite);
         self.state = HandshakeState::WaitEncryptedExtensions;
 
-        Ok(ServerHelloActions {
+        Ok(ServerHelloResult::Actions(ServerHelloActions {
             server_hs_keys,
             client_hs_keys,
             suite,
-        })
+        }))
+    }
+
+    /// Handle a HelloRetryRequest (ServerHello with magic random).
+    fn process_hello_retry_request(
+        &mut self,
+        msg_data: &[u8],
+        sh: &super::codec::ServerHello,
+        suite: CipherSuite,
+    ) -> Result<ServerHelloResult, TlsError> {
+        if self.hrr_done {
+            return Err(TlsError::HandshakeFailed(
+                "received second HelloRetryRequest".into(),
+            ));
+        }
+
+        let params = CipherSuiteParams::from_suite(suite)?;
+
+        // Re-init transcript if SHA-384
+        if params.hash_len == 48 {
+            self.transcript = TranscriptHash::new(|| Box::new(hitls_crypto::sha2::Sha384::new()));
+        }
+
+        // Feed original CH to transcript, then replace with message_hash
+        self.transcript.update(&self.client_hello_msg)?;
+        self.transcript.replace_with_message_hash()?;
+
+        // Feed HRR to transcript
+        self.transcript.update(msg_data)?;
+
+        // Extract selected group from key_share extension
+        let ks_ext = sh
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::KEY_SHARE)
+            .ok_or_else(|| TlsError::HandshakeFailed("missing key_share in HRR".into()))?;
+        let selected_group = parse_key_share_hrr(&ks_ext.data)?;
+
+        // Extract cookie if present
+        let cookie = sh
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::COOKIE)
+            .map(|e| parse_cookie(&e.data))
+            .transpose()?;
+
+        // Save state
+        self.params = Some(params);
+        self.negotiated_suite = Some(suite);
+        self.hrr_done = true;
+
+        Ok(ServerHelloResult::RetryNeeded(RetryActions {
+            selected_group,
+            cookie,
+            suite,
+        }))
+    }
+
+    /// Build a retried ClientHello after HelloRetryRequest.
+    ///
+    /// Generates a new key exchange for the selected group and builds a new ClientHello.
+    pub fn build_client_hello_retry(&mut self, retry: &RetryActions) -> Result<Vec<u8>, TlsError> {
+        // Generate new key exchange for the selected group
+        let kx = KeyExchange::generate(retry.selected_group)?;
+
+        let mut random = [0u8; 32];
+        getrandom::getrandom(&mut random)
+            .map_err(|_| TlsError::HandshakeFailed("random generation failed".into()))?;
+
+        let mut extensions = vec![
+            build_supported_versions_ch(),
+            build_supported_groups(&self.config.supported_groups),
+            build_signature_algorithms(&self.config.signature_algorithms),
+            build_key_share_ch(retry.selected_group, kx.public_key_bytes()),
+        ];
+        if let Some(ref name) = self.config.server_name {
+            extensions.push(build_server_name(name));
+        }
+        if let Some(ref cookie) = retry.cookie {
+            extensions.push(build_cookie(cookie));
+        }
+
+        let ch = ClientHello {
+            random,
+            legacy_session_id: vec![],
+            cipher_suites: self.config.cipher_suites.clone(),
+            extensions,
+        };
+
+        let msg = encode_client_hello(&ch);
+        self.transcript.update(&msg)?;
+        self.key_exchange = Some(kx);
+        self.state = HandshakeState::WaitServerHello;
+
+        Ok(msg)
     }
 
     /// Process an EncryptedExtensions message.
@@ -255,10 +585,23 @@ impl ClientHandshake {
         }
 
         let body = get_body(msg_data)?;
-        let _ee = decode_encrypted_extensions(body)?;
+        let ee = decode_encrypted_extensions(body)?;
+
+        // Check for early_data extension (0-RTT acceptance)
+        if self.offered_early_data {
+            self.early_data_accepted = ee
+                .extensions
+                .iter()
+                .any(|e| e.extension_type == ExtensionType::EARLY_DATA);
+        }
 
         self.transcript.update(msg_data)?;
-        self.state = HandshakeState::WaitCertCertReq;
+        // In PSK mode, server skips Certificate + CertificateVerify
+        if self.psk_mode {
+            self.state = HandshakeState::WaitFinished;
+        } else {
+            self.state = HandshakeState::WaitCertCertReq;
+        }
         Ok(())
     }
 
@@ -312,7 +655,7 @@ impl ClientHandshake {
             let cert = hitls_pki::x509::Certificate::from_der(cert_der)
                 .map_err(|e| TlsError::HandshakeFailed(format!("cert parse error: {e}")))?;
 
-            verify_certificate_verify(&cert, cv.algorithm, &cv.signature, &transcript_hash)?;
+            verify_certificate_verify(&cert, cv.algorithm, &cv.signature, &transcript_hash, true)?;
         }
 
         // Feed this message to the transcript
@@ -361,7 +704,8 @@ impl ClientHandshake {
         // Derive Master Secret
         ks.derive_master_secret()?;
 
-        // Derive application traffic secrets (transcript = CH..server Finished)
+        // Derive application traffic secrets from Hash(CH..server Finished)
+        // NOTE: EOED must NOT be in transcript yet (RFC 8446 §7.1)
         let transcript_hash_sf = self.transcript.current_hash()?;
         let (client_app_secret, server_app_secret) =
             ks.derive_app_traffic_secrets(&transcript_hash_sf)?;
@@ -372,14 +716,29 @@ impl ClientHandshake {
         let client_app_keys = TrafficKeys::derive(&params, &client_app_secret)?;
         let server_app_keys = TrafficKeys::derive(&params, &server_app_secret)?;
 
-        // Build client Finished
+        // If 0-RTT was accepted, add EndOfEarlyData to transcript AFTER app secrets
+        // but BEFORE client Finished (RFC 8446 §4.4.4: client Finished context includes EOED)
+        let eoed_msg = if self.early_data_accepted {
+            let msg = encode_end_of_early_data();
+            self.transcript.update(&msg)?;
+            Some(msg)
+        } else {
+            None
+        };
+
+        // Build client Finished from Hash(CH..server Finished [.. EOED])
+        let transcript_hash_for_cfin = self.transcript.current_hash()?;
         let client_finished_key = ks.derive_finished_key(&self.client_hs_secret)?;
         let client_verify_data =
-            ks.compute_finished_verify_data(&client_finished_key, &transcript_hash_sf)?;
+            ks.compute_finished_verify_data(&client_finished_key, &transcript_hash_for_cfin)?;
         let client_finished_msg = encode_finished(&client_verify_data);
 
-        // Feed client Finished to transcript (for resumption master secret if needed)
+        // Feed client Finished to transcript (for resumption master secret)
         self.transcript.update(&client_finished_msg)?;
+
+        // Derive resumption master secret
+        let transcript_hash_cf = self.transcript.current_hash()?;
+        let resumption_master_secret = ks.derive_resumption_master_secret(&transcript_hash_cf)?;
 
         self.state = HandshakeState::Connected;
 
@@ -388,6 +747,69 @@ impl ClientHandshake {
             client_app_keys,
             server_app_keys,
             suite,
+            client_app_secret,
+            server_app_secret,
+            cipher_params: params,
+            resumption_master_secret,
+            end_of_early_data_msg: eoed_msg,
+        })
+    }
+
+    /// Process a NewSessionTicket message received post-handshake.
+    ///
+    /// Returns a `TlsSession` that can be stored for future resumption.
+    pub fn process_new_session_ticket(
+        &self,
+        msg_data: &[u8],
+        resumption_master_secret: &[u8],
+    ) -> Result<TlsSession, TlsError> {
+        let body = get_body(msg_data)?;
+        let nst = decode_new_session_ticket(body)?;
+
+        let params = self
+            .params
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher suite params".into()))?;
+        let ks = KeySchedule::new(params.clone());
+
+        // Derive PSK from resumption_master_secret + ticket_nonce
+        let psk = ks.derive_resumption_psk(resumption_master_secret, &nst.ticket_nonce)?;
+
+        let suite = self
+            .negotiated_suite
+            .ok_or_else(|| TlsError::HandshakeFailed("no negotiated suite".into()))?;
+
+        // Extract max_early_data from NST extensions (early_data extension)
+        let max_early_data = nst
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::EARLY_DATA)
+            .and_then(|e| {
+                if e.data.len() >= 4 {
+                    Some(u32::from_be_bytes([
+                        e.data[0], e.data[1], e.data[2], e.data[3],
+                    ]))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+
+        Ok(TlsSession {
+            id: nst.ticket.clone(),
+            cipher_suite: suite,
+            master_secret: resumption_master_secret.to_vec(),
+            alpn_protocol: None,
+            ticket: Some(nst.ticket),
+            ticket_lifetime: nst.ticket_lifetime,
+            max_early_data,
+            ticket_age_add: nst.ticket_age_add,
+            ticket_nonce: nst.ticket_nonce,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            psk,
         })
     }
 }

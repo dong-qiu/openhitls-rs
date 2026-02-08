@@ -42,6 +42,8 @@ pub enum HandshakeState {
     WaitFinished,
     /// Server: waiting for ClientHello.
     WaitClientHello,
+    /// Server: waiting for retried ClientHello after HRR.
+    WaitClientHelloRetry,
     /// Server: waiting for client Finished.
     WaitClientFinished,
     /// Handshake complete.

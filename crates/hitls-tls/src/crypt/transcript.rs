@@ -60,6 +60,22 @@ impl TranscriptHash {
     pub fn hash_len(&self) -> usize {
         self.hash_len
     }
+
+    /// Replace the transcript with a synthetic `message_hash` construct (RFC 8446 §4.4.1).
+    ///
+    /// Used when processing HelloRetryRequest: the transcript up to this point
+    /// is replaced with `HandshakeType::MessageHash(254) || 0 || 0 || Hash.length || Hash(messages)`.
+    pub fn replace_with_message_hash(&mut self) -> Result<(), TlsError> {
+        let hash = self.current_hash()?;
+        let mut synthetic = Vec::with_capacity(4 + hash.len());
+        synthetic.push(254); // HandshakeType::MessageHash
+        synthetic.push(0);
+        synthetic.push(0);
+        synthetic.push(hash.len() as u8);
+        synthetic.extend_from_slice(&hash);
+        self.message_buffer = synthetic;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

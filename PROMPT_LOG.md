@@ -1009,3 +1009,29 @@ Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
 > Update documentation files for Phase 19 completion (CLAUDE.md, README.md, DEV_LOG.md, PROMPT_LOG.md)
 
 **Result**: Updated all four documentation files to reflect Phase 19 completion. Updated status to Phase 19, crypto test count to 249, total test count to 460 (6 ignored), SLH-DSA and XMSS marked as Done in algorithm table, roadmap updated (Phase 19 complete, remaining work consolidated into Phase 20).
+
+---
+
+## Session 21: Phase 21 — TLS 1.3 Advanced Features
+
+### Prompt 65: Phase 21 Step 5 — Post-Handshake Client Auth
+> Implement Post-Handshake Client Authentication (RFC 8446 §4.6.2)
+
+**Result**: Implemented post-handshake client authentication for TLS 1.3:
+
+- CertificateRequest codec (encode/decode) in codec.rs
+- build_post_handshake_auth() extension in extensions_codec.rs
+- Config additions: client_certificate_chain, client_private_key, post_handshake_auth
+- is_server parameter added to sign_certificate_verify and verify_certificate_verify
+- Client: handle_post_hs_cert_request method, builds Certificate + CertificateVerify + Finished response
+- Server: request_client_auth() method on TlsServerConnection, sends CertificateRequest, reads/verifies client response
+- Helper: build_ed25519_der_cert() for building test certs
+- Bug fixed: SPKI construction in cert builder was missing AlgorithmIdentifier SEQUENCE wrapper
+- 6 new tests: test_certificate_request_codec, test_post_hs_auth_codec, test_post_hs_auth_roundtrip, test_post_hs_auth_no_cert, test_post_hs_auth_not_offered, test_post_hs_auth_server_not_connected
+
+535 tests passing (20 auth + 46 bignum + 278 crypto + 10 integration + 47 pki + 108 tls + 26 utils), 18 ignored. Clippy clean, fmt clean.
+
+### Prompt 66: Update documentation for Phase 21 Step 5
+> Update documentation files for Phase 21 Step 5 completion (Post-Handshake Client Auth)
+
+**Result**: Updated CLAUDE.md, DEV_LOG.md, and PROMPT_LOG.md to reflect Phase 21 Step 5 completion. Updated status to "Phase 21 complete — all TLS 1.3 features", TLS test count to 108, total test count to 535.

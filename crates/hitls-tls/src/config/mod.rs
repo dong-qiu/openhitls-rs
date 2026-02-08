@@ -1,6 +1,7 @@
 //! TLS configuration with builder pattern.
 
 use crate::crypt::{NamedGroup, SignatureScheme};
+use crate::session::TlsSession;
 use crate::{CipherSuite, TlsRole, TlsVersion};
 use hitls_types::EccCurveId;
 use zeroize::Zeroize;
@@ -68,6 +69,18 @@ pub struct TlsConfig {
     pub certificate_chain: Vec<Vec<u8>>,
     /// Server private key for CertificateVerify signing.
     pub private_key: Option<ServerPrivateKey>,
+    /// Ticket encryption key (32 bytes) for server-side NewSessionTicket generation.
+    pub ticket_key: Option<Vec<u8>>,
+    /// Session to resume via PSK (client-side).
+    pub resumption_session: Option<TlsSession>,
+    /// Maximum early data size (0 = disabled, for both client and server).
+    pub max_early_data_size: u32,
+    /// Client certificate chain (DER-encoded, leaf first) for post-handshake auth.
+    pub client_certificate_chain: Vec<Vec<u8>>,
+    /// Client private key for post-handshake CertificateVerify signing.
+    pub client_private_key: Option<ServerPrivateKey>,
+    /// Whether to offer post-handshake authentication (client-side).
+    pub post_handshake_auth: bool,
 }
 
 impl TlsConfig {
@@ -93,6 +106,12 @@ pub struct TlsConfigBuilder {
     trusted_certs: Vec<Vec<u8>>,
     certificate_chain: Vec<Vec<u8>>,
     private_key: Option<ServerPrivateKey>,
+    ticket_key: Option<Vec<u8>>,
+    resumption_session: Option<TlsSession>,
+    max_early_data_size: u32,
+    client_certificate_chain: Vec<Vec<u8>>,
+    client_private_key: Option<ServerPrivateKey>,
+    post_handshake_auth: bool,
 }
 
 impl Default for TlsConfigBuilder {
@@ -119,6 +138,12 @@ impl Default for TlsConfigBuilder {
             trusted_certs: Vec::new(),
             certificate_chain: Vec::new(),
             private_key: None,
+            ticket_key: None,
+            resumption_session: None,
+            max_early_data_size: 0,
+            client_certificate_chain: Vec::new(),
+            client_private_key: None,
+            post_handshake_auth: false,
         }
     }
 }
@@ -189,6 +214,36 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn ticket_key(mut self, key: Vec<u8>) -> Self {
+        self.ticket_key = Some(key);
+        self
+    }
+
+    pub fn resumption_session(mut self, session: TlsSession) -> Self {
+        self.resumption_session = Some(session);
+        self
+    }
+
+    pub fn max_early_data_size(mut self, size: u32) -> Self {
+        self.max_early_data_size = size;
+        self
+    }
+
+    pub fn client_certificate_chain(mut self, certs: Vec<Vec<u8>>) -> Self {
+        self.client_certificate_chain = certs;
+        self
+    }
+
+    pub fn client_private_key(mut self, key: ServerPrivateKey) -> Self {
+        self.client_private_key = Some(key);
+        self
+    }
+
+    pub fn post_handshake_auth(mut self, enabled: bool) -> Self {
+        self.post_handshake_auth = enabled;
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -204,6 +259,12 @@ impl TlsConfigBuilder {
             trusted_certs: self.trusted_certs,
             certificate_chain: self.certificate_chain,
             private_key: self.private_key,
+            ticket_key: self.ticket_key,
+            resumption_session: self.resumption_session,
+            max_early_data_size: self.max_early_data_size,
+            client_certificate_chain: self.client_certificate_chain,
+            client_private_key: self.client_private_key,
+            post_handshake_auth: self.post_handshake_auth,
         }
     }
 }

@@ -40,16 +40,18 @@ pub fn select_signature_scheme(
     ))
 }
 
-/// Sign CertificateVerify content using the server's private key.
+/// Sign CertificateVerify content using a private key.
 ///
 /// Builds the verify content (64 spaces || context || 0x00 || transcript_hash)
 /// and dispatches to the appropriate crypto signing API.
+/// `is_server` selects the context string ("server"/"client" CertificateVerify).
 pub fn sign_certificate_verify(
     key: &ServerPrivateKey,
     scheme: SignatureScheme,
     transcript_hash: &[u8],
+    is_server: bool,
 ) -> Result<Vec<u8>, TlsError> {
-    let content = build_verify_content(transcript_hash, true);
+    let content = build_verify_content(transcript_hash, is_server);
 
     match key {
         ServerPrivateKey::Ed25519(seed) => {
@@ -138,9 +140,13 @@ mod tests {
         let transcript_hash = vec![0xAA; 32];
 
         // Sign
-        let signature =
-            sign_certificate_verify(&server_key, SignatureScheme::ED25519, &transcript_hash)
-                .unwrap();
+        let signature = sign_certificate_verify(
+            &server_key,
+            SignatureScheme::ED25519,
+            &transcript_hash,
+            true,
+        )
+        .unwrap();
         assert_eq!(signature.len(), 64);
 
         // Verify using the public key (same as verify.rs does)
