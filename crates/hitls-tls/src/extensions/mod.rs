@@ -20,6 +20,7 @@ impl ExtensionType {
     pub const CERTIFICATE_AUTHORITIES: Self = Self(47);
     pub const POST_HANDSHAKE_AUTH: Self = Self(49);
     pub const SIGNATURE_ALGORITHMS_CERT: Self = Self(50);
+    pub const COMPRESS_CERTIFICATE: Self = Self(27);
     pub const KEY_SHARE: Self = Self(51);
 }
 

@@ -2,6 +2,7 @@
 
 use crate::crypt::{NamedGroup, SignatureScheme};
 use crate::extensions::{Extension, ExtensionType};
+use crate::handshake::codec::CertCompressionAlgorithm;
 use hitls_types::TlsError;
 
 // ---------------------------------------------------------------------------
@@ -505,6 +506,44 @@ pub fn build_post_handshake_auth() -> Extension {
     }
 }
 
+/// Build compress_certificate extension for ClientHello (RFC 8879).
+/// Format: algorithms_len(1) || [algorithm(2)]*
+pub fn build_compress_certificate(algos: &[CertCompressionAlgorithm]) -> Extension {
+    let list_len = (algos.len() * 2) as u8;
+    let mut data = Vec::with_capacity(1 + algos.len() * 2);
+    data.push(list_len);
+    for algo in algos {
+        data.extend_from_slice(&algo.0.to_be_bytes());
+    }
+    Extension {
+        extension_type: ExtensionType::COMPRESS_CERTIFICATE,
+        data,
+    }
+}
+
+/// Parse compress_certificate extension from ClientHello.
+pub fn parse_compress_certificate(data: &[u8]) -> Result<Vec<CertCompressionAlgorithm>, TlsError> {
+    if data.is_empty() {
+        return Err(TlsError::HandshakeFailed(
+            "compress_certificate: empty".into(),
+        ));
+    }
+    let list_len = data[0] as usize;
+    if list_len % 2 != 0 || data.len() < 1 + list_len {
+        return Err(TlsError::HandshakeFailed(
+            "compress_certificate: invalid length".into(),
+        ));
+    }
+    let mut algos = Vec::new();
+    let mut pos = 1;
+    while pos < 1 + list_len {
+        let algo = u16::from_be_bytes([data[pos], data[pos + 1]]);
+        algos.push(CertCompressionAlgorithm(algo));
+        pos += 2;
+    }
+    Ok(algos)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -707,5 +746,28 @@ mod tests {
         let ext2 = build_pre_shared_key_sh(3);
         let idx2 = parse_pre_shared_key_sh(&ext2.data).unwrap();
         assert_eq!(idx2, 3);
+    }
+
+    #[test]
+    fn test_build_parse_compress_certificate() {
+        let algos = vec![
+            CertCompressionAlgorithm::ZLIB,
+            CertCompressionAlgorithm::BROTLI,
+        ];
+        let ext = build_compress_certificate(&algos);
+        assert_eq!(ext.extension_type, ExtensionType::COMPRESS_CERTIFICATE);
+
+        let parsed = parse_compress_certificate(&ext.data).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0], CertCompressionAlgorithm::ZLIB);
+        assert_eq!(parsed[1], CertCompressionAlgorithm::BROTLI);
+    }
+
+    #[test]
+    fn test_build_parse_compress_certificate_single() {
+        let algos = vec![CertCompressionAlgorithm::ZLIB];
+        let ext = build_compress_certificate(&algos);
+        let parsed = parse_compress_certificate(&ext.data).unwrap();
+        assert_eq!(parsed, vec![CertCompressionAlgorithm::ZLIB]);
     }
 }

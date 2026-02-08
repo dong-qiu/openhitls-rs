@@ -4,7 +4,7 @@ A production-grade cryptographic and TLS library written in pure Rust, rewritten
 
 > **Status: Phase 22 Complete — ECC Curve Additions (P-224, P-521, Brainpool P-256r1/P-384r1/P-512r1)**
 >
-> 561 tests passing (20 auth + 46 bignum + 304 crypto + 47 pki + 108 tls + 26 utils + 10 integration). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), HMAC-DRBG, PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth), HOTP/TOTP, SPAKE2+, and CLI tool.
+> 568 tests passing (20 auth + 46 bignum + 304 crypto + 47 pki + 108 tls + 26 utils + 10 integration). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), HMAC-DRBG, PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth), HOTP/TOTP, SPAKE2+, and CLI tool.
 
 ## Goals
 
@@ -23,7 +23,7 @@ openhitls-rs/
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (26 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
 │   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECC (P-224/P-256/P-384/P-521/Brainpool), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9, DRBG, ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal (304 tests)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth (108 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth (115 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain build), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (47 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl)
@@ -155,7 +155,7 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (561 tests, 19 ignored)
+# Run all tests (568 tests, 19 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
@@ -204,7 +204,7 @@ Convenience feature groups:
 
 ### Completed (Phase 0-22)
 
-All cryptographic primitives, X.509, PKCS#12, CMS, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth), auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), and CLI tool implemented. 561 tests passing across 9 crates.
+All cryptographic primitives, X.509, PKCS#12, CMS, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), and CLI tool implemented. 568 tests passing across 9 crates.
 
 ### Remaining Migration Work
 
@@ -215,11 +215,11 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | Feature | RFC | Status |
 |---------|-----|--------|
 | PSK / Session Tickets | RFC 8446 §4.6.1 | **Done** |
-| HelloRetryRequest (HRR) | RFC 8446 §4.1.4 | Not implemented |
+| HelloRetryRequest (HRR) | RFC 8446 §4.1.4 | **Done** |
 | 0-RTT Early Data | RFC 8446 §4.2.10 | **Done** |
 | Post-Handshake Client Auth | RFC 8446 §4.6.2 | **Done** |
-| KeyUpdate | RFC 8446 §4.6.3 | Stub only |
-| Certificate Compression | RFC 8879 | Not implemented |
+| KeyUpdate | RFC 8446 §4.6.3 | **Done** |
+| Certificate Compression | RFC 8879 | **Done** (zlib, feature-gated) |
 
 #### Phase 22: ECC Curve Additions
 

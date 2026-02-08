@@ -22,6 +22,7 @@ pub enum HandshakeType {
     CertificateVerify = 15,
     Finished = 20,
     KeyUpdate = 24,
+    CompressedCertificate = 25,
     MessageHash = 254,
 }
 

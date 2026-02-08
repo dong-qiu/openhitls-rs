@@ -19,13 +19,16 @@ use zeroize::Zeroize;
 use super::codec::{
     decode_certificate, decode_certificate_verify, decode_encrypted_extensions, decode_finished,
     decode_new_session_ticket, decode_server_hello, encode_client_hello, encode_end_of_early_data,
-    encode_finished, ClientHello, HELLO_RETRY_REQUEST_RANDOM,
+    encode_finished, CertCompressionAlgorithm, ClientHello, HELLO_RETRY_REQUEST_RANDOM,
 };
+#[cfg(feature = "cert-compression")]
+use super::codec::{decode_compressed_certificate, decompress_certificate_body};
 use super::extensions_codec::{
-    build_cookie, build_early_data_ch, build_key_share_ch, build_post_handshake_auth,
-    build_pre_shared_key_ch, build_psk_key_exchange_modes, build_server_name,
-    build_signature_algorithms, build_supported_groups, build_supported_versions_ch, parse_cookie,
-    parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh, parse_supported_versions_sh,
+    build_compress_certificate, build_cookie, build_early_data_ch, build_key_share_ch,
+    build_post_handshake_auth, build_pre_shared_key_ch, build_psk_key_exchange_modes,
+    build_server_name, build_signature_algorithms, build_supported_groups,
+    build_supported_versions_ch, parse_cookie, parse_key_share_hrr, parse_key_share_sh,
+    parse_pre_shared_key_sh, parse_supported_versions_sh,
 };
 use super::key_exchange::KeyExchange;
 use super::verify::verify_certificate_verify;
@@ -106,6 +109,8 @@ pub struct ClientHandshake {
     early_data_accepted: bool,
     /// Client early traffic secret (for 0-RTT encryption).
     early_traffic_secret: Vec<u8>,
+    /// Offered certificate compression algorithms.
+    cert_compression_algos: Vec<CertCompressionAlgorithm>,
 }
 
 impl Drop for ClientHandshake {
@@ -143,6 +148,7 @@ impl ClientHandshake {
             offered_early_data: false,
             early_data_accepted: false,
             early_traffic_secret: Vec::new(),
+            cert_compression_algos: Vec::new(),
         }
     }
 
@@ -202,6 +208,12 @@ impl ClientHandshake {
         }
         if self.config.post_handshake_auth {
             extensions.push(build_post_handshake_auth());
+        }
+        if !self.config.cert_compression_algos.is_empty() {
+            extensions.push(build_compress_certificate(
+                &self.config.cert_compression_algos,
+            ));
+            self.cert_compression_algos = self.config.cert_compression_algos.clone();
         }
 
         // PSK extensions (pre_shared_key MUST be last)
@@ -560,6 +572,9 @@ impl ClientHandshake {
         if let Some(ref cookie) = retry.cookie {
             extensions.push(build_cookie(cookie));
         }
+        if !self.cert_compression_algos.is_empty() {
+            extensions.push(build_compress_certificate(&self.cert_compression_algos));
+        }
 
         let ch = ClientHello {
             random,
@@ -627,6 +642,54 @@ impl ClientHandshake {
             .map(|e| e.cert_data.clone())
             .collect();
 
+        self.transcript.update(msg_data)?;
+        self.state = HandshakeState::WaitCertVerify;
+        Ok(())
+    }
+
+    /// Process a CompressedCertificate message (RFC 8879).
+    #[cfg(feature = "cert-compression")]
+    pub fn process_compressed_certificate(&mut self, msg_data: &[u8]) -> Result<(), TlsError> {
+        if self.state != HandshakeState::WaitCertCertReq {
+            return Err(TlsError::HandshakeFailed(
+                "process_compressed_certificate: wrong state".into(),
+            ));
+        }
+
+        let body = get_body(msg_data)?;
+        let compressed_msg = decode_compressed_certificate(body)?;
+
+        // Verify we offered this algorithm
+        if !self
+            .cert_compression_algos
+            .contains(&compressed_msg.algorithm)
+        {
+            return Err(TlsError::HandshakeFailed(
+                "server used cert compression algorithm we didn't offer".into(),
+            ));
+        }
+
+        // Decompress to recover the original Certificate message body
+        let cert_body = decompress_certificate_body(
+            compressed_msg.algorithm,
+            &compressed_msg.compressed_data,
+            compressed_msg.uncompressed_length,
+        )?;
+
+        let cert_msg = decode_certificate(&cert_body)?;
+
+        if cert_msg.certificate_list.is_empty() {
+            return Err(TlsError::HandshakeFailed("empty certificate list".into()));
+        }
+
+        // Store DER-encoded certificates
+        self.server_certs = cert_msg
+            .certificate_list
+            .iter()
+            .map(|e| e.cert_data.clone())
+            .collect();
+
+        // RFC 8879 §4: transcript uses the CompressedCertificate message as-is
         self.transcript.update(msg_data)?;
         self.state = HandshakeState::WaitCertVerify;
         Ok(())

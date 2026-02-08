@@ -1063,3 +1063,19 @@ Key changes:
 > Update CLAUDE.md, README.md, DEV_LOG.md, PROMPT_LOG.md for Phase 22 completion
 
 **Result**: Updated all four documentation files to reflect Phase 22 completion. Updated status to "Phase 22 complete — ECC curve additions", crypto test count to 304 (19 ignored), total test count to 561 (19 ignored). Marked all Phase 22 curves as Done in README roadmap table. Updated ECC/ECDSA/ECDH descriptions to list all supported curves.
+
+### Prompt 69: Phase 21 remaining — Certificate Compression (RFC 8879)
+> 请完成Phase 21的剩余的工作
+
+**Result**: Implemented TLS Certificate Compression (RFC 8879) — the remaining Phase 21 feature. Also fixed README docs for HRR and KeyUpdate (already implemented but incorrectly marked as incomplete).
+
+Key implementation:
+- `compress_certificate` extension (type 27) in ClientHello
+- `CompressedCertificate` message (handshake type 25) replaces Certificate when compression negotiated
+- zlib compression via `flate2` crate, feature-gated behind `cert-compression`
+- Server: compresses Certificate body when both sides support algorithm
+- Client: decompresses CompressedCertificate, verifies algorithm was offered
+- 16 MiB decompression limit, length validation per RFC 8879 §4
+- 7 new tests (codec roundtrip, compress/decompress, extension, full handshake, config, disabled)
+
+568 tests passing (20 auth + 46 bignum + 304 crypto + 10 integration + 47 pki + 115 tls + 26 utils), 19 ignored. Clippy clean, fmt clean.

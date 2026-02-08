@@ -17,17 +17,21 @@ use hitls_types::TlsError;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
+#[cfg(feature = "cert-compression")]
+use super::codec::{
+    compress_certificate_body, encode_compressed_certificate, CompressedCertificateMsg,
+};
 use super::codec::{
     decode_client_hello, decode_finished, encode_certificate, encode_certificate_verify,
     encode_encrypted_extensions, encode_finished, encode_new_session_ticket, encode_server_hello,
-    CertificateEntry, CertificateMsg, CertificateVerifyMsg, EncryptedExtensions,
-    NewSessionTicketMsg, ServerHello, HELLO_RETRY_REQUEST_RANDOM,
+    CertCompressionAlgorithm, CertificateEntry, CertificateMsg, CertificateVerifyMsg,
+    EncryptedExtensions, NewSessionTicketMsg, ServerHello, HELLO_RETRY_REQUEST_RANDOM,
 };
 use super::extensions_codec::{
     build_early_data_ee, build_early_data_nst, build_key_share_hrr, build_key_share_sh,
-    build_pre_shared_key_sh, build_supported_versions_sh, parse_key_share_ch,
-    parse_pre_shared_key_ch, parse_psk_key_exchange_modes, parse_signature_algorithms_ch,
-    parse_supported_groups_ch, parse_supported_versions_ch,
+    build_pre_shared_key_sh, build_supported_versions_sh, parse_compress_certificate,
+    parse_key_share_ch, parse_pre_shared_key_ch, parse_psk_key_exchange_modes,
+    parse_signature_algorithms_ch, parse_supported_groups_ch, parse_supported_versions_ch,
 };
 use super::key_exchange::KeyExchange;
 use super::signing::{select_signature_scheme, sign_certificate_verify};
@@ -229,6 +233,8 @@ pub struct ServerHandshake {
     client_hs_secret: Vec<u8>,
     /// Server handshake traffic secret (for server finished key).
     server_hs_secret: Vec<u8>,
+    /// Client-offered certificate compression algorithms.
+    client_cert_compression_algos: Vec<CertCompressionAlgorithm>,
 }
 
 impl Drop for ServerHandshake {
@@ -251,6 +257,7 @@ impl ServerHandshake {
             negotiated_suite: None,
             client_hs_secret: Vec::new(),
             server_hs_secret: Vec::new(),
+            client_cert_compression_algos: Vec::new(),
         }
     }
 
@@ -317,6 +324,16 @@ impl ServerHandshake {
             .find(|e| e.extension_type == ExtensionType::SUPPORTED_GROUPS)
             .map(|e| parse_supported_groups_ch(&e.data))
             .transpose()?;
+
+        // compress_certificate (RFC 8879)
+        let client_cert_compression = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::COMPRESS_CERTIFICATE)
+            .map(|e| parse_compress_certificate(&e.data))
+            .transpose()?
+            .unwrap_or_default();
+        self.client_cert_compression_algos = client_cert_compression;
 
         // --- Select cipher suite ---
         let suite = self
@@ -479,6 +496,16 @@ impl ServerHandshake {
             .ok_or_else(|| TlsError::HandshakeFailed("missing key_share in retried CH".into()))?;
         let client_key_shares = parse_key_share_ch(&ks_ext.data)?;
 
+        // Re-parse compress_certificate from retried CH
+        let client_cert_compression = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::COMPRESS_CERTIFICATE)
+            .map(|e| parse_compress_certificate(&e.data))
+            .transpose()?
+            .unwrap_or_default();
+        self.client_cert_compression_algos = client_cert_compression;
+
         let suite = self
             .negotiated_suite
             .ok_or_else(|| TlsError::HandshakeFailed("no negotiated suite after HRR".into()))?;
@@ -623,7 +650,34 @@ impl ServerHandshake {
                     })
                     .collect(),
             };
-            certificate_msg = encode_certificate(&cert_msg);
+            // Try certificate compression if both sides support it
+            #[cfg(feature = "cert-compression")]
+            {
+                let negotiated_algo = self
+                    .config
+                    .cert_compression_algos
+                    .iter()
+                    .find(|a| self.client_cert_compression_algos.contains(a))
+                    .copied();
+                if let Some(algo) = negotiated_algo {
+                    // Encode the uncompressed Certificate body (without handshake header)
+                    let uncompressed = encode_certificate(&cert_msg);
+                    let cert_body = &uncompressed[4..]; // skip 4-byte handshake header
+                    let compressed_data = compress_certificate_body(cert_body)?;
+                    let compressed_msg = CompressedCertificateMsg {
+                        algorithm: algo,
+                        uncompressed_length: cert_body.len() as u32,
+                        compressed_data,
+                    };
+                    certificate_msg = encode_compressed_certificate(&compressed_msg);
+                } else {
+                    certificate_msg = encode_certificate(&cert_msg);
+                }
+            }
+            #[cfg(not(feature = "cert-compression"))]
+            {
+                certificate_msg = encode_certificate(&cert_msg);
+            }
             self.transcript.update(&certificate_msg)?;
 
             let private_key = self.config.private_key.as_ref().ok_or_else(|| {

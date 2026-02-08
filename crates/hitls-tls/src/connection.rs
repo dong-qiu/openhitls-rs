@@ -490,6 +490,16 @@ impl<S: Read + Write> TlsClientConnection<S> {
                         hs.process_encrypted_extensions(&msg_data)?;
                     }
                     HandshakeState::WaitCertCertReq => {
+                        // Check message type: Certificate (11) or CompressedCertificate (25)
+                        #[cfg(feature = "cert-compression")]
+                        if !msg_data.is_empty()
+                            && msg_data[0] == HandshakeType::CompressedCertificate as u8
+                        {
+                            hs.process_compressed_certificate(&msg_data)?;
+                        } else {
+                            hs.process_certificate(&msg_data)?;
+                        }
+                        #[cfg(not(feature = "cert-compression"))]
                         hs.process_certificate(&msg_data)?;
                     }
                     HandshakeState::WaitCertVerify => {
@@ -4368,5 +4378,224 @@ mod tests {
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(err_msg.contains("not connected"));
+    }
+
+    /// Test that cert_compression_algos config field works correctly.
+    #[test]
+    fn test_cert_compression_config() {
+        use crate::handshake::codec::CertCompressionAlgorithm;
+
+        let config = TlsConfig::builder()
+            .cert_compression(vec![CertCompressionAlgorithm::ZLIB])
+            .build();
+        assert_eq!(config.cert_compression_algos.len(), 1);
+        assert_eq!(
+            config.cert_compression_algos[0],
+            CertCompressionAlgorithm::ZLIB
+        );
+
+        // Default: empty
+        let config2 = TlsConfig::builder().build();
+        assert!(config2.cert_compression_algos.is_empty());
+    }
+
+    /// Full handshake with certificate compression enabled on both sides.
+    #[cfg(feature = "cert-compression")]
+    #[test]
+    fn test_cert_compression_handshake() {
+        use crate::config::ServerPrivateKey;
+        use crate::handshake::codec::CertCompressionAlgorithm;
+
+        let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+        let client_config = TlsConfig::builder()
+            .server_name("test.example.com")
+            .verify_peer(false)
+            .cert_compression(vec![CertCompressionAlgorithm::ZLIB])
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .cert_compression(vec![CertCompressionAlgorithm::ZLIB])
+            .build();
+
+        // --- Client builds ClientHello ---
+        let mut client_hs = ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+
+        // --- Server receives ClientHello, produces flight ---
+        let mut server_rl = RecordLayer::new();
+        let (ct, ch_plaintext, _) = server_rl.open_record(&ch_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        let (_, _, ch_total) = parse_handshake_header(&ch_plaintext).unwrap();
+
+        let mut server_hs = ServerHandshake::new(server_config);
+        let actions = match server_hs
+            .process_client_hello(&ch_plaintext[..ch_total])
+            .unwrap()
+        {
+            ClientHelloResult::Actions(a) => *a,
+            _ => panic!("expected Actions, got HRR"),
+        };
+
+        // Verify the certificate_msg is CompressedCertificate (type 25), not Certificate (type 11)
+        assert_eq!(
+            actions.certificate_msg[0], 25,
+            "server should send CompressedCertificate"
+        );
+
+        // --- Server sends ServerHello (plaintext) ---
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_hello_msg)
+            .unwrap();
+
+        // Activate server HS encryption
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_hs_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_hs_keys)
+            .unwrap();
+
+        // Send encrypted flight: EE, CompressedCertificate, CertificateVerify, Finished
+        let ee_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.encrypted_extensions_msg)
+            .unwrap();
+        let cert_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_msg)
+            .unwrap();
+        let cv_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_verify_msg)
+            .unwrap();
+        let sfin_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_finished_msg)
+            .unwrap();
+
+        // --- Client processes ServerHello ---
+        let (ct, sh_plaintext, _) = client_rl.open_record(&sh_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        let (_, _, sh_total) = parse_handshake_header(&sh_plaintext).unwrap();
+        let sh_actions = match client_hs
+            .process_server_hello(&sh_plaintext[..sh_total])
+            .unwrap()
+        {
+            ServerHelloResult::Actions(a) => a,
+            _ => panic!("expected Actions, got HRR"),
+        };
+
+        // Activate client HS decryption/encryption
+        client_rl
+            .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(sh_actions.suite, &sh_actions.client_hs_keys)
+            .unwrap();
+
+        // --- Client processes encrypted flight ---
+        // EE
+        let (ct, ee_plain, _) = client_rl.open_record(&ee_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        let (_, _, ee_total) = parse_handshake_header(&ee_plain).unwrap();
+        client_hs
+            .process_encrypted_extensions(&ee_plain[..ee_total])
+            .unwrap();
+
+        // CompressedCertificate (type 25) — dispatch based on message type byte
+        let (ct, cert_plain, _) = client_rl.open_record(&cert_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        assert_eq!(
+            cert_plain[0], 25,
+            "received CompressedCertificate message type"
+        );
+        let (_, _, cert_total) = parse_handshake_header(&cert_plain).unwrap();
+        client_hs
+            .process_compressed_certificate(&cert_plain[..cert_total])
+            .unwrap();
+
+        // CertificateVerify
+        let (ct, cv_plain, _) = client_rl.open_record(&cv_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        let (_, _, cv_total) = parse_handshake_header(&cv_plain).unwrap();
+        client_hs
+            .process_certificate_verify(&cv_plain[..cv_total])
+            .unwrap();
+
+        // Finished
+        let (ct, fin_plain, _) = client_rl.open_record(&sfin_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        let (_, _, fin_total) = parse_handshake_header(&fin_plain).unwrap();
+        let fin_actions = client_hs.process_finished(&fin_plain[..fin_total]).unwrap();
+        assert_eq!(client_hs.state(), HandshakeState::Connected);
+
+        // --- Client sends client Finished ---
+        let cfin_record = client_rl
+            .seal_record(ContentType::Handshake, &fin_actions.client_finished_msg)
+            .unwrap();
+
+        // --- Server receives client Finished ---
+        let (ct, cfin_plain, _) = server_rl.open_record(&cfin_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        let (_, _, cfin_total) = parse_handshake_header(&cfin_plain).unwrap();
+        let _cfin_actions = server_hs
+            .process_client_finished(&cfin_plain[..cfin_total])
+            .unwrap();
+        assert_eq!(server_hs.state(), HandshakeState::Connected);
+    }
+
+    /// Verify that when client offers compression but server doesn't, normal Certificate is used.
+    #[cfg(feature = "cert-compression")]
+    #[test]
+    fn test_cert_compression_server_disabled() {
+        use crate::config::ServerPrivateKey;
+        use crate::handshake::codec::CertCompressionAlgorithm;
+
+        let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+        let client_config = TlsConfig::builder()
+            .server_name("test.example.com")
+            .verify_peer(false)
+            .cert_compression(vec![CertCompressionAlgorithm::ZLIB])
+            .build();
+
+        // Server does NOT enable cert compression
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+
+        let mut client_hs = ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+
+        let mut server_rl = RecordLayer::new();
+        let (_, ch_plaintext, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_plaintext).unwrap();
+
+        let mut server_hs = ServerHandshake::new(server_config);
+        let actions = match server_hs
+            .process_client_hello(&ch_plaintext[..ch_total])
+            .unwrap()
+        {
+            ClientHelloResult::Actions(a) => *a,
+            _ => panic!("expected Actions"),
+        };
+
+        // Server should send normal Certificate (type 11), not CompressedCertificate
+        assert_eq!(
+            actions.certificate_msg[0], 11,
+            "server should send normal Certificate when compression disabled"
+        );
     }
 }

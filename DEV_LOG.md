@@ -1988,3 +1988,49 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
 - **561 tests total** (20 auth + 46 bignum + 304 crypto + 47 pki + 108 tls + 26 utils + 10 integration), 19 ignored
 - hitls-crypto: 304 tests (19 ignored)
 - All clippy warnings resolved, formatting clean
+
+---
+
+## Phase 21 Completion — Certificate Compression (RFC 8879)
+
+### Summary
+Implemented the remaining Phase 21 feature: TLS Certificate Compression (RFC 8879). Also fixed the README Phase 21 table to correctly mark HRR and KeyUpdate as Done (they were already implemented but the docs were outdated).
+
+### Changes
+
+#### 1. Certificate Compression (RFC 8879)
+- **Extension**: `compress_certificate` (type 27) — client sends list of supported compression algorithms in ClientHello
+- **Message**: `CompressedCertificate` (handshake type 25) — server sends compressed Certificate message body
+- **Algorithm**: zlib (algorithm ID 1) via `flate2` crate, feature-gated behind `cert-compression`
+- **Protocol flow**: Client advertises → Server compresses Certificate body → Client decompresses and processes normally
+- **Transcript**: Uses CompressedCertificate message as-is in transcript hash (per RFC 8879 §4)
+- **Safety**: 16 MiB decompression limit, uncompressed_length validation
+
+#### 2. Dependencies
+- Added `flate2 = "1"` to workspace (pure Rust via miniz_oxide backend)
+- Feature flag `cert-compression = ["flate2"]` in hitls-tls
+
+#### 3. Files Modified
+- `Cargo.toml` (workspace): Added `flate2` dependency
+- `crates/hitls-tls/Cargo.toml`: Added `flate2` optional dep + `cert-compression` feature
+- `crates/hitls-tls/src/extensions/mod.rs`: Added `COMPRESS_CERTIFICATE` constant
+- `crates/hitls-tls/src/handshake/mod.rs`: Added `CompressedCertificate` variant
+- `crates/hitls-tls/src/handshake/codec.rs`: Added codec, compress/decompress helpers
+- `crates/hitls-tls/src/handshake/extensions_codec.rs`: Added build/parse for extension
+- `crates/hitls-tls/src/config/mod.rs`: Added `cert_compression_algos` config field
+- `crates/hitls-tls/src/handshake/client.rs`: Extension in CH, `process_compressed_certificate()`
+- `crates/hitls-tls/src/handshake/server.rs`: Parse extension, compress Certificate when negotiated
+- `crates/hitls-tls/src/connection.rs`: Dispatch CompressedCertificate in WaitCertCertReq state
+
+#### 4. Tests (7 new)
+- `test_compressed_certificate_codec_roundtrip` — encode/decode CompressedCertificate message
+- `test_compress_decompress_zlib` — compress/decompress Certificate body roundtrip
+- `test_build_parse_compress_certificate` — extension encode/decode roundtrip
+- `test_build_parse_compress_certificate_single` — single algorithm extension
+- `test_cert_compression_config` — config builder test
+- `test_cert_compression_handshake` — full client-server handshake with compression
+- `test_cert_compression_server_disabled` — normal Certificate when server doesn't enable compression
+
+### Test Results
+- **568 tests total** (20 auth + 46 bignum + 304 crypto + 47 pki + 115 tls + 26 utils + 10 integration), 19 ignored
+- All clippy warnings resolved, formatting clean

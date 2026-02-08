@@ -1,6 +1,7 @@
 //! TLS configuration with builder pattern.
 
 use crate::crypt::{NamedGroup, SignatureScheme};
+use crate::handshake::codec::CertCompressionAlgorithm;
 use crate::session::TlsSession;
 use crate::{CipherSuite, TlsRole, TlsVersion};
 use hitls_types::EccCurveId;
@@ -81,6 +82,9 @@ pub struct TlsConfig {
     pub client_private_key: Option<ServerPrivateKey>,
     /// Whether to offer post-handshake authentication (client-side).
     pub post_handshake_auth: bool,
+    /// Certificate compression algorithms to offer/accept (RFC 8879).
+    /// Empty means disabled.
+    pub cert_compression_algos: Vec<CertCompressionAlgorithm>,
 }
 
 impl TlsConfig {
@@ -112,6 +116,7 @@ pub struct TlsConfigBuilder {
     client_certificate_chain: Vec<Vec<u8>>,
     client_private_key: Option<ServerPrivateKey>,
     post_handshake_auth: bool,
+    cert_compression_algos: Vec<CertCompressionAlgorithm>,
 }
 
 impl Default for TlsConfigBuilder {
@@ -144,6 +149,7 @@ impl Default for TlsConfigBuilder {
             client_certificate_chain: Vec::new(),
             client_private_key: None,
             post_handshake_auth: false,
+            cert_compression_algos: Vec::new(),
         }
     }
 }
@@ -244,6 +250,11 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn cert_compression(mut self, algos: Vec<CertCompressionAlgorithm>) -> Self {
+        self.cert_compression_algos = algos;
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -265,6 +276,7 @@ impl TlsConfigBuilder {
             client_certificate_chain: self.client_certificate_chain,
             client_private_key: self.client_private_key,
             post_handshake_auth: self.post_handshake_auth,
+            cert_compression_algos: self.cert_compression_algos,
         }
     }
 }

@@ -93,6 +93,24 @@ pub struct CertificateRequestMsg {
     pub extensions: Vec<Extension>,
 }
 
+/// Certificate compression algorithm (RFC 8879).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CertCompressionAlgorithm(pub u16);
+
+impl CertCompressionAlgorithm {
+    pub const ZLIB: Self = Self(1);
+    pub const BROTLI: Self = Self(2);
+    pub const ZSTD: Self = Self(0x0100);
+}
+
+/// CompressedCertificate message (RFC 8879 §4).
+#[derive(Debug, Clone)]
+pub struct CompressedCertificateMsg {
+    pub algorithm: CertCompressionAlgorithm,
+    pub uncompressed_length: u32,
+    pub compressed_data: Vec<u8>,
+}
+
 /// KeyUpdate request type (RFC 8446 §4.6.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -130,6 +148,7 @@ pub fn parse_handshake_header(data: &[u8]) -> Result<(HandshakeType, &[u8], usiz
         15 => HandshakeType::CertificateVerify,
         20 => HandshakeType::Finished,
         24 => HandshakeType::KeyUpdate,
+        25 => HandshakeType::CompressedCertificate,
         254 => HandshakeType::MessageHash,
         _ => {
             return Err(TlsError::HandshakeFailed(format!(
@@ -419,6 +438,109 @@ pub fn decode_key_update(data: &[u8]) -> Result<KeyUpdateMsg, TlsError> {
         }
     };
     Ok(KeyUpdateMsg { request_update })
+}
+
+// ---------------------------------------------------------------------------
+// Encode/Decode CompressedCertificate (RFC 8879)
+// ---------------------------------------------------------------------------
+
+/// Encode a CompressedCertificate message as a complete handshake message.
+pub fn encode_compressed_certificate(msg: &CompressedCertificateMsg) -> Vec<u8> {
+    let mut body = Vec::with_capacity(5 + msg.compressed_data.len());
+    // algorithm (2)
+    body.extend_from_slice(&msg.algorithm.0.to_be_bytes());
+    // uncompressed_length (3)
+    body.push((msg.uncompressed_length >> 16) as u8);
+    body.push((msg.uncompressed_length >> 8) as u8);
+    body.push(msg.uncompressed_length as u8);
+    // compressed_certificate_message (3-byte length + data)
+    let len = msg.compressed_data.len();
+    body.push((len >> 16) as u8);
+    body.push((len >> 8) as u8);
+    body.push(len as u8);
+    body.extend_from_slice(&msg.compressed_data);
+    wrap_handshake(HandshakeType::CompressedCertificate, &body)
+}
+
+/// Decode a CompressedCertificate message from handshake body bytes.
+pub fn decode_compressed_certificate(data: &[u8]) -> Result<CompressedCertificateMsg, TlsError> {
+    let err = |msg: &str| TlsError::HandshakeFailed(format!("CompressedCertificate: {msg}"));
+
+    if data.len() < 8 {
+        return Err(err("too short"));
+    }
+
+    let algorithm = CertCompressionAlgorithm(u16::from_be_bytes([data[0], data[1]]));
+    let uncompressed_length = read_u24(&data[2..]);
+    let compressed_len = read_u24(&data[5..]) as usize;
+
+    if data.len() < 8 + compressed_len {
+        return Err(err("truncated compressed data"));
+    }
+    let compressed_data = data[8..8 + compressed_len].to_vec();
+
+    Ok(CompressedCertificateMsg {
+        algorithm,
+        uncompressed_length,
+        compressed_data,
+    })
+}
+
+/// Compress a Certificate message body using zlib.
+#[cfg(feature = "cert-compression")]
+pub fn compress_certificate_body(cert_body: &[u8]) -> Result<Vec<u8>, TlsError> {
+    use flate2::read::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Read;
+
+    let mut encoder = ZlibEncoder::new(cert_body, Compression::default());
+    let mut compressed = Vec::new();
+    encoder
+        .read_to_end(&mut compressed)
+        .map_err(|e| TlsError::HandshakeFailed(format!("zlib compress error: {e}")))?;
+    Ok(compressed)
+}
+
+/// Decompress a CompressedCertificate body back to Certificate message body.
+#[cfg(feature = "cert-compression")]
+pub fn decompress_certificate_body(
+    algorithm: CertCompressionAlgorithm,
+    compressed: &[u8],
+    uncompressed_length: u32,
+) -> Result<Vec<u8>, TlsError> {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+
+    if algorithm != CertCompressionAlgorithm::ZLIB {
+        return Err(TlsError::HandshakeFailed(format!(
+            "unsupported cert compression algorithm: {}",
+            algorithm.0
+        )));
+    }
+
+    // Cap decompressed size at 16 MiB to prevent decompression bombs
+    const MAX_DECOMPRESSED: u32 = 16 * 1024 * 1024;
+    if uncompressed_length > MAX_DECOMPRESSED {
+        return Err(TlsError::HandshakeFailed(
+            "certificate uncompressed_length too large".into(),
+        ));
+    }
+
+    let mut decoder = ZlibDecoder::new(compressed);
+    let mut decompressed = Vec::with_capacity(uncompressed_length as usize);
+    decoder
+        .read_to_end(&mut decompressed)
+        .map_err(|e| TlsError::HandshakeFailed(format!("zlib decompress error: {e}")))?;
+
+    if decompressed.len() != uncompressed_length as usize {
+        return Err(TlsError::HandshakeFailed(format!(
+            "certificate decompressed length mismatch: expected {}, got {}",
+            uncompressed_length,
+            decompressed.len()
+        )));
+    }
+
+    Ok(decompressed)
 }
 
 // ---------------------------------------------------------------------------
@@ -1138,5 +1260,60 @@ mod tests {
             decoded.extensions[0].extension_type,
             ExtensionType::SIGNATURE_ALGORITHMS
         );
+    }
+
+    #[test]
+    fn test_compressed_certificate_codec_roundtrip() {
+        let original = CompressedCertificateMsg {
+            algorithm: CertCompressionAlgorithm::ZLIB,
+            uncompressed_length: 1234,
+            compressed_data: vec![0x78, 0x9C, 0x01, 0x02, 0x03, 0x04, 0x05],
+        };
+
+        let encoded = encode_compressed_certificate(&original);
+        // Verify handshake type = 25 (CompressedCertificate)
+        assert_eq!(encoded[0], 25);
+
+        // Decode body (skip 4-byte handshake header)
+        let body = &encoded[4..];
+        let decoded = decode_compressed_certificate(body).unwrap();
+        assert_eq!(decoded.algorithm, CertCompressionAlgorithm::ZLIB);
+        assert_eq!(decoded.uncompressed_length, 1234);
+        assert_eq!(decoded.compressed_data, original.compressed_data);
+    }
+
+    #[cfg(feature = "cert-compression")]
+    #[test]
+    fn test_compress_decompress_zlib() {
+        // A sample Certificate message body (context_len=0, list with one small cert)
+        let mut cert_body = Vec::new();
+        cert_body.push(0); // empty context
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00]; // minimal DER
+        let mut list = Vec::new();
+        // cert_data (3-byte len)
+        list.push(0);
+        list.push(0);
+        list.push(fake_cert.len() as u8);
+        list.extend_from_slice(&fake_cert);
+        // extensions (2-byte len = 0)
+        list.push(0);
+        list.push(0);
+        // list length
+        let list_len = list.len();
+        cert_body.push((list_len >> 16) as u8);
+        cert_body.push((list_len >> 8) as u8);
+        cert_body.push(list_len as u8);
+        cert_body.extend_from_slice(&list);
+
+        let compressed = compress_certificate_body(&cert_body).unwrap();
+        assert!(!compressed.is_empty());
+        // Should be able to decompress back
+        let decompressed = decompress_certificate_body(
+            CertCompressionAlgorithm::ZLIB,
+            &compressed,
+            cert_body.len() as u32,
+        )
+        .unwrap();
+        assert_eq!(decompressed, cert_body);
     }
 }
