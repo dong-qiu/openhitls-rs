@@ -95,6 +95,12 @@ impl Encoder {
     pub fn write_set(&mut self, contents: &[u8]) -> &mut Self {
         self.write_tlv(0x31, contents)
     }
+
+    /// Write raw bytes directly (already DER-encoded).
+    pub fn write_raw(&mut self, data: &[u8]) -> &mut Self {
+        self.buf.extend_from_slice(data);
+        self
+    }
 }
 
 impl Default for Encoder {

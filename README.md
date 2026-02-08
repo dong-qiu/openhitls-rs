@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Phase 22 Complete — ECC Curve Additions (P-224, P-521, Brainpool P-256r1/P-384r1/P-512r1)**
+> **Status: Phase 23 Complete — CTR-DRBG + Hash-DRBG + PKCS#8 Key Parsing**
 >
-> 568 tests passing (20 auth + 46 bignum + 304 crypto + 47 pki + 108 tls + 26 utils + 10 integration). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), HMAC-DRBG, PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth), HOTP/TOTP, SPAKE2+, and CLI tool.
+> 600 tests passing (20 auth + 46 bignum + 326 crypto + 57 pki + 115 tls + 26 utils + 10 integration). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain), PKCS#8 (parse/encode), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), HOTP/TOTP, SPAKE2+, and CLI tool.
 
 ## Goals
 
@@ -22,9 +22,9 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error types, constants
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (26 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
-│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECC (P-224/P-256/P-384/P-521/Brainpool), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9, DRBG, ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal (304 tests)
+│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECC (P-224/P-256/P-384/P-521/Brainpool), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9, DRBG (HMAC/CTR/Hash), ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal (326 tests)
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth (115 tests)
-│   ├── hitls-pki/       # X.509 (parse, verify, chain build), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (47 tests)
+│   ├── hitls-pki/       # X.509 (parse, verify, chain build), PKCS#8 (RFC 5958), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (57 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl)
 ├── tests/interop/       # Integration tests: cross-crate roundtrip validation (10 tests)
@@ -109,6 +109,8 @@ openhitls-rs/
 | PBKDF2 | `pbkdf2` | **Done** | Verified with OpenSSL |
 | scrypt | `scrypt` | **Done** | RFC 7914 |
 | HMAC-DRBG (SP 800-90A) | `drbg` | **Done** | NIST SP 800-90A |
+| CTR-DRBG (SP 800-90A) | `drbg` | **Done** | NIST SP 800-90A §10.2 |
+| Hash-DRBG (SP 800-90A) | `drbg` | **Done** | NIST SP 800-90A §10.1.1 |
 | HPKE (RFC 9180) | `hpke` | **Done** | RFC 9180 A.1 |
 
 ### Big Number Arithmetic (`hitls-bignum`)
@@ -127,12 +129,13 @@ openhitls-rs/
 
 | Protocol | Crate | Status |
 |----------|-------|--------|
-| TLS 1.3 | `hitls-tls` | **Done** — Key Schedule + Record + Client & Server Handshake + PSK/Session Tickets + 0-RTT Early Data (no HRR yet) |
+| TLS 1.3 | `hitls-tls` | **Done** — Key Schedule + Record + Client & Server Handshake + HRR + KeyUpdate + PSK/0-RTT + Certificate Compression |
 | TLS 1.2 | `hitls-tls` | Planned (Phase 25) |
 | DTLS 1.2 | `hitls-tls` | Planned (Phase 26) |
 | TLCP (GM/T 0024) | `hitls-tls` | Planned (Phase 27) |
 | X.509 Certificates | `hitls-pki` | **Done** (parse + verify + chain) |
 | CRL | `hitls-pki` | Planned (Phase 24) |
+| PKCS#8 (RFC 5958) | `hitls-pki` | **Done** (parse + encode) |
 | PKCS#12 (RFC 7292) | `hitls-pki` | **Done** (parse + create) |
 | CMS SignedData (RFC 5652) | `hitls-pki` | **Done** (parse + verify + sign) |
 | HOTP (RFC 4226) | `hitls-auth` | **Done** |
@@ -155,13 +158,13 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (568 tests, 19 ignored)
+# Run all tests (600 tests, 19 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 304 tests (19 ignored)
-cargo test -p hitls-tls --all-features      # 108 tests
-cargo test -p hitls-pki --all-features      # 47 tests
+cargo test -p hitls-crypto --all-features   # 326 tests (19 ignored)
+cargo test -p hitls-tls --all-features      # 115 tests
+cargo test -p hitls-pki --all-features      # 57 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 26 tests
 cargo test -p hitls-auth --all-features     # 20 tests
@@ -202,9 +205,9 @@ Convenience feature groups:
 
 ## Roadmap
 
-### Completed (Phase 0-22)
+### Completed (Phase 0-23)
 
-All cryptographic primitives, X.509, PKCS#12, CMS, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), and CLI tool implemented. 568 tests passing across 9 crates.
+All cryptographic primitives, X.509, PKCS#8, PKCS#12, CMS, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), DRBG variants (HMAC, CTR, Hash), and CLI tool implemented. 600 tests passing across 9 crates.
 
 ### Remaining Migration Work
 
@@ -231,13 +234,13 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | Brainpool P-512r1 | RFC 5639 | **Done** |
 | P-224 (secp224r1) | FIPS 186-4 | **Done** |
 
-#### Phase 23: DRBG Variants & Cipher Modes
+#### Phase 23: DRBG Variants & PKCS#8
 
 | Component | Standard | Status |
 |-----------|----------|--------|
-| CTR-DRBG (AES-based) | NIST SP 800-90A | Not implemented (only HMAC-DRBG done) |
-| Hash-DRBG | NIST SP 800-90A | Not implemented |
-| PKCS#8 Key Parsing | RFC 5958 | Not implemented |
+| CTR-DRBG (AES-256) | NIST SP 800-90A §10.2 | **Done** |
+| Hash-DRBG (SHA-256/384/512) | NIST SP 800-90A §10.1.1 | **Done** |
+| PKCS#8 Key Parsing | RFC 5958 | **Done** (RSA, EC, Ed25519, X25519, DSA) |
 
 #### Phase 24: CRL & OCSP
 

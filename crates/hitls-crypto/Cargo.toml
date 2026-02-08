@@ -63,7 +63,7 @@ hybridkem = ["x25519", "mlkem", "sha2"]
 hkdf = ["hmac"]
 pbkdf2 = ["hmac"]
 scrypt = ["pbkdf2"]
-drbg = ["hmac", "sha2"]
+drbg = ["hmac", "sha2", "aes"]
 hpke = ["hkdf", "x25519", "sha2", "aes", "modes"]
 
 # Modes of operation

@@ -201,6 +201,11 @@ pub mod known {
         Oid::new(&[1, 2, 840, 113549, 1, 7, 3])
     }
 
+    // DSA
+    pub fn dsa() -> Oid {
+        Oid::new(&[1, 2, 840, 10040, 4, 1])
+    }
+
     // Additional signature OIDs
     pub fn sha1_with_rsa_encryption() -> Oid {
         Oid::new(&[1, 2, 840, 113549, 1, 1, 5])

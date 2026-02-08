@@ -8,13 +8,14 @@ description = "PKI certificate management for openHiTLS"
 
 [dependencies]
 hitls-types = { path = "../hitls-types" }
-hitls-crypto = { path = "../hitls-crypto", features = ["rsa", "ecdsa", "sha2", "sha1", "ed25519", "hmac", "pbkdf2", "modes"] }
+hitls-crypto = { path = "../hitls-crypto", features = ["rsa", "ecdsa", "sha2", "sha1", "ed25519", "x25519", "dsa", "hmac", "pbkdf2", "modes"] }
 hitls-utils = { path = "../hitls-utils" }
 zeroize = { version = "1.8", features = ["derive"] }
 getrandom = "0.2"
 
 [features]
-default = ["x509", "pkcs12", "cms"]
+default = ["x509", "pkcs12", "cms", "pkcs8"]
 x509 = []
 pkcs12 = []
 cms = []
+pkcs8 = []

@@ -9,3 +9,6 @@ pub mod pkcs12;
 
 #[cfg(feature = "cms")]
 pub mod cms;
+
+#[cfg(feature = "pkcs8")]
+pub mod pkcs8;

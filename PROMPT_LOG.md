@@ -1079,3 +1079,17 @@ Key implementation:
 - 7 new tests (codec roundtrip, compress/decompress, extension, full handshake, config, disabled)
 
 568 tests passing (20 auth + 46 bignum + 304 crypto + 10 integration + 47 pki + 115 tls + 26 utils), 19 ignored. Clippy clean, fmt clean.
+
+### Prompt 70: Start Phase 23
+> 请开始Phase 23的工作
+
+**Result**: Implemented Phase 23 — CTR-DRBG, Hash-DRBG, and PKCS#8 Key Parsing.
+
+Key implementation:
+- **CTR-DRBG** (NIST SP 800-90A §10.2): AES-256 based DRBG with key[32]+v[16] state, block_cipher_df derivation function, 11 tests
+- **Hash-DRBG** (NIST SP 800-90A §10.1.1): SHA-256/384/512 based DRBG with V+C state, hash_df counter-mode derivation, hashgen output, big-endian modular v_add, 11 tests
+- **DRBG refactor**: Split single-file drbg/mod.rs into hmac_drbg.rs, ctr_drbg.rs, hash_drbg.rs
+- **PKCS#8** (RFC 5958): Parse/encode PrivateKeyInfo for RSA, EC (P-256/P-384), Ed25519, X25519, DSA. OID dispatch table with 5 key types, 10 tests
+- Added DSA OID to hitls-utils
+
+600 tests passing (20 auth + 46 bignum + 326 crypto + 10 integration + 57 pki + 115 tls + 26 utils), 19 ignored. Clippy clean, fmt clean.

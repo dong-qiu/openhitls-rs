@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 22 complete — ECC curve additions + Phase 21 cert compression
+- **Status**: Phase 23 complete — CTR-DRBG, Hash-DRBG, PKCS#8 key parsing
 
 ## Workspace Structure
 
@@ -18,9 +18,9 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error enums
 │   ├── hitls-utils/     # ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
-│   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); ECC: P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1
+│   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); ECC: P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; DRBG: HMAC/CTR/Hash
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth (115 tests)
-│   ├── hitls-pki/       # X.509 (parse, verify, chain), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (47 tests)
+│   ├── hitls-pki/       # X.509 (parse, verify, chain), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652), PKCS#8 (RFC 5958) (57 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl)
 ├── tests/interop/       # Integration tests (10 cross-crate tests)
@@ -34,13 +34,13 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (568 tests, 19 ignored for slow keygen)
+# Run all tests (600 tests, 19 ignored for slow keygen)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 304 tests (19 ignored)
+cargo test -p hitls-crypto --all-features   # 326 tests (19 ignored)
 cargo test -p hitls-tls --all-features      # 115 tests
-cargo test -p hitls-pki --all-features      # 47 tests
+cargo test -p hitls-pki --all-features      # 57 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 26 tests
 cargo test -p hitls-auth --all-features     # 20 tests
@@ -101,6 +101,6 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-All 22 phases (0-22) complete: Phases 0-20 + Phase 21 (TLS 1.3 advanced, now including certificate compression RFC 8879) + Phase 22 (ECC curve additions). 568 tests passing (19 ignored for slow keygen).
+All 23 phases (0-23) complete: Phases 0-20 + Phase 21 (TLS 1.3 advanced, certificate compression RFC 8879) + Phase 22 (ECC curve additions) + Phase 23 (CTR-DRBG, Hash-DRBG, PKCS#8 key parsing). 600 tests passing (19 ignored for slow keygen).
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

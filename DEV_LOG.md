@@ -2034,3 +2034,104 @@ Implemented the remaining Phase 21 feature: TLS Certificate Compression (RFC 887
 ### Test Results
 - **568 tests total** (20 auth + 46 bignum + 304 crypto + 47 pki + 115 tls + 26 utils + 10 integration), 19 ignored
 - All clippy warnings resolved, formatting clean
+
+---
+
+## Phase 23: CTR-DRBG + Hash-DRBG + PKCS#8 Key Parsing (Session 2026-02-08)
+
+### Goals
+- Add CTR-DRBG (NIST SP 800-90A §10.2) and Hash-DRBG (§10.1.1) to complement existing HMAC-DRBG
+- Implement PKCS#8 private key parsing/encoding (RFC 5958) for interoperability
+- Refactor DRBG module into multi-file structure
+
+### Completed Steps
+
+#### 1. DRBG Module Refactoring
+- Split single-file `drbg/mod.rs` into multi-file module:
+  - `mod.rs` — re-exports + shared constants
+  - `hmac_drbg.rs` — existing HmacDrbg (moved from mod.rs, unchanged)
+  - `ctr_drbg.rs` — new CTR-DRBG
+  - `hash_drbg.rs` — new Hash-DRBG
+- Updated `drbg` feature to include `aes` dependency: `drbg = ["hmac", "sha2", "aes"]`
+
+#### 2. CTR-DRBG (NIST SP 800-90A §10.2)
+- **Structure**: `CtrDrbg { key: [u8; 32], v: [u8; 16], reseed_counter: u64 }`
+- **Constants**: KEY_LEN=32 (AES-256), BLOCK_LEN=16, SEED_LEN=48, RESEED_INTERVAL=2^48
+- **Core functions**:
+  - `new(seed_material)` — instantiate without DF (requires 48-byte seed)
+  - `with_df(entropy, nonce, personalization)` — instantiate with block_cipher_df
+  - `update(provided_data)` — generate AES-ECB blocks via V+1→encrypt, XOR with data, split into Key+V
+  - `generate(output, additional_input)` — check reseed, optional update, generate blocks, final update
+  - `reseed(entropy, additional_input)` — combine + update + reset counter
+  - `block_cipher_df(input, output_len)` — BCC-based derivation using AES CBC-MAC
+- Uses `crate::aes::AesKey` for single-block AES-256 encryption
+- 11 tests: instantiate, invalid_len, generate, deterministic, reseed, additional_input, large_output, with_df, nist_vector, block_cipher_df, increment_counter
+
+#### 3. Hash-DRBG (NIST SP 800-90A §10.1.1)
+- **Structure**: `HashDrbg { v: Vec<u8>, c: Vec<u8>, seed_len: usize, hash_type: HashDrbgType, reseed_counter: u64 }`
+- **Hash types**: Sha256 (seedLen=55), Sha384 (seedLen=111), Sha512 (seedLen=111) per SP 800-90A Table 2
+- **Core functions**:
+  - `new(hash_type, seed_material)` — V = hash_df(seed), C = hash_df(0x00||V)
+  - `hash_df(input, output_len)` — counter-mode: Hash(counter || len_bits_be32 || input)
+  - `generate(output, additional_input)` — optional w=Hash(0x02||V||adin), hashgen, H=Hash(0x03||V), V=(V+H+C+counter)
+  - `hashgen(v, output_len)` — data=V, generate Hash(data) blocks, data+=1 mod 2^seedlen
+  - `reseed(entropy, additional_input)` — seed=0x01||V||entropy||adin, V=hash_df, C=hash_df(0x00||V)
+  - `v_add(values)` / `v_add_u64(val)` — big-endian modular addition with carry
+- 11 tests: sha256_instantiate, sha256_generate, sha256_deterministic, sha256_reseed, sha256_additional_input, sha512_generate, sha384_generate, large_output, hash_df, v_add, v_add_u64
+
+#### 4. PKCS#8 Key Parsing (RFC 5958)
+- **File**: `crates/hitls-pki/src/pkcs8/mod.rs`
+- **Enum**: `Pkcs8PrivateKey { Rsa, Ec, Ed25519, X25519, Dsa }`
+- **OID dispatch**:
+  - RSA (`1.2.840.113549.1.1.1`) → parse RSAPrivateKey SEQUENCE → `RsaPrivateKey::new(n,d,e,p,q)`
+  - EC (`1.2.840.10045.2.1`) → params=curve OID→EccCurveId, ECPrivateKey → `EcdsaKeyPair::from_private_key()`
+  - Ed25519 (`1.3.101.112`) → inner OCTET STRING 32 bytes → `Ed25519KeyPair::from_seed()`
+  - X25519 (`1.3.101.110`) → inner OCTET STRING 32 bytes → `X25519PrivateKey::new()`
+  - DSA (`1.2.840.10040.4.1`) → params=(p,q,g), privateKey INTEGER → `DsaKeyPair::from_private_key()`
+- **Encode helpers**: `encode_pkcs8_der_raw()`, `encode_pkcs8_pem_raw()`, `encode_ed25519_pkcs8_der()`, `encode_x25519_pkcs8_der()`, `encode_ec_pkcs8_der()`
+- Added DSA OID to `hitls-utils/src/oid/mod.rs`
+- Added `pkcs8` feature to `hitls-pki/Cargo.toml`, added `x25519` and `dsa` to hitls-crypto deps
+- 10 tests: parse_ed25519, parse_x25519, parse_rsa_pem (real 2048-bit key from C test data), parse_ec_p256, parse_ec_p384, parse_dsa, pem_roundtrip, ec_roundtrip, ed25519_roundtrip, invalid_version
+
+### Files Created/Modified
+
+| File | Operation | Approx Lines |
+|------|-----------|-------------|
+| `crates/hitls-crypto/src/drbg/mod.rs` | Rewritten: module root with re-exports | ~20 |
+| `crates/hitls-crypto/src/drbg/hmac_drbg.rs` | New: moved from mod.rs | ~280 |
+| `crates/hitls-crypto/src/drbg/ctr_drbg.rs` | New: CTR-DRBG | ~450 |
+| `crates/hitls-crypto/src/drbg/hash_drbg.rs` | New: Hash-DRBG | ~500 |
+| `crates/hitls-pki/src/pkcs8/mod.rs` | New: PKCS#8 parse/encode | ~650 |
+| `crates/hitls-crypto/Cargo.toml` | Modified: drbg adds aes | +1 |
+| `crates/hitls-pki/Cargo.toml` | Modified: pkcs8 feature, x25519+dsa deps | +5 |
+| `crates/hitls-pki/src/lib.rs` | Modified: add pkcs8 module | +1 |
+| `crates/hitls-utils/src/oid/mod.rs` | Modified: add DSA OID | +5 |
+
+### Bugs Found & Fixed
+- **`crate::aes::Aes` not found**: AES struct is `AesKey`, not `Aes`. Fixed import.
+- **`CryptoError::UnsupportedAlgorithm` doesn't exist**: Used `CryptoError::DecodeUnknownOid` instead.
+- **Invalid RSA test key**: Made-up n,d,p,q values weren't mathematically valid (p*q≠n). Replaced with real RSA PEM from C test data.
+- **Clippy `manual_div_ceil`**: Changed to `.div_ceil()` method.
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-auth | 20 | All pass |
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 326 (+22, 19 ignored) | All pass |
+| hitls-pki | 57 (+10) | All pass |
+| hitls-tls | 115 | All pass |
+| hitls-utils | 26 | All pass |
+| integration | 10 | All pass |
+| **Total** | **600** | **All pass** |
+
+New tests (32):
+- CTR-DRBG (11): instantiate, invalid_len, generate, deterministic, reseed, additional_input, large_output, with_df, nist_vector, block_cipher_df, increment_counter
+- Hash-DRBG (11): sha256_instantiate, sha256_generate, sha256_deterministic, sha256_reseed, sha256_additional_input, sha512_generate, sha384_generate, large_output, hash_df, v_add, v_add_u64
+- PKCS#8 (10): parse_ed25519, parse_x25519, parse_rsa_pem, parse_ec_p256, parse_ec_p384, parse_dsa, pem_roundtrip, ec_roundtrip, ed25519_roundtrip, invalid_version
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 600 workspace tests passing (19 ignored)
