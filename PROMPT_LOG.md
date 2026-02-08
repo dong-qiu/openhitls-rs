@@ -1093,3 +1093,16 @@ Key implementation:
 - Added DSA OID to hitls-utils
 
 600 tests passing (20 auth + 46 bignum + 326 crypto + 10 integration + 57 pki + 115 tls + 26 utils), 19 ignored. Clippy clean, fmt clean.
+
+### Prompt 71: Start Phase 24
+> 请开始Phase 24的工作
+
+**Result**: Implemented Phase 24 — CRL Parsing + Validation + Revocation Checking + OCSP Parsing.
+
+Key implementation:
+- **CRL Parsing** (RFC 5280 §5): Full CRL parsing from DER/PEM, version detection (v1/v2), entry extensions (reason code, invalidity date), serial lookup with `is_revoked()`, signature verification against issuer cert. 13 tests.
+- **Revocation Checking**: Integrated into `CertificateVerifier` with opt-in `check_revocation` flag. For each chain cert, finds matching issuer CRL, verifies CRL signature, checks CRL time validity, checks serial against revoked list. Soft-fail if no CRL. 3 tests.
+- **OCSP Parsing** (RFC 6960): Offline OCSP request building (`OcspRequest::to_der()`) and response parsing (`OcspResponse::from_der()`). Supports Good/Revoked/Unknown status, BasicOCSPResponse with signature verification. 8 tests.
+- Added 9 CRL/OCSP OIDs to hitls-utils, OCSP type re-exports from x509 module
+
+624 tests passing (20 auth + 46 bignum + 326 crypto + 10 integration + 81 pki + 115 tls + 26 utils), 19 ignored. Clippy clean, fmt clean.

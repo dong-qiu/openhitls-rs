@@ -2,6 +2,7 @@
 
 use hitls_types::PkiError;
 
+use super::crl::CertificateRevocationList;
 use super::{Certificate, KeyUsage};
 
 /// X.509 certificate chain verifier.
@@ -10,8 +11,10 @@ use super::{Certificate, KeyUsage};
 /// through intermediate CAs to a trusted root certificate.
 pub struct CertificateVerifier {
     trusted_certs: Vec<Certificate>,
+    crls: Vec<CertificateRevocationList>,
     max_depth: u32,
     verification_time: Option<i64>,
+    check_revocation: bool,
 }
 
 impl Default for CertificateVerifier {
@@ -21,12 +24,14 @@ impl Default for CertificateVerifier {
 }
 
 impl CertificateVerifier {
-    /// Create a new verifier with default settings (max depth 10, no time check).
+    /// Create a new verifier with default settings (max depth 10, no time/CRL check).
     pub fn new() -> Self {
         Self {
             trusted_certs: Vec::new(),
+            crls: Vec::new(),
             max_depth: 10,
             verification_time: None,
+            check_revocation: false,
         }
     }
 
@@ -60,6 +65,25 @@ impl CertificateVerifier {
     /// If not set, time checking is skipped.
     pub fn set_verification_time(&mut self, time: i64) -> &mut Self {
         self.verification_time = Some(time);
+        self
+    }
+
+    /// Add a CRL for revocation checking.
+    pub fn add_crl(&mut self, crl: CertificateRevocationList) -> &mut Self {
+        self.crls.push(crl);
+        self
+    }
+
+    /// Parse and add all CRLs from a PEM string.
+    pub fn add_crls_pem(&mut self, pem: &str) -> Result<&mut Self, PkiError> {
+        let crls = super::crl::parse_crls_pem(pem)?;
+        self.crls.extend(crls);
+        Ok(self)
+    }
+
+    /// Enable or disable revocation checking (default: disabled).
+    pub fn set_check_revocation(&mut self, check: bool) -> &mut Self {
+        self.check_revocation = check;
         self
     }
 
@@ -142,7 +166,7 @@ impl CertificateVerifier {
         None
     }
 
-    /// Validate the built chain (time, BasicConstraints, KeyUsage, pathLen).
+    /// Validate the built chain (time, BasicConstraints, KeyUsage, pathLen, revocation).
     fn validate_chain(&self, chain: &[Certificate]) -> Result<(), PkiError> {
         for (i, cert) in chain.iter().enumerate() {
             // Time validity check
@@ -192,7 +216,61 @@ impl CertificateVerifier {
                 }
             }
         }
+
+        // Revocation checking (if enabled)
+        if self.check_revocation {
+            self.check_revocation_status(chain)?;
+        }
+
         Ok(())
+    }
+
+    /// Check revocation status for each certificate in the chain (except the root).
+    fn check_revocation_status(&self, chain: &[Certificate]) -> Result<(), PkiError> {
+        // For each cert except the last (root), check if it's revoked.
+        // The issuer of chain[i] is chain[i+1].
+        for i in 0..chain.len().saturating_sub(1) {
+            let cert = &chain[i];
+            let issuer = &chain[i + 1];
+
+            // Find a CRL from this issuer
+            if let Some(crl) = self.find_crl_for_issuer(issuer) {
+                // Verify CRL signature
+                let sig_valid = crl.verify_signature(issuer).map_err(|e| {
+                    PkiError::InvalidCrl(format!("CRL signature verification failed: {}", e))
+                })?;
+                if !sig_valid {
+                    return Err(PkiError::InvalidCrl(
+                        "CRL signature verification failed".into(),
+                    ));
+                }
+
+                // Check CRL time validity
+                if let Some(time) = self.verification_time {
+                    if time < crl.this_update {
+                        return Err(PkiError::InvalidCrl("CRL not yet valid".into()));
+                    }
+                    if let Some(next_update) = crl.next_update {
+                        if time > next_update {
+                            return Err(PkiError::InvalidCrl("CRL has expired".into()));
+                        }
+                    }
+                }
+
+                // Check if certificate is revoked
+                if crl.is_revoked(&cert.serial_number).is_some() {
+                    return Err(PkiError::CertRevoked);
+                }
+            }
+            // If no CRL found for this issuer, skip (soft-fail).
+            // A strict mode could return an error here.
+        }
+        Ok(())
+    }
+
+    /// Find a CRL issued by the given issuer certificate (by matching issuer DN).
+    fn find_crl_for_issuer(&self, issuer: &Certificate) -> Option<&CertificateRevocationList> {
+        self.crls.iter().find(|crl| crl.issuer == issuer.subject)
     }
 }
 
@@ -502,5 +580,72 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let intermediates = [intermediate_ca()];
         let chain = verifier.verify_cert(&ee, &intermediates).unwrap();
         assert_eq!(chain.len(), 3);
+    }
+
+    // --- CRL revocation checking tests ---
+
+    // CRL test data: ca.crl revokes server2 (serial ...D9) but NOT server1 (serial ...D8)
+    const CRL_CA_PEM: &str = include_str!(
+        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/certs/ca.crt"
+    );
+    const CRL_PEM: &str = include_str!(
+        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/crl/ca.crl"
+    );
+    const SERVER1_PEM: &str = include_str!(
+        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/certs/server1.crt"
+    );
+    const SERVER2_PEM: &str = include_str!(
+        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/certs/server2.crt"
+    );
+
+    #[test]
+    fn test_verify_chain_with_crl_revoked() {
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server2 = Certificate::from_pem(SERVER2_PEM).unwrap();
+        let crl = CertificateRevocationList::from_pem(CRL_PEM).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(ca);
+        verifier.add_crl(crl);
+        verifier.set_check_revocation(true);
+        // CRL valid Nov 4 – Dec 4, 2025; use Nov 19, 2025
+        verifier.set_verification_time(1_763_164_800);
+
+        let result = verifier.verify_cert(&server2, &[]);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), PkiError::CertRevoked));
+    }
+
+    #[test]
+    fn test_verify_chain_with_crl_not_revoked() {
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server1 = Certificate::from_pem(SERVER1_PEM).unwrap();
+        let crl = CertificateRevocationList::from_pem(CRL_PEM).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(ca);
+        verifier.add_crl(crl);
+        verifier.set_check_revocation(true);
+        verifier.set_verification_time(1_763_164_800);
+
+        let chain = verifier.verify_cert(&server1, &[]).unwrap();
+        assert_eq!(chain.len(), 2); // [server1, ca]
+    }
+
+    #[test]
+    fn test_verify_chain_no_revocation_check_default() {
+        // With revocation checking off (default), a revoked cert still passes
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server2 = Certificate::from_pem(SERVER2_PEM).unwrap();
+        let crl = CertificateRevocationList::from_pem(CRL_PEM).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(ca);
+        verifier.add_crl(crl);
+        // check_revocation defaults to false
+        verifier.set_verification_time(1_763_164_800);
+
+        let chain = verifier.verify_cert(&server2, &[]).unwrap();
+        assert_eq!(chain.len(), 2);
     }
 }

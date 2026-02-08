@@ -1,5 +1,7 @@
-//! X.509 certificate, CRL, and CSR management.
+//! X.509 certificate, CRL, CSR, and OCSP management.
 
+pub mod crl;
+pub mod ocsp;
 pub mod verify;
 
 use hitls_types::{CryptoError, EccCurveId, PkiError};
@@ -68,22 +70,13 @@ pub struct CertificateRequest {
     pub public_key: SubjectPublicKeyInfo,
 }
 
-/// A certificate revocation list (CRL).
-#[derive(Debug, Clone)]
-pub struct CertificateRevocationList {
-    pub raw: Vec<u8>,
-    pub issuer: DistinguishedName,
-    pub this_update: i64,
-    pub next_update: Option<i64>,
-    pub revoked_certs: Vec<RevokedCertificate>,
-}
-
-/// A revoked certificate entry.
-#[derive(Debug, Clone)]
-pub struct RevokedCertificate {
-    pub serial_number: Vec<u8>,
-    pub revocation_date: i64,
-}
+// CRL types are defined in crl.rs and re-exported here.
+pub use crl::{CertificateRevocationList, RevocationReason, RevokedCertificate};
+// OCSP types are defined in ocsp.rs and re-exported here.
+pub use ocsp::{
+    OcspBasicResponse, OcspCertId, OcspCertStatus, OcspRequest, OcspResponse, OcspResponseStatus,
+    OcspSingleResponse, ResponderId,
+};
 
 // ---------------------------------------------------------------------------
 // Distinguished Name helpers
@@ -250,7 +243,9 @@ impl Eq for DistinguishedName {}
 // AlgorithmIdentifier parsing
 // ---------------------------------------------------------------------------
 
-fn parse_algorithm_identifier(dec: &mut Decoder) -> Result<(Vec<u8>, Option<Vec<u8>>), PkiError> {
+pub(crate) fn parse_algorithm_identifier(
+    dec: &mut Decoder,
+) -> Result<(Vec<u8>, Option<Vec<u8>>), PkiError> {
     let mut alg_dec = dec
         .read_sequence()
         .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
@@ -278,7 +273,7 @@ fn parse_algorithm_identifier(dec: &mut Decoder) -> Result<(Vec<u8>, Option<Vec<
 // Name / DN parsing
 // ---------------------------------------------------------------------------
 
-fn parse_name(dec: &mut Decoder) -> Result<DistinguishedName, PkiError> {
+pub(crate) fn parse_name(dec: &mut Decoder) -> Result<DistinguishedName, PkiError> {
     let mut name_dec = dec
         .read_sequence()
         .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
@@ -348,7 +343,7 @@ fn parse_subject_public_key_info(dec: &mut Decoder) -> Result<SubjectPublicKeyIn
 // Extensions parsing
 // ---------------------------------------------------------------------------
 
-fn parse_extensions(ext_data: &[u8]) -> Result<Vec<X509Extension>, PkiError> {
+pub(crate) fn parse_extensions(ext_data: &[u8]) -> Result<Vec<X509Extension>, PkiError> {
     let mut ext_seq = Decoder::new(ext_data)
         .read_sequence()
         .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
@@ -581,14 +576,14 @@ impl Certificate {
 // Signature verification helpers
 // ---------------------------------------------------------------------------
 
-enum HashAlg {
+pub(crate) enum HashAlg {
     Sha1,
     Sha256,
     Sha384,
     Sha512,
 }
 
-fn compute_hash(data: &[u8], alg: &HashAlg) -> Result<Vec<u8>, CryptoError> {
+pub(crate) fn compute_hash(data: &[u8], alg: &HashAlg) -> Result<Vec<u8>, CryptoError> {
     match alg {
         HashAlg::Sha1 => {
             let mut h = hitls_crypto::sha1::Sha1::new();
@@ -613,7 +608,7 @@ fn compute_hash(data: &[u8], alg: &HashAlg) -> Result<Vec<u8>, CryptoError> {
     }
 }
 
-fn verify_rsa(
+pub(crate) fn verify_rsa(
     tbs: &[u8],
     signature: &[u8],
     spki: &SubjectPublicKeyInfo,
@@ -642,7 +637,7 @@ fn verify_rsa(
         .map_err(PkiError::from)
 }
 
-fn oid_to_curve_id(oid: &Oid) -> Result<EccCurveId, PkiError> {
+pub(crate) fn oid_to_curve_id(oid: &Oid) -> Result<EccCurveId, PkiError> {
     if *oid == known::secp224r1() {
         Ok(EccCurveId::NistP224)
     } else if *oid == known::prime256v1() {
@@ -665,7 +660,7 @@ fn oid_to_curve_id(oid: &Oid) -> Result<EccCurveId, PkiError> {
     }
 }
 
-fn verify_ecdsa(
+pub(crate) fn verify_ecdsa(
     tbs: &[u8],
     signature: &[u8],
     spki: &SubjectPublicKeyInfo,
@@ -686,7 +681,7 @@ fn verify_ecdsa(
     verifier.verify(&digest, signature).map_err(PkiError::from)
 }
 
-fn verify_ed25519(
+pub(crate) fn verify_ed25519(
     tbs: &[u8],
     signature: &[u8],
     spki: &SubjectPublicKeyInfo,

@@ -237,6 +237,37 @@ pub mod known {
         Oid::new(&[2, 5, 29, 31])
     }
 
+    // CRL Extension OIDs (RFC 5280 §5.2)
+    pub fn crl_number() -> Oid {
+        Oid::new(&[2, 5, 29, 20])
+    }
+    pub fn crl_reason() -> Oid {
+        Oid::new(&[2, 5, 29, 21])
+    }
+    pub fn invalidity_date() -> Oid {
+        Oid::new(&[2, 5, 29, 24])
+    }
+    pub fn delta_crl_indicator() -> Oid {
+        Oid::new(&[2, 5, 29, 27])
+    }
+    pub fn issuing_distribution_point() -> Oid {
+        Oid::new(&[2, 5, 29, 28])
+    }
+
+    // PKIX Authority Information Access (RFC 5280 §4.2.2.1)
+    pub fn authority_info_access() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 1, 1])
+    }
+    pub fn ocsp() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 48, 1])
+    }
+    pub fn ocsp_basic() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 48, 1, 1])
+    }
+    pub fn ca_issuers() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 48, 2])
+    }
+
     // DN Attribute Type OIDs (X.520)
     pub fn common_name() -> Oid {
         Oid::new(&[2, 5, 4, 3])

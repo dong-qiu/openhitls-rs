@@ -2135,3 +2135,115 @@ New tests (32):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 600 workspace tests passing (19 ignored)
+
+---
+
+## Phase 24: CRL Parsing + Validation + Revocation Checking + OCSP (Session 2026-02-09)
+
+### Goals
+- Parse X.509 CRLs (Certificate Revocation Lists) per RFC 5280 §5
+- Verify CRL signatures against issuer certificates
+- Integrate revocation checking into CertificateVerifier
+- Implement basic OCSP (RFC 6960) request/response parsing (offline, no HTTP)
+
+### Completed Steps
+
+#### Step 1: Add CRL/OCSP OIDs + Make mod.rs Helpers pub(crate)
+
+**File**: `crates/hitls-utils/src/oid/mod.rs`
+- Added 9 CRL/OCSP OIDs: `crl_number`, `crl_reason`, `invalidity_date`, `delta_crl_indicator`, `issuing_distribution_point`, `authority_info_access`, `ocsp`, `ocsp_basic`, `ca_issuers`
+
+**File**: `crates/hitls-pki/src/x509/mod.rs`
+- Changed 9 helpers to `pub(crate)`: `parse_algorithm_identifier`, `parse_name`, `parse_extensions`, `HashAlg`, `compute_hash`, `verify_rsa`, `verify_ecdsa`, `verify_ed25519`, `oid_to_curve_id`
+- Added `pub mod crl;` and `pub mod ocsp;` declarations
+- Replaced CRL struct stubs with `pub use crl::{ ... }` re-exports
+- Added OCSP type re-exports
+
+#### Step 2: CRL Parsing + Verification (13 tests)
+
+**File**: `crates/hitls-pki/src/x509/crl.rs` (new, ~410 lines)
+
+Structures:
+- `CertificateRevocationList`: raw, version, signature_algorithm, signature_params, issuer, this_update, next_update, revoked_certs, extensions, tbs_raw, signature_value
+- `RevokedCertificate`: serial_number, revocation_date, reason, invalidity_date, extensions
+- `RevocationReason` enum (0=Unspecified through 10=AaCompromise, 7 unused)
+
+API:
+- `from_der()`, `from_pem()` — full CRL parsing with version detection, entry extensions
+- `is_revoked(serial)` — serial number lookup with leading-zero stripping
+- `verify_signature(issuer)` — reuses RSA/ECDSA/Ed25519 signature verification
+- `crl_number()` — extract CRL number extension
+- `parse_crls_pem()` — parse multiple CRLs from PEM
+- `verify_signature_with_oid()` — pub(crate) helper reused by OCSP
+
+Test data from C project: `testcode/testdata/cert/test_for_crl/` (PEM-encoded .crl files)
+
+**Bugs found and fixed**:
+- **ASN.1 Tag number for SEQUENCE**: `tags::SEQUENCE = 0x30` but `Tag.number` stores only the 5-bit tag number (0x10). Used `tag.number == 0x10` for SEQUENCE comparisons.
+- **PEM vs DER**: Test `.crl` files are PEM-encoded despite `.crl` extension. Changed to `include_str!` + `from_pem()`.
+- **Zero-length nextUpdate**: One CRL has empty UTCTIME for nextUpdate. Used `.ok()` to treat parse failure as absent.
+
+#### Step 3: Revocation Checking in CertificateVerifier (3 tests)
+
+**File**: `crates/hitls-pki/src/x509/verify.rs`
+
+New fields/methods:
+- `crls: Vec<CertificateRevocationList>`, `check_revocation: bool` (default false)
+- `add_crl()`, `add_crls_pem()`, `set_check_revocation()` builder methods
+
+Revocation checking logic (`check_revocation_status`):
+- For each cert in chain except root: find CRL matching issuer DN
+- Verify CRL signature with issuer cert
+- Check CRL time validity (thisUpdate ≤ now ≤ nextUpdate)
+- If cert serial found in revoked list → `Err(PkiError::CertRevoked)`
+- Soft-fail if no CRL found for issuer (no error, just skip)
+
+Tests: `verify_chain_with_crl_revoked`, `verify_chain_with_crl_not_revoked`, `verify_chain_no_revocation_check_default`
+
+#### Step 4: Basic OCSP Message Parsing (8 tests)
+
+**File**: `crates/hitls-pki/src/x509/ocsp.rs` (new, ~480 lines)
+
+Structures:
+- `OcspCertId`: hash_algorithm, issuer_name_hash, issuer_key_hash, serial_number
+- `OcspRequest`: request_list, nonce
+- `OcspResponse`: status, basic_response
+- `OcspBasicResponse`: tbs_raw, responder_id, produced_at, responses, signature_algorithm, signature, certs
+- `OcspSingleResponse`: cert_id, status, this_update, next_update
+- `OcspCertStatus`: Good, Revoked { time, reason }, Unknown
+- `OcspResponseStatus`: Successful, MalformedRequest, InternalError, TryLater, SigRequired, Unauthorized
+- `ResponderId`: ByName, ByKey
+
+API:
+- `OcspCertId::new(cert, issuer)` — SHA-256 based cert ID
+- `OcspCertId::to_der()`, `matches()` — encode/compare
+- `OcspRequest::new(cert, issuer)`, `to_der()` — build OCSP request
+- `OcspResponse::from_der()` — parse full OCSP response
+- `OcspBasicResponse::verify_signature(issuer)`, `find_response(cert_id)`
+
+Encoder helper pattern: `enc_seq()`, `enc_octet()`, `enc_oid()`, etc. — wrapper functions for Encoder's `&mut Self` → `finish(self)` ownership issue.
+
+Synthetic test data: `build_test_ocsp_response()` constructs DER for testing without real OCSP server data.
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-auth | 20 | All pass |
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 326 (19 ignored) | All pass |
+| hitls-pki | 81 (+24) | All pass |
+| hitls-tls | 115 | All pass |
+| hitls-utils | 26 | All pass |
+| integration | 10 | All pass |
+| **Total** | **624** | **All pass** |
+
+New tests (24):
+- CRL (13): parse_crl_v1_pem, parse_crl_v2_pem, parse_crl_v2_empty, parse_crl_no_next_update, parse_crl_reason_codes, parse_crl_invalidity_date, verify_crl_signature, verify_crl_v2_signature, verify_crl_signature_wrong_issuer, is_revoked_found, is_revoked_not_found, parse_crls_pem_multiple, crl_v2_reason_key_compromise
+- Verify+CRL (3): verify_chain_with_crl_revoked, verify_chain_with_crl_not_revoked, verify_chain_no_revocation_check_default
+- OCSP (8): ocsp_cert_id_new, ocsp_cert_id_matches, ocsp_cert_id_to_der_roundtrip, ocsp_request_to_der, ocsp_response_non_successful, ocsp_response_parse_good, ocsp_response_parse_revoked, ocsp_response_find_response
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 624 workspace tests passing (19 ignored)
