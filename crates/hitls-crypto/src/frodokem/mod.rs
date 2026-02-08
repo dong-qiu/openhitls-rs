@@ -172,8 +172,7 @@ impl FrodoKemKeyPair {
         hash_input.extend_from_slice(pk_hash);
         hash_input.extend_from_slice(&mu_prime);
         hash_input.extend_from_slice(salt);
-        let seed_k_prime =
-            util::shake_hash(&hash_input, &[], p.seed_se_len + p.ss_len, p)?;
+        let seed_k_prime = util::shake_hash(&hash_input, &[], p.seed_se_len + p.ss_len, p)?;
 
         let seed_se_prime = &seed_k_prime[..p.seed_se_len];
         let k_prime = &seed_k_prime[p.seed_se_len..];
@@ -293,12 +292,7 @@ mod tests {
             let p = get_params(param_id);
             let kp = FrodoKemKeyPair::generate(param_id).unwrap();
             assert_eq!(kp.encapsulation_key().len(), p.pk_size, "{:?} pk", param_id);
-            assert_eq!(
-                kp.decapsulation_key.len(),
-                p.sk_size,
-                "{:?} sk",
-                param_id
-            );
+            assert_eq!(kp.decapsulation_key.len(), p.sk_size, "{:?} sk", param_id);
             let (ct, ss) = kp.encapsulate().unwrap();
             assert_eq!(ct.len(), p.ct_size, "{:?} ct", param_id);
             assert_eq!(ss.len(), p.ss_len, "{:?} ss", param_id);

@@ -53,7 +53,13 @@ impl GfPoly {
     /// Evaluate polynomial given as coefficient slice at all support points.
     /// out[i] = f(L[i]) where f has degree t with f[t] as leading coefficient.
     #[allow(clippy::needless_range_loop)]
-    pub fn eval_roots(out: &mut [GfElement], f: &[GfElement], support: &[GfElement], n: usize, t: usize) {
+    pub fn eval_roots(
+        out: &mut [GfElement],
+        f: &[GfElement],
+        support: &[GfElement],
+        n: usize,
+        t: usize,
+    ) {
         for i in 0..n {
             let mut r = f[t];
             let a = support[i];

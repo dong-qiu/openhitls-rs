@@ -158,7 +158,14 @@ pub(crate) fn reduce_to_systematic(mat: &mut BitMatrix) -> Result<(), CryptoErro
     Ok(())
 }
 
-fn xor_row_masked(data: &mut [u8], dst_row: usize, src_row: usize, byte_idx: usize, bit_in_byte: usize, cols_bytes: usize) {
+fn xor_row_masked(
+    data: &mut [u8],
+    dst_row: usize,
+    src_row: usize,
+    byte_idx: usize,
+    bit_in_byte: usize,
+    cols_bytes: usize,
+) {
     let lo_mask = (1u8 << bit_in_byte) - 1;
     let dst_off = dst_row * cols_bytes;
     let src_off = src_row * cols_bytes;
@@ -248,10 +255,7 @@ pub(crate) fn gauss_semi_systematic(
 }
 
 /// Extract T for semi-systematic form.
-pub(crate) fn extract_t_semi(
-    mat: &BitMatrix,
-    params: &McElieceParams,
-) -> Vec<u8> {
+pub(crate) fn extract_t_semi(mat: &BitMatrix, params: &McElieceParams) -> Vec<u8> {
     let mt = params.mt;
     let tail = mt & 7;
     let k = params.n - mt;
@@ -303,7 +307,9 @@ fn cols_permutation(
         for k in 0..8 {
             tmp[k] = (tmp[k] >> tail) | (tmp[k + 1] << (8 - tail));
         }
-        buf[i] = u64::from_le_bytes([tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6], tmp[7]]);
+        buf[i] = u64::from_le_bytes([
+            tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6], tmp[7],
+        ]);
     }
 
     // Gaussian elimination on submatrix
@@ -355,7 +361,9 @@ fn cols_permutation(
         for k in 0..8 {
             tmp[k] = (tmp[k] >> tail) | (tmp[k + 1] << (8 - tail));
         }
-        let mut t = u64::from_le_bytes([tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6], tmp[7]]);
+        let mut t = u64::from_le_bytes([
+            tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6], tmp[7],
+        ]);
 
         for j in 0..MU {
             let d = ((t >> j) ^ (t >> ctz_list[j])) & 1;

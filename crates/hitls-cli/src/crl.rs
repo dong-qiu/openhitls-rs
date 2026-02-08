@@ -11,7 +11,11 @@ pub fn run(input: &str, text: bool) -> Result<(), Box<dyn std::error::Error>> {
         if let Ok(pem_str) = std::str::from_utf8(&data) {
             if let Ok(blocks) = hitls_utils::pem::parse(pem_str) {
                 for block in &blocks {
-                    println!("  PEM block: {} ({} bytes DER)", block.label, block.data.len());
+                    println!(
+                        "  PEM block: {} ({} bytes DER)",
+                        block.label,
+                        block.data.len()
+                    );
                 }
                 return Ok(());
             }

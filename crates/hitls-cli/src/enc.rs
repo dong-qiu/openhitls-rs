@@ -22,10 +22,9 @@ pub fn run(
             }
         }
         _ => {
-            return Err(format!(
-                "cipher '{cipher}' not yet implemented. Supported: aes-256-gcm"
-            )
-            .into());
+            return Err(
+                format!("cipher '{cipher}' not yet implemented. Supported: aes-256-gcm").into(),
+            );
         }
     }
 

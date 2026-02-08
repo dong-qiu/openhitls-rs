@@ -92,7 +92,12 @@ fn parse_curve_id(name: &str) -> Result<hitls_types::EccCurveId, Box<dyn std::er
 }
 
 fn parse_mlkem_param(name: &str) -> Result<u32, Box<dyn std::error::Error>> {
-    match name.to_uppercase().replace('-', "").replace("MLKEM", "").as_str() {
+    match name
+        .to_uppercase()
+        .replace('-', "")
+        .replace("MLKEM", "")
+        .as_str()
+    {
         "512" => Ok(512),
         "768" | "" => Ok(768),
         "1024" => Ok(1024),
@@ -101,7 +106,12 @@ fn parse_mlkem_param(name: &str) -> Result<u32, Box<dyn std::error::Error>> {
 }
 
 fn parse_mldsa_param(name: &str) -> Result<u32, Box<dyn std::error::Error>> {
-    match name.to_uppercase().replace('-', "").replace("MLDSA", "").as_str() {
+    match name
+        .to_uppercase()
+        .replace('-', "")
+        .replace("MLDSA", "")
+        .as_str()
+    {
         "44" => Ok(44),
         "65" | "" => Ok(65),
         "87" => Ok(87),

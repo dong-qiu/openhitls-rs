@@ -61,24 +61,18 @@ pub(crate) fn unpack(input: &[u8], count: usize, logq: u8) -> Vec<u16> {
             let b = &input[base_in..base_in + 15];
 
             out[base_out] = (b[0] as u16 | ((b[1] as u16) << 8)) & mask;
-            out[base_out + 1] = ((b[1] as u16) >> 7 | ((b[2] as u16) << 1)
-                | ((b[3] as u16) << 9))
-                & mask;
-            out[base_out + 2] = ((b[3] as u16) >> 6 | ((b[4] as u16) << 2)
-                | ((b[5] as u16) << 10))
-                & mask;
-            out[base_out + 3] = ((b[5] as u16) >> 5 | ((b[6] as u16) << 3)
-                | ((b[7] as u16) << 11))
-                & mask;
-            out[base_out + 4] = ((b[7] as u16) >> 4 | ((b[8] as u16) << 4)
-                | ((b[9] as u16) << 12))
-                & mask;
-            out[base_out + 5] = ((b[9] as u16) >> 3 | ((b[10] as u16) << 5)
-                | ((b[11] as u16) << 13))
-                & mask;
-            out[base_out + 6] = ((b[11] as u16) >> 2 | ((b[12] as u16) << 6)
-                | ((b[13] as u16) << 14))
-                & mask;
+            out[base_out + 1] =
+                ((b[1] as u16) >> 7 | ((b[2] as u16) << 1) | ((b[3] as u16) << 9)) & mask;
+            out[base_out + 2] =
+                ((b[3] as u16) >> 6 | ((b[4] as u16) << 2) | ((b[5] as u16) << 10)) & mask;
+            out[base_out + 3] =
+                ((b[5] as u16) >> 5 | ((b[6] as u16) << 3) | ((b[7] as u16) << 11)) & mask;
+            out[base_out + 4] =
+                ((b[7] as u16) >> 4 | ((b[8] as u16) << 4) | ((b[9] as u16) << 12)) & mask;
+            out[base_out + 5] =
+                ((b[9] as u16) >> 3 | ((b[10] as u16) << 5) | ((b[11] as u16) << 13)) & mask;
+            out[base_out + 6] =
+                ((b[11] as u16) >> 2 | ((b[12] as u16) << 6) | ((b[13] as u16) << 14)) & mask;
             out[base_out + 7] = ((b[13] as u16) >> 1 | ((b[14] as u16) << 7)) & mask;
         }
     }
@@ -139,12 +133,7 @@ pub(crate) fn decode(input: &[u16], params: &FrodoParams) -> Vec<u8> {
 /// Sample noise from the CDF distribution using random bytes from SHAKE output.
 /// `r` must have length >= 2 * count.
 /// Returns `count` signed noise values stored as u16 (mod q via q_mask).
-pub(crate) fn sample_noise(
-    r: &[u8],
-    count: usize,
-    cdf_table: &[u16],
-    q_mask: u16,
-) -> Vec<u16> {
+pub(crate) fn sample_noise(r: &[u8], count: usize, cdf_table: &[u16], q_mask: u16) -> Vec<u16> {
     let mut out = vec![0u16; count];
     for i in 0..count {
         let sample = u16::from_le_bytes([r[2 * i], r[2 * i + 1]]);
@@ -168,7 +157,11 @@ pub(crate) fn ct_verify(a: &[u8], b: &[u8]) -> u8 {
     use subtle::ConstantTimeEq;
     // ct_eq returns Choice(1) if equal, Choice(0) if not
     let eq: bool = a.ct_eq(b).into();
-    if eq { 0 } else { 1 }
+    if eq {
+        0
+    } else {
+        1
+    }
 }
 
 /// Constant-time select: if selector == 0, return a; else return b.
@@ -255,8 +248,10 @@ mod tests {
     #[test]
     fn test_encode_decode() {
         let params = test_params_640();
-        let mu = vec![0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x56, 0x78, 0x9A,
-                      0xBC, 0xDE, 0xF0, 0x11, 0x22, 0x33, 0x44, 0x55];
+        let mu = vec![
+            0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x11, 0x22, 0x33,
+            0x44, 0x55,
+        ];
         let encoded = encode(&mu, params);
         let decoded = decode(&encoded, params);
         assert_eq!(mu, decoded);

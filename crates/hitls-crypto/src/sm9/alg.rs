@@ -20,9 +20,7 @@ pub(crate) enum Sm9KeyType {
 /// Generate a master key pair.
 /// For signing: Ppub = [ks]P2 (master pub on G2, user key on G1)
 /// For encryption: Ppub = [ke]P1 (master pub on G1, user key on G2)
-pub(crate) fn master_keygen(
-    key_type: Sm9KeyType,
-) -> Result<(BigNum, Vec<u8>), CryptoError> {
+pub(crate) fn master_keygen(key_type: Sm9KeyType) -> Result<(BigNum, Vec<u8>), CryptoError> {
     let n = curve::order();
     let n_minus_1 = n.sub(&BigNum::from_u64(1));
 

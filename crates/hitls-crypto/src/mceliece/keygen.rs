@@ -10,12 +10,12 @@ use super::poly::{self, GfPoly};
 
 /// Internal key generation result.
 pub(crate) struct KeyPairInternal {
-    pub pk_t: Vec<u8>,      // Public key T matrix
-    pub sk_delta: Vec<u8>,   // Random seed
-    pub sk_c: u64,           // Pivot mask (semi-systematic only)
-    pub sk_g: GfPoly,        // Goppa polynomial
+    pub pk_t: Vec<u8>,            // Public key T matrix
+    pub sk_delta: Vec<u8>,        // Random seed
+    pub sk_c: u64,                // Pivot mask (semi-systematic only)
+    pub sk_g: GfPoly,             // Goppa polynomial
     pub sk_alpha: Vec<GfElement>, // Field ordering
-    pub sk_s: Vec<u8>,       // Random string for implicit rejection
+    pub sk_s: Vec<u8>,            // Random string for implicit rejection
     pub sk_controlbits: Vec<u8>,  // Benes network control bits
 }
 
@@ -48,10 +48,17 @@ pub(crate) fn seeded_keygen(
 
         let s_bits = &prg_output[..s_byte_len];
         let field_ord_bits = &prg_output[s_byte_len..s_byte_len + field_ord_byte_len];
-        let irr_poly_bits = &prg_output[s_byte_len + field_ord_byte_len..s_byte_len + field_ord_byte_len + irr_poly_byte_len];
+        let irr_poly_bits = &prg_output
+            [s_byte_len + field_ord_byte_len..s_byte_len + field_ord_byte_len + irr_poly_byte_len];
 
         // Try to generate key
-        match systematic_loop(s_bits, field_ord_bits, irr_poly_bits, &current_delta, params) {
+        match systematic_loop(
+            s_bits,
+            field_ord_bits,
+            irr_poly_bits,
+            &current_delta,
+            params,
+        ) {
             Ok(kp) => return Ok(kp),
             Err(_) => {
                 current_delta = delta_prime;
@@ -133,7 +140,8 @@ fn systematic_loop(
 
     // Random string s
     let mut sk_s = vec![0u8; params.n_bytes];
-    sk_s[..params.n_bytes.min(s_bits.len())].copy_from_slice(&s_bits[..params.n_bytes.min(s_bits.len())]);
+    sk_s[..params.n_bytes.min(s_bits.len())]
+        .copy_from_slice(&s_bits[..params.n_bytes.min(s_bits.len())]);
 
     let mut sk_delta = vec![0u8; L_BYTES];
     sk_delta[..delta.len().min(L_BYTES)].copy_from_slice(&delta[..delta.len().min(L_BYTES)]);
@@ -149,7 +157,10 @@ fn systematic_loop(
     })
 }
 
-fn generate_irreducible_poly(random_bits: &[u8], params: &McElieceParams) -> Result<GfPoly, CryptoError> {
+fn generate_irreducible_poly(
+    random_bits: &[u8],
+    params: &McElieceParams,
+) -> Result<GfPoly, CryptoError> {
     let t = params.t;
     let m = params.m;
 
@@ -178,7 +189,10 @@ fn generate_irreducible_poly(random_bits: &[u8], params: &McElieceParams) -> Res
     Ok(g)
 }
 
-fn generate_field_ordering(random_bits: &[u8], params: &McElieceParams) -> Result<Vec<GfElement>, CryptoError> {
+fn generate_field_ordering(
+    random_bits: &[u8],
+    params: &McElieceParams,
+) -> Result<Vec<GfElement>, CryptoError> {
     let m = params.m;
 
     // Read Q 32-bit values

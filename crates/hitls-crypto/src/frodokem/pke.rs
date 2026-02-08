@@ -34,12 +34,7 @@ pub(crate) fn pke_keygen(
 
     // Sample S (n × n_bar) and E (n × n_bar)
     let s = util::sample_noise(&r[..2 * n * n_bar], n * n_bar, params.cdf_table, q_mask);
-    let e = util::sample_noise(
-        &r[2 * n * n_bar..],
-        n * n_bar,
-        params.cdf_table,
-        q_mask,
-    );
+    let e = util::sample_noise(&r[2 * n * n_bar..], n * n_bar, params.cdf_table, q_mask);
 
     // B = A·S + E
     let b = matrix::mul_add_as_plus_e(seed_a, &s, &e, params)?;

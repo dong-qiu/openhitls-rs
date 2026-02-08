@@ -27,14 +27,17 @@ mod tests {
             .unwrap();
         let rsa_pub = rsa_key.public_key();
         let rsa_ok = rsa_pub
-            .verify(hitls_crypto::rsa::RsaPadding::Pkcs1v15Sign, &digest, &rsa_sig)
+            .verify(
+                hitls_crypto::rsa::RsaPadding::Pkcs1v15Sign,
+                &digest,
+                &rsa_sig,
+            )
             .unwrap();
         assert!(rsa_ok, "RSA signature verification failed");
 
         // ECDSA P-256 sign + verify
         let ec_kp =
-            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256)
-                .unwrap();
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
         let ec_sig = ec_kp.sign(&digest).unwrap();
         let ec_ok = ec_kp.verify(&digest, &ec_sig).unwrap();
         assert!(ec_ok, "ECDSA signature verification failed");
@@ -54,7 +57,8 @@ mod tests {
         let nonce = hex("000000000000000000000001");
 
         // AES-256-GCM encrypt (returns ct || tag)
-        let ct_tag = hitls_crypto::modes::gcm::gcm_encrypt(&key, &nonce, b"aad", plaintext).unwrap();
+        let ct_tag =
+            hitls_crypto::modes::gcm::gcm_encrypt(&key, &nonce, b"aad", plaintext).unwrap();
 
         // Compute HMAC-SHA256 over ciphertext for integrity binding
         let hmac_key = hex("aabbccdd");
@@ -132,8 +136,8 @@ mod tests {
     #[test]
     fn test_ecdsa_p384_sign_verify() {
         // P-384 ECDSA roundtrip
-        let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP384)
-            .unwrap();
+        let kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP384).unwrap();
         let digest = hitls_crypto::sha2::Sha384::digest(b"P-384 ECDSA test message").unwrap();
         let sig = kp.sign(&digest).unwrap();
         let ok = kp.verify(&digest, &sig).unwrap();

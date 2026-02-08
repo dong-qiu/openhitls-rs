@@ -221,11 +221,7 @@ fn deserialize_private_key(
     // controlbits
     let controlbits = sk[offset..].to_vec();
 
-    Ok(PrivateKeyParts {
-        g,
-        s,
-        controlbits,
-    })
+    Ok(PrivateKeyParts { g, s, controlbits })
 }
 
 #[cfg(test)]
@@ -275,7 +271,7 @@ mod tests {
         p2.set_coeff(1, 1);
         p2.set_coeff(2, 1);
         assert_eq!(p2.eval(0), 1); // p(0) = 1
-        // p(1) = 1 + 1 + 1 = 1
+                                   // p(1) = 1 + 1 + 1 = 1
         assert_eq!(p2.eval(1), 1);
     }
 
@@ -436,11 +432,20 @@ mod tests {
         let t = 2;
         let mt = t * 13; // 26
         let p = params::McElieceParams {
-            m: 13, n, t, mt, k: n - mt, // 64 - 26 = 38
-            n_bytes: 8, mt_bytes: mt.div_ceil(8), k_bytes: (n - mt).div_ceil(8),
-            private_key_bytes: 0, public_key_bytes: 0,
-            cipher_bytes: mt.div_ceil(8), shared_key_bytes: 32,
-            semi: false, pc: false,
+            m: 13,
+            n,
+            t,
+            mt,
+            k: n - mt, // 64 - 26 = 38
+            n_bytes: 8,
+            mt_bytes: mt.div_ceil(8),
+            k_bytes: (n - mt).div_ceil(8),
+            private_key_bytes: 0,
+            public_key_bytes: 0,
+            cipher_bytes: mt.div_ceil(8),
+            shared_key_bytes: 32,
+            semi: false,
+            pc: false,
         };
         // Create a random received vector — decoding should produce an error or non-match
         let received = vec![0xFFu8; 8];

@@ -32,16 +32,15 @@ impl EcPointG1 {
 
     /// Create from affine coordinates.
     pub fn from_affine(x: Fp, y: Fp) -> Self {
-        Self {
-            x,
-            y,
-            z: Fp::one(),
-        }
+        Self { x, y, z: Fp::one() }
     }
 
     /// Generator P1.
     pub fn generator() -> Self {
-        Self::from_affine(Fp::from_bignum(curve::p1_x()), Fp::from_bignum(curve::p1_y()))
+        Self::from_affine(
+            Fp::from_bignum(curve::p1_x()),
+            Fp::from_bignum(curve::p1_y()),
+        )
     }
 
     /// Convert to affine (x, y).

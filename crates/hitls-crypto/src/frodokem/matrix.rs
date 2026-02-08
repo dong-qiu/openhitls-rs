@@ -238,9 +238,8 @@ pub(crate) fn mul_add_sb_plus_e(
             let sp_val = sp[i * n + j] as u32;
             for k in 0..n_bar {
                 let b_val = b[j * n_bar + k] as u32;
-                out[i * n_bar + k] = out[i * n_bar + k]
-                    .wrapping_add((sp_val.wrapping_mul(b_val)) as u16)
-                    & q_mask;
+                out[i * n_bar + k] =
+                    out[i * n_bar + k].wrapping_add((sp_val.wrapping_mul(b_val)) as u16) & q_mask;
             }
         }
     }
@@ -294,9 +293,7 @@ pub(crate) fn mul_bs(s_t: &[u16], c1: &[u16], params: &FrodoParams) -> Vec<u16> 
         for j in 0..n_bar {
             let mut sum = 0u32;
             for k in 0..n {
-                sum = sum.wrapping_add(
-                    (c1[i * n + k] as u32).wrapping_mul(s_t[j * n + k] as u32),
-                );
+                sum = sum.wrapping_add((c1[i * n + k] as u32).wrapping_mul(s_t[j * n + k] as u32));
             }
             result[i * n_bar + j] = (sum as u16) & q_mask;
         }

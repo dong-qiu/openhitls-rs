@@ -32,13 +32,20 @@ fn init_tables() -> GfTables {
         log_table[a as usize] = i as u16;
         // Multiply by generator 3: a * 3 = a * (x + 1) = (a << 1) ^ a
         let next = (a << 1) ^ a;
-        a = if next & (1 << 13) != 0 { next ^ GF_POLY } else { next };
+        a = if next & (1 << 13) != 0 {
+            next ^ GF_POLY
+        } else {
+            next
+        };
     }
     // log[0] is undefined, set to 0 as sentinel
     log_table[0] = 0;
     exp_table[Q - 1] = exp_table[0]; // wrap around
 
-    GfTables { log_table, exp_table }
+    GfTables {
+        log_table,
+        exp_table,
+    }
 }
 
 fn tables() -> &'static GfTables {

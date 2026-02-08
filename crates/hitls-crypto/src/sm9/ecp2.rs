@@ -180,12 +180,12 @@ impl EcPointG2 {
             return Err(CryptoError::InvalidArg);
         }
         let x = Fp2::new(
-            Fp::from_bytes_be(&data[32..64])?,  // c0
-            Fp::from_bytes_be(&data[..32])?,     // c1
+            Fp::from_bytes_be(&data[32..64])?, // c0
+            Fp::from_bytes_be(&data[..32])?,   // c1
         );
         let y = Fp2::new(
-            Fp::from_bytes_be(&data[96..128])?,  // c0
-            Fp::from_bytes_be(&data[64..96])?,    // c1
+            Fp::from_bytes_be(&data[96..128])?, // c0
+            Fp::from_bytes_be(&data[64..96])?,  // c1
         );
         Ok(Self::from_affine(x, y))
     }

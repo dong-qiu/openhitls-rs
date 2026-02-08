@@ -88,11 +88,7 @@ pub(crate) fn pairing(p: &EcPointG1, q: &EcPointG2) -> Result<Fp12, CryptoError>
 ///   c0 = Fp4(λ·xT - yT, Fp2(yP, 0))   — constant + yP in v-slot
 ///   c1 = Fp4::zero()                     — no w term
 ///   c2 = Fp4(-λ·xP, Fp2::zero())       — negated in w² slot
-fn line_double(
-    t: &EcPointG2,
-    px: &Fp,
-    py: &Fp,
-) -> Result<(Fp12, EcPointG2), CryptoError> {
+fn line_double(t: &EcPointG2, px: &Fp, py: &Fp) -> Result<(Fp12, EcPointG2), CryptoError> {
     let (tx, ty) = t.to_affine()?;
 
     // Tangent line at T: λ = (3·tx²) / (2·ty)  (since a=0)

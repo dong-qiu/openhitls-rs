@@ -140,9 +140,8 @@ fn benes_controlbits(
 
     let nu = n as usize;
     let area_a = unsafe { std::slice::from_raw_parts_mut(temp.as_mut_ptr() as *mut u32, nu) };
-    let area_b = unsafe {
-        std::slice::from_raw_parts_mut(temp.as_mut_ptr().add(nu) as *mut u32, nu)
-    };
+    let area_b =
+        unsafe { std::slice::from_raw_parts_mut(temp.as_mut_ptr().add(nu) as *mut u32, nu) };
 
     // Build 32-bit keys
     for i in 0..nu {
@@ -230,14 +229,35 @@ fn benes_controlbits(
 
     // Recurse
     let mut child_temp = vec![0i32; nu]; // reuse temp space
-    benes_controlbits(out, current_pos, step * 2, &q[..nu / 2], w - 1, n / 2, &mut child_temp)?;
-    benes_controlbits(out, current_pos + step, step * 2, &q[nu / 2..], w - 1, n / 2, &mut child_temp)?;
+    benes_controlbits(
+        out,
+        current_pos,
+        step * 2,
+        &q[..nu / 2],
+        w - 1,
+        n / 2,
+        &mut child_temp,
+    )?;
+    benes_controlbits(
+        out,
+        current_pos + step,
+        step * 2,
+        &q[nu / 2..],
+        w - 1,
+        n / 2,
+        &mut child_temp,
+    )?;
 
     Ok(())
 }
 
 #[allow(clippy::needless_range_loop)]
-fn process_small_alphabet(area_a: &mut [u32], area_b: &mut [u32], n: usize, w: u32) -> Result<(), CryptoError> {
+fn process_small_alphabet(
+    area_a: &mut [u32],
+    area_b: &mut [u32],
+    n: usize,
+    w: u32,
+) -> Result<(), CryptoError> {
     for i in 0..n {
         area_b[i] = ((area_a[i] & 0x3FF) << 10) | (area_b[i] & 0x3FF);
     }
@@ -263,7 +283,12 @@ fn process_small_alphabet(area_a: &mut [u32], area_b: &mut [u32], n: usize, w: u
 }
 
 #[allow(clippy::needless_range_loop)]
-fn process_large_alphabet(area_a: &mut [u32], area_b: &mut [u32], n: usize, w: u32) -> Result<(), CryptoError> {
+fn process_large_alphabet(
+    area_a: &mut [u32],
+    area_b: &mut [u32],
+    n: usize,
+    w: u32,
+) -> Result<(), CryptoError> {
     for i in 0..n {
         area_b[i] = (area_a[i] << 16) | (area_b[i] & 0xFFFF);
     }

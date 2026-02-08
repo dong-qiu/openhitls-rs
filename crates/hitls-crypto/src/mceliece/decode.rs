@@ -122,7 +122,10 @@ fn berlekamp_massey(
         let mut d = syndrome[n_idx as usize];
         for i in 1..=lfsr_len {
             if i <= poly_c.degree && poly_c.coeffs[i as usize] != 0 && (n_idx - i) >= 0 {
-                d = gf::gf_add(d, gf::gf_mul(poly_c.coeffs[i as usize], syndrome[(n_idx - i) as usize]));
+                d = gf::gf_add(
+                    d,
+                    gf::gf_mul(poly_c.coeffs[i as usize], syndrome[(n_idx - i) as usize]),
+                );
             }
         }
 
@@ -140,7 +143,11 @@ fn berlekamp_massey(
                     if poly_b.coeffs[i] != 0 && (i as i32 + m) <= t as i32 {
                         let term = gf::gf_mul(corr, poly_b.coeffs[i]);
                         let idx = (i as i32 + m) as usize;
-                        let cur = if (idx as i32) <= poly_c.degree { poly_c.coeffs[idx] } else { 0 };
+                        let cur = if (idx as i32) <= poly_c.degree {
+                            poly_c.coeffs[idx]
+                        } else {
+                            0
+                        };
                         poly_c.set_coeff(idx, gf::gf_add(cur, term));
                     }
                 }

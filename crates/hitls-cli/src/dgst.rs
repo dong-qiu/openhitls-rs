@@ -14,7 +14,10 @@ pub fn run(algorithm: &str, file: &str) -> Result<(), Box<dyn std::error::Error>
 
     let (digest, alg_name) = hash_data(algorithm, &data)?;
 
-    let hex = digest.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let hex = digest
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
     if file == "-" {
         println!("{alg_name}(stdin)= {hex}");
     } else {

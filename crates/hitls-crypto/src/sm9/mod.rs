@@ -97,11 +97,7 @@ impl Sm9MasterKey {
     }
 
     /// Encrypt a message to a user ID.
-    pub fn encrypt(
-        &self,
-        user_id: &[u8],
-        plaintext: &[u8],
-    ) -> Result<Vec<u8>, CryptoError> {
+    pub fn encrypt(&self, user_id: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if self.key_type != Sm9KeyType::Encrypt {
             return Err(CryptoError::InvalidArg);
         }
@@ -124,11 +120,7 @@ pub struct Sm9UserKey {
 impl Sm9UserKey {
     /// Sign a message using this user's SM9 private key.
     /// Requires the master public key for computing the pairing.
-    pub fn sign(
-        &self,
-        message: &[u8],
-        master_pub: &[u8],
-    ) -> Result<Vec<u8>, CryptoError> {
+    pub fn sign(&self, message: &[u8], master_pub: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if self.key_type != Sm9KeyType::Sign {
             return Err(CryptoError::InvalidArg);
         }
@@ -288,19 +280,16 @@ mod tests {
         let beta = pairing::fp2_pow(&xi, &exp2).unwrap();
 
         // alpha should be in Fp (c1 = 0)
-        assert!(
-            alpha.c1.is_zero(),
-            "alpha.c1 should be 0, got non-zero"
-        );
+        assert!(alpha.c1.is_zero(), "alpha.c1 should be 0, got non-zero");
         // beta should be in Fp (c1 = 0)
-        assert!(
-            beta.c1.is_zero(),
-            "beta.c1 should be 0, got non-zero"
-        );
+        assert!(beta.c1.is_zero(), "beta.c1 should be 0, got non-zero");
 
         // Check alpha^3 = -1 (mod p)
         let a3 = alpha.mul(&alpha).unwrap().mul(&alpha).unwrap();
-        let neg_one = fp2::Fp2::new(fp::Fp::from_bignum(p.sub(&hitls_bignum::BigNum::from_u64(1))), fp::Fp::zero());
+        let neg_one = fp2::Fp2::new(
+            fp::Fp::from_bignum(p.sub(&hitls_bignum::BigNum::from_u64(1))),
+            fp::Fp::zero(),
+        );
         assert_eq!(a3, neg_one, "alpha^3 should be -1");
 
         // Check beta^2 = -1 (mod p)
@@ -352,11 +341,18 @@ mod tests {
         let p4 = p2.mul(&p2);
         let num = p4.sub(&p2).add(&hitls_bignum::BigNum::from_u64(1));
         let (exp, rem) = num.div_rem(&n).unwrap();
-        assert!(rem.is_zero(), "FAIL: (p^4-p^2+1) mod n != 0, remainder = {:?}", rem);
+        assert!(
+            rem.is_zero(),
+            "FAIL: (p^4-p^2+1) mod n != 0, remainder = {:?}",
+            rem
+        );
         // Verify exp * n = num
         let check = exp.mul(&n);
         assert_eq!(check, num, "FAIL: exp * n != p^4-p^2+1");
-        eprintln!("PASS: Hard part exponent is exact, exp has {} bits", exp.to_bytes_be().len() * 8);
+        eprintln!(
+            "PASS: Hard part exponent is exact, exp has {} bits",
+            exp.to_bytes_be().len() * 8
+        );
 
         // Step 2: Test Frobenius on Fp12 by comparing explicit formula with f^p
         let f = fp12::Fp12::new(
@@ -401,10 +397,7 @@ mod tests {
             let p6 = p3.mul(&p3);
             f.pow(&p6).unwrap()
         };
-        assert_eq!(
-            f_conj, f_pow_p6,
-            "FAIL: p^6 conjugation formula != f^(p^6)"
-        );
+        assert_eq!(f_conj, f_pow_p6, "FAIL: p^6 conjugation formula != f^(p^6)");
         eprintln!("PASS: p^6 conjugation matches f^(p^6)");
 
         // Step 5: Test second argument linearity: e(P, 2Q) == e(P, Q)^2
@@ -418,16 +411,25 @@ mod tests {
         let e_p_q_sq = e_p_q.sqr().unwrap();
 
         let second_arg_ok = e_p_2q == e_p_q_sq;
-        eprintln!("Second argument linearity e(P, 2Q) == e(P, Q)^2: {}", second_arg_ok);
+        eprintln!(
+            "Second argument linearity e(P, 2Q) == e(P, Q)^2: {}",
+            second_arg_ok
+        );
 
         // Step 6: Test first argument linearity: e(2P, Q) == e(P, Q)^2
         let p1_2 = p1.scalar_mul(&two).unwrap();
         let e_2p_q = pairing::pairing(&p1_2, &p2_gen).unwrap();
 
         let first_arg_ok = e_2p_q == e_p_q_sq;
-        eprintln!("First argument linearity e(2P, Q) == e(P, Q)^2: {}", first_arg_ok);
+        eprintln!(
+            "First argument linearity e(2P, Q) == e(P, Q)^2: {}",
+            first_arg_ok
+        );
 
-        assert!(second_arg_ok || first_arg_ok, "Neither linearity direction works");
+        assert!(
+            second_arg_ok || first_arg_ok,
+            "Neither linearity direction works"
+        );
     }
 
     #[test]

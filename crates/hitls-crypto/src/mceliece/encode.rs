@@ -77,8 +77,7 @@ pub(crate) fn fixed_weight_vector(params: &McElieceParams) -> Result<Vec<u8>, Cr
         let sample_cnt = 2 * t;
         let rand_bytes_len = sample_cnt * 2;
         let mut rand_bytes = vec![0u8; rand_bytes_len];
-        getrandom::getrandom(&mut rand_bytes)
-            .map_err(|_| CryptoError::McElieceKeygenFail)?;
+        getrandom::getrandom(&mut rand_bytes).map_err(|_| CryptoError::McElieceKeygenFail)?;
 
         let mut pos_list = Vec::with_capacity(t);
 

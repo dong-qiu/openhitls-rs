@@ -40,10 +40,7 @@ fn print_cert_text(cert: &hitls_pki::x509::Certificate) {
         cert.version + 1,
         cert.version
     );
-    println!(
-        "        Serial Number: {}",
-        hex_str(&cert.serial_number)
-    );
+    println!("        Serial Number: {}", hex_str(&cert.serial_number));
     println!("    Issuer: {}", cert.issuer);
     println!("    Validity");
     println!("        Not Before: {}", format_time(cert.not_before));

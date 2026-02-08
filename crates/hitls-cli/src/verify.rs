@@ -4,8 +4,8 @@ use std::fs;
 
 pub fn run(ca_file: &str, cert_file: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Load CA certificates
-    let ca_pem = fs::read_to_string(ca_file)
-        .map_err(|e| format!("cannot read CA file '{ca_file}': {e}"))?;
+    let ca_pem =
+        fs::read_to_string(ca_file).map_err(|e| format!("cannot read CA file '{ca_file}': {e}"))?;
 
     // Load certificate to verify
     let cert_pem = fs::read_to_string(cert_file)
@@ -16,7 +16,8 @@ pub fn run(ca_file: &str, cert_file: &str) -> Result<(), Box<dyn std::error::Err
 
     // Build verifier with trusted CAs
     let mut verifier = hitls_pki::x509::verify::CertificateVerifier::new();
-    verifier.add_trusted_certs_pem(&ca_pem)
+    verifier
+        .add_trusted_certs_pem(&ca_pem)
         .map_err(|e| format!("failed to parse CA certificates: {e}"))?;
 
     // Verify
