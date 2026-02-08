@@ -1953,3 +1953,38 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
 - **Bug fixed**: SPKI construction in cert builder was missing AlgorithmIdentifier SEQUENCE wrapper
 - 6 new tests: test_certificate_request_codec, test_post_hs_auth_codec, test_post_hs_auth_roundtrip, test_post_hs_auth_no_cert, test_post_hs_auth_not_offered, test_post_hs_auth_server_not_connected
 - 108 TLS tests, 535 workspace total
+
+---
+
+## Phase 22: ECC Curve Additions
+
+### Goals
+- Add P-224, P-521, Brainpool P-256r1, Brainpool P-384r1, Brainpool P-512r1 curves
+- Extend ECDSA and ECDH to support all new curves
+- Add OID mappings and X.509/CMS curve support
+
+### Completed Steps
+
+#### 1. New ECC Curves
+- **P-224 (secp224r1)**: FIPS 186-4, 224-bit prime curve
+- **P-521 (secp521r1)**: FIPS 186-4, 521-bit prime curve
+- **Brainpool P-256r1**: RFC 5639, 256-bit prime curve
+- **Brainpool P-384r1**: RFC 5639, 384-bit prime curve
+- **Brainpool P-512r1**: RFC 5639, 512-bit prime curve
+
+#### 2. Key Implementation Details
+- Added generic point doubling for Brainpool curves where a ≠ p−3 (NIST curves use an optimized doubling formula that assumes a = p−3; Brainpool curves have arbitrary a values)
+- Fixed Brainpool P-384r1 prime (p) and P-512r1 curve parameter (a) hex values from RFC 5639
+- Added OID constants for all new curves
+- Extended X.509 and CMS curve mappings to support the new curves
+
+#### 3. Tests
+- 16 new ECC tests (point operations, scalar multiplication, roundtrips for each curve)
+- 5 new ECDSA tests (sign/verify for each new curve)
+- 5 new ECDH tests (key exchange for each new curve)
+- 26 new tests total, 1 additional ignored (slow keygen)
+
+### Test Results
+- **561 tests total** (20 auth + 46 bignum + 304 crypto + 47 pki + 108 tls + 26 utils + 10 integration), 19 ignored
+- hitls-crypto: 304 tests (19 ignored)
+- All clippy warnings resolved, formatting clean

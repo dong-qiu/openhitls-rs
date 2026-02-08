@@ -126,6 +126,27 @@ fn cerr(msg: &str) -> PkiError {
     PkiError::CmsError(msg.into())
 }
 
+fn cms_oid_to_curve_id(oid: &Oid) -> Option<hitls_types::EccCurveId> {
+    use hitls_types::EccCurveId;
+    if *oid == known::secp224r1() {
+        Some(EccCurveId::NistP224)
+    } else if *oid == known::prime256v1() {
+        Some(EccCurveId::NistP256)
+    } else if *oid == known::secp384r1() {
+        Some(EccCurveId::NistP384)
+    } else if *oid == known::secp521r1() {
+        Some(EccCurveId::NistP521)
+    } else if *oid == known::brainpool_p256r1() {
+        Some(EccCurveId::BrainpoolP256r1)
+    } else if *oid == known::brainpool_p384r1() {
+        Some(EccCurveId::BrainpoolP384r1)
+    } else if *oid == known::brainpool_p512r1() {
+        Some(EccCurveId::BrainpoolP512r1)
+    } else {
+        None
+    }
+}
+
 fn bytes_to_u32(bytes: &[u8]) -> u32 {
     bytes
         .iter()
@@ -585,13 +606,8 @@ fn verify_signature_with_cert(
             .ok_or_else(|| cerr("missing EC curve in cert"))?;
         let curve_oid =
             Oid::from_der_value(curve_oid_bytes).map_err(|e| cerr(&format!("curve OID: {e}")))?;
-        let curve_id = if curve_oid == known::prime256v1() {
-            hitls_types::EccCurveId::NistP256
-        } else if curve_oid == known::secp384r1() {
-            hitls_types::EccCurveId::NistP384
-        } else {
-            return Err(cerr(&format!("unsupported EC curve: {curve_oid}")));
-        };
+        let curve_id = cms_oid_to_curve_id(&curve_oid)
+            .ok_or_else(|| cerr(&format!("unsupported EC curve: {curve_oid}")))?;
         let verifier = hitls_crypto::ecdsa::EcdsaKeyPair::from_public_key(
             curve_id,
             &cert.public_key.public_key,
@@ -647,13 +663,8 @@ fn sign_digest(
             .ok_or_else(|| cerr("missing EC curve"))?;
         let curve_oid =
             Oid::from_der_value(curve_oid_bytes).map_err(|e| cerr(&format!("curve: {e}")))?;
-        let curve_id = if curve_oid == known::prime256v1() {
-            hitls_types::EccCurveId::NistP256
-        } else if curve_oid == known::secp384r1() {
-            hitls_types::EccCurveId::NistP384
-        } else {
-            return Err(cerr(&format!("unsupported curve: {curve_oid}")));
-        };
+        let curve_id = cms_oid_to_curve_id(&curve_oid)
+            .ok_or_else(|| cerr(&format!("unsupported curve: {curve_oid}")))?;
 
         let ec_key_bytes = parse_ec_private_key(private_key_der)?;
         let kp = hitls_crypto::ecdsa::EcdsaKeyPair::from_private_key(curve_id, &ec_key_bytes)

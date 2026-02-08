@@ -1035,3 +1035,31 @@ Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
 > Update documentation files for Phase 21 Step 5 completion (Post-Handshake Client Auth)
 
 **Result**: Updated CLAUDE.md, DEV_LOG.md, and PROMPT_LOG.md to reflect Phase 21 Step 5 completion. Updated status to "Phase 21 complete — all TLS 1.3 features", TLS test count to 108, total test count to 535.
+
+---
+
+## Session 22: Phase 22 — ECC Curve Additions
+
+### Prompt 67: Implement Phase 22 — ECC Curve Additions
+> Add P-224, P-521, Brainpool P-256r1/P-384r1/P-512r1 curves with ECDSA and ECDH support
+
+**Result**: Implemented 5 new ECC curves in hitls-crypto:
+
+- **P-224 (secp224r1)**: FIPS 186-4 curve parameters, optimized doubling (a = p−3)
+- **P-521 (secp521r1)**: FIPS 186-4 curve parameters, optimized doubling (a = p−3)
+- **Brainpool P-256r1**: RFC 5639 curve parameters, generic doubling (a ≠ p−3)
+- **Brainpool P-384r1**: RFC 5639 curve parameters, generic doubling (a ≠ p−3)
+- **Brainpool P-512r1**: RFC 5639 curve parameters, generic doubling (a ≠ p−3)
+
+Key changes:
+- Added generic point doubling for Brainpool curves (a ≠ p−3), since NIST curves use an optimized formula assuming a = p−3
+- Fixed Brainpool P-384r1 p and P-512r1 a parameter hex values from RFC 5639
+- Added OID constants and X.509/CMS curve mappings for all new curves
+- 26 new tests (16 ECC + 5 ECDSA + 5 ECDH), 1 additional ignored
+
+561 tests passing (20 auth + 46 bignum + 304 crypto + 10 integration + 47 pki + 108 tls + 26 utils), 19 ignored. Clippy clean, fmt clean.
+
+### Prompt 68: Update documentation for Phase 22
+> Update CLAUDE.md, README.md, DEV_LOG.md, PROMPT_LOG.md for Phase 22 completion
+
+**Result**: Updated all four documentation files to reflect Phase 22 completion. Updated status to "Phase 22 complete — ECC curve additions", crypto test count to 304 (19 ignored), total test count to 561 (19 ignored). Marked all Phase 22 curves as Done in README roadmap table. Updated ECC/ECDSA/ECDH descriptions to list all supported curves.

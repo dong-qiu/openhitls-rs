@@ -342,6 +342,169 @@ mod tests {
 
     #[test]
     fn test_unsupported_curve() {
-        assert!(EcGroup::new(EccCurveId::NistP521).is_err());
+        assert!(EcGroup::new(EccCurveId::NistP192).is_err());
+    }
+
+    // --- P-224 tests ---
+
+    #[test]
+    fn test_generator_on_curve_p224() {
+        let group = EcGroup::new(EccCurveId::NistP224).unwrap();
+        let g = group.generator();
+        assert!(g.is_on_curve(&group).unwrap());
+    }
+
+    #[test]
+    fn test_point_encoding_roundtrip_p224() {
+        let group = EcGroup::new(EccCurveId::NistP224).unwrap();
+        let g = group.generator();
+        let encoded = g.to_uncompressed(&group).unwrap();
+        assert_eq!(encoded.len(), 1 + 2 * 28); // 57 bytes
+        assert_eq!(encoded[0], 0x04);
+        let decoded = EcPoint::from_uncompressed(&group, &encoded).unwrap();
+        assert_eq!(g, decoded);
+    }
+
+    #[test]
+    fn test_scalar_mul_small_values_p224() {
+        let group = EcGroup::new(EccCurveId::NistP224).unwrap();
+        let one_g = group.scalar_mul_base(&BigNum::from_u64(1)).unwrap();
+        assert_eq!(one_g, group.generator());
+        let three_g = group.scalar_mul_base(&BigNum::from_u64(3)).unwrap();
+        assert!(three_g.is_on_curve(&group).unwrap());
+        assert!(!three_g.is_infinity());
+    }
+
+    #[test]
+    fn test_order_times_g_is_infinity_p224() {
+        let group = EcGroup::new(EccCurveId::NistP224).unwrap();
+        let n = group.order().clone();
+        let result = group.scalar_mul_base(&n).unwrap();
+        assert!(result.is_infinity());
+    }
+
+    // --- P-521 tests ---
+
+    #[test]
+    fn test_generator_on_curve_p521() {
+        let group = EcGroup::new(EccCurveId::NistP521).unwrap();
+        let g = group.generator();
+        assert!(g.is_on_curve(&group).unwrap());
+    }
+
+    #[test]
+    fn test_point_encoding_roundtrip_p521() {
+        let group = EcGroup::new(EccCurveId::NistP521).unwrap();
+        let g = group.generator();
+        let encoded = g.to_uncompressed(&group).unwrap();
+        assert_eq!(encoded.len(), 1 + 2 * 66); // 133 bytes
+        assert_eq!(encoded[0], 0x04);
+        let decoded = EcPoint::from_uncompressed(&group, &encoded).unwrap();
+        assert_eq!(g, decoded);
+    }
+
+    #[test]
+    fn test_scalar_mul_small_values_p521() {
+        let group = EcGroup::new(EccCurveId::NistP521).unwrap();
+        let one_g = group.scalar_mul_base(&BigNum::from_u64(1)).unwrap();
+        assert_eq!(one_g, group.generator());
+        let three_g = group.scalar_mul_base(&BigNum::from_u64(3)).unwrap();
+        assert!(three_g.is_on_curve(&group).unwrap());
+    }
+
+    #[test]
+    #[ignore] // Slow for 521-bit curve in debug mode
+    fn test_order_times_g_is_infinity_p521() {
+        let group = EcGroup::new(EccCurveId::NistP521).unwrap();
+        let n = group.order().clone();
+        let result = group.scalar_mul_base(&n).unwrap();
+        assert!(result.is_infinity());
+    }
+
+    // --- Brainpool P-256r1 tests ---
+
+    #[test]
+    fn test_generator_on_curve_bp256() {
+        let group = EcGroup::new(EccCurveId::BrainpoolP256r1).unwrap();
+        let g = group.generator();
+        assert!(g.is_on_curve(&group).unwrap());
+    }
+
+    #[test]
+    fn test_point_encoding_roundtrip_bp256() {
+        let group = EcGroup::new(EccCurveId::BrainpoolP256r1).unwrap();
+        let g = group.generator();
+        let encoded = g.to_uncompressed(&group).unwrap();
+        assert_eq!(encoded.len(), 65);
+        let decoded = EcPoint::from_uncompressed(&group, &encoded).unwrap();
+        assert_eq!(g, decoded);
+    }
+
+    #[test]
+    fn test_scalar_mul_small_values_bp256() {
+        let group = EcGroup::new(EccCurveId::BrainpoolP256r1).unwrap();
+        let one_g = group.scalar_mul_base(&BigNum::from_u64(1)).unwrap();
+        assert_eq!(one_g, group.generator());
+        let two_g = group.scalar_mul_base(&BigNum::from_u64(2)).unwrap();
+        assert!(two_g.is_on_curve(&group).unwrap());
+        assert!(!two_g.is_infinity());
+    }
+
+    #[test]
+    fn test_order_times_g_is_infinity_bp256() {
+        let group = EcGroup::new(EccCurveId::BrainpoolP256r1).unwrap();
+        let n = group.order().clone();
+        let result = group.scalar_mul_base(&n).unwrap();
+        assert!(result.is_infinity());
+    }
+
+    #[test]
+    fn test_double_equals_add_bp256() {
+        let group = EcGroup::new(EccCurveId::BrainpoolP256r1).unwrap();
+        let g = group.generator();
+        let two_g = group.scalar_mul_base(&BigNum::from_u64(2)).unwrap();
+        let g_plus_g = group
+            .scalar_mul_add(&BigNum::from_u64(1), &BigNum::from_u64(1), &g)
+            .unwrap();
+        assert_eq!(two_g, g_plus_g);
+        assert!(two_g.is_on_curve(&group).unwrap());
+    }
+
+    // --- Brainpool P-384r1 tests ---
+
+    #[test]
+    fn test_generator_on_curve_bp384() {
+        let group = EcGroup::new(EccCurveId::BrainpoolP384r1).unwrap();
+        let g = group.generator();
+        assert!(g.is_on_curve(&group).unwrap());
+    }
+
+    #[test]
+    fn test_point_encoding_roundtrip_bp384() {
+        let group = EcGroup::new(EccCurveId::BrainpoolP384r1).unwrap();
+        let g = group.generator();
+        let encoded = g.to_uncompressed(&group).unwrap();
+        assert_eq!(encoded.len(), 1 + 2 * 48);
+        let decoded = EcPoint::from_uncompressed(&group, &encoded).unwrap();
+        assert_eq!(g, decoded);
+    }
+
+    // --- Brainpool P-512r1 tests ---
+
+    #[test]
+    fn test_generator_on_curve_bp512() {
+        let group = EcGroup::new(EccCurveId::BrainpoolP512r1).unwrap();
+        let g = group.generator();
+        assert!(g.is_on_curve(&group).unwrap());
+    }
+
+    #[test]
+    fn test_point_encoding_roundtrip_bp512() {
+        let group = EcGroup::new(EccCurveId::BrainpoolP512r1).unwrap();
+        let g = group.generator();
+        let encoded = g.to_uncompressed(&group).unwrap();
+        assert_eq!(encoded.len(), 1 + 2 * 64);
+        let decoded = EcPoint::from_uncompressed(&group, &encoded).unwrap();
+        assert_eq!(g, decoded);
     }
 }

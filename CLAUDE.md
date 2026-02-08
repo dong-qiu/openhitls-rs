@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 21 complete — all TLS 1.3 features
+- **Status**: Phase 22 complete — ECC curve additions
 
 ## Workspace Structure
 
@@ -18,7 +18,7 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error enums
 │   ├── hitls-utils/     # ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
-│   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated)
+│   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); ECC: P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth (108 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (47 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (20 tests)
@@ -34,11 +34,11 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (535 tests, 18 ignored for slow keygen)
+# Run all tests (561 tests, 19 ignored for slow keygen)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 278 tests (18 ignored)
+cargo test -p hitls-crypto --all-features   # 304 tests (19 ignored)
 cargo test -p hitls-tls --all-features      # 108 tests
 cargo test -p hitls-pki --all-features      # 47 tests
 cargo test -p hitls-bignum                  # 46 tests
@@ -101,6 +101,6 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-All 21 phases (0-20) complete, plus Phase 21 Steps 3-5 (PSK/Session Tickets, 0-RTT Early Data, Post-Handshake Client Auth). 535 tests passing (18 ignored for slow keygen).
+All 22 phases (0-22) complete: Phases 0-20 + Phase 21 (TLS 1.3 advanced) + Phase 22 (ECC curve additions). 561 tests passing (19 ignored for slow keygen).
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

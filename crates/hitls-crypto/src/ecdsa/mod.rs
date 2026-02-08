@@ -293,4 +293,44 @@ mod tests {
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
             .collect()
     }
+
+    #[test]
+    fn test_ecdsa_sign_verify_p224() {
+        let key = EcdsaKeyPair::generate(EccCurveId::NistP224).unwrap();
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362");
+        let sig = key.sign(&digest).unwrap();
+        assert!(key.verify(&digest, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_ecdsa_sign_verify_p521() {
+        let key = EcdsaKeyPair::generate(EccCurveId::NistP521).unwrap();
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        let sig = key.sign(&digest).unwrap();
+        assert!(key.verify(&digest, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_ecdsa_sign_verify_brainpool_p256r1() {
+        let key = EcdsaKeyPair::generate(EccCurveId::BrainpoolP256r1).unwrap();
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        let sig = key.sign(&digest).unwrap();
+        assert!(key.verify(&digest, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_ecdsa_sign_verify_brainpool_p384r1() {
+        let key = EcdsaKeyPair::generate(EccCurveId::BrainpoolP384r1).unwrap();
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        let sig = key.sign(&digest).unwrap();
+        assert!(key.verify(&digest, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_ecdsa_sign_verify_brainpool_p512r1() {
+        let key = EcdsaKeyPair::generate(EccCurveId::BrainpoolP512r1).unwrap();
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        let sig = key.sign(&digest).unwrap();
+        assert!(key.verify(&digest, &sig).unwrap());
+    }
 }

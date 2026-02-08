@@ -125,8 +125,9 @@ pub(crate) fn point_add(
 
 /// Jacobian point doubling: R = 2A.
 ///
-/// Uses the optimized formula for curves with a = -3 (a = p - 3),
-/// which applies to both NIST P-256 and P-384.
+/// Uses the optimized formula `M = 3·(X+Z²)·(X-Z²)` for curves with a = p-3
+/// (NIST curves, SM2). Falls back to generic `M = 3·X² + a·Z⁴` for other
+/// curves (Brainpool).
 pub(crate) fn point_double(
     a: &JacobianPoint,
     params: &CurveParams,
@@ -147,12 +148,23 @@ pub(crate) fn point_double(
     let s = a.x.mod_mul(&y_sq, p)?;
     let s = s.mod_mul(&four, p)?;
 
-    // M = 3·(X + Z²)·(X - Z²) when a = -3
-    let z_sq = a.z.mod_mul(&a.z, p)?;
-    let x_plus_zsq = a.x.mod_add(&z_sq, p)?;
-    let x_minus_zsq = a.x.mod_sub(&z_sq, p)?;
-    let m = x_plus_zsq.mod_mul(&x_minus_zsq, p)?;
-    let m = m.mod_mul(&three, p)?;
+    // M depends on whether a = p - 3
+    let m = if params.a_is_minus_3 {
+        // M = 3·(X + Z²)·(X - Z²) when a = -3
+        let z_sq = a.z.mod_mul(&a.z, p)?;
+        let x_plus_zsq = a.x.mod_add(&z_sq, p)?;
+        let x_minus_zsq = a.x.mod_sub(&z_sq, p)?;
+        let m = x_plus_zsq.mod_mul(&x_minus_zsq, p)?;
+        m.mod_mul(&three, p)?
+    } else {
+        // M = 3·X² + a·Z⁴ (generic formula)
+        let x_sq = a.x.mod_mul(&a.x, p)?;
+        let three_x_sq = x_sq.mod_mul(&three, p)?;
+        let z_sq = a.z.mod_mul(&a.z, p)?;
+        let z4 = z_sq.mod_mul(&z_sq, p)?;
+        let a_z4 = params.a.mod_mul(&z4, p)?;
+        three_x_sq.mod_add(&a_z4, p)?
+    };
 
     // X3 = M² - 2·S
     let m_sq = m.mod_mul(&m, p)?;

@@ -139,4 +139,64 @@ mod tests {
 
         assert_eq!(pub_bytes, restored_pub);
     }
+
+    #[test]
+    fn test_ecdh_p224_shared_secret() {
+        let alice = EcdhKeyPair::generate(EccCurveId::NistP224).unwrap();
+        let bob = EcdhKeyPair::generate(EccCurveId::NistP224).unwrap();
+        let alice_pub = alice.public_key_bytes().unwrap();
+        let bob_pub = bob.public_key_bytes().unwrap();
+        let secret_a = alice.compute_shared_secret(&bob_pub).unwrap();
+        let secret_b = bob.compute_shared_secret(&alice_pub).unwrap();
+        assert_eq!(secret_a, secret_b);
+        assert_eq!(secret_a.len(), 28);
+    }
+
+    #[test]
+    fn test_ecdh_p521_shared_secret() {
+        let alice = EcdhKeyPair::generate(EccCurveId::NistP521).unwrap();
+        let bob = EcdhKeyPair::generate(EccCurveId::NistP521).unwrap();
+        let alice_pub = alice.public_key_bytes().unwrap();
+        let bob_pub = bob.public_key_bytes().unwrap();
+        let secret_a = alice.compute_shared_secret(&bob_pub).unwrap();
+        let secret_b = bob.compute_shared_secret(&alice_pub).unwrap();
+        assert_eq!(secret_a, secret_b);
+        assert_eq!(secret_a.len(), 66);
+    }
+
+    #[test]
+    fn test_ecdh_brainpool_p256r1_shared_secret() {
+        let alice = EcdhKeyPair::generate(EccCurveId::BrainpoolP256r1).unwrap();
+        let bob = EcdhKeyPair::generate(EccCurveId::BrainpoolP256r1).unwrap();
+        let alice_pub = alice.public_key_bytes().unwrap();
+        let bob_pub = bob.public_key_bytes().unwrap();
+        let secret_a = alice.compute_shared_secret(&bob_pub).unwrap();
+        let secret_b = bob.compute_shared_secret(&alice_pub).unwrap();
+        assert_eq!(secret_a, secret_b);
+        assert_eq!(secret_a.len(), 32);
+    }
+
+    #[test]
+    fn test_ecdh_brainpool_p384r1_shared_secret() {
+        let alice = EcdhKeyPair::generate(EccCurveId::BrainpoolP384r1).unwrap();
+        let bob = EcdhKeyPair::generate(EccCurveId::BrainpoolP384r1).unwrap();
+        let alice_pub = alice.public_key_bytes().unwrap();
+        let bob_pub = bob.public_key_bytes().unwrap();
+        let secret_a = alice.compute_shared_secret(&bob_pub).unwrap();
+        let secret_b = bob.compute_shared_secret(&alice_pub).unwrap();
+        assert_eq!(secret_a, secret_b);
+        assert_eq!(secret_a.len(), 48);
+    }
+
+    #[test]
+    fn test_ecdh_brainpool_p512r1_shared_secret() {
+        let alice = EcdhKeyPair::generate(EccCurveId::BrainpoolP512r1).unwrap();
+        let bob = EcdhKeyPair::generate(EccCurveId::BrainpoolP512r1).unwrap();
+        let alice_pub = alice.public_key_bytes().unwrap();
+        let bob_pub = bob.public_key_bytes().unwrap();
+        let secret_a = alice.compute_shared_secret(&bob_pub).unwrap();
+        let secret_b = bob.compute_shared_secret(&alice_pub).unwrap();
+        assert_eq!(secret_a, secret_b);
+        assert_eq!(secret_a.len(), 64);
+    }
 }

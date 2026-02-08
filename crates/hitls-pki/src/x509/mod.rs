@@ -643,10 +643,20 @@ fn verify_rsa(
 }
 
 fn oid_to_curve_id(oid: &Oid) -> Result<EccCurveId, PkiError> {
-    if *oid == known::prime256v1() {
+    if *oid == known::secp224r1() {
+        Ok(EccCurveId::NistP224)
+    } else if *oid == known::prime256v1() {
         Ok(EccCurveId::NistP256)
     } else if *oid == known::secp384r1() {
         Ok(EccCurveId::NistP384)
+    } else if *oid == known::secp521r1() {
+        Ok(EccCurveId::NistP521)
+    } else if *oid == known::brainpool_p256r1() {
+        Ok(EccCurveId::BrainpoolP256r1)
+    } else if *oid == known::brainpool_p384r1() {
+        Ok(EccCurveId::BrainpoolP384r1)
+    } else if *oid == known::brainpool_p512r1() {
+        Ok(EccCurveId::BrainpoolP512r1)
     } else {
         Err(PkiError::InvalidCert(format!(
             "unsupported EC curve: {}",

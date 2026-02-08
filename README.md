@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Phase 21 Step 4 Complete — TLS 1.3 0-RTT Early Data**
+> **Status: Phase 22 Complete — ECC Curve Additions (P-224, P-521, Brainpool P-256r1/P-384r1/P-512r1)**
 >
-> 529 tests passing (20 auth + 46 bignum + 278 crypto + 47 pki + 102 tls + 26 utils + 10 integration). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-256, P-384), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), HMAC-DRBG, PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data), HOTP/TOTP, SPAKE2+, and CLI tool.
+> 561 tests passing (20 auth + 46 bignum + 304 crypto + 47 pki + 108 tls + 26 utils + 10 integration). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), HMAC-DRBG, PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth), HOTP/TOTP, SPAKE2+, and CLI tool.
 
 ## Goals
 
@@ -22,8 +22,8 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error types, constants
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (26 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
-│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9, DRBG, ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal (278 tests)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data (102 tests)
+│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECC (P-224/P-256/P-384/P-521/Brainpool), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9, DRBG, ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal (304 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth (108 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain build), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (47 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl)
@@ -77,9 +77,9 @@ openhitls-rs/
 | Algorithm | Feature Flag | Status |
 |-----------|-------------|--------|
 | RSA (PKCS#1 v1.5, PSS, OAEP) | `rsa` (default) | **Done** |
-| ECDSA (P-256, P-384) | `ecdsa` (default) | **Done** |
-| ECDH (P-256, P-384) | `ecdh` | **Done** |
-| ECC core (Jacobian, Weierstrass) | `ecc` | **Done** |
+| ECDSA (P-224, P-256, P-384, P-521, Brainpool) | `ecdsa` (default) | **Done** |
+| ECDH (P-224, P-256, P-384, P-521, Brainpool) | `ecdh` | **Done** |
+| ECC core (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1) | `ecc` | **Done** |
 | Ed25519 (RFC 8032) | `ed25519` | **Done** |
 | X25519 (RFC 7748) | `x25519` | **Done** |
 | DH (ffdhe2048, ffdhe3072) | `dh` | **Done** |
@@ -155,12 +155,12 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (529 tests, 18 ignored)
+# Run all tests (561 tests, 19 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 278 tests (18 ignored)
-cargo test -p hitls-tls --all-features      # 102 tests
+cargo test -p hitls-crypto --all-features   # 304 tests (19 ignored)
+cargo test -p hitls-tls --all-features      # 108 tests
 cargo test -p hitls-pki --all-features      # 47 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 26 tests
@@ -202,9 +202,9 @@ Convenience feature groups:
 
 ## Roadmap
 
-### Completed (Phase 0-20)
+### Completed (Phase 0-22)
 
-All cryptographic primitives, X.509, PKCS#12, CMS, TLS 1.3 (including PSK/session tickets + 0-RTT early data), auth protocols, PQC, and CLI tool implemented. 529 tests passing across 9 crates.
+All cryptographic primitives, X.509, PKCS#12, CMS, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth), auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), and CLI tool implemented. 561 tests passing across 9 crates.
 
 ### Remaining Migration Work
 
@@ -217,7 +217,7 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | PSK / Session Tickets | RFC 8446 §4.6.1 | **Done** |
 | HelloRetryRequest (HRR) | RFC 8446 §4.1.4 | Not implemented |
 | 0-RTT Early Data | RFC 8446 §4.2.10 | **Done** |
-| Post-Handshake Client Auth | RFC 8446 §4.6.2 | Not implemented |
+| Post-Handshake Client Auth | RFC 8446 §4.6.2 | **Done** |
 | KeyUpdate | RFC 8446 §4.6.3 | Stub only |
 | Certificate Compression | RFC 8879 | Not implemented |
 
@@ -225,11 +225,11 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 
 | Curve | Standard | Status |
 |-------|----------|--------|
-| P-521 (secp521r1) | FIPS 186-4 | Not implemented |
-| Brainpool P-256r1 | RFC 5639 | Not implemented |
-| Brainpool P-384r1 | RFC 5639 | Not implemented |
-| Brainpool P-512r1 | RFC 5639 | Not implemented |
-| P-224 (secp224r1) | FIPS 186-4 | Not implemented |
+| P-521 (secp521r1) | FIPS 186-4 | **Done** |
+| Brainpool P-256r1 | RFC 5639 | **Done** |
+| Brainpool P-384r1 | RFC 5639 | **Done** |
+| Brainpool P-512r1 | RFC 5639 | **Done** |
+| P-224 (secp224r1) | FIPS 186-4 | **Done** |
 
 #### Phase 23: DRBG Variants & Cipher Modes
 
