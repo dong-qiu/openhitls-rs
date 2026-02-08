@@ -1362,11 +1362,6 @@ mod tests {
     #[test]
     fn test_full_handshake_state_machine_roundtrip() {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::ServerHandshake;
-        use crate::handshake::HandshakeState;
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
 
@@ -1511,10 +1506,6 @@ mod tests {
     #[test]
     fn test_full_handshake_with_app_data() {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::ServerHandshake;
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
 
@@ -1656,10 +1647,6 @@ mod tests {
     #[test]
     fn test_handshake_cipher_suite_negotiation() {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::ServerHandshake;
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _, fake_cert) = make_ed25519_server_identity();
 
@@ -1711,10 +1698,6 @@ mod tests {
     #[test]
     fn test_handshake_no_shared_cipher_suite() {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::ServerHandshake;
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _, fake_cert) = make_ed25519_server_identity();
 
@@ -1769,10 +1752,6 @@ mod tests {
         CipherSuite,
     ) {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::ServerHandshake;
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
 
@@ -1903,13 +1882,6 @@ mod tests {
     /// responds → client updates read key. Then exchange app data with new keys.
     #[test]
     fn test_key_update_roundtrip() {
-        use crate::crypt::key_schedule::KeySchedule;
-        use crate::crypt::traffic_keys::TrafficKeys;
-        use crate::handshake::codec::{
-            decode_key_update, encode_key_update, KeyUpdateMsg, KeyUpdateRequest,
-        };
-        use crate::record::ContentType;
-
         let (
             mut client_rl,
             mut server_rl,
@@ -2034,11 +2006,6 @@ mod tests {
     /// Test KeyUpdate(UpdateNotRequested): peer doesn't respond with its own KeyUpdate.
     #[test]
     fn test_key_update_not_requested() {
-        use crate::crypt::key_schedule::KeySchedule;
-        use crate::crypt::traffic_keys::TrafficKeys;
-        use crate::handshake::codec::{encode_key_update, KeyUpdateMsg, KeyUpdateRequest};
-        use crate::record::ContentType;
-
         let (mut client_rl, mut server_rl, client_secret, _server_secret, params, suite) =
             do_test_handshake();
 
@@ -2088,11 +2055,6 @@ mod tests {
     /// Test multiple consecutive key updates.
     #[test]
     fn test_key_update_multiple() {
-        use crate::crypt::key_schedule::KeySchedule;
-        use crate::crypt::traffic_keys::TrafficKeys;
-        use crate::handshake::codec::{encode_key_update, KeyUpdateMsg, KeyUpdateRequest};
-        use crate::record::ContentType;
-
         let (mut client_rl, mut server_rl, mut c_write, _s_write, params, suite) =
             do_test_handshake();
 
@@ -2164,10 +2126,6 @@ mod tests {
     fn test_hrr_group_mismatch() {
         use crate::config::ServerPrivateKey;
         use crate::crypt::NamedGroup;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::ServerHandshake;
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
 
@@ -2352,10 +2310,6 @@ mod tests {
     fn test_secp256r1_handshake_no_hrr() {
         use crate::config::ServerPrivateKey;
         use crate::crypt::NamedGroup;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::ServerHandshake;
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
 
@@ -2528,10 +2482,6 @@ mod tests {
     fn test_hrr_no_common_group() {
         use crate::config::ServerPrivateKey;
         use crate::crypt::NamedGroup;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::ServerHandshake;
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _, fake_cert) = make_ed25519_server_identity();
 
@@ -2583,10 +2533,6 @@ mod tests {
         crate::handshake::server::ClientHelloActions,
     ) {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::ServerHandshake;
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
         let ticket_key = vec![0xAB; 32];
@@ -2720,9 +2666,6 @@ mod tests {
     /// end-to-end: server generates NST → client receives and processes it).
     #[test]
     fn test_nst_generation_and_processing() {
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-
         let (mut client_rl, mut server_rl, _params, _suite, fin_actions, cfin_actions, _actions) =
             do_test_handshake_with_tickets();
 
@@ -2847,10 +2790,6 @@ mod tests {
     #[test]
     fn test_session_resumption_roundtrip() {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::ServerHandshake;
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
         let ticket_key = vec![0xAB; 32];
@@ -3184,8 +3123,6 @@ mod tests {
     /// Test that PSK binder verification works correctly.
     #[test]
     fn test_psk_binder_computation() {
-        use crate::crypt::key_schedule::KeySchedule;
-
         let params =
             crate::crypt::CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256)
                 .unwrap();
@@ -3264,10 +3201,6 @@ mod tests {
         Vec<u8>, // ticket_key
     ) {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::{ClientHelloResult, ServerHandshake};
-        use crate::record::{ContentType, RecordLayer};
 
         let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
         let ticket_key = vec![0xAB; 32];
@@ -3409,10 +3342,6 @@ mod tests {
     #[test]
     fn test_early_data_accepted() {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::{ClientHelloResult, ServerHandshake};
-        use crate::record::{ContentType, RecordLayer};
 
         let (session, seed, fake_cert, ticket_key) = do_initial_handshake_for_early_data(16384);
         let early_suite = session.cipher_suite;
@@ -3607,10 +3536,6 @@ mod tests {
     #[test]
     fn test_early_data_rejected() {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::{ClientHelloResult, ServerHandshake};
-        use crate::record::{ContentType, RecordLayer};
 
         // Initial handshake WITH max_early_data_size > 0 so NST has max_early_data
         let (session, seed, fake_cert, ticket_key) = do_initial_handshake_for_early_data(16384);
@@ -3750,10 +3675,6 @@ mod tests {
     #[test]
     fn test_early_data_multiple_records() {
         use crate::config::ServerPrivateKey;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
-        use crate::handshake::server::{ClientHelloResult, ServerHandshake};
-        use crate::record::{ContentType, RecordLayer};
 
         let (session, seed, fake_cert, ticket_key) = do_initial_handshake_for_early_data(16384);
         let early_suite = session.cipher_suite;
@@ -4026,9 +3947,6 @@ mod tests {
     #[test]
     fn test_post_hs_auth_codec() {
         use crate::crypt::SignatureScheme;
-        use crate::handshake::codec::{
-            decode_certificate_request, encode_certificate_request, CertificateRequestMsg,
-        };
         use crate::handshake::extensions_codec::build_signature_algorithms;
 
         let sig_algs = vec![
@@ -4054,15 +3972,13 @@ mod tests {
     #[test]
     fn test_post_hs_auth_roundtrip() {
         use crate::config::ServerPrivateKey;
-        use crate::crypt::key_schedule::KeySchedule;
+
         use crate::crypt::SignatureScheme;
-        use crate::handshake::client::ClientHandshake;
-        use crate::handshake::codec::parse_handshake_header;
+
         use crate::handshake::extensions_codec::build_signature_algorithms;
-        use crate::handshake::server::ServerHandshake;
+
         use crate::handshake::signing::{select_signature_scheme, sign_certificate_verify};
         use crate::handshake::verify::verify_certificate_verify;
-        use crate::record::{ContentType, RecordLayer};
 
         let server_seed = vec![0x42; 32];
         let (_, _, fake_server_cert) = make_ed25519_server_identity();
@@ -4332,10 +4248,8 @@ mod tests {
     /// Test post-HS auth where client has no certificate (empty Certificate).
     #[test]
     fn test_post_hs_auth_no_cert() {
-        use crate::crypt::key_schedule::KeySchedule;
         use crate::crypt::SignatureScheme;
         use crate::handshake::extensions_codec::build_signature_algorithms;
-        use crate::record::ContentType;
 
         let (mut client_rl, mut server_rl, client_app_secret, _server_app_secret, params, _suite) =
             do_test_handshake();
