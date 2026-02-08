@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 18 complete — core crypto + X.509 chain + TLS 1.3 client & server handshake + PKCS#12 + CMS + OTP + SPAKE2+ done
+- **Status**: Phase 19 complete — core crypto + X.509 chain + TLS 1.3 client & server handshake + PKCS#12 + CMS + OTP + SPAKE2+ + SLH-DSA + XMSS done
 
 ## Workspace Structure
 
@@ -33,11 +33,11 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (441 tests, 3 ignored for slow keygen)
+# Run all tests (460 tests, 6 ignored for slow keygen)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 230 tests
+cargo test -p hitls-crypto --all-features   # 249 tests
 cargo test -p hitls-tls --all-features      # 72 tests
 cargo test -p hitls-pki --all-features      # 47 tests
 cargo test -p hitls-bignum                  # 46 tests
@@ -99,8 +99,8 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-18 complete. Remaining phases:
-- Phase 19: Remaining PQC (SLH-DSA, XMSS, FrodoKEM, McEliece, SM9)
-- Phase 20: CLI Tool + Integration Tests
+Phases 0-19 complete. Remaining phases:
+- Phase 19: SLH-DSA (FIPS 205) + XMSS (RFC 8391) -- **Done**
+- Phase 20: Remaining PQC (FrodoKEM, McEliece, SM9) + CLI Tool + Integration Tests
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

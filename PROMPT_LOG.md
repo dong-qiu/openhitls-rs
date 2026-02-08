@@ -977,3 +977,35 @@ Added `Hkdf::from_prk()` method for HPKE's LabeledExtract/LabeledExpand pattern.
 > Update the project documentation files for Phase 18 completion.
 
 **Result**: Updated README.md, CLAUDE.md, DEV_LOG.md, and PROMPT_LOG.md to reflect Phase 18 completion. Updated status to Phase 18, test count to 441, workspace structure descriptions, protocol table, roadmap (removed Phase 18 from remaining), and added Phase 18 entries to DEV_LOG and PROMPT_LOG.
+
+---
+
+## Session 20: Phase 19 — SLH-DSA (FIPS 205) + XMSS (RFC 8391)
+
+### Prompt 63: Implement Phase 19
+> Implement Phase 19: SLH-DSA (FIPS 205) and XMSS (RFC 8391) hash-based signature schemes
+
+**Result**: Implemented both hash-based signature schemes in hitls-crypto:
+
+**SLH-DSA** (7 files in `slh_dsa/`):
+- 12 parameter sets (SHA2/SHAKE x {128,192,256} x {s,f})
+- WOTS+ (W=16), FORS (k trees of height a), Hypertree (d layers)
+- Dual hash modes: SHAKE256 sponge construction + SHA-2 with padded prefix/MGF1/HMAC
+- Address scheme: 32-byte uncompressed (SHAKE) vs 22-byte compressed (SHA-2)
+- 10 tests (roundtrips, tamper, cross-key, lengths, empty/large msg), 2 ignored (128s slow)
+
+**XMSS** (6 files in `xmss/`):
+- 9 single-tree parameter sets (SHA-256/SHAKE128/SHAKE256 x h=10/16/20, n=32)
+- ROBUST mode with bitmask XOR
+- L-tree compression for WOTS+ public keys
+- Stateful signing with leaf index tracking and exhaustion detection
+- 9 tests (roundtrips, stateful signing, remaining count, tamper, cross-key, lengths), 1 ignored (h=16 slow)
+
+**Bug fixed**: `wots_pk_gen` was passing empty `&[]` instead of actual `sk_seed` to PRF, causing keygen tree leaves to differ from sign/verify expectations. Fixed by propagating `sk_seed` through the call chain.
+
+460 tests passing (20 auth + 46 bignum + 249 crypto + 47 pki + 72 tls + 26 utils), 6 ignored. Clippy clean, fmt clean.
+
+### Prompt 64: Update documentation for Phase 19
+> Update documentation files for Phase 19 completion (CLAUDE.md, README.md, DEV_LOG.md, PROMPT_LOG.md)
+
+**Result**: Updated all four documentation files to reflect Phase 19 completion. Updated status to Phase 19, crypto test count to 249, total test count to 460 (6 ignored), SLH-DSA and XMSS marked as Done in algorithm table, roadmap updated (Phase 19 complete, remaining work consolidated into Phase 20).

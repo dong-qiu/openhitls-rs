@@ -168,7 +168,7 @@ pub enum MlDsaParamId {
     MlDsa87,
 }
 
-/// SLH-DSA parameter set identifiers.
+/// SLH-DSA parameter set identifiers (FIPS 205).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SlhDsaParamId {
     Sha2128s,
@@ -183,6 +183,29 @@ pub enum SlhDsaParamId {
     Shake256s,
     Sha2256f,
     Shake256f,
+}
+
+/// XMSS parameter set identifiers (RFC 8391, single-tree).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum XmssParamId {
+    /// XMSS-SHA2_10_256: SHA-256, h=10, n=32 (1024 signatures)
+    Sha2_10_256,
+    /// XMSS-SHA2_16_256: SHA-256, h=16, n=32 (65536 signatures)
+    Sha2_16_256,
+    /// XMSS-SHA2_20_256: SHA-256, h=20, n=32 (1048576 signatures)
+    Sha2_20_256,
+    /// XMSS-SHAKE_10_256: SHAKE128, h=10, n=32
+    Shake128_10_256,
+    /// XMSS-SHAKE_16_256: SHAKE128, h=16, n=32
+    Shake128_16_256,
+    /// XMSS-SHAKE_20_256: SHAKE128, h=20, n=32
+    Shake128_20_256,
+    /// XMSS-SHAKE256_10_256: SHAKE256, h=10, n=32
+    Shake256_10_256,
+    /// XMSS-SHAKE256_16_256: SHAKE256, h=16, n=32
+    Shake256_16_256,
+    /// XMSS-SHAKE256_20_256: SHAKE256, h=20, n=32
+    Shake256_20_256,
 }
 
 /// FrodoKEM parameter set identifiers.

@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Active Development (Phase 18 Complete)**
+> **Status: Active Development (Phase 19 Complete)**
 >
-> Core cryptographic primitives implemented: hash functions (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric ciphers (AES, SM4, ChaCha20), block cipher modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS), AES Key Wrap (RFC 3394), ChaCha20-Poly1305 AEAD, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384, point_add/point_negate), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), HMAC-DRBG, ML-KEM (FIPS 203), ML-DSA (FIPS 204), HPKE (RFC 9180), HybridKEM (X25519+ML-KEM-768), Paillier, ElGamal, X.509 certificate parsing/verification (RSA, ECDSA, Ed25519), X.509 chain building/verification with trust store, PKCS#12 (RFC 7292) parse/create, CMS SignedData (RFC 5652) parse/verify/sign, TLS 1.3 key schedule (RFC 8446/8448) with HKDF, transcript hash, AEAD adapter, TLS 1.3 record layer encryption, TLS 1.3 client handshake (full 1-RTT flow with X25519 key exchange, CertificateVerify signature verification, and handshake state machine), TLS 1.3 server handshake with bidirectional application data exchange, HOTP/TOTP (RFC 4226/6238), and SPAKE2+ (RFC 9382 on P-256). 441 tests passing (20 auth + 46 bignum + 230 crypto + 47 pki + 72 tls + 26 utils).
+> Core cryptographic primitives implemented: hash functions (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric ciphers (AES, SM4, ChaCha20), block cipher modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS), AES Key Wrap (RFC 3394), ChaCha20-Poly1305 AEAD, KDFs (HKDF, PBKDF2, scrypt), RSA (PKCS#1 v1.5, OAEP, PSS), ECC (P-256, P-384, point_add/point_negate), ECDSA, ECDH, Ed25519, X25519, DH (ffdhe2048/3072), DSA, SM2 (sign/verify/encrypt/decrypt), HMAC-DRBG, ML-KEM (FIPS 203), ML-DSA (FIPS 204), SLH-DSA (FIPS 205), XMSS (RFC 8391), HPKE (RFC 9180), HybridKEM (X25519+ML-KEM-768), Paillier, ElGamal, X.509 certificate parsing/verification (RSA, ECDSA, Ed25519), X.509 chain building/verification with trust store, PKCS#12 (RFC 7292) parse/create, CMS SignedData (RFC 5652) parse/verify/sign, TLS 1.3 key schedule (RFC 8446/8448) with HKDF, transcript hash, AEAD adapter, TLS 1.3 record layer encryption, TLS 1.3 client handshake (full 1-RTT flow with X25519 key exchange, CertificateVerify signature verification, and handshake state machine), TLS 1.3 server handshake with bidirectional application data exchange, HOTP/TOTP (RFC 4226/6238), and SPAKE2+ (RFC 9382 on P-256). 460 tests passing (20 auth + 46 bignum + 249 crypto + 47 pki + 72 tls + 26 utils).
 
 ## Goals
 
@@ -22,7 +22,7 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error types, constants
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (26 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
-│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, DRBG, ML-KEM, ML-DSA, HPKE, HybridKEM, Paillier, ElGamal... (230 tests)
+│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, DRBG, ML-KEM, ML-DSA, SLH-DSA, XMSS, HPKE, HybridKEM, Paillier, ElGamal... (249 tests)
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake (72 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain build), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (47 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382), Privacy Pass (20 tests)
@@ -94,8 +94,8 @@ openhitls-rs/
 |-----------|-------------|--------|
 | ML-KEM (Kyber) 512/768/1024 | `mlkem` | **Done** |
 | ML-DSA (Dilithium) 44/65/87 | `mldsa` | **Done** |
-| SLH-DSA (SPHINCS+) | `slh-dsa` | Stub |
-| XMSS / XMSS^MT | `xmss` | Stub |
+| SLH-DSA (SPHINCS+) FIPS 205 | `slh-dsa` | **Done** |
+| XMSS (RFC 8391) | `xmss` | **Done** |
 | FrodoKEM | `frodokem` | Stub |
 | Classic McEliece | `mceliece` | Stub |
 | Hybrid KEM (X25519+ML-KEM-768) | `hybridkem` | **Done** |
@@ -153,11 +153,11 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (441 tests)
+# Run all tests (460 tests)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 230 tests (3 ignored)
+cargo test -p hitls-crypto --all-features   # 249 tests (6 ignored)
 cargo test -p hitls-tls --all-features      # 72 tests
 cargo test -p hitls-pki --all-features      # 47 tests
 cargo test -p hitls-bignum                  # 46 tests
@@ -199,12 +199,11 @@ Convenience feature groups:
 
 ## Roadmap
 
-Phase 0–18 complete. Remaining phases:
+Phase 0–19 complete. Remaining phases:
 
 | Phase | Name | Est. LOC | Est. Tests | Critical Path |
 |-------|------|----------|------------|---------------|
-| 19 | Remaining PQC (SLH-DSA, XMSS, FrodoKEM, McEliece, SM9) | ~7,000 | ~35 | No |
-| 20 | CLI Tool + Integration Tests | ~1,910 | ~20 | No |
+| 20 | Remaining PQC (FrodoKEM, McEliece, SM9) + CLI Tool + Integration Tests | ~5,000 | ~40 | No |
 
 Target: ~40,000 lines of Rust, ~500+ tests. See [plan file](.claude/plans/) for details.
 

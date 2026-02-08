@@ -1725,4 +1725,87 @@ Used real 3-cert RSA chain from C project (`testcode/testdata/tls/certificate/pe
 - All clippy warnings resolved, formatting clean
 
 ### Next Steps
-- Phase 19: Remaining PQC (SLH-DSA, XMSS, FrodoKEM, McEliece, SM9)
+- Phase 19: SLH-DSA (FIPS 205) + XMSS (RFC 8391)
+
+---
+
+## Phase 19: SLH-DSA (FIPS 205) + XMSS (RFC 8391) (Session 2026-02-08)
+
+### Goals
+- Implement SLH-DSA (Stateless Hash-Based Digital Signature Algorithm, FIPS 205) in hitls-crypto
+- Implement XMSS (eXtended Merkle Signature Scheme, RFC 8391) in hitls-crypto
+- Full parameter set support for both schemes
+- Comprehensive tests with roundtrip verification
+
+### Completed Steps
+
+#### 1. SLH-DSA (`hitls-crypto/src/slh_dsa/`)
+
+**Files created (7)**:
+- `mod.rs` — Public API: `SlhDsaKeyPair`, `SlhDsaPublicKey`, `keygen()`, `sign()`, `verify()`
+- `params.rs` — 12 parameter sets: SHA2/SHAKE x {128,192,256} x {s,f}
+- `address.rs` — 32-byte uncompressed (SHAKE) and 22-byte compressed (SHA-2) address schemes
+- `hash.rs` — Hash function abstraction: F, H, H_msg, PRF, PRF_msg for both SHA-2 and SHAKE modes
+- `wots.rs` — WOTS+ one-time signatures (W=16): chain, sign, pk_from_sig, pk_gen
+- `fors.rs` — FORS (Forest of Random Subsets): k trees of height a, sign and pk_from_sig
+- `hypertree.rs` — Hypertree: d layers of XMSS-like trees, sign and verify
+
+**Implementation details**:
+- SHAKE mode: `SHAKE256(PK.seed || ADRS || M)` — straightforward sponge construction
+- SHA-2 mode: `SHA-256/512` with padded prefix block, `MGF1` for `H_msg`, `HMAC` for `PRF_msg`
+- Address scheme: 32-byte uncompressed for SHAKE, 22-byte compressed for SHA-2
+- WOTS+ with Winternitz parameter W=16 (len1 + len2 chains)
+- FORS with k trees of height a (varies by parameter set)
+- Hypertree with d layers, each containing 2^(h/d) leaves
+
+**Tests (10)**:
+- Sign/verify roundtrip for SLH-DSA-SHA2-128f and SLH-DSA-SHAKE-128f
+- Signature tamper detection
+- Cross-key rejection (different key pair cannot verify)
+- Signature and public key length validation
+- Empty message and large message signing
+- 2 tests ignored (128s variants with hp=9 are slow due to 512 leaves per tree)
+
+#### 2. XMSS (`hitls-crypto/src/xmss/`)
+
+**Files created (6)**:
+- `mod.rs` — Public API: `XmssKeyPair`, `XmssPublicKey`, `keygen()`, `sign()`, `verify()`, stateful signing with leaf index tracking
+- `params.rs` — 9 single-tree parameter sets: SHA-256/SHAKE128/SHAKE256 x h=10/16/20 (all n=32)
+- `address.rs` — 32-byte address structure with OTS, L-tree, and hash tree address types
+- `hash.rs` — Hash function abstraction: F, H, H_msg, PRF with ROBUST mode bitmask XOR
+- `wots.rs` — WOTS+ one-time signatures: chain, sign, pk_from_sig, pk_gen (shared design with SLH-DSA)
+- `tree.rs` — XMSS tree operations: L-tree compression, treehash, compute_root, sign_tree, verify_tree
+
+**Implementation details**:
+- ROBUST mode with bitmask XOR (3 hash calls per F operation, 5 per H operation)
+- L-tree compression for WOTS+ public keys (iterative pairwise hashing to compress len chains into single node)
+- Stateful design: `sign()` takes `&mut self`, advances leaf index, returns error on key exhaustion
+- `remaining_signatures()` method to check how many signatures remain
+- Single-tree only (no XMSS^MT multi-tree variant)
+
+**Tests (9)**:
+- Sign/verify roundtrip for XMSS-SHA2_10_256, XMSS-SHAKE_10_128, XMSS-SHAKE256_10_256
+- Stateful signing: two consecutive signatures with automatic index advance
+- Remaining signatures count validation
+- Signature tamper detection
+- Cross-key rejection
+- Signature length validation
+- 1 test ignored (XMSS-SHA2_16_256 with h=16 builds 65536 leaves — very slow)
+
+### Bug Found and Fixed
+- **wots_pk_gen sk_seed bug**: Initially passed empty `&[]` to PRF instead of actual `sk_seed` in `wots_pk_gen`. This caused tree leaves computed during keygen to differ from what sign/verify expects, because keygen and signing would derive different WOTS+ secret keys. The fix was to properly propagate the `sk_seed` parameter through `wots_pk_gen` -> `xmss_compute_root` -> `hypertree_sign`. This bug affected both SLH-DSA and XMSS since they share the WOTS+ construction.
+
+### Files Created/Modified
+- **NEW**: `hitls-crypto/src/slh_dsa/mod.rs`, `params.rs`, `address.rs`, `hash.rs`, `wots.rs`, `fors.rs`, `hypertree.rs`
+- **NEW**: `hitls-crypto/src/xmss/mod.rs`, `params.rs`, `address.rs`, `hash.rs`, `wots.rs`, `tree.rs`
+- **MODIFIED**: `hitls-crypto/src/lib.rs` (module declarations)
+- **MODIFIED**: `hitls-crypto/Cargo.toml` (feature flags for slh-dsa and xmss)
+
+### Test Results
+- **460 tests total** (20 auth + 46 bignum + 249 crypto + 47 pki + 72 tls + 26 utils), 6 ignored
+- 19 new crypto tests (10 SLH-DSA + 9 XMSS)
+- 3 newly ignored tests (2 SLH-DSA 128s slow variants + 1 XMSS h=16 slow variant)
+- All clippy warnings resolved, formatting clean
+
+### Next Steps
+- Phase 20: Remaining PQC (FrodoKEM, McEliece, SM9) + CLI Tool + Integration Tests
