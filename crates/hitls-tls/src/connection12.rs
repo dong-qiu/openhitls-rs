@@ -939,15 +939,26 @@ mod tests {
 
         // 1. Client → CH
         let ch_msg = client_hs.build_client_hello().unwrap();
-        c2s.extend_from_slice(&client_rl.seal_record(ContentType::Handshake, &ch_msg).unwrap());
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &ch_msg)
+                .unwrap(),
+        );
 
         // 2. Server ← CH → SH + Cert + SKE + SHD
         let (_, ch_plain, consumed) = server_rl.open_record(&c2s).unwrap();
         c2s.drain(..consumed);
         let (_, _, ch_total) = parse_handshake_header(&ch_plain).unwrap();
-        let flight = server_hs.process_client_hello(&ch_plain[..ch_total]).unwrap();
+        let flight = server_hs
+            .process_client_hello(&ch_plain[..ch_total])
+            .unwrap();
         let suite_neg = flight.suite;
-        for msg in [&flight.server_hello, &flight.certificate, &flight.server_key_exchange, &flight.server_hello_done] {
+        for msg in [
+            &flight.server_hello,
+            &flight.certificate,
+            &flight.server_key_exchange,
+            &flight.server_hello_done,
+        ] {
             s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
         }
 
@@ -957,21 +968,27 @@ mod tests {
         s2c.drain(..consumed);
         let (_, sh_body, sh_total) = parse_handshake_header(&sh_plain).unwrap();
         let sh = decode_server_hello(sh_body).unwrap();
-        client_hs.process_server_hello(&sh_plain[..sh_total], &sh).unwrap();
+        client_hs
+            .process_server_hello(&sh_plain[..sh_total], &sh)
+            .unwrap();
 
         // Cert
         let (_, cert_plain, consumed) = client_rl.open_record(&s2c).unwrap();
         s2c.drain(..consumed);
         let (_, cert_body, cert_total) = parse_handshake_header(&cert_plain).unwrap();
         let cert12 = decode_certificate12(cert_body).unwrap();
-        client_hs.process_certificate(&cert_plain[..cert_total], &cert12.certificate_list).unwrap();
+        client_hs
+            .process_certificate(&cert_plain[..cert_total], &cert12.certificate_list)
+            .unwrap();
 
         // SKE
         let (_, ske_plain, consumed) = client_rl.open_record(&s2c).unwrap();
         s2c.drain(..consumed);
         let (_, ske_body, ske_total) = parse_handshake_header(&ske_plain).unwrap();
         let ske = decode_server_key_exchange(ske_body).unwrap();
-        client_hs.process_server_key_exchange(&ske_plain[..ske_total], &ske).unwrap();
+        client_hs
+            .process_server_key_exchange(&ske_plain[..ske_total], &ske)
+            .unwrap();
 
         // SHD
         let (_, shd_plain, consumed) = client_rl.open_record(&s2c).unwrap();
@@ -979,25 +996,49 @@ mod tests {
         let (_, _, shd_total) = parse_handshake_header(&shd_plain).unwrap();
 
         // 4. Client flight: CKE + CCS + Finished
-        let cflight = client_hs.process_server_hello_done(&shd_plain[..shd_total]).unwrap();
-        c2s.extend_from_slice(&client_rl.seal_record(ContentType::Handshake, &cflight.client_key_exchange).unwrap());
-        c2s.extend_from_slice(&client_rl.seal_record(ContentType::ChangeCipherSpec, &[0x01]).unwrap());
+        let cflight = client_hs
+            .process_server_hello_done(&shd_plain[..shd_total])
+            .unwrap();
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &cflight.client_key_exchange)
+                .unwrap(),
+        );
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::ChangeCipherSpec, &[0x01])
+                .unwrap(),
+        );
 
         // Activate client write
         if cflight.is_cbc {
             client_rl.activate_write_encryption12_cbc(
-                cflight.client_write_key.clone(), cflight.client_write_mac_key.clone(), cflight.mac_len,
+                cflight.client_write_key.clone(),
+                cflight.client_write_mac_key.clone(),
+                cflight.mac_len,
             );
         } else {
-            client_rl.activate_write_encryption12(suite_neg, &cflight.client_write_key, cflight.client_write_iv.clone()).unwrap();
+            client_rl
+                .activate_write_encryption12(
+                    suite_neg,
+                    &cflight.client_write_key,
+                    cflight.client_write_iv.clone(),
+                )
+                .unwrap();
         }
-        c2s.extend_from_slice(&client_rl.seal_record(ContentType::Handshake, &cflight.finished).unwrap());
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &cflight.finished)
+                .unwrap(),
+        );
 
         // 5. Server processes CKE + CCS + Finished
         let (_, cke_plain, consumed) = server_rl.open_record(&c2s).unwrap();
         c2s.drain(..consumed);
         let (_, _, cke_total) = parse_handshake_header(&cke_plain).unwrap();
-        let keys = server_hs.process_client_key_exchange(&cke_plain[..cke_total]).unwrap();
+        let keys = server_hs
+            .process_client_key_exchange(&cke_plain[..cke_total])
+            .unwrap();
 
         let (ct, _, consumed) = server_rl.open_record(&c2s).unwrap();
         c2s.drain(..consumed);
@@ -1007,10 +1048,18 @@ mod tests {
         // Activate server read
         if keys.is_cbc {
             server_rl.activate_read_decryption12_cbc(
-                keys.client_write_key.clone(), keys.client_write_mac_key.clone(), keys.mac_len,
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
             );
         } else {
-            server_rl.activate_read_decryption12(suite_neg, &keys.client_write_key, keys.client_write_iv.clone()).unwrap();
+            server_rl
+                .activate_read_decryption12(
+                    suite_neg,
+                    &keys.client_write_key,
+                    keys.client_write_iv.clone(),
+                )
+                .unwrap();
         }
 
         let (_, fin_plain, consumed) = server_rl.open_record(&c2s).unwrap();
@@ -1019,15 +1068,31 @@ mod tests {
         let server_fin = server_hs.process_finished(&fin_plain[..fin_total]).unwrap();
 
         // 6. Server → CCS + Finished
-        s2c.extend_from_slice(&server_rl.seal_record(ContentType::ChangeCipherSpec, &[0x01]).unwrap());
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::ChangeCipherSpec, &[0x01])
+                .unwrap(),
+        );
         if keys.is_cbc {
             server_rl.activate_write_encryption12_cbc(
-                keys.server_write_key.clone(), keys.server_write_mac_key.clone(), keys.mac_len,
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
             );
         } else {
-            server_rl.activate_write_encryption12(suite_neg, &keys.server_write_key, keys.server_write_iv.clone()).unwrap();
+            server_rl
+                .activate_write_encryption12(
+                    suite_neg,
+                    &keys.server_write_key,
+                    keys.server_write_iv.clone(),
+                )
+                .unwrap();
         }
-        s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, &server_fin.finished).unwrap());
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::Handshake, &server_fin.finished)
+                .unwrap(),
+        );
 
         // 7. Client processes CCS + Finished
         let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
@@ -1037,26 +1102,40 @@ mod tests {
 
         if cflight.is_cbc {
             client_rl.activate_read_decryption12_cbc(
-                cflight.server_write_key.clone(), cflight.server_write_mac_key.clone(), cflight.mac_len,
+                cflight.server_write_key.clone(),
+                cflight.server_write_mac_key.clone(),
+                cflight.mac_len,
             );
         } else {
-            client_rl.activate_read_decryption12(suite_neg, &cflight.server_write_key, cflight.server_write_iv.clone()).unwrap();
+            client_rl
+                .activate_read_decryption12(
+                    suite_neg,
+                    &cflight.server_write_key,
+                    cflight.server_write_iv.clone(),
+                )
+                .unwrap();
         }
 
         let (_, sfin_plain, consumed) = client_rl.open_record(&s2c).unwrap();
         s2c.drain(..consumed);
         let (_, _, sfin_total) = parse_handshake_header(&sfin_plain).unwrap();
-        client_hs.process_finished(&sfin_plain[..sfin_total], &cflight.master_secret).unwrap();
+        client_hs
+            .process_finished(&sfin_plain[..sfin_total], &cflight.master_secret)
+            .unwrap();
 
         // 8. App data exchange
         let app_msg = b"Hello from client!";
-        let app_record = client_rl.seal_record(ContentType::ApplicationData, app_msg).unwrap();
+        let app_record = client_rl
+            .seal_record(ContentType::ApplicationData, app_msg)
+            .unwrap();
         let (ct, app_plain, _) = server_rl.open_record(&app_record).unwrap();
         assert_eq!(ct, ContentType::ApplicationData);
         assert_eq!(app_plain, app_msg);
 
         let reply = b"Hello from server!";
-        let reply_record = server_rl.seal_record(ContentType::ApplicationData, reply).unwrap();
+        let reply_record = server_rl
+            .seal_record(ContentType::ApplicationData, reply)
+            .unwrap();
         let (ct, reply_plain, _) = client_rl.open_record(&reply_record).unwrap();
         assert_eq!(ct, ContentType::ApplicationData);
         assert_eq!(reply_plain, reply);
@@ -1067,10 +1146,8 @@ mod tests {
 
     #[test]
     fn test_tls12_cbc_sha_full_handshake() {
-        let (cs, ss, _) = run_tls12_handshake(
-            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-            &[], &[],
-        );
+        let (cs, ss, _) =
+            run_tls12_handshake(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, &[], &[]);
         assert_eq!(cs, Tls12ClientState::Connected);
         assert_eq!(ss, Tls12ServerState::Connected);
     }
@@ -1079,7 +1156,8 @@ mod tests {
     fn test_tls12_cbc_sha256_full_handshake() {
         let (cs, ss, _) = run_tls12_handshake(
             CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
-            &[], &[],
+            &[],
+            &[],
         );
         assert_eq!(cs, Tls12ClientState::Connected);
         assert_eq!(ss, Tls12ServerState::Connected);
@@ -1089,7 +1167,8 @@ mod tests {
     fn test_tls12_cbc_sha384_full_handshake() {
         let (cs, ss, _) = run_tls12_handshake(
             CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384,
-            &[], &[],
+            &[],
+            &[],
         );
         assert_eq!(cs, Tls12ClientState::Connected);
         assert_eq!(ss, Tls12ServerState::Connected);
@@ -1099,7 +1178,8 @@ mod tests {
     fn test_tls12_chacha20_full_handshake() {
         let (cs, ss, _) = run_tls12_handshake(
             CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-            &[], &[],
+            &[],
+            &[],
         );
         assert_eq!(cs, Tls12ClientState::Connected);
         assert_eq!(ss, Tls12ServerState::Connected);

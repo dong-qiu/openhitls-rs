@@ -638,9 +638,9 @@ pub fn parse_server_name(data: &[u8]) -> Result<String, TlsError> {
     }
     let name_type = data[2];
     if name_type != 0 {
-        return Err(TlsError::HandshakeFailed(
-            format!("SNI: unsupported name type {name_type}"),
-        ));
+        return Err(TlsError::HandshakeFailed(format!(
+            "SNI: unsupported name type {name_type}"
+        )));
     }
     let name_len = u16::from_be_bytes([data[3], data[4]]) as usize;
     if data.len() < 5 + name_len {

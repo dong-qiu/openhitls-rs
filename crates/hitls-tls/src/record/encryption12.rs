@@ -362,17 +362,13 @@ mod tests {
     #[test]
     fn test_chacha20_tls12_suite_mapping() {
         assert_eq!(
-            tls12_suite_to_aead_suite(
-                CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
-            )
-            .unwrap(),
+            tls12_suite_to_aead_suite(CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256)
+                .unwrap(),
             CipherSuite::TLS_CHACHA20_POLY1305_SHA256
         );
         assert_eq!(
-            tls12_suite_to_aead_suite(
-                CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
-            )
-            .unwrap(),
+            tls12_suite_to_aead_suite(CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256)
+                .unwrap(),
             CipherSuite::TLS_CHACHA20_POLY1305_SHA256
         );
     }

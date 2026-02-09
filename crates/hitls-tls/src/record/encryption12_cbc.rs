@@ -36,9 +36,9 @@ fn create_hmac(mac_len: usize, mac_key: &[u8]) -> Result<Hmac, TlsError> {
             mac_key,
         ),
         _ => {
-            return Err(TlsError::RecordError(
-                format!("unsupported MAC length: {mac_len}"),
-            ))
+            return Err(TlsError::RecordError(format!(
+                "unsupported MAC length: {mac_len}"
+            )))
         }
     }
     .map_err(TlsError::CryptoError)
@@ -234,8 +234,7 @@ impl RecordDecryptor12Cbc {
         let fragment = &record.fragment;
 
         // Minimum: IV(16) + at least one block (mac + padding)
-        let min_encrypted_len =
-            (self.mac_len + 1).div_ceil(AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
+        let min_encrypted_len = (self.mac_len + 1).div_ceil(AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
         if fragment.len() < AES_BLOCK_SIZE + min_encrypted_len {
             return Err(TlsError::RecordError("CBC record too short".into()));
         }

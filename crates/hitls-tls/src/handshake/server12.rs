@@ -211,8 +211,9 @@ impl Tls12ServerHandshake {
         // Build ServerHello extensions
         let mut sh_extensions = Vec::new();
         if let Some(ref alpn) = self.negotiated_alpn {
-            sh_extensions
-                .push(crate::handshake::extensions_codec::build_alpn_selected(alpn));
+            sh_extensions.push(crate::handshake::extensions_codec::build_alpn_selected(
+                alpn,
+            ));
         }
 
         // Build ServerHello
