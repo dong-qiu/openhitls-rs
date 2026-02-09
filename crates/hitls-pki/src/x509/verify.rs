@@ -585,18 +585,12 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     // --- CRL revocation checking tests ---
 
     // CRL test data: ca.crl revokes server2 (serial ...D9) but NOT server1 (serial ...D8)
-    const CRL_CA_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/certs/ca.crt"
-    );
-    const CRL_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/crl/ca.crl"
-    );
-    const SERVER1_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/certs/server1.crt"
-    );
-    const SERVER2_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/certs/server2.crt"
-    );
+    const CRL_CA_PEM: &str = include_str!("../../../../tests/vectors/crl/crl_verify/certs/ca.crt");
+    const CRL_PEM: &str = include_str!("../../../../tests/vectors/crl/crl_verify/crl/ca.crl");
+    const SERVER1_PEM: &str =
+        include_str!("../../../../tests/vectors/crl/crl_verify/certs/server1.crt");
+    const SERVER2_PEM: &str =
+        include_str!("../../../../tests/vectors/crl/crl_verify/certs/server2.crt");
 
     #[test]
     fn test_verify_chain_with_crl_revoked() {

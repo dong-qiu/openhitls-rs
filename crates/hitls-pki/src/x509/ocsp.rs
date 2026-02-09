@@ -665,12 +665,9 @@ fn build_test_ocsp_response(
 mod tests {
     use super::*;
 
-    const CRL_CA_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/certs/ca.crt"
-    );
-    const SERVER1_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/certs/server1.crt"
-    );
+    const CRL_CA_PEM: &str = include_str!("../../../../tests/vectors/crl/crl_verify/certs/ca.crt");
+    const SERVER1_PEM: &str =
+        include_str!("../../../../tests/vectors/crl/crl_verify/certs/server1.crt");
 
     #[test]
     fn test_ocsp_cert_id_new() {

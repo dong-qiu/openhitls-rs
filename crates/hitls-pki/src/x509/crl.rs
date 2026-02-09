@@ -413,49 +413,42 @@ pub fn parse_crls_pem(pem: &str) -> Result<Vec<CertificateRevocationList>, PkiEr
 mod tests {
     use super::*;
 
-    // Real CRL from C test data (PEM format, v1, RSA SHA-256, 2 revoked certs)
-    const CRL_V1_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/crl/ca.crl"
-    );
+    // Real CRL from test data (PEM format, v1, RSA SHA-256, 2 revoked certs)
+    const CRL_V1_PEM: &str = include_str!("../../../../tests/vectors/crl/crl_verify/crl/ca.crl");
 
     // CA certificate for verifying the CRL
-    const CA_CERT_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_verify/certs/ca.crt"
-    );
+    const CA_CERT_PEM: &str = include_str!("../../../../tests/vectors/crl/crl_verify/certs/ca.crt");
 
     // V2 CRL with extensions (PEM format)
-    const CRL_V2_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/extension_crl/test_crl.pem"
-    );
+    const CRL_V2_PEM: &str =
+        include_str!("../../../../tests/vectors/crl/extension_crl/test_crl.pem");
 
     // CA cert for the v2 CRL
-    const CRL_V2_CA_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/extension_crl/ca_cert.pem"
-    );
+    const CRL_V2_CA_PEM: &str =
+        include_str!("../../../../tests/vectors/crl/extension_crl/ca_cert.pem");
 
     // Empty CRL (no revoked certs) — PEM
-    const EMPTY_CRL_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_empty_crl.crl"
-    );
+    const EMPTY_CRL_PEM: &str =
+        include_str!("../../../../tests/vectors/crl/crl_parse/crl/demoCA_rsa2048_v2_empty_crl.crl");
 
     // No next_update CRL — PEM
     const NO_NEXT_UPDATE_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_no_next_time.crl"
+        "../../../../tests/vectors/crl/crl_parse/crl/demoCA_rsa2048_v2_no_next_time.crl"
     );
 
     // Reason code test — key compromise (reason=1) — PEM
     const REASON_CODE_1_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_1.crl"
+        "../../../../tests/vectors/crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_1.crl"
     );
 
     // Reason code test — CA compromise (reason=2) — PEM
     const REASON_CODE_2_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_2.crl"
+        "../../../../tests/vectors/crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_2.crl"
     );
 
     // Invalidity date CRL — PEM
     const INVALIDITY_DATE_PEM: &str = include_str!(
-        "../../../../../openhitls/testcode/testdata/cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_InvalidityData.crl"
+        "../../../../tests/vectors/crl/crl_parse/crl/demoCA_rsa2048_v2_InvalidityData.crl"
     );
 
     #[test]
