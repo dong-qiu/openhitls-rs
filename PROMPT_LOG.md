@@ -1106,3 +1106,20 @@ Key implementation:
 - Added 9 CRL/OCSP OIDs to hitls-utils, OCSP type re-exports from x509 module
 
 624 tests passing (20 auth + 46 bignum + 326 crypto + 10 integration + 81 pki + 115 tls + 26 utils), 19 ignored. Clippy clean, fmt clean.
+
+### Prompt 72: Start Phase 25
+> 请开始Phase 25的工作
+
+**Result**: Implemented Phase 25 — CSR Generation (PKCS#10, RFC 2986), X.509 Certificate Generation, TLS 1.2 PRF (RFC 5246 section 5), CLI `req` command.
+
+Key implementation:
+- **ASN.1 encoder enhancements**: 8 new methods for complex structure encoding
+- **SigningKey abstraction**: Unified signing interface for RSA, ECDSA, Ed25519
+- **CSR parsing + generation**: `CertificateRequestBuilder` with fluent API, PKCS#10 DER/PEM output
+- **X.509 certificate generation**: `CertificateBuilder` with `self_signed()` convenience method
+- **TLS 1.2 PRF**: P_hash expansion with HMAC, RFC 5246 section 5 compliant
+- **CLI `req` command**: CSR generation and display via command-line
+
+Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src/oid/mod.rs`, `crates/hitls-pki/src/x509/mod.rs`, `crates/hitls-tls/src/crypt/prf.rs`, `crates/hitls-cli/src/req.rs`, `crates/hitls-cli/src/main.rs`, `tests/interop/src/lib.rs`
+
+661 tests passing (20 auth + 46 bignum + 326 crypto + 13 integration + 98 pki + 123 tls + 35 utils), 19 ignored. 37 new tests. Clippy clean, fmt clean.

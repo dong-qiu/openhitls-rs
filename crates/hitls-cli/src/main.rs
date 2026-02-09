@@ -5,6 +5,7 @@ mod dgst;
 mod enc;
 mod genpkey;
 mod pkey;
+mod req;
 mod verify;
 mod x509cmd;
 
@@ -162,12 +163,7 @@ fn main() {
             key,
             subj,
             output,
-        } => {
-            eprintln!(
-                "CSR generation is not yet implemented (new={new}, key={key:?}, subj={subj:?}, out={output:?})"
-            );
-            Ok(())
-        }
+        } => req::run(*new, key.as_deref(), subj.as_deref(), output.as_deref()),
         Commands::X509 {
             input,
             text,

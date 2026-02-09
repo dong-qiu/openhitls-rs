@@ -65,9 +65,22 @@ pub struct X509Extension {
 /// A certificate signing request (CSR / PKCS#10).
 #[derive(Debug, Clone)]
 pub struct CertificateRequest {
+    /// DER-encoded CSR data.
     pub raw: Vec<u8>,
+    /// Version (always 0).
+    pub version: u8,
+    /// Subject distinguished name.
     pub subject: DistinguishedName,
+    /// Subject public key info.
     pub public_key: SubjectPublicKeyInfo,
+    /// Requested extensions (from extensionRequest attribute).
+    pub attributes: Vec<X509Extension>,
+    /// Raw TBS bytes for signature verification.
+    pub tbs_raw: Vec<u8>,
+    /// Signature algorithm OID bytes.
+    pub signature_algorithm: Vec<u8>,
+    /// Signature value bytes.
+    pub signature_value: Vec<u8>,
 }
 
 // CRL types are defined in crl.rs and re-exported here.
@@ -693,6 +706,734 @@ pub(crate) fn verify_ed25519(
 }
 
 // ---------------------------------------------------------------------------
+// DER encoding helpers
+// ---------------------------------------------------------------------------
+
+use hitls_utils::asn1::Encoder;
+
+/// Encode a DistinguishedName to DER (SEQUENCE of SET of SEQUENCE { OID, string }).
+pub(crate) fn encode_distinguished_name(dn: &DistinguishedName) -> Vec<u8> {
+    let mut rdns = Encoder::new();
+    for (attr_name, value) in &dn.entries {
+        let mut atav = Encoder::new();
+        // Look up the OID for the attribute name
+        let oid = known::dn_short_name_to_oid(attr_name).unwrap_or_else(|| Oid::new(&[2, 5, 4, 3])); // fallback to CN
+        atav.write_oid(&oid.to_der_value());
+        // Country name uses PrintableString per RFC 5280
+        if attr_name == "C" {
+            atav.write_printable_string(value);
+        } else {
+            atav.write_utf8_string(value);
+        }
+        let atav_der = atav.finish();
+        let mut seq = Encoder::new();
+        seq.write_sequence(&atav_der);
+        let seq_der = seq.finish();
+        let mut set = Encoder::new();
+        set.write_set(&seq_der);
+        rdns.write_raw(&set.finish());
+    }
+    let mut outer = Encoder::new();
+    outer.write_sequence(&rdns.finish());
+    outer.finish()
+}
+
+/// Encode an AlgorithmIdentifier to DER.
+///
+/// `params_tlv` should be a complete DER TLV (tag+length+value), or None.
+/// When None, adds NULL for RSA algorithms, omits params for ECDSA/Ed25519.
+pub(crate) fn encode_algorithm_identifier(oid: &[u8], params_tlv: Option<&[u8]>) -> Vec<u8> {
+    let mut inner = Encoder::new();
+    inner.write_oid(oid);
+    if let Some(p) = params_tlv {
+        inner.write_raw(p);
+    }
+    // If no params TLV is provided, nothing is written (absent).
+    // Callers that need NULL should pass Some(&[0x05, 0x00]).
+    let mut outer = Encoder::new();
+    outer.write_sequence(&inner.finish());
+    outer.finish()
+}
+
+/// NULL parameter bytes for AlgorithmIdentifier (DER: 0x05 0x00).
+const ALG_PARAMS_NULL: &[u8] = &[0x05, 0x00];
+
+/// Encode a SubjectPublicKeyInfo to DER.
+pub(crate) fn encode_subject_public_key_info(spki: &SubjectPublicKeyInfo) -> Vec<u8> {
+    // algorithm_params stores raw VALUE bytes from parse_algorithm_identifier;
+    // for EC keys this is the raw OID value; for RSA it's None (→ NULL).
+    let params_tlv = if let Some(ref p) = spki.algorithm_params {
+        // Reconstruct full OID TLV from raw value bytes
+        let mut enc = Encoder::new();
+        enc.write_oid(p);
+        Some(enc.finish())
+    } else {
+        // RSA and Ed25519: RSA needs NULL, Ed25519 needs absent
+        let alg_oid = Oid::from_der_value(&spki.algorithm_oid).ok();
+        if alg_oid.as_ref() == Some(&known::rsa_encryption()) {
+            Some(ALG_PARAMS_NULL.to_vec())
+        } else {
+            None
+        }
+    };
+    let alg_id = encode_algorithm_identifier(&spki.algorithm_oid, params_tlv.as_deref());
+    let mut inner = Encoder::new();
+    inner.write_raw(&alg_id);
+    inner.write_bit_string(0, &spki.public_key);
+    let mut outer = Encoder::new();
+    outer.write_sequence(&inner.finish());
+    outer.finish()
+}
+
+/// Encode extensions to DER (SEQUENCE of Extension).
+pub(crate) fn encode_extensions(exts: &[X509Extension]) -> Vec<u8> {
+    let mut seq_contents = Encoder::new();
+    for ext in exts {
+        let mut ext_inner = Encoder::new();
+        ext_inner.write_oid(&ext.oid);
+        if ext.critical {
+            ext_inner.write_boolean(true);
+        }
+        ext_inner.write_octet_string(&ext.value);
+        let mut ext_seq = Encoder::new();
+        ext_seq.write_sequence(&ext_inner.finish());
+        seq_contents.write_raw(&ext_seq.finish());
+    }
+    let mut outer = Encoder::new();
+    outer.write_sequence(&seq_contents.finish());
+    outer.finish()
+}
+
+/// Encode validity (notBefore, notAfter) to DER.
+pub(crate) fn encode_validity(not_before: i64, not_after: i64) -> Vec<u8> {
+    let mut inner = Encoder::new();
+    inner.write_time(not_before);
+    inner.write_time(not_after);
+    let mut outer = Encoder::new();
+    outer.write_sequence(&inner.finish());
+    outer.finish()
+}
+
+// ---------------------------------------------------------------------------
+// SigningKey — unified signing dispatch
+// ---------------------------------------------------------------------------
+
+/// A private key that can sign data. Supports RSA, ECDSA, and Ed25519.
+pub enum SigningKey {
+    /// RSA private key (signs with SHA-256 + PKCS#1 v1.5).
+    Rsa(hitls_crypto::rsa::RsaPrivateKey),
+    /// ECDSA private key (signs with SHA-256/384 depending on curve).
+    Ecdsa {
+        curve_id: EccCurveId,
+        key_pair: hitls_crypto::ecdsa::EcdsaKeyPair,
+    },
+    /// Ed25519 private key (signs raw message).
+    Ed25519(hitls_crypto::ed25519::Ed25519KeyPair),
+}
+
+impl SigningKey {
+    /// Create a SigningKey from PKCS#8 DER bytes.
+    pub fn from_pkcs8_der(der: &[u8]) -> Result<Self, PkiError> {
+        use crate::pkcs8::{parse_pkcs8_der, Pkcs8PrivateKey};
+        let key = parse_pkcs8_der(der).map_err(PkiError::from)?;
+        match key {
+            Pkcs8PrivateKey::Rsa(rsa) => Ok(SigningKey::Rsa(rsa)),
+            Pkcs8PrivateKey::Ec { curve_id, key_pair } => {
+                Ok(SigningKey::Ecdsa { curve_id, key_pair })
+            }
+            Pkcs8PrivateKey::Ed25519(ed) => Ok(SigningKey::Ed25519(ed)),
+            _ => Err(PkiError::InvalidCert(
+                "unsupported key type for signing".into(),
+            )),
+        }
+    }
+
+    /// Create a SigningKey from PKCS#8 PEM string.
+    pub fn from_pkcs8_pem(pem: &str) -> Result<Self, PkiError> {
+        let blocks =
+            hitls_utils::pem::parse(pem).map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let key_block = blocks
+            .iter()
+            .find(|b| b.label == "PRIVATE KEY")
+            .ok_or_else(|| PkiError::InvalidCert("no PRIVATE KEY block found".into()))?;
+        Self::from_pkcs8_der(&key_block.data)
+    }
+
+    /// Sign the given data (hash + sign for RSA/ECDSA, raw sign for Ed25519).
+    pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>, PkiError> {
+        match self {
+            SigningKey::Rsa(rsa) => {
+                let digest = compute_hash(data, &HashAlg::Sha256).map_err(PkiError::from)?;
+                rsa.sign(hitls_crypto::rsa::RsaPadding::Pkcs1v15Sign, &digest)
+                    .map_err(PkiError::from)
+            }
+            SigningKey::Ecdsa { curve_id, key_pair } => {
+                let hash_alg = match curve_id {
+                    EccCurveId::NistP384 | EccCurveId::BrainpoolP384r1 => HashAlg::Sha384,
+                    EccCurveId::NistP521 | EccCurveId::BrainpoolP512r1 => HashAlg::Sha512,
+                    _ => HashAlg::Sha256,
+                };
+                let digest = compute_hash(data, &hash_alg).map_err(PkiError::from)?;
+                key_pair.sign(&digest).map_err(PkiError::from)
+            }
+            SigningKey::Ed25519(ed) => {
+                let sig = ed.sign(data).map_err(PkiError::from)?;
+                Ok(sig.to_vec())
+            }
+        }
+    }
+
+    /// Get the signature algorithm OID bytes for this key type.
+    pub fn algorithm_oid(&self) -> Vec<u8> {
+        match self {
+            SigningKey::Rsa(_) => known::sha256_with_rsa_encryption().to_der_value(),
+            SigningKey::Ecdsa { curve_id, .. } => match curve_id {
+                EccCurveId::NistP384 | EccCurveId::BrainpoolP384r1 => {
+                    known::ecdsa_with_sha384().to_der_value()
+                }
+                EccCurveId::NistP521 | EccCurveId::BrainpoolP512r1 => {
+                    known::ecdsa_with_sha512().to_der_value()
+                }
+                _ => known::ecdsa_with_sha256().to_der_value(),
+            },
+            SigningKey::Ed25519(_) => known::ed25519().to_der_value(),
+        }
+    }
+
+    /// Get the signature algorithm parameters as full DER TLV.
+    /// Returns Some(NULL TLV) for RSA, None (absent) for ECDSA/Ed25519.
+    pub fn algorithm_params(&self) -> Option<Vec<u8>> {
+        match self {
+            SigningKey::Rsa(_) => Some(ALG_PARAMS_NULL.to_vec()),
+            SigningKey::Ecdsa { .. } | SigningKey::Ed25519(_) => None,
+        }
+    }
+
+    /// Extract the SubjectPublicKeyInfo for this key.
+    pub fn public_key_info(&self) -> Result<SubjectPublicKeyInfo, PkiError> {
+        match self {
+            SigningKey::Rsa(rsa) => {
+                let pub_key = rsa.public_key();
+                // Encode public key as SEQUENCE { modulus INTEGER, exponent INTEGER }
+                let mut inner = Encoder::new();
+                inner.write_integer(&pub_key.n_bytes());
+                inner.write_integer(&pub_key.e_bytes());
+                let mut seq = Encoder::new();
+                seq.write_sequence(&inner.finish());
+                // RSA SPKI algorithm_params: None here means NULL will be added
+                // by encode_subject_public_key_info (since it doesn't match OID pattern)
+                Ok(SubjectPublicKeyInfo {
+                    algorithm_oid: known::rsa_encryption().to_der_value(),
+                    algorithm_params: None,
+                    public_key: seq.finish(),
+                })
+            }
+            SigningKey::Ecdsa { curve_id, key_pair } => {
+                let pub_bytes = key_pair.public_key_bytes().map_err(PkiError::from)?;
+                let curve_oid = curve_id_to_oid(*curve_id)?;
+                // algorithm_params stores raw OID value bytes (without tag+length)
+                // because parse_algorithm_identifier stores tlv.value
+                Ok(SubjectPublicKeyInfo {
+                    algorithm_oid: known::ec_public_key().to_der_value(),
+                    algorithm_params: Some(curve_oid.to_der_value()),
+                    public_key: pub_bytes,
+                })
+            }
+            SigningKey::Ed25519(ed) => Ok(SubjectPublicKeyInfo {
+                algorithm_oid: known::ed25519().to_der_value(),
+                algorithm_params: None,
+                public_key: ed.public_key().to_vec(),
+            }),
+        }
+    }
+}
+
+/// Map an EccCurveId to its OID.
+fn curve_id_to_oid(curve_id: EccCurveId) -> Result<Oid, PkiError> {
+    match curve_id {
+        EccCurveId::NistP224 => Ok(known::secp224r1()),
+        EccCurveId::NistP256 => Ok(known::prime256v1()),
+        EccCurveId::NistP384 => Ok(known::secp384r1()),
+        EccCurveId::NistP521 => Ok(known::secp521r1()),
+        EccCurveId::BrainpoolP256r1 => Ok(known::brainpool_p256r1()),
+        EccCurveId::BrainpoolP384r1 => Ok(known::brainpool_p384r1()),
+        EccCurveId::BrainpoolP512r1 => Ok(known::brainpool_p512r1()),
+        _ => Err(PkiError::InvalidCert(format!(
+            "unsupported curve: {:?}",
+            curve_id
+        ))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CSR (PKCS#10) Parsing + Generation
+// ---------------------------------------------------------------------------
+
+impl CertificateRequest {
+    /// Parse a CSR from DER-encoded bytes (RFC 2986).
+    pub fn from_der(data: &[u8]) -> Result<Self, PkiError> {
+        let mut outer = Decoder::new(data)
+            .read_sequence()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+
+        // Extract raw TBS bytes for signature verification
+        let remaining_before = outer.remaining();
+        let tbs_tlv = outer
+            .read_tlv()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let tbs_consumed = remaining_before.len() - outer.remaining().len();
+        let tbs_raw = remaining_before[..tbs_consumed].to_vec();
+
+        // Parse CertificationRequestInfo
+        let mut tbs_dec = Decoder::new(tbs_tlv.value);
+
+        // version INTEGER (must be 0)
+        let version_bytes = tbs_dec
+            .read_integer()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let version = version_bytes.last().copied().unwrap_or(0);
+
+        // subject Name
+        let subject = parse_name(&mut tbs_dec)?;
+
+        // subjectPKInfo SubjectPublicKeyInfo
+        let public_key = parse_subject_public_key_info(&mut tbs_dec)?;
+
+        // attributes [0] IMPLICIT SET OF Attribute
+        let attributes = {
+            let attr_tlv = tbs_dec
+                .try_read_context_specific(0, true)
+                .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+            if let Some(attr_tlv) = attr_tlv {
+                parse_csr_attributes(attr_tlv.value)?
+            } else {
+                Vec::new()
+            }
+        };
+
+        // signatureAlgorithm AlgorithmIdentifier
+        let (signature_algorithm, _sig_params) = parse_algorithm_identifier(&mut outer)?;
+
+        // signatureValue BIT STRING
+        let (_, sig_bytes) = outer
+            .read_bit_string()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+
+        Ok(CertificateRequest {
+            raw: data.to_vec(),
+            version,
+            subject,
+            public_key,
+            attributes,
+            tbs_raw,
+            signature_algorithm,
+            signature_value: sig_bytes.to_vec(),
+        })
+    }
+
+    /// Parse a CSR from PEM-encoded string.
+    pub fn from_pem(pem: &str) -> Result<Self, PkiError> {
+        let blocks =
+            hitls_utils::pem::parse(pem).map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let csr_block = blocks
+            .iter()
+            .find(|b| b.label == "CERTIFICATE REQUEST")
+            .ok_or_else(|| PkiError::InvalidCert("no CERTIFICATE REQUEST block found".into()))?;
+        Self::from_der(&csr_block.data)
+    }
+
+    /// Verify the CSR's self-signature.
+    pub fn verify_signature(&self) -> Result<bool, PkiError> {
+        let sig_oid = Oid::from_der_value(&self.signature_algorithm)
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+
+        if sig_oid == known::sha256_with_rsa_encryption()
+            || sig_oid == known::sha384_with_rsa_encryption()
+            || sig_oid == known::sha512_with_rsa_encryption()
+            || sig_oid == known::sha1_with_rsa_encryption()
+        {
+            let hash_alg = if sig_oid == known::sha384_with_rsa_encryption() {
+                HashAlg::Sha384
+            } else if sig_oid == known::sha512_with_rsa_encryption() {
+                HashAlg::Sha512
+            } else if sig_oid == known::sha1_with_rsa_encryption() {
+                HashAlg::Sha1
+            } else {
+                HashAlg::Sha256
+            };
+            verify_rsa(
+                &self.tbs_raw,
+                &self.signature_value,
+                &self.public_key,
+                hash_alg,
+            )
+        } else if sig_oid == known::ecdsa_with_sha256()
+            || sig_oid == known::ecdsa_with_sha384()
+            || sig_oid == known::ecdsa_with_sha512()
+        {
+            let hash_alg = if sig_oid == known::ecdsa_with_sha384() {
+                HashAlg::Sha384
+            } else if sig_oid == known::ecdsa_with_sha512() {
+                HashAlg::Sha512
+            } else {
+                HashAlg::Sha256
+            };
+            verify_ecdsa(
+                &self.tbs_raw,
+                &self.signature_value,
+                &self.public_key,
+                hash_alg,
+            )
+        } else if sig_oid == known::ed25519() {
+            verify_ed25519(&self.tbs_raw, &self.signature_value, &self.public_key)
+        } else {
+            Err(PkiError::InvalidCert(format!(
+                "unsupported CSR signature algorithm: {}",
+                sig_oid
+            )))
+        }
+    }
+}
+
+/// Parse CSR attributes — extract extensionRequest extensions.
+fn parse_csr_attributes(data: &[u8]) -> Result<Vec<X509Extension>, PkiError> {
+    let mut dec = Decoder::new(data);
+    let mut extensions = Vec::new();
+    while !dec.is_empty() {
+        let mut attr_dec = dec
+            .read_sequence()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let oid_bytes = attr_dec
+            .read_oid()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let oid = Oid::from_der_value(oid_bytes).map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        if oid == known::extension_request() {
+            // Values is SET OF Extensions
+            let set_dec = attr_dec
+                .read_set()
+                .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+            if !set_dec.is_empty() {
+                let ext_data = set_dec.remaining();
+                extensions.extend(parse_extensions(ext_data)?);
+            }
+        }
+    }
+    Ok(extensions)
+}
+
+/// Builder for creating Certificate Signing Requests (CSRs).
+pub struct CertificateRequestBuilder {
+    subject: DistinguishedName,
+    extensions: Vec<X509Extension>,
+}
+
+impl CertificateRequestBuilder {
+    /// Create a new CSR builder with the given subject DN.
+    pub fn new(subject: DistinguishedName) -> Self {
+        Self {
+            subject,
+            extensions: Vec::new(),
+        }
+    }
+
+    /// Add an extension to the CSR.
+    pub fn add_extension(mut self, oid: Vec<u8>, critical: bool, value: Vec<u8>) -> Self {
+        self.extensions.push(X509Extension {
+            oid,
+            critical,
+            value,
+        });
+        self
+    }
+
+    /// Build the CSR, signing with the given key.
+    pub fn build(self, signing_key: &SigningKey) -> Result<CertificateRequest, PkiError> {
+        let spki = signing_key.public_key_info()?;
+
+        // Build CertificationRequestInfo
+        let mut cri = Encoder::new();
+        cri.write_integer(&[0x00]); // version 0
+
+        // subject Name
+        let dn_der = encode_distinguished_name(&self.subject);
+        cri.write_raw(&dn_der);
+
+        // subjectPKInfo
+        let spki_der = encode_subject_public_key_info(&spki);
+        cri.write_raw(&spki_der);
+
+        // attributes [0] IMPLICIT SET OF Attribute
+        if !self.extensions.is_empty() {
+            let ext_der = encode_extensions(&self.extensions);
+            // Wrap in Attribute: SEQUENCE { OID extensionRequest, SET { extensions } }
+            let mut attr_inner = Encoder::new();
+            attr_inner.write_oid(&known::extension_request().to_der_value());
+            let mut set_enc = Encoder::new();
+            set_enc.write_raw(&ext_der); // extensions already wrapped in SEQUENCE
+            let mut attr_set = Encoder::new();
+            attr_set.write_set(&set_enc.finish());
+            attr_inner.write_raw(&attr_set.finish());
+            let mut attr_seq = Encoder::new();
+            attr_seq.write_sequence(&attr_inner.finish());
+            cri.write_context_specific(0, true, &attr_seq.finish());
+        } else {
+            cri.write_context_specific(0, true, &[]);
+        }
+
+        let mut tbs_seq = Encoder::new();
+        tbs_seq.write_sequence(&cri.finish());
+        let tbs_raw = tbs_seq.finish();
+
+        // Sign the TBS
+        let signature = signing_key.sign(&tbs_raw)?;
+
+        // Build outer SEQUENCE
+        let sig_alg_oid = signing_key.algorithm_oid();
+        let sig_alg_params = signing_key.algorithm_params();
+        let alg_id_der = encode_algorithm_identifier(&sig_alg_oid, sig_alg_params.as_deref());
+
+        let mut outer = Encoder::new();
+        outer.write_raw(&tbs_raw);
+        outer.write_raw(&alg_id_der);
+        outer.write_bit_string(0, &signature);
+        let mut result = Encoder::new();
+        result.write_sequence(&outer.finish());
+        let raw = result.finish();
+
+        Ok(CertificateRequest {
+            raw: raw.clone(),
+            version: 0,
+            subject: self.subject,
+            public_key: spki,
+            attributes: self.extensions,
+            tbs_raw,
+            signature_algorithm: sig_alg_oid,
+            signature_value: signature,
+        })
+    }
+
+    /// Build the CSR and encode as PEM string.
+    pub fn build_pem(self, signing_key: &SigningKey) -> Result<String, PkiError> {
+        let csr = self.build(signing_key)?;
+        Ok(hitls_utils::pem::encode("CERTIFICATE REQUEST", &csr.raw))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Certificate Builder
+// ---------------------------------------------------------------------------
+
+/// Builder for creating X.509 v3 certificates.
+pub struct CertificateBuilder {
+    serial_number: Vec<u8>,
+    issuer: DistinguishedName,
+    subject: DistinguishedName,
+    not_before: i64,
+    not_after: i64,
+    subject_public_key: Option<SubjectPublicKeyInfo>,
+    extensions: Vec<X509Extension>,
+}
+
+impl CertificateBuilder {
+    /// Create a new certificate builder with default values.
+    pub fn new() -> Self {
+        Self {
+            serial_number: vec![0x01],
+            issuer: DistinguishedName {
+                entries: Vec::new(),
+            },
+            subject: DistinguishedName {
+                entries: Vec::new(),
+            },
+            not_before: 0,
+            not_after: 0,
+            subject_public_key: None,
+            extensions: Vec::new(),
+        }
+    }
+
+    /// Set the serial number.
+    pub fn serial_number(mut self, serial: &[u8]) -> Self {
+        self.serial_number = serial.to_vec();
+        self
+    }
+
+    /// Set the issuer DN.
+    pub fn issuer(mut self, dn: DistinguishedName) -> Self {
+        self.issuer = dn;
+        self
+    }
+
+    /// Set the subject DN.
+    pub fn subject(mut self, dn: DistinguishedName) -> Self {
+        self.subject = dn;
+        self
+    }
+
+    /// Set the validity period.
+    pub fn validity(mut self, not_before: i64, not_after: i64) -> Self {
+        self.not_before = not_before;
+        self.not_after = not_after;
+        self
+    }
+
+    /// Set the subject public key.
+    pub fn subject_public_key(mut self, spki: SubjectPublicKeyInfo) -> Self {
+        self.subject_public_key = Some(spki);
+        self
+    }
+
+    /// Add a raw extension.
+    pub fn add_extension(mut self, oid: Vec<u8>, critical: bool, value: Vec<u8>) -> Self {
+        self.extensions.push(X509Extension {
+            oid,
+            critical,
+            value,
+        });
+        self
+    }
+
+    /// Add a BasicConstraints extension.
+    pub fn add_basic_constraints(self, is_ca: bool, path_len: Option<u32>) -> Self {
+        let mut inner = Encoder::new();
+        if is_ca {
+            inner.write_boolean(true);
+        }
+        if let Some(pl) = path_len {
+            inner.write_integer(&pl.to_be_bytes());
+        }
+        let mut seq = Encoder::new();
+        seq.write_sequence(&inner.finish());
+        let value = seq.finish();
+        self.add_extension(known::basic_constraints().to_der_value(), true, value)
+    }
+
+    /// Add a KeyUsage extension.
+    pub fn add_key_usage(self, usage: u16) -> Self {
+        // Encode as BIT STRING
+        let mut bits = vec![(usage & 0xFF) as u8];
+        if usage > 0xFF {
+            bits.push((usage >> 8) as u8);
+        }
+        // Calculate unused bits in last byte
+        let last = *bits.last().unwrap();
+        let unused = if last == 0 {
+            0
+        } else {
+            last.trailing_zeros() as u8
+        };
+        let mut enc = Encoder::new();
+        enc.write_bit_string(unused, &bits);
+        let value = enc.finish();
+        self.add_extension(known::key_usage().to_der_value(), true, value)
+    }
+
+    /// Build the certificate, signing with the given key.
+    pub fn build(self, signing_key: &SigningKey) -> Result<Certificate, PkiError> {
+        let spki = self
+            .subject_public_key
+            .ok_or_else(|| PkiError::InvalidCert("subject public key not set".into()))?;
+
+        let sig_alg_oid = signing_key.algorithm_oid();
+        let sig_alg_params = signing_key.algorithm_params();
+
+        // Build TBSCertificate
+        let mut tbs = Encoder::new();
+
+        // version [0] EXPLICIT INTEGER v3 (2)
+        let mut ver_int = Encoder::new();
+        ver_int.write_integer(&[0x02]);
+        tbs.write_context_specific(0, true, &ver_int.finish());
+
+        // serialNumber INTEGER
+        tbs.write_integer(&self.serial_number);
+
+        // signature AlgorithmIdentifier (inner)
+        let alg_id = encode_algorithm_identifier(&sig_alg_oid, sig_alg_params.as_deref());
+        tbs.write_raw(&alg_id);
+
+        // issuer Name
+        tbs.write_raw(&encode_distinguished_name(&self.issuer));
+
+        // validity
+        tbs.write_raw(&encode_validity(self.not_before, self.not_after));
+
+        // subject Name
+        tbs.write_raw(&encode_distinguished_name(&self.subject));
+
+        // subjectPublicKeyInfo
+        tbs.write_raw(&encode_subject_public_key_info(&spki));
+
+        // extensions [3] EXPLICIT Extensions
+        if !self.extensions.is_empty() {
+            let ext_der = encode_extensions(&self.extensions);
+            tbs.write_context_specific(3, true, &ext_der);
+        }
+
+        let mut tbs_seq = Encoder::new();
+        tbs_seq.write_sequence(&tbs.finish());
+        let tbs_raw = tbs_seq.finish();
+
+        // Sign the TBS
+        let signature = signing_key.sign(&tbs_raw)?;
+
+        // Build outer Certificate SEQUENCE
+        let mut outer = Encoder::new();
+        outer.write_raw(&tbs_raw);
+        outer.write_raw(&encode_algorithm_identifier(
+            &sig_alg_oid,
+            sig_alg_params.as_deref(),
+        ));
+        outer.write_bit_string(0, &signature);
+        let mut result = Encoder::new();
+        result.write_sequence(&outer.finish());
+        let raw = result.finish();
+
+        // Parse the generated cert to ensure correctness and fill all fields
+        Certificate::from_der(&raw)
+    }
+
+    /// Build the certificate and encode as PEM string.
+    pub fn build_pem(self, signing_key: &SigningKey) -> Result<String, PkiError> {
+        let cert = self.build(signing_key)?;
+        Ok(hitls_utils::pem::encode("CERTIFICATE", &cert.raw))
+    }
+
+    /// Create a self-signed certificate with sensible defaults (v3, CA=true).
+    pub fn self_signed(
+        subject: DistinguishedName,
+        signing_key: &SigningKey,
+        not_before: i64,
+        not_after: i64,
+    ) -> Result<Certificate, PkiError> {
+        let spki = signing_key.public_key_info()?;
+        // Generate a random serial number
+        let mut serial = [0u8; 16];
+        getrandom::getrandom(&mut serial)
+            .map_err(|_| PkiError::InvalidCert("failed to generate random serial".into()))?;
+        serial[0] &= 0x7F; // Ensure positive
+
+        CertificateBuilder::new()
+            .serial_number(&serial)
+            .issuer(subject.clone())
+            .subject(subject)
+            .validity(not_before, not_after)
+            .subject_public_key(spki)
+            .add_basic_constraints(true, None)
+            .add_key_usage(
+                KeyUsage::DIGITAL_SIGNATURE | KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN,
+            )
+            .build(signing_key)
+    }
+}
+
+impl Default for CertificateBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -870,5 +1611,358 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let ecdsa_sig_oid = Oid::from_der_value(&ecdsa_cert.signature_algorithm).unwrap();
         // Should be ecdsaWithSHA256
         assert_eq!(ecdsa_sig_oid, known::ecdsa_with_sha256());
+    }
+
+    // -----------------------------------------------------------------------
+    // Encoding roundtrip tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_encode_dn_roundtrip() {
+        let dn = DistinguishedName {
+            entries: vec![
+                ("CN".to_string(), "Test".to_string()),
+                ("O".to_string(), "OpenHiTLS".to_string()),
+                ("C".to_string(), "CN".to_string()),
+            ],
+        };
+        let encoded = encode_distinguished_name(&dn);
+        let mut dec = hitls_utils::asn1::Decoder::new(&encoded);
+        let parsed = parse_name(&mut dec).unwrap();
+        assert_eq!(parsed.entries, dn.entries);
+    }
+
+    #[test]
+    fn test_encode_algorithm_identifier_rsa() {
+        let oid = known::sha256_with_rsa_encryption().to_der_value();
+        let encoded = encode_algorithm_identifier(&oid, None);
+        let mut dec = hitls_utils::asn1::Decoder::new(&encoded);
+        let (parsed_oid, parsed_params) = parse_algorithm_identifier(&mut dec).unwrap();
+        assert_eq!(parsed_oid, oid);
+        assert!(parsed_params.is_none()); // NULL → None
+    }
+
+    #[test]
+    fn test_encode_spki_roundtrip() {
+        // Parse SPKI from an existing cert, encode it back, and reparse
+        let data = hex(RSA_CERT_HEX);
+        let cert = Certificate::from_der(&data).unwrap();
+        let encoded = encode_subject_public_key_info(&cert.public_key);
+        let mut dec = hitls_utils::asn1::Decoder::new(&encoded);
+        let parsed = parse_subject_public_key_info(&mut dec).unwrap();
+        assert_eq!(parsed.algorithm_oid, cert.public_key.algorithm_oid);
+        assert_eq!(parsed.public_key, cert.public_key.public_key);
+    }
+
+    #[test]
+    fn test_encode_extensions_roundtrip() {
+        let exts = vec![X509Extension {
+            oid: known::basic_constraints().to_der_value(),
+            critical: true,
+            value: vec![0x30, 0x03, 0x01, 0x01, 0xFF], // isCA=true
+        }];
+        let encoded = encode_extensions(&exts);
+        let parsed = parse_extensions(&encoded).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].oid, exts[0].oid);
+        assert!(parsed[0].critical);
+        assert_eq!(parsed[0].value, exts[0].value);
+    }
+
+    // -----------------------------------------------------------------------
+    // SigningKey tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_signing_key_ed25519() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let data = b"hello world";
+        let sig = sk.sign(data).unwrap();
+        let spki = sk.public_key_info().unwrap();
+
+        // Verify
+        let result = verify_ed25519(data, &sig, &spki).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_signing_key_ecdsa_p256() {
+        let kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let sk = SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: kp,
+        };
+        let data = b"test message";
+        let sig = sk.sign(data).unwrap();
+        let spki = sk.public_key_info().unwrap();
+
+        let result = verify_ecdsa(data, &sig, &spki, HashAlg::Sha256).unwrap();
+        assert!(result);
+    }
+
+    // -----------------------------------------------------------------------
+    // CSR tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_build_csr_ed25519() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let subject = DistinguishedName {
+            entries: vec![("CN".to_string(), "Test CSR".to_string())],
+        };
+        let csr = CertificateRequestBuilder::new(subject.clone())
+            .build(&sk)
+            .unwrap();
+        assert_eq!(csr.version, 0);
+        assert_eq!(csr.subject.entries, subject.entries);
+
+        // Verify self-signature
+        assert!(csr.verify_signature().unwrap());
+
+        // Roundtrip: DER → parse → verify
+        let parsed = CertificateRequest::from_der(&csr.raw).unwrap();
+        assert_eq!(parsed.subject.entries, subject.entries);
+        assert!(parsed.verify_signature().unwrap());
+    }
+
+    #[test]
+    fn test_build_csr_ecdsa() {
+        let kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let sk = SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: kp,
+        };
+        let subject = DistinguishedName {
+            entries: vec![
+                ("CN".to_string(), "ECDSA CSR".to_string()),
+                ("O".to_string(), "Test Org".to_string()),
+            ],
+        };
+        let csr = CertificateRequestBuilder::new(subject.clone())
+            .build(&sk)
+            .unwrap();
+        assert!(csr.verify_signature().unwrap());
+
+        let parsed = CertificateRequest::from_der(&csr.raw).unwrap();
+        assert_eq!(parsed.subject.get("CN"), Some("ECDSA CSR"));
+        assert!(parsed.verify_signature().unwrap());
+    }
+
+    #[test]
+    fn test_build_csr_pem_roundtrip() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let subject = DistinguishedName {
+            entries: vec![("CN".to_string(), "PEM Test".to_string())],
+        };
+        let pem = CertificateRequestBuilder::new(subject)
+            .build_pem(&sk)
+            .unwrap();
+        assert!(pem.contains("-----BEGIN CERTIFICATE REQUEST-----"));
+        let parsed = CertificateRequest::from_pem(&pem).unwrap();
+        assert_eq!(parsed.subject.get("CN"), Some("PEM Test"));
+        assert!(parsed.verify_signature().unwrap());
+    }
+
+    #[test]
+    fn test_build_csr_with_extensions() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let subject = DistinguishedName {
+            entries: vec![("CN".to_string(), "Ext CSR".to_string())],
+        };
+        let csr = CertificateRequestBuilder::new(subject)
+            .add_extension(
+                known::basic_constraints().to_der_value(),
+                true,
+                vec![0x30, 0x03, 0x01, 0x01, 0xFF],
+            )
+            .build(&sk)
+            .unwrap();
+        assert!(csr.verify_signature().unwrap());
+        // Verify extension survived the roundtrip
+        let parsed = CertificateRequest::from_der(&csr.raw).unwrap();
+        assert!(parsed.verify_signature().unwrap());
+    }
+
+    // -----------------------------------------------------------------------
+    // Certificate Builder tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_build_self_signed_ed25519() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let subject = DistinguishedName {
+            entries: vec![
+                ("CN".to_string(), "Test CA".to_string()),
+                ("O".to_string(), "OpenHiTLS".to_string()),
+            ],
+        };
+        let cert = CertificateBuilder::self_signed(
+            subject.clone(),
+            &sk,
+            1_700_000_000, // 2023-11-14
+            1_800_000_000, // 2027-01-15
+        )
+        .unwrap();
+
+        assert_eq!(cert.version, 3);
+        assert_eq!(cert.subject.get("CN"), Some("Test CA"));
+        assert_eq!(cert.issuer.get("CN"), Some("Test CA"));
+        assert!(cert.is_self_signed());
+        assert!(cert.is_ca());
+        assert!(cert.verify_signature(&cert).unwrap());
+    }
+
+    #[test]
+    fn test_build_self_signed_ecdsa() {
+        let kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let sk = SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: kp,
+        };
+        let subject = DistinguishedName {
+            entries: vec![("CN".to_string(), "ECDSA CA".to_string())],
+        };
+        let cert =
+            CertificateBuilder::self_signed(subject, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+        assert!(cert.is_self_signed());
+        assert!(cert.verify_signature(&cert).unwrap());
+    }
+
+    #[test]
+    fn test_build_cert_chain() {
+        // Generate CA
+        let ca_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let ca_sk = SigningKey::Ed25519(ca_kp);
+        let ca_dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "Root CA".to_string())],
+        };
+        let ca_cert =
+            CertificateBuilder::self_signed(ca_dn, &ca_sk, 1_700_000_000, 1_800_000_000).unwrap();
+
+        // Generate end-entity cert signed by CA
+        let ee_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let ee_sk = SigningKey::Ed25519(ee_kp);
+        let ee_spki = ee_sk.public_key_info().unwrap();
+        let ee_dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "server.example.com".to_string())],
+        };
+        let ee_cert = CertificateBuilder::new()
+            .serial_number(&[0x02])
+            .issuer(ca_cert.subject.clone())
+            .subject(ee_dn.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(ee_spki)
+            .build(&ca_sk)
+            .unwrap();
+
+        assert_eq!(ee_cert.subject.get("CN"), Some("server.example.com"));
+        assert_eq!(ee_cert.issuer.get("CN"), Some("Root CA"));
+        assert!(!ee_cert.is_self_signed());
+
+        // Verify EE cert signature against CA
+        assert!(ee_cert.verify_signature(&ca_cert).unwrap());
+        // CA self-verify still works
+        assert!(ca_cert.verify_signature(&ca_cert).unwrap());
+    }
+
+    #[test]
+    fn test_build_cert_with_basic_constraints() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "CA".to_string())],
+        };
+        let spki = sk.public_key_info().unwrap();
+        let cert = CertificateBuilder::new()
+            .serial_number(&[0x01])
+            .issuer(dn.clone())
+            .subject(dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .add_basic_constraints(true, Some(1))
+            .build(&sk)
+            .unwrap();
+
+        let bc = cert.basic_constraints().unwrap();
+        assert!(bc.is_ca);
+        assert_eq!(bc.path_len_constraint, Some(1));
+    }
+
+    #[test]
+    fn test_build_cert_with_key_usage() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "KU Test".to_string())],
+        };
+        let spki = sk.public_key_info().unwrap();
+        let cert = CertificateBuilder::new()
+            .serial_number(&[0x01])
+            .issuer(dn.clone())
+            .subject(dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .add_key_usage(KeyUsage::DIGITAL_SIGNATURE | KeyUsage::KEY_CERT_SIGN)
+            .build(&sk)
+            .unwrap();
+
+        let ku = cert.key_usage().unwrap();
+        assert!(ku.has(KeyUsage::DIGITAL_SIGNATURE));
+        assert!(ku.has(KeyUsage::KEY_CERT_SIGN));
+        assert!(!ku.has(KeyUsage::KEY_ENCIPHERMENT));
+    }
+
+    #[test]
+    fn test_cert_pem_roundtrip() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "PEM Cert".to_string())],
+        };
+        let pem = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+        let pem_str = hitls_utils::pem::encode("CERTIFICATE", &pem.raw);
+        assert!(pem_str.contains("-----BEGIN CERTIFICATE-----"));
+        let parsed = Certificate::from_pem(&pem_str).unwrap();
+        assert_eq!(parsed.subject.get("CN"), Some("PEM Cert"));
+        assert!(parsed.verify_signature(&parsed).unwrap());
+    }
+
+    #[test]
+    fn test_build_from_csr() {
+        // Build CSR
+        let ee_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let ee_sk = SigningKey::Ed25519(ee_kp);
+        let csr = CertificateRequestBuilder::new(DistinguishedName {
+            entries: vec![("CN".to_string(), "CSR Subject".to_string())],
+        })
+        .build(&ee_sk)
+        .unwrap();
+        assert!(csr.verify_signature().unwrap());
+
+        // CA signs a cert using CSR's subject and public key
+        let ca_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let ca_sk = SigningKey::Ed25519(ca_kp);
+        let ca_dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "Issuing CA".to_string())],
+        };
+        let cert = CertificateBuilder::new()
+            .serial_number(&[0x42])
+            .issuer(ca_dn)
+            .subject(csr.subject.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(csr.public_key.clone())
+            .build(&ca_sk)
+            .unwrap();
+
+        assert_eq!(cert.subject.get("CN"), Some("CSR Subject"));
+        assert_eq!(cert.issuer.get("CN"), Some("Issuing CA"));
     }
 }

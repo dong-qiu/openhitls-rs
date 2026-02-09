@@ -5,6 +5,7 @@
 pub mod aead;
 pub mod hkdf;
 pub mod key_schedule;
+pub mod prf;
 pub mod traffic_keys;
 pub mod transcript;
 

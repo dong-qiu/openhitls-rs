@@ -2247,3 +2247,89 @@ New tests (24):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 624 workspace tests passing (19 ignored)
+
+---
+
+## Phase 25: CSR Generation, X.509 Certificate Generation, TLS 1.2 PRF, CLI req (Session 2026-02-09)
+
+### Goals
+- Implement CSR (Certificate Signing Request) generation per PKCS#10 (RFC 2986)
+- Implement X.509 certificate generation with CertificateBuilder
+- Implement TLS 1.2 PRF (RFC 5246 section 5)
+- Add CLI `req` command for CSR operations
+- Create SigningKey abstraction for RSA/ECDSA/Ed25519
+
+### Completed Steps
+
+#### Step 1: ASN.1 Encoder Enhancements (8 new methods)
+
+**File**: `crates/hitls-utils/src/asn1/encoder.rs`
+- Added 8 new encoder methods to support certificate/CSR generation:
+  - Methods for constructing complex ASN.1 structures needed by PKCS#10 and X.509
+
+#### Step 2: OID Additions
+
+**File**: `crates/hitls-utils/src/oid/mod.rs`
+- Added new OIDs required for CSR generation and certificate building
+
+#### Step 3: SigningKey Abstraction
+
+**File**: `crates/hitls-pki/src/x509/mod.rs`
+- Created `SigningKey` trait abstraction supporting RSA, ECDSA, and Ed25519
+- Unified signing interface for both CSR and certificate generation
+- Each key type encapsulates algorithm OID, signature parameters, and signing logic
+
+#### Step 4: CSR Parsing + Generation with CertificateRequestBuilder
+
+**File**: `crates/hitls-pki/src/x509/mod.rs`
+- `CertificateRequestBuilder`: fluent builder API for constructing PKCS#10 CSRs
+- Supports subject DN, public key, extensions, and signature generation
+- CSR parsing from DER/PEM with signature verification
+- Outputs standard PKCS#10 DER/PEM format
+
+#### Step 5: X.509 Certificate Generation with CertificateBuilder
+
+**File**: `crates/hitls-pki/src/x509/mod.rs`
+- `CertificateBuilder`: fluent builder for X.509 v3 certificates
+- Supports serial number, validity period, subject/issuer DN, extensions
+- `self_signed()` convenience method for self-signed certificate generation
+- Full DER encoding of TBSCertificate + signature
+
+#### Step 6: TLS 1.2 PRF
+
+**File**: `crates/hitls-tls/src/crypt/prf.rs`
+- Implemented TLS 1.2 PRF per RFC 5246 section 5
+- P_hash expansion function using HMAC
+- Label + seed concatenation per specification
+- Tests with RFC 5246 test vectors
+
+#### Step 7: CLI `req` Command
+
+**File**: `crates/hitls-cli/src/req.rs`, `crates/hitls-cli/src/main.rs`
+- Added `req` subcommand to the CLI tool
+- CSR generation and display functionality
+- Integration with SigningKey abstraction and CertificateRequestBuilder
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-auth | 20 | All pass |
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 326 (19 ignored) | All pass |
+| hitls-pki | 98 (+17) | All pass |
+| hitls-tls | 123 (+8) | All pass |
+| hitls-utils | 35 (+9) | All pass |
+| integration | 13 (+3) | All pass |
+| **Total** | **661** | **All pass** |
+
+New tests (37):
+- ASN.1 encoder (9): new encoder method tests in hitls-utils
+- CSR/Certificate generation (17): CSR builder, CSR parse, certificate builder, self-signed generation, SigningKey tests in hitls-pki
+- TLS 1.2 PRF (8): PRF computation tests with RFC vectors in hitls-tls
+- Integration (3): cross-crate CSR/certificate roundtrip tests
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 661 workspace tests passing (19 ignored)

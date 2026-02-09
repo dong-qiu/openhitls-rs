@@ -357,6 +357,11 @@ pub mod known {
         Oid::new(&[2, 16, 840, 1, 101, 3, 4, 1, 22])
     }
 
+    // PKCS#9 extensionRequest (1.2.840.113549.1.9.14)
+    pub fn extension_request() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 9, 14])
+    }
+
     /// Map a well-known DN attribute OID to its short name.
     pub fn oid_to_dn_short_name(oid: &super::Oid) -> Option<&'static str> {
         let arcs = oid.arcs();
@@ -369,6 +374,21 @@ pub mod known {
             [2, 5, 4, 7] => Some("L"),
             [2, 5, 4, 5] => Some("serialNumber"),
             [1, 2, 840, 113549, 1, 9, 1] => Some("emailAddress"),
+            _ => None,
+        }
+    }
+
+    /// Map a DN short name to its well-known OID.
+    pub fn dn_short_name_to_oid(name: &str) -> Option<super::Oid> {
+        match name {
+            "CN" => Some(common_name()),
+            "C" => Some(country_name()),
+            "O" => Some(organization_name()),
+            "OU" => Some(organizational_unit_name()),
+            "ST" => Some(state_or_province_name()),
+            "L" => Some(locality_name()),
+            "serialNumber" => Some(serial_number_attr()),
+            "emailAddress" => Some(email_address()),
             _ => None,
         }
     }
@@ -452,5 +472,25 @@ mod tests {
         let der = oid.to_der_value();
         let parsed = Oid::from_der_value(&der).unwrap();
         assert_eq!(oid, parsed);
+    }
+
+    #[test]
+    fn test_dn_short_name_roundtrip() {
+        let names = [
+            "CN",
+            "C",
+            "O",
+            "OU",
+            "ST",
+            "L",
+            "serialNumber",
+            "emailAddress",
+        ];
+        for name in &names {
+            let oid = known::dn_short_name_to_oid(name).expect(name);
+            let back = known::oid_to_dn_short_name(&oid).expect(name);
+            assert_eq!(*name, back);
+        }
+        assert!(known::dn_short_name_to_oid("UNKNOWN").is_none());
     }
 }

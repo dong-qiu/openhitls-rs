@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Phase 23 Complete — CTR-DRBG + Hash-DRBG + PKCS#8 Key Parsing**
+> **Status: Phase 25 Complete — CSR Generation + X.509 Certificate Generation + TLS 1.2 PRF + CLI req**
 >
-> 600 tests passing (20 auth + 46 bignum + 326 crypto + 57 pki + 115 tls + 26 utils + 10 integration). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain), PKCS#8 (parse/encode), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), HOTP/TOTP, SPAKE2+, and CLI tool.
+> 661 tests passing (20 auth + 46 bignum + 326 crypto + 98 pki + 123 tls + 35 utils + 13 integration). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain/CSR generation/certificate generation), PKCS#8 (parse/encode), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), TLS 1.2 PRF, HOTP/TOTP, SPAKE2+, and CLI tool.
 
 ## Goals
 
@@ -20,14 +20,14 @@ A production-grade cryptographic and TLS library written in pure Rust, rewritten
 openhitls-rs/
 ├── crates/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error types, constants
-│   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (26 tests)
+│   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (35 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
 │   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECC (P-224/P-256/P-384/P-521/Brainpool), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9, DRBG (HMAC/CTR/Hash), ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal (326 tests)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth (115 tests)
-│   ├── hitls-pki/       # X.509 (parse, verify, chain build), PKCS#8 (RFC 5958), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (57 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, TLS 1.2 PRF (123 tests)
+│   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, certificate generation), PKCS#8 (RFC 5958), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (98 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382), Privacy Pass (20 tests)
-│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl)
-├── tests/interop/       # Integration tests: cross-crate roundtrip validation (10 tests)
+│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req)
+├── tests/interop/       # Integration tests: cross-crate roundtrip validation (13 tests)
 ├── tests/vectors/       # Standard test vectors (NIST CAVP, Wycheproof, GM/T)
 └── benches/             # Performance benchmarks
 ```
@@ -130,11 +130,12 @@ openhitls-rs/
 | Protocol | Crate | Status |
 |----------|-------|--------|
 | TLS 1.3 | `hitls-tls` | **Done** — Key Schedule + Record + Client & Server Handshake + HRR + KeyUpdate + PSK/0-RTT + Certificate Compression |
-| TLS 1.2 | `hitls-tls` | Planned (Phase 25) |
-| DTLS 1.2 | `hitls-tls` | Planned (Phase 26) |
-| TLCP (GM/T 0024) | `hitls-tls` | Planned (Phase 27) |
-| X.509 Certificates | `hitls-pki` | **Done** (parse + verify + chain) |
-| CRL | `hitls-pki` | Planned (Phase 24) |
+| TLS 1.2 PRF | `hitls-tls` | **Done** — PRF (RFC 5246 section 5) |
+| TLS 1.2 | `hitls-tls` | Planned (Phase 26) |
+| DTLS 1.2 | `hitls-tls` | Planned (Phase 27) |
+| TLCP (GM/T 0024) | `hitls-tls` | Planned (Phase 28) |
+| X.509 Certificates | `hitls-pki` | **Done** (parse + verify + chain + CSR generation + certificate generation) |
+| CRL | `hitls-pki` | **Done** (parse + validate + revocation checking) |
 | PKCS#8 (RFC 5958) | `hitls-pki` | **Done** (parse + encode) |
 | PKCS#12 (RFC 7292) | `hitls-pki` | **Done** (parse + create) |
 | CMS SignedData (RFC 5652) | `hitls-pki` | **Done** (parse + verify + sign) |
@@ -158,17 +159,17 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (600 tests, 19 ignored)
+# Run all tests (661 tests, 19 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 326 tests (19 ignored)
-cargo test -p hitls-tls --all-features      # 115 tests
-cargo test -p hitls-pki --all-features      # 57 tests
+cargo test -p hitls-tls --all-features      # 123 tests
+cargo test -p hitls-pki --all-features      # 98 tests
 cargo test -p hitls-bignum                  # 46 tests
-cargo test -p hitls-utils                   # 26 tests
+cargo test -p hitls-utils                   # 35 tests
 cargo test -p hitls-auth --all-features     # 20 tests
-cargo test -p hitls-integration-tests       # 10 tests
+cargo test -p hitls-integration-tests       # 13 tests
 
 # Lint
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
@@ -205,9 +206,9 @@ Convenience feature groups:
 
 ## Roadmap
 
-### Completed (Phase 0-23)
+### Completed (Phase 0-25)
 
-All cryptographic primitives, X.509, PKCS#8, PKCS#12, CMS, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), DRBG variants (HMAC, CTR, Hash), and CLI tool implemented. 600 tests passing across 9 crates.
+All cryptographic primitives, X.509 (including CSR generation and certificate generation), PKCS#8, PKCS#12, CMS, CRL/OCSP, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), TLS 1.2 PRF, auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), DRBG variants (HMAC, CTR, Hash), and CLI tool implemented. 661 tests passing across 9 crates.
 
 ### Remaining Migration Work
 
@@ -246,12 +247,24 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 
 | Feature | Standard | Status |
 |---------|----------|--------|
-| CRL Parsing | RFC 5280 §5 | Not implemented |
-| CRL Validation | RFC 5280 §6.3 | Not implemented |
-| Revocation Checking | RFC 5280 | Not implemented |
-| OCSP (basic) | RFC 6960 | Not implemented |
+| CRL Parsing | RFC 5280 §5 | **Done** |
+| CRL Validation | RFC 5280 §6.3 | **Done** |
+| Revocation Checking | RFC 5280 | **Done** |
+| OCSP (basic) | RFC 6960 | **Done** |
 
-#### Phase 25: TLS 1.2
+#### Phase 25: CSR Generation, Certificate Generation, TLS 1.2 PRF
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| CSR Parsing (PKCS#10) | RFC 2986 | **Done** |
+| CSR Generation (CertificateRequestBuilder) | RFC 2986 | **Done** |
+| X.509 Certificate Generation (CertificateBuilder) | RFC 5280 | **Done** |
+| Self-Signed Certificate Generation | RFC 5280 | **Done** |
+| SigningKey Abstraction (RSA/ECDSA/Ed25519) | — | **Done** |
+| TLS 1.2 PRF | RFC 5246 §5 | **Done** |
+| CLI `req` Command | — | **Done** |
+
+#### Phase 26: TLS 1.2
 
 | Feature | Standard | Status |
 |---------|----------|--------|
@@ -261,7 +274,7 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | Renegotiation | RFC 5746 | Not implemented |
 | TLS 1.2 Record Protocol | RFC 5246 §6 | Not implemented |
 
-#### Phase 26: DTLS
+#### Phase 27: DTLS
 
 | Feature | Standard | Status |
 |---------|----------|--------|
@@ -270,7 +283,7 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | Retransmission Timers | RFC 6347 §4.2.4 | Not implemented |
 | Cookie Exchange | RFC 6347 §4.2.1 | Not implemented |
 
-#### Phase 27: TLCP (GM/T 0024)
+#### Phase 28: TLCP (GM/T 0024)
 
 | Feature | Standard | Status |
 |---------|----------|--------|
@@ -278,7 +291,7 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | SM2/SM3/SM4 Cipher Suites | GM/T 0024 | Not implemented |
 | Double Certificate | GM/T 0024 | Not implemented |
 
-#### Phase 28: Hardware Acceleration & Production Hardening
+#### Phase 29: Hardware Acceleration & Production Hardening
 
 | Feature | Description | Status |
 |---------|-------------|--------|

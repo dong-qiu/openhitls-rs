@@ -262,4 +262,146 @@ mod tests {
         let ss4 = kp.decapsulate(&ct2).unwrap();
         assert_eq!(ss3, ss4);
     }
+
+    // -------------------------------------------------------
+    // 11. Ed25519 CA → CSR → signed cert → chain verification
+    // -------------------------------------------------------
+    #[test]
+    fn test_ed25519_ca_chain_generation() {
+        use hitls_pki::x509::{
+            CertificateBuilder, CertificateRequestBuilder, DistinguishedName, SigningKey,
+        };
+
+        // Generate CA key + self-signed cert
+        let ca_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let ca_sk = SigningKey::Ed25519(ca_kp);
+        let ca_dn = DistinguishedName {
+            entries: vec![
+                ("CN".to_string(), "Integration Test CA".to_string()),
+                ("O".to_string(), "OpenHiTLS".to_string()),
+            ],
+        };
+        let ca_cert =
+            CertificateBuilder::self_signed(ca_dn, &ca_sk, 1_700_000_000, 1_800_000_000).unwrap();
+        assert!(ca_cert.is_self_signed());
+        assert!(ca_cert.is_ca());
+        assert!(ca_cert.verify_signature(&ca_cert).unwrap());
+
+        // Generate EE key + CSR
+        let ee_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let ee_sk = SigningKey::Ed25519(ee_kp);
+        let ee_dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "server.example.com".to_string())],
+        };
+        let csr = CertificateRequestBuilder::new(ee_dn).build(&ee_sk).unwrap();
+        assert!(csr.verify_signature().unwrap());
+
+        // CA signs cert using CSR info
+        let ee_cert = CertificateBuilder::new()
+            .serial_number(&[0x02])
+            .issuer(ca_cert.subject.clone())
+            .subject(csr.subject.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(csr.public_key.clone())
+            .build(&ca_sk)
+            .unwrap();
+        assert!(ee_cert.verify_signature(&ca_cert).unwrap());
+
+        // Chain verification
+        let mut verifier = hitls_pki::x509::verify::CertificateVerifier::new();
+        verifier.add_trusted_cert(ca_cert);
+        let chain = verifier.verify_cert(&ee_cert, &[]).unwrap();
+        assert!(!chain.is_empty());
+    }
+
+    // -------------------------------------------------------
+    // 12. ECDSA P-256 CA → cert → chain verification
+    // -------------------------------------------------------
+    #[test]
+    fn test_ecdsa_ca_chain_generation() {
+        use hitls_pki::x509::{CertificateBuilder, DistinguishedName, SigningKey};
+
+        let ca_kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let ca_sk = SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: ca_kp,
+        };
+        let ca_dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "ECDSA CA".to_string())],
+        };
+        let ca_cert =
+            CertificateBuilder::self_signed(ca_dn, &ca_sk, 1_700_000_000, 1_800_000_000).unwrap();
+        assert!(ca_cert.is_self_signed());
+        assert!(ca_cert.verify_signature(&ca_cert).unwrap());
+
+        // Generate EE cert
+        let ee_kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let ee_sk = SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: ee_kp,
+        };
+        let ee_spki = ee_sk.public_key_info().unwrap();
+        let ee_cert = CertificateBuilder::new()
+            .serial_number(&[0x03])
+            .issuer(ca_cert.subject.clone())
+            .subject(DistinguishedName {
+                entries: vec![("CN".to_string(), "ecdsa.example.com".to_string())],
+            })
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(ee_spki)
+            .build(&ca_sk)
+            .unwrap();
+        assert!(ee_cert.verify_signature(&ca_cert).unwrap());
+    }
+
+    // -------------------------------------------------------
+    // 13. CSR → cert pipeline with PEM roundtrip
+    // -------------------------------------------------------
+    #[test]
+    fn test_csr_to_cert_pem_pipeline() {
+        use hitls_pki::x509::{
+            Certificate, CertificateBuilder, CertificateRequest, CertificateRequestBuilder,
+            DistinguishedName, SigningKey,
+        };
+
+        // Generate CA
+        let ca_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let ca_sk = SigningKey::Ed25519(ca_kp);
+        let ca_dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "Pipeline CA".to_string())],
+        };
+        let ca_cert =
+            CertificateBuilder::self_signed(ca_dn, &ca_sk, 1_700_000_000, 1_800_000_000).unwrap();
+
+        // Generate CSR as PEM
+        let ee_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let ee_sk = SigningKey::Ed25519(ee_kp);
+        let csr_pem = CertificateRequestBuilder::new(DistinguishedName {
+            entries: vec![("CN".to_string(), "pipeline.example.com".to_string())],
+        })
+        .build_pem(&ee_sk)
+        .unwrap();
+
+        // Parse CSR from PEM
+        let csr = CertificateRequest::from_pem(&csr_pem).unwrap();
+        assert!(csr.verify_signature().unwrap());
+
+        // Sign cert
+        let ee_cert = CertificateBuilder::new()
+            .serial_number(&[0x99])
+            .issuer(ca_cert.subject.clone())
+            .subject(csr.subject.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(csr.public_key.clone())
+            .build(&ca_sk)
+            .unwrap();
+
+        // PEM roundtrip
+        let cert_pem = hitls_utils::pem::encode("CERTIFICATE", &ee_cert.raw);
+        let parsed = Certificate::from_pem(&cert_pem).unwrap();
+        assert_eq!(parsed.subject.get("CN"), Some("pipeline.example.com"));
+        assert!(parsed.verify_signature(&ca_cert).unwrap());
+    }
 }

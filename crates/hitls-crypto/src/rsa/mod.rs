@@ -136,6 +136,16 @@ impl RsaPublicKey {
         self.k
     }
 
+    /// Return the modulus as big-endian bytes.
+    pub fn n_bytes(&self) -> Vec<u8> {
+        self.n.to_bytes_be()
+    }
+
+    /// Return the public exponent as big-endian bytes.
+    pub fn e_bytes(&self) -> Vec<u8> {
+        self.e.to_bytes_be()
+    }
+
     /// Raw RSA public key operation: c = m^e mod n (RSAEP).
     fn raw_encrypt(&self, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let m = BigNum::from_bytes_be(data);
