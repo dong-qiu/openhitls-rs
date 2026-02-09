@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Phase 26 Complete — TLS 1.2 Handshake (ECDHE-GCM)**
+> **Status: Phase 27 Complete — DTLS 1.2 (RFC 6347)**
 >
-> 701 tests passing (20 auth + 46 bignum + 326 crypto + 98 pki + 162 tls + 35 utils + 14 integration). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain/CSR generation/certificate generation), PKCS#8 (parse/encode), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), TLS 1.2 handshake (ECDHE-GCM), TLS 1.2 PRF, HOTP/TOTP, SPAKE2+, and CLI tool.
+> 749 tests passing (20 auth + 46 bignum + 326 crypto + 98 pki + 210 tls + 35 utils + 14 integration). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain/CSR generation/certificate generation), PKCS#8 (parse/encode), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), TLS 1.2 handshake (ECDHE-GCM), DTLS 1.2 (record layer + handshake + fragmentation + retransmission + cookie exchange + anti-replay), TLS 1.2 PRF, HOTP/TOTP, SPAKE2+, and CLI tool.
 
 ## Goals
 
@@ -23,7 +23,7 @@ openhitls-rs/
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (35 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
 │   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECC (P-224/P-256/P-384/P-521/Brainpool), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9, DRBG (HMAC/CTR/Hash), ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal (326 tests)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, TLS 1.2 handshake (ECDHE-GCM), TLS 1.2 PRF (162 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, TLS 1.2 handshake (ECDHE-GCM), DTLS 1.2 (RFC 6347), TLS 1.2 PRF (210 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, certificate generation), PKCS#8 (RFC 5958), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (98 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req)
@@ -132,7 +132,7 @@ openhitls-rs/
 | TLS 1.3 | `hitls-tls` | **Done** — Key Schedule + Record + Client & Server Handshake + HRR + KeyUpdate + PSK/0-RTT + Certificate Compression |
 | TLS 1.2 PRF | `hitls-tls` | **Done** — PRF (RFC 5246 section 5) |
 | TLS 1.2 | `hitls-tls` | **Done** — ECDHE-GCM (4 cipher suites, client & server handshake) |
-| DTLS 1.2 | `hitls-tls` | Planned (Phase 27) |
+| DTLS 1.2 | `hitls-tls` | **Done** — Record layer + Handshake + Fragmentation/Reassembly + Cookie Exchange + Anti-Replay + Retransmission |
 | TLCP (GM/T 0024) | `hitls-tls` | Planned (Phase 28) |
 | X.509 Certificates | `hitls-pki` | **Done** (parse + verify + chain + CSR generation + certificate generation) |
 | CRL | `hitls-pki` | **Done** (parse + validate + revocation checking) |
@@ -159,12 +159,12 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (701 tests, 19 ignored)
+# Run all tests (749 tests, 19 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 326 tests (19 ignored)
-cargo test -p hitls-tls --all-features      # 162 tests
+cargo test -p hitls-tls --all-features      # 210 tests
 cargo test -p hitls-pki --all-features      # 98 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 35 tests
@@ -206,9 +206,9 @@ Convenience feature groups:
 
 ## Roadmap
 
-### Completed (Phase 0-26)
+### Completed (Phase 0-27)
 
-All cryptographic primitives, X.509 (including CSR generation and certificate generation), PKCS#8, PKCS#12, CMS, CRL/OCSP, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), TLS 1.2 handshake (ECDHE-GCM), TLS 1.2 PRF, auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), DRBG variants (HMAC, CTR, Hash), and CLI tool implemented. 701 tests passing across 9 crates.
+All cryptographic primitives, X.509 (including CSR generation and certificate generation), PKCS#8, PKCS#12, CMS, CRL/OCSP, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), TLS 1.2 handshake (ECDHE-GCM), DTLS 1.2 (RFC 6347: record layer, handshake, fragmentation/reassembly, cookie exchange, anti-replay, retransmission), TLS 1.2 PRF, auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), DRBG variants (HMAC, CTR, Hash), and CLI tool implemented. 749 tests passing across 9 crates.
 
 ### Remaining Migration Work
 
@@ -274,14 +274,20 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | Renegotiation | RFC 5746 | Not implemented |
 | TLS 1.2 Record Protocol | RFC 5246 §6 | **Done** (GCM with explicit nonce) |
 
-#### Phase 27: DTLS
+#### Phase 27: DTLS 1.2
 
 | Feature | Standard | Status |
 |---------|----------|--------|
-| DTLS 1.2 Record Layer | RFC 6347 | Not implemented |
-| Message Fragmentation/Reassembly | RFC 6347 §4.2.3 | Not implemented |
-| Retransmission Timers | RFC 6347 §4.2.4 | Not implemented |
-| Cookie Exchange | RFC 6347 §4.2.1 | Not implemented |
+| DTLS 1.2 Record Layer (13-byte header, epoch, 48-bit seq) | RFC 6347 | **Done** |
+| Epoch-Aware AEAD Encryption/Decryption | RFC 6347 §4.1 | **Done** |
+| DTLS Handshake Header (12-byte, message_seq, fragmentation) | RFC 6347 §4.2.2 | **Done** |
+| HelloVerifyRequest Cookie Exchange | RFC 6347 §4.2.1 | **Done** |
+| Message Fragmentation/Reassembly (MTU-aware) | RFC 6347 §4.2.3 | **Done** |
+| Anti-Replay Sliding Window (64-bit bitmap) | RFC 6347 §4.1.2.6 | **Done** |
+| Retransmission Timers (exponential backoff) | RFC 6347 §4.2.4 | **Done** |
+| DTLS Client Handshake State Machine | RFC 6347 | **Done** |
+| DTLS Server Handshake State Machine | RFC 6347 | **Done** |
+| DTLS Connection Types + In-Memory Transport | RFC 6347 | **Done** |
 
 #### Phase 28: TLCP (GM/T 0024)
 
@@ -309,9 +315,9 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | Component | C (lines) | Rust (lines) | Feature Coverage |
 |-----------|-----------|--------------|------------------|
 | Crypto Algorithms | ~132K | ~24K | ~90% |
-| TLS Protocol | ~52K | ~5K | ~45% (TLS 1.3 + TLS 1.2 ECDHE-GCM) |
+| TLS Protocol | ~52K | ~7K | ~50% (TLS 1.3 + TLS 1.2 + DTLS 1.2) |
 | PKI / X.509 | ~17K | ~3.3K | ~60% |
-| Total | ~460K | ~29K | ~72% (TLS 1.3 deployments) |
+| Total | ~460K | ~31K | ~74% (TLS 1.3 deployments) |
 
 ## Minimum Supported Rust Version
 

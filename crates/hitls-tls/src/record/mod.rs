@@ -1,7 +1,13 @@
 //! TLS record layer: parsing, serialization, fragmentation, and encryption.
 
+#[cfg(feature = "dtls12")]
+pub mod anti_replay;
+#[cfg(feature = "dtls12")]
+pub mod dtls;
 pub mod encryption;
 pub mod encryption12;
+#[cfg(feature = "dtls12")]
+pub mod encryption_dtls12;
 
 use crate::crypt::traffic_keys::TrafficKeys;
 use crate::CipherSuite;

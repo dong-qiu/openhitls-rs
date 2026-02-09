@@ -140,6 +140,7 @@ pub fn parse_handshake_header(data: &[u8]) -> Result<(HandshakeType, &[u8], usiz
     let msg_type = match data[0] {
         1 => HandshakeType::ClientHello,
         2 => HandshakeType::ServerHello,
+        3 => HandshakeType::HelloVerifyRequest,
         4 => HandshakeType::NewSessionTicket,
         5 => HandshakeType::EndOfEarlyData,
         8 => HandshakeType::EncryptedExtensions,

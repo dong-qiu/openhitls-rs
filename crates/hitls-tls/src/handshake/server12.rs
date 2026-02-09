@@ -356,7 +356,10 @@ impl Tls12ServerHandshake {
 // ---------------------------------------------------------------------------
 
 /// Negotiate a TLS 1.2 cipher suite between client and server.
-fn negotiate_cipher_suite(ch: &ClientHello, config: &TlsConfig) -> Result<CipherSuite, TlsError> {
+pub(crate) fn negotiate_cipher_suite(
+    ch: &ClientHello,
+    config: &TlsConfig,
+) -> Result<CipherSuite, TlsError> {
     // Server preference order
     for server_suite in &config.cipher_suites {
         if !is_tls12_suite(*server_suite) {
@@ -370,7 +373,7 @@ fn negotiate_cipher_suite(ch: &ClientHello, config: &TlsConfig) -> Result<Cipher
 }
 
 /// Negotiate a named group for ECDHE.
-fn negotiate_group(
+pub(crate) fn negotiate_group(
     client_groups: &[NamedGroup],
     server_groups: &[NamedGroup],
 ) -> Result<NamedGroup, TlsError> {
@@ -385,7 +388,7 @@ fn negotiate_group(
 /// Select a signature scheme for TLS 1.2 ServerKeyExchange.
 ///
 /// Unlike TLS 1.3 which only uses PSS, TLS 1.2 also supports PKCS#1v1.5.
-fn select_signature_scheme_tls12(
+pub(crate) fn select_signature_scheme_tls12(
     key: &ServerPrivateKey,
     client_schemes: &[SignatureScheme],
 ) -> Result<SignatureScheme, TlsError> {
@@ -423,7 +426,7 @@ fn select_signature_scheme_tls12(
 ///
 /// The signed data is `client_random || server_random || server_key_exchange_params`.
 /// Unlike TLS 1.3, there is no "64 spaces" prefix — the data is hashed directly.
-fn sign_ske_data(
+pub(crate) fn sign_ske_data(
     key: &ServerPrivateKey,
     scheme: SignatureScheme,
     signed_data: &[u8],

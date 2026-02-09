@@ -2,12 +2,22 @@
 
 pub mod client;
 pub mod client12;
+#[cfg(feature = "dtls12")]
+pub mod client_dtls12;
 pub mod codec;
 pub mod codec12;
+#[cfg(feature = "dtls12")]
+pub mod codec_dtls;
 pub mod extensions_codec;
+#[cfg(feature = "dtls12")]
+pub mod fragment;
 pub mod key_exchange;
+#[cfg(feature = "dtls12")]
+pub mod retransmit;
 pub mod server;
 pub mod server12;
+#[cfg(feature = "dtls12")]
+pub mod server_dtls12;
 pub mod signing;
 pub mod verify;
 
@@ -17,6 +27,7 @@ pub mod verify;
 pub enum HandshakeType {
     ClientHello = 1,
     ServerHello = 2,
+    HelloVerifyRequest = 3,
     NewSessionTicket = 4,
     EndOfEarlyData = 5,
     EncryptedExtensions = 8,

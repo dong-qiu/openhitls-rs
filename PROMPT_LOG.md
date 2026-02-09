@@ -1129,3 +1129,21 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Prompt**: Implement TLS 1.2 ECDHE-GCM handshake (client + server) with record encryption, building on existing TLS 1.2 PRF and TLS 1.3 infrastructure.
 
 **Result**: 40 new tests (162 - 123 = 39 tls tests + 1 integration). Full TLS 1.2 handshake support for 4 ECDHE-GCM cipher suites with client/server state machines, GCM record encryption with explicit nonce, and connection types implementing TlsConnection trait. 701 total tests (19 ignored).
+
+## Phase 27: DTLS 1.2 (RFC 6347)
+
+**Prompt**: Implement DTLS 1.2 (RFC 6347) — the datagram variant of TLS 1.2 over UDP. Reuse TLS 1.2 cryptography with DTLS-specific record format, handshake fragmentation/reassembly, retransmission, cookie exchange, and anti-replay protection.
+
+**Result**: 48 new tests (210 - 162 = 48 tls tests). Complete DTLS 1.2 implementation with:
+- DTLS record layer (13-byte header, epoch management, 48-bit sequence numbers)
+- Epoch-aware AEAD encryption/decryption (nonce = fixed_iv || epoch || seq)
+- DTLS handshake header (12-byte) with TLS↔DTLS header conversion for transcript hashing
+- HelloVerifyRequest cookie exchange (HMAC-SHA256 based, configurable)
+- MTU-aware handshake message fragmentation and reassembly
+- Anti-replay sliding window (64-bit bitmap, RFC 6347 §4.1.2.6)
+- Retransmission timer with exponential backoff (1s → 60s max)
+- Client and server handshake state machines
+- Connection types with in-memory datagram transport for testing
+- 9 new files, 6 modified files, all feature-gated with `#[cfg(feature = "dtls12")]`
+
+749 total tests (19 ignored). Clippy clean, fmt clean.

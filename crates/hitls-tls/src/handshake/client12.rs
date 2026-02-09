@@ -395,7 +395,7 @@ impl Tls12ClientHandshake {
 }
 
 /// Verify the signature on ServerKeyExchange parameters.
-fn verify_ske_signature(
+pub(crate) fn verify_ske_signature(
     cert_der: &[u8],
     scheme: SignatureScheme,
     signed_data: &[u8],

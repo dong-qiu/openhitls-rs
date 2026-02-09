@@ -2385,3 +2385,136 @@ New tests (37):
 - Key exchange: SECP256R1, SECP384R1, X25519
 - Record encryption: GCM with explicit nonce
 - **701 tests total** (46 bignum + 326 crypto + 162 tls + 98 pki + 35 utils + 20 auth + 14 integration), 19 ignored
+
+## Phase 27: DTLS 1.2 (RFC 6347)
+
+### Goals
+- Implement DTLS 1.2 — the datagram variant of TLS 1.2 over UDP
+- Reuse TLS 1.2 cryptography (key derivation, AEAD, cipher suites) with DTLS-specific record format
+- Same 4 ECDHE-GCM cipher suites as TLS 1.2
+- Feature-gated with `#[cfg(feature = "dtls12")]`
+
+### Key Differences from TLS 1.2
+- Record header: 13 bytes (+ epoch + 48-bit explicit seq) vs 5 bytes
+- Version wire value: 0xFEFD vs 0x0303
+- Handshake header: 12 bytes (+ message_seq, fragment_offset, fragment_length) vs 4 bytes
+- MTU-aware handshake message fragmentation/reassembly
+- Flight-based retransmission with exponential backoff
+- HelloVerifyRequest cookie exchange for DoS protection
+- Anti-replay sliding window (64-bit bitmap)
+- Transcript hash: convert DTLS 12-byte HS header → TLS 4-byte header before hashing (RFC 6347 §4.2.6)
+
+### Step 1: DTLS Record Layer (13-byte Header + Epoch Management)
+**File**: `crates/hitls-tls/src/record/dtls.rs` (NEW)
+- `DtlsRecord`: content_type, version (0xFEFD), epoch (u16), sequence_number (48-bit), fragment
+- `parse_dtls_record()` / `serialize_dtls_record()`: 13-byte header encode/decode
+- `EpochState`: epoch management with sequence number reset on epoch change, overflow check at 2^48-1
+- 7 tests
+
+### Step 2: DTLS Record Encryption (Epoch-Aware AEAD)
+**File**: `crates/hitls-tls/src/record/encryption_dtls12.rs` (NEW)
+- `DtlsRecordEncryptor12` / `DtlsRecordDecryptor12`: epoch-aware AEAD encryption/decryption
+- Nonce: `fixed_iv(4) || epoch(2) || seq(6)` (differs from TLS 1.2 which uses 8-byte seq as explicit nonce)
+- AAD: 13 bytes `epoch(2) || seq(6) || type(1) || version(2) || plaintext_len(2)` (epoch+seq instead of 64-bit seq)
+- 6 tests
+
+### Step 3: DTLS Handshake Header + HelloVerifyRequest Codec
+**File**: `crates/hitls-tls/src/handshake/codec_dtls.rs` (NEW)
+- `DtlsHandshakeHeader`: 12-byte header with msg_type, length, message_seq, fragment_offset, fragment_length
+- `tls_to_dtls_handshake()` / `dtls_to_tls_handshake()`: header format conversion for transcript hashing
+- `HelloVerifyRequest`: encode/decode with cookie field
+- `encode_dtls_client_hello()` / `decode_dtls_client_hello()`: ClientHello with cookie field between session_id and cipher_suites
+- 8 tests
+
+### Step 4: Handshake Fragmentation and Reassembly
+**File**: `crates/hitls-tls/src/handshake/fragment.rs` (NEW)
+- `fragment_handshake()`: Split handshake message into MTU-sized DTLS fragments (default MTU: 1200)
+- `ReassemblyBuffer`: Per-byte bitmap tracking for a single handshake message
+- `ReassemblyManager`: Multi-message reassembly with HashMap<u16, ReassemblyBuffer>
+- Supports out-of-order and duplicate fragments
+- 7 tests
+
+### Step 5: Anti-Replay Window + Retransmission Timer
+**Files**: `record/anti_replay.rs` (NEW), `handshake/retransmit.rs` (NEW)
+- `AntiReplayWindow`: 64-bit sliding window bitmap (RFC 6347 §4.1.2.6), check/accept/reset operations
+- `RetransmitTimer`: Exponential backoff 1s → 2s → 4s → ... → 60s max
+- `Flight`: Stored serialized DTLS records for retransmission
+- 7 tests
+
+### Step 6: DTLS Client + Server Handshake State Machines
+**Files**: `handshake/client_dtls12.rs` (NEW), `handshake/server_dtls12.rs` (NEW)
+
+#### Client (`Dtls12ClientHandshake`)
+- States: Idle → WaitHelloVerifyRequest → WaitServerHello → WaitCertificate → WaitServerKeyExchange → WaitServerHelloDone → WaitChangeCipherSpec → WaitFinished → Connected
+- Reuses TLS 1.2 helpers: `verify_ske_signature` (made `pub(crate)`)
+- All messages wrapped with 12-byte DTLS header, transcript fed with TLS-format headers
+- `build_client_hello()` uses DTLS-specific ClientHello with cookie field
+- 3 tests
+
+#### Server (`Dtls12ServerHandshake`)
+- States: Idle → WaitClientHelloWithCookie → WaitClientKeyExchange → WaitChangeCipherSpec → WaitFinished → Connected
+- Cookie generation: HMAC-SHA256(cookie_secret, client_random || cipher_suites_hash), truncated to 16 bytes
+- Reuses TLS 1.2 helpers: `negotiate_cipher_suite`, `negotiate_group`, `select_signature_scheme_tls12`, `sign_ske_data` (all made `pub(crate)`)
+- 3 tests
+
+### Step 7: DTLS Connection Types + Integration Tests
+**File**: `crates/hitls-tls/src/connection_dtls12.rs` (NEW)
+- `Dtls12ClientConnection` / `Dtls12ServerConnection`: Full connection types with epoch management, AEAD encryption/decryption, anti-replay
+- `dtls12_handshake_in_memory()`: Complete handshake driver for testing, supports cookie and no-cookie modes
+- Helper functions: `wrap_handshake_record`, `wrap_ccs_record`, `wrap_encrypted_handshake_record`
+- 7 tests: client/server creation, full handshake (no cookie), full handshake (with cookie), app data exchange, anti-replay rejection, multiple messages
+
+### Critical Bugs Found & Fixed
+
+1. **Extension parsing bug**: `decode_dtls_client_hello` called `parse_extensions_from` (expects 2-byte length prefix) after already stripping the prefix. Extensions were silently dropped → "no common ECDHE group" error. Fixed by using `parse_extensions_list` (no prefix version).
+
+2. **Double AEAD suite conversion**: `dtls12_handshake_in_memory` called `tls12_suite_to_aead_suite()` before passing to `DtlsRecordEncryptor12::new()`, but `new()` internally also calls `tls12_suite_to_aead_suite`. The second call tried to convert an already-converted TLS 1.3 suite → `NoSharedCipherSuite`. Fixed by passing the original TLS 1.2 suite directly.
+
+3. **HMAC factory lifetime**: `Box<dyn Fn() -> Box<dyn Digest>>` didn't satisfy `'static` requirement for `Hmac::new`. Fixed by passing inline closure directly.
+
+### Files Created/Modified
+
+| File | Operation | Description |
+|------|-----------|-------------|
+| `record/dtls.rs` | New | DTLS record layer (13-byte header, epoch management) |
+| `record/encryption_dtls12.rs` | New | Epoch-aware AEAD encryption/decryption |
+| `record/anti_replay.rs` | New | Anti-replay sliding window (64-bit bitmap) |
+| `record/mod.rs` | Modified | Added DTLS module declarations |
+| `handshake/codec_dtls.rs` | New | DTLS handshake header, HelloVerifyRequest, DTLS ClientHello |
+| `handshake/fragment.rs` | New | MTU-aware fragmentation and reassembly |
+| `handshake/retransmit.rs` | New | Exponential backoff retransmission timer |
+| `handshake/client_dtls12.rs` | New | DTLS 1.2 client handshake state machine |
+| `handshake/server_dtls12.rs` | New | DTLS 1.2 server handshake state machine |
+| `handshake/mod.rs` | Modified | Added DTLS module declarations |
+| `handshake/client12.rs` | Modified | Made `verify_ske_signature` pub(crate) |
+| `handshake/server12.rs` | Modified | Made 4 helper functions pub(crate) |
+| `handshake/codec.rs` | Modified | Added HelloVerifyRequest to parse_handshake_header |
+| `connection_dtls12.rs` | New | DTLS connection types + in-memory transport |
+| `lib.rs` | Modified | Added connection_dtls12 module |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-auth | 20 | All pass |
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 326 (19 ignored) | All pass |
+| hitls-pki | 98 | All pass |
+| hitls-tls | 210 (+48) | All pass |
+| hitls-utils | 35 | All pass |
+| integration | 14 | All pass |
+| **Total** | **749** | **All pass** |
+
+New tests (48):
+- DTLS record layer (7): parse/serialize/roundtrip/epoch management
+- DTLS record encryption (6): encrypt/decrypt roundtrip, AAD/nonce construction, tamper detection
+- DTLS handshake codec (8): header parse/wrap, TLS↔DTLS conversion, HelloVerifyRequest, DTLS ClientHello
+- Fragmentation/reassembly (7): fragment split, reassembly in-order/out-of-order/duplicate
+- Anti-replay + retransmit (7): sliding window, exponential backoff
+- Client/server handshake (6): state transitions, cookie flow, message_seq tracking
+- Connection integration (7): full handshake (cookie/no-cookie), app data, anti-replay
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 749 workspace tests passing (19 ignored)
