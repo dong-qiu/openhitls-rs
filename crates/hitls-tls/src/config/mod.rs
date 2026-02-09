@@ -87,6 +87,10 @@ pub struct TlsConfig {
     pub client_private_key: Option<ServerPrivateKey>,
     /// Whether to offer post-handshake authentication (client-side).
     pub post_handshake_auth: bool,
+    /// Server: request client certificate during TLS 1.2 handshake (mTLS).
+    pub verify_client_cert: bool,
+    /// Server: reject handshake if client provides no certificate (requires verify_client_cert).
+    pub require_client_cert: bool,
     /// Certificate compression algorithms to offer/accept (RFC 8879).
     /// Empty means disabled.
     pub cert_compression_algos: Vec<CertCompressionAlgorithm>,
@@ -128,6 +132,8 @@ pub struct TlsConfigBuilder {
     client_certificate_chain: Vec<Vec<u8>>,
     client_private_key: Option<ServerPrivateKey>,
     post_handshake_auth: bool,
+    verify_client_cert: bool,
+    require_client_cert: bool,
     cert_compression_algos: Vec<CertCompressionAlgorithm>,
     #[cfg(feature = "tlcp")]
     tlcp_enc_certificate_chain: Vec<Vec<u8>>,
@@ -165,6 +171,8 @@ impl Default for TlsConfigBuilder {
             client_certificate_chain: Vec::new(),
             client_private_key: None,
             post_handshake_auth: false,
+            verify_client_cert: false,
+            require_client_cert: false,
             cert_compression_algos: Vec::new(),
             #[cfg(feature = "tlcp")]
             tlcp_enc_certificate_chain: Vec::new(),
@@ -270,6 +278,16 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn verify_client_cert(mut self, enabled: bool) -> Self {
+        self.verify_client_cert = enabled;
+        self
+    }
+
+    pub fn require_client_cert(mut self, required: bool) -> Self {
+        self.require_client_cert = required;
+        self
+    }
+
     pub fn cert_compression(mut self, algos: Vec<CertCompressionAlgorithm>) -> Self {
         self.cert_compression_algos = algos;
         self
@@ -308,6 +326,8 @@ impl TlsConfigBuilder {
             client_certificate_chain: self.client_certificate_chain,
             client_private_key: self.client_private_key,
             post_handshake_auth: self.post_handshake_auth,
+            verify_client_cert: self.verify_client_cert,
+            require_client_cert: self.require_client_cert,
             cert_compression_algos: self.cert_compression_algos,
             #[cfg(feature = "tlcp")]
             tlcp_enc_certificate_chain: self.tlcp_enc_certificate_chain,
@@ -371,5 +391,23 @@ mod tests {
         assert!(!config.verify_peer);
         assert_eq!(config.trusted_certs.len(), 1);
         assert_eq!(config.server_name.as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn test_config_builder_mtls_defaults() {
+        let config = TlsConfig::builder().build();
+        assert!(!config.verify_client_cert);
+        assert!(!config.require_client_cert);
+    }
+
+    #[test]
+    fn test_config_builder_with_mtls() {
+        let config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .verify_client_cert(true)
+            .require_client_cert(true)
+            .build();
+        assert!(config.verify_client_cert);
+        assert!(config.require_client_cert);
     }
 }

@@ -1,7 +1,8 @@
 //! TLS 1.2 handshake message encoding/decoding.
 //!
 //! Handles ServerKeyExchange, ClientKeyExchange, ServerHelloDone,
-//! Certificate (TLS 1.2 format), and Finished (12-byte verify_data).
+//! Certificate (TLS 1.2 format), Finished (12-byte verify_data),
+//! CertificateRequest (mTLS), and CertificateVerify.
 
 use crate::crypt::SignatureScheme;
 use crate::handshake::codec::{read_u24, wrap_handshake};
@@ -252,6 +253,177 @@ pub fn encode_change_cipher_spec() -> Vec<u8> {
     vec![0x01]
 }
 
+// ---------------------------------------------------------------------------
+// CertificateRequest (TLS 1.2, RFC 5246 §7.4.4)
+// ---------------------------------------------------------------------------
+
+/// TLS 1.2 CertificateRequest message.
+///
+/// ```text
+/// cert_types_len(1) || cert_types(variable) ||
+/// sig_hash_algs_len(2) || sig_hash_algs(variable) ||
+/// ca_list_len(2) || ca_entries(variable)
+/// ```
+#[derive(Debug, Clone)]
+pub struct CertificateRequest12 {
+    /// Supported certificate types: rsa_sign(1), ecdsa_sign(64).
+    pub cert_types: Vec<u8>,
+    /// Supported signature algorithms.
+    pub sig_hash_algs: Vec<SignatureScheme>,
+    /// Distinguished names of acceptable CAs (DER-encoded, can be empty).
+    pub ca_names: Vec<Vec<u8>>,
+}
+
+/// Encode a TLS 1.2 CertificateRequest message (wrapped with handshake header).
+pub fn encode_certificate_request12(cr: &CertificateRequest12) -> Vec<u8> {
+    let mut body = Vec::new();
+
+    // cert_types_len(1) || cert_types
+    body.push(cr.cert_types.len() as u8);
+    body.extend_from_slice(&cr.cert_types);
+
+    // sig_hash_algs_len(2) || sig_hash_algs (each 2 bytes)
+    let algs_len = (cr.sig_hash_algs.len() * 2) as u16;
+    body.extend_from_slice(&algs_len.to_be_bytes());
+    for alg in &cr.sig_hash_algs {
+        body.extend_from_slice(&alg.0.to_be_bytes());
+    }
+
+    // ca_list_len(2) || (dn_len(2) || dn)*
+    let ca_total: usize = cr.ca_names.iter().map(|dn| 2 + dn.len()).sum();
+    body.extend_from_slice(&(ca_total as u16).to_be_bytes());
+    for dn in &cr.ca_names {
+        body.extend_from_slice(&(dn.len() as u16).to_be_bytes());
+        body.extend_from_slice(dn);
+    }
+
+    wrap_handshake(HandshakeType::CertificateRequest, &body)
+}
+
+/// Decode a TLS 1.2 CertificateRequest message body.
+pub fn decode_certificate_request12(body: &[u8]) -> Result<CertificateRequest12, TlsError> {
+    if body.is_empty() {
+        return Err(TlsError::HandshakeFailed(
+            "CertificateRequest12 empty".into(),
+        ));
+    }
+
+    let mut offset = 0;
+
+    // cert_types
+    let cert_types_len = body[offset] as usize;
+    offset += 1;
+    if body.len() < offset + cert_types_len {
+        return Err(TlsError::HandshakeFailed(
+            "CertificateRequest12 cert_types truncated".into(),
+        ));
+    }
+    let cert_types = body[offset..offset + cert_types_len].to_vec();
+    offset += cert_types_len;
+
+    // sig_hash_algs
+    if body.len() < offset + 2 {
+        return Err(TlsError::HandshakeFailed(
+            "CertificateRequest12 sig_algs_len truncated".into(),
+        ));
+    }
+    let algs_len = u16::from_be_bytes([body[offset], body[offset + 1]]) as usize;
+    offset += 2;
+    if algs_len % 2 != 0 || body.len() < offset + algs_len {
+        return Err(TlsError::HandshakeFailed(
+            "CertificateRequest12 sig_algs truncated".into(),
+        ));
+    }
+    let mut sig_hash_algs = Vec::with_capacity(algs_len / 2);
+    for i in (0..algs_len).step_by(2) {
+        let alg = u16::from_be_bytes([body[offset + i], body[offset + i + 1]]);
+        sig_hash_algs.push(SignatureScheme(alg));
+    }
+    offset += algs_len;
+
+    // ca_names
+    if body.len() < offset + 2 {
+        return Err(TlsError::HandshakeFailed(
+            "CertificateRequest12 ca_list_len truncated".into(),
+        ));
+    }
+    let ca_total = u16::from_be_bytes([body[offset], body[offset + 1]]) as usize;
+    offset += 2;
+    if body.len() < offset + ca_total {
+        return Err(TlsError::HandshakeFailed(
+            "CertificateRequest12 ca_list truncated".into(),
+        ));
+    }
+    let ca_end = offset + ca_total;
+    let mut ca_names = Vec::new();
+    while offset < ca_end {
+        if offset + 2 > ca_end {
+            return Err(TlsError::HandshakeFailed(
+                "CertificateRequest12 ca entry truncated".into(),
+            ));
+        }
+        let dn_len = u16::from_be_bytes([body[offset], body[offset + 1]]) as usize;
+        offset += 2;
+        if offset + dn_len > ca_end {
+            return Err(TlsError::HandshakeFailed(
+                "CertificateRequest12 ca DN truncated".into(),
+            ));
+        }
+        ca_names.push(body[offset..offset + dn_len].to_vec());
+        offset += dn_len;
+    }
+
+    Ok(CertificateRequest12 {
+        cert_types,
+        sig_hash_algs,
+        ca_names,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// CertificateVerify (TLS 1.2, RFC 5246 §7.4.8)
+// ---------------------------------------------------------------------------
+
+/// TLS 1.2 CertificateVerify message.
+///
+/// ```text
+/// sig_algorithm(2) || sig_len(2) || signature(variable)
+/// ```
+#[derive(Debug, Clone)]
+pub struct CertificateVerify12 {
+    pub sig_algorithm: SignatureScheme,
+    pub signature: Vec<u8>,
+}
+
+/// Encode a TLS 1.2 CertificateVerify message (wrapped with handshake header).
+pub fn encode_certificate_verify12(cv: &CertificateVerify12) -> Vec<u8> {
+    let mut body = Vec::with_capacity(4 + cv.signature.len());
+    body.extend_from_slice(&cv.sig_algorithm.0.to_be_bytes());
+    body.extend_from_slice(&(cv.signature.len() as u16).to_be_bytes());
+    body.extend_from_slice(&cv.signature);
+    wrap_handshake(HandshakeType::CertificateVerify, &body)
+}
+
+/// Decode a TLS 1.2 CertificateVerify message body.
+pub fn decode_certificate_verify12(body: &[u8]) -> Result<CertificateVerify12, TlsError> {
+    if body.len() < 4 {
+        return Err(TlsError::HandshakeFailed(
+            "CertificateVerify12 too short".into(),
+        ));
+    }
+    let sig_alg = u16::from_be_bytes([body[0], body[1]]);
+    let sig_len = u16::from_be_bytes([body[2], body[3]]) as usize;
+    if body.len() < 4 + sig_len {
+        return Err(TlsError::HandshakeFailed(
+            "CertificateVerify12 signature truncated".into(),
+        ));
+    }
+    Ok(CertificateVerify12 {
+        sig_algorithm: SignatureScheme(sig_alg),
+        signature: body[4..4 + sig_len].to_vec(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,5 +546,84 @@ mod tests {
         assert!(decode_finished12(&[0xAA; 11]).is_err());
         assert!(decode_finished12(&[0xAA; 13]).is_err());
         assert!(decode_finished12(&[0xAA; 12]).is_ok());
+    }
+
+    #[test]
+    fn test_encode_decode_certificate_request12_roundtrip() {
+        let cr = CertificateRequest12 {
+            cert_types: vec![1, 64], // rsa_sign, ecdsa_sign
+            sig_hash_algs: vec![
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+                SignatureScheme::RSA_PSS_RSAE_SHA256,
+            ],
+            ca_names: vec![],
+        };
+
+        let encoded = encode_certificate_request12(&cr);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::CertificateRequest);
+
+        let decoded = decode_certificate_request12(body).unwrap();
+        assert_eq!(decoded.cert_types, vec![1, 64]);
+        assert_eq!(decoded.sig_hash_algs.len(), 2);
+        assert_eq!(
+            decoded.sig_hash_algs[0],
+            SignatureScheme::ECDSA_SECP256R1_SHA256
+        );
+        assert_eq!(
+            decoded.sig_hash_algs[1],
+            SignatureScheme::RSA_PSS_RSAE_SHA256
+        );
+        assert!(decoded.ca_names.is_empty());
+    }
+
+    #[test]
+    fn test_encode_decode_certificate_request12_with_ca_names() {
+        let dn1 = vec![0x30, 0x0A, 0x31, 0x08]; // fake DER DN
+        let dn2 = vec![0x30, 0x0C, 0x31, 0x0A, 0x30, 0x08];
+        let cr = CertificateRequest12 {
+            cert_types: vec![1],
+            sig_hash_algs: vec![SignatureScheme::RSA_PKCS1_SHA256],
+            ca_names: vec![dn1.clone(), dn2.clone()],
+        };
+
+        let encoded = encode_certificate_request12(&cr);
+        let (_, body, _) = crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+
+        let decoded = decode_certificate_request12(body).unwrap();
+        assert_eq!(decoded.ca_names.len(), 2);
+        assert_eq!(decoded.ca_names[0], dn1);
+        assert_eq!(decoded.ca_names[1], dn2);
+    }
+
+    #[test]
+    fn test_decode_certificate_request12_empty_error() {
+        assert!(decode_certificate_request12(&[]).is_err());
+    }
+
+    #[test]
+    fn test_encode_decode_certificate_verify12_roundtrip() {
+        let cv = CertificateVerify12 {
+            sig_algorithm: SignatureScheme::ECDSA_SECP256R1_SHA256,
+            signature: vec![0xAB; 70],
+        };
+
+        let encoded = encode_certificate_verify12(&cv);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::CertificateVerify);
+
+        let decoded = decode_certificate_verify12(body).unwrap();
+        assert_eq!(
+            decoded.sig_algorithm,
+            SignatureScheme::ECDSA_SECP256R1_SHA256
+        );
+        assert_eq!(decoded.signature, cv.signature);
+    }
+
+    #[test]
+    fn test_decode_certificate_verify12_too_short() {
+        assert!(decode_certificate_verify12(&[0x04, 0x03]).is_err());
     }
 }

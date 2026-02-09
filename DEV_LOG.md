@@ -2735,3 +2735,113 @@ New tests (18):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 806 workspace tests passing (19 ignored)
+
+## Phase 30: TLS 1.2 Session Resumption + Client Certificate Auth (mTLS) (Session 2026-02-10)
+
+### Goals
+- Implement TLS 1.2 session ID-based resumption (abbreviated handshake, RFC 5246 §7.4.1.2)
+- Implement TLS 1.2 client certificate authentication (mTLS, RFC 5246 §7.4.4)
+- CertificateRequest12 + CertificateVerify12 codec
+- Server and client-side mTLS state machine changes
+- Server-side session caching with `InMemorySessionCache`
+- Client-side session resumption via `config.resumption_session`
+- End-to-end integration tests for session resumption and mTLS
+
+### Implementation
+
+#### Step 1: CertificateRequest12 + CertificateVerify12 Codec
+- `CertificateRequest12` struct: cert_types, sig_hash_algs, ca_names
+- `encode_certificate_request12` / `decode_certificate_request12`
+- `CertificateVerify12` struct: sig_algorithm, signature
+- `encode_certificate_verify12` / `decode_certificate_verify12`
+- `sign_certificate_verify12` / `verify_certificate_verify12` (TLS 1.2 signs transcript hash directly, no "64 spaces" prefix)
+
+#### Step 2: Config Additions
+- `verify_client_cert` and `require_client_cert` fields on `TlsConfig`
+- Builder methods `.verify_client_cert(bool)` and `.require_client_cert(bool)`
+
+#### Step 3: Server-Side mTLS
+- `WaitClientCertificate` and `WaitClientCertificateVerify` states
+- `process_client_certificate()`: parse client cert, validate non-empty if required
+- `process_client_certificate_verify()`: verify signature against transcript hash
+- CertificateRequest message in `ServerFlightResult`
+
+#### Step 4: Client-Side mTLS
+- `process_certificate_request()`: store CertReq info
+- `ClientFlightResult` gains `client_certificate` and `certificate_verify` fields
+- `process_server_hello_done()` builds client cert + CertVerify if requested
+
+#### Step 5: mTLS Connection Integration
+- Server `do_handshake()`: send CertReq, read client Cert/CertVerify
+- Client `do_handshake()`: handle CertReq, send Cert/CertVerify
+
+#### Step 6: Server Session Caching + Abbreviated Handshake
+- `AbbreviatedServerResult` struct with keys + Finished message
+- `ServerHelloResult` enum: `Full(ServerFlightResult)` | `Abbreviated(AbbreviatedServerResult)`
+- `process_client_hello_resumable()`: cache lookup → abbreviated or full fallback
+- `do_abbreviated()`: derive keys from cached master_secret + new randoms
+- `process_abbreviated_finished()`: verify client Finished in abbreviated mode
+- Server generates 32-byte session_id on full handshake
+- `session_id()` and `master_secret_ref()` accessors for session caching
+
+#### Step 7: Client Session Resumption
+- `AbbreviatedClientKeys` struct
+- `build_client_hello()` uses cached session's ID when `config.resumption_session` set
+- `process_server_hello()` detects abbreviated when server echoes cached session_id
+- `take_abbreviated_keys()` returns derived keys
+- `process_abbreviated_server_finished()` verifies server Finished + returns client Finished
+
+#### Step 8: End-to-End Integration Tests
+- `test_tls12_session_resumption_roundtrip` — AES-128-GCM full → abbreviated → app data
+- `test_tls12_session_resumption_cbc_suite` — CBC cipher suite resumption
+- `test_tls12_session_resumption_sha384` — AES-256-GCM-SHA384 resumption
+- `test_tls12_mtls_then_resumption` — mTLS first, then abbreviated
+- `test_tls12_session_expired_fallback` — evicted session falls back to full
+
+### Key Design Decisions
+- **Abbreviated handshake order**: Server sends CCS+Finished FIRST, opposite of full handshake
+- **Transcript for abbreviated**: Server Finished = PRF(ms, "server finished", Hash(CH+SH)); client Finished adds server Finished to transcript
+- **Session ID**: Server generates random 32-byte ID on full handshake (not echoing client's)
+- **Cache ownership**: `run_abbreviated_handshake` test helper does not manage cache; caller prepares cache
+- **CertificateVerify TLS 1.2**: Signs transcript hash directly (not "64 spaces || context || 0x00 || hash" like TLS 1.3)
+- **Backward compatibility**: `process_server_hello` return type unchanged; abbreviated detected via `is_abbreviated()` + `take_abbreviated_keys()`
+
+### Files Changed
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `handshake/codec12.rs` | Modified | CertReq12 + CertVerify12 codec + sign/verify |
+| `config/mod.rs` | Modified | verify_client_cert, require_client_cert |
+| `handshake/server12.rs` | Modified | mTLS states, session caching, abbreviated handshake |
+| `handshake/client12.rs` | Modified | mTLS response, session resumption, abbreviated flow |
+| `connection12.rs` | Modified | mTLS + abbreviated connection integration + 5 e2e tests |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-auth | 20 | All pass |
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 330 (19 ignored) | All pass |
+| hitls-pki | 98 | All pass |
+| hitls-tls | 291 (+28) | All pass |
+| hitls-utils | 35 | All pass |
+| integration | 14 | All pass |
+| **Total** | **834** | **All pass** |
+
+New tests (28):
+- CertReq12 codec: roundtrip, with CA names, empty error (3)
+- CertVerify12 codec: roundtrip (1)
+- CertVerify12 sign/verify: ECDSA (1)
+- Config: mTLS defaults, with mTLS (2)
+- Server mTLS: sends CertReq, no CertReq, rejects empty, accepts empty (4)
+- Client mTLS: stores CertReq, flight with cert, empty cert, no CertReq (4)
+- Connection mTLS: full handshake, optional no cert, required no cert (3)
+- Server session: abbreviated detected, unknown session full, suite mismatch full (3)
+- Client session: sends cached ID, detects abbreviated, falls back full, new randoms (4)
+- Integration: resumption roundtrip, CBC suite, SHA384, mTLS then resumption, expired fallback (5) -- Note: 2 tests were pre-existing config tests from Step 2
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 834 workspace tests passing (19 ignored)

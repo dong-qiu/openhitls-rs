@@ -1184,3 +1184,19 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - 1 new file (encryption12_cbc.rs), 9 modified files
 
 806 total tests (19 ignored). Clippy clean, fmt clean.
+
+## Phase 30: TLS 1.2 Session Resumption + Client Certificate Auth (mTLS)
+
+**Prompt**: Implement Phase 30 — TLS 1.2 Session Resumption (RFC 5246 §7.4.1.2 abbreviated handshake) and Client Certificate Authentication (mTLS, RFC 5246 §7.4.4). Includes CertificateRequest12/CertificateVerify12 codec, server/client mTLS state machine, session ID-based caching, abbreviated handshake flow, and end-to-end integration tests.
+
+**Result**: 28 new tests (291 - 263 = 28 tls tests). Complete implementation with:
+- CertificateRequest12 + CertificateVerify12 encode/decode + sign/verify (TLS 1.2 style, no "64 spaces" prefix)
+- Server mTLS: CertificateRequest generation, client cert verification, WaitClientCertificate/WaitClientCertificateVerify states
+- Client mTLS: handle CertificateRequest, send client Certificate + CertificateVerify
+- Server session caching: `process_client_hello_resumable()` with SessionCache lookup, `do_abbreviated()` for abbreviated handshake
+- Client session resumption: cached session_id in ClientHello, detect abbreviated in ServerHello, derive keys from cached master_secret
+- Abbreviated handshake: server sends CCS+Finished FIRST (opposite of full), 1-RTT
+- 5 end-to-end integration tests: GCM/CBC/SHA384 resumption, mTLS→resumption, expired fallback
+- 0 new files, 5 modified files
+
+834 total tests (19 ignored). Clippy clean, fmt clean.
