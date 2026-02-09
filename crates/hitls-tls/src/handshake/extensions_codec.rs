@@ -545,6 +545,62 @@ pub fn parse_compress_certificate(data: &[u8]) -> Result<Vec<CertCompressionAlgo
 }
 
 // ---------------------------------------------------------------------------
+// TLS 1.2 extensions
+// ---------------------------------------------------------------------------
+
+/// Build the `ec_point_formats` extension (RFC 4492 §5.1.2).
+/// Advertises uncompressed (0) point format only.
+pub fn build_ec_point_formats() -> Extension {
+    // Format: ec_point_formats_length(1) || uncompressed(1)
+    Extension {
+        extension_type: ExtensionType::EC_POINT_FORMATS,
+        data: vec![0x01, 0x00], // length=1, uncompressed=0
+    }
+}
+
+/// Parse `ec_point_formats` extension.
+/// Returns the list of supported EC point format codes.
+pub fn parse_ec_point_formats(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    if data.is_empty() {
+        return Err(TlsError::HandshakeFailed("ec_point_formats: empty".into()));
+    }
+    let list_len = data[0] as usize;
+    if data.len() < 1 + list_len {
+        return Err(TlsError::HandshakeFailed(
+            "ec_point_formats: truncated".into(),
+        ));
+    }
+    Ok(data[1..1 + list_len].to_vec())
+}
+
+/// Build the `renegotiation_info` extension (RFC 5746) for initial handshake.
+/// Contains an empty renegotiated_connection field.
+pub fn build_renegotiation_info_initial() -> Extension {
+    // Format: renegotiated_connection_length(1) = 0
+    Extension {
+        extension_type: ExtensionType::RENEGOTIATION_INFO,
+        data: vec![0x00], // empty renegotiated_connection
+    }
+}
+
+/// Parse `renegotiation_info` extension.
+/// Returns the renegotiated_connection bytes.
+pub fn parse_renegotiation_info(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    if data.is_empty() {
+        return Err(TlsError::HandshakeFailed(
+            "renegotiation_info: empty".into(),
+        ));
+    }
+    let len = data[0] as usize;
+    if data.len() < 1 + len {
+        return Err(TlsError::HandshakeFailed(
+            "renegotiation_info: truncated".into(),
+        ));
+    }
+    Ok(data[1..1 + len].to_vec())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -769,5 +825,21 @@ mod tests {
         let ext = build_compress_certificate(&algos);
         let parsed = parse_compress_certificate(&ext.data).unwrap();
         assert_eq!(parsed, vec![CertCompressionAlgorithm::ZLIB]);
+    }
+
+    #[test]
+    fn test_build_parse_ec_point_formats() {
+        let ext = build_ec_point_formats();
+        assert_eq!(ext.extension_type, ExtensionType::EC_POINT_FORMATS);
+        let formats = parse_ec_point_formats(&ext.data).unwrap();
+        assert_eq!(formats, vec![0x00]); // uncompressed only
+    }
+
+    #[test]
+    fn test_build_parse_renegotiation_info() {
+        let ext = build_renegotiation_info_initial();
+        assert_eq!(ext.extension_type, ExtensionType::RENEGOTIATION_INFO);
+        let info = parse_renegotiation_info(&ext.data).unwrap();
+        assert!(info.is_empty()); // empty for initial handshake
     }
 }

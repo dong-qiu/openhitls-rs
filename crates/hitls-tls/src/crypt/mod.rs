@@ -5,6 +5,7 @@
 pub mod aead;
 pub mod hkdf;
 pub mod key_schedule;
+pub mod key_schedule12;
 pub mod prf;
 pub mod traffic_keys;
 pub mod transcript;
@@ -105,4 +106,111 @@ impl SignatureScheme {
     pub const RSA_PSS_RSAE_SHA512: Self = Self(0x0806);
     pub const ED25519: Self = Self(0x0807);
     pub const SM2_SM3: Self = Self(0x0708);
+}
+
+/// TLS 1.2 key exchange algorithm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyExchangeAlg {
+    Ecdhe,
+}
+
+/// TLS 1.2 authentication algorithm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthAlg {
+    Rsa,
+    Ecdsa,
+}
+
+/// Parameters associated with a TLS 1.2 cipher suite.
+#[derive(Debug, Clone)]
+pub struct Tls12CipherSuiteParams {
+    /// The cipher suite identifier.
+    pub suite: CipherSuite,
+    /// Key exchange algorithm.
+    pub kx_alg: KeyExchangeAlg,
+    /// Authentication algorithm.
+    pub auth_alg: AuthAlg,
+    /// Hash output size in bytes (32 for SHA-256, 48 for SHA-384).
+    pub hash_len: usize,
+    /// AEAD key length in bytes (16 or 32).
+    pub key_len: usize,
+    /// Fixed IV length from key_block (4 for GCM).
+    pub fixed_iv_len: usize,
+    /// Explicit nonce length sent with each record (8 for GCM).
+    pub record_iv_len: usize,
+    /// AEAD tag length in bytes (16).
+    pub tag_len: usize,
+}
+
+impl Tls12CipherSuiteParams {
+    /// Look up parameters for a TLS 1.2 cipher suite.
+    pub fn from_suite(suite: CipherSuite) -> Result<Self, TlsError> {
+        match suite {
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Rsa,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+            }),
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Rsa,
+                hash_len: 48,
+                key_len: 32,
+                fixed_iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+            }),
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Ecdsa,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+            }),
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Ecdsa,
+                hash_len: 48,
+                key_len: 32,
+                fixed_iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+            }),
+            _ => Err(TlsError::NoSharedCipherSuite),
+        }
+    }
+
+    /// Create a HashFactory for this cipher suite's hash algorithm.
+    pub fn hash_factory(&self) -> HashFactory {
+        match self.hash_len {
+            48 => Box::new(|| Box::new(Sha384::new()) as Box<dyn Digest>),
+            _ => Box::new(|| Box::new(Sha256::new()) as Box<dyn Digest>),
+        }
+    }
+
+    /// Total key material needed from the key block (GCM: no MAC keys).
+    pub fn key_block_len(&self) -> usize {
+        // client_write_key + server_write_key + client_write_iv + server_write_iv
+        2 * self.key_len + 2 * self.fixed_iv_len
+    }
+}
+
+/// Returns true if the cipher suite is a TLS 1.2 suite.
+pub fn is_tls12_suite(suite: CipherSuite) -> bool {
+    Tls12CipherSuiteParams::from_suite(suite).is_ok()
+}
+
+/// Returns true if the cipher suite is a TLS 1.3 suite.
+pub fn is_tls13_suite(suite: CipherSuite) -> bool {
+    CipherSuiteParams::from_suite(suite).is_ok()
 }

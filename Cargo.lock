@@ -211,6 +211,7 @@ dependencies = [
  "hitls-tls",
  "hitls-types",
  "hitls-utils",
+ "zeroize",
 ]
 
 [[package]]

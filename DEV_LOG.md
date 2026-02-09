@@ -2333,3 +2333,55 @@ New tests (37):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 661 workspace tests passing (19 ignored)
+
+## Phase 26: TLS 1.2 Handshake (ECDHE-GCM)
+
+### Step 1: TLS 1.2 Cipher Suite Params + Key Derivation
+- `crypt/key_schedule12.rs`: `Tls12KeyBlock`, `derive_master_secret()`, `derive_key_block()`, `compute_verify_data()`
+- `crypt/mod.rs`: `Tls12CipherSuiteParams`, `from_suite()`, `hash_factory()`, `key_block_len()`, `is_tls12_suite()`
+- 6 tests
+
+### Step 2: TLS 1.2 GCM Record Encryption
+- `record/encryption12.rs`: `RecordEncryptor12`, `RecordDecryptor12` with explicit nonce (fixed_iv(4) || seq(8))
+- `record/mod.rs`: Extended with TLS 1.2 encryptor/decryptor dispatch, `activate_write_encryption12()`, `activate_read_decryption12()`
+- AAD: 13 bytes (seq || type || version || length), NOT 5 like TLS 1.3
+- Record format: explicit_nonce(8) || ciphertext || tag(16)
+- 8 tests
+
+### Step 3: TLS 1.2 Handshake Message Codec
+- `handshake/codec12.rs`: `ServerKeyExchange`, `ClientKeyExchange`, `Certificate12`
+- Encode/decode functions for SKE, CKE, SHD, Certificate12, Finished12
+- `build_ske_params()`, `build_ske_signed_data()` helpers
+- 8 tests
+
+### Step 4: TLS 1.2 Client Handshake
+- `handshake/client12.rs`: `Tls12ClientHandshake` state machine
+- States: Idle → WaitServerHello → WaitCertificate → WaitServerKeyExchange → WaitServerHelloDone → WaitChangeCipherSpec → WaitFinished → Connected
+- `ClientFlightResult`: CKE + Finished + derived keys
+- SKE signature verification: RSA PKCS#1v1.5, RSA-PSS, ECDSA P-256/P-384
+- SHA-384 transcript hash switch on suite negotiation
+- 2 tests
+
+### Step 5: TLS 1.2 Server Handshake
+- `handshake/server12.rs`: `Tls12ServerHandshake` state machine
+- States: Idle → WaitClientKeyExchange → WaitChangeCipherSpec → WaitFinished → Connected
+- `ServerFlightResult`: SH + Cert + SKE + SHD
+- `select_signature_scheme_tls12()`: PSS preferred over PKCS#1v1.5
+- `sign_ske_data()`: Directly signs client_random || server_random || ske_params
+- 7 tests
+
+### Step 6: TLS 1.2 Connection Types + Extensions
+- `connection12.rs`: `Tls12ClientConnection`, `Tls12ServerConnection` implementing `TlsConnection` trait
+- `extensions_codec.rs`: `build_ec_point_formats()`, `build_renegotiation_info_initial()`
+- `extensions/mod.rs`: Added `EC_POINT_FORMATS`, `RENEGOTIATION_INFO`
+- Full handshake integration test with app data exchange
+- 5 tests (3 connection12 + 2 extension)
+
+### Step 7: Integration Tests
+- `tests/interop/src/lib.rs`: TLS 1.2 ECDHE-ECDSA full handshake + app data exchange
+
+### Summary
+- Cipher suites: ECDHE_RSA/ECDSA_WITH_AES_128/256_GCM_SHA256/384
+- Key exchange: SECP256R1, SECP384R1, X25519
+- Record encryption: GCM with explicit nonce
+- **701 tests total** (46 bignum + 326 crypto + 162 tls + 98 pki + 35 utils + 20 auth + 14 integration), 19 ignored

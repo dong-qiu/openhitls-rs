@@ -1123,3 +1123,9 @@ Key implementation:
 Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src/oid/mod.rs`, `crates/hitls-pki/src/x509/mod.rs`, `crates/hitls-tls/src/crypt/prf.rs`, `crates/hitls-cli/src/req.rs`, `crates/hitls-cli/src/main.rs`, `tests/interop/src/lib.rs`
 
 661 tests passing (20 auth + 46 bignum + 326 crypto + 13 integration + 98 pki + 123 tls + 35 utils), 19 ignored. 37 new tests. Clippy clean, fmt clean.
+
+## Phase 26: TLS 1.2 Handshake (ECDHE-GCM)
+
+**Prompt**: Implement TLS 1.2 ECDHE-GCM handshake (client + server) with record encryption, building on existing TLS 1.2 PRF and TLS 1.3 infrastructure.
+
+**Result**: 40 new tests (162 - 123 = 39 tls tests + 1 integration). Full TLS 1.2 handshake support for 4 ECDHE-GCM cipher suites with client/server state machines, GCM record encryption with explicit nonce, and connection types implementing TlsConnection trait. 701 total tests (19 ignored).

@@ -1,10 +1,13 @@
 //! TLS handshake protocol state machine.
 
 pub mod client;
+pub mod client12;
 pub mod codec;
+pub mod codec12;
 pub mod extensions_codec;
 pub mod key_exchange;
 pub mod server;
+pub mod server12;
 pub mod signing;
 pub mod verify;
 
@@ -18,8 +21,11 @@ pub enum HandshakeType {
     EndOfEarlyData = 5,
     EncryptedExtensions = 8,
     Certificate = 11,
+    ServerKeyExchange = 12,
     CertificateRequest = 13,
+    ServerHelloDone = 14,
     CertificateVerify = 15,
+    ClientKeyExchange = 16,
     Finished = 20,
     KeyUpdate = 24,
     CompressedCertificate = 25,

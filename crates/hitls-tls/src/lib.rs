@@ -4,6 +4,7 @@
 pub mod alert;
 pub mod config;
 pub mod connection;
+pub mod connection12;
 pub mod crypt;
 pub mod extensions;
 pub mod handshake;

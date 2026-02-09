@@ -1,10 +1,12 @@
 //! TLS record layer: parsing, serialization, fragmentation, and encryption.
 
 pub mod encryption;
+pub mod encryption12;
 
 use crate::crypt::traffic_keys::TrafficKeys;
 use crate::CipherSuite;
 use encryption::{RecordDecryptor, RecordEncryptor, MAX_PLAINTEXT_LENGTH, TLS13_LEGACY_VERSION};
+use encryption12::{RecordDecryptor12, RecordEncryptor12};
 use hitls_types::TlsError;
 
 /// TLS record content types.
@@ -33,10 +35,14 @@ pub struct Record {
 pub struct RecordLayer {
     /// Maximum fragment size (default: 16384).
     pub max_fragment_size: usize,
-    /// Optional encryptor for outgoing records.
+    /// Optional TLS 1.3 encryptor for outgoing records.
     encryptor: Option<RecordEncryptor>,
-    /// Optional decryptor for incoming records.
+    /// Optional TLS 1.3 decryptor for incoming records.
     decryptor: Option<RecordDecryptor>,
+    /// Optional TLS 1.2 encryptor for outgoing records.
+    encryptor12: Option<RecordEncryptor12>,
+    /// Optional TLS 1.2 decryptor for incoming records.
+    decryptor12: Option<RecordDecryptor12>,
 }
 
 impl RecordLayer {
@@ -45,17 +51,19 @@ impl RecordLayer {
             max_fragment_size: MAX_PLAINTEXT_LENGTH,
             encryptor: None,
             decryptor: None,
+            encryptor12: None,
+            decryptor12: None,
         }
     }
 
-    /// Returns true if write encryption is active.
+    /// Returns true if write encryption is active (TLS 1.2 or 1.3).
     pub fn is_encrypting(&self) -> bool {
-        self.encryptor.is_some()
+        self.encryptor.is_some() || self.encryptor12.is_some()
     }
 
-    /// Returns true if read decryption is active.
+    /// Returns true if read decryption is active (TLS 1.2 or 1.3).
     pub fn is_decrypting(&self) -> bool {
-        self.decryptor.is_some()
+        self.decryptor.is_some() || self.decryptor12.is_some()
     }
 
     /// Activate write encryption with the given traffic keys.
@@ -84,14 +92,48 @@ impl RecordLayer {
         Ok(())
     }
 
+    /// Activate TLS 1.2 write encryption with the given key and fixed IV.
+    pub fn activate_write_encryption12(
+        &mut self,
+        suite: CipherSuite,
+        key: &[u8],
+        fixed_iv: Vec<u8>,
+    ) -> Result<(), TlsError> {
+        self.encryptor = None; // Clear any TLS 1.3 encryptor
+        self.encryptor12 = Some(RecordEncryptor12::new(
+            encryption12::tls12_suite_to_aead_suite(suite)?,
+            key,
+            fixed_iv,
+        )?);
+        Ok(())
+    }
+
+    /// Activate TLS 1.2 read decryption with the given key and fixed IV.
+    pub fn activate_read_decryption12(
+        &mut self,
+        suite: CipherSuite,
+        key: &[u8],
+        fixed_iv: Vec<u8>,
+    ) -> Result<(), TlsError> {
+        self.decryptor = None; // Clear any TLS 1.3 decryptor
+        self.decryptor12 = Some(RecordDecryptor12::new(
+            encryption12::tls12_suite_to_aead_suite(suite)?,
+            key,
+            fixed_iv,
+        )?);
+        Ok(())
+    }
+
     /// Deactivate write encryption (return to plaintext mode).
     pub fn deactivate_write_encryption(&mut self) {
         self.encryptor = None;
+        self.encryptor12 = None;
     }
 
     /// Deactivate read decryption (return to plaintext mode).
     pub fn deactivate_read_decryption(&mut self) {
         self.decryptor = None;
+        self.decryptor12 = None;
     }
 
     /// Encrypt (if active) and serialize a record for sending.
@@ -108,13 +150,16 @@ impl RecordLayer {
                 "plaintext exceeds max fragment size".into(),
             ));
         }
-        let record = match &mut self.encryptor {
-            Some(enc) => enc.encrypt_record(content_type, plaintext)?,
-            None => Record {
+        let record = if let Some(enc) = &mut self.encryptor {
+            enc.encrypt_record(content_type, plaintext)?
+        } else if let Some(enc12) = &mut self.encryptor12 {
+            enc12.encrypt_record(content_type, plaintext)?
+        } else {
+            Record {
                 content_type,
                 version: TLS13_LEGACY_VERSION,
                 fragment: plaintext.to_vec(),
-            },
+            }
         };
         Ok(self.serialize_record(&record))
     }
@@ -127,13 +172,21 @@ impl RecordLayer {
     /// the actual inner content type and plaintext.
     pub fn open_record(&mut self, data: &[u8]) -> Result<(ContentType, Vec<u8>, usize), TlsError> {
         let (record, consumed) = self.parse_record(data)?;
-        match &mut self.decryptor {
-            Some(dec) if record.content_type == ContentType::ApplicationData => {
+        // TLS 1.3: encrypted records always have ApplicationData content type
+        if let Some(dec) = &mut self.decryptor {
+            if record.content_type == ContentType::ApplicationData {
                 let (ct, pt) = dec.decrypt_record(&record)?;
-                Ok((ct, pt, consumed))
+                return Ok((ct, pt, consumed));
             }
-            _ => Ok((record.content_type, record.fragment, consumed)),
         }
+        // TLS 1.2: encrypted records keep their actual content type
+        if let Some(dec12) = &mut self.decryptor12 {
+            if record.content_type != ContentType::ChangeCipherSpec {
+                let pt = dec12.decrypt_record(&record)?;
+                return Ok((record.content_type, pt, consumed));
+            }
+        }
+        Ok((record.content_type, record.fragment, consumed))
     }
 
     /// Parse a TLS record from the given bytes.

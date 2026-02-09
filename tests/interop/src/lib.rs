@@ -357,7 +357,220 @@ mod tests {
     }
 
     // -------------------------------------------------------
-    // 13. CSR → cert pipeline with PEM roundtrip
+    // 13. TLS 1.2 ECDHE-ECDSA full handshake + app data
+    // -------------------------------------------------------
+    #[test]
+    fn test_tls12_ecdhe_ecdsa_full_handshake() {
+        use hitls_tls::config::{ServerPrivateKey, TlsConfig};
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::handshake::client12::Tls12ClientHandshake;
+        use hitls_tls::handshake::codec::{decode_server_hello, parse_handshake_header};
+        use hitls_tls::handshake::codec12::{decode_certificate12, decode_server_key_exchange};
+        use hitls_tls::handshake::server12::Tls12ServerHandshake;
+        use hitls_tls::record::{ContentType, RecordLayer};
+        use hitls_tls::CipherSuite;
+
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .build();
+
+        let mut c2s = Vec::new();
+        let mut s2c = Vec::new();
+        let mut client_hs = Tls12ClientHandshake::new(client_config);
+        let mut server_hs = Tls12ServerHandshake::new(server_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_rl = RecordLayer::new();
+
+        // Client → CH
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &ch_msg)
+                .unwrap(),
+        );
+
+        // Server processes CH, sends flight
+        let (_, ch_plain, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        let (_, _, ch_total) = parse_handshake_header(&ch_plain).unwrap();
+        let sflight = server_hs
+            .process_client_hello(&ch_plain[..ch_total])
+            .unwrap();
+        let suite = sflight.suite;
+
+        for msg in [
+            &sflight.server_hello,
+            &sflight.certificate,
+            &sflight.server_key_exchange,
+            &sflight.server_hello_done,
+        ] {
+            s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
+        }
+
+        // Client processes server flight
+        // SH
+        let (_, data, c) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..c);
+        let (_, body, total) = parse_handshake_header(&data).unwrap();
+        let sh = decode_server_hello(body).unwrap();
+        client_hs
+            .process_server_hello(&data[..total], &sh)
+            .unwrap();
+        // Cert
+        let (_, data, c) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..c);
+        let (_, body, total) = parse_handshake_header(&data).unwrap();
+        let cert12 = decode_certificate12(body).unwrap();
+        client_hs
+            .process_certificate(&data[..total], &cert12.certificate_list)
+            .unwrap();
+        // SKE
+        let (_, data, c) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..c);
+        let (_, body, total) = parse_handshake_header(&data).unwrap();
+        let ske = decode_server_key_exchange(body).unwrap();
+        client_hs
+            .process_server_key_exchange(&data[..total], &ske)
+            .unwrap();
+        // SHD
+        let (_, data, c) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..c);
+        let (_, _, total) = parse_handshake_header(&data).unwrap();
+        let mut cflight = client_hs.process_server_hello_done(&data[..total]).unwrap();
+
+        // Client → CKE + CCS + Finished
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &cflight.client_key_exchange)
+                .unwrap(),
+        );
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::ChangeCipherSpec, &[0x01])
+                .unwrap(),
+        );
+        client_rl
+            .activate_write_encryption12(
+                suite,
+                &cflight.client_write_key,
+                cflight.client_write_iv.clone(),
+            )
+            .unwrap();
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &cflight.finished)
+                .unwrap(),
+        );
+
+        // Server processes CKE + CCS + Finished
+        let (_, data, c) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..c);
+        let (_, _, total) = parse_handshake_header(&data).unwrap();
+        let mut keys = server_hs
+            .process_client_key_exchange(&data[..total])
+            .unwrap();
+
+        let (ct, _, c) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..c);
+        assert_eq!(ct, ContentType::ChangeCipherSpec);
+        server_hs.process_change_cipher_spec().unwrap();
+
+        server_rl
+            .activate_read_decryption12(suite, &keys.client_write_key, keys.client_write_iv.clone())
+            .unwrap();
+
+        let (_, data, c) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..c);
+        let (_, _, total) = parse_handshake_header(&data).unwrap();
+        let sfin = server_hs.process_finished(&data[..total]).unwrap();
+
+        // Server → CCS + Finished
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::ChangeCipherSpec, &[0x01])
+                .unwrap(),
+        );
+        server_rl
+            .activate_write_encryption12(
+                suite,
+                &keys.server_write_key,
+                keys.server_write_iv.clone(),
+            )
+            .unwrap();
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::Handshake, &sfin.finished)
+                .unwrap(),
+        );
+
+        // Client processes server CCS + Finished
+        let (ct, _, c) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..c);
+        assert_eq!(ct, ContentType::ChangeCipherSpec);
+        client_hs.process_change_cipher_spec().unwrap();
+
+        client_rl
+            .activate_read_decryption12(
+                suite,
+                &cflight.server_write_key,
+                cflight.server_write_iv.clone(),
+            )
+            .unwrap();
+
+        let (_, data, c) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..c);
+        let (_, _, total) = parse_handshake_header(&data).unwrap();
+        client_hs
+            .process_finished(&data[..total], &cflight.master_secret)
+            .unwrap();
+
+        // Both connected — exchange app data
+        let msg = b"TLS 1.2 interop integration test!";
+        let rec = client_rl
+            .seal_record(ContentType::ApplicationData, msg)
+            .unwrap();
+        let (ct, plain, _) = server_rl.open_record(&rec).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(plain, msg);
+
+        let reply = b"Server reply over TLS 1.2 GCM";
+        let rec = server_rl
+            .seal_record(ContentType::ApplicationData, reply)
+            .unwrap();
+        let (ct, plain, _) = client_rl.open_record(&rec).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(plain, reply);
+
+        // Cleanup
+        use zeroize::Zeroize;
+        cflight.master_secret.zeroize();
+        keys.master_secret.zeroize();
+    }
+
+    // -------------------------------------------------------
+    // 14. CSR → cert pipeline with PEM roundtrip
     // -------------------------------------------------------
     #[test]
     fn test_csr_to_cert_pem_pipeline() {

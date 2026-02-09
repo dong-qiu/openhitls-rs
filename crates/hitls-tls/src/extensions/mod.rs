@@ -22,6 +22,8 @@ impl ExtensionType {
     pub const SIGNATURE_ALGORITHMS_CERT: Self = Self(50);
     pub const COMPRESS_CERTIFICATE: Self = Self(27);
     pub const KEY_SHARE: Self = Self(51);
+    pub const EC_POINT_FORMATS: Self = Self(11);
+    pub const RENEGOTIATION_INFO: Self = Self(0xFF01);
 }
 
 /// A raw TLS extension.
