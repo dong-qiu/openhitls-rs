@@ -39,19 +39,29 @@ pub struct ClientFlightResult {
     pub finished: Vec<u8>,
     /// Master secret for key derivation
     pub master_secret: Vec<u8>,
+    /// Client write MAC key (empty for AEAD suites).
+    pub client_write_mac_key: Vec<u8>,
+    /// Server write MAC key (empty for AEAD suites).
+    pub server_write_mac_key: Vec<u8>,
     /// Client write key
     pub client_write_key: Vec<u8>,
     /// Server write key
     pub server_write_key: Vec<u8>,
-    /// Client write IV (4 bytes for GCM)
+    /// Client write IV
     pub client_write_iv: Vec<u8>,
-    /// Server write IV (4 bytes for GCM)
+    /// Server write IV
     pub server_write_iv: Vec<u8>,
+    /// True if the negotiated suite uses CBC (not AEAD).
+    pub is_cbc: bool,
+    /// MAC output length (0 for AEAD, 20/32/48 for CBC).
+    pub mac_len: usize,
 }
 
 impl Drop for ClientFlightResult {
     fn drop(&mut self) {
         self.master_secret.zeroize();
+        self.client_write_mac_key.zeroize();
+        self.server_write_mac_key.zeroize();
         self.client_write_key.zeroize();
         self.server_write_key.zeroize();
         self.client_write_iv.zeroize();
@@ -128,6 +138,13 @@ impl Tls12ClientHandshake {
 
         // Renegotiation info (empty for initial handshake)
         extensions.push(crate::handshake::extensions_codec::build_renegotiation_info_initial());
+
+        // ALPN
+        if !self.config.alpn_protocols.is_empty() {
+            extensions.push(crate::handshake::extensions_codec::build_alpn(
+                &self.config.alpn_protocols,
+            ));
+        }
 
         // Filter cipher suites to TLS 1.2 ones only
         let tls12_suites: Vec<CipherSuite> = self
@@ -328,10 +345,14 @@ impl Tls12ClientHandshake {
             client_key_exchange: cke_msg,
             finished: finished_msg,
             master_secret,
+            client_write_mac_key: key_block.client_write_mac_key.clone(),
+            server_write_mac_key: key_block.server_write_mac_key.clone(),
             client_write_key: key_block.client_write_key.clone(),
             server_write_key: key_block.server_write_key.clone(),
             client_write_iv: key_block.client_write_iv.clone(),
             server_write_iv: key_block.server_write_iv.clone(),
+            is_cbc: params.is_cbc,
+            mac_len: params.mac_len,
         })
     }
 

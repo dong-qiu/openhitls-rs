@@ -203,6 +203,10 @@ pub fn tls12_suite_to_aead_suite(suite: CipherSuite) -> Result<CipherSuite, TlsE
         | CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 => {
             Ok(CipherSuite::TLS_AES_256_GCM_SHA384)
         }
+        CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+        | CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 => {
+            Ok(CipherSuite::TLS_CHACHA20_POLY1305_SHA256)
+        }
         _ => Err(TlsError::NoSharedCipherSuite),
     }
 }
@@ -353,5 +357,45 @@ mod tests {
             CipherSuite::TLS_AES_256_GCM_SHA384
         );
         assert!(tls12_suite_to_aead_suite(CipherSuite::TLS_AES_128_GCM_SHA256).is_err());
+    }
+
+    #[test]
+    fn test_chacha20_tls12_suite_mapping() {
+        assert_eq!(
+            tls12_suite_to_aead_suite(
+                CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+            )
+            .unwrap(),
+            CipherSuite::TLS_CHACHA20_POLY1305_SHA256
+        );
+        assert_eq!(
+            tls12_suite_to_aead_suite(
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+            )
+            .unwrap(),
+            CipherSuite::TLS_CHACHA20_POLY1305_SHA256
+        );
+    }
+
+    #[test]
+    fn test_chacha20_tls12_encrypt_decrypt_roundtrip() {
+        let key = vec![0x42u8; 32]; // ChaCha20 uses 256-bit key
+        let iv = vec![0xABu8; 4]; // 4-byte fixed IV
+        let aead_suite = CipherSuite::TLS_CHACHA20_POLY1305_SHA256;
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 ChaCha20-Poly1305";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        assert_eq!(record.version, TLS12_VERSION);
+        // fragment = explicit_nonce(8) + plaintext(31) + tag(16) = 55
+        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 16);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
     }
 }

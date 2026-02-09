@@ -2620,3 +2620,118 @@ New tests (39):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 788 workspace tests passing (19 ignored)
+
+---
+
+## Phase 29: TLS 1.2 CBC + ChaCha20-Poly1305 + ALPN + SNI (Session 2026-02-06)
+
+### Goals
+- Add 8 ECDHE-CBC cipher suites (AES-128/256-CBC with SHA/SHA256/SHA384)
+- Add 2 ECDHE-ChaCha20-Poly1305 cipher suites (RFC 7905)
+- Add ALPN extension negotiation (RFC 7301)
+- Add SNI server-side parsing (RFC 6066)
+
+### Implementation Details
+
+#### Step 1: Cipher Suite Definitions + Extended Params
+- Added 10 cipher suite constants to `CipherSuite` in `lib.rs`
+- Extended `Tls12CipherSuiteParams` with `mac_key_len`, `mac_len`, `is_cbc` fields
+- Added `mac_hash_factory()` method for CBC MAC hash (SHA-1/SHA-256/SHA-384 dispatch)
+- Updated `key_block_len()` to include MAC keys: `2 * mac_key_len + 2 * key_len + 2 * fixed_iv_len`
+- PRF hash vs MAC hash distinction: CBC-SHA suites use SHA-256 PRF but HMAC-SHA1 for MAC
+
+#### Step 2: TLS 1.2 CBC Key Schedule
+- Extended `Tls12KeyBlock` with `client_write_mac_key` and `server_write_mac_key` fields
+- Updated `derive_key_block()` to extract MAC keys first (RFC 5246 §6.3 ordering)
+
+#### Step 3: TLS 1.2 CBC Record Encryption
+- Created `encryption12_cbc.rs` — MAC-then-encrypt record protection
+- `RecordEncryptor12Cbc`: HMAC → TLS padding → random IV → AES-CBC encrypt
+- `RecordDecryptor12Cbc`: constant-time padding + MAC validation (padding oracle mitigation)
+- Helper: `create_hmac(mac_len, mac_key)` dispatches on mac_len (20→SHA-1, 32→SHA-256, 48→SHA-384) — avoids `HashFactory` `'static` lifetime issue
+- Manual AES-CBC encrypt/decrypt using `AesKey::encrypt_block`/`decrypt_block`
+- 6 tests: SHA-1/SHA-256/SHA-384 roundtrips, tampered MAC, tampered ciphertext, sequential records
+
+#### Step 4: ChaCha20-Poly1305 for TLS 1.2
+- Extended `tls12_suite_to_aead_suite()` to map ChaCha20 TLS 1.2 suites to TLS 1.3 AEAD
+- Existing `RecordEncryptor12`/`RecordDecryptor12` already handle ChaCha20-Poly1305 via `create_aead()`
+- 2 tests: suite mapping, encrypt/decrypt roundtrip
+
+#### Step 5: Integrate CBC into Record Layer + Handshake
+- Added `encryptor12_cbc`/`decryptor12_cbc` fields to `RecordLayer`
+- Added `activate_write_encryption12_cbc()`/`activate_read_decryption12_cbc()` methods
+- Updated `seal_record()`/`open_record()`/`is_encrypting()`/`is_decrypting()` with CBC path
+- Extended `ClientFlightResult` with `client_write_mac_key`, `server_write_mac_key`, `is_cbc`, `mac_len`
+- Extended `Tls12DerivedKeys` with same fields
+- Updated `connection12.rs` client/server `do_handshake()` to check `is_cbc` flag
+
+#### Step 6: ALPN + SNI Extensions
+- Added `build_alpn()`, `parse_alpn_ch()`, `build_alpn_selected()`, `parse_alpn_sh()` to `extensions_codec.rs`
+- Added `parse_server_name()` for SNI parsing
+- Added ALPN to `build_client_hello()` in TLS 1.2 client
+- Added ALPN/SNI parsing in `process_client_hello()` in TLS 1.2 server
+- Server ALPN negotiation: server-preference order matching
+- 4 tests: ALPN CH/SH roundtrips, SNI parse, SNI Unicode
+
+#### Step 7: Integration Tests
+- Created `run_tls12_handshake()` helper for in-memory full handshake + app data
+- 6 integration tests: CBC-SHA, CBC-SHA256, CBC-SHA384, ChaCha20-Poly1305, ALPN negotiation, ALPN no match
+
+### Key Bugs Fixed
+- **`HashFactory` `'static` lifetime**: `Hmac::new` requires `'static` factory. Solved by removing `HashFactory` from struct and using `mac_len`-based dispatch with hardcoded hash constructors.
+- **Clippy `useless_conversion`**: `format!(...).into()` on `String` fields — removed redundant `.into()`.
+- **Clippy `manual_div_ceil`**: Replaced manual ceiling division with `.div_ceil()`.
+
+### New Cipher Suites (10)
+
+| Suite | Code | Auth | Enc | MAC |
+|-------|------|------|-----|-----|
+| ECDHE_RSA_AES_128_CBC_SHA | 0xC013 | RSA | AES-128-CBC | HMAC-SHA1 |
+| ECDHE_RSA_AES_256_CBC_SHA | 0xC014 | RSA | AES-256-CBC | HMAC-SHA1 |
+| ECDHE_ECDSA_AES_128_CBC_SHA | 0xC009 | ECDSA | AES-128-CBC | HMAC-SHA1 |
+| ECDHE_ECDSA_AES_256_CBC_SHA | 0xC00A | ECDSA | AES-256-CBC | HMAC-SHA1 |
+| ECDHE_RSA_AES_128_CBC_SHA256 | 0xC027 | RSA | AES-128-CBC | HMAC-SHA256 |
+| ECDHE_RSA_AES_256_CBC_SHA384 | 0xC028 | RSA | AES-256-CBC | HMAC-SHA384 |
+| ECDHE_ECDSA_AES_128_CBC_SHA256 | 0xC023 | ECDSA | AES-128-CBC | HMAC-SHA256 |
+| ECDHE_ECDSA_AES_256_CBC_SHA384 | 0xC024 | ECDSA | AES-256-CBC | HMAC-SHA384 |
+| ECDHE_RSA_CHACHA20_POLY1305 | 0xCCA8 | RSA | ChaCha20-Poly1305 | AEAD |
+| ECDHE_ECDSA_CHACHA20_POLY1305 | 0xCCA9 | ECDSA | ChaCha20-Poly1305 | AEAD |
+
+### Files Changed
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `lib.rs` | Modified | 10 cipher suite constants |
+| `crypt/mod.rs` | Modified | Extended params (mac_key_len, mac_len, is_cbc) |
+| `crypt/key_schedule12.rs` | Modified | MAC keys in key block |
+| `record/encryption12_cbc.rs` | **New** | CBC MAC-then-encrypt record layer |
+| `record/encryption12.rs` | Modified | ChaCha20 suite mapping |
+| `record/mod.rs` | Modified | CBC encryptor/decryptor integration |
+| `handshake/client12.rs` | Modified | CBC key derivation, ALPN |
+| `handshake/server12.rs` | Modified | CBC key derivation, ALPN, SNI |
+| `handshake/extensions_codec.rs` | Modified | ALPN + SNI codec |
+| `connection12.rs` | Modified | CBC activation, integration tests |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-auth | 20 | All pass |
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 330 (19 ignored) | All pass |
+| hitls-pki | 98 | All pass |
+| hitls-tls | 263 (+18) | All pass |
+| hitls-utils | 35 | All pass |
+| integration | 14 | All pass |
+| **Total** | **806** | **All pass** |
+
+New tests (18):
+- CBC record encryption: SHA-1/SHA-256/SHA-384 roundtrips, tampered MAC, tampered ciphertext, sequential records (6)
+- ChaCha20-Poly1305: suite mapping, encrypt/decrypt roundtrip (2)
+- ALPN/SNI: build/parse CH, build/parse SH, SNI parse, SNI Unicode (4)
+- Integration: CBC-SHA/SHA256/SHA384 full handshake, ChaCha20 full handshake, ALPN negotiation, ALPN no match (6)
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 806 workspace tests passing (19 ignored)

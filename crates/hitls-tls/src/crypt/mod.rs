@@ -12,6 +12,7 @@ pub mod transcript;
 
 use crate::CipherSuite;
 use hitls_crypto::provider::Digest;
+use hitls_crypto::sha1::Sha1;
 use hitls_crypto::sha2::{Sha256, Sha384};
 #[cfg(feature = "tlcp")]
 use hitls_crypto::sm3::Sm3;
@@ -139,22 +140,29 @@ pub struct Tls12CipherSuiteParams {
     pub kx_alg: KeyExchangeAlg,
     /// Authentication algorithm.
     pub auth_alg: AuthAlg,
-    /// Hash output size in bytes (32 for SHA-256, 48 for SHA-384).
+    /// PRF hash output size in bytes (32 for SHA-256, 48 for SHA-384).
     pub hash_len: usize,
-    /// AEAD key length in bytes (16 or 32).
+    /// Encryption key length in bytes (16 or 32).
     pub key_len: usize,
-    /// Fixed IV length from key_block (4 for GCM).
+    /// Fixed IV length from key_block (4 for GCM/ChaCha20, 16 for CBC).
     pub fixed_iv_len: usize,
-    /// Explicit nonce length sent with each record (8 for GCM).
+    /// Explicit nonce length sent with each record (8 for GCM/ChaCha20, 0 for CBC).
     pub record_iv_len: usize,
-    /// AEAD tag length in bytes (16).
+    /// AEAD tag length in bytes (16 for GCM/ChaCha20, 0 for CBC).
     pub tag_len: usize,
+    /// MAC key length (0 for AEAD, 20 for HMAC-SHA1, 32 for SHA-256, 48 for SHA-384).
+    pub mac_key_len: usize,
+    /// MAC output length (0 for AEAD, 20 for SHA-1, 32 for SHA-256, 48 for SHA-384).
+    pub mac_len: usize,
+    /// true = CBC MAC-then-encrypt, false = AEAD (GCM/ChaCha20).
+    pub is_cbc: bool,
 }
 
 impl Tls12CipherSuiteParams {
     /// Look up parameters for a TLS 1.2 cipher suite.
     pub fn from_suite(suite: CipherSuite) -> Result<Self, TlsError> {
         match suite {
+            // --- ECDHE-GCM suites ---
             CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 => Ok(Self {
                 suite,
                 kx_alg: KeyExchangeAlg::Ecdhe,
@@ -164,6 +172,9 @@ impl Tls12CipherSuiteParams {
                 fixed_iv_len: 4,
                 record_iv_len: 8,
                 tag_len: 16,
+                mac_key_len: 0,
+                mac_len: 0,
+                is_cbc: false,
             }),
             CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 => Ok(Self {
                 suite,
@@ -174,6 +185,9 @@ impl Tls12CipherSuiteParams {
                 fixed_iv_len: 4,
                 record_iv_len: 8,
                 tag_len: 16,
+                mac_key_len: 0,
+                mac_len: 0,
+                is_cbc: false,
             }),
             CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 => Ok(Self {
                 suite,
@@ -184,6 +198,9 @@ impl Tls12CipherSuiteParams {
                 fixed_iv_len: 4,
                 record_iv_len: 8,
                 tag_len: 16,
+                mac_key_len: 0,
+                mac_len: 0,
+                is_cbc: false,
             }),
             CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 => Ok(Self {
                 suite,
@@ -194,12 +211,149 @@ impl Tls12CipherSuiteParams {
                 fixed_iv_len: 4,
                 record_iv_len: 8,
                 tag_len: 16,
+                mac_key_len: 0,
+                mac_len: 0,
+                is_cbc: false,
+            }),
+            // --- ECDHE-CBC-SHA suites (PRF=SHA-256, MAC=HMAC-SHA1) ---
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Rsa,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 20,
+                mac_len: 20,
+                is_cbc: true,
+            }),
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Rsa,
+                hash_len: 32,
+                key_len: 32,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 20,
+                mac_len: 20,
+                is_cbc: true,
+            }),
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Ecdsa,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 20,
+                mac_len: 20,
+                is_cbc: true,
+            }),
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Ecdsa,
+                hash_len: 32,
+                key_len: 32,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 20,
+                mac_len: 20,
+                is_cbc: true,
+            }),
+            // --- ECDHE-CBC-SHA256 suites (PRF=SHA-256, MAC=HMAC-SHA256) ---
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Rsa,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 32,
+                mac_len: 32,
+                is_cbc: true,
+            }),
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Ecdsa,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 32,
+                mac_len: 32,
+                is_cbc: true,
+            }),
+            // --- ECDHE-CBC-SHA384 suites (PRF=SHA-384, MAC=HMAC-SHA384) ---
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Rsa,
+                hash_len: 48,
+                key_len: 32,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 48,
+                mac_len: 48,
+                is_cbc: true,
+            }),
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Ecdsa,
+                hash_len: 48,
+                key_len: 32,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 48,
+                mac_len: 48,
+                is_cbc: true,
+            }),
+            // --- ECDHE-ChaCha20-Poly1305 suites (PRF=SHA-256, AEAD) ---
+            CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Rsa,
+                hash_len: 32,
+                key_len: 32,
+                fixed_iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+                mac_key_len: 0,
+                mac_len: 0,
+                is_cbc: false,
+            }),
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                auth_alg: AuthAlg::Ecdsa,
+                hash_len: 32,
+                key_len: 32,
+                fixed_iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+                mac_key_len: 0,
+                mac_len: 0,
+                is_cbc: false,
             }),
             _ => Err(TlsError::NoSharedCipherSuite),
         }
     }
 
-    /// Create a HashFactory for this cipher suite's hash algorithm.
+    /// Create a HashFactory for this cipher suite's PRF hash algorithm.
     pub fn hash_factory(&self) -> HashFactory {
         match self.hash_len {
             48 => Box::new(|| Box::new(Sha384::new()) as Box<dyn Digest>),
@@ -207,10 +361,20 @@ impl Tls12CipherSuiteParams {
         }
     }
 
-    /// Total key material needed from the key block (GCM: no MAC keys).
+    /// Create a HashFactory for the MAC hash algorithm (CBC suites only).
+    /// Returns SHA-1 for mac_len=20, SHA-256 for mac_len=32, SHA-384 for mac_len=48.
+    pub fn mac_hash_factory(&self) -> HashFactory {
+        match self.mac_len {
+            20 => Box::new(|| Box::new(Sha1::new()) as Box<dyn Digest>),
+            48 => Box::new(|| Box::new(Sha384::new()) as Box<dyn Digest>),
+            _ => Box::new(|| Box::new(Sha256::new()) as Box<dyn Digest>),
+        }
+    }
+
+    /// Total key material needed from the key block.
+    /// CBC: 2*mac_key + 2*enc_key + 2*iv. AEAD: 2*enc_key + 2*fixed_iv.
     pub fn key_block_len(&self) -> usize {
-        // client_write_key + server_write_key + client_write_iv + server_write_iv
-        2 * self.key_len + 2 * self.fixed_iv_len
+        2 * self.mac_key_len + 2 * self.key_len + 2 * self.fixed_iv_len
     }
 }
 

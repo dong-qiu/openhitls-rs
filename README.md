@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Phase 28 Complete — TLCP (GM/T 0024)**
+> **Status: Phase 29 Complete — TLS 1.2 CBC + ChaCha20-Poly1305 + ALPN + SNI**
 >
-> 788 tests passing (20 auth + 46 bignum + 326 crypto + 98 pki + 245 tls + 35 utils + 14 integration; 19 ignored). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain/CSR generation/certificate generation), PKCS#8 (parse/encode), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), TLS 1.2 handshake (ECDHE-GCM), DTLS 1.2 (record layer + handshake + fragmentation + retransmission + cookie exchange + anti-replay), TLCP (GM/T 0024, 4 cipher suites, double certificate, ECDHE + ECC key exchange), TLS 1.2 PRF, HOTP/TOTP, SPAKE2+, and CLI tool.
+> 806 tests passing (20 auth + 46 bignum + 330 crypto + 98 pki + 263 tls + 35 utils + 14 integration; 19 ignored). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain/CSR generation/certificate generation), PKCS#8 (parse/encode), PKCS#12, CMS SignedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), TLS 1.2 handshake (14 cipher suites: ECDHE-GCM/CBC/ChaCha20, ALPN, SNI), DTLS 1.2 (record layer + handshake + fragmentation + retransmission + cookie exchange + anti-replay), TLCP (GM/T 0024, 4 cipher suites, double certificate, ECDHE + ECC key exchange), TLS 1.2 PRF, HOTP/TOTP, SPAKE2+, and CLI tool.
 
 ## Goals
 
@@ -23,7 +23,7 @@ openhitls-rs/
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (35 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
 │   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECC (P-224/P-256/P-384/P-521/Brainpool), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9, DRBG (HMAC/CTR/Hash), ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal (326 tests)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, TLS 1.2 handshake (ECDHE-GCM), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), TLS 1.2 PRF (245 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, TLS 1.2 handshake (14 suites: ECDHE-GCM/CBC/ChaCha20, ALPN, SNI), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), TLS 1.2 PRF (263 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, certificate generation), PKCS#8 (RFC 5958), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652) (98 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req)
@@ -131,7 +131,7 @@ openhitls-rs/
 |----------|-------|--------|
 | TLS 1.3 | `hitls-tls` | **Done** — Key Schedule + Record + Client & Server Handshake + HRR + KeyUpdate + PSK/0-RTT + Certificate Compression |
 | TLS 1.2 PRF | `hitls-tls` | **Done** — PRF (RFC 5246 section 5) |
-| TLS 1.2 | `hitls-tls` | **Done** — ECDHE-GCM (4 cipher suites, client & server handshake) |
+| TLS 1.2 | `hitls-tls` | **Done** — 14 cipher suites (ECDHE-GCM/CBC/ChaCha20, ALPN, SNI) |
 | DTLS 1.2 | `hitls-tls` | **Done** — Record layer + Handshake + Fragmentation/Reassembly + Cookie Exchange + Anti-Replay + Retransmission |
 | TLCP (GM/T 0024) | `hitls-tls` | **Done** — 4 cipher suites (ECDHE/ECC × SM4-CBC/GCM), double certificate, ECDHE + ECC key exchange |
 | X.509 Certificates | `hitls-pki` | **Done** (parse + verify + chain + CSR generation + certificate generation) |
@@ -159,12 +159,12 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (788 tests, 19 ignored)
+# Run all tests (806 tests, 19 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 326 tests (19 ignored)
-cargo test -p hitls-tls --all-features      # 245 tests
+cargo test -p hitls-crypto --all-features   # 330 tests (19 ignored)
+cargo test -p hitls-tls --all-features      # 263 tests
 cargo test -p hitls-pki --all-features      # 98 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 35 tests
@@ -208,7 +208,7 @@ Convenience feature groups:
 
 ### Completed (Phase 0-28)
 
-All cryptographic primitives, X.509 (including CSR generation and certificate generation), PKCS#8, PKCS#12, CMS, CRL/OCSP, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), TLS 1.2 handshake (ECDHE-GCM), DTLS 1.2 (RFC 6347: record layer, handshake, fragmentation/reassembly, cookie exchange, anti-replay, retransmission), TLCP (GM/T 0024: 4 cipher suites, double certificate, ECDHE + ECC key exchange, SM4-CBC/GCM), TLS 1.2 PRF, auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), DRBG variants (HMAC, CTR, Hash), and CLI tool implemented. 788 tests passing across 9 crates.
+All cryptographic primitives, X.509 (including CSR generation and certificate generation), PKCS#8, PKCS#12, CMS, CRL/OCSP, TLS 1.3 (including PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression), TLS 1.2 handshake (14 cipher suites: ECDHE-GCM/CBC/ChaCha20, ALPN, SNI), DTLS 1.2 (RFC 6347: record layer, handshake, fragmentation/reassembly, cookie exchange, anti-replay, retransmission), TLCP (GM/T 0024: 4 cipher suites, double certificate, ECDHE + ECC key exchange, SM4-CBC/GCM), TLS 1.2 PRF, auth protocols, PQC, ECC curve additions (P-224, P-521, Brainpool), DRBG variants (HMAC, CTR, Hash), and CLI tool implemented. 806 tests passing across 9 crates.
 
 ### Remaining Migration Work
 
@@ -268,8 +268,8 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 
 | Feature | Standard | Status |
 |---------|----------|--------|
-| TLS 1.2 Handshake | RFC 5246 | **Done** (ECDHE-GCM, 4 cipher suites) |
-| TLS 1.2 Cipher Suites (50+) | RFC 5246 | **Partial** (4 ECDHE-GCM suites) |
+| TLS 1.2 Handshake | RFC 5246 | **Done** (14 cipher suites: ECDHE-GCM/CBC/ChaCha20) |
+| TLS 1.2 Cipher Suites (50+) | RFC 5246 | **Partial** (14 suites: 4 GCM + 8 CBC + 2 ChaCha20) |
 | Session Resumption (ID-based) | RFC 5246 §7.4.1.2 | Not implemented |
 | Renegotiation | RFC 5746 | Not implemented |
 | TLS 1.2 Record Protocol | RFC 5246 §6 | **Done** (GCM with explicit nonce) |
@@ -300,7 +300,18 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | GCM AEAD (SM4-GCM) | GM/T 0024 | **Done** |
 | SM3-based PRF | GM/T 0024 | **Done** |
 
-#### Phase 29: Hardware Acceleration & Production Hardening
+#### Phase 29: TLS 1.2 CBC + ChaCha20-Poly1305 + ALPN + SNI
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| 8 ECDHE-CBC cipher suites (AES-128/256, SHA/SHA256/SHA384) | RFC 5246 | **Done** |
+| 2 ECDHE-ChaCha20-Poly1305 cipher suites | RFC 7905 | **Done** |
+| CBC MAC-then-encrypt record protection | RFC 5246 §6.2.3.1 | **Done** |
+| Constant-time padding oracle mitigation | RFC 5246 | **Done** |
+| ALPN extension (Application-Layer Protocol Negotiation) | RFC 7301 | **Done** |
+| SNI server-side parsing (Server Name Indication) | RFC 6066 | **Done** |
+
+#### Phase 30: Hardware Acceleration & Production Hardening
 
 | Feature | Description | Status |
 |---------|-------------|--------|
@@ -318,9 +329,9 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | Component | C (lines) | Rust (lines) | Feature Coverage |
 |-----------|-----------|--------------|------------------|
 | Crypto Algorithms | ~132K | ~24K | ~90% |
-| TLS Protocol | ~52K | ~8K | ~55% (TLS 1.3 + TLS 1.2 + DTLS 1.2 + TLCP) |
+| TLS Protocol | ~52K | ~9K | ~60% (TLS 1.3 + TLS 1.2 + DTLS 1.2 + TLCP) |
 | PKI / X.509 | ~17K | ~3.3K | ~60% |
-| Total | ~460K | ~32K | ~75% (TLS 1.3 deployments) |
+| Total | ~460K | ~33K | ~76% (TLS 1.3 deployments) |
 
 ## Minimum Supported Rust Version
 

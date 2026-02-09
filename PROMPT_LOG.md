@@ -1167,3 +1167,20 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - Feature-gated with `#[cfg(feature = "tlcp")]`
 
 788 total tests (19 ignored). Clippy clean, fmt clean.
+
+## Phase 29: TLS 1.2 CBC + ChaCha20-Poly1305 + ALPN + SNI
+
+**Prompt**: 开始Phase 29 — Add 8 TLS 1.2 ECDHE-CBC cipher suites (AES-128/256-CBC with SHA/SHA256/SHA384), 2 ECDHE-ChaCha20-Poly1305 cipher suites (RFC 7905), ALPN extension negotiation (RFC 7301), and SNI server-side parsing (RFC 6066).
+
+**Result**: 18 new tests (263 - 245 = 18 tls tests). Complete implementation with:
+- 10 new cipher suites: 8 ECDHE-CBC (RSA/ECDSA × AES-128/256 × SHA/SHA256/SHA384) + 2 ECDHE-ChaCha20-Poly1305
+- CBC MAC-then-encrypt record protection with constant-time padding oracle mitigation
+- ChaCha20-Poly1305 via existing AEAD infrastructure (suite mapping only)
+- ALPN extension: build/parse for ClientHello and ServerHello, server-preference negotiation
+- SNI parsing: server-side extraction of hostname from ClientHello
+- Extended Tls12CipherSuiteParams with mac_key_len, mac_len, is_cbc fields
+- Extended key block derivation with MAC keys (RFC 5246 §6.3 ordering)
+- Full integration tests: CBC-SHA/SHA256/SHA384 handshake, ChaCha20 handshake, ALPN negotiation
+- 1 new file (encryption12_cbc.rs), 9 modified files
+
+806 total tests (19 ignored). Clippy clean, fmt clean.

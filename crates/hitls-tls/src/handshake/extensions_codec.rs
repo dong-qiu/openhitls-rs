@@ -545,6 +545,112 @@ pub fn parse_compress_certificate(data: &[u8]) -> Result<Vec<CertCompressionAlgo
 }
 
 // ---------------------------------------------------------------------------
+// ALPN extension (RFC 7301)
+// ---------------------------------------------------------------------------
+
+/// Build the `application_layer_protocol_negotiation` extension for ClientHello.
+/// Format: protocol_name_list_length(2) || (protocol_name_length(1) || protocol_name)*
+pub fn build_alpn(protocols: &[Vec<u8>]) -> Extension {
+    let mut list = Vec::new();
+    for proto in protocols {
+        list.push(proto.len() as u8);
+        list.extend_from_slice(proto);
+    }
+    let mut data = Vec::with_capacity(2 + list.len());
+    data.extend_from_slice(&(list.len() as u16).to_be_bytes());
+    data.extend_from_slice(&list);
+    Extension {
+        extension_type: ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION,
+        data,
+    }
+}
+
+/// Parse ALPN extension from ClientHello (returns list of protocol names).
+pub fn parse_alpn_ch(data: &[u8]) -> Result<Vec<Vec<u8>>, TlsError> {
+    if data.len() < 2 {
+        return Err(TlsError::HandshakeFailed("ALPN CH: too short".into()));
+    }
+    let list_len = u16::from_be_bytes([data[0], data[1]]) as usize;
+    if data.len() < 2 + list_len {
+        return Err(TlsError::HandshakeFailed("ALPN CH: truncated".into()));
+    }
+    let mut protos = Vec::new();
+    let mut pos = 2;
+    let end = 2 + list_len;
+    while pos < end {
+        let proto_len = data[pos] as usize;
+        pos += 1;
+        if pos + proto_len > end {
+            return Err(TlsError::HandshakeFailed(
+                "ALPN CH: protocol truncated".into(),
+            ));
+        }
+        protos.push(data[pos..pos + proto_len].to_vec());
+        pos += proto_len;
+    }
+    Ok(protos)
+}
+
+/// Build ALPN extension for ServerHello (single selected protocol).
+pub fn build_alpn_selected(protocol: &[u8]) -> Extension {
+    let mut data = Vec::with_capacity(2 + 1 + protocol.len());
+    let list_len = (1 + protocol.len()) as u16;
+    data.extend_from_slice(&list_len.to_be_bytes());
+    data.push(protocol.len() as u8);
+    data.extend_from_slice(protocol);
+    Extension {
+        extension_type: ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION,
+        data,
+    }
+}
+
+/// Parse ALPN extension from ServerHello (returns single selected protocol).
+pub fn parse_alpn_sh(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    if data.len() < 2 {
+        return Err(TlsError::HandshakeFailed("ALPN SH: too short".into()));
+    }
+    let list_len = u16::from_be_bytes([data[0], data[1]]) as usize;
+    if data.len() < 2 + list_len || list_len < 2 {
+        return Err(TlsError::HandshakeFailed("ALPN SH: truncated".into()));
+    }
+    let proto_len = data[2] as usize;
+    if 1 + proto_len != list_len {
+        return Err(TlsError::HandshakeFailed(
+            "ALPN SH: unexpected list size".into(),
+        ));
+    }
+    Ok(data[3..3 + proto_len].to_vec())
+}
+
+// ---------------------------------------------------------------------------
+// SNI parsing
+// ---------------------------------------------------------------------------
+
+/// Parse `server_name` extension from ClientHello.
+/// Format: server_name_list_length(2) || name_type(1) || host_name_length(2) || host_name
+pub fn parse_server_name(data: &[u8]) -> Result<String, TlsError> {
+    if data.len() < 2 {
+        return Err(TlsError::HandshakeFailed("SNI: too short".into()));
+    }
+    let list_len = u16::from_be_bytes([data[0], data[1]]) as usize;
+    if data.len() < 2 + list_len || list_len < 3 {
+        return Err(TlsError::HandshakeFailed("SNI: truncated".into()));
+    }
+    let name_type = data[2];
+    if name_type != 0 {
+        return Err(TlsError::HandshakeFailed(
+            format!("SNI: unsupported name type {name_type}"),
+        ));
+    }
+    let name_len = u16::from_be_bytes([data[3], data[4]]) as usize;
+    if data.len() < 5 + name_len {
+        return Err(TlsError::HandshakeFailed("SNI: name truncated".into()));
+    }
+    String::from_utf8(data[5..5 + name_len].to_vec())
+        .map_err(|_| TlsError::HandshakeFailed("SNI: invalid UTF-8".into()))
+}
+
+// ---------------------------------------------------------------------------
 // TLS 1.2 extensions
 // ---------------------------------------------------------------------------
 
@@ -825,6 +931,41 @@ mod tests {
         let ext = build_compress_certificate(&algos);
         let parsed = parse_compress_certificate(&ext.data).unwrap();
         assert_eq!(parsed, vec![CertCompressionAlgorithm::ZLIB]);
+    }
+
+    #[test]
+    fn test_alpn_build_parse_ch_roundtrip() {
+        let protos = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        let ext = build_alpn(&protos);
+        assert_eq!(
+            ext.extension_type,
+            ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION
+        );
+        let parsed = parse_alpn_ch(&ext.data).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0], b"h2");
+        assert_eq!(parsed[1], b"http/1.1");
+    }
+
+    #[test]
+    fn test_alpn_build_parse_sh_roundtrip() {
+        let ext = build_alpn_selected(b"h2");
+        let parsed = parse_alpn_sh(&ext.data).unwrap();
+        assert_eq!(parsed, b"h2");
+    }
+
+    #[test]
+    fn test_sni_parse_roundtrip() {
+        let ext = build_server_name("example.com");
+        let parsed = parse_server_name(&ext.data).unwrap();
+        assert_eq!(parsed, "example.com");
+    }
+
+    #[test]
+    fn test_sni_parse_unicode() {
+        let ext = build_server_name("test.example.org");
+        let parsed = parse_server_name(&ext.data).unwrap();
+        assert_eq!(parsed, "test.example.org");
     }
 
     #[test]

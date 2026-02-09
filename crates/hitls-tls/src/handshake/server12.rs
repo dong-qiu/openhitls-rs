@@ -14,7 +14,7 @@ use crate::handshake::codec12::{
     ServerKeyExchange,
 };
 use crate::handshake::extensions_codec::{
-    parse_signature_algorithms_ch, parse_supported_groups_ch,
+    parse_alpn_ch, parse_server_name, parse_signature_algorithms_ch, parse_supported_groups_ch,
 };
 use crate::handshake::key_exchange::KeyExchange;
 use crate::CipherSuite;
@@ -51,19 +51,29 @@ pub struct ServerFlightResult {
 pub struct Tls12DerivedKeys {
     /// Master secret (48 bytes).
     pub master_secret: Vec<u8>,
+    /// Client write MAC key (empty for AEAD suites).
+    pub client_write_mac_key: Vec<u8>,
+    /// Server write MAC key (empty for AEAD suites).
+    pub server_write_mac_key: Vec<u8>,
     /// Client write key.
     pub client_write_key: Vec<u8>,
     /// Server write key.
     pub server_write_key: Vec<u8>,
-    /// Client write IV (4 bytes for GCM).
+    /// Client write IV.
     pub client_write_iv: Vec<u8>,
-    /// Server write IV (4 bytes for GCM).
+    /// Server write IV.
     pub server_write_iv: Vec<u8>,
+    /// True if the negotiated suite uses CBC (not AEAD).
+    pub is_cbc: bool,
+    /// MAC output length (0 for AEAD, 20/32/48 for CBC).
+    pub mac_len: usize,
 }
 
 impl Drop for Tls12DerivedKeys {
     fn drop(&mut self) {
         self.master_secret.zeroize();
+        self.client_write_mac_key.zeroize();
+        self.server_write_mac_key.zeroize();
         self.client_write_key.zeroize();
         self.server_write_key.zeroize();
         self.client_write_iv.zeroize();
@@ -88,6 +98,10 @@ pub struct Tls12ServerHandshake {
     ephemeral_key: Option<KeyExchange>,
     master_secret: Vec<u8>,
     client_sig_algs: Vec<SignatureScheme>,
+    /// Negotiated ALPN protocol (if any).
+    negotiated_alpn: Option<Vec<u8>>,
+    /// Client SNI hostname (if sent).
+    client_server_name: Option<String>,
 }
 
 impl Drop for Tls12ServerHandshake {
@@ -108,11 +122,23 @@ impl Tls12ServerHandshake {
             ephemeral_key: None,
             master_secret: Vec::new(),
             client_sig_algs: Vec::new(),
+            negotiated_alpn: None,
+            client_server_name: None,
         }
     }
 
     pub fn state(&self) -> Tls12ServerState {
         self.state
+    }
+
+    /// Get the negotiated ALPN protocol (if any).
+    pub fn negotiated_alpn(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Get the client's SNI hostname (if sent).
+    pub fn client_server_name(&self) -> Option<&str> {
+        self.client_server_name.as_deref()
     }
 
     /// Process ClientHello and build the full server flight.
@@ -134,6 +160,7 @@ impl Tls12ServerHandshake {
 
         // Parse extensions
         let mut client_groups = Vec::new();
+        let mut client_alpn_protocols = Vec::new();
         for ext in &ch.extensions {
             match ext.extension_type {
                 ExtensionType::SIGNATURE_ALGORITHMS => {
@@ -142,7 +169,23 @@ impl Tls12ServerHandshake {
                 ExtensionType::SUPPORTED_GROUPS => {
                     client_groups = parse_supported_groups_ch(&ext.data)?;
                 }
+                ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION => {
+                    client_alpn_protocols = parse_alpn_ch(&ext.data)?;
+                }
+                ExtensionType::SERVER_NAME => {
+                    self.client_server_name = Some(parse_server_name(&ext.data)?);
+                }
                 _ => {} // ignore other extensions
+            }
+        }
+
+        // Negotiate ALPN
+        if !client_alpn_protocols.is_empty() && !self.config.alpn_protocols.is_empty() {
+            for server_proto in &self.config.alpn_protocols {
+                if client_alpn_protocols.contains(server_proto) {
+                    self.negotiated_alpn = Some(server_proto.clone());
+                    break;
+                }
             }
         }
 
@@ -165,12 +208,19 @@ impl Tls12ServerHandshake {
         // Negotiate group
         let group = negotiate_group(&client_groups, &self.config.supported_groups)?;
 
+        // Build ServerHello extensions
+        let mut sh_extensions = Vec::new();
+        if let Some(ref alpn) = self.negotiated_alpn {
+            sh_extensions
+                .push(crate::handshake::extensions_codec::build_alpn_selected(alpn));
+        }
+
         // Build ServerHello
         let sh = ServerHello {
             random: self.server_random,
             legacy_session_id: ch.legacy_session_id.clone(),
             cipher_suite: suite,
-            extensions: Vec::new(), // TLS 1.2 ServerHello: no extensions needed for ECDHE-GCM
+            extensions: sh_extensions,
         };
         let sh_msg = encode_server_hello(&sh);
         self.transcript.update(&sh_msg)?;
@@ -277,10 +327,14 @@ impl Tls12ServerHandshake {
 
         Ok(Tls12DerivedKeys {
             master_secret,
+            client_write_mac_key: key_block.client_write_mac_key.clone(),
+            server_write_mac_key: key_block.server_write_mac_key.clone(),
             client_write_key: key_block.client_write_key.clone(),
             server_write_key: key_block.server_write_key.clone(),
             client_write_iv: key_block.client_write_iv.clone(),
             server_write_iv: key_block.server_write_iv.clone(),
+            is_cbc: params.is_cbc,
+            mac_len: params.mac_len,
         })
     }
 

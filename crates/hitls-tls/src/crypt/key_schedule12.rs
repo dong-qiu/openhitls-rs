@@ -11,12 +11,13 @@ use zeroize::Zeroize;
 
 type Factory = dyn Fn() -> Box<dyn Digest> + Send + Sync;
 
-/// TLS 1.2 key block: symmetric keys and IVs for both directions.
+/// TLS 1.2 key block: MAC keys (CBC only), symmetric keys, and IVs.
 ///
-/// For GCM cipher suites, there are no MAC keys — the AEAD handles
-/// authentication internally. The IV is the 4-byte "fixed" portion;
-/// the remaining 8 bytes (explicit nonce) are sent with each record.
+/// For GCM/ChaCha20 suites, MAC keys are empty (AEAD handles auth).
+/// For CBC suites, MAC keys are extracted first per RFC 5246 §6.3.
 pub struct Tls12KeyBlock {
+    pub client_write_mac_key: Vec<u8>,
+    pub server_write_mac_key: Vec<u8>,
     pub client_write_key: Vec<u8>,
     pub server_write_key: Vec<u8>,
     pub client_write_iv: Vec<u8>,
@@ -25,6 +26,8 @@ pub struct Tls12KeyBlock {
 
 impl Drop for Tls12KeyBlock {
     fn drop(&mut self) {
+        self.client_write_mac_key.zeroize();
+        self.server_write_mac_key.zeroize();
         self.client_write_key.zeroize();
         self.server_write_key.zeroize();
         self.client_write_iv.zeroize();
@@ -79,7 +82,12 @@ pub fn derive_key_block(
     let total_len = params.key_block_len();
     let key_block = prf(factory, master_secret, "key expansion", &seed, total_len)?;
 
+    // RFC 5246 §6.3: MAC keys → enc keys → IVs
     let mut offset = 0;
+    let client_write_mac_key = key_block[offset..offset + params.mac_key_len].to_vec();
+    offset += params.mac_key_len;
+    let server_write_mac_key = key_block[offset..offset + params.mac_key_len].to_vec();
+    offset += params.mac_key_len;
     let client_write_key = key_block[offset..offset + params.key_len].to_vec();
     offset += params.key_len;
     let server_write_key = key_block[offset..offset + params.key_len].to_vec();
@@ -89,6 +97,8 @@ pub fn derive_key_block(
     let server_write_iv = key_block[offset..offset + params.fixed_iv_len].to_vec();
 
     Ok(Tls12KeyBlock {
+        client_write_mac_key,
+        server_write_mac_key,
         client_write_key,
         server_write_key,
         client_write_iv,
