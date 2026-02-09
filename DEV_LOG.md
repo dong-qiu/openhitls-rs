@@ -2845,3 +2845,66 @@ New tests (28):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 834 workspace tests passing (19 ignored)
+
+## Phase 31: s_client CLI + Network I/O (Session 2026-02-10)
+
+### Goals
+- Implement `s_client` CLI command for connecting to real TLS servers over TCP
+- Support TLS 1.3 and TLS 1.2 version selection
+- Support --insecure, --CAfile, --alpn, --http, --quiet flags
+- Add TCP connect timeout for robustness
+- Interop tests against public servers (google.com, cloudflare.com)
+
+### Implementation
+
+#### Step 1: Expand SClient CLI Arguments
+- Added `--tls` (version: "1.2" or "1.3", default "1.3")
+- Added `--CAfile` (PEM CA certificate file for server verification)
+- Added `--insecure` (skip certificate verification)
+- Added `--http` (send HTTP GET / and print response)
+- Added `--quiet` (suppress connection info)
+- Added `mod s_client` declaration
+
+#### Step 2: Implement s_client Module
+- `parse_connect()`: parse "host:port" or "host" (default port 443)
+- DNS resolve with `ToSocketAddrs` + `TcpStream::connect_timeout()` (10s)
+- Read/write timeout (10s) on TCP stream
+- `TlsConfig::builder()` with SNI, verify_peer, cipher suites per version
+- CA cert loading via `Certificate::from_pem()` → `.raw` → `.trusted_cert()`
+- ALPN via comma-separated string → `.alpn()`
+- Version dispatch: TLS 1.3 → `TlsClientConnection`, TLS 1.2 → `Tls12ClientConnection`
+- `print_connection_info()`: display protocol version + cipher suite
+- `do_http()`: send GET request, read response in loop, handle close_notify/alerts/connection reset
+
+#### Step 3: Enable tls12 Feature
+- Updated `hitls-cli/Cargo.toml`: `hitls-tls = { features = ["tls13", "tls12"] }`
+
+#### Step 4: Interop Tests
+- 5 `#[ignore]` tests (require internet): TLS 1.3 google, TLS 1.2 google, HTTP GET, TLS 1.3 cloudflare, TLS 1.2 with ALPN
+
+### Files Changed
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `hitls-cli/src/main.rs` | Modified | Expanded SClient args + dispatch to s_client::run() |
+| `hitls-cli/src/s_client.rs` | **New** | s_client implementation + 4 unit tests + 5 interop tests |
+| `hitls-cli/Cargo.toml` | Modified | Enable tls12 feature |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-auth | 20 | All pass |
+| hitls-bignum | 46 | All pass |
+| hitls-cli | 4 (+5 ignored) | All pass |
+| hitls-crypto | 330 (19 ignored) | All pass |
+| hitls-pki | 98 | All pass |
+| hitls-tls | 291 | All pass |
+| hitls-utils | 35 | All pass |
+| integration | 14 | All pass |
+| **Total** | **838** | **All pass (24 ignored)** |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 838 workspace tests passing (24 ignored)

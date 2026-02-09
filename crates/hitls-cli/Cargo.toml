@@ -19,7 +19,7 @@ hitls-crypto = { path = "../hitls-crypto", features = [
     "rsa", "ecdsa", "ed25519", "x25519",
     "mlkem", "mldsa",
 ] }
-hitls-tls = { path = "../hitls-tls" }
+hitls-tls = { path = "../hitls-tls", features = ["tls13", "tls12"] }
 hitls-pki = { path = "../hitls-pki" }
 hitls-auth = { path = "../hitls-auth" }
 hitls-utils = { path = "../hitls-utils" }

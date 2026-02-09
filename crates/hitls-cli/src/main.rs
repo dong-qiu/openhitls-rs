@@ -6,6 +6,7 @@ mod enc;
 mod genpkey;
 mod pkey;
 mod req;
+mod s_client;
 mod verify;
 mod x509cmd;
 
@@ -116,11 +117,26 @@ enum Commands {
     },
     /// TLS client connection.
     SClient {
-        /// Host:port to connect to.
+        /// Host:port to connect to (default port 443).
         connect: String,
-        /// ALPN protocols.
+        /// ALPN protocols (comma-separated, e.g. "h2,http/1.1").
         #[arg(long)]
         alpn: Option<String>,
+        /// TLS version: "1.2" or "1.3".
+        #[arg(long = "tls", default_value = "1.3")]
+        tls_version: String,
+        /// CA certificate file (PEM) for server verification.
+        #[arg(long = "CAfile")]
+        ca_file: Option<String>,
+        /// Skip server certificate verification.
+        #[arg(long)]
+        insecure: bool,
+        /// Send HTTP GET / after handshake and print response.
+        #[arg(long)]
+        http: bool,
+        /// Quiet mode: suppress connection info.
+        #[arg(long, short)]
+        quiet: bool,
     },
     /// TLS server.
     SServer {
@@ -171,10 +187,23 @@ fn main() {
         } => x509cmd::run(input, *text, *fingerprint),
         Commands::Verify { ca_file, cert } => verify::run(ca_file, cert),
         Commands::Crl { input, text } => crl::run(input, *text),
-        Commands::SClient { connect, alpn } => {
-            eprintln!("TLS client is not yet implemented (connect={connect}, alpn={alpn:?})");
-            Ok(())
-        }
+        Commands::SClient {
+            connect,
+            alpn,
+            tls_version,
+            ca_file,
+            insecure,
+            http,
+            quiet,
+        } => s_client::run(
+            connect,
+            alpn.as_deref(),
+            tls_version,
+            ca_file.as_deref(),
+            *insecure,
+            *http,
+            *quiet,
+        ),
         Commands::SServer { port, cert, key } => {
             eprintln!("TLS server is not yet implemented (port={port}, cert={cert}, key={key})");
             Ok(())

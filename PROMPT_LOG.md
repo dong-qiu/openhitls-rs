@@ -1200,3 +1200,21 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - 0 new files, 5 modified files
 
 834 total tests (19 ignored). Clippy clean, fmt clean.
+
+---
+
+### Phase 31 (2026-02-10)
+
+**Prompt**: Implement Phase 31 — s_client CLI command with real TCP/TLS connectivity. Support TLS 1.3 and 1.2 version selection, certificate verification (--CAfile/--insecure), ALPN, HTTP GET mode, and interop tests against public servers.
+
+**Result**: 4 new unit tests + 5 ignored interop tests (838 total). Complete implementation with:
+- `s_client.rs` module: TCP connect with 10s timeout, TLS config builder, version dispatch (TLS 1.3 / 1.2)
+- CLI args: --tls (version), --CAfile (PEM CA cert), --insecure, --http, --alpn, --quiet
+- `parse_connect()`: host:port parsing with default port 443
+- `do_http()`: HTTP GET / with response reading, handles close_notify/alerts/connection reset
+- CA cert loading via `Certificate::from_pem()` → `.trusted_cert(der)`
+- ALPN via comma-separated string split
+- Enabled tls12 feature in hitls-cli Cargo.toml
+- 1 new file, 2 modified files
+
+838 total tests (24 ignored). Clippy clean, fmt clean.

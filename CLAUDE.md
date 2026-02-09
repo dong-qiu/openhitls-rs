@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 30 complete — TLS 1.2 Session Resumption + Client Certificate Auth (mTLS)
+- **Status**: Phase 31 complete — s_client CLI + Network I/O
 
 ## Workspace Structure
 
@@ -22,7 +22,7 @@ openhitls-rs/
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, TLS 1.2 handshake (ECDHE-GCM/CBC/ChaCha20, ALPN, SNI, session resumption, mTLS), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), TLS 1.2 PRF (291 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, Certificate generation, SigningKey abstraction), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652), PKCS#8 (RFC 5958) (98 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (20 tests)
-│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req)
+│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client)
 ├── tests/interop/       # Integration tests (14 cross-crate tests)
 ├── tests/vectors/       # Standard test vectors
 └── benches/             # Performance benchmarks
@@ -34,7 +34,7 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (834 tests, 19 ignored for slow keygen)
+# Run all tests (838 tests, 24 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
