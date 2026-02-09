@@ -27,6 +27,8 @@ pub fn select_signature_scheme(
             SignatureScheme::RSA_PSS_RSAE_SHA384,
             SignatureScheme::RSA_PSS_RSAE_SHA512,
         ],
+        #[cfg(feature = "tlcp")]
+        ServerPrivateKey::Sm2 { .. } => &[SignatureScheme::SM2_SM3],
     };
 
     for candidate in candidates {
@@ -85,6 +87,13 @@ pub fn sign_certificate_verify(
             rsa_key
                 .sign(hitls_crypto::rsa::RsaPadding::Pss, &digest)
                 .map_err(TlsError::CryptoError)
+        }
+        #[cfg(feature = "tlcp")]
+        ServerPrivateKey::Sm2 { private_key } => {
+            // SM2 signing: SM3 hash of content, then SM2 sign
+            let kp = hitls_crypto::sm2::Sm2KeyPair::from_private_key(private_key)
+                .map_err(TlsError::CryptoError)?;
+            kp.sign(&content).map_err(TlsError::CryptoError)
         }
     }
 }

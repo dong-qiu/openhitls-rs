@@ -8,11 +8,15 @@ pub mod encryption;
 pub mod encryption12;
 #[cfg(feature = "dtls12")]
 pub mod encryption_dtls12;
+#[cfg(feature = "tlcp")]
+pub mod encryption_tlcp;
 
 use crate::crypt::traffic_keys::TrafficKeys;
 use crate::CipherSuite;
 use encryption::{RecordDecryptor, RecordEncryptor, MAX_PLAINTEXT_LENGTH, TLS13_LEGACY_VERSION};
 use encryption12::{RecordDecryptor12, RecordEncryptor12};
+#[cfg(feature = "tlcp")]
+use encryption_tlcp::{TlcpDecryptor, TlcpEncryptor};
 use hitls_types::TlsError;
 
 /// TLS record content types.
@@ -49,6 +53,12 @@ pub struct RecordLayer {
     encryptor12: Option<RecordEncryptor12>,
     /// Optional TLS 1.2 decryptor for incoming records.
     decryptor12: Option<RecordDecryptor12>,
+    /// Optional TLCP encryptor for outgoing records.
+    #[cfg(feature = "tlcp")]
+    encryptor_tlcp: Option<TlcpEncryptor>,
+    /// Optional TLCP decryptor for incoming records.
+    #[cfg(feature = "tlcp")]
+    decryptor_tlcp: Option<TlcpDecryptor>,
 }
 
 impl RecordLayer {
@@ -59,17 +69,35 @@ impl RecordLayer {
             decryptor: None,
             encryptor12: None,
             decryptor12: None,
+            #[cfg(feature = "tlcp")]
+            encryptor_tlcp: None,
+            #[cfg(feature = "tlcp")]
+            decryptor_tlcp: None,
         }
     }
 
-    /// Returns true if write encryption is active (TLS 1.2 or 1.3).
+    /// Returns true if write encryption is active (TLS 1.2, 1.3, or TLCP).
     pub fn is_encrypting(&self) -> bool {
-        self.encryptor.is_some() || self.encryptor12.is_some()
+        if self.encryptor.is_some() || self.encryptor12.is_some() {
+            return true;
+        }
+        #[cfg(feature = "tlcp")]
+        if self.encryptor_tlcp.is_some() {
+            return true;
+        }
+        false
     }
 
-    /// Returns true if read decryption is active (TLS 1.2 or 1.3).
+    /// Returns true if read decryption is active (TLS 1.2, 1.3, or TLCP).
     pub fn is_decrypting(&self) -> bool {
-        self.decryptor.is_some() || self.decryptor12.is_some()
+        if self.decryptor.is_some() || self.decryptor12.is_some() {
+            return true;
+        }
+        #[cfg(feature = "tlcp")]
+        if self.decryptor_tlcp.is_some() {
+            return true;
+        }
+        false
     }
 
     /// Activate write encryption with the given traffic keys.
@@ -130,16 +158,40 @@ impl RecordLayer {
         Ok(())
     }
 
+    /// Activate TLCP write encryption.
+    #[cfg(feature = "tlcp")]
+    pub fn activate_write_encryption_tlcp(&mut self, enc: TlcpEncryptor) {
+        self.encryptor = None;
+        self.encryptor12 = None;
+        self.encryptor_tlcp = Some(enc);
+    }
+
+    /// Activate TLCP read decryption.
+    #[cfg(feature = "tlcp")]
+    pub fn activate_read_decryption_tlcp(&mut self, dec: TlcpDecryptor) {
+        self.decryptor = None;
+        self.decryptor12 = None;
+        self.decryptor_tlcp = Some(dec);
+    }
+
     /// Deactivate write encryption (return to plaintext mode).
     pub fn deactivate_write_encryption(&mut self) {
         self.encryptor = None;
         self.encryptor12 = None;
+        #[cfg(feature = "tlcp")]
+        {
+            self.encryptor_tlcp = None;
+        }
     }
 
     /// Deactivate read decryption (return to plaintext mode).
     pub fn deactivate_read_decryption(&mut self) {
         self.decryptor = None;
         self.decryptor12 = None;
+        #[cfg(feature = "tlcp")]
+        {
+            self.decryptor_tlcp = None;
+        }
     }
 
     /// Encrypt (if active) and serialize a record for sending.
@@ -161,6 +213,11 @@ impl RecordLayer {
         } else if let Some(enc12) = &mut self.encryptor12 {
             enc12.encrypt_record(content_type, plaintext)?
         } else {
+            #[cfg(feature = "tlcp")]
+            if let Some(enc_tlcp) = &mut self.encryptor_tlcp {
+                let record = enc_tlcp.encrypt_record(content_type, plaintext)?;
+                return Ok(self.serialize_record(&record));
+            }
             Record {
                 content_type,
                 version: TLS13_LEGACY_VERSION,
@@ -189,6 +246,14 @@ impl RecordLayer {
         if let Some(dec12) = &mut self.decryptor12 {
             if record.content_type != ContentType::ChangeCipherSpec {
                 let pt = dec12.decrypt_record(&record)?;
+                return Ok((record.content_type, pt, consumed));
+            }
+        }
+        // TLCP: encrypted records keep their actual content type
+        #[cfg(feature = "tlcp")]
+        if let Some(dec_tlcp) = &mut self.decryptor_tlcp {
+            if record.content_type != ContentType::ChangeCipherSpec {
+                let pt = dec_tlcp.decrypt_record(&record)?;
                 return Ok((record.content_type, pt, consumed));
             }
         }

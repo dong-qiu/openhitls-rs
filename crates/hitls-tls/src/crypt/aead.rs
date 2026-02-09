@@ -102,6 +102,53 @@ impl TlsAead for ChaCha20Poly1305Aead {
     }
 }
 
+/// SM4-GCM AEAD (128-bit key only).
+#[cfg(feature = "tlcp")]
+pub struct Sm4GcmAead {
+    key: Vec<u8>,
+}
+
+#[cfg(feature = "tlcp")]
+impl Sm4GcmAead {
+    pub fn new(key: &[u8]) -> Result<Self, TlsError> {
+        if key.len() != 16 {
+            return Err(TlsError::HandshakeFailed(
+                "SM4-GCM: key must be 16 bytes".into(),
+            ));
+        }
+        Ok(Self { key: key.to_vec() })
+    }
+}
+
+#[cfg(feature = "tlcp")]
+impl Drop for Sm4GcmAead {
+    fn drop(&mut self) {
+        self.key.zeroize();
+    }
+}
+
+#[cfg(feature = "tlcp")]
+impl TlsAead for Sm4GcmAead {
+    fn encrypt(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, TlsError> {
+        hitls_crypto::modes::gcm::sm4_gcm_encrypt(&self.key, nonce, aad, plaintext)
+            .map_err(TlsError::CryptoError)
+    }
+
+    fn decrypt(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        ciphertext_with_tag: &[u8],
+    ) -> Result<Vec<u8>, TlsError> {
+        hitls_crypto::modes::gcm::sm4_gcm_decrypt(&self.key, nonce, aad, ciphertext_with_tag)
+            .map_err(TlsError::CryptoError)
+    }
+
+    fn tag_size(&self) -> usize {
+        16
+    }
+}
+
 /// Create a TlsAead instance for the given cipher suite and key.
 pub fn create_aead(suite: CipherSuite, key: &[u8]) -> Result<Box<dyn TlsAead>, TlsError> {
     match suite {
@@ -111,6 +158,12 @@ pub fn create_aead(suite: CipherSuite, key: &[u8]) -> Result<Box<dyn TlsAead>, T
         CipherSuite::TLS_CHACHA20_POLY1305_SHA256 => Ok(Box::new(ChaCha20Poly1305Aead::new(key)?)),
         _ => Err(TlsError::NoSharedCipherSuite),
     }
+}
+
+/// Create an SM4-GCM AEAD instance.
+#[cfg(feature = "tlcp")]
+pub fn create_sm4_gcm_aead(key: &[u8]) -> Result<Box<dyn TlsAead>, TlsError> {
+    Ok(Box::new(Sm4GcmAead::new(key)?))
 }
 
 #[cfg(test)]

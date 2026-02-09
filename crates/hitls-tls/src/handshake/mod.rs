@@ -4,10 +4,14 @@ pub mod client;
 pub mod client12;
 #[cfg(feature = "dtls12")]
 pub mod client_dtls12;
+#[cfg(feature = "tlcp")]
+pub mod client_tlcp;
 pub mod codec;
 pub mod codec12;
 #[cfg(feature = "dtls12")]
 pub mod codec_dtls;
+#[cfg(feature = "tlcp")]
+pub mod codec_tlcp;
 pub mod extensions_codec;
 #[cfg(feature = "dtls12")]
 pub mod fragment;
@@ -18,6 +22,8 @@ pub mod server;
 pub mod server12;
 #[cfg(feature = "dtls12")]
 pub mod server_dtls12;
+#[cfg(feature = "tlcp")]
+pub mod server_tlcp;
 pub mod signing;
 pub mod verify;
 

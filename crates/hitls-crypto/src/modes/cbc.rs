@@ -1,6 +1,7 @@
 //! CBC (Cipher Block Chaining) mode of operation.
 
 use crate::aes::{AesKey, AES_BLOCK_SIZE};
+use crate::provider::BlockCipher;
 use hitls_types::CryptoError;
 use subtle::ConstantTimeEq;
 
@@ -67,6 +68,93 @@ pub fn cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, 
     }
     output.truncate(output.len() - pad_val);
     Ok(output)
+}
+
+/// Encrypt data using CBC mode with a generic block cipher and PKCS#7 padding.
+pub fn cbc_encrypt_with(
+    cipher: &dyn BlockCipher,
+    iv: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let bs = cipher.block_size();
+    if iv.len() != bs {
+        return Err(CryptoError::InvalidIvLength);
+    }
+
+    // PKCS#7 padding
+    let pad_len = bs - (plaintext.len() % bs);
+    let mut data = plaintext.to_vec();
+    data.extend(vec![pad_len as u8; pad_len]);
+
+    let mut prev = vec![0u8; bs];
+    prev.copy_from_slice(iv);
+
+    for chunk in data.chunks_mut(bs) {
+        for i in 0..bs {
+            chunk[i] ^= prev[i];
+        }
+        cipher.encrypt_block(chunk)?;
+        prev.copy_from_slice(chunk);
+    }
+    Ok(data)
+}
+
+/// Decrypt data using CBC mode with a generic block cipher and remove PKCS#7 padding.
+pub fn cbc_decrypt_with(
+    cipher: &dyn BlockCipher,
+    iv: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let bs = cipher.block_size();
+    if iv.len() != bs {
+        return Err(CryptoError::InvalidIvLength);
+    }
+    if ciphertext.len() % bs != 0 || ciphertext.is_empty() {
+        return Err(CryptoError::InvalidArg);
+    }
+
+    let mut output = ciphertext.to_vec();
+    let mut prev = vec![0u8; bs];
+    prev.copy_from_slice(iv);
+
+    for chunk in output.chunks_mut(bs) {
+        let ct_copy: Vec<u8> = chunk.to_vec();
+        cipher.decrypt_block(chunk)?;
+        for i in 0..bs {
+            chunk[i] ^= prev[i];
+        }
+        prev.copy_from_slice(&ct_copy);
+    }
+
+    // PKCS#7 unpad (constant-time check)
+    let pad_val = *output.last().ok_or(CryptoError::InvalidPadding)? as usize;
+    if pad_val == 0 || pad_val > bs {
+        return Err(CryptoError::InvalidPadding);
+    }
+    let pad_byte = pad_val as u8;
+    let mut valid = 1u8;
+    for &b in &output[output.len() - pad_val..] {
+        valid &= b.ct_eq(&pad_byte).unwrap_u8();
+    }
+    if valid != 1 {
+        return Err(CryptoError::InvalidPadding);
+    }
+    output.truncate(output.len() - pad_val);
+    Ok(output)
+}
+
+/// Encrypt data using CBC mode with SM4 and PKCS#7 padding.
+#[cfg(feature = "sm4")]
+pub fn sm4_cbc_encrypt(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+    cbc_encrypt_with(&cipher, iv, plaintext)
+}
+
+/// Decrypt data using CBC mode with SM4 and remove PKCS#7 padding.
+#[cfg(feature = "sm4")]
+pub fn sm4_cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+    cbc_decrypt_with(&cipher, iv, ciphertext)
 }
 
 #[cfg(test)]
@@ -136,6 +224,48 @@ mod tests {
     fn test_cbc_invalid_iv() {
         let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
         assert!(cbc_encrypt(&key, &[0u8; 15], b"test").is_err());
+    }
+
+    #[cfg(feature = "sm4")]
+    #[test]
+    fn test_sm4_cbc_encrypt_decrypt_roundtrip() {
+        let key = [0x42u8; 16]; // SM4 128-bit key
+        let iv = [0x01u8; 16];
+        let plaintext = b"hello SM4-CBC with PKCS7 padding";
+
+        let ct = sm4_cbc_encrypt(&key, &iv, plaintext).unwrap();
+        // 32 bytes plaintext → 32 bytes + 16 bytes padding block = 48 bytes
+        assert_eq!(ct.len(), 48);
+
+        let pt = sm4_cbc_decrypt(&key, &iv, &ct).unwrap();
+        assert_eq!(pt, plaintext);
+    }
+
+    #[cfg(feature = "sm4")]
+    #[test]
+    fn test_sm4_cbc_pkcs7_padding() {
+        let key = [0x55u8; 16];
+        let iv = [0xaau8; 16];
+
+        // Test short input (5 bytes → needs 11 bytes padding → 1 block)
+        let pt_short = b"ABCDE";
+        let ct = sm4_cbc_encrypt(&key, &iv, pt_short).unwrap();
+        assert_eq!(ct.len(), 16);
+        let decrypted = sm4_cbc_decrypt(&key, &iv, &ct).unwrap();
+        assert_eq!(decrypted, pt_short);
+
+        // Test aligned input (16 bytes → gets full 16-byte padding block → 2 blocks)
+        let pt_aligned = [0xbbu8; 16];
+        let ct = sm4_cbc_encrypt(&key, &iv, &pt_aligned).unwrap();
+        assert_eq!(ct.len(), 32);
+        let decrypted = sm4_cbc_decrypt(&key, &iv, &ct).unwrap();
+        assert_eq!(decrypted, pt_aligned);
+
+        // Test empty input (→ 16 bytes padding-only block)
+        let ct = sm4_cbc_encrypt(&key, &iv, b"").unwrap();
+        assert_eq!(ct.len(), 16);
+        let decrypted = sm4_cbc_decrypt(&key, &iv, &ct).unwrap();
+        assert!(decrypted.is_empty());
     }
 
     // NIST SP 800-38A F.2.1: verify first ciphertext block

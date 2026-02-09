@@ -9,6 +9,8 @@ use hitls_types::TlsError;
 enum KeyExchangeInner {
     X25519(X25519PrivateKey),
     EcdhP256(Box<EcdhKeyPair>),
+    #[cfg(feature = "tlcp")]
+    EcdhSm2(Box<EcdhKeyPair>),
 }
 
 /// Ephemeral key exchange state for a TLS handshake.
@@ -44,6 +46,17 @@ impl KeyExchange {
                     public_key_bytes,
                 })
             }
+            #[cfg(feature = "tlcp")]
+            NamedGroup::SM2P256 => {
+                let kp = EcdhKeyPair::generate(hitls_types::EccCurveId::Sm2Prime256)
+                    .map_err(TlsError::CryptoError)?;
+                let public_key_bytes = kp.public_key_bytes().map_err(TlsError::CryptoError)?;
+                Ok(Self {
+                    group,
+                    inner: KeyExchangeInner::EcdhSm2(Box::new(kp)),
+                    public_key_bytes,
+                })
+            }
             _ => Err(TlsError::HandshakeFailed(format!(
                 "unsupported named group: {:?}",
                 group
@@ -71,6 +84,10 @@ impl KeyExchange {
                     .map_err(TlsError::CryptoError)
             }
             KeyExchangeInner::EcdhP256(kp) => kp
+                .compute_shared_secret(peer_public)
+                .map_err(TlsError::CryptoError),
+            #[cfg(feature = "tlcp")]
+            KeyExchangeInner::EcdhSm2(kp) => kp
                 .compute_shared_secret(peer_public)
                 .map_err(TlsError::CryptoError),
         }
@@ -112,5 +129,20 @@ mod tests {
     #[test]
     fn test_unsupported_group() {
         assert!(KeyExchange::generate(NamedGroup::X448).is_err());
+    }
+
+    #[cfg(feature = "tlcp")]
+    #[test]
+    fn test_key_exchange_sm2() {
+        let kx = KeyExchange::generate(NamedGroup::SM2P256).unwrap();
+        assert_eq!(kx.group(), NamedGroup::SM2P256);
+        // SM2 uncompressed point: 0x04 || x(32) || y(32) = 65 bytes
+        assert_eq!(kx.public_key_bytes().len(), 65);
+
+        let peer = KeyExchange::generate(NamedGroup::SM2P256).unwrap();
+        let shared1 = kx.compute_shared_secret(peer.public_key_bytes()).unwrap();
+        let shared2 = peer.compute_shared_secret(kx.public_key_bytes()).unwrap();
+        assert_eq!(shared1, shared2);
+        assert_eq!(shared1.len(), 32); // SM2 field size
     }
 }

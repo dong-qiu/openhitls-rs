@@ -1,9 +1,11 @@
 //! GCM (Galois/Counter Mode) authenticated encryption.
 //!
-//! Implements AES-GCM as defined in NIST SP 800-38D.
+//! Implements GCM as defined in NIST SP 800-38D.
 //! Provides authenticated encryption with associated data (AEAD).
+//! Supports AES-GCM and SM4-GCM via the `BlockCipher` trait.
 
-use crate::aes::{AesKey, AES_BLOCK_SIZE};
+use crate::aes::AesKey;
+use crate::provider::BlockCipher;
 use hitls_types::CryptoError;
 use subtle::ConstantTimeEq;
 
@@ -149,14 +151,16 @@ fn inc32(counter: &mut [u8; 16]) {
     counter[12..16].copy_from_slice(&ctr.to_be_bytes());
 }
 
-/// Internal GCM encrypt/decrypt.
-fn gcm_crypt_internal(
-    cipher: &AesKey,
+/// Internal GCM encrypt/decrypt (generic over block cipher).
+fn gcm_crypt_generic(
+    cipher: &dyn BlockCipher,
     nonce: &[u8],
     aad: &[u8],
     input: &[u8],
     encrypting: bool,
 ) -> Result<(Vec<u8>, [u8; GCM_TAG_SIZE]), CryptoError> {
+    let block_size = cipher.block_size();
+
     // Compute H = Encrypt(0^128)
     let mut h_block = [0u8; 16];
     cipher.encrypt_block(&mut h_block)?;
@@ -187,7 +191,7 @@ fn gcm_crypt_internal(
     inc32(&mut counter);
 
     let mut output = input.to_vec();
-    for chunk in output.chunks_mut(AES_BLOCK_SIZE) {
+    for chunk in output.chunks_mut(block_size) {
         let mut keystream = counter;
         cipher.encrypt_block(&mut keystream)?;
         for (d, &k) in chunk.iter_mut().zip(keystream.iter()) {
@@ -228,7 +232,7 @@ pub fn gcm_encrypt(
     plaintext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     let cipher = AesKey::new(key)?;
-    let (mut ct, tag) = gcm_crypt_internal(&cipher, nonce, aad, plaintext, true)?;
+    let (mut ct, tag) = gcm_crypt_generic(&cipher, nonce, aad, plaintext, true)?;
     ct.extend_from_slice(&tag);
     Ok(ct)
 }
@@ -249,9 +253,50 @@ pub fn gcm_decrypt(
     let (ct_data, received_tag) = ciphertext.split_at(ct_len);
 
     let cipher = AesKey::new(key)?;
-    let (plaintext, computed_tag) = gcm_crypt_internal(&cipher, nonce, aad, ct_data, false)?;
+    let (plaintext, computed_tag) = gcm_crypt_generic(&cipher, nonce, aad, ct_data, false)?;
 
     // Constant-time tag comparison
+    if computed_tag.ct_eq(received_tag).unwrap_u8() != 1 {
+        return Err(CryptoError::AeadTagVerifyFail);
+    }
+
+    Ok(plaintext)
+}
+
+/// Encrypt and authenticate data using SM4-GCM.
+/// Returns ciphertext || 16-byte tag.
+#[cfg(feature = "sm4")]
+pub fn sm4_gcm_encrypt(
+    key: &[u8],
+    nonce: &[u8],
+    aad: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+    let (mut ct, tag) = gcm_crypt_generic(&cipher, nonce, aad, plaintext, true)?;
+    ct.extend_from_slice(&tag);
+    Ok(ct)
+}
+
+/// Decrypt and verify data using SM4-GCM.
+/// `ciphertext` includes the appended 16-byte tag.
+/// Returns plaintext on success, or error if authentication fails.
+#[cfg(feature = "sm4")]
+pub fn sm4_gcm_decrypt(
+    key: &[u8],
+    nonce: &[u8],
+    aad: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    if ciphertext.len() < GCM_TAG_SIZE {
+        return Err(CryptoError::InvalidArg);
+    }
+    let ct_len = ciphertext.len() - GCM_TAG_SIZE;
+    let (ct_data, received_tag) = ciphertext.split_at(ct_len);
+
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+    let (plaintext, computed_tag) = gcm_crypt_generic(&cipher, nonce, aad, ct_data, false)?;
+
     if computed_tag.ct_eq(received_tag).unwrap_u8() != 1 {
         return Err(CryptoError::AeadTagVerifyFail);
     }
@@ -347,5 +392,40 @@ mod tests {
         let key = hex_to_bytes("00000000000000000000000000000000");
         let nonce = hex_to_bytes("000000000000000000000000");
         assert!(gcm_decrypt(&key, &nonce, &[], &[0u8; 15]).is_err());
+    }
+
+    #[cfg(feature = "sm4")]
+    #[test]
+    fn test_sm4_gcm_encrypt_decrypt_roundtrip() {
+        use super::sm4_gcm_decrypt;
+        use super::sm4_gcm_encrypt;
+
+        let key = [0x42u8; 16]; // SM4 128-bit key
+        let nonce = [0x01u8; 12];
+        let aad = b"additional data";
+        let plaintext = b"hello SM4-GCM authenticated encryption";
+
+        let ct = sm4_gcm_encrypt(&key, &nonce, aad, plaintext).unwrap();
+        assert_eq!(ct.len(), plaintext.len() + 16); // ciphertext + 16-byte tag
+
+        let pt = sm4_gcm_decrypt(&key, &nonce, aad, &ct).unwrap();
+        assert_eq!(pt, plaintext);
+    }
+
+    #[cfg(feature = "sm4")]
+    #[test]
+    fn test_sm4_gcm_tampered_tag() {
+        use super::sm4_gcm_decrypt;
+        use super::sm4_gcm_encrypt;
+
+        let key = [0x42u8; 16];
+        let nonce = [0x01u8; 12];
+        let plaintext = b"secret message";
+
+        let mut ct = sm4_gcm_encrypt(&key, &nonce, &[], plaintext).unwrap();
+        // Tamper with the tag (last 16 bytes)
+        let len = ct.len();
+        ct[len - 1] ^= 0x01;
+        assert!(sm4_gcm_decrypt(&key, &nonce, &[], &ct).is_err());
     }
 }

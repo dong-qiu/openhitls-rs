@@ -170,6 +170,12 @@ pub mod known {
     pub fn sm2_sign() -> Oid {
         Oid::new(&[1, 2, 156, 10197, 1, 301, 1])
     }
+    pub fn sm2_curve() -> Oid {
+        Oid::new(&[1, 2, 156, 10197, 1, 301])
+    }
+    pub fn sm2_with_sm3() -> Oid {
+        Oid::new(&[1, 2, 156, 10197, 1, 501])
+    }
     pub fn sm3() -> Oid {
         Oid::new(&[1, 2, 156, 10197, 1, 401])
     }

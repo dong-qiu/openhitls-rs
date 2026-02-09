@@ -1147,3 +1147,23 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - 9 new files, 6 modified files, all feature-gated with `#[cfg(feature = "dtls12")]`
 
 749 total tests (19 ignored). Clippy clean, fmt clean.
+
+## Phase 28: TLCP (GM/T 0024)
+
+**Prompt**: Implement TLCP (GM/T 0024 / GB/T 38636-2020) — China's Transport Layer Cryptography Protocol. 4 cipher suites with SM2/SM3/SM4, double certificate mechanism, ECDHE and ECC static key exchange modes, CBC MAC-then-encrypt and GCM AEAD record protection.
+
+**Result**: 39 new tests (245 - 210 = 35 tls tests + 4 additional). Complete TLCP implementation with:
+- 4 cipher suites: ECDHE_SM4_CBC_SM3 (0xE011), ECC_SM4_CBC_SM3 (0xE013), ECDHE_SM4_GCM_SM3 (0xE051), ECC_SM4_GCM_SM3 (0xE053)
+- Double certificate mechanism (signing + encryption)
+- Two key exchange modes: ECDHE (ephemeral SM2, forward secrecy) and ECC static (SM2 encryption)
+- CBC MAC-then-encrypt (HMAC-SM3 + SM4-CBC with TLS-style padding)
+- GCM AEAD (SM4-GCM, same pattern as TLS 1.2)
+- SM3-based PRF (same labels as TLS 1.2)
+- Full in-memory handshake tests for all 4 cipher suites
+- Application data exchange tests
+- Added SM2 support to PKI SigningKey, SM2 private_key_bytes() to hitls-crypto
+- Added SM4-GCM and SM4-CBC generic functions to hitls-crypto
+- 5 new files (connection_tlcp.rs, client_tlcp.rs, server_tlcp.rs, codec_tlcp.rs, encryption_tlcp.rs), 10 modified files
+- Feature-gated with `#[cfg(feature = "tlcp")]`
+
+788 total tests (19 ignored). Clippy clean, fmt clean.

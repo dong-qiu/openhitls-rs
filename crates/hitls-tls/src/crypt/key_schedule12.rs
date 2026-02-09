@@ -114,6 +114,78 @@ pub fn compute_verify_data(
     prf(factory, master_secret, label, handshake_hash, 12)
 }
 
+/// TLCP key block: MAC keys, symmetric keys, and IVs for both directions.
+///
+/// For CBC cipher suites: mac_key(32) + enc_key(16) + iv(16) per direction.
+/// For GCM cipher suites: enc_key(16) + fixed_iv(4) per direction (no MAC keys).
+#[cfg(feature = "tlcp")]
+pub struct TlcpKeyBlock {
+    pub client_write_mac_key: Vec<u8>,
+    pub server_write_mac_key: Vec<u8>,
+    pub client_write_key: Vec<u8>,
+    pub server_write_key: Vec<u8>,
+    pub client_write_iv: Vec<u8>,
+    pub server_write_iv: Vec<u8>,
+}
+
+#[cfg(feature = "tlcp")]
+impl Drop for TlcpKeyBlock {
+    fn drop(&mut self) {
+        self.client_write_mac_key.zeroize();
+        self.server_write_mac_key.zeroize();
+        self.client_write_key.zeroize();
+        self.server_write_key.zeroize();
+        self.client_write_iv.zeroize();
+        self.server_write_iv.zeroize();
+    }
+}
+
+/// Derive the TLCP key block from the master secret.
+///
+/// Key block layout (RFC 5246 §6.3, same for TLCP):
+/// ```text
+/// client_write_MAC_key[mac_key_len] || server_write_MAC_key[mac_key_len] ||
+/// client_write_key[enc_key_len] || server_write_key[enc_key_len] ||
+/// client_write_IV[iv_len] || server_write_IV[iv_len]
+/// ```
+#[cfg(feature = "tlcp")]
+pub fn derive_tlcp_key_block(
+    factory: &Factory,
+    master_secret: &[u8],
+    server_random: &[u8; 32],
+    client_random: &[u8; 32],
+    params: &crate::crypt::TlcpCipherSuiteParams,
+) -> Result<TlcpKeyBlock, TlsError> {
+    let mut seed = Vec::with_capacity(64);
+    seed.extend_from_slice(server_random);
+    seed.extend_from_slice(client_random);
+
+    let total_len = params.key_block_len();
+    let key_block = prf(factory, master_secret, "key expansion", &seed, total_len)?;
+
+    let mut offset = 0;
+    let client_write_mac_key = key_block[offset..offset + params.mac_key_len].to_vec();
+    offset += params.mac_key_len;
+    let server_write_mac_key = key_block[offset..offset + params.mac_key_len].to_vec();
+    offset += params.mac_key_len;
+    let client_write_key = key_block[offset..offset + params.enc_key_len].to_vec();
+    offset += params.enc_key_len;
+    let server_write_key = key_block[offset..offset + params.enc_key_len].to_vec();
+    offset += params.enc_key_len;
+    let client_write_iv = key_block[offset..offset + params.iv_len].to_vec();
+    offset += params.iv_len;
+    let server_write_iv = key_block[offset..offset + params.iv_len].to_vec();
+
+    Ok(TlcpKeyBlock {
+        client_write_mac_key,
+        server_write_mac_key,
+        client_write_key,
+        server_write_key,
+        client_write_iv,
+        server_write_iv,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,5 +345,79 @@ mod tests {
         .unwrap();
         // 2*32 + 2*4 = 72
         assert_eq!(params256.key_block_len(), 72);
+    }
+
+    #[cfg(feature = "tlcp")]
+    #[test]
+    fn test_derive_tlcp_key_block_cbc() {
+        use hitls_crypto::sm3::Sm3;
+
+        fn sm3_factory() -> Box<dyn Fn() -> Box<dyn Digest> + Send + Sync> {
+            Box::new(|| Box::new(Sm3::new()))
+        }
+
+        let factory = sm3_factory();
+        let master_secret = [0xABu8; 48];
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        let params =
+            crate::crypt::TlcpCipherSuiteParams::from_suite(crate::CipherSuite::ECDHE_SM4_CBC_SM3)
+                .unwrap();
+
+        let kb = derive_tlcp_key_block(
+            &*factory,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+
+        assert_eq!(kb.client_write_mac_key.len(), 32);
+        assert_eq!(kb.server_write_mac_key.len(), 32);
+        assert_eq!(kb.client_write_key.len(), 16);
+        assert_eq!(kb.server_write_key.len(), 16);
+        assert_eq!(kb.client_write_iv.len(), 16);
+        assert_eq!(kb.server_write_iv.len(), 16);
+        // All different
+        assert_ne!(kb.client_write_mac_key, kb.server_write_mac_key);
+        assert_ne!(kb.client_write_key, kb.server_write_key);
+    }
+
+    #[cfg(feature = "tlcp")]
+    #[test]
+    fn test_derive_tlcp_key_block_gcm() {
+        use hitls_crypto::sm3::Sm3;
+
+        fn sm3_factory() -> Box<dyn Fn() -> Box<dyn Digest> + Send + Sync> {
+            Box::new(|| Box::new(Sm3::new()))
+        }
+
+        let factory = sm3_factory();
+        let master_secret = [0xCDu8; 48];
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        let params =
+            crate::crypt::TlcpCipherSuiteParams::from_suite(crate::CipherSuite::ECDHE_SM4_GCM_SM3)
+                .unwrap();
+
+        let kb = derive_tlcp_key_block(
+            &*factory,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+
+        // GCM: no MAC keys
+        assert!(kb.client_write_mac_key.is_empty());
+        assert!(kb.server_write_mac_key.is_empty());
+        assert_eq!(kb.client_write_key.len(), 16);
+        assert_eq!(kb.server_write_key.len(), 16);
+        assert_eq!(kb.client_write_iv.len(), 4);
+        assert_eq!(kb.server_write_iv.len(), 4);
     }
 }

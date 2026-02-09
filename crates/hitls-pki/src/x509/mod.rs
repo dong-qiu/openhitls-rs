@@ -818,7 +818,7 @@ pub(crate) fn encode_validity(not_before: i64, not_after: i64) -> Vec<u8> {
 // SigningKey — unified signing dispatch
 // ---------------------------------------------------------------------------
 
-/// A private key that can sign data. Supports RSA, ECDSA, and Ed25519.
+/// A private key that can sign data. Supports RSA, ECDSA, Ed25519, and SM2.
 pub enum SigningKey {
     /// RSA private key (signs with SHA-256 + PKCS#1 v1.5).
     Rsa(hitls_crypto::rsa::RsaPrivateKey),
@@ -829,6 +829,8 @@ pub enum SigningKey {
     },
     /// Ed25519 private key (signs raw message).
     Ed25519(hitls_crypto::ed25519::Ed25519KeyPair),
+    /// SM2 private key (signs with SM2-SM3).
+    Sm2(hitls_crypto::sm2::Sm2KeyPair),
 }
 
 impl SigningKey {
@@ -880,6 +882,7 @@ impl SigningKey {
                 let sig = ed.sign(data).map_err(PkiError::from)?;
                 Ok(sig.to_vec())
             }
+            SigningKey::Sm2(sm2) => sm2.sign(data).map_err(PkiError::from),
         }
     }
 
@@ -897,15 +900,16 @@ impl SigningKey {
                 _ => known::ecdsa_with_sha256().to_der_value(),
             },
             SigningKey::Ed25519(_) => known::ed25519().to_der_value(),
+            SigningKey::Sm2(_) => known::sm2_with_sm3().to_der_value(),
         }
     }
 
     /// Get the signature algorithm parameters as full DER TLV.
-    /// Returns Some(NULL TLV) for RSA, None (absent) for ECDSA/Ed25519.
+    /// Returns Some(NULL TLV) for RSA, None (absent) for ECDSA/Ed25519/SM2.
     pub fn algorithm_params(&self) -> Option<Vec<u8>> {
         match self {
             SigningKey::Rsa(_) => Some(ALG_PARAMS_NULL.to_vec()),
-            SigningKey::Ecdsa { .. } | SigningKey::Ed25519(_) => None,
+            SigningKey::Ecdsa { .. } | SigningKey::Ed25519(_) | SigningKey::Sm2(_) => None,
         }
     }
 
@@ -944,6 +948,14 @@ impl SigningKey {
                 algorithm_params: None,
                 public_key: ed.public_key().to_vec(),
             }),
+            SigningKey::Sm2(sm2) => {
+                let pub_bytes = sm2.public_key_bytes().map_err(PkiError::from)?;
+                Ok(SubjectPublicKeyInfo {
+                    algorithm_oid: known::ec_public_key().to_der_value(),
+                    algorithm_params: Some(known::sm2_curve().to_der_value()),
+                    public_key: pub_bytes,
+                })
+            }
         }
     }
 }

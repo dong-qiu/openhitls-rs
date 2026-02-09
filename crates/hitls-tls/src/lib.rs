@@ -7,6 +7,8 @@ pub mod connection;
 pub mod connection12;
 #[cfg(feature = "dtls12")]
 pub mod connection_dtls12;
+#[cfg(feature = "tlcp")]
+pub mod connection_tlcp;
 pub mod crypt;
 pub mod extensions;
 pub mod handshake;
@@ -40,6 +42,12 @@ impl CipherSuite {
     pub const TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: Self = Self(0xC030);
     pub const TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256: Self = Self(0xC02B);
     pub const TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384: Self = Self(0xC02C);
+
+    // TLCP cipher suites (GM/T 0024)
+    pub const ECDHE_SM4_CBC_SM3: Self = Self(0xE011);
+    pub const ECC_SM4_CBC_SM3: Self = Self(0xE013);
+    pub const ECDHE_SM4_GCM_SM3: Self = Self(0xE051);
+    pub const ECC_SM4_GCM_SM3: Self = Self(0xE053);
 }
 
 /// The role of a TLS endpoint.

@@ -25,6 +25,9 @@ pub enum ServerPrivateKey {
         p: Vec<u8>,
         q: Vec<u8>,
     },
+    /// SM2 private key bytes (big-endian scalar on the SM2 curve).
+    #[cfg(feature = "tlcp")]
+    Sm2 { private_key: Vec<u8> },
 }
 
 impl Drop for ServerPrivateKey {
@@ -37,6 +40,8 @@ impl Drop for ServerPrivateKey {
                 p.zeroize();
                 q.zeroize();
             }
+            #[cfg(feature = "tlcp")]
+            ServerPrivateKey::Sm2 { private_key } => private_key.zeroize(),
         }
     }
 }
@@ -85,6 +90,13 @@ pub struct TlsConfig {
     /// Certificate compression algorithms to offer/accept (RFC 8879).
     /// Empty means disabled.
     pub cert_compression_algos: Vec<CertCompressionAlgorithm>,
+    /// TLCP encryption certificate chain (DER-encoded, leaf first).
+    /// TLCP uses double certificates: a signing cert + an encryption cert.
+    #[cfg(feature = "tlcp")]
+    pub tlcp_enc_certificate_chain: Vec<Vec<u8>>,
+    /// TLCP encryption private key (SM2).
+    #[cfg(feature = "tlcp")]
+    pub tlcp_enc_private_key: Option<ServerPrivateKey>,
 }
 
 impl TlsConfig {
@@ -117,6 +129,10 @@ pub struct TlsConfigBuilder {
     client_private_key: Option<ServerPrivateKey>,
     post_handshake_auth: bool,
     cert_compression_algos: Vec<CertCompressionAlgorithm>,
+    #[cfg(feature = "tlcp")]
+    tlcp_enc_certificate_chain: Vec<Vec<u8>>,
+    #[cfg(feature = "tlcp")]
+    tlcp_enc_private_key: Option<ServerPrivateKey>,
 }
 
 impl Default for TlsConfigBuilder {
@@ -150,6 +166,10 @@ impl Default for TlsConfigBuilder {
             client_private_key: None,
             post_handshake_auth: false,
             cert_compression_algos: Vec::new(),
+            #[cfg(feature = "tlcp")]
+            tlcp_enc_certificate_chain: Vec::new(),
+            #[cfg(feature = "tlcp")]
+            tlcp_enc_private_key: None,
         }
     }
 }
@@ -255,6 +275,18 @@ impl TlsConfigBuilder {
         self
     }
 
+    #[cfg(feature = "tlcp")]
+    pub fn tlcp_enc_certificate_chain(mut self, certs: Vec<Vec<u8>>) -> Self {
+        self.tlcp_enc_certificate_chain = certs;
+        self
+    }
+
+    #[cfg(feature = "tlcp")]
+    pub fn tlcp_enc_private_key(mut self, key: ServerPrivateKey) -> Self {
+        self.tlcp_enc_private_key = Some(key);
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -277,6 +309,10 @@ impl TlsConfigBuilder {
             client_private_key: self.client_private_key,
             post_handshake_auth: self.post_handshake_auth,
             cert_compression_algos: self.cert_compression_algos,
+            #[cfg(feature = "tlcp")]
+            tlcp_enc_certificate_chain: self.tlcp_enc_certificate_chain,
+            #[cfg(feature = "tlcp")]
+            tlcp_enc_private_key: self.tlcp_enc_private_key,
         }
     }
 }

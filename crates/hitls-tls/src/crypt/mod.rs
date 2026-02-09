@@ -13,6 +13,8 @@ pub mod transcript;
 use crate::CipherSuite;
 use hitls_crypto::provider::Digest;
 use hitls_crypto::sha2::{Sha256, Sha384};
+#[cfg(feature = "tlcp")]
+use hitls_crypto::sm3::Sm3;
 use hitls_types::TlsError;
 
 /// A factory closure that creates fresh Digest instances.
@@ -88,6 +90,8 @@ impl NamedGroup {
     pub const FFDHE4096: Self = Self(0x0102);
     // Post-quantum (draft)
     pub const X25519_MLKEM768: Self = Self(0x6399);
+    // TLCP SM2 curve
+    pub const SM2P256: Self = Self(0x0041);
 }
 
 /// TLS signature scheme identifiers.
@@ -108,17 +112,22 @@ impl SignatureScheme {
     pub const SM2_SM3: Self = Self(0x0708);
 }
 
-/// TLS 1.2 key exchange algorithm.
+/// TLS 1.2 / TLCP key exchange algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyExchangeAlg {
     Ecdhe,
+    /// TLCP ECC static key exchange (SM2 encryption of premaster secret).
+    #[cfg(feature = "tlcp")]
+    Ecc,
 }
 
-/// TLS 1.2 authentication algorithm.
+/// TLS 1.2 / TLCP authentication algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthAlg {
     Rsa,
     Ecdsa,
+    #[cfg(feature = "tlcp")]
+    Sm2,
 }
 
 /// Parameters associated with a TLS 1.2 cipher suite.
@@ -213,4 +222,175 @@ pub fn is_tls12_suite(suite: CipherSuite) -> bool {
 /// Returns true if the cipher suite is a TLS 1.3 suite.
 pub fn is_tls13_suite(suite: CipherSuite) -> bool {
     CipherSuiteParams::from_suite(suite).is_ok()
+}
+
+/// Parameters associated with a TLCP cipher suite (GM/T 0024).
+///
+/// TLCP uses SM4 (16-byte key) and SM3 (32-byte hash) exclusively.
+/// CBC suites use MAC-then-encrypt with HMAC-SM3.
+/// GCM suites use SM4-GCM AEAD.
+#[cfg(feature = "tlcp")]
+#[derive(Debug, Clone)]
+pub struct TlcpCipherSuiteParams {
+    /// The cipher suite identifier.
+    pub suite: CipherSuite,
+    /// Key exchange algorithm: Ecdhe (forward secrecy) or Ecc (static).
+    pub kx_alg: KeyExchangeAlg,
+    /// true = SM4-CBC + HMAC-SM3, false = SM4-GCM AEAD.
+    pub is_cbc: bool,
+    /// SM4 encryption key length (always 16).
+    pub enc_key_len: usize,
+    /// MAC key length: 32 for CBC (HMAC-SM3), 0 for GCM.
+    pub mac_key_len: usize,
+    /// IV length: 16 for CBC, 4 (fixed portion) for GCM.
+    pub iv_len: usize,
+    /// Explicit nonce length per record: 0 for CBC (IV is random per record),
+    /// 8 for GCM.
+    pub record_iv_len: usize,
+    /// Tag/MAC output length: 32 for CBC (HMAC-SM3), 16 for GCM.
+    pub tag_len: usize,
+}
+
+#[cfg(feature = "tlcp")]
+impl TlcpCipherSuiteParams {
+    /// Look up parameters for a TLCP cipher suite.
+    pub fn from_suite(suite: CipherSuite) -> Result<Self, TlsError> {
+        match suite {
+            CipherSuite::ECDHE_SM4_CBC_SM3 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                is_cbc: true,
+                enc_key_len: 16,
+                mac_key_len: 32,
+                iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 32,
+            }),
+            CipherSuite::ECC_SM4_CBC_SM3 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecc,
+                is_cbc: true,
+                enc_key_len: 16,
+                mac_key_len: 32,
+                iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 32,
+            }),
+            CipherSuite::ECDHE_SM4_GCM_SM3 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecdhe,
+                is_cbc: false,
+                enc_key_len: 16,
+                mac_key_len: 0,
+                iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+            }),
+            CipherSuite::ECC_SM4_GCM_SM3 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Ecc,
+                is_cbc: false,
+                enc_key_len: 16,
+                mac_key_len: 0,
+                iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+            }),
+            _ => Err(TlsError::NoSharedCipherSuite),
+        }
+    }
+
+    /// Create a HashFactory for SM3 (always SM3 for TLCP).
+    pub fn hash_factory(&self) -> HashFactory {
+        Box::new(|| Box::new(Sm3::new()) as Box<dyn Digest>)
+    }
+
+    /// SM3 hash output length (always 32).
+    pub fn hash_len(&self) -> usize {
+        32
+    }
+
+    /// Total key material needed from the key block.
+    ///
+    /// CBC: 2×32 (MAC) + 2×16 (enc key) + 2×16 (IV) = 128 bytes.
+    /// GCM: 2×16 (enc key) + 2×4 (fixed IV) = 40 bytes.
+    pub fn key_block_len(&self) -> usize {
+        2 * self.mac_key_len + 2 * self.enc_key_len + 2 * self.iv_len
+    }
+}
+
+/// Returns true if the cipher suite is a TLCP suite.
+#[cfg(feature = "tlcp")]
+pub fn is_tlcp_suite(suite: CipherSuite) -> bool {
+    TlcpCipherSuiteParams::from_suite(suite).is_ok()
+}
+
+#[cfg(test)]
+#[cfg(feature = "tlcp")]
+mod tests_tlcp {
+    use super::*;
+
+    #[test]
+    fn test_tlcp_cipher_suite_params_ecdhe_cbc() {
+        let params = TlcpCipherSuiteParams::from_suite(CipherSuite::ECDHE_SM4_CBC_SM3).unwrap();
+        assert_eq!(params.kx_alg, KeyExchangeAlg::Ecdhe);
+        assert!(params.is_cbc);
+        assert_eq!(params.enc_key_len, 16);
+        assert_eq!(params.mac_key_len, 32);
+        assert_eq!(params.iv_len, 16);
+        assert_eq!(params.tag_len, 32);
+        assert_eq!(params.key_block_len(), 128);
+        assert_eq!(params.hash_len(), 32);
+    }
+
+    #[test]
+    fn test_tlcp_cipher_suite_params_ecc_gcm() {
+        let params = TlcpCipherSuiteParams::from_suite(CipherSuite::ECC_SM4_GCM_SM3).unwrap();
+        assert_eq!(params.kx_alg, KeyExchangeAlg::Ecc);
+        assert!(!params.is_cbc);
+        assert_eq!(params.enc_key_len, 16);
+        assert_eq!(params.mac_key_len, 0);
+        assert_eq!(params.iv_len, 4);
+        assert_eq!(params.record_iv_len, 8);
+        assert_eq!(params.tag_len, 16);
+        assert_eq!(params.key_block_len(), 40);
+    }
+
+    #[test]
+    fn test_tlcp_key_block_cbc_sizes() {
+        // CBC: 2*32 + 2*16 + 2*16 = 128
+        let cbc = TlcpCipherSuiteParams::from_suite(CipherSuite::ECC_SM4_CBC_SM3).unwrap();
+        assert_eq!(cbc.key_block_len(), 128);
+    }
+
+    #[test]
+    fn test_tlcp_key_block_gcm_sizes() {
+        // GCM: 2*0 + 2*16 + 2*4 = 40
+        let gcm = TlcpCipherSuiteParams::from_suite(CipherSuite::ECDHE_SM4_GCM_SM3).unwrap();
+        assert_eq!(gcm.key_block_len(), 40);
+    }
+
+    #[test]
+    fn test_tlcp_sm3_hash_factory() {
+        let params = TlcpCipherSuiteParams::from_suite(CipherSuite::ECDHE_SM4_CBC_SM3).unwrap();
+        let factory = params.hash_factory();
+        let mut hasher = factory();
+        hasher.update(b"abc").unwrap();
+        let mut digest = vec![0u8; 32];
+        hasher.finish(&mut digest).unwrap();
+        assert_eq!(digest.len(), 32);
+        // SM3("abc") known value
+        let expected = "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0";
+        let got: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn test_is_tlcp_suite() {
+        assert!(is_tlcp_suite(CipherSuite::ECDHE_SM4_CBC_SM3));
+        assert!(is_tlcp_suite(CipherSuite::ECC_SM4_CBC_SM3));
+        assert!(is_tlcp_suite(CipherSuite::ECDHE_SM4_GCM_SM3));
+        assert!(is_tlcp_suite(CipherSuite::ECC_SM4_GCM_SM3));
+        assert!(!is_tlcp_suite(CipherSuite::TLS_AES_128_GCM_SHA256));
+    }
 }

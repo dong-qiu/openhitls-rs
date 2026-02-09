@@ -2518,3 +2518,105 @@ New tests (48):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 749 workspace tests passing (19 ignored)
+
+## Phase 28: TLCP (GM/T 0024 / GB/T 38636-2020)
+
+### Goals
+- Implement TLCP — China's Transport Layer Cryptography Protocol (GM/T 0024 / GB/T 38636-2020)
+- 4 cipher suites with SM2/SM3/SM4 algorithm combinations
+- Double certificate mechanism (signing + encryption)
+- Two key exchange modes: ECDHE (ephemeral SM2, forward secrecy) and ECC static (SM2 encryption)
+- CBC MAC-then-encrypt and GCM AEAD record protection
+- Feature-gated with `#[cfg(feature = "tlcp")]`
+
+### Protocol Overview
+TLCP is China's national TLS-like protocol defined in GM/T 0024-2014 and GB/T 38636-2020. It uses SM2/SM3/SM4 exclusively, features a double certificate mechanism (separate signing and encryption certificates), and supports both ECDHE (with forward secrecy) and ECC static key exchange modes.
+
+### Cipher Suites Implemented
+
+| Suite | Code | Key Exchange | Encryption | MAC |
+|-------|------|-------------|------------|-----|
+| ECDHE_SM4_CBC_SM3 | 0xE011 | ECDHE (ephemeral SM2) | SM4-CBC | HMAC-SM3 |
+| ECC_SM4_CBC_SM3 | 0xE013 | ECC static (SM2 encrypt) | SM4-CBC | HMAC-SM3 |
+| ECDHE_SM4_GCM_SM3 | 0xE051 | ECDHE (ephemeral SM2) | SM4-GCM | AEAD |
+| ECC_SM4_GCM_SM3 | 0xE053 | ECC static (SM2 encrypt) | SM4-GCM | AEAD |
+
+### Step 1: TLCP Cipher Suite Parameters + SM2 Key Exchange
+- `crypt/mod.rs`: Added TLCP cipher suite definitions with SM4-CBC/GCM + SM3 parameters
+- `key_exchange.rs`: SM2 ECDH key exchange support
+- `key_schedule12.rs`: TLCP key block derivation using SM3-based PRF (same labels as TLS 1.2)
+
+### Step 2: TLCP Record Layer Encryption
+- `record/encryption_tlcp.rs` (NEW): CBC MAC-then-encrypt (HMAC-SM3 + SM4-CBC with TLS-style padding) and GCM AEAD (SM4-GCM, same pattern as TLS 1.2)
+- `record/mod.rs`: Added TLCP RecordLayer integration
+
+### Step 3: TLCP Handshake Codec
+- `handshake/codec_tlcp.rs` (NEW): TLCP-specific message encoding/decoding including double certificate handling
+
+### Step 4: TLCP Client Handshake
+- `handshake/client_tlcp.rs` (NEW): TLCP client handshake state machine
+- Supports both ECDHE and ECC static key exchange
+- Double certificate processing (signing + encryption certificates from server)
+
+### Step 5: TLCP Server Handshake
+- `handshake/server_tlcp.rs` (NEW): TLCP server handshake state machine
+- Double certificate presentation (signing + encryption)
+- SM2 signature for ServerKeyExchange (ECDHE mode)
+- SM2 encryption-based key exchange (ECC mode)
+
+### Step 6: TLCP Connection Types + Integration Tests
+- `connection_tlcp.rs` (NEW): `TlcpClientConnection` / `TlcpServerConnection`
+- Full in-memory handshake tests for all 4 cipher suites
+- Application data exchange tests
+
+### Step 7: Supporting Changes
+- Added SM2 support to PKI `SigningKey` (`x509/mod.rs`: `SigningKey::Sm2`)
+- Added `SM2` private_key_bytes() to hitls-crypto
+- Added SM4-GCM and SM4-CBC generic functions to hitls-crypto (`gcm.rs`, `cbc.rs`)
+- `config/mod.rs`: SM2 key configuration support
+- `signing.rs` / `server12.rs`: SM2 dispatch for signature operations
+
+### Files Created/Modified
+
+| File | Operation | Description |
+|------|-----------|-------------|
+| `connection_tlcp.rs` | New | TLCP connection types + in-memory transport |
+| `handshake/client_tlcp.rs` | New | TLCP client handshake state machine |
+| `handshake/server_tlcp.rs` | New | TLCP server handshake state machine |
+| `handshake/codec_tlcp.rs` | New | TLCP handshake message codec |
+| `record/encryption_tlcp.rs` | New | CBC MAC-then-encrypt + GCM AEAD for TLCP |
+| `record/mod.rs` | Modified | Added TLCP RecordLayer |
+| `crypt/mod.rs` | Modified | TLCP cipher suite parameters |
+| `key_schedule12.rs` | Modified | TLCP key block derivation |
+| `config/mod.rs` | Modified | SM2 key configuration |
+| `handshake/signing.rs` | Modified | SM2 dispatch |
+| `handshake/server12.rs` | Modified | SM2 dispatch |
+| `key_exchange.rs` | Modified | SM2 ECDH |
+| `crypto/gcm.rs` | Modified | SM4-GCM support |
+| `crypto/cbc.rs` | Modified | SM4-CBC support |
+| `pki/x509/mod.rs` | Modified | SigningKey::Sm2 |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-auth | 20 | All pass |
+| hitls-bignum | 46 | All pass |
+| hitls-crypto | 326 (19 ignored) | All pass |
+| hitls-pki | 98 | All pass |
+| hitls-tls | 245 (+35) | All pass |
+| hitls-utils | 35 | All pass |
+| integration | 14 | All pass |
+| **Total** | **788** | **All pass** |
+
+New tests (39):
+- TLCP handshake: ECDHE_SM4_CBC_SM3, ECC_SM4_CBC_SM3, ECDHE_SM4_GCM_SM3, ECC_SM4_GCM_SM3
+- TLCP record encryption: CBC MAC-then-encrypt, GCM AEAD
+- Application data exchange tests for all cipher suites
+- SM2 key exchange tests
+- Double certificate handling tests
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 788 workspace tests passing (19 ignored)

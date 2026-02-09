@@ -409,6 +409,8 @@ pub(crate) fn select_signature_scheme_tls12(
             SignatureScheme::RSA_PSS_RSAE_SHA384,
             SignatureScheme::RSA_PKCS1_SHA384,
         ],
+        #[cfg(feature = "tlcp")]
+        ServerPrivateKey::Sm2 { .. } => &[SignatureScheme::SM2_SM3],
     };
 
     for candidate in candidates {
@@ -473,6 +475,12 @@ pub(crate) fn sign_ske_data(
             rsa_key
                 .sign(padding, &digest)
                 .map_err(TlsError::CryptoError)
+        }
+        #[cfg(feature = "tlcp")]
+        ServerPrivateKey::Sm2 { private_key } => {
+            let kp = hitls_crypto::sm2::Sm2KeyPair::from_private_key(private_key)
+                .map_err(TlsError::CryptoError)?;
+            kp.sign(signed_data).map_err(TlsError::CryptoError)
         }
     }
 }

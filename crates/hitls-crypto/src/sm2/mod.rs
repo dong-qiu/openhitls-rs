@@ -316,6 +316,19 @@ impl Sm2KeyPair {
     pub fn public_key_bytes(&self) -> Result<Vec<u8>, CryptoError> {
         self.public_key.to_uncompressed(&self.group)
     }
+
+    /// Return the private key as 32-byte big-endian.
+    pub fn private_key_bytes(&self) -> Result<Vec<u8>, CryptoError> {
+        if self.private_key.is_zero() {
+            return Err(CryptoError::EccInvalidPrivateKey);
+        }
+        let mut bytes = self.private_key.to_bytes_be();
+        // Pad to 32 bytes for SM2P256
+        while bytes.len() < 32 {
+            bytes.insert(0, 0);
+        }
+        Ok(bytes)
+    }
 }
 
 /// Compute ZA = SM3(ENTLA || IDA || a || b || xG || yG || xA || yA).
