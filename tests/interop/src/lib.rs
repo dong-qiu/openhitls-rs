@@ -435,9 +435,7 @@ mod tests {
         s2c.drain(..c);
         let (_, body, total) = parse_handshake_header(&data).unwrap();
         let sh = decode_server_hello(body).unwrap();
-        client_hs
-            .process_server_hello(&data[..total], &sh)
-            .unwrap();
+        client_hs.process_server_hello(&data[..total], &sh).unwrap();
         // Cert
         let (_, data, c) = client_rl.open_record(&s2c).unwrap();
         s2c.drain(..c);
