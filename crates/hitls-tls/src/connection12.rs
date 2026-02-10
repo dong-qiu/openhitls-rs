@@ -3903,11 +3903,6 @@ mod tests {
         suite: CipherSuite,
         groups: &[NamedGroup],
     ) -> (Tls12ClientState, Tls12ServerState) {
-        use crate::handshake::codec12::{
-            decode_server_key_exchange_dhe_psk, decode_server_key_exchange_ecdhe_psk,
-            decode_server_key_exchange_psk_hint,
-        };
-
         let psk = b"test-pre-shared-key-32-bytes!!!!".to_vec(); // 32 bytes
         let psk_identity = b"client-identity".to_vec();
 
