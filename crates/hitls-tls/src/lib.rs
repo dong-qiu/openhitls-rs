@@ -57,6 +57,23 @@ impl CipherSuite {
     pub const TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCA8);
     pub const TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCA9);
 
+    // TLS 1.2 RSA static key exchange cipher suites
+    pub const TLS_RSA_WITH_AES_128_GCM_SHA256: Self = Self(0x009C);
+    pub const TLS_RSA_WITH_AES_256_GCM_SHA384: Self = Self(0x009D);
+    pub const TLS_RSA_WITH_AES_128_CBC_SHA: Self = Self(0x002F);
+    pub const TLS_RSA_WITH_AES_256_CBC_SHA: Self = Self(0x0035);
+    pub const TLS_RSA_WITH_AES_128_CBC_SHA256: Self = Self(0x003C);
+    pub const TLS_RSA_WITH_AES_256_CBC_SHA256: Self = Self(0x003D);
+
+    // TLS 1.2 DHE_RSA key exchange cipher suites
+    pub const TLS_DHE_RSA_WITH_AES_128_GCM_SHA256: Self = Self(0x009E);
+    pub const TLS_DHE_RSA_WITH_AES_256_GCM_SHA384: Self = Self(0x009F);
+    pub const TLS_DHE_RSA_WITH_AES_128_CBC_SHA: Self = Self(0x0033);
+    pub const TLS_DHE_RSA_WITH_AES_256_CBC_SHA: Self = Self(0x0039);
+    pub const TLS_DHE_RSA_WITH_AES_128_CBC_SHA256: Self = Self(0x0067);
+    pub const TLS_DHE_RSA_WITH_AES_256_CBC_SHA256: Self = Self(0x006B);
+    pub const TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCAA);
+
     // TLCP cipher suites (GM/T 0024)
     pub const ECDHE_SM4_CBC_SM3: Self = Self(0xE011);
     pub const ECC_SM4_CBC_SM3: Self = Self(0xE013);

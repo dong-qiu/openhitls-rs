@@ -1283,3 +1283,21 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - 0 new files, 11 modified files
 
 880 total tests (25 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 36: TLS 1.2 RSA + DHE Key Exchange — 13 New Cipher Suites (2026-02-10)
+
+**Prompt**: Implement Phase 36 — TLS 1.2 RSA static key exchange and DHE_RSA key exchange. RSA static: client encrypts pre_master_secret with server's RSA public key (PKCS#1 v1.5), no ServerKeyExchange message, with Bleichenbacher protection (use random PMS on decryption failure). DHE_RSA: server sends ephemeral DH parameters (p, g, Ys) in ServerKeyExchange signed with RSA, client verifies signature and computes DH shared secret. Add 6 RSA suites (AES-128/256 GCM + CBC) and 7 DHE_RSA suites (AES-128/256 GCM + CBC + ChaCha20-Poly1305). Update codec for RSA/DH ClientKeyExchange and DH ServerKeyExchange. Enable ECDHE_RSA suites with real RSA certificates. Add codec roundtrip tests, connection handshake tests, and TCP loopback integration tests.
+
+**Result**: 10 new tls tests (323->333) + 2 integration tests (20 total, 3 ignored). Complete implementation with:
+- 13 new cipher suites: 6 RSA static (AES-128/256 GCM + CBC SHA/SHA256) + 7 DHE_RSA (AES-128/256 GCM + CBC + ChaCha20)
+- RSA static key exchange: client encrypts 48-byte PMS with server RSA public key, server decrypts with Bleichenbacher protection
+- DHE_RSA key exchange: server generates ephemeral DH params, signs with RSA, client verifies and computes DH shared secret
+- Bleichenbacher protection: on PKCS#1 v1.5 decryption failure, use random PMS instead of aborting (prevents oracle)
+- Codec updates: RSA encrypted PMS in ClientKeyExchange, DH params in ServerKeyExchange, DH Yc in ClientKeyExchange
+- ECDHE_RSA suites now tested with real RSA certificates
+- 4 codec roundtrip tests + 6 connection handshake tests + 2 integration tests (ignored — slow RSA keygen)
+- 0 new files, 10 modified files
+
+890 total tests (27 ignored). Clippy clean, fmt clean.

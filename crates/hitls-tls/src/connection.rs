@@ -4679,7 +4679,10 @@ mod tests {
             .seal_record(ContentType::Handshake, &server_flight.certificate)
             .unwrap();
         let ske_record = server_rl
-            .seal_record(ContentType::Handshake, &server_flight.server_key_exchange)
+            .seal_record(
+                ContentType::Handshake,
+                server_flight.server_key_exchange.as_ref().unwrap(),
+            )
             .unwrap();
         let shd_record = server_rl
             .seal_record(ContentType::Handshake, &server_flight.server_hello_done)
@@ -4907,7 +4910,10 @@ mod tests {
             .seal_record(ContentType::Handshake, &server_flight.certificate)
             .unwrap();
         let ske_record = server_rl
-            .seal_record(ContentType::Handshake, &server_flight.server_key_exchange)
+            .seal_record(
+                ContentType::Handshake,
+                server_flight.server_key_exchange.as_ref().unwrap(),
+            )
             .unwrap();
         let shd_record = server_rl
             .seal_record(ContentType::Handshake, &server_flight.server_hello_done)

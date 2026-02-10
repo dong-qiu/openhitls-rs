@@ -423,7 +423,7 @@ mod tests {
         for msg in [
             &sflight.server_hello,
             &sflight.certificate,
-            &sflight.server_key_exchange,
+            sflight.server_key_exchange.as_ref().unwrap(),
             &sflight.server_hello_done,
         ] {
             s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
@@ -1340,6 +1340,189 @@ mod tests {
         let mut buf = [0u8; 256];
         let n = conn.read(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"EMS+ETM confirmed!");
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // 22. TCP loopback: TLS 1.2 RSA static key exchange
+    // -------------------------------------------------------
+    #[test]
+    #[ignore] // RSA 2048 key generation is slow
+    fn test_tcp_tls12_loopback_rsa_static() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::SignatureScheme;
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_rsa_server_identity();
+
+        let suites = [CipherSuite::TLS_RSA_WITH_AES_128_GCM_SHA256];
+        let sig_algs = [
+            SignatureScheme::RSA_PSS_RSAE_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA256,
+        ];
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(30)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(30)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"RSA static KX over TCP!");
+
+            conn.write(b"RSA static confirmed!").unwrap();
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+        assert_eq!(
+            conn.cipher_suite(),
+            Some(CipherSuite::TLS_RSA_WITH_AES_128_GCM_SHA256)
+        );
+
+        conn.write(b"RSA static KX over TCP!").unwrap();
+
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"RSA static confirmed!");
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // 23. TCP loopback: TLS 1.2 DHE_RSA key exchange
+    // -------------------------------------------------------
+    #[test]
+    #[ignore] // RSA 2048 key generation is slow
+    fn test_tcp_tls12_loopback_dhe_rsa() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_rsa_server_identity();
+
+        let suites = [CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256];
+        let groups = [NamedGroup::FFDHE2048];
+        let sig_algs = [
+            SignatureScheme::RSA_PSS_RSAE_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA256,
+        ];
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(30)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(30)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"DHE over TCP!");
+
+            conn.write(b"DHE confirmed!").unwrap();
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+        assert_eq!(
+            conn.cipher_suite(),
+            Some(CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256)
+        );
+
+        conn.write(b"DHE over TCP!").unwrap();
+
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"DHE confirmed!");
 
         conn.shutdown().unwrap();
         server_handle.join().unwrap();

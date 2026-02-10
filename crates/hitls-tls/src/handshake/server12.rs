@@ -7,14 +7,18 @@ use crate::crypt::key_schedule12::{
     compute_verify_data, derive_extended_master_secret, derive_key_block, derive_master_secret,
 };
 use crate::crypt::transcript::TranscriptHash;
-use crate::crypt::{is_tls12_suite, NamedGroup, SignatureScheme, Tls12CipherSuiteParams};
+use crate::crypt::{
+    is_tls12_suite, KeyExchangeAlg, NamedGroup, SignatureScheme, Tls12CipherSuiteParams,
+};
 use crate::extensions::ExtensionType;
 use crate::handshake::codec::{decode_client_hello, encode_server_hello, ClientHello, ServerHello};
 use crate::handshake::codec12::{
-    build_ske_params, build_ske_signed_data, decode_certificate12, decode_certificate_verify12,
-    decode_client_key_exchange, encode_certificate12, encode_certificate_request12,
+    build_dhe_ske_params, build_ske_params, build_ske_signed_data, decode_certificate12,
+    decode_certificate_verify12, decode_client_key_exchange, decode_client_key_exchange_dhe,
+    decode_client_key_exchange_rsa, encode_certificate12, encode_certificate_request12,
     encode_finished12, encode_new_session_ticket12, encode_server_hello_done,
-    encode_server_key_exchange, Certificate12, CertificateRequest12, ServerKeyExchange,
+    encode_server_key_exchange, encode_server_key_exchange_dhe, Certificate12,
+    CertificateRequest12, ServerKeyExchange, ServerKeyExchangeDhe,
 };
 use crate::handshake::extensions_codec::{
     build_encrypt_then_mac, build_extended_master_secret, build_session_ticket_sh, parse_alpn_ch,
@@ -25,8 +29,10 @@ use crate::handshake::extensions_codec::{
 use crate::handshake::key_exchange::KeyExchange;
 use crate::session::{decrypt_session_ticket, encrypt_session_ticket, SessionCache, TlsSession};
 use crate::CipherSuite;
+use hitls_crypto::dh::{DhKeyPair, DhParams};
+use hitls_crypto::rsa::{RsaPadding, RsaPrivateKey as CryptoRsaPrivateKey};
 use hitls_crypto::sha2::Sha256;
-use hitls_types::{EccCurveId, TlsError};
+use hitls_types::{DhParamId, EccCurveId, TlsError};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
@@ -48,8 +54,8 @@ pub struct ServerFlightResult {
     pub server_hello: Vec<u8>,
     /// Certificate handshake message.
     pub certificate: Vec<u8>,
-    /// ServerKeyExchange handshake message.
-    pub server_key_exchange: Vec<u8>,
+    /// ServerKeyExchange handshake message (None for RSA static key exchange).
+    pub server_key_exchange: Option<Vec<u8>>,
     /// CertificateRequest message (only if mTLS is enabled).
     pub certificate_request: Option<Vec<u8>>,
     /// ServerHelloDone handshake message.
@@ -159,6 +165,9 @@ pub struct Tls12ServerHandshake {
     client_random: [u8; 32],
     server_random: [u8; 32],
     ephemeral_key: Option<KeyExchange>,
+    kx_alg: KeyExchangeAlg,
+    dhe_params: Option<DhParams>,
+    dhe_key_pair: Option<DhKeyPair>,
     master_secret: Vec<u8>,
     client_sig_algs: Vec<SignatureScheme>,
     /// Negotiated ALPN protocol (if any).
@@ -201,6 +210,9 @@ impl Tls12ServerHandshake {
             client_random: [0u8; 32],
             server_random: [0u8; 32],
             ephemeral_key: None,
+            kx_alg: KeyExchangeAlg::Ecdhe,
+            dhe_params: None,
+            dhe_key_pair: None,
             master_secret: Vec::new(),
             client_sig_algs: Vec::new(),
             negotiated_alpn: None,
@@ -219,6 +231,11 @@ impl Tls12ServerHandshake {
 
     pub fn state(&self) -> Tls12ServerState {
         self.state
+    }
+
+    /// Get the negotiated key exchange algorithm.
+    pub fn kx_alg(&self) -> KeyExchangeAlg {
+        self.kx_alg
     }
 
     /// Get the negotiated ALPN protocol (if any).
@@ -393,8 +410,8 @@ impl Tls12ServerHandshake {
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
         self.session_id = session_id;
 
-        // Negotiate group
-        let group = negotiate_group(&client_groups, &self.config.supported_groups)?;
+        // Store key exchange algorithm
+        self.kx_alg = params.kx_alg;
 
         // Negotiate EMS: echo if client offered and config enables it
         if self.client_offered_ems && self.config.enable_extended_master_secret {
@@ -443,33 +460,87 @@ impl Tls12ServerHandshake {
         let cert_msg = encode_certificate12(&cert12);
         self.transcript.update(&cert_msg)?;
 
-        // Generate ephemeral ECDH key
-        let kx = KeyExchange::generate(group)?;
-        let server_public = kx.public_key_bytes().to_vec();
+        // Build ServerKeyExchange (depends on key exchange algorithm)
+        let ske_msg_opt = match params.kx_alg {
+            KeyExchangeAlg::Rsa => {
+                // RSA static key exchange: no ServerKeyExchange message
+                None
+            }
+            KeyExchangeAlg::Dhe => {
+                // DHE key exchange: negotiate FFDHE group, generate DH key pair
+                let group = negotiate_ffdhe_group(&client_groups, &self.config.supported_groups)?;
+                let dh_param_id = named_group_to_dh_param_id(group)?;
+                let dh_params = DhParams::from_group(dh_param_id).map_err(TlsError::CryptoError)?;
+                let dh_kp = DhKeyPair::generate(&dh_params).map_err(TlsError::CryptoError)?;
+                let dh_ys = dh_kp
+                    .public_key_bytes(&dh_params)
+                    .map_err(TlsError::CryptoError)?;
+                let dh_p = dh_params.p_bytes();
+                let dh_g = dh_params.g_bytes();
 
-        // Build and sign ServerKeyExchange
-        let named_curve = group.0;
-        let ske_params = build_ske_params(3, named_curve, &server_public);
-        let signed_data =
-            build_ske_signed_data(&self.client_random, &self.server_random, &ske_params);
+                let ske_params = build_dhe_ske_params(&dh_p, &dh_g, &dh_ys);
+                let signed_data =
+                    build_ske_signed_data(&self.client_random, &self.server_random, &ske_params);
 
-        let private_key =
-            self.config.private_key.as_ref().ok_or_else(|| {
-                TlsError::HandshakeFailed("no server private key configured".into())
-            })?;
+                let private_key = self.config.private_key.as_ref().ok_or_else(|| {
+                    TlsError::HandshakeFailed("no server private key configured".into())
+                })?;
+                let sig_scheme = select_signature_scheme_tls12(private_key, &self.client_sig_algs)?;
+                let signature = sign_ske_data(private_key, sig_scheme, &signed_data)?;
 
-        let sig_scheme = select_signature_scheme_tls12(private_key, &self.client_sig_algs)?;
-        let signature = sign_ske_data(private_key, sig_scheme, &signed_data)?;
+                let ske = ServerKeyExchangeDhe {
+                    dh_p,
+                    dh_g,
+                    dh_ys,
+                    signature_algorithm: sig_scheme,
+                    signature,
+                };
+                let ske_msg = encode_server_key_exchange_dhe(&ske);
+                self.transcript.update(&ske_msg)?;
 
-        let ske = ServerKeyExchange {
-            curve_type: 3,
-            named_curve,
-            public_key: server_public,
-            signature_algorithm: sig_scheme,
-            signature,
+                self.dhe_params = Some(dh_params);
+                self.dhe_key_pair = Some(dh_kp);
+
+                Some(ske_msg)
+            }
+            KeyExchangeAlg::Ecdhe => {
+                // ECDHE key exchange: negotiate EC group, generate ephemeral key
+                let group = negotiate_group(&client_groups, &self.config.supported_groups)?;
+                let kx = KeyExchange::generate(group)?;
+                let server_public = kx.public_key_bytes().to_vec();
+
+                let named_curve = group.0;
+                let ske_params = build_ske_params(3, named_curve, &server_public);
+                let signed_data =
+                    build_ske_signed_data(&self.client_random, &self.server_random, &ske_params);
+
+                let private_key = self.config.private_key.as_ref().ok_or_else(|| {
+                    TlsError::HandshakeFailed("no server private key configured".into())
+                })?;
+                let sig_scheme = select_signature_scheme_tls12(private_key, &self.client_sig_algs)?;
+                let signature = sign_ske_data(private_key, sig_scheme, &signed_data)?;
+
+                let ske = ServerKeyExchange {
+                    curve_type: 3,
+                    named_curve,
+                    public_key: server_public,
+                    signature_algorithm: sig_scheme,
+                    signature,
+                };
+                let ske_msg = encode_server_key_exchange(&ske);
+                self.transcript.update(&ske_msg)?;
+
+                self.ephemeral_key = Some(kx);
+
+                Some(ske_msg)
+            }
+            #[cfg(feature = "tlcp")]
+            KeyExchangeAlg::Ecc => {
+                return Err(TlsError::HandshakeFailed(
+                    "ECC static key exchange not supported in TLS 1.2 server".into(),
+                ));
+            }
         };
-        let ske_msg = encode_server_key_exchange(&ske);
-        self.transcript.update(&ske_msg)?;
 
         // Build CertificateRequest (if mTLS is enabled)
         let certificate_request = if self.config.verify_client_cert {
@@ -489,7 +560,6 @@ impl Tls12ServerHandshake {
         let shd_msg = encode_server_hello_done();
         self.transcript.update(&shd_msg)?;
 
-        self.ephemeral_key = Some(kx);
         self.params = Some(params);
         self.state = if self.config.verify_client_cert {
             Tls12ServerState::WaitClientCertificate
@@ -500,7 +570,7 @@ impl Tls12ServerHandshake {
         Ok(ServerFlightResult {
             server_hello: sh_msg,
             certificate: cert_msg,
-            server_key_exchange: ske_msg,
+            server_key_exchange: ske_msg_opt,
             certificate_request,
             server_hello_done: shd_msg,
             suite,
@@ -807,13 +877,78 @@ impl Tls12ServerHandshake {
         self.transcript.update(msg_data)?;
 
         let body = get_body(msg_data)?;
-        let cke = decode_client_key_exchange(body)?;
 
-        let kx = self
-            .ephemeral_key
-            .take()
-            .ok_or_else(|| TlsError::HandshakeFailed("no ephemeral key".into()))?;
-        let pre_master_secret = kx.compute_shared_secret(&cke.public_key)?;
+        // Compute pre-master secret based on key exchange algorithm
+        let pre_master_secret = match self.kx_alg {
+            KeyExchangeAlg::Ecdhe => {
+                let cke = decode_client_key_exchange(body)?;
+                let kx = self
+                    .ephemeral_key
+                    .take()
+                    .ok_or_else(|| TlsError::HandshakeFailed("no ephemeral key".into()))?;
+                kx.compute_shared_secret(&cke.public_key)?
+            }
+            KeyExchangeAlg::Rsa => {
+                let cke = decode_client_key_exchange_rsa(body)?;
+                let private_key = self.config.private_key.as_ref().ok_or_else(|| {
+                    TlsError::HandshakeFailed("no server private key configured".into())
+                })?;
+                let (n, d, e, p, q) = match private_key {
+                    ServerPrivateKey::Rsa { n, d, e, p, q } => (n, d, e, p, q),
+                    _ => {
+                        return Err(TlsError::HandshakeFailed(
+                            "RSA key exchange requires RSA private key".into(),
+                        ))
+                    }
+                };
+                let rsa_key =
+                    CryptoRsaPrivateKey::new(n, d, e, p, q).map_err(TlsError::CryptoError)?;
+
+                // Bleichenbacher protection: generate random PMS first, then
+                // overwrite only if decryption succeeds and version bytes match.
+                let mut random_pms = vec![0u8; 48];
+                getrandom::getrandom(&mut random_pms)
+                    .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
+                // Set version bytes for the random fallback PMS (TLS 1.2 = 0x0303)
+                random_pms[0] = 0x03;
+                random_pms[1] = 0x03;
+
+                match rsa_key.decrypt(RsaPadding::Pkcs1v15Encrypt, &cke.encrypted_pms) {
+                    Ok(ref decrypted)
+                        if decrypted.len() == 48
+                            && decrypted[0] == 0x03
+                            && decrypted[1] == 0x03 =>
+                    {
+                        decrypted.clone()
+                    }
+                    _ => {
+                        // Decryption failed, wrong length, or wrong version:
+                        // use random PMS to prevent Bleichenbacher oracle
+                        random_pms
+                    }
+                }
+            }
+            KeyExchangeAlg::Dhe => {
+                let cke = decode_client_key_exchange_dhe(body)?;
+                let dh_kp = self
+                    .dhe_key_pair
+                    .take()
+                    .ok_or_else(|| TlsError::HandshakeFailed("no DHE key pair".into()))?;
+                let dh_params = self
+                    .dhe_params
+                    .take()
+                    .ok_or_else(|| TlsError::HandshakeFailed("no DHE params".into()))?;
+                dh_kp
+                    .compute_shared_secret(&dh_params, &cke.dh_yc)
+                    .map_err(TlsError::CryptoError)?
+            }
+            #[cfg(feature = "tlcp")]
+            KeyExchangeAlg::Ecc => {
+                return Err(TlsError::HandshakeFailed(
+                    "ECC static key exchange not supported in TLS 1.2 server".into(),
+                ));
+            }
+        };
 
         let params = self
             .params
@@ -1001,6 +1136,42 @@ pub(crate) fn negotiate_group(
         }
     }
     Err(TlsError::HandshakeFailed("no common ECDHE group".into()))
+}
+
+/// Negotiate a named group for DHE (FFDHE groups only).
+pub(crate) fn negotiate_ffdhe_group(
+    client_groups: &[NamedGroup],
+    server_groups: &[NamedGroup],
+) -> Result<NamedGroup, TlsError> {
+    for sg in server_groups {
+        if is_ffdhe_group(*sg) && client_groups.contains(sg) {
+            return Ok(*sg);
+        }
+    }
+    // If no FFDHE group was negotiated via supported_groups extension,
+    // default to FFDHE2048 (server choice per RFC 7919).
+    Ok(NamedGroup::FFDHE2048)
+}
+
+/// Check if a NamedGroup is an FFDHE group.
+fn is_ffdhe_group(g: NamedGroup) -> bool {
+    matches!(
+        g,
+        NamedGroup::FFDHE2048 | NamedGroup::FFDHE3072 | NamedGroup::FFDHE4096
+    )
+}
+
+/// Map a NamedGroup to a DhParamId for RFC 7919 groups.
+fn named_group_to_dh_param_id(group: NamedGroup) -> Result<DhParamId, TlsError> {
+    match group {
+        NamedGroup::FFDHE2048 => Ok(DhParamId::Rfc7919_2048),
+        NamedGroup::FFDHE3072 => Ok(DhParamId::Rfc7919_3072),
+        NamedGroup::FFDHE4096 => Ok(DhParamId::Rfc7919_4096),
+        _ => Err(TlsError::HandshakeFailed(format!(
+            "unsupported FFDHE group: 0x{:04x}",
+            group.0
+        ))),
+    }
 }
 
 /// Select a signature scheme for TLS 1.2 ServerKeyExchange.
@@ -1381,7 +1552,11 @@ mod tests {
         let (ht, _, _) = parse_handshake_header(&result.certificate).unwrap();
         assert_eq!(ht, HandshakeType::Certificate);
 
-        let (ht, _, _) = parse_handshake_header(&result.server_key_exchange).unwrap();
+        let ske_data = result
+            .server_key_exchange
+            .as_ref()
+            .expect("ECDHE should have SKE");
+        let (ht, _, _) = parse_handshake_header(ske_data).unwrap();
         assert_eq!(ht, HandshakeType::ServerKeyExchange);
 
         let (ht, _, _) = parse_handshake_header(&result.server_hello_done).unwrap();

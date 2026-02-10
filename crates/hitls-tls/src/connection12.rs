@@ -6,10 +6,12 @@
 use std::io::{Read, Write};
 
 use crate::config::TlsConfig;
+use crate::crypt::KeyExchangeAlg;
 use crate::handshake::client12::Tls12ClientHandshake;
 use crate::handshake::codec::{decode_server_hello, parse_handshake_header};
 use crate::handshake::codec12::{
     decode_certificate12, decode_certificate_request12, decode_server_key_exchange,
+    decode_server_key_exchange_dhe,
 };
 use crate::handshake::server12::{ServerHelloResult, Tls12ServerHandshake};
 use crate::handshake::HandshakeType;
@@ -145,19 +147,49 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
         let cert12 = decode_certificate12(cert_body)?;
         hs.process_certificate(&cert_data, &cert12.certificate_list)?;
 
-        // 4. Read ServerKeyExchange
-        let (hs_type, ske_data) = self.read_handshake_msg()?;
-        if hs_type != HandshakeType::ServerKeyExchange {
-            return Err(TlsError::HandshakeFailed(format!(
-                "expected ServerKeyExchange, got {hs_type:?}"
-            )));
-        }
-        let (_, ske_body, _) = parse_handshake_header(&ske_data)?;
-        let ske = decode_server_key_exchange(ske_body)?;
-        hs.process_server_key_exchange(&ske_data, &ske)?;
+        // 4. Read ServerKeyExchange (ECDHE/DHE) or skip (RSA)
+        // After Certificate, the next message depends on the key exchange algorithm:
+        //   ECDHE/DHE → ServerKeyExchange → CertificateRequest? → ServerHelloDone
+        //   RSA       → CertificateRequest? → ServerHelloDone  (no SKE)
+        let (hs_type, next_data) = self.read_handshake_msg()?;
+
+        let (hs_type, next_data) = if hs_type == HandshakeType::ServerKeyExchange {
+            let (_, ske_body, _) = parse_handshake_header(&next_data)?;
+            match hs.kx_alg() {
+                KeyExchangeAlg::Ecdhe => {
+                    let ske = decode_server_key_exchange(ske_body)?;
+                    hs.process_server_key_exchange(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::Dhe => {
+                    let ske = decode_server_key_exchange_dhe(ske_body)?;
+                    hs.process_server_key_exchange_dhe(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::Rsa => {
+                    return Err(TlsError::HandshakeFailed(
+                        "unexpected ServerKeyExchange for RSA key exchange".into(),
+                    ));
+                }
+                #[cfg(feature = "tlcp")]
+                KeyExchangeAlg::Ecc => {
+                    return Err(TlsError::HandshakeFailed(
+                        "ECC not supported in TLS 1.2".into(),
+                    ));
+                }
+            }
+            // Read the next message after SKE
+            self.read_handshake_msg()?
+        } else {
+            // No SKE — must be RSA key exchange
+            if hs.kx_alg() != KeyExchangeAlg::Rsa {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected ServerKeyExchange for {:?}, got {hs_type:?}",
+                    hs.kx_alg()
+                )));
+            }
+            (hs_type, next_data)
+        };
 
         // 5. Read CertificateRequest (optional) or ServerHelloDone
-        let (hs_type, next_data) = self.read_handshake_msg()?;
         let shd_data = if hs_type == HandshakeType::CertificateRequest {
             let (_, cr_body, _) = parse_handshake_header(&next_data)?;
             let cr = decode_certificate_request12(cr_body)?;
@@ -688,13 +720,15 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             .write_all(&cert_record)
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
-        // 5. Send ServerKeyExchange
-        let ske_record = self
-            .record_layer
-            .seal_record(ContentType::Handshake, &flight.server_key_exchange)?;
-        self.stream
-            .write_all(&ske_record)
-            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        // 5. Send ServerKeyExchange (if present — not sent for RSA key exchange)
+        if let Some(ref ske_msg) = flight.server_key_exchange {
+            let ske_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, ske_msg)?;
+            self.stream
+                .write_all(&ske_record)
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
 
         // 6. Send CertificateRequest (if mTLS enabled)
         if let Some(ref cr_msg) = flight.certificate_request {
@@ -1146,7 +1180,7 @@ mod tests {
         for msg in [
             &flight.server_hello,
             &flight.certificate,
-            &flight.server_key_exchange,
+            flight.server_key_exchange.as_ref().unwrap(),
             &flight.server_hello_done,
         ] {
             let rec = server_rl.seal_record(ContentType::Handshake, msg).unwrap();
@@ -1383,7 +1417,7 @@ mod tests {
         for msg in [
             &flight.server_hello,
             &flight.certificate,
-            &flight.server_key_exchange,
+            flight.server_key_exchange.as_ref().unwrap(),
             &flight.server_hello_done,
         ] {
             s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
@@ -1742,7 +1776,7 @@ mod tests {
         for msg in [
             &flight.server_hello,
             &flight.certificate,
-            &flight.server_key_exchange,
+            flight.server_key_exchange.as_ref().unwrap(),
         ] {
             s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
         }
@@ -2013,7 +2047,7 @@ mod tests {
         for msg in [
             &flight.server_hello,
             &flight.certificate,
-            &flight.server_key_exchange,
+            flight.server_key_exchange.as_ref().unwrap(),
             &flight.server_hello_done,
         ] {
             s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
@@ -2573,7 +2607,7 @@ mod tests {
         for msg in [
             &flight.server_hello,
             &flight.certificate,
-            &flight.server_key_exchange,
+            flight.server_key_exchange.as_ref().unwrap(),
             &flight.server_hello_done,
         ] {
             s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
@@ -3136,7 +3170,7 @@ mod tests {
         for msg in [
             &flight.server_hello,
             &flight.certificate,
-            &flight.server_key_exchange,
+            flight.server_key_exchange.as_ref().unwrap(),
             &flight.server_hello_done,
         ] {
             s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
@@ -3432,6 +3466,351 @@ mod tests {
 
         // Step 2: Abbreviated handshake with the EMS session
         let (cs, ss) = run_ticket_abbreviated_handshake(suite, ticket_key, session).unwrap();
+        assert_eq!(cs, Tls12ClientState::Connected);
+        assert_eq!(ss, Tls12ServerState::Connected);
+    }
+
+    // =======================================================================
+    // RSA / DHE key exchange helpers and tests (Phase 36)
+    // =======================================================================
+
+    /// Generate an RSA 2048 server identity (cert DER + ServerPrivateKey).
+    fn make_rsa_cert_and_key() -> (Vec<u8>, ServerPrivateKey) {
+        use hitls_crypto::rsa::RsaPrivateKey;
+        use hitls_pki::x509::{CertificateBuilder, DistinguishedName, SigningKey};
+
+        let rsa = RsaPrivateKey::generate(2048).unwrap();
+        let (n, d, e) = (rsa.n_bytes(), rsa.d_bytes(), rsa.e_bytes());
+        let (p, q) = (rsa.p_bytes(), rsa.q_bytes());
+        let sk = SigningKey::Rsa(rsa);
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "TestRSA".into())],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+        (cert.to_der(), ServerPrivateKey::Rsa { n, d, e, p, q })
+    }
+
+    /// Run a full TLS 1.2 handshake with RSA or DHE key exchange (in-process).
+    ///
+    /// Works for RSA static KX (no SKE), DHE_RSA (DHE SKE), and ECDHE_RSA (ECDHE SKE).
+    /// Uses a real RSA certificate so that RSA encryption and signature verification work.
+    fn run_tls12_rsa_or_dhe_handshake(
+        suite: CipherSuite,
+        groups: &[NamedGroup],
+    ) -> (Tls12ClientState, Tls12ServerState) {
+        let (cert_der, server_key) = make_rsa_cert_and_key();
+
+        let sig_algs = [
+            SignatureScheme::RSA_PSS_RSAE_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::RSA_PSS_RSAE_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA384,
+        ];
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(groups)
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(vec![cert_der])
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let mut c2s = Vec::new();
+        let mut s2c = Vec::new();
+        let mut client_hs = Tls12ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = Tls12ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // 1. Client → CH
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &ch_msg)
+                .unwrap(),
+        );
+
+        // 2. Server ← CH → server flight
+        let (_, ch_plain, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        let (_, _, ch_total) = parse_handshake_header(&ch_plain).unwrap();
+        let flight = server_hs
+            .process_client_hello(&ch_plain[..ch_total])
+            .unwrap();
+        let suite_neg = flight.suite;
+
+        // Server sends: SH, Cert, [SKE], SHD
+        for msg in &[&flight.server_hello, &flight.certificate] {
+            s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
+        }
+        if let Some(ref ske_msg) = flight.server_key_exchange {
+            s2c.extend_from_slice(
+                &server_rl
+                    .seal_record(ContentType::Handshake, ske_msg)
+                    .unwrap(),
+            );
+        }
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::Handshake, &flight.server_hello_done)
+                .unwrap(),
+        );
+
+        // 3. Client processes server flight
+        // SH
+        let (_, sh_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, sh_body, sh_total) = parse_handshake_header(&sh_plain).unwrap();
+        let sh = decode_server_hello(sh_body).unwrap();
+        client_hs
+            .process_server_hello(&sh_plain[..sh_total], &sh)
+            .unwrap();
+
+        // Cert
+        let (_, cert_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, cert_body, cert_total) = parse_handshake_header(&cert_plain).unwrap();
+        let cert12 = decode_certificate12(cert_body).unwrap();
+        client_hs
+            .process_certificate(&cert_plain[..cert_total], &cert12.certificate_list)
+            .unwrap();
+
+        // SKE (optional — only for ECDHE/DHE)
+        if flight.server_key_exchange.is_some() {
+            let (_, ske_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+            s2c.drain(..consumed);
+            let (_, ske_body, ske_total) = parse_handshake_header(&ske_plain).unwrap();
+            match client_hs.kx_alg() {
+                KeyExchangeAlg::Ecdhe => {
+                    let ske = decode_server_key_exchange(ske_body).unwrap();
+                    client_hs
+                        .process_server_key_exchange(&ske_plain[..ske_total], &ske)
+                        .unwrap();
+                }
+                KeyExchangeAlg::Dhe => {
+                    let ske = decode_server_key_exchange_dhe(ske_body).unwrap();
+                    client_hs
+                        .process_server_key_exchange_dhe(&ske_plain[..ske_total], &ske)
+                        .unwrap();
+                }
+                _ => panic!("unexpected kx_alg for SKE"),
+            }
+        }
+
+        // SHD
+        let (_, shd_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, _, shd_total) = parse_handshake_header(&shd_plain).unwrap();
+
+        // 4. Client flight: CKE + CCS + Finished
+        let cflight = client_hs
+            .process_server_hello_done(&shd_plain[..shd_total])
+            .unwrap();
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &cflight.client_key_exchange)
+                .unwrap(),
+        );
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::ChangeCipherSpec, &[0x01])
+                .unwrap(),
+        );
+
+        // Activate client write encryption
+        if cflight.is_cbc {
+            client_rl.activate_write_encryption12_cbc(
+                cflight.client_write_key.clone(),
+                cflight.client_write_mac_key.clone(),
+                cflight.mac_len,
+            );
+        } else {
+            client_rl
+                .activate_write_encryption12(
+                    suite_neg,
+                    &cflight.client_write_key,
+                    cflight.client_write_iv.clone(),
+                )
+                .unwrap();
+        }
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &cflight.finished)
+                .unwrap(),
+        );
+
+        // 5. Server processes CKE + CCS + Finished
+        let (_, cke_plain, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        let (_, _, cke_total) = parse_handshake_header(&cke_plain).unwrap();
+        let keys = server_hs
+            .process_client_key_exchange(&cke_plain[..cke_total])
+            .unwrap();
+
+        let (ct, _, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        assert_eq!(ct, ContentType::ChangeCipherSpec);
+        server_hs.process_change_cipher_spec().unwrap();
+
+        if keys.is_cbc {
+            server_rl.activate_read_decryption12_cbc(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            server_rl
+                .activate_read_decryption12(
+                    suite_neg,
+                    &keys.client_write_key,
+                    keys.client_write_iv.clone(),
+                )
+                .unwrap();
+        }
+
+        let (_, fin_plain, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        let (_, _, fin_total) = parse_handshake_header(&fin_plain).unwrap();
+        let server_fin = server_hs.process_finished(&fin_plain[..fin_total]).unwrap();
+
+        // 6. Server → CCS + Finished
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::ChangeCipherSpec, &[0x01])
+                .unwrap(),
+        );
+        if keys.is_cbc {
+            server_rl.activate_write_encryption12_cbc(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            server_rl
+                .activate_write_encryption12(
+                    suite_neg,
+                    &keys.server_write_key,
+                    keys.server_write_iv.clone(),
+                )
+                .unwrap();
+        }
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::Handshake, &server_fin.finished)
+                .unwrap(),
+        );
+
+        // 7. Client processes CCS + Finished
+        let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        assert_eq!(ct, ContentType::ChangeCipherSpec);
+        client_hs.process_change_cipher_spec().unwrap();
+
+        if cflight.is_cbc {
+            client_rl.activate_read_decryption12_cbc(
+                cflight.server_write_key.clone(),
+                cflight.server_write_mac_key.clone(),
+                cflight.mac_len,
+            );
+        } else {
+            client_rl
+                .activate_read_decryption12(
+                    suite_neg,
+                    &cflight.server_write_key,
+                    cflight.server_write_iv.clone(),
+                )
+                .unwrap();
+        }
+
+        let (_, sfin_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, _, sfin_total) = parse_handshake_header(&sfin_plain).unwrap();
+        client_hs
+            .process_finished(&sfin_plain[..sfin_total], &cflight.master_secret)
+            .unwrap();
+
+        // 8. App data exchange
+        let app_msg = b"RSA/DHE works!";
+        let app_record = client_rl
+            .seal_record(ContentType::ApplicationData, app_msg)
+            .unwrap();
+        let (ct, app_plain, _) = server_rl.open_record(&app_record).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(app_plain, app_msg);
+
+        let reply = b"Confirmed!";
+        let reply_record = server_rl
+            .seal_record(ContentType::ApplicationData, reply)
+            .unwrap();
+        let (ct, reply_plain, _) = client_rl.open_record(&reply_record).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(reply_plain, reply);
+
+        (client_hs.state(), server_hs.state())
+    }
+
+    #[test]
+    fn test_tls12_rsa_gcm_handshake() {
+        let (cs, ss) = run_tls12_rsa_or_dhe_handshake(
+            CipherSuite::TLS_RSA_WITH_AES_128_GCM_SHA256,
+            &[], // RSA KX doesn't need groups
+        );
+        assert_eq!(cs, Tls12ClientState::Connected);
+        assert_eq!(ss, Tls12ServerState::Connected);
+    }
+
+    #[test]
+    fn test_tls12_rsa_cbc_handshake() {
+        let (cs, ss) =
+            run_tls12_rsa_or_dhe_handshake(CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA256, &[]);
+        assert_eq!(cs, Tls12ClientState::Connected);
+        assert_eq!(ss, Tls12ServerState::Connected);
+    }
+
+    #[test]
+    fn test_tls12_dhe_gcm_handshake() {
+        let (cs, ss) = run_tls12_rsa_or_dhe_handshake(
+            CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+            &[NamedGroup::FFDHE2048],
+        );
+        assert_eq!(cs, Tls12ClientState::Connected);
+        assert_eq!(ss, Tls12ServerState::Connected);
+    }
+
+    #[test]
+    fn test_tls12_dhe_cbc_handshake() {
+        let (cs, ss) = run_tls12_rsa_or_dhe_handshake(
+            CipherSuite::TLS_DHE_RSA_WITH_AES_128_CBC_SHA,
+            &[NamedGroup::FFDHE2048],
+        );
+        assert_eq!(cs, Tls12ClientState::Connected);
+        assert_eq!(ss, Tls12ServerState::Connected);
+    }
+
+    #[test]
+    fn test_tls12_dhe_chacha20_handshake() {
+        let (cs, ss) = run_tls12_rsa_or_dhe_handshake(
+            CipherSuite::TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+            &[NamedGroup::FFDHE2048],
+        );
+        assert_eq!(cs, Tls12ClientState::Connected);
+        assert_eq!(ss, Tls12ServerState::Connected);
+    }
+
+    #[test]
+    fn test_tls12_ecdhe_rsa_gcm_handshake() {
+        let (cs, ss) = run_tls12_rsa_or_dhe_handshake(
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            &[NamedGroup::SECP256R1],
+        );
         assert_eq!(cs, Tls12ClientState::Connected);
         assert_eq!(ss, Tls12ServerState::Connected);
     }

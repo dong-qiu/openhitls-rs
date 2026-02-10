@@ -8,7 +8,7 @@ description = "TLS protocol implementation for openHiTLS"
 
 [dependencies]
 hitls-types = { path = "../hitls-types" }
-hitls-crypto = { path = "../hitls-crypto", features = ["modes", "chacha20", "x25519", "ecdh", "ecdsa", "rsa", "ed25519"] }
+hitls-crypto = { path = "../hitls-crypto", features = ["modes", "chacha20", "x25519", "ecdh", "ecdsa", "rsa", "ed25519", "dh"] }
 hitls-pki = { path = "../hitls-pki" }
 hitls-utils = { path = "../hitls-utils" }
 getrandom = "0.2"

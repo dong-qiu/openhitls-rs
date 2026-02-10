@@ -1,7 +1,8 @@
-//! TLS 1.2 client handshake state machine (ECDHE-GCM).
+//! TLS 1.2 client handshake state machine.
 //!
-//! Implements the full TLS 1.2 client handshake for ECDHE key exchange
-//! with AES-GCM cipher suites.
+//! Implements the full TLS 1.2 client handshake for ECDHE, RSA static,
+//! and DHE key exchange with AES-GCM, AES-CBC, and ChaCha20-Poly1305
+//! cipher suites.
 
 use crate::config::ServerPrivateKey;
 use crate::config::TlsConfig;
@@ -9,17 +10,21 @@ use crate::crypt::key_schedule12::{
     compute_verify_data, derive_extended_master_secret, derive_key_block, derive_master_secret,
 };
 use crate::crypt::transcript::TranscriptHash;
-use crate::crypt::{NamedGroup, SignatureScheme, Tls12CipherSuiteParams};
+use crate::crypt::{KeyExchangeAlg, NamedGroup, SignatureScheme, Tls12CipherSuiteParams};
 use crate::extensions::ExtensionType;
 use crate::handshake::codec::{encode_client_hello, ClientHello, ServerHello};
 use crate::handshake::codec12::{
-    build_ske_params, build_ske_signed_data, decode_new_session_ticket12, encode_certificate12,
-    encode_certificate_verify12, encode_client_key_exchange, encode_finished12, Certificate12,
-    CertificateRequest12, CertificateVerify12, ClientKeyExchange, ServerKeyExchange,
+    build_dhe_ske_params, build_ske_params, build_ske_signed_data, decode_new_session_ticket12,
+    encode_certificate12, encode_certificate_verify12, encode_client_key_exchange,
+    encode_client_key_exchange_dhe, encode_client_key_exchange_rsa, encode_finished12,
+    Certificate12, CertificateRequest12, CertificateVerify12, ClientKeyExchange,
+    ClientKeyExchangeDhe, ClientKeyExchangeRsa, ServerKeyExchange, ServerKeyExchangeDhe,
 };
 use crate::handshake::key_exchange::KeyExchange;
 use crate::handshake::server12::select_signature_scheme_tls12;
 use crate::CipherSuite;
+use hitls_crypto::dh::{DhKeyPair, DhParams};
+use hitls_crypto::rsa::{RsaPadding, RsaPublicKey};
 use hitls_crypto::sha2::Sha256;
 use hitls_types::TlsError;
 use zeroize::Zeroize;
@@ -126,6 +131,14 @@ pub struct Tls12ClientHandshake {
     server_certs: Vec<Vec<u8>>,
     server_ecdh_public: Vec<u8>,
     server_named_curve: u16,
+    /// Key exchange algorithm for this session.
+    kx_alg: KeyExchangeAlg,
+    /// Leaf certificate DER (for RSA key encryption).
+    server_cert_der: Vec<u8>,
+    /// DHE params from ServerKeyExchange.
+    server_dhe_p: Vec<u8>,
+    server_dhe_g: Vec<u8>,
+    server_dhe_ys: Vec<u8>,
     /// Stored ClientHello bytes for transcript replay on hash switch.
     client_hello_bytes: Vec<u8>,
     /// Whether server sent CertificateRequest (mTLS).
@@ -170,6 +183,11 @@ impl Tls12ClientHandshake {
             server_certs: Vec::new(),
             server_ecdh_public: Vec::new(),
             server_named_curve: 0,
+            kx_alg: KeyExchangeAlg::Ecdhe,
+            server_cert_der: Vec::new(),
+            server_dhe_p: Vec::new(),
+            server_dhe_g: Vec::new(),
+            server_dhe_ys: Vec::new(),
             client_hello_bytes: Vec::new(),
             cert_request_received: false,
             requested_sig_algs: Vec::new(),
@@ -226,6 +244,11 @@ impl Tls12ClientHandshake {
         self.received_ticket = Some(ticket);
         self.received_ticket_lifetime = lifetime;
         Ok(())
+    }
+
+    /// The key exchange algorithm for this session.
+    pub fn kx_alg(&self) -> KeyExchangeAlg {
+        self.kx_alg
     }
 
     /// Whether Extended Master Secret was negotiated.
@@ -447,6 +470,7 @@ impl Tls12ClientHandshake {
             if self.cached_session_ems != self.use_extended_master_secret {
                 // Fall through to full handshake
                 self.abbreviated = false;
+                self.kx_alg = params.kx_alg;
                 self.params = Some(params);
                 self.state = Tls12ClientState::WaitCertificate;
                 return Ok(sh.cipher_suite);
@@ -485,6 +509,7 @@ impl Tls12ClientHandshake {
             return Ok(sh.cipher_suite);
         }
 
+        self.kx_alg = params.kx_alg;
         self.params = Some(params);
         self.state = Tls12ClientState::WaitCertificate;
         Ok(sh.cipher_suite)
@@ -505,8 +530,14 @@ impl Tls12ClientHandshake {
         }
 
         self.server_certs = cert_list.to_vec();
+        self.server_cert_der = cert_list[0].clone();
         self.transcript.update(raw_msg)?;
-        self.state = Tls12ClientState::WaitServerKeyExchange;
+        // RSA key exchange has no ServerKeyExchange — skip directly to SHD
+        if self.kx_alg == KeyExchangeAlg::Rsa {
+            self.state = Tls12ClientState::WaitServerHelloDone;
+        } else {
+            self.state = Tls12ClientState::WaitServerKeyExchange;
+        }
         Ok(())
     }
 
@@ -541,6 +572,42 @@ impl Tls12ClientHandshake {
 
         self.server_ecdh_public = ske.public_key.clone();
         self.server_named_curve = ske.named_curve;
+        self.transcript.update(raw_msg)?;
+        self.state = Tls12ClientState::WaitServerHelloDone;
+        Ok(())
+    }
+
+    /// Process a DHE ServerKeyExchange message.
+    ///
+    /// Verifies the signature over the DHE parameters using the server's
+    /// certificate public key.
+    pub fn process_server_key_exchange_dhe(
+        &mut self,
+        raw_msg: &[u8],
+        ske: &ServerKeyExchangeDhe,
+    ) -> Result<(), TlsError> {
+        if self.state != Tls12ClientState::WaitServerKeyExchange {
+            return Err(TlsError::HandshakeFailed(
+                "unexpected DHE ServerKeyExchange".into(),
+            ));
+        }
+
+        // Verify the signature
+        if self.config.verify_peer {
+            let params = build_dhe_ske_params(&ske.dh_p, &ske.dh_g, &ske.dh_ys);
+            let signed_data =
+                build_ske_signed_data(&self.client_random, &self.server_random, &params);
+            verify_ske_signature(
+                &self.server_certs[0],
+                ske.signature_algorithm,
+                &signed_data,
+                &ske.signature,
+            )?;
+        }
+
+        self.server_dhe_p = ske.dh_p.clone();
+        self.server_dhe_g = ske.dh_g.clone();
+        self.server_dhe_ys = ske.dh_ys.clone();
         self.transcript.update(raw_msg)?;
         self.state = Tls12ClientState::WaitServerHelloDone;
         Ok(())
@@ -601,30 +668,66 @@ impl Tls12ClientHandshake {
             None
         };
 
-        // Generate ephemeral key pair matching server's curve
-        let group = match self.server_named_curve {
-            0x0017 => NamedGroup::SECP256R1,
-            0x0018 => NamedGroup::SECP384R1,
-            0x001D => NamedGroup::X25519,
+        // Generate premaster secret and CKE based on key exchange algorithm
+        let (pre_master_secret, cke_msg) = match self.kx_alg {
+            KeyExchangeAlg::Ecdhe => {
+                let group = match self.server_named_curve {
+                    0x0017 => NamedGroup::SECP256R1,
+                    0x0018 => NamedGroup::SECP384R1,
+                    0x001D => NamedGroup::X25519,
+                    _ => {
+                        return Err(TlsError::HandshakeFailed(format!(
+                            "unsupported ECDH curve: 0x{:04x}",
+                            self.server_named_curve
+                        )))
+                    }
+                };
+                let kx = KeyExchange::generate(group)?;
+                let client_public = kx.public_key_bytes().to_vec();
+                let pms = kx.compute_shared_secret(&self.server_ecdh_public)?;
+                let cke = ClientKeyExchange {
+                    public_key: client_public,
+                };
+                let cke_msg = encode_client_key_exchange(&cke);
+                (pms, cke_msg)
+            }
+            KeyExchangeAlg::Rsa => {
+                // Generate 48-byte PMS: version(2) || random(46)
+                let mut pms = vec![0u8; 48];
+                pms[0] = 0x03;
+                pms[1] = 0x03;
+                getrandom::getrandom(&mut pms[2..])
+                    .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
+                // Encrypt PMS with server's RSA public key
+                let rsa_pub = parse_rsa_public_key_from_cert(&self.server_cert_der)?;
+                let encrypted_pms = rsa_pub
+                    .encrypt(RsaPadding::Pkcs1v15Encrypt, &pms)
+                    .map_err(TlsError::CryptoError)?;
+                let cke = ClientKeyExchangeRsa { encrypted_pms };
+                let cke_msg = encode_client_key_exchange_rsa(&cke);
+                (pms, cke_msg)
+            }
+            KeyExchangeAlg::Dhe => {
+                let dh_params = DhParams::new(&self.server_dhe_p, &self.server_dhe_g)
+                    .map_err(TlsError::CryptoError)?;
+                let kp = DhKeyPair::generate(&dh_params).map_err(TlsError::CryptoError)?;
+                let yc = kp
+                    .public_key_bytes(&dh_params)
+                    .map_err(TlsError::CryptoError)?;
+                let pms = kp
+                    .compute_shared_secret(&dh_params, &self.server_dhe_ys)
+                    .map_err(TlsError::CryptoError)?;
+                let cke = ClientKeyExchangeDhe { dh_yc: yc };
+                let cke_msg = encode_client_key_exchange_dhe(&cke);
+                (pms, cke_msg)
+            }
+            #[cfg(feature = "tlcp")]
             _ => {
-                return Err(TlsError::HandshakeFailed(format!(
-                    "unsupported ECDH curve: 0x{:04x}",
-                    self.server_named_curve
-                )))
+                return Err(TlsError::HandshakeFailed(
+                    "unsupported key exchange algorithm".into(),
+                ))
             }
         };
-
-        let kx = KeyExchange::generate(group)?;
-        let client_public = kx.public_key_bytes().to_vec();
-
-        // Compute ECDH shared secret (pre_master_secret)
-        let pre_master_secret = kx.compute_shared_secret(&self.server_ecdh_public)?;
-
-        // Build ClientKeyExchange message
-        let cke = ClientKeyExchange {
-            public_key: client_public,
-        };
-        let cke_msg = encode_client_key_exchange(&cke);
         self.transcript.update(&cke_msg)?;
 
         // Derive master secret (EMS uses transcript hash instead of randoms)
@@ -997,6 +1100,30 @@ fn sign_certificate_verify12(
             kp.sign(transcript_hash).map_err(TlsError::CryptoError)
         }
     }
+}
+
+/// Parse the RSA public key from a DER-encoded X.509 certificate.
+///
+/// Extracts the SubjectPublicKeyInfo, decodes the RSA modulus and exponent,
+/// and returns an `RsaPublicKey` suitable for encryption.
+fn parse_rsa_public_key_from_cert(cert_der: &[u8]) -> Result<RsaPublicKey, TlsError> {
+    let cert = hitls_pki::x509::Certificate::from_der(cert_der)
+        .map_err(|e| TlsError::HandshakeFailed(format!("cert parse: {e}")))?;
+    let spki = &cert.public_key;
+
+    use hitls_utils::asn1::Decoder;
+    let mut key_dec = Decoder::new(&spki.public_key);
+    let mut seq = key_dec
+        .read_sequence()
+        .map_err(|e| TlsError::HandshakeFailed(format!("RSA key parse: {e}")))?;
+    let n = seq
+        .read_integer()
+        .map_err(|e| TlsError::HandshakeFailed(format!("RSA modulus parse: {e}")))?;
+    let e = seq
+        .read_integer()
+        .map_err(|e| TlsError::HandshakeFailed(format!("RSA exponent parse: {e}")))?;
+
+    RsaPublicKey::new(n, e).map_err(TlsError::CryptoError)
 }
 
 #[cfg(test)]

@@ -52,6 +52,16 @@ impl DhParams {
     pub fn prime_size(&self) -> usize {
         self.p.bit_len().div_ceil(8)
     }
+
+    /// Return the prime modulus p as big-endian bytes.
+    pub fn p_bytes(&self) -> Vec<u8> {
+        self.p.to_bytes_be()
+    }
+
+    /// Return the generator g as big-endian bytes.
+    pub fn g_bytes(&self) -> Vec<u8> {
+        self.g.to_bytes_be()
+    }
 }
 
 /// A Diffie-Hellman key pair.

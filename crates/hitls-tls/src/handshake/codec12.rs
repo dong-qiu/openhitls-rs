@@ -166,6 +166,180 @@ pub fn decode_client_key_exchange(body: &[u8]) -> Result<ClientKeyExchange, TlsE
     })
 }
 
+// ---------------------------------------------------------------------------
+// DHE ServerKeyExchange
+// ---------------------------------------------------------------------------
+
+/// ServerKeyExchange for DHE (RFC 5246 §7.4.3).
+#[derive(Debug, Clone)]
+pub struct ServerKeyExchangeDhe {
+    /// DH prime modulus p (big-endian).
+    pub dh_p: Vec<u8>,
+    /// DH generator g (big-endian).
+    pub dh_g: Vec<u8>,
+    /// Server's DH public value Ys (big-endian).
+    pub dh_ys: Vec<u8>,
+    /// Signature algorithm used.
+    pub signature_algorithm: SignatureScheme,
+    /// Signature over client_random + server_random + dh_params.
+    pub signature: Vec<u8>,
+}
+
+/// Build the DHE "server key exchange params" portion for signature computation.
+///
+/// ```text
+/// params = dh_p_len(2) || dh_p || dh_g_len(2) || dh_g || dh_Ys_len(2) || dh_Ys
+/// ```
+pub fn build_dhe_ske_params(dh_p: &[u8], dh_g: &[u8], dh_ys: &[u8]) -> Vec<u8> {
+    let mut params = Vec::with_capacity(6 + dh_p.len() + dh_g.len() + dh_ys.len());
+    params.extend_from_slice(&(dh_p.len() as u16).to_be_bytes());
+    params.extend_from_slice(dh_p);
+    params.extend_from_slice(&(dh_g.len() as u16).to_be_bytes());
+    params.extend_from_slice(dh_g);
+    params.extend_from_slice(&(dh_ys.len() as u16).to_be_bytes());
+    params.extend_from_slice(dh_ys);
+    params
+}
+
+/// Encode a DHE ServerKeyExchange message (wrapped with handshake header).
+pub fn encode_server_key_exchange_dhe(ske: &ServerKeyExchangeDhe) -> Vec<u8> {
+    let params = build_dhe_ske_params(&ske.dh_p, &ske.dh_g, &ske.dh_ys);
+    let sig_alg = ske.signature_algorithm.0.to_be_bytes();
+    let mut body = Vec::with_capacity(params.len() + 2 + 2 + ske.signature.len());
+    body.extend_from_slice(&params);
+    body.extend_from_slice(&sig_alg);
+    body.extend_from_slice(&(ske.signature.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ske.signature);
+    wrap_handshake(HandshakeType::ServerKeyExchange, &body)
+}
+
+/// Decode a DHE ServerKeyExchange message body.
+pub fn decode_server_key_exchange_dhe(body: &[u8]) -> Result<ServerKeyExchangeDhe, TlsError> {
+    if body.len() < 6 {
+        return Err(TlsError::HandshakeFailed(
+            "DHE ServerKeyExchange too short".into(),
+        ));
+    }
+    let mut off = 0;
+    // p
+    let p_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + p_len + 2 {
+        return Err(TlsError::HandshakeFailed("DHE SKE p truncated".into()));
+    }
+    let dh_p = body[off..off + p_len].to_vec();
+    off += p_len;
+    // g
+    let g_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + g_len + 2 {
+        return Err(TlsError::HandshakeFailed("DHE SKE g truncated".into()));
+    }
+    let dh_g = body[off..off + g_len].to_vec();
+    off += g_len;
+    // Ys
+    let ys_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + ys_len + 4 {
+        return Err(TlsError::HandshakeFailed("DHE SKE Ys truncated".into()));
+    }
+    let dh_ys = body[off..off + ys_len].to_vec();
+    off += ys_len;
+    // signature algorithm + signature
+    let sig_alg = u16::from_be_bytes([body[off], body[off + 1]]);
+    let sig_len = u16::from_be_bytes([body[off + 2], body[off + 3]]) as usize;
+    off += 4;
+    if body.len() < off + sig_len {
+        return Err(TlsError::HandshakeFailed(
+            "DHE SKE signature truncated".into(),
+        ));
+    }
+    let signature = body[off..off + sig_len].to_vec();
+    Ok(ServerKeyExchangeDhe {
+        dh_p,
+        dh_g,
+        dh_ys,
+        signature_algorithm: SignatureScheme(sig_alg),
+        signature,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// RSA ClientKeyExchange
+// ---------------------------------------------------------------------------
+
+/// ClientKeyExchange for RSA static key exchange (RFC 5246 §7.4.7.1).
+#[derive(Debug, Clone)]
+pub struct ClientKeyExchangeRsa {
+    /// PKCS#1v1.5-encrypted premaster secret.
+    pub encrypted_pms: Vec<u8>,
+}
+
+/// Encode an RSA ClientKeyExchange message.
+/// Wire format: encrypted_pms_len(2) || encrypted_pms
+pub fn encode_client_key_exchange_rsa(cke: &ClientKeyExchangeRsa) -> Vec<u8> {
+    let mut body = Vec::with_capacity(2 + cke.encrypted_pms.len());
+    body.extend_from_slice(&(cke.encrypted_pms.len() as u16).to_be_bytes());
+    body.extend_from_slice(&cke.encrypted_pms);
+    wrap_handshake(HandshakeType::ClientKeyExchange, &body)
+}
+
+/// Decode an RSA ClientKeyExchange message body.
+pub fn decode_client_key_exchange_rsa(body: &[u8]) -> Result<ClientKeyExchangeRsa, TlsError> {
+    if body.len() < 2 {
+        return Err(TlsError::HandshakeFailed(
+            "RSA ClientKeyExchange too short".into(),
+        ));
+    }
+    let len = u16::from_be_bytes([body[0], body[1]]) as usize;
+    if body.len() < 2 + len {
+        return Err(TlsError::HandshakeFailed(
+            "RSA ClientKeyExchange truncated".into(),
+        ));
+    }
+    Ok(ClientKeyExchangeRsa {
+        encrypted_pms: body[2..2 + len].to_vec(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// DHE ClientKeyExchange
+// ---------------------------------------------------------------------------
+
+/// ClientKeyExchange for DHE (RFC 5246 §7.4.7.2).
+#[derive(Debug, Clone)]
+pub struct ClientKeyExchangeDhe {
+    /// Client's DH public value Yc (big-endian).
+    pub dh_yc: Vec<u8>,
+}
+
+/// Encode a DHE ClientKeyExchange message.
+/// Wire format: dh_Yc_len(2) || dh_Yc
+pub fn encode_client_key_exchange_dhe(cke: &ClientKeyExchangeDhe) -> Vec<u8> {
+    let mut body = Vec::with_capacity(2 + cke.dh_yc.len());
+    body.extend_from_slice(&(cke.dh_yc.len() as u16).to_be_bytes());
+    body.extend_from_slice(&cke.dh_yc);
+    wrap_handshake(HandshakeType::ClientKeyExchange, &body)
+}
+
+/// Decode a DHE ClientKeyExchange message body.
+pub fn decode_client_key_exchange_dhe(body: &[u8]) -> Result<ClientKeyExchangeDhe, TlsError> {
+    if body.len() < 2 {
+        return Err(TlsError::HandshakeFailed(
+            "DHE ClientKeyExchange too short".into(),
+        ));
+    }
+    let len = u16::from_be_bytes([body[0], body[1]]) as usize;
+    if body.len() < 2 + len {
+        return Err(TlsError::HandshakeFailed(
+            "DHE ClientKeyExchange truncated".into(),
+        ));
+    }
+    Ok(ClientKeyExchangeDhe {
+        dh_yc: body[2..2 + len].to_vec(),
+    })
+}
+
 /// Encode a ServerHelloDone message (empty body).
 pub fn encode_server_hello_done() -> Vec<u8> {
     wrap_handshake(HandshakeType::ServerHelloDone, &[])
@@ -688,5 +862,77 @@ mod tests {
             decode_new_session_ticket12(&[0x00, 0x00, 0x0E, 0x10, 0x00, 0x00]).unwrap();
         assert_eq!(lifetime, 3600);
         assert!(ticket.is_empty());
+    }
+
+    #[test]
+    fn test_encode_decode_dhe_ske_roundtrip() {
+        let ske = ServerKeyExchangeDhe {
+            dh_p: vec![0xFF; 256],  // 2048-bit prime
+            dh_g: vec![0x02],       // generator = 2
+            dh_ys: vec![0xAA; 256], // public value
+            signature_algorithm: SignatureScheme::RSA_PSS_RSAE_SHA256,
+            signature: vec![0xBB; 256],
+        };
+
+        let encoded = encode_server_key_exchange_dhe(&ske);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ServerKeyExchange);
+
+        let decoded = decode_server_key_exchange_dhe(body).unwrap();
+        assert_eq!(decoded.dh_p, ske.dh_p);
+        assert_eq!(decoded.dh_g, ske.dh_g);
+        assert_eq!(decoded.dh_ys, ske.dh_ys);
+        assert_eq!(
+            decoded.signature_algorithm,
+            SignatureScheme::RSA_PSS_RSAE_SHA256
+        );
+        assert_eq!(decoded.signature, ske.signature);
+    }
+
+    #[test]
+    fn test_encode_decode_rsa_cke_roundtrip() {
+        let cke = ClientKeyExchangeRsa {
+            encrypted_pms: vec![0xCC; 256],
+        };
+
+        let encoded = encode_client_key_exchange_rsa(&cke);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ClientKeyExchange);
+
+        let decoded = decode_client_key_exchange_rsa(body).unwrap();
+        assert_eq!(decoded.encrypted_pms, cke.encrypted_pms);
+    }
+
+    #[test]
+    fn test_encode_decode_dhe_cke_roundtrip() {
+        let cke = ClientKeyExchangeDhe {
+            dh_yc: vec![0xDD; 256],
+        };
+
+        let encoded = encode_client_key_exchange_dhe(&cke);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ClientKeyExchange);
+
+        let decoded = decode_client_key_exchange_dhe(body).unwrap();
+        assert_eq!(decoded.dh_yc, cke.dh_yc);
+    }
+
+    #[test]
+    fn test_build_dhe_ske_params() {
+        let p = vec![0xFF; 8];
+        let g = vec![0x02];
+        let ys = vec![0xAA; 8];
+        let params = build_dhe_ske_params(&p, &g, &ys);
+        // 2 + 8 + 2 + 1 + 2 + 8 = 23
+        assert_eq!(params.len(), 23);
+        assert_eq!(&params[0..2], &[0x00, 0x08]); // p_len
+        assert_eq!(&params[2..10], &[0xFF; 8]); // p
+        assert_eq!(&params[10..12], &[0x00, 0x01]); // g_len
+        assert_eq!(params[12], 0x02); // g
+        assert_eq!(&params[13..15], &[0x00, 0x08]); // ys_len
+        assert_eq!(&params[15..23], &[0xAA; 8]); // ys
     }
 }

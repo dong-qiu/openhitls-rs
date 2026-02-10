@@ -3181,3 +3181,107 @@ Phase 35 adds three TLS 1.2 security extensions that harden the protocol against
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 880 workspace tests passing (25 ignored)
+
+## Phase 36: TLS 1.2 RSA + DHE Key Exchange — 13 New Cipher Suites (Session 2026-02-10)
+
+### Goals
+- Implement RSA static key exchange (client encrypts pre_master_secret with server's RSA public key, no ServerKeyExchange message)
+- Implement DHE_RSA key exchange (server sends DH parameters in ServerKeyExchange, signed with RSA)
+- Add Bleichenbacher protection for RSA key exchange (on PKCS#1 v1.5 decryption failure, use random pre_master_secret instead of aborting)
+- Register 6 RSA cipher suites (GCM and CBC variants) and 7 DHE_RSA cipher suites (GCM, CBC, ChaCha20)
+- Enable ECDHE_RSA cipher suites to work with real RSA certificates
+
+### Summary
+
+Phase 36 adds two new TLS 1.2 key exchange mechanisms — RSA static and DHE_RSA — bringing the total cipher suite count from 14 to 27. This covers the most widely deployed non-ECDHE cipher suites in TLS 1.2.
+
+1. **RSA Static Key Exchange** — The client generates a 48-byte pre_master_secret (with TLS version in the first two bytes), encrypts it with the server's RSA public key using PKCS#1 v1.5, and sends it in the ClientKeyExchange message. The server decrypts it with its RSA private key. No ServerKeyExchange message is sent. This is the simplest TLS 1.2 key exchange but lacks forward secrecy.
+
+2. **DHE_RSA Key Exchange** — The server generates ephemeral DH parameters (p, g, Ys) and sends them in a ServerKeyExchange message, signed with its RSA private key. The client verifies the signature, generates its own DH key pair, sends Yc in ClientKeyExchange, and both sides compute the shared pre_master_secret via Diffie-Hellman. This provides forward secrecy.
+
+3. **Bleichenbacher Protection** — When RSA PKCS#1 v1.5 decryption fails (padding error), instead of returning an error (which would be an oracle), the server generates a random 48-byte pre_master_secret and continues the handshake. The handshake will fail at the Finished message verification, but the attacker cannot distinguish decryption failure from success.
+
+### Implementation
+
+#### Step 1: Cipher Suite Registration
+- Added 6 RSA static cipher suites:
+  - `TLS_RSA_WITH_AES_128_GCM_SHA256` (0x009C)
+  - `TLS_RSA_WITH_AES_256_GCM_SHA384` (0x009D)
+  - `TLS_RSA_WITH_AES_128_CBC_SHA` (0x002F)
+  - `TLS_RSA_WITH_AES_256_CBC_SHA` (0x0035)
+  - `TLS_RSA_WITH_AES_128_CBC_SHA256` (0x003C)
+  - `TLS_RSA_WITH_AES_256_CBC_SHA256` (0x003D)
+- Added 7 DHE_RSA cipher suites:
+  - `TLS_DHE_RSA_WITH_AES_128_GCM_SHA256` (0x009E)
+  - `TLS_DHE_RSA_WITH_AES_256_GCM_SHA384` (0x009F)
+  - `TLS_DHE_RSA_WITH_AES_128_CBC_SHA` (0x0033)
+  - `TLS_DHE_RSA_WITH_AES_256_CBC_SHA` (0x0039)
+  - `TLS_DHE_RSA_WITH_AES_128_CBC_SHA256` (0x0067)
+  - `TLS_DHE_RSA_WITH_AES_256_CBC_SHA256` (0x006B)
+  - `TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256` (0xCCAA)
+- Registered `KeyExchangeType::Rsa` and `KeyExchangeType::Dhe` in suite metadata
+
+#### Step 2: RSA Static Key Exchange (Client + Server)
+- Server skips ServerKeyExchange for RSA static suites
+- Client encrypts 48-byte pre_master_secret with server's RSA public key (PKCS#1 v1.5)
+- Server decrypts with RSA private key, with Bleichenbacher protection on failure
+- Pre_master_secret format: 2 bytes TLS version + 46 random bytes
+
+#### Step 3: DHE_RSA Key Exchange (Server)
+- Server generates ephemeral DH key pair using configured DH parameters (ffdhe2048/3072)
+- Encodes ServerKeyExchange: DH p, g, Ys parameters + RSA signature over client_random + server_random + params
+- Signature uses SHA-256 for TLS 1.2 (SignatureAndHashAlgorithm)
+
+#### Step 4: DHE_RSA Key Exchange (Client)
+- Client parses ServerKeyExchange, verifies RSA signature over DH parameters
+- Generates own DH key pair, computes shared secret via DH key agreement
+- Sends Yc in ClientKeyExchange
+
+#### Step 5: Codec Updates
+- Extended `encode_server_key_exchange` / `decode_server_key_exchange` for DH parameters
+- Extended `encode_client_key_exchange` / `decode_client_key_exchange` for RSA encrypted pre_master_secret and DH Yc
+- Added codec roundtrip tests for all new message formats
+
+#### Step 6: Connection Integration
+- Both `Tls12ClientConnection` and `Tls12ServerConnection` dispatch on `KeyExchangeType` for RSA/DHE/ECDHE paths
+- ECDHE_RSA suites now tested with real RSA certificates (previously only tested with ECDSA certs)
+- DH module extended to support server-side key generation and parameter encoding
+
+### Files Changed
+
+| File | Status | Description |
+|------|--------|-------------|
+| `hitls-tls/src/lib.rs` | Modified | 13 new cipher suite constants and registrations |
+| `hitls-tls/src/crypt/mod.rs` | Modified | KeyExchangeType::Rsa and ::Dhe, suite metadata |
+| `hitls-tls/src/handshake/codec12.rs` | Modified | ServerKeyExchange/ClientKeyExchange codec for RSA/DH |
+| `hitls-tls/src/handshake/client12.rs` | Modified | RSA and DHE client key exchange logic |
+| `hitls-tls/src/handshake/server12.rs` | Modified | RSA and DHE server key exchange logic, Bleichenbacher protection |
+| `hitls-tls/src/record/encryption12.rs` | Modified | Support for new cipher suite encryption params |
+| `hitls-tls/src/connection12.rs` | Modified | Connection-level dispatch for RSA/DHE/ECDHE key exchange |
+| `hitls-crypto/src/dh/mod.rs` | Modified | DH parameter encoding, server-side key generation |
+| `tests/interop/src/lib.rs` | Modified | 2 new integration tests (RSA + DHE, both ignored — slow keygen) |
+| `Cargo.toml` | Modified | Dependency updates |
+
+### Test Results
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| bignum | 46 | 0 |
+| crypto | 330 | 19 |
+| tls | 333 | 0 |
+| pki | 98 | 0 |
+| utils | 35 | 0 |
+| auth | 20 | 0 |
+| cli | 8 | 5 |
+| integration | 20 | 3 |
+| **Total** | **890** | **27** |
+
+### New Tests (12 total)
+- 4 codec roundtrip tests (RSA ClientKeyExchange, DH ServerKeyExchange, DH ClientKeyExchange, mixed)
+- 6 connection handshake tests (RSA GCM, RSA CBC, DHE GCM, DHE CBC, DHE ChaCha20, ECDHE_RSA with real RSA cert)
+- 2 integration tests (RSA TCP loopback, DHE_RSA TCP loopback — both ignored due to slow RSA keygen)
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 890 workspace tests passing (27 ignored)
