@@ -289,6 +289,21 @@ impl MlKemKeyPair {
         })
     }
 
+    /// Construct an ML-KEM key pair from just the encapsulation (public) key.
+    ///
+    /// The resulting key pair can only encapsulate, not decapsulate.
+    pub fn from_encapsulation_key(parameter_set: u32, ek: &[u8]) -> Result<Self, CryptoError> {
+        let params = get_params(parameter_set)?;
+        if ek.len() != params.ek_len {
+            return Err(CryptoError::InvalidArg);
+        }
+        Ok(Self {
+            encapsulation_key: ek.to_vec(),
+            decapsulation_key: Vec::new(),
+            parameter_set,
+        })
+    }
+
     /// Encapsulate: produce a shared secret and ciphertext.
     pub fn encapsulate(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
         let params = get_params(self.parameter_set)?;
@@ -433,5 +448,29 @@ mod tests {
         let kp1024 = MlKemKeyPair::generate(1024).unwrap();
         assert_eq!(kp1024.encapsulation_key().len(), 1568);
         assert_eq!(kp1024.decapsulation_key.len(), 3168);
+    }
+
+    #[test]
+    fn test_mlkem_from_encapsulation_key() {
+        let full_kp = MlKemKeyPair::generate(768).unwrap();
+        let ek = full_kp.encapsulation_key().to_vec();
+
+        // Construct from just the encapsulation key
+        let pub_kp = MlKemKeyPair::from_encapsulation_key(768, &ek).unwrap();
+        assert_eq!(pub_kp.encapsulation_key().len(), 1184);
+
+        // Encapsulate using the public-only key pair
+        let (ss_enc, ct) = pub_kp.encapsulate().unwrap();
+        assert_eq!(ss_enc.len(), 32);
+        assert_eq!(ct.len(), 1088);
+
+        // Decapsulate using the full key pair
+        let ss_dec = full_kp.decapsulate(&ct).unwrap();
+        assert_eq!(ss_enc, ss_dec);
+    }
+
+    #[test]
+    fn test_mlkem_from_encapsulation_key_bad_length() {
+        assert!(MlKemKeyPair::from_encapsulation_key(768, &[0u8; 100]).is_err());
     }
 }

@@ -93,6 +93,11 @@ impl NamedGroup {
     pub const X25519_MLKEM768: Self = Self(0x6399);
     // TLCP SM2 curve
     pub const SM2P256: Self = Self(0x0041);
+
+    /// Returns true if this group uses KEM (encapsulate/decapsulate) instead of DH.
+    pub fn is_kem(&self) -> bool {
+        matches!(*self, NamedGroup::X25519_MLKEM768)
+    }
 }
 
 /// TLS signature scheme identifiers.

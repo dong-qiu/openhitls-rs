@@ -1,7 +1,8 @@
-//! TLS 1.3 ephemeral key exchange (X25519, SECP256R1).
+//! TLS 1.3 ephemeral key exchange (X25519, SECP256R1, X25519MLKEM768).
 
 use crate::crypt::NamedGroup;
 use hitls_crypto::ecdh::EcdhKeyPair;
+use hitls_crypto::mlkem::MlKemKeyPair;
 use hitls_crypto::x25519::{X25519PrivateKey, X25519PublicKey};
 use hitls_types::TlsError;
 
@@ -11,6 +12,10 @@ enum KeyExchangeInner {
     EcdhP256(Box<EcdhKeyPair>),
     #[cfg(feature = "tlcp")]
     EcdhSm2(Box<EcdhKeyPair>),
+    HybridX25519MlKem768 {
+        mlkem: MlKemKeyPair,
+        x25519_sk: X25519PrivateKey,
+    },
 }
 
 /// Ephemeral key exchange state for a TLS handshake.
@@ -57,6 +62,19 @@ impl KeyExchange {
                     public_key_bytes,
                 })
             }
+            NamedGroup::X25519_MLKEM768 => {
+                let mlkem = MlKemKeyPair::generate(768).map_err(TlsError::CryptoError)?;
+                let x25519_sk = X25519PrivateKey::generate().map_err(TlsError::CryptoError)?;
+                let x25519_pk = x25519_sk.public_key();
+                // Wire format: mlkem_ek(1184) || x25519_pk(32) = 1216 bytes
+                let mut public_key_bytes = mlkem.encapsulation_key().to_vec();
+                public_key_bytes.extend_from_slice(x25519_pk.as_bytes());
+                Ok(Self {
+                    group,
+                    inner: KeyExchangeInner::HybridX25519MlKem768 { mlkem, x25519_sk },
+                    public_key_bytes,
+                })
+            }
             _ => Err(TlsError::HandshakeFailed(format!(
                 "unsupported named group: {:?}",
                 group
@@ -90,6 +108,72 @@ impl KeyExchange {
             KeyExchangeInner::EcdhSm2(kp) => kp
                 .compute_shared_secret(peer_public)
                 .map_err(TlsError::CryptoError),
+            KeyExchangeInner::HybridX25519MlKem768 { mlkem, x25519_sk } => {
+                // peer_public = mlkem_ct(1088) || x25519_eph_pk(32) = 1120 bytes
+                if peer_public.len() != 1120 {
+                    return Err(TlsError::HandshakeFailed(
+                        "invalid hybrid KEM ciphertext length".into(),
+                    ));
+                }
+                let mlkem_ct = &peer_public[..1088];
+                let x25519_pk_bytes = &peer_public[1088..1120];
+                let mlkem_ss = mlkem.decapsulate(mlkem_ct).map_err(TlsError::CryptoError)?;
+                let x25519_pk =
+                    X25519PublicKey::new(x25519_pk_bytes).map_err(TlsError::CryptoError)?;
+                let x25519_ss = x25519_sk
+                    .diffie_hellman(&x25519_pk)
+                    .map_err(TlsError::CryptoError)?;
+                // Shared secret: mlkem_ss(32) || x25519_ss(32) = 64 bytes
+                let mut shared_secret = mlkem_ss;
+                shared_secret.extend_from_slice(&x25519_ss);
+                Ok(shared_secret)
+            }
+        }
+    }
+
+    /// Server-side KEM encapsulation for hybrid groups.
+    ///
+    /// Returns `(shared_secret, ciphertext_for_key_share)`.
+    pub fn encapsulate(
+        group: NamedGroup,
+        peer_public_key: &[u8],
+    ) -> Result<(Vec<u8>, Vec<u8>), TlsError> {
+        match group {
+            NamedGroup::X25519_MLKEM768 => {
+                // peer_public_key = mlkem_ek(1184) || x25519_pk(32) = 1216 bytes
+                if peer_public_key.len() != 1216 {
+                    return Err(TlsError::HandshakeFailed(
+                        "invalid hybrid KEM public key length".into(),
+                    ));
+                }
+                let mlkem_ek = &peer_public_key[..1184];
+                let x25519_pk_bytes = &peer_public_key[1184..1216];
+
+                // ML-KEM encapsulate to peer's encapsulation key
+                let mlkem_kp = MlKemKeyPair::from_encapsulation_key(768, mlkem_ek)
+                    .map_err(TlsError::CryptoError)?;
+                let (mlkem_ss, mlkem_ct) = mlkem_kp.encapsulate().map_err(TlsError::CryptoError)?;
+
+                // X25519 ephemeral DH
+                let x25519_eph_sk = X25519PrivateKey::generate().map_err(TlsError::CryptoError)?;
+                let x25519_eph_pk = x25519_eph_sk.public_key();
+                let x25519_pk =
+                    X25519PublicKey::new(x25519_pk_bytes).map_err(TlsError::CryptoError)?;
+                let x25519_ss = x25519_eph_sk
+                    .diffie_hellman(&x25519_pk)
+                    .map_err(TlsError::CryptoError)?;
+
+                // Ciphertext: mlkem_ct(1088) || x25519_eph_pk(32) = 1120 bytes
+                let mut ciphertext = mlkem_ct;
+                ciphertext.extend_from_slice(x25519_eph_pk.as_bytes());
+
+                // Shared secret: mlkem_ss(32) || x25519_ss(32) = 64 bytes
+                let mut shared_secret = mlkem_ss;
+                shared_secret.extend_from_slice(&x25519_ss);
+
+                Ok((shared_secret, ciphertext))
+            }
+            _ => Err(TlsError::HandshakeFailed("not a KEM group".into())),
         }
     }
 }
@@ -144,5 +228,39 @@ mod tests {
         let shared2 = peer.compute_shared_secret(kx.public_key_bytes()).unwrap();
         assert_eq!(shared1, shared2);
         assert_eq!(shared1.len(), 32); // SM2 field size
+    }
+
+    #[test]
+    fn test_key_exchange_hybrid_kem() {
+        let kx = KeyExchange::generate(NamedGroup::X25519_MLKEM768).unwrap();
+        assert_eq!(kx.group(), NamedGroup::X25519_MLKEM768);
+        // mlkem768_ek(1184) || x25519_pk(32) = 1216 bytes
+        assert_eq!(kx.public_key_bytes().len(), 1216);
+    }
+
+    #[test]
+    fn test_key_exchange_hybrid_kem_roundtrip() {
+        // Client generates key pair
+        let client_kx = KeyExchange::generate(NamedGroup::X25519_MLKEM768).unwrap();
+        assert_eq!(client_kx.public_key_bytes().len(), 1216);
+
+        // Server encapsulates to client's public key
+        let (server_ss, ciphertext) =
+            KeyExchange::encapsulate(NamedGroup::X25519_MLKEM768, client_kx.public_key_bytes())
+                .unwrap();
+        assert_eq!(ciphertext.len(), 1120); // mlkem_ct(1088) || x25519_eph_pk(32)
+        assert_eq!(server_ss.len(), 64); // mlkem_ss(32) || x25519_ss(32)
+
+        // Client decapsulates server's ciphertext
+        let client_ss = client_kx.compute_shared_secret(&ciphertext).unwrap();
+        assert_eq!(client_ss.len(), 64);
+
+        // Shared secrets must match
+        assert_eq!(client_ss, server_ss);
+    }
+
+    #[test]
+    fn test_key_exchange_hybrid_kem_encapsulate_bad_length() {
+        assert!(KeyExchange::encapsulate(NamedGroup::X25519_MLKEM768, &[0u8; 100]).is_err());
     }
 }

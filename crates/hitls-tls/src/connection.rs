@@ -5044,4 +5044,326 @@ mod tests {
         assert_eq!(ct, ContentType::ApplicationData);
         assert_eq!(pt, data);
     }
+
+    /// TLS 1.3 handshake with X25519MLKEM768 hybrid KEM key exchange.
+    #[test]
+    fn test_hybrid_kem_handshake() {
+        use crate::config::ServerPrivateKey;
+        use crate::crypt::NamedGroup;
+
+        let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+        let client_config = TlsConfig::builder()
+            .supported_groups(&[NamedGroup::X25519_MLKEM768])
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .supported_groups(&[NamedGroup::X25519_MLKEM768])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+
+        let mut client_hs = ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // Client builds CH with hybrid KEM key share (1216 bytes)
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+
+        // Server processes CH → Actions (not HRR)
+        let (_, ch_data, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_data).unwrap();
+        let actions = match server_hs
+            .process_client_hello(&ch_data[..ch_total])
+            .unwrap()
+        {
+            ClientHelloResult::Actions(a) => *a,
+            _ => panic!("expected Actions, got HRR"),
+        };
+
+        // Server sends ServerHello + encrypted flight
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_hello_msg)
+            .unwrap();
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_hs_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_hs_keys)
+            .unwrap();
+
+        let ee_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.encrypted_extensions_msg)
+            .unwrap();
+        let cert_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_msg)
+            .unwrap();
+        let cv_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_verify_msg)
+            .unwrap();
+        let sfin_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_finished_msg)
+            .unwrap();
+
+        // Client processes ServerHello
+        let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
+        let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
+        let sh_actions = match client_hs
+            .process_server_hello(&sh_data[..sh_total])
+            .unwrap()
+        {
+            ServerHelloResult::Actions(a) => a,
+            _ => panic!("expected Actions"),
+        };
+        client_rl
+            .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(sh_actions.suite, &sh_actions.client_hs_keys)
+            .unwrap();
+
+        // Client processes encrypted flight
+        for rec in [&ee_rec, &cert_rec, &cv_rec] {
+            let (_, data, _) = client_rl.open_record(rec).unwrap();
+            let (_, _, total) = parse_handshake_header(&data).unwrap();
+            let msg = &data[..total];
+            match client_hs.state() {
+                HandshakeState::WaitEncryptedExtensions => {
+                    client_hs.process_encrypted_extensions(msg).unwrap();
+                }
+                HandshakeState::WaitCertCertReq => {
+                    client_hs.process_certificate(msg).unwrap();
+                }
+                HandshakeState::WaitCertVerify => {
+                    client_hs.process_certificate_verify(msg).unwrap();
+                }
+                s => panic!("unexpected state: {s:?}"),
+            }
+        }
+
+        let (_, fin_data, _) = client_rl.open_record(&sfin_rec).unwrap();
+        let (_, _, fin_total) = parse_handshake_header(&fin_data).unwrap();
+        let fin_actions = client_hs.process_finished(&fin_data[..fin_total]).unwrap();
+        assert_eq!(client_hs.state(), HandshakeState::Connected);
+
+        // Client sends Finished
+        let cfin_record = client_rl
+            .seal_record(ContentType::Handshake, &fin_actions.client_finished_msg)
+            .unwrap();
+        let (_, cfin_data, _) = server_rl.open_record(&cfin_record).unwrap();
+        let (_, _, cfin_total) = parse_handshake_header(&cfin_data).unwrap();
+        server_hs
+            .process_client_finished(&cfin_data[..cfin_total])
+            .unwrap();
+        assert_eq!(server_hs.state(), HandshakeState::Connected);
+
+        // Activate app keys and exchange data
+        client_rl
+            .activate_write_encryption(fin_actions.suite, &fin_actions.client_app_keys)
+            .unwrap();
+        client_rl
+            .activate_read_decryption(fin_actions.suite, &fin_actions.server_app_keys)
+            .unwrap();
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_app_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_app_keys)
+            .unwrap();
+
+        let msg = b"Hello from hybrid KEM client!";
+        let rec = client_rl
+            .seal_record(ContentType::ApplicationData, msg)
+            .unwrap();
+        let (ct, pt, _) = server_rl.open_record(&rec).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, msg);
+
+        let msg2 = b"Hello from hybrid KEM server!";
+        let rec2 = server_rl
+            .seal_record(ContentType::ApplicationData, msg2)
+            .unwrap();
+        let (ct2, pt2, _) = client_rl.open_record(&rec2).unwrap();
+        assert_eq!(ct2, ContentType::ApplicationData);
+        assert_eq!(pt2, msg2);
+    }
+
+    /// HRR fallback: client offers hybrid KEM, server only supports X25519.
+    #[test]
+    fn test_hybrid_kem_hrr_fallback() {
+        use crate::config::ServerPrivateKey;
+        use crate::crypt::NamedGroup;
+
+        let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+        // Client offers hybrid first, then X25519 fallback
+        let client_config = TlsConfig::builder()
+            .supported_groups(&[NamedGroup::X25519_MLKEM768, NamedGroup::X25519])
+            .verify_peer(false)
+            .build();
+
+        // Server only supports X25519
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .supported_groups(&[NamedGroup::X25519])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+
+        let mut client_hs = ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // CH1: client sends hybrid KEM key share
+        let ch1_msg = client_hs.build_client_hello().unwrap();
+        let ch1_rec = client_rl
+            .seal_record(ContentType::Handshake, &ch1_msg)
+            .unwrap();
+
+        // Server → HRR (no matching key_share, selects X25519 from supported_groups)
+        let (_, ch1_data, _) = server_rl.open_record(&ch1_rec).unwrap();
+        let (_, _, ch1_total) = parse_handshake_header(&ch1_data).unwrap();
+        let hrr_actions = match server_hs
+            .process_client_hello(&ch1_data[..ch1_total])
+            .unwrap()
+        {
+            ClientHelloResult::HelloRetryRequest(a) => a,
+            ClientHelloResult::Actions(_) => panic!("expected HRR"),
+        };
+
+        let hrr_rec = server_rl
+            .seal_record(ContentType::Handshake, &hrr_actions.hrr_msg)
+            .unwrap();
+
+        // Client processes HRR → RetryNeeded with X25519
+        let (_, hrr_data, _) = client_rl.open_record(&hrr_rec).unwrap();
+        let (_, _, hrr_total) = parse_handshake_header(&hrr_data).unwrap();
+        let retry = match client_hs
+            .process_server_hello(&hrr_data[..hrr_total])
+            .unwrap()
+        {
+            ServerHelloResult::RetryNeeded(r) => r,
+            _ => panic!("expected RetryNeeded"),
+        };
+        assert_eq!(retry.selected_group, NamedGroup::X25519);
+
+        // CH2: client sends X25519 key share
+        let ch2_msg = client_hs.build_client_hello_retry(&retry).unwrap();
+        let ch2_rec = client_rl
+            .seal_record(ContentType::Handshake, &ch2_msg)
+            .unwrap();
+
+        // Server processes CH2 → full handshake
+        let (_, ch2_data, _) = server_rl.open_record(&ch2_rec).unwrap();
+        let (_, _, ch2_total) = parse_handshake_header(&ch2_data).unwrap();
+        let actions = server_hs
+            .process_client_hello_retry(&ch2_data[..ch2_total])
+            .unwrap();
+
+        // Complete the handshake
+        let sh_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_hello_msg)
+            .unwrap();
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_hs_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_hs_keys)
+            .unwrap();
+
+        let ee_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.encrypted_extensions_msg)
+            .unwrap();
+        let cert_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_msg)
+            .unwrap();
+        let cv_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_verify_msg)
+            .unwrap();
+        let sfin_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_finished_msg)
+            .unwrap();
+
+        // Client processes real ServerHello
+        let (_, sh_data, _) = client_rl.open_record(&sh_rec).unwrap();
+        let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
+        let sh_actions = match client_hs
+            .process_server_hello(&sh_data[..sh_total])
+            .unwrap()
+        {
+            ServerHelloResult::Actions(a) => a,
+            _ => panic!("expected Actions on second SH"),
+        };
+        client_rl
+            .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(sh_actions.suite, &sh_actions.client_hs_keys)
+            .unwrap();
+
+        // Client processes encrypted flight
+        for rec in [&ee_rec, &cert_rec, &cv_rec] {
+            let (_, data, _) = client_rl.open_record(rec).unwrap();
+            let (_, _, total) = parse_handshake_header(&data).unwrap();
+            let msg = &data[..total];
+            match client_hs.state() {
+                HandshakeState::WaitEncryptedExtensions => {
+                    client_hs.process_encrypted_extensions(msg).unwrap();
+                }
+                HandshakeState::WaitCertCertReq => {
+                    client_hs.process_certificate(msg).unwrap();
+                }
+                HandshakeState::WaitCertVerify => {
+                    client_hs.process_certificate_verify(msg).unwrap();
+                }
+                s => panic!("unexpected state: {s:?}"),
+            }
+        }
+
+        let (_, fin_data, _) = client_rl.open_record(&sfin_rec).unwrap();
+        let (_, _, fin_total) = parse_handshake_header(&fin_data).unwrap();
+        let fin_actions = client_hs.process_finished(&fin_data[..fin_total]).unwrap();
+        assert_eq!(client_hs.state(), HandshakeState::Connected);
+
+        let cfin_rec = client_rl
+            .seal_record(ContentType::Handshake, &fin_actions.client_finished_msg)
+            .unwrap();
+        let (_, cfin_data, _) = server_rl.open_record(&cfin_rec).unwrap();
+        let (_, _, cfin_total) = parse_handshake_header(&cfin_data).unwrap();
+        server_hs
+            .process_client_finished(&cfin_data[..cfin_total])
+            .unwrap();
+        assert_eq!(server_hs.state(), HandshakeState::Connected);
+
+        // Exchange app data
+        client_rl
+            .activate_write_encryption(fin_actions.suite, &fin_actions.client_app_keys)
+            .unwrap();
+        client_rl
+            .activate_read_decryption(fin_actions.suite, &fin_actions.server_app_keys)
+            .unwrap();
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_app_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_app_keys)
+            .unwrap();
+
+        let msg = b"Post-HRR fallback data!";
+        let rec = client_rl
+            .seal_record(ContentType::ApplicationData, msg)
+            .unwrap();
+        let (ct, pt, _) = server_rl.open_record(&rec).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, msg);
+    }
 }

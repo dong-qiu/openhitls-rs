@@ -586,8 +586,14 @@ impl ServerHandshake {
             None
         };
 
-        // Generate server ephemeral key
-        let server_kx = KeyExchange::generate(client_group)?;
+        // Key exchange: KEM (encapsulate) or DH (generate + compute)
+        let (shared_secret, server_key_share_bytes) = if client_group.is_kem() {
+            KeyExchange::encapsulate(client_group, client_pub_key)?
+        } else {
+            let server_kx = KeyExchange::generate(client_group)?;
+            let ss = server_kx.compute_shared_secret(client_pub_key)?;
+            (ss, server_kx.public_key_bytes().to_vec())
+        };
 
         // Build ServerHello
         let mut random = [0u8; 32];
@@ -596,7 +602,7 @@ impl ServerHandshake {
 
         let mut sh_extensions = vec![
             build_supported_versions_sh(),
-            build_key_share_sh(client_group, server_kx.public_key_bytes()),
+            build_key_share_sh(client_group, &server_key_share_bytes),
         ];
         if psk_mode {
             sh_extensions.push(build_pre_shared_key_sh(0));
@@ -610,9 +616,6 @@ impl ServerHandshake {
         };
         let server_hello_msg = encode_server_hello(&sh);
         self.transcript.update(&server_hello_msg)?;
-
-        // Compute shared secret
-        let shared_secret = server_kx.compute_shared_secret(client_pub_key)?;
 
         ks.derive_handshake_secret(&shared_secret)?;
 

@@ -3411,3 +3411,97 @@ RFC 4279 defines pre-shared key (PSK) cipher suites for TLS, enabling authentica
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 904 workspace tests passing (27 ignored)
+
+---
+
+## Phase 38: TLS 1.3 Post-Quantum Hybrid KEM — X25519MLKEM768 (Session 2026-02-11)
+
+### Goals
+- Integrate hybrid post-quantum key exchange into TLS 1.3 using X25519+ML-KEM-768
+- Implement NamedGroup 0x6399 (X25519MLKEM768) following draft-ietf-tls-ecdhe-mlkem wire format
+- Support server-side KEM encapsulation (not DH) for hybrid groups
+- Support HelloRetryRequest (HRR) fallback from hybrid to classical X25519
+
+### Background
+
+Post-quantum hybrid key exchange combines a classical key exchange (X25519) with a post-quantum KEM (ML-KEM-768) to provide protection against both classical and quantum adversaries. The wire format follows draft-ietf-tls-ecdhe-mlkem, which specifies ML-KEM data first, followed by X25519 data:
+
+- **Client key_share**: `mlkem_ek(1184 bytes) || x25519_pk(32 bytes)` = 1216 bytes total
+- **Server key_share**: `mlkem_ct(1088 bytes) || x25519_eph_pk(32 bytes)` = 1120 bytes total
+- **Shared secret**: `mlkem_ss(32 bytes) || x25519_ss(32 bytes)` = 64 bytes (raw concatenation, no KDF)
+
+Unlike standard DH-based key exchange, the server uses KEM encapsulation: given the client's ML-KEM encapsulation key, the server generates a ciphertext and shared secret without needing its own ML-KEM private key. The client then decapsulates using its ML-KEM private key.
+
+HRR fallback works naturally: the client offers both X25519MLKEM768 and X25519 in its initial ClientHello. If the server does not support hybrid groups, it can issue an HRR requesting X25519 only, and the handshake completes classically.
+
+### Implementation
+
+#### Step 1: ML-KEM `from_encapsulation_key()` Constructor
+- Added `MlKem768::from_encapsulation_key(ek: &[u8])` to reconstruct an ML-KEM instance from a 1184-byte encapsulation key, enabling the server to call `encapsulate()` without needing the full keypair
+- Added 2 unit tests: roundtrip encapsulate/decapsulate via `from_encapsulation_key()`, and invalid-length rejection
+
+#### Step 2: `HybridX25519MlKem768` Key Exchange Variant
+- Added `KeyExchangeState::HybridX25519MlKem768` variant to `key_exchange.rs` holding both an `MlKem768` instance and an `X25519PrivateKey`
+- `generate()`: creates a fresh ML-KEM-768 keypair + X25519 keypair, returns the concatenated public key share (1216 bytes: `mlkem_ek || x25519_pk`)
+- `compute_shared_secret(server_share)`: splits the server's 1120-byte share into `mlkem_ct(1088)` + `x25519_eph_pk(32)`, decapsulates ML-KEM, performs X25519 DH, returns concatenated 64-byte shared secret
+- `encapsulate(client_share)`: server-side function that splits the client's 1216-byte share into `mlkem_ek(1184)` + `x25519_pk(32)`, creates an ephemeral X25519 key, encapsulates ML-KEM, returns `(server_key_share, shared_secret)` where `server_key_share` = `mlkem_ct || x25519_eph_pk` (1120 bytes) and `shared_secret` = `mlkem_ss || x25519_ss` (64 bytes)
+- Added 3 unit tests: generate + compute roundtrip, encapsulate + decapsulate roundtrip, invalid share length rejection
+
+#### Step 3: `NamedGroup::is_kem()` Helper
+- Added `is_kem()` method on `NamedGroup` enum in `hitls-tls/src/crypt/mod.rs` that returns `true` for `X25519MlKem768` (and any future KEM-based groups)
+- Used by the server handshake to branch between DH-based and KEM-based key exchange
+
+#### Step 4: Server Handshake KEM Branch
+- Modified `build_server_flight()` in `hitls-tls/src/handshake/server.rs` to detect KEM-based groups via `is_kem()` and call `encapsulate()` instead of the standard DH `generate()` + `compute_shared_secret()` flow
+- The server receives the client's key_share, calls `encapsulate(client_share)`, and directly obtains both the server key_share (ciphertext) and the shared secret in one operation
+
+#### Step 5: Feature Flag and Cargo.toml
+- Added `"mlkem"` feature to `hitls-tls/Cargo.toml` to gate the hybrid KEM code path
+- The `mlkem` feature enables `hitls-crypto/mlkem` as a dependency
+
+#### Step 6: End-to-End Tests
+- Added 2 E2E tests in `hitls-tls/src/connection.rs`:
+  - **Hybrid handshake**: Client and server complete a full TLS 1.3 handshake using X25519MLKEM768, verifying bidirectional data exchange
+  - **HRR fallback**: Client offers X25519MLKEM768 + X25519, server only supports X25519, issues HRR, handshake completes classically
+
+### Files Changed
+
+| File | Status | Description |
+|------|--------|-------------|
+| `hitls-crypto/src/mlkem/mod.rs` | Modified | Added `from_encapsulation_key()` constructor + 2 tests |
+| `hitls-tls/src/handshake/key_exchange.rs` | Modified | `HybridX25519MlKem768` variant, `generate()`, `compute_shared_secret()` (decap), `encapsulate()` (server-side) + 3 tests |
+| `hitls-tls/src/crypt/mod.rs` | Modified | `is_kem()` helper on `NamedGroup` |
+| `hitls-tls/src/handshake/server.rs` | Modified | KEM branch in `build_server_flight()` |
+| `hitls-tls/Cargo.toml` | Modified | Added `"mlkem"` feature |
+| `hitls-tls/src/connection.rs` | Modified | 2 E2E tests (hybrid handshake + HRR fallback) |
+
+### Test Results
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| bignum | 46 | 0 |
+| crypto | 332 | 19 |
+| tls | 352 | 0 |
+| pki | 98 | 0 |
+| utils | 35 | 0 |
+| auth | 20 | 0 |
+| cli | 8 | 5 |
+| integration | 20 | 3 |
+| **Total** | **911** | **27** |
+
+### New Tests (7 total)
+- 2 ML-KEM tests (hitls-crypto):
+  - `from_encapsulation_key()` roundtrip (encapsulate + decapsulate)
+  - Invalid encapsulation key length rejection
+- 3 key_exchange tests (hitls-tls):
+  - Generate + compute_shared_secret roundtrip
+  - Encapsulate + decapsulate roundtrip
+  - Invalid share length rejection
+- 2 E2E tests (hitls-tls):
+  - TLS 1.3 hybrid X25519MLKEM768 full handshake + bidirectional data
+  - TLS 1.3 HRR fallback from hybrid to X25519
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 911 workspace tests passing (27 ignored)
