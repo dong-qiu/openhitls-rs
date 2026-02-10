@@ -101,6 +101,14 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-All 35 phases (0-34) complete: Phases 0-33 + Phase 34 (TLS 1.2 session ticket — RFC 5077 ticket-based resumption). 859 tests passing (25 ignored).
+Phases 0-34 complete (859 tests, 25 ignored). Remaining phases 35-42 planned:
+- Phase 35: TLS 1.2 EMS (RFC 7627) + Renegotiation (RFC 5746) + ETM (RFC 7366)
+- Phase 36: TLS 1.2 RSA/DHE key exchange (~17 additional cipher suites)
+- Phase 37: TLS 1.2 PSK cipher suites (RFC 4279)
+- Phase 38: TLS 1.3 Post-Quantum Hybrid KEM (X25519+ML-KEM-768)
+- Phase 39: TLS extensions (Max Fragment, Record Size Limit, OCSP, SCT, Fallback SCSV)
+- Phase 40: Async I/O (tokio) + AES-NI acceleration + benchmarks
+- Phase 41: DTLCP + custom extensions + key logging
+- Phase 42: Fuzzing + Wycheproof + interop testing + security audit
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

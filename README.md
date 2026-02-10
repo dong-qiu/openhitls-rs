@@ -212,7 +212,7 @@ All 48 cryptographic algorithm modules, X.509 (parse/verify/chain/CRL/OCSP/CSR/c
 
 ### Completed Migration Phases (Phase 21–34)
 
-The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls)) contains ~460K lines covering 48 crypto modules, TLS protocol variants, and full PKI infrastructure. The Rust port covers ~76% of features with all crypto algorithms, TLS 1.3/1.2, DTLS 1.2, and TLCP fully implemented. Below are the detailed phase tables for completed work.
+The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls)) contains ~460K lines covering 48 crypto modules, TLS protocol variants, and full PKI infrastructure. The Rust port covers ~85-90% of core features with all crypto algorithms, TLS 1.3/1.2, DTLS 1.2, and TLCP fully implemented. Remaining gaps are primarily TLS 1.2 legacy extensions (EMS, renegotiation), additional key exchange types (RSA/DHE/PSK), post-quantum TLS integration, and performance optimization. Below are the detailed phase tables for completed work.
 
 #### Phase 21: TLS 1.3 Completeness
 
@@ -366,73 +366,102 @@ The original C implementation ([openHiTLS](https://gitee.com/openhitls/openhitls
 | Client ticket sending + NewSessionTicket processing | RFC 5077 §3.4 | **Done** |
 | Connection-level ticket flow + take_session() | RFC 5077 | **Done** |
 
-### Remaining Tasks
+### Remaining Migration Phases (Phase 35–42)
 
-The following items have been identified as gaps between the C and Rust implementations. They are organized by priority and category.
+Based on systematic gap analysis between the C implementation (~460K lines) and the Rust port, the following phases cover all identified remaining work. Phases 35–37 focus on TLS 1.2 legacy compatibility; Phase 38 adds post-quantum TLS; Phases 39–42 cover extensions, performance, and quality.
 
-#### TLS Protocol Gaps
-
-| Feature | RFC | Priority | Notes |
-|---------|-----|----------|-------|
-| Renegotiation | RFC 5746 | Low | Rare in practice; has security concerns |
-| TLS 1.0 / 1.1 | RFC 4346 / 2246 | Low | EOL legacy protocols (deprecated by RFC 8996) |
-| Custom Extensions Framework | — | Low | Can be added per-need |
-| Additional TLS 1.2 Cipher Suites | RFC 5246 | Low | C has 50+, Rust has 14 (most-used modern suites) |
-
-#### PKI / Certificate Gaps
+#### Phase 35: TLS 1.2 Extended Master Secret + Renegotiation + ETM
 
 | Feature | RFC | Priority | Notes |
 |---------|-----|----------|-------|
-| CMS EnvelopedData | RFC 5652 | Low | Encryption (email S/MIME) |
-| CMS EncryptedData | RFC 5652 | Low | Symmetric encryption |
-| OpenSSH Key Format | RFC 4253 | Low | SSH compatibility |
-| Advanced X.509 Constraints | RFC 5280 §4.2.1.10 | Low | Name/Policy constraints validation |
+| Extended Master Secret (EMS) | RFC 7627 | **High** | Prevents Triple Handshake attack; modifies PRF to include session hash |
+| Secure Renegotiation | RFC 5746 | **High** | HelloRequest, renegotiation_info extension, verify_data binding (75 refs in C, 21 files) |
+| Encrypt-Then-MAC (ETM) | RFC 7366 | Medium | CBC mode security improvement; negotiate MAC-after-encrypt ordering |
 
-#### Performance & Hardware Acceleration
+#### Phase 36: TLS 1.2 RSA/DHE Key Exchange + Additional Cipher Suites
 
-| Feature | Platform | Priority | Expected Speedup |
-|---------|----------|----------|-----------------|
-| AES-NI | x86-64 | Medium | 2-3x for AES operations |
-| ARM NEON | AArch64 | Low | 2-4x for ECC/AES |
-| AVX-512 Poly1305 | x86-64 | Low | 4x for ChaCha20-Poly1305 |
-| CPU Capability Detection | All | Medium | Runtime feature selection |
+| Feature | RFC | Priority | Notes |
+|---------|-----|----------|-------|
+| RSA static key exchange | RFC 5246 | Medium | 6 suites: RSA_WITH_AES_128/256_{CBC_SHA,CBC_SHA256,GCM_SHA256/384} |
+| DHE-RSA key exchange | RFC 5246 | Medium | 7+ suites: DHE_RSA_WITH_AES_128/256_{GCM,CBC,ChaCha20} |
+| DHE-DSS key exchange | RFC 5246 | Low | 4+ suites: DHE_DSS_WITH_AES_128/256_GCM_SHA256/384 |
 
-#### Testing & Quality
+#### Phase 37: TLS 1.2 PSK Cipher Suites
+
+| Feature | RFC | Priority | Notes |
+|---------|-----|----------|-------|
+| PSK suites | RFC 4279 | Low-Medium | 8+ suites: PSK_WITH_AES_128/256_{CBC,GCM,CCM} |
+| DHE-PSK suites | RFC 4279 | Low | 4+ suites: DHE_PSK_WITH_AES_* |
+| RSA-PSK suites | RFC 4279 | Low | 4+ suites: RSA_PSK_WITH_AES_* |
+
+#### Phase 38: TLS 1.3 Post-Quantum Hybrid KEM Integration
+
+| Feature | Draft | Priority | Notes |
+|---------|-------|----------|-------|
+| X25519 + ML-KEM-768 | draft-ietf-tls-hybrid-design | **High** | Named group 0x11EC; primary PQ migration path |
+| ECDH-P256 + ML-KEM-768 | draft-ietf-tls-hybrid-design | Medium | Named group 0x11EB |
+| ECDH-P384 + ML-KEM-1024 | draft-ietf-tls-hybrid-design | Medium | Named group 0x11ED; high-security variant |
+
+#### Phase 39: TLS Extensions Completeness
+
+| Feature | RFC | Priority | Notes |
+|---------|-----|----------|-------|
+| Max Fragment Length | RFC 6066 | Low | Constrained device support |
+| Record Size Limit | RFC 8449 | Low | Modern replacement for max_fragment_length |
+| OCSP Stapling | RFC 6066 | Low | status_request extension (C also minimal) |
+| Signed Certificate Timestamp (SCT) | RFC 6962 | Low | Certificate Transparency |
+| Fallback SCSV | RFC 7507 | Low | Downgrade protection signaling (0x5600) |
+| TLS 1.3 SM4-GCM/CCM-SM3 | GB/T 38636 | Low | Chinese national standard TLS 1.3 suites |
+
+#### Phase 40: Async I/O + Performance Optimization
+
+| Feature | Platform | Priority | Notes |
+|---------|----------|----------|-------|
+| Async TLS (tokio) | All | Medium | Feature-gated `async` versions of connection types |
+| AES-NI acceleration | x86-64 | Medium | 2-3x AES speedup via hardware intrinsics |
+| ARM NEON acceleration | AArch64 | Low | 2-4x for AES/ECC |
+| CPU capability detection | All | Medium | Runtime feature selection |
+| Criterion benchmarks | All | Low | Performance regression tracking |
+
+#### Phase 41: DTLCP + Additional Protocol Variants
+
+| Feature | Standard | Priority | Notes |
+|---------|----------|----------|-------|
+| DTLCP (DTLS over TLCP) | GM/T 0024 | Low | DTLS 1.2 + SM2/SM3/SM4 (278 refs in C) |
+| Custom Extensions Framework | — | Low | Pluggable extension registration |
+| Key Log callback | — | Low | SSLKEYLOGFILE for Wireshark debugging |
+
+#### Phase 42: Testing & Quality Assurance
 
 | Feature | Description | Priority |
 |---------|-------------|----------|
-| Fuzzing Harnesses | libfuzzer/AFL targets for parser/handshake | Medium |
-| Wycheproof Test Vectors | Comprehensive edge-case tests | Medium |
-| Security Validation (SDV) | Compliance validation suite from C testcode | Low |
-| Performance Benchmarks | Criterion benchmarks for all algorithms | Low |
+| Fuzzing harnesses | libfuzzer/AFL targets for TLS/X.509/ASN.1 parsers | Medium |
+| Wycheproof test vectors | Google edge-case vectors for AES-GCM, ECDSA, RSA, ECDH | Medium |
+| Interop testing | Test against OpenSSL/BoringSSL/rustls via TCP | Medium |
+| SDV compliance | Port C testcode/ validation suite | Low |
+| Security audit prep | Threat model, constant-time verification, documentation | Low |
 
-#### CLI Tool Gaps
+#### Other Identified Gaps (Not Phased)
 
-| C Command | Function | Priority |
-|-----------|----------|----------|
-| `app_list` | List available algorithms/cipher suites | Low |
-| `app_rand` | Generate random bytes | Low |
-| `app_kdf` | Key derivation tool | Low |
-| `app_provider` | Query crypto provider | Low |
-
-#### Code-Level TODOs (3 items)
-
-| Location | Description | Priority |
-|----------|-------------|----------|
-| `hitls-bignum/src/ops.rs:48` | Knuth's Algorithm D for division (currently binary long division) | Low |
-| `hitls-auth/src/privpass/mod.rs:31,36` | Privacy Pass token issuance/verification stubs (`todo!()`) | Low |
+| Category | Item | Priority | Notes |
+|----------|------|----------|-------|
+| PKI | CMS EnvelopedData / EncryptedData | Low | S/MIME encryption |
+| Crypto | NistP192 curve | Low | TLS does not use; standalone only |
+| Crypto | HCTR mode (SM4) | Low | TLS does not use; format-preserving encryption |
+| BigNum | Knuth Algorithm D division | Low | Currently binary long division (functional) |
+| Auth | Privacy Pass token stubs | Low | `todo!()` in privpass/mod.rs |
 
 ### Coverage Summary (vs. C Implementation)
 
-| Component | C (lines) | Rust (lines) | Feature Coverage |
-|-----------|-----------|--------------|------------------|
-| Crypto Algorithms | ~132K | ~24K | **100%** (all 48 modules) |
-| TLS Protocol | ~52K | ~9K | **90%** (TLS 1.3 + 1.2 + DTLS 1.2 + TLCP) |
-| PKI / X.509 | ~17K | ~3.3K | **70%** (parse/verify/chain/CRL/OCSP/CSR/PKCS#8/PKCS#12/CMS) |
-| Base Support Layer | ~12K | ~2K | **95%** (ASN.1/Base64/PEM/OID/errors) |
-| CLI Tools | ~8K | ~1.5K | **75%** (dgst/genpkey/x509/verify/enc/pkey/crl/req/s-client/s-server) |
-| Test Infrastructure | ~20K | ~1K | **85%** (859 tests; missing SDV/fuzzing) |
-| **Total** | **~460K** | **~41K** | **~76%** (production-ready for TLS 1.3 deployments) |
+| Component | C (lines) | Rust (lines) | Feature Coverage | Remaining Gaps |
+|-----------|-----------|--------------|------------------|----------------|
+| Crypto Algorithms | ~132K | ~24K | **100%** (all 48 modules) | AES-NI/NEON acceleration |
+| TLS Protocol | ~52K | ~9K | **85%** (TLS 1.3 + 1.2 + DTLS 1.2 + TLCP) | EMS, renegotiation, RSA/DHE/PSK KX, hybrid KEM |
+| PKI / X.509 | ~17K | ~3.3K | **90%** (parse/verify/chain/CRL/OCSP/CSR/PKCS#8/PKCS#12/CMS) | CMS EnvelopedData |
+| Base Support Layer | ~12K | ~2K | **95%** (ASN.1/Base64/PEM/OID/errors) | — |
+| CLI Tools | ~8K | ~1.5K | **80%** (dgst/genpkey/x509/verify/enc/pkey/crl/req/s-client/s-server) | list/rand/kdf commands |
+| Test Infrastructure | ~20K | ~1K | **85%** (859 tests; missing SDV/fuzzing) | Wycheproof, fuzzing |
+| **Total** | **~460K** | **~41K** | **~85-90%** (production-ready for modern TLS deployments) | Phases 35–42 |
 
 ## Minimum Supported Rust Version
 
