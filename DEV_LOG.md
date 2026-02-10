@@ -2974,3 +2974,39 @@ Updated match arm to call `s_server::run()`.
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 842 workspace tests passing (24 ignored)
+
+---
+
+## Phase 33: TCP Loopback Integration Tests
+
+### What
+Added 5 TCP loopback integration tests that spawn real TCP server/client threads on `127.0.0.1:0` (random port) to validate end-to-end TLS communication over actual `TcpStream`.
+
+### Tests Added (5 new, 18 total integration tests)
+1. `test_tcp_tls13_loopback_ed25519` — TLS 1.3, Ed25519, AES-256-GCM, X25519, bidirectional exchange
+2. `test_tcp_tls12_loopback_ecdsa` — TLS 1.2, ECDSA P-256, ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+3. `test_tcp_tls13_loopback_large_payload` — TLS 1.3, 64 KB payload (multi-record, chunked writes ≤16000 bytes)
+4. `test_tcp_tls12_loopback_rsa` — TLS 1.2, RSA 2048, ECDHE_RSA_WITH_AES_256_GCM_SHA384 [ignored — slow keygen]
+5. `test_tcp_tls13_loopback_multi_message` — TLS 1.3, 5 echo round trips
+
+### Key Findings
+- TLS `write()` does NOT auto-split payloads exceeding max fragment size (16384 bytes) — must chunk manually
+- `TcpListener::bind("127.0.0.1:0")` reliably assigns random ports for parallel test isolation
+- 5-second timeouts prevent test hangs on handshake failures
+
+### Files Modified
+- `tests/interop/Cargo.toml` — enabled `tls12` feature for hitls-tls
+- `tests/interop/src/lib.rs` — added 3 identity helpers + 5 TCP loopback tests
+
+### Test Counts
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| bignum | 46 | 0 |
+| crypto | 330 | 19 |
+| tls | 291 | 0 |
+| pki | 98 | 0 |
+| utils | 35 | 0 |
+| auth | 20 | 0 |
+| cli | 8 | 5 |
+| integration | 18 | 1 |
+| **Total** | **846** | **25** |

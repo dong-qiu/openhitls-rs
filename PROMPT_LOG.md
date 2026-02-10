@@ -1235,3 +1235,11 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - 1 new file, 5 modified files
 
 842 total tests (24 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 33: TCP Loopback Integration Tests
+
+**Prompt**: Add real TCP loopback integration tests that spawn server thread on 127.0.0.1:0, connect with client thread, and verify end-to-end TLS 1.3 and TLS 1.2 communication over actual TcpStream sockets.
+
+**Result**: 5 tests added (4 running, 1 ignored). Enabled tls12 feature in interop crate. Fixed write() chunking for payloads > 16384 bytes. 846 tests (25 ignored) total.

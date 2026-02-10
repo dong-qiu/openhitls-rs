@@ -615,4 +615,487 @@ mod tests {
         assert_eq!(parsed.subject.get("CN"), Some("pipeline.example.com"));
         assert!(parsed.verify_signature(&ca_cert).unwrap());
     }
+
+    // -------------------------------------------------------
+    // TCP loopback helpers
+    // -------------------------------------------------------
+
+    /// Generate an Ed25519 server identity (cert DER chain + ServerPrivateKey).
+    fn make_ed25519_server_identity() -> (Vec<Vec<u8>>, hitls_tls::config::ServerPrivateKey) {
+        use hitls_pki::x509::{CertificateBuilder, DistinguishedName, SigningKey};
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let seed = kp.seed().to_vec();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "localhost".into())],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+        (
+            vec![cert.raw],
+            hitls_tls::config::ServerPrivateKey::Ed25519(seed),
+        )
+    }
+
+    /// Generate an ECDSA P-256 server identity.
+    fn make_ecdsa_server_identity() -> (Vec<Vec<u8>>, hitls_tls::config::ServerPrivateKey) {
+        use hitls_pki::x509::{CertificateBuilder, DistinguishedName, SigningKey};
+        use hitls_types::EccCurveId;
+        let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let priv_bytes = kp.private_key_bytes();
+        let sk = SigningKey::Ecdsa {
+            curve_id: EccCurveId::NistP256,
+            key_pair: kp,
+        };
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "localhost".into())],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+        (
+            vec![cert.raw],
+            hitls_tls::config::ServerPrivateKey::Ecdsa {
+                curve_id: EccCurveId::NistP256,
+                private_key: priv_bytes,
+            },
+        )
+    }
+
+    /// Generate an RSA 2048 server identity.
+    fn make_rsa_server_identity() -> (Vec<Vec<u8>>, hitls_tls::config::ServerPrivateKey) {
+        use hitls_pki::x509::{CertificateBuilder, DistinguishedName, SigningKey};
+        let rsa = hitls_crypto::rsa::RsaPrivateKey::generate(2048).unwrap();
+        let (n, d, e) = (rsa.n_bytes(), rsa.d_bytes(), rsa.e_bytes());
+        let (p, q) = (rsa.p_bytes(), rsa.q_bytes());
+        let sk = SigningKey::Rsa(rsa);
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "localhost".into())],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+        (
+            vec![cert.raw],
+            hitls_tls::config::ServerPrivateKey::Rsa { n, d, e, p, q },
+        )
+    }
+
+    // -------------------------------------------------------
+    // 15. TCP loopback: TLS 1.3 Ed25519
+    // -------------------------------------------------------
+    #[test]
+    fn test_tcp_tls13_loopback_ed25519() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"Hello from client!");
+
+            conn.write(b"Hello from server!").unwrap();
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        assert_eq!(conn.version(), Some(TlsVersion::Tls13));
+
+        conn.write(b"Hello from client!").unwrap();
+
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"Hello from server!");
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // 16. TCP loopback: TLS 1.2 ECDSA P-256
+    // -------------------------------------------------------
+    #[test]
+    fn test_tcp_tls12_loopback_ecdsa() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+
+        let suites = [CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256];
+        let groups = [NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"TLS 1.2 works!");
+
+            conn.write(b"TLS 1.2 confirmed!").unwrap();
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+
+        conn.write(b"TLS 1.2 works!").unwrap();
+
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"TLS 1.2 confirmed!");
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // 17. TCP loopback: TLS 1.3 large payload (64 KB)
+    // -------------------------------------------------------
+    #[test]
+    fn test_tcp_tls13_loopback_large_payload() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .verify_peer(false)
+            .build();
+
+        let payload: Vec<u8> = (0..65536u32).map(|i| (i % 251) as u8).collect();
+        let payload_clone = payload.clone();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            // Read all 64 KB (may arrive across multiple TLS records)
+            let mut received = Vec::new();
+            while received.len() < 65536 {
+                let mut buf = [0u8; 16384];
+                let n = conn.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                received.extend_from_slice(&buf[..n]);
+            }
+            assert_eq!(received, payload_clone);
+
+            // Echo back in chunks
+            let mut offset = 0;
+            while offset < received.len() {
+                let end = (offset + 16000).min(received.len());
+                conn.write(&received[offset..end]).unwrap();
+                offset = end;
+            }
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        // Write in chunks (TLS max fragment = 16384)
+        let mut offset = 0;
+        while offset < payload.len() {
+            let end = (offset + 16000).min(payload.len());
+            conn.write(&payload[offset..end]).unwrap();
+            offset = end;
+        }
+
+        let mut received = Vec::new();
+        while received.len() < 65536 {
+            let mut buf = [0u8; 16384];
+            let n = conn.read(&mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            received.extend_from_slice(&buf[..n]);
+        }
+        assert_eq!(received, payload);
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // 18. TCP loopback: TLS 1.2 RSA
+    // -------------------------------------------------------
+    #[test]
+    #[ignore] // RSA 2048 key generation is slow
+    fn test_tcp_tls12_loopback_rsa() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_rsa_server_identity();
+
+        let suites = [CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384];
+        let groups = [NamedGroup::SECP256R1];
+        let sig_algs = [
+            SignatureScheme::RSA_PSS_RSAE_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA256,
+        ];
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"RSA over TCP!");
+
+            conn.write(b"RSA confirmed!").unwrap();
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        conn.write(b"RSA over TCP!").unwrap();
+
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"RSA confirmed!");
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // 19. TCP loopback: TLS 1.3 multi-message echo
+    // -------------------------------------------------------
+    #[test]
+    fn test_tcp_tls13_loopback_multi_message() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            for _ in 0..5 {
+                let mut buf = [0u8; 256];
+                let n = conn.read(&mut buf).unwrap();
+                conn.write(&buf[..n]).unwrap();
+            }
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        for i in 0..5u32 {
+            let msg = format!("Message #{}", i + 1);
+            conn.write(msg.as_bytes()).unwrap();
+
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], msg.as_bytes());
+        }
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
 }

@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 32 complete — s_server CLI + Key Conversion
+- **Status**: Phase 33 complete — TCP Loopback Integration Tests
 
 ## Workspace Structure
 
@@ -23,7 +23,7 @@ openhitls-rs/
 │   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, Certificate generation, SigningKey abstraction), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652), PKCS#8 (RFC 5958) (98 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server)
-├── tests/interop/       # Integration tests (14 cross-crate tests)
+├── tests/interop/       # Integration tests (18 cross-crate tests, 1 ignored)
 ├── tests/vectors/       # Standard test vectors
 └── benches/             # Performance benchmarks
 ```
@@ -34,7 +34,7 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (842 tests, 24 ignored)
+# Run all tests (846 tests, 25 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
@@ -44,7 +44,7 @@ cargo test -p hitls-pki --all-features      # 98 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 35 tests
 cargo test -p hitls-auth --all-features     # 20 tests
-cargo test -p hitls-integration-tests       # 14 tests
+cargo test -p hitls-integration-tests       # 18 tests (1 ignored)
 
 # Lint (must pass with zero warnings)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
@@ -101,6 +101,6 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-All 33 phases (0-32) complete: Phases 0-31 + Phase 32 (s_server CLI with PKCS#8 key loading, TCP listener, TLS 1.3/1.2 echo server). 842 tests passing (24 ignored).
+All 34 phases (0-33) complete: Phases 0-32 + Phase 33 (TCP loopback integration tests — TLS 1.3/1.2 over real TCP sockets). 846 tests passing (25 ignored).
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.
