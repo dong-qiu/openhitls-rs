@@ -3010,3 +3010,83 @@ Added 5 TCP loopback integration tests that spawn real TCP server/client threads
 | cli | 8 | 5 |
 | integration | 18 | 1 |
 | **Total** | **846** | **25** |
+
+---
+
+## Phase 34: TLS 1.2 Session Ticket (RFC 5077) (Session 2026-02-10)
+
+### Goals
+- Implement TLS 1.2 session ticket support per RFC 5077
+- SessionTicket extension (type 35) for ClientHello and ServerHello
+- Ticket encryption/decryption using AES-256-GCM with session state serialization
+- NewSessionTicket handshake message (HandshakeType 4)
+- Server-side ticket issuance and ticket-based resumption
+- Client-side ticket sending and NewSessionTicket processing
+- Connection-level ticket flow with `take_session()` for later resumption
+
+### Implementation
+
+#### Step 1: SessionTicket Extension (type 35)
+Added `SESSION_TICKET` constant (0x0023 = 35) to extensions module. Implemented 4 codec functions:
+- `build_client_hello_session_ticket()` — writes extension type + ticket data (empty for new, cached for resumption)
+- `parse_client_hello_session_ticket()` — extracts ticket bytes from ClientHello
+- `build_server_hello_session_ticket()` — writes empty extension (zero-length, indicates server support)
+- `parse_server_hello_session_ticket()` — parses empty extension from ServerHello
+
+#### Step 2: Ticket Encryption + Session Serialization
+- Session state serialization: `serialize_session()` / `deserialize_session()` — encodes cipher_suite, master_secret, and version into a compact binary format
+- `encrypt_ticket()` — AES-256-GCM encryption with random 12-byte nonce, prepended to ciphertext
+- `decrypt_ticket()` — extracts nonce, decrypts, deserializes back to session state
+
+#### Step 3: NewSessionTicket Message
+- Codec for TLS 1.2 NewSessionTicket (HandshakeType 4): 4-byte lifetime_hint + variable-length ticket
+- `encode_new_session_ticket12()` — serializes lifetime and opaque ticket
+- `decode_new_session_ticket12()` — parses lifetime and ticket data
+
+#### Step 4: Server Integration
+- Server issues NewSessionTicket after full handshake (sent before CCS)
+- On ClientHello with session ticket: decrypt ticket → if valid, resume with abbreviated handshake
+- If ticket invalid or decryption fails: fall back to full handshake
+- SessionTicket extension included in ServerHello to signal ticket support
+
+#### Step 5: Client Integration
+- Client sends cached ticket in ClientHello SessionTicket extension
+- Client processes NewSessionTicket messages and stores ticket for future resumption
+- Key bug fix: client generates random session_id when resuming with a ticket (even if cached session has empty ID), so server echoes it back and client detects abbreviated mode (RFC 5077 §3.4)
+
+#### Step 6: Connection-Level Flow
+- Both `Tls12ClientConnection` and `Tls12ServerConnection` handle ticket flow
+- `take_session()` method extracts session state (including ticket) for external caching and later resumption
+- Ticket key configurable on server connection
+
+### Files Changed
+
+| File | Status | Description |
+|------|--------|-------------|
+| `hitls-tls/src/extensions/mod.rs` | Modified | SESSION_TICKET constant |
+| `hitls-tls/src/handshake/extensions_codec.rs` | Modified | 4 codec functions + 4 tests |
+| `hitls-tls/src/session/mod.rs` | Modified | ticket encrypt/decrypt + session serialize/deserialize |
+| `hitls-tls/src/handshake/codec12.rs` | Modified | NewSessionTicket encode/decode + 3 tests |
+| `hitls-tls/src/handshake/server12.rs` | Modified | ticket resumption + issuance |
+| `hitls-tls/src/handshake/client12.rs` | Modified | ticket extension + NewSessionTicket handling + session_id fix |
+| `hitls-tls/src/connection12.rs` | Modified | connection flow + take_session() + 5 tests |
+| `tests/interop/src/lib.rs` | Modified | 1 TCP loopback ticket test |
+
+### Test Results
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| bignum | 46 | 0 |
+| crypto | 330 | 19 |
+| tls | 303 | 0 |
+| pki | 98 | 0 |
+| utils | 35 | 0 |
+| auth | 20 | 0 |
+| cli | 8 | 5 |
+| integration | 19 | 1 |
+| **Total** | **859** | **25** |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 859 workspace tests passing (25 ignored)

@@ -11,14 +11,15 @@ use crate::handshake::codec::{decode_client_hello, encode_server_hello, ClientHe
 use crate::handshake::codec12::{
     build_ske_params, build_ske_signed_data, decode_certificate12, decode_certificate_verify12,
     decode_client_key_exchange, encode_certificate12, encode_certificate_request12,
-    encode_finished12, encode_server_hello_done, encode_server_key_exchange, Certificate12,
-    CertificateRequest12, ServerKeyExchange,
+    encode_finished12, encode_new_session_ticket12, encode_server_hello_done,
+    encode_server_key_exchange, Certificate12, CertificateRequest12, ServerKeyExchange,
 };
 use crate::handshake::extensions_codec::{
-    parse_alpn_ch, parse_server_name, parse_signature_algorithms_ch, parse_supported_groups_ch,
+    build_session_ticket_sh, parse_alpn_ch, parse_server_name, parse_session_ticket_ch,
+    parse_signature_algorithms_ch, parse_supported_groups_ch,
 };
 use crate::handshake::key_exchange::KeyExchange;
-use crate::session::SessionCache;
+use crate::session::{decrypt_session_ticket, encrypt_session_ticket, SessionCache, TlsSession};
 use crate::CipherSuite;
 use hitls_crypto::sha2::Sha256;
 use hitls_types::{EccCurveId, TlsError};
@@ -223,6 +224,45 @@ impl Tls12ServerHandshake {
         self.abbreviated
     }
 
+    /// Build an encrypted NewSessionTicket message for the current session.
+    ///
+    /// Must be called after the master secret is available (full handshake completed).
+    /// Returns the wrapped handshake message, or None if ticket_key not configured.
+    pub fn build_new_session_ticket(
+        &self,
+        suite: CipherSuite,
+        lifetime: u32,
+    ) -> Result<Option<Vec<u8>>, TlsError> {
+        let ticket_key = match self.config.ticket_key.as_ref() {
+            Some(k) => k,
+            None => return Ok(None),
+        };
+        if self.master_secret.is_empty() {
+            return Err(TlsError::HandshakeFailed(
+                "master_secret not available for ticket".into(),
+            ));
+        }
+        let session = TlsSession {
+            id: Vec::new(),
+            cipher_suite: suite,
+            master_secret: self.master_secret.clone(),
+            alpn_protocol: self.negotiated_alpn.clone(),
+            ticket: None,
+            ticket_lifetime: lifetime,
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            psk: Vec::new(),
+        };
+        let ticket = encrypt_session_ticket(ticket_key, &session)?;
+        let msg = encode_new_session_ticket12(lifetime, &ticket);
+        Ok(Some(msg))
+    }
+
     /// Process ClientHello and build the full server flight.
     ///
     /// `msg_data` is the full handshake message including the 4-byte header.
@@ -302,6 +342,10 @@ impl Tls12ServerHandshake {
             sh_extensions.push(crate::handshake::extensions_codec::build_alpn_selected(
                 alpn,
             ));
+        }
+        // Signal session ticket support if ticket_key is configured
+        if self.config.ticket_key.is_some() {
+            sh_extensions.push(build_session_ticket_sh());
         }
 
         // Build ServerHello
@@ -386,11 +430,9 @@ impl Tls12ServerHandshake {
         })
     }
 
-    /// Process ClientHello with optional session cache lookup.
+    /// Process ClientHello with optional session cache lookup and ticket support.
     ///
-    /// If the client's session_id matches a cached session and the cipher suite
-    /// is acceptable, returns an abbreviated handshake result. Otherwise falls
-    /// back to a full handshake via `process_client_hello()`.
+    /// Priority: (1) session ticket resumption, (2) session ID cache, (3) full handshake.
     pub fn process_client_hello_resumable(
         &mut self,
         msg_data: &[u8],
@@ -400,11 +442,38 @@ impl Tls12ServerHandshake {
             return Err(TlsError::HandshakeFailed("unexpected ClientHello".into()));
         }
 
-        // Parse ClientHello to check session_id
+        // Parse ClientHello to check session_id and extensions
         let body = get_body(msg_data)?;
         let ch = decode_client_hello(body)?;
 
-        // Try session resumption
+        // (1) Try session ticket resumption
+        if let Some(ref ticket_key) = self.config.ticket_key {
+            for ext in &ch.extensions {
+                if ext.extension_type == ExtensionType::SESSION_TICKET {
+                    let ticket_data = parse_session_ticket_ch(&ext.data)?;
+                    if !ticket_data.is_empty() {
+                        if let Some(session) = decrypt_session_ticket(ticket_key, &ticket_data) {
+                            if ch.cipher_suites.contains(&session.cipher_suite)
+                                && self.config.cipher_suites.contains(&session.cipher_suite)
+                                && is_tls12_suite(session.cipher_suite)
+                            {
+                                let cached_suite = session.cipher_suite;
+                                let cached_ms = session.master_secret.clone();
+                                // Use the client's session_id so client detects abbreviation
+                                let sid = ch.legacy_session_id.clone();
+
+                                return self
+                                    .do_abbreviated(msg_data, &ch, cached_suite, &cached_ms, sid)
+                                    .map(ServerHelloResult::Abbreviated);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        // (2) Try session ID cache resumption
         if let Some(cache) = session_cache {
             if !ch.legacy_session_id.is_empty() {
                 if let Some(session) = cache.get(&ch.legacy_session_id) {
@@ -425,7 +494,7 @@ impl Tls12ServerHandshake {
             }
         }
 
-        // Fall back to full handshake
+        // (3) Fall back to full handshake
         self.process_client_hello(msg_data)
             .map(ServerHelloResult::Full)
     }
@@ -459,11 +528,15 @@ impl Tls12ServerHandshake {
         self.transcript.update(msg_data)?;
 
         // Build ServerHello echoing the cached session_id
+        let mut sh_extensions = Vec::new();
+        if self.config.ticket_key.is_some() {
+            sh_extensions.push(build_session_ticket_sh());
+        }
         let sh = ServerHello {
             random: self.server_random,
             legacy_session_id: session_id.clone(),
             cipher_suite: suite,
-            extensions: Vec::new(),
+            extensions: sh_extensions,
         };
         let sh_msg = encode_server_hello(&sh);
         self.transcript.update(&sh_msg)?;

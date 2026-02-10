@@ -1098,4 +1098,160 @@ mod tests {
         conn.shutdown().unwrap();
         server_handle.join().unwrap();
     }
+
+    // -------------------------------------------------------
+    // 20. TCP loopback: TLS 1.2 session ticket resumption
+    // -------------------------------------------------------
+    #[test]
+    fn test_tcp_tls12_session_ticket_loopback() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+        let ticket_key = vec![0xAB; 32];
+
+        let suites = [CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256];
+        let groups = [NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+
+        // --- First connection: full handshake, get ticket ---
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain.clone())
+            .private_key(server_key.clone())
+            .verify_peer(false)
+            .ticket_key(ticket_key.clone())
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .session_resumption(true)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"Full handshake!");
+            conn.write(b"Got it!").unwrap();
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+
+        conn.write(b"Full handshake!").unwrap();
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"Got it!");
+
+        // Get the session with ticket for resumption
+        let session = conn.take_session().unwrap();
+        assert!(session.ticket.is_some(), "should have received a ticket");
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+
+        // --- Second connection: ticket-based resumption ---
+        let server_config2 = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .ticket_key(ticket_key)
+            .build();
+
+        let client_config2 = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .session_resumption(true)
+            .resumption_session(session)
+            .build();
+
+        let listener2 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr2 = listener2.local_addr().unwrap();
+
+        let server_handle2 = thread::spawn(move || {
+            let (stream, _) = listener2.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config2);
+            conn.handshake().unwrap();
+
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"Resumed!");
+            conn.write(b"Session ticket works!").unwrap();
+            conn.shutdown().unwrap();
+        });
+
+        let stream2 = TcpStream::connect_timeout(&addr2, Duration::from_secs(5)).unwrap();
+        stream2
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream2
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn2 = Tls12ClientConnection::new(stream2, client_config2);
+        conn2.handshake().unwrap();
+        assert_eq!(conn2.version(), Some(TlsVersion::Tls12));
+
+        conn2.write(b"Resumed!").unwrap();
+        let mut buf = [0u8; 256];
+        let n = conn2.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"Session ticket works!");
+
+        conn2.shutdown().unwrap();
+        server_handle2.join().unwrap();
+    }
 }

@@ -10,9 +10,9 @@ use crate::crypt::transcript::TranscriptHash;
 use crate::crypt::{NamedGroup, SignatureScheme, Tls12CipherSuiteParams};
 use crate::handshake::codec::{encode_client_hello, ClientHello, ServerHello};
 use crate::handshake::codec12::{
-    build_ske_params, build_ske_signed_data, encode_certificate12, encode_certificate_verify12,
-    encode_client_key_exchange, encode_finished12, Certificate12, CertificateRequest12,
-    CertificateVerify12, ClientKeyExchange, ServerKeyExchange,
+    build_ske_params, build_ske_signed_data, decode_new_session_ticket12, encode_certificate12,
+    encode_certificate_verify12, encode_client_key_exchange, encode_finished12, Certificate12,
+    CertificateRequest12, CertificateVerify12, ClientKeyExchange, ServerKeyExchange,
 };
 use crate::handshake::key_exchange::KeyExchange;
 use crate::handshake::server12::select_signature_scheme_tls12;
@@ -137,6 +137,12 @@ pub struct Tls12ClientHandshake {
     abbreviated: bool,
     /// Keys derived during abbreviated handshake (available after process_server_hello).
     abbreviated_keys: Option<AbbreviatedClientKeys>,
+    /// Whether server signaled session ticket support in ServerHello.
+    server_supports_ticket: bool,
+    /// Received session ticket from NewSessionTicket message.
+    received_ticket: Option<Vec<u8>>,
+    /// Received ticket lifetime hint.
+    received_ticket_lifetime: u32,
 }
 
 impl Tls12ClientHandshake {
@@ -158,6 +164,9 @@ impl Tls12ClientHandshake {
             cached_master_secret: Vec::new(),
             abbreviated: false,
             abbreviated_keys: None,
+            server_supports_ticket: false,
+            received_ticket: None,
+            received_ticket_lifetime: 0,
         }
     }
 
@@ -174,6 +183,31 @@ impl Tls12ClientHandshake {
     /// if session resumption was detected).
     pub fn take_abbreviated_keys(&mut self) -> Option<AbbreviatedClientKeys> {
         self.abbreviated_keys.take()
+    }
+
+    /// Whether the server supports session tickets (signaled in ServerHello).
+    pub fn server_supports_ticket(&self) -> bool {
+        self.server_supports_ticket
+    }
+
+    /// Get the received session ticket (if any).
+    pub fn received_ticket(&self) -> Option<&[u8]> {
+        self.received_ticket.as_deref()
+    }
+
+    /// Get the received ticket lifetime hint.
+    pub fn received_ticket_lifetime(&self) -> u32 {
+        self.received_ticket_lifetime
+    }
+
+    /// Process a NewSessionTicket message from the server (RFC 5077).
+    ///
+    /// `body` is the handshake message body (after 4-byte header).
+    pub fn process_new_session_ticket(&mut self, body: &[u8]) -> Result<(), TlsError> {
+        let (lifetime, ticket) = decode_new_session_ticket12(body)?;
+        self.received_ticket = Some(ticket);
+        self.received_ticket_lifetime = lifetime;
+        Ok(())
     }
 
     /// Build the ClientHello message.
@@ -218,6 +252,28 @@ impl Tls12ClientHandshake {
             ));
         }
 
+        // Session Ticket (RFC 5077)
+        if self.config.session_resumption {
+            if let Some(ref session) = self.config.resumption_session {
+                if let Some(ref ticket) = session.ticket {
+                    // Send ticket for resumption
+                    extensions.push(crate::handshake::extensions_codec::build_session_ticket_ch(
+                        ticket,
+                    ));
+                } else {
+                    // No ticket, send empty extension to signal support
+                    extensions.push(crate::handshake::extensions_codec::build_session_ticket_ch(
+                        &[],
+                    ));
+                }
+            } else {
+                // No cached session, send empty extension to signal support
+                extensions.push(crate::handshake::extensions_codec::build_session_ticket_ch(
+                    &[],
+                ));
+            }
+        }
+
         // Filter cipher suites to TLS 1.2 ones only
         let tls12_suites: Vec<CipherSuite> = self
             .config
@@ -231,12 +287,23 @@ impl Tls12ClientHandshake {
             return Err(TlsError::NoSharedCipherSuite);
         }
 
-        // Use cached session ID for resumption, or generate a random one
+        // Use cached session ID for resumption, or generate a random one.
+        // For ticket-based resumption: if session has a ticket but empty ID, generate
+        // a random session_id so the server can echo it back (RFC 5077 §3.4).
         let session_id = if self.config.session_resumption {
             if let Some(ref session) = self.config.resumption_session {
-                self.cached_session_id = session.id.clone();
                 self.cached_master_secret = session.master_secret.clone();
-                session.id.clone()
+                if session.id.is_empty() && session.ticket.is_some() {
+                    // Ticket-based resumption: generate random session_id
+                    let mut sid = vec![0u8; 32];
+                    getrandom::getrandom(&mut sid)
+                        .map_err(|e| TlsError::HandshakeFailed(format!("random gen: {e}")))?;
+                    self.cached_session_id = sid.clone();
+                    sid
+                } else {
+                    self.cached_session_id = session.id.clone();
+                    session.id.clone()
+                }
             } else {
                 let mut sid = vec![0u8; 32];
                 getrandom::getrandom(&mut sid)
@@ -278,6 +345,14 @@ impl Tls12ClientHandshake {
         let params = Tls12CipherSuiteParams::from_suite(sh.cipher_suite)?;
 
         self.server_random = sh.random;
+
+        // Check for SessionTicket extension in ServerHello
+        for ext in &sh.extensions {
+            if ext.extension_type == crate::extensions::ExtensionType::SESSION_TICKET {
+                self.server_supports_ticket = true;
+                break;
+            }
+        }
 
         // Switch transcript hash if the negotiated suite uses SHA-384
         if params.hash_len == 48 {

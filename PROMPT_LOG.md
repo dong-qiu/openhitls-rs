@@ -1243,3 +1243,23 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Prompt**: Add real TCP loopback integration tests that spawn server thread on 127.0.0.1:0, connect with client thread, and verify end-to-end TLS 1.3 and TLS 1.2 communication over actual TcpStream sockets.
 
 **Result**: 5 tests added (4 running, 1 ignored). Enabled tls12 feature in interop crate. Fixed write() chunking for payloads > 16384 bytes. 846 tests (25 ignored) total.
+
+---
+
+## Phase 34: TLS 1.2 Session Ticket (RFC 5077)
+
+**Prompt**: Implement TLS 1.2 Session Ticket support per RFC 5077 — SessionTicket extension (type 35) with 4 codec functions, AES-256-GCM ticket encryption/decryption with session state serialization, NewSessionTicket message (HandshakeType 4), server-side ticket issuance and resumption, client-side ticket sending and processing, connection-level ticket flow with take_session(), and comprehensive tests.
+
+**Result**: 12 new tls tests (303 - 291 = 12) + 1 integration test (19 - 18 = 1). Complete RFC 5077 implementation with:
+- SESSION_TICKET extension constant + 4 codec functions (build/parse for ClientHello and ServerHello)
+- AES-256-GCM ticket encryption/decryption with session state serialization/deserialization
+- NewSessionTicket message codec (HandshakeType 4, lifetime_hint + ticket data)
+- Server issues tickets after full handshake, decrypts tickets from ClientHello for resumption
+- Client sends tickets in ClientHello, processes NewSessionTicket, stores for future resumption
+- Key bug fix: client generates random session_id for ticket-based resumption (RFC 5077 §3.4)
+- Connection-level flow: take_session() for extracting session state with ticket
+- 5 unit tests (full handshake with ticket, ticket resumption, invalid ticket fallback, wrong key fallback, take_session)
+- 1 TCP loopback integration test for ticket-based resumption
+- 0 new files, 8 modified files
+
+859 total tests (25 ignored). Clippy clean, fmt clean.

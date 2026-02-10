@@ -11,9 +11,10 @@ use crate::handshake::codec::{decode_server_hello, parse_handshake_header};
 use crate::handshake::codec12::{
     decode_certificate12, decode_certificate_request12, decode_server_key_exchange,
 };
-use crate::handshake::server12::Tls12ServerHandshake;
+use crate::handshake::server12::{ServerHelloResult, Tls12ServerHandshake};
 use crate::handshake::HandshakeType;
 use crate::record::{ContentType, RecordLayer};
+use crate::session::TlsSession;
 use crate::{CipherSuite, TlsConnection, TlsError, TlsVersion};
 use zeroize::Zeroize;
 
@@ -41,6 +42,8 @@ pub struct Tls12ClientConnection<S: Read + Write> {
     read_buf: Vec<u8>,
     /// Buffered decrypted application data.
     app_data_buf: Vec<u8>,
+    /// Session state for resumption (populated after handshake).
+    session: Option<TlsSession>,
 }
 
 impl<S: Read + Write> Tls12ClientConnection<S> {
@@ -54,7 +57,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             negotiated_suite: None,
             read_buf: Vec::with_capacity(16 * 1024),
             app_data_buf: Vec::new(),
+            session: None,
         }
+    }
+
+    /// Take the session state (with ticket if applicable) for later resumption.
+    pub fn take_session(&mut self) -> Option<TlsSession> {
+        self.session.take()
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -119,6 +128,11 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
         let (_, sh_body, _) = parse_handshake_header(&sh_data)?;
         let sh = decode_server_hello(sh_body)?;
         let suite = hs.process_server_hello(&sh_data, &sh)?;
+
+        // Check for abbreviated handshake (session resumption)
+        if hs.is_abbreviated() {
+            return self.do_client_abbreviated(&mut hs, suite);
+        }
 
         // 3. Read Certificate
         let (hs_type, cert_data) = self.read_handshake_msg()?;
@@ -226,14 +240,33 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             .write_all(&fin_record)
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
-        // 11. Read server ChangeCipherSpec
-        let (ct, _ccs_data) = self.read_record()?;
-        if ct != ContentType::ChangeCipherSpec {
-            return Err(TlsError::HandshakeFailed(format!(
-                "expected ChangeCipherSpec, got {ct:?}"
-            )));
+        // 11. Read NewSessionTicket (optional) then server ChangeCipherSpec
+        loop {
+            let (ct, data) = self.read_record()?;
+            match ct {
+                ContentType::Handshake => {
+                    // May be a NewSessionTicket (plaintext, before CCS)
+                    let (hs_type, _, total) = parse_handshake_header(&data)?;
+                    if hs_type == HandshakeType::NewSessionTicket {
+                        let body = &data[4..total];
+                        hs.process_new_session_ticket(body)?;
+                    } else {
+                        return Err(TlsError::HandshakeFailed(format!(
+                            "expected NewSessionTicket or CCS, got {hs_type:?}"
+                        )));
+                    }
+                }
+                ContentType::ChangeCipherSpec => {
+                    hs.process_change_cipher_spec()?;
+                    break;
+                }
+                _ => {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "expected ChangeCipherSpec, got {ct:?}"
+                    )));
+                }
+            }
         }
-        hs.process_change_cipher_spec()?;
 
         // 12. Activate read decryption
         if flight.is_cbc {
@@ -259,10 +292,148 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
         }
         hs.process_finished(&fin_data, &flight.master_secret)?;
 
+        // Build session state for later resumption
+        self.session = Some(TlsSession {
+            id: Vec::new(),
+            cipher_suite: suite,
+            master_secret: flight.master_secret.clone(),
+            alpn_protocol: None,
+            ticket: hs.received_ticket().map(|t| t.to_vec()),
+            ticket_lifetime: hs.received_ticket_lifetime(),
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            psk: Vec::new(),
+        });
+
         // Zeroize secrets
         flight.master_secret.zeroize();
         flight.client_write_key.zeroize();
         flight.server_write_key.zeroize();
+
+        self.negotiated_suite = Some(suite);
+        self.state = ConnectionState::Connected;
+        Ok(())
+    }
+
+    /// Abbreviated handshake path (client side, session resumption via ticket or ID).
+    fn do_client_abbreviated(
+        &mut self,
+        hs: &mut Tls12ClientHandshake,
+        suite: CipherSuite,
+    ) -> Result<(), TlsError> {
+        let mut keys = hs
+            .take_abbreviated_keys()
+            .ok_or_else(|| TlsError::HandshakeFailed("no abbreviated keys".into()))?;
+
+        // 1. Read optional NewSessionTicket then CCS from server
+        loop {
+            let (ct, data) = self.read_record()?;
+            match ct {
+                ContentType::Handshake => {
+                    let (hs_type, _, total) = parse_handshake_header(&data)?;
+                    if hs_type == HandshakeType::NewSessionTicket {
+                        let body = &data[4..total];
+                        hs.process_new_session_ticket(body)?;
+                    } else {
+                        return Err(TlsError::HandshakeFailed(format!(
+                            "expected NewSessionTicket or CCS, got {hs_type:?}"
+                        )));
+                    }
+                }
+                ContentType::ChangeCipherSpec => {
+                    hs.process_change_cipher_spec()?;
+                    break;
+                }
+                _ => {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "expected CCS, got {ct:?}"
+                    )));
+                }
+            }
+        }
+
+        // 2. Activate read decryption (server write key)
+        if keys.is_cbc {
+            self.record_layer.activate_read_decryption12_cbc(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            self.record_layer.activate_read_decryption12(
+                suite,
+                &keys.server_write_key,
+                keys.server_write_iv.clone(),
+            )?;
+        }
+
+        // 3. Read server Finished (encrypted)
+        let (hs_type, fin_data) = self.read_handshake_msg()?;
+        if hs_type != HandshakeType::Finished {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected Finished, got {hs_type:?}"
+            )));
+        }
+        let client_finished = hs.process_abbreviated_server_finished(&fin_data)?;
+
+        // 4. Send CCS
+        let ccs_record = self
+            .record_layer
+            .seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
+        self.stream
+            .write_all(&ccs_record)
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 5. Activate write encryption (client write key)
+        if keys.is_cbc {
+            self.record_layer.activate_write_encryption12_cbc(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            self.record_layer.activate_write_encryption12(
+                suite,
+                &keys.client_write_key,
+                keys.client_write_iv.clone(),
+            )?;
+        }
+
+        // 6. Send client Finished (encrypted)
+        let fin_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &client_finished)?;
+        self.stream
+            .write_all(&fin_record)
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Build session state for later resumption
+        self.session = Some(TlsSession {
+            id: Vec::new(),
+            cipher_suite: suite,
+            master_secret: keys.master_secret.clone(),
+            alpn_protocol: None,
+            ticket: hs.received_ticket().map(|t| t.to_vec()),
+            ticket_lifetime: hs.received_ticket_lifetime(),
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            psk: Vec::new(),
+        });
+
+        // Zeroize secrets
+        keys.master_secret.zeroize();
+        keys.client_write_key.zeroize();
+        keys.server_write_key.zeroize();
 
         self.negotiated_suite = Some(suite);
         self.state = ConnectionState::Connected;
@@ -378,6 +549,8 @@ pub struct Tls12ServerConnection<S: Read + Write> {
     read_buf: Vec<u8>,
     /// Buffered decrypted application data.
     app_data_buf: Vec<u8>,
+    /// Session state for session ticket issuance.
+    session: Option<TlsSession>,
 }
 
 impl<S: Read + Write> Tls12ServerConnection<S> {
@@ -391,7 +564,13 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             negotiated_suite: None,
             read_buf: Vec::with_capacity(16 * 1024),
             app_data_buf: Vec::new(),
+            session: None,
         }
+    }
+
+    /// Take the session state (for session caching on server side).
+    pub fn take_session(&mut self) -> Option<TlsSession> {
+        self.session.take()
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -444,8 +623,27 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             )));
         }
 
-        // 2. Process ClientHello → build server flight
-        let flight = hs.process_client_hello(&ch_data)?;
+        // 2. Process ClientHello (with ticket support, no session ID cache)
+        let result = hs.process_client_hello_resumable(&ch_data, None)?;
+
+        match result {
+            ServerHelloResult::Full(flight) => {
+                self.do_full_handshake(&mut hs, flight)?;
+            }
+            ServerHelloResult::Abbreviated(abbr) => {
+                self.do_abbreviated_handshake(&mut hs, abbr)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Full handshake path (with optional NewSessionTicket).
+    fn do_full_handshake(
+        &mut self,
+        hs: &mut Tls12ServerHandshake,
+        flight: crate::handshake::server12::ServerFlightResult,
+    ) -> Result<(), TlsError> {
         let suite = flight.suite;
 
         // 3. Send ServerHello
@@ -530,7 +728,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         }
         hs.process_change_cipher_spec()?;
 
-        // 9. Activate read decryption (client write key)
+        // 12. Activate read decryption (client write key)
         if keys.is_cbc {
             self.record_layer.activate_read_decryption12_cbc(
                 keys.client_write_key.clone(),
@@ -545,7 +743,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             )?;
         }
 
-        // 10. Read client Finished (encrypted)
+        // 13. Read client Finished (encrypted)
         let (hs_type, fin_data) = self.read_handshake_msg()?;
         if hs_type != HandshakeType::Finished {
             return Err(TlsError::HandshakeFailed(format!(
@@ -554,7 +752,17 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         }
         let server_fin = hs.process_finished(&fin_data)?;
 
-        // 11. Send ChangeCipherSpec
+        // 14. Send NewSessionTicket (plaintext, before CCS) if ticket_key configured
+        if let Some(nst_msg) = hs.build_new_session_ticket(suite, 3600)? {
+            let nst_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, &nst_msg)?;
+            self.stream
+                .write_all(&nst_record)
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // 15. Send ChangeCipherSpec
         let ccs_record = self
             .record_layer
             .seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
@@ -562,7 +770,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             .write_all(&ccs_record)
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
-        // 12. Activate write encryption (server write key)
+        // 16. Activate write encryption (server write key)
         if keys.is_cbc {
             self.record_layer.activate_write_encryption12_cbc(
                 keys.server_write_key.clone(),
@@ -577,7 +785,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             )?;
         }
 
-        // 13. Send server Finished (encrypted)
+        // 17. Send server Finished (encrypted)
         let sfin_record = self
             .record_layer
             .seal_record(ContentType::Handshake, &server_fin.finished)?;
@@ -589,6 +797,106 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         keys.master_secret.zeroize();
         keys.client_write_key.zeroize();
         keys.server_write_key.zeroize();
+
+        self.negotiated_suite = Some(suite);
+        self.state = ConnectionState::Connected;
+        Ok(())
+    }
+
+    /// Abbreviated handshake path (session ticket or session ID resumption).
+    fn do_abbreviated_handshake(
+        &mut self,
+        hs: &mut Tls12ServerHandshake,
+        mut abbr: crate::handshake::server12::AbbreviatedServerResult,
+    ) -> Result<(), TlsError> {
+        let suite = abbr.suite;
+
+        // 1. Send ServerHello (echoes session_id)
+        let sh_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &abbr.server_hello)?;
+        self.stream
+            .write_all(&sh_record)
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 2. Send NewSessionTicket (plaintext) if ticket_key configured
+        if let Some(nst_msg) = hs.build_new_session_ticket(suite, 3600)? {
+            let nst_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, &nst_msg)?;
+            self.stream
+                .write_all(&nst_record)
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // 3. Send CCS
+        let ccs_record = self
+            .record_layer
+            .seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
+        self.stream
+            .write_all(&ccs_record)
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 4. Activate write encryption (server write key)
+        if abbr.is_cbc {
+            self.record_layer.activate_write_encryption12_cbc(
+                abbr.server_write_key.clone(),
+                abbr.server_write_mac_key.clone(),
+                abbr.mac_len,
+            );
+        } else {
+            self.record_layer.activate_write_encryption12(
+                suite,
+                &abbr.server_write_key,
+                abbr.server_write_iv.clone(),
+            )?;
+        }
+
+        // 5. Send server Finished (encrypted)
+        let sfin_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &abbr.finished)?;
+        self.stream
+            .write_all(&sfin_record)
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 6. Read client CCS
+        let (ct, _ccs_data) = self.read_record()?;
+        if ct != ContentType::ChangeCipherSpec {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected ChangeCipherSpec, got {ct:?}"
+            )));
+        }
+        hs.process_change_cipher_spec()?;
+
+        // 7. Activate read decryption (client write key)
+        if abbr.is_cbc {
+            self.record_layer.activate_read_decryption12_cbc(
+                abbr.client_write_key.clone(),
+                abbr.client_write_mac_key.clone(),
+                abbr.mac_len,
+            );
+        } else {
+            self.record_layer.activate_read_decryption12(
+                suite,
+                &abbr.client_write_key,
+                abbr.client_write_iv.clone(),
+            )?;
+        }
+
+        // 8. Read client Finished (encrypted)
+        let (hs_type, fin_data) = self.read_handshake_msg()?;
+        if hs_type != HandshakeType::Finished {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected Finished, got {hs_type:?}"
+            )));
+        }
+        hs.process_abbreviated_finished(&fin_data)?;
+
+        // Zeroize secrets
+        abbr.master_secret.zeroize();
+        abbr.client_write_key.zeroize();
+        abbr.server_write_key.zeroize();
 
         self.negotiated_suite = Some(suite);
         self.state = ConnectionState::Connected;
@@ -2113,6 +2421,518 @@ mod tests {
         let (cs, ss) = run_abbreviated_handshake(suite, session, &mut cache).unwrap();
         assert_eq!(cs, Tls12ClientState::Connected);
         assert_eq!(ss, Tls12ServerState::Connected);
+    }
+
+    // =========================================================================
+    // Session Ticket helpers + tests
+    // =========================================================================
+
+    /// Helper: Run a full TLS 1.2 handshake with ticket_key configured on server.
+    /// Returns the TlsSession (with ticket) from the handshake.
+    fn run_full_handshake_with_ticket(suite: CipherSuite, ticket_key: Vec<u8>) -> TlsSession {
+        use crate::handshake::codec12::decode_new_session_ticket12;
+
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .session_resumption(true)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .ticket_key(ticket_key)
+            .build();
+
+        let mut c2s = Vec::new();
+        let mut s2c = Vec::new();
+        let mut client_hs = Tls12ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = Tls12ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // 1. Client → CH (with empty SessionTicket extension)
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &ch_msg)
+                .unwrap(),
+        );
+
+        // 2. Server processes CH (should include empty SessionTicket ext in SH)
+        let (_, ch_plain, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        let (_, _, ch_total) = parse_handshake_header(&ch_plain).unwrap();
+        let flight = server_hs
+            .process_client_hello(&ch_plain[..ch_total])
+            .unwrap();
+        let suite_neg = flight.suite;
+        for msg in [
+            &flight.server_hello,
+            &flight.certificate,
+            &flight.server_key_exchange,
+            &flight.server_hello_done,
+        ] {
+            s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
+        }
+
+        // 3. Client processes SH + Cert + SKE + SHD
+        let (_, sh_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, sh_body, sh_total) = parse_handshake_header(&sh_plain).unwrap();
+        let sh = decode_server_hello(sh_body).unwrap();
+        client_hs
+            .process_server_hello(&sh_plain[..sh_total], &sh)
+            .unwrap();
+
+        let (_, cert_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, cert_body, cert_total) = parse_handshake_header(&cert_plain).unwrap();
+        let cert12 = decode_certificate12(cert_body).unwrap();
+        client_hs
+            .process_certificate(&cert_plain[..cert_total], &cert12.certificate_list)
+            .unwrap();
+
+        let (_, ske_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, ske_body, ske_total) = parse_handshake_header(&ske_plain).unwrap();
+        let ske = decode_server_key_exchange(ske_body).unwrap();
+        client_hs
+            .process_server_key_exchange(&ske_plain[..ske_total], &ske)
+            .unwrap();
+
+        let (_, shd_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, _, shd_total) = parse_handshake_header(&shd_plain).unwrap();
+
+        // 4. Client flight: CKE + CCS + Finished
+        let cflight = client_hs
+            .process_server_hello_done(&shd_plain[..shd_total])
+            .unwrap();
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &cflight.client_key_exchange)
+                .unwrap(),
+        );
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::ChangeCipherSpec, &[0x01])
+                .unwrap(),
+        );
+        client_rl
+            .activate_write_encryption12(
+                suite_neg,
+                &cflight.client_write_key,
+                cflight.client_write_iv.clone(),
+            )
+            .unwrap();
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &cflight.finished)
+                .unwrap(),
+        );
+
+        // 5. Server processes CKE + CCS + Finished
+        let (_, cke_plain, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        let (_, _, cke_total) = parse_handshake_header(&cke_plain).unwrap();
+        let keys = server_hs
+            .process_client_key_exchange(&cke_plain[..cke_total])
+            .unwrap();
+
+        let (ct, _, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        assert_eq!(ct, ContentType::ChangeCipherSpec);
+        server_hs.process_change_cipher_spec().unwrap();
+
+        server_rl
+            .activate_read_decryption12(
+                suite_neg,
+                &keys.client_write_key,
+                keys.client_write_iv.clone(),
+            )
+            .unwrap();
+
+        let (_, fin_plain, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        let (_, _, fin_total) = parse_handshake_header(&fin_plain).unwrap();
+        let server_fin = server_hs.process_finished(&fin_plain[..fin_total]).unwrap();
+
+        // 6. Server → NewSessionTicket + CCS + Finished
+        let nst_msg = server_hs
+            .build_new_session_ticket(suite_neg, 3600)
+            .unwrap()
+            .expect("should produce a ticket");
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::Handshake, &nst_msg)
+                .unwrap(),
+        );
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::ChangeCipherSpec, &[0x01])
+                .unwrap(),
+        );
+        server_rl
+            .activate_write_encryption12(
+                suite_neg,
+                &keys.server_write_key,
+                keys.server_write_iv.clone(),
+            )
+            .unwrap();
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::Handshake, &server_fin.finished)
+                .unwrap(),
+        );
+
+        // 7. Client processes NewSessionTicket + CCS + Finished
+        let (ct, nst_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        assert_eq!(ct, ContentType::Handshake);
+        let (hs_type, _, nst_total) = parse_handshake_header(&nst_plain).unwrap();
+        assert_eq!(hs_type, HandshakeType::NewSessionTicket);
+        let nst_body = &nst_plain[4..nst_total];
+        let (lifetime, ticket_data) = decode_new_session_ticket12(nst_body).unwrap();
+        client_hs.process_new_session_ticket(nst_body).unwrap();
+
+        let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        assert_eq!(ct, ContentType::ChangeCipherSpec);
+        client_hs.process_change_cipher_spec().unwrap();
+
+        client_rl
+            .activate_read_decryption12(
+                suite_neg,
+                &cflight.server_write_key,
+                cflight.server_write_iv.clone(),
+            )
+            .unwrap();
+
+        let (_, sfin_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, _, sfin_total) = parse_handshake_header(&sfin_plain).unwrap();
+        client_hs
+            .process_finished(&sfin_plain[..sfin_total], &cflight.master_secret)
+            .unwrap();
+
+        assert_eq!(client_hs.state(), Tls12ClientState::Connected);
+        assert_eq!(server_hs.state(), Tls12ServerState::Connected);
+
+        // Build session with ticket for resumption
+        TlsSession {
+            id: Vec::new(), // ticket-based, no session ID needed
+            cipher_suite: suite_neg,
+            master_secret: cflight.master_secret.clone(),
+            alpn_protocol: None,
+            ticket: Some(ticket_data),
+            ticket_lifetime: lifetime,
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            psk: Vec::new(),
+        }
+    }
+
+    /// Helper: Run an abbreviated handshake using a session ticket (no session ID cache).
+    fn run_ticket_abbreviated_handshake(
+        suite: CipherSuite,
+        ticket_key: Vec<u8>,
+        cached_session: TlsSession,
+    ) -> Result<(Tls12ClientState, Tls12ServerState), TlsError> {
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .session_resumption(true)
+            .resumption_session(cached_session)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .ticket_key(ticket_key)
+            .build();
+
+        let mut c2s = Vec::new();
+        let mut s2c = Vec::new();
+        let mut client_hs = Tls12ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = Tls12ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // 1. Client → CH (with ticket in SessionTicket extension)
+        let ch_msg = client_hs.build_client_hello()?;
+        c2s.extend_from_slice(&client_rl.seal_record(ContentType::Handshake, &ch_msg)?);
+
+        // 2. Server processes CH with ticket (no session cache needed)
+        let (_, ch_plain, consumed) = server_rl.open_record(&c2s)?;
+        c2s.drain(..consumed);
+        let (_, _, ch_total) = parse_handshake_header(&ch_plain)?;
+        let result = server_hs.process_client_hello_resumable(&ch_plain[..ch_total], None)?;
+
+        match result {
+            ServerHelloResult::Abbreviated(mut abbr) => {
+                // Server → SH + (optional NST) + CCS + Finished
+                s2c.extend_from_slice(
+                    &server_rl.seal_record(ContentType::Handshake, &abbr.server_hello)?,
+                );
+
+                // Optionally send NST (new ticket for the new session)
+                if let Some(nst_msg) = server_hs.build_new_session_ticket(abbr.suite, 3600)? {
+                    s2c.extend_from_slice(
+                        &server_rl.seal_record(ContentType::Handshake, &nst_msg)?,
+                    );
+                }
+
+                s2c.extend_from_slice(
+                    &server_rl.seal_record(ContentType::ChangeCipherSpec, &[0x01])?,
+                );
+                server_rl.activate_write_encryption12(
+                    abbr.suite,
+                    &abbr.server_write_key,
+                    abbr.server_write_iv.clone(),
+                )?;
+                s2c.extend_from_slice(
+                    &server_rl.seal_record(ContentType::Handshake, &abbr.finished)?,
+                );
+
+                // Client processes SH
+                let (_, sh_plain, consumed) = client_rl.open_record(&s2c)?;
+                s2c.drain(..consumed);
+                let (_, sh_body, sh_total) = parse_handshake_header(&sh_plain)?;
+                let sh = decode_server_hello(sh_body)?;
+                client_hs.process_server_hello(&sh_plain[..sh_total], &sh)?;
+
+                assert!(client_hs.is_abbreviated());
+                let keys = client_hs.take_abbreviated_keys().unwrap();
+
+                // Client processes optional NST then CCS
+                loop {
+                    let (ct, data, consumed) = client_rl.open_record(&s2c)?;
+                    s2c.drain(..consumed);
+                    match ct {
+                        ContentType::Handshake => {
+                            let (hs_type, _, total) = parse_handshake_header(&data)?;
+                            if hs_type == HandshakeType::NewSessionTicket {
+                                let body = &data[4..total];
+                                client_hs.process_new_session_ticket(body)?;
+                            } else {
+                                return Err(TlsError::HandshakeFailed(format!(
+                                    "unexpected {hs_type:?}"
+                                )));
+                            }
+                        }
+                        ContentType::ChangeCipherSpec => {
+                            client_hs.process_change_cipher_spec()?;
+                            break;
+                        }
+                        _ => {
+                            return Err(TlsError::HandshakeFailed(format!("unexpected {ct:?}")));
+                        }
+                    }
+                }
+
+                // Activate client read decryption
+                client_rl.activate_read_decryption12(
+                    keys.suite,
+                    &keys.server_write_key,
+                    keys.server_write_iv.clone(),
+                )?;
+
+                // Client reads server Finished
+                let (_, sfin_plain, consumed) = client_rl.open_record(&s2c)?;
+                s2c.drain(..consumed);
+                let (_, _, sfin_total) = parse_handshake_header(&sfin_plain)?;
+                let client_finished_msg =
+                    client_hs.process_abbreviated_server_finished(&sfin_plain[..sfin_total])?;
+
+                // Client → CCS + Finished
+                c2s.extend_from_slice(
+                    &client_rl.seal_record(ContentType::ChangeCipherSpec, &[0x01])?,
+                );
+                client_rl.activate_write_encryption12(
+                    keys.suite,
+                    &keys.client_write_key,
+                    keys.client_write_iv.clone(),
+                )?;
+                c2s.extend_from_slice(
+                    &client_rl.seal_record(ContentType::Handshake, &client_finished_msg)?,
+                );
+
+                // Server processes client CCS + Finished
+                let (ct, _, consumed) = server_rl.open_record(&c2s)?;
+                c2s.drain(..consumed);
+                assert_eq!(ct, ContentType::ChangeCipherSpec);
+                server_hs.process_change_cipher_spec()?;
+
+                server_rl.activate_read_decryption12(
+                    abbr.suite,
+                    &abbr.client_write_key,
+                    abbr.client_write_iv.clone(),
+                )?;
+
+                let (_, cfin_plain, consumed) = server_rl.open_record(&c2s)?;
+                c2s.drain(..consumed);
+                let (_, _, cfin_total) = parse_handshake_header(&cfin_plain)?;
+                server_hs.process_abbreviated_finished(&cfin_plain[..cfin_total])?;
+
+                // Verify app data works
+                let app_msg = b"Hello ticket resumption!";
+                let app_record = client_rl.seal_record(ContentType::ApplicationData, app_msg)?;
+                let (ct, app_plain, _) = server_rl.open_record(&app_record)?;
+                assert_eq!(ct, ContentType::ApplicationData);
+                assert_eq!(app_plain, app_msg);
+
+                abbr.master_secret.zeroize();
+
+                Ok((client_hs.state(), server_hs.state()))
+            }
+            ServerHelloResult::Full(_flight) => Err(TlsError::HandshakeFailed(
+                "expected abbreviated handshake but got full".into(),
+            )),
+        }
+    }
+
+    #[test]
+    fn test_tls12_session_ticket_full_handshake() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let ticket_key = vec![0xAB; 32];
+
+        let session = run_full_handshake_with_ticket(suite, ticket_key);
+        assert!(session.ticket.is_some());
+        assert!(!session.ticket.as_ref().unwrap().is_empty());
+        assert_eq!(session.ticket_lifetime, 3600);
+        assert_eq!(session.cipher_suite, suite);
+        assert!(!session.master_secret.is_empty());
+    }
+
+    #[test]
+    fn test_tls12_session_ticket_resumption() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let ticket_key = vec![0xAB; 32];
+
+        // Step 1: Full handshake → get session with ticket
+        let session = run_full_handshake_with_ticket(suite, ticket_key.clone());
+        assert!(session.ticket.is_some());
+
+        // Step 2: Abbreviated handshake using ticket
+        let (cs, ss) = run_ticket_abbreviated_handshake(suite, ticket_key, session).unwrap();
+        assert_eq!(cs, Tls12ClientState::Connected);
+        assert_eq!(ss, Tls12ServerState::Connected);
+    }
+
+    #[test]
+    fn test_tls12_session_ticket_invalid_ticket() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let ticket_key = vec![0xAB; 32];
+
+        // Create a session with a corrupted ticket
+        let mut session = run_full_handshake_with_ticket(suite, ticket_key.clone());
+        // Corrupt the ticket data
+        if let Some(ref mut ticket) = session.ticket {
+            for b in ticket.iter_mut() {
+                *b ^= 0xFF;
+            }
+        }
+
+        // Abbreviated should fail → server falls back to full handshake
+        let result = run_ticket_abbreviated_handshake(suite, ticket_key, session);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("expected abbreviated"));
+    }
+
+    #[test]
+    fn test_tls12_session_ticket_wrong_key() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let ticket_key = vec![0xAB; 32];
+
+        // Full handshake with original key
+        let session = run_full_handshake_with_ticket(suite, ticket_key);
+        assert!(session.ticket.is_some());
+
+        // Try resumption with a different ticket key → decryption fails → full handshake
+        let different_key = vec![0xCD; 32];
+        let result = run_ticket_abbreviated_handshake(suite, different_key, session);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("expected abbreviated"));
+    }
+
+    #[test]
+    fn test_tls12_session_ticket_take_session() {
+        // Use Cursor-based connection to verify take_session works
+        let stream = Cursor::new(Vec::<u8>::new());
+        let config = TlsConfig::builder().build();
+        let mut conn = Tls12ClientConnection::new(stream, config);
+
+        // Before handshake, no session
+        assert!(conn.take_session().is_none());
+
+        // Manually set a session (simulating post-handshake state)
+        conn.session = Some(TlsSession {
+            id: Vec::new(),
+            cipher_suite: CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+            master_secret: vec![0x42; 48],
+            alpn_protocol: None,
+            ticket: Some(vec![0xDE; 100]),
+            ticket_lifetime: 3600,
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: 0,
+            psk: Vec::new(),
+        });
+
+        let session = conn.take_session().unwrap();
+        assert!(session.ticket.is_some());
+        assert_eq!(session.ticket.as_ref().unwrap().len(), 100);
+        assert_eq!(session.ticket_lifetime, 3600);
+
+        // After take, session is gone
+        assert!(conn.take_session().is_none());
+
+        // Same for server
+        let stream = Cursor::new(Vec::<u8>::new());
+        let config = TlsConfig::builder().build();
+        let mut srv = Tls12ServerConnection::new(stream, config);
+        assert!(srv.take_session().is_none());
     }
 
     #[test]

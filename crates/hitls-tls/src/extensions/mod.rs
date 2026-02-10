@@ -23,6 +23,7 @@ impl ExtensionType {
     pub const COMPRESS_CERTIFICATE: Self = Self(27);
     pub const KEY_SHARE: Self = Self(51);
     pub const EC_POINT_FORMATS: Self = Self(11);
+    pub const SESSION_TICKET: Self = Self(35);
     pub const RENEGOTIATION_INFO: Self = Self(0xFF01);
 }
 

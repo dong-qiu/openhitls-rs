@@ -707,6 +707,43 @@ pub fn parse_renegotiation_info(data: &[u8]) -> Result<Vec<u8>, TlsError> {
 }
 
 // ---------------------------------------------------------------------------
+// Session Ticket extension (RFC 5077)
+// ---------------------------------------------------------------------------
+
+/// Build SessionTicket extension for ClientHello.
+/// Empty data = "I support tickets", non-empty = ticket for resumption.
+pub fn build_session_ticket_ch(ticket: &[u8]) -> Extension {
+    Extension {
+        extension_type: ExtensionType::SESSION_TICKET,
+        data: ticket.to_vec(),
+    }
+}
+
+/// Parse SessionTicket extension from ClientHello.
+/// Returns the ticket bytes (empty = new session, non-empty = resumption attempt).
+pub fn parse_session_ticket_ch(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    Ok(data.to_vec())
+}
+
+/// Build empty SessionTicket extension for ServerHello (signals ticket support).
+pub fn build_session_ticket_sh() -> Extension {
+    Extension {
+        extension_type: ExtensionType::SESSION_TICKET,
+        data: vec![],
+    }
+}
+
+/// Parse SessionTicket extension from ServerHello (expect empty).
+pub fn parse_session_ticket_sh(data: &[u8]) -> Result<(), TlsError> {
+    if !data.is_empty() {
+        return Err(TlsError::HandshakeFailed(
+            "session_ticket SH: expected empty".into(),
+        ));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -982,5 +1019,37 @@ mod tests {
         assert_eq!(ext.extension_type, ExtensionType::RENEGOTIATION_INFO);
         let info = parse_renegotiation_info(&ext.data).unwrap();
         assert!(info.is_empty()); // empty for initial handshake
+    }
+
+    #[test]
+    fn test_session_ticket_ch_empty() {
+        let ext = build_session_ticket_ch(&[]);
+        assert_eq!(ext.extension_type, ExtensionType::SESSION_TICKET);
+        assert!(ext.data.is_empty());
+        let parsed = parse_session_ticket_ch(&ext.data).unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn test_session_ticket_ch_with_ticket() {
+        let ticket = vec![0xDE; 128];
+        let ext = build_session_ticket_ch(&ticket);
+        assert_eq!(ext.extension_type, ExtensionType::SESSION_TICKET);
+        assert_eq!(ext.data.len(), ticket.len());
+        let parsed = parse_session_ticket_ch(&ext.data).unwrap();
+        assert_eq!(parsed, ticket);
+    }
+
+    #[test]
+    fn test_session_ticket_sh() {
+        let ext = build_session_ticket_sh();
+        assert_eq!(ext.extension_type, ExtensionType::SESSION_TICKET);
+        assert!(ext.data.is_empty());
+        parse_session_ticket_sh(&ext.data).unwrap();
+    }
+
+    #[test]
+    fn test_session_ticket_sh_non_empty_fails() {
+        assert!(parse_session_ticket_sh(&[0x01]).is_err());
     }
 }

@@ -424,6 +424,42 @@ pub fn decode_certificate_verify12(body: &[u8]) -> Result<CertificateVerify12, T
     })
 }
 
+// ---------------------------------------------------------------------------
+// NewSessionTicket (TLS 1.2, RFC 5077)
+// ---------------------------------------------------------------------------
+
+/// Encode a TLS 1.2 NewSessionTicket message (wrapped with handshake header).
+///
+/// ```text
+/// ticket_lifetime_hint(4) || ticket_len(2) || ticket(variable)
+/// ```
+pub fn encode_new_session_ticket12(lifetime_hint: u32, ticket: &[u8]) -> Vec<u8> {
+    let mut body = Vec::with_capacity(4 + 2 + ticket.len());
+    body.extend_from_slice(&lifetime_hint.to_be_bytes());
+    body.extend_from_slice(&(ticket.len() as u16).to_be_bytes());
+    body.extend_from_slice(ticket);
+    wrap_handshake(HandshakeType::NewSessionTicket, &body)
+}
+
+/// Decode a TLS 1.2 NewSessionTicket message body.
+///
+/// Returns `(lifetime_hint, ticket_data)`.
+pub fn decode_new_session_ticket12(body: &[u8]) -> Result<(u32, Vec<u8>), TlsError> {
+    if body.len() < 6 {
+        return Err(TlsError::HandshakeFailed(
+            "NewSessionTicket12 too short".into(),
+        ));
+    }
+    let lifetime = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
+    let ticket_len = u16::from_be_bytes([body[4], body[5]]) as usize;
+    if body.len() < 6 + ticket_len {
+        return Err(TlsError::HandshakeFailed(
+            "NewSessionTicket12 ticket truncated".into(),
+        ));
+    }
+    Ok((lifetime, body[6..6 + ticket_len].to_vec()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -625,5 +661,32 @@ mod tests {
     #[test]
     fn test_decode_certificate_verify12_too_short() {
         assert!(decode_certificate_verify12(&[0x04, 0x03]).is_err());
+    }
+
+    #[test]
+    fn test_encode_decode_new_session_ticket12_roundtrip() {
+        let ticket = vec![0xAB; 128];
+        let encoded = encode_new_session_ticket12(3600, &ticket);
+
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::NewSessionTicket);
+
+        let (lifetime, decoded_ticket) = decode_new_session_ticket12(body).unwrap();
+        assert_eq!(lifetime, 3600);
+        assert_eq!(decoded_ticket, ticket);
+    }
+
+    #[test]
+    fn test_decode_new_session_ticket12_too_short() {
+        assert!(decode_new_session_ticket12(&[0x00; 5]).is_err());
+    }
+
+    #[test]
+    fn test_decode_new_session_ticket12_empty_ticket() {
+        let (lifetime, ticket) =
+            decode_new_session_ticket12(&[0x00, 0x00, 0x0E, 0x10, 0x00, 0x00]).unwrap();
+        assert_eq!(lifetime, 3600);
+        assert!(ticket.is_empty());
     }
 }
