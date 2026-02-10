@@ -422,7 +422,7 @@ mod tests {
 
         for msg in [
             &sflight.server_hello,
-            &sflight.certificate,
+            sflight.certificate.as_ref().unwrap(),
             sflight.server_key_exchange.as_ref().unwrap(),
             &sflight.server_hello_done,
         ] {

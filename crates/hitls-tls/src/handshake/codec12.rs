@@ -634,6 +634,400 @@ pub fn decode_new_session_ticket12(body: &[u8]) -> Result<(u32, Vec<u8>), TlsErr
     Ok((lifetime, body[6..6 + ticket_len].to_vec()))
 }
 
+// ---------------------------------------------------------------------------
+// PSK key exchange types and codecs (RFC 4279, RFC 5489)
+// ---------------------------------------------------------------------------
+
+/// ServerKeyExchange for plain PSK or RSA_PSK: just a PSK identity hint.
+///
+/// ```text
+/// psk_identity_hint_len(2) || psk_identity_hint(variable)
+/// ```
+#[derive(Debug, Clone)]
+pub struct ServerKeyExchangePskHint {
+    /// PSK identity hint (may be empty).
+    pub hint: Vec<u8>,
+}
+
+/// ServerKeyExchange for DHE_PSK (RFC 4279 §3): hint + DH params (unsigned).
+///
+/// ```text
+/// psk_identity_hint_len(2) || hint || dh_p_len(2) || dh_p ||
+/// dh_g_len(2) || dh_g || dh_Ys_len(2) || dh_Ys
+/// ```
+#[derive(Debug, Clone)]
+pub struct ServerKeyExchangeDhePsk {
+    pub hint: Vec<u8>,
+    pub dh_p: Vec<u8>,
+    pub dh_g: Vec<u8>,
+    pub dh_ys: Vec<u8>,
+}
+
+/// ServerKeyExchange for ECDHE_PSK (RFC 5489 §2): hint + ECDHE params (unsigned).
+///
+/// ```text
+/// psk_identity_hint_len(2) || hint || curve_type(1) || named_curve(2) ||
+/// point_len(1) || point(variable)
+/// ```
+#[derive(Debug, Clone)]
+pub struct ServerKeyExchangeEcdhePsk {
+    pub hint: Vec<u8>,
+    pub named_curve: u16,
+    pub public_key: Vec<u8>,
+}
+
+/// ClientKeyExchange for plain PSK (RFC 4279 §2).
+///
+/// ```text
+/// psk_identity_len(2) || psk_identity(variable)
+/// ```
+#[derive(Debug, Clone)]
+pub struct ClientKeyExchangePsk {
+    pub identity: Vec<u8>,
+}
+
+/// ClientKeyExchange for DHE_PSK (RFC 4279 §3).
+///
+/// ```text
+/// psk_identity_len(2) || identity || dh_Yc_len(2) || dh_Yc
+/// ```
+#[derive(Debug, Clone)]
+pub struct ClientKeyExchangeDhePsk {
+    pub identity: Vec<u8>,
+    pub dh_yc: Vec<u8>,
+}
+
+/// ClientKeyExchange for ECDHE_PSK (RFC 5489 §2).
+///
+/// ```text
+/// psk_identity_len(2) || identity || point_len(1) || point(variable)
+/// ```
+#[derive(Debug, Clone)]
+pub struct ClientKeyExchangeEcdhePsk {
+    pub identity: Vec<u8>,
+    pub public_key: Vec<u8>,
+}
+
+/// ClientKeyExchange for RSA_PSK (RFC 4279 §4).
+///
+/// ```text
+/// psk_identity_len(2) || identity || encrypted_pms_len(2) || encrypted_pms
+/// ```
+#[derive(Debug, Clone)]
+pub struct ClientKeyExchangeRsaPsk {
+    pub identity: Vec<u8>,
+    pub encrypted_pms: Vec<u8>,
+}
+
+/// Build the PSK premaster secret (RFC 4279 §2).
+///
+/// ```text
+/// pms = other_secret_len(2) || other_secret || psk_len(2) || psk
+/// ```
+///
+/// For plain PSK: `other_secret` is N zero bytes where N = psk.len().
+/// For DHE_PSK / ECDHE_PSK: `other_secret` is the DH/ECDH shared secret.
+/// For RSA_PSK: `other_secret` is the 48-byte RSA premaster secret.
+pub fn build_psk_pms(other_secret: &[u8], psk: &[u8]) -> Vec<u8> {
+    let mut pms = Vec::with_capacity(4 + other_secret.len() + psk.len());
+    pms.extend_from_slice(&(other_secret.len() as u16).to_be_bytes());
+    pms.extend_from_slice(other_secret);
+    pms.extend_from_slice(&(psk.len() as u16).to_be_bytes());
+    pms.extend_from_slice(psk);
+    pms
+}
+
+/// Encode a PSK ClientKeyExchange message.
+pub fn encode_client_key_exchange_psk(cke: &ClientKeyExchangePsk) -> Vec<u8> {
+    let mut body = Vec::with_capacity(2 + cke.identity.len());
+    body.extend_from_slice(&(cke.identity.len() as u16).to_be_bytes());
+    body.extend_from_slice(&cke.identity);
+    wrap_handshake(HandshakeType::ClientKeyExchange, &body)
+}
+
+/// Encode a DHE_PSK ClientKeyExchange message.
+pub fn encode_client_key_exchange_dhe_psk(cke: &ClientKeyExchangeDhePsk) -> Vec<u8> {
+    let mut body = Vec::with_capacity(4 + cke.identity.len() + cke.dh_yc.len());
+    body.extend_from_slice(&(cke.identity.len() as u16).to_be_bytes());
+    body.extend_from_slice(&cke.identity);
+    body.extend_from_slice(&(cke.dh_yc.len() as u16).to_be_bytes());
+    body.extend_from_slice(&cke.dh_yc);
+    wrap_handshake(HandshakeType::ClientKeyExchange, &body)
+}
+
+/// Encode an ECDHE_PSK ClientKeyExchange message.
+pub fn encode_client_key_exchange_ecdhe_psk(cke: &ClientKeyExchangeEcdhePsk) -> Vec<u8> {
+    let mut body = Vec::with_capacity(3 + cke.identity.len() + cke.public_key.len());
+    body.extend_from_slice(&(cke.identity.len() as u16).to_be_bytes());
+    body.extend_from_slice(&cke.identity);
+    body.push(cke.public_key.len() as u8);
+    body.extend_from_slice(&cke.public_key);
+    wrap_handshake(HandshakeType::ClientKeyExchange, &body)
+}
+
+/// Encode an RSA_PSK ClientKeyExchange message.
+pub fn encode_client_key_exchange_rsa_psk(cke: &ClientKeyExchangeRsaPsk) -> Vec<u8> {
+    let mut body = Vec::with_capacity(4 + cke.identity.len() + cke.encrypted_pms.len());
+    body.extend_from_slice(&(cke.identity.len() as u16).to_be_bytes());
+    body.extend_from_slice(&cke.identity);
+    body.extend_from_slice(&(cke.encrypted_pms.len() as u16).to_be_bytes());
+    body.extend_from_slice(&cke.encrypted_pms);
+    wrap_handshake(HandshakeType::ClientKeyExchange, &body)
+}
+
+/// Decode a PSK identity hint ServerKeyExchange body.
+pub fn decode_server_key_exchange_psk_hint(
+    body: &[u8],
+) -> Result<ServerKeyExchangePskHint, TlsError> {
+    if body.len() < 2 {
+        return Err(TlsError::HandshakeFailed("PSK SKE hint too short".into()));
+    }
+    let hint_len = u16::from_be_bytes([body[0], body[1]]) as usize;
+    if body.len() < 2 + hint_len {
+        return Err(TlsError::HandshakeFailed("PSK SKE hint truncated".into()));
+    }
+    Ok(ServerKeyExchangePskHint {
+        hint: body[2..2 + hint_len].to_vec(),
+    })
+}
+
+/// Decode a DHE_PSK ServerKeyExchange body (hint + unsigned DH params).
+pub fn decode_server_key_exchange_dhe_psk(
+    body: &[u8],
+) -> Result<ServerKeyExchangeDhePsk, TlsError> {
+    if body.len() < 2 {
+        return Err(TlsError::HandshakeFailed("DHE_PSK SKE too short".into()));
+    }
+    let mut off = 0;
+    // hint
+    let hint_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + hint_len + 2 {
+        return Err(TlsError::HandshakeFailed(
+            "DHE_PSK SKE hint truncated".into(),
+        ));
+    }
+    let hint = body[off..off + hint_len].to_vec();
+    off += hint_len;
+    // dh_p
+    let p_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + p_len + 2 {
+        return Err(TlsError::HandshakeFailed("DHE_PSK SKE p truncated".into()));
+    }
+    let dh_p = body[off..off + p_len].to_vec();
+    off += p_len;
+    // dh_g
+    let g_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + g_len + 2 {
+        return Err(TlsError::HandshakeFailed("DHE_PSK SKE g truncated".into()));
+    }
+    let dh_g = body[off..off + g_len].to_vec();
+    off += g_len;
+    // dh_Ys
+    let ys_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + ys_len {
+        return Err(TlsError::HandshakeFailed("DHE_PSK SKE Ys truncated".into()));
+    }
+    let dh_ys = body[off..off + ys_len].to_vec();
+    Ok(ServerKeyExchangeDhePsk {
+        hint,
+        dh_p,
+        dh_g,
+        dh_ys,
+    })
+}
+
+/// Encode a PSK hint-only ServerKeyExchange message (wrapped with handshake header).
+pub fn encode_server_key_exchange_psk_hint(ske: &ServerKeyExchangePskHint) -> Vec<u8> {
+    let mut body = Vec::with_capacity(2 + ske.hint.len());
+    body.extend_from_slice(&(ske.hint.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ske.hint);
+    wrap_handshake(HandshakeType::ServerKeyExchange, &body)
+}
+
+/// Encode a DHE_PSK ServerKeyExchange message (wrapped with handshake header).
+pub fn encode_server_key_exchange_dhe_psk(ske: &ServerKeyExchangeDhePsk) -> Vec<u8> {
+    let mut body = Vec::with_capacity(
+        2 + ske.hint.len() + 6 + ske.dh_p.len() + ske.dh_g.len() + ske.dh_ys.len(),
+    );
+    body.extend_from_slice(&(ske.hint.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ske.hint);
+    body.extend_from_slice(&(ske.dh_p.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ske.dh_p);
+    body.extend_from_slice(&(ske.dh_g.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ske.dh_g);
+    body.extend_from_slice(&(ske.dh_ys.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ske.dh_ys);
+    wrap_handshake(HandshakeType::ServerKeyExchange, &body)
+}
+
+/// Encode an ECDHE_PSK ServerKeyExchange message (wrapped with handshake header).
+pub fn encode_server_key_exchange_ecdhe_psk(ske: &ServerKeyExchangeEcdhePsk) -> Vec<u8> {
+    let mut body = Vec::with_capacity(2 + ske.hint.len() + 4 + ske.public_key.len());
+    body.extend_from_slice(&(ske.hint.len() as u16).to_be_bytes());
+    body.extend_from_slice(&ske.hint);
+    body.push(3); // curve_type = named_curve
+    body.extend_from_slice(&ske.named_curve.to_be_bytes());
+    body.push(ske.public_key.len() as u8);
+    body.extend_from_slice(&ske.public_key);
+    wrap_handshake(HandshakeType::ServerKeyExchange, &body)
+}
+
+/// Decode a PSK ClientKeyExchange body.
+pub fn decode_client_key_exchange_psk(body: &[u8]) -> Result<ClientKeyExchangePsk, TlsError> {
+    if body.len() < 2 {
+        return Err(TlsError::HandshakeFailed("PSK CKE too short".into()));
+    }
+    let id_len = u16::from_be_bytes([body[0], body[1]]) as usize;
+    if body.len() < 2 + id_len {
+        return Err(TlsError::HandshakeFailed(
+            "PSK CKE identity truncated".into(),
+        ));
+    }
+    Ok(ClientKeyExchangePsk {
+        identity: body[2..2 + id_len].to_vec(),
+    })
+}
+
+/// Decode a DHE_PSK ClientKeyExchange body.
+pub fn decode_client_key_exchange_dhe_psk(
+    body: &[u8],
+) -> Result<ClientKeyExchangeDhePsk, TlsError> {
+    if body.len() < 2 {
+        return Err(TlsError::HandshakeFailed("DHE_PSK CKE too short".into()));
+    }
+    let mut off = 0;
+    let id_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + id_len + 2 {
+        return Err(TlsError::HandshakeFailed(
+            "DHE_PSK CKE identity truncated".into(),
+        ));
+    }
+    let identity = body[off..off + id_len].to_vec();
+    off += id_len;
+    let yc_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + yc_len {
+        return Err(TlsError::HandshakeFailed("DHE_PSK CKE Yc truncated".into()));
+    }
+    let dh_yc = body[off..off + yc_len].to_vec();
+    Ok(ClientKeyExchangeDhePsk { identity, dh_yc })
+}
+
+/// Decode an ECDHE_PSK ClientKeyExchange body.
+pub fn decode_client_key_exchange_ecdhe_psk(
+    body: &[u8],
+) -> Result<ClientKeyExchangeEcdhePsk, TlsError> {
+    if body.len() < 2 {
+        return Err(TlsError::HandshakeFailed("ECDHE_PSK CKE too short".into()));
+    }
+    let mut off = 0;
+    let id_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + id_len + 1 {
+        return Err(TlsError::HandshakeFailed(
+            "ECDHE_PSK CKE identity truncated".into(),
+        ));
+    }
+    let identity = body[off..off + id_len].to_vec();
+    off += id_len;
+    let point_len = body[off] as usize;
+    off += 1;
+    if body.len() < off + point_len {
+        return Err(TlsError::HandshakeFailed(
+            "ECDHE_PSK CKE point truncated".into(),
+        ));
+    }
+    let public_key = body[off..off + point_len].to_vec();
+    Ok(ClientKeyExchangeEcdhePsk {
+        identity,
+        public_key,
+    })
+}
+
+/// Decode an RSA_PSK ClientKeyExchange body.
+pub fn decode_client_key_exchange_rsa_psk(
+    body: &[u8],
+) -> Result<ClientKeyExchangeRsaPsk, TlsError> {
+    if body.len() < 2 {
+        return Err(TlsError::HandshakeFailed("RSA_PSK CKE too short".into()));
+    }
+    let mut off = 0;
+    let id_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + id_len + 2 {
+        return Err(TlsError::HandshakeFailed(
+            "RSA_PSK CKE identity truncated".into(),
+        ));
+    }
+    let identity = body[off..off + id_len].to_vec();
+    off += id_len;
+    let enc_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + enc_len {
+        return Err(TlsError::HandshakeFailed(
+            "RSA_PSK CKE encrypted_pms truncated".into(),
+        ));
+    }
+    let encrypted_pms = body[off..off + enc_len].to_vec();
+    Ok(ClientKeyExchangeRsaPsk {
+        identity,
+        encrypted_pms,
+    })
+}
+
+/// Decode an ECDHE_PSK ServerKeyExchange body (hint + unsigned ECDHE params).
+pub fn decode_server_key_exchange_ecdhe_psk(
+    body: &[u8],
+) -> Result<ServerKeyExchangeEcdhePsk, TlsError> {
+    if body.len() < 2 {
+        return Err(TlsError::HandshakeFailed("ECDHE_PSK SKE too short".into()));
+    }
+    let mut off = 0;
+    // hint
+    let hint_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + hint_len + 4 {
+        return Err(TlsError::HandshakeFailed(
+            "ECDHE_PSK SKE hint truncated".into(),
+        ));
+    }
+    let hint = body[off..off + hint_len].to_vec();
+    off += hint_len;
+    // curve_type (must be 3 = named_curve)
+    let curve_type = body[off];
+    if curve_type != 3 {
+        return Err(TlsError::HandshakeFailed(format!(
+            "unsupported curve type: {curve_type} (expected 3=named_curve)"
+        )));
+    }
+    off += 1;
+    let named_curve = u16::from_be_bytes([body[off], body[off + 1]]);
+    off += 2;
+    if off >= body.len() {
+        return Err(TlsError::HandshakeFailed(
+            "ECDHE_PSK SKE point truncated".into(),
+        ));
+    }
+    let point_len = body[off] as usize;
+    off += 1;
+    if body.len() < off + point_len {
+        return Err(TlsError::HandshakeFailed(
+            "ECDHE_PSK SKE point data truncated".into(),
+        ));
+    }
+    let public_key = body[off..off + point_len].to_vec();
+    Ok(ServerKeyExchangeEcdhePsk {
+        hint,
+        named_curve,
+        public_key,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -934,5 +1328,154 @@ mod tests {
         assert_eq!(params[12], 0x02); // g
         assert_eq!(&params[13..15], &[0x00, 0x08]); // ys_len
         assert_eq!(&params[15..23], &[0xAA; 8]); // ys
+    }
+
+    #[test]
+    fn test_build_psk_pms() {
+        let other_secret = vec![0x01, 0x02, 0x03, 0x04];
+        let psk = vec![0xAA, 0xBB, 0xCC];
+        let pms = build_psk_pms(&other_secret, &psk);
+        // Format: uint16(len(other_secret)) || other_secret || uint16(len(psk)) || psk
+        // = 2 + 4 + 2 + 3 = 11 bytes
+        assert_eq!(pms.len(), 11);
+        assert_eq!(&pms[0..2], &[0x00, 0x04]); // other_secret length
+        assert_eq!(&pms[2..6], &[0x01, 0x02, 0x03, 0x04]); // other_secret
+        assert_eq!(&pms[6..8], &[0x00, 0x03]); // psk length
+        assert_eq!(&pms[8..11], &[0xAA, 0xBB, 0xCC]); // psk
+    }
+
+    #[test]
+    fn test_build_psk_pms_plain() {
+        // Plain PSK: other_secret is all zeros with the same length as psk
+        let psk = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let other_secret = vec![0x00; psk.len()];
+        let pms = build_psk_pms(&other_secret, &psk);
+        // = 2 + 4 + 2 + 4 = 12 bytes
+        assert_eq!(pms.len(), 12);
+        assert_eq!(&pms[0..2], &[0x00, 0x04]); // other_secret length
+        assert_eq!(&pms[2..6], &[0x00, 0x00, 0x00, 0x00]); // zeros
+        assert_eq!(&pms[6..8], &[0x00, 0x04]); // psk length
+        assert_eq!(&pms[8..12], &[0xDE, 0xAD, 0xBE, 0xEF]); // psk
+    }
+
+    #[test]
+    fn test_encode_decode_psk_hint_ske_roundtrip() {
+        let ske = ServerKeyExchangePskHint {
+            hint: b"my_psk_hint".to_vec(),
+        };
+
+        let encoded = encode_server_key_exchange_psk_hint(&ske);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ServerKeyExchange);
+
+        let decoded = decode_server_key_exchange_psk_hint(body).unwrap();
+        assert_eq!(decoded.hint, ske.hint);
+    }
+
+    #[test]
+    fn test_encode_decode_dhe_psk_ske_roundtrip() {
+        let ske = ServerKeyExchangeDhePsk {
+            hint: b"dhe_psk_hint".to_vec(),
+            dh_p: vec![0xFF; 128],
+            dh_g: vec![0x02],
+            dh_ys: vec![0xAA; 128],
+        };
+
+        let encoded = encode_server_key_exchange_dhe_psk(&ske);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ServerKeyExchange);
+
+        let decoded = decode_server_key_exchange_dhe_psk(body).unwrap();
+        assert_eq!(decoded.hint, ske.hint);
+        assert_eq!(decoded.dh_p, ske.dh_p);
+        assert_eq!(decoded.dh_g, ske.dh_g);
+        assert_eq!(decoded.dh_ys, ske.dh_ys);
+    }
+
+    #[test]
+    fn test_encode_decode_ecdhe_psk_ske_roundtrip() {
+        let ske = ServerKeyExchangeEcdhePsk {
+            hint: b"ecdhe_psk_hint".to_vec(),
+            named_curve: 0x0017, // secp256r1
+            public_key: vec![0x04; 65],
+        };
+
+        let encoded = encode_server_key_exchange_ecdhe_psk(&ske);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ServerKeyExchange);
+
+        let decoded = decode_server_key_exchange_ecdhe_psk(body).unwrap();
+        assert_eq!(decoded.hint, ske.hint);
+        assert_eq!(decoded.named_curve, 0x0017);
+        assert_eq!(decoded.public_key, ske.public_key);
+    }
+
+    #[test]
+    fn test_encode_decode_psk_cke_roundtrip() {
+        let cke = ClientKeyExchangePsk {
+            identity: b"client_psk_identity".to_vec(),
+        };
+
+        let encoded = encode_client_key_exchange_psk(&cke);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ClientKeyExchange);
+
+        let decoded = decode_client_key_exchange_psk(body).unwrap();
+        assert_eq!(decoded.identity, cke.identity);
+    }
+
+    #[test]
+    fn test_encode_decode_dhe_psk_cke_roundtrip() {
+        let cke = ClientKeyExchangeDhePsk {
+            identity: b"dhe_psk_id".to_vec(),
+            dh_yc: vec![0xDD; 128],
+        };
+
+        let encoded = encode_client_key_exchange_dhe_psk(&cke);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ClientKeyExchange);
+
+        let decoded = decode_client_key_exchange_dhe_psk(body).unwrap();
+        assert_eq!(decoded.identity, cke.identity);
+        assert_eq!(decoded.dh_yc, cke.dh_yc);
+    }
+
+    #[test]
+    fn test_encode_decode_ecdhe_psk_cke_roundtrip() {
+        let cke = ClientKeyExchangeEcdhePsk {
+            identity: b"ecdhe_psk_id".to_vec(),
+            public_key: vec![0x04; 65],
+        };
+
+        let encoded = encode_client_key_exchange_ecdhe_psk(&cke);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ClientKeyExchange);
+
+        let decoded = decode_client_key_exchange_ecdhe_psk(body).unwrap();
+        assert_eq!(decoded.identity, cke.identity);
+        assert_eq!(decoded.public_key, cke.public_key);
+    }
+
+    #[test]
+    fn test_encode_decode_rsa_psk_cke_roundtrip() {
+        let cke = ClientKeyExchangeRsaPsk {
+            identity: b"rsa_psk_id".to_vec(),
+            encrypted_pms: vec![0xCC; 256],
+        };
+
+        let encoded = encode_client_key_exchange_rsa_psk(&cke);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ClientKeyExchange);
+
+        let decoded = decode_client_key_exchange_rsa_psk(body).unwrap();
+        assert_eq!(decoded.identity, cke.identity);
+        assert_eq!(decoded.encrypted_pms, cke.encrypted_pms);
     }
 }

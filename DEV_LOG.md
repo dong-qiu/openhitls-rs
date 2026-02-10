@@ -3285,3 +3285,129 @@ Phase 36 adds two new TLS 1.2 key exchange mechanisms — RSA static and DHE_RSA
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 890 workspace tests passing (27 ignored)
+
+## Phase 37: TLS 1.2 PSK Cipher Suites — 20 New Cipher Suites (Session 2026-02-11)
+
+### Goals
+- Implement TLS 1.2 Pre-Shared Key (PSK) cipher suites per RFC 4279 and RFC 5489
+- Support all four PSK key exchange families: PSK, DHE_PSK, RSA_PSK, ECDHE_PSK
+- Each family with 5 cipher suites: AES-128-GCM, AES-256-GCM, AES-128-CBC-SHA, AES-256-CBC-SHA, ChaCha20-Poly1305
+- Implement PSK configuration (identity, identity hint, server callback)
+- Conditional Certificate/CertificateRequest handling for PSK modes
+
+### Background
+
+RFC 4279 defines pre-shared key (PSK) cipher suites for TLS, enabling authentication based on symmetric keys shared in advance between the communicating parties. This is useful in environments where managing certificates is impractical (IoT, embedded systems, constrained networks). Four key exchange families are defined:
+
+1. **PSK** — Pure PSK authentication with no certificate. The pre-master secret is derived solely from the shared key using the RFC 4279 PMS format: `uint16(other_secret_len) + other_secret + uint16(psk_len) + psk`, where `other_secret` is all zeros for plain PSK.
+
+2. **DHE_PSK** — Combines ephemeral Diffie-Hellman key exchange with PSK authentication. The DH shared secret serves as `other_secret` in the PMS construction, providing forward secrecy.
+
+3. **RSA_PSK** — The server authenticates with an RSA certificate (like standard RSA key exchange), while the client provides a PSK identity. The RSA-encrypted pre-master secret serves as `other_secret`.
+
+4. **ECDHE_PSK** (RFC 5489) — Combines ephemeral ECDHE key exchange with PSK authentication, providing forward secrecy with elliptic curve efficiency.
+
+### Implementation
+
+#### Step 1: Cipher Suite Registration
+- Added 20 new PSK cipher suites across 4 families:
+  - **PSK (5)**: `TLS_PSK_WITH_AES_128_GCM_SHA256` (0x00A8), `TLS_PSK_WITH_AES_256_GCM_SHA384` (0x00A9), `TLS_PSK_WITH_AES_128_CBC_SHA` (0x008C), `TLS_PSK_WITH_AES_256_CBC_SHA` (0x008D), `TLS_PSK_WITH_CHACHA20_POLY1305_SHA256` (0xCCAB)
+  - **DHE_PSK (5)**: `TLS_DHE_PSK_WITH_AES_128_GCM_SHA256` (0x00AA), `TLS_DHE_PSK_WITH_AES_256_GCM_SHA384` (0x00AB), `TLS_DHE_PSK_WITH_AES_128_CBC_SHA` (0x0090), `TLS_DHE_PSK_WITH_AES_256_CBC_SHA` (0x0091), `TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256` (0xCCAD)
+  - **RSA_PSK (5)**: `TLS_RSA_PSK_WITH_AES_128_GCM_SHA256` (0x00AC), `TLS_RSA_PSK_WITH_AES_256_GCM_SHA384` (0x00AD), `TLS_RSA_PSK_WITH_AES_128_CBC_SHA` (0x0094), `TLS_RSA_PSK_WITH_AES_256_CBC_SHA` (0x0095), `TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256` (0xCCAE)
+  - **ECDHE_PSK (5)**: `TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA` (0xC035), `TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA` (0xC036), `TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256` (non-standard), `TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384` (non-standard), `TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256` (0xCCAC)
+
+#### Step 2: KeyExchangeAlg Enum Extensions
+- Added `KeyExchangeAlg::Psk`, `DhePsk`, `RsaPsk`, `EcdhePsk` variants
+- Added `KeyExchangeAlg::requires_certificate()` helper — returns false for `Psk`, `DhePsk`, `EcdhePsk` (only `RsaPsk` and non-PSK suites require certificates)
+- Added `KeyExchangeAlg::is_psk()` helper — returns true for all four PSK variants
+- Added `AuthAlg::Psk` variant for PSK authentication
+
+#### Step 3: PSK Configuration
+- Added PSK configuration fields: `psk`, `psk_identity`, `psk_identity_hint`, `psk_server_callback`
+- `psk_server_callback` is a `Box<dyn Fn(&[u8]) -> Option<Vec<u8>>>` that resolves a PSK identity to the shared key on the server side
+- Client provides `psk` and `psk_identity`; server provides `psk_server_callback` (or static `psk` for simple cases)
+
+#### Step 4: PSK PMS Construction
+- Implemented `build_psk_pms(other_secret, psk)` helper per RFC 4279 Section 2:
+  - Format: `uint16(len(other_secret)) || other_secret || uint16(len(psk)) || psk`
+  - For plain PSK: `other_secret` = `[0u8; psk.len()]`
+  - For DHE_PSK/ECDHE_PSK: `other_secret` = DH/ECDHE shared secret
+  - For RSA_PSK: `other_secret` = 48-byte RSA-encrypted pre-master secret (decrypted)
+
+#### Step 5: ServerKeyExchange Codec
+- PSK: sends only the PSK identity hint (uint16 length-prefixed)
+- DHE_PSK: sends DH parameters (p, g, Ys) followed by the PSK identity hint
+- ECDHE_PSK: sends ECDHE parameters (curve type, named curve, public key) followed by the PSK identity hint
+- RSA_PSK: sends only the PSK identity hint (no key exchange parameters; RSA uses the certificate)
+
+#### Step 6: ClientKeyExchange Codec
+- PSK: sends the PSK identity (uint16 length-prefixed)
+- DHE_PSK: sends PSK identity followed by the client DH public value (Yc)
+- ECDHE_PSK: sends PSK identity followed by the client ECDHE public key
+- RSA_PSK: sends PSK identity followed by the RSA-encrypted pre-master secret
+
+#### Step 7: Server Handshake Updates
+- `ServerFlightResult.certificate` changed from `Vec<u8>` to `Option<Vec<u8>>` — `None` for non-certificate PSK modes
+- Server conditionally skips Certificate and CertificateRequest messages for non-certificate PSK modes
+- `resolve_psk()` helper on server side: uses `psk_server_callback` to look up PSK by client-provided identity
+- PSK ServerKeyExchange generation for all 4 families
+- PSK ClientKeyExchange processing for all 4 families
+
+#### Step 8: Client Handshake Updates
+- Client conditionally reads Certificate message only when `requires_certificate()` is true
+- PSK ServerKeyExchange dispatch to appropriate parser for each family
+- 4 PSK ClientKeyExchange generation paths (PSK, DHE_PSK, ECDHE_PSK, RSA_PSK)
+- Client uses configured `psk_identity` in ClientKeyExchange
+
+#### Step 9: Bug Fix
+- Fixed RSA_PSK server12 bug: `CryptoRsaPrivateKey::new()` had `e` (public exponent) and `d` (private exponent) arguments swapped, causing RSA decryption to fail during RSA_PSK key exchange
+
+### Files Changed
+
+| File | Status | Description |
+|------|--------|-------------|
+| `hitls-tls/src/lib.rs` | Modified | 20 new PSK cipher suite constants and registrations |
+| `hitls-tls/src/crypt/mod.rs` | Modified | KeyExchangeAlg PSK variants, AuthAlg::Psk, suite metadata |
+| `hitls-tls/src/handshake/codec12.rs` | Modified | PSK ServerKeyExchange/ClientKeyExchange codec for all 4 families |
+| `hitls-tls/src/handshake/client12.rs` | Modified | PSK client key exchange logic, conditional Certificate read |
+| `hitls-tls/src/handshake/server12.rs` | Modified | PSK server key exchange logic, conditional Cert/CertReq, resolve_psk() |
+| `hitls-tls/src/handshake/common.rs` | Modified | `build_psk_pms()` helper function |
+| `hitls-tls/src/config/mod.rs` | Modified | PSK configuration fields (psk, psk_identity, psk_identity_hint, psk_server_callback) |
+| `hitls-tls/src/connection12.rs` | Modified | ServerFlightResult.certificate changed to Option<Vec<u8>> |
+
+### Test Results
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| bignum | 46 | 0 |
+| crypto | 330 | 19 |
+| tls | 347 | 0 |
+| pki | 98 | 0 |
+| utils | 35 | 0 |
+| auth | 20 | 0 |
+| cli | 8 | 5 |
+| integration | 20 | 3 |
+| **Total** | **904** | **27** |
+
+### New Tests (14 total)
+- 9 codec roundtrip tests:
+  - PSK ServerKeyExchange (hint-only)
+  - PSK ClientKeyExchange (identity)
+  - DHE_PSK ServerKeyExchange (DH params + hint)
+  - DHE_PSK ClientKeyExchange (identity + Yc)
+  - ECDHE_PSK ServerKeyExchange (ECDHE params + hint)
+  - ECDHE_PSK ClientKeyExchange (identity + pubkey)
+  - RSA_PSK ServerKeyExchange (hint-only)
+  - RSA_PSK ClientKeyExchange (identity + encrypted PMS)
+  - Mixed PSK codec roundtrip
+- 5 handshake tests:
+  - PSK with AES-128-GCM
+  - PSK with AES-128-CBC-SHA
+  - DHE_PSK with AES-128-GCM
+  - ECDHE_PSK with AES-128-CBC-SHA
+  - RSA_PSK with AES-128-GCM
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 904 workspace tests passing (27 ignored)

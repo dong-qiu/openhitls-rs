@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 36 complete — TLS 1.2 RSA + DHE Key Exchange (13 new cipher suites)
+- **Status**: Phase 37 complete — TLS 1.2 PSK Cipher Suites (20 new cipher suites)
 
 ## Workspace Structure
 
@@ -19,7 +19,7 @@ openhitls-rs/
 │   ├── hitls-utils/     # ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
 │   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); ECC: P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; DRBG: HMAC/CTR/Hash
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, TLS 1.2 handshake (ECDHE/RSA/DHE_RSA key exchange, GCM/CBC/ChaCha20, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, Bleichenbacher protection), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), TLS 1.2 PRF (333 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, TLS 1.2 handshake (ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, Bleichenbacher protection), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), TLS 1.2 PRF (347 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, Certificate generation, SigningKey abstraction), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652), PKCS#8 (RFC 5958) (98 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server)
@@ -34,12 +34,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (890 tests, 27 ignored)
+# Run all tests (904 tests, 27 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 330 tests (19 ignored)
-cargo test -p hitls-tls --all-features      # 333 tests
+cargo test -p hitls-tls --all-features      # 347 tests
 cargo test -p hitls-pki --all-features      # 98 tests
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 35 tests
@@ -101,8 +101,8 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-36 complete (890 tests, 27 ignored). Remaining phases 37-42 planned:
-- Phase 37: TLS 1.2 PSK cipher suites (RFC 4279)
+Phases 0-37 complete (904 tests, 27 ignored). Remaining phases 38-42 planned:
+- Phase 37: TLS 1.2 PSK cipher suites (RFC 4279/5489) -- DONE
 - Phase 38: TLS 1.3 Post-Quantum Hybrid KEM (X25519+ML-KEM-768)
 - Phase 39: TLS extensions (Max Fragment, Record Size Limit, OCSP, SCT, Fallback SCSV)
 - Phase 40: Async I/O (tokio) + AES-NI acceleration + benchmarks

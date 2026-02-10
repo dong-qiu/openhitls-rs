@@ -13,12 +13,17 @@ use crate::crypt::{
 use crate::extensions::ExtensionType;
 use crate::handshake::codec::{decode_client_hello, encode_server_hello, ClientHello, ServerHello};
 use crate::handshake::codec12::{
-    build_dhe_ske_params, build_ske_params, build_ske_signed_data, decode_certificate12,
-    decode_certificate_verify12, decode_client_key_exchange, decode_client_key_exchange_dhe,
-    decode_client_key_exchange_rsa, encode_certificate12, encode_certificate_request12,
-    encode_finished12, encode_new_session_ticket12, encode_server_hello_done,
-    encode_server_key_exchange, encode_server_key_exchange_dhe, Certificate12,
-    CertificateRequest12, ServerKeyExchange, ServerKeyExchangeDhe,
+    build_dhe_ske_params, build_psk_pms, build_ske_params, build_ske_signed_data,
+    decode_certificate12, decode_certificate_verify12, decode_client_key_exchange,
+    decode_client_key_exchange_dhe, decode_client_key_exchange_dhe_psk,
+    decode_client_key_exchange_ecdhe_psk, decode_client_key_exchange_psk,
+    decode_client_key_exchange_rsa, decode_client_key_exchange_rsa_psk, encode_certificate12,
+    encode_certificate_request12, encode_finished12, encode_new_session_ticket12,
+    encode_server_hello_done, encode_server_key_exchange, encode_server_key_exchange_dhe,
+    encode_server_key_exchange_dhe_psk, encode_server_key_exchange_ecdhe_psk,
+    encode_server_key_exchange_psk_hint, Certificate12, CertificateRequest12, ServerKeyExchange,
+    ServerKeyExchangeDhe, ServerKeyExchangeDhePsk, ServerKeyExchangeEcdhePsk,
+    ServerKeyExchangePskHint,
 };
 use crate::handshake::extensions_codec::{
     build_encrypt_then_mac, build_extended_master_secret, build_session_ticket_sh, parse_alpn_ch,
@@ -52,8 +57,8 @@ pub enum Tls12ServerState {
 pub struct ServerFlightResult {
     /// ServerHello handshake message.
     pub server_hello: Vec<u8>,
-    /// Certificate handshake message.
-    pub certificate: Vec<u8>,
+    /// Certificate handshake message (None for PSK suites without certificates).
+    pub certificate: Option<Vec<u8>>,
     /// ServerKeyExchange handshake message (None for RSA static key exchange).
     pub server_key_exchange: Option<Vec<u8>>,
     /// CertificateRequest message (only if mTLS is enabled).
@@ -453,12 +458,17 @@ impl Tls12ServerHandshake {
         let sh_msg = encode_server_hello(&sh);
         self.transcript.update(&sh_msg)?;
 
-        // Build Certificate
-        let cert12 = Certificate12 {
-            certificate_list: self.config.certificate_chain.clone(),
+        // Build Certificate (only for non-PSK key exchanges that require certificates)
+        let cert_msg = if params.kx_alg.requires_certificate() {
+            let cert12 = Certificate12 {
+                certificate_list: self.config.certificate_chain.clone(),
+            };
+            let msg = encode_certificate12(&cert12);
+            self.transcript.update(&msg)?;
+            Some(msg)
+        } else {
+            None
         };
-        let cert_msg = encode_certificate12(&cert12);
-        self.transcript.update(&cert_msg)?;
 
         // Build ServerKeyExchange (depends on key exchange algorithm)
         let ske_msg_opt = match params.kx_alg {
@@ -534,6 +544,52 @@ impl Tls12ServerHandshake {
 
                 Some(ske_msg)
             }
+            KeyExchangeAlg::Psk | KeyExchangeAlg::RsaPsk => {
+                // Optional: send hint-only SKE if hint is configured
+                if let Some(ref hint) = self.config.psk_identity_hint {
+                    let ske = ServerKeyExchangePskHint { hint: hint.clone() };
+                    let ske_msg = encode_server_key_exchange_psk_hint(&ske);
+                    self.transcript.update(&ske_msg)?;
+                    Some(ske_msg)
+                } else {
+                    None
+                }
+            }
+            KeyExchangeAlg::DhePsk => {
+                let group = negotiate_ffdhe_group(&client_groups, &self.config.supported_groups)?;
+                let dh_param_id = named_group_to_dh_param_id(group)?;
+                let dh_params = DhParams::from_group(dh_param_id).map_err(TlsError::CryptoError)?;
+                let dh_kp = DhKeyPair::generate(&dh_params).map_err(TlsError::CryptoError)?;
+                let dh_ys = dh_kp
+                    .public_key_bytes(&dh_params)
+                    .map_err(TlsError::CryptoError)?;
+                let hint = self.config.psk_identity_hint.clone().unwrap_or_default();
+                let ske = ServerKeyExchangeDhePsk {
+                    hint,
+                    dh_p: dh_params.p_bytes(),
+                    dh_g: dh_params.g_bytes(),
+                    dh_ys,
+                };
+                let ske_msg = encode_server_key_exchange_dhe_psk(&ske);
+                self.transcript.update(&ske_msg)?;
+                self.dhe_params = Some(dh_params);
+                self.dhe_key_pair = Some(dh_kp);
+                Some(ske_msg)
+            }
+            KeyExchangeAlg::EcdhePsk => {
+                let group = negotiate_group(&client_groups, &self.config.supported_groups)?;
+                let kx = KeyExchange::generate(group)?;
+                let hint = self.config.psk_identity_hint.clone().unwrap_or_default();
+                let ske = ServerKeyExchangeEcdhePsk {
+                    hint,
+                    named_curve: group.0,
+                    public_key: kx.public_key_bytes().to_vec(),
+                };
+                let ske_msg = encode_server_key_exchange_ecdhe_psk(&ske);
+                self.transcript.update(&ske_msg)?;
+                self.ephemeral_key = Some(kx);
+                Some(ske_msg)
+            }
             #[cfg(feature = "tlcp")]
             KeyExchangeAlg::Ecc => {
                 return Err(TlsError::HandshakeFailed(
@@ -542,26 +598,27 @@ impl Tls12ServerHandshake {
             }
         };
 
-        // Build CertificateRequest (if mTLS is enabled)
-        let certificate_request = if self.config.verify_client_cert {
-            let cr = CertificateRequest12 {
-                cert_types: vec![1, 64], // rsa_sign, ecdsa_sign
-                sig_hash_algs: self.config.signature_algorithms.clone(),
-                ca_names: vec![],
+        // Build CertificateRequest (if mTLS is enabled and KX requires certificates)
+        let certificate_request =
+            if self.config.verify_client_cert && params.kx_alg.requires_certificate() {
+                let cr = CertificateRequest12 {
+                    cert_types: vec![1, 64], // rsa_sign, ecdsa_sign
+                    sig_hash_algs: self.config.signature_algorithms.clone(),
+                    ca_names: vec![],
+                };
+                let cr_msg = encode_certificate_request12(&cr);
+                self.transcript.update(&cr_msg)?;
+                Some(cr_msg)
+            } else {
+                None
             };
-            let cr_msg = encode_certificate_request12(&cr);
-            self.transcript.update(&cr_msg)?;
-            Some(cr_msg)
-        } else {
-            None
-        };
 
         // Build ServerHelloDone
         let shd_msg = encode_server_hello_done();
         self.transcript.update(&shd_msg)?;
 
         self.params = Some(params);
-        self.state = if self.config.verify_client_cert {
+        self.state = if self.config.verify_client_cert && certificate_request.is_some() {
             Tls12ServerState::WaitClientCertificate
         } else {
             Tls12ServerState::WaitClientKeyExchange
@@ -942,6 +999,70 @@ impl Tls12ServerHandshake {
                     .compute_shared_secret(&dh_params, &cke.dh_yc)
                     .map_err(TlsError::CryptoError)?
             }
+            KeyExchangeAlg::Psk => {
+                let cke = decode_client_key_exchange_psk(body)?;
+                let psk = self.resolve_psk(&cke.identity)?;
+                let other_secret = vec![0u8; psk.len()];
+                build_psk_pms(&other_secret, &psk)
+            }
+            KeyExchangeAlg::DhePsk => {
+                let cke = decode_client_key_exchange_dhe_psk(body)?;
+                let psk = self.resolve_psk(&cke.identity)?;
+                let dh_kp = self.dhe_key_pair.take().ok_or_else(|| {
+                    TlsError::HandshakeFailed("no DHE key pair for DHE_PSK".into())
+                })?;
+                let dh_params = self
+                    .dhe_params
+                    .take()
+                    .ok_or_else(|| TlsError::HandshakeFailed("no DHE params for DHE_PSK".into()))?;
+                let dh_shared = dh_kp
+                    .compute_shared_secret(&dh_params, &cke.dh_yc)
+                    .map_err(TlsError::CryptoError)?;
+                build_psk_pms(&dh_shared, &psk)
+            }
+            KeyExchangeAlg::EcdhePsk => {
+                let cke = decode_client_key_exchange_ecdhe_psk(body)?;
+                let psk = self.resolve_psk(&cke.identity)?;
+                let kx = self.ephemeral_key.take().ok_or_else(|| {
+                    TlsError::HandshakeFailed("no ECDHE key for ECDHE_PSK".into())
+                })?;
+                let ecdh_shared = kx.compute_shared_secret(&cke.public_key)?;
+                build_psk_pms(&ecdh_shared, &psk)
+            }
+            KeyExchangeAlg::RsaPsk => {
+                let cke = decode_client_key_exchange_rsa_psk(body)?;
+                let psk = self.resolve_psk(&cke.identity)?;
+                // Decrypt RSA PMS with Bleichenbacher protection (same as RSA)
+                let rsa_key = match &self.config.private_key {
+                    Some(ServerPrivateKey::Rsa { n, d, e, p, q }) => {
+                        CryptoRsaPrivateKey::new(n, d, e, p, q).map_err(TlsError::CryptoError)?
+                    }
+                    _ => {
+                        return Err(TlsError::HandshakeFailed(
+                            "no RSA private key for RSA_PSK".into(),
+                        ))
+                    }
+                };
+                let mut fallback_pms = vec![0u8; 48];
+                fallback_pms[0] = 0x03;
+                fallback_pms[1] = 0x03;
+                getrandom::getrandom(&mut fallback_pms[2..])
+                    .map_err(|e| TlsError::HandshakeFailed(format!("getrandom: {e}")))?;
+                let rsa_pms = match rsa_key.decrypt(RsaPadding::Pkcs1v15Encrypt, &cke.encrypted_pms)
+                {
+                    Ok(decrypted) if decrypted.len() == 48 => {
+                        let version_ok =
+                            bool::from(decrypted[0].ct_eq(&0x03) & decrypted[1].ct_eq(&0x03));
+                        if version_ok {
+                            decrypted
+                        } else {
+                            fallback_pms
+                        }
+                    }
+                    _ => fallback_pms,
+                };
+                build_psk_pms(&rsa_pms, &psk)
+            }
             #[cfg(feature = "tlcp")]
             KeyExchangeAlg::Ecc => {
                 return Err(TlsError::HandshakeFailed(
@@ -1101,6 +1222,17 @@ impl Tls12ServerHandshake {
         Ok(ServerFinishedResult {
             finished: finished_msg,
         })
+    }
+
+    /// Resolve PSK from config: try callback first, then fall back to static PSK.
+    fn resolve_psk(&self, identity: &[u8]) -> Result<Vec<u8>, TlsError> {
+        if let Some(ref cb) = self.config.psk_server_callback {
+            cb(identity).ok_or_else(|| TlsError::HandshakeFailed("PSK identity not found".into()))
+        } else if let Some(ref psk) = self.config.psk {
+            Ok(psk.clone())
+        } else {
+            Err(TlsError::HandshakeFailed("no PSK configured".into()))
+        }
     }
 }
 
@@ -1549,7 +1681,11 @@ mod tests {
         let (ht, _, _) = parse_handshake_header(&result.server_hello).unwrap();
         assert_eq!(ht, HandshakeType::ServerHello);
 
-        let (ht, _, _) = parse_handshake_header(&result.certificate).unwrap();
+        let cert_data = result
+            .certificate
+            .as_ref()
+            .expect("ECDHE should have Certificate");
+        let (ht, _, _) = parse_handshake_header(cert_data).unwrap();
         assert_eq!(ht, HandshakeType::Certificate);
 
         let ske_data = result

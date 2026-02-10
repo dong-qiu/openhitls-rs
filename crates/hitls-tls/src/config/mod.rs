@@ -1,5 +1,8 @@
 //! TLS configuration with builder pattern.
 
+use std::fmt;
+use std::sync::Arc;
+
 use crate::crypt::{NamedGroup, SignatureScheme};
 use crate::handshake::codec::CertCompressionAlgorithm;
 use crate::session::TlsSession;
@@ -46,8 +49,11 @@ impl Drop for ServerPrivateKey {
     }
 }
 
+/// Server callback for PSK lookup: given a PSK identity, return the PSK value or None.
+pub type PskServerCallback = Arc<dyn Fn(&[u8]) -> Option<Vec<u8>> + Send + Sync>;
+
 /// TLS configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TlsConfig {
     /// Minimum supported TLS version.
     pub min_version: TlsVersion,
@@ -98,6 +104,14 @@ pub struct TlsConfig {
     /// Certificate compression algorithms to offer/accept (RFC 8879).
     /// Empty means disabled.
     pub cert_compression_algos: Vec<CertCompressionAlgorithm>,
+    /// Pre-shared key value for TLS 1.2 PSK cipher suites (RFC 4279).
+    pub psk: Option<Vec<u8>>,
+    /// PSK identity (client: identity to send in CKE; server: for simple matching).
+    pub psk_identity: Option<Vec<u8>>,
+    /// PSK identity hint (server: sent in SKE to help client select correct PSK).
+    pub psk_identity_hint: Option<Vec<u8>>,
+    /// Server PSK callback: look up PSK by identity. Returns None if unknown.
+    pub psk_server_callback: Option<PskServerCallback>,
     /// TLCP encryption certificate chain (DER-encoded, leaf first).
     /// TLCP uses double certificates: a signing cert + an encryption cert.
     #[cfg(feature = "tlcp")]
@@ -105,6 +119,27 @@ pub struct TlsConfig {
     /// TLCP encryption private key (SM2).
     #[cfg(feature = "tlcp")]
     pub tlcp_enc_private_key: Option<ServerPrivateKey>,
+}
+
+impl fmt::Debug for TlsConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TlsConfig")
+            .field("min_version", &self.min_version)
+            .field("max_version", &self.max_version)
+            .field("cipher_suites", &self.cipher_suites)
+            .field("role", &self.role)
+            .field("verify_peer", &self.verify_peer)
+            .field(
+                "psk",
+                &self.psk.as_ref().map(|p| format!("[{} bytes]", p.len())),
+            )
+            .field("psk_identity", &self.psk_identity)
+            .field(
+                "psk_server_callback",
+                &self.psk_server_callback.as_ref().map(|_| "<callback>"),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 impl TlsConfig {
@@ -115,7 +150,6 @@ impl TlsConfig {
 }
 
 /// Builder for `TlsConfig`.
-#[derive(Debug)]
 pub struct TlsConfigBuilder {
     min_version: TlsVersion,
     max_version: TlsVersion,
@@ -141,6 +175,10 @@ pub struct TlsConfigBuilder {
     enable_extended_master_secret: bool,
     enable_encrypt_then_mac: bool,
     cert_compression_algos: Vec<CertCompressionAlgorithm>,
+    psk: Option<Vec<u8>>,
+    psk_identity: Option<Vec<u8>>,
+    psk_identity_hint: Option<Vec<u8>>,
+    psk_server_callback: Option<PskServerCallback>,
     #[cfg(feature = "tlcp")]
     tlcp_enc_certificate_chain: Vec<Vec<u8>>,
     #[cfg(feature = "tlcp")]
@@ -182,11 +220,24 @@ impl Default for TlsConfigBuilder {
             enable_extended_master_secret: true,
             enable_encrypt_then_mac: true,
             cert_compression_algos: Vec::new(),
+            psk: None,
+            psk_identity: None,
+            psk_identity_hint: None,
+            psk_server_callback: None,
             #[cfg(feature = "tlcp")]
             tlcp_enc_certificate_chain: Vec::new(),
             #[cfg(feature = "tlcp")]
             tlcp_enc_private_key: None,
         }
+    }
+}
+
+impl fmt::Debug for TlsConfigBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TlsConfigBuilder")
+            .field("role", &self.role)
+            .field("cipher_suites", &self.cipher_suites)
+            .finish_non_exhaustive()
     }
 }
 
@@ -311,6 +362,26 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn psk(mut self, key: Vec<u8>) -> Self {
+        self.psk = Some(key);
+        self
+    }
+
+    pub fn psk_identity(mut self, identity: Vec<u8>) -> Self {
+        self.psk_identity = Some(identity);
+        self
+    }
+
+    pub fn psk_identity_hint(mut self, hint: Vec<u8>) -> Self {
+        self.psk_identity_hint = Some(hint);
+        self
+    }
+
+    pub fn psk_server_callback(mut self, cb: PskServerCallback) -> Self {
+        self.psk_server_callback = Some(cb);
+        self
+    }
+
     #[cfg(feature = "tlcp")]
     pub fn tlcp_enc_certificate_chain(mut self, certs: Vec<Vec<u8>>) -> Self {
         self.tlcp_enc_certificate_chain = certs;
@@ -349,6 +420,10 @@ impl TlsConfigBuilder {
             enable_extended_master_secret: self.enable_extended_master_secret,
             enable_encrypt_then_mac: self.enable_encrypt_then_mac,
             cert_compression_algos: self.cert_compression_algos,
+            psk: self.psk,
+            psk_identity: self.psk_identity,
+            psk_identity_hint: self.psk_identity_hint,
+            psk_server_callback: self.psk_server_callback,
             #[cfg(feature = "tlcp")]
             tlcp_enc_certificate_chain: self.tlcp_enc_certificate_chain,
             #[cfg(feature = "tlcp")]

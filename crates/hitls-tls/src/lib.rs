@@ -74,6 +74,34 @@ impl CipherSuite {
     pub const TLS_DHE_RSA_WITH_AES_256_CBC_SHA256: Self = Self(0x006B);
     pub const TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCAA);
 
+    // TLS 1.2 PSK cipher suites (RFC 4279, RFC 5487)
+    pub const TLS_PSK_WITH_AES_128_GCM_SHA256: Self = Self(0x00A8);
+    pub const TLS_PSK_WITH_AES_256_GCM_SHA384: Self = Self(0x00A9);
+    pub const TLS_PSK_WITH_AES_128_CBC_SHA: Self = Self(0x008C);
+    pub const TLS_PSK_WITH_AES_256_CBC_SHA: Self = Self(0x008D);
+    pub const TLS_PSK_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCAB);
+
+    // TLS 1.2 DHE_PSK cipher suites (RFC 4279, RFC 5487)
+    pub const TLS_DHE_PSK_WITH_AES_128_GCM_SHA256: Self = Self(0x00AA);
+    pub const TLS_DHE_PSK_WITH_AES_256_GCM_SHA384: Self = Self(0x00AB);
+    pub const TLS_DHE_PSK_WITH_AES_128_CBC_SHA: Self = Self(0x0090);
+    pub const TLS_DHE_PSK_WITH_AES_256_CBC_SHA: Self = Self(0x0091);
+    pub const TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCAD);
+
+    // TLS 1.2 RSA_PSK cipher suites (RFC 4279, RFC 5487)
+    pub const TLS_RSA_PSK_WITH_AES_128_GCM_SHA256: Self = Self(0x00AC);
+    pub const TLS_RSA_PSK_WITH_AES_256_GCM_SHA384: Self = Self(0x00AD);
+    pub const TLS_RSA_PSK_WITH_AES_128_CBC_SHA: Self = Self(0x0094);
+    pub const TLS_RSA_PSK_WITH_AES_256_CBC_SHA: Self = Self(0x0095);
+    pub const TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCAE);
+
+    // TLS 1.2 ECDHE_PSK cipher suites (RFC 5489)
+    pub const TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA: Self = Self(0xC035);
+    pub const TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA: Self = Self(0xC036);
+    pub const TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA256: Self = Self(0xC037);
+    pub const TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA384: Self = Self(0xC038);
+    pub const TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCAC);
+
     // TLCP cipher suites (GM/T 0024)
     pub const ECDHE_SM4_CBC_SM3: Self = Self(0xE011);
     pub const ECC_SM4_CBC_SM3: Self = Self(0xE013);
