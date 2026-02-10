@@ -75,6 +75,11 @@ impl EcdsaKeyPair {
         })
     }
 
+    /// Return the private key scalar as big-endian bytes.
+    pub fn private_key_bytes(&self) -> Vec<u8> {
+        self.private_key.to_bytes_be()
+    }
+
     /// Sign a message digest, returning the DER-encoded (r, s) signature.
     ///
     /// The digest should be the hash of the message (e.g., SHA-256 for P-256).

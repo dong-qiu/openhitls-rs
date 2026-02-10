@@ -7,6 +7,7 @@ mod genpkey;
 mod pkey;
 mod req;
 mod s_client;
+mod s_server;
 mod verify;
 mod x509cmd;
 
@@ -143,12 +144,18 @@ enum Commands {
         /// Port to listen on.
         #[arg(short, long, default_value = "4433")]
         port: u16,
-        /// Certificate file.
+        /// Certificate chain file (PEM).
         #[arg(long)]
         cert: String,
-        /// Private key file.
+        /// Private key file (PEM, PKCS#8).
         #[arg(long)]
         key: String,
+        /// TLS version: "1.2" or "1.3".
+        #[arg(long = "tls", default_value = "1.3")]
+        tls_version: String,
+        /// Quiet mode: suppress connection info.
+        #[arg(long, short)]
+        quiet: bool,
     },
 }
 
@@ -204,10 +211,13 @@ fn main() {
             *http,
             *quiet,
         ),
-        Commands::SServer { port, cert, key } => {
-            eprintln!("TLS server is not yet implemented (port={port}, cert={cert}, key={key})");
-            Ok(())
-        }
+        Commands::SServer {
+            port,
+            cert,
+            key,
+            tls_version,
+            quiet,
+        } => s_server::run(*port, cert, key, tls_version, *quiet),
     };
 
     if let Err(e) = result {

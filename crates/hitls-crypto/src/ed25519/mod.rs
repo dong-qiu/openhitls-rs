@@ -42,6 +42,11 @@ impl Ed25519KeyPair {
         Self::from_seed(&seed)
     }
 
+    /// Return a reference to the 32-byte private seed.
+    pub fn seed(&self) -> &[u8; 32] {
+        &self.private_key
+    }
+
     /// Create an Ed25519 key pair from a 32-byte private seed.
     pub fn from_seed(seed: &[u8]) -> Result<Self, CryptoError> {
         if seed.len() != 32 {

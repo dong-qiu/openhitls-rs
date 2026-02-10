@@ -331,6 +331,31 @@ impl RsaPrivateKey {
         }
     }
 
+    /// Return the modulus as big-endian bytes.
+    pub fn n_bytes(&self) -> Vec<u8> {
+        self.n.to_bytes_be()
+    }
+
+    /// Return the public exponent as big-endian bytes.
+    pub fn e_bytes(&self) -> Vec<u8> {
+        self.e.to_bytes_be()
+    }
+
+    /// Return the private exponent as big-endian bytes.
+    pub fn d_bytes(&self) -> Vec<u8> {
+        self.d.to_bytes_be()
+    }
+
+    /// Return prime factor p as big-endian bytes.
+    pub fn p_bytes(&self) -> Vec<u8> {
+        self.p.to_bytes_be()
+    }
+
+    /// Return prime factor q as big-endian bytes.
+    pub fn q_bytes(&self) -> Vec<u8> {
+        self.q.to_bytes_be()
+    }
+
     /// Raw RSA private key operation: m = c^d mod n (RSADP).
     /// Uses CRT optimization for ~4x speedup over direct exponentiation.
     fn raw_decrypt(&self, data: &[u8]) -> Result<Vec<u8>, CryptoError> {

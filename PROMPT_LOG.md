@@ -1218,3 +1218,20 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - 1 new file, 2 modified files
 
 838 total tests (24 ignored). Clippy clean, fmt clean.
+
+---
+
+### Phase 32: s_server CLI + Key Conversion (2026-02-10)
+
+**Prompt**: Implement s_server CLI command with PKCS#8 key loading, TCP listener, TLS 1.3/1.2 echo server.
+
+**Result**: 4 new unit tests (842 total). Complete implementation with:
+- `s_server.rs` module: TCP listener, TLS server accept loop, echo mode
+- `pkcs8_to_server_key()`: converts Pkcs8PrivateKey → ServerPrivateKey (RSA/ECDSA/Ed25519)
+- Private key getters: `RsaPrivateKey.d_bytes()/p_bytes()/q_bytes()`, `Ed25519KeyPair.seed()`, `EcdsaKeyPair.private_key_bytes()`
+- CLI args: --tls (version), --cert (PEM), --key (PKCS#8 PEM), --quiet
+- Version dispatch: TLS 1.3 → TlsServerConnection, TLS 1.2 → Tls12ServerConnection
+- Certificate chain loading via `parse_certs_pem()`
+- 1 new file, 5 modified files
+
+842 total tests (24 ignored). Clippy clean, fmt clean.

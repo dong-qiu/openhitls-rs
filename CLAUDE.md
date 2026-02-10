@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 31 complete — s_client CLI + Network I/O
+- **Status**: Phase 32 complete — s_server CLI + Key Conversion
 
 ## Workspace Structure
 
@@ -22,7 +22,7 @@ openhitls-rs/
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, TLS 1.2 handshake (ECDHE-GCM/CBC/ChaCha20, ALPN, SNI, session resumption, mTLS), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), TLS 1.2 PRF (291 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, Certificate generation, SigningKey abstraction), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652), PKCS#8 (RFC 5958) (98 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (20 tests)
-│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client)
+│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server)
 ├── tests/interop/       # Integration tests (14 cross-crate tests)
 ├── tests/vectors/       # Standard test vectors
 └── benches/             # Performance benchmarks
@@ -34,7 +34,7 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (838 tests, 24 ignored)
+# Run all tests (842 tests, 24 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
@@ -101,6 +101,6 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-All 30 phases (0-30) complete: Phases 0-29 + Phase 30 (TLS 1.2 session resumption via abbreviated handshake, client certificate auth / mTLS with CertificateRequest + CertificateVerify). 834 tests passing (19 ignored for slow keygen).
+All 33 phases (0-32) complete: Phases 0-31 + Phase 32 (s_server CLI with PKCS#8 key loading, TCP listener, TLS 1.3/1.2 echo server). 842 tests passing (24 ignored).
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

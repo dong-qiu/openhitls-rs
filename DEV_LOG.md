@@ -2908,3 +2908,69 @@ New tests (28):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 838 workspace tests passing (24 ignored)
+
+---
+
+## Phase 32: s_server CLI + Key Conversion (Session 2026-02-10)
+
+### Goals
+- Implement `s-server` CLI command for accepting TLS connections
+- Add PKCS#8 → ServerPrivateKey conversion (RSA, ECDSA, Ed25519)
+- Add private key getters to RsaPrivateKey, Ed25519KeyPair, EcdsaKeyPair
+- Support both TLS 1.3 and TLS 1.2 server modes
+- Echo server: read data from client and echo it back
+
+### Implementation
+
+#### Step 1: Private Key Getters
+Added public getter methods to crypto types for extracting private key bytes:
+- `RsaPrivateKey`: `n_bytes()`, `e_bytes()`, `d_bytes()`, `p_bytes()`, `q_bytes()`
+- `Ed25519KeyPair`: `seed()` → `&[u8; 32]`
+- `EcdsaKeyPair`: `private_key_bytes()` → `Vec<u8>`
+
+#### Step 2: s_server Module
+Created `crates/hitls-cli/src/s_server.rs` with:
+- `run(port, cert_path, key_path, tls_version, quiet)` — main entry point
+- `pkcs8_to_server_key()` — converts `Pkcs8PrivateKey` to `ServerPrivateKey`
+- Certificate chain loading via `parse_certs_pem()`
+- TCP listener on `0.0.0.0:{port}`
+- Version dispatch: TLS 1.3 → `TlsServerConnection`, TLS 1.2 → `Tls12ServerConnection`
+- Echo loop: read data, echo back, handle graceful shutdown
+- Connection info display (protocol version, cipher suite)
+
+#### Step 3: CLI Integration
+Expanded `SServer` clap variant with `--tls` (version) and `--quiet` flags.
+Updated match arm to call `s_server::run()`.
+
+#### Step 4: Tests
+4 unit tests for PKCS#8 → ServerPrivateKey conversion:
+- Ed25519, RSA, EC P-256, unsupported (X25519 → error)
+
+### Files Changed
+
+| File | Status | Description |
+|------|--------|-------------|
+| `hitls-crypto/src/rsa/mod.rs` | Modified | Add d/p/q byte getters to RsaPrivateKey |
+| `hitls-crypto/src/ed25519/mod.rs` | Modified | Add seed() getter to Ed25519KeyPair |
+| `hitls-crypto/src/ecdsa/mod.rs` | Modified | Add private_key_bytes() to EcdsaKeyPair |
+| `hitls-cli/src/main.rs` | Modified | Add mod s_server, expand SServer args |
+| `hitls-cli/src/s_server.rs` | **New** | s_server implementation + 4 unit tests |
+
+### Test Results
+
+| Crate | Tests | Status |
+|-------|-------|--------|
+| hitls-auth | 20 | All pass |
+| hitls-bignum | 46 | All pass |
+| hitls-cli | 8 (+5 ignored) | All pass |
+| hitls-crypto | 330 (19 ignored) | All pass |
+| hitls-pki | 98 | All pass |
+| hitls-tls | 291 | All pass |
+| hitls-utils | 35 | All pass |
+| integration | 14 | All pass |
+| **Total** | **842** | **All pass (24 ignored)** |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 842 workspace tests passing (24 ignored)
