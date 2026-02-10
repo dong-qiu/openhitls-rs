@@ -322,6 +322,226 @@ impl RecordDecryptor12Cbc {
     }
 }
 
+// ===========================================================================
+// Encrypt-Then-MAC (RFC 7366)
+// ===========================================================================
+
+/// TLS 1.2 Encrypt-Then-MAC record encryptor (RFC 7366).
+///
+/// Reverses the order: encrypt plaintext+padding first, then MAC over the ciphertext.
+/// This eliminates padding oracle attacks.
+pub struct RecordEncryptor12EtM {
+    enc_key: Vec<u8>,
+    mac_key: Vec<u8>,
+    mac_len: usize,
+    seq: u64,
+}
+
+impl Drop for RecordEncryptor12EtM {
+    fn drop(&mut self) {
+        self.enc_key.zeroize();
+        self.mac_key.zeroize();
+    }
+}
+
+impl RecordEncryptor12EtM {
+    pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Self {
+        Self {
+            enc_key,
+            mac_key,
+            mac_len,
+            seq: 0,
+        }
+    }
+
+    /// Encrypt a record with Encrypt-Then-MAC.
+    ///
+    /// 1. Pad plaintext with TLS padding
+    /// 2. Generate random IV, encrypt plaintext||padding with AES-CBC
+    /// 3. Compute MAC over seq || type || version || length(IV+ciphertext) || IV || ciphertext
+    /// 4. Fragment = IV || ciphertext || MAC
+    pub fn encrypt_record(
+        &mut self,
+        content_type: ContentType,
+        plaintext: &[u8],
+    ) -> Result<Record, TlsError> {
+        if plaintext.len() > MAX_PLAINTEXT_LENGTH {
+            return Err(TlsError::RecordError("plaintext exceeds maximum".into()));
+        }
+
+        // Pad plaintext
+        let padding = build_tls_padding(plaintext.len());
+        let mut encrypt_data = Vec::with_capacity(plaintext.len() + padding.len());
+        encrypt_data.extend_from_slice(plaintext);
+        encrypt_data.extend_from_slice(&padding);
+
+        // Generate random explicit IV
+        let mut iv = [0u8; AES_BLOCK_SIZE];
+        getrandom::getrandom(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
+
+        // Encrypt in-place
+        aes_cbc_encrypt_raw(&self.enc_key, &iv, &mut encrypt_data)?;
+
+        // Compute MAC over: seq(8) || type(1) || version(2) || length(2) || IV || ciphertext
+        // length = len(IV + ciphertext), i.e., the ciphertext portion before MAC
+        let adjusted_len = (AES_BLOCK_SIZE + encrypt_data.len()) as u16;
+        let mut hmac = create_hmac(self.mac_len, &self.mac_key)?;
+        hmac.update(&self.seq.to_be_bytes())
+            .map_err(TlsError::CryptoError)?;
+        hmac.update(&[content_type as u8])
+            .map_err(TlsError::CryptoError)?;
+        hmac.update(&TLS12_VERSION.to_be_bytes())
+            .map_err(TlsError::CryptoError)?;
+        hmac.update(&adjusted_len.to_be_bytes())
+            .map_err(TlsError::CryptoError)?;
+        hmac.update(&iv).map_err(TlsError::CryptoError)?;
+        hmac.update(&encrypt_data).map_err(TlsError::CryptoError)?;
+        let mut mac = vec![0u8; self.mac_len];
+        hmac.finish(&mut mac).map_err(TlsError::CryptoError)?;
+
+        // Fragment = IV || ciphertext || MAC
+        let mut fragment = Vec::with_capacity(AES_BLOCK_SIZE + encrypt_data.len() + self.mac_len);
+        fragment.extend_from_slice(&iv);
+        fragment.extend_from_slice(&encrypt_data);
+        fragment.extend_from_slice(&mac);
+
+        if self.seq == u64::MAX {
+            return Err(TlsError::RecordError("sequence number overflow".into()));
+        }
+        self.seq += 1;
+
+        Ok(Record {
+            content_type,
+            version: TLS12_VERSION,
+            fragment,
+        })
+    }
+
+    pub fn sequence_number(&self) -> u64 {
+        self.seq
+    }
+}
+
+/// TLS 1.2 Encrypt-Then-MAC record decryptor (RFC 7366).
+pub struct RecordDecryptor12EtM {
+    enc_key: Vec<u8>,
+    mac_key: Vec<u8>,
+    mac_len: usize,
+    seq: u64,
+}
+
+impl Drop for RecordDecryptor12EtM {
+    fn drop(&mut self) {
+        self.enc_key.zeroize();
+        self.mac_key.zeroize();
+    }
+}
+
+impl RecordDecryptor12EtM {
+    pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Self {
+        Self {
+            enc_key,
+            mac_key,
+            mac_len,
+            seq: 0,
+        }
+    }
+
+    /// Decrypt a TLS 1.2 Encrypt-Then-MAC record.
+    ///
+    /// 1. Split fragment: IV(16) || ciphertext(N) || MAC(mac_len)
+    /// 2. Verify MAC over seq || type || version || length(IV+ciphertext) || IV || ciphertext
+    /// 3. Decrypt ciphertext with AES-CBC
+    /// 4. Remove TLS padding
+    pub fn decrypt_record(&mut self, record: &Record) -> Result<Vec<u8>, TlsError> {
+        let fragment = &record.fragment;
+
+        // Minimum: IV(16) + one block + MAC
+        let min_len = AES_BLOCK_SIZE + AES_BLOCK_SIZE + self.mac_len;
+        if fragment.len() < min_len {
+            return Err(TlsError::RecordError("ETM record too short".into()));
+        }
+        if fragment.len() > MAX_CIPHERTEXT_LENGTH {
+            return Err(TlsError::RecordError("record overflow".into()));
+        }
+
+        // Split: IV || ciphertext || MAC
+        let mac_start = fragment.len() - self.mac_len;
+        let iv = &fragment[..AES_BLOCK_SIZE];
+        let ciphertext = &fragment[AES_BLOCK_SIZE..mac_start];
+        let received_mac = &fragment[mac_start..];
+
+        if ciphertext.len() % AES_BLOCK_SIZE != 0 {
+            return Err(TlsError::RecordError(
+                "ETM ciphertext not block-aligned".into(),
+            ));
+        }
+
+        // Verify MAC FIRST (this is the key security property of ETM)
+        let adjusted_len = (AES_BLOCK_SIZE + ciphertext.len()) as u16;
+        let mut hmac = create_hmac(self.mac_len, &self.mac_key)?;
+        hmac.update(&self.seq.to_be_bytes())
+            .map_err(TlsError::CryptoError)?;
+        hmac.update(&[record.content_type as u8])
+            .map_err(TlsError::CryptoError)?;
+        hmac.update(&TLS12_VERSION.to_be_bytes())
+            .map_err(TlsError::CryptoError)?;
+        hmac.update(&adjusted_len.to_be_bytes())
+            .map_err(TlsError::CryptoError)?;
+        hmac.update(iv).map_err(TlsError::CryptoError)?;
+        hmac.update(ciphertext).map_err(TlsError::CryptoError)?;
+        let mut expected_mac = vec![0u8; self.mac_len];
+        hmac.finish(&mut expected_mac)
+            .map_err(TlsError::CryptoError)?;
+
+        if !bool::from(received_mac.ct_eq(&expected_mac)) {
+            return Err(TlsError::RecordError("bad record MAC".into()));
+        }
+
+        // MAC verified — now decrypt
+        let mut decrypted = ciphertext.to_vec();
+        aes_cbc_decrypt_raw(&self.enc_key, iv, &mut decrypted)?;
+
+        // Remove TLS padding (since MAC was already verified, padding errors
+        // can't be used as an oracle)
+        if decrypted.is_empty() {
+            return Err(TlsError::RecordError("empty decrypted data".into()));
+        }
+        let padding_length = decrypted[decrypted.len() - 1] as usize;
+        let total_padding = padding_length + 1;
+        if total_padding > decrypted.len() {
+            return Err(TlsError::RecordError("invalid padding".into()));
+        }
+
+        // Verify padding bytes
+        for &b in &decrypted[decrypted.len() - total_padding..] {
+            if b != padding_length as u8 {
+                return Err(TlsError::RecordError("invalid padding".into()));
+            }
+        }
+
+        let plaintext_len = decrypted.len() - total_padding;
+        let plaintext = decrypted[..plaintext_len].to_vec();
+
+        if plaintext.len() > MAX_PLAINTEXT_LENGTH {
+            return Err(TlsError::RecordError(
+                "decrypted plaintext too large".into(),
+            ));
+        }
+
+        if self.seq == u64::MAX {
+            return Err(TlsError::RecordError("sequence number overflow".into()));
+        }
+        self.seq += 1;
+
+        Ok(plaintext)
+    }
+
+    pub fn sequence_number(&self) -> u64 {
+        self.seq
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,6 +640,99 @@ mod tests {
 
         for i in 0..5 {
             let msg = format!("message {i}");
+            let record = enc
+                .encrypt_record(ContentType::ApplicationData, msg.as_bytes())
+                .unwrap();
+            let decrypted = dec.decrypt_record(&record).unwrap();
+            assert_eq!(decrypted, msg.as_bytes());
+        }
+        assert_eq!(enc.sequence_number(), 5);
+        assert_eq!(dec.sequence_number(), 5);
+    }
+
+    // ETM tests
+
+    #[test]
+    fn test_etm_encrypt_decrypt_roundtrip() {
+        let enc_key = vec![0x42u8; 16]; // AES-128
+        let mac_key = vec![0xABu8; 32]; // HMAC-SHA256
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+
+        let plaintext = b"hello TLS 1.2 ETM";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        assert_eq!(record.version, TLS12_VERSION);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_etm_sha1_roundtrip() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 20]; // HMAC-SHA1
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 20);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 20);
+
+        let plaintext = b"hello ETM SHA1";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_etm_tampered_mac_detected() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+
+        let mut record = enc
+            .encrypt_record(ContentType::ApplicationData, b"secret")
+            .unwrap();
+
+        // Tamper with MAC (last byte)
+        let last = record.fragment.len() - 1;
+        record.fragment[last] ^= 0x01;
+        assert!(dec.decrypt_record(&record).is_err());
+    }
+
+    #[test]
+    fn test_etm_tampered_ciphertext_detected() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+
+        let mut record = enc
+            .encrypt_record(ContentType::ApplicationData, b"secret data")
+            .unwrap();
+
+        // Tamper with ciphertext (byte after IV, before MAC)
+        record.fragment[20] ^= 0x01;
+        assert!(dec.decrypt_record(&record).is_err());
+    }
+
+    #[test]
+    fn test_etm_multiple_records_seq() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+
+        for i in 0..5 {
+            let msg = format!("ETM message {i}");
             let record = enc
                 .encrypt_record(ContentType::ApplicationData, msg.as_bytes())
                 .unwrap();

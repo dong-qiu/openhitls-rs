@@ -54,6 +54,29 @@ pub fn derive_master_secret(
     prf(factory, pre_master_secret, "master secret", &seed, 48)
 }
 
+/// Derive the 48-byte master secret using the Extended Master Secret extension (RFC 7627).
+///
+/// ```text
+/// master_secret = PRF(pre_master_secret, "extended master secret",
+///                     session_hash)[0..47]
+/// ```
+///
+/// `session_hash` is the hash of all handshake messages up to and including
+/// the ClientKeyExchange message.
+pub fn derive_extended_master_secret(
+    factory: &Factory,
+    pre_master_secret: &[u8],
+    session_hash: &[u8],
+) -> Result<Vec<u8>, TlsError> {
+    prf(
+        factory,
+        pre_master_secret,
+        "extended master secret",
+        session_hash,
+        48,
+    )
+}
+
 /// Derive the key block from the master secret.
 ///
 /// RFC 5246 §6.3:
@@ -338,6 +361,33 @@ mod tests {
         .unwrap();
         assert_ne!(vd, vd_server);
         assert_eq!(vd_server.len(), 12);
+    }
+
+    #[test]
+    fn test_derive_extended_master_secret() {
+        let factory = sha256_factory();
+        let pms = hex("0303aabbccdd");
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+        let session_hash = hex("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
+
+        // EMS should produce 48-byte master secret
+        let ems = derive_extended_master_secret(&*factory, &pms, &session_hash).unwrap();
+        assert_eq!(ems.len(), 48);
+
+        // EMS should differ from standard master secret derivation
+        let standard =
+            derive_master_secret(&*factory, &pms, &client_random, &server_random).unwrap();
+        assert_ne!(ems, standard);
+
+        // EMS should be deterministic
+        let ems2 = derive_extended_master_secret(&*factory, &pms, &session_hash).unwrap();
+        assert_eq!(ems, ems2);
+
+        // Different session_hash → different EMS
+        let other_hash = hex("1111111111111111111111111111111111111111111111111111111111111111");
+        let ems3 = derive_extended_master_secret(&*factory, &pms, &other_hash).unwrap();
+        assert_ne!(ems, ems3);
     }
 
     #[test]

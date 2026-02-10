@@ -30,6 +30,8 @@ pub struct TlsSession {
     pub created_at: u64,
     /// Pre-shared key derived from resumption_master_secret + ticket_nonce.
     pub psk: Vec<u8>,
+    /// Whether the Extended Master Secret extension (RFC 7627) was used.
+    pub extended_master_secret: bool,
 }
 
 impl Drop for TlsSession {
@@ -101,14 +103,15 @@ impl SessionCache for InMemorySessionCache {
 
 /// Encode TlsSession to bytes for ticket encryption.
 ///
-/// Format: `cipher_suite(2) || ms_len(2) || master_secret(var) || created_at(8) || lifetime(4)`
+/// Format: `cipher_suite(2) || ms_len(2) || master_secret(var) || created_at(8) || lifetime(4) || ems(1)`
 pub fn encode_session_state(session: &TlsSession) -> Vec<u8> {
-    let mut data = Vec::with_capacity(2 + 2 + session.master_secret.len() + 8 + 4);
+    let mut data = Vec::with_capacity(2 + 2 + session.master_secret.len() + 8 + 4 + 1);
     data.extend_from_slice(&session.cipher_suite.0.to_be_bytes());
     data.extend_from_slice(&(session.master_secret.len() as u16).to_be_bytes());
     data.extend_from_slice(&session.master_secret);
     data.extend_from_slice(&session.created_at.to_be_bytes());
     data.extend_from_slice(&session.ticket_lifetime.to_be_bytes());
+    data.push(if session.extended_master_secret { 1 } else { 0 });
     data
 }
 
@@ -140,6 +143,12 @@ pub fn decode_session_state(data: &[u8]) -> Result<TlsSession, TlsError> {
         data[offset + 10],
         data[offset + 11],
     ]);
+    // EMS flag: optional trailing byte for backwards compatibility
+    let ems = if data.len() > offset + 12 {
+        data[offset + 12] != 0
+    } else {
+        false
+    };
 
     Ok(TlsSession {
         id: Vec::new(),
@@ -153,6 +162,7 @@ pub fn decode_session_state(data: &[u8]) -> Result<TlsSession, TlsError> {
         ticket_nonce: Vec::new(),
         created_at,
         psk: Vec::new(),
+        extended_master_secret: ems,
     })
 }
 

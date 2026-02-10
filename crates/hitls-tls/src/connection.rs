@@ -2746,6 +2746,7 @@ mod tests {
             ticket_nonce: vec![1, 2, 3],
             created_at: 1000,
             psk: vec![0; 32],
+            extended_master_secret: false,
         };
 
         let session2 = TlsSession {
@@ -2760,6 +2761,7 @@ mod tests {
             ticket_nonce: vec![4, 5, 6],
             created_at: 2000,
             psk: vec![0; 32],
+            extended_master_secret: false,
         };
 
         cache.put(b"key1", session1);
@@ -2783,6 +2785,7 @@ mod tests {
             ticket_nonce: vec![7, 8, 9],
             created_at: 3000,
             psk: vec![0; 32],
+            extended_master_secret: false,
         };
         cache.put(b"key3", session3);
         assert_eq!(cache.len(), 2);

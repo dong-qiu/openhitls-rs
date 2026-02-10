@@ -3,7 +3,9 @@
 //! Implements the ECDHE-GCM handshake for TLS 1.2 servers.
 
 use crate::config::{ServerPrivateKey, TlsConfig};
-use crate::crypt::key_schedule12::{compute_verify_data, derive_key_block, derive_master_secret};
+use crate::crypt::key_schedule12::{
+    compute_verify_data, derive_extended_master_secret, derive_key_block, derive_master_secret,
+};
 use crate::crypt::transcript::TranscriptHash;
 use crate::crypt::{is_tls12_suite, NamedGroup, SignatureScheme, Tls12CipherSuiteParams};
 use crate::extensions::ExtensionType;
@@ -15,8 +17,10 @@ use crate::handshake::codec12::{
     encode_server_key_exchange, Certificate12, CertificateRequest12, ServerKeyExchange,
 };
 use crate::handshake::extensions_codec::{
-    build_session_ticket_sh, parse_alpn_ch, parse_server_name, parse_session_ticket_ch,
-    parse_signature_algorithms_ch, parse_supported_groups_ch,
+    build_encrypt_then_mac, build_extended_master_secret, build_session_ticket_sh, parse_alpn_ch,
+    parse_encrypt_then_mac, parse_extended_master_secret, parse_renegotiation_info,
+    parse_server_name, parse_session_ticket_ch, parse_signature_algorithms_ch,
+    parse_supported_groups_ch,
 };
 use crate::handshake::key_exchange::KeyExchange;
 use crate::session::{decrypt_session_ticket, encrypt_session_ticket, SessionCache, TlsSession};
@@ -167,6 +171,18 @@ pub struct Tls12ServerHandshake {
     session_id: Vec<u8>,
     /// Whether this is an abbreviated (resumed) handshake.
     abbreviated: bool,
+    /// Negotiated Extended Master Secret (RFC 7627).
+    use_extended_master_secret: bool,
+    /// Negotiated Encrypt-Then-MAC (RFC 7366, CBC suites only).
+    use_encrypt_then_mac: bool,
+    /// Stored client verify_data after receiving Finished.
+    client_verify_data: Vec<u8>,
+    /// Stored server verify_data after sending Finished.
+    server_verify_data: Vec<u8>,
+    /// Whether the client offered EMS in ClientHello.
+    client_offered_ems: bool,
+    /// Whether the client offered ETM in ClientHello.
+    client_offered_etm: bool,
 }
 
 impl Drop for Tls12ServerHandshake {
@@ -192,6 +208,12 @@ impl Tls12ServerHandshake {
             client_certs: Vec::new(),
             session_id: Vec::new(),
             abbreviated: false,
+            use_extended_master_secret: false,
+            use_encrypt_then_mac: false,
+            client_verify_data: Vec::new(),
+            server_verify_data: Vec::new(),
+            client_offered_ems: false,
+            client_offered_etm: false,
         }
     }
 
@@ -222,6 +244,26 @@ impl Tls12ServerHandshake {
     /// Whether this handshake used abbreviated (session resumption) mode.
     pub fn is_abbreviated(&self) -> bool {
         self.abbreviated
+    }
+
+    /// Whether Extended Master Secret was negotiated.
+    pub fn use_extended_master_secret(&self) -> bool {
+        self.use_extended_master_secret
+    }
+
+    /// Whether Encrypt-Then-MAC was negotiated (CBC suites only).
+    pub fn use_encrypt_then_mac(&self) -> bool {
+        self.use_encrypt_then_mac
+    }
+
+    /// Get the client verify_data from Finished (for renegotiation).
+    pub fn client_verify_data(&self) -> &[u8] {
+        &self.client_verify_data
+    }
+
+    /// Get the server verify_data from Finished (for renegotiation).
+    pub fn server_verify_data(&self) -> &[u8] {
+        &self.server_verify_data
     }
 
     /// Build an encrypted NewSessionTicket message for the current session.
@@ -257,6 +299,7 @@ impl Tls12ServerHandshake {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             psk: Vec::new(),
+            extended_master_secret: self.use_extended_master_secret,
         };
         let ticket = encrypt_session_ticket(ticket_key, &session)?;
         let msg = encode_new_session_ticket12(lifetime, &ticket);
@@ -297,6 +340,23 @@ impl Tls12ServerHandshake {
                 ExtensionType::SERVER_NAME => {
                     self.client_server_name = Some(parse_server_name(&ext.data)?);
                 }
+                ExtensionType::EXTENDED_MASTER_SECRET => {
+                    parse_extended_master_secret(&ext.data)?;
+                    self.client_offered_ems = true;
+                }
+                ExtensionType::ENCRYPT_THEN_MAC => {
+                    parse_encrypt_then_mac(&ext.data)?;
+                    self.client_offered_etm = true;
+                }
+                ExtensionType::RENEGOTIATION_INFO => {
+                    let ri_data = parse_renegotiation_info(&ext.data)?;
+                    // Initial handshake: must be empty
+                    if !ri_data.is_empty() {
+                        return Err(TlsError::HandshakeFailed(
+                            "non-empty renegotiation_info in initial handshake".into(),
+                        ));
+                    }
+                }
                 _ => {} // ignore other extensions
             }
         }
@@ -336,6 +396,16 @@ impl Tls12ServerHandshake {
         // Negotiate group
         let group = negotiate_group(&client_groups, &self.config.supported_groups)?;
 
+        // Negotiate EMS: echo if client offered and config enables it
+        if self.client_offered_ems && self.config.enable_extended_master_secret {
+            self.use_extended_master_secret = true;
+        }
+
+        // Negotiate ETM: echo if client offered, config enables, AND suite is CBC
+        if self.client_offered_etm && self.config.enable_encrypt_then_mac && params.is_cbc {
+            self.use_encrypt_then_mac = true;
+        }
+
         // Build ServerHello extensions
         let mut sh_extensions = Vec::new();
         if let Some(ref alpn) = self.negotiated_alpn {
@@ -346,6 +416,14 @@ impl Tls12ServerHandshake {
         // Signal session ticket support if ticket_key is configured
         if self.config.ticket_key.is_some() {
             sh_extensions.push(build_session_ticket_sh());
+        }
+        // Echo EMS extension
+        if self.use_extended_master_secret {
+            sh_extensions.push(build_extended_master_secret());
+        }
+        // Echo ETM extension
+        if self.use_encrypt_then_mac {
+            sh_extensions.push(build_encrypt_then_mac());
         }
 
         // Build ServerHello
@@ -446,6 +524,12 @@ impl Tls12ServerHandshake {
         let body = get_body(msg_data)?;
         let ch = decode_client_hello(body)?;
 
+        // Check for EMS extension in CH (needed for resumption compatibility checks)
+        let client_has_ems = ch
+            .extensions
+            .iter()
+            .any(|ext| ext.extension_type == ExtensionType::EXTENDED_MASTER_SECRET);
+
         // (1) Try session ticket resumption
         if let Some(ref ticket_key) = self.config.ticket_key {
             for ext in &ch.extensions {
@@ -453,17 +537,28 @@ impl Tls12ServerHandshake {
                     let ticket_data = parse_session_ticket_ch(&ext.data)?;
                     if !ticket_data.is_empty() {
                         if let Some(session) = decrypt_session_ticket(ticket_key, &ticket_data) {
-                            if ch.cipher_suites.contains(&session.cipher_suite)
+                            // EMS resumption check (RFC 7627 §5.3):
+                            // session EMS flag must match client's EMS offer
+                            if session.extended_master_secret == client_has_ems
+                                && ch.cipher_suites.contains(&session.cipher_suite)
                                 && self.config.cipher_suites.contains(&session.cipher_suite)
                                 && is_tls12_suite(session.cipher_suite)
                             {
                                 let cached_suite = session.cipher_suite;
                                 let cached_ms = session.master_secret.clone();
+                                let cached_ems = session.extended_master_secret;
                                 // Use the client's session_id so client detects abbreviation
                                 let sid = ch.legacy_session_id.clone();
 
                                 return self
-                                    .do_abbreviated(msg_data, &ch, cached_suite, &cached_ms, sid)
+                                    .do_abbreviated(
+                                        msg_data,
+                                        &ch,
+                                        cached_suite,
+                                        &cached_ms,
+                                        sid,
+                                        cached_ems,
+                                    )
                                     .map(ServerHelloResult::Abbreviated);
                             }
                         }
@@ -477,17 +572,27 @@ impl Tls12ServerHandshake {
         if let Some(cache) = session_cache {
             if !ch.legacy_session_id.is_empty() {
                 if let Some(session) = cache.get(&ch.legacy_session_id) {
-                    // Verify the cached cipher suite is offered by both sides
-                    if ch.cipher_suites.contains(&session.cipher_suite)
+                    // EMS resumption check (RFC 7627 §5.3):
+                    // session EMS flag must match client's EMS offer
+                    if session.extended_master_secret == client_has_ems
+                        && ch.cipher_suites.contains(&session.cipher_suite)
                         && self.config.cipher_suites.contains(&session.cipher_suite)
                         && is_tls12_suite(session.cipher_suite)
                     {
                         let cached_suite = session.cipher_suite;
                         let cached_ms = session.master_secret.clone();
+                        let cached_ems = session.extended_master_secret;
                         let sid = ch.legacy_session_id.clone();
 
                         return self
-                            .do_abbreviated(msg_data, &ch, cached_suite, &cached_ms, sid)
+                            .do_abbreviated(
+                                msg_data,
+                                &ch,
+                                cached_suite,
+                                &cached_ms,
+                                sid,
+                                cached_ems,
+                            )
                             .map(ServerHelloResult::Abbreviated);
                     }
                 }
@@ -510,8 +615,24 @@ impl Tls12ServerHandshake {
         suite: CipherSuite,
         cached_master_secret: &[u8],
         session_id: Vec<u8>,
+        cached_ems: bool,
     ) -> Result<AbbreviatedServerResult, TlsError> {
         let params = Tls12CipherSuiteParams::from_suite(suite)?;
+
+        // Set EMS flag from cached session for abbreviated handshake
+        self.use_extended_master_secret = cached_ems;
+
+        // Check if client offered ETM and suite is CBC
+        let mut client_offered_etm_here = false;
+        for ext in &ch.extensions {
+            if ext.extension_type == ExtensionType::ENCRYPT_THEN_MAC {
+                client_offered_etm_here = true;
+                break;
+            }
+        }
+        if client_offered_etm_here && self.config.enable_encrypt_then_mac && params.is_cbc {
+            self.use_encrypt_then_mac = true;
+        }
 
         // Switch transcript hash if the resumed suite uses SHA-384
         if params.hash_len == 48 {
@@ -531,6 +652,14 @@ impl Tls12ServerHandshake {
         let mut sh_extensions = Vec::new();
         if self.config.ticket_key.is_some() {
             sh_extensions.push(build_session_ticket_sh());
+        }
+        // Echo EMS extension for abbreviated handshake
+        if self.use_extended_master_secret {
+            sh_extensions.push(build_extended_master_secret());
+        }
+        // Echo ETM extension for abbreviated handshake
+        if self.use_encrypt_then_mac {
+            sh_extensions.push(build_encrypt_then_mac());
         }
         let sh = ServerHello {
             random: self.server_random,
@@ -559,6 +688,7 @@ impl Tls12ServerHandshake {
             "server finished",
             &transcript_hash,
         )?;
+        self.server_verify_data = server_verify_data.clone();
         let finished_msg = encode_finished12(&server_verify_data);
 
         // Add server Finished to transcript (for client Finished verification)
@@ -630,6 +760,7 @@ impl Tls12ServerHandshake {
             ));
         }
 
+        self.client_verify_data = received_verify_data.to_vec();
         self.state = Tls12ServerState::Connected;
         Ok(())
     }
@@ -689,13 +820,19 @@ impl Tls12ServerHandshake {
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher suite params".into()))?;
 
+        // Derive master secret (EMS uses transcript hash instead of randoms)
         let factory = params.hash_factory();
-        let master_secret = derive_master_secret(
-            &*factory,
-            &pre_master_secret,
-            &self.client_random,
-            &self.server_random,
-        )?;
+        let master_secret = if self.use_extended_master_secret {
+            let session_hash = self.transcript.current_hash()?;
+            derive_extended_master_secret(&*factory, &pre_master_secret, &session_hash)?
+        } else {
+            derive_master_secret(
+                &*factory,
+                &pre_master_secret,
+                &self.client_random,
+                &self.server_random,
+            )?
+        };
 
         let key_block = derive_key_block(
             &*factory,
@@ -808,6 +945,8 @@ impl Tls12ServerHandshake {
             ));
         }
 
+        self.client_verify_data = received_verify_data.to_vec();
+
         // Add client Finished to transcript
         self.transcript.update(msg_data)?;
 
@@ -819,6 +958,7 @@ impl Tls12ServerHandshake {
             "server finished",
             &transcript_hash,
         )?;
+        self.server_verify_data = server_verify_data.clone();
         let finished_msg = encode_finished12(&server_verify_data);
 
         self.state = Tls12ServerState::Connected;
@@ -1338,6 +1478,7 @@ mod tests {
             ticket_nonce: Vec::new(),
             created_at: 0,
             psk: Vec::new(),
+            extended_master_secret: false,
         };
 
         let mut cache = InMemorySessionCache::new(16);
@@ -1415,6 +1556,7 @@ mod tests {
             ticket_nonce: Vec::new(),
             created_at: 0,
             psk: Vec::new(),
+            extended_master_secret: false,
         };
 
         let mut cache = InMemorySessionCache::new(16);

@@ -218,7 +218,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
         // 9. Activate write encryption
-        if flight.is_cbc {
+        if flight.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_write_encryption12_etm(
+                flight.client_write_key.clone(),
+                flight.client_write_mac_key.clone(),
+                flight.mac_len,
+            );
+        } else if flight.is_cbc {
             self.record_layer.activate_write_encryption12_cbc(
                 flight.client_write_key.clone(),
                 flight.client_write_mac_key.clone(),
@@ -269,7 +275,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
         }
 
         // 12. Activate read decryption
-        if flight.is_cbc {
+        if flight.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_read_decryption12_etm(
+                flight.server_write_key.clone(),
+                flight.server_write_mac_key.clone(),
+                flight.mac_len,
+            );
+        } else if flight.is_cbc {
             self.record_layer.activate_read_decryption12_cbc(
                 flight.server_write_key.clone(),
                 flight.server_write_mac_key.clone(),
@@ -308,6 +320,7 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             psk: Vec::new(),
+            extended_master_secret: hs.use_extended_master_secret(),
         });
 
         // Zeroize secrets
@@ -358,7 +371,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
         }
 
         // 2. Activate read decryption (server write key)
-        if keys.is_cbc {
+        if keys.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_read_decryption12_etm(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
             self.record_layer.activate_read_decryption12_cbc(
                 keys.server_write_key.clone(),
                 keys.server_write_mac_key.clone(),
@@ -390,7 +409,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
         // 5. Activate write encryption (client write key)
-        if keys.is_cbc {
+        if keys.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_write_encryption12_etm(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
             self.record_layer.activate_write_encryption12_cbc(
                 keys.client_write_key.clone(),
                 keys.client_write_mac_key.clone(),
@@ -428,6 +453,7 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             psk: Vec::new(),
+            extended_master_secret: hs.use_extended_master_secret(),
         });
 
         // Zeroize secrets
@@ -729,7 +755,13 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         hs.process_change_cipher_spec()?;
 
         // 12. Activate read decryption (client write key)
-        if keys.is_cbc {
+        if keys.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_read_decryption12_etm(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
             self.record_layer.activate_read_decryption12_cbc(
                 keys.client_write_key.clone(),
                 keys.client_write_mac_key.clone(),
@@ -771,7 +803,13 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
         // 16. Activate write encryption (server write key)
-        if keys.is_cbc {
+        if keys.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_write_encryption12_etm(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
             self.record_layer.activate_write_encryption12_cbc(
                 keys.server_write_key.clone(),
                 keys.server_write_mac_key.clone(),
@@ -838,7 +876,13 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
         // 4. Activate write encryption (server write key)
-        if abbr.is_cbc {
+        if abbr.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_write_encryption12_etm(
+                abbr.server_write_key.clone(),
+                abbr.server_write_mac_key.clone(),
+                abbr.mac_len,
+            );
+        } else if abbr.is_cbc {
             self.record_layer.activate_write_encryption12_cbc(
                 abbr.server_write_key.clone(),
                 abbr.server_write_mac_key.clone(),
@@ -870,7 +914,13 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         hs.process_change_cipher_spec()?;
 
         // 7. Activate read decryption (client write key)
-        if abbr.is_cbc {
+        if abbr.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_read_decryption12_etm(
+                abbr.client_write_key.clone(),
+                abbr.client_write_mac_key.clone(),
+                abbr.mac_len,
+            );
+        } else if abbr.is_cbc {
             self.record_layer.activate_read_decryption12_cbc(
                 abbr.client_write_key.clone(),
                 abbr.client_write_mac_key.clone(),
@@ -2012,7 +2062,13 @@ mod tests {
                 .seal_record(ContentType::ChangeCipherSpec, &[0x01])
                 .unwrap(),
         );
-        if cflight.is_cbc {
+        if cflight.is_cbc && client_hs.use_encrypt_then_mac() {
+            client_rl.activate_write_encryption12_etm(
+                cflight.client_write_key.clone(),
+                cflight.client_write_mac_key.clone(),
+                cflight.mac_len,
+            );
+        } else if cflight.is_cbc {
             client_rl.activate_write_encryption12_cbc(
                 cflight.client_write_key.clone(),
                 cflight.client_write_mac_key.clone(),
@@ -2046,7 +2102,13 @@ mod tests {
         assert_eq!(ct, ContentType::ChangeCipherSpec);
         server_hs.process_change_cipher_spec().unwrap();
 
-        if keys.is_cbc {
+        if keys.is_cbc && server_hs.use_encrypt_then_mac() {
+            server_rl.activate_read_decryption12_etm(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
             server_rl.activate_read_decryption12_cbc(
                 keys.client_write_key.clone(),
                 keys.client_write_mac_key.clone(),
@@ -2066,6 +2128,7 @@ mod tests {
         c2s.drain(..consumed);
         let (_, _, fin_total) = parse_handshake_header(&fin_plain).unwrap();
         let server_fin = server_hs.process_finished(&fin_plain[..fin_total]).unwrap();
+        let server_etm = server_hs.use_encrypt_then_mac();
 
         // 6. Server → CCS + Finished
         s2c.extend_from_slice(
@@ -2073,21 +2136,16 @@ mod tests {
                 .seal_record(ContentType::ChangeCipherSpec, &[0x01])
                 .unwrap(),
         );
-        if keys.is_cbc {
-            server_rl.activate_write_encryption12_cbc(
-                keys.server_write_key.clone(),
-                keys.server_write_mac_key.clone(),
-                keys.mac_len,
-            );
-        } else {
-            server_rl
-                .activate_write_encryption12(
-                    suite_neg,
-                    &keys.server_write_key,
-                    keys.server_write_iv.clone(),
-                )
-                .unwrap();
-        }
+        activate_write_cbc_or_etm(
+            &mut server_rl,
+            suite_neg,
+            keys.is_cbc,
+            server_etm,
+            &keys.server_write_key,
+            &keys.server_write_mac_key,
+            keys.mac_len,
+            keys.server_write_iv.clone(),
+        );
         s2c.extend_from_slice(
             &server_rl
                 .seal_record(ContentType::Handshake, &server_fin.finished)
@@ -2099,22 +2157,18 @@ mod tests {
         s2c.drain(..consumed);
         assert_eq!(ct, ContentType::ChangeCipherSpec);
         client_hs.process_change_cipher_spec().unwrap();
+        let client_etm = client_hs.use_encrypt_then_mac();
 
-        if cflight.is_cbc {
-            client_rl.activate_read_decryption12_cbc(
-                cflight.server_write_key.clone(),
-                cflight.server_write_mac_key.clone(),
-                cflight.mac_len,
-            );
-        } else {
-            client_rl
-                .activate_read_decryption12(
-                    suite_neg,
-                    &cflight.server_write_key,
-                    cflight.server_write_iv.clone(),
-                )
-                .unwrap();
-        }
+        activate_read_cbc_or_etm(
+            &mut client_rl,
+            suite_neg,
+            cflight.is_cbc,
+            client_etm,
+            &cflight.server_write_key,
+            &cflight.server_write_mac_key,
+            cflight.mac_len,
+            cflight.server_write_iv.clone(),
+        );
 
         let (_, sfin_plain, consumed) = client_rl.open_record(&s2c).unwrap();
         s2c.drain(..consumed);
@@ -2139,6 +2193,49 @@ mod tests {
             ticket_nonce: Vec::new(),
             created_at: 0,
             psk: Vec::new(),
+            extended_master_secret: client_hs.use_extended_master_secret(),
+        }
+    }
+
+    // Activate CBC/ETM/AEAD encryption on the given record layer (helper for test fns).
+    #[allow(clippy::too_many_arguments)]
+    fn activate_write_cbc_or_etm(
+        rl: &mut RecordLayer,
+        suite: CipherSuite,
+        is_cbc: bool,
+        use_etm: bool,
+        write_key: &[u8],
+        mac_key: &[u8],
+        mac_len: usize,
+        iv: Vec<u8>,
+    ) {
+        if is_cbc && use_etm {
+            rl.activate_write_encryption12_etm(write_key.to_vec(), mac_key.to_vec(), mac_len);
+        } else if is_cbc {
+            rl.activate_write_encryption12_cbc(write_key.to_vec(), mac_key.to_vec(), mac_len);
+        } else {
+            rl.activate_write_encryption12(suite, write_key, iv)
+                .unwrap();
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn activate_read_cbc_or_etm(
+        rl: &mut RecordLayer,
+        suite: CipherSuite,
+        is_cbc: bool,
+        use_etm: bool,
+        write_key: &[u8],
+        mac_key: &[u8],
+        mac_len: usize,
+        iv: Vec<u8>,
+    ) {
+        if is_cbc && use_etm {
+            rl.activate_read_decryption12_etm(write_key.to_vec(), mac_key.to_vec(), mac_len);
+        } else if is_cbc {
+            rl.activate_read_decryption12_cbc(write_key.to_vec(), mac_key.to_vec(), mac_len);
+        } else {
+            rl.activate_read_decryption12(suite, write_key, iv).unwrap();
         }
     }
 
@@ -2207,6 +2304,7 @@ mod tests {
         match result {
             ServerHelloResult::Abbreviated(mut abbr) => {
                 // Abbreviated path: Server sends SH → CCS → Finished
+                let server_etm = server_hs.use_encrypt_then_mac();
 
                 // 3. Server → SH (plaintext)
                 s2c.extend_from_slice(
@@ -2219,19 +2317,16 @@ mod tests {
                 );
 
                 // 5. Activate server write encryption
-                if abbr.is_cbc {
-                    server_rl.activate_write_encryption12_cbc(
-                        abbr.server_write_key.clone(),
-                        abbr.server_write_mac_key.clone(),
-                        abbr.mac_len,
-                    );
-                } else {
-                    server_rl.activate_write_encryption12(
-                        abbr.suite,
-                        &abbr.server_write_key,
-                        abbr.server_write_iv.clone(),
-                    )?;
-                }
+                activate_write_cbc_or_etm(
+                    &mut server_rl,
+                    abbr.suite,
+                    abbr.is_cbc,
+                    server_etm,
+                    &abbr.server_write_key,
+                    &abbr.server_write_mac_key,
+                    abbr.mac_len,
+                    abbr.server_write_iv.clone(),
+                );
 
                 // 6. Server → Finished (encrypted)
                 s2c.extend_from_slice(
@@ -2247,6 +2342,7 @@ mod tests {
 
                 assert!(client_hs.is_abbreviated());
                 let keys = client_hs.take_abbreviated_keys().unwrap();
+                let client_etm = client_hs.use_encrypt_then_mac();
 
                 // 8. Client processes CCS
                 let (ct, _, consumed) = client_rl.open_record(&s2c)?;
@@ -2255,19 +2351,16 @@ mod tests {
                 client_hs.process_change_cipher_spec()?;
 
                 // 9. Activate client read decryption (server write key)
-                if keys.is_cbc {
-                    client_rl.activate_read_decryption12_cbc(
-                        keys.server_write_key.clone(),
-                        keys.server_write_mac_key.clone(),
-                        keys.mac_len,
-                    );
-                } else {
-                    client_rl.activate_read_decryption12(
-                        keys.suite,
-                        &keys.server_write_key,
-                        keys.server_write_iv.clone(),
-                    )?;
-                }
+                activate_read_cbc_or_etm(
+                    &mut client_rl,
+                    keys.suite,
+                    keys.is_cbc,
+                    client_etm,
+                    &keys.server_write_key,
+                    &keys.server_write_mac_key,
+                    keys.mac_len,
+                    keys.server_write_iv.clone(),
+                );
 
                 // 10. Client reads server Finished (encrypted) → returns client Finished
                 let (_, sfin_plain, consumed) = client_rl.open_record(&s2c)?;
@@ -2282,19 +2375,16 @@ mod tests {
                 );
 
                 // 12. Activate client write encryption
-                if keys.is_cbc {
-                    client_rl.activate_write_encryption12_cbc(
-                        keys.client_write_key.clone(),
-                        keys.client_write_mac_key.clone(),
-                        keys.mac_len,
-                    );
-                } else {
-                    client_rl.activate_write_encryption12(
-                        keys.suite,
-                        &keys.client_write_key,
-                        keys.client_write_iv.clone(),
-                    )?;
-                }
+                activate_write_cbc_or_etm(
+                    &mut client_rl,
+                    keys.suite,
+                    keys.is_cbc,
+                    client_etm,
+                    &keys.client_write_key,
+                    &keys.client_write_mac_key,
+                    keys.mac_len,
+                    keys.client_write_iv.clone(),
+                );
 
                 // 13. Client → Finished (encrypted)
                 c2s.extend_from_slice(
@@ -2308,19 +2398,16 @@ mod tests {
                 server_hs.process_change_cipher_spec()?;
 
                 // 15. Activate server read decryption (client write key)
-                if abbr.is_cbc {
-                    server_rl.activate_read_decryption12_cbc(
-                        abbr.client_write_key.clone(),
-                        abbr.client_write_mac_key.clone(),
-                        abbr.mac_len,
-                    );
-                } else {
-                    server_rl.activate_read_decryption12(
-                        abbr.suite,
-                        &abbr.client_write_key,
-                        abbr.client_write_iv.clone(),
-                    )?;
-                }
+                activate_read_cbc_or_etm(
+                    &mut server_rl,
+                    abbr.suite,
+                    abbr.is_cbc,
+                    server_etm,
+                    &abbr.client_write_key,
+                    &abbr.client_write_mac_key,
+                    abbr.mac_len,
+                    abbr.client_write_iv.clone(),
+                );
 
                 // 16. Server processes client Finished (encrypted)
                 let (_, cfin_plain, consumed) = server_rl.open_record(&c2s)?;
@@ -2651,6 +2738,7 @@ mod tests {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             psk: Vec::new(),
+            extended_master_secret: client_hs.use_extended_master_secret(),
         }
     }
 
@@ -2918,6 +3006,7 @@ mod tests {
             ticket_nonce: Vec::new(),
             created_at: 0,
             psk: Vec::new(),
+            extended_master_secret: false,
         });
 
         let session = conn.take_session().unwrap();
@@ -2962,6 +3051,7 @@ mod tests {
             ticket_nonce: Vec::new(),
             created_at: 0,
             psk: Vec::new(),
+            extended_master_secret: false,
         };
         cache.put(&[0xFF; 32], other_session);
         // Original session should be evicted
@@ -2973,6 +3063,435 @@ mod tests {
         let result = run_abbreviated_handshake(suite, session, &mut cache);
         assert!(result.is_err());
         // The error message confirms it fell back to full handshake
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("expected abbreviated"));
+    }
+
+    // =========================================================================
+    // Phase 35: EMS + ETM + Renegotiation Info tests
+    // =========================================================================
+
+    /// Helper: run a full handshake with custom configs, returning handshake structs.
+    fn run_ems_etm_handshake(
+        suite: CipherSuite,
+        client_ems: bool,
+        server_ems: bool,
+        client_etm: bool,
+        server_etm: bool,
+    ) -> (Tls12ClientHandshake, Tls12ServerHandshake) {
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .enable_extended_master_secret(client_ems)
+            .enable_encrypt_then_mac(client_etm)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .enable_extended_master_secret(server_ems)
+            .enable_encrypt_then_mac(server_etm)
+            .build();
+
+        let mut c2s = Vec::new();
+        let mut s2c = Vec::new();
+        let mut client_hs = Tls12ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = Tls12ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // CH
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &ch_msg)
+                .unwrap(),
+        );
+
+        // Server processes CH
+        let (_, ch_plain, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        let (_, _, ch_total) = parse_handshake_header(&ch_plain).unwrap();
+        let flight = server_hs
+            .process_client_hello(&ch_plain[..ch_total])
+            .unwrap();
+
+        // SH + Cert + SKE + SHD
+        for msg in [
+            &flight.server_hello,
+            &flight.certificate,
+            &flight.server_key_exchange,
+            &flight.server_hello_done,
+        ] {
+            s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, msg).unwrap());
+        }
+
+        // Client processes SH
+        let (_, sh_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, sh_body, sh_total) = parse_handshake_header(&sh_plain).unwrap();
+        let sh = decode_server_hello(sh_body).unwrap();
+        client_hs
+            .process_server_hello(&sh_plain[..sh_total], &sh)
+            .unwrap();
+
+        // Client processes Cert
+        let (_, cert_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, cert_body, cert_total) = parse_handshake_header(&cert_plain).unwrap();
+        let cert12 = decode_certificate12(cert_body).unwrap();
+        client_hs
+            .process_certificate(&cert_plain[..cert_total], &cert12.certificate_list)
+            .unwrap();
+
+        // Client processes SKE
+        let (_, ske_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, ske_body, ske_total) = parse_handshake_header(&ske_plain).unwrap();
+        let ske = decode_server_key_exchange(ske_body).unwrap();
+        client_hs
+            .process_server_key_exchange(&ske_plain[..ske_total], &ske)
+            .unwrap();
+
+        // Client processes SHD + builds CKE + CCS + Finished
+        let (_, shd_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, _, shd_total) = parse_handshake_header(&shd_plain).unwrap();
+        let cflight = client_hs
+            .process_server_hello_done(&shd_plain[..shd_total])
+            .unwrap();
+
+        // Client sends CKE + CCS + Finished
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &cflight.client_key_exchange)
+                .unwrap(),
+        );
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::ChangeCipherSpec, &[0x01])
+                .unwrap(),
+        );
+
+        let params = crate::crypt::Tls12CipherSuiteParams::from_suite(flight.suite).unwrap();
+        if cflight.is_cbc && client_hs.use_encrypt_then_mac() {
+            client_rl.activate_write_encryption12_etm(
+                cflight.client_write_key.clone(),
+                cflight.client_write_mac_key.clone(),
+                cflight.mac_len,
+            );
+        } else if cflight.is_cbc {
+            client_rl.activate_write_encryption12_cbc(
+                cflight.client_write_key.clone(),
+                cflight.client_write_mac_key.clone(),
+                cflight.mac_len,
+            );
+        } else {
+            client_rl
+                .activate_write_encryption12(
+                    flight.suite,
+                    &cflight.client_write_key,
+                    cflight.client_write_iv.clone(),
+                )
+                .unwrap();
+        }
+        c2s.extend_from_slice(
+            &client_rl
+                .seal_record(ContentType::Handshake, &cflight.finished)
+                .unwrap(),
+        );
+
+        // Server processes CKE
+        let (_, cke_plain, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        let (_, _, cke_total) = parse_handshake_header(&cke_plain).unwrap();
+        let keys = server_hs
+            .process_client_key_exchange(&cke_plain[..cke_total])
+            .unwrap();
+
+        // Server processes CCS
+        let (ct, _, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        assert_eq!(ct, ContentType::ChangeCipherSpec);
+        server_hs.process_change_cipher_spec().unwrap();
+
+        // Server read decryption
+        if keys.is_cbc && server_hs.use_encrypt_then_mac() {
+            server_rl.activate_read_decryption12_etm(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
+            server_rl.activate_read_decryption12_cbc(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            server_rl
+                .activate_read_decryption12(
+                    flight.suite,
+                    &keys.client_write_key,
+                    keys.client_write_iv.clone(),
+                )
+                .unwrap();
+        }
+
+        // Server processes client Finished + builds server Finished
+        let (_, fin_plain, consumed) = server_rl.open_record(&c2s).unwrap();
+        c2s.drain(..consumed);
+        let (_, _, fin_total) = parse_handshake_header(&fin_plain).unwrap();
+        let server_fin = server_hs.process_finished(&fin_plain[..fin_total]).unwrap();
+
+        // Server sends CCS + Finished
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::ChangeCipherSpec, &[0x01])
+                .unwrap(),
+        );
+        if keys.is_cbc && server_hs.use_encrypt_then_mac() {
+            server_rl.activate_write_encryption12_etm(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
+            server_rl.activate_write_encryption12_cbc(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            server_rl
+                .activate_write_encryption12(
+                    flight.suite,
+                    &keys.server_write_key,
+                    keys.server_write_iv.clone(),
+                )
+                .unwrap();
+        }
+        s2c.extend_from_slice(
+            &server_rl
+                .seal_record(ContentType::Handshake, &server_fin.finished)
+                .unwrap(),
+        );
+
+        // Client processes CCS + server Finished
+        let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        assert_eq!(ct, ContentType::ChangeCipherSpec);
+        client_hs.process_change_cipher_spec().unwrap();
+
+        if cflight.is_cbc && client_hs.use_encrypt_then_mac() {
+            client_rl.activate_read_decryption12_etm(
+                cflight.server_write_key.clone(),
+                cflight.server_write_mac_key.clone(),
+                cflight.mac_len,
+            );
+        } else if cflight.is_cbc {
+            client_rl.activate_read_decryption12_cbc(
+                cflight.server_write_key.clone(),
+                cflight.server_write_mac_key.clone(),
+                cflight.mac_len,
+            );
+        } else {
+            client_rl
+                .activate_read_decryption12(
+                    flight.suite,
+                    &cflight.server_write_key,
+                    cflight.server_write_iv.clone(),
+                )
+                .unwrap();
+        }
+
+        let (_, sfin_plain, consumed) = client_rl.open_record(&s2c).unwrap();
+        s2c.drain(..consumed);
+        let (_, _, sfin_total) = parse_handshake_header(&sfin_plain).unwrap();
+        client_hs
+            .process_finished(&sfin_plain[..sfin_total], &cflight.master_secret)
+            .unwrap();
+
+        // Verify both connected
+        assert_eq!(client_hs.state(), Tls12ClientState::Connected);
+        assert_eq!(server_hs.state(), Tls12ServerState::Connected);
+
+        // Verify data exchange works (if encrypted)
+        let app_data = b"Hello EMS/ETM test!";
+        let encrypted = client_rl
+            .seal_record(ContentType::ApplicationData, app_data)
+            .unwrap();
+        let (ct, decrypted, _) = server_rl.open_record(&encrypted).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(decrypted, app_data);
+
+        let _ = params; // suppress unused warning
+        (client_hs, server_hs)
+    }
+
+    #[test]
+    fn test_tls12_ems_full_handshake() {
+        // Both enable EMS → EMS negotiated
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_hs, server_hs) = run_ems_etm_handshake(suite, true, true, false, false);
+        assert!(client_hs.use_extended_master_secret());
+        assert!(server_hs.use_extended_master_secret());
+        // Verify_data stored
+        assert_eq!(client_hs.client_verify_data().len(), 12);
+        assert_eq!(client_hs.server_verify_data().len(), 12);
+        assert_eq!(server_hs.client_verify_data().len(), 12);
+        assert_eq!(server_hs.server_verify_data().len(), 12);
+    }
+
+    #[test]
+    fn test_tls12_ems_client_only() {
+        // Client enables EMS but server disables → not negotiated
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_hs, server_hs) = run_ems_etm_handshake(suite, true, false, false, false);
+        assert!(!client_hs.use_extended_master_secret());
+        assert!(!server_hs.use_extended_master_secret());
+    }
+
+    #[test]
+    fn test_tls12_ems_server_only() {
+        // Server enables EMS but client doesn't offer → not negotiated
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_hs, server_hs) = run_ems_etm_handshake(suite, false, true, false, false);
+        assert!(!client_hs.use_extended_master_secret());
+        assert!(!server_hs.use_extended_master_secret());
+    }
+
+    #[test]
+    fn test_tls12_etm_cbc_roundtrip() {
+        // ETM with CBC cipher suite
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA;
+        let (client_hs, server_hs) = run_ems_etm_handshake(suite, false, false, true, true);
+        assert!(client_hs.use_encrypt_then_mac());
+        assert!(server_hs.use_encrypt_then_mac());
+    }
+
+    #[test]
+    fn test_tls12_etm_only_with_cbc() {
+        // ETM with AEAD suite → not negotiated (ETM only applies to CBC)
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_hs, server_hs) = run_ems_etm_handshake(suite, false, false, true, true);
+        assert!(!client_hs.use_encrypt_then_mac());
+        assert!(!server_hs.use_encrypt_then_mac());
+    }
+
+    #[test]
+    fn test_tls12_ems_etm_combined() {
+        // Both EMS and ETM with CBC suite
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA;
+        let (client_hs, server_hs) = run_ems_etm_handshake(suite, true, true, true, true);
+        assert!(client_hs.use_extended_master_secret());
+        assert!(server_hs.use_extended_master_secret());
+        assert!(client_hs.use_encrypt_then_mac());
+        assert!(server_hs.use_encrypt_then_mac());
+    }
+
+    #[test]
+    fn test_tls12_renegotiation_info_validated() {
+        // Verify initial handshake validates renegotiation_info (both sides check empty)
+        // This test just confirms the handshake succeeds with renegotiation_info present
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_hs, server_hs) = run_ems_etm_handshake(suite, true, true, false, false);
+        assert_eq!(client_hs.state(), Tls12ClientState::Connected);
+        assert_eq!(server_hs.state(), Tls12ServerState::Connected);
+        // Verify_data is 12 bytes (used for renegotiation_info in future renegotiations)
+        assert_eq!(client_hs.client_verify_data().len(), 12);
+        assert_eq!(client_hs.server_verify_data().len(), 12);
+    }
+
+    #[test]
+    fn test_tls12_ems_session_resumption_with_ticket() {
+        // Full handshake with EMS → get ticket → resume → both should negotiate EMS
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let ticket_key = vec![0xAB; 32];
+
+        // Step 1: Full handshake with EMS + ticket
+        let session = run_full_handshake_with_ticket(suite, ticket_key.clone());
+        assert!(session.ticket.is_some());
+        assert!(session.extended_master_secret); // EMS was negotiated
+
+        // Step 2: Abbreviated handshake with the EMS session
+        let (cs, ss) = run_ticket_abbreviated_handshake(suite, ticket_key, session).unwrap();
+        assert_eq!(cs, Tls12ClientState::Connected);
+        assert_eq!(ss, Tls12ServerState::Connected);
+    }
+
+    #[test]
+    fn test_tls12_ems_mismatch_fallback() {
+        // Session without EMS, but new handshake negotiates EMS → should NOT resume
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let ticket_key = vec![0xAB; 32];
+
+        // Create a session manually with extended_master_secret: false
+        // but with a valid ticket encrypted by a server that had EMS disabled
+
+        // Encrypt a session ticket with EMS=false
+        let non_ems_session = TlsSession {
+            id: Vec::new(),
+            cipher_suite: suite,
+            master_secret: vec![0x42; 48],
+            alpn_protocol: None,
+            ticket: None,
+            ticket_lifetime: 3600,
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            psk: Vec::new(),
+            extended_master_secret: false,
+        };
+        let ticket_data =
+            crate::session::encrypt_session_ticket(&ticket_key, &non_ems_session).unwrap();
+
+        // Build a resumption session with the non-EMS ticket
+        let resumption_session = TlsSession {
+            id: Vec::new(),
+            cipher_suite: suite,
+            master_secret: vec![0x42; 48],
+            alpn_protocol: None,
+            ticket: Some(ticket_data),
+            ticket_lifetime: 3600,
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            psk: Vec::new(),
+            extended_master_secret: false,
+        };
+
+        // Client sends EMS extension (default true), but cached session has EMS=false
+        // Server decrypts ticket → EMS=false, but client offers EMS
+        // Server check: session.ems(false) == client_has_ems(true) → false, so skip
+        // Falls back to full handshake → test expects abbreviated but gets full
+        let result = run_ticket_abbreviated_handshake(suite, ticket_key, resumption_session);
+        // Should fail because the test helper expects abbreviated
+        assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(err_msg.contains("expected abbreviated"));
     }

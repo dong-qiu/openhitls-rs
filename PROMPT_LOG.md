@@ -1263,3 +1263,23 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - 0 new files, 8 modified files
 
 859 total tests (25 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 35: TLS 1.2 Extended Master Secret + Encrypt-Then-MAC + Renegotiation Indication (2026-02-10)
+
+**Prompt**: Implement Phase 35 — TLS 1.2 Extended Master Secret (RFC 7627), Encrypt-Then-MAC (RFC 7366), and Secure Renegotiation Indication (RFC 5746). EMS binds master secret to handshake transcript using "extended master secret" label + session_hash. ETM reverses CBC record layer to encrypt-then-MAC, eliminating padding oracles. Renegotiation indication validates renegotiation_info with empty verify_data on initial handshake and stores client/server verify_data for future use. Add config flags enable_extended_master_secret and enable_encrypt_then_mac (both default true). Add comprehensive unit tests and a TCP loopback integration test for EMS+ETM over CBC.
+
+**Result**: 20 new tls tests (303->323) + 1 integration test (19->20). Complete implementation with:
+- Extension constants: EXTENDED_MASTER_SECRET (0x0017), ENCRYPT_THEN_MAC (0x0016), RENEGOTIATION_INFO (0xFF01)
+- 6 codec functions (build/parse for ClientHello and ServerHello for all three extensions)
+- EMS: modified derive_master_secret() to use "extended master secret" label + session_hash when negotiated
+- ETM: modified CBC record encryption/decryption to compute MAC over ciphertext (IV + encrypted data) instead of plaintext
+- Renegotiation indication: validates empty verify_data on initial handshake, stores client/server verify_data
+- Config flags: enable_extended_master_secret (default true), enable_encrypt_then_mac (default true)
+- Session EMS flag persisted through ticket serialization for resumption
+- ETM only activates for CBC cipher suites (GCM/ChaCha20 are already AEAD)
+- 1 TCP loopback integration test: EMS+ETM over CBC cipher suite
+- 0 new files, 11 modified files
+
+880 total tests (25 ignored). Clippy clean, fmt clean.

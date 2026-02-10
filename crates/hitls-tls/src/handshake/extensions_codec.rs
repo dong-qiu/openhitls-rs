@@ -707,6 +707,70 @@ pub fn parse_renegotiation_info(data: &[u8]) -> Result<Vec<u8>, TlsError> {
 }
 
 // ---------------------------------------------------------------------------
+// Extended Master Secret extension (RFC 7627)
+// ---------------------------------------------------------------------------
+
+/// Build the `extended_master_secret` extension (RFC 7627).
+/// Empty extension — presence signals EMS support.
+pub fn build_extended_master_secret() -> Extension {
+    Extension {
+        extension_type: ExtensionType::EXTENDED_MASTER_SECRET,
+        data: vec![],
+    }
+}
+
+/// Parse `extended_master_secret` extension (must be empty).
+pub fn parse_extended_master_secret(data: &[u8]) -> Result<(), TlsError> {
+    if !data.is_empty() {
+        return Err(TlsError::HandshakeFailed(
+            "extended_master_secret: expected empty".into(),
+        ));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Encrypt-Then-MAC extension (RFC 7366)
+// ---------------------------------------------------------------------------
+
+/// Build the `encrypt_then_mac` extension (RFC 7366).
+/// Empty extension — presence signals ETM support.
+pub fn build_encrypt_then_mac() -> Extension {
+    Extension {
+        extension_type: ExtensionType::ENCRYPT_THEN_MAC,
+        data: vec![],
+    }
+}
+
+/// Parse `encrypt_then_mac` extension (must be empty).
+pub fn parse_encrypt_then_mac(data: &[u8]) -> Result<(), TlsError> {
+    if !data.is_empty() {
+        return Err(TlsError::HandshakeFailed(
+            "encrypt_then_mac: expected empty".into(),
+        ));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Renegotiation info with verify_data (RFC 5746)
+// ---------------------------------------------------------------------------
+
+/// Build the `renegotiation_info` extension with verify_data for renegotiation.
+/// Format: renegotiated_connection_length(1) || client_verify_data || server_verify_data
+pub fn build_renegotiation_info(client_verify_data: &[u8], server_verify_data: &[u8]) -> Extension {
+    let total_len = client_verify_data.len() + server_verify_data.len();
+    let mut data = Vec::with_capacity(1 + total_len);
+    data.push(total_len as u8);
+    data.extend_from_slice(client_verify_data);
+    data.extend_from_slice(server_verify_data);
+    Extension {
+        extension_type: ExtensionType::RENEGOTIATION_INFO,
+        data,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Session Ticket extension (RFC 5077)
 // ---------------------------------------------------------------------------
 
@@ -1019,6 +1083,44 @@ mod tests {
         assert_eq!(ext.extension_type, ExtensionType::RENEGOTIATION_INFO);
         let info = parse_renegotiation_info(&ext.data).unwrap();
         assert!(info.is_empty()); // empty for initial handshake
+    }
+
+    #[test]
+    fn test_build_parse_extended_master_secret() {
+        let ext = build_extended_master_secret();
+        assert_eq!(ext.extension_type, ExtensionType::EXTENDED_MASTER_SECRET);
+        assert!(ext.data.is_empty());
+        parse_extended_master_secret(&ext.data).unwrap();
+    }
+
+    #[test]
+    fn test_extended_master_secret_non_empty_fails() {
+        assert!(parse_extended_master_secret(&[0x01]).is_err());
+    }
+
+    #[test]
+    fn test_build_parse_encrypt_then_mac() {
+        let ext = build_encrypt_then_mac();
+        assert_eq!(ext.extension_type, ExtensionType::ENCRYPT_THEN_MAC);
+        assert!(ext.data.is_empty());
+        parse_encrypt_then_mac(&ext.data).unwrap();
+    }
+
+    #[test]
+    fn test_encrypt_then_mac_non_empty_fails() {
+        assert!(parse_encrypt_then_mac(&[0x01]).is_err());
+    }
+
+    #[test]
+    fn test_build_parse_renegotiation_info_with_verify_data() {
+        let client_vd = vec![0xAA; 12];
+        let server_vd = vec![0xBB; 12];
+        let ext = build_renegotiation_info(&client_vd, &server_vd);
+        assert_eq!(ext.extension_type, ExtensionType::RENEGOTIATION_INFO);
+        let info = parse_renegotiation_info(&ext.data).unwrap();
+        assert_eq!(info.len(), 24);
+        assert_eq!(&info[..12], &client_vd[..]);
+        assert_eq!(&info[12..], &server_vd[..]);
     }
 
     #[test]

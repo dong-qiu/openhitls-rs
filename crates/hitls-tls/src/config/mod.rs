@@ -91,6 +91,10 @@ pub struct TlsConfig {
     pub verify_client_cert: bool,
     /// Server: reject handshake if client provides no certificate (requires verify_client_cert).
     pub require_client_cert: bool,
+    /// Enable Extended Master Secret extension (RFC 7627). Default: true.
+    pub enable_extended_master_secret: bool,
+    /// Enable Encrypt-Then-MAC extension (RFC 7366, CBC suites only). Default: true.
+    pub enable_encrypt_then_mac: bool,
     /// Certificate compression algorithms to offer/accept (RFC 8879).
     /// Empty means disabled.
     pub cert_compression_algos: Vec<CertCompressionAlgorithm>,
@@ -134,6 +138,8 @@ pub struct TlsConfigBuilder {
     post_handshake_auth: bool,
     verify_client_cert: bool,
     require_client_cert: bool,
+    enable_extended_master_secret: bool,
+    enable_encrypt_then_mac: bool,
     cert_compression_algos: Vec<CertCompressionAlgorithm>,
     #[cfg(feature = "tlcp")]
     tlcp_enc_certificate_chain: Vec<Vec<u8>>,
@@ -173,6 +179,8 @@ impl Default for TlsConfigBuilder {
             post_handshake_auth: false,
             verify_client_cert: false,
             require_client_cert: false,
+            enable_extended_master_secret: true,
+            enable_encrypt_then_mac: true,
             cert_compression_algos: Vec::new(),
             #[cfg(feature = "tlcp")]
             tlcp_enc_certificate_chain: Vec::new(),
@@ -288,6 +296,16 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn enable_extended_master_secret(mut self, enabled: bool) -> Self {
+        self.enable_extended_master_secret = enabled;
+        self
+    }
+
+    pub fn enable_encrypt_then_mac(mut self, enabled: bool) -> Self {
+        self.enable_encrypt_then_mac = enabled;
+        self
+    }
+
     pub fn cert_compression(mut self, algos: Vec<CertCompressionAlgorithm>) -> Self {
         self.cert_compression_algos = algos;
         self
@@ -328,6 +346,8 @@ impl TlsConfigBuilder {
             post_handshake_auth: self.post_handshake_auth,
             verify_client_cert: self.verify_client_cert,
             require_client_cert: self.require_client_cert,
+            enable_extended_master_secret: self.enable_extended_master_secret,
+            enable_encrypt_then_mac: self.enable_encrypt_then_mac,
             cert_compression_algos: self.cert_compression_algos,
             #[cfg(feature = "tlcp")]
             tlcp_enc_certificate_chain: self.tlcp_enc_certificate_chain,

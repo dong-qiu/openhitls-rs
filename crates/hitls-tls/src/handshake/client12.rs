@@ -5,9 +5,12 @@
 
 use crate::config::ServerPrivateKey;
 use crate::config::TlsConfig;
-use crate::crypt::key_schedule12::{compute_verify_data, derive_key_block, derive_master_secret};
+use crate::crypt::key_schedule12::{
+    compute_verify_data, derive_extended_master_secret, derive_key_block, derive_master_secret,
+};
 use crate::crypt::transcript::TranscriptHash;
 use crate::crypt::{NamedGroup, SignatureScheme, Tls12CipherSuiteParams};
+use crate::extensions::ExtensionType;
 use crate::handshake::codec::{encode_client_hello, ClientHello, ServerHello};
 use crate::handshake::codec12::{
     build_ske_params, build_ske_signed_data, decode_new_session_ticket12, encode_certificate12,
@@ -143,6 +146,16 @@ pub struct Tls12ClientHandshake {
     received_ticket: Option<Vec<u8>>,
     /// Received ticket lifetime hint.
     received_ticket_lifetime: u32,
+    /// Negotiated Extended Master Secret (RFC 7627).
+    use_extended_master_secret: bool,
+    /// Negotiated Encrypt-Then-MAC (RFC 7366, CBC suites only).
+    use_encrypt_then_mac: bool,
+    /// Stored client verify_data after sending Finished.
+    client_verify_data: Vec<u8>,
+    /// Stored server verify_data after receiving Finished.
+    server_verify_data: Vec<u8>,
+    /// Whether the cached session used EMS (for resumption compatibility).
+    cached_session_ems: bool,
 }
 
 impl Tls12ClientHandshake {
@@ -167,6 +180,11 @@ impl Tls12ClientHandshake {
             server_supports_ticket: false,
             received_ticket: None,
             received_ticket_lifetime: 0,
+            use_extended_master_secret: false,
+            use_encrypt_then_mac: false,
+            client_verify_data: Vec::new(),
+            server_verify_data: Vec::new(),
+            cached_session_ems: false,
         }
     }
 
@@ -208,6 +226,26 @@ impl Tls12ClientHandshake {
         self.received_ticket = Some(ticket);
         self.received_ticket_lifetime = lifetime;
         Ok(())
+    }
+
+    /// Whether Extended Master Secret was negotiated.
+    pub fn use_extended_master_secret(&self) -> bool {
+        self.use_extended_master_secret
+    }
+
+    /// Whether Encrypt-Then-MAC was negotiated (CBC suites only).
+    pub fn use_encrypt_then_mac(&self) -> bool {
+        self.use_encrypt_then_mac
+    }
+
+    /// Get the client verify_data from Finished (for renegotiation).
+    pub fn client_verify_data(&self) -> &[u8] {
+        &self.client_verify_data
+    }
+
+    /// Get the server verify_data from Finished (for renegotiation).
+    pub fn server_verify_data(&self) -> &[u8] {
+        &self.server_verify_data
     }
 
     /// Build the ClientHello message.
@@ -272,6 +310,21 @@ impl Tls12ClientHandshake {
                     &[],
                 ));
             }
+        }
+
+        // Extended Master Secret (RFC 7627)
+        if self.config.enable_extended_master_secret {
+            extensions.push(crate::handshake::extensions_codec::build_extended_master_secret());
+        }
+
+        // Encrypt-Then-MAC (RFC 7366)
+        if self.config.enable_encrypt_then_mac {
+            extensions.push(crate::handshake::extensions_codec::build_encrypt_then_mac());
+        }
+
+        // Cache the EMS flag from resumption session for later validation
+        if let Some(ref session) = self.config.resumption_session {
+            self.cached_session_ems = session.extended_master_secret;
         }
 
         // Filter cipher suites to TLS 1.2 ones only
@@ -346,11 +399,34 @@ impl Tls12ClientHandshake {
 
         self.server_random = sh.random;
 
-        // Check for SessionTicket extension in ServerHello
+        // Parse ServerHello extensions
         for ext in &sh.extensions {
-            if ext.extension_type == crate::extensions::ExtensionType::SESSION_TICKET {
-                self.server_supports_ticket = true;
-                break;
+            match ext.extension_type {
+                ExtensionType::SESSION_TICKET => {
+                    self.server_supports_ticket = true;
+                }
+                ExtensionType::EXTENDED_MASTER_SECRET => {
+                    crate::handshake::extensions_codec::parse_extended_master_secret(&ext.data)?;
+                    self.use_extended_master_secret = true;
+                }
+                ExtensionType::ENCRYPT_THEN_MAC => {
+                    crate::handshake::extensions_codec::parse_encrypt_then_mac(&ext.data)?;
+                    // Only enable ETM for CBC suites
+                    if params.is_cbc {
+                        self.use_encrypt_then_mac = true;
+                    }
+                }
+                ExtensionType::RENEGOTIATION_INFO => {
+                    let ri_data =
+                        crate::handshake::extensions_codec::parse_renegotiation_info(&ext.data)?;
+                    // Initial handshake: renegotiation_info must contain empty renegotiated_connection
+                    if !ri_data.is_empty() {
+                        return Err(TlsError::HandshakeFailed(
+                            "non-empty renegotiation_info in initial handshake".into(),
+                        ));
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -365,6 +441,17 @@ impl Tls12ClientHandshake {
 
         // Check for abbreviated handshake (session resumption)
         if !self.cached_session_id.is_empty() && sh.legacy_session_id == self.cached_session_id {
+            // EMS resumption compatibility check (RFC 7627 §5.3):
+            // - If cached session used EMS but server didn't echo EMS → reject abbreviation
+            // - If cached session did NOT use EMS but server echoed EMS → reject abbreviation
+            if self.cached_session_ems != self.use_extended_master_secret {
+                // Fall through to full handshake
+                self.abbreviated = false;
+                self.params = Some(params);
+                self.state = Tls12ClientState::WaitCertificate;
+                return Ok(sh.cipher_suite);
+            }
+
             self.abbreviated = true;
 
             // Derive keys from cached master_secret + new randoms
@@ -540,14 +627,19 @@ impl Tls12ClientHandshake {
         let cke_msg = encode_client_key_exchange(&cke);
         self.transcript.update(&cke_msg)?;
 
-        // Derive master secret
+        // Derive master secret (EMS uses transcript hash instead of randoms)
         let factory = params.hash_factory();
-        let master_secret = derive_master_secret(
-            &*factory,
-            &pre_master_secret,
-            &self.client_random,
-            &self.server_random,
-        )?;
+        let master_secret = if self.use_extended_master_secret {
+            let session_hash = self.transcript.current_hash()?;
+            derive_extended_master_secret(&*factory, &pre_master_secret, &session_hash)?
+        } else {
+            derive_master_secret(
+                &*factory,
+                &pre_master_secret,
+                &self.client_random,
+                &self.server_random,
+            )?
+        };
 
         // Derive key block
         let key_block = derive_key_block(
@@ -588,6 +680,7 @@ impl Tls12ClientHandshake {
             "client finished",
             &transcript_hash,
         )?;
+        self.client_verify_data = verify_data.clone();
         let finished_msg = encode_finished12(&verify_data);
         // The Finished message itself is added to the transcript for verifying server Finished
         self.transcript.update(&finished_msg)?;
@@ -666,6 +759,8 @@ impl Tls12ClientHandshake {
             ));
         }
 
+        self.server_verify_data = received_verify_data.to_vec();
+
         // Add server Finished to transcript
         self.transcript.update(raw_msg)?;
 
@@ -677,6 +772,7 @@ impl Tls12ClientHandshake {
             "client finished",
             &transcript_hash,
         )?;
+        self.client_verify_data = client_verify_data.clone();
         let finished_msg = encode_finished12(&client_verify_data);
 
         self.state = Tls12ClientState::Connected;
@@ -719,6 +815,7 @@ impl Tls12ClientHandshake {
         // Constant-time comparison
         use subtle::ConstantTimeEq;
         if received_verify_data.ct_eq(&expected).into() {
+            self.server_verify_data = received_verify_data.to_vec();
             self.transcript.update(raw_msg)?;
             self.state = Tls12ClientState::Connected;
             Ok(())
@@ -1002,6 +1099,7 @@ mod tests {
             ticket_nonce: Vec::new(),
             created_at: 0,
             psk: Vec::new(),
+            extended_master_secret: false,
         };
 
         let config = TlsConfig::builder()
@@ -1041,6 +1139,7 @@ mod tests {
             ticket_nonce: Vec::new(),
             created_at: 0,
             psk: Vec::new(),
+            extended_master_secret: false,
         };
 
         let config = TlsConfig::builder()
@@ -1098,6 +1197,7 @@ mod tests {
             ticket_nonce: Vec::new(),
             created_at: 0,
             psk: Vec::new(),
+            extended_master_secret: false,
         };
 
         let config = TlsConfig::builder()
@@ -1149,6 +1249,7 @@ mod tests {
             ticket_nonce: Vec::new(),
             created_at: 0,
             psk: Vec::new(),
+            extended_master_secret: false,
         };
 
         // First handshake

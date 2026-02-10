@@ -873,6 +873,7 @@ impl ClientHandshake {
                 .unwrap_or_default()
                 .as_secs(),
             psk,
+            extended_master_secret: false,
         })
     }
 }

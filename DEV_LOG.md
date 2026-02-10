@@ -3090,3 +3090,94 @@ Added `SESSION_TICKET` constant (0x0023 = 35) to extensions module. Implemented 
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 859 workspace tests passing (25 ignored)
+
+---
+
+## Phase 35: TLS 1.2 Extended Master Secret + Encrypt-Then-MAC + Renegotiation Indication (Session 2026-02-10)
+
+### Goals
+- Implement Extended Master Secret (RFC 7627) to bind master secret to handshake transcript and prevent triple handshake attacks
+- Implement Encrypt-Then-MAC (RFC 7366) to reverse CBC record layer from MAC-then-encrypt to encrypt-then-MAC, eliminating padding oracle attacks
+- Implement Secure Renegotiation Indication (RFC 5746) to validate renegotiation_info extension on initial handshake
+- Add config flags for EMS and ETM (both default-enabled)
+
+### Summary
+
+Phase 35 adds three TLS 1.2 security extensions that harden the protocol against well-known attacks:
+
+1. **Extended Master Secret (RFC 7627)** — Changes master secret derivation from `PRF(pre_master_secret, "master secret", client_random + server_random)` to `PRF(pre_master_secret, "extended master secret", session_hash)` where `session_hash` is the hash of the handshake transcript up to and including the ClientKeyExchange. This binds the master secret to the specific handshake, preventing triple handshake attacks where a MITM could synchronize two sessions to share a master secret.
+
+2. **Encrypt-Then-MAC (RFC 7366)** — Reverses the CBC record protection order. Standard TLS 1.2 CBC uses MAC-then-encrypt (compute MAC over plaintext, then encrypt plaintext+MAC+padding), which is vulnerable to padding oracle attacks. ETM computes the MAC over the ciphertext (IV + encrypted data) after encryption, so the receiver can verify integrity before attempting decryption, completely eliminating padding oracles.
+
+3. **Secure Renegotiation Indication (RFC 5746)** — On initial handshake, both client and server include the `renegotiation_info` extension with empty `renegotiated_connection` field. This signals support for secure renegotiation. Client and server verify_data from the Finished messages are stored for future renegotiation use (where they would be included in the extension to cryptographically bind the new handshake to the previous one).
+
+### Implementation
+
+#### Step 1: Extension Constants + Codec Functions
+- Added `EXTENDED_MASTER_SECRET` (0x0017), `ENCRYPT_THEN_MAC` (0x0016), and `RENEGOTIATION_INFO` (0xFF01) constants to extensions module
+- Implemented 6 codec functions for building/parsing these extensions in ClientHello and ServerHello
+- `build_client_hello_renegotiation_info()` sends empty verify_data on initial handshake
+- `parse_server_hello_renegotiation_info()` validates empty verify_data from server
+
+#### Step 2: EMS Master Secret Derivation
+- Modified `derive_master_secret()` to accept an `extended_master_secret` flag
+- When EMS is negotiated: uses `"extended master secret"` label with `session_hash` (handshake transcript hash) instead of `"master secret"` with `client_random + server_random`
+- Session hash computed using the cipher suite's PRF hash algorithm over all handshake messages through ClientKeyExchange
+
+#### Step 3: Session EMS Flag + Config Flags
+- Added `extended_master_secret: bool` field to `Tls12Session` to track whether EMS was used
+- Added `enable_extended_master_secret: bool` (default true) and `enable_encrypt_then_mac: bool` (default true) to `Tls12Config`
+- Session serialization updated to include the EMS flag for ticket-based resumption
+
+#### Step 4-5: Client + Server Negotiation
+- Client sends EMS, ETM, and renegotiation_info extensions in ClientHello when enabled in config
+- Server echoes extensions it supports in ServerHello, storing negotiation results
+- Both sides track `use_extended_master_secret`, `use_encrypt_then_mac`, and `secure_renegotiation` flags
+- ETM only applies to CBC cipher suites (GCM and ChaCha20 are already authenticated encryption)
+
+#### Step 6-7: ETM Record Layer
+- Modified CBC record encryption to use encrypt-then-MAC when ETM is negotiated
+- ETM encryption: encrypt plaintext+padding, then compute HMAC over sequence_number + header + IV + ciphertext
+- ETM decryption: verify HMAC over IV+ciphertext first, then decrypt; reject immediately if MAC fails (no padding oracle)
+- Standard (non-ETM) path unchanged: MAC-then-encrypt with constant-time padding verification
+
+#### Step 8-9: Connection Integration + Tests
+- Both `Tls12ClientConnection` and `Tls12ServerConnection` pass config flags through to handshake
+- Renegotiation verify_data stored in connection state after handshake completion
+- 20 new unit tests covering EMS negotiation, ETM negotiation, renegotiation_info validation, combined EMS+ETM handshake, disabled config paths, and CBC record layer ETM encryption/decryption
+- 1 new TCP loopback integration test verifying EMS+ETM over a real CBC cipher suite
+
+### Files Changed
+
+| File | Status | Description |
+|------|--------|-------------|
+| `hitls-tls/src/extensions/mod.rs` | Modified | EMS, ETM, renegotiation_info constants |
+| `hitls-tls/src/handshake/extensions_codec.rs` | Modified | 6 codec functions + tests |
+| `hitls-tls/src/handshake/key_exchange.rs` | Modified | EMS master secret derivation with session_hash |
+| `hitls-tls/src/handshake/client12.rs` | Modified | Client EMS/ETM/reneg extension building + parsing |
+| `hitls-tls/src/handshake/server12.rs` | Modified | Server EMS/ETM/reneg extension negotiation |
+| `hitls-tls/src/session/mod.rs` | Modified | EMS flag in session + serialization |
+| `hitls-tls/src/config/mod.rs` | Modified | enable_extended_master_secret, enable_encrypt_then_mac flags |
+| `hitls-tls/src/record/tls12_record.rs` | Modified | ETM encrypt-then-MAC record protection |
+| `hitls-tls/src/connection12.rs` | Modified | Connection-level EMS/ETM/reneg integration + tests |
+| `hitls-tls/src/handshake/codec12.rs` | Modified | Handshake state for EMS/ETM flags |
+| `tests/interop/src/lib.rs` | Modified | TCP loopback EMS+ETM over CBC test |
+
+### Test Results
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| bignum | 46 | 0 |
+| crypto | 330 | 19 |
+| tls | 323 | 0 |
+| pki | 98 | 0 |
+| utils | 35 | 0 |
+| auth | 20 | 0 |
+| cli | 8 | 5 |
+| integration | 20 | 1 |
+| **Total** | **880** | **25** |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 880 workspace tests passing (25 ignored)
