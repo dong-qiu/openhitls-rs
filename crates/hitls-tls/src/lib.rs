@@ -5,6 +5,10 @@ pub mod alert;
 pub mod config;
 pub mod connection;
 pub mod connection12;
+#[cfg(feature = "async")]
+pub mod connection12_async;
+#[cfg(feature = "async")]
+pub mod connection_async;
 #[cfg(feature = "dtls12")]
 pub mod connection_dtls12;
 #[cfg(feature = "tlcp")]
@@ -130,6 +134,24 @@ pub trait TlsConnection {
     fn write(&mut self, buf: &[u8]) -> Result<usize, TlsError>;
     /// Shut down the TLS connection gracefully.
     fn shutdown(&mut self) -> Result<(), TlsError>;
+    /// Get the negotiated TLS version.
+    fn version(&self) -> Option<TlsVersion>;
+    /// Get the negotiated cipher suite.
+    fn cipher_suite(&self) -> Option<CipherSuite>;
+}
+
+/// An asynchronous TLS connection (requires `async` feature + tokio).
+#[cfg(feature = "async")]
+#[allow(async_fn_in_trait)]
+pub trait AsyncTlsConnection {
+    /// Perform the TLS handshake asynchronously.
+    async fn handshake(&mut self) -> Result<(), TlsError>;
+    /// Read decrypted data into `buf` asynchronously.
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, TlsError>;
+    /// Write data to be encrypted and sent asynchronously.
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, TlsError>;
+    /// Shut down the TLS connection gracefully.
+    async fn shutdown(&mut self) -> Result<(), TlsError>;
     /// Get the negotiated TLS version.
     fn version(&self) -> Option<TlsVersion>;
     /// Get the negotiated cipher suite.

@@ -19,7 +19,7 @@ flate2 = { workspace = true, optional = true }
 
 [dependencies.tokio]
 version = "1"
-features = ["io-util", "net"]
+features = ["io-util", "net", "macros", "rt"]
 optional = true
 
 [features]

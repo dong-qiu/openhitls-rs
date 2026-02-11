@@ -71,3 +71,11 @@ modes = ["aes"]
 
 # Expose low-level internals
 hazmat = []
+
+[dev-dependencies]
+criterion = { workspace = true }
+hitls-bignum = { path = "../hitls-bignum" }
+
+[[bench]]
+name = "crypto_bench"
+harness = false

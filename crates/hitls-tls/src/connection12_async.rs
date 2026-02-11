@@ -1,0 +1,1130 @@
+//! Asynchronous TLS 1.2 connection wrapping an `AsyncRead + AsyncWrite` transport.
+
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+use crate::config::TlsConfig;
+use crate::crypt::KeyExchangeAlg;
+use crate::handshake::client12::Tls12ClientHandshake;
+use crate::handshake::codec::{decode_server_hello, parse_handshake_header};
+use crate::handshake::codec12::{
+    decode_certificate12, decode_certificate_request12, decode_server_key_exchange,
+    decode_server_key_exchange_dhe, decode_server_key_exchange_dhe_psk,
+    decode_server_key_exchange_ecdhe_psk, decode_server_key_exchange_psk_hint,
+};
+use crate::handshake::server12::{ServerHelloResult, Tls12ServerHandshake};
+use crate::handshake::HandshakeType;
+use crate::record::{ContentType, RecordLayer};
+use crate::session::TlsSession;
+use crate::{AsyncTlsConnection, CipherSuite, TlsError, TlsVersion};
+use zeroize::Zeroize;
+
+/// Connection state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectionState {
+    Handshaking,
+    Connected,
+    Closed,
+    Error,
+}
+
+// ===========================================================================
+// Async TLS 1.2 Client Connection
+// ===========================================================================
+
+/// An asynchronous TLS 1.2 client connection.
+pub struct AsyncTls12ClientConnection<S: AsyncRead + AsyncWrite + Unpin> {
+    stream: S,
+    config: TlsConfig,
+    record_layer: RecordLayer,
+    state: ConnectionState,
+    negotiated_suite: Option<CipherSuite>,
+    /// Buffer for reading records from the stream.
+    read_buf: Vec<u8>,
+    /// Buffered decrypted application data.
+    app_data_buf: Vec<u8>,
+    /// Session state for resumption (populated after handshake).
+    session: Option<TlsSession>,
+}
+
+impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
+    /// Create a new async TLS 1.2 client connection wrapping the given stream.
+    pub fn new(stream: S, config: TlsConfig) -> Self {
+        Self {
+            stream,
+            config,
+            record_layer: RecordLayer::new(),
+            state: ConnectionState::Handshaking,
+            negotiated_suite: None,
+            read_buf: Vec::with_capacity(16 * 1024),
+            app_data_buf: Vec::new(),
+            session: None,
+        }
+    }
+
+    /// Take the session state (with ticket if applicable) for later resumption.
+    pub fn take_session(&mut self) -> Option<TlsSession> {
+        self.session.take()
+    }
+
+    /// Read at least `min_bytes` from the stream into read_buf.
+    async fn fill_buf(&mut self, min_bytes: usize) -> Result<(), TlsError> {
+        while self.read_buf.len() < min_bytes {
+            let mut tmp = [0u8; 16384];
+            let n = self
+                .stream
+                .read(&mut tmp)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("read error: {e}")))?;
+            if n == 0 {
+                return Err(TlsError::RecordError("unexpected EOF".into()));
+            }
+            self.read_buf.extend_from_slice(&tmp[..n]);
+        }
+        Ok(())
+    }
+
+    /// Read a single record from the stream.
+    async fn read_record(&mut self) -> Result<(ContentType, Vec<u8>), TlsError> {
+        self.fill_buf(5).await?;
+        let length = u16::from_be_bytes([self.read_buf[3], self.read_buf[4]]) as usize;
+        self.fill_buf(5 + length).await?;
+        let (ct, plaintext, consumed) = self.record_layer.open_record(&self.read_buf)?;
+        self.read_buf.drain(..consumed);
+        Ok((ct, plaintext))
+    }
+
+    /// Read a handshake message from the stream.
+    /// Returns (handshake_type, full_message_bytes_including_header).
+    async fn read_handshake_msg(&mut self) -> Result<(HandshakeType, Vec<u8>), TlsError> {
+        let (ct, data) = self.read_record().await?;
+        if ct != ContentType::Handshake {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected Handshake, got {ct:?}"
+            )));
+        }
+        let (hs_type, _, total) = parse_handshake_header(&data)?;
+        Ok((hs_type, data[..total].to_vec()))
+    }
+
+    /// Run the TLS 1.2 client handshake.
+    async fn do_handshake(&mut self) -> Result<(), TlsError> {
+        let mut hs = Tls12ClientHandshake::new(self.config.clone());
+
+        // 1. Build and send ClientHello
+        let ch_msg = hs.build_client_hello()?;
+        let ch_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &ch_msg)?;
+        self.stream
+            .write_all(&ch_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 2. Read ServerHello
+        let (hs_type, sh_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::ServerHello {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected ServerHello, got {hs_type:?}"
+            )));
+        }
+        let (_, sh_body, _) = parse_handshake_header(&sh_data)?;
+        let sh = decode_server_hello(sh_body)?;
+        let suite = hs.process_server_hello(&sh_data, &sh)?;
+
+        // Apply peer's record size limit (TLS 1.2: no adjustment)
+        if let Some(limit) = hs.peer_record_size_limit() {
+            self.record_layer.max_fragment_size = limit as usize;
+        }
+
+        // Check for abbreviated handshake (session resumption)
+        if hs.is_abbreviated() {
+            return self.do_client_abbreviated(&mut hs, suite).await;
+        }
+
+        // 3. Read Certificate (only for KX that requires it)
+        let (hs_type, next_data) = if hs.kx_alg().requires_certificate() {
+            let (hs_type, cert_data) = self.read_handshake_msg().await?;
+            if hs_type != HandshakeType::Certificate {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected Certificate, got {hs_type:?}"
+                )));
+            }
+            let (_, cert_body, _) = parse_handshake_header(&cert_data)?;
+            let cert12 = decode_certificate12(cert_body)?;
+            hs.process_certificate(&cert_data, &cert12.certificate_list)?;
+            self.read_handshake_msg().await?
+        } else {
+            self.read_handshake_msg().await?
+        };
+
+        // 4. Read ServerKeyExchange or skip
+        let (hs_type, next_data) = if hs_type == HandshakeType::ServerKeyExchange {
+            let (_, ske_body, _) = parse_handshake_header(&next_data)?;
+            match hs.kx_alg() {
+                KeyExchangeAlg::Ecdhe => {
+                    let ske = decode_server_key_exchange(ske_body)?;
+                    hs.process_server_key_exchange(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::Dhe => {
+                    let ske = decode_server_key_exchange_dhe(ske_body)?;
+                    hs.process_server_key_exchange_dhe(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::Psk | KeyExchangeAlg::RsaPsk => {
+                    let ske = decode_server_key_exchange_psk_hint(ske_body)?;
+                    hs.process_server_key_exchange_psk_hint(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::DhePsk => {
+                    let ske = decode_server_key_exchange_dhe_psk(ske_body)?;
+                    hs.process_server_key_exchange_dhe_psk(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::EcdhePsk => {
+                    let ske = decode_server_key_exchange_ecdhe_psk(ske_body)?;
+                    hs.process_server_key_exchange_ecdhe_psk(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::Rsa => {
+                    return Err(TlsError::HandshakeFailed(
+                        "unexpected ServerKeyExchange for RSA key exchange".into(),
+                    ));
+                }
+                #[cfg(feature = "tlcp")]
+                KeyExchangeAlg::Ecc => {
+                    return Err(TlsError::HandshakeFailed(
+                        "ECC not supported in TLS 1.2".into(),
+                    ));
+                }
+            }
+            // Read the next message after SKE
+            self.read_handshake_msg().await?
+        } else {
+            // No SKE — must be RSA or plain PSK key exchange
+            if hs.kx_alg() != KeyExchangeAlg::Rsa
+                && hs.kx_alg() != KeyExchangeAlg::Psk
+                && hs.kx_alg() != KeyExchangeAlg::RsaPsk
+            {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected ServerKeyExchange for {:?}, got {hs_type:?}",
+                    hs.kx_alg()
+                )));
+            }
+            (hs_type, next_data)
+        };
+
+        // 5. Read CertificateRequest (optional) or ServerHelloDone
+        let shd_data = if hs_type == HandshakeType::CertificateRequest {
+            let (_, cr_body, _) = parse_handshake_header(&next_data)?;
+            let cr = decode_certificate_request12(cr_body)?;
+            hs.process_certificate_request(&next_data, &cr)?;
+            // Now read the actual ServerHelloDone
+            let (hs_type, shd_data) = self.read_handshake_msg().await?;
+            if hs_type != HandshakeType::ServerHelloDone {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected ServerHelloDone, got {hs_type:?}"
+                )));
+            }
+            shd_data
+        } else if hs_type == HandshakeType::ServerHelloDone {
+            next_data
+        } else {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected CertificateRequest or ServerHelloDone, got {hs_type:?}"
+            )));
+        };
+
+        // 6. Process ServerHelloDone -> generates client flight
+        let mut flight = hs.process_server_hello_done(&shd_data)?;
+
+        // 7. Send client Certificate (if mTLS requested)
+        if let Some(ref cert_msg) = flight.client_certificate {
+            let cert_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cert_msg)?;
+            self.stream
+                .write_all(&cert_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // 8. Send ClientKeyExchange (plaintext)
+        let cke_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &flight.client_key_exchange)?;
+        self.stream
+            .write_all(&cke_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 9. Send CertificateVerify (if mTLS with client cert)
+        if let Some(ref cv_msg) = flight.certificate_verify {
+            let cv_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cv_msg)?;
+            self.stream
+                .write_all(&cv_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // 10. Send ChangeCipherSpec
+        let ccs_record = self
+            .record_layer
+            .seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
+        self.stream
+            .write_all(&ccs_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 9. Activate write encryption
+        if flight.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_write_encryption12_etm(
+                flight.client_write_key.clone(),
+                flight.client_write_mac_key.clone(),
+                flight.mac_len,
+            );
+        } else if flight.is_cbc {
+            self.record_layer.activate_write_encryption12_cbc(
+                flight.client_write_key.clone(),
+                flight.client_write_mac_key.clone(),
+                flight.mac_len,
+            );
+        } else {
+            self.record_layer.activate_write_encryption12(
+                suite,
+                &flight.client_write_key,
+                flight.client_write_iv.clone(),
+            )?;
+        }
+
+        // 10. Send Finished (encrypted)
+        let fin_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &flight.finished)?;
+        self.stream
+            .write_all(&fin_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 11. Read NewSessionTicket (optional) then server ChangeCipherSpec
+        loop {
+            let (ct, data) = self.read_record().await?;
+            match ct {
+                ContentType::Handshake => {
+                    // May be a NewSessionTicket (plaintext, before CCS)
+                    let (hs_type, _, total) = parse_handshake_header(&data)?;
+                    if hs_type == HandshakeType::NewSessionTicket {
+                        let body = &data[4..total];
+                        hs.process_new_session_ticket(body)?;
+                    } else {
+                        return Err(TlsError::HandshakeFailed(format!(
+                            "expected NewSessionTicket or CCS, got {hs_type:?}"
+                        )));
+                    }
+                }
+                ContentType::ChangeCipherSpec => {
+                    hs.process_change_cipher_spec()?;
+                    break;
+                }
+                _ => {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "expected ChangeCipherSpec, got {ct:?}"
+                    )));
+                }
+            }
+        }
+
+        // 12. Activate read decryption
+        if flight.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_read_decryption12_etm(
+                flight.server_write_key.clone(),
+                flight.server_write_mac_key.clone(),
+                flight.mac_len,
+            );
+        } else if flight.is_cbc {
+            self.record_layer.activate_read_decryption12_cbc(
+                flight.server_write_key.clone(),
+                flight.server_write_mac_key.clone(),
+                flight.mac_len,
+            );
+        } else {
+            self.record_layer.activate_read_decryption12(
+                suite,
+                &flight.server_write_key,
+                flight.server_write_iv.clone(),
+            )?;
+        }
+
+        // 13. Read server Finished (encrypted)
+        let (hs_type, fin_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::Finished {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected Finished, got {hs_type:?}"
+            )));
+        }
+        hs.process_finished(&fin_data, &flight.master_secret)?;
+
+        // Build session state for later resumption
+        self.session = Some(TlsSession {
+            id: Vec::new(),
+            cipher_suite: suite,
+            master_secret: flight.master_secret.clone(),
+            alpn_protocol: None,
+            ticket: hs.received_ticket().map(|t| t.to_vec()),
+            ticket_lifetime: hs.received_ticket_lifetime(),
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            psk: Vec::new(),
+            extended_master_secret: hs.use_extended_master_secret(),
+        });
+
+        // Zeroize secrets
+        flight.master_secret.zeroize();
+        flight.client_write_key.zeroize();
+        flight.server_write_key.zeroize();
+
+        self.negotiated_suite = Some(suite);
+        self.state = ConnectionState::Connected;
+        Ok(())
+    }
+
+    /// Abbreviated handshake path (client side, session resumption via ticket or ID).
+    async fn do_client_abbreviated(
+        &mut self,
+        hs: &mut Tls12ClientHandshake,
+        suite: CipherSuite,
+    ) -> Result<(), TlsError> {
+        let mut keys = hs
+            .take_abbreviated_keys()
+            .ok_or_else(|| TlsError::HandshakeFailed("no abbreviated keys".into()))?;
+
+        // 1. Read optional NewSessionTicket then CCS from server
+        loop {
+            let (ct, data) = self.read_record().await?;
+            match ct {
+                ContentType::Handshake => {
+                    let (hs_type, _, total) = parse_handshake_header(&data)?;
+                    if hs_type == HandshakeType::NewSessionTicket {
+                        let body = &data[4..total];
+                        hs.process_new_session_ticket(body)?;
+                    } else {
+                        return Err(TlsError::HandshakeFailed(format!(
+                            "expected NewSessionTicket or CCS, got {hs_type:?}"
+                        )));
+                    }
+                }
+                ContentType::ChangeCipherSpec => {
+                    hs.process_change_cipher_spec()?;
+                    break;
+                }
+                _ => {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "expected CCS, got {ct:?}"
+                    )));
+                }
+            }
+        }
+
+        // 2. Activate read decryption (server write key)
+        if keys.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_read_decryption12_etm(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
+            self.record_layer.activate_read_decryption12_cbc(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            self.record_layer.activate_read_decryption12(
+                suite,
+                &keys.server_write_key,
+                keys.server_write_iv.clone(),
+            )?;
+        }
+
+        // 3. Read server Finished (encrypted)
+        let (hs_type, fin_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::Finished {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected Finished, got {hs_type:?}"
+            )));
+        }
+        let client_finished = hs.process_abbreviated_server_finished(&fin_data)?;
+
+        // 4. Send CCS
+        let ccs_record = self
+            .record_layer
+            .seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
+        self.stream
+            .write_all(&ccs_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 5. Activate write encryption (client write key)
+        if keys.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_write_encryption12_etm(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
+            self.record_layer.activate_write_encryption12_cbc(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            self.record_layer.activate_write_encryption12(
+                suite,
+                &keys.client_write_key,
+                keys.client_write_iv.clone(),
+            )?;
+        }
+
+        // 6. Send client Finished (encrypted)
+        let fin_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &client_finished)?;
+        self.stream
+            .write_all(&fin_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Build session state for later resumption
+        self.session = Some(TlsSession {
+            id: Vec::new(),
+            cipher_suite: suite,
+            master_secret: keys.master_secret.clone(),
+            alpn_protocol: None,
+            ticket: hs.received_ticket().map(|t| t.to_vec()),
+            ticket_lifetime: hs.received_ticket_lifetime(),
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            psk: Vec::new(),
+            extended_master_secret: hs.use_extended_master_secret(),
+        });
+
+        // Zeroize secrets
+        keys.master_secret.zeroize();
+        keys.client_write_key.zeroize();
+        keys.server_write_key.zeroize();
+
+        self.negotiated_suite = Some(suite);
+        self.state = ConnectionState::Connected;
+        Ok(())
+    }
+}
+
+impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ClientConnection<S> {
+    async fn handshake(&mut self) -> Result<(), TlsError> {
+        if self.state != ConnectionState::Handshaking {
+            return Err(TlsError::HandshakeFailed(
+                "handshake already completed or failed".into(),
+            ));
+        }
+        match self.do_handshake().await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.state = ConnectionState::Error;
+                Err(e)
+            }
+        }
+    }
+
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::RecordError(
+                "not connected (handshake not done)".into(),
+            ));
+        }
+
+        // Return buffered data first
+        if !self.app_data_buf.is_empty() {
+            let n = std::cmp::min(buf.len(), self.app_data_buf.len());
+            buf[..n].copy_from_slice(&self.app_data_buf[..n]);
+            self.app_data_buf.drain(..n);
+            return Ok(n);
+        }
+
+        let (ct, plaintext) = self.read_record().await?;
+        match ct {
+            ContentType::ApplicationData => {
+                let n = std::cmp::min(buf.len(), plaintext.len());
+                buf[..n].copy_from_slice(&plaintext[..n]);
+                if plaintext.len() > n {
+                    self.app_data_buf.extend_from_slice(&plaintext[n..]);
+                }
+                Ok(n)
+            }
+            ContentType::Alert => {
+                self.state = ConnectionState::Closed;
+                Ok(0)
+            }
+            _ => Err(TlsError::RecordError(format!(
+                "unexpected content type: {ct:?}"
+            ))),
+        }
+    }
+
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::RecordError(
+                "not connected (handshake not done)".into(),
+            ));
+        }
+
+        let record = self
+            .record_layer
+            .seal_record(ContentType::ApplicationData, buf)?;
+        self.stream
+            .write_all(&record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        Ok(buf.len())
+    }
+
+    async fn shutdown(&mut self) -> Result<(), TlsError> {
+        if self.state == ConnectionState::Closed {
+            return Ok(());
+        }
+        let alert_data = [1u8, 0u8]; // close_notify
+        let record = self
+            .record_layer
+            .seal_record(ContentType::Alert, &alert_data)?;
+        let _ = self.stream.write_all(&record).await;
+        self.state = ConnectionState::Closed;
+        Ok(())
+    }
+
+    fn version(&self) -> Option<TlsVersion> {
+        if self.state == ConnectionState::Connected {
+            Some(TlsVersion::Tls12)
+        } else {
+            None
+        }
+    }
+
+    fn cipher_suite(&self) -> Option<CipherSuite> {
+        self.negotiated_suite
+    }
+}
+
+// ===========================================================================
+// Async TLS 1.2 Server Connection
+// ===========================================================================
+
+/// An asynchronous TLS 1.2 server connection.
+pub struct AsyncTls12ServerConnection<S: AsyncRead + AsyncWrite + Unpin> {
+    stream: S,
+    config: TlsConfig,
+    record_layer: RecordLayer,
+    state: ConnectionState,
+    negotiated_suite: Option<CipherSuite>,
+    /// Buffer for reading records from the stream.
+    read_buf: Vec<u8>,
+    /// Buffered decrypted application data.
+    app_data_buf: Vec<u8>,
+    /// Session state for session ticket issuance.
+    session: Option<TlsSession>,
+}
+
+impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
+    /// Create a new async TLS 1.2 server connection wrapping the given stream.
+    pub fn new(stream: S, config: TlsConfig) -> Self {
+        Self {
+            stream,
+            config,
+            record_layer: RecordLayer::new(),
+            state: ConnectionState::Handshaking,
+            negotiated_suite: None,
+            read_buf: Vec::with_capacity(16 * 1024),
+            app_data_buf: Vec::new(),
+            session: None,
+        }
+    }
+
+    /// Take the session state (for session caching on server side).
+    pub fn take_session(&mut self) -> Option<TlsSession> {
+        self.session.take()
+    }
+
+    /// Read at least `min_bytes` from the stream into read_buf.
+    async fn fill_buf(&mut self, min_bytes: usize) -> Result<(), TlsError> {
+        while self.read_buf.len() < min_bytes {
+            let mut tmp = [0u8; 16384];
+            let n = self
+                .stream
+                .read(&mut tmp)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("read error: {e}")))?;
+            if n == 0 {
+                return Err(TlsError::RecordError("unexpected EOF".into()));
+            }
+            self.read_buf.extend_from_slice(&tmp[..n]);
+        }
+        Ok(())
+    }
+
+    /// Read a single record from the stream.
+    async fn read_record(&mut self) -> Result<(ContentType, Vec<u8>), TlsError> {
+        self.fill_buf(5).await?;
+        let length = u16::from_be_bytes([self.read_buf[3], self.read_buf[4]]) as usize;
+        self.fill_buf(5 + length).await?;
+        let (ct, plaintext, consumed) = self.record_layer.open_record(&self.read_buf)?;
+        self.read_buf.drain(..consumed);
+        Ok((ct, plaintext))
+    }
+
+    /// Read a handshake message from the stream.
+    async fn read_handshake_msg(&mut self) -> Result<(HandshakeType, Vec<u8>), TlsError> {
+        let (ct, data) = self.read_record().await?;
+        if ct != ContentType::Handshake {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected Handshake, got {ct:?}"
+            )));
+        }
+        let (hs_type, _, total) = parse_handshake_header(&data)?;
+        Ok((hs_type, data[..total].to_vec()))
+    }
+
+    /// Run the TLS 1.2 server handshake.
+    async fn do_handshake(&mut self) -> Result<(), TlsError> {
+        let mut hs = Tls12ServerHandshake::new(self.config.clone());
+
+        // 1. Read ClientHello
+        let (hs_type, ch_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::ClientHello {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected ClientHello, got {hs_type:?}"
+            )));
+        }
+
+        // 2. Process ClientHello (with ticket support, no session ID cache)
+        let result = hs.process_client_hello_resumable(&ch_data, None)?;
+
+        // Apply client's record size limit (TLS 1.2: no adjustment)
+        if let Some(limit) = hs.client_record_size_limit() {
+            self.record_layer.max_fragment_size = limit as usize;
+        }
+
+        match result {
+            ServerHelloResult::Full(flight) => {
+                self.do_full_handshake(&mut hs, flight).await?;
+            }
+            ServerHelloResult::Abbreviated(abbr) => {
+                self.do_abbreviated_handshake(&mut hs, abbr).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Full handshake path (with optional NewSessionTicket).
+    async fn do_full_handshake(
+        &mut self,
+        hs: &mut Tls12ServerHandshake,
+        flight: crate::handshake::server12::ServerFlightResult,
+    ) -> Result<(), TlsError> {
+        let suite = flight.suite;
+
+        // 3. Send ServerHello
+        let sh_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &flight.server_hello)?;
+        self.stream
+            .write_all(&sh_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 4. Send Certificate (if present -- PSK suites skip this)
+        if let Some(ref cert_msg) = flight.certificate {
+            let cert_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cert_msg)?;
+            self.stream
+                .write_all(&cert_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // 5. Send ServerKeyExchange (if present -- not sent for RSA key exchange)
+        if let Some(ref ske_msg) = flight.server_key_exchange {
+            let ske_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, ske_msg)?;
+            self.stream
+                .write_all(&ske_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // 6. Send CertificateRequest (if mTLS enabled)
+        if let Some(ref cr_msg) = flight.certificate_request {
+            let cr_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cr_msg)?;
+            self.stream
+                .write_all(&cr_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // 7. Send ServerHelloDone
+        let shd_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &flight.server_hello_done)?;
+        self.stream
+            .write_all(&shd_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 8. Read client Certificate (if mTLS)
+        if flight.certificate_request.is_some() {
+            let (hs_type, cert_data) = self.read_handshake_msg().await?;
+            if hs_type != HandshakeType::Certificate {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected client Certificate, got {hs_type:?}"
+                )));
+            }
+            hs.process_client_certificate(&cert_data)?;
+        }
+
+        // 9. Read ClientKeyExchange
+        let (hs_type, cke_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::ClientKeyExchange {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected ClientKeyExchange, got {hs_type:?}"
+            )));
+        }
+        let mut keys = hs.process_client_key_exchange(&cke_data)?;
+
+        // 10. Read client CertificateVerify (if client sent certs)
+        if hs.state() == crate::handshake::server12::Tls12ServerState::WaitClientCertificateVerify {
+            let (hs_type, cv_data) = self.read_handshake_msg().await?;
+            if hs_type != HandshakeType::CertificateVerify {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected CertificateVerify, got {hs_type:?}"
+                )));
+            }
+            hs.process_client_certificate_verify(&cv_data)?;
+        }
+
+        // 11. Read ChangeCipherSpec from client
+        let (ct, _ccs_data) = self.read_record().await?;
+        if ct != ContentType::ChangeCipherSpec {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected ChangeCipherSpec, got {ct:?}"
+            )));
+        }
+        hs.process_change_cipher_spec()?;
+
+        // 12. Activate read decryption (client write key)
+        if keys.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_read_decryption12_etm(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
+            self.record_layer.activate_read_decryption12_cbc(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            self.record_layer.activate_read_decryption12(
+                suite,
+                &keys.client_write_key,
+                keys.client_write_iv.clone(),
+            )?;
+        }
+
+        // 13. Read client Finished (encrypted)
+        let (hs_type, fin_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::Finished {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected Finished, got {hs_type:?}"
+            )));
+        }
+        let server_fin = hs.process_finished(&fin_data)?;
+
+        // 14. Send NewSessionTicket (plaintext, before CCS) if ticket_key configured
+        if let Some(nst_msg) = hs.build_new_session_ticket(suite, 3600)? {
+            let nst_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, &nst_msg)?;
+            self.stream
+                .write_all(&nst_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // 15. Send ChangeCipherSpec
+        let ccs_record = self
+            .record_layer
+            .seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
+        self.stream
+            .write_all(&ccs_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 16. Activate write encryption (server write key)
+        if keys.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_write_encryption12_etm(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
+            self.record_layer.activate_write_encryption12_cbc(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            self.record_layer.activate_write_encryption12(
+                suite,
+                &keys.server_write_key,
+                keys.server_write_iv.clone(),
+            )?;
+        }
+
+        // 17. Send server Finished (encrypted)
+        let sfin_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &server_fin.finished)?;
+        self.stream
+            .write_all(&sfin_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Zeroize secrets
+        keys.master_secret.zeroize();
+        keys.client_write_key.zeroize();
+        keys.server_write_key.zeroize();
+
+        self.negotiated_suite = Some(suite);
+        self.state = ConnectionState::Connected;
+        Ok(())
+    }
+
+    /// Abbreviated handshake path (session ticket or session ID resumption).
+    async fn do_abbreviated_handshake(
+        &mut self,
+        hs: &mut Tls12ServerHandshake,
+        mut abbr: crate::handshake::server12::AbbreviatedServerResult,
+    ) -> Result<(), TlsError> {
+        let suite = abbr.suite;
+
+        // 1. Send ServerHello (echoes session_id)
+        let sh_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &abbr.server_hello)?;
+        self.stream
+            .write_all(&sh_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 2. Send NewSessionTicket (plaintext) if ticket_key configured
+        if let Some(nst_msg) = hs.build_new_session_ticket(suite, 3600)? {
+            let nst_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, &nst_msg)?;
+            self.stream
+                .write_all(&nst_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // 3. Send CCS
+        let ccs_record = self
+            .record_layer
+            .seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
+        self.stream
+            .write_all(&ccs_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 4. Activate write encryption (server write key)
+        if abbr.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_write_encryption12_etm(
+                abbr.server_write_key.clone(),
+                abbr.server_write_mac_key.clone(),
+                abbr.mac_len,
+            );
+        } else if abbr.is_cbc {
+            self.record_layer.activate_write_encryption12_cbc(
+                abbr.server_write_key.clone(),
+                abbr.server_write_mac_key.clone(),
+                abbr.mac_len,
+            );
+        } else {
+            self.record_layer.activate_write_encryption12(
+                suite,
+                &abbr.server_write_key,
+                abbr.server_write_iv.clone(),
+            )?;
+        }
+
+        // 5. Send server Finished (encrypted)
+        let sfin_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &abbr.finished)?;
+        self.stream
+            .write_all(&sfin_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // 6. Read client CCS
+        let (ct, _ccs_data) = self.read_record().await?;
+        if ct != ContentType::ChangeCipherSpec {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected ChangeCipherSpec, got {ct:?}"
+            )));
+        }
+        hs.process_change_cipher_spec()?;
+
+        // 7. Activate read decryption (client write key)
+        if abbr.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_read_decryption12_etm(
+                abbr.client_write_key.clone(),
+                abbr.client_write_mac_key.clone(),
+                abbr.mac_len,
+            );
+        } else if abbr.is_cbc {
+            self.record_layer.activate_read_decryption12_cbc(
+                abbr.client_write_key.clone(),
+                abbr.client_write_mac_key.clone(),
+                abbr.mac_len,
+            );
+        } else {
+            self.record_layer.activate_read_decryption12(
+                suite,
+                &abbr.client_write_key,
+                abbr.client_write_iv.clone(),
+            )?;
+        }
+
+        // 8. Read client Finished (encrypted)
+        let (hs_type, fin_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::Finished {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected Finished, got {hs_type:?}"
+            )));
+        }
+        hs.process_abbreviated_finished(&fin_data)?;
+
+        // Zeroize secrets
+        abbr.master_secret.zeroize();
+        abbr.client_write_key.zeroize();
+        abbr.server_write_key.zeroize();
+
+        self.negotiated_suite = Some(suite);
+        self.state = ConnectionState::Connected;
+        Ok(())
+    }
+}
+
+impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ServerConnection<S> {
+    async fn handshake(&mut self) -> Result<(), TlsError> {
+        if self.state != ConnectionState::Handshaking {
+            return Err(TlsError::HandshakeFailed(
+                "handshake already completed or failed".into(),
+            ));
+        }
+        match self.do_handshake().await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.state = ConnectionState::Error;
+                Err(e)
+            }
+        }
+    }
+
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::RecordError(
+                "not connected (handshake not done)".into(),
+            ));
+        }
+
+        if !self.app_data_buf.is_empty() {
+            let n = std::cmp::min(buf.len(), self.app_data_buf.len());
+            buf[..n].copy_from_slice(&self.app_data_buf[..n]);
+            self.app_data_buf.drain(..n);
+            return Ok(n);
+        }
+
+        let (ct, plaintext) = self.read_record().await?;
+        match ct {
+            ContentType::ApplicationData => {
+                let n = std::cmp::min(buf.len(), plaintext.len());
+                buf[..n].copy_from_slice(&plaintext[..n]);
+                if plaintext.len() > n {
+                    self.app_data_buf.extend_from_slice(&plaintext[n..]);
+                }
+                Ok(n)
+            }
+            ContentType::Alert => {
+                self.state = ConnectionState::Closed;
+                Ok(0)
+            }
+            _ => Err(TlsError::RecordError(format!(
+                "unexpected content type: {ct:?}"
+            ))),
+        }
+    }
+
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::RecordError(
+                "not connected (handshake not done)".into(),
+            ));
+        }
+
+        let record = self
+            .record_layer
+            .seal_record(ContentType::ApplicationData, buf)?;
+        self.stream
+            .write_all(&record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        Ok(buf.len())
+    }
+
+    async fn shutdown(&mut self) -> Result<(), TlsError> {
+        if self.state == ConnectionState::Closed {
+            return Ok(());
+        }
+        let alert_data = [1u8, 0u8]; // close_notify
+        let record = self
+            .record_layer
+            .seal_record(ContentType::Alert, &alert_data)?;
+        let _ = self.stream.write_all(&record).await;
+        self.state = ConnectionState::Closed;
+        Ok(())
+    }
+
+    fn version(&self) -> Option<TlsVersion> {
+        if self.state == ConnectionState::Connected {
+            Some(TlsVersion::Tls12)
+        } else {
+            None
+        }
+    }
+
+    fn cipher_suite(&self) -> Option<CipherSuite> {
+        self.negotiated_suite
+    }
+}
