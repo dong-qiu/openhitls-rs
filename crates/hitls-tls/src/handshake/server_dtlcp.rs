@@ -302,8 +302,7 @@ impl DtlcpServerHandshake {
     /// Negotiate a TLCP cipher suite.
     fn negotiate_suite(&self, ch: &ClientHello) -> Result<CipherSuite, TlsError> {
         for &server_suite in &self.config.cipher_suites {
-            if crate::crypt::is_tlcp_suite(server_suite)
-                && ch.cipher_suites.contains(&server_suite)
+            if crate::crypt::is_tlcp_suite(server_suite) && ch.cipher_suites.contains(&server_suite)
             {
                 return Ok(server_suite);
             }

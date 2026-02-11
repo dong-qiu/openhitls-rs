@@ -398,7 +398,12 @@ impl ClientHandshake {
                     .finish(&mut ch_hash)
                     .map_err(TlsError::CryptoError)?;
                 self.early_traffic_secret = ks.derive_early_traffic_secret(&ch_hash)?;
-                crate::crypt::keylog::log_key(&self.config, "CLIENT_EARLY_TRAFFIC_SECRET", &self.client_random, &self.early_traffic_secret);
+                crate::crypt::keylog::log_key(
+                    &self.config,
+                    "CLIENT_EARLY_TRAFFIC_SECRET",
+                    &self.client_random,
+                    &self.early_traffic_secret,
+                );
                 self.offered_early_data = true;
             }
 
@@ -528,8 +533,18 @@ impl ClientHandshake {
         let transcript_hash = self.transcript.current_hash()?;
         let (client_hs_secret, server_hs_secret) =
             ks.derive_handshake_traffic_secrets(&transcript_hash)?;
-        crate::crypt::keylog::log_key(&self.config, "CLIENT_HANDSHAKE_TRAFFIC_SECRET", &self.client_random, &client_hs_secret);
-        crate::crypt::keylog::log_key(&self.config, "SERVER_HANDSHAKE_TRAFFIC_SECRET", &self.client_random, &server_hs_secret);
+        crate::crypt::keylog::log_key(
+            &self.config,
+            "CLIENT_HANDSHAKE_TRAFFIC_SECRET",
+            &self.client_random,
+            &client_hs_secret,
+        );
+        crate::crypt::keylog::log_key(
+            &self.config,
+            "SERVER_HANDSHAKE_TRAFFIC_SECRET",
+            &self.client_random,
+            &server_hs_secret,
+        );
 
         // Derive traffic keys
         let server_hs_keys = TrafficKeys::derive(&params, &server_hs_secret)?;
@@ -870,8 +885,18 @@ impl ClientHandshake {
         let transcript_hash_sf = self.transcript.current_hash()?;
         let (client_app_secret, server_app_secret) =
             ks.derive_app_traffic_secrets(&transcript_hash_sf)?;
-        crate::crypt::keylog::log_key(&self.config, "CLIENT_TRAFFIC_SECRET_0", &self.client_random, &client_app_secret);
-        crate::crypt::keylog::log_key(&self.config, "SERVER_TRAFFIC_SECRET_0", &self.client_random, &server_app_secret);
+        crate::crypt::keylog::log_key(
+            &self.config,
+            "CLIENT_TRAFFIC_SECRET_0",
+            &self.client_random,
+            &client_app_secret,
+        );
+        crate::crypt::keylog::log_key(
+            &self.config,
+            "SERVER_TRAFFIC_SECRET_0",
+            &self.client_random,
+            &server_app_secret,
+        );
 
         let suite = self
             .negotiated_suite

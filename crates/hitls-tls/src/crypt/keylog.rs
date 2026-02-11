@@ -99,12 +99,7 @@ mod tests {
 
         let cr = [0x01u8; 32];
         let secret = [0x02u8; 48];
-        log_key(
-            &config,
-            "CLIENT_HANDSHAKE_TRAFFIC_SECRET",
-            &cr,
-            &secret,
-        );
+        log_key(&config, "CLIENT_HANDSHAKE_TRAFFIC_SECRET", &cr, &secret);
 
         let logged = lines.lock().unwrap();
         let parts: Vec<&str> = logged[0].split(' ').collect();

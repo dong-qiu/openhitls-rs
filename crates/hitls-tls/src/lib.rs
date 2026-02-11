@@ -9,12 +9,12 @@ pub mod connection12;
 pub mod connection12_async;
 #[cfg(feature = "async")]
 pub mod connection_async;
+#[cfg(feature = "dtlcp")]
+pub mod connection_dtlcp;
 #[cfg(feature = "dtls12")]
 pub mod connection_dtls12;
 #[cfg(feature = "tlcp")]
 pub mod connection_tlcp;
-#[cfg(feature = "dtlcp")]
-pub mod connection_dtlcp;
 pub mod crypt;
 pub mod extensions;
 pub mod handshake;

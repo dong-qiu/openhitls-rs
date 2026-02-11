@@ -7,12 +7,12 @@ pub mod dtls;
 pub mod encryption;
 pub mod encryption12;
 pub mod encryption12_cbc;
+#[cfg(feature = "dtlcp")]
+pub mod encryption_dtlcp;
 #[cfg(feature = "dtls12")]
 pub mod encryption_dtls12;
 #[cfg(feature = "tlcp")]
 pub mod encryption_tlcp;
-#[cfg(feature = "dtlcp")]
-pub mod encryption_dtlcp;
 
 use crate::crypt::traffic_keys::TrafficKeys;
 use crate::CipherSuite;

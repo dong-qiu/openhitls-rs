@@ -637,7 +637,12 @@ impl ServerHandshake {
         let early_read_keys = if accept_early_data {
             let ch_transcript = self.transcript.current_hash()?;
             let early_secret = ks.derive_early_traffic_secret(&ch_transcript)?;
-            crate::crypt::keylog::log_key(&self.config, "CLIENT_EARLY_TRAFFIC_SECRET", &self.client_random, &early_secret);
+            crate::crypt::keylog::log_key(
+                &self.config,
+                "CLIENT_EARLY_TRAFFIC_SECRET",
+                &self.client_random,
+                &early_secret,
+            );
             Some(TrafficKeys::derive(&params, &early_secret)?)
         } else {
             None
@@ -679,8 +684,18 @@ impl ServerHandshake {
         let transcript_hash = self.transcript.current_hash()?;
         let (client_hs_secret, server_hs_secret) =
             ks.derive_handshake_traffic_secrets(&transcript_hash)?;
-        crate::crypt::keylog::log_key(&self.config, "CLIENT_HANDSHAKE_TRAFFIC_SECRET", &self.client_random, &client_hs_secret);
-        crate::crypt::keylog::log_key(&self.config, "SERVER_HANDSHAKE_TRAFFIC_SECRET", &self.client_random, &server_hs_secret);
+        crate::crypt::keylog::log_key(
+            &self.config,
+            "CLIENT_HANDSHAKE_TRAFFIC_SECRET",
+            &self.client_random,
+            &client_hs_secret,
+        );
+        crate::crypt::keylog::log_key(
+            &self.config,
+            "SERVER_HANDSHAKE_TRAFFIC_SECRET",
+            &self.client_random,
+            &server_hs_secret,
+        );
 
         let server_hs_keys = TrafficKeys::derive(&params, &server_hs_secret)?;
         let client_hs_keys = TrafficKeys::derive(&params, &client_hs_secret)?;
@@ -799,8 +814,18 @@ impl ServerHandshake {
         let transcript_hash_sf = self.transcript.current_hash()?;
         let (client_app_secret, server_app_secret) =
             ks.derive_app_traffic_secrets(&transcript_hash_sf)?;
-        crate::crypt::keylog::log_key(&self.config, "CLIENT_TRAFFIC_SECRET_0", &self.client_random, &client_app_secret);
-        crate::crypt::keylog::log_key(&self.config, "SERVER_TRAFFIC_SECRET_0", &self.client_random, &server_app_secret);
+        crate::crypt::keylog::log_key(
+            &self.config,
+            "CLIENT_TRAFFIC_SECRET_0",
+            &self.client_random,
+            &client_app_secret,
+        );
+        crate::crypt::keylog::log_key(
+            &self.config,
+            "SERVER_TRAFFIC_SECRET_0",
+            &self.client_random,
+            &server_app_secret,
+        );
         let server_app_keys = TrafficKeys::derive(&params, &server_app_secret)?;
         let client_app_keys = TrafficKeys::derive(&params, &client_app_secret)?;
 

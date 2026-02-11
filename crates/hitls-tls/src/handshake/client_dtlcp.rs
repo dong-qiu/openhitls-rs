@@ -5,7 +5,9 @@
 //! double certificates, ECDHE + ECC static key exchange).
 
 use crate::config::TlsConfig;
-use crate::crypt::key_schedule12::{compute_verify_data, derive_master_secret, derive_tlcp_key_block};
+use crate::crypt::key_schedule12::{
+    compute_verify_data, derive_master_secret, derive_tlcp_key_block,
+};
 use crate::crypt::transcript::TranscriptHash;
 use crate::crypt::{KeyExchangeAlg, NamedGroup, TlcpCipherSuiteParams};
 use crate::handshake::codec::ServerHello;
@@ -13,9 +15,7 @@ use crate::handshake::codec12::{
     build_ske_params, build_ske_signed_data, encode_client_key_exchange, encode_finished12,
     ClientKeyExchange,
 };
-use crate::handshake::codec_dtls::{
-    dtls_to_tls_handshake, wrap_dtls_handshake_full,
-};
+use crate::handshake::codec_dtls::{dtls_to_tls_handshake, wrap_dtls_handshake_full};
 use crate::handshake::codec_tlcp::{
     build_ecc_ske_signed_data, decode_ecc_server_key_exchange, encode_ecc_client_key_exchange,
     EccClientKeyExchange, TlcpCertificateMessage,
@@ -133,9 +133,11 @@ impl DtlcpClientHandshake {
         if let Some(ref name) = self.config.server_name {
             extensions.push(crate::handshake::extensions_codec::build_server_name(name));
         }
-        extensions.push(crate::handshake::extensions_codec::build_signature_algorithms(
-            &self.config.signature_algorithms,
-        ));
+        extensions.push(
+            crate::handshake::extensions_codec::build_signature_algorithms(
+                &self.config.signature_algorithms,
+            ),
+        );
         extensions.push(crate::handshake::extensions_codec::build_ec_point_formats());
 
         // Filter cipher suites to TLCP
@@ -364,8 +366,7 @@ impl DtlcpClientHandshake {
         // Convert CKE TLS msg to DTLS format
         let seq = self.message_seq;
         self.message_seq += 1;
-        let cke_dtls_msg =
-            crate::handshake::codec_dtls::tls_to_dtls_handshake(&cke_tls_msg, seq)?;
+        let cke_dtls_msg = crate::handshake::codec_dtls::tls_to_dtls_handshake(&cke_tls_msg, seq)?;
 
         // Add CKE to transcript in TLS format
         self.transcript.update(&cke_tls_msg)?;

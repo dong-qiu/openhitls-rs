@@ -655,8 +655,7 @@ mod tests {
 
     #[test]
     fn test_dtlcp_handshake_ecdhe_gcm_no_cookie() {
-        let (client_config, server_config) =
-            build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (client_config, server_config) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
         let (client, server) =
             dtlcp_handshake_in_memory(client_config, server_config, false).unwrap();
 
@@ -664,17 +663,13 @@ mod tests {
         assert!(server.is_connected());
         assert_eq!(client.version(), Some(TlsVersion::Dtlcp));
         assert_eq!(server.version(), Some(TlsVersion::Dtlcp));
-        assert_eq!(
-            client.cipher_suite(),
-            Some(CipherSuite::ECDHE_SM4_GCM_SM3)
-        );
+        assert_eq!(client.cipher_suite(), Some(CipherSuite::ECDHE_SM4_GCM_SM3));
         assert_eq!(client.cipher_suite(), server.cipher_suite());
     }
 
     #[test]
     fn test_dtlcp_handshake_ecdhe_gcm_with_cookie() {
-        let (client_config, server_config) =
-            build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (client_config, server_config) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
         let (client, server) =
             dtlcp_handshake_in_memory(client_config, server_config, true).unwrap();
 
@@ -687,42 +682,33 @@ mod tests {
 
     #[test]
     fn test_dtlcp_handshake_ecc_gcm() {
-        let (client_config, server_config) =
-            build_dtlcp_configs(CipherSuite::ECC_SM4_GCM_SM3);
+        let (client_config, server_config) = build_dtlcp_configs(CipherSuite::ECC_SM4_GCM_SM3);
         let (client, server) =
             dtlcp_handshake_in_memory(client_config, server_config, false).unwrap();
 
         assert!(client.is_connected());
         assert!(server.is_connected());
-        assert_eq!(
-            client.cipher_suite(),
-            Some(CipherSuite::ECC_SM4_GCM_SM3)
-        );
+        assert_eq!(client.cipher_suite(), Some(CipherSuite::ECC_SM4_GCM_SM3));
     }
 
     // --- CBC handshake test ---
 
     #[test]
     fn test_dtlcp_handshake_ecdhe_cbc() {
-        let (client_config, server_config) =
-            build_dtlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3);
+        let (client_config, server_config) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3);
         let (client, server) =
             dtlcp_handshake_in_memory(client_config, server_config, false).unwrap();
 
         assert!(client.is_connected());
         assert!(server.is_connected());
-        assert_eq!(
-            client.cipher_suite(),
-            Some(CipherSuite::ECDHE_SM4_CBC_SM3)
-        );
+        assert_eq!(client.cipher_suite(), Some(CipherSuite::ECDHE_SM4_CBC_SM3));
     }
 
     // --- Application data exchange ---
 
     #[test]
     fn test_dtlcp_app_data_exchange() {
-        let (client_config, server_config) =
-            build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (client_config, server_config) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
         let (mut client, mut server) =
             dtlcp_handshake_in_memory(client_config, server_config, false).unwrap();
 
@@ -741,8 +727,7 @@ mod tests {
 
     #[test]
     fn test_dtlcp_app_data_exchange_cbc() {
-        let (client_config, server_config) =
-            build_dtlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3);
+        let (client_config, server_config) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3);
         let (mut client, mut server) =
             dtlcp_handshake_in_memory(client_config, server_config, false).unwrap();
 
@@ -761,8 +746,7 @@ mod tests {
 
     #[test]
     fn test_dtlcp_anti_replay_rejection() {
-        let (client_config, server_config) =
-            build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (client_config, server_config) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
         let (mut client, mut server) =
             dtlcp_handshake_in_memory(client_config, server_config, false).unwrap();
 
@@ -782,8 +766,7 @@ mod tests {
 
     #[test]
     fn test_dtlcp_multiple_messages() {
-        let (client_config, server_config) =
-            build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (client_config, server_config) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
         let (mut client, mut server) =
             dtlcp_handshake_in_memory(client_config, server_config, false).unwrap();
 
@@ -806,16 +789,12 @@ mod tests {
 
     #[test]
     fn test_dtlcp_handshake_ecc_cbc() {
-        let (client_config, server_config) =
-            build_dtlcp_configs(CipherSuite::ECC_SM4_CBC_SM3);
+        let (client_config, server_config) = build_dtlcp_configs(CipherSuite::ECC_SM4_CBC_SM3);
         let (client, server) =
             dtlcp_handshake_in_memory(client_config, server_config, false).unwrap();
 
         assert!(client.is_connected());
         assert!(server.is_connected());
-        assert_eq!(
-            client.cipher_suite(),
-            Some(CipherSuite::ECC_SM4_CBC_SM3)
-        );
+        assert_eq!(client.cipher_suite(), Some(CipherSuite::ECC_SM4_CBC_SM3));
     }
 }

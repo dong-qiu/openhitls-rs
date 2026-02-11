@@ -63,8 +63,7 @@ impl ExtensionContext {
 ///
 /// Called when constructing the relevant handshake message.
 /// Return `Some(data)` to include the extension, or `None` to skip it.
-pub type CustomExtAddCallback =
-    Arc<dyn Fn(ExtensionContext) -> Option<Vec<u8>> + Send + Sync>;
+pub type CustomExtAddCallback = Arc<dyn Fn(ExtensionContext) -> Option<Vec<u8>> + Send + Sync>;
 
 /// Callback to parse received custom extension data.
 ///

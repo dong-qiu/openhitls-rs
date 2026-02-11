@@ -223,7 +223,9 @@ impl DtlcpRecordDecryptorGcm {
             .decrypt(&nonce, &aad, ciphertext_with_tag)
             .map_err(|_| TlsError::RecordError("DTLCP bad record MAC".into()))?;
         if plaintext.len() > MAX_PLAINTEXT_LENGTH {
-            return Err(TlsError::RecordError("decrypted plaintext too large".into()));
+            return Err(TlsError::RecordError(
+                "decrypted plaintext too large".into(),
+            ));
         }
         Ok(plaintext)
     }
@@ -269,8 +271,7 @@ impl DtlcpRecordEncryptorCbc {
         encrypt_data.extend_from_slice(&padding);
 
         let mut iv = [0u8; SM4_BLOCK_SIZE];
-        getrandom::getrandom(&mut iv)
-            .map_err(|_| TlsError::RecordError("RNG failed".into()))?;
+        getrandom::getrandom(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
         sm4_cbc_encrypt_raw(&self.enc_key, &iv, &mut encrypt_data)?;
 
         let mut fragment = Vec::with_capacity(SM4_BLOCK_SIZE + encrypt_data.len());
@@ -306,10 +307,7 @@ impl DtlcpRecordDecryptorCbc {
     }
 
     /// Decrypt a DTLCP CBC record.
-    pub fn decrypt_record(
-        &mut self,
-        record: &DtlsRecord,
-    ) -> Result<Vec<u8>, TlsError> {
+    pub fn decrypt_record(&mut self, record: &DtlsRecord) -> Result<Vec<u8>, TlsError> {
         let fragment = &record.fragment;
         if fragment.len() < SM4_BLOCK_SIZE + SM4_BLOCK_SIZE * 3 {
             return Err(TlsError::RecordError("CBC record too short".into()));
@@ -327,7 +325,11 @@ impl DtlcpRecordDecryptorCbc {
 
         let padding_length = decrypted[decrypted.len() - 1] as usize;
         let total_overhead = padding_length + 1 + SM3_MAC_SIZE;
-        let good_length = if total_overhead <= decrypted.len() { 1u8 } else { 0u8 };
+        let good_length = if total_overhead <= decrypted.len() {
+            1u8
+        } else {
+            0u8
+        };
 
         let pad_start = decrypted.len().saturating_sub(padding_length + 1);
         let mut pad_ok = good_length;
@@ -362,7 +364,9 @@ impl DtlcpRecordDecryptorCbc {
 
         let plaintext = decrypted[..content_len].to_vec();
         if plaintext.len() > MAX_PLAINTEXT_LENGTH {
-            return Err(TlsError::RecordError("decrypted plaintext too large".into()));
+            return Err(TlsError::RecordError(
+                "decrypted plaintext too large".into(),
+            ));
         }
         Ok(plaintext)
     }
@@ -433,10 +437,8 @@ mod tests {
     fn test_dtlcp_cbc_encrypt_decrypt() {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0x99u8; 32];
-        let mut encryptor =
-            DtlcpRecordEncryptorCbc::new(enc_key.clone(), mac_key.clone());
-        let mut decryptor =
-            DtlcpRecordDecryptorCbc::new(enc_key, mac_key);
+        let mut encryptor = DtlcpRecordEncryptorCbc::new(enc_key.clone(), mac_key.clone());
+        let mut decryptor = DtlcpRecordDecryptorCbc::new(enc_key, mac_key);
 
         let plaintext = b"hello DTLCP CBC";
         let record = encryptor
