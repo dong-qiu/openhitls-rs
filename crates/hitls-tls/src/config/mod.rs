@@ -112,6 +112,19 @@ pub struct TlsConfig {
     pub psk_identity_hint: Option<Vec<u8>>,
     /// Server PSK callback: look up PSK by identity. Returns None if unknown.
     pub psk_server_callback: Option<PskServerCallback>,
+    /// Record size limit (RFC 8449). 0 = disabled (use default 16384).
+    /// Valid range: 64..=16384 (TLS 1.2) or 64..=16385 (TLS 1.3).
+    pub record_size_limit: u16,
+    /// Whether to send Fallback SCSV (RFC 7507) in ClientHello.
+    pub send_fallback_scsv: bool,
+    /// Enable OCSP stapling: client offers status_request, server provides stapled response.
+    pub enable_ocsp_stapling: bool,
+    /// Raw DER-encoded OCSP response for server-side stapling.
+    pub ocsp_staple: Option<Vec<u8>>,
+    /// Enable SCT (RFC 6962): client offers, server provides.
+    pub enable_sct: bool,
+    /// Raw SCT list bytes for server to provide in Certificate entries.
+    pub sct_list: Option<Vec<u8>>,
     /// TLCP encryption certificate chain (DER-encoded, leaf first).
     /// TLCP uses double certificates: a signing cert + an encryption cert.
     #[cfg(feature = "tlcp")]
@@ -179,6 +192,12 @@ pub struct TlsConfigBuilder {
     psk_identity: Option<Vec<u8>>,
     psk_identity_hint: Option<Vec<u8>>,
     psk_server_callback: Option<PskServerCallback>,
+    record_size_limit: u16,
+    send_fallback_scsv: bool,
+    enable_ocsp_stapling: bool,
+    ocsp_staple: Option<Vec<u8>>,
+    enable_sct: bool,
+    sct_list: Option<Vec<u8>>,
     #[cfg(feature = "tlcp")]
     tlcp_enc_certificate_chain: Vec<Vec<u8>>,
     #[cfg(feature = "tlcp")]
@@ -224,6 +243,12 @@ impl Default for TlsConfigBuilder {
             psk_identity: None,
             psk_identity_hint: None,
             psk_server_callback: None,
+            record_size_limit: 0,
+            send_fallback_scsv: false,
+            enable_ocsp_stapling: false,
+            ocsp_staple: None,
+            enable_sct: false,
+            sct_list: None,
             #[cfg(feature = "tlcp")]
             tlcp_enc_certificate_chain: Vec::new(),
             #[cfg(feature = "tlcp")]
@@ -382,6 +407,36 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn record_size_limit(mut self, limit: u16) -> Self {
+        self.record_size_limit = limit;
+        self
+    }
+
+    pub fn send_fallback_scsv(mut self, enabled: bool) -> Self {
+        self.send_fallback_scsv = enabled;
+        self
+    }
+
+    pub fn enable_ocsp_stapling(mut self, enabled: bool) -> Self {
+        self.enable_ocsp_stapling = enabled;
+        self
+    }
+
+    pub fn ocsp_staple(mut self, staple: Vec<u8>) -> Self {
+        self.ocsp_staple = Some(staple);
+        self
+    }
+
+    pub fn enable_sct(mut self, enabled: bool) -> Self {
+        self.enable_sct = enabled;
+        self
+    }
+
+    pub fn sct_list(mut self, sct: Vec<u8>) -> Self {
+        self.sct_list = Some(sct);
+        self
+    }
+
     #[cfg(feature = "tlcp")]
     pub fn tlcp_enc_certificate_chain(mut self, certs: Vec<Vec<u8>>) -> Self {
         self.tlcp_enc_certificate_chain = certs;
@@ -424,6 +479,12 @@ impl TlsConfigBuilder {
             psk_identity: self.psk_identity,
             psk_identity_hint: self.psk_identity_hint,
             psk_server_callback: self.psk_server_callback,
+            record_size_limit: self.record_size_limit,
+            send_fallback_scsv: self.send_fallback_scsv,
+            enable_ocsp_stapling: self.enable_ocsp_stapling,
+            ocsp_staple: self.ocsp_staple,
+            enable_sct: self.enable_sct,
+            sct_list: self.sct_list,
             #[cfg(feature = "tlcp")]
             tlcp_enc_certificate_chain: self.tlcp_enc_certificate_chain,
             #[cfg(feature = "tlcp")]

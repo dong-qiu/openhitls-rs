@@ -808,6 +808,122 @@ pub fn parse_session_ticket_sh(data: &[u8]) -> Result<(), TlsError> {
 }
 
 // ---------------------------------------------------------------------------
+// Record Size Limit (RFC 8449)
+// ---------------------------------------------------------------------------
+
+/// Build `record_size_limit` extension (RFC 8449).
+/// Wire format: 2-byte uint16 value representing the maximum record size
+/// the sender is willing to receive.
+pub fn build_record_size_limit(limit: u16) -> Extension {
+    Extension {
+        extension_type: ExtensionType::RECORD_SIZE_LIMIT,
+        data: limit.to_be_bytes().to_vec(),
+    }
+}
+
+/// Parse `record_size_limit` extension. Returns the uint16 value.
+/// Valid range: 64..=16384 (TLS 1.2) or 64..=16385 (TLS 1.3).
+pub fn parse_record_size_limit(data: &[u8]) -> Result<u16, TlsError> {
+    if data.len() != 2 {
+        return Err(TlsError::HandshakeFailed(
+            "record_size_limit: expected 2 bytes".into(),
+        ));
+    }
+    let limit = u16::from_be_bytes([data[0], data[1]]);
+    if limit < 64 {
+        return Err(TlsError::HandshakeFailed(
+            "record_size_limit: value must be >= 64".into(),
+        ));
+    }
+    Ok(limit)
+}
+
+// ---------------------------------------------------------------------------
+// OCSP Stapling (RFC 6066 Section 8)
+// ---------------------------------------------------------------------------
+
+/// Build `status_request` extension for ClientHello (RFC 6066 §8).
+/// Requests OCSP stapling: type=ocsp(1), empty responder_id_list, empty extensions.
+pub fn build_status_request_ch() -> Extension {
+    // status_type(1) = ocsp(1), responder_id_list_len(2) = 0, request_extensions_len(2) = 0
+    Extension {
+        extension_type: ExtensionType::STATUS_REQUEST,
+        data: vec![0x01, 0x00, 0x00, 0x00, 0x00],
+    }
+}
+
+/// Parse `status_request` extension from ClientHello.
+/// Returns true if the client requests OCSP stapling (type == ocsp(1)).
+pub fn parse_status_request_ch(data: &[u8]) -> Result<bool, TlsError> {
+    if data.is_empty() {
+        return Err(TlsError::HandshakeFailed(
+            "status_request: empty data".into(),
+        ));
+    }
+    Ok(data[0] == 1) // type = ocsp
+}
+
+/// Build `status_request` extension for TLS 1.3 Certificate entry.
+/// Contains the raw DER-encoded OCSP response wrapped in CertificateStatus format.
+pub fn build_status_request_cert_entry(ocsp_response_der: &[u8]) -> Extension {
+    // CertificateStatus: status_type(1)=ocsp(1) + OCSPResponse length(3) + OCSPResponse
+    let len = ocsp_response_der.len();
+    let mut data = Vec::with_capacity(4 + len);
+    data.push(0x01); // status_type = ocsp
+    data.push((len >> 16) as u8);
+    data.push((len >> 8) as u8);
+    data.push(len as u8);
+    data.extend_from_slice(ocsp_response_der);
+    Extension {
+        extension_type: ExtensionType::STATUS_REQUEST,
+        data,
+    }
+}
+
+/// Parse `status_request` extension from TLS 1.3 Certificate entry.
+/// Returns the raw DER-encoded OCSP response.
+pub fn parse_status_request_cert_entry(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    if data.len() < 4 {
+        return Err(TlsError::HandshakeFailed(
+            "status_request cert entry: too short".into(),
+        ));
+    }
+    if data[0] != 0x01 {
+        return Err(TlsError::HandshakeFailed(
+            "status_request cert entry: expected ocsp type".into(),
+        ));
+    }
+    let len = ((data[1] as usize) << 16) | ((data[2] as usize) << 8) | (data[3] as usize);
+    if data.len() < 4 + len {
+        return Err(TlsError::HandshakeFailed(
+            "status_request cert entry: truncated OCSP response".into(),
+        ));
+    }
+    Ok(data[4..4 + len].to_vec())
+}
+
+// ---------------------------------------------------------------------------
+// Signed Certificate Timestamp (RFC 6962)
+// ---------------------------------------------------------------------------
+
+/// Build `signed_certificate_timestamp` extension for ClientHello (empty, signals support).
+pub fn build_sct_ch() -> Extension {
+    Extension {
+        extension_type: ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP,
+        data: vec![],
+    }
+}
+
+/// Build `signed_certificate_timestamp` extension for TLS 1.3 Certificate entry.
+/// Contains the raw SCT list bytes (opaque SignedCertificateTimestampList).
+pub fn build_sct_cert_entry(sct_list: &[u8]) -> Extension {
+    Extension {
+        extension_type: ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP,
+        data: sct_list.to_vec(),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1153,5 +1269,101 @@ mod tests {
     #[test]
     fn test_session_ticket_sh_non_empty_fails() {
         assert!(parse_session_ticket_sh(&[0x01]).is_err());
+    }
+
+    // Record Size Limit tests
+
+    #[test]
+    fn test_build_parse_record_size_limit() {
+        let ext = build_record_size_limit(4096);
+        assert_eq!(ext.extension_type, ExtensionType::RECORD_SIZE_LIMIT);
+        assert_eq!(ext.data.len(), 2);
+        let parsed = parse_record_size_limit(&ext.data).unwrap();
+        assert_eq!(parsed, 4096);
+    }
+
+    #[test]
+    fn test_record_size_limit_min_64() {
+        let ext = build_record_size_limit(64);
+        let parsed = parse_record_size_limit(&ext.data).unwrap();
+        assert_eq!(parsed, 64);
+    }
+
+    #[test]
+    fn test_record_size_limit_max_16385() {
+        let ext = build_record_size_limit(16385);
+        let parsed = parse_record_size_limit(&ext.data).unwrap();
+        assert_eq!(parsed, 16385);
+    }
+
+    #[test]
+    fn test_record_size_limit_below_64_rejected() {
+        let data = 63u16.to_be_bytes();
+        assert!(parse_record_size_limit(&data).is_err());
+    }
+
+    #[test]
+    fn test_record_size_limit_wrong_length() {
+        assert!(parse_record_size_limit(&[0x10]).is_err());
+        assert!(parse_record_size_limit(&[0x00, 0x40, 0x00]).is_err());
+    }
+
+    // OCSP Stapling tests
+
+    #[test]
+    fn test_build_status_request_ch() {
+        let ext = build_status_request_ch();
+        assert_eq!(ext.extension_type, ExtensionType::STATUS_REQUEST);
+        assert_eq!(ext.data, vec![0x01, 0x00, 0x00, 0x00, 0x00]);
+        let is_ocsp = parse_status_request_ch(&ext.data).unwrap();
+        assert!(is_ocsp);
+    }
+
+    #[test]
+    fn test_status_request_ch_non_ocsp() {
+        let is_ocsp = parse_status_request_ch(&[0x02, 0x00, 0x00]).unwrap();
+        assert!(!is_ocsp);
+    }
+
+    #[test]
+    fn test_status_request_ch_empty_fails() {
+        assert!(parse_status_request_ch(&[]).is_err());
+    }
+
+    #[test]
+    fn test_build_parse_status_request_cert_entry() {
+        let ocsp_der = vec![0x30, 0x82, 0x01, 0x00, 0xAA, 0xBB];
+        let ext = build_status_request_cert_entry(&ocsp_der);
+        assert_eq!(ext.extension_type, ExtensionType::STATUS_REQUEST);
+        let parsed = parse_status_request_cert_entry(&ext.data).unwrap();
+        assert_eq!(parsed, ocsp_der);
+    }
+
+    #[test]
+    fn test_status_request_cert_entry_truncated() {
+        assert!(parse_status_request_cert_entry(&[0x01, 0x00, 0x00]).is_err());
+    }
+
+    // SCT tests
+
+    #[test]
+    fn test_build_sct_ch() {
+        let ext = build_sct_ch();
+        assert_eq!(
+            ext.extension_type,
+            ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP
+        );
+        assert!(ext.data.is_empty());
+    }
+
+    #[test]
+    fn test_build_sct_cert_entry() {
+        let sct_list = vec![0x00, 0x10, 0x01, 0x02, 0x03];
+        let ext = build_sct_cert_entry(&sct_list);
+        assert_eq!(
+            ext.extension_type,
+            ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP
+        );
+        assert_eq!(ext.data, sct_list);
     }
 }

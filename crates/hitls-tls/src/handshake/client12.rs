@@ -175,6 +175,8 @@ pub struct Tls12ClientHandshake {
     server_verify_data: Vec<u8>,
     /// Whether the cached session used EMS (for resumption compatibility).
     cached_session_ems: bool,
+    /// Peer's record size limit from ServerHello.
+    peer_record_size_limit: Option<u16>,
 }
 
 impl Tls12ClientHandshake {
@@ -210,6 +212,7 @@ impl Tls12ClientHandshake {
             client_verify_data: Vec::new(),
             server_verify_data: Vec::new(),
             cached_session_ems: false,
+            peer_record_size_limit: None,
         }
     }
 
@@ -276,6 +279,11 @@ impl Tls12ClientHandshake {
     /// Get the server verify_data from Finished (for renegotiation).
     pub fn server_verify_data(&self) -> &[u8] {
         &self.server_verify_data
+    }
+
+    /// Peer's record size limit from ServerHello (RFC 8449).
+    pub fn peer_record_size_limit(&self) -> Option<u16> {
+        self.peer_record_size_limit
     }
 
     /// Build the ClientHello message.
@@ -352,13 +360,30 @@ impl Tls12ClientHandshake {
             extensions.push(crate::handshake::extensions_codec::build_encrypt_then_mac());
         }
 
+        // Record Size Limit (RFC 8449)
+        if self.config.record_size_limit > 0 {
+            extensions.push(crate::handshake::extensions_codec::build_record_size_limit(
+                self.config.record_size_limit.min(16384),
+            ));
+        }
+
+        // OCSP Stapling (RFC 6066)
+        if self.config.enable_ocsp_stapling {
+            extensions.push(crate::handshake::extensions_codec::build_status_request_ch());
+        }
+
+        // Signed Certificate Timestamp (RFC 6962)
+        if self.config.enable_sct {
+            extensions.push(crate::handshake::extensions_codec::build_sct_ch());
+        }
+
         // Cache the EMS flag from resumption session for later validation
         if let Some(ref session) = self.config.resumption_session {
             self.cached_session_ems = session.extended_master_secret;
         }
 
         // Filter cipher suites to TLS 1.2 ones only
-        let tls12_suites: Vec<CipherSuite> = self
+        let mut tls12_suites: Vec<CipherSuite> = self
             .config
             .cipher_suites
             .iter()
@@ -368,6 +393,11 @@ impl Tls12ClientHandshake {
 
         if tls12_suites.is_empty() {
             return Err(TlsError::NoSharedCipherSuite);
+        }
+
+        // Fallback SCSV (RFC 7507)
+        if self.config.send_fallback_scsv {
+            tls12_suites.push(CipherSuite::TLS_FALLBACK_SCSV);
         }
 
         // Use cached session ID for resumption, or generate a random one.
@@ -455,6 +485,11 @@ impl Tls12ClientHandshake {
                             "non-empty renegotiation_info in initial handshake".into(),
                         ));
                     }
+                }
+                ExtensionType::RECORD_SIZE_LIMIT => {
+                    self.peer_record_size_limit = Some(
+                        crate::handshake::extensions_codec::parse_record_size_limit(&ext.data)?,
+                    );
                 }
                 _ => {}
             }

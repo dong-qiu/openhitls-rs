@@ -488,6 +488,10 @@ impl<S: Read + Write> TlsClientConnection<S> {
                 match hs.state() {
                     HandshakeState::WaitEncryptedExtensions => {
                         hs.process_encrypted_extensions(&msg_data)?;
+                        // Apply peer's record size limit (TLS 1.3)
+                        if let Some(limit) = hs.peer_record_size_limit() {
+                            self.record_layer.max_fragment_size = limit as usize;
+                        }
                     }
                     HandshakeState::WaitCertCertReq => {
                         // Check message type: Certificate (11) or CompressedCertificate (25)
@@ -1106,6 +1110,11 @@ impl<S: Read + Write> TlsServerConnection<S> {
                 hs.process_client_hello_retry(ch2_msg)?
             }
         };
+
+        // Apply client's record size limit (TLS 1.3: subtract 1 for content type)
+        if let Some(limit) = hs.client_record_size_limit() {
+            self.record_layer.max_fragment_size = limit.saturating_sub(1) as usize;
+        }
 
         // Step 3: Send ServerHello as plaintext record
         let sh_record = self
@@ -5365,5 +5374,363 @@ mod tests {
         let (ct, pt, _) = server_rl.open_record(&rec).unwrap();
         assert_eq!(ct, ContentType::ApplicationData);
         assert_eq!(pt, msg);
+    }
+
+    #[test]
+    fn test_tls13_record_size_limit() {
+        use crate::config::ServerPrivateKey;
+        let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+        let client_config = TlsConfig::builder()
+            .record_size_limit(4096)
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .record_size_limit(4096)
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+
+        let mut client_hs = ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // Client builds CH with record_size_limit extension
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+
+        // Server processes CH
+        let (_, ch_data, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_data).unwrap();
+        let actions = match server_hs
+            .process_client_hello(&ch_data[..ch_total])
+            .unwrap()
+        {
+            ClientHelloResult::Actions(a) => *a,
+            _ => panic!("expected Actions"),
+        };
+
+        // Server should have client's RSL
+        assert_eq!(server_hs.client_record_size_limit(), Some(4096));
+
+        // Apply client's RSL to server record layer (TLS 1.3: -1)
+        if let Some(limit) = server_hs.client_record_size_limit() {
+            server_rl.max_fragment_size = limit.saturating_sub(1) as usize;
+        }
+
+        // Server sends ServerHello + encrypted flight
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_hello_msg)
+            .unwrap();
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_hs_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_hs_keys)
+            .unwrap();
+        let ee_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.encrypted_extensions_msg)
+            .unwrap();
+        let cert_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_msg)
+            .unwrap();
+        let cv_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_verify_msg)
+            .unwrap();
+        let sfin_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_finished_msg)
+            .unwrap();
+
+        // Client processes ServerHello
+        let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
+        let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
+        let sh_actions = match client_hs
+            .process_server_hello(&sh_data[..sh_total])
+            .unwrap()
+        {
+            ServerHelloResult::Actions(a) => a,
+            _ => panic!("expected Actions"),
+        };
+        client_rl
+            .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(sh_actions.suite, &sh_actions.client_hs_keys)
+            .unwrap();
+
+        // Client processes EE → should get peer's RSL
+        for rec in [&ee_rec, &cert_rec, &cv_rec] {
+            let (_, data, _) = client_rl.open_record(rec).unwrap();
+            let (_, _, total) = parse_handshake_header(&data).unwrap();
+            let msg_data = &data[..total];
+            match client_hs.state() {
+                HandshakeState::WaitEncryptedExtensions => {
+                    client_hs.process_encrypted_extensions(msg_data).unwrap();
+                    // TLS 1.3: peer_limit = 4096 - 1 = 4095
+                    assert_eq!(client_hs.peer_record_size_limit(), Some(4095));
+                    // Apply to client record layer
+                    client_rl.max_fragment_size = 4095;
+                }
+                HandshakeState::WaitCertCertReq => {
+                    client_hs.process_certificate(msg_data).unwrap();
+                }
+                HandshakeState::WaitCertVerify => {
+                    client_hs.process_certificate_verify(msg_data).unwrap();
+                }
+                s => panic!("unexpected state: {s:?}"),
+            }
+        }
+
+        // Process server Finished
+        let (_, sfin_data, _) = client_rl.open_record(&sfin_rec).unwrap();
+        let (_, _, sfin_total) = parse_handshake_header(&sfin_data).unwrap();
+        let fin_actions = client_hs
+            .process_finished(&sfin_data[..sfin_total])
+            .unwrap();
+
+        // Activate app keys
+        client_rl
+            .activate_read_decryption(fin_actions.suite, &fin_actions.server_app_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(fin_actions.suite, &fin_actions.client_app_keys)
+            .unwrap();
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_app_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_app_keys)
+            .unwrap();
+
+        // Verify record layer caps: server should cap at 4095 bytes
+        assert_eq!(server_rl.max_fragment_size, 4095);
+        assert_eq!(client_rl.max_fragment_size, 4095);
+
+        // Server should reject a plaintext larger than 4095
+        let large = vec![0x42u8; 4096];
+        assert!(server_rl
+            .seal_record(ContentType::ApplicationData, &large)
+            .is_err());
+
+        // But 4095 bytes should work
+        let just_right = vec![0x42u8; 4095];
+        let rec = server_rl
+            .seal_record(ContentType::ApplicationData, &just_right)
+            .unwrap();
+        let (ct, pt, _) = client_rl.open_record(&rec).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, just_right);
+    }
+
+    #[test]
+    fn test_tls13_ocsp_stapling() {
+        use crate::config::ServerPrivateKey;
+        let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+        let fake_ocsp_response = vec![0x30, 0x82, 0x01, 0x00, 0xAA, 0xBB, 0xCC];
+
+        let client_config = TlsConfig::builder()
+            .enable_ocsp_stapling(true)
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .enable_ocsp_stapling(true)
+            .ocsp_staple(fake_ocsp_response.clone())
+            .verify_peer(false)
+            .build();
+
+        let mut client_hs = ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // Full handshake
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+        let (_, ch_data, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_data).unwrap();
+        let actions = match server_hs
+            .process_client_hello(&ch_data[..ch_total])
+            .unwrap()
+        {
+            ClientHelloResult::Actions(a) => *a,
+            _ => panic!("expected Actions"),
+        };
+
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_hello_msg)
+            .unwrap();
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_hs_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_hs_keys)
+            .unwrap();
+        let ee_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.encrypted_extensions_msg)
+            .unwrap();
+        let cert_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_msg)
+            .unwrap();
+        let cv_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_verify_msg)
+            .unwrap();
+        let _sfin_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_finished_msg)
+            .unwrap();
+
+        // Client processes ServerHello
+        let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
+        let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
+        let sh_actions = match client_hs
+            .process_server_hello(&sh_data[..sh_total])
+            .unwrap()
+        {
+            ServerHelloResult::Actions(a) => a,
+            _ => panic!("expected Actions"),
+        };
+        client_rl
+            .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(sh_actions.suite, &sh_actions.client_hs_keys)
+            .unwrap();
+
+        // Process EE, Cert (with OCSP), CertVerify
+        for rec in [&ee_rec, &cert_rec, &cv_rec] {
+            let (_, data, _) = client_rl.open_record(rec).unwrap();
+            let (_, _, total) = parse_handshake_header(&data).unwrap();
+            let msg_data = &data[..total];
+            match client_hs.state() {
+                HandshakeState::WaitEncryptedExtensions => {
+                    client_hs.process_encrypted_extensions(msg_data).unwrap();
+                }
+                HandshakeState::WaitCertCertReq => {
+                    client_hs.process_certificate(msg_data).unwrap();
+                }
+                HandshakeState::WaitCertVerify => {
+                    client_hs.process_certificate_verify(msg_data).unwrap();
+                }
+                s => panic!("unexpected state: {s:?}"),
+            }
+        }
+
+        // Client should have received OCSP response
+        assert_eq!(
+            client_hs.ocsp_response(),
+            Some(fake_ocsp_response.as_slice())
+        );
+        assert!(client_hs.sct_data().is_none());
+    }
+
+    #[test]
+    fn test_tls13_sct() {
+        use crate::config::ServerPrivateKey;
+        let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+        let fake_sct_list = vec![0x00, 0x10, 0x01, 0x02, 0x03, 0x04, 0x05];
+
+        let client_config = TlsConfig::builder()
+            .enable_sct(true)
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .enable_sct(true)
+            .sct_list(fake_sct_list.clone())
+            .verify_peer(false)
+            .build();
+
+        let mut client_hs = ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // Full handshake
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+        let (_, ch_data, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_data).unwrap();
+        let actions = match server_hs
+            .process_client_hello(&ch_data[..ch_total])
+            .unwrap()
+        {
+            ClientHelloResult::Actions(a) => *a,
+            _ => panic!("expected Actions"),
+        };
+
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_hello_msg)
+            .unwrap();
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_hs_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_hs_keys)
+            .unwrap();
+        let ee_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.encrypted_extensions_msg)
+            .unwrap();
+        let cert_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_msg)
+            .unwrap();
+        let cv_rec = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_verify_msg)
+            .unwrap();
+
+        // Client processes ServerHello
+        let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
+        let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
+        let sh_actions = match client_hs
+            .process_server_hello(&sh_data[..sh_total])
+            .unwrap()
+        {
+            ServerHelloResult::Actions(a) => a,
+            _ => panic!("expected Actions"),
+        };
+        client_rl
+            .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(sh_actions.suite, &sh_actions.client_hs_keys)
+            .unwrap();
+
+        // Process EE, Cert (with SCT), CertVerify
+        for rec in [&ee_rec, &cert_rec, &cv_rec] {
+            let (_, data, _) = client_rl.open_record(rec).unwrap();
+            let (_, _, total) = parse_handshake_header(&data).unwrap();
+            let msg_data = &data[..total];
+            match client_hs.state() {
+                HandshakeState::WaitEncryptedExtensions => {
+                    client_hs.process_encrypted_extensions(msg_data).unwrap();
+                }
+                HandshakeState::WaitCertCertReq => {
+                    client_hs.process_certificate(msg_data).unwrap();
+                }
+                HandshakeState::WaitCertVerify => {
+                    client_hs.process_certificate_verify(msg_data).unwrap();
+                }
+                s => panic!("unexpected state: {s:?}"),
+            }
+        }
+
+        // Client should have received SCT data
+        assert!(client_hs.ocsp_response().is_none());
+        assert_eq!(client_hs.sct_data(), Some(fake_sct_list.as_slice()));
     }
 }

@@ -3505,3 +3505,133 @@ HRR fallback works naturally: the client offers both X25519MLKEM768 and X25519 i
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 911 workspace tests passing (27 ignored)
+
+---
+
+## Phase 39: TLS Extensions Completeness — Record Size Limit, Fallback SCSV, OCSP Stapling, SCT (Session 2026-02-11)
+
+### Goals
+- Implement Record Size Limit extension (RFC 8449) for both TLS 1.3 and TLS 1.2
+- Implement Fallback SCSV (RFC 7507) downgrade protection signaling
+- Implement OCSP Stapling (RFC 6066 section 8) for certificate status in TLS 1.3 (full) and TLS 1.2 (CH offering)
+- Implement Signed Certificate Timestamp (SCT, RFC 6962) for Certificate Transparency in TLS 1.3 (full) and TLS 1.2 (CH offering)
+- Integrate Record Size Limit into the record layer via existing max_fragment_size mechanism
+
+### Background
+
+This phase completes four TLS extensions that improve security and interoperability:
+
+**Record Size Limit (RFC 8449)** replaces the legacy Max Fragment Length extension (RFC 6066) with a simpler, more flexible mechanism. Endpoints advertise the maximum record size they are willing to receive (64..16385 bytes). In TLS 1.3, the limit is reduced by 1 to account for the content type byte in the inner plaintext. The extension is carried in ClientHello and EncryptedExtensions (TLS 1.3) or ClientHello and ServerHello (TLS 1.2).
+
+**Fallback SCSV (RFC 7507)** is a Signaling Cipher Suite Value (0x5600) that clients append to the cipher suite list when performing a protocol version fallback. If a server receives TLS_FALLBACK_SCSV and supports a protocol version higher than what the client offered, it responds with an `inappropriate_fallback` alert, preventing version downgrade attacks.
+
+**OCSP Stapling (RFC 6066 section 8)** allows a TLS server to include an OCSP response (certificate status) directly in the handshake, eliminating the need for clients to contact the OCSP responder separately. In TLS 1.3, the OCSP response is included in the extensions of the leaf Certificate entry. In TLS 1.2, the client offers the status_request extension in ClientHello (CertificateStatus message handling deferred).
+
+**SCT (RFC 6962)** enables Certificate Transparency by allowing the server to include Signed Certificate Timestamps in the handshake. In TLS 1.3, the SCT list is included in the extensions of the leaf Certificate entry. In TLS 1.2, the client offers the signed_certificate_timestamp extension in ClientHello.
+
+Max Fragment Length (RFC 6066) was intentionally skipped as it is not present in the C reference implementation and is superseded by Record Size Limit.
+
+### Implementation
+
+#### Step 1: Extension Constants and Types
+- Added `RECORD_SIZE_LIMIT` (0x001C) extension type constant in `extensions/mod.rs`
+- Added `TLS_FALLBACK_SCSV` (0x5600) cipher suite constant in `lib.rs`
+
+#### Step 2: Extension Codec Functions (extensions_codec.rs)
+- `encode_record_size_limit(limit: u16)` — Encodes a 2-byte record size limit value
+- `parse_record_size_limit(data: &[u8])` — Parses and validates the 2-byte limit (64..16385 range)
+- `encode_status_request_client()` — Encodes a minimal status_request extension for ClientHello (type=ocsp, empty responder_id + extensions)
+- `parse_status_request(data: &[u8])` — Parses status_request from ServerHello (empty or type=ocsp)
+- `encode_ocsp_response(response: &[u8])` — Encodes an OCSP response in Certificate entry extensions
+- `encode_sct_list(sct_list: &[u8])` — Encodes a raw SCT list in Certificate entry extensions
+- `parse_sct_list(data: &[u8])` — Parses an SCT list from Certificate entry extensions
+- 13 unit tests covering all codec functions (roundtrips, edge cases, error handling)
+
+#### Step 3: Configuration Fields (config/mod.rs)
+- `record_size_limit: Option<u16>` — Enable Record Size Limit extension with specified value
+- `send_fallback_scsv: bool` — Client appends TLS_FALLBACK_SCSV to cipher suite list
+- `ocsp_response: Option<Vec<u8>>` — Server's OCSP response to staple in Certificate
+- `request_ocsp_stapling: bool` — Client requests OCSP stapling via status_request
+- `sct_list: Option<Vec<u8>>` — Server's SCT list to include in Certificate
+- `request_sct: bool` — Client requests SCTs via signed_certificate_timestamp
+- Builder methods for all new fields
+
+#### Step 4: TLS 1.3 Client Handshake (client.rs)
+- Record Size Limit in ClientHello and EncryptedExtensions processing
+- OCSP status_request extension in ClientHello
+- SCT signed_certificate_timestamp extension in ClientHello
+- OCSP response parsing from leaf Certificate entry extensions
+- SCT list parsing from leaf Certificate entry extensions
+
+#### Step 5: TLS 1.3 Server Handshake (server.rs)
+- Record Size Limit in EncryptedExtensions (echoes negotiated limit)
+- OCSP response in leaf Certificate entry extensions (when configured)
+- SCT list in leaf Certificate entry extensions (when configured)
+
+#### Step 6: TLS 1.2 Client Handshake (client12.rs)
+- Record Size Limit in ClientHello
+- Fallback SCSV appended to cipher suite list when `send_fallback_scsv=true`
+- OCSP status_request extension in ClientHello
+- SCT signed_certificate_timestamp extension in ClientHello
+
+#### Step 7: TLS 1.2 Server Handshake (server12.rs)
+- Record Size Limit echo in ServerHello (when client offers it)
+- Fallback SCSV detection: if server supports higher version than offered, rejects with inappropriate_fallback alert
+- Added `#[derive(Debug)]` on `ServerFlightResult` for test diagnostics
+
+#### Step 8: Record Layer Integration (connection.rs, connection12.rs)
+- TLS 1.3: RSL applied to record layer via `max_fragment_size`, with -1 adjustment for content type byte
+- TLS 1.2: RSL applied to record layer via `max_fragment_size`, no adjustment
+- 3 E2E tests in connection.rs (RSL negotiation, OCSP stapling, SCT)
+- 3 E2E tests in connection12.rs (SCSV accepted, SCSV rejected with inappropriate_fallback, RSL)
+
+### Files Changed
+
+| File | Status | Description |
+|------|--------|-------------|
+| `hitls-tls/src/extensions/mod.rs` | Modified | Added `RECORD_SIZE_LIMIT` (0x001C) constant |
+| `hitls-tls/src/lib.rs` | Modified | Added `TLS_FALLBACK_SCSV` (0x5600) constant |
+| `hitls-tls/src/handshake/extensions_codec.rs` | Modified | 7 codec functions + 13 unit tests |
+| `hitls-tls/src/config/mod.rs` | Modified | 6 new config fields + builder methods |
+| `hitls-tls/src/handshake/client.rs` | Modified | RSL in CH+EE, OCSP/SCT in CH+Certificate |
+| `hitls-tls/src/handshake/server.rs` | Modified | RSL in EE, OCSP/SCT in Certificate entries |
+| `hitls-tls/src/handshake/client12.rs` | Modified | RSL + SCSV + OCSP/SCT in CH |
+| `hitls-tls/src/handshake/server12.rs` | Modified | RSL + SCSV detection + `#[derive(Debug)]` on ServerFlightResult |
+| `hitls-tls/src/connection.rs` | Modified | RSL record layer integration + 3 E2E tests (RSL, OCSP, SCT) |
+| `hitls-tls/src/connection12.rs` | Modified | RSL integration + 3 E2E tests (SCSV accepted, SCSV rejected, RSL) |
+
+### Test Results
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| bignum | 46 | 0 |
+| crypto | 332 | 19 |
+| tls | 370 | 0 |
+| pki | 98 | 0 |
+| utils | 35 | 0 |
+| auth | 20 | 0 |
+| cli | 8 | 5 |
+| integration | 20 | 3 |
+| **Total** | **929** | **27** |
+
+### New Tests (18 total)
+- 13 codec unit tests (hitls-tls/extensions_codec.rs):
+  - Record Size Limit encode/parse roundtrip
+  - Record Size Limit range validation (too low, too high, wrong length)
+  - status_request encode/parse roundtrip
+  - OCSP response encode roundtrip
+  - SCT list encode/parse roundtrip
+  - Edge cases for all codec functions
+- 3 TLS 1.3 E2E tests (hitls-tls/connection.rs):
+  - Record Size Limit negotiation with correct fragment size
+  - OCSP stapling (server sends response, client receives in Certificate)
+  - SCT (server sends SCT list, client receives in Certificate)
+- 2 TLS 1.2 E2E tests (hitls-tls/connection12.rs):
+  - Fallback SCSV accepted (server at same version, no rejection)
+  - Fallback SCSV rejected (server supports higher version, inappropriate_fallback alert)
+  - Record Size Limit negotiation (renamed from 2 to count as single test with RSL)
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 929 workspace tests passing (27 ignored)

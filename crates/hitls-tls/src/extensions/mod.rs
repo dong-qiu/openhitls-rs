@@ -26,6 +26,7 @@ impl ExtensionType {
     pub const ENCRYPT_THEN_MAC: Self = Self(22);
     pub const EXTENDED_MASTER_SECRET: Self = Self(23);
     pub const SESSION_TICKET: Self = Self(35);
+    pub const RECORD_SIZE_LIMIT: Self = Self(28);
     pub const RENEGOTIATION_INFO: Self = Self(0xFF01);
 }
 

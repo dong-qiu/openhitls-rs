@@ -26,9 +26,10 @@ use super::codec::{decode_compressed_certificate, decompress_certificate_body};
 use super::extensions_codec::{
     build_compress_certificate, build_cookie, build_early_data_ch, build_key_share_ch,
     build_post_handshake_auth, build_pre_shared_key_ch, build_psk_key_exchange_modes,
-    build_server_name, build_signature_algorithms, build_supported_groups,
-    build_supported_versions_ch, parse_cookie, parse_key_share_hrr, parse_key_share_sh,
-    parse_pre_shared_key_sh, parse_supported_versions_sh,
+    build_record_size_limit, build_sct_ch, build_server_name, build_signature_algorithms,
+    build_status_request_ch, build_supported_groups, build_supported_versions_ch, parse_cookie,
+    parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh, parse_record_size_limit,
+    parse_status_request_cert_entry, parse_supported_versions_sh,
 };
 use super::key_exchange::KeyExchange;
 use super::verify::verify_certificate_verify;
@@ -111,6 +112,12 @@ pub struct ClientHandshake {
     early_traffic_secret: Vec<u8>,
     /// Offered certificate compression algorithms.
     cert_compression_algos: Vec<CertCompressionAlgorithm>,
+    /// Peer's record size limit from EncryptedExtensions (adjusted for TLS 1.3).
+    peer_record_size_limit: Option<u16>,
+    /// OCSP response received from server Certificate entry.
+    ocsp_response: Option<Vec<u8>>,
+    /// SCT data received from server Certificate entry.
+    sct_data: Option<Vec<u8>>,
 }
 
 impl Drop for ClientHandshake {
@@ -149,6 +156,9 @@ impl ClientHandshake {
             early_data_accepted: false,
             early_traffic_secret: Vec::new(),
             cert_compression_algos: Vec::new(),
+            peer_record_size_limit: None,
+            ocsp_response: None,
+            sct_data: None,
         }
     }
 
@@ -171,6 +181,21 @@ impl ClientHandshake {
     /// Only valid if `offered_early_data()` is true.
     pub fn early_traffic_secret(&self) -> &[u8] {
         &self.early_traffic_secret
+    }
+
+    /// The peer's negotiated record size limit (adjusted for TLS 1.3).
+    pub fn peer_record_size_limit(&self) -> Option<u16> {
+        self.peer_record_size_limit
+    }
+
+    /// OCSP response received from server's Certificate entry.
+    pub fn ocsp_response(&self) -> Option<&[u8]> {
+        self.ocsp_response.as_deref()
+    }
+
+    /// SCT data received from server's Certificate entry.
+    pub fn sct_data(&self) -> Option<&[u8]> {
+        self.sct_data.as_deref()
     }
 
     /// Build the ClientHello handshake message.
@@ -214,6 +239,17 @@ impl ClientHandshake {
                 &self.config.cert_compression_algos,
             ));
             self.cert_compression_algos = self.config.cert_compression_algos.clone();
+        }
+        if self.config.record_size_limit > 0 {
+            extensions.push(build_record_size_limit(
+                self.config.record_size_limit.min(16385),
+            ));
+        }
+        if self.config.enable_ocsp_stapling {
+            extensions.push(build_status_request_ch());
+        }
+        if self.config.enable_sct {
+            extensions.push(build_sct_ch());
         }
 
         // PSK extensions (pre_shared_key MUST be last)
@@ -575,6 +611,17 @@ impl ClientHandshake {
         if !self.cert_compression_algos.is_empty() {
             extensions.push(build_compress_certificate(&self.cert_compression_algos));
         }
+        if self.config.record_size_limit > 0 {
+            extensions.push(build_record_size_limit(
+                self.config.record_size_limit.min(16385),
+            ));
+        }
+        if self.config.enable_ocsp_stapling {
+            extensions.push(build_status_request_ch());
+        }
+        if self.config.enable_sct {
+            extensions.push(build_sct_ch());
+        }
 
         let ch = ClientHello {
             random,
@@ -602,12 +649,21 @@ impl ClientHandshake {
         let body = get_body(msg_data)?;
         let ee = decode_encrypted_extensions(body)?;
 
-        // Check for early_data extension (0-RTT acceptance)
-        if self.offered_early_data {
-            self.early_data_accepted = ee
-                .extensions
-                .iter()
-                .any(|e| e.extension_type == ExtensionType::EARLY_DATA);
+        // Process extensions from EncryptedExtensions
+        for ext in &ee.extensions {
+            match ext.extension_type {
+                ExtensionType::EARLY_DATA => {
+                    if self.offered_early_data {
+                        self.early_data_accepted = true;
+                    }
+                }
+                ExtensionType::RECORD_SIZE_LIMIT => {
+                    let peer_limit = parse_record_size_limit(&ext.data)?;
+                    // TLS 1.3: subtract 1 for content type byte
+                    self.peer_record_size_limit = Some(peer_limit.saturating_sub(1));
+                }
+                _ => {}
+            }
         }
 
         self.transcript.update(msg_data)?;
@@ -641,6 +697,21 @@ impl ClientHandshake {
             .iter()
             .map(|e| e.cert_data.clone())
             .collect();
+
+        // Extract OCSP/SCT from leaf certificate entry extensions
+        if let Some(leaf_entry) = cert_msg.certificate_list.first() {
+            for ext in &leaf_entry.extensions {
+                match ext.extension_type {
+                    ExtensionType::STATUS_REQUEST => {
+                        self.ocsp_response = Some(parse_status_request_cert_entry(&ext.data)?);
+                    }
+                    ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP => {
+                        self.sct_data = Some(ext.data.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         self.transcript.update(msg_data)?;
         self.state = HandshakeState::WaitCertVerify;

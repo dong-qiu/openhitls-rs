@@ -29,9 +29,11 @@ use super::codec::{
 };
 use super::extensions_codec::{
     build_early_data_ee, build_early_data_nst, build_key_share_hrr, build_key_share_sh,
-    build_pre_shared_key_sh, build_supported_versions_sh, parse_compress_certificate,
+    build_pre_shared_key_sh, build_record_size_limit, build_sct_cert_entry,
+    build_status_request_cert_entry, build_supported_versions_sh, parse_compress_certificate,
     parse_key_share_ch, parse_pre_shared_key_ch, parse_psk_key_exchange_modes,
-    parse_signature_algorithms_ch, parse_supported_groups_ch, parse_supported_versions_ch,
+    parse_record_size_limit, parse_signature_algorithms_ch, parse_status_request_ch,
+    parse_supported_groups_ch, parse_supported_versions_ch,
 };
 use super::key_exchange::KeyExchange;
 use super::signing::{select_signature_scheme, sign_certificate_verify};
@@ -235,6 +237,12 @@ pub struct ServerHandshake {
     server_hs_secret: Vec<u8>,
     /// Client-offered certificate compression algorithms.
     client_cert_compression_algos: Vec<CertCompressionAlgorithm>,
+    /// Client's record size limit from ClientHello.
+    client_record_size_limit: Option<u16>,
+    /// Whether client requested OCSP stapling.
+    client_wants_ocsp: bool,
+    /// Whether client requested SCT.
+    client_wants_sct: bool,
 }
 
 impl Drop for ServerHandshake {
@@ -258,12 +266,20 @@ impl ServerHandshake {
             client_hs_secret: Vec::new(),
             server_hs_secret: Vec::new(),
             client_cert_compression_algos: Vec::new(),
+            client_record_size_limit: None,
+            client_wants_ocsp: false,
+            client_wants_sct: false,
         }
     }
 
     /// Current handshake state.
     pub fn state(&self) -> HandshakeState {
         self.state
+    }
+
+    /// The client's record size limit (for capping outgoing records).
+    pub fn client_record_size_limit(&self) -> Option<u16> {
+        self.client_record_size_limit
     }
 
     /// Process a ClientHello message.
@@ -334,6 +350,35 @@ impl ServerHandshake {
             .transpose()?
             .unwrap_or_default();
         self.client_cert_compression_algos = client_cert_compression;
+
+        // record_size_limit (RFC 8449)
+        if let Some(rsl_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::RECORD_SIZE_LIMIT)
+        {
+            self.client_record_size_limit = Some(parse_record_size_limit(&rsl_ext.data)?);
+        }
+
+        // status_request (OCSP stapling, RFC 6066)
+        if let Some(sr_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::STATUS_REQUEST)
+        {
+            if parse_status_request_ch(&sr_ext.data).unwrap_or(false) {
+                self.client_wants_ocsp = true;
+            }
+        }
+
+        // signed_certificate_timestamp (SCT, RFC 6962)
+        if ch
+            .extensions
+            .iter()
+            .any(|e| e.extension_type == ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP)
+        {
+            self.client_wants_sct = true;
+        }
 
         // --- Select cipher suite ---
         let suite = self
@@ -631,6 +676,11 @@ impl ServerHandshake {
         if accept_early_data {
             ee_extensions.push(build_early_data_ee());
         }
+        if self.client_record_size_limit.is_some() && self.config.record_size_limit > 0 {
+            ee_extensions.push(build_record_size_limit(
+                self.config.record_size_limit.min(16385),
+            ));
+        }
         let ee = EncryptedExtensions {
             extensions: ee_extensions,
         };
@@ -647,9 +697,26 @@ impl ServerHandshake {
                     .config
                     .certificate_chain
                     .iter()
-                    .map(|cert_der| CertificateEntry {
-                        cert_data: cert_der.clone(),
-                        extensions: vec![],
+                    .enumerate()
+                    .map(|(i, cert_der)| {
+                        let mut cert_extensions = Vec::new();
+                        if i == 0 {
+                            // Leaf certificate: add OCSP/SCT extensions
+                            if self.client_wants_ocsp {
+                                if let Some(ref ocsp) = self.config.ocsp_staple {
+                                    cert_extensions.push(build_status_request_cert_entry(ocsp));
+                                }
+                            }
+                            if self.client_wants_sct {
+                                if let Some(ref sct) = self.config.sct_list {
+                                    cert_extensions.push(build_sct_cert_entry(sct));
+                                }
+                            }
+                        }
+                        CertificateEntry {
+                            cert_data: cert_der.clone(),
+                            extensions: cert_extensions,
+                        }
                     })
                     .collect(),
             };

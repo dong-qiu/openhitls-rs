@@ -26,14 +26,14 @@ use crate::handshake::codec12::{
     ServerKeyExchangePskHint,
 };
 use crate::handshake::extensions_codec::{
-    build_encrypt_then_mac, build_extended_master_secret, build_session_ticket_sh, parse_alpn_ch,
-    parse_encrypt_then_mac, parse_extended_master_secret, parse_renegotiation_info,
-    parse_server_name, parse_session_ticket_ch, parse_signature_algorithms_ch,
-    parse_supported_groups_ch,
+    build_encrypt_then_mac, build_extended_master_secret, build_record_size_limit,
+    build_session_ticket_sh, parse_alpn_ch, parse_encrypt_then_mac, parse_extended_master_secret,
+    parse_record_size_limit, parse_renegotiation_info, parse_server_name, parse_session_ticket_ch,
+    parse_signature_algorithms_ch, parse_supported_groups_ch,
 };
 use crate::handshake::key_exchange::KeyExchange;
 use crate::session::{decrypt_session_ticket, encrypt_session_ticket, SessionCache, TlsSession};
-use crate::CipherSuite;
+use crate::{CipherSuite, TlsVersion};
 use hitls_crypto::dh::{DhKeyPair, DhParams};
 use hitls_crypto::rsa::{RsaPadding, RsaPrivateKey as CryptoRsaPrivateKey};
 use hitls_crypto::sha2::Sha256;
@@ -54,6 +54,7 @@ pub enum Tls12ServerState {
 }
 
 /// Server flight result after processing ClientHello.
+#[derive(Debug)]
 pub struct ServerFlightResult {
     /// ServerHello handshake message.
     pub server_hello: Vec<u8>,
@@ -197,6 +198,8 @@ pub struct Tls12ServerHandshake {
     client_offered_ems: bool,
     /// Whether the client offered ETM in ClientHello.
     client_offered_etm: bool,
+    /// Client's record size limit from ClientHello (RFC 8449).
+    client_record_size_limit: Option<u16>,
 }
 
 impl Drop for Tls12ServerHandshake {
@@ -231,6 +234,7 @@ impl Tls12ServerHandshake {
             server_verify_data: Vec::new(),
             client_offered_ems: false,
             client_offered_etm: false,
+            client_record_size_limit: None,
         }
     }
 
@@ -286,6 +290,11 @@ impl Tls12ServerHandshake {
     /// Get the server verify_data from Finished (for renegotiation).
     pub fn server_verify_data(&self) -> &[u8] {
         &self.server_verify_data
+    }
+
+    /// Client's record size limit from ClientHello (RFC 8449).
+    pub fn client_record_size_limit(&self) -> Option<u16> {
+        self.client_record_size_limit
     }
 
     /// Build an encrypted NewSessionTicket message for the current session.
@@ -379,7 +388,26 @@ impl Tls12ServerHandshake {
                         ));
                     }
                 }
+                ExtensionType::RECORD_SIZE_LIMIT => {
+                    self.client_record_size_limit = Some(parse_record_size_limit(&ext.data)?);
+                }
+                ExtensionType::STATUS_REQUEST => {
+                    // Note: TLS 1.2 OCSP stapling detected but not yet fully implemented
+                }
+                ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP => {
+                    // Note: TLS 1.2 SCT detected but not yet fully implemented
+                }
                 _ => {} // ignore other extensions
+            }
+        }
+
+        // Fallback SCSV (RFC 7507) detection
+        if ch.cipher_suites.contains(&CipherSuite::TLS_FALLBACK_SCSV) {
+            // If server supports a higher version than TLS 1.2, reject
+            if self.config.max_version == TlsVersion::Tls13 {
+                return Err(TlsError::HandshakeFailed(
+                    "inappropriate fallback: server supports higher version".into(),
+                ));
             }
         }
 
@@ -446,6 +474,12 @@ impl Tls12ServerHandshake {
         // Echo ETM extension
         if self.use_encrypt_then_mac {
             sh_extensions.push(build_encrypt_then_mac());
+        }
+        // Echo Record Size Limit (RFC 8449) if client offered and config enables it
+        if self.client_record_size_limit.is_some() && self.config.record_size_limit > 0 {
+            sh_extensions.push(build_record_size_limit(
+                self.config.record_size_limit.min(16384),
+            ));
         }
 
         // Build ServerHello

@@ -132,6 +132,11 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
         let sh = decode_server_hello(sh_body)?;
         let suite = hs.process_server_hello(&sh_data, &sh)?;
 
+        // Apply peer's record size limit (TLS 1.2: no adjustment)
+        if let Some(limit) = hs.peer_record_size_limit() {
+            self.record_layer.max_fragment_size = limit as usize;
+        }
+
         // Check for abbreviated handshake (session resumption)
         if hs.is_abbreviated() {
             return self.do_client_abbreviated(&mut hs, suite);
@@ -699,6 +704,11 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
 
         // 2. Process ClientHello (with ticket support, no session ID cache)
         let result = hs.process_client_hello_resumable(&ch_data, None)?;
+
+        // Apply client's record size limit (TLS 1.2: no adjustment)
+        if let Some(limit) = hs.client_record_size_limit() {
+            self.record_layer.max_fragment_size = limit as usize;
+        }
 
         match result {
             ServerHelloResult::Full(flight) => {
@@ -4238,5 +4248,201 @@ mod tests {
             run_tls12_psk_handshake(CipherSuite::TLS_RSA_PSK_WITH_AES_128_GCM_SHA256, &[]);
         assert_eq!(cs, Tls12ClientState::Connected);
         assert_eq!(ss, Tls12ServerState::Connected);
+    }
+
+    #[test]
+    fn test_tls12_fallback_scsv_accepted() {
+        // Client sends Fallback SCSV, server max_version is TLS 1.2 → accepted
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .send_fallback_scsv(true)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .max_version(TlsVersion::Tls12) // server only supports TLS 1.2
+            .build();
+
+        let mut client_hs = Tls12ClientHandshake::new(client_config);
+        let mut server_hs = Tls12ServerHandshake::new(server_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_rl = RecordLayer::new();
+
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+        let (_, ch_plain, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_plain).unwrap();
+
+        // Server should accept (max_version == TLS 1.2, no downgrade)
+        let result = server_hs.process_client_hello(&ch_plain[..ch_total]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_tls12_fallback_scsv_rejected() {
+        // Client sends Fallback SCSV, server max_version is TLS 1.3 → rejected
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .send_fallback_scsv(true)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .max_version(TlsVersion::Tls13) // server supports TLS 1.3 → downgrade detected
+            .build();
+
+        let mut client_hs = Tls12ClientHandshake::new(client_config);
+        let mut server_hs = Tls12ServerHandshake::new(server_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_rl = RecordLayer::new();
+
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+        let (_, ch_plain, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_plain).unwrap();
+
+        // Server should reject (inappropriate fallback)
+        let result = server_hs.process_client_hello(&ch_plain[..ch_total]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("inappropriate fallback"));
+    }
+
+    #[test]
+    fn test_tls12_record_size_limit() {
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .record_size_limit(2048)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .record_size_limit(2048)
+            .max_version(TlsVersion::Tls12)
+            .build();
+
+        let mut client_hs = Tls12ClientHandshake::new(client_config);
+        let mut server_hs = Tls12ServerHandshake::new(server_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_rl = RecordLayer::new();
+
+        // 1. Client → CH
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+
+        // 2. Server ← CH
+        let (_, ch_plain, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_plain).unwrap();
+        let flight = server_hs
+            .process_client_hello(&ch_plain[..ch_total])
+            .unwrap();
+
+        // Server should have client's RSL
+        assert_eq!(server_hs.client_record_size_limit(), Some(2048));
+
+        // Apply client's RSL to server record layer (TLS 1.2: no adjustment)
+        if let Some(limit) = server_hs.client_record_size_limit() {
+            server_rl.max_fragment_size = limit as usize;
+        }
+
+        // 3. Server → SH
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &flight.server_hello)
+            .unwrap();
+
+        // 4. Client ← SH
+        let (_, sh_plain, _) = client_rl.open_record(&sh_record).unwrap();
+        let (_, sh_body, sh_total) = parse_handshake_header(&sh_plain).unwrap();
+        let sh = decode_server_hello(sh_body).unwrap();
+        client_hs
+            .process_server_hello(&sh_plain[..sh_total], &sh)
+            .unwrap();
+
+        // Client should have peer's RSL
+        assert_eq!(client_hs.peer_record_size_limit(), Some(2048));
+
+        // Apply to client record layer
+        if let Some(limit) = client_hs.peer_record_size_limit() {
+            client_rl.max_fragment_size = limit as usize;
+        }
+
+        // Verify caps
+        assert_eq!(server_rl.max_fragment_size, 2048);
+        assert_eq!(client_rl.max_fragment_size, 2048);
+
+        // Large plaintext should be rejected
+        let large = vec![0x42u8; 2049];
+        assert!(server_rl
+            .seal_record(ContentType::ApplicationData, &large)
+            .is_err());
+
+        // Exactly 2048 should work
+        let ok = vec![0x42u8; 2048];
+        assert!(server_rl
+            .seal_record(ContentType::ApplicationData, &ok)
+            .is_ok());
     }
 }

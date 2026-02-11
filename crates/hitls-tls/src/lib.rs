@@ -107,6 +107,10 @@ impl CipherSuite {
     pub const ECC_SM4_CBC_SM3: Self = Self(0xE013);
     pub const ECDHE_SM4_GCM_SM3: Self = Self(0xE051);
     pub const ECC_SM4_GCM_SM3: Self = Self(0xE053);
+
+    // Signaling cipher suite values
+    /// TLS Fallback SCSV (RFC 7507) — signals intentional version downgrade.
+    pub const TLS_FALLBACK_SCSV: Self = Self(0x5600);
 }
 
 /// The role of a TLS endpoint.
