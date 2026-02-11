@@ -162,8 +162,8 @@ unsafe fn encrypt_block_ni(block: &mut [u8; 16], enc_keys: &[[u8; 16]], rounds: 
     state = _mm_xor_si128(state, load_key(&enc_keys[0]));
 
     // Rounds 1 .. rounds-1: SubBytes, ShiftRows, MixColumns, AddRoundKey.
-    for r in 1..rounds {
-        state = _mm_aesenc_si128(state, load_key(&enc_keys[r]));
+    for rk in enc_keys.iter().take(rounds).skip(1) {
+        state = _mm_aesenc_si128(state, load_key(rk));
     }
 
     // Final round: SubBytes, ShiftRows, AddRoundKey (no MixColumns).
@@ -181,8 +181,8 @@ unsafe fn decrypt_block_ni(block: &mut [u8; 16], dec_keys: &[[u8; 16]], rounds: 
     state = _mm_xor_si128(state, load_key(&dec_keys[0]));
 
     // Rounds 1 .. rounds-1: InvShiftRows, InvSubBytes, InvMixColumns, AddRoundKey.
-    for r in 1..rounds {
-        state = _mm_aesdec_si128(state, load_key(&dec_keys[r]));
+    for rk in dec_keys.iter().take(rounds).skip(1) {
+        state = _mm_aesdec_si128(state, load_key(rk));
     }
 
     // Final round: InvShiftRows, InvSubBytes, AddRoundKey (no InvMixColumns).
