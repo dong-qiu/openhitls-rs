@@ -13,6 +13,8 @@ pub mod connection_async;
 pub mod connection_dtls12;
 #[cfg(feature = "tlcp")]
 pub mod connection_tlcp;
+#[cfg(feature = "dtlcp")]
+pub mod connection_dtlcp;
 pub mod crypt;
 pub mod extensions;
 pub mod handshake;
@@ -28,6 +30,7 @@ pub enum TlsVersion {
     Tls13,
     Dtls12,
     Tlcp,
+    Dtlcp,
 }
 
 /// TLS cipher suite identifier.

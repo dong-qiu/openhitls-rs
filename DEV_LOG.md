@@ -3635,3 +3635,147 @@ Max Fragment Length (RFC 6066) was intentionally skipped as it is not present in
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 929 workspace tests passing (27 ignored)
+
+---
+
+## Phase 40: Async I/O + Hardware AES + Benchmarks (Session 2026-02-10)
+
+### Goals
+- Feature-gated async TLS connections (tokio)
+- Hardware AES acceleration (AES-NI on x86-64, NEON on AArch64)
+- Criterion benchmarks for performance regression tracking
+
+### Completed Steps
+- Added `async` feature flag with tokio dependency
+- Created `connection_async.rs` and `connection12_async.rs` for async TLS 1.3 and 1.2
+- Implemented hardware AES with runtime CPU feature detection
+- Added Criterion benchmark suite in `benches/`
+- 16 new tests (945 total, 27 ignored)
+
+### Build Status
+- Clippy: zero warnings
+- 945 workspace tests passing (27 ignored)
+
+---
+
+## Phase 41: DTLCP + Custom Extensions + Key Logging (Session 2026-02-11)
+
+### Goals
+- **DTLCP**: DTLS 1.2 record layer + TLCP handshake/crypto (SM2/SM3/SM4), combining datagram transport with Chinese national cryptography
+- **Custom Extensions**: Callback-based framework for user-defined TLS extensions
+- **Key Logging**: NSS key log format (SSLKEYLOGFILE) callback for Wireshark-compatible debugging
+
+### Completed Steps
+
+#### 1. Key Logging (NSS Key Log Format)
+**New files:**
+- `crypt/keylog.rs` — `log_key()` and `log_master_secret()` helpers, hex formatting
+
+**Config integration:**
+- Added `key_log_callback: Option<KeyLogCallback>` to `TlsConfig` and `TlsConfigBuilder`
+- `KeyLogCallback = Arc<dyn Fn(&str) + Send + Sync>`
+
+**Wired into all protocol variants:**
+- TLS 1.3 client: 5 labels (CLIENT_EARLY_TRAFFIC_SECRET, CLIENT_HANDSHAKE_TRAFFIC_SECRET, SERVER_HANDSHAKE_TRAFFIC_SECRET, CLIENT_TRAFFIC_SECRET_0, SERVER_TRAFFIC_SECRET_0)
+- TLS 1.3 server: 5 labels (same, added `client_random` field to ServerHandshake struct)
+- TLS 1.2 client/server: CLIENT_RANDOM label after master_secret derivation
+- DTLS 1.2 client/server: CLIENT_RANDOM label
+- TLCP client/server: CLIENT_RANDOM label
+- DTLCP client/server: CLIENT_RANDOM label
+
+**Tests (5):** Key log format validation, all labels fire, no-op without callback
+
+#### 2. Custom Extensions Framework
+**New types in `extensions/mod.rs`:**
+- `ExtensionContext` — bitmask (CLIENT_HELLO, SERVER_HELLO, ENCRYPTED_EXTENSIONS, CERTIFICATE, CERTIFICATE_REQUEST, NEW_SESSION_TICKET)
+- `CustomExtension` — registration struct (extension_type, context, add_cb, parse_cb)
+- `CustomExtAddCallback` / `CustomExtParseCallback` — Arc<dyn Fn> callbacks
+- `build_custom_extensions()` / `parse_custom_extensions()` helpers
+
+**Config integration:**
+- Added `custom_extensions: Vec<CustomExtension>` to `TlsConfig` and `TlsConfigBuilder`
+
+**Wired into handshake paths:**
+- TLS 1.3 client: build in CH (before PSK), parse SH, parse EE
+- TLS 1.3 server: parse CH, build EE
+- TLS 1.2 client: build in CH, parse SH
+- TLS 1.2 server: parse CH, build SH
+
+**Tests (9):** Custom ext in CH/SH/EE, multiple extensions, skip when None, alert on error, TLS 1.2 roundtrip
+
+#### 3. DTLCP (DTLS + TLCP)
+**New feature flag:**
+- `dtlcp = ["dtls12", "tlcp"]` — requires both DTLS 1.2 and TLCP features
+
+**New files:**
+- `record/encryption_dtlcp.rs` — DTLCP record encryption with DTLS-style nonce/AAD + SM4-CBC/GCM
+  - `DtlcpRecordEncryptorGcm` / `DtlcpRecordDecryptorGcm` — SM4-GCM with `fixed_iv(4)||epoch(2)||seq(6)` nonce
+  - `DtlcpRecordEncryptorCbc` / `DtlcpRecordDecryptorCbc` — SM4-CBC with HMAC-SM3 MAC, `epoch(2)||seq(6)` in MAC
+  - `DtlcpEncryptor` / `DtlcpDecryptor` — dispatch enums (GCM vs CBC)
+- `handshake/client_dtlcp.rs` — DTLCP client state machine
+  - States: Idle → WaitHelloVerifyRequest → WaitServerHello → WaitCertificate → WaitServerKeyExchange → WaitServerHelloDone → WaitChangeCipherSpec → WaitFinished → Connected
+  - Combines DTLS framing (12-byte HS headers, message_seq, fragmentation) with TLCP crypto (double cert, SM2)
+- `handshake/server_dtlcp.rs` — DTLCP server state machine
+  - States: Idle → WaitClientHelloWithCookie → WaitClientKeyExchange → WaitChangeCipherSpec → WaitFinished → Connected
+  - Cookie: HMAC-SHA256(secret, client_random || cipher_suites_hash), truncated to 16 bytes
+  - Double cert via `encode_tlcp_certificate()`, SM2 signing for SKE
+- `connection_dtlcp.rs` — DTLCP connection driver
+  - `DtlcpClientConnection` / `DtlcpServerConnection` with EpochState, anti-replay
+  - `dtlcp_handshake_in_memory()` — full handshake driver for testing
+  - `create_dtlcp_encryptor/decryptor()` — CBC vs GCM dispatch based on suite
+
+**DTLCP key differences from TLCP:**
+- Record header: 13 bytes (DTLS format) with version 0x0101
+- GCM nonce: `fixed_iv(4) || epoch(2) || seq(6)` (DTLS-style)
+- GCM AAD: `epoch(2) || seq(6) || type(1) || version_0x0101(2) || plaintext_len(2)`
+- CBC MAC: `epoch(2) || seq(6)` instead of plain `seq(8)`
+- Handshake: DTLS 12-byte headers with message_seq, fragmentation, cookie exchange
+
+**Tests (23):**
+- 6 encryption tests (GCM encrypt/decrypt, CBC encrypt/decrypt, tampered ciphertext/MAC, AAD format)
+- 6 handshake unit tests (client CH/SH/SKE/cert/CKE, server CH processing)
+- 11 connection tests (ECDHE GCM ± cookie, ECC GCM, ECDHE/ECC CBC, app data GCM/CBC, anti-replay, multi-message)
+
+### Modified Files
+- `Cargo.toml` — added `dtlcp = ["dtls12", "tlcp"]` feature
+- `lib.rs` — added `Dtlcp` to `TlsVersion`, `connection_dtlcp` module
+- `config/mod.rs` — added `key_log_callback`, `custom_extensions` fields
+- `extensions/mod.rs` — added `ExtensionContext`, `CustomExtension`, callbacks
+- `handshake/mod.rs` — added `client_dtlcp`, `server_dtlcp` modules
+- `handshake/extensions_codec.rs` — custom ext build/parse helpers
+- `handshake/client.rs` — key logging + custom ext (TLS 1.3 client)
+- `handshake/server.rs` — key logging + custom ext + client_random field (TLS 1.3 server)
+- `handshake/client12.rs` — key logging + custom ext (TLS 1.2 client)
+- `handshake/server12.rs` — key logging + custom ext (TLS 1.2 server)
+- `handshake/client_dtls12.rs` — key logging (DTLS 1.2 client)
+- `handshake/server_dtls12.rs` — key logging (DTLS 1.2 server)
+- `handshake/client_tlcp.rs` — key logging (TLCP client)
+- `handshake/server_tlcp.rs` — key logging (TLCP server)
+- `record/mod.rs` — added `encryption_dtlcp` module
+- `crypt/mod.rs` — added `keylog` module
+
+### Test Summary
+
+| Crate | Passing | Ignored |
+|-------|---------|---------|
+| bignum | 46 | 0 |
+| crypto | 343 | 19 |
+| tls | 409 | 0 |
+| pki | 98 | 0 |
+| utils | 35 | 0 |
+| auth | 20 | 0 |
+| cli | 8 | 5 |
+| integration | 23 | 3 |
+| **Total** | **982** | **27** |
+
+### New Tests (37 total)
+- 5 key logging tests (format, all TLS 1.3 labels, no-op)
+- 9 custom extension tests (CH/SH/EE, multiple, skip, alert, TLS 1.2)
+- 6 DTLCP encryption tests (GCM/CBC encrypt/decrypt, tamper, AAD)
+- 6 DTLCP handshake unit tests (client/server state machines)
+- 11 DTLCP connection tests (4 cipher suites × cookie modes, app data, anti-replay)
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 982 workspace tests passing (27 ignored)

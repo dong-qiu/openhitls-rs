@@ -289,6 +289,7 @@ impl TlcpClientHandshake {
             &self.client_random,
             &self.server_random,
         )?;
+        crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
 
         let mut key_block = derive_tlcp_key_block(
             &*factory,

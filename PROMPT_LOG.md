@@ -1301,3 +1301,28 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - 0 new files, 10 modified files
 
 890 total tests (27 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 37-40: PSK + Post-Quantum + Extensions + Async (2026-02-10)
+
+**Prompt**: Implement Phases 37-40 (TLS 1.2 PSK cipher suites, TLS 1.3 Post-Quantum Hybrid KEM, TLS Extensions, Async I/O + Hardware AES).
+
+**Result**: 55 new tests (890→945). PSK (20 suites: PSK/DHE_PSK/RSA_PSK/ECDHE_PSK), X25519MLKEM768 hybrid KEM with HRR fallback, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT (RFC 6962), async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), Criterion benchmarks.
+
+945 total tests (27 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 41: DTLCP + Custom Extensions + Key Logging (2026-02-11)
+
+**Prompt**: Implement Phase 41 — DTLCP (DTLS + TLCP, datagram transport with Chinese national crypto), custom TLS extensions framework (callback-based, user-registerable), and NSS key logging (SSLKEYLOGFILE format for Wireshark debugging). DTLCP combines DTLS 1.2 record layer (13-byte header, epoch/seq, cookie, anti-replay, fragmentation) with TLCP handshake (SM2/SM3/SM4, double certificate, ECDHE + ECC key exchange). Key logging wired into TLS 1.3 (6 labels), TLS 1.2, DTLS 1.2, TLCP, and DTLCP (CLIENT_RANDOM label). Custom extensions support CH, SH, and EncryptedExtensions contexts.
+
+**Result**: 37 new tls tests (372→409), total 982 (27 ignored). Complete implementation with:
+- Key logging: NSS format callback, `log_key()` / `log_master_secret()` helpers, wired into all 5 protocol variants
+- Custom extensions: `ExtensionContext` bitmask, `CustomExtension` struct, `Arc<dyn Fn>` callbacks, wired into TLS 1.3 + TLS 1.2 handshakes
+- DTLCP: 4 cipher suites (ECDHE/ECC × SM4-CBC/GCM), DTLS-style nonce/AAD with version 0x0101, cookie exchange, anti-replay
+- 5 new files + 16 modified files
+- Feature flag: `dtlcp = ["dtls12", "tlcp"]`
+
+982 total tests (27 ignored). Clippy clean, fmt clean.

@@ -4,6 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::crypt::{NamedGroup, SignatureScheme};
+use crate::extensions::CustomExtension;
 use crate::handshake::codec::CertCompressionAlgorithm;
 use crate::session::TlsSession;
 use crate::{CipherSuite, TlsRole, TlsVersion};
@@ -51,6 +52,12 @@ impl Drop for ServerPrivateKey {
 
 /// Server callback for PSK lookup: given a PSK identity, return the PSK value or None.
 pub type PskServerCallback = Arc<dyn Fn(&[u8]) -> Option<Vec<u8>> + Send + Sync>;
+
+/// Callback for NSS key log format output (SSLKEYLOGFILE-compatible).
+///
+/// Called with a pre-formatted line: `<label> <client_random_hex> <secret_hex>`.
+/// The callback should append the line (plus a newline) to a log file or buffer.
+pub type KeyLogCallback = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// TLS configuration.
 #[derive(Clone)]
@@ -132,6 +139,10 @@ pub struct TlsConfig {
     /// TLCP encryption private key (SM2).
     #[cfg(feature = "tlcp")]
     pub tlcp_enc_private_key: Option<ServerPrivateKey>,
+    /// Key log callback for NSS key log format (SSLKEYLOGFILE-compatible).
+    pub key_log_callback: Option<KeyLogCallback>,
+    /// Registered custom extensions.
+    pub custom_extensions: Vec<CustomExtension>,
 }
 
 impl fmt::Debug for TlsConfig {
@@ -150,6 +161,10 @@ impl fmt::Debug for TlsConfig {
             .field(
                 "psk_server_callback",
                 &self.psk_server_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "key_log_callback",
+                &self.key_log_callback.as_ref().map(|_| "<callback>"),
             )
             .finish_non_exhaustive()
     }
@@ -202,6 +217,8 @@ pub struct TlsConfigBuilder {
     tlcp_enc_certificate_chain: Vec<Vec<u8>>,
     #[cfg(feature = "tlcp")]
     tlcp_enc_private_key: Option<ServerPrivateKey>,
+    key_log_callback: Option<KeyLogCallback>,
+    custom_extensions: Vec<CustomExtension>,
 }
 
 impl Default for TlsConfigBuilder {
@@ -253,6 +270,8 @@ impl Default for TlsConfigBuilder {
             tlcp_enc_certificate_chain: Vec::new(),
             #[cfg(feature = "tlcp")]
             tlcp_enc_private_key: None,
+            key_log_callback: None,
+            custom_extensions: Vec::new(),
         }
     }
 }
@@ -449,6 +468,16 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn key_log(mut self, cb: KeyLogCallback) -> Self {
+        self.key_log_callback = Some(cb);
+        self
+    }
+
+    pub fn custom_extension(mut self, ext: CustomExtension) -> Self {
+        self.custom_extensions.push(ext);
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -489,6 +518,8 @@ impl TlsConfigBuilder {
             tlcp_enc_certificate_chain: self.tlcp_enc_certificate_chain,
             #[cfg(feature = "tlcp")]
             tlcp_enc_private_key: self.tlcp_enc_private_key,
+            key_log_callback: self.key_log_callback,
+            custom_extensions: self.custom_extensions,
         }
     }
 }

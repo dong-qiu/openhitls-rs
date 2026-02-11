@@ -401,6 +401,13 @@ impl Tls12ServerHandshake {
             }
         }
 
+        // Parse custom extensions from ClientHello
+        crate::extensions::parse_custom_extensions(
+            &self.config.custom_extensions,
+            crate::extensions::ExtensionContext::CLIENT_HELLO,
+            &ch.extensions,
+        )?;
+
         // Fallback SCSV (RFC 7507) detection
         if ch.cipher_suites.contains(&CipherSuite::TLS_FALLBACK_SCSV) {
             // If server supports a higher version than TLS 1.2, reject
@@ -481,6 +488,12 @@ impl Tls12ServerHandshake {
                 self.config.record_size_limit.min(16384),
             ));
         }
+
+        // Custom extensions for ServerHello
+        sh_extensions.extend(crate::extensions::build_custom_extensions(
+            &self.config.custom_extensions,
+            crate::extensions::ExtensionContext::SERVER_HELLO,
+        ));
 
         // Build ServerHello
         let sh = ServerHello {
@@ -1123,6 +1136,7 @@ impl Tls12ServerHandshake {
                 &self.server_random,
             )?
         };
+        crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
 
         let key_block = derive_key_block(
             &*factory,

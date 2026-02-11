@@ -377,6 +377,12 @@ impl Tls12ClientHandshake {
             extensions.push(crate::handshake::extensions_codec::build_sct_ch());
         }
 
+        // Custom extensions
+        extensions.extend(crate::extensions::build_custom_extensions(
+            &self.config.custom_extensions,
+            crate::extensions::ExtensionContext::CLIENT_HELLO,
+        ));
+
         // Cache the EMS flag from resumption session for later validation
         if let Some(ref session) = self.config.resumption_session {
             self.cached_session_ems = session.extended_master_secret;
@@ -494,6 +500,13 @@ impl Tls12ClientHandshake {
                 _ => {}
             }
         }
+
+        // Parse custom extensions in ServerHello
+        crate::extensions::parse_custom_extensions(
+            &self.config.custom_extensions,
+            crate::extensions::ExtensionContext::SERVER_HELLO,
+            &sh.extensions,
+        )?;
 
         // Switch transcript hash if the negotiated suite uses SHA-384
         if params.hash_len == 48 {
@@ -954,6 +967,7 @@ impl Tls12ClientHandshake {
                 &self.server_random,
             )?
         };
+        crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
 
         // Derive key block
         let key_block = derive_key_block(

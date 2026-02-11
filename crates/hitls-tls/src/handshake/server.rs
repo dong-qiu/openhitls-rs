@@ -243,6 +243,8 @@ pub struct ServerHandshake {
     client_wants_ocsp: bool,
     /// Whether client requested SCT.
     client_wants_sct: bool,
+    /// Client random (stored for key logging).
+    client_random: [u8; 32],
 }
 
 impl Drop for ServerHandshake {
@@ -269,6 +271,7 @@ impl ServerHandshake {
             client_record_size_limit: None,
             client_wants_ocsp: false,
             client_wants_sct: false,
+            client_random: [0u8; 32],
         }
     }
 
@@ -297,6 +300,7 @@ impl ServerHandshake {
 
         let body = get_body(msg_data)?;
         let ch = decode_client_hello(body)?;
+        self.client_random = ch.random;
 
         // --- Parse extensions ---
 
@@ -379,6 +383,13 @@ impl ServerHandshake {
         {
             self.client_wants_sct = true;
         }
+
+        // Parse custom extensions from ClientHello
+        crate::extensions::parse_custom_extensions(
+            &self.config.custom_extensions,
+            crate::extensions::ExtensionContext::CLIENT_HELLO,
+            &ch.extensions,
+        )?;
 
         // --- Select cipher suite ---
         let suite = self
@@ -626,6 +637,7 @@ impl ServerHandshake {
         let early_read_keys = if accept_early_data {
             let ch_transcript = self.transcript.current_hash()?;
             let early_secret = ks.derive_early_traffic_secret(&ch_transcript)?;
+            crate::crypt::keylog::log_key(&self.config, "CLIENT_EARLY_TRAFFIC_SECRET", &self.client_random, &early_secret);
             Some(TrafficKeys::derive(&params, &early_secret)?)
         } else {
             None
@@ -667,6 +679,8 @@ impl ServerHandshake {
         let transcript_hash = self.transcript.current_hash()?;
         let (client_hs_secret, server_hs_secret) =
             ks.derive_handshake_traffic_secrets(&transcript_hash)?;
+        crate::crypt::keylog::log_key(&self.config, "CLIENT_HANDSHAKE_TRAFFIC_SECRET", &self.client_random, &client_hs_secret);
+        crate::crypt::keylog::log_key(&self.config, "SERVER_HANDSHAKE_TRAFFIC_SECRET", &self.client_random, &server_hs_secret);
 
         let server_hs_keys = TrafficKeys::derive(&params, &server_hs_secret)?;
         let client_hs_keys = TrafficKeys::derive(&params, &client_hs_secret)?;
@@ -681,6 +695,12 @@ impl ServerHandshake {
                 self.config.record_size_limit.min(16385),
             ));
         }
+        // Custom extensions for EncryptedExtensions
+        ee_extensions.extend(crate::extensions::build_custom_extensions(
+            &self.config.custom_extensions,
+            crate::extensions::ExtensionContext::ENCRYPTED_EXTENSIONS,
+        ));
+
         let ee = EncryptedExtensions {
             extensions: ee_extensions,
         };
@@ -779,6 +799,8 @@ impl ServerHandshake {
         let transcript_hash_sf = self.transcript.current_hash()?;
         let (client_app_secret, server_app_secret) =
             ks.derive_app_traffic_secrets(&transcript_hash_sf)?;
+        crate::crypt::keylog::log_key(&self.config, "CLIENT_TRAFFIC_SECRET_0", &self.client_random, &client_app_secret);
+        crate::crypt::keylog::log_key(&self.config, "SERVER_TRAFFIC_SECRET_0", &self.client_random, &server_app_secret);
         let server_app_keys = TrafficKeys::derive(&params, &server_app_secret)?;
         let client_app_keys = TrafficKeys::derive(&params, &client_app_secret)?;
 

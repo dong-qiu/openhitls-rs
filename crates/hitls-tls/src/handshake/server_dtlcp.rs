@@ -1,41 +1,41 @@
-//! DTLS 1.2 server handshake state machine.
+//! DTLCP server handshake state machine.
 //!
-//! Mirrors the TLS 1.2 server handshake (server12.rs) but uses DTLS-specific
-//! record framing, 12-byte handshake headers, cookie exchange, and
-//! transcript hashing with TLS-format headers (RFC 6347 §4.2.6).
+//! Combines DTLS record framing (12-byte handshake headers, cookie exchange,
+//! transcript hashing with TLS-format headers) with TLCP crypto (SM2/SM3/SM4,
+//! double certificates, ECDHE + ECC static key exchange).
 
-use crate::config::TlsConfig;
-use crate::crypt::key_schedule12::{compute_verify_data, derive_key_block, derive_master_secret};
+use crate::config::{ServerPrivateKey, TlsConfig};
+use crate::crypt::key_schedule12::{
+    compute_verify_data, derive_master_secret, derive_tlcp_key_block,
+};
 use crate::crypt::transcript::TranscriptHash;
-use crate::crypt::{SignatureScheme, Tls12CipherSuiteParams};
-use crate::extensions::ExtensionType;
+use crate::crypt::{KeyExchangeAlg, NamedGroup, SignatureScheme, TlcpCipherSuiteParams};
 use crate::handshake::codec::{encode_server_hello, ClientHello, ServerHello};
 use crate::handshake::codec12::{
-    build_ske_params, build_ske_signed_data, decode_client_key_exchange, encode_certificate12,
-    encode_finished12, encode_server_key_exchange, Certificate12, ServerKeyExchange,
+    build_ske_params, build_ske_signed_data, decode_client_key_exchange, encode_finished12,
+    encode_server_hello_done, encode_server_key_exchange, ServerKeyExchange,
 };
 use crate::handshake::codec_dtls::{
     decode_dtls_client_hello, dtls_to_tls_handshake, encode_hello_verify_request,
     tls_to_dtls_handshake, wrap_dtls_handshake_full, HelloVerifyRequest,
 };
-use crate::handshake::extensions_codec::{
-    parse_signature_algorithms_ch, parse_supported_groups_ch,
+use crate::handshake::codec_tlcp::{
+    build_ecc_ske_signed_data, decode_ecc_client_key_exchange, encode_ecc_server_key_exchange,
+    encode_tlcp_certificate, EccServerKeyExchange, TlcpCertificateMessage,
 };
 use crate::handshake::key_exchange::KeyExchange;
-use crate::handshake::server12::{
-    negotiate_cipher_suite, negotiate_group, select_signature_scheme_tls12, sign_ske_data,
-};
 use crate::handshake::HandshakeType;
-use crate::record::dtls::DTLS12_VERSION;
+use crate::record::encryption_dtlcp::DTLCP_VERSION;
 use crate::CipherSuite;
-use hitls_crypto::sha2::Sha256;
+use hitls_crypto::sm3::Sm3;
 use hitls_types::TlsError;
+use std::mem;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
-/// DTLS 1.2 server handshake states.
+/// DTLCP server handshake states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Dtls12ServerState {
+pub enum DtlcpServerState {
     Idle,
     WaitClientHelloWithCookie,
     WaitClientKeyExchange,
@@ -46,17 +46,16 @@ pub enum Dtls12ServerState {
 
 /// Result from processing the initial ClientHello when cookie mode is enabled.
 #[derive(Debug)]
-pub struct DtlsHelloVerifyResult {
+pub struct DtlcpHelloVerifyResult {
     /// HelloVerifyRequest DTLS handshake message.
     pub hello_verify_request: Vec<u8>,
 }
 
-/// Server flight result after processing ClientHello (with valid cookie or no-cookie mode).
-#[derive(Debug)]
-pub struct DtlsServerFlightResult {
+/// Server flight result after processing ClientHello.
+pub struct DtlcpServerFlightResult {
     /// ServerHello DTLS handshake message.
     pub server_hello: Vec<u8>,
-    /// Certificate DTLS handshake message.
+    /// Certificate DTLS handshake message (double cert).
     pub certificate: Vec<u8>,
     /// ServerKeyExchange DTLS handshake message.
     pub server_key_exchange: Vec<u8>,
@@ -67,17 +66,21 @@ pub struct DtlsServerFlightResult {
 }
 
 /// Keys derived after processing ClientKeyExchange.
-pub struct DtlsDerivedKeys {
+pub struct DtlcpDerivedKeys {
     pub master_secret: Vec<u8>,
+    pub client_write_mac_key: Vec<u8>,
+    pub server_write_mac_key: Vec<u8>,
     pub client_write_key: Vec<u8>,
     pub server_write_key: Vec<u8>,
     pub client_write_iv: Vec<u8>,
     pub server_write_iv: Vec<u8>,
 }
 
-impl Drop for DtlsDerivedKeys {
+impl Drop for DtlcpDerivedKeys {
     fn drop(&mut self) {
         self.master_secret.zeroize();
+        self.client_write_mac_key.zeroize();
+        self.server_write_mac_key.zeroize();
         self.client_write_key.zeroize();
         self.server_write_key.zeroize();
         self.client_write_iv.zeroize();
@@ -86,22 +89,22 @@ impl Drop for DtlsDerivedKeys {
 }
 
 /// Server Finished result.
-pub struct DtlsServerFinishedResult {
+pub struct DtlcpServerFinishedResult {
     /// Server Finished DTLS handshake message.
     pub finished: Vec<u8>,
 }
 
-/// DTLS 1.2 server handshake state machine.
-pub struct Dtls12ServerHandshake {
+/// DTLCP server handshake state machine.
+pub struct DtlcpServerHandshake {
     config: TlsConfig,
-    state: Dtls12ServerState,
-    params: Option<Tls12CipherSuiteParams>,
+    state: DtlcpServerState,
+    params: Option<TlcpCipherSuiteParams>,
     transcript: TranscriptHash,
     client_random: [u8; 32],
     server_random: [u8; 32],
-    ephemeral_key: Option<KeyExchange>,
+    is_ecc_static: bool,
+    ecdh_keypair: Option<KeyExchange>,
     master_secret: Vec<u8>,
-    client_sig_algs: Vec<SignatureScheme>,
     /// Next message_seq to assign to outgoing messages.
     message_seq: u16,
     /// Whether cookie exchange is enabled.
@@ -112,28 +115,28 @@ pub struct Dtls12ServerHandshake {
     expected_cookie: Vec<u8>,
 }
 
-impl Drop for Dtls12ServerHandshake {
+impl Drop for DtlcpServerHandshake {
     fn drop(&mut self) {
         self.master_secret.zeroize();
         self.cookie_secret.zeroize();
     }
 }
 
-impl Dtls12ServerHandshake {
+impl DtlcpServerHandshake {
     pub fn new(config: TlsConfig, enable_cookie: bool) -> Self {
         let mut cookie_secret = vec![0u8; 32];
         let _ = getrandom::getrandom(&mut cookie_secret);
 
         Self {
             config,
-            state: Dtls12ServerState::Idle,
+            state: DtlcpServerState::Idle,
             params: None,
-            transcript: TranscriptHash::new(|| Box::new(Sha256::new())),
+            transcript: TranscriptHash::new(|| Box::new(Sm3::new())),
             client_random: [0u8; 32],
             server_random: [0u8; 32],
-            ephemeral_key: None,
+            is_ecc_static: false,
+            ecdh_keypair: None,
             master_secret: Vec::new(),
-            client_sig_algs: Vec::new(),
             message_seq: 0,
             enable_cookie,
             cookie_secret,
@@ -141,21 +144,19 @@ impl Dtls12ServerHandshake {
         }
     }
 
-    pub fn state(&self) -> Dtls12ServerState {
+    pub fn state(&self) -> DtlcpServerState {
         self.state
     }
 
     /// Process the initial ClientHello.
-    ///
-    /// `raw_dtls_msg` is the DTLS handshake message (12-byte header + body).
     ///
     /// If cookie mode is enabled, returns `Ok(Err(hvr))` containing a HelloVerifyRequest.
     /// If cookie mode is disabled, returns `Ok(Ok(flight))` with the server flight.
     pub fn process_client_hello(
         &mut self,
         raw_dtls_msg: &[u8],
-    ) -> Result<Result<DtlsServerFlightResult, DtlsHelloVerifyResult>, TlsError> {
-        if self.state != Dtls12ServerState::Idle {
+    ) -> Result<Result<DtlcpServerFlightResult, DtlcpHelloVerifyResult>, TlsError> {
+        if self.state != DtlcpServerState::Idle {
             return Err(TlsError::HandshakeFailed("unexpected ClientHello".into()));
         }
 
@@ -166,12 +167,12 @@ impl Dtls12ServerHandshake {
 
         if self.enable_cookie {
             if cookie.is_empty() {
-                // First ClientHello without cookie — send HVR
+                // First ClientHello without cookie -- send HVR
                 let computed_cookie = self.compute_cookie(&ch);
                 self.expected_cookie = computed_cookie.clone();
 
                 let hvr = HelloVerifyRequest {
-                    server_version: DTLS12_VERSION,
+                    server_version: DTLCP_VERSION,
                     cookie: computed_cookie,
                 };
                 let hvr_body = encode_hello_verify_request(&hvr);
@@ -180,12 +181,12 @@ impl Dtls12ServerHandshake {
                 let hvr_msg =
                     wrap_dtls_handshake_full(HandshakeType::HelloVerifyRequest, &hvr_body, seq);
 
-                self.state = Dtls12ServerState::WaitClientHelloWithCookie;
-                return Ok(Err(DtlsHelloVerifyResult {
+                self.state = DtlcpServerState::WaitClientHelloWithCookie;
+                return Ok(Err(DtlcpHelloVerifyResult {
                     hello_verify_request: hvr_msg,
                 }));
             }
-            // Has cookie — verify it
+            // Has cookie -- verify it
             if cookie != self.expected_cookie {
                 return Err(TlsError::HandshakeFailed("cookie mismatch".into()));
             }
@@ -196,13 +197,11 @@ impl Dtls12ServerHandshake {
     }
 
     /// Process a retried ClientHello (with cookie).
-    ///
-    /// Called when state is `WaitClientHelloWithCookie`.
     pub fn process_client_hello_with_cookie(
         &mut self,
         raw_dtls_msg: &[u8],
-    ) -> Result<DtlsServerFlightResult, TlsError> {
-        if self.state != Dtls12ServerState::WaitClientHelloWithCookie {
+    ) -> Result<DtlcpServerFlightResult, TlsError> {
+        if self.state != DtlcpServerState::WaitClientHelloWithCookie {
             return Err(TlsError::HandshakeFailed(
                 "unexpected ClientHello with cookie".into(),
             ));
@@ -225,29 +224,12 @@ impl Dtls12ServerHandshake {
         &mut self,
         raw_dtls_msg: &[u8],
         ch: &ClientHello,
-    ) -> Result<DtlsServerFlightResult, TlsError> {
-        // Parse extensions
-        let mut client_groups = Vec::new();
-        for ext in &ch.extensions {
-            match ext.extension_type {
-                ExtensionType::SIGNATURE_ALGORITHMS => {
-                    self.client_sig_algs = parse_signature_algorithms_ch(&ext.data)?;
-                }
-                ExtensionType::SUPPORTED_GROUPS => {
-                    client_groups = parse_supported_groups_ch(&ext.data)?;
-                }
-                _ => {}
-            }
-        }
-
-        // Negotiate cipher suite
-        let suite = negotiate_cipher_suite(ch, &self.config)?;
-        let params = Tls12CipherSuiteParams::from_suite(suite)?;
-
-        // Switch transcript hash if SHA-384
-        if params.hash_len == 48 {
-            self.transcript = TranscriptHash::new(|| Box::new(hitls_crypto::sha2::Sha384::new()));
-        }
+    ) -> Result<DtlcpServerFlightResult, TlsError> {
+        // Negotiate cipher suite (TLCP suites only)
+        let suite = self.negotiate_suite(ch)?;
+        let params = TlcpCipherSuiteParams::from_suite(suite)?;
+        self.is_ecc_static = params.kx_alg == KeyExchangeAlg::Ecc;
+        self.params = Some(params);
 
         // Add ClientHello to transcript in TLS format
         let tls_ch = dtls_to_tls_handshake(raw_dtls_msg)?;
@@ -257,13 +239,14 @@ impl Dtls12ServerHandshake {
         getrandom::getrandom(&mut self.server_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
-        // Negotiate group
-        let group = negotiate_group(&client_groups, &self.config.supported_groups)?;
-
         // Build ServerHello (TLS format, then convert to DTLS)
+        let mut session_id = vec![0u8; 32];
+        getrandom::getrandom(&mut session_id)
+            .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
+
         let sh = ServerHello {
             random: self.server_random,
-            legacy_session_id: ch.legacy_session_id.clone(),
+            legacy_session_id: session_id,
             cipher_suite: suite,
             extensions: Vec::new(),
         };
@@ -273,59 +256,41 @@ impl Dtls12ServerHandshake {
         let sh_dtls = tls_to_dtls_handshake(&sh_tls, seq)?;
         self.transcript.update(&sh_tls)?;
 
-        // Build Certificate (TLS format, then convert to DTLS)
-        let cert12 = Certificate12 {
-            certificate_list: self.config.certificate_chain.clone(),
+        // Build Certificate (double cert: sign chain + enc cert)
+        let cert_msg = TlcpCertificateMessage {
+            sign_chain: self.config.certificate_chain.clone(),
+            enc_cert: self
+                .config
+                .tlcp_enc_certificate_chain
+                .first()
+                .cloned()
+                .ok_or_else(|| {
+                    TlsError::HandshakeFailed("no TLCP encryption certificate".into())
+                })?,
         };
-        let cert_tls = encode_certificate12(&cert12);
+        let cert_tls = encode_tlcp_certificate(&cert_msg);
         let seq = self.message_seq;
         self.message_seq += 1;
         let cert_dtls = tls_to_dtls_handshake(&cert_tls, seq)?;
         self.transcript.update(&cert_tls)?;
 
-        // Generate ephemeral ECDH key
-        let kx = KeyExchange::generate(group)?;
-        let server_public = kx.public_key_bytes().to_vec();
-
-        // Build and sign ServerKeyExchange
-        let named_curve = group.0;
-        let ske_params = build_ske_params(3, named_curve, &server_public);
-        let signed_data =
-            build_ske_signed_data(&self.client_random, &self.server_random, &ske_params);
-
-        let private_key =
-            self.config.private_key.as_ref().ok_or_else(|| {
-                TlsError::HandshakeFailed("no server private key configured".into())
-            })?;
-
-        let sig_scheme = select_signature_scheme_tls12(private_key, &self.client_sig_algs)?;
-        let signature = sign_ske_data(private_key, sig_scheme, &signed_data)?;
-
-        let ske = ServerKeyExchange {
-            curve_type: 3,
-            named_curve,
-            public_key: server_public,
-            signature_algorithm: sig_scheme,
-            signature,
-        };
-        let ske_tls = encode_server_key_exchange(&ske);
+        // Build ServerKeyExchange
+        let ske_tls = self.build_server_key_exchange(&cert_msg.enc_cert)?;
         let seq = self.message_seq;
         self.message_seq += 1;
         let ske_dtls = tls_to_dtls_handshake(&ske_tls, seq)?;
         self.transcript.update(&ske_tls)?;
 
         // Build ServerHelloDone
-        let shd_tls = crate::handshake::codec12::encode_server_hello_done();
+        let shd_tls = encode_server_hello_done();
         let seq = self.message_seq;
         self.message_seq += 1;
         let shd_dtls = tls_to_dtls_handshake(&shd_tls, seq)?;
         self.transcript.update(&shd_tls)?;
 
-        self.ephemeral_key = Some(kx);
-        self.params = Some(params);
-        self.state = Dtls12ServerState::WaitClientKeyExchange;
+        self.state = DtlcpServerState::WaitClientKeyExchange;
 
-        Ok(DtlsServerFlightResult {
+        Ok(DtlcpServerFlightResult {
             server_hello: sh_dtls,
             certificate: cert_dtls,
             server_key_exchange: ske_dtls,
@@ -334,14 +299,66 @@ impl Dtls12ServerHandshake {
         })
     }
 
+    /// Negotiate a TLCP cipher suite.
+    fn negotiate_suite(&self, ch: &ClientHello) -> Result<CipherSuite, TlsError> {
+        for &server_suite in &self.config.cipher_suites {
+            if crate::crypt::is_tlcp_suite(server_suite)
+                && ch.cipher_suites.contains(&server_suite)
+            {
+                return Ok(server_suite);
+            }
+        }
+        Err(TlsError::NoSharedCipherSuite)
+    }
+
+    /// Build the ServerKeyExchange message (TLS format).
+    fn build_server_key_exchange(&mut self, enc_cert_der: &[u8]) -> Result<Vec<u8>, TlsError> {
+        let sign_key = self
+            .config
+            .private_key
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no signing private key".into()))?;
+
+        if self.is_ecc_static {
+            // ECC static: sign (client_random || server_random || enc_cert_der)
+            let signed_data =
+                build_ecc_ske_signed_data(&self.client_random, &self.server_random, enc_cert_der);
+            let signature = sign_sm2(sign_key, &signed_data)?;
+
+            let ske = EccServerKeyExchange {
+                signature_algorithm: SignatureScheme::SM2_SM3,
+                signature,
+            };
+            Ok(encode_ecc_server_key_exchange(&ske))
+        } else {
+            // ECDHE: generate ephemeral SM2 keypair
+            let kx = KeyExchange::generate(NamedGroup::SM2P256)?;
+            let public_key = kx.public_key_bytes().to_vec();
+
+            let params = build_ske_params(3, 0x0041, &public_key);
+            let signed_data =
+                build_ske_signed_data(&self.client_random, &self.server_random, &params);
+            let signature = sign_sm2(sign_key, &signed_data)?;
+
+            let ske = ServerKeyExchange {
+                curve_type: 3,
+                named_curve: 0x0041,
+                public_key,
+                signature_algorithm: SignatureScheme::SM2_SM3,
+                signature,
+            };
+
+            self.ecdh_keypair = Some(kx);
+            Ok(encode_server_key_exchange(&ske))
+        }
+    }
+
     /// Process ClientKeyExchange and derive keys.
-    ///
-    /// `raw_dtls_msg` is the DTLS handshake message (12-byte header + body).
     pub fn process_client_key_exchange(
         &mut self,
         raw_dtls_msg: &[u8],
-    ) -> Result<DtlsDerivedKeys, TlsError> {
-        if self.state != Dtls12ServerState::WaitClientKeyExchange {
+    ) -> Result<DtlcpDerivedKeys, TlsError> {
+        if self.state != DtlcpServerState::WaitClientKeyExchange {
             return Err(TlsError::HandshakeFailed(
                 "unexpected ClientKeyExchange".into(),
             ));
@@ -353,19 +370,47 @@ impl Dtls12ServerHandshake {
 
         // Decode CKE body (skip DTLS 12-byte header)
         let body = dtls_get_body(raw_dtls_msg)?;
-        let cke = decode_client_key_exchange(body)?;
-
-        let kx = self
-            .ephemeral_key
-            .take()
-            .ok_or_else(|| TlsError::HandshakeFailed("no ephemeral key".into()))?;
-        let pre_master_secret = kx.compute_shared_secret(&cke.public_key)?;
 
         let params = self
             .params
             .as_ref()
-            .ok_or_else(|| TlsError::HandshakeFailed("no cipher suite params".into()))?;
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher suite params".into()))?
+            .clone();
 
+        let pre_master_secret = if self.is_ecc_static {
+            // ECC static: SM2-decrypt premaster secret
+            let cke = decode_ecc_client_key_exchange(body)?;
+
+            let enc_key = self
+                .config
+                .tlcp_enc_private_key
+                .as_ref()
+                .ok_or_else(|| TlsError::HandshakeFailed("no enc private key".into()))?;
+
+            let private_key_bytes = match enc_key {
+                ServerPrivateKey::Sm2 { private_key } => private_key,
+                _ => {
+                    return Err(TlsError::HandshakeFailed(
+                        "enc private key must be SM2".into(),
+                    ))
+                }
+            };
+
+            let kp = hitls_crypto::sm2::Sm2KeyPair::from_private_key(private_key_bytes)
+                .map_err(TlsError::CryptoError)?;
+            kp.decrypt(&cke.encrypted_premaster)
+                .map_err(TlsError::CryptoError)?
+        } else {
+            // ECDHE: compute shared secret
+            let cke = decode_client_key_exchange(body)?;
+            let kx = self
+                .ecdh_keypair
+                .as_ref()
+                .ok_or_else(|| TlsError::HandshakeFailed("no ECDH keypair".into()))?;
+            kx.compute_shared_secret(&cke.public_key)?
+        };
+
+        // Derive master secret and key block
         let factory = params.hash_factory();
         let master_secret = derive_master_secret(
             &*factory,
@@ -375,45 +420,45 @@ impl Dtls12ServerHandshake {
         )?;
         crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
 
-        let key_block = derive_key_block(
+        let mut key_block = derive_tlcp_key_block(
             &*factory,
             &master_secret,
             &self.server_random,
             &self.client_random,
-            params,
+            &params,
         )?;
 
         self.master_secret = master_secret.clone();
-        self.state = Dtls12ServerState::WaitChangeCipherSpec;
+        self.state = DtlcpServerState::WaitChangeCipherSpec;
 
-        Ok(DtlsDerivedKeys {
+        Ok(DtlcpDerivedKeys {
             master_secret,
-            client_write_key: key_block.client_write_key.clone(),
-            server_write_key: key_block.server_write_key.clone(),
-            client_write_iv: key_block.client_write_iv.clone(),
-            server_write_iv: key_block.server_write_iv.clone(),
+            client_write_mac_key: mem::take(&mut key_block.client_write_mac_key),
+            server_write_mac_key: mem::take(&mut key_block.server_write_mac_key),
+            client_write_key: mem::take(&mut key_block.client_write_key),
+            server_write_key: mem::take(&mut key_block.server_write_key),
+            client_write_iv: mem::take(&mut key_block.client_write_iv),
+            server_write_iv: mem::take(&mut key_block.server_write_iv),
         })
     }
 
     /// Process ChangeCipherSpec from client.
     pub fn process_change_cipher_spec(&mut self) -> Result<(), TlsError> {
-        if self.state != Dtls12ServerState::WaitChangeCipherSpec {
+        if self.state != DtlcpServerState::WaitChangeCipherSpec {
             return Err(TlsError::HandshakeFailed(
                 "unexpected ChangeCipherSpec".into(),
             ));
         }
-        self.state = Dtls12ServerState::WaitFinished;
+        self.state = DtlcpServerState::WaitFinished;
         Ok(())
     }
 
     /// Process client Finished and build server Finished.
-    ///
-    /// `raw_dtls_msg` is the DTLS handshake message (12-byte header + body).
     pub fn process_finished(
         &mut self,
         raw_dtls_msg: &[u8],
-    ) -> Result<DtlsServerFinishedResult, TlsError> {
-        if self.state != Dtls12ServerState::WaitFinished {
+    ) -> Result<DtlcpServerFinishedResult, TlsError> {
+        if self.state != DtlcpServerState::WaitFinished {
             return Err(TlsError::HandshakeFailed("unexpected Finished".into()));
         }
 
@@ -461,9 +506,9 @@ impl Dtls12ServerHandshake {
         self.message_seq += 1;
         let finished_dtls = tls_to_dtls_handshake(&finished_tls, seq)?;
 
-        self.state = Dtls12ServerState::Connected;
+        self.state = DtlcpServerState::Connected;
 
-        Ok(DtlsServerFinishedResult {
+        Ok(DtlcpServerFinishedResult {
             finished: finished_dtls,
         })
     }
@@ -497,6 +542,20 @@ impl Dtls12ServerHandshake {
     }
 }
 
+/// SM2 signing using the server's signing private key.
+fn sign_sm2(key: &ServerPrivateKey, data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    match key {
+        ServerPrivateKey::Sm2 { private_key } => {
+            let kp = hitls_crypto::sm2::Sm2KeyPair::from_private_key(private_key)
+                .map_err(TlsError::CryptoError)?;
+            kp.sign(data).map_err(TlsError::CryptoError)
+        }
+        _ => Err(TlsError::HandshakeFailed(
+            "DTLCP signing key must be SM2".into(),
+        )),
+    }
+}
+
 /// Strip the 12-byte DTLS handshake header to get the body.
 fn dtls_get_body(msg: &[u8]) -> Result<&[u8], TlsError> {
     if msg.len() < 12 {
@@ -510,115 +569,18 @@ fn dtls_get_body(msg: &[u8]) -> Result<&[u8], TlsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ServerPrivateKey;
-    use crate::crypt::NamedGroup;
-    use crate::handshake::codec_dtls::{
-        encode_dtls_client_hello_body, parse_dtls_handshake_header,
-    };
-
-    fn make_dtls_server_config() -> TlsConfig {
-        let seed = vec![0x42u8; 32];
-        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
-        let _pub_key = kp.public_key().to_vec();
-
-        // Minimal test cert (not real X.509)
-        let cert_der = vec![0x30, 0x82, 0x01, 0x00];
-
-        TlsConfig::builder()
-            .cipher_suites(&[
-                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-            ])
-            .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
-            .signature_algorithms(&[
-                SignatureScheme::ED25519,
-                SignatureScheme::ECDSA_SECP256R1_SHA256,
-                SignatureScheme::RSA_PSS_RSAE_SHA256,
-            ])
-            .certificate_chain(vec![cert_der])
-            .private_key(ServerPrivateKey::Ed25519(seed))
-            .build()
-    }
-
-    fn build_dtls_client_hello(suites: &[CipherSuite], cookie: &[u8]) -> Vec<u8> {
-        let mut random = [0u8; 32];
-        getrandom::getrandom(&mut random).unwrap();
-
-        let extensions = vec![
-            crate::handshake::extensions_codec::build_signature_algorithms(&[
-                SignatureScheme::ED25519,
-                SignatureScheme::ECDSA_SECP256R1_SHA256,
-                SignatureScheme::RSA_PSS_RSAE_SHA256,
-            ]),
-            crate::handshake::extensions_codec::build_supported_groups(&[
-                NamedGroup::SECP256R1,
-                NamedGroup::X25519,
-            ]),
-            crate::handshake::extensions_codec::build_ec_point_formats(),
-            crate::handshake::extensions_codec::build_renegotiation_info_initial(),
-        ];
-
-        let ch = ClientHello {
-            random,
-            legacy_session_id: vec![0u8; 32],
-            cipher_suites: suites.to_vec(),
-            extensions,
-        };
-
-        let body = encode_dtls_client_hello_body(&ch, cookie);
-        wrap_dtls_handshake_full(HandshakeType::ClientHello, &body, 0)
+    #[test]
+    fn test_dtlcp_server_state_initial() {
+        let config = TlsConfig::builder().build();
+        let hs = DtlcpServerHandshake::new(config, true);
+        assert_eq!(hs.state(), DtlcpServerState::Idle);
     }
 
     #[test]
-    fn test_dtls12_server_state_initial() {
-        let config = make_dtls_server_config();
-        let hs = Dtls12ServerHandshake::new(config, true);
-        assert_eq!(hs.state(), Dtls12ServerState::Idle);
-    }
-
-    #[test]
-    fn test_dtls12_server_no_cookie_mode() {
-        let config = make_dtls_server_config();
-        let mut hs = Dtls12ServerHandshake::new(config, false);
-
-        let ch_msg =
-            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
-
-        let result = hs.process_client_hello(&ch_msg).unwrap();
-        // Should directly produce server flight (no HVR)
-        let flight = result.unwrap();
-
-        // Verify all messages have DTLS headers
-        let (h, _, _) = parse_dtls_handshake_header(&flight.server_hello).unwrap();
-        assert_eq!(h.msg_type, HandshakeType::ServerHello);
-
-        let (h, _, _) = parse_dtls_handshake_header(&flight.certificate).unwrap();
-        assert_eq!(h.msg_type, HandshakeType::Certificate);
-
-        let (h, _, _) = parse_dtls_handshake_header(&flight.server_key_exchange).unwrap();
-        assert_eq!(h.msg_type, HandshakeType::ServerKeyExchange);
-
-        let (h, _, _) = parse_dtls_handshake_header(&flight.server_hello_done).unwrap();
-        assert_eq!(h.msg_type, HandshakeType::ServerHelloDone);
-
-        assert_eq!(hs.state(), Dtls12ServerState::WaitClientKeyExchange);
-    }
-
-    #[test]
-    fn test_dtls12_hello_verify_request_flow() {
-        let config = make_dtls_server_config();
-        let mut hs = Dtls12ServerHandshake::new(config, true);
-
-        // First ClientHello (no cookie)
-        let ch_msg =
-            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
-
-        let result = hs.process_client_hello(&ch_msg).unwrap();
-        // Should get HVR, not flight
-        let hvr_result = result.unwrap_err();
-
-        let (h, _, _) = parse_dtls_handshake_header(&hvr_result.hello_verify_request).unwrap();
-        assert_eq!(h.msg_type, HandshakeType::HelloVerifyRequest);
-        assert_eq!(hs.state(), Dtls12ServerState::WaitClientHelloWithCookie);
+    fn test_dtlcp_server_state_initial_no_cookie() {
+        let config = TlsConfig::builder().build();
+        let hs = DtlcpServerHandshake::new(config, false);
+        assert_eq!(hs.state(), DtlcpServerState::Idle);
+        assert!(!hs.enable_cookie);
     }
 }
