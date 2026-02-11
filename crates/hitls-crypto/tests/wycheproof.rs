@@ -321,12 +321,15 @@ fn parse_der_length(der: &[u8], pos: usize) -> Option<(usize, usize)> {
         }
         let mut len = 0usize;
         for i in 0..num_bytes {
-            len = len.checked_shl(8)?.checked_add(*der.get(pos + 1 + i)? as usize)?;
+            len = len
+                .checked_shl(8)?
+                .checked_add(*der.get(pos + 1 + i)? as usize)?;
         }
         Some((len, pos.checked_add(1 + num_bytes)?))
     }
 }
 
+#[cfg(feature = "sha2")]
 fn sha256_hash(data: &[u8]) -> Vec<u8> {
     use hitls_crypto::hash::Sha256;
     let mut h = Sha256::new();
@@ -334,6 +337,7 @@ fn sha256_hash(data: &[u8]) -> Vec<u8> {
     h.finish().unwrap().to_vec()
 }
 
+#[cfg(feature = "sha2")]
 fn sha384_hash(data: &[u8]) -> Vec<u8> {
     use hitls_crypto::hash::Sha384;
     let mut h = Sha384::new();
@@ -341,6 +345,7 @@ fn sha384_hash(data: &[u8]) -> Vec<u8> {
     h.finish().unwrap().to_vec()
 }
 
+#[cfg(feature = "sha2")]
 fn sha512_hash(data: &[u8]) -> Vec<u8> {
     use hitls_crypto::hash::Sha512;
     let mut h = Sha512::new();
@@ -352,6 +357,7 @@ fn sha512_hash(data: &[u8]) -> Vec<u8> {
 // AES-GCM tests
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "modes")]
 #[test]
 fn wycheproof_aes_gcm() {
     use hitls_crypto::modes::gcm::{gcm_decrypt, gcm_encrypt};
@@ -406,6 +412,7 @@ fn wycheproof_aes_gcm() {
 // ChaCha20-Poly1305 tests
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "chacha20")]
 #[test]
 fn wycheproof_chacha20_poly1305() {
     use hitls_crypto::chacha20::ChaCha20Poly1305;
@@ -467,6 +474,7 @@ fn wycheproof_chacha20_poly1305() {
 // AES-CCM tests
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "modes")]
 #[test]
 fn wycheproof_aes_ccm() {
     use hitls_crypto::modes::ccm::{ccm_decrypt, ccm_encrypt};
@@ -523,6 +531,7 @@ fn wycheproof_aes_ccm() {
 // AES-CBC (PKCS5 padding) tests
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "modes")]
 #[test]
 fn wycheproof_aes_cbc_pkcs5() {
     use hitls_crypto::modes::cbc::{cbc_decrypt, cbc_encrypt};
@@ -576,6 +585,7 @@ fn wycheproof_aes_cbc_pkcs5() {
 
 /// Known DER encoding leniency flags — our ASN.1 parser accepts some
 /// non-strict encodings. These are tracked as known limitations.
+#[cfg(feature = "ecdsa")]
 const ECDSA_ENCODING_FLAGS: &[&str] = &[
     "MissingZero",
     "BerEncodedSignature",
@@ -583,6 +593,7 @@ const ECDSA_ENCODING_FLAGS: &[&str] = &[
     "ModifiedSignature",
 ];
 
+#[cfg(feature = "ecdsa")]
 fn run_ecdsa_tests(
     filename: &str,
     curve_id: hitls_types::EccCurveId,
@@ -609,9 +620,8 @@ fn run_ecdsa_tests(
 
             match tc.result.as_str() {
                 "valid" => {
-                    let ok = verify_result.unwrap_or_else(|e| {
-                        panic!("tc {}: verify error: {e}", tc.tc_id)
-                    });
+                    let ok = verify_result
+                        .unwrap_or_else(|e| panic!("tc {}: verify error: {e}", tc.tc_id));
                     assert!(ok, "tc {}: valid sig rejected", tc.tc_id);
                 }
                 "invalid" => {
@@ -641,6 +651,7 @@ fn run_ecdsa_tests(
     );
 }
 
+#[cfg(feature = "ecdsa")]
 #[test]
 fn wycheproof_ecdsa_p256_sha256() {
     run_ecdsa_tests(
@@ -650,6 +661,7 @@ fn wycheproof_ecdsa_p256_sha256() {
     );
 }
 
+#[cfg(feature = "ecdsa")]
 #[test]
 fn wycheproof_ecdsa_p384_sha384() {
     run_ecdsa_tests(
@@ -659,6 +671,7 @@ fn wycheproof_ecdsa_p384_sha384() {
     );
 }
 
+#[cfg(feature = "ecdsa")]
 #[test]
 fn wycheproof_ecdsa_p521_sha512() {
     run_ecdsa_tests(
@@ -673,8 +686,10 @@ fn wycheproof_ecdsa_p521_sha512() {
 // ---------------------------------------------------------------------------
 
 /// Flags for ECDH tests where our SPKI parser doesn't validate curve params.
+#[cfg(feature = "ecdh")]
 const ECDH_SPKI_FLAGS: &[&str] = &["WrongOrder", "UnnamedCurve", "InvalidPublic"];
 
+#[cfg(feature = "ecdh")]
 fn run_ecdh_tests(filename: &str, curve_id: hitls_types::EccCurveId) {
     use hitls_crypto::ecdh::EcdhKeyPair;
 
@@ -690,9 +705,7 @@ fn run_ecdh_tests(filename: &str, curve_id: hitls_types::EccCurveId) {
             let peer_point = match extract_ec_point_from_spki(&public_der) {
                 Some(p) => p,
                 None => {
-                    if tc.result == "valid"
-                        && !tc.flags.contains(&"CompressedPoint".to_string())
-                    {
+                    if tc.result == "valid" && !tc.flags.contains(&"CompressedPoint".to_string()) {
                         panic!("tc {}: failed to extract EC point from SPKI", tc.tc_id);
                     }
                     tested += 1;
@@ -759,20 +772,29 @@ fn run_ecdh_tests(filename: &str, curve_id: hitls_types::EccCurveId) {
     );
 }
 
+#[cfg(feature = "ecdh")]
 #[test]
 fn wycheproof_ecdh_p256() {
-    run_ecdh_tests("ecdh_secp256r1_test.json", hitls_types::EccCurveId::NistP256);
+    run_ecdh_tests(
+        "ecdh_secp256r1_test.json",
+        hitls_types::EccCurveId::NistP256,
+    );
 }
 
+#[cfg(feature = "ecdh")]
 #[test]
 fn wycheproof_ecdh_p384() {
-    run_ecdh_tests("ecdh_secp384r1_test.json", hitls_types::EccCurveId::NistP384);
+    run_ecdh_tests(
+        "ecdh_secp384r1_test.json",
+        hitls_types::EccCurveId::NistP384,
+    );
 }
 
 // ---------------------------------------------------------------------------
 // Ed25519 tests
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "ed25519")]
 #[test]
 fn wycheproof_ed25519() {
     use hitls_crypto::ed25519::Ed25519KeyPair;
@@ -795,9 +817,8 @@ fn wycheproof_ed25519() {
 
             match tc.result.as_str() {
                 "valid" => {
-                    let ok = verify_result.unwrap_or_else(|e| {
-                        panic!("tc {}: verify error: {e}", tc.tc_id)
-                    });
+                    let ok = verify_result
+                        .unwrap_or_else(|e| panic!("tc {}: verify error: {e}", tc.tc_id));
                     assert!(ok, "tc {}: valid sig rejected", tc.tc_id);
                 }
                 "invalid" => {
@@ -812,16 +833,14 @@ fn wycheproof_ed25519() {
     }
 
     assert!(tested > 0, "No Ed25519 tests were run");
-    eprintln!(
-        "Ed25519: {tested}/{} vectors tested",
-        file.number_of_tests
-    );
+    eprintln!("Ed25519: {tested}/{} vectors tested", file.number_of_tests);
 }
 
 // ---------------------------------------------------------------------------
 // X25519 tests
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "x25519")]
 #[test]
 fn wycheproof_x25519() {
     use hitls_crypto::x25519::{X25519PrivateKey, X25519PublicKey};
@@ -902,16 +921,14 @@ fn wycheproof_x25519() {
     }
 
     assert!(tested > 0, "No X25519 tests were run");
-    eprintln!(
-        "X25519: {tested}/{} vectors tested",
-        file.number_of_tests
-    );
+    eprintln!("X25519: {tested}/{} vectors tested", file.number_of_tests);
 }
 
 // ---------------------------------------------------------------------------
 // RSA PKCS#1 v1.5 Signature tests
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "rsa")]
 #[test]
 fn wycheproof_rsa_signature_pkcs1v15() {
     use hitls_crypto::rsa::{RsaPadding, RsaPublicKey};
@@ -933,9 +950,8 @@ fn wycheproof_rsa_signature_pkcs1v15() {
 
             match tc.result.as_str() {
                 "valid" => {
-                    let ok = verify_result.unwrap_or_else(|e| {
-                        panic!("tc {}: verify error: {e}", tc.tc_id)
-                    });
+                    let ok = verify_result
+                        .unwrap_or_else(|e| panic!("tc {}: verify error: {e}", tc.tc_id));
                     assert!(ok, "tc {}: valid sig rejected", tc.tc_id);
                 }
                 "invalid" => {
@@ -960,6 +976,7 @@ fn wycheproof_rsa_signature_pkcs1v15() {
 // RSA PSS Signature tests
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "rsa")]
 #[test]
 fn wycheproof_rsa_pss() {
     use hitls_crypto::rsa::{RsaPadding, RsaPublicKey};
@@ -985,9 +1002,8 @@ fn wycheproof_rsa_pss() {
 
             match tc.result.as_str() {
                 "valid" => {
-                    let ok = verify_result.unwrap_or_else(|e| {
-                        panic!("tc {}: verify error: {e}", tc.tc_id)
-                    });
+                    let ok = verify_result
+                        .unwrap_or_else(|e| panic!("tc {}: verify error: {e}", tc.tc_id));
                     assert!(ok, "tc {}: valid sig rejected", tc.tc_id);
                 }
                 "invalid" => {
@@ -1002,16 +1018,14 @@ fn wycheproof_rsa_pss() {
     }
 
     assert!(tested > 0, "No RSA PSS tests were run");
-    eprintln!(
-        "RSA PSS: {tested}/{} vectors tested",
-        file.number_of_tests
-    );
+    eprintln!("RSA PSS: {tested}/{} vectors tested", file.number_of_tests);
 }
 
 // ---------------------------------------------------------------------------
 // HKDF-SHA256 tests
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "hkdf")]
 #[test]
 fn wycheproof_hkdf_sha256() {
     use hitls_crypto::hkdf::Hkdf;
@@ -1041,8 +1055,7 @@ fn wycheproof_hkdf_sha256() {
                     );
                 }
                 "invalid" => {
-                    let result =
-                        Hkdf::new(&salt, &ikm).and_then(|h| h.expand(&info, tc.size));
+                    let result = Hkdf::new(&salt, &ikm).and_then(|h| h.expand(&info, tc.size));
                     assert!(result.is_err(), "tc {}: expected HKDF to fail", tc.tc_id);
                 }
                 _ => {}
@@ -1062,6 +1075,7 @@ fn wycheproof_hkdf_sha256() {
 // HMAC-SHA256 tests
 // ---------------------------------------------------------------------------
 
+#[cfg(all(feature = "hmac", feature = "sha2"))]
 #[test]
 fn wycheproof_hmac_sha256() {
     use hitls_crypto::hash::Sha256;
@@ -1091,9 +1105,7 @@ fn wycheproof_hmac_sha256() {
                     );
                 }
                 "invalid" => {
-                    if let Ok(full_mac) =
-                        Hmac::mac(|| Box::new(Sha256::new()), &key, &msg)
-                    {
+                    if let Ok(full_mac) = Hmac::mac(|| Box::new(Sha256::new()), &key, &msg) {
                         let truncated = &full_mac[..tag_bytes.min(full_mac.len())];
                         assert_ne!(
                             hex_encode(truncated),
