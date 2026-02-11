@@ -75,6 +75,8 @@ hazmat = []
 [dev-dependencies]
 criterion = { workspace = true }
 hitls-bignum = { path = "../hitls-bignum" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [[bench]]
 name = "crypto_bench"

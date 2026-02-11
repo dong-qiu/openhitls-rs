@@ -83,6 +83,16 @@ jobs:
       - run: cargo miri test -p hitls-bignum
       - run: cargo miri test -p hitls-utils
 
+  fuzz-check:
+    name: Fuzz Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-fuzz --locked || true
+      - run: cd fuzz && cargo check
+
   bench:
     name: Benchmark Check
     runs-on: ubuntu-latest

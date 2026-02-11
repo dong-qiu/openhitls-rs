@@ -6,6 +6,7 @@
 
 use hitls_bignum::BigNum;
 use hitls_types::CryptoError;
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 use crate::curve25519::edwards::{point_add, scalar_mul, scalar_mul_base, GeExtended};
@@ -190,7 +191,7 @@ impl Ed25519KeyPair {
         let ka = scalar_mul(&k_scalar, &a_point);
         let rka = point_add(&r_point, &ka);
 
-        Ok(sb.to_bytes() == rka.to_bytes())
+        Ok(sb.to_bytes().ct_eq(&rka.to_bytes()).into())
     }
 
     /// Return the 32-byte public key.

@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["fuzz"]
 members = [
     "crates/hitls-types",
     "crates/hitls-utils",
@@ -40,6 +41,7 @@ serde = { version = "1", features = ["derive"] }
 clap = { version = "4", features = ["derive"] }
 criterion = "0.5"
 flate2 = "1"
+serde_json = "1"
 
 [profile.release]
 lto = true

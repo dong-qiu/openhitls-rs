@@ -346,6 +346,8 @@ dependencies = [
  "hitls-bignum",
  "hitls-types",
  "hitls-utils",
+ "serde",
+ "serde_json",
  "subtle",
  "zeroize",
 ]

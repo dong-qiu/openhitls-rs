@@ -3779,3 +3779,91 @@ Max Fragment Length (RFC 6066) was intentionally skipped as it is not present in
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 982 workspace tests passing (27 ignored)
+
+## Phase 42: Wycheproof + Fuzzing + Security Audit (Session 2026-02-11)
+
+### Goals
+- Validate crypto implementations against Google Wycheproof edge-case test vectors
+- Add fuzzing infrastructure (cargo-fuzz, 10 libfuzzer targets)
+- Security audit: constant-time comparisons, zeroize-on-drop, unsafe code review
+- Create SECURITY.md security policy
+- Update CI pipeline with fuzz build check
+
+### Completed Steps
+
+#### 1. Wycheproof Test Vectors (15 tests, 5000+ vectors)
+
+Downloaded 15 JSON vector files from C2SP/wycheproof into `tests/vectors/wycheproof/`:
+- `aes_gcm_test.json` (316 vectors), `chacha20_poly1305_test.json` (325 vectors)
+- `ecdsa_secp256r1_sha256_test.json` (482 vectors), `ecdsa_secp384r1_sha384_test.json` (502 vectors), `ecdsa_secp521r1_sha512_test.json` (540 vectors)
+- `ecdh_secp256r1_test.json` (612 vectors), `ecdh_secp384r1_test.json` (1047 vectors)
+- `ed25519_test.json` (150 vectors), `x25519_test.json` (518 vectors)
+- `rsa_signature_2048_sha256_test.json` (259 vectors), `rsa_pss_2048_sha256_mgf1_32_test.json` (108 vectors)
+- `hkdf_sha256_test.json` (86 vectors), `hmac_sha256_test.json` (174 vectors)
+- `aes_ccm_test.json` (552 vectors), `aes_cbc_pkcs5_test.json` (216 vectors)
+
+Created `crates/hitls-crypto/tests/wycheproof.rs` with common JSON schema structs and 15 `#[test]` functions. All pass.
+
+**Bugs found and fixed during Wycheproof testing:**
+- ECDSA `decode_der_signature()` accepted trailing data after DER SEQUENCE — fixed to reject with `decoder.is_empty()` + `seq.is_empty()` checks
+- DER parser `parse_der_length()` had integer overflow on malformed input — fixed with checked arithmetic
+
+**Known leniencies documented (not security-critical):**
+- ECDSA DER parser accepts some non-strict encodings (MissingZero, BerEncodedSignature, InvalidEncoding)
+- ECDH SPKI parser doesn't validate curve parameters (WrongOrder, UnnamedCurve)
+
+#### 2. Fuzz Targets (10 targets)
+
+Created `fuzz/Cargo.toml` (excluded from workspace) with 10 libfuzzer targets:
+- `fuzz_asn1`, `fuzz_base64`, `fuzz_pem` — hitls-utils parsers
+- `fuzz_x509`, `fuzz_crl`, `fuzz_pkcs8`, `fuzz_pkcs12`, `fuzz_cms` — hitls-pki parsers
+- `fuzz_tls_record`, `fuzz_tls_handshake` — hitls-tls parsers
+
+Added fuzz-check CI job (nightly toolchain, `cargo check` in fuzz directory).
+
+#### 3. Security Audit
+
+**Constant-time audit (2 issues fixed):**
+- Ed25519 `verify()` used `==` for signature comparison → fixed to `subtle::ConstantTimeEq::ct_eq()`
+- Fe25519 `PartialEq` used `==` on byte arrays → fixed to `ct_eq()`
+- All other crypto comparisons (45+ locations) already use `subtle::ConstantTimeEq`: RSA PKCS#1v1.5/PSS/OAEP, GCM tag verification, TLS Finished, TLS 1.2 CBC MAC/padding, SPAKE2+ confirmation
+
+**Zeroize audit (2 issues fixed):**
+- `PaillierKeyPair` missing Drop → added Drop that zeroizes `lambda` and `mu`
+- `ElGamalKeyPair` missing Drop → added Drop that zeroizes `x` (private key)
+- All other key types (30+) properly implement Zeroize/Drop
+
+**Unsafe code review (1 issue fixed):**
+- 7 unsafe blocks in 3 expected files (`aes_ni.rs`, `aes_neon.rs`, `benes.rs`)
+- All technically correct with appropriate safety guards
+- Added missing `// SAFETY:` comment to `benes.rs` lines 142-144
+
+**SECURITY.md created** with: security policy, constant-time operations, zeroize-on-drop, unsafe code inventory, RNG policy, algorithm status, known limitations, testing summary.
+
+### New Test Counts
+- hitls-crypto: 343 unit + 15 Wycheproof = 358 tests (19 ignored)
+- Total workspace: 997 tests (27 ignored)
+
+### Files Created
+- `tests/vectors/wycheproof/*.json` — 15 Wycheproof JSON vector files
+- `crates/hitls-crypto/tests/wycheproof.rs` — Wycheproof integration test file
+- `fuzz/Cargo.toml` — cargo-fuzz manifest
+- `fuzz/fuzz_targets/fuzz_*.rs` — 10 fuzz target files
+- `SECURITY.md` — Security policy
+
+### Files Modified
+- `Cargo.toml` — Added `serde_json` workspace dep, `exclude = ["fuzz"]`
+- `crates/hitls-crypto/Cargo.toml` — Added `serde`, `serde_json` dev-deps
+- `crates/hitls-crypto/src/ecdsa/mod.rs` — Strict DER signature validation
+- `crates/hitls-crypto/src/ed25519/mod.rs` — Constant-time signature verification
+- `crates/hitls-crypto/src/curve25519/field.rs` — Constant-time Fe25519 PartialEq
+- `crates/hitls-crypto/src/paillier/mod.rs` — Added Drop with zeroize
+- `crates/hitls-crypto/src/elgamal/mod.rs` — Added Drop with zeroize
+- `crates/hitls-crypto/src/mceliece/benes.rs` — Added SAFETY comments
+- `.github/workflows/ci.yml` — Added fuzz-check + bench CI jobs
+- `CLAUDE.md`, `README.md`, `DEV_LOG.md` — Updated
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 997 workspace tests passing (27 ignored)

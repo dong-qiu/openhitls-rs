@@ -8,6 +8,7 @@
 
 use hitls_bignum::BigNum;
 use hitls_types::CryptoError;
+use zeroize::Zeroize;
 
 /// An ElGamal key pair for encryption and decryption.
 pub struct ElGamalKeyPair {
@@ -19,6 +20,12 @@ pub struct ElGamalKeyPair {
     x: BigNum,
     /// The public key y = g^x mod p.
     y: BigNum,
+}
+
+impl Drop for ElGamalKeyPair {
+    fn drop(&mut self) {
+        self.x.zeroize();
+    }
 }
 
 impl ElGamalKeyPair {

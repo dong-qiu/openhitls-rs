@@ -9,6 +9,7 @@
 
 use hitls_bignum::BigNum;
 use hitls_types::CryptoError;
+use zeroize::Zeroize;
 
 /// A Paillier key pair (public key n, private key lambda/mu).
 pub struct PaillierKeyPair {
@@ -20,6 +21,13 @@ pub struct PaillierKeyPair {
     lambda: BigNum,
     /// The private key component mu = lambda^{-1} mod n.
     mu: BigNum,
+}
+
+impl Drop for PaillierKeyPair {
+    fn drop(&mut self) {
+        self.lambda.zeroize();
+        self.mu.zeroize();
+    }
 }
 
 impl PaillierKeyPair {

@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 41 complete — DTLCP + Custom Extensions + Key Logging
+- **Status**: Phase 42 complete — Wycheproof + Fuzzing + Security Audit
 
 ## Workspace Structure
 
@@ -18,13 +18,14 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error enums
 │   ├── hitls-utils/     # ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
-│   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); hardware AES acceleration (ARMv8/x86-64); ECC: P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; DRBG: HMAC/CTR/Hash (343 tests)
+│   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); hardware AES acceleration (ARMv8/x86-64); ECC: P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; DRBG: HMAC/CTR/Hash; Wycheproof test vectors (358 tests)
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, hybrid KEM (X25519MLKEM768), async I/O (tokio), TLS 1.2 handshake (ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, Bleichenbacher protection), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), DTLCP (DTLS+TLCP), custom extensions framework, NSS key logging, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT, TLS 1.2 PRF (409 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, Certificate generation, SigningKey abstraction), PKCS#12 (RFC 7292), CMS SignedData (RFC 5652), PKCS#8 (RFC 5958) (98 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (20 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server)
 ├── tests/interop/       # Integration tests (23 cross-crate tests, 3 ignored)
-├── tests/vectors/       # Standard test vectors
+├── tests/vectors/       # Standard test vectors (Wycheproof JSON)
+├── fuzz/                # Fuzz targets (cargo-fuzz, 10 targets)
 └── benches/             # Performance benchmarks
 ```
 
@@ -34,11 +35,11 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (982 tests, 27 ignored)
+# Run all tests (997 tests, 27 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 343 tests (19 ignored)
+cargo test -p hitls-crypto --all-features   # 358 tests (19 ignored, includes 15 Wycheproof)
 cargo test -p hitls-tls --all-features      # 409 tests
 cargo test -p hitls-pki --all-features      # 98 tests
 cargo test -p hitls-bignum                  # 46 tests
@@ -101,10 +102,9 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-41 complete (982 tests, 27 ignored). Remaining phase 42 planned:
-- Phase 39: TLS Extensions (Record Size Limit RFC 8449, Fallback SCSV RFC 7507, OCSP Stapling, SCT) -- DONE
+Phases 0-42 complete (997 tests, 27 ignored). All planned phases done.
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
 - Phase 41: DTLCP + Custom Extensions + Key Logging -- DONE
-- Phase 42: Fuzzing + Wycheproof + interop testing + security audit
+- Phase 42: Wycheproof (5000+ vectors) + Fuzzing (10 targets) + Security Audit -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

@@ -455,7 +455,8 @@ impl Fe25519 {
 
 impl PartialEq for Fe25519 {
     fn eq(&self, other: &Self) -> bool {
-        self.to_bytes() == other.to_bytes()
+        use subtle::ConstantTimeEq;
+        self.to_bytes().ct_eq(&other.to_bytes()).into()
     }
 }
 

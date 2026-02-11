@@ -1,0 +1,64 @@
+[package]
+name = "hitls-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hitls-utils = { path = "../crates/hitls-utils" }
+hitls-pki = { path = "../crates/hitls-pki" }
+hitls-tls = { path = "../crates/hitls-tls", features = ["tls12", "dtls12", "tlcp"] }
+
+[[bin]]
+name = "fuzz_asn1"
+path = "fuzz_targets/fuzz_asn1.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_base64"
+path = "fuzz_targets/fuzz_base64.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_pem"
+path = "fuzz_targets/fuzz_pem.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_x509"
+path = "fuzz_targets/fuzz_x509.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_crl"
+path = "fuzz_targets/fuzz_crl.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_pkcs8"
+path = "fuzz_targets/fuzz_pkcs8.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_pkcs12"
+path = "fuzz_targets/fuzz_pkcs12.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_cms"
+path = "fuzz_targets/fuzz_cms.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_tls_record"
+path = "fuzz_targets/fuzz_tls_record.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_tls_handshake"
+path = "fuzz_targets/fuzz_tls_handshake.rs"
+doc = false

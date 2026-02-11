@@ -217,6 +217,16 @@ fn decode_der_signature(data: &[u8]) -> Result<(BigNum, BigNum), CryptoError> {
     let r_bytes = seq.read_integer()?;
     let s_bytes = seq.read_integer()?;
 
+    // Reject trailing data inside the SEQUENCE
+    if !seq.is_empty() {
+        return Err(CryptoError::EcdsaVerifyFail);
+    }
+
+    // Reject trailing data after the SEQUENCE
+    if !decoder.is_empty() {
+        return Err(CryptoError::EcdsaVerifyFail);
+    }
+
     // Strip leading zeros (ASN.1 INTEGER may have a leading 0x00 for positive sign)
     let r = BigNum::from_bytes_be(r_bytes);
     let s = BigNum::from_bytes_be(s_bytes);
