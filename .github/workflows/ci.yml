@@ -80,6 +80,8 @@ jobs:
         with:
           components: miri
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: miri
       - run: cargo miri test -p hitls-bignum
       - run: cargo miri test -p hitls-utils
 
