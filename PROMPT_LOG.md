@@ -1326,3 +1326,23 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - Feature flag: `dtlcp = ["dtls12", "tlcp"]`
 
 982 total tests (27 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 42: Wycheproof + Fuzzing + Security Audit (2026-02-11)
+
+**Prompt**: Implement Phase 42 — Wycheproof test vectors (Google's edge-case crypto test suite, 5000+ vectors across AES-GCM, ChaCha20-Poly1305, ECDSA P-256/P-384/P-521, ECDH, Ed25519, X25519, RSA PKCS#1v1.5, RSA-PSS, HKDF, HMAC, AES-CCM, AES-CBC), fuzzing infrastructure (10 cargo-fuzz libfuzzer targets for ASN.1, Base64, PEM, X.509, CRL, PKCS#8, PKCS#12, CMS, TLS record, TLS handshake), and security audit (constant-time comparisons, zeroize-on-drop, unsafe code review). Create SECURITY.md and enhance CI.
+
+**Result**: 15 new Wycheproof tests (crypto 343→358), total 997 (27 ignored). Bugs found: ECDSA DER parser accepted trailing data (fixed), DER length parser integer overflow (fixed). Security audit: Ed25519 verify + Fe25519 PartialEq used `==` instead of `ct_eq()` (fixed), Paillier + ElGamal missing Drop/zeroize (fixed), added SAFETY comments to benes.rs. 10 fuzz targets, SECURITY.md, CI fuzz-check + bench jobs.
+
+997 total tests (27 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 43: Feature Completeness (2026-02-11)
+
+**Prompt**: Implement Phase 43 — PKI text output (to_text() for Certificate/CRL/CSR, OpenSSL-compatible format), TLS 1.3 SM4-GCM/CCM cipher suites (RFC 8998, TLS_SM4_GCM_SM3 0x00C6, TLS_SM4_CCM_SM3 0x00C7), SM4-CCM crypto (BlockCipher trait generalization), CMS EnvelopedData (RFC 5652 §6, RSA OAEP key transport + AES Key Wrap), Privacy Pass (RFC 9578 Type 2, RSA blind signatures), and CLI new commands (list, rand, pkeyutl, speed).
+
+**Result**: 25 new tests (crypto +1, tls +4, pki +9, auth +4, cli +7), total 1022 (28 ignored). 6 new files, 15 modified files. SM4-CCM via BlockCipher trait, TLS 1.3 SM4 suites via sm_tls13 feature flag, CMS EnvelopedData with RSA key transport + AES key wrap, Privacy Pass RSA blind signatures full flow, 14 CLI commands total.
+
+1022 total tests (28 ignored). Clippy clean, fmt clean.
