@@ -15,7 +15,7 @@ use crate::CipherSuite;
 use hitls_crypto::provider::Digest;
 use hitls_crypto::sha1::Sha1;
 use hitls_crypto::sha2::{Sha256, Sha384};
-#[cfg(feature = "tlcp")]
+#[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
 use hitls_crypto::sm3::Sm3;
 use hitls_types::TlsError;
 
@@ -62,12 +62,36 @@ impl CipherSuiteParams {
                 iv_len: 12,
                 tag_len: 16,
             }),
+            #[cfg(feature = "sm_tls13")]
+            CipherSuite::TLS_SM4_GCM_SM3 => Ok(Self {
+                suite,
+                hash_len: 32,
+                key_len: 16,
+                iv_len: 12,
+                tag_len: 16,
+            }),
+            #[cfg(feature = "sm_tls13")]
+            CipherSuite::TLS_SM4_CCM_SM3 => Ok(Self {
+                suite,
+                hash_len: 32,
+                key_len: 16,
+                iv_len: 12,
+                tag_len: 16,
+            }),
             _ => Err(TlsError::NoSharedCipherSuite),
         }
     }
 
     /// Create a HashFactory for this cipher suite's hash algorithm.
     pub fn hash_factory(&self) -> HashFactory {
+        #[cfg(feature = "sm_tls13")]
+        {
+            if self.suite == CipherSuite::TLS_SM4_GCM_SM3
+                || self.suite == CipherSuite::TLS_SM4_CCM_SM3
+            {
+                return Box::new(|| Box::new(Sm3::new()) as Box<dyn Digest>);
+            }
+        }
         match self.hash_len {
             48 => Box::new(|| Box::new(Sha384::new()) as Box<dyn Digest>),
             _ => Box::new(|| Box::new(Sha256::new()) as Box<dyn Digest>),
@@ -1036,5 +1060,25 @@ mod tests_tlcp {
         assert!(is_tlcp_suite(CipherSuite::ECDHE_SM4_GCM_SM3));
         assert!(is_tlcp_suite(CipherSuite::ECC_SM4_GCM_SM3));
         assert!(!is_tlcp_suite(CipherSuite::TLS_AES_128_GCM_SHA256));
+    }
+
+    #[cfg(feature = "sm_tls13")]
+    #[test]
+    fn test_sm4_gcm_sm3_suite_params() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_SM4_GCM_SM3).unwrap();
+        assert_eq!(params.hash_len, 32);
+        assert_eq!(params.key_len, 16);
+        assert_eq!(params.iv_len, 12);
+        assert_eq!(params.tag_len, 16);
+    }
+
+    #[cfg(feature = "sm_tls13")]
+    #[test]
+    fn test_sm4_ccm_sm3_suite_params() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_SM4_CCM_SM3).unwrap();
+        assert_eq!(params.hash_len, 32);
+        assert_eq!(params.key_len, 16);
+        assert_eq!(params.iv_len, 12);
+        assert_eq!(params.tag_len, 16);
     }
 }

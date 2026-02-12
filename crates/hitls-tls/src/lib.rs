@@ -44,6 +44,12 @@ impl CipherSuite {
     pub const TLS_CHACHA20_POLY1305_SHA256: Self = Self(0x1303);
     pub const TLS_AES_128_CCM_SHA256: Self = Self(0x1304);
 
+    // TLS 1.3 SM4 cipher suites (RFC 8998)
+    #[cfg(feature = "sm_tls13")]
+    pub const TLS_SM4_GCM_SM3: Self = Self(0x00C6);
+    #[cfg(feature = "sm_tls13")]
+    pub const TLS_SM4_CCM_SM3: Self = Self(0x00C7);
+
     // TLS 1.2 ECDHE-GCM cipher suites
     pub const TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: Self = Self(0xC02F);
     pub const TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: Self = Self(0xC030);

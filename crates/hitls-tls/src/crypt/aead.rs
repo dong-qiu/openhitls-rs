@@ -103,12 +103,12 @@ impl TlsAead for ChaCha20Poly1305Aead {
 }
 
 /// SM4-GCM AEAD (128-bit key only).
-#[cfg(feature = "tlcp")]
+#[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
 pub struct Sm4GcmAead {
     key: Vec<u8>,
 }
 
-#[cfg(feature = "tlcp")]
+#[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
 impl Sm4GcmAead {
     pub fn new(key: &[u8]) -> Result<Self, TlsError> {
         if key.len() != 16 {
@@ -120,14 +120,14 @@ impl Sm4GcmAead {
     }
 }
 
-#[cfg(feature = "tlcp")]
+#[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
 impl Drop for Sm4GcmAead {
     fn drop(&mut self) {
         self.key.zeroize();
     }
 }
 
-#[cfg(feature = "tlcp")]
+#[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
 impl TlsAead for Sm4GcmAead {
     fn encrypt(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, TlsError> {
         hitls_crypto::modes::gcm::sm4_gcm_encrypt(&self.key, nonce, aad, plaintext)
@@ -149,6 +149,53 @@ impl TlsAead for Sm4GcmAead {
     }
 }
 
+/// SM4-CCM AEAD (128-bit key only).
+#[cfg(feature = "sm_tls13")]
+pub struct Sm4CcmAead {
+    key: Vec<u8>,
+}
+
+#[cfg(feature = "sm_tls13")]
+impl Sm4CcmAead {
+    pub fn new(key: &[u8]) -> Result<Self, TlsError> {
+        if key.len() != 16 {
+            return Err(TlsError::HandshakeFailed(
+                "SM4-CCM: key must be 16 bytes".into(),
+            ));
+        }
+        Ok(Self { key: key.to_vec() })
+    }
+}
+
+#[cfg(feature = "sm_tls13")]
+impl Drop for Sm4CcmAead {
+    fn drop(&mut self) {
+        self.key.zeroize();
+    }
+}
+
+#[cfg(feature = "sm_tls13")]
+impl TlsAead for Sm4CcmAead {
+    fn encrypt(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, TlsError> {
+        hitls_crypto::modes::ccm::sm4_ccm_encrypt(&self.key, nonce, aad, plaintext, 16)
+            .map_err(TlsError::CryptoError)
+    }
+
+    fn decrypt(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        ciphertext_with_tag: &[u8],
+    ) -> Result<Vec<u8>, TlsError> {
+        hitls_crypto::modes::ccm::sm4_ccm_decrypt(&self.key, nonce, aad, ciphertext_with_tag, 16)
+            .map_err(TlsError::CryptoError)
+    }
+
+    fn tag_size(&self) -> usize {
+        16
+    }
+}
+
 /// Create a TlsAead instance for the given cipher suite and key.
 pub fn create_aead(suite: CipherSuite, key: &[u8]) -> Result<Box<dyn TlsAead>, TlsError> {
     match suite {
@@ -156,6 +203,10 @@ pub fn create_aead(suite: CipherSuite, key: &[u8]) -> Result<Box<dyn TlsAead>, T
             Ok(Box::new(AesGcmAead::new(key)?))
         }
         CipherSuite::TLS_CHACHA20_POLY1305_SHA256 => Ok(Box::new(ChaCha20Poly1305Aead::new(key)?)),
+        #[cfg(feature = "sm_tls13")]
+        CipherSuite::TLS_SM4_GCM_SM3 => Ok(Box::new(Sm4GcmAead::new(key)?)),
+        #[cfg(feature = "sm_tls13")]
+        CipherSuite::TLS_SM4_CCM_SM3 => Ok(Box::new(Sm4CcmAead::new(key)?)),
         _ => Err(TlsError::NoSharedCipherSuite),
     }
 }
@@ -193,6 +244,38 @@ mod tests {
         let plaintext = b"hello ChaCha20";
 
         let aead = create_aead(CipherSuite::TLS_CHACHA20_POLY1305_SHA256, &key).unwrap();
+        let ct = aead.encrypt(&nonce, aad, plaintext).unwrap();
+        assert_eq!(ct.len(), plaintext.len() + aead.tag_size());
+
+        let pt = aead.decrypt(&nonce, aad, &ct).unwrap();
+        assert_eq!(pt, plaintext);
+    }
+
+    #[cfg(feature = "sm_tls13")]
+    #[test]
+    fn test_sm4_gcm_aead_roundtrip() {
+        let key = [0x42u8; 16];
+        let nonce = [0x01u8; 12];
+        let aad = b"additional data";
+        let plaintext = b"hello SM4-GCM TLS 1.3";
+
+        let aead = create_aead(CipherSuite::TLS_SM4_GCM_SM3, &key).unwrap();
+        let ct = aead.encrypt(&nonce, aad, plaintext).unwrap();
+        assert_eq!(ct.len(), plaintext.len() + aead.tag_size());
+
+        let pt = aead.decrypt(&nonce, aad, &ct).unwrap();
+        assert_eq!(pt, plaintext);
+    }
+
+    #[cfg(feature = "sm_tls13")]
+    #[test]
+    fn test_sm4_ccm_aead_roundtrip() {
+        let key = [0x42u8; 16];
+        let nonce = [0x01u8; 12];
+        let aad = b"additional data";
+        let plaintext = b"hello SM4-CCM TLS 1.3";
+
+        let aead = create_aead(CipherSuite::TLS_SM4_CCM_SM3, &key).unwrap();
         let ct = aead.encrypt(&nonce, aad, plaintext).unwrap();
         assert_eq!(ct.len(), plaintext.len() + aead.tag_size());
 

@@ -1,4 +1,6 @@
-//! CMS (Cryptographic Message Syntax) / PKCS#7 — SignedData (RFC 5652).
+//! CMS (Cryptographic Message Syntax) / PKCS#7 — SignedData + EnvelopedData (RFC 5652).
+
+pub mod enveloped;
 
 use hitls_types::PkiError;
 use hitls_utils::asn1::{tags, Decoder, Encoder};
@@ -74,6 +76,7 @@ pub struct SignedData {
 pub struct CmsMessage {
     pub content_type: CmsContentType,
     pub signed_data: Option<SignedData>,
+    pub enveloped_data: Option<enveloped::EnvelopedData>,
     pub raw: Vec<u8>,
 }
 
@@ -178,12 +181,25 @@ impl CmsMessage {
             Ok(CmsMessage {
                 content_type,
                 signed_data: Some(sd),
+                enveloped_data: None,
+                raw: data.to_vec(),
+            })
+        } else if content_type == CmsContentType::EnvelopedData {
+            let ctx0 = ci
+                .read_context_specific(0, true)
+                .map_err(|e| cerr(&format!("[0]: {e}")))?;
+            let ed = enveloped::parse_enveloped_data(ctx0.value)?;
+            Ok(CmsMessage {
+                content_type,
+                signed_data: None,
+                enveloped_data: Some(ed),
                 raw: data.to_vec(),
             })
         } else {
             Ok(CmsMessage {
                 content_type,
                 signed_data: None,
+                enveloped_data: None,
                 raw: data.to_vec(),
             })
         }
@@ -291,6 +307,7 @@ impl CmsMessage {
         Ok(CmsMessage {
             content_type: CmsContentType::SignedData,
             signed_data: Some(sd),
+            enveloped_data: None,
             raw: encoded,
         })
     }

@@ -8,7 +8,7 @@ pub fn run(input: &str, text: bool, fingerprint: bool) -> Result<(), Box<dyn std
         .map_err(|e| format!("failed to parse certificate: {e}"))?;
 
     if text {
-        print_cert_text(&cert);
+        print!("{}", cert.to_text());
     }
 
     if fingerprint {
@@ -30,59 +30,6 @@ pub fn run(input: &str, text: bool, fingerprint: bool) -> Result<(), Box<dyn std
     }
 
     Ok(())
-}
-
-fn print_cert_text(cert: &hitls_pki::x509::Certificate) {
-    println!("Certificate:");
-    println!("    Data:");
-    println!(
-        "        Version: {} (0x{:x})",
-        cert.version + 1,
-        cert.version
-    );
-    println!("        Serial Number: {}", hex_str(&cert.serial_number));
-    println!("    Issuer: {}", cert.issuer);
-    println!("    Validity");
-    println!("        Not Before: {}", format_time(cert.not_before));
-    println!("        Not After : {}", format_time(cert.not_after));
-    println!("    Subject: {}", cert.subject);
-    println!("    Subject Public Key Info:");
-    println!(
-        "        Algorithm OID: {}",
-        hex_str(&cert.public_key.algorithm_oid)
-    );
-    println!(
-        "        Public Key: ({} bytes)",
-        cert.public_key.public_key.len()
-    );
-
-    if !cert.extensions.is_empty() {
-        println!("    X509v3 extensions:");
-        for ext in &cert.extensions {
-            let critical = if ext.critical { " critical" } else { "" };
-            println!("        OID: {}{}", hex_str(&ext.oid), critical);
-        }
-    }
-
-    if let Some(bc) = cert.basic_constraints() {
-        println!(
-            "        BasicConstraints: CA:{}, pathLen:{:?}",
-            bc.is_ca, bc.path_len_constraint
-        );
-    }
-
-    if let Some(ku) = cert.key_usage() {
-        println!("        KeyUsage: 0x{:04x}", ku.0);
-    }
-
-    println!(
-        "    Signature Algorithm: OID {}",
-        hex_str(&cert.signature_algorithm)
-    );
-    println!(
-        "    Signature Value: ({} bytes)",
-        cert.signature_value.len()
-    );
 }
 
 fn hex_str(data: &[u8]) -> String {

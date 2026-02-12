@@ -2,6 +2,7 @@
 
 pub mod crl;
 pub mod ocsp;
+pub mod text;
 pub mod verify;
 
 use hitls_types::{CryptoError, EccCurveId, PkiError};

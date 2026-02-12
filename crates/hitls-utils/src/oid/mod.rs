@@ -363,6 +363,27 @@ pub mod known {
         Oid::new(&[2, 16, 840, 1, 101, 3, 4, 1, 22])
     }
 
+    // AES-GCM
+    pub fn aes128_gcm() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 1, 6])
+    }
+    pub fn aes256_gcm() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 1, 46])
+    }
+
+    // AES Key Wrap
+    pub fn aes128_wrap() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 1, 5])
+    }
+    pub fn aes256_wrap() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 1, 45])
+    }
+
+    // RSA OAEP
+    pub fn rsaes_oaep() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 1, 7])
+    }
+
     // PKCS#9 extensionRequest (1.2.840.113549.1.9.14)
     pub fn extension_request() -> Oid {
         Oid::new(&[1, 2, 840, 113549, 1, 9, 14])

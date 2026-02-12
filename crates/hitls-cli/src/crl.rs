@@ -1,28 +1,34 @@
-//! CRL display command (stub implementation).
+//! CRL display command implementation.
 
 use std::fs;
 
 pub fn run(input: &str, text: bool) -> Result<(), Box<dyn std::error::Error>> {
     let data = fs::read(input)?;
-    println!("CRL file: {input} ({} bytes)", data.len());
+
+    // Try PEM first, then DER
+    let crl = if let Ok(pem_str) = std::str::from_utf8(&data) {
+        if pem_str.contains("-----BEGIN X509 CRL-----") {
+            let blocks =
+                hitls_utils::pem::parse(pem_str).map_err(|e| format!("PEM parse failed: {e}"))?;
+            let der = blocks.first().ok_or("no PEM block found")?;
+            hitls_pki::x509::CertificateRevocationList::from_der(&der.data)
+                .map_err(|e| format!("CRL parse failed: {e}"))?
+        } else {
+            hitls_pki::x509::CertificateRevocationList::from_der(&data)
+                .map_err(|e| format!("CRL parse failed: {e}"))?
+        }
+    } else {
+        hitls_pki::x509::CertificateRevocationList::from_der(&data)
+            .map_err(|e| format!("CRL parse failed: {e}"))?
+    };
 
     if text {
-        // Parse as PEM if possible
-        if let Ok(pem_str) = std::str::from_utf8(&data) {
-            if let Ok(blocks) = hitls_utils::pem::parse(pem_str) {
-                for block in &blocks {
-                    println!(
-                        "  PEM block: {} ({} bytes DER)",
-                        block.label,
-                        block.data.len()
-                    );
-                }
-                return Ok(());
-            }
-        }
-        println!("  (DER format, {} bytes)", data.len());
+        print!("{}", crl.to_text());
+    } else {
+        println!("CRL file: {input}");
+        println!("  Issuer: {}", crl.issuer);
+        println!("  Revoked certificates: {}", crl.revoked_certs.len());
     }
 
-    eprintln!("Note: Full CRL parsing is not yet implemented");
     Ok(())
 }

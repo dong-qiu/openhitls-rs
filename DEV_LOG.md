@@ -3867,3 +3867,132 @@ Added fuzz-check CI job (nightly toolchain, `cargo check` in fuzz directory).
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 997 workspace tests passing (27 ignored)
+
+---
+
+## Phase 43: Feature Completeness (Session 2026-02-11)
+
+### Goals
+- PKI text output: `to_text()` for Certificate, CRL, CSR
+- TLS 1.3 SM4-GCM/CCM cipher suites (RFC 8998): `TLS_SM4_GCM_SM3` (0x00C6), `TLS_SM4_CCM_SM3` (0x00C7)
+- CMS EnvelopedData (RFC 5652 §6): RSA OAEP key transport + AES Key Wrap
+- Privacy Pass (RFC 9578 Type 2): RSA blind signatures
+- CLI new commands: `list`, `rand`, `pkeyutl`, `speed`
+
+### Completed Steps
+
+#### 1. PKI Text Output (5 tests)
+
+**File created**: `crates/hitls-pki/src/x509/text.rs`
+
+Implemented `to_text()` methods for Certificate, CRL, and CSR with OpenSSL-compatible formatting:
+- Certificate output: Version, Serial, Signature Algorithm, Issuer, Validity, Subject, SPKI, Extensions (BasicConstraints, KeyUsage, SubjectAltName), Signature
+- CRL output: Version, Issuer, Validity, Revoked Certificates, Extensions
+- CSR output: Version, Subject, SPKI
+- OID-to-name mapping for ~30 common OIDs (rsaEncryption, sha256WithRSA, prime256v1, etc.)
+- Hex dump helpers for serial numbers and signature values
+
+**Files modified**: `crates/hitls-pki/src/x509/mod.rs` (added `pub mod text;`)
+
+**Tests**: `test_cert_to_text_basic`, `test_cert_to_text_extensions`, `test_crl_to_text`, `test_csr_to_text`, `test_oid_name_mapping`
+
+**CLI integration**: Updated `crates/hitls-cli/src/x509cmd.rs` to use `cert.to_text()` for `--text` flag; updated `crates/hitls-cli/src/crl.rs` to use `crl.to_text()`.
+
+#### 2. TLS 1.3 SM4-GCM/CCM Cipher Suites (5 tests)
+
+**SM4-CCM in hitls-crypto**: Generalized `crates/hitls-crypto/src/modes/ccm.rs` with a local `BlockCipher` trait so both AES and SM4 can be used as the underlying cipher. Added `sm4_ccm_encrypt()` / `sm4_ccm_decrypt()` public functions.
+
+**TLS integration**:
+- `crates/hitls-tls/src/lib.rs`: Added `TLS_SM4_GCM_SM3 = CipherSuite(0x00C6)`, `TLS_SM4_CCM_SM3 = CipherSuite(0x00C7)`
+- `crates/hitls-tls/src/crypt/mod.rs`: Added SM4 suites to `CipherSuiteParams::from_suite()` (hash_len=32, key_len=16, iv_len=12, tag_len=16); updated `hash_factory()` to return SM3 for SM4 suites
+- `crates/hitls-tls/src/crypt/aead.rs`: Added `Sm4CcmAead` struct with `TlsAead` impl; widened `Sm4GcmAead` cfg gate; updated `create_aead()` for 0x00C6/0x00C7
+- `crates/hitls-tls/Cargo.toml`: Added `sm_tls13` feature flag
+
+**Tests**: `test_sm4_gcm_sm3_suite_params`, `test_sm4_ccm_sm3_suite_params`, `test_sm4_gcm_aead_roundtrip`, `test_sm4_ccm_aead_roundtrip`, `test_sm4_ccm_crypto_roundtrip` (1 in hitls-crypto, 4 in hitls-tls)
+
+#### 3. CMS EnvelopedData (5 tests, 1 ignored)
+
+**File created**: `crates/hitls-pki/src/cms/enveloped.rs` (~970 lines)
+
+Implemented CMS EnvelopedData (RFC 5652 §6) with two recipient types:
+- **RSA Key Transport (KeyTransRecipientInfo)**: Encrypt content encryption key (CEK) with recipient's RSA public key (OAEP), encrypt content with AES-GCM
+- **AES Key Wrap (KekRecipientInfo)**: Wrap CEK with pre-shared KEK, encrypt content with AES-GCM
+
+Structs: `EnvelopedData`, `RecipientInfo` (enum), `KeyTransRecipientInfo`, `KekRecipientInfo`, `EncryptedContentInfo`, `CmsEncryptionAlg` (enum: Aes128Gcm, Aes256Gcm)
+
+API: `CmsMessage::encrypt_rsa()`, `CmsMessage::decrypt_rsa()`, `CmsMessage::encrypt_kek()`, `CmsMessage::decrypt_kek()`
+
+**Files modified**: `crates/hitls-pki/src/cms/mod.rs` (pub mod enveloped, re-exports), `crates/hitls-utils/src/oid/mod.rs` (added aes128_gcm, aes256_gcm, aes128_wrap, aes256_wrap, rsaes_oaep OIDs)
+
+**Tests**: `test_cms_enveloped_kek_roundtrip`, `test_cms_enveloped_parse_encode`, `test_cms_enveloped_wrong_key`, `test_cms_enveloped_aes256_gcm`, `test_cms_enveloped_rsa_roundtrip` (ignored — slow RSA keygen)
+
+**Bug fixed**: Background agent used raw BigNum for RSA decryption + manual OAEP unpadding. Simplified to use existing `RsaPrivateKey::new(n, d, e, p, q).decrypt(RsaPadding::Oaep, ...)` which handles OAEP internally.
+
+#### 4. Privacy Pass (4 tests)
+
+**File rewritten**: `crates/hitls-auth/src/privpass/mod.rs` (replaced `todo!()` stubs with full implementation)
+
+Implemented RSA blind signatures per RFC 9578 Type 2 (publicly verifiable tokens):
+- **Issuer**: `new(RsaPrivateKey)`, `issue(&self, request) → TokenResponse`
+- **Client**: `new(RsaPublicKey)`, `create_token_request(&self, challenge) → (TokenRequest, BlindState)`, `finalize_token(&self, response, state) → Token`
+- **`verify_token(token, public_key)`**: Standard RSA verification of unblinded signature
+
+Blind signature flow: `msg * r^e mod n → sign → blind_sig * r^(-1) mod n → verify`
+
+**Files modified**: `crates/hitls-auth/Cargo.toml` (added hitls-bignum, hitls-crypto deps under `privpass` feature)
+
+**Tests**: `test_privpass_issue_verify_roundtrip`, `test_privpass_invalid_token`, `test_privpass_wrong_key`, `test_privpass_token_type_encoding`
+
+#### 5. CLI New Commands (7 tests)
+
+**Files created**:
+- `crates/hitls-cli/src/list.rs` — `hitls list [--filter ciphers|hashes|curves|kex|all]`: Lists supported algorithms from hardcoded tables
+- `crates/hitls-cli/src/rand_cmd.rs` — `hitls rand [--num N] [--format hex|base64]`: Generates random bytes via `getrandom`
+- `crates/hitls-cli/src/pkeyutl.rs` — `hitls pkeyutl -O sign|verify|encrypt|decrypt --inkey KEY`: Public key operations via PKCS#8 key loading
+- `crates/hitls-cli/src/speed.rs` — `hitls speed [ALGORITHM] [--seconds N]`: Throughput benchmark (AES-GCM, ChaCha20-Poly1305, SHA-256/384/512, SM3)
+
+**Files modified**: `crates/hitls-cli/src/main.rs` (added 4 module declarations + 4 Commands enum variants + match arms), `crates/hitls-cli/Cargo.toml` (added `chacha20` feature)
+
+**Tests**: `test_cli_list_all`, `test_cli_list_invalid_filter`, `test_cli_rand_hex`, `test_cli_rand_base64`, `test_cli_rand_zero_bytes`, `test_cli_speed_sha256`, `test_cli_speed_invalid_algorithm`
+
+### New Test Counts
+
+| Crate | Before | New | After |
+|-------|--------|-----|-------|
+| hitls-crypto | 358 (19 ign) | +1 | 359 (19 ign) |
+| hitls-tls | 409 | +4 | 413 |
+| hitls-pki | 98 | +10 | 107 (+1 ign) |
+| hitls-auth | 20 | +4 | 24 |
+| hitls-cli | 8 (5 ign) | +7 | 15 (5 ign) |
+| Others | 104 (3 ign) | 0 | 104 (3 ign) |
+| **Total** | **997 (27 ign)** | **+26** | **1022 (28 ign)** |
+
+### Files Created
+- `crates/hitls-pki/src/x509/text.rs` — PKI text output
+- `crates/hitls-pki/src/cms/enveloped.rs` — CMS EnvelopedData
+- `crates/hitls-cli/src/list.rs` — `list` command
+- `crates/hitls-cli/src/rand_cmd.rs` — `rand` command
+- `crates/hitls-cli/src/pkeyutl.rs` — `pkeyutl` command
+- `crates/hitls-cli/src/speed.rs` — `speed` command
+
+### Files Modified
+- `crates/hitls-crypto/src/modes/ccm.rs` — BlockCipher trait, SM4-CCM functions
+- `crates/hitls-tls/src/lib.rs` — SM4 cipher suite constants
+- `crates/hitls-tls/src/crypt/mod.rs` — SM4 suite params + SM3 hash factory
+- `crates/hitls-tls/src/crypt/aead.rs` — Sm4CcmAead + create_aead update
+- `crates/hitls-tls/Cargo.toml` — `sm_tls13` feature
+- `crates/hitls-pki/src/cms/mod.rs` — EnvelopedData re-exports
+- `crates/hitls-pki/src/x509/mod.rs` — `pub mod text;`
+- `crates/hitls-utils/src/oid/mod.rs` — New OIDs (aes128_gcm, aes256_gcm, aes128_wrap, aes256_wrap, rsaes_oaep)
+- `crates/hitls-auth/src/privpass/mod.rs` — Full RSA blind sig implementation
+- `crates/hitls-auth/Cargo.toml` — Feature deps
+- `crates/hitls-cli/src/main.rs` — 4 new subcommands
+- `crates/hitls-cli/src/x509cmd.rs` — Use cert.to_text()
+- `crates/hitls-cli/src/crl.rs` — Use crl.to_text()
+- `crates/hitls-cli/Cargo.toml` — Added chacha20 feature
+- `CLAUDE.md`, `README.md`, `DEV_LOG.md` — Updated
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1022 workspace tests passing (28 ignored)

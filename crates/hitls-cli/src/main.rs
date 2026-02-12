@@ -4,10 +4,14 @@ mod crl;
 mod dgst;
 mod enc;
 mod genpkey;
+mod list;
 mod pkey;
+mod pkeyutl;
+mod rand_cmd;
 mod req;
 mod s_client;
 mod s_server;
+mod speed;
 mod verify;
 mod x509cmd;
 
@@ -157,6 +161,51 @@ enum Commands {
         #[arg(long, short)]
         quiet: bool,
     },
+    /// List supported algorithms and cipher suites.
+    List {
+        /// Filter: all, ciphers, hashes, curves, kex.
+        #[arg(short, long, default_value = "all")]
+        filter: String,
+    },
+    /// Generate random bytes.
+    Rand {
+        /// Number of bytes to generate.
+        #[arg(short, long, default_value = "32")]
+        num: usize,
+        /// Output format: hex or base64.
+        #[arg(short, long, default_value = "hex")]
+        format: String,
+    },
+    /// Public key utility (sign/verify/encrypt/decrypt/derive).
+    Pkeyutl {
+        /// Operation: sign, verify, encrypt, decrypt, derive.
+        #[arg(short = 'O', long)]
+        op: String,
+        /// Input file.
+        #[arg(short, long)]
+        input: String,
+        /// Output file.
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Private key file (PKCS#8 PEM).
+        #[arg(long)]
+        inkey: String,
+        /// Peer public key file (for derive).
+        #[arg(long)]
+        peerkey: Option<String>,
+        /// Signature file (for verify).
+        #[arg(long)]
+        sigfile: Option<String>,
+    },
+    /// Benchmark cryptographic algorithm throughput.
+    Speed {
+        /// Algorithm: aes-128-gcm, aes-256-gcm, chacha20-poly1305, sha256, sha384, sha512, sm3, all.
+        #[arg(default_value = "all")]
+        algorithm: String,
+        /// Duration in seconds.
+        #[arg(short, long, default_value = "3")]
+        seconds: u64,
+    },
 }
 
 fn main() {
@@ -218,6 +267,24 @@ fn main() {
             tls_version,
             quiet,
         } => s_server::run(*port, cert, key, tls_version, *quiet),
+        Commands::List { filter } => list::run(filter),
+        Commands::Rand { num, format } => rand_cmd::run(*num, format),
+        Commands::Pkeyutl {
+            op,
+            input,
+            output,
+            inkey,
+            peerkey,
+            sigfile,
+        } => pkeyutl::run(
+            op,
+            input,
+            output.as_deref(),
+            inkey,
+            peerkey.as_deref(),
+            sigfile.as_deref(),
+        ),
+        Commands::Speed { algorithm, seconds } => speed::run(algorithm, *seconds),
     };
 
     if let Err(e) = result {
