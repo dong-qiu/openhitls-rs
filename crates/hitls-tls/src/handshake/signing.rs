@@ -73,10 +73,18 @@ pub fn sign_certificate_verify(
             curve_id,
             private_key,
         } => {
-            let digest = match scheme {
-                SignatureScheme::ECDSA_SECP256R1_SHA256 => compute_sha256(&content)?,
-                SignatureScheme::ECDSA_SECP384R1_SHA384 => compute_sha384(&content)?,
-                _ => return Err(TlsError::HandshakeFailed("ECDSA scheme mismatch".into())),
+            let digest = match (scheme, *curve_id) {
+                (SignatureScheme::ECDSA_SECP256R1_SHA256, EccCurveId::NistP256) => {
+                    compute_sha256(&content)?
+                }
+                (SignatureScheme::ECDSA_SECP384R1_SHA384, EccCurveId::NistP384) => {
+                    compute_sha384(&content)?
+                }
+                _ => {
+                    return Err(TlsError::HandshakeFailed(
+                        "ECDSA curve/scheme mismatch".into(),
+                    ))
+                }
             };
             let kp = hitls_crypto::ecdsa::EcdsaKeyPair::from_private_key(*curve_id, private_key)
                 .map_err(TlsError::CryptoError)?;
