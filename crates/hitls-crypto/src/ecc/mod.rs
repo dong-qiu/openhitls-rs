@@ -340,9 +340,42 @@ mod tests {
         assert!(inf.to_uncompressed(&group).is_err());
     }
 
+    // --- P-192 tests ---
+
     #[test]
-    fn test_unsupported_curve() {
-        assert!(EcGroup::new(EccCurveId::NistP192).is_err());
+    fn test_generator_on_curve_p192() {
+        let group = EcGroup::new(EccCurveId::NistP192).unwrap();
+        let g = group.generator();
+        assert!(g.is_on_curve(&group).unwrap());
+    }
+
+    #[test]
+    fn test_point_encoding_roundtrip_p192() {
+        let group = EcGroup::new(EccCurveId::NistP192).unwrap();
+        let g = group.generator();
+        let encoded = g.to_uncompressed(&group).unwrap();
+        assert_eq!(encoded.len(), 1 + 2 * 24); // 49 bytes
+        assert_eq!(encoded[0], 0x04);
+        let decoded = EcPoint::from_uncompressed(&group, &encoded).unwrap();
+        assert_eq!(g, decoded);
+    }
+
+    #[test]
+    fn test_scalar_mul_small_values_p192() {
+        let group = EcGroup::new(EccCurveId::NistP192).unwrap();
+        let one_g = group.scalar_mul_base(&BigNum::from_u64(1)).unwrap();
+        assert_eq!(one_g, group.generator());
+        let three_g = group.scalar_mul_base(&BigNum::from_u64(3)).unwrap();
+        assert!(three_g.is_on_curve(&group).unwrap());
+        assert!(!three_g.is_infinity());
+    }
+
+    #[test]
+    fn test_order_times_g_is_infinity_p192() {
+        let group = EcGroup::new(EccCurveId::NistP192).unwrap();
+        let n = group.order().clone();
+        let result = group.scalar_mul_base(&n).unwrap();
+        assert!(result.is_infinity());
     }
 
     // --- P-224 tests ---

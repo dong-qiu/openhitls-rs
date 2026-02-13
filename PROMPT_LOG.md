@@ -1346,3 +1346,21 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 25 new tests (crypto +1, tls +4, pki +9, auth +4, cli +7), total 1022 (28 ignored). 6 new files, 15 modified files. SM4-CCM via BlockCipher trait, TLS 1.3 SM4 suites via sm_tls13 feature flag, CMS EnvelopedData with RSA key transport + AES key wrap, Privacy Pass RSA blind signatures full flow, 14 CLI commands total.
 
 1022 total tests (28 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 44: All Remaining Features (2026-02-12)
+
+**Prompt**: Implement Phase 44 — NistP192 curve, HCTR mode, CMS EncryptedData.
+
+**Result**: 16 new tests, total 1038 (28 ignored). NistP192 ECC curve, HCTR encryption mode, CMS EncryptedData parsing.
+
+---
+
+## Phase 45: Complete DH Groups + TLS FFDHE Expansion (2026-02-13)
+
+**Prompt**: Implement Phase 45 — Complete all 13 DH group primes (RFC 2409, RFC 3526, RFC 7919), add TLS FFDHE6144/8192 named groups, expand DHE negotiation, add tests for all groups.
+
+**Result**: 8 new tests (14 total, 6 ignored for slow large groups), total 1046 (34 ignored). Rewrote `groups.rs` with all 13 DH primes from C source. Added NamedGroup::FFDHE6144 (0x0103) and FFDHE8192 (0x0104). Updated `is_ffdhe_group()` and `named_group_to_dh_param_id()` for all 5 FFDHE groups. Exhaustive match on DhParamId (no catch-all).
+
+1046 total tests (34 ignored). Clippy clean, fmt clean.

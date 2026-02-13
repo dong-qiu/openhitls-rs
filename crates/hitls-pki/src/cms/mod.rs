@@ -1,5 +1,6 @@
-//! CMS (Cryptographic Message Syntax) / PKCS#7 — SignedData + EnvelopedData (RFC 5652).
+//! CMS (Cryptographic Message Syntax) / PKCS#7 — SignedData + EnvelopedData + EncryptedData (RFC 5652).
 
+pub mod encrypted;
 pub mod enveloped;
 
 use hitls_types::PkiError;
@@ -77,6 +78,7 @@ pub struct CmsMessage {
     pub content_type: CmsContentType,
     pub signed_data: Option<SignedData>,
     pub enveloped_data: Option<enveloped::EnvelopedData>,
+    pub encrypted_data: Option<encrypted::EncryptedData>,
     pub raw: Vec<u8>,
 }
 
@@ -182,6 +184,7 @@ impl CmsMessage {
                 content_type,
                 signed_data: Some(sd),
                 enveloped_data: None,
+                encrypted_data: None,
                 raw: data.to_vec(),
             })
         } else if content_type == CmsContentType::EnvelopedData {
@@ -193,6 +196,19 @@ impl CmsMessage {
                 content_type,
                 signed_data: None,
                 enveloped_data: Some(ed),
+                encrypted_data: None,
+                raw: data.to_vec(),
+            })
+        } else if content_type == CmsContentType::EncryptedData {
+            let ctx0 = ci
+                .read_context_specific(0, true)
+                .map_err(|e| cerr(&format!("[0]: {e}")))?;
+            let ed = encrypted::parse_encrypted_data(ctx0.value)?;
+            Ok(CmsMessage {
+                content_type,
+                signed_data: None,
+                enveloped_data: None,
+                encrypted_data: Some(ed),
                 raw: data.to_vec(),
             })
         } else {
@@ -200,6 +216,7 @@ impl CmsMessage {
                 content_type,
                 signed_data: None,
                 enveloped_data: None,
+                encrypted_data: None,
                 raw: data.to_vec(),
             })
         }
@@ -308,6 +325,7 @@ impl CmsMessage {
             content_type: CmsContentType::SignedData,
             signed_data: Some(sd),
             enveloped_data: None,
+            encrypted_data: None,
             raw: encoded,
         })
     }

@@ -180,4 +180,233 @@ mod tests {
         let params3072 = DhParams::from_group(DhParamId::Rfc7919_3072).unwrap();
         assert_eq!(params3072.prime_size(), 384); // 3072 bits = 384 bytes
     }
+
+    // --- All 13 DH groups: prime size validation ---
+
+    #[test]
+    fn test_all_groups_prime_sizes() {
+        let cases: &[(DhParamId, usize)] = &[
+            (DhParamId::Rfc2409_768, 96),    // 768 bits = 96 bytes
+            (DhParamId::Rfc2409_1024, 128),  // 1024 bits = 128 bytes
+            (DhParamId::Rfc3526_1536, 192),  // 1536 bits = 192 bytes
+            (DhParamId::Rfc3526_2048, 256),  // 2048 bits = 256 bytes
+            (DhParamId::Rfc3526_3072, 384),  // 3072 bits = 384 bytes
+            (DhParamId::Rfc3526_4096, 512),  // 4096 bits = 512 bytes
+            (DhParamId::Rfc3526_6144, 768),  // 6144 bits = 768 bytes
+            (DhParamId::Rfc3526_8192, 1024), // 8192 bits = 1024 bytes
+            (DhParamId::Rfc7919_2048, 256),
+            (DhParamId::Rfc7919_3072, 384),
+            (DhParamId::Rfc7919_4096, 512),
+            (DhParamId::Rfc7919_6144, 768),
+            (DhParamId::Rfc7919_8192, 1024),
+        ];
+        for &(id, expected_bytes) in cases {
+            let params = DhParams::from_group(id)
+                .unwrap_or_else(|e| panic!("from_group({id:?}) failed: {e}"));
+            assert_eq!(
+                params.prime_size(),
+                expected_bytes,
+                "prime size mismatch for {id:?}"
+            );
+            // All groups use g=2
+            assert_eq!(
+                params.g_bytes(),
+                vec![2u8],
+                "generator should be 2 for {id:?}"
+            );
+        }
+    }
+
+    // --- Key exchange roundtrip tests for RFC 2409 groups ---
+
+    #[test]
+    fn test_dh_rfc2409_768_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc2409_768).unwrap();
+        assert_eq!(params.prime_size(), 96);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 96);
+    }
+
+    #[test]
+    fn test_dh_rfc2409_1024_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc2409_1024).unwrap();
+        assert_eq!(params.prime_size(), 128);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 128);
+    }
+
+    // --- Key exchange roundtrip tests for RFC 3526 groups ---
+
+    #[test]
+    fn test_dh_rfc3526_1536_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc3526_1536).unwrap();
+        assert_eq!(params.prime_size(), 192);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 192);
+    }
+
+    #[test]
+    fn test_dh_rfc3526_2048_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc3526_2048).unwrap();
+        assert_eq!(params.prime_size(), 256);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 256);
+    }
+
+    #[test]
+    fn test_dh_rfc3526_3072_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc3526_3072).unwrap();
+        assert_eq!(params.prime_size(), 384);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 384);
+    }
+
+    #[test]
+    #[ignore] // slow: 4096-bit modexp
+    fn test_dh_rfc3526_4096_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc3526_4096).unwrap();
+        assert_eq!(params.prime_size(), 512);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 512);
+    }
+
+    #[test]
+    #[ignore] // slow: 6144-bit modexp
+    fn test_dh_rfc3526_6144_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc3526_6144).unwrap();
+        assert_eq!(params.prime_size(), 768);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 768);
+    }
+
+    #[test]
+    #[ignore] // slow: 8192-bit modexp
+    fn test_dh_rfc3526_8192_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc3526_8192).unwrap();
+        assert_eq!(params.prime_size(), 1024);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 1024);
+    }
+
+    // --- Key exchange roundtrip tests for RFC 7919 groups ---
+
+    #[test]
+    fn test_dh_rfc7919_3072_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc7919_3072).unwrap();
+        assert_eq!(params.prime_size(), 384);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 384);
+    }
+
+    #[test]
+    #[ignore] // slow: 4096-bit modexp
+    fn test_dh_rfc7919_4096_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc7919_4096).unwrap();
+        assert_eq!(params.prime_size(), 512);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 512);
+    }
+
+    #[test]
+    #[ignore] // slow: 6144-bit modexp
+    fn test_dh_rfc7919_6144_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc7919_6144).unwrap();
+        assert_eq!(params.prime_size(), 768);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 768);
+    }
+
+    #[test]
+    #[ignore] // slow: 8192-bit modexp
+    fn test_dh_rfc7919_8192_key_exchange() {
+        let params = DhParams::from_group(DhParamId::Rfc7919_8192).unwrap();
+        assert_eq!(params.prime_size(), 1024);
+        let alice = DhKeyPair::generate(&params).unwrap();
+        let bob = DhKeyPair::generate(&params).unwrap();
+        let alice_pub = alice.public_key_bytes(&params).unwrap();
+        let bob_pub = bob.public_key_bytes(&params).unwrap();
+        let sa = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+        let sb = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+        assert_eq!(sa, sb);
+        assert_eq!(sa.len(), 1024);
+    }
+
+    #[test]
+    fn test_dh_invalid_peer_public_key() {
+        let params = DhParams::from_group(DhParamId::Rfc7919_2048).unwrap();
+        let alice = DhKeyPair::generate(&params).unwrap();
+        // peer public key = 0 should be rejected
+        let zero = vec![0u8; 256];
+        assert!(alice.compute_shared_secret(&params, &zero).is_err());
+        // peer public key = 1 should be rejected
+        let mut one = vec![0u8; 256];
+        one[255] = 1;
+        assert!(alice.compute_shared_secret(&params, &one).is_err());
+    }
 }

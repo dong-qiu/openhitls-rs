@@ -24,14 +24,14 @@ pub enum CmsEncryptionAlg {
 }
 
 impl CmsEncryptionAlg {
-    fn key_len(self) -> usize {
+    pub(crate) fn key_len(self) -> usize {
         match self {
             CmsEncryptionAlg::Aes128Gcm => 16,
             CmsEncryptionAlg::Aes256Gcm => 32,
         }
     }
 
-    fn oid(self) -> Oid {
+    pub(crate) fn oid(self) -> Oid {
         match self {
             CmsEncryptionAlg::Aes128Gcm => known::aes128_gcm(),
             CmsEncryptionAlg::Aes256Gcm => known::aes256_gcm(),
@@ -178,6 +178,7 @@ impl CmsMessage {
             content_type: CmsContentType::EnvelopedData,
             signed_data: None,
             enveloped_data: Some(ed),
+            encrypted_data: None,
             raw: encoded,
         })
     }
@@ -255,6 +256,7 @@ impl CmsMessage {
             content_type: CmsContentType::EnvelopedData,
             signed_data: None,
             enveloped_data: Some(ed),
+            encrypted_data: None,
             raw: encoded,
         })
     }

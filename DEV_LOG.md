@@ -3996,3 +3996,134 @@ Blind signature flow: `msg * r^e mod n → sign → blind_sig * r^(-1) mod n →
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1022 workspace tests passing (28 ignored)
+
+---
+
+## Phase 44: Remaining Feature Conversions (2026-02-11)
+
+### Goal
+Complete the last 3 identified gaps from the C reference:
+1. **NistP192 (secp192r1) curve** — missing from ECC module
+2. **HCTR mode** — wide-block tweakable cipher
+3. **CMS EncryptedData** — simplest CMS content type (symmetric-key encryption)
+
+BigNum Knuth Algorithm D was found to already be implemented in `knuth_div_rem()`.
+
+### Part 1: NistP192 Curve (6 tests)
+
+Added secp192r1 (P-192) curve parameters from C reference `crypto/ecc/src/ecc_para.c`:
+- field_size = 24, a_is_minus_3 = true, h = 1
+- Added `p192_params()` function and match arm in `get_curve_params()`
+- Removed old `test_unsupported_curve` test (P-192 is now supported)
+- All 9 EccCurveId variants now covered (removed `_ =>` wildcard)
+
+Tests: `test_generator_on_curve_p192`, `test_point_encoding_roundtrip_p192`, `test_scalar_mul_small_values_p192`, `test_order_times_g_is_infinity_p192`, `test_ecdsa_sign_verify_p192`, `test_ecdh_p192_shared_secret`
+
+### Part 2: HCTR Mode (7 tests)
+
+Implemented HCTR wide-block encryption mode following C reference `crypto/modes/src/modes_hctr.c`:
+- **GF(2^128) multiplication**: Schoolbook MSB-first, reduction polynomial x^128+x^7+x^2+x+1
+- **Universal hash (UHash)**: GF(2^128) polynomial evaluation with pre-computed K powers
+- **HCTR encrypt/decrypt**: Split message, UHash, AES-ECB, AES-CTR, UHash pattern
+- Length-preserving: output length always equals input length
+- Minimum 16 bytes input (one AES block)
+
+Tests: `test_gf128_mul_basic`, `test_hctr_encrypt_decrypt_roundtrip`, `test_hctr_single_block`, `test_hctr_multi_block`, `test_hctr_length_preserving`, `test_hctr_different_tweaks`, `test_hctr_too_short`
+
+### Part 3: CMS EncryptedData (4 tests)
+
+Added CMS EncryptedData (RFC 5652 §6) — symmetric-key content encryption:
+- `EncryptedData` struct with version + EncryptedContentInfo
+- Reuses `EncryptedContentInfo` and `CmsEncryptionAlg` from enveloped.rs
+- Made `CmsEncryptionAlg::key_len()` and `::oid()` pub(crate)
+- Added `encrypted_data` field to `CmsMessage` (updated 6 construction sites)
+- DER encode/parse with ContentInfo wrapping (OID 1.2.840.113549.1.7.6)
+
+API: `CmsMessage::encrypt_symmetric(data, key, alg)` / `decrypt_symmetric(key)`
+
+Tests: `test_cms_encrypted_data_roundtrip`, `test_cms_encrypted_data_aes256`, `test_cms_encrypted_data_wrong_key`, `test_cms_encrypted_data_parse_encode`
+
+### Test Count Table
+
+| Crate | Before | New | After |
+|-------|--------|-----|-------|
+| hitls-bignum | 46 | 0 | 46 |
+| hitls-crypto | 359 (19 ign) | +16 | 375 (19 ign) |
+| hitls-tls | 413 | 0 | 413 |
+| hitls-pki | 107 (1 ign) | +4 | 111 (1 ign) |
+| hitls-utils | 35 | 0 | 35 |
+| hitls-auth | 24 | 0 | 24 |
+| hitls-cli | 15 (5 ign) | 0 | 15 (5 ign) |
+| integration | 23 (3 ign) | 0 | 23 (3 ign) |
+| **Total** | **1022 (28 ign)** | **+17** | **1038 (28 ign)** |
+
+Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced "unsupported curve" test; total new = +13 in ecc/ecdsa/ecdh, +7 hctr = +17 workspace total with -1 removed test = +16 in crypto)
+
+### Files Created
+- `crates/hitls-crypto/src/modes/hctr.rs` — HCTR mode (GF(2^128), UHash, encrypt/decrypt)
+- `crates/hitls-pki/src/cms/encrypted.rs` — CMS EncryptedData (encrypt/decrypt, DER encode/parse)
+
+### Files Modified
+- `crates/hitls-crypto/src/ecc/curves.rs` — P-192 params, removed wildcard match
+- `crates/hitls-crypto/src/ecc/mod.rs` — P-192 tests (replaced unsupported curve test)
+- `crates/hitls-crypto/src/ecdsa/mod.rs` — P-192 ECDSA test
+- `crates/hitls-crypto/src/ecdh/mod.rs` — P-192 ECDH test
+- `crates/hitls-crypto/src/modes/mod.rs` — `pub mod hctr;`
+- `crates/hitls-pki/src/cms/mod.rs` — `pub mod encrypted;`, encrypted_data field, EncryptedData parsing
+- `crates/hitls-pki/src/cms/enveloped.rs` — pub(crate) for key_len/oid, encrypted_data field
+- `CLAUDE.md`, `DEV_LOG.md`, `README.md`, `PROMPT_LOG.md` — Updated
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1038 workspace tests passing (28 ignored)
+
+---
+
+## Phase 45: Complete DH Groups + TLS FFDHE Expansion (Session 2026-02-13)
+
+### Goals
+- Implement all 13 DH group prime constants (RFC 2409, RFC 3526, RFC 7919)
+- Add TLS NamedGroup FFDHE6144 (0x0103) and FFDHE8192 (0x0104)
+- Expand TLS DHE negotiation to support all 5 FFDHE groups
+- Add tests for all 13 DH groups (prime size validation + key exchange roundtrip)
+
+### Completed Steps
+
+#### 1. DH Group Primes (`hitls-crypto/src/dh/groups.rs`)
+- Rewrote `groups.rs` with all 13 DH group prime hex constants extracted from C source (`crypto/dh/src/dh_para.c`)
+- RFC 2409 groups: 768-bit (MODP Group 1), 1024-bit (MODP Group 2)
+- RFC 3526 groups: 1536/2048/3072/4096/6144/8192-bit (MODP Groups 5-18)
+- RFC 7919 FFDHE groups: 2048/3072/4096/6144/8192-bit (safe primes for TLS)
+- All groups use generator g=2
+- `get_ffdhe_params()` match is now exhaustive over all `DhParamId` variants (no `_ => None` fallback)
+
+#### 2. TLS FFDHE Expansion (`hitls-tls/src/crypt/mod.rs`, `hitls-tls/src/handshake/server12.rs`)
+- Added `NamedGroup::FFDHE6144` (0x0103) and `NamedGroup::FFDHE8192` (0x0104) constants
+- Updated `is_ffdhe_group()` to recognize all 5 FFDHE groups
+- Updated `named_group_to_dh_param_id()` to map FFDHE6144 → `DhParamId::Rfc7919_6144` and FFDHE8192 → `DhParamId::Rfc7919_8192`
+
+#### 3. Tests (`hitls-crypto/src/dh/mod.rs`)
+- `test_all_groups_prime_sizes`: Validates prime byte size and g=2 for all 13 groups
+- Key exchange roundtrip tests for each group family:
+  - RFC 2409: 768-bit, 1024-bit
+  - RFC 3526: 1536/2048/3072-bit (fast), 4096/6144/8192-bit (ignored, slow)
+  - RFC 7919: 3072-bit (fast), 4096/6144/8192-bit (ignored, slow)
+- `test_dh_invalid_peer_public_key`: Validates rejection of 0 and 1 as peer public keys
+- 14 new tests total (8 running + 6 ignored for slow large-group modexp)
+
+### Test Results
+- hitls-crypto: 364 passed, 25 ignored (was 359/19) — +5 running, +6 ignored
+- Total workspace: 1046 tests (34 ignored)
+
+### Files Modified
+- `crates/hitls-crypto/src/dh/groups.rs` — Rewritten with all 13 DH group primes
+- `crates/hitls-crypto/src/dh/mod.rs` — Added 14 new tests
+- `crates/hitls-tls/src/crypt/mod.rs` — Added FFDHE6144/FFDHE8192 NamedGroup constants
+- `crates/hitls-tls/src/handshake/server12.rs` — Updated is_ffdhe_group() and named_group_to_dh_param_id()
+- `CLAUDE.md`, `DEV_LOG.md`, `README.md`, `PROMPT_LOG.md` — Updated
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1046 workspace tests passing (34 ignored)

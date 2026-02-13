@@ -141,6 +141,18 @@ mod tests {
     }
 
     #[test]
+    fn test_ecdh_p192_shared_secret() {
+        let alice = EcdhKeyPair::generate(EccCurveId::NistP192).unwrap();
+        let bob = EcdhKeyPair::generate(EccCurveId::NistP192).unwrap();
+        let alice_pub = alice.public_key_bytes().unwrap();
+        let bob_pub = bob.public_key_bytes().unwrap();
+        let secret_a = alice.compute_shared_secret(&bob_pub).unwrap();
+        let secret_b = bob.compute_shared_secret(&alice_pub).unwrap();
+        assert_eq!(secret_a, secret_b);
+        assert_eq!(secret_a.len(), 24);
+    }
+
+    #[test]
     fn test_ecdh_p224_shared_secret() {
         let alice = EcdhKeyPair::generate(EccCurveId::NistP224).unwrap();
         let bob = EcdhKeyPair::generate(EccCurveId::NistP224).unwrap();

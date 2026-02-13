@@ -310,6 +310,14 @@ mod tests {
     }
 
     #[test]
+    fn test_ecdsa_sign_verify_p192() {
+        let key = EcdsaKeyPair::generate(EccCurveId::NistP192).unwrap();
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e");
+        let sig = key.sign(&digest).unwrap();
+        assert!(key.verify(&digest, &sig).unwrap());
+    }
+
+    #[test]
     fn test_ecdsa_sign_verify_p224() {
         let key = EcdsaKeyPair::generate(EccCurveId::NistP224).unwrap();
         let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362");

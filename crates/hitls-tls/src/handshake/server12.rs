@@ -1337,7 +1337,11 @@ pub(crate) fn negotiate_ffdhe_group(
 fn is_ffdhe_group(g: NamedGroup) -> bool {
     matches!(
         g,
-        NamedGroup::FFDHE2048 | NamedGroup::FFDHE3072 | NamedGroup::FFDHE4096
+        NamedGroup::FFDHE2048
+            | NamedGroup::FFDHE3072
+            | NamedGroup::FFDHE4096
+            | NamedGroup::FFDHE6144
+            | NamedGroup::FFDHE8192
     )
 }
 
@@ -1347,6 +1351,8 @@ fn named_group_to_dh_param_id(group: NamedGroup) -> Result<DhParamId, TlsError> 
         NamedGroup::FFDHE2048 => Ok(DhParamId::Rfc7919_2048),
         NamedGroup::FFDHE3072 => Ok(DhParamId::Rfc7919_3072),
         NamedGroup::FFDHE4096 => Ok(DhParamId::Rfc7919_4096),
+        NamedGroup::FFDHE6144 => Ok(DhParamId::Rfc7919_6144),
+        NamedGroup::FFDHE8192 => Ok(DhParamId::Rfc7919_8192),
         _ => Err(TlsError::HandshakeFailed(format!(
             "unsupported FFDHE group: 0x{:04x}",
             group.0

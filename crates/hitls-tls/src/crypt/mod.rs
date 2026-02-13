@@ -114,6 +114,8 @@ impl NamedGroup {
     pub const FFDHE2048: Self = Self(0x0100);
     pub const FFDHE3072: Self = Self(0x0101);
     pub const FFDHE4096: Self = Self(0x0102);
+    pub const FFDHE6144: Self = Self(0x0103);
+    pub const FFDHE8192: Self = Self(0x0104);
     // Post-quantum (draft)
     pub const X25519_MLKEM768: Self = Self(0x6399);
     // TLCP SM2 curve

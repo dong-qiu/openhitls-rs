@@ -1,6 +1,6 @@
 //! Elliptic curve parameter definitions for Weierstrass curves.
 //!
-//! Provides hard-coded parameters for NIST P-224, P-256, P-384, P-521,
+//! Provides hard-coded parameters for NIST P-192, P-224, P-256, P-384, P-521,
 //! Brainpool P-256r1, P-384r1, P-512r1, and SM2P256V1.
 
 use hitls_bignum::BigNum;
@@ -41,6 +41,7 @@ fn bn(hex: &str) -> BigNum {
 /// Return curve parameters for the given curve ID.
 pub(crate) fn get_curve_params(curve_id: EccCurveId) -> Result<CurveParams, CryptoError> {
     match curve_id {
+        EccCurveId::NistP192 => Ok(p192_params()),
         EccCurveId::NistP224 => Ok(p224_params()),
         EccCurveId::NistP256 => Ok(p256_params()),
         EccCurveId::NistP384 => Ok(p384_params()),
@@ -49,7 +50,21 @@ pub(crate) fn get_curve_params(curve_id: EccCurveId) -> Result<CurveParams, Cryp
         EccCurveId::BrainpoolP384r1 => Ok(brainpool_p384r1_params()),
         EccCurveId::BrainpoolP512r1 => Ok(brainpool_p512r1_params()),
         EccCurveId::Sm2Prime256 => Ok(sm2p256v1_params()),
-        _ => Err(CryptoError::InvalidArg),
+    }
+}
+
+/// NIST P-192 (secp192r1) parameters — FIPS 186-4 / SEC 2 §2.4.
+fn p192_params() -> CurveParams {
+    CurveParams {
+        p: bn("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFFFFFFFFFF"),
+        a: bn("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFFFFFFFFFC"),
+        b: bn("64210519E59C80E70FA7E9AB72243049FEB8DEECC146B9B1"),
+        gx: bn("188DA80EB03090F67CBF20EB43A18800F4FF0AFD82FF1012"),
+        gy: bn("07192B95FFC8DA78631011ED6B24CDD573F977A11E794811"),
+        n: bn("FFFFFFFFFFFFFFFFFFFFFFFF99DEF836146BC9B1B4D22831"),
+        h: 1,
+        field_size: 24,
+        a_is_minus_3: true,
     }
 }
 
