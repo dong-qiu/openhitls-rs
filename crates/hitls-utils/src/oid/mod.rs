@@ -332,6 +332,9 @@ pub mod known {
     }
 
     // PKCS#7 additional
+    pub fn pkcs7_digested_data() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 7, 5])
+    }
     pub fn pkcs7_encrypted_data() -> Oid {
         Oid::new(&[1, 2, 840, 113549, 1, 7, 6])
     }

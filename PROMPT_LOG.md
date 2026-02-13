@@ -1374,3 +1374,15 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 19 new tests (crypto 364→397, +33 running, +2 ignored), total 1065 (36 ignored). 4 new files in `hitls-crypto/src/fips/` (mod.rs, kat.rs, pct.rs, integrity.rs). FipsModule state machine with `run_self_tests()` orchestrating KAT→PCT. 6 KAT algorithms with NIST/RFC vectors. 3 PCT algorithms covering ECDSA, Ed25519, RSA. HMAC-SHA256 file integrity with `subtle::ConstantTimeEq`. CmvpError enum with 6 variants integrated into CryptoError via `#[from]`.
 
 1065 total tests (36 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 47: CLI Enhancements + CMS DigestedData (2026-02-13)
+
+**Prompt**: Implement Phase 47 — CMS DigestedData (RFC 5652 §5, parse + create + verify, SHA-256/384/512), CLI `pkcs12` subcommand (parse/extract/create P12 files, --info/--nokeys/--nocerts/--export), CLI `mac` subcommand (HMAC-SHA1/256/384/512/SM3 + CMAC-AES128/256, hex key input).
+
+**Result**: 17 new tests (pki 111→117 +6 DigestedData, cli 15→26 +4 pkcs12 +7 mac), total 1082 (36 ignored). 2 new CLI files (pkcs12.rs, mac.rs). DigestedData struct with parse/create/verify, `pkcs7_digested_data` OID added. PKCS#12 CLI with info/extract/export modes. MAC CLI with 7 algorithms (5 HMAC + 2 CMAC). Added `cmac` feature to CLI Cargo.toml. All planned migration phases complete.
+
+1082 total tests (36 ignored). Clippy clean, fmt clean.
+
+1065 total tests (36 ignored). Clippy clean, fmt clean.

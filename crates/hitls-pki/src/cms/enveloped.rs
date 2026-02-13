@@ -179,6 +179,7 @@ impl CmsMessage {
             signed_data: None,
             enveloped_data: Some(ed),
             encrypted_data: None,
+            digested_data: None,
             raw: encoded,
         })
     }
@@ -257,6 +258,7 @@ impl CmsMessage {
             signed_data: None,
             enveloped_data: Some(ed),
             encrypted_data: None,
+            digested_data: None,
             raw: encoded,
         })
     }

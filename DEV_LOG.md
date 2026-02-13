@@ -4222,3 +4222,70 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1065 workspace tests passing (36 ignored)
+
+---
+
+## Phase 47: CLI Enhancements + CMS DigestedData (Session 2026-02-13)
+
+### Goals
+- Add CMS DigestedData (RFC 5652 §5) — parse, create, verify
+- Add CLI `pkcs12` subcommand — parse/extract/create P12 files
+- Add CLI `mac` subcommand — HMAC/CMAC computation
+- Complete all planned migration phases
+
+### Completed Steps
+
+#### 1. CMS DigestedData (`hitls-pki/src/cms/mod.rs`)
+- Added `DigestedData` struct: version, digest_algorithm, encap_content_info, digest
+- Added `parse_digested_data()` function parsing RFC 5652 §5 ASN.1 structure
+- Added `encode_digested_data_cms()` for DER encoding with ContentInfo wrapper
+- Added `CmsMessage::digest()` constructor — computes digest and wraps in DigestedData
+- Added `CmsMessage::verify_digest()` — re-computes and compares digest
+- Added `pkcs7_digested_data` OID (1.2.840.113549.1.7.5) to `hitls-utils/src/oid/mod.rs`
+- Updated `oid_to_content_type()` to recognize DigestedData
+- Added `digested_data: Option<DigestedData>` field to `CmsMessage` (updated all constructors in mod.rs, enveloped.rs, encrypted.rs)
+- 6 new tests: create+verify, roundtrip, SHA-512, tampered digest, tampered content, content type detection
+
+#### 2. CLI `pkcs12` Subcommand (`hitls-cli/src/pkcs12.rs`)
+- `--info` mode: display P12 summary (key presence, cert count, subjects)
+- Default mode: extract key and certs to PEM (to stdout or --output file)
+- `--nokeys` / `--nocerts` flags to suppress output
+- `--export` mode: create P12 from `--inkey` + `--cert` PEM files with password
+- 4 new tests: info mode, extract to file, nokeys flag, export roundtrip
+
+#### 3. CLI `mac` Subcommand (`hitls-cli/src/mac.rs`)
+- HMAC algorithms: hmac-sha1, hmac-sha256, hmac-sha384, hmac-sha512, hmac-sm3
+- CMAC algorithms: cmac-aes128 (16-byte key), cmac-aes256 (32-byte key)
+- Key input as hex string, output format: `ALG(file)= hex_digest`
+- Stdin support with `-` file argument
+- Added `cmac` feature to hitls-cli Cargo.toml dependencies
+- 7 new tests: hmac-sha256, hmac-sha384, cmac-aes128, cmac-aes256, unsupported alg, wrong key length, hex decode
+
+#### 4. Main CLI Integration (`hitls-cli/src/main.rs`)
+- Added `mod mac` and `mod pkcs12` declarations
+- Added `Pkcs12` variant to `Commands` enum (9 args: input, password, info, nokeys, nocerts, export, inkey, cert, output)
+- Added `Mac` variant to `Commands` enum (3 args: algorithm, key, file)
+- Added dispatch cases in `main()` for both commands
+
+### Test Results
+- hitls-pki: 117 passed, 1 ignored (was 111/1) — +6 new CMS DigestedData tests
+- hitls-cli: 26 passed, 5 ignored (was 15/5) — +4 pkcs12 + 7 mac tests
+- Total workspace: 1082 tests (36 ignored)
+
+### Files Created
+- `crates/hitls-cli/src/pkcs12.rs` — PKCS#12 CLI subcommand + 4 tests
+- `crates/hitls-cli/src/mac.rs` — MAC computation CLI + 7 tests
+
+### Files Modified
+- `crates/hitls-utils/src/oid/mod.rs` — Added `pkcs7_digested_data()` OID
+- `crates/hitls-pki/src/cms/mod.rs` — DigestedData struct, parse, create, verify, 6 tests
+- `crates/hitls-pki/src/cms/enveloped.rs` — Added `digested_data: None` to CmsMessage constructors
+- `crates/hitls-pki/src/cms/encrypted.rs` — Added `digested_data: None` to CmsMessage constructor
+- `crates/hitls-cli/src/main.rs` — Added Pkcs12 + Mac commands
+- `crates/hitls-cli/Cargo.toml` — Added `cmac` feature
+- `CLAUDE.md`, `README.md`, `DEV_LOG.md`, `PROMPT_LOG.md` — Updated
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1082 workspace tests passing (36 ignored)

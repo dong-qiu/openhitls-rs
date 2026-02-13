@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: Phase 46 Complete — FIPS/CMVP Compliance Framework**
+> **Status: Phase 47 Complete — All Planned Migration Phases Done**
 >
-> 1065 tests passing (24 auth + 46 bignum + 382 crypto + 111 pki + 413 tls + 35 utils + 15 cli + 23 integration; 36 ignored). 5000+ Wycheproof edge-case vectors, 10 fuzz targets, security audit (constant-time, zeroize, unsafe code review). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain/CSR generation/certificate generation/to_text), PKCS#8 (parse/encode), PKCS#12, CMS SignedData + EnvelopedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression + X25519MLKEM768 hybrid KEM + SM4-GCM/CCM (RFC 8998)), TLS 1.2 handshake (47 cipher suites: ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, Bleichenbacher protection, ALPN, SNI, session resumption, session ticket, EMS, ETM, renegotiation indication, mTLS), DTLS 1.2 (record layer + handshake + fragmentation + retransmission + cookie exchange + anti-replay), TLCP (GM/T 0024, 4 cipher suites, double certificate, ECDHE + ECC key exchange), DTLCP (DTLS + TLCP, 4 cipher suites, cookie exchange, anti-replay), custom extensions framework, NSS key logging (SSLKEYLOGFILE), Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT (RFC 6962), async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), TLS 1.2 PRF, HOTP/TOTP, SPAKE2+, Privacy Pass (RFC 9578), and CLI tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed).
+> 1082 tests passing (24 auth + 46 bignum + 382 crypto + 117 pki + 413 tls + 35 utils + 26 cli + 23 integration; 36 ignored). 5000+ Wycheproof edge-case vectors, 10 fuzz targets, security audit (constant-time, zeroize, unsafe code review). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain/CSR generation/certificate generation/to_text), PKCS#8 (parse/encode), PKCS#12, CMS SignedData + EnvelopedData + EncryptedData + DigestedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression + X25519MLKEM768 hybrid KEM + SM4-GCM/CCM (RFC 8998)), TLS 1.2 handshake (47 cipher suites: ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, Bleichenbacher protection, ALPN, SNI, session resumption, session ticket, EMS, ETM, renegotiation indication, mTLS), DTLS 1.2 (record layer + handshake + fragmentation + retransmission + cookie exchange + anti-replay), TLCP (GM/T 0024, 4 cipher suites, double certificate, ECDHE + ECC key exchange), DTLCP (DTLS + TLCP, 4 cipher suites, cookie exchange, anti-replay), custom extensions framework, NSS key logging (SSLKEYLOGFILE), Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT (RFC 6962), async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), FIPS/CMVP (KAT, PCT, integrity), TLS 1.2 PRF, HOTP/TOTP, SPAKE2+, Privacy Pass (RFC 9578), and CLI tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac).
 
 ## Goals
 
@@ -26,7 +26,7 @@ openhitls-rs/
 │   ├── hitls-tls/       # TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP, async I/O (tokio), custom extensions, NSS key logging, 47+ cipher suites, hybrid KEM (X25519MLKEM768), TLS 1.3 SM4-GCM/CCM (RFC 8998), Record Size Limit, Fallback SCSV, OCSP stapling, SCT (413 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, certificate generation, to_text), PKCS#8 (RFC 5958), PKCS#12 (RFC 7292), CMS SignedData + EnvelopedData (RFC 5652) (107 tests)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382), Privacy Pass (RFC 9578, RSA blind sigs) (24 tests)
-│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed)
+│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
 ├── tests/interop/       # Integration tests: 23 cross-crate tests including TCP loopback (3 ignored)
 ├── tests/vectors/       # Standard test vectors (NIST CAVP, Wycheproof JSON, GM/T)
 ├── fuzz/                # Fuzz targets (cargo-fuzz, 10 libfuzzer targets)
@@ -169,17 +169,17 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (1065 tests, 36 ignored)
+# Run all tests (1082 tests, 36 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 397 tests (27 ignored, incl. 15 Wycheproof)
 cargo test -p hitls-tls --all-features      # 413 tests
-cargo test -p hitls-pki --all-features      # 111 tests (1 ignored)
+cargo test -p hitls-pki --all-features      # 117 tests (1 ignored)
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 35 tests
 cargo test -p hitls-auth --all-features     # 24 tests
-cargo test -p hitls-cli --all-features      # 15 tests (5 ignored)
+cargo test -p hitls-cli --all-features      # 26 tests (5 ignored)
 cargo test -p hitls-integration-tests       # 23 tests (3 ignored)
 
 # Lint
@@ -520,19 +520,19 @@ All 13 DH groups from RFC 2409, RFC 3526, and RFC 7919 now fully implemented wit
 
 **Scope**: `hitls-crypto/src/fips/` (mod.rs, kat.rs, pct.rs, integrity.rs), `hitls-types/src/error.rs`
 
-### Planned Migration Phases (Phase 47)
+### Completed Migration Phase 47
 
-#### Phase 47: CLI Enhancements + CMS DigestedData
+#### Phase 47: CLI Enhancements + CMS DigestedData — DONE
 
 **Priority: Medium** — Practical tool completeness for PKCS#12 operations and CMS coverage.
 
 | Feature | Standard | Status | Notes |
 |---------|----------|--------|-------|
-| CLI `pkcs12` subcommand | RFC 7292 | **Planned** | Parse/create P12 files, extract cert/key, password-based encryption |
-| CLI `mac` subcommand | — | **Planned** | HMAC/CMAC computation (parallel to `dgst` for MACs) |
-| CMS DigestedData | RFC 5652 §5 | **Planned** | Simple digest-wrapping content type (parse + create) |
+| CLI `pkcs12` subcommand | RFC 7292 | **Done** | Parse/create P12, extract cert/key (--info/--nokeys/--nocerts/--export) |
+| CLI `mac` subcommand | — | **Done** | HMAC (SHA-1/256/384/512/SM3) + CMAC (AES-128/256), hex key input |
+| CMS DigestedData | RFC 5652 §5 | **Done** | Parse + create + verify; SHA-256/384/512; 6 tests |
 
-**Scope**: `hitls-cli/src/`, `hitls-pki/src/cms/`
+**Scope**: `hitls-cli/src/pkcs12.rs`, `hitls-cli/src/mac.rs`, `hitls-pki/src/cms/mod.rs`
 
 #### Other Identified Gaps (Low Priority / Deferred)
 
@@ -551,12 +551,12 @@ All 13 DH groups from RFC 2409, RFC 3526, and RFC 7919 now fully implemented wit
 |-----------|-----------|--------------|------------------|----------------|
 | Crypto Algorithms | ~132K | ~24K | **100%** (all 48 modules + SM4-CCM + hardware AES + all 13 DH groups + FIPS/CMVP) | — |
 | TLS Protocol | ~52K | ~14K | **100%** (TLS 1.3 + 1.2 + DTLS 1.2 + TLCP + DTLCP + X25519MLKEM768 + SM4-GCM/CCM + RSL/SCSV/OCSP/SCT + async I/O + key logging + custom extensions + all 5 FFDHE groups) | — |
-| PKI / X.509 | ~17K | ~3.8K | **98%** (parse/verify/chain/CRL/OCSP/CSR/cert gen/to_text/PKCS#8/PKCS#12/CMS SignedData+EnvelopedData+EncryptedData) | CMS DigestedData |
+| PKI / X.509 | ~17K | ~4K | **100%** (parse/verify/chain/CRL/OCSP/CSR/cert gen/to_text/PKCS#8/PKCS#12/CMS SignedData+EnvelopedData+EncryptedData+DigestedData) | — |
 | Base Support Layer | ~12K | ~2K | **95%** (ASN.1/Base64/PEM/OID/errors) | — |
-| CLI Tools | ~8K | ~2K | **95%** (dgst/genpkey/x509/verify/enc/pkey/crl/req/s-client/s-server/list/rand/pkeyutl/speed) | pkcs12, mac commands |
+| CLI Tools | ~8K | ~2.2K | **100%** (dgst/genpkey/x509/verify/enc/pkey/crl/req/s-client/s-server/list/rand/pkeyutl/speed/pkcs12/mac) | — |
 | FIPS/CMVP | ~5K | ~0.5K | **85%** (state machine, 6 KATs, 3 PCTs, integrity check, feature-gated) | Conditional algorithm disabling |
-| Test Infrastructure | ~20K | ~3.5K | **95%** (1065 tests + 5000+ Wycheproof vectors + 10 fuzz targets + security audit) | SDV compliance tests |
-| **Total** | **~460K** | **~51K** | **~99%** (production-ready for modern TLS deployments) | Phase 47 planned |
+| Test Infrastructure | ~20K | ~3.5K | **95%** (1082 tests + 5000+ Wycheproof vectors + 10 fuzz targets + security audit) | SDV compliance tests |
+| **Total** | **~460K** | **~51K** | **~99%** (production-ready for modern TLS deployments) | Low-priority items only |
 
 ## Minimum Supported Rust Version
 

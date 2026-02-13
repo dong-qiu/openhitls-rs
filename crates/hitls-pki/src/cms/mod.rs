@@ -1,4 +1,4 @@
-//! CMS (Cryptographic Message Syntax) / PKCS#7 — SignedData + EnvelopedData + EncryptedData (RFC 5652).
+//! CMS (Cryptographic Message Syntax) / PKCS#7 — SignedData + EnvelopedData + EncryptedData + DigestedData (RFC 5652).
 
 pub mod encrypted;
 pub mod enveloped;
@@ -72,6 +72,15 @@ pub struct SignedData {
     pub signer_infos: Vec<SignerInfo>,
 }
 
+/// A CMS DigestedData message (RFC 5652 §5).
+#[derive(Debug, Clone)]
+pub struct DigestedData {
+    pub version: u32,
+    pub digest_algorithm: AlgorithmIdentifier,
+    pub encap_content_info: EncapContentInfo,
+    pub digest: Vec<u8>,
+}
+
 /// A CMS message.
 #[derive(Debug)]
 pub struct CmsMessage {
@@ -79,6 +88,7 @@ pub struct CmsMessage {
     pub signed_data: Option<SignedData>,
     pub enveloped_data: Option<enveloped::EnvelopedData>,
     pub encrypted_data: Option<encrypted::EncryptedData>,
+    pub digested_data: Option<DigestedData>,
     pub raw: Vec<u8>,
 }
 
@@ -185,6 +195,7 @@ impl CmsMessage {
                 signed_data: Some(sd),
                 enveloped_data: None,
                 encrypted_data: None,
+                digested_data: None,
                 raw: data.to_vec(),
             })
         } else if content_type == CmsContentType::EnvelopedData {
@@ -197,6 +208,7 @@ impl CmsMessage {
                 signed_data: None,
                 enveloped_data: Some(ed),
                 encrypted_data: None,
+                digested_data: None,
                 raw: data.to_vec(),
             })
         } else if content_type == CmsContentType::EncryptedData {
@@ -209,6 +221,20 @@ impl CmsMessage {
                 signed_data: None,
                 enveloped_data: None,
                 encrypted_data: Some(ed),
+                digested_data: None,
+                raw: data.to_vec(),
+            })
+        } else if content_type == CmsContentType::DigestedData {
+            let ctx0 = ci
+                .read_context_specific(0, true)
+                .map_err(|e| cerr(&format!("[0]: {e}")))?;
+            let dd = parse_digested_data(ctx0.value)?;
+            Ok(CmsMessage {
+                content_type,
+                signed_data: None,
+                enveloped_data: None,
+                encrypted_data: None,
+                digested_data: Some(dd),
                 raw: data.to_vec(),
             })
         } else {
@@ -217,6 +243,7 @@ impl CmsMessage {
                 signed_data: None,
                 enveloped_data: None,
                 encrypted_data: None,
+                digested_data: None,
                 raw: data.to_vec(),
             })
         }
@@ -326,6 +353,7 @@ impl CmsMessage {
             signed_data: Some(sd),
             enveloped_data: None,
             encrypted_data: None,
+            digested_data: None,
             raw: encoded,
         })
     }
@@ -937,6 +965,123 @@ fn extract_raw_issuer(cert_der: &[u8]) -> Result<Vec<u8>, PkiError> {
     Ok(enc.finish())
 }
 
+// ── DigestedData (RFC 5652 §5) ───────────────────────────────────────
+
+/// Parse DigestedData from the inner SEQUENCE bytes.
+///
+/// DigestedData ::= SEQUENCE {
+///   version          CMSVersion,
+///   digestAlgorithm  DigestAlgorithmIdentifier,
+///   encapContentInfo EncapsulatedContentInfo,
+///   digest           Digest (OCTET STRING)
+/// }
+fn parse_digested_data(data: &[u8]) -> Result<DigestedData, PkiError> {
+    let mut dec = Decoder::new(data);
+    let mut dd = dec
+        .read_sequence()
+        .map_err(|e| cerr(&format!("DigestedData: {e}")))?;
+
+    let version = bytes_to_u32(
+        dd.read_integer()
+            .map_err(|e| cerr(&format!("DD ver: {e}")))?,
+    );
+
+    let digest_algorithm = parse_algorithm_identifier(&mut dd)?;
+
+    let encap = parse_encap_content_info(&mut dd)?;
+
+    let digest = dd
+        .read_octet_string()
+        .map_err(|e| cerr(&format!("DD digest: {e}")))?
+        .to_vec();
+
+    Ok(DigestedData {
+        version,
+        digest_algorithm,
+        encap_content_info: encap,
+        digest,
+    })
+}
+
+/// Encode a DigestedData as a full CMS ContentInfo.
+fn encode_digested_data_cms(dd: &DigestedData) -> Vec<u8> {
+    let mut inner = Vec::new();
+
+    // version
+    inner.extend_from_slice(&enc_int(&[dd.version as u8]));
+
+    // digestAlgorithm
+    inner.extend_from_slice(&encode_algorithm_identifier(&dd.digest_algorithm));
+
+    // encapContentInfo
+    inner.extend_from_slice(&encode_encap_content_info(&dd.encap_content_info));
+
+    // digest OCTET STRING
+    inner.extend_from_slice(&enc_octet(&dd.digest));
+
+    let dd_seq = enc_seq(&inner);
+
+    // Wrap in ContentInfo
+    let ctx0 = enc_explicit_ctx(0, &dd_seq);
+    let mut ci_inner = enc_oid(&known::pkcs7_digested_data().to_der_value());
+    ci_inner.extend_from_slice(&ctx0);
+    enc_seq(&ci_inner)
+}
+
+impl CmsMessage {
+    /// Create a CMS DigestedData message.
+    ///
+    /// Computes the digest of the provided data and wraps it in a
+    /// DigestedData structure (RFC 5652 §5).
+    pub fn digest(data: &[u8], alg: CmsDigestAlg) -> Result<Self, PkiError> {
+        let digest = compute_digest(data, alg)?;
+        let alg_id = digest_alg_identifier(alg);
+
+        let dd = DigestedData {
+            version: 0,
+            digest_algorithm: alg_id,
+            encap_content_info: EncapContentInfo {
+                content_type: known::pkcs7_data().to_der_value(),
+                content: Some(data.to_vec()),
+            },
+            digest,
+        };
+
+        let encoded = encode_digested_data_cms(&dd);
+
+        Ok(CmsMessage {
+            content_type: CmsContentType::DigestedData,
+            signed_data: None,
+            enveloped_data: None,
+            encrypted_data: None,
+            digested_data: Some(dd),
+            raw: encoded,
+        })
+    }
+
+    /// Verify the digest in a DigestedData message.
+    ///
+    /// Re-computes the digest from the encapsulated content and compares
+    /// it with the stored digest value.
+    pub fn verify_digest(&self) -> Result<bool, PkiError> {
+        let dd = self
+            .digested_data
+            .as_ref()
+            .ok_or_else(|| cerr("not DigestedData"))?;
+
+        let content = dd
+            .encap_content_info
+            .content
+            .as_ref()
+            .ok_or_else(|| cerr("no content in DigestedData"))?;
+
+        let alg = oid_to_digest_alg(&dd.digest_algorithm.oid)?;
+        let computed = compute_digest(content, alg)?;
+
+        Ok(computed == dd.digest)
+    }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 fn oid_to_content_type(oid: &Oid) -> CmsContentType {
@@ -946,6 +1091,8 @@ fn oid_to_content_type(oid: &Oid) -> CmsContentType {
         CmsContentType::SignedData
     } else if *oid == known::pkcs7_enveloped_data() {
         CmsContentType::EnvelopedData
+    } else if *oid == known::pkcs7_digested_data() {
+        CmsContentType::DigestedData
     } else if *oid == known::pkcs7_encrypted_data() {
         CmsContentType::EncryptedData
     } else {
@@ -1117,6 +1264,82 @@ mod tests {
         let msg = CmsMessage::from_der(&encoded).unwrap();
         let parsed = msg.signed_data.unwrap();
         assert!(parsed.encap_content_info.content.is_none());
+    }
+
+    #[test]
+    fn test_cms_digested_data_create_and_verify() {
+        let data = b"Hello, DigestedData!";
+        let msg = CmsMessage::digest(data, CmsDigestAlg::Sha256).unwrap();
+        assert_eq!(msg.content_type, CmsContentType::DigestedData);
+        assert!(msg.digested_data.is_some());
+        let dd = msg.digested_data.as_ref().unwrap();
+        assert_eq!(dd.version, 0);
+        assert_eq!(dd.digest.len(), 32);
+        assert_eq!(
+            dd.encap_content_info.content.as_deref(),
+            Some(data.as_slice())
+        );
+        assert!(msg.verify_digest().unwrap());
+    }
+
+    #[test]
+    fn test_cms_digested_data_roundtrip() {
+        let data = b"Roundtrip test data for CMS DigestedData";
+        let msg = CmsMessage::digest(data, CmsDigestAlg::Sha384).unwrap();
+        let dd = msg.digested_data.as_ref().unwrap();
+        assert_eq!(dd.digest.len(), 48); // SHA-384
+
+        // Encode and re-parse
+        let parsed = CmsMessage::from_der(&msg.raw).unwrap();
+        assert_eq!(parsed.content_type, CmsContentType::DigestedData);
+        let parsed_dd = parsed.digested_data.as_ref().unwrap();
+        assert_eq!(parsed_dd.version, dd.version);
+        assert_eq!(parsed_dd.digest, dd.digest);
+        assert_eq!(
+            parsed_dd.encap_content_info.content,
+            dd.encap_content_info.content
+        );
+        assert!(parsed.verify_digest().unwrap());
+    }
+
+    #[test]
+    fn test_cms_digested_data_sha512() {
+        let data = b"SHA-512 digested data";
+        let msg = CmsMessage::digest(data, CmsDigestAlg::Sha512).unwrap();
+        let dd = msg.digested_data.as_ref().unwrap();
+        assert_eq!(dd.digest.len(), 64);
+        assert!(msg.verify_digest().unwrap());
+    }
+
+    #[test]
+    fn test_cms_digested_data_tampered_fails() {
+        let data = b"original data";
+        let msg = CmsMessage::digest(data, CmsDigestAlg::Sha256).unwrap();
+
+        // Re-parse and tamper the digest
+        let mut parsed = CmsMessage::from_der(&msg.raw).unwrap();
+        if let Some(dd) = parsed.digested_data.as_mut() {
+            dd.digest[0] ^= 0xFF;
+        }
+        assert!(!parsed.verify_digest().unwrap());
+    }
+
+    #[test]
+    fn test_cms_digested_data_tampered_content_fails() {
+        let data = b"original data";
+        let msg = CmsMessage::digest(data, CmsDigestAlg::Sha256).unwrap();
+
+        let mut parsed = CmsMessage::from_der(&msg.raw).unwrap();
+        if let Some(dd) = parsed.digested_data.as_mut() {
+            dd.encap_content_info.content = Some(b"tampered data".to_vec());
+        }
+        assert!(!parsed.verify_digest().unwrap());
+    }
+
+    #[test]
+    fn test_cms_digested_data_content_type_detection() {
+        let dd_oid = known::pkcs7_digested_data();
+        assert_eq!(oid_to_content_type(&dd_oid), CmsContentType::DigestedData);
     }
 
     #[test]

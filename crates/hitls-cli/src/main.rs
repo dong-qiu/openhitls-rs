@@ -5,6 +5,8 @@ mod dgst;
 mod enc;
 mod genpkey;
 mod list;
+mod mac;
+mod pkcs12;
 mod pkey;
 mod pkeyutl;
 mod rand_cmd;
@@ -197,6 +199,47 @@ enum Commands {
         #[arg(long)]
         sigfile: Option<String>,
     },
+    /// PKCS#12 operations (parse, extract, create).
+    Pkcs12 {
+        /// Input P12 file.
+        #[arg(short, long)]
+        input: Option<String>,
+        /// Password for the P12 file.
+        #[arg(short, long, default_value = "")]
+        password: String,
+        /// Display P12 info (num certs, key presence).
+        #[arg(long)]
+        info: bool,
+        /// Suppress private key output.
+        #[arg(long)]
+        nokeys: bool,
+        /// Suppress certificate output.
+        #[arg(long)]
+        nocerts: bool,
+        /// Export mode: create P12 from key + cert.
+        #[arg(long)]
+        export: bool,
+        /// Private key file (PEM) for export.
+        #[arg(long)]
+        inkey: Option<String>,
+        /// Certificate file (PEM) for export.
+        #[arg(long)]
+        cert: Option<String>,
+        /// Output file.
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Compute MAC (HMAC/CMAC) over a file.
+    Mac {
+        /// MAC algorithm (hmac-sha256, hmac-sha384, hmac-sha512, hmac-sm3, hmac-sha1, cmac-aes128, cmac-aes256).
+        #[arg(short, long, default_value = "hmac-sha256")]
+        algorithm: String,
+        /// Key in hexadecimal.
+        #[arg(short, long)]
+        key: String,
+        /// Input file (use - for stdin).
+        file: String,
+    },
     /// Benchmark cryptographic algorithm throughput.
     Speed {
         /// Algorithm: aes-128-gcm, aes-256-gcm, chacha20-poly1305, sha256, sha384, sha512, sm3, all.
@@ -284,6 +327,32 @@ fn main() {
             peerkey.as_deref(),
             sigfile.as_deref(),
         ),
+        Commands::Pkcs12 {
+            input,
+            password,
+            info,
+            nokeys,
+            nocerts,
+            export,
+            inkey,
+            cert,
+            output,
+        } => pkcs12::run(
+            input.as_deref(),
+            password,
+            *info,
+            *nokeys,
+            *nocerts,
+            *export,
+            inkey.as_deref(),
+            cert.as_deref(),
+            output.as_deref(),
+        ),
+        Commands::Mac {
+            algorithm,
+            key,
+            file,
+        } => mac::run(algorithm, key, file),
         Commands::Speed { algorithm, seconds } => speed::run(algorithm, *seconds),
     };
 

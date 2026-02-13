@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 46 complete — FIPS/CMVP Compliance Framework
+- **Status**: Phase 47 complete — CLI Enhancements + CMS DigestedData
 
 ## Workspace Structure
 
@@ -20,9 +20,9 @@ openhitls-rs/
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
 │   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); hardware AES acceleration (ARMv8/x86-64); ECC: P-192, P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; DRBG: HMAC/CTR/Hash; SM4-CCM; HCTR mode; FIPS/CMVP (KAT, PCT, integrity); Wycheproof test vectors (397 tests)
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, hybrid KEM (X25519MLKEM768), async I/O (tokio), TLS 1.3 SM4-GCM/CCM (RFC 8998), TLS 1.2 handshake (ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, Bleichenbacher protection), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), DTLCP (DTLS+TLCP), custom extensions framework, NSS key logging, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT, TLS 1.2 PRF (413 tests)
-│   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, Certificate generation, to_text output, SigningKey abstraction), PKCS#12 (RFC 7292), CMS SignedData + EnvelopedData + EncryptedData (RFC 5652), PKCS#8 (RFC 5958) (111 tests, 1 ignored)
+│   ├── hitls-pki/       # X.509 (parse, verify, chain, CRL, OCSP, CSR generation, Certificate generation, to_text output, SigningKey abstraction), PKCS#12 (RFC 7292), CMS SignedData + EnvelopedData + EncryptedData + DigestedData (RFC 5652), PKCS#8 (RFC 5958) (117 tests, 1 ignored)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (RFC 9578, RSA blind sigs) (24 tests)
-│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed)
+│   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
 ├── tests/interop/       # Integration tests (23 cross-crate tests, 3 ignored)
 ├── tests/vectors/       # Standard test vectors (Wycheproof JSON)
 ├── fuzz/                # Fuzz targets (cargo-fuzz, 10 targets)
@@ -35,17 +35,17 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (1065 tests, 36 ignored)
+# Run all tests (1082 tests, 36 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 397 tests (27 ignored, includes 15 Wycheproof)
 cargo test -p hitls-tls --all-features      # 413 tests
-cargo test -p hitls-pki --all-features      # 111 tests (1 ignored)
+cargo test -p hitls-pki --all-features      # 117 tests (1 ignored)
 cargo test -p hitls-bignum                  # 46 tests
 cargo test -p hitls-utils                   # 35 tests
 cargo test -p hitls-auth --all-features     # 24 tests
-cargo test -p hitls-cli --all-features      # 15 tests (5 ignored)
+cargo test -p hitls-cli --all-features      # 26 tests (5 ignored)
 cargo test -p hitls-integration-tests       # 23 tests (3 ignored)
 
 # Lint (must pass with zero warnings)
@@ -103,7 +103,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-46 complete (1065 tests, 36 ignored). Phase 47 planned for remaining gaps.
+Phases 0-47 complete (1082 tests, 36 ignored). All planned migration phases complete.
 
 ### Completed
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
@@ -113,8 +113,6 @@ Phases 0-46 complete (1065 tests, 36 ignored). Phase 47 planned for remaining ga
 - Phase 44: Remaining Features (NistP192, HCTR mode, CMS EncryptedData) -- DONE
 - Phase 45: Complete DH Groups + TLS FFDHE Expansion (all 13 DH groups, FFDHE6144/8192 in TLS) -- DONE
 - Phase 46: FIPS/CMVP Compliance Framework (KAT self-tests, FIPS state machine, PCT, integrity check, feature-gated) -- DONE
-
-### Planned
-- Phase 47: CLI Enhancements + CMS DigestedData (pkcs12/mac CLI commands, CMS DigestedData) -- PLANNED
+- Phase 47: CLI Enhancements + CMS DigestedData (pkcs12/mac CLI commands, CMS DigestedData RFC 5652 §5) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.
