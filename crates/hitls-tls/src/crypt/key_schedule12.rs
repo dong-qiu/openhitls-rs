@@ -407,6 +407,139 @@ mod tests {
         assert_eq!(params256.key_block_len(), 72);
     }
 
+    #[test]
+    fn test_derive_key_block_cbc_with_mac_keys() {
+        let factory = sha256_factory();
+        let master_secret = [0xABu8; 48];
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        let params = Tls12CipherSuiteParams::from_suite(
+            crate::CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+        )
+        .unwrap();
+
+        assert!(params.is_cbc);
+        assert_eq!(params.mac_key_len, 20);
+
+        let kb = derive_key_block(
+            &*factory,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+
+        // CBC: MAC keys are non-empty (20 bytes for HMAC-SHA1)
+        assert_eq!(kb.client_write_mac_key.len(), 20);
+        assert_eq!(kb.server_write_mac_key.len(), 20);
+        assert_eq!(kb.client_write_key.len(), 16);
+        assert_eq!(kb.server_write_key.len(), 16);
+        assert_eq!(kb.client_write_iv.len(), 16);
+        assert_eq!(kb.server_write_iv.len(), 16);
+        // All parts should be different
+        assert_ne!(kb.client_write_mac_key, kb.server_write_mac_key);
+        assert_ne!(kb.client_write_key, kb.server_write_key);
+    }
+
+    #[test]
+    fn test_derive_key_block_cbc_256_key_block_len() {
+        let params = Tls12CipherSuiteParams::from_suite(
+            crate::CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+        )
+        .unwrap();
+        // mac_key(20)*2 + key(32)*2 + iv(16)*2 = 40+64+32 = 136
+        assert_eq!(params.key_block_len(), 136);
+    }
+
+    #[test]
+    fn test_derive_key_block_chacha20_poly1305() {
+        let factory = sha256_factory();
+        let master_secret = [0xEFu8; 48];
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        let params = Tls12CipherSuiteParams::from_suite(
+            crate::CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+        )
+        .unwrap();
+
+        assert!(!params.is_cbc);
+
+        let kb = derive_key_block(
+            &*factory,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+
+        assert_eq!(kb.client_write_key.len(), 32);
+        assert_eq!(kb.server_write_key.len(), 32);
+        // AEAD: no MAC keys
+        assert!(kb.client_write_mac_key.is_empty());
+        assert!(kb.server_write_mac_key.is_empty());
+    }
+
+    #[test]
+    fn test_derive_master_secret_sha384() {
+        let factory = sha384_factory();
+        let pms = hex("0303aabbccdd");
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        let ms = derive_master_secret(&*factory, &pms, &client_random, &server_random).unwrap();
+        assert_eq!(ms.len(), 48);
+
+        // SHA-384 should produce different master secret than SHA-256
+        let factory256 = sha256_factory();
+        let ms256 =
+            derive_master_secret(&*factory256, &pms, &client_random, &server_random).unwrap();
+        assert_ne!(ms, ms256);
+    }
+
+    #[test]
+    fn test_compute_verify_data_length() {
+        let factory = sha384_factory();
+        let master_secret = [0xABu8; 48];
+        let handshake_hash = [0xCDu8; 48];
+
+        let vd = compute_verify_data(
+            &*factory,
+            &master_secret,
+            "client finished",
+            &handshake_hash,
+        )
+        .unwrap();
+        // verify_data is always 12 bytes regardless of hash
+        assert_eq!(vd.len(), 12);
+    }
+
+    #[test]
+    fn test_key_block_seed_order() {
+        // Key expansion uses server_random + client_random (reversed)
+        // Verify that swapping client/server randoms gives different key blocks
+        let factory = sha256_factory();
+        let master_secret = [0xABu8; 48];
+        let random_a = [0x01u8; 32];
+        let random_b = [0x02u8; 32];
+
+        let params = Tls12CipherSuiteParams::from_suite(
+            crate::CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        )
+        .unwrap();
+
+        let kb1 =
+            derive_key_block(&*factory, &master_secret, &random_a, &random_b, &params).unwrap();
+        let kb2 =
+            derive_key_block(&*factory, &master_secret, &random_b, &random_a, &params).unwrap();
+
+        // Swapped randoms → different keys
+        assert_ne!(kb1.client_write_key, kb2.client_write_key);
+    }
+
     #[cfg(feature = "tlcp")]
     #[test]
     fn test_derive_tlcp_key_block_cbc() {

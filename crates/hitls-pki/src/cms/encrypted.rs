@@ -295,4 +295,84 @@ mod tests {
         let decrypted = parsed.decrypt_symmetric(&key).unwrap();
         assert_eq!(decrypted, plaintext);
     }
+
+    #[test]
+    fn test_cms_encrypted_data_wrong_key_length() {
+        let plaintext = b"test";
+        // AES-128 expects 16 bytes, give 15
+        let result =
+            CmsMessage::encrypt_symmetric(plaintext, &[0x42; 15], CmsEncryptionAlg::Aes128Gcm);
+        assert!(result.is_err());
+
+        // AES-256 expects 32 bytes, give 16
+        let result2 =
+            CmsMessage::encrypt_symmetric(plaintext, &[0x42; 16], CmsEncryptionAlg::Aes256Gcm);
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn test_cms_encrypted_data_empty_plaintext() {
+        let key = [0x42u8; 16];
+        let cms = CmsMessage::encrypt_symmetric(b"", &key, CmsEncryptionAlg::Aes128Gcm).unwrap();
+        let decrypted = cms.decrypt_symmetric(&key).unwrap();
+        assert!(decrypted.is_empty());
+    }
+
+    #[test]
+    fn test_cms_encrypted_data_large_data() {
+        let key = [0x42u8; 32];
+        let plaintext = vec![0xAB; 65536]; // 64 KiB
+        let cms =
+            CmsMessage::encrypt_symmetric(&plaintext, &key, CmsEncryptionAlg::Aes256Gcm).unwrap();
+        let decrypted = cms.decrypt_symmetric(&key).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_cms_encrypted_data_tampered_ciphertext() {
+        let key = [0x42u8; 16];
+        let plaintext = b"Tamper-proof test data";
+        let mut cms =
+            CmsMessage::encrypt_symmetric(plaintext, &key, CmsEncryptionAlg::Aes128Gcm).unwrap();
+
+        // Tamper with the encrypted content
+        if let Some(ref mut ed) = cms.encrypted_data {
+            if let Some(ref mut ct) = ed.encrypted_content_info.encrypted_content {
+                if !ct.is_empty() {
+                    ct[0] ^= 0xFF;
+                }
+            }
+        }
+        let result = cms.decrypt_symmetric(&key);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cms_encrypted_data_unique_nonces() {
+        // Each encryption should produce different ciphertext due to random nonce
+        let key = [0x42u8; 16];
+        let plaintext = b"same plaintext";
+        let cms1 =
+            CmsMessage::encrypt_symmetric(plaintext, &key, CmsEncryptionAlg::Aes128Gcm).unwrap();
+        let cms2 =
+            CmsMessage::encrypt_symmetric(plaintext, &key, CmsEncryptionAlg::Aes128Gcm).unwrap();
+
+        let ct1 = cms1
+            .encrypted_data
+            .as_ref()
+            .unwrap()
+            .encrypted_content_info
+            .encrypted_content
+            .as_ref()
+            .unwrap();
+        let ct2 = cms2
+            .encrypted_data
+            .as_ref()
+            .unwrap()
+            .encrypted_content_info
+            .encrypted_content
+            .as_ref()
+            .unwrap();
+        assert_ne!(ct1, ct2);
+    }
 }

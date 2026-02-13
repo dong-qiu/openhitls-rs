@@ -859,4 +859,117 @@ mod tests {
         let p_val = Fe448(p_limbs);
         assert!(p_val.reduce().is_zero());
     }
+
+    #[test]
+    fn test_neg_roundtrip() {
+        let mut bytes = [0u8; 56];
+        bytes[0] = 42;
+        bytes[7] = 0xFF;
+        let a = Fe448::from_bytes(&bytes);
+        let neg_a = a.neg();
+        // a + (-a) should be zero
+        let sum = a.add(&neg_a);
+        assert!(sum.is_zero());
+    }
+
+    #[test]
+    fn test_neg_zero() {
+        let z = Fe448::zero();
+        let neg_z = z.neg();
+        assert!(neg_z.is_zero());
+    }
+
+    #[test]
+    fn test_mul_small() {
+        let a = Fe448::from_bytes(&[0x03; 56]);
+        // a * 2 should equal a + a
+        let doubled = a.mul_small(2);
+        let added = a.add(&a);
+        assert_eq!(doubled.to_bytes(), added.to_bytes());
+    }
+
+    #[test]
+    fn test_mul_small_zero() {
+        let a = Fe448::from_bytes(&[0xAB; 56]);
+        let zero = a.mul_small(0);
+        assert!(zero.is_zero());
+    }
+
+    #[test]
+    fn test_mul_small_one() {
+        let a = Fe448::from_bytes(&[0x42; 56]);
+        let same = a.mul_small(1);
+        assert_eq!(a.to_bytes(), same.to_bytes());
+    }
+
+    #[test]
+    fn test_sqrt_of_square() {
+        // sqrt(a^2) should be either a or -a
+        let mut bytes = [0u8; 56];
+        bytes[0] = 9; // small value for cleaner test
+        let a = Fe448::from_bytes(&bytes);
+        let a_sq = a.square();
+        let root = a_sq.sqrt();
+        let root_sq = root.square();
+        // root^2 should equal a^2
+        assert_eq!(root_sq.to_bytes(), a_sq.to_bytes());
+    }
+
+    #[test]
+    fn test_distributive_law() {
+        // a * (b + c) == a*b + a*c
+        let a = Fe448::from_bytes(&[0x11; 56]);
+        let b = Fe448::from_bytes(&[0x22; 56]);
+        let c = Fe448::from_bytes(&[0x33; 56]);
+
+        let lhs = a.mul(&b.add(&c));
+        let rhs = a.mul(&b).add(&a.mul(&c));
+        assert_eq!(lhs.to_bytes(), rhs.to_bytes());
+    }
+
+    #[test]
+    fn test_mul_commutativity() {
+        let a = Fe448::from_bytes(&[0xAB; 56]);
+        let b = Fe448::from_bytes(&[0xCD; 56]);
+        assert_eq!(a.mul(&b).to_bytes(), b.mul(&a).to_bytes());
+    }
+
+    #[test]
+    fn test_is_negative() {
+        // is_negative checks bit 0 of canonical encoding
+        let one = Fe448::one();
+        assert_eq!(one.is_negative(), 1); // 1 is odd
+
+        let two = Fe448::one().add(&Fe448::one());
+        assert_eq!(two.is_negative(), 0); // 2 is even
+    }
+
+    #[test]
+    fn test_partial_eq_same_value() {
+        let a = Fe448::from_bytes(&[0x42; 56]);
+        let b = Fe448::from_bytes(&[0x42; 56]);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_partial_eq_different_values() {
+        let a = Fe448::from_bytes(&[0x42; 56]);
+        let b = Fe448::from_bytes(&[0x43; 56]);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_sub_self_is_zero() {
+        let a = Fe448::from_bytes(&[0xFF; 56]);
+        let diff = a.sub(&a);
+        assert!(diff.is_zero());
+    }
+
+    #[test]
+    fn test_invert_one() {
+        // 1^(-1) = 1
+        let one = Fe448::one();
+        let inv = one.invert();
+        assert_eq!(inv.to_bytes(), one.to_bytes());
+    }
 }

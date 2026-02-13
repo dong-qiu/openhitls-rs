@@ -146,6 +146,88 @@ mod tests {
     }
 
     #[test]
+    fn test_select_signature_scheme_ed448() {
+        let key = ServerPrivateKey::Ed448(vec![0x42; 57]);
+        let client_schemes = vec![SignatureScheme::ED448, SignatureScheme::ED25519];
+        let scheme = select_signature_scheme(&key, &client_schemes).unwrap();
+        assert_eq!(scheme, SignatureScheme::ED448);
+    }
+
+    #[test]
+    fn test_select_signature_scheme_ecdsa_p256() {
+        let key = ServerPrivateKey::Ecdsa {
+            curve_id: EccCurveId::NistP256,
+            private_key: vec![0x42; 32],
+        };
+        let client_schemes = vec![
+            SignatureScheme::RSA_PSS_RSAE_SHA256,
+            SignatureScheme::ECDSA_SECP256R1_SHA256,
+        ];
+        let scheme = select_signature_scheme(&key, &client_schemes).unwrap();
+        assert_eq!(scheme, SignatureScheme::ECDSA_SECP256R1_SHA256);
+    }
+
+    #[test]
+    fn test_select_signature_scheme_ecdsa_p384() {
+        let key = ServerPrivateKey::Ecdsa {
+            curve_id: EccCurveId::NistP384,
+            private_key: vec![0x42; 48],
+        };
+        let client_schemes = vec![
+            SignatureScheme::ECDSA_SECP256R1_SHA256,
+            SignatureScheme::ECDSA_SECP384R1_SHA384,
+        ];
+        let scheme = select_signature_scheme(&key, &client_schemes).unwrap();
+        assert_eq!(scheme, SignatureScheme::ECDSA_SECP384R1_SHA384);
+    }
+
+    #[test]
+    fn test_select_signature_scheme_ecdsa_unsupported_curve() {
+        let key = ServerPrivateKey::Ecdsa {
+            curve_id: EccCurveId::NistP521,
+            private_key: vec![0x42; 66],
+        };
+        let client_schemes = vec![
+            SignatureScheme::ECDSA_SECP256R1_SHA256,
+            SignatureScheme::ECDSA_SECP384R1_SHA384,
+        ];
+        assert!(select_signature_scheme(&key, &client_schemes).is_err());
+    }
+
+    #[test]
+    fn test_select_signature_scheme_rsa_first_match() {
+        let key = ServerPrivateKey::Rsa {
+            n: vec![0x01],
+            d: vec![0x02],
+            e: vec![0x03],
+            p: vec![0x04],
+            q: vec![0x05],
+        };
+        // Client supports SHA384 and SHA256 — server prefers SHA256 (first candidate)
+        let client_schemes = vec![
+            SignatureScheme::RSA_PSS_RSAE_SHA384,
+            SignatureScheme::RSA_PSS_RSAE_SHA256,
+        ];
+        let scheme = select_signature_scheme(&key, &client_schemes).unwrap();
+        assert_eq!(scheme, SignatureScheme::RSA_PSS_RSAE_SHA256);
+    }
+
+    #[test]
+    fn test_select_signature_scheme_rsa_sha512() {
+        let key = ServerPrivateKey::Rsa {
+            n: vec![0x01],
+            d: vec![0x02],
+            e: vec![0x03],
+            p: vec![0x04],
+            q: vec![0x05],
+        };
+        // Client only supports SHA512
+        let client_schemes = vec![SignatureScheme::RSA_PSS_RSAE_SHA512];
+        let scheme = select_signature_scheme(&key, &client_schemes).unwrap();
+        assert_eq!(scheme, SignatureScheme::RSA_PSS_RSAE_SHA512);
+    }
+
+    #[test]
     fn test_sign_and_verify_ed25519_roundtrip() {
         // Use a fixed seed and derive the public key from it
         let seed = vec![0x42; 32];
@@ -171,5 +253,93 @@ mod tests {
             hitls_crypto::ed25519::Ed25519KeyPair::from_public_key(&pub_key_bytes).unwrap();
         let ok = verifier.verify(&content, &signature).unwrap();
         assert!(ok);
+    }
+
+    #[test]
+    fn test_sign_and_verify_ecdsa_p256_roundtrip() {
+        let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let pub_bytes = kp.public_key_bytes().unwrap();
+        let priv_bytes = kp.private_key_bytes();
+
+        let server_key = ServerPrivateKey::Ecdsa {
+            curve_id: EccCurveId::NistP256,
+            private_key: priv_bytes,
+        };
+        let transcript_hash = vec![0xCC; 32];
+
+        let signature = sign_certificate_verify(
+            &server_key,
+            SignatureScheme::ECDSA_SECP256R1_SHA256,
+            &transcript_hash,
+            true,
+        )
+        .unwrap();
+
+        // Verify
+        let content = build_verify_content(&transcript_hash, true);
+        let digest = compute_sha256(&content).unwrap();
+        let verifier =
+            hitls_crypto::ecdsa::EcdsaKeyPair::from_public_key(EccCurveId::NistP256, &pub_bytes)
+                .unwrap();
+        let ok = verifier.verify(&digest, &signature).unwrap();
+        assert!(ok);
+    }
+
+    #[test]
+    fn test_sign_certificate_verify_server_vs_client_context() {
+        let seed = vec![0x42; 32];
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let pub_key_bytes = kp.public_key().to_vec();
+
+        let server_key = ServerPrivateKey::Ed25519(seed);
+        let transcript_hash = vec![0xAA; 32];
+
+        // Sign as server
+        let sig_server = sign_certificate_verify(
+            &server_key,
+            SignatureScheme::ED25519,
+            &transcript_hash,
+            true,
+        )
+        .unwrap();
+
+        // Sign as client (different context string → different signature)
+        let sig_client = sign_certificate_verify(
+            &server_key,
+            SignatureScheme::ED25519,
+            &transcript_hash,
+            false,
+        )
+        .unwrap();
+
+        assert_ne!(sig_server, sig_client);
+
+        // Each signature verifies under the correct context
+        let content_server = build_verify_content(&transcript_hash, true);
+        let content_client = build_verify_content(&transcript_hash, false);
+        let verifier =
+            hitls_crypto::ed25519::Ed25519KeyPair::from_public_key(&pub_key_bytes).unwrap();
+        assert!(verifier.verify(&content_server, &sig_server).unwrap());
+        assert!(verifier.verify(&content_client, &sig_client).unwrap());
+    }
+
+    #[test]
+    fn test_sign_ecdsa_unsupported_scheme() {
+        let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let priv_bytes = kp.private_key_bytes();
+
+        let server_key = ServerPrivateKey::Ecdsa {
+            curve_id: EccCurveId::NistP256,
+            private_key: priv_bytes,
+        };
+
+        // ECDSA key but passing an RSA scheme → "ECDSA scheme mismatch"
+        let result = sign_certificate_verify(
+            &server_key,
+            SignatureScheme::RSA_PSS_RSAE_SHA256,
+            &[0xAA; 32],
+            true,
+        );
+        assert!(result.is_err());
     }
 }

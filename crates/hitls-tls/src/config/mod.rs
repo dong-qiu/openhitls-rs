@@ -600,4 +600,180 @@ mod tests {
         assert!(config.verify_client_cert);
         assert!(config.require_client_cert);
     }
+
+    #[test]
+    fn test_config_builder_version_range() {
+        let config = TlsConfig::builder()
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .build();
+        assert_eq!(config.min_version, TlsVersion::Tls12);
+        assert_eq!(config.max_version, TlsVersion::Tls12);
+    }
+
+    #[test]
+    fn test_config_builder_alpn() {
+        let config = TlsConfig::builder()
+            .alpn(&[b"h2", b"http/1.1"])
+            .build();
+        assert_eq!(config.alpn_protocols.len(), 2);
+        assert_eq!(config.alpn_protocols[0], b"h2");
+        assert_eq!(config.alpn_protocols[1], b"http/1.1");
+    }
+
+    #[test]
+    fn test_config_builder_cipher_suites() {
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_AES_128_GCM_SHA256])
+            .build();
+        assert_eq!(config.cipher_suites.len(), 1);
+        assert_eq!(
+            config.cipher_suites[0],
+            CipherSuite::TLS_AES_128_GCM_SHA256
+        );
+    }
+
+    #[test]
+    fn test_config_builder_session_resumption() {
+        // Default: enabled
+        let config = TlsConfig::builder().build();
+        assert!(config.session_resumption);
+
+        // Disabled
+        let config2 = TlsConfig::builder().session_resumption(false).build();
+        assert!(!config2.session_resumption);
+    }
+
+    #[test]
+    fn test_config_builder_psk() {
+        let config = TlsConfig::builder()
+            .psk(vec![0xAA; 32])
+            .psk_identity(b"client1".to_vec())
+            .psk_identity_hint(b"server hint".to_vec())
+            .build();
+        assert_eq!(config.psk.as_ref().unwrap().len(), 32);
+        assert_eq!(config.psk_identity.as_ref().unwrap(), b"client1");
+        assert_eq!(
+            config.psk_identity_hint.as_ref().unwrap(),
+            b"server hint"
+        );
+    }
+
+    #[test]
+    fn test_config_builder_ems_etm_defaults() {
+        let config = TlsConfig::builder().build();
+        assert!(config.enable_extended_master_secret);
+        assert!(config.enable_encrypt_then_mac);
+    }
+
+    #[test]
+    fn test_config_builder_disable_ems_etm() {
+        let config = TlsConfig::builder()
+            .enable_extended_master_secret(false)
+            .enable_encrypt_then_mac(false)
+            .build();
+        assert!(!config.enable_extended_master_secret);
+        assert!(!config.enable_encrypt_then_mac);
+    }
+
+    #[test]
+    fn test_config_builder_record_size_limit() {
+        let config = TlsConfig::builder().record_size_limit(1024).build();
+        assert_eq!(config.record_size_limit, 1024);
+
+        let default = TlsConfig::builder().build();
+        assert_eq!(default.record_size_limit, 0); // disabled
+    }
+
+    #[test]
+    fn test_config_builder_fallback_scsv() {
+        let config = TlsConfig::builder().send_fallback_scsv(true).build();
+        assert!(config.send_fallback_scsv);
+
+        let default = TlsConfig::builder().build();
+        assert!(!default.send_fallback_scsv);
+    }
+
+    #[test]
+    fn test_config_builder_ocsp_sct() {
+        let config = TlsConfig::builder()
+            .enable_ocsp_stapling(true)
+            .ocsp_staple(vec![0x30, 0x82])
+            .enable_sct(true)
+            .sct_list(vec![0x00, 0x10])
+            .build();
+        assert!(config.enable_ocsp_stapling);
+        assert!(config.ocsp_staple.is_some());
+        assert!(config.enable_sct);
+        assert!(config.sct_list.is_some());
+    }
+
+    #[test]
+    fn test_config_builder_post_handshake_auth() {
+        let config = TlsConfig::builder()
+            .post_handshake_auth(true)
+            .client_certificate_chain(vec![vec![0x30]])
+            .client_private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .build();
+        assert!(config.post_handshake_auth);
+        assert_eq!(config.client_certificate_chain.len(), 1);
+        assert!(config.client_private_key.is_some());
+    }
+
+    #[test]
+    fn test_config_builder_early_data() {
+        let config = TlsConfig::builder()
+            .max_early_data_size(16384)
+            .build();
+        assert_eq!(config.max_early_data_size, 16384);
+
+        let default = TlsConfig::builder().build();
+        assert_eq!(default.max_early_data_size, 0);
+    }
+
+    #[test]
+    fn test_config_builder_ticket_key() {
+        let config = TlsConfig::builder()
+            .ticket_key(vec![0x42; 32])
+            .build();
+        assert_eq!(config.ticket_key.as_ref().unwrap().len(), 32);
+    }
+
+    #[test]
+    fn test_config_debug_format() {
+        let config = TlsConfig::builder()
+            .psk(vec![0xAA; 16])
+            .build();
+        let debug = format!("{config:?}");
+        assert!(debug.contains("TlsConfig"));
+        // PSK should show length, not raw bytes
+        assert!(debug.contains("16 bytes"));
+        assert!(!debug.contains("0xAA"));
+    }
+
+    #[test]
+    fn test_config_builder_debug_format() {
+        let builder = TlsConfig::builder();
+        let debug = format!("{builder:?}");
+        assert!(debug.contains("TlsConfigBuilder"));
+        assert!(debug.contains("Client"));
+    }
+
+    #[test]
+    fn test_config_builder_psk_server_callback() {
+        let cb: PskServerCallback = Arc::new(|identity| {
+            if identity == b"client1" {
+                Some(vec![0xAA; 32])
+            } else {
+                None
+            }
+        });
+        let config = TlsConfig::builder().psk_server_callback(cb).build();
+        assert!(config.psk_server_callback.is_some());
+        // Test the callback
+        let result = (config.psk_server_callback.as_ref().unwrap())(b"client1");
+        assert!(result.is_some());
+        let result2 = (config.psk_server_callback.as_ref().unwrap())(b"unknown");
+        assert!(result2.is_none());
+    }
 }

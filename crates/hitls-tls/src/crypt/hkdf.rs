@@ -272,4 +272,87 @@ mod tests {
             derive_secret(&sha256_factory, &early_secret, b"derived", &empty_hash).unwrap();
         assert_eq!(derived.len(), 32);
     }
+
+    #[test]
+    fn test_hmac_hash_basic() {
+        // RFC 2202 Test Case 1: HMAC-SHA256 with known key and data
+        let key = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let data = b"Hi There";
+        let result = hmac_hash(&sha256_factory, &key, data).unwrap();
+        assert_eq!(result.len(), 32);
+        // Verify determinism
+        let result2 = hmac_hash(&sha256_factory, &key, data).unwrap();
+        assert_eq!(result, result2);
+    }
+
+    #[test]
+    fn test_hmac_hash_long_key() {
+        // Key longer than block size (64 bytes for SHA-256) gets hashed first
+        let long_key = vec![0xAA; 131]; // > 64 bytes
+        let data = b"Test With Long Key";
+        let result = hmac_hash(&sha256_factory, &long_key, data).unwrap();
+        assert_eq!(result.len(), 32);
+    }
+
+    #[test]
+    fn test_hkdf_expand_long_output() {
+        // Request output longer than hash length (> 32 bytes for SHA-256)
+        // This exercises multiple HMAC iterations
+        let prk = hex("077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5");
+        let info = b"long expansion test";
+
+        let okm = hkdf_expand(&sha256_factory, &prk, info, 80).unwrap();
+        assert_eq!(okm.len(), 80);
+
+        // First 32 bytes should match a 32-byte expansion (T(1) is the same)
+        let okm_short = hkdf_expand(&sha256_factory, &prk, info, 32).unwrap();
+        assert_eq!(&okm[..32], &okm_short[..]);
+    }
+
+    #[test]
+    fn test_hkdf_expand_too_large() {
+        // Output length > 255 * hash_len should fail
+        let prk = vec![0x42; 32];
+        let result = hkdf_expand(&sha256_factory, &prk, b"", 255 * 32 + 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_hkdf_expand_label_with_context() {
+        // HKDF-Expand-Label with non-empty context
+        let secret = vec![0xAA; 32];
+        let context = b"some transcript hash data";
+        let result = hkdf_expand_label(&sha256_factory, &secret, b"key", context, 16).unwrap();
+        assert_eq!(result.len(), 16);
+
+        // Different context → different output
+        let result2 =
+            hkdf_expand_label(&sha256_factory, &secret, b"key", b"different ctx", 16).unwrap();
+        assert_ne!(result, result2);
+    }
+
+    #[test]
+    fn test_derive_secret_sha384() {
+        let secret = vec![0xBB; 48];
+        let transcript = vec![0xCC; 48]; // SHA-384 hash length
+        let derived = derive_secret(&sha384_factory, &secret, b"c hs traffic", &transcript).unwrap();
+        assert_eq!(derived.len(), 48);
+    }
+
+    #[test]
+    fn test_hkdf_extract_deterministic() {
+        let salt = hex("000102030405060708090a0b0c");
+        let ikm = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let prk1 = hkdf_extract(&sha256_factory, &salt, &ikm).unwrap();
+        let prk2 = hkdf_extract(&sha256_factory, &salt, &ikm).unwrap();
+        assert_eq!(prk1, prk2);
+    }
+
+    #[test]
+    fn test_hkdf_expand_single_byte() {
+        // Edge case: request exactly 1 byte of output
+        let prk = vec![0x42; 32];
+        let okm = hkdf_expand(&sha256_factory, &prk, b"info", 1).unwrap();
+        assert_eq!(okm.len(), 1);
+    }
 }

@@ -470,4 +470,198 @@ mod tests {
         ks.derive_master_secret().unwrap();
         assert_eq!(ks.current_secret.len(), 48);
     }
+
+    #[test]
+    fn test_early_secret_with_psk() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks_no_psk = KeySchedule::new(params.clone());
+        ks_no_psk.derive_early_secret(None).unwrap();
+        let no_psk_secret = ks_no_psk.current_secret.clone();
+
+        let mut ks_psk = KeySchedule::new(params);
+        let psk = vec![0xDE; 32];
+        ks_psk.derive_early_secret(Some(&psk)).unwrap();
+
+        // PSK vs zero-PSK should produce different early secrets
+        assert_ne!(ks_psk.current_secret, no_psk_secret);
+        assert_eq!(ks_psk.current_secret.len(), 32);
+    }
+
+    #[test]
+    fn test_early_traffic_secret() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(Some(&[0xAA; 32])).unwrap();
+
+        let ch_hash = [0xBB; 32];
+        let early_traffic = ks.derive_early_traffic_secret(&ch_hash).unwrap();
+        assert_eq!(early_traffic.len(), 32);
+
+        // Deterministic
+        let early_traffic2 = ks.derive_early_traffic_secret(&ch_hash).unwrap();
+        assert_eq!(early_traffic, early_traffic2);
+
+        // Different CH hash → different secret
+        let early_traffic3 = ks.derive_early_traffic_secret(&[0xCC; 32]).unwrap();
+        assert_ne!(early_traffic, early_traffic3);
+    }
+
+    #[test]
+    fn test_early_traffic_secret_wrong_stage() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+
+        // Initial stage → should fail
+        assert!(ks.derive_early_traffic_secret(&[0u8; 32]).is_err());
+
+        // After handshake secret → should fail
+        ks.derive_early_secret(None).unwrap();
+        ks.derive_handshake_secret(&[0u8; 32]).unwrap();
+        assert!(ks.derive_early_traffic_secret(&[0u8; 32]).is_err());
+    }
+
+    #[test]
+    fn test_binder_key_resumption_vs_external() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(Some(&[0xAA; 32])).unwrap();
+
+        let res_binder = ks.derive_binder_key(false).unwrap(); // resumption
+        let ext_binder = ks.derive_binder_key(true).unwrap(); // external
+
+        assert_eq!(res_binder.len(), 32);
+        assert_eq!(ext_binder.len(), 32);
+        // Different labels → different keys
+        assert_ne!(res_binder, ext_binder);
+    }
+
+    #[test]
+    fn test_binder_key_wrong_stage() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+        ks.derive_handshake_secret(&[0u8; 32]).unwrap();
+
+        // HandshakeSecret stage → should fail
+        assert!(ks.derive_binder_key(false).is_err());
+    }
+
+    #[test]
+    fn test_exporter_master_secret() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+        ks.derive_handshake_secret(&[0xAA; 32]).unwrap();
+        ks.derive_master_secret().unwrap();
+
+        let transcript = [0xBB; 32];
+        let exp = ks.derive_exporter_master_secret(&transcript).unwrap();
+        assert_eq!(exp.len(), 32);
+
+        // Deterministic
+        let exp2 = ks.derive_exporter_master_secret(&transcript).unwrap();
+        assert_eq!(exp, exp2);
+    }
+
+    #[test]
+    fn test_exporter_master_secret_wrong_stage() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+
+        // EarlySecret stage → should fail
+        assert!(ks.derive_exporter_master_secret(&[0u8; 32]).is_err());
+    }
+
+    #[test]
+    fn test_resumption_master_secret() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+        ks.derive_handshake_secret(&[0xAA; 32]).unwrap();
+        ks.derive_master_secret().unwrap();
+
+        let transcript_cf = [0xCC; 32];
+        let rms = ks.derive_resumption_master_secret(&transcript_cf).unwrap();
+        assert_eq!(rms.len(), 32);
+
+        // Different transcript → different secret
+        let rms2 = ks.derive_resumption_master_secret(&[0xDD; 32]).unwrap();
+        assert_ne!(rms, rms2);
+    }
+
+    #[test]
+    fn test_resumption_psk_derivation() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let ks = KeySchedule::new(params);
+
+        let rms = vec![0xAA; 32];
+        let nonce1 = vec![0x01];
+        let nonce2 = vec![0x02];
+
+        let psk1 = ks.derive_resumption_psk(&rms, &nonce1).unwrap();
+        let psk2 = ks.derive_resumption_psk(&rms, &nonce2).unwrap();
+
+        assert_eq!(psk1.len(), 32);
+        assert_eq!(psk2.len(), 32);
+        // Different nonces → different PSKs
+        assert_ne!(psk1, psk2);
+    }
+
+    #[test]
+    fn test_compute_finished_verify_data() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+        ks.derive_handshake_secret(&[0xAA; 32]).unwrap();
+
+        let (client_hs, _server_hs) = ks.derive_handshake_traffic_secrets(&[0xBB; 32]).unwrap();
+
+        let finished_key = ks.derive_finished_key(&client_hs).unwrap();
+        let verify_data = ks
+            .compute_finished_verify_data(&finished_key, &[0xCC; 32])
+            .unwrap();
+        assert_eq!(verify_data.len(), 32);
+
+        // Deterministic
+        let verify_data2 = ks
+            .compute_finished_verify_data(&finished_key, &[0xCC; 32])
+            .unwrap();
+        assert_eq!(verify_data, verify_data2);
+
+        // Different transcript → different verify_data
+        let verify_data3 = ks
+            .compute_finished_verify_data(&finished_key, &[0xDD; 32])
+            .unwrap();
+        assert_ne!(verify_data, verify_data3);
+    }
+
+    #[test]
+    fn test_double_derive_early_secret_fails() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+
+        // Second derive_early_secret should fail (already in EarlySecret stage)
+        assert!(ks.derive_early_secret(None).is_err());
+    }
+
+    #[test]
+    fn test_traffic_secret_update_chain() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let ks = KeySchedule::new(params);
+
+        let secret0 = hex("9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5");
+        let secret1 = ks.update_traffic_secret(&secret0).unwrap();
+        let secret2 = ks.update_traffic_secret(&secret1).unwrap();
+
+        // Each update produces a different secret
+        assert_ne!(secret0, secret1);
+        assert_ne!(secret1, secret2);
+        assert_ne!(secret0, secret2);
+
+        // All are 32 bytes
+        assert_eq!(secret1.len(), 32);
+        assert_eq!(secret2.len(), 32);
+    }
 }

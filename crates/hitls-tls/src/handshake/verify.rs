@@ -202,4 +202,223 @@ mod tests {
         // Server and client contexts differ in content (not length)
         assert_ne!(content, client_content);
     }
+
+    #[test]
+    fn test_build_verify_content_lengths() {
+        // Server context string
+        let hash32 = vec![0xBB; 32];
+        let content = build_verify_content(&hash32, true);
+        assert_eq!(content.len(), 64 + SERVER_CONTEXT.len() + 1 + 32);
+
+        // Client context string
+        let content_client = build_verify_content(&hash32, false);
+        assert_eq!(content_client.len(), 64 + CLIENT_CONTEXT.len() + 1 + 32);
+
+        // With 48-byte hash (SHA-384)
+        let hash48 = vec![0xCC; 48];
+        let content48 = build_verify_content(&hash48, true);
+        assert_eq!(content48.len(), 64 + SERVER_CONTEXT.len() + 1 + 48);
+    }
+
+    #[test]
+    fn test_build_verify_content_empty_hash() {
+        let content = build_verify_content(&[], true);
+        assert_eq!(content.len(), 64 + SERVER_CONTEXT.len() + 1);
+        // Last byte is the 0x00 separator
+        assert_eq!(content[content.len() - 1], 0x00);
+    }
+
+    /// Helper: build a minimal Certificate with only the public_key field populated.
+    fn make_cert_with_spki(algorithm_oid: Vec<u8>, public_key: Vec<u8>) -> Certificate {
+        Certificate {
+            raw: Vec::new(),
+            version: 3,
+            serial_number: vec![0x01],
+            issuer: hitls_pki::x509::DistinguishedName {
+                entries: Vec::new(),
+            },
+            subject: hitls_pki::x509::DistinguishedName {
+                entries: Vec::new(),
+            },
+            not_before: 0,
+            not_after: 0,
+            public_key: SubjectPublicKeyInfo {
+                algorithm_oid,
+                algorithm_params: None,
+                public_key,
+            },
+            extensions: Vec::new(),
+            tbs_raw: Vec::new(),
+            signature_algorithm: Vec::new(),
+            signature_params: None,
+            signature_value: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_verify_certificate_verify_ed25519_roundtrip() {
+        // Generate Ed25519 keypair
+        let seed = vec![0x42; 32];
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let pub_key = kp.public_key().to_vec();
+
+        // Sign using the signing module
+        let transcript_hash = vec![0xAA; 32];
+        let content = build_verify_content(&transcript_hash, true);
+        let signature = kp.sign(&content).unwrap();
+
+        // Build cert with Ed25519 public key
+        // Ed25519 OID: 1.3.101.112 → 06 03 2b 65 70
+        let cert = make_cert_with_spki(vec![0x2b, 0x65, 0x70], pub_key);
+
+        // Verify should succeed
+        verify_certificate_verify(
+            &cert,
+            SignatureScheme::ED25519,
+            &signature,
+            &transcript_hash,
+            true,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_verify_certificate_verify_ed25519_wrong_signature() {
+        let seed = vec![0x42; 32];
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let pub_key = kp.public_key().to_vec();
+
+        let transcript_hash = vec![0xAA; 32];
+        let content = build_verify_content(&transcript_hash, true);
+        let mut signature = kp.sign(&content).unwrap();
+
+        // Tamper with signature
+        signature[0] ^= 0xFF;
+
+        let cert = make_cert_with_spki(vec![0x2b, 0x65, 0x70], pub_key);
+
+        let result = verify_certificate_verify(
+            &cert,
+            SignatureScheme::ED25519,
+            &signature,
+            &transcript_hash,
+            true,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_verify_certificate_verify_ed25519_wrong_transcript() {
+        let seed = vec![0x42; 32];
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let pub_key = kp.public_key().to_vec();
+
+        let transcript_hash = vec![0xAA; 32];
+        let content = build_verify_content(&transcript_hash, true);
+        let signature = kp.sign(&content).unwrap();
+
+        // Verify with different transcript hash should fail
+        let wrong_hash = vec![0xBB; 32];
+        let cert = make_cert_with_spki(vec![0x2b, 0x65, 0x70], pub_key);
+
+        let result = verify_certificate_verify(
+            &cert,
+            SignatureScheme::ED25519,
+            &signature,
+            &wrong_hash,
+            true,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_verify_certificate_verify_ed25519_server_vs_client() {
+        let seed = vec![0x42; 32];
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let pub_key = kp.public_key().to_vec();
+
+        let transcript_hash = vec![0xAA; 32];
+        // Sign as server
+        let content = build_verify_content(&transcript_hash, true);
+        let signature = kp.sign(&content).unwrap();
+
+        let cert = make_cert_with_spki(vec![0x2b, 0x65, 0x70], pub_key);
+
+        // Verify as client should fail (different context string)
+        let result = verify_certificate_verify(
+            &cert,
+            SignatureScheme::ED25519,
+            &signature,
+            &transcript_hash,
+            false, // client context
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_verify_certificate_verify_ecdsa_p256_roundtrip() {
+        // Generate ECDSA P-256 keypair
+        let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let pub_key = kp.public_key_bytes().unwrap();
+
+        let transcript_hash = vec![0xAA; 32];
+        let content = build_verify_content(&transcript_hash, true);
+        let digest = compute_sha256(&content).unwrap();
+        let signature = kp.sign(&digest).unwrap();
+
+        // ECDSA public key for SPKI: uncompressed point
+        // P-256 OID: 1.2.840.10045.2.1 (ecPublicKey)
+        let cert = make_cert_with_spki(vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], pub_key);
+
+        verify_certificate_verify(
+            &cert,
+            SignatureScheme::ECDSA_SECP256R1_SHA256,
+            &signature,
+            &transcript_hash,
+            true,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_verify_certificate_verify_ecdsa_p384_roundtrip() {
+        let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(EccCurveId::NistP384).unwrap();
+        let pub_key = kp.public_key_bytes().unwrap();
+
+        let transcript_hash = vec![0xBB; 48];
+        let content = build_verify_content(&transcript_hash, true);
+        let digest = compute_sha384(&content).unwrap();
+        let signature = kp.sign(&digest).unwrap();
+
+        let cert = make_cert_with_spki(vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], pub_key);
+
+        verify_certificate_verify(
+            &cert,
+            SignatureScheme::ECDSA_SECP384R1_SHA384,
+            &signature,
+            &transcript_hash,
+            true,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_verify_certificate_verify_unsupported_scheme() {
+        let seed = vec![0x42; 32];
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let pub_key = kp.public_key().to_vec();
+
+        let cert = make_cert_with_spki(vec![0x2b, 0x65, 0x70], pub_key);
+
+        let result = verify_certificate_verify(
+            &cert,
+            SignatureScheme(0x0000), // unsupported
+            &[0xAA; 64],
+            &[0xBB; 32],
+            true,
+        );
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("unsupported signature scheme"));
+    }
 }

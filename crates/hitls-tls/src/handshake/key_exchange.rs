@@ -294,4 +294,55 @@ mod tests {
     fn test_key_exchange_hybrid_kem_encapsulate_bad_length() {
         assert!(KeyExchange::encapsulate(NamedGroup::X25519_MLKEM768, &[0u8; 100]).is_err());
     }
+
+    #[test]
+    fn test_encapsulate_non_kem_group() {
+        // X25519 is not a KEM group
+        assert!(KeyExchange::encapsulate(NamedGroup::X25519, &[0u8; 32]).is_err());
+    }
+
+    #[test]
+    fn test_key_exchange_x25519_wrong_peer_length() {
+        let kx = KeyExchange::generate(NamedGroup::X25519).unwrap();
+        // X25519 expects 32-byte peer key; 16 bytes should fail
+        assert!(kx.compute_shared_secret(&[0u8; 16]).is_err());
+    }
+
+    #[test]
+    fn test_key_exchange_x448_wrong_peer_length() {
+        let kx = KeyExchange::generate(NamedGroup::X448).unwrap();
+        // X448 expects 56-byte peer key
+        assert!(kx.compute_shared_secret(&[0u8; 32]).is_err());
+    }
+
+    #[test]
+    fn test_key_exchange_hybrid_wrong_ciphertext_length() {
+        let kx = KeyExchange::generate(NamedGroup::X25519_MLKEM768).unwrap();
+        // Hybrid expects 1120-byte ciphertext, not 100
+        assert!(kx.compute_shared_secret(&[0u8; 100]).is_err());
+    }
+
+    #[test]
+    fn test_key_exchange_generates_unique_keys() {
+        let kx1 = KeyExchange::generate(NamedGroup::X25519).unwrap();
+        let kx2 = KeyExchange::generate(NamedGroup::X25519).unwrap();
+        // Two independent generations should produce different public keys
+        assert_ne!(kx1.public_key_bytes(), kx2.public_key_bytes());
+    }
+
+    #[test]
+    fn test_key_exchange_secp256r1_wrong_peer() {
+        let kx = KeyExchange::generate(NamedGroup::SECP256R1).unwrap();
+        // Invalid EC point (all zeros, not 0x04 prefix)
+        assert!(kx.compute_shared_secret(&[0u8; 65]).is_err());
+    }
+
+    #[test]
+    fn test_key_exchange_x25519_shared_secret_not_zero() {
+        let kx = KeyExchange::generate(NamedGroup::X25519).unwrap();
+        let peer = KeyExchange::generate(NamedGroup::X25519).unwrap();
+        let shared = kx.compute_shared_secret(peer.public_key_bytes()).unwrap();
+        // Shared secret should not be all zeros
+        assert!(shared.iter().any(|&b| b != 0));
+    }
 }
