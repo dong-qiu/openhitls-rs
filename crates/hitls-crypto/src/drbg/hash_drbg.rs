@@ -173,11 +173,24 @@ impl HashDrbg {
         })
     }
 
-    /// Instantiate from the system entropy source (getrandom).
+    /// Instantiate from the system entropy source.
+    ///
+    /// When the `entropy` feature is enabled, raw bytes are health-tested
+    /// (NIST SP 800-90B RCT + APT) and conditioned before use.
+    /// Otherwise, `getrandom` is used directly.
     pub fn from_system_entropy(hash_type: HashDrbgType) -> Result<Self, CryptoError> {
         let seed_len = hash_type.seed_len();
         let mut entropy = vec![0u8; seed_len];
-        getrandom::getrandom(&mut entropy).map_err(|_| CryptoError::BnRandGenFail)?;
+        #[cfg(feature = "entropy")]
+        {
+            let mut es =
+                crate::entropy::EntropySource::new(crate::entropy::EntropyConfig::default());
+            es.get_entropy(&mut entropy)?;
+        }
+        #[cfg(not(feature = "entropy"))]
+        {
+            getrandom::getrandom(&mut entropy).map_err(|_| CryptoError::BnRandGenFail)?;
+        }
         let result = Self::new(hash_type, &entropy);
         entropy.zeroize();
         result

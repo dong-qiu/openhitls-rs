@@ -115,6 +115,10 @@ pub mod kdf {
     pub use super::provider::Kdf;
 }
 
+// Entropy health testing
+#[cfg(feature = "entropy")]
+pub mod entropy;
+
 // FIPS/CMVP compliance
 #[cfg(feature = "fips")]
 pub mod fips;

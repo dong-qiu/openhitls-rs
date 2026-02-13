@@ -20,6 +20,7 @@ pub(crate) fn run_all_kat() -> Result<(), CmvpError> {
     kat_hmac_drbg()?;
     kat_hkdf_sha256()?;
     kat_ecdsa_p256()?;
+    kat_entropy_health()?;
     Ok(())
 }
 
@@ -220,6 +221,57 @@ fn kat_ecdsa_p256() -> Result<(), CmvpError> {
     Ok(())
 }
 
+/// Entropy health test KAT (NIST SP 800-90B §4.4).
+///
+/// Validates that:
+/// 1. RCT correctly detects a stuck source (all-same samples)
+/// 2. APT correctly detects a biased source (high repetition within window)
+/// 3. Normal varying data passes both tests
+fn kat_entropy_health() -> Result<(), CmvpError> {
+    use crate::entropy::health::{AptTest, HealthTest, RctTest};
+    use hitls_types::CryptoError;
+
+    // 1. RCT must detect stuck source
+    let mut rct = RctTest::new(5);
+    let mut rct_failed = false;
+    for _ in 0..10 {
+        if rct.test(0x42).is_err() {
+            rct_failed = true;
+            break;
+        }
+    }
+    if !rct_failed {
+        return Err(CmvpError::KatFailure(
+            "Entropy RCT failed to detect stuck source".into(),
+        ));
+    }
+
+    // 2. APT must detect biased source
+    let mut apt = AptTest::new(20, 15);
+    let mut apt_failed = false;
+    for _ in 0..20 {
+        if apt.test(0x42).is_err() {
+            apt_failed = true;
+            break;
+        }
+    }
+    if !apt_failed {
+        return Err(CmvpError::KatFailure(
+            "Entropy APT failed to detect biased source".into(),
+        ));
+    }
+
+    // 3. Normal data must pass
+    let mut ht = HealthTest::with_defaults();
+    for i in 0u64..1000 {
+        ht.test_sample(i).map_err(|e: CryptoError| {
+            CmvpError::KatFailure(format!("Entropy health test failed on normal data: {e}"))
+        })?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +304,11 @@ mod tests {
     #[test]
     fn test_kat_ecdsa_p256() {
         kat_ecdsa_p256().unwrap();
+    }
+
+    #[test]
+    fn test_kat_entropy_health() {
+        kat_entropy_health().unwrap();
     }
 
     #[test]

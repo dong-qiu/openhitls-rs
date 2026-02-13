@@ -95,6 +95,12 @@ pub enum CryptoError {
     #[error("drbg: failed to obtain entropy")]
     DrbgEntropyFail,
 
+    // Entropy health test errors
+    #[error("entropy: repetition count test failed")]
+    EntropyRctFailure,
+    #[error("entropy: adaptive proportion test failed")]
+    EntropyAptFailure,
+
     // KDF errors
     #[error("kdf: derived key length overflow")]
     KdfDkLenOverflow,

@@ -1385,4 +1385,12 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1082 total tests (36 ignored). Clippy clean, fmt clean.
 
-1065 total tests (36 ignored). Clippy clean, fmt clean.
+---
+
+## Phase 48: Entropy Health Testing — NIST SP 800-90B (2026-02-13)
+
+**Prompt**: Implement entropy health testing per NIST SP 800-90B. Create entropy module with health tests (RCT §4.4.1 + APT §4.4.2), entropy pool (circular buffer), SHA-256 hash conditioning function (§3.1.5), pluggable NoiseSource trait with system default (getrandom). Integrate with DRBG from_system_entropy() and FIPS self-tests.
+
+**Result**: 22 new tests (crypto 397→418: +8 health, +5 pool, +3 conditioning, +4 coordinator, +1 FIPS KAT, +1 doc-test), total 1104 (36 ignored). 4 new files (entropy/mod.rs, health.rs, pool.rs, conditioning.rs). Feature flag `entropy = ["sha2"]`, `fips` now depends on `entropy`. DRBG `from_system_entropy()` conditionally uses health-tested entropy. Error variants: `EntropyRctFailure`, `EntropyAptFailure`. FIPS KAT validates RCT/APT detection.
+
+1104 total tests (36 ignored). Clippy clean, fmt clean.

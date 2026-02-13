@@ -4289,3 +4289,86 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1082 workspace tests passing (36 ignored)
+
+---
+
+## Phase 48: Entropy Health Testing — NIST SP 800-90B (Session 2026-02-13)
+
+### Goals
+- Implement NIST SP 800-90B entropy health tests (Repetition Count Test + Adaptive Proportion Test)
+- Create entropy pool (circular buffer) for entropy byte buffering
+- Implement SHA-256 hash-based conditioning function (NIST SP 800-90B §3.1.5)
+- Add pluggable noise source trait (NoiseSource) with system default (getrandom)
+- Create EntropySource coordinator orchestrating collection → testing → conditioning → pooling
+- Integrate health-tested entropy into DRBG from_system_entropy() methods
+- Add entropy health KAT to FIPS self-test suite
+
+### Implementation
+
+#### entropy/health.rs — Health Tests (NIST SP 800-90B §4.4)
+- `RctTest`: Repetition Count Test detects stuck noise sources (same sample repeated ≥ cutoff times)
+- `AptTest`: Adaptive Proportion Test detects biased sources within sliding windows
+- `HealthTest`: Combined runner for both tests
+- Default parameters: RCT cutoff=21, APT window=512, APT cutoff=410 (H=1.0, α=2⁻²⁰)
+- 8 tests: varying data passes, stuck source detected, count resets, uniform passes, biased detected, window resets, combined test, reset clears state
+
+#### entropy/pool.rs — Entropy Pool
+- `EntropyPool`: Circular buffer (ring buffer) with head/tail pointers
+- Push/pop with wrap-around handling, capacity tracking
+- Memory securely zeroed on drop and after pop operations
+- Default capacity: 4096 bytes, minimum: 64 bytes
+- 5 tests: basic push/pop, wrap-around, empty pop, full push, zeroize on drop
+
+#### entropy/conditioning.rs — Hash-Based Conditioning Function
+- `HashConditioner`: SHA-256 derivation function
+- Input: raw noise bytes; Output: 32 bytes of full-entropy conditioned data
+- Formula: SHA-256(0x01 || BE32(output_len) || raw_entropy)
+- FIPS 140-3 entropy requirement: (output_bits + 64) / min_entropy_per_byte
+- 3 tests: output length, deterministic, needed input length calculation
+
+#### entropy/mod.rs — Entropy Source Coordinator
+- `NoiseSource` trait: pluggable with name(), min_entropy_per_byte(), read()
+- `SystemNoiseSource`: wraps getrandom (8 bits/byte, full entropy)
+- `EntropyConfig`: pool capacity, health test enable/disable, RCT/APT parameters
+- `EntropySource`: coordinator with pool + optional health tests + conditioner + noise source
+- `get_entropy()`: serves from pool or gathers fresh conditioned entropy
+- `startup_test()`: 1024 sample startup health test per NIST SP 800-90B §4.3
+- 4 tests: get entropy, startup test, custom noise source, stuck source detection
+
+#### DRBG Integration
+- `HmacDrbg::from_system_entropy()`: uses EntropySource when `entropy` feature enabled
+- `CtrDrbg::from_system_entropy()`: same pattern
+- `HashDrbg::from_system_entropy()`: same pattern
+- When `entropy` feature disabled: existing getrandom path unchanged (zero regression)
+
+#### FIPS Integration
+- Added `kat_entropy_health()` to fips/kat.rs
+- Tests: RCT detects stuck source, APT detects biased source, normal data passes
+- 1 new KAT test
+
+#### Error Variants
+- Added `CryptoError::EntropyRctFailure` and `CryptoError::EntropyAptFailure`
+
+### Feature Flag
+- `entropy = ["sha2"]` in hitls-crypto/Cargo.toml
+- `fips` now includes `entropy` as dependency
+- Gated with `#[cfg(feature = "entropy")]`
+
+### Files Changed
+- `crates/hitls-types/src/error.rs` — Added 2 entropy error variants
+- `crates/hitls-crypto/src/entropy/mod.rs` — NEW: Coordinator, NoiseSource trait, EntropySource (4 tests)
+- `crates/hitls-crypto/src/entropy/health.rs` — NEW: RCT + APT health tests (8 tests)
+- `crates/hitls-crypto/src/entropy/pool.rs` — NEW: Circular entropy buffer (5 tests)
+- `crates/hitls-crypto/src/entropy/conditioning.rs` — NEW: SHA-256 conditioning (3 tests)
+- `crates/hitls-crypto/src/lib.rs` — Added `#[cfg(feature = "entropy")] pub mod entropy`
+- `crates/hitls-crypto/Cargo.toml` — Added `entropy = ["sha2"]`, updated `fips` deps
+- `crates/hitls-crypto/src/drbg/hmac_drbg.rs` — Conditional entropy integration
+- `crates/hitls-crypto/src/drbg/ctr_drbg.rs` — Conditional entropy integration
+- `crates/hitls-crypto/src/drbg/hash_drbg.rs` — Conditional entropy integration
+- `crates/hitls-crypto/src/fips/kat.rs` — Added kat_entropy_health() + 1 test
+- `CLAUDE.md`, `README.md`, `DEV_LOG.md`, `PROMPT_LOG.md` — Updated
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1104 workspace tests passing (36 ignored), +22 new tests
