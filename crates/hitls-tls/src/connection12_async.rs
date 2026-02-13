@@ -1133,8 +1133,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ServerC
 mod tests {
     use super::*;
     use crate::config::{ServerPrivateKey, TlsConfig};
-    use crate::crypt::SignatureScheme;
     use crate::crypt::NamedGroup;
+    use crate::crypt::SignatureScheme;
     use crate::CipherSuite;
 
     fn ecdsa_private_key() -> Vec<u8> {
@@ -1173,8 +1173,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_async_tls12_new_connection_state() {
-        let (client_config, _) =
-            make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (client_config, _) = make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
         let (client_stream, _server_stream) = tokio::io::duplex(16 * 1024);
         let conn = AsyncTls12ClientConnection::new(client_stream, client_config);
 
@@ -1184,8 +1183,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_async_tls12_read_before_handshake() {
-        let (_, server_config) =
-            make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (_, server_config) = make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
         let (_, server_stream) = tokio::io::duplex(16 * 1024);
         let mut conn = AsyncTls12ServerConnection::new(server_stream, server_config);
 
@@ -1196,8 +1194,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_async_tls12_write_before_handshake() {
-        let (client_config, _) =
-            make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (client_config, _) = make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
         let (client_stream, _) = tokio::io::duplex(16 * 1024);
         let mut conn = AsyncTls12ClientConnection::new(client_stream, client_config);
 
@@ -1296,8 +1293,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_async_tls12_server_new_state() {
-        let (_, server_config) =
-            make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (_, server_config) = make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
         let (_, server_stream) = tokio::io::duplex(16 * 1024);
         let conn = AsyncTls12ServerConnection::new(server_stream, server_config);
 
