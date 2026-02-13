@@ -13,6 +13,7 @@ pub fn select_signature_scheme(
 ) -> Result<SignatureScheme, TlsError> {
     let candidates: &[SignatureScheme] = match key {
         ServerPrivateKey::Ed25519(_) => &[SignatureScheme::ED25519],
+        ServerPrivateKey::Ed448(_) => &[SignatureScheme::ED448],
         ServerPrivateKey::Ecdsa { curve_id, .. } => match *curve_id {
             EccCurveId::NistP256 => &[SignatureScheme::ECDSA_SECP256R1_SHA256],
             EccCurveId::NistP384 => &[SignatureScheme::ECDSA_SECP384R1_SHA384],
@@ -58,6 +59,12 @@ pub fn sign_certificate_verify(
     match key {
         ServerPrivateKey::Ed25519(seed) => {
             let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(seed)
+                .map_err(TlsError::CryptoError)?;
+            let sig = kp.sign(&content).map_err(TlsError::CryptoError)?;
+            Ok(sig.to_vec())
+        }
+        ServerPrivateKey::Ed448(seed) => {
+            let kp = hitls_crypto::ed448::Ed448KeyPair::from_seed(seed)
                 .map_err(TlsError::CryptoError)?;
             let sig = kp.sign(&content).map_err(TlsError::CryptoError)?;
             Ok(sig.to_vec())

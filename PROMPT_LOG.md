@@ -1394,3 +1394,13 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 22 new tests (crypto 397→418: +8 health, +5 pool, +3 conditioning, +4 coordinator, +1 FIPS KAT, +1 doc-test), total 1104 (36 ignored). 4 new files (entropy/mod.rs, health.rs, pool.rs, conditioning.rs). Feature flag `entropy = ["sha2"]`, `fips` now depends on `entropy`. DRBG `from_system_entropy()` conditionally uses health-tested entropy. Error variants: `EntropyRctFailure`, `EntropyAptFailure`. FIPS KAT validates RCT/APT detection.
 
 1104 total tests (36 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 49: Ed448 / X448 / Curve448 (2026-02-14)
+
+**Prompt**: Implement Ed448 (RFC 8032 §5.2), X448 (RFC 7748 §5), and Curve448 (Goldilocks) cryptographic primitives. Create Fe448 field arithmetic in GF(2^448-2^224-1) with 16x28-bit limb representation and Goldilocks reduction. Implement Edwards curve point operations for the a=1, d=-39081 curve (extended coordinates). Ed448 signing/verification uses SHAKE256 with dom4 prefix, supports contexts and Ed448ph pre-hashing. X448 DH uses Montgomery ladder with clamping. Wire into TLS handshake (SignatureScheme::ED448 0x0808, X448 key exchange, ServerPrivateKey::Ed448). Add PkeyAlgId::Ed448/X448 variants and feature flags `ed448 = ["sha3", "hitls-bignum"]`, `x448 = []`.
+
+**Result**: 87 new tests (crypto 418→463 +45 tests +1 ignored: 8 field, 6 edwards, 8 ed448, 5 x448; tls 413→423 +10 tests), total 1157 (37 ignored). 5 new files (curve448/mod.rs, curve448/field.rs, curve448/edwards.rs, ed448/mod.rs, x448/mod.rs), 10+ modified files. Key bugs fixed: Ed448 addition formula must use separate X1*X2/Y1*Y2 (not HWCD trick which requires a=-1); X448 Montgomery ladder BB→AA variable swap; basepoint coordinate derivation; hex vector corruption. TLS integration: Ed448 signing/verification in TLS 1.3 and 1.2, X448 key exchange with NamedGroup::X448, ServerPrivateKey::Ed448 variant.
+
+1157 total tests (37 ignored). Clippy clean, fmt clean.

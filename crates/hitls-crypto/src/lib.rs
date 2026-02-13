@@ -55,6 +55,8 @@ pub mod mac {
 // Asymmetric algorithms
 #[cfg(any(feature = "ed25519", feature = "x25519"))]
 pub(crate) mod curve25519;
+#[cfg(any(feature = "ed448", feature = "x448"))]
+pub(crate) mod curve448;
 #[cfg(feature = "dh")]
 pub mod dh;
 #[cfg(feature = "dsa")]
@@ -67,6 +69,8 @@ pub mod ecdh;
 pub mod ecdsa;
 #[cfg(feature = "ed25519")]
 pub mod ed25519;
+#[cfg(feature = "ed448")]
+pub mod ed448;
 #[cfg(feature = "elgamal")]
 pub mod elgamal;
 #[cfg(feature = "paillier")]
@@ -79,6 +83,8 @@ pub mod sm2;
 pub mod sm9;
 #[cfg(feature = "x25519")]
 pub mod x25519;
+#[cfg(feature = "x448")]
+pub mod x448;
 
 // Post-quantum algorithms
 #[cfg(feature = "frodokem")]

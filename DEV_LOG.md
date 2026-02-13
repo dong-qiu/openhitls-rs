@@ -4372,3 +4372,101 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1104 workspace tests passing (36 ignored), +22 new tests
+
+---
+
+## Phase 49: Ed448 / X448 / Curve448 (Session 2026-02-14)
+
+### Goals
+- Implement Curve448 (Goldilocks) field arithmetic in GF(2^448-2^224-1) with 16x28-bit limb representation
+- Implement Edwards curve point operations for the a=1, d=-39081 curve (extended coordinates)
+- Implement Ed448 signing and verification per RFC 8032 section 5.2 with SHAKE256 and dom4 prefix
+- Implement X448 Diffie-Hellman key exchange per RFC 7748 section 5 (Montgomery ladder)
+- Wire Ed448/X448 into TLS handshake (signing, verification, key exchange) and add feature flags
+- Add PkeyAlgId::Ed448 and PkeyAlgId::X448 enum variants
+
+### Implementation
+
+#### curve448/field.rs — Fe448 Field Arithmetic (GF(2^448-2^224-1))
+- 16x28-bit limb representation for Goldilocks prime p = 2^448 - 2^224 - 1
+- Basic operations: add, sub, mul, square with Goldilocks-specific reduction
+- Inversion via Fermat's little theorem (a^(p-2) mod p)
+- Conditional swap (constant-time) for Montgomery ladder
+- Encode/decode: 56-byte little-endian serialization
+- 8 tests: zero_one, add_sub_roundtrip, mul_one_identity, mul_square_consistency, invert, encode_decode_roundtrip, conditional_swap, goldilocks_reduction
+
+#### curve448/edwards.rs — GeExtended448 Edwards Point Operations
+- Extended coordinates (X, Y, Z, T) on Edwards curve with a=1, d=-39081
+- Point addition: Separate X1*X2 and Y1*Y2 computation (NOT the HWCD (Y-X)(Y'-X') trick, which only works for a=-1)
+- Point doubling, negation, identity
+- Variable-time scalar multiplication (double-and-add, 448 bits)
+- Basepoint from RFC 8032 with correct coordinates derived from curve equation
+- 6 tests: identity, basepoint_roundtrip, double_equals_add, scalar_mul_one, scalar_mul_two, order
+
+#### ed448/mod.rs — Ed448 Sign/Verify (RFC 8032 §5.2)
+- Key generation: SHAKE256(secret) → 114 bytes, first 57 clamped as scalar, rest as nonce prefix
+- Signing: dom4(context) prefix + SHAKE256 nonce generation + scalar mul + challenge computation
+- Verification: Decompress R + compute challenge + check [8][S]B == [8](R + [k]A)
+- Ed448ph (pre-hashed): SHAKE256 hash of message with phflag=1
+- Context support: Optional context bytes (0-255 length) via dom4(flag, context)
+- 8 tests: rfc8032_blank, rfc8032_1byte, rfc8032_context, ed448ph_rfc8032, sign_verify_roundtrip, tamper_detection, invalid_signature, context_mismatch
+
+#### x448/mod.rs — X448 Key Exchange (RFC 7748 §5)
+- Montgomery ladder scalar multiplication on u-coordinate
+- Key clamping: clear 2 LSBs, set MSB of byte 55
+- RFC 7748 test vectors (two known-answer tests)
+- DH key exchange: generate ephemeral, compute shared secret
+- 5 tests (1 ignored): rfc7748_vector1, rfc7748_vector2, dh_rfc7748, key_exchange_symmetry, iterated_1000 (ignored — slow)
+
+#### TLS Integration
+- `hitls-types/src/algorithm.rs`: Added `PkeyAlgId::Ed448` and `PkeyAlgId::X448` variants
+- `hitls-tls/src/crypt/mod.rs`: Added `SignatureScheme::ED448 = 0x0808`
+- `hitls-tls/src/handshake/key_exchange.rs`: Wired X448 into `generate()` and `compute_shared_secret()` with NamedGroup::X448
+- `hitls-tls/src/handshake/signing.rs`: Added Ed448 signing dispatch
+- `hitls-tls/src/handshake/verify.rs`: Added Ed448 verification dispatch
+- `hitls-tls/src/config/mod.rs`: Added `ServerPrivateKey::Ed448 { seed: [u8; 57] }` variant
+- `hitls-tls/src/handshake/server12.rs`, `client12.rs`: Added Ed448 to TLS 1.2 signing paths
+- 1 new TLS test: test_key_exchange_x448
+
+### Key Bugs Found & Fixed
+1. **Ed448 addition formula a=1 vs a=-1**: The HWCD `(Y-X)(Y'-X')` trick only works for a=-1 (Ed25519). For a=1 (Ed448), must compute X1*X2 and Y1*Y2 separately so H = Y1Y2 - X1X2 (not +).
+2. **Montgomery ladder `BB` vs `AA`**: X448 ladder had `z_2 = E*(BB + a24*E)` but RFC 7748 requires `z_2 = E*(AA + a24*E)`.
+3. **Basepoint coordinates**: Initial values were wrong; computed correct y from RFC 8032 decimal and derived x from curve equation.
+4. **RFC test vector hex corruption**: Several test vector hex strings had wrong/extra characters from web scraping.
+
+### Feature Flags
+- `ed448 = ["sha3", "hitls-bignum"]` in hitls-crypto/Cargo.toml
+- `x448 = []` in hitls-crypto/Cargo.toml
+- `hitls-tls/Cargo.toml`: Added ed448, x448 to hitls-crypto features
+
+### Test Results
+- hitls-crypto: 463 passed, 28 ignored (was 418/27) — +45 new crypto tests (+1 ignored)
+- hitls-tls: 423 passed (was 413) — +10 new TLS tests
+- Total workspace: 1157 tests passed, 37 ignored (+87 new tests, +1 newly ignored)
+- Grand total: 1191 passed + 37 ignored
+
+### Files Created
+- `crates/hitls-crypto/src/curve448/mod.rs` — Module root
+- `crates/hitls-crypto/src/curve448/field.rs` — Fe448 GF(2^448-2^224-1) field arithmetic (8 tests)
+- `crates/hitls-crypto/src/curve448/edwards.rs` — GeExtended448 Edwards point operations (6 tests)
+- `crates/hitls-crypto/src/ed448/mod.rs` — Ed448 sign/verify with SHAKE256+dom4 (8 tests)
+- `crates/hitls-crypto/src/x448/mod.rs` — X448 DH key exchange (5 tests, 1 ignored)
+
+### Files Modified
+- `crates/hitls-crypto/Cargo.toml` — Added `ed448 = ["sha3", "hitls-bignum"]` and `x448 = []` features
+- `crates/hitls-crypto/src/lib.rs` — Added curve448, ed448, x448 modules with feature gates
+- `crates/hitls-types/src/algorithm.rs` — Added Ed448, X448 to PkeyAlgId enum
+- `crates/hitls-tls/Cargo.toml` — Added ed448, x448 to hitls-crypto features
+- `crates/hitls-tls/src/crypt/mod.rs` — Added SignatureScheme::ED448 (0x0808)
+- `crates/hitls-tls/src/handshake/key_exchange.rs` — Wired X448 key exchange
+- `crates/hitls-tls/src/handshake/signing.rs` — Added Ed448 signing
+- `crates/hitls-tls/src/handshake/verify.rs` — Added Ed448 verification
+- `crates/hitls-tls/src/config/mod.rs` — Added ServerPrivateKey::Ed448 variant
+- `crates/hitls-tls/src/handshake/server12.rs` — Added Ed448 TLS 1.2 signing
+- `crates/hitls-tls/src/handshake/client12.rs` — Added Ed448 TLS 1.2 signing
+- `CLAUDE.md`, `README.md`, `DEV_LOG.md`, `PROMPT_LOG.md` — Updated
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1157 workspace tests passing (37 ignored), +87 new tests

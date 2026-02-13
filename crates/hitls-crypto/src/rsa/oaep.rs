@@ -132,3 +132,101 @@ pub(crate) fn oaep_decrypt_unpad(em: &[u8]) -> Result<Vec<u8>, CryptoError> {
 
     Ok(db[msg_start..].to_vec())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_l_hash_is_sha256_of_empty() {
+        // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        let expected = [
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
+            0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
+            0x78, 0x52, 0xb8, 0x55,
+        ];
+        assert_eq!(l_hash(), expected);
+    }
+
+    #[test]
+    fn test_oaep_encrypt_pad_structure() {
+        let msg = b"OAEP test";
+        let k = 128;
+        let em = oaep_encrypt_pad(msg, k).unwrap();
+
+        assert_eq!(em.len(), k);
+        assert_eq!(em[0], 0x00); // Leading zero byte
+    }
+
+    #[test]
+    fn test_oaep_message_too_long() {
+        let k = 128;
+        // max_msg_len = k - 2*H_LEN - 2 = 128 - 64 - 2 = 62
+        let long_msg = vec![0xAA; 63];
+        assert!(oaep_encrypt_pad(&long_msg, k).is_err());
+
+        let ok_msg = vec![0xAA; 62];
+        assert!(oaep_encrypt_pad(&ok_msg, k).is_ok());
+    }
+
+    #[test]
+    fn test_oaep_encrypt_decrypt_roundtrip() {
+        let msg = b"roundtrip check";
+        let k = 128;
+        let em = oaep_encrypt_pad(msg, k).unwrap();
+        let recovered = oaep_decrypt_unpad(&em).unwrap();
+        assert_eq!(recovered, msg);
+    }
+
+    #[test]
+    fn test_oaep_encrypt_decrypt_empty_message() {
+        let msg = b"";
+        let k = 128;
+        let em = oaep_encrypt_pad(msg, k).unwrap();
+        let recovered = oaep_decrypt_unpad(&em).unwrap();
+        assert_eq!(recovered, msg);
+    }
+
+    #[test]
+    fn test_oaep_decrypt_too_short() {
+        // Minimum: 2*H_LEN + 2 = 66 bytes
+        let em = vec![0u8; 65];
+        assert!(oaep_decrypt_unpad(&em).is_err());
+    }
+
+    #[test]
+    fn test_oaep_decrypt_bad_first_byte() {
+        let msg = b"test";
+        let k = 128;
+        let mut em = oaep_encrypt_pad(msg, k).unwrap();
+        em[0] = 0x01; // Should be 0x00
+        assert!(oaep_decrypt_unpad(&em).is_err());
+    }
+
+    #[test]
+    fn test_oaep_decrypt_tampered_masked_db() {
+        let msg = b"data";
+        let k = 128;
+        let mut em = oaep_encrypt_pad(msg, k).unwrap();
+        // Tamper with maskedDB region (after maskedSeed)
+        em[1 + H_LEN + 5] ^= 0xFF;
+        // Decryption should fail (lHash mismatch or structural error)
+        assert!(oaep_decrypt_unpad(&em).is_err());
+    }
+
+    #[test]
+    fn test_oaep_randomness() {
+        // Two encryptions of the same message should produce different ciphertexts
+        let msg = b"same message";
+        let k = 128;
+        let em1 = oaep_encrypt_pad(msg, k).unwrap();
+        let em2 = oaep_encrypt_pad(msg, k).unwrap();
+        assert_ne!(em1, em2, "OAEP should be randomized");
+
+        // But both should decrypt to the same message
+        let r1 = oaep_decrypt_unpad(&em1).unwrap();
+        let r2 = oaep_decrypt_unpad(&em2).unwrap();
+        assert_eq!(r1, msg);
+        assert_eq!(r2, msg);
+    }
+}

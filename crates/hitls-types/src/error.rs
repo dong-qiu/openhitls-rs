@@ -222,3 +222,275 @@ pub enum PkiError {
     #[error("crypto error: {0}")]
     CryptoError(#[from] CryptoError),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // CryptoError
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_crypto_error_display_simple_variants() {
+        assert_eq!(CryptoError::NullInput.to_string(), "null or empty input");
+        assert_eq!(
+            CryptoError::MemAllocFail.to_string(),
+            "memory allocation failed"
+        );
+        assert_eq!(
+            CryptoError::InvalidAlgId.to_string(),
+            "invalid algorithm id"
+        );
+        assert_eq!(CryptoError::InvalidArg.to_string(), "invalid argument");
+        assert_eq!(
+            CryptoError::NotSupported.to_string(),
+            "operation not supported"
+        );
+        assert_eq!(CryptoError::InvalidKey.to_string(), "invalid key");
+        assert_eq!(
+            CryptoError::PairwiseCheckFail.to_string(),
+            "key pairwise consistency check failed"
+        );
+    }
+
+    #[test]
+    fn test_crypto_error_structured_variants() {
+        let e = CryptoError::BufferTooSmall { need: 64, got: 32 };
+        assert_eq!(e.to_string(), "buffer length not enough: need 64, got 32");
+
+        let e = CryptoError::InvalidKeyLength {
+            expected: 32,
+            got: 16,
+        };
+        assert_eq!(e.to_string(), "invalid key length: expected 32, got 16");
+    }
+
+    #[test]
+    fn test_crypto_error_domain_variants() {
+        // RSA
+        assert_eq!(
+            CryptoError::RsaInvalidKeyBits.to_string(),
+            "rsa: invalid key bits"
+        );
+        assert_eq!(
+            CryptoError::RsaVerifyFail.to_string(),
+            "rsa: verification failed"
+        );
+        assert_eq!(
+            CryptoError::RsaInvalidPadding.to_string(),
+            "rsa: invalid padding"
+        );
+        assert_eq!(
+            CryptoError::RsaNoKeyInfo.to_string(),
+            "rsa: missing key info"
+        );
+
+        // ECC
+        assert_eq!(
+            CryptoError::EccPointAtInfinity.to_string(),
+            "ecc: point at infinity"
+        );
+        assert_eq!(
+            CryptoError::EccPointNotOnCurve.to_string(),
+            "ecc: point not on curve"
+        );
+        assert_eq!(
+            CryptoError::EccInvalidPrivateKey.to_string(),
+            "ecc: invalid private key"
+        );
+
+        // DRBG
+        assert_eq!(
+            CryptoError::DrbgInvalidState.to_string(),
+            "drbg: invalid state"
+        );
+        assert_eq!(
+            CryptoError::DrbgEntropyFail.to_string(),
+            "drbg: failed to obtain entropy"
+        );
+
+        // Entropy health
+        assert_eq!(
+            CryptoError::EntropyRctFailure.to_string(),
+            "entropy: repetition count test failed"
+        );
+        assert_eq!(
+            CryptoError::EntropyAptFailure.to_string(),
+            "entropy: adaptive proportion test failed"
+        );
+    }
+
+    #[test]
+    fn test_crypto_error_debug_impl() {
+        let e = CryptoError::NullInput;
+        let dbg = format!("{:?}", e);
+        assert!(dbg.contains("NullInput"));
+
+        let e = CryptoError::BufferTooSmall { need: 10, got: 5 };
+        let dbg = format!("{:?}", e);
+        assert!(dbg.contains("BufferTooSmall"));
+        assert!(dbg.contains("10"));
+        assert!(dbg.contains("5"));
+    }
+
+    #[test]
+    fn test_crypto_error_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<CryptoError>();
+    }
+
+    // -----------------------------------------------------------------------
+    // CmvpError
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_cmvp_error_display() {
+        assert_eq!(
+            CmvpError::IntegrityError.to_string(),
+            "integrity check failed"
+        );
+        assert_eq!(
+            CmvpError::KatFailure("AES".into()).to_string(),
+            "KAT self-test failed: AES"
+        );
+        assert_eq!(
+            CmvpError::RandomnessError.to_string(),
+            "randomness test failed"
+        );
+        assert_eq!(
+            CmvpError::PairwiseTestError("RSA".into()).to_string(),
+            "pairwise consistency test failed: RSA"
+        );
+        assert_eq!(
+            CmvpError::InvalidState.to_string(),
+            "FIPS module not in operational state"
+        );
+        assert_eq!(
+            CmvpError::ParamCheckError("bad len".into()).to_string(),
+            "parameter check failed: bad len"
+        );
+    }
+
+    #[test]
+    fn test_cmvp_to_crypto_error_conversion() {
+        let cmvp = CmvpError::IntegrityError;
+        let crypto: CryptoError = cmvp.into();
+        let display = crypto.to_string();
+        assert!(display.contains("integrity check failed"), "got: {display}");
+    }
+
+    // -----------------------------------------------------------------------
+    // TlsError
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_tls_error_display() {
+        assert_eq!(
+            TlsError::HandshakeFailed("bad cert".into()).to_string(),
+            "handshake failed: bad cert"
+        );
+        assert_eq!(
+            TlsError::AlertReceived("fatal".into()).to_string(),
+            "alert received: fatal"
+        );
+        assert_eq!(
+            TlsError::RecordError("overflow".into()).to_string(),
+            "record layer error: overflow"
+        );
+        assert_eq!(
+            TlsError::UnsupportedVersion.to_string(),
+            "unsupported protocol version"
+        );
+        assert_eq!(
+            TlsError::NoSharedCipherSuite.to_string(),
+            "no shared cipher suite"
+        );
+        assert_eq!(TlsError::SessionExpired.to_string(), "session expired");
+        assert_eq!(TlsError::ConnectionClosed.to_string(), "connection closed");
+    }
+
+    #[test]
+    fn test_tls_error_from_crypto_error() {
+        let crypto = CryptoError::InvalidKey;
+        let tls: TlsError = crypto.into();
+        let display = tls.to_string();
+        assert!(display.contains("invalid key"), "got: {display}");
+    }
+
+    #[test]
+    fn test_tls_error_from_io_error() {
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+        let tls: TlsError = io.into();
+        let display = tls.to_string();
+        assert!(display.contains("refused"), "got: {display}");
+    }
+
+    // -----------------------------------------------------------------------
+    // PkiError
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_pki_error_display() {
+        assert_eq!(
+            PkiError::InvalidCert("bad ASN.1".into()).to_string(),
+            "invalid certificate: bad ASN.1"
+        );
+        assert_eq!(PkiError::CertExpired.to_string(), "certificate expired");
+        assert_eq!(
+            PkiError::CertNotYetValid.to_string(),
+            "certificate not yet valid"
+        );
+        assert_eq!(PkiError::CertRevoked.to_string(), "certificate revoked");
+        assert_eq!(
+            PkiError::IssuerNotFound.to_string(),
+            "issuer certificate not found"
+        );
+        assert_eq!(
+            PkiError::MaxDepthExceeded(10).to_string(),
+            "max chain depth exceeded: 10"
+        );
+    }
+
+    #[test]
+    fn test_pki_error_from_crypto_error() {
+        let crypto = CryptoError::EcdsaVerifyFail;
+        let pki: PkiError = crypto.into();
+        let display = pki.to_string();
+        assert!(
+            display.contains("ecdsa: verification failed"),
+            "got: {display}"
+        );
+    }
+
+    #[test]
+    fn test_pki_error_chain_variants() {
+        let e = PkiError::ChainVerifyFailed("depth check".into());
+        assert_eq!(
+            e.to_string(),
+            "certificate chain verification failed: depth check"
+        );
+
+        let e = PkiError::BasicConstraintsViolation("not CA".into());
+        assert_eq!(e.to_string(), "basic constraints violation: not CA");
+
+        let e = PkiError::KeyUsageViolation("no digital sig".into());
+        assert_eq!(e.to_string(), "key usage violation: no digital sig");
+    }
+
+    #[test]
+    fn test_pki_error_encoding_variants() {
+        assert_eq!(
+            PkiError::Pkcs12Error("bad mac".into()).to_string(),
+            "pkcs12 error: bad mac"
+        );
+        assert_eq!(
+            PkiError::CmsError("unsupported".into()).to_string(),
+            "cms error: unsupported"
+        );
+        assert_eq!(
+            PkiError::Asn1Error("unexpected tag".into()).to_string(),
+            "asn1 parse error: unexpected tag"
+        );
+    }
+}

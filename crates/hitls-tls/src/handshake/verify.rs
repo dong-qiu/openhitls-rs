@@ -68,6 +68,10 @@ pub fn verify_certificate_verify(
             // Ed25519 signs the raw content, not a hash
             verify_ed25519(spki, &content, signature)?
         }
+        SignatureScheme::ED448 => {
+            // Ed448 signs the raw content, not a hash
+            verify_ed448(spki, &content, signature)?
+        }
         _ => {
             return Err(TlsError::HandshakeFailed(format!(
                 "unsupported signature scheme: 0x{:04x}",
@@ -153,6 +157,18 @@ fn verify_ed25519(
     signature: &[u8],
 ) -> Result<bool, TlsError> {
     let verifier = hitls_crypto::ed25519::Ed25519KeyPair::from_public_key(&spki.public_key)
+        .map_err(TlsError::CryptoError)?;
+    verifier
+        .verify(message, signature)
+        .map_err(TlsError::CryptoError)
+}
+
+fn verify_ed448(
+    spki: &SubjectPublicKeyInfo,
+    message: &[u8],
+    signature: &[u8],
+) -> Result<bool, TlsError> {
+    let verifier = hitls_crypto::ed448::Ed448KeyPair::from_public_key(&spki.public_key)
         .map_err(TlsError::CryptoError)?;
     verifier
         .verify(message, signature)

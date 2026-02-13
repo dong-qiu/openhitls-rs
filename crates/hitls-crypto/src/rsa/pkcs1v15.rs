@@ -152,3 +152,198 @@ fn fill_nonzero_random(buf: &mut [u8]) -> Result<(), CryptoError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // PKCS1v15 Signature Padding
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_sign_pad_sha256_structure() {
+        let digest = vec![0xAA; 32]; // SHA-256 length
+        let k = 128; // RSA-1024 modulus length
+        let em = pkcs1v15_sign_pad(&digest, k).unwrap();
+
+        assert_eq!(em.len(), k);
+        assert_eq!(em[0], 0x00);
+        assert_eq!(em[1], 0x01);
+
+        // PS should be all 0xFF
+        let t_len = DIGEST_INFO_SHA256.len() + 32;
+        let ps_len = k - t_len - 3;
+        for &b in &em[2..2 + ps_len] {
+            assert_eq!(b, 0xFF);
+        }
+
+        // Separator
+        assert_eq!(em[2 + ps_len], 0x00);
+
+        // DigestInfo prefix
+        assert_eq!(
+            &em[3 + ps_len..3 + ps_len + DIGEST_INFO_SHA256.len()],
+            DIGEST_INFO_SHA256
+        );
+
+        // Digest
+        assert_eq!(&em[3 + ps_len + DIGEST_INFO_SHA256.len()..], &digest[..]);
+    }
+
+    #[test]
+    fn test_sign_pad_sha384() {
+        let digest = vec![0xBB; 48]; // SHA-384 length
+        let em = pkcs1v15_sign_pad(&digest, 128).unwrap();
+        assert_eq!(em.len(), 128);
+        assert!(em.ends_with(&digest));
+    }
+
+    #[test]
+    fn test_sign_pad_sha512() {
+        let digest = vec![0xCC; 64]; // SHA-512 length
+        let em = pkcs1v15_sign_pad(&digest, 128).unwrap();
+        assert_eq!(em.len(), 128);
+        assert!(em.ends_with(&digest));
+    }
+
+    #[test]
+    fn test_sign_pad_sha1() {
+        let digest = vec![0xDD; 20]; // SHA-1 length
+        let em = pkcs1v15_sign_pad(&digest, 128).unwrap();
+        assert_eq!(em.len(), 128);
+        assert!(em.ends_with(&digest));
+    }
+
+    #[test]
+    fn test_sign_pad_unsupported_digest_length() {
+        let digest = vec![0xEE; 28]; // SHA-224, not supported
+        assert!(pkcs1v15_sign_pad(&digest, 128).is_err());
+    }
+
+    #[test]
+    fn test_sign_pad_k_too_small() {
+        let digest = vec![0xAA; 32];
+        // For SHA-256: t_len = 19 + 32 = 51, need k >= 51 + 11 = 62
+        assert!(pkcs1v15_sign_pad(&digest, 61).is_err());
+        assert!(pkcs1v15_sign_pad(&digest, 62).is_ok());
+    }
+
+    #[test]
+    fn test_verify_unpad_roundtrip() {
+        let digest = vec![0x42; 32];
+        let k = 128;
+        let em = pkcs1v15_sign_pad(&digest, k).unwrap();
+        let ok = pkcs1v15_verify_unpad(&em, &digest, k).unwrap();
+        assert!(ok);
+    }
+
+    #[test]
+    fn test_verify_unpad_wrong_digest() {
+        let digest = vec![0x42; 32];
+        let k = 128;
+        let em = pkcs1v15_sign_pad(&digest, k).unwrap();
+
+        let wrong = vec![0x43; 32];
+        let ok = pkcs1v15_verify_unpad(&em, &wrong, k).unwrap();
+        assert!(!ok);
+    }
+
+    // -----------------------------------------------------------------------
+    // PKCS1v15 Encryption Padding
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_encrypt_pad_structure() {
+        let msg = b"test";
+        let k = 128;
+        let em = pkcs1v15_encrypt_pad(msg, k).unwrap();
+
+        assert_eq!(em.len(), k);
+        assert_eq!(em[0], 0x00);
+        assert_eq!(em[1], 0x02);
+
+        // PS (random non-zero) should be at least 8 bytes
+        let ps_len = k - msg.len() - 3;
+        assert!(ps_len >= 8);
+        for &b in &em[2..2 + ps_len] {
+            assert_ne!(b, 0x00, "PS byte must be non-zero");
+        }
+
+        // Separator
+        assert_eq!(em[2 + ps_len], 0x00);
+
+        // Message
+        assert_eq!(&em[3 + ps_len..], msg);
+    }
+
+    #[test]
+    fn test_encrypt_pad_message_too_long() {
+        let k = 128;
+        // max msg len = k - 11 = 117
+        let long_msg = vec![0xAA; 118];
+        assert!(pkcs1v15_encrypt_pad(&long_msg, k).is_err());
+
+        let ok_msg = vec![0xAA; 117];
+        assert!(pkcs1v15_encrypt_pad(&ok_msg, k).is_ok());
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_unpad_roundtrip() {
+        let msg = b"Hello PKCS1";
+        let k = 128;
+        let em = pkcs1v15_encrypt_pad(msg, k).unwrap();
+        let recovered = pkcs1v15_decrypt_unpad(&em).unwrap();
+        assert_eq!(recovered, msg);
+    }
+
+    #[test]
+    fn test_decrypt_unpad_too_short() {
+        let em = vec![0u8; 10];
+        assert!(pkcs1v15_decrypt_unpad(&em).is_err());
+    }
+
+    #[test]
+    fn test_decrypt_unpad_bad_header() {
+        // Wrong first byte
+        let mut em = vec![0x00; 128];
+        em[0] = 0x01;
+        em[1] = 0x02;
+        assert!(pkcs1v15_decrypt_unpad(&em).is_err());
+
+        // Wrong second byte
+        let mut em = vec![0x00; 128];
+        em[0] = 0x00;
+        em[1] = 0x01;
+        assert!(pkcs1v15_decrypt_unpad(&em).is_err());
+    }
+
+    #[test]
+    fn test_decrypt_unpad_ps_too_short() {
+        // PS less than 8 bytes: separator at index 9 means PS = em[2..9] = 7 bytes
+        let mut em = vec![0xFF; 128];
+        em[0] = 0x00;
+        em[1] = 0x02;
+        em[9] = 0x00; // separator at position 9 => PS only 7 bytes
+        assert!(pkcs1v15_decrypt_unpad(&em).is_err());
+    }
+
+    #[test]
+    fn test_decrypt_unpad_no_separator() {
+        // No 0x00 separator after PS
+        let mut em = vec![0xFF; 128];
+        em[0] = 0x00;
+        em[1] = 0x02;
+        // All remaining bytes are 0xFF, no separator
+        assert!(pkcs1v15_decrypt_unpad(&em).is_err());
+    }
+
+    #[test]
+    fn test_encrypt_pad_empty_message() {
+        let msg = b"";
+        let k = 128;
+        let em = pkcs1v15_encrypt_pad(msg, k).unwrap();
+        let recovered = pkcs1v15_decrypt_unpad(&em).unwrap();
+        assert_eq!(recovered, msg);
+    }
+}

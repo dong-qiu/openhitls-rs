@@ -1369,6 +1369,7 @@ pub(crate) fn select_signature_scheme_tls12(
 ) -> Result<SignatureScheme, TlsError> {
     let candidates: &[SignatureScheme] = match key {
         ServerPrivateKey::Ed25519(_) => &[SignatureScheme::ED25519],
+        ServerPrivateKey::Ed448(_) => &[SignatureScheme::ED448],
         ServerPrivateKey::Ecdsa { curve_id, .. } => match *curve_id {
             EccCurveId::NistP256 => &[SignatureScheme::ECDSA_SECP256R1_SHA256],
             EccCurveId::NistP384 => &[SignatureScheme::ECDSA_SECP384R1_SHA384],
@@ -1411,6 +1412,13 @@ pub(crate) fn sign_ske_data(
     match key {
         ServerPrivateKey::Ed25519(seed) => {
             let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(seed)
+                .map_err(TlsError::CryptoError)?;
+            kp.sign(signed_data)
+                .map(|s| s.to_vec())
+                .map_err(TlsError::CryptoError)
+        }
+        ServerPrivateKey::Ed448(seed) => {
+            let kp = hitls_crypto::ed448::Ed448KeyPair::from_seed(seed)
                 .map_err(TlsError::CryptoError)?;
             kp.sign(signed_data)
                 .map(|s| s.to_vec())

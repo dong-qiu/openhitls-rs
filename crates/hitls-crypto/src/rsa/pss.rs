@@ -191,3 +191,118 @@ pub(crate) fn pss_verify_unpad_with_salt(
     use subtle::ConstantTimeEq;
     Ok(h.ct_eq(&h_prime).into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sha256(data: &[u8]) -> Vec<u8> {
+        let mut h = Sha256::new();
+        h.update(data).unwrap();
+        h.finish().unwrap().to_vec()
+    }
+
+    #[test]
+    fn test_pss_sign_pad_wrong_digest_length() {
+        // PSS requires exactly 32-byte (SHA-256) digest
+        let short = vec![0u8; 20];
+        assert!(pss_sign_pad(&short, 1023).is_err());
+
+        let long = vec![0u8; 64];
+        assert!(pss_sign_pad(&long, 1023).is_err());
+    }
+
+    #[test]
+    fn test_pss_sign_pad_em_too_small() {
+        let digest = sha256(b"hello");
+        // em_bits must allow em_len >= H_LEN + salt_len + 2 = 32 + 32 + 2 = 66
+        // em_len = ceil(em_bits/8), so em_bits = 65*8 = 520 gives em_len=65 (too small)
+        assert!(pss_sign_pad(&digest, 520).is_err());
+    }
+
+    #[test]
+    fn test_pss_encode_and_verify_roundtrip() {
+        let digest = sha256(b"test message");
+        let salt = vec![0xAB; 32];
+        let em_bits = 1023; // 128 bytes em_len
+
+        let em = pss_encode(&digest, em_bits, &salt).unwrap();
+        assert_eq!(em.len(), 128);
+        assert_eq!(em[127], 0xbc);
+
+        // Top bit must be zero (8*128 - 1023 = 1 top bit cleared)
+        assert_eq!(em[0] & 0x80, 0);
+
+        // Verify should succeed
+        let ok = pss_verify_unpad(&em, &digest, em_bits).unwrap();
+        assert!(ok);
+    }
+
+    #[test]
+    fn test_pss_verify_wrong_digest() {
+        let digest = sha256(b"message A");
+        let salt = vec![0xCD; 32];
+        let em_bits = 1023;
+
+        let em = pss_encode(&digest, em_bits, &salt).unwrap();
+
+        let wrong_digest = sha256(b"message B");
+        let ok = pss_verify_unpad(&em, &wrong_digest, em_bits).unwrap();
+        assert!(!ok);
+    }
+
+    #[test]
+    fn test_pss_verify_tampered_em() {
+        let digest = sha256(b"data");
+        let salt = vec![0x11; 32];
+        let em_bits = 1023;
+
+        let mut em = pss_encode(&digest, em_bits, &salt).unwrap();
+
+        // Tamper with a byte in the middle
+        em[60] ^= 0x01;
+        let ok = pss_verify_unpad(&em, &digest, em_bits).unwrap();
+        assert!(!ok);
+    }
+
+    #[test]
+    fn test_pss_verify_bad_trailer() {
+        let digest = sha256(b"data");
+        let salt = vec![0x22; 32];
+        let em_bits = 1023;
+
+        let mut em = pss_encode(&digest, em_bits, &salt).unwrap();
+
+        // Replace trailer byte 0xbc with something else
+        let last = em.len() - 1;
+        em[last] = 0xAA;
+        let ok = pss_verify_unpad(&em, &digest, em_bits).unwrap();
+        assert!(!ok);
+    }
+
+    #[test]
+    fn test_pss_zero_salt_roundtrip() {
+        let digest = sha256(b"zero salt");
+        let em_bits = 1023;
+
+        let em = pss_encode(&digest, em_bits, &[]).unwrap();
+        let ok = pss_verify_unpad_with_salt(&em, &digest, em_bits, 0).unwrap();
+        assert!(ok);
+    }
+
+    #[test]
+    fn test_pss_verify_wrong_digest_length() {
+        let em = vec![0u8; 128];
+        let short_digest = vec![0u8; 20];
+        assert!(pss_verify_unpad(&em, &short_digest, 1023).is_err());
+    }
+
+    #[test]
+    fn test_pss_verify_em_too_short() {
+        let digest = sha256(b"x");
+        // em shorter than em_len
+        let em = vec![0u8; 10];
+        let ok = pss_verify_unpad(&em, &digest, 1023).unwrap();
+        assert!(!ok);
+    }
+}

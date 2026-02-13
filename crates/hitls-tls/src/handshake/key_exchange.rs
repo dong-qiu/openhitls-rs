@@ -1,14 +1,16 @@
-//! TLS 1.3 ephemeral key exchange (X25519, SECP256R1, X25519MLKEM768).
+//! TLS 1.3 ephemeral key exchange (X25519, X448, SECP256R1, X25519MLKEM768).
 
 use crate::crypt::NamedGroup;
 use hitls_crypto::ecdh::EcdhKeyPair;
 use hitls_crypto::mlkem::MlKemKeyPair;
 use hitls_crypto::x25519::{X25519PrivateKey, X25519PublicKey};
+use hitls_crypto::x448::{X448PrivateKey, X448PublicKey};
 use hitls_types::TlsError;
 
 /// Inner key exchange state (variant per named group).
 enum KeyExchangeInner {
     X25519(X25519PrivateKey),
+    X448(X448PrivateKey),
     EcdhP256(Box<EcdhKeyPair>),
     #[cfg(feature = "tlcp")]
     EcdhSm2(Box<EcdhKeyPair>),
@@ -38,6 +40,16 @@ impl KeyExchange {
                 Ok(Self {
                     group,
                     inner: KeyExchangeInner::X25519(private_key),
+                    public_key_bytes,
+                })
+            }
+            NamedGroup::X448 => {
+                let private_key = X448PrivateKey::generate().map_err(TlsError::CryptoError)?;
+                let public_key = private_key.public_key();
+                let public_key_bytes = public_key.as_bytes().to_vec();
+                Ok(Self {
+                    group,
+                    inner: KeyExchangeInner::X448(private_key),
                     public_key_bytes,
                 })
             }
@@ -97,6 +109,12 @@ impl KeyExchange {
         match &self.inner {
             KeyExchangeInner::X25519(private_key) => {
                 let peer_key = X25519PublicKey::new(peer_public).map_err(TlsError::CryptoError)?;
+                private_key
+                    .diffie_hellman(&peer_key)
+                    .map_err(TlsError::CryptoError)
+            }
+            KeyExchangeInner::X448(private_key) => {
+                let peer_key = X448PublicKey::new(peer_public).map_err(TlsError::CryptoError)?;
                 private_key
                     .diffie_hellman(&peer_key)
                     .map_err(TlsError::CryptoError)
@@ -211,8 +229,21 @@ mod tests {
     }
 
     #[test]
+    fn test_key_exchange_x448() {
+        let kx = KeyExchange::generate(NamedGroup::X448).unwrap();
+        assert_eq!(kx.group(), NamedGroup::X448);
+        assert_eq!(kx.public_key_bytes().len(), 56);
+
+        let peer = KeyExchange::generate(NamedGroup::X448).unwrap();
+        let shared1 = kx.compute_shared_secret(peer.public_key_bytes()).unwrap();
+        let shared2 = peer.compute_shared_secret(kx.public_key_bytes()).unwrap();
+        assert_eq!(shared1, shared2);
+        assert_eq!(shared1.len(), 56);
+    }
+
+    #[test]
     fn test_unsupported_group() {
-        assert!(KeyExchange::generate(NamedGroup::X448).is_err());
+        assert!(KeyExchange::generate(NamedGroup(0x9999)).is_err());
     }
 
     #[cfg(feature = "tlcp")]

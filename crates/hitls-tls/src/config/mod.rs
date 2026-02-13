@@ -16,6 +16,8 @@ use zeroize::Zeroize;
 pub enum ServerPrivateKey {
     /// Ed25519 32-byte seed.
     Ed25519(Vec<u8>),
+    /// Ed448 57-byte seed.
+    Ed448(Vec<u8>),
     /// ECDSA private key bytes + curve identifier.
     Ecdsa {
         curve_id: EccCurveId,
@@ -38,6 +40,7 @@ impl Drop for ServerPrivateKey {
     fn drop(&mut self) {
         match self {
             ServerPrivateKey::Ed25519(seed) => seed.zeroize(),
+            ServerPrivateKey::Ed448(seed) => seed.zeroize(),
             ServerPrivateKey::Ecdsa { private_key, .. } => private_key.zeroize(),
             ServerPrivateKey::Rsa { d, p, q, .. } => {
                 d.zeroize();

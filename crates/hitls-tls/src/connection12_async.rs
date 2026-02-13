@@ -1128,3 +1128,202 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ServerC
         self.negotiated_suite
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{ServerPrivateKey, TlsConfig};
+    use crate::crypt::SignatureScheme;
+    use crate::crypt::NamedGroup;
+    use crate::CipherSuite;
+
+    fn ecdsa_private_key() -> Vec<u8> {
+        vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ]
+    }
+
+    fn make_configs(suite: CipherSuite) -> (TlsConfig, TlsConfig) {
+        let key_bytes = ecdsa_private_key();
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: key_bytes,
+            })
+            .verify_peer(false)
+            .build();
+
+        (client_config, server_config)
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_new_connection_state() {
+        let (client_config, _) =
+            make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (client_stream, _server_stream) = tokio::io::duplex(16 * 1024);
+        let conn = AsyncTls12ClientConnection::new(client_stream, client_config);
+
+        assert_eq!(conn.version(), None);
+        assert_eq!(conn.cipher_suite(), None);
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_read_before_handshake() {
+        let (_, server_config) =
+            make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (_, server_stream) = tokio::io::duplex(16 * 1024);
+        let mut conn = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let mut buf = [0u8; 16];
+        let result = conn.read(&mut buf).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_write_before_handshake() {
+        let (client_config, _) =
+            make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (client_stream, _) = tokio::io::duplex(16 * 1024);
+        let mut conn = AsyncTls12ClientConnection::new(client_stream, client_config);
+
+        let result = conn.write(b"hello").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_full_handshake_and_data() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        assert_eq!(client.version(), Some(TlsVersion::Tls12));
+        assert_eq!(server.version(), Some(TlsVersion::Tls12));
+        assert_eq!(client.cipher_suite(), Some(suite));
+        assert_eq!(server.cipher_suite(), Some(suite));
+
+        // Client → Server
+        let msg = b"Hello from client";
+        client.write(msg).await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = server.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg);
+
+        // Server → Client
+        let reply = b"Hello from server";
+        server.write(reply).await.unwrap();
+        let n = client.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], reply);
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_double_handshake_fails() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        assert!(client.handshake().await.is_err());
+        assert!(server.handshake().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_shutdown() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        client.shutdown().await.unwrap();
+        // Double shutdown should be OK
+        client.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_chacha20_handshake() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        assert_eq!(client.cipher_suite(), Some(suite));
+
+        let data = b"ChaCha20-Poly1305 test data";
+        client.write(data).await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = server.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], data);
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_server_new_state() {
+        let (_, server_config) =
+            make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (_, server_stream) = tokio::io::duplex(16 * 1024);
+        let conn = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        assert_eq!(conn.version(), None);
+        assert_eq!(conn.cipher_suite(), None);
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_take_session() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        let session = client.take_session();
+        assert!(session.is_some());
+        let session = session.unwrap();
+        assert_eq!(session.cipher_suite, suite);
+
+        // Second take returns None
+        assert!(client.take_session().is_none());
+    }
+}

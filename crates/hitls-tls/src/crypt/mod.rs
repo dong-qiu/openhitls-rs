@@ -142,6 +142,7 @@ impl SignatureScheme {
     pub const RSA_PSS_RSAE_SHA384: Self = Self(0x0805);
     pub const RSA_PSS_RSAE_SHA512: Self = Self(0x0806);
     pub const ED25519: Self = Self(0x0807);
+    pub const ED448: Self = Self(0x0808);
     pub const SM2_SM3: Self = Self(0x0708);
 }
 

@@ -1296,6 +1296,13 @@ fn sign_certificate_verify12(
                 .map(|s| s.to_vec())
                 .map_err(TlsError::CryptoError)
         }
+        ServerPrivateKey::Ed448(seed) => {
+            let kp = hitls_crypto::ed448::Ed448KeyPair::from_seed(seed)
+                .map_err(TlsError::CryptoError)?;
+            kp.sign(transcript_hash)
+                .map(|s| s.to_vec())
+                .map_err(TlsError::CryptoError)
+        }
         ServerPrivateKey::Ecdsa {
             curve_id,
             private_key,

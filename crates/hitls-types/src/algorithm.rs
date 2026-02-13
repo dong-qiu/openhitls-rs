@@ -106,7 +106,9 @@ pub enum PkeyAlgId {
     Ecdsa,
     Ecdh,
     Ed25519,
+    Ed448,
     X25519,
+    X448,
     Sm2,
     Sm9,
     Paillier,
@@ -301,4 +303,281 @@ pub enum PointFormat {
     #[default]
     Uncompressed,
     Hybrid,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_hash_alg_id_variant_count_and_uniqueness() {
+        let all = [
+            HashAlgId::Md5,
+            HashAlgId::Sha1,
+            HashAlgId::Sha224,
+            HashAlgId::Sha256,
+            HashAlgId::Sha384,
+            HashAlgId::Sha512,
+            HashAlgId::Sha3_224,
+            HashAlgId::Sha3_256,
+            HashAlgId::Sha3_384,
+            HashAlgId::Sha3_512,
+            HashAlgId::Shake128,
+            HashAlgId::Shake256,
+            HashAlgId::Sm3,
+        ];
+        assert_eq!(all.len(), 13);
+        let set: HashSet<HashAlgId> = all.iter().copied().collect();
+        assert_eq!(set.len(), all.len());
+    }
+
+    #[test]
+    fn test_hash_alg_id_clone_copy_eq_debug() {
+        let a = HashAlgId::Sha256;
+        let b = a; // Copy
+        let c = Clone::clone(&a); // Clone (use Clone::clone to avoid clippy clone_on_copy)
+        assert_eq!(a, b);
+        assert_eq!(a, c);
+        assert_ne!(a, HashAlgId::Sha384);
+        assert_eq!(format!("{:?}", a), "Sha256");
+    }
+
+    #[test]
+    fn test_cipher_alg_id_all_distinct() {
+        let all = [
+            CipherAlgId::Aes128Cbc,
+            CipherAlgId::Aes192Cbc,
+            CipherAlgId::Aes256Cbc,
+            CipherAlgId::Aes128Ctr,
+            CipherAlgId::Aes192Ctr,
+            CipherAlgId::Aes256Ctr,
+            CipherAlgId::Aes128Ecb,
+            CipherAlgId::Aes192Ecb,
+            CipherAlgId::Aes256Ecb,
+            CipherAlgId::Aes128Xts,
+            CipherAlgId::Aes256Xts,
+            CipherAlgId::Aes128Ccm,
+            CipherAlgId::Aes192Ccm,
+            CipherAlgId::Aes256Ccm,
+            CipherAlgId::Aes128Gcm,
+            CipherAlgId::Aes192Gcm,
+            CipherAlgId::Aes256Gcm,
+            CipherAlgId::Aes128WrapNoPad,
+            CipherAlgId::Aes192WrapNoPad,
+            CipherAlgId::Aes256WrapNoPad,
+            CipherAlgId::Aes128WrapPad,
+            CipherAlgId::Aes192WrapPad,
+            CipherAlgId::Aes256WrapPad,
+            CipherAlgId::Aes128Cfb,
+            CipherAlgId::Aes192Cfb,
+            CipherAlgId::Aes256Cfb,
+            CipherAlgId::Aes128Ofb,
+            CipherAlgId::Aes192Ofb,
+            CipherAlgId::Aes256Ofb,
+            CipherAlgId::Chacha20Poly1305,
+            CipherAlgId::Sm4Xts,
+            CipherAlgId::Sm4Cbc,
+            CipherAlgId::Sm4Ecb,
+            CipherAlgId::Sm4Ctr,
+            CipherAlgId::Sm4Hctr,
+            CipherAlgId::Sm4Gcm,
+            CipherAlgId::Sm4Cfb,
+            CipherAlgId::Sm4Ofb,
+            CipherAlgId::Sm4Ccm,
+        ];
+        let set: HashSet<CipherAlgId> = all.iter().copied().collect();
+        assert_eq!(set.len(), all.len());
+    }
+
+    #[test]
+    fn test_pkey_alg_id_all_distinct() {
+        let all = [
+            PkeyAlgId::Rsa,
+            PkeyAlgId::Dsa,
+            PkeyAlgId::Dh,
+            PkeyAlgId::Ecdsa,
+            PkeyAlgId::Ecdh,
+            PkeyAlgId::Ed25519,
+            PkeyAlgId::Ed448,
+            PkeyAlgId::X25519,
+            PkeyAlgId::X448,
+            PkeyAlgId::Sm2,
+            PkeyAlgId::Sm9,
+            PkeyAlgId::Paillier,
+            PkeyAlgId::ElGamal,
+            PkeyAlgId::MlKem,
+            PkeyAlgId::MlDsa,
+            PkeyAlgId::SlhDsa,
+            PkeyAlgId::Xmss,
+            PkeyAlgId::FrodoKem,
+            PkeyAlgId::McEliece,
+            PkeyAlgId::HybridKem,
+        ];
+        assert_eq!(all.len(), 20);
+        let set: HashSet<PkeyAlgId> = all.iter().copied().collect();
+        assert_eq!(set.len(), all.len());
+    }
+
+    #[test]
+    fn test_ecc_curve_id_all_distinct() {
+        let all = [
+            EccCurveId::NistP192,
+            EccCurveId::NistP224,
+            EccCurveId::NistP256,
+            EccCurveId::NistP384,
+            EccCurveId::NistP521,
+            EccCurveId::BrainpoolP256r1,
+            EccCurveId::BrainpoolP384r1,
+            EccCurveId::BrainpoolP512r1,
+            EccCurveId::Sm2Prime256,
+        ];
+        assert_eq!(all.len(), 9);
+        let set: HashSet<EccCurveId> = all.iter().copied().collect();
+        assert_eq!(set.len(), all.len());
+    }
+
+    #[test]
+    fn test_dh_param_id_count() {
+        let all = [
+            DhParamId::Rfc2409_768,
+            DhParamId::Rfc2409_1024,
+            DhParamId::Rfc3526_1536,
+            DhParamId::Rfc3526_2048,
+            DhParamId::Rfc3526_3072,
+            DhParamId::Rfc3526_4096,
+            DhParamId::Rfc3526_6144,
+            DhParamId::Rfc3526_8192,
+            DhParamId::Rfc7919_2048,
+            DhParamId::Rfc7919_3072,
+            DhParamId::Rfc7919_4096,
+            DhParamId::Rfc7919_6144,
+            DhParamId::Rfc7919_8192,
+        ];
+        assert_eq!(all.len(), 13);
+        let set: HashSet<DhParamId> = all.iter().copied().collect();
+        assert_eq!(set.len(), all.len());
+    }
+
+    #[test]
+    fn test_pq_param_ids() {
+        let mlkem = [
+            MlKemParamId::MlKem512,
+            MlKemParamId::MlKem768,
+            MlKemParamId::MlKem1024,
+        ];
+        assert_eq!(mlkem.len(), 3);
+        let mldsa = [
+            MlDsaParamId::MlDsa44,
+            MlDsaParamId::MlDsa65,
+            MlDsaParamId::MlDsa87,
+        ];
+        assert_eq!(mldsa.len(), 3);
+
+        let slh: HashSet<_> = [
+            SlhDsaParamId::Sha2128s,
+            SlhDsaParamId::Shake128s,
+            SlhDsaParamId::Sha2128f,
+            SlhDsaParamId::Shake128f,
+            SlhDsaParamId::Sha2192s,
+            SlhDsaParamId::Shake192s,
+            SlhDsaParamId::Sha2192f,
+            SlhDsaParamId::Shake192f,
+            SlhDsaParamId::Sha2256s,
+            SlhDsaParamId::Shake256s,
+            SlhDsaParamId::Sha2256f,
+            SlhDsaParamId::Shake256f,
+        ]
+        .iter()
+        .copied()
+        .collect();
+        assert_eq!(slh.len(), 12);
+    }
+
+    #[test]
+    fn test_mac_alg_id_all_distinct() {
+        let all = [
+            MacAlgId::HmacMd5,
+            MacAlgId::HmacSha1,
+            MacAlgId::HmacSha224,
+            MacAlgId::HmacSha256,
+            MacAlgId::HmacSha384,
+            MacAlgId::HmacSha512,
+            MacAlgId::HmacSha3_224,
+            MacAlgId::HmacSha3_256,
+            MacAlgId::HmacSha3_384,
+            MacAlgId::HmacSha3_512,
+            MacAlgId::HmacSm3,
+            MacAlgId::CmacAes128,
+            MacAlgId::CmacAes192,
+            MacAlgId::CmacAes256,
+            MacAlgId::CmacSm4,
+            MacAlgId::CbcMacSm4,
+            MacAlgId::GmacAes128,
+            MacAlgId::GmacAes192,
+            MacAlgId::GmacAes256,
+            MacAlgId::SipHash64,
+            MacAlgId::SipHash128,
+        ];
+        assert_eq!(all.len(), 21);
+        let set: HashSet<MacAlgId> = all.iter().copied().collect();
+        assert_eq!(set.len(), all.len());
+    }
+
+    #[test]
+    fn test_rand_alg_id_all_distinct() {
+        let all = [
+            RandAlgId::Sha1,
+            RandAlgId::Sha224,
+            RandAlgId::Sha256,
+            RandAlgId::Sha384,
+            RandAlgId::Sha512,
+            RandAlgId::Sm3,
+            RandAlgId::HmacSha1,
+            RandAlgId::HmacSha224,
+            RandAlgId::HmacSha256,
+            RandAlgId::HmacSha384,
+            RandAlgId::HmacSha512,
+            RandAlgId::Aes128Ctr,
+            RandAlgId::Aes192Ctr,
+            RandAlgId::Aes256Ctr,
+            RandAlgId::Aes128CtrDf,
+            RandAlgId::Aes192CtrDf,
+            RandAlgId::Aes256CtrDf,
+            RandAlgId::Sm4CtrDf,
+        ];
+        assert_eq!(all.len(), 18);
+        let set: HashSet<RandAlgId> = all.iter().copied().collect();
+        assert_eq!(set.len(), all.len());
+    }
+
+    #[test]
+    fn test_kdf_alg_id_all_distinct() {
+        let all = [
+            KdfAlgId::Scrypt,
+            KdfAlgId::Pbkdf2,
+            KdfAlgId::KdfTls12,
+            KdfAlgId::Hkdf,
+        ];
+        assert_eq!(all.len(), 4);
+        let set: HashSet<KdfAlgId> = all.iter().copied().collect();
+        assert_eq!(set.len(), all.len());
+    }
+
+    #[test]
+    fn test_point_format_default_is_uncompressed() {
+        assert_eq!(PointFormat::default(), PointFormat::Uncompressed);
+        assert_ne!(PointFormat::Compressed, PointFormat::Uncompressed);
+        assert_ne!(PointFormat::Compressed, PointFormat::Hybrid);
+    }
+
+    #[test]
+    fn test_enums_as_hashmap_keys() {
+        use std::collections::HashMap;
+        let mut map = HashMap::new();
+        map.insert(HashAlgId::Sha256, "SHA-256");
+        map.insert(HashAlgId::Sha384, "SHA-384");
+        assert_eq!(map[&HashAlgId::Sha256], "SHA-256");
+        assert_eq!(map.get(&HashAlgId::Sm3), None);
+    }
 }
