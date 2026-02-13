@@ -140,10 +140,8 @@ mod tests {
 
     #[test]
     fn test_traffic_key_different_suites_different_lengths() {
-        let params128 =
-            CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
-        let params256 =
-            CipherSuiteParams::from_suite(CipherSuite::TLS_AES_256_GCM_SHA384).unwrap();
+        let params128 = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let params256 = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_256_GCM_SHA384).unwrap();
 
         let secret128 = vec![0xAA; 32];
         let secret256 = vec![0xAA; 48];

@@ -613,9 +613,7 @@ mod tests {
 
     #[test]
     fn test_config_builder_alpn() {
-        let config = TlsConfig::builder()
-            .alpn(&[b"h2", b"http/1.1"])
-            .build();
+        let config = TlsConfig::builder().alpn(&[b"h2", b"http/1.1"]).build();
         assert_eq!(config.alpn_protocols.len(), 2);
         assert_eq!(config.alpn_protocols[0], b"h2");
         assert_eq!(config.alpn_protocols[1], b"http/1.1");
@@ -627,10 +625,7 @@ mod tests {
             .cipher_suites(&[CipherSuite::TLS_AES_128_GCM_SHA256])
             .build();
         assert_eq!(config.cipher_suites.len(), 1);
-        assert_eq!(
-            config.cipher_suites[0],
-            CipherSuite::TLS_AES_128_GCM_SHA256
-        );
+        assert_eq!(config.cipher_suites[0], CipherSuite::TLS_AES_128_GCM_SHA256);
     }
 
     #[test]
@@ -653,10 +648,7 @@ mod tests {
             .build();
         assert_eq!(config.psk.as_ref().unwrap().len(), 32);
         assert_eq!(config.psk_identity.as_ref().unwrap(), b"client1");
-        assert_eq!(
-            config.psk_identity_hint.as_ref().unwrap(),
-            b"server hint"
-        );
+        assert_eq!(config.psk_identity_hint.as_ref().unwrap(), b"server hint");
     }
 
     #[test]
@@ -722,9 +714,7 @@ mod tests {
 
     #[test]
     fn test_config_builder_early_data() {
-        let config = TlsConfig::builder()
-            .max_early_data_size(16384)
-            .build();
+        let config = TlsConfig::builder().max_early_data_size(16384).build();
         assert_eq!(config.max_early_data_size, 16384);
 
         let default = TlsConfig::builder().build();
@@ -733,17 +723,13 @@ mod tests {
 
     #[test]
     fn test_config_builder_ticket_key() {
-        let config = TlsConfig::builder()
-            .ticket_key(vec![0x42; 32])
-            .build();
+        let config = TlsConfig::builder().ticket_key(vec![0x42; 32]).build();
         assert_eq!(config.ticket_key.as_ref().unwrap().len(), 32);
     }
 
     #[test]
     fn test_config_debug_format() {
-        let config = TlsConfig::builder()
-            .psk(vec![0xAA; 16])
-            .build();
+        let config = TlsConfig::builder().psk(vec![0xAA; 16]).build();
         let debug = format!("{config:?}");
         assert!(debug.contains("TlsConfig"));
         // PSK should show length, not raw bytes

@@ -335,7 +335,8 @@ mod tests {
     fn test_derive_secret_sha384() {
         let secret = vec![0xBB; 48];
         let transcript = vec![0xCC; 48]; // SHA-384 hash length
-        let derived = derive_secret(&sha384_factory, &secret, b"c hs traffic", &transcript).unwrap();
+        let derived =
+            derive_secret(&sha384_factory, &secret, b"c hs traffic", &transcript).unwrap();
         assert_eq!(derived.len(), 48);
     }
 
