@@ -114,3 +114,7 @@ pub mod kdf {
     //! Unified KDF interface.
     pub use super::provider::Kdf;
 }
+
+// FIPS/CMVP compliance
+#[cfg(feature = "fips")]
+pub mod fips;

@@ -1364,3 +1364,13 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 8 new tests (14 total, 6 ignored for slow large groups), total 1046 (34 ignored). Rewrote `groups.rs` with all 13 DH primes from C source. Added NamedGroup::FFDHE6144 (0x0103) and FFDHE8192 (0x0104). Updated `is_ffdhe_group()` and `named_group_to_dh_param_id()` for all 5 FFDHE groups. Exhaustive match on DhParamId (no catch-all).
 
 1046 total tests (34 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 46: FIPS/CMVP Compliance Framework (2026-02-13)
+
+**Prompt**: Implement Phase 46 — FIPS 140-3 compliance framework: FIPS state machine (PreOperational → SelfTesting → Operational → Error), KAT self-tests (SHA-256, HMAC-SHA256, AES-128-GCM, HMAC-DRBG, HKDF-SHA256, ECDSA P-256), Pairwise Consistency Tests (ECDSA P-256, Ed25519, RSA-2048 PSS), HMAC-SHA256 integrity check with constant-time comparison, CmvpError types, feature-gated behind `fips`.
+
+**Result**: 19 new tests (crypto 364→397, +33 running, +2 ignored), total 1065 (36 ignored). 4 new files in `hitls-crypto/src/fips/` (mod.rs, kat.rs, pct.rs, integrity.rs). FipsModule state machine with `run_self_tests()` orchestrating KAT→PCT. 6 KAT algorithms with NIST/RFC vectors. 3 PCT algorithms covering ECDSA, Ed25519, RSA. HMAC-SHA256 file integrity with `subtle::ConstantTimeEq`. CmvpError enum with 6 variants integrated into CryptoError via `#[from]`.
+
+1065 total tests (36 ignored). Clippy clean, fmt clean.

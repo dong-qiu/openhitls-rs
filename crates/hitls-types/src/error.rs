@@ -134,6 +134,27 @@ pub enum CryptoError {
     McElieceKeygenFail,
     #[error("mceliece: decode failed")]
     McElieceDecodeFail,
+
+    // FIPS/CMVP errors
+    #[error("cmvp: {0}")]
+    Cmvp(#[from] CmvpError),
+}
+
+/// FIPS/CMVP self-test and compliance errors.
+#[derive(Debug, thiserror::Error)]
+pub enum CmvpError {
+    #[error("integrity check failed")]
+    IntegrityError,
+    #[error("KAT self-test failed: {0}")]
+    KatFailure(String),
+    #[error("randomness test failed")]
+    RandomnessError,
+    #[error("pairwise consistency test failed: {0}")]
+    PairwiseTestError(String),
+    #[error("FIPS module not in operational state")]
+    InvalidState,
+    #[error("parameter check failed: {0}")]
+    ParamCheckError(String),
 }
 
 /// TLS protocol errors.

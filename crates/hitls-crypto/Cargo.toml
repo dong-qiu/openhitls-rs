@@ -69,6 +69,9 @@ hpke = ["hkdf", "x25519", "sha2", "aes", "modes"]
 # Modes of operation
 modes = ["aes"]
 
+# FIPS/CMVP compliance
+fips = ["sha2", "hmac", "aes", "modes", "drbg", "rsa", "ecdsa", "ed25519", "hkdf"]
+
 # Expose low-level internals
 hazmat = []
 

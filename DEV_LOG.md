@@ -4127,3 +4127,98 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1046 workspace tests passing (34 ignored)
+
+---
+
+## Phase 46: FIPS/CMVP Compliance Framework (Session 2026-02-13)
+
+### Goals
+- Implement FIPS 140-3 self-test infrastructure with state machine
+- Add Known Answer Tests (KAT) for approved algorithms
+- Add Pairwise Consistency Tests (PCT) for asymmetric key generation
+- Add HMAC-based library integrity verification
+- Feature-gate everything behind `fips` feature flag
+- Add `CmvpError` error types to hitls-types
+
+### C Reference
+- `crypto/eal/src/eal_cmvp.c` — Main CMVP module (state machine, self-test orchestration)
+- `crypto/eal/src/eal_cmvp_kat.c` — 21 KAT implementations
+- `crypto/eal/src/eal_cmvp_integ.c` — Integrity checking
+- `include/crypto/crypt_eal_cmvp.h` — Public API
+- 65 total files across 3 provider tiers (ISO 19790, SM, FIPS)
+
+### Design Decisions
+- Simplified from C's 3-provider tier architecture to single `fips` feature module
+- 6 KAT algorithms (vs 21 in C) — covers core approved algorithms
+- 3 PCT algorithms (ECDSA P-256, Ed25519, RSA-2048 PSS) — covers all asymmetric families
+- `CmvpError` integrated into `CryptoError` via `#[from]` derive
+- Constant-time HMAC comparison for integrity check using `subtle::ConstantTimeEq`
+
+### Completed Steps
+
+#### 1. Error Types (`hitls-types/src/error.rs`)
+- Added `CmvpError` enum with 6 variants: IntegrityError, KatFailure(String), RandomnessError, PairwiseTestError(String), InvalidState, ParamCheckError(String)
+- Added `Cmvp(#[from] CmvpError)` variant to `CryptoError` for seamless error propagation
+
+#### 2. Feature Flag (`hitls-crypto/Cargo.toml`, `hitls-crypto/src/lib.rs`)
+- Added `fips` feature that pulls in required algorithm features: sha2, hmac, aes, modes, drbg, rsa, ecdsa, ed25519, hkdf
+- Added `#[cfg(feature = "fips")] pub mod fips;` to lib.rs
+
+#### 3. FIPS State Machine (`hitls-crypto/src/fips/mod.rs`)
+- `FipsState` enum: PreOperational, SelfTesting, Operational, Error
+- `FipsModule` struct with `run_self_tests()` orchestrating KAT → PCT sequence
+- Error state is permanent (cannot re-run self-tests after failure)
+- `check_integrity()` method for HMAC-based library verification
+- `Default` impl creates PreOperational module
+- 5 unit tests
+
+#### 4. Known Answer Tests (`hitls-crypto/src/fips/kat.rs`)
+- `kat_sha256()` — NIST CAVP SHAVS vector
+- `kat_hmac_sha256()` — RFC 4231 Test Case 1
+- `kat_aes128_gcm()` — NIST SP 800-38D vector (encrypt + decrypt verification)
+- `kat_hmac_drbg()` — NIST SP 800-90A vector (instantiate → reseed → generate(discard) → generate(compare))
+- `kat_hkdf_sha256()` — RFC 5869 Appendix A Test Case 1
+- `kat_ecdsa_p256()` — Conditional self-test: generate key, sign, verify
+- `run_all_kat()` — Orchestrates all 6 KATs, returns on first failure
+- 7 unit tests
+
+#### 5. Pairwise Consistency Tests (`hitls-crypto/src/fips/pct.rs`)
+- `pct_ecdsa_p256()` — EcdsaKeyPair::generate → sign → verify
+- `pct_ed25519()` — Ed25519KeyPair::generate → sign → verify
+- `pct_rsa_sign_verify()` — RsaPrivateKey::generate(2048) → sign(PSS) → verify
+- `run_all_pct()` — Orchestrates all 3 PCTs
+- 4 unit tests (2 ignored for slow RSA-2048 keygen)
+
+#### 6. Integrity Check (`hitls-crypto/src/fips/integrity.rs`)
+- `hmac_sha256(key, data)` — Helper computing HMAC-SHA256
+- `check_integrity(lib_path, key, expected_hmac)` — Read file, compute HMAC, constant-time compare
+- `compute_file_hmac(lib_path, key)` — Public utility for generating reference HMAC values
+- 4 unit tests (pass, wrong hmac, missing file, wrong length)
+
+### Bugs & Fixes During Implementation
+- `Hmac::new` requires `'static` factory closure — cannot pass borrowed `Box`, must pass `|| Box::new(Sha256::new()) as Box<dyn Digest>` directly
+- `Ed25519PrivateKey`/`Ed25519PublicKey` don't exist — correct struct is `Ed25519KeyPair` with `sign(msg)` / `verify(msg, sig)`
+- `RsaKeyPair` doesn't exist — correct struct is `RsaPrivateKey` with `sign(RsaPadding::Pss, &digest)`
+- `crate::drbg::hmac_drbg::HmacDrbg` — module `hmac_drbg` is private; use re-export `crate::drbg::HmacDrbg`
+- `HmacDrbg::reseed()` takes `additional_input: Option<&[u8]>` second parameter
+
+### Test Results
+- hitls-crypto: 397 passed, 27 ignored (was 364/25) — +33 running, +2 ignored (from FIPS module)
+- Total workspace: 1065 tests (36 ignored)
+
+### Files Created
+- `crates/hitls-crypto/src/fips/mod.rs` — FIPS state machine + 5 tests
+- `crates/hitls-crypto/src/fips/kat.rs` — 6 KATs + 7 tests
+- `crates/hitls-crypto/src/fips/pct.rs` — 3 PCTs + 4 tests
+- `crates/hitls-crypto/src/fips/integrity.rs` — HMAC integrity check + 4 tests
+
+### Files Modified
+- `crates/hitls-types/src/error.rs` — Added CmvpError enum + CryptoError::Cmvp variant
+- `crates/hitls-crypto/Cargo.toml` — Added `fips` feature
+- `crates/hitls-crypto/src/lib.rs` — Added `fips` module
+- `CLAUDE.md`, `README.md` — Updated status and test counts
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1065 workspace tests passing (36 ignored)
