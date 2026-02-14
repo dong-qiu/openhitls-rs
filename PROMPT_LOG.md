@@ -1407,6 +1407,16 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ---
 
+## P1: Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT (2026-02-14)
+
+**Prompt**: Implement P1 — (1) Add unit tests for alert/session/record TLS modules (zero tests previously), (2) Wire CMS Ed25519/Ed448 signature verification (was returning "not yet supported"), (3) Expand enc CLI to support aes-128-gcm, chacha20-poly1305, sm4-gcm, (4) Implement TLS 1.2 OCSP stapling CertificateStatus message (RFC 6066).
+
+**Result**: 71 new tests (tls +62: 8 alert, 21 session, 23 record, 6 codec12, 4 server12; pki +3: CMS Ed25519/Ed448; cli +6: enc cipher variants). CMS Ed25519/Ed448 signing+verification now functional. enc CLI supports 4 ciphers via `--cipher` flag. TLS 1.2 CertificateStatus (HS type 22) implemented server+client side, sync+async. Key bug: ChaCha20-Poly1305 uses struct API not standalone functions.
+
+1362 total tests (37 ignored). Clippy clean, fmt clean.
+
+---
+
 ## Phase 50: Test Coverage + CMS Ed25519/Ed448 + enc CLI + TLS 1.2 OCSP/SCT (2026-02-13)
 
 **Prompt**: Implement P1 priority items: (1) Add test coverage for alert/session/record TLS modules that had zero tests. (2) Wire CMS Ed25519/Ed448 signature verification (replace "not yet supported" stubs). (3) Expand enc CLI from AES-256-GCM only to support 4 ciphers. (4) Implement TLS 1.2 OCSP Stapling CertificateStatus message (RFC 6066 §8).
