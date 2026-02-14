@@ -400,6 +400,39 @@ pub mod known {
         Oid::new(&[1, 2, 840, 113549, 1, 9, 14])
     }
 
+    // X.509 Name Constraints (RFC 5280 §4.2.1.10)
+    pub fn name_constraints() -> Oid {
+        Oid::new(&[2, 5, 29, 30])
+    }
+
+    // X.509 Certificate Policies (RFC 5280 §4.2.1.4)
+    pub fn certificate_policies() -> Oid {
+        Oid::new(&[2, 5, 29, 32])
+    }
+
+    // Extended Key Usage purpose OIDs (RFC 5280 §4.2.1.12)
+    pub fn kp_server_auth() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 3, 1])
+    }
+    pub fn kp_client_auth() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 3, 2])
+    }
+    pub fn kp_code_signing() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 3, 3])
+    }
+    pub fn kp_email_protection() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 3, 4])
+    }
+    pub fn kp_time_stamping() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 3, 8])
+    }
+    pub fn kp_ocsp_signing() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 3, 9])
+    }
+    pub fn any_extended_key_usage() -> Oid {
+        Oid::new(&[2, 5, 29, 37, 0])
+    }
+
     /// Map a well-known DN attribute OID to its short name.
     pub fn oid_to_dn_short_name(oid: &super::Oid) -> Option<&'static str> {
         let arcs = oid.arcs();

@@ -128,6 +128,57 @@ pub struct BasicConstraints {
     pub path_len_constraint: Option<u32>,
 }
 
+/// Parsed Extended Key Usage extension (RFC 5280 §4.2.1.12).
+#[derive(Debug, Clone)]
+pub struct ExtendedKeyUsage {
+    pub purposes: Vec<Oid>,
+}
+
+/// Parsed Subject Alternative Name extension (RFC 5280 §4.2.1.6).
+#[derive(Debug, Clone)]
+pub struct SubjectAltName {
+    pub dns_names: Vec<String>,
+    pub ip_addresses: Vec<Vec<u8>>,
+    pub email_addresses: Vec<String>,
+    pub uris: Vec<String>,
+}
+
+/// Parsed Authority Key Identifier extension (RFC 5280 §4.2.1.1).
+#[derive(Debug, Clone)]
+pub struct AuthorityKeyIdentifier {
+    pub key_identifier: Option<Vec<u8>>,
+}
+
+/// Parsed Authority Information Access extension (RFC 5280 §4.2.2.1).
+#[derive(Debug, Clone)]
+pub struct AuthorityInfoAccess {
+    pub ocsp_urls: Vec<String>,
+    pub ca_issuer_urls: Vec<String>,
+}
+
+/// Parsed Name Constraints extension (RFC 5280 §4.2.1.10).
+#[derive(Debug, Clone)]
+pub struct NameConstraints {
+    pub permitted_subtrees: Vec<GeneralSubtree>,
+    pub excluded_subtrees: Vec<GeneralSubtree>,
+}
+
+/// A subtree constraint for Name Constraints.
+#[derive(Debug, Clone)]
+pub struct GeneralSubtree {
+    pub base: GeneralName,
+}
+
+/// A GeneralName value as used in SAN and Name Constraints.
+#[derive(Debug, Clone)]
+pub enum GeneralName {
+    DnsName(String),
+    DirectoryName(DistinguishedName),
+    Rfc822Name(String),
+    IpAddress(Vec<u8>),
+    Uri(String),
+}
+
 /// Parsed KeyUsage extension (RFC 5280 §4.2.1.3) as a bit-flag mask.
 #[derive(Debug, Clone, Copy)]
 pub struct KeyUsage(pub u16);
@@ -212,6 +263,209 @@ fn parse_key_usage(value: &[u8]) -> Result<KeyUsage, PkiError> {
 }
 
 // ---------------------------------------------------------------------------
+// Extension parsing helpers
+// ---------------------------------------------------------------------------
+
+/// Parse ExtendedKeyUsage: `SEQUENCE OF OID`
+fn parse_extended_key_usage(value: &[u8]) -> Result<ExtendedKeyUsage, PkiError> {
+    let mut dec = Decoder::new(value)
+        .read_sequence()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    let mut purposes = Vec::new();
+    while !dec.is_empty() {
+        let oid_bytes = dec
+            .read_oid()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let oid = Oid::from_der_value(oid_bytes).map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        purposes.push(oid);
+    }
+    Ok(ExtendedKeyUsage { purposes })
+}
+
+/// Parse a GeneralName from a context-tagged TLV.
+/// GeneralName ::= CHOICE {
+///   otherName       [0], rfc822Name [1] IA5String, dNSName [2] IA5String,
+///   x400Address     [3], directoryName [4] EXPLICIT Name,
+///   ediPartyName    [5], uniformResourceIdentifier [6] IA5String,
+///   iPAddress       [7] OCTET STRING, registeredID [8] OID
+/// }
+fn parse_general_name(tag_num: u32, value: &[u8]) -> Option<GeneralName> {
+    match tag_num {
+        1 => {
+            // rfc822Name — IA5String
+            String::from_utf8(value.to_vec())
+                .ok()
+                .map(GeneralName::Rfc822Name)
+        }
+        2 => {
+            // dNSName — IA5String
+            String::from_utf8(value.to_vec())
+                .ok()
+                .map(GeneralName::DnsName)
+        }
+        4 => {
+            // directoryName — EXPLICIT Name
+            let mut dec = Decoder::new(value);
+            parse_name(&mut dec).ok().map(GeneralName::DirectoryName)
+        }
+        6 => {
+            // uniformResourceIdentifier — IA5String
+            String::from_utf8(value.to_vec()).ok().map(GeneralName::Uri)
+        }
+        7 => {
+            // iPAddress — OCTET STRING (4 for IPv4, 16 for IPv6; 8/32 in NC)
+            Some(GeneralName::IpAddress(value.to_vec()))
+        }
+        _ => None, // skip unsupported types
+    }
+}
+
+/// Parse SubjectAltName: `SEQUENCE OF GeneralName`
+fn parse_subject_alt_name(value: &[u8]) -> Result<SubjectAltName, PkiError> {
+    let mut dec = Decoder::new(value)
+        .read_sequence()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    let mut san = SubjectAltName {
+        dns_names: Vec::new(),
+        ip_addresses: Vec::new(),
+        email_addresses: Vec::new(),
+        uris: Vec::new(),
+    };
+    while !dec.is_empty() {
+        let tlv = dec
+            .read_tlv()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        if tlv.tag.class == TagClass::ContextSpecific {
+            match tlv.tag.number {
+                1 => {
+                    if let Ok(s) = String::from_utf8(tlv.value.to_vec()) {
+                        san.email_addresses.push(s);
+                    }
+                }
+                2 => {
+                    if let Ok(s) = String::from_utf8(tlv.value.to_vec()) {
+                        san.dns_names.push(s);
+                    }
+                }
+                6 => {
+                    if let Ok(s) = String::from_utf8(tlv.value.to_vec()) {
+                        san.uris.push(s);
+                    }
+                }
+                7 => {
+                    san.ip_addresses.push(tlv.value.to_vec());
+                }
+                _ => {} // skip unsupported GeneralName types
+            }
+        }
+    }
+    Ok(san)
+}
+
+/// Parse AuthorityKeyIdentifier: `SEQUENCE { [0] keyIdentifier OPTIONAL, ... }`
+fn parse_authority_key_identifier(value: &[u8]) -> Result<AuthorityKeyIdentifier, PkiError> {
+    let mut dec = Decoder::new(value)
+        .read_sequence()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    let key_identifier = dec
+        .try_read_context_specific(0, false)
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?
+        .map(|tlv| tlv.value.to_vec());
+    Ok(AuthorityKeyIdentifier { key_identifier })
+}
+
+/// Parse SubjectKeyIdentifier: the extension value is `OCTET STRING`.
+fn parse_subject_key_identifier(value: &[u8]) -> Result<Vec<u8>, PkiError> {
+    let mut dec = Decoder::new(value);
+    let ski = dec
+        .read_octet_string()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    Ok(ski.to_vec())
+}
+
+/// Parse AuthorityInfoAccess: `SEQUENCE OF AccessDescription`
+/// AccessDescription ::= SEQUENCE { accessMethod OID, accessLocation GeneralName }
+fn parse_authority_info_access(value: &[u8]) -> Result<AuthorityInfoAccess, PkiError> {
+    let mut dec = Decoder::new(value)
+        .read_sequence()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    let mut aia = AuthorityInfoAccess {
+        ocsp_urls: Vec::new(),
+        ca_issuer_urls: Vec::new(),
+    };
+    let ocsp_oid = known::ocsp().to_der_value();
+    let ca_issuers_oid = known::ca_issuers().to_der_value();
+    while !dec.is_empty() {
+        let mut ad = dec
+            .read_sequence()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let method_bytes = ad
+            .read_oid()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let tlv = ad
+            .read_tlv()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        // accessLocation is a GeneralName — typically [6] URI
+        if tlv.tag.class == TagClass::ContextSpecific && tlv.tag.number == 6 {
+            if let Ok(url) = String::from_utf8(tlv.value.to_vec()) {
+                if method_bytes == ocsp_oid.as_slice() {
+                    aia.ocsp_urls.push(url);
+                } else if method_bytes == ca_issuers_oid.as_slice() {
+                    aia.ca_issuer_urls.push(url);
+                }
+            }
+        }
+    }
+    Ok(aia)
+}
+
+/// Parse NameConstraints: `SEQUENCE { [0] permitted OPTIONAL, [1] excluded OPTIONAL }`
+fn parse_name_constraints(value: &[u8]) -> Result<NameConstraints, PkiError> {
+    let mut dec = Decoder::new(value)
+        .read_sequence()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    let mut nc = NameConstraints {
+        permitted_subtrees: Vec::new(),
+        excluded_subtrees: Vec::new(),
+    };
+    if let Some(tlv) = dec
+        .try_read_context_specific(0, true)
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?
+    {
+        nc.permitted_subtrees = parse_general_subtrees(tlv.value)?;
+    }
+    if let Some(tlv) = dec
+        .try_read_context_specific(1, true)
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?
+    {
+        nc.excluded_subtrees = parse_general_subtrees(tlv.value)?;
+    }
+    Ok(nc)
+}
+
+/// Parse GeneralSubtrees: `SEQUENCE OF GeneralSubtree`
+/// GeneralSubtree ::= SEQUENCE { base GeneralName, minimum [0] DEFAULT 0, maximum [1] OPTIONAL }
+fn parse_general_subtrees(data: &[u8]) -> Result<Vec<GeneralSubtree>, PkiError> {
+    let mut dec = Decoder::new(data);
+    let mut subtrees = Vec::new();
+    while !dec.is_empty() {
+        let mut sub_dec = dec
+            .read_sequence()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let tlv = sub_dec
+            .read_tlv()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        if tlv.tag.class == TagClass::ContextSpecific {
+            if let Some(gn) = parse_general_name(tlv.tag.number, tlv.value) {
+                subtrees.push(GeneralSubtree { base: gn });
+            }
+        }
+        // Skip minimum/maximum if present
+    }
+    Ok(subtrees)
+}
+
+// ---------------------------------------------------------------------------
 // Certificate extension convenience methods
 // ---------------------------------------------------------------------------
 
@@ -232,6 +486,60 @@ impl Certificate {
             .iter()
             .find(|e| e.oid == ku_oid)
             .and_then(|e| parse_key_usage(&e.value).ok())
+    }
+
+    /// Parse the Extended Key Usage extension, if present.
+    pub fn extended_key_usage(&self) -> Option<ExtendedKeyUsage> {
+        let eku_oid = known::ext_key_usage().to_der_value();
+        self.extensions
+            .iter()
+            .find(|e| e.oid == eku_oid)
+            .and_then(|e| parse_extended_key_usage(&e.value).ok())
+    }
+
+    /// Parse the Subject Alternative Name extension, if present.
+    pub fn subject_alt_name(&self) -> Option<SubjectAltName> {
+        let san_oid = known::subject_alt_name().to_der_value();
+        self.extensions
+            .iter()
+            .find(|e| e.oid == san_oid)
+            .and_then(|e| parse_subject_alt_name(&e.value).ok())
+    }
+
+    /// Parse the Authority Key Identifier extension, if present.
+    pub fn authority_key_identifier(&self) -> Option<AuthorityKeyIdentifier> {
+        let aki_oid = known::authority_key_identifier().to_der_value();
+        self.extensions
+            .iter()
+            .find(|e| e.oid == aki_oid)
+            .and_then(|e| parse_authority_key_identifier(&e.value).ok())
+    }
+
+    /// Parse the Subject Key Identifier extension, if present.
+    pub fn subject_key_identifier(&self) -> Option<Vec<u8>> {
+        let ski_oid = known::subject_key_identifier().to_der_value();
+        self.extensions
+            .iter()
+            .find(|e| e.oid == ski_oid)
+            .and_then(|e| parse_subject_key_identifier(&e.value).ok())
+    }
+
+    /// Parse the Authority Information Access extension, if present.
+    pub fn authority_info_access(&self) -> Option<AuthorityInfoAccess> {
+        let aia_oid = known::authority_info_access().to_der_value();
+        self.extensions
+            .iter()
+            .find(|e| e.oid == aia_oid)
+            .and_then(|e| parse_authority_info_access(&e.value).ok())
+    }
+
+    /// Parse the Name Constraints extension, if present.
+    pub fn name_constraints(&self) -> Option<NameConstraints> {
+        let nc_oid = known::name_constraints().to_der_value();
+        self.extensions
+            .iter()
+            .find(|e| e.oid == nc_oid)
+            .and_then(|e| parse_name_constraints(&e.value).ok())
     }
 
     /// Returns true if this certificate is a CA (BasicConstraints present with isCA=true).
@@ -805,6 +1113,36 @@ pub(crate) fn encode_extensions(exts: &[X509Extension]) -> Vec<u8> {
     outer.finish()
 }
 
+/// Encode GeneralSubtrees for NameConstraints.
+fn encode_general_subtrees(names: &[GeneralName]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for name in names {
+        let mut sub_inner = Encoder::new();
+        match name {
+            GeneralName::DnsName(s) => {
+                sub_inner.write_context_specific(2, false, s.as_bytes());
+            }
+            GeneralName::Rfc822Name(s) => {
+                sub_inner.write_context_specific(1, false, s.as_bytes());
+            }
+            GeneralName::Uri(s) => {
+                sub_inner.write_context_specific(6, false, s.as_bytes());
+            }
+            GeneralName::IpAddress(ip) => {
+                sub_inner.write_context_specific(7, false, ip);
+            }
+            GeneralName::DirectoryName(dn) => {
+                let dn_der = encode_distinguished_name(dn);
+                sub_inner.write_context_specific(4, true, &dn_der);
+            }
+        }
+        let mut seq = Encoder::new();
+        seq.write_sequence(&sub_inner.finish());
+        out.extend_from_slice(&seq.finish());
+    }
+    out
+}
+
 /// Encode validity (notBefore, notAfter) to DER.
 pub(crate) fn encode_validity(not_before: i64, not_after: i64) -> Vec<u8> {
     let mut inner = Encoder::new();
@@ -1319,6 +1657,71 @@ impl CertificateBuilder {
         seq.write_sequence(&inner.finish());
         let value = seq.finish();
         self.add_extension(known::basic_constraints().to_der_value(), true, value)
+    }
+
+    /// Add a SubjectKeyIdentifier extension (hash of public key).
+    pub fn add_subject_key_identifier(self, key_id: &[u8]) -> Self {
+        let mut enc = Encoder::new();
+        enc.write_octet_string(key_id);
+        let value = enc.finish();
+        self.add_extension(known::subject_key_identifier().to_der_value(), false, value)
+    }
+
+    /// Add an AuthorityKeyIdentifier extension.
+    pub fn add_authority_key_identifier(self, key_id: &[u8]) -> Self {
+        // AKI: SEQUENCE { [0] keyIdentifier }
+        let mut inner = Encoder::new();
+        inner.write_context_specific(0, false, key_id);
+        let mut seq = Encoder::new();
+        seq.write_sequence(&inner.finish());
+        let value = seq.finish();
+        self.add_extension(
+            known::authority_key_identifier().to_der_value(),
+            false,
+            value,
+        )
+    }
+
+    /// Add an ExtendedKeyUsage extension.
+    pub fn add_extended_key_usage(self, oids: &[Oid], critical: bool) -> Self {
+        let mut inner = Encoder::new();
+        for oid in oids {
+            inner.write_oid(&oid.to_der_value());
+        }
+        let mut seq = Encoder::new();
+        seq.write_sequence(&inner.finish());
+        let value = seq.finish();
+        self.add_extension(known::ext_key_usage().to_der_value(), critical, value)
+    }
+
+    /// Add a SubjectAltName extension with DNS names.
+    pub fn add_subject_alt_name_dns(self, dns_names: &[&str]) -> Self {
+        let mut inner = Encoder::new();
+        for name in dns_names {
+            // dNSName [2] IA5String (context-specific, primitive)
+            inner.write_context_specific(2, false, name.as_bytes());
+        }
+        let mut seq = Encoder::new();
+        seq.write_sequence(&inner.finish());
+        let value = seq.finish();
+        self.add_extension(known::subject_alt_name().to_der_value(), false, value)
+    }
+
+    /// Add a NameConstraints extension.
+    pub fn add_name_constraints(self, permitted: &[GeneralName], excluded: &[GeneralName]) -> Self {
+        let mut inner = Encoder::new();
+        if !permitted.is_empty() {
+            let subtrees = encode_general_subtrees(permitted);
+            inner.write_context_specific(0, true, &subtrees);
+        }
+        if !excluded.is_empty() {
+            let subtrees = encode_general_subtrees(excluded);
+            inner.write_context_specific(1, true, &subtrees);
+        }
+        let mut seq = Encoder::new();
+        seq.write_sequence(&inner.finish());
+        let value = seq.finish();
+        self.add_extension(known::name_constraints().to_der_value(), true, value)
     }
 
     /// Add a KeyUsage extension.
@@ -2072,6 +2475,233 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let cert = Certificate::from_der(CERTCHECK_BC).unwrap();
         let bc = cert.basic_constraints();
         assert!(bc.is_some(), "should have BasicConstraints extension");
+    }
+
+    // -----------------------------------------------------------------------
+    // P3: Typed extension parsing tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_eku_parsing() {
+        let cert = Certificate::from_der(CERTCHECK_EKU).unwrap();
+        let eku = cert.extended_key_usage();
+        assert!(eku.is_some(), "cert should have EKU extension");
+        let eku = eku.unwrap();
+        assert!(!eku.purposes.is_empty());
+    }
+
+    #[test]
+    fn test_eku_parsing_real_server() {
+        // server_good.der from eku_suite has serverAuth
+        let cert = Certificate::from_der(EKU_SERVER_GOOD_DER).unwrap();
+        let eku = cert.extended_key_usage();
+        assert!(eku.is_some());
+        let eku = eku.unwrap();
+        assert!(
+            eku.purposes.iter().any(|p| *p == known::kp_server_auth()),
+            "server cert should have serverAuth EKU"
+        );
+    }
+
+    const EKU_SERVER_GOOD_DER: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/eku_suite/server_good.der");
+    const EKU_CLIENT_GOOD_DER: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/eku_suite/client_good.der");
+    const EKU_ANY_GOOD_DER: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/eku_suite/anyEKU/anyeku_good.der");
+
+    #[test]
+    fn test_eku_parsing_real_client() {
+        let cert = Certificate::from_der(EKU_CLIENT_GOOD_DER).unwrap();
+        let eku = cert.extended_key_usage().unwrap();
+        assert!(eku.purposes.iter().any(|p| *p == known::kp_client_auth()));
+    }
+
+    #[test]
+    fn test_eku_any_purpose() {
+        let cert = Certificate::from_der(EKU_ANY_GOOD_DER).unwrap();
+        let eku = cert.extended_key_usage().unwrap();
+        assert!(
+            eku.purposes
+                .iter()
+                .any(|p| *p == known::any_extended_key_usage()),
+            "anyEKU cert should have anyExtendedKeyUsage"
+        );
+    }
+
+    #[test]
+    fn test_san_email_parsing() {
+        // cert_ext_san_parse_1.der has rfc822Name (email), not dNSName
+        let cert = Certificate::from_der(CERTCHECK_SAN_DNS).unwrap();
+        let san = cert.subject_alt_name();
+        assert!(san.is_some(), "cert should have SAN extension");
+        let san = san.unwrap();
+        assert!(
+            !san.email_addresses.is_empty(),
+            "SAN should have email addresses"
+        );
+    }
+
+    #[test]
+    fn test_san_ip_parsing() {
+        let cert = Certificate::from_der(CERTCHECK_SAN_IP).unwrap();
+        let san = cert.subject_alt_name();
+        assert!(san.is_some(), "cert should have SAN extension");
+        let san = san.unwrap();
+        assert!(!san.ip_addresses.is_empty(), "SAN should have IP addresses");
+    }
+
+    #[test]
+    fn test_san_empty() {
+        // RSA test cert has no SAN
+        let data = hex(RSA_CERT_HEX);
+        let cert = Certificate::from_der(&data).unwrap();
+        assert!(cert.subject_alt_name().is_none());
+    }
+
+    #[test]
+    fn test_aki_parsing() {
+        let data = hex(RSA_CERT_HEX);
+        let cert = Certificate::from_der(&data).unwrap();
+        let aki = cert.authority_key_identifier();
+        assert!(aki.is_some(), "cert should have AKI extension");
+        let aki = aki.unwrap();
+        assert!(aki.key_identifier.is_some(), "AKI should have key ID");
+    }
+
+    #[test]
+    fn test_ski_parsing() {
+        let data = hex(RSA_CERT_HEX);
+        let cert = Certificate::from_der(&data).unwrap();
+        let ski = cert.subject_key_identifier();
+        assert!(ski.is_some(), "cert should have SKI extension");
+        assert!(!ski.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_aki_ski_match() {
+        // Self-signed cert: AKI.keyId == SKI
+        let data = hex(RSA_CERT_HEX);
+        let cert = Certificate::from_der(&data).unwrap();
+        let ski = cert.subject_key_identifier().unwrap();
+        let aki = cert.authority_key_identifier().unwrap();
+        assert_eq!(
+            aki.key_identifier.as_ref().unwrap(),
+            &ski,
+            "self-signed cert AKI should match SKI"
+        );
+    }
+
+    #[test]
+    fn test_name_constraints_synthetic() {
+        // Build a cert with NameConstraints using the builder
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "NC Test CA".to_string())],
+        };
+        let spki = sk.public_key_info().unwrap();
+        let cert = CertificateBuilder::new()
+            .serial_number(&[0x01])
+            .issuer(dn.clone())
+            .subject(dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .add_basic_constraints(true, None)
+            .add_name_constraints(
+                &[GeneralName::DnsName(".example.com".into())],
+                &[GeneralName::DnsName(".evil.com".into())],
+            )
+            .build(&sk)
+            .unwrap();
+
+        let nc = cert.name_constraints();
+        assert!(nc.is_some(), "cert should have NameConstraints");
+        let nc = nc.unwrap();
+        assert_eq!(nc.permitted_subtrees.len(), 1);
+        assert_eq!(nc.excluded_subtrees.len(), 1);
+        match &nc.permitted_subtrees[0].base {
+            GeneralName::DnsName(s) => assert_eq!(s, ".example.com"),
+            _ => panic!("expected DnsName"),
+        }
+        match &nc.excluded_subtrees[0].base {
+            GeneralName::DnsName(s) => assert_eq!(s, ".evil.com"),
+            _ => panic!("expected DnsName"),
+        }
+    }
+
+    #[test]
+    fn test_eku_builder_roundtrip() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "EKU Test".to_string())],
+        };
+        let spki = sk.public_key_info().unwrap();
+        let cert = CertificateBuilder::new()
+            .serial_number(&[0x01])
+            .issuer(dn.clone())
+            .subject(dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .add_extended_key_usage(&[known::kp_server_auth(), known::kp_client_auth()], false)
+            .build(&sk)
+            .unwrap();
+
+        let eku = cert.extended_key_usage().unwrap();
+        assert_eq!(eku.purposes.len(), 2);
+        assert!(eku.purposes.contains(&known::kp_server_auth()));
+        assert!(eku.purposes.contains(&known::kp_client_auth()));
+    }
+
+    #[test]
+    fn test_san_builder_roundtrip() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "SAN Test".to_string())],
+        };
+        let spki = sk.public_key_info().unwrap();
+        let cert = CertificateBuilder::new()
+            .serial_number(&[0x01])
+            .issuer(dn.clone())
+            .subject(dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .add_subject_alt_name_dns(&["www.example.com", "mail.example.com"])
+            .build(&sk)
+            .unwrap();
+
+        let san = cert.subject_alt_name().unwrap();
+        assert_eq!(san.dns_names.len(), 2);
+        assert!(san.dns_names.contains(&"www.example.com".to_string()));
+        assert!(san.dns_names.contains(&"mail.example.com".to_string()));
+    }
+
+    #[test]
+    fn test_ski_aki_builder_roundtrip() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "SKI Test".to_string())],
+        };
+        let spki = sk.public_key_info().unwrap();
+        let key_id = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+        let cert = CertificateBuilder::new()
+            .serial_number(&[0x01])
+            .issuer(dn.clone())
+            .subject(dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .add_subject_key_identifier(&key_id)
+            .add_authority_key_identifier(&key_id)
+            .build(&sk)
+            .unwrap();
+
+        let ski = cert.subject_key_identifier().unwrap();
+        assert_eq!(ski, key_id);
+        let aki = cert.authority_key_identifier().unwrap();
+        assert_eq!(aki.key_identifier.unwrap(), key_id);
     }
 
     #[test]

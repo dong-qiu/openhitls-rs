@@ -4677,3 +4677,61 @@ Tests added to `x509/mod.rs`:
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1414 workspace tests passing (37 ignored)
+
+---
+
+## P3: X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup
+
+### Overview
+Added typed parsing and enforcement for critical RFC 5280 X.509 extensions. This phase significantly improves real-world PKI compliance by adding EKU enforcement, AKI/SKI-based issuer matching, CMS SubjectKeyIdentifier signer lookup, and Name Constraints enforcement.
+
+### Part 1: Typed Extension Parsing (14 tests)
+Added 7 new types and 6 new methods on `Certificate` for parsing X.509 extensions:
+- **ExtendedKeyUsage**: `SEQUENCE OF OID` — serverAuth, clientAuth, codeSigning, etc.
+- **SubjectAltName**: DNS names, IP addresses, email addresses, URIs
+- **AuthorityKeyIdentifier**: key_identifier (OCTET STRING)
+- **SubjectKeyIdentifier**: raw `Vec<u8>` (OCTET STRING)
+- **AuthorityInfoAccess**: OCSP URLs, CA issuer URLs
+- **NameConstraints**: permitted/excluded subtrees (DNS, email, IP, DN, URI)
+- **GeneralName** enum: DnsName, DirectoryName, Rfc822Name, IpAddress, Uri
+
+CertificateBuilder helpers: `add_subject_key_identifier()`, `add_authority_key_identifier()`, `add_extended_key_usage()`, `add_subject_alt_name_dns()`, `add_name_constraints()`
+
+New OIDs: `name_constraints`, `certificate_policies`, `kp_server_auth`, `kp_client_auth`, `kp_code_signing`, `kp_email_protection`, `kp_time_stamping`, `kp_ocsp_signing`, `any_extended_key_usage`
+
+### Part 2: EKU Enforcement (8 tests)
+Added optional `required_eku` field to `CertificateVerifier`. When set, the end-entity certificate's EKU must contain the required purpose (or `anyExtendedKeyUsage`). Per RFC 5280 §4.2.1.12, if no EKU extension is present, no restriction applies.
+
+**Bug fix**: `test_eku_enforce_any_eku_accepts_all` — the anyEKU test cert has its own separate CA chain (`anyEKU/rootca.der` and `anyEKU/ca.der`), not the same chain as other EKU test certs.
+
+### Part 3: AKI/SKI Chain Matching (5 tests)
+Improved `find_issuer()` to prefer AKI/SKI matching when available. When a certificate has an AuthorityKeyIdentifier with a keyIdentifier, and a candidate issuer has a matching SubjectKeyIdentifier, that candidate is preferred. This handles cross-signed CAs (same subject DN, different keys) correctly.
+
+Tests include synthetic cross-signed CA scenarios, DN-only fallback, AKI mismatch fallback, and verification of real test cert AKI/SKI chain.
+
+### Part 4: CMS SKI Signer Lookup (4 tests)
+Replaced the `SubjectKeyIdentifier` stub in `find_signer_cert()` with actual SKI matching — iterates certificates and matches `cert.subject_key_identifier()` against the signer's SKI.
+
+### Part 5: Name Constraints Enforcement (8 tests)
+Added `validate_name_constraints()` to chain verification. When an intermediate CA has a NameConstraints extension, all certificates below it are checked:
+- **Excluded subtrees**: Name MUST NOT match any excluded constraint
+- **Permitted subtrees**: If same-type permitted constraints exist, name MUST match at least one
+- Matching logic: DNS (`.example.com` subdomain), email (`@domain`), IP (CIDR netmask), DN (suffix match), URI (host portion)
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `hitls-utils/src/oid/mod.rs` | +10 OIDs (NC, cert policies, EKU purposes) |
+| `hitls-types/src/error.rs` | +2 error variants (ExtKeyUsageViolation, NameConstraintsViolation) |
+| `hitls-pki/src/x509/mod.rs` | +7 types, +8 parsing functions, +6 Certificate methods, +5 builder helpers, +14 tests |
+| `hitls-pki/src/x509/verify.rs` | EKU enforcement, AKI/SKI matching, NC enforcement, +21 tests |
+| `hitls-pki/src/cms/mod.rs` | SKI signer lookup, +4 tests |
+
+### Test Counts (P3)
+- **hitls-pki**: 216 (from 177), +39 new tests
+- **Total workspace**: 1453 (from 1414), +39 new tests, 37 ignored
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1453 workspace tests passing (37 ignored)

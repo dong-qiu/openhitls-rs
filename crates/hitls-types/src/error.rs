@@ -217,6 +217,10 @@ pub enum PkiError {
     BasicConstraintsViolation(String),
     #[error("key usage violation: {0}")]
     KeyUsageViolation(String),
+    #[error("extended key usage violation: {0}")]
+    ExtKeyUsageViolation(String),
+    #[error("name constraints violation: {0}")]
+    NameConstraintsViolation(String),
     #[error("max chain depth exceeded: {0}")]
     MaxDepthExceeded(u32),
     #[error("crypto error: {0}")]

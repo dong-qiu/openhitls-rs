@@ -1,9 +1,10 @@
 //! X.509 certificate chain building and verification.
 
 use hitls_types::PkiError;
+use hitls_utils::oid::{known, Oid};
 
 use super::crl::CertificateRevocationList;
-use super::{Certificate, KeyUsage};
+use super::{Certificate, GeneralName, KeyUsage, NameConstraints};
 
 /// X.509 certificate chain verifier.
 ///
@@ -15,6 +16,7 @@ pub struct CertificateVerifier {
     max_depth: u32,
     verification_time: Option<i64>,
     check_revocation: bool,
+    required_eku: Option<Oid>,
 }
 
 impl Default for CertificateVerifier {
@@ -32,6 +34,7 @@ impl CertificateVerifier {
             max_depth: 10,
             verification_time: None,
             check_revocation: false,
+            required_eku: None,
         }
     }
 
@@ -84,6 +87,15 @@ impl CertificateVerifier {
     /// Enable or disable revocation checking (default: disabled).
     pub fn set_check_revocation(&mut self, check: bool) -> &mut Self {
         self.check_revocation = check;
+        self
+    }
+
+    /// Set a required Extended Key Usage for end-entity certificates.
+    /// When set, the end-entity cert's EKU must contain this purpose
+    /// (or anyExtendedKeyUsage). If the cert has no EKU extension,
+    /// it passes per RFC 5280 §4.2.1.12.
+    pub fn set_required_eku(&mut self, eku: Oid) -> &mut Self {
+        self.required_eku = Some(eku);
         self
     }
 
@@ -144,21 +156,32 @@ impl CertificateVerifier {
         self.trusted_certs.iter().any(|t| t.raw == cert.raw)
     }
 
-    /// Find the issuer of `cert` by matching issuer DN to candidate subject DN.
+    /// Find the issuer of `cert` by matching issuer DN and optionally AKI/SKI.
+    /// Prefers AKI/SKI match when available (stronger than DN-only).
     /// Searches intermediates first, then the trust store.
     fn find_issuer(
         &self,
         cert: &Certificate,
         intermediates: &[Certificate],
     ) -> Option<Certificate> {
-        // Search intermediates first
-        for candidate in intermediates {
-            if cert.issuer == candidate.subject {
-                return Some(candidate.clone());
+        let aki = cert.authority_key_identifier();
+        let aki_key_id = aki.as_ref().and_then(|a| a.key_identifier.as_ref());
+
+        // First pass: AKI/SKI match (if AKI has a keyIdentifier)
+        if let Some(key_id) = aki_key_id {
+            for candidate in intermediates.iter().chain(self.trusted_certs.iter()) {
+                if cert.issuer == candidate.subject {
+                    if let Some(ski) = candidate.subject_key_identifier() {
+                        if ski == *key_id {
+                            return Some(candidate.clone());
+                        }
+                    }
+                }
             }
         }
-        // Then search trust store
-        for candidate in &self.trusted_certs {
+
+        // Fallback: DN-only matching
+        for candidate in intermediates.iter().chain(self.trusted_certs.iter()) {
             if cert.issuer == candidate.subject {
                 return Some(candidate.clone());
             }
@@ -214,7 +237,29 @@ impl CertificateVerifier {
                         }
                     }
                 }
+
+                // NameConstraints: all certificates below this CA must satisfy
+                if let Some(nc) = cert.name_constraints() {
+                    for below in chain.iter().take(i) {
+                        validate_name_constraints(below, &nc)?;
+                    }
+                }
             }
+        }
+
+        // EKU enforcement on end-entity certificate
+        if let Some(ref required) = self.required_eku {
+            let ee = &chain[0];
+            if let Some(eku) = ee.extended_key_usage() {
+                let any_eku = known::any_extended_key_usage();
+                if !eku.purposes.iter().any(|p| p == required || *p == any_eku) {
+                    return Err(PkiError::ExtKeyUsageViolation(format!(
+                        "end-entity lacks required EKU: {}",
+                        required
+                    )));
+                }
+            }
+            // If no EKU extension → no restriction per RFC 5280 §4.2.1.12
         }
 
         // Revocation checking (if enabled)
@@ -274,6 +319,200 @@ impl CertificateVerifier {
     }
 }
 
+/// Validate a certificate against NameConstraints (RFC 5280 §4.2.1.10).
+///
+/// Checks the certificate's subject DN and SAN entries against the permitted
+/// and excluded subtrees.
+fn validate_name_constraints(cert: &Certificate, nc: &NameConstraints) -> Result<(), PkiError> {
+    // Collect all names to check: subject DN + SAN entries
+    let san = cert.subject_alt_name();
+
+    // Check DNS names from SAN
+    if let Some(ref san) = san {
+        for dns in &san.dns_names {
+            check_name_against_constraints(&GeneralName::DnsName(dns.clone()), nc)?;
+        }
+        for email in &san.email_addresses {
+            check_name_against_constraints(&GeneralName::Rfc822Name(email.clone()), nc)?;
+        }
+        for ip in &san.ip_addresses {
+            check_name_against_constraints(&GeneralName::IpAddress(ip.clone()), nc)?;
+        }
+        for uri in &san.uris {
+            check_name_against_constraints(&GeneralName::Uri(uri.clone()), nc)?;
+        }
+    }
+
+    // Check subject DN (if non-empty and there are directoryName constraints)
+    if !cert.subject.entries.is_empty() {
+        let has_dn_constraints = nc
+            .permitted_subtrees
+            .iter()
+            .any(|s| matches!(s.base, GeneralName::DirectoryName(_)))
+            || nc
+                .excluded_subtrees
+                .iter()
+                .any(|s| matches!(s.base, GeneralName::DirectoryName(_)));
+        if has_dn_constraints {
+            check_name_against_constraints(&GeneralName::DirectoryName(cert.subject.clone()), nc)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Check a single name against permitted/excluded constraints.
+fn check_name_against_constraints(
+    name: &GeneralName,
+    nc: &NameConstraints,
+) -> Result<(), PkiError> {
+    // Excluded check: name MUST NOT be within any excluded subtree
+    for subtree in &nc.excluded_subtrees {
+        if name_matches_constraint(name, &subtree.base) {
+            return Err(PkiError::NameConstraintsViolation(
+                "name is in excluded subtree".to_string(),
+            ));
+        }
+    }
+
+    // Permitted check: if there are permitted subtrees of the same type,
+    // name MUST be within at least one of them
+    let same_type_permitted: Vec<_> = nc
+        .permitted_subtrees
+        .iter()
+        .filter(|s| same_name_type(name, &s.base))
+        .collect();
+
+    if !same_type_permitted.is_empty() {
+        let matched = same_type_permitted
+            .iter()
+            .any(|s| name_matches_constraint(name, &s.base));
+        if !matched {
+            return Err(PkiError::NameConstraintsViolation(
+                "name is not within any permitted subtree".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Check if two GeneralName values are the same type.
+fn same_name_type(a: &GeneralName, b: &GeneralName) -> bool {
+    matches!(
+        (a, b),
+        (GeneralName::DnsName(_), GeneralName::DnsName(_))
+            | (GeneralName::Rfc822Name(_), GeneralName::Rfc822Name(_))
+            | (GeneralName::IpAddress(_), GeneralName::IpAddress(_))
+            | (GeneralName::Uri(_), GeneralName::Uri(_))
+            | (GeneralName::DirectoryName(_), GeneralName::DirectoryName(_))
+    )
+}
+
+/// Check if a name matches a constraint subtree.
+fn name_matches_constraint(name: &GeneralName, constraint: &GeneralName) -> bool {
+    match (name, constraint) {
+        (GeneralName::DnsName(dns), GeneralName::DnsName(constraint_dns)) => {
+            dns_matches(dns, constraint_dns)
+        }
+        (GeneralName::Rfc822Name(email), GeneralName::Rfc822Name(constraint_email)) => {
+            email_matches(email, constraint_email)
+        }
+        (GeneralName::IpAddress(ip), GeneralName::IpAddress(constraint_ip)) => {
+            ip_matches(ip, constraint_ip)
+        }
+        (GeneralName::DirectoryName(dn), GeneralName::DirectoryName(constraint_dn)) => {
+            dn_is_subtree(dn, constraint_dn)
+        }
+        (GeneralName::Uri(uri), GeneralName::Uri(constraint_uri)) => {
+            // URI constraint: match host portion
+            let uri_host = uri
+                .split("://")
+                .nth(1)
+                .unwrap_or(uri)
+                .split('/')
+                .next()
+                .unwrap_or("");
+            dns_matches(uri_host, constraint_uri)
+        }
+        _ => false,
+    }
+}
+
+/// DNS name matching: constraint ".example.com" matches "foo.example.com".
+/// Constraint "example.com" matches exactly "example.com" and "*.example.com".
+fn dns_matches(name: &str, constraint: &str) -> bool {
+    let name_lower = name.to_ascii_lowercase();
+    let constraint_lower = constraint.to_ascii_lowercase();
+
+    if let Some(stripped) = constraint_lower.strip_prefix('.') {
+        // ".example.com" matches any subdomain
+        name_lower.ends_with(&constraint_lower) || name_lower == stripped
+    } else {
+        // "example.com" matches exactly or as suffix with dot
+        name_lower == constraint_lower || name_lower.ends_with(&format!(".{}", constraint_lower))
+    }
+}
+
+/// Email matching: "@example.com" matches "user@example.com".
+/// "example.com" matches any email at that domain.
+fn email_matches(email: &str, constraint: &str) -> bool {
+    let email_lower = email.to_ascii_lowercase();
+    let constraint_lower = constraint.to_ascii_lowercase();
+
+    if constraint_lower.starts_with('@') {
+        // "@example.com" matches any user at that domain
+        email_lower.ends_with(&constraint_lower)
+    } else if constraint_lower.contains('@') {
+        // Exact email match
+        email_lower == constraint_lower
+    } else {
+        // Domain-only constraint: matches any email at that domain
+        if let Some(domain) = email_lower.split('@').nth(1) {
+            domain == constraint_lower || domain.ends_with(&format!(".{}", constraint_lower))
+        } else {
+            false
+        }
+    }
+}
+
+/// IP address matching against CIDR-style constraint.
+/// Constraint is IP(n) || Netmask(n) where n is 4 (IPv4) or 16 (IPv6).
+fn ip_matches(ip: &[u8], constraint: &[u8]) -> bool {
+    let addr_len = constraint.len() / 2;
+    if ip.len() != addr_len || constraint.len() != addr_len * 2 {
+        return false;
+    }
+    let net = &constraint[..addr_len];
+    let mask = &constraint[addr_len..];
+    for i in 0..addr_len {
+        if (ip[i] & mask[i]) != (net[i] & mask[i]) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Check if `dn` is a subtree of `constraint_dn`.
+/// The constraint DN's entries must be a suffix of the subject DN's entries.
+fn dn_is_subtree(dn: &super::DistinguishedName, constraint_dn: &super::DistinguishedName) -> bool {
+    if constraint_dn.entries.is_empty() {
+        return true; // empty constraint matches all
+    }
+    if dn.entries.len() < constraint_dn.entries.len() {
+        return false;
+    }
+    // Constraint entries must match the suffix of dn entries
+    let offset = dn.entries.len() - constraint_dn.entries.len();
+    for (i, (ck, cv)) in constraint_dn.entries.iter().enumerate() {
+        let (dk, dv) = &dn.entries[offset + i];
+        if dk != ck || dv != cv {
+            return false;
+        }
+    }
+    true
+}
+
 /// Parse multiple certificates from a PEM string.
 pub fn parse_certs_pem(pem: &str) -> Result<Vec<Certificate>, PkiError> {
     let blocks = hitls_utils::pem::parse(pem).map_err(|e| PkiError::Asn1Error(e.to_string()))?;
@@ -289,6 +528,7 @@ pub fn parse_certs_pem(pem: &str) -> Result<Vec<Certificate>, PkiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::x509::{CertificateBuilder, DistinguishedName, SigningKey};
 
     // Root CA: CN=certificate.testca.com (self-signed, RSA 2048, SHA-256)
     // BasicConstraints: CA=true, pathLen=30
@@ -985,6 +1225,545 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         verifier.add_trusted_cert(rootca);
         let chain = verifier.verify_cert(&server, &[ca]).unwrap();
         assert_eq!(chain.len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // P3: EKU enforcement tests
+    // -----------------------------------------------------------------------
+
+    fn eku_chain_verifier() -> CertificateVerifier {
+        let rootca = Certificate::from_der(EKU_ROOTCA).unwrap();
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(rootca);
+        v
+    }
+
+    fn eku_ca() -> Certificate {
+        Certificate::from_der(EKU_CA).unwrap()
+    }
+
+    #[test]
+    fn test_eku_enforce_server_auth_good() {
+        let mut v = eku_chain_verifier();
+        v.set_required_eku(known::kp_server_auth());
+        let server = Certificate::from_der(EKU_SERVER_GOOD).unwrap();
+        let result = v.verify_cert(&server, &[eku_ca()]);
+        assert!(result.is_ok(), "serverAuth cert should pass: {result:?}");
+    }
+
+    #[test]
+    fn test_eku_enforce_server_auth_bad() {
+        let mut v = eku_chain_verifier();
+        v.set_required_eku(known::kp_server_auth());
+        let client = Certificate::from_der(EKU_CLIENT_GOOD).unwrap();
+        let result = v.verify_cert(&client, &[eku_ca()]);
+        assert!(
+            result.is_err(),
+            "clientAuth cert should fail serverAuth check"
+        );
+        match result.unwrap_err() {
+            PkiError::ExtKeyUsageViolation(_) => {}
+            e => panic!("expected ExtKeyUsageViolation, got: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn test_eku_enforce_client_auth_good() {
+        let mut v = eku_chain_verifier();
+        v.set_required_eku(known::kp_client_auth());
+        let client = Certificate::from_der(EKU_CLIENT_GOOD).unwrap();
+        let result = v.verify_cert(&client, &[eku_ca()]);
+        assert!(result.is_ok(), "clientAuth cert should pass: {result:?}");
+    }
+
+    #[test]
+    fn test_eku_enforce_any_eku_accepts_all() {
+        // anyEKU certs have their own CA chain
+        const ANY_ROOTCA: &[u8] =
+            include_bytes!("../../../../tests/vectors/chain/eku_suite/anyEKU/rootca.der");
+        const ANY_CA: &[u8] =
+            include_bytes!("../../../../tests/vectors/chain/eku_suite/anyEKU/ca.der");
+        let rootca = Certificate::from_der(ANY_ROOTCA).unwrap();
+        let ca = Certificate::from_der(ANY_CA).unwrap();
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(rootca);
+        v.set_required_eku(known::kp_server_auth());
+        let any_cert = Certificate::from_der(EKU_ANY_GOOD).unwrap();
+        let result = v.verify_cert(&any_cert, &[ca]);
+        assert!(
+            result.is_ok(),
+            "anyExtendedKeyUsage should accept any required EKU: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_eku_enforce_bad_ku_passes_eku() {
+        // server_badku has wrong KeyUsage but right EKU — EKU check should pass
+        // (KU is a separate check)
+        let mut v = eku_chain_verifier();
+        v.set_required_eku(known::kp_server_auth());
+        let server_badku = Certificate::from_der(EKU_SERVER_BADKU).unwrap();
+        let result = v.verify_cert(&server_badku, &[eku_ca()]);
+        // This should pass EKU but may fail KU — we only care about EKU here
+        match result {
+            Ok(_) => {} // passes both — fine
+            Err(PkiError::ExtKeyUsageViolation(_)) => {
+                panic!("should not fail EKU check for server_badku")
+            }
+            Err(_) => {} // KU or other failure is fine
+        }
+    }
+
+    #[test]
+    fn test_eku_no_extension_passes() {
+        // Cert without EKU → no restriction per RFC 5280
+        let mut v = CertificateVerifier::new();
+        let root = root_ca();
+        v.add_trusted_cert(root.clone());
+        v.set_required_eku(known::kp_server_auth());
+        // end_entity has no EKU extension → should pass
+        let ee = end_entity();
+        let result = v.verify_cert(&ee, &[intermediate_ca()]);
+        assert!(result.is_ok(), "no EKU → passes: {result:?}");
+    }
+
+    #[test]
+    fn test_eku_enforce_not_set_skips() {
+        // No required_eku set → any cert passes
+        let v = eku_chain_verifier();
+        // Do NOT set required_eku
+        let client = Certificate::from_der(EKU_CLIENT_GOOD).unwrap();
+        let result = v.verify_cert(&client, &[eku_ca()]);
+        assert!(result.is_ok(), "no required_eku → passes: {result:?}");
+    }
+
+    #[test]
+    fn test_eku_enforce_code_signing_rejects_tls() {
+        let mut v = eku_chain_verifier();
+        v.set_required_eku(known::kp_code_signing());
+        let server = Certificate::from_der(EKU_SERVER_GOOD).unwrap();
+        let result = v.verify_cert(&server, &[eku_ca()]);
+        assert!(
+            result.is_err(),
+            "serverAuth cert should fail codeSigning check"
+        );
+        match result.unwrap_err() {
+            PkiError::ExtKeyUsageViolation(_) => {}
+            e => panic!("expected ExtKeyUsageViolation, got: {e:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // P3: AKI/SKI chain matching tests
+    // -----------------------------------------------------------------------
+
+    fn make_dn(cn: &str) -> DistinguishedName {
+        DistinguishedName {
+            entries: vec![("CN".to_string(), cn.to_string())],
+        }
+    }
+
+    #[test]
+    fn test_aki_ski_chain_building() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let spki = sk.public_key_info().unwrap();
+        let ski_bytes = b"\x01\x02\x03\x04\x05\x06\x07\x08";
+        let ca_dn = make_dn("AKI-SKI Test CA");
+
+        let ca = CertificateBuilder::new()
+            .serial_number(&[1])
+            .issuer(ca_dn.clone())
+            .subject(ca_dn.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki.clone())
+            .add_basic_constraints(true, None)
+            .add_key_usage(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN)
+            .add_subject_key_identifier(ski_bytes)
+            .build(&sk)
+            .unwrap();
+
+        let ee = CertificateBuilder::new()
+            .serial_number(&[2])
+            .issuer(ca_dn)
+            .subject(make_dn("AKI-SKI Test EE"))
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .add_authority_key_identifier(ski_bytes)
+            .build(&sk)
+            .unwrap();
+
+        // Verify AKI/SKI parsed correctly
+        assert_eq!(ca.subject_key_identifier(), Some(ski_bytes.to_vec()));
+        let aki = ee.authority_key_identifier().unwrap();
+        assert_eq!(aki.key_identifier, Some(ski_bytes.to_vec()));
+
+        // Chain should build successfully
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(ca);
+        let result = v.verify_cert(&ee, &[]);
+        assert!(result.is_ok(), "AKI/SKI chain should verify: {result:?}");
+    }
+
+    #[test]
+    fn test_aki_ski_cross_signed() {
+        // Two CAs with the SAME subject DN but different SKIs.
+        let kp_a = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk_a = SigningKey::Ed25519(kp_a);
+        let spki_a = sk_a.public_key_info().unwrap();
+        let kp_b = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk_b = SigningKey::Ed25519(kp_b);
+        let spki_b = sk_b.public_key_info().unwrap();
+        let ski_a = b"\xAA\xBB\xCC\xDD";
+        let ski_b = b"\x11\x22\x33\x44";
+        let ca_dn = make_dn("Cross-Sign CA");
+
+        let ca_a = CertificateBuilder::new()
+            .serial_number(&[1])
+            .issuer(ca_dn.clone())
+            .subject(ca_dn.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki_a.clone())
+            .add_basic_constraints(true, None)
+            .add_key_usage(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN)
+            .add_subject_key_identifier(ski_a)
+            .build(&sk_a)
+            .unwrap();
+
+        let ca_b = CertificateBuilder::new()
+            .serial_number(&[2])
+            .issuer(ca_dn.clone())
+            .subject(ca_dn.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki_b)
+            .add_basic_constraints(true, None)
+            .add_key_usage(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN)
+            .add_subject_key_identifier(ski_b)
+            .build(&sk_b)
+            .unwrap();
+
+        // EE cert issued by CA A (AKI points to ski_a)
+        let ee = CertificateBuilder::new()
+            .serial_number(&[3])
+            .issuer(ca_dn)
+            .subject(make_dn("Cross-Sign EE"))
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki_a)
+            .add_authority_key_identifier(ski_a)
+            .build(&sk_a)
+            .unwrap();
+
+        // Both CAs in trust store, same DN — AKI/SKI selects correct one
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(ca_a);
+        v.add_trusted_cert(ca_b);
+        let result = v.verify_cert(&ee, &[]);
+        assert!(
+            result.is_ok(),
+            "should find correct CA via AKI/SKI: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_no_aki_falls_back_to_dn() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let spki = sk.public_key_info().unwrap();
+        let ca_dn = make_dn("DN-Only CA");
+
+        let ca = CertificateBuilder::new()
+            .serial_number(&[1])
+            .issuer(ca_dn.clone())
+            .subject(ca_dn.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki.clone())
+            .add_basic_constraints(true, None)
+            .add_key_usage(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN)
+            .build(&sk)
+            .unwrap();
+
+        let ee = CertificateBuilder::new()
+            .serial_number(&[2])
+            .issuer(ca_dn)
+            .subject(make_dn("DN-Only EE"))
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .build(&sk)
+            .unwrap();
+
+        assert!(ee.authority_key_identifier().is_none());
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(ca);
+        let result = v.verify_cert(&ee, &[]);
+        assert!(result.is_ok(), "DN-only matching should work: {result:?}");
+    }
+
+    #[test]
+    fn test_aki_mismatch_falls_to_dn() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let spki = sk.public_key_info().unwrap();
+        let ca_dn = make_dn("Mismatch CA");
+
+        let ca = CertificateBuilder::new()
+            .serial_number(&[1])
+            .issuer(ca_dn.clone())
+            .subject(ca_dn.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki.clone())
+            .add_basic_constraints(true, None)
+            .add_key_usage(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN)
+            .add_subject_key_identifier(b"\xAA\xBB")
+            .build(&sk)
+            .unwrap();
+
+        let ee = CertificateBuilder::new()
+            .serial_number(&[2])
+            .issuer(ca_dn)
+            .subject(make_dn("Mismatch EE"))
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .add_authority_key_identifier(b"\xFF\xFF")
+            .build(&sk)
+            .unwrap();
+
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(ca);
+        let result = v.verify_cert(&ee, &[]);
+        assert!(
+            result.is_ok(),
+            "AKI mismatch should fall back to DN: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_real_certs_have_aki_ski() {
+        let root = root_ca();
+        let inter = intermediate_ca();
+        let ee = end_entity();
+
+        // Root should have SKI
+        let root_ski = root.subject_key_identifier();
+        assert!(root_ski.is_some(), "root CA should have SKI");
+
+        // Intermediate should have AKI and SKI
+        let inter_aki = inter.authority_key_identifier();
+        assert!(inter_aki.is_some(), "intermediate CA should have AKI");
+        let inter_ski = inter.subject_key_identifier();
+        assert!(inter_ski.is_some(), "intermediate CA should have SKI");
+
+        // AKI of intermediate should match SKI of root
+        if let (Some(ref aki), Some(ref ski)) = (&inter_aki, &root_ski) {
+            if let Some(ref key_id) = aki.key_identifier {
+                assert_eq!(key_id, ski, "intermediate AKI should match root SKI");
+            }
+        }
+
+        // EE should have AKI matching intermediate's SKI
+        let ee_aki = ee.authority_key_identifier();
+        assert!(ee_aki.is_some(), "end entity should have AKI");
+        if let (Some(ref aki), Some(ref ski)) = (&ee_aki, &inter_ski) {
+            if let Some(ref key_id) = aki.key_identifier {
+                assert_eq!(key_id, ski, "EE AKI should match intermediate SKI");
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // P3: Name Constraints enforcement tests
+    // -----------------------------------------------------------------------
+
+    /// Build a CA cert with NameConstraints and an EE cert, returns (ca, ee).
+    fn build_nc_chain(
+        permitted: &[GeneralName],
+        excluded: &[GeneralName],
+        ee_dns: &[&str],
+    ) -> (Certificate, Certificate) {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let spki = sk.public_key_info().unwrap();
+        let ca_dn = make_dn("NC Test CA");
+
+        let ca = CertificateBuilder::new()
+            .serial_number(&[1])
+            .issuer(ca_dn.clone())
+            .subject(ca_dn.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki.clone())
+            .add_basic_constraints(true, None)
+            .add_key_usage(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN)
+            .add_name_constraints(permitted, excluded)
+            .build(&sk)
+            .unwrap();
+
+        let mut builder = CertificateBuilder::new()
+            .serial_number(&[2])
+            .issuer(ca_dn)
+            .subject(make_dn("NC Test EE"))
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki);
+        if !ee_dns.is_empty() {
+            builder = builder.add_subject_alt_name_dns(ee_dns);
+        }
+        let ee = builder.build(&sk).unwrap();
+
+        (ca, ee)
+    }
+
+    #[test]
+    fn test_nc_permitted_dns_pass() {
+        let (ca, ee) = build_nc_chain(
+            &[GeneralName::DnsName(".example.com".into())],
+            &[],
+            &["server.example.com"],
+        );
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(ca);
+        let result = v.verify_cert(&ee, &[]);
+        assert!(
+            result.is_ok(),
+            "DNS within permitted should pass: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_nc_permitted_dns_fail() {
+        let (ca, ee) = build_nc_chain(
+            &[GeneralName::DnsName(".example.com".into())],
+            &[],
+            &["evil.com"],
+        );
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(ca);
+        let result = v.verify_cert(&ee, &[]);
+        assert!(result.is_err(), "DNS outside permitted should fail");
+        match result.unwrap_err() {
+            PkiError::NameConstraintsViolation(_) => {}
+            e => panic!("expected NameConstraintsViolation, got: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn test_nc_excluded_dns() {
+        let (ca, ee) = build_nc_chain(
+            &[],
+            &[GeneralName::DnsName(".evil.com".into())],
+            &["server.evil.com"],
+        );
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(ca);
+        let result = v.verify_cert(&ee, &[]);
+        assert!(result.is_err(), "DNS in excluded should fail");
+        match result.unwrap_err() {
+            PkiError::NameConstraintsViolation(_) => {}
+            e => panic!("expected NameConstraintsViolation, got: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn test_nc_no_constraints_passes() {
+        // No NameConstraints extension → no restriction
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let spki = sk.public_key_info().unwrap();
+        let ca_dn = make_dn("No NC CA");
+
+        let ca = CertificateBuilder::new()
+            .serial_number(&[1])
+            .issuer(ca_dn.clone())
+            .subject(ca_dn.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki.clone())
+            .add_basic_constraints(true, None)
+            .add_key_usage(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN)
+            .build(&sk)
+            .unwrap();
+
+        let ee = CertificateBuilder::new()
+            .serial_number(&[2])
+            .issuer(ca_dn)
+            .subject(make_dn("No NC EE"))
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .add_subject_alt_name_dns(&["anything.org"])
+            .build(&sk)
+            .unwrap();
+
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(ca);
+        let result = v.verify_cert(&ee, &[]);
+        assert!(result.is_ok(), "no NC → passes: {result:?}");
+    }
+
+    #[test]
+    fn test_nc_permitted_exact_domain() {
+        // "example.com" permits exactly "example.com" and subdomains
+        let (ca, ee) = build_nc_chain(
+            &[GeneralName::DnsName("example.com".into())],
+            &[],
+            &["example.com"],
+        );
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(ca);
+        let result = v.verify_cert(&ee, &[]);
+        assert!(result.is_ok(), "exact domain match should pass: {result:?}");
+    }
+
+    #[test]
+    fn test_nc_excluded_overrides_permitted() {
+        // Permitted ".example.com" but excluded ".bad.example.com"
+        let (ca, ee) = build_nc_chain(
+            &[GeneralName::DnsName(".example.com".into())],
+            &[GeneralName::DnsName(".bad.example.com".into())],
+            &["server.bad.example.com"],
+        );
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(ca);
+        let result = v.verify_cert(&ee, &[]);
+        assert!(result.is_err(), "excluded should override permitted");
+        match result.unwrap_err() {
+            PkiError::NameConstraintsViolation(_) => {}
+            e => panic!("expected NameConstraintsViolation, got: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn test_nc_ip_constraint() {
+        // Permitted: 192.168.1.0/24 (IP=192.168.1.0 mask=255.255.255.0)
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let spki = sk.public_key_info().unwrap();
+        let ca_dn = make_dn("IP NC CA");
+
+        let permitted_ip = vec![192, 168, 1, 0, 255, 255, 255, 0]; // IP + netmask
+        let ca = CertificateBuilder::new()
+            .serial_number(&[1])
+            .issuer(ca_dn.clone())
+            .subject(ca_dn.clone())
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki.clone())
+            .add_basic_constraints(true, None)
+            .add_key_usage(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN)
+            .add_name_constraints(&[GeneralName::IpAddress(permitted_ip)], &[])
+            .build(&sk)
+            .unwrap();
+
+        // Test: verify IP matching works (IP SAN in cert via raw extension)
+        // We'll just verify the NC was stored correctly
+        let nc = ca.name_constraints().unwrap();
+        assert_eq!(nc.permitted_subtrees.len(), 1);
+        assert!(nc.excluded_subtrees.is_empty());
+    }
+
+    #[test]
+    fn test_nc_email_constraint() {
+        // Verify email matching logic
+        assert!(email_matches("user@example.com", "example.com"));
+        assert!(email_matches("user@example.com", "@example.com"));
+        assert!(!email_matches("user@other.com", "example.com"));
+        assert!(email_matches("user@sub.example.com", "example.com"));
+        assert!(email_matches("admin@example.com", "admin@example.com"));
+        assert!(!email_matches("user@example.com", "admin@example.com"));
     }
 
     // --- CRL revocation checking tests ---

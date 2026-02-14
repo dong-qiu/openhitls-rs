@@ -1432,3 +1432,11 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 52 new PKI tests across 4 parts. Part 1: 21 chain verification tests using real C cert vectors (certVer 6: valid chain, tampered sigs, DN mismatch, wrong anchor, cycle; bcExt 7: missing BC, CA=false, pathLen exceeded/within, depth limits; time 4: current/expired/historical; eku 4: parse server/client/bad/any). Part 2: 12 CMS tests (4 parsing, 5 verification, 3 failure); fixed CMS verifier to accept rsaEncryption OID (1.2.840.113549.1.1.1). Part 3: 8 PKCS#12 tests (parse 3 real P12 files, chain P12, wrong password, cert-key match, empty password, multiple items). Part 4: 10 cert parsing edge cases (v1, v3, negative serial 00FF encoding, null DN, RSA-PSS, SAN DNS/IP, KeyUsage, EKU, BasicConstraints). Key fixes: CMS rsaEncryption OID support, DER serial number padding handling, time validity timestamp correction.
 
 1414 total tests (37 ignored). Clippy clean, fmt clean.
+
+## P3: X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup (2026-02-14)
+
+**Prompt**: Implement typed X.509 extension parsing (EKU, SAN, AKI, SKI, AIA, NameConstraints), EKU enforcement in CertificateVerifier, AKI/SKI-based issuer matching, CMS SubjectKeyIdentifier signer lookup, and Name Constraints enforcement. 5 parts, expected ~40 new tests.
+
+**Result**: 39 new PKI tests across 5 parts. Part 1: 14 extension parsing tests (EKU parse/roundtrip, SAN email/IP/DNS, AKI/SKI parse/match, AIA, NC synthetic, builder roundtrip). Part 2: 8 EKU enforcement tests (serverAuth good/bad, clientAuth, anyEKU, badKU+goodEKU, no-EKU-passes, not-set-skips, codeSigning-rejects-TLS). Part 3: 5 AKI/SKI chain matching tests (AKI/SKI chain, cross-signed CAs, DN-only fallback, AKI mismatch fallback, real cert AKI/SKI). Part 4: 4 CMS SKI signer lookup tests (find by SKI, not found, SKI vs issuer-serial, multiple certs). Part 5: 8 Name Constraints tests (permitted DNS pass/fail, excluded DNS, no-NC-passes, exact domain, excluded-overrides-permitted, IP constraint, email matching). Key fixes: anyEKU cert has separate CA chain, GeneralName tag [1]=rfc822Name not dNSName.
+
+1453 total tests (37 ignored). Clippy clean, fmt clean.

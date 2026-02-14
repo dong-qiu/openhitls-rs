@@ -614,8 +614,15 @@ fn find_signer_cert<'a>(
             }
             Err(cerr("signer cert not found by serial number"))
         }
-        SignerIdentifier::SubjectKeyIdentifier(_ski) => {
-            Err(cerr("SubjectKeyIdentifier lookup not implemented"))
+        SignerIdentifier::SubjectKeyIdentifier(ski) => {
+            for cert in certs {
+                if let Some(cert_ski) = cert.subject_key_identifier() {
+                    if cert_ski == *ski {
+                        return Ok(cert);
+                    }
+                }
+            }
+            Err(cerr("signer cert not found by SubjectKeyIdentifier"))
         }
     }
 }
@@ -1696,5 +1703,106 @@ mod tests {
         let truncated = &CMS_RSA_PKCS1_ATTACHED[..50];
         let result = CmsMessage::from_der(truncated);
         assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // P3: CMS SubjectKeyIdentifier signer lookup
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_cms_ski_signer_lookup() {
+        // Build a cert with a known SKI, then look it up by SKI
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let pub_key = kp.public_key().to_vec();
+        let ski = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01];
+        let mut cert = make_ed25519_cert(&pub_key);
+        // Add SKI extension
+        let mut enc = hitls_utils::asn1::Encoder::new();
+        enc.write_octet_string(&ski);
+        let ski_value = enc.finish();
+        cert.extensions.push(crate::x509::X509Extension {
+            oid: known::subject_key_identifier().to_der_value(),
+            critical: false,
+            value: ski_value,
+        });
+
+        let sid = SignerIdentifier::SubjectKeyIdentifier(ski.clone());
+        let certs = vec![cert];
+        let found = find_signer_cert(&sid, &certs);
+        assert!(found.is_ok(), "should find cert by SKI");
+    }
+
+    #[test]
+    fn test_cms_ski_signer_not_found() {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let pub_key = kp.public_key().to_vec();
+        let cert = make_ed25519_cert(&pub_key);
+        // No SKI extension on cert
+
+        let sid = SignerIdentifier::SubjectKeyIdentifier(vec![0x01, 0x02, 0x03]);
+        let certs = vec![cert];
+        let result = find_signer_cert(&sid, &certs);
+        assert!(result.is_err(), "should not find cert by non-matching SKI");
+    }
+
+    #[test]
+    fn test_cms_ski_vs_issuer_serial() {
+        // Verify both lookup methods find the same cert
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let pub_key = kp.public_key().to_vec();
+        let ski = vec![0xAA, 0xBB, 0xCC];
+        let serial = vec![0x42];
+        let mut cert = make_ed25519_cert(&pub_key);
+        cert.serial_number = serial.clone();
+        let mut enc = hitls_utils::asn1::Encoder::new();
+        enc.write_octet_string(&ski);
+        let ski_value = enc.finish();
+        cert.extensions.push(crate::x509::X509Extension {
+            oid: known::subject_key_identifier().to_der_value(),
+            critical: false,
+            value: ski_value,
+        });
+
+        let certs = vec![cert];
+
+        // Lookup by SKI
+        let sid_ski = SignerIdentifier::SubjectKeyIdentifier(ski);
+        let found_ski = find_signer_cert(&sid_ski, &certs).unwrap();
+
+        // Lookup by serial
+        let sid_serial = SignerIdentifier::IssuerAndSerialNumber {
+            issuer: Vec::new(),
+            serial_number: serial,
+        };
+        let found_serial = find_signer_cert(&sid_serial, &certs).unwrap();
+
+        // Both should find the same cert
+        assert_eq!(found_ski.serial_number, found_serial.serial_number);
+    }
+
+    #[test]
+    fn test_cms_ski_multiple_certs() {
+        // Multiple certs, only one matches the SKI
+        let kp1 = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let kp2 = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let mut cert1 = make_ed25519_cert(kp1.public_key());
+        cert1.serial_number = vec![0x01];
+        let mut cert2 = make_ed25519_cert(kp2.public_key());
+        cert2.serial_number = vec![0x02];
+
+        let target_ski = vec![0xFF, 0xEE, 0xDD];
+        let mut enc = hitls_utils::asn1::Encoder::new();
+        enc.write_octet_string(&target_ski);
+        let ski_value = enc.finish();
+        cert2.extensions.push(crate::x509::X509Extension {
+            oid: known::subject_key_identifier().to_der_value(),
+            critical: false,
+            value: ski_value,
+        });
+
+        let certs = vec![cert1, cert2];
+        let sid = SignerIdentifier::SubjectKeyIdentifier(target_ski);
+        let found = find_signer_cert(&sid, &certs).unwrap();
+        assert_eq!(found.serial_number, vec![0x02]);
     }
 }
