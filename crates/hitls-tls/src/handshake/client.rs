@@ -1092,6 +1092,7 @@ mod tests {
             .is_err());
     }
 
+    #[cfg(feature = "cert-compression")]
     #[test]
     fn test_compressed_certificate_wrong_state() {
         let config = TlsConfig::builder().build();

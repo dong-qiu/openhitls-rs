@@ -239,6 +239,7 @@ mod tests {
         assert_eq!(hex(&out2), expected);
     }
 
+    #[cfg(feature = "sha1")]
     fn sha1_factory() -> Box<dyn Digest> {
         Box::new(crate::sha1::Sha1::new())
     }
@@ -252,6 +253,7 @@ mod tests {
     }
 
     // RFC 2202 Case 1: HMAC-SHA1
+    #[cfg(feature = "sha1")]
     #[test]
     fn test_hmac_sha1_rfc2202_case1() {
         let key = [0x0b; 20];
@@ -263,6 +265,7 @@ mod tests {
     }
 
     // RFC 2202 Case 2: HMAC-SHA1
+    #[cfg(feature = "sha1")]
     #[test]
     fn test_hmac_sha1_rfc2202_case2() {
         let key = b"Jefe";
