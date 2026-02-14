@@ -238,4 +238,76 @@ mod tests {
         ctx.finish(&mut out2).unwrap();
         assert_eq!(hex(&out2), expected);
     }
+
+    fn sha1_factory() -> Box<dyn Digest> {
+        Box::new(crate::sha1::Sha1::new())
+    }
+
+    fn sha384_factory() -> Box<dyn Digest> {
+        Box::new(crate::sha2::Sha384::new())
+    }
+
+    fn sha512_factory() -> Box<dyn Digest> {
+        Box::new(crate::sha2::Sha512::new())
+    }
+
+    // RFC 2202 Case 1: HMAC-SHA1
+    #[test]
+    fn test_hmac_sha1_rfc2202_case1() {
+        let key = [0x0b; 20];
+        let data = b"Hi There";
+        let expected = "b617318655057264e28bc0b6fb378c8ef146be00";
+
+        let result = Hmac::mac(sha1_factory, &key, data).unwrap();
+        assert_eq!(hex(&result), expected);
+    }
+
+    // RFC 2202 Case 2: HMAC-SHA1
+    #[test]
+    fn test_hmac_sha1_rfc2202_case2() {
+        let key = b"Jefe";
+        let data = b"what do ya want for nothing?";
+        let expected = "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79";
+
+        let result = Hmac::mac(sha1_factory, key, data).unwrap();
+        assert_eq!(hex(&result), expected);
+    }
+
+    // RFC 4231 Case 1: HMAC-SHA384
+    #[test]
+    fn test_hmac_sha384_rfc4231_case1() {
+        let key = [0x0b; 20];
+        let data = b"Hi There";
+        let expected = "afd03944d84895626b0825f4ab46907f\
+                        15f9dadbe4101ec682aa034c7cebc59c\
+                        faea9ea9076ede7f4af152e8b2fa9cb6";
+
+        let result = Hmac::mac(sha384_factory, &key, data).unwrap();
+        assert_eq!(hex(&result), expected);
+    }
+
+    // RFC 4231 Case 1: HMAC-SHA512
+    #[test]
+    fn test_hmac_sha512_rfc4231_case1() {
+        let key = [0x0b; 20];
+        let data = b"Hi There";
+        let expected = "87aa7cdea5ef619d4ff0b4241a1d6cb0\
+                        2379f4e2ce4ec2787ad0b30545e17cde\
+                        daa833b7d6b8a702038b274eaea3f4e4\
+                        be9d914eeb61f1702e696c203a126854";
+
+        let result = Hmac::mac(sha512_factory, &key, data).unwrap();
+        assert_eq!(hex(&result), expected);
+    }
+
+    // HMAC-SHA256 with empty message
+    #[test]
+    fn test_hmac_empty_message() {
+        let key = [0x0b; 20];
+        let result1 = Hmac::mac(sha256_factory, &key, b"").unwrap();
+        let result2 = Hmac::mac(sha256_factory, &key, b"").unwrap();
+        // Output should be non-empty and deterministic
+        assert_eq!(result1.len(), 32);
+        assert_eq!(result1, result2);
+    }
 }

@@ -356,4 +356,60 @@ mod tests {
         let sig = key.sign(&digest).unwrap();
         assert!(key.verify(&digest, &sig).unwrap());
     }
+
+    #[test]
+    fn test_ecdsa_verify_r_zero() {
+        let key = EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        // DER: SEQUENCE { INTEGER r=0, INTEGER s=1 }
+        let sig = vec![0x30, 0x06, 0x02, 0x01, 0x00, 0x02, 0x01, 0x01];
+        assert!(!key.verify(&digest, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_ecdsa_verify_s_zero() {
+        let key = EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        // DER: SEQUENCE { INTEGER r=1, INTEGER s=0 }
+        let sig = vec![0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x00];
+        assert!(!key.verify(&digest, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_ecdsa_verify_r_ge_n() {
+        let key = EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        // P-256 order n
+        let n_hex = "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551";
+        let n_bytes = hex(n_hex);
+        // Build DER: SEQUENCE { INTEGER r=n, INTEGER s=1 }
+        let mut sig = Vec::new();
+        // INTEGER r = n (needs leading 0x00 since high bit is set)
+        let mut r_der = vec![0x02, (n_bytes.len() + 1) as u8, 0x00];
+        r_der.extend_from_slice(&n_bytes);
+        // INTEGER s = 1
+        let s_der = vec![0x02, 0x01, 0x01];
+        let inner_len = r_der.len() + s_der.len();
+        sig.push(0x30);
+        sig.push(inner_len as u8);
+        sig.extend_from_slice(&r_der);
+        sig.extend_from_slice(&s_der);
+        assert!(!key.verify(&digest, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_ecdsa_invalid_der_trailing_data() {
+        let key = EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        let mut sig = key.sign(&digest).unwrap();
+        // Append extra byte after valid DER
+        sig.push(0xFF);
+        assert!(key.verify(&digest, &sig).is_err());
+    }
+
+    #[test]
+    fn test_ecdsa_private_key_zero_rejected() {
+        let result = EcdsaKeyPair::from_private_key(EccCurveId::NistP256, &[0u8; 32]);
+        assert!(result.is_err());
+    }
 }

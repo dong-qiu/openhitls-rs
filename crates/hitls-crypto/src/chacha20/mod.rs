@@ -592,4 +592,42 @@ If I could offer you only one tip for the future, sunscreen would be it.";
         let pt = aead.decrypt(&nonce, b"some aad", &ct).unwrap();
         assert!(pt.is_empty());
     }
+
+    #[test]
+    fn test_chacha20_poly1305_empty_aad() {
+        let key = [0x42u8; 32];
+        let nonce = [0u8; 12];
+        let aead = ChaCha20Poly1305::new(&key).unwrap();
+        let plaintext = b"Hello, ChaCha20!";
+
+        let ct = aead.encrypt(&nonce, b"", plaintext).unwrap();
+        let pt = aead.decrypt(&nonce, b"", &ct).unwrap();
+        assert_eq!(pt, plaintext);
+    }
+
+    #[test]
+    fn test_chacha20_poly1305_empty_both() {
+        let key = [0x42u8; 32];
+        let nonce = [0u8; 12];
+        let aead = ChaCha20Poly1305::new(&key).unwrap();
+
+        let ct = aead.encrypt(&nonce, b"", b"").unwrap();
+        assert_eq!(ct.len(), 16); // tag only
+        let pt = aead.decrypt(&nonce, b"", &ct).unwrap();
+        assert!(pt.is_empty());
+    }
+
+    #[test]
+    fn test_chacha20_poly1305_invalid_key_size() {
+        assert!(ChaCha20Poly1305::new(&[0u8; 31]).is_err());
+        assert!(ChaCha20Poly1305::new(&[0u8; 33]).is_err());
+    }
+
+    #[test]
+    fn test_chacha20_poly1305_invalid_nonce_size() {
+        let aead = ChaCha20Poly1305::new(&[0u8; 32]).unwrap();
+        assert!(aead.encrypt(&[0u8; 11], b"", b"test").is_err());
+        assert!(aead.encrypt(&[0u8; 13], b"", b"test").is_err());
+        assert!(aead.decrypt(&[0u8; 11], b"", &[0u8; 20]).is_err());
+    }
 }

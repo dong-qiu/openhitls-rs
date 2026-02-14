@@ -2196,4 +2196,50 @@ mod tests {
         let (ht, _, _) = parse_handshake_header(&result.server_hello_done).unwrap();
         assert_eq!(ht, HandshakeType::ServerHelloDone);
     }
+
+    #[test]
+    fn test_server12_cke_wrong_state_idle() {
+        let config = make_server_config();
+        let mut hs = Tls12ServerHandshake::new(config);
+        // CKE from Idle → error
+        assert!(hs
+            .process_client_key_exchange(&[16, 0, 0, 4, 0, 0, 0, 0])
+            .is_err());
+    }
+
+    #[test]
+    fn test_server12_ccs_wrong_state_idle() {
+        let config = make_server_config();
+        let mut hs = Tls12ServerHandshake::new(config);
+        // CCS from Idle → error
+        assert!(hs.process_change_cipher_spec().is_err());
+    }
+
+    #[test]
+    fn test_server12_finished_wrong_state_idle() {
+        let config = make_server_config();
+        let mut hs = Tls12ServerHandshake::new(config);
+        // Finished from Idle → error
+        assert!(hs
+            .process_finished(&[20, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            .is_err());
+    }
+
+    #[test]
+    fn test_server12_cert_wrong_state_idle() {
+        let config = make_server_config();
+        let mut hs = Tls12ServerHandshake::new(config);
+        // Client Certificate from Idle → error
+        assert!(hs
+            .process_client_certificate(&[11, 0, 0, 3, 0, 0, 0])
+            .is_err());
+    }
+
+    #[test]
+    fn test_server12_accessor_methods() {
+        let config = make_server_config();
+        let hs = Tls12ServerHandshake::new(config);
+        assert_eq!(hs.state(), Tls12ServerState::Idle);
+        assert!(!hs.is_abbreviated());
+    }
 }

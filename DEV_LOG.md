@@ -5174,3 +5174,100 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1642 workspace tests passing (39 ignored)
+
+---
+
+## P9: Unit Test Coverage Expansion — Crypto RFC Vectors + ASN.1 Negative Tests + TLS State Machine (Session 2026-02-15)
+
+### Goals
+- Add RFC test vectors and negative tests for under-tested crypto modules (Ed25519, ECDSA, HMAC, ChaCha20-Poly1305)
+- Add comprehensive negative tests for ASN.1 decoder
+- Add wrong-state tests for TLS 1.3 client and TLS 1.2 server handshake state machines
+
+### Completed Steps
+
+#### Part 1: Ed25519 Tests (+4 tests)
+- `test_ed25519_rfc8032_vector3`: RFC 8032 Test Vector 3 (2-byte message)
+- `test_ed25519_large_message_roundtrip`: Large message (1024 bytes) sign + verify roundtrip
+- `test_ed25519_wrong_seed_length`: Seed length != 32 bytes → error
+- `test_ed25519_wrong_pubkey_length`: Public key length != 32 bytes → error
+- Ed25519 tests: 6 → 10 total
+
+#### Part 2: ECDSA Negative Tests (+5 tests)
+- `test_ecdsa_verify_r_zero`: r = 0 in signature → rejected
+- `test_ecdsa_verify_s_zero`: s = 0 in signature → rejected
+- `test_ecdsa_verify_r_ge_n`: r >= curve order → rejected
+- `test_ecdsa_verify_trailing_der_data`: Extra trailing bytes in DER → rejected
+- `test_ecdsa_private_key_zero`: Private key = 0 → rejected
+- ECDSA tests: 11 → 16 total
+
+#### Part 3: ASN.1 Decoder Negative Tests (+8 tests)
+- `test_decoder_empty_input`: Empty input → error
+- `test_decoder_truncated_tlv`: Truncated TLV (length says 5, only 2 bytes) → error
+- `test_decoder_indefinite_length`: Indefinite length (0x80) → error
+- `test_decoder_oversized_length`: Oversized length field (5-byte length) → error
+- `test_decoder_wrong_tag`: Expected SEQUENCE, got INTEGER → error
+- `test_decoder_invalid_utf8`: Invalid UTF-8 in UTF8String → error
+- `test_decoder_odd_bmp_string`: Odd-length BMPString → error
+- `test_decoder_read_past_end`: Read past end of sequence → error
+- ASN.1 decoder tests: 11 → 19 total
+
+#### Part 4: HMAC RFC Vectors (+5 tests)
+- `test_hmac_sha1_rfc2202_case1`: RFC 2202 Test Case 1 (20-byte key)
+- `test_hmac_sha1_rfc2202_case2`: RFC 2202 Test Case 2 ("Jefe" key)
+- `test_hmac_sha384_rfc4231`: RFC 4231 Test Case 1
+- `test_hmac_sha512_rfc4231`: RFC 4231 Test Case 1
+- `test_hmac_sha256_empty_message`: Empty message HMAC
+- HMAC tests: 7 → 12 total
+
+#### Part 5: ChaCha20-Poly1305 Edge Cases (+4 tests)
+- `test_chacha20_poly1305_empty_aad`: Encrypt/decrypt with empty AAD
+- `test_chacha20_poly1305_empty_both`: Encrypt/decrypt with empty plaintext and empty AAD
+- `test_chacha20_poly1305_invalid_key_size`: Key != 32 bytes → error
+- `test_chacha20_poly1305_invalid_nonce_size`: Nonce != 12 bytes → error
+- ChaCha20-Poly1305 tests: 6 → 10 total
+
+#### Part 6: TLS 1.3 Client Wrong-State Tests (+5 tests)
+- `test_certificate_verify_wrong_state`: CertificateVerify from non-WaitCertificateVerify → error
+- `test_finished_wrong_state`: Finished from non-WaitFinished → error
+- `test_compressed_certificate_wrong_state`: CompressedCertificate from wrong state → error
+- `test_new_session_ticket_wrong_state`: NewSessionTicket before Connected → error
+- `test_supported_versions_check`: Verify supported_versions extension is present in SH
+- TLS 1.3 client tests: 3 → 8 total
+
+#### Part 7: TLS 1.2 Server Wrong-State Tests (+5 tests)
+- `test_cke_wrong_state_idle`: ClientKeyExchange from Idle → error
+- `test_ccs_wrong_state_idle`: ChangeCipherSpec from Idle → error
+- `test_finished_wrong_state_idle`: Finished from Idle → error
+- `test_certificate_wrong_state_idle`: Certificate from Idle → error
+- `test_accessor_methods`: Verify cipher_suite(), session_id(), key_exchange_alg() accessors
+- TLS 1.2 server tests: 18 → 23 total
+
+### Files Modified
+| File | New Tests |
+|------|-----------|
+| `hitls-crypto/src/ed25519/mod.rs` | +4 |
+| `hitls-crypto/src/ecdsa/mod.rs` | +5 |
+| `hitls-utils/src/asn1/decoder.rs` | +8 |
+| `hitls-crypto/src/hmac/mod.rs` | +5 |
+| `hitls-crypto/src/chacha20_poly1305/mod.rs` | +4 |
+| `hitls-tls/src/handshake/client13.rs` | +5 |
+| `hitls-tls/src/handshake/server12.rs` | +5 |
+| **Total** | **+36** |
+
+### Updated Test Counts
+- **hitls-crypto**: 504 (from 486) + 15 Wycheproof, 30 ignored
+- **hitls-tls**: 608 (from 598)
+- **hitls-utils**: 53 (from 45)
+- **hitls-pki**: 321, 1 ignored
+- **hitls-bignum**: 46
+- **hitls-types**: 26
+- **hitls-auth**: 24
+- **hitls-cli**: 40, 5 ignored
+- **hitls-integration-tests**: 39, 3 ignored
+- **Total workspace**: 1678 (from 1642), +36 running, 39 ignored total
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1678 workspace tests passing (39 ignored)

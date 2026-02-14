@@ -1068,4 +1068,61 @@ mod tests {
         // Can't process Certificate from Idle
         assert!(hs.process_certificate(&[11, 0, 0, 4, 0, 0, 0, 0]).is_err());
     }
+
+    #[test]
+    fn test_certificate_verify_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = ClientHandshake::new(config);
+        // CertificateVerify from Idle → error
+        assert!(hs
+            .process_certificate_verify(&[15, 0, 0, 4, 0, 0, 0, 0])
+            .is_err());
+    }
+
+    #[test]
+    fn test_finished_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = ClientHandshake::new(config);
+        // Finished from Idle → error
+        assert!(hs
+            .process_finished(&[
+                20, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0
+            ])
+            .is_err());
+    }
+
+    #[test]
+    fn test_compressed_certificate_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = ClientHandshake::new(config);
+        // CompressedCertificate from Idle → error
+        assert!(hs
+            .process_compressed_certificate(&[25, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0])
+            .is_err());
+    }
+
+    #[test]
+    fn test_new_session_ticket_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let hs = ClientHandshake::new(config);
+        // NST from Idle → error (no cipher suite params)
+        assert!(hs
+            .process_new_session_ticket(&[4, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], &[])
+            .is_err());
+    }
+
+    #[test]
+    fn test_client_hello_has_supported_versions() {
+        let config = TlsConfig::builder().server_name("example.com").build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // Verify the CH bytes contain the supported_versions extension type (0x002B)
+        let found = ch_msg.windows(2).any(|w| w[0] == 0x00 && w[1] == 0x2B);
+        assert!(
+            found,
+            "ClientHello must contain supported_versions extension (0x002B)"
+        );
+    }
 }

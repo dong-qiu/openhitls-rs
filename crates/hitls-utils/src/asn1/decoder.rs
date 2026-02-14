@@ -393,4 +393,69 @@ mod tests {
         // 2000-01-01 00:00:00 UTC = 946684800
         assert_eq!(datetime_to_unix(2000, 1, 1, 0, 0, 0).unwrap(), 946684800);
     }
+
+    // --- Negative / malformed input tests ---
+
+    #[test]
+    fn test_decode_empty_input() {
+        let mut dec = Decoder::new(&[]);
+        assert!(dec.read_tlv().is_err());
+    }
+
+    #[test]
+    fn test_decode_truncated_tlv() {
+        // SEQUENCE declaring 5 bytes, but only 1 byte of value follows
+        let data = [0x30, 0x05, 0x01];
+        let mut dec = Decoder::new(&data);
+        assert!(dec.read_tlv().is_err());
+    }
+
+    #[test]
+    fn test_decode_indefinite_length() {
+        // SEQUENCE with indefinite length (0x80) — DER rejects this
+        let data = [0x30, 0x80, 0x02, 0x01, 0x42, 0x00, 0x00];
+        let mut dec = Decoder::new(&data);
+        assert!(dec.read_tlv().is_err());
+    }
+
+    #[test]
+    fn test_decode_oversized_length_bytes() {
+        // SEQUENCE with 5-byte length encoding (0x85) — exceeds 4-byte limit
+        let data = [0x30, 0x85, 0x00, 0x00, 0x00, 0x00, 0x01, 0x42];
+        let mut dec = Decoder::new(&data);
+        assert!(dec.read_tlv().is_err());
+    }
+
+    #[test]
+    fn test_decode_integer_wrong_tag() {
+        // OCTET STRING (tag 0x04), but calling read_integer() which expects 0x02
+        let data = [0x04, 0x01, 0x42];
+        let mut dec = Decoder::new(&data);
+        assert!(dec.read_integer().is_err());
+    }
+
+    #[test]
+    fn test_decode_invalid_utf8_string() {
+        // UTF8String (tag 0x0C) with invalid UTF-8 bytes
+        let data = [0x0C, 0x02, 0xFF, 0xFE];
+        let mut dec = Decoder::new(&data);
+        assert!(dec.read_string().is_err());
+    }
+
+    #[test]
+    fn test_decode_bmpstring_odd_length() {
+        // BMPString (tag 0x1E) with 3 bytes (odd, must be even for UTF-16BE)
+        let data = [0x1E, 0x03, 0x00, 0x41, 0x00];
+        let mut dec = Decoder::new(&data);
+        assert!(dec.read_string().is_err());
+    }
+
+    #[test]
+    fn test_decode_read_past_end() {
+        // Only one INTEGER present, but try to read two
+        let data = [0x02, 0x01, 0x42];
+        let mut dec = Decoder::new(&data);
+        assert!(dec.read_integer().is_ok());
+        assert!(dec.read_integer().is_err());
+    }
 }

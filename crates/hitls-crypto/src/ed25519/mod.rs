@@ -377,4 +377,56 @@ mod tests {
         sig[0] ^= 0x01; // tamper with R
         assert!(!key.verify(msg, &sig).unwrap());
     }
+
+    // RFC 8032 §7.1 Test Vector 3 (2-byte message)
+    #[test]
+    fn test_ed25519_rfc8032_test3() {
+        let seed = hex("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7");
+        let expected_pub = hex("fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025");
+        let message = hex("af82");
+        let expected_sig = hex(
+            "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac\
+             18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a",
+        );
+
+        let key = Ed25519KeyPair::from_seed(&seed).unwrap();
+        assert_eq!(key.public_key(), &expected_pub[..]);
+
+        let sig = key.sign(&message).unwrap();
+        assert_eq!(sig.as_slice(), &expected_sig[..]);
+        assert!(key.verify(&message, &sig).unwrap());
+    }
+
+    // Large message sign-verify roundtrip (exercises multi-block SHA-512)
+    #[test]
+    fn test_ed25519_large_message_roundtrip() {
+        let seed = hex("f5e5767cf153319517630f226876b86c8160cc583bc013744c6bf255f5cc0ee5");
+        let expected_pub = hex("278117fc144c72340f67d0f2316e8386ceffbf2b2428c9c51fef7c597f1d426e");
+
+        let key = Ed25519KeyPair::from_seed(&seed).unwrap();
+        assert_eq!(key.public_key(), &expected_pub[..]);
+
+        // 1023-byte message exercises multi-block SHA-512 (block size = 128)
+        let message: Vec<u8> = (0..1023).map(|i| (i & 0xFF) as u8).collect();
+        let sig = key.sign(&message).unwrap();
+        assert_eq!(sig.len(), 64);
+        assert!(key.verify(&message, &sig).unwrap());
+
+        // Tampered message must fail
+        let mut tampered = message.clone();
+        tampered[500] ^= 0x01;
+        assert!(!key.verify(&tampered, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_ed25519_wrong_seed_length() {
+        assert!(Ed25519KeyPair::from_seed(&[0u8; 31]).is_err());
+        assert!(Ed25519KeyPair::from_seed(&[0u8; 33]).is_err());
+    }
+
+    #[test]
+    fn test_ed25519_wrong_pubkey_length() {
+        assert!(Ed25519KeyPair::from_public_key(&[0u8; 31]).is_err());
+        assert!(Ed25519KeyPair::from_public_key(&[0u8; 33]).is_err());
+    }
 }

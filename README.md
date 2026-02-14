@@ -2,9 +2,9 @@
 
 A production-grade cryptographic and TLS library written in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **Status: P8 Complete — Unit Test Coverage Expansion (TLS Handshake + Crypto RFC Vectors + Utils Negative Tests)**
+> **Status: P9 Complete — Unit Test Coverage Expansion (Crypto RFC Vectors + ASN.1 Negative Tests + TLS State Machine)**
 >
-> 1642 tests passing (24 auth + 46 bignum + 486 crypto + 15 wycheproof + 321 pki + 598 tls + 26 types + 45 utils + 40 cli + 39 integration + 2 doc; 39 ignored). 5000+ Wycheproof edge-case vectors, 10 fuzz targets, security audit (constant-time, zeroize, unsafe code review). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), entropy health testing (NIST SP 800-90B RCT+APT, entropy pool, conditioning, pluggable noise sources), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, Ed448 (RFC 8032), X448 (RFC 7748), Curve448 (Goldilocks), DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain/CSR generation/certificate generation/to_text, EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies enforcement), PKCS#8 (parse/encode), PKCS#12, CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr) + EnvelopedData + EncryptedData + DigestedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression + X25519MLKEM768 hybrid KEM + SM4-GCM/CCM (RFC 8998)), TLS 1.2 handshake (47 cipher suites: ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, Bleichenbacher protection, ALPN, SNI, session resumption, session ticket, EMS, ETM, renegotiation indication, mTLS, OCSP stapling CertificateStatus), DTLS 1.2 (record layer + handshake + fragmentation + retransmission + cookie exchange + anti-replay), TLCP (GM/T 0024, 4 cipher suites, double certificate, ECDHE + ECC key exchange), DTLCP (DTLS + TLCP, 4 cipher suites, cookie exchange, anti-replay), custom extensions framework, NSS key logging (SSLKEYLOGFILE), Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT (RFC 6962), async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), FIPS/CMVP (KAT, PCT, integrity, entropy health tests), TLS 1.2 PRF, HOTP/TOTP, SPAKE2+, Privacy Pass (RFC 9578), and CLI tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac).
+> 1678 tests passing (24 auth + 46 bignum + 504 crypto + 15 wycheproof + 321 pki + 608 tls + 26 types + 53 utils + 40 cli + 39 integration + 2 doc; 39 ignored). 5000+ Wycheproof edge-case vectors, 10 fuzz targets, security audit (constant-time, zeroize, unsafe code review). Full coverage: hash (SHA-2, SHA-3/SHAKE, SM3, SHA-1, MD5), HMAC/CMAC/GMAC/SipHash, symmetric (AES, SM4, ChaCha20), modes (ECB, CBC, CTR, GCM, CFB, OFB, CCM, XTS, Key Wrap), ChaCha20-Poly1305, KDFs (HKDF, PBKDF2, scrypt), DRBGs (HMAC-DRBG, CTR-DRBG, Hash-DRBG), entropy health testing (NIST SP 800-90B RCT+APT, entropy pool, conditioning, pluggable noise sources), RSA (PKCS#1v1.5, OAEP, PSS), ECC (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1), ECDSA, ECDH, Ed25519, X25519, Ed448 (RFC 8032), X448 (RFC 7748), Curve448 (Goldilocks), DH, DSA, SM2, SM9 (IBE with BN256 pairing), PQC (ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, Classic McEliece), HPKE, HybridKEM, Paillier, ElGamal, X.509 (parse/verify/chain/CSR generation/certificate generation/to_text, EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies enforcement), PKCS#8 (parse/encode), PKCS#12, CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr) + EnvelopedData + EncryptedData + DigestedData, TLS 1.3 (key schedule + record + client/server handshake + PSK/session tickets + 0-RTT early data + post-handshake client auth + certificate compression + X25519MLKEM768 hybrid KEM + SM4-GCM/CCM (RFC 8998)), TLS 1.2 handshake (47 cipher suites: ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, Bleichenbacher protection, ALPN, SNI, session resumption, session ticket, EMS, ETM, renegotiation indication, mTLS, OCSP stapling CertificateStatus), DTLS 1.2 (record layer + handshake + fragmentation + retransmission + cookie exchange + anti-replay), TLCP (GM/T 0024, 4 cipher suites, double certificate, ECDHE + ECC key exchange), DTLCP (DTLS + TLCP, 4 cipher suites, cookie exchange, anti-replay), custom extensions framework, NSS key logging (SSLKEYLOGFILE), Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT (RFC 6962), async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), FIPS/CMVP (KAT, PCT, integrity, entropy health tests), TLS 1.2 PRF, HOTP/TOTP, SPAKE2+, Privacy Pass (RFC 9578), and CLI tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac).
 
 ## Goals
 
@@ -20,10 +20,10 @@ A production-grade cryptographic and TLS library written in pure Rust, rewritten
 openhitls-rs/
 ├── crates/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error types, constants
-│   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (45 tests)
+│   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (53 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (46 tests)
-│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECC (P-224/P-256/P-384/P-521/Brainpool), ECDSA, ECDH, Ed25519, X25519, Ed448, X448, Curve448, DH, DSA, SM2, SM9, DRBG (HMAC/CTR/Hash), Entropy (SP 800-90B health tests), ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal, SM4-CCM (516 tests + 15 Wycheproof)
-│   ├── hitls-tls/       # TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP, async I/O (tokio), custom extensions, NSS key logging, 47+ cipher suites, hybrid KEM (X25519MLKEM768), TLS 1.3 SM4-GCM/CCM (RFC 8998), Record Size Limit, Fallback SCSV, OCSP stapling, SCT (598 tests)
+│   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECC (P-224/P-256/P-384/P-521/Brainpool), ECDSA, ECDH, Ed25519, X25519, Ed448, X448, Curve448, DH, DSA, SM2, SM9, DRBG (HMAC/CTR/Hash), Entropy (SP 800-90B health tests), ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal, SM4-CCM (504 tests + 15 Wycheproof)
+│   ├── hitls-tls/       # TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP, async I/O (tokio), custom extensions, NSS key logging, 47+ cipher suites, hybrid KEM (X25519MLKEM768), TLS 1.3 SM4-GCM/CCM (RFC 8998), Record Size Limit, Fallback SCSV, OCSP stapling, SCT (608 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify [RSA/ECDSA/Ed25519/Ed448/SM2/RSA-PSS], chain, CRL, OCSP, CSR generation, certificate generation, to_text), PKCS#8 (RFC 5958, Ed448/X448), SPKI parsing, PKCS#12 (RFC 7292), CMS SignedData (Ed25519/Ed448, detached mode) + EnvelopedData (RFC 5652) (321 tests, 1 ignored)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382), Privacy Pass (RFC 9578, RSA blind sigs) (24 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
@@ -171,18 +171,18 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (1362 tests, 37 ignored)
+# Run all tests (1678 tests, 39 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 476 tests (28 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 558 tests
+cargo test -p hitls-crypto --all-features   # 504 tests (30 ignored) + 15 Wycheproof
+cargo test -p hitls-tls --all-features      # 608 tests
 cargo test -p hitls-pki --all-features      # 321 tests (1 ignored)
 cargo test -p hitls-bignum                  # 46 tests
-cargo test -p hitls-utils                   # 35 tests
+cargo test -p hitls-utils                   # 53 tests
 cargo test -p hitls-auth --all-features     # 24 tests
 cargo test -p hitls-cli --all-features      # 40 tests (5 ignored)
-cargo test -p hitls-integration-tests       # 23 tests (3 ignored)
+cargo test -p hitls-integration-tests       # 39 tests (3 ignored)
 
 # Lint
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
@@ -221,7 +221,7 @@ Convenience feature groups:
 
 ### Completed (Phase 0–50)
 
-All 48+ cryptographic algorithm modules including Ed448/X448/Curve448, X.509 (parse/verify/chain/CRL/OCSP/CSR/cert generation/to_text), PKCS#8, PKCS#12, CMS SignedData (Ed25519/Ed448) + EnvelopedData, TLS 1.3 (full spec: PSK/0-RTT/KeyUpdate/HRR/post-HS auth/cert compression/X25519MLKEM768 hybrid KEM/SM4-GCM/CCM (RFC 8998)), TLS 1.2 (47 suites: ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, Bleichenbacher protection, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, PSK (RFC 4279/5489), OCSP stapling CertificateStatus), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024, 4 suites), DTLCP (DTLS+TLCP, 4 suites), custom extensions framework, NSS key logging, async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), TLS extensions (Record Size Limit RFC 8449, Fallback SCSV RFC 7507, OCSP stapling, SCT RFC 6962), TLS 1.2 PRF, auth protocols (HOTP/TOTP/SPAKE2+/Privacy Pass RFC 9578), PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), ECC curves (P-224/P-521/Brainpool), DRBGs (HMAC/CTR/Hash), CLI tool (14 commands), TCP loopback integration tests, 5000+ Wycheproof edge-case vectors, 10 fuzz targets, and security audit. 1397 tests passing (37 ignored) across 10 crates.
+All 48+ cryptographic algorithm modules including Ed448/X448/Curve448, X.509 (parse/verify/chain/CRL/OCSP/CSR/cert generation/to_text), PKCS#8, PKCS#12, CMS SignedData (Ed25519/Ed448) + EnvelopedData, TLS 1.3 (full spec: PSK/0-RTT/KeyUpdate/HRR/post-HS auth/cert compression/X25519MLKEM768 hybrid KEM/SM4-GCM/CCM (RFC 8998)), TLS 1.2 (47 suites: ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, Bleichenbacher protection, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, PSK (RFC 4279/5489), OCSP stapling CertificateStatus), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024, 4 suites), DTLCP (DTLS+TLCP, 4 suites), custom extensions framework, NSS key logging, async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), TLS extensions (Record Size Limit RFC 8449, Fallback SCSV RFC 7507, OCSP stapling, SCT RFC 6962), TLS 1.2 PRF, auth protocols (HOTP/TOTP/SPAKE2+/Privacy Pass RFC 9578), PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), ECC curves (P-224/P-521/Brainpool), DRBGs (HMAC/CTR/Hash), CLI tool (14 commands), TCP loopback integration tests, 5000+ Wycheproof edge-case vectors, 10 fuzz targets, and security audit. 1678 tests passing (39 ignored) across 10 crates.
 
 ### Completed Migration Phases (Phase 21–39)
 
@@ -627,7 +627,7 @@ All 13 DH groups from RFC 2409, RFC 3526, and RFC 7919 now fully implemented wit
 | Base Support Layer | ~12K | ~2K | **95%** (ASN.1/Base64/PEM/OID/errors) | — |
 | CLI Tools | ~8K | ~2.2K | **100%** (dgst/genpkey/x509/verify/enc/pkey/crl/req/s-client/s-server/list/rand/pkeyutl/speed/pkcs12/mac) | — |
 | FIPS/CMVP | ~5K | ~0.6K | **90%** (state machine, 7 KATs incl. entropy, 3 PCTs, integrity check, feature-gated) | Conditional algorithm disabling |
-| Test Infrastructure | ~20K | ~3.5K | **95%** (1362 tests + 5000+ Wycheproof vectors + 10 fuzz targets + security audit) | SDV compliance tests |
+| Test Infrastructure | ~20K | ~3.5K | **95%** (1678 tests + 5000+ Wycheproof vectors + 10 fuzz targets + security audit) | SDV compliance tests |
 | **Total** | **~460K** | **~52K** | **~99%** (production-ready for modern TLS deployments) | Low-priority items only |
 
 ## Minimum Supported Rust Version
