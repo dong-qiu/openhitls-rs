@@ -147,4 +147,39 @@ mod tests {
         let okm = Hkdf::derive(&[], &ikm, &[], 42).unwrap();
         assert_eq!(hex(&okm), expected_okm);
     }
+
+    /// Verify that `from_prk()` produces the same OKM as `new()` for Case 1.
+    #[test]
+    fn test_hkdf_from_prk() {
+        let ikm = hex_to_bytes("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let salt = hex_to_bytes("000102030405060708090a0b0c");
+        let info = hex_to_bytes("f0f1f2f3f4f5f6f7f8f9");
+
+        let hkdf_full = Hkdf::new(&salt, &ikm).unwrap();
+        let okm_full = hkdf_full.expand(&info, 42).unwrap();
+
+        // Use from_prk with the PRK extracted above
+        let hkdf_prk = Hkdf::from_prk(&hkdf_full.prk);
+        let okm_prk = hkdf_prk.expand(&info, 42).unwrap();
+
+        assert_eq!(okm_full, okm_prk);
+    }
+
+    /// Expand with length exceeding 255*HashLen should fail.
+    #[test]
+    fn test_hkdf_expand_max_length_error() {
+        let ikm = hex_to_bytes("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let hkdf = Hkdf::new(&[], &ikm).unwrap();
+        // 255 * 32 = 8160 is the max; 8161 should fail
+        assert!(hkdf.expand(&[], 255 * 32 + 1).is_err());
+    }
+
+    /// Expand with zero length should produce empty output.
+    #[test]
+    fn test_hkdf_expand_zero_length() {
+        let ikm = hex_to_bytes("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let hkdf = Hkdf::new(&[], &ikm).unwrap();
+        let okm = hkdf.expand(&[], 0).unwrap();
+        assert!(okm.is_empty());
+    }
 }

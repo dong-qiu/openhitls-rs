@@ -205,4 +205,64 @@ mod tests {
         let key2 = X25519PrivateKey::new(&[1u8; 32]).unwrap();
         assert_eq!(key1.public_key(), key2.public_key());
     }
+
+    /// RFC 7748 §5.2: After 1 iteration, k should match the published vector.
+    #[test]
+    fn test_x25519_rfc7748_iterated_1() {
+        // Initial state: k = u = basepoint (9)
+        let mut k = [0u8; 32];
+        k[0] = 9;
+        let mut u = k;
+
+        // 1 iteration: k, u = X25519(k, u), k_old
+        let old_k = k;
+        let prv = X25519PrivateKey::new(&k).unwrap();
+        let pub_key = X25519PublicKey::new(&u).unwrap();
+        let result = prv.diffie_hellman(&pub_key).unwrap();
+        k.copy_from_slice(&result);
+        u = old_k;
+        let _ = u; // suppress unused warning
+
+        let expected =
+            hex_to_bytes("422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079");
+        assert_eq!(k, expected);
+    }
+
+    /// RFC 7748 §5.2: After 1000 iterations, k should match the published vector.
+    #[test]
+    fn test_x25519_rfc7748_iterated_1000() {
+        let mut k = [0u8; 32];
+        k[0] = 9;
+        let mut u = k;
+
+        for _ in 0..1000 {
+            let old_k = k;
+            // X25519 applies clamping internally via X25519PrivateKey::new
+            let prv = X25519PrivateKey::new(&k).unwrap();
+            let pub_key = X25519PublicKey::new(&u).unwrap();
+            let result = prv.diffie_hellman(&pub_key).unwrap();
+            k.copy_from_slice(&result);
+            u = old_k;
+        }
+
+        let expected =
+            hex_to_bytes("684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51");
+        assert_eq!(k, expected);
+    }
+
+    #[test]
+    fn test_x25519_low_order_all_zero() {
+        let prv = X25519PrivateKey::generate().unwrap();
+        let zero_pub = X25519PublicKey::new(&[0u8; 32]).unwrap();
+        // All-zero public key should produce all-zero shared secret → error
+        assert!(prv.diffie_hellman(&zero_pub).is_err());
+    }
+
+    #[test]
+    fn test_x25519_wrong_key_size() {
+        assert!(X25519PrivateKey::new(&[0u8; 31]).is_err());
+        assert!(X25519PrivateKey::new(&[0u8; 33]).is_err());
+        assert!(X25519PublicKey::new(&[0u8; 31]).is_err());
+        assert!(X25519PublicKey::new(&[0u8; 33]).is_err());
+    }
 }

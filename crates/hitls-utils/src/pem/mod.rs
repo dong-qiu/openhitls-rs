@@ -98,4 +98,43 @@ BAUG
         assert_eq!(blocks[1].label, "PRIVATE KEY");
         assert_eq!(blocks[1].data, &[4, 5, 6]);
     }
+
+    #[test]
+    fn test_pem_missing_end_marker() {
+        let pem = "-----BEGIN CERT-----\nAQID\n";
+        assert!(parse(pem).is_err());
+    }
+
+    #[test]
+    fn test_pem_no_blocks() {
+        let pem = "just plain text\nno PEM here";
+        let blocks = parse(pem).unwrap();
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn test_pem_empty_data() {
+        let pem = "-----BEGIN X-----\n-----END X-----\n";
+        let blocks = parse(pem).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].label, "X");
+        assert!(blocks[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_pem_label_mismatch() {
+        let pem = "-----BEGIN A-----\nAQID\n-----END B-----\n";
+        // The parser looks for "-----END A-----" specifically, so it won't find it
+        assert!(parse(pem).is_err());
+    }
+
+    #[test]
+    fn test_pem_extra_whitespace() {
+        // Lines with leading/trailing spaces should still parse (trim is applied)
+        let pem = "  -----BEGIN TEST-----  \n  AQID  \n  -----END TEST-----  \n";
+        let blocks = parse(pem).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].label, "TEST");
+        assert_eq!(blocks[0].data, &[1, 2, 3]);
+    }
 }

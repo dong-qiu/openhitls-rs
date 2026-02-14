@@ -177,4 +177,56 @@ mod tests {
         assert!(w.check(1));
         assert!(w.check(2));
     }
+
+    #[test]
+    fn test_anti_replay_window_boundary_exact() {
+        let mut w = AntiReplayWindow::new();
+        // Accept 0..64
+        for i in 0..64 {
+            w.accept(i);
+        }
+        // max_seq = 63, window covers 0..63
+        // seq=0 is at exact edge (index = 63), should be seen → reject
+        assert!(!w.check(0));
+        // seq=63 was seen → reject
+        assert!(!w.check(63));
+        // seq=64 is new → accept
+        assert!(w.check(64));
+
+        // Now accept 64, window shifts: covers 1..64
+        w.accept(64);
+        // seq=0 is now too old (outside window)
+        assert!(!w.check(0));
+        // seq=1 was seen and is at edge → reject
+        assert!(!w.check(1));
+    }
+
+    #[test]
+    fn test_anti_replay_large_forward_jump() {
+        let mut w = AntiReplayWindow::new();
+        w.accept(0);
+        // Jump ahead by 10000
+        w.accept(10000);
+        // seq=0 is now far too old
+        assert!(!w.check(0));
+        // seq=9937 = 10000 - 63 = at the edge of the window, but never seen → accept
+        assert!(w.check(9937));
+        // seq=9936 is too old (outside window)
+        assert!(!w.check(9936));
+        // seq=9999 is within window and not seen → accept
+        assert!(w.check(9999));
+    }
+
+    #[test]
+    fn test_anti_replay_check_and_accept_combined() {
+        let mut w = AntiReplayWindow::new();
+        // First call should succeed
+        assert!(w.check_and_accept(0).is_ok());
+        // Second call with same seq should fail (replay)
+        assert!(w.check_and_accept(0).is_err());
+        // New seq should succeed
+        assert!(w.check_and_accept(1).is_ok());
+        // Replay of 1 should fail
+        assert!(w.check_and_accept(1).is_err());
+    }
 }

@@ -621,4 +621,62 @@ mod tests {
         assert_eq!(h.msg_type, HandshakeType::HelloVerifyRequest);
         assert_eq!(hs.state(), Dtls12ServerState::WaitClientHelloWithCookie);
     }
+
+    #[test]
+    fn test_dtls12_server_cookie_retry_success() {
+        use crate::handshake::codec_dtls::decode_hello_verify_request;
+
+        let config = make_dtls_server_config();
+        let mut hs = Dtls12ServerHandshake::new(config, true);
+
+        // CH1 without cookie → HVR
+        let ch1 =
+            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
+        let result = hs.process_client_hello(&ch1).unwrap();
+        let hvr_result = result.unwrap_err();
+
+        // Extract cookie from HVR
+        let hvr_body = &hvr_result.hello_verify_request[12..]; // skip 12-byte DTLS header
+        let hvr = decode_hello_verify_request(hvr_body).unwrap();
+        let cookie = hvr.cookie;
+
+        // CH2 with correct cookie → server flight
+        let ch2 = build_dtls_client_hello(
+            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            &cookie,
+        );
+        let flight = hs.process_client_hello_with_cookie(&ch2).unwrap();
+
+        // Verify server flight is produced
+        let (h, _, _) = parse_dtls_handshake_header(&flight.server_hello).unwrap();
+        assert_eq!(h.msg_type, HandshakeType::ServerHello);
+        assert_eq!(hs.state(), Dtls12ServerState::WaitClientKeyExchange);
+    }
+
+    #[test]
+    fn test_dtls12_server_wrong_cookie_rejected() {
+        let config = make_dtls_server_config();
+        let mut hs = Dtls12ServerHandshake::new(config, true);
+
+        // CH1 without cookie → HVR
+        let ch1 =
+            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
+        let _result = hs.process_client_hello(&ch1).unwrap();
+
+        // CH2 with wrong cookie → error
+        let wrong_cookie = vec![0xFF; 16];
+        let ch2 = build_dtls_client_hello(
+            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            &wrong_cookie,
+        );
+        assert!(hs.process_client_hello_with_cookie(&ch2).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_server_ccs_wrong_state() {
+        let config = make_dtls_server_config();
+        let mut hs = Dtls12ServerHandshake::new(config, true);
+        // State is Idle, not WaitChangeCipherSpec
+        assert!(hs.process_change_cipher_spec().is_err());
+    }
 }

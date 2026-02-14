@@ -261,4 +261,32 @@ mod tests {
         let digest = Sm3::digest(b"").unwrap();
         assert_eq!(hex(&digest), expected);
     }
+
+    /// Incremental update should produce the same hash as one-shot digest.
+    #[test]
+    fn test_sm3_incremental() {
+        let mut ctx = Sm3::new();
+        ctx.update(b"a").unwrap();
+        ctx.update(b"b").unwrap();
+        ctx.update(b"c").unwrap();
+        let incremental = ctx.finish().unwrap();
+
+        let one_shot = Sm3::digest(b"abc").unwrap();
+        assert_eq!(incremental, one_shot);
+    }
+
+    /// GB/T 32905-2016 test: Hash 1,000,000 × 'a'.
+    #[test]
+    #[ignore] // slow (~2s)
+    fn test_sm3_1million_a() {
+        let expected = "c8aaf89429554029e231941a2acc0ad61ff2a5acd8fadd25847a3a732b3b02c3";
+        let mut ctx = Sm3::new();
+        // Feed in chunks for efficiency
+        let chunk = [b'a'; 1000];
+        for _ in 0..1000 {
+            ctx.update(&chunk).unwrap();
+        }
+        let digest = ctx.finish().unwrap();
+        assert_eq!(hex(&digest), expected);
+    }
 }

@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: P7 complete — Integration Test Expansion + TLCP Public API + Code Quality
+- **Status**: P8 complete — Unit Test Coverage Expansion (TLS Handshake + Crypto RFC Vectors + Utils Negative Tests)
 
 ## Workspace Structure
 
@@ -18,8 +18,8 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error enums
 │   ├── hitls-utils/     # ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
-│   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); hardware AES acceleration (ARMv8/x86-64); ECC: P-192, P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; Curve448: Ed448, X448; DRBG: HMAC/CTR/Hash; SM4-CCM; HCTR mode; FIPS/CMVP (KAT, PCT, integrity); Entropy health testing (NIST SP 800-90B, RCT+APT); Wycheproof test vectors (476 tests + 15 Wycheproof)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, hybrid KEM (X25519MLKEM768), async I/O (tokio), TLS 1.3 SM4-GCM/CCM (RFC 8998), RFC 5705/8446 key material export, TLS 1.2 handshake (ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, Bleichenbacher protection, OCSP stapling CertificateStatus), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), DTLCP (DTLS+TLCP), custom extensions framework, NSS key logging, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT, Ed448/X448 signing + key exchange, TLS 1.2 PRF (580 tests)
+│   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); hardware AES acceleration (ARMv8/x86-64); ECC: P-192, P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; Curve448: Ed448, X448; DRBG: HMAC/CTR/Hash; SM4-CCM; HCTR mode; FIPS/CMVP (KAT, PCT, integrity); Entropy health testing (NIST SP 800-90B, RCT+APT); Wycheproof test vectors (486 tests + 15 Wycheproof)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, hybrid KEM (X25519MLKEM768), async I/O (tokio), TLS 1.3 SM4-GCM/CCM (RFC 8998), RFC 5705/8446 key material export, TLS 1.2 handshake (ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, Bleichenbacher protection, OCSP stapling CertificateStatus), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), DTLCP (DTLS+TLCP), custom extensions framework, NSS key logging, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT, Ed448/X448 signing + key exchange, TLS 1.2 PRF (598 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify [RSA/ECDSA/Ed25519/Ed448/SM2/RSA-PSS], chain, CRL, OCSP, CSR generation, Certificate generation, to_text output, SigningKey abstraction, EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies enforcement), PKCS#12 (RFC 7292), CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr, detached mode) + EnvelopedData + EncryptedData + DigestedData (RFC 5652), PKCS#8 (RFC 5958, Ed448/X448), SPKI public key parsing (321 tests, 1 ignored)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (RFC 9578, RSA blind sigs) (24 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
@@ -35,15 +35,15 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (1604 tests, 37 ignored)
+# Run all tests (1642 tests, 39 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 476 tests (28 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 580 tests
+cargo test -p hitls-crypto --all-features   # 486 tests (30 ignored) + 15 Wycheproof
+cargo test -p hitls-tls --all-features      # 598 tests
 cargo test -p hitls-pki --all-features      # 321 tests (1 ignored)
 cargo test -p hitls-bignum                  # 46 tests
-cargo test -p hitls-utils                   # 35 tests
+cargo test -p hitls-utils                   # 45 tests
 cargo test -p hitls-auth --all-features     # 24 tests
 cargo test -p hitls-cli --all-features      # 40 tests (5 ignored)
 cargo test -p hitls-integration-tests       # 39 tests (3 ignored)
@@ -103,7 +103,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-49 + P1-P7 complete (1604 tests, 37 ignored).
+Phases 0-49 + P1-P8 complete (1642 tests, 39 ignored).
 
 ### Completed
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
@@ -123,5 +123,6 @@ Phases 0-49 + P1-P7 complete (1604 tests, 37 ignored).
 - P5: PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths (41 new PKI tests: Ed448/SM2/RSA-PSS verify in cert/CRL/OCSP, OCSP verify_signature tests, CRL DER test vectors from C, CMS EnvelopedData error paths, text/PKCS#12/chain test quality) -- DONE
 - P6: TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness (24 new tests: TLS 1.3/1.2 export_keying_material RFC 5705/8446 §7.5, CMS detached SignedData, PKCS#8 Ed448/X448, SPKI parsing, pkeyutl derive X25519/X448/ECDH + sign/verify ECDSA/Ed448/RSA-PSS) -- DONE
 - P7: Integration Test Expansion + TLCP Public API + Code Quality (30 new tests: ML-KEM panic→Result fix, TLCP public handshake-in-memory API, 5 DTLS 1.2 integration tests, 4 TLCP integration tests, 3 DTLCP integration tests, 4 mTLS integration tests, 12 TLS 1.3 server unit tests) -- DONE
+- P8: Unit Test Coverage Expansion (40 new tests: X25519 RFC 7748 §5.2 iterated vectors, HKDF from_prk/error paths, SM3/SM4 incremental+1M iteration vectors, Base64 negative tests, PEM negative tests, anti-replay window edge cases, TLS 1.2 client12 wrong-state/KX/ticket tests, DTLS 1.2 client HVR/wrong-state tests, DTLS 1.2 server cookie retry/wrong-cookie tests) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

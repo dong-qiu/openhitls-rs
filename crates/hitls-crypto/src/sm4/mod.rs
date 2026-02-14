@@ -233,4 +233,43 @@ mod tests {
         assert!(Sm4Key::new(&[0u8; 15]).is_err());
         assert!(Sm4Key::new(&[0u8; 32]).is_err());
     }
+
+    /// GB/T 32907-2016 Appendix A.2: Encrypt block 1,000,000 times.
+    #[test]
+    #[ignore] // slow
+    fn test_sm4_1million_iterations() {
+        let key = hex_to_bytes("0123456789abcdeffedcba9876543210");
+        let cipher = Sm4Key::new(&key).unwrap();
+        let mut block = hex_to_bytes("0123456789abcdeffedcba9876543210");
+        for _ in 0..1_000_000 {
+            cipher.encrypt_block(&mut block).unwrap();
+        }
+        assert_eq!(hex(&block), "595298c7c6fd271f0402f804c33d3f66");
+    }
+
+    /// Encrypt all-zeros key and plaintext.
+    #[test]
+    fn test_sm4_all_zeros() {
+        let key = [0u8; 16];
+        let cipher = Sm4Key::new(&key).unwrap();
+        let mut block = [0u8; 16];
+        cipher.encrypt_block(&mut block).unwrap();
+        // Verify it produces a non-zero ciphertext and decrypts back
+        assert_ne!(block, [0u8; 16]);
+        let ct = block;
+        cipher.decrypt_block(&mut block).unwrap();
+        assert_eq!(block, [0u8; 16]);
+        // Re-encrypt should match
+        cipher.encrypt_block(&mut block).unwrap();
+        assert_eq!(block, ct);
+    }
+
+    /// Invalid block length should return error.
+    #[test]
+    fn test_sm4_invalid_block_len() {
+        let key = [0u8; 16];
+        let cipher = Sm4Key::new(&key).unwrap();
+        assert!(cipher.encrypt_block(&mut [0u8; 15]).is_err());
+        assert!(cipher.decrypt_block(&mut [0u8; 17]).is_err());
+    }
 }

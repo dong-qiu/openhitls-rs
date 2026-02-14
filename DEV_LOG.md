@@ -5078,3 +5078,99 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1604 workspace tests passing (37 ignored)
+
+## P8: Unit Test Coverage Expansion (Session 2026-02-14)
+
+### Goals
+- Expand unit test coverage for under-tested modules
+- Add RFC test vectors for X25519, SM3, SM4
+- Add negative tests for Base64, PEM
+- Add wrong-state tests for TLS 1.2 client handshake
+- Add DTLS 1.2 client/server HVR and cookie tests
+- Add anti-replay window edge case tests
+
+### Implementation
+
+#### Part 4: X25519 RFC Test Vectors (+4 tests)
+- `test_x25519_rfc7748_iterated_1`: RFC 7748 §5.2, 1 iteration → known result
+- `test_x25519_rfc7748_iterated_1000`: RFC 7748 §5.2, 1000 iterations → known result
+- `test_x25519_low_order_all_zero`: All-zero pubkey → error (point at infinity)
+- `test_x25519_wrong_key_size`: 31/33-byte keys → InvalidArg error
+
+#### Part 5: HKDF Additional Tests (+3 tests)
+- `test_hkdf_from_prk`: `from_prk()` with Case 1 PRK produces same OKM as `new()`
+- `test_hkdf_expand_max_length_error`: OKM > 255*HashLen → KdfDkLenOverflow error
+- `test_hkdf_expand_zero_length`: Zero-length expand → Ok(empty)
+
+#### Part 6: SM3 + SM4 Tests (+5 tests, 2 ignored)
+- `test_sm3_incremental`: Byte-at-a-time update matches one-shot digest
+- `test_sm3_1million_a`: 1M × 'a' → GB/T known vector (ignored, slow)
+- `test_sm4_1million_iterations`: 1M encryptions → GB/T A.2 vector (ignored, slow)
+- `test_sm4_all_zeros`: All-zero key/plaintext encrypts and decrypts correctly
+- `test_sm4_invalid_block_len`: 15/17-byte blocks → error
+
+#### Part 7: Base64 Negative Tests (+5 tests)
+- `test_decode_invalid_char`: Invalid chars '!' and '@' → error
+- `test_decode_bad_length`: Non-multiple-of-4 input → error
+- `test_decode_whitespace_tolerance`: Newlines/spaces stripped correctly
+- `test_decode_empty_string`: Empty string → Ok(empty)
+- `test_encode_binary_data`: Binary data (0x00, 0xFF, 0x80) roundtrips
+
+#### Part 8: PEM Negative Tests (+5 tests)
+- `test_pem_missing_end_marker`: No END marker → error
+- `test_pem_no_blocks`: Plain text with no PEM markers → Ok(empty)
+- `test_pem_empty_data`: Empty body between BEGIN/END → Ok, data=[]
+- `test_pem_label_mismatch`: BEGIN A / END B → error
+- `test_pem_extra_whitespace`: Leading/trailing spaces on lines → parses OK
+
+#### Part 9: Anti-Replay Edge Cases (+3 tests)
+- `test_anti_replay_window_boundary_exact`: 64 sequential accepts, verify edge behavior
+- `test_anti_replay_large_forward_jump`: Jump 10000 ahead, verify old seqs rejected
+- `test_anti_replay_check_and_accept_combined`: check_and_accept() returns Ok then Err
+
+#### Part 1: TLS 1.2 Client Handshake Unit Tests (+8 tests)
+- `test_server_hello_wrong_state`: process_server_hello from Idle → error
+- `test_server_hello_unsupported_suite`: SH with different suite still processes (known suite)
+- `test_process_certificate_wrong_state`: process_certificate from Idle → error
+- `test_server_hello_done_wrong_state`: process_server_hello_done from Idle → error
+- `test_process_finished_wrong_state`: process_finished from Idle → error
+- `test_kx_alg_rsa_static`: RSA suite → kx_alg == Rsa after SH
+- `test_kx_alg_dhe`: DHE_RSA suite → kx_alg == Dhe after SH
+- `test_new_session_ticket_processed`: process_new_session_ticket stores ticket
+
+#### Part 2: DTLS 1.2 Client Handshake Tests (+4 tests)
+- `test_dtls12_client_hvr_processing`: Build CH → construct HVR → process → CH2 with cookie
+- `test_dtls12_client_hvr_wrong_state`: HVR from Idle → error
+- `test_dtls12_client_process_sh_wrong_state`: SH from Idle → error
+- `test_dtls12_client_ccs_wrong_state`: CCS from Idle → error
+
+#### Part 3: DTLS 1.2 Server Handshake Tests (+3 tests)
+- `test_dtls12_server_cookie_retry_success`: CH1→HVR→extract cookie→CH2→server flight
+- `test_dtls12_server_wrong_cookie_rejected`: CH2 with wrong cookie → error
+- `test_dtls12_server_ccs_wrong_state`: CCS from Idle → error
+
+### Files Modified
+| File | New Tests |
+|------|-----------|
+| `hitls-crypto/src/x25519/mod.rs` | +4 |
+| `hitls-crypto/src/hkdf/mod.rs` | +3 |
+| `hitls-crypto/src/sm3/mod.rs` | +2 (1 ignored) |
+| `hitls-crypto/src/sm4/mod.rs` | +3 (1 ignored) |
+| `hitls-utils/src/base64/mod.rs` | +5 |
+| `hitls-utils/src/pem/mod.rs` | +5 |
+| `hitls-tls/src/record/anti_replay.rs` | +3 |
+| `hitls-tls/src/handshake/client12.rs` | +8 |
+| `hitls-tls/src/handshake/client_dtls12.rs` | +4 |
+| `hitls-tls/src/handshake/server_dtls12.rs` | +3 |
+| **Total** | **+40 (2 ignored)** |
+
+### Updated Test Counts
+- **hitls-crypto**: 486 (from 476) + 15 Wycheproof, 30 ignored (from 28)
+- **hitls-tls**: 598 (from 580)
+- **hitls-utils**: 45 (from 35)
+- **Total workspace**: 1642 (from 1604), +38 running (+2 ignored), 39 ignored total
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1642 workspace tests passing (39 ignored)

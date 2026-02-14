@@ -496,4 +496,82 @@ mod tests {
         assert_eq!(h1.message_seq, 0);
         assert_eq!(hs.message_seq, 1);
     }
+
+    #[test]
+    fn test_dtls12_client_hvr_processing() {
+        use crate::handshake::codec_dtls::{
+            encode_hello_verify_request, wrap_dtls_handshake_full, HelloVerifyRequest,
+        };
+        use crate::record::dtls::DTLS12_VERSION;
+
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .build();
+
+        let mut hs = Dtls12ClientHandshake::new(config);
+        let _ch1 = hs.build_client_hello().unwrap();
+        assert_eq!(hs.state(), Dtls12ClientState::WaitHelloVerifyRequest);
+
+        // Construct a HelloVerifyRequest with a cookie
+        let cookie = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        let hvr = HelloVerifyRequest {
+            server_version: DTLS12_VERSION,
+            cookie: cookie.clone(),
+        };
+        let hvr_body = encode_hello_verify_request(&hvr);
+        let hvr_msg = wrap_dtls_handshake_full(HandshakeType::HelloVerifyRequest, &hvr_body, 0);
+
+        // Process HVR → should get a new ClientHello with the cookie
+        let ch2 = hs.process_hello_verify_request(&hvr_msg).unwrap();
+
+        // State should now be WaitServerHello
+        assert_eq!(hs.state(), Dtls12ClientState::WaitServerHello);
+        // The new CH should be a valid DTLS handshake message
+        let (h2, _, _) = parse_dtls_handshake_header(&ch2).unwrap();
+        assert_eq!(h2.msg_type, HandshakeType::ClientHello);
+    }
+
+    #[test]
+    fn test_dtls12_client_hvr_wrong_state() {
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .build();
+
+        let mut hs = Dtls12ClientHandshake::new(config);
+        // State is Idle — HVR should fail
+        let hvr_msg = vec![
+            0x03, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xFE, 0xFD,
+            0x00,
+        ]; // minimal HVR
+        assert!(hs.process_hello_verify_request(&hvr_msg).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_client_process_sh_wrong_state() {
+        use crate::handshake::codec::ServerHello;
+
+        let config = TlsConfig::builder().build();
+        let mut hs = Dtls12ClientHandshake::new(config);
+        // State is Idle, not WaitServerHello
+        let sh = ServerHello {
+            random: [0u8; 32],
+            legacy_session_id: vec![],
+            cipher_suite: CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            extensions: Vec::new(),
+        };
+        // Wrap as DTLS
+        let sh_tls = crate::handshake::codec::encode_server_hello(&sh);
+        let sh_dtls = crate::handshake::codec_dtls::tls_to_dtls_handshake(&sh_tls, 0).unwrap();
+        assert!(hs.process_server_hello(&sh_dtls, &sh).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_client_ccs_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Dtls12ClientHandshake::new(config);
+        // State is Idle, not WaitChangeCipherSpec
+        assert!(hs.process_change_cipher_spec().is_err());
+    }
 }

@@ -130,4 +130,42 @@ mod tests {
         assert_eq!(encode(b"fooba"), "Zm9vYmE=");
         assert_eq!(encode(b"foobar"), "Zm9vYmFy");
     }
+
+    #[test]
+    fn test_decode_invalid_char() {
+        assert!(decode("Zm9v!!!!").is_err());
+        assert!(decode("@@@@").is_err());
+    }
+
+    #[test]
+    fn test_decode_bad_length() {
+        // Not a multiple of 4 after stripping whitespace
+        assert!(decode("Zm9v=").is_err());
+        assert!(decode("A").is_err());
+        assert!(decode("AB").is_err());
+    }
+
+    #[test]
+    fn test_decode_whitespace_tolerance() {
+        // Whitespace (newlines, spaces) should be stripped before decoding
+        let decoded = decode("Zm9v\nYmFy\n").unwrap();
+        assert_eq!(decoded, b"foobar");
+
+        let decoded2 = decode("  Zm9v  YmFy  ").unwrap();
+        assert_eq!(decoded2, b"foobar");
+    }
+
+    #[test]
+    fn test_decode_empty_string() {
+        let decoded = decode("").unwrap();
+        assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn test_encode_binary_data() {
+        let data = [0x00, 0xFF, 0x80];
+        let encoded = encode(&data);
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(decoded, data);
+    }
 }
