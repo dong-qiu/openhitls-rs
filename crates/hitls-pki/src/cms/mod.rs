@@ -632,6 +632,7 @@ fn verify_signature_with_cert(
         || sig_oid == known::sha384_with_rsa_encryption()
         || sig_oid == known::sha512_with_rsa_encryption()
         || sig_oid == known::sha1_with_rsa_encryption()
+        || sig_oid == known::rsa_encryption()
     {
         // RSA PKCS#1v15
         let mut key_dec = Decoder::new(&cert.public_key.public_key);
@@ -1547,5 +1548,153 @@ mod tests {
         };
 
         verify_signature_with_cert(message, &signature, &sig_alg, &cert).unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // P2: Real C test vector — CMS SignedData tests
+    // -----------------------------------------------------------------------
+
+    const CMS_CA_CERT: &str = include_str!("../../../../tests/vectors/cms/ca_cert.pem");
+    const CMS_MSG: &[u8] = include_bytes!("../../../../tests/vectors/cms/msg.txt");
+
+    const CMS_RSA_PKCS1_ATTACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/rsa_pkcs1_attached.cms");
+    const CMS_RSA_PKCS1_DETACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/rsa_pkcs1_detached.cms");
+    const CMS_RSA_PSS_ATTACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/rsa_pss_attached.cms");
+    const CMS_P256_ATTACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/p256_attached.cms");
+    const CMS_P256_DETACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/p256_detached.cms");
+    const CMS_P384_ATTACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/p384_attached.cms");
+    const CMS_P384_DETACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/p384_detached.cms");
+    const CMS_P521_ATTACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/p521_attached.cms");
+
+    // --- Parsing tests ---
+
+    #[test]
+    fn test_cms_parse_rsa_pkcs1_attached() {
+        let msg = CmsMessage::from_der(CMS_RSA_PKCS1_ATTACHED).unwrap();
+        assert_eq!(msg.content_type, CmsContentType::SignedData);
+        let sd = msg.signed_data.as_ref().unwrap();
+        assert!(sd.encap_content_info.content.is_some());
+        assert!(!sd.signer_infos.is_empty());
+        assert!(!sd.certificates.is_empty());
+    }
+
+    #[test]
+    fn test_cms_parse_rsa_pss_attached() {
+        let msg = CmsMessage::from_der(CMS_RSA_PSS_ATTACHED).unwrap();
+        assert_eq!(msg.content_type, CmsContentType::SignedData);
+        let sd = msg.signed_data.as_ref().unwrap();
+        assert!(sd.encap_content_info.content.is_some());
+    }
+
+    #[test]
+    fn test_cms_parse_p256_detached() {
+        let msg = CmsMessage::from_der(CMS_P256_DETACHED).unwrap();
+        assert_eq!(msg.content_type, CmsContentType::SignedData);
+        let sd = msg.signed_data.as_ref().unwrap();
+        // Detached: no embedded content
+        assert!(sd.encap_content_info.content.is_none());
+    }
+
+    #[test]
+    fn test_cms_parse_p384_attached() {
+        let msg = CmsMessage::from_der(CMS_P384_ATTACHED).unwrap();
+        assert_eq!(msg.content_type, CmsContentType::SignedData);
+        let sd = msg.signed_data.as_ref().unwrap();
+        assert!(sd.encap_content_info.content.is_some());
+    }
+
+    // --- Verification tests ---
+
+    #[test]
+    fn test_cms_verify_rsa_pkcs1_attached() {
+        let msg = CmsMessage::from_der(CMS_RSA_PKCS1_ATTACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(CMS_CA_CERT).unwrap();
+        let result = msg.verify_signatures(None, &[ca]);
+        assert!(
+            result.is_ok(),
+            "RSA PKCS#1 attached verify failed: {result:?}"
+        );
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_verify_p256_attached() {
+        let msg = CmsMessage::from_der(CMS_P256_ATTACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(CMS_CA_CERT).unwrap();
+        let result = msg.verify_signatures(None, &[ca]);
+        assert!(result.is_ok(), "P-256 attached verify failed: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_verify_p384_detached() {
+        let msg = CmsMessage::from_der(CMS_P384_DETACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(CMS_CA_CERT).unwrap();
+        let result = msg.verify_signatures(Some(CMS_MSG), &[ca]);
+        assert!(result.is_ok(), "P-384 detached verify failed: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_verify_p521_attached() {
+        let msg = CmsMessage::from_der(CMS_P521_ATTACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(CMS_CA_CERT).unwrap();
+        let result = msg.verify_signatures(None, &[ca]);
+        assert!(result.is_ok(), "P-521 attached verify failed: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_verify_rsa_pkcs1_detached() {
+        let msg = CmsMessage::from_der(CMS_RSA_PKCS1_DETACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(CMS_CA_CERT).unwrap();
+        let result = msg.verify_signatures(Some(CMS_MSG), &[ca]);
+        assert!(
+            result.is_ok(),
+            "RSA PKCS#1 detached verify failed: {result:?}"
+        );
+        assert!(result.unwrap());
+    }
+
+    // --- Failure tests ---
+
+    #[test]
+    fn test_cms_verify_detached_wrong_content() {
+        let msg = CmsMessage::from_der(CMS_P256_DETACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(CMS_CA_CERT).unwrap();
+        let wrong_content = b"wrong content that was not signed";
+        let result = msg.verify_signatures(Some(wrong_content), &[ca]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cms_verify_tampered_cms() {
+        let mut tampered = CMS_RSA_PKCS1_ATTACHED.to_vec();
+        // Flip a bit in the signature area (near the end)
+        if let Some(b) = tampered.last_mut() {
+            *b ^= 0xFF;
+        }
+        let msg = CmsMessage::from_der(&tampered);
+        if let Ok(msg) = msg {
+            let ca = crate::x509::Certificate::from_pem(CMS_CA_CERT).unwrap();
+            let result = msg.verify_signatures(None, &[ca]);
+            assert!(result.is_err());
+        }
+        // If parse fails, that's also a valid failure path
+    }
+
+    #[test]
+    fn test_cms_parse_truncated() {
+        let truncated = &CMS_RSA_PKCS1_ATTACHED[..50];
+        let result = CmsMessage::from_der(truncated);
+        assert!(result.is_err());
     }
 }

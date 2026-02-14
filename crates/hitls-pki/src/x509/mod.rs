@@ -1948,6 +1948,132 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         assert!(parsed.verify_signature(&parsed).unwrap());
     }
 
+    // -----------------------------------------------------------------------
+    // P2: Real C test vector — certificate parsing edge cases
+    // -----------------------------------------------------------------------
+
+    const CERTCHECK_V0: &[u8] =
+        include_bytes!("../../../../tests/vectors/certcheck/certversion0noext.der");
+    const CERTCHECK_V2: &[u8] =
+        include_bytes!("../../../../tests/vectors/certcheck/certversion2withext.der");
+    const CERTCHECK_NEG_SERIAL: &[u8] =
+        include_bytes!("../../../../tests/vectors/certcheck/certnegativeserialnum.der");
+    const CERTCHECK_DN_NULL: &[u8] =
+        include_bytes!("../../../../tests/vectors/certcheck/certdnvaluenull.der");
+    const CERTCHECK_RSA_PSS: &[u8] =
+        include_bytes!("../../../../tests/vectors/certcheck/certrsapss.der");
+    const CERTCHECK_SAN_DNS: &[u8] =
+        include_bytes!("../../../../tests/vectors/certcheck/cert_ext_san_parse_1.der");
+    const CERTCHECK_SAN_IP: &[u8] =
+        include_bytes!("../../../../tests/vectors/certcheck/cert_ext_san_parse_3.der");
+    const CERTCHECK_KU: &[u8] =
+        include_bytes!("../../../../tests/vectors/certcheck/cert_ext_keyusage_parse_1.der");
+    const CERTCHECK_EKU: &[u8] =
+        include_bytes!("../../../../tests/vectors/certcheck/cert_ext_extku_parse_1.der");
+    const CERTCHECK_BC: &[u8] =
+        include_bytes!("../../../../tests/vectors/certcheck/cert_ext_bcon_parse_1.der");
+
+    #[test]
+    fn test_parse_v1_cert() {
+        // Version 0 (v1) cert — no extensions
+        let cert = Certificate::from_der(CERTCHECK_V0).unwrap();
+        assert_eq!(cert.version, 1); // v1 = version field value 0
+        assert!(cert.extensions.is_empty());
+    }
+
+    #[test]
+    fn test_parse_v3_cert() {
+        // Version 2 (v3) cert — has extensions
+        let cert = Certificate::from_der(CERTCHECK_V2).unwrap();
+        assert_eq!(cert.version, 3); // v3 = version field value 2
+        assert!(!cert.extensions.is_empty());
+    }
+
+    #[test]
+    fn test_parse_negative_serial() {
+        // Certificate with serial number 0xFF (encoded as 00 FF in DER to stay positive)
+        let cert = Certificate::from_der(CERTCHECK_NEG_SERIAL).unwrap();
+        assert!(!cert.serial_number.is_empty());
+        // DER INTEGER encoding: 00 FF (leading zero keeps it positive per X.690)
+        // The raw bytes should contain 0xFF after any leading zero padding
+        let sn = &cert.serial_number;
+        let value_byte = if sn[0] == 0x00 && sn.len() > 1 {
+            sn[1] // strip DER padding byte
+        } else {
+            sn[0]
+        };
+        assert_eq!(value_byte, 0xFF, "serial value byte should be 0xFF");
+    }
+
+    #[test]
+    fn test_parse_dn_null_value() {
+        // Certificate with null byte in DN value
+        let result = Certificate::from_der(CERTCHECK_DN_NULL);
+        // Should either parse successfully or fail gracefully
+        match result {
+            Ok(cert) => {
+                assert!(!cert.subject.entries.is_empty());
+            }
+            Err(_) => {
+                // Failing to parse a null DN is acceptable
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_rsa_pss_cert() {
+        // RSA-PSS algorithm identifier
+        let cert = Certificate::from_der(CERTCHECK_RSA_PSS).unwrap();
+        assert_eq!(cert.version, 3);
+        // RSA-PSS OID: 1.2.840.113549.1.1.10
+        let sig_oid = Oid::from_der_value(&cert.signature_algorithm).unwrap();
+        let rsa_pss_oid = Oid::new(&[1, 2, 840, 113549, 1, 1, 10]);
+        assert_eq!(sig_oid, rsa_pss_oid);
+    }
+
+    #[test]
+    fn test_parse_san_dns() {
+        // SAN extension with DNS names
+        let cert = Certificate::from_der(CERTCHECK_SAN_DNS).unwrap();
+        let san_oid = known::subject_alt_name().to_der_value();
+        let san_ext = cert.extensions.iter().find(|e| e.oid == san_oid);
+        assert!(san_ext.is_some(), "should have SAN extension");
+    }
+
+    #[test]
+    fn test_parse_san_ip() {
+        // SAN extension with IP addresses
+        let cert = Certificate::from_der(CERTCHECK_SAN_IP).unwrap();
+        let san_oid = known::subject_alt_name().to_der_value();
+        let san_ext = cert.extensions.iter().find(|e| e.oid == san_oid);
+        assert!(san_ext.is_some(), "should have SAN extension");
+    }
+
+    #[test]
+    fn test_parse_keyusage_ext() {
+        // KeyUsage extension
+        let cert = Certificate::from_der(CERTCHECK_KU).unwrap();
+        let ku = cert.key_usage();
+        assert!(ku.is_some(), "should have KeyUsage extension");
+    }
+
+    #[test]
+    fn test_parse_eku_ext() {
+        // Extended Key Usage extension
+        let cert = Certificate::from_der(CERTCHECK_EKU).unwrap();
+        let eku_oid = vec![0x55, 0x1D, 0x25]; // 2.5.29.37
+        let has_eku = cert.extensions.iter().any(|e| e.oid.ends_with(&eku_oid));
+        assert!(has_eku, "should have EKU extension");
+    }
+
+    #[test]
+    fn test_parse_bc_ext() {
+        // BasicConstraints extension
+        let cert = Certificate::from_der(CERTCHECK_BC).unwrap();
+        let bc = cert.basic_constraints();
+        assert!(bc.is_some(), "should have BasicConstraints extension");
+    }
+
     #[test]
     fn test_build_from_csr() {
         // Build CSR

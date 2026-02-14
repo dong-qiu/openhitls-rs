@@ -582,6 +582,411 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         assert_eq!(chain.len(), 3);
     }
 
+    // -----------------------------------------------------------------------
+    // Part 2 (P2): Real C test vector — certVer suite
+    // -----------------------------------------------------------------------
+
+    const CV_ROOT: &str = include_str!("../../../../tests/vectors/chain/certVer/certVer_root.pem");
+    const CV_INTER: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_inter.pem");
+    const CV_LEAF: &str = include_str!("../../../../tests/vectors/chain/certVer/certVer_leaf.pem");
+    const CV_LEAF_TAMPERED: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_leaf_tampered.pem");
+    const CV_TARGET_CA_TAMPERED: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_target_ca_tampered.pem");
+    const CV_NM_ROOT: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_name_mismatch_root.pem");
+    const CV_NM_WRONG_INTER: &str = include_str!(
+        "../../../../tests/vectors/chain/certVer/certVer_name_mismatch_wrong_inter.pem"
+    );
+    const CV_NM_LEAF: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_name_mismatch_leaf.pem");
+    const CV_WA_ROOT: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_wrong_anchor_root.pem");
+    const CV_WA_INTER: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_wrong_anchor_inter.pem");
+    const CV_WA_LEAF: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_wrong_anchor_leaf.pem");
+    const CV_WA_FAKE_ROOT: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_wrong_anchor_fake_root.pem");
+    const CV_CYCLE_A: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_cycle_a.pem");
+    const CV_CYCLE_B: &str =
+        include_str!("../../../../tests/vectors/chain/certVer/certVer_cycle_b.pem");
+
+    #[test]
+    fn test_chain_valid_3cert() {
+        let root = Certificate::from_pem(CV_ROOT).unwrap();
+        let inter = Certificate::from_pem(CV_INTER).unwrap();
+        let leaf = Certificate::from_pem(CV_LEAF).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        let chain = verifier.verify_cert(&leaf, &[inter]).unwrap();
+        assert_eq!(chain.len(), 3);
+    }
+
+    #[test]
+    fn test_chain_tampered_leaf_sig() {
+        let root = Certificate::from_pem(CV_ROOT).unwrap();
+        let inter = Certificate::from_pem(CV_INTER).unwrap();
+        let leaf_tampered = Certificate::from_pem(CV_LEAF_TAMPERED).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        let result = verifier.verify_cert(&leaf_tampered, &[inter]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_chain_tampered_ca_sig() {
+        let root = Certificate::from_pem(CV_ROOT).unwrap();
+        let inter = Certificate::from_pem(CV_INTER).unwrap();
+        let target_tampered = Certificate::from_pem(CV_TARGET_CA_TAMPERED).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        let result = verifier.verify_cert(&target_tampered, &[inter]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_chain_dn_mismatch() {
+        // Leaf claims issuer = "Actual Intermediate" but only "Wrong Intermediate" is provided
+        let root = Certificate::from_pem(CV_NM_ROOT).unwrap();
+        let wrong_inter = Certificate::from_pem(CV_NM_WRONG_INTER).unwrap();
+        let leaf = Certificate::from_pem(CV_NM_LEAF).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        let result = verifier.verify_cert(&leaf, &[wrong_inter]);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), PkiError::IssuerNotFound));
+    }
+
+    #[test]
+    fn test_chain_wrong_trust_anchor_real() {
+        // Valid chain root→inter→leaf, but trust store has only fake_root
+        let actual_root = Certificate::from_pem(CV_WA_ROOT).unwrap();
+        let inter = Certificate::from_pem(CV_WA_INTER).unwrap();
+        let leaf = Certificate::from_pem(CV_WA_LEAF).unwrap();
+        let fake_root = Certificate::from_pem(CV_WA_FAKE_ROOT).unwrap();
+
+        // With fake root: chain builds to actual_root but it's not trusted
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(fake_root);
+        let result = verifier.verify_cert(&leaf, &[inter.clone(), actual_root.clone()]);
+        // actual_root is self-signed but not in trust store → fails
+        assert!(result.is_err());
+
+        // With actual root: should succeed
+        let mut verifier2 = CertificateVerifier::new();
+        verifier2.add_trusted_cert(actual_root);
+        let chain = verifier2.verify_cert(&leaf, &[inter]).unwrap();
+        assert_eq!(chain.len(), 3);
+    }
+
+    #[test]
+    fn test_chain_cycle_detection() {
+        // cycle_a's issuer = cycle_b, cycle_b's issuer = cycle_a — circular
+        let cycle_a = Certificate::from_pem(CV_CYCLE_A).unwrap();
+        let cycle_b = Certificate::from_pem(CV_CYCLE_B).unwrap();
+
+        let verifier = CertificateVerifier::new();
+        // Neither is in trust store, so chain building should fail
+        let result = verifier.verify_cert(&cycle_a, &[cycle_b]);
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // P2: bcExt suite — BasicConstraints enforcement
+    // -----------------------------------------------------------------------
+
+    const BC_ROOT: &str = include_str!("../../../../tests/vectors/chain/bcExt/bc_root_general.pem");
+    const BC_INTER_MISSING_BC: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/bc_inter_missing_bc.pem");
+    const BC_INTER_CA_FALSE: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/bc_inter_ca_false.pem");
+    const BC_LEAF_MISSING_BC: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/bc_leaf_missing_bc.pem");
+    const BC_LEAF_CA_FALSE: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/bc_leaf_ca_false.pem");
+
+    #[test]
+    fn test_bc_missing_on_intermediate() {
+        // Intermediate has no BasicConstraints — not a CA
+        let root = Certificate::from_pem(BC_ROOT).unwrap();
+        let inter = Certificate::from_pem(BC_INTER_MISSING_BC).unwrap();
+        let leaf = Certificate::from_pem(BC_LEAF_MISSING_BC).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        let result = verifier.verify_cert(&leaf, &[inter]);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            PkiError::BasicConstraintsViolation(_) => {}
+            e => panic!("expected BasicConstraintsViolation, got: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn test_bc_ca_false_intermediate() {
+        // Intermediate has CA:FALSE — not a CA
+        let root = Certificate::from_pem(BC_ROOT).unwrap();
+        let inter = Certificate::from_pem(BC_INTER_CA_FALSE).unwrap();
+        let leaf = Certificate::from_pem(BC_LEAF_CA_FALSE).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        let result = verifier.verify_cert(&leaf, &[inter]);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            PkiError::BasicConstraintsViolation(_) => {}
+            e => panic!("expected BasicConstraintsViolation, got: {e:?}"),
+        }
+    }
+
+    const PL_ROOT: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/pathlen_root_pl1.pem");
+    const PL_INTER1: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/pathlen_inter_lvl1.pem");
+    const PL_INTER2: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/pathlen_inter_lvl2.pem");
+    const PL_LEAF: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/pathlen_leaf_pl_exceed.pem");
+
+    #[test]
+    fn test_bc_pathlen_exceeded() {
+        // root (pathlen=1) → inter1 → inter2 → leaf
+        // root allows only 1 CA below it, but inter1 + inter2 = 2 CAs → violation
+        let root = Certificate::from_pem(PL_ROOT).unwrap();
+        let inter1 = Certificate::from_pem(PL_INTER1).unwrap();
+        let inter2 = Certificate::from_pem(PL_INTER2).unwrap();
+        let leaf = Certificate::from_pem(PL_LEAF).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        let result = verifier.verify_cert(&leaf, &[inter1, inter2]);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            PkiError::BasicConstraintsViolation(_) => {}
+            e => panic!("expected BasicConstraintsViolation, got: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn test_bc_pathlen_within_limit() {
+        // root (pathlen=1) → inter1: only 1 CA below root → OK
+        let root = Certificate::from_pem(PL_ROOT).unwrap();
+        let inter1 = Certificate::from_pem(PL_INTER1).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        // Verify inter1 against root — inter1 is signed by root, chain = [inter1, root]
+        let chain = verifier.verify_cert(&inter1, &[]).unwrap();
+        assert_eq!(chain.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // P2: depth_suite — chain depth tests
+    // -----------------------------------------------------------------------
+
+    const DEPTH_ROOT: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/depth_suite/depth_root.pem");
+    const DEPTH_INTER1: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/depth_suite/depth_inter1.pem");
+    const DEPTH_INTER2: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/depth_suite/depth_inter2.pem");
+    const DEPTH_LEAF1: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/depth_suite/depth_leaf_lvl1.pem");
+    const DEPTH_LEAF2: &str =
+        include_str!("../../../../tests/vectors/chain/bcExt/depth_suite/depth_leaf_lvl2.pem");
+
+    #[test]
+    fn test_bc_depth_within_limit() {
+        // root → inter1 → leaf_lvl1 with max_depth=3 → passes
+        let root = Certificate::from_pem(DEPTH_ROOT).unwrap();
+        let inter1 = Certificate::from_pem(DEPTH_INTER1).unwrap();
+        let leaf = Certificate::from_pem(DEPTH_LEAF1).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        verifier.set_max_depth(3);
+        let chain = verifier.verify_cert(&leaf, &[inter1]).unwrap();
+        assert_eq!(chain.len(), 3);
+    }
+
+    #[test]
+    fn test_bc_depth_exceeded() {
+        // root → inter1 → inter2 → leaf_lvl2 with max_depth=2 → fails
+        let root = Certificate::from_pem(DEPTH_ROOT).unwrap();
+        let inter1 = Certificate::from_pem(DEPTH_INTER1).unwrap();
+        let inter2 = Certificate::from_pem(DEPTH_INTER2).unwrap();
+        let leaf = Certificate::from_pem(DEPTH_LEAF2).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        verifier.set_max_depth(2);
+        let result = verifier.verify_cert(&leaf, &[inter1, inter2]);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), PkiError::MaxDepthExceeded(2)));
+    }
+
+    #[test]
+    fn test_bc_depth_4level_passes() {
+        // root → inter1 → inter2 → leaf_lvl2 with default max_depth=10 → passes
+        let root = Certificate::from_pem(DEPTH_ROOT).unwrap();
+        let inter1 = Certificate::from_pem(DEPTH_INTER1).unwrap();
+        let inter2 = Certificate::from_pem(DEPTH_INTER2).unwrap();
+        let leaf = Certificate::from_pem(DEPTH_LEAF2).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        let chain = verifier.verify_cert(&leaf, &[inter1, inter2]).unwrap();
+        assert_eq!(chain.len(), 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // P2: time suite — certificate validity period tests
+    // -----------------------------------------------------------------------
+
+    const TIME_ROOT_CURRENT: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/time/root_current.der");
+    const TIME_INTER_CURRENT: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/time/inter_current.der");
+    const TIME_LEAF_CURRENT: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/time/leaf_current.der");
+    const TIME_ROOT_EXPIRED: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/time/root_expired.der");
+    const TIME_INTER_EXPIRED: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/time/inter_expired.der");
+    const TIME_LEAF_EXPIRED: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/time/leaf_expired.der");
+
+    #[test]
+    fn test_time_all_current() {
+        // All certs valid at 2026-06-01 (1780272000)
+        let root = Certificate::from_der(TIME_ROOT_CURRENT).unwrap();
+        let inter = Certificate::from_der(TIME_INTER_CURRENT).unwrap();
+        let leaf = Certificate::from_der(TIME_LEAF_CURRENT).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        verifier.set_verification_time(1_780_272_000);
+        let chain = verifier.verify_cert(&leaf, &[inter]).unwrap();
+        assert_eq!(chain.len(), 3);
+    }
+
+    #[test]
+    fn test_time_expired_leaf() {
+        // leaf_expired: 2019-07-01 to 2019-12-31 — expired at 2025
+        let root = Certificate::from_der(TIME_ROOT_EXPIRED).unwrap();
+        let inter = Certificate::from_der(TIME_INTER_EXPIRED).unwrap();
+        let leaf = Certificate::from_der(TIME_LEAF_EXPIRED).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        verifier.set_verification_time(1_735_689_600); // 2025-01-01
+        let result = verifier.verify_cert(&leaf, &[inter]);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), PkiError::CertExpired));
+    }
+
+    #[test]
+    fn test_time_expired_root() {
+        // root_expired: 2018-01-01 to 2021-01-01 — expired at 2025
+        let root = Certificate::from_der(TIME_ROOT_EXPIRED).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root.clone());
+        verifier.set_verification_time(1_735_689_600); // 2025-01-01
+        let result = verifier.verify_cert(&root, &[]);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), PkiError::CertExpired));
+    }
+
+    #[test]
+    fn test_time_historical_valid() {
+        // All expired certs were valid at 2019-09-01 (1567296000)
+        let root = Certificate::from_der(TIME_ROOT_EXPIRED).unwrap();
+        let inter = Certificate::from_der(TIME_INTER_EXPIRED).unwrap();
+        let leaf = Certificate::from_der(TIME_LEAF_EXPIRED).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        verifier.set_verification_time(1_567_296_000); // 2019-09-01
+        let chain = verifier.verify_cert(&leaf, &[inter]).unwrap();
+        assert_eq!(chain.len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // P2: eku suite — Extended Key Usage parsing tests
+    // -----------------------------------------------------------------------
+
+    const EKU_ROOTCA: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/eku_suite/rootca.der");
+    const EKU_CA: &[u8] = include_bytes!("../../../../tests/vectors/chain/eku_suite/ca.der");
+    const EKU_SERVER_GOOD: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/eku_suite/server_good.der");
+    const EKU_CLIENT_GOOD: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/eku_suite/client_good.der");
+    const EKU_SERVER_BADKU: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/eku_suite/server_badku.der");
+    const EKU_ANY_GOOD: &[u8] =
+        include_bytes!("../../../../tests/vectors/chain/eku_suite/anyEKU/anyeku_good.der");
+
+    #[test]
+    fn test_eku_server_good_parses() {
+        let cert = Certificate::from_der(EKU_SERVER_GOOD).unwrap();
+        assert_eq!(cert.subject.get("CN"), Some("EKU Test Server Good"));
+        // Should have extensions including ExtendedKeyUsage
+        assert!(!cert.extensions.is_empty());
+        // EKU OID = 2.5.29.37
+        let eku_oid = vec![0x55, 0x1D, 0x25]; // id-ce-extKeyUsage
+        let has_eku = cert.extensions.iter().any(|e| e.oid.ends_with(&eku_oid));
+        assert!(has_eku, "server_good should have EKU extension");
+    }
+
+    #[test]
+    fn test_eku_client_good_parses() {
+        let cert = Certificate::from_der(EKU_CLIENT_GOOD).unwrap();
+        assert_eq!(cert.subject.get("CN"), Some("EKU Test Client Good"));
+        let eku_oid = vec![0x55, 0x1D, 0x25];
+        let has_eku = cert.extensions.iter().any(|e| e.oid.ends_with(&eku_oid));
+        assert!(has_eku, "client_good should have EKU extension");
+    }
+
+    #[test]
+    fn test_eku_bad_ku_parses() {
+        let cert = Certificate::from_der(EKU_SERVER_BADKU).unwrap();
+        assert_eq!(cert.subject.get("CN"), Some("EKU Test Server BadKU"));
+        // Still has KU but with wrong bits for server auth
+        let ku = cert.key_usage();
+        assert!(ku.is_some());
+    }
+
+    #[test]
+    fn test_eku_any_parses() {
+        let cert = Certificate::from_der(EKU_ANY_GOOD).unwrap();
+        assert_eq!(cert.subject.get("CN"), Some("AnyEKU Good"));
+        let eku_oid = vec![0x55, 0x1D, 0x25];
+        let has_eku = cert.extensions.iter().any(|e| e.oid.ends_with(&eku_oid));
+        assert!(has_eku, "anyeku_good should have EKU extension");
+    }
+
+    #[test]
+    fn test_eku_chain_verifies() {
+        // rootca → ca → server_good (3-cert chain)
+        let rootca = Certificate::from_der(EKU_ROOTCA).unwrap();
+        let ca = Certificate::from_der(EKU_CA).unwrap();
+        let server = Certificate::from_der(EKU_SERVER_GOOD).unwrap();
+
+        let mut verifier = CertificateVerifier::new();
+        verifier.add_trusted_cert(rootca);
+        let chain = verifier.verify_cert(&server, &[ca]).unwrap();
+        assert_eq!(chain.len(), 3);
+    }
+
     // --- CRL revocation checking tests ---
 
     // CRL test data: ca.crl revokes server2 (serial ...D9) but NOT server1 (serial ...D8)
