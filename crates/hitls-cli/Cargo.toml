@@ -16,7 +16,7 @@ hitls-crypto = { path = "../hitls-crypto", features = [
     "md5", "sha1", "sha2", "sha3", "sm3",
     "aes", "sm4", "modes", "chacha20",
     "hmac", "cmac",
-    "rsa", "ecdsa", "ed25519", "x25519",
+    "rsa", "ecdsa", "ecdh", "ed25519", "x25519", "ed448", "x448",
     "mlkem", "mldsa",
 ] }
 hitls-tls = { path = "../hitls-tls", features = ["tls13", "tls12"] }

@@ -4894,3 +4894,95 @@ Copied 6 DER files from C codebase:
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1550 workspace tests passing (37 ignored)
+
+---
+
+## P6: TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness (2026-02-14)
+
+### Goals
+Implement RFC 5705 / RFC 8446 §7.5 key material export on all TLS connection types, add CMS detached SignedData mode, complete pkeyutl CLI (derive, sign/verify expansion), and extend PKCS#8 for Ed448/X448 + SPKI public key parsing.
+
+### Part 1: TLS RFC 5705 / RFC 8446 §7.5 Key Material Export
+
+Created `hitls-tls/src/crypt/export.rs` implementing:
+- `validate_exporter_label()` — rejects reserved labels (RFC 5705 §4)
+- `tls13_export_keying_material()` — two-step HKDF derivation
+- `tls12_export_keying_material()` — PRF-based derivation
+
+Modified handshake to derive `exporter_master_secret`:
+- `client.rs`: Added `exporter_master_secret` to `FinishedActions`, derived from `ks.derive_exporter_master_secret(&transcript_hash_sf)`
+- `server.rs`: Added `exporter_master_secret` to `ClientHelloActions`
+
+Added `export_keying_material()` method to all 4 connection types:
+- `TlsClientConnection` / `TlsServerConnection` (TLS 1.3)
+- `Tls12ClientConnection` / `Tls12ServerConnection` (TLS 1.2)
+
+TLS 1.2 connections store `client_random`, `server_random`, `master_secret`, and `hash_len` for export. Added Drop impls for zeroization. Added `client_random()`/`server_random()` public accessors to `Tls12ClientHandshake`/`Tls12ServerHandshake`.
+
+10 unit tests in `export.rs` (deterministic output, context handling, forbidden labels, SHA-384, TLS 1.2 export).
+
+### Part 2: CMS Detached SignedData
+
+Added `CmsMessage::sign_detached()` — identical to `sign()` but sets `encap_content_info.content = None`.
+
+Fixed bug: `signed_attrs` stored in `SignerInfo` by `sign()`/`sign_detached()` was incorrectly formatted as `enc_explicit_ctx(0, content)[1..]` (length prefix included), but `verify_signer_info()` expected just the raw content. Changed to store `signed_attrs_content.clone()` directly, matching the DER parse path.
+
+4 tests: roundtrip, wrong data, no content, ECDSA.
+
+### Part 3: pkeyutl derive
+
+Implemented `do_derive()` in `pkeyutl.rs` supporting:
+- X25519: `X25519PrivateKey::diffie_hellman(&X25519PublicKey)`
+- X448: `X448PrivateKey::diffie_hellman(&X448PublicKey)`
+- ECDH P-256/P-384: `EcdhKeyPair::compute_shared_secret(&peer_pub_bytes)`
+
+Added SPKI (SubjectPublicKeyInfo) parsing to `hitls-pki/src/pkcs8/mod.rs`:
+- `SpkiPublicKey` enum (X25519, X448, Ec)
+- `parse_spki_pem()` / `parse_spki_der()` for peer public key parsing
+- `encode_x25519_spki_der()` / `encode_x448_spki_der()` / `encode_ec_spki_der()` / `encode_spki_pem()`
+
+4 tests: X25519 DH, ECDH P-256, type mismatch, X448 DH.
+
+### Part 4: pkeyutl sign/verify expansion + PKCS#8 Ed448/X448
+
+Extended `Pkcs8PrivateKey` enum with `Ed448(Ed448KeyPair)` and `X448(X448PrivateKey)` variants. Added parsing (`parse_ed448_private_key`, `parse_x448_private_key`) and encoding (`encode_ed448_pkcs8_der`, `encode_x448_pkcs8_der`).
+
+Expanded `do_sign()`: added ECDSA (SHA-256 digest + sign) and Ed448 match arms.
+Expanded `do_verify()`: added RSA-PSS, ECDSA, Ed448 match arms.
+
+Fixed `s_server.rs` `pkcs8_to_server_key()` for new Ed448/X448 variants.
+
+Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.toml.
+
+4 pkcs8 tests: Ed448 roundtrip, X448 roundtrip, SPKI X25519 roundtrip, SPKI EC P-256 roundtrip.
+4 pkeyutl tests: ECDSA sign/verify, Ed448 sign/verify, RSA-PSS sign/verify, unsupported key type.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `hitls-tls/src/crypt/export.rs` | NEW — RFC 5705/8446 key export helpers + 10 tests |
+| `hitls-tls/src/crypt/mod.rs` | +`pub mod export`, +`hash_factory_for_len()` |
+| `hitls-tls/src/handshake/client.rs` | +exporter_master_secret in FinishedActions |
+| `hitls-tls/src/handshake/server.rs` | +exporter_master_secret in ClientHelloActions |
+| `hitls-tls/src/handshake/client12.rs` | +client_random()/server_random() accessors |
+| `hitls-tls/src/handshake/server12.rs` | +client_random()/server_random() accessors |
+| `hitls-tls/src/connection.rs` | +exporter field, export_keying_material(), Drop |
+| `hitls-tls/src/connection12.rs` | +export fields, export_keying_material(), Drop |
+| `hitls-pki/src/cms/mod.rs` | +sign_detached(), fixed signed_attrs format, 4 tests |
+| `hitls-pki/src/pkcs8/mod.rs` | +Ed448/X448 variants, SPKI parsing/encoding, 4 tests |
+| `hitls-pki/Cargo.toml` | +ecdh, x448 features |
+| `hitls-cli/src/pkeyutl.rs` | +derive impl, sign/verify expansion, 8 tests |
+| `hitls-cli/src/s_server.rs` | +Ed448/X448 in pkcs8_to_server_key |
+| `hitls-cli/Cargo.toml` | +ecdh, ed448, x448 features |
+
+### Test Counts (P6)
+- **hitls-tls**: 568 (from 558), +10 new tests
+- **hitls-pki**: 321 (from 313), +8 new tests (4 CMS detached + 4 PKCS#8/SPKI)
+- **hitls-cli**: 40 (from 32), +8 new tests (4 derive + 4 sign/verify)
+- **Total workspace**: 1574 (from 1550), +24 new tests, 37 ignored
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1574 workspace tests passing (37 ignored)

@@ -3,6 +3,7 @@
 //! Bridges the TLS protocol with the underlying `hitls-crypto` primitives.
 
 pub mod aead;
+pub mod export;
 pub mod hkdf;
 pub mod key_schedule;
 pub mod key_schedule12;
@@ -862,7 +863,12 @@ impl Tls12CipherSuiteParams {
 
     /// Create a HashFactory for this cipher suite's PRF hash algorithm.
     pub fn hash_factory(&self) -> HashFactory {
-        match self.hash_len {
+        Self::hash_factory_for_len(self.hash_len)
+    }
+
+    /// Create a HashFactory for a given PRF hash length.
+    pub fn hash_factory_for_len(hash_len: usize) -> HashFactory {
+        match hash_len {
             48 => Box::new(|| Box::new(Sha384::new()) as Box<dyn Digest>),
             _ => Box::new(|| Box::new(Sha256::new()) as Box<dyn Digest>),
         }

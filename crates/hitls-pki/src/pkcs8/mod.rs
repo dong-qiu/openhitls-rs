@@ -4,14 +4,18 @@
 //! - RSA (PKCS#1)
 //! - ECDSA (P-224, P-256, P-384, P-521, Brainpool)
 //! - Ed25519 (RFC 8032)
+//! - Ed448 (RFC 8032)
 //! - X25519 (RFC 7748)
+//! - X448 (RFC 7748)
 //! - DSA (FIPS 186-4)
 
 use hitls_crypto::dsa::{DsaKeyPair, DsaParams};
 use hitls_crypto::ecdsa::EcdsaKeyPair;
 use hitls_crypto::ed25519::Ed25519KeyPair;
+use hitls_crypto::ed448::Ed448KeyPair;
 use hitls_crypto::rsa::RsaPrivateKey;
 use hitls_crypto::x25519::X25519PrivateKey;
+use hitls_crypto::x448::X448PrivateKey;
 use hitls_types::{CryptoError, EccCurveId};
 use hitls_utils::asn1::{Decoder, Encoder};
 use hitls_utils::oid::{known, Oid};
@@ -27,12 +31,31 @@ pub enum Pkcs8PrivateKey {
     },
     /// Ed25519 private key.
     Ed25519(Ed25519KeyPair),
+    /// Ed448 private key.
+    Ed448(Ed448KeyPair),
     /// X25519 private key.
     X25519(X25519PrivateKey),
+    /// X448 private key.
+    X448(X448PrivateKey),
     /// DSA private key with domain parameters.
     Dsa {
         params: DsaParams,
         key_pair: DsaKeyPair,
+    },
+}
+
+/// A parsed SPKI (SubjectPublicKeyInfo) public key.
+///
+/// Used for peer public key parsing in key agreement (e.g., `pkeyutl derive`).
+pub enum SpkiPublicKey {
+    /// X25519 public key (32 bytes).
+    X25519(Vec<u8>),
+    /// X448 public key (56 bytes).
+    X448(Vec<u8>),
+    /// EC public key with curve identifier (uncompressed point).
+    Ec {
+        curve_id: EccCurveId,
+        public_key: Vec<u8>,
     },
 }
 
@@ -74,8 +97,12 @@ pub fn parse_pkcs8_der(der: &[u8]) -> Result<Pkcs8PrivateKey, CryptoError> {
         parse_ec_private_key(&alg_params, private_key_bytes)
     } else if algorithm_oid == known::ed25519() {
         parse_ed25519_private_key(private_key_bytes)
+    } else if algorithm_oid == known::ed448() {
+        parse_ed448_private_key(private_key_bytes)
     } else if algorithm_oid == known::x25519() {
         parse_x25519_private_key(private_key_bytes)
+    } else if algorithm_oid == known::x448() {
+        parse_x448_private_key(private_key_bytes)
     } else if algorithm_oid == known::dsa() {
         parse_dsa_private_key(&alg_params, private_key_bytes)
     } else {
@@ -284,6 +311,36 @@ fn parse_x25519_private_key(data: &[u8]) -> Result<Pkcs8PrivateKey, CryptoError>
     Ok(Pkcs8PrivateKey::X25519(key))
 }
 
+// ===== Ed448 =====
+
+/// Parse an Ed448 private key from PKCS#8.
+///
+/// The privateKey OCTET STRING contains another OCTET STRING wrapping the 57-byte seed.
+fn parse_ed448_private_key(data: &[u8]) -> Result<Pkcs8PrivateKey, CryptoError> {
+    let mut dec = Decoder::new(data);
+    let seed = dec.read_octet_string()?;
+    if seed.len() != 57 {
+        return Err(CryptoError::InvalidKey);
+    }
+    let key_pair = Ed448KeyPair::from_seed(seed)?;
+    Ok(Pkcs8PrivateKey::Ed448(key_pair))
+}
+
+// ===== X448 =====
+
+/// Parse an X448 private key from PKCS#8.
+///
+/// Same structure as X25519 — OCTET STRING wrapping 56-byte key.
+fn parse_x448_private_key(data: &[u8]) -> Result<Pkcs8PrivateKey, CryptoError> {
+    let mut dec = Decoder::new(data);
+    let key_bytes = dec.read_octet_string()?;
+    if key_bytes.len() != 56 {
+        return Err(CryptoError::InvalidKey);
+    }
+    let key = X448PrivateKey::new(key_bytes)?;
+    Ok(Pkcs8PrivateKey::X448(key))
+}
+
 // ===== DSA =====
 
 /// Parse DSA algorithm parameters.
@@ -384,6 +441,129 @@ pub fn encode_ec_pkcs8_der(curve_id: EccCurveId, private_key: &[u8]) -> Vec<u8> 
     let params = param_enc.finish();
 
     encode_pkcs8_der_raw(&known::ec_public_key(), Some(&params), &private_key_der)
+}
+
+/// Encode an Ed448 seed as a PKCS#8 DER PrivateKeyInfo.
+pub fn encode_ed448_pkcs8_der(seed: &[u8]) -> Vec<u8> {
+    let mut inner_enc = Encoder::new();
+    inner_enc.write_octet_string(seed);
+    let private_key_der = inner_enc.finish();
+
+    encode_pkcs8_der_raw(&known::ed448(), None, &private_key_der)
+}
+
+/// Encode an X448 key as a PKCS#8 DER PrivateKeyInfo.
+pub fn encode_x448_pkcs8_der(seed: &[u8]) -> Vec<u8> {
+    let mut inner_enc = Encoder::new();
+    inner_enc.write_octet_string(seed);
+    let private_key_der = inner_enc.finish();
+
+    encode_pkcs8_der_raw(&known::x448(), None, &private_key_der)
+}
+
+// ===== SPKI (SubjectPublicKeyInfo) Parsing =====
+
+/// Parse a PEM-encoded SubjectPublicKeyInfo ("PUBLIC KEY" label).
+///
+/// Returns `SpkiPublicKey` identifying the key type and raw public key bytes.
+pub fn parse_spki_pem(pem: &str) -> Result<SpkiPublicKey, CryptoError> {
+    let blocks = hitls_utils::pem::parse(pem)?;
+    for block in &blocks {
+        if block.label == "PUBLIC KEY" {
+            return parse_spki_der(&block.data);
+        }
+    }
+    Err(CryptoError::DecodeAsn1Fail)
+}
+
+/// Parse a DER-encoded SubjectPublicKeyInfo.
+///
+/// ```text
+/// SubjectPublicKeyInfo ::= SEQUENCE {
+///     algorithm       AlgorithmIdentifier,
+///     subjectPublicKey BIT STRING
+/// }
+/// ```
+pub fn parse_spki_der(der: &[u8]) -> Result<SpkiPublicKey, CryptoError> {
+    let mut outer = Decoder::new(der);
+    let mut seq = outer.read_sequence()?;
+
+    // AlgorithmIdentifier SEQUENCE
+    let mut alg_id = seq.read_sequence()?;
+    let oid_bytes = alg_id.read_oid()?;
+    let algorithm_oid = Oid::from_der_value(oid_bytes)?;
+    let alg_params = alg_id.remaining().to_vec();
+
+    // subjectPublicKey BIT STRING
+    let (_unused_bits, bit_string) = seq.read_bit_string()?;
+
+    if algorithm_oid == known::x25519() {
+        if bit_string.len() != 32 {
+            return Err(CryptoError::InvalidKey);
+        }
+        Ok(SpkiPublicKey::X25519(bit_string.to_vec()))
+    } else if algorithm_oid == known::x448() {
+        if bit_string.len() != 56 {
+            return Err(CryptoError::InvalidKey);
+        }
+        Ok(SpkiPublicKey::X448(bit_string.to_vec()))
+    } else if algorithm_oid == known::ec_public_key() {
+        let curve_id = parse_ec_curve_oid(&alg_params)?;
+        Ok(SpkiPublicKey::Ec {
+            curve_id,
+            public_key: bit_string.to_vec(),
+        })
+    } else {
+        Err(CryptoError::DecodeUnknownOid)
+    }
+}
+
+/// Encode an X25519 public key as a DER-encoded SubjectPublicKeyInfo.
+pub fn encode_x25519_spki_der(public_key: &[u8; 32]) -> Vec<u8> {
+    encode_spki_der_raw(&known::x25519(), None, public_key)
+}
+
+/// Encode an X448 public key as a DER-encoded SubjectPublicKeyInfo.
+pub fn encode_x448_spki_der(public_key: &[u8; 56]) -> Vec<u8> {
+    encode_spki_der_raw(&known::x448(), None, public_key)
+}
+
+/// Encode an EC public key as a DER-encoded SubjectPublicKeyInfo.
+pub fn encode_ec_spki_der(curve_id: EccCurveId, public_key: &[u8]) -> Vec<u8> {
+    let curve_oid = curve_id_to_oid(curve_id);
+    let mut param_enc = Encoder::new();
+    param_enc.write_oid(&curve_oid.to_der_value());
+    let params = param_enc.finish();
+
+    encode_spki_der_raw(&known::ec_public_key(), Some(&params), public_key)
+}
+
+/// Low-level SPKI encoding helper.
+fn encode_spki_der_raw(
+    algorithm_oid: &Oid,
+    algorithm_params: Option<&[u8]>,
+    public_key: &[u8],
+) -> Vec<u8> {
+    let mut alg_enc = Encoder::new();
+    alg_enc.write_oid(&algorithm_oid.to_der_value());
+    if let Some(params) = algorithm_params {
+        alg_enc.write_raw(params);
+    }
+    let alg_bytes = alg_enc.finish();
+
+    let mut body_enc = Encoder::new();
+    body_enc.write_sequence(&alg_bytes);
+    body_enc.write_bit_string(0, public_key);
+    let body = body_enc.finish();
+
+    let mut final_enc = Encoder::new();
+    final_enc.write_sequence(&body);
+    final_enc.finish()
+}
+
+/// Encode an SPKI to PEM format.
+pub fn encode_spki_pem(der: &[u8]) -> String {
+    hitls_utils::pem::encode("PUBLIC KEY", der)
 }
 
 #[cfg(test)]
@@ -609,6 +789,68 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
                 assert!(kp.verify(msg, &sig).is_ok());
             }
             _ => panic!("Expected Ed25519 key"),
+        }
+    }
+
+    #[test]
+    fn test_pkcs8_ed448_roundtrip() {
+        let seed = [0x55u8; 57];
+        let der = encode_ed448_pkcs8_der(&seed);
+        let key = parse_pkcs8_der(&der).unwrap();
+        match key {
+            Pkcs8PrivateKey::Ed448(kp) => {
+                let msg = b"test message for ed448 signing";
+                let sig = kp.sign(msg).unwrap();
+                assert_eq!(sig.len(), 114);
+                assert!(kp.verify(msg, &sig).unwrap());
+            }
+            _ => panic!("Expected Ed448 key"),
+        }
+    }
+
+    #[test]
+    fn test_pkcs8_x448_roundtrip() {
+        let key_bytes = [0x42u8; 56];
+        let der = encode_x448_pkcs8_der(&key_bytes);
+        let key = parse_pkcs8_der(&der).unwrap();
+        match key {
+            Pkcs8PrivateKey::X448(_) => {}
+            _ => panic!("Expected X448 key"),
+        }
+    }
+
+    #[test]
+    fn test_spki_x25519_roundtrip() {
+        let priv_key = X25519PrivateKey::new(&[0x77u8; 32]).unwrap();
+        let pub_key = priv_key.public_key();
+        let spki_der = encode_x25519_spki_der(pub_key.as_bytes());
+        let spki_pem = encode_spki_pem(&spki_der);
+
+        let parsed = parse_spki_pem(&spki_pem).unwrap();
+        match parsed {
+            SpkiPublicKey::X25519(bytes) => {
+                assert_eq!(bytes.as_slice(), pub_key.as_bytes());
+            }
+            _ => panic!("Expected X25519 public key"),
+        }
+    }
+
+    #[test]
+    fn test_spki_ec_p256_roundtrip() {
+        let kp = EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let pub_bytes = kp.public_key_bytes().unwrap();
+        let spki_der = encode_ec_spki_der(EccCurveId::NistP256, &pub_bytes);
+
+        let parsed = parse_spki_der(&spki_der).unwrap();
+        match parsed {
+            SpkiPublicKey::Ec {
+                curve_id,
+                public_key,
+            } => {
+                assert_eq!(curve_id, EccCurveId::NistP256);
+                assert_eq!(public_key, pub_bytes);
+            }
+            _ => panic!("Expected EC public key"),
         }
     }
 }

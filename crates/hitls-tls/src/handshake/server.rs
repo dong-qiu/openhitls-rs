@@ -69,6 +69,8 @@ pub struct ClientHelloActions {
     pub cipher_params: CipherSuiteParams,
     /// Whether this handshake used PSK (skipped cert/CV).
     pub psk_mode: bool,
+    /// Exporter master secret (for RFC 5705 / RFC 8446 §7.5 key material export).
+    pub exporter_master_secret: Vec<u8>,
     /// Whether 0-RTT early data was accepted.
     pub early_data_accepted: bool,
     /// Client early traffic keys (for reading 0-RTT data, if accepted).
@@ -829,6 +831,15 @@ impl ServerHandshake {
         let server_app_keys = TrafficKeys::derive(&params, &server_app_secret)?;
         let client_app_keys = TrafficKeys::derive(&params, &client_app_secret)?;
 
+        // Derive exporter master secret (RFC 8446 §7.5)
+        let exporter_master_secret = ks.derive_exporter_master_secret(&transcript_hash_sf)?;
+        crate::crypt::keylog::log_key(
+            &self.config,
+            "EXPORTER_SECRET",
+            &self.client_random,
+            &exporter_master_secret,
+        );
+
         // Save state
         self.client_hs_secret = client_hs_secret;
         self.server_hs_secret = server_hs_secret;
@@ -851,6 +862,7 @@ impl ServerHandshake {
             client_app_secret,
             server_app_secret,
             cipher_params: params,
+            exporter_master_secret,
             psk_mode,
             early_data_accepted: accept_early_data,
             early_read_keys,

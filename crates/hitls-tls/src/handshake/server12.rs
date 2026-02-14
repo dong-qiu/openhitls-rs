@@ -275,6 +275,16 @@ impl Tls12ServerHandshake {
         &self.master_secret
     }
 
+    /// The client random value (for key export).
+    pub fn client_random(&self) -> &[u8; 32] {
+        &self.client_random
+    }
+
+    /// The server random value (for key export).
+    pub fn server_random(&self) -> &[u8; 32] {
+        &self.server_random
+    }
+
     /// Whether this handshake used abbreviated (session resumption) mode.
     pub fn is_abbreviated(&self) -> bool {
         self.abbreviated

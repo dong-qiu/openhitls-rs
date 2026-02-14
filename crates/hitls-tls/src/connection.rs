@@ -49,6 +49,8 @@ pub struct TlsClientConnection<S: Read + Write> {
     server_app_secret: Vec<u8>,
     /// Resumption master secret (for processing NewSessionTicket).
     resumption_master_secret: Vec<u8>,
+    /// Exporter master secret (for RFC 5705 / RFC 8446 §7.5 key material export).
+    exporter_master_secret: Vec<u8>,
     /// Client handshake state (kept for processing post-handshake messages).
     client_hs: Option<ClientHandshake>,
     /// Received session from NewSessionTicket (for resumption).
@@ -64,6 +66,7 @@ impl<S: Read + Write> Drop for TlsClientConnection<S> {
         self.client_app_secret.zeroize();
         self.server_app_secret.zeroize();
         self.resumption_master_secret.zeroize();
+        self.exporter_master_secret.zeroize();
     }
 }
 
@@ -83,6 +86,7 @@ impl<S: Read + Write> TlsClientConnection<S> {
             client_app_secret: Vec::new(),
             server_app_secret: Vec::new(),
             resumption_master_secret: Vec::new(),
+            exporter_master_secret: Vec::new(),
             client_hs: None,
             received_session: None,
             early_data_queue: Vec::new(),
@@ -105,6 +109,36 @@ impl<S: Read + Write> TlsClientConnection<S> {
     /// Whether the server accepted 0-RTT early data in this connection.
     pub fn early_data_accepted(&self) -> bool {
         self.early_data_accepted
+    }
+
+    /// Export keying material per RFC 8446 §7.5 / RFC 5705.
+    ///
+    /// Derives `length` bytes of key material from the TLS session using the
+    /// given label and optional context. Must only be called after the handshake
+    /// completes.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        length: usize,
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::HandshakeFailed(
+                "export_keying_material: not connected".into(),
+            ));
+        }
+        let params = self
+            .cipher_params
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
+        let factory = params.hash_factory();
+        crate::crypt::export::tls13_export_keying_material(
+            &*factory,
+            &self.exporter_master_secret,
+            label,
+            context,
+            length,
+        )
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -552,6 +586,7 @@ impl<S: Read + Write> TlsClientConnection<S> {
                         self.client_app_secret = fin_actions.client_app_secret;
                         self.server_app_secret = fin_actions.server_app_secret;
                         self.resumption_master_secret = fin_actions.resumption_master_secret;
+                        self.exporter_master_secret = fin_actions.exporter_master_secret;
 
                         self.negotiated_suite = Some(fin_actions.suite);
                         self.negotiated_version = Some(TlsVersion::Tls13);
@@ -731,12 +766,15 @@ pub struct TlsServerConnection<S: Read + Write> {
     client_app_secret: Vec<u8>,
     /// Server application traffic secret (for key updates).
     server_app_secret: Vec<u8>,
+    /// Exporter master secret (for RFC 5705 / RFC 8446 §7.5 key material export).
+    exporter_master_secret: Vec<u8>,
 }
 
 impl<S: Read + Write> Drop for TlsServerConnection<S> {
     fn drop(&mut self) {
         self.client_app_secret.zeroize();
         self.server_app_secret.zeroize();
+        self.exporter_master_secret.zeroize();
     }
 }
 
@@ -755,7 +793,38 @@ impl<S: Read + Write> TlsServerConnection<S> {
             cipher_params: None,
             client_app_secret: Vec::new(),
             server_app_secret: Vec::new(),
+            exporter_master_secret: Vec::new(),
         }
+    }
+
+    /// Export keying material per RFC 8446 §7.5 / RFC 5705.
+    ///
+    /// Derives `length` bytes of key material from the TLS session using the
+    /// given label and optional context. Must only be called after the handshake
+    /// completes.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        length: usize,
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::HandshakeFailed(
+                "export_keying_material: not connected".into(),
+            ));
+        }
+        let params = self
+            .cipher_params
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
+        let factory = params.hash_factory();
+        crate::crypt::export::tls13_export_keying_material(
+            &*factory,
+            &self.exporter_master_secret,
+            label,
+            context,
+            length,
+        )
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -1230,10 +1299,11 @@ impl<S: Read + Write> TlsServerConnection<S> {
                 .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
         }
 
-        // Save secrets for key updates
+        // Save secrets for key updates and export
         self.cipher_params = Some(actions.cipher_params);
         self.client_app_secret = actions.client_app_secret;
         self.server_app_secret = actions.server_app_secret;
+        self.exporter_master_secret = actions.exporter_master_secret;
 
         self.negotiated_suite = Some(actions.suite);
         self.negotiated_version = Some(TlsVersion::Tls13);

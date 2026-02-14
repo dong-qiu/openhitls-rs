@@ -261,6 +261,16 @@ impl Tls12ClientHandshake {
         self.kx_alg
     }
 
+    /// The client random value (for key export).
+    pub fn client_random(&self) -> &[u8; 32] {
+        &self.client_random
+    }
+
+    /// The server random value (for key export).
+    pub fn server_random(&self) -> &[u8; 32] {
+        &self.server_random
+    }
+
     /// Whether Extended Master Secret was negotiated.
     pub fn use_extended_master_secret(&self) -> bool {
         self.use_extended_master_secret

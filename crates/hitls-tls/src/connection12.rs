@@ -47,6 +47,20 @@ pub struct Tls12ClientConnection<S: Read + Write> {
     app_data_buf: Vec<u8>,
     /// Session state for resumption (populated after handshake).
     session: Option<TlsSession>,
+    /// Master secret (for RFC 5705 key material export).
+    export_master_secret: Vec<u8>,
+    /// Client random (for RFC 5705 key material export).
+    export_client_random: [u8; 32],
+    /// Server random (for RFC 5705 key material export).
+    export_server_random: [u8; 32],
+    /// PRF hash length (for determining hash factory).
+    export_hash_len: usize,
+}
+
+impl<S: Read + Write> Drop for Tls12ClientConnection<S> {
+    fn drop(&mut self) {
+        self.export_master_secret.zeroize();
+    }
 }
 
 impl<S: Read + Write> Tls12ClientConnection<S> {
@@ -61,12 +75,45 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             read_buf: Vec::with_capacity(16 * 1024),
             app_data_buf: Vec::new(),
             session: None,
+            export_master_secret: Vec::new(),
+            export_client_random: [0u8; 32],
+            export_server_random: [0u8; 32],
+            export_hash_len: 0,
         }
     }
 
     /// Take the session state (with ticket if applicable) for later resumption.
     pub fn take_session(&mut self) -> Option<TlsSession> {
         self.session.take()
+    }
+
+    /// Export keying material per RFC 5705.
+    ///
+    /// Derives `length` bytes of key material from the TLS 1.2 session using
+    /// the PRF, the given label, and optional context. Must only be called
+    /// after the handshake completes.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        length: usize,
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::HandshakeFailed(
+                "export_keying_material: not connected".into(),
+            ));
+        }
+        let factory =
+            crate::crypt::Tls12CipherSuiteParams::hash_factory_for_len(self.export_hash_len);
+        crate::crypt::export::tls12_export_keying_material(
+            &*factory,
+            &self.export_master_secret,
+            &self.export_client_random,
+            &self.export_server_random,
+            label,
+            context,
+            length,
+        )
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -386,6 +433,14 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             extended_master_secret: hs.use_extended_master_secret(),
         });
 
+        // Store export parameters (before zeroizing master_secret)
+        self.export_master_secret = flight.master_secret.clone();
+        self.export_client_random = *hs.client_random();
+        self.export_server_random = *hs.server_random();
+        if let Ok(p) = crate::crypt::Tls12CipherSuiteParams::from_suite(suite) {
+            self.export_hash_len = p.hash_len;
+        }
+
         // Zeroize secrets
         flight.master_secret.zeroize();
         flight.client_write_key.zeroize();
@@ -519,6 +574,14 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             extended_master_secret: hs.use_extended_master_secret(),
         });
 
+        // Store export parameters (before zeroizing master_secret)
+        self.export_master_secret = keys.master_secret.clone();
+        self.export_client_random = *hs.client_random();
+        self.export_server_random = *hs.server_random();
+        if let Ok(p) = crate::crypt::Tls12CipherSuiteParams::from_suite(suite) {
+            self.export_hash_len = p.hash_len;
+        }
+
         // Zeroize secrets
         keys.master_secret.zeroize();
         keys.client_write_key.zeroize();
@@ -640,6 +703,20 @@ pub struct Tls12ServerConnection<S: Read + Write> {
     app_data_buf: Vec<u8>,
     /// Session state for session ticket issuance.
     session: Option<TlsSession>,
+    /// Master secret (for RFC 5705 key material export).
+    export_master_secret: Vec<u8>,
+    /// Client random (for RFC 5705 key material export).
+    export_client_random: [u8; 32],
+    /// Server random (for RFC 5705 key material export).
+    export_server_random: [u8; 32],
+    /// PRF hash length (for determining hash factory).
+    export_hash_len: usize,
+}
+
+impl<S: Read + Write> Drop for Tls12ServerConnection<S> {
+    fn drop(&mut self) {
+        self.export_master_secret.zeroize();
+    }
 }
 
 impl<S: Read + Write> Tls12ServerConnection<S> {
@@ -654,12 +731,41 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             read_buf: Vec::with_capacity(16 * 1024),
             app_data_buf: Vec::new(),
             session: None,
+            export_master_secret: Vec::new(),
+            export_client_random: [0u8; 32],
+            export_server_random: [0u8; 32],
+            export_hash_len: 0,
         }
     }
 
     /// Take the session state (for session caching on server side).
     pub fn take_session(&mut self) -> Option<TlsSession> {
         self.session.take()
+    }
+
+    /// Export keying material per RFC 5705.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        length: usize,
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::HandshakeFailed(
+                "export_keying_material: not connected".into(),
+            ));
+        }
+        let factory =
+            crate::crypt::Tls12CipherSuiteParams::hash_factory_for_len(self.export_hash_len);
+        crate::crypt::export::tls12_export_keying_material(
+            &*factory,
+            &self.export_master_secret,
+            &self.export_client_random,
+            &self.export_server_random,
+            label,
+            context,
+            length,
+        )
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -913,6 +1019,14 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             .write_all(&sfin_record)
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
+        // Store export parameters (before zeroizing master_secret)
+        self.export_master_secret = keys.master_secret.clone();
+        self.export_client_random = *hs.client_random();
+        self.export_server_random = *hs.server_random();
+        if let Ok(p) = crate::crypt::Tls12CipherSuiteParams::from_suite(suite) {
+            self.export_hash_len = p.hash_len;
+        }
+
         // Zeroize secrets
         keys.master_secret.zeroize();
         keys.client_write_key.zeroize();
@@ -1024,6 +1138,14 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             )));
         }
         hs.process_abbreviated_finished(&fin_data)?;
+
+        // Store export parameters (before zeroizing master_secret)
+        self.export_master_secret = abbr.master_secret.clone();
+        self.export_client_random = *hs.client_random();
+        self.export_server_random = *hs.server_random();
+        if let Ok(p) = crate::crypt::Tls12CipherSuiteParams::from_suite(suite) {
+            self.export_hash_len = p.hash_len;
+        }
 
         // Zeroize secrets
         abbr.master_secret.zeroize();

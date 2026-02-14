@@ -330,7 +330,7 @@ impl CmsMessage {
                 serial_number: cert.serial_number.clone(),
             },
             digest_algorithm: digest_alg_id.clone(),
-            signed_attrs: Some(enc_explicit_ctx(0, &signed_attrs_content)[1..].to_vec()), // Store raw
+            signed_attrs: Some(signed_attrs_content.clone()), // Store raw
             signature_algorithm: sig_alg_id,
             signature,
         };
@@ -341,6 +341,72 @@ impl CmsMessage {
             encap_content_info: EncapContentInfo {
                 content_type: known::pkcs7_data().to_der_value(),
                 content: Some(data.to_vec()),
+            },
+            certificates: vec![signer_cert_der.to_vec()],
+            signer_infos: vec![si],
+        };
+
+        let encoded = encode_signed_data_cms(&sd);
+
+        Ok(CmsMessage {
+            content_type: CmsContentType::SignedData,
+            signed_data: Some(sd),
+            enveloped_data: None,
+            encrypted_data: None,
+            digested_data: None,
+            raw: encoded,
+        })
+    }
+
+    /// Create a CMS SignedData message (detached mode — content not embedded).
+    ///
+    /// In detached mode, the `encapContentInfo.eContent` field is omitted.
+    /// The verifier must supply the original data externally via
+    /// `verify_signatures(Some(data), &[])`.
+    pub fn sign_detached(
+        data: &[u8],
+        signer_cert_der: &[u8],
+        private_key_der: &[u8],
+        digest_alg: CmsDigestAlg,
+    ) -> Result<Self, PkiError> {
+        let cert = crate::x509::Certificate::from_der(signer_cert_der)
+            .map_err(|e| cerr(&format!("cert parse: {e}")))?;
+
+        let digest = compute_digest(data, digest_alg)?;
+        let digest_alg_id = digest_alg_identifier(digest_alg);
+
+        // Build signedAttrs
+        let signed_attrs_content = build_signed_attrs(&known::pkcs7_data().to_der_value(), &digest);
+        // Re-encode with SET tag for signing
+        let signed_attrs_for_signing = enc_set(&signed_attrs_content);
+
+        // Hash the signedAttrs
+        let attrs_digest = compute_digest(&signed_attrs_for_signing, digest_alg)?;
+
+        // Determine signature algorithm and sign
+        let sig_alg_oid = &cert.signature_algorithm;
+        let (signature, sig_alg_id) =
+            sign_digest(&attrs_digest, private_key_der, sig_alg_oid, &cert)?;
+
+        // Build SignerInfo
+        let si = SignerInfo {
+            version: 1,
+            sid: SignerIdentifier::IssuerAndSerialNumber {
+                issuer: extract_raw_issuer(signer_cert_der)?,
+                serial_number: cert.serial_number.clone(),
+            },
+            digest_algorithm: digest_alg_id.clone(),
+            signed_attrs: Some(signed_attrs_content.clone()),
+            signature_algorithm: sig_alg_id,
+            signature,
+        };
+
+        let sd = SignedData {
+            version: 1,
+            digest_algorithms: vec![digest_alg_id],
+            encap_content_info: EncapContentInfo {
+                content_type: known::pkcs7_data().to_der_value(),
+                content: None, // detached — no embedded content
             },
             certificates: vec![signer_cert_der.to_vec()],
             signer_infos: vec![si],
@@ -1999,5 +2065,106 @@ mod tests {
         verifier.set_verification_time(1_767_225_600); // Jan 1, 2026
         let chain = verifier.verify_cert(&dev1, &[mid]).unwrap();
         assert_eq!(chain.len(), 3);
+    }
+
+    // ── CMS Detached SignedData Tests ────────────────────────────────
+
+    /// Helper: generate a self-signed Ed25519 cert DER + key PKCS#8 DER.
+    fn gen_ed25519_cert_and_key() -> (Vec<u8>, Vec<u8>) {
+        let seed = [0x55u8; 32];
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let sk = crate::x509::SigningKey::Ed25519(kp);
+        let dn = crate::x509::DistinguishedName {
+            entries: vec![("CN".to_string(), "CMS Detached Test".to_string())],
+        };
+        let cert =
+            crate::x509::CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000)
+                .unwrap();
+        let key_der = crate::pkcs8::encode_ed25519_pkcs8_der(&seed);
+        (cert.raw, key_der)
+    }
+
+    /// Helper: generate a self-signed ECDSA P-256 cert DER + key PKCS#8 DER.
+    fn gen_ecdsa_p256_cert_and_key() -> (Vec<u8>, Vec<u8>) {
+        let kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let private_key = kp.private_key_bytes();
+        let sk = crate::x509::SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: kp,
+        };
+        let dn = crate::x509::DistinguishedName {
+            entries: vec![("CN".to_string(), "CMS Detached ECDSA Test".to_string())],
+        };
+        let cert =
+            crate::x509::CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000)
+                .unwrap();
+        let key_der =
+            crate::pkcs8::encode_ec_pkcs8_der(hitls_types::EccCurveId::NistP256, &private_key);
+        (cert.raw, key_der)
+    }
+
+    #[test]
+    fn test_cms_sign_detached_roundtrip() {
+        let (cert_der, key_der) = gen_ed25519_cert_and_key();
+        let data = b"Detached signing test data";
+
+        let cms =
+            CmsMessage::sign_detached(data, &cert_der, &key_der, CmsDigestAlg::Sha256).unwrap();
+
+        // Embedded content should be None in the in-memory struct
+        let sd = cms.signed_data.as_ref().unwrap();
+        assert!(sd.encap_content_info.content.is_none());
+
+        // DER roundtrip then verify with original data
+        let cms2 = CmsMessage::from_der(&cms.raw).unwrap();
+        let ok = cms2.verify_signatures(Some(data), &[]).unwrap();
+        assert!(ok);
+    }
+
+    #[test]
+    fn test_cms_sign_detached_wrong_data() {
+        let (cert_der, key_der) = gen_ed25519_cert_and_key();
+        let data = b"Original data";
+
+        let cms =
+            CmsMessage::sign_detached(data, &cert_der, &key_der, CmsDigestAlg::Sha256).unwrap();
+
+        // DER roundtrip; verify with wrong data should fail
+        let cms2 = CmsMessage::from_der(&cms.raw).unwrap();
+        let result = cms2.verify_signatures(Some(b"Wrong data"), &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cms_sign_detached_no_content() {
+        let (cert_der, key_der) = gen_ed25519_cert_and_key();
+        let data = b"Some content";
+
+        let cms =
+            CmsMessage::sign_detached(data, &cert_der, &key_der, CmsDigestAlg::Sha256).unwrap();
+
+        // DER roundtrip; verify without providing external data should fail
+        let cms2 = CmsMessage::from_der(&cms.raw).unwrap();
+        let result = cms2.verify_signatures(None, &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cms_sign_detached_ecdsa() {
+        let (cert_der, key_der) = gen_ecdsa_p256_cert_and_key();
+        let data = b"ECDSA detached signing test";
+
+        let cms =
+            CmsMessage::sign_detached(data, &cert_der, &key_der, CmsDigestAlg::Sha256).unwrap();
+
+        // DER roundtrip then verify
+        let cms2 = CmsMessage::from_der(&cms.raw).unwrap();
+        let ok = cms2.verify_signatures(Some(data), &[]).unwrap();
+        assert!(ok);
+
+        // Content should be None (detached)
+        let sd = cms2.signed_data.as_ref().unwrap();
+        assert!(sd.encap_content_info.content.is_none());
     }
 }

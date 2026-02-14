@@ -77,6 +77,8 @@ pub struct FinishedActions {
     pub cipher_params: CipherSuiteParams,
     /// Resumption master secret (for deriving PSKs from NewSessionTickets).
     pub resumption_master_secret: Vec<u8>,
+    /// Exporter master secret (for RFC 5705 / RFC 8446 §7.5 key material export).
+    pub exporter_master_secret: Vec<u8>,
     /// EndOfEarlyData message to send (if 0-RTT was accepted).
     /// Must be sent encrypted with 0-RTT write key before switching to HS write key.
     pub end_of_early_data_msg: Option<Vec<u8>>,
@@ -898,6 +900,15 @@ impl ClientHandshake {
             &server_app_secret,
         );
 
+        // Derive exporter master secret (RFC 8446 §7.5)
+        let exporter_master_secret = ks.derive_exporter_master_secret(&transcript_hash_sf)?;
+        crate::crypt::keylog::log_key(
+            &self.config,
+            "EXPORTER_SECRET",
+            &self.client_random,
+            &exporter_master_secret,
+        );
+
         let suite = self
             .negotiated_suite
             .ok_or_else(|| TlsError::HandshakeFailed("no negotiated suite".into()))?;
@@ -939,6 +950,7 @@ impl ClientHandshake {
             server_app_secret,
             cipher_params: params,
             resumption_master_secret,
+            exporter_master_secret,
             end_of_early_data_msg: eoed_msg,
         })
     }
