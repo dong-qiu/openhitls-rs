@@ -158,6 +158,16 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             self.read_handshake_msg()?
         };
 
+        // 3b. Handle optional CertificateStatus (RFC 6066, OCSP stapling)
+        let (hs_type, next_data) = if hs_type == HandshakeType::CertificateStatus {
+            // CertificateStatus is added to transcript but contents are not used
+            // by the handshake — just available for the application.
+            // Read next message after CertificateStatus
+            self.read_handshake_msg()?
+        } else {
+            (hs_type, next_data)
+        };
+
         // 4. Read ServerKeyExchange or skip
         let (hs_type, next_data) = if hs_type == HandshakeType::ServerKeyExchange {
             let (_, ske_body, _) = parse_handshake_header(&next_data)?;
@@ -745,6 +755,16 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
                 .seal_record(ContentType::Handshake, cert_msg)?;
             self.stream
                 .write_all(&cert_record)
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // 4b. Send CertificateStatus (if OCSP stapling, RFC 6066)
+        if let Some(ref cs_msg) = flight.certificate_status {
+            let cs_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cs_msg)?;
+            self.stream
+                .write_all(&cs_record)
                 .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
         }
 

@@ -758,6 +758,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
                 .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
         }
 
+        // 4b. Send CertificateStatus (if OCSP stapling, RFC 6066)
+        if let Some(ref cs_msg) = flight.certificate_status {
+            let cs_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cs_msg)?;
+            self.stream
+                .write_all(&cs_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
         // 5. Send ServerKeyExchange (if present -- not sent for RSA key exchange)
         if let Some(ref ske_msg) = flight.server_key_exchange {
             let ske_record = self

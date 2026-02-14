@@ -345,6 +345,44 @@ pub fn encode_server_hello_done() -> Vec<u8> {
     wrap_handshake(HandshakeType::ServerHelloDone, &[])
 }
 
+/// Encode a TLS 1.2 CertificateStatus message (RFC 6066 §8).
+///
+/// Format: status_type(1)=ocsp(1) || response_length(3) || ocsp_response
+pub fn encode_certificate_status12(ocsp_response: &[u8]) -> Vec<u8> {
+    let len = ocsp_response.len();
+    let mut body = Vec::with_capacity(4 + len);
+    body.push(0x01); // status_type = ocsp
+    body.push((len >> 16) as u8);
+    body.push((len >> 8) as u8);
+    body.push(len as u8);
+    body.extend_from_slice(ocsp_response);
+    wrap_handshake(HandshakeType::CertificateStatus, &body)
+}
+
+/// Decode a TLS 1.2 CertificateStatus message body.
+///
+/// Returns the raw OCSP response DER.
+pub fn decode_certificate_status12(body: &[u8]) -> Result<Vec<u8>, TlsError> {
+    if body.len() < 4 {
+        return Err(TlsError::HandshakeFailed(
+            "CertificateStatus: too short".into(),
+        ));
+    }
+    if body[0] != 0x01 {
+        return Err(TlsError::HandshakeFailed(format!(
+            "CertificateStatus: unsupported status_type {}",
+            body[0]
+        )));
+    }
+    let len = ((body[1] as usize) << 16) | ((body[2] as usize) << 8) | (body[3] as usize);
+    if body.len() < 4 + len {
+        return Err(TlsError::HandshakeFailed(
+            "CertificateStatus: response truncated".into(),
+        ));
+    }
+    Ok(body[4..4 + len].to_vec())
+}
+
 /// Encode a TLS 1.2 Certificate message.
 pub fn encode_certificate12(cert: &Certificate12) -> Vec<u8> {
     // Total length of all certificates
@@ -1477,5 +1515,72 @@ mod tests {
         let decoded = decode_client_key_exchange_rsa_psk(body).unwrap();
         assert_eq!(decoded.identity, cke.identity);
         assert_eq!(decoded.encrypted_pms, cke.encrypted_pms);
+    }
+
+    #[test]
+    fn test_encode_decode_certificate_status12_roundtrip() {
+        let ocsp_response = vec![0x30, 0x82, 0x01, 0x00, 0xAA, 0xBB, 0xCC];
+        let encoded = encode_certificate_status12(&ocsp_response);
+
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::CertificateStatus);
+
+        let decoded = decode_certificate_status12(body).unwrap();
+        assert_eq!(decoded, ocsp_response);
+    }
+
+    #[test]
+    fn test_encode_certificate_status12_wire_format() {
+        let ocsp_response = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let encoded = encode_certificate_status12(&ocsp_response);
+
+        // Handshake header: type(1) + length(3) = 4 bytes
+        // Body: status_type(1) + response_length(3) + response(4) = 8 bytes
+        // Total = 12 bytes
+        assert_eq!(encoded.len(), 12);
+        assert_eq!(encoded[0], 22); // HandshakeType::CertificateStatus
+                                    // Body length = 8
+        assert_eq!(&encoded[1..4], &[0x00, 0x00, 0x08]);
+        // status_type = ocsp(1)
+        assert_eq!(encoded[4], 0x01);
+        // response length = 4
+        assert_eq!(&encoded[5..8], &[0x00, 0x00, 0x04]);
+        // response data
+        assert_eq!(&encoded[8..12], &[0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    #[test]
+    fn test_decode_certificate_status12_too_short() {
+        assert!(decode_certificate_status12(&[]).is_err());
+        assert!(decode_certificate_status12(&[0x01, 0x00]).is_err());
+        assert!(decode_certificate_status12(&[0x01, 0x00, 0x00]).is_err());
+    }
+
+    #[test]
+    fn test_decode_certificate_status12_unsupported_type() {
+        // status_type = 2 (not ocsp)
+        let data = vec![0x02, 0x00, 0x00, 0x04, 0xDE, 0xAD, 0xBE, 0xEF];
+        assert!(decode_certificate_status12(&data).is_err());
+    }
+
+    #[test]
+    fn test_decode_certificate_status12_truncated_response() {
+        // Claims 10 bytes but only has 4
+        let data = vec![0x01, 0x00, 0x00, 0x0A, 0xDE, 0xAD, 0xBE, 0xEF];
+        assert!(decode_certificate_status12(&data).is_err());
+    }
+
+    #[test]
+    fn test_encode_decode_certificate_status12_empty_response() {
+        let ocsp_response = vec![];
+        let encoded = encode_certificate_status12(&ocsp_response);
+
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::CertificateStatus);
+
+        let decoded = decode_certificate_status12(body).unwrap();
+        assert!(decoded.is_empty());
     }
 }

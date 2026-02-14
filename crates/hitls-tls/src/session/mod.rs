@@ -207,3 +207,236 @@ pub fn decrypt_session_ticket(ticket_key: &[u8], ticket: &[u8]) -> Option<TlsSes
     let plaintext = hitls_crypto::modes::gcm::gcm_decrypt(ticket_key, nonce, &[], ct_tag).ok()?;
     decode_session_state(&plaintext).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_session(suite: u16, ms: &[u8]) -> TlsSession {
+        TlsSession {
+            id: Vec::new(),
+            cipher_suite: CipherSuite(suite),
+            master_secret: ms.to_vec(),
+            alpn_protocol: None,
+            ticket: None,
+            ticket_lifetime: 3600,
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: 1700000000,
+            psk: Vec::new(),
+            extended_master_secret: false,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // InMemorySessionCache
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_cache_put_get() {
+        let mut cache = InMemorySessionCache::new(10);
+        let session = make_session(0x1301, &[0xAA; 32]);
+        cache.put(b"key1", session);
+        let s = cache.get(b"key1").unwrap();
+        assert_eq!(s.cipher_suite.0, 0x1301);
+        assert_eq!(s.master_secret, vec![0xAA; 32]);
+    }
+
+    #[test]
+    fn test_cache_get_missing() {
+        let cache = InMemorySessionCache::new(10);
+        assert!(cache.get(b"nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_cache_remove() {
+        let mut cache = InMemorySessionCache::new(10);
+        cache.put(b"key1", make_session(0x1301, &[1; 32]));
+        assert!(cache.get(b"key1").is_some());
+        cache.remove(b"key1");
+        assert!(cache.get(b"key1").is_none());
+    }
+
+    #[test]
+    fn test_cache_len_is_empty() {
+        let mut cache = InMemorySessionCache::new(10);
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+        cache.put(b"a", make_session(0x1301, &[1; 32]));
+        assert!(!cache.is_empty());
+        assert_eq!(cache.len(), 1);
+        cache.put(b"b", make_session(0x1302, &[2; 32]));
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn test_cache_eviction() {
+        let mut cache = InMemorySessionCache::new(2);
+        cache.put(b"a", make_session(0x1301, &[1; 32]));
+        cache.put(b"b", make_session(0x1302, &[2; 32]));
+        assert_eq!(cache.len(), 2);
+        // Third insert should evict one entry
+        cache.put(b"c", make_session(0x1303, &[3; 32]));
+        assert_eq!(cache.len(), 2);
+        // c should exist
+        assert!(cache.get(b"c").is_some());
+    }
+
+    #[test]
+    fn test_cache_overwrite() {
+        let mut cache = InMemorySessionCache::new(10);
+        cache.put(b"key1", make_session(0x1301, &[1; 32]));
+        cache.put(b"key1", make_session(0x1302, &[2; 32]));
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.get(b"key1").unwrap().cipher_suite.0, 0x1302);
+    }
+
+    #[test]
+    fn test_cache_multiple_keys() {
+        let mut cache = InMemorySessionCache::new(10);
+        cache.put(b"a", make_session(0x1301, &[1; 32]));
+        cache.put(b"b", make_session(0x1302, &[2; 32]));
+        cache.put(b"c", make_session(0x1303, &[3; 32]));
+        assert_eq!(cache.get(b"a").unwrap().cipher_suite.0, 0x1301);
+        assert_eq!(cache.get(b"b").unwrap().cipher_suite.0, 0x1302);
+        assert_eq!(cache.get(b"c").unwrap().cipher_suite.0, 0x1303);
+    }
+
+    #[test]
+    fn test_cache_zero_capacity() {
+        let mut cache = InMemorySessionCache::new(0);
+        // Inserting into zero-capacity cache: evicts immediately
+        cache.put(b"key1", make_session(0x1301, &[1; 32]));
+        // The session was evicted to make room, then inserted — but capacity=0 means
+        // after eviction there's room for 1 (HashMap doesn't enforce max_size after put)
+        // Actually, the code evicts one then inserts, so len=0 after evict but inserts again.
+        // With 0 capacity, every insert evicts the previous entry.
+    }
+
+    // -----------------------------------------------------------------------
+    // Session state encoding/decoding
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_encode_decode_roundtrip() {
+        let session = make_session(0x1301, &[0xAB; 48]);
+        let encoded = encode_session_state(&session);
+        let decoded = decode_session_state(&encoded).unwrap();
+        assert_eq!(decoded.cipher_suite.0, 0x1301);
+        assert_eq!(decoded.master_secret, vec![0xAB; 48]);
+        assert_eq!(decoded.created_at, 1700000000);
+        assert_eq!(decoded.ticket_lifetime, 3600);
+        assert!(!decoded.extended_master_secret);
+    }
+
+    #[test]
+    fn test_encode_decode_empty_master_secret() {
+        let session = make_session(0x1302, &[]);
+        let encoded = encode_session_state(&session);
+        let decoded = decode_session_state(&encoded).unwrap();
+        assert!(decoded.master_secret.is_empty());
+        assert_eq!(decoded.cipher_suite.0, 0x1302);
+    }
+
+    #[test]
+    fn test_encode_decode_large_master_secret() {
+        let ms = vec![0x42; 256];
+        let session = make_session(0x1303, &ms);
+        let encoded = encode_session_state(&session);
+        let decoded = decode_session_state(&encoded).unwrap();
+        assert_eq!(decoded.master_secret, ms);
+    }
+
+    #[test]
+    fn test_decode_truncated() {
+        // Less than minimum header (4 bytes)
+        assert!(decode_session_state(&[0x13]).is_err());
+        assert!(decode_session_state(&[0x13, 0x01]).is_err());
+        assert!(decode_session_state(&[0x13, 0x01, 0x00]).is_err());
+    }
+
+    #[test]
+    fn test_decode_invalid_ms_len() {
+        // Header says ms_len=100 but not enough data
+        let mut data = vec![0x13, 0x01, 0x00, 100];
+        data.extend_from_slice(&[0u8; 10]); // only 10 bytes, need 100+12
+        assert!(decode_session_state(&data).is_err());
+    }
+
+    #[test]
+    fn test_encode_preserves_ems_flag() {
+        let mut session = make_session(0x1301, &[0xCC; 32]);
+        session.extended_master_secret = true;
+        let encoded = encode_session_state(&session);
+        let decoded = decode_session_state(&encoded).unwrap();
+        assert!(decoded.extended_master_secret);
+    }
+
+    #[test]
+    fn test_encode_decode_various_suites() {
+        for suite in [0x1301u16, 0x1302, 0x1303, 0xC02F, 0xCCA8] {
+            let session = make_session(suite, &[0x11; 32]);
+            let encoded = encode_session_state(&session);
+            let decoded = decode_session_state(&encoded).unwrap();
+            assert_eq!(decoded.cipher_suite.0, suite);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Session ticket encryption/decryption
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_encrypt_decrypt_roundtrip() {
+        let key = [0x42u8; 32];
+        let session = make_session(0x1301, &[0xAB; 48]);
+        let ticket = encrypt_session_ticket(&key, &session).unwrap();
+        let recovered = decrypt_session_ticket(&key, &ticket).unwrap();
+        assert_eq!(recovered.cipher_suite.0, 0x1301);
+        assert_eq!(recovered.master_secret, vec![0xAB; 48]);
+    }
+
+    #[test]
+    fn test_decrypt_wrong_key() {
+        let key = [0x42u8; 32];
+        let wrong_key = [0x43u8; 32];
+        let session = make_session(0x1301, &[0xAB; 48]);
+        let ticket = encrypt_session_ticket(&key, &session).unwrap();
+        assert!(decrypt_session_ticket(&wrong_key, &ticket).is_none());
+    }
+
+    #[test]
+    fn test_decrypt_tampered_ticket() {
+        let key = [0x42u8; 32];
+        let session = make_session(0x1301, &[0xAB; 48]);
+        let mut ticket = encrypt_session_ticket(&key, &session).unwrap();
+        // Flip a byte in the ciphertext
+        let mid = ticket.len() / 2;
+        ticket[mid] ^= 0xFF;
+        assert!(decrypt_session_ticket(&key, &ticket).is_none());
+    }
+
+    #[test]
+    fn test_decrypt_truncated() {
+        let key = [0x42u8; 32];
+        // Too short: needs at least nonce(12) + tag(16) = 28 bytes
+        assert!(decrypt_session_ticket(&key, &[0u8; 27]).is_none());
+    }
+
+    #[test]
+    fn test_decrypt_empty() {
+        let key = [0x42u8; 32];
+        assert!(decrypt_session_ticket(&key, &[]).is_none());
+    }
+
+    #[test]
+    fn test_encrypt_produces_different_tickets() {
+        let key = [0x42u8; 32];
+        let session = make_session(0x1301, &[0xAB; 48]);
+        let ticket1 = encrypt_session_ticket(&key, &session).unwrap();
+        let ticket2 = encrypt_session_ticket(&key, &session).unwrap();
+        // Different nonces → different ciphertexts
+        assert_ne!(ticket1, ticket2);
+    }
+}

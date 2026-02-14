@@ -14,7 +14,7 @@ path = "src/main.rs"
 hitls-types = { path = "../hitls-types" }
 hitls-crypto = { path = "../hitls-crypto", features = [
     "md5", "sha1", "sha2", "sha3", "sm3",
-    "aes", "modes", "chacha20",
+    "aes", "sm4", "modes", "chacha20",
     "hmac", "cmac",
     "rsa", "ecdsa", "ed25519", "x25519",
     "mlkem", "mldsa",

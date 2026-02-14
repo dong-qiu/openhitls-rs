@@ -151,6 +151,7 @@ pub fn parse_handshake_header(data: &[u8]) -> Result<(HandshakeType, &[u8], usiz
         15 => HandshakeType::CertificateVerify,
         16 => HandshakeType::ClientKeyExchange,
         20 => HandshakeType::Finished,
+        22 => HandshakeType::CertificateStatus,
         24 => HandshakeType::KeyUpdate,
         25 => HandshakeType::CompressedCertificate,
         254 => HandshakeType::MessageHash,

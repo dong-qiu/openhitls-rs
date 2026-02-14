@@ -412,3 +412,359 @@ impl Default for RecordLayer {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // RecordLayer state
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_new_defaults() {
+        let rl = RecordLayer::new();
+        assert!(!rl.is_encrypting());
+        assert!(!rl.is_decrypting());
+        assert_eq!(rl.max_fragment_size, MAX_PLAINTEXT_LENGTH);
+    }
+
+    #[test]
+    fn test_default_same_as_new() {
+        let rl = RecordLayer::default();
+        assert!(!rl.is_encrypting());
+        assert!(!rl.is_decrypting());
+        assert_eq!(rl.max_fragment_size, MAX_PLAINTEXT_LENGTH);
+    }
+
+    #[test]
+    fn test_activate_deactivate_tls13() {
+        let mut rl = RecordLayer::new();
+        let keys = TrafficKeys {
+            key: vec![0x42; 16],
+            iv: vec![0x43; 12],
+        };
+        rl.activate_write_encryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+        assert!(rl.is_encrypting());
+        assert!(!rl.is_decrypting());
+        rl.activate_read_decryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+        assert!(rl.is_decrypting());
+
+        rl.deactivate_write_encryption();
+        assert!(!rl.is_encrypting());
+        rl.deactivate_read_decryption();
+        assert!(!rl.is_decrypting());
+    }
+
+    #[test]
+    fn test_activate_deactivate_tls12_cbc() {
+        let mut rl = RecordLayer::new();
+        rl.activate_write_encryption12_cbc(vec![0; 16], vec![0; 20], 20);
+        assert!(rl.is_encrypting());
+        rl.activate_read_decryption12_cbc(vec![0; 16], vec![0; 20], 20);
+        assert!(rl.is_decrypting());
+        rl.deactivate_write_encryption();
+        rl.deactivate_read_decryption();
+        assert!(!rl.is_encrypting());
+        assert!(!rl.is_decrypting());
+    }
+
+    #[test]
+    fn test_activate_deactivate_tls12_etm() {
+        let mut rl = RecordLayer::new();
+        rl.activate_write_encryption12_etm(vec![0; 16], vec![0; 32], 32);
+        assert!(rl.is_encrypting());
+        rl.activate_read_decryption12_etm(vec![0; 16], vec![0; 32], 32);
+        assert!(rl.is_decrypting());
+        rl.deactivate_write_encryption();
+        rl.deactivate_read_decryption();
+        assert!(!rl.is_encrypting());
+        assert!(!rl.is_decrypting());
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_record / serialize_record
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_serialize_roundtrip() {
+        let rl = RecordLayer::new();
+        let record = Record {
+            content_type: ContentType::Handshake,
+            version: 0x0303,
+            fragment: vec![0x01, 0x00, 0x00, 0x05, 0x03, 0x03, 0x00, 0x00, 0x00],
+        };
+        let bytes = rl.serialize_record(&record);
+        let (parsed, consumed) = rl.parse_record(&bytes).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!(parsed.content_type, ContentType::Handshake);
+        assert_eq!(parsed.version, 0x0303);
+        assert_eq!(parsed.fragment, record.fragment);
+    }
+
+    #[test]
+    fn test_parse_content_types() {
+        let rl = RecordLayer::new();
+        for (ct_byte, expected) in [
+            (20u8, ContentType::ChangeCipherSpec),
+            (21, ContentType::Alert),
+            (22, ContentType::Handshake),
+            (23, ContentType::ApplicationData),
+        ] {
+            let data = [ct_byte, 0x03, 0x03, 0x00, 0x02, 0xAA, 0xBB];
+            let (record, consumed) = rl.parse_record(&data).unwrap();
+            assert_eq!(consumed, 7);
+            assert_eq!(record.content_type, expected);
+            assert_eq!(record.fragment, vec![0xAA, 0xBB]);
+        }
+    }
+
+    #[test]
+    fn test_parse_unknown_content_type() {
+        let rl = RecordLayer::new();
+        let data = [99u8, 0x03, 0x03, 0x00, 0x01, 0xFF];
+        assert!(rl.parse_record(&data).is_err());
+    }
+
+    #[test]
+    fn test_parse_incomplete_header() {
+        let rl = RecordLayer::new();
+        assert!(rl.parse_record(&[]).is_err());
+        assert!(rl.parse_record(&[22]).is_err());
+        assert!(rl.parse_record(&[22, 0x03, 0x03]).is_err());
+        assert!(rl.parse_record(&[22, 0x03, 0x03, 0x00]).is_err());
+    }
+
+    #[test]
+    fn test_parse_incomplete_fragment() {
+        let rl = RecordLayer::new();
+        // Header says 100 bytes but only 5 available
+        let data = [22u8, 0x03, 0x03, 0x00, 100, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        assert!(rl.parse_record(&data).is_err());
+    }
+
+    #[test]
+    fn test_parse_oversized_record() {
+        let rl = RecordLayer::new();
+        // Length = MAX_PLAINTEXT_LENGTH + 257 → too large
+        let len = (MAX_PLAINTEXT_LENGTH + 257) as u16;
+        let mut data = vec![23u8, 0x03, 0x03];
+        data.extend_from_slice(&len.to_be_bytes());
+        data.extend(vec![0u8; len as usize]);
+        assert!(rl.parse_record(&data).is_err());
+    }
+
+    #[test]
+    fn test_serialize_empty_fragment() {
+        let rl = RecordLayer::new();
+        let record = Record {
+            content_type: ContentType::Alert,
+            version: 0x0303,
+            fragment: Vec::new(),
+        };
+        let bytes = rl.serialize_record(&record);
+        assert_eq!(bytes, vec![21, 0x03, 0x03, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn test_serialize_record_format() {
+        let rl = RecordLayer::new();
+        let record = Record {
+            content_type: ContentType::ApplicationData,
+            version: 0x0301,
+            fragment: vec![0x01, 0x02, 0x03],
+        };
+        let bytes = rl.serialize_record(&record);
+        assert_eq!(bytes[0], 23); // ApplicationData
+        assert_eq!(&bytes[1..3], &[0x03, 0x01]); // version
+        assert_eq!(&bytes[3..5], &[0x00, 0x03]); // length
+        assert_eq!(&bytes[5..], &[0x01, 0x02, 0x03]); // fragment
+    }
+
+    // -----------------------------------------------------------------------
+    // seal_record / open_record
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_seal_open_plaintext() {
+        let mut rl = RecordLayer::new();
+        let data = b"hello plaintext";
+        let sealed = rl.seal_record(ContentType::Handshake, data).unwrap();
+        let (ct, pt, consumed) = rl.open_record(&sealed).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        assert_eq!(pt, data);
+        assert_eq!(consumed, sealed.len());
+    }
+
+    #[test]
+    fn test_seal_open_tls13_aes128() {
+        let mut rl = RecordLayer::new();
+        let keys = TrafficKeys {
+            key: vec![0x42; 16],
+            iv: vec![0x43; 12],
+        };
+        rl.activate_write_encryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+        rl.activate_read_decryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+
+        let plaintext = b"hello encrypted world";
+        let sealed = rl
+            .seal_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        // Sealed record should look like ApplicationData on the wire
+        assert_eq!(sealed[0], 23);
+
+        let (ct, pt, consumed) = rl.open_record(&sealed).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, plaintext);
+        assert_eq!(consumed, sealed.len());
+    }
+
+    #[test]
+    fn test_seal_open_tls13_aes256() {
+        let mut rl = RecordLayer::new();
+        let keys = TrafficKeys {
+            key: vec![0x44; 32],
+            iv: vec![0x45; 12],
+        };
+        rl.activate_write_encryption(CipherSuite::TLS_AES_256_GCM_SHA384, &keys)
+            .unwrap();
+        rl.activate_read_decryption(CipherSuite::TLS_AES_256_GCM_SHA384, &keys)
+            .unwrap();
+
+        let plaintext = b"AES-256-GCM test data";
+        let sealed = rl
+            .seal_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        let (ct, pt, _) = rl.open_record(&sealed).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, plaintext);
+    }
+
+    #[test]
+    fn test_seal_open_tls13_chacha20() {
+        let mut rl = RecordLayer::new();
+        let keys = TrafficKeys {
+            key: vec![0x46; 32],
+            iv: vec![0x47; 12],
+        };
+        rl.activate_write_encryption(CipherSuite::TLS_CHACHA20_POLY1305_SHA256, &keys)
+            .unwrap();
+        rl.activate_read_decryption(CipherSuite::TLS_CHACHA20_POLY1305_SHA256, &keys)
+            .unwrap();
+
+        let plaintext = b"ChaCha20-Poly1305 test";
+        let sealed = rl
+            .seal_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        let (ct, pt, _) = rl.open_record(&sealed).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, plaintext);
+    }
+
+    #[test]
+    fn test_seal_plaintext_too_large() {
+        let mut rl = RecordLayer::new();
+        let data = vec![0u8; MAX_PLAINTEXT_LENGTH + 1];
+        assert!(rl.seal_record(ContentType::ApplicationData, &data).is_err());
+    }
+
+    #[test]
+    fn test_open_tampered_ciphertext() {
+        let mut rl = RecordLayer::new();
+        let keys = TrafficKeys {
+            key: vec![0x42; 16],
+            iv: vec![0x43; 12],
+        };
+        rl.activate_write_encryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+        rl.activate_read_decryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+
+        let plaintext = b"data to tamper with";
+        let mut sealed = rl
+            .seal_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        // Tamper with the ciphertext portion (after 5-byte header)
+        let mid = 5 + (sealed.len() - 5) / 2;
+        sealed[mid] ^= 0xFF;
+        assert!(rl.open_record(&sealed).is_err());
+    }
+
+    #[test]
+    fn test_seal_multiple_sequence_numbers() {
+        let mut rl = RecordLayer::new();
+        let keys = TrafficKeys {
+            key: vec![0x42; 16],
+            iv: vec![0x43; 12],
+        };
+        rl.activate_write_encryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+        rl.activate_read_decryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+
+        // Multiple seal+open cycles should work (sequence numbers increment)
+        for i in 0u8..5 {
+            let msg = vec![i; 10];
+            let sealed = rl.seal_record(ContentType::ApplicationData, &msg).unwrap();
+            let (ct, pt, _) = rl.open_record(&sealed).unwrap();
+            assert_eq!(ct, ContentType::ApplicationData);
+            assert_eq!(pt, msg);
+        }
+    }
+
+    #[test]
+    fn test_content_type_hiding_tls13() {
+        let mut rl = RecordLayer::new();
+        let keys = TrafficKeys {
+            key: vec![0x42; 16],
+            iv: vec![0x43; 12],
+        };
+        rl.activate_write_encryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+        rl.activate_read_decryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+
+        let types = [
+            ContentType::Alert,
+            ContentType::Handshake,
+            ContentType::ApplicationData,
+        ];
+        for &inner_type in &types {
+            let sealed = rl.seal_record(inner_type, b"test data").unwrap();
+            // All encrypted records appear as ApplicationData on the wire
+            assert_eq!(sealed[0], 23);
+            let (ct, pt, _) = rl.open_record(&sealed).unwrap();
+            assert_eq!(ct, inner_type);
+            assert_eq!(pt, b"test data");
+        }
+    }
+
+    #[test]
+    fn test_parse_record_extra_data() {
+        let rl = RecordLayer::new();
+        // Build a valid record followed by extra bytes
+        let mut data = vec![22u8, 0x03, 0x03, 0x00, 0x03, 0x01, 0x02, 0x03];
+        data.extend_from_slice(&[0xFF, 0xFF]); // extra bytes
+        let (record, consumed) = rl.parse_record(&data).unwrap();
+        assert_eq!(consumed, 8); // only consumes the record
+        assert_eq!(record.fragment, vec![0x01, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn test_max_fragment_size_custom() {
+        let mut rl = RecordLayer::new();
+        rl.max_fragment_size = 512;
+        // 512 bytes should work
+        let data = vec![0u8; 512];
+        let sealed = rl.seal_record(ContentType::ApplicationData, &data).unwrap();
+        assert!(!sealed.is_empty());
+        // 513 bytes should fail
+        let data = vec![0u8; 513];
+        assert!(rl.seal_record(ContentType::ApplicationData, &data).is_err());
+    }
+}

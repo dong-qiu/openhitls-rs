@@ -60,6 +60,8 @@ pub struct ServerFlightResult {
     pub server_hello: Vec<u8>,
     /// Certificate handshake message (None for PSK suites without certificates).
     pub certificate: Option<Vec<u8>>,
+    /// CertificateStatus message (RFC 6066, OCSP stapling — None if not requested or no staple).
+    pub certificate_status: Option<Vec<u8>>,
     /// ServerKeyExchange handshake message (None for RSA static key exchange).
     pub server_key_exchange: Option<Vec<u8>>,
     /// CertificateRequest message (only if mTLS is enabled).
@@ -200,6 +202,10 @@ pub struct Tls12ServerHandshake {
     client_offered_etm: bool,
     /// Client's record size limit from ClientHello (RFC 8449).
     client_record_size_limit: Option<u16>,
+    /// Whether the client sent the status_request extension (OCSP stapling).
+    client_wants_ocsp: bool,
+    /// Whether the client sent the signed_certificate_timestamp extension.
+    client_wants_sct: bool,
 }
 
 impl Drop for Tls12ServerHandshake {
@@ -235,6 +241,8 @@ impl Tls12ServerHandshake {
             client_offered_ems: false,
             client_offered_etm: false,
             client_record_size_limit: None,
+            client_wants_ocsp: false,
+            client_wants_sct: false,
         }
     }
 
@@ -392,10 +400,10 @@ impl Tls12ServerHandshake {
                     self.client_record_size_limit = Some(parse_record_size_limit(&ext.data)?);
                 }
                 ExtensionType::STATUS_REQUEST => {
-                    // Note: TLS 1.2 OCSP stapling detected but not yet fully implemented
+                    self.client_wants_ocsp = true;
                 }
                 ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP => {
-                    // Note: TLS 1.2 SCT detected but not yet fully implemented
+                    self.client_wants_sct = true;
                 }
                 _ => {} // ignore other extensions
             }
@@ -513,6 +521,19 @@ impl Tls12ServerHandshake {
             let msg = encode_certificate12(&cert12);
             self.transcript.update(&msg)?;
             Some(msg)
+        } else {
+            None
+        };
+
+        // Build CertificateStatus (RFC 6066 — OCSP stapling)
+        let cert_status_msg = if self.client_wants_ocsp {
+            if let Some(ref ocsp_response) = self.config.ocsp_staple {
+                let msg = crate::handshake::codec12::encode_certificate_status12(ocsp_response);
+                self.transcript.update(&msg)?;
+                Some(msg)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -674,6 +695,7 @@ impl Tls12ServerHandshake {
         Ok(ServerFlightResult {
             server_hello: sh_msg,
             certificate: cert_msg,
+            certificate_status: cert_status_msg,
             server_key_exchange: ske_msg_opt,
             certificate_request,
             server_hello_done: shd_msg,
@@ -1989,5 +2011,179 @@ mod tests {
         };
 
         encode_client_hello(&ch)
+    }
+
+    /// Build a ClientHello with optional STATUS_REQUEST and SCT extensions.
+    fn build_test_client_hello_with_ocsp(
+        suites: &[CipherSuite],
+        include_status_request: bool,
+        include_sct: bool,
+    ) -> Vec<u8> {
+        use crate::handshake::codec::encode_client_hello;
+        use crate::handshake::extensions_codec::*;
+
+        let mut random = [0u8; 32];
+        getrandom::getrandom(&mut random).unwrap();
+
+        let mut extensions = vec![
+            build_signature_algorithms(&[
+                SignatureScheme::ED25519,
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+                SignatureScheme::RSA_PSS_RSAE_SHA256,
+            ]),
+            build_supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519]),
+            build_ec_point_formats(),
+            build_renegotiation_info_initial(),
+        ];
+        if include_status_request {
+            extensions.push(build_status_request_ch());
+        }
+        if include_sct {
+            extensions.push(build_sct_ch());
+        }
+
+        let ch = ClientHello {
+            random,
+            legacy_session_id: vec![0u8; 32],
+            cipher_suites: suites.to_vec(),
+            extensions,
+        };
+
+        encode_client_hello(&ch)
+    }
+
+    #[test]
+    fn test_server_ocsp_stapling_when_requested_and_configured() {
+        let fake_ocsp_response = vec![0x30, 0x82, 0x01, 0x00, 0xAA, 0xBB];
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
+            .signature_algorithms(&[
+                SignatureScheme::ED25519,
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+                SignatureScheme::RSA_PSS_RSAE_SHA256,
+            ])
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
+            .ocsp_staple(fake_ocsp_response.clone())
+            .build();
+
+        let mut hs = Tls12ServerHandshake::new(config);
+        let ch = build_test_client_hello_with_ocsp(
+            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            true,
+            false,
+        );
+        let result = hs.process_client_hello(&ch).unwrap();
+
+        // CertificateStatus should be present
+        let cs = result
+            .certificate_status
+            .as_ref()
+            .expect("CertificateStatus should be present");
+        let (ht, body, _) = parse_handshake_header(cs).unwrap();
+        assert_eq!(ht, HandshakeType::CertificateStatus);
+
+        let ocsp = crate::handshake::codec12::decode_certificate_status12(body).unwrap();
+        assert_eq!(ocsp, fake_ocsp_response);
+    }
+
+    #[test]
+    fn test_server_no_ocsp_when_not_requested() {
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
+            .signature_algorithms(&[
+                SignatureScheme::ED25519,
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+                SignatureScheme::RSA_PSS_RSAE_SHA256,
+            ])
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
+            .ocsp_staple(vec![0x30, 0x82, 0x01, 0x00])
+            .build();
+
+        let mut hs = Tls12ServerHandshake::new(config);
+        // Client does NOT include STATUS_REQUEST extension
+        let ch = build_test_client_hello_with_ocsp(
+            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            false,
+            false,
+        );
+        let result = hs.process_client_hello(&ch).unwrap();
+
+        // No CertificateStatus since client didn't request it
+        assert!(result.certificate_status.is_none());
+    }
+
+    #[test]
+    fn test_server_no_ocsp_when_no_staple_configured() {
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
+            .signature_algorithms(&[
+                SignatureScheme::ED25519,
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+                SignatureScheme::RSA_PSS_RSAE_SHA256,
+            ])
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
+            // No ocsp_staple configured
+            .build();
+
+        let mut hs = Tls12ServerHandshake::new(config);
+        // Client requests OCSP stapling but server has no staple
+        let ch = build_test_client_hello_with_ocsp(
+            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            true,
+            false,
+        );
+        let result = hs.process_client_hello(&ch).unwrap();
+
+        // No CertificateStatus since server has no OCSP staple
+        assert!(result.certificate_status.is_none());
+    }
+
+    #[test]
+    fn test_server_flight_order_with_ocsp() {
+        let fake_ocsp = vec![0xDE, 0xAD];
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
+            .signature_algorithms(&[
+                SignatureScheme::ED25519,
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+                SignatureScheme::RSA_PSS_RSAE_SHA256,
+            ])
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
+            .ocsp_staple(fake_ocsp)
+            .build();
+
+        let mut hs = Tls12ServerHandshake::new(config);
+        let ch = build_test_client_hello_with_ocsp(
+            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            true,
+            false,
+        );
+        let result = hs.process_client_hello(&ch).unwrap();
+
+        // Verify complete flight: SH, Cert, CertificateStatus, SKE, SHD
+        let (ht, _, _) = parse_handshake_header(&result.server_hello).unwrap();
+        assert_eq!(ht, HandshakeType::ServerHello);
+
+        let (ht, _, _) = parse_handshake_header(result.certificate.as_ref().unwrap()).unwrap();
+        assert_eq!(ht, HandshakeType::Certificate);
+
+        let (ht, _, _) =
+            parse_handshake_header(result.certificate_status.as_ref().unwrap()).unwrap();
+        assert_eq!(ht, HandshakeType::CertificateStatus);
+
+        let (ht, _, _) =
+            parse_handshake_header(result.server_key_exchange.as_ref().unwrap()).unwrap();
+        assert_eq!(ht, HandshakeType::ServerKeyExchange);
+
+        let (ht, _, _) = parse_handshake_header(&result.server_hello_done).unwrap();
+        assert_eq!(ht, HandshakeType::ServerHelloDone);
     }
 }

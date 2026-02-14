@@ -1404,3 +1404,13 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 87 new tests (crypto 418→463 +45 tests +1 ignored: 8 field, 6 edwards, 8 ed448, 5 x448; tls 413→423 +10 tests), total 1157 (37 ignored). 5 new files (curve448/mod.rs, curve448/field.rs, curve448/edwards.rs, ed448/mod.rs, x448/mod.rs), 10+ modified files. Key bugs fixed: Ed448 addition formula must use separate X1*X2/Y1*Y2 (not HWCD trick which requires a=-1); X448 Montgomery ladder BB→AA variable swap; basepoint coordinate derivation; hex vector corruption. TLS integration: Ed448 signing/verification in TLS 1.3 and 1.2, X448 key exchange with NamedGroup::X448, ServerPrivateKey::Ed448 variant.
 
 1157 total tests (37 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 50: Test Coverage + CMS Ed25519/Ed448 + enc CLI + TLS 1.2 OCSP/SCT (2026-02-13)
+
+**Prompt**: Implement P1 priority items: (1) Add test coverage for alert/session/record TLS modules that had zero tests. (2) Wire CMS Ed25519/Ed448 signature verification (replace "not yet supported" stubs). (3) Expand enc CLI from AES-256-GCM only to support 4 ciphers. (4) Implement TLS 1.2 OCSP Stapling CertificateStatus message (RFC 6066 §8).
+
+**Result**: 71 new tests across 4 parts. Part 1: 52 tests for alert (8: enum values, from_u8), session (21: cache ops, encode/decode, ticket encrypt/decrypt), record (23: state mgmt, parse/serialize, seal/open with TLS 1.3 AEAD, content type hiding). Part 2: 3 CMS tests (Ed25519/Ed448 sign-verify roundtrip, tampered sig detection); replaced stubs with actual EdDSA verification/signing using parse_eddsa_private_key() helper. Part 3: 6 enc CLI tests; refactored to CipherParams dispatcher supporting aes-256-gcm, aes-128-gcm, chacha20-poly1305, sm4-gcm via --cipher flag. Part 4: 10 TLS 1.2 OCSP tests (6 codec: encode/decode CertificateStatus wire format; 4 server: OCSP when requested, not-requested, no-staple, flight order). Added HandshakeType::CertificateStatus (22), server sends between Certificate and SKE, client handles optional message. Key bugs: ChaCha20-Poly1305 is struct-based API not function-based; ed448/sm4 features needed in downstream Cargo.toml.
+
+1397 total tests (37 ignored). Clippy clean, fmt clean.

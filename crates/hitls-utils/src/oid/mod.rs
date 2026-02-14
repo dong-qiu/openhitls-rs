@@ -188,6 +188,14 @@ pub mod known {
         Oid::new(&[1, 3, 101, 110])
     }
 
+    // Ed448/X448
+    pub fn ed448() -> Oid {
+        Oid::new(&[1, 3, 101, 113])
+    }
+    pub fn x448() -> Oid {
+        Oid::new(&[1, 3, 101, 111])
+    }
+
     // AES
     pub fn aes128_cbc() -> Oid {
         Oid::new(&[2, 16, 840, 1, 101, 3, 4, 1, 2])

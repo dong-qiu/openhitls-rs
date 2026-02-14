@@ -4470,3 +4470,78 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1157 workspace tests passing (37 ignored), +87 new tests
+
+## Phase 50: Test Coverage + CMS Ed25519/Ed448 + enc CLI + TLS 1.2 OCSP/SCT (Session 2026-02-13)
+
+### Goals
+- Close test coverage gaps for alert, session, and record TLS modules (zero tests → comprehensive coverage)
+- Wire CMS Ed25519/Ed448 signature verification (replace "not yet supported" stubs)
+- Expand enc CLI to support 4 cipher types (was AES-256-GCM only)
+- Implement TLS 1.2 OCSP Stapling CertificateStatus message (RFC 6066 §8)
+
+### Implementation Details
+
+#### Part 1: Alert / Session / Record Tests (52 tests)
+
+**Alert module** (`crates/hitls-tls/src/alert/mod.rs`):
+- Added `AlertLevel::from_u8()` and `AlertDescription::from_u8()` conversion methods
+- 8 tests: enum repr values, exhaustive variant check, creation, debug, from_u8 roundtrip, unknown codes
+
+**Session module** (`crates/hitls-tls/src/session/mod.rs`):
+- 21 tests covering InMemorySessionCache (put/get/remove/len/eviction/overwrite/zero-capacity), encode/decode session state roundtrips (empty ms, large ms, truncated, invalid ms_len, EMS flag, various suites), and session ticket encrypt/decrypt (roundtrip, wrong key, tampered, truncated, empty, different nonces)
+
+**Record module** (`crates/hitls-tls/src/record/mod.rs`):
+- 23 tests covering RecordLayer state (defaults, activate/deactivate TLS 1.3/1.2 AEAD/CBC/ETM), parse/serialize records (roundtrip for handshake/alert/appdata, incomplete header/fragment, oversized, empty), seal/open (plaintext passthrough, TLS 1.3 AES-128/256-GCM and ChaCha20-Poly1305 roundtrip, oversized reject, tampered ciphertext, sequence numbers, content type hiding)
+
+#### Part 2: CMS Ed25519/Ed448 (3 tests)
+
+- Replaced Ed25519 "not yet supported" stub in `verify_signature_with_cert()` with actual verification using `Ed25519KeyPair::from_public_key()`
+- Added Ed448 verification support using `Ed448KeyPair::from_public_key()`
+- Added Ed25519/Ed448 signing in `sign_digest()` with `parse_eddsa_private_key()` helper for PKCS#8 key parsing
+- Added OIDs: `ed448()` (1.3.101.113) and `x448()` (1.3.101.111) to hitls-utils
+- 3 tests: Ed25519 verify roundtrip, Ed25519 tampered signature, Ed448 verify roundtrip
+
+#### Part 3: enc CLI Cipher Expansion (6 tests)
+
+- Refactored `enc.rs` from single-cipher to multi-cipher support
+- Added `CipherParams` struct and `cipher_params()` dispatcher
+- Added `aead_encrypt_raw()`/`aead_decrypt_raw()` dispatching to correct crypto API
+- Supported ciphers: aes-256-gcm (existing), aes-128-gcm, chacha20-poly1305, sm4-gcm
+- All use same output format: `nonce(12) || ciphertext+tag`
+- 6 tests: roundtrip for each cipher, unknown cipher error, file-level roundtrip
+
+#### Part 4: TLS 1.2 OCSP Stapling CertificateStatus (10 tests)
+
+- Added `CertificateStatus = 22` to `HandshakeType` enum
+- Added `encode_certificate_status12()` and `decode_certificate_status12()` to codec12.rs
+- Server: Added `client_wants_ocsp`/`client_wants_sct` flags, parse STATUS_REQUEST extension, build CertificateStatus message (type 22: `status_type(1)=ocsp || response_len(3) || response`)
+- Server flight order: SH → Cert → [CertificateStatus] → [SKE] → SHD
+- Client: Handle optional CertificateStatus between Certificate and ServerKeyExchange
+- Updated sync and async connection code
+- 6 codec tests: roundtrip, wire format, too short, unsupported type, truncated, empty
+- 4 server tests: OCSP when requested, no OCSP when not requested, no OCSP when no staple, flight order verification
+
+### Files Created
+None (all changes to existing files)
+
+### Files Modified
+- `crates/hitls-tls/src/alert/mod.rs` — Added from_u8() methods + 8 tests
+- `crates/hitls-tls/src/session/mod.rs` — Added 21 tests
+- `crates/hitls-tls/src/record/mod.rs` — Added 23 tests
+- `crates/hitls-utils/src/oid/mod.rs` — Added ed448() and x448() OIDs
+- `crates/hitls-pki/Cargo.toml` — Added ed448 feature
+- `crates/hitls-pki/src/cms/mod.rs` — Ed25519/Ed448 verification + signing + 3 tests
+- `crates/hitls-cli/src/enc.rs` — Multi-cipher support + 6 tests
+- `crates/hitls-cli/Cargo.toml` — Added sm4 feature
+- `crates/hitls-tls/src/handshake/mod.rs` — Added CertificateStatus variant
+- `crates/hitls-tls/src/handshake/codec.rs` — Added CertificateStatus parsing
+- `crates/hitls-tls/src/handshake/codec12.rs` — encode/decode CertificateStatus + 6 tests
+- `crates/hitls-tls/src/handshake/server12.rs` — OCSP/SCT flags + CertificateStatus flight + 4 tests
+- `crates/hitls-tls/src/connection12.rs` — Server CertificateStatus sending + client handling
+- `crates/hitls-tls/src/connection12_async.rs` — Async CertificateStatus sending
+- `CLAUDE.md`, `README.md`, `DEV_LOG.md` — Updated
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1397 workspace tests passing (37 ignored), +71 new tests

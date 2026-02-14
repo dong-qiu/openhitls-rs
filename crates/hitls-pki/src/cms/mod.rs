@@ -683,9 +683,28 @@ fn verify_signature_with_cert(
             Err(cerr("ECDSA signature verification failed"))
         }
     } else if sig_oid == known::ed25519() {
-        // Ed25519 in CMS requires signing the full message, not a digest.
-        // Not yet supported.
-        Err(cerr("Ed25519 in CMS not yet supported"))
+        let kp =
+            hitls_crypto::ed25519::Ed25519KeyPair::from_public_key(&cert.public_key.public_key)
+                .map_err(|e| cerr(&format!("Ed25519 key: {e}")))?;
+        let ok = kp
+            .verify(digest, signature)
+            .map_err(|e| cerr(&format!("Ed25519 verify: {e}")))?;
+        if ok {
+            Ok(())
+        } else {
+            Err(cerr("Ed25519 signature verification failed"))
+        }
+    } else if sig_oid == known::ed448() {
+        let kp = hitls_crypto::ed448::Ed448KeyPair::from_public_key(&cert.public_key.public_key)
+            .map_err(|e| cerr(&format!("Ed448 key: {e}")))?;
+        let ok = kp
+            .verify(digest, signature)
+            .map_err(|e| cerr(&format!("Ed448 verify: {e}")))?;
+        if ok {
+            Ok(())
+        } else {
+            Err(cerr("Ed448 signature verification failed"))
+        }
     } else {
         Err(cerr(&format!("unsupported sig alg: {sig_oid}")))
     }
@@ -740,9 +759,66 @@ fn sign_digest(
                 params: None,
             },
         ))
+    } else if sig_oid == known::ed25519() {
+        let seed = parse_eddsa_private_key(private_key_der)?;
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed)
+            .map_err(|e| cerr(&format!("Ed25519 key: {e}")))?;
+        let signature = kp
+            .sign(digest)
+            .map_err(|e| cerr(&format!("Ed25519 sign: {e}")))?
+            .to_vec();
+        Ok((
+            signature,
+            AlgorithmIdentifier {
+                oid: cert_sig_alg_oid.to_vec(),
+                params: None,
+            },
+        ))
+    } else if sig_oid == known::ed448() {
+        let seed = parse_eddsa_private_key(private_key_der)?;
+        let kp = hitls_crypto::ed448::Ed448KeyPair::from_seed(&seed)
+            .map_err(|e| cerr(&format!("Ed448 key: {e}")))?;
+        let signature = kp
+            .sign(digest)
+            .map_err(|e| cerr(&format!("Ed448 sign: {e}")))?
+            .to_vec();
+        Ok((
+            signature,
+            AlgorithmIdentifier {
+                oid: cert_sig_alg_oid.to_vec(),
+                params: None,
+            },
+        ))
     } else {
         Err(cerr(&format!("unsupported sig alg for signing: {sig_oid}")))
     }
+}
+
+/// Parse EdDSA private key seed from PKCS#8 DER.
+///
+/// PKCS#8: SEQUENCE { version, algorithm SEQUENCE { OID }, privateKey OCTET STRING }
+/// The privateKey is itself a DER-encoded OCTET STRING containing the seed.
+fn parse_eddsa_private_key(pkcs8_der: &[u8]) -> Result<Vec<u8>, PkiError> {
+    let mut dec = Decoder::new(pkcs8_der);
+    let mut seq = dec
+        .read_sequence()
+        .map_err(|e| cerr(&format!("PKCS8: {e}")))?;
+    let _version = seq
+        .read_integer()
+        .map_err(|e| cerr(&format!("PKCS8 ver: {e}")))?;
+    let _alg = seq
+        .read_sequence()
+        .map_err(|e| cerr(&format!("PKCS8 alg: {e}")))?;
+    let key_octet = seq
+        .read_octet_string()
+        .map_err(|e| cerr(&format!("PKCS8 key: {e}")))?;
+    // The key_octet is another OCTET STRING wrapping the raw seed
+    let mut inner_dec = Decoder::new(key_octet);
+    let seed = inner_dec
+        .read_octet_string()
+        .map_err(|e| cerr(&format!("EdDSA seed: {e}")))?
+        .to_vec();
+    Ok(seed)
 }
 
 fn parse_rsa_private_key(pkcs8_der: &[u8]) -> Result<hitls_crypto::rsa::RsaPrivateKey, PkiError> {
@@ -1362,5 +1438,114 @@ mod tests {
         // Verify it's parseable as a SEQUENCE
         let mut dec = Decoder::new(&encoded);
         let _seq = dec.read_sequence().unwrap();
+    }
+
+    /// Helper: make a minimal Certificate with Ed25519 public key for CMS tests.
+    fn make_ed25519_cert(pub_key: &[u8]) -> crate::x509::Certificate {
+        crate::x509::Certificate {
+            raw: Vec::new(),
+            version: 3,
+            serial_number: vec![0x01],
+            issuer: crate::x509::DistinguishedName {
+                entries: Vec::new(),
+            },
+            subject: crate::x509::DistinguishedName {
+                entries: Vec::new(),
+            },
+            not_before: 0,
+            not_after: 0,
+            public_key: crate::x509::SubjectPublicKeyInfo {
+                algorithm_oid: known::ed25519().to_der_value(),
+                algorithm_params: None,
+                public_key: pub_key.to_vec(),
+            },
+            extensions: Vec::new(),
+            tbs_raw: Vec::new(),
+            signature_algorithm: known::ed25519().to_der_value(),
+            signature_params: None,
+            signature_value: Vec::new(),
+        }
+    }
+
+    /// Helper: make a minimal Certificate with Ed448 public key for CMS tests.
+    fn make_ed448_cert(pub_key: &[u8]) -> crate::x509::Certificate {
+        crate::x509::Certificate {
+            raw: Vec::new(),
+            version: 3,
+            serial_number: vec![0x01],
+            issuer: crate::x509::DistinguishedName {
+                entries: Vec::new(),
+            },
+            subject: crate::x509::DistinguishedName {
+                entries: Vec::new(),
+            },
+            not_before: 0,
+            not_after: 0,
+            public_key: crate::x509::SubjectPublicKeyInfo {
+                algorithm_oid: known::ed448().to_der_value(),
+                algorithm_params: None,
+                public_key: pub_key.to_vec(),
+            },
+            extensions: Vec::new(),
+            tbs_raw: Vec::new(),
+            signature_algorithm: known::ed448().to_der_value(),
+            signature_params: None,
+            signature_value: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_cms_ed25519_verify_roundtrip() {
+        let seed = vec![0x42u8; 32];
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let pub_key = kp.public_key().to_vec();
+        let cert = make_ed25519_cert(&pub_key);
+
+        let message = b"CMS Ed25519 test message";
+        let signature = kp.sign(message).unwrap().to_vec();
+
+        let sig_alg = AlgorithmIdentifier {
+            oid: known::ed25519().to_der_value(),
+            params: None,
+        };
+
+        verify_signature_with_cert(message, &signature, &sig_alg, &cert).unwrap();
+    }
+
+    #[test]
+    fn test_cms_ed25519_tampered_signature() {
+        let seed = vec![0x42u8; 32];
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let pub_key = kp.public_key().to_vec();
+        let cert = make_ed25519_cert(&pub_key);
+
+        let message = b"CMS Ed25519 tamper test";
+        let mut signature = kp.sign(message).unwrap().to_vec();
+        signature[0] ^= 0xFF; // tamper
+
+        let sig_alg = AlgorithmIdentifier {
+            oid: known::ed25519().to_der_value(),
+            params: None,
+        };
+
+        assert!(verify_signature_with_cert(message, &signature, &sig_alg, &cert).is_err());
+    }
+
+    #[test]
+    fn test_cms_ed448_verify_roundtrip() {
+        let seed = vec![0x42u8; 57];
+        let kp = hitls_crypto::ed448::Ed448KeyPair::from_seed(&seed).unwrap();
+        let pub_key = kp.public_key().to_vec();
+        let cert = make_ed448_cert(&pub_key);
+
+        let message = b"CMS Ed448 test message";
+        let signature = kp.sign(message).unwrap().to_vec();
+
+        let sig_alg = AlgorithmIdentifier {
+            oid: known::ed448().to_der_value(),
+            params: None,
+        };
+
+        verify_signature_with_cert(message, &signature, &sig_alg, &cert).unwrap();
     }
 }
