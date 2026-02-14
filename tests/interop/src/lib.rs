@@ -1750,4 +1750,674 @@ mod tests {
         conn.shutdown().await.unwrap();
         server_handle.await.unwrap();
     }
+
+    // -------------------------------------------------------
+    // DTLS 1.2 integration tests
+    // -------------------------------------------------------
+
+    fn make_dtls12_configs() -> (hitls_tls::config::TlsConfig, hitls_tls::config::TlsConfig) {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::CipherSuite;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        (client_config, server_config)
+    }
+
+    #[test]
+    fn test_dtls12_handshake_no_cookie() {
+        use hitls_tls::connection_dtls12::dtls12_handshake_in_memory;
+        use hitls_tls::TlsVersion;
+
+        let (cc, sc) = make_dtls12_configs();
+        let (client, server) = dtls12_handshake_in_memory(cc, sc, false).unwrap();
+        assert_eq!(client.version(), Some(TlsVersion::Dtls12));
+        assert_eq!(server.version(), Some(TlsVersion::Dtls12));
+    }
+
+    #[test]
+    fn test_dtls12_handshake_with_cookie() {
+        use hitls_tls::connection_dtls12::dtls12_handshake_in_memory;
+        use hitls_tls::TlsVersion;
+
+        let (cc, sc) = make_dtls12_configs();
+        let (client, server) = dtls12_handshake_in_memory(cc, sc, true).unwrap();
+        assert_eq!(client.version(), Some(TlsVersion::Dtls12));
+        assert_eq!(server.version(), Some(TlsVersion::Dtls12));
+    }
+
+    #[test]
+    fn test_dtls12_data_roundtrip() {
+        use hitls_tls::connection_dtls12::dtls12_handshake_in_memory;
+
+        let (cc, sc) = make_dtls12_configs();
+        let (mut client, mut server) = dtls12_handshake_in_memory(cc, sc, false).unwrap();
+
+        // Client -> Server
+        let datagram = client.seal_app_data(b"Hello from DTLS client").unwrap();
+        let pt = server.open_app_data(&datagram).unwrap();
+        assert_eq!(pt, b"Hello from DTLS client");
+
+        // Server -> Client
+        let datagram = server.seal_app_data(b"Hello from DTLS server").unwrap();
+        let pt = client.open_app_data(&datagram).unwrap();
+        assert_eq!(pt, b"Hello from DTLS server");
+    }
+
+    #[test]
+    fn test_dtls12_multiple_datagrams() {
+        use hitls_tls::connection_dtls12::dtls12_handshake_in_memory;
+
+        let (cc, sc) = make_dtls12_configs();
+        let (mut client, mut server) = dtls12_handshake_in_memory(cc, sc, false).unwrap();
+
+        for i in 0..20u32 {
+            let msg = format!("DTLS message #{i}");
+            let dg = client.seal_app_data(msg.as_bytes()).unwrap();
+            let pt = server.open_app_data(&dg).unwrap();
+            assert_eq!(pt, msg.as_bytes());
+
+            let reply = format!("DTLS reply #{i}");
+            let dg = server.seal_app_data(reply.as_bytes()).unwrap();
+            let pt = client.open_app_data(&dg).unwrap();
+            assert_eq!(pt, reply.as_bytes());
+        }
+    }
+
+    #[test]
+    fn test_dtls12_anti_replay() {
+        use hitls_tls::connection_dtls12::dtls12_handshake_in_memory;
+
+        let (cc, sc) = make_dtls12_configs();
+        let (mut client, mut server) = dtls12_handshake_in_memory(cc, sc, false).unwrap();
+
+        let datagram = client.seal_app_data(b"replay me").unwrap();
+        // First open succeeds
+        let pt = server.open_app_data(&datagram).unwrap();
+        assert_eq!(pt, b"replay me");
+        // Second open (replay) should fail
+        let result = server.open_app_data(&datagram);
+        assert!(result.is_err(), "replayed datagram should be rejected");
+    }
+
+    // -------------------------------------------------------
+    // TLCP integration tests
+    // -------------------------------------------------------
+
+    fn make_sm2_tlcp_identity() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+        use hitls_crypto::sm2::Sm2KeyPair;
+        use hitls_pki::x509::{
+            CertificateBuilder, DistinguishedName, SigningKey, SubjectPublicKeyInfo,
+        };
+        use hitls_utils::oid::known;
+
+        let sign_kp = Sm2KeyPair::generate().unwrap();
+        let sign_pubkey = sign_kp.public_key_bytes().unwrap();
+        let sign_privkey = sign_kp.private_key_bytes().unwrap();
+
+        let enc_kp = Sm2KeyPair::generate().unwrap();
+        let enc_pubkey = enc_kp.public_key_bytes().unwrap();
+        let enc_privkey = enc_kp.private_key_bytes().unwrap();
+
+        let sign_spki = SubjectPublicKeyInfo {
+            algorithm_oid: known::ec_public_key().to_der_value(),
+            algorithm_params: Some(known::sm2_curve().to_der_value()),
+            public_key: sign_pubkey,
+        };
+        let sign_sk = SigningKey::Sm2(sign_kp);
+        let sign_dn = DistinguishedName {
+            entries: vec![("CN".into(), "TLCP Sign".into())],
+        };
+        let sign_cert = CertificateBuilder::new()
+            .serial_number(&[0x01])
+            .issuer(sign_dn.clone())
+            .subject(sign_dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(sign_spki)
+            .build(&sign_sk)
+            .unwrap();
+
+        let enc_spki = SubjectPublicKeyInfo {
+            algorithm_oid: known::ec_public_key().to_der_value(),
+            algorithm_params: Some(known::sm2_curve().to_der_value()),
+            public_key: enc_pubkey,
+        };
+        let enc_sk = SigningKey::Sm2(enc_kp);
+        let enc_dn = DistinguishedName {
+            entries: vec![("CN".into(), "TLCP Enc".into())],
+        };
+        let enc_cert = CertificateBuilder::new()
+            .serial_number(&[0x02])
+            .issuer(enc_dn.clone())
+            .subject(enc_dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(enc_spki)
+            .build(&enc_sk)
+            .unwrap();
+
+        (sign_privkey, sign_cert.raw, enc_privkey, enc_cert.raw)
+    }
+
+    fn make_tlcp_configs(
+        suite: hitls_tls::CipherSuite,
+    ) -> (hitls_tls::config::TlsConfig, hitls_tls::config::TlsConfig) {
+        use hitls_tls::config::{ServerPrivateKey, TlsConfig};
+        use hitls_tls::crypt::SignatureScheme;
+
+        let (sign_privkey, sign_cert, enc_privkey, enc_cert) = make_sm2_tlcp_identity();
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .signature_algorithms(&[SignatureScheme::SM2_SM3])
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .signature_algorithms(&[SignatureScheme::SM2_SM3])
+            .certificate_chain(vec![sign_cert])
+            .private_key(ServerPrivateKey::Sm2 {
+                private_key: sign_privkey,
+            })
+            .tlcp_enc_certificate_chain(vec![enc_cert])
+            .tlcp_enc_private_key(ServerPrivateKey::Sm2 {
+                private_key: enc_privkey,
+            })
+            .verify_peer(false)
+            .build();
+
+        (client_config, server_config)
+    }
+
+    #[test]
+    fn test_tlcp_ecdhe_gcm() {
+        use hitls_tls::connection_tlcp::tlcp_handshake_in_memory;
+        use hitls_tls::CipherSuite;
+
+        let (cc, sc) = make_tlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (mut client, mut server) = tlcp_handshake_in_memory(cc, sc).unwrap();
+
+        let rec = client.seal_app_data(b"TLCP ECDHE GCM test").unwrap();
+        let pt = server.open_app_data(&rec).unwrap();
+        assert_eq!(pt, b"TLCP ECDHE GCM test");
+
+        let rec = server.seal_app_data(b"TLCP server reply").unwrap();
+        let pt = client.open_app_data(&rec).unwrap();
+        assert_eq!(pt, b"TLCP server reply");
+    }
+
+    #[test]
+    fn test_tlcp_ecdhe_cbc() {
+        use hitls_tls::connection_tlcp::tlcp_handshake_in_memory;
+        use hitls_tls::CipherSuite;
+
+        let (cc, sc) = make_tlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3);
+        let (mut client, mut server) = tlcp_handshake_in_memory(cc, sc).unwrap();
+
+        let rec = client.seal_app_data(b"TLCP ECDHE CBC test").unwrap();
+        let pt = server.open_app_data(&rec).unwrap();
+        assert_eq!(pt, b"TLCP ECDHE CBC test");
+
+        let rec = server.seal_app_data(b"CBC server reply").unwrap();
+        let pt = client.open_app_data(&rec).unwrap();
+        assert_eq!(pt, b"CBC server reply");
+    }
+
+    #[test]
+    fn test_tlcp_ecc_gcm() {
+        use hitls_tls::connection_tlcp::tlcp_handshake_in_memory;
+        use hitls_tls::CipherSuite;
+
+        let (cc, sc) = make_tlcp_configs(CipherSuite::ECC_SM4_GCM_SM3);
+        let (mut client, mut server) = tlcp_handshake_in_memory(cc, sc).unwrap();
+
+        let rec = client.seal_app_data(b"ECC GCM test").unwrap();
+        let pt = server.open_app_data(&rec).unwrap();
+        assert_eq!(pt, b"ECC GCM test");
+    }
+
+    #[test]
+    fn test_tlcp_ecc_cbc() {
+        use hitls_tls::connection_tlcp::tlcp_handshake_in_memory;
+        use hitls_tls::CipherSuite;
+
+        let (cc, sc) = make_tlcp_configs(CipherSuite::ECC_SM4_CBC_SM3);
+        let (mut client, mut server) = tlcp_handshake_in_memory(cc, sc).unwrap();
+
+        let rec = client.seal_app_data(b"ECC CBC test").unwrap();
+        let pt = server.open_app_data(&rec).unwrap();
+        assert_eq!(pt, b"ECC CBC test");
+    }
+
+    // -------------------------------------------------------
+    // DTLCP integration tests
+    // -------------------------------------------------------
+
+    fn make_dtlcp_configs(
+        suite: hitls_tls::CipherSuite,
+    ) -> (hitls_tls::config::TlsConfig, hitls_tls::config::TlsConfig) {
+        use hitls_tls::config::{ServerPrivateKey, TlsConfig};
+        use hitls_tls::crypt::SignatureScheme;
+
+        let (sign_privkey, sign_cert, enc_privkey, enc_cert) = make_sm2_tlcp_identity();
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .signature_algorithms(&[SignatureScheme::SM2_SM3])
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .signature_algorithms(&[SignatureScheme::SM2_SM3])
+            .certificate_chain(vec![sign_cert])
+            .private_key(ServerPrivateKey::Sm2 {
+                private_key: sign_privkey,
+            })
+            .tlcp_enc_certificate_chain(vec![enc_cert])
+            .tlcp_enc_private_key(ServerPrivateKey::Sm2 {
+                private_key: enc_privkey,
+            })
+            .verify_peer(false)
+            .build();
+
+        (client_config, server_config)
+    }
+
+    #[test]
+    fn test_dtlcp_ecdhe_gcm() {
+        use hitls_tls::connection_dtlcp::dtlcp_handshake_in_memory;
+        use hitls_tls::CipherSuite;
+
+        let (cc, sc) = make_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (mut client, mut server) = dtlcp_handshake_in_memory(cc, sc, false).unwrap();
+
+        let dg = client.seal_app_data(b"DTLCP ECDHE GCM").unwrap();
+        let pt = server.open_app_data(&dg).unwrap();
+        assert_eq!(pt, b"DTLCP ECDHE GCM");
+
+        let dg = server.seal_app_data(b"DTLCP reply").unwrap();
+        let pt = client.open_app_data(&dg).unwrap();
+        assert_eq!(pt, b"DTLCP reply");
+    }
+
+    #[test]
+    fn test_dtlcp_ecdhe_cbc() {
+        use hitls_tls::connection_dtlcp::dtlcp_handshake_in_memory;
+        use hitls_tls::CipherSuite;
+
+        let (cc, sc) = make_dtlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3);
+        let (mut client, mut server) = dtlcp_handshake_in_memory(cc, sc, false).unwrap();
+
+        let dg = client.seal_app_data(b"DTLCP ECDHE CBC").unwrap();
+        let pt = server.open_app_data(&dg).unwrap();
+        assert_eq!(pt, b"DTLCP ECDHE CBC");
+    }
+
+    #[test]
+    fn test_dtlcp_with_cookie() {
+        use hitls_tls::connection_dtlcp::dtlcp_handshake_in_memory;
+        use hitls_tls::{CipherSuite, TlsVersion};
+
+        let (cc, sc) = make_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (client, server) = dtlcp_handshake_in_memory(cc, sc, true).unwrap();
+        assert_eq!(client.version(), Some(TlsVersion::Dtlcp));
+        assert_eq!(server.version(), Some(TlsVersion::Dtlcp));
+    }
+
+    // -------------------------------------------------------
+    // mTLS integration tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_tls12_mtls_loopback() {
+        use hitls_tls::config::{ServerPrivateKey, TlsConfig};
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+
+        // Also create a client ECDSA identity
+        let client_kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let client_priv = client_kp.private_key_bytes();
+        let client_sk = hitls_pki::x509::SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: client_kp,
+        };
+        let client_dn = hitls_pki::x509::DistinguishedName {
+            entries: vec![("CN".into(), "client".into())],
+        };
+        let client_cert = hitls_pki::x509::CertificateBuilder::self_signed(
+            client_dn,
+            &client_sk,
+            1_700_000_000,
+            1_800_000_000,
+        )
+        .unwrap();
+
+        let suites = [CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256];
+        let groups = [NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .verify_client_cert(true)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .client_certificate_chain(vec![client_cert.raw])
+            .client_private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: client_priv,
+            })
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"mTLS client hello");
+            conn.write(b"mTLS server reply").unwrap();
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+        conn.write(b"mTLS client hello").unwrap();
+
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"mTLS server reply");
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_tls12_mtls_required_no_cert() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+
+        let suites = [CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256];
+        let groups = [NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .verify_client_cert(true)
+            .require_client_cert(true)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&suites)
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            // No client cert provided
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            // Server should reject because client sends empty cert
+            let result = conn.handshake();
+            assert!(result.is_err(), "server should reject missing client cert");
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        // Client handshake may also error out
+        let _ = conn.handshake();
+
+        server_handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_tls13_post_hs_auth_in_memory() {
+        use hitls_tls::config::{ServerPrivateKey, TlsConfig};
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        // Create client Ed25519 identity
+        let client_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let client_seed = client_kp.seed().to_vec();
+        let client_sk = hitls_pki::x509::SigningKey::Ed25519(client_kp);
+        let client_dn = hitls_pki::x509::DistinguishedName {
+            entries: vec![("CN".into(), "post-hs-client".into())],
+        };
+        let client_cert = hitls_pki::x509::CertificateBuilder::self_signed(
+            client_dn,
+            &client_sk,
+            1_700_000_000,
+            1_800_000_000,
+        )
+        .unwrap();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .verify_peer(false)
+            .post_handshake_auth(true)
+            .client_certificate_chain(vec![client_cert.raw])
+            .client_private_key(ServerPrivateKey::Ed25519(client_seed))
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            // Request post-handshake client auth
+            let certs = conn.request_client_auth().unwrap();
+            assert!(!certs.is_empty(), "should receive client cert");
+
+            conn.write(b"post-hs auth ok").unwrap();
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"post-hs auth ok");
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_tls13_post_hs_auth_not_offered() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        // Client does NOT offer post_handshake_auth
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .verify_peer(false)
+            .post_handshake_auth(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            // Request post-handshake auth — client didn't offer it
+            // Server should still send CertificateRequest, but client will error
+            let result = conn.request_client_auth();
+            // This should fail because client didn't offer post_handshake_auth
+            assert!(
+                result.is_err(),
+                "should fail when client didn't offer post-hs auth"
+            );
+
+            let _ = conn.shutdown();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        // Client reads — should get CertificateRequest and fail
+        let mut buf = [0u8; 256];
+        let _ = conn.read(&mut buf);
+
+        let _ = conn.shutdown();
+        server_handle.join().unwrap();
+    }
 }

@@ -85,7 +85,7 @@ pub struct MlKemKeyPair {
 // ---- K-PKE (Internal Public-Key Encryption) ----
 
 /// K-PKE Key Generation (FIPS 203 Algorithm 12).
-fn kpke_keygen(d: &[u8; 32], params: &MlKemParams) -> (Vec<u8>, Vec<u8>) {
+fn kpke_keygen(d: &[u8; 32], params: &MlKemParams) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
     let k = params.k;
 
     // (ρ, σ) = G(d || k)
@@ -104,11 +104,11 @@ fn kpke_keygen(d: &[u8; 32], params: &MlKemParams) -> (Vec<u8>, Vec<u8>) {
     let mut e = Vec::with_capacity(k);
     for i in 0..k {
         let prf_out = prf(&sigma, i as u8, 64 * params.eta1);
-        s.push(sample_cbd(&prf_out, params.eta1));
+        s.push(sample_cbd(&prf_out, params.eta1)?);
     }
     for i in 0..k {
         let prf_out = prf(&sigma, (k + i) as u8, 64 * params.eta1);
-        e.push(sample_cbd(&prf_out, params.eta1));
+        e.push(sample_cbd(&prf_out, params.eta1)?);
     }
 
     // NTT(s), NTT(e)
@@ -145,11 +145,16 @@ fn kpke_keygen(d: &[u8; 32], params: &MlKemParams) -> (Vec<u8>, Vec<u8>) {
         dk.extend_from_slice(&byte_encode(poly, 12));
     }
 
-    (ek, dk)
+    Ok((ek, dk))
 }
 
 /// K-PKE Encryption (FIPS 203 Algorithm 13).
-fn kpke_encrypt(ek: &[u8], msg: &[u8; 32], randomness: &[u8; 32], params: &MlKemParams) -> Vec<u8> {
+fn kpke_encrypt(
+    ek: &[u8],
+    msg: &[u8; 32],
+    randomness: &[u8; 32],
+    params: &MlKemParams,
+) -> Result<Vec<u8>, CryptoError> {
     let k = params.k;
 
     // Decode encapsulation key
@@ -168,14 +173,14 @@ fn kpke_encrypt(ek: &[u8], msg: &[u8; 32], randomness: &[u8; 32], params: &MlKem
     let mut e1 = Vec::with_capacity(k);
     for i in 0..k {
         let prf_out = prf(randomness, i as u8, 64 * params.eta1);
-        r_vec.push(sample_cbd(&prf_out, params.eta1));
+        r_vec.push(sample_cbd(&prf_out, params.eta1)?);
     }
     for i in 0..k {
         let prf_out = prf(randomness, (k + i) as u8, 64 * params.eta2);
-        e1.push(sample_cbd(&prf_out, params.eta2));
+        e1.push(sample_cbd(&prf_out, params.eta2)?);
     }
     let prf_out = prf(randomness, (2 * k) as u8, 64 * params.eta2);
-    let e2 = sample_cbd(&prf_out, params.eta2);
+    let e2 = sample_cbd(&prf_out, params.eta2)?;
 
     // NTT(r)
     let mut r_hat: Vec<Poly> = r_vec.clone();
@@ -211,7 +216,7 @@ fn kpke_encrypt(ek: &[u8], msg: &[u8; 32], randomness: &[u8; 32], params: &MlKem
         ct.extend_from_slice(&poly_compress(poly, params.du));
     }
     ct.extend_from_slice(&poly_compress(&v, params.dv));
-    ct
+    Ok(ct)
 }
 
 /// K-PKE Decryption (FIPS 203 Algorithm 14).
@@ -270,7 +275,7 @@ impl MlKemKeyPair {
         let mut z = [0u8; 32];
         getrandom::getrandom(&mut z).map_err(|_| CryptoError::BnRandGenFail)?;
 
-        let (ek_pke, dk_pke) = kpke_keygen(&d, &params);
+        let (ek_pke, dk_pke) = kpke_keygen(&d, &params)?;
 
         // ek = ek_pke
         let ek = ek_pke.clone();
@@ -322,7 +327,7 @@ impl MlKemKeyPair {
         let r: [u8; 32] = g_out[32..64].try_into().unwrap();
 
         // ct = K-PKE.Encrypt(ek, m, r)
-        let ct = kpke_encrypt(&self.encapsulation_key, &m, &r, &params);
+        let ct = kpke_encrypt(&self.encapsulation_key, &m, &r, &params)?;
 
         Ok((shared_secret, ct))
     }
@@ -357,7 +362,7 @@ impl MlKemKeyPair {
         let r_prime: [u8; 32] = g_out[32..64].try_into().unwrap();
 
         // ct' = K-PKE.Encrypt(ek, m', r')
-        let ct_prime = kpke_encrypt(ek, &m_prime, &r_prime, &params);
+        let ct_prime = kpke_encrypt(ek, &m_prime, &r_prime, &params)?;
 
         // Constant-time comparison
         use subtle::ConstantTimeEq;

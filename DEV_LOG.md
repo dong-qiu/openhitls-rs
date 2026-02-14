@@ -4986,3 +4986,95 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1574 workspace tests passing (37 ignored)
+
+---
+
+## P7: Integration Test Expansion + TLCP Public API + Code Quality (Session 2026-02-14)
+
+### Goals
+- Fix `panic!()` in ML-KEM production library code
+- Add public TLCP handshake-in-memory API for integration testing
+- Add integration tests for DTLS 1.2, TLCP, DTLCP, and mTLS
+- Add TLS 1.3 server handshake unit tests
+
+### Completed Steps
+
+#### Part 1: Fix ML-KEM panic → Result
+- Changed `sample_cbd()` from `-> Poly` to `-> Result<Poly, CryptoError>` in `mlkem/poly.rs`
+- Changed `kpke_keygen()` from `-> (Vec<u8>, Vec<u8>)` to `-> Result<(Vec<u8>, Vec<u8>), CryptoError>`
+- Changed `kpke_encrypt()` from `-> Vec<u8>` to `-> Result<Vec<u8>, CryptoError>`
+- Added `?` to all 7 call sites in `mlkem/mod.rs`
+- Replaced `panic!("Unsupported eta: {eta}")` with `Err(CryptoError::InvalidArg)`
+
+#### Part 2: TLCP Public Handshake-in-Memory API
+- Created `TlcpClientConnection` and `TlcpServerConnection` structs with `seal_app_data()`/`open_app_data()` methods
+- Created public `tlcp_handshake_in_memory()` function following DTLS 1.2 / DTLCP pattern
+- Moved `activate_tlcp_write()` and `activate_tlcp_read()` from test-only to module scope
+- Kept existing tests intact in `#[cfg(test)] mod tests`
+
+#### Part 3: Update Interop Cargo.toml
+- Added `"sm4"`, `"sm2"` to hitls-crypto features
+- Added `"dtls12"`, `"tlcp"`, `"dtlcp"` to hitls-tls features
+
+#### Part 4: DTLS 1.2 Integration Tests (5 tests)
+- `test_dtls12_handshake_no_cookie`: Basic handshake, assert version
+- `test_dtls12_handshake_with_cookie`: HelloVerifyRequest path
+- `test_dtls12_data_roundtrip`: Bidirectional app data
+- `test_dtls12_multiple_datagrams`: 20 messages each direction
+- `test_dtls12_anti_replay`: Replay same datagram rejected
+
+#### Part 5: TLCP Integration Tests (4 tests)
+- `test_tlcp_ecdhe_gcm`: ECDHE_SM4_GCM_SM3 handshake + data
+- `test_tlcp_ecdhe_cbc`: ECDHE_SM4_CBC_SM3 handshake + data
+- `test_tlcp_ecc_gcm`: ECC_SM4_GCM_SM3 static key exchange + data
+- `test_tlcp_ecc_cbc`: ECC_SM4_CBC_SM3 static key exchange + data
+
+#### Part 6: DTLCP Integration Tests (3 tests)
+- `test_dtlcp_ecdhe_gcm`: ECDHE_SM4_GCM_SM3 handshake + data
+- `test_dtlcp_ecdhe_cbc`: ECDHE_SM4_CBC_SM3 handshake + data
+- `test_dtlcp_with_cookie`: Cookie exchange path
+
+#### Part 7: mTLS Integration Tests (4 tests)
+- `test_tls12_mtls_loopback`: TLS 1.2 client cert auth over TCP
+- `test_tls12_mtls_required_no_cert`: Server requires cert, client omits → error
+- `test_tls13_post_hs_auth_in_memory`: Post-handshake CertificateRequest
+- `test_tls13_post_hs_auth_not_offered`: Client didn't offer → error
+
+#### Part 8: TLS 1.3 Server Handshake Unit Tests (12 tests)
+- `test_server_accepts_valid_client_hello`: Well-formed CH → success
+- `test_server_rejects_empty_cipher_suites`: Empty suite list → error
+- `test_server_rejects_no_key_share`: Missing key_share → error
+- `test_server_triggers_hrr_wrong_group`: Wrong group → HRR
+- `test_server_hrr_then_retry`: Full HRR → CH2 → success
+- `test_server_no_supported_groups_still_works`: Missing supported_groups still OK if key_share present
+- `test_server_chacha20_suite`: ChaCha20-Poly1305 negotiation
+- `test_server_aes256_gcm_suite`: AES-256-GCM-SHA384 negotiation
+- `test_server_double_ch_rejected`: Two CH calls → state error
+- `test_server_process_finished_correct`: Correct verify_data → success
+- `test_server_process_finished_wrong`: Wrong verify_data → error
+- `test_server_rejects_unsupported_version`: TLS 1.2-only CH → error
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `hitls-crypto/src/mlkem/poly.rs` | `sample_cbd()` → `Result<Poly, CryptoError>` |
+| `hitls-crypto/src/mlkem/mod.rs` | `kpke_keygen()`/`kpke_encrypt()` → Result, +`?` on 7 call sites |
+| `hitls-tls/src/connection_tlcp.rs` | +`TlcpClientConnection`/`TlcpServerConnection`, +`tlcp_handshake_in_memory()` |
+| `hitls-tls/src/handshake/server.rs` | +12 unit tests, +`build_valid_ch()` helper |
+| `tests/interop/Cargo.toml` | +dtls12, tlcp, dtlcp, sm2, sm4 features |
+| `tests/interop/src/lib.rs` | +16 integration tests (5 DTLS + 4 TLCP + 3 DTLCP + 4 mTLS), +helpers |
+
+### Test Counts (P7)
+- **hitls-tls**: 580 (from 568), +12 new server unit tests
+- **hitls-integration-tests**: 39 (from 23), +16 new integration tests
+- **Total workspace**: 1604 (from 1574), +30 new tests, 37 ignored
+
+### Bugs Found
+- `test_server_rejects_no_supported_groups` → renamed to `test_server_no_supported_groups_still_works`: Server can proceed without supported_groups extension if key_share is present
+- `CryptoError::InvalidParameter(String)` variant doesn't exist — use `CryptoError::InvalidArg`
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1604 workspace tests passing (37 ignored)

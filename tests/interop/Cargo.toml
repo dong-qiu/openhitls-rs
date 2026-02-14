@@ -10,14 +10,15 @@ hitls-utils = { path = "../../crates/hitls-utils" }
 hitls-bignum = { path = "../../crates/hitls-bignum" }
 hitls-crypto = { path = "../../crates/hitls-crypto", features = [
     "md5", "sha1", "sha2", "sha3", "sm3",
-    "aes", "modes", "chacha20",
+    "aes", "sm4", "modes", "chacha20",
     "hmac", "hkdf", "pbkdf2",
     "rsa", "ecdsa", "ed25519", "x25519", "ecdh",
+    "sm2",
     "mlkem", "mldsa",
     "hybridkem",
 ] }
 hitls-pki = { path = "../../crates/hitls-pki" }
-hitls-tls = { path = "../../crates/hitls-tls", features = ["tls13", "tls12", "async"] }
+hitls-tls = { path = "../../crates/hitls-tls", features = ["tls13", "tls12", "dtls12", "tlcp", "dtlcp", "async"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 hitls-auth = { path = "../../crates/hitls-auth" }
 zeroize = "1"

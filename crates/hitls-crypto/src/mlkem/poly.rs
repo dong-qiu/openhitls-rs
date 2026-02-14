@@ -5,6 +5,7 @@
 
 use crate::mlkem::ntt::{self, Poly, N, Q};
 use crate::sha3::{Sha3_256, Sha3_512, Shake128, Shake256};
+use hitls_types::CryptoError;
 
 /// Centered Binomial Distribution sampling with eta = 2.
 ///
@@ -45,11 +46,11 @@ pub(crate) fn cbd3(buf: &[u8]) -> Poly {
 }
 
 /// Sample a polynomial using CBD with the given eta.
-pub(crate) fn sample_cbd(buf: &[u8], eta: usize) -> Poly {
+pub(crate) fn sample_cbd(buf: &[u8], eta: usize) -> Result<Poly, CryptoError> {
     match eta {
-        2 => cbd2(buf),
-        3 => cbd3(buf),
-        _ => panic!("Unsupported eta: {eta}"),
+        2 => Ok(cbd2(buf)),
+        3 => Ok(cbd3(buf)),
+        _ => Err(CryptoError::InvalidArg),
     }
 }
 

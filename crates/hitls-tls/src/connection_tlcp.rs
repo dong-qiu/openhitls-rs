@@ -3,21 +3,321 @@
 //! Supports all 4 TLCP cipher suites with both ECDHE and ECC static
 //! key exchange modes over SM2/SM3/SM4.
 
+use crate::config::TlsConfig;
+use crate::handshake::client_tlcp::TlcpClientHandshake;
+use crate::handshake::codec::{decode_server_hello, parse_handshake_header};
+use crate::handshake::codec_tlcp::decode_tlcp_certificate;
+use crate::handshake::server_tlcp::TlcpServerHandshake;
+use crate::record::encryption_tlcp::{
+    RecordDecryptorTlcpCbc, RecordDecryptorTlcpGcm, RecordEncryptorTlcpCbc, RecordEncryptorTlcpGcm,
+    TlcpDecryptor, TlcpEncryptor,
+};
+use crate::record::{ContentType, RecordLayer};
+use crate::{CipherSuite, TlsError, TlsVersion};
+use zeroize::Zeroize;
+
+/// A TLCP client connection with seal/open app data methods.
+pub struct TlcpClientConnection {
+    record_layer: RecordLayer,
+    negotiated_suite: Option<CipherSuite>,
+}
+
+impl TlcpClientConnection {
+    /// Seal application data for sending.
+    pub fn seal_app_data(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, TlsError> {
+        let record = self
+            .record_layer
+            .seal_record(ContentType::ApplicationData, plaintext)?;
+        Ok(record)
+    }
+
+    /// Open a received application data record.
+    pub fn open_app_data(&mut self, record: &[u8]) -> Result<Vec<u8>, TlsError> {
+        let (ct, plaintext, _) = self.record_layer.open_record(record)?;
+        if ct != ContentType::ApplicationData {
+            return Err(TlsError::RecordError("expected application data".into()));
+        }
+        Ok(plaintext)
+    }
+
+    /// Get the negotiated version.
+    pub fn version(&self) -> Option<TlsVersion> {
+        Some(TlsVersion::Tlcp)
+    }
+
+    /// Get the negotiated cipher suite.
+    pub fn cipher_suite(&self) -> Option<CipherSuite> {
+        self.negotiated_suite
+    }
+}
+
+/// A TLCP server connection with seal/open app data methods.
+pub struct TlcpServerConnection {
+    record_layer: RecordLayer,
+    negotiated_suite: Option<CipherSuite>,
+}
+
+impl TlcpServerConnection {
+    /// Seal application data for sending.
+    pub fn seal_app_data(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, TlsError> {
+        let record = self
+            .record_layer
+            .seal_record(ContentType::ApplicationData, plaintext)?;
+        Ok(record)
+    }
+
+    /// Open a received application data record.
+    pub fn open_app_data(&mut self, record: &[u8]) -> Result<Vec<u8>, TlsError> {
+        let (ct, plaintext, _) = self.record_layer.open_record(record)?;
+        if ct != ContentType::ApplicationData {
+            return Err(TlsError::RecordError("expected application data".into()));
+        }
+        Ok(plaintext)
+    }
+
+    /// Get the negotiated version.
+    pub fn version(&self) -> Option<TlsVersion> {
+        Some(TlsVersion::Tlcp)
+    }
+
+    /// Get the negotiated cipher suite.
+    pub fn cipher_suite(&self) -> Option<CipherSuite> {
+        self.negotiated_suite
+    }
+}
+
+// ===========================================================================
+// Helpers
+// ===========================================================================
+
+fn activate_tlcp_write(
+    rl: &mut RecordLayer,
+    suite: CipherSuite,
+    enc_key: &[u8],
+    mac_key: &[u8],
+    iv: &[u8],
+) {
+    let is_cbc = matches!(
+        suite,
+        CipherSuite::ECDHE_SM4_CBC_SM3 | CipherSuite::ECC_SM4_CBC_SM3
+    );
+    if is_cbc {
+        rl.activate_write_encryption_tlcp(TlcpEncryptor::Cbc(RecordEncryptorTlcpCbc::new(
+            enc_key.to_vec(),
+            mac_key.to_vec(),
+        )));
+    } else {
+        rl.activate_write_encryption_tlcp(TlcpEncryptor::Gcm(
+            RecordEncryptorTlcpGcm::new(enc_key, iv.to_vec()).unwrap(),
+        ));
+    }
+}
+
+fn activate_tlcp_read(
+    rl: &mut RecordLayer,
+    suite: CipherSuite,
+    enc_key: &[u8],
+    mac_key: &[u8],
+    iv: &[u8],
+) {
+    let is_cbc = matches!(
+        suite,
+        CipherSuite::ECDHE_SM4_CBC_SM3 | CipherSuite::ECC_SM4_CBC_SM3
+    );
+    if is_cbc {
+        rl.activate_read_decryption_tlcp(TlcpDecryptor::Cbc(RecordDecryptorTlcpCbc::new(
+            enc_key.to_vec(),
+            mac_key.to_vec(),
+        )));
+    } else {
+        rl.activate_read_decryption_tlcp(TlcpDecryptor::Gcm(
+            RecordDecryptorTlcpGcm::new(enc_key, iv.to_vec()).unwrap(),
+        ));
+    }
+}
+
+// ===========================================================================
+// Full TLCP handshake driver
+// ===========================================================================
+
+/// Perform a full TLCP handshake between client and server using byte buffers.
+///
+/// Returns `(client, server)` both in Connected state.
+pub fn tlcp_handshake_in_memory(
+    client_config: TlsConfig,
+    server_config: TlsConfig,
+) -> Result<(TlcpClientConnection, TlcpServerConnection), TlsError> {
+    let mut client_hs = TlcpClientHandshake::new(client_config);
+    let mut server_hs = TlcpServerHandshake::new(server_config);
+
+    let mut client_rl = RecordLayer::new();
+    let mut server_rl = RecordLayer::new();
+
+    let mut client_to_server = Vec::new();
+    let mut server_to_client = Vec::new();
+
+    // 1. Client -> ClientHello
+    let ch_msg = client_hs.build_client_hello()?;
+    let ch_record = client_rl.seal_record(ContentType::Handshake, &ch_msg)?;
+    client_to_server.extend_from_slice(&ch_record);
+
+    // 2. Server processes ClientHello
+    let (ct, ch_plain, consumed) = server_rl.open_record(&client_to_server)?;
+    client_to_server.drain(..consumed);
+    if ct != ContentType::Handshake {
+        return Err(TlsError::HandshakeFailed("expected handshake".into()));
+    }
+    let (_, _, ch_total) = parse_handshake_header(&ch_plain)?;
+    let (flight, negotiated_suite) = server_hs.process_client_hello(&ch_plain[..ch_total])?;
+
+    // 3. Server -> ServerHello + Certificate + SKE + SHD
+    for msg in [
+        &flight.server_hello,
+        &flight.certificate,
+        &flight.server_key_exchange,
+        &flight.server_hello_done,
+    ] {
+        let rec = server_rl.seal_record(ContentType::Handshake, msg)?;
+        server_to_client.extend_from_slice(&rec);
+    }
+
+    // 4. Client processes ServerHello
+    let (_, sh_plain, consumed) = client_rl.open_record(&server_to_client)?;
+    server_to_client.drain(..consumed);
+    let (_, sh_body, sh_total) = parse_handshake_header(&sh_plain)?;
+    let sh = decode_server_hello(sh_body)?;
+    client_hs.process_server_hello(&sh_plain[..sh_total], &sh)?;
+
+    // 5. Client processes Certificate (double cert)
+    let (_, cert_plain, consumed) = client_rl.open_record(&server_to_client)?;
+    server_to_client.drain(..consumed);
+    let (_, cert_body, cert_total) = parse_handshake_header(&cert_plain)?;
+    let cert_msg = decode_tlcp_certificate(cert_body)?;
+    client_hs.process_certificate(&cert_plain[..cert_total], &cert_msg)?;
+
+    // 6. Client processes ServerKeyExchange
+    let (_, ske_plain, consumed) = client_rl.open_record(&server_to_client)?;
+    server_to_client.drain(..consumed);
+    let (_, ske_body, ske_total) = parse_handshake_header(&ske_plain)?;
+    client_hs.process_server_key_exchange(&ske_plain[..ske_total], ske_body)?;
+
+    // 7. Client processes ServerHelloDone
+    let (_, shd_plain, consumed) = client_rl.open_record(&server_to_client)?;
+    server_to_client.drain(..consumed);
+    let (_, _, shd_total) = parse_handshake_header(&shd_plain)?;
+    let mut cflight = client_hs.process_server_hello_done(&shd_plain[..shd_total])?;
+
+    // 8. Client -> CKE (plaintext) + CCS + Finished (encrypted)
+    let cke_record = client_rl.seal_record(ContentType::Handshake, &cflight.client_key_exchange)?;
+    client_to_server.extend_from_slice(&cke_record);
+
+    let ccs_record = client_rl.seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
+    client_to_server.extend_from_slice(&ccs_record);
+
+    // Activate client write encryption
+    activate_tlcp_write(
+        &mut client_rl,
+        negotiated_suite,
+        &cflight.client_write_key,
+        &cflight.client_write_mac_key,
+        &cflight.client_write_iv,
+    );
+
+    let fin_record = client_rl.seal_record(ContentType::Handshake, &cflight.finished)?;
+    client_to_server.extend_from_slice(&fin_record);
+
+    // 9. Server processes CKE
+    let (_, cke_plain, consumed) = server_rl.open_record(&client_to_server)?;
+    client_to_server.drain(..consumed);
+    let (_, cke_body, cke_total) = parse_handshake_header(&cke_plain)?;
+    let mut skeys = server_hs.process_client_key_exchange(&cke_plain[..cke_total], cke_body)?;
+
+    // 10. Server processes CCS
+    let (ct, _, consumed) = server_rl.open_record(&client_to_server)?;
+    client_to_server.drain(..consumed);
+    if ct != ContentType::ChangeCipherSpec {
+        return Err(TlsError::HandshakeFailed("expected CCS".into()));
+    }
+    server_hs.process_change_cipher_spec()?;
+
+    // 11. Activate server read decryption (client write key)
+    activate_tlcp_read(
+        &mut server_rl,
+        negotiated_suite,
+        &skeys.client_write_key,
+        &skeys.client_write_mac_key,
+        &skeys.client_write_iv,
+    );
+
+    // 12. Server processes client Finished (encrypted)
+    let (_, fin_plain, consumed) = server_rl.open_record(&client_to_server)?;
+    client_to_server.drain(..consumed);
+    let (_, _, fin_total) = parse_handshake_header(&fin_plain)?;
+    let server_fin =
+        server_hs.process_finished_and_build(&fin_plain[..fin_total], &skeys.master_secret)?;
+
+    // 13. Server -> CCS + Finished
+    let ccs_record = server_rl.seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
+    server_to_client.extend_from_slice(&ccs_record);
+
+    // Activate server write encryption
+    activate_tlcp_write(
+        &mut server_rl,
+        negotiated_suite,
+        &skeys.server_write_key,
+        &skeys.server_write_mac_key,
+        &skeys.server_write_iv,
+    );
+
+    let sfin_record = server_rl.seal_record(ContentType::Handshake, &server_fin)?;
+    server_to_client.extend_from_slice(&sfin_record);
+
+    // 14. Client processes server CCS
+    let (ct, _, consumed) = client_rl.open_record(&server_to_client)?;
+    server_to_client.drain(..consumed);
+    if ct != ContentType::ChangeCipherSpec {
+        return Err(TlsError::HandshakeFailed("expected CCS".into()));
+    }
+    client_hs.process_change_cipher_spec()?;
+
+    // Activate client read decryption
+    activate_tlcp_read(
+        &mut client_rl,
+        negotiated_suite,
+        &cflight.server_write_key,
+        &cflight.server_write_mac_key,
+        &cflight.server_write_iv,
+    );
+
+    // 15. Client processes server Finished (encrypted)
+    let (_, sfin_plain, consumed) = client_rl.open_record(&server_to_client)?;
+    server_to_client.drain(..consumed);
+    let (_, _, sfin_total) = parse_handshake_header(&sfin_plain)?;
+    client_hs.process_finished(&sfin_plain[..sfin_total], &cflight.master_secret)?;
+
+    // Zeroize
+    cflight.master_secret.zeroize();
+    skeys.master_secret.zeroize();
+
+    Ok((
+        TlcpClientConnection {
+            record_layer: client_rl,
+            negotiated_suite: Some(negotiated_suite),
+        },
+        TlcpServerConnection {
+            record_layer: server_rl,
+            negotiated_suite: Some(negotiated_suite),
+        },
+    ))
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::config::{ServerPrivateKey, TlsConfig};
+    use super::*;
+    use crate::config::ServerPrivateKey;
     use crate::crypt::SignatureScheme;
-    use crate::handshake::client_tlcp::{TlcpClientHandshake, TlcpClientState};
-    use crate::handshake::codec::{decode_server_hello, parse_handshake_header};
-    use crate::handshake::codec_tlcp::decode_tlcp_certificate;
-    use crate::handshake::server_tlcp::{TlcpServerHandshake, TlcpServerState};
-    use crate::record::encryption_tlcp::{
-        RecordDecryptorTlcpCbc, RecordDecryptorTlcpGcm, RecordEncryptorTlcpCbc,
-        RecordEncryptorTlcpGcm, TlcpDecryptor, TlcpEncryptor,
-    };
-    use crate::record::{ContentType, RecordLayer};
-    use crate::CipherSuite;
-    use zeroize::Zeroize;
+    use crate::handshake::client_tlcp::TlcpClientState;
+    use crate::handshake::server_tlcp::TlcpServerState;
 
     /// Create SM2 key pairs and self-signed certificates for testing.
     ///
@@ -109,55 +409,7 @@ mod tests {
         (client_config, server_config)
     }
 
-    /// Activate TLCP write encryption on a RecordLayer.
-    fn activate_tlcp_write(
-        rl: &mut RecordLayer,
-        suite: CipherSuite,
-        enc_key: &[u8],
-        mac_key: &[u8],
-        iv: &[u8],
-    ) {
-        let is_cbc = matches!(
-            suite,
-            CipherSuite::ECDHE_SM4_CBC_SM3 | CipherSuite::ECC_SM4_CBC_SM3
-        );
-        if is_cbc {
-            rl.activate_write_encryption_tlcp(TlcpEncryptor::Cbc(RecordEncryptorTlcpCbc::new(
-                enc_key.to_vec(),
-                mac_key.to_vec(),
-            )));
-        } else {
-            rl.activate_write_encryption_tlcp(TlcpEncryptor::Gcm(
-                RecordEncryptorTlcpGcm::new(enc_key, iv.to_vec()).unwrap(),
-            ));
-        }
-    }
-
-    /// Activate TLCP read decryption on a RecordLayer.
-    fn activate_tlcp_read(
-        rl: &mut RecordLayer,
-        suite: CipherSuite,
-        enc_key: &[u8],
-        mac_key: &[u8],
-        iv: &[u8],
-    ) {
-        let is_cbc = matches!(
-            suite,
-            CipherSuite::ECDHE_SM4_CBC_SM3 | CipherSuite::ECC_SM4_CBC_SM3
-        );
-        if is_cbc {
-            rl.activate_read_decryption_tlcp(TlcpDecryptor::Cbc(RecordDecryptorTlcpCbc::new(
-                enc_key.to_vec(),
-                mac_key.to_vec(),
-            )));
-        } else {
-            rl.activate_read_decryption_tlcp(TlcpDecryptor::Gcm(
-                RecordDecryptorTlcpGcm::new(enc_key, iv.to_vec()).unwrap(),
-            ));
-        }
-    }
-
-    /// Run a full TLCP handshake in-memory.
+    /// Run a full TLCP handshake in-memory using the private test helper flow.
     fn do_tlcp_handshake(
         suite: CipherSuite,
     ) -> (RecordLayer, RecordLayer, TlcpClientState, TlcpServerState) {
@@ -172,7 +424,7 @@ mod tests {
         let mut client_to_server = Vec::new();
         let mut server_to_client = Vec::new();
 
-        // 1. Client → ClientHello
+        // 1. Client -> ClientHello
         let ch_msg = client_hs.build_client_hello().unwrap();
         let ch_record = client_rl
             .seal_record(ContentType::Handshake, &ch_msg)
@@ -189,7 +441,7 @@ mod tests {
             .unwrap();
         assert_eq!(negotiated_suite, suite);
 
-        // 3. Server → ServerHello + Certificate + SKE + SHD
+        // 3. Server -> ServerHello + Certificate + SKE + SHD
         for msg in [
             &flight.server_hello,
             &flight.certificate,
@@ -238,7 +490,7 @@ mod tests {
             .process_server_hello_done(&shd_plain[..shd_total])
             .unwrap();
 
-        // 8. Client → CKE (plaintext) + CCS + Finished (encrypted)
+        // 8. Client -> CKE (plaintext) + CCS + Finished (encrypted)
         let cke_record = client_rl
             .seal_record(ContentType::Handshake, &cflight.client_key_exchange)
             .unwrap();
@@ -296,7 +548,7 @@ mod tests {
             .process_finished_and_build(&fin_plain[..fin_total], &skeys.master_secret)
             .unwrap();
 
-        // 13. Server → CCS + Finished
+        // 13. Server -> CCS + Finished
         let ccs_record = server_rl
             .seal_record(ContentType::ChangeCipherSpec, &[0x01])
             .unwrap();
@@ -350,7 +602,7 @@ mod tests {
         (client_rl, server_rl, cs, ss)
     }
 
-    // ─── Full handshake tests ────────────────────────────────
+    // --- Full handshake tests ---
 
     #[test]
     fn test_tlcp_ecdhe_cbc_full_handshake() {
@@ -380,7 +632,7 @@ mod tests {
         assert_eq!(ss, TlcpServerState::Connected);
     }
 
-    // ─── Application data tests ──────────────────────────────
+    // --- Application data tests ---
 
     #[test]
     fn test_tlcp_app_data_exchange_cbc() {

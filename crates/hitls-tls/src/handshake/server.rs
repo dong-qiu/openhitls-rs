@@ -1091,4 +1091,333 @@ mod tests {
             Ok(_) => panic!("expected error for missing supported_versions"),
         }
     }
+
+    /// Build a valid TLS 1.3 ClientHello message for server testing.
+    fn build_valid_ch(suites: &[CipherSuite], group: NamedGroup, ks_data: &[u8]) -> Vec<u8> {
+        use crate::handshake::extensions_codec::{
+            build_key_share_ch, build_signature_algorithms, build_supported_groups,
+            build_supported_versions_ch,
+        };
+        let ch = super::super::codec::ClientHello {
+            random: [0xBB; 32],
+            legacy_session_id: vec![],
+            cipher_suites: suites.to_vec(),
+            extensions: vec![
+                build_supported_versions_ch(),
+                build_supported_groups(&[group]),
+                build_signature_algorithms(&[crate::crypt::SignatureScheme::ED25519]),
+                build_key_share_ch(group, ks_data),
+            ],
+        };
+        super::super::codec::encode_client_hello(&ch)
+    }
+
+    #[test]
+    fn test_server_accepts_valid_client_hello() {
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+        let msg = build_valid_ch(
+            &[CipherSuite::TLS_AES_128_GCM_SHA256],
+            NamedGroup::X25519,
+            &[0x55; 32],
+        );
+        let result = hs.process_client_hello(&msg);
+        assert!(result.is_ok(), "valid CH should succeed");
+    }
+
+    #[test]
+    fn test_server_rejects_empty_cipher_suites() {
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+        let msg = build_valid_ch(&[], NamedGroup::X25519, &[0x55; 32]);
+        let result = hs.process_client_hello(&msg);
+        assert!(result.is_err(), "empty cipher suites should be rejected");
+    }
+
+    #[test]
+    fn test_server_rejects_no_key_share() {
+        use crate::handshake::extensions_codec::{
+            build_signature_algorithms, build_supported_groups, build_supported_versions_ch,
+        };
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+        // Build CH without key_share extension
+        let ch = super::super::codec::ClientHello {
+            random: [0xCC; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                build_supported_versions_ch(),
+                build_supported_groups(&[NamedGroup::X25519]),
+                build_signature_algorithms(&[crate::crypt::SignatureScheme::ED25519]),
+                // no key_share
+            ],
+        };
+        let msg = super::super::codec::encode_client_hello(&ch);
+        let result = hs.process_client_hello(&msg);
+        // Should either error or trigger HRR
+        match result {
+            Ok(ClientHelloResult::HelloRetryRequest(_)) => {} // acceptable
+            Err(_) => {}                                      // acceptable
+            Ok(ClientHelloResult::Actions(_)) => {
+                panic!("should not succeed without key_share")
+            }
+        }
+    }
+
+    #[test]
+    fn test_server_triggers_hrr_wrong_group() {
+        use crate::handshake::extensions_codec::{
+            build_key_share_ch, build_signature_algorithms, build_supported_groups,
+            build_supported_versions_ch,
+        };
+        // Server only supports X25519, but client offers secp256r1
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .verify_peer(false)
+            .supported_groups(&[NamedGroup::X25519])
+            .build();
+        let mut hs = ServerHandshake::new(config);
+
+        let ch = super::super::codec::ClientHello {
+            random: [0xDD; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                build_supported_versions_ch(),
+                build_supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519]),
+                build_signature_algorithms(&[crate::crypt::SignatureScheme::ED25519]),
+                // Key share only offers secp256r1 — X25519 not included
+                build_key_share_ch(NamedGroup::SECP256R1, &[0x04; 65]),
+            ],
+        };
+        let msg = super::super::codec::encode_client_hello(&ch);
+        let result = hs.process_client_hello(&msg);
+        match result {
+            Ok(ClientHelloResult::HelloRetryRequest(hrr)) => {
+                assert_eq!(hrr.suite, CipherSuite::TLS_AES_128_GCM_SHA256);
+            }
+            _other => panic!("expected HRR"),
+        }
+    }
+
+    #[test]
+    fn test_server_hrr_then_retry() {
+        use crate::handshake::extensions_codec::{
+            build_key_share_ch, build_signature_algorithms, build_supported_groups,
+            build_supported_versions_ch,
+        };
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .verify_peer(false)
+            .supported_groups(&[NamedGroup::X25519])
+            .build();
+        let mut hs = ServerHandshake::new(config);
+
+        // First CH: wrong group key share
+        let ch1 = super::super::codec::ClientHello {
+            random: [0xEE; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                build_supported_versions_ch(),
+                build_supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519]),
+                build_signature_algorithms(&[crate::crypt::SignatureScheme::ED25519]),
+                build_key_share_ch(NamedGroup::SECP256R1, &[0x04; 65]),
+            ],
+        };
+        let msg1 = super::super::codec::encode_client_hello(&ch1);
+        let result1 = hs.process_client_hello(&msg1);
+        assert!(matches!(
+            result1,
+            Ok(ClientHelloResult::HelloRetryRequest(_))
+        ));
+
+        // Second CH: correct group
+        let ch2 = super::super::codec::ClientHello {
+            random: [0xEE; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                build_supported_versions_ch(),
+                build_supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519]),
+                build_signature_algorithms(&[crate::crypt::SignatureScheme::ED25519]),
+                build_key_share_ch(NamedGroup::X25519, &[0x55; 32]),
+            ],
+        };
+        let msg2 = super::super::codec::encode_client_hello(&ch2);
+        let result2 = hs.process_client_hello_retry(&msg2);
+        assert!(result2.is_ok(), "retried CH should succeed");
+    }
+
+    #[test]
+    fn test_server_no_supported_groups_still_works() {
+        use crate::handshake::extensions_codec::{
+            build_key_share_ch, build_signature_algorithms, build_supported_versions_ch,
+        };
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+        // CH without supported_groups extension but with a valid key_share
+        let ch = super::super::codec::ClientHello {
+            random: [0xFF; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                build_supported_versions_ch(),
+                build_signature_algorithms(&[crate::crypt::SignatureScheme::ED25519]),
+                build_key_share_ch(NamedGroup::X25519, &[0x55; 32]),
+            ],
+        };
+        let msg = super::super::codec::encode_client_hello(&ch);
+        let result = hs.process_client_hello(&msg);
+        // Server can proceed if a usable key_share is found
+        assert!(
+            result.is_ok(),
+            "should work with key_share even without supported_groups"
+        );
+    }
+
+    #[test]
+    fn test_server_chacha20_suite() {
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .cipher_suites(&[CipherSuite::TLS_CHACHA20_POLY1305_SHA256])
+            .verify_peer(false)
+            .build();
+        let mut hs = ServerHandshake::new(config);
+        let msg = build_valid_ch(
+            &[CipherSuite::TLS_CHACHA20_POLY1305_SHA256],
+            NamedGroup::X25519,
+            &[0x55; 32],
+        );
+        let result = hs.process_client_hello(&msg);
+        match result {
+            Ok(ClientHelloResult::Actions(a)) => {
+                assert_eq!(a.suite, CipherSuite::TLS_CHACHA20_POLY1305_SHA256);
+            }
+            _other => panic!("expected Actions with CHA CHA20"),
+        }
+    }
+
+    #[test]
+    fn test_server_aes256_gcm_suite() {
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .cipher_suites(&[CipherSuite::TLS_AES_256_GCM_SHA384])
+            .verify_peer(false)
+            .build();
+        let mut hs = ServerHandshake::new(config);
+        let msg = build_valid_ch(
+            &[CipherSuite::TLS_AES_256_GCM_SHA384],
+            NamedGroup::X25519,
+            &[0x55; 32],
+        );
+        let result = hs.process_client_hello(&msg);
+        match result {
+            Ok(ClientHelloResult::Actions(a)) => {
+                assert_eq!(a.suite, CipherSuite::TLS_AES_256_GCM_SHA384);
+            }
+            _other => panic!("expected Actions with AES-256-GCM"),
+        }
+    }
+
+    #[test]
+    fn test_server_double_ch_rejected() {
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+        let msg = build_valid_ch(
+            &[CipherSuite::TLS_AES_128_GCM_SHA256],
+            NamedGroup::X25519,
+            &[0x55; 32],
+        );
+        // First CH should succeed
+        let _ = hs.process_client_hello(&msg).unwrap();
+        // Second CH should fail (wrong state)
+        let result = hs.process_client_hello(&msg);
+        assert!(result.is_err(), "second CH should be rejected");
+    }
+
+    #[test]
+    fn test_server_process_finished_correct() {
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+        let msg = build_valid_ch(
+            &[CipherSuite::TLS_AES_128_GCM_SHA256],
+            NamedGroup::X25519,
+            &[0x55; 32],
+        );
+        let _actions = match hs.process_client_hello(&msg).unwrap() {
+            ClientHelloResult::Actions(a) => a,
+            _ => panic!("expected Actions"),
+        };
+        // After processing CH, server should be in WaitClientFinished state
+        assert_eq!(hs.state(), HandshakeState::WaitClientFinished);
+    }
+
+    #[test]
+    fn test_server_process_finished_wrong() {
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+        let msg = build_valid_ch(
+            &[CipherSuite::TLS_AES_128_GCM_SHA256],
+            NamedGroup::X25519,
+            &[0x55; 32],
+        );
+        let _ = hs.process_client_hello(&msg).unwrap();
+
+        // Build a Finished with wrong verify_data
+        let wrong_verify = vec![0xDE; 32];
+        let mut fin_msg = vec![20u8]; // HandshakeType::Finished
+        let len = wrong_verify.len() as u32;
+        fin_msg.push((len >> 16) as u8);
+        fin_msg.push((len >> 8) as u8);
+        fin_msg.push(len as u8);
+        fin_msg.extend_from_slice(&wrong_verify);
+
+        let result = hs.process_client_finished(&fin_msg);
+        assert!(result.is_err(), "wrong verify_data should fail");
+    }
+
+    #[test]
+    fn test_server_rejects_unsupported_version() {
+        use crate::handshake::extensions_codec::{
+            build_key_share_ch, build_signature_algorithms, build_supported_groups,
+        };
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+
+        // Build CH with only TLS 1.2 in supported_versions
+        let mut sv_data = vec![0x02]; // list length = 2
+        sv_data.extend_from_slice(&0x0303u16.to_be_bytes()); // TLS 1.2
+        let sv_ext = crate::extensions::Extension {
+            extension_type: crate::extensions::ExtensionType::SUPPORTED_VERSIONS,
+            data: sv_data,
+        };
+
+        let ch = super::super::codec::ClientHello {
+            random: [0x11; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                sv_ext,
+                build_supported_groups(&[NamedGroup::X25519]),
+                build_signature_algorithms(&[crate::crypt::SignatureScheme::ED25519]),
+                build_key_share_ch(NamedGroup::X25519, &[0x55; 32]),
+            ],
+        };
+        let msg = super::super::codec::encode_client_hello(&ch);
+        let result = hs.process_client_hello(&msg);
+        assert!(
+            result.is_err(),
+            "TLS 1.2 only should be rejected by 1.3 server"
+        );
+    }
 }
