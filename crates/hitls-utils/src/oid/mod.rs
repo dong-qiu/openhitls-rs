@@ -410,6 +410,21 @@ pub mod known {
         Oid::new(&[2, 5, 29, 32])
     }
 
+    // anyPolicy (RFC 5280 §4.2.1.4)
+    pub fn any_policy() -> Oid {
+        Oid::new(&[2, 5, 29, 32, 0])
+    }
+
+    // CPS Qualifier (RFC 5280 §4.2.1.4)
+    pub fn cps_qualifier() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 2, 1])
+    }
+
+    // User Notice Qualifier (RFC 5280 §4.2.1.4)
+    pub fn user_notice_qualifier() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 5, 5, 7, 2, 2])
+    }
+
     // Extended Key Usage purpose OIDs (RFC 5280 §4.2.1.12)
     pub fn kp_server_auth() -> Oid {
         Oid::new(&[1, 3, 6, 1, 5, 5, 7, 3, 1])

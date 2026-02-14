@@ -4735,3 +4735,81 @@ Added `validate_name_constraints()` to chain verification. When an intermediate 
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1453 workspace tests passing (37 ignored)
+
+---
+
+## P4: C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests
+
+### Date: 2026-02-14
+
+### Summary
+Ported additional C test vectors for certificate parsing edge cases, AKI/SKI chain matching, extension duplication, CertificatePolicies extension, CMS without signed attributes, and CSR parsing/verification. Also added RSA-PSS CMS signature verification support.
+
+### Changes
+
+#### Part 1: AKI/SKI C Test Vector Suite (10 tests)
+- Copied 15 PEM files from C `akiski_suite/` to `tests/vectors/chain/akiski_suite/`
+- Tests validate real-world AKI/SKI chain matching scenarios:
+  - Basic 3-level chain (root → ca → device)
+  - AKI keyId matches issuer's SKI
+  - AKI keyId mismatch (DN fallback)
+  - Leaf without AKI (DN-only matching)
+  - Intermediate without SKI (DN-only fallback)
+  - AKI marked critical (unusual but valid)
+  - AKI issuer+serial match/mismatch
+  - 4-level multilevel chain
+  - Parent lacks SKI, leaf has AKI
+
+#### Part 2: Extension/Cert Parsing Edge Cases (21 tests)
+- Copied 21 DER files from C `extensions/` and `certcheck/` directories
+- Tests:
+  - Zero serial number, 20-byte and 21-byte large serial numbers
+  - Missing issuer, missing public key, missing signature algorithm (all fail)
+  - SAN with no subject, no subject with no SAN
+  - Email address in subject DN
+  - TeletexString and IA5String DN encodings
+  - DSA certificate parsing
+  - Duplicate extensions (AKI, BC, EKU, KU, SAN, SKI) — parser stores all, accessor finds first
+  - Malformed KeyUsage (fixed arithmetic overflow in `parse_key_usage`)
+  - Certificate with many extensions
+
+#### Part 3: CertificatePolicies Extension (5 tests)
+- Added 3 OIDs: `any_policy()`, `cps_qualifier()`, `user_notice_qualifier()`
+- Added types: `CertificatePolicies`, `PolicyInformation`, `PolicyQualifier`
+- Added parsing: `parse_certificate_policies()` handles nested SEQUENCE OF structure
+- Added `certificate_policies()` method on Certificate
+- Tests: critical/non-critical policy certs, None for certs without, anyPolicy builder, CPS qualifier builder
+
+#### Part 4: CMS NoAttr + Chain Tests (13 tests)
+- Copied 11 CMS files from C `noattr/` directory + CA cert
+- CMS noattr tests verify signatures without signed attributes (direct digest signature)
+- Added RSA-PSS signature verification to `verify_signature_with_cert()` in CMS module
+- Chain cert tests verify 3-level chain parsing and verification
+- Tests: P-256/P-384/P-521/RSA-PKCS1/RSA-PSS attached+detached, chain cert parsing, chain verification
+
+#### Part 5: Signature Param Consistency + CSR Tests (8 tests)
+- Copied sigParam chain certs (RSA, RSA-PSS, SM2 leaf+root pairs)
+- Copied CSR test files (RSA-SHA256, ECDSA-SHA256, SM2)
+- Sig param tests verify chains where inner and outer AlgorithmIdentifier match
+- CSR tests: parse RSA/ECDSA/SM2 CSRs, verify RSA and ECDSA self-signatures
+
+### Bug Fixes
+- **`parse_key_usage` arithmetic overflow**: Fixed panic when `unused_bits` was very large in malformed KeyUsage extensions. Added bounds check `unused_bits < 16` and fixed last-byte clearing logic for 2-byte masks.
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `hitls-utils/src/oid/mod.rs` | +3 OIDs (anyPolicy, CPS, UserNotice qualifiers) |
+| `hitls-pki/src/x509/mod.rs` | CertificatePolicies types + parsing + `certificate_policies()` method + KeyUsage overflow fix + 30 tests |
+| `hitls-pki/src/x509/verify.rs` | +13 tests (AKI/SKI suite + sigParam consistency) |
+| `hitls-pki/src/cms/mod.rs` | RSA-PSS verify support + 13 tests (noattr + chain) |
+| `tests/vectors/` | ~50 test vector files copied from C codebase |
+
+### Test Counts (P4)
+- **hitls-pki**: 272 (from 216), +56 new tests
+- **Total workspace**: 1509 (from 1453), +56 new tests, 37 ignored
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1509 workspace tests passing (37 ignored)

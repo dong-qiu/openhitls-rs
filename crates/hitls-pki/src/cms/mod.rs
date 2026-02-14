@@ -665,6 +665,27 @@ fn verify_signature_with_cert(
         } else {
             Err(cerr("RSA signature verification failed"))
         }
+    } else if sig_oid == known::rsassa_pss() {
+        // RSA-PSS
+        let mut key_dec = Decoder::new(&cert.public_key.public_key);
+        let mut key_seq = key_dec
+            .read_sequence()
+            .map_err(|e| cerr(&format!("RSA key: {e}")))?;
+        let n = key_seq
+            .read_integer()
+            .map_err(|e| cerr(&format!("RSA n: {e}")))?;
+        let e = key_seq
+            .read_integer()
+            .map_err(|e| cerr(&format!("RSA e: {e}")))?;
+        let rsa_pub = hitls_crypto::rsa::RsaPublicKey::new(n, e).map_err(PkiError::from)?;
+        let ok = rsa_pub
+            .verify(hitls_crypto::rsa::RsaPadding::Pss, digest, signature)
+            .map_err(PkiError::from)?;
+        if ok {
+            Ok(())
+        } else {
+            Err(cerr("RSA-PSS signature verification failed"))
+        }
     } else if sig_oid == known::ecdsa_with_sha256()
         || sig_oid == known::ecdsa_with_sha384()
         || sig_oid == known::ecdsa_with_sha512()
@@ -1804,5 +1825,179 @@ mod tests {
         let sid = SignerIdentifier::SubjectKeyIdentifier(target_ski);
         let found = find_signer_cert(&sid, &certs).unwrap();
         assert_eq!(found.serial_number, vec![0x02]);
+    }
+
+    // -----------------------------------------------------------------------
+    // P4: CMS NoAttr (no signed attributes) tests
+    // -----------------------------------------------------------------------
+
+    const NOATTR_CA_CERT: &str = include_str!("../../../../tests/vectors/cms/noattr/ca_cert.pem");
+    const NOATTR_P256_ATTACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/noattr/p256_attached.cms");
+    const NOATTR_P256_DETACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/noattr/p256_detached.cms");
+    const NOATTR_P384_ATTACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/noattr/p384_attached.cms");
+    const NOATTR_P384_DETACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/noattr/p384_detached.cms");
+    const NOATTR_P521_ATTACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/noattr/p521_attached.cms");
+    const NOATTR_P521_DETACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/noattr/p521_detached.cms");
+    const NOATTR_RSA_PKCS1_ATTACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/noattr/rsa_pkcs1_attached.cms");
+    const NOATTR_RSA_PKCS1_DETACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/noattr/rsa_pkcs1_detached.cms");
+    const NOATTR_RSA_PSS_ATTACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/noattr/rsa_pss_attached.cms");
+    const NOATTR_RSA_PSS_DETACHED: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/noattr/rsa_pss_detached.cms");
+
+    #[test]
+    fn test_cms_noattr_p256_parse() {
+        let msg = CmsMessage::from_der(NOATTR_P256_ATTACHED).unwrap();
+        assert_eq!(msg.content_type, CmsContentType::SignedData);
+        let sd = msg.signed_data.as_ref().unwrap();
+        assert!(!sd.signer_infos.is_empty());
+        // No signed attributes
+        assert!(
+            sd.signer_infos[0].signed_attrs.is_none(),
+            "noattr CMS should have no signed attributes"
+        );
+    }
+
+    #[test]
+    fn test_cms_noattr_p256_verify() {
+        let msg = CmsMessage::from_der(NOATTR_P256_ATTACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(NOATTR_CA_CERT).unwrap();
+        let result = msg.verify_signatures(None, &[ca]);
+        assert!(result.is_ok(), "noattr P-256 attached verify: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_noattr_p256_detached_verify() {
+        let msg = CmsMessage::from_der(NOATTR_P256_DETACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(NOATTR_CA_CERT).unwrap();
+        let result = msg.verify_signatures(Some(CMS_MSG), &[ca]);
+        assert!(result.is_ok(), "noattr P-256 detached verify: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_noattr_p384_verify() {
+        let msg = CmsMessage::from_der(NOATTR_P384_ATTACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(NOATTR_CA_CERT).unwrap();
+        let result = msg.verify_signatures(None, &[ca]);
+        assert!(result.is_ok(), "noattr P-384 attached verify: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_noattr_p384_detached_verify() {
+        let msg = CmsMessage::from_der(NOATTR_P384_DETACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(NOATTR_CA_CERT).unwrap();
+        let result = msg.verify_signatures(Some(CMS_MSG), &[ca]);
+        assert!(result.is_ok(), "noattr P-384 detached verify: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_noattr_p521_verify() {
+        let msg = CmsMessage::from_der(NOATTR_P521_ATTACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(NOATTR_CA_CERT).unwrap();
+        let result = msg.verify_signatures(None, &[ca]);
+        assert!(result.is_ok(), "noattr P-521 attached verify: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_noattr_p521_detached_verify() {
+        let msg = CmsMessage::from_der(NOATTR_P521_DETACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(NOATTR_CA_CERT).unwrap();
+        let result = msg.verify_signatures(Some(CMS_MSG), &[ca]);
+        assert!(result.is_ok(), "noattr P-521 detached verify: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_noattr_rsa_pkcs1_verify() {
+        let msg = CmsMessage::from_der(NOATTR_RSA_PKCS1_ATTACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(NOATTR_CA_CERT).unwrap();
+        let result = msg.verify_signatures(None, &[ca]);
+        assert!(
+            result.is_ok(),
+            "noattr RSA PKCS#1 attached verify: {result:?}"
+        );
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_noattr_rsa_pkcs1_detached_verify() {
+        let msg = CmsMessage::from_der(NOATTR_RSA_PKCS1_DETACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(NOATTR_CA_CERT).unwrap();
+        let result = msg.verify_signatures(Some(CMS_MSG), &[ca]);
+        assert!(
+            result.is_ok(),
+            "noattr RSA PKCS#1 detached verify: {result:?}"
+        );
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_noattr_rsa_pss_verify() {
+        let msg = CmsMessage::from_der(NOATTR_RSA_PSS_ATTACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(NOATTR_CA_CERT).unwrap();
+        let result = msg.verify_signatures(None, &[ca]);
+        assert!(result.is_ok(), "noattr RSA-PSS attached verify: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_cms_noattr_rsa_pss_detached_verify() {
+        let msg = CmsMessage::from_der(NOATTR_RSA_PSS_DETACHED).unwrap();
+        let ca = crate::x509::Certificate::from_pem(NOATTR_CA_CERT).unwrap();
+        let result = msg.verify_signatures(Some(CMS_MSG), &[ca]);
+        assert!(result.is_ok(), "noattr RSA-PSS detached verify: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    // -----------------------------------------------------------------------
+    // P4: CMS Chain cert tests
+    // -----------------------------------------------------------------------
+
+    const CHAIN_ROOT_CRT: &str = include_str!("../../../../tests/vectors/cms/chain/root_ca.crt");
+    const CHAIN_MID_CRT: &str = include_str!("../../../../tests/vectors/cms/chain/mid_ca.crt");
+    const CHAIN_DEVICE1_CRT: &str = include_str!("../../../../tests/vectors/cms/chain/device1.crt");
+    const CHAIN_DEVICE2_CRT: &str = include_str!("../../../../tests/vectors/cms/chain/device2.crt");
+
+    #[test]
+    fn test_cms_chain_certs_parse() {
+        // Verify all chain certs parse correctly
+        let root = crate::x509::Certificate::from_pem(CHAIN_ROOT_CRT).unwrap();
+        let mid = crate::x509::Certificate::from_pem(CHAIN_MID_CRT).unwrap();
+        let dev1 = crate::x509::Certificate::from_pem(CHAIN_DEVICE1_CRT).unwrap();
+        let dev2 = crate::x509::Certificate::from_pem(CHAIN_DEVICE2_CRT).unwrap();
+
+        assert!(root.is_self_signed());
+        assert!(root.is_ca());
+        assert!(mid.is_ca());
+        assert!(!dev1.is_self_signed());
+        assert!(!dev2.is_self_signed());
+    }
+
+    #[test]
+    fn test_cms_chain_verify() {
+        // Verify 3-level chain: root → mid → device
+        let root = crate::x509::Certificate::from_pem(CHAIN_ROOT_CRT).unwrap();
+        let mid = crate::x509::Certificate::from_pem(CHAIN_MID_CRT).unwrap();
+        let dev1 = crate::x509::Certificate::from_pem(CHAIN_DEVICE1_CRT).unwrap();
+
+        let mut verifier = crate::x509::verify::CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        // Use a time that's within the cert validity period
+        verifier.set_verification_time(1_767_225_600); // Jan 1, 2026
+        let chain = verifier.verify_cert(&dev1, &[mid]).unwrap();
+        assert_eq!(chain.len(), 3);
     }
 }
