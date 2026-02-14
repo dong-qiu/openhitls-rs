@@ -564,4 +564,43 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         assert!(dump.contains("01:02:03"));
         assert!(dump.starts_with("    "));
     }
+
+    // -----------------------------------------------------------------------
+    // P5: Additional text output tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_to_text_rsa_cert_fields() {
+        let cert = Certificate::from_pem(RSA_CA_PEM).unwrap();
+        let text = cert.to_text();
+        // Check key details
+        assert!(text.contains("CN=Test RSA"));
+        assert!(text.contains("O=OpenHiTLS"));
+        assert!(text.contains("C=CN"));
+        // Should show RSA key algorithm
+        assert!(text.contains("rsaEncryption"));
+        // Should contain hex dump of public key
+        assert!(text.contains("Public-Key:"));
+    }
+
+    #[test]
+    fn test_to_text_ecdsa_cert() {
+        let kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "ECDSA Text Test".to_string())],
+        };
+        let sk = crate::x509::SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: kp,
+        };
+        let cert =
+            crate::x509::CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000)
+                .unwrap();
+        let text = cert.to_text();
+        assert!(text.contains("Certificate:"));
+        assert!(text.contains("ECDSA Text Test"));
+        assert!(text.contains("id-ecPublicKey") || text.contains("ecPublicKey"));
+        assert!(text.contains("Signature Algorithm:"));
+    }
 }

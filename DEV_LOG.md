@@ -4813,3 +4813,84 @@ Ported additional C test vectors for certificate parsing edge cases, AKI/SKI cha
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1509 workspace tests passing (37 ignored)
+
+---
+
+## P5: PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths
+
+### Goal
+Wire Ed448, SM2, and RSA-PSS signature verification into PKI cert/CRL/OCSP verify paths. Add OCSP verify_signature tests (previously zero coverage). Port CRL DER test vectors from C codebase. Add CMS EnvelopedData error path tests. Improve test quality across text output, PKCS#12, and chain verification.
+
+### Part 1: Ed448 / SM2 / RSA-PSS Signature Verification
+
+Added 3 new verify helper functions in `hitls-pki/src/x509/mod.rs`:
+- `verify_ed448(tbs, sig, spki)` — Ed448 signature verification
+- `verify_sm2(tbs, sig, spki)` — SM2-with-SM3, uses `verify_with_id(b"", ...)` to match C codebase zero-length userId
+- `verify_rsa_pss(tbs, sig, spki)` — RSA-PSS with SHA-256 default hash
+
+Wired all 3 into:
+- `Certificate::verify_signature()` — OID routing after Ed25519 branch
+- `CertificateRequest::verify_signature()` — Same OID routing
+- `verify_signature_with_oid()` in `crl.rs` — CRL signature verification
+
+**Key fix**: SM2 signature verification requires `verify_with_id(b"", tbs, sig)` because C codebase signs certificates with zero-length userId, while Rust default is "1234567812345678".
+
+6 tests: Ed448 direct verify, Ed448 bad signature, SM2 self-signed, SM2 chain, RSA-PSS self-signed, RSA-PSS chain.
+
+### Part 2: OCSP Verify Signature Tests
+
+Added `build_signed_ocsp_response()` helper that creates properly signed OCSP BasicOCSPResponse (DER-encodes ResponseData, signs it, constructs BasicOCSPResponse with tbs_raw + signature).
+
+7 tests: ECDSA verify, wrong issuer (fails), tampered tbs_raw (fails), OcspRequest::new, unknown status, malformed response, non-successful status codes.
+
+### Part 3: CRL C Test Vector Porting
+
+Copied 6 DER files from C codebase:
+- `tests/vectors/crl/ecdsa/`: crl_v1.der, crl_v2.der, crl_v2.mul.der
+- `tests/vectors/crl/rsa_der/`: crl_v1.der, crl_v2.der, crl_v2.mul.der
+
+12 tests: ECDSA v1/v2/mul DER parsing, RSA v1/v2/mul DER parsing, CRL number value assertion, revocation reason validation (valid + invalid u8 values), from_der direct API, ECDSA signature algorithm detection.
+
+### Part 4: CMS EnvelopedData Error Paths
+
+8 negative tests for CMS EnvelopedData decrypt:
+- `decrypt_kek_not_enveloped` / `decrypt_rsa_not_enveloped` — SignedData input → "not EnvelopedData"
+- `decrypt_kek_no_kek_recipient` / `decrypt_rsa_no_rsa_recipient` — Wrong recipient type
+- `decrypt_kek_wrong_key_length` — 15-byte KEK (invalid)
+- `decrypt_content_no_ciphertext` — Empty encrypted_content
+- `decrypt_content_no_params` — Missing algorithm params (no nonce)
+- `cms_enveloped_kek_24byte` — AES-192 KEK round-trip
+
+### Part 5: Additional Test Quality
+
+8 tests across text.rs, verify.rs, pkcs12:
+- `test_to_text_rsa_cert_fields` — RSA cert to_text() field checks
+- `test_to_text_ecdsa_cert` — ECDSA cert to_text() output
+- `test_chain_verify_rsa_pss_full` — RSA-PSS chain verification (root → leaf)
+- `test_chain_verify_sm2_full` — SM2 chain verification
+- `test_chain_verify_rsa_pss_wrong_root` — Wrong root fails chain verification
+- `test_pkcs12_empty_data` — Empty/truncated/garbage input
+- `test_pkcs12_round_trip_ecdsa` — ECDSA private key PKCS#12 round-trip
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `hitls-pki/src/x509/mod.rs` | +verify_ed448/verify_sm2/verify_rsa_pss helpers + OID routing in Certificate + CertificateRequest verify + 6 tests |
+| `hitls-pki/src/x509/crl.rs` | +Ed448/SM2/RSA-PSS in verify_signature_with_oid + 12 CRL DER tests |
+| `hitls-pki/src/x509/ocsp.rs` | +build_signed_ocsp_response helper + 7 OCSP tests |
+| `hitls-pki/src/x509/verify.rs` | +3 chain verify tests (RSA-PSS + SM2 + wrong root) |
+| `hitls-pki/src/x509/text.rs` | +2 text output tests |
+| `hitls-pki/src/cms/enveloped.rs` | +8 error path tests |
+| `hitls-pki/src/pkcs12/mod.rs` | +2 tests (empty data + ECDSA roundtrip) |
+| `tests/vectors/crl/ecdsa/` | +3 DER files from C codebase |
+| `tests/vectors/crl/rsa_der/` | +3 DER files from C codebase |
+
+### Test Counts (P5)
+- **hitls-pki**: 313 (from 272), +41 new tests
+- **Total workspace**: 1550 (from 1509), +41 new tests, 37 ignored
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1550 workspace tests passing (37 ignored)

@@ -2082,19 +2082,8 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut v = CertificateVerifier::new();
         v.add_trusted_cert(root);
         v.set_verification_time(AKISKI_TIME);
-        // RSA-PSS may or may not be fully supported — depends on verify_signature
-        let result = v.verify_cert(&leaf, &[]);
-        match result {
-            Ok(chain) => assert_eq!(chain.len(), 2),
-            Err(e) => {
-                // RSA-PSS with specific params may not be supported yet
-                assert!(
-                    format!("{e:?}").contains("unsupported")
-                        || format!("{e:?}").contains("signature"),
-                    "unexpected error: {e:?}"
-                );
-            }
-        }
+        let chain = v.verify_cert(&leaf, &[]).unwrap();
+        assert_eq!(chain.len(), 2);
     }
 
     #[test]
@@ -2104,17 +2093,46 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut v = CertificateVerifier::new();
         v.add_trusted_cert(root);
         v.set_verification_time(AKISKI_TIME);
-        // SM2 signature verification may not be supported in verify_signature
-        let result = v.verify_cert(&leaf, &[]);
-        match result {
-            Ok(chain) => assert_eq!(chain.len(), 2),
-            Err(e) => {
-                assert!(
-                    format!("{e:?}").contains("unsupported")
-                        || format!("{e:?}").contains("signature"),
-                    "unexpected error: {e:?}"
-                );
-            }
-        }
+        let chain = v.verify_cert(&leaf, &[]).unwrap();
+        assert_eq!(chain.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // P5: Additional chain verification quality tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_chain_verify_rsa_pss_full() {
+        // Verify RSA-PSS chain with full verifier pipeline
+        let root = Certificate::from_pem(SIGPARAM_RSA_PSS_ROOT).unwrap();
+        let leaf = Certificate::from_pem(SIGPARAM_RSA_PSS_LEAF).unwrap();
+        // Verify leaf signature against root directly
+        let sig_ok = leaf.verify_signature(&root).unwrap();
+        assert!(sig_ok, "RSA-PSS leaf signature should verify against root");
+        // Verify root self-signature
+        let self_sig_ok = root.verify_signature(&root).unwrap();
+        assert!(self_sig_ok, "RSA-PSS root self-signature should verify");
+    }
+
+    #[test]
+    fn test_chain_verify_sm2_full() {
+        // Verify SM2 chain with full verifier pipeline
+        let root = Certificate::from_pem(SIGPARAM_SM2_ROOT).unwrap();
+        let leaf = Certificate::from_pem(SIGPARAM_SM2_LEAF).unwrap();
+        // Direct signature verification
+        let sig_ok = leaf.verify_signature(&root).unwrap();
+        assert!(sig_ok, "SM2 leaf signature should verify against root");
+        let self_sig_ok = root.verify_signature(&root).unwrap();
+        assert!(self_sig_ok, "SM2 root self-signature should verify");
+    }
+
+    #[test]
+    fn test_chain_verify_rsa_pss_wrong_root() {
+        // RSA-PSS leaf verified against wrong root should fail
+        let root = Certificate::from_pem(SIGPARAM_RSA_ROOT).unwrap(); // RSA, not RSA-PSS
+        let leaf = Certificate::from_pem(SIGPARAM_RSA_PSS_LEAF).unwrap();
+        let result = leaf.verify_signature(&root);
+        // Should fail — wrong key
+        assert!(result.is_err() || !result.unwrap());
     }
 }

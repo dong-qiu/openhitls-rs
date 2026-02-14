@@ -872,4 +872,191 @@ mod tests {
 
         enc_seq(&cert_inner)
     }
+
+    // -----------------------------------------------------------------------
+    // P5: CMS EnvelopedData error path tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_decrypt_kek_not_enveloped() {
+        // Build a CMS SignedData message, then try decrypt_kek → should fail
+        let cms = CmsMessage {
+            content_type: CmsContentType::SignedData,
+            signed_data: None,
+            enveloped_data: None,
+            encrypted_data: None,
+            digested_data: None,
+            raw: vec![],
+        };
+        let result = cms.decrypt_kek(&[0u8; 16]);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("not EnvelopedData"));
+    }
+
+    #[test]
+    fn test_decrypt_rsa_not_enveloped() {
+        // Build a CMS SignedData message, then try decrypt_rsa → should fail
+        let cms = CmsMessage {
+            content_type: CmsContentType::SignedData,
+            signed_data: None,
+            enveloped_data: None,
+            encrypted_data: None,
+            digested_data: None,
+            raw: vec![],
+        };
+        let result = cms.decrypt_rsa(&[1], &[1], &[1], &[1], &[1]);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("not EnvelopedData"));
+    }
+
+    #[test]
+    fn test_decrypt_kek_no_kek_recipient() {
+        // Build EnvelopedData with only KTRI (RSA) recipient, then try decrypt_kek
+        let ed = EnvelopedData {
+            version: 0,
+            recipient_infos: vec![RecipientInfo::KeyTransport(KeyTransRecipientInfo {
+                version: 0,
+                rid_issuer: vec![],
+                rid_serial: vec![],
+                key_encryption_algorithm: AlgorithmIdentifier {
+                    oid: vec![],
+                    params: None,
+                },
+                encrypted_key: vec![0u8; 32],
+            })],
+            encrypted_content_info: EncryptedContentInfo {
+                content_type: vec![],
+                content_encryption_algorithm: AlgorithmIdentifier {
+                    oid: vec![],
+                    params: None,
+                },
+                encrypted_content: Some(vec![0u8; 16]),
+            },
+        };
+        let cms = CmsMessage {
+            content_type: CmsContentType::EnvelopedData,
+            signed_data: None,
+            enveloped_data: Some(ed),
+            encrypted_data: None,
+            digested_data: None,
+            raw: vec![],
+        };
+        let result = cms.decrypt_kek(&[0u8; 16]);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("no KekRecipientInfo"));
+    }
+
+    #[test]
+    fn test_decrypt_rsa_no_rsa_recipient() {
+        // Build EnvelopedData with only KEKRI, then try decrypt_rsa
+        let ed = EnvelopedData {
+            version: 2,
+            recipient_infos: vec![RecipientInfo::Kek(KekRecipientInfo {
+                version: 4,
+                kek_id: b"test-key".to_vec(),
+                key_encryption_algorithm: AlgorithmIdentifier {
+                    oid: vec![],
+                    params: None,
+                },
+                encrypted_key: vec![0u8; 32],
+            })],
+            encrypted_content_info: EncryptedContentInfo {
+                content_type: vec![],
+                content_encryption_algorithm: AlgorithmIdentifier {
+                    oid: vec![],
+                    params: None,
+                },
+                encrypted_content: Some(vec![0u8; 16]),
+            },
+        };
+        let cms = CmsMessage {
+            content_type: CmsContentType::EnvelopedData,
+            signed_data: None,
+            enveloped_data: Some(ed),
+            encrypted_data: None,
+            digested_data: None,
+            raw: vec![],
+        };
+        let result = cms.decrypt_rsa(&[1], &[1], &[1], &[1], &[1]);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("no KeyTransRecipientInfo"));
+    }
+
+    #[test]
+    fn test_decrypt_kek_wrong_key_length() {
+        // Use a KEK with invalid length (15 bytes instead of 16/24/32)
+        let kek = [0x42u8; 16];
+        let kek_id = b"wrong-len-test";
+        let plaintext = b"Test data for wrong length";
+
+        let cms =
+            CmsMessage::encrypt_kek(plaintext, &kek, kek_id, CmsEncryptionAlg::Aes128Gcm).unwrap();
+
+        // Try decrypt with 15-byte key
+        let wrong_kek = [0x42u8; 15];
+        let result = cms.decrypt_kek(&wrong_kek);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decrypt_content_no_ciphertext() {
+        // EnvelopedData with empty encrypted_content
+        let kek = [0x42u8; 16];
+        let kek_id = b"empty-ct-test";
+        let plaintext = b"Test for empty ciphertext";
+
+        let mut cms =
+            CmsMessage::encrypt_kek(plaintext, &kek, kek_id, CmsEncryptionAlg::Aes128Gcm).unwrap();
+        // Remove the encrypted content
+        cms.enveloped_data
+            .as_mut()
+            .unwrap()
+            .encrypted_content_info
+            .encrypted_content = None;
+
+        let result = cms.decrypt_kek(&kek);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("no encrypted content"));
+    }
+
+    #[test]
+    fn test_decrypt_content_no_params() {
+        // EnvelopedData with missing algorithm params (no nonce)
+        let kek = [0x42u8; 16];
+        let kek_id = b"no-params-test";
+        let plaintext = b"Test for missing params";
+
+        let mut cms =
+            CmsMessage::encrypt_kek(plaintext, &kek, kek_id, CmsEncryptionAlg::Aes128Gcm).unwrap();
+        // Remove the params (nonce)
+        cms.enveloped_data
+            .as_mut()
+            .unwrap()
+            .encrypted_content_info
+            .content_encryption_algorithm
+            .params = None;
+
+        let result = cms.decrypt_kek(&kek);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("no content encryption params"));
+    }
+
+    #[test]
+    fn test_cms_enveloped_kek_24byte() {
+        // 24-byte KEK (AES-192)
+        let kek = [0xCC; 24];
+        let kek_id = b"aes192-kek-test";
+        let plaintext = b"Testing with AES-192 KEK wrapping";
+
+        let cms =
+            CmsMessage::encrypt_kek(plaintext, &kek, kek_id, CmsEncryptionAlg::Aes128Gcm).unwrap();
+        let decrypted = cms.decrypt_kek(&kek).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
 }

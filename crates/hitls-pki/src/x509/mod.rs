@@ -965,6 +965,12 @@ impl Certificate {
             )
         } else if sig_oid == known::ed25519() {
             verify_ed25519(&self.tbs_raw, &self.signature_value, &issuer.public_key)
+        } else if sig_oid == known::ed448() {
+            verify_ed448(&self.tbs_raw, &self.signature_value, &issuer.public_key)
+        } else if sig_oid == known::sm2_with_sm3() {
+            verify_sm2(&self.tbs_raw, &self.signature_value, &issuer.public_key)
+        } else if sig_oid == known::rsassa_pss() {
+            verify_rsa_pss(&self.tbs_raw, &self.signature_value, &issuer.public_key)
         } else {
             Err(PkiError::InvalidCert(format!(
                 "unsupported signature algorithm: {}",
@@ -1092,6 +1098,56 @@ pub(crate) fn verify_ed25519(
         .map_err(PkiError::from)?;
     // Ed25519 takes the raw message (not pre-hashed)
     verifier.verify(tbs, signature).map_err(PkiError::from)
+}
+
+pub(crate) fn verify_ed448(
+    tbs: &[u8],
+    signature: &[u8],
+    spki: &SubjectPublicKeyInfo,
+) -> Result<bool, PkiError> {
+    let verifier = hitls_crypto::ed448::Ed448KeyPair::from_public_key(&spki.public_key)
+        .map_err(PkiError::from)?;
+    // Ed448 takes the raw message (not pre-hashed)
+    verifier.verify(tbs, signature).map_err(PkiError::from)
+}
+
+pub(crate) fn verify_sm2(
+    tbs: &[u8],
+    signature: &[u8],
+    spki: &SubjectPublicKeyInfo,
+) -> Result<bool, PkiError> {
+    let verifier =
+        hitls_crypto::sm2::Sm2KeyPair::from_public_key(&spki.public_key).map_err(PkiError::from)?;
+    // SM2 with SM3 — use empty user ID for X.509 certificate verification
+    // (matches C implementation which uses zero-length userId by default)
+    verifier
+        .verify_with_id(b"", tbs, signature)
+        .map_err(PkiError::from)
+}
+
+pub(crate) fn verify_rsa_pss(
+    tbs: &[u8],
+    signature: &[u8],
+    spki: &SubjectPublicKeyInfo,
+) -> Result<bool, PkiError> {
+    // RSA-PSS SPKI uses the same RSA key format
+    let mut key_dec = Decoder::new(&spki.public_key);
+    let mut seq = key_dec
+        .read_sequence()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    let n = seq
+        .read_integer()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    let e = seq
+        .read_integer()
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+
+    let rsa_pub = hitls_crypto::rsa::RsaPublicKey::new(n, e).map_err(PkiError::from)?;
+    // Default to SHA-256 for PSS hash; compute digest then verify with PSS padding
+    let digest = compute_hash(tbs, &HashAlg::Sha256).map_err(PkiError::from)?;
+    rsa_pub
+        .verify(hitls_crypto::rsa::RsaPadding::Pss, &digest, signature)
+        .map_err(PkiError::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -1517,6 +1573,12 @@ impl CertificateRequest {
             )
         } else if sig_oid == known::ed25519() {
             verify_ed25519(&self.tbs_raw, &self.signature_value, &self.public_key)
+        } else if sig_oid == known::ed448() {
+            verify_ed448(&self.tbs_raw, &self.signature_value, &self.public_key)
+        } else if sig_oid == known::sm2_with_sm3() {
+            verify_sm2(&self.tbs_raw, &self.signature_value, &self.public_key)
+        } else if sig_oid == known::rsassa_pss() {
+            verify_rsa_pss(&self.tbs_raw, &self.signature_value, &self.public_key)
         } else {
             Err(PkiError::InvalidCert(format!(
                 "unsupported CSR signature algorithm: {}",
@@ -3292,5 +3354,87 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         assert_eq!(cp.policies[0].policy_identifier, policy_oid);
         assert_eq!(cp.policies[0].qualifiers.len(), 1);
         assert_eq!(cp.policies[0].qualifiers[0].qualifier_id, cps_oid);
+    }
+
+    // -----------------------------------------------------------------------
+    // P5: Ed448, SM2, RSA-PSS signature verification tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_verify_ed448_direct() {
+        // Test Ed448 signature verification using the verify_ed448 helper directly
+        let kp = hitls_crypto::ed448::Ed448KeyPair::generate().unwrap();
+        let pub_bytes = kp.public_key().to_vec();
+        let spki = SubjectPublicKeyInfo {
+            algorithm_oid: known::ed448().to_der_value(),
+            algorithm_params: None,
+            public_key: pub_bytes,
+        };
+        let message = b"test message for Ed448 verification";
+        let sig = kp.sign(message).unwrap();
+        let result = verify_ed448(message, &sig, &spki).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_verify_ed448_bad_signature() {
+        // Test Ed448 verification with tampered signature
+        let kp = hitls_crypto::ed448::Ed448KeyPair::generate().unwrap();
+        let pub_bytes = kp.public_key().to_vec();
+        let spki = SubjectPublicKeyInfo {
+            algorithm_oid: known::ed448().to_der_value(),
+            algorithm_params: None,
+            public_key: pub_bytes,
+        };
+        let message = b"test message for Ed448 verification";
+        let mut sig = kp.sign(message).unwrap();
+        sig[10] ^= 0xFF; // Tamper
+        let result = verify_ed448(message, &sig, &spki);
+        assert!(result.is_err() || !result.unwrap());
+    }
+
+    #[test]
+    fn test_verify_sm2_self_signed() {
+        let root_pem = include_str!("../../../../tests/vectors/chain/sigParam/sm2_root.pem");
+        let root = Certificate::from_pem(root_pem).unwrap();
+        assert_eq!(root.subject.get("CN"), Some("sigParam Root SM2"));
+        let result = root.verify_signature(&root);
+        assert!(result.is_ok(), "SM2 self-signed verify failed: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_verify_sm2_chain() {
+        let root_pem = include_str!("../../../../tests/vectors/chain/sigParam/sm2_root.pem");
+        let leaf_pem = include_str!("../../../../tests/vectors/chain/sigParam/sm2_leaf.pem");
+        let root = Certificate::from_pem(root_pem).unwrap();
+        let leaf = Certificate::from_pem(leaf_pem).unwrap();
+        let result = leaf.verify_signature(&root);
+        assert!(result.is_ok(), "SM2 chain verify failed: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_verify_rsa_pss_self_signed() {
+        let root_pem = include_str!("../../../../tests/vectors/chain/sigParam/rsa_pss_root.pem");
+        let root = Certificate::from_pem(root_pem).unwrap();
+        assert_eq!(root.subject.get("CN"), Some("sigParam Root RSA-PSS"));
+        let result = root.verify_signature(&root);
+        assert!(
+            result.is_ok(),
+            "RSA-PSS self-signed verify failed: {result:?}"
+        );
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_verify_rsa_pss_chain() {
+        let root_pem = include_str!("../../../../tests/vectors/chain/sigParam/rsa_pss_root.pem");
+        let leaf_pem = include_str!("../../../../tests/vectors/chain/sigParam/rsa_pss_leaf.pem");
+        let root = Certificate::from_pem(root_pem).unwrap();
+        let leaf = Certificate::from_pem(leaf_pem).unwrap();
+        let result = leaf.verify_signature(&root);
+        assert!(result.is_ok(), "RSA-PSS chain verify failed: {result:?}");
+        assert!(result.unwrap());
     }
 }

@@ -901,4 +901,47 @@ mod tests {
         let parsed = Pkcs12::from_der(&p12, "largekeytest").unwrap();
         assert_eq!(parsed.private_key.as_ref().unwrap(), &large_pk);
     }
+
+    // -----------------------------------------------------------------------
+    // P5: PKCS#12 error path + ECDSA round-trip
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_pkcs12_empty_data() {
+        // Empty input should fail
+        assert!(Pkcs12::from_der(&[], "password").is_err());
+        // Truncated/garbage input should fail
+        assert!(Pkcs12::from_der(&[0x30, 0x00], "password").is_err());
+        // Random garbage should fail
+        assert!(Pkcs12::from_der(&[0xFF; 64], "password").is_err());
+    }
+
+    #[test]
+    fn test_pkcs12_round_trip_ecdsa() {
+        // Build ECDSA private key in PKCS#8 format
+        let ec_oid = known::ec_public_key();
+        let p256_oid = known::prime256v1();
+
+        // AlgorithmIdentifier = SEQUENCE { OID ecPublicKey, OID secp256r1 }
+        let mut alg_inner = enc_oid(&ec_oid.to_der_value());
+        alg_inner.extend_from_slice(&enc_oid(&p256_oid.to_der_value()));
+        let alg_id = enc_seq(&alg_inner);
+
+        // Fake 32-byte EC private key wrapped in OCTET STRING
+        let ec_key = enc_octet(&[0xAB; 32]);
+
+        // PKCS#8 PrivateKeyInfo = SEQUENCE { version, algId, key }
+        let mut pki = Vec::new();
+        pki.extend_from_slice(&enc_int(&[0])); // version 0
+        pki.extend_from_slice(&alg_id);
+        pki.extend_from_slice(&ec_key);
+        let ecdsa_pk = enc_seq(&pki);
+
+        let cert = fake_certificate(99);
+        let p12 = Pkcs12::create(Some(&ecdsa_pk), &[&cert], "ectest").unwrap();
+        let parsed = Pkcs12::from_der(&p12, "ectest").unwrap();
+        assert_eq!(parsed.private_key.as_ref().unwrap(), &ecdsa_pk);
+        assert_eq!(parsed.certificates.len(), 1);
+        assert_eq!(parsed.certificates[0], cert);
+    }
 }

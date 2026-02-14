@@ -803,4 +803,269 @@ mod tests {
         };
         assert!(basic.find_response(&other_id).is_none());
     }
+
+    // -----------------------------------------------------------------------
+    // P5: OCSP verify_signature tests
+    // -----------------------------------------------------------------------
+
+    /// Build a properly signed OCSP response for testing.
+    /// Returns DER-encoded OCSPResponse.
+    fn build_signed_ocsp_response(
+        single_responses: &[(OcspCertId, OcspCertStatus, i64)],
+        sig_alg_oid: &[u8],
+        sign_fn: &dyn Fn(&[u8]) -> Vec<u8>,
+    ) -> Vec<u8> {
+        // Build SingleResponse entries
+        let mut resp_parts: Vec<Vec<u8>> = Vec::new();
+        for (cert_id, cert_status, this_update) in single_responses {
+            let cert_id_der = cert_id.to_der();
+            let status_der = match cert_status {
+                OcspCertStatus::Good => vec![0x80, 0x00],
+                OcspCertStatus::Revoked {
+                    revocation_time, ..
+                } => {
+                    let time_der = enc_generalized_time(*revocation_time);
+                    enc_tlv(0xA1, &time_der)
+                }
+                OcspCertStatus::Unknown => vec![0x82, 0x00],
+            };
+            let this_update_der = enc_generalized_time(*this_update);
+            let single_inner = enc_raw_parts(&[&cert_id_der, &status_der, &this_update_der]);
+            resp_parts.push(enc_seq(&single_inner));
+        }
+        let responses_inner =
+            enc_raw_parts(&resp_parts.iter().map(|v| v.as_slice()).collect::<Vec<_>>());
+        let responses_seq = enc_seq(&responses_inner);
+
+        // ResponderID: byKey [2]
+        let key_hash_octet = enc_octet(&[0u8; 32]);
+        let responder_id = enc_tlv(0xA2, &key_hash_octet);
+
+        // producedAt
+        let produced_at = enc_generalized_time(1_763_164_800);
+
+        // ResponseData SEQUENCE (this is what gets signed)
+        let response_data_inner = enc_raw_parts(&[&responder_id, &produced_at, &responses_seq]);
+        let response_data = enc_seq(&response_data_inner);
+
+        // Sign the ResponseData
+        let signature = sign_fn(&response_data);
+
+        // signatureAlgorithm
+        let sig_alg_inner = enc_raw_parts(&[&enc_oid(sig_alg_oid), &enc_null()]);
+        let sig_alg = enc_seq(&sig_alg_inner);
+
+        // signature BIT STRING
+        let sig_bs = enc_bit_string(0, &signature);
+
+        // BasicOCSPResponse
+        let basic_inner = enc_raw_parts(&[&response_data, &sig_alg, &sig_bs]);
+        let basic_der = enc_seq(&basic_inner);
+
+        // ResponseBytes
+        let ocsp_basic_oid = known::ocsp_basic().to_der_value();
+        let resp_bytes_inner = enc_raw_parts(&[&enc_oid(&ocsp_basic_oid), &enc_octet(&basic_der)]);
+        let resp_bytes = enc_seq(&resp_bytes_inner);
+
+        // OCSPResponse
+        let status_der = enc_tlv(0x0A, &[0]); // successful
+        let resp_bytes_tagged = enc_tlv(0xA0, &resp_bytes);
+        let outer = enc_raw_parts(&[&status_der, &resp_bytes_tagged]);
+        enc_seq(&outer)
+    }
+
+    #[test]
+    fn test_ocsp_verify_signature_ecdsa() {
+        // Build a cert and key for signing
+        let kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        // Build a minimal self-signed cert
+        let dn = crate::x509::DistinguishedName {
+            entries: vec![("CN".to_string(), "OCSP Test ECDSA".to_string())],
+        };
+        let sk = crate::x509::SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: kp.clone(),
+        };
+        let cert =
+            crate::x509::CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000)
+                .unwrap();
+
+        // Build OCSP request components
+        let cert_id = OcspCertId {
+            hash_algorithm: known::sha256().to_der_value(),
+            issuer_name_hash: vec![0u8; 32],
+            issuer_key_hash: vec![0u8; 32],
+            serial_number: vec![1],
+        };
+
+        let sig_alg_oid = known::ecdsa_with_sha256().to_der_value();
+        let der = build_signed_ocsp_response(
+            &[(cert_id, OcspCertStatus::Good, 1_763_164_800)],
+            &sig_alg_oid,
+            &|data: &[u8]| {
+                let mut h = hitls_crypto::sha2::Sha256::new();
+                h.update(data).unwrap();
+                let digest = h.finish().unwrap();
+                kp.sign(&digest).unwrap()
+            },
+        );
+
+        let resp = OcspResponse::from_der(&der).unwrap();
+        let basic = resp.basic_response.unwrap();
+        let result = basic.verify_signature(&cert);
+        assert!(result.is_ok(), "OCSP ECDSA verify failed: {result:?}");
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_ocsp_verify_signature_wrong_issuer() {
+        // Sign with one key, try to verify with different cert
+        let kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+
+        let cert_id = OcspCertId {
+            hash_algorithm: known::sha256().to_der_value(),
+            issuer_name_hash: vec![0u8; 32],
+            issuer_key_hash: vec![0u8; 32],
+            serial_number: vec![1],
+        };
+
+        let sig_alg_oid = known::ecdsa_with_sha256().to_der_value();
+        let der = build_signed_ocsp_response(
+            &[(cert_id, OcspCertStatus::Good, 1_763_164_800)],
+            &sig_alg_oid,
+            &|data: &[u8]| {
+                let mut h = hitls_crypto::sha2::Sha256::new();
+                h.update(data).unwrap();
+                let digest = h.finish().unwrap();
+                kp.sign(&digest).unwrap()
+            },
+        );
+
+        // Build a DIFFERENT cert
+        let other_kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let other_dn = crate::x509::DistinguishedName {
+            entries: vec![("CN".to_string(), "Wrong Issuer".to_string())],
+        };
+        let other_sk = crate::x509::SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: other_kp,
+        };
+        let wrong_cert = crate::x509::CertificateBuilder::self_signed(
+            other_dn,
+            &other_sk,
+            1_700_000_000,
+            1_800_000_000,
+        )
+        .unwrap();
+
+        let resp = OcspResponse::from_der(&der).unwrap();
+        let basic = resp.basic_response.unwrap();
+        let result = basic.verify_signature(&wrong_cert);
+        assert!(result.is_err() || !result.unwrap());
+    }
+
+    #[test]
+    fn test_ocsp_verify_signature_tampered() {
+        // Sign properly then tamper with tbs_raw
+        let kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let dn = crate::x509::DistinguishedName {
+            entries: vec![("CN".to_string(), "Tamper Test".to_string())],
+        };
+        let sk = crate::x509::SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: kp.clone(),
+        };
+        let cert =
+            crate::x509::CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000)
+                .unwrap();
+
+        let cert_id = OcspCertId {
+            hash_algorithm: known::sha256().to_der_value(),
+            issuer_name_hash: vec![0u8; 32],
+            issuer_key_hash: vec![0u8; 32],
+            serial_number: vec![1],
+        };
+
+        let sig_alg_oid = known::ecdsa_with_sha256().to_der_value();
+        let der = build_signed_ocsp_response(
+            &[(cert_id, OcspCertStatus::Good, 1_763_164_800)],
+            &sig_alg_oid,
+            &|data: &[u8]| {
+                let mut h = hitls_crypto::sha2::Sha256::new();
+                h.update(data).unwrap();
+                let digest = h.finish().unwrap();
+                kp.sign(&digest).unwrap()
+            },
+        );
+
+        let resp = OcspResponse::from_der(&der).unwrap();
+        let mut basic = resp.basic_response.unwrap();
+        // Tamper with tbs_raw
+        let len = basic.tbs_raw.len();
+        if len > 0 {
+            basic.tbs_raw[len - 1] ^= 0xFF;
+        }
+        let result = basic.verify_signature(&cert);
+        assert!(result.is_err() || !result.unwrap());
+    }
+
+    #[test]
+    fn test_ocsp_request_new() {
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server = Certificate::from_pem(SERVER1_PEM).unwrap();
+        let req = OcspRequest::new(&server, &ca).unwrap();
+        assert_eq!(req.request_list.len(), 1);
+        assert!(!req.request_list[0].issuer_name_hash.is_empty());
+        assert!(!req.request_list[0].issuer_key_hash.is_empty());
+        assert_eq!(req.request_list[0].serial_number, server.serial_number);
+        let der = req.to_der().unwrap();
+        assert!(!der.is_empty());
+    }
+
+    #[test]
+    fn test_ocsp_response_unknown_status() {
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server = Certificate::from_pem(SERVER1_PEM).unwrap();
+        let cert_id = OcspCertId::new(&server, &ca).unwrap();
+
+        let sha256_rsa_oid = known::sha256_with_rsa_encryption().to_der_value();
+        let der = build_test_ocsp_response(
+            OcspResponseStatus::Successful,
+            &[(cert_id.clone(), OcspCertStatus::Unknown, 1_763_164_800)],
+            &sha256_rsa_oid,
+            &[0u8; 64],
+        );
+
+        let resp = OcspResponse::from_der(&der).unwrap();
+        let basic = resp.basic_response.unwrap();
+        assert_eq!(basic.responses[0].status, OcspCertStatus::Unknown);
+    }
+
+    #[test]
+    fn test_ocsp_response_malformed() {
+        // Completely invalid DER
+        let result = OcspResponse::from_der(&[0xFF, 0xFF]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ocsp_response_non_successful_statuses() {
+        for (code, expected) in [
+            (1, OcspResponseStatus::MalformedRequest),
+            (2, OcspResponseStatus::InternalError),
+            (3, OcspResponseStatus::TryLater),
+            (5, OcspResponseStatus::SigRequired),
+            (6, OcspResponseStatus::Unauthorized),
+        ] {
+            let inner = enc_tlv(0x0A, &[code]);
+            let der = enc_seq(&inner);
+            let resp = OcspResponse::from_der(&der).unwrap();
+            assert_eq!(resp.status, expected);
+            assert!(resp.basic_response.is_none());
+        }
+    }
 }

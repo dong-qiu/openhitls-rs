@@ -6,7 +6,8 @@ use hitls_utils::oid::{known, Oid};
 
 use super::{
     parse_algorithm_identifier, parse_extensions, parse_name, verify_ecdsa, verify_ed25519,
-    verify_rsa, Certificate, DistinguishedName, HashAlg, SubjectPublicKeyInfo, X509Extension,
+    verify_ed448, verify_rsa, verify_rsa_pss, verify_sm2, Certificate, DistinguishedName, HashAlg,
+    SubjectPublicKeyInfo, X509Extension,
 };
 
 /// A certificate revocation list (CRL).
@@ -277,6 +278,12 @@ pub(crate) fn verify_signature_with_oid(
         verify_ecdsa(tbs, signature, spki, HashAlg::Sha512)
     } else if *sig_oid == known::ed25519() {
         verify_ed25519(tbs, signature, spki)
+    } else if *sig_oid == known::ed448() {
+        verify_ed448(tbs, signature, spki)
+    } else if *sig_oid == known::sm2_with_sm3() {
+        verify_sm2(tbs, signature, spki)
+    } else if *sig_oid == known::rsassa_pss() {
+        verify_rsa_pss(tbs, signature, spki)
     } else {
         Err(PkiError::InvalidCrl(format!(
             "unsupported signature algorithm: {}",
@@ -564,5 +571,142 @@ mod tests {
         assert_eq!(crl.revoked_certs.len(), 1);
         let entry = &crl.revoked_certs[0];
         assert_eq!(entry.reason, Some(RevocationReason::KeyCompromise));
+    }
+
+    // -----------------------------------------------------------------------
+    // P5: CRL C test vectors + edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_crl_ecdsa_v1_der() {
+        let data = include_bytes!("../../../../tests/vectors/crl/ecdsa/crl_v1.der");
+        let crl = CertificateRevocationList::from_der(data).unwrap();
+        assert_eq!(crl.version, 1);
+        assert!(!crl.issuer.entries.is_empty());
+    }
+
+    #[test]
+    fn test_parse_crl_ecdsa_v2_der() {
+        let data = include_bytes!("../../../../tests/vectors/crl/ecdsa/crl_v2.der");
+        let crl = CertificateRevocationList::from_der(data).unwrap();
+        assert_eq!(crl.version, 2);
+        assert!(!crl.extensions.is_empty());
+    }
+
+    #[test]
+    fn test_parse_crl_ecdsa_multiple_der() {
+        let data = include_bytes!("../../../../tests/vectors/crl/ecdsa/crl_v2.mul.der");
+        let crl = CertificateRevocationList::from_der(data).unwrap();
+        assert!(!crl.revoked_certs.is_empty());
+        assert_eq!(crl.version, 2);
+    }
+
+    #[test]
+    fn test_parse_crl_rsa_v1_der() {
+        let data = include_bytes!("../../../../tests/vectors/crl/rsa_der/crl_v1.der");
+        let crl = CertificateRevocationList::from_der(data).unwrap();
+        assert_eq!(crl.version, 1);
+        assert!(!crl.issuer.entries.is_empty());
+    }
+
+    #[test]
+    fn test_parse_crl_rsa_v2_der() {
+        let data = include_bytes!("../../../../tests/vectors/crl/rsa_der/crl_v2.der");
+        let crl = CertificateRevocationList::from_der(data).unwrap();
+        assert_eq!(crl.version, 2);
+        assert!(!crl.extensions.is_empty());
+    }
+
+    #[test]
+    fn test_parse_crl_rsa_multiple_der() {
+        let data = include_bytes!("../../../../tests/vectors/crl/rsa_der/crl_v2.mul.der");
+        let crl = CertificateRevocationList::from_der(data).unwrap();
+        assert!(!crl.revoked_certs.is_empty());
+        assert_eq!(crl.version, 2);
+    }
+
+    #[test]
+    fn test_crl_number_value() {
+        // Parse the v2 CRL and check the actual CRL number
+        let crl = CertificateRevocationList::from_pem(CRL_V2_PEM).unwrap();
+        let crl_num = crl.crl_number().unwrap();
+        assert!(!crl_num.is_empty());
+        // CRL number should be a small positive integer
+        assert!(crl_num.len() <= 8);
+    }
+
+    #[test]
+    fn test_revocation_reason_from_u8_valid() {
+        assert_eq!(
+            RevocationReason::from_u8(0),
+            Some(RevocationReason::Unspecified)
+        );
+        assert_eq!(
+            RevocationReason::from_u8(1),
+            Some(RevocationReason::KeyCompromise)
+        );
+        assert_eq!(
+            RevocationReason::from_u8(5),
+            Some(RevocationReason::CessationOfOperation)
+        );
+        assert_eq!(
+            RevocationReason::from_u8(10),
+            Some(RevocationReason::AaCompromise)
+        );
+    }
+
+    #[test]
+    fn test_revocation_reason_from_u8_invalid() {
+        // 7 is not used
+        assert_eq!(RevocationReason::from_u8(7), None);
+        // 11+ are invalid
+        assert_eq!(RevocationReason::from_u8(11), None);
+        assert_eq!(RevocationReason::from_u8(255), None);
+    }
+
+    #[test]
+    fn test_parse_crl_from_der_direct() {
+        // Parse the v1 CRL from DER (convert PEM to DER first)
+        let blocks = hitls_utils::pem::parse(CRL_V1_PEM).unwrap();
+        let crl_block = blocks.iter().find(|b| b.label == "X509 CRL").unwrap();
+        let crl = CertificateRevocationList::from_der(&crl_block.data).unwrap();
+        assert_eq!(crl.version, 1);
+        assert_eq!(crl.revoked_certs.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_crl_empty_from_pem() {
+        // Empty CRL should have no revoked certs
+        let crl = CertificateRevocationList::from_pem(EMPTY_CRL_PEM).unwrap();
+        assert!(crl.revoked_certs.is_empty());
+        // Empty CRL should still have issuer
+        assert!(!crl.issuer.entries.is_empty());
+    }
+
+    #[test]
+    fn test_crl_sig_alg_ecdsa() {
+        let data = include_bytes!("../../../../tests/vectors/crl/ecdsa/crl_v2.der");
+        let crl = CertificateRevocationList::from_der(data).unwrap();
+        let sig_oid = Oid::from_der_value(&crl.signature_algorithm).unwrap();
+        // ECDSA CRL should use an ecdsa-with-sha* OID
+        assert!(
+            sig_oid == known::ecdsa_with_sha256()
+                || sig_oid == known::ecdsa_with_sha384()
+                || sig_oid == known::ecdsa_with_sha512()
+        );
+    }
+
+    #[test]
+    fn test_crl_sig_alg_rsa() {
+        let data = include_bytes!("../../../../tests/vectors/crl/rsa_der/crl_v2.der");
+        let crl = CertificateRevocationList::from_der(data).unwrap();
+        let sig_oid = Oid::from_der_value(&crl.signature_algorithm).unwrap();
+        // RSA CRL should use sha*WithRSAEncryption OID
+        assert!(
+            sig_oid == known::sha256_with_rsa_encryption()
+                || sig_oid == known::sha384_with_rsa_encryption()
+                || sig_oid == known::sha512_with_rsa_encryption()
+                || sig_oid == known::sha1_with_rsa_encryption()
+        );
     }
 }
