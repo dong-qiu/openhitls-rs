@@ -5271,3 +5271,107 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1678 workspace tests passing (39 ignored)
+
+---
+
+## P10: Unit Test Coverage Expansion — Cipher Modes, PQC Negative Tests, DRBG State, MAC Algorithms, Transcript Hash (Session 2026-02-15)
+
+### Goals
+- Add negative/edge tests for cipher modes (CFB, OFB, ECB, XTS)
+- Add ML-KEM failure/implicit rejection tests and ML-DSA corruption/wrong key tests
+- Add DRBG reseed-divergence tests for HMAC-DRBG, CTR-DRBG, Hash-DRBG
+- Add SipHash key validation, GMAC/CMAC NIST vectors and error paths
+- Add SHA-1 reset/million-a, scrypt zero-dk_len, PBKDF2 single-byte and deterministic tests
+- Add TLS transcript hash SHA-384, replace_with_message_hash, empty update tests
+
+### Implementation Summary
+
+**Part 1: Cipher Mode Negative/Edge Cases (+5 tests)**
+- `test_cfb_invalid_iv_length`: Rejects IV lengths 0, 12, 15, 17 for both encrypt/decrypt
+- `test_cfb_aes256_roundtrip`: AES-256 CFB with 64-byte plaintext
+- `test_ofb_invalid_iv_length`: Rejects IV lengths 0, 12, 15, 17
+- `test_ecb_aes256_nist_vector`: NIST SP 800-38A F.1.5 AES-256 ECB vector
+- `test_xts_too_short_plaintext`: Rejects lengths 0, 1, 8, 15 for encrypt/decrypt
+
+**Part 2: ML-KEM Failure & Edge Cases (+4 tests)**
+- `test_mlkem_wrong_ciphertext_length`: Rejects ct lengths 100, 1087, 1089 (needs 1088)
+- `test_mlkem_cross_key_implicit_rejection`: Two keypairs, cross-decap → different secrets
+- `test_mlkem_1024_tampered_last_byte`: Tamper last byte → implicit rejection
+- `test_mlkem_pubonly_decapsulate`: Public-only key pair decap → panic (catch_unwind)
+
+**Part 3: ML-DSA Failure & Edge Cases (+5 tests)**
+- `test_mldsa_wrong_signature_length`: Truncated/extended sig → reject
+- `test_mldsa_corrupted_signature`: Flip bytes at 0, mid, last → reject
+- `test_mldsa_wrong_key_verify`: Sign kp1, verify kp2 → reject
+- `test_mldsa_empty_message`: Sign/verify empty → passes
+- `test_mldsa_large_message`: Sign/verify 10KB → passes
+
+**Part 4: DRBG Reseed Divergence (+4 tests)**
+- `test_hmac_drbg_reseed_diverges`: Two identical, reseed one → outputs diverge
+- `test_hmac_drbg_additional_input_changes_output`: With vs without additional input → differ
+- `test_ctr_drbg_reseed_diverges`: Same pattern for CTR-DRBG
+- `test_hash_drbg_reseed_diverges`: Same pattern for Hash-DRBG SHA-256
+
+**Part 5: SipHash Extended (+3 tests)**
+- `test_siphash_invalid_key_length`: Rejects keys of length 0, 8, 15, 17, 32
+- `test_siphash_empty_input`: Verifies reference vector for length-0 input
+- `test_siphash_long_input_split`: 1024-byte input one-shot vs split at 511
+
+**Part 6: GMAC & CMAC Extended (+5 tests)**
+- `test_gmac_update_after_finalize`: update() after finish() → error
+- `test_gmac_finish_output_too_small`: 8-byte output buffer → error
+- `test_cmac_aes256_nist_sp800_38b`: NIST SP 800-38B D.3 AES-256 CMAC empty message
+- `test_cmac_incremental_various_splits`: RFC 4493 64-byte message in chunks of 1, 7, 17
+- `test_cmac_finish_output_too_small`: 8-byte output buffer → error
+
+**Part 7: SHA-1 & scrypt/PBKDF2 (+5 tests, 1 ignored)**
+- `test_sha1_reset_and_reuse`: Hash → reset → hash → matches; reset → empty matches
+- `test_sha1_million_a`: 1M "a" chars → NIST vector (#[ignore])
+- `test_scrypt_zero_dk_len`: dk_len=0 → error
+- `test_pbkdf2_single_byte_output`: dk_len=1 → succeeds, returns 1 byte
+- `test_pbkdf2_deterministic`: Two calls same params → identical
+
+**Part 8: TLS Transcript Hash (+4 tests)**
+- `test_transcript_replace_with_message_hash`: Replace → hash changes, hash_len=32
+- `test_transcript_sha384`: SHA-384 factory, hash_len=48, known empty_hash
+- `test_transcript_hash_len_sha256`: hash_len()=32 for SHA-256
+- `test_transcript_empty_update`: update(b"") → matches empty_hash
+
+### Files Modified
+
+| File | New Tests |
+|------|-----------|
+| `hitls-crypto/src/modes/cfb.rs` | +2 |
+| `hitls-crypto/src/modes/ofb.rs` | +1 |
+| `hitls-crypto/src/modes/ecb.rs` | +1 |
+| `hitls-crypto/src/modes/xts.rs` | +1 |
+| `hitls-crypto/src/mlkem/mod.rs` | +4 |
+| `hitls-crypto/src/mldsa/mod.rs` | +5 |
+| `hitls-crypto/src/drbg/hmac_drbg.rs` | +2 |
+| `hitls-crypto/src/drbg/ctr_drbg.rs` | +1 |
+| `hitls-crypto/src/drbg/hash_drbg.rs` | +1 |
+| `hitls-crypto/src/siphash/mod.rs` | +3 |
+| `hitls-crypto/src/gmac/mod.rs` | +2 |
+| `hitls-crypto/src/cmac/mod.rs` | +3 |
+| `hitls-crypto/src/sha1/mod.rs` | +2 |
+| `hitls-crypto/src/scrypt/mod.rs` | +1 |
+| `hitls-crypto/src/pbkdf2/mod.rs` | +2 |
+| `hitls-tls/src/crypt/transcript.rs` | +4 |
+| **Total** | **+35 (+1 ignored)** |
+
+### Updated Test Counts
+- **hitls-crypto**: 534 (from 504) + 15 Wycheproof, 31 ignored (from 30)
+- **hitls-tls**: 612 (from 608)
+- **hitls-pki**: 321, 1 ignored
+- **hitls-bignum**: 46
+- **hitls-utils**: 53
+- **hitls-types**: 26
+- **hitls-auth**: 24
+- **hitls-cli**: 40, 5 ignored
+- **hitls-integration-tests**: 39, 3 ignored
+- **Total workspace**: 1712 (from 1678), +34 running +1 ignored, 40 ignored total
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1712 workspace tests passing (40 ignored)

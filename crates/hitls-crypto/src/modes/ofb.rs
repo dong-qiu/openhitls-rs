@@ -80,4 +80,17 @@ mod tests {
         ofb_crypt(&key, &iv, &mut data).unwrap();
         assert_eq!(data, original);
     }
+
+    #[test]
+    fn test_ofb_invalid_iv_length() {
+        let key = [0u8; 16];
+        let mut data = vec![0u8; 32];
+        for len in [0, 12, 15, 17] {
+            let iv = vec![0u8; len];
+            assert!(
+                ofb_crypt(&key, &iv, &mut data).is_err(),
+                "should reject IV of length {len}"
+            );
+        }
+    }
 }

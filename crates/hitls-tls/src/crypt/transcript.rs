@@ -120,4 +120,55 @@ mod tests {
         let expected = hitls_crypto::sha2::Sha256::digest(b"hello world").unwrap();
         assert_eq!(h3, expected.to_vec());
     }
+
+    #[test]
+    fn test_transcript_replace_with_message_hash() {
+        let mut th = TranscriptHash::new(sha256_factory);
+        th.update(b"ClientHello").unwrap();
+        th.update(b"ServerHello").unwrap();
+        let hash_before = th.current_hash().unwrap();
+
+        th.replace_with_message_hash().unwrap();
+        let hash_after = th.current_hash().unwrap();
+
+        // After replacement, hash must differ (different message buffer)
+        assert_ne!(hash_before, hash_after);
+
+        // The buffer starts with byte 254 (MessageHash handshake type)
+        // and the length field equals hash_len (32 for SHA-256)
+        assert_eq!(th.hash_len(), 32);
+    }
+
+    fn sha384_factory() -> Box<dyn Digest> {
+        Box::new(hitls_crypto::sha2::Sha384::new())
+    }
+
+    #[test]
+    fn test_transcript_sha384() {
+        let th = TranscriptHash::new(sha384_factory);
+        assert_eq!(th.hash_len(), 48);
+
+        // SHA-384("") known value
+        let empty = th.empty_hash().unwrap();
+        assert_eq!(
+            to_hex(&empty),
+            "38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b"
+        );
+    }
+
+    #[test]
+    fn test_transcript_hash_len_sha256() {
+        let th = TranscriptHash::new(sha256_factory);
+        assert_eq!(th.hash_len(), 32);
+    }
+
+    #[test]
+    fn test_transcript_empty_update() {
+        let mut th = TranscriptHash::new(sha256_factory);
+        th.update(b"").unwrap();
+        let h = th.current_hash().unwrap();
+        let empty = th.empty_hash().unwrap();
+        // Hashing empty data should equal the empty hash
+        assert_eq!(h, empty);
+    }
 }

@@ -478,4 +478,70 @@ mod tests {
     fn test_mlkem_from_encapsulation_key_bad_length() {
         assert!(MlKemKeyPair::from_encapsulation_key(768, &[0u8; 100]).is_err());
     }
+
+    #[test]
+    fn test_mlkem_wrong_ciphertext_length() {
+        let kp = MlKemKeyPair::generate(768).unwrap();
+        // ML-KEM-768 expects ct_len=1088
+        assert!(
+            kp.decapsulate(&[0u8; 100]).is_err(),
+            "should reject ciphertext of wrong length"
+        );
+        assert!(
+            kp.decapsulate(&[0u8; 1087]).is_err(),
+            "should reject ciphertext 1 byte too short"
+        );
+        assert!(
+            kp.decapsulate(&[0u8; 1089]).is_err(),
+            "should reject ciphertext 1 byte too long"
+        );
+    }
+
+    #[test]
+    fn test_mlkem_cross_key_implicit_rejection() {
+        // Two independent keypairs — decapsulating with wrong key should
+        // produce a different shared secret (implicit rejection)
+        let kp1 = MlKemKeyPair::generate(768).unwrap();
+        let kp2 = MlKemKeyPair::generate(768).unwrap();
+
+        let (ss1, ct1) = kp1.encapsulate().unwrap();
+        let ss2 = kp2.decapsulate(&ct1).unwrap();
+
+        assert_ne!(
+            ss1, ss2,
+            "cross-key decapsulation must produce different secret"
+        );
+    }
+
+    #[test]
+    fn test_mlkem_1024_tampered_last_byte() {
+        let kp = MlKemKeyPair::generate(1024).unwrap();
+        let (original_ss, mut ct) = kp.encapsulate().unwrap();
+
+        // Tamper with just the last byte
+        let last = ct.len() - 1;
+        ct[last] ^= 0x01;
+
+        let recovered_ss = kp.decapsulate(&ct).unwrap();
+        assert_ne!(
+            original_ss, recovered_ss,
+            "tampered last byte must produce different shared secret"
+        );
+    }
+
+    #[test]
+    fn test_mlkem_pubonly_decapsulate() {
+        let full_kp = MlKemKeyPair::generate(768).unwrap();
+        let ek = full_kp.encapsulation_key().to_vec();
+        let (_, ct) = full_kp.encapsulate().unwrap();
+
+        // Create a public-only key pair (empty dk)
+        let pub_kp = MlKemKeyPair::from_encapsulation_key(768, &ek).unwrap();
+
+        // Attempting to decapsulate with a pub-only key pair should panic
+        // because dk is empty and slicing will fail
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pub_kp.decapsulate(&ct)));
+        assert!(result.is_err(), "pub-only decapsulate should panic");
+    }
 }

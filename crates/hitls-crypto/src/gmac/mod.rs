@@ -186,4 +186,26 @@ mod tests {
 
         assert_eq!(tag1, tag2);
     }
+
+    #[test]
+    fn test_gmac_update_after_finalize() {
+        let key = hex_to_bytes("00000000000000000000000000000000");
+        let nonce = hex_to_bytes("000000000000000000000000");
+        let mut gmac = Gmac::new(&key, &nonce).unwrap();
+        gmac.update(b"data").unwrap();
+        let mut tag = [0u8; 16];
+        gmac.finish(&mut tag).unwrap();
+
+        // update after finish should fail (finalized flag)
+        assert!(gmac.update(b"more data").is_err());
+    }
+
+    #[test]
+    fn test_gmac_finish_output_too_small() {
+        let key = hex_to_bytes("00000000000000000000000000000000");
+        let nonce = hex_to_bytes("000000000000000000000000");
+        let mut gmac = Gmac::new(&key, &nonce).unwrap();
+        let mut small_buf = [0u8; 8];
+        assert!(gmac.finish(&mut small_buf).is_err());
+    }
 }

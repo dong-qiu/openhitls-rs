@@ -477,4 +477,25 @@ mod tests {
         increment_counter(&mut v);
         assert_eq!(v, [0u8; BLOCK_LEN]);
     }
+
+    #[test]
+    fn test_ctr_drbg_reseed_diverges() {
+        let seed = [0x42u8; SEED_LEN];
+        let mut drbg1 = CtrDrbg::new(&seed).unwrap();
+        let mut drbg2 = CtrDrbg::new(&seed).unwrap();
+
+        // Before reseed: identical outputs
+        let out1a = drbg1.generate_bytes(32).unwrap();
+        let out2a = drbg2.generate_bytes(32).unwrap();
+        assert_eq!(out1a, out2a);
+
+        // Reseed only drbg1
+        let new_entropy = [0x99u8; SEED_LEN];
+        drbg1.reseed(&new_entropy, None).unwrap();
+
+        // After reseed: outputs must differ
+        let out1b = drbg1.generate_bytes(32).unwrap();
+        let out2b = drbg2.generate_bytes(32).unwrap();
+        assert_ne!(out1b, out2b);
+    }
 }

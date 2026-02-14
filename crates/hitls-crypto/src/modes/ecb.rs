@@ -82,4 +82,18 @@ mod tests {
         assert!(ecb_encrypt(&key, &[0u8; 15]).is_err());
         assert!(ecb_encrypt(&key, &[]).is_err());
     }
+
+    // NIST SP 800-38A F.1.5: AES-256 ECB Encrypt
+    #[test]
+    fn test_ecb_aes256_nist_vector() {
+        let key = hex_to_bytes("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let pt = hex_to_bytes("6bc1bee22e409f96e93d7e117393172a");
+        let expected = "f3eed1bdb5d2a03c064b5a7e3db181f8";
+
+        let ct = ecb_encrypt(&key, &pt).unwrap();
+        assert_eq!(hex(&ct), expected);
+
+        let decrypted = ecb_decrypt(&key, &ct).unwrap();
+        assert_eq!(decrypted, pt);
+    }
 }

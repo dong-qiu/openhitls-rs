@@ -249,4 +249,10 @@ mod tests {
         // p = 0
         assert!(scrypt(b"pw", b"salt", 16, 1, 0, 32).is_err());
     }
+
+    #[test]
+    fn test_scrypt_zero_dk_len() {
+        // dk_len = 0 should be rejected
+        assert!(scrypt(b"password", b"salt", 16, 1, 1, 0).is_err());
+    }
 }

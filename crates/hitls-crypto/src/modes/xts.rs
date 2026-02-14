@@ -279,4 +279,25 @@ mod tests {
         // Less than one block
         assert!(xts_encrypt(&key1, &key2, &tweak, &[0u8; 15]).is_err());
     }
+
+    #[test]
+    fn test_xts_too_short_plaintext() {
+        let key1 = [0x42u8; 16];
+        let key2 = [0x43u8; 16];
+        let tweak = [0u8; 16];
+        // Various lengths below minimum 16
+        for len in [0, 1, 8, 15] {
+            let data = vec![0u8; len];
+            assert!(
+                xts_encrypt(&key1, &key2, &tweak, &data).is_err(),
+                "encrypt should reject plaintext of length {len}"
+            );
+            if len > 0 {
+                assert!(
+                    xts_decrypt(&key1, &key2, &tweak, &data).is_err(),
+                    "decrypt should reject ciphertext of length {len}"
+                );
+            }
+        }
+    }
 }

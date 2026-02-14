@@ -254,4 +254,39 @@ mod tests {
         let output = drbg.generate_bytes(100).unwrap();
         assert_eq!(output.len(), 100);
     }
+
+    #[test]
+    fn test_hmac_drbg_reseed_diverges() {
+        let seed = b"identical seed for both DRBGs in reseed divergence test";
+        let mut drbg1 = HmacDrbg::new(seed).unwrap();
+        let mut drbg2 = HmacDrbg::new(seed).unwrap();
+
+        // Before reseed: identical outputs
+        let out1a = drbg1.generate_bytes(32).unwrap();
+        let out2a = drbg2.generate_bytes(32).unwrap();
+        assert_eq!(out1a, out2a);
+
+        // Reseed only drbg1
+        drbg1.reseed(b"new entropy for divergence", None).unwrap();
+
+        // After reseed: outputs must differ
+        let out1b = drbg1.generate_bytes(32).unwrap();
+        let out2b = drbg2.generate_bytes(32).unwrap();
+        assert_ne!(out1b, out2b);
+    }
+
+    #[test]
+    fn test_hmac_drbg_additional_input_changes_output() {
+        let seed = b"seed for additional input divergence test HMAC-DRBG";
+        let mut drbg1 = HmacDrbg::new(seed).unwrap();
+        let mut drbg2 = HmacDrbg::new(seed).unwrap();
+
+        let mut out1 = vec![0u8; 32];
+        drbg1.generate(&mut out1, Some(b"extra")).unwrap();
+
+        let mut out2 = vec![0u8; 32];
+        drbg2.generate(&mut out2, None).unwrap();
+
+        assert_ne!(out1, out2);
+    }
 }

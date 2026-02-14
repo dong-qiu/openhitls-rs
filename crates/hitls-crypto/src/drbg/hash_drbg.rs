@@ -447,4 +447,24 @@ mod tests {
         assert_eq!(v[14], 0x01);
         assert_eq!(v[15], 0x00);
     }
+
+    #[test]
+    fn test_hash_drbg_reseed_diverges() {
+        let seed = b"identical seed for both Hash-DRBGs in reseed divergence test";
+        let mut drbg1 = HashDrbg::new(HashDrbgType::Sha256, seed).unwrap();
+        let mut drbg2 = HashDrbg::new(HashDrbgType::Sha256, seed).unwrap();
+
+        // Before reseed: identical outputs
+        let out1a = drbg1.generate_bytes(32).unwrap();
+        let out2a = drbg2.generate_bytes(32).unwrap();
+        assert_eq!(out1a, out2a);
+
+        // Reseed only drbg1
+        drbg1.reseed(b"new entropy for divergence", None).unwrap();
+
+        // After reseed: outputs must differ
+        let out1b = drbg1.generate_bytes(32).unwrap();
+        let out2b = drbg2.generate_bytes(32).unwrap();
+        assert_ne!(out1b, out2b);
+    }
 }

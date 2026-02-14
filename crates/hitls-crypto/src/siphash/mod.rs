@@ -242,4 +242,41 @@ mod tests {
 
         assert_eq!(hash1, hash2);
     }
+
+    #[test]
+    fn test_siphash_invalid_key_length() {
+        // Key must be exactly 16 bytes
+        for len in [0, 8, 15, 17, 32] {
+            let key = vec![0u8; len];
+            assert!(
+                SipHash::new(&key).is_err(),
+                "should reject key of length {len}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_siphash_empty_input() {
+        let key: Vec<u8> = (0..16).collect();
+        let result = SipHash::hash(&key, b"").unwrap();
+        // From the reference vectors (length-0 entry)
+        assert_eq!(result, 0x726fdb47dd0e0e31);
+    }
+
+    #[test]
+    fn test_siphash_long_input_split() {
+        let key: Vec<u8> = (0..16).collect();
+        let data: Vec<u8> = (0..=255).cycle().take(1024).collect();
+
+        // One-shot
+        let oneshot = SipHash::hash(&key, &data).unwrap();
+
+        // Split at 511 (non-word-aligned boundary)
+        let mut ctx = SipHash::new(&key).unwrap();
+        ctx.update(&data[..511]).unwrap();
+        ctx.update(&data[511..]).unwrap();
+        let split = ctx.finish().unwrap();
+
+        assert_eq!(oneshot, split);
+    }
 }

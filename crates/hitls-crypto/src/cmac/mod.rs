@@ -262,4 +262,47 @@ mod tests {
 
         assert_eq!(tag1, tag2);
     }
+
+    // NIST SP 800-38B D.3: AES-256 CMAC empty message
+    #[test]
+    fn test_cmac_aes256_nist_sp800_38b() {
+        let key = hex_to_bytes("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let mut cmac = Cmac::new(&key).unwrap();
+        cmac.update(&[]).unwrap();
+        let mut tag = [0u8; 16];
+        cmac.finish(&mut tag).unwrap();
+        assert_eq!(hex(&tag), "028962f61b7bf89efc6b551f4667d983");
+    }
+
+    // RFC 4493 64-byte message fed incrementally in various chunk sizes
+    #[test]
+    fn test_cmac_incremental_various_splits() {
+        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
+        let msg = hex_to_bytes("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710");
+        let expected = "51f0bebf7e3b9d92fc49741779363cfe";
+
+        // Feed in chunks of varying sizes: 1, 7, 17, ...
+        for chunk_size in [1, 7, 17] {
+            let mut cmac = Cmac::new(&key).unwrap();
+            for chunk in msg.chunks(chunk_size) {
+                cmac.update(chunk).unwrap();
+            }
+            let mut tag = [0u8; 16];
+            cmac.finish(&mut tag).unwrap();
+            assert_eq!(
+                hex(&tag),
+                expected,
+                "tag mismatch for chunk_size={chunk_size}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cmac_finish_output_too_small() {
+        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
+        let mut cmac = Cmac::new(&key).unwrap();
+        cmac.update(b"data").unwrap();
+        let mut small_buf = [0u8; 8];
+        assert!(cmac.finish(&mut small_buf).is_err());
+    }
 }

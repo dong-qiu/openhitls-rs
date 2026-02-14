@@ -663,4 +663,75 @@ mod tests {
         let kp44 = MlDsaKeyPair::generate(44).unwrap();
         assert_eq!(kp44.public_key().len(), MLDSA_44.pk_len);
     }
+
+    #[test]
+    fn test_mldsa_wrong_signature_length() {
+        let kp = MlDsaKeyPair::generate(44).unwrap();
+        let msg = b"test message for wrong sig length";
+        let sig = kp.sign(msg).unwrap();
+
+        // Truncate by 1 byte
+        let short_sig = &sig[..sig.len() - 1];
+        let result = kp.verify(msg, short_sig);
+        assert!(
+            result.is_err() || !result.unwrap(),
+            "truncated signature should not verify"
+        );
+
+        // Append 1 byte
+        let mut long_sig = sig.clone();
+        long_sig.push(0x00);
+        let result = kp.verify(msg, &long_sig);
+        assert!(
+            result.is_err() || !result.unwrap(),
+            "extended signature should not verify"
+        );
+    }
+
+    #[test]
+    fn test_mldsa_corrupted_signature() {
+        let kp = MlDsaKeyPair::generate(65).unwrap();
+        let msg = b"test message for corrupted signature";
+        let sig = kp.sign(msg).unwrap();
+
+        // Flip byte at positions: 0, middle, last
+        for pos in [0, sig.len() / 2, sig.len() - 1] {
+            let mut corrupted = sig.clone();
+            corrupted[pos] ^= 0xFF;
+            let result = kp.verify(msg, &corrupted);
+            assert!(
+                result.is_err() || !result.unwrap(),
+                "corrupted signature at position {pos} should not verify"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mldsa_wrong_key_verify() {
+        let kp1 = MlDsaKeyPair::generate(44).unwrap();
+        let kp2 = MlDsaKeyPair::generate(44).unwrap();
+        let msg = b"signed by kp1, verified by kp2";
+        let sig = kp1.sign(msg).unwrap();
+
+        let result = kp2.verify(msg, &sig);
+        assert!(
+            result.is_err() || !result.unwrap(),
+            "wrong key should not verify"
+        );
+    }
+
+    #[test]
+    fn test_mldsa_empty_message() {
+        let kp = MlDsaKeyPair::generate(44).unwrap();
+        let sig = kp.sign(b"").unwrap();
+        assert!(kp.verify(b"", &sig).unwrap(), "empty message roundtrip");
+    }
+
+    #[test]
+    fn test_mldsa_large_message() {
+        let kp = MlDsaKeyPair::generate(44).unwrap();
+        let msg = vec![0xABu8; 10240]; // 10 KB
+        let sig = kp.sign(&msg).unwrap();
+        assert!(kp.verify(&msg, &sig).unwrap(), "10KB message roundtrip");
+    }
 }

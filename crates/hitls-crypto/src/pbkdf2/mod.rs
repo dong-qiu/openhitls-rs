@@ -98,4 +98,17 @@ mod tests {
         assert!(pbkdf2(b"password", b"salt", 0, 16).is_err());
         assert!(pbkdf2(b"password", b"salt", 1, 0).is_err());
     }
+
+    #[test]
+    fn test_pbkdf2_single_byte_output() {
+        let dk = pbkdf2(b"password", b"salt", 1, 1).unwrap();
+        assert_eq!(dk.len(), 1);
+    }
+
+    #[test]
+    fn test_pbkdf2_deterministic() {
+        let dk1 = pbkdf2(b"secret", b"pepper", 100, 32).unwrap();
+        let dk2 = pbkdf2(b"secret", b"pepper", 100, 32).unwrap();
+        assert_eq!(dk1, dk2);
+    }
 }
