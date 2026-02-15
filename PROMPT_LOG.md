@@ -1415,16 +1415,6 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1362 total tests (37 ignored). Clippy clean, fmt clean.
 
----
-
-## Phase 50: Test Coverage + CMS Ed25519/Ed448 + enc CLI + TLS 1.2 OCSP/SCT (2026-02-13)
-
-**Prompt**: Implement P1 priority items: (1) Add test coverage for alert/session/record TLS modules that had zero tests. (2) Wire CMS Ed25519/Ed448 signature verification (replace "not yet supported" stubs). (3) Expand enc CLI from AES-256-GCM only to support 4 ciphers. (4) Implement TLS 1.2 OCSP Stapling CertificateStatus message (RFC 6066 §8).
-
-**Result**: 71 new tests across 4 parts. Part 1: 52 tests for alert (8: enum values, from_u8), session (21: cache ops, encode/decode, ticket encrypt/decrypt), record (23: state mgmt, parse/serialize, seal/open with TLS 1.3 AEAD, content type hiding). Part 2: 3 CMS tests (Ed25519/Ed448 sign-verify roundtrip, tampered sig detection); replaced stubs with actual EdDSA verification/signing using parse_eddsa_private_key() helper. Part 3: 6 enc CLI tests; refactored to CipherParams dispatcher supporting aes-256-gcm, aes-128-gcm, chacha20-poly1305, sm4-gcm via --cipher flag. Part 4: 10 TLS 1.2 OCSP tests (6 codec: encode/decode CertificateStatus wire format; 4 server: OCSP when requested, not-requested, no-staple, flight order). Added HandshakeType::CertificateStatus (22), server sends between Certificate and SKE, client handles optional message. Key bugs: ChaCha20-Poly1305 is struct-based API not function-based; ed448/sm4 features needed in downstream Cargo.toml.
-
-1397 total tests (37 ignored). Clippy clean, fmt clean.
-
 ## P2: C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop (2026-02-14)
 
 **Prompt**: Port real C test vectors to improve PKI test coverage. Part 1: 25 chain verification tests (certVer, bcExt, time, eku suites). Part 2: 12 CMS SignedData real file tests (parsing, verification, failure). Part 3: 8 PKCS#12 real file tests. Part 4: 10 certificate parsing edge cases (v1/v3, negative serial, SAN, KU, EKU, BC).
