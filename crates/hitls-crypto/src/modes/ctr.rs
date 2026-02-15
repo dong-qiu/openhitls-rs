@@ -105,4 +105,59 @@ mod tests {
         let mut data = vec![];
         assert!(ctr_crypt(&key, &nonce, &mut data).is_ok());
     }
+
+    #[test]
+    fn test_ctr_invalid_nonce_length() {
+        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
+        let mut data = vec![0u8; 16];
+        // 15 bytes — too short
+        assert!(matches!(
+            ctr_crypt(&key, &[0u8; 15], &mut data),
+            Err(CryptoError::InvalidIvLength)
+        ));
+        // 0 bytes
+        assert!(matches!(
+            ctr_crypt(&key, &[], &mut data),
+            Err(CryptoError::InvalidIvLength)
+        ));
+        // 12 bytes
+        assert!(matches!(
+            ctr_crypt(&key, &[0u8; 12], &mut data),
+            Err(CryptoError::InvalidIvLength)
+        ));
+        // 17 bytes — too long
+        assert!(matches!(
+            ctr_crypt(&key, &[0u8; 17], &mut data),
+            Err(CryptoError::InvalidIvLength)
+        ));
+    }
+
+    #[test]
+    fn test_ctr_invalid_key_length() {
+        let nonce = hex_to_bytes("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
+        let mut data = vec![0u8; 16];
+        // 15 bytes — not a valid AES key length
+        assert!(ctr_crypt(&[0u8; 15], &nonce, &mut data).is_err());
+        // 17 bytes
+        assert!(ctr_crypt(&[0u8; 17], &nonce, &mut data).is_err());
+        // 0 bytes
+        assert!(ctr_crypt(&[], &nonce, &mut data).is_err());
+    }
+
+    // NIST SP 800-38A F.5.5: AES-256-CTR
+    #[test]
+    fn test_ctr_aes256_roundtrip() {
+        let key = hex_to_bytes("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let nonce = hex_to_bytes("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
+        let pt = hex_to_bytes("6bc1bee22e409f96e93d7e117393172a");
+        let expected_ct = "601ec313775789a5b7a7f504bbf3d228";
+
+        let mut data = pt.clone();
+        ctr_crypt(&key, &nonce, &mut data).unwrap();
+        assert_eq!(hex(&data), expected_ct);
+
+        // Decrypt (same operation) — roundtrip
+        ctr_crypt(&key, &nonce, &mut data).unwrap();
+        assert_eq!(data, pt);
+    }
 }

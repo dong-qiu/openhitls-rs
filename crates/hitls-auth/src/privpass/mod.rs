@@ -501,6 +501,54 @@ mod tests {
     }
 
     #[test]
+    fn test_privpass_wrong_challenge_verify() {
+        let (n, e, d) = test_key_1024();
+
+        let issuer = Issuer::new(&n, &d, &e).unwrap();
+        let client = Client::new(&n, &e).unwrap();
+
+        // Issue token for "challenge1"
+        let (request, state) = client.create_token_request(b"challenge1").unwrap();
+        let response = issuer.issue(&request).unwrap();
+        let token = client.finalize_token(&response, state).unwrap();
+
+        // Verify against "challenge2" → should fail
+        let valid = verify_token(&token, &n, &e, b"challenge2").unwrap();
+        assert!(!valid, "Token should NOT verify with wrong challenge");
+    }
+
+    #[test]
+    fn test_privpass_empty_key_rejected() {
+        // Empty n → InvalidKey
+        assert!(Issuer::new(&[], &[1], &[3]).is_err());
+        // Empty d → InvalidKey
+        assert!(Issuer::new(&[15], &[], &[3]).is_err());
+        // Empty e → InvalidKey
+        assert!(Issuer::new(&[15], &[1], &[]).is_err());
+
+        // Client: empty n
+        assert!(Client::new(&[], &[3]).is_err());
+        // Client: empty e
+        assert!(Client::new(&[15], &[]).is_err());
+    }
+
+    #[test]
+    fn test_privpass_token_type_wire_roundtrip() {
+        // Roundtrip for both variants
+        let pv = TokenType::PubliclyVerifiable;
+        assert_eq!(TokenType::from_wire(&pv.to_wire()).unwrap(), pv);
+
+        let priv_v = TokenType::PrivatelyVerifiable;
+        assert_eq!(TokenType::from_wire(&priv_v.to_wire()).unwrap(), priv_v);
+
+        // Invalid wire encoding [0xFF, 0xFF]
+        assert!(TokenType::from_wire(&[0xFF, 0xFF]).is_err());
+        // Too short
+        assert!(TokenType::from_wire(&[0x00]).is_err());
+        assert!(TokenType::from_wire(&[]).is_err());
+    }
+
+    #[test]
     fn test_privpass_token_type_encoding() {
         // Test wire format values
         assert_eq!(TokenType::PubliclyVerifiable.to_wire(), [0x00, 0x02],);

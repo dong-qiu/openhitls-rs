@@ -275,6 +275,56 @@ mod tests {
         assert_eq!(incremental, one_shot);
     }
 
+    #[test]
+    fn test_sm3_reset_and_reuse() {
+        // Hash "abc" → d1
+        let mut ctx = Sm3::new();
+        ctx.update(b"abc").unwrap();
+        let d1 = ctx.finish().unwrap();
+
+        // Reset, hash "abc" → d2
+        ctx.reset();
+        ctx.update(b"abc").unwrap();
+        let d2 = ctx.finish().unwrap();
+        assert_eq!(d1, d2);
+
+        // Reset, hash "" → must match Sm3::digest(b"")
+        ctx.reset();
+        let d3 = ctx.finish().unwrap();
+        let d_empty = Sm3::digest(b"").unwrap();
+        assert_eq!(d3, d_empty);
+    }
+
+    #[test]
+    fn test_sm3_block_boundary() {
+        // Hash data at block boundaries: 64, 65, 128, 127 bytes
+        let sizes = [64, 65, 128, 127];
+        let mut results = Vec::new();
+
+        for &size in &sizes {
+            let data: Vec<u8> = (0..size).map(|i| (i & 0xFF) as u8).collect();
+            // Incremental
+            let mut ctx = Sm3::new();
+            ctx.update(&data).unwrap();
+            let incremental = ctx.finish().unwrap();
+            // One-shot
+            let one_shot = Sm3::digest(&data).unwrap();
+            assert_eq!(incremental, one_shot, "mismatch at size {size}");
+            results.push(incremental);
+        }
+
+        // All results should be different from each other
+        for i in 0..results.len() {
+            for j in (i + 1)..results.len() {
+                assert_ne!(
+                    results[i], results[j],
+                    "sizes {} and {} collide",
+                    sizes[i], sizes[j]
+                );
+            }
+        }
+    }
+
     /// GB/T 32905-2016 test: Hash 1,000,000 × 'a'.
     #[test]
     #[ignore] // slow (~2s)

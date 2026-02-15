@@ -365,6 +365,65 @@ mod tests {
         assert!(pt.is_empty());
     }
 
+    #[test]
+    fn test_ccm_invalid_nonce_too_short() {
+        let key = [0x42u8; 16];
+        // 6-byte nonce — min is 7
+        assert!(matches!(
+            ccm_encrypt(&key, &[0u8; 6], &[], &[1, 2, 3], 8),
+            Err(CryptoError::InvalidArg)
+        ));
+        assert!(matches!(
+            ccm_decrypt(&key, &[0u8; 6], &[], &[0u8; 24], 8),
+            Err(CryptoError::InvalidArg)
+        ));
+    }
+
+    #[test]
+    fn test_ccm_invalid_nonce_too_long() {
+        let key = [0x42u8; 16];
+        // 14-byte nonce — max is 13
+        assert!(matches!(
+            ccm_encrypt(&key, &[0u8; 14], &[], &[1, 2, 3], 8),
+            Err(CryptoError::InvalidArg)
+        ));
+        assert!(matches!(
+            ccm_decrypt(&key, &[0u8; 14], &[], &[0u8; 24], 8),
+            Err(CryptoError::InvalidArg)
+        ));
+    }
+
+    #[test]
+    fn test_ccm_invalid_tag_length() {
+        let key = [0x42u8; 16];
+        let nonce = [0u8; 12];
+        let pt = b"hello";
+        // tag_len must be even and in 4..=16
+        for &bad_tag in &[2usize, 3, 5, 15, 18, 0, 1] {
+            assert!(
+                ccm_encrypt(&key, &nonce, &[], pt, bad_tag).is_err(),
+                "tag_len={bad_tag} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ccm_tampered_tag() {
+        let key = [0x42u8; 16];
+        let nonce = [0u8; 12];
+        let aad = b"aad";
+        let pt = b"secret message";
+
+        let mut ct = ccm_encrypt(&key, &nonce, aad, pt, 16).unwrap();
+        // Flip last byte of ciphertext (which is part of the tag)
+        let last = ct.len() - 1;
+        ct[last] ^= 0x01;
+        assert!(matches!(
+            ccm_decrypt(&key, &nonce, aad, &ct, 16),
+            Err(CryptoError::AeadTagVerifyFail)
+        ));
+    }
+
     #[cfg(feature = "sm4")]
     #[test]
     fn test_sm4_ccm_roundtrip() {

@@ -5375,3 +5375,39 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1712 workspace tests passing (40 ignored)
+
+---
+
+## P11: Unit Test Coverage Expansion — CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3, Entropy, Privacy Pass
+
+### Date: 2026-02-15
+
+### Summary
+Added 36 new tests across 12 files, expanding negative/edge-case coverage for modules that had thin testing (3-7 tests each). All tests pass on first implementation — no bugs discovered.
+
+### New Tests by Module
+
+| File | Tests Added | Description |
+|------|------------|-------------|
+| `hitls-crypto/src/modes/ctr.rs` | +3 | Invalid nonce length, invalid key length, AES-256 NIST SP 800-38A F.5.5 roundtrip |
+| `hitls-crypto/src/modes/ccm.rs` | +4 | Nonce too short (6 bytes), nonce too long (14 bytes), invalid tag lengths (odd, out of range), tampered tag → AeadTagVerifyFail |
+| `hitls-crypto/src/modes/wrap.rs` | +4 | Too-short plaintext (8 bytes), non-multiple-of-8, corrupted unwrap (IV check), RFC 3394 §4.6 AES-256 wrapping 256-bit key |
+| `hitls-crypto/src/modes/gcm.rs` | +3 | Invalid key length (15/17/0 bytes), NIST SP 800-38D Test Case 14 (AES-256 with AAD), empty plaintext with AAD + wrong AAD rejection |
+| `hitls-crypto/src/dsa/mod.rs` | +3 | Wrong key verify (x=3 vs x=7), public-only key sign rejection, different digest verify |
+| `hitls-crypto/src/hpke/mod.rs` | +4 | Tampered ciphertext open, wrong AAD open, PSK mode roundtrip, empty PSK/PSK-ID rejection |
+| `hitls-crypto/src/hybridkem/mod.rs` | +3 | Cross-key decapsulation (implicit rejection), ciphertext length (32+1088=1120), multiple encapsulations differ |
+| `hitls-crypto/src/sm3/mod.rs` | +2 | Reset-and-reuse (hash→reset→hash same result, reset→empty matches one-shot), block boundary (64/65/128/127 bytes) |
+| `hitls-crypto/src/entropy/mod.rs` | +4 | Zero-length buffer, 4096-byte large buffer, 100× 1-byte requests, disabled health tests + stuck source succeeds |
+| `hitls-crypto/src/entropy/pool.rs` | +2 | Min capacity clamped to MIN_POOL_CAPACITY=64, partial pop (10 bytes into 20-byte buffer) |
+| `hitls-crypto/src/entropy/health.rs` | +1 | RCT reset prevents failure (feed stuck data, reset, feed again → no failure) |
+| `hitls-auth/src/privpass/mod.rs` | +3 | Wrong challenge verify → Ok(false), empty key/n/e/d rejected, TokenType wire format roundtrip + invalid [0xFF,0xFF] |
+
+### Test Counts (P11)
+- **hitls-crypto**: 567 (31 ignored) + 15 Wycheproof [was: 534]
+- **hitls-auth**: 27 [was: 24]
+- **Total workspace**: 1748 (40 ignored) [was: 1712]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1748 workspace tests passing (40 ignored)

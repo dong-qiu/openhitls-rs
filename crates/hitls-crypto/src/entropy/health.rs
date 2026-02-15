@@ -278,6 +278,22 @@ mod tests {
     }
 
     #[test]
+    fn test_rct_reset_prevents_failure() {
+        let mut rct = RctTest::new(5);
+        // Feed stuck data cutoff-2 times (count → 3)
+        for _ in 0..3 {
+            rct.test(42).unwrap();
+        }
+        // Reset — count goes back to 0
+        rct.reset();
+        // Feed same stuck data again — should not fail (count restarts)
+        for _ in 0..3 {
+            rct.test(42).unwrap();
+        }
+        // Still under cutoff — no failure
+    }
+
+    #[test]
     fn test_health_test_reset() {
         let mut ht = HealthTest::new(5, 10, 8);
         // Feed some data

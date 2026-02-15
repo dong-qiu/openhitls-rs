@@ -497,6 +497,75 @@ mod tests {
     }
 
     #[test]
+    fn test_hpke_tampered_ciphertext_open() {
+        let mut sk_bytes = [0u8; 32];
+        getrandom::getrandom(&mut sk_bytes).unwrap();
+        let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
+        let pk_r = sk_r.public_key();
+
+        let (mut sender, enc) = HpkeCtx::setup_sender(pk_r.as_bytes(), b"info").unwrap();
+        let mut recipient = HpkeCtx::setup_recipient(&sk_bytes, &enc, b"info").unwrap();
+
+        let ct = sender.seal(b"aad", b"hello").unwrap();
+        // Flip a bit in the ciphertext
+        let mut tampered = ct.clone();
+        tampered[0] ^= 0x01;
+        assert!(recipient.open(b"aad", &tampered).is_err());
+    }
+
+    #[test]
+    fn test_hpke_wrong_aad_open() {
+        let mut sk_bytes = [0u8; 32];
+        getrandom::getrandom(&mut sk_bytes).unwrap();
+        let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
+        let pk_r = sk_r.public_key();
+
+        let (mut sender, enc) = HpkeCtx::setup_sender(pk_r.as_bytes(), b"info").unwrap();
+        let mut recipient = HpkeCtx::setup_recipient(&sk_bytes, &enc, b"info").unwrap();
+
+        let ct = sender.seal(b"correct", b"payload").unwrap();
+        // Open with wrong AAD
+        assert!(recipient.open(b"wrong", &ct).is_err());
+    }
+
+    #[test]
+    fn test_hpke_psk_mode_roundtrip() {
+        let mut sk_bytes = [0u8; 32];
+        getrandom::getrandom(&mut sk_bytes).unwrap();
+        let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
+        let pk_r = sk_r.public_key();
+
+        let psk = b"my-pre-shared-key";
+        let psk_id = b"psk-identifier";
+
+        let (mut sender, enc) =
+            HpkeCtx::setup_sender_psk(pk_r.as_bytes(), b"info", psk, psk_id).unwrap();
+        let mut recipient =
+            HpkeCtx::setup_recipient_psk(&sk_bytes, &enc, b"info", psk, psk_id).unwrap();
+
+        let ct = sender.seal(b"aad", b"psk message").unwrap();
+        let pt = recipient.open(b"aad", &ct).unwrap();
+        assert_eq!(pt, b"psk message");
+    }
+
+    #[test]
+    fn test_hpke_psk_empty_psk_rejected() {
+        let mut sk_bytes = [0u8; 32];
+        getrandom::getrandom(&mut sk_bytes).unwrap();
+        let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
+        let pk_r = sk_r.public_key();
+
+        // Empty PSK → error
+        assert!(HpkeCtx::setup_sender_psk(pk_r.as_bytes(), b"info", &[], b"id").is_err());
+        // Empty PSK ID → error
+        assert!(HpkeCtx::setup_sender_psk(pk_r.as_bytes(), b"info", b"psk", &[]).is_err());
+
+        // Same for recipient side
+        assert!(HpkeCtx::setup_recipient_psk(&sk_bytes, &[0u8; 32], b"info", &[], b"id").is_err());
+        assert!(HpkeCtx::setup_recipient_psk(&sk_bytes, &[0u8; 32], b"info", b"psk", &[]).is_err());
+    }
+
+    #[test]
     fn test_roundtrip_random() {
         // Generate random key pair from raw bytes
         let mut sk_bytes = [0u8; 32];

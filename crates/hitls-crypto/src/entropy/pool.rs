@@ -190,6 +190,33 @@ mod tests {
     }
 
     #[test]
+    fn test_pool_min_capacity_clamped() {
+        let pool = EntropyPool::new(1);
+        assert_eq!(pool.capacity(), MIN_POOL_CAPACITY);
+        let pool2 = EntropyPool::new(0);
+        assert_eq!(pool2.capacity(), MIN_POOL_CAPACITY);
+    }
+
+    #[test]
+    fn test_pool_partial_pop() {
+        let mut pool = EntropyPool::new(64);
+        // Push 10 bytes
+        let data = vec![0xAB; 10];
+        pool.push(&data);
+        assert_eq!(pool.len(), 10);
+
+        // Pop into a 20-byte buffer — only 10 available
+        let mut out = vec![0xFF; 20];
+        let read = pool.pop(&mut out);
+        assert_eq!(read, 10);
+        // First 10 bytes filled
+        assert_eq!(&out[..10], &[0xAB; 10]);
+        // Rest unchanged
+        assert_eq!(&out[10..], &[0xFF; 10]);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
     fn test_pool_zeroize_on_drop() {
         let pool = EntropyPool::new(64);
         let ptr = pool.buf.as_ptr();

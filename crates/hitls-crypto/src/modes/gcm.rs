@@ -412,6 +412,57 @@ mod tests {
         assert_eq!(pt, plaintext);
     }
 
+    #[test]
+    fn test_gcm_invalid_key_length() {
+        let nonce = hex_to_bytes("000000000000000000000000");
+        // 15-byte key — not a valid AES key length
+        assert!(gcm_encrypt(&[0u8; 15], &nonce, &[], &[1, 2, 3]).is_err());
+        assert!(gcm_encrypt(&[0u8; 17], &nonce, &[], &[1, 2, 3]).is_err());
+        assert!(gcm_encrypt(&[], &nonce, &[], &[1, 2, 3]).is_err());
+    }
+
+    // NIST SP 800-38D Test Case 14: AES-256 with AAD
+    #[test]
+    fn test_gcm_aes256_nist_case14() {
+        let key = hex_to_bytes("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308");
+        let nonce = hex_to_bytes("cafebabefacedbaddecaf888");
+        let pt = hex_to_bytes(
+            "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+        );
+        let aad = hex_to_bytes("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+        let expected_ct = "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662";
+        let expected_tag = "76fc6ece0f4e1768cddf8853bb2d551b";
+
+        let result = gcm_encrypt(&key, &nonce, &aad, &pt).unwrap();
+        let ct_len = pt.len();
+        assert_eq!(hex(&result[..ct_len]), expected_ct);
+        assert_eq!(hex(&result[ct_len..]), expected_tag);
+
+        let decrypted = gcm_decrypt(&key, &nonce, &aad, &result).unwrap();
+        assert_eq!(decrypted, pt);
+    }
+
+    #[test]
+    fn test_gcm_empty_plaintext_with_aad() {
+        let key = hex_to_bytes("feffe9928665731c6d6a8f9467308308");
+        let nonce = hex_to_bytes("cafebabefacedbaddecaf888");
+        let aad = b"some authenticated data";
+
+        // Empty plaintext + AAD → result is tag-only (16 bytes)
+        let result = gcm_encrypt(&key, &nonce, aad, &[]).unwrap();
+        assert_eq!(result.len(), GCM_TAG_SIZE);
+
+        // Decrypt → empty plaintext
+        let pt = gcm_decrypt(&key, &nonce, aad, &result).unwrap();
+        assert!(pt.is_empty());
+
+        // Wrong AAD → authentication failure
+        assert!(matches!(
+            gcm_decrypt(&key, &nonce, b"wrong aad", &result),
+            Err(CryptoError::AeadTagVerifyFail)
+        ));
+    }
+
     #[cfg(feature = "sm4")]
     #[test]
     fn test_sm4_gcm_tampered_tag() {

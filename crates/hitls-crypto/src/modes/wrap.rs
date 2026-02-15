@@ -177,4 +177,56 @@ mod tests {
         let unwrapped = key_unwrap(&kek, &wrapped).unwrap();
         assert_eq!(unwrapped, key_data);
     }
+
+    #[test]
+    fn test_wrap_too_short_plaintext() {
+        let kek = hex("000102030405060708090A0B0C0D0E0F");
+        // 8-byte plaintext — min is 16
+        assert!(matches!(
+            key_wrap(&kek, &[0u8; 8]),
+            Err(CryptoError::InvalidArg)
+        ));
+        // 0 bytes
+        assert!(matches!(key_wrap(&kek, &[]), Err(CryptoError::InvalidArg)));
+    }
+
+    #[test]
+    fn test_wrap_non_multiple_of_8() {
+        let kek = hex("000102030405060708090A0B0C0D0E0F");
+        // 17-byte plaintext — not a multiple of 8
+        assert!(matches!(
+            key_wrap(&kek, &[0u8; 17]),
+            Err(CryptoError::InvalidArg)
+        ));
+        // 25-byte wrapped — not a multiple of 8 for unwrap
+        assert!(matches!(
+            key_unwrap(&kek, &[0u8; 25]),
+            Err(CryptoError::InvalidArg)
+        ));
+    }
+
+    #[test]
+    fn test_wrap_corrupted_unwrap() {
+        let kek = hex("000102030405060708090A0B0C0D0E0F");
+        let key_data = hex("00112233445566778899AABBCCDDEEFF");
+        let mut wrapped = key_wrap(&kek, &key_data).unwrap();
+        // Flip a middle byte — IV check should fail on unwrap
+        wrapped[12] ^= 0xff;
+        assert!(key_unwrap(&kek, &wrapped).is_err());
+    }
+
+    // RFC 3394 §4.6: 256-bit KEK wrapping 256-bit key
+    #[test]
+    fn test_wrap_aes256_rfc3394() {
+        let kek = hex("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
+        let key_data = hex("00112233445566778899AABBCCDDEEFF000102030405060708090A0B0C0D0E0F");
+        let expected =
+            hex("28C9F404C4B810F4CBCCB35CFB87F8263F5786E2D80ED326CBC7F0E71A99F43BFB988B9B7A02DD21");
+
+        let wrapped = key_wrap(&kek, &key_data).unwrap();
+        assert_eq!(to_hex(&wrapped), to_hex(&expected));
+
+        let unwrapped = key_unwrap(&kek, &wrapped).unwrap();
+        assert_eq!(unwrapped, key_data);
+    }
 }

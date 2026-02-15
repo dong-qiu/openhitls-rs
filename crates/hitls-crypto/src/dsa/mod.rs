@@ -322,4 +322,45 @@ mod tests {
         // p must be odd
         assert!(DsaParams::new(&[24], &[11], &[4]).is_err());
     }
+
+    #[test]
+    fn test_dsa_verify_with_wrong_key() {
+        let params = small_params();
+        // Two keypairs with explicit private keys: x=3 and x=7
+        let kp1 = DsaKeyPair::from_private_key(params.clone(), &[3]).unwrap();
+        let kp2 = DsaKeyPair::from_private_key(params, &[7]).unwrap();
+
+        let digest = [0x50]; // e after truncation: non-zero
+        let sig = kp1.sign(&digest).unwrap();
+        // Verify with wrong key — should fail (possibly Ok(false))
+        let result = kp2.verify(&digest, &sig).unwrap();
+        assert!(!result, "signature verified with wrong key");
+    }
+
+    #[test]
+    fn test_dsa_sign_with_public_only_key() {
+        let params = small_params();
+        let kp = DsaKeyPair::generate(params.clone()).unwrap();
+        let pub_bytes = kp.public_key_bytes();
+
+        // Create a verify-only key (no private key)
+        let verifier = DsaKeyPair::from_public_key(params, &pub_bytes).unwrap();
+        // Signing should fail — private_key is zero
+        let result = verifier.sign(&[0x42]);
+        assert!(result.is_err(), "signing with public-only key should fail");
+    }
+
+    #[test]
+    fn test_dsa_different_digest_verify() {
+        let params = small_params();
+        let kp = DsaKeyPair::from_private_key(params, &[5]).unwrap();
+
+        let digest1 = [0x10]; // e=1 after truncation
+        let sig = kp.sign(&digest1).unwrap();
+
+        // Verify with a different digest
+        let digest2 = [0x40]; // e=4 after truncation
+        let result = kp.verify(&digest2, &sig).unwrap();
+        assert!(!result, "signature should not verify with different digest");
+    }
 }

@@ -152,4 +152,41 @@ mod tests {
         assert!(kp.decapsulate(&[0u8; 32]).is_err());
         assert!(kp.decapsulate(&[0u8; 10]).is_err());
     }
+
+    #[test]
+    fn test_hybrid_kem_cross_key_decapsulation() {
+        let kp1 = HybridKemKeyPair::generate().unwrap();
+        let kp2 = HybridKemKeyPair::generate().unwrap();
+
+        let (ss1, ct) = kp1.encapsulate().unwrap();
+        // Decapsulate with wrong key — ML-KEM uses implicit rejection,
+        // so decapsulation succeeds but produces a different shared secret
+        let ss2 = kp2.decapsulate(&ct).unwrap();
+        assert_ne!(
+            ss1, ss2,
+            "cross-key decapsulation should produce different shared secret"
+        );
+    }
+
+    #[test]
+    fn test_hybrid_kem_ciphertext_length() {
+        let kp = HybridKemKeyPair::generate().unwrap();
+        let (_, ct) = kp.encapsulate().unwrap();
+        // X25519 ephemeral pk (32) + ML-KEM-768 ciphertext (1088) = 1120
+        assert_eq!(
+            ct.len(),
+            32 + 1088,
+            "hybrid ciphertext should be 1120 bytes"
+        );
+    }
+
+    #[test]
+    fn test_hybrid_kem_multiple_encapsulations_differ() {
+        let kp = HybridKemKeyPair::generate().unwrap();
+        let (ss1, ct1) = kp.encapsulate().unwrap();
+        let (ss2, ct2) = kp.encapsulate().unwrap();
+        // Each encapsulation uses fresh randomness
+        assert_ne!(ct1, ct2, "ciphertexts should differ");
+        assert_ne!(ss1, ss2, "shared secrets should differ");
+    }
 }

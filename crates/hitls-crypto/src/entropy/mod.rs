@@ -302,6 +302,43 @@ mod tests {
     }
 
     #[test]
+    fn test_entropy_zero_length_buffer() {
+        let mut es = EntropySource::new(EntropyConfig::default());
+        // Zero-length buffer → Ok(()) (no bytes needed)
+        assert!(es.get_entropy(&mut []).is_ok());
+    }
+
+    #[test]
+    fn test_entropy_large_buffer() {
+        let mut es = EntropySource::new(EntropyConfig::default());
+        let mut buf = vec![0u8; 4096];
+        es.get_entropy(&mut buf).unwrap();
+        // Should not be all zeros
+        assert!(buf.iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn test_entropy_multiple_small_requests() {
+        let mut es = EntropySource::new(EntropyConfig::default());
+        for _ in 0..100 {
+            let mut buf = [0u8; 1];
+            es.get_entropy(&mut buf).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_entropy_disabled_health_tests() {
+        let config = EntropyConfig {
+            enable_health_tests: false,
+            ..Default::default()
+        };
+        // Stuck source with health tests disabled → should succeed
+        let mut es = EntropySource::with_source(config, Box::new(StuckNoiseSource));
+        let mut buf = [0u8; 32];
+        assert!(es.get_entropy(&mut buf).is_ok());
+    }
+
+    #[test]
     fn test_entropy_source_health_test_catches_bad_source() {
         let config = EntropyConfig {
             rct_cutoff: 5, // Low threshold for quick failure
