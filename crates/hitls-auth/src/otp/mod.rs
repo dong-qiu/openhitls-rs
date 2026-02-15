@@ -258,4 +258,32 @@ mod tests {
                                               // Window of 0 at a different step should fail
         assert!(!totp.verify(otp, 150, 0).unwrap()); // counter=5, otp was for counter=3
     }
+
+    #[test]
+    fn test_hotp_empty_secret() {
+        // HMAC accepts any key length including empty
+        let hotp = Hotp::new(b"", 6);
+        let otp = hotp.generate(0).unwrap();
+        assert!(otp < 1_000_000);
+        assert!(hotp.verify(otp, 0).unwrap());
+    }
+
+    #[test]
+    fn test_hotp_1_digit_otp() {
+        let secret = b"12345678901234567890";
+        let hotp = Hotp::new(secret, 1);
+        let otp = hotp.generate(0).unwrap();
+        assert!(otp <= 9, "1-digit OTP should be in [0, 9], got {otp}");
+    }
+
+    #[test]
+    fn test_totp_period_boundary() {
+        let secret = b"12345678901234567890";
+        let totp = Totp::new(secret, 6, 30);
+
+        // t=29 → time step 0, t=30 → time step 1: should differ
+        let otp_a = totp.generate(29).unwrap();
+        let otp_b = totp.generate(30).unwrap();
+        assert_ne!(otp_a, otp_b, "OTPs at different time steps should differ");
+    }
 }

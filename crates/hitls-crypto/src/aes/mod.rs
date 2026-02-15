@@ -301,4 +301,17 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_aes_invalid_block_length() {
+        let cipher = AesKey::new(&[0x42u8; 16]).unwrap();
+        // 0 bytes
+        assert!(cipher.encrypt_block(&mut []).is_err());
+        // 15 bytes (too short)
+        assert!(cipher.encrypt_block(&mut [0u8; 15]).is_err());
+        // 17 bytes (too long)
+        assert!(cipher.encrypt_block(&mut [0u8; 17]).is_err());
+        // 32 bytes (double block, not supported for single-block API)
+        assert!(cipher.encrypt_block(&mut [0u8; 32]).is_err());
+    }
 }

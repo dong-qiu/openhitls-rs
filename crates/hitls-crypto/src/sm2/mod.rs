@@ -493,4 +493,43 @@ mod tests {
 
         assert_eq!(plaintext.as_slice(), &decrypted[..]);
     }
+
+    #[test]
+    fn test_sm2_public_only_sign_fails() {
+        let full_key = Sm2KeyPair::generate().unwrap();
+        let pub_bytes = full_key.public_key_bytes().unwrap();
+        let pub_only = Sm2KeyPair::from_public_key(&pub_bytes).unwrap();
+        assert!(
+            pub_only.sign(b"msg").is_err(),
+            "sign with public-only key should fail"
+        );
+    }
+
+    #[test]
+    fn test_sm2_public_only_decrypt_fails() {
+        let full_key = Sm2KeyPair::generate().unwrap();
+        let ct = full_key.encrypt(b"hello").unwrap();
+        let pub_bytes = full_key.public_key_bytes().unwrap();
+        let pub_only = Sm2KeyPair::from_public_key(&pub_bytes).unwrap();
+        assert!(
+            pub_only.decrypt(&ct).is_err(),
+            "decrypt with public-only key should fail"
+        );
+    }
+
+    #[test]
+    fn test_sm2_corrupted_signature_verify() {
+        let key = Sm2KeyPair::generate().unwrap();
+        let msg = b"test message";
+        let mut sig = key.sign(msg).unwrap();
+
+        // Corrupt a byte in the middle of the signature
+        let mid = sig.len() / 2;
+        sig[mid] ^= 0xFF;
+
+        // Should either error or return false
+        if let Ok(valid) = key.verify(msg, &sig) {
+            assert!(!valid, "corrupted signature should not verify");
+        }
+    }
 }

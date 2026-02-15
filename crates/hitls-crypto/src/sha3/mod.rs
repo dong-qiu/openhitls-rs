@@ -661,4 +661,41 @@ mod tests {
             "46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f"
         );
     }
+
+    #[test]
+    fn test_sha3_256_reset_reuse() {
+        let mut ctx = Sha3_256::new();
+        ctx.update(b"abc").unwrap();
+        let _d1 = ctx.finish().unwrap();
+
+        // Reset and hash "test" → matches one-shot
+        ctx.reset();
+        ctx.update(b"test").unwrap();
+        let d2 = ctx.finish().unwrap();
+        assert_eq!(d2, Sha3_256::digest(b"test").unwrap());
+
+        // Reset and hash empty → matches one-shot empty
+        ctx.reset();
+        let d_empty = ctx.finish().unwrap();
+        assert_eq!(d_empty, Sha3_256::digest(b"").unwrap());
+    }
+
+    #[test]
+    fn test_shake128_multiple_squeeze() {
+        let mut xof = Shake128::new();
+        xof.update(b"test").unwrap();
+        let s1 = xof.squeeze(32).unwrap();
+        let s2 = xof.squeeze(32).unwrap();
+
+        // Two successive squeezes should produce different bytes
+        assert_ne!(s1, s2);
+
+        // Concatenation should match a single 64-byte squeeze
+        let mut xof2 = Shake128::new();
+        xof2.update(b"test").unwrap();
+        let s_full = xof2.squeeze(64).unwrap();
+        let mut combined = s1;
+        combined.extend_from_slice(&s2);
+        assert_eq!(combined, s_full);
+    }
 }

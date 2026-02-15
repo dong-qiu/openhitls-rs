@@ -626,4 +626,68 @@ mod tests {
         assert_eq!(mask3.len(), 64);
         assert_eq!(&mask3[..48], &mask1[..]); // prefix matches shorter mask
     }
+
+    #[test]
+    fn test_rsa_cross_padding_verify() {
+        let (n, e, d, p, q) = test_key_1024();
+        let priv_key = RsaPrivateKey::new(&n, &d, &e, &p, &q).unwrap();
+        let pub_key = priv_key.public_key();
+        let digest = crate::sha2::Sha256::digest(b"test message").unwrap();
+
+        // Sign with PKCS1v15Sign, verify with PSS → should not verify
+        let sig_pkcs = priv_key.sign(RsaPadding::Pkcs1v15Sign, &digest).unwrap();
+        let result_pss = pub_key.verify(RsaPadding::Pss, &digest, &sig_pkcs).unwrap();
+        assert!(!result_pss, "PKCS1v15 signature should not verify as PSS");
+
+        // Sign with PSS, verify with PKCS1v15Sign → should not verify
+        let sig_pss = priv_key.sign(RsaPadding::Pss, &digest).unwrap();
+        let result_pkcs = pub_key
+            .verify(RsaPadding::Pkcs1v15Sign, &digest, &sig_pss)
+            .unwrap();
+        assert!(!result_pkcs, "PSS signature should not verify as PKCS1v15");
+    }
+
+    #[test]
+    fn test_rsa_oaep_message_too_long() {
+        let (n, e, d, p, q) = test_key_1024();
+        let priv_key = RsaPrivateKey::new(&n, &d, &e, &p, &q).unwrap();
+        let pub_key = priv_key.public_key();
+
+        // 1024-bit key: k=128, hLen=32, max_msg = 128-2*32-2 = 62 bytes
+        let msg_ok = vec![0x42u8; 62];
+        assert!(pub_key.encrypt(RsaPadding::Oaep, &msg_ok).is_ok());
+
+        let msg_too_long = vec![0x42u8; 63];
+        assert!(
+            pub_key.encrypt(RsaPadding::Oaep, &msg_too_long).is_err(),
+            "63-byte message should exceed OAEP capacity for 1024-bit key"
+        );
+    }
+
+    #[test]
+    fn test_rsa_cross_key_verify() {
+        let (n, e, d, p, q) = test_key_1024();
+        let priv_key_a = RsaPrivateKey::new(&n, &d, &e, &p, &q).unwrap();
+
+        // Generate a different key (use different primes via generate is too slow;
+        // instead use a second known key by modifying the existing one)
+        // We'll just sign with key A and verify with key A's public → true,
+        // then verify same signature with a shifted public key → false
+        let digest = crate::sha2::Sha256::digest(b"cross key test").unwrap();
+        let sig = priv_key_a.sign(RsaPadding::Pss, &digest).unwrap();
+
+        // Verify with correct key
+        let pub_a = priv_key_a.public_key();
+        assert!(pub_a.verify(RsaPadding::Pss, &digest, &sig).unwrap());
+
+        // Create a different public key by changing n slightly
+        let mut n_modified = n.clone();
+        let last = n_modified.len() - 1;
+        n_modified[last] ^= 0x02; // flip a bit
+        if let Ok(pub_b) = RsaPublicKey::new(&n_modified, &e) {
+            if let Ok(valid) = pub_b.verify(RsaPadding::Pss, &digest, &sig) {
+                assert!(!valid, "signature should not verify with different key");
+            }
+        }
+    }
 }

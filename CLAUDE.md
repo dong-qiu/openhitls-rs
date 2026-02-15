@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: P11 complete — Unit Test Coverage Expansion (CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3, Entropy, Privacy Pass)
+- **Status**: P12 complete — Unit Test Coverage Expansion (RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, AES, BigNum, OTP, SPAKE2+)
 
 ## Workspace Structure
 
@@ -18,10 +18,10 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error enums
 │   ├── hitls-utils/     # ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
-│   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); hardware AES acceleration (ARMv8/x86-64); ECC: P-192, P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; Curve448: Ed448, X448; DRBG: HMAC/CTR/Hash; SM4-CCM; HCTR mode; FIPS/CMVP (KAT, PCT, integrity); Entropy health testing (NIST SP 800-90B, RCT+APT); Wycheproof test vectors (567 tests + 15 Wycheproof)
+│   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); hardware AES acceleration (ARMv8/x86-64); ECC: P-192, P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; Curve448: Ed448, X448; DRBG: HMAC/CTR/Hash; SM4-CCM; HCTR mode; FIPS/CMVP (KAT, PCT, integrity); Entropy health testing (NIST SP 800-90B, RCT+APT); Wycheproof test vectors (593 tests + 15 Wycheproof)
 │   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, hybrid KEM (X25519MLKEM768), async I/O (tokio), TLS 1.3 SM4-GCM/CCM (RFC 8998), RFC 5705/8446 key material export, TLS 1.2 handshake (ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, Bleichenbacher protection, OCSP stapling CertificateStatus), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), DTLCP (DTLS+TLCP), custom extensions framework, NSS key logging, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT, Ed448/X448 signing + key exchange, TLS 1.2 PRF (612 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify [RSA/ECDSA/Ed25519/Ed448/SM2/RSA-PSS], chain, CRL, OCSP, CSR generation, Certificate generation, to_text output, SigningKey abstraction, EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies enforcement), PKCS#12 (RFC 7292), CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr, detached mode) + EnvelopedData + EncryptedData + DigestedData (RFC 5652), PKCS#8 (RFC 5958, Ed448/X448), SPKI public key parsing (321 tests, 1 ignored)
-│   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (RFC 9578, RSA blind sigs) (27 tests)
+│   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (RFC 9578, RSA blind sigs) (33 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
 ├── tests/interop/       # Integration tests (39 cross-crate tests, 3 ignored)
 ├── tests/vectors/       # Standard test vectors (Wycheproof JSON)
@@ -35,16 +35,16 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (1748 tests, 40 ignored)
+# Run all tests (1782 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 567 tests (31 ignored) + 15 Wycheproof
+cargo test -p hitls-crypto --all-features   # 593 tests (31 ignored) + 15 Wycheproof
 cargo test -p hitls-tls --all-features      # 612 tests
 cargo test -p hitls-pki --all-features      # 321 tests (1 ignored)
-cargo test -p hitls-bignum                  # 46 tests
+cargo test -p hitls-bignum                  # 48 tests
 cargo test -p hitls-utils                   # 53 tests
-cargo test -p hitls-auth --all-features     # 27 tests
+cargo test -p hitls-auth --all-features     # 33 tests
 cargo test -p hitls-cli --all-features      # 40 tests (5 ignored)
 cargo test -p hitls-integration-tests       # 39 tests (3 ignored)
 
@@ -127,5 +127,6 @@ Phases 0-49 + P1-P11 complete (1748 tests, 40 ignored).
 - P9: Unit Test Coverage Expansion (36 new tests: Ed25519 RFC 8032 vectors + error paths, ECDSA negative cases, ASN.1 decoder negative tests, HMAC RFC 2202/4231 vectors, ChaCha20-Poly1305 edge cases, TLS 1.3 client wrong-state tests, TLS 1.2 server wrong-state tests) -- DONE
 - P10: Unit Test Coverage Expansion (35 new tests: CFB/OFB/ECB/XTS cipher mode edge cases, ML-KEM failure/implicit rejection, ML-DSA corruption/wrong key, DRBG reseed divergence, SipHash key validation, GMAC/CMAC NIST vectors + error paths, SHA-1 reset/million-a, scrypt/PBKDF2 validation, TLS transcript hash SHA-384/replace_with_message_hash) -- DONE
 - P11: Unit Test Coverage Expansion (36 new tests: CTR invalid nonce/key + AES-256 NIST vector, CCM nonce/tag validation + tampered tag, AES Key Wrap short/non-aligned/corrupted + RFC 3394 §4.6, GCM invalid key + AES-256 NIST Case 14 + empty-pt-with-AAD, DSA wrong key/public-only/different digest, HPKE tampered ct/wrong AAD/PSK roundtrip/empty PSK rejection, HybridKEM cross-key/ct-length/multiple-encap, SM3 reset-reuse/block-boundary, Entropy zero-len/large/multiple-small/disabled-health/pool-min-capacity/partial-pop/RCT-reset, Privacy Pass wrong-challenge/empty-key/wire-roundtrip) -- DONE
+- P12: Unit Test Coverage Expansion (34 new tests: RSA cross-padding/OAEP-length/cross-key, ECDH zero/large/format/self-DH, SM2 public-only sign/decrypt + corrupted sig, ElGamal truncated/tampered ct, Paillier invalid-ct/triple-homomorphic, ECC scalar-mul-zero/point-add-negate, MD5 reset/boundary, SM4 consecutive-roundtrip/all-FF, SHA-256 reset/SHA-384 incremental/SHA-512 boundary, SHA-3 reset/SHAKE multi-squeeze, AES invalid-block-length, BigNum div-by-one/sqr-mul-consistency, HOTP empty-secret/1-digit/TOTP-boundary, SPAKE2+ setup-before-generate/empty-password/invalid-share) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

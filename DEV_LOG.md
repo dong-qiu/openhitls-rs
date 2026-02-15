@@ -5411,3 +5411,40 @@ Added 36 new tests across 12 files, expanding negative/edge-case coverage for mo
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1748 workspace tests passing (40 ignored)
+
+---
+
+## P12: Unit Test Coverage Expansion — RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, AES, BigNum, OTP, SPAKE2+ (Session 2026-02-15)
+
+### Goals
+- Add 34 new tests across 14 files covering security-critical error paths, API boundary conditions, and reset/reuse patterns
+
+### Implementation Summary
+
+| File | New Tests | What They Cover |
+|------|-----------|-----------------|
+| `hitls-crypto/src/rsa/mod.rs` | +3 | Cross-padding verify (PKCS1v15↔PSS), OAEP message length limit, cross-key verify |
+| `hitls-crypto/src/ecdh/mod.rs` | +4 | Zero private key, too-large private key, invalid public key format, self-DH |
+| `hitls-crypto/src/sm2/mod.rs` | +3 | Public-only sign fails, public-only decrypt fails, corrupted signature verify |
+| `hitls-crypto/src/elgamal/mod.rs` | +2 | Truncated ciphertext decrypt, ciphertext tampering changes plaintext |
+| `hitls-crypto/src/paillier/mod.rs` | +2 | Invalid ciphertext error, triple homomorphic add (5+7+3=15) |
+| `hitls-crypto/src/ecc/mod.rs` | +2 | scalar_mul_base(0) → infinity, P + (-P) → infinity |
+| `hitls-crypto/src/md5/mod.rs` | +2 | Reset/reuse consistency, block boundary (64/65/128/127 bytes) |
+| `hitls-crypto/src/sm4/mod.rs` | +2 | Consecutive encrypt→decrypt→encrypt determinism, all-0xFF key/plaintext roundtrip |
+| `hitls-crypto/src/sha2/mod.rs` | +3 | SHA-256 reset/reuse, SHA-384 incremental (50+50+100), SHA-512 two-block boundary |
+| `hitls-crypto/src/sha3/mod.rs` | +2 | SHA-3-256 reset/reuse, SHAKE128 multi-squeeze (32+32 = 64) |
+| `hitls-crypto/src/aes/mod.rs` | +1 | Invalid block lengths (0, 15, 17, 32 bytes) |
+| `hitls-bignum/src/ops.rs` | +2 | Division by 1, sqr vs mul consistency (0, 1, 7, 12345, 2^128) |
+| `hitls-auth/src/otp/mod.rs` | +3 | Empty secret HOTP, 1-digit OTP range, TOTP period boundary (t=29 vs t=30) |
+| `hitls-auth/src/spake2plus/mod.rs` | +3 | generate_share before setup → error, empty password succeeds, invalid share → error |
+
+### Test Counts (P12)
+- **hitls-crypto**: 593 (31 ignored) + 15 Wycheproof [was: 567]
+- **hitls-bignum**: 48 [was: 46]
+- **hitls-auth**: 33 [was: 27]
+- **Total workspace**: 1782 (40 ignored) [was: 1748]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1782 workspace tests passing (40 ignored)

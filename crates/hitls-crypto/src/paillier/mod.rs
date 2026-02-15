@@ -248,4 +248,34 @@ mod tests {
         let pt = kp.decrypt(&ct).unwrap();
         assert_eq!(BigNum::from_bytes_be(&pt).to_bytes_be(), m.to_bytes_be());
     }
+
+    #[test]
+    fn test_paillier_invalid_ciphertext() {
+        let (p, q) = small_primes();
+        let kp = PaillierKeyPair::from_primes(&p, &q).unwrap();
+        // Very short ciphertext → should error
+        assert!(kp.decrypt(&[0u8; 4]).is_err());
+    }
+
+    #[test]
+    fn test_paillier_triple_homomorphic_add() {
+        let (p, q) = small_primes();
+        let kp = PaillierKeyPair::from_primes(&p, &q).unwrap();
+
+        let m1 = BigNum::from_u64(5);
+        let m2 = BigNum::from_u64(7);
+        let m3 = BigNum::from_u64(3);
+
+        let ct1 = kp.encrypt(&m1.to_bytes_be()).unwrap();
+        let ct2 = kp.encrypt(&m2.to_bytes_be()).unwrap();
+        let ct3 = kp.encrypt(&m3.to_bytes_be()).unwrap();
+
+        let ct_sum12 = kp.add_ciphertexts(&ct1, &ct2).unwrap();
+        let ct_sum123 = kp.add_ciphertexts(&ct_sum12, &ct3).unwrap();
+        let pt_sum = kp.decrypt(&ct_sum123).unwrap();
+        let sum = BigNum::from_bytes_be(&pt_sum);
+
+        let expected = BigNum::from_u64(15); // 5 + 7 + 3
+        assert_eq!(sum.to_bytes_be(), expected.to_bytes_be());
+    }
 }

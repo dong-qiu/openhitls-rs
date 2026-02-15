@@ -670,4 +670,45 @@ mod tests {
         assert!(neg < BigNum::zero());
         assert!(neg < a);
     }
+
+    #[test]
+    fn test_div_by_one_and_mod_one() {
+        let one = BigNum::from_u64(1);
+
+        // 12345 / 1 = (12345, 0)
+        let val = BigNum::from_u64(12345);
+        let (q, r) = val.div_rem(&one).unwrap();
+        assert_eq!(q, val);
+        assert_eq!(r, BigNum::zero());
+
+        // 12345 mod 1 = 0
+        let m = val.mod_reduce(&one).unwrap();
+        assert_eq!(m, BigNum::zero());
+
+        // 0 / 1 = (0, 0)
+        let (q0, r0) = BigNum::zero().div_rem(&one).unwrap();
+        assert_eq!(q0, BigNum::zero());
+        assert_eq!(r0, BigNum::zero());
+    }
+
+    #[test]
+    fn test_sqr_mul_consistency() {
+        let values = [
+            BigNum::from_u64(0),
+            BigNum::from_u64(1),
+            BigNum::from_u64(7),
+            BigNum::from_u64(12345),
+            BigNum::from_u64(1).shl(128), // 2^128
+        ];
+        for x in &values {
+            let sq = x.sqr();
+            let mul = x.mul(x);
+            assert_eq!(
+                sq.to_bytes_be(),
+                mul.to_bytes_be(),
+                "sqr vs mul mismatch for {:?}",
+                x.to_bytes_be()
+            );
+        }
+    }
 }

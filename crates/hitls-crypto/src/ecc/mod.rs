@@ -540,4 +540,20 @@ mod tests {
         let decoded = EcPoint::from_uncompressed(&group, &encoded).unwrap();
         assert_eq!(g, decoded);
     }
+
+    #[test]
+    fn test_ecc_scalar_mul_zero() {
+        let group = EcGroup::new(EccCurveId::NistP256).unwrap();
+        let result = group.scalar_mul_base(&BigNum::zero()).unwrap();
+        assert!(result.is_infinity());
+    }
+
+    #[test]
+    fn test_ecc_point_add_with_negate() {
+        let group = EcGroup::new(EccCurveId::NistP256).unwrap();
+        let g = group.generator();
+        let neg_g = group.point_negate(&g).unwrap();
+        let sum = group.point_add(&g, &neg_g).unwrap();
+        assert!(sum.is_infinity(), "P + (-P) should be point at infinity");
+    }
 }

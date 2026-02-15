@@ -288,4 +288,43 @@ mod tests {
         let pt = kp.decrypt(&ct).unwrap();
         assert_eq!(BigNum::from_bytes_be(&pt).to_bytes_be(), m.to_bytes_be());
     }
+
+    #[test]
+    fn test_elgamal_truncated_ciphertext() {
+        let p = BigNum::from_u64(23);
+        let g = BigNum::from_u64(5);
+        let x = BigNum::from_u64(7);
+        let kp = ElGamalKeyPair::from_private_key(&p, &g, &x).unwrap();
+
+        let m = BigNum::from_u64(10);
+        let ct = kp.encrypt(&m.to_bytes_be()).unwrap();
+        assert!(ct.len() > 4);
+
+        // Truncate to 4 bytes → should fail to decrypt
+        assert!(kp.decrypt(&ct[..4]).is_err());
+    }
+
+    #[test]
+    fn test_elgamal_ciphertext_tampering() {
+        let p = BigNum::from_u64(23);
+        let g = BigNum::from_u64(5);
+        let x = BigNum::from_u64(7);
+        let kp = ElGamalKeyPair::from_private_key(&p, &g, &x).unwrap();
+
+        let m = BigNum::from_u64(10);
+        let mut ct = kp.encrypt(&m.to_bytes_be()).unwrap();
+
+        // Format: 4-byte c1_len || c1 || c2
+        // Flip a byte in the c2 portion (last byte)
+        let last = ct.len() - 1;
+        ct[last] ^= 0x01;
+
+        let pt = kp.decrypt(&ct).unwrap();
+        let recovered = BigNum::from_bytes_be(&pt);
+        assert_ne!(
+            recovered.to_bytes_be(),
+            m.to_bytes_be(),
+            "tampered ciphertext should decrypt to different value"
+        );
+    }
 }

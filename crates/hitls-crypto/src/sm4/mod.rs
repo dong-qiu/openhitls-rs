@@ -272,4 +272,36 @@ mod tests {
         assert!(cipher.encrypt_block(&mut [0u8; 15]).is_err());
         assert!(cipher.decrypt_block(&mut [0u8; 17]).is_err());
     }
+
+    #[test]
+    fn test_sm4_consecutive_encrypt_decrypt_encrypt() {
+        let key = [0x01u8; 16];
+        let pt = [0x42u8; 16];
+        let cipher = Sm4Key::new(&key).unwrap();
+
+        let mut block = pt;
+        cipher.encrypt_block(&mut block).unwrap();
+        let ct = block;
+
+        cipher.decrypt_block(&mut block).unwrap();
+        assert_eq!(block, pt);
+
+        // Re-encrypt must be deterministic
+        cipher.encrypt_block(&mut block).unwrap();
+        assert_eq!(block, ct);
+    }
+
+    #[test]
+    fn test_sm4_all_ff_roundtrip() {
+        let key = [0xFFu8; 16];
+        let pt = [0xFFu8; 16];
+        let cipher = Sm4Key::new(&key).unwrap();
+
+        let mut block = pt;
+        cipher.encrypt_block(&mut block).unwrap();
+        assert_ne!(block, pt, "ciphertext should differ from plaintext");
+
+        cipher.decrypt_block(&mut block).unwrap();
+        assert_eq!(block, pt);
+    }
 }

@@ -211,4 +211,35 @@ mod tests {
         assert_eq!(secret_a, secret_b);
         assert_eq!(secret_a.len(), 64);
     }
+
+    #[test]
+    fn test_ecdh_invalid_private_key_zero() {
+        let result = EcdhKeyPair::from_private_key(EccCurveId::NistP256, &[0u8; 32]);
+        assert!(result.is_err(), "zero private key should be rejected");
+    }
+
+    #[test]
+    fn test_ecdh_invalid_private_key_too_large() {
+        // 0xFF repeated 32 times is larger than P-256 order
+        let result = EcdhKeyPair::from_private_key(EccCurveId::NistP256, &[0xFF; 32]);
+        assert!(result.is_err(), "private key >= order should be rejected");
+    }
+
+    #[test]
+    fn test_ecdh_invalid_public_key_format() {
+        let alice = EcdhKeyPair::generate(EccCurveId::NistP256).unwrap();
+        // 32 bytes is too short (should be 65 for uncompressed P-256)
+        let result = alice.compute_shared_secret(&[0u8; 32]);
+        assert!(result.is_err(), "short public key should be rejected");
+    }
+
+    #[test]
+    fn test_ecdh_self_dh() {
+        let alice = EcdhKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let alice_pub = alice.public_key_bytes().unwrap();
+        let secret = alice.compute_shared_secret(&alice_pub).unwrap();
+        assert_eq!(secret.len(), 32);
+        // Shared secret with self should be non-zero
+        assert!(secret.iter().any(|&b| b != 0));
+    }
 }

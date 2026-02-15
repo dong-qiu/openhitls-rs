@@ -670,4 +670,38 @@ mod tests {
         let conf = prover.get_confirmation().unwrap();
         assert_eq!(conf.len(), 32);
     }
+
+    #[test]
+    fn test_spake2_setup_before_generate() {
+        let mut ctx = Spake2Plus::new(Spake2Role::Prover).unwrap();
+        // generate_share before setup should fail
+        assert!(ctx.generate_share().is_err());
+    }
+
+    #[test]
+    fn test_spake2_empty_password() {
+        let mut prover = Spake2Plus::new(Spake2Role::Prover).unwrap();
+        let mut verifier = Spake2Plus::new(Spake2Role::Verifier).unwrap();
+
+        // Empty password is valid
+        prover.setup_from_password(b"", b"salt", 1000).unwrap();
+        verifier.setup_from_password(b"", b"salt", 1000).unwrap();
+
+        let pa = prover.generate_share().unwrap();
+        let pb = verifier.generate_share().unwrap();
+
+        let ke_p = prover.process_share(&pb).unwrap();
+        let ke_v = verifier.process_share(&pa).unwrap();
+        assert_eq!(ke_p, ke_v);
+    }
+
+    #[test]
+    fn test_spake2_process_invalid_share() {
+        let mut ctx = Spake2Plus::new(Spake2Role::Prover).unwrap();
+        ctx.setup_from_password(b"password", b"salt", 1000).unwrap();
+        let _share = ctx.generate_share().unwrap();
+
+        // Invalid point encoding (10 random bytes, not a valid P-256 point)
+        assert!(ctx.process_share(&[0xFF; 10]).is_err());
+    }
 }

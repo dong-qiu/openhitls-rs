@@ -276,4 +276,52 @@ mod tests {
         let expected = "f96b697d7cb7938d525a2f31aaf161d0";
         assert_eq!(hex(&digest), expected);
     }
+
+    #[test]
+    fn test_md5_reset_reuse() {
+        let mut ctx = Md5::new();
+        ctx.update(b"abc").unwrap();
+        let d1 = ctx.finish().unwrap();
+
+        // Reset and hash same data → same digest
+        ctx.reset();
+        ctx.update(b"abc").unwrap();
+        let d2 = ctx.finish().unwrap();
+        assert_eq!(d1, d2);
+
+        // Reset and hash empty → matches one-shot empty digest
+        ctx.reset();
+        let d_empty = ctx.finish().unwrap();
+        let expected_empty = Md5::digest(b"").unwrap();
+        assert_eq!(d_empty, expected_empty);
+    }
+
+    #[test]
+    fn test_md5_block_boundary() {
+        // Test at block boundaries: 64, 65, 128, 127 bytes
+        let data_64: Vec<u8> = (0u8..64).collect();
+        let data_65: Vec<u8> = (0u8..65).collect();
+        let data_128: Vec<u8> = (0..128u8).cycle().take(128).collect();
+        let data_127: Vec<u8> = (0..127u8).collect();
+
+        let datasets = [&data_64[..], &data_65[..], &data_128[..], &data_127[..]];
+        let mut digests = Vec::new();
+
+        for data in &datasets {
+            // Incremental matches one-shot
+            let mut ctx = Md5::new();
+            ctx.update(data).unwrap();
+            let incr = ctx.finish().unwrap();
+            let oneshot = Md5::digest(data).unwrap();
+            assert_eq!(incr, oneshot);
+            digests.push(incr);
+        }
+
+        // All four digests must differ
+        for i in 0..digests.len() {
+            for j in (i + 1)..digests.len() {
+                assert_ne!(digests[i], digests[j], "digests {i} and {j} should differ");
+            }
+        }
+    }
 }

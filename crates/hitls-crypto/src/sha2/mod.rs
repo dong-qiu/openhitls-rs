@@ -829,6 +829,50 @@ mod tests {
         assert_eq!(hex(&digest), expected);
     }
 
+    #[test]
+    fn test_sha256_reset_reuse() {
+        let mut ctx = Sha256::new();
+        ctx.update(b"test").unwrap();
+        let _d1 = ctx.finish().unwrap();
+
+        // Reset and hash "abc" → must match one-shot
+        ctx.reset();
+        ctx.update(b"abc").unwrap();
+        let d2 = ctx.finish().unwrap();
+        assert_eq!(d2, Sha256::digest(b"abc").unwrap());
+
+        // Reset and hash empty → must match one-shot empty
+        ctx.reset();
+        let d_empty = ctx.finish().unwrap();
+        assert_eq!(d_empty, Sha256::digest(b"").unwrap());
+    }
+
+    #[test]
+    fn test_sha384_incremental() {
+        let data: Vec<u8> = (0u8..200).collect();
+        let oneshot = Sha384::digest(&data).unwrap();
+
+        // Feed in 50+50+100 chunks
+        let mut ctx = Sha384::new();
+        ctx.update(&data[..50]).unwrap();
+        ctx.update(&data[50..100]).unwrap();
+        ctx.update(&data[100..]).unwrap();
+        let incr = ctx.finish().unwrap();
+        assert_eq!(incr, oneshot);
+    }
+
+    #[test]
+    fn test_sha512_two_block_boundary() {
+        // SHA-512 block size = 128, so 256 bytes = exactly 2 blocks
+        let data: Vec<u8> = (0..=255u8).collect();
+        let oneshot = Sha512::digest(&data).unwrap();
+
+        let mut ctx = Sha512::new();
+        ctx.update(&data).unwrap();
+        let incr = ctx.finish().unwrap();
+        assert_eq!(incr, oneshot);
+    }
+
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
