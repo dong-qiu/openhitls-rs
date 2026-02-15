@@ -121,3 +121,16 @@ cargo fmt --all -- --check
 - **Determinism checks**: same input → same output
 - **State machine tests**: wrong-stage errors in key schedule
 - **Constant-time equality** via `subtle::ConstantTimeEq` in crypto comparisons
+
+---
+
+## Phase 62: TLS 1.2 CCM Cipher Suites (RFC 6655 / RFC 7251) — 8 new tests
+
+### Date: 2026-02-16
+
+| Module | File | Tests Added | Description |
+|--------|------|:-----------:|-------------|
+| AEAD (CCM) | `hitls-tls/src/crypt/aead.rs` | 3 | AesCcmAead encrypt/decrypt roundtrip, AES-128-CCM + AES-256-CCM key sizes, tag verification |
+| Record Layer (CCM) | `hitls-tls/src/record/encryption12.rs` | 5 | tls12_suite_to_aead_suite CCM mapping for all 6 suites, seal/open roundtrip with CCM encryptor, nonce construction (fixed_iv + explicit_nonce), AAD format verification, wrong-key rejection |
+
+**Workspace after Phase 62**: 1,790 tests, 40 ignored (+8 from Phase 61's 1,782)

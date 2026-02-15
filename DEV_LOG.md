@@ -5377,3 +5377,48 @@ Added 36 new tests across 12 files, expanding negative/edge-case coverage for mo
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1782 workspace tests passing (40 ignored)
+
+---
+
+## Phase 62: TLS 1.2 CCM Cipher Suites (RFC 6655 / RFC 7251)
+
+### Date: 2026-02-16
+
+### Summary
+Added 6 AES-CCM cipher suites for TLS 1.2 per RFC 6655 and RFC 7251, with 8 new tests (3 AEAD unit tests + 5 record layer tests). CCM uses the same nonce/AAD format as GCM (fixed_iv(4) || explicit_nonce(8), 16-byte tag). All CCM suites use SHA-256 PRF (hash_len=32).
+
+### New Cipher Suites
+
+| Suite | Code | Key Exchange | RFC |
+|-------|------|-------------|-----|
+| TLS_RSA_WITH_AES_128_CCM | 0xC09C | RSA | RFC 6655 |
+| TLS_RSA_WITH_AES_256_CCM | 0xC09D | RSA | RFC 6655 |
+| TLS_DHE_RSA_WITH_AES_128_CCM | 0xC09E | DHE_RSA | RFC 6655 |
+| TLS_DHE_RSA_WITH_AES_256_CCM | 0xC09F | DHE_RSA | RFC 6655 |
+| TLS_ECDHE_ECDSA_WITH_AES_128_CCM | 0xC0AC | ECDHE_ECDSA | RFC 7251 |
+| TLS_ECDHE_ECDSA_WITH_AES_256_CCM | 0xC0AD | ECDHE_ECDSA | RFC 7251 |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/lib.rs` | 6 new `CipherSuite` constants |
+| `crates/hitls-tls/src/crypt/aead.rs` | `AesCcmAead` struct wrapping `hitls_crypto::modes::ccm`, `create_aead` CCM support, 3 tests |
+| `crates/hitls-tls/src/crypt/mod.rs` | 6 `Tls12CipherSuiteParams` entries for CCM suites |
+| `crates/hitls-tls/src/record/encryption12.rs` | `tls12_suite_to_aead_suite` CCM mapping, 5 tests |
+| `crates/hitls-cli/src/list.rs` | CLI listing updated to include CCM suites |
+
+### Implementation Details
+- `AesCcmAead` wraps `hitls_crypto::modes::ccm` with tag_len=16
+- CCM uses same nonce/AAD format as GCM: fixed_iv(4) || explicit_nonce(8)
+- All CCM suites use SHA-256 PRF (hash_len=32)
+- AES-256-CCM suites map to `TLS_AES_128_CCM_SHA256` for AEAD dispatch (key size from key material)
+
+### Test Counts (Phase 62)
+- **hitls-tls**: 620 [was: 612]
+- **Total workspace**: 1790 (40 ignored) [was: 1782]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1790 workspace tests passing (40 ignored)

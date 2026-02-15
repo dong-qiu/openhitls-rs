@@ -222,6 +222,14 @@ pub fn tls12_suite_to_aead_suite(suite: CipherSuite) -> Result<CipherSuite, TlsE
         | CipherSuite::TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256 => {
             Ok(CipherSuite::TLS_CHACHA20_POLY1305_SHA256)
         }
+        // AES-CCM suites (RFC 6655 / RFC 7251): map to TLS 1.3 AES-128-CCM.
+        // AesCcmAead accepts both 128-bit and 256-bit keys; key size comes from key material.
+        CipherSuite::TLS_RSA_WITH_AES_128_CCM
+        | CipherSuite::TLS_RSA_WITH_AES_256_CCM
+        | CipherSuite::TLS_DHE_RSA_WITH_AES_128_CCM
+        | CipherSuite::TLS_DHE_RSA_WITH_AES_256_CCM
+        | CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CCM
+        | CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CCM => Ok(CipherSuite::TLS_AES_128_CCM_SHA256),
         _ => Err(TlsError::NoSharedCipherSuite),
     }
 }
@@ -408,5 +416,110 @@ mod tests {
 
         let decrypted = dec.decrypt_record(&record).unwrap();
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_ccm128_tls12_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_128();
+        let aead_suite = tls12_suite_to_aead_suite(CipherSuite::TLS_RSA_WITH_AES_128_CCM).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 AES-128-CCM";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        assert_eq!(record.version, TLS12_VERSION);
+        // fragment = explicit_nonce(8) + plaintext(25) + tag(16) = 49
+        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 16);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_ccm256_tls12_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_256();
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DHE_RSA_WITH_AES_256_CCM).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 AES-256-CCM";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_ccm_tls12_suite_mapping() {
+        // AES-128-CCM suites map to TLS_AES_128_CCM_SHA256
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_RSA_WITH_AES_128_CCM).unwrap(),
+            CipherSuite::TLS_AES_128_CCM_SHA256
+        );
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DHE_RSA_WITH_AES_128_CCM).unwrap(),
+            CipherSuite::TLS_AES_128_CCM_SHA256
+        );
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CCM).unwrap(),
+            CipherSuite::TLS_AES_128_CCM_SHA256
+        );
+        // AES-256-CCM suites also map to TLS_AES_128_CCM_SHA256 (key size from key material)
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_RSA_WITH_AES_256_CCM).unwrap(),
+            CipherSuite::TLS_AES_128_CCM_SHA256
+        );
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DHE_RSA_WITH_AES_256_CCM).unwrap(),
+            CipherSuite::TLS_AES_128_CCM_SHA256
+        );
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CCM).unwrap(),
+            CipherSuite::TLS_AES_128_CCM_SHA256
+        );
+    }
+
+    #[test]
+    fn test_ccm_tls12_multiple_records() {
+        let (key, iv) = make_keys_128();
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CCM).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        for i in 0..5 {
+            let msg = format!("CCM message {i}");
+            let record = enc
+                .encrypt_record(ContentType::ApplicationData, msg.as_bytes())
+                .unwrap();
+            let decrypted = dec.decrypt_record(&record).unwrap();
+            assert_eq!(decrypted, msg.as_bytes());
+        }
+        assert_eq!(enc.sequence_number(), 5);
+        assert_eq!(dec.sequence_number(), 5);
+    }
+
+    #[test]
+    fn test_ccm_tls12_tampered_record() {
+        let (key, iv) = make_keys_128();
+        let aead_suite = tls12_suite_to_aead_suite(CipherSuite::TLS_RSA_WITH_AES_128_CCM).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let record = enc
+            .encrypt_record(ContentType::Handshake, b"secret CCM data")
+            .unwrap();
+
+        let mut tampered = record.clone();
+        tampered.fragment[10] ^= 0x01;
+        assert!(dec.decrypt_record(&tampered).is_err());
     }
 }
