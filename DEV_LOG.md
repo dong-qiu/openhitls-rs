@@ -1,5 +1,42 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 64: PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites
+
+### Date: 2026-02-16
+
+### Summary
+Added 8 new TLS 1.2 cipher suites completing PSK cipher suite coverage with CBC-SHA256/SHA384 variants and ECDHE_PSK GCM variants. 6 suites from RFC 5487 add PSK/DHE_PSK/RSA_PSK with AES-128/256-CBC using SHA-256/SHA-384 MACs. 2 suites from draft-ietf-tls-ecdhe-psk-aead add ECDHE_PSK with AES-128/256-GCM. 5 new tests validate suite mapping and record layer operation.
+
+### New Cipher Suites
+
+| Suite | Code | Key Exchange | MAC/AEAD | Hash | RFC |
+|-------|------|-------------|----------|------|-----|
+| TLS_PSK_WITH_AES_128_CBC_SHA256 | 0x00AE | PSK | HMAC-SHA256 | SHA-256 | RFC 5487 |
+| TLS_PSK_WITH_AES_256_CBC_SHA384 | 0x00AF | PSK | HMAC-SHA384 | SHA-256 | RFC 5487 |
+| TLS_DHE_PSK_WITH_AES_128_CBC_SHA256 | 0x00B2 | DHE_PSK | HMAC-SHA256 | SHA-256 | RFC 5487 |
+| TLS_DHE_PSK_WITH_AES_256_CBC_SHA384 | 0x00B3 | DHE_PSK | HMAC-SHA384 | SHA-256 | RFC 5487 |
+| TLS_RSA_PSK_WITH_AES_128_CBC_SHA256 | 0x00B6 | RSA_PSK | HMAC-SHA256 | SHA-256 | RFC 5487 |
+| TLS_RSA_PSK_WITH_AES_256_CBC_SHA384 | 0x00B7 | RSA_PSK | HMAC-SHA384 | SHA-256 | RFC 5487 |
+| TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256 | 0xD001 | ECDHE_PSK | AES-GCM | SHA-256 | draft-ietf-tls-ecdhe-psk-aead |
+| TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384 | 0xD002 | ECDHE_PSK | AES-GCM | SHA-384 | draft-ietf-tls-ecdhe-psk-aead |
+
+### Implementation Details
+- CBC-SHA256/SHA384 suites use `mac_len` (32/48) for HMAC dispatch, same pattern as Phase 29 CBC
+- ECDHE_PSK GCM suites use standard AEAD record protection, identical to ECDHE_PSK (no new adapter needed)
+- All suites leverage existing `KeyExchangeAlg::Psk`, `DhePsk`, `RsaPsk`, `EcdhePsk` variants from Phase 37
+- Suite mapping in `ciphersuite.rs` and `Tls12CipherSuiteParams` lookups for CBC/GCM dispatch
+
+### Test Counts (Phase 64)
+- **hitls-tls**: 637 [was: 632]
+- **Total workspace**: 1807 (40 ignored) [was: 1802]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1807 workspace tests passing (40 ignored)
+
+---
+
 ## Phase 0: Project Scaffolding (Session 2026-02-06)
 
 ### Goals

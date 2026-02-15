@@ -1511,6 +1511,14 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1790 total tests (40 ignored). Clippy clean, fmt clean.
 
+## Phase 64: PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites (2026-02-16)
+
+**Prompt**: Add 8 new TLS 1.2 cipher suites completing PSK cipher suite coverage. RFC 5487: PSK_WITH_AES_128_CBC_SHA256 (0x00AE), PSK_WITH_AES_256_CBC_SHA384 (0x00AF), DHE_PSK_WITH_AES_128_CBC_SHA256 (0x00B2), DHE_PSK_WITH_AES_256_CBC_SHA384 (0x00B3), RSA_PSK_WITH_AES_128_CBC_SHA256 (0x00B6), RSA_PSK_WITH_AES_256_CBC_SHA384 (0x00B7). draft-ietf-tls-ecdhe-psk-aead: ECDHE_PSK_WITH_AES_128_GCM_SHA256 (0xD001), ECDHE_PSK_WITH_AES_256_GCM_SHA384 (0xD002). Use existing CBC/GCM record layer infrastructure. Expected ~5 new tests.
+
+**Result**: 5 new TLS tests. 8 new cipher suites added (6 CBC-SHA256/SHA384 from RFC 5487, 2 ECDHE_PSK GCM from draft-ietf-tls-ecdhe-psk-aead). CBC variants use mac_len dispatch (32→SHA-256, 48→SHA-384) for HMAC creation, same pattern as Phase 29. GCM variants use standard AEAD record protection, no new adapter needed. Suite mapping in `ciphersuite.rs` updated. `Tls12CipherSuiteParams` lookups extended for both CBC and GCM PSK variants. Tests: suite mapping validation, GCM roundtrip 128/256, CBC params lookup, GCM params lookup. TLS: 637 tests [was: 632]. Total: 1807 tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
 ## Phase 63: CCM_8 (8-byte tag) + PSK+CCM Cipher Suites (2026-02-16)
 
 **Prompt**: Add CCM_8 (8-byte AEAD tag) and PSK+CCM cipher suites. TLS 1.3: AES_128_CCM_8_SHA256 (0x1305). TLS 1.2 CCM_8: RSA_WITH_AES_128_CCM_8 (0xC0A0), RSA_WITH_AES_256_CCM_8 (0xC0A1). TLS 1.2 PSK+CCM: PSK_WITH_AES_256_CCM (0xC0A5), DHE_PSK_WITH_AES_128/256_CCM (0xC0A6/C0A7), ECDHE_PSK_WITH_AES_128_CCM_SHA256 (0xD005). New AesCcm8Aead adapter wrapping ccm_encrypt/decrypt with tag_len=8. Expected ~12 new tests.

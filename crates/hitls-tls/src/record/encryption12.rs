@@ -201,7 +201,8 @@ pub fn tls12_suite_to_aead_suite(suite: CipherSuite) -> Result<CipherSuite, TlsE
         | CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256
         | CipherSuite::TLS_PSK_WITH_AES_128_GCM_SHA256
         | CipherSuite::TLS_DHE_PSK_WITH_AES_128_GCM_SHA256
-        | CipherSuite::TLS_RSA_PSK_WITH_AES_128_GCM_SHA256 => {
+        | CipherSuite::TLS_RSA_PSK_WITH_AES_128_GCM_SHA256
+        | CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256 => {
             Ok(CipherSuite::TLS_AES_128_GCM_SHA256)
         }
         CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
@@ -210,7 +211,8 @@ pub fn tls12_suite_to_aead_suite(suite: CipherSuite) -> Result<CipherSuite, TlsE
         | CipherSuite::TLS_DHE_RSA_WITH_AES_256_GCM_SHA384
         | CipherSuite::TLS_PSK_WITH_AES_256_GCM_SHA384
         | CipherSuite::TLS_DHE_PSK_WITH_AES_256_GCM_SHA384
-        | CipherSuite::TLS_RSA_PSK_WITH_AES_256_GCM_SHA384 => {
+        | CipherSuite::TLS_RSA_PSK_WITH_AES_256_GCM_SHA384
+        | CipherSuite::TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384 => {
             Ok(CipherSuite::TLS_AES_256_GCM_SHA384)
         }
         CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
@@ -644,5 +646,117 @@ mod tests {
         let mut tampered = record.clone();
         tampered.fragment[10] ^= 0x01;
         assert!(dec.decrypt_record(&tampered).is_err());
+    }
+
+    #[test]
+    fn test_ecdhe_psk_gcm_tls12_suite_mapping() {
+        // ECDHE_PSK GCM suites map to corresponding TLS 1.3 AES-GCM
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256).unwrap(),
+            CipherSuite::TLS_AES_128_GCM_SHA256
+        );
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384).unwrap(),
+            CipherSuite::TLS_AES_256_GCM_SHA384
+        );
+    }
+
+    #[test]
+    fn test_ecdhe_psk_gcm128_tls12_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_128();
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 ECDHE_PSK AES-128-GCM";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        assert_eq!(record.version, TLS12_VERSION);
+        // fragment = explicit_nonce(8) + plaintext(36) + tag(16) = 60
+        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 16);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_ecdhe_psk_gcm256_tls12_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_256();
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 ECDHE_PSK AES-256-GCM";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        // fragment = explicit_nonce(8) + plaintext(36) + tag(16) = 60
+        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 16);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_psk_cbc_sha256_sha384_params_lookup() {
+        use crate::crypt::Tls12CipherSuiteParams;
+
+        // PSK CBC-SHA256 suites
+        for suite in [
+            CipherSuite::TLS_PSK_WITH_AES_128_CBC_SHA256,
+            CipherSuite::TLS_DHE_PSK_WITH_AES_128_CBC_SHA256,
+            CipherSuite::TLS_RSA_PSK_WITH_AES_128_CBC_SHA256,
+        ] {
+            let p = Tls12CipherSuiteParams::from_suite(suite).unwrap();
+            assert!(p.is_cbc);
+            assert_eq!(p.key_len, 16);
+            assert_eq!(p.hash_len, 32);
+            assert_eq!(p.mac_key_len, 32);
+            assert_eq!(p.mac_len, 32);
+        }
+
+        // PSK CBC-SHA384 suites
+        for suite in [
+            CipherSuite::TLS_PSK_WITH_AES_256_CBC_SHA384,
+            CipherSuite::TLS_DHE_PSK_WITH_AES_256_CBC_SHA384,
+            CipherSuite::TLS_RSA_PSK_WITH_AES_256_CBC_SHA384,
+        ] {
+            let p = Tls12CipherSuiteParams::from_suite(suite).unwrap();
+            assert!(p.is_cbc);
+            assert_eq!(p.key_len, 32);
+            assert_eq!(p.hash_len, 48);
+            assert_eq!(p.mac_key_len, 48);
+            assert_eq!(p.mac_len, 48);
+        }
+    }
+
+    #[test]
+    fn test_ecdhe_psk_gcm_params_lookup() {
+        use crate::crypt::Tls12CipherSuiteParams;
+
+        let p128 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256)
+                .unwrap();
+        assert!(!p128.is_cbc);
+        assert_eq!(p128.key_len, 16);
+        assert_eq!(p128.hash_len, 32);
+        assert_eq!(p128.tag_len, 16);
+        assert_eq!(p128.fixed_iv_len, 4);
+        assert_eq!(p128.record_iv_len, 8);
+
+        let p256 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384)
+                .unwrap();
+        assert!(!p256.is_cbc);
+        assert_eq!(p256.key_len, 32);
+        assert_eq!(p256.hash_len, 48);
+        assert_eq!(p256.tag_len, 16);
     }
 }
