@@ -171,16 +171,16 @@ cargo build -p hitls-crypto --no-default-features --features "aes,sha2,gcm"
 ## Testing
 
 ```bash
-# Run all tests (1748 tests, 40 ignored)
+# Run all tests (1782 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 567 tests (31 ignored) + 15 Wycheproof
+cargo test -p hitls-crypto --all-features   # 593 tests (31 ignored) + 15 Wycheproof
 cargo test -p hitls-tls --all-features      # 612 tests
 cargo test -p hitls-pki --all-features      # 321 tests (1 ignored)
-cargo test -p hitls-bignum                  # 46 tests
+cargo test -p hitls-bignum                  # 48 tests
 cargo test -p hitls-utils                   # 53 tests
-cargo test -p hitls-auth --all-features     # 27 tests
+cargo test -p hitls-auth --all-features     # 33 tests
 cargo test -p hitls-cli --all-features      # 40 tests (5 ignored)
 cargo test -p hitls-integration-tests       # 39 tests (3 ignored)
 
@@ -221,7 +221,7 @@ Convenience feature groups:
 
 ### Completed (Phase 0–50)
 
-All 48+ cryptographic algorithm modules including Ed448/X448/Curve448, X.509 (parse/verify/chain/CRL/OCSP/CSR/cert generation/to_text), PKCS#8, PKCS#12, CMS SignedData (Ed25519/Ed448) + EnvelopedData, TLS 1.3 (full spec: PSK/0-RTT/KeyUpdate/HRR/post-HS auth/cert compression/X25519MLKEM768 hybrid KEM/SM4-GCM/CCM (RFC 8998)), TLS 1.2 (47 suites: ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, Bleichenbacher protection, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, PSK (RFC 4279/5489), OCSP stapling CertificateStatus), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024, 4 suites), DTLCP (DTLS+TLCP, 4 suites), custom extensions framework, NSS key logging, async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), TLS extensions (Record Size Limit RFC 8449, Fallback SCSV RFC 7507, OCSP stapling, SCT RFC 6962), TLS 1.2 PRF, auth protocols (HOTP/TOTP/SPAKE2+/Privacy Pass RFC 9578), PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), ECC curves (P-224/P-521/Brainpool), DRBGs (HMAC/CTR/Hash), CLI tool (14 commands), TCP loopback integration tests, 5000+ Wycheproof edge-case vectors, 10 fuzz targets, and security audit. 1678 tests passing (39 ignored) across 10 crates.
+All 48+ cryptographic algorithm modules including Ed448/X448/Curve448, X.509 (parse/verify/chain/CRL/OCSP/CSR/cert generation/to_text), PKCS#8, PKCS#12, CMS SignedData (Ed25519/Ed448) + EnvelopedData, TLS 1.3 (full spec: PSK/0-RTT/KeyUpdate/HRR/post-HS auth/cert compression/X25519MLKEM768 hybrid KEM/SM4-GCM/CCM (RFC 8998)), TLS 1.2 (47 suites: ECDHE/RSA/DHE_RSA/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20, Bleichenbacher protection, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation indication (RFC 5746), mTLS, PSK (RFC 4279/5489), OCSP stapling CertificateStatus), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024, 4 suites), DTLCP (DTLS+TLCP, 4 suites), custom extensions framework, NSS key logging, async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), TLS extensions (Record Size Limit RFC 8449, Fallback SCSV RFC 7507, OCSP stapling, SCT RFC 6962), TLS 1.2 PRF, auth protocols (HOTP/TOTP/SPAKE2+/Privacy Pass RFC 9578), PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), ECC curves (P-224/P-521/Brainpool), DRBGs (HMAC/CTR/Hash), CLI tool (14 commands), TCP loopback integration tests, 5000+ Wycheproof edge-case vectors, 10 fuzz targets, and security audit. 1782 tests passing (40 ignored) across 10 crates.
 
 ### Completed Migration Phases (Phase 21–39)
 
@@ -606,6 +606,38 @@ All 13 DH groups from RFC 2409, RFC 3526, and RFC 7919 now fully implemented wit
 
 **Scope**: `hitls-utils/src/oid/mod.rs` (+3 OIDs), `hitls-pki/src/x509/mod.rs` (CertificatePolicies + 30 tests), `hitls-pki/src/x509/verify.rs` (+13 tests), `hitls-pki/src/cms/mod.rs` (RSA-PSS verify + 13 tests), `tests/vectors/` (~50 copied test vector files)
 
+#### P2: C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop — DONE
+
+52 new PKI tests: chain verification with real C project certs, CMS real file parsing/verification, PKCS#12 interop, cert parsing edge cases.
+
+#### P3: X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup — DONE
+
+39 new PKI tests: typed extension parsing for EKU/SAN/AKI/SKI/AIA/NameConstraints, EKU enforcement in chain verifier, AKI/SKI issuer matching, CMS SKI signer lookup, Name Constraints enforcement.
+
+#### P5: PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths — DONE
+
+41 new PKI tests: Ed448/SM2/RSA-PSS verify in cert/CRL/OCSP, OCSP verify_signature tests, CRL DER test vectors from C, CMS EnvelopedData error paths.
+
+#### P6: TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness — DONE
+
+24 new tests: TLS 1.3/1.2 export_keying_material (RFC 5705/8446 §7.5), CMS detached SignedData, PKCS#8 Ed448/X448, SPKI parsing, pkeyutl derive/sign/verify.
+
+#### P7: Integration Test Expansion + TLCP Public API + Code Quality — DONE
+
+30 new tests: ML-KEM panic→Result fix, TLCP public handshake-in-memory API, 5 DTLS 1.2 + 4 TLCP + 3 DTLCP + 4 mTLS integration tests, 12 TLS 1.3 server unit tests.
+
+#### P8–P12: Unit Test Coverage Expansion — DONE
+
+175 new tests across P8–P12 phases, systematically covering under-tested modules:
+
+| Phase | Tests | Key Coverage Areas |
+|-------|-------|--------------------|
+| P8 | +40 | X25519 RFC 7748 iterated vectors, HKDF error paths, SM3/SM4 incremental, Base64/PEM negative, anti-replay edges, TLS 1.2 client/DTLS state machines |
+| P9 | +36 | Ed25519 RFC 8032 vectors, ECDSA negative cases, ASN.1 decoder negatives, HMAC RFC 2202/4231, ChaCha20-Poly1305, TLS 1.3/1.2 wrong-state |
+| P10 | +35 | CFB/OFB/ECB/XTS edge cases, ML-KEM/ML-DSA negative, DRBG reseed, GMAC/CMAC NIST vectors, SHA-1 million-a, scrypt/PBKDF2, TLS transcript hash |
+| P11 | +36 | CTR/CCM/GCM/KeyWrap negatives + NIST vectors, DSA wrong-key, HPKE tampered/PSK, HybridKEM, SM3, Entropy health, Privacy Pass |
+| P12 | +34 | RSA cross-padding/OAEP/cross-key, ECDH key validation, SM2 public-only, ElGamal/Paillier ct manipulation, ECC infinity, MD5/SM4/SHA-2/SHA-3/AES edges, BigNum arithmetic, OTP/SPAKE2+ boundaries |
+
 #### Other Identified Gaps (Low Priority / Deferred)
 
 | Category | Item | Priority | Notes |
@@ -627,7 +659,7 @@ All 13 DH groups from RFC 2409, RFC 3526, and RFC 7919 now fully implemented wit
 | Base Support Layer | ~12K | ~2K | **95%** (ASN.1/Base64/PEM/OID/errors) | — |
 | CLI Tools | ~8K | ~2.2K | **100%** (dgst/genpkey/x509/verify/enc/pkey/crl/req/s-client/s-server/list/rand/pkeyutl/speed/pkcs12/mac) | — |
 | FIPS/CMVP | ~5K | ~0.6K | **90%** (state machine, 7 KATs incl. entropy, 3 PCTs, integrity check, feature-gated) | Conditional algorithm disabling |
-| Test Infrastructure | ~20K | ~3.5K | **95%** (1678 tests + 5000+ Wycheproof vectors + 10 fuzz targets + security audit) | SDV compliance tests |
+| Test Infrastructure | ~20K | ~3.5K | **95%** (1782 tests + 5000+ Wycheproof vectors + 10 fuzz targets + security audit) | SDV compliance tests |
 | **Total** | **~460K** | **~52K** | **~99%** (production-ready for modern TLS deployments) | Low-priority items only |
 
 ## Minimum Supported Rust Version
