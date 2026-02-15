@@ -759,7 +759,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // P2: Real C test vector — PKCS#12 file tests
+    // Phase 51: Real C test vector — PKCS#12 file tests
     // -----------------------------------------------------------------------
 
     const P12_1: &[u8] = include_bytes!("../../../../tests/vectors/pkcs12/p12_1.p12");
@@ -903,7 +903,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // P5: PKCS#12 error path + ECDSA round-trip
+    // Phase 54: PKCS#12 error path + ECDSA round-trip
     // -----------------------------------------------------------------------
 
     #[test]

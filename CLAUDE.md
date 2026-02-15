@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: P12 complete — Unit Test Coverage Expansion (RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, AES, BigNum, OTP, SPAKE2+)
+- **Status**: Phase 61 complete — Unit Test Coverage Expansion (RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, AES, BigNum, OTP, SPAKE2+)
 
 ## Workspace Structure
 
@@ -103,7 +103,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-49 + P1-P11 complete (1748 tests, 40 ignored).
+Phases 0-61 complete (1782 tests, 40 ignored).
 
 ### Completed
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
@@ -116,17 +116,17 @@ Phases 0-49 + P1-P11 complete (1748 tests, 40 ignored).
 - Phase 47: CLI Enhancements + CMS DigestedData (pkcs12/mac CLI commands, CMS DigestedData RFC 5652 §5) -- DONE
 - Phase 48: Entropy Health Testing (NIST SP 800-90B RCT+APT, entropy pool, conditioning, noise source trait, DRBG/FIPS integration) -- DONE
 - Phase 49: Ed448 / X448 / Curve448 (GF(2^448-2^224-1) field, Edwards a=1 d=-39081 curve, RFC 8032 Ed448 sign/verify with SHAKE256+dom4, RFC 7748 X448 DH, TLS integration) -- DONE
-- P1: Test Coverage + CMS Ed25519/Ed448 + enc CLI + TLS 1.2 OCSP/SCT (alert/session/record tests, CMS EdDSA signing/verification, multi-cipher enc CLI, TLS 1.2 CertificateStatus message) -- DONE
-- P2: C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop (52 new PKI tests: chain verification with real certs, CMS real file parsing/verification, PKCS#12 interop, cert parsing edge cases) -- DONE
-- P3: X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup (39 new PKI tests: typed extension parsing for EKU/SAN/AKI/SKI/AIA/NameConstraints, EKU enforcement in chain verifier, AKI/SKI issuer matching, CMS SKI signer lookup, Name Constraints enforcement) -- DONE
-- P4: C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests (56 new PKI tests: AKI/SKI chain matching suite, extension edge cases, cert parsing edge cases, CertificatePolicies extension, CMS noattr verification, CMS RSA-PSS support, sig param consistency, CSR parse/verify from C vectors) -- DONE
-- P5: PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths (41 new PKI tests: Ed448/SM2/RSA-PSS verify in cert/CRL/OCSP, OCSP verify_signature tests, CRL DER test vectors from C, CMS EnvelopedData error paths, text/PKCS#12/chain test quality) -- DONE
-- P6: TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness (24 new tests: TLS 1.3/1.2 export_keying_material RFC 5705/8446 §7.5, CMS detached SignedData, PKCS#8 Ed448/X448, SPKI parsing, pkeyutl derive X25519/X448/ECDH + sign/verify ECDSA/Ed448/RSA-PSS) -- DONE
-- P7: Integration Test Expansion + TLCP Public API + Code Quality (30 new tests: ML-KEM panic→Result fix, TLCP public handshake-in-memory API, 5 DTLS 1.2 integration tests, 4 TLCP integration tests, 3 DTLCP integration tests, 4 mTLS integration tests, 12 TLS 1.3 server unit tests) -- DONE
-- P8: Unit Test Coverage Expansion (40 new tests: X25519 RFC 7748 §5.2 iterated vectors, HKDF from_prk/error paths, SM3/SM4 incremental+1M iteration vectors, Base64 negative tests, PEM negative tests, anti-replay window edge cases, TLS 1.2 client12 wrong-state/KX/ticket tests, DTLS 1.2 client HVR/wrong-state tests, DTLS 1.2 server cookie retry/wrong-cookie tests) -- DONE
-- P9: Unit Test Coverage Expansion (36 new tests: Ed25519 RFC 8032 vectors + error paths, ECDSA negative cases, ASN.1 decoder negative tests, HMAC RFC 2202/4231 vectors, ChaCha20-Poly1305 edge cases, TLS 1.3 client wrong-state tests, TLS 1.2 server wrong-state tests) -- DONE
-- P10: Unit Test Coverage Expansion (35 new tests: CFB/OFB/ECB/XTS cipher mode edge cases, ML-KEM failure/implicit rejection, ML-DSA corruption/wrong key, DRBG reseed divergence, SipHash key validation, GMAC/CMAC NIST vectors + error paths, SHA-1 reset/million-a, scrypt/PBKDF2 validation, TLS transcript hash SHA-384/replace_with_message_hash) -- DONE
-- P11: Unit Test Coverage Expansion (36 new tests: CTR invalid nonce/key + AES-256 NIST vector, CCM nonce/tag validation + tampered tag, AES Key Wrap short/non-aligned/corrupted + RFC 3394 §4.6, GCM invalid key + AES-256 NIST Case 14 + empty-pt-with-AAD, DSA wrong key/public-only/different digest, HPKE tampered ct/wrong AAD/PSK roundtrip/empty PSK rejection, HybridKEM cross-key/ct-length/multiple-encap, SM3 reset-reuse/block-boundary, Entropy zero-len/large/multiple-small/disabled-health/pool-min-capacity/partial-pop/RCT-reset, Privacy Pass wrong-challenge/empty-key/wire-roundtrip) -- DONE
-- P12: Unit Test Coverage Expansion (34 new tests: RSA cross-padding/OAEP-length/cross-key, ECDH zero/large/format/self-DH, SM2 public-only sign/decrypt + corrupted sig, ElGamal truncated/tampered ct, Paillier invalid-ct/triple-homomorphic, ECC scalar-mul-zero/point-add-negate, MD5 reset/boundary, SM4 consecutive-roundtrip/all-FF, SHA-256 reset/SHA-384 incremental/SHA-512 boundary, SHA-3 reset/SHAKE multi-squeeze, AES invalid-block-length, BigNum div-by-one/sqr-mul-consistency, HOTP empty-secret/1-digit/TOTP-boundary, SPAKE2+ setup-before-generate/empty-password/invalid-share) -- DONE
+- Phase 50: Test Coverage + CMS Ed25519/Ed448 + enc CLI + TLS 1.2 OCSP/SCT (alert/session/record tests, CMS EdDSA signing/verification, multi-cipher enc CLI, TLS 1.2 CertificateStatus message) -- DONE
+- Phase 51: C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop (52 new PKI tests: chain verification with real certs, CMS real file parsing/verification, PKCS#12 interop, cert parsing edge cases) -- DONE
+- Phase 52: X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup (39 new PKI tests: typed extension parsing for EKU/SAN/AKI/SKI/AIA/NameConstraints, EKU enforcement in chain verifier, AKI/SKI issuer matching, CMS SKI signer lookup, Name Constraints enforcement) -- DONE
+- Phase 53: C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests (56 new PKI tests: AKI/SKI chain matching suite, extension edge cases, cert parsing edge cases, CertificatePolicies extension, CMS noattr verification, CMS RSA-PSS support, sig param consistency, CSR parse/verify from C vectors) -- DONE
+- Phase 54: PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths (41 new PKI tests: Ed448/SM2/RSA-PSS verify in cert/CRL/OCSP, OCSP verify_signature tests, CRL DER test vectors from C, CMS EnvelopedData error paths, text/PKCS#12/chain test quality) -- DONE
+- Phase 55: TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness (24 new tests: TLS 1.3/1.2 export_keying_material RFC 5705/8446 §7.5, CMS detached SignedData, PKCS#8 Ed448/X448, SPKI parsing, pkeyutl derive X25519/X448/ECDH + sign/verify ECDSA/Ed448/RSA-PSS) -- DONE
+- Phase 56: Integration Test Expansion + TLCP Public API + Code Quality (30 new tests: ML-KEM panic→Result fix, TLCP public handshake-in-memory API, 5 DTLS 1.2 integration tests, 4 TLCP integration tests, 3 DTLCP integration tests, 4 mTLS integration tests, 12 TLS 1.3 server unit tests) -- DONE
+- Phase 57: Unit Test Coverage Expansion (40 new tests: X25519 RFC 7748 §5.2 iterated vectors, HKDF from_prk/error paths, SM3/SM4 incremental+1M iteration vectors, Base64 negative tests, PEM negative tests, anti-replay window edge cases, TLS 1.2 client12 wrong-state/KX/ticket tests, DTLS 1.2 client HVR/wrong-state tests, DTLS 1.2 server cookie retry/wrong-cookie tests) -- DONE
+- Phase 58: Unit Test Coverage Expansion (36 new tests: Ed25519 RFC 8032 vectors + error paths, ECDSA negative cases, ASN.1 decoder negative tests, HMAC RFC 2202/4231 vectors, ChaCha20-Poly1305 edge cases, TLS 1.3 client wrong-state tests, TLS 1.2 server wrong-state tests) -- DONE
+- Phase 59: Unit Test Coverage Expansion (35 new tests: CFB/OFB/ECB/XTS cipher mode edge cases, ML-KEM failure/implicit rejection, ML-DSA corruption/wrong key, DRBG reseed divergence, SipHash key validation, GMAC/CMAC NIST vectors + error paths, SHA-1 reset/million-a, scrypt/PBKDF2 validation, TLS transcript hash SHA-384/replace_with_message_hash) -- DONE
+- Phase 60: Unit Test Coverage Expansion (36 new tests: CTR invalid nonce/key + AES-256 NIST vector, CCM nonce/tag validation + tampered tag, AES Key Wrap short/non-aligned/corrupted + RFC 3394 §4.6, GCM invalid key + AES-256 NIST Case 14 + empty-pt-with-AAD, DSA wrong key/public-only/different digest, HPKE tampered ct/wrong AAD/PSK roundtrip/empty PSK rejection, HybridKEM cross-key/ct-length/multiple-encap, SM3 reset-reuse/block-boundary, Entropy zero-len/large/multiple-small/disabled-health/pool-min-capacity/partial-pop/RCT-reset, Privacy Pass wrong-challenge/empty-key/wire-roundtrip) -- DONE
+- Phase 61: Unit Test Coverage Expansion (34 new tests: RSA cross-padding/OAEP-length/cross-key, ECDH zero/large/format/self-DH, SM2 public-only sign/decrypt + corrupted sig, ElGamal truncated/tampered ct, Paillier invalid-ct/triple-homomorphic, ECC scalar-mul-zero/point-add-negate, MD5 reset/boundary, SM4 consecutive-roundtrip/all-FF, SHA-256 reset/SHA-384 incremental/SHA-512 boundary, SHA-3 reset/SHAKE multi-squeeze, AES invalid-block-length, BigNum div-by-one/sqr-mul-consistency, HOTP empty-secret/1-digit/TOTP-boundary, SPAKE2+ setup-before-generate/empty-password/invalid-share) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

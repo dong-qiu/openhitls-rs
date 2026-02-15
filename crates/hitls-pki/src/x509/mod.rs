@@ -2494,7 +2494,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P2: Real C test vector — certificate parsing edge cases
+    // Phase 51: Real C test vector — certificate parsing edge cases
     // -----------------------------------------------------------------------
 
     const CERTCHECK_V0: &[u8] =
@@ -2620,7 +2620,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P3: Typed extension parsing tests
+    // Phase 52: Typed extension parsing tests
     // -----------------------------------------------------------------------
 
     #[test]
@@ -2878,7 +2878,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P4: Extension edge cases + cert parsing edge cases
+    // Phase 53: Extension edge cases + cert parsing edge cases
     // -----------------------------------------------------------------------
 
     const CERTCHECK_ZERO_SERIAL: &[u8] =
@@ -3129,7 +3129,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P4: CertificatePolicies extension parsing tests
+    // Phase 53: CertificatePolicies extension parsing tests
     // -----------------------------------------------------------------------
 
     const POLICY_CRITICAL_DER: &[u8] =
@@ -3227,7 +3227,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P4: CSR parsing tests from C test vectors
+    // Phase 53: CSR parsing tests from C test vectors
     // -----------------------------------------------------------------------
 
     const CSR_RSA_SHA256: &str =
@@ -3357,7 +3357,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P5: Ed448, SM2, RSA-PSS signature verification tests
+    // Phase 54: Ed448, SM2, RSA-PSS signature verification tests
     // -----------------------------------------------------------------------
 
     #[test]

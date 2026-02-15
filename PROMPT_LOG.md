@@ -1407,15 +1407,15 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ---
 
-## P1: Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT (2026-02-14)
+## Phase 50: Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT (2026-02-14)
 
-**Prompt**: Implement P1 — (1) Add unit tests for alert/session/record TLS modules (zero tests previously), (2) Wire CMS Ed25519/Ed448 signature verification (was returning "not yet supported"), (3) Expand enc CLI to support aes-128-gcm, chacha20-poly1305, sm4-gcm, (4) Implement TLS 1.2 OCSP stapling CertificateStatus message (RFC 6066).
+**Prompt**: Implement Phase 50 — (1) Add unit tests for alert/session/record TLS modules (zero tests previously), (2) Wire CMS Ed25519/Ed448 signature verification (was returning "not yet supported"), (3) Expand enc CLI to support aes-128-gcm, chacha20-poly1305, sm4-gcm, (4) Implement TLS 1.2 OCSP stapling CertificateStatus message (RFC 6066).
 
 **Result**: 71 new tests (tls +62: 8 alert, 21 session, 23 record, 6 codec12, 4 server12; pki +3: CMS Ed25519/Ed448; cli +6: enc cipher variants). CMS Ed25519/Ed448 signing+verification now functional. enc CLI supports 4 ciphers via `--cipher` flag. TLS 1.2 CertificateStatus (HS type 22) implemented server+client side, sync+async. Key bug: ChaCha20-Poly1305 uses struct API not standalone functions.
 
 1362 total tests (37 ignored). Clippy clean, fmt clean.
 
-## P2: C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop (2026-02-14)
+## Phase 51: C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop (2026-02-14)
 
 **Prompt**: Port real C test vectors to improve PKI test coverage. Part 1: 25 chain verification tests (certVer, bcExt, time, eku suites). Part 2: 12 CMS SignedData real file tests (parsing, verification, failure). Part 3: 8 PKCS#12 real file tests. Part 4: 10 certificate parsing edge cases (v1/v3, negative serial, SAN, KU, EKU, BC).
 
@@ -1423,7 +1423,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1414 total tests (37 ignored). Clippy clean, fmt clean.
 
-## P3: X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup (2026-02-14)
+## Phase 52: X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup (2026-02-14)
 
 **Prompt**: Implement typed X.509 extension parsing (EKU, SAN, AKI, SKI, AIA, NameConstraints), EKU enforcement in CertificateVerifier, AKI/SKI-based issuer matching, CMS SubjectKeyIdentifier signer lookup, and Name Constraints enforcement. 5 parts, expected ~40 new tests.
 
@@ -1431,7 +1431,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1453 total tests (37 ignored). Clippy clean, fmt clean.
 
-## P4: C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests (2026-02-14)
+## Phase 53: C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests (2026-02-14)
 
 **Prompt**: Port additional C test vectors: AKI/SKI matching suite (15 PEM files), extension edge cases (duplicate extensions, malformed values), cert parsing edge cases (zero/large serial, missing fields, string encodings), CertificatePolicies extension parsing, CMS chain and noattr tests, signature parameter consistency, CSR parse/verify. 5 parts, expected ~45 new tests.
 
@@ -1439,7 +1439,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1509 total tests (37 ignored). Clippy clean, fmt clean.
 
-## P5: PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths (2026-02-14)
+## Phase 54: PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths (2026-02-14)
 
 **Prompt**: Wire Ed448/SM2/RSA-PSS signature verification into PKI cert/CRL/OCSP verify paths; add OCSP verify_signature tests (zero coverage); port CRL DER test vectors from C codebase (ECDSA + RSA); add CMS EnvelopedData error path tests (negative cases); improve test quality for text output, PKCS#12 error paths, chain verification with new algorithms. 5 parts, expected ~44 new tests.
 
@@ -1447,7 +1447,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1550 total tests (37 ignored). Clippy clean, fmt clean.
 
-## P6: TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness (2026-02-14)
+## Phase 55: TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness (2026-02-14)
 
 **Prompt**: Implement RFC 5705 / RFC 8446 §7.5 key material export on all TLS connection types (TLS 1.3 and 1.2, client and server). Add CMS detached SignedData mode (`sign_detached()`). Complete `pkeyutl derive` for X25519/X448/ECDH key agreement. Expand `pkeyutl sign/verify` for ECDSA, Ed448, RSA-PSS. Add PKCS#8 Ed448/X448 parsing + SPKI public key parsing. 4 parts, expected ~24 new tests.
 
@@ -1455,7 +1455,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1574 total tests (37 ignored). Clippy clean, fmt clean.
 
-## P7: Integration Test Expansion + TLCP Public API + Code Quality (2026-02-14)
+## Phase 56: Integration Test Expansion + TLCP Public API + Code Quality (2026-02-14)
 
 **Prompt**: Fix `panic!()` in ML-KEM `sample_cbd()`. Add public TLCP handshake-in-memory API matching DTLS12/DTLCP patterns. Add integration tests for DTLS 1.2 (5), TLCP (4), DTLCP (3), and mTLS (4). Add TLS 1.3 server handshake unit tests (12). Update interop Cargo.toml with dtls12/tlcp/dtlcp/sm2/sm4 features. 8 parts, expected ~28 new tests.
 
@@ -1463,7 +1463,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1604 total tests (37 ignored). Clippy clean, fmt clean.
 
-## P8: Unit Test Coverage Expansion (2026-02-14)
+## Phase 57: Unit Test Coverage Expansion (2026-02-14)
 
 **Prompt**: Add 40 unit tests across 10 files covering under-tested modules: X25519 RFC 7748 §5.2 iterated vectors (+4), HKDF from_prk/error paths (+3), SM3/SM4 incremental+1M iteration vectors (+5, 2 ignored), Base64 negative tests (+5), PEM negative tests (+5), anti-replay window edge cases (+3), TLS 1.2 client12 wrong-state/KX/ticket tests (+8), DTLS 1.2 client HVR/wrong-state tests (+4), DTLS 1.2 server cookie retry/wrong-cookie tests (+3).
 
@@ -1471,7 +1471,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1642 total tests (39 ignored). Clippy clean, fmt clean.
 
-## P9: Unit Test Coverage Expansion — Crypto RFC Vectors + ASN.1 Negative Tests + TLS State Machine (2026-02-15)
+## Phase 58: Unit Test Coverage Expansion — Crypto RFC Vectors + ASN.1 Negative Tests + TLS State Machine (2026-02-15)
 
 **Prompt**: Add 36 unit tests across 7 files covering under-tested modules: Ed25519 RFC 8032 Test Vector 3 + large message roundtrip + wrong seed/pubkey length (+4), ECDSA verify r=0/s=0/r>=n/trailing DER/private key zero (+5), ASN.1 decoder negative tests: empty/truncated/indefinite/oversized/wrong tag/invalid UTF-8/odd BMP/read past end (+8), HMAC SHA-1 RFC 2202 cases 1+2 + SHA-384/SHA-512 RFC 4231 + empty message (+5), ChaCha20-Poly1305 empty AAD/empty both/invalid key/invalid nonce (+4), TLS 1.3 client CertificateVerify/Finished/CompressedCertificate/NST wrong state + supported_versions check (+5), TLS 1.2 server CKE/CCS/Finished/Certificate wrong state from Idle + accessor methods (+5).
 
@@ -1479,7 +1479,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1678 total tests (39 ignored). Clippy clean, fmt clean.
 
-## P10: Unit Test Coverage Expansion — Cipher Modes, PQC Negative Tests, DRBG State, MAC Algorithms, Transcript Hash (2026-02-15)
+## Phase 59: Unit Test Coverage Expansion — Cipher Modes, PQC Negative Tests, DRBG State, MAC Algorithms, Transcript Hash (2026-02-15)
 
 **Prompt**: Add 35 unit tests across 16 files covering under-tested modules: CFB invalid IV length + AES-256 roundtrip (+2), OFB invalid IV length (+1), ECB AES-256 NIST vector (+1), XTS too-short plaintext (+1), ML-KEM wrong ciphertext length + cross-key implicit rejection + 1024 tampered last byte + pub-only decapsulate panic (+4), ML-DSA wrong sig length + corrupted sig + wrong key verify + empty message + large message (+5), HMAC-DRBG reseed diverges + additional input changes output (+2), CTR-DRBG reseed diverges (+1), Hash-DRBG reseed diverges (+1), SipHash invalid key length + empty input reference vector + long input split (+3), GMAC update after finalize + finish output too small (+2), CMAC AES-256 NIST SP 800-38B + incremental various splits + finish output too small (+3), SHA-1 reset and reuse + million-a (#[ignore]) (+2), scrypt zero dk_len (+1), PBKDF2 single byte output + deterministic (+2), TLS transcript hash replace_with_message_hash + SHA-384 factory + hash_len check + empty update (+4).
 
@@ -1487,7 +1487,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1712 total tests (40 ignored). Clippy clean, fmt clean.
 
-## P11: Unit Test Coverage Expansion — CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3, Entropy, Privacy Pass (2026-02-15)
+## Phase 60: Unit Test Coverage Expansion — CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3, Entropy, Privacy Pass (2026-02-15)
 
 **Prompt**: Add 36 unit tests across 12 files covering under-tested modules: CTR invalid nonce/key + AES-256 NIST roundtrip (+3), CCM nonce too short/long + invalid tag lengths + tampered tag (+4), AES Key Wrap too-short/non-aligned/corrupted + RFC 3394 §4.6 (+4), GCM invalid key + NIST Case 14 AES-256 + empty-pt-with-AAD (+3), DSA wrong key/public-only sign/different digest (+3), HPKE tampered ct/wrong AAD/PSK roundtrip/empty PSK (+4), HybridKEM cross-key/ct-length/multiple-encap (+3), SM3 reset-reuse/block-boundary (+2), Entropy zero-len/large/multiple-small/disabled-health (+4), Pool min-capacity/partial-pop (+2), Health RCT-reset (+1), Privacy Pass wrong-challenge/empty-key/wire-roundtrip (+3).
 
@@ -1495,7 +1495,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1748 total tests (40 ignored). Clippy clean, fmt clean.
 
-## P12: Unit Test Coverage Expansion — RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, AES, BigNum, OTP, SPAKE2+ (2026-02-15)
+## Phase 61: Unit Test Coverage Expansion — RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, AES, BigNum, OTP, SPAKE2+ (2026-02-15)
 
 **Prompt**: Add 34 unit tests across 14 files covering security-critical error paths, API boundary conditions, and reset/reuse patterns: RSA cross-padding/OAEP-length/cross-key (+3), ECDH zero/large/format/self-DH (+4), SM2 public-only sign/decrypt + corrupted sig (+3), ElGamal truncated/tampered ct (+2), Paillier invalid-ct/triple-homomorphic (+2), ECC scalar-mul-zero/point-add-negate (+2), MD5 reset/boundary (+2), SM4 consecutive-roundtrip/all-FF (+2), SHA-2 reset/incremental/boundary (+3), SHA-3 reset/multi-squeeze (+2), AES invalid-block-length (+1), BigNum div-by-one/sqr-mul-consistency (+2), HOTP empty-secret/1-digit/TOTP-boundary (+3), SPAKE2+ setup-before-generate/empty-password/invalid-share (+3).
 

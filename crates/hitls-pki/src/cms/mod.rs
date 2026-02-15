@@ -1645,7 +1645,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // P2: Real C test vector — CMS SignedData tests
+    // Phase 51: Real C test vector — CMS SignedData tests
     // -----------------------------------------------------------------------
 
     const CMS_CA_CERT: &str = include_str!("../../../../tests/vectors/cms/ca_cert.pem");
@@ -1793,7 +1793,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // P3: CMS SubjectKeyIdentifier signer lookup
+    // Phase 52: CMS SubjectKeyIdentifier signer lookup
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1894,7 +1894,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // P4: CMS NoAttr (no signed attributes) tests
+    // Phase 53: CMS NoAttr (no signed attributes) tests
     // -----------------------------------------------------------------------
 
     const NOATTR_CA_CERT: &str = include_str!("../../../../tests/vectors/cms/noattr/ca_cert.pem");
@@ -2029,7 +2029,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // P4: CMS Chain cert tests
+    // Phase 53: CMS Chain cert tests
     // -----------------------------------------------------------------------
 
     const CHAIN_ROOT_CRT: &str = include_str!("../../../../tests/vectors/cms/chain/root_ca.crt");

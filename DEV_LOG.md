@@ -4471,7 +4471,7 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - Formatting: clean (`cargo fmt --check`)
 - 1157 workspace tests passing (37 ignored), +87 new tests
 
-## P1: Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT (Session 2026-02-14)
+## Phase 50: Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT (Session 2026-02-14)
 
 ### Goals
 - Add unit tests for three untested TLS modules (alert, session, record)
@@ -4537,15 +4537,15 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 ### Build Status
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
-- 1362 workspace tests passing (37 ignored), +71 new tests from P1
+- 1362 workspace tests passing (37 ignored), +71 new tests from Phase 50
 
-> **Note**: The jump from Phase 49 (1157) to P1 (1362) reflects +71 P1 tests plus ~134 tests
-> from earlier phases whose counts were retroactively corrected during the Phase 49 → P1 session
+> **Note**: The jump from Phase 49 (1157) to Phase 50 (1362) reflects +71 Phase 50 tests plus ~134 tests
+> from earlier phases whose counts were retroactively corrected during the Phase 49 → Phase 50 session
 > (test helper refactors, feature-flag fixes, and ignored-test reclassification).
 
 ---
 
-## P2: C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop (Session 2026-02-14)
+## Phase 51: C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop (Session 2026-02-14)
 
 ### Goals
 Port real test vectors from the C project to improve PKI test coverage with real-world certificate chains, CMS files, and PKCS#12 containers.
@@ -4598,7 +4598,7 @@ Tests added to `x509/mod.rs`:
 
 **Bug fix**: `test_parse_negative_serial` — cert has serial `00 FF` (DER padding to keep positive). Fixed assertion to strip leading zero before checking value byte.
 
-### Test Counts (P2)
+### Test Counts (Phase 51)
 - **hitls-pki**: 177 (from 125), +52 new tests
 - **Total workspace**: 1414 (from 1362), +52 new tests, 37 ignored
 
@@ -4609,7 +4609,7 @@ Tests added to `x509/mod.rs`:
 
 ---
 
-## P3: X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup
+## Phase 52: X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup
 
 ### Overview
 Added typed parsing and enforcement for critical RFC 5280 X.509 extensions. This phase significantly improves real-world PKI compliance by adding EKU enforcement, AKI/SKI-based issuer matching, CMS SubjectKeyIdentifier signer lookup, and Name Constraints enforcement.
@@ -4656,7 +4656,7 @@ Added `validate_name_constraints()` to chain verification. When an intermediate 
 | `hitls-pki/src/x509/verify.rs` | EKU enforcement, AKI/SKI matching, NC enforcement, +21 tests |
 | `hitls-pki/src/cms/mod.rs` | SKI signer lookup, +4 tests |
 
-### Test Counts (P3)
+### Test Counts (Phase 52)
 - **hitls-pki**: 216 (from 177), +39 new tests
 - **Total workspace**: 1453 (from 1414), +39 new tests, 37 ignored
 
@@ -4667,7 +4667,7 @@ Added `validate_name_constraints()` to chain verification. When an intermediate 
 
 ---
 
-## P4: C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests
+## Phase 53: C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests
 
 ### Date: 2026-02-14
 
@@ -4734,7 +4734,7 @@ Ported additional C test vectors for certificate parsing edge cases, AKI/SKI cha
 | `hitls-pki/src/cms/mod.rs` | RSA-PSS verify support + 13 tests (noattr + chain) |
 | `tests/vectors/` | ~50 test vector files copied from C codebase |
 
-### Test Counts (P4)
+### Test Counts (Phase 53)
 - **hitls-pki**: 272 (from 216), +56 new tests
 - **Total workspace**: 1509 (from 1453), +56 new tests, 37 ignored
 
@@ -4745,7 +4745,7 @@ Ported additional C test vectors for certificate parsing edge cases, AKI/SKI cha
 
 ---
 
-## P5: PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths
+## Phase 54: PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths
 
 ### Goal
 Wire Ed448, SM2, and RSA-PSS signature verification into PKI cert/CRL/OCSP verify paths. Add OCSP verify_signature tests (previously zero coverage). Port CRL DER test vectors from C codebase. Add CMS EnvelopedData error path tests. Improve test quality across text output, PKCS#12, and chain verification.
@@ -4815,7 +4815,7 @@ Copied 6 DER files from C codebase:
 | `tests/vectors/crl/ecdsa/` | +3 DER files from C codebase |
 | `tests/vectors/crl/rsa_der/` | +3 DER files from C codebase |
 
-### Test Counts (P5)
+### Test Counts (Phase 54)
 - **hitls-pki**: 313 (from 272), +41 new tests
 - **Total workspace**: 1550 (from 1509), +41 new tests, 37 ignored
 
@@ -4826,7 +4826,7 @@ Copied 6 DER files from C codebase:
 
 ---
 
-## P6: TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness (2026-02-14)
+## Phase 55: TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness (2026-02-14)
 
 ### Goals
 Implement RFC 5705 / RFC 8446 §7.5 key material export on all TLS connection types, add CMS detached SignedData mode, complete pkeyutl CLI (derive, sign/verify expansion), and extend PKCS#8 for Ed448/X448 + SPKI public key parsing.
@@ -4905,7 +4905,7 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 | `hitls-cli/src/s_server.rs` | +Ed448/X448 in pkcs8_to_server_key |
 | `hitls-cli/Cargo.toml` | +ecdh, ed448, x448 features |
 
-### Test Counts (P6)
+### Test Counts (Phase 55)
 - **hitls-tls**: 568 (from 558), +10 new tests
 - **hitls-pki**: 321 (from 313), +8 new tests (4 CMS detached + 4 PKCS#8/SPKI)
 - **hitls-cli**: 40 (from 32), +8 new tests (4 derive + 4 sign/verify)
@@ -4918,7 +4918,7 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 
 ---
 
-## P7: Integration Test Expansion + TLCP Public API + Code Quality (Session 2026-02-14)
+## Phase 56: Integration Test Expansion + TLCP Public API + Code Quality (Session 2026-02-14)
 
 ### Goals
 - Fix `panic!()` in ML-KEM production library code
@@ -4994,7 +4994,7 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 | `tests/interop/Cargo.toml` | +dtls12, tlcp, dtlcp, sm2, sm4 features |
 | `tests/interop/src/lib.rs` | +16 integration tests (5 DTLS + 4 TLCP + 3 DTLCP + 4 mTLS), +helpers |
 
-### Test Counts (P7)
+### Test Counts (Phase 56)
 - **hitls-tls**: 580 (from 568), +12 new server unit tests
 - **hitls-integration-tests**: 39 (from 23), +16 new integration tests
 - **Total workspace**: 1604 (from 1574), +30 new tests, 37 ignored
@@ -5008,7 +5008,7 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 - Formatting: clean (`cargo fmt --check`)
 - 1604 workspace tests passing (37 ignored)
 
-## P8: Unit Test Coverage Expansion (Session 2026-02-14)
+## Phase 57: Unit Test Coverage Expansion (Session 2026-02-14)
 
 ### Goals
 - Expand unit test coverage for under-tested modules
@@ -5106,7 +5106,7 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 
 ---
 
-## P9: Unit Test Coverage Expansion — Crypto RFC Vectors + ASN.1 Negative Tests + TLS State Machine (Session 2026-02-15)
+## Phase 58: Unit Test Coverage Expansion — Crypto RFC Vectors + ASN.1 Negative Tests + TLS State Machine (Session 2026-02-15)
 
 ### Goals
 - Add RFC test vectors and negative tests for under-tested crypto modules (Ed25519, ECDSA, HMAC, ChaCha20-Poly1305)
@@ -5203,7 +5203,7 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 
 ---
 
-## P10: Unit Test Coverage Expansion — Cipher Modes, PQC Negative Tests, DRBG State, MAC Algorithms, Transcript Hash (Session 2026-02-15)
+## Phase 59: Unit Test Coverage Expansion — Cipher Modes, PQC Negative Tests, DRBG State, MAC Algorithms, Transcript Hash (Session 2026-02-15)
 
 ### Goals
 - Add negative/edge tests for cipher modes (CFB, OFB, ECB, XTS)
@@ -5307,7 +5307,7 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 
 ---
 
-## P11: Unit Test Coverage Expansion — CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3, Entropy, Privacy Pass
+## Phase 60: Unit Test Coverage Expansion — CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3, Entropy, Privacy Pass
 
 ### Date: 2026-02-15
 
@@ -5331,7 +5331,7 @@ Added 36 new tests across 12 files, expanding negative/edge-case coverage for mo
 | `hitls-crypto/src/entropy/health.rs` | +1 | RCT reset prevents failure (feed stuck data, reset, feed again → no failure) |
 | `hitls-auth/src/privpass/mod.rs` | +3 | Wrong challenge verify → Ok(false), empty key/n/e/d rejected, TokenType wire format roundtrip + invalid [0xFF,0xFF] |
 
-### Test Counts (P11)
+### Test Counts (Phase 60)
 - **hitls-crypto**: 567 (31 ignored) + 15 Wycheproof [was: 534]
 - **hitls-auth**: 27 [was: 24]
 - **Total workspace**: 1748 (40 ignored) [was: 1712]
@@ -5343,7 +5343,7 @@ Added 36 new tests across 12 files, expanding negative/edge-case coverage for mo
 
 ---
 
-## P12: Unit Test Coverage Expansion — RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, AES, BigNum, OTP, SPAKE2+ (Session 2026-02-15)
+## Phase 61: Unit Test Coverage Expansion — RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, AES, BigNum, OTP, SPAKE2+ (Session 2026-02-15)
 
 ### Goals
 - Add 34 new tests across 14 files covering security-critical error paths, API boundary conditions, and reset/reuse patterns
@@ -5367,7 +5367,7 @@ Added 36 new tests across 12 files, expanding negative/edge-case coverage for mo
 | `hitls-auth/src/otp/mod.rs` | +3 | Empty secret HOTP, 1-digit OTP range, TOTP period boundary (t=29 vs t=30) |
 | `hitls-auth/src/spake2plus/mod.rs` | +3 | generate_share before setup → error, empty password succeeds, invalid share → error |
 
-### Test Counts (P12)
+### Test Counts (Phase 61)
 - **hitls-crypto**: 593 (31 ignored) + 15 Wycheproof [was: 567]
 - **hitls-bignum**: 48 [was: 46]
 - **hitls-auth**: 33 [was: 27]

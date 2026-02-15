@@ -805,7 +805,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // P5: OCSP verify_signature tests
+    // Phase 54: OCSP verify_signature tests
     // -----------------------------------------------------------------------
 
     /// Build a properly signed OCSP response for testing.

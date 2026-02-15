@@ -874,7 +874,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // P5: CMS EnvelopedData error path tests
+    // Phase 54: CMS EnvelopedData error path tests
     // -----------------------------------------------------------------------
 
     #[test]

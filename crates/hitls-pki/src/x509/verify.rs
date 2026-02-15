@@ -939,7 +939,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P2: bcExt suite — BasicConstraints enforcement
+    // Phase 51: bcExt suite — BasicConstraints enforcement
     // -----------------------------------------------------------------------
 
     const BC_ROOT: &str = include_str!("../../../../tests/vectors/chain/bcExt/bc_root_general.pem");
@@ -1028,7 +1028,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P2: depth_suite — chain depth tests
+    // Phase 51: depth_suite — chain depth tests
     // -----------------------------------------------------------------------
 
     const DEPTH_ROOT: &str =
@@ -1087,7 +1087,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P2: time suite — certificate validity period tests
+    // Phase 51: time suite — certificate validity period tests
     // -----------------------------------------------------------------------
 
     const TIME_ROOT_CURRENT: &[u8] =
@@ -1160,7 +1160,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P2: eku suite — Extended Key Usage parsing tests
+    // Phase 51: eku suite — Extended Key Usage parsing tests
     // -----------------------------------------------------------------------
 
     const EKU_ROOTCA: &[u8] =
@@ -1228,7 +1228,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P3: EKU enforcement tests
+    // Phase 52: EKU enforcement tests
     // -----------------------------------------------------------------------
 
     fn eku_chain_verifier() -> CertificateVerifier {
@@ -1354,7 +1354,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P3: AKI/SKI chain matching tests
+    // Phase 52: AKI/SKI chain matching tests
     // -----------------------------------------------------------------------
 
     fn make_dn(cn: &str) -> DistinguishedName {
@@ -1570,7 +1570,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P3: Name Constraints enforcement tests
+    // Phase 52: Name Constraints enforcement tests
     // -----------------------------------------------------------------------
 
     /// Build a CA cert with NameConstraints and an EE cert, returns (ca, ee).
@@ -1828,7 +1828,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P4: AKI/SKI C test vector suite
+    // Phase 53: AKI/SKI C test vector suite
     // -----------------------------------------------------------------------
 
     const AKISKI_ROOT: &str =
@@ -2048,7 +2048,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P4: Signature parameter consistency tests
+    // Phase 53: Signature parameter consistency tests
     // -----------------------------------------------------------------------
 
     const SIGPARAM_RSA_ROOT: &str =
@@ -2098,7 +2098,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
     }
 
     // -----------------------------------------------------------------------
-    // P5: Additional chain verification quality tests
+    // Phase 54: Additional chain verification quality tests
     // -----------------------------------------------------------------------
 
     #[test]
