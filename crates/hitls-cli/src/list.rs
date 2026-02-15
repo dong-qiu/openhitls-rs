@@ -104,6 +104,7 @@ fn print_tls13_suites() {
         "TLS_AES_256_GCM_SHA384 (0x1302)",
         "TLS_CHACHA20_POLY1305_SHA256 (0x1303)",
         "TLS_AES_128_CCM_SHA256 (0x1304)",
+        "TLS_AES_128_CCM_8_SHA256 (0x1305)",
     ] {
         println!("  {name}");
     }
@@ -124,6 +125,12 @@ fn print_tls12_suites() {
         "TLS_DHE_RSA_WITH_AES_256_CCM (0xC09F)",
         "TLS_ECDHE_ECDSA_WITH_AES_128_CCM (0xC0AC)",
         "TLS_ECDHE_ECDSA_WITH_AES_256_CCM (0xC0AD)",
+        "TLS_RSA_WITH_AES_128_CCM_8 (0xC0A0)",
+        "TLS_RSA_WITH_AES_256_CCM_8 (0xC0A1)",
+        "TLS_PSK_WITH_AES_256_CCM (0xC0A5)",
+        "TLS_DHE_PSK_WITH_AES_128_CCM (0xC0A6)",
+        "TLS_DHE_PSK_WITH_AES_256_CCM (0xC0A7)",
+        "TLS_ECDHE_PSK_WITH_AES_128_CCM_SHA256 (0xD005)",
     ] {
         println!("  {name}");
     }

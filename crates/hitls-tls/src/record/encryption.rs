@@ -528,4 +528,46 @@ mod tests {
         let result = dec.decrypt_record(&tampered);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_encrypt_decrypt_roundtrip_aes128ccm8() {
+        let keys = make_keys_128();
+        let suite = CipherSuite::TLS_AES_128_CCM_8_SHA256;
+        let mut enc = RecordEncryptor::new(suite, &keys).unwrap();
+        let mut dec = RecordDecryptor::new(suite, &keys).unwrap();
+
+        let plaintext = b"hello TLS 1.3 CCM_8";
+        let record = enc
+            .encrypt_record(ContentType::Handshake, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        assert_eq!(record.version, TLS13_LEGACY_VERSION);
+        // ciphertext = inner_plaintext(19 + 1) + tag(8) = 28
+        assert_eq!(record.fragment.len(), plaintext.len() + 1 + 8);
+
+        let (ct, pt) = dec.decrypt_record(&record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        assert_eq!(pt, plaintext);
+    }
+
+    #[test]
+    fn test_ccm8_multiple_records() {
+        let keys = make_keys_128();
+        let suite = CipherSuite::TLS_AES_128_CCM_8_SHA256;
+        let mut enc = RecordEncryptor::new(suite, &keys).unwrap();
+        let mut dec = RecordDecryptor::new(suite, &keys).unwrap();
+
+        for i in 0..5u8 {
+            let plaintext = vec![i; 100];
+            let record = enc
+                .encrypt_record(ContentType::ApplicationData, &plaintext)
+                .unwrap();
+            let (ct, pt) = dec.decrypt_record(&record).unwrap();
+            assert_eq!(ct, ContentType::ApplicationData);
+            assert_eq!(pt, plaintext);
+        }
+        assert_eq!(enc.sequence_number(), 5);
+        assert_eq!(dec.sequence_number(), 5);
+    }
 }

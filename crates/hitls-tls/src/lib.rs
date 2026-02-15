@@ -44,6 +44,8 @@ impl CipherSuite {
     pub const TLS_CHACHA20_POLY1305_SHA256: Self = Self(0x1303);
     pub const TLS_AES_128_CCM_SHA256: Self = Self(0x1304);
 
+    pub const TLS_AES_128_CCM_8_SHA256: Self = Self(0x1305);
+
     // TLS 1.3 SM4 cipher suites (RFC 8998)
     #[cfg(feature = "sm_tls13")]
     pub const TLS_SM4_GCM_SM3: Self = Self(0x00C6);
@@ -78,6 +80,10 @@ impl CipherSuite {
     pub const TLS_RSA_WITH_AES_128_CCM: Self = Self(0xC09C);
     pub const TLS_RSA_WITH_AES_256_CCM: Self = Self(0xC09D);
 
+    // TLS 1.2 RSA-CCM_8 cipher suites (RFC 6655, 8-byte tag)
+    pub const TLS_RSA_WITH_AES_128_CCM_8: Self = Self(0xC0A0);
+    pub const TLS_RSA_WITH_AES_256_CCM_8: Self = Self(0xC0A1);
+
     // TLS 1.2 RSA static key exchange cipher suites
     pub const TLS_RSA_WITH_AES_128_GCM_SHA256: Self = Self(0x009C);
     pub const TLS_RSA_WITH_AES_256_GCM_SHA384: Self = Self(0x009D);
@@ -105,6 +111,7 @@ impl CipherSuite {
     pub const TLS_PSK_WITH_AES_128_CBC_SHA: Self = Self(0x008C);
     pub const TLS_PSK_WITH_AES_256_CBC_SHA: Self = Self(0x008D);
     pub const TLS_PSK_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCAB);
+    pub const TLS_PSK_WITH_AES_256_CCM: Self = Self(0xC0A5);
 
     // TLS 1.2 DHE_PSK cipher suites (RFC 4279, RFC 5487)
     pub const TLS_DHE_PSK_WITH_AES_128_GCM_SHA256: Self = Self(0x00AA);
@@ -112,6 +119,8 @@ impl CipherSuite {
     pub const TLS_DHE_PSK_WITH_AES_128_CBC_SHA: Self = Self(0x0090);
     pub const TLS_DHE_PSK_WITH_AES_256_CBC_SHA: Self = Self(0x0091);
     pub const TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCAD);
+    pub const TLS_DHE_PSK_WITH_AES_128_CCM: Self = Self(0xC0A6);
+    pub const TLS_DHE_PSK_WITH_AES_256_CCM: Self = Self(0xC0A7);
 
     // TLS 1.2 RSA_PSK cipher suites (RFC 4279, RFC 5487)
     pub const TLS_RSA_PSK_WITH_AES_128_GCM_SHA256: Self = Self(0x00AC);
@@ -126,6 +135,7 @@ impl CipherSuite {
     pub const TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA256: Self = Self(0xC037);
     pub const TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA384: Self = Self(0xC038);
     pub const TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256: Self = Self(0xCCAC);
+    pub const TLS_ECDHE_PSK_WITH_AES_128_CCM_SHA256: Self = Self(0xD005);
 
     // TLCP cipher suites (GM/T 0024)
     pub const ECDHE_SM4_CBC_SM3: Self = Self(0xE011);

@@ -5422,3 +5422,39 @@ Added 6 AES-CCM cipher suites for TLS 1.2 per RFC 6655 and RFC 7251, with 8 new 
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1790 workspace tests passing (40 ignored)
+
+---
+
+## Phase 63: CCM_8 (8-byte tag) + PSK+CCM Cipher Suites
+
+### Date: 2026-02-16
+
+### Summary
+Added CCM_8 (8-byte AEAD tag) and PSK+CCM cipher suites across TLS 1.3 and TLS 1.2, with 12 new tests. TLS 1.3 gains AES_128_CCM_8_SHA256 (0x1305). TLS 1.2 gains 2 RSA CCM_8 suites (8-byte tag variant) and 4 PSK+CCM suites (16-byte tag). A new `AesCcm8Aead` adapter wraps `hitls_crypto::modes::ccm` with `tag_len=8` for the CCM_8 variants.
+
+### New Cipher Suites
+
+| Suite | Code | Key Exchange | Tag Size | RFC |
+|-------|------|-------------|----------|-----|
+| TLS_AES_128_CCM_8_SHA256 | 0x1305 | TLS 1.3 | 8 | RFC 8446 |
+| TLS_RSA_WITH_AES_128_CCM_8 | 0xC0A0 | RSA | 8 | RFC 6655 |
+| TLS_RSA_WITH_AES_256_CCM_8 | 0xC0A1 | RSA | 8 | RFC 6655 |
+| TLS_PSK_WITH_AES_256_CCM | 0xC0A5 | PSK | 16 | RFC 6655 |
+| TLS_DHE_PSK_WITH_AES_128_CCM | 0xC0A6 | DHE_PSK | 16 | RFC 6655 |
+| TLS_DHE_PSK_WITH_AES_256_CCM | 0xC0A7 | DHE_PSK | 16 | RFC 6655 |
+| TLS_ECDHE_PSK_WITH_AES_128_CCM_SHA256 | 0xD005 | ECDHE_PSK | 16 | RFC 7251 |
+
+### Implementation Details
+- `AesCcm8Aead` wraps `hitls_crypto::modes::ccm` with `tag_len=8` for CCM_8 variants
+- CCM_8 uses same nonce/AAD format as CCM/GCM: `fixed_iv(4) || explicit_nonce(8)`
+- PSK+CCM suites use standard 16-byte CCM tag (same `AesCcmAead` adapter from Phase 62)
+- TLS 1.3 AES_128_CCM_8_SHA256 uses 8-byte tag in record layer
+
+### Test Counts (Phase 63)
+- **hitls-tls**: 632 [was: 620]
+- **Total workspace**: 1802 (40 ignored) [was: 1790]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1802 workspace tests passing (40 ignored)

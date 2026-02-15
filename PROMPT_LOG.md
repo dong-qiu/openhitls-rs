@@ -1510,3 +1510,11 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 8 new tests (3 AEAD + 5 record layer). Created `AesCcmAead` struct in `crypt/aead.rs` wrapping CCM with 16-byte tag. CCM uses same nonce/AAD format as GCM: fixed_iv(4) || explicit_nonce(8). Added 6 `CipherSuite` constants (0xC09C–0xC09F, 0xC0AC–0xC0AD) in `lib.rs`. Added 6 `Tls12CipherSuiteParams` entries in `crypt/mod.rs` — all use SHA-256 PRF (hash_len=32), key_len=16 or 32, fixed_iv_len=4, record_iv_len=8, tag_len=16. Extended `tls12_suite_to_aead_suite()` in `record/encryption12.rs` to map CCM suites. Updated `list.rs` CLI output. AES-256-CCM suites also map to `TLS_AES_128_CCM_SHA256` for AEAD dispatch (key size determined from key material). Files modified: `lib.rs`, `crypt/aead.rs`, `crypt/mod.rs`, `record/encryption12.rs`, `hitls-cli/src/list.rs`.
 
 1790 total tests (40 ignored). Clippy clean, fmt clean.
+
+## Phase 63: CCM_8 (8-byte tag) + PSK+CCM Cipher Suites (2026-02-16)
+
+**Prompt**: Add CCM_8 (8-byte AEAD tag) and PSK+CCM cipher suites. TLS 1.3: AES_128_CCM_8_SHA256 (0x1305). TLS 1.2 CCM_8: RSA_WITH_AES_128_CCM_8 (0xC0A0), RSA_WITH_AES_256_CCM_8 (0xC0A1). TLS 1.2 PSK+CCM: PSK_WITH_AES_256_CCM (0xC0A5), DHE_PSK_WITH_AES_128/256_CCM (0xC0A6/C0A7), ECDHE_PSK_WITH_AES_128_CCM_SHA256 (0xD005). New AesCcm8Aead adapter wrapping ccm_encrypt/decrypt with tag_len=8. Expected ~12 new tests.
+
+**Result**: 12 new TLS tests. Created `AesCcm8Aead` struct wrapping CCM with 8-byte tag for CCM_8 variants. TLS 1.3 AES_128_CCM_8_SHA256 (0x1305) added as TLS 1.3 cipher suite with 8-byte AEAD tag in record layer. TLS 1.2 CCM_8 suites (0xC0A0, 0xC0A1) use 8-byte tag via `AesCcm8Aead`. PSK+CCM suites (0xC0A5, 0xC0A6, 0xC0A7, 0xD005) use standard 16-byte tag via existing `AesCcmAead`. All suites use SHA-256 PRF. CCM_8 uses same nonce/AAD format as CCM/GCM: fixed_iv(4) || explicit_nonce(8). Total: 7 new cipher suites (1 TLS 1.3 + 2 CCM_8 + 4 PSK+CCM).
+
+1802 total tests (40 ignored). Clippy clean, fmt clean.
