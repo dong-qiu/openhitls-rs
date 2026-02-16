@@ -199,6 +199,7 @@ pub fn tls12_suite_to_aead_suite(suite: CipherSuite) -> Result<CipherSuite, TlsE
         | CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
         | CipherSuite::TLS_RSA_WITH_AES_128_GCM_SHA256
         | CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256
+        | CipherSuite::TLS_DHE_DSS_WITH_AES_128_GCM_SHA256
         | CipherSuite::TLS_PSK_WITH_AES_128_GCM_SHA256
         | CipherSuite::TLS_DHE_PSK_WITH_AES_128_GCM_SHA256
         | CipherSuite::TLS_RSA_PSK_WITH_AES_128_GCM_SHA256
@@ -209,6 +210,7 @@ pub fn tls12_suite_to_aead_suite(suite: CipherSuite) -> Result<CipherSuite, TlsE
         | CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
         | CipherSuite::TLS_RSA_WITH_AES_256_GCM_SHA384
         | CipherSuite::TLS_DHE_RSA_WITH_AES_256_GCM_SHA384
+        | CipherSuite::TLS_DHE_DSS_WITH_AES_256_GCM_SHA384
         | CipherSuite::TLS_PSK_WITH_AES_256_GCM_SHA384
         | CipherSuite::TLS_DHE_PSK_WITH_AES_256_GCM_SHA384
         | CipherSuite::TLS_RSA_PSK_WITH_AES_256_GCM_SHA384
@@ -989,5 +991,233 @@ mod tests {
         assert_eq!(p256.key_len, 32);
         assert_eq!(p256.hash_len, 48);
         assert_eq!(p256.tag_len, 16);
+    }
+
+    // --- Phase 66: DHE_DSS cipher suites (DSA authentication for TLS 1.2) ---
+
+    #[test]
+    fn test_phase66_dhe_dss_cbc_sha_params_lookup() {
+        use crate::crypt::{AuthAlg, KeyExchangeAlg, Tls12CipherSuiteParams};
+
+        let p128 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DHE_DSS_WITH_AES_128_CBC_SHA)
+                .unwrap();
+        assert_eq!(p128.kx_alg, KeyExchangeAlg::Dhe);
+        assert_eq!(p128.auth_alg, AuthAlg::Dsa);
+        assert!(p128.is_cbc);
+        assert_eq!(p128.key_len, 16);
+        assert_eq!(p128.hash_len, 32);
+        assert_eq!(p128.mac_key_len, 20);
+        assert_eq!(p128.mac_len, 20);
+
+        let p256 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DHE_DSS_WITH_AES_256_CBC_SHA)
+                .unwrap();
+        assert_eq!(p256.kx_alg, KeyExchangeAlg::Dhe);
+        assert_eq!(p256.auth_alg, AuthAlg::Dsa);
+        assert!(p256.is_cbc);
+        assert_eq!(p256.key_len, 32);
+        assert_eq!(p256.mac_key_len, 20);
+        assert_eq!(p256.mac_len, 20);
+    }
+
+    #[test]
+    fn test_phase66_dhe_dss_cbc_sha256_params_lookup() {
+        use crate::crypt::{AuthAlg, KeyExchangeAlg, Tls12CipherSuiteParams};
+
+        let p128 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DHE_DSS_WITH_AES_128_CBC_SHA256)
+                .unwrap();
+        assert_eq!(p128.kx_alg, KeyExchangeAlg::Dhe);
+        assert_eq!(p128.auth_alg, AuthAlg::Dsa);
+        assert!(p128.is_cbc);
+        assert_eq!(p128.key_len, 16);
+        assert_eq!(p128.hash_len, 32);
+        assert_eq!(p128.mac_key_len, 32);
+        assert_eq!(p128.mac_len, 32);
+
+        let p256 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DHE_DSS_WITH_AES_256_CBC_SHA256)
+                .unwrap();
+        assert_eq!(p256.kx_alg, KeyExchangeAlg::Dhe);
+        assert_eq!(p256.auth_alg, AuthAlg::Dsa);
+        assert!(p256.is_cbc);
+        assert_eq!(p256.key_len, 32);
+        assert_eq!(p256.hash_len, 32);
+        assert_eq!(p256.mac_key_len, 32);
+        assert_eq!(p256.mac_len, 32);
+    }
+
+    #[test]
+    fn test_phase66_dhe_dss_gcm_params_lookup() {
+        use crate::crypt::{AuthAlg, KeyExchangeAlg, Tls12CipherSuiteParams};
+
+        let p128 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DHE_DSS_WITH_AES_128_GCM_SHA256)
+                .unwrap();
+        assert_eq!(p128.kx_alg, KeyExchangeAlg::Dhe);
+        assert_eq!(p128.auth_alg, AuthAlg::Dsa);
+        assert!(!p128.is_cbc);
+        assert_eq!(p128.key_len, 16);
+        assert_eq!(p128.hash_len, 32);
+        assert_eq!(p128.tag_len, 16);
+        assert_eq!(p128.fixed_iv_len, 4);
+        assert_eq!(p128.record_iv_len, 8);
+
+        let p256 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DHE_DSS_WITH_AES_256_GCM_SHA384)
+                .unwrap();
+        assert_eq!(p256.kx_alg, KeyExchangeAlg::Dhe);
+        assert_eq!(p256.auth_alg, AuthAlg::Dsa);
+        assert!(!p256.is_cbc);
+        assert_eq!(p256.key_len, 32);
+        assert_eq!(p256.hash_len, 48);
+        assert_eq!(p256.tag_len, 16);
+    }
+
+    #[test]
+    fn test_phase66_dhe_dss_gcm_suite_mapping() {
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DHE_DSS_WITH_AES_128_GCM_SHA256).unwrap(),
+            CipherSuite::TLS_AES_128_GCM_SHA256
+        );
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DHE_DSS_WITH_AES_256_GCM_SHA384).unwrap(),
+            CipherSuite::TLS_AES_256_GCM_SHA384
+        );
+    }
+
+    #[test]
+    fn test_phase66_dhe_dss_gcm128_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_128();
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DHE_DSS_WITH_AES_128_GCM_SHA256).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 DHE_DSS AES-128-GCM";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        assert_eq!(record.version, TLS12_VERSION);
+        // fragment = explicit_nonce(8) + plaintext(34) + tag(16) = 58
+        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 16);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_phase66_dhe_dss_gcm256_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_256();
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DHE_DSS_WITH_AES_256_GCM_SHA384).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 DHE_DSS AES-256-GCM";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        // fragment = explicit_nonce(8) + plaintext(34) + tag(16) = 58
+        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 16);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_phase66_dsa_sign_verify_roundtrip() {
+        use crate::handshake::server12::verify_dsa_from_spki;
+        use hitls_crypto::dsa::{DsaKeyPair, DsaParams};
+        use hitls_utils::asn1::Encoder;
+
+        // Small DSA parameters for fast testing: p=23, q=11, g=4
+        let p_bytes: &[u8] = &[23];
+        let q_bytes: &[u8] = &[11];
+        let g_bytes: &[u8] = &[4];
+
+        let params = DsaParams::new(p_bytes, q_bytes, g_bytes).unwrap();
+        let kp = DsaKeyPair::generate(params).unwrap();
+
+        // Encode DSA params as DER SEQUENCE { INTEGER p, INTEGER q, INTEGER g }
+        let mut inner = Encoder::new();
+        inner.write_integer(p_bytes);
+        inner.write_integer(q_bytes);
+        inner.write_integer(g_bytes);
+        let inner_der = inner.finish();
+        let mut seq_enc = Encoder::new();
+        seq_enc.write_sequence(&inner_der);
+        let params_der = seq_enc.finish();
+
+        // Sign a digest
+        let digest = [0x42u8; 32];
+        let signature = kp.sign(&digest).unwrap();
+
+        // Verify using from_public_key directly
+        let pub_bytes = kp.public_key_bytes();
+        let params2 = DsaParams::new(p_bytes, q_bytes, g_bytes).unwrap();
+        let verify_kp = DsaKeyPair::from_public_key(params2, &pub_bytes).unwrap();
+        assert!(verify_kp.verify(&digest, &signature).unwrap());
+
+        // Test verify_dsa_from_spki with a mock SPKI
+        let mut y_enc = Encoder::new();
+        y_enc.write_integer(&pub_bytes);
+        let y_der = y_enc.finish();
+
+        let spki = hitls_pki::x509::SubjectPublicKeyInfo {
+            algorithm_oid: hitls_utils::oid::known::dsa().to_der_value(),
+            algorithm_params: Some(params_der),
+            public_key: y_der,
+        };
+        assert!(verify_dsa_from_spki(&spki, &digest, &signature).unwrap());
+    }
+
+    #[test]
+    fn test_phase66_dsa_signature_scheme_selection() {
+        use crate::config::ServerPrivateKey;
+        use crate::crypt::SignatureScheme;
+        use crate::handshake::server12::select_signature_scheme_tls12;
+
+        let dsa_key = ServerPrivateKey::Dsa {
+            params_der: vec![0x30, 0x00],
+            private_key: vec![0x01],
+        };
+
+        // DSA key should prefer DSA_SHA256
+        let scheme = select_signature_scheme_tls12(
+            &dsa_key,
+            &[
+                SignatureScheme::DSA_SHA256,
+                SignatureScheme::RSA_PKCS1_SHA256,
+            ],
+        )
+        .unwrap();
+        assert_eq!(scheme, SignatureScheme::DSA_SHA256);
+
+        // DSA key with only SHA384 available
+        let scheme = select_signature_scheme_tls12(
+            &dsa_key,
+            &[
+                SignatureScheme::RSA_PKCS1_SHA256,
+                SignatureScheme::DSA_SHA384,
+            ],
+        )
+        .unwrap();
+        assert_eq!(scheme, SignatureScheme::DSA_SHA384);
+
+        // No DSA scheme available → error
+        let result = select_signature_scheme_tls12(
+            &dsa_key,
+            &[
+                SignatureScheme::RSA_PKCS1_SHA256,
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+            ],
+        );
+        assert!(result.is_err());
     }
 }

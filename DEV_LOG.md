@@ -5534,3 +5534,117 @@ Added CCM_8 (8-byte AEAD tag) and PSK+CCM cipher suites across TLS 1.3 and TLS 1
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1802 workspace tests passing (40 ignored)
+
+---
+
+## Phase 64: PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites
+
+### Date: 2026-02-16
+
+### Summary
+Added 8 new TLS 1.2 cipher suites completing PSK cipher suite coverage: 6 CBC-SHA256/SHA384 from RFC 5487 and 2 ECDHE_PSK GCM from draft-ietf-tls-ecdhe-psk-aead, with 5 new tests.
+
+### New Cipher Suites
+
+| Suite | Code | Key Exchange | RFC |
+|-------|------|-------------|-----|
+| TLS_PSK_WITH_AES_128_CBC_SHA256 | 0x00AE | PSK | RFC 5487 |
+| TLS_PSK_WITH_AES_256_CBC_SHA384 | 0x00AF | PSK | RFC 5487 |
+| TLS_DHE_PSK_WITH_AES_128_CBC_SHA256 | 0x00B2 | DHE_PSK | RFC 5487 |
+| TLS_DHE_PSK_WITH_AES_256_CBC_SHA384 | 0x00B3 | DHE_PSK | RFC 5487 |
+| TLS_RSA_PSK_WITH_AES_128_CBC_SHA256 | 0x00B6 | RSA_PSK | RFC 5487 |
+| TLS_RSA_PSK_WITH_AES_256_CBC_SHA384 | 0x00B7 | RSA_PSK | RFC 5487 |
+| TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256 | 0xD001 | ECDHE_PSK | draft-ietf-tls-ecdhe-psk-aead |
+| TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384 | 0xD002 | ECDHE_PSK | draft-ietf-tls-ecdhe-psk-aead |
+
+### Test Counts (Phase 64)
+- **hitls-tls**: 637 [was: 632]
+- **Total workspace**: 1807 (40 ignored) [was: 1802]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1807 workspace tests passing (40 ignored)
+
+---
+
+## Phase 65: PSK CCM Completion + CCM_8 Authentication Cipher Suites
+
+### Date: 2026-02-16
+
+### Summary
+Added 10 new TLS 1.2 cipher suites completing CCM/CCM_8 coverage: PSK AES_128_CCM, PSK AES_128/256_CCM_8, DHE_PSK AES_128/256_CCM_8, ECDHE_PSK AES_128_CCM_8_SHA256, DHE_RSA AES_128/256_CCM_8, ECDHE_ECDSA AES_128/256_CCM_8, with 11 new tests.
+
+### New Cipher Suites
+
+| Suite | Code | Key Exchange | Tag Size | RFC |
+|-------|------|-------------|----------|-----|
+| TLS_PSK_WITH_AES_128_CCM | 0xC0A4 | PSK | 16 | RFC 6655 |
+| TLS_PSK_WITH_AES_128_CCM_8 | 0xC0A8 | PSK | 8 | RFC 6655 |
+| TLS_PSK_WITH_AES_256_CCM_8 | 0xC0A9 | PSK | 8 | RFC 6655 |
+| TLS_DHE_PSK_WITH_AES_128_CCM_8 | 0xC0AA | DHE_PSK | 8 | RFC 6655 |
+| TLS_DHE_PSK_WITH_AES_256_CCM_8 | 0xC0AB | DHE_PSK | 8 | RFC 6655 |
+| TLS_ECDHE_PSK_WITH_AES_128_CCM_8_SHA256 | 0xD003 | ECDHE_PSK | 8 | RFC 7251 |
+| TLS_DHE_RSA_WITH_AES_128_CCM_8 | 0xC0A2 | DHE_RSA | 8 | RFC 6655 |
+| TLS_DHE_RSA_WITH_AES_256_CCM_8 | 0xC0A3 | DHE_RSA | 8 | RFC 6655 |
+| TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 | 0xC0AE | ECDHE_ECDSA | 8 | RFC 7251 |
+| TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8 | 0xC0AF | ECDHE_ECDSA | 8 | RFC 7251 |
+
+### Test Counts (Phase 65)
+- **hitls-tls**: 648 [was: 637]
+- **Total workspace**: 1818 (40 ignored) [was: 1807]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1818 workspace tests passing (40 ignored)
+
+---
+
+## Phase 66: DHE_DSS Cipher Suites (DSA Authentication for TLS 1.2)
+
+### Date: 2026-02-16
+
+### Summary
+Added 6 TLS 1.2 DHE_DSS cipher suites (RFC 5246) with DSA authentication. New `AuthAlg::Dsa` variant, `DSA_SHA256` (0x0402) and `DSA_SHA384` (0x0502) signature schemes, `ServerPrivateKey::Dsa` variant for server signing, DSA SKE signing/verification via SPKI public key extraction and `DsaKeyPair` from `hitls-crypto`. 8 new tests (params lookup, GCM AEAD mapping, encrypt/decrypt roundtrip, DSA sign/verify roundtrip, signature scheme selection).
+
+### New Cipher Suites
+
+| Suite | Code | Key Exchange | Auth | Cipher | Hash |
+|-------|------|-------------|------|--------|------|
+| TLS_DHE_DSS_WITH_AES_128_CBC_SHA | 0x0032 | Dhe | Dsa | AES-128-CBC | SHA-256 (PRF), SHA-1 (MAC) |
+| TLS_DHE_DSS_WITH_AES_256_CBC_SHA | 0x0038 | Dhe | Dsa | AES-256-CBC | SHA-256 (PRF), SHA-1 (MAC) |
+| TLS_DHE_DSS_WITH_AES_128_CBC_SHA256 | 0x0040 | Dhe | Dsa | AES-128-CBC | SHA-256 |
+| TLS_DHE_DSS_WITH_AES_256_CBC_SHA256 | 0x006A | Dhe | Dsa | AES-256-CBC | SHA-256 |
+| TLS_DHE_DSS_WITH_AES_128_GCM_SHA256 | 0x00A2 | Dhe | Dsa | AES-128-GCM | SHA-256 |
+| TLS_DHE_DSS_WITH_AES_256_GCM_SHA384 | 0x00A3 | Dhe | Dsa | AES-256-GCM | SHA-384 |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/lib.rs` | 6 new `CipherSuite` constants |
+| `crates/hitls-tls/src/crypt/mod.rs` | `SignatureScheme::DSA_SHA256/DSA_SHA384`, `AuthAlg::Dsa`, 6 `Tls12CipherSuiteParams` entries |
+| `crates/hitls-tls/src/config/mod.rs` | `ServerPrivateKey::Dsa { params_der, private_key }`, zeroize on drop |
+| `crates/hitls-tls/src/handshake/server12.rs` | DSA arms in `select_signature_scheme_tls12()` + `sign_ske_data()`, `parse_dsa_params_der()`, `verify_dsa_from_spki()`, DSA arm in `verify_cv12_signature()` |
+| `crates/hitls-tls/src/handshake/client12.rs` | DSA_SHA256/SHA384 arms in `verify_ske_signature()`, DSA arm in `sign_certificate_verify12()` |
+| `crates/hitls-tls/src/handshake/signing.rs` | `ServerPrivateKey::Dsa` arms returning "DSA not supported in TLS 1.3" error |
+| `crates/hitls-tls/src/record/encryption12.rs` | DHE_DSS GCM suites in `tls12_suite_to_aead_suite()`, 8 new tests |
+
+### Implementation Details
+- DHE_DSS uses same handshake flow as DHE_RSA: Certificate (DSA pubkey) → ServerKeyExchange (DHE params, signed with DSA) → Client verifies DSA sig
+- `parse_dsa_params_der()` parses DER SEQUENCE { INTEGER p, INTEGER q, INTEGER g } using `hitls_utils::asn1::Decoder`
+- `verify_dsa_from_spki()` extracts DSA params from SPKI `algorithm_params` and public key y from `public_key` field
+- DSA not supported in TLS 1.3 (graceful error in `signing.rs`)
+- CBC-SHA suites: mac_key_len=20, mac_len=20 (SHA-1 HMAC)
+- CBC-SHA256 suites: mac_key_len=32, mac_len=32 (SHA-256 HMAC)
+- GCM suites: fixed_iv_len=4, record_iv_len=8, tag_len=16
+
+### Test Counts (Phase 66)
+- **hitls-tls**: 656 [was: 648]
+- **Total workspace**: 1826 (40 ignored) [was: 1818]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1826 workspace tests passing (40 ignored)

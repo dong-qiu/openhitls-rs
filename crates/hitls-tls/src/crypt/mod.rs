@@ -152,6 +152,8 @@ impl SignatureScheme {
     pub const ED25519: Self = Self(0x0807);
     pub const ED448: Self = Self(0x0808);
     pub const SM2_SM3: Self = Self(0x0708);
+    pub const DSA_SHA256: Self = Self(0x0402);
+    pub const DSA_SHA384: Self = Self(0x0502);
 }
 
 /// TLS 1.2 / TLCP key exchange algorithm.
@@ -197,6 +199,8 @@ pub enum AuthAlg {
     Ecdsa,
     /// PSK-based authentication (no certificate signatures).
     Psk,
+    /// DSA authentication (DSS certificates).
+    Dsa,
     #[cfg(feature = "tlcp")]
     Sm2,
 }
@@ -687,6 +691,87 @@ impl Tls12CipherSuiteParams {
                 mac_key_len: 0,
                 mac_len: 0,
                 is_cbc: false,
+            }),
+            // --- DHE_DSS GCM suites (RFC 5246) ---
+            CipherSuite::TLS_DHE_DSS_WITH_AES_128_GCM_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Dhe,
+                auth_alg: AuthAlg::Dsa,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+                mac_key_len: 0,
+                mac_len: 0,
+                is_cbc: false,
+            }),
+            CipherSuite::TLS_DHE_DSS_WITH_AES_256_GCM_SHA384 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Dhe,
+                auth_alg: AuthAlg::Dsa,
+                hash_len: 48,
+                key_len: 32,
+                fixed_iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+                mac_key_len: 0,
+                mac_len: 0,
+                is_cbc: false,
+            }),
+            // --- DHE_DSS CBC-SHA suites (RFC 5246) ---
+            CipherSuite::TLS_DHE_DSS_WITH_AES_128_CBC_SHA => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Dhe,
+                auth_alg: AuthAlg::Dsa,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 20,
+                mac_len: 20,
+                is_cbc: true,
+            }),
+            CipherSuite::TLS_DHE_DSS_WITH_AES_256_CBC_SHA => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Dhe,
+                auth_alg: AuthAlg::Dsa,
+                hash_len: 32,
+                key_len: 32,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 20,
+                mac_len: 20,
+                is_cbc: true,
+            }),
+            // --- DHE_DSS CBC-SHA256 suites (RFC 5246) ---
+            CipherSuite::TLS_DHE_DSS_WITH_AES_128_CBC_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Dhe,
+                auth_alg: AuthAlg::Dsa,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 32,
+                mac_len: 32,
+                is_cbc: true,
+            }),
+            CipherSuite::TLS_DHE_DSS_WITH_AES_256_CBC_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::Dhe,
+                auth_alg: AuthAlg::Dsa,
+                hash_len: 32,
+                key_len: 32,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 32,
+                mac_len: 32,
+                is_cbc: true,
             }),
             // --- DHE_RSA CBC suites ---
             CipherSuite::TLS_DHE_RSA_WITH_AES_128_CBC_SHA => Ok(Self {

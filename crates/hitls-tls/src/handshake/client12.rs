@@ -1197,6 +1197,14 @@ pub(crate) fn verify_ske_signature(
             let digest = compute_sha384(signed_data)?;
             verify_ecdsa(spki, hitls_types::EccCurveId::NistP384, &digest, signature)?
         }
+        SignatureScheme::DSA_SHA256 => {
+            let digest = compute_sha256(signed_data)?;
+            crate::handshake::server12::verify_dsa_from_spki(spki, &digest, signature)?
+        }
+        SignatureScheme::DSA_SHA384 => {
+            let digest = compute_sha384(signed_data)?;
+            crate::handshake::server12::verify_dsa_from_spki(spki, &digest, signature)?
+        }
         _ => {
             return Err(TlsError::HandshakeFailed(format!(
                 "unsupported SKE signature scheme: 0x{:04x}",
@@ -1334,6 +1342,16 @@ fn sign_certificate_verify12(
             rsa_key
                 .sign(padding, transcript_hash)
                 .map_err(TlsError::CryptoError)
+        }
+        ServerPrivateKey::Dsa {
+            params_der,
+            private_key,
+        } => {
+            let params = crate::handshake::server12::parse_dsa_params_der(params_der)?;
+            let kp = hitls_crypto::dsa::DsaKeyPair::from_private_key(params, private_key)
+                .map_err(TlsError::CryptoError)?;
+            // transcript_hash IS the digest — sign directly
+            kp.sign(transcript_hash).map_err(TlsError::CryptoError)
         }
         #[cfg(feature = "tlcp")]
         ServerPrivateKey::Sm2 { private_key } => {

@@ -92,6 +92,14 @@ impl CipherSuite {
     pub const TLS_DHE_RSA_WITH_AES_128_CCM_8: Self = Self(0xC0A2);
     pub const TLS_DHE_RSA_WITH_AES_256_CCM_8: Self = Self(0xC0A3);
 
+    // TLS 1.2 DHE_DSS cipher suites (RFC 5246)
+    pub const TLS_DHE_DSS_WITH_AES_128_CBC_SHA: Self = Self(0x0032);
+    pub const TLS_DHE_DSS_WITH_AES_256_CBC_SHA: Self = Self(0x0038);
+    pub const TLS_DHE_DSS_WITH_AES_128_CBC_SHA256: Self = Self(0x0040);
+    pub const TLS_DHE_DSS_WITH_AES_256_CBC_SHA256: Self = Self(0x006A);
+    pub const TLS_DHE_DSS_WITH_AES_128_GCM_SHA256: Self = Self(0x00A2);
+    pub const TLS_DHE_DSS_WITH_AES_256_GCM_SHA384: Self = Self(0x00A3);
+
     // TLS 1.2 RSA static key exchange cipher suites
     pub const TLS_RSA_WITH_AES_128_GCM_SHA256: Self = Self(0x009C);
     pub const TLS_RSA_WITH_AES_256_GCM_SHA384: Self = Self(0x009D);

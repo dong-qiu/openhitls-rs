@@ -31,6 +31,13 @@ pub enum ServerPrivateKey {
         p: Vec<u8>,
         q: Vec<u8>,
     },
+    /// DSA private key with domain parameters.
+    Dsa {
+        /// DER-encoded DSAParameters (SEQUENCE { INTEGER p, INTEGER q, INTEGER g }).
+        params_der: Vec<u8>,
+        /// Private key x as big-endian bytes.
+        private_key: Vec<u8>,
+    },
     /// SM2 private key bytes (big-endian scalar on the SM2 curve).
     #[cfg(feature = "tlcp")]
     Sm2 { private_key: Vec<u8> },
@@ -47,6 +54,7 @@ impl Drop for ServerPrivateKey {
                 p.zeroize();
                 q.zeroize();
             }
+            ServerPrivateKey::Dsa { private_key, .. } => private_key.zeroize(),
             #[cfg(feature = "tlcp")]
             ServerPrivateKey::Sm2 { private_key } => private_key.zeroize(),
         }

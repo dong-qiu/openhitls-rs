@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 1,818 tests (40 ignored)
+**Current**: 1,826 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 
 ---
@@ -135,3 +135,52 @@ cargo fmt --all -- --check
 | Record Layer (CCM) | `hitls-tls/src/record/encryption12.rs` | 5 | tls12_suite_to_aead_suite CCM mapping for all 6 suites, seal/open roundtrip with CCM encryptor, nonce construction (fixed_iv + explicit_nonce), AAD format verification, wrong-key rejection |
 
 **Workspace after Phase 62**: 1,790 tests, 40 ignored (+8 from Phase 61's 1,782)
+
+---
+
+## Phase 63: CCM_8 + PSK+CCM Cipher Suites — 12 new tests
+
+### Date: 2026-02-16
+
+| Module | File | Tests Added | Description |
+|--------|------|:-----------:|-------------|
+| AEAD (CCM_8) | `hitls-tls/src/crypt/aead.rs` | 4 | AesCcm8Aead 8-byte tag encrypt/decrypt roundtrip, wrong AAD rejection, key sizes, TLS 1.3 CCM_8 dispatch |
+| Record Layer (CCM_8/PSK+CCM) | `hitls-tls/src/record/encryption12.rs` | 8 | CCM_8 suite mapping (RSA 128/256), PSK+CCM suite mapping, CCM_8 128/256 encrypt/decrypt roundtrip, PSK CCM_8 tampered record, ECDHE_PSK CCM_8 params lookup |
+
+**Workspace after Phase 63**: 1,802 tests, 40 ignored (+12 from Phase 62's 1,790)
+
+---
+
+## Phase 64: PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites — 5 new tests
+
+### Date: 2026-02-16
+
+| Module | File | Tests Added | Description |
+|--------|------|:-----------:|-------------|
+| Record Layer (PSK CBC/GCM) | `hitls-tls/src/record/encryption12.rs` | 5 | PSK CBC-SHA256/SHA384 params lookup, ECDHE_PSK GCM params lookup, ECDHE_PSK GCM 128/256 suite mapping + encrypt/decrypt roundtrip |
+
+**Workspace after Phase 64**: 1,807 tests, 40 ignored (+5 from Phase 63's 1,802)
+
+---
+
+## Phase 65: PSK CCM Completion + CCM_8 Authentication Cipher Suites — 11 new tests
+
+### Date: 2026-02-16
+
+| Module | File | Tests Added | Description |
+|--------|------|:-----------:|-------------|
+| Record Layer (CCM/CCM_8) | `hitls-tls/src/record/encryption12.rs` | 11 | Phase 65 CCM/CCM_8 suite mapping, PSK CCM 128 encrypt/decrypt, PSK CCM_8 128/DHE_RSA CCM_8 256/ECDHE_ECDSA CCM_8 128 roundtrip, PSK CCM_8 tampered record, params lookup (PSK CCM/CCM_8, DHE_PSK CCM_8, ECDHE_PSK CCM_8, DHE_RSA CCM_8, ECDHE_ECDSA CCM_8) |
+
+**Workspace after Phase 65**: 1,818 tests, 40 ignored (+11 from Phase 64's 1,807)
+
+---
+
+## Phase 66: DHE_DSS Cipher Suites (DSA Authentication for TLS 1.2) — 8 new tests
+
+### Date: 2026-02-16
+
+| Module | File | Tests Added | Description |
+|--------|------|:-----------:|-------------|
+| Record Layer (DHE_DSS) | `hitls-tls/src/record/encryption12.rs` | 8 | DHE_DSS CBC-SHA params lookup (128/256), CBC-SHA256 params lookup (128/256), GCM params lookup (128/256), GCM suite mapping (128→AES_128_GCM_SHA256, 256→AES_256_GCM_SHA384), GCM 128/256 encrypt/decrypt roundtrip, DSA sign/verify roundtrip (via DsaKeyPair + verify_dsa_from_spki), DSA signature scheme selection (DSA_SHA256/SHA384 preference, no-match error) |
+
+**Workspace after Phase 66**: 1,826 tests, 40 ignored (+8 from Phase 65's 1,818)

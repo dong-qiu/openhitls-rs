@@ -1534,3 +1534,13 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 12 new TLS tests. Created `AesCcm8Aead` struct wrapping CCM with 8-byte tag for CCM_8 variants. TLS 1.3 AES_128_CCM_8_SHA256 (0x1305) added as TLS 1.3 cipher suite with 8-byte AEAD tag in record layer. TLS 1.2 CCM_8 suites (0xC0A0, 0xC0A1) use 8-byte tag via `AesCcm8Aead`. PSK+CCM suites (0xC0A5, 0xC0A6, 0xC0A7, 0xD005) use standard 16-byte tag via existing `AesCcmAead`. All suites use SHA-256 PRF. CCM_8 uses same nonce/AAD format as CCM/GCM: fixed_iv(4) || explicit_nonce(8). Total: 7 new cipher suites (1 TLS 1.3 + 2 CCM_8 + 4 PSK+CCM).
 
 1802 total tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 66: DHE_DSS Cipher Suites — DSA Authentication for TLS 1.2 (2026-02-16)
+
+**Prompt**: Implement Phase 66 — DHE_DSS cipher suites (DSA authentication for TLS 1.2). Add 6 TLS 1.2 DHE_DSS cipher suites (RFC 5246): DHE_DSS_WITH_AES_128/256_CBC_SHA (0x0032/0x0038), DHE_DSS_WITH_AES_128/256_CBC_SHA256 (0x0040/0x006A), DHE_DSS_WITH_AES_128_GCM_SHA256/AES_256_GCM_SHA384 (0x00A2/0x00A3). New AuthAlg::Dsa variant, DSA_SHA256 (0x0402) and DSA_SHA384 (0x0502) signature schemes, ServerPrivateKey::Dsa for server signing, DSA SKE verification via SPKI. Modify 6 files: lib.rs, crypt/mod.rs, config/mod.rs, server12.rs, client12.rs, encryption12.rs. Expected ~8 new tests.
+
+**Result**: 8 new TLS tests. 6 new DHE_DSS cipher suites added (RFC 5246). Added `AuthAlg::Dsa` variant and `SignatureScheme::DSA_SHA256` (0x0402) / `DSA_SHA384` (0x0502). Added `ServerPrivateKey::Dsa { params_der, private_key }` with zeroize on drop. DSA signing in `sign_ske_data()`: parses DSA params from DER via `parse_dsa_params_der()` (ASN.1 SEQUENCE → DsaParams::new), hashes with SHA-256/384, signs with `DsaKeyPair::from_private_key`. DSA verification in `verify_ske_signature()`: extracts params from SPKI `algorithm_params`, public key y from `public_key` field via `verify_dsa_from_spki()`. Added DSA arm to `verify_cv12_signature()` for mTLS with DSA client certs. Added DSA arm to `sign_certificate_verify12()` in client12.rs. Added `ServerPrivateKey::Dsa` error arms in `signing.rs` (TLS 1.3 only — DSA not supported). DHE_DSS GCM suites added to `tls12_suite_to_aead_suite()` mapping. 7 files modified (lib.rs, crypt/mod.rs, config/mod.rs, server12.rs, client12.rs, signing.rs, encryption12.rs). Tests: CBC-SHA params lookup (128/256), CBC-SHA256 params lookup (128/256), GCM params lookup (128/256), GCM suite mapping, GCM 128/256 encrypt/decrypt roundtrip, DSA sign/verify roundtrip (DsaKeyPair + verify_dsa_from_spki), DSA signature scheme selection.
+
+1826 total tests (40 ignored). Clippy clean, fmt clean.

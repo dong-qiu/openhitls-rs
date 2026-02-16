@@ -28,6 +28,11 @@ pub fn select_signature_scheme(
             SignatureScheme::RSA_PSS_RSAE_SHA384,
             SignatureScheme::RSA_PSS_RSAE_SHA512,
         ],
+        ServerPrivateKey::Dsa { .. } => {
+            return Err(TlsError::HandshakeFailed(
+                "DSA not supported in TLS 1.3".into(),
+            ))
+        }
         #[cfg(feature = "tlcp")]
         ServerPrivateKey::Sm2 { .. } => &[SignatureScheme::SM2_SM3],
     };
@@ -103,6 +108,9 @@ pub fn sign_certificate_verify(
                 .sign(hitls_crypto::rsa::RsaPadding::Pss, &digest)
                 .map_err(TlsError::CryptoError)
         }
+        ServerPrivateKey::Dsa { .. } => Err(TlsError::HandshakeFailed(
+            "DSA not supported in TLS 1.3".into(),
+        )),
         #[cfg(feature = "tlcp")]
         ServerPrivateKey::Sm2 { private_key } => {
             // SM2 signing: SM3 hash of content, then SM2 sign

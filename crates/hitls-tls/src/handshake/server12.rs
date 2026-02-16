@@ -1417,6 +1417,7 @@ pub(crate) fn select_signature_scheme_tls12(
             SignatureScheme::RSA_PSS_RSAE_SHA384,
             SignatureScheme::RSA_PKCS1_SHA384,
         ],
+        ServerPrivateKey::Dsa { .. } => &[SignatureScheme::DSA_SHA256, SignatureScheme::DSA_SHA384],
         #[cfg(feature = "tlcp")]
         ServerPrivateKey::Sm2 { .. } => &[SignatureScheme::SM2_SM3],
     };
@@ -1491,6 +1492,20 @@ pub(crate) fn sign_ske_data(
                 .sign(padding, &digest)
                 .map_err(TlsError::CryptoError)
         }
+        ServerPrivateKey::Dsa {
+            params_der,
+            private_key,
+        } => {
+            let digest = match scheme {
+                SignatureScheme::DSA_SHA256 => compute_sha256(signed_data)?,
+                SignatureScheme::DSA_SHA384 => compute_sha384(signed_data)?,
+                _ => return Err(TlsError::HandshakeFailed("DSA scheme mismatch".into())),
+            };
+            let params = parse_dsa_params_der(params_der)?;
+            let kp = hitls_crypto::dsa::DsaKeyPair::from_private_key(params, private_key)
+                .map_err(TlsError::CryptoError)?;
+            kp.sign(&digest).map_err(TlsError::CryptoError)
+        }
         #[cfg(feature = "tlcp")]
         ServerPrivateKey::Sm2 { private_key } => {
             let kp = hitls_crypto::sm2::Sm2KeyPair::from_private_key(private_key)
@@ -1520,6 +1535,65 @@ fn compute_sha384(data: &[u8]) -> Result<Vec<u8>, TlsError> {
     let mut h = hitls_crypto::sha2::Sha384::new();
     h.update(data).map_err(TlsError::CryptoError)?;
     Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+}
+
+/// Parse DER-encoded DSAParameters (SEQUENCE { INTEGER p, INTEGER q, INTEGER g }).
+pub(crate) fn parse_dsa_params_der(
+    params_der: &[u8],
+) -> Result<hitls_crypto::dsa::DsaParams, TlsError> {
+    use hitls_utils::asn1::Decoder;
+    let mut dec = Decoder::new(params_der);
+    let mut seq = dec
+        .read_sequence()
+        .map_err(|e| TlsError::HandshakeFailed(format!("DSA params parse: {e}")))?;
+    let p = seq
+        .read_integer()
+        .map_err(|e| TlsError::HandshakeFailed(format!("DSA p parse: {e}")))?;
+    let q = seq
+        .read_integer()
+        .map_err(|e| TlsError::HandshakeFailed(format!("DSA q parse: {e}")))?;
+    let g = seq
+        .read_integer()
+        .map_err(|e| TlsError::HandshakeFailed(format!("DSA g parse: {e}")))?;
+    // Strip leading zero bytes (unsigned big-endian representation)
+    fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
+        let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+        &bytes[start..]
+    }
+    let p = strip_leading_zeros(p);
+    let q = strip_leading_zeros(q);
+    let g = strip_leading_zeros(g);
+    hitls_crypto::dsa::DsaParams::new(p, q, g).map_err(TlsError::CryptoError)
+}
+
+/// Verify a DSA signature using the public key from an SPKI.
+///
+/// The SPKI's algorithm_params contains DER-encoded DSAParameters (p, q, g)
+/// and the public_key contains the DER-encoded INTEGER y.
+pub(crate) fn verify_dsa_from_spki(
+    spki: &hitls_pki::x509::SubjectPublicKeyInfo,
+    digest: &[u8],
+    signature: &[u8],
+) -> Result<bool, TlsError> {
+    let params_der = spki
+        .algorithm_params
+        .as_ref()
+        .ok_or_else(|| TlsError::HandshakeFailed("DSA SPKI missing algorithm params".into()))?;
+    let params = parse_dsa_params_der(params_der)?;
+    // Parse the public key y from DER INTEGER
+    use hitls_utils::asn1::Decoder;
+    let mut key_dec = Decoder::new(&spki.public_key);
+    let y = key_dec
+        .read_integer()
+        .map_err(|e| TlsError::HandshakeFailed(format!("DSA public key parse: {e}")))?;
+    fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
+        let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+        &bytes[start..]
+    }
+    let y = strip_leading_zeros(y);
+    let kp =
+        hitls_crypto::dsa::DsaKeyPair::from_public_key(params, y).map_err(TlsError::CryptoError)?;
+    kp.verify(digest, signature).map_err(TlsError::CryptoError)
 }
 
 /// Verify a TLS 1.2 CertificateVerify signature.
@@ -1570,6 +1644,9 @@ fn verify_cv12_signature(
             verifier
                 .verify(transcript_hash, signature)
                 .map_err(TlsError::CryptoError)?
+        }
+        SignatureScheme::DSA_SHA256 | SignatureScheme::DSA_SHA384 => {
+            verify_dsa_from_spki(spki, transcript_hash, signature)?
         }
         _ => {
             return Err(TlsError::HandshakeFailed(format!(
