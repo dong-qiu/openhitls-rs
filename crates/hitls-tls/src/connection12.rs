@@ -11,7 +11,8 @@ use crate::handshake::client12::Tls12ClientHandshake;
 use crate::handshake::codec::{decode_server_hello, parse_handshake_header};
 use crate::handshake::codec12::{
     decode_certificate12, decode_certificate_request12, decode_server_key_exchange,
-    decode_server_key_exchange_dhe, decode_server_key_exchange_dhe_psk,
+    decode_server_key_exchange_dhe, decode_server_key_exchange_dhe_anon,
+    decode_server_key_exchange_dhe_psk, decode_server_key_exchange_ecdhe_anon,
     decode_server_key_exchange_ecdhe_psk, decode_server_key_exchange_psk_hint,
 };
 use crate::handshake::server12::{ServerHelloResult, Tls12ServerHandshake};
@@ -238,6 +239,14 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 KeyExchangeAlg::EcdhePsk => {
                     let ske = decode_server_key_exchange_ecdhe_psk(ske_body)?;
                     hs.process_server_key_exchange_ecdhe_psk(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::DheAnon => {
+                    let ske = decode_server_key_exchange_dhe_anon(ske_body)?;
+                    hs.process_server_key_exchange_dhe_anon(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::EcdheAnon => {
+                    let ske = decode_server_key_exchange_ecdhe_anon(ske_body)?;
+                    hs.process_server_key_exchange_ecdhe_anon(&next_data, &ske)?;
                 }
                 KeyExchangeAlg::Rsa => {
                     return Err(TlsError::HandshakeFailed(

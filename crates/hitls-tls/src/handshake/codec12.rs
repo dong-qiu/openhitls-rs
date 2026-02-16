@@ -1066,6 +1066,110 @@ pub fn decode_server_key_exchange_ecdhe_psk(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Anonymous DH_anon / ECDH_anon key exchange types and codecs (RFC 5246, RFC 4492)
+// ---------------------------------------------------------------------------
+
+/// ServerKeyExchange for DH_anon: DH params without signature.
+///
+/// ```text
+/// dh_p_len(2) || dh_p || dh_g_len(2) || dh_g || dh_Ys_len(2) || dh_Ys
+/// ```
+#[derive(Debug, Clone)]
+pub struct ServerKeyExchangeDheAnon {
+    pub dh_p: Vec<u8>,
+    pub dh_g: Vec<u8>,
+    pub dh_ys: Vec<u8>,
+}
+
+/// ServerKeyExchange for ECDH_anon: ECDHE params without signature.
+///
+/// ```text
+/// curve_type(1) || named_curve(2) || point_len(1) || point
+/// ```
+#[derive(Debug, Clone)]
+pub struct ServerKeyExchangeEcdheAnon {
+    pub named_curve: u16,
+    pub public_key: Vec<u8>,
+}
+
+/// Encode a DH_anon ServerKeyExchange message (wrapped with handshake header).
+pub fn encode_server_key_exchange_dhe_anon(ske: &ServerKeyExchangeDheAnon) -> Vec<u8> {
+    let body = build_dhe_ske_params(&ske.dh_p, &ske.dh_g, &ske.dh_ys);
+    wrap_handshake(HandshakeType::ServerKeyExchange, &body)
+}
+
+/// Decode a DH_anon ServerKeyExchange message body (unsigned DH params).
+pub fn decode_server_key_exchange_dhe_anon(
+    body: &[u8],
+) -> Result<ServerKeyExchangeDheAnon, TlsError> {
+    if body.len() < 6 {
+        return Err(TlsError::HandshakeFailed(
+            "DH_anon ServerKeyExchange too short".into(),
+        ));
+    }
+    let mut off = 0;
+    // p
+    let p_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + p_len + 2 {
+        return Err(TlsError::HandshakeFailed("DH_anon SKE p truncated".into()));
+    }
+    let dh_p = body[off..off + p_len].to_vec();
+    off += p_len;
+    // g
+    let g_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + g_len + 2 {
+        return Err(TlsError::HandshakeFailed("DH_anon SKE g truncated".into()));
+    }
+    let dh_g = body[off..off + g_len].to_vec();
+    off += g_len;
+    // Ys
+    let ys_len = u16::from_be_bytes([body[off], body[off + 1]]) as usize;
+    off += 2;
+    if body.len() < off + ys_len {
+        return Err(TlsError::HandshakeFailed("DH_anon SKE Ys truncated".into()));
+    }
+    let dh_ys = body[off..off + ys_len].to_vec();
+    Ok(ServerKeyExchangeDheAnon { dh_p, dh_g, dh_ys })
+}
+
+/// Encode an ECDH_anon ServerKeyExchange message (wrapped with handshake header).
+pub fn encode_server_key_exchange_ecdhe_anon(ske: &ServerKeyExchangeEcdheAnon) -> Vec<u8> {
+    let body = build_ske_params(3, ske.named_curve, &ske.public_key);
+    wrap_handshake(HandshakeType::ServerKeyExchange, &body)
+}
+
+/// Decode an ECDH_anon ServerKeyExchange message body (unsigned ECDHE params).
+pub fn decode_server_key_exchange_ecdhe_anon(
+    body: &[u8],
+) -> Result<ServerKeyExchangeEcdheAnon, TlsError> {
+    if body.len() < 4 {
+        return Err(TlsError::HandshakeFailed(
+            "ECDH_anon ServerKeyExchange too short".into(),
+        ));
+    }
+    let curve_type = body[0];
+    if curve_type != 3 {
+        return Err(TlsError::HandshakeFailed(format!(
+            "unsupported curve type: {curve_type} (expected 3=named_curve)"
+        )));
+    }
+    let named_curve = u16::from_be_bytes([body[1], body[2]]);
+    let point_len = body[3] as usize;
+    if body.len() < 4 + point_len {
+        return Err(TlsError::HandshakeFailed(
+            "ECDH_anon SKE point truncated".into(),
+        ));
+    }
+    let public_key = body[4..4 + point_len].to_vec();
+    Ok(ServerKeyExchangeEcdheAnon {
+        named_curve,
+        public_key,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1582,5 +1686,41 @@ mod tests {
 
         let decoded = decode_certificate_status12(body).unwrap();
         assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn test_encode_decode_dhe_anon_ske_roundtrip() {
+        let ske = ServerKeyExchangeDheAnon {
+            dh_p: vec![0xFF; 256],
+            dh_g: vec![0x02],
+            dh_ys: vec![0xAA; 256],
+        };
+
+        let encoded = encode_server_key_exchange_dhe_anon(&ske);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ServerKeyExchange);
+
+        let decoded = decode_server_key_exchange_dhe_anon(body).unwrap();
+        assert_eq!(decoded.dh_p, ske.dh_p);
+        assert_eq!(decoded.dh_g, ske.dh_g);
+        assert_eq!(decoded.dh_ys, ske.dh_ys);
+    }
+
+    #[test]
+    fn test_encode_decode_ecdhe_anon_ske_roundtrip() {
+        let ske = ServerKeyExchangeEcdheAnon {
+            named_curve: 0x0017, // secp256r1
+            public_key: vec![0x04; 65],
+        };
+
+        let encoded = encode_server_key_exchange_ecdhe_anon(&ske);
+        let (msg_type, body, _) =
+            crate::handshake::codec::parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::ServerKeyExchange);
+
+        let decoded = decode_server_key_exchange_ecdhe_anon(body).unwrap();
+        assert_eq!(decoded.named_curve, 0x0017);
+        assert_eq!(decoded.public_key, ske.public_key);
     }
 }

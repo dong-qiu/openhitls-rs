@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 1,826 tests (40 ignored)
+**Current**: 1,836 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 
 ---
@@ -184,3 +184,16 @@ cargo fmt --all -- --check
 | Record Layer (DHE_DSS) | `hitls-tls/src/record/encryption12.rs` | 8 | DHE_DSS CBC-SHA params lookup (128/256), CBC-SHA256 params lookup (128/256), GCM params lookup (128/256), GCM suite mapping (128→AES_128_GCM_SHA256, 256→AES_256_GCM_SHA384), GCM 128/256 encrypt/decrypt roundtrip, DSA sign/verify roundtrip (via DsaKeyPair + verify_dsa_from_spki), DSA signature scheme selection (DSA_SHA256/SHA384 preference, no-match error) |
 
 **Workspace after Phase 66**: 1,826 tests, 40 ignored (+8 from Phase 65's 1,818)
+
+---
+
+## Phase 67: DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2) — 10 new tests
+
+### Date: 2026-02-16
+
+| Module | File | Tests Added | Description |
+|--------|------|:-----------:|-------------|
+| Record Layer (DH_ANON/ECDH_ANON) | `hitls-tls/src/record/encryption12.rs` | 8 | DH_ANON CBC-SHA params lookup (128/256), DH_ANON CBC-SHA256 params lookup (128/256), DH_ANON GCM params lookup (128/256), ECDH_ANON CBC-SHA params lookup (128/256), DH_ANON GCM suite AEAD mapping (128→AES_128_GCM_SHA256, 256→AES_256_GCM_SHA384), DH_ANON GCM 128/256 encrypt/decrypt roundtrip, anonymous requires_certificate false |
+| Codec (DH_ANON/ECDH_ANON) | `hitls-tls/src/handshake/codec12.rs` | 2 | DHE_ANON SKE codec roundtrip (encode→decode, 256-byte p/g/Ys), ECDHE_ANON SKE codec roundtrip (encode→decode, secp256r1 65-byte point) |
+
+**Workspace after Phase 67**: 1,836 tests, 40 ignored (+10 from Phase 66's 1,826)

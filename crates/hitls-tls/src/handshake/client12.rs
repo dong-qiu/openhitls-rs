@@ -22,7 +22,8 @@ use crate::handshake::codec12::{
     Certificate12, CertificateRequest12, CertificateVerify12, ClientKeyExchange,
     ClientKeyExchangeDhe, ClientKeyExchangeDhePsk, ClientKeyExchangeEcdhePsk, ClientKeyExchangePsk,
     ClientKeyExchangeRsa, ClientKeyExchangeRsaPsk, ServerKeyExchange, ServerKeyExchangeDhe,
-    ServerKeyExchangeDhePsk as SkeDhePsk, ServerKeyExchangeEcdhePsk, ServerKeyExchangePskHint,
+    ServerKeyExchangeDheAnon, ServerKeyExchangeDhePsk as SkeDhePsk, ServerKeyExchangeEcdheAnon,
+    ServerKeyExchangeEcdhePsk, ServerKeyExchangePskHint,
 };
 use crate::handshake::key_exchange::KeyExchange;
 use crate::handshake::server12::select_signature_scheme_tls12;
@@ -588,9 +589,10 @@ impl Tls12ClientHandshake {
         // RsaPsk has a certificate, same as Rsa.
         let next_state = match params.kx_alg {
             KeyExchangeAlg::Psk => Tls12ClientState::WaitServerHelloDone,
-            KeyExchangeAlg::DhePsk | KeyExchangeAlg::EcdhePsk => {
-                Tls12ClientState::WaitServerKeyExchange
-            }
+            KeyExchangeAlg::DhePsk
+            | KeyExchangeAlg::EcdhePsk
+            | KeyExchangeAlg::DheAnon
+            | KeyExchangeAlg::EcdheAnon => Tls12ClientState::WaitServerKeyExchange,
             _ => Tls12ClientState::WaitCertificate,
         };
         self.params = Some(params);
@@ -620,10 +622,14 @@ impl Tls12ClientHandshake {
             KeyExchangeAlg::Rsa | KeyExchangeAlg::RsaPsk => {
                 self.state = Tls12ClientState::WaitServerHelloDone;
             }
-            // PSK suites without certificates should never reach here
-            KeyExchangeAlg::Psk | KeyExchangeAlg::DhePsk | KeyExchangeAlg::EcdhePsk => {
+            // PSK/anonymous suites without certificates should never reach here
+            KeyExchangeAlg::Psk
+            | KeyExchangeAlg::DhePsk
+            | KeyExchangeAlg::EcdhePsk
+            | KeyExchangeAlg::DheAnon
+            | KeyExchangeAlg::EcdheAnon => {
                 return Err(TlsError::HandshakeFailed(
-                    "unexpected Certificate for PSK key exchange".into(),
+                    "unexpected Certificate for anonymous/PSK key exchange".into(),
                 ));
             }
             // ECDHE / DHE: expect ServerKeyExchange next
@@ -743,6 +749,43 @@ impl Tls12ClientHandshake {
         self.server_psk_hint = ske.hint.clone();
         self.server_named_curve = ske.named_curve;
         self.server_ecdh_public = ske.public_key.clone();
+        self.state = Tls12ClientState::WaitServerHelloDone;
+        Ok(())
+    }
+
+    /// Process a DH_anon ServerKeyExchange (unsigned DH params).
+    pub fn process_server_key_exchange_dhe_anon(
+        &mut self,
+        raw_msg: &[u8],
+        ske: &ServerKeyExchangeDheAnon,
+    ) -> Result<(), TlsError> {
+        if self.state != Tls12ClientState::WaitServerKeyExchange {
+            return Err(TlsError::HandshakeFailed(
+                "unexpected DH_anon ServerKeyExchange".into(),
+            ));
+        }
+        self.server_dhe_p = ske.dh_p.clone();
+        self.server_dhe_g = ske.dh_g.clone();
+        self.server_dhe_ys = ske.dh_ys.clone();
+        self.transcript.update(raw_msg)?;
+        self.state = Tls12ClientState::WaitServerHelloDone;
+        Ok(())
+    }
+
+    /// Process an ECDH_anon ServerKeyExchange (unsigned ECDHE params).
+    pub fn process_server_key_exchange_ecdhe_anon(
+        &mut self,
+        raw_msg: &[u8],
+        ske: &ServerKeyExchangeEcdheAnon,
+    ) -> Result<(), TlsError> {
+        if self.state != Tls12ClientState::WaitServerKeyExchange {
+            return Err(TlsError::HandshakeFailed(
+                "unexpected ECDH_anon ServerKeyExchange".into(),
+            ));
+        }
+        self.server_named_curve = ske.named_curve;
+        self.server_ecdh_public = ske.public_key.clone();
+        self.transcript.update(raw_msg)?;
         self.state = Tls12ClientState::WaitServerHelloDone;
         Ok(())
     }
@@ -953,6 +996,41 @@ impl Tls12ClientHandshake {
                     encrypted_pms: encrypted,
                 };
                 let cke_msg = encode_client_key_exchange_rsa_psk(&cke);
+                (pms, cke_msg)
+            }
+            KeyExchangeAlg::DheAnon => {
+                let dh_params = DhParams::new(&self.server_dhe_p, &self.server_dhe_g)
+                    .map_err(TlsError::CryptoError)?;
+                let kp = DhKeyPair::generate(&dh_params).map_err(TlsError::CryptoError)?;
+                let yc = kp
+                    .public_key_bytes(&dh_params)
+                    .map_err(TlsError::CryptoError)?;
+                let pms = kp
+                    .compute_shared_secret(&dh_params, &self.server_dhe_ys)
+                    .map_err(TlsError::CryptoError)?;
+                let cke = ClientKeyExchangeDhe { dh_yc: yc };
+                let cke_msg = encode_client_key_exchange_dhe(&cke);
+                (pms, cke_msg)
+            }
+            KeyExchangeAlg::EcdheAnon => {
+                let group = match self.server_named_curve {
+                    0x0017 => NamedGroup::SECP256R1,
+                    0x0018 => NamedGroup::SECP384R1,
+                    0x001D => NamedGroup::X25519,
+                    _ => {
+                        return Err(TlsError::HandshakeFailed(format!(
+                            "unsupported ECDH curve: 0x{:04x}",
+                            self.server_named_curve
+                        )))
+                    }
+                };
+                let kx = KeyExchange::generate(group)?;
+                let client_public = kx.public_key_bytes().to_vec();
+                let pms = kx.compute_shared_secret(&self.server_ecdh_public)?;
+                let cke = ClientKeyExchange {
+                    public_key: client_public,
+                };
+                let cke_msg = encode_client_key_exchange(&cke);
                 (pms, cke_msg)
             }
             #[cfg(feature = "tlcp")]

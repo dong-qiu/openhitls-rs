@@ -20,10 +20,11 @@ use crate::handshake::codec12::{
     decode_client_key_exchange_rsa, decode_client_key_exchange_rsa_psk, encode_certificate12,
     encode_certificate_request12, encode_finished12, encode_new_session_ticket12,
     encode_server_hello_done, encode_server_key_exchange, encode_server_key_exchange_dhe,
-    encode_server_key_exchange_dhe_psk, encode_server_key_exchange_ecdhe_psk,
+    encode_server_key_exchange_dhe_anon, encode_server_key_exchange_dhe_psk,
+    encode_server_key_exchange_ecdhe_anon, encode_server_key_exchange_ecdhe_psk,
     encode_server_key_exchange_psk_hint, Certificate12, CertificateRequest12, ServerKeyExchange,
-    ServerKeyExchangeDhe, ServerKeyExchangeDhePsk, ServerKeyExchangeEcdhePsk,
-    ServerKeyExchangePskHint,
+    ServerKeyExchangeDhe, ServerKeyExchangeDheAnon, ServerKeyExchangeDhePsk,
+    ServerKeyExchangeEcdheAnon, ServerKeyExchangeEcdhePsk, ServerKeyExchangePskHint,
 };
 use crate::handshake::extensions_codec::{
     build_encrypt_then_mac, build_extended_master_secret, build_record_size_limit,
@@ -668,6 +669,37 @@ impl Tls12ServerHandshake {
                 self.ephemeral_key = Some(kx);
                 Some(ske_msg)
             }
+            KeyExchangeAlg::DheAnon => {
+                let group = negotiate_ffdhe_group(&client_groups, &self.config.supported_groups)?;
+                let dh_param_id = named_group_to_dh_param_id(group)?;
+                let dh_params = DhParams::from_group(dh_param_id).map_err(TlsError::CryptoError)?;
+                let dh_kp = DhKeyPair::generate(&dh_params).map_err(TlsError::CryptoError)?;
+                let dh_ys = dh_kp
+                    .public_key_bytes(&dh_params)
+                    .map_err(TlsError::CryptoError)?;
+                let ske = ServerKeyExchangeDheAnon {
+                    dh_p: dh_params.p_bytes(),
+                    dh_g: dh_params.g_bytes(),
+                    dh_ys,
+                };
+                let ske_msg = encode_server_key_exchange_dhe_anon(&ske);
+                self.transcript.update(&ske_msg)?;
+                self.dhe_params = Some(dh_params);
+                self.dhe_key_pair = Some(dh_kp);
+                Some(ske_msg)
+            }
+            KeyExchangeAlg::EcdheAnon => {
+                let group = negotiate_group(&client_groups, &self.config.supported_groups)?;
+                let kx = KeyExchange::generate(group)?;
+                let ske = ServerKeyExchangeEcdheAnon {
+                    named_curve: group.0,
+                    public_key: kx.public_key_bytes().to_vec(),
+                };
+                let ske_msg = encode_server_key_exchange_ecdhe_anon(&ske);
+                self.transcript.update(&ske_msg)?;
+                self.ephemeral_key = Some(kx);
+                Some(ske_msg)
+            }
             #[cfg(feature = "tlcp")]
             KeyExchangeAlg::Ecc => {
                 return Err(TlsError::HandshakeFailed(
@@ -1141,6 +1173,26 @@ impl Tls12ServerHandshake {
                     _ => fallback_pms,
                 };
                 build_psk_pms(&rsa_pms, &psk)
+            }
+            KeyExchangeAlg::DheAnon => {
+                let cke = decode_client_key_exchange_dhe(body)?;
+                let dh_kp = self.dhe_key_pair.take().ok_or_else(|| {
+                    TlsError::HandshakeFailed("no DHE key pair for DH_anon".into())
+                })?;
+                let dh_params = self
+                    .dhe_params
+                    .take()
+                    .ok_or_else(|| TlsError::HandshakeFailed("no DHE params for DH_anon".into()))?;
+                dh_kp
+                    .compute_shared_secret(&dh_params, &cke.dh_yc)
+                    .map_err(TlsError::CryptoError)?
+            }
+            KeyExchangeAlg::EcdheAnon => {
+                let cke = decode_client_key_exchange(body)?;
+                let kx = self.ephemeral_key.take().ok_or_else(|| {
+                    TlsError::HandshakeFailed("no ECDHE key for ECDH_anon".into())
+                })?;
+                kx.compute_shared_secret(&cke.public_key)?
             }
             #[cfg(feature = "tlcp")]
             KeyExchangeAlg::Ecc => {

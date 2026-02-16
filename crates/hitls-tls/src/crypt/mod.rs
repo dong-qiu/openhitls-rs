@@ -172,6 +172,10 @@ pub enum KeyExchangeAlg {
     RsaPsk,
     /// ECDHE_PSK key exchange (RFC 5489) — ECDH + PSK, no certificates.
     EcdhePsk,
+    /// Anonymous DHE key exchange (DH_anon): no authentication, no certificate.
+    DheAnon,
+    /// Anonymous ECDHE key exchange (ECDH_anon): no authentication, no certificate.
+    EcdheAnon,
     /// TLCP ECC static key exchange (SM2 encryption of premaster secret).
     #[cfg(feature = "tlcp")]
     Ecc,
@@ -188,7 +192,10 @@ impl KeyExchangeAlg {
 
     /// Returns true if the server should send a Certificate message.
     pub fn requires_certificate(&self) -> bool {
-        !matches!(self, Self::Psk | Self::DhePsk | Self::EcdhePsk)
+        !matches!(
+            self,
+            Self::Psk | Self::DhePsk | Self::EcdhePsk | Self::DheAnon | Self::EcdheAnon
+        )
     }
 }
 
@@ -201,6 +208,8 @@ pub enum AuthAlg {
     Psk,
     /// DSA authentication (DSS certificates).
     Dsa,
+    /// Anonymous (no authentication) — DH_anon / ECDH_anon suites.
+    Anon,
     #[cfg(feature = "tlcp")]
     Sm2,
 }
@@ -771,6 +780,114 @@ impl Tls12CipherSuiteParams {
                 tag_len: 0,
                 mac_key_len: 32,
                 mac_len: 32,
+                is_cbc: true,
+            }),
+            // --- DH_ANON GCM suites (RFC 5246) ---
+            CipherSuite::TLS_DH_ANON_WITH_AES_128_GCM_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::DheAnon,
+                auth_alg: AuthAlg::Anon,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+                mac_key_len: 0,
+                mac_len: 0,
+                is_cbc: false,
+            }),
+            CipherSuite::TLS_DH_ANON_WITH_AES_256_GCM_SHA384 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::DheAnon,
+                auth_alg: AuthAlg::Anon,
+                hash_len: 48,
+                key_len: 32,
+                fixed_iv_len: 4,
+                record_iv_len: 8,
+                tag_len: 16,
+                mac_key_len: 0,
+                mac_len: 0,
+                is_cbc: false,
+            }),
+            // --- DH_ANON CBC-SHA suites (RFC 5246) ---
+            CipherSuite::TLS_DH_ANON_WITH_AES_128_CBC_SHA => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::DheAnon,
+                auth_alg: AuthAlg::Anon,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 20,
+                mac_len: 20,
+                is_cbc: true,
+            }),
+            CipherSuite::TLS_DH_ANON_WITH_AES_256_CBC_SHA => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::DheAnon,
+                auth_alg: AuthAlg::Anon,
+                hash_len: 32,
+                key_len: 32,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 20,
+                mac_len: 20,
+                is_cbc: true,
+            }),
+            // --- DH_ANON CBC-SHA256 suites (RFC 5246) ---
+            CipherSuite::TLS_DH_ANON_WITH_AES_128_CBC_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::DheAnon,
+                auth_alg: AuthAlg::Anon,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 32,
+                mac_len: 32,
+                is_cbc: true,
+            }),
+            CipherSuite::TLS_DH_ANON_WITH_AES_256_CBC_SHA256 => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::DheAnon,
+                auth_alg: AuthAlg::Anon,
+                hash_len: 32,
+                key_len: 32,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 32,
+                mac_len: 32,
+                is_cbc: true,
+            }),
+            // --- ECDH_ANON CBC-SHA suites (RFC 4492) ---
+            CipherSuite::TLS_ECDH_ANON_WITH_AES_128_CBC_SHA => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::EcdheAnon,
+                auth_alg: AuthAlg::Anon,
+                hash_len: 32,
+                key_len: 16,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 20,
+                mac_len: 20,
+                is_cbc: true,
+            }),
+            CipherSuite::TLS_ECDH_ANON_WITH_AES_256_CBC_SHA => Ok(Self {
+                suite,
+                kx_alg: KeyExchangeAlg::EcdheAnon,
+                auth_alg: AuthAlg::Anon,
+                hash_len: 32,
+                key_len: 32,
+                fixed_iv_len: 16,
+                record_iv_len: 0,
+                tag_len: 0,
+                mac_key_len: 20,
+                mac_len: 20,
                 is_cbc: true,
             }),
             // --- DHE_RSA CBC suites ---

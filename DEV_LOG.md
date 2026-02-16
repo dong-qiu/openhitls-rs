@@ -1,5 +1,57 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 67: DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2)
+
+### Date: 2026-02-16
+
+### Summary
+Added 8 TLS 1.2 anonymous cipher suites (RFC 5246 / RFC 4492) with no authentication. New `KeyExchangeAlg::DheAnon` and `EcdheAnon` variants, `AuthAlg::Anon`, unsigned ServerKeyExchange codec (`ServerKeyExchangeDheAnon` / `ServerKeyExchangeEcdheAnon`), and anonymous handshake flow (no Certificate message, no signature in ServerKeyExchange, no CertificateRequest). 10 new tests (suite params lookup, GCM AEAD mapping, encrypt/decrypt roundtrip, codec roundtrip, requires_certificate check).
+
+### New Cipher Suites
+
+| Suite | Code | Key Exchange | Auth | Cipher | Hash |
+|-------|------|-------------|------|--------|------|
+| TLS_DH_ANON_WITH_AES_128_CBC_SHA | 0x0034 | DheAnon | Anon | AES-128-CBC | SHA-256 (PRF), SHA-1 (MAC) |
+| TLS_DH_ANON_WITH_AES_256_CBC_SHA | 0x003A | DheAnon | Anon | AES-256-CBC | SHA-256 (PRF), SHA-1 (MAC) |
+| TLS_DH_ANON_WITH_AES_128_CBC_SHA256 | 0x006C | DheAnon | Anon | AES-128-CBC | SHA-256 |
+| TLS_DH_ANON_WITH_AES_256_CBC_SHA256 | 0x006D | DheAnon | Anon | AES-256-CBC | SHA-256 |
+| TLS_DH_ANON_WITH_AES_128_GCM_SHA256 | 0x00A6 | DheAnon | Anon | AES-128-GCM | SHA-256 |
+| TLS_DH_ANON_WITH_AES_256_GCM_SHA384 | 0x00A7 | DheAnon | Anon | AES-256-GCM | SHA-384 |
+| TLS_ECDH_ANON_WITH_AES_128_CBC_SHA | 0xC018 | EcdheAnon | Anon | AES-128-CBC | SHA-256 (PRF), SHA-1 (MAC) |
+| TLS_ECDH_ANON_WITH_AES_256_CBC_SHA | 0xC019 | EcdheAnon | Anon | AES-256-CBC | SHA-256 (PRF), SHA-1 (MAC) |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/lib.rs` | 8 new `CipherSuite` constants |
+| `crates/hitls-tls/src/crypt/mod.rs` | `KeyExchangeAlg::DheAnon/EcdheAnon`, `AuthAlg::Anon`, updated `requires_certificate()`, 8 `Tls12CipherSuiteParams` entries |
+| `crates/hitls-tls/src/handshake/codec12.rs` | `ServerKeyExchangeDheAnon`/`ServerKeyExchangeEcdheAnon` structs, encode/decode functions, 2 roundtrip tests |
+| `crates/hitls-tls/src/handshake/server12.rs` | DheAnon/EcdheAnon arms in SKE build (~line 552) and CKE process (~line 1067) |
+| `crates/hitls-tls/src/handshake/client12.rs` | State transitions, `process_server_key_exchange_dhe_anon()`/`process_server_key_exchange_ecdhe_anon()` methods, CKE generation arms |
+| `crates/hitls-tls/src/connection12.rs` | DheAnon/EcdheAnon arms in client SKE dispatch |
+| `crates/hitls-tls/src/connection12_async.rs` | Same dispatch (async mirror) |
+| `crates/hitls-tls/src/record/encryption12.rs` | DH_ANON GCM suites in `tls12_suite_to_aead_suite()`, 8 new tests |
+
+### Implementation Details
+- Anonymous handshake: no Certificate message, no signature in ServerKeyExchange, no CertificateRequest
+- DheAnon: same DH param exchange as Dhe but unsigned — `ServerKeyExchangeDheAnon` has `dh_p/dh_g/dh_ys` only (no sig_algorithm/signature)
+- EcdheAnon: same ECDHE param exchange as Ecdhe but unsigned — `ServerKeyExchangeEcdheAnon` has `named_curve/public_key` only
+- `requires_certificate()` returns false for DheAnon/EcdheAnon (alongside Psk/DhePsk/EcdhePsk)
+- CKE processing reuses existing `decode_client_key_exchange_dhe`/`decode_client_key_exchange` — raw PMS (not PSK-wrapped)
+- CBC-SHA suites: mac_key_len=20, mac_len=20 (SHA-1 HMAC)
+- CBC-SHA256 suites: mac_key_len=32, mac_len=32 (SHA-256 HMAC)
+- GCM suites: fixed_iv_len=4, record_iv_len=8, tag_len=16
+
+### Test Counts (Phase 67)
+- **hitls-tls**: 666 [was: 656]
+- **Total workspace**: 1836 (40 ignored) [was: 1826]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1836 workspace tests passing (40 ignored)
+
 ## Phase 65: PSK CCM Completion + CCM_8 Authentication Cipher Suites
 
 ### Date: 2026-02-16
@@ -5648,3 +5700,42 @@ Added 6 TLS 1.2 DHE_DSS cipher suites (RFC 5246) with DSA authentication. New `A
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1826 workspace tests passing (40 ignored)
+
+## Phase 67: DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2)
+
+### Date: 2026-02-16
+
+### Summary
+Added 8 TLS 1.2 anonymous cipher suites (RFC 5246 / RFC 4492) with no authentication. New `KeyExchangeAlg::DheAnon` and `EcdheAnon` variants, `AuthAlg::Anon`, unsigned ServerKeyExchange codec (`ServerKeyExchangeDheAnon` / `ServerKeyExchangeEcdheAnon`), and anonymous handshake flow (no Certificate, no signature in SKE, no CertificateRequest). 10 new tests.
+
+### New Cipher Suites
+
+| Suite | Code | Key Exchange | Auth | Cipher | Hash |
+|-------|------|-------------|------|--------|------|
+| TLS_DH_ANON_WITH_AES_128_CBC_SHA | 0x0034 | DheAnon | Anon | AES-128-CBC | SHA-256 (PRF), SHA-1 (MAC) |
+| TLS_DH_ANON_WITH_AES_256_CBC_SHA | 0x003A | DheAnon | Anon | AES-256-CBC | SHA-256 (PRF), SHA-1 (MAC) |
+| TLS_DH_ANON_WITH_AES_128_CBC_SHA256 | 0x006C | DheAnon | Anon | AES-128-CBC | SHA-256 |
+| TLS_DH_ANON_WITH_AES_256_CBC_SHA256 | 0x006D | DheAnon | Anon | AES-256-CBC | SHA-256 |
+| TLS_DH_ANON_WITH_AES_128_GCM_SHA256 | 0x00A6 | DheAnon | Anon | AES-128-GCM | SHA-256 |
+| TLS_DH_ANON_WITH_AES_256_GCM_SHA384 | 0x00A7 | DheAnon | Anon | AES-256-GCM | SHA-384 |
+| TLS_ECDH_ANON_WITH_AES_128_CBC_SHA | 0xC018 | EcdheAnon | Anon | AES-128-CBC | SHA-256 (PRF), SHA-1 (MAC) |
+| TLS_ECDH_ANON_WITH_AES_256_CBC_SHA | 0xC019 | EcdheAnon | Anon | AES-256-CBC | SHA-256 (PRF), SHA-1 (MAC) |
+
+### Files Modified (8)
+- `crates/hitls-tls/src/lib.rs` — 8 cipher suite constants
+- `crates/hitls-tls/src/crypt/mod.rs` — `KeyExchangeAlg::DheAnon/EcdheAnon`, `AuthAlg::Anon`, `requires_certificate()`, 8 suite params
+- `crates/hitls-tls/src/handshake/codec12.rs` — `ServerKeyExchangeDheAnon`/`ServerKeyExchangeEcdheAnon` structs + encode/decode + 2 tests
+- `crates/hitls-tls/src/handshake/server12.rs` — SKE build + CKE process arms
+- `crates/hitls-tls/src/handshake/client12.rs` — State transitions, SKE process, CKE gen
+- `crates/hitls-tls/src/connection12.rs` — Client SKE dispatch
+- `crates/hitls-tls/src/connection12_async.rs` — Async SKE dispatch
+- `crates/hitls-tls/src/record/encryption12.rs` — GCM AEAD mapping + 8 tests
+
+### Test Counts (Phase 67)
+- **hitls-tls**: 666 [was: 656]
+- **Total workspace**: 1836 (40 ignored) [was: 1826]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1836 workspace tests passing (40 ignored)

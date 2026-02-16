@@ -203,7 +203,8 @@ pub fn tls12_suite_to_aead_suite(suite: CipherSuite) -> Result<CipherSuite, TlsE
         | CipherSuite::TLS_PSK_WITH_AES_128_GCM_SHA256
         | CipherSuite::TLS_DHE_PSK_WITH_AES_128_GCM_SHA256
         | CipherSuite::TLS_RSA_PSK_WITH_AES_128_GCM_SHA256
-        | CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256 => {
+        | CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256
+        | CipherSuite::TLS_DH_ANON_WITH_AES_128_GCM_SHA256 => {
             Ok(CipherSuite::TLS_AES_128_GCM_SHA256)
         }
         CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
@@ -214,7 +215,8 @@ pub fn tls12_suite_to_aead_suite(suite: CipherSuite) -> Result<CipherSuite, TlsE
         | CipherSuite::TLS_PSK_WITH_AES_256_GCM_SHA384
         | CipherSuite::TLS_DHE_PSK_WITH_AES_256_GCM_SHA384
         | CipherSuite::TLS_RSA_PSK_WITH_AES_256_GCM_SHA384
-        | CipherSuite::TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384 => {
+        | CipherSuite::TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384
+        | CipherSuite::TLS_DH_ANON_WITH_AES_256_GCM_SHA384 => {
             Ok(CipherSuite::TLS_AES_256_GCM_SHA384)
         }
         CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
@@ -1219,5 +1221,132 @@ mod tests {
             ],
         );
         assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // DH_ANON / ECDH_ANON cipher suite tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_dh_anon_cbc_sha_params() {
+        use crate::crypt::{AuthAlg, KeyExchangeAlg, Tls12CipherSuiteParams};
+        let p128 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DH_ANON_WITH_AES_128_CBC_SHA)
+                .unwrap();
+        assert_eq!(p128.kx_alg, KeyExchangeAlg::DheAnon);
+        assert_eq!(p128.auth_alg, AuthAlg::Anon);
+        assert_eq!(p128.key_len, 16);
+        assert_eq!(p128.mac_key_len, 20);
+        assert!(p128.is_cbc);
+
+        let p256 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DH_ANON_WITH_AES_256_CBC_SHA)
+                .unwrap();
+        assert_eq!(p256.key_len, 32);
+        assert_eq!(p256.mac_key_len, 20);
+    }
+
+    #[test]
+    fn test_dh_anon_cbc_sha256_params() {
+        use crate::crypt::{KeyExchangeAlg, Tls12CipherSuiteParams};
+        let p128 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DH_ANON_WITH_AES_128_CBC_SHA256)
+                .unwrap();
+        assert_eq!(p128.kx_alg, KeyExchangeAlg::DheAnon);
+        assert_eq!(p128.key_len, 16);
+        assert_eq!(p128.mac_key_len, 32);
+        assert_eq!(p128.mac_len, 32);
+
+        let p256 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DH_ANON_WITH_AES_256_CBC_SHA256)
+                .unwrap();
+        assert_eq!(p256.key_len, 32);
+        assert_eq!(p256.mac_key_len, 32);
+    }
+
+    #[test]
+    fn test_dh_anon_gcm_params() {
+        use crate::crypt::{AuthAlg, KeyExchangeAlg, Tls12CipherSuiteParams};
+        let p128 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DH_ANON_WITH_AES_128_GCM_SHA256)
+                .unwrap();
+        assert_eq!(p128.kx_alg, KeyExchangeAlg::DheAnon);
+        assert_eq!(p128.auth_alg, AuthAlg::Anon);
+        assert_eq!(p128.key_len, 16);
+        assert_eq!(p128.tag_len, 16);
+        assert!(!p128.is_cbc);
+
+        let p256 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DH_ANON_WITH_AES_256_GCM_SHA384)
+                .unwrap();
+        assert_eq!(p256.key_len, 32);
+        assert_eq!(p256.hash_len, 48);
+    }
+
+    #[test]
+    fn test_ecdh_anon_cbc_sha_params() {
+        use crate::crypt::{AuthAlg, KeyExchangeAlg, Tls12CipherSuiteParams};
+        let p128 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_ECDH_ANON_WITH_AES_128_CBC_SHA)
+                .unwrap();
+        assert_eq!(p128.kx_alg, KeyExchangeAlg::EcdheAnon);
+        assert_eq!(p128.auth_alg, AuthAlg::Anon);
+        assert_eq!(p128.key_len, 16);
+        assert_eq!(p128.mac_key_len, 20);
+        assert!(p128.is_cbc);
+
+        let p256 =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_ECDH_ANON_WITH_AES_256_CBC_SHA)
+                .unwrap();
+        assert_eq!(p256.key_len, 32);
+        assert_eq!(p256.mac_key_len, 20);
+    }
+
+    #[test]
+    fn test_dh_anon_gcm_aead_mapping() {
+        let s128 =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DH_ANON_WITH_AES_128_GCM_SHA256).unwrap();
+        assert_eq!(s128, CipherSuite::TLS_AES_128_GCM_SHA256);
+
+        let s256 =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DH_ANON_WITH_AES_256_GCM_SHA384).unwrap();
+        assert_eq!(s256, CipherSuite::TLS_AES_256_GCM_SHA384);
+    }
+
+    #[test]
+    fn test_dh_anon_gcm_128_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_128();
+        let plaintext = b"DH_anon GCM 128 roundtrip";
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DH_ANON_WITH_AES_128_GCM_SHA256).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        let pt = dec.decrypt_record(&record).unwrap();
+        assert_eq!(&pt[..], plaintext);
+    }
+
+    #[test]
+    fn test_dh_anon_gcm_256_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_256();
+        let plaintext = b"DH_anon GCM 256 roundtrip";
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DH_ANON_WITH_AES_256_GCM_SHA384).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        let pt = dec.decrypt_record(&record).unwrap();
+        assert_eq!(&pt[..], plaintext);
+    }
+
+    #[test]
+    fn test_anon_requires_certificate_false() {
+        use crate::crypt::KeyExchangeAlg;
+        assert!(!KeyExchangeAlg::DheAnon.requires_certificate());
+        assert!(!KeyExchangeAlg::EcdheAnon.requires_certificate());
     }
 }
