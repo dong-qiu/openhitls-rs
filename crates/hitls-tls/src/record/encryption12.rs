@@ -232,14 +232,25 @@ pub fn tls12_suite_to_aead_suite(suite: CipherSuite) -> Result<CipherSuite, TlsE
         | CipherSuite::TLS_DHE_RSA_WITH_AES_256_CCM
         | CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CCM
         | CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CCM
+        | CipherSuite::TLS_PSK_WITH_AES_128_CCM
         | CipherSuite::TLS_PSK_WITH_AES_256_CCM
         | CipherSuite::TLS_DHE_PSK_WITH_AES_128_CCM
         | CipherSuite::TLS_DHE_PSK_WITH_AES_256_CCM
         | CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_CCM_SHA256 => {
             Ok(CipherSuite::TLS_AES_128_CCM_SHA256)
         }
-        // AES-CCM_8 suites (RFC 6655, 8-byte tag): map to TLS 1.3 AES-128-CCM_8.
-        CipherSuite::TLS_RSA_WITH_AES_128_CCM_8 | CipherSuite::TLS_RSA_WITH_AES_256_CCM_8 => {
+        // AES-CCM_8 suites (RFC 6655 / RFC 7251, 8-byte tag): map to TLS 1.3 AES-128-CCM_8.
+        CipherSuite::TLS_RSA_WITH_AES_128_CCM_8
+        | CipherSuite::TLS_RSA_WITH_AES_256_CCM_8
+        | CipherSuite::TLS_DHE_RSA_WITH_AES_128_CCM_8
+        | CipherSuite::TLS_DHE_RSA_WITH_AES_256_CCM_8
+        | CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8
+        | CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8
+        | CipherSuite::TLS_PSK_WITH_AES_128_CCM_8
+        | CipherSuite::TLS_PSK_WITH_AES_256_CCM_8
+        | CipherSuite::TLS_DHE_PSK_WITH_AES_128_CCM_8
+        | CipherSuite::TLS_DHE_PSK_WITH_AES_256_CCM_8
+        | CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_CCM_8_SHA256 => {
             Ok(CipherSuite::TLS_AES_128_CCM_8_SHA256)
         }
         _ => Err(TlsError::NoSharedCipherSuite),
@@ -702,6 +713,226 @@ mod tests {
 
         let decrypted = dec.decrypt_record(&record).unwrap();
         assert_eq!(decrypted, plaintext);
+    }
+
+    // --- Phase 65: PSK CCM completion + CCM_8 authentication cipher suites ---
+
+    #[test]
+    fn test_phase65_ccm_ccm8_suite_mapping() {
+        // PSK CCM (16-byte tag) maps to TLS_AES_128_CCM_SHA256
+        assert_eq!(
+            tls12_suite_to_aead_suite(CipherSuite::TLS_PSK_WITH_AES_128_CCM).unwrap(),
+            CipherSuite::TLS_AES_128_CCM_SHA256
+        );
+
+        // All CCM_8 suites map to TLS_AES_128_CCM_8_SHA256
+        let ccm8_suites = [
+            CipherSuite::TLS_DHE_RSA_WITH_AES_128_CCM_8,
+            CipherSuite::TLS_DHE_RSA_WITH_AES_256_CCM_8,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8,
+            CipherSuite::TLS_PSK_WITH_AES_128_CCM_8,
+            CipherSuite::TLS_PSK_WITH_AES_256_CCM_8,
+            CipherSuite::TLS_DHE_PSK_WITH_AES_128_CCM_8,
+            CipherSuite::TLS_DHE_PSK_WITH_AES_256_CCM_8,
+            CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_CCM_8_SHA256,
+        ];
+        for suite in ccm8_suites {
+            assert_eq!(
+                tls12_suite_to_aead_suite(suite).unwrap(),
+                CipherSuite::TLS_AES_128_CCM_8_SHA256,
+                "CCM_8 mapping failed for suite 0x{:04X}",
+                suite.0
+            );
+        }
+    }
+
+    #[test]
+    fn test_phase65_psk_ccm128_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_128();
+        let aead_suite = tls12_suite_to_aead_suite(CipherSuite::TLS_PSK_WITH_AES_128_CCM).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 PSK AES-128-CCM";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        // fragment = explicit_nonce(8) + plaintext(29) + tag(16) = 53
+        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 16);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_phase65_psk_ccm8_128_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_128();
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_PSK_WITH_AES_128_CCM_8).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 PSK AES-128-CCM_8";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        assert_eq!(record.content_type, ContentType::ApplicationData);
+        // fragment = explicit_nonce(8) + plaintext(31) + tag(8) = 47
+        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 8);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_phase65_dhe_rsa_ccm8_256_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_256();
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_DHE_RSA_WITH_AES_256_CCM_8).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 DHE_RSA AES-256-CCM_8";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        // fragment = explicit_nonce(8) + plaintext(35) + tag(8) = 51
+        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 8);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_phase65_ecdhe_ecdsa_ccm8_128_encrypt_decrypt_roundtrip() {
+        let (key, iv) = make_keys_128();
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let plaintext = b"hello TLS 1.2 ECDHE_ECDSA AES-128-CCM_8";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        // fragment = explicit_nonce(8) + plaintext(40) + tag(8) = 56
+        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 8);
+
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_phase65_ccm8_psk_tampered_record() {
+        let (key, iv) = make_keys_128();
+        let aead_suite =
+            tls12_suite_to_aead_suite(CipherSuite::TLS_PSK_WITH_AES_128_CCM_8).unwrap();
+        let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
+        let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
+
+        let record = enc
+            .encrypt_record(ContentType::Handshake, b"secret CCM_8 PSK data")
+            .unwrap();
+
+        let mut tampered = record.clone();
+        tampered.fragment[10] ^= 0x01;
+        assert!(dec.decrypt_record(&tampered).is_err());
+    }
+
+    #[test]
+    fn test_phase65_params_lookup_psk_ccm() {
+        use crate::crypt::Tls12CipherSuiteParams;
+
+        // PSK CCM (16-byte tag)
+        let p = Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_PSK_WITH_AES_128_CCM).unwrap();
+        assert!(!p.is_cbc);
+        assert_eq!(p.key_len, 16);
+        assert_eq!(p.hash_len, 32);
+        assert_eq!(p.tag_len, 16);
+        assert_eq!(p.fixed_iv_len, 4);
+        assert_eq!(p.record_iv_len, 8);
+
+        // PSK CCM_8 (8-byte tag)
+        for (suite, key_len) in [
+            (CipherSuite::TLS_PSK_WITH_AES_128_CCM_8, 16),
+            (CipherSuite::TLS_PSK_WITH_AES_256_CCM_8, 32),
+        ] {
+            let p = Tls12CipherSuiteParams::from_suite(suite).unwrap();
+            assert!(!p.is_cbc);
+            assert_eq!(p.key_len, key_len);
+            assert_eq!(p.tag_len, 8);
+            assert_eq!(p.hash_len, 32);
+        }
+    }
+
+    #[test]
+    fn test_phase65_params_lookup_dhe_psk_ccm8() {
+        use crate::crypt::Tls12CipherSuiteParams;
+
+        for (suite, key_len) in [
+            (CipherSuite::TLS_DHE_PSK_WITH_AES_128_CCM_8, 16),
+            (CipherSuite::TLS_DHE_PSK_WITH_AES_256_CCM_8, 32),
+        ] {
+            let p = Tls12CipherSuiteParams::from_suite(suite).unwrap();
+            assert!(!p.is_cbc);
+            assert_eq!(p.key_len, key_len);
+            assert_eq!(p.tag_len, 8);
+            assert_eq!(p.hash_len, 32);
+            assert_eq!(p.fixed_iv_len, 4);
+            assert_eq!(p.record_iv_len, 8);
+        }
+    }
+
+    #[test]
+    fn test_phase65_params_lookup_ecdhe_psk_ccm8() {
+        use crate::crypt::Tls12CipherSuiteParams;
+
+        let p = Tls12CipherSuiteParams::from_suite(
+            CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_CCM_8_SHA256,
+        )
+        .unwrap();
+        assert!(!p.is_cbc);
+        assert_eq!(p.key_len, 16);
+        assert_eq!(p.tag_len, 8);
+        assert_eq!(p.hash_len, 32);
+    }
+
+    #[test]
+    fn test_phase65_params_lookup_dhe_rsa_ccm8() {
+        use crate::crypt::Tls12CipherSuiteParams;
+
+        for (suite, key_len) in [
+            (CipherSuite::TLS_DHE_RSA_WITH_AES_128_CCM_8, 16),
+            (CipherSuite::TLS_DHE_RSA_WITH_AES_256_CCM_8, 32),
+        ] {
+            let p = Tls12CipherSuiteParams::from_suite(suite).unwrap();
+            assert!(!p.is_cbc);
+            assert_eq!(p.key_len, key_len);
+            assert_eq!(p.tag_len, 8);
+            assert_eq!(p.hash_len, 32);
+        }
+    }
+
+    #[test]
+    fn test_phase65_params_lookup_ecdhe_ecdsa_ccm8() {
+        use crate::crypt::Tls12CipherSuiteParams;
+
+        for (suite, key_len) in [
+            (CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8, 16),
+            (CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8, 32),
+        ] {
+            let p = Tls12CipherSuiteParams::from_suite(suite).unwrap();
+            assert!(!p.is_cbc);
+            assert_eq!(p.key_len, key_len);
+            assert_eq!(p.tag_len, 8);
+            assert_eq!(p.hash_len, 32);
+        }
     }
 
     #[test]
