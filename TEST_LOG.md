@@ -7,7 +7,8 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Final**: 1,291 tests (37 ignored) — **187 new tests added**
+**Current**: 1,818 tests (40 ignored)
+**P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 
 ---
 

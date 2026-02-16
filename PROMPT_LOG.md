@@ -1511,6 +1511,14 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1790 total tests (40 ignored). Clippy clean, fmt clean.
 
+## Phase 65: PSK CCM Completion + CCM_8 Authentication Cipher Suites (2026-02-16)
+
+**Prompt**: Implement Phase 65 — PSK CCM completion + CCM_8 authentication cipher suites. Add 10 TLS 1.2 cipher suites completing CCM/CCM_8 coverage: PSK AES_128_CCM (0xC0A4), PSK AES_128/256_CCM_8 (0xC0A8/C0A9), DHE_PSK AES_128/256_CCM_8 (0xC0AA/C0AB), ECDHE_PSK AES_128_CCM_8_SHA256 (0xD003), DHE_RSA AES_128/256_CCM_8 (0xC0A2/C0A3), ECDHE_ECDSA AES_128/256_CCM_8 (0xC0AE/C0AF). All use PRF=SHA-256, AEAD mode, fixed_iv_len=4, record_iv_len=8. CCM suites use tag_len=16, CCM_8 suites use tag_len=8.
+
+**Result**: 11 new TLS tests. 10 new cipher suites added. PSK_WITH_AES_128_CCM added to CCM (16-byte tag) AEAD mapping arm. 9 CCM_8 suites added to CCM_8 (8-byte tag) AEAD mapping arm (expanded from 2 to 11 entries). All 10 suites registered in `Tls12CipherSuiteParams::from_suite()`. No handshake changes needed — all KX/auth combinations already implemented. Tests: suite mapping (10 CCM_8 + 1 CCM), encrypt/decrypt roundtrips (PSK CCM 128, PSK CCM_8 128, DHE_RSA CCM_8 256, ECDHE_ECDSA CCM_8 128), tampered record (PSK CCM_8), params lookup (PSK CCM/CCM_8, DHE_PSK CCM_8, ECDHE_PSK CCM_8, DHE_RSA CCM_8, ECDHE_ECDSA CCM_8). TLS: 648 tests [was: 637]. Total: 1818 tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
 ## Phase 64: PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites (2026-02-16)
 
 **Prompt**: Add 8 new TLS 1.2 cipher suites completing PSK cipher suite coverage. RFC 5487: PSK_WITH_AES_128_CBC_SHA256 (0x00AE), PSK_WITH_AES_256_CBC_SHA384 (0x00AF), DHE_PSK_WITH_AES_128_CBC_SHA256 (0x00B2), DHE_PSK_WITH_AES_256_CBC_SHA384 (0x00B3), RSA_PSK_WITH_AES_128_CBC_SHA256 (0x00B6), RSA_PSK_WITH_AES_256_CBC_SHA384 (0x00B7). draft-ietf-tls-ecdhe-psk-aead: ECDHE_PSK_WITH_AES_128_GCM_SHA256 (0xD001), ECDHE_PSK_WITH_AES_256_GCM_SHA384 (0xD002). Use existing CBC/GCM record layer infrastructure. Expected ~5 new tests.

@@ -1,5 +1,44 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 65: PSK CCM Completion + CCM_8 Authentication Cipher Suites
+
+### Date: 2026-02-16
+
+### Summary
+Added 10 TLS 1.2 cipher suites completing CCM/CCM_8 coverage across all key exchange methods. PSK: AES_128_CCM (16-byte tag), AES_128/256_CCM_8 (8-byte tag). DHE_PSK: AES_128/256_CCM_8. ECDHE_PSK: AES_128_CCM_8_SHA256. DHE_RSA: AES_128/256_CCM_8. ECDHE_ECDSA: AES_128/256_CCM_8. 11 new tests validate suite mapping, record layer encrypt/decrypt roundtrips, tampered record detection, and parameter lookups.
+
+### New Cipher Suites
+
+| Suite | Code | Key Exchange | Tag | Key | RFC |
+|-------|------|-------------|-----|-----|-----|
+| TLS_PSK_WITH_AES_128_CCM | 0xC0A4 | PSK | 16 | 128 | RFC 6655 |
+| TLS_PSK_WITH_AES_128_CCM_8 | 0xC0A8 | PSK | 8 | 128 | RFC 6655 |
+| TLS_PSK_WITH_AES_256_CCM_8 | 0xC0A9 | PSK | 8 | 256 | RFC 6655 |
+| TLS_DHE_PSK_WITH_AES_128_CCM_8 | 0xC0AA | DHE_PSK | 8 | 128 | RFC 6655 |
+| TLS_DHE_PSK_WITH_AES_256_CCM_8 | 0xC0AB | DHE_PSK | 8 | 256 | RFC 6655 |
+| TLS_ECDHE_PSK_WITH_AES_128_CCM_8_SHA256 | 0xD003 | ECDHE_PSK | 8 | 128 | draft-ietf-tls-ecdhe-psk-aead |
+| TLS_DHE_RSA_WITH_AES_128_CCM_8 | 0xC0A2 | DHE_RSA | 8 | 128 | RFC 6655 |
+| TLS_DHE_RSA_WITH_AES_256_CCM_8 | 0xC0A3 | DHE_RSA | 8 | 256 | RFC 6655 |
+| TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 | 0xC0AE | ECDHE_ECDSA | 8 | 128 | RFC 7251 |
+| TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8 | 0xC0AF | ECDHE_ECDSA | 8 | 256 | RFC 7251 |
+
+### Implementation Details
+- PSK_WITH_AES_128_CCM added to CCM (16-byte tag) AEAD mapping arm
+- 9 CCM_8 suites added to CCM_8 (8-byte tag) AEAD mapping arm (was 2, now 11)
+- All 10 suites registered in `Tls12CipherSuiteParams::from_suite()` with correct kx_alg, auth_alg, key_len, tag_len
+- No handshake changes needed — all KX/auth combinations already implemented
+
+### Test Counts (Phase 65)
+- **hitls-tls**: 648 [was: 637]
+- **Total workspace**: 1818 (40 ignored) [was: 1807]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1818 workspace tests passing (40 ignored)
+
+---
+
 ## Phase 64: PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites
 
 ### Date: 2026-02-16
