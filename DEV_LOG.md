@@ -6163,3 +6163,80 @@ Systematic test coverage improvement for the seven previously-untested CLI comma
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1952 workspace tests passing (40 ignored)
+
+## Testing-Phase 73: Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
+
+### Summary
+Added 33 new tests across hitls-tls and hitls-integration-tests:
+- B1: 12 async TLS 1.3 unit tests in `connection_async.rs`
+- B2: 21 cipher suite integration tests in `tests/interop/src/lib.rs`
+Total: 1988 → 2021 tests (+33)
+
+### Files Modified
+| File | Change |
+|------|--------|
+| `crates/hitls-tls/src/connection_async.rs` | +12 `#[tokio::test]` async TLS 1.3 tests |
+| `tests/interop/src/lib.rs` | +21 cipher suite integration tests + helpers |
+
+### B1: Async TLS 1.3 Unit Tests (+12)
+New helper `make_tls13_configs()` uses Ed25519 seed [0x42;32] with fake cert + `verify_peer(false)`.
+
+| Test | Description |
+|------|-------------|
+| test_async_tls13_read_before_handshake | Read before handshake returns Err |
+| test_async_tls13_write_before_handshake | Write before handshake returns Err |
+| test_async_tls13_full_handshake_and_data | Bidirectional data after handshake |
+| test_async_tls13_version_and_cipher | version()=Tls13, cipher_suite() is Some |
+| test_async_tls13_shutdown | Graceful shutdown + double shutdown OK |
+| test_async_tls13_large_payload | 32KB payload across 16KB record boundary |
+| test_async_tls13_multi_message | 3 sequential messages |
+| test_async_tls13_key_update | key_update(false) + data exchange after |
+| test_async_tls13_session_take | take_session() no-panic; second take = None |
+| test_async_tls13_connection_info | connection_info() Some after handshake |
+| test_async_tls13_alpn_negotiation | ALPN "h2" negotiated correctly |
+| test_async_tls13_is_session_resumed | Full handshake → is_session_resumed()=false |
+
+### B2: Cipher Suite Integration Tests (+21)
+New helpers: `run_tls12_tcp_loopback`, `run_tls13_tcp_loopback`, `make_psk_configs`, `make_anon_configs`
+
+| Test Group | Count | Suites |
+|-----------|-------|--------|
+| ECDHE_ECDSA CCM | 4 | AES_128/256_CCM, AES_128/256_CCM_8 |
+| DHE_RSA CCM | 4 | AES_128/256_CCM, AES_128/256_CCM_8 |
+| PSK | 5 | PSK+GCM, PSK+CCM, DHE_PSK+GCM, ECDHE_PSK+GCM, PSK+ChaCha20 |
+| DH_ANON/ECDH_ANON | 4 | DH_ANON+GCM/CBC, ECDH_ANON+CBC(x2) |
+| TLS 1.3 additional | 4 | AES256-GCM, ChaCha20, CCM_8, RSA cert |
+
+### Bug Found and Fixed
+- `TLS_AES_128_CCM_SHA256` (0x1304) is NOT in `CipherSuiteParams::from_suite()` for TLS 1.3 (only `TLS_AES_128_CCM_8_SHA256` 0x1305 is). Replaced `test_tcp_tls13_aes128_ccm` with `test_tcp_tls13_rsa_server_cert`.
+- TLS 1.2 integration tests must use `Tls12ClientConnection`/`Tls12ServerConnection`, not `TlsClientConnection`/`TlsServerConnection` (which are TLS 1.3 only).
+
+### Test Counts (Testing-Phase 73)
+
+| Crate | Before | After | Delta |
+|-------|--------|-------|-------|
+| hitls-tls | 726 | 738 | +12 |
+| hitls-integration-tests | 39 | 60 | +21 |
+| **Workspace total** | **1988** | **2021** | **+33** |
+
+### Workspace Test Breakdown After Testing-Phase 73
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 48 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 593 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 60 | 3 |
+| hitls-pki | 336 | 1 |
+| hitls-tls | 738 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2021** | **40** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2021 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

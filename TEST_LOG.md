@@ -7,9 +7,10 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 1,952 tests (40 ignored)
+**Current**: 2,021 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
+**Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
 
 ---
 
@@ -277,3 +278,54 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **1952** | **40** |
+
+---
+
+## Testing-Phase 73 — Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
+
+**Scope**: Stage B of the test optimization plan — async connection coverage and cipher suite TCP loopback integration.
+**New tests**: +33 (1988 → 2021 total, 40 ignored unchanged)
+
+### B1: Async TLS 1.3 Unit Tests (+12)
+
+| Test | File | Description |
+|------|------|-------------|
+| test_async_tls13_read_before_handshake | `connection_async.rs` | Read before handshake returns Err |
+| test_async_tls13_write_before_handshake | `connection_async.rs` | Write before handshake returns Err |
+| test_async_tls13_full_handshake_and_data | `connection_async.rs` | Bidirectional data after handshake |
+| test_async_tls13_version_and_cipher | `connection_async.rs` | version()=Tls13, cipher_suite() is Some |
+| test_async_tls13_shutdown | `connection_async.rs` | Graceful shutdown + double shutdown OK |
+| test_async_tls13_large_payload | `connection_async.rs` | 32KB payload across 16KB record boundary |
+| test_async_tls13_multi_message | `connection_async.rs` | 3 sequential messages |
+| test_async_tls13_key_update | `connection_async.rs` | key_update(false) + data exchange after |
+| test_async_tls13_session_take | `connection_async.rs` | take_session() no-panic; second take = None |
+| test_async_tls13_connection_info | `connection_async.rs` | connection_info() Some after handshake |
+| test_async_tls13_alpn_negotiation | `connection_async.rs` | ALPN "h2" negotiated correctly |
+| test_async_tls13_is_session_resumed | `connection_async.rs` | Full handshake → is_session_resumed()=false |
+
+### B2: Cipher Suite Integration Tests (+21)
+
+| Test Group | Tests | File | Suites |
+|-----------|:-----:|------|--------|
+| ECDHE_ECDSA CCM | 4 | `tests/interop/src/lib.rs` | AES_128/256_CCM, AES_128/256_CCM_8 |
+| DHE_RSA CCM | 4 | `tests/interop/src/lib.rs` | AES_128/256_CCM, AES_128/256_CCM_8 |
+| PSK suites | 5 | `tests/interop/src/lib.rs` | PSK+GCM, PSK+CCM, DHE_PSK+GCM, ECDHE_PSK+GCM, PSK+ChaCha20 |
+| DH_ANON/ECDH_ANON | 4 | `tests/interop/src/lib.rs` | DH_ANON+GCM/CBC, ECDH_ANON+CBC(x2) |
+| TLS 1.3 additional | 4 | `tests/interop/src/lib.rs` | AES256-GCM, ChaCha20, CCM_8, RSA cert |
+
+### Workspace Test Counts After Testing-Phase 73
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 48 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 593 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 60 | 3 |
+| hitls-pki | 336 | 1 |
+| hitls-tls | 738 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2021** | **40** |

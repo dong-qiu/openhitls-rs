@@ -1622,3 +1622,16 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 13 new tests (11 in hitls-tls + 2 in server.rs). Modified 10 files. KeyUpdate protection: added `key_update_recv_count: u32` field to TlsClientConnection, TlsServerConnection, AsyncTlsClientConnection, AsyncTlsServerConnection (init 0 in new()). Increment + check > 128 at top of handle_key_update() in all 4 types. Reset to 0 in read() ApplicationData branch in all 4 types. MFL: added MaxFragmentLength enum with to_size()/from_u8() in config/mod.rs, max_fragment_length config field + builder method. build_max_fragment_length (1-byte body) + parse_max_fragment_length in extensions_codec.rs. Client12: build in build_client_hello(), parse in process_server_hello(), getter, renegotiation reset. Server12: parse in process_client_hello(), echo in build_server_hello(), getter, renegotiation reset. Connection12 sync+async: apply MFL to record_layer.max_fragment_size before RSL check (RSL overwrites if present). Sig_algs_cert: build_signature_algorithms_cert + parse_signature_algorithms_cert (reuses parse_signature_algorithms_ch) in extensions_codec.rs. Client.rs: added in build_client_hello() + HRR path after signature_algorithms. Server.rs: added client_sig_algs_cert field, parsed in process_client_hello(), getter.
 
 1988 total tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
+## Testing-Phase 73: Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
+
+**Prompt**: Start implementing Testing-Phase 73 (async TLS 1.3 unit tests + cipher suite integration tests).
+
+**Result**:
+- B1: Added 12 async TLS 1.3 unit tests to `connection_async.rs` using `tokio::io::duplex`, covering all key async code paths (read/write before handshake, full handshake + bidirectional data, version and cipher suite verification, graceful shutdown + double shutdown, 32KB large payload, multi-message exchange, key_update() after handshake, take_session(), connection_info() API, ALPN negotiation, is_session_resumed()).
+- B2: Added 21 cipher suite TCP loopback integration tests to `tests/interop/src/lib.rs`. Fixed two bugs: (1) TLS 1.3 does not support `TLS_AES_128_CCM_SHA256` (only `TLS_AES_128_CCM_8_SHA256`); (2) TLS 1.2 tests must use `Tls12ClientConnection`/`Tls12ServerConnection`. Suites covered: ECDHE_ECDSA CCM/CCM_8 (4), DHE_RSA CCM/CCM_8 (4), PSK/DHE_PSK/ECDHE_PSK GCM+CCM+ChaCha20 (5), DH_ANON/ECDH_ANON GCM+CBC (4), TLS 1.3 additional (4).
+- Total: +33 new tests, 1988→2021 tests.
+
+2021 total tests (40 ignored). Clippy clean, fmt clean.
