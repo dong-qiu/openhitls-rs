@@ -1300,4 +1300,266 @@ mod tests {
         assert!(conn.version().is_none());
         assert!(conn.cipher_suite().is_none());
     }
+
+    // -------------------------------------------------------
+    // TLS 1.3 async unit tests
+    // -------------------------------------------------------
+
+    /// Build a matched (client_config, server_config) pair for TLS 1.3 async tests.
+    /// Uses an Ed25519 key with a fake cert DER; verify_peer(false) so cert is not validated.
+    fn make_tls13_configs() -> (TlsConfig, TlsConfig) {
+        use crate::config::ServerPrivateKey;
+        // Minimal ASN.1 SEQUENCE — accepted by TLS layer when verify_peer=false
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        // Valid 32-byte Ed25519 seed
+        let seed = [0x42u8; 32];
+
+        let server_config = TlsConfig::builder()
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed.to_vec()))
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder().verify_peer(false).build();
+
+        (client_config, server_config)
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_read_before_handshake() {
+        let (_, server_config) = make_tls13_configs();
+        let (_, server_stream) = tokio::io::duplex(16 * 1024);
+        let mut conn = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let mut buf = [0u8; 16];
+        let result = conn.read(&mut buf).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_write_before_handshake() {
+        let (client_config, _) = make_tls13_configs();
+        let (client_stream, _) = tokio::io::duplex(16 * 1024);
+        let mut conn = AsyncTlsClientConnection::new(client_stream, client_config);
+
+        let result = conn.write(b"hello").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_full_handshake_and_data() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // Client → Server
+        let msg = b"Hello TLS 1.3 async!";
+        client.write(msg).await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = server.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg);
+
+        // Server → Client
+        let reply = b"TLS 1.3 async reply!";
+        server.write(reply).await.unwrap();
+        let n = client.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], reply);
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_version_and_cipher() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        assert_eq!(client.version(), Some(TlsVersion::Tls13));
+        assert_eq!(server.version(), Some(TlsVersion::Tls13));
+        assert!(client.cipher_suite().is_some());
+        assert!(server.cipher_suite().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_shutdown() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        client.shutdown().await.unwrap();
+        // Double shutdown should succeed
+        client.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_large_payload() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(128 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // 32 KB payload — crosses the 16 KB TLS record boundary
+        let payload = vec![0xABu8; 32 * 1024];
+        client.write(&payload).await.unwrap();
+
+        let mut received = Vec::new();
+        while received.len() < payload.len() {
+            let mut buf = [0u8; 16 * 1024];
+            let n = server.read(&mut buf).await.unwrap();
+            received.extend_from_slice(&buf[..n]);
+        }
+        assert_eq!(received, payload);
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_multi_message() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        let messages: &[&[u8]] = &[b"msg-one", b"msg-two", b"msg-three"];
+        for msg in messages {
+            client.write(msg).await.unwrap();
+            let mut buf = [0u8; 256];
+            let n = server.read(&mut buf).await.unwrap();
+            assert_eq!(&buf[..n], *msg);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_key_update() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // Key update without requesting peer response
+        client.key_update(false).await.unwrap();
+
+        // Data exchange still works after key update
+        client.write(b"after key update").await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = server.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"after key update");
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_session_take() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // The client may receive a NewSessionTicket — take it if present
+        let session = client.take_session();
+        // In TLS 1.3, session is only populated after NST reception.
+        // Whether Some or None, take_session() must not panic.
+        let _ = session;
+
+        // Second take always returns None
+        assert!(client.take_session().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_connection_info() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        let info = client.connection_info();
+        assert!(info.is_some());
+        let info = info.unwrap();
+        // cipher_suite is populated after a successful TLS 1.3 handshake
+        assert_eq!(info.cipher_suite, client.cipher_suite().unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_alpn_negotiation() {
+        use crate::config::ServerPrivateKey;
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let seed = [0x43u8; 32];
+
+        let server_config = TlsConfig::builder()
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed.to_vec()))
+            .verify_peer(false)
+            .alpn(&[b"h2", b"http/1.1"])
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .verify_peer(false)
+            .alpn(&[b"h2"])
+            .build();
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        let info = client.connection_info().unwrap();
+        assert_eq!(info.alpn_protocol.as_deref(), Some(b"h2".as_ref()));
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_is_session_resumed() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // Full handshake — not a resumed session
+        assert!(!client.is_session_resumed());
+        assert!(!server.is_session_resumed());
+    }
 }
