@@ -1604,3 +1604,11 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 12 new TLS tests. Modified 4 files. TLS 1.3 sync+async: auto-lookup in `do_handshake()` (check cache when no explicit resumption_session + server_name present), auto-store in `read()` on NewSessionTicket (cache.put keyed by server_name), write fragmentation loop in client+server `write()` (while offset < buf.len(), seal_record chunk, advance offset). TLS 1.2 sync+async: auto-lookup in `do_handshake()` with additional `session_resumption` guard, auto-store after full handshake (after `self.session = Some(...)`) and after abbreviated handshake, write fragmentation loop in client+server `write()`. Empty buffer returns Ok(0) immediately. Tests: TLS 1.3 auto-store, auto-lookup, explicit overrides cache, no server_name skips cache, write fragments large data (2000B/512 max_frag → 4 records), write exact boundary (100B → 1 record, 101B → 2 records), write empty buffer, TLS 1.2 auto-store, auto-lookup, cache disabled without flag, abbreviated updates cache, TLS 1.2 write fragments large data (TCP roundtrip).
 
 1892 total tests (40 ignored). Clippy clean, fmt clean.
+
+## Testing-Phase 72: CLI Command Unit Tests + Session Cache Concurrency (2026-02-17)
+
+**Prompt**: 分析当前测试完整性，制定测试优化计划，将阶段A（CLI命令单元测试7个文件 +45 tests；Session Cache并发安全 +6 tests）映射为Testing-Phase 72并实现。每次完成后更新 TEST_LOG.md, PROMPT_LOG.md, CLAUDE.md, README.md。
+
+**Result**: +72 new tests (1880 → 1952 total). Seven CLI command modules (dgst, x509cmd, genpkey, pkey, req, crl, verify) went from 0 tests to full coverage: 17+15+19+5+9+6+4 = 75 new CLI tests. Session cache module added 6 Arc<Mutex<>> concurrency tests covering basic wrapper, 4-thread concurrent puts, concurrent read+write, eviction-under-load (capacity=5), shared-across-two-arcs, and trait-object Box<dyn SessionCache>. hitls-cli: 40→117 tests (+77). hitls-tls: 684→690 tests (+6). All Clippy warnings resolved (len_zero → is_empty). All CRL tests use include_str! referencing existing test vectors. Self-signed cert helper uses seed [0x55;32] and not_after=9_999_999_999 to avoid expiry. RSA generation excluded from genpkey unit tests (too slow). verify.rs success path tested; failure path skipped (calls process::exit(1)).
+
+1952 total tests (40 ignored). Clippy clean, fmt clean.

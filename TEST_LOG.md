@@ -7,8 +7,9 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 1,854 tests (40 ignored)
+**Current**: 1,952 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
+**Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 
 ---
 
@@ -228,3 +229,51 @@ cargo fmt --all -- --check
 | Connection (TLS 1.3 sync) | `hitls-tls/src/connection.rs` | 3 | connection_info (SNI, negotiated_group, server_certs, is_psk_mode, negotiated_alpn), ALPN negotiation (client offers h2+http/1.1, server selects h2, verified on both sides), graceful shutdown (close_notify exchange via record layer, bidirectional close) |
 
 **Workspace after Phase 69**: 1,854 tests, 40 ignored (+8 from Phase 68's 1,846)
+
+
+---
+
+## Testing-Phase 72 — CLI Command Unit Tests + Session Cache Concurrency (2026-02-17)
+
+**Scope**: Stage A of the test optimization plan — fills gaps identified in the test completeness analysis.
+**New tests**: +72 (1880 → 1952 total, 40 ignored unchanged)
+
+### CLI Command Tests (+66 across 7 files)
+
+| Module | File | Tests | Coverage |
+|--------|------|:-----:|---------|
+| dgst | `hitls-cli/src/dgst.rs` | 17 | hash_data() × 9 algorithms, case insensitivity, alias, different-inputs, run() success/file-not-found/bad-algorithm |
+| x509cmd | `hitls-cli/src/x509cmd.rs` | 15 | hex_str(), days_to_ymd() (epoch/Y2K/leap/Dec31), format_time() (epoch/2024/UTC), run() default/fingerprint/text/invalid/nonexistent |
+| genpkey | `hitls-cli/src/genpkey.rs` | 19 | parse_curve_id() ×aliases/P384/SM2/unknown, parse_mlkem_param() ×512/768/1024/empty/unknown, parse_mldsa_param() ×44/65/87/unknown, run() ×EC/ECDSA/Ed25519/X25519/MLKEM/MLDSA/unknown/file-output |
+| pkey | `hitls-cli/src/pkey.rs` | 5 | run() no-flags/text/pubout/empty-file-error/nonexistent |
+| req | `hitls-cli/src/req.rs` | 9 | parse_subject() simple/multi/no-leading-slash/empty/missing-equals, run() CSR-stdout/CSR-file/no-key/no-subject |
+| crl | `hitls-cli/src/crl.rs` | 6 | run() PEM-empty/PEM-with-revoked/text-mode/DER/nonexistent/invalid; include_str! CRL test vectors |
+| verify | `hitls-cli/src/verify.rs` | 4 | run() success-self-signed/CA-not-found/cert-not-found/invalid-pem |
+
+### Session Cache Concurrency Tests (+6)
+
+| Test | File | Description |
+|------|------|-------------|
+| test_cache_arc_mutex_basic | `hitls-tls/src/session/mod.rs` | Arc<Mutex<InMemorySessionCache>> basic put+get |
+| test_cache_arc_mutex_concurrent_puts | session/mod.rs | 4 threads × 25 unique keys = 100 entries, no data races |
+| test_cache_arc_mutex_concurrent_get_put | session/mod.rs | 2 writer + 2 reader threads simultaneously |
+| test_cache_arc_mutex_eviction_under_load | session/mod.rs | 3 threads × 10 inserts, max_size=5, eviction preserved |
+| test_cache_arc_mutex_shared_across_two_arcs | session/mod.rs | Two Arc clones see same underlying data |
+| test_cache_trait_object_via_arc_mutex | session/mod.rs | Arc<Mutex<Box<dyn SessionCache>>> trait-object pattern |
+
+### Workspace Test Counts After Testing-Phase 72
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 48 | 0 |
+| hitls-cli | **117** | 5 |
+| hitls-crypto | 593 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 39 | 3 |
+| hitls-pki | 336 | 1 |
+| hitls-tls | **690** | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **1952** | **40** |

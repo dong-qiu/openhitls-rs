@@ -45,7 +45,7 @@ cargo test -p hitls-pki --all-features      # 336 tests (1 ignored)
 cargo test -p hitls-bignum                  # 48 tests
 cargo test -p hitls-utils                   # 53 tests
 cargo test -p hitls-auth --all-features     # 33 tests
-cargo test -p hitls-cli --all-features      # 40 tests (5 ignored)
+cargo test -p hitls-cli --all-features      # 117 tests (5 ignored)
 cargo test -p hitls-integration-tests       # 39 tests (3 ignored)
 
 # Lint (must pass with zero warnings)
@@ -146,5 +146,6 @@ Phases 0-72 complete (1892 tests, 40 ignored).
 - Phase 70: Hostname verification + cert chain validation + SNI callback (RFC 6125 hostname verification (SAN/CN matching, wildcards, IP addresses), cert chain validation via CertificateVerifier (trusted_certs), CertVerifyCallback for custom verification override, SniCallback for server-side certificate selection by hostname, verify_hostname config (default: true), wired into all 5 client handshake paths (TLS 1.2/1.3/DTLS/TLCP/DTLCP), +15 tests) -- DONE
 - Phase 71: Server-side session cache + session expiration + cipher preference (Arc<Mutex<dyn SessionCache>> in TlsConfig, auto-store after full handshake, auto-lookup on ClientHello, InMemorySessionCache TTL expiration (default 2h), cleanup(), cipher_server_preference config (default: true, toggle client preference), wired into sync+async TLS 1.2 server + renegotiation paths, TLS 1.3 cipher preference, +13 tests) -- DONE
 - Phase 72: Client-side session cache + write record fragmentation (client auto-store sessions after handshake/NST, auto-lookup from cache by server_name, explicit resumption_session takes priority, TLS 1.2 session_resumption flag guard, write() auto-splits data into max_fragment_size chunks, all 8 connection types (4 sync + 4 async), +12 tests) -- DONE
+- Testing-Phase 72: CLI command unit tests + Session Cache concurrency (dgst/x509cmd/genpkey/pkey/req/crl/verify: +66 tests covering hash algorithms, cert operations, key generation, CSR generation, CRL display, cert verification; Session Cache Arc<Mutex<>> concurrency: +6 tests covering concurrent puts/gets/eviction/trait-object usage, total +72 tests, 1892→1964) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.
