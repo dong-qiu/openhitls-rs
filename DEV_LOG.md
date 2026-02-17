@@ -5932,3 +5932,68 @@ Security-critical phase: client now validates server certificate chain against t
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1869 workspace tests passing (40 ignored)
+
+## Phase 71 — Server-Side Session Cache + Session Expiration + Cipher Preference (2026-02-17)
+
+### Summary
+Production readiness: server now caches and resumes sessions by ID. Added `session_cache: Option<Arc<Mutex<dyn SessionCache>>>` to TlsConfig, wired into both sync and async TLS 1.2 server connections. After full handshake, sessions are auto-stored in cache; on ClientHello, sessions are auto-looked up for ID-based resumption. Added TTL-based expiration to `InMemorySessionCache` (default 2 hours) with lazy expiration in `get()` and explicit `cleanup()` method. Added `cipher_server_preference: bool` config (default: true) — when false, client's cipher order is preferred. Applied to both TLS 1.2 and TLS 1.3. 13 new tests.
+
+### Key Features
+
+| Feature | Notes |
+|---------|-------|
+| Server-side session cache | `Arc<Mutex<dyn SessionCache>>` in TlsConfig; shared across connections |
+| Auto-store after handshake | Session stored in cache at end of `do_full_handshake()` with session_id, cipher_suite, master_secret, ALPN, EMS flag |
+| Auto-lookup on ClientHello | Cache passed to `process_client_hello_resumable()` for ID-based resumption |
+| Session TTL expiration | `session_lifetime: u64` (seconds, default 7200); lazy expiration in `get()` returns None for expired |
+| `cleanup()` method | Explicit expired session removal via `HashMap::retain` |
+| `with_lifetime()` constructor | `InMemorySessionCache::with_lifetime(max_size, lifetime_secs)` |
+| `cipher_server_preference` | Default true (server order); false = client order. TLS 1.2 + TLS 1.3 |
+| Renegotiation support | Session cache wired into `do_server_renegotiation()` and `do_server_renego_full()` |
+
+### Files Modified (6)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/session/mod.rs` | `session_lifetime` field, `with_lifetime()`, `cleanup()`, `is_expired()`, lazy expiration in `get()`, updated `make_session` test helper, 5 TTL tests |
+| `crates/hitls-tls/src/config/mod.rs` | `session_cache: Option<Arc<Mutex<dyn SessionCache>>>`, `cipher_server_preference: bool`, builder methods, Debug impl, 2 config tests |
+| `crates/hitls-tls/src/handshake/server12.rs` | `negotiate_cipher_suite()` respects `cipher_server_preference`, 2 cipher preference tests |
+| `crates/hitls-tls/src/handshake/server.rs` | TLS 1.3 cipher suite selection respects `cipher_server_preference`, 1 test |
+| `crates/hitls-tls/src/connection12.rs` | Pass session cache to `process_client_hello_resumable()`, store session after full handshake, renegotiation cache support, 3 TCP integration tests |
+| `crates/hitls-tls/src/connection12_async.rs` | Async mirror: session cache passing with block-scoped MutexGuard (Send-safe), session store after handshake, renegotiation cache support |
+
+### Implementation Details
+- **Thread safety**: `Arc<Mutex<dyn SessionCache>>` — `Arc` for sharing across connections, `Mutex` for interior mutability (`put()` needs `&mut self`)
+- **Read path**: Lock mutex → deref `MutexGuard` to `&dyn SessionCache` → pass to `process_client_hello_resumable()` (only calls `get()`)
+- **Write path**: Separate lock after handshake completion → call `put()` with new `TlsSession`
+- **Async safety**: Block scoping ensures `MutexGuard` is dropped before `.await` points (required for `Send` futures)
+- **Lazy expiration**: `get()` checks `now - session.created_at > session_lifetime`; returns `None` without removing (avoids `&mut self` in immutable method)
+- **Borrow checker**: `cache.put(&session.id, session)` fails because `session.id` borrows `session` which is moved — fixed by cloning: `let sid = session.id.clone(); cache.put(&sid, session);`
+- **Test timestamp fix**: Updated all test `TlsSession` instances from hardcoded `created_at: 0` / `1700000000` to `SystemTime::now()` to avoid false TTL expiry
+
+### Test Counts (Phase 71)
+- **hitls-tls**: 697 [was: 684] (+13 new tests)
+- **Total workspace**: 1880 (40 ignored) [was: 1869]
+
+### New Tests (13)
+
+| # | Test | File | Description |
+|---|------|------|-------------|
+| 1 | `test_cache_ttl_fresh` | session/mod.rs | Session within TTL → get returns Some |
+| 2 | `test_cache_ttl_expired` | session/mod.rs | Session past TTL → get returns None |
+| 3 | `test_cache_ttl_zero_no_expiry` | session/mod.rs | TTL=0 → session never expires |
+| 4 | `test_cache_cleanup` | session/mod.rs | cleanup() removes expired, keeps fresh |
+| 5 | `test_cache_with_lifetime` | session/mod.rs | `with_lifetime()` constructor works |
+| 6 | `test_cipher_server_preference_default` | server12.rs | Default: server order wins |
+| 7 | `test_cipher_client_preference` | server12.rs | cipher_server_preference=false: client order wins |
+| 8 | `test_cipher_client_preference_tls13` | server.rs | TLS 1.3 client preference |
+| 9 | `test_config_session_cache` | config/mod.rs | Builder accepts session_cache |
+| 10 | `test_config_cipher_server_preference` | config/mod.rs | Builder sets cipher_server_preference |
+| 11 | `test_session_id_resumption_via_cache` | connection12.rs | Full handshake → store → resume via session ID |
+| 12 | `test_session_cache_miss_full_handshake` | connection12.rs | Unknown session ID → full handshake |
+| 13 | `test_session_cache_disabled` | connection12.rs | No session_cache → full handshake (existing behavior) |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1880 workspace tests passing (40 ignored)
