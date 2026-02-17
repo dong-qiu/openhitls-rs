@@ -1278,7 +1278,6 @@ impl Tls12ClientHandshake {
             &transcript_hash,
         )?;
 
-        use subtle::ConstantTimeEq;
         if !bool::from(received_verify_data.ct_eq(&expected)) {
             return Err(TlsError::HandshakeFailed(
                 "server Finished verify_data mismatch".into(),
@@ -1339,7 +1338,6 @@ impl Tls12ClientHandshake {
         )?;
 
         // Constant-time comparison
-        use subtle::ConstantTimeEq;
         if received_verify_data.ct_eq(&expected).into() {
             self.server_verify_data = received_verify_data.to_vec();
             self.transcript.update(raw_msg)?;
