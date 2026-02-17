@@ -28,8 +28,9 @@ use crate::handshake::codec12::{
 };
 use crate::handshake::extensions_codec::{
     build_encrypt_then_mac, build_extended_master_secret, build_record_size_limit,
-    build_session_ticket_sh, parse_alpn_ch, parse_encrypt_then_mac, parse_extended_master_secret,
-    parse_record_size_limit, parse_renegotiation_info, parse_server_name, parse_session_ticket_ch,
+    build_renegotiation_info, build_renegotiation_info_initial, build_session_ticket_sh,
+    parse_alpn_ch, parse_encrypt_then_mac, parse_extended_master_secret, parse_record_size_limit,
+    parse_renegotiation_info, parse_server_name, parse_session_ticket_ch,
     parse_signature_algorithms_ch, parse_supported_groups_ch,
 };
 use crate::handshake::key_exchange::KeyExchange;
@@ -207,6 +208,12 @@ pub struct Tls12ServerHandshake {
     client_wants_ocsp: bool,
     /// Whether the client sent the signed_certificate_timestamp extension.
     client_wants_sct: bool,
+    /// Whether this is a renegotiation handshake.
+    is_renegotiation: bool,
+    /// Previous client verify_data (saved from prior handshake for renegotiation).
+    prev_client_verify_data: Vec<u8>,
+    /// Previous server verify_data (saved from prior handshake for renegotiation).
+    prev_server_verify_data: Vec<u8>,
 }
 
 impl Drop for Tls12ServerHandshake {
@@ -244,6 +251,9 @@ impl Tls12ServerHandshake {
             client_record_size_limit: None,
             client_wants_ocsp: false,
             client_wants_sct: false,
+            is_renegotiation: false,
+            prev_client_verify_data: Vec::new(),
+            prev_server_verify_data: Vec::new(),
         }
     }
 
@@ -314,6 +324,60 @@ impl Tls12ServerHandshake {
     /// Client's record size limit from ClientHello (RFC 8449).
     pub fn client_record_size_limit(&self) -> Option<u16> {
         self.client_record_size_limit
+    }
+
+    /// Whether this is a renegotiation handshake.
+    pub fn is_renegotiation(&self) -> bool {
+        self.is_renegotiation
+    }
+
+    /// Reset handshake state for renegotiation (RFC 5746).
+    ///
+    /// Saves the current verify_data from both sides, resets all handshake
+    /// state to Idle, and marks this as a renegotiation handshake.
+    pub fn reset_for_renegotiation(&mut self) {
+        self.prev_client_verify_data = std::mem::take(&mut self.client_verify_data);
+        self.prev_server_verify_data = std::mem::take(&mut self.server_verify_data);
+        self.state = Tls12ServerState::Idle;
+        self.params = None;
+        self.transcript = TranscriptHash::new(|| Box::new(Sha256::new()));
+        self.client_random = [0u8; 32];
+        self.server_random = [0u8; 32];
+        self.ephemeral_key = None;
+        self.kx_alg = KeyExchangeAlg::Ecdhe;
+        self.dhe_params = None;
+        self.dhe_key_pair = None;
+        self.master_secret.zeroize();
+        self.master_secret.clear();
+        self.client_sig_algs.clear();
+        self.negotiated_alpn = None;
+        self.client_server_name = None;
+        self.client_certs.clear();
+        self.session_id.clear();
+        self.abbreviated = false;
+        self.use_extended_master_secret = false;
+        self.use_encrypt_then_mac = false;
+        self.client_offered_ems = false;
+        self.client_offered_etm = false;
+        self.client_record_size_limit = None;
+        self.client_wants_ocsp = false;
+        self.client_wants_sct = false;
+        self.is_renegotiation = true;
+    }
+
+    /// Set up for renegotiation with previous verify_data.
+    ///
+    /// Used by the connection layer to create a new handshake configured
+    /// for renegotiation with the verify_data from a previous handshake.
+    pub fn setup_renegotiation(&mut self, prev_client_vd: Vec<u8>, prev_server_vd: Vec<u8>) {
+        self.prev_client_verify_data = prev_client_vd;
+        self.prev_server_verify_data = prev_server_vd;
+        self.is_renegotiation = true;
+    }
+
+    /// Build a HelloRequest message (RFC 5246 §7.4.1.1).
+    pub fn build_hello_request() -> Vec<u8> {
+        crate::handshake::codec::encode_hello_request()
     }
 
     /// Build an encrypted NewSessionTicket message for the current session.
@@ -400,8 +464,14 @@ impl Tls12ServerHandshake {
                 }
                 ExtensionType::RENEGOTIATION_INFO => {
                     let ri_data = parse_renegotiation_info(&ext.data)?;
-                    // Initial handshake: must be empty
-                    if !ri_data.is_empty() {
+                    if self.is_renegotiation {
+                        // RFC 5746 §3.7: client must send client_verify_data
+                        if ri_data.ct_eq(&self.prev_client_verify_data).unwrap_u8() != 1 {
+                            return Err(TlsError::HandshakeFailed(
+                                "renegotiation_info verify_data mismatch".into(),
+                            ));
+                        }
+                    } else if !ri_data.is_empty() {
                         return Err(TlsError::HandshakeFailed(
                             "non-empty renegotiation_info in initial handshake".into(),
                         ));
@@ -484,6 +554,15 @@ impl Tls12ServerHandshake {
 
         // Build ServerHello extensions
         let mut sh_extensions = Vec::new();
+        // Renegotiation info (RFC 5746): always include in ServerHello
+        if self.is_renegotiation {
+            sh_extensions.push(build_renegotiation_info(
+                &self.prev_client_verify_data,
+                &self.prev_server_verify_data,
+            ));
+        } else {
+            sh_extensions.push(build_renegotiation_info_initial());
+        }
         if let Some(ref alpn) = self.negotiated_alpn {
             sh_extensions.push(crate::handshake::extensions_codec::build_alpn_selected(
                 alpn,
@@ -888,6 +967,15 @@ impl Tls12ServerHandshake {
 
         // Build ServerHello echoing the cached session_id
         let mut sh_extensions = Vec::new();
+        // Renegotiation info (RFC 5746)
+        if self.is_renegotiation {
+            sh_extensions.push(build_renegotiation_info(
+                &self.prev_client_verify_data,
+                &self.prev_server_verify_data,
+            ));
+        } else {
+            sh_extensions.push(build_renegotiation_info_initial());
+        }
         if self.config.ticket_key.is_some() {
             sh_extensions.push(build_session_ticket_sh());
         }
@@ -2370,5 +2458,33 @@ mod tests {
         let hs = Tls12ServerHandshake::new(config);
         assert_eq!(hs.state(), Tls12ServerState::Idle);
         assert!(!hs.is_abbreviated());
+    }
+
+    #[test]
+    fn test_server_reset_for_renegotiation() {
+        let config = make_server_config();
+        let mut hs = Tls12ServerHandshake::new(config);
+
+        // Simulate verify_data from a completed handshake
+        hs.client_verify_data = vec![0x03; 12];
+        hs.server_verify_data = vec![0x04; 12];
+        hs.state = Tls12ServerState::Connected;
+
+        assert!(!hs.is_renegotiation());
+
+        hs.reset_for_renegotiation();
+
+        assert!(hs.is_renegotiation());
+        assert_eq!(hs.state(), Tls12ServerState::Idle);
+        assert_eq!(hs.prev_client_verify_data, vec![0x03; 12]);
+        assert_eq!(hs.prev_server_verify_data, vec![0x04; 12]);
+        assert!(hs.client_verify_data.is_empty());
+        assert!(hs.server_verify_data.is_empty());
+    }
+
+    #[test]
+    fn test_server_build_hello_request() {
+        let hr = Tls12ServerHandshake::build_hello_request();
+        assert_eq!(hr, vec![0x00, 0x00, 0x00, 0x00]);
     }
 }

@@ -32,6 +32,7 @@ pub enum AlertDescription {
     InternalError = 80,
     InappropriateFallback = 86,
     UserCanceled = 90,
+    NoRenegotiation = 100,
     MissingExtension = 109,
     UnsupportedExtension = 110,
     UnrecognizedName = 112,
@@ -83,6 +84,7 @@ impl AlertDescription {
             80 => Ok(AlertDescription::InternalError),
             86 => Ok(AlertDescription::InappropriateFallback),
             90 => Ok(AlertDescription::UserCanceled),
+            100 => Ok(AlertDescription::NoRenegotiation),
             109 => Ok(AlertDescription::MissingExtension),
             110 => Ok(AlertDescription::UnsupportedExtension),
             112 => Ok(AlertDescription::UnrecognizedName),
@@ -144,6 +146,7 @@ mod tests {
             AlertDescription::InternalError,
             AlertDescription::InappropriateFallback,
             AlertDescription::UserCanceled,
+            AlertDescription::NoRenegotiation,
             AlertDescription::MissingExtension,
             AlertDescription::UnsupportedExtension,
             AlertDescription::UnrecognizedName,
@@ -152,7 +155,7 @@ mod tests {
             AlertDescription::CertificateRequired,
             AlertDescription::NoApplicationProtocol,
         ];
-        assert_eq!(all.len(), 27);
+        assert_eq!(all.len(), 28);
         // Each variant is distinct
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {
@@ -196,8 +199,8 @@ mod tests {
     #[test]
     fn test_alert_description_from_u8_roundtrip() {
         let codes: &[u8] = &[
-            0, 10, 20, 22, 40, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 70, 71, 80, 86, 90, 109,
-            110, 112, 113, 115, 116, 120,
+            0, 10, 20, 22, 40, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 70, 71, 80, 86, 90, 100,
+            109, 110, 112, 113, 115, 116, 120,
         ];
         for &code in codes {
             let desc = AlertDescription::from_u8(code).unwrap();
@@ -209,7 +212,14 @@ mod tests {
     fn test_alert_description_unknown() {
         assert!(AlertDescription::from_u8(1).is_err());
         assert!(AlertDescription::from_u8(5).is_err());
-        assert!(AlertDescription::from_u8(100).is_err());
+        assert!(AlertDescription::from_u8(99).is_err());
         assert!(AlertDescription::from_u8(255).is_err());
+    }
+
+    #[test]
+    fn test_no_renegotiation_alert() {
+        assert_eq!(AlertDescription::NoRenegotiation as u8, 100);
+        let desc = AlertDescription::from_u8(100).unwrap();
+        assert_eq!(desc, AlertDescription::NoRenegotiation);
     }
 }

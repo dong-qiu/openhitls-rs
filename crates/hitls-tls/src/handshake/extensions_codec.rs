@@ -1366,4 +1366,30 @@ mod tests {
         );
         assert_eq!(ext.data, sct_list);
     }
+
+    #[test]
+    fn test_renegotiation_info_with_verify_data() {
+        let client_vd = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+        ];
+        let server_vd = vec![
+            0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+        ];
+
+        let ext = build_renegotiation_info(&client_vd, &server_vd);
+        assert_eq!(ext.extension_type, ExtensionType::RENEGOTIATION_INFO);
+
+        // Parse it back
+        let parsed = parse_renegotiation_info(&ext.data).unwrap();
+        // Should be client_vd || server_vd
+        assert_eq!(parsed.len(), 24);
+        assert_eq!(&parsed[..12], &client_vd[..]);
+        assert_eq!(&parsed[12..], &server_vd[..]);
+
+        // Client-only (for ClientHello during renegotiation)
+        let ext2 = build_renegotiation_info(&client_vd, &[]);
+        let parsed2 = parse_renegotiation_info(&ext2.data).unwrap();
+        assert_eq!(parsed2.len(), 12);
+        assert_eq!(&parsed2[..], &client_vd[..]);
+    }
 }

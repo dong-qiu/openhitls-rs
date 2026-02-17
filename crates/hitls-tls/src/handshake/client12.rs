@@ -32,6 +32,7 @@ use hitls_crypto::dh::{DhKeyPair, DhParams};
 use hitls_crypto::rsa::{RsaPadding, RsaPublicKey};
 use hitls_crypto::sha2::Sha256;
 use hitls_types::TlsError;
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 /// TLS 1.2 client handshake states.
@@ -178,6 +179,12 @@ pub struct Tls12ClientHandshake {
     cached_session_ems: bool,
     /// Peer's record size limit from ServerHello.
     peer_record_size_limit: Option<u16>,
+    /// Whether this is a renegotiation handshake.
+    is_renegotiation: bool,
+    /// Previous client verify_data (saved from prior handshake for renegotiation).
+    prev_client_verify_data: Vec<u8>,
+    /// Previous server verify_data (saved from prior handshake for renegotiation).
+    prev_server_verify_data: Vec<u8>,
 }
 
 impl Tls12ClientHandshake {
@@ -214,6 +221,9 @@ impl Tls12ClientHandshake {
             server_verify_data: Vec::new(),
             cached_session_ems: false,
             peer_record_size_limit: None,
+            is_renegotiation: false,
+            prev_client_verify_data: Vec::new(),
+            prev_server_verify_data: Vec::new(),
         }
     }
 
@@ -297,6 +307,60 @@ impl Tls12ClientHandshake {
         self.peer_record_size_limit
     }
 
+    /// Whether this is a renegotiation handshake.
+    pub fn is_renegotiation(&self) -> bool {
+        self.is_renegotiation
+    }
+
+    /// Reset handshake state for renegotiation (RFC 5746).
+    ///
+    /// Saves the current verify_data from both sides, resets all handshake
+    /// state to Idle, and marks this as a renegotiation handshake.
+    pub fn reset_for_renegotiation(&mut self) {
+        self.prev_client_verify_data = std::mem::take(&mut self.client_verify_data);
+        self.prev_server_verify_data = std::mem::take(&mut self.server_verify_data);
+        self.state = Tls12ClientState::Idle;
+        self.params = None;
+        self.transcript = TranscriptHash::new(|| Box::new(Sha256::new()));
+        self.client_random = [0u8; 32];
+        self.server_random = [0u8; 32];
+        self.server_certs.clear();
+        self.server_ecdh_public.clear();
+        self.server_named_curve = 0;
+        self.kx_alg = KeyExchangeAlg::Ecdhe;
+        self.server_cert_der.clear();
+        self.server_dhe_p.clear();
+        self.server_dhe_g.clear();
+        self.server_dhe_ys.clear();
+        self.server_psk_hint.clear();
+        self.client_hello_bytes.clear();
+        self.cert_request_received = false;
+        self.requested_sig_algs.clear();
+        self.cached_session_id.clear();
+        self.cached_master_secret.zeroize();
+        self.cached_master_secret.clear();
+        self.abbreviated = false;
+        self.abbreviated_keys = None;
+        self.server_supports_ticket = false;
+        self.received_ticket = None;
+        self.received_ticket_lifetime = 0;
+        self.use_extended_master_secret = false;
+        self.use_encrypt_then_mac = false;
+        self.cached_session_ems = false;
+        self.peer_record_size_limit = None;
+        self.is_renegotiation = true;
+    }
+
+    /// Set up for renegotiation with previous verify_data.
+    ///
+    /// Used by the connection layer to create a new handshake configured
+    /// for renegotiation with the verify_data from a previous handshake.
+    pub fn setup_renegotiation(&mut self, prev_client_vd: Vec<u8>, prev_server_vd: Vec<u8>) {
+        self.prev_client_verify_data = prev_client_vd;
+        self.prev_server_verify_data = prev_server_vd;
+        self.is_renegotiation = true;
+    }
+
     /// Build the ClientHello message.
     ///
     /// Returns the full handshake message bytes (for sending) and the raw
@@ -329,8 +393,18 @@ impl Tls12ClientHandshake {
         // EC point formats (uncompressed only)
         extensions.push(crate::handshake::extensions_codec::build_ec_point_formats());
 
-        // Renegotiation info (empty for initial handshake)
-        extensions.push(crate::handshake::extensions_codec::build_renegotiation_info_initial());
+        // Renegotiation info (RFC 5746)
+        if self.is_renegotiation {
+            // Client sends client_verify_data only (RFC 5746 §3.5)
+            extensions.push(
+                crate::handshake::extensions_codec::build_renegotiation_info(
+                    &self.prev_client_verify_data,
+                    &[],
+                ),
+            );
+        } else {
+            extensions.push(crate::handshake::extensions_codec::build_renegotiation_info_initial());
+        }
 
         // ALPN
         if !self.config.alpn_protocols.is_empty() {
@@ -339,8 +413,8 @@ impl Tls12ClientHandshake {
             ));
         }
 
-        // Session Ticket (RFC 5077)
-        if self.config.session_resumption {
+        // Session Ticket (RFC 5077) — disabled during renegotiation
+        if self.config.session_resumption && !self.is_renegotiation {
             if let Some(ref session) = self.config.resumption_session {
                 if let Some(ref ticket) = session.ticket {
                     // Send ticket for resumption
@@ -420,7 +494,8 @@ impl Tls12ClientHandshake {
         // Use cached session ID for resumption, or generate a random one.
         // For ticket-based resumption: if session has a ticket but empty ID, generate
         // a random session_id so the server can echo it back (RFC 5077 §3.4).
-        let session_id = if self.config.session_resumption {
+        // During renegotiation, always use a fresh session ID (no resumption).
+        let session_id = if self.config.session_resumption && !self.is_renegotiation {
             if let Some(ref session) = self.config.resumption_session {
                 self.cached_master_secret = session.master_secret.clone();
                 if session.id.is_empty() && session.ticket.is_some() {
@@ -496,8 +571,20 @@ impl Tls12ClientHandshake {
                 ExtensionType::RENEGOTIATION_INFO => {
                     let ri_data =
                         crate::handshake::extensions_codec::parse_renegotiation_info(&ext.data)?;
-                    // Initial handshake: renegotiation_info must contain empty renegotiated_connection
-                    if !ri_data.is_empty() {
+                    if self.is_renegotiation {
+                        // RFC 5746 §3.5: server must send
+                        // client_verify_data || server_verify_data
+                        let mut expected = Vec::with_capacity(
+                            self.prev_client_verify_data.len() + self.prev_server_verify_data.len(),
+                        );
+                        expected.extend_from_slice(&self.prev_client_verify_data);
+                        expected.extend_from_slice(&self.prev_server_verify_data);
+                        if ri_data.ct_eq(&expected).unwrap_u8() != 1 {
+                            return Err(TlsError::HandshakeFailed(
+                                "renegotiation_info verify_data mismatch".into(),
+                            ));
+                        }
+                    } else if !ri_data.is_empty() {
                         return Err(TlsError::HandshakeFailed(
                             "non-empty renegotiation_info in initial handshake".into(),
                         ));
@@ -1917,5 +2004,30 @@ mod tests {
 
         assert_eq!(hs.received_ticket(), Some(ticket_data.as_slice()));
         assert_eq!(hs.received_ticket_lifetime(), 3600);
+    }
+
+    #[test]
+    fn test_client_reset_for_renegotiation() {
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .build();
+        let mut hs = Tls12ClientHandshake::new(config);
+
+        // Simulate verify_data from a completed handshake
+        hs.client_verify_data = vec![0x01; 12];
+        hs.server_verify_data = vec![0x02; 12];
+        hs.state = Tls12ClientState::Connected;
+
+        assert!(!hs.is_renegotiation());
+
+        hs.reset_for_renegotiation();
+
+        assert!(hs.is_renegotiation());
+        assert_eq!(hs.state(), Tls12ClientState::Idle);
+        assert_eq!(hs.prev_client_verify_data, vec![0x01; 12]);
+        assert_eq!(hs.prev_server_verify_data, vec![0x02; 12]);
+        assert!(hs.client_verify_data.is_empty());
+        assert!(hs.server_verify_data.is_empty());
     }
 }

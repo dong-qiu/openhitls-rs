@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 1,836 tests (40 ignored)
+**Current**: 1,846 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 
 ---
@@ -197,3 +197,21 @@ cargo fmt --all -- --check
 | Codec (DH_ANON/ECDH_ANON) | `hitls-tls/src/handshake/codec12.rs` | 2 | DHE_ANON SKE codec roundtrip (encode→decode, 256-byte p/g/Ys), ECDHE_ANON SKE codec roundtrip (encode→decode, secp256r1 65-byte point) |
 
 **Workspace after Phase 67**: 1,836 tests, 40 ignored (+10 from Phase 66's 1,826)
+
+---
+
+## Phase 68: TLS 1.2 Renegotiation (RFC 5746) — 10 new tests
+
+### Date: 2026-02-17
+
+| Module | File | Tests Added | Description |
+|--------|------|:-----------:|-------------|
+| Handshake Codec | `hitls-tls/src/handshake/codec.rs` | 1 | HelloRequest encode → `[0x00, 0x00, 0x00, 0x00]`, parse → type HelloRequest, empty body |
+| Extensions Codec | `hitls-tls/src/handshake/extensions_codec.rs` | 1 | Build renegotiation_info with 12+12 verify_data, parse, validate content roundtrip |
+| Client Handshake | `hitls-tls/src/handshake/client12.rs` | 1 | reset_for_renegotiation sets state=Idle, is_renegotiation=true, prev_*_verify_data preserved |
+| Server Handshake | `hitls-tls/src/handshake/server12.rs` | 2 | reset_for_renegotiation (same as client), build_hello_request returns `[0, 0, 0, 0]` |
+| Alert | `hitls-tls/src/alert/mod.rs` | 1 | NoRenegotiation = 100, from_u8(100) roundtrip |
+| Config | `hitls-tls/src/config/mod.rs` | 1 | Builder default false, set true, build, verify |
+| Connection (sync) | `hitls-tls/src/connection12.rs` | 3 | Full renegotiation TCP roundtrip (handshake → data → renego → data), renegotiation disabled rejects (no_renegotiation warning → connection continues), renegotiation no session resumption (with ticket_key, always full handshake) |
+
+**Workspace after Phase 68**: 1,846 tests, 40 ignored (+10 from Phase 67's 1,836)

@@ -138,6 +138,7 @@ pub fn parse_handshake_header(data: &[u8]) -> Result<(HandshakeType, &[u8], usiz
         ));
     }
     let msg_type = match data[0] {
+        0 => HandshakeType::HelloRequest,
         1 => HandshakeType::ClientHello,
         2 => HandshakeType::ServerHello,
         3 => HandshakeType::HelloVerifyRequest,
@@ -182,6 +183,13 @@ pub(crate) fn wrap_handshake(msg_type: HandshakeType, body: &[u8]) -> Vec<u8> {
     out.push(len as u8);
     out.extend_from_slice(body);
     out
+}
+
+/// Encode a HelloRequest message (RFC 5246 §7.4.1.1).
+///
+/// HelloRequest has an empty body: type(1)=0 || length(3)=0.
+pub fn encode_hello_request() -> Vec<u8> {
+    wrap_handshake(HandshakeType::HelloRequest, &[])
 }
 
 // ---------------------------------------------------------------------------
@@ -939,6 +947,16 @@ mod tests {
     use super::*;
     use crate::crypt::SignatureScheme;
     use crate::extensions::ExtensionType;
+
+    #[test]
+    fn test_hello_request_codec() {
+        let encoded = encode_hello_request();
+        assert_eq!(encoded, vec![0x00, 0x00, 0x00, 0x00]);
+        let (msg_type, body, total) = parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::HelloRequest);
+        assert!(body.is_empty());
+        assert_eq!(total, 4);
+    }
 
     #[test]
     fn test_encode_decode_client_hello() {

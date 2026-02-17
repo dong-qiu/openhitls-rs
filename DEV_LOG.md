@@ -5739,3 +5739,58 @@ Added 8 TLS 1.2 anonymous cipher suites (RFC 5246 / RFC 4492) with no authentica
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1836 workspace tests passing (40 ignored)
+
+## Phase 68: TLS 1.2 Renegotiation (RFC 5746)
+
+### Date: 2026-02-17
+
+### Summary
+Added server-initiated TLS 1.2 renegotiation with full RFC 5746 verify_data validation. HelloRequest message type (type 0, empty body), NoRenegotiation alert (code 100), `allow_renegotiation` config option, client/server renegotiation state management (`setup_renegotiation()`, `reset_for_renegotiation()`), RFC 5746 renegotiation_info extension with `client_verify_data || server_verify_data` validation using `subtle::ConstantTimeEq`, re-handshake over encrypted connection with automatic record layer re-keying, and server renegotiation_info in initial ServerHello (pre-existing RFC 5746 gap fix). Both sync and async paths. No session resumption during renegotiation (always full handshake). Application data buffering during renegotiation. 10 new tests.
+
+### Key Features
+
+| Feature | Standard | Description |
+|---------|----------|-------------|
+| HelloRequest message type (0) | RFC 5246 | 4-byte message `[0x00, 0x00, 0x00, 0x00]`, encode/parse in codec.rs |
+| NoRenegotiation alert (100) | RFC 5746 | Warning-level alert sent by client when `allow_renegotiation = false` |
+| `allow_renegotiation` config | — | Builder option, default `false`, controls client renegotiation behavior |
+| Client renegotiation | RFC 5746 | `setup_renegotiation()` / `reset_for_renegotiation()` on `Tls12ClientHandshake` |
+| Server renegotiation | RFC 5746 | `setup_renegotiation()` / `reset_for_renegotiation()` / `build_hello_request()` on `Tls12ServerHandshake` |
+| verify_data validation | RFC 5746 | Client sends `prev_client_verify_data` in renegotiation_info; server validates and responds with `prev_client_verify_data || prev_server_verify_data` |
+| Renegotiating state | — | New `ConnectionState::Renegotiating` for both client and server connections |
+| Server-initiated flow | RFC 5246 | `initiate_renegotiation()` sends HelloRequest, `do_server_renegotiation()` processes full re-handshake |
+| Client-initiated response | RFC 5246 | Client detects HelloRequest in `read()`, calls `do_renegotiation()` |
+| Server renegotiation_info in initial ServerHello | RFC 5746 | Fixed pre-existing gap — server now always echoes renegotiation_info |
+| App data buffering | — | Server buffers app data received during Renegotiating state |
+| Async mirror | — | Full async implementation matching sync behavior |
+
+### Files Modified (9)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/handshake/mod.rs` | `HelloRequest = 0` variant in `HandshakeType` enum |
+| `crates/hitls-tls/src/handshake/codec.rs` | `0 => HandshakeType::HelloRequest` case, `encode_hello_request()` function, 1 test |
+| `crates/hitls-tls/src/alert/mod.rs` | `NoRenegotiation = 100` variant, `from_u8(100)` case, updated existing tests, 1 new test |
+| `crates/hitls-tls/src/config/mod.rs` | `allow_renegotiation: bool` field + builder method + `build()`, 1 test |
+| `crates/hitls-tls/src/handshake/client12.rs` | `is_renegotiation`, `prev_client_verify_data`, `prev_server_verify_data` fields, `setup_renegotiation()`, `reset_for_renegotiation()`, `is_renegotiation()`, modified `build_client_hello()` (renegotiation_info with verify_data, disable session resumption), modified `process_server_hello()` (verify_data validation with `ct_eq`), 1 test |
+| `crates/hitls-tls/src/handshake/server12.rs` | Same 3 fields + `setup_renegotiation()`, `reset_for_renegotiation()`, `is_renegotiation()`, `build_hello_request()`, modified `process_client_hello()` (verify_data validation), added renegotiation_info to ServerHello extensions (both full and abbreviated paths), 2 tests |
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | 1 test (`test_renegotiation_info_with_verify_data`) |
+| `crates/hitls-tls/src/connection12.rs` | `Renegotiating` state, `client_verify_data`/`server_verify_data` fields, `do_renegotiation()` (client), `initiate_renegotiation()`/`do_server_renegotiation()`/`do_server_renego_full()` (server), modified `read()` for both client (HelloRequest detection) and server (renegotiation dispatch, app data buffering), 3 integration tests (TCP loopback) |
+| `crates/hitls-tls/src/connection12_async.rs` | Async mirror of all connection12.rs changes |
+
+### Implementation Details
+- **Reuse existing handshake code**: Creates fresh `Tls12ClientHandshake`/`Tls12ServerHandshake` for renegotiation, configured via `setup_renegotiation(prev_client_vd, prev_server_vd)`. All 91 cipher suites work in renegotiation.
+- **Record layer re-keying is automatic**: `activate_write_encryption12()` and `activate_read_decryption12()` replace existing encryptors/decryptors. Sequence numbers reset to 0.
+- **No session resumption during renegotiation**: `build_client_hello()` guards session_id/ticket logic with `!self.is_renegotiation`.
+- **Server renegotiation_info fix**: Server was missing renegotiation_info in initial ServerHello (RFC 5746 gap). Now always includes it.
+- **Critical bug fix**: Server `read()` loop must only return buffered data when `state == Connected` (not `Renegotiating`), otherwise renegotiation never completes.
+- **Constant-time verify_data comparison**: Uses `subtle::ConstantTimeEq` (`ct_eq()`) for all renegotiation_info validation.
+
+### Test Counts (Phase 68)
+- **hitls-tls**: 676 [was: 666]
+- **Total workspace**: 1846 (40 ignored) [was: 1836]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1846 workspace tests passing (40 ignored)

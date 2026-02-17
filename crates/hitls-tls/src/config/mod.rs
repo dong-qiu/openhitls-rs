@@ -135,6 +135,8 @@ pub struct TlsConfig {
     pub record_size_limit: u16,
     /// Whether to send Fallback SCSV (RFC 7507) in ClientHello.
     pub send_fallback_scsv: bool,
+    /// Allow TLS 1.2 renegotiation (RFC 5746). Default: false.
+    pub allow_renegotiation: bool,
     /// Enable OCSP stapling: client offers status_request, server provides stapled response.
     pub enable_ocsp_stapling: bool,
     /// Raw DER-encoded OCSP response for server-side stapling.
@@ -220,6 +222,7 @@ pub struct TlsConfigBuilder {
     psk_server_callback: Option<PskServerCallback>,
     record_size_limit: u16,
     send_fallback_scsv: bool,
+    allow_renegotiation: bool,
     enable_ocsp_stapling: bool,
     ocsp_staple: Option<Vec<u8>>,
     enable_sct: bool,
@@ -273,6 +276,7 @@ impl Default for TlsConfigBuilder {
             psk_server_callback: None,
             record_size_limit: 0,
             send_fallback_scsv: false,
+            allow_renegotiation: false,
             enable_ocsp_stapling: false,
             ocsp_staple: None,
             enable_sct: false,
@@ -447,6 +451,11 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn allow_renegotiation(mut self, enabled: bool) -> Self {
+        self.allow_renegotiation = enabled;
+        self
+    }
+
     pub fn enable_ocsp_stapling(mut self, enabled: bool) -> Self {
         self.enable_ocsp_stapling = enabled;
         self
@@ -521,6 +530,7 @@ impl TlsConfigBuilder {
             psk_server_callback: self.psk_server_callback,
             record_size_limit: self.record_size_limit,
             send_fallback_scsv: self.send_fallback_scsv,
+            allow_renegotiation: self.allow_renegotiation,
             enable_ocsp_stapling: self.enable_ocsp_stapling,
             ocsp_staple: self.ocsp_staple,
             enable_sct: self.enable_sct,
@@ -692,6 +702,17 @@ mod tests {
 
         let default = TlsConfig::builder().build();
         assert!(!default.send_fallback_scsv);
+    }
+
+    #[test]
+    fn test_allow_renegotiation_config() {
+        // Default: disabled
+        let default = TlsConfig::builder().build();
+        assert!(!default.allow_renegotiation);
+
+        // Enabled
+        let config = TlsConfig::builder().allow_renegotiation(true).build();
+        assert!(config.allow_renegotiation);
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use crate::alert::{AlertDescription, AlertLevel};
 use crate::config::TlsConfig;
 use crate::crypt::KeyExchangeAlg;
 use crate::handshake::client12::Tls12ClientHandshake;
@@ -24,6 +25,7 @@ use zeroize::Zeroize;
 enum ConnectionState {
     Handshaking,
     Connected,
+    Renegotiating,
     Closed,
     Error,
 }
@@ -45,6 +47,10 @@ pub struct AsyncTls12ClientConnection<S: AsyncRead + AsyncWrite + Unpin> {
     app_data_buf: Vec<u8>,
     /// Session state for resumption (populated after handshake).
     session: Option<TlsSession>,
+    /// Client verify_data from last handshake (for renegotiation).
+    client_verify_data: Vec<u8>,
+    /// Server verify_data from last handshake (for renegotiation).
+    server_verify_data: Vec<u8>,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
@@ -59,6 +65,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
             read_buf: Vec::with_capacity(16 * 1024),
             app_data_buf: Vec::new(),
             session: None,
+            client_verify_data: Vec::new(),
+            server_verify_data: Vec::new(),
         }
     }
 
@@ -395,6 +403,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
         flight.server_write_key.zeroize();
 
         self.negotiated_suite = Some(suite);
+        self.client_verify_data = hs.client_verify_data().to_vec();
+        self.server_verify_data = hs.server_verify_data().to_vec();
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -530,6 +540,287 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
         keys.server_write_key.zeroize();
 
         self.negotiated_suite = Some(suite);
+        self.client_verify_data = hs.client_verify_data().to_vec();
+        self.server_verify_data = hs.server_verify_data().to_vec();
+        self.state = ConnectionState::Connected;
+        Ok(())
+    }
+
+    /// Perform client-side renegotiation (RFC 5746).
+    ///
+    /// Creates a new handshake, sets verify_data for renegotiation_info,
+    /// runs the full handshake over the encrypted connection, and re-keys.
+    async fn do_renegotiation(&mut self) -> Result<(), TlsError> {
+        self.state = ConnectionState::Renegotiating;
+
+        let mut hs = Tls12ClientHandshake::new(self.config.clone());
+        // Set previous verify_data for RFC 5746
+        hs.setup_renegotiation(
+            std::mem::take(&mut self.client_verify_data),
+            std::mem::take(&mut self.server_verify_data),
+        );
+
+        // Build and send ClientHello (over encrypted connection)
+        let ch_msg = hs.build_client_hello()?;
+        let ch_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &ch_msg)?;
+        self.stream
+            .write_all(&ch_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Read ServerHello
+        let (hs_type, sh_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::ServerHello {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected ServerHello, got {hs_type:?}"
+            )));
+        }
+        let (_, sh_body, _) = parse_handshake_header(&sh_data)?;
+        let sh = decode_server_hello(sh_body)?;
+        let suite = hs.process_server_hello(&sh_data, &sh)?;
+
+        // Renegotiation always does full handshake (no abbreviation)
+        if hs.is_abbreviated() {
+            return Err(TlsError::HandshakeFailed(
+                "unexpected session resumption during renegotiation".into(),
+            ));
+        }
+
+        // Read Certificate (only for KX that requires it)
+        let (hs_type, next_data) = if hs.kx_alg().requires_certificate() {
+            let (hs_type, cert_data) = self.read_handshake_msg().await?;
+            if hs_type != HandshakeType::Certificate {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected Certificate, got {hs_type:?}"
+                )));
+            }
+            let (_, cert_body, _) = parse_handshake_header(&cert_data)?;
+            let cert12 = decode_certificate12(cert_body)?;
+            hs.process_certificate(&cert_data, &cert12.certificate_list)?;
+            self.read_handshake_msg().await?
+        } else {
+            self.read_handshake_msg().await?
+        };
+
+        // Handle optional CertificateStatus
+        let (hs_type, next_data) = if hs_type == HandshakeType::CertificateStatus {
+            self.read_handshake_msg().await?
+        } else {
+            (hs_type, next_data)
+        };
+
+        // Read ServerKeyExchange or skip
+        let (hs_type, next_data) = if hs_type == HandshakeType::ServerKeyExchange {
+            let (_, ske_body, _) = parse_handshake_header(&next_data)?;
+            match hs.kx_alg() {
+                KeyExchangeAlg::Ecdhe => {
+                    let ske = decode_server_key_exchange(ske_body)?;
+                    hs.process_server_key_exchange(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::Dhe => {
+                    let ske = decode_server_key_exchange_dhe(ske_body)?;
+                    hs.process_server_key_exchange_dhe(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::Psk | KeyExchangeAlg::RsaPsk => {
+                    let ske = decode_server_key_exchange_psk_hint(ske_body)?;
+                    hs.process_server_key_exchange_psk_hint(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::DhePsk => {
+                    let ske = decode_server_key_exchange_dhe_psk(ske_body)?;
+                    hs.process_server_key_exchange_dhe_psk(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::EcdhePsk => {
+                    let ske = decode_server_key_exchange_ecdhe_psk(ske_body)?;
+                    hs.process_server_key_exchange_ecdhe_psk(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::DheAnon => {
+                    let ske = decode_server_key_exchange_dhe_anon(ske_body)?;
+                    hs.process_server_key_exchange_dhe_anon(&next_data, &ske)?;
+                }
+                KeyExchangeAlg::EcdheAnon => {
+                    let ske = decode_server_key_exchange_ecdhe_anon(ske_body)?;
+                    hs.process_server_key_exchange_ecdhe_anon(&next_data, &ske)?;
+                }
+                _ => {
+                    return Err(TlsError::HandshakeFailed(
+                        "unexpected ServerKeyExchange for this key exchange".into(),
+                    ));
+                }
+            }
+            self.read_handshake_msg().await?
+        } else {
+            if hs.kx_alg() != KeyExchangeAlg::Rsa
+                && hs.kx_alg() != KeyExchangeAlg::Psk
+                && hs.kx_alg() != KeyExchangeAlg::RsaPsk
+            {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected ServerKeyExchange for {:?}, got {hs_type:?}",
+                    hs.kx_alg()
+                )));
+            }
+            (hs_type, next_data)
+        };
+
+        // Read CertificateRequest (optional) or ServerHelloDone
+        let shd_data = if hs_type == HandshakeType::CertificateRequest {
+            let (_, cr_body, _) = parse_handshake_header(&next_data)?;
+            let cr = decode_certificate_request12(cr_body)?;
+            hs.process_certificate_request(&next_data, &cr)?;
+            let (hs_type, shd_data) = self.read_handshake_msg().await?;
+            if hs_type != HandshakeType::ServerHelloDone {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected ServerHelloDone, got {hs_type:?}"
+                )));
+            }
+            shd_data
+        } else if hs_type == HandshakeType::ServerHelloDone {
+            next_data
+        } else {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected CertificateRequest or ServerHelloDone, got {hs_type:?}"
+            )));
+        };
+
+        // Process ServerHelloDone
+        let mut flight = hs.process_server_hello_done(&shd_data)?;
+
+        // Send client Certificate (if mTLS requested)
+        if let Some(ref cert_msg) = flight.client_certificate {
+            let cert_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cert_msg)?;
+            self.stream
+                .write_all(&cert_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // Send ClientKeyExchange
+        let cke_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &flight.client_key_exchange)?;
+        self.stream
+            .write_all(&cke_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Send CertificateVerify (if mTLS)
+        if let Some(ref cv_msg) = flight.certificate_verify {
+            let cv_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cv_msg)?;
+            self.stream
+                .write_all(&cv_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // Send ChangeCipherSpec
+        let ccs_record = self
+            .record_layer
+            .seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
+        self.stream
+            .write_all(&ccs_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Activate write encryption (re-key)
+        if flight.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_write_encryption12_etm(
+                flight.client_write_key.clone(),
+                flight.client_write_mac_key.clone(),
+                flight.mac_len,
+            );
+        } else if flight.is_cbc {
+            self.record_layer.activate_write_encryption12_cbc(
+                flight.client_write_key.clone(),
+                flight.client_write_mac_key.clone(),
+                flight.mac_len,
+            );
+        } else {
+            self.record_layer.activate_write_encryption12(
+                suite,
+                &flight.client_write_key,
+                flight.client_write_iv.clone(),
+            )?;
+        }
+
+        // Send Finished (encrypted with new keys)
+        let fin_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &flight.finished)?;
+        self.stream
+            .write_all(&fin_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Read NewSessionTicket (optional) then server ChangeCipherSpec
+        loop {
+            let (ct, data) = self.read_record().await?;
+            match ct {
+                ContentType::Handshake => {
+                    let (hs_type, _, total) = parse_handshake_header(&data)?;
+                    if hs_type == HandshakeType::NewSessionTicket {
+                        let body = &data[4..total];
+                        hs.process_new_session_ticket(body)?;
+                    } else {
+                        return Err(TlsError::HandshakeFailed(format!(
+                            "expected NewSessionTicket or CCS, got {hs_type:?}"
+                        )));
+                    }
+                }
+                ContentType::ChangeCipherSpec => {
+                    hs.process_change_cipher_spec()?;
+                    break;
+                }
+                _ => {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "expected ChangeCipherSpec, got {ct:?}"
+                    )));
+                }
+            }
+        }
+
+        // Activate read decryption (re-key)
+        if flight.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_read_decryption12_etm(
+                flight.server_write_key.clone(),
+                flight.server_write_mac_key.clone(),
+                flight.mac_len,
+            );
+        } else if flight.is_cbc {
+            self.record_layer.activate_read_decryption12_cbc(
+                flight.server_write_key.clone(),
+                flight.server_write_mac_key.clone(),
+                flight.mac_len,
+            );
+        } else {
+            self.record_layer.activate_read_decryption12(
+                suite,
+                &flight.server_write_key,
+                flight.server_write_iv.clone(),
+            )?;
+        }
+
+        // Read server Finished (encrypted with new keys)
+        let (hs_type, fin_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::Finished {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected Finished, got {hs_type:?}"
+            )));
+        }
+        hs.process_finished(&fin_data, &flight.master_secret)?;
+
+        // Zeroize secrets
+        flight.master_secret.zeroize();
+        flight.client_write_key.zeroize();
+        flight.server_write_key.zeroize();
+
+        self.negotiated_suite = Some(suite);
+        self.client_verify_data = hs.client_verify_data().to_vec();
+        self.server_verify_data = hs.server_verify_data().to_vec();
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -558,31 +849,58 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ClientC
             ));
         }
 
-        // Return buffered data first
-        if !self.app_data_buf.is_empty() {
-            let n = std::cmp::min(buf.len(), self.app_data_buf.len());
-            buf[..n].copy_from_slice(&self.app_data_buf[..n]);
-            self.app_data_buf.drain(..n);
-            return Ok(n);
-        }
+        loop {
+            // Return buffered data first
+            if !self.app_data_buf.is_empty() {
+                let n = std::cmp::min(buf.len(), self.app_data_buf.len());
+                buf[..n].copy_from_slice(&self.app_data_buf[..n]);
+                self.app_data_buf.drain(..n);
+                return Ok(n);
+            }
 
-        let (ct, plaintext) = self.read_record().await?;
-        match ct {
-            ContentType::ApplicationData => {
-                let n = std::cmp::min(buf.len(), plaintext.len());
-                buf[..n].copy_from_slice(&plaintext[..n]);
-                if plaintext.len() > n {
-                    self.app_data_buf.extend_from_slice(&plaintext[n..]);
+            let (ct, plaintext) = self.read_record().await?;
+            match ct {
+                ContentType::ApplicationData => {
+                    let n = std::cmp::min(buf.len(), plaintext.len());
+                    buf[..n].copy_from_slice(&plaintext[..n]);
+                    if plaintext.len() > n {
+                        self.app_data_buf.extend_from_slice(&plaintext[n..]);
+                    }
+                    return Ok(n);
                 }
-                Ok(n)
+                ContentType::Alert => {
+                    self.state = ConnectionState::Closed;
+                    return Ok(0);
+                }
+                ContentType::Handshake => {
+                    // Check for HelloRequest (type 0)
+                    if plaintext.len() >= 4 && plaintext[0] == 0x00 {
+                        if !self.config.allow_renegotiation {
+                            // Send warning alert no_renegotiation and continue
+                            let alert_data = [
+                                AlertLevel::Warning as u8,
+                                AlertDescription::NoRenegotiation as u8,
+                            ];
+                            let record = self
+                                .record_layer
+                                .seal_record(ContentType::Alert, &alert_data)?;
+                            let _ = self.stream.write_all(&record).await;
+                            continue;
+                        }
+                        // Perform renegotiation
+                        self.do_renegotiation().await?;
+                        continue;
+                    }
+                    return Err(TlsError::RecordError(
+                        "unexpected handshake message during application data".into(),
+                    ));
+                }
+                _ => {
+                    return Err(TlsError::RecordError(format!(
+                        "unexpected content type: {ct:?}"
+                    )));
+                }
             }
-            ContentType::Alert => {
-                self.state = ConnectionState::Closed;
-                Ok(0)
-            }
-            _ => Err(TlsError::RecordError(format!(
-                "unexpected content type: {ct:?}"
-            ))),
         }
     }
 
@@ -646,6 +964,10 @@ pub struct AsyncTls12ServerConnection<S: AsyncRead + AsyncWrite + Unpin> {
     app_data_buf: Vec<u8>,
     /// Session state for session ticket issuance.
     session: Option<TlsSession>,
+    /// Client verify_data from last handshake (for renegotiation).
+    client_verify_data: Vec<u8>,
+    /// Server verify_data from last handshake (for renegotiation).
+    server_verify_data: Vec<u8>,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
@@ -660,6 +982,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
             read_buf: Vec::with_capacity(16 * 1024),
             app_data_buf: Vec::new(),
             session: None,
+            client_verify_data: Vec::new(),
+            server_verify_data: Vec::new(),
         }
     }
 
@@ -935,6 +1259,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
         keys.server_write_key.zeroize();
 
         self.negotiated_suite = Some(suite);
+        self.client_verify_data = hs.client_verify_data().to_vec();
+        self.server_verify_data = hs.server_verify_data().to_vec();
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -1051,6 +1377,252 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
         abbr.server_write_key.zeroize();
 
         self.negotiated_suite = Some(suite);
+        self.client_verify_data = hs.client_verify_data().to_vec();
+        self.server_verify_data = hs.server_verify_data().to_vec();
+        self.state = ConnectionState::Connected;
+        Ok(())
+    }
+
+    /// Initiate server-side renegotiation (RFC 5746).
+    ///
+    /// Sends a HelloRequest and sets state to Renegotiating.
+    /// The actual renegotiation handshake happens when the client responds
+    /// with a ClientHello, processed by the server's `read()`.
+    pub async fn initiate_renegotiation(&mut self) -> Result<(), TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::HandshakeFailed(
+                "cannot renegotiate: not connected".into(),
+            ));
+        }
+        if !self.config.allow_renegotiation {
+            return Err(TlsError::HandshakeFailed(
+                "renegotiation not allowed by config".into(),
+            ));
+        }
+
+        // Send HelloRequest
+        let hr = Tls12ServerHandshake::build_hello_request();
+        let record = self.record_layer.seal_record(ContentType::Handshake, &hr)?;
+        self.stream
+            .write_all(&record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        self.state = ConnectionState::Renegotiating;
+        Ok(())
+    }
+
+    /// Perform server-side renegotiation with the received ClientHello.
+    async fn do_server_renegotiation(&mut self, ch_data: Vec<u8>) -> Result<(), TlsError> {
+        let mut hs = Tls12ServerHandshake::new(self.config.clone());
+        hs.setup_renegotiation(
+            std::mem::take(&mut self.client_verify_data),
+            std::mem::take(&mut self.server_verify_data),
+        );
+
+        let result = hs.process_client_hello_resumable(&ch_data, None)?;
+
+        match result {
+            ServerHelloResult::Full(flight) => {
+                self.do_server_renego_full(&mut hs, flight).await?;
+            }
+            ServerHelloResult::Abbreviated(_) => {
+                return Err(TlsError::HandshakeFailed(
+                    "unexpected session resumption during renegotiation".into(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Full handshake path for renegotiation (reuses same logic as initial).
+    async fn do_server_renego_full(
+        &mut self,
+        hs: &mut Tls12ServerHandshake,
+        flight: crate::handshake::server12::ServerFlightResult,
+    ) -> Result<(), TlsError> {
+        let suite = flight.suite;
+
+        // Send ServerHello
+        let sh_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &flight.server_hello)?;
+        self.stream
+            .write_all(&sh_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Send Certificate (if present)
+        if let Some(ref cert_msg) = flight.certificate {
+            let cert_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cert_msg)?;
+            self.stream
+                .write_all(&cert_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // Send CertificateStatus (if OCSP stapling)
+        if let Some(ref cs_msg) = flight.certificate_status {
+            let cs_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cs_msg)?;
+            self.stream
+                .write_all(&cs_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // Send ServerKeyExchange (if present)
+        if let Some(ref ske_msg) = flight.server_key_exchange {
+            let ske_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, ske_msg)?;
+            self.stream
+                .write_all(&ske_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // Send CertificateRequest (if mTLS enabled)
+        if let Some(ref cr_msg) = flight.certificate_request {
+            let cr_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, cr_msg)?;
+            self.stream
+                .write_all(&cr_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
+
+        // Send ServerHelloDone
+        let shd_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &flight.server_hello_done)?;
+        self.stream
+            .write_all(&shd_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Read client Certificate (if mTLS)
+        if flight.certificate_request.is_some() {
+            let (hs_type, cert_data) = self.read_handshake_msg().await?;
+            if hs_type != HandshakeType::Certificate {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected client Certificate, got {hs_type:?}"
+                )));
+            }
+            hs.process_client_certificate(&cert_data)?;
+        }
+
+        // Read ClientKeyExchange
+        let (hs_type, cke_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::ClientKeyExchange {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected ClientKeyExchange, got {hs_type:?}"
+            )));
+        }
+        let mut keys = hs.process_client_key_exchange(&cke_data)?;
+
+        // Read client CertificateVerify (if client sent certs)
+        if hs.state() == crate::handshake::server12::Tls12ServerState::WaitClientCertificateVerify {
+            let (hs_type, cv_data) = self.read_handshake_msg().await?;
+            if hs_type != HandshakeType::CertificateVerify {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected CertificateVerify, got {hs_type:?}"
+                )));
+            }
+            hs.process_client_certificate_verify(&cv_data)?;
+        }
+
+        // Read ChangeCipherSpec from client
+        let (ct, _ccs_data) = self.read_record().await?;
+        if ct != ContentType::ChangeCipherSpec {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected ChangeCipherSpec, got {ct:?}"
+            )));
+        }
+        hs.process_change_cipher_spec()?;
+
+        // Activate read decryption (re-key with client write key)
+        if keys.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_read_decryption12_etm(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
+            self.record_layer.activate_read_decryption12_cbc(
+                keys.client_write_key.clone(),
+                keys.client_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            self.record_layer.activate_read_decryption12(
+                suite,
+                &keys.client_write_key,
+                keys.client_write_iv.clone(),
+            )?;
+        }
+
+        // Read client Finished (encrypted with new keys)
+        let (hs_type, fin_data) = self.read_handshake_msg().await?;
+        if hs_type != HandshakeType::Finished {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected Finished, got {hs_type:?}"
+            )));
+        }
+        let server_fin = hs.process_finished(&fin_data)?;
+
+        // Send ChangeCipherSpec
+        let ccs_record = self
+            .record_layer
+            .seal_record(ContentType::ChangeCipherSpec, &[0x01])?;
+        self.stream
+            .write_all(&ccs_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Activate write encryption (re-key with server write key)
+        if keys.is_cbc && hs.use_encrypt_then_mac() {
+            self.record_layer.activate_write_encryption12_etm(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else if keys.is_cbc {
+            self.record_layer.activate_write_encryption12_cbc(
+                keys.server_write_key.clone(),
+                keys.server_write_mac_key.clone(),
+                keys.mac_len,
+            );
+        } else {
+            self.record_layer.activate_write_encryption12(
+                suite,
+                &keys.server_write_key,
+                keys.server_write_iv.clone(),
+            )?;
+        }
+
+        // Send server Finished (encrypted with new keys)
+        let sfin_record = self
+            .record_layer
+            .seal_record(ContentType::Handshake, &server_fin.finished)?;
+        self.stream
+            .write_all(&sfin_record)
+            .await
+            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Zeroize secrets
+        keys.master_secret.zeroize();
+        keys.client_write_key.zeroize();
+        keys.server_write_key.zeroize();
+
+        self.negotiated_suite = Some(suite);
+        self.client_verify_data = hs.client_verify_data().to_vec();
+        self.server_verify_data = hs.server_verify_data().to_vec();
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -1073,36 +1645,74 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ServerC
     }
 
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, TlsError> {
-        if self.state != ConnectionState::Connected {
+        if self.state != ConnectionState::Connected && self.state != ConnectionState::Renegotiating
+        {
             return Err(TlsError::RecordError(
                 "not connected (handshake not done)".into(),
             ));
         }
 
-        if !self.app_data_buf.is_empty() {
-            let n = std::cmp::min(buf.len(), self.app_data_buf.len());
-            buf[..n].copy_from_slice(&self.app_data_buf[..n]);
-            self.app_data_buf.drain(..n);
-            return Ok(n);
-        }
+        loop {
+            // Only return buffered data when Connected (not during renegotiation)
+            if self.state == ConnectionState::Connected && !self.app_data_buf.is_empty() {
+                let n = std::cmp::min(buf.len(), self.app_data_buf.len());
+                buf[..n].copy_from_slice(&self.app_data_buf[..n]);
+                self.app_data_buf.drain(..n);
+                return Ok(n);
+            }
 
-        let (ct, plaintext) = self.read_record().await?;
-        match ct {
-            ContentType::ApplicationData => {
-                let n = std::cmp::min(buf.len(), plaintext.len());
-                buf[..n].copy_from_slice(&plaintext[..n]);
-                if plaintext.len() > n {
-                    self.app_data_buf.extend_from_slice(&plaintext[n..]);
+            let (ct, plaintext) = self.read_record().await?;
+            match ct {
+                ContentType::ApplicationData => {
+                    if self.state == ConnectionState::Renegotiating {
+                        // Buffer app data during renegotiation
+                        self.app_data_buf.extend_from_slice(&plaintext);
+                        continue;
+                    }
+                    let n = std::cmp::min(buf.len(), plaintext.len());
+                    buf[..n].copy_from_slice(&plaintext[..n]);
+                    if plaintext.len() > n {
+                        self.app_data_buf.extend_from_slice(&plaintext[n..]);
+                    }
+                    return Ok(n);
                 }
-                Ok(n)
+                ContentType::Alert => {
+                    // Check for no_renegotiation warning during renegotiation
+                    if self.state == ConnectionState::Renegotiating
+                        && plaintext.len() >= 2
+                        && plaintext[0] == AlertLevel::Warning as u8
+                        && plaintext[1] == AlertDescription::NoRenegotiation as u8
+                    {
+                        // Client refused renegotiation -- go back to Connected
+                        self.state = ConnectionState::Connected;
+                        continue;
+                    }
+                    self.state = ConnectionState::Closed;
+                    return Ok(0);
+                }
+                ContentType::Handshake => {
+                    if self.state == ConnectionState::Renegotiating {
+                        // Expecting ClientHello during renegotiation
+                        let (hs_type, _, total) = parse_handshake_header(&plaintext)?;
+                        if hs_type == HandshakeType::ClientHello {
+                            let ch_data = plaintext[..total].to_vec();
+                            self.do_server_renegotiation(ch_data).await?;
+                            continue;
+                        }
+                        return Err(TlsError::HandshakeFailed(format!(
+                            "expected ClientHello during renegotiation, got {hs_type:?}"
+                        )));
+                    }
+                    return Err(TlsError::RecordError(format!(
+                        "unexpected content type: {ct:?}"
+                    )));
+                }
+                _ => {
+                    return Err(TlsError::RecordError(format!(
+                        "unexpected content type: {ct:?}"
+                    )));
+                }
             }
-            ContentType::Alert => {
-                self.state = ConnectionState::Closed;
-                Ok(0)
-            }
-            _ => Err(TlsError::RecordError(format!(
-                "unexpected content type: {ct:?}"
-            ))),
         }
     }
 

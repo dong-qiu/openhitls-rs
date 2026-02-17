@@ -35,6 +35,7 @@ pub mod verify;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum HandshakeType {
+    HelloRequest = 0,
     ClientHello = 1,
     ServerHello = 2,
     HelloVerifyRequest = 3,
