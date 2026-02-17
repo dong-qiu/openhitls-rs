@@ -2,7 +2,7 @@
 //!
 //! Implements the ECDHE-GCM handshake for TLS 1.2 servers.
 
-use crate::config::{ServerPrivateKey, TlsConfig};
+use crate::config::{ServerPrivateKey, SniAction, TlsConfig};
 use crate::crypt::key_schedule12::{
     compute_verify_data, derive_extended_master_secret, derive_key_block, derive_master_secret,
 };
@@ -501,6 +501,24 @@ impl Tls12ServerHandshake {
             crate::extensions::ExtensionContext::CLIENT_HELLO,
             &ch.extensions,
         )?;
+
+        // SNI callback (server-side hostname-based config selection)
+        if let (Some(ref sni_cb), Some(ref hostname)) =
+            (&self.config.sni_callback, &self.client_server_name)
+        {
+            match sni_cb(hostname) {
+                SniAction::Accept => {}
+                SniAction::AcceptWithConfig(new_config) => {
+                    self.config = *new_config;
+                }
+                SniAction::Reject => {
+                    return Err(TlsError::HandshakeFailed("unrecognized_name".into()));
+                }
+                SniAction::Ignore => {
+                    self.client_server_name = None;
+                }
+            }
+        }
 
         // Fallback SCSV (RFC 7507) detection
         if ch.cipher_suites.contains(&CipherSuite::TLS_FALLBACK_SCSV) {

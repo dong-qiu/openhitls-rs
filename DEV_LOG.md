@@ -5845,3 +5845,90 @@ Added connection parameter query APIs (ConnectionInfo struct), completed ALPN ne
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1854 workspace tests passing (40 ignored)
+
+---
+
+## Phase 70 — Hostname Verification + Certificate Chain Validation + SNI Callback (2026-02-17)
+
+### Summary
+Security-critical phase: client now validates server certificate chain against trusted CAs and verifies hostname matching. Added RFC 6125 hostname verification (SAN/CN matching, wildcards, IP addresses), certificate chain validation via `CertificateVerifier`, `CertVerifyCallback` for custom verification override, `SniCallback` for server-side certificate selection by hostname. Wired into all 5 client handshake paths (TLS 1.2/1.3/DTLS 1.2/TLCP/DTLCP). 15 new tests (all hostname verification unit tests in hitls-pki).
+
+### Key Features
+
+| Feature | Spec | Notes |
+|---------|------|-------|
+| Hostname verification | RFC 6125 / RFC 9525 | SAN dNSName + iPAddress matching, wildcard support (`*.example.com`), CN fallback (deprecated but supported), case-insensitive, IPv4/IPv6 |
+| Certificate chain validation | RFC 5280 | Uses existing `CertificateVerifier` from hitls-pki, validates against `config.trusted_certs` |
+| CertVerifyCallback | — | Application can override chain/hostname verification results |
+| SniCallback | — | Server selects certificate/config based on client's requested hostname |
+| SniAction enum | — | Accept, AcceptWithConfig(Box\<TlsConfig\>), Reject, Ignore |
+| verify_hostname config | — | Default: true. Only effective when verify_peer=true and server_name is set |
+| PkiError::HostnameMismatch | — | New error variant for hostname verification failures |
+
+### Hostname Verification Rules (RFC 6125)
+- SAN takes precedence over CN when present
+- Wildcard `*` only in leftmost label, must be exactly `*` (no partial wildcards like `f*o.bar.com`)
+- At least 2 labels after wildcard (`*.com` rejected)
+- Wildcard does not match bare domain (`*.example.com` ≠ `example.com`)
+- Wildcard does not match multi-level (`*.example.com` ≠ `a.b.example.com`)
+- IP addresses match only against SAN iPAddress (4-byte IPv4, 16-byte IPv6), never DNS SAN or CN
+- Case-insensitive DNS comparison
+
+### Files Created (2)
+
+| File | Description |
+|------|-------------|
+| `crates/hitls-pki/src/x509/hostname.rs` | RFC 6125 hostname verification: `verify_hostname(cert, hostname)`, wildcard matching, IP address matching, 15 unit tests |
+| `crates/hitls-tls/src/cert_verify.rs` | TLS cert verification orchestration: `verify_server_certificate(config, cert_chain_der)`, `CertVerifyInfo` struct |
+
+### Files Modified (9)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-types/src/error.rs` | `PkiError::HostnameMismatch(String)` variant |
+| `crates/hitls-pki/src/x509/mod.rs` | `pub mod hostname;` export |
+| `crates/hitls-tls/src/lib.rs` | `pub mod cert_verify;` export |
+| `crates/hitls-tls/src/config/mod.rs` | `CertVerifyCallback`, `SniCallback`, `SniAction` types; `cert_verify_callback`, `sni_callback`, `verify_hostname` fields in TlsConfig + builder |
+| `crates/hitls-tls/src/handshake/client.rs` | `verify_server_certificate()` call in TLS 1.3 `process_certificate()` |
+| `crates/hitls-tls/src/handshake/client12.rs` | `verify_server_certificate()` call in TLS 1.2 `process_certificate()` |
+| `crates/hitls-tls/src/handshake/client_dtls12.rs` | `verify_server_certificate()` call in DTLS 1.2 `process_certificate()` |
+| `crates/hitls-tls/src/handshake/client_tlcp.rs` | `verify_server_certificate()` call in TLCP `process_certificate()` |
+| `crates/hitls-tls/src/handshake/client_dtlcp.rs` | `verify_server_certificate()` call in DTLCP `process_certificate()` |
+| `crates/hitls-tls/src/handshake/server.rs` | SNI callback dispatch in TLS 1.3 `process_client_hello()` |
+| `crates/hitls-tls/src/handshake/server12.rs` | SNI callback dispatch in TLS 1.2 `process_client_hello()` |
+
+### Implementation Details
+- **verify_server_certificate() flow**: (1) Skip if `!verify_peer`, (2) Parse leaf cert + intermediates, (3) Chain verification via `CertificateVerifier` with `trusted_certs`, (4) Hostname verification if `verify_hostname && server_name` is set, (5) If `cert_verify_callback` is set, delegate to callback with `CertVerifyInfo`, (6) Otherwise both chain and hostname must pass.
+- **No existing test breakage**: All existing tests use `verify_peer(false)`, so the new verification is bypassed. Default `verify_hostname: true` is safe because it only runs when `verify_peer=true` AND `server_name` is set.
+- **SNI callback pattern**: Both TLS 1.2 and 1.3 servers dispatch after extension parsing and before cipher suite negotiation. `AcceptWithConfig` replaces the entire config (allowing different cert/key per hostname).
+- **TLCP/DTLCP cert verification**: Verifies `server_sign_certs` (signing certificate chain) since TLCP uses double certificates.
+
+### Test Counts (Phase 70)
+- **hitls-pki**: 336 [was: 321] (+15 hostname verification tests)
+- **hitls-tls**: 684 [unchanged — no new TLS tests, verification wired into existing paths]
+- **Total workspace**: 1869 (40 ignored) [was: 1854]
+
+### New Tests (15)
+
+| # | Test | File | Description |
+|---|------|------|-------------|
+| 1 | `test_exact_dns_match` | hostname.rs | `www.example.com` matches SAN dNSName `www.example.com` |
+| 2 | `test_wildcard_single_level` | hostname.rs | `*.example.com` matches `foo.example.com` |
+| 3 | `test_wildcard_no_bare_domain` | hostname.rs | `*.example.com` does NOT match `example.com` |
+| 4 | `test_wildcard_no_deep_match` | hostname.rs | `*.example.com` does NOT match `a.b.example.com` |
+| 5 | `test_wildcard_minimum_labels` | hostname.rs | `*.com` does NOT match `example.com` |
+| 6 | `test_partial_wildcard_rejected` | hostname.rs | `f*o.example.com` does NOT match `foo.example.com` |
+| 7 | `test_case_insensitive` | hostname.rs | `WWW.EXAMPLE.COM` matches SAN `www.example.com` |
+| 8 | `test_ipv4_match` | hostname.rs | `192.168.1.1` matches SAN iPAddress `[192, 168, 1, 1]` |
+| 9 | `test_san_takes_precedence_over_cn` | hostname.rs | When SAN exists, CN is ignored even if it matches |
+| 10 | `test_cn_fallback_no_san` | hostname.rs | When no SAN extension, falls back to subject CN |
+| 11 | `test_ipv6_match` | hostname.rs | `::1` matches SAN iPAddress (16-byte) |
+| 12 | `test_ip_not_matched_against_dns_san` | hostname.rs | IP as DNS SAN string does NOT match IP hostname |
+| 13 | `test_empty_hostname` | hostname.rs | Empty hostname returns error |
+| 14 | `test_no_san_no_cn` | hostname.rs | No SAN and no CN returns error |
+| 15 | `test_multiple_san_entries` | hostname.rs | Multiple DNS + IP SANs all matchable |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1869 workspace tests passing (40 ignored)

@@ -177,6 +177,9 @@ impl TlcpClientHandshake {
         self.server_sign_certs = cert_msg.sign_chain.clone();
         self.server_enc_cert = cert_msg.enc_cert.clone();
         self.transcript.update(raw_msg)?;
+
+        crate::cert_verify::verify_server_certificate(&self.config, &self.server_sign_certs)?;
+
         self.state = TlcpClientState::WaitServerKeyExchange;
         Ok(())
     }

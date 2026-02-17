@@ -797,6 +797,9 @@ impl ClientHandshake {
         }
 
         self.transcript.update(msg_data)?;
+
+        crate::cert_verify::verify_server_certificate(&self.config, &self.server_certs)?;
+
         self.state = HandshakeState::WaitCertVerify;
         Ok(())
     }

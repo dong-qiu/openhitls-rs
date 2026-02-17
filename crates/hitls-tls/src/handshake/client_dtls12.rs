@@ -252,6 +252,9 @@ impl Dtls12ClientHandshake {
         self.server_certs = cert_list.to_vec();
         let tls_msg = dtls_to_tls_handshake(raw_dtls_msg)?;
         self.transcript.update(&tls_msg)?;
+
+        crate::cert_verify::verify_server_certificate(&self.config, &self.server_certs)?;
+
         self.state = Dtls12ClientState::WaitServerKeyExchange;
         Ok(())
     }

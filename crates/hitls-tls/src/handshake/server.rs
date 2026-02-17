@@ -4,7 +4,7 @@
 //! ClientHello → ServerHello + {EE} + {Certificate} + {CertificateVerify} + {Finished}
 //! → client {Finished}
 
-use crate::config::TlsConfig;
+use crate::config::{SniAction, TlsConfig};
 use crate::crypt::hkdf::{hkdf_expand, hmac_hash};
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
@@ -450,6 +450,24 @@ impl ServerHandshake {
             crate::extensions::ExtensionContext::CLIENT_HELLO,
             &ch.extensions,
         )?;
+
+        // SNI callback (server-side hostname-based config selection)
+        if let (Some(ref sni_cb), Some(ref hostname)) =
+            (&self.config.sni_callback, &self.client_server_name)
+        {
+            match sni_cb(hostname) {
+                SniAction::Accept => {}
+                SniAction::AcceptWithConfig(new_config) => {
+                    self.config = *new_config;
+                }
+                SniAction::Reject => {
+                    return Err(TlsError::HandshakeFailed("unrecognized_name".into()));
+                }
+                SniAction::Ignore => {
+                    self.client_server_name = None;
+                }
+            }
+        }
 
         // --- Select cipher suite ---
         let suite = self

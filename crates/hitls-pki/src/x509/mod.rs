@@ -1,6 +1,7 @@
 //! X.509 certificate, CRL, CSR, and OCSP management.
 
 pub mod crl;
+pub mod hostname;
 pub mod ocsp;
 pub mod text;
 pub mod verify;

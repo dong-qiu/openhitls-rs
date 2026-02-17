@@ -70,6 +70,32 @@ pub type PskServerCallback = Arc<dyn Fn(&[u8]) -> Option<Vec<u8>> + Send + Sync>
 /// The callback should append the line (plus a newline) to a log file or buffer.
 pub type KeyLogCallback = Arc<dyn Fn(&str) + Send + Sync>;
 
+/// Callback for custom certificate verification.
+///
+/// Called with verification info after chain and hostname checks. The callback can
+/// override the default result: returning `Ok(())` accepts the certificate even if
+/// default checks failed, and returning `Err(reason)` rejects it.
+pub type CertVerifyCallback =
+    Arc<dyn Fn(&crate::cert_verify::CertVerifyInfo) -> Result<(), String> + Send + Sync>;
+
+/// Callback for server-side SNI-based configuration selection.
+///
+/// Called with the client's requested hostname. Returns an action to take.
+pub type SniCallback = Arc<dyn Fn(&str) -> SniAction + Send + Sync>;
+
+/// Action to take after the SNI callback processes a hostname.
+#[derive(Clone)]
+pub enum SniAction {
+    /// Accept the connection with the current config.
+    Accept,
+    /// Accept the connection with a different config (e.g., different certificate).
+    AcceptWithConfig(Box<TlsConfig>),
+    /// Reject the connection with unrecognized_name alert.
+    Reject,
+    /// Ignore the SNI extension (clear the server name).
+    Ignore,
+}
+
 /// TLS configuration.
 #[derive(Clone)]
 pub struct TlsConfig {
@@ -154,6 +180,14 @@ pub struct TlsConfig {
     pub tlcp_enc_private_key: Option<ServerPrivateKey>,
     /// Key log callback for NSS key log format (SSLKEYLOGFILE-compatible).
     pub key_log_callback: Option<KeyLogCallback>,
+    /// Custom certificate verification callback.
+    pub cert_verify_callback: Option<CertVerifyCallback>,
+    /// Server-side SNI callback for hostname-based configuration selection.
+    pub sni_callback: Option<SniCallback>,
+    /// Whether to verify the server's hostname against the certificate.
+    /// Only effective when `verify_peer` is true and `server_name` is set.
+    /// Default: true.
+    pub verify_hostname: bool,
     /// Registered custom extensions.
     pub custom_extensions: Vec<CustomExtension>,
 }
@@ -179,6 +213,15 @@ impl fmt::Debug for TlsConfig {
                 "key_log_callback",
                 &self.key_log_callback.as_ref().map(|_| "<callback>"),
             )
+            .field(
+                "cert_verify_callback",
+                &self.cert_verify_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "sni_callback",
+                &self.sni_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field("verify_hostname", &self.verify_hostname)
             .finish_non_exhaustive()
     }
 }
@@ -232,6 +275,9 @@ pub struct TlsConfigBuilder {
     #[cfg(feature = "tlcp")]
     tlcp_enc_private_key: Option<ServerPrivateKey>,
     key_log_callback: Option<KeyLogCallback>,
+    cert_verify_callback: Option<CertVerifyCallback>,
+    sni_callback: Option<SniCallback>,
+    verify_hostname: bool,
     custom_extensions: Vec<CustomExtension>,
 }
 
@@ -286,6 +332,9 @@ impl Default for TlsConfigBuilder {
             #[cfg(feature = "tlcp")]
             tlcp_enc_private_key: None,
             key_log_callback: None,
+            cert_verify_callback: None,
+            sni_callback: None,
+            verify_hostname: true,
             custom_extensions: Vec::new(),
         }
     }
@@ -493,6 +542,21 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn cert_verify_callback(mut self, cb: CertVerifyCallback) -> Self {
+        self.cert_verify_callback = Some(cb);
+        self
+    }
+
+    pub fn sni_callback(mut self, cb: SniCallback) -> Self {
+        self.sni_callback = Some(cb);
+        self
+    }
+
+    pub fn verify_hostname(mut self, enabled: bool) -> Self {
+        self.verify_hostname = enabled;
+        self
+    }
+
     pub fn custom_extension(mut self, ext: CustomExtension) -> Self {
         self.custom_extensions.push(ext);
         self
@@ -540,6 +604,9 @@ impl TlsConfigBuilder {
             #[cfg(feature = "tlcp")]
             tlcp_enc_private_key: self.tlcp_enc_private_key,
             key_log_callback: self.key_log_callback,
+            cert_verify_callback: self.cert_verify_callback,
+            sni_callback: self.sni_callback,
+            verify_hostname: self.verify_hostname,
             custom_extensions: self.custom_extensions,
         }
     }

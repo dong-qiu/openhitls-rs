@@ -727,6 +727,9 @@ impl Tls12ClientHandshake {
         self.server_certs = cert_list.to_vec();
         self.server_cert_der = cert_list[0].clone();
         self.transcript.update(raw_msg)?;
+
+        crate::cert_verify::verify_server_certificate(&self.config, &self.server_certs)?;
+
         match self.kx_alg {
             // RSA / RSA_PSK: no ServerKeyExchange — skip directly to SHD
             KeyExchangeAlg::Rsa | KeyExchangeAlg::RsaPsk => {

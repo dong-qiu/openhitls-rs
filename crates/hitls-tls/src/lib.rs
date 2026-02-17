@@ -2,6 +2,7 @@
 #![doc = "TLS protocol implementation for openHiTLS."]
 
 pub mod alert;
+pub mod cert_verify;
 pub mod config;
 pub mod connection;
 pub mod connection12;

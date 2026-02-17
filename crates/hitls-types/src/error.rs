@@ -223,6 +223,8 @@ pub enum PkiError {
     NameConstraintsViolation(String),
     #[error("max chain depth exceeded: {0}")]
     MaxDepthExceeded(u32),
+    #[error("hostname mismatch: {0}")]
+    HostnameMismatch(String),
     #[error("crypto error: {0}")]
     CryptoError(#[from] CryptoError),
 }

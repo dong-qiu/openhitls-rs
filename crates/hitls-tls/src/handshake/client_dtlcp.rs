@@ -251,6 +251,9 @@ impl DtlcpClientHandshake {
 
         let tls_msg = dtls_to_tls_handshake(raw_dtls_msg)?;
         self.transcript.update(&tls_msg)?;
+
+        crate::cert_verify::verify_server_certificate(&self.config, &self.server_sign_certs)?;
+
         self.state = DtlcpClientState::WaitServerKeyExchange;
         Ok(())
     }
