@@ -553,4 +553,168 @@ mod tests {
         assert_eq!(cache.session_lifetime, 1800);
         assert!(cache.is_empty());
     }
+
+    #[test]
+    fn test_cache_arc_mutex_basic() {
+        use std::sync::{Arc, Mutex};
+
+        let cache = Arc::new(Mutex::new(InMemorySessionCache::new(10)));
+        {
+            let mut c = cache.lock().unwrap();
+            c.put(b"key1", make_session(0x1301, &[1u8; 32]));
+        }
+        {
+            let c = cache.lock().unwrap();
+            let s = c.get(b"key1").unwrap();
+            assert_eq!(s.cipher_suite.0, 0x1301);
+        }
+    }
+
+    #[test]
+    fn test_cache_arc_mutex_concurrent_puts() {
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        let cache = Arc::new(Mutex::new(InMemorySessionCache::new(200)));
+        let mut handles = Vec::new();
+
+        for thread_id in 0u8..4 {
+            let cache_clone = Arc::clone(&cache);
+            let handle = thread::spawn(move || {
+                for j in 0u8..25 {
+                    let key = vec![thread_id, j];
+                    let session = make_session(0x1301, &[thread_id; 32]);
+                    let mut c = cache_clone.lock().unwrap();
+                    c.put(&key, session);
+                }
+            });
+            handles.push(handle);
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let c = cache.lock().unwrap();
+        // 4 threads × 25 unique keys = 100 entries total (capacity=200)
+        assert_eq!(c.len(), 100);
+    }
+
+    #[test]
+    fn test_cache_arc_mutex_concurrent_get_put() {
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        let cache = Arc::new(Mutex::new(InMemorySessionCache::new(50)));
+
+        // Pre-populate a key for readers to find
+        {
+            let mut c = cache.lock().unwrap();
+            c.put(b"shared_key", make_session(0x1302, &[0xAA; 32]));
+        }
+
+        let mut handles = Vec::new();
+
+        // 2 writer threads
+        for i in 0u8..2 {
+            let cache_clone = Arc::clone(&cache);
+            let h = thread::spawn(move || {
+                for j in 0u8..10 {
+                    let key = vec![i, j, 0xFF];
+                    let mut c = cache_clone.lock().unwrap();
+                    c.put(&key, make_session(0x1303, &[i; 32]));
+                }
+            });
+            handles.push(h);
+        }
+
+        // 2 reader threads
+        for _ in 0..2 {
+            let cache_clone = Arc::clone(&cache);
+            let h = thread::spawn(move || {
+                for _ in 0..10 {
+                    let c = cache_clone.lock().unwrap();
+                    // Either finds the session or None — both are valid under concurrent load
+                    let _ = c.get(b"shared_key");
+                }
+            });
+            handles.push(h);
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // The shared_key should still be retrievable (unless evicted under capacity pressure)
+        let c = cache.lock().unwrap();
+        assert!(!c.is_empty());
+    }
+
+    #[test]
+    fn test_cache_arc_mutex_eviction_under_load() {
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        // Small capacity to trigger eviction under concurrent writes
+        let cache = Arc::new(Mutex::new(InMemorySessionCache::new(5)));
+        let mut handles = Vec::new();
+
+        for i in 0u8..3 {
+            let cache_clone = Arc::clone(&cache);
+            let h = thread::spawn(move || {
+                for j in 0u8..10 {
+                    let key = vec![i, j];
+                    let mut c = cache_clone.lock().unwrap();
+                    c.put(&key, make_session(0x1301, &[i; 32]));
+                }
+            });
+            handles.push(h);
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Eviction must keep len ≤ max_size
+        let c = cache.lock().unwrap();
+        assert!(c.len() <= 5, "cache len {} exceeds max_size 5", c.len());
+    }
+
+    #[test]
+    fn test_cache_arc_mutex_shared_across_two_arcs() {
+        use std::sync::{Arc, Mutex};
+
+        let cache1 = Arc::new(Mutex::new(InMemorySessionCache::new(10)));
+        let cache2 = Arc::clone(&cache1);
+
+        // Write via cache1
+        cache1
+            .lock()
+            .unwrap()
+            .put(b"k1", make_session(0x1301, &[1u8; 32]));
+
+        // Read via cache2 — should see the same data
+        let c = cache2.lock().unwrap();
+        assert!(c.get(b"k1").is_some());
+        assert_eq!(c.get(b"k1").unwrap().cipher_suite.0, 0x1301);
+    }
+
+    #[test]
+    fn test_cache_trait_object_via_arc_mutex() {
+        use std::sync::{Arc, Mutex};
+
+        // Use as SessionCache trait object
+        let cache: Arc<Mutex<Box<dyn SessionCache>>> =
+            Arc::new(Mutex::new(Box::new(InMemorySessionCache::new(10))));
+
+        cache
+            .lock()
+            .unwrap()
+            .put(b"trait_key", make_session(0x1302, &[0x42; 32]));
+
+        let c = cache.lock().unwrap();
+        let s = c.get(b"trait_key").unwrap();
+        assert_eq!(s.cipher_suite.0, 0x1302);
+    }
+
 }

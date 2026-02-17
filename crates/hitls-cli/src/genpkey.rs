@@ -118,3 +118,165 @@ fn parse_mldsa_param(name: &str) -> Result<u32, Box<dyn std::error::Error>> {
         _ => Err(format!("unsupported ML-DSA parameter set: {name}").into()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // parse_curve_id
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_curve_id_p256_aliases() {
+        for name in &["P-256", "p256", "prime256v1", "secp256r1"] {
+            let id = parse_curve_id(name).unwrap();
+            assert_eq!(id, hitls_types::EccCurveId::NistP256, "failed for {name}");
+        }
+    }
+
+    #[test]
+    fn test_parse_curve_id_p384() {
+        assert_eq!(
+            parse_curve_id("P-384").unwrap(),
+            hitls_types::EccCurveId::NistP384
+        );
+        assert_eq!(
+            parse_curve_id("secp384r1").unwrap(),
+            hitls_types::EccCurveId::NistP384
+        );
+    }
+
+    #[test]
+    fn test_parse_curve_id_sm2() {
+        assert_eq!(
+            parse_curve_id("sm2").unwrap(),
+            hitls_types::EccCurveId::Sm2Prime256
+        );
+        assert_eq!(
+            parse_curve_id("SM2P256V1").unwrap(),
+            hitls_types::EccCurveId::Sm2Prime256
+        );
+    }
+
+    #[test]
+    fn test_parse_curve_id_unknown() {
+        assert!(parse_curve_id("P-521").is_err());
+        assert!(parse_curve_id("brainpool").is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_mlkem_param
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_mlkem_param_512() {
+        assert_eq!(parse_mlkem_param("512").unwrap(), 512);
+    }
+
+    #[test]
+    fn test_parse_mlkem_param_768() {
+        assert_eq!(parse_mlkem_param("768").unwrap(), 768);
+    }
+
+    #[test]
+    fn test_parse_mlkem_param_1024() {
+        assert_eq!(parse_mlkem_param("1024").unwrap(), 1024);
+    }
+
+    #[test]
+    fn test_parse_mlkem_param_default_empty() {
+        // Empty string maps to 768
+        assert_eq!(parse_mlkem_param("").unwrap(), 768);
+    }
+
+    #[test]
+    fn test_parse_mlkem_param_unknown() {
+        assert!(parse_mlkem_param("256").is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_mldsa_param
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_mldsa_param_44() {
+        assert_eq!(parse_mldsa_param("44").unwrap(), 44);
+    }
+
+    #[test]
+    fn test_parse_mldsa_param_65() {
+        assert_eq!(parse_mldsa_param("65").unwrap(), 65);
+    }
+
+    #[test]
+    fn test_parse_mldsa_param_87() {
+        assert_eq!(parse_mldsa_param("87").unwrap(), 87);
+    }
+
+    #[test]
+    fn test_parse_mldsa_param_unknown() {
+        assert!(parse_mldsa_param("128").is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // run() — fast key types only (RSA excluded: too slow for unit tests)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_run_ec_p256() {
+        let result = run("ec", None, Some("P-256"), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_ecdsa_p384() {
+        let result = run("ecdsa", None, Some("P-384"), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_ed25519() {
+        let result = run("ed25519", None, None, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_x25519() {
+        let result = run("x25519", None, None, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_mlkem_768() {
+        let result = run("ml-kem", None, Some("768"), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_mldsa_65() {
+        let result = run("ml-dsa", None, Some("65"), None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_unknown_algorithm() {
+        let result = run("unknown-algo", None, None, None);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported algorithm"));
+    }
+
+    #[test]
+    fn test_run_output_to_file() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join("test_genpkey_ed25519.pem");
+        let result = run("ed25519", None, None, Some(tmp.to_str().unwrap()));
+        assert!(result.is_ok());
+        let content = fs::read_to_string(&tmp).unwrap();
+        assert!(content.contains("PUBLIC KEY"));
+        let _ = fs::remove_file(&tmp);
+    }
+}

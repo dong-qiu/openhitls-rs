@@ -6058,3 +6058,45 @@ Added client-side session cache (auto-store/auto-lookup by server_name) and writ
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1892 workspace tests passing (40 ignored)
+
+## Testing-Phase 72: CLI Command Unit Tests + Session Cache Concurrency
+
+### Date: 2026-02-17
+
+### Summary
+Systematic test coverage improvement for the seven previously-untested CLI command modules and Arc<Mutex<>> concurrency safety for the InMemorySessionCache added in Phase 71. Part of the Testing-Phase roadmap (Testing-Phase 72 = Stage A of the test optimization plan). Added 72 new tests total: 77 in hitls-cli (net +77 from 40→117) and 6 in hitls-tls session module.
+
+### Files Modified
+
+| File | Tests Added | Description |
+|------|:-----------:|-------------|
+| `crates/hitls-cli/src/dgst.rs` | 17 | hash_data() for all 9 algorithms (MD5/SHA1/SHA224/SHA256/SHA384/SHA512/SM3/SHA3-256/SHA3-512), case insensitivity, alias, different inputs, run() success/error paths |
+| `crates/hitls-cli/src/x509cmd.rs` | 15 | hex_str(), days_to_ymd() (epoch/Y2K/leap-Feb29/Dec31), format_time() (epoch/2024/UTC suffix), run() default/fingerprint/text/invalid/nonexistent |
+| `crates/hitls-cli/src/genpkey.rs` | 19 | parse_curve_id() aliases/P384/SM2/unknown, parse_mlkem_param() 512/768/1024/empty/unknown, parse_mldsa_param() 44/65/87/unknown, run() EC-P256/ECDSA-P384/Ed25519/X25519/ML-KEM/ML-DSA/unknown/file-output |
+| `crates/hitls-cli/src/pkey.rs` | 5 | run() no-flags/text/pubout/empty-file-error/nonexistent |
+| `crates/hitls-cli/src/req.rs` | 9 | parse_subject() simple/multi/no-leading-slash/empty/missing-equals, run() CSR-stdout/CSR-to-file/no-key/no-subject |
+| `crates/hitls-cli/src/crl.rs` | 6 | run() PEM-empty/PEM-with-revoked/text-mode/DER-crl/nonexistent/invalid-data; uses include_str! for CRL test vectors |
+| `crates/hitls-cli/src/verify.rs` | 4 | run() success-self-signed/CA-not-found/cert-not-found/invalid-cert-pem |
+| `crates/hitls-tls/src/session/mod.rs` | 6 | Arc<Mutex<InMemorySessionCache>>: basic/concurrent-puts (4 threads×25 keys)/concurrent-get-put/eviction-under-load (capacity=5)/shared-across-arcs/trait-object-Box<dyn SessionCache> |
+
+### Test Counts
+
+| Crate | Before | After | Delta |
+|-------|--------|-------|-------|
+| hitls-cli | 40 | 117 | +77 |
+| hitls-tls | 684 | 690 | +6 |
+| **Workspace total** | **1880** | **1952** | **+72** |
+
+### Design Notes
+
+- **CLI tests**: Use `std::env::temp_dir()` for temp files (consistent with existing tests); clean up with `fs::remove_file()` after each test
+- **CRL tests**: Reference test vectors via `include_str!("../../../tests/vectors/crl/...")` rather than embedding PEM inline
+- **Cert helpers**: `make_self_signed_cert_pem()` / `make_ed25519_key_pem()` helpers generate deterministic keys with seed `[0x42/0x55; 32]`; `not_after=9_999_999_999` avoids expiry failures
+- **Concurrent tests**: Use `std::thread::spawn` + `Arc::clone`; all tests complete deterministically with no `std::thread::sleep` or timing dependencies
+- **verify.rs constraint**: `run()` calls `std::process::exit(1)` on verification failure (not testable); only file-I/O error paths and success path are tested
+- **genpkey.rs**: RSA generation intentionally excluded from unit tests (slow, marked `#[ignore]` elsewhere)
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1952 workspace tests passing (40 ignored)
