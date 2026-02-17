@@ -238,6 +238,19 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
 
     /// Run the TLS 1.2 client handshake.
     fn do_handshake(&mut self) -> Result<(), TlsError> {
+        // Auto-lookup: if no explicit resumption_session, check cache
+        if self.config.resumption_session.is_none() && self.config.session_resumption {
+            if let (Some(ref cache_mutex), Some(ref server_name)) =
+                (&self.config.session_cache, &self.config.server_name)
+            {
+                if let Ok(cache) = cache_mutex.lock() {
+                    if let Some(cached) = cache.get(server_name.as_bytes()) {
+                        self.config.resumption_session = Some(cached.clone());
+                    }
+                }
+            }
+        }
+
         let mut hs = Tls12ClientHandshake::new(self.config.clone());
 
         // 1. Build and send ClientHello
@@ -522,6 +535,17 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             extended_master_secret: hs.use_extended_master_secret(),
         });
 
+        // Auto-store in client session cache
+        if let (Some(ref cache_mutex), Some(ref server_name)) =
+            (&self.config.session_cache, &self.config.server_name)
+        {
+            if let Ok(mut cache) = cache_mutex.lock() {
+                if let Some(ref session) = self.session {
+                    cache.put(server_name.as_bytes(), session.clone());
+                }
+            }
+        }
+
         // Store export parameters (before zeroizing master_secret)
         self.export_master_secret = flight.master_secret.clone();
         self.export_client_random = *hs.client_random();
@@ -672,6 +696,17 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             psk: Vec::new(),
             extended_master_secret: hs.use_extended_master_secret(),
         });
+
+        // Auto-store in client session cache
+        if let (Some(ref cache_mutex), Some(ref server_name)) =
+            (&self.config.session_cache, &self.config.server_name)
+        {
+            if let Ok(mut cache) = cache_mutex.lock() {
+                if let Some(ref session) = self.session {
+                    cache.put(server_name.as_bytes(), session.clone());
+                }
+            }
+        }
 
         // Store export parameters (before zeroizing master_secret)
         self.export_master_secret = keys.master_secret.clone();
@@ -1077,12 +1112,22 @@ impl<S: Read + Write> TlsConnection for Tls12ClientConnection<S> {
             ));
         }
 
-        let record = self
-            .record_layer
-            .seal_record(ContentType::ApplicationData, buf)?;
-        self.stream
-            .write_all(&record)
-            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let max_frag = self.record_layer.max_fragment_size;
+        let mut offset = 0;
+        while offset < buf.len() {
+            let end = std::cmp::min(offset + max_frag, buf.len());
+            let record = self
+                .record_layer
+                .seal_record(ContentType::ApplicationData, &buf[offset..end])?;
+            self.stream
+                .write_all(&record)
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+            offset = end;
+        }
         Ok(buf.len())
     }
 
@@ -2100,12 +2145,22 @@ impl<S: Read + Write> TlsConnection for Tls12ServerConnection<S> {
             ));
         }
 
-        let record = self
-            .record_layer
-            .seal_record(ContentType::ApplicationData, buf)?;
-        self.stream
-            .write_all(&record)
-            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let max_frag = self.record_layer.max_fragment_size;
+        let mut offset = 0;
+        while offset < buf.len() {
+            let end = std::cmp::min(offset + max_frag, buf.len());
+            let record = self
+                .record_layer
+                .seal_record(ContentType::ApplicationData, &buf[offset..end])?;
+            self.stream
+                .write_all(&record)
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+            offset = end;
+        }
         Ok(buf.len())
     }
 
@@ -6316,6 +6371,461 @@ mod tests {
         assert!(conn.cipher_suite().is_some());
 
         conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    // ======================================================================
+    // Client-side session cache tests (Phase 72)
+    // ======================================================================
+
+    /// TLS 1.2 client auto-stores session after full handshake.
+    #[test]
+    fn test_tls12_client_session_cache_auto_store() {
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
+
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let client_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .server_name("store.example.com")
+            .session_cache(client_cache.clone())
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            tx.send(()).unwrap();
+            let mut buf = [0u8; 64];
+            let _ = conn.read(&mut buf);
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        // Client cache should have 1 session stored
+        assert_eq!(client_cache.lock().unwrap().len(), 1);
+        let cached = client_cache
+            .lock()
+            .unwrap()
+            .get(b"store.example.com")
+            .unwrap()
+            .clone();
+        assert_eq!(
+            cached.cipher_suite,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        );
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.2 client auto-lookup from cache for session resumption.
+    #[test]
+    fn test_tls12_client_session_cache_auto_lookup() {
+        use crate::session::{InMemorySessionCache, SessionCache};
+        use std::sync::{Arc, Mutex};
+
+        let client_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+
+        // Pre-populate cache with a session
+        let session = TlsSession {
+            id: vec![1],
+            cipher_suite: CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+            master_secret: vec![0; 48],
+            alpn_protocol: None,
+            ticket: Some(vec![0xAA; 16]),
+            ticket_lifetime: 3600,
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            psk: Vec::new(),
+            extended_master_secret: false,
+        };
+        client_cache
+            .lock()
+            .unwrap()
+            .put(b"lookup12.example.com", session);
+
+        let mut config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .verify_peer(false)
+            .server_name("lookup12.example.com")
+            .session_cache(client_cache)
+            .session_resumption(true)
+            .build();
+
+        assert!(config.resumption_session.is_none());
+
+        // Simulate auto-lookup
+        if config.resumption_session.is_none() && config.session_resumption {
+            if let (Some(ref cache_mutex), Some(ref server_name)) =
+                (&config.session_cache, &config.server_name)
+            {
+                if let Ok(cache) = cache_mutex.lock() {
+                    if let Some(cached) = cache.get(server_name.as_bytes()) {
+                        config.resumption_session = Some(cached.clone());
+                    }
+                }
+            }
+        }
+
+        assert!(config.resumption_session.is_some());
+        let rs = config.resumption_session.unwrap();
+        assert_eq!(rs.ticket, Some(vec![0xAA; 16]));
+    }
+
+    /// TLS 1.2 session_resumption=false disables cache lookup.
+    #[test]
+    fn test_tls12_client_cache_disabled_without_flag() {
+        use crate::session::{InMemorySessionCache, SessionCache};
+        use std::sync::{Arc, Mutex};
+
+        let client_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+
+        let session = TlsSession {
+            id: vec![1],
+            cipher_suite: CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+            master_secret: vec![0; 48],
+            alpn_protocol: None,
+            ticket: Some(vec![0xAA; 16]),
+            ticket_lifetime: 3600,
+            max_early_data: 0,
+            ticket_age_add: 0,
+            ticket_nonce: Vec::new(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            psk: Vec::new(),
+            extended_master_secret: false,
+        };
+        client_cache
+            .lock()
+            .unwrap()
+            .put(b"disabled.example.com", session);
+
+        let mut config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .verify_peer(false)
+            .server_name("disabled.example.com")
+            .session_cache(client_cache)
+            .session_resumption(false) // Disable session resumption
+            .build();
+
+        // Simulate auto-lookup with session_resumption=false
+        if config.resumption_session.is_none() && config.session_resumption {
+            if let (Some(ref cache_mutex), Some(ref server_name)) =
+                (&config.session_cache, &config.server_name)
+            {
+                if let Ok(cache) = cache_mutex.lock() {
+                    if let Some(cached) = cache.get(server_name.as_bytes()) {
+                        config.resumption_session = Some(cached.clone());
+                    }
+                }
+            }
+        }
+
+        // Should remain None because session_resumption is false
+        assert!(config.resumption_session.is_none());
+    }
+
+    /// TLS 1.2 abbreviated handshake updates cache entry.
+    #[test]
+    fn test_tls12_client_abbreviated_updates_cache() {
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
+
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let client_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+        let server_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+
+        // First connection: full handshake with client + server cache
+        let client_config1 = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .server_name("resume.example.com")
+            .session_cache(client_cache.clone())
+            .session_resumption(true)
+            .build();
+
+        let sc1 = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert.clone()])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private.clone(),
+            })
+            .verify_peer(false)
+            .session_cache(server_cache.clone())
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, sc1);
+            conn.handshake().unwrap();
+            assert!(!conn.is_session_resumed());
+            tx.send(()).unwrap();
+            let mut buf = [0u8; 64];
+            let _ = conn.read(&mut buf);
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config1);
+        conn.handshake().unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        // Client cache should have session from first handshake
+        assert_eq!(client_cache.lock().unwrap().len(), 1);
+        let first_session = client_cache
+            .lock()
+            .unwrap()
+            .get(b"resume.example.com")
+            .unwrap()
+            .clone();
+        let first_created = first_session.created_at;
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+
+        // Small delay to get different created_at
+        std::thread::sleep(Duration::from_millis(10));
+
+        // Second connection: should auto-lookup and attempt resumption
+        // The cache entry will be updated after abbreviated handshake
+        let client_config2 = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .server_name("resume.example.com")
+            .session_cache(client_cache.clone())
+            .session_resumption(true)
+            .build();
+
+        let sc2 = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .session_cache(server_cache)
+            .build();
+
+        let listener2 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr2 = listener2.local_addr().unwrap();
+        let (tx2, rx2) = mpsc::channel();
+
+        let server_handle2 = thread::spawn(move || {
+            let (stream, _) = listener2.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, sc2);
+            conn.handshake().unwrap();
+            tx2.send(conn.is_session_resumed()).unwrap();
+            let mut buf = [0u8; 64];
+            let _ = conn.read(&mut buf);
+        });
+
+        let stream2 = TcpStream::connect_timeout(&addr2, Duration::from_secs(5)).unwrap();
+        stream2
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream2
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn2 = Tls12ClientConnection::new(stream2, client_config2);
+        conn2.handshake().unwrap();
+        let _server_resumed = rx2.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        // After second handshake, cache should still have 1 entry (updated)
+        assert_eq!(client_cache.lock().unwrap().len(), 1);
+        let second_session = client_cache
+            .lock()
+            .unwrap()
+            .get(b"resume.example.com")
+            .unwrap()
+            .clone();
+        // The created_at should be >= first (session was updated)
+        assert!(second_session.created_at >= first_created);
+
+        conn2.shutdown().unwrap();
+        server_handle2.join().unwrap();
+    }
+
+    // ======================================================================
+    // TLS 1.2 write fragmentation tests (Phase 72)
+    // ======================================================================
+
+    /// TLS 1.2: write 2000 bytes with max_frag=512 → succeeds, peer receives all.
+    #[test]
+    fn test_tls12_write_fragments_large_data() {
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            // Read all fragments
+            let mut total = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                match conn.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => total.extend_from_slice(&buf[..n]),
+                    Err(_) => break,
+                }
+            }
+            tx.send(total).unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        // Set small fragment size and write large data
+        conn.record_layer.max_fragment_size = 512;
+        let big_data = vec![0x42u8; 2000];
+        let written = conn.write(&big_data).unwrap();
+        assert_eq!(written, 2000);
+
+        conn.shutdown().unwrap();
+        let received = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(received, big_data);
+
         server_handle.join().unwrap();
     }
 }

@@ -5997,3 +5997,64 @@ Production readiness: server now caches and resumes sessions by ID. Added `sessi
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1880 workspace tests passing (40 ignored)
+
+---
+
+## Phase 72: Client-Side Session Cache + Write Record Fragmentation
+
+### Date: 2026-02-17
+
+### Summary
+Added client-side session cache (auto-store/auto-lookup by server_name) and write record fragmentation (auto-split into max_fragment_size chunks) across all 8 connection types (4 sync + 4 async).
+
+### Features (2)
+
+| Feature | Description |
+|---------|-------------|
+| Client-side session cache | Auto-store sessions after handshake/NST, auto-lookup on new connection; cache key = `server_name` bytes; explicit `resumption_session` takes priority; TLS 1.2 guarded by `session_resumption` flag |
+| Write record fragmentation | `write()` auto-splits data into `max_fragment_size` chunks instead of erroring on large buffers; empty buffer returns `Ok(0)` |
+
+### Files Modified (4)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/connection.rs` | TLS 1.3 sync: auto-lookup in `do_handshake()`, auto-store on NST in `read()`, write fragmentation in client+server `write()`, +7 tests |
+| `crates/hitls-tls/src/connection_async.rs` | TLS 1.3 async: mirror of sync changes (auto-lookup, auto-store, write fragmentation) |
+| `crates/hitls-tls/src/connection12.rs` | TLS 1.2 sync: auto-lookup in `do_handshake()` with `session_resumption` guard, auto-store after full+abbreviated handshake, write fragmentation in client+server `write()`, +5 tests |
+| `crates/hitls-tls/src/connection12_async.rs` | TLS 1.2 async: mirror of sync changes (auto-lookup, auto-store full+abbreviated, write fragmentation) |
+
+### Implementation Details
+- **Cache key**: `server_name.as_bytes()` — natural for client-side caching. If `server_name` is `None`, cache is skipped entirely
+- **Priority**: Explicit `config.resumption_session` always takes priority over cache lookup (cache is a convenience fallback)
+- **TLS 1.2 guard**: Auto-lookup additionally requires `config.session_resumption == true` (TLS 1.2 has an explicit resumption flag)
+- **Multiple NSTs (TLS 1.3)**: Each NST overwrites the cached session for that server_name (latest wins)
+- **Async safety**: `Mutex::lock()` in auto-lookup/store doesn't cross `.await` points — no Send issues
+- **Write fragmentation loop**: `while offset < buf.len() { seal_record(&buf[offset..end]); offset = end; }` — splits data into `max_fragment_size` chunks
+- **Empty buffer shortcut**: `buf.is_empty()` returns `Ok(0)` immediately without sealing any records
+- **Clone**: `TlsSession` is Clone — cache stores a copy, connection also gets a copy
+
+### Test Counts (Phase 72)
+- **hitls-tls**: 709 [was: 697] (+12 new tests)
+- **Total workspace**: 1892 (40 ignored) [was: 1880]
+
+### New Tests (12)
+
+| # | Test | File | Description |
+|---|------|------|-------------|
+| 1 | `test_tls13_client_session_cache_auto_store` | connection.rs | Full handshake + NST → cache has entry keyed by server_name |
+| 2 | `test_tls13_client_session_cache_auto_lookup` | connection.rs | Pre-populate cache → auto-lookup populates resumption_session |
+| 3 | `test_tls13_client_explicit_session_overrides_cache` | connection.rs | Both explicit + cache set → explicit preserved |
+| 4 | `test_tls13_client_no_server_name_skips_cache` | connection.rs | No server_name → cache lookup skipped |
+| 5 | `test_write_fragments_large_data` | connection.rs | 2000 bytes / 512 max_frag → 4 records, server reassembles correctly |
+| 6 | `test_write_exact_boundary` | connection.rs | Exactly max_frag → 1 record; max_frag+1 → 2 records |
+| 7 | `test_write_empty_buffer` | connection.rs | Empty buffer → Ok(0), no records sent |
+| 8 | `test_tls12_client_session_cache_auto_store` | connection12.rs | Full handshake → client cache has entry keyed by server_name |
+| 9 | `test_tls12_client_session_cache_auto_lookup` | connection12.rs | Pre-populate cache → auto-lookup populates resumption_session |
+| 10 | `test_tls12_client_cache_disabled_without_flag` | connection12.rs | session_resumption=false → cache lookup skipped |
+| 11 | `test_tls12_client_abbreviated_updates_cache` | connection12.rs | Full handshake + abbreviated → cache entry updated |
+| 12 | `test_tls12_write_fragments_large_data` | connection12.rs | 2000 bytes / 512 max_frag → succeeds, peer receives all data |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1892 workspace tests passing (40 ignored)

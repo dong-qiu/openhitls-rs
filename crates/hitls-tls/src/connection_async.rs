@@ -367,6 +367,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
 
     /// Run the TLS 1.3 client handshake.
     async fn do_handshake(&mut self) -> Result<(), TlsError> {
+        // Auto-lookup: if no explicit resumption_session, check cache
+        if self.config.resumption_session.is_none() {
+            if let (Some(ref cache_mutex), Some(ref server_name)) =
+                (&self.config.session_cache, &self.config.server_name)
+            {
+                if let Ok(cache) = cache_mutex.lock() {
+                    if let Some(cached) = cache.get(server_name.as_bytes()) {
+                        self.config.resumption_session = Some(cached.clone());
+                    }
+                }
+            }
+        }
+
         let mut hs = ClientHandshake::new(self.config.clone());
 
         // Build and send ClientHello
@@ -660,6 +673,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTlsClientCon
                                     &plaintext[..total],
                                     &self.resumption_master_secret,
                                 ) {
+                                    // Auto-store in session cache
+                                    if let (Some(ref cache_mutex), Some(ref server_name)) =
+                                        (&self.config.session_cache, &self.config.server_name)
+                                    {
+                                        if let Ok(mut cache) = cache_mutex.lock() {
+                                            cache.put(server_name.as_bytes(), session.clone());
+                                        }
+                                    }
                                     self.received_session = Some(session);
                                 }
                             }
@@ -701,13 +722,24 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTlsClientCon
                 "not connected (handshake not done)".into(),
             ));
         }
-        let record = self
-            .record_layer
-            .seal_record(ContentType::ApplicationData, buf)?;
-        self.stream
-            .write_all(&record)
-            .await
-            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let max_frag = self.record_layer.max_fragment_size;
+        let mut offset = 0;
+        while offset < buf.len() {
+            let end = std::cmp::min(offset + max_frag, buf.len());
+            let record = self
+                .record_layer
+                .seal_record(ContentType::ApplicationData, &buf[offset..end])?;
+            self.stream
+                .write_all(&record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+            offset = end;
+        }
         Ok(buf.len())
     }
 
@@ -1176,13 +1208,24 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTlsServerCon
                 "not connected (handshake not done)".into(),
             ));
         }
-        let record = self
-            .record_layer
-            .seal_record(ContentType::ApplicationData, buf)?;
-        self.stream
-            .write_all(&record)
-            .await
-            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let max_frag = self.record_layer.max_fragment_size;
+        let mut offset = 0;
+        while offset < buf.len() {
+            let end = std::cmp::min(offset + max_frag, buf.len());
+            let record = self
+                .record_layer
+                .seal_record(ContentType::ApplicationData, &buf[offset..end])?;
+            self.stream
+                .write_all(&record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+            offset = end;
+        }
         Ok(buf.len())
     }
 

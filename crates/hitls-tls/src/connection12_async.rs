@@ -189,6 +189,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
 
     /// Run the TLS 1.2 client handshake.
     async fn do_handshake(&mut self) -> Result<(), TlsError> {
+        // Auto-lookup: if no explicit resumption_session, check cache
+        if self.config.resumption_session.is_none() && self.config.session_resumption {
+            if let (Some(ref cache_mutex), Some(ref server_name)) =
+                (&self.config.session_cache, &self.config.server_name)
+            {
+                if let Ok(cache) = cache_mutex.lock() {
+                    if let Some(cached) = cache.get(server_name.as_bytes()) {
+                        self.config.resumption_session = Some(cached.clone());
+                    }
+                }
+            }
+        }
+
         let mut hs = Tls12ClientHandshake::new(self.config.clone());
 
         // 1. Build and send ClientHello
@@ -469,6 +482,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
             extended_master_secret: hs.use_extended_master_secret(),
         });
 
+        // Auto-store in client session cache
+        if let (Some(ref cache_mutex), Some(ref server_name)) =
+            (&self.config.session_cache, &self.config.server_name)
+        {
+            if let Ok(mut cache) = cache_mutex.lock() {
+                if let Some(ref session) = self.session {
+                    cache.put(server_name.as_bytes(), session.clone());
+                }
+            }
+        }
+
         // Zeroize secrets
         flight.master_secret.zeroize();
         flight.client_write_key.zeroize();
@@ -613,6 +637,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
             psk: Vec::new(),
             extended_master_secret: hs.use_extended_master_secret(),
         });
+
+        // Auto-store in client session cache
+        if let (Some(ref cache_mutex), Some(ref server_name)) =
+            (&self.config.session_cache, &self.config.server_name)
+        {
+            if let Ok(mut cache) = cache_mutex.lock() {
+                if let Some(ref session) = self.session {
+                    cache.put(server_name.as_bytes(), session.clone());
+                }
+            }
+        }
 
         // Zeroize secrets
         keys.master_secret.zeroize();
@@ -1005,13 +1040,23 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ClientC
             ));
         }
 
-        let record = self
-            .record_layer
-            .seal_record(ContentType::ApplicationData, buf)?;
-        self.stream
-            .write_all(&record)
-            .await
-            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let max_frag = self.record_layer.max_fragment_size;
+        let mut offset = 0;
+        while offset < buf.len() {
+            let end = std::cmp::min(offset + max_frag, buf.len());
+            let record = self
+                .record_layer
+                .seal_record(ContentType::ApplicationData, &buf[offset..end])?;
+            self.stream
+                .write_all(&record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+            offset = end;
+        }
         Ok(buf.len())
     }
 
@@ -1987,13 +2032,23 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ServerC
             ));
         }
 
-        let record = self
-            .record_layer
-            .seal_record(ContentType::ApplicationData, buf)?;
-        self.stream
-            .write_all(&record)
-            .await
-            .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let max_frag = self.record_layer.max_fragment_size;
+        let mut offset = 0;
+        while offset < buf.len() {
+            let end = std::cmp::min(offset + max_frag, buf.len());
+            let record = self
+                .record_layer
+                .seal_record(ContentType::ApplicationData, &buf[offset..end])?;
+            self.stream
+                .write_all(&record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+            offset = end;
+        }
         Ok(buf.len())
     }
 
