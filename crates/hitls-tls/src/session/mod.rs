@@ -716,5 +716,4 @@ mod tests {
         let s = c.get(b"trait_key").unwrap();
         assert_eq!(s.cipher_suite.0, 0x1302);
     }
-
 }
