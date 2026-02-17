@@ -1324,8 +1324,19 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             )));
         }
 
-        // 2. Process ClientHello (with ticket support, no session ID cache)
-        let result = hs.process_client_hello_resumable(&ch_data, None)?;
+        // 2. Process ClientHello (with ticket support + session ID cache)
+        let cache_ref = self
+            .config
+            .session_cache
+            .as_ref()
+            .map(|c| c.lock().unwrap());
+        let result = hs.process_client_hello_resumable(
+            &ch_data,
+            cache_ref
+                .as_deref()
+                .map(|c| c as &dyn crate::session::SessionCache),
+        )?;
+        drop(cache_ref);
 
         // Apply client's record size limit (TLS 1.2: no adjustment)
         if let Some(limit) = hs.client_record_size_limit() {
@@ -1546,6 +1557,35 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         self.client_server_name = hs.client_server_name().map(|s| s.to_string());
         self.session_resumed = false;
         self.state = ConnectionState::Connected;
+
+        // Store session in cache for session ID-based resumption
+        if let Some(ref cache_mutex) = self.config.session_cache {
+            let session_id = hs.session_id();
+            if !session_id.is_empty() {
+                if let Ok(mut cache) = cache_mutex.lock() {
+                    let session = TlsSession {
+                        id: session_id.to_vec(),
+                        cipher_suite: suite,
+                        master_secret: self.export_master_secret.clone(),
+                        alpn_protocol: self.negotiated_alpn.clone(),
+                        ticket: None,
+                        ticket_lifetime: 7200,
+                        max_early_data: 0,
+                        ticket_age_add: 0,
+                        ticket_nonce: Vec::new(),
+                        created_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        psk: Vec::new(),
+                        extended_master_secret: hs.use_extended_master_secret(),
+                    };
+                    let sid = session.id.clone();
+                    cache.put(&sid, session);
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1710,7 +1750,18 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             std::mem::take(&mut self.server_verify_data),
         );
 
-        let result = hs.process_client_hello_resumable(&ch_data, None)?;
+        let cache_ref = self
+            .config
+            .session_cache
+            .as_ref()
+            .map(|c| c.lock().unwrap());
+        let result = hs.process_client_hello_resumable(
+            &ch_data,
+            cache_ref
+                .as_deref()
+                .map(|c| c as &dyn crate::session::SessionCache),
+        )?;
+        drop(cache_ref);
 
         match result {
             ServerHelloResult::Full(flight) => {
@@ -1917,6 +1968,35 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
         self.client_server_name = hs.client_server_name().map(|s| s.to_string());
         self.state = ConnectionState::Connected;
+
+        // Store session in cache for session ID-based resumption
+        if let Some(ref cache_mutex) = self.config.session_cache {
+            let session_id = hs.session_id();
+            if !session_id.is_empty() {
+                if let Ok(mut cache) = cache_mutex.lock() {
+                    let session = TlsSession {
+                        id: session_id.to_vec(),
+                        cipher_suite: suite,
+                        master_secret: self.export_master_secret.clone(),
+                        alpn_protocol: self.negotiated_alpn.clone(),
+                        ticket: None,
+                        ticket_lifetime: 7200,
+                        max_early_data: 0,
+                        ticket_age_add: 0,
+                        ticket_nonce: Vec::new(),
+                        created_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        psk: Vec::new(),
+                        extended_master_secret: hs.use_extended_master_secret(),
+                    };
+                    let sid = session.id.clone();
+                    cache.put(&sid, session);
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -3203,7 +3283,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 0,
             ticket_nonce: Vec::new(),
-            created_at: 0,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: Vec::new(),
             extended_master_secret: client_hs.use_extended_master_secret(),
         }
@@ -4016,7 +4099,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 0,
             ticket_nonce: Vec::new(),
-            created_at: 0,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: Vec::new(),
             extended_master_secret: false,
         });
@@ -4061,7 +4147,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 0,
             ticket_nonce: Vec::new(),
-            created_at: 0,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: Vec::new(),
             extended_master_secret: false,
         };
@@ -5992,6 +6081,241 @@ mod tests {
         assert!(conn.received_close_notify);
         assert_eq!(conn.state, ConnectionState::Closed);
 
+        server_handle.join().unwrap();
+    }
+
+    // ======================================================================
+    // Session cache integration tests
+    // ======================================================================
+
+    /// After full handshake with session_cache configured, server auto-stores
+    /// the session. Second connection resumes via session ID.
+    #[test]
+    fn test_session_id_resumption_via_cache() {
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
+
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .session_cache(cache.clone())
+            .build();
+
+        // --- First connection: full handshake ---
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let sc = server_config.clone();
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, sc);
+            conn.handshake().unwrap();
+            assert!(!conn.is_session_resumed());
+            tx.send(()).unwrap();
+            let mut buf = [0u8; 64];
+            let _ = conn.read(&mut buf);
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        // After handshake, cache should have 1 session
+        assert_eq!(cache.lock().unwrap().len(), 1);
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    /// Session cache miss → full handshake when no session exists for the ID.
+    #[test]
+    fn test_session_cache_miss_full_handshake() {
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
+
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        // Empty cache — no sessions to resume
+        let cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .session_cache(cache.clone())
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            // Cache miss → full handshake → not resumed
+            assert!(!conn.is_session_resumed());
+            tx.send(()).unwrap();
+            let mut buf = [0u8; 64];
+            let _ = conn.read(&mut buf);
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        // After full handshake, cache should have 1 session stored
+        assert_eq!(cache.lock().unwrap().len(), 1);
+
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    /// No session_cache configured → full handshake always (existing behavior).
+    #[test]
+    fn test_session_cache_disabled() {
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .build();
+
+        // No session_cache → disabled
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            assert!(!conn.is_session_resumed());
+            tx.send(()).unwrap();
+            let mut buf = [0u8; 64];
+            let _ = conn.read(&mut buf);
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        // session_cache is None, so no external storage
+        assert!(conn.cipher_suite().is_some());
+
+        conn.shutdown().unwrap();
         server_handle.join().unwrap();
     }
 }

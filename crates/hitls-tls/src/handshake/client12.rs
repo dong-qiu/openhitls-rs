@@ -1673,7 +1673,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 0,
             ticket_nonce: Vec::new(),
-            created_at: 0,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: Vec::new(),
             extended_master_secret: false,
         };
@@ -1713,7 +1716,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 0,
             ticket_nonce: Vec::new(),
-            created_at: 0,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: Vec::new(),
             extended_master_secret: false,
         };
@@ -1771,7 +1777,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 0,
             ticket_nonce: Vec::new(),
-            created_at: 0,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: Vec::new(),
             extended_master_secret: false,
         };
@@ -1823,7 +1832,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 0,
             ticket_nonce: Vec::new(),
-            created_at: 0,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: Vec::new(),
             extended_master_secret: false,
         };

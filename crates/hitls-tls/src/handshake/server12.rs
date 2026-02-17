@@ -1488,13 +1488,25 @@ pub(crate) fn negotiate_cipher_suite(
     ch: &ClientHello,
     config: &TlsConfig,
 ) -> Result<CipherSuite, TlsError> {
-    // Server preference order
-    for server_suite in &config.cipher_suites {
-        if !is_tls12_suite(*server_suite) {
-            continue;
+    if config.cipher_server_preference {
+        // Server preference order (default)
+        for server_suite in &config.cipher_suites {
+            if !is_tls12_suite(*server_suite) {
+                continue;
+            }
+            if ch.cipher_suites.contains(server_suite) {
+                return Ok(*server_suite);
+            }
         }
-        if ch.cipher_suites.contains(server_suite) {
-            return Ok(*server_suite);
+    } else {
+        // Client preference order
+        for client_suite in &ch.cipher_suites {
+            if !is_tls12_suite(*client_suite) {
+                continue;
+            }
+            if config.cipher_suites.contains(client_suite) {
+                return Ok(*client_suite);
+            }
         }
     }
     Err(TlsError::NoSharedCipherSuite)
@@ -2121,7 +2133,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 0,
             ticket_nonce: Vec::new(),
-            created_at: 0,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: Vec::new(),
             extended_master_secret: false,
         };
@@ -2199,7 +2214,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 0,
             ticket_nonce: Vec::new(),
-            created_at: 0,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: Vec::new(),
             extended_master_secret: false,
         };
@@ -2509,5 +2527,54 @@ mod tests {
     fn test_server_build_hello_request() {
         let hr = Tls12ServerHandshake::build_hello_request();
         assert_eq!(hr, vec![0x00, 0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn test_cipher_server_preference_default() {
+        // Server preference: server's first matching suite wins
+        let ch = ClientHello {
+            random: [0u8; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            ],
+            extensions: vec![],
+        };
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .cipher_suites(&[
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+            ])
+            .build();
+        // Server preference: RSA first in server list
+        let suite = negotiate_cipher_suite(&ch, &config).unwrap();
+        assert_eq!(suite, CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
+    }
+
+    #[test]
+    fn test_cipher_client_preference() {
+        // Client preference: client's first matching suite wins
+        let ch = ClientHello {
+            random: [0u8; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            ],
+            extensions: vec![],
+        };
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .cipher_suites(&[
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+            ])
+            .cipher_server_preference(false)
+            .build();
+        // Client preference: ECDSA first in client list
+        let suite = negotiate_cipher_suite(&ch, &config).unwrap();
+        assert_eq!(suite, CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
     }
 }

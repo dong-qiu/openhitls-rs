@@ -1,12 +1,12 @@
 //! TLS configuration with builder pattern.
 
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::crypt::{NamedGroup, SignatureScheme};
 use crate::extensions::CustomExtension;
 use crate::handshake::codec::CertCompressionAlgorithm;
-use crate::session::TlsSession;
+use crate::session::{SessionCache, TlsSession};
 use crate::{CipherSuite, TlsRole, TlsVersion};
 use hitls_types::EccCurveId;
 use zeroize::Zeroize;
@@ -190,6 +190,12 @@ pub struct TlsConfig {
     pub verify_hostname: bool,
     /// Registered custom extensions.
     pub custom_extensions: Vec<CustomExtension>,
+    /// Server-side session cache for session ID-based resumption.
+    /// Shared across connections via `Arc<Mutex<..>>`.
+    pub session_cache: Option<Arc<Mutex<dyn SessionCache>>>,
+    /// Whether to use server preference order for cipher suite negotiation.
+    /// Default: true (server preference). When false, client preference is used.
+    pub cipher_server_preference: bool,
 }
 
 impl fmt::Debug for TlsConfig {
@@ -222,6 +228,11 @@ impl fmt::Debug for TlsConfig {
                 &self.sni_callback.as_ref().map(|_| "<callback>"),
             )
             .field("verify_hostname", &self.verify_hostname)
+            .field(
+                "session_cache",
+                &self.session_cache.as_ref().map(|_| "<cache>"),
+            )
+            .field("cipher_server_preference", &self.cipher_server_preference)
             .finish_non_exhaustive()
     }
 }
@@ -279,6 +290,8 @@ pub struct TlsConfigBuilder {
     sni_callback: Option<SniCallback>,
     verify_hostname: bool,
     custom_extensions: Vec<CustomExtension>,
+    session_cache: Option<Arc<Mutex<dyn SessionCache>>>,
+    cipher_server_preference: bool,
 }
 
 impl Default for TlsConfigBuilder {
@@ -336,6 +349,8 @@ impl Default for TlsConfigBuilder {
             sni_callback: None,
             verify_hostname: true,
             custom_extensions: Vec::new(),
+            session_cache: None,
+            cipher_server_preference: true,
         }
     }
 }
@@ -562,6 +577,16 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn session_cache(mut self, cache: Arc<Mutex<dyn SessionCache>>) -> Self {
+        self.session_cache = Some(cache);
+        self
+    }
+
+    pub fn cipher_server_preference(mut self, enabled: bool) -> Self {
+        self.cipher_server_preference = enabled;
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -608,6 +633,8 @@ impl TlsConfigBuilder {
             sni_callback: self.sni_callback,
             verify_hostname: self.verify_hostname,
             custom_extensions: self.custom_extensions,
+            session_cache: self.session_cache,
+            cipher_server_preference: self.cipher_server_preference,
         }
     }
 }
@@ -857,5 +884,26 @@ mod tests {
         assert!(result.is_some());
         let result2 = (config.psk_server_callback.as_ref().unwrap())(b"unknown");
         assert!(result2.is_none());
+    }
+
+    #[test]
+    fn test_config_session_cache() {
+        use crate::session::InMemorySessionCache;
+        use std::sync::Mutex;
+
+        let cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+        let config = TlsConfig::builder().session_cache(cache.clone()).build();
+        assert!(config.session_cache.is_some());
+    }
+
+    #[test]
+    fn test_config_cipher_server_preference() {
+        // Default: true
+        let config = TlsConfig::builder().build();
+        assert!(config.cipher_server_preference);
+
+        // Disabled
+        let config2 = TlsConfig::builder().cipher_server_preference(false).build();
+        assert!(!config2.cipher_server_preference);
     }
 }

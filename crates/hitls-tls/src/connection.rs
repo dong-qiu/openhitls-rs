@@ -2978,7 +2978,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 42,
             ticket_nonce: vec![1, 2, 3],
-            created_at: 1000,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: vec![0; 32],
             extended_master_secret: false,
         };
@@ -2993,7 +2996,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 43,
             ticket_nonce: vec![4, 5, 6],
-            created_at: 2000,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: vec![0; 32],
             extended_master_secret: false,
         };
@@ -3017,7 +3023,10 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 44,
             ticket_nonce: vec![7, 8, 9],
-            created_at: 3000,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             psk: vec![0; 32],
             extended_master_secret: false,
         };

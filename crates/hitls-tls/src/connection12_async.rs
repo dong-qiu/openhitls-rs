@@ -1211,8 +1211,21 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
             )));
         }
 
-        // 2. Process ClientHello (with ticket support, no session ID cache)
-        let result = hs.process_client_hello_resumable(&ch_data, None)?;
+        // 2. Process ClientHello (with ticket support + session ID cache)
+        // Use a block to ensure MutexGuard is dropped before any .await
+        let result = {
+            let cache_ref = self
+                .config
+                .session_cache
+                .as_ref()
+                .map(|c| c.lock().unwrap());
+            hs.process_client_hello_resumable(
+                &ch_data,
+                cache_ref
+                    .as_deref()
+                    .map(|c| c as &dyn crate::session::SessionCache),
+            )?
+        };
 
         // Apply client's record size limit (TLS 1.2: no adjustment)
         if let Some(limit) = hs.client_record_size_limit() {
@@ -1421,6 +1434,34 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
             .await
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
+        // Store session in cache before zeroizing master secret
+        if let Some(ref cache_mutex) = self.config.session_cache {
+            let session_id = hs.session_id();
+            if !session_id.is_empty() {
+                if let Ok(mut cache) = cache_mutex.lock() {
+                    let session = crate::session::TlsSession {
+                        id: session_id.to_vec(),
+                        cipher_suite: suite,
+                        master_secret: keys.master_secret.clone(),
+                        alpn_protocol: hs.negotiated_alpn().map(|a| a.to_vec()),
+                        ticket: None,
+                        ticket_lifetime: 7200,
+                        max_early_data: 0,
+                        ticket_age_add: 0,
+                        ticket_nonce: Vec::new(),
+                        created_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        psk: Vec::new(),
+                        extended_master_secret: hs.use_extended_master_secret(),
+                    };
+                    let sid = session.id.clone();
+                    cache.put(&sid, session);
+                }
+            }
+        }
+
         // Zeroize secrets
         keys.master_secret.zeroize();
         keys.client_write_key.zeroize();
@@ -1595,7 +1636,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
             std::mem::take(&mut self.server_verify_data),
         );
 
-        let result = hs.process_client_hello_resumable(&ch_data, None)?;
+        // Use a block to ensure MutexGuard is dropped before any .await
+        let result = {
+            let cache_ref = self
+                .config
+                .session_cache
+                .as_ref()
+                .map(|c| c.lock().unwrap());
+            hs.process_client_hello_resumable(
+                &ch_data,
+                cache_ref
+                    .as_deref()
+                    .map(|c| c as &dyn crate::session::SessionCache),
+            )?
+        };
 
         match result {
             ServerHelloResult::Full(flight) => {
@@ -1789,6 +1843,34 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
             .write_all(&sfin_record)
             .await
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+        // Store session in cache before zeroizing master secret
+        if let Some(ref cache_mutex) = self.config.session_cache {
+            let session_id = hs.session_id();
+            if !session_id.is_empty() {
+                if let Ok(mut cache) = cache_mutex.lock() {
+                    let session = crate::session::TlsSession {
+                        id: session_id.to_vec(),
+                        cipher_suite: suite,
+                        master_secret: keys.master_secret.clone(),
+                        alpn_protocol: hs.negotiated_alpn().map(|a| a.to_vec()),
+                        ticket: None,
+                        ticket_lifetime: 7200,
+                        max_early_data: 0,
+                        ticket_age_add: 0,
+                        ticket_nonce: Vec::new(),
+                        created_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        psk: Vec::new(),
+                        extended_master_secret: hs.use_extended_master_secret(),
+                    };
+                    let sid = session.id.clone();
+                    cache.put(&sid, session);
+                }
+            }
+        }
 
         // Zeroize secrets
         keys.master_secret.zeroize();

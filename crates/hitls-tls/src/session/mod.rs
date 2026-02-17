@@ -51,18 +51,32 @@ pub trait SessionCache: Send + Sync {
     fn remove(&mut self, key: &[u8]);
 }
 
-/// In-memory session cache with a maximum size limit.
+/// In-memory session cache with a maximum size limit and optional TTL expiration.
 pub struct InMemorySessionCache {
     sessions: HashMap<Vec<u8>, TlsSession>,
     max_size: usize,
+    /// Session lifetime in seconds. 0 means no expiry.
+    session_lifetime: u64,
 }
 
 impl InMemorySessionCache {
     /// Create a new cache with the given maximum number of sessions.
+    /// Default session lifetime is 7200 seconds (2 hours).
     pub fn new(max_size: usize) -> Self {
         Self {
             sessions: HashMap::new(),
             max_size,
+            session_lifetime: 7200,
+        }
+    }
+
+    /// Create a new cache with a custom session lifetime in seconds.
+    /// A lifetime of 0 means sessions never expire.
+    pub fn with_lifetime(max_size: usize, lifetime_secs: u64) -> Self {
+        Self {
+            sessions: HashMap::new(),
+            max_size,
+            session_lifetime: lifetime_secs,
         }
     }
 
@@ -74,6 +88,31 @@ impl InMemorySessionCache {
     /// Whether the cache is empty.
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
+    }
+
+    /// Remove all expired sessions from the cache.
+    pub fn cleanup(&mut self) {
+        if self.session_lifetime == 0 {
+            return;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.sessions
+            .retain(|_, session| now.saturating_sub(session.created_at) <= self.session_lifetime);
+    }
+
+    /// Check whether a session has expired based on the configured lifetime.
+    fn is_expired(&self, session: &TlsSession) -> bool {
+        if self.session_lifetime == 0 {
+            return false;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        now.saturating_sub(session.created_at) > self.session_lifetime
     }
 }
 
@@ -89,7 +128,12 @@ impl SessionCache for InMemorySessionCache {
     }
 
     fn get(&self, key: &[u8]) -> Option<&TlsSession> {
-        self.sessions.get(key)
+        let session = self.sessions.get(key)?;
+        // Lazy expiration: return None for expired sessions
+        if self.is_expired(session) {
+            return None;
+        }
+        Some(session)
     }
 
     fn remove(&mut self, key: &[u8]) {
@@ -223,10 +267,17 @@ mod tests {
             max_early_data: 0,
             ticket_age_add: 0,
             ticket_nonce: Vec::new(),
-            created_at: 1700000000,
+            created_at: now_secs(),
             psk: Vec::new(),
             extended_master_secret: false,
         }
+    }
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
     }
 
     // -----------------------------------------------------------------------
@@ -321,11 +372,12 @@ mod tests {
     #[test]
     fn test_encode_decode_roundtrip() {
         let session = make_session(0x1301, &[0xAB; 48]);
+        let expected_created_at = session.created_at;
         let encoded = encode_session_state(&session);
         let decoded = decode_session_state(&encoded).unwrap();
         assert_eq!(decoded.cipher_suite.0, 0x1301);
         assert_eq!(decoded.master_secret, vec![0xAB; 48]);
-        assert_eq!(decoded.created_at, 1700000000);
+        assert_eq!(decoded.created_at, expected_created_at);
         assert_eq!(decoded.ticket_lifetime, 3600);
         assert!(!decoded.extended_master_secret);
     }
@@ -438,5 +490,67 @@ mod tests {
         let ticket2 = encrypt_session_ticket(&key, &session).unwrap();
         // Different nonces → different ciphertexts
         assert_ne!(ticket1, ticket2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Session TTL expiration
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_cache_ttl_fresh() {
+        let mut cache = InMemorySessionCache::with_lifetime(10, 3600);
+        let mut session = make_session(0x1301, &[0xAA; 32]);
+        session.created_at = now_secs(); // fresh
+        cache.put(b"key1", session);
+        assert!(cache.get(b"key1").is_some());
+    }
+
+    #[test]
+    fn test_cache_ttl_expired() {
+        let mut cache = InMemorySessionCache::with_lifetime(10, 3600);
+        let mut session = make_session(0x1301, &[0xAA; 32]);
+        session.created_at = now_secs() - 7200; // 2 hours ago, TTL is 1 hour
+        cache.put(b"key1", session);
+        assert!(cache.get(b"key1").is_none());
+    }
+
+    #[test]
+    fn test_cache_ttl_zero_no_expiry() {
+        let mut cache = InMemorySessionCache::with_lifetime(10, 0);
+        let mut session = make_session(0x1301, &[0xAA; 32]);
+        session.created_at = 1; // very old
+        cache.put(b"key1", session);
+        // TTL=0 means no expiry, so session should still be returned
+        assert!(cache.get(b"key1").is_some());
+    }
+
+    #[test]
+    fn test_cache_cleanup() {
+        let mut cache = InMemorySessionCache::with_lifetime(10, 3600);
+
+        // Fresh session
+        let mut fresh = make_session(0x1301, &[0xAA; 32]);
+        fresh.created_at = now_secs();
+        cache.put(b"fresh", fresh);
+
+        // Expired session
+        let mut expired = make_session(0x1302, &[0xBB; 32]);
+        expired.created_at = now_secs() - 7200;
+        cache.put(b"expired", expired);
+
+        assert_eq!(cache.len(), 2);
+        cache.cleanup();
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(b"fresh").is_some());
+        // After cleanup, expired entry is removed from the HashMap
+        assert!(!cache.sessions.contains_key(b"expired" as &[u8]));
+    }
+
+    #[test]
+    fn test_cache_with_lifetime() {
+        let cache = InMemorySessionCache::with_lifetime(50, 1800);
+        assert_eq!(cache.max_size, 50);
+        assert_eq!(cache.session_lifetime, 1800);
+        assert!(cache.is_empty());
     }
 }

@@ -470,13 +470,21 @@ impl ServerHandshake {
         }
 
         // --- Select cipher suite ---
-        let suite = self
-            .config
-            .cipher_suites
-            .iter()
-            .find(|s| ch.cipher_suites.contains(s))
-            .copied()
-            .ok_or(TlsError::NoSharedCipherSuite)?;
+        let suite = if self.config.cipher_server_preference {
+            // Server preference (default)
+            self.config
+                .cipher_suites
+                .iter()
+                .find(|s| ch.cipher_suites.contains(s))
+                .copied()
+        } else {
+            // Client preference
+            ch.cipher_suites
+                .iter()
+                .find(|s| self.config.cipher_suites.contains(s))
+                .copied()
+        }
+        .ok_or(TlsError::NoSharedCipherSuite)?;
 
         let params = CipherSuiteParams::from_suite(suite)?;
 
@@ -1407,6 +1415,40 @@ mod tests {
                 assert_eq!(a.suite, CipherSuite::TLS_AES_256_GCM_SHA384);
             }
             _other => panic!("expected Actions with AES-256-GCM"),
+        }
+    }
+
+    #[test]
+    fn test_cipher_client_preference_tls13() {
+        // Server supports AES-256-GCM first, client wants AES-128-GCM first
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .cipher_suites(&[
+                CipherSuite::TLS_AES_256_GCM_SHA384,
+                CipherSuite::TLS_AES_128_GCM_SHA256,
+            ])
+            .cipher_server_preference(false)
+            .verify_peer(false)
+            .build();
+        let mut hs = ServerHandshake::new(config);
+        // Client offers AES-128-GCM first, AES-256-GCM second
+        let msg = build_valid_ch(
+            &[
+                CipherSuite::TLS_AES_128_GCM_SHA256,
+                CipherSuite::TLS_AES_256_GCM_SHA384,
+            ],
+            NamedGroup::X25519,
+            &[0x55; 32],
+        );
+        let result = hs.process_client_hello(&msg);
+        match result {
+            Ok(ClientHelloResult::Actions(a)) => {
+                // Client preference: AES-128-GCM wins
+                assert_eq!(a.suite, CipherSuite::TLS_AES_128_GCM_SHA256);
+            }
+            _other => panic!("expected Actions"),
         }
     }
 
