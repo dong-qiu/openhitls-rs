@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 1,846 tests (40 ignored)
+**Current**: 1,854 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 
 ---
@@ -215,3 +215,16 @@ cargo fmt --all -- --check
 | Connection (sync) | `hitls-tls/src/connection12.rs` | 3 | Full renegotiation TCP roundtrip (handshake → data → renego → data), renegotiation disabled rejects (no_renegotiation warning → connection continues), renegotiation no session resumption (with ticket_key, always full handshake) |
 
 **Workspace after Phase 68**: 1,846 tests, 40 ignored (+10 from Phase 67's 1,836)
+
+---
+
+## Phase 69: Connection Info APIs + Graceful Shutdown + ALPN Completion — 8 new tests
+
+### Date: 2026-02-17
+
+| Module | File | Tests Added | Description |
+|--------|------|:-----------:|-------------|
+| Connection (TLS 1.2 sync) | `hitls-tls/src/connection12.rs` | 5 | connection_info cipher_suite/version/peer_certs/server_name/named_group/verify_data, ALPN negotiation (h2 selected from h2+http/1.1), session_resumed (full=false, abbreviated=true), graceful shutdown (close_notify send/receive, Ok(0) on read), close_notify_in_read (received_close_notify flag, ConnectionState::Closed) |
+| Connection (TLS 1.3 sync) | `hitls-tls/src/connection.rs` | 3 | connection_info (SNI, negotiated_group, server_certs, is_psk_mode, negotiated_alpn), ALPN negotiation (client offers h2+http/1.1, server selects h2, verified on both sides), graceful shutdown (close_notify exchange via record layer, bidirectional close) |
+
+**Workspace after Phase 69**: 1,854 tests, 40 ignored (+8 from Phase 68's 1,846)

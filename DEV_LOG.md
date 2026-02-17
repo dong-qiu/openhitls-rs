@@ -5794,3 +5794,54 @@ Added server-initiated TLS 1.2 renegotiation with full RFC 5746 verify_data vali
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1846 workspace tests passing (40 ignored)
+
+---
+
+## Phase 69 — Connection Info APIs + Graceful Shutdown + ALPN Completion (2026-02-17)
+
+### Summary
+Added connection parameter query APIs (ConnectionInfo struct), completed ALPN negotiation for all protocol versions, and implemented graceful shutdown with close_notify tracking.
+
+### Key Features
+
+| Feature | Spec | Notes |
+|---------|------|-------|
+| ConnectionInfo struct | — | cipher_suite, peer_certificates, alpn_protocol, server_name, negotiated_group, session_resumed, peer/local_verify_data |
+| TLS 1.3 ALPN (client) | RFC 7301 | `build_alpn()` in ClientHello + HRR retry, `parse_alpn_sh()` from EncryptedExtensions |
+| TLS 1.3 ALPN (server) | RFC 7301 | `parse_alpn_ch()` from ClientHello, negotiate (server preference), `build_alpn_selected()` in EncryptedExtensions |
+| TLS 1.2 client ALPN parsing | RFC 7301 | Parse `APPLICATION_LAYER_PROTOCOL_NEGOTIATION` from ServerHello extensions |
+| Graceful shutdown | RFC 5246/8446 | close_notify tracking (sent_close_notify, received_close_notify), `read()` returns Ok(0), version() available after close |
+| Public getter methods | — | `connection_info()`, `peer_certificates()`, `alpn_protocol()`, `server_name()`, `negotiated_group()`, `is_session_resumed()`, `peer_verify_data()`, `local_verify_data()`, `received_close_notify()` |
+| Handshake getters | — | `server_certs()`, `negotiated_alpn()`, `negotiated_group()`, `is_psk_mode()`/`is_abbreviated()`, `client_server_name()`, `client_certs()` on all 4 handshake types |
+
+### Files Modified (10)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/connection_info.rs` | **NEW**: `ConnectionInfo` struct with 8 fields (cipher_suite, peer_certificates, alpn_protocol, server_name, negotiated_group, session_resumed, peer_verify_data, local_verify_data) |
+| `crates/hitls-tls/src/lib.rs` | `pub mod connection_info;` export, re-export `ConnectionInfo` |
+| `crates/hitls-tls/src/handshake/client12.rs` | `negotiated_alpn` field, parse ALPN from ServerHello, public getters (`server_certs()`, `server_named_curve()`, `negotiated_alpn()`, `is_abbreviated()`), reset in `reset_for_renegotiation()` |
+| `crates/hitls-tls/src/handshake/server12.rs` | Public getters (`client_certs()`, `negotiated_group()`, `is_abbreviated()`) |
+| `crates/hitls-tls/src/handshake/client.rs` | `negotiated_alpn`/`negotiated_group` fields, `build_alpn()` in ClientHello + HRR retry, parse ALPN from EncryptedExtensions, store negotiated_group from key_share, public getters (`server_certs()`, `negotiated_alpn()`, `negotiated_group()`, `is_psk_mode()`) |
+| `crates/hitls-tls/src/handshake/server.rs` | `negotiated_alpn`/`client_server_name`/`negotiated_group`/`client_certs` fields, parse ALPN + SNI from ClientHello, negotiate ALPN (server preference), include ALPN in EncryptedExtensions, store client_certs, public getters |
+| `crates/hitls-tls/src/connection12.rs` | 7 info fields + 9 getter methods on both client and server, populate after handshake (full + abbreviated), close_notify detection in `read()`, shutdown tracking, 5 new tests |
+| `crates/hitls-tls/src/connection12_async.rs` | Async mirror: same 7 fields, 9 getters, close_notify handling, shutdown tracking |
+| `crates/hitls-tls/src/connection.rs` | 7 info fields + 9 getter methods on both client and server, populate after handshake, close_notify detection in `read()`, shutdown tracking, 3 new tests |
+| `crates/hitls-tls/src/connection_async.rs` | Async mirror: same 7 fields, 9 getters, close_notify handling, shutdown tracking |
+
+### Implementation Details
+- **ConnectionInfo is a snapshot**: Struct captures negotiated parameters after handshake completes. Callers can query individual getters or get the full snapshot.
+- **ALPN negotiation uses server preference order**: Server iterates its own protocols first, selecting the first match found in client's list (same logic for TLS 1.2 and 1.3).
+- **close_notify detection**: Alert with level=1 (warning), description=0 (close_notify) sets `received_close_notify = true` and returns `Ok(0)` from `read()`. This distinguishes graceful close from fatal alerts.
+- **Version available after close**: `version()` and `cipher_suite()` remain accessible after shutdown, unlike other connection methods that require Connected state.
+- **Session resumption tracking**: TLS 1.2 `is_session_resumed` set based on abbreviated vs full handshake path. TLS 1.3 derived from `is_psk_mode()`.
+- **All 8 connection types updated**: Tls12ClientConnection, Tls12ServerConnection, Tls13ClientConnection, Tls13ServerConnection (sync), plus their 4 async counterparts.
+
+### Test Counts (Phase 69)
+- **hitls-tls**: 684 [was: 676]
+- **Total workspace**: 1854 (40 ignored) [was: 1846]
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1854 workspace tests passing (40 ignored)

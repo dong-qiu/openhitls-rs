@@ -4,7 +4,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::alert::{AlertDescription, AlertLevel};
 use crate::config::TlsConfig;
-use crate::crypt::KeyExchangeAlg;
+use crate::connection_info::ConnectionInfo;
+use crate::crypt::{KeyExchangeAlg, NamedGroup};
 use crate::handshake::client12::Tls12ClientHandshake;
 use crate::handshake::codec::{decode_server_hello, parse_handshake_header};
 use crate::handshake::codec12::{
@@ -51,6 +52,20 @@ pub struct AsyncTls12ClientConnection<S: AsyncRead + AsyncWrite + Unpin> {
     client_verify_data: Vec<u8>,
     /// Server verify_data from last handshake (for renegotiation).
     server_verify_data: Vec<u8>,
+    /// Peer certificates (DER-encoded, leaf first).
+    peer_certificates: Vec<Vec<u8>>,
+    /// Negotiated ALPN protocol (if any).
+    negotiated_alpn: Option<Vec<u8>>,
+    /// Server name used for this connection.
+    server_name_used: Option<String>,
+    /// Negotiated key exchange group (if applicable).
+    negotiated_group: Option<NamedGroup>,
+    /// Whether this connection was resumed from a previous session.
+    session_resumed: bool,
+    /// Whether we have sent close_notify.
+    sent_close_notify: bool,
+    /// Whether we have received close_notify.
+    received_close_notify: bool,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
@@ -67,12 +82,69 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
             session: None,
             client_verify_data: Vec::new(),
             server_verify_data: Vec::new(),
+            peer_certificates: Vec::new(),
+            negotiated_alpn: None,
+            server_name_used: None,
+            negotiated_group: None,
+            session_resumed: false,
+            sent_close_notify: false,
+            received_close_notify: false,
         }
     }
 
     /// Take the session state (with ticket if applicable) for later resumption.
     pub fn take_session(&mut self) -> Option<TlsSession> {
         self.session.take()
+    }
+
+    /// Get a snapshot of the negotiated connection parameters.
+    /// Returns `None` if the handshake has not completed.
+    pub fn connection_info(&self) -> Option<ConnectionInfo> {
+        self.negotiated_suite.map(|suite| ConnectionInfo {
+            cipher_suite: suite,
+            peer_certificates: self.peer_certificates.clone(),
+            alpn_protocol: self.negotiated_alpn.clone(),
+            server_name: self.server_name_used.clone(),
+            negotiated_group: self.negotiated_group,
+            session_resumed: self.session_resumed,
+            peer_verify_data: self.server_verify_data.clone(),
+            local_verify_data: self.client_verify_data.clone(),
+        })
+    }
+
+    /// Get the peer's certificate chain (DER-encoded, leaf first).
+    pub fn peer_certificates(&self) -> &[Vec<u8>] {
+        &self.peer_certificates
+    }
+
+    /// Get the negotiated ALPN protocol (if any).
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Get the server name (SNI) used for this connection.
+    pub fn server_name(&self) -> Option<&str> {
+        self.server_name_used.as_deref()
+    }
+
+    /// Get the negotiated key exchange group (if applicable).
+    pub fn negotiated_group(&self) -> Option<NamedGroup> {
+        self.negotiated_group
+    }
+
+    /// Whether this connection was resumed from a previous session.
+    pub fn is_session_resumed(&self) -> bool {
+        self.session_resumed
+    }
+
+    /// Get the peer's Finished verify_data.
+    pub fn peer_verify_data(&self) -> &[u8] {
+        &self.server_verify_data
+    }
+
+    /// Get the local Finished verify_data.
+    pub fn local_verify_data(&self) -> &[u8] {
+        &self.client_verify_data
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -405,6 +477,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.peer_certificates = hs.server_certs().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.server_name_used = self.config.server_name.clone();
+        let nc = hs.server_named_curve();
+        if nc != 0 {
+            self.negotiated_group = Some(NamedGroup(nc));
+        }
+        self.session_resumed = false;
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -542,6 +622,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.server_name_used = self.config.server_name.clone();
+        self.session_resumed = true;
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -821,6 +904,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.peer_certificates = hs.server_certs().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.server_name_used = self.config.server_name.clone();
+        let nc = hs.server_named_curve();
+        if nc != 0 {
+            self.negotiated_group = Some(NamedGroup(nc));
+        }
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -869,6 +959,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ClientC
                     return Ok(n);
                 }
                 ContentType::Alert => {
+                    if plaintext.len() >= 2 && plaintext[1] == 0 {
+                        // close_notify
+                        self.received_close_notify = true;
+                    }
                     self.state = ConnectionState::Closed;
                     return Ok(0);
                 }
@@ -925,17 +1019,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ClientC
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        let alert_data = [1u8, 0u8]; // close_notify
-        let record = self
-            .record_layer
-            .seal_record(ContentType::Alert, &alert_data)?;
-        let _ = self.stream.write_all(&record).await;
+        if !self.sent_close_notify {
+            let alert_data = [1u8, 0u8]; // close_notify
+            let record = self
+                .record_layer
+                .seal_record(ContentType::Alert, &alert_data)?;
+            let _ = self.stream.write_all(&record).await;
+            self.sent_close_notify = true;
+        }
         self.state = ConnectionState::Closed;
         Ok(())
     }
 
     fn version(&self) -> Option<TlsVersion> {
-        if self.state == ConnectionState::Connected {
+        if self.state == ConnectionState::Connected || self.state == ConnectionState::Closed {
             Some(TlsVersion::Tls12)
         } else {
             None
@@ -968,6 +1065,20 @@ pub struct AsyncTls12ServerConnection<S: AsyncRead + AsyncWrite + Unpin> {
     client_verify_data: Vec<u8>,
     /// Server verify_data from last handshake (for renegotiation).
     server_verify_data: Vec<u8>,
+    /// Peer certificates (DER-encoded, leaf first).
+    peer_certificates: Vec<Vec<u8>>,
+    /// Negotiated ALPN protocol (if any).
+    negotiated_alpn: Option<Vec<u8>>,
+    /// Client's SNI hostname.
+    client_server_name: Option<String>,
+    /// Negotiated key exchange group (if applicable).
+    negotiated_group: Option<NamedGroup>,
+    /// Whether this connection was resumed from a previous session.
+    session_resumed: bool,
+    /// Whether we have sent close_notify.
+    sent_close_notify: bool,
+    /// Whether we have received close_notify.
+    received_close_notify: bool,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
@@ -984,12 +1095,69 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
             session: None,
             client_verify_data: Vec::new(),
             server_verify_data: Vec::new(),
+            peer_certificates: Vec::new(),
+            negotiated_alpn: None,
+            client_server_name: None,
+            negotiated_group: None,
+            session_resumed: false,
+            sent_close_notify: false,
+            received_close_notify: false,
         }
     }
 
     /// Take the session state (for session caching on server side).
     pub fn take_session(&mut self) -> Option<TlsSession> {
         self.session.take()
+    }
+
+    /// Get a snapshot of the negotiated connection parameters.
+    /// Returns `None` if the handshake has not completed.
+    pub fn connection_info(&self) -> Option<ConnectionInfo> {
+        self.negotiated_suite.map(|suite| ConnectionInfo {
+            cipher_suite: suite,
+            peer_certificates: self.peer_certificates.clone(),
+            alpn_protocol: self.negotiated_alpn.clone(),
+            server_name: self.client_server_name.clone(),
+            negotiated_group: self.negotiated_group,
+            session_resumed: self.session_resumed,
+            peer_verify_data: self.client_verify_data.clone(),
+            local_verify_data: self.server_verify_data.clone(),
+        })
+    }
+
+    /// Get the peer's certificate chain (DER-encoded, leaf first).
+    pub fn peer_certificates(&self) -> &[Vec<u8>] {
+        &self.peer_certificates
+    }
+
+    /// Get the negotiated ALPN protocol (if any).
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Get the client's SNI hostname.
+    pub fn server_name(&self) -> Option<&str> {
+        self.client_server_name.as_deref()
+    }
+
+    /// Get the negotiated key exchange group (if applicable).
+    pub fn negotiated_group(&self) -> Option<NamedGroup> {
+        self.negotiated_group
+    }
+
+    /// Whether this connection was resumed from a previous session.
+    pub fn is_session_resumed(&self) -> bool {
+        self.session_resumed
+    }
+
+    /// Get the peer's Finished verify_data.
+    pub fn peer_verify_data(&self) -> &[u8] {
+        &self.client_verify_data
+    }
+
+    /// Get the local Finished verify_data.
+    pub fn local_verify_data(&self) -> &[u8] {
+        &self.server_verify_data
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -1261,6 +1429,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.peer_certificates = hs.client_certs().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.client_server_name = hs.client_server_name().map(|s| s.to_string());
+        self.session_resumed = false;
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -1379,6 +1551,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.client_server_name = hs.client_server_name().map(|s| s.to_string());
+        self.session_resumed = true;
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -1623,6 +1798,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.peer_certificates = hs.client_certs().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.client_server_name = hs.client_server_name().map(|s| s.to_string());
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -1687,6 +1865,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ServerC
                         self.state = ConnectionState::Connected;
                         continue;
                     }
+                    if plaintext.len() >= 2 && plaintext[1] == 0 {
+                        // close_notify
+                        self.received_close_notify = true;
+                    }
                     self.state = ConnectionState::Closed;
                     return Ok(0);
                 }
@@ -1737,17 +1919,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ServerC
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        let alert_data = [1u8, 0u8]; // close_notify
-        let record = self
-            .record_layer
-            .seal_record(ContentType::Alert, &alert_data)?;
-        let _ = self.stream.write_all(&record).await;
+        if !self.sent_close_notify {
+            let alert_data = [1u8, 0u8]; // close_notify
+            let record = self
+                .record_layer
+                .seal_record(ContentType::Alert, &alert_data)?;
+            let _ = self.stream.write_all(&record).await;
+            self.sent_close_notify = true;
+        }
         self.state = ConnectionState::Closed;
         Ok(())
     }
 
     fn version(&self) -> Option<TlsVersion> {
-        if self.state == ConnectionState::Connected {
+        if self.state == ConnectionState::Connected || self.state == ConnectionState::Closed {
             Some(TlsVersion::Tls12)
         } else {
             None

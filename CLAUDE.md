@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 68 complete — TLS 1.2 renegotiation (RFC 5746)
+- **Status**: Phase 69 complete — Connection info APIs + graceful shutdown + ALPN completion
 
 ## Workspace Structure
 
@@ -19,7 +19,7 @@ openhitls-rs/
 │   ├── hitls-utils/     # ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
 │   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); hardware AES acceleration (ARMv8/x86-64); ECC: P-192, P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; Curve448: Ed448, X448; DRBG: HMAC/CTR/Hash; SM4-CCM; HCTR mode; FIPS/CMVP (KAT, PCT, integrity); Entropy health testing (NIST SP 800-90B, RCT+APT); Wycheproof test vectors (593 tests + 15 Wycheproof)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, hybrid KEM (X25519MLKEM768), async I/O (tokio), TLS 1.3 SM4-GCM/CCM (RFC 8998) + AES_128_CCM_8_SHA256, RFC 5705/8446 key material export, TLS 1.2 handshake (ECDHE/RSA/DHE_RSA/DHE_DSS/DH_ANON/ECDH_ANON/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20/CCM/CCM_8, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation (RFC 5746), mTLS, Bleichenbacher protection, AES-CCM (RFC 6655/7251), AES-CCM_8 (8-byte tag), PSK+CCM, PSK CBC-SHA256/SHA384 (RFC 5487), ECDHE_PSK GCM (draft-ietf-tls-ecdhe-psk-aead), DHE_DSS (RFC 5246), DH_ANON/ECDH_ANON (RFC 5246/4492), OCSP stapling CertificateStatus), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), DTLCP (DTLS+TLCP), custom extensions framework, NSS key logging, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT, Ed448/X448 signing + key exchange, TLS 1.2 PRF (676 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, hybrid KEM (X25519MLKEM768), async I/O (tokio), TLS 1.3 SM4-GCM/CCM (RFC 8998) + AES_128_CCM_8_SHA256, RFC 5705/8446 key material export, TLS 1.2 handshake (ECDHE/RSA/DHE_RSA/DHE_DSS/DH_ANON/ECDH_ANON/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20/CCM/CCM_8, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation (RFC 5746), mTLS, Bleichenbacher protection, AES-CCM (RFC 6655/7251), AES-CCM_8 (8-byte tag), PSK+CCM, PSK CBC-SHA256/SHA384 (RFC 5487), ECDHE_PSK GCM (draft-ietf-tls-ecdhe-psk-aead), DHE_DSS (RFC 5246), DH_ANON/ECDH_ANON (RFC 5246/4492), OCSP stapling CertificateStatus), ConnectionInfo APIs, graceful shutdown (close_notify tracking), DTLS 1.2 (RFC 6347), TLCP (GM/T 0024), DTLCP (DTLS+TLCP), custom extensions framework, NSS key logging, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT, Ed448/X448 signing + key exchange, TLS 1.2 PRF (684 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify [RSA/ECDSA/Ed25519/Ed448/SM2/RSA-PSS], chain, CRL, OCSP, CSR generation, Certificate generation, to_text output, SigningKey abstraction, EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies enforcement), PKCS#12 (RFC 7292), CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr, detached mode) + EnvelopedData + EncryptedData + DigestedData (RFC 5652), PKCS#8 (RFC 5958, Ed448/X448), SPKI public key parsing (321 tests, 1 ignored)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (RFC 9578, RSA blind sigs) (33 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
@@ -35,12 +35,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (1846 tests, 40 ignored)
+# Run all tests (1854 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 593 tests (31 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 676 tests
+cargo test -p hitls-tls --all-features      # 684 tests
 cargo test -p hitls-pki --all-features      # 321 tests (1 ignored)
 cargo test -p hitls-bignum                  # 48 tests
 cargo test -p hitls-utils                   # 53 tests
@@ -103,7 +103,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-68 complete (1846 tests, 40 ignored).
+Phases 0-69 complete (1854 tests, 40 ignored).
 
 ### Completed
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
@@ -135,5 +135,6 @@ Phases 0-68 complete (1846 tests, 40 ignored).
 - Phase 66: DHE_DSS cipher suites (6 new suites: DHE_DSS_WITH_AES_128/256_CBC_SHA, DHE_DSS_WITH_AES_128/256_CBC_SHA256, DHE_DSS_WITH_AES_128_GCM_SHA256/AES_256_GCM_SHA384, AuthAlg::Dsa, DSA_SHA256/SHA384 signature schemes, ServerPrivateKey::Dsa, +8 tests) -- DONE
 - Phase 67: DH_ANON + ECDH_ANON cipher suites (8 new suites: DH_ANON_WITH_AES_128/256_CBC_SHA, DH_ANON_WITH_AES_128/256_CBC_SHA256, DH_ANON_WITH_AES_128_GCM_SHA256/AES_256_GCM_SHA384, ECDH_ANON_WITH_AES_128/256_CBC_SHA, KeyExchangeAlg::DheAnon/EcdheAnon, AuthAlg::Anon, unsigned ServerKeyExchange codec, anonymous handshake flow, +10 tests) -- DONE
 - Phase 68: TLS 1.2 renegotiation (RFC 5746) (HelloRequest message type + codec, NoRenegotiation alert, allow_renegotiation config, reset_for_renegotiation() for client/server, RFC 5746 renegotiation_info with verify_data validation, re-handshake over encrypted connection, server renegotiation_info in initial ServerHello fix, sync + async paths, +10 tests) -- DONE
+- Phase 69: Connection info APIs + graceful shutdown + ALPN completion (ConnectionInfo struct with peer certs/ALPN/SNI/named group/verify_data, TLS 1.3 ALPN client+server, TLS 1.2 client ALPN parsing, close_notify tracking, graceful shutdown, public getters on all 8 connection types, sync + async paths, +8 tests) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

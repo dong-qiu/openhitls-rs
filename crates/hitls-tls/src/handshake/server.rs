@@ -28,12 +28,13 @@ use super::codec::{
     EncryptedExtensions, NewSessionTicketMsg, ServerHello, HELLO_RETRY_REQUEST_RANDOM,
 };
 use super::extensions_codec::{
-    build_early_data_ee, build_early_data_nst, build_key_share_hrr, build_key_share_sh,
-    build_pre_shared_key_sh, build_record_size_limit, build_sct_cert_entry,
-    build_status_request_cert_entry, build_supported_versions_sh, parse_compress_certificate,
-    parse_key_share_ch, parse_pre_shared_key_ch, parse_psk_key_exchange_modes,
-    parse_record_size_limit, parse_signature_algorithms_ch, parse_status_request_ch,
-    parse_supported_groups_ch, parse_supported_versions_ch,
+    build_alpn_selected, build_early_data_ee, build_early_data_nst, build_key_share_hrr,
+    build_key_share_sh, build_pre_shared_key_sh, build_record_size_limit, build_sct_cert_entry,
+    build_status_request_cert_entry, build_supported_versions_sh, parse_alpn_ch,
+    parse_compress_certificate, parse_key_share_ch, parse_pre_shared_key_ch,
+    parse_psk_key_exchange_modes, parse_record_size_limit, parse_server_name,
+    parse_signature_algorithms_ch, parse_status_request_ch, parse_supported_groups_ch,
+    parse_supported_versions_ch,
 };
 use super::key_exchange::KeyExchange;
 use super::signing::{select_signature_scheme, sign_certificate_verify};
@@ -247,6 +248,14 @@ pub struct ServerHandshake {
     client_wants_sct: bool,
     /// Client random (stored for key logging).
     client_random: [u8; 32],
+    /// Negotiated ALPN protocol (if any).
+    negotiated_alpn: Option<Vec<u8>>,
+    /// Client SNI hostname (if sent).
+    client_server_name: Option<String>,
+    /// Negotiated key exchange group.
+    negotiated_group: Option<NamedGroup>,
+    /// Client certificates (DER-encoded, leaf first) for post-handshake auth.
+    client_certs: Vec<Vec<u8>>,
 }
 
 impl Drop for ServerHandshake {
@@ -274,6 +283,10 @@ impl ServerHandshake {
             client_wants_ocsp: false,
             client_wants_sct: false,
             client_random: [0u8; 32],
+            negotiated_alpn: None,
+            client_server_name: None,
+            negotiated_group: None,
+            client_certs: Vec::new(),
         }
     }
 
@@ -285,6 +298,26 @@ impl ServerHandshake {
     /// The client's record size limit (for capping outgoing records).
     pub fn client_record_size_limit(&self) -> Option<u16> {
         self.client_record_size_limit
+    }
+
+    /// Get the negotiated ALPN protocol (if any).
+    pub fn negotiated_alpn(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Get the client's SNI hostname (if sent).
+    pub fn client_server_name(&self) -> Option<&str> {
+        self.client_server_name.as_deref()
+    }
+
+    /// Get the negotiated key exchange group (if any).
+    pub fn negotiated_group(&self) -> Option<NamedGroup> {
+        self.negotiated_group
+    }
+
+    /// Get the client's certificate chain (DER-encoded, leaf first).
+    pub fn client_certs(&self) -> &[Vec<u8>] {
+        &self.client_certs
     }
 
     /// Process a ClientHello message.
@@ -384,6 +417,31 @@ impl ServerHandshake {
             .any(|e| e.extension_type == ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP)
         {
             self.client_wants_sct = true;
+        }
+
+        // ALPN (RFC 7301)
+        if let Some(alpn_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION)
+        {
+            let client_alpn_protocols = parse_alpn_ch(&alpn_ext.data)?;
+            // Server preference order
+            for server_proto in &self.config.alpn_protocols {
+                if client_alpn_protocols.contains(server_proto) {
+                    self.negotiated_alpn = Some(server_proto.clone());
+                    break;
+                }
+            }
+        }
+
+        // SNI (RFC 6066)
+        if let Some(sni_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::SERVER_NAME)
+        {
+            self.client_server_name = Some(parse_server_name(&sni_ext.data)?);
         }
 
         // Parse custom extensions from ClientHello
@@ -618,6 +676,7 @@ impl ServerHandshake {
         verified_psk: Option<Vec<u8>>,
     ) -> Result<ClientHelloActions, TlsError> {
         let psk_mode = verified_psk.is_some();
+        self.negotiated_group = Some(client_group);
 
         // Check if client offered early_data and server can accept it
         let client_offered_early_data = ch
@@ -711,6 +770,10 @@ impl ServerHandshake {
             ee_extensions.push(build_record_size_limit(
                 self.config.record_size_limit.min(16385),
             ));
+        }
+        // ALPN in EncryptedExtensions (RFC 8446 §4.2)
+        if let Some(ref proto) = self.negotiated_alpn {
+            ee_extensions.push(build_alpn_selected(proto));
         }
         // Custom extensions for EncryptedExtensions
         ee_extensions.extend(crate::extensions::build_custom_extensions(

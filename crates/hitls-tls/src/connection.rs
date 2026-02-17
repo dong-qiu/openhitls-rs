@@ -3,9 +3,10 @@
 use std::io::{Read, Write};
 
 use crate::config::TlsConfig;
+use crate::connection_info::ConnectionInfo;
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
-use crate::crypt::CipherSuiteParams;
+use crate::crypt::{CipherSuiteParams, NamedGroup};
 use crate::handshake::client::{ClientHandshake, ServerHelloResult};
 use crate::handshake::codec::{
     decode_certificate, decode_certificate_request, decode_certificate_verify, decode_finished,
@@ -59,6 +60,20 @@ pub struct TlsClientConnection<S: Read + Write> {
     early_data_queue: Vec<u8>,
     /// Whether early data was accepted by the server in this connection.
     early_data_accepted: bool,
+    /// Peer certificates (DER-encoded, leaf first).
+    peer_certificates: Vec<Vec<u8>>,
+    /// Negotiated ALPN protocol (if any).
+    negotiated_alpn: Option<Vec<u8>>,
+    /// Server name (SNI) used in this connection.
+    server_name_used: Option<String>,
+    /// Negotiated key exchange group (if applicable).
+    negotiated_group: Option<NamedGroup>,
+    /// Whether this connection was resumed from a previous session.
+    session_resumed: bool,
+    /// Whether we have sent close_notify.
+    sent_close_notify: bool,
+    /// Whether we have received close_notify.
+    received_close_notify: bool,
 }
 
 impl<S: Read + Write> Drop for TlsClientConnection<S> {
@@ -91,6 +106,13 @@ impl<S: Read + Write> TlsClientConnection<S> {
             received_session: None,
             early_data_queue: Vec::new(),
             early_data_accepted: false,
+            peer_certificates: Vec::new(),
+            negotiated_alpn: None,
+            server_name_used: None,
+            negotiated_group: None,
+            session_resumed: false,
+            sent_close_notify: false,
+            received_close_notify: false,
         }
     }
 
@@ -139,6 +161,48 @@ impl<S: Read + Write> TlsClientConnection<S> {
             context,
             length,
         )
+    }
+
+    /// Return a snapshot of the negotiated connection parameters.
+    ///
+    /// Returns `None` if no cipher suite has been negotiated yet (i.e. before
+    /// the handshake completes).
+    pub fn connection_info(&self) -> Option<ConnectionInfo> {
+        self.negotiated_suite.map(|suite| ConnectionInfo {
+            cipher_suite: suite,
+            peer_certificates: self.peer_certificates.clone(),
+            alpn_protocol: self.negotiated_alpn.clone(),
+            server_name: self.server_name_used.clone(),
+            negotiated_group: self.negotiated_group,
+            session_resumed: self.session_resumed,
+            peer_verify_data: Vec::new(),
+            local_verify_data: Vec::new(),
+        })
+    }
+
+    /// Peer certificates (DER-encoded, leaf first).
+    pub fn peer_certificates(&self) -> &[Vec<u8>] {
+        &self.peer_certificates
+    }
+
+    /// Negotiated ALPN protocol (if any).
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Server name (SNI) used in this connection.
+    pub fn server_name(&self) -> Option<&str> {
+        self.server_name_used.as_deref()
+    }
+
+    /// Negotiated key exchange group (if applicable).
+    pub fn negotiated_group(&self) -> Option<NamedGroup> {
+        self.negotiated_group
+    }
+
+    /// Whether this connection was resumed from a previous session.
+    pub fn is_session_resumed(&self) -> bool {
+        self.session_resumed
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -590,6 +654,14 @@ impl<S: Read + Write> TlsClientConnection<S> {
 
                         self.negotiated_suite = Some(fin_actions.suite);
                         self.negotiated_version = Some(TlsVersion::Tls13);
+
+                        // Populate connection info from handshake state
+                        self.peer_certificates = hs.server_certs().to_vec();
+                        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+                        self.server_name_used = self.config.server_name.clone();
+                        self.negotiated_group = hs.negotiated_group();
+                        self.session_resumed = hs.is_psk_mode();
+
                         self.state = ConnectionState::Connected;
                         return Ok(());
                     }
@@ -695,6 +767,9 @@ impl<S: Read + Write> TlsConnection for TlsClientConnection<S> {
                     }
                 }
                 ContentType::Alert => {
+                    if plaintext.len() >= 2 && plaintext[1] == 0 {
+                        self.received_close_notify = true;
+                    }
                     self.state = ConnectionState::Closed;
                     return Ok(0);
                 }
@@ -728,11 +803,14 @@ impl<S: Read + Write> TlsConnection for TlsClientConnection<S> {
             return Ok(());
         }
 
-        let alert_data = [1u8, 0u8];
-        let record = self
-            .record_layer
-            .seal_record(ContentType::Alert, &alert_data)?;
-        let _ = self.stream.write_all(&record);
+        if !self.sent_close_notify {
+            let alert_data = [1u8, 0u8];
+            let record = self
+                .record_layer
+                .seal_record(ContentType::Alert, &alert_data)?;
+            let _ = self.stream.write_all(&record);
+            self.sent_close_notify = true;
+        }
         self.state = ConnectionState::Closed;
         Ok(())
     }
@@ -768,6 +846,20 @@ pub struct TlsServerConnection<S: Read + Write> {
     server_app_secret: Vec<u8>,
     /// Exporter master secret (for RFC 5705 / RFC 8446 §7.5 key material export).
     exporter_master_secret: Vec<u8>,
+    /// Peer certificates (DER-encoded, leaf first).
+    peer_certificates: Vec<Vec<u8>>,
+    /// Negotiated ALPN protocol (if any).
+    negotiated_alpn: Option<Vec<u8>>,
+    /// Client server name (SNI) received from the client.
+    client_server_name: Option<String>,
+    /// Negotiated key exchange group (if applicable).
+    negotiated_group: Option<NamedGroup>,
+    /// Whether this connection was resumed from a previous session.
+    session_resumed: bool,
+    /// Whether we have sent close_notify.
+    sent_close_notify: bool,
+    /// Whether we have received close_notify.
+    received_close_notify: bool,
 }
 
 impl<S: Read + Write> Drop for TlsServerConnection<S> {
@@ -794,6 +886,13 @@ impl<S: Read + Write> TlsServerConnection<S> {
             client_app_secret: Vec::new(),
             server_app_secret: Vec::new(),
             exporter_master_secret: Vec::new(),
+            peer_certificates: Vec::new(),
+            negotiated_alpn: None,
+            client_server_name: None,
+            negotiated_group: None,
+            session_resumed: false,
+            sent_close_notify: false,
+            received_close_notify: false,
         }
     }
 
@@ -825,6 +924,48 @@ impl<S: Read + Write> TlsServerConnection<S> {
             context,
             length,
         )
+    }
+
+    /// Return a snapshot of the negotiated connection parameters.
+    ///
+    /// Returns `None` if no cipher suite has been negotiated yet (i.e. before
+    /// the handshake completes).
+    pub fn connection_info(&self) -> Option<ConnectionInfo> {
+        self.negotiated_suite.map(|suite| ConnectionInfo {
+            cipher_suite: suite,
+            peer_certificates: self.peer_certificates.clone(),
+            alpn_protocol: self.negotiated_alpn.clone(),
+            server_name: self.client_server_name.clone(),
+            negotiated_group: self.negotiated_group,
+            session_resumed: self.session_resumed,
+            peer_verify_data: Vec::new(),
+            local_verify_data: Vec::new(),
+        })
+    }
+
+    /// Peer certificates (DER-encoded, leaf first).
+    pub fn peer_certificates(&self) -> &[Vec<u8>] {
+        &self.peer_certificates
+    }
+
+    /// Negotiated ALPN protocol (if any).
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Client server name (SNI) received from the client.
+    pub fn server_name(&self) -> Option<&str> {
+        self.client_server_name.as_deref()
+    }
+
+    /// Negotiated key exchange group (if applicable).
+    pub fn negotiated_group(&self) -> Option<NamedGroup> {
+        self.negotiated_group
+    }
+
+    /// Whether this connection was resumed from a previous session.
+    pub fn is_session_resumed(&self) -> bool {
+        self.session_resumed
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -1307,6 +1448,13 @@ impl<S: Read + Write> TlsServerConnection<S> {
 
         self.negotiated_suite = Some(actions.suite);
         self.negotiated_version = Some(TlsVersion::Tls13);
+
+        // Populate connection info from handshake state
+        self.peer_certificates = hs.client_certs().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.client_server_name = hs.client_server_name().map(|s| s.to_string());
+        self.negotiated_group = hs.negotiated_group();
+
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -1369,6 +1517,9 @@ impl<S: Read + Write> TlsConnection for TlsServerConnection<S> {
                     }
                 }
                 ContentType::Alert => {
+                    if plaintext.len() >= 2 && plaintext[1] == 0 {
+                        self.received_close_notify = true;
+                    }
                     self.state = ConnectionState::Closed;
                     return Ok(0);
                 }
@@ -1401,11 +1552,15 @@ impl<S: Read + Write> TlsConnection for TlsServerConnection<S> {
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        let alert_data = [1u8, 0u8];
-        let record = self
-            .record_layer
-            .seal_record(ContentType::Alert, &alert_data)?;
-        let _ = self.stream.write_all(&record);
+
+        if !self.sent_close_notify {
+            let alert_data = [1u8, 0u8];
+            let record = self
+                .record_layer
+                .seal_record(ContentType::Alert, &alert_data)?;
+            let _ = self.stream.write_all(&record);
+            self.sent_close_notify = true;
+        }
         self.state = ConnectionState::Closed;
         Ok(())
     }
@@ -5802,5 +5957,420 @@ mod tests {
         // Client should have received SCT data
         assert!(client_hs.ocsp_response().is_none());
         assert_eq!(client_hs.sct_data(), Some(fake_sct_list.as_slice()));
+    }
+
+    // ======================================================================
+    // Phase 69: TLS 1.3 Connection info + ALPN + graceful shutdown tests
+    // ======================================================================
+
+    /// After TLS 1.3 handshake, verify all ConnectionInfo fields including
+    /// cipher_suite, peer_certificates, server_name, negotiated_group.
+    #[test]
+    fn test_tls13_connection_info() {
+        use crate::config::ServerPrivateKey;
+        use crate::crypt::NamedGroup;
+
+        let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+        let client_config = TlsConfig::builder()
+            .server_name("tls13.example.com")
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![fake_cert.clone()])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+
+        let mut client_hs = ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // Client → CH
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+
+        // Server ← CH → flight
+        let (_, ch_data, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_data).unwrap();
+        let actions = match server_hs
+            .process_client_hello(&ch_data[..ch_total])
+            .unwrap()
+        {
+            ClientHelloResult::Actions(a) => *a,
+            _ => panic!("expected Actions"),
+        };
+
+        // Server should have parsed SNI
+        assert_eq!(server_hs.client_server_name(), Some("tls13.example.com"));
+        // Server should know the negotiated group
+        assert!(server_hs.negotiated_group().is_some());
+
+        // Server → SH (plaintext)
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_hello_msg)
+            .unwrap();
+
+        // Activate server HS encryption
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_hs_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_hs_keys)
+            .unwrap();
+
+        // Encrypted flight: EE, Cert, CV, Finished
+        let ee_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.encrypted_extensions_msg)
+            .unwrap();
+        let cert_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_msg)
+            .unwrap();
+        let cv_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_verify_msg)
+            .unwrap();
+        let sfin_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_finished_msg)
+            .unwrap();
+
+        // Client ← SH
+        let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
+        let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
+        let sh_actions = match client_hs
+            .process_server_hello(&sh_data[..sh_total])
+            .unwrap()
+        {
+            ServerHelloResult::Actions(a) => a,
+            _ => panic!("expected Actions"),
+        };
+
+        client_rl
+            .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(sh_actions.suite, &sh_actions.client_hs_keys)
+            .unwrap();
+
+        // Client ← EE, Cert, CV, Fin
+        let (_, ee_data, _) = client_rl.open_record(&ee_record).unwrap();
+        let (_, _, ee_total) = parse_handshake_header(&ee_data).unwrap();
+        client_hs
+            .process_encrypted_extensions(&ee_data[..ee_total])
+            .unwrap();
+
+        let (_, cert_data, _) = client_rl.open_record(&cert_record).unwrap();
+        let (_, _, cert_total) = parse_handshake_header(&cert_data).unwrap();
+        client_hs
+            .process_certificate(&cert_data[..cert_total])
+            .unwrap();
+
+        let (_, cv_data, _) = client_rl.open_record(&cv_record).unwrap();
+        let (_, _, cv_total) = parse_handshake_header(&cv_data).unwrap();
+        client_hs
+            .process_certificate_verify(&cv_data[..cv_total])
+            .unwrap();
+
+        let (_, fin_data, _) = client_rl.open_record(&sfin_record).unwrap();
+        let (_, _, fin_total) = parse_handshake_header(&fin_data).unwrap();
+        let _fin_actions = client_hs.process_finished(&fin_data[..fin_total]).unwrap();
+
+        assert_eq!(client_hs.state(), HandshakeState::Connected);
+
+        // Verify client handshake getters
+        assert_eq!(client_hs.server_certs().len(), 1);
+        assert_eq!(client_hs.server_certs()[0], fake_cert);
+        assert!(client_hs.negotiated_group().is_some());
+        let group = client_hs.negotiated_group().unwrap();
+        assert!(
+            group == NamedGroup::X25519 || group == NamedGroup::SECP256R1,
+            "expected a valid NamedGroup, got {group:?}"
+        );
+        assert!(!client_hs.is_psk_mode());
+        // No ALPN configured
+        assert!(client_hs.negotiated_alpn().is_none());
+    }
+
+    /// TLS 1.3 ALPN negotiation: client offers h2+http/1.1, server selects h2.
+    #[test]
+    fn test_tls13_alpn_negotiation() {
+        use crate::config::ServerPrivateKey;
+
+        let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+        let client_config = TlsConfig::builder()
+            .verify_peer(false)
+            .alpn(&[b"h2", b"http/1.1"])
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .alpn(&[b"h2"])
+            .build();
+
+        let mut client_hs = ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // CH
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+
+        // Server ← CH
+        let (_, ch_data, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_data).unwrap();
+        let actions = match server_hs
+            .process_client_hello(&ch_data[..ch_total])
+            .unwrap()
+        {
+            ClientHelloResult::Actions(a) => *a,
+            _ => panic!("expected Actions"),
+        };
+
+        // Server should have negotiated ALPN
+        assert_eq!(server_hs.negotiated_alpn(), Some(b"h2".as_ref()));
+
+        // SH (plaintext)
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_hello_msg)
+            .unwrap();
+
+        // Activate HS encryption
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_hs_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_hs_keys)
+            .unwrap();
+
+        // EE contains ALPN
+        let ee_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.encrypted_extensions_msg)
+            .unwrap();
+        let cert_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_msg)
+            .unwrap();
+        let cv_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_verify_msg)
+            .unwrap();
+        let sfin_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_finished_msg)
+            .unwrap();
+
+        // Client ← SH
+        let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
+        let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
+        let sh_actions = match client_hs
+            .process_server_hello(&sh_data[..sh_total])
+            .unwrap()
+        {
+            ServerHelloResult::Actions(a) => a,
+            _ => panic!("expected Actions"),
+        };
+
+        client_rl
+            .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(sh_actions.suite, &sh_actions.client_hs_keys)
+            .unwrap();
+
+        // Client ← EE (should parse ALPN)
+        let (_, ee_data, _) = client_rl.open_record(&ee_record).unwrap();
+        let (_, _, ee_total) = parse_handshake_header(&ee_data).unwrap();
+        client_hs
+            .process_encrypted_extensions(&ee_data[..ee_total])
+            .unwrap();
+
+        // Client should now see negotiated ALPN
+        assert_eq!(client_hs.negotiated_alpn(), Some(b"h2".as_ref()));
+
+        // Continue to finish handshake
+        let (_, cert_data, _) = client_rl.open_record(&cert_record).unwrap();
+        let (_, _, cert_total) = parse_handshake_header(&cert_data).unwrap();
+        client_hs
+            .process_certificate(&cert_data[..cert_total])
+            .unwrap();
+
+        let (_, cv_data, _) = client_rl.open_record(&cv_record).unwrap();
+        let (_, _, cv_total) = parse_handshake_header(&cv_data).unwrap();
+        client_hs
+            .process_certificate_verify(&cv_data[..cv_total])
+            .unwrap();
+
+        let (_, fin_data, _) = client_rl.open_record(&sfin_record).unwrap();
+        let (_, _, fin_total) = parse_handshake_header(&fin_data).unwrap();
+        let _fin_actions = client_hs.process_finished(&fin_data[..fin_total]).unwrap();
+
+        assert_eq!(client_hs.state(), HandshakeState::Connected);
+        // ALPN should still be available after handshake completes
+        assert_eq!(client_hs.negotiated_alpn(), Some(b"h2".as_ref()));
+    }
+
+    /// TLS 1.3 bidirectional close_notify test: after handshake, client sends
+    /// close_notify via shutdown, server detects it.
+    #[test]
+    fn test_tls13_graceful_shutdown() {
+        use crate::config::ServerPrivateKey;
+
+        let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+        let client_config = TlsConfig::builder().verify_peer(false).build();
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+
+        let mut client_hs = ClientHandshake::new(client_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_hs = ServerHandshake::new(server_config);
+        let mut server_rl = RecordLayer::new();
+
+        // Full handshake
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+
+        let (_, ch_data, _) = server_rl.open_record(&ch_record).unwrap();
+        let (_, _, ch_total) = parse_handshake_header(&ch_data).unwrap();
+        let actions = match server_hs
+            .process_client_hello(&ch_data[..ch_total])
+            .unwrap()
+        {
+            ClientHelloResult::Actions(a) => *a,
+            _ => panic!("expected Actions"),
+        };
+
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_hello_msg)
+            .unwrap();
+
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_hs_keys)
+            .unwrap();
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_hs_keys)
+            .unwrap();
+
+        let ee_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.encrypted_extensions_msg)
+            .unwrap();
+        let cert_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_msg)
+            .unwrap();
+        let cv_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.certificate_verify_msg)
+            .unwrap();
+        let sfin_record = server_rl
+            .seal_record(ContentType::Handshake, &actions.server_finished_msg)
+            .unwrap();
+
+        // Client processes SH
+        let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
+        let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
+        let sh_actions = match client_hs
+            .process_server_hello(&sh_data[..sh_total])
+            .unwrap()
+        {
+            ServerHelloResult::Actions(a) => a,
+            _ => panic!("expected Actions"),
+        };
+
+        client_rl
+            .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(sh_actions.suite, &sh_actions.client_hs_keys)
+            .unwrap();
+
+        // Client processes EE, Cert, CV, Fin
+        let (_, ee_data, _) = client_rl.open_record(&ee_record).unwrap();
+        let (_, _, ee_total) = parse_handshake_header(&ee_data).unwrap();
+        client_hs
+            .process_encrypted_extensions(&ee_data[..ee_total])
+            .unwrap();
+
+        let (_, cert_data, _) = client_rl.open_record(&cert_record).unwrap();
+        let (_, _, cert_total) = parse_handshake_header(&cert_data).unwrap();
+        client_hs
+            .process_certificate(&cert_data[..cert_total])
+            .unwrap();
+
+        let (_, cv_data, _) = client_rl.open_record(&cv_record).unwrap();
+        let (_, _, cv_total) = parse_handshake_header(&cv_data).unwrap();
+        client_hs
+            .process_certificate_verify(&cv_data[..cv_total])
+            .unwrap();
+
+        let (_, fin_data, _) = client_rl.open_record(&sfin_record).unwrap();
+        let (_, _, fin_total) = parse_handshake_header(&fin_data).unwrap();
+        let fin_actions = client_hs.process_finished(&fin_data[..fin_total]).unwrap();
+
+        // Client → Finished (still encrypted with HS keys)
+        let cfin_record = client_rl
+            .seal_record(ContentType::Handshake, &fin_actions.client_finished_msg)
+            .unwrap();
+
+        // NOW activate app keys on client (after sending Finished)
+        client_rl
+            .activate_read_decryption(fin_actions.suite, &fin_actions.server_app_keys)
+            .unwrap();
+        client_rl
+            .activate_write_encryption(fin_actions.suite, &fin_actions.client_app_keys)
+            .unwrap();
+
+        // Server processes client Finished
+        let (_, cfin_data, _) = server_rl.open_record(&cfin_record).unwrap();
+        let (_, _, cfin_total) = parse_handshake_header(&cfin_data).unwrap();
+        let _cfin_actions = server_hs
+            .process_client_finished(&cfin_data[..cfin_total])
+            .unwrap();
+
+        // Activate app keys on server
+        server_rl
+            .activate_read_decryption(actions.suite, &actions.client_app_keys)
+            .unwrap();
+        server_rl
+            .activate_write_encryption(actions.suite, &actions.server_app_keys)
+            .unwrap();
+
+        // Both sides are Connected. Now test close_notify.
+
+        // Client sends close_notify alert
+        let close_notify = [1u8, 0u8]; // AlertLevel::Warning, AlertDescription::CloseNotify
+        let close_record = client_rl
+            .seal_record(ContentType::Alert, &close_notify)
+            .unwrap();
+
+        // Server receives close_notify
+        let (ct, plaintext, _) = server_rl.open_record(&close_record).unwrap();
+        assert_eq!(ct, ContentType::Alert);
+        assert_eq!(plaintext.len(), 2);
+        assert_eq!(plaintext[0], 1); // warning
+        assert_eq!(plaintext[1], 0); // close_notify
+
+        // Server sends close_notify in response
+        let server_close_record = server_rl
+            .seal_record(ContentType::Alert, &close_notify)
+            .unwrap();
+
+        // Client receives close_notify
+        let (ct, plaintext, _) = client_rl.open_record(&server_close_record).unwrap();
+        assert_eq!(ct, ContentType::Alert);
+        assert_eq!(plaintext[1], 0); // close_notify
     }
 }

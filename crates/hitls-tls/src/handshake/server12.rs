@@ -331,6 +331,11 @@ impl Tls12ServerHandshake {
         self.is_renegotiation
     }
 
+    /// Get the client's certificate chain (DER-encoded, leaf first) for mTLS.
+    pub fn client_certs(&self) -> &[Vec<u8>] {
+        &self.client_certs
+    }
+
     /// Reset handshake state for renegotiation (RFC 5746).
     ///
     /// Saves the current verify_data from both sides, resets all handshake

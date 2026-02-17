@@ -185,6 +185,8 @@ pub struct Tls12ClientHandshake {
     prev_client_verify_data: Vec<u8>,
     /// Previous server verify_data (saved from prior handshake for renegotiation).
     prev_server_verify_data: Vec<u8>,
+    /// Negotiated ALPN protocol from ServerHello (if any).
+    negotiated_alpn: Option<Vec<u8>>,
 }
 
 impl Tls12ClientHandshake {
@@ -224,6 +226,7 @@ impl Tls12ClientHandshake {
             is_renegotiation: false,
             prev_client_verify_data: Vec::new(),
             prev_server_verify_data: Vec::new(),
+            negotiated_alpn: None,
         }
     }
 
@@ -312,6 +315,21 @@ impl Tls12ClientHandshake {
         self.is_renegotiation
     }
 
+    /// Get the server's certificate chain (DER-encoded, leaf first).
+    pub fn server_certs(&self) -> &[Vec<u8>] {
+        &self.server_certs
+    }
+
+    /// Get the server's selected named curve (raw u16 value).
+    pub fn server_named_curve(&self) -> u16 {
+        self.server_named_curve
+    }
+
+    /// Get the negotiated ALPN protocol (if any).
+    pub fn negotiated_alpn(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
     /// Reset handshake state for renegotiation (RFC 5746).
     ///
     /// Saves the current verify_data from both sides, resets all handshake
@@ -348,6 +366,7 @@ impl Tls12ClientHandshake {
         self.use_encrypt_then_mac = false;
         self.cached_session_ems = false;
         self.peer_record_size_limit = None;
+        self.negotiated_alpn = None;
         self.is_renegotiation = true;
     }
 
@@ -594,6 +613,10 @@ impl Tls12ClientHandshake {
                     self.peer_record_size_limit = Some(
                         crate::handshake::extensions_codec::parse_record_size_limit(&ext.data)?,
                     );
+                }
+                ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION => {
+                    let proto = crate::handshake::extensions_codec::parse_alpn_sh(&ext.data)?;
+                    self.negotiated_alpn = Some(proto);
                 }
                 _ => {}
             }

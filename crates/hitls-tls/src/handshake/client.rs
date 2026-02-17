@@ -24,12 +24,12 @@ use super::codec::{
 #[cfg(feature = "cert-compression")]
 use super::codec::{decode_compressed_certificate, decompress_certificate_body};
 use super::extensions_codec::{
-    build_compress_certificate, build_cookie, build_early_data_ch, build_key_share_ch,
+    build_alpn, build_compress_certificate, build_cookie, build_early_data_ch, build_key_share_ch,
     build_post_handshake_auth, build_pre_shared_key_ch, build_psk_key_exchange_modes,
     build_record_size_limit, build_sct_ch, build_server_name, build_signature_algorithms,
-    build_status_request_ch, build_supported_groups, build_supported_versions_ch, parse_cookie,
-    parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh, parse_record_size_limit,
-    parse_status_request_cert_entry, parse_supported_versions_sh,
+    build_status_request_ch, build_supported_groups, build_supported_versions_ch, parse_alpn_sh,
+    parse_cookie, parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh,
+    parse_record_size_limit, parse_status_request_cert_entry, parse_supported_versions_sh,
 };
 use super::key_exchange::KeyExchange;
 use super::verify::verify_certificate_verify;
@@ -122,6 +122,10 @@ pub struct ClientHandshake {
     sct_data: Option<Vec<u8>>,
     /// Client random (for key logging).
     client_random: [u8; 32],
+    /// Negotiated ALPN protocol from EncryptedExtensions (if any).
+    negotiated_alpn: Option<Vec<u8>>,
+    /// Negotiated key exchange group from ServerHello key_share.
+    negotiated_group: Option<NamedGroup>,
 }
 
 impl Drop for ClientHandshake {
@@ -164,6 +168,8 @@ impl ClientHandshake {
             ocsp_response: None,
             sct_data: None,
             client_random: [0u8; 32],
+            negotiated_alpn: None,
+            negotiated_group: None,
         }
     }
 
@@ -201,6 +207,26 @@ impl ClientHandshake {
     /// SCT data received from server's Certificate entry.
     pub fn sct_data(&self) -> Option<&[u8]> {
         self.sct_data.as_deref()
+    }
+
+    /// Get the server's certificate chain (DER-encoded, leaf first).
+    pub fn server_certs(&self) -> &[Vec<u8>] {
+        &self.server_certs
+    }
+
+    /// Get the negotiated ALPN protocol (if any).
+    pub fn negotiated_alpn(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Get the negotiated key exchange group (if any).
+    pub fn negotiated_group(&self) -> Option<NamedGroup> {
+        self.negotiated_group
+    }
+
+    /// Whether PSK mode was used (session resumed via PSK).
+    pub fn is_psk_mode(&self) -> bool {
+        self.psk_mode
     }
 
     /// Build the ClientHello handshake message.
@@ -256,6 +282,11 @@ impl ClientHandshake {
         }
         if self.config.enable_sct {
             extensions.push(build_sct_ch());
+        }
+
+        // ALPN
+        if !self.config.alpn_protocols.is_empty() {
+            extensions.push(build_alpn(&self.config.alpn_protocols));
         }
 
         // Custom extensions
@@ -483,6 +514,7 @@ impl ClientHandshake {
             .find(|e| e.extension_type == ExtensionType::KEY_SHARE)
             .ok_or_else(|| TlsError::HandshakeFailed("missing key_share in ServerHello".into()))?;
         let (server_group, server_pub_key) = parse_key_share_sh(&ks_ext.data)?;
+        self.negotiated_group = Some(server_group);
 
         // Verify group matches
         let kx = self
@@ -659,6 +691,9 @@ impl ClientHandshake {
         if self.config.enable_sct {
             extensions.push(build_sct_ch());
         }
+        if !self.config.alpn_protocols.is_empty() {
+            extensions.push(build_alpn(&self.config.alpn_protocols));
+        }
 
         let ch = ClientHello {
             random,
@@ -698,6 +733,10 @@ impl ClientHandshake {
                     let peer_limit = parse_record_size_limit(&ext.data)?;
                     // TLS 1.3: subtract 1 for content type byte
                     self.peer_record_size_limit = Some(peer_limit.saturating_sub(1));
+                }
+                ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION => {
+                    let proto = parse_alpn_sh(&ext.data)?;
+                    self.negotiated_alpn = Some(proto);
                 }
                 _ => {}
             }

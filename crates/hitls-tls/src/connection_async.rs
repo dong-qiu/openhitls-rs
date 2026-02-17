@@ -3,9 +3,10 @@
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::config::TlsConfig;
+use crate::connection_info::ConnectionInfo;
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
-use crate::crypt::CipherSuiteParams;
+use crate::crypt::{CipherSuiteParams, NamedGroup};
 use crate::handshake::client::{ClientHandshake, ServerHelloResult};
 use crate::handshake::codec::{
     decode_certificate_request, decode_key_update, encode_certificate, encode_certificate_verify,
@@ -50,6 +51,13 @@ pub struct AsyncTlsClientConnection<S: AsyncRead + AsyncWrite + Unpin> {
     received_session: Option<TlsSession>,
     early_data_queue: Vec<u8>,
     early_data_accepted: bool,
+    peer_certificates: Vec<Vec<u8>>,
+    negotiated_alpn: Option<Vec<u8>>,
+    server_name_used: Option<String>,
+    negotiated_group: Option<NamedGroup>,
+    session_resumed: bool,
+    sent_close_notify: bool,
+    received_close_notify: bool,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> Drop for AsyncTlsClientConnection<S> {
@@ -80,6 +88,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
             received_session: None,
             early_data_queue: Vec::new(),
             early_data_accepted: false,
+            peer_certificates: Vec::new(),
+            negotiated_alpn: None,
+            server_name_used: None,
+            negotiated_group: None,
+            session_resumed: false,
+            sent_close_notify: false,
+            received_close_notify: false,
         }
     }
 
@@ -96,6 +111,46 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
     /// Whether the server accepted 0-RTT early data.
     pub fn early_data_accepted(&self) -> bool {
         self.early_data_accepted
+    }
+
+    /// Return a snapshot of negotiated connection parameters, or `None` if
+    /// the handshake has not completed yet.
+    pub fn connection_info(&self) -> Option<ConnectionInfo> {
+        self.negotiated_suite.map(|suite| ConnectionInfo {
+            cipher_suite: suite,
+            peer_certificates: self.peer_certificates.clone(),
+            alpn_protocol: self.negotiated_alpn.clone(),
+            server_name: self.server_name_used.clone(),
+            negotiated_group: self.negotiated_group,
+            session_resumed: self.session_resumed,
+            peer_verify_data: Vec::new(),
+            local_verify_data: Vec::new(),
+        })
+    }
+
+    /// Peer certificates (DER-encoded, leaf first).
+    pub fn peer_certificates(&self) -> &[Vec<u8>] {
+        &self.peer_certificates
+    }
+
+    /// Negotiated ALPN protocol (if any).
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Server name (SNI) used in this connection.
+    pub fn server_name(&self) -> Option<&str> {
+        self.server_name_used.as_deref()
+    }
+
+    /// Negotiated key exchange group (if applicable).
+    pub fn negotiated_group(&self) -> Option<NamedGroup> {
+        self.negotiated_group
+    }
+
+    /// Whether this connection was resumed from a previous session.
+    pub fn is_session_resumed(&self) -> bool {
+        self.session_resumed
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -514,6 +569,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
 
                         self.negotiated_suite = Some(fin_actions.suite);
                         self.negotiated_version = Some(TlsVersion::Tls13);
+                        self.peer_certificates = hs.server_certs().to_vec();
+                        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+                        self.server_name_used = self.config.server_name.clone();
+                        self.negotiated_group = hs.negotiated_group();
+                        self.session_resumed = hs.is_psk_mode();
                         self.state = ConnectionState::Connected;
                         return Ok(());
                     }
@@ -620,6 +680,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTlsClientCon
                     }
                 }
                 ContentType::Alert => {
+                    if plaintext.len() >= 2 && plaintext[1] == 0 {
+                        self.received_close_notify = true;
+                    }
                     self.state = ConnectionState::Closed;
                     return Ok(0);
                 }
@@ -652,17 +715,23 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTlsClientCon
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        let alert_data = [1u8, 0u8];
-        let record = self
-            .record_layer
-            .seal_record(ContentType::Alert, &alert_data)?;
-        let _ = self.stream.write_all(&record).await;
+        if !self.sent_close_notify {
+            let alert_data = [1u8, 0u8];
+            let record = self
+                .record_layer
+                .seal_record(ContentType::Alert, &alert_data)?;
+            let _ = self.stream.write_all(&record).await;
+            self.sent_close_notify = true;
+        }
         self.state = ConnectionState::Closed;
         Ok(())
     }
 
     fn version(&self) -> Option<TlsVersion> {
-        self.negotiated_version
+        match self.state {
+            ConnectionState::Connected | ConnectionState::Closed => self.negotiated_version,
+            _ => self.negotiated_version,
+        }
     }
 
     fn cipher_suite(&self) -> Option<CipherSuite> {
@@ -687,6 +756,13 @@ pub struct AsyncTlsServerConnection<S: AsyncRead + AsyncWrite + Unpin> {
     cipher_params: Option<CipherSuiteParams>,
     client_app_secret: Vec<u8>,
     server_app_secret: Vec<u8>,
+    peer_certificates: Vec<Vec<u8>>,
+    negotiated_alpn: Option<Vec<u8>>,
+    client_server_name: Option<String>,
+    negotiated_group: Option<NamedGroup>,
+    session_resumed: bool,
+    sent_close_notify: bool,
+    received_close_notify: bool,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> Drop for AsyncTlsServerConnection<S> {
@@ -711,7 +787,54 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
             cipher_params: None,
             client_app_secret: Vec::new(),
             server_app_secret: Vec::new(),
+            peer_certificates: Vec::new(),
+            negotiated_alpn: None,
+            client_server_name: None,
+            negotiated_group: None,
+            session_resumed: false,
+            sent_close_notify: false,
+            received_close_notify: false,
         }
+    }
+
+    /// Return a snapshot of negotiated connection parameters, or `None` if
+    /// the handshake has not completed yet.
+    pub fn connection_info(&self) -> Option<ConnectionInfo> {
+        self.negotiated_suite.map(|suite| ConnectionInfo {
+            cipher_suite: suite,
+            peer_certificates: self.peer_certificates.clone(),
+            alpn_protocol: self.negotiated_alpn.clone(),
+            server_name: self.client_server_name.clone(),
+            negotiated_group: self.negotiated_group,
+            session_resumed: self.session_resumed,
+            peer_verify_data: Vec::new(),
+            local_verify_data: Vec::new(),
+        })
+    }
+
+    /// Peer certificates (DER-encoded, leaf first).
+    pub fn peer_certificates(&self) -> &[Vec<u8>] {
+        &self.peer_certificates
+    }
+
+    /// Negotiated ALPN protocol (if any).
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Client server name (SNI) used in this connection.
+    pub fn server_name(&self) -> Option<&str> {
+        self.client_server_name.as_deref()
+    }
+
+    /// Negotiated key exchange group (if applicable).
+    pub fn negotiated_group(&self) -> Option<NamedGroup> {
+        self.negotiated_group
+    }
+
+    /// Whether this connection was resumed from a previous session.
+    pub fn is_session_resumed(&self) -> bool {
+        self.session_resumed
     }
 
     async fn fill_buf(&mut self, min_bytes: usize) -> Result<(), TlsError> {
@@ -967,6 +1090,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
 
         self.negotiated_suite = Some(actions.suite);
         self.negotiated_version = Some(TlsVersion::Tls13);
+        self.peer_certificates = hs.client_certs().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.client_server_name = hs.client_server_name().map(|s| s.to_string());
+        self.negotiated_group = hs.negotiated_group();
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -1028,6 +1155,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTlsServerCon
                     }
                 }
                 ContentType::Alert => {
+                    if plaintext.len() >= 2 && plaintext[1] == 0 {
+                        self.received_close_notify = true;
+                    }
                     self.state = ConnectionState::Closed;
                     return Ok(0);
                 }
@@ -1060,17 +1190,23 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTlsServerCon
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        let alert_data = [1u8, 0u8];
-        let record = self
-            .record_layer
-            .seal_record(ContentType::Alert, &alert_data)?;
-        let _ = self.stream.write_all(&record).await;
+        if !self.sent_close_notify {
+            let alert_data = [1u8, 0u8];
+            let record = self
+                .record_layer
+                .seal_record(ContentType::Alert, &alert_data)?;
+            let _ = self.stream.write_all(&record).await;
+            self.sent_close_notify = true;
+        }
         self.state = ConnectionState::Closed;
         Ok(())
     }
 
     fn version(&self) -> Option<TlsVersion> {
-        self.negotiated_version
+        match self.state {
+            ConnectionState::Connected | ConnectionState::Closed => self.negotiated_version,
+            _ => self.negotiated_version,
+        }
     }
 
     fn cipher_suite(&self) -> Option<CipherSuite> {

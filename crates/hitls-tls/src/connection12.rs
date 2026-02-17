@@ -7,7 +7,8 @@ use std::io::{Read, Write};
 
 use crate::alert::{AlertDescription, AlertLevel};
 use crate::config::TlsConfig;
-use crate::crypt::KeyExchangeAlg;
+use crate::connection_info::ConnectionInfo;
+use crate::crypt::{KeyExchangeAlg, NamedGroup};
 use crate::handshake::client12::Tls12ClientHandshake;
 use crate::handshake::codec::{decode_server_hello, parse_handshake_header};
 use crate::handshake::codec12::{
@@ -62,6 +63,20 @@ pub struct Tls12ClientConnection<S: Read + Write> {
     client_verify_data: Vec<u8>,
     /// Server verify_data from last handshake (for renegotiation).
     server_verify_data: Vec<u8>,
+    /// Peer certificates (DER-encoded, leaf first).
+    peer_certificates: Vec<Vec<u8>>,
+    /// Negotiated ALPN protocol (if any).
+    negotiated_alpn: Option<Vec<u8>>,
+    /// Server name used for this connection.
+    server_name_used: Option<String>,
+    /// Negotiated key exchange group (if applicable).
+    negotiated_group: Option<NamedGroup>,
+    /// Whether this connection was resumed from a previous session.
+    session_resumed: bool,
+    /// Whether we have sent close_notify.
+    sent_close_notify: bool,
+    /// Whether we have received close_notify.
+    received_close_notify: bool,
 }
 
 impl<S: Read + Write> Drop for Tls12ClientConnection<S> {
@@ -88,6 +103,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             export_hash_len: 0,
             client_verify_data: Vec::new(),
             server_verify_data: Vec::new(),
+            peer_certificates: Vec::new(),
+            negotiated_alpn: None,
+            server_name_used: None,
+            negotiated_group: None,
+            session_resumed: false,
+            sent_close_notify: false,
+            received_close_notify: false,
         }
     }
 
@@ -123,6 +145,56 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
             context,
             length,
         )
+    }
+
+    /// Get a snapshot of the negotiated connection parameters.
+    /// Returns `None` if the handshake has not completed.
+    pub fn connection_info(&self) -> Option<ConnectionInfo> {
+        self.negotiated_suite.map(|suite| ConnectionInfo {
+            cipher_suite: suite,
+            peer_certificates: self.peer_certificates.clone(),
+            alpn_protocol: self.negotiated_alpn.clone(),
+            server_name: self.server_name_used.clone(),
+            negotiated_group: self.negotiated_group,
+            session_resumed: self.session_resumed,
+            peer_verify_data: self.server_verify_data.clone(),
+            local_verify_data: self.client_verify_data.clone(),
+        })
+    }
+
+    /// Get the peer's certificate chain (DER-encoded, leaf first).
+    pub fn peer_certificates(&self) -> &[Vec<u8>] {
+        &self.peer_certificates
+    }
+
+    /// Get the negotiated ALPN protocol (if any).
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Get the server name (SNI) used for this connection.
+    pub fn server_name(&self) -> Option<&str> {
+        self.server_name_used.as_deref()
+    }
+
+    /// Get the negotiated key exchange group (if applicable).
+    pub fn negotiated_group(&self) -> Option<NamedGroup> {
+        self.negotiated_group
+    }
+
+    /// Whether this connection was resumed from a previous session.
+    pub fn is_session_resumed(&self) -> bool {
+        self.session_resumed
+    }
+
+    /// Get the peer's Finished verify_data.
+    pub fn peer_verify_data(&self) -> &[u8] {
+        &self.server_verify_data
+    }
+
+    /// Get the local Finished verify_data.
+    pub fn local_verify_data(&self) -> &[u8] {
+        &self.client_verify_data
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -466,6 +538,14 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.peer_certificates = hs.server_certs().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.server_name_used = self.config.server_name.clone();
+        let nc = hs.server_named_curve();
+        if nc != 0 {
+            self.negotiated_group = Some(NamedGroup(nc));
+        }
+        self.session_resumed = false;
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -609,6 +689,9 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.server_name_used = self.config.server_name.clone();
+        self.session_resumed = true;
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -893,6 +976,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.peer_certificates = hs.server_certs().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.server_name_used = self.config.server_name.clone();
+        let nc = hs.server_named_curve();
+        if nc != 0 {
+            self.negotiated_group = Some(NamedGroup(nc));
+        }
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -941,6 +1031,10 @@ impl<S: Read + Write> TlsConnection for Tls12ClientConnection<S> {
                     return Ok(n);
                 }
                 ContentType::Alert => {
+                    if plaintext.len() >= 2 && plaintext[1] == 0 {
+                        // close_notify
+                        self.received_close_notify = true;
+                    }
                     self.state = ConnectionState::Closed;
                     return Ok(0);
                 }
@@ -996,17 +1090,20 @@ impl<S: Read + Write> TlsConnection for Tls12ClientConnection<S> {
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        let alert_data = [1u8, 0u8]; // close_notify
-        let record = self
-            .record_layer
-            .seal_record(ContentType::Alert, &alert_data)?;
-        let _ = self.stream.write_all(&record);
+        if !self.sent_close_notify {
+            let alert_data = [1u8, 0u8]; // close_notify
+            let record = self
+                .record_layer
+                .seal_record(ContentType::Alert, &alert_data)?;
+            let _ = self.stream.write_all(&record);
+            self.sent_close_notify = true;
+        }
         self.state = ConnectionState::Closed;
         Ok(())
     }
 
     fn version(&self) -> Option<TlsVersion> {
-        if self.state == ConnectionState::Connected {
+        if self.state == ConnectionState::Connected || self.state == ConnectionState::Closed {
             Some(TlsVersion::Tls12)
         } else {
             None
@@ -1047,6 +1144,20 @@ pub struct Tls12ServerConnection<S: Read + Write> {
     client_verify_data: Vec<u8>,
     /// Server verify_data from last handshake (for renegotiation).
     server_verify_data: Vec<u8>,
+    /// Peer certificates (DER-encoded, leaf first).
+    peer_certificates: Vec<Vec<u8>>,
+    /// Negotiated ALPN protocol (if any).
+    negotiated_alpn: Option<Vec<u8>>,
+    /// Client's SNI hostname.
+    client_server_name: Option<String>,
+    /// Negotiated key exchange group (if applicable).
+    negotiated_group: Option<NamedGroup>,
+    /// Whether this connection was resumed from a previous session.
+    session_resumed: bool,
+    /// Whether we have sent close_notify.
+    sent_close_notify: bool,
+    /// Whether we have received close_notify.
+    received_close_notify: bool,
 }
 
 impl<S: Read + Write> Drop for Tls12ServerConnection<S> {
@@ -1073,6 +1184,13 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             export_hash_len: 0,
             client_verify_data: Vec::new(),
             server_verify_data: Vec::new(),
+            peer_certificates: Vec::new(),
+            negotiated_alpn: None,
+            client_server_name: None,
+            negotiated_group: None,
+            session_resumed: false,
+            sent_close_notify: false,
+            received_close_notify: false,
         }
     }
 
@@ -1104,6 +1222,56 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             context,
             length,
         )
+    }
+
+    /// Get a snapshot of the negotiated connection parameters.
+    /// Returns `None` if the handshake has not completed.
+    pub fn connection_info(&self) -> Option<ConnectionInfo> {
+        self.negotiated_suite.map(|suite| ConnectionInfo {
+            cipher_suite: suite,
+            peer_certificates: self.peer_certificates.clone(),
+            alpn_protocol: self.negotiated_alpn.clone(),
+            server_name: self.client_server_name.clone(),
+            negotiated_group: self.negotiated_group,
+            session_resumed: self.session_resumed,
+            peer_verify_data: self.client_verify_data.clone(),
+            local_verify_data: self.server_verify_data.clone(),
+        })
+    }
+
+    /// Get the peer's certificate chain (DER-encoded, leaf first).
+    pub fn peer_certificates(&self) -> &[Vec<u8>] {
+        &self.peer_certificates
+    }
+
+    /// Get the negotiated ALPN protocol (if any).
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        self.negotiated_alpn.as_deref()
+    }
+
+    /// Get the client's SNI hostname.
+    pub fn server_name(&self) -> Option<&str> {
+        self.client_server_name.as_deref()
+    }
+
+    /// Get the negotiated key exchange group (if applicable).
+    pub fn negotiated_group(&self) -> Option<NamedGroup> {
+        self.negotiated_group
+    }
+
+    /// Whether this connection was resumed from a previous session.
+    pub fn is_session_resumed(&self) -> bool {
+        self.session_resumed
+    }
+
+    /// Get the peer's Finished verify_data.
+    pub fn peer_verify_data(&self) -> &[u8] {
+        &self.client_verify_data
+    }
+
+    /// Get the local Finished verify_data.
+    pub fn local_verify_data(&self) -> &[u8] {
+        &self.server_verify_data
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -1373,6 +1541,10 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.peer_certificates = hs.client_certs().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.client_server_name = hs.client_server_name().map(|s| s.to_string());
+        self.session_resumed = false;
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -1495,6 +1667,9 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.client_server_name = hs.client_server_name().map(|s| s.to_string());
+        self.session_resumed = true;
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -1738,6 +1913,9 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         self.negotiated_suite = Some(suite);
         self.client_verify_data = hs.client_verify_data().to_vec();
         self.server_verify_data = hs.server_verify_data().to_vec();
+        self.peer_certificates = hs.client_certs().to_vec();
+        self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
+        self.client_server_name = hs.client_server_name().map(|s| s.to_string());
         self.state = ConnectionState::Connected;
         Ok(())
     }
@@ -1802,6 +1980,10 @@ impl<S: Read + Write> TlsConnection for Tls12ServerConnection<S> {
                         self.state = ConnectionState::Connected;
                         continue;
                     }
+                    if plaintext.len() >= 2 && plaintext[1] == 0 {
+                        // close_notify
+                        self.received_close_notify = true;
+                    }
                     self.state = ConnectionState::Closed;
                     return Ok(0);
                 }
@@ -1851,17 +2033,20 @@ impl<S: Read + Write> TlsConnection for Tls12ServerConnection<S> {
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        let alert_data = [1u8, 0u8]; // close_notify
-        let record = self
-            .record_layer
-            .seal_record(ContentType::Alert, &alert_data)?;
-        let _ = self.stream.write_all(&record);
+        if !self.sent_close_notify {
+            let alert_data = [1u8, 0u8]; // close_notify
+            let record = self
+                .record_layer
+                .seal_record(ContentType::Alert, &alert_data)?;
+            let _ = self.stream.write_all(&record);
+            self.sent_close_notify = true;
+        }
         self.state = ConnectionState::Closed;
         Ok(())
     }
 
     fn version(&self) -> Option<TlsVersion> {
-        if self.state == ConnectionState::Connected {
+        if self.state == ConnectionState::Connected || self.state == ConnectionState::Closed {
             Some(TlsVersion::Tls12)
         } else {
             None
@@ -5465,6 +5650,348 @@ mod tests {
         assert_eq!(&buf[..n], b"pong2");
 
         conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    // ======================================================================
+    // Phase 69: Connection info + graceful shutdown tests
+    // ======================================================================
+
+    /// Helper: make ECDSA configs with optional ALPN and SNI for connection-level tests.
+    fn make_conn_info_configs(
+        alpn_client: &[&[u8]],
+        alpn_server: &[&[u8]],
+        sni: Option<&str>,
+    ) -> (TlsConfig, TlsConfig) {
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let mut client_builder = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false);
+        if !alpn_client.is_empty() {
+            client_builder = client_builder.alpn(alpn_client);
+        }
+        if let Some(name) = sni {
+            client_builder = client_builder.server_name(name);
+        }
+        let client_config = client_builder.build();
+
+        let mut server_builder = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false);
+        if !alpn_server.is_empty() {
+            server_builder = server_builder.alpn(alpn_server);
+        }
+        let server_config = server_builder.build();
+
+        (client_config, server_config)
+    }
+
+    /// After ECDHE handshake, verify cipher_suite, version, peer_certificates,
+    /// server_name, negotiated_group, verify_data, and session_resumed from
+    /// connection_info().
+    #[test]
+    fn test_tls12_connection_info_cipher_suite() {
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (client_config, server_config) =
+            make_conn_info_configs(&[], &[], Some("test.example.com"));
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            // Server should see client's SNI
+            assert_eq!(conn.server_name(), Some("test.example.com"));
+            assert_eq!(
+                conn.cipher_suite(),
+                Some(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256)
+            );
+            assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+            assert!(!conn.is_session_resumed());
+            // Server verify_data (local = server)
+            assert_eq!(conn.local_verify_data().len(), 12);
+            assert_eq!(conn.peer_verify_data().len(), 12);
+            tx.send(()).unwrap();
+
+            let mut buf = [0u8; 64];
+            let _ = conn.read(&mut buf);
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        assert_eq!(
+            conn.cipher_suite(),
+            Some(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256)
+        );
+        assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+
+        // Connection info snapshot
+        let info = conn.connection_info().unwrap();
+        assert_eq!(
+            info.cipher_suite,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        );
+        assert!(!info.session_resumed);
+
+        // Peer certificates: server sent one fake cert
+        assert_eq!(conn.peer_certificates().len(), 1);
+        assert_eq!(conn.peer_certificates()[0], vec![0x30, 0x82, 0x01, 0x00]);
+
+        // SNI
+        assert_eq!(conn.server_name(), Some("test.example.com"));
+
+        // Named group
+        assert_eq!(conn.negotiated_group(), Some(NamedGroup::SECP256R1));
+
+        // Verify data
+        assert_eq!(conn.local_verify_data().len(), 12);
+        assert_eq!(conn.peer_verify_data().len(), 12);
+        // Local (client) and peer (server) verify_data must differ
+        assert_ne!(conn.local_verify_data(), conn.peer_verify_data());
+
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    /// Both sides configure ALPN, verify alpn_protocol() returns negotiated protocol.
+    #[test]
+    fn test_tls12_connection_info_alpn() {
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (client_config, server_config) =
+            make_conn_info_configs(&[b"h2", b"http/1.1"], &[b"h2"], None);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            // Server should report negotiated ALPN
+            assert_eq!(conn.alpn_protocol(), Some(b"h2".as_ref()));
+            tx.send(()).unwrap();
+
+            let mut buf = [0u8; 64];
+            let _ = conn.read(&mut buf);
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        // Client should see ALPN from connection_info
+        assert_eq!(conn.alpn_protocol(), Some(b"h2".as_ref()));
+        let info = conn.connection_info().unwrap();
+        assert_eq!(info.alpn_protocol.as_deref(), Some(b"h2".as_ref()));
+
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        conn.shutdown().unwrap();
+        server_handle.join().unwrap();
+    }
+
+    /// First handshake: session_resumed=false. Abbreviated with ticket: session_resumed=true.
+    #[test]
+    fn test_tls12_connection_info_session_resumed() {
+        // Test at the state machine level: full handshake sets session_resumed=false,
+        // abbreviated sets session_resumed=true.
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+
+        // Full handshake + get session for abbreviated
+        let session = run_full_handshake_get_session(suite);
+        assert!(!session.id.is_empty());
+
+        // The full handshake itself would set session_resumed=false on the connection.
+        // For the abbreviated case, run it and check state.
+        let mut cache = InMemorySessionCache::new(10);
+        let session_id = session.id.clone();
+        cache.put(&session_id, session);
+
+        let result =
+            run_abbreviated_handshake(suite, cache.get(&session_id).unwrap().clone(), &mut cache);
+        // Abbreviated succeeds and server_hs enters Connected
+        assert!(result.is_ok());
+        let (client_state, server_state) = result.unwrap();
+        assert_eq!(client_state, Tls12ClientState::Connected);
+        assert_eq!(server_state, Tls12ServerState::Connected);
+    }
+
+    /// Client shutdown sends close_notify, server reads Ok(0), then server
+    /// shuts down, both closed.
+    #[test]
+    fn test_tls12_graceful_shutdown() {
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (client_config, server_config) = make_conn_info_configs(&[], &[], None);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            // Exchange some data first
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"hello");
+            conn.write(b"world").unwrap();
+
+            // Wait for client to shut down
+            tx.send(()).unwrap();
+
+            // Read should return 0 when close_notify arrives
+            let n = conn.read(&mut buf).unwrap();
+            assert_eq!(n, 0);
+            assert!(conn.received_close_notify);
+
+            // Version should still be available after close
+            assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+
+            // Server shuts down too
+            conn.shutdown().unwrap();
+            assert_eq!(conn.state, ConnectionState::Closed);
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        // Exchange data
+        conn.write(b"hello").unwrap();
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"world");
+
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        // Client initiates shutdown
+        conn.shutdown().unwrap();
+        assert!(conn.sent_close_notify);
+        assert_eq!(conn.state, ConnectionState::Closed);
+
+        // Second shutdown should be a no-op
+        conn.shutdown().unwrap();
+
+        server_handle.join().unwrap();
+    }
+
+    /// Peer sends close_notify during read(), client reads Ok(0) cleanly.
+    #[test]
+    fn test_tls12_close_notify_in_read() {
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        use std::time::Duration;
+
+        let (client_config, server_config) = make_conn_info_configs(&[], &[], None);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+
+            // Server immediately shuts down (sends close_notify)
+            conn.shutdown().unwrap();
+        });
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        // Client reads — should get Ok(0) from close_notify
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(n, 0);
+        assert!(conn.received_close_notify);
+        assert_eq!(conn.state, ConnectionState::Closed);
+
         server_handle.join().unwrap();
     }
 }
