@@ -58,6 +58,8 @@ pub struct AsyncTlsClientConnection<S: AsyncRead + AsyncWrite + Unpin> {
     session_resumed: bool,
     sent_close_notify: bool,
     received_close_notify: bool,
+    /// Counter for consecutive KeyUpdate messages without application data.
+    key_update_recv_count: u32,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> Drop for AsyncTlsClientConnection<S> {
@@ -95,6 +97,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
             session_resumed: false,
             sent_close_notify: false,
             received_close_notify: false,
+            key_update_recv_count: 0,
         }
     }
 
@@ -219,6 +222,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
 
     /// Handle a received KeyUpdate message.
     async fn handle_key_update(&mut self, body: &[u8]) -> Result<(), TlsError> {
+        self.key_update_recv_count += 1;
+        if self.key_update_recv_count > 128 {
+            return Err(TlsError::HandshakeFailed(
+                "too many consecutive KeyUpdate messages without application data".into(),
+            ));
+        }
         let ku = decode_key_update(body)?;
         let params = self
             .cipher_params
@@ -653,6 +662,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTlsClientCon
             let (ct, plaintext) = self.read_record().await?;
             match ct {
                 ContentType::ApplicationData => {
+                    self.key_update_recv_count = 0;
                     let n = std::cmp::min(buf.len(), plaintext.len());
                     buf[..n].copy_from_slice(&plaintext[..n]);
                     if plaintext.len() > n {
@@ -795,6 +805,8 @@ pub struct AsyncTlsServerConnection<S: AsyncRead + AsyncWrite + Unpin> {
     session_resumed: bool,
     sent_close_notify: bool,
     received_close_notify: bool,
+    /// Counter for consecutive KeyUpdate messages without application data.
+    key_update_recv_count: u32,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> Drop for AsyncTlsServerConnection<S> {
@@ -826,6 +838,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
             session_resumed: false,
             sent_close_notify: false,
             received_close_notify: false,
+            key_update_recv_count: 0,
         }
     }
 
@@ -931,6 +944,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
     }
 
     async fn handle_key_update(&mut self, body: &[u8]) -> Result<(), TlsError> {
+        self.key_update_recv_count += 1;
+        if self.key_update_recv_count > 128 {
+            return Err(TlsError::HandshakeFailed(
+                "too many consecutive KeyUpdate messages without application data".into(),
+            ));
+        }
         let ku = decode_key_update(body)?;
         let params = self
             .cipher_params
@@ -1165,6 +1184,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTlsServerCon
             let (ct, plaintext) = self.read_record().await?;
             match ct {
                 ContentType::ApplicationData => {
+                    self.key_update_recv_count = 0;
                     let n = std::cmp::min(buf.len(), plaintext.len());
                     buf[..n].copy_from_slice(&plaintext[..n]);
                     if plaintext.len() > n {

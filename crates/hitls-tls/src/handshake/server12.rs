@@ -27,11 +27,12 @@ use crate::handshake::codec12::{
     ServerKeyExchangeEcdheAnon, ServerKeyExchangeEcdhePsk, ServerKeyExchangePskHint,
 };
 use crate::handshake::extensions_codec::{
-    build_encrypt_then_mac, build_extended_master_secret, build_record_size_limit,
-    build_renegotiation_info, build_renegotiation_info_initial, build_session_ticket_sh,
-    parse_alpn_ch, parse_encrypt_then_mac, parse_extended_master_secret, parse_record_size_limit,
-    parse_renegotiation_info, parse_server_name, parse_session_ticket_ch,
-    parse_signature_algorithms_ch, parse_supported_groups_ch,
+    build_encrypt_then_mac, build_extended_master_secret, build_max_fragment_length,
+    build_record_size_limit, build_renegotiation_info, build_renegotiation_info_initial,
+    build_session_ticket_sh, parse_alpn_ch, parse_encrypt_then_mac, parse_extended_master_secret,
+    parse_max_fragment_length, parse_record_size_limit, parse_renegotiation_info,
+    parse_server_name, parse_session_ticket_ch, parse_signature_algorithms_ch,
+    parse_supported_groups_ch,
 };
 use crate::handshake::key_exchange::KeyExchange;
 use crate::session::{decrypt_session_ticket, encrypt_session_ticket, SessionCache, TlsSession};
@@ -214,6 +215,8 @@ pub struct Tls12ServerHandshake {
     prev_client_verify_data: Vec<u8>,
     /// Previous server verify_data (saved from prior handshake for renegotiation).
     prev_server_verify_data: Vec<u8>,
+    /// Client-offered max fragment length (RFC 6066).
+    client_max_fragment_length: Option<crate::config::MaxFragmentLength>,
 }
 
 impl Drop for Tls12ServerHandshake {
@@ -254,6 +257,7 @@ impl Tls12ServerHandshake {
             is_renegotiation: false,
             prev_client_verify_data: Vec::new(),
             prev_server_verify_data: Vec::new(),
+            client_max_fragment_length: None,
         }
     }
 
@@ -326,6 +330,11 @@ impl Tls12ServerHandshake {
         self.client_record_size_limit
     }
 
+    /// Client-offered max fragment length from ClientHello (RFC 6066).
+    pub fn client_max_fragment_length(&self) -> Option<crate::config::MaxFragmentLength> {
+        self.client_max_fragment_length
+    }
+
     /// Whether this is a renegotiation handshake.
     pub fn is_renegotiation(&self) -> bool {
         self.is_renegotiation
@@ -367,6 +376,7 @@ impl Tls12ServerHandshake {
         self.client_record_size_limit = None;
         self.client_wants_ocsp = false;
         self.client_wants_sct = false;
+        self.client_max_fragment_length = None;
         self.is_renegotiation = true;
     }
 
@@ -491,6 +501,9 @@ impl Tls12ServerHandshake {
                 ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP => {
                     self.client_wants_sct = true;
                 }
+                ExtensionType::MAX_FRAGMENT_LENGTH => {
+                    self.client_max_fragment_length = Some(parse_max_fragment_length(&ext.data)?);
+                }
                 _ => {} // ignore other extensions
             }
         }
@@ -608,6 +621,10 @@ impl Tls12ServerHandshake {
             sh_extensions.push(build_record_size_limit(
                 self.config.record_size_limit.min(16384),
             ));
+        }
+        // Echo Max Fragment Length (RFC 6066) if client offered
+        if let Some(mfl) = self.client_max_fragment_length {
+            sh_extensions.push(build_max_fragment_length(mfl));
         }
 
         // Custom extensions for ServerHello

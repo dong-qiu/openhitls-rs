@@ -9,7 +9,7 @@ use crate::crypt::hkdf::{hkdf_expand, hmac_hash};
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
 use crate::crypt::transcript::TranscriptHash;
-use crate::crypt::{CipherSuiteParams, HashFactory, NamedGroup};
+use crate::crypt::{CipherSuiteParams, HashFactory, NamedGroup, SignatureScheme};
 use crate::extensions::ExtensionType;
 use crate::CipherSuite;
 use hitls_crypto::sha2::Sha256;
@@ -33,8 +33,8 @@ use super::extensions_codec::{
     build_status_request_cert_entry, build_supported_versions_sh, parse_alpn_ch,
     parse_compress_certificate, parse_key_share_ch, parse_pre_shared_key_ch,
     parse_psk_key_exchange_modes, parse_record_size_limit, parse_server_name,
-    parse_signature_algorithms_ch, parse_status_request_ch, parse_supported_groups_ch,
-    parse_supported_versions_ch,
+    parse_signature_algorithms_cert, parse_signature_algorithms_ch, parse_status_request_ch,
+    parse_supported_groups_ch, parse_supported_versions_ch,
 };
 use super::key_exchange::KeyExchange;
 use super::signing::{select_signature_scheme, sign_certificate_verify};
@@ -256,6 +256,8 @@ pub struct ServerHandshake {
     negotiated_group: Option<NamedGroup>,
     /// Client certificates (DER-encoded, leaf first) for post-handshake auth.
     client_certs: Vec<Vec<u8>>,
+    /// Client-offered signature algorithms for certificates (RFC 8446 §4.2.3).
+    client_sig_algs_cert: Vec<SignatureScheme>,
 }
 
 impl Drop for ServerHandshake {
@@ -287,6 +289,7 @@ impl ServerHandshake {
             client_server_name: None,
             negotiated_group: None,
             client_certs: Vec::new(),
+            client_sig_algs_cert: Vec::new(),
         }
     }
 
@@ -318,6 +321,11 @@ impl ServerHandshake {
     /// Get the client's certificate chain (DER-encoded, leaf first).
     pub fn client_certs(&self) -> &[Vec<u8>] {
         &self.client_certs
+    }
+
+    /// Client-offered signature algorithms for certificates (RFC 8446 §4.2.3).
+    pub fn client_sig_algs_cert(&self) -> &[SignatureScheme] {
+        &self.client_sig_algs_cert
     }
 
     /// Process a ClientHello message.
@@ -363,6 +371,15 @@ impl ServerHandshake {
                 TlsError::HandshakeFailed("missing signature_algorithms in ClientHello".into())
             })?;
         let client_sig_algs = parse_signature_algorithms_ch(&sig_alg_ext.data)?;
+
+        // signature_algorithms_cert (RFC 8446 §4.2.3) — optional
+        if let Some(sac_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::SIGNATURE_ALGORITHMS_CERT)
+        {
+            self.client_sig_algs_cert = parse_signature_algorithms_cert(&sac_ext.data)?;
+        }
 
         // key_share
         let ks_ext = ch
@@ -1542,5 +1559,62 @@ mod tests {
             result.is_err(),
             "TLS 1.2 only should be rejected by 1.3 server"
         );
+    }
+
+    #[test]
+    fn test_tls13_server_parses_sig_algs_cert() {
+        use super::super::extensions_codec::{
+            build_key_share_ch, build_signature_algorithms, build_signature_algorithms_cert,
+            build_supported_groups, build_supported_versions_ch,
+        };
+        use crate::crypt::SignatureScheme;
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(crate::config::ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .verify_peer(false)
+            .build();
+        let mut hs = ServerHandshake::new(server_config);
+
+        // Build a ClientHello with signature_algorithms_cert
+        let ch = super::super::codec::ClientHello {
+            random: [0x42; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                build_supported_versions_ch(),
+                build_supported_groups(&[NamedGroup::X25519]),
+                build_signature_algorithms(&[SignatureScheme::ED25519]),
+                build_signature_algorithms_cert(&[
+                    SignatureScheme::RSA_PSS_RSAE_SHA256,
+                    SignatureScheme::ECDSA_SECP256R1_SHA256,
+                ]),
+                build_key_share_ch(NamedGroup::X25519, &[0x55; 32]),
+            ],
+        };
+        let msg = super::super::codec::encode_client_hello(&ch);
+        let _result = hs.process_client_hello(&msg);
+        // The server should have parsed sig_algs_cert
+        assert_eq!(hs.client_sig_algs_cert().len(), 2);
+        assert_eq!(
+            hs.client_sig_algs_cert()[0],
+            SignatureScheme::RSA_PSS_RSAE_SHA256
+        );
+        assert_eq!(
+            hs.client_sig_algs_cert()[1],
+            SignatureScheme::ECDSA_SECP256R1_SHA256
+        );
+    }
+
+    #[test]
+    fn test_tls13_sig_algs_cert_empty_default() {
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .verify_peer(false)
+            .build();
+        let hs = ServerHandshake::new(server_config);
+        // No sig_algs_cert by default
+        assert!(hs.client_sig_algs_cert().is_empty());
     }
 }

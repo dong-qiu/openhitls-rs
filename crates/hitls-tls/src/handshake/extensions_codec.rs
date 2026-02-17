@@ -1,5 +1,6 @@
 //! TLS 1.3 extension encoding/decoding for ClientHello/ServerHello.
 
+use crate::config::MaxFragmentLength;
 use crate::crypt::{NamedGroup, SignatureScheme};
 use crate::extensions::{Extension, ExtensionType};
 use crate::handshake::codec::CertCompressionAlgorithm;
@@ -924,6 +925,56 @@ pub fn build_sct_cert_entry(sct_list: &[u8]) -> Extension {
 }
 
 // ---------------------------------------------------------------------------
+// Max Fragment Length (RFC 6066 §4)
+// ---------------------------------------------------------------------------
+
+/// Build `max_fragment_length` extension (RFC 6066).
+/// Wire format: 1-byte enum value (1=512, 2=1024, 3=2048, 4=4096).
+pub fn build_max_fragment_length(mfl: MaxFragmentLength) -> Extension {
+    Extension {
+        extension_type: ExtensionType::MAX_FRAGMENT_LENGTH,
+        data: vec![mfl as u8],
+    }
+}
+
+/// Parse `max_fragment_length` extension. Returns the `MaxFragmentLength` value.
+pub fn parse_max_fragment_length(data: &[u8]) -> Result<MaxFragmentLength, TlsError> {
+    if data.len() != 1 {
+        return Err(TlsError::HandshakeFailed(
+            "max_fragment_length: expected 1 byte".into(),
+        ));
+    }
+    MaxFragmentLength::from_u8(data[0]).ok_or_else(|| {
+        TlsError::HandshakeFailed(format!("max_fragment_length: invalid value {}", data[0]))
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Signature Algorithms Cert (RFC 8446 §4.2.3)
+// ---------------------------------------------------------------------------
+
+/// Build `signature_algorithms_cert` extension (RFC 8446 §4.2.3).
+/// Wire format is identical to `signature_algorithms` but with type 50.
+pub fn build_signature_algorithms_cert(schemes: &[SignatureScheme]) -> Extension {
+    let mut data = Vec::with_capacity(2 + schemes.len() * 2);
+    let list_len = (schemes.len() * 2) as u16;
+    data.extend_from_slice(&list_len.to_be_bytes());
+    for s in schemes {
+        data.extend_from_slice(&s.0.to_be_bytes());
+    }
+    Extension {
+        extension_type: ExtensionType::SIGNATURE_ALGORITHMS_CERT,
+        data,
+    }
+}
+
+/// Parse `signature_algorithms_cert` extension.
+/// Reuses the same wire format as `signature_algorithms`.
+pub fn parse_signature_algorithms_cert(data: &[u8]) -> Result<Vec<SignatureScheme>, TlsError> {
+    parse_signature_algorithms_ch(data)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1391,5 +1442,49 @@ mod tests {
         let parsed2 = parse_renegotiation_info(&ext2.data).unwrap();
         assert_eq!(parsed2.len(), 12);
         assert_eq!(&parsed2[..], &client_vd[..]);
+    }
+
+    #[test]
+    fn test_mfl_codec_roundtrip() {
+        use crate::config::MaxFragmentLength;
+
+        // Test all valid values
+        for (val, expected_size) in [
+            (MaxFragmentLength::Bits512, 512),
+            (MaxFragmentLength::Bits1024, 1024),
+            (MaxFragmentLength::Bits2048, 2048),
+            (MaxFragmentLength::Bits4096, 4096),
+        ] {
+            let ext = build_max_fragment_length(val);
+            assert_eq!(ext.extension_type, ExtensionType::MAX_FRAGMENT_LENGTH);
+            assert_eq!(ext.data.len(), 1);
+            let parsed = parse_max_fragment_length(&ext.data).unwrap();
+            assert_eq!(parsed, val);
+            assert_eq!(parsed.to_size(), expected_size);
+        }
+
+        // Invalid values rejected
+        assert!(parse_max_fragment_length(&[0]).is_err());
+        assert!(parse_max_fragment_length(&[5]).is_err());
+        assert!(parse_max_fragment_length(&[]).is_err());
+        assert!(parse_max_fragment_length(&[1, 2]).is_err());
+    }
+
+    #[test]
+    fn test_sig_algs_cert_codec_roundtrip() {
+        let schemes = vec![
+            SignatureScheme::RSA_PSS_RSAE_SHA256,
+            SignatureScheme::ECDSA_SECP256R1_SHA256,
+            SignatureScheme::ED25519,
+        ];
+        let ext = build_signature_algorithms_cert(&schemes);
+        assert_eq!(ext.extension_type, ExtensionType::SIGNATURE_ALGORITHMS_CERT);
+        // Same wire format as signature_algorithms: list_len(2) + 3*scheme(2)
+        assert_eq!(ext.data.len(), 2 + 3 * 2);
+        let parsed = parse_signature_algorithms_cert(&ext.data).unwrap();
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0], SignatureScheme::RSA_PSS_RSAE_SHA256);
+        assert_eq!(parsed[1], SignatureScheme::ECDSA_SECP256R1_SHA256);
+        assert_eq!(parsed[2], SignatureScheme::ED25519);
     }
 }

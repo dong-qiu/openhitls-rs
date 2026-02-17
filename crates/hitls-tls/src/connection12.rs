@@ -273,7 +273,12 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
         let sh = decode_server_hello(sh_body)?;
         let suite = hs.process_server_hello(&sh_data, &sh)?;
 
-        // Apply peer's record size limit (TLS 1.2: no adjustment)
+        // Apply negotiated max fragment length (RFC 6066) — lower priority than RSL
+        if let Some(mfl) = hs.negotiated_max_fragment_length() {
+            self.record_layer.max_fragment_size = mfl.to_size();
+        }
+
+        // Apply peer's record size limit (TLS 1.2: no adjustment) — overrides MFL
         if let Some(limit) = hs.peer_record_size_limit() {
             self.record_layer.max_fragment_size = limit as usize;
         }
@@ -1383,7 +1388,12 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         )?;
         drop(cache_ref);
 
-        // Apply client's record size limit (TLS 1.2: no adjustment)
+        // Apply client's max fragment length (RFC 6066) — lower priority than RSL
+        if let Some(mfl) = hs.client_max_fragment_length() {
+            self.record_layer.max_fragment_size = mfl.to_size();
+        }
+
+        // Apply client's record size limit (TLS 1.2: no adjustment) — overrides MFL
         if let Some(limit) = hs.client_record_size_limit() {
             self.record_layer.max_fragment_size = limit as usize;
         }
@@ -6827,5 +6837,168 @@ mod tests {
         assert_eq!(received, big_data);
 
         server_handle.join().unwrap();
+    }
+
+    /// MFL negotiation: client offers MFL → server echoes it → fragment size applied.
+    #[test]
+    fn test_tls12_mfl_negotiation() {
+        use crate::config::MaxFragmentLength;
+        use crate::handshake::client12::Tls12ClientHandshake;
+        use crate::handshake::codec::{decode_server_hello, parse_handshake_header};
+        use crate::handshake::server12::Tls12ServerHandshake;
+
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .max_fragment_length(MaxFragmentLength::Bits2048)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .build();
+
+        let mut client_hs = Tls12ClientHandshake::new(client_config);
+        let mut server_hs = Tls12ServerHandshake::new(server_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_rl = RecordLayer::new();
+
+        // Client → ClientHello
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+
+        // Server processes ClientHello
+        let (ct, ch_plain, _) = server_rl.open_record(&ch_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        let (_, _, ch_total) = parse_handshake_header(&ch_plain).unwrap();
+        let flight = server_hs
+            .process_client_hello(&ch_plain[..ch_total])
+            .unwrap();
+
+        // Server should have parsed MFL
+        assert_eq!(
+            server_hs.client_max_fragment_length(),
+            Some(MaxFragmentLength::Bits2048)
+        );
+
+        // Server → ServerHello (contains MFL echo)
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &flight.server_hello)
+            .unwrap();
+
+        // Client processes ServerHello
+        let (ct, sh_plain, _) = client_rl.open_record(&sh_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        let (_, sh_body, sh_total) = parse_handshake_header(&sh_plain).unwrap();
+        let sh = decode_server_hello(sh_body).unwrap();
+        client_hs
+            .process_server_hello(&sh_plain[..sh_total], &sh)
+            .unwrap();
+
+        // Client should have negotiated MFL
+        assert_eq!(
+            client_hs.negotiated_max_fragment_length(),
+            Some(MaxFragmentLength::Bits2048)
+        );
+    }
+
+    /// MFL: server without support doesn't echo → default size kept.
+    #[test]
+    fn test_tls12_mfl_server_no_support() {
+        use crate::config::MaxFragmentLength;
+        use crate::handshake::client12::Tls12ClientHandshake;
+        use crate::handshake::codec::{decode_server_hello, parse_handshake_header};
+        use crate::handshake::server12::Tls12ServerHandshake;
+
+        let ecdsa_private = vec![
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
+        ];
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+
+        // Client offers MFL 512
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .max_fragment_length(MaxFragmentLength::Bits512)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private,
+            })
+            .verify_peer(false)
+            .build();
+
+        let mut client_hs = Tls12ClientHandshake::new(client_config);
+        let mut server_hs = Tls12ServerHandshake::new(server_config);
+        let mut client_rl = RecordLayer::new();
+        let mut server_rl = RecordLayer::new();
+
+        // Client → ClientHello (with MFL extension)
+        let ch_msg = client_hs.build_client_hello().unwrap();
+        let ch_record = client_rl
+            .seal_record(ContentType::Handshake, &ch_msg)
+            .unwrap();
+
+        // Server processes ClientHello
+        let (ct, ch_plain, _) = server_rl.open_record(&ch_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        let (_, _, ch_total) = parse_handshake_header(&ch_plain).unwrap();
+        let flight = server_hs
+            .process_client_hello(&ch_plain[..ch_total])
+            .unwrap();
+
+        // Server echoes MFL (accept-all policy)
+        assert_eq!(
+            server_hs.client_max_fragment_length(),
+            Some(MaxFragmentLength::Bits512)
+        );
+
+        // Server → ServerHello
+        let sh_record = server_rl
+            .seal_record(ContentType::Handshake, &flight.server_hello)
+            .unwrap();
+
+        // Client processes ServerHello
+        let (ct, sh_plain, _) = client_rl.open_record(&sh_record).unwrap();
+        assert_eq!(ct, ContentType::Handshake);
+        let (_, sh_body, sh_total) = parse_handshake_header(&sh_plain).unwrap();
+        let sh = decode_server_hello(sh_body).unwrap();
+        client_hs
+            .process_server_hello(&sh_plain[..sh_total], &sh)
+            .unwrap();
+
+        // Client should have negotiated MFL 512
+        assert_eq!(
+            client_hs.negotiated_max_fragment_length(),
+            Some(MaxFragmentLength::Bits512)
+        );
     }
 }

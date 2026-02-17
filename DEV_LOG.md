@@ -1,5 +1,68 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 73: KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3)
+
+### Date: 2026-02-18
+
+### Summary
+Added three features: (1) KeyUpdate DoS protection with a 128-consecutive-limit counter that resets on application data receipt across all 4 TLS 1.3 connection types; (2) Max Fragment Length extension (RFC 6066) with codec, config, TLS 1.2 client/server negotiation and record layer enforcement; (3) Signature Algorithms Cert extension (RFC 8446 §4.2.3) with codec, config, TLS 1.3 ClientHello building and server parsing.
+
+### Features (3)
+
+| Feature | Description |
+|---------|-------------|
+| KeyUpdate loop protection | `key_update_recv_count` counter rejects after 128 consecutive KeyUpdates without app data; resets on ApplicationData receipt; all 4 TLS 1.3 connection types (2 sync + 2 async) |
+| Max Fragment Length (RFC 6066) | `MaxFragmentLength` enum (512/1024/2048/4096), codec (`build_max_fragment_length`/`parse_max_fragment_length`), TLS 1.2 client sends in ClientHello, server echoes in ServerHello, record layer enforcement (lower priority than RSL) |
+| Signature Algorithms Cert (RFC 8446 §4.2.3) | Codec reuses `signature_algorithms` wire format with type 50, config `signature_algorithms_cert`, TLS 1.3 ClientHello building + HRR path, server parsing + getter |
+
+### Files Modified (10)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/config/mod.rs` | Added `MaxFragmentLength` enum, `max_fragment_length` + `signature_algorithms_cert` config fields + builder methods (+3 tests) |
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Added MFL + sig_algs_cert build/parse codec functions (+2 tests) |
+| `crates/hitls-tls/src/connection.rs` | Added `key_update_recv_count` to client + server, increment/check in `handle_key_update()`, reset in `read()` (+2 tests) |
+| `crates/hitls-tls/src/connection_async.rs` | Mirror sync KeyUpdate protection for async client + server |
+| `crates/hitls-tls/src/handshake/client12.rs` | Added `negotiated_max_fragment_length` field, MFL in `build_client_hello()`, parse in `process_server_hello()`, getter, renegotiation reset |
+| `crates/hitls-tls/src/handshake/server12.rs` | Added `client_max_fragment_length` field, parse in `process_client_hello()`, echo in `build_server_hello()`, getter, renegotiation reset |
+| `crates/hitls-tls/src/connection12.rs` | MFL enforcement in client + server `do_handshake()` (lower priority than RSL) (+2 tests) |
+| `crates/hitls-tls/src/connection12_async.rs` | Mirror sync MFL enforcement for async client + server |
+| `crates/hitls-tls/src/handshake/client.rs` | Added `build_signature_algorithms_cert()` in ClientHello + HRR path |
+| `crates/hitls-tls/src/handshake/server.rs` | Added `client_sig_algs_cert` field, parse in `process_client_hello()`, getter (+2 tests) |
+
+### Implementation Details
+- **KeyUpdate limit**: 128 consecutive KeyUpdates without ApplicationData triggers error; counter resets to 0 when app data arrives
+- **MFL priority**: MFL set first, then RSL overwrites if also present (RFC 8449 supersedes RFC 6066)
+- **MFL server policy**: Server echoes client's MFL value (accept-all); no separate server config needed
+- **sig_algs_cert reuse**: Wire format identical to `signature_algorithms` — just different `ExtensionType(50)`
+
+### Test Counts (Phase 73)
+- **hitls-tls**: 720 [was: 709] (+11 new tests in hitls-tls, +2 in config)
+- **Total workspace**: 1905 (40 ignored) [was: 1892]
+
+### New Tests (13)
+
+| # | Test | File | Description |
+|---|------|------|-------------|
+| 1 | `test_config_max_fragment_length` | config/mod.rs | Builder sets MFL, default is None |
+| 2 | `test_config_signature_algorithms_cert` | config/mod.rs | Builder sets sig_algs_cert, default is empty |
+| 3 | `test_mfl_size_values` | config/mod.rs | `MaxFragmentLength::to_size()` and `from_u8()` correctness |
+| 4 | `test_mfl_codec_roundtrip` | extensions_codec.rs | Build/parse each MFL value (1-4), invalid values rejected |
+| 5 | `test_sig_algs_cert_codec_roundtrip` | extensions_codec.rs | Build/parse sig_algs_cert, verify type=50 |
+| 6 | `test_key_update_loop_protection` | connection.rs | Counter init=0, limit=128 verified for client + server |
+| 7 | `test_key_update_counter_reset_on_data` | connection.rs | Counter resets to 0 on app data for client + server |
+| 8 | `test_tls12_mfl_negotiation` | connection12.rs | Client offers MFL 2048 → server echoes → both negotiate correctly |
+| 9 | `test_tls12_mfl_server_no_support` | connection12.rs | Client offers MFL 512 → server echoes (accept-all policy) |
+| 10 | `test_tls13_server_parses_sig_algs_cert` | server.rs | Server receives and stores sig_algs_cert from ClientHello |
+| 11 | `test_tls13_sig_algs_cert_empty_default` | server.rs | No sig_algs_cert by default → empty vec |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1905 workspace tests passing (40 ignored)
+
+---
+
 ## Phase 67: DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2)
 
 ### Date: 2026-02-16

@@ -11,6 +11,36 @@ use crate::{CipherSuite, TlsRole, TlsVersion};
 use hitls_types::EccCurveId;
 use zeroize::Zeroize;
 
+/// Max fragment length values (RFC 6066 §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaxFragmentLength {
+    Bits512 = 1,
+    Bits1024 = 2,
+    Bits2048 = 3,
+    Bits4096 = 4,
+}
+
+impl MaxFragmentLength {
+    pub fn to_size(self) -> usize {
+        match self {
+            Self::Bits512 => 512,
+            Self::Bits1024 => 1024,
+            Self::Bits2048 => 2048,
+            Self::Bits4096 => 4096,
+        }
+    }
+
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            1 => Some(Self::Bits512),
+            2 => Some(Self::Bits1024),
+            3 => Some(Self::Bits2048),
+            4 => Some(Self::Bits4096),
+            _ => None,
+        }
+    }
+}
+
 /// Server private key material for CertificateVerify signing.
 #[derive(Debug, Clone)]
 pub enum ServerPrivateKey {
@@ -196,6 +226,11 @@ pub struct TlsConfig {
     /// Whether to use server preference order for cipher suite negotiation.
     /// Default: true (server preference). When false, client preference is used.
     pub cipher_server_preference: bool,
+    /// Max fragment length (RFC 6066). None = disabled (use default 16384).
+    pub max_fragment_length: Option<MaxFragmentLength>,
+    /// Signature algorithms for certificates (RFC 8446 §4.2.3).
+    /// Empty = not sent (server uses signature_algorithms instead).
+    pub signature_algorithms_cert: Vec<SignatureScheme>,
 }
 
 impl fmt::Debug for TlsConfig {
@@ -292,6 +327,8 @@ pub struct TlsConfigBuilder {
     custom_extensions: Vec<CustomExtension>,
     session_cache: Option<Arc<Mutex<dyn SessionCache>>>,
     cipher_server_preference: bool,
+    max_fragment_length: Option<MaxFragmentLength>,
+    signature_algorithms_cert: Vec<SignatureScheme>,
 }
 
 impl Default for TlsConfigBuilder {
@@ -351,6 +388,8 @@ impl Default for TlsConfigBuilder {
             custom_extensions: Vec::new(),
             session_cache: None,
             cipher_server_preference: true,
+            max_fragment_length: None,
+            signature_algorithms_cert: Vec::new(),
         }
     }
 }
@@ -587,6 +626,16 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn max_fragment_length(mut self, mfl: MaxFragmentLength) -> Self {
+        self.max_fragment_length = Some(mfl);
+        self
+    }
+
+    pub fn signature_algorithms_cert(mut self, schemes: &[SignatureScheme]) -> Self {
+        self.signature_algorithms_cert = schemes.to_vec();
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -635,6 +684,8 @@ impl TlsConfigBuilder {
             custom_extensions: self.custom_extensions,
             session_cache: self.session_cache,
             cipher_server_preference: self.cipher_server_preference,
+            max_fragment_length: self.max_fragment_length,
+            signature_algorithms_cert: self.signature_algorithms_cert,
         }
     }
 }
@@ -905,5 +956,68 @@ mod tests {
         // Disabled
         let config2 = TlsConfig::builder().cipher_server_preference(false).build();
         assert!(!config2.cipher_server_preference);
+    }
+
+    #[test]
+    fn test_config_max_fragment_length() {
+        // Default: None
+        let config = TlsConfig::builder().build();
+        assert!(config.max_fragment_length.is_none());
+
+        // Set MFL
+        let config2 = TlsConfig::builder()
+            .max_fragment_length(MaxFragmentLength::Bits2048)
+            .build();
+        assert_eq!(
+            config2.max_fragment_length,
+            Some(MaxFragmentLength::Bits2048)
+        );
+    }
+
+    #[test]
+    fn test_config_signature_algorithms_cert() {
+        // Default: empty
+        let config = TlsConfig::builder().build();
+        assert!(config.signature_algorithms_cert.is_empty());
+
+        // Set sig_algs_cert
+        let config2 = TlsConfig::builder()
+            .signature_algorithms_cert(&[
+                SignatureScheme::RSA_PSS_RSAE_SHA256,
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+            ])
+            .build();
+        assert_eq!(config2.signature_algorithms_cert.len(), 2);
+        assert_eq!(
+            config2.signature_algorithms_cert[0],
+            SignatureScheme::RSA_PSS_RSAE_SHA256
+        );
+    }
+
+    #[test]
+    fn test_mfl_size_values() {
+        assert_eq!(MaxFragmentLength::Bits512.to_size(), 512);
+        assert_eq!(MaxFragmentLength::Bits1024.to_size(), 1024);
+        assert_eq!(MaxFragmentLength::Bits2048.to_size(), 2048);
+        assert_eq!(MaxFragmentLength::Bits4096.to_size(), 4096);
+
+        assert_eq!(
+            MaxFragmentLength::from_u8(1),
+            Some(MaxFragmentLength::Bits512)
+        );
+        assert_eq!(
+            MaxFragmentLength::from_u8(2),
+            Some(MaxFragmentLength::Bits1024)
+        );
+        assert_eq!(
+            MaxFragmentLength::from_u8(3),
+            Some(MaxFragmentLength::Bits2048)
+        );
+        assert_eq!(
+            MaxFragmentLength::from_u8(4),
+            Some(MaxFragmentLength::Bits4096)
+        );
+        assert_eq!(MaxFragmentLength::from_u8(0), None);
+        assert_eq!(MaxFragmentLength::from_u8(5), None);
     }
 }

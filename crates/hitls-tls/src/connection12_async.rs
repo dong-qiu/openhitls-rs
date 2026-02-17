@@ -225,7 +225,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
         let sh = decode_server_hello(sh_body)?;
         let suite = hs.process_server_hello(&sh_data, &sh)?;
 
-        // Apply peer's record size limit (TLS 1.2: no adjustment)
+        // Apply negotiated max fragment length (RFC 6066) — lower priority than RSL
+        if let Some(mfl) = hs.negotiated_max_fragment_length() {
+            self.record_layer.max_fragment_size = mfl.to_size();
+        }
+
+        // Apply peer's record size limit (TLS 1.2: no adjustment) — overrides MFL
         if let Some(limit) = hs.peer_record_size_limit() {
             self.record_layer.max_fragment_size = limit as usize;
         }
@@ -1272,7 +1277,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
             )?
         };
 
-        // Apply client's record size limit (TLS 1.2: no adjustment)
+        // Apply client's max fragment length (RFC 6066) — lower priority than RSL
+        if let Some(mfl) = hs.client_max_fragment_length() {
+            self.record_layer.max_fragment_size = mfl.to_size();
+        }
+
+        // Apply client's record size limit (TLS 1.2: no adjustment) — overrides MFL
         if let Some(limit) = hs.client_record_size_limit() {
             self.record_layer.max_fragment_size = limit as usize;
         }

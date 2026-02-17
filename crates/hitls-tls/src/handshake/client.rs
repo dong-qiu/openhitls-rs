@@ -27,9 +27,10 @@ use super::extensions_codec::{
     build_alpn, build_compress_certificate, build_cookie, build_early_data_ch, build_key_share_ch,
     build_post_handshake_auth, build_pre_shared_key_ch, build_psk_key_exchange_modes,
     build_record_size_limit, build_sct_ch, build_server_name, build_signature_algorithms,
-    build_status_request_ch, build_supported_groups, build_supported_versions_ch, parse_alpn_sh,
-    parse_cookie, parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh,
-    parse_record_size_limit, parse_status_request_cert_entry, parse_supported_versions_sh,
+    build_signature_algorithms_cert, build_status_request_ch, build_supported_groups,
+    build_supported_versions_ch, parse_alpn_sh, parse_cookie, parse_key_share_hrr,
+    parse_key_share_sh, parse_pre_shared_key_sh, parse_record_size_limit,
+    parse_status_request_cert_entry, parse_supported_versions_sh,
 };
 use super::key_exchange::KeyExchange;
 use super::verify::verify_certificate_verify;
@@ -260,6 +261,11 @@ impl ClientHandshake {
             build_signature_algorithms(&self.config.signature_algorithms),
             build_key_share_ch(group, kx.public_key_bytes()),
         ];
+        if !self.config.signature_algorithms_cert.is_empty() {
+            extensions.push(build_signature_algorithms_cert(
+                &self.config.signature_algorithms_cert,
+            ));
+        }
         if let Some(ref name) = self.config.server_name {
             extensions.push(build_server_name(name));
         }
@@ -671,6 +677,11 @@ impl ClientHandshake {
             build_signature_algorithms(&self.config.signature_algorithms),
             build_key_share_ch(retry.selected_group, kx.public_key_bytes()),
         ];
+        if !self.config.signature_algorithms_cert.is_empty() {
+            extensions.push(build_signature_algorithms_cert(
+                &self.config.signature_algorithms_cert,
+            ));
+        }
         if let Some(ref name) = self.config.server_name {
             extensions.push(build_server_name(name));
         }

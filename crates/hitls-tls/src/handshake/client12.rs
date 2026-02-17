@@ -187,6 +187,8 @@ pub struct Tls12ClientHandshake {
     prev_server_verify_data: Vec<u8>,
     /// Negotiated ALPN protocol from ServerHello (if any).
     negotiated_alpn: Option<Vec<u8>>,
+    /// Negotiated max fragment length from ServerHello (RFC 6066).
+    negotiated_max_fragment_length: Option<crate::config::MaxFragmentLength>,
 }
 
 impl Tls12ClientHandshake {
@@ -227,6 +229,7 @@ impl Tls12ClientHandshake {
             prev_client_verify_data: Vec::new(),
             prev_server_verify_data: Vec::new(),
             negotiated_alpn: None,
+            negotiated_max_fragment_length: None,
         }
     }
 
@@ -310,6 +313,11 @@ impl Tls12ClientHandshake {
         self.peer_record_size_limit
     }
 
+    /// Negotiated max fragment length from ServerHello (RFC 6066).
+    pub fn negotiated_max_fragment_length(&self) -> Option<crate::config::MaxFragmentLength> {
+        self.negotiated_max_fragment_length
+    }
+
     /// Whether this is a renegotiation handshake.
     pub fn is_renegotiation(&self) -> bool {
         self.is_renegotiation
@@ -367,6 +375,7 @@ impl Tls12ClientHandshake {
         self.cached_session_ems = false;
         self.peer_record_size_limit = None;
         self.negotiated_alpn = None;
+        self.negotiated_max_fragment_length = None;
         self.is_renegotiation = true;
     }
 
@@ -462,6 +471,11 @@ impl Tls12ClientHandshake {
         // Encrypt-Then-MAC (RFC 7366)
         if self.config.enable_encrypt_then_mac {
             extensions.push(crate::handshake::extensions_codec::build_encrypt_then_mac());
+        }
+
+        // Max Fragment Length (RFC 6066)
+        if let Some(mfl) = self.config.max_fragment_length {
+            extensions.push(crate::handshake::extensions_codec::build_max_fragment_length(mfl));
         }
 
         // Record Size Limit (RFC 8449)
@@ -617,6 +631,11 @@ impl Tls12ClientHandshake {
                 ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION => {
                     let proto = crate::handshake::extensions_codec::parse_alpn_sh(&ext.data)?;
                     self.negotiated_alpn = Some(proto);
+                }
+                ExtensionType::MAX_FRAGMENT_LENGTH => {
+                    self.negotiated_max_fragment_length = Some(
+                        crate::handshake::extensions_codec::parse_max_fragment_length(&ext.data)?,
+                    );
                 }
                 _ => {}
             }
