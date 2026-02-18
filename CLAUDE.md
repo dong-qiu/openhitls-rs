@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 74 complete — Certificate Authorities extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 session cache
+- **Status**: Phase 74 complete + Testing-Phase 74 — Fuzz seed corpus + error scenario integration tests
 
 ## Workspace Structure
 
@@ -35,7 +35,7 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2036 tests, 40 ignored)
+# Run all tests (2054 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
@@ -46,7 +46,7 @@ cargo test -p hitls-bignum                  # 48 tests
 cargo test -p hitls-utils                   # 53 tests
 cargo test -p hitls-auth --all-features     # 33 tests
 cargo test -p hitls-cli --all-features      # 117 tests (5 ignored)
-cargo test -p hitls-integration-tests       # 60 tests (3 ignored)
+cargo test -p hitls-integration-tests       # 78 tests (3 ignored)
 
 # Lint (must pass with zero warnings)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
@@ -110,7 +110,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-74 complete (2036 tests, 40 ignored).
+Phases 0-74 complete (2054 tests, 40 ignored).
 
 ### Completed
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
@@ -150,5 +150,6 @@ Phases 0-74 complete (2036 tests, 40 ignored).
 - Phase 73: KeyUpdate loop protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3) (key_update_recv_count counter with 128-limit DoS protection, MaxFragmentLength enum + codec + TLS 1.2 client/server negotiation + record layer enforcement, signature_algorithms_cert codec + TLS 1.3 ClientHello building + server parsing, all sync + async paths, +13 tests) -- DONE
 - Testing-Phase 73: Async TLS 1.3 unit tests + cipher suite integration (connection_async.rs: +12 tests covering read/write before handshake, full handshake+data, version/cipher check, shutdown, 32KB payload, multi-message, key_update, take_session, connection_info, ALPN, session_resumed; cipher suite integration: +21 TCP loopback tests covering ECDHE_ECDSA CCM/CCM_8, DHE_RSA CCM/CCM_8, PSK/DHE_PSK/ECDHE_PSK GCM+CCM+ChaCha20, DH_ANON/ECDH_ANON GCM+CBC, TLS 1.3 AES256-GCM/ChaCha20/CCM_8/RSA-cert, total +33 tests, 1988→2021) -- DONE
 - Phase 74: Certificate Authorities extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 session cache (certificate_authorities codec + config + TLS 1.3 ClientHello + server parsing, early exporter master secret derivation + export_early_keying_material() API on all 4 TLS 1.3 connections, DTLS 1.2 session cache auto-store by server_name/session_id, +15 tests) -- DONE
+- Testing-Phase 74: Fuzz seed corpus + error scenario integration tests (C1: 66 binary seed files across all 10 fuzz targets in fuzz/corpus/<target>/; C2: +18 integration tests covering version mismatch, cipher suite mismatch, PSK wrong key, ALPN negotiation, 5 concurrent TLS 1.3/1.2 connections, 64KB payload fragmentation, ConnectionInfo field validation, session_resumed checks, multi-message exchange, graceful shutdown, multi-suite negotiation, empty write, total +18 tests, 2036→2054) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

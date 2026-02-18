@@ -1645,3 +1645,31 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 **Result**: 15 new tests (753 hitls-tls, up from 738). Modified 10 files. Certificate Authorities: `build_certificate_authorities()` encodes `ca_list_length(2) || [dn_length(2) || dn_bytes]*` per RFC 8446 §4.2.4, `parse_certificate_authorities()` validates and returns `Vec<Vec<u8>>` of DER DNs. Config adds `certificate_authorities: Vec<Vec<u8>>` with builder method. Client pushes extension in `build_client_hello()` when non-empty. Server parses in `process_client_hello()` extension loop, stores in `client_certificate_authorities` field with getter. Early Exporter: `derive_early_exporter_master_secret()` added to KeySchedule with EarlySecret stage check, uses `Derive-Secret(ES, "e exp master", ClientHello_hash)`. Client derives after PSK binder computation and in `process_server_hello()` between `derive_early_secret()` and `derive_handshake_secret()`. Server derives in `build_server_flight()` when PSK mode. `tls13_export_early_keying_material()` delegates to existing exporter with different input secret. `export_early_keying_material()` API on all 4 TLS 1.3 connections returns error if no PSK was offered. Async connections also gained missing `exporter_master_secret` + `export_keying_material()`. DTLS 1.2: `session_id` field on `Dtls12ServerHandshake` stored from ServerHello. Auto-store in `connection_dtls12.rs` before key material zeroize — client by server_name, server by session_id (guard: skip if empty).
 
 2036 total tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
+## Testing-Phase 74 (2026-02-18)
+
+**Prompt**: 开始实现 Testing-Phase 74
+
+**Work performed**:
+- C1: Created 66 structured fuzz seed corpus files across all 10 fuzz targets in `fuzz/corpus/<target>/`:
+  - fuzz_asn1 (10), fuzz_base64 (10), fuzz_pem (8), fuzz_tls_record (10), fuzz_tls_handshake (8),
+    fuzz_x509 (5), fuzz_crl (4), fuzz_pkcs8 (4), fuzz_pkcs12 (3), fuzz_cms (4)
+  - Seeds are binary files with valid/structured data matching each fuzz target's input format
+- C2: Added 18 error scenario integration tests to `tests/interop/src/lib.rs`:
+  - Version mismatch: TLS 1.3 client vs TLS 1.2 server (and vice versa) → handshake fails
+  - Cipher suite mismatch: no common TLS 1.2 suite → NoSharedCipherSuite error
+  - PSK wrong key: mismatched PSK → Finished MAC verification fails
+  - ALPN: overlap negotiated (http/1.1) + client-only ALPN with no server → None
+  - Concurrent: 5 parallel TLS 1.3 and 5 parallel TLS 1.2 connections
+  - Large payload: 64KB fragmented round-trip (TLS 1.3 and TLS 1.2)
+  - ConnectionInfo: cipher_suite, negotiated_group, session_resumed validation
+  - First connection not resumed (session_resumed=false)
+  - Multi-message: 3 request/response pairs on one connection
+  - Graceful shutdown, multi-suite negotiation, empty write
+
+**Result**:
+- Integration tests: 60 → 78 (+18); total: 2036 → 2054 tests.
+
+2054 total tests (40 ignored). Clippy clean, fmt clean.
