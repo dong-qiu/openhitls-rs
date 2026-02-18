@@ -975,6 +975,63 @@ pub fn parse_signature_algorithms_cert(data: &[u8]) -> Result<Vec<SignatureSchem
 }
 
 // ---------------------------------------------------------------------------
+// Certificate Authorities (RFC 8446 §4.2.4)
+// ---------------------------------------------------------------------------
+
+/// Build `certificate_authorities` extension (RFC 8446 §4.2.4, type 47).
+/// Wire format: ca_list_length(2) || [dn_length(2) || distinguished_name(DER)]*
+pub fn build_certificate_authorities(ca_list: &[Vec<u8>]) -> Extension {
+    let mut list = Vec::new();
+    for dn in ca_list {
+        list.extend_from_slice(&(dn.len() as u16).to_be_bytes());
+        list.extend_from_slice(dn);
+    }
+    let mut data = Vec::with_capacity(2 + list.len());
+    data.extend_from_slice(&(list.len() as u16).to_be_bytes());
+    data.extend_from_slice(&list);
+    Extension {
+        extension_type: ExtensionType::CERTIFICATE_AUTHORITIES,
+        data,
+    }
+}
+
+/// Parse `certificate_authorities` extension (RFC 8446 §4.2.4).
+/// Returns list of DER-encoded Distinguished Names.
+pub fn parse_certificate_authorities(data: &[u8]) -> Result<Vec<Vec<u8>>, TlsError> {
+    if data.len() < 2 {
+        return Err(TlsError::HandshakeFailed(
+            "certificate_authorities: too short".into(),
+        ));
+    }
+    let list_len = u16::from_be_bytes([data[0], data[1]]) as usize;
+    if data.len() < 2 + list_len {
+        return Err(TlsError::HandshakeFailed(
+            "certificate_authorities: truncated".into(),
+        ));
+    }
+    let mut dns = Vec::new();
+    let mut pos = 2;
+    let end = 2 + list_len;
+    while pos < end {
+        if end - pos < 2 {
+            return Err(TlsError::HandshakeFailed(
+                "certificate_authorities: truncated DN length".into(),
+            ));
+        }
+        let dn_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+        pos += 2;
+        if end - pos < dn_len {
+            return Err(TlsError::HandshakeFailed(
+                "certificate_authorities: truncated DN".into(),
+            ));
+        }
+        dns.push(data[pos..pos + dn_len].to_vec());
+        pos += dn_len;
+    }
+    Ok(dns)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1468,6 +1525,43 @@ mod tests {
         assert!(parse_max_fragment_length(&[5]).is_err());
         assert!(parse_max_fragment_length(&[]).is_err());
         assert!(parse_max_fragment_length(&[1, 2]).is_err());
+    }
+
+    #[test]
+    fn test_certificate_authorities_codec_roundtrip() {
+        // Single DN
+        let dn1 = vec![0x30, 0x0A, 0x31, 0x08, 0x30, 0x06];
+        let ext = build_certificate_authorities(std::slice::from_ref(&dn1));
+        assert_eq!(ext.extension_type, ExtensionType::CERTIFICATE_AUTHORITIES);
+        let parsed = parse_certificate_authorities(&ext.data).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0], dn1);
+
+        // Multiple DNs
+        let dn2 = vec![0x30, 0x0B, 0x31, 0x09, 0x30, 0x07, 0x01];
+        let ext2 = build_certificate_authorities(&[dn1.clone(), dn2.clone()]);
+        let parsed2 = parse_certificate_authorities(&ext2.data).unwrap();
+        assert_eq!(parsed2.len(), 2);
+        assert_eq!(parsed2[0], dn1);
+        assert_eq!(parsed2[1], dn2);
+    }
+
+    #[test]
+    fn test_certificate_authorities_empty() {
+        let ext = build_certificate_authorities(&[]);
+        assert_eq!(ext.extension_type, ExtensionType::CERTIFICATE_AUTHORITIES);
+        let parsed = parse_certificate_authorities(&ext.data).unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn test_certificate_authorities_truncated_rejected() {
+        // Too short for list length
+        assert!(parse_certificate_authorities(&[0x00]).is_err());
+        // List length says 10 bytes but only 2 available
+        assert!(parse_certificate_authorities(&[0x00, 0x0A, 0x00, 0x02]).is_err());
+        // DN length says 5 but only 2 bytes available
+        assert!(parse_certificate_authorities(&[0x00, 0x04, 0x00, 0x05, 0xAA, 0xBB]).is_err());
     }
 
     #[test]

@@ -1,5 +1,73 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 74: Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 Session Cache
+
+### Date: 2026-02-18
+
+### Summary
+Added three features: (1) Certificate Authorities extension (type 47) with full codec (build/parse), TlsConfig field, TLS 1.3 ClientHello building and server parsing; (2) Early Exporter Master Secret derivation (`"e exp master"` label) in key schedule with `export_early_keying_material()` API on all 4 TLS 1.3 connection types; (3) DTLS 1.2 session cache auto-store after handshake (client by server_name, server by session_id).
+
+### Features (3)
+
+| Feature | Description |
+|---------|-------------|
+| Certificate Authorities (RFC 8446 §4.2.4) | `build_certificate_authorities`/`parse_certificate_authorities` codec, `certificate_authorities: Vec<Vec<u8>>` config field, TLS 1.3 ClientHello building (when non-empty), server parsing in `process_client_hello()`, getter `client_certificate_authorities()` |
+| Early Exporter Master Secret (RFC 8446 §7.5) | `derive_early_exporter_master_secret()` in key_schedule (EarlySecret stage, label `"e exp master"`), `tls13_export_early_keying_material()` export function, `export_early_keying_material()` API on all 4 TLS 1.3 connection types (2 sync + 2 async), returns error if no PSK offered |
+| DTLS 1.2 Session Cache | `session_id` field + getter on `Dtls12ServerHandshake`, auto-store after handshake (client by server_name, server by session_id), before key material zeroize |
+
+### Files Modified (10)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Added `build_certificate_authorities()` and `parse_certificate_authorities()` codec functions (+3 tests) |
+| `crates/hitls-tls/src/config/mod.rs` | Added `certificate_authorities: Vec<Vec<u8>>` to TlsConfig + TlsConfigBuilder + builder method (+1 test) |
+| `crates/hitls-tls/src/crypt/key_schedule.rs` | Added `derive_early_exporter_master_secret()` method with EarlySecret stage check (+2 tests) |
+| `crates/hitls-tls/src/crypt/export.rs` | Added `tls13_export_early_keying_material()` delegating to existing exporter (+2 tests) |
+| `crates/hitls-tls/src/handshake/client.rs` | Added `early_exporter_master_secret` field (zeroize on drop), certificate_authorities in ClientHello, early exporter derivation after PSK, pass in FinishedActions |
+| `crates/hitls-tls/src/handshake/server.rs` | Added `client_certificate_authorities` field + getter, parse in `process_client_hello()`, `early_exporter_master_secret` in ClientHelloActions, derive in `build_server_flight()` when PSK (+2 tests) |
+| `crates/hitls-tls/src/connection.rs` | Added `early_exporter_master_secret` field on both client + server, `export_early_keying_material()` API (+2 tests) |
+| `crates/hitls-tls/src/connection_async.rs` | Added both `exporter_master_secret` + `early_exporter_master_secret` on async client + server (async was missing regular exporter), both `export_keying_material()` + `export_early_keying_material()` APIs |
+| `crates/hitls-tls/src/handshake/server_dtls12.rs` | Added `session_id` field, init, getter, store from ServerHello |
+| `crates/hitls-tls/src/connection_dtls12.rs` | Added session cache auto-store before zeroize (client by server_name, server by session_id) (+3 tests) |
+
+### Implementation Details
+- **Certificate Authorities wire format**: RFC 8446 §4.2.4 — `ca_list_length(2) || [dn_length(2) || dn_bytes(DER)]*`
+- **Early exporter derivation timing**: Client derives after PSK binder computation (EarlySecret stage); server derives after `derive_early_secret()` with verified PSK, before `derive_handshake_secret()`
+- **Early exporter API**: `export_early_keying_material()` delegates to `tls13_export_keying_material()` internally — same algorithm, different input secret. Returns error if no PSK offered (empty secret)
+- **Async exporter gap fixed**: Async connections were missing `exporter_master_secret` entirely — both regular and early exporter were added
+- **DTLS 1.2 session cache**: Auto-store only (not auto-lookup/abbreviated handshake), must happen before key material zeroize
+
+### Test Counts (Phase 74)
+- **hitls-tls**: 741 [was: 726] (+15 new tests)
+- **Total workspace**: 2003 (40 ignored) [was: 1988]
+
+### New Tests (15)
+
+| # | Test | File | Description |
+|---|------|------|-------------|
+| 1 | `test_certificate_authorities_codec_roundtrip` | extensions_codec.rs | Build/parse single + multiple DNs |
+| 2 | `test_certificate_authorities_empty` | extensions_codec.rs | Empty ca_list produces valid extension |
+| 3 | `test_certificate_authorities_truncated_rejected` | extensions_codec.rs | Truncated data returns error |
+| 4 | `test_config_certificate_authorities` | config/mod.rs | Builder sets certificate_authorities, default is empty |
+| 5 | `test_early_exporter_master_secret` | key_schedule.rs | Derive from EarlySecret stage, deterministic, varies with transcript |
+| 6 | `test_early_exporter_master_secret_wrong_stage` | key_schedule.rs | Fails in Initial/HandshakeSecret/MasterSecret stages |
+| 7 | `test_tls13_early_export_deterministic` | export.rs | Early export produces consistent output |
+| 8 | `test_tls13_early_export_differs_from_regular` | export.rs | Same label, different secrets → different outputs |
+| 9 | `test_tls13_server_parses_certificate_authorities` | server.rs | Server parses CA extension from ClientHello |
+| 10 | `test_tls13_certificate_authorities_empty_default` | server.rs | No CA extension when not configured |
+| 11 | `test_tls13_early_export_no_psk_fails` | connection.rs | export_early_keying_material fails without PSK |
+| 12 | `test_tls13_early_export_with_psk` | connection.rs | export_early_keying_material succeeds with PSK session |
+| 13 | `test_dtls12_client_session_cache_auto_store` | connection_dtls12.rs | Client auto-stores session keyed by server_name |
+| 14 | `test_dtls12_server_session_cache_auto_store` | connection_dtls12.rs | Server auto-stores session keyed by session_id |
+| 15 | `test_dtls12_no_cache_no_error` | connection_dtls12.rs | No session_cache configured → no error |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 2003 workspace tests passing (40 ignored)
+
+---
+
 ## Phase 73: KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3)
 
 ### Date: 2026-02-18

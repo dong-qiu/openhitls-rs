@@ -271,6 +271,28 @@ impl KeySchedule {
         )
     }
 
+    /// Derive the early exporter master secret (RFC 8446 §7.1).
+    ///
+    /// `transcript_hash` = Hash(ClientHello).
+    ///
+    /// `early_exporter_master_secret = Derive-Secret(ES, "e exp master", CH_hash)`
+    pub fn derive_early_exporter_master_secret(
+        &self,
+        transcript_hash: &[u8],
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.stage != KeyScheduleStage::EarlySecret {
+            return Err(TlsError::HandshakeFailed(
+                "derive_early_exporter_master_secret: wrong stage".into(),
+            ));
+        }
+        derive_secret(
+            &*self.hash_factory,
+            &self.current_secret,
+            b"e exp master",
+            transcript_hash,
+        )
+    }
+
     /// Derive binder key from the Early Secret (for PSK binder verification).
     ///
     /// For resumption PSK: label = "res binder".
@@ -644,6 +666,47 @@ mod tests {
 
         // Second derive_early_secret should fail (already in EarlySecret stage)
         assert!(ks.derive_early_secret(None).is_err());
+    }
+
+    #[test]
+    fn test_early_exporter_master_secret() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(Some(&[0xAA; 32])).unwrap();
+
+        let ch_hash = [0xBB; 32];
+        let eems = ks.derive_early_exporter_master_secret(&ch_hash).unwrap();
+        assert_eq!(eems.len(), 32);
+
+        // Deterministic
+        let eems2 = ks.derive_early_exporter_master_secret(&ch_hash).unwrap();
+        assert_eq!(eems, eems2);
+
+        // Different transcript → different secret
+        let eems3 = ks.derive_early_exporter_master_secret(&[0xCC; 32]).unwrap();
+        assert_ne!(eems, eems3);
+
+        // Different from early traffic secret (different label)
+        let ets = ks.derive_early_traffic_secret(&ch_hash).unwrap();
+        assert_ne!(eems, ets);
+    }
+
+    #[test]
+    fn test_early_exporter_master_secret_wrong_stage() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+
+        // Initial stage → should fail
+        assert!(ks.derive_early_exporter_master_secret(&[0u8; 32]).is_err());
+
+        // After handshake secret → should fail
+        ks.derive_early_secret(None).unwrap();
+        ks.derive_handshake_secret(&[0u8; 32]).unwrap();
+        assert!(ks.derive_early_exporter_master_secret(&[0u8; 32]).is_err());
+
+        // After master secret → should fail
+        ks.derive_master_secret().unwrap();
+        assert!(ks.derive_early_exporter_master_secret(&[0u8; 32]).is_err());
     }
 
     #[test]

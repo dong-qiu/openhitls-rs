@@ -110,6 +110,8 @@ pub struct Dtls12ServerHandshake {
     cookie_secret: Vec<u8>,
     /// The expected cookie for the current handshake.
     expected_cookie: Vec<u8>,
+    /// Session ID from the ServerHello (for session cache keying).
+    session_id: Vec<u8>,
 }
 
 impl Drop for Dtls12ServerHandshake {
@@ -138,11 +140,17 @@ impl Dtls12ServerHandshake {
             enable_cookie,
             cookie_secret,
             expected_cookie: Vec::new(),
+            session_id: Vec::new(),
         }
     }
 
     pub fn state(&self) -> Dtls12ServerState {
         self.state
+    }
+
+    /// Session ID from the ServerHello message.
+    pub fn session_id(&self) -> &[u8] {
+        &self.session_id
     }
 
     /// Process the initial ClientHello.
@@ -267,6 +275,7 @@ impl Dtls12ServerHandshake {
             cipher_suite: suite,
             extensions: Vec::new(),
         };
+        self.session_id = sh.legacy_session_id.clone();
         let sh_tls = encode_server_hello(&sh);
         let seq = self.message_seq;
         self.message_seq += 1;

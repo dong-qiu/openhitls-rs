@@ -52,6 +52,8 @@ pub struct TlsClientConnection<S: Read + Write> {
     resumption_master_secret: Vec<u8>,
     /// Exporter master secret (for RFC 5705 / RFC 8446 §7.5 key material export).
     exporter_master_secret: Vec<u8>,
+    /// Early exporter master secret (for 0-RTT key material export, empty if no PSK).
+    early_exporter_master_secret: Vec<u8>,
     /// Client handshake state (kept for processing post-handshake messages).
     client_hs: Option<ClientHandshake>,
     /// Received session from NewSessionTicket (for resumption).
@@ -84,6 +86,7 @@ impl<S: Read + Write> Drop for TlsClientConnection<S> {
         self.server_app_secret.zeroize();
         self.resumption_master_secret.zeroize();
         self.exporter_master_secret.zeroize();
+        self.early_exporter_master_secret.zeroize();
     }
 }
 
@@ -104,6 +107,7 @@ impl<S: Read + Write> TlsClientConnection<S> {
             server_app_secret: Vec::new(),
             resumption_master_secret: Vec::new(),
             exporter_master_secret: Vec::new(),
+            early_exporter_master_secret: Vec::new(),
             client_hs: None,
             received_session: None,
             early_data_queue: Vec::new(),
@@ -160,6 +164,36 @@ impl<S: Read + Write> TlsClientConnection<S> {
         crate::crypt::export::tls13_export_keying_material(
             &*factory,
             &self.exporter_master_secret,
+            label,
+            context,
+            length,
+        )
+    }
+
+    /// Export early keying material per RFC 8446 §7.5 (0-RTT context).
+    ///
+    /// Uses the early exporter master secret derived during PSK-based handshakes.
+    /// Returns an error if no PSK was offered (empty early exporter master secret).
+    pub fn export_early_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        length: usize,
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.early_exporter_master_secret.is_empty() {
+            return Err(TlsError::HandshakeFailed(
+                "export_early_keying_material: no early exporter master secret (no PSK offered)"
+                    .into(),
+            ));
+        }
+        let params = self
+            .cipher_params
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
+        let factory = params.hash_factory();
+        crate::crypt::export::tls13_export_early_keying_material(
+            &*factory,
+            &self.early_exporter_master_secret,
             label,
             context,
             length,
@@ -673,6 +707,8 @@ impl<S: Read + Write> TlsClientConnection<S> {
                         self.server_app_secret = fin_actions.server_app_secret;
                         self.resumption_master_secret = fin_actions.resumption_master_secret;
                         self.exporter_master_secret = fin_actions.exporter_master_secret;
+                        self.early_exporter_master_secret =
+                            fin_actions.early_exporter_master_secret;
 
                         self.negotiated_suite = Some(fin_actions.suite);
                         self.negotiated_version = Some(TlsVersion::Tls13);
@@ -887,6 +923,8 @@ pub struct TlsServerConnection<S: Read + Write> {
     server_app_secret: Vec<u8>,
     /// Exporter master secret (for RFC 5705 / RFC 8446 §7.5 key material export).
     exporter_master_secret: Vec<u8>,
+    /// Early exporter master secret (for 0-RTT key material export, empty if no PSK).
+    early_exporter_master_secret: Vec<u8>,
     /// Peer certificates (DER-encoded, leaf first).
     peer_certificates: Vec<Vec<u8>>,
     /// Negotiated ALPN protocol (if any).
@@ -910,6 +948,7 @@ impl<S: Read + Write> Drop for TlsServerConnection<S> {
         self.client_app_secret.zeroize();
         self.server_app_secret.zeroize();
         self.exporter_master_secret.zeroize();
+        self.early_exporter_master_secret.zeroize();
     }
 }
 
@@ -929,6 +968,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             client_app_secret: Vec::new(),
             server_app_secret: Vec::new(),
             exporter_master_secret: Vec::new(),
+            early_exporter_master_secret: Vec::new(),
             peer_certificates: Vec::new(),
             negotiated_alpn: None,
             client_server_name: None,
@@ -964,6 +1004,36 @@ impl<S: Read + Write> TlsServerConnection<S> {
         crate::crypt::export::tls13_export_keying_material(
             &*factory,
             &self.exporter_master_secret,
+            label,
+            context,
+            length,
+        )
+    }
+
+    /// Export early keying material per RFC 8446 §7.5 (0-RTT context).
+    ///
+    /// Uses the early exporter master secret derived during PSK-based handshakes.
+    /// Returns an error if no PSK was offered (empty early exporter master secret).
+    pub fn export_early_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        length: usize,
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.early_exporter_master_secret.is_empty() {
+            return Err(TlsError::HandshakeFailed(
+                "export_early_keying_material: no early exporter master secret (no PSK offered)"
+                    .into(),
+            ));
+        }
+        let params = self
+            .cipher_params
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
+        let factory = params.hash_factory();
+        crate::crypt::export::tls13_export_early_keying_material(
+            &*factory,
+            &self.early_exporter_master_secret,
             label,
             context,
             length,
@@ -1495,6 +1565,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
         self.client_app_secret = actions.client_app_secret;
         self.server_app_secret = actions.server_app_secret;
         self.exporter_master_secret = actions.exporter_master_secret;
+        self.early_exporter_master_secret = actions.early_exporter_master_secret;
 
         self.negotiated_suite = Some(actions.suite);
         self.negotiated_version = Some(TlsVersion::Tls13);
@@ -7127,5 +7198,57 @@ mod tests {
         sconn.key_update_recv_count = 100;
         sconn.key_update_recv_count = 0;
         assert_eq!(sconn.key_update_recv_count, 0);
+    }
+
+    #[test]
+    fn test_tls13_early_export_no_psk_fails() {
+        // export_early_keying_material should fail when no PSK was offered
+        // (early_exporter_master_secret is empty).
+        let stream = Cursor::new(Vec::<u8>::new());
+        let config = TlsConfig::builder().build();
+        let conn = TlsClientConnection::new(stream, config);
+        let result = conn.export_early_keying_material(b"test_label", Some(b"ctx"), 32);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("no early exporter master secret"),
+            "unexpected error: {err_msg}"
+        );
+
+        // Same for server
+        let stream2 = Cursor::new(Vec::<u8>::new());
+        let config2 = TlsConfig::builder().role(crate::TlsRole::Server).build();
+        let sconn = TlsServerConnection::new(stream2, config2);
+        let result2 = sconn.export_early_keying_material(b"test_label", None, 32);
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn test_tls13_early_export_with_psk() {
+        // When early_exporter_master_secret is populated (simulating PSK handshake),
+        // export_early_keying_material should succeed.
+        let stream = Cursor::new(Vec::<u8>::new());
+        let config = TlsConfig::builder().build();
+        let mut conn = TlsClientConnection::new(stream, config);
+
+        // Simulate a completed PSK handshake by setting the secret and cipher params
+        conn.early_exporter_master_secret = vec![0xAB; 32];
+        conn.cipher_params = Some(
+            crate::crypt::CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256)
+                .unwrap(),
+        );
+
+        let result = conn.export_early_keying_material(b"test_label", Some(b"ctx"), 32);
+        assert!(result.is_ok());
+        let ekm = result.unwrap();
+        assert_eq!(ekm.len(), 32);
+
+        // Same secret + label + context should produce deterministic output
+        let result2 = conn.export_early_keying_material(b"test_label", Some(b"ctx"), 32);
+        assert_eq!(ekm, result2.unwrap());
+
+        // Different label should produce different output
+        let result3 = conn.export_early_keying_material(b"other_label", Some(b"ctx"), 32);
+        assert_ne!(ekm, result3.unwrap());
     }
 }

@@ -70,6 +70,25 @@ pub fn tls13_export_keying_material(
     hkdf_expand_label(factory, &tmp, b"exporter", &ctx_hash, length)
 }
 
+/// TLS 1.3 early key material export (RFC 8446 §7.5, for 0-RTT context).
+///
+/// Uses the same algorithm as regular exporter but with the early exporter master secret.
+pub fn tls13_export_early_keying_material(
+    factory: &Factory,
+    early_exporter_master_secret: &[u8],
+    label: &[u8],
+    context: Option<&[u8]>,
+    length: usize,
+) -> Result<Vec<u8>, TlsError> {
+    tls13_export_keying_material(
+        factory,
+        early_exporter_master_secret,
+        label,
+        context,
+        length,
+    )
+}
+
 /// TLS 1.2 key material export (RFC 5705).
 ///
 /// ```text
@@ -228,6 +247,36 @@ mod tests {
         .unwrap();
         // With and without context should differ
         assert_ne!(out_none, out_ctx);
+    }
+
+    #[test]
+    fn test_tls13_early_export_deterministic() {
+        let factory = sha256_factory();
+        let eems = vec![0x11; 32]; // fake early_exporter_master_secret
+        let label = b"test-early-exporter";
+        let ctx = b"early context";
+
+        let out1 =
+            tls13_export_early_keying_material(&*factory, &eems, label, Some(ctx), 32).unwrap();
+        let out2 =
+            tls13_export_early_keying_material(&*factory, &eems, label, Some(ctx), 32).unwrap();
+        assert_eq!(out1, out2);
+        assert_eq!(out1.len(), 32);
+    }
+
+    #[test]
+    fn test_tls13_early_export_differs_from_regular() {
+        let factory = sha256_factory();
+        let label = b"test-exporter";
+        let regular_secret = vec![0xAA; 32];
+        let early_secret = vec![0xBB; 32];
+
+        let regular =
+            tls13_export_keying_material(&*factory, &regular_secret, label, None, 32).unwrap();
+        let early =
+            tls13_export_early_keying_material(&*factory, &early_secret, label, None, 32).unwrap();
+        // Different secrets → different output
+        assert_ne!(regular, early);
     }
 
     #[test]

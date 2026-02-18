@@ -31,10 +31,10 @@ use super::extensions_codec::{
     build_alpn_selected, build_early_data_ee, build_early_data_nst, build_key_share_hrr,
     build_key_share_sh, build_pre_shared_key_sh, build_record_size_limit, build_sct_cert_entry,
     build_status_request_cert_entry, build_supported_versions_sh, parse_alpn_ch,
-    parse_compress_certificate, parse_key_share_ch, parse_pre_shared_key_ch,
-    parse_psk_key_exchange_modes, parse_record_size_limit, parse_server_name,
-    parse_signature_algorithms_cert, parse_signature_algorithms_ch, parse_status_request_ch,
-    parse_supported_groups_ch, parse_supported_versions_ch,
+    parse_certificate_authorities, parse_compress_certificate, parse_key_share_ch,
+    parse_pre_shared_key_ch, parse_psk_key_exchange_modes, parse_record_size_limit,
+    parse_server_name, parse_signature_algorithms_cert, parse_signature_algorithms_ch,
+    parse_status_request_ch, parse_supported_groups_ch, parse_supported_versions_ch,
 };
 use super::key_exchange::KeyExchange;
 use super::signing::{select_signature_scheme, sign_certificate_verify};
@@ -72,6 +72,8 @@ pub struct ClientHelloActions {
     pub psk_mode: bool,
     /// Exporter master secret (for RFC 5705 / RFC 8446 §7.5 key material export).
     pub exporter_master_secret: Vec<u8>,
+    /// Early exporter master secret (for export_early_keying_material, empty if no PSK).
+    pub early_exporter_master_secret: Vec<u8>,
     /// Whether 0-RTT early data was accepted.
     pub early_data_accepted: bool,
     /// Client early traffic keys (for reading 0-RTT data, if accepted).
@@ -258,6 +260,8 @@ pub struct ServerHandshake {
     client_certs: Vec<Vec<u8>>,
     /// Client-offered signature algorithms for certificates (RFC 8446 §4.2.3).
     client_sig_algs_cert: Vec<SignatureScheme>,
+    /// Certificate authorities received from client (RFC 8446 §4.2.4).
+    client_certificate_authorities: Vec<Vec<u8>>,
 }
 
 impl Drop for ServerHandshake {
@@ -290,6 +294,7 @@ impl ServerHandshake {
             negotiated_group: None,
             client_certs: Vec::new(),
             client_sig_algs_cert: Vec::new(),
+            client_certificate_authorities: Vec::new(),
         }
     }
 
@@ -326,6 +331,11 @@ impl ServerHandshake {
     /// Client-offered signature algorithms for certificates (RFC 8446 §4.2.3).
     pub fn client_sig_algs_cert(&self) -> &[SignatureScheme] {
         &self.client_sig_algs_cert
+    }
+
+    /// Certificate authorities received from client's ClientHello.
+    pub fn client_certificate_authorities(&self) -> &[Vec<u8>] {
+        &self.client_certificate_authorities
     }
 
     /// Process a ClientHello message.
@@ -379,6 +389,15 @@ impl ServerHandshake {
             .find(|e| e.extension_type == ExtensionType::SIGNATURE_ALGORITHMS_CERT)
         {
             self.client_sig_algs_cert = parse_signature_algorithms_cert(&sac_ext.data)?;
+        }
+
+        // certificate_authorities (RFC 8446 §4.2.4) — optional
+        if let Some(ca_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::CERTIFICATE_AUTHORITIES)
+        {
+            self.client_certificate_authorities = parse_certificate_authorities(&ca_ext.data)?;
         }
 
         // key_share
@@ -752,6 +771,14 @@ impl ServerHandshake {
             None
         };
 
+        // Derive early exporter master secret (requires EarlySecret stage)
+        let early_exporter_master_secret = if verified_psk.is_some() {
+            let ch_hash = self.transcript.current_hash()?;
+            ks.derive_early_exporter_master_secret(&ch_hash)?
+        } else {
+            Vec::new()
+        };
+
         // Key exchange: KEM (encapsulate) or DH (generate + compute)
         let (shared_secret, server_key_share_bytes) = if client_group.is_kem() {
             KeyExchange::encapsulate(client_group, client_pub_key)?
@@ -969,6 +996,7 @@ impl ServerHandshake {
             server_app_secret,
             cipher_params: params,
             exporter_master_secret,
+            early_exporter_master_secret,
             psk_mode,
             early_data_accepted: accept_early_data,
             early_read_keys,
@@ -1616,5 +1644,57 @@ mod tests {
         let hs = ServerHandshake::new(server_config);
         // No sig_algs_cert by default
         assert!(hs.client_sig_algs_cert().is_empty());
+    }
+
+    #[test]
+    fn test_tls13_server_parses_certificate_authorities() {
+        use super::super::extensions_codec::{
+            build_certificate_authorities, build_key_share_ch, build_signature_algorithms,
+            build_supported_groups, build_supported_versions_ch,
+        };
+        use crate::crypt::SignatureScheme;
+
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(crate::config::ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .verify_peer(false)
+            .build();
+        let mut hs = ServerHandshake::new(server_config);
+
+        // Build a ClientHello with certificate_authorities extension
+        let dn1 = vec![0x30, 0x06, 0x31, 0x04, 0x30, 0x02, 0x06, 0x00];
+        let dn2 = vec![0x30, 0x03, 0x31, 0x01, 0x00];
+        let ch = super::super::codec::ClientHello {
+            random: [0x42; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                build_supported_versions_ch(),
+                build_supported_groups(&[NamedGroup::X25519]),
+                build_signature_algorithms(&[SignatureScheme::ED25519]),
+                build_key_share_ch(NamedGroup::X25519, &[0x55; 32]),
+                build_certificate_authorities(&[dn1.clone(), dn2.clone()]),
+            ],
+        };
+        let msg = super::super::codec::encode_client_hello(&ch);
+        let _result = hs.process_client_hello(&msg);
+
+        // Server should have parsed the certificate_authorities
+        let cas = hs.client_certificate_authorities();
+        assert_eq!(cas.len(), 2);
+        assert_eq!(cas[0], dn1);
+        assert_eq!(cas[1], dn2);
+    }
+
+    #[test]
+    fn test_tls13_certificate_authorities_empty_default() {
+        let server_config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .verify_peer(false)
+            .build();
+        let hs = ServerHandshake::new(server_config);
+        // No certificate_authorities by default
+        assert!(hs.client_certificate_authorities().is_empty());
     }
 }

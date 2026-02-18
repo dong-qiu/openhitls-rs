@@ -1635,3 +1635,13 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - Total: +33 new tests, 1988→2021 tests.
 
 2021 total tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 74: Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 Session Cache (2026-02-18)
+
+**Prompt**: Implement Phase 74 — certificate_authorities extension (RFC 8446) + early exporter master secret + DTLS 1.2 session cache. (1) Add `build_certificate_authorities()`/`parse_certificate_authorities()` codec functions for extension type 47, `certificate_authorities: Vec<Vec<u8>>` config field, TLS 1.3 ClientHello building + server parsing. (2) Add `derive_early_exporter_master_secret()` in key_schedule (label `"e exp master"`, EarlySecret stage), `tls13_export_early_keying_material()` export function, `export_early_keying_material()` API on all 4 TLS 1.3 connection types (sync+async client+server). (3) Add `session_id` field to `Dtls12ServerHandshake`, DTLS 1.2 session cache auto-store after handshake (client by server_name, server by session_id). Modify 10 files. Expected ~15 new tests.
+
+**Result**: 15 new tests (753 hitls-tls, up from 738). Modified 10 files. Certificate Authorities: `build_certificate_authorities()` encodes `ca_list_length(2) || [dn_length(2) || dn_bytes]*` per RFC 8446 §4.2.4, `parse_certificate_authorities()` validates and returns `Vec<Vec<u8>>` of DER DNs. Config adds `certificate_authorities: Vec<Vec<u8>>` with builder method. Client pushes extension in `build_client_hello()` when non-empty. Server parses in `process_client_hello()` extension loop, stores in `client_certificate_authorities` field with getter. Early Exporter: `derive_early_exporter_master_secret()` added to KeySchedule with EarlySecret stage check, uses `Derive-Secret(ES, "e exp master", ClientHello_hash)`. Client derives after PSK binder computation and in `process_server_hello()` between `derive_early_secret()` and `derive_handshake_secret()`. Server derives in `build_server_flight()` when PSK mode. `tls13_export_early_keying_material()` delegates to existing exporter with different input secret. `export_early_keying_material()` API on all 4 TLS 1.3 connections returns error if no PSK was offered. Async connections also gained missing `exporter_master_secret` + `export_keying_material()`. DTLS 1.2: `session_id` field on `Dtls12ServerHandshake` stored from ServerHello. Auto-store in `connection_dtls12.rs` before key material zeroize — client by server_name, server by session_id (guard: skip if empty).
+
+2036 total tests (40 ignored). Clippy clean, fmt clean.

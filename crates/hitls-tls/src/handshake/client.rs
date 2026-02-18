@@ -24,12 +24,12 @@ use super::codec::{
 #[cfg(feature = "cert-compression")]
 use super::codec::{decode_compressed_certificate, decompress_certificate_body};
 use super::extensions_codec::{
-    build_alpn, build_compress_certificate, build_cookie, build_early_data_ch, build_key_share_ch,
-    build_post_handshake_auth, build_pre_shared_key_ch, build_psk_key_exchange_modes,
-    build_record_size_limit, build_sct_ch, build_server_name, build_signature_algorithms,
-    build_signature_algorithms_cert, build_status_request_ch, build_supported_groups,
-    build_supported_versions_ch, parse_alpn_sh, parse_cookie, parse_key_share_hrr,
-    parse_key_share_sh, parse_pre_shared_key_sh, parse_record_size_limit,
+    build_alpn, build_certificate_authorities, build_compress_certificate, build_cookie,
+    build_early_data_ch, build_key_share_ch, build_post_handshake_auth, build_pre_shared_key_ch,
+    build_psk_key_exchange_modes, build_record_size_limit, build_sct_ch, build_server_name,
+    build_signature_algorithms, build_signature_algorithms_cert, build_status_request_ch,
+    build_supported_groups, build_supported_versions_ch, parse_alpn_sh, parse_cookie,
+    parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh, parse_record_size_limit,
     parse_status_request_cert_entry, parse_supported_versions_sh,
 };
 use super::key_exchange::KeyExchange;
@@ -80,6 +80,8 @@ pub struct FinishedActions {
     pub resumption_master_secret: Vec<u8>,
     /// Exporter master secret (for RFC 5705 / RFC 8446 §7.5 key material export).
     pub exporter_master_secret: Vec<u8>,
+    /// Early exporter master secret (for export_early_keying_material, empty if no PSK).
+    pub early_exporter_master_secret: Vec<u8>,
     /// EndOfEarlyData message to send (if 0-RTT was accepted).
     /// Must be sent encrypted with 0-RTT write key before switching to HS write key.
     pub end_of_early_data_msg: Option<Vec<u8>>,
@@ -127,6 +129,8 @@ pub struct ClientHandshake {
     negotiated_alpn: Option<Vec<u8>>,
     /// Negotiated key exchange group from ServerHello key_share.
     negotiated_group: Option<NamedGroup>,
+    /// Early exporter master secret (RFC 8446 §7.5, derived when PSK is offered).
+    early_exporter_master_secret: Vec<u8>,
 }
 
 impl Drop for ClientHandshake {
@@ -137,6 +141,7 @@ impl Drop for ClientHandshake {
         if let Some(ref mut psk) = self.psk {
             psk.zeroize();
         }
+        self.early_exporter_master_secret.zeroize();
     }
 }
 
@@ -171,6 +176,7 @@ impl ClientHandshake {
             client_random: [0u8; 32],
             negotiated_alpn: None,
             negotiated_group: None,
+            early_exporter_master_secret: Vec::new(),
         }
     }
 
@@ -264,6 +270,11 @@ impl ClientHandshake {
         if !self.config.signature_algorithms_cert.is_empty() {
             extensions.push(build_signature_algorithms_cert(
                 &self.config.signature_algorithms_cert,
+            ));
+        }
+        if !self.config.certificate_authorities.is_empty() {
+            extensions.push(build_certificate_authorities(
+                &self.config.certificate_authorities,
             ));
         }
         if let Some(ref name) = self.config.server_name {
@@ -427,6 +438,19 @@ impl ClientHandshake {
             // Store PSK for later use in process_server_hello
             self.psk = Some(psk);
 
+            // Derive early exporter master secret (RFC 8446 §7.5)
+            // Hash the full CH (with real binder) for the transcript
+            {
+                let mut eems_hasher = (*factory)();
+                eems_hasher.update(&msg).map_err(TlsError::CryptoError)?;
+                let mut eems_hash = vec![0u8; hash_len];
+                eems_hasher
+                    .finish(&mut eems_hash)
+                    .map_err(TlsError::CryptoError)?;
+                self.early_exporter_master_secret =
+                    ks.derive_early_exporter_master_secret(&eems_hash)?;
+            }
+
             // Derive early traffic secret for 0-RTT if offering early data
             if offer_early_data {
                 // Hash the full CH (with real binder) for the early traffic secret
@@ -567,6 +591,14 @@ impl ClientHandshake {
         // Key schedule: Early Secret → Handshake Secret
         let mut ks = KeySchedule::new(params.clone());
         ks.derive_early_secret(self.psk.as_deref())?;
+
+        // Derive early exporter master secret before advancing to handshake stage
+        // (requires EarlySecret stage; uses Hash(ClientHello) as transcript)
+        if self.psk.is_some() {
+            let ch_hash = self.transcript.current_hash()?;
+            self.early_exporter_master_secret = ks.derive_early_exporter_master_secret(&ch_hash)?;
+        }
+
         ks.derive_handshake_secret(&shared_secret)?;
 
         // Derive handshake traffic secrets
@@ -1004,6 +1036,7 @@ impl ClientHandshake {
             cipher_params: params,
             resumption_master_secret,
             exporter_master_secret,
+            early_exporter_master_secret: std::mem::take(&mut self.early_exporter_master_secret),
             end_of_early_data_msg: eoed_msg,
         })
     }

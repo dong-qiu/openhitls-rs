@@ -231,6 +231,10 @@ pub struct TlsConfig {
     /// Signature algorithms for certificates (RFC 8446 §4.2.3).
     /// Empty = not sent (server uses signature_algorithms instead).
     pub signature_algorithms_cert: Vec<SignatureScheme>,
+    /// Certificate authorities (RFC 8446 §4.2.4).
+    /// DER-encoded Distinguished Names to send in ClientHello.
+    /// Empty = not sent.
+    pub certificate_authorities: Vec<Vec<u8>>,
 }
 
 impl fmt::Debug for TlsConfig {
@@ -329,6 +333,7 @@ pub struct TlsConfigBuilder {
     cipher_server_preference: bool,
     max_fragment_length: Option<MaxFragmentLength>,
     signature_algorithms_cert: Vec<SignatureScheme>,
+    certificate_authorities: Vec<Vec<u8>>,
 }
 
 impl Default for TlsConfigBuilder {
@@ -390,6 +395,7 @@ impl Default for TlsConfigBuilder {
             cipher_server_preference: true,
             max_fragment_length: None,
             signature_algorithms_cert: Vec::new(),
+            certificate_authorities: Vec::new(),
         }
     }
 }
@@ -636,6 +642,11 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn certificate_authorities(mut self, dns: Vec<Vec<u8>>) -> Self {
+        self.certificate_authorities = dns;
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -686,6 +697,7 @@ impl TlsConfigBuilder {
             cipher_server_preference: self.cipher_server_preference,
             max_fragment_length: self.max_fragment_length,
             signature_algorithms_cert: self.signature_algorithms_cert,
+            certificate_authorities: self.certificate_authorities,
         }
     }
 }
@@ -992,6 +1004,21 @@ mod tests {
             config2.signature_algorithms_cert[0],
             SignatureScheme::RSA_PSS_RSAE_SHA256
         );
+    }
+
+    #[test]
+    fn test_config_certificate_authorities() {
+        // Default: empty
+        let config = TlsConfig::builder().build();
+        assert!(config.certificate_authorities.is_empty());
+
+        // Set certificate_authorities
+        let dn = vec![0x30, 0x0A, 0x31, 0x08];
+        let config2 = TlsConfig::builder()
+            .certificate_authorities(vec![dn.clone()])
+            .build();
+        assert_eq!(config2.certificate_authorities.len(), 1);
+        assert_eq!(config2.certificate_authorities[0], dn);
     }
 
     #[test]

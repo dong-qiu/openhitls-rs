@@ -47,6 +47,8 @@ pub struct AsyncTlsClientConnection<S: AsyncRead + AsyncWrite + Unpin> {
     client_app_secret: Vec<u8>,
     server_app_secret: Vec<u8>,
     resumption_master_secret: Vec<u8>,
+    exporter_master_secret: Vec<u8>,
+    early_exporter_master_secret: Vec<u8>,
     client_hs: Option<ClientHandshake>,
     received_session: Option<TlsSession>,
     early_data_queue: Vec<u8>,
@@ -67,6 +69,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Drop for AsyncTlsClientConnection<S> {
         self.client_app_secret.zeroize();
         self.server_app_secret.zeroize();
         self.resumption_master_secret.zeroize();
+        self.exporter_master_secret.zeroize();
+        self.early_exporter_master_secret.zeroize();
     }
 }
 
@@ -86,6 +90,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
             client_app_secret: Vec::new(),
             server_app_secret: Vec::new(),
             resumption_master_secret: Vec::new(),
+            exporter_master_secret: Vec::new(),
+            early_exporter_master_secret: Vec::new(),
             client_hs: None,
             received_session: None,
             early_data_queue: Vec::new(),
@@ -154,6 +160,59 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
     /// Whether this connection was resumed from a previous session.
     pub fn is_session_resumed(&self) -> bool {
         self.session_resumed
+    }
+
+    /// Export keying material per RFC 8446 §7.5 / RFC 5705.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        length: usize,
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::HandshakeFailed(
+                "export_keying_material: not connected".into(),
+            ));
+        }
+        let params = self
+            .cipher_params
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
+        let factory = params.hash_factory();
+        crate::crypt::export::tls13_export_keying_material(
+            &*factory,
+            &self.exporter_master_secret,
+            label,
+            context,
+            length,
+        )
+    }
+
+    /// Export early keying material per RFC 8446 §7.5 (0-RTT context).
+    pub fn export_early_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        length: usize,
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.early_exporter_master_secret.is_empty() {
+            return Err(TlsError::HandshakeFailed(
+                "export_early_keying_material: no early exporter master secret (no PSK offered)"
+                    .into(),
+            ));
+        }
+        let params = self
+            .cipher_params
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
+        let factory = params.hash_factory();
+        crate::crypt::export::tls13_export_early_keying_material(
+            &*factory,
+            &self.early_exporter_master_secret,
+            label,
+            context,
+            length,
+        )
     }
 
     /// Read at least `min_bytes` from the stream into read_buf.
@@ -588,6 +647,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
                         self.client_app_secret = fin_actions.client_app_secret;
                         self.server_app_secret = fin_actions.server_app_secret;
                         self.resumption_master_secret = fin_actions.resumption_master_secret;
+                        self.exporter_master_secret = fin_actions.exporter_master_secret;
+                        self.early_exporter_master_secret =
+                            fin_actions.early_exporter_master_secret;
 
                         self.negotiated_suite = Some(fin_actions.suite);
                         self.negotiated_version = Some(TlsVersion::Tls13);
@@ -798,6 +860,8 @@ pub struct AsyncTlsServerConnection<S: AsyncRead + AsyncWrite + Unpin> {
     cipher_params: Option<CipherSuiteParams>,
     client_app_secret: Vec<u8>,
     server_app_secret: Vec<u8>,
+    exporter_master_secret: Vec<u8>,
+    early_exporter_master_secret: Vec<u8>,
     peer_certificates: Vec<Vec<u8>>,
     negotiated_alpn: Option<Vec<u8>>,
     client_server_name: Option<String>,
@@ -813,6 +877,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Drop for AsyncTlsServerConnection<S> {
     fn drop(&mut self) {
         self.client_app_secret.zeroize();
         self.server_app_secret.zeroize();
+        self.exporter_master_secret.zeroize();
+        self.early_exporter_master_secret.zeroize();
     }
 }
 
@@ -831,6 +897,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
             cipher_params: None,
             client_app_secret: Vec::new(),
             server_app_secret: Vec::new(),
+            exporter_master_secret: Vec::new(),
+            early_exporter_master_secret: Vec::new(),
             peer_certificates: Vec::new(),
             negotiated_alpn: None,
             client_server_name: None,
@@ -880,6 +948,59 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
     /// Whether this connection was resumed from a previous session.
     pub fn is_session_resumed(&self) -> bool {
         self.session_resumed
+    }
+
+    /// Export keying material per RFC 8446 §7.5 / RFC 5705.
+    pub fn export_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        length: usize,
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.state != ConnectionState::Connected {
+            return Err(TlsError::HandshakeFailed(
+                "export_keying_material: not connected".into(),
+            ));
+        }
+        let params = self
+            .cipher_params
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
+        let factory = params.hash_factory();
+        crate::crypt::export::tls13_export_keying_material(
+            &*factory,
+            &self.exporter_master_secret,
+            label,
+            context,
+            length,
+        )
+    }
+
+    /// Export early keying material per RFC 8446 §7.5 (0-RTT context).
+    pub fn export_early_keying_material(
+        &self,
+        label: &[u8],
+        context: Option<&[u8]>,
+        length: usize,
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.early_exporter_master_secret.is_empty() {
+            return Err(TlsError::HandshakeFailed(
+                "export_early_keying_material: no early exporter master secret (no PSK offered)"
+                    .into(),
+            ));
+        }
+        let params = self
+            .cipher_params
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
+        let factory = params.hash_factory();
+        crate::crypt::export::tls13_export_early_keying_material(
+            &*factory,
+            &self.early_exporter_master_secret,
+            label,
+            context,
+            length,
+        )
     }
 
     async fn fill_buf(&mut self, min_bytes: usize) -> Result<(), TlsError> {
@@ -1138,6 +1259,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
         self.cipher_params = Some(actions.cipher_params);
         self.client_app_secret = actions.client_app_secret;
         self.server_app_secret = actions.server_app_secret;
+        self.exporter_master_secret = actions.exporter_master_secret;
+        self.early_exporter_master_secret = actions.early_exporter_master_secret;
 
         self.negotiated_suite = Some(actions.suite);
         self.negotiated_version = Some(TlsVersion::Tls13);
