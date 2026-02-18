@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 76 complete + Testing-Phase 77 — SniCallback + DTLS abbreviated + PADDING/OID Filters + PskServerCallback integration (2144 tests)
+- **Status**: Phase 76 complete + Testing-Phase 78 — GREASE + Heartbeat + Async DTLS edge cases + extension codec (2166 tests)
 
 ## Workspace Structure
 
@@ -23,7 +23,7 @@ openhitls-rs/
 │   ├── hitls-pki/       # X.509 (parse, verify [RSA/ECDSA/Ed25519/Ed448/SM2/RSA-PSS], chain, CRL, OCSP, CSR generation, Certificate generation, to_text output, SigningKey abstraction, EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies enforcement, hostname verification (RFC 6125)), PKCS#12 (RFC 7292), CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr, detached mode) + EnvelopedData + EncryptedData + DigestedData (RFC 5652), PKCS#8 (RFC 5958, Ed448/X448), SPKI public key parsing (336 tests, 1 ignored)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (RFC 9578, RSA blind sigs) (33 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
-├── tests/interop/       # Integration tests (107 cross-crate tests, 3 ignored)
+├── tests/interop/       # Integration tests (113 cross-crate tests, 3 ignored)
 ├── tests/vectors/       # Standard test vectors (Wycheproof JSON)
 ├── fuzz/                # Fuzz targets (cargo-fuzz, 10 targets)
 └── benches/             # Performance benchmarks
@@ -35,18 +35,18 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2144 tests, 40 ignored)
+# Run all tests (2166 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 593 tests (31 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 813 tests
+cargo test -p hitls-tls --all-features      # 829 tests
 cargo test -p hitls-pki --all-features      # 336 tests (1 ignored)
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
 cargo test -p hitls-auth --all-features     # 33 tests
 cargo test -p hitls-cli --all-features      # 117 tests (5 ignored)
-cargo test -p hitls-integration-tests       # 107 tests (3 ignored)
+cargo test -p hitls-integration-tests       # 113 tests (3 ignored)
 
 # Lint (must pass with zero warnings)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
