@@ -1098,4 +1098,107 @@ mod tests {
         assert_eq!(config2.oid_filters[0].0, oid);
         assert_eq!(config2.oid_filters[0].1, values);
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 76 — F2: Config builder callback tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_config_cert_verify_callback() {
+        use crate::cert_verify::CertVerifyInfo;
+        use std::sync::Arc;
+        let cb: CertVerifyCallback = Arc::new(|_info: &CertVerifyInfo| Ok(()));
+        let config = TlsConfig::builder().cert_verify_callback(cb).build();
+        assert!(
+            config.cert_verify_callback.is_some(),
+            "cert_verify_callback should be set"
+        );
+    }
+
+    #[test]
+    fn test_config_sni_callback() {
+        use std::sync::Arc;
+        let cb: SniCallback = Arc::new(|_hostname: &str| SniAction::Accept);
+        let config = TlsConfig::builder().sni_callback(cb).build();
+        assert!(config.sni_callback.is_some(), "sni_callback should be set");
+    }
+
+    #[test]
+    fn test_config_key_log_callback() {
+        use std::sync::Arc;
+        let logged = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let l = logged.clone();
+        let cb: KeyLogCallback = Arc::new(move |line: &str| {
+            l.lock().unwrap().push(line.to_string());
+        });
+        let config = TlsConfig::builder().key_log(cb).build();
+        assert!(
+            config.key_log_callback.is_some(),
+            "key_log_callback should be set"
+        );
+        // Invoke it and verify it works
+        (config.key_log_callback.as_ref().unwrap())("test line");
+        assert_eq!(logged.lock().unwrap().as_slice(), &["test line"]);
+    }
+
+    #[test]
+    fn test_config_verify_hostname_toggle() {
+        // Default: verify_hostname = true
+        let config_default = TlsConfig::builder().build();
+        assert!(
+            config_default.verify_hostname,
+            "verify_hostname should default to true"
+        );
+
+        // Explicitly disable
+        let config_off = TlsConfig::builder().verify_hostname(false).build();
+        assert!(
+            !config_off.verify_hostname,
+            "verify_hostname(false) should disable it"
+        );
+
+        // Re-enable
+        let config_on = TlsConfig::builder().verify_hostname(true).build();
+        assert!(
+            config_on.verify_hostname,
+            "verify_hostname(true) should enable it"
+        );
+    }
+
+    #[test]
+    fn test_config_trusted_cert_accumulates() {
+        let der1 = vec![0x30, 0x00]; // minimal fake DER
+        let der2 = vec![0x30, 0x01, 0x00];
+        let config = TlsConfig::builder()
+            .trusted_cert(der1.clone())
+            .trusted_cert(der2.clone())
+            .build();
+        assert_eq!(config.trusted_certs.len(), 2);
+        assert_eq!(config.trusted_certs[0], der1);
+        assert_eq!(config.trusted_certs[1], der2);
+    }
+
+    #[test]
+    fn test_config_sni_action_variants() {
+        // Verify all SniAction variants can be constructed and cloned
+        let _accept = SniAction::Accept;
+        let _reject = SniAction::Reject;
+        let _ignore = SniAction::Ignore;
+        let inner = TlsConfig::builder().build();
+        let _with_config = SniAction::AcceptWithConfig(Box::new(inner));
+    }
+
+    #[test]
+    fn test_config_debug_includes_callbacks() {
+        use crate::cert_verify::CertVerifyInfo;
+        use std::sync::Arc;
+        let cb: CertVerifyCallback = Arc::new(|_: &CertVerifyInfo| Ok(()));
+        let config = TlsConfig::builder().cert_verify_callback(cb).build();
+        let s = format!("{config:?}");
+        // Debug output should show "<callback>" placeholder for the callback field
+        assert!(
+            s.contains("cert_verify_callback"),
+            "debug should include cert_verify_callback field"
+        );
+    }
 }

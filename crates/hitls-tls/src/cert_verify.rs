@@ -103,3 +103,287 @@ pub fn verify_server_certificate(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{CertVerifyCallback, TlsConfig};
+    use crate::TlsRole;
+    use std::sync::Arc;
+
+    /// Helper: generate a self-signed Ed25519 certificate DER for "localhost".
+    fn make_self_signed_cert_der(cn: &str) -> Vec<u8> {
+        use hitls_pki::x509::{CertificateBuilder, DistinguishedName, SigningKey};
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), cn.into())],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_900_000_000).unwrap();
+        cert.raw
+    }
+
+    // -------------------------------------------------------
+    // 1. verify_peer=false bypasses all checks
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_skipped_when_verify_peer_false() {
+        // Even an empty chain succeeds when verify_peer is false
+        let config = TlsConfig::builder().verify_peer(false).build();
+        assert!(verify_server_certificate(&config, &[]).is_ok());
+    }
+
+    #[test]
+    fn test_verify_skipped_invalid_der_when_verify_peer_false() {
+        let config = TlsConfig::builder().verify_peer(false).build();
+        // Garbage DER should be accepted because verify_peer=false
+        assert!(verify_server_certificate(&config, &[vec![0xFF, 0x00, 0x01]]).is_ok());
+    }
+
+    // -------------------------------------------------------
+    // 2. Empty chain rejected
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_empty_chain_rejected() {
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .build();
+        let result = verify_server_certificate(&config, &[]);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("empty certificate chain"), "unexpected: {msg}");
+    }
+
+    // -------------------------------------------------------
+    // 3. Invalid DER in leaf certificate
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_invalid_der_rejected() {
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .build();
+        let garbage = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let result = verify_server_certificate(&config, &[garbage]);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("failed to parse leaf certificate"),
+            "unexpected: {msg}"
+        );
+    }
+
+    // -------------------------------------------------------
+    // 4. Chain fails when no trusted certs
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_no_trusted_certs_fails_chain() {
+        let cert_der = make_self_signed_cert_der("localhost");
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(false)
+            .build();
+        // verify_peer=true, no trusted_certs → chain fails
+        let result = verify_server_certificate(&config, &[cert_der]);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("no trusted certificates configured"),
+            "unexpected: {msg}"
+        );
+    }
+
+    // -------------------------------------------------------
+    // 5. Hostname verification skipped when verify_hostname=false
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_hostname_skipped_when_disabled() {
+        let cert_der = make_self_signed_cert_der("localhost");
+        // Use the cert itself as trusted → chain passes
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(false)
+            .trusted_cert(cert_der.clone())
+            .build();
+        // Chain passes (self-signed, trusted), hostname skipped → Ok
+        let result = verify_server_certificate(&config, &[cert_der]);
+        assert!(result.is_ok(), "expected Ok but got: {:?}", result.err());
+    }
+
+    // -------------------------------------------------------
+    // 6. Hostname skipped when no server_name set
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_hostname_skipped_when_no_server_name() {
+        let cert_der = make_self_signed_cert_der("localhost");
+        // verify_hostname=true but no server_name → hostname check is skipped
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(true) // enabled, but no server_name
+            .trusted_cert(cert_der.clone())
+            .build();
+        // No server_name → hostname_result = Ok(); chain passes → Ok
+        let result = verify_server_certificate(&config, &[cert_der]);
+        assert!(result.is_ok(), "expected Ok but got: {:?}", result.err());
+    }
+
+    // -------------------------------------------------------
+    // 7. Callback overrides: accept despite chain failure
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_callback_accepts_despite_chain_failure() {
+        let cert_der = make_self_signed_cert_der("example.com");
+        // Callback always returns Ok → accepts even without trusted certs
+        let cb: CertVerifyCallback = Arc::new(|_info| Ok(()));
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(false)
+            .cert_verify_callback(cb)
+            .build();
+        // No trusted certs → chain would fail, but callback accepts
+        assert!(verify_server_certificate(&config, &[cert_der]).is_ok());
+    }
+
+    // -------------------------------------------------------
+    // 8. Callback overrides: reject despite valid chain
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_callback_rejects_despite_valid_chain() {
+        let cert_der = make_self_signed_cert_der("localhost");
+        // Callback always rejects
+        let cb: CertVerifyCallback = Arc::new(|_info| Err("policy violation".to_string()));
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(false)
+            .trusted_cert(cert_der.clone())
+            .cert_verify_callback(cb)
+            .build();
+        let result = verify_server_certificate(&config, &[cert_der]);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("callback rejected"), "unexpected: {msg}");
+        assert!(msg.contains("policy violation"), "unexpected: {msg}");
+    }
+
+    // -------------------------------------------------------
+    // 9. Callback receives correct CertVerifyInfo fields
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_callback_receives_correct_info() {
+        use std::sync::Mutex;
+        let cert_der = make_self_signed_cert_der("example.com");
+        let received_hostname: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
+        let received_chain_len: Arc<Mutex<Option<usize>>> = Arc::new(Mutex::new(None));
+        let received_chain_err: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+
+        let rh = received_hostname.clone();
+        let rcl = received_chain_len.clone();
+        let rce = received_chain_err.clone();
+
+        let cb: CertVerifyCallback = Arc::new(move |info| {
+            *rh.lock().unwrap() = Some(info.hostname.clone());
+            *rcl.lock().unwrap() = Some(info.cert_chain.len());
+            *rce.lock().unwrap() = info.chain_result.is_err();
+            Ok(()) // accept regardless
+        });
+
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(true)
+            .server_name("example.com")
+            .cert_verify_callback(cb)
+            .build();
+
+        let _ = verify_server_certificate(&config, &[cert_der]);
+
+        // Callback should have been invoked with the correct info
+        assert_eq!(
+            *received_hostname.lock().unwrap(),
+            Some(Some("example.com".to_string()))
+        );
+        assert_eq!(*received_chain_len.lock().unwrap(), Some(1));
+        // No trusted certs → chain_result was Err
+        assert!(*received_chain_err.lock().unwrap());
+    }
+
+    // -------------------------------------------------------
+    // 10. Hostname mismatch fails when verify_hostname=true
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_hostname_mismatch_fails() {
+        let cert_der = make_self_signed_cert_der("localhost"); // CN=localhost
+                                                               // Trust the cert, but check against "example.com" → hostname mismatch
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(true)
+            .server_name("example.com") // mismatch with CN=localhost
+            .trusted_cert(cert_der.clone())
+            .build();
+        let result = verify_server_certificate(&config, &[cert_der]);
+        assert!(result.is_err(), "expected hostname mismatch error");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("hostname"), "unexpected: {msg}");
+    }
+
+    // -------------------------------------------------------
+    // 11. CertVerifyInfo Debug impl works
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_cert_verify_info_debug() {
+        let info = CertVerifyInfo {
+            chain_result: Ok(()),
+            hostname_result: Err("mismatch".to_string()),
+            cert_chain: vec![vec![0x01, 0x02]],
+            hostname: Some("example.com".to_string()),
+        };
+        let s = format!("{info:?}");
+        assert!(s.contains("hostname_result"));
+        assert!(s.contains("mismatch"));
+    }
+
+    // -------------------------------------------------------
+    // 12. Callback not invoked when verify_peer=false
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_callback_not_invoked_when_verify_peer_false() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let invoked = Arc::new(AtomicBool::new(false));
+        let inv = invoked.clone();
+        let cb: CertVerifyCallback = Arc::new(move |_info| {
+            inv.store(true, Ordering::Relaxed);
+            Ok(())
+        });
+
+        let config = TlsConfig::builder()
+            .verify_peer(false)
+            .cert_verify_callback(cb)
+            .build();
+
+        // verify_peer=false → early return, callback never invoked
+        let _ = verify_server_certificate(&config, &[vec![0x30, 0x00]]);
+        assert!(
+            !invoked.load(Ordering::Relaxed),
+            "callback must not be invoked when verify_peer=false"
+        );
+    }
+}
