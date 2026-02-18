@@ -157,6 +157,58 @@ Added three features: (1) PADDING extension (type 21, RFC 7685) with codec (buil
 
 ---
 
+## Testing-Phase 75: Phase 74 Feature Integration Tests + Async Export Unit Tests
+
+### Date: 2026-02-18
+
+### Summary
+
+Added integration and async unit tests for Phase 74 features:
+1. **Integration tests** (+10): certificate_authorities config handshake, export_keying_material client/server match + different labels + before handshake + various lengths + server-side, export_early_keying_material no-PSK error, TLS 1.2 export_keying_material match, TLS 1.2 session cache + ticket resumption.
+2. **Async unit tests** (+6): export_keying_material before handshake, early export no-PSK, both-sides match, different labels, CA config, deterministic.
+
+### Files Modified
+
+1. **`tests/interop/src/lib.rs`** — 10 new integration tests
+2. **`crates/hitls-tls/src/connection_async.rs`** — 6 new async export unit tests
+
+### Test Counts
+
++16 tests (2054 → 2070)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2070 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Testing-Phase 74: Fuzz Seed Corpus + Error Scenario Integration Tests
+
+### Date: 2026-02-18
+
+### Summary
+
+Added structured fuzz seed corpus and error scenario integration tests:
+1. **Fuzz seed corpus** (C1): 66 binary seed files across all 10 fuzz targets in `fuzz/corpus/<target>/`.
+2. **Integration tests** (C2): +18 tests covering version mismatch, cipher suite mismatch, PSK wrong key, ALPN negotiation, 5 concurrent TLS 1.3/1.2 connections, 64KB payload fragmentation, ConnectionInfo field validation, session_resumed checks, multi-message exchange, graceful shutdown, multi-suite negotiation, empty write.
+
+### Files Modified
+
+1. **`fuzz/corpus/`** — 66 binary seed files across 10 fuzz targets
+2. **`tests/interop/src/lib.rs`** — 18 new integration tests
+
+### Test Counts
+
++18 tests (2036 → 2054)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2054 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase 74: Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 Session Cache
 
 ### Date: 2026-02-18
