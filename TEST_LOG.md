@@ -7,13 +7,14 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,131 tests (40 ignored)
+**Current**: 2,144 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
 **Testing-Phase 74**: +18 tests (Error scenario integration tests + 66 fuzz seed corpus files)
 **Testing-Phase 75**: +16 tests (Integration test expansion + async key-export unit tests)
 **Testing-Phase 76**: +26 tests (cert_verify unit tests + config callback tests + integration tests)
+**Testing-Phase 77**: +13 tests (SniCallback + DTLS abbreviated + PADDING/OID Filters + PskServerCallback integration)
 
 ---
 
