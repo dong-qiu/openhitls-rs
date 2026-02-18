@@ -6692,4 +6692,366 @@ mod tests {
         );
         server_handle.join().unwrap();
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 78 — H1: GREASE (RFC 8701) integration tests
+    // -------------------------------------------------------
+
+    /// TLS 1.3: GREASE enabled on client — server ignores GREASE values, handshake succeeds.
+    #[test]
+    fn test_tls13_grease_enabled_handshake() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 32];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        // Client with GREASE enabled
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .grease(true)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"grease-tls13").unwrap();
+        let mut buf = [0u8; 32];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"grease-tls13");
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.2: GREASE enabled on client — server ignores GREASE values, handshake succeeds.
+    #[test]
+    fn test_tls12_grease_enabled_handshake() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::SignatureScheme;
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let groups = [hitls_tls::crypt::NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 32];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        // Client with GREASE enabled
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .grease(true)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"grease-tls12").unwrap();
+        let mut buf = [0u8; 32];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"grease-tls12");
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // Testing-Phase 78 — H2: Heartbeat extension (RFC 6520) integration
+    // -------------------------------------------------------
+
+    /// TLS 1.3: Client with heartbeat_mode=1, handshake succeeds (negotiation-only).
+    #[test]
+    fn test_tls13_heartbeat_mode_handshake() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 32];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        // Client with heartbeat_mode=1 (peer_allowed_to_send)
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .heartbeat_mode(1)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"heartbeat-tls13").unwrap();
+        let mut buf = [0u8; 32];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"heartbeat-tls13");
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.2: Client with heartbeat_mode=2, handshake succeeds.
+    #[test]
+    fn test_tls12_heartbeat_mode_handshake() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::SignatureScheme;
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let groups = [hitls_tls::crypt::NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 32];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        // Client with heartbeat_mode=2 (peer_not_allowed_to_send)
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .heartbeat_mode(2)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"heartbeat-tls12").unwrap();
+        let mut buf = [0u8; 32];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"heartbeat-tls12");
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // Testing-Phase 78 — H5: GREASE + Heartbeat combined
+    // -------------------------------------------------------
+
+    /// TLS 1.3: Both GREASE and heartbeat enabled simultaneously.
+    #[test]
+    fn test_tls13_grease_and_heartbeat_combined() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 32];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        // Client with both GREASE and heartbeat enabled
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .grease(true)
+            .heartbeat_mode(1)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"combo").unwrap();
+        let mut buf = [0u8; 32];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"combo");
+        server_handle.join().unwrap();
+    }
+
+    /// DTLS 1.2: GREASE enabled on client — handshake succeeds.
+    #[test]
+    fn test_dtls12_grease_enabled_handshake() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection_dtls12::dtls12_handshake_in_memory;
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::{CipherSuite, TlsVersion};
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .grease(true)
+            .verify_peer(false)
+            .build();
+
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let (mut client, mut server) =
+            dtls12_handshake_in_memory(client_config, server_config, false).unwrap();
+        assert_eq!(client.version(), Some(TlsVersion::Dtls12));
+        assert_eq!(server.version(), Some(TlsVersion::Dtls12));
+
+        // App data exchange
+        let ct = client.seal_app_data(b"grease-dtls").unwrap();
+        let pt = server.open_app_data(&ct).unwrap();
+        assert_eq!(pt, b"grease-dtls");
+    }
 }

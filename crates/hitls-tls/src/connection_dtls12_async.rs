@@ -1502,4 +1502,99 @@ mod tests {
             assert!(s.is_session_resumed());
         }
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 78 — H3: Async DTLS 1.2 cookie mode + edge cases
+    // -------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_async_dtls12_with_cookie_mode() {
+        // Server enables cookie (HelloVerifyRequest flow)
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncDtls12ClientConnection::new(client_stream, client_config());
+        let mut server = AsyncDtls12ServerConnection::new(server_stream, server_config(), true); // cookie=true
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        assert_eq!(client.version(), Some(TlsVersion::Dtls12));
+        assert_eq!(server.version(), Some(TlsVersion::Dtls12));
+
+        // Data exchange after cookie-based handshake
+        let msg = b"cookie-mode-ok";
+        client.write(msg).await.unwrap();
+        let mut buf = [0u8; 64];
+        let n = server.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg);
+    }
+
+    #[tokio::test]
+    async fn test_async_dtls12_multi_message_exchange() {
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncDtls12ClientConnection::new(client_stream, client_config());
+        let mut server = AsyncDtls12ServerConnection::new(server_stream, server_config(), false);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // Multiple round-trips
+        for i in 0..5 {
+            let msg = format!("msg-{i}");
+            client.write(msg.as_bytes()).await.unwrap();
+            let mut buf = [0u8; 64];
+            let n = server.read(&mut buf).await.unwrap();
+            assert_eq!(&buf[..n], msg.as_bytes());
+
+            let reply = format!("ack-{i}");
+            server.write(reply.as_bytes()).await.unwrap();
+            let n = client.read(&mut buf).await.unwrap();
+            assert_eq!(&buf[..n], reply.as_bytes());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_async_dtls12_cookie_mode_abbreviated() {
+        // Cookie mode + session resumption
+        let client_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+        let server_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+
+        // 1st: Full handshake with cookie
+        {
+            let (cs, ss) = tokio::io::duplex(64 * 1024);
+            let mut c = AsyncDtls12ClientConnection::new(
+                cs,
+                client_config_with_cache(client_cache.clone()),
+            );
+            let mut s = AsyncDtls12ServerConnection::new(
+                ss,
+                server_config_with_cache(server_cache.clone()),
+                true, // cookie enabled
+            );
+            let (cr, sr) = tokio::join!(c.handshake(), s.handshake());
+            cr.unwrap();
+            sr.unwrap();
+            assert!(!c.is_session_resumed());
+        }
+
+        // 2nd: Abbreviated handshake with cookie
+        {
+            let (cs, ss) = tokio::io::duplex(64 * 1024);
+            let mut c = AsyncDtls12ClientConnection::new(
+                cs,
+                client_config_with_cache(client_cache.clone()),
+            );
+            let mut s = AsyncDtls12ServerConnection::new(
+                ss,
+                server_config_with_cache(server_cache.clone()),
+                true,
+            );
+            let (cr, sr) = tokio::join!(c.handshake(), s.handshake());
+            cr.unwrap();
+            sr.unwrap();
+            assert!(c.is_session_resumed());
+            assert!(s.is_session_resumed());
+        }
+    }
 }

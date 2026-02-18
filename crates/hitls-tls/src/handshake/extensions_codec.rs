@@ -1942,4 +1942,104 @@ mod tests {
         assert_eq!(ver1, 0x3A3A); // GREASE
         assert_eq!(ver2, 0x0304); // TLS 1.3
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 78 — H4: Extension codec negative/edge case tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_parse_supported_versions_ch_empty_data() {
+        // Totally empty data → error
+        assert!(parse_supported_versions_ch(&[]).is_err());
+    }
+
+    #[test]
+    fn test_parse_supported_versions_ch_zero_list() {
+        // List length 0 → empty list (codec accepts)
+        let result = parse_supported_versions_ch(&[0]).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_supported_versions_ch_truncated() {
+        // List length says 4 bytes but only 2 bytes follow
+        assert!(parse_supported_versions_ch(&[4, 0x03, 0x04]).is_err());
+    }
+
+    #[test]
+    fn test_parse_supported_versions_ch_odd_length() {
+        // Odd list length (3 bytes) → not a multiple of 2 → error
+        assert!(parse_supported_versions_ch(&[3, 0x03, 0x04, 0x01]).is_err());
+    }
+
+    #[test]
+    fn test_parse_signature_algorithms_ch_empty_data() {
+        // Too short → error
+        assert!(parse_signature_algorithms_ch(&[]).is_err());
+        assert!(parse_signature_algorithms_ch(&[0]).is_err());
+    }
+
+    #[test]
+    fn test_parse_key_share_ch_empty_list() {
+        // Key share list with 0 length → empty (should succeed, 0 entries)
+        let result = parse_key_share_ch(&[0, 0]);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_certificate_authorities_truncated_name() {
+        // Total length = 4, then name length says 10 but only 2 bytes follow
+        let data = [0, 4, 0, 10, 0xAA, 0xBB];
+        assert!(parse_certificate_authorities(&data).is_err());
+    }
+
+    #[test]
+    fn test_parse_alpn_ch_empty_protocol_name() {
+        // ALPN with a zero-length protocol name → error per RFC 7301
+        // outer_len(2) = 3, then name_len=0 (invalid)
+        let data = [0, 3, 0];
+        assert!(parse_alpn_ch(&data).is_err());
+    }
+
+    #[test]
+    fn test_parse_server_name_empty() {
+        // Empty SNI data → error
+        assert!(parse_server_name(&[]).is_err());
+    }
+
+    #[test]
+    fn test_parse_max_fragment_length_wrong_length() {
+        // MFL extension must be exactly 1 byte
+        assert!(parse_max_fragment_length(&[]).is_err());
+        assert!(parse_max_fragment_length(&[1, 2]).is_err());
+    }
+
+    #[test]
+    fn test_parse_max_fragment_length_invalid_value() {
+        // Valid values are 1-4, value 0 and 5+ are invalid
+        assert!(parse_max_fragment_length(&[0]).is_err());
+        assert!(parse_max_fragment_length(&[5]).is_err());
+    }
+
+    #[test]
+    fn test_grease_supported_groups_includes_real_groups() {
+        use crate::crypt::NamedGroup;
+        let groups = [NamedGroup::SECP256R1, NamedGroup::X25519];
+        let gv = 0x4A4A;
+        let ext = build_supported_groups_grease(&groups, gv);
+        // Should contain GREASE value + real groups
+        let parsed = parse_supported_groups_ch(&ext.data).unwrap();
+        assert!(parsed.len() >= 3); // 1 GREASE + 2 real
+    }
+
+    #[test]
+    fn test_grease_signature_algorithms_includes_real() {
+        use crate::crypt::SignatureScheme;
+        let algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+        let gv = 0x5A5A;
+        let ext = build_signature_algorithms_grease(&algs, gv);
+        let parsed = parse_signature_algorithms_ch(&ext.data).unwrap();
+        assert!(parsed.len() >= 2); // 1 GREASE + 1 real
+    }
 }
