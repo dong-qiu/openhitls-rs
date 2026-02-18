@@ -62,6 +62,34 @@ Implemented three features:
 
 ---
 
+## Testing-Phase 76: cert_verify Unit Tests + Config Callbacks + Integration Tests
+
+### Date: 2026-02-18
+
+### Summary
+
+Added comprehensive tests for cert_verify module and config callbacks:
+1. **cert_verify.rs** — 13 unit tests covering all code paths of `verify_server_certificate()`: verify_peer=false bypass, empty chain rejection, invalid DER rejection, chain fails with no trusted certs, hostname verification skip, CertVerifyCallback (accept/reject/info fields), hostname mismatch, Debug impl, callback-not-invoked when verify_peer=false.
+2. **config/mod.rs** — 7 unit tests for builder methods: cert_verify_callback, sni_callback, key_log_callback, verify_hostname toggle, trusted_cert accumulation, SniAction variants, Debug format.
+3. **tests/interop/src/lib.rs** — 6 integration tests: TLS 1.3/1.2 cert_verify_callback accept/reject, TLS 1.3/1.2 key_log_callback, TLS 1.2 server-initiated renegotiation.
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/cert_verify.rs`** — NEW: TLS cert verification orchestration with 13 unit tests
+2. **`crates/hitls-tls/src/config/mod.rs`** — 7 new config callback unit tests
+3. **`tests/interop/src/lib.rs`** — 6 new integration tests
+
+### Test Counts
+
++26 tests (2105 → 2131)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2131 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase 75: PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake
 
 ### Date: 2026-02-18

@@ -1729,3 +1729,17 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - hitls-tls: 774 → 793 (+19 tests); total: 2086 → 2105 tests.
 
 2105 total tests (40 ignored). Clippy clean, fmt clean.
+
+## Testing-Phase 76: cert_verify Unit Tests + Config Callbacks + Integration Tests (2026-02-18)
+
+**Prompt**: Add comprehensive test coverage for cert_verify module, config callbacks, and additional integration tests.
+
+**Work performed**:
+- cert_verify.rs: 13 unit tests covering verify_server_certificate() code paths (verify_peer bypass, chain validation, hostname verification, CertVerifyCallback accept/reject/info)
+- config/mod.rs: 7 unit tests for cert_verify_callback, sni_callback, key_log_callback, verify_hostname toggle, trusted_cert accumulation, SniAction variants, Debug format
+- tests/interop/src/lib.rs: 6 integration tests (TLS 1.3/1.2 cert_verify_callback, key_log_callback, renegotiation)
+
+**Result**:
+- hitls-tls: 793 → 813 (+20 tests); integration: 88 → 94 (+6 tests); total: 2105 → 2131 tests.
+
+2131 total tests (40 ignored). Clippy clean, fmt clean.
