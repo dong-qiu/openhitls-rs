@@ -235,6 +235,13 @@ pub struct TlsConfig {
     /// DER-encoded Distinguished Names to send in ClientHello.
     /// Empty = not sent.
     pub certificate_authorities: Vec<Vec<u8>>,
+    /// Target ClientHello size for PADDING extension (RFC 7685).
+    /// 0 = disabled.
+    pub padding_target: u16,
+    /// OID filters for TLS 1.3 CertificateRequest (RFC 8446 §4.2.5).
+    /// Each entry is (OID DER bytes, certificate extension values).
+    /// Empty = not sent.
+    pub oid_filters: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 impl fmt::Debug for TlsConfig {
@@ -334,6 +341,8 @@ pub struct TlsConfigBuilder {
     max_fragment_length: Option<MaxFragmentLength>,
     signature_algorithms_cert: Vec<SignatureScheme>,
     certificate_authorities: Vec<Vec<u8>>,
+    padding_target: u16,
+    oid_filters: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 impl Default for TlsConfigBuilder {
@@ -396,6 +405,8 @@ impl Default for TlsConfigBuilder {
             max_fragment_length: None,
             signature_algorithms_cert: Vec::new(),
             certificate_authorities: Vec::new(),
+            padding_target: 0,
+            oid_filters: Vec::new(),
         }
     }
 }
@@ -647,6 +658,16 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn padding_target(mut self, target: u16) -> Self {
+        self.padding_target = target;
+        self
+    }
+
+    pub fn oid_filters(mut self, filters: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
+        self.oid_filters = filters;
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -698,6 +719,8 @@ impl TlsConfigBuilder {
             max_fragment_length: self.max_fragment_length,
             signature_algorithms_cert: self.signature_algorithms_cert,
             certificate_authorities: self.certificate_authorities,
+            padding_target: self.padding_target,
+            oid_filters: self.oid_filters,
         }
     }
 }
@@ -1046,5 +1069,33 @@ mod tests {
         );
         assert_eq!(MaxFragmentLength::from_u8(0), None);
         assert_eq!(MaxFragmentLength::from_u8(5), None);
+    }
+
+    #[test]
+    fn test_config_padding_target() {
+        // Default: 0 (disabled)
+        let config = TlsConfig::builder().build();
+        assert_eq!(config.padding_target, 0);
+
+        // Set padding target
+        let config2 = TlsConfig::builder().padding_target(512).build();
+        assert_eq!(config2.padding_target, 512);
+    }
+
+    #[test]
+    fn test_config_oid_filters() {
+        // Default: empty
+        let config = TlsConfig::builder().build();
+        assert!(config.oid_filters.is_empty());
+
+        // Set OID filters
+        let oid = vec![0x55, 0x1D, 0x25];
+        let values = vec![0x30, 0x0A];
+        let config2 = TlsConfig::builder()
+            .oid_filters(vec![(oid.clone(), values.clone())])
+            .build();
+        assert_eq!(config2.oid_filters.len(), 1);
+        assert_eq!(config2.oid_filters[0].0, oid);
+        assert_eq!(config2.oid_filters[0].1, values);
     }
 }

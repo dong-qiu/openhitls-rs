@@ -1032,6 +1032,101 @@ pub fn parse_certificate_authorities(data: &[u8]) -> Result<Vec<Vec<u8>>, TlsErr
 }
 
 // ---------------------------------------------------------------------------
+// PADDING Extension (RFC 7685, type 21)
+// ---------------------------------------------------------------------------
+
+/// Build `padding` extension (RFC 7685, type 21).
+/// Wire format: N zero bytes.
+pub fn build_padding(padding_len: usize) -> Extension {
+    Extension {
+        extension_type: ExtensionType::PADDING,
+        data: vec![0u8; padding_len],
+    }
+}
+
+/// Parse `padding` extension.
+/// Validates all bytes are zero per RFC 7685.
+pub fn parse_padding(data: &[u8]) -> Result<usize, TlsError> {
+    for &b in data {
+        if b != 0 {
+            return Err(TlsError::HandshakeFailed("padding: non-zero byte".into()));
+        }
+    }
+    Ok(data.len())
+}
+
+// ---------------------------------------------------------------------------
+// OID Filters Extension (RFC 8446 §4.2.5, type 48)
+// ---------------------------------------------------------------------------
+
+/// Build `oid_filters` extension (RFC 8446 §4.2.5, type 48).
+/// Wire format: filters_length(2) || [oid_length(1) || oid || values_length(2) || values]*
+pub fn build_oid_filters(filters: &[(Vec<u8>, Vec<u8>)]) -> Extension {
+    let mut list = Vec::new();
+    for (oid, values) in filters {
+        list.push(oid.len() as u8);
+        list.extend_from_slice(oid);
+        list.extend_from_slice(&(values.len() as u16).to_be_bytes());
+        list.extend_from_slice(values);
+    }
+    let mut data = Vec::with_capacity(2 + list.len());
+    data.extend_from_slice(&(list.len() as u16).to_be_bytes());
+    data.extend_from_slice(&list);
+    Extension {
+        extension_type: ExtensionType::OID_FILTERS,
+        data,
+    }
+}
+
+/// Parse `oid_filters` extension.
+/// Returns list of (OID DER bytes, certificate extension values) pairs.
+#[allow(clippy::type_complexity)]
+pub fn parse_oid_filters(data: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, TlsError> {
+    if data.len() < 2 {
+        return Err(TlsError::HandshakeFailed("oid_filters: too short".into()));
+    }
+    let list_len = u16::from_be_bytes([data[0], data[1]]) as usize;
+    if data.len() < 2 + list_len {
+        return Err(TlsError::HandshakeFailed("oid_filters: truncated".into()));
+    }
+    let mut filters = Vec::new();
+    let mut pos = 2;
+    let end = 2 + list_len;
+    while pos < end {
+        if end - pos < 1 {
+            return Err(TlsError::HandshakeFailed(
+                "oid_filters: truncated OID length".into(),
+            ));
+        }
+        let oid_len = data[pos] as usize;
+        pos += 1;
+        if end - pos < oid_len {
+            return Err(TlsError::HandshakeFailed(
+                "oid_filters: truncated OID".into(),
+            ));
+        }
+        let oid = data[pos..pos + oid_len].to_vec();
+        pos += oid_len;
+        if end - pos < 2 {
+            return Err(TlsError::HandshakeFailed(
+                "oid_filters: truncated values length".into(),
+            ));
+        }
+        let values_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+        pos += 2;
+        if end - pos < values_len {
+            return Err(TlsError::HandshakeFailed(
+                "oid_filters: truncated values".into(),
+            ));
+        }
+        let values = data[pos..pos + values_len].to_vec();
+        pos += values_len;
+        filters.push((oid, values));
+    }
+    Ok(filters)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1580,5 +1675,70 @@ mod tests {
         assert_eq!(parsed[0], SignatureScheme::RSA_PSS_RSAE_SHA256);
         assert_eq!(parsed[1], SignatureScheme::ECDSA_SECP256R1_SHA256);
         assert_eq!(parsed[2], SignatureScheme::ED25519);
+    }
+
+    // PADDING tests
+
+    #[test]
+    fn test_padding_codec_roundtrip() {
+        for len in [0, 1, 100, 512] {
+            let ext = build_padding(len);
+            assert_eq!(ext.extension_type, ExtensionType::PADDING);
+            assert_eq!(ext.data.len(), len);
+            let parsed_len = parse_padding(&ext.data).unwrap();
+            assert_eq!(parsed_len, len);
+        }
+    }
+
+    #[test]
+    fn test_padding_rejects_nonzero() {
+        let mut data = vec![0u8; 10];
+        data[5] = 0x01;
+        assert!(parse_padding(&data).is_err());
+    }
+
+    // OID Filters tests
+
+    #[test]
+    fn test_oid_filters_codec_roundtrip() {
+        // Single filter
+        let oid1 = vec![0x55, 0x1D, 0x25]; // id-ce-extKeyUsage OID bytes
+        let values1 = vec![0x30, 0x0A, 0x06, 0x08];
+        let ext = build_oid_filters(&[(oid1.clone(), values1.clone())]);
+        assert_eq!(ext.extension_type, ExtensionType::OID_FILTERS);
+        let parsed = parse_oid_filters(&ext.data).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].0, oid1);
+        assert_eq!(parsed[0].1, values1);
+
+        // Multiple filters
+        let oid2 = vec![0x55, 0x1D, 0x0F]; // id-ce-keyUsage
+        let values2 = vec![0x03, 0x02, 0x05, 0xA0];
+        let ext2 = build_oid_filters(&[
+            (oid1.clone(), values1.clone()),
+            (oid2.clone(), values2.clone()),
+        ]);
+        let parsed2 = parse_oid_filters(&ext2.data).unwrap();
+        assert_eq!(parsed2.len(), 2);
+        assert_eq!(parsed2[0], (oid1, values1));
+        assert_eq!(parsed2[1], (oid2, values2));
+    }
+
+    #[test]
+    fn test_oid_filters_empty() {
+        let ext = build_oid_filters(&[]);
+        assert_eq!(ext.extension_type, ExtensionType::OID_FILTERS);
+        let parsed = parse_oid_filters(&ext.data).unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn test_oid_filters_truncated_rejected() {
+        // Too short for list length
+        assert!(parse_oid_filters(&[0x00]).is_err());
+        // List length says 10 but only 2 available
+        assert!(parse_oid_filters(&[0x00, 0x0A, 0x03]).is_err());
+        // OID length says 5 but only 2 bytes available
+        assert!(parse_oid_filters(&[0x00, 0x04, 0x05, 0xAA, 0xBB, 0xCC]).is_err());
     }
 }

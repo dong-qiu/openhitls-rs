@@ -59,6 +59,26 @@ impl Drop for DtlsClientFlightResult {
     }
 }
 
+/// Keys derived from a cached session for abbreviated handshake.
+pub struct DtlsAbbreviatedClientKeys {
+    pub suite: CipherSuite,
+    pub master_secret: Vec<u8>,
+    pub client_write_key: Vec<u8>,
+    pub server_write_key: Vec<u8>,
+    pub client_write_iv: Vec<u8>,
+    pub server_write_iv: Vec<u8>,
+}
+
+impl Drop for DtlsAbbreviatedClientKeys {
+    fn drop(&mut self) {
+        self.master_secret.zeroize();
+        self.client_write_key.zeroize();
+        self.server_write_key.zeroize();
+        self.client_write_iv.zeroize();
+        self.server_write_iv.zeroize();
+    }
+}
+
 /// DTLS 1.2 client handshake state machine.
 pub struct Dtls12ClientHandshake {
     config: TlsConfig,
@@ -76,6 +96,16 @@ pub struct Dtls12ClientHandshake {
     cookie: Vec<u8>,
     /// Stored ClientHello body for transcript replay on hash switch.
     client_hello_tls_bytes: Vec<u8>,
+    /// Cached session ID for abbreviated handshake.
+    cached_session_id: Vec<u8>,
+    /// Cached master secret for abbreviated handshake.
+    cached_master_secret: Vec<u8>,
+    /// Cached cipher suite for abbreviated handshake.
+    cached_suite: CipherSuite,
+    /// Whether this is an abbreviated (resumed) handshake.
+    abbreviated: bool,
+    /// Abbreviated keys (set when abbreviated == true after SH processing).
+    abbreviated_keys: Option<DtlsAbbreviatedClientKeys>,
 }
 
 impl Dtls12ClientHandshake {
@@ -93,6 +123,11 @@ impl Dtls12ClientHandshake {
             message_seq: 0,
             cookie: Vec::new(),
             client_hello_tls_bytes: Vec::new(),
+            cached_session_id: Vec::new(),
+            cached_master_secret: Vec::new(),
+            cached_suite: CipherSuite(0),
+            abbreviated: false,
+            abbreviated_keys: None,
         }
     }
 
@@ -113,6 +148,21 @@ impl Dtls12ClientHandshake {
         if self.state == Dtls12ClientState::Idle {
             getrandom::getrandom(&mut self.client_random)
                 .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
+
+            // Check session cache for resumption
+            if let (Some(ref cache_mutex), Some(ref server_name)) =
+                (&self.config.session_cache, &self.config.server_name)
+            {
+                if let Ok(cache) = cache_mutex.lock() {
+                    if let Some(session) = cache.get(server_name.as_bytes()) {
+                        if crate::crypt::is_tls12_suite(session.cipher_suite) {
+                            self.cached_session_id = session.id.clone();
+                            self.cached_master_secret = session.master_secret.clone();
+                            self.cached_suite = session.cipher_suite;
+                        }
+                    }
+                }
+            }
         }
 
         // Build extensions
@@ -144,9 +194,16 @@ impl Dtls12ClientHandshake {
             return Err(TlsError::NoSharedCipherSuite);
         }
 
-        let mut session_id = vec![0u8; 32];
-        getrandom::getrandom(&mut session_id)
-            .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
+        // Use cached session ID if available (for abbreviated handshake),
+        // otherwise generate a random one.
+        let session_id = if !self.cached_session_id.is_empty() {
+            self.cached_session_id.clone()
+        } else {
+            let mut sid = vec![0u8; 32];
+            getrandom::getrandom(&mut sid)
+                .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
+            sid
+        };
 
         let ch = crate::handshake::codec::ClientHello {
             random: self.client_random,
@@ -228,13 +285,122 @@ impl Dtls12ClientHandshake {
             self.transcript.update(&self.client_hello_tls_bytes)?;
         }
 
-        self.params = Some(params);
+        self.params = Some(params.clone());
 
         // Add ServerHello to transcript in TLS format
         let tls_msg = dtls_to_tls_handshake(raw_dtls_msg)?;
         self.transcript.update(&tls_msg)?;
-        self.state = Dtls12ClientState::WaitCertificate;
+
+        // Check for abbreviated handshake (session resumption)
+        if !self.cached_session_id.is_empty()
+            && sh.legacy_session_id == self.cached_session_id
+            && sh.cipher_suite == self.cached_suite
+        {
+            self.abbreviated = true;
+            // Derive keys from cached master_secret + new randoms
+            let factory = params.hash_factory();
+            let key_block = derive_key_block(
+                &*factory,
+                &self.cached_master_secret,
+                &self.server_random,
+                &self.client_random,
+                &params,
+            )?;
+            self.abbreviated_keys = Some(DtlsAbbreviatedClientKeys {
+                suite: sh.cipher_suite,
+                master_secret: self.cached_master_secret.clone(),
+                client_write_key: key_block.client_write_key.clone(),
+                server_write_key: key_block.server_write_key.clone(),
+                client_write_iv: key_block.client_write_iv.clone(),
+                server_write_iv: key_block.server_write_iv.clone(),
+            });
+            self.state = Dtls12ClientState::WaitChangeCipherSpec;
+        } else {
+            // Full handshake — clear cached state
+            self.abbreviated = false;
+            self.cached_session_id.clear();
+            self.cached_master_secret.zeroize();
+            self.state = Dtls12ClientState::WaitCertificate;
+        }
+
         Ok(sh.cipher_suite)
+    }
+
+    /// Whether this is an abbreviated (resumed) handshake.
+    pub fn is_abbreviated(&self) -> bool {
+        self.abbreviated
+    }
+
+    /// Take the abbreviated keys (consumes them).
+    pub fn take_abbreviated_keys(&mut self) -> Option<DtlsAbbreviatedClientKeys> {
+        self.abbreviated_keys.take()
+    }
+
+    /// Process server Finished for abbreviated handshake.
+    ///
+    /// Verifies server Finished, computes client Finished, returns the client Finished message.
+    pub fn process_abbreviated_server_finished(
+        &mut self,
+        raw_dtls_msg: &[u8],
+        master_secret: &[u8],
+    ) -> Result<Vec<u8>, TlsError> {
+        if self.state != Dtls12ClientState::WaitFinished || !self.abbreviated {
+            return Err(TlsError::HandshakeFailed(
+                "unexpected abbreviated Finished".into(),
+            ));
+        }
+
+        let params = self
+            .params
+            .as_ref()
+            .ok_or_else(|| TlsError::HandshakeFailed("no cipher suite params".into()))?;
+
+        // Convert to TLS format to extract verify_data
+        let tls_msg = dtls_to_tls_handshake(raw_dtls_msg)?;
+        if tls_msg.len() < 4 + 12 {
+            return Err(TlsError::HandshakeFailed(
+                "Finished message too short".into(),
+            ));
+        }
+        let received_verify_data = &tls_msg[4..4 + 12];
+
+        // Verify server Finished: PRF(ms, "server finished", Hash(CH + SH))
+        let factory = params.hash_factory();
+        let transcript_hash = self.transcript.current_hash()?;
+        let expected = compute_verify_data(
+            &*factory,
+            master_secret,
+            "server finished",
+            &transcript_hash,
+        )?;
+
+        use subtle::ConstantTimeEq;
+        if !bool::from(received_verify_data.ct_eq(&expected)) {
+            return Err(TlsError::HandshakeFailed(
+                "server Finished verify_data mismatch".into(),
+            ));
+        }
+
+        // Add server Finished to transcript
+        self.transcript.update(&tls_msg)?;
+
+        // Compute client Finished: PRF(ms, "client finished", Hash(CH + SH + SF))
+        let transcript_hash = self.transcript.current_hash()?;
+        let client_verify_data = compute_verify_data(
+            &*factory,
+            master_secret,
+            "client finished",
+            &transcript_hash,
+        )?;
+        let finished_tls = crate::handshake::codec12::encode_finished12(&client_verify_data);
+
+        let seq = self.message_seq;
+        self.message_seq += 1;
+        let finished_dtls =
+            crate::handshake::codec_dtls::tls_to_dtls_handshake(&finished_tls, seq)?;
+
+        self.state = Dtls12ClientState::Connected;
+        Ok(finished_dtls)
     }
 
     /// Process a Certificate message.
@@ -576,5 +742,67 @@ mod tests {
         let mut hs = Dtls12ClientHandshake::new(config);
         // State is Idle, not WaitChangeCipherSpec
         assert!(hs.process_change_cipher_spec().is_err());
+    }
+
+    #[test]
+    fn test_dtls12_client_detects_abbreviated() {
+        use crate::session::{InMemorySessionCache, SessionCache, TlsSession};
+        use std::sync::{Arc, Mutex};
+
+        let session_id = vec![0xAA; 32];
+        let master_secret = vec![0xBB; 48];
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+
+        let cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+        {
+            let mut c = cache.lock().unwrap();
+            c.put(
+                b"test.example.com",
+                TlsSession {
+                    id: session_id.clone(),
+                    cipher_suite: suite,
+                    master_secret: master_secret.clone(),
+                    alpn_protocol: None,
+                    ticket: None,
+                    ticket_lifetime: 0,
+                    max_early_data: 0,
+                    ticket_age_add: 0,
+                    ticket_nonce: Vec::new(),
+                    created_at: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    psk: Vec::new(),
+                    extended_master_secret: false,
+                },
+            );
+        }
+
+        let config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .server_name("test.example.com")
+            .session_cache(cache)
+            .verify_peer(false)
+            .build();
+
+        let mut hs = Dtls12ClientHandshake::new(config);
+        let _ch_msg = hs.build_client_hello().unwrap();
+        assert!(!hs.is_abbreviated());
+
+        // Server echoes back the cached session_id → abbreviated
+        let sh = ServerHello {
+            random: [0x11; 32],
+            legacy_session_id: session_id,
+            cipher_suite: suite,
+            extensions: Vec::new(),
+        };
+        let sh_tls = crate::handshake::codec::encode_server_hello(&sh);
+        let sh_dtls = crate::handshake::codec_dtls::tls_to_dtls_handshake(&sh_tls, 0).unwrap();
+        hs.process_server_hello(&sh_dtls, &sh).unwrap();
+
+        assert!(hs.is_abbreviated());
+        assert_eq!(hs.state(), Dtls12ClientState::WaitChangeCipherSpec);
+        assert!(hs.take_abbreviated_keys().is_some());
     }
 }

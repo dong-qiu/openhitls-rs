@@ -25,12 +25,12 @@ use super::codec::{
 use super::codec::{decode_compressed_certificate, decompress_certificate_body};
 use super::extensions_codec::{
     build_alpn, build_certificate_authorities, build_compress_certificate, build_cookie,
-    build_early_data_ch, build_key_share_ch, build_post_handshake_auth, build_pre_shared_key_ch,
-    build_psk_key_exchange_modes, build_record_size_limit, build_sct_ch, build_server_name,
-    build_signature_algorithms, build_signature_algorithms_cert, build_status_request_ch,
-    build_supported_groups, build_supported_versions_ch, parse_alpn_sh, parse_cookie,
-    parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh, parse_record_size_limit,
-    parse_status_request_cert_entry, parse_supported_versions_sh,
+    build_early_data_ch, build_key_share_ch, build_padding, build_post_handshake_auth,
+    build_pre_shared_key_ch, build_psk_key_exchange_modes, build_record_size_limit, build_sct_ch,
+    build_server_name, build_signature_algorithms, build_signature_algorithms_cert,
+    build_status_request_ch, build_supported_groups, build_supported_versions_ch, parse_alpn_sh,
+    parse_cookie, parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh,
+    parse_record_size_limit, parse_status_request_cert_entry, parse_supported_versions_sh,
 };
 use super::key_exchange::KeyExchange;
 use super::verify::verify_certificate_verify;
@@ -311,6 +311,28 @@ impl ClientHandshake {
             &self.config.custom_extensions,
             crate::extensions::ExtensionContext::CLIENT_HELLO,
         ));
+
+        // PADDING extension (RFC 7685) — added before PSK (which MUST be last)
+        if self.config.padding_target > 0 {
+            // Compute current ClientHello encoded size estimate:
+            // type(1) + length(3) + version(2) + random(32) + session_id_len(1) +
+            // suites_len(2) + suites(2*N) + comp_len(1) + comp(1) + ext_len(2) + extensions
+            let suites_size = 2 * self.config.cipher_suites.len();
+            let ext_size: usize = extensions
+                .iter()
+                .map(|e| 4 + e.data.len()) // type(2) + length(2) + data
+                .sum();
+            let ch_size = 1 + 3 + 2 + 32 + 1 + 2 + suites_size + 1 + 1 + 2 + ext_size;
+            let target = self.config.padding_target as usize;
+            if ch_size + 4 < target {
+                // Need (target - ch_size) more bytes total. The PADDING extension itself
+                // takes 4 bytes overhead (type + length), so padding_data = needed - 4.
+                let needed = target - ch_size;
+                if needed > 4 {
+                    extensions.push(build_padding(needed - 4));
+                }
+            }
+        }
 
         // PSK extensions (pre_shared_key MUST be last)
         let has_psk = self.config.resumption_session.is_some();
@@ -1210,6 +1232,62 @@ mod tests {
         assert!(
             found,
             "ClientHello must contain supported_versions extension (0x002B)"
+        );
+    }
+
+    #[test]
+    fn test_padding_in_tls13_client_hello() {
+        let config = TlsConfig::builder()
+            .server_name("example.com")
+            .padding_target(512)
+            .build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // PADDING extension type is 0x0015 (21)
+        let has_padding = ch_msg.windows(2).any(|w| w[0] == 0x00 && w[1] == 0x15);
+        assert!(has_padding, "ClientHello should contain PADDING extension");
+        // The CH message should be close to the target size
+        // (might not be exactly 512 due to rounding, but should be >= 512 - 4)
+        assert!(
+            ch_msg.len() >= 508,
+            "CH len {} should be near target 512",
+            ch_msg.len()
+        );
+    }
+
+    #[test]
+    fn test_no_padding_when_disabled() {
+        let config = TlsConfig::builder()
+            .server_name("example.com")
+            .padding_target(0)
+            .build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // PADDING extension type is 0x0015 (21)
+        let has_padding = ch_msg.windows(2).any(|w| w[0] == 0x00 && w[1] == 0x15);
+        assert!(
+            !has_padding,
+            "ClientHello should NOT contain PADDING extension when disabled"
+        );
+    }
+
+    #[test]
+    fn test_no_padding_when_already_large() {
+        // Set a very small target that the CH already exceeds
+        let config = TlsConfig::builder()
+            .server_name("example.com")
+            .padding_target(10)
+            .build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // PADDING extension should NOT be present since CH already exceeds target
+        let has_padding = ch_msg.windows(2).any(|w| w[0] == 0x00 && w[1] == 0x15);
+        assert!(
+            !has_padding,
+            "ClientHello should NOT contain PADDING when already exceeding target"
         );
     }
 }

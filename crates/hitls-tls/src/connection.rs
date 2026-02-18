@@ -1217,9 +1217,15 @@ impl<S: Read + Write> TlsServerConnection<S> {
             SignatureScheme::RSA_PSS_RSAE_SHA384,
             SignatureScheme::RSA_PSS_RSAE_SHA512,
         ];
+        let mut cr_exts = vec![build_signature_algorithms(&sig_algs)];
+        if !self.config.oid_filters.is_empty() {
+            cr_exts.push(crate::handshake::extensions_codec::build_oid_filters(
+                &self.config.oid_filters,
+            ));
+        }
         let cr = CertificateRequestMsg {
             certificate_request_context: context.clone(),
-            extensions: vec![build_signature_algorithms(&sig_algs)],
+            extensions: cr_exts,
         };
         let cr_msg = encode_certificate_request(&cr);
 

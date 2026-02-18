@@ -1694,3 +1694,21 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - hitls-tls: 753 → 759 (+6); hitls-integration-tests: 78 → 88 (+10); total: 2054 → 2070 tests.
 
 2070 total tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 75: PADDING Extension (RFC 7685) + OID Filters Extension (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake (2026-02-18)
+
+**Prompt**: Implement Phase 75 — PADDING extension (type 21, RFC 7685) codec + config + TLS 1.3 ClientHello integration, OID Filters extension (type 48, RFC 8446 §4.2.5) codec + config + TLS 1.3 CertificateRequest, DTLS 1.2 abbreviated handshake (session cache lookup, abbreviated flow mirroring TLS 1.2 pattern).
+
+**Work performed**:
+- PADDING extension (RFC 7685): build_padding/parse_padding codec (validates all-zero bytes per spec), `padding_target: u16` config field, added to TLS 1.3 ClientHello (after custom extensions, before PSK which must be last)
+- OID Filters extension (RFC 8446 §4.2.5): build_oid_filters/parse_oid_filters codec (wire format: filters_length(2) || [oid_length(1) || oid || values_length(2) || values]*), `oid_filters: Vec<(Vec<u8>, Vec<u8>)>` config field, added to TLS 1.3 server CertificateRequest
+- DTLS 1.2 abbreviated handshake: DtlsAbbreviatedClientKeys/DtlsAbbreviatedServerResult structs, DtlsServerHelloResult enum (Full/Abbreviated), client session cache lookup in build_client_hello_with_cookie(), server session cache lookup in process_client_hello/process_client_hello_with_cookie(), do_abbreviated() server method, abbreviated flow in connection_dtls12 (server CCS+Finished first, then client CCS+Finished), fresh random session_id for full handshakes to prevent false abbreviated detection
+- Files modified: extensions/mod.rs, handshake/extensions_codec.rs, config/mod.rs, handshake/client.rs, connection.rs, handshake/client_dtls12.rs, handshake/server_dtls12.rs, connection_dtls12.rs
+
+**Result**:
+- hitls-tls: 759 → 774 (+15 tests); total: 2070 → 2085 tests.
+- 5 codec tests, 2 config tests, 3 padding ClientHello tests, 1 client abbreviated detection test, 4 DTLS abbreviated handshake integration tests
+
+2085 total tests (40 ignored). Clippy clean, fmt clean.

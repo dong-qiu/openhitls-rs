@@ -1,5 +1,72 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 75: PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake
+
+### Date: 2026-02-18
+
+### Summary
+Added three features: (1) PADDING extension (type 21, RFC 7685) with codec (build/parse), config field `padding_target`, TLS 1.3 ClientHello integration (added before PSK); (2) OID Filters extension (type 48, RFC 8446 §4.2.5) with codec (build/parse), config field `oid_filters`, wired into TLS 1.3 server CertificateRequest; (3) DTLS 1.2 abbreviated (resumed) handshake with session cache lookup, abbreviated flow (server CCS+Finished first, then client CCS+Finished), mirroring the TLS 1.2 pattern.
+
+### Features (3)
+
+| Feature | Description |
+|---------|-------------|
+| PADDING Extension (RFC 7685) | `build_padding`/`parse_padding` codec, `ExtensionType::PADDING` (21), `padding_target: u16` config (0=disabled), TLS 1.3 ClientHello integration (padding added before PSK which must be last), parse validates all zero bytes |
+| OID Filters (RFC 8446 §4.2.5) | `build_oid_filters`/`parse_oid_filters` codec, `ExtensionType::OID_FILTERS` (48), `oid_filters: Vec<(Vec<u8>, Vec<u8>)>` config, wired into server `request_client_auth()` CertificateRequest |
+| DTLS 1.2 Abbreviated Handshake | Client session cache lookup in `build_client_hello`, abbreviated detection in `process_server_hello` (session_id match), `DtlsAbbreviatedClientKeys`/`DtlsAbbreviatedServerResult` structs, `do_abbreviated()` server method, abbreviated Finished processing (both sides), `do_abbreviated_handshake()` connection driver, full→abbreviated→app data flow |
+
+### Files Modified (8)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/extensions/mod.rs` | Added `PADDING` (21) and `OID_FILTERS` (48) extension type constants |
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Added `build_padding`/`parse_padding`, `build_oid_filters`/`parse_oid_filters` codec functions (+5 tests) |
+| `crates/hitls-tls/src/config/mod.rs` | Added `padding_target: u16` and `oid_filters: Vec<(Vec<u8>, Vec<u8>)>` to TlsConfig + builder methods (+2 tests) |
+| `crates/hitls-tls/src/handshake/client.rs` | Added PADDING extension to `build_client_hello()` after custom extensions, before PSK (+3 tests) |
+| `crates/hitls-tls/src/connection.rs` | Added OID Filters to server `request_client_auth()` CertificateRequest when configured |
+| `crates/hitls-tls/src/handshake/client_dtls12.rs` | Added abbreviated handshake fields, session cache lookup in `build_client_hello_with_cookie`, abbreviated detection in `process_server_hello`, `process_abbreviated_server_finished`, getters (+1 test) |
+| `crates/hitls-tls/src/handshake/server_dtls12.rs` | Added `DtlsAbbreviatedServerResult`, `DtlsServerHelloResult` enum, `do_abbreviated()`, `process_abbreviated_finished()`, session cache lookup in both `process_client_hello` methods, new session_id generation for full handshake |
+| `crates/hitls-tls/src/connection_dtls12.rs` | Refactored into `do_full_handshake`/`do_abbreviated_handshake` helpers, session store helpers, abbreviated handshake driver (+4 tests) |
+
+### Implementation Details
+- **PADDING placement**: Added as last extension before PSK (which MUST be last per RFC 8446). Padding is only added if ClientHello size + 4 (ext overhead) < target.
+- **PADDING validation**: `parse_padding()` validates all bytes are zero per RFC 7685 — non-zero bytes are rejected.
+- **OID Filters wire format**: `filters_length(2) || [oid_length(1) || oid || values_length(2) || values]*`
+- **DTLS 1.2 abbreviated flow**: Server sends SH → CCS → Finished (encrypted), client detects via session_id match, processes server Finished, sends CCS → Finished (encrypted). Server verifies client Finished.
+- **Session ID for full handshake**: Server now generates a fresh random session_id for full handshakes (instead of echoing client's), preventing false abbreviation detection.
+- **Session cache TTL**: Cached sessions respect InMemorySessionCache TTL expiration (default 2h).
+
+### Test Counts (Phase 75)
+- **hitls-tls**: 768 [was: 753] (+15 new tests)
+- **Total workspace**: 2069 (40 ignored) [was: 2036 (actually 2003 + 33 auth)]
+
+### New Tests (15)
+
+| # | Test | File | Description |
+|---|------|------|-------------|
+| 1 | `test_padding_codec_roundtrip` | extensions_codec.rs | Build padding (0, 1, 100, 512), verify roundtrip |
+| 2 | `test_padding_rejects_nonzero` | extensions_codec.rs | parse_padding rejects non-zero bytes |
+| 3 | `test_oid_filters_codec_roundtrip` | extensions_codec.rs | Build single + multiple OID filters, verify roundtrip |
+| 4 | `test_oid_filters_empty` | extensions_codec.rs | Empty filter list produces valid extension |
+| 5 | `test_oid_filters_truncated_rejected` | extensions_codec.rs | Truncated data returns error |
+| 6 | `test_config_padding_target` | config/mod.rs | Builder sets padding_target, default is 0 |
+| 7 | `test_config_oid_filters` | config/mod.rs | Builder sets oid_filters, default is empty |
+| 8 | `test_padding_in_tls13_client_hello` | client.rs | CH with padding_target=512, PADDING ext present |
+| 9 | `test_no_padding_when_disabled` | client.rs | padding_target=0 → no PADDING ext |
+| 10 | `test_no_padding_when_already_large` | client.rs | CH > target → no padding added |
+| 11 | `test_dtls12_client_detects_abbreviated` | client_dtls12.rs | Unit test: abbreviated detection via session_id match |
+| 12 | `test_dtls12_abbreviated_handshake` | connection_dtls12.rs | Full HS → abbreviated HS succeeds |
+| 13 | `test_dtls12_abbreviated_app_data` | connection_dtls12.rs | App data after abbreviated HS |
+| 14 | `test_dtls12_abbreviated_falls_back_to_full` | connection_dtls12.rs | Mismatched session → full handshake |
+| 15 | `test_dtls12_abbreviated_with_cookie` | connection_dtls12.rs | Abbreviated + cookie exchange combined |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 2069 workspace tests passing (40 ignored)
+
+---
+
 ## Phase 74: Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 Session Cache
 
 ### Date: 2026-02-18
