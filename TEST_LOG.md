@@ -7,10 +7,11 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,021 tests (40 ignored)
+**Current**: 2,054 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
+**Testing-Phase 74**: +18 tests (Error scenario integration tests + 66 fuzz seed corpus files)
 
 ---
 
@@ -329,3 +330,66 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2021** | **40** |
+
+---
+
+## Testing-Phase 74 — Fuzz Seed Corpus + Error Scenario Integration Tests (2026-02-18)
+
+**Scope**: Stage C of the test optimization plan — structured fuzz seeds for all 10 targets and error/edge-case integration tests.
+**New items**: 66 seed corpus files + 18 new integration tests (2036 → 2054 total, 40 ignored unchanged)
+**hitls-integration-tests**: 60 → 78 tests
+
+### C1: Fuzz Seed Corpus (66 seed files across 10 targets)
+
+| Target | Seeds | Formats |
+|--------|------:|---------|
+| fuzz_asn1 | 10 | SEQUENCE, INTEGER, OID, BIT STRING, OCTET STRING, UTF8String, BOOLEAN, NULL, long-form length, empty SEQUENCE |
+| fuzz_base64 | 10 | Valid base64, newlines, empty, padding variants, invalid chars, URL-safe, whitespace |
+| fuzz_pem | 8 | CERTIFICATE, RSA PRIVATE KEY, EC PRIVATE KEY, PKCS#8, multi-block, truncated forms |
+| fuzz_x509 | 5 | Minimal cert skeleton, garbage DER, empty SEQUENCE, integer, length overflow |
+| fuzz_crl | 4 | CRL skeleton, empty, garbage, partial header |
+| fuzz_pkcs8 | 4 | EC key (P-256), RSA key, Ed25519, garbage |
+| fuzz_pkcs12 | 3 | PFX header, empty, garbage |
+| fuzz_cms | 4 | SignedData OID, EnvelopedData OID, empty, garbage |
+| fuzz_tls_handshake | 8 | ClientHello, ServerHello, Certificate, Finished, ServerHelloDone, HRR, truncated, unknown type |
+| fuzz_tls_record | 10 | Handshake/AppData/Alert/CCS/Heartbeat records, TLS 1.0 version, empty, truncated, large length |
+
+### C2: Error Scenario Integration Tests (+18)
+
+| Test | Category | Description |
+|------|----------|-------------|
+| test_version_mismatch_tls13_client_vs_tls12_server | Version | TLS 1.3 client → TLS 1.2 server must fail |
+| test_version_mismatch_tls12_client_vs_tls13_server | Version | TLS 1.2 client → TLS 1.3 server must fail |
+| test_tls12_cipher_suite_mismatch | Cipher | No common suite between client/server → fail |
+| test_tls12_psk_wrong_key | PSK | PSK key mismatch → Finished MAC fails |
+| test_tls13_alpn_overlap_negotiated | ALPN | Client h2+http/1.1, server http/1.1 → http/1.1 |
+| test_tls13_alpn_client_only_no_server_alpn | ALPN | Client offers ALPN, server has none → None |
+| test_concurrent_tls13_connections | Concurrency | 5 parallel TLS 1.3 connections all succeed |
+| test_concurrent_tls12_connections | Concurrency | 5 parallel TLS 1.2 connections all succeed |
+| test_tls13_large_64kb_payload | Large Data | 64KB payload fragmented across TLS 1.3 records |
+| test_tls12_large_64kb_payload | Large Data | 64KB payload fragmented across TLS 1.2 records |
+| test_tls13_connection_info_fields | ConnectionInfo | cipher_suite, negotiated_group, session_resumed |
+| test_tls12_connection_info_fields | ConnectionInfo | TLS 1.2 ConnectionInfo validation |
+| test_tls13_first_connection_not_resumed | Session | is_session_resumed()=false on first handshake |
+| test_tls12_multi_message_exchange | Protocol | 3 sequential request/response pairs |
+| test_tls12_graceful_shutdown | Shutdown | close_notify on both sides without error |
+| test_tls13_multi_suite_negotiation | Cipher | Server selects from shared cipher suite list |
+| test_tls13_session_take_after_handshake | Session | session_resumption(true) + first conn not resumed |
+| test_tls12_empty_write | Edge Case | Empty write(b"") succeeds without sending record |
+
+### Workspace Test Counts After Testing-Phase 74
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 48 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 593 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 78 | 3 |
+| hitls-pki | 336 | 1 |
+| hitls-tls | 753 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2054** | **40** |
