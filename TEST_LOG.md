@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,112 tests (40 ignored)
+**Current**: 2,131 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -447,3 +447,102 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2070** | **40** |
+
+---
+
+## Phase 76 — Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) (2026-02-18)
+
+**Scope**: Async DTLS 1.2 connections, Heartbeat extension codec, GREASE ClientHello injection.
+**New items**: +19 tests (2086 → 2105)
+**hitls-tls**: 774 → 793 tests
+
+### New Tests (+19)
+
+| Test | File | Description |
+|------|------|-------------|
+| test_heartbeat_codec_roundtrip | extensions_codec.rs | Heartbeat build/parse roundtrip (mode 1, mode 2) |
+| test_heartbeat_invalid_mode | extensions_codec.rs | Rejects mode 0, 3+, empty, oversized |
+| test_grease_value_is_valid | extensions_codec.rs | grease_value() returns valid 0x?A?A pattern |
+| test_grease_extension_build | extensions_codec.rs | GREASE extension has valid type + empty data |
+| test_grease_supported_versions | extensions_codec.rs | GREASE version prepended to supported_versions |
+| test_config_heartbeat_mode | config/mod.rs | Config builder sets heartbeat_mode correctly |
+| test_config_grease | config/mod.rs | Config builder sets grease flag correctly |
+| test_grease_in_client_hello | client.rs | GREASE cipher suite + extension present in ClientHello |
+| test_no_grease_when_disabled | client.rs | No GREASE values when config.grease=false |
+| test_async_dtls12_read_before_handshake | connection_dtls12_async.rs | Read before handshake returns error |
+| test_async_dtls12_write_before_handshake | connection_dtls12_async.rs | Write before handshake returns error |
+| test_async_dtls12_full_handshake | connection_dtls12_async.rs | Full handshake + data exchange |
+| test_async_dtls12_version_check | connection_dtls12_async.rs | Version returns DTLS 1.2 after handshake |
+| test_async_dtls12_cipher_suite | connection_dtls12_async.rs | Cipher suite matches configured suite |
+| test_async_dtls12_connection_info | connection_dtls12_async.rs | ConnectionInfo fields populated after handshake |
+| test_async_dtls12_shutdown | connection_dtls12_async.rs | Graceful shutdown completes |
+| test_async_dtls12_large_payload | connection_dtls12_async.rs | 32KB payload exchange |
+| test_async_dtls12_abbreviated_handshake | connection_dtls12_async.rs | Session resumption via abbreviated handshake |
+| test_async_dtls12_session_resumed | connection_dtls12_async.rs | is_session_resumed() returns true after resumption |
+
+---
+
+## Testing-Phase 76 — cert_verify Unit Tests + Config Callbacks + Integration Tests (2026-02-18)
+
+**Scope**: F1: cert_verify module unit tests; F2: config callback tests; F3: integration tests.
+**New items**: 13 cert_verify unit tests (F1) + 7 config callback tests (F2) + 6 integration tests (F3) = +26 tests total (2105 → 2131)
+**hitls-tls**: 793 → 813 tests
+**hitls-integration-tests**: 88 → 94 tests
+
+### F1: cert_verify Unit Tests (+13, in cert_verify.rs)
+
+| Test | Description |
+|------|-------------|
+| test_verify_peer_false_empty_chain | verify_peer=false bypasses empty chain |
+| test_verify_peer_false_garbage_der | verify_peer=false bypasses garbage DER |
+| test_empty_chain_rejected | Empty chain rejected when verify_peer=true |
+| test_invalid_der_rejected | Invalid DER rejected |
+| test_chain_fails_no_trusted_certs | Chain fails with no trusted certs |
+| test_hostname_skip_disabled | Hostname check skipped when disabled |
+| test_hostname_skip_no_server_name | Hostname check skipped with no server_name |
+| test_callback_accept_despite_failure | CertVerifyCallback overrides chain failure |
+| test_callback_reject_despite_valid | CertVerifyCallback rejects valid chain |
+| test_callback_receives_correct_info | CertVerifyInfo fields populated correctly |
+| test_hostname_mismatch | CN=localhost vs server_name="example.com" fails |
+| test_cert_verify_info_debug | CertVerifyInfo Debug impl works |
+| test_callback_not_invoked_verify_peer_false | Callback not invoked when verify_peer=false |
+
+### F2: Config Callback Tests (+7, in config/mod.rs)
+
+| Test | Description |
+|------|-------------|
+| test_cert_verify_callback | cert_verify_callback stored and callable |
+| test_sni_callback | sni_callback stored and callable |
+| test_key_log_callback | key_log_callback stored and callable |
+| test_verify_hostname_toggle | Default true, disable/re-enable |
+| test_trusted_cert_accumulates | Multiple trusted_cert calls accumulate |
+| test_sni_action_variants | All SniAction variants constructible |
+| test_config_debug_format | Debug format includes callback field names |
+
+### F3: Integration Tests (+6, in tests/interop/src/lib.rs)
+
+| Test | Description |
+|------|-------------|
+| test_tls13_cert_verify_callback_accept | Callback overrides missing trusted certs |
+| test_tls13_cert_verify_callback_reject | Callback rejects → handshake fails |
+| test_tls12_cert_verify_callback_accept | Same pattern over TLS 1.2 |
+| test_tls13_key_log_callback_invoked | Lines have 3 space-separated fields |
+| test_tls12_key_log_callback_invoked | Lines start with CLIENT_RANDOM |
+| test_tls12_server_renegotiation | Server-initiated renegotiation end-to-end |
+
+### Workspace Test Counts After Testing-Phase 76
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 593 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 94 | 3 |
+| hitls-pki | 336 | 1 |
+| hitls-tls | 813 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2131** | **40** |
