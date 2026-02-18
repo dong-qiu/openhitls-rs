@@ -25,10 +25,12 @@ use super::codec::{
 use super::codec::{decode_compressed_certificate, decompress_certificate_body};
 use super::extensions_codec::{
     build_alpn, build_certificate_authorities, build_compress_certificate, build_cookie,
-    build_early_data_ch, build_key_share_ch, build_padding, build_post_handshake_auth,
-    build_pre_shared_key_ch, build_psk_key_exchange_modes, build_record_size_limit, build_sct_ch,
-    build_server_name, build_signature_algorithms, build_signature_algorithms_cert,
-    build_status_request_ch, build_supported_groups, build_supported_versions_ch, parse_alpn_sh,
+    build_early_data_ch, build_grease_extension, build_heartbeat, build_key_share_ch,
+    build_key_share_ch_grease, build_padding, build_post_handshake_auth, build_pre_shared_key_ch,
+    build_psk_key_exchange_modes, build_record_size_limit, build_sct_ch, build_server_name,
+    build_signature_algorithms, build_signature_algorithms_cert, build_signature_algorithms_grease,
+    build_status_request_ch, build_supported_groups, build_supported_groups_grease,
+    build_supported_versions_ch, build_supported_versions_ch_grease, grease_value, parse_alpn_sh,
     parse_cookie, parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh,
     parse_record_size_limit, parse_status_request_cert_entry, parse_supported_versions_sh,
 };
@@ -260,13 +262,26 @@ impl ClientHandshake {
             .map_err(|_| TlsError::HandshakeFailed("random generation failed".into()))?;
         self.client_random = random;
 
-        // Build extensions
-        let mut extensions = vec![
-            build_supported_versions_ch(),
-            build_supported_groups(&self.config.supported_groups),
-            build_signature_algorithms(&self.config.signature_algorithms),
-            build_key_share_ch(group, kx.public_key_bytes()),
-        ];
+        // Build extensions (with optional GREASE injection)
+        let grease_enabled = self.config.grease;
+        let mut extensions = if grease_enabled {
+            vec![
+                build_supported_versions_ch_grease(grease_value()),
+                build_supported_groups_grease(&self.config.supported_groups, grease_value()),
+                build_signature_algorithms_grease(
+                    &self.config.signature_algorithms,
+                    grease_value(),
+                ),
+                build_key_share_ch_grease(group, kx.public_key_bytes(), grease_value()),
+            ]
+        } else {
+            vec![
+                build_supported_versions_ch(),
+                build_supported_groups(&self.config.supported_groups),
+                build_signature_algorithms(&self.config.signature_algorithms),
+                build_key_share_ch(group, kx.public_key_bytes()),
+            ]
+        };
         if !self.config.signature_algorithms_cert.is_empty() {
             extensions.push(build_signature_algorithms_cert(
                 &self.config.signature_algorithms_cert,
@@ -306,11 +321,21 @@ impl ClientHandshake {
             extensions.push(build_alpn(&self.config.alpn_protocols));
         }
 
+        // Heartbeat extension (RFC 6520)
+        if self.config.heartbeat_mode > 0 {
+            extensions.push(build_heartbeat(self.config.heartbeat_mode));
+        }
+
         // Custom extensions
         extensions.extend(crate::extensions::build_custom_extensions(
             &self.config.custom_extensions,
             crate::extensions::ExtensionContext::CLIENT_HELLO,
         ));
+
+        // GREASE empty extension (RFC 8701)
+        if grease_enabled {
+            extensions.push(build_grease_extension());
+        }
 
         // PADDING extension (RFC 7685) — added before PSK (which MUST be last)
         if self.config.padding_target > 0 {
@@ -349,10 +374,16 @@ impl ClientHandshake {
             extensions.push(build_early_data_ch());
         }
 
+        // Build cipher suites (with optional GREASE prepend)
+        let mut cipher_suites = self.config.cipher_suites.clone();
+        if grease_enabled {
+            cipher_suites.insert(0, CipherSuite(grease_value()));
+        }
+
         let ch = ClientHello {
             random,
             legacy_session_id: vec![],
-            cipher_suites: self.config.cipher_suites.clone(),
+            cipher_suites,
             extensions,
         };
 
@@ -1289,5 +1320,83 @@ mod tests {
             !has_padding,
             "ClientHello should NOT contain PADDING when already exceeding target"
         );
+    }
+
+    #[test]
+    fn test_grease_in_client_hello() {
+        use crate::handshake::extensions_codec::is_grease_value;
+
+        let config = TlsConfig::builder().grease(true).build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // Parse the ClientHello to check for GREASE values
+        // The CH starts with type(1) + length(3) + version(2) + random(32) +
+        // session_id_len(1) + session_id + suites_len(2) + suites...
+        let pos = 4; // skip type + length
+        let _version = u16::from_be_bytes([ch_msg[pos], ch_msg[pos + 1]]);
+        let sid_len = ch_msg[pos + 2 + 32] as usize;
+        let suites_offset = pos + 2 + 32 + 1 + sid_len;
+        let suites_len =
+            u16::from_be_bytes([ch_msg[suites_offset], ch_msg[suites_offset + 1]]) as usize;
+
+        // Check that at least one GREASE cipher suite exists (should be first)
+        let first_suite =
+            u16::from_be_bytes([ch_msg[suites_offset + 2], ch_msg[suites_offset + 3]]);
+        assert!(
+            is_grease_value(first_suite),
+            "first cipher suite should be GREASE, got {first_suite:#06X}"
+        );
+
+        // Check that at least one GREASE extension type exists in the message
+        // by scanning for any 2-byte window matching the GREASE pattern in extension area
+        let comp_offset = suites_offset + 2 + suites_len;
+        let _comp_len = ch_msg[comp_offset] as usize;
+        let ext_offset = comp_offset + 1 + _comp_len;
+        let ext_total_len =
+            u16::from_be_bytes([ch_msg[ext_offset], ch_msg[ext_offset + 1]]) as usize;
+        let ext_data = &ch_msg[ext_offset + 2..ext_offset + 2 + ext_total_len];
+
+        // Scan for any extension with a GREASE type
+        let mut found_grease_ext = false;
+        let mut p = 0;
+        while p + 4 <= ext_data.len() {
+            let etype = u16::from_be_bytes([ext_data[p], ext_data[p + 1]]);
+            let elen = u16::from_be_bytes([ext_data[p + 2], ext_data[p + 3]]) as usize;
+            if is_grease_value(etype) {
+                found_grease_ext = true;
+                break;
+            }
+            p += 4 + elen;
+        }
+        assert!(
+            found_grease_ext,
+            "ClientHello should contain a GREASE extension"
+        );
+    }
+
+    #[test]
+    fn test_no_grease_when_disabled() {
+        use crate::handshake::extensions_codec::is_grease_value;
+
+        let config = TlsConfig::builder().grease(false).build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // Parse cipher suites — none should be GREASE
+        let pos = 4;
+        let sid_len = ch_msg[pos + 2 + 32] as usize;
+        let suites_offset = pos + 2 + 32 + 1 + sid_len;
+        let suites_len =
+            u16::from_be_bytes([ch_msg[suites_offset], ch_msg[suites_offset + 1]]) as usize;
+        let mut s = suites_offset + 2;
+        while s + 2 <= suites_offset + 2 + suites_len {
+            let suite = u16::from_be_bytes([ch_msg[s], ch_msg[s + 1]]);
+            assert!(
+                !is_grease_value(suite),
+                "no GREASE cipher suite expected, found {suite:#06X}"
+            );
+            s += 2;
+        }
     }
 }

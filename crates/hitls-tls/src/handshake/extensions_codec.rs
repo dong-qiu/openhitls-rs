@@ -1127,6 +1127,143 @@ pub fn parse_oid_filters(data: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, TlsErro
 }
 
 // ---------------------------------------------------------------------------
+// Heartbeat Extension (RFC 6520, type 15)
+// ---------------------------------------------------------------------------
+
+/// Build `heartbeat` extension (RFC 6520, type 15).
+/// Wire format: mode(1) — 1=peer_allowed_to_send, 2=peer_not_allowed_to_send.
+pub fn build_heartbeat(mode: u8) -> Extension {
+    Extension {
+        extension_type: ExtensionType::HEARTBEAT,
+        data: vec![mode],
+    }
+}
+
+/// Parse `heartbeat` extension.
+/// Returns the mode value (1 or 2).
+pub fn parse_heartbeat(data: &[u8]) -> Result<u8, TlsError> {
+    if data.len() != 1 {
+        return Err(TlsError::HandshakeFailed(
+            "heartbeat: expected 1 byte".into(),
+        ));
+    }
+    let mode = data[0];
+    if mode != 1 && mode != 2 {
+        return Err(TlsError::HandshakeFailed(format!(
+            "heartbeat: invalid mode {mode}, expected 1 or 2"
+        )));
+    }
+    Ok(mode)
+}
+
+// ---------------------------------------------------------------------------
+// GREASE (RFC 8701)
+// ---------------------------------------------------------------------------
+
+/// The 16 GREASE values defined in RFC 8701.
+pub const GREASE_VALUES: [u16; 16] = [
+    0x0A0A, 0x1A1A, 0x2A2A, 0x3A3A, 0x4A4A, 0x5A5A, 0x6A6A, 0x7A7A, 0x8A8A, 0x9A9A, 0xAAAA, 0xBABA,
+    0xCACA, 0xDADA, 0xEAEA, 0xFAFA,
+];
+
+/// Returns true if a u16 value matches the GREASE pattern (0x?A?A where both nibbles match).
+pub fn is_grease_value(v: u16) -> bool {
+    (v & 0x0F0F) == 0x0A0A && (v >> 8) == (v & 0xFF)
+}
+
+/// Pick a random GREASE value from the 16 defined values.
+pub fn grease_value() -> u16 {
+    let mut buf = [0u8; 1];
+    let _ = getrandom::getrandom(&mut buf);
+    GREASE_VALUES[(buf[0] & 0x0F) as usize]
+}
+
+/// Build a GREASE extension with a random type code and empty data.
+pub fn build_grease_extension() -> Extension {
+    Extension {
+        extension_type: ExtensionType(grease_value()),
+        data: vec![],
+    }
+}
+
+/// Build `supported_versions` ClientHello extension with a GREASE version prepended.
+pub fn build_supported_versions_ch_grease(grease_ver: u16) -> Extension {
+    // Format: list_length(1) || grease_version(2) || TLS 1.3 (0x0304)
+    let data = vec![
+        0x04, // list_length = 4 bytes (2 versions)
+        (grease_ver >> 8) as u8,
+        (grease_ver & 0xFF) as u8,
+        0x03,
+        0x04, // TLS 1.3
+    ];
+    Extension {
+        extension_type: ExtensionType::SUPPORTED_VERSIONS,
+        data,
+    }
+}
+
+/// Build `supported_groups` extension with a GREASE group prepended.
+pub fn build_supported_groups_grease(groups: &[NamedGroup], grease_group: u16) -> Extension {
+    let mut data = Vec::with_capacity(2 + 2 + groups.len() * 2);
+    let list_len = (2 + groups.len() * 2) as u16;
+    data.extend_from_slice(&list_len.to_be_bytes());
+    data.extend_from_slice(&grease_group.to_be_bytes());
+    for g in groups {
+        data.extend_from_slice(&g.0.to_be_bytes());
+    }
+    Extension {
+        extension_type: ExtensionType::SUPPORTED_GROUPS,
+        data,
+    }
+}
+
+/// Build `signature_algorithms` extension with a GREASE scheme prepended.
+pub fn build_signature_algorithms_grease(
+    schemes: &[SignatureScheme],
+    grease_sig: u16,
+) -> Extension {
+    let mut data = Vec::with_capacity(2 + 2 + schemes.len() * 2);
+    let list_len = (2 + schemes.len() * 2) as u16;
+    data.extend_from_slice(&list_len.to_be_bytes());
+    data.extend_from_slice(&grease_sig.to_be_bytes());
+    for s in schemes {
+        data.extend_from_slice(&s.0.to_be_bytes());
+    }
+    Extension {
+        extension_type: ExtensionType::SIGNATURE_ALGORITHMS,
+        data,
+    }
+}
+
+/// Build `key_share` ClientHello extension with a GREASE key_share entry prepended.
+/// The GREASE entry uses a 1-byte dummy public key (0x00).
+pub fn build_key_share_ch_grease(
+    group: NamedGroup,
+    public_key: &[u8],
+    grease_group: u16,
+) -> Extension {
+    // GREASE entry: group(2) + key_len(2) + key(1) = 5 bytes
+    // Real entry: group(2) + key_len(2) + key(N)
+    let grease_entry_len = 2 + 2 + 1;
+    let real_entry_len = 2 + 2 + public_key.len();
+    let total_len = grease_entry_len + real_entry_len;
+    let mut data = Vec::with_capacity(2 + total_len);
+    data.extend_from_slice(&(total_len as u16).to_be_bytes());
+    // GREASE entry
+    data.extend_from_slice(&grease_group.to_be_bytes());
+    data.extend_from_slice(&1u16.to_be_bytes()); // key_exchange_length = 1
+    data.push(0x00); // dummy key
+                     // Real entry
+    data.extend_from_slice(&group.0.to_be_bytes());
+    data.extend_from_slice(&(public_key.len() as u16).to_be_bytes());
+    data.extend_from_slice(public_key);
+    Extension {
+        extension_type: ExtensionType::KEY_SHARE,
+        data,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1740,5 +1877,69 @@ mod tests {
         assert!(parse_oid_filters(&[0x00, 0x0A, 0x03]).is_err());
         // OID length says 5 but only 2 bytes available
         assert!(parse_oid_filters(&[0x00, 0x04, 0x05, 0xAA, 0xBB, 0xCC]).is_err());
+    }
+
+    // Heartbeat extension tests
+
+    #[test]
+    fn test_heartbeat_codec_roundtrip() {
+        // Mode 1: peer_allowed_to_send
+        let ext = build_heartbeat(1);
+        assert_eq!(ext.extension_type, ExtensionType::HEARTBEAT);
+        assert_eq!(ext.data.len(), 1);
+        let mode = parse_heartbeat(&ext.data).unwrap();
+        assert_eq!(mode, 1);
+
+        // Mode 2: peer_not_allowed_to_send
+        let ext2 = build_heartbeat(2);
+        let mode2 = parse_heartbeat(&ext2.data).unwrap();
+        assert_eq!(mode2, 2);
+    }
+
+    #[test]
+    fn test_heartbeat_invalid_mode() {
+        // Mode 0 → error
+        assert!(parse_heartbeat(&[0]).is_err());
+        // Mode 3 → error
+        assert!(parse_heartbeat(&[3]).is_err());
+        // Empty → error
+        assert!(parse_heartbeat(&[]).is_err());
+        // Too long → error
+        assert!(parse_heartbeat(&[1, 2]).is_err());
+    }
+
+    // GREASE tests
+
+    #[test]
+    fn test_grease_value_is_valid() {
+        // Call multiple times to exercise randomness
+        for _ in 0..20 {
+            let gv = grease_value();
+            assert!(
+                is_grease_value(gv),
+                "grease_value() returned {gv:#06X} which is not a valid GREASE value"
+            );
+            assert!(GREASE_VALUES.contains(&gv));
+        }
+    }
+
+    #[test]
+    fn test_grease_extension_build() {
+        let ext = build_grease_extension();
+        assert!(is_grease_value(ext.extension_type.0));
+        assert!(ext.data.is_empty());
+    }
+
+    #[test]
+    fn test_grease_supported_versions() {
+        let gv = 0x3A3A;
+        let ext = build_supported_versions_ch_grease(gv);
+        assert_eq!(ext.extension_type, ExtensionType::SUPPORTED_VERSIONS);
+        // Parse: list_length(1) + versions
+        assert_eq!(ext.data[0], 4); // 2 versions * 2 bytes
+        let ver1 = u16::from_be_bytes([ext.data[1], ext.data[2]]);
+        let ver2 = u16::from_be_bytes([ext.data[3], ext.data[4]]);
+        assert_eq!(ver1, 0x3A3A); // GREASE
+        assert_eq!(ver2, 0x0304); // TLS 1.3
     }
 }

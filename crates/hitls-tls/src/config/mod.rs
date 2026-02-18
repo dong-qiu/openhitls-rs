@@ -242,6 +242,13 @@ pub struct TlsConfig {
     /// Each entry is (OID DER bytes, certificate extension values).
     /// Empty = not sent.
     pub oid_filters: Vec<(Vec<u8>, Vec<u8>)>,
+    /// Heartbeat extension mode (RFC 6520).
+    /// 0 = disabled (default), 1 = peer_allowed_to_send, 2 = peer_not_allowed_to_send.
+    pub heartbeat_mode: u8,
+    /// Enable GREASE (RFC 8701) in ClientHello.
+    /// When true, injects random GREASE values into cipher suites, extensions,
+    /// supported_versions, supported_groups, signature_algorithms, key_share.
+    pub grease: bool,
 }
 
 impl fmt::Debug for TlsConfig {
@@ -343,6 +350,8 @@ pub struct TlsConfigBuilder {
     certificate_authorities: Vec<Vec<u8>>,
     padding_target: u16,
     oid_filters: Vec<(Vec<u8>, Vec<u8>)>,
+    heartbeat_mode: u8,
+    grease: bool,
 }
 
 impl Default for TlsConfigBuilder {
@@ -407,6 +416,8 @@ impl Default for TlsConfigBuilder {
             certificate_authorities: Vec::new(),
             padding_target: 0,
             oid_filters: Vec::new(),
+            heartbeat_mode: 0,
+            grease: false,
         }
     }
 }
@@ -668,6 +679,16 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn heartbeat_mode(mut self, mode: u8) -> Self {
+        self.heartbeat_mode = mode;
+        self
+    }
+
+    pub fn grease(mut self, enabled: bool) -> Self {
+        self.grease = enabled;
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -721,6 +742,8 @@ impl TlsConfigBuilder {
             certificate_authorities: self.certificate_authorities,
             padding_target: self.padding_target,
             oid_filters: self.oid_filters,
+            heartbeat_mode: self.heartbeat_mode,
+            grease: self.grease,
         }
     }
 }
@@ -1080,6 +1103,32 @@ mod tests {
         // Set padding target
         let config2 = TlsConfig::builder().padding_target(512).build();
         assert_eq!(config2.padding_target, 512);
+    }
+
+    #[test]
+    fn test_config_heartbeat_mode() {
+        // Default: 0 (disabled)
+        let config = TlsConfig::builder().build();
+        assert_eq!(config.heartbeat_mode, 0);
+
+        // Set mode 1 (peer_allowed_to_send)
+        let config2 = TlsConfig::builder().heartbeat_mode(1).build();
+        assert_eq!(config2.heartbeat_mode, 1);
+
+        // Set mode 2 (peer_not_allowed_to_send)
+        let config3 = TlsConfig::builder().heartbeat_mode(2).build();
+        assert_eq!(config3.heartbeat_mode, 2);
+    }
+
+    #[test]
+    fn test_config_grease() {
+        // Default: false
+        let config = TlsConfig::builder().build();
+        assert!(!config.grease);
+
+        // Enabled
+        let config2 = TlsConfig::builder().grease(true).build();
+        assert!(config2.grease);
     }
 
     #[test]

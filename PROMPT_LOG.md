@@ -1712,3 +1712,20 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - 5 codec tests, 2 config tests, 3 padding ClientHello tests, 1 client abbreviated detection test, 4 DTLS abbreviated handshake integration tests
 
 2085 total tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
+## Phase 76: Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) (2026-02-18)
+
+**Prompt**: Implement Phase 76 — Async DTLS 1.2 (AsyncDtls12ClientConnection + AsyncDtls12ServerConnection, full/abbreviated handshake, read/write/shutdown, anti-replay, session cache), Heartbeat extension (RFC 6520, type 15 codec + config), GREASE (RFC 8701, ClientHello injection).
+
+**Work performed**:
+- Async DTLS 1.2: New connection_dtls12_async.rs with full/abbreviated handshake, async read/write/shutdown, anti-replay, epoch management, session cache auto-store
+- Heartbeat extension (RFC 6520): type 15 codec + config heartbeat_mode
+- GREASE (RFC 8701): config flag + ClientHello cipher suite/extension/version/group/sig_alg/key_share injection
+- Files: connection_dtls12_async.rs (NEW), lib.rs, extensions/mod.rs, extensions_codec.rs, config/mod.rs, client.rs
+
+**Result**:
+- hitls-tls: 774 → 793 (+19 tests); total: 2086 → 2105 tests.
+
+2105 total tests (40 ignored). Clippy clean, fmt clean.

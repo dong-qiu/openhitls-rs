@@ -14,6 +14,8 @@ pub mod connection_async;
 pub mod connection_dtlcp;
 #[cfg(feature = "dtls12")]
 pub mod connection_dtls12;
+#[cfg(all(feature = "async", feature = "dtls12"))]
+pub mod connection_dtls12_async;
 pub mod connection_info;
 #[cfg(feature = "tlcp")]
 pub mod connection_tlcp;

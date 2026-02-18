@@ -1,5 +1,67 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 76: Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701)
+
+### Date: 2026-02-18
+
+### Summary
+
+Implemented three features:
+1. **Async DTLS 1.2** — `AsyncDtls12ClientConnection<S>` + `AsyncDtls12ServerConnection<S>` with full handshake (cookie exchange), abbreviated handshake (session resumption), async read/write/shutdown, anti-replay, epoch management, session cache auto-store.
+2. **Heartbeat Extension (RFC 6520)** — Extension type 15 codec (build/parse), `heartbeat_mode: u8` config field (0=disabled, 1=peer_allowed_to_send, 2=peer_not_allowed_to_send). Extension negotiation only.
+3. **GREASE (RFC 8701)** — `grease: bool` config field. When enabled, injects random GREASE values (0x?A?A pattern) into ClientHello: cipher suites (prepend), supported_versions, supported_groups, signature_algorithms, key_share (with 1-byte dummy), and one random empty GREASE extension.
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/connection_dtls12_async.rs`** — NEW: Async DTLS 1.2 client + server connections (full/abbreviated handshake, read/write/shutdown, anti-replay, session cache, 10 tests)
+2. **`crates/hitls-tls/src/lib.rs`** — Register `connection_dtls12_async` module under `#[cfg(all(feature = "async", feature = "dtls12"))]`
+3. **`crates/hitls-tls/src/extensions/mod.rs`** — Add `HEARTBEAT: Self = Self(15)` constant
+4. **`crates/hitls-tls/src/handshake/extensions_codec.rs`** — Heartbeat codec (build_heartbeat, parse_heartbeat), GREASE helpers (GREASE_VALUES, is_grease_value, grease_value, build_grease_extension, build_supported_versions_ch_grease, build_supported_groups_grease, build_signature_algorithms_grease, build_key_share_ch_grease), 5 tests
+5. **`crates/hitls-tls/src/config/mod.rs`** — Add `heartbeat_mode: u8` and `grease: bool` config fields with builder methods and defaults, 2 tests
+6. **`crates/hitls-tls/src/handshake/client.rs`** — GREASE injection in `build_client_hello()` (cipher suites prepend, extension builders, empty GREASE extension), heartbeat extension when configured, 2 tests
+
+### Implementation Details
+
+- Async DTLS 1.2 follows patterns from `connection12_async.rs` (async I/O orchestration) and `connection_dtls12.rs` (DTLS-specific: EpochState, DtlsRecord, encryption/decryption, anti-replay, cookie exchange)
+- DTLS record format: 13-byte header (content_type + version + epoch + sequence_number + length), self-framing over stream transport
+- Session cache locking: MutexGuard acquired and released synchronously, never held across `.await` points
+- GREASE values are independently random per list (different `grease_value()` calls for cipher suite, versions, groups, sig_algs, key_share, extension)
+- Heartbeat: mode validation rejects 0, 3+, empty, and oversized data
+- All secrets zeroized after handshake completion
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_heartbeat_codec_roundtrip | extensions_codec.rs |
+| 2 | test_heartbeat_invalid_mode | extensions_codec.rs |
+| 3 | test_grease_value_is_valid | extensions_codec.rs |
+| 4 | test_grease_extension_build | extensions_codec.rs |
+| 5 | test_grease_supported_versions | extensions_codec.rs |
+| 6 | test_config_heartbeat_mode | config/mod.rs |
+| 7 | test_config_grease | config/mod.rs |
+| 8 | test_grease_in_client_hello | client.rs |
+| 9 | test_no_grease_when_disabled | client.rs |
+| 10 | test_async_dtls12_read_before_handshake | connection_dtls12_async.rs |
+| 11 | test_async_dtls12_write_before_handshake | connection_dtls12_async.rs |
+| 12 | test_async_dtls12_full_handshake | connection_dtls12_async.rs |
+| 13 | test_async_dtls12_version_check | connection_dtls12_async.rs |
+| 14 | test_async_dtls12_cipher_suite | connection_dtls12_async.rs |
+| 15 | test_async_dtls12_connection_info | connection_dtls12_async.rs |
+| 16 | test_async_dtls12_shutdown | connection_dtls12_async.rs |
+| 17 | test_async_dtls12_large_payload | connection_dtls12_async.rs |
+| 18 | test_async_dtls12_abbreviated_handshake | connection_dtls12_async.rs |
+| 19 | test_async_dtls12_session_resumed | connection_dtls12_async.rs |
+
++19 tests (2086 → 2105)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2105 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase 75: PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake
 
 ### Date: 2026-02-18

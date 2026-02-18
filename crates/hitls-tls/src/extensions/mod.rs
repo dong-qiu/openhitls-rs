@@ -31,6 +31,7 @@ impl ExtensionType {
     pub const SESSION_TICKET: Self = Self(35);
     pub const RECORD_SIZE_LIMIT: Self = Self(28);
     pub const OID_FILTERS: Self = Self(48);
+    pub const HEARTBEAT: Self = Self(15);
     pub const RENEGOTIATION_INFO: Self = Self(0xFF01);
 }
 
