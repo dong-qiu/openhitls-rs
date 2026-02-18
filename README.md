@@ -23,8 +23,8 @@ openhitls-rs/
 │   ├── hitls-utils/     # Utilities: ASN.1, Base64, PEM, OID (53 tests)
 │   ├── hitls-bignum/    # Big number: Montgomery, Miller-Rabin, GCD (49 tests)
 │   ├── hitls-crypto/    # Crypto: AES, SM4, ChaCha20, GCM, SHA-2, SHA-3, HMAC, CMAC, RSA, ECC (P-224/P-256/P-384/P-521/Brainpool), ECDSA, ECDH, Ed25519, X25519, Ed448, X448, Curve448, DH, DSA, SM2, SM9, DRBG (HMAC/CTR/Hash), Entropy (SP 800-90B health tests), ML-KEM, ML-DSA, SLH-DSA, XMSS, FrodoKEM, McEliece, HPKE, HybridKEM, Paillier, ElGamal, SM4-CCM (593 tests + 15 Wycheproof)
-│   ├── hitls-tls/       # TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP, async I/O (tokio), custom extensions, NSS key logging, 91 cipher suites (incl. TLS 1.2 AES-CCM RFC 6655/7251, AES-CCM_8 8-byte tag, PSK+CCM/CCM_8, DHE_PSK CCM_8, ECDHE_PSK CCM_8, DHE_RSA CCM_8, ECDHE_ECDSA CCM_8, PSK CBC-SHA256/SHA384, ECDHE_PSK GCM, DHE_DSS RFC 5246, DH_ANON/ECDH_ANON RFC 5246/4492), renegotiation (RFC 5746), hostname verification (RFC 6125), cert chain validation, CertVerifyCallback + SniCallback, ConnectionInfo APIs, graceful shutdown (close_notify), hybrid KEM (X25519MLKEM768), TLS 1.3 SM4-GCM/CCM (RFC 8998) + AES_128_CCM_8_SHA256, Record Size Limit, Fallback SCSV, OCSP stapling, SCT, Certificate Authorities (RFC 8446 §4.2.4), early exporter master secret (RFC 8446 §7.5), PADDING (RFC 7685), OID Filters (RFC 8446 §4.2.5), DTLS 1.2 session cache + abbreviated handshake + async I/O, Heartbeat (RFC 6520), GREASE (RFC 8701) (813 tests)
-│   ├── hitls-pki/       # X.509 (parse, verify [RSA/ECDSA/Ed25519/Ed448/SM2/RSA-PSS], chain, CRL, OCSP, CSR generation, certificate generation, to_text, hostname verification (RFC 6125)), PKCS#8 (RFC 5958, Ed448/X448), SPKI parsing, PKCS#12 (RFC 7292), CMS SignedData (Ed25519/Ed448, detached mode) + EnvelopedData (RFC 5652) (336 tests, 1 ignored)
+│   ├── hitls-tls/       # TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP, 10 connection types (5 sync + 5 async), async I/O (tokio), custom extensions, NSS key logging, 91 cipher suites (incl. TLS 1.2 AES-CCM RFC 6655/7251, AES-CCM_8 8-byte tag, PSK+CCM/CCM_8, DHE_PSK CCM_8, ECDHE_PSK CCM_8, DHE_RSA CCM_8, ECDHE_ECDSA CCM_8, PSK CBC-SHA256/SHA384, ECDHE_PSK GCM, DHE_DSS RFC 5246, DH_ANON/ECDH_ANON RFC 5246/4492), renegotiation (RFC 5746), hostname verification (RFC 6125), cert chain validation, CertVerifyCallback + SniCallback, ConnectionInfo APIs, graceful shutdown (close_notify), server/client session cache (TTL expiration, cipher_server_preference), write record fragmentation, KeyUpdate loop protection (128 limit), Max Fragment Length (RFC 6066), Signature Algorithms Cert (RFC 8446 §4.2.3), hybrid KEM (X25519MLKEM768), TLS 1.3 SM4-GCM/CCM (RFC 8998) + AES_128_CCM_8_SHA256, RFC 5705/8446 key material export, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT (RFC 6962), Certificate Authorities (RFC 8446 §4.2.4), early exporter master secret (RFC 8446 §7.5), PADDING (RFC 7685), OID Filters (RFC 8446 §4.2.5), DTLS 1.2 session cache + abbreviated handshake + async I/O, Heartbeat (RFC 6520), GREASE (RFC 8701) (813 tests)
+│   ├── hitls-pki/       # X.509 (parse, verify [RSA/ECDSA/Ed25519/Ed448/SM2/RSA-PSS], chain, CRL, OCSP, CSR generation, certificate generation, to_text, EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies enforcement, hostname verification (RFC 6125)), PKCS#8 (RFC 5958, Ed448/X448), SPKI parsing, PKCS#12 (RFC 7292), CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr, detached mode) + EnvelopedData + EncryptedData + DigestedData (RFC 5652) (336 tests, 1 ignored)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382), Privacy Pass (RFC 9578, RSA blind sigs) (33 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
 ├── tests/interop/       # Integration tests: 94 cross-crate tests including TCP loopback, DTLS 1.2, TLCP, DTLCP, mTLS (3 ignored)
@@ -135,7 +135,7 @@ openhitls-rs/
 | TLS 1.3 | `hitls-tls` | **Done** — Key Schedule + Record + Client & Server Handshake + HRR + KeyUpdate + PSK/0-RTT + Certificate Compression + X25519MLKEM768 Hybrid KEM + SM4-GCM/CCM (RFC 8998) + AES_128_CCM_8_SHA256 |
 | TLS 1.2 PRF | `hitls-tls` | **Done** — PRF (RFC 5246 section 5) |
 | TLS 1.2 | `hitls-tls` | **Done** — 91 cipher suites (ECDHE/RSA/DHE_RSA/DHE_DSS/DH_ANON/ECDH_ANON/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20/CCM/CCM_8, Bleichenbacher protection), ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation (RFC 5746, server-initiated + verify_data validation), mTLS, PSK (RFC 4279/5489/5487), AES-CCM (RFC 6655/7251), AES-CCM_8 (8-byte tag), PSK+CCM/CCM_8, DHE_PSK CCM_8, ECDHE_PSK CCM_8, DHE_RSA CCM_8, ECDHE_ECDSA CCM_8, PSK CBC-SHA256/SHA384, ECDHE_PSK GCM, DHE_DSS (RFC 5246), DH_ANON/ECDH_ANON (RFC 5246/4492) |
-| DTLS 1.2 | `hitls-tls` | **Done** — Record layer + Handshake + Fragmentation/Reassembly + Cookie Exchange + Anti-Replay + Retransmission + Session Cache + Abbreviated Handshake |
+| DTLS 1.2 | `hitls-tls` | **Done** — Record layer + Handshake + Fragmentation/Reassembly + Cookie Exchange + Anti-Replay + Retransmission + Session Cache + Abbreviated Handshake + Async I/O |
 | TLCP (GM/T 0024) | `hitls-tls` | **Done** — 4 cipher suites (ECDHE/ECC × SM4-CBC/GCM), double certificate, ECDHE + ECC key exchange |
 | DTLCP (DTLS + TLCP) | `hitls-tls` | **Done** — DTLS 1.2 record layer + TLCP handshake/crypto (SM2/SM3/SM4), 4 cipher suites, cookie exchange, anti-replay |
 | Custom Extensions | `hitls-tls` | **Done** — Callback-based framework for user-defined TLS extensions (CH, SH, EE contexts) |
@@ -146,10 +146,12 @@ openhitls-rs/
 | SCT | `hitls-tls` | **Done** — RFC 6962: TLS 1.3 full (signed_certificate_timestamp in CH, SCT list in Certificate entry), TLS 1.2 CH offering |
 | X.509 Certificates | `hitls-pki` | **Done** (parse + verify + chain + CSR generation + certificate generation) |
 | CRL | `hitls-pki` | **Done** (parse + validate + revocation checking) |
-| PKCS#8 (RFC 5958) | `hitls-pki` | **Done** (parse + encode) |
+| PKCS#8 (RFC 5958) | `hitls-pki` | **Done** (parse + encode, Ed448/X448) |
 | PKCS#12 (RFC 7292) | `hitls-pki` | **Done** (parse + create) |
-| CMS SignedData (RFC 5652) | `hitls-pki` | **Done** (parse + verify + sign) |
+| CMS SignedData (RFC 5652) | `hitls-pki` | **Done** (parse + verify + sign, Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr, detached mode) |
 | CMS EnvelopedData (RFC 5652) | `hitls-pki` | **Done** (RSA key transport + AES key wrap) |
+| CMS EncryptedData (RFC 5652) | `hitls-pki` | **Done** (password-based encryption) |
+| CMS DigestedData (RFC 5652) | `hitls-pki` | **Done** (digest verification) |
 | HOTP (RFC 4226) | `hitls-auth` | **Done** |
 | TOTP (RFC 6238) | `hitls-auth` | **Done** |
 | SPAKE2+ (RFC 9382, P-256) | `hitls-auth` | **Done** |
@@ -219,9 +221,9 @@ Convenience feature groups:
 
 ## Roadmap
 
-### Completed (Phase 0–75)
+### Completed (Phase 0–76)
 
-All 48+ cryptographic algorithm modules including Ed448/X448/Curve448, X.509 (parse/verify/chain/CRL/OCSP/CSR/cert generation/to_text), PKCS#8, PKCS#12, CMS SignedData (Ed25519/Ed448) + EnvelopedData, TLS 1.3 (full spec: PSK/0-RTT/KeyUpdate/HRR/post-HS auth/cert compression/X25519MLKEM768 hybrid KEM/SM4-GCM/CCM (RFC 8998)/AES_128_CCM_8_SHA256/certificate_authorities (RFC 8446 §4.2.4)/early exporter master secret (RFC 8446 §7.5)/PADDING (RFC 7685)/OID Filters (RFC 8446 §4.2.5)), TLS 1.2 (91 suites: ECDHE/RSA/DHE_RSA/DHE_DSS/DH_ANON/ECDH_ANON/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20/CCM/CCM_8, Bleichenbacher protection, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation (RFC 5746, server-initiated + verify_data validation), mTLS, PSK (RFC 4279/5487/5489), AES-CCM (RFC 6655/7251), AES-CCM_8 (8-byte tag), PSK+CCM, PSK CBC-SHA256/SHA384, ECDHE_PSK GCM, DHE_DSS (RFC 5246), DH_ANON/ECDH_ANON (RFC 5246/4492), OCSP stapling CertificateStatus), DTLS 1.2 (RFC 6347, session cache, abbreviated handshake, async I/O), Heartbeat (RFC 6520), GREASE (RFC 8701), TLCP (GM/T 0024, 4 suites), DTLCP (DTLS+TLCP, 4 suites), custom extensions framework, NSS key logging, async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), TLS extensions (Record Size Limit RFC 8449, Fallback SCSV RFC 7507, OCSP stapling, SCT RFC 6962, Certificate Authorities RFC 8446, Signature Algorithms Cert RFC 8446, Max Fragment Length RFC 6066, PADDING RFC 7685, OID Filters RFC 8446, Heartbeat RFC 6520, GREASE RFC 8701), TLS 1.2 PRF, auth protocols (HOTP/TOTP/SPAKE2+/Privacy Pass RFC 9578), PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), ECC curves (P-224/P-521/Brainpool), DRBGs (HMAC/CTR/Hash), CLI tool (14 commands), TCP loopback integration tests, 5000+ Wycheproof edge-case vectors, 10 fuzz targets, and security audit. 2131 tests passing (40 ignored) across 10 crates.
+All 48+ cryptographic algorithm modules including Ed448/X448/Curve448, X.509 (parse/verify/chain/CRL/OCSP/CSR/cert generation/to_text), PKCS#8, PKCS#12, CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr, detached mode) + EnvelopedData + EncryptedData + DigestedData (RFC 5652), TLS 1.3 (full spec: PSK/0-RTT/KeyUpdate/HRR/post-HS auth/cert compression/X25519MLKEM768 hybrid KEM/SM4-GCM/CCM (RFC 8998)/AES_128_CCM_8_SHA256/certificate_authorities (RFC 8446 §4.2.4)/early exporter master secret (RFC 8446 §7.5)/Signature Algorithms Cert (RFC 8446 §4.2.3)/PADDING (RFC 7685)/OID Filters (RFC 8446 §4.2.5)), TLS 1.2 (91 suites: ECDHE/RSA/DHE_RSA/DHE_DSS/DH_ANON/ECDH_ANON/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20/CCM/CCM_8, Bleichenbacher protection, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation (RFC 5746, server-initiated + verify_data validation), mTLS, PSK (RFC 4279/5487/5489), AES-CCM (RFC 6655/7251), AES-CCM_8 (8-byte tag), PSK+CCM, PSK CBC-SHA256/SHA384, ECDHE_PSK GCM, DHE_DSS (RFC 5246), DH_ANON/ECDH_ANON (RFC 5246/4492), OCSP stapling CertificateStatus, Max Fragment Length (RFC 6066), server/client session cache with TTL expiration, cipher_server_preference, write record fragmentation, KeyUpdate loop protection), DTLS 1.2 (RFC 6347, session cache, abbreviated handshake, async I/O), Heartbeat (RFC 6520), GREASE (RFC 8701), TLCP (GM/T 0024, 4 suites), DTLCP (DTLS+TLCP, 4 suites), custom extensions framework, NSS key logging, 10 connection types (5 sync + 5 async: TLS 1.3, TLS 1.2, DTLS 1.2, TLCP, DTLCP), async I/O (tokio), hardware AES (AES-NI + ARMv8 NEON), TLS extensions (Record Size Limit RFC 8449, Fallback SCSV RFC 7507, OCSP stapling, SCT RFC 6962, Certificate Authorities RFC 8446, Signature Algorithms Cert RFC 8446, Max Fragment Length RFC 6066, PADDING RFC 7685, OID Filters RFC 8446, Heartbeat RFC 6520, GREASE RFC 8701), TLS 1.2 PRF, auth protocols (HOTP/TOTP/SPAKE2+/Privacy Pass RFC 9578), PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), ECC curves (P-224/P-521/Brainpool), DRBGs (HMAC/CTR/Hash), CLI tool (14 commands), TCP loopback integration tests, 5000+ Wycheproof edge-case vectors, 10 fuzz targets, and security audit. 2131 tests passing (40 ignored) across 10 crates.
 
 ### Completed Migration Phases (Phase 21–39)
 
@@ -760,6 +762,123 @@ Security-critical: client now validates server certificate chain against trusted
 | Wired into TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP client paths | — | **Done** |
 | SNI callback in TLS 1.3 + TLS 1.2 server | — | **Done** |
 
+#### Phase 65: PSK CCM Completion + CCM_8 Authentication Cipher Suites -- DONE
+
+10 new TLS 1.2 cipher suites completing PSK+CCM and CCM_8 coverage across all key exchange types. 11 new tests.
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLS_PSK_WITH_AES_128_CCM (0xC0A4) | RFC 6655 | **Done** |
+| TLS_PSK_WITH_AES_128_CCM_8 (0xC0A8) | RFC 6655 | **Done** |
+| TLS_PSK_WITH_AES_256_CCM_8 (0xC0A9) | RFC 6655 | **Done** |
+| TLS_DHE_PSK_WITH_AES_128_CCM_8 (0xC0AA) | RFC 6655 | **Done** |
+| TLS_DHE_PSK_WITH_AES_256_CCM_8 (0xC0AB) | RFC 6655 | **Done** |
+| TLS_ECDHE_PSK_WITH_AES_128_CCM_8_SHA256 (0xD005) | RFC 7251 | **Done** |
+| TLS_DHE_RSA_WITH_AES_128_CCM_8 (0xC0A2) | RFC 6655 | **Done** |
+| TLS_DHE_RSA_WITH_AES_256_CCM_8 (0xC0A3) | RFC 6655 | **Done** |
+| TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 (0xC0AE) | RFC 7251 | **Done** |
+| TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8 (0xC0AF) | RFC 7251 | **Done** |
+
+#### Phase 71: Server-Side Session Cache + Session Expiration + Cipher Preference -- DONE
+
+Server-side `Arc<Mutex<dyn SessionCache>>` in TlsConfig, auto-store after full handshake, auto-lookup on ClientHello, InMemorySessionCache with TTL expiration (default 2h), cleanup(), cipher_server_preference config. Wired into sync+async TLS 1.2 server + renegotiation + TLS 1.3. 13 new tests.
+
+| Feature | Status |
+|---------|--------|
+| `Arc<Mutex<dyn SessionCache>>` in TlsConfig | **Done** |
+| Auto-store session after full handshake | **Done** |
+| Auto-lookup session on ClientHello | **Done** |
+| InMemorySessionCache with TTL expiration (default 2h) | **Done** |
+| `cleanup()` method to evict expired sessions | **Done** |
+| `cipher_server_preference` config (default: true) | **Done** |
+| Wired into sync+async TLS 1.2 server + renegotiation | **Done** |
+| TLS 1.3 cipher preference | **Done** |
+
+#### Phase 72: Client-Side Session Cache + Write Record Fragmentation -- DONE
+
+Client auto-store sessions after handshake/NST, auto-lookup from cache by server_name, explicit resumption_session takes priority, write() auto-splits data into max_fragment_size chunks across all 8 connection types (4 sync + 4 async). 12 new tests.
+
+| Feature | Status |
+|---------|--------|
+| Client auto-store session after handshake/NST | **Done** |
+| Auto-lookup from cache by `server_name` | **Done** |
+| Explicit `resumption_session` takes priority over cache | **Done** |
+| TLS 1.2 `session_resumption` flag guard | **Done** |
+| Write record fragmentation (auto-split by `max_fragment_size`) | **Done** |
+| All 8 connection types (4 sync + 4 async) | **Done** |
+
+#### Testing-Phase 72: CLI Command Unit Tests + Session Cache Concurrency -- DONE
+
+72 new tests: dgst/x509cmd/genpkey/pkey/req/crl/verify CLI command unit tests (+66) and session cache Arc<Mutex<>> concurrency tests (+6).
+
+#### Phase 73: KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3) -- DONE
+
+KeyUpdate recv counter with 128-limit DoS protection, MaxFragmentLength enum + codec + TLS 1.2 client/server negotiation + record layer enforcement, signature_algorithms_cert codec + TLS 1.3 ClientHello + server parsing. 13 new tests.
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| KeyUpdate loop protection (128 consecutive limit) | RFC 8446 | **Done** |
+| Max Fragment Length (512/1024/2048/4096) | RFC 6066 | **Done** |
+| MaxFragmentLength client/server negotiation (TLS 1.2) | RFC 6066 | **Done** |
+| Record layer enforcement of negotiated fragment size | RFC 6066 | **Done** |
+| Signature Algorithms Cert extension | RFC 8446 §4.2.3 | **Done** |
+| TLS 1.3 ClientHello building + server parsing | RFC 8446 | **Done** |
+
+#### Testing-Phase 73: Async TLS 1.3 Unit Tests + Cipher Suite Integration -- DONE
+
+33 new tests: 12 async TLS 1.3 connection tests + 21 TCP loopback cipher suite integration tests covering CCM/CCM_8/PSK/DH_ANON/ECDH_ANON/TLS 1.3 variants.
+
+#### Phase 74: Certificate Authorities (RFC 8446 §4.2.4) + Early Exporter Master Secret + DTLS 1.2 Session Cache -- DONE
+
+certificate_authorities codec + config + TLS 1.3 ClientHello + server parsing, early exporter master secret derivation + export_early_keying_material() API, DTLS 1.2 session cache auto-store. 15 new tests.
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| Certificate Authorities extension codec | RFC 8446 §4.2.4 | **Done** |
+| TLS 1.3 ClientHello + server parsing | RFC 8446 | **Done** |
+| Early exporter master secret derivation | RFC 8446 §7.5 | **Done** |
+| `export_early_keying_material()` API on all 4 TLS 1.3 connections | RFC 8446 | **Done** |
+| DTLS 1.2 session cache auto-store by server_name/session_id | RFC 6347 | **Done** |
+
+#### Testing-Phase 74: Fuzz Seed Corpus + Error Scenario Integration Tests -- DONE
+
+66 binary seed files across all 10 fuzz targets + 18 integration tests covering version/cipher mismatch, PSK wrong key, ALPN, concurrent connections, 64KB fragmentation, ConnectionInfo, graceful shutdown.
+
+#### Testing-Phase 75: Phase 74 Feature Integration Tests + Async Export Unit Tests -- DONE
+
+16 new tests: 10 integration tests (certificate_authorities, export_keying_material, session cache resumption) + 6 async unit tests (export APIs, CA config).
+
+#### Phase 75: PADDING (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake -- DONE
+
+PADDING type 21 codec + config padding_target + TLS 1.3 ClientHello integration, OID Filters type 48 codec + config oid_filters + TLS 1.3 CertificateRequest, DTLS 1.2 abbreviated handshake (session cache lookup + abbreviated flow). 15 new tests.
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| PADDING extension (type 21) codec + config | RFC 7685 | **Done** |
+| TLS 1.3 ClientHello padding integration | RFC 7685 | **Done** |
+| OID Filters extension (type 48) codec + config | RFC 8446 §4.2.5 | **Done** |
+| TLS 1.3 CertificateRequest OID Filters | RFC 8446 | **Done** |
+| DTLS 1.2 abbreviated handshake (session resumption) | RFC 6347 | **Done** |
+
+#### Phase 76: Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) -- DONE
+
+AsyncDtls12ClientConnection + AsyncDtls12ServerConnection with full/abbreviated handshake, read/write/shutdown, anti-replay, session cache. Heartbeat type 15 codec + config. GREASE config flag + ClientHello injection. 19 new tests.
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| `AsyncDtls12ClientConnection<S>` (full + abbreviated handshake) | RFC 6347 | **Done** |
+| `AsyncDtls12ServerConnection<S>` (full + abbreviated handshake) | RFC 6347 | **Done** |
+| Async read/write/shutdown with anti-replay + epoch management | RFC 6347 | **Done** |
+| Session cache auto-store (client + server) | RFC 6347 | **Done** |
+| Heartbeat extension type 15 codec (build/parse) | RFC 6520 | **Done** |
+| `heartbeat_mode` config (0=disabled, 1=peer_allowed, 2=peer_not_allowed) | RFC 6520 | **Done** |
+| GREASE `grease` config flag | RFC 8701 | **Done** |
+| GREASE injection: cipher suites, extensions, versions, groups, sig_algs, key_share | RFC 8701 | **Done** |
+
+#### Testing-Phase 76: cert_verify Unit Tests + Config Callbacks + Integration Tests -- DONE
+
+26 new tests: 13 cert_verify unit tests (verify_server_certificate code paths), 7 config callback tests (CertVerifyCallback/SniCallback/key_log_callback), 6 integration tests (TLS 1.3/1.2 cert_verify_callback, key_log_callback, renegotiation).
+
 #### Other Identified Gaps (Low Priority / Deferred)
 
 | Category | Item | Priority | Notes |
@@ -776,7 +895,7 @@ Security-critical: client now validates server certificate chain against trusted
 | Component | C (lines) | Rust (lines) | Feature Coverage | Remaining Gaps |
 |-----------|-----------|--------------|------------------|----------------|
 | Crypto Algorithms | ~132K | ~26K | **100%** (all 48 modules + SM4-CCM + hardware AES + all 13 DH groups + FIPS/CMVP + entropy health testing + Ed448/X448/Curve448) | — |
-| TLS Protocol | ~52K | ~14K | **100%** (TLS 1.3 + 1.2 + DTLS 1.2 + TLCP + DTLCP + X25519MLKEM768 + SM4-GCM/CCM + AES-CCM (RFC 6655/7251) + AES-CCM_8 + PSK+CCM + PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM + DHE_DSS (RFC 5246) + DH_ANON/ECDH_ANON (RFC 5246/4492) + renegotiation (RFC 5746) + hostname verification (RFC 6125) + cert chain validation + CertVerifyCallback/SniCallback + RSL/SCSV/OCSP/SCT + async I/O + key logging + custom extensions + all 5 FFDHE groups) | — |
+| TLS Protocol | ~52K | ~14K | **100%** (TLS 1.3 + 1.2 + DTLS 1.2 + TLCP + DTLCP + 10 connection types (5 sync + 5 async) + X25519MLKEM768 + SM4-GCM/CCM + AES-CCM (RFC 6655/7251) + AES-CCM_8 + PSK+CCM + PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM + DHE_DSS (RFC 5246) + DH_ANON/ECDH_ANON (RFC 5246/4492) + renegotiation (RFC 5746) + hostname verification (RFC 6125) + cert chain validation + CertVerifyCallback/SniCallback + server/client session cache + write record fragmentation + KeyUpdate loop protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert + PADDING/OID Filters + Heartbeat (RFC 6520) + GREASE (RFC 8701) + RSL/SCSV/OCSP/SCT + async I/O + key logging + custom extensions + all 5 FFDHE groups) | — |
 | PKI / X.509 | ~17K | ~4K | **100%** (parse/verify/chain/CRL/OCSP/CSR/cert gen/to_text/hostname verification (RFC 6125)/PKCS#8/PKCS#12/CMS SignedData+EnvelopedData+EncryptedData+DigestedData) | — |
 | Base Support Layer | ~12K | ~2K | **95%** (ASN.1/Base64/PEM/OID/errors) | — |
 | CLI Tools | ~8K | ~2.2K | **100%** (dgst/genpkey/x509/verify/enc/pkey/crl/req/s-client/s-server/list/rand/pkeyutl/speed/pkcs12/mac) | — |
