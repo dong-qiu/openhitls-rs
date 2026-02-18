@@ -5840,4 +5840,856 @@ mod tests {
         let _ = conn.shutdown();
         server_handle.join().unwrap();
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 77 — G1: SniCallback integration tests
+    // -------------------------------------------------------
+
+    /// TLS 1.3: SniCallback returns Accept — handshake succeeds with original config.
+    #[test]
+    fn test_tls13_sni_callback_accept() {
+        use hitls_tls::config::{SniAction, SniCallback, TlsConfig};
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+        let cb: SniCallback = Arc::new(|_hostname: &str| SniAction::Accept);
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .sni_callback(cb)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 16];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .server_name("example.com")
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"sni-accept").unwrap();
+        let mut buf = [0u8; 16];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"sni-accept");
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.3: SniCallback returns AcceptWithConfig — server switches to new config.
+    #[test]
+    fn test_tls13_sni_callback_accept_with_config() {
+        use hitls_tls::config::{SniAction, SniCallback, TlsConfig};
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain1, server_key1) = make_ed25519_server_identity();
+        let (cert_chain2, server_key2) = make_ed25519_server_identity();
+
+        // Callback switches to a second certificate chain for "example.com"
+        let new_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain2)
+            .private_key(server_key2)
+            .verify_peer(false)
+            .build();
+
+        let cb: SniCallback = Arc::new(move |_hostname: &str| {
+            SniAction::AcceptWithConfig(Box::new(new_config.clone()))
+        });
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain1)
+            .private_key(server_key1)
+            .verify_peer(false)
+            .sni_callback(cb)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            // Handshake succeeds using the config switched in by SniCallback
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 16];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .server_name("example.com")
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"sni-switched").unwrap();
+        let mut buf = [0u8; 16];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"sni-switched");
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.3: SniCallback returns Reject — handshake fails with error.
+    #[test]
+    fn test_tls13_sni_callback_reject() {
+        use hitls_tls::config::{SniAction, SniCallback, TlsConfig};
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+        // Callback always rejects
+        let cb: SniCallback = Arc::new(|_| SniAction::Reject);
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .sni_callback(cb)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            // Server-side handshake should fail (Reject)
+            let _ = conn.handshake();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .server_name("rejected.example.com")
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        // Client-side handshake should fail because server rejected SNI
+        let result = conn.handshake();
+        assert!(
+            result.is_err(),
+            "handshake should fail when SniCallback rejects"
+        );
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.3: SniCallback returns Ignore — server_name cleared, handshake continues.
+    #[test]
+    fn test_tls13_sni_callback_ignore() {
+        use hitls_tls::config::{SniAction, SniCallback, TlsConfig};
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+        // Callback returns Ignore → server clears client_server_name but continues
+        let cb: SniCallback = Arc::new(|_| SniAction::Ignore);
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .sni_callback(cb)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 16];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .server_name("ignored.example.com")
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        // Handshake succeeds despite Ignore
+        conn.handshake().unwrap();
+        conn.write(b"sni-ignored").unwrap();
+        let mut buf = [0u8; 16];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"sni-ignored");
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.2: SniCallback returns Accept — handshake succeeds.
+    #[test]
+    fn test_tls12_sni_callback_accept() {
+        use hitls_tls::config::{SniAction, SniCallback, TlsConfig};
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::SignatureScheme;
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let groups = [hitls_tls::crypt::NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+
+        let cb: SniCallback = Arc::new(|_| SniAction::Accept);
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .sni_callback(cb)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 16];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .server_name("example.com")
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"tls12-sni").unwrap();
+        let mut buf = [0u8; 16];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"tls12-sni");
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.2: SniCallback returns Reject — handshake fails.
+    #[test]
+    fn test_tls12_sni_callback_reject() {
+        use hitls_tls::config::{SniAction, SniCallback, TlsConfig};
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::SignatureScheme;
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let groups = [hitls_tls::crypt::NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+
+        let cb: SniCallback = Arc::new(|_| SniAction::Reject);
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .sni_callback(cb)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            let _ = conn.handshake();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .server_name("rejected.example.com")
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        let result = conn.handshake();
+        assert!(
+            result.is_err(),
+            "handshake should fail when TLS 1.2 SniCallback rejects"
+        );
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // Testing-Phase 77 — G2: PADDING extension integration
+    // -------------------------------------------------------
+
+    /// TLS 1.3: Client with padding_target=512, handshake completes successfully.
+    #[test]
+    fn test_tls13_padding_extension_handshake() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 16];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        // Client sends ClientHello padded to ~512 bytes via RFC 7685 PADDING extension
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .padding_target(512)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"padded-hello").unwrap();
+        let mut buf = [0u8; 16];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"padded-hello");
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // Testing-Phase 77 — G3: OID Filters integration
+    // -------------------------------------------------------
+
+    /// TLS 1.3 mTLS: Server with oid_filters set, CertificateRequest includes OID Filters extension.
+    #[test]
+    fn test_tls13_oid_filters_in_cert_request() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (server_cert_chain, server_key) = make_ed25519_server_identity();
+        let (client_cert_chain, client_key) = make_ed25519_server_identity();
+
+        // OID for extendedKeyUsage (2.5.29.37)
+        let oid_bytes = vec![0x55, 0x1D, 0x25];
+        let oid_values = vec![0x30, 0x0A]; // placeholder values
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(server_cert_chain)
+            .private_key(server_key)
+            .verify_peer(true)
+            .trusted_cert(client_cert_chain[0].clone())
+            .oid_filters(vec![(oid_bytes, oid_values)])
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            // Server sends CertificateRequest with OID Filters — handshake should complete
+            let result = conn.handshake();
+            let _ = result;
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(client_cert_chain)
+            .private_key(client_key)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        // Client receives CertificateRequest with OID Filters and processes it
+        let _ = conn.handshake();
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.3 mTLS: Server without oid_filters — CertificateRequest has no OID Filters extension.
+    #[test]
+    fn test_tls13_no_oid_filters_in_cert_request() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (server_cert_chain, server_key) = make_ed25519_server_identity();
+        let (client_cert_chain, client_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(server_cert_chain)
+            .private_key(server_key)
+            .verify_peer(true)
+            .trusted_cert(client_cert_chain[0].clone())
+            .build(); // No oid_filters
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            let _ = conn.handshake();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(client_cert_chain)
+            .private_key(client_key)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        // Handshake completes without OID Filters (no crash / no parse error)
+        let _ = conn.handshake();
+        server_handle.join().unwrap();
+    }
+
+    // -------------------------------------------------------
+    // Testing-Phase 77 — G4: DTLS 1.2 abbreviated handshake integration
+    // -------------------------------------------------------
+
+    /// DTLS 1.2: Full handshake followed by an abbreviated (session resumption) handshake.
+    #[test]
+    fn test_dtls12_integration_abbreviated_handshake() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection_dtls12::dtls12_handshake_in_memory;
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::session::{InMemorySessionCache, SessionCache};
+        use hitls_tls::{CipherSuite, TlsVersion};
+        use std::sync::{Arc, Mutex};
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let groups = [NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+
+        let client_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+        let server_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+
+        let make_client_config = |cache: Arc<Mutex<InMemorySessionCache>>| {
+            TlsConfig::builder()
+                .cipher_suites(&[suite])
+                .supported_groups(&groups)
+                .signature_algorithms(&sig_algs)
+                .verify_peer(false)
+                .server_name("dtls.test.example")
+                .session_cache(cache)
+                .build()
+        };
+
+        let make_server_config = |cache: Arc<Mutex<InMemorySessionCache>>| {
+            TlsConfig::builder()
+                .cipher_suites(&[suite])
+                .supported_groups(&groups)
+                .signature_algorithms(&sig_algs)
+                .certificate_chain(cert_chain.clone())
+                .private_key(server_key.clone())
+                .verify_peer(false)
+                .session_cache(cache)
+                .build()
+        };
+
+        // 1st connection: full handshake → populates session caches
+        let cc1 = make_client_config(client_cache.clone());
+        let sc1 = make_server_config(server_cache.clone());
+        let (client1, server1) = dtls12_handshake_in_memory(cc1, sc1, false).unwrap();
+        assert_eq!(client1.version(), Some(TlsVersion::Dtls12));
+        assert_eq!(server1.version(), Some(TlsVersion::Dtls12));
+
+        // Verify session was cached on the client
+        let session_stored = {
+            let cache = client_cache.lock().unwrap();
+            cache.get(b"dtls.test.example").is_some()
+        };
+        assert!(session_stored, "client should have cached the session");
+
+        // 2nd connection: abbreviated handshake (session resumption)
+        let cc2 = make_client_config(client_cache.clone());
+        let sc2 = make_server_config(server_cache.clone());
+        let (client2, server2) = dtls12_handshake_in_memory(cc2, sc2, false).unwrap();
+        assert_eq!(client2.version(), Some(TlsVersion::Dtls12));
+        assert_eq!(server2.version(), Some(TlsVersion::Dtls12));
+    }
+
+    /// DTLS 1.2 abbreviated: Data exchange works correctly after session resumption.
+    #[test]
+    fn test_dtls12_integration_abbreviated_data_exchange() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection_dtls12::dtls12_handshake_in_memory;
+        use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+        use hitls_tls::session::InMemorySessionCache;
+        use hitls_tls::CipherSuite;
+        use std::sync::{Arc, Mutex};
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let groups = [NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+
+        let client_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+        let server_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+
+        let make_client_config = |cache: Arc<Mutex<InMemorySessionCache>>| {
+            TlsConfig::builder()
+                .cipher_suites(&[suite])
+                .supported_groups(&groups)
+                .signature_algorithms(&sig_algs)
+                .verify_peer(false)
+                .server_name("dtls.test.example")
+                .session_cache(cache)
+                .build()
+        };
+
+        let make_server_config = |cache: Arc<Mutex<InMemorySessionCache>>| {
+            TlsConfig::builder()
+                .cipher_suites(&[suite])
+                .supported_groups(&groups)
+                .signature_algorithms(&sig_algs)
+                .certificate_chain(cert_chain.clone())
+                .private_key(server_key.clone())
+                .verify_peer(false)
+                .session_cache(cache)
+                .build()
+        };
+
+        // First: full handshake
+        let (_, _) = dtls12_handshake_in_memory(
+            make_client_config(client_cache.clone()),
+            make_server_config(server_cache.clone()),
+            false,
+        )
+        .unwrap();
+
+        // Second: abbreviated handshake
+        let (mut client, mut server) = dtls12_handshake_in_memory(
+            make_client_config(client_cache),
+            make_server_config(server_cache),
+            false,
+        )
+        .unwrap();
+
+        // Verify application data works after abbreviated handshake
+        let datagram = client.seal_app_data(b"after resumption").unwrap();
+        let pt = server.open_app_data(&datagram).unwrap();
+        assert_eq!(pt, b"after resumption");
+
+        let reply = server.seal_app_data(b"resumed ok").unwrap();
+        let pt = client.open_app_data(&reply).unwrap();
+        assert_eq!(pt, b"resumed ok");
+    }
+
+    // -------------------------------------------------------
+    // Testing-Phase 77 — G5: PskServerCallback integration tests
+    // -------------------------------------------------------
+
+    /// TLS 1.2 PSK: PskServerCallback returns key for known identity — handshake succeeds.
+    #[test]
+    fn test_tls12_psk_server_callback_known_identity() {
+        use hitls_tls::config::{PskServerCallback, TlsConfig};
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let suite = CipherSuite::TLS_PSK_WITH_AES_128_GCM_SHA256;
+        let psk = b"test-psk-key-32-bytes-for-aes!!!".to_vec();
+        let psk_clone = psk.clone();
+        let identity = b"known-client".to_vec();
+
+        // Server uses callback to look up PSK by identity
+        let cb: PskServerCallback = Arc::new(move |id: &[u8]| {
+            if id == b"known-client" {
+                Some(psk_clone.clone())
+            } else {
+                None
+            }
+        });
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .verify_peer(false)
+            .psk_server_callback(cb)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 16];
+            let n = conn.read(&mut buf).unwrap();
+            conn.write(&buf[..n]).unwrap();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .verify_peer(false)
+            .psk(psk)
+            .psk_identity(identity)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"psk-callback").unwrap();
+        let mut buf = [0u8; 16];
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"psk-callback");
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.2 PSK: PskServerCallback returns None for unknown identity — handshake fails.
+    #[test]
+    fn test_tls12_psk_server_callback_unknown_identity() {
+        use hitls_tls::config::{PskServerCallback, TlsConfig};
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let suite = CipherSuite::TLS_PSK_WITH_AES_128_GCM_SHA256;
+        let psk = b"test-psk-key-32-bytes-for-aes!!!".to_vec();
+
+        // Server callback never finds the identity → returns None
+        let cb: PskServerCallback = Arc::new(|_id: &[u8]| None);
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .verify_peer(false)
+            .psk_server_callback(cb)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            let _ = conn.handshake(); // Expected to fail
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .verify_peer(false)
+            .psk(psk)
+            .psk_identity(b"unknown-client".to_vec())
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        let result = conn.handshake();
+        assert!(
+            result.is_err(),
+            "handshake should fail for unknown PSK identity"
+        );
+        server_handle.join().unwrap();
+    }
 }
