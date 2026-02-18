@@ -393,3 +393,55 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2054** | **40** |
+
+---
+
+## Testing-Phase 75 — Phase 74 Feature Integration Tests + Async Export Unit Tests (2026-02-18)
+
+**Scope**: E1: Integration tests for Phase 74 features (certificate_authorities, key material export, session cache); E2: Async export API unit tests.
+**New items**: 10 new integration tests (E1) + 6 new async unit tests (E2) = +16 tests total (2054 → 2070)
+**hitls-integration-tests**: 78 → 88 tests
+**hitls-tls**: 753 → 759 tests
+
+### E1: Integration Tests for Phase 74 Features (+10)
+
+| Test | Category | Description |
+|------|----------|-------------|
+| test_tls13_certificate_authorities_config_handshake | Cert Auth | Client with 2 DER DNs → handshake succeeds |
+| test_tls13_certificate_authorities_empty_config | Cert Auth | Empty CA list → handshake succeeds |
+| test_tls13_export_keying_material_client_server_match | EKM | Client and server derive identical 32-byte EKM |
+| test_tls13_export_keying_material_different_labels | EKM | Different labels → different EKM; context vs no-context → different |
+| test_tls13_export_keying_material_before_handshake | EKM | Returns "not connected" error before handshake |
+| test_tls13_export_early_keying_material_no_psk | Early EKM | Returns "no early exporter master secret" error without PSK |
+| test_tls13_export_keying_material_various_lengths | EKM | Lengths 16, 32, 48, 64 all succeed |
+| test_tls12_export_keying_material_client_server_match | TLS 1.2 EKM | TLS 1.2 RFC 5705 client/server match |
+| test_tls12_session_cache_store_and_resume | Session Cache | InMemorySessionCache + ticket: first full, second resumed |
+| test_tls13_export_keying_material_server_side | EKM | Server-side export with/without context both match client |
+
+### E2: Async Export Unit Tests (+6, in connection_async.rs)
+
+| Test | Category | Description |
+|------|----------|-------------|
+| test_async_tls13_export_keying_material_before_handshake | Async EKM | Returns "not connected" error before handshake |
+| test_async_tls13_export_early_keying_material_no_psk | Async Early EKM | Client + server both fail without PSK |
+| test_async_tls13_export_keying_material_both_sides | Async EKM | Client and server derive identical keying material |
+| test_async_tls13_export_keying_material_different_labels | Async EKM | Different labels → different EKM; server matches client |
+| test_async_tls13_certificate_authorities_config | Async Cert Auth | Handshake with CA config succeeds, export also works |
+| test_async_tls13_export_keying_material_deterministic | Async EKM | Same label+context always returns same bytes |
+
+### Workspace Test Counts After Testing-Phase 75
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 48 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 593 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 88 | 3 |
+| hitls-pki | 336 | 1 |
+| hitls-tls | 759 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2070** | **40** |

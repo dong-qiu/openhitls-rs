@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 74 complete + Testing-Phase 74 — Fuzz seed corpus + error scenario integration tests
+- **Status**: Phase 74 complete + Testing-Phase 75 — Phase 74 feature integration tests + async export unit tests
 
 ## Workspace Structure
 
@@ -23,7 +23,7 @@ openhitls-rs/
 │   ├── hitls-pki/       # X.509 (parse, verify [RSA/ECDSA/Ed25519/Ed448/SM2/RSA-PSS], chain, CRL, OCSP, CSR generation, Certificate generation, to_text output, SigningKey abstraction, EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies enforcement, hostname verification (RFC 6125)), PKCS#12 (RFC 7292), CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr, detached mode) + EnvelopedData + EncryptedData + DigestedData (RFC 5652), PKCS#8 (RFC 5958, Ed448/X448), SPKI public key parsing (336 tests, 1 ignored)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (RFC 9578, RSA blind sigs) (33 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
-├── tests/interop/       # Integration tests (60 cross-crate tests, 3 ignored)
+├── tests/interop/       # Integration tests (88 cross-crate tests, 3 ignored)
 ├── tests/vectors/       # Standard test vectors (Wycheproof JSON)
 ├── fuzz/                # Fuzz targets (cargo-fuzz, 10 targets)
 └── benches/             # Performance benchmarks
@@ -35,18 +35,18 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2054 tests, 40 ignored)
+# Run all tests (2070 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 593 tests (31 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 753 tests
+cargo test -p hitls-tls --all-features      # 759 tests
 cargo test -p hitls-pki --all-features      # 336 tests (1 ignored)
 cargo test -p hitls-bignum                  # 48 tests
 cargo test -p hitls-utils                   # 53 tests
 cargo test -p hitls-auth --all-features     # 33 tests
 cargo test -p hitls-cli --all-features      # 117 tests (5 ignored)
-cargo test -p hitls-integration-tests       # 78 tests (3 ignored)
+cargo test -p hitls-integration-tests       # 88 tests (3 ignored)
 
 # Lint (must pass with zero warnings)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
@@ -110,7 +110,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-74 complete (2054 tests, 40 ignored).
+Phases 0-74 complete + Testing-Phase 75 (2070 tests, 40 ignored).
 
 ### Completed
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
@@ -151,5 +151,6 @@ Phases 0-74 complete (2054 tests, 40 ignored).
 - Testing-Phase 73: Async TLS 1.3 unit tests + cipher suite integration (connection_async.rs: +12 tests covering read/write before handshake, full handshake+data, version/cipher check, shutdown, 32KB payload, multi-message, key_update, take_session, connection_info, ALPN, session_resumed; cipher suite integration: +21 TCP loopback tests covering ECDHE_ECDSA CCM/CCM_8, DHE_RSA CCM/CCM_8, PSK/DHE_PSK/ECDHE_PSK GCM+CCM+ChaCha20, DH_ANON/ECDH_ANON GCM+CBC, TLS 1.3 AES256-GCM/ChaCha20/CCM_8/RSA-cert, total +33 tests, 1988→2021) -- DONE
 - Phase 74: Certificate Authorities extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 session cache (certificate_authorities codec + config + TLS 1.3 ClientHello + server parsing, early exporter master secret derivation + export_early_keying_material() API on all 4 TLS 1.3 connections, DTLS 1.2 session cache auto-store by server_name/session_id, +15 tests) -- DONE
 - Testing-Phase 74: Fuzz seed corpus + error scenario integration tests (C1: 66 binary seed files across all 10 fuzz targets in fuzz/corpus/<target>/; C2: +18 integration tests covering version mismatch, cipher suite mismatch, PSK wrong key, ALPN negotiation, 5 concurrent TLS 1.3/1.2 connections, 64KB payload fragmentation, ConnectionInfo field validation, session_resumed checks, multi-message exchange, graceful shutdown, multi-suite negotiation, empty write, total +18 tests, 2036→2054) -- DONE
+- Testing-Phase 75: Phase 74 feature integration tests + async export unit tests (E1: +10 integration tests covering certificate_authorities config handshake, export_keying_material client/server match + different labels + before handshake + various lengths + server-side, export_early_keying_material no-PSK error, TLS 1.2 export_keying_material match, TLS 1.2 session cache + ticket resumption; E2: +6 async unit tests covering export_keying_material before handshake, early export no-PSK, both-sides match, different labels, CA config, deterministic, total +16 tests, 2054→2070) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

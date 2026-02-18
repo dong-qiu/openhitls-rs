@@ -4535,4 +4535,829 @@ mod tests {
         let _ = conn.shutdown();
         server_handle.join().unwrap();
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 75 — E1: Phase 74 Feature Integration Tests
+    // -------------------------------------------------------
+
+    /// TLS 1.3 handshake with certificate_authorities config succeeds.
+    /// Verifies the extension is sent without protocol errors.
+    #[test]
+    fn test_tls13_certificate_authorities_config_handshake() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 8];
+            let _ = conn.read(&mut buf);
+            conn.write(b"ok").unwrap();
+            let _ = conn.shutdown();
+        });
+
+        // Client sends certificate_authorities extension with two fake DER-encoded DNs
+        let dn1 = vec![0x30, 0x07, 0x31, 0x05, 0x30, 0x03, 0x06, 0x01, 0x41]; // minimal SEQUENCE
+        let dn2 = vec![0x30, 0x07, 0x31, 0x05, 0x30, 0x03, 0x06, 0x01, 0x42];
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_authorities(vec![dn1, dn2])
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"hi").unwrap();
+        let mut buf = [0u8; 8];
+        let _ = conn.read(&mut buf);
+        let _ = conn.shutdown();
+
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.3 handshake succeeds when no certificate_authorities are configured.
+    #[test]
+    fn test_tls13_certificate_authorities_empty_config() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 8];
+            let _ = conn.read(&mut buf);
+            conn.write(b"ok").unwrap();
+            let _ = conn.shutdown();
+        });
+
+        // Empty certificate_authorities (equivalent to not setting it)
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_authorities(vec![])
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        conn.write(b"hi").unwrap();
+        let mut buf = [0u8; 8];
+        let _ = conn.read(&mut buf);
+        let _ = conn.shutdown();
+
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.3 export_keying_material: client and server derive the same material.
+    #[test]
+    fn test_tls13_export_keying_material_client_server_match() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let ekm = conn
+                .export_keying_material(b"TESTING LABEL", Some(b"test context"), 32)
+                .unwrap();
+            tx.send(ekm).unwrap();
+            let mut buf = [0u8; 8];
+            let _ = conn.read(&mut buf);
+            let _ = conn.shutdown();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        let client_ekm = conn
+            .export_keying_material(b"TESTING LABEL", Some(b"test context"), 32)
+            .unwrap();
+        assert_eq!(client_ekm.len(), 32);
+
+        conn.write(b"done").unwrap();
+        let mut buf = [0u8; 8];
+        let _ = conn.read(&mut buf);
+        let _ = conn.shutdown();
+
+        server_handle.join().unwrap();
+        let server_ekm = rx.recv().unwrap();
+        assert_eq!(
+            client_ekm, server_ekm,
+            "client and server must derive identical keying material"
+        );
+    }
+
+    /// TLS 1.3 export_keying_material: different labels produce different material.
+    #[test]
+    fn test_tls13_export_keying_material_different_labels() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 8];
+            let _ = conn.read(&mut buf);
+            let _ = conn.shutdown();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        let ekm1 = conn.export_keying_material(b"LABEL ONE", None, 32).unwrap();
+        let ekm2 = conn.export_keying_material(b"LABEL TWO", None, 32).unwrap();
+        let ekm3 = conn
+            .export_keying_material(b"LABEL ONE", Some(b"context"), 32)
+            .unwrap();
+        assert_ne!(
+            ekm1, ekm2,
+            "different labels must produce different material"
+        );
+        assert_ne!(ekm1, ekm3, "no-context vs with-context must differ");
+
+        conn.write(b"done").unwrap();
+        let mut buf = [0u8; 8];
+        let _ = conn.read(&mut buf);
+        let _ = conn.shutdown();
+
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.3 export_keying_material: returns error before handshake.
+    #[test]
+    fn test_tls13_export_keying_material_before_handshake() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::TlsClientConnection;
+        use std::net::{TcpListener, TcpStream};
+        use std::time::Duration;
+
+        // Create an unconnected client — handshake() never called
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+
+        let config = TlsConfig::builder()
+            .role(hitls_tls::TlsRole::Client)
+            .verify_peer(false)
+            .build();
+        let conn = TlsClientConnection::new(stream, config);
+
+        let result = conn.export_keying_material(b"test", None, 32);
+        assert!(
+            result.is_err(),
+            "export_keying_material must fail before handshake"
+        );
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("not connected"),
+            "error should say 'not connected', got: {msg}"
+        );
+    }
+
+    /// TLS 1.3 export_early_keying_material: returns error when no PSK was used.
+    #[test]
+    fn test_tls13_export_early_keying_material_no_psk() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            // Server also fails without PSK
+            let res = conn.export_early_keying_material(b"early", None, 32);
+            assert!(res.is_err(), "server: early export must fail without PSK");
+            let mut buf = [0u8; 8];
+            let _ = conn.read(&mut buf);
+            let _ = conn.shutdown();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        // No PSK → early exporter master secret is empty → error
+        let result = conn.export_early_keying_material(b"early", None, 32);
+        assert!(result.is_err(), "early export must fail without PSK");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("no early exporter master secret"),
+            "unexpected error: {msg}"
+        );
+
+        conn.write(b"done").unwrap();
+        let mut buf = [0u8; 8];
+        let _ = conn.read(&mut buf);
+        let _ = conn.shutdown();
+
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.3 export_keying_material: various output lengths work correctly.
+    #[test]
+    fn test_tls13_export_keying_material_various_lengths() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 8];
+            let _ = conn.read(&mut buf);
+            let _ = conn.shutdown();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+
+        for length in [16, 32, 48, 64] {
+            let ekm = conn
+                .export_keying_material(b"EXPORTER LABEL", Some(b"ctx"), length)
+                .unwrap();
+            assert_eq!(
+                ekm.len(),
+                length,
+                "expected {length} bytes, got {}",
+                ekm.len()
+            );
+        }
+
+        conn.write(b"done").unwrap();
+        let mut buf = [0u8; 8];
+        let _ = conn.read(&mut buf);
+        let _ = conn.shutdown();
+
+        server_handle.join().unwrap();
+    }
+
+    /// TLS 1.2 export_keying_material: client and server derive the same material.
+    #[test]
+    fn test_tls12_export_keying_material_client_server_match() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::SignatureScheme;
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let groups = [hitls_tls::crypt::NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let ekm = conn
+                .export_keying_material(b"TESTING LABEL", Some(b"test context"), 32)
+                .unwrap();
+            tx.send(ekm).unwrap();
+            let mut buf = [0u8; 8];
+            let _ = conn.read(&mut buf);
+            let _ = conn.shutdown();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = Tls12ClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        let client_ekm = conn
+            .export_keying_material(b"TESTING LABEL", Some(b"test context"), 32)
+            .unwrap();
+        assert_eq!(client_ekm.len(), 32);
+
+        conn.write(b"done").unwrap();
+        let mut buf = [0u8; 8];
+        let _ = conn.read(&mut buf);
+        let _ = conn.shutdown();
+
+        server_handle.join().unwrap();
+        let server_ekm = rx.recv().unwrap();
+        assert_eq!(
+            client_ekm, server_ekm,
+            "TLS 1.2: client and server must derive identical keying material"
+        );
+    }
+
+    /// TLS 1.2 session cache: InMemorySessionCache stores sessions; second connection
+    /// is resumed via session ticket (server with ticket_key + client with session_cache).
+    #[test]
+    fn test_tls12_session_cache_store_and_resume() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection12::{Tls12ClientConnection, Tls12ServerConnection};
+        use hitls_tls::crypt::SignatureScheme;
+        use hitls_tls::session::InMemorySessionCache;
+        use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let groups = [hitls_tls::crypt::NamedGroup::SECP256R1];
+        let sig_algs = [SignatureScheme::ECDSA_SECP256R1_SHA256];
+        // Server uses the same ticket_key for both connections so it can decrypt
+        // tickets issued during the first handshake.
+        let ticket_key = vec![0xAB; 32];
+
+        // Shared client session cache
+        let client_cache = Arc::new(Mutex::new(InMemorySessionCache::new(10)));
+
+        // First connection: server issues a session ticket; client stores it in cache.
+        let server_config1 = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain.clone())
+            .private_key(server_key.clone())
+            .ticket_key(ticket_key.clone())
+            .verify_peer(false)
+            .build();
+
+        let listener1 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr1 = listener1.local_addr().unwrap();
+
+        let s1 = thread::spawn(move || {
+            let (stream, _) = listener1.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config1);
+            conn.handshake().unwrap();
+            let mut buf = [0u8; 8];
+            let _ = conn.read(&mut buf);
+            conn.write(b"ok").unwrap();
+            let _ = conn.shutdown();
+        });
+
+        let client_cache_clone = client_cache.clone();
+        let client_config1 = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .server_name("localhost")
+            .session_cache(client_cache_clone)
+            .session_resumption(true)
+            .verify_peer(false)
+            .build();
+
+        let stream1 = std::net::TcpStream::connect_timeout(&addr1, Duration::from_secs(5)).unwrap();
+        stream1
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream1
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn1 = Tls12ClientConnection::new(stream1, client_config1);
+        conn1.handshake().unwrap();
+        assert!(
+            !conn1.is_session_resumed(),
+            "first connection is never resumed"
+        );
+        conn1.write(b"hi").unwrap();
+        let mut buf = [0u8; 8];
+        let _ = conn1.read(&mut buf);
+        let _ = conn1.shutdown();
+        s1.join().unwrap();
+
+        // The client cache should now hold the ticket-based session for "localhost"
+        assert!(
+            !client_cache.lock().unwrap().is_empty(),
+            "session with ticket should be stored in client cache after first connection"
+        );
+
+        // Second connection: server with the same ticket_key can decrypt the cached ticket.
+        let server_config2 = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .ticket_key(ticket_key)
+            .verify_peer(false)
+            .build();
+
+        let listener2 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr2 = listener2.local_addr().unwrap();
+
+        let s2 = thread::spawn(move || {
+            let (stream, _) = listener2.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = Tls12ServerConnection::new(stream, server_config2);
+            conn.handshake().unwrap();
+            assert!(
+                conn.is_session_resumed(),
+                "server: second connection should be resumed"
+            );
+            let mut buf = [0u8; 8];
+            let _ = conn.read(&mut buf);
+            conn.write(b"ok").unwrap();
+            let _ = conn.shutdown();
+        });
+
+        let client_cache_clone2 = client_cache.clone();
+        let client_config2 = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&groups)
+            .signature_algorithms(&sig_algs)
+            .server_name("localhost")
+            .session_cache(client_cache_clone2)
+            .session_resumption(true)
+            .verify_peer(false)
+            .build();
+
+        let stream2 = std::net::TcpStream::connect_timeout(&addr2, Duration::from_secs(5)).unwrap();
+        stream2
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream2
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn2 = Tls12ClientConnection::new(stream2, client_config2);
+        conn2.handshake().unwrap();
+        // Ticket in cache lets client offer it; server decrypts → abbreviated handshake
+        assert!(
+            conn2.is_session_resumed(),
+            "second connection should be resumed from cached ticket"
+        );
+        conn2.write(b"hi").unwrap();
+        let mut buf = [0u8; 8];
+        let _ = conn2.read(&mut buf);
+        let _ = conn2.shutdown();
+        s2.join().unwrap();
+    }
+
+    /// TLS 1.3 export_keying_material: server-side export also works.
+    #[test]
+    fn test_tls13_export_keying_material_server_side() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+        use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+        let (tx, rx) = mpsc::channel::<(Vec<u8>, Vec<u8>)>();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut conn = TlsServerConnection::new(stream, server_config);
+            conn.handshake().unwrap();
+            let ekm_with_ctx = conn
+                .export_keying_material(b"MY LABEL", Some(b"my context"), 48)
+                .unwrap();
+            let ekm_no_ctx = conn.export_keying_material(b"MY LABEL", None, 48).unwrap();
+            tx.send((ekm_with_ctx, ekm_no_ctx)).unwrap();
+            let mut buf = [0u8; 8];
+            let _ = conn.read(&mut buf);
+            let _ = conn.shutdown();
+        });
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .verify_peer(false)
+            .build();
+
+        let stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut conn = TlsClientConnection::new(stream, client_config);
+        conn.handshake().unwrap();
+        let client_ekm_with_ctx = conn
+            .export_keying_material(b"MY LABEL", Some(b"my context"), 48)
+            .unwrap();
+        let client_ekm_no_ctx = conn.export_keying_material(b"MY LABEL", None, 48).unwrap();
+
+        conn.write(b"done").unwrap();
+        let mut buf = [0u8; 8];
+        let _ = conn.read(&mut buf);
+        let _ = conn.shutdown();
+
+        server_handle.join().unwrap();
+        let (server_ekm_with_ctx, server_ekm_no_ctx) = rx.recv().unwrap();
+
+        assert_eq!(
+            client_ekm_with_ctx, server_ekm_with_ctx,
+            "with-context EKM must match"
+        );
+        assert_eq!(
+            client_ekm_no_ctx, server_ekm_no_ctx,
+            "no-context EKM must match"
+        );
+        assert_ne!(
+            client_ekm_with_ctx, client_ekm_no_ctx,
+            "context vs no-context must differ"
+        );
+        assert_eq!(client_ekm_with_ctx.len(), 48);
+        assert_eq!(client_ekm_no_ctx.len(), 48);
+    }
 }
