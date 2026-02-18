@@ -52,9 +52,17 @@ impl BigNum {
     }
 
     /// Modular reduction: self mod modulus.
+    ///
+    /// For negative values, returns `modulus - (|self| mod modulus)` so that
+    /// the result is always in `[0, modulus)`.  This is required for correct
+    /// RSA CRT recombination where intermediate differences can be negative.
     pub fn mod_reduce(&self, modulus: &BigNum) -> Result<BigNum, CryptoError> {
         let (_, r) = self.div_rem(modulus)?;
-        Ok(r)
+        if self.is_negative() && !r.is_zero() {
+            Ok(modulus.sub(&r))
+        } else {
+            Ok(r)
+        }
     }
 
     /// Modular exponentiation: self^exp mod modulus.
@@ -689,6 +697,40 @@ mod tests {
         let (q0, r0) = BigNum::zero().div_rem(&one).unwrap();
         assert_eq!(q0, BigNum::zero());
         assert_eq!(r0, BigNum::zero());
+    }
+
+    #[test]
+    fn test_mod_reduce_negative() {
+        // (-7) mod 5 should be 3  (since -7 = -2*5 + 3)
+        let mut neg7 = BigNum::from_u64(7);
+        neg7.set_negative(true);
+        let m = BigNum::from_u64(5);
+        let r = neg7.mod_reduce(&m).unwrap();
+        assert_eq!(r, BigNum::from_u64(3));
+
+        // (-17) mod 5 should be 3  (since -17 = -4*5 + 3)
+        let mut neg17 = BigNum::from_u64(17);
+        neg17.set_negative(true);
+        let r = neg17.mod_reduce(&m).unwrap();
+        assert_eq!(r, BigNum::from_u64(3));
+
+        // (-10) mod 5 should be 0  (exactly divisible)
+        let mut neg10 = BigNum::from_u64(10);
+        neg10.set_negative(true);
+        let r = neg10.mod_reduce(&m).unwrap();
+        assert_eq!(r, BigNum::zero());
+
+        // (-1) mod 97 should be 96
+        let mut neg1 = BigNum::from_u64(1);
+        neg1.set_negative(true);
+        let m97 = BigNum::from_u64(97);
+        let r = neg1.mod_reduce(&m97).unwrap();
+        assert_eq!(r, BigNum::from_u64(96));
+
+        // Positive values should be unchanged
+        let pos7 = BigNum::from_u64(7);
+        let r = pos7.mod_reduce(&m).unwrap();
+        assert_eq!(r, BigNum::from_u64(2));
     }
 
     #[test]
