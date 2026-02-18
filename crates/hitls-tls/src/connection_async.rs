@@ -1685,4 +1685,170 @@ mod tests {
         assert!(!client.is_session_resumed());
         assert!(!server.is_session_resumed());
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 75 — E2: Async export API unit tests
+    // -------------------------------------------------------
+
+    /// export_keying_material returns error when called before handshake.
+    #[tokio::test]
+    async fn test_async_tls13_export_keying_material_before_handshake() {
+        let (client_stream, _server_stream) = tokio::io::duplex(64 * 1024);
+        let config = TlsConfig::builder().verify_peer(false).build();
+        let conn = AsyncTlsClientConnection::new(client_stream, config);
+
+        let result = conn.export_keying_material(b"label", None, 32);
+        assert!(result.is_err(), "must fail before handshake");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("not connected"), "error: {msg}");
+    }
+
+    /// export_early_keying_material returns error when no PSK was offered.
+    #[tokio::test]
+    async fn test_async_tls13_export_early_keying_material_no_psk() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // No PSK → early exporter master secret is empty
+        let c_result = client.export_early_keying_material(b"early label", None, 32);
+        assert!(
+            c_result.is_err(),
+            "client: early export must fail without PSK"
+        );
+        let msg = format!("{}", c_result.unwrap_err());
+        assert!(
+            msg.contains("no early exporter master secret"),
+            "unexpected error: {msg}"
+        );
+
+        let s_result = server.export_early_keying_material(b"early label", None, 32);
+        assert!(
+            s_result.is_err(),
+            "server: early export must fail without PSK"
+        );
+    }
+
+    /// export_keying_material: client and server derive identical keying material.
+    #[tokio::test]
+    async fn test_async_tls13_export_keying_material_both_sides() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        let label = b"ASYNC EXPORTER";
+        let context = Some(b"async context".as_ref());
+
+        let client_ekm = client.export_keying_material(label, context, 32).unwrap();
+        let server_ekm = server.export_keying_material(label, context, 32).unwrap();
+
+        assert_eq!(client_ekm.len(), 32);
+        assert_eq!(server_ekm.len(), 32);
+        assert_eq!(
+            client_ekm, server_ekm,
+            "async client and server must derive identical keying material"
+        );
+    }
+
+    /// export_keying_material: different labels produce different material.
+    #[tokio::test]
+    async fn test_async_tls13_export_keying_material_different_labels() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        let ekm_a = client.export_keying_material(b"LABEL A", None, 32).unwrap();
+        let ekm_b = client.export_keying_material(b"LABEL B", None, 32).unwrap();
+        let ekm_a_ctx = client
+            .export_keying_material(b"LABEL A", Some(b"ctx"), 32)
+            .unwrap();
+
+        assert_ne!(ekm_a, ekm_b, "different labels must produce different EKM");
+        assert_ne!(ekm_a, ekm_a_ctx, "no-context vs with-context must differ");
+
+        // Server derives the same as client for each case
+        let s_ekm_a = server.export_keying_material(b"LABEL A", None, 32).unwrap();
+        assert_eq!(ekm_a, s_ekm_a, "server EKM for LABEL A must match client");
+    }
+
+    /// certificate_authorities config: handshake succeeds with or without CAs configured.
+    #[tokio::test]
+    async fn test_async_tls13_certificate_authorities_config() {
+        use crate::config::ServerPrivateKey;
+
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let seed = [0x42u8; 32];
+
+        let server_config = TlsConfig::builder()
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed.to_vec()))
+            .verify_peer(false)
+            .build();
+
+        // Client with non-empty certificate_authorities list
+        let dn1 = vec![0x30, 0x07, 0x31, 0x05, 0x30, 0x03, 0x06, 0x01, 0x41];
+        let client_config = TlsConfig::builder()
+            .verify_peer(false)
+            .certificate_authorities(vec![dn1])
+            .build();
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // After handshake, export must succeed
+        let ekm = client.export_keying_material(b"label", None, 16).unwrap();
+        assert_eq!(ekm.len(), 16);
+    }
+
+    /// export_keying_material: deterministic — same call returns same bytes.
+    #[tokio::test]
+    async fn test_async_tls13_export_keying_material_deterministic() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // Same label + context → same output (deterministic HKDF-Expand)
+        let ekm1 = client
+            .export_keying_material(b"STABLE LABEL", Some(b"ctx"), 32)
+            .unwrap();
+        let ekm2 = client
+            .export_keying_material(b"STABLE LABEL", Some(b"ctx"), 32)
+            .unwrap();
+        assert_eq!(ekm1, ekm2, "export_keying_material must be deterministic");
+
+        // Server also deterministic and matches client
+        let s_ekm1 = server
+            .export_keying_material(b"STABLE LABEL", Some(b"ctx"), 32)
+            .unwrap();
+        assert_eq!(ekm1, s_ekm1, "server export must match client");
+    }
 }

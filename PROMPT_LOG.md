@@ -1673,3 +1673,24 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - Integration tests: 60 → 78 (+18); total: 2036 → 2054 tests.
 
 2054 total tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
+## Testing-Phase 75 — Phase 74 Feature Integration Tests + Async Export Unit Tests (2026-02-18)
+
+**Prompt**: 开始实现 Testing-Phase 75 (Start implementing Testing-Phase 75)
+
+**Implementation**:
+- E1 (10 integration tests in tests/interop/src/lib.rs):
+  - certificate_authorities config: handshake succeeds with 2 DER DNs, or empty list
+  - export_keying_material (TLS 1.3): client/server match, different labels, before handshake, various lengths, server-side
+  - export_early_keying_material: no-PSK error (both sides)
+  - TLS 1.2 export_keying_material: client/server match
+  - TLS 1.2 session cache + ticket: InMemorySessionCache stores ticket from 1st handshake; 2nd connection resumed
+- E2 (6 async unit tests in crates/hitls-tls/src/connection_async.rs):
+  - export_keying_material before handshake, early export no-PSK, both-sides match, different labels, CA config, deterministic
+
+**Result**:
+- hitls-tls: 753 → 759 (+6); hitls-integration-tests: 78 → 88 (+10); total: 2054 → 2070 tests.
+
+2070 total tests (40 ignored). Clippy clean, fmt clean.
