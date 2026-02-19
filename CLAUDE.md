@@ -61,7 +61,7 @@ cargo fmt --all -- --check
 - `rustfmt.toml`: max_width=100, use_field_init_shorthand, use_try_shorthand
 - `clippy.toml`: cognitive-complexity-threshold=30
 - Always run `cargo fmt` before committing
-- **Sync before commit**: Before committing local changes, always pull the latest remote main branch first (`git pull origin main --rebase`) to avoid conflicts and ensure commits are based on the latest upstream state
+- **Sync before task**: Before starting any implementation task, always pull the latest remote main branch first (`git pull origin main`) to ensure the local codebase is up to date
 
 ### Error Handling
 - Use `hitls_types::CryptoError` for all crypto errors (thiserror-based)
