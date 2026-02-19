@@ -1808,6 +1808,77 @@ mod tests {
     }
 
     #[test]
+    fn test_server_accessors_after_init() {
+        let config = make_server_config();
+        let hs = ServerHandshake::new(config);
+        assert_eq!(hs.state(), HandshakeState::WaitClientHello);
+        assert!(hs.client_record_size_limit().is_none());
+        assert!(hs.negotiated_alpn().is_none());
+        assert!(hs.client_server_name().is_none());
+        assert!(hs.negotiated_group().is_none());
+        assert!(hs.client_certs().is_empty());
+    }
+
+    #[test]
+    fn test_server_process_client_finished_wrong_state_wait_ch() {
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+        // Finished from WaitClientHello → error
+        assert!(hs
+            .process_client_finished(&[20, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            .is_err());
+    }
+
+    #[test]
+    fn test_server_process_client_hello_retry_wrong_state() {
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+        // process_client_hello_retry from WaitClientHello (without prior HRR) → error
+        assert!(hs
+            .process_client_hello_retry(&[1, 0, 0, 4, 0, 0, 0, 0])
+            .is_err());
+    }
+
+    #[test]
+    fn test_server_rejects_tls12_only_supported_versions() {
+        use crate::extensions::Extension;
+        use crate::handshake::codec::{encode_client_hello, ClientHello};
+        use crate::handshake::extensions_codec::{
+            build_key_share_ch, build_signature_algorithms, build_supported_groups,
+        };
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+
+        // ClientHello with supported_versions that does NOT include TLS 1.3
+        let sv_ext = Extension {
+            extension_type: ExtensionType::SUPPORTED_VERSIONS,
+            data: vec![2, 0x03, 0x03], // only TLS 1.2
+        };
+
+        let ch = ClientHello {
+            random: [0xBB; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                sv_ext,
+                build_supported_groups(&[NamedGroup::X25519]),
+                build_signature_algorithms(&[crate::crypt::SignatureScheme::ED25519]),
+                build_key_share_ch(NamedGroup::X25519, &[0x04; 32]),
+            ],
+        };
+        let msg = encode_client_hello(&ch);
+        assert!(hs.process_client_hello(&msg).is_err());
+    }
+
+    #[test]
+    fn test_server_alpn_no_match_returns_none() {
+        let config = make_server_config();
+        let hs = ServerHandshake::new(config);
+        // Without processing any CH, negotiated_alpn is None
+        assert!(hs.negotiated_alpn().is_none());
+    }
+
+    #[test]
     fn test_server_client_hello_retry_then_wrong_group_still_fails() {
         use crate::handshake::extensions_codec::{
             build_key_share_ch, build_signature_algorithms, build_supported_groups,

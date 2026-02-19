@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,323 tests (40 ignored)
+**Current**: 2,348 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -858,3 +858,78 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2323** | **40** |
+
+---
+
+## Testing-Phase 83: session/client/server/async/dtls12-async Unit Tests
+
+**Date**: 2026-02-19
+**Tests added**: +25 (2323 → 2348)
+**Files modified**: session/mod.rs, handshake/client.rs, handshake/server.rs, connection_async.rs, connection_dtls12_async.rs
+
+### M1: Session Cache + Ticket Edge Cases (+5, in session/mod.rs)
+
+| Test | Description |
+|------|-------------|
+| test_cache_cleanup_noop_with_zero_lifetime | Cleanup with lifetime=0 is a no-op (all sessions retained) |
+| test_encrypt_session_ticket_wrong_key_length | encrypt_session_ticket rejects 16-byte and 48-byte keys |
+| test_decrypt_session_ticket_wrong_key_length | decrypt_session_ticket returns None for wrong key lengths |
+| test_decode_session_state_without_ems_byte | Decode without trailing EMS byte defaults to false |
+| test_cache_cleanup_removes_nothing_when_fresh | Cleanup on freshly-created sessions removes nothing |
+
+### M2: TLS 1.3 Client Handshake Tests (+5, in handshake/client.rs)
+
+| Test | Description |
+|------|-------------|
+| test_client_accessors_after_init | All getter accessors return safe defaults before handshake |
+| test_client_hello_with_heartbeat_extension | ClientHello includes heartbeat ext when heartbeat_mode=1 |
+| test_client_hello_default_has_supported_groups | ClientHello includes supported_groups extension |
+| test_client_new_session_ticket_no_params | NST processing without cipher params errors |
+| test_client_process_finished_wrong_state_idle | Finished from Idle state errors |
+
+### M3: TLS 1.3 Server Handshake Tests (+5, in handshake/server.rs)
+
+| Test | Description |
+|------|-------------|
+| test_server_accessors_after_init | All getter accessors return defaults after init |
+| test_server_process_client_finished_wrong_state_wait_ch | Finished from WaitClientHello errors |
+| test_server_process_client_hello_retry_wrong_state | HelloRetryRequest retry without prior HRR errors |
+| test_server_rejects_tls12_only_supported_versions | ClientHello with only TLS 1.2 in supported_versions rejected |
+| test_server_alpn_no_match_returns_none | No CH processed → negotiated_alpn is None |
+
+### M4: Async TLS 1.3 Connection Tests (+5, in connection_async.rs)
+
+| Test | Description |
+|------|-------------|
+| test_async_tls13_key_update_request_response | key_update(true) with request_response works |
+| test_async_tls13_export_keying_material_zero_length | Export with length=0 returns empty vec |
+| test_async_tls13_server_export_before_handshake | Server export before handshake errors |
+| test_async_tls13_accessor_methods | peer_certs/server_name/negotiated_group/connection_info after handshake |
+| test_async_tls13_export_different_contexts | Different contexts produce different export output |
+
+### M5: Async DTLS 1.2 Connection Tests (+5, in connection_dtls12_async.rs)
+
+| Test | Description |
+|------|-------------|
+| test_async_dtls12_take_session_returns_none | DTLS 1.2 take_session always returns None (cache-based) |
+| test_async_dtls12_server_name_accessor | server_name returns configured value after handshake |
+| test_async_dtls12_is_session_resumed_first_handshake | First handshake is not session-resumed |
+| test_async_dtls12_peer_certificates_empty | Server peer_certs empty when verify_peer=false |
+| test_async_dtls12_bidirectional_after_handshake | Client→Server and Server→Client data exchange |
+
+### Workspace Test Counts After Testing-Phase 83
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 603 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 122 | 3 |
+| hitls-pki | 341 | 1 |
+| hitls-tls | 987 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2348** | **40** |
