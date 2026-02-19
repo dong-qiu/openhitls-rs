@@ -356,4 +356,48 @@ mod tests {
         let okm = hkdf_expand(&sha256_factory, &prk, b"info", 1).unwrap();
         assert_eq!(okm.len(), 1);
     }
+
+    #[test]
+    fn test_hkdf_expand_empty_info() {
+        // Expand with empty info (valid per RFC 5869)
+        let prk = hex("077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5");
+        let okm = hkdf_expand(&sha256_factory, &prk, b"", 32).unwrap();
+        assert_eq!(okm.len(), 32);
+        // Deterministic
+        let okm2 = hkdf_expand(&sha256_factory, &prk, b"", 32).unwrap();
+        assert_eq!(okm, okm2);
+    }
+
+    #[test]
+    fn test_hkdf_expand_label_sha384() {
+        let secret = vec![0xBB; 48];
+        let result =
+            hkdf_expand_label(&sha384_factory, &secret, b"s hs traffic", b"hash384", 48).unwrap();
+        assert_eq!(result.len(), 48);
+        // Different label → different output
+        let result2 =
+            hkdf_expand_label(&sha384_factory, &secret, b"c hs traffic", b"hash384", 48).unwrap();
+        assert_ne!(result, result2);
+    }
+
+    #[test]
+    fn test_hmac_hash_empty_data() {
+        let key = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let result = hmac_hash(&sha256_factory, &key, b"").unwrap();
+        assert_eq!(result.len(), 32);
+        // HMAC with empty data should still produce deterministic output
+        let result2 = hmac_hash(&sha256_factory, &key, b"").unwrap();
+        assert_eq!(result, result2);
+        // Should differ from HMAC with non-empty data
+        let result3 = hmac_hash(&sha256_factory, &key, b"data").unwrap();
+        assert_ne!(result, result3);
+    }
+
+    #[test]
+    fn test_hkdf_expand_exact_hash_length() {
+        // Request exactly hash_len bytes (32 for SHA-256) — single iteration
+        let prk = vec![0x42; 32];
+        let okm = hkdf_expand(&sha256_factory, &prk, b"test", 32).unwrap();
+        assert_eq!(okm.len(), 32);
+    }
 }

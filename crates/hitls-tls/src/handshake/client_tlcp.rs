@@ -444,4 +444,95 @@ mod tests {
         let hs = TlcpClientHandshake::new(config);
         assert_eq!(hs.state(), TlcpClientState::Idle);
     }
+
+    #[test]
+    fn test_tlcp_client_server_hello_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = TlcpClientHandshake::new(config);
+        // ServerHello from Idle → error
+        let sh = crate::handshake::codec::ServerHello {
+            random: [0u8; 32],
+            legacy_session_id: vec![],
+            cipher_suite: CipherSuite::ECDHE_SM4_CBC_SM3,
+            extensions: vec![],
+        };
+        let result = hs.process_server_hello(&[2, 0, 0, 4, 0, 0, 0, 0], &sh);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("unexpected ServerHello"), "{msg}");
+    }
+
+    #[test]
+    fn test_tlcp_client_certificate_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = TlcpClientHandshake::new(config);
+        let cert_msg = crate::handshake::codec_tlcp::TlcpCertificateMessage {
+            sign_chain: vec![],
+            enc_cert: vec![],
+        };
+        // Certificate from Idle → error
+        let result = hs.process_certificate(&[11, 0, 0, 4, 0, 0, 0, 0], &cert_msg);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("unexpected Certificate"), "{msg}");
+    }
+
+    #[test]
+    fn test_tlcp_client_ske_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = TlcpClientHandshake::new(config);
+        // SKE from Idle → error
+        let result = hs.process_server_key_exchange(&[12, 0, 0, 4], &[0, 0, 0, 0]);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("unexpected ServerKeyExchange"), "{msg}");
+    }
+
+    #[test]
+    fn test_tlcp_client_shd_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = TlcpClientHandshake::new(config);
+        // SHD from Idle → error
+        let result = hs.process_server_hello_done(&[14, 0, 0, 0]);
+        assert!(result.is_err());
+        let msg = format!("{}", result.err().unwrap());
+        assert!(msg.contains("unexpected ServerHelloDone"), "{msg}");
+    }
+
+    #[test]
+    fn test_tlcp_client_ccs_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = TlcpClientHandshake::new(config);
+        // CCS from Idle → error
+        let result = hs.process_change_cipher_spec();
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("unexpected ChangeCipherSpec"), "{msg}");
+    }
+
+    #[test]
+    fn test_tlcp_client_finished_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = TlcpClientHandshake::new(config);
+        // Finished from Idle → error
+        let result = hs.process_finished(
+            &[20, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            &[0u8; 48],
+        );
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("unexpected Finished"), "{msg}");
+    }
+
+    #[test]
+    fn test_tlcp_client_no_tlcp_suites_error() {
+        // Config with only TLS 1.3 suite → no TLCP suites → error on build_client_hello
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_AES_128_GCM_SHA256])
+            .build();
+        let mut hs = TlcpClientHandshake::new(config);
+        let result = hs.build_client_hello();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), TlsError::NoSharedCipherSuite));
+    }
 }
