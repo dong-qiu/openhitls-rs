@@ -296,4 +296,95 @@ mod tests {
         )
         .is_err());
     }
+
+    #[test]
+    fn test_tls12_export_non_utf8_label() {
+        let factory = sha256_factory();
+        let ms = vec![0x42; 48];
+        let cr = [1u8; 32];
+        let sr = [2u8; 32];
+        let err = tls12_export_keying_material(
+            &*factory,
+            &ms,
+            &cr,
+            &sr,
+            &[0xFF, 0xFE], // invalid UTF-8
+            None,
+            32,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("UTF-8"));
+    }
+
+    #[test]
+    fn test_tls12_export_different_randoms() {
+        let factory = sha256_factory();
+        let ms = vec![0x42; 48];
+        let cr1 = [1u8; 32];
+        let cr2 = [2u8; 32];
+        let sr = [3u8; 32];
+        let out1 = tls12_export_keying_material(&*factory, &ms, &cr1, &sr, b"test-label", None, 32)
+            .unwrap();
+        let out2 = tls12_export_keying_material(&*factory, &ms, &cr2, &sr, b"test-label", None, 32)
+            .unwrap();
+        assert_ne!(
+            out1, out2,
+            "different randoms should produce different output"
+        );
+    }
+
+    #[test]
+    fn test_tls13_export_different_secrets() {
+        let factory = sha256_factory();
+        let ems1 = vec![0xAA; 32];
+        let ems2 = vec![0xBB; 32];
+        let out1 = tls13_export_keying_material(&*factory, &ems1, b"test-label", None, 32).unwrap();
+        let out2 = tls13_export_keying_material(&*factory, &ems2, b"test-label", None, 32).unwrap();
+        assert_ne!(
+            out1, out2,
+            "different secrets should produce different output"
+        );
+    }
+
+    #[test]
+    fn test_tls13_early_export_forbidden_label() {
+        let factory = sha256_factory();
+        let eems = vec![0x11; 32];
+        let err = tls13_export_early_keying_material(&*factory, &eems, b"master secret", None, 32)
+            .unwrap_err();
+        assert!(err.to_string().contains("reserved"));
+    }
+
+    #[test]
+    fn test_tls12_export_context_affects_output() {
+        let factory = sha256_factory();
+        let ms = vec![0x42; 48];
+        let cr = [1u8; 32];
+        let sr = [2u8; 32];
+        let out_a = tls12_export_keying_material(
+            &*factory,
+            &ms,
+            &cr,
+            &sr,
+            b"test-label",
+            Some(b"ctx-A"),
+            32,
+        )
+        .unwrap();
+        let out_b = tls12_export_keying_material(
+            &*factory,
+            &ms,
+            &cr,
+            &sr,
+            b"test-label",
+            Some(b"ctx-B"),
+            32,
+        )
+        .unwrap();
+        let out_none =
+            tls12_export_keying_material(&*factory, &ms, &cr, &sr, b"test-label", None, 32)
+                .unwrap();
+        assert_ne!(out_a, out_b, "different contexts → different output");
+        assert_ne!(out_a, out_none, "context vs no context → different output");
+    }
 }

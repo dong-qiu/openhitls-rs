@@ -2383,4 +2383,72 @@ mod tests {
         // Truncated entry
         assert!(parse_status_request_v2(&[0x00, 0x03, 0x01, 0x00]).is_err());
     }
+
+    #[test]
+    fn test_grease_key_share_ch_includes_real_entry() {
+        let real_group = NamedGroup::X25519;
+        let fake_pk = vec![0x42u8; 32];
+        let grease_group = GREASE_VALUES[0]; // 0x0A0A
+        let ext = build_key_share_ch_grease(real_group, &fake_pk, grease_group);
+        assert_eq!(ext.extension_type, ExtensionType::KEY_SHARE);
+
+        // Parse the key_share entries — should contain GREASE entry + real entry
+        let entries = parse_key_share_ch(&ext.data).unwrap();
+        assert_eq!(entries.len(), 2);
+        // First entry is GREASE (1-byte key)
+        assert_eq!(entries[0].0 .0, grease_group);
+        assert_eq!(entries[0].1.len(), 1);
+        // Second entry is the real key share
+        assert_eq!(entries[1].0, real_group);
+        assert_eq!(entries[1].1, fake_pk);
+    }
+
+    #[test]
+    fn test_parse_extensions_truncated_length() {
+        // Total length says 8 but only 4 bytes of extension data follow
+        let data = [
+            0x00, 0x08, // extensions total length = 8
+            0x00, 0x0A, // extension type 10
+            0x00,
+            0x02, // ext data length = 2
+                  // missing 2 bytes of extension data
+        ];
+        assert!(parse_extensions(&data).is_err());
+    }
+
+    #[test]
+    fn test_parse_extensions_empty_returns_empty() {
+        // Less than 2 bytes → Ok(empty)
+        assert!(parse_extensions(&[]).unwrap().is_empty());
+        assert!(parse_extensions(&[0x00]).unwrap().is_empty());
+        // Zero-length extensions list
+        assert!(parse_extensions(&[0x00, 0x00]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_pre_shared_key_ch_truncated_identity() {
+        // identities_length = 10 but data too short
+        let data = [
+            0x00, 0x0A, // identities list length = 10
+            0x00, 0x03, // identity length = 3
+            0x41, 0x42,
+            0x43, // identity bytes "ABC"
+                  // missing obfuscated_ticket_age (4 bytes) + rest
+        ];
+        let result = parse_pre_shared_key_ch(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_alpn_sh_list_length_mismatch() {
+        // list_len claims 10, but actual data after header is only 3 bytes
+        let data = [
+            0x00, 0x0A, // list_length = 10
+            0x02, // proto_len = 2
+            0x68, 0x32, // "h2"
+        ];
+        // list_len(10) != 1 + proto_len(2) = 3 → unexpected list size
+        let result = parse_alpn_sh(&data);
+        assert!(result.is_err());
+    }
 }

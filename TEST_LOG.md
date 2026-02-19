@@ -933,3 +933,55 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2348** | **40** |
+
+## Testing-Phase 84: record/extensions/export/codec/connection Unit Tests
+
+**Date**: 2026-02-19
+**Scope**: Record layer, extensions framework, key material export, extensions codec, TLS 1.3 connection
+**Tests Added**: +24 (2348 → 2372)
+
+### Test Details
+
+| # | Module | Test Name | Description |
+|---|--------|-----------|-------------|
+| 1 | record/mod.rs | test_seal_open_tls12_etm_roundtrip | EtM encrypt+decrypt roundtrip with AES-128-CBC + HMAC-SHA256 |
+| 2 | record/mod.rs | test_ccs_passthrough_with_active_decryptor12 | CCS record not decrypted even with active decryptor |
+| 3 | record/mod.rs | test_empty_encrypted_record_rejected | Empty payload rejected when is_decrypting() is true |
+| 4 | record/mod.rs | test_parse_record_size_limit_boundary | max_fragment_size+256 accepted, +257 rejected |
+| 5 | extensions/mod.rs | test_extension_type_constants | Verify numeric values of all ExtensionType constants |
+| 6 | extensions/mod.rs | test_extension_context_flag_values | Verify bitflag values (CH=0x0001, SH=0x0002, EE=0x0010, etc.) |
+| 7 | extensions/mod.rs | test_parse_ignores_wrong_context_extension | Parse callback not fired for wrong context |
+| 8 | extensions/mod.rs | test_parse_custom_extensions_empty_received | Empty received list → no callbacks |
+| 9 | extensions/mod.rs | test_extension_context_zero_contains_nothing | ExtensionContext(0) contains nothing |
+| 10 | crypt/export.rs | test_tls12_export_non_utf8_label | Non-UTF-8 label [0xFF, 0xFE] → Err("UTF-8") |
+| 11 | crypt/export.rs | test_tls12_export_different_randoms | Different client_random → different output |
+| 12 | crypt/export.rs | test_tls13_export_different_secrets | Different EMS → different output |
+| 13 | crypt/export.rs | test_tls13_early_export_forbidden_label | "master secret" → Err("reserved") |
+| 14 | crypt/export.rs | test_tls12_export_context_affects_output | ctx-A vs ctx-B vs None all produce different output |
+| 15 | extensions_codec.rs | test_grease_key_share_ch_includes_real_entry | GREASE key_share builder includes both GREASE and real entries |
+| 16 | extensions_codec.rs | test_parse_extensions_truncated_length | Total length claims 8 but only 4 bytes follow → Err |
+| 17 | extensions_codec.rs | test_parse_extensions_empty_returns_empty | Empty/short/zero-length input → Ok(empty) |
+| 18 | extensions_codec.rs | test_parse_pre_shared_key_ch_truncated_identity | Truncated identity list → Err |
+| 19 | extensions_codec.rs | test_parse_alpn_sh_list_length_mismatch | list_len mismatch → Err |
+| 20 | connection.rs | test_tls13_take_session_before_handshake | take_session() before handshake returns None |
+| 21 | connection.rs | test_tls13_connection_info_before_handshake | connection_info() before handshake returns None |
+| 22 | connection.rs | test_tls13_accessors_before_handshake | All accessors return safe defaults before handshake |
+| 23 | connection.rs | test_tls13_queue_early_data_and_accepted | Queue early data + verify early_data_accepted is false |
+| 24 | connection.rs | test_tls13_server_key_update_before_connected | Server key_update before connected fails |
+
+### Workspace Test Counts After Testing-Phase 84
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 603 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 122 | 3 |
+| hitls-pki | 341 | 1 |
+| hitls-tls | 1011 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2372** | **40** |
