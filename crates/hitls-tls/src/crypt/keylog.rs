@@ -108,4 +108,87 @@ mod tests {
         assert_eq!(parts[1].len(), 64); // 32 bytes = 64 hex chars
         assert_eq!(parts[2].len(), 96); // 48 bytes = 96 hex chars
     }
+
+    #[test]
+    fn test_keylog_empty_secret() {
+        let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let lines_clone = lines.clone();
+        let config = TlsConfig::builder()
+            .key_log(Arc::new(move |line: &str| {
+                lines_clone.lock().unwrap().push(line.to_string());
+            }))
+            .build();
+
+        log_key(&config, "TEST_LABEL", &[0xAA; 32], &[]);
+        let logged = lines.lock().unwrap();
+        let parts: Vec<&str> = logged[0].split(' ').collect();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[2], ""); // empty secret → empty hex
+    }
+
+    #[test]
+    fn test_keylog_multiple_calls_order() {
+        let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let lines_clone = lines.clone();
+        let config = TlsConfig::builder()
+            .key_log(Arc::new(move |line: &str| {
+                lines_clone.lock().unwrap().push(line.to_string());
+            }))
+            .build();
+
+        log_key(&config, "LABEL_A", &[0x01; 32], &[0x10; 16]);
+        log_key(&config, "LABEL_B", &[0x02; 32], &[0x20; 16]);
+        log_key(&config, "LABEL_C", &[0x03; 32], &[0x30; 16]);
+
+        let logged = lines.lock().unwrap();
+        assert_eq!(logged.len(), 3);
+        assert!(logged[0].starts_with("LABEL_A "));
+        assert!(logged[1].starts_with("LABEL_B "));
+        assert!(logged[2].starts_with("LABEL_C "));
+    }
+
+    #[test]
+    fn test_to_hex_boundary_values() {
+        assert_eq!(to_hex(&[0x00]), "00");
+        assert_eq!(to_hex(&[0xFF]), "ff");
+        assert_eq!(to_hex(&[0x00, 0xFF, 0x0A, 0xF0]), "00ff0af0");
+        // Empty
+        assert_eq!(to_hex(&[]), "");
+        // Single byte
+        assert_eq!(to_hex(&[0xAB]), "ab");
+    }
+
+    #[test]
+    fn test_keylog_tls13_exporter_label() {
+        let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let lines_clone = lines.clone();
+        let config = TlsConfig::builder()
+            .key_log(Arc::new(move |line: &str| {
+                lines_clone.lock().unwrap().push(line.to_string());
+            }))
+            .build();
+
+        log_key(&config, "EXPORTER_SECRET", &[0xBB; 32], &[0xCC; 32]);
+        let logged = lines.lock().unwrap();
+        assert!(logged[0].starts_with("EXPORTER_SECRET "));
+        let parts: Vec<&str> = logged[0].split(' ').collect();
+        assert_eq!(parts[2].len(), 64); // 32 bytes = 64 hex chars
+    }
+
+    #[test]
+    fn test_keylog_large_secret() {
+        let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let lines_clone = lines.clone();
+        let config = TlsConfig::builder()
+            .key_log(Arc::new(move |line: &str| {
+                lines_clone.lock().unwrap().push(line.to_string());
+            }))
+            .build();
+
+        let large_secret = vec![0xDD; 256];
+        log_key(&config, "LARGE_SECRET", &[0xEE; 32], &large_secret);
+        let logged = lines.lock().unwrap();
+        let parts: Vec<&str> = logged[0].split(' ').collect();
+        assert_eq!(parts[2].len(), 512); // 256 bytes = 512 hex chars
+    }
 }

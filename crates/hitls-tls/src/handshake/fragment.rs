@@ -290,4 +290,59 @@ mod tests {
         assert!(buf.insert_fragment(3, &body[3..5]).unwrap());
         assert_eq!(buf.message_body().unwrap(), body.as_slice());
     }
+
+    #[test]
+    fn test_fragment_zero_length_message() {
+        // Empty body (e.g., ServerHelloDone) should produce a single fragment
+        let fragments = fragment_handshake(HandshakeType::ServerHelloDone, &[], 0, 100);
+        assert_eq!(fragments.len(), 1);
+        // Header is DTLS_HS_HEADER_LEN bytes, body is 0
+        assert_eq!(fragments[0].len(), DTLS_HS_HEADER_LEN);
+    }
+
+    #[test]
+    fn test_fragment_exact_mtu_fit() {
+        // Body exactly fits in max_fragment_payload → single fragment
+        let body = vec![0xAB; 100];
+        let fragments = fragment_handshake(HandshakeType::Certificate, &body, 1, 100);
+        assert_eq!(fragments.len(), 1);
+
+        // Body is one byte over → 2 fragments
+        let body2 = vec![0xAB; 101];
+        let fragments2 = fragment_handshake(HandshakeType::Certificate, &body2, 1, 100);
+        assert_eq!(fragments2.len(), 2);
+    }
+
+    #[test]
+    fn test_reassembly_fragment_exceeds_total() {
+        let mut buf = ReassemblyBuffer::new(HandshakeType::Certificate, 0, 10);
+        // Fragment at offset 8 with 5 bytes → 8+5=13 > 10 → error
+        let result = buf.insert_fragment(8, &[0x01; 5]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reassembly_empty_message_complete() {
+        // total_length=0 → is_complete() should be true immediately
+        let buf = ReassemblyBuffer::new(HandshakeType::ServerHelloDone, 0, 0);
+        assert!(buf.is_complete());
+        assert_eq!(buf.message_body().unwrap(), &[] as &[u8]);
+    }
+
+    #[test]
+    fn test_reassembly_manager_reset() {
+        let mut mgr = ReassemblyManager::new();
+        let header = DtlsHandshakeHeader {
+            msg_type: HandshakeType::Certificate,
+            length: 5,
+            message_seq: 0,
+            fragment_offset: 0,
+            fragment_length: 5,
+        };
+        let _ = mgr.process_fragment(&header, b"hello");
+        mgr.reset();
+        // After reset, manager is empty — reprocessing same seq should work
+        let result = mgr.process_fragment(&header, b"hello");
+        assert!(result.is_ok());
+    }
 }

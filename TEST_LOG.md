@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,348 tests (40 ignored)
+**Current**: 2,420 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -1038,3 +1038,54 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2397** | **40** |
+
+## Testing-Phase 86: retransmit/keylog/fragment/anti_replay/key_exchange Unit Tests
+
+**Date**: 2026-02-19
+**Scope**: DTLS retransmission timer, NSS key logging, handshake fragmentation, anti-replay window, key exchange
+**Tests Added**: +23 (2397 → 2420)
+
+### Test Details
+
+| # | Module | Test Name | Description |
+|---|--------|-----------|-------------|
+| 1 | retransmit.rs | test_retransmit_timer_is_expired_before_start | deadline=None → not expired |
+| 2 | retransmit.rs | test_retransmit_timer_is_exhausted_boundary | 11 backoffs=not exhausted, 12=exhausted |
+| 3 | retransmit.rs | test_retransmit_timer_default_trait | Default trait equivalent to new() |
+| 4 | retransmit.rs | test_flight_push_clear_and_empty | Flight push/clear/is_empty |
+| 5 | retransmit.rs | test_flight_default_trait | Flight::default() is empty |
+| 6 | keylog.rs | test_keylog_empty_secret | Empty secret → empty hex in 3rd field |
+| 7 | keylog.rs | test_keylog_multiple_calls_order | 3 sequential calls preserve order |
+| 8 | keylog.rs | test_to_hex_boundary_values | 0x00, 0xFF, empty, mixed boundary values |
+| 9 | keylog.rs | test_keylog_tls13_exporter_label | EXPORTER_SECRET label format |
+| 10 | keylog.rs | test_keylog_large_secret | 256-byte secret → 512 hex chars |
+| 11 | fragment.rs | test_fragment_zero_length_message | ServerHelloDone empty body → single fragment |
+| 12 | fragment.rs | test_fragment_exact_mtu_fit | 100 bytes in MTU 100 → 1 frag; 101 → 2 frags |
+| 13 | fragment.rs | test_reassembly_fragment_exceeds_total | offset+len > total → Err |
+| 14 | fragment.rs | test_reassembly_empty_message_complete | total_length=0 → immediately complete |
+| 15 | fragment.rs | test_reassembly_manager_reset | Reset clears internal state |
+| 16 | anti_replay.rs | test_anti_replay_default_impl_equivalent | Default equivalent to new() |
+| 17 | anti_replay.rs | test_anti_replay_check_and_accept_error_message | Error contains "replay" |
+| 18 | anti_replay.rs | test_anti_replay_sliding_window_after_gap | accept 0, jump to 100, check 37/36/50 |
+| 19 | anti_replay.rs | test_anti_replay_interleaved_check_and_accept | Interleaved seq 0,3,1,4,2 then replay check |
+| 20 | key_exchange.rs | test_key_exchange_group_accessor | X25519 and SECP256R1 group accessors |
+| 21 | key_exchange.rs | test_key_exchange_public_key_length_by_group | X25519=32, P256=65, X448=56 |
+| 22 | key_exchange.rs | test_key_exchange_secp256r1_shared_secret_symmetry | Both directions produce equal shared secret |
+| 23 | key_exchange.rs | test_key_exchange_x448_roundtrip | X448 DH both directions equal, len=56 |
+
+### Workspace Test Counts After Testing-Phase 86
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 603 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 122 | 3 |
+| hitls-pki | 341 | 1 |
+| hitls-tls | 1059 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2420** | **40** |

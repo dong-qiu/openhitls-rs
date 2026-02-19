@@ -345,4 +345,45 @@ mod tests {
         // Shared secret should not be all zeros
         assert!(shared.iter().any(|&b| b != 0));
     }
+
+    #[test]
+    fn test_key_exchange_group_accessor() {
+        let kx = KeyExchange::generate(NamedGroup::X25519).unwrap();
+        assert_eq!(kx.group(), NamedGroup::X25519);
+
+        let kx2 = KeyExchange::generate(NamedGroup::SECP256R1).unwrap();
+        assert_eq!(kx2.group(), NamedGroup::SECP256R1);
+    }
+
+    #[test]
+    fn test_key_exchange_public_key_length_by_group() {
+        let x25519 = KeyExchange::generate(NamedGroup::X25519).unwrap();
+        assert_eq!(x25519.public_key_bytes().len(), 32);
+
+        let p256 = KeyExchange::generate(NamedGroup::SECP256R1).unwrap();
+        assert_eq!(p256.public_key_bytes().len(), 65); // uncompressed point
+
+        let x448 = KeyExchange::generate(NamedGroup::X448).unwrap();
+        assert_eq!(x448.public_key_bytes().len(), 56);
+    }
+
+    #[test]
+    fn test_key_exchange_secp256r1_shared_secret_symmetry() {
+        let kx1 = KeyExchange::generate(NamedGroup::SECP256R1).unwrap();
+        let kx2 = KeyExchange::generate(NamedGroup::SECP256R1).unwrap();
+        let shared1 = kx1.compute_shared_secret(kx2.public_key_bytes()).unwrap();
+        let shared2 = kx2.compute_shared_secret(kx1.public_key_bytes()).unwrap();
+        assert_eq!(shared1, shared2);
+        assert!(shared1.iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn test_key_exchange_x448_roundtrip() {
+        let kx1 = KeyExchange::generate(NamedGroup::X448).unwrap();
+        let kx2 = KeyExchange::generate(NamedGroup::X448).unwrap();
+        let shared1 = kx1.compute_shared_secret(kx2.public_key_bytes()).unwrap();
+        let shared2 = kx2.compute_shared_secret(kx1.public_key_bytes()).unwrap();
+        assert_eq!(shared1, shared2);
+        assert_eq!(shared1.len(), 56);
+    }
 }
