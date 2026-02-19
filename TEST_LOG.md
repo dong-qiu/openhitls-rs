@@ -985,3 +985,56 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2372** | **40** |
+
+## Testing-Phase 85: aead/crypt/alert/signing/config Unit Tests
+
+**Date**: 2026-02-19
+**Scope**: AEAD constructors, cipher suite params, alert codes, signing dispatch, config builder
+**Tests Added**: +25 (2372 → 2397)
+
+### Test Details
+
+| # | Module | Test Name | Description |
+|---|--------|-----------|-------------|
+| 1 | crypt/aead.rs | test_aes_gcm_aead_invalid_key_length | Reject 0/8/24/48-byte keys, accept 16/32 |
+| 2 | crypt/aead.rs | test_aes_ccm_aead_invalid_key_length | Reject 0/8/24-byte keys, accept 16/32 |
+| 3 | crypt/aead.rs | test_aes_ccm8_aead_invalid_key_length | Reject 0/12/24-byte keys, accept 16/32 |
+| 4 | crypt/aead.rs | test_aead_tag_size_consistency | GCM=16, CCM=16, CCM8=8, ChaCha20=16 |
+| 5 | crypt/aead.rs | test_aes_gcm_decrypt_wrong_nonce | Decrypt with wrong nonce fails |
+| 6 | crypt/mod.rs | test_named_group_is_kem_variants | Only X25519_MLKEM768 is KEM |
+| 7 | crypt/mod.rs | test_key_exchange_alg_is_psk_all_variants | Psk/DhePsk/RsaPsk/EcdhePsk are PSK |
+| 8 | crypt/mod.rs | test_key_exchange_alg_requires_certificate_all_variants | Psk/DhePsk/EcdhePsk/Anon don't require cert |
+| 9 | crypt/mod.rs | test_tls12_cbc_suite_is_cbc_flag | CBC has is_cbc=true, mac_key_len=20; GCM has is_cbc=false, tag_len=16 |
+| 10 | crypt/mod.rs | test_tls13_hash_factory_produces_correct_output_size | SHA-256→32 bytes, SHA-384→48 bytes |
+| 11 | alert/mod.rs | test_alert_level_from_u8_all_invalid | All values except 1,2 return Err |
+| 12 | alert/mod.rs | test_alert_description_undefined_gaps | 35 undefined codes in gaps return Err |
+| 13 | alert/mod.rs | test_alert_clone_and_copy | Copy semantics preserve fields |
+| 14 | alert/mod.rs | test_alert_to_bytes_roundtrip | Serialize to [level, desc] and parse back |
+| 15 | alert/mod.rs | test_alert_description_tls13_specific_codes | MissingExtension=109, CertificateRequired=116, NoApplicationProtocol=120 |
+| 16 | signing.rs | test_select_signature_scheme_dsa_rejected | DSA key → "DSA not supported in TLS 1.3" |
+| 17 | signing.rs | test_select_signature_scheme_empty_client_list | Empty client schemes → "no common" |
+| 18 | signing.rs | test_sign_certificate_verify_ed448_roundtrip | Ed448 sign + verify roundtrip |
+| 19 | signing.rs | test_sign_certificate_verify_dsa_rejected | DSA key in sign_certificate_verify → Err |
+| 20 | signing.rs | test_sign_certificate_verify_rsa_wrong_scheme | RSA key with Ed25519 scheme → Err |
+| 21 | config/mod.rs | test_config_builder_last_setter_wins | Second cipher_suites() call overrides first |
+| 22 | config/mod.rs | test_config_builder_verify_hostname_default_true | Default verify_hostname is true |
+| 23 | config/mod.rs | test_config_empty_records_limit_custom | Custom empty_records_limit(100) |
+| 24 | config/mod.rs | test_config_multiple_trusted_certs | Accumulate 2 trusted certs |
+| 25 | config/mod.rs | test_config_builder_all_version_range_combinations | TLS 1.2-only and TLS 1.3-only ranges |
+
+### Workspace Test Counts After Testing-Phase 85
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 603 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 122 | 3 |
+| hitls-pki | 341 | 1 |
+| hitls-tls | 1036 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2397** | **40** |

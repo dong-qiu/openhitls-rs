@@ -1720,6 +1720,82 @@ mod tests_cipher_suite_params {
         assert_eq!(p.kx_alg, KeyExchangeAlg::Dhe);
         assert_eq!(p.auth_alg, AuthAlg::Rsa);
     }
+
+    #[test]
+    fn test_named_group_is_kem_variants() {
+        assert!(NamedGroup::X25519_MLKEM768.is_kem());
+        assert!(!NamedGroup::X25519.is_kem());
+        assert!(!NamedGroup::SECP256R1.is_kem());
+        assert!(!NamedGroup::SECP384R1.is_kem());
+        assert!(!NamedGroup::X448.is_kem());
+        assert!(!NamedGroup::FFDHE2048.is_kem());
+    }
+
+    #[test]
+    fn test_key_exchange_alg_is_psk_all_variants() {
+        assert!(KeyExchangeAlg::Psk.is_psk());
+        assert!(KeyExchangeAlg::DhePsk.is_psk());
+        assert!(KeyExchangeAlg::RsaPsk.is_psk());
+        assert!(KeyExchangeAlg::EcdhePsk.is_psk());
+        assert!(!KeyExchangeAlg::Ecdhe.is_psk());
+        assert!(!KeyExchangeAlg::Rsa.is_psk());
+        assert!(!KeyExchangeAlg::Dhe.is_psk());
+        assert!(!KeyExchangeAlg::DheAnon.is_psk());
+        assert!(!KeyExchangeAlg::EcdheAnon.is_psk());
+    }
+
+    #[test]
+    fn test_key_exchange_alg_requires_certificate_all_variants() {
+        // These require certificates
+        assert!(KeyExchangeAlg::Ecdhe.requires_certificate());
+        assert!(KeyExchangeAlg::Rsa.requires_certificate());
+        assert!(KeyExchangeAlg::Dhe.requires_certificate());
+        assert!(KeyExchangeAlg::RsaPsk.requires_certificate());
+        // These do NOT require certificates
+        assert!(!KeyExchangeAlg::Psk.requires_certificate());
+        assert!(!KeyExchangeAlg::DhePsk.requires_certificate());
+        assert!(!KeyExchangeAlg::EcdhePsk.requires_certificate());
+        assert!(!KeyExchangeAlg::DheAnon.requires_certificate());
+        assert!(!KeyExchangeAlg::EcdheAnon.requires_certificate());
+    }
+
+    #[test]
+    fn test_tls12_cbc_suite_is_cbc_flag() {
+        // CBC suites should have is_cbc = true
+        let cbc =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA)
+                .unwrap();
+        assert!(cbc.is_cbc);
+        assert_eq!(cbc.mac_key_len, 20); // HMAC-SHA1
+        assert_eq!(cbc.tag_len, 0); // No AEAD tag for CBC
+
+        // GCM suites should have is_cbc = false
+        let gcm =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
+                .unwrap();
+        assert!(!gcm.is_cbc);
+        assert_eq!(gcm.mac_key_len, 0); // AEAD: no MAC key
+        assert_eq!(gcm.tag_len, 16); // GCM tag
+    }
+
+    #[test]
+    fn test_tls13_hash_factory_produces_correct_output_size() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let factory = params.hash_factory();
+        let mut hasher = factory();
+        hasher.update(b"test").unwrap();
+        let mut out = vec![0u8; params.hash_len];
+        hasher.finish(&mut out).unwrap();
+        assert_eq!(out.len(), 32);
+
+        let params384 = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_256_GCM_SHA384).unwrap();
+        let factory384 = params384.hash_factory();
+        let mut hasher384 = factory384();
+        hasher384.update(b"test").unwrap();
+        let mut out384 = vec![0u8; params384.hash_len];
+        hasher384.finish(&mut out384).unwrap();
+        assert_eq!(out384.len(), 48);
+    }
 }
 
 #[cfg(test)]

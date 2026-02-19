@@ -475,4 +475,65 @@ mod tests {
         let pt = aead.decrypt(&nonce, aad, &ct).unwrap();
         assert_eq!(pt, plaintext);
     }
+
+    #[test]
+    fn test_aes_gcm_aead_invalid_key_length() {
+        // Only 16 and 32-byte keys are valid for AES-GCM
+        assert!(AesGcmAead::new(&[0x42u8; 0]).is_err());
+        assert!(AesGcmAead::new(&[0x42u8; 8]).is_err());
+        assert!(AesGcmAead::new(&[0x42u8; 24]).is_err());
+        assert!(AesGcmAead::new(&[0x42u8; 48]).is_err());
+        // Valid key lengths should succeed
+        assert!(AesGcmAead::new(&[0x42u8; 16]).is_ok());
+        assert!(AesGcmAead::new(&[0x42u8; 32]).is_ok());
+    }
+
+    #[test]
+    fn test_aes_ccm_aead_invalid_key_length() {
+        assert!(AesCcmAead::new(&[0x42u8; 0]).is_err());
+        assert!(AesCcmAead::new(&[0x42u8; 8]).is_err());
+        assert!(AesCcmAead::new(&[0x42u8; 24]).is_err());
+        // Valid
+        assert!(AesCcmAead::new(&[0x42u8; 16]).is_ok());
+        assert!(AesCcmAead::new(&[0x42u8; 32]).is_ok());
+    }
+
+    #[test]
+    fn test_aes_ccm8_aead_invalid_key_length() {
+        assert!(AesCcm8Aead::new(&[0x42u8; 0]).is_err());
+        assert!(AesCcm8Aead::new(&[0x42u8; 12]).is_err());
+        assert!(AesCcm8Aead::new(&[0x42u8; 24]).is_err());
+        // Valid
+        assert!(AesCcm8Aead::new(&[0x42u8; 16]).is_ok());
+        assert!(AesCcm8Aead::new(&[0x42u8; 32]).is_ok());
+    }
+
+    #[test]
+    fn test_aead_tag_size_consistency() {
+        let gcm = AesGcmAead::new(&[0x42u8; 16]).unwrap();
+        assert_eq!(gcm.tag_size(), 16);
+
+        let ccm = AesCcmAead::new(&[0x42u8; 16]).unwrap();
+        assert_eq!(ccm.tag_size(), 16);
+
+        let ccm8 = AesCcm8Aead::new(&[0x42u8; 16]).unwrap();
+        assert_eq!(ccm8.tag_size(), 8);
+
+        let chacha = ChaCha20Poly1305Aead::new(&[0x42u8; 32]).unwrap();
+        assert_eq!(chacha.tag_size(), 16);
+    }
+
+    #[test]
+    fn test_aes_gcm_decrypt_wrong_nonce() {
+        let key = [0x42u8; 16];
+        let nonce1 = [0x01u8; 12];
+        let nonce2 = [0x02u8; 12];
+        let aad = b"aad";
+        let plaintext = b"test data";
+
+        let aead = AesGcmAead::new(&key).unwrap();
+        let ct = aead.encrypt(&nonce1, aad, plaintext).unwrap();
+        // Decrypting with wrong nonce should fail
+        assert!(aead.decrypt(&nonce2, aad, &ct).is_err());
+    }
 }

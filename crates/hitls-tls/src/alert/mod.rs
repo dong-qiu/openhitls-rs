@@ -281,4 +281,88 @@ mod tests {
         let desc = AlertDescription::from_u8(100).unwrap();
         assert_eq!(desc, AlertDescription::NoRenegotiation);
     }
+
+    #[test]
+    fn test_alert_level_from_u8_all_invalid() {
+        // All values except 1 (Warning) and 2 (Fatal) must return Err
+        for v in 0..=255u8 {
+            if v == 1 || v == 2 {
+                assert!(AlertLevel::from_u8(v).is_ok());
+            } else {
+                assert_eq!(AlertLevel::from_u8(v).unwrap_err(), v);
+            }
+        }
+    }
+
+    #[test]
+    fn test_alert_description_undefined_gaps() {
+        // Specific gaps in the code space should return Err
+        let undefined: &[u8] = &[
+            1, 2, 3, 5, 9, 11, 15, 19, 23, 25, 31, 35, 39, 52, 55, 61, 65, 72, 75, 81, 85, 87, 91,
+            95, 99, 101, 105, 108, 117, 119, 121, 130, 200, 254, 255,
+        ];
+        for &code in undefined {
+            assert!(
+                AlertDescription::from_u8(code).is_err(),
+                "code {} should be undefined",
+                code,
+            );
+        }
+    }
+
+    #[test]
+    fn test_alert_clone_and_copy() {
+        let a = Alert {
+            level: AlertLevel::Fatal,
+            description: AlertDescription::HandshakeFailure,
+        };
+        let b = a; // Copy
+        let c: Alert = {
+            // Explicit copy (not clone, to avoid clippy::clone_on_copy)
+            Alert {
+                level: a.level,
+                description: a.description,
+            }
+        };
+        assert_eq!(a.level, b.level);
+        assert_eq!(a.description, b.description);
+        assert_eq!(a.level, c.level);
+        assert_eq!(a.description, c.description);
+    }
+
+    #[test]
+    fn test_alert_to_bytes_roundtrip() {
+        // Serialize alert to 2-byte wire format and parse back
+        let alert = Alert {
+            level: AlertLevel::Fatal,
+            description: AlertDescription::DecodeError,
+        };
+        let bytes = [alert.level as u8, alert.description as u8];
+        assert_eq!(bytes, [2, 50]);
+        let level = AlertLevel::from_u8(bytes[0]).unwrap();
+        let desc = AlertDescription::from_u8(bytes[1]).unwrap();
+        assert_eq!(level, AlertLevel::Fatal);
+        assert_eq!(desc, AlertDescription::DecodeError);
+    }
+
+    #[test]
+    fn test_alert_description_tls13_specific_codes() {
+        // TLS 1.3 specific alert codes (RFC 8446)
+        assert_eq!(AlertDescription::MissingExtension as u8, 109);
+        assert_eq!(AlertDescription::CertificateRequired as u8, 116);
+        assert_eq!(AlertDescription::NoApplicationProtocol as u8, 120);
+
+        assert_eq!(
+            AlertDescription::from_u8(109).unwrap(),
+            AlertDescription::MissingExtension,
+        );
+        assert_eq!(
+            AlertDescription::from_u8(116).unwrap(),
+            AlertDescription::CertificateRequired,
+        );
+        assert_eq!(
+            AlertDescription::from_u8(120).unwrap(),
+            AlertDescription::NoApplicationProtocol,
+        );
+    }
 }

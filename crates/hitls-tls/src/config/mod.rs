@@ -1783,4 +1783,62 @@ mod tests {
             "Default signature algorithms should not be empty"
         );
     }
+
+    #[test]
+    fn test_config_builder_last_setter_wins() {
+        use crate::CipherSuite;
+
+        let suite_a = vec![CipherSuite::TLS_AES_128_GCM_SHA256];
+        let suite_b = vec![CipherSuite::TLS_AES_256_GCM_SHA384];
+        let config = TlsConfig::builder()
+            .cipher_suites(&suite_a)
+            .cipher_suites(&suite_b)
+            .build();
+        assert_eq!(config.cipher_suites, suite_b);
+    }
+
+    #[test]
+    fn test_config_builder_verify_hostname_default_true() {
+        let config = TlsConfig::builder().build();
+        assert!(config.verify_hostname);
+    }
+
+    #[test]
+    fn test_config_empty_records_limit_custom() {
+        let config = TlsConfig::builder().empty_records_limit(100).build();
+        assert_eq!(config.empty_records_limit, 100);
+    }
+
+    #[test]
+    fn test_config_multiple_trusted_certs() {
+        let cert1 = vec![0x01, 0x02, 0x03];
+        let cert2 = vec![0x04, 0x05, 0x06];
+        let config = TlsConfig::builder()
+            .trusted_cert(cert1.clone())
+            .trusted_cert(cert2.clone())
+            .build();
+        assert_eq!(config.trusted_certs.len(), 2);
+        assert_eq!(config.trusted_certs[0], cert1);
+        assert_eq!(config.trusted_certs[1], cert2);
+    }
+
+    #[test]
+    fn test_config_builder_all_version_range_combinations() {
+        use crate::TlsVersion;
+        // TLS 1.2 only
+        let c = TlsConfig::builder()
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .build();
+        assert_eq!(c.min_version, TlsVersion::Tls12);
+        assert_eq!(c.max_version, TlsVersion::Tls12);
+
+        // TLS 1.3 only
+        let c = TlsConfig::builder()
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .build();
+        assert_eq!(c.min_version, TlsVersion::Tls13);
+        assert_eq!(c.max_version, TlsVersion::Tls13);
+    }
 }
