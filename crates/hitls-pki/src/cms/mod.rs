@@ -835,6 +835,36 @@ fn verify_signature_with_cert(
         } else {
             Err(cerr("Ed448 signature verification failed"))
         }
+    } else if cfg!(feature = "mldsa")
+        && (sig_oid == known::ml_dsa_44()
+            || sig_oid == known::ml_dsa_65()
+            || sig_oid == known::ml_dsa_87())
+    {
+        #[cfg(feature = "mldsa")]
+        {
+            let param_set = if sig_oid == known::ml_dsa_44() {
+                44u32
+            } else if sig_oid == known::ml_dsa_65() {
+                65
+            } else {
+                87
+            };
+            let ok = hitls_crypto::mldsa::mldsa_verify(
+                &cert.public_key.public_key,
+                digest,
+                signature,
+                &hitls_crypto::mldsa::get_params(param_set)
+                    .map_err(|e| cerr(&format!("ML-DSA params: {e}")))?,
+            )
+            .map_err(|e| cerr(&format!("ML-DSA verify: {e}")))?;
+            if ok {
+                Ok(())
+            } else {
+                Err(cerr("ML-DSA signature verification failed"))
+            }
+        }
+        #[cfg(not(feature = "mldsa"))]
+        Err(cerr("ML-DSA not enabled"))
     } else {
         Err(cerr(&format!("unsupported sig alg: {sig_oid}")))
     }
@@ -2459,5 +2489,67 @@ mod tests {
             oid_to_content_type(&ad_oid),
             CmsContentType::AuthenticatedData
         );
+    }
+
+    // ─── Phase 82: ML-DSA OID integration ───
+
+    #[cfg(feature = "mldsa")]
+    #[test]
+    fn test_cms_mldsa_oid_definitions() {
+        // Verify ML-DSA OIDs are correctly defined
+        let oid44 = known::ml_dsa_44();
+        let oid65 = known::ml_dsa_65();
+        let oid87 = known::ml_dsa_87();
+
+        // All three must be distinct
+        assert_ne!(oid44, oid65);
+        assert_ne!(oid65, oid87);
+        assert_ne!(oid44, oid87);
+
+        // DER roundtrip
+        let der44 = oid44.to_der_value();
+        let parsed44 = Oid::from_der_value(&der44).unwrap();
+        assert_eq!(parsed44, oid44);
+    }
+
+    #[cfg(feature = "mldsa")]
+    #[test]
+    fn test_cms_mldsa_sign_verify_roundtrip() {
+        use hitls_crypto::mldsa::MlDsaKeyPair;
+
+        // Generate ML-DSA-44 key pair (fastest parameter set)
+        let kp = MlDsaKeyPair::generate(44).unwrap();
+        let message = b"CMS ML-DSA test message";
+
+        // Sign
+        let signature = kp.sign(message).unwrap();
+
+        // Verify
+        let ok = kp.verify(message, &signature).unwrap();
+        assert!(ok);
+
+        // Tampered message must fail
+        let tampered = b"CMS ML-DSA tampered message";
+        let ok2 = kp.verify(tampered, &signature).unwrap();
+        assert!(!ok2);
+    }
+
+    #[cfg(feature = "mldsa")]
+    #[test]
+    fn test_cms_mldsa_tampered_signature() {
+        use hitls_crypto::mldsa::MlDsaKeyPair;
+
+        let kp = MlDsaKeyPair::generate(44).unwrap();
+        let message = b"integrity check";
+        let mut signature = kp.sign(message).unwrap();
+
+        // Tamper with the signature
+        if !signature.is_empty() {
+            signature[0] ^= 0xFF;
+        }
+
+        // Verification should fail
+        let ok = kp.verify(message, &signature).unwrap();
+        assert!(!ok);
     }
 }

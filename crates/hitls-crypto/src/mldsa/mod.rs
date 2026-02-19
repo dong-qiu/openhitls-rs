@@ -17,7 +17,7 @@ use poly::*;
 
 /// ML-DSA parameter set.
 #[derive(Clone, Copy)]
-struct MlDsaParams {
+pub struct MlDsaParams {
     k: usize,       // rows (public key vector dimension)
     l: usize,       // columns (secret vector dimension)
     eta: usize,     // secret coefficient bound
@@ -77,7 +77,7 @@ const MLDSA_87: MlDsaParams = MlDsaParams {
     sig_len: 4627,
 };
 
-fn get_params(parameter_set: u32) -> Result<MlDsaParams, CryptoError> {
+pub fn get_params(parameter_set: u32) -> Result<MlDsaParams, CryptoError> {
     match parameter_set {
         44 => Ok(MLDSA_44),
         65 => Ok(MLDSA_65),
@@ -477,7 +477,7 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
 }
 
 /// ML-DSA Verify (Algorithm 3 of FIPS 204).
-fn mldsa_verify(
+pub fn mldsa_verify(
     pk: &[u8],
     message: &[u8],
     sig: &[u8],

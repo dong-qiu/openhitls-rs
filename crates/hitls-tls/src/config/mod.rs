@@ -189,6 +189,36 @@ pub type CertVerifyCallback =
 /// Called with the client's requested hostname. Returns an action to take.
 pub type SniCallback = Arc<dyn Fn(&str) -> SniAction + Send + Sync>;
 
+/// Result from the ticket key callback containing the key material.
+#[derive(Clone)]
+pub struct TicketKeyResult {
+    /// 16-byte key name for ticket identification.
+    pub key_name: [u8; 16],
+    /// Encryption key (typically 32 bytes for AES-256).
+    pub key: Vec<u8>,
+    /// Initialization vector (typically 16 bytes).
+    pub iv: Vec<u8>,
+}
+
+/// Ticket key callback for custom session ticket encryption key management.
+///
+/// Enables key rotation: the callback provides keying material for encrypting
+/// (is_encrypt=true) or decrypting (is_encrypt=false) session tickets.
+/// The `ticket_name` parameter is the first 16 bytes of the ticket (key name).
+/// Returns `None` to reject (e.g., expired key).
+pub type TicketKeyCallback = Arc<dyn Fn(&[u8], bool) -> Option<TicketKeyResult> + Send + Sync>;
+
+/// Security callback for filtering cipher suites, groups, and signature algorithms.
+///
+/// Called during handshake to approve each algorithm against a security policy.
+/// Parameters: `(op, level, id)`:
+/// - `op`: 0=CipherSuite, 1=NamedGroup, 2=SignatureAlgorithm
+/// - `level`: security level from config
+/// - `id`: algorithm identifier (cipher suite u16, group u16, sigalg u16)
+///
+/// Returns true to allow, false to reject.
+pub type SecurityCallback = Arc<dyn Fn(u32, u32, u16) -> bool + Send + Sync>;
+
 /// Action to take after the SNI callback processes a hostname.
 #[derive(Clone)]
 pub enum SniAction {
@@ -353,6 +383,19 @@ pub struct TlsConfig {
     /// Maximum consecutive empty records allowed before fatal alert (default: 32).
     /// Acts as DoS protection — resets to 0 on each non-empty record.
     pub empty_records_limit: u32,
+    /// Session ID context for server-side session cache isolation.
+    /// Different services sharing the same cache can use different contexts
+    /// to prevent session cross-contamination.
+    pub session_id_context: Option<Vec<u8>>,
+    /// When true, shutdown() sets state to Closed without sending close_notify.
+    /// Default: false (always send close_notify per RFC).
+    pub quiet_shutdown: bool,
+    /// Ticket key callback for custom session ticket key management (key rotation).
+    pub ticket_key_cb: Option<TicketKeyCallback>,
+    /// Security callback for filtering cipher suites, groups, and signature algorithms.
+    pub security_cb: Option<SecurityCallback>,
+    /// Security level for the security callback (default: 1).
+    pub security_level: u32,
 }
 
 impl fmt::Debug for TlsConfig {
@@ -418,6 +461,15 @@ impl fmt::Debug for TlsConfig {
                 "client_hello_callback",
                 &self.client_hello_callback.as_ref().map(|_| "<callback>"),
             )
+            .field(
+                "ticket_key_cb",
+                &self.ticket_key_cb.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "security_cb",
+                &self.security_cb.as_ref().map(|_| "<callback>"),
+            )
+            .field("security_level", &self.security_level)
             .finish_non_exhaustive()
     }
 }
@@ -496,6 +548,11 @@ pub struct TlsConfigBuilder {
     client_hello_callback: Option<ClientHelloCallback>,
     flight_transmit_enable: bool,
     empty_records_limit: u32,
+    session_id_context: Option<Vec<u8>>,
+    quiet_shutdown: bool,
+    ticket_key_cb: Option<TicketKeyCallback>,
+    security_cb: Option<SecurityCallback>,
+    security_level: u32,
 }
 
 impl Default for TlsConfigBuilder {
@@ -574,6 +631,11 @@ impl Default for TlsConfigBuilder {
             client_hello_callback: None,
             flight_transmit_enable: true,
             empty_records_limit: 32,
+            session_id_context: None,
+            quiet_shutdown: false,
+            ticket_key_cb: None,
+            security_cb: None,
+            security_level: 1,
         }
     }
 }
@@ -905,6 +967,31 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn session_id_context(mut self, ctx: Vec<u8>) -> Self {
+        self.session_id_context = Some(ctx);
+        self
+    }
+
+    pub fn quiet_shutdown(mut self, enabled: bool) -> Self {
+        self.quiet_shutdown = enabled;
+        self
+    }
+
+    pub fn ticket_key_cb(mut self, cb: TicketKeyCallback) -> Self {
+        self.ticket_key_cb = Some(cb);
+        self
+    }
+
+    pub fn security_cb(mut self, cb: SecurityCallback) -> Self {
+        self.security_cb = Some(cb);
+        self
+    }
+
+    pub fn security_level(mut self, level: u32) -> Self {
+        self.security_level = level;
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -972,6 +1059,11 @@ impl TlsConfigBuilder {
             client_hello_callback: self.client_hello_callback,
             flight_transmit_enable: self.flight_transmit_enable,
             empty_records_limit: self.empty_records_limit,
+            session_id_context: self.session_id_context,
+            quiet_shutdown: self.quiet_shutdown,
+            ticket_key_cb: self.ticket_key_cb,
+            security_cb: self.security_cb,
+            security_level: self.security_level,
         }
     }
 }
@@ -1840,5 +1932,260 @@ mod tests {
             .build();
         assert_eq!(c.min_version, TlsVersion::Tls13);
         assert_eq!(c.max_version, TlsVersion::Tls13);
+    }
+
+    // ─── Phase 80: session_id_context + quiet_shutdown ───
+
+    #[test]
+    fn test_config_session_id_context_builder() {
+        let config = TlsConfig::builder()
+            .session_id_context(b"my-virtual-host".to_vec())
+            .build();
+        assert_eq!(
+            config.session_id_context.as_deref(),
+            Some(b"my-virtual-host".as_slice())
+        );
+    }
+
+    #[test]
+    fn test_config_session_id_context_default_none() {
+        let config = TlsConfig::builder().build();
+        assert!(config.session_id_context.is_none());
+    }
+
+    #[test]
+    fn test_config_session_id_context_isolation() {
+        let config_a = TlsConfig::builder()
+            .session_id_context(b"service-a".to_vec())
+            .build();
+        let config_b = TlsConfig::builder()
+            .session_id_context(b"service-b".to_vec())
+            .build();
+        assert_ne!(config_a.session_id_context, config_b.session_id_context);
+    }
+
+    #[test]
+    fn test_config_quiet_shutdown_default_false() {
+        let config = TlsConfig::builder().build();
+        assert!(!config.quiet_shutdown);
+    }
+
+    #[test]
+    fn test_config_quiet_shutdown_enabled() {
+        let config = TlsConfig::builder().quiet_shutdown(true).build();
+        assert!(config.quiet_shutdown);
+    }
+
+    #[test]
+    fn test_config_quiet_shutdown_disabled() {
+        let config = TlsConfig::builder().quiet_shutdown(false).build();
+        assert!(!config.quiet_shutdown);
+    }
+
+    #[test]
+    fn test_config_session_id_context_reuse() {
+        let ctx = b"shared-context".to_vec();
+        let config1 = TlsConfig::builder().session_id_context(ctx.clone()).build();
+        let config2 = TlsConfig::builder().session_id_context(ctx).build();
+        assert_eq!(config1.session_id_context, config2.session_id_context);
+    }
+
+    // ─── Phase 81: TicketKeyCb + SecurityCb ───
+
+    #[test]
+    fn test_config_ticket_key_cb_builder() {
+        let cb: TicketKeyCallback = Arc::new(|_ticket_name, is_encrypt| {
+            Some(TicketKeyResult {
+                key_name: [0xAA; 16],
+                key: vec![0xBB; 32],
+                iv: if is_encrypt {
+                    vec![0xCC; 16]
+                } else {
+                    vec![0xDD; 16]
+                },
+            })
+        });
+        let config = TlsConfig::builder().ticket_key_cb(cb).build();
+        assert!(config.ticket_key_cb.is_some());
+    }
+
+    #[test]
+    fn test_config_ticket_key_cb_encrypt_decrypt() {
+        let cb: TicketKeyCallback = Arc::new(|_ticket_name, is_encrypt| {
+            Some(TicketKeyResult {
+                key_name: [0x01; 16],
+                key: vec![0xAA; 32],
+                iv: if is_encrypt {
+                    vec![0xBB; 16]
+                } else {
+                    vec![0xCC; 16]
+                },
+            })
+        });
+        let config = TlsConfig::builder().ticket_key_cb(cb.clone()).build();
+        let enc_result = (config.ticket_key_cb.as_ref().unwrap())(&[0x01; 16], true);
+        assert!(enc_result.is_some());
+        let enc = enc_result.unwrap();
+        assert_eq!(enc.key_name, [0x01; 16]);
+        assert_eq!(enc.key.len(), 32);
+        assert_eq!(enc.iv, vec![0xBB; 16]);
+
+        let dec_result = (config.ticket_key_cb.as_ref().unwrap())(&[0x01; 16], false);
+        assert!(dec_result.is_some());
+        assert_eq!(dec_result.unwrap().iv, vec![0xCC; 16]);
+    }
+
+    #[test]
+    fn test_config_ticket_key_cb_key_rotation() {
+        let cb: TicketKeyCallback = Arc::new(|ticket_name, is_encrypt| {
+            if is_encrypt {
+                // Always use "new" key for encryption
+                Some(TicketKeyResult {
+                    key_name: [0x02; 16],
+                    key: vec![0xCC; 32],
+                    iv: vec![0xDD; 16],
+                })
+            } else if ticket_name == [0x01; 16] {
+                // Accept old key for decryption
+                Some(TicketKeyResult {
+                    key_name: [0x01; 16],
+                    key: vec![0xAA; 32],
+                    iv: vec![0xBB; 16],
+                })
+            } else if ticket_name == [0x02; 16] {
+                Some(TicketKeyResult {
+                    key_name: [0x02; 16],
+                    key: vec![0xCC; 32],
+                    iv: vec![0xDD; 16],
+                })
+            } else {
+                None // Unknown key
+            }
+        });
+        let config = TlsConfig::builder().ticket_key_cb(cb).build();
+        let cb_ref = config.ticket_key_cb.as_ref().unwrap();
+
+        // Encrypt with new key
+        let enc = (cb_ref)(&[], true).unwrap();
+        assert_eq!(enc.key_name, [0x02; 16]);
+
+        // Decrypt with old key
+        let dec_old = (cb_ref)(&[0x01; 16], false);
+        assert!(dec_old.is_some());
+
+        // Decrypt with new key
+        let dec_new = (cb_ref)(&[0x02; 16], false);
+        assert!(dec_new.is_some());
+
+        // Unknown key rejected
+        let dec_unknown = (cb_ref)(&[0xFF; 16], false);
+        assert!(dec_unknown.is_none());
+    }
+
+    #[test]
+    fn test_config_ticket_key_cb_reject() {
+        let cb: TicketKeyCallback = Arc::new(|_ticket_name, _is_encrypt| None);
+        let config = TlsConfig::builder().ticket_key_cb(cb).build();
+        let result = (config.ticket_key_cb.as_ref().unwrap())(&[0; 16], false);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_config_ticket_key_cb_default_none() {
+        let config = TlsConfig::builder().build();
+        assert!(config.ticket_key_cb.is_none());
+    }
+
+    #[test]
+    fn test_config_security_cb_builder() {
+        let cb: SecurityCallback = Arc::new(|_op, _level, _id| true);
+        let config = TlsConfig::builder().security_cb(cb).build();
+        assert!(config.security_cb.is_some());
+    }
+
+    #[test]
+    fn test_config_security_cb_reject_cipher() {
+        let cb: SecurityCallback = Arc::new(|op, _level, id| {
+            if op == 0 {
+                // CipherSuite: reject a specific suite
+                id != 0x002F // TLS_RSA_WITH_AES_128_CBC_SHA
+            } else {
+                true
+            }
+        });
+        let config = TlsConfig::builder().security_cb(cb).build();
+        let cb_ref = config.security_cb.as_ref().unwrap();
+
+        assert!(!(cb_ref)(0, 1, 0x002F)); // Rejected
+        assert!((cb_ref)(0, 1, 0x1301)); // Allowed
+        assert!((cb_ref)(1, 1, 0x0017)); // Group: always allowed
+    }
+
+    #[test]
+    fn test_config_security_cb_reject_group() {
+        let cb: SecurityCallback = Arc::new(|op, _level, id| {
+            if op == 1 {
+                // NamedGroup: reject weak groups
+                id != 0x001D // x25519 is fine, but let's say reject a hypothetical one
+            } else {
+                true
+            }
+        });
+        let config = TlsConfig::builder().security_cb(cb).build();
+        let cb_ref = config.security_cb.as_ref().unwrap();
+
+        assert!(!(cb_ref)(1, 1, 0x001D)); // Rejected group
+        assert!((cb_ref)(1, 1, 0x0017)); // SECP256R1 allowed
+        assert!((cb_ref)(0, 1, 0x001D)); // Same ID but op=cipher, allowed
+    }
+
+    #[test]
+    fn test_config_security_cb_reject_sigalg() {
+        let cb: SecurityCallback = Arc::new(|op, _level, id| {
+            if op == 2 {
+                // SignatureAlgorithm: reject RSA PKCS#1 SHA-1
+                id != 0x0201
+            } else {
+                true
+            }
+        });
+        let config = TlsConfig::builder().security_cb(cb).build();
+        let cb_ref = config.security_cb.as_ref().unwrap();
+
+        assert!(!(cb_ref)(2, 1, 0x0201)); // Rejected sigalg
+        assert!((cb_ref)(2, 1, 0x0804)); // RSA_PSS_SHA256 allowed
+    }
+
+    #[test]
+    fn test_config_security_cb_level_based() {
+        let cb: SecurityCallback = Arc::new(|op, level, _id| {
+            if op == 0 && level >= 2 {
+                false // Reject all ciphers at security level >= 2
+            } else {
+                true
+            }
+        });
+        let config = TlsConfig::builder()
+            .security_cb(cb)
+            .security_level(2)
+            .build();
+        let cb_ref = config.security_cb.as_ref().unwrap();
+        let level = config.security_level;
+
+        assert!(!(cb_ref)(0, level, 0x1301)); // Cipher rejected at level 2
+        assert!((cb_ref)(1, level, 0x001D)); // Group OK even at level 2
+    }
+
+    #[test]
+    fn test_config_security_cb_default_none() {
+        let config = TlsConfig::builder().build();
+        assert!(config.security_cb.is_none());
+        assert_eq!(config.security_level, 1);
+    }
+
+    #[test]
+    fn test_config_security_level_builder() {
+        let config = TlsConfig::builder().security_level(3).build();
+        assert_eq!(config.security_level, 3);
     }
 }

@@ -592,9 +592,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncDtls12Client
             return Err(TlsError::RecordError("not connected".into()));
         }
 
-        // Send close_notify alert
-        self.send_encrypted_alert(1, 0).await?;
-        self.sent_close_notify = true;
+        if !self.config.quiet_shutdown {
+            // Send close_notify alert
+            self.send_encrypted_alert(1, 0).await?;
+            self.sent_close_notify = true;
+        }
         self.state = DtlsConnectionState::Closed;
         Ok(())
     }
@@ -1094,8 +1096,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncDtls12Server
             return Err(TlsError::RecordError("not connected".into()));
         }
 
-        self.send_encrypted_alert(1, 0).await?;
-        self.sent_close_notify = true;
+        if !self.config.quiet_shutdown {
+            self.send_encrypted_alert(1, 0).await?;
+            self.sent_close_notify = true;
+        }
         self.state = DtlsConnectionState::Closed;
         Ok(())
     }

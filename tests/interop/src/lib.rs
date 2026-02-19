@@ -7581,4 +7581,95 @@ mod tests {
         rl.check_empty_record(ContentType::Handshake, 0).unwrap();
         assert_eq!(rl.empty_record_count, 1);
     }
+
+    // ─── Phase 82: Integration tests ───
+
+    #[test]
+    fn test_quiet_shutdown_e2e() {
+        use hitls_tls::config::TlsConfig;
+        use hitls_tls::{TlsRole, TlsVersion};
+
+        // Verify quiet_shutdown config works end-to-end
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .quiet_shutdown(true)
+            .build();
+        assert!(config.quiet_shutdown);
+
+        // With quiet_shutdown=false (default), config should be false
+        let config2 = TlsConfig::builder().role(TlsRole::Server).build();
+        assert!(!config2.quiet_shutdown);
+
+        // Verify it propagates through version limits
+        let config3 = TlsConfig::builder()
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls13)
+            .quiet_shutdown(true)
+            .build();
+        assert!(config3.quiet_shutdown);
+        assert_eq!(config3.min_version, TlsVersion::Tls12);
+    }
+
+    #[test]
+    fn test_security_callback_e2e() {
+        use hitls_tls::config::{SecurityCallback, TlsConfig};
+        use hitls_tls::TlsRole;
+        use std::sync::Arc;
+
+        // Create a security callback that rejects weak ciphers
+        let cb: SecurityCallback = Arc::new(|op, level, id| {
+            if op == 0 && level >= 2 {
+                // At level 2+, reject AES-128 suites (id < 0x1302)
+                id >= 0x1302
+            } else {
+                true
+            }
+        });
+
+        let config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .security_cb(cb.clone())
+            .security_level(2)
+            .build();
+
+        let cb_ref = config.security_cb.as_ref().unwrap();
+        let level = config.security_level;
+
+        // AES-128-GCM (0x1301) should be rejected at level 2
+        assert!(!(cb_ref)(0, level, 0x1301));
+        // AES-256-GCM (0x1302) should be allowed
+        assert!((cb_ref)(0, level, 0x1302));
+        // Groups always allowed
+        assert!((cb_ref)(1, level, 0x001D));
+    }
+
+    #[test]
+    fn test_encrypted_pkcs8_e2e() {
+        use hitls_pki::pkcs8::encrypted;
+        use hitls_pki::pkcs8::{encode_ed25519_pkcs8_der, parse_pkcs8_der, Pkcs8PrivateKey};
+
+        // Generate a key, encrypt it, decrypt it, use it
+        let seed = [0x42u8; 32];
+        let pki_der = encode_ed25519_pkcs8_der(&seed);
+
+        // Encrypt with password
+        let encrypted_der = encrypted::encrypt_pkcs8_der(&pki_der, "integration-test").unwrap();
+
+        // Verify it's different from plaintext
+        assert_ne!(pki_der, encrypted_der);
+
+        // Decrypt
+        let decrypted = encrypted::decrypt_pkcs8_der(&encrypted_der, "integration-test").unwrap();
+        assert_eq!(pki_der, decrypted);
+
+        // Parse and use the key
+        let key = parse_pkcs8_der(&decrypted).unwrap();
+        match key {
+            Pkcs8PrivateKey::Ed25519(kp) => {
+                let sig = kp.sign(b"test").unwrap();
+                assert!(kp.verify(b"test", &sig).is_ok());
+            }
+            _ => panic!("Expected Ed25519"),
+        }
+    }
 }

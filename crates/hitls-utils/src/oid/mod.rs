@@ -196,6 +196,17 @@ pub mod known {
         Oid::new(&[1, 3, 101, 111])
     }
 
+    // ML-DSA (FIPS 204)
+    pub fn ml_dsa_44() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 4, 1, 2, 267, 12, 4, 3])
+    }
+    pub fn ml_dsa_65() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 4, 1, 2, 267, 12, 6, 5])
+    }
+    pub fn ml_dsa_87() -> Oid {
+        Oid::new(&[1, 3, 6, 1, 4, 1, 2, 267, 12, 8, 7])
+    }
+
     // AES
     pub fn aes128_cbc() -> Oid {
         Oid::new(&[2, 16, 840, 1, 101, 3, 4, 1, 2])

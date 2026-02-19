@@ -1069,7 +1069,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ClientC
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        if !self.sent_close_notify {
+        if !self.config.quiet_shutdown && !self.sent_close_notify {
             let alert_data = [1u8, 0u8]; // close_notify
             let record = self
                 .record_layer
@@ -2066,7 +2066,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ServerC
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        if !self.sent_close_notify {
+        if !self.config.quiet_shutdown && !self.sent_close_notify {
             let alert_data = [1u8, 0u8]; // close_notify
             let record = self
                 .record_layer

@@ -1794,3 +1794,33 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - hitls-tls: 904 → 913 (+9 tests); integration: 113 → 122 (+9 tests); total: 2256 → 2274 tests.
 
 2274 total tests (40 ignored). Clippy clean, fmt clean.
+
+## Phases 80-82: Final C→Rust Feature Parity (2026-02-19)
+
+**Prompt**: Implement the 3-phase migration plan (Phases 80-82) to achieve 100% C→Rust feature parity. Phase 80: Encrypted PKCS#8 + Session ID Context + quiet_shutdown. Phase 81: TicketKeyCallback + SecurityCallback. Phase 82: SM4-CTR-DRBG + CMS ML-DSA + integration tests + documentation sync.
+
+**Work performed**:
+
+### Phase 80 (+12 tests, 2323→2335)
+- Encrypted PKCS#8 (EncryptedPrivateKeyInfo): new file `crates/hitls-pki/src/pkcs8/encrypted.rs` with PBES2 decrypt/encrypt (PBKDF2-HMAC-SHA256 + AES-256-CBC/AES-128-CBC), DER+PEM APIs
+- Session ID Context: `session_id_context: Option<Vec<u8>>` in TlsConfig for session cache isolation
+- quiet_shutdown: `quiet_shutdown: bool` config to skip close_notify, wired into all 6 connection types (TLS 1.3/1.2/DTLS 1.2 × sync/async)
+- Files: pkcs8/encrypted.rs (NEW), pkcs8/mod.rs, config/mod.rs, connection.rs, connection12.rs, connection_async.rs, connection12_async.rs, connection_dtls12.rs, connection_dtls12_async.rs
+
+### Phase 81 (+12 tests, 2335→2347)
+- TicketKeyCallback: `Arc<dyn Fn(&[u8], bool) -> Option<TicketKeyResult> + Send + Sync>` for session ticket key rotation
+- SecurityCallback: `Arc<dyn Fn(u32, u32, u16) -> bool + Send + Sync>` for filtering cipher/group/sigalg by security level
+- security_level config (default: 1)
+- Files: config/mod.rs
+
+### Phase 82 (+10 tests, 2347→2357)
+- SM4-CTR-DRBG: new file `crates/hitls-crypto/src/drbg/sm4_ctr_drbg.rs` implementing NIST SP 800-90A §10.2 with SM4 (16-byte key, 32-byte seed)
+- CMS ML-DSA: ML-DSA-44/65/87 OID constants + verification dispatch in CMS SignedData
+- 3 integration tests: quiet_shutdown e2e, security_callback e2e, encrypted_pkcs8 e2e
+- Documentation sync: CLAUDE.md, DEV_LOG.md, PROMPT_LOG.md, README.md
+- Files: drbg/sm4_ctr_drbg.rs (NEW), drbg/mod.rs, oid/mod.rs, cms/mod.rs, hitls-pki/Cargo.toml, mldsa/mod.rs, tests/interop/src/lib.rs
+
+**Result**:
+- hitls-crypto: 603 → 607 (+4); hitls-tls: 962 → 981 (+19); hitls-pki: 341 → 349 (+8); integration: 122 → 125 (+3); total: 2323 → 2357 tests (+34).
+
+2357 total tests (40 ignored). Clippy clean, fmt clean. **100% C→Rust feature parity achieved.**

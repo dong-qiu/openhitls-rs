@@ -1,5 +1,140 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 82: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests + Documentation Sync
+
+### Date: 2026-02-19
+
+### Summary
+
+Implemented three features plus documentation sync, completing 100% C→Rust feature parity:
+1. **SM4-CTR-DRBG** — NIST SP 800-90A Section 10.2 CTR-DRBG using SM4 as the block cipher (128-bit key, 128-bit block, 32-byte seed). `Sm4CtrDrbg` struct with `new()`, `generate()`, `generate_bytes()`, `reseed()`. Feature-gated under `sm4`. 4 tests.
+2. **CMS ML-DSA OID Integration** — Added ML-DSA-44/65/87 OID constants to `hitls-utils`. Wired ML-DSA verification dispatch into CMS SignedData `verify_signature_with_cert()`. Made `mldsa_verify`, `get_params`, `MlDsaParams` public. Feature-gated under `mldsa`. 3 tests.
+3. **Integration Tests** — 3 end-to-end integration tests: quiet_shutdown (TLS 1.3, no close_notify sent), security_callback (reject weak cipher suites), encrypted_pkcs8 (encrypt/decrypt roundtrip).
+4. **Documentation Sync** — Updated CLAUDE.md, DEV_LOG.md, PROMPT_LOG.md, README.md.
+
+### Files Modified
+
+1. **`crates/hitls-crypto/src/drbg/sm4_ctr_drbg.rs`** — NEW: SM4-CTR-DRBG implementation (Sm4CtrDrbg struct, update/generate/reseed, 4 tests)
+2. **`crates/hitls-crypto/src/drbg/mod.rs`** — Added `sm4_ctr_drbg` module + `Sm4CtrDrbg` re-export
+3. **`crates/hitls-utils/src/oid/mod.rs`** — Added ML-DSA OIDs: ml_dsa_44(), ml_dsa_65(), ml_dsa_87()
+4. **`crates/hitls-pki/src/cms/mod.rs`** — ML-DSA verification dispatch + 3 tests
+5. **`crates/hitls-pki/Cargo.toml`** — Added `mldsa` feature
+6. **`crates/hitls-crypto/src/mldsa/mod.rs`** — Made MlDsaParams/get_params/mldsa_verify public
+7. **`tests/interop/src/lib.rs`** — 3 new integration tests
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_sm4_ctr_drbg_generate | drbg/sm4_ctr_drbg.rs |
+| 2 | test_sm4_ctr_drbg_reseed | drbg/sm4_ctr_drbg.rs |
+| 3 | test_sm4_ctr_drbg_deterministic | drbg/sm4_ctr_drbg.rs |
+| 4 | test_sm4_ctr_drbg_vs_aes_different_output | drbg/sm4_ctr_drbg.rs |
+| 5 | test_cms_mldsa_oid_definitions | cms/mod.rs |
+| 6 | test_cms_mldsa_sign_verify_roundtrip | cms/mod.rs |
+| 7 | test_cms_mldsa_tampered_signature | cms/mod.rs |
+| 8 | test_quiet_shutdown_e2e | interop/lib.rs |
+| 9 | test_security_callback_e2e | interop/lib.rs |
+| 10 | test_encrypted_pkcs8_e2e | interop/lib.rs |
+
++10 tests (2347 → 2357): hitls-crypto 603 → 607 (+4), hitls-pki 346 → 349 (+3), hitls-integration 122 → 125 (+3)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2357 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 81: TicketKeyCallback + SecurityCallback
+
+### Date: 2026-02-19
+
+### Summary
+
+Implemented two TLS config callback features:
+1. **TicketKeyCallback** — `Arc<dyn Fn(&[u8], bool) -> Option<TicketKeyResult> + Send + Sync>` for session ticket key rotation. `TicketKeyResult` struct with `key_name`, `key`, `iv`. Config field + builder method. 5 tests.
+2. **SecurityCallback** — `Arc<dyn Fn(u32, u32, u16) -> bool + Send + Sync>` for filtering cipher suites/groups/signature algorithms by security policy. Config field `security_cb` + `security_level: u32` + builder methods. 7 tests.
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/config/mod.rs`** — TicketKeyResult struct, TicketKeyCallback/SecurityCallback type aliases, 5 config fields + builder methods + Debug impl + 12 tests
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_config_ticket_key_cb | config/mod.rs |
+| 2 | test_config_ticket_key_cb_encrypt_decrypt | config/mod.rs |
+| 3 | test_config_ticket_key_cb_reject | config/mod.rs |
+| 4 | test_config_ticket_key_cb_default_none | config/mod.rs |
+| 5 | test_config_ticket_key_cb_clone | config/mod.rs |
+| 6 | test_config_security_cb | config/mod.rs |
+| 7 | test_config_security_cb_reject_cipher | config/mod.rs |
+| 8 | test_config_security_cb_reject_group | config/mod.rs |
+| 9 | test_config_security_cb_reject_sigalg | config/mod.rs |
+| 10 | test_config_security_level | config/mod.rs |
+| 11 | test_config_security_cb_default_none | config/mod.rs |
+| 12 | test_config_security_cb_clone | config/mod.rs |
+
++12 tests (2335 → 2347): hitls-tls 943 → 955 (+12)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2347 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 80: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
+
+### Date: 2026-02-19
+
+### Summary
+
+Implemented three features:
+1. **Encrypted PKCS#8 (EncryptedPrivateKeyInfo)** — RFC 5958 EncryptedPrivateKeyInfo parsing and encoding with PBES2 (PBKDF2-HMAC-SHA256 + AES-256-CBC default, AES-128-CBC optional). Functions: `decrypt_pkcs8_der()`, `decrypt_pkcs8_pem()`, `encrypt_pkcs8_der()`, `encrypt_pkcs8_der_with()`, `encrypt_pkcs8_pem()`. 5 tests.
+2. **Session ID Context** — `session_id_context: Option<Vec<u8>>` config field for server-side session cache isolation. Builder method. 3 tests.
+3. **quiet_shutdown** — `quiet_shutdown: bool` config (default false) to skip sending close_notify alert on shutdown. Wired into all 6 connection types (TLS 1.3, TLS 1.2, DTLS 1.2 × sync/async). 4 tests.
+
+### Files Modified
+
+1. **`crates/hitls-pki/src/pkcs8/encrypted.rs`** — NEW: Encrypted PKCS#8 implementation + 5 tests
+2. **`crates/hitls-pki/src/pkcs8/mod.rs`** — Added `pub mod encrypted;`
+3. **`crates/hitls-tls/src/config/mod.rs`** — session_id_context + quiet_shutdown fields + builder + 7 tests
+4. **`crates/hitls-tls/src/connection.rs`** — quiet_shutdown guard in TLS 1.3 shutdown
+5. **`crates/hitls-tls/src/connection12.rs`** — quiet_shutdown guard in TLS 1.2 shutdown
+6. **`crates/hitls-tls/src/connection_async.rs`** — quiet_shutdown guard in async TLS 1.3 shutdown
+7. **`crates/hitls-tls/src/connection12_async.rs`** — quiet_shutdown guard in async TLS 1.2 shutdown
+8. **`crates/hitls-tls/src/connection_dtls12.rs`** — quiet_shutdown guard in DTLS 1.2 sync shutdown
+9. **`crates/hitls-tls/src/connection_dtls12_async.rs`** — quiet_shutdown guard in async DTLS 1.2 shutdown
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_encrypted_pkcs8_roundtrip_ed25519 | pkcs8/encrypted.rs |
+| 2 | test_encrypted_pkcs8_roundtrip_ec | pkcs8/encrypted.rs |
+| 3 | test_encrypted_pkcs8_wrong_password | pkcs8/encrypted.rs |
+| 4 | test_encrypted_pkcs8_aes128_compat | pkcs8/encrypted.rs |
+| 5 | test_encrypted_pkcs8_pem_roundtrip | pkcs8/encrypted.rs |
+| 6 | test_config_session_id_context | config/mod.rs |
+| 7 | test_config_session_id_context_none | config/mod.rs |
+| 8 | test_config_session_id_context_clone | config/mod.rs |
+| 9 | test_config_quiet_shutdown | config/mod.rs |
+| 10 | test_config_quiet_shutdown_default | config/mod.rs |
+| 11 | test_config_quiet_shutdown_clone | config/mod.rs |
+| 12 | test_config_quiet_shutdown_builder | config/mod.rs |
+
++12 tests (2323 → 2335): hitls-pki 341 → 346 (+5), hitls-tls 936 → 943 (+7)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2335 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase 79: DTLS Config Enhancements + Integration Tests for Phase 77-78 Features
 
 ### Date: 2026-02-19

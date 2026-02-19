@@ -8,6 +8,10 @@
 //! - X25519 (RFC 7748)
 //! - X448 (RFC 7748)
 //! - DSA (FIPS 186-4)
+//!
+//! Also supports Encrypted PKCS#8 (EncryptedPrivateKeyInfo) via the `encrypted` submodule.
+
+pub mod encrypted;
 
 use hitls_crypto::dsa::{DsaKeyPair, DsaParams};
 use hitls_crypto::ecdsa::EcdsaKeyPair;

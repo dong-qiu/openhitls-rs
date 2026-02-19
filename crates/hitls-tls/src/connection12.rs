@@ -1140,7 +1140,7 @@ impl<S: Read + Write> TlsConnection for Tls12ClientConnection<S> {
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        if !self.sent_close_notify {
+        if !self.config.quiet_shutdown && !self.sent_close_notify {
             let alert_data = [1u8, 0u8]; // close_notify
             let record = self
                 .record_layer
@@ -2178,7 +2178,7 @@ impl<S: Read + Write> TlsConnection for Tls12ServerConnection<S> {
         if self.state == ConnectionState::Closed {
             return Ok(());
         }
-        if !self.sent_close_notify {
+        if !self.config.quiet_shutdown && !self.sent_close_notify {
             let alert_data = [1u8, 0u8]; // close_notify
             let record = self
                 .record_layer

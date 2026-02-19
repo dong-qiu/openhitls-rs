@@ -884,7 +884,7 @@ impl<S: Read + Write> TlsConnection for TlsClientConnection<S> {
             return Ok(());
         }
 
-        if !self.sent_close_notify {
+        if !self.config.quiet_shutdown && !self.sent_close_notify {
             let alert_data = [1u8, 0u8];
             let record = self
                 .record_layer
@@ -1699,7 +1699,7 @@ impl<S: Read + Write> TlsConnection for TlsServerConnection<S> {
             return Ok(());
         }
 
-        if !self.sent_close_notify {
+        if !self.config.quiet_shutdown && !self.sent_close_notify {
             let alert_data = [1u8, 0u8];
             let record = self
                 .record_layer
