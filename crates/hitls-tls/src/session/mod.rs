@@ -749,4 +749,61 @@ mod tests {
         let decoded = decode_session_state(&encoded).unwrap();
         assert!(decoded.extended_master_secret);
     }
+
+    #[test]
+    fn test_cache_cleanup_noop_with_zero_lifetime() {
+        let mut cache = InMemorySessionCache::with_lifetime(10, 0);
+        cache.put(b"a", make_session(0x1301, &[1; 32]));
+        cache.put(b"b", make_session(0x1302, &[2; 32]));
+        assert_eq!(cache.len(), 2);
+        // With lifetime=0, cleanup should be a no-op
+        cache.cleanup();
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn test_encrypt_session_ticket_wrong_key_length() {
+        let session = make_session(0x1301, &[0xAA; 32]);
+        // Key too short (16 bytes instead of 32)
+        let result = encrypt_session_ticket(&[0x11; 16], &session);
+        assert!(result.is_err());
+        // Key too long (48 bytes)
+        let result = encrypt_session_ticket(&[0x11; 48], &session);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decrypt_session_ticket_wrong_key_length() {
+        let session = make_session(0x1301, &[0xAA; 32]);
+        let ticket = encrypt_session_ticket(&[0x11; 32], &session).unwrap();
+        // Decrypt with wrong key length → None
+        assert!(decrypt_session_ticket(&[0x11; 16], &ticket).is_none());
+        assert!(decrypt_session_ticket(&[0x11; 48], &ticket).is_none());
+    }
+
+    #[test]
+    fn test_decode_session_state_without_ems_byte() {
+        // Build encoded state manually WITHOUT the trailing EMS byte
+        let session = make_session(0x1301, &[0xBB; 48]);
+        let encoded = encode_session_state(&session);
+        // Strip the last byte (EMS flag)
+        let truncated = &encoded[..encoded.len() - 1];
+        let decoded = decode_session_state(truncated).unwrap();
+        // Without EMS byte, default is false
+        assert!(!decoded.extended_master_secret);
+        assert_eq!(decoded.cipher_suite.0, 0x1301);
+        assert_eq!(decoded.master_secret, vec![0xBB; 48]);
+    }
+
+    #[test]
+    fn test_cache_cleanup_removes_nothing_when_fresh() {
+        let mut cache = InMemorySessionCache::with_lifetime(10, 3600);
+        cache.put(b"a", make_session(0x1301, &[1; 32]));
+        cache.put(b"b", make_session(0x1302, &[2; 32]));
+        // Sessions just created — cleanup should remove nothing
+        cache.cleanup();
+        assert_eq!(cache.len(), 2);
+        assert!(cache.get(b"a").is_some());
+        assert!(cache.get(b"b").is_some());
+    }
 }

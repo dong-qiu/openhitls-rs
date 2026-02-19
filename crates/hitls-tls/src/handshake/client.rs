@@ -1538,4 +1538,73 @@ mod tests {
             "ClientHello should contain certificate_authorities (0x002F)"
         );
     }
+
+    #[test]
+    fn test_client_accessors_after_init() {
+        let config = TlsConfig::builder().build();
+        let hs = ClientHandshake::new(config);
+        // All accessors should return safe defaults before handshake
+        assert!(!hs.offered_early_data());
+        assert!(!hs.early_data_accepted());
+        assert!(hs.early_traffic_secret().is_empty());
+        assert!(hs.peer_record_size_limit().is_none());
+        assert!(hs.ocsp_response().is_none());
+        assert!(hs.sct_data().is_none());
+        assert!(hs.server_certs().is_empty());
+        assert!(hs.negotiated_alpn().is_none());
+        assert!(hs.negotiated_group().is_none());
+        assert!(!hs.is_psk_mode());
+    }
+
+    #[test]
+    fn test_client_hello_with_heartbeat_extension() {
+        let config = TlsConfig::builder()
+            .server_name("example.com")
+            .heartbeat_mode(1)
+            .build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // Heartbeat extension type = 0x000F (15)
+        let ext_types = parse_extension_types(&ch_msg);
+        assert!(
+            ext_types.contains(&0x000F),
+            "ClientHello should contain heartbeat extension (0x000F)"
+        );
+    }
+
+    #[test]
+    fn test_client_hello_default_has_supported_groups() {
+        let config = TlsConfig::builder().server_name("example.com").build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // supported_groups extension type = 0x000A (10)
+        let ext_types = parse_extension_types(&ch_msg);
+        assert!(
+            ext_types.contains(&0x000A),
+            "ClientHello should contain supported_groups (0x000A)"
+        );
+    }
+
+    #[test]
+    fn test_client_new_session_ticket_no_params() {
+        let config = TlsConfig::builder().build();
+        let hs = ClientHandshake::new(config);
+        // No params set (no handshake done) → error on NST processing
+        let fake_nst = vec![4, 0, 0, 12, 0, 0, 0, 10, 0, 0, 0, 1, 0, 0, 1, 0x42];
+        assert!(hs
+            .process_new_session_ticket(&fake_nst, &[0u8; 48])
+            .is_err());
+    }
+
+    #[test]
+    fn test_client_process_finished_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = ClientHandshake::new(config);
+        // Finished from Idle → error
+        assert!(hs
+            .process_finished(&[20, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            .is_err());
+    }
 }

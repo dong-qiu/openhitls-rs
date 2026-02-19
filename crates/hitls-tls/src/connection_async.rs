@@ -1823,6 +1823,106 @@ mod tests {
         assert_eq!(ekm.len(), 16);
     }
 
+    /// key_update with request_response=true triggers bidirectional key rotation.
+    #[tokio::test]
+    async fn test_async_tls13_key_update_request_response() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // Key update requesting peer response
+        client.key_update(true).await.unwrap();
+
+        // Data exchange still works after key update request
+        client.write(b"after request response").await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = server.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"after request response");
+    }
+
+    /// export_keying_material with zero length output.
+    #[tokio::test]
+    async fn test_async_tls13_export_keying_material_zero_length() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        let ekm = client.export_keying_material(b"zero-len", None, 0).unwrap();
+        assert!(ekm.is_empty());
+    }
+
+    /// Server-side export_keying_material before handshake returns error.
+    #[tokio::test]
+    async fn test_async_tls13_server_export_before_handshake() {
+        let (_, server_config) = make_tls13_configs();
+        let (_, server_stream) = tokio::io::duplex(16 * 1024);
+        let server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let result = server.export_keying_material(b"test", None, 32);
+        assert!(result.is_err());
+    }
+
+    /// Accessor methods return expected values after handshake.
+    #[tokio::test]
+    async fn test_async_tls13_accessor_methods() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // peer_certificates: server doesn't verify peer, so client certs should be empty
+        assert!(server.peer_certificates().is_empty());
+        // server_name: client didn't set server_name
+        assert!(client.server_name().is_none());
+        // negotiated_group: should be set after handshake
+        assert!(client.negotiated_group().is_some());
+        // connection_info should be available
+        assert!(client.connection_info().is_some());
+        assert!(server.connection_info().is_some());
+    }
+
+    /// export_keying_material: different contexts produce different results.
+    #[tokio::test]
+    async fn test_async_tls13_export_different_contexts() {
+        let (client_config, server_config) = make_tls13_configs();
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        let ctx_a = client
+            .export_keying_material(b"test-label", Some(b"context-A"), 32)
+            .unwrap();
+        let ctx_b = client
+            .export_keying_material(b"test-label", Some(b"context-B"), 32)
+            .unwrap();
+        assert_ne!(
+            ctx_a, ctx_b,
+            "different contexts should produce different output"
+        );
+    }
+
     /// export_keying_material: deterministic — same call returns same bytes.
     #[tokio::test]
     async fn test_async_tls13_export_keying_material_deterministic() {

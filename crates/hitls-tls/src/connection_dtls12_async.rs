@@ -1555,6 +1555,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_async_dtls12_take_session_returns_none() {
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncDtls12ClientConnection::new(cs, client_config());
+        let mut server = AsyncDtls12ServerConnection::new(ss, server_config(), false);
+
+        let (cr, sr) = tokio::join!(client.handshake(), server.handshake());
+        cr.unwrap();
+        sr.unwrap();
+
+        // DTLS 1.2 sessions go to cache, take_session always returns None
+        assert!(client.take_session().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_async_dtls12_server_name_accessor() {
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let cc = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+                SignatureScheme::RSA_PSS_RSAE_SHA256,
+            ])
+            .verify_peer(false)
+            .server_name("dtls.test.local")
+            .build();
+        let mut client = AsyncDtls12ClientConnection::new(cs, cc);
+        let mut server = AsyncDtls12ServerConnection::new(ss, server_config(), false);
+
+        let (cr, sr) = tokio::join!(client.handshake(), server.handshake());
+        cr.unwrap();
+        sr.unwrap();
+
+        // Client should report the configured server name
+        assert_eq!(client.server_name(), Some("dtls.test.local"));
+    }
+
+    #[tokio::test]
+    async fn test_async_dtls12_is_session_resumed_first_handshake() {
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncDtls12ClientConnection::new(cs, client_config());
+        let mut server = AsyncDtls12ServerConnection::new(ss, server_config(), false);
+
+        let (cr, sr) = tokio::join!(client.handshake(), server.handshake());
+        cr.unwrap();
+        sr.unwrap();
+
+        // First handshake → not resumed
+        assert!(!client.is_session_resumed());
+        assert!(!server.is_session_resumed());
+    }
+
+    #[tokio::test]
+    async fn test_async_dtls12_peer_certificates_empty() {
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncDtls12ClientConnection::new(cs, client_config());
+        let mut server = AsyncDtls12ServerConnection::new(ss, server_config(), false);
+
+        let (cr, sr) = tokio::join!(client.handshake(), server.handshake());
+        cr.unwrap();
+        sr.unwrap();
+
+        // Server doesn't require client certs (verify_peer=false)
+        assert!(server.peer_certificates().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_async_dtls12_bidirectional_after_handshake() {
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncDtls12ClientConnection::new(cs, client_config());
+        let mut server = AsyncDtls12ServerConnection::new(ss, server_config(), false);
+
+        let (cr, sr) = tokio::join!(client.handshake(), server.handshake());
+        cr.unwrap();
+        sr.unwrap();
+
+        // Client → Server
+        client.write(b"from client").await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = server.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"from client");
+
+        // Server → Client
+        server.write(b"from server").await.unwrap();
+        let n = client.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"from server");
+    }
+
+    #[tokio::test]
     async fn test_async_dtls12_cookie_mode_abbreviated() {
         // Cookie mode + session resumption
         let client_cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
