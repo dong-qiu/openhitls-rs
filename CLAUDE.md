@@ -23,7 +23,7 @@ openhitls-rs/
 │   ├── hitls-pki/       # X.509 (parse, verify [RSA/ECDSA/Ed25519/Ed448/SM2/RSA-PSS], chain, CRL, OCSP, CSR generation, Certificate generation, to_text output, SigningKey abstraction, EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies enforcement, hostname verification (RFC 6125)), PKCS#12 (RFC 7292), CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr, detached mode) + EnvelopedData + EncryptedData + DigestedData + AuthenticatedData (RFC 5652 §9, HMAC-SHA-256/384/512), PKCS#8 (RFC 5958, Ed448/X448), SPKI public key parsing (341 tests, 1 ignored)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (RFC 9578, RSA blind sigs) (33 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
-├── tests/interop/       # Integration tests (113 cross-crate tests, 3 ignored)
+├── tests/interop/       # Integration tests (122 cross-crate tests, 3 ignored)
 ├── tests/vectors/       # Standard test vectors (Wycheproof JSON)
 ├── fuzz/                # Fuzz targets (cargo-fuzz, 10 targets)
 └── benches/             # Performance benchmarks

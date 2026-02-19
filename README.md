@@ -63,6 +63,8 @@ openhitls-rs/
 | CCM mode (AEAD) | `modes` | **Done** | NIST SP 800-38C |
 | XTS mode | `modes` | **Done** | NIST SP 800-38E |
 | AES Key Wrap | `modes` | **Done** | RFC 3394 |
+| HCTR mode | `modes` | **Done** | Length-preserving encryption |
+| SM4-CCM (AEAD) | `modes` | **Done** | GB/T |
 
 ### MAC
 
@@ -78,9 +80,9 @@ openhitls-rs/
 | Algorithm | Feature Flag | Status |
 |-----------|-------------|--------|
 | RSA (PKCS#1 v1.5, PSS, OAEP) | `rsa` (default) | **Done** |
-| ECDSA (P-224, P-256, P-384, P-521, Brainpool) | `ecdsa` (default) | **Done** |
-| ECDH (P-224, P-256, P-384, P-521, Brainpool) | `ecdh` | **Done** |
-| ECC core (P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1) | `ecc` | **Done** |
+| ECDSA (P-192, P-224, P-256, P-384, P-521, Brainpool) | `ecdsa` (default) | **Done** |
+| ECDH (P-192, P-224, P-256, P-384, P-521, Brainpool) | `ecdh` | **Done** |
+| ECC core (P-192, P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1) | `ecc` | **Done** |
 | Ed25519 (RFC 8032) | `ed25519` | **Done** |
 | X25519 (RFC 7748) | `x25519` | **Done** |
 | Ed448 (RFC 8032) | `ed448` | **Done** |
@@ -902,7 +904,34 @@ AsyncDtls12ClientConnection + AsyncDtls12ServerConnection with full/abbreviated 
 | STATUS_REQUEST_V2 (RFC 6961, type 17) | ExtensionType constant + codec (build/parse) + config `enable_ocsp_multi_stapling: bool` + ClientHello (TLS 1.3 + 1.2) |
 | CMS AuthenticatedData (RFC 5652 §9) | AuthenticatedData struct + parse/encode + create (`CmsMessage::authenticate`) + verify (`CmsMessage::verify_mac`) + HMAC-SHA-256/384/512 |
 
-15 new tests: 9 codec tests + 3 config tests + 5 CMS AuthenticatedData tests (2239→2254).
+17 new tests: 9 codec tests + 3 config tests + 5 CMS AuthenticatedData tests (2239→2256).
+
+#### Phase 79: DTLS Config Enhancements + Integration Tests -- DONE
+
+| Feature | Description |
+|---------|-------------|
+| `flight_transmit_enable` config | DTLS flight-based transmission control (default: true) |
+| `empty_records_limit` config | Consecutive empty record DoS protection with configurable limit (default: 32) |
+| RecordLayer `check_empty_record()` | Rejects empty encrypted/Alert/AppData records, allows empty Handshake/CCS within limit |
+| Integration tests for Phase 77-78 | MsgCallback TLS 1.3/1.2, InfoCallback, ClientHelloCallback, CBC-MAC-SM4, CMS AuthenticatedData, RecordPaddingCallback, DTLS config, empty records limit |
+
+18 new tests: 9 DTLS config + RecordLayer unit tests + 9 integration tests (2256→2274).
+
+#### Testing-Phase 77: SniCallback + PADDING + OID Filters + DTLS Abbreviated + PskServerCallback Integration Tests -- DONE
+
+13 new tests: SniCallback server cert selection, PADDING extension negotiation, OID Filters in CertificateRequest, DTLS abbreviated handshake with session cache, PskServerCallback (2131→2144).
+
+#### Testing-Phase 78: GREASE + Heartbeat + Async DTLS Edge Cases + Extension Codec Negative Tests -- DONE
+
+22 new tests: GREASE ClientHello injection, Heartbeat extension negotiation, async DTLS edge cases, extension codec negative/roundtrip tests (2144→2166).
+
+#### Testing-Phase 79: DTLS 1.2 Handshake + TLS 1.3 Server + Record Layer + PRF Unit Tests -- DONE
+
+28 new tests: DTLS 1.2 server/client wrong-state handling, TLS 1.3 server key share/HRR, record layer multi-record parse + AEAD/CBC roundtrip, PRF cross-hash/empty secret/seed uniqueness (2166→2194).
+
+#### Testing-Phase 80: TLCP Server + Transcript + Key Schedule 1.2 + Cert Verify + TLS 1.3 Client + Session Unit Tests -- DONE
+
+24 new tests: TLCP server wrong-state/suite negotiation, transcript operations, key schedule 1.2 EMS pipeline, cert verify hostname/trusted certs, TLS 1.3 client extensions, session serialization roundtrip (2194→2218).
 
 #### Other Identified Gaps (Low Priority / Deferred)
 
@@ -920,12 +949,12 @@ AsyncDtls12ClientConnection + AsyncDtls12ServerConnection with full/abbreviated 
 | Component | C (lines) | Rust (lines) | Feature Coverage | Remaining Gaps |
 |-----------|-----------|--------------|------------------|----------------|
 | Crypto Algorithms | ~132K | ~26K | **100%** (all 48 modules + SM4-CCM + hardware AES + all 13 DH groups + FIPS/CMVP + entropy health testing + Ed448/X448/Curve448) | — |
-| TLS Protocol | ~52K | ~14K | **100%** (TLS 1.3 + 1.2 + DTLS 1.2 + TLCP + DTLCP + 10 connection types (5 sync + 5 async) + X25519MLKEM768 + SM4-GCM/CCM + AES-CCM (RFC 6655/7251) + AES-CCM_8 + PSK+CCM + PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM + DHE_DSS (RFC 5246) + DH_ANON/ECDH_ANON (RFC 5246/4492) + renegotiation (RFC 5746) + hostname verification (RFC 6125) + cert chain validation + CertVerifyCallback/SniCallback + 7 TLS callbacks + server/client session cache + write record fragmentation + KeyUpdate loop protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert + PADDING/OID Filters + Heartbeat (RFC 6520) + GREASE (RFC 8701) + Trusted CA Keys (RFC 6066) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + RSL/SCSV/OCSP/SCT + async I/O + key logging + custom extensions + all 5 FFDHE groups) | — |
+| TLS Protocol | ~52K | ~14K | **100%** (TLS 1.3 + 1.2 + DTLS 1.2 + TLCP + DTLCP + 10 connection types (5 sync + 5 async) + X25519MLKEM768 + SM4-GCM/CCM + AES-CCM (RFC 6655/7251) + AES-CCM_8 + PSK+CCM + PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM + DHE_DSS (RFC 5246) + DH_ANON/ECDH_ANON (RFC 5246/4492) + renegotiation (RFC 5746) + hostname verification (RFC 6125) + cert chain validation + CertVerifyCallback/SniCallback + 7 TLS callbacks + server/client session cache + write record fragmentation + KeyUpdate loop protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert + PADDING/OID Filters + Heartbeat (RFC 6520) + GREASE (RFC 8701) + Trusted CA Keys (RFC 6066) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + flight_transmit_enable + empty_records_limit DoS protection + RSL/SCSV/OCSP/SCT + async I/O + key logging + custom extensions + all 5 FFDHE groups) | — |
 | PKI / X.509 | ~17K | ~4K | **100%** (parse/verify/chain/CRL/OCSP/CSR/cert gen/to_text/hostname verification (RFC 6125)/PKCS#8/PKCS#12/CMS SignedData+EnvelopedData+EncryptedData+DigestedData+AuthenticatedData) | — |
 | Base Support Layer | ~12K | ~2K | **95%** (ASN.1/Base64/PEM/OID/errors) | — |
 | CLI Tools | ~8K | ~2.2K | **100%** (dgst/genpkey/x509/verify/enc/pkey/crl/req/s-client/s-server/list/rand/pkeyutl/speed/pkcs12/mac) | — |
 | FIPS/CMVP | ~5K | ~0.6K | **90%** (state machine, 7 KATs incl. entropy, 3 PCTs, integrity check, feature-gated) | Conditional algorithm disabling |
-| Test Infrastructure | ~20K | ~3.5K | **95%** (2254 tests + 5000+ Wycheproof vectors + 10 fuzz targets + security audit) | SDV compliance tests |
+| Test Infrastructure | ~20K | ~3.5K | **95%** (2274 tests + 5000+ Wycheproof vectors + 10 fuzz targets + security audit) | SDV compliance tests |
 | **Total** | **~460K** | **~53K** | **~99%** (production-ready for modern TLS deployments, 91 TLS 1.2 cipher suites) | Low-priority items only |
 
 ## Minimum Supported Rust Version
