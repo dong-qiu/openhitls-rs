@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 79 complete + Testing-Phase 84 — record/extensions/export/codec/connection unit tests (2372 tests)
+- **Status**: Phase 79 complete + Testing-Phase 85 — aead/crypt/alert/signing/config unit tests (2397 tests)
 
 ## Workspace Structure
 
@@ -35,12 +35,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2372 tests, 40 ignored)
+# Run all tests (2397 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 603 tests (31 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 1011 tests
+cargo test -p hitls-tls --all-features      # 1036 tests
 cargo test -p hitls-pki --all-features      # 341 tests (1 ignored)
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
@@ -111,7 +111,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-79 complete (2372 tests, 40 ignored).
+Phases 0-79 complete (2397 tests, 40 ignored).
 
 ### Completed
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
@@ -167,5 +167,6 @@ Phases 0-79 complete (2372 tests, 40 ignored).
 - Testing-Phase 82: codec/server12/client12/dtls12/config unit tests (Codec: decode_server_hello too short version/random, decode_client_hello too short/odd suites, decode_key_update invalid; Server12: abbreviated_finished wrong state, cert_verify wrong state, build_new_session_ticket no key/with key no master; Client12: CCS wrong state, abbreviated_finished wrong state, cert_request wrong state, process_finished wrong state, new_session_ticket lifetime zero; DTLS 1.2: version/cipher_suite/bidirectional/is_connected/multiple_sequential; Config: role setter, builder long chain, default cipher_suites/groups/sig_algs non-empty, +24 tests, 2299→2323) -- DONE
 - Testing-Phase 83: session/client/server/async/dtls12-async unit tests (Session: cleanup noop zero lifetime, encrypt/decrypt ticket wrong key length, decode without EMS byte, cleanup fresh sessions; TLS 1.3 client: accessors after init, heartbeat extension, supported_groups extension, new_session_ticket no params, process_finished wrong state; TLS 1.3 server: accessors after init, process_finished wrong state, process_hello_retry wrong state, rejects TLS1.2-only supported_versions, ALPN no match; Async TLS 1.3: key_update request_response, export zero length, server export before handshake, accessor methods, different contexts export; Async DTLS 1.2: take_session returns none, server_name accessor, is_session_resumed first handshake, peer_certificates empty, bidirectional data, +25 tests, 2323→2348) -- DONE
 - Testing-Phase 84: record/extensions/export/codec/connection unit tests (Record: EtM seal+open roundtrip, CCS passthrough with active decryptor, empty encrypted record rejected, record size limit boundary; Extensions: type constants, context flag values, wrong context ignored, empty received, zero context contains nothing; Export: non-UTF-8 label rejected, different randoms differ, different secrets differ, early export forbidden label, context affects output; Codec: GREASE key_share includes real entry, parse_extensions truncated/empty, parse_pre_shared_key_ch truncated, parse_alpn_sh list length mismatch; Connection: take_session before handshake, connection_info before handshake, accessors before handshake, queue_early_data+accepted, server key_update before connected, +24 tests, 2348→2372) -- DONE
+- Testing-Phase 85: aead/crypt/alert/signing/config unit tests (AEAD: AES-GCM/CCM/CCM8 invalid key length, tag_size consistency, GCM decrypt wrong nonce; Crypt: NamedGroup is_kem variants, KeyExchangeAlg is_psk/requires_certificate all variants, TLS 1.2 CBC is_cbc flag, TLS 1.3 hash_factory output size; Alert: level from_u8 all invalid, description undefined gaps, clone+copy, to_bytes roundtrip, TLS 1.3 specific codes; Signing: DSA rejected, empty client list, Ed448 roundtrip, DSA sign rejected, RSA wrong scheme; Config: last setter wins, verify_hostname default, empty_records_limit custom, multiple trusted_certs, version range combinations, +25 tests, 2372→2397) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

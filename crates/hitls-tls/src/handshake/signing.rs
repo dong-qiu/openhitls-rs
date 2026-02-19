@@ -358,4 +358,70 @@ mod tests {
         );
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_select_signature_scheme_dsa_rejected() {
+        let key = ServerPrivateKey::Dsa {
+            params_der: vec![0x42; 128],
+            private_key: vec![0x42; 20],
+        };
+        let result = select_signature_scheme(&key, &[SignatureScheme::ED25519]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("DSA"));
+    }
+
+    #[test]
+    fn test_select_signature_scheme_empty_client_list() {
+        let key = ServerPrivateKey::Ed25519(vec![0x42; 32]);
+        let result = select_signature_scheme(&key, &[]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("no common"));
+    }
+
+    #[test]
+    fn test_sign_certificate_verify_ed448_roundtrip() {
+        let seed = vec![0x42; 57];
+        let kp = hitls_crypto::ed448::Ed448KeyPair::from_seed(&seed).unwrap();
+        let pub_key_bytes = kp.public_key().to_vec();
+
+        let server_key = ServerPrivateKey::Ed448(seed);
+        let transcript_hash = vec![0xBB; 48];
+        let sig =
+            sign_certificate_verify(&server_key, SignatureScheme::ED448, &transcript_hash, true)
+                .unwrap();
+
+        let content = build_verify_content(&transcript_hash, true);
+        let verifier = hitls_crypto::ed448::Ed448KeyPair::from_public_key(&pub_key_bytes).unwrap();
+        assert!(verifier.verify(&content, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_sign_certificate_verify_dsa_rejected() {
+        let key = ServerPrivateKey::Dsa {
+            params_der: vec![0x42; 128],
+            private_key: vec![0x42; 20],
+        };
+        let result = sign_certificate_verify(
+            &key,
+            SignatureScheme::ED25519, // scheme doesn't matter for DSA
+            &[0xAA; 32],
+            true,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("DSA"));
+    }
+
+    #[test]
+    fn test_sign_certificate_verify_rsa_wrong_scheme() {
+        // RSA key with a non-RSA scheme → "RSA scheme mismatch"
+        let key = ServerPrivateKey::Rsa {
+            n: vec![0x42; 128],
+            d: vec![0x42; 128],
+            e: vec![0x01, 0x00, 0x01],
+            p: vec![0x42; 64],
+            q: vec![0x42; 64],
+        };
+        let result = sign_certificate_verify(&key, SignatureScheme::ED25519, &[0xAA; 32], true);
+        assert!(result.is_err());
+    }
 }
