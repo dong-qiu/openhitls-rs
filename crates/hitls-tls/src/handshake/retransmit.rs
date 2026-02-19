@@ -164,4 +164,59 @@ mod tests {
         assert_eq!(timer.retransmit_count(), 0);
         assert!(!timer.is_expired());
     }
+
+    #[test]
+    fn test_retransmit_timer_is_expired_before_start() {
+        let timer = RetransmitTimer::new();
+        // Before start(), deadline is None → not expired
+        assert!(!timer.is_expired());
+    }
+
+    #[test]
+    fn test_retransmit_timer_is_exhausted_boundary() {
+        let mut timer = RetransmitTimer::new();
+        // Backoff 11 times → count=11, not exhausted
+        for _ in 0..11 {
+            timer.backoff();
+        }
+        assert_eq!(timer.retransmit_count(), 11);
+        assert!(!timer.is_exhausted());
+
+        // Backoff once more → count=12, exhausted
+        timer.backoff();
+        assert_eq!(timer.retransmit_count(), 12);
+        assert!(timer.is_exhausted());
+    }
+
+    #[test]
+    fn test_retransmit_timer_default_trait() {
+        let timer = RetransmitTimer::default();
+        assert_eq!(timer.timeout(), Duration::from_secs(1));
+        assert_eq!(timer.retransmit_count(), 0);
+        assert!(!timer.is_expired());
+        assert!(!timer.is_exhausted());
+    }
+
+    #[test]
+    fn test_flight_push_clear_and_empty() {
+        let mut flight = Flight::new();
+        assert!(flight.is_empty());
+
+        flight.push(vec![0x01, 0x02]);
+        flight.push(vec![0x03, 0x04, 0x05]);
+        assert!(!flight.is_empty());
+        assert_eq!(flight.records.len(), 2);
+        assert_eq!(flight.records[0], vec![0x01, 0x02]);
+        assert_eq!(flight.records[1], vec![0x03, 0x04, 0x05]);
+
+        flight.clear();
+        assert!(flight.is_empty());
+        assert_eq!(flight.records.len(), 0);
+    }
+
+    #[test]
+    fn test_flight_default_trait() {
+        let flight = Flight::default();
+        assert!(flight.is_empty());
+    }
 }

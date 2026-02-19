@@ -229,4 +229,60 @@ mod tests {
         // Replay of 1 should fail
         assert!(w.check_and_accept(1).is_err());
     }
+
+    #[test]
+    fn test_anti_replay_default_impl_equivalent() {
+        let w1 = AntiReplayWindow::new();
+        let w2 = AntiReplayWindow::default();
+        // Both should accept seq=0
+        assert!(w1.check(0));
+        assert!(w2.check(0));
+    }
+
+    #[test]
+    fn test_anti_replay_check_and_accept_error_message() {
+        let mut w = AntiReplayWindow::new();
+        w.accept(5);
+        let err = w.check_and_accept(5).unwrap_err();
+        assert!(
+            err.to_string().contains("replay"),
+            "Error should mention 'replay': {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_anti_replay_sliding_window_after_gap() {
+        let mut w = AntiReplayWindow::new();
+        // Accept 0, then jump to 100
+        w.accept(0);
+        w.accept(100);
+        // Window now covers 37..100 (100-63=37)
+        // seq=37 was never seen → should accept
+        assert!(w.check(37));
+        // seq=36 is too old → should reject
+        assert!(!w.check(36));
+        // seq=50 never seen → should accept
+        assert!(w.check(50));
+        w.accept(50);
+        // seq=50 now seen → should reject
+        assert!(!w.check(50));
+    }
+
+    #[test]
+    fn test_anti_replay_interleaved_check_and_accept() {
+        let mut w = AntiReplayWindow::new();
+        // Interleaved sequence: 0, 3, 1, 4, 2
+        assert!(w.check_and_accept(0).is_ok());
+        assert!(w.check_and_accept(3).is_ok());
+        assert!(w.check_and_accept(1).is_ok());
+        assert!(w.check_and_accept(4).is_ok());
+        assert!(w.check_and_accept(2).is_ok());
+        // All should now be rejected
+        for i in 0..5 {
+            assert!(w.check_and_accept(i).is_err());
+        }
+        // Next new seq should succeed
+        assert!(w.check_and_accept(5).is_ok());
+    }
 }

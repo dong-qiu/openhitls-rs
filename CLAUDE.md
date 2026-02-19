@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 79 complete + Testing-Phase 85 — aead/crypt/alert/signing/config unit tests (2397 tests)
+- **Status**: Phase 79 complete + Testing-Phase 86 — retransmit/keylog/fragment/anti_replay/key_exchange unit tests (2420 tests)
 
 ## Workspace Structure
 
@@ -35,12 +35,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2397 tests, 40 ignored)
+# Run all tests (2420 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 603 tests (31 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 1036 tests
+cargo test -p hitls-tls --all-features      # 1059 tests
 cargo test -p hitls-pki --all-features      # 341 tests (1 ignored)
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
