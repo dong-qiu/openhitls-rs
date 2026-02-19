@@ -291,4 +291,79 @@ mod tests {
         let cloned = ext.clone();
         assert_eq!(cloned.extension_type, 0xFF00);
     }
+
+    #[test]
+    fn test_extension_type_constants() {
+        assert_eq!(ExtensionType::SERVER_NAME.0, 0);
+        assert_eq!(ExtensionType::HEARTBEAT.0, 15);
+        assert_eq!(ExtensionType::PADDING.0, 21);
+        assert_eq!(ExtensionType::ENCRYPT_THEN_MAC.0, 22);
+        assert_eq!(ExtensionType::EXTENDED_MASTER_SECRET.0, 23);
+        assert_eq!(ExtensionType::RECORD_SIZE_LIMIT.0, 28);
+        assert_eq!(ExtensionType::SESSION_TICKET.0, 35);
+        assert_eq!(ExtensionType::PRE_SHARED_KEY.0, 41);
+        assert_eq!(ExtensionType::SUPPORTED_VERSIONS.0, 43);
+        assert_eq!(ExtensionType::KEY_SHARE.0, 51);
+        assert_eq!(ExtensionType::OID_FILTERS.0, 48);
+        assert_eq!(ExtensionType::RENEGOTIATION_INFO.0, 0xFF01);
+    }
+
+    #[test]
+    fn test_extension_context_flag_values() {
+        assert_eq!(ExtensionContext::CLIENT_HELLO.0, 0x0001);
+        assert_eq!(ExtensionContext::SERVER_HELLO.0, 0x0002);
+        assert_eq!(ExtensionContext::ENCRYPTED_EXTENSIONS.0, 0x0010);
+        assert_eq!(ExtensionContext::CERTIFICATE.0, 0x0020);
+        assert_eq!(ExtensionContext::CERTIFICATE_REQUEST.0, 0x0040);
+        assert_eq!(ExtensionContext::NEW_SESSION_TICKET.0, 0x0080);
+    }
+
+    #[test]
+    fn test_parse_ignores_wrong_context_extension() {
+        let call_count = Arc::new(AtomicU32::new(0));
+        let cc = call_count.clone();
+        let ext = CustomExtension {
+            extension_type: 0xFF00,
+            context: ExtensionContext::CLIENT_HELLO, // Only CH
+            add_cb: Arc::new(|_ctx| None),
+            parse_cb: Arc::new(move |_ctx, _data| {
+                cc.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }),
+        };
+        let received = vec![Extension {
+            extension_type: ExtensionType(0xFF00),
+            data: vec![0x01],
+        }];
+        // Parse in SERVER_HELLO context → callback should NOT fire
+        parse_custom_extensions(&[ext], ExtensionContext::SERVER_HELLO, &received).unwrap();
+        assert_eq!(call_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_parse_custom_extensions_empty_received() {
+        let call_count = Arc::new(AtomicU32::new(0));
+        let cc = call_count.clone();
+        let ext = CustomExtension {
+            extension_type: 0xFF00,
+            context: ExtensionContext::CLIENT_HELLO,
+            add_cb: Arc::new(|_ctx| None),
+            parse_cb: Arc::new(move |_ctx, _data| {
+                cc.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }),
+        };
+        // Empty received list → no callbacks fired
+        parse_custom_extensions(&[ext], ExtensionContext::CLIENT_HELLO, &[]).unwrap();
+        assert_eq!(call_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_extension_context_zero_contains_nothing() {
+        let zero = ExtensionContext(0);
+        assert!(!zero.contains(ExtensionContext::CLIENT_HELLO));
+        assert!(!zero.contains(ExtensionContext::SERVER_HELLO));
+        assert!(!zero.contains(ExtensionContext::ENCRYPTED_EXTENSIONS));
+        assert!(!zero.contains(ExtensionContext::CERTIFICATE));
+    }
 }

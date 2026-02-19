@@ -1020,4 +1020,84 @@ mod tests {
             .to_string()
             .contains("too many consecutive empty records"));
     }
+
+    #[test]
+    fn test_seal_open_tls12_etm_roundtrip() {
+        let enc_key = vec![0x11; 16];
+        let mac_key = vec![0x22; 32];
+        let mac_len = 32;
+
+        let mut write_rl = RecordLayer::new();
+        write_rl.activate_write_encryption12_etm(enc_key.clone(), mac_key.clone(), mac_len);
+
+        let mut read_rl = RecordLayer::new();
+        read_rl.activate_read_decryption12_etm(enc_key, mac_key, mac_len);
+
+        // Seal a record
+        let plaintext = b"EtM roundtrip test payload";
+        let sealed = write_rl
+            .seal_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        // Open it
+        let (ct, pt, consumed) = read_rl.open_record(&sealed).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, plaintext);
+        assert_eq!(consumed, sealed.len());
+    }
+
+    #[test]
+    fn test_ccs_passthrough_with_active_decryptor12() {
+        let mut rl = RecordLayer::new();
+        rl.activate_read_decryption12(
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            &[0x33; 16],
+            vec![0x44; 4],
+        )
+        .unwrap();
+        assert!(rl.is_decrypting());
+
+        // Build a raw CCS record: type=20, version=0x0303, length=1, payload=[1]
+        let ccs_record = vec![20, 0x03, 0x03, 0x00, 0x01, 0x01];
+        let (ct, data, consumed) = rl.open_record(&ccs_record).unwrap();
+        assert_eq!(ct, ContentType::ChangeCipherSpec);
+        assert_eq!(data, vec![0x01]);
+        assert_eq!(consumed, 6);
+    }
+
+    #[test]
+    fn test_empty_encrypted_record_rejected() {
+        let mut rl = RecordLayer::new();
+        // Activate any decryptor to set is_decrypting() = true
+        rl.activate_read_decryption12_etm(vec![0; 16], vec![0; 32], 32);
+        assert!(rl.is_decrypting());
+
+        // Empty record with active decryptor → should be rejected
+        let err = rl
+            .check_empty_record(ContentType::ApplicationData, 0)
+            .unwrap_err();
+        assert!(err.to_string().contains("empty encrypted record"));
+    }
+
+    #[test]
+    fn test_parse_record_size_limit_boundary() {
+        let mut rl = RecordLayer::new();
+        rl.max_fragment_size = 100;
+
+        // Exactly at limit: 100 + 256 = 356 bytes → should be accepted
+        let payload = vec![0xAA; 356];
+        let mut record = vec![22, 0x03, 0x03]; // Handshake, TLS 1.2
+        record.extend_from_slice(&(356u16).to_be_bytes());
+        record.extend_from_slice(&payload);
+        let result = rl.parse_record(&record);
+        assert!(result.is_ok());
+
+        // One byte over limit: 357 bytes → rejected
+        let payload2 = vec![0xBB; 357];
+        let mut record2 = vec![22, 0x03, 0x03];
+        record2.extend_from_slice(&(357u16).to_be_bytes());
+        record2.extend_from_slice(&payload2);
+        let err = rl.parse_record(&record2).unwrap_err();
+        assert!(err.to_string().contains("record too large"));
+    }
 }

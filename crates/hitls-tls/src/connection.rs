@@ -7265,4 +7265,60 @@ mod tests {
         let result3 = conn.export_early_keying_material(b"other_label", Some(b"ctx"), 32);
         assert_ne!(ekm, result3.unwrap());
     }
+
+    #[test]
+    fn test_tls13_take_session_before_handshake() {
+        let stream = Cursor::new(Vec::<u8>::new());
+        let config = TlsConfig::builder().build();
+        let mut conn = TlsClientConnection::new(stream, config);
+        // Before handshake, no session to take
+        assert!(conn.take_session().is_none());
+    }
+
+    #[test]
+    fn test_tls13_connection_info_before_handshake() {
+        let stream = Cursor::new(Vec::<u8>::new());
+        let config = TlsConfig::builder().build();
+        let conn = TlsClientConnection::new(stream, config);
+        // Before handshake, connection_info returns None
+        assert!(conn.connection_info().is_none());
+    }
+
+    #[test]
+    fn test_tls13_accessors_before_handshake() {
+        let stream = Cursor::new(Vec::<u8>::new());
+        let config = TlsConfig::builder().build();
+        let conn = TlsClientConnection::new(stream, config);
+        assert!(conn.peer_certificates().is_empty());
+        assert!(conn.alpn_protocol().is_none());
+        assert!(conn.server_name().is_none());
+        assert!(conn.negotiated_group().is_none());
+        assert!(!conn.is_session_resumed());
+    }
+
+    #[test]
+    fn test_tls13_queue_early_data_and_accepted() {
+        let stream = Cursor::new(Vec::<u8>::new());
+        let config = TlsConfig::builder().build();
+        let mut conn = TlsClientConnection::new(stream, config);
+        // Before queuing, early_data_accepted is false
+        assert!(!conn.early_data_accepted());
+        // Queue some data
+        conn.queue_early_data(b"hello early");
+        conn.queue_early_data(b" world");
+        // Still not accepted (no handshake done)
+        assert!(!conn.early_data_accepted());
+        // But the queue should be populated internally
+        assert_eq!(conn.early_data_queue, b"hello early world");
+    }
+
+    #[test]
+    fn test_tls13_server_key_update_before_connected() {
+        let stream = Cursor::new(Vec::<u8>::new());
+        let config = TlsConfig::builder().build();
+        let mut conn = TlsServerConnection::new(stream, config);
+        // key_update before connected should fail
+        let result = conn.key_update(false);
+        assert!(result.is_err());
+    }
 }
