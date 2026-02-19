@@ -38,7 +38,14 @@ pub fn decrypt_pkcs8_der(der: &[u8], password: &str) -> Result<Vec<u8>, CryptoEr
         return Err(CryptoError::DecodeUnknownOid);
     }
 
-    decrypt_pbes2(&alg_params, &encrypted, password)
+    let decrypted = decrypt_pbes2(&alg_params, &encrypted, password)?;
+
+    // Validate that decrypted bytes form a valid ASN.1 SEQUENCE (PrivateKeyInfo).
+    // CBC padding alone is insufficient — ~1/256 chance random garbage has valid padding.
+    let mut check = Decoder::new(&decrypted);
+    check.read_sequence().map_err(|_| CryptoError::InvalidPadding)?;
+
+    Ok(decrypted)
 }
 
 /// Decrypt a PEM-encoded EncryptedPrivateKeyInfo ("ENCRYPTED PRIVATE KEY" label).
