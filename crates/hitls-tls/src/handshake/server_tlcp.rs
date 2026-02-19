@@ -402,4 +402,77 @@ mod tests {
         let hs = TlcpServerHandshake::new(config);
         assert_eq!(hs.state(), TlcpServerState::Idle);
     }
+
+    #[test]
+    fn test_tlcp_server_cke_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = TlcpServerHandshake::new(config);
+        assert_eq!(hs.state(), TlcpServerState::Idle);
+        // CKE in Idle state → error
+        let result = hs.process_client_key_exchange(&[16, 0, 0, 4], &[0, 0, 0, 0]);
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        let msg = format!("{err}");
+        assert!(msg.contains("unexpected ClientKeyExchange"), "{msg}");
+    }
+
+    #[test]
+    fn test_tlcp_server_ccs_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = TlcpServerHandshake::new(config);
+        // CCS in Idle state → error
+        let result = hs.process_change_cipher_spec();
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("unexpected ChangeCipherSpec"), "{msg}");
+    }
+
+    #[test]
+    fn test_tlcp_server_finished_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = TlcpServerHandshake::new(config);
+        // Finished in Idle state → error
+        let result = hs.process_finished_and_build(
+            &[20, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            &[0u8; 48],
+        );
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("unexpected Finished"), "{msg}");
+    }
+
+    #[test]
+    fn test_tlcp_server_negotiate_suite_no_match() {
+        // Build config with no TLCP suites at all
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_AES_128_GCM_SHA256])
+            .build();
+        let hs = TlcpServerHandshake::new(config);
+
+        // Build a minimal ClientHello that only offers ECDHE_SM4_CBC_SM3
+        let ch = ClientHello {
+            random: [0u8; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::ECDHE_SM4_CBC_SM3],
+            extensions: vec![],
+        };
+        let result = hs.negotiate_suite(&ch);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), TlsError::NoSharedCipherSuite));
+    }
+
+    #[test]
+    fn test_tlcp_server_finished_too_short() {
+        let config = TlsConfig::builder().build();
+        let mut hs = TlcpServerHandshake::new(config);
+        // Force state to WaitFinished
+        hs.state = TlcpServerState::WaitFinished;
+        hs.params =
+            Some(TlcpCipherSuiteParams::from_suite(CipherSuite::ECDHE_SM4_CBC_SM3).unwrap());
+        // Finished message too short (less than 4 + 12 bytes)
+        let result = hs.process_finished_and_build(&[20, 0, 0, 4, 0, 0, 0, 0], &[0u8; 48]);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("too short"), "{msg}");
+    }
 }

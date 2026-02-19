@@ -386,4 +386,95 @@ mod tests {
             "callback must not be invoked when verify_peer=false"
         );
     }
+
+    // -------------------------------------------------------
+    // 13. Hostname CN match succeeds
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_hostname_cn_match_succeeds() {
+        let cert_der = make_self_signed_cert_der("myhost.example.com");
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(true)
+            .server_name("myhost.example.com")
+            .trusted_cert(cert_der.clone())
+            .build();
+        // CN matches server_name, chain trusted → Ok
+        let result = verify_server_certificate(&config, &[cert_der]);
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+    }
+
+    // -------------------------------------------------------
+    // 14. Multiple trusted certs — one matches
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_multiple_trusted_certs() {
+        let cert_a_der = make_self_signed_cert_der("server-a.example.com");
+        let cert_b_der = make_self_signed_cert_der("server-b.example.com");
+
+        // Trust both certs, present cert_b → should verify
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(false)
+            .trusted_cert(cert_a_der)
+            .trusted_cert(cert_b_der.clone())
+            .build();
+        let result = verify_server_certificate(&config, &[cert_b_der]);
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+    }
+
+    // -------------------------------------------------------
+    // 15. Wrong trusted cert fails chain
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_verify_wrong_trusted_cert_fails() {
+        let cert_a_der = make_self_signed_cert_der("server-a.example.com");
+        let cert_b_der = make_self_signed_cert_der("server-b.example.com");
+
+        // Only trust cert_a, present cert_b → chain should fail
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(false)
+            .trusted_cert(cert_a_der)
+            .build();
+        let result = verify_server_certificate(&config, &[cert_b_der]);
+        assert!(result.is_err(), "expected chain verification to fail");
+    }
+
+    // -------------------------------------------------------
+    // 16. Callback receives hostname_result error on mismatch
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_callback_receives_hostname_error() {
+        use std::sync::Mutex;
+        let cert_der = make_self_signed_cert_der("localhost");
+        let hostname_was_err: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+        let hwe = hostname_was_err.clone();
+
+        let cb: CertVerifyCallback = Arc::new(move |info| {
+            *hwe.lock().unwrap() = info.hostname_result.is_err();
+            Ok(()) // accept anyway
+        });
+
+        let config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .verify_peer(true)
+            .verify_hostname(true)
+            .server_name("wrong-host.example.com")
+            .trusted_cert(cert_der.clone())
+            .cert_verify_callback(cb)
+            .build();
+
+        // Should succeed because callback accepts
+        assert!(verify_server_certificate(&config, &[cert_der]).is_ok());
+        // But callback should have seen hostname error
+        assert!(*hostname_was_err.lock().unwrap());
+    }
 }

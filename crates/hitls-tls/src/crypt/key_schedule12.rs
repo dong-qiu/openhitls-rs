@@ -613,4 +613,122 @@ mod tests {
         assert_eq!(kb.client_write_iv.len(), 4);
         assert_eq!(kb.server_write_iv.len(), 4);
     }
+
+    #[test]
+    fn test_compute_verify_data_server_label() {
+        let factory = sha256_factory();
+        let master_secret = [0xBBu8; 48];
+        let handshake_hash = [0xAAu8; 32];
+
+        let vd = compute_verify_data(
+            &*factory,
+            &master_secret,
+            "server finished",
+            &handshake_hash,
+        )
+        .unwrap();
+        assert_eq!(vd.len(), 12);
+
+        // Same inputs → same result (deterministic)
+        let vd2 = compute_verify_data(
+            &*factory,
+            &master_secret,
+            "server finished",
+            &handshake_hash,
+        )
+        .unwrap();
+        assert_eq!(vd, vd2);
+
+        // Different hash → different verify_data
+        let other_hash = [0xFFu8; 32];
+        let vd3 =
+            compute_verify_data(&*factory, &master_secret, "server finished", &other_hash).unwrap();
+        assert_ne!(vd, vd3);
+    }
+
+    #[test]
+    fn test_ems_then_key_block_derivation() {
+        // End-to-end: EMS → key block, verifying the full derivation pipeline
+        let factory = sha256_factory();
+        let pms = hex("0303aabbccdd");
+        let session_hash = hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        let ems = derive_extended_master_secret(&*factory, &pms, &session_hash).unwrap();
+        assert_eq!(ems.len(), 48);
+
+        let params = Tls12CipherSuiteParams::from_suite(
+            crate::CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        )
+        .unwrap();
+
+        let kb =
+            derive_key_block(&*factory, &ems, &server_random, &client_random, &params).unwrap();
+        assert_eq!(kb.client_write_key.len(), 16);
+        assert_eq!(kb.server_write_key.len(), 16);
+        assert_ne!(kb.client_write_key, kb.server_write_key);
+    }
+
+    #[test]
+    fn test_derive_key_block_deterministic() {
+        let factory = sha256_factory();
+        let master_secret = [0xDDu8; 48];
+        let client_random = [0x11u8; 32];
+        let server_random = [0x22u8; 32];
+
+        let params = Tls12CipherSuiteParams::from_suite(
+            crate::CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        )
+        .unwrap();
+
+        let kb1 = derive_key_block(
+            &*factory,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+        let kb2 = derive_key_block(
+            &*factory,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+
+        assert_eq!(kb1.client_write_key, kb2.client_write_key);
+        assert_eq!(kb1.server_write_key, kb2.server_write_key);
+        assert_eq!(kb1.client_write_iv, kb2.client_write_iv);
+        assert_eq!(kb1.server_write_iv, kb2.server_write_iv);
+    }
+
+    #[test]
+    fn test_derive_key_block_ccm_suite() {
+        let factory = sha256_factory();
+        let master_secret = [0xEEu8; 48];
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        let params =
+            Tls12CipherSuiteParams::from_suite(crate::CipherSuite::TLS_RSA_WITH_AES_128_CCM)
+                .unwrap();
+
+        let kb = derive_key_block(
+            &*factory,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+
+        assert_eq!(kb.client_write_key.len(), 16);
+        assert_eq!(kb.server_write_key.len(), 16);
+        // CCM is AEAD: no MAC keys
+        assert!(kb.client_write_mac_key.is_empty());
+        assert!(kb.server_write_mac_key.is_empty());
+    }
 }
