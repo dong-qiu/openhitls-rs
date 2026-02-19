@@ -171,4 +171,59 @@ mod tests {
         // Hashing empty data should equal the empty hash
         assert_eq!(h, empty);
     }
+
+    #[test]
+    fn test_transcript_binary_data() {
+        let mut th = TranscriptHash::new(sha256_factory);
+        // Feed raw binary data including null bytes and high bytes
+        let data: Vec<u8> = (0..=255).collect();
+        th.update(&data).unwrap();
+        let h = th.current_hash().unwrap();
+        assert_eq!(h.len(), 32);
+
+        // Verify against direct SHA-256
+        let expected = Sha256::digest(&data).unwrap();
+        assert_eq!(h, expected.to_vec());
+    }
+
+    #[test]
+    fn test_transcript_double_replace_message_hash() {
+        let mut th = TranscriptHash::new(sha256_factory);
+        th.update(b"ClientHello1").unwrap();
+        th.update(b"ServerHello+HRR").unwrap();
+        th.replace_with_message_hash().unwrap();
+        let h1 = th.current_hash().unwrap();
+
+        // Add second ClientHello, then replace again (simulates double HRR scenario)
+        th.update(b"ClientHello2").unwrap();
+        th.replace_with_message_hash().unwrap();
+        let h2 = th.current_hash().unwrap();
+
+        // The two hashes must differ (different buffer content)
+        assert_ne!(h1, h2);
+        assert_eq!(h2.len(), 32);
+    }
+
+    #[test]
+    fn test_transcript_current_hash_fresh() {
+        // current_hash on a freshly created transcript should equal empty_hash
+        let th = TranscriptHash::new(sha256_factory);
+        let current = th.current_hash().unwrap();
+        let empty = th.empty_hash().unwrap();
+        assert_eq!(current, empty);
+    }
+
+    #[test]
+    fn test_transcript_update_after_replace() {
+        let mut th = TranscriptHash::new(sha256_factory);
+        th.update(b"msg1").unwrap();
+        th.replace_with_message_hash().unwrap();
+        let h_after_replace = th.current_hash().unwrap();
+
+        // Adding more data after replacement should change the hash
+        th.update(b"msg2").unwrap();
+        let h_after_update = th.current_hash().unwrap();
+        assert_ne!(h_after_replace, h_after_update);
+        assert_eq!(h_after_update.len(), 32);
+    }
 }

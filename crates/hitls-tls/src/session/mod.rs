@@ -716,4 +716,37 @@ mod tests {
         let s = c.get(b"trait_key").unwrap();
         assert_eq!(s.cipher_suite.0, 0x1302);
     }
+
+    #[test]
+    fn test_session_alpn_not_serialized() {
+        // The encode_session_state format doesn't persist ALPN
+        // (it's restored from the handshake, not the ticket).
+        // Verify decoded session has alpn_protocol=None.
+        let mut session = make_session(0x1301, &[0xBB; 32]);
+        session.alpn_protocol = Some(b"h2".to_vec());
+
+        let encoded = encode_session_state(&session);
+        let decoded = decode_session_state(&encoded).unwrap();
+        assert_eq!(decoded.alpn_protocol, None);
+    }
+
+    #[test]
+    fn test_session_ticket_lifetime_roundtrip() {
+        let mut session = make_session(0x1302, &[0xCC; 48]);
+        session.ticket_lifetime = 7200;
+
+        let encoded = encode_session_state(&session);
+        let decoded = decode_session_state(&encoded).unwrap();
+        assert_eq!(decoded.ticket_lifetime, 7200);
+    }
+
+    #[test]
+    fn test_session_ems_flag_roundtrip() {
+        let mut session = make_session(0x1301, &[0xDD; 32]);
+        session.extended_master_secret = true;
+
+        let encoded = encode_session_state(&session);
+        let decoded = decode_session_state(&encoded).unwrap();
+        assert!(decoded.extended_master_secret);
+    }
 }

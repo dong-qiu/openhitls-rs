@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 76 complete + Testing-Phase 79 — DTLS 1.2 handshake + TLS 1.3 server + record layer + PRF unit tests (2194 tests)
+- **Status**: Phase 76 complete + Testing-Phase 80 — TLCP server + transcript + key_schedule12 + cert_verify + TLS 1.3 client + session unit tests (2218 tests)
 
 ## Workspace Structure
 
@@ -19,7 +19,7 @@ openhitls-rs/
 │   ├── hitls-utils/     # ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (Montgomery, Miller-Rabin)
 │   ├── hitls-crypto/    # All cryptographic algorithms (feature-gated); hardware AES acceleration (ARMv8/x86-64); ECC: P-192, P-224, P-256, P-384, P-521, Brainpool P-256r1/P-384r1/P-512r1; Curve448: Ed448, X448; DRBG: HMAC/CTR/Hash; SM4-CCM; HCTR mode; FIPS/CMVP (KAT, PCT, integrity); Entropy health testing (NIST SP 800-90B, RCT+APT); Wycheproof test vectors (593 tests + 15 Wycheproof)
-│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, hybrid KEM (X25519MLKEM768), async I/O (tokio), TLS 1.3 SM4-GCM/CCM (RFC 8998) + AES_128_CCM_8_SHA256, RFC 5705/8446 key material export, early exporter master secret (RFC 8446 §7.5), TLS 1.2 handshake (ECDHE/RSA/DHE_RSA/DHE_DSS/DH_ANON/ECDH_ANON/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20/CCM/CCM_8, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation (RFC 5746), mTLS, Bleichenbacher protection, AES-CCM (RFC 6655/7251), AES-CCM_8 (8-byte tag), PSK+CCM, PSK CBC-SHA256/SHA384 (RFC 5487), ECDHE_PSK GCM (draft-ietf-tls-ecdhe-psk-aead), DHE_DSS (RFC 5246), DH_ANON/ECDH_ANON (RFC 5246/4492), OCSP stapling CertificateStatus), hostname verification (RFC 6125), cert chain validation (CertificateVerifier), CertVerifyCallback + SniCallback, ConnectionInfo APIs, graceful shutdown (close_notify tracking), server-side session cache (Arc<Mutex<dyn SessionCache>>), client-side session cache (auto-store/auto-lookup by server_name), session TTL expiration, cipher_server_preference config, write record fragmentation (auto-split by max_fragment_size), KeyUpdate loop protection (128 consecutive limit), Max Fragment Length (RFC 6066, TLS 1.2 client/server negotiation), Signature Algorithms Cert (RFC 8446 §4.2.3, TLS 1.3 ClientHello + server parsing), Certificate Authorities (RFC 8446 §4.2.4, codec + config + TLS 1.3 ClientHello + server parsing), PADDING (RFC 7685, codec + config + TLS 1.3 ClientHello), OID Filters (RFC 8446 §4.2.5, codec + config + TLS 1.3 CertificateRequest), DTLS 1.2 (RFC 6347, session cache auto-store, abbreviated handshake/session resumption, async I/O), Heartbeat extension (RFC 6520, type 15, codec + config, negotiation only), GREASE (RFC 8701, ClientHello cipher suites/extensions/versions/groups/sig_algs/key_share), TLCP (GM/T 0024), DTLCP (DTLS+TLCP), custom extensions framework, NSS key logging, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT, Ed448/X448 signing + key exchange, TLS 1.2 PRF (857 tests)
+│   ├── hitls-tls/       # TLS 1.3 key schedule, record encryption, client & server handshake, PSK/session tickets, 0-RTT early data, post-handshake client auth, hybrid KEM (X25519MLKEM768), async I/O (tokio), TLS 1.3 SM4-GCM/CCM (RFC 8998) + AES_128_CCM_8_SHA256, RFC 5705/8446 key material export, early exporter master secret (RFC 8446 §7.5), TLS 1.2 handshake (ECDHE/RSA/DHE_RSA/DHE_DSS/DH_ANON/ECDH_ANON/PSK/DHE_PSK/RSA_PSK/ECDHE_PSK key exchange, GCM/CBC/ChaCha20/CCM/CCM_8, ALPN, SNI, session resumption, session ticket (RFC 5077), EMS (RFC 7627), ETM (RFC 7366), renegotiation (RFC 5746), mTLS, Bleichenbacher protection, AES-CCM (RFC 6655/7251), AES-CCM_8 (8-byte tag), PSK+CCM, PSK CBC-SHA256/SHA384 (RFC 5487), ECDHE_PSK GCM (draft-ietf-tls-ecdhe-psk-aead), DHE_DSS (RFC 5246), DH_ANON/ECDH_ANON (RFC 5246/4492), OCSP stapling CertificateStatus), hostname verification (RFC 6125), cert chain validation (CertificateVerifier), CertVerifyCallback + SniCallback, ConnectionInfo APIs, graceful shutdown (close_notify tracking), server-side session cache (Arc<Mutex<dyn SessionCache>>), client-side session cache (auto-store/auto-lookup by server_name), session TTL expiration, cipher_server_preference config, write record fragmentation (auto-split by max_fragment_size), KeyUpdate loop protection (128 consecutive limit), Max Fragment Length (RFC 6066, TLS 1.2 client/server negotiation), Signature Algorithms Cert (RFC 8446 §4.2.3, TLS 1.3 ClientHello + server parsing), Certificate Authorities (RFC 8446 §4.2.4, codec + config + TLS 1.3 ClientHello + server parsing), PADDING (RFC 7685, codec + config + TLS 1.3 ClientHello), OID Filters (RFC 8446 §4.2.5, codec + config + TLS 1.3 CertificateRequest), DTLS 1.2 (RFC 6347, session cache auto-store, abbreviated handshake/session resumption, async I/O), Heartbeat extension (RFC 6520, type 15, codec + config, negotiation only), GREASE (RFC 8701, ClientHello cipher suites/extensions/versions/groups/sig_algs/key_share), TLCP (GM/T 0024), DTLCP (DTLS+TLCP), custom extensions framework, NSS key logging, Record Size Limit (RFC 8449), Fallback SCSV (RFC 7507), OCSP stapling, SCT, Ed448/X448 signing + key exchange, TLS 1.2 PRF (881 tests)
 │   ├── hitls-pki/       # X.509 (parse, verify [RSA/ECDSA/Ed25519/Ed448/SM2/RSA-PSS], chain, CRL, OCSP, CSR generation, Certificate generation, to_text output, SigningKey abstraction, EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies enforcement, hostname verification (RFC 6125)), PKCS#12 (RFC 7292), CMS SignedData (Ed25519/Ed448, SKI signer lookup, RSA-PSS, noattr, detached mode) + EnvelopedData + EncryptedData + DigestedData (RFC 5652), PKCS#8 (RFC 5958, Ed448/X448), SPKI public key parsing (336 tests, 1 ignored)
 │   ├── hitls-auth/      # HOTP/TOTP (RFC 4226/6238), SPAKE2+ (RFC 9382, P-256), Privacy Pass (RFC 9578, RSA blind sigs) (33 tests)
 │   └── hitls-cli/       # Command-line tool (dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac)
@@ -35,12 +35,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2194 tests, 40 ignored)
+# Run all tests (2218 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 593 tests (31 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 857 tests
+cargo test -p hitls-tls --all-features      # 881 tests
 cargo test -p hitls-pki --all-features      # 336 tests (1 ignored)
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
@@ -110,7 +110,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-76 complete (2194 tests, 40 ignored).
+Phases 0-76 complete (2218 tests, 40 ignored).
 
 ### Completed
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
@@ -158,5 +158,6 @@ Phases 0-76 complete (2194 tests, 40 ignored).
 - Testing-Phase 77: SniCallback + PADDING + OID Filters + DTLS abbreviated + PskServerCallback integration tests (+13 tests, 2131→2144) -- DONE
 - Testing-Phase 78: GREASE + Heartbeat + Async DTLS edge cases + extension codec negative tests (+22 tests, 2144→2166) -- DONE
 - Testing-Phase 79: DTLS 1.2 handshake + TLS 1.3 server + record layer + PRF unit tests (DTLS 1.2 server: abbreviated via cache, wrong-state CKE/Finished/abbreviated-Finished/CH-with-cookie, message_seq, dtls_get_body; DTLS 1.2 client: wrong-state cert/SKE/SHD/Finished/abbreviated-Finished, non-abbreviated session mismatch, empty cert rejected, dtls_get_body; TLS 1.3 server: SECP256R1 key share, no common suite, server cipher preference, HRR wrong group retry; Record layer: multi-record parse, TLS 1.2 AEAD/CBC roundtrip, cipher mode switch; PRF: zero/large output, cross-hash, empty secret, seed uniqueness, +28 tests, 2166→2194) -- DONE
+- Testing-Phase 80: TLCP server + transcript + key_schedule12 + cert_verify + TLS 1.3 client + session unit tests (TLCP server: wrong-state CKE/CCS/Finished, suite negotiation no match, Finished too short; Transcript: binary data, double replace, fresh hash, update after replace; Key schedule 1.2: server verify_data label, EMS→key block pipeline, deterministic, CCM suite; Cert verify: CN hostname match, multiple trusted certs, wrong trusted cert, callback hostname error; TLS 1.3 client: ALPN in CH, SNI in CH, sig_algs_cert, certificate_authorities; Session: ALPN not serialized, ticket lifetime roundtrip, EMS flag roundtrip, +24 tests, 2194→2218) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

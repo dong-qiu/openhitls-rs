@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,194 tests (40 ignored)
+**Current**: 2,218 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -17,6 +17,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 **Testing-Phase 77**: +13 tests (SniCallback + DTLS abbreviated + PADDING/OID Filters + PskServerCallback integration)
 **Testing-Phase 78**: +22 tests (GREASE + Heartbeat + Async DTLS edge cases + extension codec negative tests)
 **Testing-Phase 79**: +28 tests (DTLS 1.2 handshake + TLS 1.3 server + record layer + PRF unit tests)
+**Testing-Phase 80**: +24 tests (TLCP server + transcript + key_schedule12 + cert_verify + TLS 1.3 client + session)
 
 ---
 
@@ -629,3 +630,84 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2194** | **40** |
+
+---
+
+## Testing-Phase 80 — TLCP Server + Transcript + Key Schedule 1.2 + Cert Verify + TLS 1.3 Client + Session Unit Tests
+
+**Date**: 2026-02-19
+**Tests added**: +24 (2194 → 2218)
+**Build**: `cargo test --workspace --all-features` — all 2218 pass, 40 ignored
+**Clippy**: zero warnings
+**Fmt**: clean
+
+### J1: TLCP Server Handshake Tests (+5, in server_tlcp.rs)
+
+| Test | Description |
+|------|-------------|
+| test_tlcp_server_cke_wrong_state_idle | CKE from Idle → error |
+| test_tlcp_server_ccs_wrong_state_idle | CCS from Idle → error |
+| test_tlcp_server_finished_wrong_state_idle | Finished from Idle → error |
+| test_tlcp_server_negotiate_suite_no_match | No TLCP suites in config → NoSharedCipherSuite |
+| test_tlcp_server_finished_too_short | Finished message < 16 bytes → too short |
+
+### J2: Transcript Hash Tests (+4, in crypt/transcript.rs)
+
+| Test | Description |
+|------|-------------|
+| test_transcript_binary_data | Feed 0..255 bytes, verify against direct SHA-256 |
+| test_transcript_double_replace_message_hash | Double replace_with_message_hash produces different hashes |
+| test_transcript_current_hash_fresh | Fresh transcript current_hash == empty_hash |
+| test_transcript_update_after_replace | Update after replace changes the hash |
+
+### J3: Key Schedule 1.2 Tests (+4, in crypt/key_schedule12.rs)
+
+| Test | Description |
+|------|-------------|
+| test_compute_verify_data_server_label | Server finished label, determinism, different hash |
+| test_ems_then_key_block_derivation | EMS → key block end-to-end pipeline |
+| test_derive_key_block_deterministic | Same inputs → identical key blocks |
+| test_derive_key_block_ccm_suite | AES-128-CCM key block: 16-byte keys, no MAC keys |
+
+### J4: Cert Verify Tests (+4, in cert_verify.rs)
+
+| Test | Description |
+|------|-------------|
+| test_verify_hostname_cn_match_succeeds | CN matches server_name → Ok |
+| test_verify_multiple_trusted_certs | Two trusted certs, one matches → Ok |
+| test_verify_wrong_trusted_cert_fails | Wrong trusted cert → chain error |
+| test_callback_receives_hostname_error | Callback sees hostname_result.is_err() on mismatch |
+
+### J5: TLS 1.3 Client Tests (+4, in handshake/client.rs)
+
+| Test | Description |
+|------|-------------|
+| test_client_hello_has_alpn_when_configured | ALPN extension + "h2" bytes in CH |
+| test_client_hello_has_sni_extension | SNI hostname bytes in CH |
+| test_client_hello_signature_algorithms_cert | sig_algs_cert extension (0x0032) in CH |
+| test_client_hello_certificate_authorities | certificate_authorities extension (0x002F) in CH |
+
+### J6: Session Module Tests (+3, in session/mod.rs)
+
+| Test | Description |
+|------|-------------|
+| test_session_alpn_not_serialized | ALPN not persisted in encode/decode |
+| test_session_ticket_lifetime_roundtrip | ticket_lifetime preserved in encode/decode |
+| test_session_ems_flag_roundtrip | extended_master_secret flag preserved |
+
+### Workspace Test Counts After Testing-Phase 80
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 593 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 113 | 3 |
+| hitls-pki | 336 | 1 |
+| hitls-tls | 881 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2218** | **40** |

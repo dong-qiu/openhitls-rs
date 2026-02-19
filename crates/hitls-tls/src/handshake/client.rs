@@ -1399,4 +1399,83 @@ mod tests {
             s += 2;
         }
     }
+
+    #[test]
+    fn test_client_hello_has_alpn_when_configured() {
+        let config = TlsConfig::builder()
+            .server_name("example.com")
+            .alpn(&[b"h2", b"http/1.1"])
+            .build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // ALPN extension type = 0x0010 (16)
+        let has_alpn = ch_msg.windows(2).any(|w| w[0] == 0x00 && w[1] == 0x10);
+        assert!(has_alpn, "ClientHello must contain ALPN extension (0x0010)");
+
+        // "h2" is 2 bytes, so look for the h2 bytes in the raw message
+        assert!(
+            ch_msg.windows(2).any(|w| w == b"h2"),
+            "ClientHello should contain 'h2' protocol"
+        );
+    }
+
+    #[test]
+    fn test_client_hello_has_sni_extension() {
+        let config = TlsConfig::builder().server_name("test.example.com").build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // SNI extension type = 0x0000 (0)
+        // Check that the hostname bytes appear in the message
+        assert!(
+            ch_msg.windows(16).any(|w| w == b"test.example.com"),
+            "ClientHello should contain server_name 'test.example.com'"
+        );
+    }
+
+    #[test]
+    fn test_client_hello_signature_algorithms_cert() {
+        let config = TlsConfig::builder()
+            .server_name("example.com")
+            .signature_algorithms_cert(&[
+                crate::crypt::SignatureScheme::ECDSA_SECP256R1_SHA256,
+                crate::crypt::SignatureScheme::RSA_PSS_RSAE_SHA256,
+            ])
+            .build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // signature_algorithms_cert extension type = 0x0032 (50)
+        let has_sig_alg_cert = ch_msg.windows(2).any(|w| w[0] == 0x00 && w[1] == 0x32);
+        assert!(
+            has_sig_alg_cert,
+            "ClientHello should contain signature_algorithms_cert (0x0032)"
+        );
+    }
+
+    #[test]
+    fn test_client_hello_certificate_authorities() {
+        use hitls_pki::x509::{CertificateBuilder, DistinguishedName, SigningKey};
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "Test CA".into())],
+        };
+        let ca = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_900_000_000).unwrap();
+
+        let config = TlsConfig::builder()
+            .server_name("example.com")
+            .certificate_authorities(vec![ca.raw])
+            .build();
+        let mut hs = ClientHandshake::new(config);
+        let ch_msg = hs.build_client_hello().unwrap();
+
+        // certificate_authorities extension type = 0x002F (47)
+        let has_ca = ch_msg.windows(2).any(|w| w[0] == 0x00 && w[1] == 0x2F);
+        assert!(
+            has_ca,
+            "ClientHello should contain certificate_authorities (0x002F)"
+        );
+    }
 }
