@@ -140,6 +140,16 @@ impl RecordLayer {
         Ok(())
     }
 
+    /// Set the TLS 1.3 record padding callback on the active encryptor (if any).
+    pub fn set_record_padding_callback(
+        &mut self,
+        cb: std::sync::Arc<dyn Fn(u8, usize) -> usize + Send + Sync>,
+    ) {
+        if let Some(enc) = &mut self.encryptor {
+            enc.set_padding_callback(cb);
+        }
+    }
+
     /// Activate read decryption with the given traffic keys.
     ///
     /// Replaces any existing decryptor (resets sequence number to 0).

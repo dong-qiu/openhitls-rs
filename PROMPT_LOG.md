@@ -1743,3 +1743,21 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - hitls-tls: 793 → 813 (+20 tests); integration: 88 → 94 (+6 tests); total: 2105 → 2131 tests.
 
 2131 total tests (40 ignored). Clippy clean, fmt clean.
+
+## Phase 77: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4 (2026-02-19)
+
+**Prompt**: 开始 Phase 77 — Implement TLS callback framework (7 callbacks: MsgCallback, InfoCallback, RecordPaddingCallback, DhTmpCallback, CookieGenCallback, CookieVerifyCallback, ClientHelloCallback), missing legacy alert codes, and CBC-MAC-SM4.
+
+**Work performed**:
+- TLS Callbacks: 7 callback type aliases + ClientHelloInfo struct + ClientHelloAction enum + config fields + builder methods
+- Record padding callback wired into TLS 1.3 RecordEncryptor encrypt_record()
+- Cookie gen/verify callbacks wired into DTLS 1.2 + DTLCP servers
+- Client hello callback wired into TLS 1.3 + TLS 1.2 servers (after SNI, before cipher selection)
+- Alert codes: 6 legacy codes added (DecryptionFailed, DecompressionFailure, NoCertificateReserved, ExportRestrictionReserved, CertificateUnobtainable, BadCertificateHashValue)
+- CBC-MAC-SM4: New cbc_mac.rs with SM4 block cipher, zero-padding, Zeroize/ZeroizeOnDrop, feature-gated cbc-mac=["sm4"]
+- Files: config/mod.rs, alert/mod.rs, cbc_mac.rs (NEW), lib.rs, Cargo.toml, encryption.rs, record/mod.rs, connection.rs, server.rs, server12.rs, server_dtls12.rs, server_dtlcp.rs
+
+**Result**:
+- hitls-crypto: 593 → 603 (+10 CBC-MAC tests); hitls-tls: 881 → 892 (+11 callback/alert tests); total: 2218 → 2239 tests (rebased on Testing-Phase 80).
+
+2239 total tests (40 ignored). Clippy clean, fmt clean.

@@ -38,6 +38,8 @@ pub mod cipher {
 }
 
 // MAC algorithms
+#[cfg(feature = "cbc-mac")]
+pub mod cbc_mac;
 #[cfg(feature = "cmac")]
 pub mod cmac;
 #[cfg(feature = "gmac")]

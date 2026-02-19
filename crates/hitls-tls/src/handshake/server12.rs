@@ -533,6 +533,30 @@ impl Tls12ServerHandshake {
             }
         }
 
+        // ClientHello callback (server-side observation/processing)
+        if let Some(ref ch_cb) = self.config.client_hello_callback {
+            let info = crate::config::ClientHelloInfo {
+                cipher_suites: ch.cipher_suites.iter().map(|cs| cs.0).collect(),
+                supported_versions: vec![0x0303], // TLS 1.2
+                server_name: self.client_server_name.clone(),
+                alpn_protocols: client_alpn_protocols.clone(),
+            };
+            match ch_cb(&info) {
+                crate::config::ClientHelloAction::Success => {}
+                crate::config::ClientHelloAction::Retry => {
+                    return Err(TlsError::HandshakeFailed(
+                        "client_hello_callback: retry requested".into(),
+                    ));
+                }
+                crate::config::ClientHelloAction::Failed(alert) => {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "client_hello_callback: rejected (alert {})",
+                        alert
+                    )));
+                }
+            }
+        }
+
         // Fallback SCSV (RFC 7507) detection
         if ch.cipher_suites.contains(&CipherSuite::TLS_FALLBACK_SCSV) {
             // If server supports a higher version than TLS 1.2, reject

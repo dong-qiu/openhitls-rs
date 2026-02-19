@@ -32,6 +32,7 @@ sm3 = []
 # MAC algorithms
 hmac = []
 cmac = ["aes"]
+cbc-mac = ["sm4"]
 gmac = ["aes", "modes"]
 siphash = []
 

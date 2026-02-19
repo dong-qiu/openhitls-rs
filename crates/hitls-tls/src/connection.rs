@@ -701,6 +701,10 @@ impl<S: Read + Write> TlsClientConnection<S> {
                             fin_actions.suite,
                             &fin_actions.client_app_keys,
                         )?;
+                        // Wire record padding callback (TLS 1.3)
+                        if let Some(ref cb) = self.config.record_padding_callback {
+                            self.record_layer.set_record_padding_callback(cb.clone());
+                        }
 
                         self.cipher_params = Some(fin_actions.cipher_params);
                         self.client_app_secret = fin_actions.client_app_secret;
@@ -1555,6 +1559,10 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .activate_read_decryption(actions.suite, &actions.client_app_keys)?;
         self.record_layer
             .activate_write_encryption(actions.suite, &actions.server_app_keys)?;
+        // Wire record padding callback (TLS 1.3)
+        if let Some(ref cb) = self.config.record_padding_callback {
+            self.record_layer.set_record_padding_callback(cb.clone());
+        }
 
         // Step 9: Send NewSessionTicket(s) if generated
         for nst_msg in &fin_actions.new_session_ticket_msgs {

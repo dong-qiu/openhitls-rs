@@ -1,5 +1,83 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 77: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4
+
+### Date: 2026-02-19
+
+### Summary
+
+Implemented three features:
+1. **TLS Callback Framework** — 7 new callback types (`MsgCallback`, `InfoCallback`, `RecordPaddingCallback`, `DhTmpCallback`, `CookieGenCallback`, `CookieVerifyCallback`, `ClientHelloCallback`) with `ClientHelloInfo` struct and `ClientHelloAction` enum. All callbacks use `Arc<dyn Fn(...) + Send + Sync>` pattern. Wired `record_padding_cb` into TLS 1.3 `RecordEncryptor`, `cookie_gen/verify_callback` into DTLS 1.2/DTLCP servers, `client_hello_callback` into TLS 1.3/1.2 servers.
+2. **Missing Legacy Alert Codes** — Added 6 legacy/deprecated alert codes to `AlertDescription`: `DecryptionFailed(21)`, `DecompressionFailure(30)`, `NoCertificateReserved(41)`, `ExportRestrictionReserved(60)`, `CertificateUnobtainable(111)`, `BadCertificateHashValue(114)`. Updated `from_u8()` and tests (28→34 variants).
+3. **CBC-MAC-SM4** — New `CbcMacSm4` implementation using SM4 block cipher with zero-padding. Feature-gated behind `cbc-mac = ["sm4"]`. Implements `new(key)`, `update(data)`, `finish(out)`, `reset()` API pattern. Derives `Zeroize`/`ZeroizeOnDrop`.
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/config/mod.rs`** — 7 callback type aliases + `ClientHelloInfo` struct + `ClientHelloAction` enum + 7 config fields + 7 builder methods + Debug impl entries + 10 tests
+2. **`crates/hitls-tls/src/alert/mod.rs`** — 6 new alert codes + updated `from_u8()` + updated tests (34 variants) + `test_legacy_alert_codes` test
+3. **`crates/hitls-crypto/src/cbc_mac.rs`** — NEW: CBC-MAC-SM4 implementation with 10 unit tests
+4. **`crates/hitls-crypto/src/lib.rs`** — Registered `cbc_mac` module under `#[cfg(feature = "cbc-mac")]`
+5. **`crates/hitls-crypto/Cargo.toml`** — Added `cbc-mac = ["sm4"]` feature flag
+6. **`crates/hitls-tls/src/record/encryption.rs`** — Added `padding_cb` field to `RecordEncryptor`, `set_padding_callback()` method, invocation in `encrypt_record()`
+7. **`crates/hitls-tls/src/record/mod.rs`** — Added `set_record_padding_callback()` on `RecordLayer`
+8. **`crates/hitls-tls/src/connection.rs`** — Wired `record_padding_callback` from config at 2 app key activation points (client + server)
+9. **`crates/hitls-tls/src/handshake/server.rs`** — Wired `client_hello_callback` into TLS 1.3 server after SNI
+10. **`crates/hitls-tls/src/handshake/server12.rs`** — Wired `client_hello_callback` into TLS 1.2 server after SNI
+11. **`crates/hitls-tls/src/handshake/server_dtls12.rs`** — Wired `cookie_gen_callback`/`cookie_verify_callback` into DTLS 1.2 server
+12. **`crates/hitls-tls/src/handshake/server_dtlcp.rs`** — Wired `cookie_gen_callback`/`cookie_verify_callback` into DTLCP server
+
+### Implementation Details
+
+- **Callback signatures** match C openHiTLS typedefs (`HITLS_MsgCb`, `HITLS_InfoCb`, etc.) adapted to Rust idioms
+- **MsgCallback**: `fn(is_write: bool, content_type: u16, version: u8, data: &[u8])` — observes all protocol messages
+- **InfoCallback**: `fn(event_type: i32, value: i32)` — state change/alert notifications
+- **RecordPaddingCallback**: `fn(content_type: u8, plaintext_len: usize) -> usize` — returns padding length for TLS 1.3 records
+- **DhTmpCallback**: `fn(is_export: bool, key_length: u32) -> Option<Vec<u8>>` — dynamic DH parameter generation
+- **CookieGenCallback**: `fn(client_hello_hash: &[u8]) -> Vec<u8>` — custom DTLS cookie generation
+- **CookieVerifyCallback**: `fn(cookie: &[u8], client_hello_hash: &[u8]) -> bool` — custom DTLS cookie verification
+- **ClientHelloCallback**: `fn(&ClientHelloInfo) -> ClientHelloAction` — observe/control ClientHello processing (Success/Retry/Failed)
+- **CBC-MAC algorithm**: state = E_K(state XOR block), zero-padding for final incomplete block, 16-byte output
+- Cookie callbacks fall back to default HMAC-SHA256 when not configured
+- client_hello_callback placed after SNI callback but before cipher suite selection
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_config_msg_callback | config/mod.rs |
+| 2 | test_config_info_callback | config/mod.rs |
+| 3 | test_config_record_padding_callback | config/mod.rs |
+| 4 | test_config_dh_tmp_callback | config/mod.rs |
+| 5 | test_config_cookie_gen_callback | config/mod.rs |
+| 6 | test_config_cookie_verify_callback | config/mod.rs |
+| 7 | test_config_client_hello_callback | config/mod.rs |
+| 8 | test_config_callbacks_default_none | config/mod.rs |
+| 9 | test_client_hello_info_debug | config/mod.rs |
+| 10 | test_client_hello_action_variants | config/mod.rs |
+| 11 | test_alert_description_all_34_variants | alert/mod.rs |
+| 12 | test_legacy_alert_codes | alert/mod.rs |
+| 13 | test_cbc_mac_sm4_single_block | cbc_mac.rs |
+| 14 | test_cbc_mac_sm4_empty_message | cbc_mac.rs |
+| 15 | test_cbc_mac_sm4_multi_block | cbc_mac.rs |
+| 16 | test_cbc_mac_sm4_partial_block | cbc_mac.rs |
+| 17 | test_cbc_mac_sm4_incremental_update | cbc_mac.rs |
+| 18 | test_cbc_mac_sm4_reset | cbc_mac.rs |
+| 19 | test_cbc_mac_sm4_invalid_key_length | cbc_mac.rs |
+| 20 | test_cbc_mac_sm4_output_size | cbc_mac.rs |
+| 21 | test_cbc_mac_sm4_buffer_too_small | cbc_mac.rs |
+| 22 | test_cbc_mac_sm4_deterministic | cbc_mac.rs |
+
++21 tests (2218 → 2239)
+
+Note: Phase 77 was applied on top of Testing-Phase 80 (2218 tests). The +21 count reflects the net new tests added by Phase 77 features (10 CBC-MAC + 10 config callbacks + 1 alert test). Some existing tests were also updated (e.g., alert variant count 28→34).
+
+### Build Status
+- `cargo test --workspace --all-features`: 2239 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase 76: Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701)
 
 ### Date: 2026-02-18

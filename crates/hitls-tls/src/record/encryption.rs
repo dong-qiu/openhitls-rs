@@ -108,6 +108,8 @@ pub struct RecordEncryptor {
     iv: Vec<u8>,
     seq: u64,
     tag_len: usize,
+    /// Optional record padding callback: (content_type, plaintext_len) -> padding_len.
+    padding_cb: Option<std::sync::Arc<dyn Fn(u8, usize) -> usize + Send + Sync>>,
 }
 
 impl Drop for RecordEncryptor {
@@ -126,7 +128,16 @@ impl RecordEncryptor {
             iv: keys.iv.clone(),
             seq: 0,
             tag_len,
+            padding_cb: None,
         })
+    }
+
+    /// Set the record padding callback for TLS 1.3 records.
+    pub fn set_padding_callback(
+        &mut self,
+        cb: std::sync::Arc<dyn Fn(u8, usize) -> usize + Send + Sync>,
+    ) {
+        self.padding_cb = Some(cb);
     }
 
     /// Encrypt a plaintext record into a TLS 1.3 ciphertext record.
@@ -144,7 +155,13 @@ impl RecordEncryptor {
             ));
         }
 
-        let mut inner = build_inner_plaintext(content_type, plaintext, 0)?;
+        // Compute padding via callback (if set), otherwise 0
+        let padding_len = self
+            .padding_cb
+            .as_ref()
+            .map(|cb| cb(content_type as u8, plaintext.len()))
+            .unwrap_or(0);
+        let mut inner = build_inner_plaintext(content_type, plaintext, padding_len)?;
         let ciphertext_len = inner.len() + self.tag_len;
 
         if ciphertext_len > MAX_CIPHERTEXT_LENGTH {

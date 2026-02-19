@@ -240,7 +240,7 @@ impl Dtls12ServerHandshake {
                 }));
             }
             // Has cookie — verify it
-            if cookie != self.expected_cookie {
+            if !self.verify_cookie(&ch, &cookie) {
                 return Err(TlsError::HandshakeFailed("cookie mismatch".into()));
             }
         }
@@ -290,7 +290,7 @@ impl Dtls12ServerHandshake {
         self.client_random = ch.random;
 
         // Verify cookie
-        if cookie != self.expected_cookie {
+        if !self.verify_cookie(&ch, &cookie) {
             return Err(TlsError::HandshakeFailed("cookie mismatch".into()));
         }
 
@@ -694,8 +694,14 @@ impl Dtls12ServerHandshake {
 
     /// Compute a cookie from the ClientHello fields.
     ///
-    /// Uses HMAC-SHA256(cookie_secret, client_random || cipher_suites_hash).
+    /// If a `cookie_gen_callback` is set in config, delegates to it.
+    /// Otherwise uses HMAC-SHA256(cookie_secret, client_random || cipher_suites_hash).
     fn compute_cookie(&self, ch: &ClientHello) -> Vec<u8> {
+        // Use cookie_gen_callback if configured
+        if let Some(ref cb) = self.config.cookie_gen_callback {
+            return cb(&ch.random);
+        }
+
         use hitls_crypto::hmac::Hmac;
         use hitls_crypto::sha2::Sha256 as S256;
 
@@ -718,6 +724,17 @@ impl Dtls12ServerHandshake {
         // Truncate to 16 bytes for cookie (sufficient for DoS protection)
         out.truncate(16);
         out
+    }
+
+    /// Verify a cookie from the ClientHello.
+    ///
+    /// If a `cookie_verify_callback` is set in config, delegates to it.
+    /// Otherwise compares against the expected cookie.
+    fn verify_cookie(&self, ch: &ClientHello, cookie: &[u8]) -> bool {
+        if let Some(ref cb) = self.config.cookie_verify_callback {
+            return cb(&ch.random, cookie);
+        }
+        cookie == self.expected_cookie
     }
 }
 

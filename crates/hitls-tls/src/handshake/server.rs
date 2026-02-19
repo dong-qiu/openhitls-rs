@@ -505,6 +505,30 @@ impl ServerHandshake {
             }
         }
 
+        // ClientHello callback (server-side observation/processing)
+        if let Some(ref ch_cb) = self.config.client_hello_callback {
+            let info = crate::config::ClientHelloInfo {
+                cipher_suites: ch.cipher_suites.iter().map(|cs| cs.0).collect(),
+                supported_versions: versions.clone(),
+                server_name: self.client_server_name.clone(),
+                alpn_protocols: Vec::new(),
+            };
+            match ch_cb(&info) {
+                crate::config::ClientHelloAction::Success => {}
+                crate::config::ClientHelloAction::Retry => {
+                    return Err(TlsError::HandshakeFailed(
+                        "client_hello_callback: retry requested".into(),
+                    ));
+                }
+                crate::config::ClientHelloAction::Failed(alert) => {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "client_hello_callback: rejected (alert {})",
+                        alert
+                    )));
+                }
+            }
+        }
+
         // --- Select cipher suite ---
         let suite = if self.config.cipher_server_preference {
             // Server preference (default)

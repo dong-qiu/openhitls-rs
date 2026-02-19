@@ -94,6 +94,81 @@ impl Drop for ServerPrivateKey {
 /// Server callback for PSK lookup: given a PSK identity, return the PSK value or None.
 pub type PskServerCallback = Arc<dyn Fn(&[u8]) -> Option<Vec<u8>> + Send + Sync>;
 
+/// Protocol message observation callback (debugging/auditing).
+///
+/// Called for every TLS protocol message sent or received.
+/// Parameters: `(is_outgoing, tls_version, content_type, message_bytes)`.
+/// - `is_outgoing`: true when sending, false when receiving
+/// - `tls_version`: TLS version as u16 (e.g. 0x0303 for TLS 1.2)
+/// - `content_type`: record content type (20=CCS, 21=alert, 22=handshake, 23=application)
+/// - `message_bytes`: raw message payload
+pub type MsgCallback = Arc<dyn Fn(bool, u16, u8, &[u8]) + Send + Sync>;
+
+/// State change / alert notification callback.
+///
+/// Called on handshake state transitions and alert events.
+/// Parameters: `(event_type, value)`.
+/// Event types: handshake state changes, alert notifications, etc.
+pub type InfoCallback = Arc<dyn Fn(i32, i32) + Send + Sync>;
+
+/// TLS 1.3 record padding callback.
+///
+/// Called before encrypting a TLS 1.3 record to determine additional padding.
+/// Parameters: `(content_type, plaintext_length)`.
+/// Returns: desired total padding length (0 = no extra padding).
+pub type RecordPaddingCallback = Arc<dyn Fn(u8, usize) -> usize + Send + Sync>;
+
+/// Temporary DH key generation callback.
+///
+/// Called on server to generate ephemeral DH parameters.
+/// Parameters: `(is_export, key_bits)`.
+/// Returns: DH parameters as DER bytes, or None to use defaults.
+pub type DhTmpCallback = Arc<dyn Fn(bool, u32) -> Option<Vec<u8>> + Send + Sync>;
+
+/// DTLS cookie generation callback.
+///
+/// Called on DTLS server to generate a HelloVerifyRequest cookie.
+/// Parameters: `(client_hello_data)` — opaque client identification data.
+/// Returns: generated cookie bytes.
+pub type CookieGenCallback = Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;
+
+/// DTLS cookie verification callback.
+///
+/// Called on DTLS server to verify a cookie from the client's second ClientHello.
+/// Parameters: `(client_hello_data, cookie)`.
+/// Returns: true if cookie is valid.
+pub type CookieVerifyCallback = Arc<dyn Fn(&[u8], &[u8]) -> bool + Send + Sync>;
+
+/// Information extracted from a ClientHello message for the callback.
+#[derive(Debug, Clone)]
+pub struct ClientHelloInfo {
+    /// Client-offered cipher suites.
+    pub cipher_suites: Vec<u16>,
+    /// Client-offered TLS versions.
+    pub supported_versions: Vec<u16>,
+    /// Server name from SNI extension, if present.
+    pub server_name: Option<String>,
+    /// Client-offered ALPN protocols.
+    pub alpn_protocols: Vec<Vec<u8>>,
+}
+
+/// Action to take after the ClientHello callback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClientHelloAction {
+    /// Continue the handshake normally.
+    Success,
+    /// Suspend the handshake (e.g., for async processing).
+    Retry,
+    /// Abort the handshake and send the specified alert.
+    Failed(u8),
+}
+
+/// ClientHello observation/processing callback (server-side).
+///
+/// Called when the server receives a ClientHello, before continuing the handshake.
+/// Returns an action: continue, retry (suspend), or fail (abort with alert).
+pub type ClientHelloCallback = Arc<dyn Fn(&ClientHelloInfo) -> ClientHelloAction + Send + Sync>;
+
 /// Callback for NSS key log format output (SSLKEYLOGFILE-compatible).
 ///
 /// Called with a pre-formatted line: `<label> <client_random_hex> <secret_hex>`.
@@ -249,6 +324,20 @@ pub struct TlsConfig {
     /// When true, injects random GREASE values into cipher suites, extensions,
     /// supported_versions, supported_groups, signature_algorithms, key_share.
     pub grease: bool,
+    /// Protocol message observation callback (debugging/auditing).
+    pub msg_callback: Option<MsgCallback>,
+    /// State change / alert notification callback.
+    pub info_callback: Option<InfoCallback>,
+    /// TLS 1.3 record padding callback.
+    pub record_padding_callback: Option<RecordPaddingCallback>,
+    /// Temporary DH key generation callback (server-side).
+    pub dh_tmp_callback: Option<DhTmpCallback>,
+    /// DTLS cookie generation callback (server-side).
+    pub cookie_gen_callback: Option<CookieGenCallback>,
+    /// DTLS cookie verification callback (server-side).
+    pub cookie_verify_callback: Option<CookieVerifyCallback>,
+    /// ClientHello observation/processing callback (server-side).
+    pub client_hello_callback: Option<ClientHelloCallback>,
 }
 
 impl fmt::Debug for TlsConfig {
@@ -286,6 +375,34 @@ impl fmt::Debug for TlsConfig {
                 &self.session_cache.as_ref().map(|_| "<cache>"),
             )
             .field("cipher_server_preference", &self.cipher_server_preference)
+            .field(
+                "msg_callback",
+                &self.msg_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "info_callback",
+                &self.info_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "record_padding_callback",
+                &self.record_padding_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "dh_tmp_callback",
+                &self.dh_tmp_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "cookie_gen_callback",
+                &self.cookie_gen_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "cookie_verify_callback",
+                &self.cookie_verify_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "client_hello_callback",
+                &self.client_hello_callback.as_ref().map(|_| "<callback>"),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -352,6 +469,13 @@ pub struct TlsConfigBuilder {
     oid_filters: Vec<(Vec<u8>, Vec<u8>)>,
     heartbeat_mode: u8,
     grease: bool,
+    msg_callback: Option<MsgCallback>,
+    info_callback: Option<InfoCallback>,
+    record_padding_callback: Option<RecordPaddingCallback>,
+    dh_tmp_callback: Option<DhTmpCallback>,
+    cookie_gen_callback: Option<CookieGenCallback>,
+    cookie_verify_callback: Option<CookieVerifyCallback>,
+    client_hello_callback: Option<ClientHelloCallback>,
 }
 
 impl Default for TlsConfigBuilder {
@@ -418,6 +542,13 @@ impl Default for TlsConfigBuilder {
             oid_filters: Vec::new(),
             heartbeat_mode: 0,
             grease: false,
+            msg_callback: None,
+            info_callback: None,
+            record_padding_callback: None,
+            dh_tmp_callback: None,
+            cookie_gen_callback: None,
+            cookie_verify_callback: None,
+            client_hello_callback: None,
         }
     }
 }
@@ -689,6 +820,41 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn msg_callback(mut self, cb: MsgCallback) -> Self {
+        self.msg_callback = Some(cb);
+        self
+    }
+
+    pub fn info_callback(mut self, cb: InfoCallback) -> Self {
+        self.info_callback = Some(cb);
+        self
+    }
+
+    pub fn record_padding_callback(mut self, cb: RecordPaddingCallback) -> Self {
+        self.record_padding_callback = Some(cb);
+        self
+    }
+
+    pub fn dh_tmp_callback(mut self, cb: DhTmpCallback) -> Self {
+        self.dh_tmp_callback = Some(cb);
+        self
+    }
+
+    pub fn cookie_gen_callback(mut self, cb: CookieGenCallback) -> Self {
+        self.cookie_gen_callback = Some(cb);
+        self
+    }
+
+    pub fn cookie_verify_callback(mut self, cb: CookieVerifyCallback) -> Self {
+        self.cookie_verify_callback = Some(cb);
+        self
+    }
+
+    pub fn client_hello_callback(mut self, cb: ClientHelloCallback) -> Self {
+        self.client_hello_callback = Some(cb);
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -744,6 +910,13 @@ impl TlsConfigBuilder {
             oid_filters: self.oid_filters,
             heartbeat_mode: self.heartbeat_mode,
             grease: self.grease,
+            msg_callback: self.msg_callback,
+            info_callback: self.info_callback,
+            record_padding_callback: self.record_padding_callback,
+            dh_tmp_callback: self.dh_tmp_callback,
+            cookie_gen_callback: self.cookie_gen_callback,
+            cookie_verify_callback: self.cookie_verify_callback,
+            client_hello_callback: self.client_hello_callback,
         }
     }
 }
@@ -1249,5 +1422,172 @@ mod tests {
             s.contains("cert_verify_callback"),
             "debug should include cert_verify_callback field"
         );
+    }
+
+    // -------------------------------------------------------
+    // Phase 77 — F1: 7 TLS callback config tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_config_msg_callback() {
+        use std::sync::{Arc, Mutex};
+        let log = Arc::new(Mutex::new(Vec::<(bool, u16, u8, Vec<u8>)>::new()));
+        let l = log.clone();
+        let cb: MsgCallback = Arc::new(move |out, ver, ct, data| {
+            l.lock().unwrap().push((out, ver, ct, data.to_vec()));
+        });
+        let config = TlsConfig::builder().msg_callback(cb).build();
+        assert!(config.msg_callback.is_some());
+        // Invoke
+        (config.msg_callback.as_ref().unwrap())(true, 0x0303, 22, &[1, 2, 3]);
+        let entries = log.lock().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0], (true, 0x0303, 22, vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn test_config_info_callback() {
+        use std::sync::{Arc, Mutex};
+        let events = Arc::new(Mutex::new(Vec::<(i32, i32)>::new()));
+        let e = events.clone();
+        let cb: InfoCallback = Arc::new(move |event_type, value| {
+            e.lock().unwrap().push((event_type, value));
+        });
+        let config = TlsConfig::builder().info_callback(cb).build();
+        assert!(config.info_callback.is_some());
+        (config.info_callback.as_ref().unwrap())(1, 42);
+        assert_eq!(events.lock().unwrap().as_slice(), &[(1, 42)]);
+    }
+
+    #[test]
+    fn test_config_record_padding_callback() {
+        let cb: RecordPaddingCallback = Arc::new(|_ct, len| {
+            // Pad to next multiple of 256
+            let pad = 256 - (len % 256);
+            if pad == 256 {
+                0
+            } else {
+                pad
+            }
+        });
+        let config = TlsConfig::builder().record_padding_callback(cb).build();
+        assert!(config.record_padding_callback.is_some());
+        let padding = (config.record_padding_callback.as_ref().unwrap())(23, 100);
+        assert_eq!(padding, 156); // 256 - 100
+    }
+
+    #[test]
+    fn test_config_dh_tmp_callback() {
+        let cb: DhTmpCallback = Arc::new(|is_export, key_bits| {
+            if is_export {
+                None
+            } else {
+                Some(vec![0xAA; (key_bits / 8) as usize])
+            }
+        });
+        let config = TlsConfig::builder().dh_tmp_callback(cb).build();
+        assert!(config.dh_tmp_callback.is_some());
+        let result = (config.dh_tmp_callback.as_ref().unwrap())(false, 2048);
+        assert_eq!(result.unwrap().len(), 256);
+        let result2 = (config.dh_tmp_callback.as_ref().unwrap())(true, 512);
+        assert!(result2.is_none());
+    }
+
+    #[test]
+    fn test_config_cookie_gen_callback() {
+        let cb: CookieGenCallback = Arc::new(|client_data| {
+            let mut cookie = vec![0xFF; 32];
+            for (i, &b) in client_data.iter().take(32).enumerate() {
+                cookie[i] ^= b;
+            }
+            cookie
+        });
+        let config = TlsConfig::builder().cookie_gen_callback(cb).build();
+        assert!(config.cookie_gen_callback.is_some());
+        let cookie = (config.cookie_gen_callback.as_ref().unwrap())(&[0x42; 10]);
+        assert_eq!(cookie.len(), 32);
+    }
+
+    #[test]
+    fn test_config_cookie_verify_callback() {
+        let cb: CookieVerifyCallback =
+            Arc::new(|_client_data, cookie| cookie.len() == 32 && cookie[0] != 0);
+        let config = TlsConfig::builder().cookie_verify_callback(cb).build();
+        assert!(config.cookie_verify_callback.is_some());
+        assert!((config.cookie_verify_callback.as_ref().unwrap())(
+            &[],
+            &[1u8; 32]
+        ));
+        assert!(!(config.cookie_verify_callback.as_ref().unwrap())(
+            &[],
+            &[0u8; 32]
+        ));
+    }
+
+    #[test]
+    fn test_config_client_hello_callback() {
+        let cb: ClientHelloCallback = Arc::new(|info| {
+            if info.server_name.as_deref() == Some("blocked.com") {
+                ClientHelloAction::Failed(112) // unrecognized_name
+            } else {
+                ClientHelloAction::Success
+            }
+        });
+        let config = TlsConfig::builder().client_hello_callback(cb).build();
+        assert!(config.client_hello_callback.is_some());
+        let info_ok = ClientHelloInfo {
+            cipher_suites: vec![0x1301],
+            supported_versions: vec![0x0304],
+            server_name: Some("example.com".to_string()),
+            alpn_protocols: vec![],
+        };
+        assert_eq!(
+            (config.client_hello_callback.as_ref().unwrap())(&info_ok),
+            ClientHelloAction::Success
+        );
+        let info_bad = ClientHelloInfo {
+            cipher_suites: vec![0x1301],
+            supported_versions: vec![0x0304],
+            server_name: Some("blocked.com".to_string()),
+            alpn_protocols: vec![],
+        };
+        assert_eq!(
+            (config.client_hello_callback.as_ref().unwrap())(&info_bad),
+            ClientHelloAction::Failed(112)
+        );
+    }
+
+    #[test]
+    fn test_config_callbacks_default_none() {
+        let config = TlsConfig::builder().build();
+        assert!(config.msg_callback.is_none());
+        assert!(config.info_callback.is_none());
+        assert!(config.record_padding_callback.is_none());
+        assert!(config.dh_tmp_callback.is_none());
+        assert!(config.cookie_gen_callback.is_none());
+        assert!(config.cookie_verify_callback.is_none());
+        assert!(config.client_hello_callback.is_none());
+    }
+
+    #[test]
+    fn test_client_hello_info_debug() {
+        let info = ClientHelloInfo {
+            cipher_suites: vec![0x1301, 0x1302],
+            supported_versions: vec![0x0304],
+            server_name: Some("test.com".to_string()),
+            alpn_protocols: vec![b"h2".to_vec()],
+        };
+        let s = format!("{info:?}");
+        assert!(s.contains("test.com"));
+        assert!(s.contains("ClientHelloInfo"));
+    }
+
+    #[test]
+    fn test_client_hello_action_variants() {
+        assert_eq!(ClientHelloAction::Success, ClientHelloAction::Success);
+        assert_eq!(ClientHelloAction::Retry, ClientHelloAction::Retry);
+        assert_eq!(ClientHelloAction::Failed(80), ClientHelloAction::Failed(80));
+        assert_ne!(ClientHelloAction::Success, ClientHelloAction::Retry);
+        assert_ne!(ClientHelloAction::Failed(80), ClientHelloAction::Failed(90));
     }
 }
