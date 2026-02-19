@@ -598,4 +598,52 @@ mod tests {
         assert_eq!(hs.state(), DtlcpServerState::Idle);
         assert!(!hs.enable_cookie);
     }
+
+    #[test]
+    fn test_dtlcp_server_cke_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = DtlcpServerHandshake::new(config, false);
+        let fake_msg = vec![0u8; 20];
+        let result = hs.process_client_key_exchange(&fake_msg);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dtlcp_server_ccs_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = DtlcpServerHandshake::new(config, false);
+        let result = hs.process_change_cipher_spec();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dtlcp_server_finished_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = DtlcpServerHandshake::new(config, false);
+        let fake_msg = vec![0u8; 20];
+        let result = hs.process_finished(&fake_msg);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dtlcp_server_ch_with_cookie_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = DtlcpServerHandshake::new(config, false);
+        let fake_msg = vec![0u8; 20];
+        let result = hs.process_client_hello_with_cookie(&fake_msg);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dtlcp_server_dtls_get_body_too_short() {
+        // Less than 12 bytes should fail
+        let short_msg = vec![0u8; 10];
+        let result = dtls_get_body(&short_msg);
+        assert!(result.is_err());
+
+        // Exactly 12 bytes → empty body
+        let exact_msg = vec![0u8; 12];
+        let body = dtls_get_body(&exact_msg).unwrap();
+        assert!(body.is_empty());
+    }
 }

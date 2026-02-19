@@ -2284,4 +2284,101 @@ mod tests {
         // Second take returns None
         assert!(client.take_session().is_none());
     }
+
+    #[tokio::test]
+    async fn test_async_tls12_client_accessors_before_handshake() {
+        let (client_config, _) = make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (client_stream, _) = tokio::io::duplex(16 * 1024);
+        let conn = AsyncTls12ClientConnection::new(client_stream, client_config);
+
+        assert!(conn.connection_info().is_none());
+        assert!(conn.peer_certificates().is_empty());
+        assert!(conn.alpn_protocol().is_none());
+        assert!(conn.server_name().is_none());
+        assert!(conn.negotiated_group().is_none());
+        assert!(!conn.is_session_resumed());
+        assert!(conn.peer_verify_data().is_empty());
+        assert!(conn.local_verify_data().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_server_accessors_before_handshake() {
+        let (_, server_config) = make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (_, server_stream) = tokio::io::duplex(16 * 1024);
+        let conn = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        assert!(conn.connection_info().is_none());
+        assert!(conn.peer_certificates().is_empty());
+        assert!(conn.alpn_protocol().is_none());
+        assert!(conn.server_name().is_none());
+        assert!(conn.negotiated_group().is_none());
+        assert!(!conn.is_session_resumed());
+        assert!(conn.peer_verify_data().is_empty());
+        assert!(conn.local_verify_data().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_connection_info_after_handshake() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        let info = client.connection_info().unwrap();
+        assert_eq!(info.cipher_suite, suite);
+        assert!(!info.session_resumed);
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_large_payload() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(128 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        let data = vec![0xABu8; 32 * 1024];
+        client.write(&data).await.unwrap();
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut total = 0;
+        while total < data.len() {
+            let n = server.read(&mut buf[total..]).await.unwrap();
+            assert!(n > 0);
+            total += n;
+        }
+        assert_eq!(&buf[..total], &data[..]);
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_cbc_cipher_suite() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        assert_eq!(client.cipher_suite(), Some(suite));
+
+        let msg = b"CBC cipher suite test";
+        client.write(msg).await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = server.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg);
+    }
 }

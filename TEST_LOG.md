@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,420 tests (40 ignored)
+**Current**: 2,445 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -1089,3 +1089,56 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2420** | **40** |
+
+## Testing-Phase 87: connection12_async/server_dtlcp/client_dtlcp/encryption_dtlcp/lib.rs Unit Tests
+
+**Date**: 2026-02-20
+**Scope**: Async TLS 1.2 accessors + handshake, DTLCP client+server wrong-state, DTLCP record encryption edge cases, core enum tests
+**Tests Added**: +25 (2420 → 2445)
+
+### Test Details
+
+| # | Module | Test Name | Description |
+|---|--------|-----------|-------------|
+| 1 | connection12_async.rs | test_async_tls12_client_accessors_before_handshake | All client accessors return defaults before handshake |
+| 2 | connection12_async.rs | test_async_tls12_server_accessors_before_handshake | All server accessors return defaults before handshake |
+| 3 | connection12_async.rs | test_async_tls12_connection_info_after_handshake | ConnectionInfo populated after handshake |
+| 4 | connection12_async.rs | test_async_tls12_large_payload | 32KB payload exchange over async TLS 1.2 |
+| 5 | connection12_async.rs | test_async_tls12_cbc_cipher_suite | CBC cipher suite handshake + data exchange |
+| 6 | server_dtlcp.rs | test_dtlcp_server_cke_wrong_state_idle | CKE from Idle → error |
+| 7 | server_dtlcp.rs | test_dtlcp_server_ccs_wrong_state_idle | CCS from Idle → error |
+| 8 | server_dtlcp.rs | test_dtlcp_server_finished_wrong_state_idle | Finished from Idle → error |
+| 9 | server_dtlcp.rs | test_dtlcp_server_ch_with_cookie_wrong_state | CH-with-cookie from wrong state → error |
+| 10 | server_dtlcp.rs | test_dtlcp_server_dtls_get_body_too_short | <12 bytes → error, 12 bytes → empty body |
+| 11 | client_dtlcp.rs | test_dtlcp_client_no_tlcp_suites_error | No TLCP suites → build_client_hello fails |
+| 12 | client_dtlcp.rs | test_dtlcp_client_ccs_wrong_state_idle | CCS from Idle → error |
+| 13 | client_dtlcp.rs | test_dtlcp_client_finished_wrong_state_idle | Finished from Idle → error |
+| 14 | client_dtlcp.rs | test_dtlcp_client_server_hello_wrong_state_idle | ServerHello from Idle → error |
+| 15 | client_dtlcp.rs | test_dtlcp_client_dtls_get_body_too_short | <12 bytes → error, 12 bytes → empty body |
+| 16 | encryption_dtlcp.rs | test_dtlcp_gcm_record_too_short | GCM fragment < nonce+tag → error |
+| 17 | encryption_dtlcp.rs | test_dtlcp_cbc_record_too_short | CBC fragment < IV+3blocks → error |
+| 18 | encryption_dtlcp.rs | test_dtlcp_cbc_not_block_aligned | Non-block-aligned ciphertext → error |
+| 19 | encryption_dtlcp.rs | test_dtlcp_gcm_different_epochs | Different epochs produce different ciphertexts |
+| 20 | encryption_dtlcp.rs | test_dtlcp_dispatch_cbc_variant | CBC dispatch enum encrypt+decrypt roundtrip |
+| 21 | lib.rs | test_tls_version_debug_and_clone | TlsVersion Debug + Copy semantics |
+| 22 | lib.rs | test_tls_version_all_variants_distinct | All 5 TlsVersion variants are distinct |
+| 23 | lib.rs | test_cipher_suite_tls13_constants | TLS 1.3 cipher suite code values |
+| 24 | lib.rs | test_cipher_suite_hash_and_eq | HashSet deduplication works |
+| 25 | lib.rs | test_cipher_suite_fallback_scsv | TLS_FALLBACK_SCSV = 0x5600 |
+
+### Workspace Test Counts After Testing-Phase 87
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 603 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 122 | 3 |
+| hitls-pki | 341 | 1 |
+| hitls-tls | 1084 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2445** | **40** |
