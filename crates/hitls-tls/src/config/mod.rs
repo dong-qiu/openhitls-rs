@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use crate::crypt::{NamedGroup, SignatureScheme};
 use crate::extensions::CustomExtension;
 use crate::handshake::codec::CertCompressionAlgorithm;
+use crate::handshake::extensions_codec::TrustedAuthority;
 use crate::session::{SessionCache, TlsSession};
 use crate::{CipherSuite, TlsRole, TlsVersion};
 use hitls_types::EccCurveId;
@@ -324,6 +325,14 @@ pub struct TlsConfig {
     /// When true, injects random GREASE values into cipher suites, extensions,
     /// supported_versions, supported_groups, signature_algorithms, key_share.
     pub grease: bool,
+    /// Trusted CA keys for ClientHello (RFC 6066 §6).
+    /// Empty = not sent.
+    pub trusted_ca_keys: Vec<TrustedAuthority>,
+    /// SRTP protection profiles for USE_SRTP extension (RFC 5764).
+    /// Empty = not sent.
+    pub srtp_profiles: Vec<u16>,
+    /// Enable OCSP multi-stapling via STATUS_REQUEST_V2 (RFC 6961).
+    pub enable_ocsp_multi_stapling: bool,
     /// Protocol message observation callback (debugging/auditing).
     pub msg_callback: Option<MsgCallback>,
     /// State change / alert notification callback.
@@ -469,6 +478,9 @@ pub struct TlsConfigBuilder {
     oid_filters: Vec<(Vec<u8>, Vec<u8>)>,
     heartbeat_mode: u8,
     grease: bool,
+    trusted_ca_keys: Vec<TrustedAuthority>,
+    srtp_profiles: Vec<u16>,
+    enable_ocsp_multi_stapling: bool,
     msg_callback: Option<MsgCallback>,
     info_callback: Option<InfoCallback>,
     record_padding_callback: Option<RecordPaddingCallback>,
@@ -542,6 +554,9 @@ impl Default for TlsConfigBuilder {
             oid_filters: Vec::new(),
             heartbeat_mode: 0,
             grease: false,
+            trusted_ca_keys: Vec::new(),
+            srtp_profiles: Vec::new(),
+            enable_ocsp_multi_stapling: false,
             msg_callback: None,
             info_callback: None,
             record_padding_callback: None,
@@ -820,6 +835,21 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn trusted_ca_keys(mut self, authorities: Vec<TrustedAuthority>) -> Self {
+        self.trusted_ca_keys = authorities;
+        self
+    }
+
+    pub fn srtp_profiles(mut self, profiles: Vec<u16>) -> Self {
+        self.srtp_profiles = profiles;
+        self
+    }
+
+    pub fn enable_ocsp_multi_stapling(mut self, enabled: bool) -> Self {
+        self.enable_ocsp_multi_stapling = enabled;
+        self
+    }
+
     pub fn msg_callback(mut self, cb: MsgCallback) -> Self {
         self.msg_callback = Some(cb);
         self
@@ -910,6 +940,9 @@ impl TlsConfigBuilder {
             oid_filters: self.oid_filters,
             heartbeat_mode: self.heartbeat_mode,
             grease: self.grease,
+            trusted_ca_keys: self.trusted_ca_keys,
+            srtp_profiles: self.srtp_profiles,
+            enable_ocsp_multi_stapling: self.enable_ocsp_multi_stapling,
             msg_callback: self.msg_callback,
             info_callback: self.info_callback,
             record_padding_callback: self.record_padding_callback,
@@ -1589,5 +1622,58 @@ mod tests {
         assert_eq!(ClientHelloAction::Failed(80), ClientHelloAction::Failed(80));
         assert_ne!(ClientHelloAction::Success, ClientHelloAction::Retry);
         assert_ne!(ClientHelloAction::Failed(80), ClientHelloAction::Failed(90));
+    }
+
+    // -------------------------------------------------------
+    // Phase 78 — Config builder tests for new extension fields
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_config_trusted_ca_keys() {
+        use crate::handshake::extensions_codec::TrustedAuthority;
+        // Default: empty
+        let config = TlsConfig::builder().build();
+        assert!(config.trusted_ca_keys.is_empty());
+
+        // Set trusted CA keys
+        let authorities = vec![
+            TrustedAuthority {
+                identifier_type: 1,
+                data: vec![0xAA; 20],
+            },
+            TrustedAuthority {
+                identifier_type: 3,
+                data: vec![0xBB; 20],
+            },
+        ];
+        let config2 = TlsConfig::builder().trusted_ca_keys(authorities).build();
+        assert_eq!(config2.trusted_ca_keys.len(), 2);
+        assert_eq!(config2.trusted_ca_keys[0].identifier_type, 1);
+    }
+
+    #[test]
+    fn test_config_srtp_profiles() {
+        // Default: empty
+        let config = TlsConfig::builder().build();
+        assert!(config.srtp_profiles.is_empty());
+
+        // Set SRTP profiles
+        let config2 = TlsConfig::builder()
+            .srtp_profiles(vec![0x0001, 0x0007])
+            .build();
+        assert_eq!(config2.srtp_profiles, vec![0x0001, 0x0007]);
+    }
+
+    #[test]
+    fn test_config_ocsp_multi_stapling() {
+        // Default: disabled
+        let config = TlsConfig::builder().build();
+        assert!(!config.enable_ocsp_multi_stapling);
+
+        // Enabled
+        let config2 = TlsConfig::builder()
+            .enable_ocsp_multi_stapling(true)
+            .build();
+        assert!(config2.enable_ocsp_multi_stapling);
     }
 }

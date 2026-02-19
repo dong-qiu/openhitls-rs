@@ -495,6 +495,28 @@ impl Tls12ClientHandshake {
             extensions.push(crate::handshake::extensions_codec::build_sct_ch());
         }
 
+        // Trusted CA Keys (RFC 6066 §6)
+        if !self.config.trusted_ca_keys.is_empty() {
+            extensions.push(crate::handshake::extensions_codec::build_trusted_ca_keys(
+                &self.config.trusted_ca_keys,
+            ));
+        }
+
+        // USE_SRTP (RFC 5764)
+        if !self.config.srtp_profiles.is_empty() {
+            extensions.push(crate::handshake::extensions_codec::build_use_srtp(
+                &self.config.srtp_profiles,
+                &[],
+            ));
+        }
+
+        // STATUS_REQUEST_V2 / OCSP multi-stapling (RFC 6961)
+        if self.config.enable_ocsp_multi_stapling {
+            extensions.push(crate::handshake::extensions_codec::build_status_request_v2(
+                &[2],
+            ));
+        }
+
         // Custom extensions
         extensions.extend(crate::extensions::build_custom_extensions(
             &self.config.custom_extensions,

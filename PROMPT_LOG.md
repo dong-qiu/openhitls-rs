@@ -1761,3 +1761,20 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - hitls-crypto: 593 → 603 (+10 CBC-MAC tests); hitls-tls: 881 → 892 (+11 callback/alert tests); total: 2218 → 2239 tests (rebased on Testing-Phase 80).
 
 2239 total tests (40 ignored). Clippy clean, fmt clean.
+
+## Phase 78: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9) (2026-02-19)
+
+**Prompt**: Implement Phase 78 — Trusted CA Keys (RFC 6066 §6, type 3) codec + config + ClientHello integration, USE_SRTP (RFC 5764, type 14) codec + config + ClientHello integration, STATUS_REQUEST_V2 (RFC 6961, type 17) codec + config + ClientHello integration, CMS AuthenticatedData (RFC 5652 §9) parse/encode/create/verify with HMAC-SHA-256/384/512.
+
+**Work performed**:
+- Trusted CA Keys (RFC 6066 §6): ExtensionType TRUSTED_CA_KEYS(3) + build_trusted_ca_keys/parse_trusted_ca_keys codec + TrustedAuthority enum (PreAgreed/KeySha1Hash/X509Name/CertSha1Hash) + config field trusted_ca_keys + builder method + ClientHello integration (TLS 1.3 + 1.2) + 3 codec tests + 1 config test
+- USE_SRTP (RFC 5764): ExtensionType USE_SRTP(14) + build_use_srtp/parse_use_srtp codec + config field srtp_profiles: Vec<u16> + builder method + ClientHello integration (TLS 1.3 + 1.2) + 3 codec tests + 1 config test
+- STATUS_REQUEST_V2 (RFC 6961): ExtensionType STATUS_REQUEST_V2(17) + build_status_request_v2/parse_status_request_v2 codec + config field enable_ocsp_multi_stapling: bool + builder method + ClientHello integration (TLS 1.3 + 1.2) + 2 codec tests + 1 config test
+- CMS AuthenticatedData (RFC 5652 §9): AuthenticatedData struct + parse/encode + CmsMessage::authenticate (create) + CmsMessage::verify_mac (verify) + HMAC-SHA-256/384/512 + OID 1.2.840.113549.1.9.16.1.2 + DER roundtrip + 5 tests
+- New OIDs: cms_authenticated_data, hmac_sha384, hmac_sha512
+- Files: extensions/mod.rs, extensions_codec.rs, config/mod.rs, client.rs, client12.rs, cms/mod.rs, cms/encrypted.rs, cms/enveloped.rs, oid/mod.rs
+
+**Result**:
+- hitls-tls: 892 → 904 (+12 tests); hitls-pki: 336 → 341 (+5 tests); total: 2239 → 2256 tests.
+
+2256 total tests (40 ignored). Clippy clean, fmt clean.

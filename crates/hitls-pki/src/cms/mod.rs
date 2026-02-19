@@ -81,6 +81,19 @@ pub struct DigestedData {
     pub digest: Vec<u8>,
 }
 
+/// A CMS AuthenticatedData message (RFC 5652 §9).
+///
+/// Simplified: no originatorInfo, no recipientInfos (key is provided out-of-band),
+/// no authAttrs/unauthAttrs. Uses HMAC with SHA-256/384/512.
+#[derive(Debug, Clone)]
+pub struct AuthenticatedData {
+    pub version: u32,
+    pub mac_algorithm: AlgorithmIdentifier,
+    pub digest_algorithm: Option<AlgorithmIdentifier>,
+    pub encap_content_info: EncapContentInfo,
+    pub mac: Vec<u8>,
+}
+
 /// A CMS message.
 #[derive(Debug)]
 pub struct CmsMessage {
@@ -89,6 +102,7 @@ pub struct CmsMessage {
     pub enveloped_data: Option<enveloped::EnvelopedData>,
     pub encrypted_data: Option<encrypted::EncryptedData>,
     pub digested_data: Option<DigestedData>,
+    pub authenticated_data: Option<AuthenticatedData>,
     pub raw: Vec<u8>,
 }
 
@@ -196,6 +210,7 @@ impl CmsMessage {
                 enveloped_data: None,
                 encrypted_data: None,
                 digested_data: None,
+                authenticated_data: None,
                 raw: data.to_vec(),
             })
         } else if content_type == CmsContentType::EnvelopedData {
@@ -209,6 +224,7 @@ impl CmsMessage {
                 enveloped_data: Some(ed),
                 encrypted_data: None,
                 digested_data: None,
+                authenticated_data: None,
                 raw: data.to_vec(),
             })
         } else if content_type == CmsContentType::EncryptedData {
@@ -222,6 +238,7 @@ impl CmsMessage {
                 enveloped_data: None,
                 encrypted_data: Some(ed),
                 digested_data: None,
+                authenticated_data: None,
                 raw: data.to_vec(),
             })
         } else if content_type == CmsContentType::DigestedData {
@@ -235,6 +252,21 @@ impl CmsMessage {
                 enveloped_data: None,
                 encrypted_data: None,
                 digested_data: Some(dd),
+                authenticated_data: None,
+                raw: data.to_vec(),
+            })
+        } else if content_type == CmsContentType::AuthenticatedData {
+            let ctx0 = ci
+                .read_context_specific(0, true)
+                .map_err(|e| cerr(&format!("[0]: {e}")))?;
+            let ad = parse_authenticated_data(ctx0.value)?;
+            Ok(CmsMessage {
+                content_type,
+                signed_data: None,
+                enveloped_data: None,
+                encrypted_data: None,
+                digested_data: None,
+                authenticated_data: Some(ad),
                 raw: data.to_vec(),
             })
         } else {
@@ -244,6 +276,7 @@ impl CmsMessage {
                 enveloped_data: None,
                 encrypted_data: None,
                 digested_data: None,
+                authenticated_data: None,
                 raw: data.to_vec(),
             })
         }
@@ -354,6 +387,7 @@ impl CmsMessage {
             enveloped_data: None,
             encrypted_data: None,
             digested_data: None,
+            authenticated_data: None,
             raw: encoded,
         })
     }
@@ -420,6 +454,7 @@ impl CmsMessage {
             enveloped_data: None,
             encrypted_data: None,
             digested_data: None,
+            authenticated_data: None,
             raw: encoded,
         })
     }
@@ -1226,6 +1261,7 @@ impl CmsMessage {
             enveloped_data: None,
             encrypted_data: None,
             digested_data: Some(dd),
+            authenticated_data: None,
             raw: encoded,
         })
     }
@@ -1251,6 +1287,149 @@ impl CmsMessage {
 
         Ok(computed == dd.digest)
     }
+
+    /// Create a CMS AuthenticatedData message (RFC 5652 §9).
+    ///
+    /// Computes an HMAC over the provided data using the given key and digest algorithm.
+    /// The key is provided out-of-band (no recipientInfos are encoded).
+    pub fn authenticate(data: &[u8], key: &[u8], alg: CmsDigestAlg) -> Result<Self, PkiError> {
+        let mac = compute_hmac(data, key, alg)?;
+        let mac_alg = hmac_alg_identifier(alg);
+
+        let ad = AuthenticatedData {
+            version: 0,
+            mac_algorithm: mac_alg,
+            digest_algorithm: None,
+            encap_content_info: EncapContentInfo {
+                content_type: known::pkcs7_data().to_der_value(),
+                content: Some(data.to_vec()),
+            },
+            mac,
+        };
+
+        let encoded = encode_authenticated_data_cms(&ad);
+
+        Ok(CmsMessage {
+            content_type: CmsContentType::AuthenticatedData,
+            signed_data: None,
+            enveloped_data: None,
+            encrypted_data: None,
+            digested_data: None,
+            authenticated_data: Some(ad),
+            raw: encoded,
+        })
+    }
+
+    /// Verify the MAC in an AuthenticatedData message.
+    ///
+    /// Re-computes the HMAC from the encapsulated content using the provided key
+    /// and compares it with the stored MAC value.
+    pub fn verify_mac(&self, key: &[u8]) -> Result<bool, PkiError> {
+        let ad = self
+            .authenticated_data
+            .as_ref()
+            .ok_or_else(|| cerr("not AuthenticatedData"))?;
+
+        let content = ad
+            .encap_content_info
+            .content
+            .as_ref()
+            .ok_or_else(|| cerr("no content in AuthenticatedData"))?;
+
+        let alg = oid_to_hmac_digest_alg(&ad.mac_algorithm.oid)?;
+        let computed = compute_hmac(content, key, alg)?;
+
+        Ok(computed == ad.mac)
+    }
+}
+
+// ── AuthenticatedData parsing / encoding ────────────────────────────
+
+fn parse_authenticated_data(data: &[u8]) -> Result<AuthenticatedData, PkiError> {
+    let mut dec = Decoder::new(data);
+    let mut ad = dec
+        .read_sequence()
+        .map_err(|e| cerr(&format!("AuthenticatedData: {e}")))?;
+
+    let version = bytes_to_u32(
+        ad.read_integer()
+            .map_err(|e| cerr(&format!("AD ver: {e}")))?,
+    );
+
+    // Skip originatorInfo [0] IMPLICIT if present
+    let _ = ad.try_read_context_specific(0, true);
+
+    // recipientInfos SET OF — skip (we use out-of-band key)
+    let _ = ad.read_set().map_err(|e| cerr(&format!("AD recip: {e}")))?;
+
+    // macAlgorithm
+    let mac_algorithm = parse_algorithm_identifier(&mut ad)?;
+
+    // digestAlgorithm [1] — optional
+    let digest_algorithm = ad
+        .try_read_context_specific(1, true)
+        .ok()
+        .flatten()
+        .and_then(|ctx| {
+            let mut d = Decoder::new(ctx.value);
+            parse_algorithm_identifier(&mut d).ok()
+        });
+
+    // encapContentInfo
+    let encap = parse_encap_content_info(&mut ad)?;
+
+    // authAttrs [2] IMPLICIT — skip if present
+    let _ = ad.try_read_context_specific(2, true);
+
+    // mac OCTET STRING
+    let mac = ad
+        .read_octet_string()
+        .map_err(|e| cerr(&format!("AD mac: {e}")))?
+        .to_vec();
+
+    // unauthAttrs [3] IMPLICIT — skip if present
+    let _ = ad.try_read_context_specific(3, true);
+
+    Ok(AuthenticatedData {
+        version,
+        mac_algorithm,
+        digest_algorithm,
+        encap_content_info: encap,
+        mac,
+    })
+}
+
+fn encode_authenticated_data_cms(ad: &AuthenticatedData) -> Vec<u8> {
+    let mut inner = Vec::new();
+
+    // version
+    inner.extend_from_slice(&enc_int(&[ad.version as u8]));
+
+    // recipientInfos SET OF (empty — key provided out-of-band)
+    inner.extend_from_slice(&enc_set(&[]));
+
+    // macAlgorithm
+    inner.extend_from_slice(&encode_algorithm_identifier(&ad.mac_algorithm));
+
+    // digestAlgorithm [1] IMPLICIT (optional)
+    if let Some(ref da) = ad.digest_algorithm {
+        let alg_enc = encode_algorithm_identifier(da);
+        inner.extend_from_slice(&enc_explicit_ctx(1, &alg_enc));
+    }
+
+    // encapContentInfo
+    inner.extend_from_slice(&encode_encap_content_info(&ad.encap_content_info));
+
+    // mac OCTET STRING
+    inner.extend_from_slice(&enc_octet(&ad.mac));
+
+    let ad_seq = enc_seq(&inner);
+
+    // Wrap in ContentInfo
+    let ctx0 = enc_explicit_ctx(0, &ad_seq);
+    let mut ci_inner = enc_oid(&known::cms_authenticated_data().to_der_value());
+    ci_inner.extend_from_slice(&ctx0);
+    enc_seq(&ci_inner)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -1266,6 +1445,8 @@ fn oid_to_content_type(oid: &Oid) -> CmsContentType {
         CmsContentType::DigestedData
     } else if *oid == known::pkcs7_encrypted_data() {
         CmsContentType::EncryptedData
+    } else if *oid == known::cms_authenticated_data() {
+        CmsContentType::AuthenticatedData
     } else {
         CmsContentType::Unknown
     }
@@ -1313,6 +1494,48 @@ fn compute_digest(data: &[u8], alg: CmsDigestAlg) -> Result<Vec<u8>, PkiError> {
             h.update(data).map_err(PkiError::from)?;
             Ok(h.finish().map_err(PkiError::from)?.to_vec())
         }
+    }
+}
+
+fn compute_hmac(data: &[u8], key: &[u8], alg: CmsDigestAlg) -> Result<Vec<u8>, PkiError> {
+    use hitls_crypto::hmac::Hmac;
+
+    let (factory, out_len): (Box<dyn Fn() -> Box<dyn hitls_crypto::hash::Digest>>, usize) =
+        match alg {
+            CmsDigestAlg::Sha256 => (Box::new(|| Box::new(hitls_crypto::sha2::Sha256::new())), 32),
+            CmsDigestAlg::Sha384 => (Box::new(|| Box::new(hitls_crypto::sha2::Sha384::new())), 48),
+            CmsDigestAlg::Sha512 => (Box::new(|| Box::new(hitls_crypto::sha2::Sha512::new())), 64),
+        };
+
+    let mut hmac = Hmac::new(factory, key).map_err(PkiError::from)?;
+    hmac.update(data).map_err(PkiError::from)?;
+    let mut out = vec![0u8; out_len];
+    hmac.finish(&mut out).map_err(PkiError::from)?;
+    Ok(out)
+}
+
+fn hmac_alg_identifier(alg: CmsDigestAlg) -> AlgorithmIdentifier {
+    let oid = match alg {
+        CmsDigestAlg::Sha256 => known::hmac_sha256_oid().to_der_value(),
+        CmsDigestAlg::Sha384 => known::hmac_sha384_oid().to_der_value(),
+        CmsDigestAlg::Sha512 => known::hmac_sha512_oid().to_der_value(),
+    };
+    AlgorithmIdentifier {
+        oid,
+        params: Some(vec![0x05, 0x00]), // NULL
+    }
+}
+
+fn oid_to_hmac_digest_alg(oid_bytes: &[u8]) -> Result<CmsDigestAlg, PkiError> {
+    let oid = Oid::from_der_value(oid_bytes).map_err(|e| cerr(&format!("MAC OID: {e}")))?;
+    if oid == known::hmac_sha256_oid() {
+        Ok(CmsDigestAlg::Sha256)
+    } else if oid == known::hmac_sha384_oid() {
+        Ok(CmsDigestAlg::Sha384)
+    } else if oid == known::hmac_sha512_oid() {
+        Ok(CmsDigestAlg::Sha512)
+    } else {
+        Err(cerr(&format!("unsupported MAC alg: {oid}")))
     }
 }
 
@@ -2166,5 +2389,75 @@ mod tests {
         // Content should be None (detached)
         let sd = cms2.signed_data.as_ref().unwrap();
         assert!(sd.encap_content_info.content.is_none());
+    }
+
+    // -------------------------------------------------------
+    // Phase 78 — CMS AuthenticatedData (RFC 5652 §9) tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_cms_authenticated_data_create_verify() {
+        let data = b"Hello AuthenticatedData";
+        let key = vec![0xAB; 32];
+        let cms = CmsMessage::authenticate(data, &key, CmsDigestAlg::Sha256).unwrap();
+        assert_eq!(cms.content_type, CmsContentType::AuthenticatedData);
+        assert!(cms.authenticated_data.is_some());
+        let ad = cms.authenticated_data.as_ref().unwrap();
+        assert_eq!(ad.version, 0);
+        assert_eq!(ad.mac.len(), 32); // HMAC-SHA-256
+
+        // Verify with correct key
+        let ok = cms.verify_mac(&key).unwrap();
+        assert!(ok);
+    }
+
+    #[test]
+    fn test_cms_authenticated_data_wrong_key() {
+        let data = b"Secret data";
+        let key = vec![0xAB; 32];
+        let cms = CmsMessage::authenticate(data, &key, CmsDigestAlg::Sha256).unwrap();
+
+        // Verify with wrong key should return false
+        let wrong_key = vec![0xCD; 32];
+        let ok = cms.verify_mac(&wrong_key).unwrap();
+        assert!(!ok);
+    }
+
+    #[test]
+    fn test_cms_authenticated_data_der_roundtrip() {
+        let data = b"Roundtrip test data";
+        let key = vec![0x42; 32];
+        let cms = CmsMessage::authenticate(data, &key, CmsDigestAlg::Sha256).unwrap();
+
+        // DER roundtrip
+        let cms2 = CmsMessage::from_der(&cms.raw).unwrap();
+        assert_eq!(cms2.content_type, CmsContentType::AuthenticatedData);
+        let ok = cms2.verify_mac(&key).unwrap();
+        assert!(ok);
+    }
+
+    #[test]
+    fn test_cms_authenticated_data_sha512() {
+        let data = b"SHA-512 MAC test";
+        let key = vec![0xEE; 64];
+        let cms = CmsMessage::authenticate(data, &key, CmsDigestAlg::Sha512).unwrap();
+        let ad = cms.authenticated_data.as_ref().unwrap();
+        assert_eq!(ad.mac.len(), 64); // HMAC-SHA-512
+
+        let ok = cms.verify_mac(&key).unwrap();
+        assert!(ok);
+
+        // DER roundtrip
+        let cms2 = CmsMessage::from_der(&cms.raw).unwrap();
+        assert!(cms2.verify_mac(&key).unwrap());
+    }
+
+    #[test]
+    fn test_cms_authenticated_data_content_type_oid() {
+        let ad_oid = known::cms_authenticated_data();
+        assert_eq!(
+            oid_to_content_type(&ad_oid),
+            CmsContentType::AuthenticatedData
+        );
     }
 }

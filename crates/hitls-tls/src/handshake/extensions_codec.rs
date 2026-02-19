@@ -1157,6 +1157,238 @@ pub fn parse_heartbeat(data: &[u8]) -> Result<u8, TlsError> {
 }
 
 // ---------------------------------------------------------------------------
+// Trusted CA Keys (RFC 6066 §6, type 3)
+// ---------------------------------------------------------------------------
+
+/// Identifier type for trusted CA keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TrustedAuthorityType {
+    /// Pre-agreed — no data follows.
+    PreAgreed = 0,
+    /// SHA-1 hash of the distinguished name.
+    KeySha1Hash = 1,
+    /// SHA-1 hash of the public key.
+    X509Name = 2,
+    /// SHA-1 hash of the certificate.
+    CertSha1Hash = 3,
+}
+
+/// A single trusted authority entry.
+#[derive(Debug, Clone)]
+pub struct TrustedAuthority {
+    pub identifier_type: u8,
+    pub data: Vec<u8>,
+}
+
+/// Build `trusted_ca_keys` extension for ClientHello (RFC 6066 §6, type 3).
+/// Wire format: trusted_authorities_len(2) || [identifier_type(1) || data]*
+pub fn build_trusted_ca_keys(authorities: &[TrustedAuthority]) -> Extension {
+    let mut list = Vec::new();
+    for auth in authorities {
+        list.push(auth.identifier_type);
+        if auth.identifier_type == 0 {
+            // pre-agreed: no data
+        } else if auth.identifier_type == 2 {
+            // x509_name: dn_length(2) + dn
+            list.extend_from_slice(&(auth.data.len() as u16).to_be_bytes());
+            list.extend_from_slice(&auth.data);
+        } else {
+            // key_sha1_hash(1) / cert_sha1_hash(3): 20-byte SHA-1 hash
+            list.extend_from_slice(&auth.data);
+        }
+    }
+    let mut data = Vec::with_capacity(2 + list.len());
+    data.extend_from_slice(&(list.len() as u16).to_be_bytes());
+    data.extend_from_slice(&list);
+    Extension {
+        extension_type: ExtensionType::TRUSTED_CA_KEYS,
+        data,
+    }
+}
+
+/// Parse `trusted_ca_keys` extension.
+/// Returns list of TrustedAuthority entries.
+pub fn parse_trusted_ca_keys(data: &[u8]) -> Result<Vec<TrustedAuthority>, TlsError> {
+    if data.len() < 2 {
+        return Err(TlsError::HandshakeFailed(
+            "trusted_ca_keys: too short".into(),
+        ));
+    }
+    let list_len = u16::from_be_bytes([data[0], data[1]]) as usize;
+    if data.len() < 2 + list_len {
+        return Err(TlsError::HandshakeFailed(
+            "trusted_ca_keys: truncated".into(),
+        ));
+    }
+    let mut result = Vec::new();
+    let mut pos = 2;
+    let end = 2 + list_len;
+    while pos < end {
+        let id_type = data[pos];
+        pos += 1;
+        let entry_data = match id_type {
+            0 => Vec::new(), // pre-agreed
+            1 | 3 => {
+                // SHA-1 hash: 20 bytes
+                if end - pos < 20 {
+                    return Err(TlsError::HandshakeFailed(
+                        "trusted_ca_keys: truncated hash".into(),
+                    ));
+                }
+                let d = data[pos..pos + 20].to_vec();
+                pos += 20;
+                d
+            }
+            2 => {
+                // x509_name: dn_length(2) + dn
+                if end - pos < 2 {
+                    return Err(TlsError::HandshakeFailed(
+                        "trusted_ca_keys: truncated DN length".into(),
+                    ));
+                }
+                let dn_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+                pos += 2;
+                if end - pos < dn_len {
+                    return Err(TlsError::HandshakeFailed(
+                        "trusted_ca_keys: truncated DN".into(),
+                    ));
+                }
+                let d = data[pos..pos + dn_len].to_vec();
+                pos += dn_len;
+                d
+            }
+            _ => {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "trusted_ca_keys: unknown identifier type {id_type}"
+                )));
+            }
+        };
+        result.push(TrustedAuthority {
+            identifier_type: id_type,
+            data: entry_data,
+        });
+    }
+    Ok(result)
+}
+
+// ---------------------------------------------------------------------------
+// USE_SRTP (RFC 5764, type 14)
+// ---------------------------------------------------------------------------
+
+/// Build `use_srtp` extension (RFC 5764, type 14).
+/// Wire format: profiles_len(2) || profiles(2 each) || mki_len(1) || mki
+pub fn build_use_srtp(profiles: &[u16], mki: &[u8]) -> Extension {
+    let profiles_len = (profiles.len() * 2) as u16;
+    let mut data = Vec::with_capacity(2 + profiles.len() * 2 + 1 + mki.len());
+    data.extend_from_slice(&profiles_len.to_be_bytes());
+    for &p in profiles {
+        data.extend_from_slice(&p.to_be_bytes());
+    }
+    data.push(mki.len() as u8);
+    data.extend_from_slice(mki);
+    Extension {
+        extension_type: ExtensionType::USE_SRTP,
+        data,
+    }
+}
+
+/// Parse `use_srtp` extension.
+/// Returns (profiles, mki).
+pub fn parse_use_srtp(data: &[u8]) -> Result<(Vec<u16>, Vec<u8>), TlsError> {
+    if data.len() < 3 {
+        return Err(TlsError::HandshakeFailed("use_srtp: too short".into()));
+    }
+    let profiles_len = u16::from_be_bytes([data[0], data[1]]) as usize;
+    if profiles_len % 2 != 0 {
+        return Err(TlsError::HandshakeFailed(
+            "use_srtp: odd profiles length".into(),
+        ));
+    }
+    if data.len() < 2 + profiles_len + 1 {
+        return Err(TlsError::HandshakeFailed("use_srtp: truncated".into()));
+    }
+    let mut profiles = Vec::with_capacity(profiles_len / 2);
+    for i in (2..2 + profiles_len).step_by(2) {
+        profiles.push(u16::from_be_bytes([data[i], data[i + 1]]));
+    }
+    let mki_pos = 2 + profiles_len;
+    let mki_len = data[mki_pos] as usize;
+    if data.len() < mki_pos + 1 + mki_len {
+        return Err(TlsError::HandshakeFailed("use_srtp: truncated MKI".into()));
+    }
+    let mki = data[mki_pos + 1..mki_pos + 1 + mki_len].to_vec();
+    Ok((profiles, mki))
+}
+
+// ---------------------------------------------------------------------------
+// STATUS_REQUEST_V2 (RFC 6961, type 17)
+// ---------------------------------------------------------------------------
+
+/// Build `status_request_v2` extension for ClientHello (RFC 6961, type 17).
+/// Requests OCSP multi-stapling.
+/// Wire format: list_len(2) || [status_type(1) || request_len(2) || request]*
+/// For ocsp(1): request = responder_id_list_len(2)=0 || request_extensions_len(2)=0
+/// For ocsp_multi(2): same structure as ocsp but allows per-cert OCSP responses.
+pub fn build_status_request_v2(request_types: &[u8]) -> Extension {
+    let mut list = Vec::new();
+    for &status_type in request_types {
+        list.push(status_type);
+        // request_length(2) = 4 (empty responder + empty extensions)
+        list.extend_from_slice(&4u16.to_be_bytes());
+        // responder_id_list_len(2) = 0
+        list.extend_from_slice(&0u16.to_be_bytes());
+        // request_extensions_len(2) = 0
+        list.extend_from_slice(&0u16.to_be_bytes());
+    }
+    let mut data = Vec::with_capacity(2 + list.len());
+    data.extend_from_slice(&(list.len() as u16).to_be_bytes());
+    data.extend_from_slice(&list);
+    Extension {
+        extension_type: ExtensionType::STATUS_REQUEST_V2,
+        data,
+    }
+}
+
+/// Parse `status_request_v2` extension.
+/// Returns list of status types requested (1=ocsp, 2=ocsp_multi).
+pub fn parse_status_request_v2(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    if data.len() < 2 {
+        return Err(TlsError::HandshakeFailed(
+            "status_request_v2: too short".into(),
+        ));
+    }
+    let list_len = u16::from_be_bytes([data[0], data[1]]) as usize;
+    if data.len() < 2 + list_len {
+        return Err(TlsError::HandshakeFailed(
+            "status_request_v2: truncated".into(),
+        ));
+    }
+    let mut types = Vec::new();
+    let mut pos = 2;
+    let end = 2 + list_len;
+    while pos < end {
+        if end - pos < 3 {
+            return Err(TlsError::HandshakeFailed(
+                "status_request_v2: truncated entry".into(),
+            ));
+        }
+        let status_type = data[pos];
+        pos += 1;
+        let request_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+        pos += 2;
+        if end - pos < request_len {
+            return Err(TlsError::HandshakeFailed(
+                "status_request_v2: truncated request".into(),
+            ));
+        }
+        pos += request_len;
+        types.push(status_type);
+    }
+    Ok(types)
+}
+
+// ---------------------------------------------------------------------------
 // GREASE (RFC 8701)
 // ---------------------------------------------------------------------------
 
@@ -2041,5 +2273,114 @@ mod tests {
         let ext = build_signature_algorithms_grease(&algs, gv);
         let parsed = parse_signature_algorithms_ch(&ext.data).unwrap();
         assert!(parsed.len() >= 2); // 1 GREASE + 1 real
+    }
+
+    // -------------------------------------------------------
+    // Phase 78 — Trusted CA Keys / USE_SRTP / STATUS_REQUEST_V2
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_trusted_ca_keys_roundtrip() {
+        let authorities = vec![
+            TrustedAuthority {
+                identifier_type: 0, // pre-agreed
+                data: vec![],
+            },
+            TrustedAuthority {
+                identifier_type: 1, // key_sha1_hash
+                data: vec![0xAA; 20],
+            },
+            TrustedAuthority {
+                identifier_type: 2,                 // x509_name
+                data: vec![0x30, 0x0C, 0x31, 0x0A], // short DN
+            },
+            TrustedAuthority {
+                identifier_type: 3, // cert_sha1_hash
+                data: vec![0xBB; 20],
+            },
+        ];
+        let ext = build_trusted_ca_keys(&authorities);
+        assert_eq!(ext.extension_type, ExtensionType::TRUSTED_CA_KEYS);
+        let parsed = parse_trusted_ca_keys(&ext.data).unwrap();
+        assert_eq!(parsed.len(), 4);
+        assert_eq!(parsed[0].identifier_type, 0);
+        assert!(parsed[0].data.is_empty());
+        assert_eq!(parsed[1].identifier_type, 1);
+        assert_eq!(parsed[1].data, vec![0xAA; 20]);
+        assert_eq!(parsed[2].identifier_type, 2);
+        assert_eq!(parsed[2].data, vec![0x30, 0x0C, 0x31, 0x0A]);
+        assert_eq!(parsed[3].identifier_type, 3);
+        assert_eq!(parsed[3].data, vec![0xBB; 20]);
+    }
+
+    #[test]
+    fn test_trusted_ca_keys_empty() {
+        let ext = build_trusted_ca_keys(&[]);
+        let parsed = parse_trusted_ca_keys(&ext.data).unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn test_trusted_ca_keys_parse_errors() {
+        // Too short
+        assert!(parse_trusted_ca_keys(&[]).is_err());
+        assert!(parse_trusted_ca_keys(&[0x00]).is_err());
+        // Truncated list
+        assert!(parse_trusted_ca_keys(&[0x00, 0x05, 0x01]).is_err());
+        // Unknown identifier type
+        assert!(parse_trusted_ca_keys(&[0x00, 0x01, 0xFF]).is_err());
+    }
+
+    #[test]
+    fn test_use_srtp_roundtrip() {
+        let profiles = vec![0x0001, 0x0007]; // SRTP_AES128_CM_HMAC_SHA1_80, SRTP_AEAD_AES_128_GCM
+        let mki = vec![0x42];
+        let ext = build_use_srtp(&profiles, &mki);
+        assert_eq!(ext.extension_type, ExtensionType::USE_SRTP);
+        let (parsed_profiles, parsed_mki) = parse_use_srtp(&ext.data).unwrap();
+        assert_eq!(parsed_profiles, profiles);
+        assert_eq!(parsed_mki, mki);
+    }
+
+    #[test]
+    fn test_use_srtp_empty_mki() {
+        let profiles = vec![0x0001];
+        let ext = build_use_srtp(&profiles, &[]);
+        let (parsed_profiles, parsed_mki) = parse_use_srtp(&ext.data).unwrap();
+        assert_eq!(parsed_profiles, vec![0x0001]);
+        assert!(parsed_mki.is_empty());
+    }
+
+    #[test]
+    fn test_use_srtp_parse_errors() {
+        // Too short
+        assert!(parse_use_srtp(&[]).is_err());
+        assert!(parse_use_srtp(&[0x00, 0x02]).is_err());
+        // Odd profiles length
+        assert!(parse_use_srtp(&[0x00, 0x03, 0x00, 0x01, 0x00, 0x00]).is_err());
+    }
+
+    #[test]
+    fn test_status_request_v2_roundtrip() {
+        let ext = build_status_request_v2(&[1, 2]); // ocsp + ocsp_multi
+        assert_eq!(ext.extension_type, ExtensionType::STATUS_REQUEST_V2);
+        let parsed = parse_status_request_v2(&ext.data).unwrap();
+        assert_eq!(parsed, vec![1, 2]);
+    }
+
+    #[test]
+    fn test_status_request_v2_single() {
+        let ext = build_status_request_v2(&[2]); // ocsp_multi only
+        let parsed = parse_status_request_v2(&ext.data).unwrap();
+        assert_eq!(parsed, vec![2]);
+    }
+
+    #[test]
+    fn test_status_request_v2_parse_errors() {
+        // Too short
+        assert!(parse_status_request_v2(&[]).is_err());
+        assert!(parse_status_request_v2(&[0x00]).is_err());
+        // Truncated entry
+        assert!(parse_status_request_v2(&[0x00, 0x03, 0x01, 0x00]).is_err());
     }
 }

@@ -180,6 +180,7 @@ impl CmsMessage {
             enveloped_data: Some(ed),
             encrypted_data: None,
             digested_data: None,
+            authenticated_data: None,
             raw: encoded,
         })
     }
@@ -259,6 +260,7 @@ impl CmsMessage {
             enveloped_data: Some(ed),
             encrypted_data: None,
             digested_data: None,
+            authenticated_data: None,
             raw: encoded,
         })
     }
@@ -886,6 +888,7 @@ mod tests {
             enveloped_data: None,
             encrypted_data: None,
             digested_data: None,
+            authenticated_data: None,
             raw: vec![],
         };
         let result = cms.decrypt_kek(&[0u8; 16]);
@@ -903,6 +906,7 @@ mod tests {
             enveloped_data: None,
             encrypted_data: None,
             digested_data: None,
+            authenticated_data: None,
             raw: vec![],
         };
         let result = cms.decrypt_rsa(&[1], &[1], &[1], &[1], &[1]);
@@ -941,6 +945,7 @@ mod tests {
             enveloped_data: Some(ed),
             encrypted_data: None,
             digested_data: None,
+            authenticated_data: None,
             raw: vec![],
         };
         let result = cms.decrypt_kek(&[0u8; 16]);
@@ -978,6 +983,7 @@ mod tests {
             enveloped_data: Some(ed),
             encrypted_data: None,
             digested_data: None,
+            authenticated_data: None,
             raw: vec![],
         };
         let result = cms.decrypt_rsa(&[1], &[1], &[1], &[1], &[1]);

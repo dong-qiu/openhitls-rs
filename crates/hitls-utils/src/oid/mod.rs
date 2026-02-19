@@ -335,6 +335,12 @@ pub mod known {
     pub fn hmac_sha256_oid() -> Oid {
         Oid::new(&[1, 2, 840, 113549, 2, 9])
     }
+    pub fn hmac_sha384_oid() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 2, 10])
+    }
+    pub fn hmac_sha512_oid() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 2, 11])
+    }
     pub fn hmac_sha1_oid() -> Oid {
         Oid::new(&[1, 2, 840, 113549, 2, 7])
     }
@@ -345,6 +351,10 @@ pub mod known {
     }
     pub fn pkcs7_encrypted_data() -> Oid {
         Oid::new(&[1, 2, 840, 113549, 1, 7, 6])
+    }
+    /// id-ct-authData (1.2.840.113549.1.9.16.1.2) — CMS AuthenticatedData (RFC 5652 §9).
+    pub fn cms_authenticated_data() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 9, 16, 1, 2])
     }
 
     // CMS / PKCS#9 attributes

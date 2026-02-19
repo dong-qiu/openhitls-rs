@@ -29,10 +29,11 @@ use super::extensions_codec::{
     build_key_share_ch_grease, build_padding, build_post_handshake_auth, build_pre_shared_key_ch,
     build_psk_key_exchange_modes, build_record_size_limit, build_sct_ch, build_server_name,
     build_signature_algorithms, build_signature_algorithms_cert, build_signature_algorithms_grease,
-    build_status_request_ch, build_supported_groups, build_supported_groups_grease,
-    build_supported_versions_ch, build_supported_versions_ch_grease, grease_value, parse_alpn_sh,
-    parse_cookie, parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh,
-    parse_record_size_limit, parse_status_request_cert_entry, parse_supported_versions_sh,
+    build_status_request_ch, build_status_request_v2, build_supported_groups,
+    build_supported_groups_grease, build_supported_versions_ch, build_supported_versions_ch_grease,
+    build_trusted_ca_keys, build_use_srtp, grease_value, parse_alpn_sh, parse_cookie,
+    parse_key_share_hrr, parse_key_share_sh, parse_pre_shared_key_sh, parse_record_size_limit,
+    parse_status_request_cert_entry, parse_supported_versions_sh,
 };
 use super::key_exchange::KeyExchange;
 use super::verify::verify_certificate_verify;
@@ -324,6 +325,21 @@ impl ClientHandshake {
         // Heartbeat extension (RFC 6520)
         if self.config.heartbeat_mode > 0 {
             extensions.push(build_heartbeat(self.config.heartbeat_mode));
+        }
+
+        // Trusted CA Keys (RFC 6066 §6)
+        if !self.config.trusted_ca_keys.is_empty() {
+            extensions.push(build_trusted_ca_keys(&self.config.trusted_ca_keys));
+        }
+
+        // USE_SRTP (RFC 5764)
+        if !self.config.srtp_profiles.is_empty() {
+            extensions.push(build_use_srtp(&self.config.srtp_profiles, &[]));
+        }
+
+        // STATUS_REQUEST_V2 / OCSP multi-stapling (RFC 6961)
+        if self.config.enable_ocsp_multi_stapling {
+            extensions.push(build_status_request_v2(&[2])); // ocsp_multi(2)
         }
 
         // Custom extensions

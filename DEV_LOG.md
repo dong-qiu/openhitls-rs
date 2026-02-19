@@ -1,5 +1,63 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 78: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9)
+
+### Date: 2026-02-19
+
+### Summary
+
+Implemented four features:
+1. **Trusted CA Keys (RFC 6066 §6, type 3)** — ExtensionType constant + codec (build_trusted_ca_keys/parse_trusted_ca_keys) + config field `trusted_ca_keys: Vec<TrustedAuthority>` + builder method + ClientHello integration (TLS 1.3 + TLS 1.2). 3 codec tests + 1 config test.
+2. **USE_SRTP (RFC 5764, type 14)** — ExtensionType constant + codec (build_use_srtp/parse_use_srtp) + config field `srtp_profiles: Vec<u16>` + builder method + ClientHello integration (TLS 1.3 + TLS 1.2). 3 codec tests + 1 config test.
+3. **STATUS_REQUEST_V2 (RFC 6961, type 17)** — ExtensionType constant + codec (build_status_request_v2/parse_status_request_v2) + config field `enable_ocsp_multi_stapling: bool` + builder method + ClientHello integration (TLS 1.3 + TLS 1.2). 2 codec tests + 1 config test.
+4. **CMS AuthenticatedData (RFC 5652 §9)** — AuthenticatedData struct + parse/encode + create (CmsMessage::authenticate) + verify (CmsMessage::verify_mac) + HMAC-SHA-256/384/512 support + OID (1.2.840.113549.1.9.16.1.2) + DER roundtrip + 5 tests.
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/extensions/mod.rs`** — 3 new ExtensionType constants (TRUSTED_CA_KEYS type 3, USE_SRTP type 14, STATUS_REQUEST_V2 type 17)
+2. **`crates/hitls-tls/src/handshake/extensions_codec.rs`** — 6 codec functions (build/parse for each extension) + 9 tests (3 trusted_ca_keys + 3 use_srtp + 2 status_request_v2 + 1 roundtrip)
+3. **`crates/hitls-tls/src/config/mod.rs`** — 3 new config fields (trusted_ca_keys, srtp_profiles, enable_ocsp_multi_stapling) + builder methods + 3 config tests
+4. **`crates/hitls-tls/src/handshake/client.rs`** — 3 extension building calls in TLS 1.3 ClientHello
+5. **`crates/hitls-tls/src/handshake/client12.rs`** — 3 extension building calls in TLS 1.2 ClientHello
+6. **`crates/hitls-pki/src/cms/mod.rs`** — AuthenticatedData struct + parse/encode/create/verify + 5 tests
+7. **`crates/hitls-pki/src/cms/encrypted.rs`** — authenticated_data field added
+8. **`crates/hitls-pki/src/cms/enveloped.rs`** — authenticated_data field added
+9. **`crates/hitls-utils/src/oid/mod.rs`** — 3 new OIDs (cms_authenticated_data, hmac_sha384, hmac_sha512)
+
+### Implementation Details
+
+- **Trusted CA Keys**: TrustedAuthority enum with PreAgreed, KeySha1Hash([u8;20]), X509Name(Vec<u8>), CertSha1Hash([u8;20]) variants per RFC 6066 §6 IdentifierType. Wire format: authorities_length(2) || [identifier_type(1) || data]*. Added to ClientHello when trusted_ca_keys is non-empty.
+- **USE_SRTP**: Wire format: profiles_length(2) || [profile_id(2)]* || mki_length(1) || mki. Config stores Vec<u16> of SRTP protection profiles. Added to ClientHello when srtp_profiles is non-empty.
+- **STATUS_REQUEST_V2**: Wire format: list_length(2) || [status_type(1)=2 || request_length(2) || responder_id_list_length(2)=0 || request_extensions_length(2)=0]*. Single OCSP_MULTI request item emitted. Added to ClientHello when enable_ocsp_multi_stapling is true.
+- **CMS AuthenticatedData**: ContentInfo with OID 1.2.840.113549.1.9.16.1.2, version 0, originatorInfo absent, recipientInfos with KeyTransRecipientInfo (RSA key transport), macAlgorithm (HMAC-SHA-256/384/512), encapContentInfo with eContentType id-data, mac value. authenticate() creates with random MAC key encrypted to recipient RSA public key. verify_mac() decrypts MAC key with recipient private key and re-computes HMAC.
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_build_parse_trusted_ca_keys | extensions_codec.rs |
+| 2 | test_trusted_ca_keys_empty | extensions_codec.rs |
+| 3 | test_trusted_ca_keys_roundtrip | extensions_codec.rs |
+| 4 | test_build_parse_use_srtp | extensions_codec.rs |
+| 5 | test_use_srtp_empty | extensions_codec.rs |
+| 6 | test_use_srtp_roundtrip | extensions_codec.rs |
+| 7 | test_build_parse_status_request_v2 | extensions_codec.rs |
+| 8 | test_status_request_v2_roundtrip | extensions_codec.rs |
+| 9 | test_status_request_v2_parse_empty | extensions_codec.rs |
+| 10 | test_config_trusted_ca_keys | config/mod.rs |
+| 11 | test_config_srtp_profiles | config/mod.rs |
+| 12 | test_config_enable_ocsp_multi_stapling | config/mod.rs |
+| 13-15 | CMS AuthenticatedData tests (create/verify, DER roundtrip, HMAC variants) | cms/mod.rs |
+
++17 tests (2239 → 2256): hitls-tls 892 → 904 (+12), hitls-pki 336 → 341 (+5)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2256 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase 77: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4
 
 ### Date: 2026-02-19

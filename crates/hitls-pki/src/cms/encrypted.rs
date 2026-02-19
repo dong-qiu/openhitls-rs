@@ -85,6 +85,7 @@ impl CmsMessage {
             enveloped_data: None,
             encrypted_data: Some(ed),
             digested_data: None,
+            authenticated_data: None,
             raw: encoded,
         })
     }

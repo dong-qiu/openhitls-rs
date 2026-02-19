@@ -9,10 +9,13 @@ pub struct ExtensionType(pub u16);
 impl ExtensionType {
     pub const SERVER_NAME: Self = Self(0);
     pub const MAX_FRAGMENT_LENGTH: Self = Self(1);
+    pub const TRUSTED_CA_KEYS: Self = Self(3);
     pub const STATUS_REQUEST: Self = Self(5);
     pub const SUPPORTED_GROUPS: Self = Self(10);
     pub const SIGNATURE_ALGORITHMS: Self = Self(13);
+    pub const USE_SRTP: Self = Self(14);
     pub const APPLICATION_LAYER_PROTOCOL_NEGOTIATION: Self = Self(16);
+    pub const STATUS_REQUEST_V2: Self = Self(17);
     pub const SIGNED_CERTIFICATE_TIMESTAMP: Self = Self(18);
     pub const PRE_SHARED_KEY: Self = Self(41);
     pub const EARLY_DATA: Self = Self(42);
