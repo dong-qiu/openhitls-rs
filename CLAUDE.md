@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 79 complete + Testing-Phase 81 — client_tlcp + cipher suite params + verify Ed448 + HKDF edge cases (2299 tests)
+- **Status**: Phase 79 complete + Testing-Phase 82 — codec/server12/client12/dtls12/config unit tests (2323 tests)
 
 ## Workspace Structure
 
@@ -35,12 +35,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2299 tests, 40 ignored)
+# Run all tests (2323 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 603 tests (31 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 938 tests
+cargo test -p hitls-tls --all-features      # 962 tests
 cargo test -p hitls-pki --all-features      # 341 tests (1 ignored)
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
@@ -111,7 +111,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-79 complete (2299 tests, 40 ignored).
+Phases 0-79 complete (2323 tests, 40 ignored).
 
 ### Completed
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
@@ -164,5 +164,6 @@ Phases 0-79 complete (2299 tests, 40 ignored).
 - Phase 78: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9) (Trusted CA Keys type 3 codec + config trusted_ca_keys + ClientHello TLS 1.3/1.2, USE_SRTP type 14 codec + config srtp_profiles + ClientHello TLS 1.3/1.2, STATUS_REQUEST_V2 type 17 codec + config enable_ocsp_multi_stapling + ClientHello TLS 1.3/1.2, CMS AuthenticatedData parse/encode/create/verify with HMAC-SHA-256/384/512, +17 tests, 2239→2256) -- DONE
 - Phase 79: DTLS config enhancements + integration tests (flight_transmit_enable + empty_records_limit DoS protection in RecordLayer, 9 integration tests covering MsgCallback TLS 1.3/1.2 + InfoCallback + ClientHelloCallback + CBC-MAC-SM4 + CMS AuthenticatedData + RecordPaddingCallback + DTLS config + empty records limit, +18 tests, 2256→2274) -- DONE
 - Testing-Phase 81: client_tlcp + cipher suite params + verify Ed448 + HKDF edge cases (TLCP client: wrong-state ServerHello/Certificate/SKE/SHD/CCS/Finished, no TLCP suites error; Cipher suite params: TLS 1.3 AES-128-GCM/AES-256-GCM/ChaCha20/CCM_8/invalid/hash_factory SHA-256/SHA-384, TLS 1.2 CBC-SHA/PSK-GCM/invalid/DHE-RSA-GCM; Verify: Ed448 roundtrip/wrong sig, Ed25519 client context; HKDF: empty info expand, SHA-384 expand_label, empty data HMAC, exact hash length expand, +25 tests, 2274→2299) -- DONE
+- Testing-Phase 82: codec/server12/client12/dtls12/config unit tests (Codec: decode_server_hello too short version/random, decode_client_hello too short/odd suites, decode_key_update invalid; Server12: abbreviated_finished wrong state, cert_verify wrong state, build_new_session_ticket no key/with key no master; Client12: CCS wrong state, abbreviated_finished wrong state, cert_request wrong state, process_finished wrong state, new_session_ticket lifetime zero; DTLS 1.2: version/cipher_suite/bidirectional/is_connected/multiple_sequential; Config: role setter, builder long chain, default cipher_suites/groups/sig_algs non-empty, +24 tests, 2299→2323) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

@@ -1339,4 +1339,44 @@ mod tests {
         .unwrap();
         assert_eq!(decompressed, cert_body);
     }
+
+    #[test]
+    fn test_decode_server_hello_too_short_for_version() {
+        // Only 1 byte — too short for 2-byte version
+        assert!(decode_server_hello(&[0x03]).is_err());
+    }
+
+    #[test]
+    fn test_decode_server_hello_too_short_for_random() {
+        // version(2) + only 10 bytes of random (need 32)
+        let mut data = vec![0x03, 0x03];
+        data.extend_from_slice(&[0u8; 10]);
+        assert!(decode_server_hello(&data).is_err());
+    }
+
+    #[test]
+    fn test_decode_client_hello_too_short_for_version() {
+        assert!(decode_client_hello(&[0x03]).is_err());
+    }
+
+    #[test]
+    fn test_decode_client_hello_odd_cipher_suites_length() {
+        // version(2) + random(32) + session_id_len(1,0) + suites_len(2, value=3 odd)
+        let mut data = vec![0x03, 0x03];
+        data.extend_from_slice(&[0u8; 32]); // random
+        data.push(0); // session_id_len = 0
+        data.extend_from_slice(&[0x00, 0x03]); // suites_len = 3 (odd → invalid)
+        data.extend_from_slice(&[0x00, 0x00, 0x00]); // 3 bytes
+        assert!(decode_client_hello(&data).is_err());
+    }
+
+    #[test]
+    fn test_decode_key_update_invalid_value() {
+        // Value 2 is not valid (only 0 and 1)
+        assert!(decode_key_update(&[2]).is_err());
+        // Value 255 is not valid
+        assert!(decode_key_update(&[255]).is_err());
+        // Empty body
+        assert!(decode_key_update(&[]).is_err());
+    }
 }

@@ -1724,4 +1724,63 @@ mod tests {
         let config3 = TlsConfig::builder().empty_records_limit(0).build();
         assert_eq!(config3.empty_records_limit, 0);
     }
+
+    #[test]
+    fn test_config_role_setter() {
+        let config = TlsConfig::builder().role(crate::TlsRole::Server).build();
+        assert_eq!(config.role, crate::TlsRole::Server);
+
+        let config2 = TlsConfig::builder().role(crate::TlsRole::Client).build();
+        assert_eq!(config2.role, crate::TlsRole::Client);
+    }
+
+    #[test]
+    fn test_config_builder_long_chain() {
+        // Verify that builder chaining with many setters compiles and works
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .cipher_suites(&[CipherSuite::TLS_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::X25519])
+            .server_name("example.com")
+            .alpn(&[b"h2", b"http/1.1"])
+            .enable_extended_master_secret(true)
+            .enable_encrypt_then_mac(true)
+            .cipher_server_preference(true)
+            .padding_target(512)
+            .grease(true)
+            .heartbeat_mode(1)
+            .build();
+        assert_eq!(config.role, crate::TlsRole::Server);
+        assert!(config.grease);
+        assert_eq!(config.heartbeat_mode, 1);
+        assert_eq!(config.padding_target, 512);
+        assert_eq!(config.alpn_protocols.len(), 2);
+    }
+
+    #[test]
+    fn test_config_default_cipher_suites_non_empty() {
+        let config = TlsConfig::builder().build();
+        assert!(
+            !config.cipher_suites.is_empty(),
+            "Default cipher suites should not be empty"
+        );
+    }
+
+    #[test]
+    fn test_config_default_supported_groups_non_empty() {
+        let config = TlsConfig::builder().build();
+        assert!(
+            !config.supported_groups.is_empty(),
+            "Default supported groups should not be empty"
+        );
+    }
+
+    #[test]
+    fn test_config_default_signature_algorithms_non_empty() {
+        let config = TlsConfig::builder().build();
+        assert!(
+            !config.signature_algorithms.is_empty(),
+            "Default signature algorithms should not be empty"
+        );
+    }
 }

@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,243 tests (40 ignored)
+**Current**: 2,323 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -784,3 +784,77 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2299** | **40** |
+
+---
+
+## Testing-Phase 82: codec/server12/client12/dtls12/config Unit Tests
+
+**Date**: 2026-02-19
+**Tests added**: +24 (2299 → 2323)
+**Files modified**: codec.rs, server12.rs, client12.rs, connection_dtls12.rs, config/mod.rs
+
+### L1: Codec Decode Error Tests (+5, in handshake/codec.rs)
+
+| Test | Description |
+|------|-------------|
+| test_decode_server_hello_too_short_for_version | ServerHello with only 1 byte fails |
+| test_decode_server_hello_too_short_for_random | ServerHello with version+10 bytes (need 32 random) fails |
+| test_decode_client_hello_too_short_for_version | ClientHello with only 1 byte fails |
+| test_decode_client_hello_odd_cipher_suites_length | ClientHello with odd cipher suites length fails |
+| test_decode_key_update_invalid_value | KeyUpdate with values 2, 255, or empty fails |
+
+### L2: Server12 Wrong-State + Ticket Tests (+4, in handshake/server12.rs)
+
+| Test | Description |
+|------|-------------|
+| test_server12_abbreviated_finished_wrong_state_idle | Abbreviated Finished from Idle state errors |
+| test_server12_cert_verify_wrong_state_idle | CertificateVerify from Idle state errors |
+| test_server12_build_new_session_ticket_no_key | No ticket_key configured returns Ok(None) |
+| test_server12_build_new_session_ticket_with_key_no_master_secret | ticket_key set but no master_secret errors |
+
+### L3: Client12 Wrong-State + Ticket Tests (+5, in handshake/client12.rs)
+
+| Test | Description |
+|------|-------------|
+| test_client12_change_cipher_spec_wrong_state_idle | CCS from Idle state errors |
+| test_client12_abbreviated_finished_wrong_state_idle | Abbreviated Finished from Idle state errors |
+| test_client12_cert_request_wrong_state_idle | CertificateRequest from Idle state errors |
+| test_client12_process_finished_wrong_state_idle | Finished from Idle state errors |
+| test_client12_new_session_ticket_lifetime_zero | NewSessionTicket with lifetime=0 parses correctly |
+
+### L4: DTLS 1.2 Connection Tests (+5, in connection_dtls12.rs)
+
+| Test | Description |
+|------|-------------|
+| test_dtls12_version_after_handshake | Both sides report DTLS 1.2 version |
+| test_dtls12_cipher_suite_after_handshake | Both sides agree on cipher suite |
+| test_dtls12_bidirectional_data | Client→Server and Server→Client data exchange |
+| test_dtls12_is_connected_after_handshake | Both sides report is_connected() |
+| test_dtls12_multiple_sequential_messages | 5 sequential messages all delivered correctly |
+
+### L5: Config Builder Tests (+5, in config/mod.rs)
+
+| Test | Description |
+|------|-------------|
+| test_config_role_setter | Role setter on builder works |
+| test_config_builder_long_chain | Builder with many setters chained compiles and works |
+| test_config_default_cipher_suites_non_empty | Default config has non-empty cipher suites |
+| test_config_default_supported_groups_non_empty | Default config has non-empty supported groups |
+| test_config_default_signature_algorithms_non_empty | Default config has non-empty signature algorithms |
+
+### Workspace Test Counts After Testing-Phase 82
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 603 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 122 | 3 |
+| hitls-pki | 341 | 1 |
+| hitls-tls | 962 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2323** | **40** |

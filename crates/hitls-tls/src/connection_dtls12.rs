@@ -1088,4 +1088,64 @@ mod tests {
         let received = server.open_app_data(&datagram).unwrap();
         assert_eq!(received, msg);
     }
+
+    #[test]
+    fn test_dtls12_version_after_handshake() {
+        let cc = client_config();
+        let sc = server_config();
+        let (client, server) = dtls12_handshake_in_memory(cc, sc, false).unwrap();
+        assert_eq!(client.version(), Some(crate::TlsVersion::Dtls12));
+        assert_eq!(server.version(), Some(crate::TlsVersion::Dtls12));
+    }
+
+    #[test]
+    fn test_dtls12_cipher_suite_after_handshake() {
+        let cc = client_config();
+        let sc = server_config();
+        let (client, server) = dtls12_handshake_in_memory(cc, sc, false).unwrap();
+        // Both sides should agree on the cipher suite
+        assert_eq!(client.cipher_suite(), server.cipher_suite());
+        assert!(client.cipher_suite().is_some());
+    }
+
+    #[test]
+    fn test_dtls12_bidirectional_data() {
+        let cc = client_config();
+        let sc = server_config();
+        let (mut client, mut server) = dtls12_handshake_in_memory(cc, sc, false).unwrap();
+
+        // Client → Server
+        let c2s = client.seal_app_data(b"hello from client").unwrap();
+        let received = server.open_app_data(&c2s).unwrap();
+        assert_eq!(received, b"hello from client");
+
+        // Server → Client
+        let s2c = server.seal_app_data(b"hello from server").unwrap();
+        let received = client.open_app_data(&s2c).unwrap();
+        assert_eq!(received, b"hello from server");
+    }
+
+    #[test]
+    fn test_dtls12_is_connected_after_handshake() {
+        let cc = client_config();
+        let sc = server_config();
+        let (client, server) = dtls12_handshake_in_memory(cc, sc, false).unwrap();
+        assert!(client.is_connected());
+        assert!(server.is_connected());
+    }
+
+    #[test]
+    fn test_dtls12_multiple_sequential_messages() {
+        let cc = client_config();
+        let sc = server_config();
+        let (mut client, mut server) = dtls12_handshake_in_memory(cc, sc, false).unwrap();
+
+        // Send multiple messages in sequence
+        for i in 0..5u8 {
+            let msg = vec![i; 64];
+            let datagram = client.seal_app_data(&msg).unwrap();
+            let received = server.open_app_data(&datagram).unwrap();
+            assert_eq!(received, msg);
+        }
+    }
 }
