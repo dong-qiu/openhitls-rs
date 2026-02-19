@@ -421,4 +421,72 @@ mod tests {
         let err_msg = format!("{}", result.unwrap_err());
         assert!(err_msg.contains("unsupported signature scheme"));
     }
+
+    #[test]
+    fn test_verify_certificate_verify_ed448_roundtrip() {
+        let kp = hitls_crypto::ed448::Ed448KeyPair::generate().unwrap();
+        let pub_key = kp.public_key().to_vec();
+
+        let transcript_hash = vec![0xCC; 48];
+        let content = build_verify_content(&transcript_hash, true);
+        let signature = kp.sign(&content).unwrap();
+
+        // Ed448 OID: 1.3.101.113 → 06 03 2b 65 71
+        let cert = make_cert_with_spki(vec![0x2b, 0x65, 0x71], pub_key);
+
+        verify_certificate_verify(
+            &cert,
+            SignatureScheme::ED448,
+            &signature,
+            &transcript_hash,
+            true,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_verify_certificate_verify_ed448_wrong_signature() {
+        let kp = hitls_crypto::ed448::Ed448KeyPair::generate().unwrap();
+        let pub_key = kp.public_key().to_vec();
+
+        let transcript_hash = vec![0xCC; 48];
+        let content = build_verify_content(&transcript_hash, true);
+        let mut signature = kp.sign(&content).unwrap();
+        signature[0] ^= 0xFF; // tamper
+
+        let cert = make_cert_with_spki(vec![0x2b, 0x65, 0x71], pub_key);
+
+        let result = verify_certificate_verify(
+            &cert,
+            SignatureScheme::ED448,
+            &signature,
+            &transcript_hash,
+            true,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_verify_certificate_verify_ed25519_client_context_roundtrip() {
+        let seed = vec![0x99; 32];
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let pub_key = kp.public_key().to_vec();
+
+        let transcript_hash = vec![0xDD; 32];
+        // Sign with client context
+        let content = build_verify_content(&transcript_hash, false);
+        let signature = kp.sign(&content).unwrap();
+
+        let cert = make_cert_with_spki(vec![0x2b, 0x65, 0x70], pub_key);
+
+        // Verify with client context → should succeed
+        verify_certificate_verify(
+            &cert,
+            SignatureScheme::ED25519,
+            &signature,
+            &transcript_hash,
+            false,
+        )
+        .unwrap();
+    }
 }

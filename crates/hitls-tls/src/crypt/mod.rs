@@ -1618,6 +1618,111 @@ pub fn is_tlcp_suite(suite: CipherSuite) -> bool {
 }
 
 #[cfg(test)]
+mod tests_cipher_suite_params {
+    use super::*;
+
+    #[test]
+    fn test_tls13_aes128_gcm_sha256_params() {
+        let p = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        assert_eq!(p.hash_len, 32);
+        assert_eq!(p.key_len, 16);
+        assert_eq!(p.iv_len, 12);
+        assert_eq!(p.tag_len, 16);
+    }
+
+    #[test]
+    fn test_tls13_aes256_gcm_sha384_params() {
+        let p = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_256_GCM_SHA384).unwrap();
+        assert_eq!(p.hash_len, 48);
+        assert_eq!(p.key_len, 32);
+        assert_eq!(p.iv_len, 12);
+        assert_eq!(p.tag_len, 16);
+    }
+
+    #[test]
+    fn test_tls13_chacha20_poly1305_params() {
+        let p = CipherSuiteParams::from_suite(CipherSuite::TLS_CHACHA20_POLY1305_SHA256).unwrap();
+        assert_eq!(p.hash_len, 32);
+        assert_eq!(p.key_len, 32);
+        assert_eq!(p.iv_len, 12);
+        assert_eq!(p.tag_len, 16);
+    }
+
+    #[test]
+    fn test_tls13_aes128_ccm8_params() {
+        let p = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_CCM_8_SHA256).unwrap();
+        assert_eq!(p.hash_len, 32);
+        assert_eq!(p.key_len, 16);
+        assert_eq!(p.iv_len, 12);
+        assert_eq!(p.tag_len, 8); // CCM_8 uses 8-byte tag
+    }
+
+    #[test]
+    fn test_tls13_invalid_suite_rejected() {
+        // A TLS 1.2 suite should fail for TLS 1.3 params
+        let result =
+            CipherSuiteParams::from_suite(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_tls13_hash_factory_sha256() {
+        let p = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let factory = p.hash_factory();
+        let hasher = factory();
+        assert_eq!(hasher.output_size(), 32);
+    }
+
+    #[test]
+    fn test_tls13_hash_factory_sha384() {
+        let p = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_256_GCM_SHA384).unwrap();
+        let factory = p.hash_factory();
+        let hasher = factory();
+        assert_eq!(hasher.output_size(), 48);
+    }
+
+    #[test]
+    fn test_tls12_ecdhe_rsa_cbc_sha_params() {
+        let p = Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA)
+            .unwrap();
+        assert!(p.is_cbc);
+        assert_eq!(p.kx_alg, KeyExchangeAlg::Ecdhe);
+        assert_eq!(p.auth_alg, AuthAlg::Rsa);
+        assert_eq!(p.key_len, 16);
+        assert_eq!(p.mac_key_len, 20); // HMAC-SHA1
+        assert_eq!(p.fixed_iv_len, 16);
+    }
+
+    #[test]
+    fn test_tls12_psk_aes128_gcm_params() {
+        let p = Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_PSK_WITH_AES_128_GCM_SHA256)
+            .unwrap();
+        assert!(!p.is_cbc);
+        assert_eq!(p.kx_alg, KeyExchangeAlg::Psk);
+        assert_eq!(p.auth_alg, AuthAlg::Psk);
+        assert_eq!(p.key_len, 16);
+        assert_eq!(p.mac_key_len, 0); // AEAD: no MAC key
+    }
+
+    #[test]
+    fn test_tls12_invalid_suite_rejected() {
+        // A TLS 1.3 suite should fail for TLS 1.2 params
+        let result = Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_tls12_dhe_rsa_gcm_params() {
+        let p =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256)
+                .unwrap();
+        assert!(!p.is_cbc);
+        assert_eq!(p.kx_alg, KeyExchangeAlg::Dhe);
+        assert_eq!(p.auth_alg, AuthAlg::Rsa);
+    }
+}
+
+#[cfg(test)]
 #[cfg(feature = "tlcp")]
 mod tests_tlcp {
     use super::*;

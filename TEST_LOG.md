@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,218 tests (40 ignored)
+**Current**: 2,243 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -18,6 +18,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 **Testing-Phase 78**: +22 tests (GREASE + Heartbeat + Async DTLS edge cases + extension codec negative tests)
 **Testing-Phase 79**: +28 tests (DTLS 1.2 handshake + TLS 1.3 server + record layer + PRF unit tests)
 **Testing-Phase 80**: +24 tests (TLCP server + transcript + key_schedule12 + cert_verify + TLS 1.3 client + session)
+**Testing-Phase 81**: +25 tests (client_tlcp + cipher suite params + verify Ed448 + HKDF edge cases)
 
 ---
 
@@ -711,3 +712,75 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2218** | **40** |
+
+---
+
+## Testing-Phase 81 — Client TLCP + Cipher Suite Params + Verify Ed448 + HKDF Edge Cases
+
+**Date**: 2026-02-19
+**Tests added**: +25 (2274 → 2299)
+**Build**: `cargo test --workspace --all-features` — all 2299 pass, 40 ignored
+**Clippy**: zero warnings
+**Fmt**: clean
+
+### K1: TLCP Client Handshake Tests (+7, in handshake/client_tlcp.rs)
+
+| Test | Description |
+|------|-------------|
+| test_tlcp_client_server_hello_wrong_state | ServerHello from wrong state → error |
+| test_tlcp_client_certificate_wrong_state | Certificate from wrong state → error |
+| test_tlcp_client_server_key_exchange_wrong_state | SKE from wrong state → error |
+| test_tlcp_client_server_hello_done_wrong_state | SHD from wrong state → error |
+| test_tlcp_client_ccs_wrong_state | CCS from wrong state → error |
+| test_tlcp_client_finished_wrong_state | Finished from wrong state → error |
+| test_tlcp_client_no_tlcp_suites_error | Config with no TLCP suites → error |
+
+### K2: Cipher Suite Params Tests (+11, in crypt/mod.rs)
+
+| Test | Description |
+|------|-------------|
+| test_tls13_aes128_gcm_sha256_params | AES-128-GCM: hash_len=32, key_len=16, iv_len=12, tag_len=16 |
+| test_tls13_aes256_gcm_sha384_params | AES-256-GCM: hash_len=48, key_len=32, iv_len=12, tag_len=16 |
+| test_tls13_chacha20_poly1305_params | ChaCha20-Poly1305: hash_len=32, key_len=32, iv_len=12, tag_len=16 |
+| test_tls13_ccm_8_params | CCM_8: hash_len=32, key_len=16, iv_len=12, tag_len=8 |
+| test_tls13_invalid_suite_returns_none | Invalid TLS 1.2 suite → None |
+| test_tls13_hash_factory_sha256 | SHA-256 hash_factory output_size = 32 |
+| test_tls13_hash_factory_sha384 | SHA-384 hash_factory output_size = 48 |
+| test_tls12_ecdhe_rsa_aes128_cbc_sha_params | TLS 1.2 CBC: mac_key_len=20, enc=Cbc |
+| test_tls12_psk_aes128_gcm_sha256_params | TLS 1.2 PSK GCM: key_len=16, iv_len=4 |
+| test_tls12_invalid_suite_returns_none | Invalid TLS 1.3 suite → None |
+| test_tls12_dhe_rsa_aes256_gcm_sha384_params | TLS 1.2 DHE-RSA GCM: key_len=32, hash_len=48 |
+
+### K3: Certificate Verify Ed448 Tests (+3, in handshake/verify.rs)
+
+| Test | Description |
+|------|-------------|
+| test_verify_certificate_verify_ed448_roundtrip | Ed448 sign+verify roundtrip with server context |
+| test_verify_certificate_verify_ed448_wrong_signature | Ed448 wrong signature → error |
+| test_verify_certificate_verify_ed25519_client_context | Ed25519 client context (different prefix) roundtrip |
+
+### K4: HKDF Edge Case Tests (+4, in crypt/hkdf.rs)
+
+| Test | Description |
+|------|-------------|
+| test_hkdf_expand_empty_info | Expand with empty info succeeds |
+| test_hkdf_sha384_expand_label | SHA-384 expand_label produces 48-byte output |
+| test_hkdf_empty_data_hmac | HMAC with empty data finishes successfully |
+| test_hkdf_expand_exact_hash_length | Expand to exact hash_len output |
+
+### Workspace Test Counts After Testing-Phase 81
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 603 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 122 | 3 |
+| hitls-pki | 341 | 1 |
+| hitls-tls | 938 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2299** | **40** |

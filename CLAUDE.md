@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 79 complete — DTLS config enhancements + integration tests for Phase 77-78 features (2274 tests)
+- **Status**: Phase 79 complete + Testing-Phase 81 — client_tlcp + cipher suite params + verify Ed448 + HKDF edge cases (2299 tests)
 
 ## Workspace Structure
 
@@ -35,12 +35,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2274 tests, 40 ignored)
+# Run all tests (2299 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 603 tests (31 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 913 tests
+cargo test -p hitls-tls --all-features      # 938 tests
 cargo test -p hitls-pki --all-features      # 341 tests (1 ignored)
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
@@ -111,7 +111,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0-79 complete (2274 tests, 40 ignored).
+Phases 0-79 complete (2299 tests, 40 ignored).
 
 ### Completed
 - Phase 40: Async I/O (tokio) + Hardware AES Acceleration (ARMv8/x86-64) + Criterion Benchmarks -- DONE
@@ -163,5 +163,6 @@ Phases 0-79 complete (2274 tests, 40 ignored).
 - Phase 77: TLS callback framework + missing alert codes + CBC-MAC-SM4 (7 TLS callbacks: MsgCallback/InfoCallback/RecordPaddingCallback/DhTmpCallback/CookieGenCallback/CookieVerifyCallback/ClientHelloCallback + ClientHelloInfo/ClientHelloAction, 6 legacy alert codes added to AlertDescription, CBC-MAC-SM4 with zero-padding (feature-gated cbc-mac), record_padding_cb wired into TLS 1.3 encryption, cookie callbacks wired into DTLS/DTLCP, client_hello_callback wired into TLS 1.3/1.2 server, +21 tests, 2218→2239) -- DONE
 - Phase 78: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9) (Trusted CA Keys type 3 codec + config trusted_ca_keys + ClientHello TLS 1.3/1.2, USE_SRTP type 14 codec + config srtp_profiles + ClientHello TLS 1.3/1.2, STATUS_REQUEST_V2 type 17 codec + config enable_ocsp_multi_stapling + ClientHello TLS 1.3/1.2, CMS AuthenticatedData parse/encode/create/verify with HMAC-SHA-256/384/512, +17 tests, 2239→2256) -- DONE
 - Phase 79: DTLS config enhancements + integration tests (flight_transmit_enable + empty_records_limit DoS protection in RecordLayer, 9 integration tests covering MsgCallback TLS 1.3/1.2 + InfoCallback + ClientHelloCallback + CBC-MAC-SM4 + CMS AuthenticatedData + RecordPaddingCallback + DTLS config + empty records limit, +18 tests, 2256→2274) -- DONE
+- Testing-Phase 81: client_tlcp + cipher suite params + verify Ed448 + HKDF edge cases (TLCP client: wrong-state ServerHello/Certificate/SKE/SHD/CCS/Finished, no TLCP suites error; Cipher suite params: TLS 1.3 AES-128-GCM/AES-256-GCM/ChaCha20/CCM_8/invalid/hash_factory SHA-256/SHA-384, TLS 1.2 CBC-SHA/PSK-GCM/invalid/DHE-RSA-GCM; Verify: Ed448 roundtrip/wrong sig, Ed25519 client context; HKDF: empty info expand, SHA-384 expand_label, empty data HMAC, exact hash length expand, +25 tests, 2274→2299) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.
