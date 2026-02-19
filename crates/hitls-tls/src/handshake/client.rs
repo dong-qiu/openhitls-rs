@@ -1282,6 +1282,48 @@ mod tests {
         );
     }
 
+    /// Parse extension types from a raw ClientHello handshake message.
+    /// Returns a list of (type_u16) for each extension found.
+    fn parse_extension_types(ch_msg: &[u8]) -> Vec<u16> {
+        // Skip handshake header: type(1) + length(3) = 4
+        let mut pos = 4;
+        // version(2) + random(32)
+        pos += 2 + 32;
+        if pos >= ch_msg.len() {
+            return vec![];
+        }
+        // session_id
+        let sid_len = ch_msg[pos] as usize;
+        pos += 1 + sid_len;
+        // cipher_suites
+        if pos + 2 > ch_msg.len() {
+            return vec![];
+        }
+        let suites_len = u16::from_be_bytes([ch_msg[pos], ch_msg[pos + 1]]) as usize;
+        pos += 2 + suites_len;
+        // compression_methods
+        if pos >= ch_msg.len() {
+            return vec![];
+        }
+        let comp_len = ch_msg[pos] as usize;
+        pos += 1 + comp_len;
+        // extensions_length
+        if pos + 2 > ch_msg.len() {
+            return vec![];
+        }
+        let ext_total = u16::from_be_bytes([ch_msg[pos], ch_msg[pos + 1]]) as usize;
+        pos += 2;
+        let ext_end = pos + ext_total;
+        let mut types = Vec::new();
+        while pos + 4 <= ext_end && pos + 4 <= ch_msg.len() {
+            let etype = u16::from_be_bytes([ch_msg[pos], ch_msg[pos + 1]]);
+            let elen = u16::from_be_bytes([ch_msg[pos + 2], ch_msg[pos + 3]]) as usize;
+            types.push(etype);
+            pos += 4 + elen;
+        }
+        types
+    }
+
     #[test]
     fn test_padding_in_tls13_client_hello() {
         let config = TlsConfig::builder()
@@ -1291,11 +1333,13 @@ mod tests {
         let mut hs = ClientHandshake::new(config);
         let ch_msg = hs.build_client_hello().unwrap();
 
-        // PADDING extension type is 0x0015 (21)
-        let has_padding = ch_msg.windows(2).any(|w| w[0] == 0x00 && w[1] == 0x15);
-        assert!(has_padding, "ClientHello should contain PADDING extension");
+        // PADDING extension type is 21 (0x0015)
+        let ext_types = parse_extension_types(&ch_msg);
+        assert!(
+            ext_types.contains(&21),
+            "ClientHello should contain PADDING extension"
+        );
         // The CH message should be close to the target size
-        // (might not be exactly 512 due to rounding, but should be >= 512 - 4)
         assert!(
             ch_msg.len() >= 508,
             "CH len {} should be near target 512",
@@ -1312,10 +1356,10 @@ mod tests {
         let mut hs = ClientHandshake::new(config);
         let ch_msg = hs.build_client_hello().unwrap();
 
-        // PADDING extension type is 0x0015 (21)
-        let has_padding = ch_msg.windows(2).any(|w| w[0] == 0x00 && w[1] == 0x15);
+        // PADDING extension type is 21 (0x0015) — must NOT appear
+        let ext_types = parse_extension_types(&ch_msg);
         assert!(
-            !has_padding,
+            !ext_types.contains(&21),
             "ClientHello should NOT contain PADDING extension when disabled"
         );
     }
@@ -1331,9 +1375,9 @@ mod tests {
         let ch_msg = hs.build_client_hello().unwrap();
 
         // PADDING extension should NOT be present since CH already exceeds target
-        let has_padding = ch_msg.windows(2).any(|w| w[0] == 0x00 && w[1] == 0x15);
+        let ext_types = parse_extension_types(&ch_msg);
         assert!(
-            !has_padding,
+            !ext_types.contains(&21),
             "ClientHello should NOT contain PADDING when already exceeding target"
         );
     }
