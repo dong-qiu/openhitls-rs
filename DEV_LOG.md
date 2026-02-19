@@ -1,5 +1,561 @@
 # openHiTLS Rust Migration — Development Log
 
+## Migration Roadmap Archive
+
+> The following phase tables document the complete C→Rust migration history (Phase 21–82).
+> They were moved here from README.md to keep the README focused on feature showcase.
+> For the current feature summary, see [README.md](README.md).
+
+### Phase 21: TLS 1.3 Completeness
+
+| Feature | RFC | Status |
+|---------|-----|--------|
+| PSK / Session Tickets | RFC 8446 §4.6.1 | **Done** |
+| HelloRetryRequest (HRR) | RFC 8446 §4.1.4 | **Done** |
+| 0-RTT Early Data | RFC 8446 §4.2.10 | **Done** |
+| Post-Handshake Client Auth | RFC 8446 §4.6.2 | **Done** |
+| KeyUpdate | RFC 8446 §4.6.3 | **Done** |
+| Certificate Compression | RFC 8879 | **Done** (zlib, feature-gated) |
+
+### Phase 22: ECC Curve Additions
+
+| Curve | Standard | Status |
+|-------|----------|--------|
+| P-521 (secp521r1) | FIPS 186-4 | **Done** |
+| Brainpool P-256r1 | RFC 5639 | **Done** |
+| Brainpool P-384r1 | RFC 5639 | **Done** |
+| Brainpool P-512r1 | RFC 5639 | **Done** |
+| P-224 (secp224r1) | FIPS 186-4 | **Done** |
+
+### Phase 23: DRBG Variants & PKCS#8
+
+| Component | Standard | Status |
+|-----------|----------|--------|
+| CTR-DRBG (AES-256) | NIST SP 800-90A §10.2 | **Done** |
+| Hash-DRBG (SHA-256/384/512) | NIST SP 800-90A §10.1.1 | **Done** |
+| PKCS#8 Key Parsing | RFC 5958 | **Done** (RSA, EC, Ed25519, X25519, DSA) |
+
+### Phase 24: CRL & OCSP
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| CRL Parsing | RFC 5280 §5 | **Done** |
+| CRL Validation | RFC 5280 §6.3 | **Done** |
+| Revocation Checking | RFC 5280 | **Done** |
+| OCSP (basic) | RFC 6960 | **Done** |
+
+### Phase 25: CSR Generation, Certificate Generation, TLS 1.2 PRF
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| CSR Parsing (PKCS#10) | RFC 2986 | **Done** |
+| CSR Generation (CertificateRequestBuilder) | RFC 2986 | **Done** |
+| X.509 Certificate Generation (CertificateBuilder) | RFC 5280 | **Done** |
+| Self-Signed Certificate Generation | RFC 5280 | **Done** |
+| SigningKey Abstraction (RSA/ECDSA/Ed25519) | — | **Done** |
+| TLS 1.2 PRF | RFC 5246 §5 | **Done** |
+| CLI `req` Command | — | **Done** |
+
+### Phase 26: TLS 1.2
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLS 1.2 Handshake | RFC 5246 | **Done** (91 cipher suites) |
+| TLS 1.2 Cipher Suites (50+) | RFC 5246 | **Done** (91 suites) |
+| Session Resumption (ID-based) | RFC 5246 §7.4.1.2 | **Done** |
+| Client Certificate Auth (mTLS) | RFC 5246 §7.4.4 | **Done** |
+| Renegotiation Indication | RFC 5746 | **Done** (Phase 68: full renegotiation) |
+| TLS 1.2 Record Protocol | RFC 5246 §6 | **Done** |
+
+### Phase 27: DTLS 1.2
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| DTLS 1.2 Record Layer (13-byte header, epoch, 48-bit seq) | RFC 6347 | **Done** |
+| Epoch-Aware AEAD Encryption/Decryption | RFC 6347 §4.1 | **Done** |
+| DTLS Handshake Header (12-byte, message_seq, fragmentation) | RFC 6347 §4.2.2 | **Done** |
+| HelloVerifyRequest Cookie Exchange | RFC 6347 §4.2.1 | **Done** |
+| Message Fragmentation/Reassembly (MTU-aware) | RFC 6347 §4.2.3 | **Done** |
+| Anti-Replay Sliding Window (64-bit bitmap) | RFC 6347 §4.1.2.6 | **Done** |
+| Retransmission Timers (exponential backoff) | RFC 6347 §4.2.4 | **Done** |
+| DTLS Client Handshake State Machine | RFC 6347 | **Done** |
+| DTLS Server Handshake State Machine | RFC 6347 | **Done** |
+| DTLS Connection Types + In-Memory Transport | RFC 6347 | **Done** |
+
+### Phase 28: TLCP (GM/T 0024)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLCP Handshake (ECDHE + ECC key exchange) | GM/T 0024 / GB/T 38636-2020 | **Done** |
+| 4 Cipher Suites (ECDHE_SM4_CBC_SM3, ECC_SM4_CBC_SM3, ECDHE_SM4_GCM_SM3, ECC_SM4_GCM_SM3) | GM/T 0024 | **Done** |
+| Double Certificate (signing + encryption) | GM/T 0024 | **Done** |
+| CBC MAC-then-encrypt (HMAC-SM3 + SM4-CBC) | GM/T 0024 | **Done** |
+| GCM AEAD (SM4-GCM) | GM/T 0024 | **Done** |
+| SM3-based PRF | GM/T 0024 | **Done** |
+
+### Phase 29: TLS 1.2 CBC + ChaCha20-Poly1305 + ALPN + SNI
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| 8 ECDHE-CBC cipher suites (AES-128/256, SHA/SHA256/SHA384) | RFC 5246 | **Done** |
+| 2 ECDHE-ChaCha20-Poly1305 cipher suites | RFC 7905 | **Done** |
+| CBC MAC-then-encrypt record protection | RFC 5246 §6.2.3.1 | **Done** |
+| Constant-time padding oracle mitigation | RFC 5246 | **Done** |
+| ALPN extension (Application-Layer Protocol Negotiation) | RFC 7301 | **Done** |
+| SNI server-side parsing (Server Name Indication) | RFC 6066 | **Done** |
+
+### Phase 30: TLS 1.2 Session Resumption + Client Certificate Auth (mTLS)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| CertificateRequest12 + CertificateVerify12 codec | RFC 5246 §7.4.4/§7.4.8 | **Done** |
+| Server-side mTLS (CertificateRequest, verify client cert) | RFC 5246 | **Done** |
+| Client-side mTLS (respond to CertReq, CertVerify) | RFC 5246 | **Done** |
+| Session ID-based resumption (abbreviated handshake) | RFC 5246 §7.4.1.2 | **Done** |
+| Server-side session caching (InMemorySessionCache) | RFC 5246 | **Done** |
+| Client-side session resumption (cached session_id) | RFC 5246 | **Done** |
+| Abbreviated handshake (1-RTT, server CCS+Finished first) | RFC 5246 | **Done** |
+
+### Phase 31: s_client CLI + Network I/O
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| s_client CLI command | TLS client with --tls, --insecure, --http, --CAfile, --alpn, --quiet | **Done** |
+| TLS 1.3 over TCP | TlsClientConnection over TcpStream | **Done** |
+| TLS 1.2 over TCP | Tls12ClientConnection over TcpStream | **Done** |
+| TCP connect timeout | 10-second connect + read/write timeout | **Done** |
+| HTTP GET mode | --http flag sends GET / and prints response | **Done** |
+| CA file loading | --CAfile loads PEM CA cert for verification | **Done** |
+
+### Phase 32: s_server CLI + Key Conversion
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| s_server CLI command | TLS server with --tls, --port, --cert, --key, --quiet | **Done** |
+| PKCS#8 → ServerPrivateKey | Convert RSA/ECDSA/Ed25519 keys for TLS server | **Done** |
+| TLS 1.3 echo server | TlsServerConnection over TcpStream | **Done** |
+| TLS 1.2 echo server | Tls12ServerConnection over TcpStream | **Done** |
+| RsaPrivateKey byte getters | d_bytes(), p_bytes(), q_bytes() | **Done** |
+
+### Phase 33: TCP Loopback Integration Tests
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| TLS 1.3 Ed25519 TCP loopback | Bidirectional exchange over real TcpStream | **Done** |
+| TLS 1.2 ECDSA P-256 TCP loopback | ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 | **Done** |
+| TLS 1.3 large payload (64 KB) | Multi-record chunked writes over TCP | **Done** |
+| TLS 1.2 RSA TCP loopback | ECDHE_RSA_WITH_AES_256_GCM_SHA384 (ignored — slow keygen) | **Done** |
+| TLS 1.3 multi-message echo | 5 round trips over TCP | **Done** |
+
+### Phase 34: TLS 1.2 Session Ticket (RFC 5077)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| SessionTicket extension (type 35, ClientHello + ServerHello codec) | RFC 5077 §3.2 | **Done** |
+| Ticket encryption (AES-256-GCM, session state serialization) | RFC 5077 §4 | **Done** |
+| NewSessionTicket message (HandshakeType 4, lifetime_hint + ticket) | RFC 5077 §3.3 | **Done** |
+| Server ticket issuance + ticket-based resumption | RFC 5077 §3.1 | **Done** |
+| Client ticket sending + NewSessionTicket processing | RFC 5077 §3.4 | **Done** |
+| Connection-level ticket flow + take_session() | RFC 5077 | **Done** |
+
+### Phase 35: TLS 1.2 Extended Master Secret + Encrypt-Then-MAC + Renegotiation Indication
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| Extended Master Secret (EMS) | RFC 7627 | **Done** |
+| Encrypt-Then-MAC (ETM) | RFC 7366 | **Done** |
+| Secure Renegotiation Indication | RFC 5746 | **Done** (Phase 68: full renegotiation) |
+| Config flags (enable_extended_master_secret, enable_encrypt_then_mac) | — | **Done** |
+| TCP loopback EMS+ETM over CBC integration test | — | **Done** |
+
+### Phase 36: TLS 1.2 RSA + DHE Key Exchange (13 New Cipher Suites)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| RSA static key exchange (no ServerKeyExchange) | RFC 5246 | **Done** |
+| DHE_RSA key exchange (DH ServerKeyExchange) | RFC 5246 | **Done** |
+| Bleichenbacher protection for RSA key exchange | — | **Done** |
+| 6 RSA suites (AES-128/256 GCM + CBC) | RFC 5246 | **Done** |
+| 7 DHE_RSA suites (AES-128/256 GCM + CBC + ChaCha20) | RFC 5246/7905 | **Done** |
+| ECDHE_RSA suites tested with real RSA certificates | RFC 5246 | **Done** |
+
+### Phase 37: TLS 1.2 PSK Cipher Suites (RFC 4279/5489)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| PSK key exchange (5 suites: AES-128/256-GCM, AES-128/256-CBC-SHA, ChaCha20-Poly1305) | RFC 4279 | **Done** |
+| DHE_PSK key exchange (5 suites: same AEAD/CBC variants) | RFC 4279 | **Done** |
+| RSA_PSK key exchange (5 suites: same AEAD/CBC variants, server RSA cert) | RFC 4279 | **Done** |
+| ECDHE_PSK key exchange (5 suites: same AEAD/CBC variants) | RFC 5489 | **Done** |
+| PSK configuration (psk, psk_identity, psk_identity_hint, psk_server_callback) | RFC 4279 | **Done** |
+| `build_psk_pms()` helper (RFC 4279 PMS format) | RFC 4279 | **Done** |
+| `KeyExchangeAlg::Psk`, `DhePsk`, `RsaPsk`, `EcdhePsk` variants | — | **Done** |
+| Conditional Certificate/CertificateRequest for PSK modes | RFC 4279 | **Done** |
+
+### Phase 38: TLS 1.3 Post-Quantum Hybrid KEM (X25519MLKEM768)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| X25519MLKEM768 key exchange (NamedGroup 0x6399) | draft-ietf-tls-ecdhe-mlkem | **Done** |
+| Wire format: ML-KEM first, X25519 second | draft-ietf-tls-ecdhe-mlkem | **Done** |
+| Client key_share: mlkem_ek(1184) + x25519_pk(32) = 1216 bytes | — | **Done** |
+| Server key_share: mlkem_ct(1088) + x25519_eph_pk(32) = 1120 bytes | — | **Done** |
+| Shared secret: mlkem_ss(32) + x25519_ss(32) = 64 bytes (raw concat) | — | **Done** |
+| Server-side KEM encapsulation (not DH) for hybrid groups | — | **Done** |
+| HRR fallback: client offers hybrid+X25519, server can HRR to X25519 | RFC 8446 §4.1.4 | **Done** |
+| `MlKem768::from_encapsulation_key()` constructor | FIPS 203 | **Done** |
+| `NamedGroup::is_kem()` helper | — | **Done** |
+| E2E hybrid handshake + HRR fallback tests | — | **Done** |
+
+### Phase 39: TLS Extensions Completeness (Record Size Limit, Fallback SCSV, OCSP Stapling, SCT)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| Record Size Limit (TLS 1.3) | RFC 8449 | **Done** — CH + EncryptedExtensions, -1 for content type, 64..16385 range validation |
+| Record Size Limit (TLS 1.2) | RFC 8449 | **Done** — CH + SH echo, no content type adjustment |
+| Fallback SCSV | RFC 7507 | **Done** — Client appends 0x5600, server detects + inappropriate_fallback alert |
+| OCSP Stapling (TLS 1.3) | RFC 6066 section 8 | **Done** — status_request in CH, OCSP response in leaf Certificate entry extensions |
+| OCSP Stapling (TLS 1.2) | RFC 6066 section 8 | **Done** — CH offering + CertificateStatus message (type 22) |
+| SCT (TLS 1.3) | RFC 6962 | **Done** — signed_certificate_timestamp in CH, SCT list in leaf Certificate entry extensions |
+| SCT (TLS 1.2) | RFC 6962 | **Done** — CH offering |
+| Record layer integration | RFC 8449 | **Done** — RSL applied via existing max_fragment_size |
+
+### Phase 40: Async I/O + Performance Optimization
+
+| Feature | Platform | Status |
+|---------|----------|--------|
+| Async TLS (tokio) | All | **Done** |
+| AES-NI acceleration | x86-64 | **Done** |
+| ARM NEON acceleration | AArch64 | **Done** |
+| Criterion benchmarks | All | **Done** |
+
+### Phase 41: DTLCP + Custom Extensions + Key Logging
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| DTLCP (DTLS over TLCP) | GM/T 0024 | **Done** — 4 cipher suites, cookie exchange, anti-replay |
+| Custom Extensions Framework | — | **Done** — Callback-based, CH/SH/EE contexts |
+| Key Log callback (SSLKEYLOGFILE) | — | **Done** — NSS format, TLS 1.3/1.2/DTLS/TLCP/DTLCP |
+
+### Phase 42: Testing & Quality Assurance
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| Wycheproof test vectors | 15 test functions, 5000+ edge-case vectors | **Done** |
+| Fuzz targets | 10 libfuzzer targets | **Done** |
+| Security audit | Constant-time audit, zeroize audit, unsafe code review | **Done** |
+| SECURITY.md | Security policy, algorithm status, known limitations | **Done** |
+| CI enhancements | Fuzz build check (nightly) + Miri + Benchmark check | **Done** |
+
+### Phase 43: Feature Completeness
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| PKI Text Output | `to_text()` for Certificate, CRL, CSR | **Done** |
+| TLS 1.3 SM4-GCM/CCM | `TLS_SM4_GCM_SM3` (0x00C6), `TLS_SM4_CCM_SM3` (0x00C7), RFC 8998 | **Done** |
+| SM4-CCM crypto | BlockCipher trait generalization for SM4+AES in CCM mode | **Done** |
+| CMS EnvelopedData | RFC 5652 §6: RSA OAEP key transport + AES Key Wrap | **Done** |
+| Privacy Pass | RFC 9578 Type 2: RSA blind signatures | **Done** |
+| CLI: list, rand, pkeyutl, speed | 4 new subcommands (14 total CLI commands) | **Done** |
+
+### Phase 44: Remaining Features (NistP192, HCTR mode, CMS EncryptedData)
+
+Completed P-192, HCTR mode, CMS EncryptedData.
+
+### Phase 45: Complete DH Groups + TLS FFDHE Expansion
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| RFC 2409 DH groups (768-bit, 1024-bit) | RFC 2409 §6 | **Done** |
+| RFC 3526 DH groups (1536/2048/3072/4096/6144/8192-bit) | RFC 3526 §2-7 | **Done** |
+| RFC 7919 FFDHE groups (4096/6144/8192-bit) | RFC 7919 §3 | **Done** |
+| TLS NamedGroup FFDHE6144/8192 | RFC 7919 | **Done** |
+
+### Phase 46: FIPS/CMVP Compliance Framework
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| FIPS state machine | FIPS 140-3 | **Done** |
+| KAT: SHA-256, HMAC-SHA256, AES-128-GCM, HMAC-DRBG, HKDF-SHA256, ECDSA P-256 | FIPS 140-3 §10.3.3 | **Done** |
+| Integrity check | FIPS 140-3 §10.3.1 | **Done** |
+| PCT: ECDSA P-256, Ed25519, RSA-2048 PSS | FIPS 140-3 §10.3.5 | **Done** |
+
+### Phase 47: CLI Enhancements + CMS DigestedData
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| CLI `pkcs12` subcommand | RFC 7292 | **Done** |
+| CLI `mac` subcommand | — | **Done** |
+| CMS DigestedData | RFC 5652 §5 | **Done** |
+
+### Phase 48: Entropy Health Testing (NIST SP 800-90B)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| Repetition Count Test (RCT) | NIST SP 800-90B §4.4.1 | **Done** |
+| Adaptive Proportion Test (APT) | NIST SP 800-90B §4.4.2 | **Done** |
+| Entropy Pool + Hash Conditioning | NIST SP 800-90B §3.1.5 | **Done** |
+| Noise Source Trait + DRBG Integration | — | **Done** |
+
+### Phase 49: Ed448 / X448 / Curve448
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| Fe448 field arithmetic | GF(2^448-2^224-1) | **Done** |
+| Ed448 sign/verify | RFC 8032 §5.2 | **Done** |
+| X448 key exchange | RFC 7748 §5 | **Done** |
+| TLS integration (Ed448 signing, X448 key exchange) | RFC 8446 | **Done** |
+
+### Phase 50: Test Coverage + CMS Ed25519/Ed448 + enc CLI + TLS 1.2 OCSP/SCT
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| Alert/Session/Record module tests | 52 tests for under-tested modules | **Done** |
+| CMS Ed25519/Ed448 | Verify + sign with Ed25519/Ed448 in CMS SignedData | **Done** |
+| enc CLI expansion | 4 ciphers: aes-256-gcm, aes-128-gcm, chacha20-poly1305, sm4-gcm | **Done** |
+| TLS 1.2 CertificateStatus | RFC 6066 §8: OCSP stapling in TLS 1.2 | **Done** |
+
+### Phase 51–54: PKI Test Coverage
+
+- **Phase 51**: C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop (52 new PKI tests)
+- **Phase 52**: X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup (39 new PKI tests)
+- **Phase 53**: C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests (56 new PKI tests)
+- **Phase 54**: PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths (41 new PKI tests)
+
+### Phase 55: TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness
+
+24 new tests: TLS 1.3/1.2 export_keying_material (RFC 5705/8446 §7.5), CMS detached SignedData, PKCS#8 Ed448/X448, SPKI parsing, pkeyutl derive/sign/verify.
+
+### Phase 56: Integration Test Expansion + TLCP Public API + Code Quality
+
+30 new tests: ML-KEM panic→Result fix, TLCP public handshake-in-memory API, 5 DTLS 1.2 + 4 TLCP + 3 DTLCP + 4 mTLS integration tests, 12 TLS 1.3 server unit tests.
+
+### Phase 57–61: Unit Test Coverage Expansion
+
+175 new tests across Phase 57–61:
+
+| Phase | Tests | Key Coverage Areas |
+|-------|-------|--------------------|
+| Phase 57 | +40 | X25519 RFC 7748 iterated vectors, HKDF error paths, SM3/SM4, Base64/PEM, anti-replay, TLS 1.2 client/DTLS state machines |
+| Phase 58 | +36 | Ed25519 RFC 8032 vectors, ECDSA, ASN.1, HMAC, ChaCha20-Poly1305, TLS 1.3/1.2 wrong-state |
+| Phase 59 | +35 | CFB/OFB/ECB/XTS, ML-KEM/ML-DSA, DRBG, GMAC/CMAC, SHA-1, scrypt/PBKDF2, TLS transcript |
+| Phase 60 | +36 | CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3, Entropy, Privacy Pass |
+| Phase 61 | +34 | RSA, ECDH, SM2, ElGamal/Paillier, ECC, MD5/SM4/SHA-2/SHA-3/AES, BigNum, OTP/SPAKE2+ |
+
+### Phase 62: TLS 1.2 CCM Cipher Suites (RFC 6655 / RFC 7251)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLS_RSA_WITH_AES_128_CCM (0xC09C) | RFC 6655 | **Done** |
+| TLS_RSA_WITH_AES_256_CCM (0xC09D) | RFC 6655 | **Done** |
+| TLS_DHE_RSA_WITH_AES_128_CCM (0xC09E) | RFC 6655 | **Done** |
+| TLS_DHE_RSA_WITH_AES_256_CCM (0xC09F) | RFC 6655 | **Done** |
+| TLS_ECDHE_ECDSA_WITH_AES_128_CCM (0xC0AC) | RFC 7251 | **Done** |
+| TLS_ECDHE_ECDSA_WITH_AES_256_CCM (0xC0AD) | RFC 7251 | **Done** |
+
+### Phase 63: CCM_8 + PSK+CCM Cipher Suites
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLS_AES_128_CCM_8_SHA256 (0x1305) | RFC 8446 | **Done** |
+| TLS_RSA_WITH_AES_128_CCM_8 (0xC0A0) | RFC 6655 | **Done** |
+| TLS_RSA_WITH_AES_256_CCM_8 (0xC0A1) | RFC 6655 | **Done** |
+| TLS_PSK_WITH_AES_256_CCM (0xC0A5) | RFC 6655 | **Done** |
+| TLS_DHE_PSK_WITH_AES_128_CCM (0xC0A6) | RFC 6655 | **Done** |
+| TLS_DHE_PSK_WITH_AES_256_CCM (0xC0A7) | RFC 6655 | **Done** |
+| TLS_ECDHE_PSK_WITH_AES_128_CCM_SHA256 (0xD005) | RFC 7251 | **Done** |
+
+### Phase 64: PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLS_PSK_WITH_AES_128_CBC_SHA256 (0x00AE) | RFC 5487 | **Done** |
+| TLS_PSK_WITH_AES_256_CBC_SHA384 (0x00AF) | RFC 5487 | **Done** |
+| TLS_DHE_PSK_WITH_AES_128_CBC_SHA256 (0x00B2) | RFC 5487 | **Done** |
+| TLS_DHE_PSK_WITH_AES_256_CBC_SHA384 (0x00B3) | RFC 5487 | **Done** |
+| TLS_RSA_PSK_WITH_AES_128_CBC_SHA256 (0x00B6) | RFC 5487 | **Done** |
+| TLS_RSA_PSK_WITH_AES_256_CBC_SHA384 (0x00B7) | RFC 5487 | **Done** |
+| TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256 (0xD001) | draft-ietf-tls-ecdhe-psk-aead | **Done** |
+| TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384 (0xD002) | draft-ietf-tls-ecdhe-psk-aead | **Done** |
+
+### Phase 65: PSK CCM Completion + CCM_8 Authentication Cipher Suites
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLS_PSK_WITH_AES_128_CCM (0xC0A4) | RFC 6655 | **Done** |
+| TLS_PSK_WITH_AES_128_CCM_8 (0xC0A8) | RFC 6655 | **Done** |
+| TLS_PSK_WITH_AES_256_CCM_8 (0xC0A9) | RFC 6655 | **Done** |
+| TLS_DHE_PSK_WITH_AES_128_CCM_8 (0xC0AA) | RFC 6655 | **Done** |
+| TLS_DHE_PSK_WITH_AES_256_CCM_8 (0xC0AB) | RFC 6655 | **Done** |
+| TLS_ECDHE_PSK_WITH_AES_128_CCM_8_SHA256 (0xD005) | RFC 7251 | **Done** |
+| TLS_DHE_RSA_WITH_AES_128_CCM_8 (0xC0A2) | RFC 6655 | **Done** |
+| TLS_DHE_RSA_WITH_AES_256_CCM_8 (0xC0A3) | RFC 6655 | **Done** |
+| TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 (0xC0AE) | RFC 7251 | **Done** |
+| TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8 (0xC0AF) | RFC 7251 | **Done** |
+
+### Phase 66: DHE_DSS Cipher Suites (DSA Authentication)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLS_DHE_DSS_WITH_AES_128_CBC_SHA (0x0032) | RFC 5246 | **Done** |
+| TLS_DHE_DSS_WITH_AES_256_CBC_SHA (0x0038) | RFC 5246 | **Done** |
+| TLS_DHE_DSS_WITH_AES_128_CBC_SHA256 (0x0040) | RFC 5246 | **Done** |
+| TLS_DHE_DSS_WITH_AES_256_CBC_SHA256 (0x006A) | RFC 5246 | **Done** |
+| TLS_DHE_DSS_WITH_AES_128_GCM_SHA256 (0x00A2) | RFC 5246 | **Done** |
+| TLS_DHE_DSS_WITH_AES_256_GCM_SHA384 (0x00A3) | RFC 5246 | **Done** |
+
+### Phase 67: DH_ANON + ECDH_ANON Cipher Suites
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| TLS_DH_ANON_WITH_AES_128_CBC_SHA (0x0034) | RFC 5246 | **Done** |
+| TLS_DH_ANON_WITH_AES_256_CBC_SHA (0x003A) | RFC 5246 | **Done** |
+| TLS_DH_ANON_WITH_AES_128_CBC_SHA256 (0x006C) | RFC 5246 | **Done** |
+| TLS_DH_ANON_WITH_AES_256_CBC_SHA256 (0x006D) | RFC 5246 | **Done** |
+| TLS_DH_ANON_WITH_AES_128_GCM_SHA256 (0x00A6) | RFC 5246 | **Done** |
+| TLS_DH_ANON_WITH_AES_256_GCM_SHA384 (0x00A7) | RFC 5246 | **Done** |
+| TLS_ECDH_ANON_WITH_AES_128_CBC_SHA (0xC018) | RFC 4492 | **Done** |
+| TLS_ECDH_ANON_WITH_AES_256_CBC_SHA (0xC019) | RFC 4492 | **Done** |
+
+### Phase 68: TLS 1.2 Renegotiation (RFC 5746)
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| HelloRequest message type (0) + codec | RFC 5246 | **Done** |
+| NoRenegotiation alert (100) | RFC 5746 | **Done** |
+| `allow_renegotiation` config option | — | **Done** |
+| Client + Server renegotiation (verify_data validation) | RFC 5746 | **Done** |
+| Renegotiating connection state + async renegotiation | RFC 5246 | **Done** |
+
+### Phase 69: Connection Info APIs + Graceful Shutdown + ALPN Completion
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| ConnectionInfo struct | — | **Done** |
+| TLS 1.3 ALPN (client + server) | RFC 7301 | **Done** |
+| Graceful shutdown (close_notify tracking) | RFC 5246/8446 | **Done** |
+
+### Phase 70: Hostname Verification + Certificate Chain Validation + SNI Callback
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| Hostname verification (SAN/CN, wildcards, IP) | RFC 6125 | **Done** |
+| Certificate chain validation (CertificateVerifier + trusted_certs) | RFC 5280 | **Done** |
+| CertVerifyCallback + SniCallback | — | **Done** |
+| Wired into TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP | — | **Done** |
+
+### Phase 71: Server-Side Session Cache + Session Expiration + Cipher Preference
+
+| Feature | Status |
+|---------|--------|
+| `Arc<Mutex<dyn SessionCache>>` in TlsConfig | **Done** |
+| Auto-store / auto-lookup / TTL expiration (default 2h) | **Done** |
+| `cipher_server_preference` config (default: true) | **Done** |
+
+### Phase 72: Client-Side Session Cache + Write Record Fragmentation
+
+| Feature | Status |
+|---------|--------|
+| Client auto-store / auto-lookup by server_name | **Done** |
+| Write record fragmentation (auto-split by max_fragment_size) | **Done** |
+| All 8 connection types (4 sync + 4 async) | **Done** |
+
+### Phase 73: KeyUpdate Loop Protection + Max Fragment Length + Signature Algorithms Cert
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| KeyUpdate loop protection (128 limit) | RFC 8446 | **Done** |
+| Max Fragment Length (512/1024/2048/4096) | RFC 6066 | **Done** |
+| Signature Algorithms Cert extension | RFC 8446 §4.2.3 | **Done** |
+
+### Phase 74: Certificate Authorities + Early Exporter + DTLS 1.2 Session Cache
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| Certificate Authorities extension | RFC 8446 §4.2.4 | **Done** |
+| Early exporter master secret + API | RFC 8446 §7.5 | **Done** |
+| DTLS 1.2 session cache auto-store | RFC 6347 | **Done** |
+
+### Phase 75: PADDING + OID Filters + DTLS 1.2 Abbreviated Handshake
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| PADDING extension (type 21) | RFC 7685 | **Done** |
+| OID Filters extension (type 48) | RFC 8446 §4.2.5 | **Done** |
+| DTLS 1.2 abbreviated handshake (session resumption) | RFC 6347 | **Done** |
+
+### Phase 76: Async DTLS 1.2 + Heartbeat + GREASE
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| AsyncDtls12Client/ServerConnection | RFC 6347 | **Done** |
+| Heartbeat extension (type 15) | RFC 6520 | **Done** |
+| GREASE injection (cipher suites/extensions/groups/sig_algs/key_share) | RFC 8701 | **Done** |
+
+### Phase 77: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4
+
+| Feature | Description |
+|---------|-------------|
+| 7 TLS Callbacks | MsgCallback, InfoCallback, RecordPaddingCallback, DhTmpCallback, CookieGenCallback, CookieVerifyCallback, ClientHelloCallback |
+| Missing Alert Codes | 6 legacy codes added |
+| CBC-MAC-SM4 | SM4 CBC-MAC with zero-padding, feature-gated `cbc-mac` |
+
+### Phase 78: Trusted CA Keys + USE_SRTP + STATUS_REQUEST_V2 + CMS AuthenticatedData
+
+| Feature | Standard | Status |
+|---------|----------|--------|
+| Trusted CA Keys (type 3) | RFC 6066 §6 | **Done** |
+| USE_SRTP (type 14) | RFC 5764 | **Done** |
+| STATUS_REQUEST_V2 (type 17) | RFC 6961 | **Done** |
+| CMS AuthenticatedData (HMAC-SHA-256/384/512) | RFC 5652 §9 | **Done** |
+
+### Phase 79: DTLS Config Enhancements + Integration Tests
+
+| Feature | Description |
+|---------|-------------|
+| flight_transmit_enable | DTLS flight-based transmission control |
+| empty_records_limit | Consecutive empty record DoS protection (default: 32) |
+| Integration tests | MsgCallback, InfoCallback, ClientHelloCallback, CBC-MAC-SM4, CMS AuthenticatedData |
+
+### Phase 80: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| Encrypted PKCS#8 | PBES2 (PBKDF2-HMAC-SHA256 + AES-256-CBC/AES-128-CBC) | **Done** |
+| Session ID Context | session_id_context for session cache isolation | **Done** |
+| quiet_shutdown | Skip close_notify on shutdown (all 6 connection types) | **Done** |
+
+### Phase 81: TicketKeyCallback + SecurityCallback
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| TicketKeyCallback | Session ticket key rotation callback | **Done** |
+| SecurityCallback | Cipher/group/sigalg security filtering | **Done** |
+| security_level config | Configurable security level (default: 1) | **Done** |
+
+### Phase 82: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| SM4-CTR-DRBG | NIST SP 800-90A §10.2 with SM4 cipher | **Done** |
+| CMS ML-DSA | ML-DSA-44/65/87 OID dispatch in CMS SignedData | **Done** |
+| Integration tests | quiet_shutdown, security_callback, encrypted_pkcs8 e2e | **Done** |
+
+### Coverage Summary (vs. C Implementation)
+
+| Component | C (lines) | Rust (lines) | Coverage | Remaining Gaps |
+|-----------|-----------|--------------|----------|----------------|
+| Crypto Algorithms | ~132K | ~27K | **100%** | — |
+| TLS Protocol | ~52K | ~15K | **100%** | — |
+| PKI / X.509 | ~17K | ~4.5K | **100%** | — |
+| Base Support Layer | ~12K | ~2K | **95%** | — |
+| CLI Tools | ~8K | ~2.2K | **100%** | — |
+| FIPS/CMVP | ~5K | ~0.6K | **90%** | Conditional algorithm disabling |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | SDV compliance tests |
+| **Total** | **~460K** | **~55K** | **~100%** | Performance optimization items only |
+
+---
+
 ## Phase 82: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests + Documentation Sync
 
 ### Date: 2026-02-19

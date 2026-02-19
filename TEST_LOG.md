@@ -1,13 +1,18 @@
 # openHiTLS-rs — Test Development Log
 
+> This file documents the complete testing history for openHiTLS-rs.
+> For the current feature summary, see [README.md](README.md).
+> For implementation phase history, see [DEV_LOG.md](DEV_LOG.md).
+
 ## Overview
 
 Systematic test coverage improvement across the openHiTLS-rs workspace.
 Tests were added in four priority tiers (P0–P3), working from most critical
-(core crypto primitives) down to supplementary coverage.
+(core crypto primitives) down to supplementary coverage, followed by
+Testing-Phase 72–86 for protocol and edge-case coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,445 tests (40 ignored)
+**Current**: 2,454 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -19,6 +24,11 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 **Testing-Phase 79**: +28 tests (DTLS 1.2 handshake + TLS 1.3 server + record layer + PRF unit tests)
 **Testing-Phase 80**: +24 tests (TLCP server + transcript + key_schedule12 + cert_verify + TLS 1.3 client + session)
 **Testing-Phase 81**: +25 tests (client_tlcp + cipher suite params + verify Ed448 + HKDF edge cases)
+**Testing-Phase 82**: +24 tests (codec/server12/client12/dtls12/config unit tests)
+**Testing-Phase 83**: +25 tests (session/client/server/async/dtls12-async unit tests)
+**Testing-Phase 84**: +24 tests (record/extensions/export/codec/connection unit tests)
+**Testing-Phase 85**: +25 tests (aead/crypt/alert/signing/config unit tests)
+**Testing-Phase 86**: +23 tests (retransmit/keylog/fragment/anti_replay/key_exchange unit tests)
 
 ---
 
