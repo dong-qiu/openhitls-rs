@@ -2595,6 +2595,53 @@ mod tests {
     }
 
     #[test]
+    fn test_server12_abbreviated_finished_wrong_state_idle() {
+        let config = make_server_config();
+        let mut hs = Tls12ServerHandshake::new(config);
+        // Abbreviated Finished from Idle → error
+        assert!(hs
+            .process_abbreviated_finished(&[20, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            .is_err());
+    }
+
+    #[test]
+    fn test_server12_cert_verify_wrong_state_idle() {
+        let config = make_server_config();
+        let mut hs = Tls12ServerHandshake::new(config);
+        // CertificateVerify from Idle → error
+        assert!(hs
+            .process_client_certificate_verify(&[15, 0, 0, 4, 0x08, 0x04, 0x00, 0x00])
+            .is_err());
+    }
+
+    #[test]
+    fn test_server12_build_new_session_ticket_no_key() {
+        let config = make_server_config();
+        let hs = Tls12ServerHandshake::new(config);
+        // No ticket_key configured → returns Ok(None)
+        let result = hs
+            .build_new_session_ticket(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 3600)
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_server12_build_new_session_ticket_with_key_no_master_secret() {
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .ticket_key(vec![0xAA; 48])
+            .build();
+        let hs = Tls12ServerHandshake::new(config);
+        // ticket_key configured but no master_secret → error
+        let result =
+            hs.build_new_session_ticket(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 3600);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_cipher_client_preference() {
         // Client preference: client's first matching suite wins
         let ch = ClientHello {

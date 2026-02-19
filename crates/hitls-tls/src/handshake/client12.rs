@@ -2084,6 +2084,71 @@ mod tests {
     }
 
     #[test]
+    fn test_client12_change_cipher_spec_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Tls12ClientHandshake::new(config);
+        // CCS from Idle → error
+        assert!(hs.process_change_cipher_spec().is_err());
+    }
+
+    #[test]
+    fn test_client12_abbreviated_finished_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Tls12ClientHandshake::new(config);
+        // Abbreviated Finished from Idle → error
+        assert!(hs
+            .process_abbreviated_server_finished(&[
+                20, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ])
+            .is_err());
+    }
+
+    #[test]
+    fn test_client12_cert_request_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Tls12ClientHandshake::new(config);
+        let cr = CertificateRequest12 {
+            cert_types: vec![1],
+            sig_hash_algs: vec![],
+            ca_names: vec![],
+        };
+        // CertificateRequest from Idle → error
+        assert!(hs
+            .process_certificate_request(&[13, 0, 0, 1, 1], &cr)
+            .is_err());
+    }
+
+    #[test]
+    fn test_client12_process_finished_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Tls12ClientHandshake::new(config);
+        // Finished from Idle → error
+        let fake_master_secret = vec![0u8; 48];
+        assert!(hs
+            .process_finished(
+                &[20, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                &fake_master_secret
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn test_client12_new_session_ticket_lifetime_zero() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Tls12ClientHandshake::new(config);
+
+        // Build a NewSessionTicket with lifetime = 0
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u32.to_be_bytes()); // lifetime = 0
+        body.extend_from_slice(&4u16.to_be_bytes()); // ticket_len = 4
+        body.extend_from_slice(&[0xEE, 0xFF, 0x11, 0x22]); // ticket
+
+        hs.process_new_session_ticket(&body).unwrap();
+        assert_eq!(hs.received_ticket_lifetime(), 0);
+        assert_eq!(hs.received_ticket(), Some(&[0xEE, 0xFF, 0x11, 0x22][..]));
+    }
+
+    #[test]
     fn test_client_reset_for_renegotiation() {
         let config = TlsConfig::builder()
             .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
