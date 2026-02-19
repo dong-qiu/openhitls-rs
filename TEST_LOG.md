@@ -7,7 +7,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 (core crypto primitives) down to supplementary coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,166 tests (40 ignored)
+**Current**: 2,194 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -16,6 +16,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 **Testing-Phase 76**: +26 tests (cert_verify unit tests + config callback tests + integration tests)
 **Testing-Phase 77**: +13 tests (SniCallback + DTLS abbreviated + PADDING/OID Filters + PskServerCallback integration)
 **Testing-Phase 78**: +22 tests (GREASE + Heartbeat + Async DTLS edge cases + extension codec negative tests)
+**Testing-Phase 79**: +28 tests (DTLS 1.2 handshake + TLS 1.3 server + record layer + PRF unit tests)
 
 ---
 
@@ -548,3 +549,83 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2131** | **40** |
+
+---
+
+## Testing-Phase 79 — DTLS 1.2 Handshake + TLS 1.3 Server + Record Layer + PRF Unit Tests
+
+**Date**: 2026-02-19
+**Tests added**: +28 (2166 → 2194)
+**Build**: `cargo test --workspace --all-features` — all 2194 pass, 40 ignored
+**Clippy**: zero warnings
+**Fmt**: clean
+
+### I1: DTLS 1.2 Server Handshake Tests (+7, in server_dtls12.rs)
+
+| Test | Description |
+|------|-------------|
+| test_dtls12_server_process_cke_wrong_state | CKE from Idle → error |
+| test_dtls12_server_process_finished_wrong_state | Finished from Idle → error |
+| test_dtls12_server_abbreviated_finished_wrong_state | Abbreviated Finished from Idle → error |
+| test_dtls12_server_ch_with_cookie_wrong_state | CH-with-cookie from Idle → error |
+| test_dtls12_server_abbreviated_via_cache | Session cache hit → abbreviated handshake |
+| test_dtls12_server_message_seq_increments | message_seq increments after HVR |
+| test_dtls12_server_dtls_get_body_too_short | dtls_get_body edge cases (<12 bytes) |
+
+### I2: DTLS 1.2 Client Handshake Tests (+8, in client_dtls12.rs)
+
+| Test | Description |
+|------|-------------|
+| test_dtls12_client_process_cert_wrong_state | Certificate from Idle → error |
+| test_dtls12_client_process_ske_wrong_state | SKE from Idle → error |
+| test_dtls12_client_process_shd_wrong_state | SHD from Idle → error |
+| test_dtls12_client_process_finished_wrong_state | Finished from Idle → error |
+| test_dtls12_client_abbreviated_finished_wrong_state | Abbreviated Finished from Idle → error |
+| test_dtls12_client_non_abbreviated_when_session_id_differs | Session ID mismatch → full handshake |
+| test_dtls12_client_empty_cert_list_rejected | Empty cert chain → error |
+| test_dtls12_client_dtls_get_body_edge_cases | dtls_get_body edge cases |
+
+### I3: TLS 1.3 Server Handshake Tests (+4, in server.rs)
+
+| Test | Description |
+|------|-------------|
+| test_server_secp256r1_key_share | SECP256R1 key share handling |
+| test_server_no_common_cipher_suite | No common suite → error |
+| test_server_cipher_server_preference_default | Default server cipher preference |
+| test_server_client_hello_retry_then_wrong_group_still_fails | HRR → still wrong group → error |
+
+### I4: Record Layer Tests (+4, in record/mod.rs)
+
+| Test | Description |
+|------|-------------|
+| test_parse_multiple_records_sequential | Two records in one buffer |
+| test_seal_open_tls12_aead_roundtrip | TLS 1.2 AEAD seal/open roundtrip |
+| test_seal_open_tls12_cbc_roundtrip | TLS 1.2 CBC seal/open roundtrip |
+| test_cipher_mode_switch_tls13_to_tls12 | TLS 1.3 → TLS 1.2 cipher mode switch |
+
+### I5: PRF Edge Case Tests (+5, in crypt/prf.rs)
+
+| Test | Description |
+|------|-------------|
+| test_prf_zero_output_length | Zero-length output |
+| test_prf_large_output | 1000-byte output + prefix consistency |
+| test_prf_sha256_vs_sha384_different_output | Different hash → different output |
+| test_prf_empty_secret | Empty secret → valid output |
+| test_prf_different_seeds_differ | Different seeds → different output |
+
+### Workspace Test Counts After Testing-Phase 79
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 593 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 113 | 3 |
+| hitls-pki | 336 | 1 |
+| hitls-tls | 857 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2194** | **40** |

@@ -767,4 +767,117 @@ mod tests {
         let data = vec![0u8; 513];
         assert!(rl.seal_record(ContentType::ApplicationData, &data).is_err());
     }
+
+    #[test]
+    fn test_parse_multiple_records_sequential() {
+        let rl = RecordLayer::new();
+        // Build two records back-to-back in one buffer
+        let rec1 = Record {
+            content_type: ContentType::Handshake,
+            version: 0x0303,
+            fragment: vec![0x01, 0x02, 0x03],
+        };
+        let rec2 = Record {
+            content_type: ContentType::ApplicationData,
+            version: 0x0303,
+            fragment: vec![0x04, 0x05],
+        };
+        let mut buf = rl.serialize_record(&rec1);
+        buf.extend(rl.serialize_record(&rec2));
+
+        // Parse first record
+        let (parsed1, consumed1) = rl.parse_record(&buf).unwrap();
+        assert_eq!(parsed1.content_type, ContentType::Handshake);
+        assert_eq!(parsed1.fragment, vec![0x01, 0x02, 0x03]);
+        assert_eq!(consumed1, 8); // 5-byte header + 3-byte fragment
+
+        // Parse second record from remaining buffer
+        let (parsed2, consumed2) = rl.parse_record(&buf[consumed1..]).unwrap();
+        assert_eq!(parsed2.content_type, ContentType::ApplicationData);
+        assert_eq!(parsed2.fragment, vec![0x04, 0x05]);
+        assert_eq!(consumed2, 7); // 5-byte header + 2-byte fragment
+        assert_eq!(consumed1 + consumed2, buf.len());
+    }
+
+    #[test]
+    fn test_seal_open_tls12_aead_roundtrip() {
+        let mut rl = RecordLayer::new();
+        let key = vec![0x42u8; 16]; // AES-128 key
+        let iv = vec![0x43u8; 4]; // 4-byte implicit IV for GCM
+        rl.activate_write_encryption12(
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            &key,
+            iv.clone(),
+        )
+        .unwrap();
+        rl.activate_read_decryption12(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, &key, iv)
+            .unwrap();
+
+        let plaintext = b"hello TLS 1.2 AEAD";
+        let sealed = rl
+            .seal_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        // TLS 1.2 AEAD records include explicit nonce + ciphertext + tag
+        assert!(sealed.len() > 5 + plaintext.len());
+
+        let (ct, pt, consumed) = rl.open_record(&sealed).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, plaintext);
+        assert_eq!(consumed, sealed.len());
+    }
+
+    #[test]
+    fn test_seal_open_tls12_cbc_roundtrip() {
+        let mut rl = RecordLayer::new();
+        let enc_key = vec![0x42u8; 16]; // AES-128 key
+        let mac_key = vec![0x43u8; 20]; // SHA-1 HMAC key
+        rl.activate_write_encryption12_cbc(enc_key.clone(), mac_key.clone(), 20);
+        rl.activate_read_decryption12_cbc(enc_key, mac_key, 20);
+
+        let plaintext = b"hello TLS 1.2 CBC";
+        let sealed = rl
+            .seal_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        // CBC records include IV + ciphertext (padded) + MAC
+        assert!(sealed.len() > 5 + plaintext.len());
+
+        let (ct, pt, consumed) = rl.open_record(&sealed).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, plaintext);
+        assert_eq!(consumed, sealed.len());
+    }
+
+    #[test]
+    fn test_cipher_mode_switch_tls13_to_tls12() {
+        let mut rl = RecordLayer::new();
+
+        // Start with TLS 1.3 AEAD
+        let keys13 = TrafficKeys {
+            key: vec![0x42; 16],
+            iv: vec![0x43; 12],
+        };
+        rl.activate_write_encryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys13)
+            .unwrap();
+        assert!(rl.is_encrypting());
+
+        // Deactivate and switch to TLS 1.2 AEAD
+        rl.deactivate_write_encryption();
+        assert!(!rl.is_encrypting());
+
+        let key12 = vec![0x44u8; 16];
+        let iv12 = vec![0x45u8; 4];
+        rl.activate_write_encryption12(
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            &key12,
+            iv12,
+        )
+        .unwrap();
+        assert!(rl.is_encrypting());
+
+        // Should be able to seal with TLS 1.2 now
+        let sealed = rl
+            .seal_record(ContentType::ApplicationData, b"mode switch test")
+            .unwrap();
+        assert!(!sealed.is_empty());
+    }
 }

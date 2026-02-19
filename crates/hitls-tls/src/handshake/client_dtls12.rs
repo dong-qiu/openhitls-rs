@@ -805,4 +805,167 @@ mod tests {
         assert_eq!(hs.state(), Dtls12ClientState::WaitChangeCipherSpec);
         assert!(hs.take_abbreviated_keys().is_some());
     }
+
+    #[test]
+    fn test_dtls12_client_process_cert_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Dtls12ClientHandshake::new(config);
+        // State is Idle, not WaitCertificate
+        let fake_cert = wrap_dtls_handshake_full(
+            HandshakeType::Certificate,
+            &[0x00, 0x00, 0x03, 0x00, 0x00, 0x00],
+            0,
+        );
+        assert!(hs.process_certificate(&fake_cert, &[vec![0x30]]).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_client_process_ske_wrong_state() {
+        use crate::handshake::codec12::ServerKeyExchange;
+
+        let config = TlsConfig::builder().build();
+        let mut hs = Dtls12ClientHandshake::new(config);
+        // State is Idle, not WaitServerKeyExchange
+        let ske = ServerKeyExchange {
+            curve_type: 3,
+            named_curve: 0x0017,
+            public_key: vec![0x04; 65],
+            signature_algorithm: crate::crypt::SignatureScheme::ECDSA_SECP256R1_SHA256,
+            signature: vec![0u8; 64],
+        };
+        let fake_ske = wrap_dtls_handshake_full(HandshakeType::ServerKeyExchange, &[0u8; 100], 0);
+        assert!(hs.process_server_key_exchange(&fake_ske, &ske).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_client_process_shd_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Dtls12ClientHandshake::new(config);
+        // State is Idle, not WaitServerHelloDone
+        let fake_shd = wrap_dtls_handshake_full(HandshakeType::ServerHelloDone, &[], 0);
+        assert!(hs.process_server_hello_done(&fake_shd).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_client_process_finished_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Dtls12ClientHandshake::new(config);
+        // State is Idle, not WaitFinished
+        let fake_fin = wrap_dtls_handshake_full(HandshakeType::Finished, &[0u8; 12], 0);
+        assert!(hs.process_finished(&fake_fin, &[0u8; 48]).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_client_abbreviated_finished_wrong_state() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Dtls12ClientHandshake::new(config);
+        // State is Idle, not WaitFinished
+        let fake_fin = wrap_dtls_handshake_full(HandshakeType::Finished, &[0u8; 12], 0);
+        assert!(hs
+            .process_abbreviated_server_finished(&fake_fin, &[0u8; 48])
+            .is_err());
+    }
+
+    #[test]
+    fn test_dtls12_client_non_abbreviated_when_session_id_differs() {
+        use crate::session::{InMemorySessionCache, SessionCache, TlsSession};
+        use std::sync::{Arc, Mutex};
+
+        let session_id = vec![0xAA; 32];
+        let master_secret = vec![0xBB; 48];
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+
+        let cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+        {
+            let mut c = cache.lock().unwrap();
+            c.put(
+                b"test.example.com",
+                TlsSession {
+                    id: session_id.clone(),
+                    cipher_suite: suite,
+                    master_secret: master_secret.clone(),
+                    alpn_protocol: None,
+                    ticket: None,
+                    ticket_lifetime: 0,
+                    max_early_data: 0,
+                    ticket_age_add: 0,
+                    ticket_nonce: Vec::new(),
+                    created_at: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    psk: Vec::new(),
+                    extended_master_secret: false,
+                },
+            );
+        }
+
+        let config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .server_name("test.example.com")
+            .session_cache(cache)
+            .verify_peer(false)
+            .build();
+
+        let mut hs = Dtls12ClientHandshake::new(config);
+        let _ch_msg = hs.build_client_hello().unwrap();
+
+        // Server returns a DIFFERENT session_id → full handshake, not abbreviated
+        let sh = crate::handshake::codec::ServerHello {
+            random: [0x22; 32],
+            legacy_session_id: vec![0xCC; 32], // different from cached
+            cipher_suite: suite,
+            extensions: Vec::new(),
+        };
+        let sh_tls = crate::handshake::codec::encode_server_hello(&sh);
+        let sh_dtls = crate::handshake::codec_dtls::tls_to_dtls_handshake(&sh_tls, 0).unwrap();
+        hs.process_server_hello(&sh_dtls, &sh).unwrap();
+
+        assert!(!hs.is_abbreviated());
+        assert_eq!(hs.state(), Dtls12ClientState::WaitCertificate);
+    }
+
+    #[test]
+    fn test_dtls12_client_empty_cert_list_rejected() {
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .verify_peer(false)
+            .build();
+
+        let mut hs = Dtls12ClientHandshake::new(config);
+        let _ch = hs.build_client_hello().unwrap();
+
+        // Process a ServerHello to advance to WaitCertificate
+        let sh = crate::handshake::codec::ServerHello {
+            random: [0x33; 32],
+            legacy_session_id: vec![0u8; 32],
+            cipher_suite: CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            extensions: Vec::new(),
+        };
+        let sh_tls = crate::handshake::codec::encode_server_hello(&sh);
+        let sh_dtls = crate::handshake::codec_dtls::tls_to_dtls_handshake(&sh_tls, 0).unwrap();
+        hs.process_server_hello(&sh_dtls, &sh).unwrap();
+
+        assert_eq!(hs.state(), Dtls12ClientState::WaitCertificate);
+
+        // Process Certificate with empty cert list → error
+        let cert_body = vec![0x00, 0x00, 0x00]; // empty certificate_list
+        let cert_dtls = wrap_dtls_handshake_full(HandshakeType::Certificate, &cert_body, 1);
+        let result = hs.process_certificate(&cert_dtls, &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dtls12_client_dtls_get_body_edge_cases() {
+        // Too short
+        assert!(dtls_get_body(&[0u8; 5]).is_err());
+        // Exactly 12 bytes → empty body
+        let body = dtls_get_body(&[0u8; 12]).unwrap();
+        assert!(body.is_empty());
+        // 13 bytes → 1-byte body
+        let body = dtls_get_body(&[0u8; 13]).unwrap();
+        assert_eq!(body.len(), 1);
+    }
 }
