@@ -347,6 +347,12 @@ pub struct TlsConfig {
     pub cookie_verify_callback: Option<CookieVerifyCallback>,
     /// ClientHello observation/processing callback (server-side).
     pub client_hello_callback: Option<ClientHelloCallback>,
+    /// Enable DTLS flight-based transmission (default: true).
+    /// When true, handshake messages are buffered and sent together as a flight.
+    pub flight_transmit_enable: bool,
+    /// Maximum consecutive empty records allowed before fatal alert (default: 32).
+    /// Acts as DoS protection — resets to 0 on each non-empty record.
+    pub empty_records_limit: u32,
 }
 
 impl fmt::Debug for TlsConfig {
@@ -488,6 +494,8 @@ pub struct TlsConfigBuilder {
     cookie_gen_callback: Option<CookieGenCallback>,
     cookie_verify_callback: Option<CookieVerifyCallback>,
     client_hello_callback: Option<ClientHelloCallback>,
+    flight_transmit_enable: bool,
+    empty_records_limit: u32,
 }
 
 impl Default for TlsConfigBuilder {
@@ -564,6 +572,8 @@ impl Default for TlsConfigBuilder {
             cookie_gen_callback: None,
             cookie_verify_callback: None,
             client_hello_callback: None,
+            flight_transmit_enable: true,
+            empty_records_limit: 32,
         }
     }
 }
@@ -885,6 +895,16 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn flight_transmit_enable(mut self, enabled: bool) -> Self {
+        self.flight_transmit_enable = enabled;
+        self
+    }
+
+    pub fn empty_records_limit(mut self, limit: u32) -> Self {
+        self.empty_records_limit = limit;
+        self
+    }
+
     pub fn build(self) -> TlsConfig {
         TlsConfig {
             min_version: self.min_version,
@@ -950,6 +970,8 @@ impl TlsConfigBuilder {
             cookie_gen_callback: self.cookie_gen_callback,
             cookie_verify_callback: self.cookie_verify_callback,
             client_hello_callback: self.client_hello_callback,
+            flight_transmit_enable: self.flight_transmit_enable,
+            empty_records_limit: self.empty_records_limit,
         }
     }
 }
@@ -1675,5 +1697,31 @@ mod tests {
             .enable_ocsp_multi_stapling(true)
             .build();
         assert!(config2.enable_ocsp_multi_stapling);
+    }
+
+    #[test]
+    fn test_config_flight_transmit_enable() {
+        // Default: enabled
+        let config = TlsConfig::builder().build();
+        assert!(config.flight_transmit_enable);
+
+        // Disabled
+        let config2 = TlsConfig::builder().flight_transmit_enable(false).build();
+        assert!(!config2.flight_transmit_enable);
+    }
+
+    #[test]
+    fn test_config_empty_records_limit() {
+        // Default: 32
+        let config = TlsConfig::builder().build();
+        assert_eq!(config.empty_records_limit, 32);
+
+        // Custom
+        let config2 = TlsConfig::builder().empty_records_limit(100).build();
+        assert_eq!(config2.empty_records_limit, 100);
+
+        // Zero (disallow all empty records)
+        let config3 = TlsConfig::builder().empty_records_limit(0).build();
+        assert_eq!(config3.empty_records_limit, 0);
     }
 }

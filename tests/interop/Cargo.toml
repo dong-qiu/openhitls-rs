@@ -16,6 +16,7 @@ hitls-crypto = { path = "../../crates/hitls-crypto", features = [
     "sm2",
     "mlkem", "mldsa",
     "hybridkem",
+    "cbc-mac",
 ] }
 hitls-pki = { path = "../../crates/hitls-pki" }
 hitls-tls = { path = "../../crates/hitls-tls", features = ["tls13", "tls12", "dtls12", "tlcp", "dtlcp", "async"] }

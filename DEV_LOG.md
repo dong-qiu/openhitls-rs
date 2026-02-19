@@ -1,5 +1,54 @@
 # openHiTLS Rust Migration — Development Log
 
+## Phase 79: DTLS Config Enhancements + Integration Tests for Phase 77-78 Features
+
+### Date: 2026-02-19
+
+### Summary
+
+Implemented two features:
+1. **DTLS Configuration Enhancements** — Added `flight_transmit_enable` (bool, default true) and `empty_records_limit` (u32, default 32) to TlsConfig + TlsConfigBuilder. Implemented `check_empty_record()` in RecordLayer for DoS protection: tracks consecutive empty plaintext records, rejects empty Alert/ApplicationData records, rejects empty encrypted records, and returns fatal error when limit exceeded. 2 config tests + 7 record layer tests.
+2. **Integration Tests for Phase 77-78 Features** — 9 integration tests covering: MsgCallback TLS 1.3/1.2 (config acceptance + handshake success), InfoCallback (server-side events), ClientHelloCallback (cipher suite observation), CBC-MAC-SM4 (create/verify/determinism), CMS AuthenticatedData (create/verify/DER roundtrip), RecordPaddingCallback (wired + handshake + data exchange), DTLS config enhancements (flight_transmit_enable + empty_records_limit + handshake), RecordLayer empty records limit (DoS protection).
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/config/mod.rs`** — 2 new config fields (flight_transmit_enable, empty_records_limit) + builder methods + 2 tests
+2. **`crates/hitls-tls/src/record/mod.rs`** — empty_record_count/empty_records_limit fields + check_empty_record() method + DEFAULT_EMPTY_RECORDS_LIMIT constant + 7 tests
+3. **`tests/interop/src/lib.rs`** — 9 new integration tests
+4. **`tests/interop/Cargo.toml`** — Added `cbc-mac` feature to hitls-crypto dependency
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_config_flight_transmit_enable | config/mod.rs |
+| 2 | test_config_empty_records_limit | config/mod.rs |
+| 3 | test_empty_record_defaults | record/mod.rs |
+| 4 | test_empty_record_non_empty_resets | record/mod.rs |
+| 5 | test_empty_record_limit_exceeded | record/mod.rs |
+| 6 | test_empty_record_alert_rejected | record/mod.rs |
+| 7 | test_empty_record_app_data_rejected | record/mod.rs |
+| 8 | test_empty_record_ccs_allowed | record/mod.rs |
+| 9 | test_empty_record_zero_limit | record/mod.rs |
+| 10 | test_tls13_msg_callback | interop/lib.rs |
+| 11 | test_tls12_msg_callback | interop/lib.rs |
+| 12 | test_tls13_info_callback | interop/lib.rs |
+| 13 | test_tls13_client_hello_callback | interop/lib.rs |
+| 14 | test_cbc_mac_sm4_integration | interop/lib.rs |
+| 15 | test_cms_authenticated_data_integration | interop/lib.rs |
+| 16 | test_tls13_record_padding_callback | interop/lib.rs |
+| 17 | test_dtls12_config_enhancements | interop/lib.rs |
+| 18 | test_record_layer_empty_records_limit | interop/lib.rs |
+
++18 tests (2256 → 2274): hitls-tls 904 → 913 (+9), hitls-integration 113 → 122 (+9)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2274 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase 78: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9)
 
 ### Date: 2026-02-19

@@ -48,9 +48,16 @@ pub struct Record {
 /// Supports both plaintext mode (initial handshake) and encrypted mode
 /// (after traffic keys are activated). Encryption is per-direction:
 /// write encryption and read decryption are activated independently.
+/// Default maximum number of consecutive empty records allowed.
+pub const DEFAULT_EMPTY_RECORDS_LIMIT: u32 = 32;
+
 pub struct RecordLayer {
     /// Maximum fragment size (default: 16384).
     pub max_fragment_size: usize,
+    /// Counter for consecutive empty plaintext records received.
+    pub empty_record_count: u32,
+    /// Maximum consecutive empty records before fatal error (DoS protection).
+    pub empty_records_limit: u32,
     /// Optional TLS 1.3 encryptor for outgoing records.
     encryptor: Option<RecordEncryptor>,
     /// Optional TLS 1.3 decryptor for incoming records.
@@ -79,6 +86,8 @@ impl RecordLayer {
     pub fn new() -> Self {
         Self {
             max_fragment_size: MAX_PLAINTEXT_LENGTH,
+            empty_record_count: 0,
+            empty_records_limit: DEFAULT_EMPTY_RECORDS_LIMIT,
             encryptor: None,
             decryptor: None,
             encryptor12: None,
@@ -404,6 +413,46 @@ impl RecordLayer {
             },
             5 + length,
         ))
+    }
+
+    /// Check and track empty record counts for DoS protection.
+    ///
+    /// Call this after decrypting/parsing a record. If the plaintext is empty,
+    /// increments the counter and returns an error if the limit is exceeded.
+    /// Non-empty records reset the counter to zero.
+    ///
+    /// Per C openHiTLS semantics:
+    /// - Only Handshake and CCS records may be empty (unencrypted)
+    /// - Empty encrypted records are rejected
+    /// - Empty Alert and ApplicationData records are rejected
+    pub fn check_empty_record(
+        &mut self,
+        content_type: ContentType,
+        plaintext_len: usize,
+    ) -> Result<(), TlsError> {
+        if plaintext_len > 0 {
+            self.empty_record_count = 0;
+            return Ok(());
+        }
+        // Empty record
+        if self.is_decrypting() {
+            return Err(TlsError::RecordError("empty encrypted record".into()));
+        }
+        match content_type {
+            ContentType::Handshake | ContentType::ChangeCipherSpec => {}
+            _ => {
+                return Err(TlsError::RecordError(
+                    "empty alert or application data record".into(),
+                ));
+            }
+        }
+        self.empty_record_count += 1;
+        if self.empty_record_count > self.empty_records_limit {
+            return Err(TlsError::RecordError(
+                "too many consecutive empty records".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Serialize a TLS record to bytes.
@@ -889,5 +938,86 @@ mod tests {
             .seal_record(ContentType::ApplicationData, b"mode switch test")
             .unwrap();
         assert!(!sealed.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Empty record DoS protection
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_empty_record_defaults() {
+        let rl = RecordLayer::new();
+        assert_eq!(rl.empty_record_count, 0);
+        assert_eq!(rl.empty_records_limit, DEFAULT_EMPTY_RECORDS_LIMIT);
+    }
+
+    #[test]
+    fn test_empty_record_non_empty_resets() {
+        let mut rl = RecordLayer::new();
+        // Accept some empty handshake records
+        rl.check_empty_record(ContentType::Handshake, 0).unwrap();
+        rl.check_empty_record(ContentType::Handshake, 0).unwrap();
+        assert_eq!(rl.empty_record_count, 2);
+
+        // Non-empty record resets counter
+        rl.check_empty_record(ContentType::Handshake, 10).unwrap();
+        assert_eq!(rl.empty_record_count, 0);
+    }
+
+    #[test]
+    fn test_empty_record_limit_exceeded() {
+        let mut rl = RecordLayer::new();
+        rl.empty_records_limit = 3;
+
+        rl.check_empty_record(ContentType::Handshake, 0).unwrap();
+        rl.check_empty_record(ContentType::Handshake, 0).unwrap();
+        rl.check_empty_record(ContentType::Handshake, 0).unwrap();
+
+        // 4th empty record exceeds limit of 3
+        let err = rl
+            .check_empty_record(ContentType::Handshake, 0)
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("too many consecutive empty records"));
+    }
+
+    #[test]
+    fn test_empty_record_alert_rejected() {
+        let mut rl = RecordLayer::new();
+        let err = rl.check_empty_record(ContentType::Alert, 0).unwrap_err();
+        assert!(err.to_string().contains("empty alert or application data"));
+    }
+
+    #[test]
+    fn test_empty_record_app_data_rejected() {
+        let mut rl = RecordLayer::new();
+        let err = rl
+            .check_empty_record(ContentType::ApplicationData, 0)
+            .unwrap_err();
+        assert!(err.to_string().contains("empty alert or application data"));
+    }
+
+    #[test]
+    fn test_empty_record_ccs_allowed() {
+        let mut rl = RecordLayer::new();
+        // CCS empty records are allowed (within limit)
+        rl.check_empty_record(ContentType::ChangeCipherSpec, 0)
+            .unwrap();
+        assert_eq!(rl.empty_record_count, 1);
+    }
+
+    #[test]
+    fn test_empty_record_zero_limit() {
+        let mut rl = RecordLayer::new();
+        rl.empty_records_limit = 0;
+
+        // Even one empty record exceeds limit of 0
+        let err = rl
+            .check_empty_record(ContentType::Handshake, 0)
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("too many consecutive empty records"));
     }
 }

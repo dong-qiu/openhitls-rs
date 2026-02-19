@@ -1778,3 +1778,19 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - hitls-tls: 892 → 904 (+12 tests); hitls-pki: 336 → 341 (+5 tests); total: 2239 → 2256 tests.
 
 2256 total tests (40 ignored). Clippy clean, fmt clean.
+
+## Phase 79: DTLS Config Enhancements + Integration Tests (2026-02-19)
+
+**Prompt**: 开始 Phase 79 — DTLS configuration enhancements (flight_transmit_enable, empty_records_limit) + integration tests for Phase 77-78 features (MsgCallback, InfoCallback, ClientHelloCallback, CBC-MAC-SM4, CMS AuthenticatedData, RecordPaddingCallback).
+
+**Work performed**:
+- DTLS config: flight_transmit_enable (bool, default true) + empty_records_limit (u32, default 32) in TlsConfig/TlsConfigBuilder
+- RecordLayer: check_empty_record() DoS protection (rejects empty encrypted/Alert/AppData records, tracks consecutive empty Handshake/CCS records, fatal error on limit exceeded)
+- Integration tests: 9 tests covering MsgCallback TLS 1.3/1.2, InfoCallback, ClientHelloCallback, CBC-MAC-SM4, CMS AuthenticatedData, RecordPaddingCallback, DTLS config, empty records limit
+- Added cbc-mac feature to interop test Cargo.toml
+- Files: config/mod.rs, record/mod.rs, tests/interop/src/lib.rs, tests/interop/Cargo.toml
+
+**Result**:
+- hitls-tls: 904 → 913 (+9 tests); integration: 113 → 122 (+9 tests); total: 2256 → 2274 tests.
+
+2274 total tests (40 ignored). Clippy clean, fmt clean.
