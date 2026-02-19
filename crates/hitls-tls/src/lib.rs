@@ -240,3 +240,60 @@ pub trait AsyncTlsConnection {
     /// Get the negotiated cipher suite.
     fn cipher_suite(&self) -> Option<CipherSuite>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tls_version_debug_and_clone() {
+        let v = TlsVersion::Tls13;
+        let v2 = v;
+        assert_eq!(v, v2);
+        assert_eq!(format!("{v:?}"), "Tls13");
+    }
+
+    #[test]
+    fn test_tls_version_all_variants_distinct() {
+        let versions = [
+            TlsVersion::Tls12,
+            TlsVersion::Tls13,
+            TlsVersion::Dtls12,
+            TlsVersion::Tlcp,
+            TlsVersion::Dtlcp,
+        ];
+        for i in 0..versions.len() {
+            for j in (i + 1)..versions.len() {
+                assert_ne!(versions[i], versions[j]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_cipher_suite_tls13_constants() {
+        assert_eq!(CipherSuite::TLS_AES_128_GCM_SHA256.0, 0x1301);
+        assert_eq!(CipherSuite::TLS_AES_256_GCM_SHA384.0, 0x1302);
+        assert_eq!(CipherSuite::TLS_CHACHA20_POLY1305_SHA256.0, 0x1303);
+        assert_eq!(CipherSuite::TLS_AES_128_CCM_SHA256.0, 0x1304);
+        assert_eq!(CipherSuite::TLS_AES_128_CCM_8_SHA256.0, 0x1305);
+    }
+
+    #[test]
+    fn test_cipher_suite_hash_and_eq() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(CipherSuite::TLS_AES_128_GCM_SHA256);
+        set.insert(CipherSuite::TLS_AES_256_GCM_SHA384);
+        set.insert(CipherSuite::TLS_AES_128_GCM_SHA256); // duplicate
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_cipher_suite_fallback_scsv() {
+        assert_eq!(CipherSuite::TLS_FALLBACK_SCSV.0, 0x5600);
+        assert_ne!(
+            CipherSuite::TLS_FALLBACK_SCSV,
+            CipherSuite::TLS_AES_128_GCM_SHA256
+        );
+    }
+}

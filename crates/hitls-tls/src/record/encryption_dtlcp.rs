@@ -502,4 +502,107 @@ mod tests {
         assert_eq!(aad[9..11], DTLCP_VERSION.to_be_bytes());
         assert_eq!(aad[11..13], 100u16.to_be_bytes());
     }
+
+    #[test]
+    fn test_dtlcp_gcm_record_too_short() {
+        let key = [0x42u8; 16];
+        let iv = vec![0x01, 0x02, 0x03, 0x04];
+        let mut dec = DtlcpRecordDecryptorGcm::new(&key, iv).unwrap();
+
+        // Fragment shorter than explicit_nonce(8) + tag(16) = 24
+        let record = DtlsRecord {
+            content_type: ContentType::ApplicationData,
+            version: DTLCP_VERSION,
+            epoch: 1,
+            sequence_number: 0,
+            fragment: vec![0u8; 10],
+        };
+        let result = dec.decrypt_record(&record);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("too short"));
+    }
+
+    #[test]
+    fn test_dtlcp_cbc_record_too_short() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0x99u8; 32];
+        let mut dec = DtlcpRecordDecryptorCbc::new(enc_key, mac_key);
+
+        // CBC needs at least IV(16) + 3 blocks(48) = 64 bytes
+        let record = DtlsRecord {
+            content_type: ContentType::ApplicationData,
+            version: DTLCP_VERSION,
+            epoch: 1,
+            sequence_number: 0,
+            fragment: vec![0u8; 32],
+        };
+        let result = dec.decrypt_record(&record);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("too short"));
+    }
+
+    #[test]
+    fn test_dtlcp_cbc_not_block_aligned() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0x99u8; 32];
+        let mut dec = DtlcpRecordDecryptorCbc::new(enc_key, mac_key);
+
+        // IV(16) + 65 bytes (not multiple of 16)
+        let mut fragment = vec![0u8; 16 + 65];
+        // Fill to satisfy minimum length
+        fragment.resize(16 + 65, 0xAA);
+        let record = DtlsRecord {
+            content_type: ContentType::ApplicationData,
+            version: DTLCP_VERSION,
+            epoch: 1,
+            sequence_number: 0,
+            fragment,
+        };
+        let result = dec.decrypt_record(&record);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("block-aligned"));
+    }
+
+    #[test]
+    fn test_dtlcp_gcm_different_epochs() {
+        let key = [0x42u8; 16];
+        let iv = vec![0x01, 0x02, 0x03, 0x04];
+        let mut enc = DtlcpRecordEncryptorGcm::new(&key, iv.clone()).unwrap();
+        let mut dec = DtlcpRecordDecryptorGcm::new(&key, iv).unwrap();
+
+        let msg = b"epoch test";
+        let record_e1 = enc
+            .encrypt_record(ContentType::ApplicationData, msg, 1, 0)
+            .unwrap();
+        let record_e2 = enc
+            .encrypt_record(ContentType::ApplicationData, msg, 2, 0)
+            .unwrap();
+
+        // Different epochs → different ciphertexts
+        assert_ne!(record_e1.fragment, record_e2.fragment);
+
+        // Both decrypt correctly
+        let p1 = dec.decrypt_record(&record_e1).unwrap();
+        let p2 = dec.decrypt_record(&record_e2).unwrap();
+        assert_eq!(p1, msg);
+        assert_eq!(p2, msg);
+    }
+
+    #[test]
+    fn test_dtlcp_dispatch_cbc_variant() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0x99u8; 32];
+        let mut enc = DtlcpEncryptor::Cbc(DtlcpRecordEncryptorCbc::new(
+            enc_key.clone(),
+            mac_key.clone(),
+        ));
+        let mut dec = DtlcpDecryptor::Cbc(DtlcpRecordDecryptorCbc::new(enc_key, mac_key));
+
+        let msg = b"CBC dispatch";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, msg, 0, 0)
+            .unwrap();
+        let plain = dec.decrypt_record(&record).unwrap();
+        assert_eq!(plain, msg);
+    }
 }

@@ -599,4 +599,72 @@ mod tests {
         assert_eq!(h1.message_seq, 0);
         assert_eq!(hs.message_seq, 1);
     }
+
+    #[test]
+    fn test_dtlcp_client_no_tlcp_suites_error() {
+        // Config with only TLS 1.3 suites → build_client_hello fails
+        let config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::TLS_AES_128_GCM_SHA256])
+            .signature_algorithms(&[SignatureScheme::SM2_SM3])
+            .build();
+
+        let mut hs = DtlcpClientHandshake::new(config);
+        let result = hs.build_client_hello();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dtlcp_client_ccs_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = DtlcpClientHandshake::new(config);
+        let result = hs.process_change_cipher_spec();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("unexpected ChangeCipherSpec"));
+    }
+
+    #[test]
+    fn test_dtlcp_client_finished_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = DtlcpClientHandshake::new(config);
+        let fake_msg = vec![0u8; 20];
+        let result = hs.process_finished(&fake_msg, &[0u8; 48]);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("unexpected Finished"));
+    }
+
+    #[test]
+    fn test_dtlcp_client_server_hello_wrong_state_idle() {
+        let config = TlsConfig::builder().build();
+        let mut hs = DtlcpClientHandshake::new(config);
+        let fake_msg = vec![0u8; 20];
+        let sh = crate::handshake::codec::ServerHello {
+            random: [0u8; 32],
+            legacy_session_id: vec![0u8; 32],
+            cipher_suite: CipherSuite::ECDHE_SM4_GCM_SM3,
+            extensions: Vec::new(),
+        };
+        let result = hs.process_server_hello(&fake_msg, &sh);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("unexpected ServerHello"));
+    }
+
+    #[test]
+    fn test_dtlcp_client_dtls_get_body_too_short() {
+        let short_msg = vec![0u8; 5];
+        let result = dtls_get_body(&short_msg);
+        assert!(result.is_err());
+
+        let exact_msg = vec![0u8; 12];
+        let body = dtls_get_body(&exact_msg).unwrap();
+        assert!(body.is_empty());
+    }
 }
