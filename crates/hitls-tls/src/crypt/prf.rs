@@ -237,4 +237,58 @@ mod tests {
         // Log for verification
         eprintln!("PRF output: {}", to_hex(&output));
     }
+
+    #[test]
+    fn test_prf_zero_output_length() {
+        let factory = sha256_factory();
+        let output = prf(&*factory, b"secret", "label", b"seed", 0).unwrap();
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_prf_large_output() {
+        // Test with output larger than multiple hash blocks (SHA-256 = 32 bytes)
+        let factory = sha256_factory();
+        let output = prf(&*factory, b"secret", "label", b"seed", 1000).unwrap();
+        assert_eq!(output.len(), 1000);
+
+        // Verify prefix consistency with shorter output
+        let short = prf(&*factory, b"secret", "label", b"seed", 500).unwrap();
+        assert_eq!(&output[..500], &short[..]);
+    }
+
+    #[test]
+    fn test_prf_sha256_vs_sha384_different_output() {
+        // Same inputs with different hash → different output
+        let f256 = sha256_factory();
+        let f384 = sha384_factory();
+        let secret = b"same secret";
+        let label = "same label";
+        let seed = b"same seed";
+
+        let out256 = prf(&*f256, secret, label, seed, 48).unwrap();
+        let out384 = prf(&*f384, secret, label, seed, 48).unwrap();
+        assert_ne!(out256, out384);
+    }
+
+    #[test]
+    fn test_prf_empty_secret() {
+        // Empty secret should still produce valid output
+        let factory = sha256_factory();
+        let output = prf(&*factory, &[], "label", b"seed", 32).unwrap();
+        assert_eq!(output.len(), 32);
+        // Verify determinism
+        let output2 = prf(&*factory, &[], "label", b"seed", 32).unwrap();
+        assert_eq!(output, output2);
+    }
+
+    #[test]
+    fn test_prf_different_seeds_differ() {
+        let factory = sha256_factory();
+        let secret = b"secret";
+        let label = "label";
+        let out1 = prf(&*factory, secret, label, b"seed1", 32).unwrap();
+        let out2 = prf(&*factory, secret, label, b"seed2", 32).unwrap();
+        assert_ne!(out1, out2);
+    }
 }

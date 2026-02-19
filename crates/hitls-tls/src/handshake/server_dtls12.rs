@@ -917,4 +917,153 @@ mod tests {
         // State is Idle, not WaitChangeCipherSpec
         assert!(hs.process_change_cipher_spec().is_err());
     }
+
+    #[test]
+    fn test_dtls12_server_process_cke_wrong_state() {
+        let config = make_dtls_server_config();
+        let mut hs = Dtls12ServerHandshake::new(config, false);
+        // State is Idle, not WaitClientKeyExchange
+        let fake_cke = wrap_dtls_handshake_full(HandshakeType::ClientKeyExchange, &[0x04; 65], 0);
+        assert!(hs.process_client_key_exchange(&fake_cke).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_server_process_finished_wrong_state() {
+        let config = make_dtls_server_config();
+        let mut hs = Dtls12ServerHandshake::new(config, false);
+        // State is Idle, not WaitFinished
+        let fake_fin = wrap_dtls_handshake_full(HandshakeType::Finished, &[0u8; 12], 0);
+        assert!(hs.process_finished(&fake_fin).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_server_abbreviated_finished_wrong_state() {
+        let config = make_dtls_server_config();
+        let mut hs = Dtls12ServerHandshake::new(config, false);
+        // State is Idle, not WaitAbbreviatedFinished
+        let fake_fin = wrap_dtls_handshake_full(HandshakeType::Finished, &[0u8; 12], 0);
+        assert!(hs.process_abbreviated_finished(&fake_fin).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_server_ch_with_cookie_wrong_state() {
+        let config = make_dtls_server_config();
+        let mut hs = Dtls12ServerHandshake::new(config, true);
+        // State is Idle, not WaitClientHelloWithCookie
+        let ch_msg =
+            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
+        assert!(hs.process_client_hello_with_cookie(&ch_msg).is_err());
+    }
+
+    #[test]
+    fn test_dtls12_server_abbreviated_via_cache() {
+        use crate::session::{InMemorySessionCache, SessionCache, TlsSession};
+        use std::sync::{Arc, Mutex};
+
+        let session_id = vec![0xAA; 32];
+        let master_secret = vec![0xBB; 48];
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+
+        let cache = Arc::new(Mutex::new(InMemorySessionCache::new(100)));
+        {
+            let mut c = cache.lock().unwrap();
+            c.put(
+                &session_id,
+                TlsSession {
+                    id: session_id.clone(),
+                    cipher_suite: suite,
+                    master_secret: master_secret.clone(),
+                    alpn_protocol: None,
+                    ticket: None,
+                    ticket_lifetime: 0,
+                    max_early_data: 0,
+                    ticket_age_add: 0,
+                    ticket_nonce: Vec::new(),
+                    created_at: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    psk: Vec::new(),
+                    extended_master_secret: false,
+                },
+            );
+        }
+
+        let config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
+            .signature_algorithms(&[
+                SignatureScheme::ED25519,
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+            ])
+            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
+            .session_cache(cache)
+            .build();
+
+        let mut hs = Dtls12ServerHandshake::new(config, false);
+
+        // Build a ClientHello with the cached session_id
+        let mut random = [0u8; 32];
+        getrandom::getrandom(&mut random).unwrap();
+        let extensions = vec![
+            crate::handshake::extensions_codec::build_signature_algorithms(&[
+                SignatureScheme::ED25519,
+                SignatureScheme::ECDSA_SECP256R1_SHA256,
+            ]),
+            crate::handshake::extensions_codec::build_supported_groups(&[
+                NamedGroup::SECP256R1,
+                NamedGroup::X25519,
+            ]),
+            crate::handshake::extensions_codec::build_ec_point_formats(),
+            crate::handshake::extensions_codec::build_renegotiation_info_initial(),
+        ];
+        let ch = crate::handshake::codec::ClientHello {
+            random,
+            legacy_session_id: session_id.clone(),
+            cipher_suites: vec![suite],
+            extensions,
+        };
+        let body = encode_dtls_client_hello_body(&ch, &[]);
+        let ch_msg = wrap_dtls_handshake_full(HandshakeType::ClientHello, &body, 0);
+
+        let result = hs.process_client_hello(&ch_msg).unwrap();
+        match result {
+            Ok(DtlsServerHelloResult::Abbreviated(abbr)) => {
+                assert_eq!(abbr.suite, suite);
+                assert_eq!(abbr.session_id, session_id);
+                assert!(!abbr.server_hello.is_empty());
+                assert!(!abbr.finished.is_empty());
+                assert!(!abbr.client_write_key.is_empty());
+                assert!(!abbr.server_write_key.is_empty());
+            }
+            Ok(DtlsServerHelloResult::Full(_)) => panic!("expected Abbreviated"),
+            Err(_) => panic!("expected Ok, not HVR"),
+        }
+        assert_eq!(hs.state(), Dtls12ServerState::WaitAbbreviatedFinished);
+        assert!(hs.is_abbreviated());
+    }
+
+    #[test]
+    fn test_dtls12_server_message_seq_increments() {
+        let config = make_dtls_server_config();
+        let mut hs = Dtls12ServerHandshake::new(config, true);
+        assert_eq!(hs.message_seq, 0);
+
+        let ch_msg =
+            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
+        let _result = hs.process_client_hello(&ch_msg).unwrap();
+
+        // After HVR, message_seq should have incremented
+        assert!(hs.message_seq > 0);
+    }
+
+    #[test]
+    fn test_dtls12_server_dtls_get_body_too_short() {
+        // dtls_get_body should fail for messages shorter than 12 bytes
+        assert!(dtls_get_body(&[0u8; 11]).is_err());
+        assert!(dtls_get_body(&[]).is_err());
+        // 12 bytes is fine (empty body)
+        assert!(dtls_get_body(&[0u8; 12]).is_ok());
+    }
 }
