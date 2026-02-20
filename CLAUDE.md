@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 82 complete + Testing-Phase 87 — async TLS 1.2/DTLCP client+server/encryption/lib.rs unit tests (2445 tests)
+- **Status**: Phase 82 complete + Testing-Phase 88 — connection_info/handshake enums/lib.rs constants/codec error paths/async accessors unit tests (2519 tests)
 
 ## Workspace Structure
 
@@ -35,12 +35,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2445 tests, 40 ignored)
+# Run all tests (2519 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 607 tests (31 ignored) + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 1084 tests
+cargo test -p hitls-tls --all-features      # 1143 tests
 cargo test -p hitls-pki --all-features      # 349 tests (1 ignored)
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
@@ -171,5 +171,8 @@ Phases 0-82 complete (2454 tests, 40 ignored). **100% C→Rust feature parity ac
 - Phase 80: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown (Encrypted PKCS#8: decrypt_pkcs8_der/pem, encrypt_pkcs8_der/pem with PBKDF2-HMAC-SHA256 + AES-256-CBC/AES-128-CBC; session_id_context config for session cache isolation; quiet_shutdown config to skip close_notify on shutdown across all 6 connection types sync+async, +12 tests) -- DONE
 - Phase 81: TicketKeyCallback + SecurityCallback (TicketKeyCallback: Arc<dyn Fn(&[u8], bool) -> Option<TicketKeyResult>> for session ticket key rotation; SecurityCallback: Arc<dyn Fn(u32, u32, u16) -> bool> for filtering cipher suites/groups/sigalgs by security level; security_level config, +12 tests) -- DONE
 - Phase 82: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests (SM4-CTR-DRBG: NIST SP 800-90A §10.2 with SM4 cipher, 16-byte key, 32-byte seed; CMS ML-DSA: ML-DSA-44/65/87 OID dispatch in CMS SignedData verification; 3 integration tests: quiet_shutdown e2e, security_callback e2e, encrypted_pkcs8 e2e; documentation sync, +10 tests) -- DONE
+- Testing-Phase 86: retransmit/keylog/fragment/anti_replay/key_exchange unit tests (+23 tests, 2397→2420) -- DONE
+- Testing-Phase 87: async TLS 1.2/DTLCP client+server/encryption/lib.rs unit tests (+25 tests, 2420→2445) -- DONE
+- Testing-Phase 88: connection_info/handshake enums/lib.rs constants/codec_tlcp error paths/codec_dtls error paths/async TLS 1.2+DTLS 1.2 accessor tests (ConnectionInfo: construction/optional fields/debug/clone/large certs; HandshakeType: all 18 discriminant values/distinct/HandshakeState 12 variants/debug+clone/HandshakeMessage; lib.rs: TLS 1.2 ECDHE/RSA/DHE/PSK/TLCP cipher suite constants, TlsRole, CipherSuite debug, TlsVersion hash; codec_tlcp: decode certificate too short/body truncated/entry truncated, SKE too short/sig truncated, CKE too short/data truncated; codec_dtls: HVR too short/cookie truncated, unknown type, tls_to_dtls too short/length mismatch, dtls_to_tls too short/body mismatch, body truncated, CH too short; async TLS 1.2: multi-message/verify_data/negotiated_group/server connection_info; async DTLS 1.2: server/client connection_info before handshake, server accessors after handshake, +40 tests, 2479→2519) -- DONE
 
 See `DEV_LOG.md` for detailed implementation history and `PROMPT_LOG.md` for prompt/response log.

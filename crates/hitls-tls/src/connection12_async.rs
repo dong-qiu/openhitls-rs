@@ -2381,4 +2381,100 @@ mod tests {
         let n = server.read(&mut buf).await.unwrap();
         assert_eq!(&buf[..n], msg);
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 88: async TLS 1.2 additional tests
+    // -------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_async_tls12_multi_message_exchange() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        // Multiple round-trip exchanges
+        for i in 0..5 {
+            let msg = format!("async-tls12-msg-{i}");
+            client.write(msg.as_bytes()).await.unwrap();
+            let mut buf = [0u8; 256];
+            let n = server.read(&mut buf).await.unwrap();
+            assert_eq!(&buf[..n], msg.as_bytes());
+
+            let reply = format!("async-tls12-reply-{i}");
+            server.write(reply.as_bytes()).await.unwrap();
+            let n = client.read(&mut buf).await.unwrap();
+            assert_eq!(&buf[..n], reply.as_bytes());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_verify_data_after_handshake() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        // After handshake, verify_data should be populated (12 bytes for TLS 1.2)
+        assert!(!client.peer_verify_data().is_empty());
+        assert!(!client.local_verify_data().is_empty());
+        assert!(!server.peer_verify_data().is_empty());
+        assert!(!server.local_verify_data().is_empty());
+
+        // Client's peer verify_data = server's local verify_data
+        assert_eq!(client.peer_verify_data(), server.local_verify_data());
+        // Client's local verify_data = server's peer verify_data
+        assert_eq!(client.local_verify_data(), server.peer_verify_data());
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_negotiated_group_after_handshake() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        // ECDHE suite should have a negotiated group
+        assert_eq!(client.negotiated_group(), Some(NamedGroup::SECP256R1));
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_server_connection_info_after_handshake() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTls12ServerConnection::new(server_stream, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        // Server connection info
+        let server_info = server.connection_info().unwrap();
+        assert_eq!(server_info.cipher_suite, suite);
+        assert!(!server_info.session_resumed);
+        // Verify data should be present in connection info
+        assert!(!server_info.peer_verify_data.is_empty());
+        assert!(!server_info.local_verify_data.is_empty());
+    }
 }

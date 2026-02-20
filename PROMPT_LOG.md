@@ -1824,3 +1824,27 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - hitls-crypto: 603 → 607 (+4); hitls-tls: 962 → 981 (+19); hitls-pki: 341 → 349 (+8); integration: 122 → 125 (+3); total: 2323 → 2357 tests (+34).
 
 2357 total tests (40 ignored). Clippy clean, fmt clean. **100% C→Rust feature parity achieved.**
+
+---
+
+## Session 37: Testing-Phase 88
+
+**Prompt**: 开始实现 Testing-Phase 88
+
+**Work performed**:
+
+### Testing-Phase 88 (+40 tests, 2479→2519)
+
+Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, codec error paths, and async connection accessors across 7 files:
+
+1. **connection_info.rs** (+5 tests) — ConnectionInfo construction with all fields, optional fields None, Debug format, Clone independence, large peer certs
+2. **handshake/mod.rs** (+5 tests) — HandshakeType all 18 discriminant values, all variants distinct, HandshakeState 12 variants, Debug/Clone, HandshakeMessage construction
+3. **lib.rs** (+7 tests) — TLS 1.2 ECDHE cipher suite constants, RSA/DHE constants, PSK constants, TLCP constants, TlsRole enum, CipherSuite Debug, TlsVersion Hash
+4. **codec_tlcp.rs** (+7 tests) — decode_tlcp_certificate too short/body truncated/entry truncated, decode_ecc_server_key_exchange too short/sig truncated, decode_ecc_client_key_exchange too short/data truncated
+5. **codec_dtls.rs** (+9 tests) — HVR too short/cookie truncated, unknown handshake type, tls_to_dtls too short/length mismatch, dtls_to_tls too short/body mismatch, body truncated, CH too short for version
+6. **connection12_async.rs** (+4 tests) — multi-message exchange, verify_data cross-match, negotiated_group after handshake, server connection_info
+7. **connection_dtls12_async.rs** (+3 tests) — server connection_info before handshake, server accessors after handshake, client connection_info before handshake
+
+**Result**:
+- hitls-tls: 1084 → 1143 (+59 from phases 86-88 combined); total: 2479 → 2519 tests (+40 this phase).
+- 2519 total tests (40 ignored). Clippy clean, fmt clean.
