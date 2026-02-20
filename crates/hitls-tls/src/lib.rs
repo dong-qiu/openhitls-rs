@@ -296,4 +296,124 @@ mod tests {
             CipherSuite::TLS_AES_128_GCM_SHA256
         );
     }
+
+    #[test]
+    fn test_cipher_suite_tls12_ecdhe_constants() {
+        // ECDHE-GCM suites (RFC 5289)
+        assert_eq!(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256.0, 0xC02F);
+        assert_eq!(CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384.0, 0xC030);
+        assert_eq!(
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256.0,
+            0xC02B
+        );
+        assert_eq!(
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384.0,
+            0xC02C
+        );
+        // ECDHE-CBC suites
+        assert_eq!(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA.0, 0xC013);
+        assert_eq!(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA.0, 0xC009);
+        // ECDHE-ChaCha20 suites
+        assert_eq!(
+            CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256.0,
+            0xCCA8
+        );
+        assert_eq!(
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256.0,
+            0xCCA9
+        );
+    }
+
+    #[test]
+    fn test_cipher_suite_tls12_rsa_and_dhe_constants() {
+        // RSA static suites
+        assert_eq!(CipherSuite::TLS_RSA_WITH_AES_128_GCM_SHA256.0, 0x009C);
+        assert_eq!(CipherSuite::TLS_RSA_WITH_AES_256_GCM_SHA384.0, 0x009D);
+        assert_eq!(CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA.0, 0x002F);
+        assert_eq!(CipherSuite::TLS_RSA_WITH_AES_256_CBC_SHA.0, 0x0035);
+        // DHE_RSA suites
+        assert_eq!(CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256.0, 0x009E);
+        assert_eq!(CipherSuite::TLS_DHE_RSA_WITH_AES_256_GCM_SHA384.0, 0x009F);
+        assert_eq!(
+            CipherSuite::TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256.0,
+            0xCCAA
+        );
+    }
+
+    #[test]
+    fn test_cipher_suite_tls12_psk_constants() {
+        // PSK suites (RFC 4279/5487)
+        assert_eq!(CipherSuite::TLS_PSK_WITH_AES_128_GCM_SHA256.0, 0x00A8);
+        assert_eq!(CipherSuite::TLS_PSK_WITH_AES_256_GCM_SHA384.0, 0x00A9);
+        assert_eq!(CipherSuite::TLS_PSK_WITH_AES_128_CBC_SHA.0, 0x008C);
+        assert_eq!(CipherSuite::TLS_PSK_WITH_AES_128_CBC_SHA256.0, 0x00AE);
+        assert_eq!(CipherSuite::TLS_PSK_WITH_CHACHA20_POLY1305_SHA256.0, 0xCCAB);
+        // DHE_PSK suites
+        assert_eq!(CipherSuite::TLS_DHE_PSK_WITH_AES_128_GCM_SHA256.0, 0x00AA);
+        assert_eq!(CipherSuite::TLS_DHE_PSK_WITH_AES_128_CCM.0, 0xC0A6);
+        // RSA_PSK suites
+        assert_eq!(CipherSuite::TLS_RSA_PSK_WITH_AES_128_GCM_SHA256.0, 0x00AC);
+        // ECDHE_PSK suites
+        assert_eq!(CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA.0, 0xC035);
+        assert_eq!(CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256.0, 0xD001);
+    }
+
+    #[test]
+    fn test_cipher_suite_tlcp_constants() {
+        // TLCP cipher suites (GM/T 0024)
+        assert_eq!(CipherSuite::ECDHE_SM4_CBC_SM3.0, 0xE011);
+        assert_eq!(CipherSuite::ECC_SM4_CBC_SM3.0, 0xE013);
+        assert_eq!(CipherSuite::ECDHE_SM4_GCM_SM3.0, 0xE051);
+        assert_eq!(CipherSuite::ECC_SM4_GCM_SM3.0, 0xE053);
+        // All TLCP suites are distinct
+        let suites = [
+            CipherSuite::ECDHE_SM4_CBC_SM3,
+            CipherSuite::ECC_SM4_CBC_SM3,
+            CipherSuite::ECDHE_SM4_GCM_SM3,
+            CipherSuite::ECC_SM4_GCM_SM3,
+        ];
+        for i in 0..suites.len() {
+            for j in (i + 1)..suites.len() {
+                assert_ne!(suites[i], suites[j]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_tls_role_enum() {
+        let client = TlsRole::Client;
+        let server = TlsRole::Server;
+        assert_ne!(client, server);
+        assert_eq!(client, TlsRole::Client);
+        assert_eq!(server, TlsRole::Server);
+
+        // Debug
+        assert_eq!(format!("{client:?}"), "Client");
+        assert_eq!(format!("{server:?}"), "Server");
+
+        // Copy
+        let c2 = client;
+        assert_eq!(c2, client);
+    }
+
+    #[test]
+    fn test_cipher_suite_debug_format() {
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let debug = format!("{suite:?}");
+        assert!(debug.contains("CipherSuite"));
+        assert!(debug.contains("4865")); // 0x1301 = 4865
+    }
+
+    #[test]
+    fn test_tls_version_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(TlsVersion::Tls12);
+        set.insert(TlsVersion::Tls13);
+        set.insert(TlsVersion::Dtls12);
+        set.insert(TlsVersion::Tlcp);
+        set.insert(TlsVersion::Dtlcp);
+        set.insert(TlsVersion::Tls12); // duplicate
+        assert_eq!(set.len(), 5);
+    }
 }

@@ -347,4 +347,67 @@ mod tests {
         assert_eq!(&data[32..64], &[0x02u8; 32]);
         assert_eq!(&data[64..], &[0x30u8; 100]);
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 88: codec_tlcp error path tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_decode_tlcp_certificate_too_short() {
+        // Less than 3 bytes → error
+        assert!(decode_tlcp_certificate(&[0x00]).is_err());
+        assert!(decode_tlcp_certificate(&[0x00, 0x00]).is_err());
+        assert!(decode_tlcp_certificate(&[]).is_err());
+    }
+
+    #[test]
+    fn test_decode_tlcp_certificate_body_truncated() {
+        // total_len says 100 but body only has 3 bytes
+        let body = vec![0x00, 0x00, 0x64]; // total_len = 100
+        assert!(decode_tlcp_certificate(&body).is_err());
+    }
+
+    #[test]
+    fn test_decode_tlcp_certificate_entry_truncated() {
+        // Valid total_len, but cert entry length exceeds remaining data
+        // total_len = 6 (one cert entry header of 3 saying len=100, but only 3 bytes left)
+        let body = vec![
+            0x00, 0x00, 0x06, // total_len = 6
+            0x00, 0x00, 0x64, // cert_len = 100, but only 3 bytes follow
+            0x30, 0x30, 0x30,
+        ];
+        assert!(decode_tlcp_certificate(&body).is_err());
+    }
+
+    #[test]
+    fn test_decode_ecc_server_key_exchange_too_short() {
+        // Less than 4 bytes → error
+        assert!(decode_ecc_server_key_exchange(&[0x00, 0x00]).is_err());
+        assert!(decode_ecc_server_key_exchange(&[0x00, 0x00, 0x00]).is_err());
+    }
+
+    #[test]
+    fn test_decode_ecc_server_key_exchange_sig_truncated() {
+        // Header says sig_len=64 but only 4 bytes of signature follow
+        let mut body = vec![0x00, 0x00]; // sig_alg
+        body.extend_from_slice(&(64u16).to_be_bytes()); // sig_len = 64
+        body.extend_from_slice(&[0xAA; 4]); // only 4 bytes, not 64
+        assert!(decode_ecc_server_key_exchange(&body).is_err());
+    }
+
+    #[test]
+    fn test_decode_ecc_client_key_exchange_too_short() {
+        // Less than 2 bytes → error
+        assert!(decode_ecc_client_key_exchange(&[0x00]).is_err());
+        assert!(decode_ecc_client_key_exchange(&[]).is_err());
+    }
+
+    #[test]
+    fn test_decode_ecc_client_key_exchange_data_truncated() {
+        // Length says 128 but only 10 bytes follow
+        let mut body = vec![];
+        body.extend_from_slice(&(128u16).to_be_bytes());
+        body.extend_from_slice(&[0xBB; 10]);
+        assert!(decode_ecc_client_key_exchange(&body).is_err());
+    }
 }

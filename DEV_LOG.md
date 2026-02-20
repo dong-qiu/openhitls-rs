@@ -556,6 +556,86 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 
 ---
 
+## Testing-Phase 88: connection_info / handshake enums / lib.rs constants / codec error paths / async accessors
+
+### Date: 2026-02-20
+
+### Summary
+
+Added 40 unit tests across 7 files targeting zero-test or thin-coverage areas:
+
+1. **connection_info.rs** (+5) — ConnectionInfo struct construction, optional fields, Debug/Clone traits, large peer certs
+2. **handshake/mod.rs** (+5) — HandshakeType wire-format discriminant values (all 18), distinctness, HandshakeState 12 variants, Debug/Clone, HandshakeMessage construction
+3. **lib.rs** (+7) — TLS 1.2 ECDHE/RSA/DHE/PSK/TLCP cipher suite constant verification, TlsRole enum, CipherSuite Debug, TlsVersion Hash
+4. **codec_tlcp.rs** (+7) — All error paths: certificate too short/body truncated/entry truncated, SKE too short/sig truncated, CKE too short/data truncated
+5. **codec_dtls.rs** (+9) — All error paths: HVR too short/cookie truncated, unknown handshake type, tls_to_dtls too short/length mismatch, dtls_to_tls too short/body mismatch, body truncated, CH too short
+6. **connection12_async.rs** (+4) — Multi-message exchange, verify_data cross-match, negotiated_group, server connection_info
+7. **connection_dtls12_async.rs** (+3) — Server/client connection_info before handshake, server accessors after handshake
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/connection_info.rs`** — Added `#[cfg(test)] mod tests` with 5 tests
+2. **`crates/hitls-tls/src/handshake/mod.rs`** — Added `#[cfg(test)] mod tests` with 5 tests
+3. **`crates/hitls-tls/src/lib.rs`** — Added 7 tests to existing test module
+4. **`crates/hitls-tls/src/handshake/codec_tlcp.rs`** — Added 7 error-path tests
+5. **`crates/hitls-tls/src/handshake/codec_dtls.rs`** — Added 9 error-path tests
+6. **`crates/hitls-tls/src/connection12_async.rs`** — Added 4 async accessor/data tests
+7. **`crates/hitls-tls/src/connection_dtls12_async.rs`** — Added 3 async accessor tests
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_connection_info_construction_all_fields | connection_info.rs |
+| 2 | test_connection_info_optional_fields_none | connection_info.rs |
+| 3 | test_connection_info_debug_format | connection_info.rs |
+| 4 | test_connection_info_clone_independence | connection_info.rs |
+| 5 | test_connection_info_large_peer_certs | connection_info.rs |
+| 6 | test_handshake_type_discriminant_values | handshake/mod.rs |
+| 7 | test_handshake_type_all_variants_distinct | handshake/mod.rs |
+| 8 | test_handshake_state_variants | handshake/mod.rs |
+| 9 | test_handshake_type_debug_clone | handshake/mod.rs |
+| 10 | test_handshake_message_construction | handshake/mod.rs |
+| 11 | test_cipher_suite_tls12_ecdhe_constants | lib.rs |
+| 12 | test_cipher_suite_tls12_rsa_dhe_constants | lib.rs |
+| 13 | test_cipher_suite_tls12_psk_constants | lib.rs |
+| 14 | test_cipher_suite_tlcp_constants | lib.rs |
+| 15 | test_tls_role_enum | lib.rs |
+| 16 | test_cipher_suite_debug | lib.rs |
+| 17 | test_tls_version_hash | lib.rs |
+| 18 | test_decode_tlcp_certificate_too_short | codec_tlcp.rs |
+| 19 | test_decode_tlcp_certificate_body_truncated | codec_tlcp.rs |
+| 20 | test_decode_tlcp_certificate_entry_truncated | codec_tlcp.rs |
+| 21 | test_decode_ecc_server_key_exchange_too_short | codec_tlcp.rs |
+| 22 | test_decode_ecc_server_key_exchange_sig_truncated | codec_tlcp.rs |
+| 23 | test_decode_ecc_client_key_exchange_too_short | codec_tlcp.rs |
+| 24 | test_decode_ecc_client_key_exchange_data_truncated | codec_tlcp.rs |
+| 25 | test_decode_hello_verify_request_too_short | codec_dtls.rs |
+| 26 | test_decode_hello_verify_request_cookie_truncated | codec_dtls.rs |
+| 27 | test_dtls_handshake_unknown_type | codec_dtls.rs |
+| 28 | test_tls_to_dtls_too_short | codec_dtls.rs |
+| 29 | test_tls_to_dtls_length_mismatch | codec_dtls.rs |
+| 30 | test_dtls_to_tls_too_short | codec_dtls.rs |
+| 31 | test_dtls_to_tls_body_length_mismatch | codec_dtls.rs |
+| 32 | test_dtls_get_body_truncated | codec_dtls.rs |
+| 33 | test_dtls_client_hello_too_short_for_version | codec_dtls.rs |
+| 34 | test_async_tls12_multi_message_exchange | connection12_async.rs |
+| 35 | test_async_tls12_verify_data_after_handshake | connection12_async.rs |
+| 36 | test_async_tls12_negotiated_group_after_handshake | connection12_async.rs |
+| 37 | test_async_tls12_server_connection_info_after_handshake | connection12_async.rs |
+| 38 | test_async_dtls12_server_connection_info_before_handshake | connection_dtls12_async.rs |
+| 39 | test_async_dtls12_server_accessors_after_handshake | connection_dtls12_async.rs |
+| 40 | test_async_dtls12_client_connection_info_before_handshake | connection_dtls12_async.rs |
+
++40 tests (2479 → 2519): hitls-tls 1103 → 1143 (+40)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2519 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase 82: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests + Documentation Sync
 
 ### Date: 2026-02-19

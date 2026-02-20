@@ -1690,4 +1690,66 @@ mod tests {
             assert!(s.is_session_resumed());
         }
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 88: async DTLS 1.2 additional tests
+    // -------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_async_dtls12_server_connection_info_before_handshake() {
+        let (_, ss) = tokio::io::duplex(64 * 1024);
+        let conn = AsyncDtls12ServerConnection::new(ss, server_config(), false);
+
+        // Before handshake: all accessors should return None/empty/false
+        assert!(conn.connection_info().is_none());
+        assert!(conn.peer_certificates().is_empty());
+        assert!(conn.alpn_protocol().is_none());
+        assert!(conn.server_name().is_none());
+        assert!(conn.negotiated_group().is_none());
+        assert!(!conn.is_session_resumed());
+    }
+
+    #[tokio::test]
+    async fn test_async_dtls12_server_accessors_after_handshake() {
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncDtls12ClientConnection::new(cs, client_config());
+        let mut server = AsyncDtls12ServerConnection::new(ss, server_config(), false);
+
+        let (cr, sr) = tokio::join!(client.handshake(), server.handshake());
+        cr.unwrap();
+        sr.unwrap();
+
+        // Server connection_info should be populated
+        let info = server.connection_info().unwrap();
+        assert_eq!(
+            info.cipher_suite,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        );
+        assert!(!info.session_resumed);
+
+        // Server cipher suite and version
+        assert_eq!(
+            server.cipher_suite(),
+            Some(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256)
+        );
+        assert_eq!(server.version(), Some(TlsVersion::Dtls12));
+
+        // Peer certificates (client didn't send client cert)
+        assert!(server.peer_certificates().is_empty());
+        assert!(!server.is_session_resumed());
+    }
+
+    #[tokio::test]
+    async fn test_async_dtls12_client_connection_info_before_handshake() {
+        let (cs, _) = tokio::io::duplex(64 * 1024);
+        let conn = AsyncDtls12ClientConnection::new(cs, client_config());
+
+        assert!(conn.connection_info().is_none());
+        assert!(conn.peer_certificates().is_empty());
+        assert!(conn.alpn_protocol().is_none());
+        assert!(conn.negotiated_group().is_none());
+        assert!(!conn.is_session_resumed());
+        assert_eq!(conn.version(), None);
+        assert_eq!(conn.cipher_suite(), None);
+    }
 }

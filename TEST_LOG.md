@@ -12,7 +12,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 Testing-Phase 72–86 for protocol and edge-case coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,454 tests (40 ignored)
+**Current**: 2,519 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -29,6 +29,8 @@ Testing-Phase 72–86 for protocol and edge-case coverage.
 **Testing-Phase 84**: +24 tests (record/extensions/export/codec/connection unit tests)
 **Testing-Phase 85**: +25 tests (aead/crypt/alert/signing/config unit tests)
 **Testing-Phase 86**: +23 tests (retransmit/keylog/fragment/anti_replay/key_exchange unit tests)
+**Testing-Phase 87**: +25 tests (async TLS 1.2/DTLCP client+server/encryption/lib.rs unit tests)
+**Testing-Phase 88**: +40 tests (connection_info/handshake enums/lib.rs constants/codec error paths/async accessors)
 
 ---
 
@@ -1152,3 +1154,71 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2445** | **40** |
+
+## Testing-Phase 88: connection_info/handshake enums/lib.rs constants/codec error paths/async accessors
+
+**Date**: 2026-02-20
+**Scope**: ConnectionInfo struct tests, HandshakeType/HandshakeState enum coverage, TLS 1.2/TLCP/PSK cipher suite constants, TLCP+DTLS codec error paths, async TLS 1.2 + DTLS 1.2 accessor tests
+**Tests Added**: +40 (2479 → 2519)
+
+### Test Details
+
+| # | Module | Test Name | Description |
+|---|--------|-----------|-------------|
+| 1 | connection_info.rs | test_connection_info_construction_all_fields | All 8 fields populated and accessible |
+| 2 | connection_info.rs | test_connection_info_optional_fields_none | Optional fields as None, empty vecs |
+| 3 | connection_info.rs | test_connection_info_debug_format | Debug trait output contains key fields |
+| 4 | connection_info.rs | test_connection_info_clone_independence | Clone produces independent copy |
+| 5 | connection_info.rs | test_connection_info_large_peer_certs | 3 large DER certs (1024/2048/512 bytes) |
+| 6 | handshake/mod.rs | test_handshake_type_discriminant_values | All 18 HandshakeType wire values match RFC |
+| 7 | handshake/mod.rs | test_handshake_type_all_variants_distinct | All 18 discriminants are unique |
+| 8 | handshake/mod.rs | test_handshake_state_all_variants | All 12 HandshakeState variants distinct |
+| 9 | handshake/mod.rs | test_handshake_type_debug_and_clone | Debug format and Copy semantics |
+| 10 | handshake/mod.rs | test_handshake_message_construction_and_clone | HandshakeMessage construction, Clone, Debug |
+| 11 | lib.rs | test_cipher_suite_tls12_ecdhe_constants | ECDHE GCM/CBC/ChaCha20 code values |
+| 12 | lib.rs | test_cipher_suite_tls12_rsa_and_dhe_constants | RSA/DHE_RSA code values |
+| 13 | lib.rs | test_cipher_suite_tls12_psk_constants | PSK/DHE_PSK/RSA_PSK/ECDHE_PSK values |
+| 14 | lib.rs | test_cipher_suite_tlcp_constants | 4 TLCP suites + uniqueness check |
+| 15 | lib.rs | test_tls_role_enum | Client/Server distinct, Debug, Copy |
+| 16 | lib.rs | test_cipher_suite_debug_format | CipherSuite Debug contains inner value |
+| 17 | lib.rs | test_tls_version_hash | 5 versions in HashSet, dedup to 5 |
+| 18 | codec_tlcp.rs | test_decode_tlcp_certificate_too_short | <3 bytes → error |
+| 19 | codec_tlcp.rs | test_decode_tlcp_certificate_body_truncated | total_len exceeds data → error |
+| 20 | codec_tlcp.rs | test_decode_tlcp_certificate_entry_truncated | cert entry len exceeds data → error |
+| 21 | codec_tlcp.rs | test_decode_ecc_server_key_exchange_too_short | <4 bytes → error |
+| 22 | codec_tlcp.rs | test_decode_ecc_server_key_exchange_sig_truncated | sig_len exceeds data → error |
+| 23 | codec_tlcp.rs | test_decode_ecc_client_key_exchange_too_short | <2 bytes → error |
+| 24 | codec_tlcp.rs | test_decode_ecc_client_key_exchange_data_truncated | data len exceeds body → error |
+| 25 | codec_dtls.rs | test_decode_hello_verify_request_too_short | <3 bytes → error |
+| 26 | codec_dtls.rs | test_decode_hello_verify_request_cookie_truncated | cookie len exceeds data → error |
+| 27 | codec_dtls.rs | test_match_handshake_type_unknown | 0xFF type byte → error |
+| 28 | codec_dtls.rs | test_tls_to_dtls_too_short | <4 bytes → error |
+| 29 | codec_dtls.rs | test_tls_to_dtls_length_mismatch | Header length ≠ body length → error |
+| 30 | codec_dtls.rs | test_dtls_to_tls_too_short | <12 bytes → error |
+| 31 | codec_dtls.rs | test_dtls_to_tls_body_length_mismatch | Header.length ≠ body.len → error |
+| 32 | codec_dtls.rs | test_parse_dtls_handshake_body_truncated | fragment_length exceeds data → error |
+| 33 | codec_dtls.rs | test_decode_dtls_client_hello_too_short_for_version | 1 byte → too short for version |
+| 34 | connection12_async.rs | test_async_tls12_multi_message_exchange | 5 round-trip message exchanges |
+| 35 | connection12_async.rs | test_async_tls12_verify_data_after_handshake | verify_data populated, client↔server cross-match |
+| 36 | connection12_async.rs | test_async_tls12_negotiated_group_after_handshake | ECDHE → SECP256R1 group |
+| 37 | connection12_async.rs | test_async_tls12_server_connection_info_after_handshake | Server ConnectionInfo populated |
+| 38 | connection_dtls12_async.rs | test_async_dtls12_server_connection_info_before_handshake | All server accessors return defaults |
+| 39 | connection_dtls12_async.rs | test_async_dtls12_server_accessors_after_handshake | Server info/cipher/version after handshake |
+| 40 | connection_dtls12_async.rs | test_async_dtls12_client_connection_info_before_handshake | All client accessors return defaults |
+
+### Workspace Test Counts After Testing-Phase 88
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 607 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 125 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1143 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2519** | **40** |

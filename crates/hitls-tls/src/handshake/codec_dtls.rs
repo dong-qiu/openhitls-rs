@@ -495,4 +495,95 @@ mod tests {
         assert_eq!(decoded_ch.random, [0x11; 32]);
         assert!(decoded_cookie.is_empty());
     }
+
+    // -------------------------------------------------------
+    // Testing-Phase 88: codec_dtls error path tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_decode_hello_verify_request_too_short() {
+        // Less than 3 bytes → error
+        assert!(decode_hello_verify_request(&[0xFE, 0xFD]).is_err());
+        assert!(decode_hello_verify_request(&[]).is_err());
+    }
+
+    #[test]
+    fn test_decode_hello_verify_request_cookie_truncated() {
+        // cookie_len says 10 but only 3 bytes follow
+        let data = vec![0xFE, 0xFD, 0x0A, 0x01, 0x02, 0x03];
+        assert!(decode_hello_verify_request(&data).is_err());
+    }
+
+    #[test]
+    fn test_match_handshake_type_unknown() {
+        // Unknown type byte → error
+        let data = vec![
+            0xFF, // unknown type
+            0x00, 0x00, 0x01, // length = 1
+            0x00, 0x00, // message_seq = 0
+            0x00, 0x00, 0x00, // fragment_offset = 0
+            0x00, 0x00, 0x01, // fragment_length = 1
+            0x00, // 1-byte body
+        ];
+        assert!(parse_dtls_handshake_header(&data).is_err());
+    }
+
+    #[test]
+    fn test_tls_to_dtls_too_short() {
+        // Less than 4 bytes → error
+        assert!(tls_to_dtls_handshake(&[0x01, 0x00], 0).is_err());
+    }
+
+    #[test]
+    fn test_tls_to_dtls_length_mismatch() {
+        // Header says length=10 but body is only 3 bytes
+        let mut msg = vec![0x01]; // ClientHello
+        write_u24(&mut msg, 10); // length = 10
+        msg.extend_from_slice(&[0x00, 0x00, 0x00]); // only 3 bytes body
+        assert!(tls_to_dtls_handshake(&msg, 0).is_err());
+    }
+
+    #[test]
+    fn test_dtls_to_tls_too_short() {
+        // Less than 12 bytes → error
+        assert!(dtls_to_tls_handshake(&[0x01; 8]).is_err());
+    }
+
+    #[test]
+    fn test_dtls_to_tls_body_length_mismatch() {
+        // DTLS header says length=100 but fragment_length says 5 and only 5 bytes follow
+        // This creates a mismatch between header.length and body.len()
+        let mut data = vec![
+            0x01, // ClientHello
+        ];
+        write_u24(&mut data, 100); // length = 100 (total msg length)
+        data.extend_from_slice(&0u16.to_be_bytes()); // message_seq = 0
+        write_u24(&mut data, 0); // fragment_offset = 0
+        write_u24(&mut data, 5); // fragment_length = 5
+        data.extend_from_slice(&[0x00; 5]); // 5-byte body
+
+        // parse succeeds (fragment_length matches), but dtls_to_tls fails
+        // because body.len() (5) != length (100)
+        assert!(dtls_to_tls_handshake(&data).is_err());
+    }
+
+    #[test]
+    fn test_parse_dtls_handshake_body_truncated() {
+        // fragment_length says 50 but only 10 bytes follow the header
+        let mut data = vec![
+            0x02, // ServerHello
+        ];
+        write_u24(&mut data, 50); // length = 50
+        data.extend_from_slice(&1u16.to_be_bytes()); // message_seq = 1
+        write_u24(&mut data, 0); // fragment_offset = 0
+        write_u24(&mut data, 50); // fragment_length = 50
+        data.extend_from_slice(&[0x00; 10]); // only 10 bytes, not 50
+        assert!(parse_dtls_handshake_header(&data).is_err());
+    }
+
+    #[test]
+    fn test_decode_dtls_client_hello_too_short_for_version() {
+        // Only 1 byte — too short for version(2)
+        assert!(decode_dtls_client_hello(&[0xFE]).is_err());
+    }
 }
