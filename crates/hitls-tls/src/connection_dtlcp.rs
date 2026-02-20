@@ -797,4 +797,42 @@ mod tests {
         assert!(server.is_connected());
         assert_eq!(client.cipher_suite(), Some(CipherSuite::ECC_SM4_CBC_SM3));
     }
+
+    // --- Error path tests: seal/open before connected ---
+
+    #[test]
+    fn test_dtlcp_client_seal_before_connected() {
+        let (client_config, _) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let mut conn = DtlcpClientConnection::new(client_config);
+        let result = conn.seal_app_data(b"should fail");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not connected"));
+    }
+
+    #[test]
+    fn test_dtlcp_client_open_before_connected() {
+        let (client_config, _) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let mut conn = DtlcpClientConnection::new(client_config);
+        let result = conn.open_app_data(b"dummy datagram");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not connected"));
+    }
+
+    #[test]
+    fn test_dtlcp_server_seal_before_connected() {
+        let (_, server_config) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let mut conn = DtlcpServerConnection::new(server_config, false);
+        let result = conn.seal_app_data(b"should fail");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not connected"));
+    }
+
+    #[test]
+    fn test_dtlcp_server_open_before_connected() {
+        let (_, server_config) = build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let mut conn = DtlcpServerConnection::new(server_config, false);
+        let result = conn.open_app_data(b"dummy datagram");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not connected"));
+    }
 }

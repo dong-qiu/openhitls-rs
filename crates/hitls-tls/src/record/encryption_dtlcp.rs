@@ -605,4 +605,63 @@ mod tests {
         let plain = dec.decrypt_record(&record).unwrap();
         assert_eq!(plain, msg);
     }
+
+    #[test]
+    fn test_explicit_nonce_format() {
+        let nonce = build_explicit_nonce(1, 42);
+        assert_eq!(nonce.len(), 8);
+        // epoch = 1 → big-endian [0x00, 0x01]
+        assert_eq!(nonce[0], 0x00);
+        assert_eq!(nonce[1], 0x01);
+        // seq = 42 → last 6 bytes of u64 big-endian
+        let seq_bytes = 42u64.to_be_bytes();
+        assert_eq!(&nonce[2..8], &seq_bytes[2..8]);
+    }
+
+    #[test]
+    fn test_gcm_empty_plaintext_roundtrip() {
+        let key = [0x42u8; 16];
+        let iv = vec![0x01, 0x02, 0x03, 0x04];
+        let mut enc = DtlcpRecordEncryptorGcm::new(&key, iv.clone()).unwrap();
+        let mut dec = DtlcpRecordDecryptorGcm::new(&key, iv).unwrap();
+
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, b"", 1, 0)
+            .unwrap();
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert!(decrypted.is_empty());
+    }
+
+    #[test]
+    fn test_cbc_sequential_records() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0x99u8; 32];
+        let mut enc = DtlcpRecordEncryptorCbc::new(enc_key.clone(), mac_key.clone());
+        let mut dec = DtlcpRecordDecryptorCbc::new(enc_key, mac_key);
+
+        for seq in 0..5u64 {
+            let msg = format!("seq={seq}");
+            let record = enc
+                .encrypt_record(ContentType::ApplicationData, msg.as_bytes(), 1, seq)
+                .unwrap();
+            assert_eq!(record.sequence_number, seq);
+            let plain = dec.decrypt_record(&record).unwrap();
+            assert_eq!(plain, msg.as_bytes());
+        }
+    }
+
+    #[test]
+    fn test_cbc_large_plaintext_roundtrip() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0x99u8; 32];
+        let mut enc = DtlcpRecordEncryptorCbc::new(enc_key.clone(), mac_key.clone());
+        let mut dec = DtlcpRecordDecryptorCbc::new(enc_key, mac_key);
+
+        let msg = vec![0xBBu8; 4096];
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, &msg, 1, 0)
+            .unwrap();
+        let plain = dec.decrypt_record(&record).unwrap();
+        assert_eq!(plain, msg);
+    }
 }

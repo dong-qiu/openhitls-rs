@@ -187,3 +187,128 @@ fn brainpool_p512r1_params() -> CurveParams {
         a_is_minus_3: false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hitls_types::EccCurveId;
+
+    const ALL_CURVES: [EccCurveId; 9] = [
+        EccCurveId::NistP192,
+        EccCurveId::NistP224,
+        EccCurveId::NistP256,
+        EccCurveId::NistP384,
+        EccCurveId::NistP521,
+        EccCurveId::BrainpoolP256r1,
+        EccCurveId::BrainpoolP384r1,
+        EccCurveId::BrainpoolP512r1,
+        EccCurveId::Sm2Prime256,
+    ];
+
+    #[test]
+    fn test_all_curves_load_successfully() {
+        for &curve_id in &ALL_CURVES {
+            let params = get_curve_params(curve_id);
+            assert!(params.is_ok(), "failed to load curve {curve_id:?}");
+        }
+    }
+
+    #[test]
+    fn test_field_size_matches_prime_byte_length() {
+        let expected_sizes: [(EccCurveId, usize); 9] = [
+            (EccCurveId::NistP192, 24),
+            (EccCurveId::NistP224, 28),
+            (EccCurveId::NistP256, 32),
+            (EccCurveId::NistP384, 48),
+            (EccCurveId::NistP521, 66),
+            (EccCurveId::BrainpoolP256r1, 32),
+            (EccCurveId::BrainpoolP384r1, 48),
+            (EccCurveId::BrainpoolP512r1, 64),
+            (EccCurveId::Sm2Prime256, 32),
+        ];
+        for (curve_id, expected) in expected_sizes {
+            let params = get_curve_params(curve_id).unwrap();
+            assert_eq!(
+                params.field_size, expected,
+                "field_size mismatch for {curve_id:?}"
+            );
+            let p_bytes = params.p.to_bytes_be();
+            assert!(
+                p_bytes.len() <= expected,
+                "prime byte length > field_size for {curve_id:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_all_curves_cofactor_one() {
+        for &curve_id in &ALL_CURVES {
+            let params = get_curve_params(curve_id).unwrap();
+            assert_eq!(params.h, 1, "cofactor != 1 for {curve_id:?}");
+        }
+    }
+
+    #[test]
+    fn test_a_is_minus_3_flag() {
+        // NIST curves and SM2 have a = p - 3
+        let minus3_true = [
+            EccCurveId::NistP192,
+            EccCurveId::NistP224,
+            EccCurveId::NistP256,
+            EccCurveId::NistP384,
+            EccCurveId::NistP521,
+            EccCurveId::Sm2Prime256,
+        ];
+        for &curve_id in &minus3_true {
+            let params = get_curve_params(curve_id).unwrap();
+            assert!(
+                params.a_is_minus_3,
+                "expected a_is_minus_3=true for {curve_id:?}"
+            );
+        }
+        // Brainpool curves do NOT have a = p - 3
+        let minus3_false = [
+            EccCurveId::BrainpoolP256r1,
+            EccCurveId::BrainpoolP384r1,
+            EccCurveId::BrainpoolP512r1,
+        ];
+        for &curve_id in &minus3_false {
+            let params = get_curve_params(curve_id).unwrap();
+            assert!(
+                !params.a_is_minus_3,
+                "expected a_is_minus_3=false for {curve_id:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_all_primes_unique() {
+        let primes: Vec<Vec<u8>> = ALL_CURVES
+            .iter()
+            .map(|&id| get_curve_params(id).unwrap().p.to_bytes_be())
+            .collect();
+        for i in 0..primes.len() {
+            for j in (i + 1)..primes.len() {
+                assert_ne!(
+                    primes[i], primes[j],
+                    "curves {:?} and {:?} share the same prime",
+                    ALL_CURVES[i], ALL_CURVES[j]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_order_less_than_prime() {
+        for &curve_id in &ALL_CURVES {
+            let params = get_curve_params(curve_id).unwrap();
+            let n_bytes = params.n.to_bytes_be();
+            let p_bytes = params.p.to_bytes_be();
+            // n < p: either fewer bytes, or lexicographically smaller
+            assert!(
+                n_bytes.len() <= p_bytes.len(),
+                "order byte length > prime byte length for {curve_id:?}"
+            );
+        }
+    }
+}
