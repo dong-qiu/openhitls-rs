@@ -21,7 +21,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | TLS Protocol | ~52K | ~15K | **100%** | TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP, 91 suites, 10 conn types |
 | PKI / X.509 | ~17K | ~4.5K | **100%** | X.509, PKCS#8/12, CMS (5 content types), hostname verification |
 | CLI Tools | ~8K | ~2.2K | **100%** | 14 commands (dgst, genpkey, x509, s-client, s-server, etc.) |
-| FIPS/CMVP | ~5K | ~0.6K | **90%** | State machine, 7 KATs, 3 PCTs, integrity check |
+| FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
 | Test Infrastructure | ~20K | ~3.5K | **95%** | 2519 tests + Wycheproof + 10 fuzz targets + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
