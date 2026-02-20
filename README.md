@@ -259,12 +259,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2454 tests, 40 ignored)
+# Run all tests (2519 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 607 tests + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 1078 tests
+cargo test -p hitls-tls --all-features      # 1143 tests
 cargo test -p hitls-pki --all-features      # 349 tests
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
