@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 82 complete + Testing-Phase 87 — 100% C→Rust feature parity (2479 tests)
+- **Status**: Phase 82 complete + Testing-Phase 88 — 100% C→Rust feature parity (2519 tests)
 
 ## Workspace Structure
 
