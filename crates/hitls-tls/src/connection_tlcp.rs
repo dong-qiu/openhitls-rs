@@ -706,4 +706,75 @@ mod tests {
             assert_eq!(plaintext, msg.as_bytes());
         }
     }
+
+    // --- Public API tests (TlcpClientConnection / TlcpServerConnection) ---
+
+    #[test]
+    fn test_public_api_handshake_ecdhe_gcm() {
+        let (client_config, server_config) = build_tlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (client, server) = tlcp_handshake_in_memory(client_config, server_config).unwrap();
+        assert_eq!(client.version(), Some(TlsVersion::Tlcp));
+        assert_eq!(server.version(), Some(TlsVersion::Tlcp));
+        assert_eq!(client.cipher_suite(), Some(CipherSuite::ECDHE_SM4_GCM_SM3));
+        assert_eq!(server.cipher_suite(), Some(CipherSuite::ECDHE_SM4_GCM_SM3));
+    }
+
+    #[test]
+    fn test_public_api_bidirectional_data() {
+        let (client_config, server_config) = build_tlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (mut client, mut server) =
+            tlcp_handshake_in_memory(client_config, server_config).unwrap();
+
+        // Client -> Server
+        let msg = b"public API client message";
+        let record = client.seal_app_data(msg).unwrap();
+        let received = server.open_app_data(&record).unwrap();
+        assert_eq!(received, msg);
+
+        // Server -> Client
+        let reply = b"public API server reply";
+        let record = server.seal_app_data(reply).unwrap();
+        let received = client.open_app_data(&record).unwrap();
+        assert_eq!(received, reply);
+    }
+
+    #[test]
+    fn test_public_api_ecc_static_cbc() {
+        let (client_config, server_config) = build_tlcp_configs(CipherSuite::ECC_SM4_CBC_SM3);
+        let (mut client, mut server) =
+            tlcp_handshake_in_memory(client_config, server_config).unwrap();
+        assert_eq!(client.cipher_suite(), Some(CipherSuite::ECC_SM4_CBC_SM3));
+
+        let msg = b"ECC CBC via public API";
+        let record = client.seal_app_data(msg).unwrap();
+        let received = server.open_app_data(&record).unwrap();
+        assert_eq!(received, msg);
+    }
+
+    #[test]
+    fn test_public_api_large_payload() {
+        let (client_config, server_config) = build_tlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (mut client, mut server) =
+            tlcp_handshake_in_memory(client_config, server_config).unwrap();
+
+        let msg = vec![0xABu8; 8192];
+        let record = client.seal_app_data(&msg).unwrap();
+        let received = server.open_app_data(&record).unwrap();
+        assert_eq!(received, msg);
+    }
+
+    #[test]
+    fn test_public_api_version_always_tlcp() {
+        // TlcpClientConnection.version() always returns Some(Tlcp)
+        let (client_config, server_config) = build_tlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3);
+        let (client, server) = tlcp_handshake_in_memory(client_config, server_config).unwrap();
+        assert_eq!(client.version(), Some(TlsVersion::Tlcp));
+        assert_eq!(server.version(), Some(TlsVersion::Tlcp));
+
+        // Also verify with GCM suite
+        let (client_config, server_config) = build_tlcp_configs(CipherSuite::ECC_SM4_GCM_SM3);
+        let (client, server) = tlcp_handshake_in_memory(client_config, server_config).unwrap();
+        assert_eq!(client.version(), Some(TlsVersion::Tlcp));
+        assert_eq!(server.version(), Some(TlsVersion::Tlcp));
+    }
 }

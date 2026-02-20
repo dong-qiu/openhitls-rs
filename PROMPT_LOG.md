@@ -1848,3 +1848,22 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - hitls-tls: 1084 → 1143 (+59 from phases 86-88 combined); total: 2479 → 2519 tests (+40 this phase).
 - 2519 total tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
+## Testing-Phase 89
+
+**Prompt**: Testing-Phase 89 — ECC curve parameter validation, DH group parameter validation, TLCP public API tests, DTLCP error path tests, DTLCP encryption edge cases (+25 tests, 2519→2544)
+
+**Scope**: Add unit tests to previously untested modules (ecc/curves.rs, dh/groups.rs) and thin-coverage areas (connection_tlcp public API, connection_dtlcp error paths, encryption_dtlcp edge cases).
+
+**Files modified**:
+1. `crates/hitls-crypto/src/ecc/curves.rs` (+6 tests) — all_curves_load, field_size_matches_prime, cofactor_one, a_is_minus_3_flag, unique_primes, order_less_than_prime
+2. `crates/hitls-crypto/src/dh/groups.rs` (+6 tests) — all_groups_load, generators_are_two, prime_byte_sizes, unique_primes, rfc7919_distinct_from_rfc3526, rfc2409_768_prefix_of_1024
+3. `crates/hitls-tls/src/connection_tlcp.rs` (+5 tests) — public_api_handshake_ecdhe_gcm, bidirectional_data, ecc_static_cbc, large_payload, version_always_tlcp
+4. `crates/hitls-tls/src/connection_dtlcp.rs` (+4 tests) — client_seal_before_connected, client_open_before_connected, server_seal_before_connected, server_open_before_connected
+5. `crates/hitls-tls/src/record/encryption_dtlcp.rs` (+4 tests) — explicit_nonce_format, gcm_empty_plaintext_roundtrip, cbc_sequential_records, cbc_large_plaintext_roundtrip
+
+**Result**:
+- hitls-crypto: 607 → 619 (+12); hitls-tls: 1143 → 1156 (+13); total: 2519 → 2544 (+25).
+- 2544 total tests (40 ignored). Clippy clean, fmt clean.

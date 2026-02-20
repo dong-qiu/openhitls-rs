@@ -7473,3 +7473,51 @@ New helpers: `run_tls12_tcp_loopback`, `run_tls13_tcp_loopback`, `make_psk_confi
 - `cargo test --workspace --all-features`: 2021 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Testing-Phase 89: ECC Curve Params / DH Group Params / TLCP Public API / DTLCP Error Paths / DTLCP Encryption
+
+**Date**: 2026-02-20
+**Scope**: Unit tests for previously untested parameter modules and thin-coverage connection/encryption modules
+
+### Summary
+
+Added 25 new tests covering:
+- **ECC curves** (6 tests): Parameter validation for all 9 Weierstrass curves — load success, field_size correctness, cofactor=1, a_is_minus_3 flag (NIST+SM2 true, Brainpool false), prime uniqueness, order < prime
+- **DH groups** (6 tests): Parameter validation for all 13 MODP groups — load success, generator=2, prime byte sizes match RFC specifications, prime uniqueness, RFC 7919 primes distinct from RFC 3526 at same bit sizes, RFC 2409 groups share common prefix
+- **TLCP connection** (5 tests): TlcpClientConnection/TlcpServerConnection public API via tlcp_handshake_in_memory() — ECDHE GCM handshake, bidirectional data, ECC static CBC, large 8KB payload, version accessor always returns Tlcp
+- **DTLCP connection** (4 tests): Error paths for seal_app_data/open_app_data before connected — client seal, client open, server seal, server open all return "not connected" error
+- **DTLCP encryption** (4 tests): Edge cases — explicit nonce byte layout verification, GCM empty plaintext roundtrip, CBC sequential records with incrementing seq, CBC large 4KB plaintext roundtrip
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/ecc/curves.rs` | +6 tests (new test module) |
+| `crates/hitls-crypto/src/dh/groups.rs` | +6 tests (new test module) |
+| `crates/hitls-tls/src/connection_tlcp.rs` | +5 tests |
+| `crates/hitls-tls/src/connection_dtlcp.rs` | +4 tests |
+| `crates/hitls-tls/src/record/encryption_dtlcp.rs` | +4 tests |
+
+### Workspace Test Counts After Testing-Phase 89
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 619 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 125 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1156 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2544** | **40** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2544 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

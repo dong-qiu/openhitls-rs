@@ -31,6 +31,7 @@ Testing-Phase 72–86 for protocol and edge-case coverage.
 **Testing-Phase 86**: +23 tests (retransmit/keylog/fragment/anti_replay/key_exchange unit tests)
 **Testing-Phase 87**: +25 tests (async TLS 1.2/DTLCP client+server/encryption/lib.rs unit tests)
 **Testing-Phase 88**: +40 tests (connection_info/handshake enums/lib.rs constants/codec error paths/async accessors)
+**Testing-Phase 89**: +25 tests (ECC curve params/DH group params/TLCP public API/DTLCP error paths/DTLCP encryption edge cases)
 
 ---
 
@@ -1222,3 +1223,37 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2519** | **40** |
+
+---
+
+## Testing-Phase 89: ECC curve params/DH group params/TLCP public API/DTLCP error paths/DTLCP encryption
+
+**Date**: 2026-02-20
+**Scope**: ECC curve parameter validation (9 curves), DH group parameter validation (13 groups), TLCP public API (TlcpClientConnection/TlcpServerConnection), DTLCP seal/open before connected error paths, DTLCP encryption edge cases
+
+### New Tests (+25)
+
+| Module | File | Tests Added | Description |
+|--------|------|:-----------:|-------------|
+| ECC Curves | `hitls-crypto/src/ecc/curves.rs` | 6 | all_curves_load, field_size_matches_prime, cofactor_one, a_is_minus_3_flag, unique_primes, order_less_than_prime |
+| DH Groups | `hitls-crypto/src/dh/groups.rs` | 6 | all_groups_load, generators_are_two, prime_byte_sizes, unique_primes, rfc7919_distinct_from_rfc3526, rfc2409_768_prefix_of_1024 |
+| TLCP Connection | `hitls-tls/src/connection_tlcp.rs` | 5 | public_api_handshake_ecdhe_gcm, bidirectional_data, ecc_static_cbc, large_payload, version_always_tlcp |
+| DTLCP Connection | `hitls-tls/src/connection_dtlcp.rs` | 4 | client_seal_before_connected, client_open_before_connected, server_seal_before_connected, server_open_before_connected |
+| DTLCP Encryption | `hitls-tls/src/record/encryption_dtlcp.rs` | 4 | explicit_nonce_format, gcm_empty_plaintext_roundtrip, cbc_sequential_records, cbc_large_plaintext_roundtrip |
+
+### Workspace Test Counts After Testing-Phase 89
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 619 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 125 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1156 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2544** | **40** |

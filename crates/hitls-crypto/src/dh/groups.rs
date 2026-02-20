@@ -346,3 +346,117 @@ D5B8019488D9C0A0A1FE3075A577E23183F81D4A3F2FA457\
 FAFABE1C5D71A87E2F741EF8C1FE86FEA6BBFDE530677F0D\
 97D11D49F7A8443D0822E506A9F4614E011E2A94838FF88C\
 D68C8BB7C5C6424CFFFFFFFFFFFFFFFF";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hitls_types::DhParamId;
+
+    const ALL_GROUPS: [DhParamId; 13] = [
+        DhParamId::Rfc2409_768,
+        DhParamId::Rfc2409_1024,
+        DhParamId::Rfc3526_1536,
+        DhParamId::Rfc3526_2048,
+        DhParamId::Rfc3526_3072,
+        DhParamId::Rfc3526_4096,
+        DhParamId::Rfc3526_6144,
+        DhParamId::Rfc3526_8192,
+        DhParamId::Rfc7919_2048,
+        DhParamId::Rfc7919_3072,
+        DhParamId::Rfc7919_4096,
+        DhParamId::Rfc7919_6144,
+        DhParamId::Rfc7919_8192,
+    ];
+
+    #[test]
+    fn test_all_groups_load_successfully() {
+        for &id in &ALL_GROUPS {
+            let result = get_ffdhe_params(id);
+            assert!(result.is_some(), "failed to load DH group {id:?}");
+        }
+    }
+
+    #[test]
+    fn test_all_generators_are_two() {
+        let two = BigNum::from_u64(2);
+        for &id in &ALL_GROUPS {
+            let (_, g) = get_ffdhe_params(id).unwrap();
+            assert_eq!(
+                g.to_bytes_be(),
+                two.to_bytes_be(),
+                "generator != 2 for {id:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_prime_byte_sizes() {
+        let expected: [(DhParamId, usize); 13] = [
+            (DhParamId::Rfc2409_768, 96),
+            (DhParamId::Rfc2409_1024, 128),
+            (DhParamId::Rfc3526_1536, 192),
+            (DhParamId::Rfc3526_2048, 256),
+            (DhParamId::Rfc3526_3072, 384),
+            (DhParamId::Rfc3526_4096, 512),
+            (DhParamId::Rfc3526_6144, 768),
+            (DhParamId::Rfc3526_8192, 1024),
+            (DhParamId::Rfc7919_2048, 256),
+            (DhParamId::Rfc7919_3072, 384),
+            (DhParamId::Rfc7919_4096, 512),
+            (DhParamId::Rfc7919_6144, 768),
+            (DhParamId::Rfc7919_8192, 1024),
+        ];
+        for (id, size) in expected {
+            let (p, _) = get_ffdhe_params(id).unwrap();
+            let p_bytes = p.to_bytes_be();
+            assert_eq!(p_bytes.len(), size, "prime size mismatch for {id:?}");
+        }
+    }
+
+    #[test]
+    fn test_all_primes_unique() {
+        let primes: Vec<Vec<u8>> = ALL_GROUPS
+            .iter()
+            .map(|&id| get_ffdhe_params(id).unwrap().0.to_bytes_be())
+            .collect();
+        for i in 0..primes.len() {
+            for j in (i + 1)..primes.len() {
+                assert_ne!(
+                    primes[i], primes[j],
+                    "groups {:?} and {:?} share the same prime",
+                    ALL_GROUPS[i], ALL_GROUPS[j]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_rfc7919_distinct_from_rfc3526_same_bit_size() {
+        let pairs = [
+            (DhParamId::Rfc3526_2048, DhParamId::Rfc7919_2048),
+            (DhParamId::Rfc3526_3072, DhParamId::Rfc7919_3072),
+            (DhParamId::Rfc3526_4096, DhParamId::Rfc7919_4096),
+            (DhParamId::Rfc3526_6144, DhParamId::Rfc7919_6144),
+            (DhParamId::Rfc3526_8192, DhParamId::Rfc7919_8192),
+        ];
+        for (rfc3526_id, rfc7919_id) in pairs {
+            let (p1, _) = get_ffdhe_params(rfc3526_id).unwrap();
+            let (p2, _) = get_ffdhe_params(rfc7919_id).unwrap();
+            assert_ne!(
+                p1.to_bytes_be(),
+                p2.to_bytes_be(),
+                "RFC 3526 {rfc3526_id:?} and RFC 7919 {rfc7919_id:?} should differ"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rfc2409_768_is_prefix_of_1024() {
+        let (p768, _) = get_ffdhe_params(DhParamId::Rfc2409_768).unwrap();
+        let (p1024, _) = get_ffdhe_params(DhParamId::Rfc2409_1024).unwrap();
+        let p768_bytes = p768.to_bytes_be();
+        let p1024_bytes = p1024.to_bytes_be();
+        assert!(p1024_bytes.len() > p768_bytes.len());
+        assert_eq!(&p768_bytes[..8], &p1024_bytes[..8]);
+    }
+}
