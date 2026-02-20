@@ -12,7 +12,7 @@ Tests were added in four priority tiers (P0–P3), working from most critical
 Testing-Phase 72–86 for protocol and edge-case coverage.
 
 **Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,519 tests (40 ignored)
+**Current**: 2,577 tests (40 ignored)
 **P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
 **Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
 **Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
@@ -32,6 +32,7 @@ Testing-Phase 72–86 for protocol and edge-case coverage.
 **Testing-Phase 87**: +25 tests (async TLS 1.2/DTLCP client+server/encryption/lib.rs unit tests)
 **Testing-Phase 88**: +40 tests (connection_info/handshake enums/lib.rs constants/codec error paths/async accessors)
 **Testing-Phase 89**: +25 tests (ECC curve params/DH group params/TLCP public API/DTLCP error paths/DTLCP encryption edge cases)
+**Testing-Phase 90**: +33 tests (ECC Jacobian point arithmetic/AES software S-box/SM9 Fp field/SM9 G1 point/McEliece bit vector)
 
 ---
 
@@ -1257,3 +1258,37 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2544** | **40** |
+
+---
+
+## Testing-Phase 90: ECC Jacobian point/AES software S-box/SM9 Fp field/SM9 G1/McEliece bit vector
+
+**Date**: 2026-02-20
+**Scope**: First-ever unit tests for 5 previously untested crypto implementation files: ECC Jacobian point arithmetic, AES software (S-box) implementation, SM9 BN256 Fp field arithmetic, SM9 G1 point operations, and Classic McEliece bit vector utilities
+
+### New Tests (+33)
+
+| Module | File | Tests Added | Description |
+|--------|------|:-----------:|-------------|
+| ECC Point | `hitls-crypto/src/ecc/point.rs` | 10 | infinity_is_infinity, from_affine_to_affine_roundtrip, infinity_to_affine_returns_none, point_add_identity, point_add_inverse_gives_infinity, point_double_matches_add, scalar_mul_by_one, scalar_mul_by_zero_gives_infinity, scalar_mul_by_order_gives_infinity, scalar_mul_add_consistency |
+| AES Soft | `hitls-crypto/src/aes/soft.rs` | 8 | aes128_fips197_appendix_b, aes128_encrypt_decrypt_roundtrip, aes192_encrypt_decrypt_roundtrip, aes256_fips197_appendix_c3, invalid_key_length_rejected, invalid_block_size_rejected, sbox_inv_sbox_are_inverses, key_len_accessor |
+| SM9 Fp | `hitls-crypto/src/sm9/fp.rs` | 6 | add_sub_identity, mul_one_identity, inv_mul_gives_one, neg_double_neg, serialization_roundtrip, zero_neg_is_zero |
+| SM9 EcPointG1 | `hitls-crypto/src/sm9/ecp.rs` | 5 | generator_on_curve, infinity_add_generator, negate_add_gives_infinity, scalar_mul_by_order_gives_infinity, serialization_roundtrip |
+| McEliece Vector | `hitls-crypto/src/mceliece/vector.rs` | 4 | set_get_bit_roundtrip, flip_bit, hamming_weight, pop64_count_ones |
+
+### Workspace Test Counts After Testing-Phase 90
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 652 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 125 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1156 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2577** | **40** |

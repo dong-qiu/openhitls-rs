@@ -254,3 +254,131 @@ pub(crate) fn scalar_mul_add(
 
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ecc::curves::get_curve_params;
+    use hitls_types::EccCurveId;
+
+    fn p256_params() -> CurveParams {
+        get_curve_params(EccCurveId::NistP256).unwrap()
+    }
+
+    fn p256_generator(params: &CurveParams) -> JacobianPoint {
+        JacobianPoint::from_affine(&params.gx, &params.gy)
+    }
+
+    #[test]
+    fn infinity_is_infinity() {
+        let inf = JacobianPoint::infinity();
+        assert!(inf.is_infinity());
+        assert!(inf.z.is_zero());
+    }
+
+    #[test]
+    fn from_affine_to_affine_roundtrip() {
+        let params = p256_params();
+        let g = p256_generator(&params);
+        assert!(!g.is_infinity());
+        let (x, y) = g.to_affine(&params.p).unwrap().unwrap();
+        assert_eq!(x, params.gx);
+        assert_eq!(y, params.gy);
+    }
+
+    #[test]
+    fn infinity_to_affine_returns_none() {
+        let params = p256_params();
+        let inf = JacobianPoint::infinity();
+        assert!(inf.to_affine(&params.p).unwrap().is_none());
+    }
+
+    #[test]
+    fn point_add_identity() {
+        let params = p256_params();
+        let g = p256_generator(&params);
+        let inf = JacobianPoint::infinity();
+        // G + O = G
+        let r = point_add(&g, &inf, &params).unwrap();
+        let (rx, ry) = r.to_affine(&params.p).unwrap().unwrap();
+        assert_eq!(rx, params.gx);
+        assert_eq!(ry, params.gy);
+        // O + G = G
+        let r2 = point_add(&inf, &g, &params).unwrap();
+        let (rx2, ry2) = r2.to_affine(&params.p).unwrap().unwrap();
+        assert_eq!(rx2, params.gx);
+        assert_eq!(ry2, params.gy);
+    }
+
+    #[test]
+    fn point_add_inverse_gives_infinity() {
+        let params = p256_params();
+        let g = p256_generator(&params);
+        // -G has negated y coordinate: (gx, p - gy)
+        let neg_gy = params.p.sub(&params.gy);
+        let neg_g = JacobianPoint::from_affine(&params.gx, &neg_gy);
+        let r = point_add(&g, &neg_g, &params).unwrap();
+        assert!(r.is_infinity());
+    }
+
+    #[test]
+    fn point_double_matches_add() {
+        let params = p256_params();
+        let g = p256_generator(&params);
+        let two_g = point_double(&g, &params).unwrap();
+        assert!(!two_g.is_infinity());
+        // 2G via add(G, G) should match
+        let two_g_add = point_add(&g, &g, &params).unwrap();
+        let (x1, y1) = two_g.to_affine(&params.p).unwrap().unwrap();
+        let (x2, y2) = two_g_add.to_affine(&params.p).unwrap().unwrap();
+        assert_eq!(x1, x2);
+        assert_eq!(y1, y2);
+    }
+
+    #[test]
+    fn scalar_mul_by_one() {
+        let params = p256_params();
+        let g = p256_generator(&params);
+        let one = BigNum::from_u64(1);
+        let r = scalar_mul(&one, &g, &params).unwrap();
+        let (rx, ry) = r.to_affine(&params.p).unwrap().unwrap();
+        assert_eq!(rx, params.gx);
+        assert_eq!(ry, params.gy);
+    }
+
+    #[test]
+    fn scalar_mul_by_zero_gives_infinity() {
+        let params = p256_params();
+        let g = p256_generator(&params);
+        let zero = BigNum::zero();
+        let r = scalar_mul(&zero, &g, &params).unwrap();
+        assert!(r.is_infinity());
+    }
+
+    #[test]
+    fn scalar_mul_by_order_gives_infinity() {
+        let params = p256_params();
+        let g = p256_generator(&params);
+        let r = scalar_mul(&params.n, &g, &params).unwrap();
+        assert!(r.is_infinity());
+    }
+
+    #[test]
+    fn scalar_mul_add_consistency() {
+        let params = p256_params();
+        let g = p256_generator(&params);
+        let k1 = BigNum::from_u64(3);
+        let k2 = BigNum::from_u64(5);
+        let q = point_double(&g, &params).unwrap();
+        // k1*G + k2*Q via Shamir's trick
+        let combined = scalar_mul_add(&k1, &g, &k2, &q, &params).unwrap();
+        // k1*G + k2*Q via separate operations
+        let part1 = scalar_mul(&k1, &g, &params).unwrap();
+        let part2 = scalar_mul(&k2, &q, &params).unwrap();
+        let separate = point_add(&part1, &part2, &params).unwrap();
+        let (cx, cy) = combined.to_affine(&params.p).unwrap().unwrap();
+        let (sx, sy) = separate.to_affine(&params.p).unwrap().unwrap();
+        assert_eq!(cx, sx);
+        assert_eq!(cy, sy);
+    }
+}

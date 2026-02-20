@@ -7521,3 +7521,51 @@ Added 25 new tests covering:
 - `cargo test --workspace --all-features`: 2544 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Testing-Phase 90: ECC Jacobian point/AES software S-box/SM9 Fp field/SM9 G1/McEliece bit vector
+
+**Date**: 2026-02-20
+**Scope**: First-ever unit tests for 5 previously untested crypto implementation files
+
+### Summary
+
+Added 33 new tests covering:
+- **ECC Jacobian point arithmetic** (10 tests): Infinity point, from_affine/to_affine roundtrip on P-256, point_add identity (P+O=P, O+P=P), point_add inverse gives infinity (P+(-P)=O), point_double matches add(P,P), scalar_mul by 1/0/order, scalar_mul_add Shamir's trick consistency
+- **AES software S-box implementation** (8 tests): FIPS 197 Appendix B AES-128 vector, encrypt+decrypt roundtrip for all 3 key sizes (128/192/256), invalid key/block size rejection, SBOX/INV_SBOX inverse property (all 256 values), key_len accessor
+- **SM9 BN256 Fp field arithmetic** (6 tests): add/sub identity, mul by one, inverse multiply gives one, double negation, serialization roundtrip, zero negation
+- **SM9 G1 point operations** (5 tests): Generator on curve (y²=x³+5), infinity+generator, negate+add gives infinity, scalar_mul by order gives infinity, serialization roundtrip
+- **McEliece bit vector utilities** (4 tests): set/get bit roundtrip, flip bit, Hamming weight, pop64 count_ones
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/ecc/point.rs` | +10 tests (new test module) |
+| `crates/hitls-crypto/src/aes/soft.rs` | +8 tests (new test module) |
+| `crates/hitls-crypto/src/sm9/fp.rs` | +6 tests (new test module) |
+| `crates/hitls-crypto/src/sm9/ecp.rs` | +5 tests (new test module) |
+| `crates/hitls-crypto/src/mceliece/vector.rs` | +4 tests (new test module) |
+
+### Workspace Test Counts After Testing-Phase 90
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 652 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 125 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1156 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2577** | **40** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2577 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

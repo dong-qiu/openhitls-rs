@@ -265,3 +265,103 @@ fn add_round_key(s: &mut [u8; 16], rk: &[u32], round: usize) {
         s[i + 3] ^= w[3];
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    /// FIPS 197 Appendix B — AES-128 test vector
+    #[test]
+    fn aes128_fips197_appendix_b() {
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let pt = hex("3243f6a8885a308d313198a2e0370734");
+        let expected_ct = hex("3925841d02dc09fbdc118597196a0b32");
+        let aes = SoftAesKey::new(&key).unwrap();
+        let mut block = pt.clone();
+        aes.encrypt_block(&mut block).unwrap();
+        assert_eq!(block, expected_ct);
+    }
+
+    #[test]
+    fn aes128_encrypt_decrypt_roundtrip() {
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let pt = hex("6bc1bee22e409f96e93d7e117393172a");
+        let aes = SoftAesKey::new(&key).unwrap();
+        let mut block = pt.clone();
+        aes.encrypt_block(&mut block).unwrap();
+        assert_ne!(block, pt);
+        aes.decrypt_block(&mut block).unwrap();
+        assert_eq!(block, pt);
+    }
+
+    #[test]
+    fn aes192_encrypt_decrypt_roundtrip() {
+        let key = hex("8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b");
+        let pt = hex("6bc1bee22e409f96e93d7e117393172a");
+        let aes = SoftAesKey::new(&key).unwrap();
+        assert_eq!(aes.key_len(), 24);
+        let mut block = pt.clone();
+        aes.encrypt_block(&mut block).unwrap();
+        assert_ne!(block, pt);
+        aes.decrypt_block(&mut block).unwrap();
+        assert_eq!(block, pt);
+    }
+
+    /// FIPS 197 Appendix C.3 — AES-256 test vector
+    #[test]
+    fn aes256_fips197_appendix_c3() {
+        let key = hex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let pt = hex("6bc1bee22e409f96e93d7e117393172a");
+        let expected_ct = hex("f3eed1bdb5d2a03c064b5a7e3db181f8");
+        let aes = SoftAesKey::new(&key).unwrap();
+        assert_eq!(aes.key_len(), 32);
+        let mut block = pt.clone();
+        aes.encrypt_block(&mut block).unwrap();
+        assert_eq!(block, expected_ct);
+        // decrypt back
+        aes.decrypt_block(&mut block).unwrap();
+        assert_eq!(block, pt);
+    }
+
+    #[test]
+    fn invalid_key_length_rejected() {
+        assert!(SoftAesKey::new(&[0u8; 15]).is_err());
+        assert!(SoftAesKey::new(&[0u8; 17]).is_err());
+        assert!(SoftAesKey::new(&[0u8; 0]).is_err());
+        assert!(SoftAesKey::new(&[0u8; 33]).is_err());
+    }
+
+    #[test]
+    fn invalid_block_size_rejected() {
+        let key = [0u8; 16];
+        let aes = SoftAesKey::new(&key).unwrap();
+        let mut short = [0u8; 8];
+        assert!(aes.encrypt_block(&mut short).is_err());
+        assert!(aes.decrypt_block(&mut short).is_err());
+        let mut long = [0u8; 32];
+        assert!(aes.encrypt_block(&mut long).is_err());
+        assert!(aes.decrypt_block(&mut long).is_err());
+    }
+
+    #[test]
+    fn sbox_inv_sbox_are_inverses() {
+        for i in 0u8..=255 {
+            assert_eq!(INV_SBOX[SBOX[i as usize] as usize], i);
+            assert_eq!(SBOX[INV_SBOX[i as usize] as usize], i);
+        }
+    }
+
+    #[test]
+    fn key_len_accessor() {
+        assert_eq!(SoftAesKey::new(&[0u8; 16]).unwrap().key_len(), 16);
+        assert_eq!(SoftAesKey::new(&[0u8; 24]).unwrap().key_len(), 24);
+        assert_eq!(SoftAesKey::new(&[0u8; 32]).unwrap().key_len(), 32);
+    }
+}

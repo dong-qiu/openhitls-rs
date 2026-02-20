@@ -122,3 +122,57 @@ impl PartialEq for Fp {
 }
 
 impl Eq for Fp {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_sub_identity() {
+        let a = Fp::from_u64(42);
+        let zero = Fp::zero();
+        // a + 0 = a
+        assert_eq!(a.add(&zero).unwrap(), a);
+        // a - a = 0
+        assert_eq!(a.sub(&a).unwrap(), zero);
+    }
+
+    #[test]
+    fn mul_one_identity() {
+        let a = Fp::from_u64(123456789);
+        let one = Fp::one();
+        assert_eq!(a.mul(&one).unwrap(), a);
+    }
+
+    #[test]
+    fn inv_mul_gives_one() {
+        let a = Fp::from_u64(7);
+        let a_inv = a.inv().unwrap();
+        let product = a.mul(&a_inv).unwrap();
+        assert_eq!(product, Fp::one());
+    }
+
+    #[test]
+    fn neg_double_neg() {
+        let a = Fp::from_u64(999);
+        let neg_a = a.neg().unwrap();
+        let neg_neg_a = neg_a.neg().unwrap();
+        assert_eq!(neg_neg_a, a);
+    }
+
+    #[test]
+    fn serialization_roundtrip() {
+        let a = Fp::from_u64(0xDEADBEEF);
+        let bytes = a.to_bytes_be();
+        assert_eq!(bytes.len(), 32);
+        let b = Fp::from_bytes_be(&bytes).unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn zero_neg_is_zero() {
+        let z = Fp::zero();
+        assert_eq!(z.neg().unwrap(), Fp::zero());
+        assert!(z.is_zero());
+    }
+}
