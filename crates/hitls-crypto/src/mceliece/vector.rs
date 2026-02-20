@@ -36,3 +36,53 @@ pub(crate) fn vec_flip(v: &mut [u8], idx: usize) {
 pub(crate) fn pop64(x: u64) -> u32 {
     x.count_ones()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_get_bit_roundtrip() {
+        let mut buf = vec![0u8; 4];
+        // Set bits 0, 7, 15, 31
+        vec_set_bit(&mut buf, 0, 1);
+        vec_set_bit(&mut buf, 7, 1);
+        vec_set_bit(&mut buf, 15, 1);
+        vec_set_bit(&mut buf, 31, 1);
+        assert_eq!(vec_get_bit(&buf, 0), 1);
+        assert_eq!(vec_get_bit(&buf, 7), 1);
+        assert_eq!(vec_get_bit(&buf, 15), 1);
+        assert_eq!(vec_get_bit(&buf, 31), 1);
+        // Unset bits should be 0
+        assert_eq!(vec_get_bit(&buf, 1), 0);
+        assert_eq!(vec_get_bit(&buf, 8), 0);
+        // Clear a set bit
+        vec_set_bit(&mut buf, 7, 0);
+        assert_eq!(vec_get_bit(&buf, 7), 0);
+    }
+
+    #[test]
+    fn flip_bit() {
+        let mut buf = vec![0u8; 2];
+        vec_flip(&mut buf, 3);
+        assert_eq!(vec_get_bit(&buf, 3), 1);
+        vec_flip(&mut buf, 3);
+        assert_eq!(vec_get_bit(&buf, 3), 0);
+    }
+
+    #[test]
+    fn hamming_weight() {
+        assert_eq!(vec_weight(&[0u8; 4]), 0);
+        assert_eq!(vec_weight(&[0xFF]), 8);
+        assert_eq!(vec_weight(&[0xFF, 0xFF]), 16);
+        assert_eq!(vec_weight(&[0x01, 0x80]), 2);
+    }
+
+    #[test]
+    fn pop64_count_ones() {
+        assert_eq!(pop64(0), 0);
+        assert_eq!(pop64(1), 1);
+        assert_eq!(pop64(u64::MAX), 64);
+        assert_eq!(pop64(0xAAAAAAAAAAAAAAAA), 32);
+    }
+}

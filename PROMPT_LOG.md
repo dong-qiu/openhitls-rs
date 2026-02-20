@@ -1867,3 +1867,22 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - hitls-crypto: 607 → 619 (+12); hitls-tls: 1143 → 1156 (+13); total: 2519 → 2544 (+25).
 - 2544 total tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
+## Testing-Phase 90
+
+**Prompt**: 开始实现 Testing-Phase 90
+
+**Scope**: First-ever unit tests for 5 previously untested crypto implementation files: ECC Jacobian point arithmetic, AES software S-box, SM9 BN256 Fp field, SM9 G1 point operations, McEliece bit vector utilities.
+
+**Files modified**:
+1. `crates/hitls-crypto/src/ecc/point.rs` (+10 tests) — infinity, from/to_affine roundtrip, point_add identity/inverse, point_double, scalar_mul by 1/0/order, scalar_mul_add consistency
+2. `crates/hitls-crypto/src/aes/soft.rs` (+8 tests) — FIPS 197 AES-128/256 vectors, 3 key size roundtrips, invalid key/block, SBOX inverse property, key_len
+3. `crates/hitls-crypto/src/sm9/fp.rs` (+6 tests) — add/sub/mul/inv/neg identities, serialization roundtrip
+4. `crates/hitls-crypto/src/sm9/ecp.rs` (+5 tests) — generator on curve, infinity add, negate, order, serialization
+5. `crates/hitls-crypto/src/mceliece/vector.rs` (+4 tests) — set/get/flip bit, Hamming weight, pop64
+
+**Result**:
+- hitls-crypto: 619 → 652 (+33); total: 2544 → 2577 (+33).
+- 2577 total tests (40 ignored). Clippy clean, fmt clean.

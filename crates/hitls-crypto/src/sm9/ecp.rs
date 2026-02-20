@@ -192,3 +192,53 @@ impl PartialEq for EcPointG1 {
 }
 
 impl Eq for EcPointG1 {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generator_on_curve() {
+        // Check y² = x³ + 5 (mod p) for P1
+        let g = EcPointG1::generator();
+        let (gx, gy) = g.to_affine().unwrap();
+        let y_sq = gy.sqr().unwrap();
+        let x_cu = gx.sqr().unwrap().mul(&gx).unwrap();
+        let b = Fp::from_bignum(curve::b_coeff());
+        let rhs = x_cu.add(&b).unwrap();
+        assert_eq!(y_sq, rhs);
+    }
+
+    #[test]
+    fn infinity_add_generator() {
+        let inf = EcPointG1::infinity();
+        let g = EcPointG1::generator();
+        let r = inf.add(&g).unwrap();
+        assert_eq!(r, g);
+    }
+
+    #[test]
+    fn negate_add_gives_infinity() {
+        let g = EcPointG1::generator();
+        let neg_g = g.negate().unwrap();
+        let r = g.add(&neg_g).unwrap();
+        assert!(r.is_infinity());
+    }
+
+    #[test]
+    fn scalar_mul_by_order_gives_infinity() {
+        let g = EcPointG1::generator();
+        let n = curve::order();
+        let r = g.scalar_mul(&n).unwrap();
+        assert!(r.is_infinity());
+    }
+
+    #[test]
+    fn serialization_roundtrip() {
+        let g = EcPointG1::generator();
+        let bytes = g.to_bytes().unwrap();
+        assert_eq!(bytes.len(), 64);
+        let g2 = EcPointG1::from_bytes(&bytes).unwrap();
+        assert_eq!(g, g2);
+    }
+}

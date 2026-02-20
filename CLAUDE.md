@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 82 complete + Testing-Phase 89 — 100% C→Rust feature parity (2544 tests)
+- **Status**: Phase 82 complete + Testing-Phase 90 — 100% C→Rust feature parity (2577 tests)
 
 ## Workspace Structure
 
@@ -35,12 +35,13 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2544 tests, 40 ignored)
+# Run all tests (2577 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 619 tests (31 ignored) + 15 Wycheproof
+cargo test -p hitls-crypto --all-features   # 652 tests (31 ignored) + 15 Wycheproof
 cargo test -p hitls-tls --all-features      # 1156 tests
+
 cargo test -p hitls-pki --all-features      # 349 tests (1 ignored)
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
@@ -127,6 +128,6 @@ Key milestones:
 - Phase 68–76: Renegotiation, hostname verification, session cache, async DTLS, GREASE, Heartbeat
 - Phase 77–79: TLS callbacks (10 types), Trusted CA Keys/USE_SRTP/STATUS_REQUEST_V2, CMS AuthenticatedData
 - Phase 80–82: Encrypted PKCS#8, TicketKeyCallback/SecurityCallback, SM4-CTR-DRBG, CMS ML-DSA
-- Testing-Phase 72–89: CLI unit tests, async connection tests, cipher suite integration, codec/state machine edge cases, ECC/DH param validation
+- Testing-Phase 72–90: CLI unit tests, async connection tests, cipher suite integration, codec/state machine edge cases, ECC point/AES soft/SM9 field arithmetic/McEliece vector
 
 See `DEV_LOG.md` for detailed phase tables, `TEST_LOG.md` for testing history, and `PROMPT_LOG.md` for prompt/response log.
