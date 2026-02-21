@@ -1,42 +1,145 @@
 # openHiTLS-rs — Test Development Log
 
-> This file documents the complete testing history for openHiTLS-rs.
-> For the current feature summary, see [README.md](README.md).
-> For implementation phase history, see [DEV_LOG.md](DEV_LOG.md).
-
-## Overview
-
-Systematic test coverage improvement across the openHiTLS-rs workspace.
-Tests were added in four priority tiers (P0–P3), working from most critical
-(core crypto primitives) down to supplementary coverage, followed by
-Testing-Phase 72–86 for protocol and edge-case coverage.
-
-**Baseline**: 1,104 tests (36 ignored)
-**Current**: 2,577 tests (40 ignored)
-**P0–P3 Total**: 1,291 tests (37 ignored) — **187 new tests added**
-**Testing-Phase 72**: +72 tests (CLI commands + Session Cache concurrency)
-**Testing-Phase 73**: +33 tests (Async TLS 1.3 unit tests + cipher suite integration)
-**Testing-Phase 74**: +18 tests (Error scenario integration tests + 66 fuzz seed corpus files)
-**Testing-Phase 75**: +16 tests (Integration test expansion + async key-export unit tests)
-**Testing-Phase 76**: +26 tests (cert_verify unit tests + config callback tests + integration tests)
-**Testing-Phase 77**: +13 tests (SniCallback + DTLS abbreviated + PADDING/OID Filters + PskServerCallback integration)
-**Testing-Phase 78**: +22 tests (GREASE + Heartbeat + Async DTLS edge cases + extension codec negative tests)
-**Testing-Phase 79**: +28 tests (DTLS 1.2 handshake + TLS 1.3 server + record layer + PRF unit tests)
-**Testing-Phase 80**: +24 tests (TLCP server + transcript + key_schedule12 + cert_verify + TLS 1.3 client + session)
-**Testing-Phase 81**: +25 tests (client_tlcp + cipher suite params + verify Ed448 + HKDF edge cases)
-**Testing-Phase 82**: +24 tests (codec/server12/client12/dtls12/config unit tests)
-**Testing-Phase 83**: +25 tests (session/client/server/async/dtls12-async unit tests)
-**Testing-Phase 84**: +24 tests (record/extensions/export/codec/connection unit tests)
-**Testing-Phase 85**: +25 tests (aead/crypt/alert/signing/config unit tests)
-**Testing-Phase 86**: +23 tests (retransmit/keylog/fragment/anti_replay/key_exchange unit tests)
-**Testing-Phase 87**: +25 tests (async TLS 1.2/DTLCP client+server/encryption/lib.rs unit tests)
-**Testing-Phase 88**: +40 tests (connection_info/handshake enums/lib.rs constants/codec error paths/async accessors)
-**Testing-Phase 89**: +25 tests (ECC curve params/DH group params/TLCP public API/DTLCP error paths/DTLCP encryption edge cases)
-**Testing-Phase 90**: +33 tests (ECC Jacobian point arithmetic/AES software S-box/SM9 Fp field/SM9 G1 point/McEliece bit vector)
+> Comprehensive testing history for the openHiTLS-rs cryptographic library.
+> Related docs: [README.md](README.md) | [DEV_LOG.md](DEV_LOG.md) | [PROMPT_LOG.md](PROMPT_LOG.md)
 
 ---
 
-## P0 — Critical Core Crypto (64 new tests)
+## 1. Executive Summary
+
+| Metric | Value |
+|--------|-------|
+| **Total tests** | **2,577** (40 ignored) |
+| **Test growth** | 1,104 → 2,577 (+134% since baseline) |
+| **Crates covered** | 8/8 (100% crate-level coverage) |
+| **Fuzz targets** | 10 (with 66 seed corpus files) |
+| **Wycheproof vectors** | 5,000+ (15 test groups) |
+| **Zero failures** | All 2,577 tests pass, clippy clean, fmt clean |
+
+### Test Growth Timeline
+
+```
+Phase       Tests   Delta   Period
+─────────   ─────   ─────   ──────────────────
+Baseline    1,104           Pre-testing effort
+T-Phase 49  1,291    +187   Foundation (core crypto + TLS + PKI)
+Phase 50–61 1,782    +491   Unit test expansion (crypto + TLS edge cases)
+Phase 62–69 1,846     +64   Cipher suite feature tests (CCM/PSK/DSS/ANON/renego)
+Phase 70–82 2,026    +180   Feature-driven tests (hostname/session/callbacks/PQC)
+T-Phase 72  1,964     +72   CLI + session cache concurrency (*)
+T-Phase 73  2,021     +33   Async TLS 1.3 + cipher suite integration (*)
+T-Phase 74  2,054     +18   Fuzz corpus + error scenario integration (*)
+T-Phase 75  2,070     +16   Key export + async export unit tests (*)
+T-Phase 76  2,131     +26   cert_verify + config callbacks + integration (*)
+T-Phase 77  2,144     +13   SniCallback + DTLS abbreviated + extensions (*)
+T-Phase 78  2,166     +22   GREASE + Heartbeat + async DTLS edge cases (*)
+T-Phase 79  2,194     +28   DTLS handshake + TLS 1.3 server + record + PRF (*)
+T-Phase 80  2,218     +24   TLCP server + transcript + key schedule + session (*)
+T-Phase 81  2,299     +25   Client TLCP + cipher params + Ed448 + HKDF (*)
+T-Phase 82  2,323     +24   Codec + server12 + client12 + dtls12 + config (*)
+T-Phase 83  2,348     +25   Session + client + server + async + dtls12-async (*)
+T-Phase 84  2,372     +24   Record + extensions + export + codec + connection (*)
+T-Phase 85  2,397     +25   AEAD + crypt + alert + signing + config (*)
+T-Phase 86  2,420     +23   Retransmit + keylog + fragment + anti_replay (*)
+T-Phase 87  2,445     +25   Async TLS 1.2 + DTLCP + encryption + lib.rs (*)
+T-Phase 88  2,519     +40   ConnectionInfo + handshake enums + codec errors (*)
+T-Phase 89  2,544     +25   ECC/DH params + TLCP API + DTLCP encryption (*)
+T-Phase 90  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
+```
+
+(*) Testing-only phases (no new features, pure test coverage)
+
+---
+
+## 2. Test Architecture
+
+### Test Pyramid
+
+```
+                    ┌─────────────┐
+                    │  Fuzz (10)  │  libfuzzer targets: ASN.1, PEM, X.509, TLS, CMS...
+                   ─┼─────────────┼─
+                  │   Integration  │  125 cross-crate TCP/loopback tests
+                 ─┼────────────────┼─
+               │   Wycheproof 5000+ │  Standard test vectors (NIST, RFC, GB/T)
+              ─┼─────────────────────┼─
+            │      Unit Tests 2,327    │  Per-module: roundtrip, negative, edge cases
+           ─┴─────────────────────────┴─
+```
+
+### Per-Crate Breakdown (Current)
+
+| Crate | Tests | Ignored | % of Total | Focus |
+|-------|------:|--------:|:----------:|-------|
+| hitls-tls | 1,156 | 0 | 44.8% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
+| hitls-crypto | 652 | 31 | 25.3% | 48 algorithm modules + hardware acceleration |
+| hitls-pki | 349 | 1 | 13.5% | X.509, PKCS#8/12, CMS (5 content types) |
+| hitls-integration | 125 | 3 | 4.9% | Cross-crate TCP loopback, error scenarios, concurrency |
+| hitls-cli | 117 | 5 | 4.5% | 14 CLI commands (dgst, x509, genpkey, etc.) |
+| hitls-utils | 53 | 0 | 2.1% | ASN.1, Base64, PEM, OID |
+| hitls-bignum | 49 | 0 | 1.9% | Montgomery, Miller-Rabin, modular arithmetic |
+| hitls-auth | 33 | 0 | 1.3% | HOTP/TOTP, SPAKE2+, Privacy Pass |
+| hitls-types | 26 | 0 | 1.0% | Enum definitions, error types |
+| Wycheproof | 15 | 0 | 0.6% | 5,000+ vectors across 15 test groups |
+| Doc-tests | 2 | 0 | 0.1% | API documentation examples |
+| **Total** | **2,577** | **40** | **100%** | |
+
+### Test Quality Principles
+
+- **RFC / standard test vectors**: FIPS 197, RFC 8448, RFC 5869, RFC 7539, RFC 8032, RFC 4231, GB/T 32905/32907
+- **Roundtrip tests**: All encrypt/decrypt and sign/verify paths
+- **Negative tests**: Wrong key, tampered data, invalid lengths, scheme mismatches
+- **Edge cases**: Empty input, single byte, max-size data, boundary values
+- **Wrong-state tests**: Every TLS handshake state machine transition with invalid states
+- **Determinism checks**: Same input → same output
+- **Constant-time equality**: `subtle::ConstantTimeEq` in all cryptographic comparisons
+
+---
+
+## 3. Coverage Gap Analysis & Optimization Plan
+
+### Remaining Untested Files (30 files, ~6,670 lines)
+
+After Testing-Phase 90, 30 crypto implementation files still lack direct unit tests:
+
+| Category | Files | Lines | Complexity | Priority |
+|----------|------:|------:|:----------:|:--------:|
+| **SLH-DSA** (FIPS 205) | 6 | 1,224 | High | P1 |
+| **Classic McEliece** | 7 | 1,686 | High | P1 |
+| **XMSS** (RFC 8391) | 5 | 752 | Medium | P2 |
+| **FrodoKEM** | 3 | 743 | Medium | P2 |
+| **SM9** (remaining) | 7 | 1,121 | Medium | P2 |
+| **Provider traits** | 1 | 144 | Low | P3 |
+
+**Note**: All untested files are in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
+
+### Optimization Plan — Next Priorities
+
+| Priority | Target | Est. Tests | Rationale |
+|:--------:|--------|:----------:|-----------|
+| **P1** | SM9 tower fields (fp2, fp4, fp12) | ~15 | Field arithmetic is foundation for pairing; verify algebraic identities |
+| **P1** | SLH-DSA (address, FORS, WOTS, hypertree) | ~20 | Post-quantum standard (FIPS 205); high-value coverage |
+| **P2** | McEliece (poly, matrix, decode, benes) | ~15 | PQC key encapsulation; complex linear algebra |
+| **P2** | FrodoKEM (matrix, pke, params) | ~10 | PQC lattice-based; matrix sampling correctness |
+| **P2** | XMSS (hash, tree, WOTS, address) | ~10 | Hash-based stateful signatures |
+| **P3** | Stress / performance regression tests | ~5 | Large payload, concurrent connections |
+| **P3** | Negative integration tests | ~10 | Protocol-level error injection, malformed records |
+
+### Coverage Metrics Target
+
+| Metric | Current | Target |
+|--------|:-------:|:------:|
+| Total tests | 2,577 | 2,700+ |
+| Crypto files with tests | 75% | 90%+ |
+| TLS files with tests | 100% | 100% |
+| Integration tests | 125 | 140+ |
+| Fuzz corpus seeds | 66 | 100+ |
+
+---
+
+## 4. Era I — Foundation Tests (Testing-Phase 49, +187 tests, 1,104 → 1,291)
+
+### §A — Critical Core Crypto (64 new tests)
 
 **Target**: Core cryptographic primitives with zero or minimal existing tests.
 
@@ -50,11 +153,11 @@ Testing-Phase 72–86 for protocol and edge-case coverage.
 | ECDSA | `hitls-crypto/src/ecdsa/mod.rs` | 8 | P-256/P-384 sign+verify, wrong curve, tampered signature/digest, key roundtrip, empty message, deterministic public key |
 | Ed25519 | `hitls-crypto/src/ed25519/mod.rs` | 8 | RFC 8032 Test Vector 1, empty/long message, wrong public key, tampered sig, key from seed roundtrip, sign determinism |
 
-**Workspace after P0**: 1,168 tests, 36 ignored
+**Workspace after §A**: 1,168 tests, 36 ignored
 
 ---
 
-## P1 — Protocol-Critical TLS + PKI (60 new tests)
+### §B — Protocol-Critical TLS + PKI (60 new tests)
 
 **Target**: TLS record layer, X.509 parsing, and additional crypto modules.
 
@@ -69,11 +172,11 @@ Testing-Phase 72–86 for protocol and edge-case coverage.
 | SM4 | `hitls-crypto/src/sm4/mod.rs` | 4 | GB/T 32907 vector, encrypt/decrypt roundtrip, wrong key length, ECB mode |
 | SM3 | `hitls-crypto/src/sm3/mod.rs` | 4 | GB/T 32905 vectors (empty, "abc", 64-byte), incremental update |
 
-**Workspace after P1**: 1,200 tests, 37 ignored
+**Workspace after §B**: 1,200 tests, 37 ignored
 
 ---
 
-## P2 — Handshake & Key Schedule (42 new tests)
+### §C — Handshake & Key Schedule (42 new tests)
 
 **Target**: TLS 1.3 handshake signing/verification and key derivation.
 
@@ -85,11 +188,11 @@ Testing-Phase 72–86 for protocol and edge-case coverage.
 | Key Exchange | `hitls-tls/src/handshake/key_exchange.rs` | 7 | Non-KEM encapsulate error, wrong peer key lengths (X25519/X448/SECP256R1/hybrid), key uniqueness, non-zero shared secret |
 | TLS 1.2 Key Schedule | `hitls-tls/src/crypt/key_schedule12.rs` | 6 | CBC key block with MAC keys, CBC-256 block length, ChaCha20-Poly1305, SHA-384 master secret, verify_data always 12 bytes, key block seed order |
 
-**Workspace after P2**: 1,243 tests, 37 ignored
+**Workspace after §C**: 1,243 tests, 37 ignored
 
 ---
 
-## P3 — Supplementary Coverage (48 new tests)
+### §D — Supplementary Coverage (48 new tests)
 
 **Target**: Config builder, field arithmetic, HKDF TLS primitives, CMS EncryptedData.
 
@@ -101,51 +204,34 @@ Testing-Phase 72–86 for protocol and edge-case coverage.
 | CMS EncryptedData | `hitls-pki/src/cms/encrypted.rs` | 5 | Wrong key length, empty plaintext, large data (64 KiB), tampered ciphertext, unique nonces (randomness) |
 | Traffic Keys | `hitls-tls/src/crypt/traffic_keys.rs` | 6 | Client HS keys (RFC 8448), SHA-384, ChaCha20-Poly1305, deterministic, different secrets, different suites/lengths |
 
-**Workspace after P3**: 1,291 tests, 37 ignored
+**Workspace after §D**: 1,291 tests, 37 ignored
 
 ---
 
-## Verification
+## 5. Era II — Feature-Driven Unit Test Expansion (Phase 50–61, +491 tests)
 
-All phases verified with:
+These phases focused on expanding unit test coverage alongside implementation work.
 
-```bash
-# Full test suite — all pass
-cargo test --workspace --all-features
-# Result: 1,291 passed, 0 failed, 37 ignored
+| Phase | Tests Added | Running Total | Focus |
+|-------|:----------:|:------------:|-------|
+| **50** | +71 | 1,362 | Alert/session/record tests, CMS Ed25519/Ed448 signing, enc CLI multi-cipher, TLS 1.2 OCSP/SCT |
+| **51** | +52 | 1,414 | C test vectors porting: cert chain verification, CMS real file tests, PKCS#12 interop |
+| **52** | +39 | 1,453 | X.509 extension parsing (EKU/SAN/AKI/SKI/AIA/NameConstraints), CMS SKI lookup |
+| **53** | +56 | 1,509 | AKI/SKI chain matching, CertificatePolicies, CMS noattr/RSA-PSS, CSR parse/verify |
+| **54** | +41 | 1,550 | Ed448/SM2/RSA-PSS verify in cert/CRL/OCSP, CMS EnvelopedData error paths |
+| **55** | +24 | 1,574 | TLS RFC 5705 key export, CMS detached SignedData, pkeyutl completeness |
+| **56** | +30 | 1,604 | TLCP public API, DTLS/TLCP/DTLCP/mTLS integration tests, TLS 1.3 server unit tests |
+| **57** | +40 | 1,644 | X25519 RFC 7748 vectors, HKDF edge cases, SM3/SM4 vectors, anti-replay, TLS wrong-state |
+| **58** | +36 | 1,678 | Ed25519 RFC 8032 vectors, ECDSA/ASN.1/HMAC/ChaCha20 edge cases, TLS wrong-state |
+| **59** | +35 | 1,712 | CFB/OFB/ECB/XTS modes, ML-KEM/ML-DSA edge cases, DRBG reseed, GMAC/CMAC vectors |
+| **60** | +36 | 1,748 | CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3, Entropy health, Privacy Pass |
+| **61** | +34 | 1,782 | RSA/ECDH/SM2/ElGamal/Paillier, ECC scalar mul, SHA2/SHA3/AES, BigNum, HOTP/SPAKE2+ |
 
-# Clippy — zero warnings
-RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
+---
 
-# Format check
-cargo fmt --all -- --check
-```
+## 6. Era III — Cipher Suite & Protocol Feature Tests (Phase 62–82, +244 tests)
 
-## Per-Crate Breakdown (Final)
-
-| Crate | Tests | Ignored |
-|-------|------:|--------:|
-| hitls-crypto | 476 | 28 |
-| hitls-tls | 496 | 0 |
-| hitls-pki | 122 | 1 |
-| hitls-bignum | 46 | 0 |
-| hitls-utils | 35 | 0 |
-| hitls-cli | 26 | 5 |
-| hitls-auth | 24 | 0 |
-| hitls-integration-tests | 23 | 3 |
-| Wycheproof (hitls-crypto) | 15 | 0 |
-| Doc-tests | 2 | 0 |
-| **Total** | **1,291** | **37** |
-
-## Test Quality Principles
-
-- **RFC / standard test vectors** where available (RFC 8448, RFC 5869, RFC 7539, RFC 8032, RFC 4231, GB/T 32907, GB/T 32905)
-- **Roundtrip tests** for all encrypt/decrypt and sign/verify paths
-- **Negative tests**: wrong key, tampered data, invalid lengths, scheme mismatches
-- **Edge cases**: empty input, single byte, max-size data, boundary values
-- **Determinism checks**: same input → same output
-- **State machine tests**: wrong-stage errors in key schedule
-- **Constant-time equality** via `subtle::ConstantTimeEq` in crypto comparisons
+Tests added alongside new TLS cipher suites, protocol features, and callbacks.
 
 ---
 
@@ -253,6 +339,33 @@ cargo fmt --all -- --check
 
 **Workspace after Phase 69**: 1,854 tests, 40 ignored (+8 from Phase 68's 1,846)
 
+---
+
+### Implementation Phases 70–82 (feature tests, +172 tests)
+
+These phases added new features with accompanying test suites. See [DEV_LOG.md](DEV_LOG.md) for implementation details.
+
+| Phase | Tests | Cumulative | Feature |
+|-------|:-----:|:----------:|---------|
+| **70** | +15 | 1,869 | Hostname verification (RFC 6125), cert chain validation, SniCallback |
+| **71** | +13 | 1,882 | Server-side session cache, TTL expiration, cipher_server_preference |
+| **72** | +12 | 1,894 | Client-side session cache, write record fragmentation |
+| **73** | +13 | 1,907 | KeyUpdate loop protection, Max Fragment Length (RFC 6066), Signature Algorithms Cert |
+| **74** | +15 | 1,922 | Certificate Authorities (RFC 8446 §4.2.4), early exporter, DTLS session cache |
+| **75** | +15 | 1,937 | PADDING (RFC 7685), OID Filters (RFC 8446 §4.2.5), DTLS abbreviated handshake |
+| **76** | +19 | 1,956 | Async DTLS 1.2, Heartbeat (RFC 6520), GREASE (RFC 8701) |
+| **77** | +21 | 1,977 | TLS callbacks (7 types), CBC-MAC-SM4, missing alert codes |
+| **78** | +17 | 1,994 | Trusted CA Keys, USE_SRTP, STATUS_REQUEST_V2, CMS AuthenticatedData |
+| **79** | +18 | 2,012 | flight_transmit_enable, empty_records_limit, callback integration tests |
+| **80** | +12 | 2,024 | Encrypted PKCS#8 (PBES2), session_id_context, quiet_shutdown |
+| **81** | +12 | 2,036 | TicketKeyCallback, SecurityCallback |
+| **82** | +10 | 2,046 | SM4-CTR-DRBG, CMS ML-DSA, quiet_shutdown/security_callback integration |
+
+---
+
+## 7. Era IV — Systematic Test Coverage Expansion (Testing-Phase 72–90, +531 tests)
+
+Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
@@ -565,6 +678,99 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2131** | **40** |
+
+---
+
+## Testing-Phase 77 — SniCallback + PADDING + OID Filters + DTLS Abbreviated + PskServerCallback (2026-02-19)
+
+**Scope**: Integration tests for Phase 75-76 features — SNI-based certificate selection, PADDING extension target, OID Filters in CertificateRequest, DTLS abbreviated handshake session resumption, and PskServerCallback.
+**New tests**: +13 (2131 → 2144)
+**hitls-integration-tests**: 94 → 107 tests
+
+### New Tests (+13)
+
+| Test | Category | Description |
+|------|----------|-------------|
+| test_tls13_sni_callback_selects_cert | SNI | SniCallback switches cert based on hostname |
+| test_tls13_sni_callback_abort | SNI | SniCallback returns Abort → handshake fails |
+| test_tls13_sni_callback_no_match | SNI | SniCallback returns NoAck → default cert used |
+| test_tls13_padding_target_512 | PADDING | ClientHello padded to 512-byte target |
+| test_tls13_oid_filters_in_cert_request | OID Filters | OID filters sent in CertificateRequest |
+| test_dtls12_abbreviated_handshake_session_cache | DTLS | DTLS session cache → abbreviated handshake |
+| test_dtls12_abbreviated_checks_session_id | DTLS | Session ID mismatch → full handshake |
+| test_tls12_psk_server_callback | PSK | PskServerCallback resolves identity to key |
+| test_tls12_psk_server_callback_reject | PSK | PskServerCallback rejects identity → handshake fails |
+| test_tls12_psk_server_callback_wrong_key | PSK | PskServerCallback wrong key → Finished verification fails |
+| test_tls13_padding_target_zero_noop | PADDING | padding_target=0 → no padding added |
+| test_tls12_sni_callback_selects_cert | SNI | TLS 1.2 SniCallback cert selection |
+| test_dtls12_abbreviated_full_data_exchange | DTLS | Full handshake → data → abbreviated → data |
+
+---
+
+## Testing-Phase 78 — GREASE + Heartbeat + Async DTLS Edge Cases + Extension Codec Negative Tests (2026-02-19)
+
+**Scope**: GREASE ClientHello validation, Heartbeat config/codec, async DTLS 1.2 edge cases, and extension codec negative/boundary tests.
+**New tests**: +22 (2144 → 2166)
+**hitls-tls**: 826 → 848 tests
+
+### G1: GREASE Validation Tests (+5)
+
+| Test | Description |
+|------|-------------|
+| test_grease_cipher_suite_in_client_hello | GREASE cipher suite present in encoded ClientHello |
+| test_grease_extension_type_pattern | GREASE extension type matches 0x?A?A pattern |
+| test_grease_supported_versions_prepended | GREASE version first in supported_versions list |
+| test_grease_named_group_in_key_share | GREASE named group in key_share extension |
+| test_grease_sig_alg_in_signature_algorithms | GREASE sig_alg in signature_algorithms extension |
+
+### G2: Heartbeat Config + Codec Tests (+4)
+
+| Test | Description |
+|------|-------------|
+| test_heartbeat_mode_config_peer_allowed | heartbeat_mode=1 → peer_allowed_to_send negotiated |
+| test_heartbeat_mode_config_peer_not_allowed | heartbeat_mode=2 → peer_not_allowed_to_send |
+| test_heartbeat_codec_invalid_empty | Empty heartbeat extension → parse error |
+| test_heartbeat_codec_oversized_mode | Mode > 2 → parse error |
+
+### G3: Async DTLS 1.2 Edge Case Tests (+6)
+
+| Test | Description |
+|------|-------------|
+| test_async_dtls12_multi_message_sequential | 5 sequential messages all delivered in order |
+| test_async_dtls12_server_shutdown | Server-initiated shutdown completes |
+| test_async_dtls12_client_server_name | server_name() returns configured value |
+| test_async_dtls12_is_connected_before_handshake | is_connected()=false before handshake |
+| test_async_dtls12_empty_write | Empty write succeeds without error |
+| test_async_dtls12_anti_replay_duplicate | Replayed record rejected |
+
+### G4: Extension Codec Negative Tests (+7)
+
+| Test | Description |
+|------|-------------|
+| test_parse_server_name_extension_empty | Empty SNI extension → parse error |
+| test_parse_supported_versions_ch_empty | Empty supported_versions → parse error |
+| test_parse_key_share_ch_truncated_entry | Truncated key_share entry → parse error |
+| test_build_parse_max_fragment_length_roundtrip | MaxFragmentLength codec roundtrip |
+| test_parse_record_size_limit_wrong_length | Wrong length record_size_limit → parse error |
+| test_build_parse_certificate_authorities_roundtrip | certificate_authorities codec roundtrip |
+| test_parse_signature_algorithms_cert_truncated | Truncated sig_algs_cert → parse error |
+
+### Workspace Test Counts After Testing-Phase 78
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 593 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 107 | 3 |
+| hitls-pki | 336 | 1 |
+| hitls-tls | 848 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2166** | **40** |
 
 ---
 
@@ -1292,3 +1498,23 @@ cargo fmt --all -- --check
 | hitls-utils | 53 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2577** | **40** |
+
+---
+
+## 8. Verification & Quality Gates
+
+All phases verified with the same quality gates:
+
+```bash
+# Full test suite — all 2,577 tests pass
+cargo test --workspace --all-features
+# Result: 2,577 passed, 0 failed, 40 ignored
+
+# Clippy — zero warnings enforced
+RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
+
+# Format — rustfmt compliance
+cargo fmt --all -- --check
+```
+
+**Ignored tests** (40 total): Slow operations marked `#[ignore]` — RSA/DH/DSA key generation, ML-KEM/ML-DSA full-parameter tests, SM9 pairing operations, and long-running XMSS/McEliece tests. All pass when explicitly run with `cargo test -- --ignored`.
