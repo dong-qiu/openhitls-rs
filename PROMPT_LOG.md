@@ -1904,3 +1904,105 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - hitls-tls: 1156 → 1164 (+8); total: 2577 → 2585 (+8).
 - 2585 total tests (40 ignored). Clippy clean, fmt clean.
 - D1 deficiency closed.
+
+---
+
+## Architecture Analysis (ARCH_REPORT.md)
+
+**Prompt**: 请对项目的架构进行分析，输出架构分析报告ARCH_REPORT.md，并针对架构分析结果制定重构方案
+
+**Scope**: Comprehensive architecture analysis of the entire 121K-line openHiTLS-rs codebase (8 workspace crates, 228 source files). Identified 10 architectural issues and designed a 10-phase refactoring plan.
+
+**Work performed**:
+- Launched 6 parallel exploration agents to analyze all workspace crates
+- Analyzed: dependency graph, trait hierarchy, module structure, code metrics, unsafe usage, integration tests
+- Identified issues: PKI encoding duplication (24 enc_* copies), record layer Option proliferation, oversized files (connection.rs 2914 lines), sync/async code duplication (~4000 lines), hash digest match duplication, x509/mod.rs 2200 lines, test organization, test helper scattering, parameter struct bloat, DRBG code duplication
+- Designed 10-phase refactoring plan (Phase R102–R111) with priority, risk, and dependency analysis
+
+**Files created**:
+1. `ARCH_REPORT.md` — 819 lines, 9 sections: workspace overview, crate analysis (×8), cross-cutting concerns, architectural issues (×10), refactoring plan (×10), execution roadmap
+
+**Result**:
+- ARCH_REPORT.md created and pushed to main (commit `31db03d`).
+- No code changes, no test impact.
+
+---
+
+## Unified Phase Naming Convention
+
+**Prompt**: 对markdown文件中的开发过程进行统一命名，特性迁移和新特性开发使用Phase X命名，测试增强和优化使用Phase TX，重构使用Phase RX，性能提升使用Phase PX，其中X使用全局的数字来标示体现出不同活动所处的阶段
+
+**Scope**: Rename all development phases across 7 markdown files to a unified global sequential numbering system reflecting true chronological order.
+
+**Work performed**:
+- Designed mapping: Phase 0–71 unchanged; Phase 72–82 (feature) interleaved with Testing-Phase 72–90 (testing) → global numbers 72–101; ARCH_REPORT R1–R10 → Phase R102–R111
+- Created Perl bulk-rename script (`/tmp/rename_phases.pl`) with 5-step processing (Testing-Phase ranges → individual Testing-Phase → T-Phase shorthand → feature phase ranges → individual feature phases)
+- Fixed UTF-8 en-dash encoding issues in Perl (range patterns with `–` failed silently)
+- Manually corrected all broken range references (e.g., "Phase 82–79" → "Phase 82–86")
+
+**Files modified**:
+1. `DEV_LOG.md` — All 19 feature phase headers + 19 testing phase headers + ranges + cross-references
+2. `TEST_LOG.md` — Timeline table, all testing phase sections, era headings, ranges
+3. `PROMPT_LOG.md` — Session headers, phase references
+4. `CLAUDE.md` — Status line, migration roadmap, key milestones
+5. `README.md` — "Phase 0–82" → "Phase 0–92"
+6. `MIGRATION_REPORT.md` — Phase 81 → Phase 90
+7. `ARCH_REPORT.md` — R1–R10 → Phase R102–R111
+
+**Result**:
+- 7 files modified, 174 insertions, 174 deletions. Pushed to main (commit `6bf2508`).
+- Zero remaining "Testing-Phase" or "T-Phase" references.
+- No code changes, no test impact.
+
+---
+
+## Phase R102: PKI Encoding Consolidation
+
+**Prompt**: 请开始Phase R102阶段的工作
+
+**Scope**: Eliminate 32 duplicated ASN.1 encoding helpers and utility functions scattered across the hitls-pki crate (cms, pkcs12, x509, pkcs8 modules).
+
+**Work performed**:
+- Explored all enc_* / bytes_to_u32 / oid_to_curve_id / parse_algorithm_identifier duplicates across 7 files
+- Created `crates/hitls-pki/src/encoding.rs` — 11 shared `pub(crate)` helpers: enc_seq, enc_set, enc_octet, enc_oid, enc_int, enc_null, enc_tlv, enc_explicit_ctx, enc_raw_parts, bytes_to_u32
+- Created `crates/hitls-pki/src/oid_mapping.rs` — unified `oid_to_curve_id` returning `Option<EccCurveId>` (callers wrap in their error types)
+- Made `cms::parse_algorithm_identifier` `pub(crate)` so enveloped.rs and encrypted.rs reuse it
+- Removed 275 lines of duplicated code across 9 files
+- Fixed unused import warning (`enc_tlv` in pkcs12/mod.rs)
+
+**Files created**:
+1. `crates/hitls-pki/src/encoding.rs` — 79 lines, 11 shared ASN.1 helpers
+2. `crates/hitls-pki/src/oid_mapping.rs` — 27 lines, unified OID-to-curve mapping
+
+**Files modified**:
+3. `crates/hitls-pki/src/lib.rs` — 2 non-feature-gated module declarations
+4. `crates/hitls-pki/src/cms/mod.rs` — Removed 10 functions, added imports, parse_algorithm_identifier → pub(crate)
+5. `crates/hitls-pki/src/cms/enveloped.rs` — Removed 2 functions, updated imports
+6. `crates/hitls-pki/src/cms/encrypted.rs` — Removed 2 functions, updated imports
+7. `crates/hitls-pki/src/pkcs12/mod.rs` — Removed 9 functions, removed unused Encoder/tags imports
+8. `crates/hitls-pki/src/x509/ocsp.rs` — Removed 7 functions, removed unused Encoder import
+9. `crates/hitls-pki/src/pkcs8/mod.rs` — oid_to_curve_id → thin wrapper over oid_mapping
+10. `crates/hitls-pki/src/pkcs8/encrypted.rs` — Removed bytes_to_u32
+11. `crates/hitls-pki/src/x509/mod.rs` — oid_to_curve_id → thin wrapper over oid_mapping
+
+**Result**:
+- 11 files changed, 141 insertions, 275 deletions (net −134 lines).
+- hitls-pki: 349 tests pass, 1 ignored. Full workspace: all pass. Clippy: 0 warnings.
+- Zero public API changes. Pushed to main (commit `32cb3d1`).
+
+---
+
+## ARCH_LOG.md Creation
+
+**Prompt**: 请将重构的过程记录到ARCH_LOG.md中
+
+**Work performed**:
+- Created `ARCH_LOG.md` as the architecture refactoring log (companion to ARCH_REPORT.md)
+- Recorded Phase R102 with full detail: goal, problem table (32 duplicates), solution design, 11 files modified, not-changed rationale, impact metrics, build status
+- Added refactoring queue table (R102–R111 status)
+
+**Files created**:
+1. `ARCH_LOG.md` — Architecture refactoring execution log
+
+**Result**:
+- ARCH_LOG.md created.
