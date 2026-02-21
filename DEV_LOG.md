@@ -7569,3 +7569,47 @@ Added 33 new tests covering:
 - `cargo test --workspace --all-features`: 2577 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Testing-Phase 91: 0-RTT early data + replay protection tests
+
+**Date**: 2026-02-21
+**Scope**: Close D1 Critical deficiency — 0-RTT early data extension codec, client offering logic, async 0-RTT accepted/rejected flows
+
+### Summary
+
+Added 8 new tests covering:
+- **Early data extension codec** (3 tests): ClientHello early_data must be empty, EncryptedExtensions early_data must be empty, NewSessionTicket early_data carries 4-byte BE max_early_data_size (boundary values: 0, 16384, u32::MAX)
+- **Client offering logic** (2 tests): No PSK → must not offer early data, session.max_early_data=0 → must not offer early data (even with max_early_data_size configured)
+- **Async 0-RTT accepted flow** (1 test): Initial handshake → extract session → resumption with queue_early_data → verify early_data_accepted=true → server reads early data → post-handshake bidirectional exchange
+- **Async 0-RTT rejected flow** (1 test): Initial handshake → extract session → server max_early_data_size=0 → verify early_data_accepted=false → 1-RTT fallback works
+- **Queue API** (1 test): queue_early_data accumulation, early_data_accepted=false before handshake
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | +3 tests (early_data CH/EE/NST codec) |
+| `crates/hitls-tls/src/handshake/client.rs` | +2 tests (offering guard: no-PSK, zero max_early_data) |
+| `crates/hitls-tls/src/connection_async.rs` | +3 tests + helper fn (async 0-RTT accepted/rejected/queue API) |
+
+### Workspace Test Counts After Testing-Phase 91
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 652 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 125 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1164 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2585** | **40** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

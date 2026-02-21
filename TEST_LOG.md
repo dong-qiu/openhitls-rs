@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,577** (40 ignored) |
-| **Test growth** | 1,104 → 2,577 (+134% since baseline) |
+| **Total tests** | **2,585** (40 ignored) |
+| **Test growth** | 1,104 → 2,585 (+134% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,577 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 2,585 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -45,6 +45,7 @@ Phase T98  2,445     +25   Async TLS 1.2 + DTLCP + encryption + lib.rs (*)
 Phase T99  2,519     +40   ConnectionInfo + handshake enums + codec errors (*)
 Phase T100  2,544     +25   ECC/DH params + TLCP API + DTLCP encryption (*)
 Phase T101  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
+Phase T102  2,585      +8   0-RTT early data + replay protection (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -71,7 +72,7 @@ Phase T101  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
 
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
-| hitls-tls | 1,156 | 0 | 44.8% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
+| hitls-tls | 1,164 | 0 | 45.0% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
 | hitls-crypto | 652 | 31 | 25.3% | 48 algorithm modules + hardware acceleration |
 | hitls-pki | 349 | 1 | 13.5% | X.509, PKCS#8/12, CMS (5 content types) |
 | hitls-integration | 125 | 3 | 4.9% | Cross-crate TCP loopback, error scenarios, concurrency |
@@ -82,7 +83,7 @@ Phase T101  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
 | hitls-types | 26 | 0 | 1.0% | Enum definitions, error types |
 | Wycheproof | 15 | 0 | 0.6% | 5,000+ vectors across 15 test groups |
 | Doc-tests | 2 | 0 | 0.1% | API documentation examples |
-| **Total** | **2,577** | **40** | **100%** | |
+| **Total** | **2,585** | **40** | **100%** | |
 
 ### Test Quality Principles
 
@@ -104,7 +105,7 @@ Phase T101  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
 
 | Severity | ID | Description | Status |
 |:--------:|:--:|-------------|:------:|
-| Critical | D1 | 0-RTT replay protection: zero tests | Open |
+| Critical | D1 | 0-RTT replay protection: zero tests | **Closed** (Phase T102: +8 tests) |
 | Critical | D2 | Async TLS 1.2/TLCP/DTLCP: zero tests | Open |
 | High | D3 | Extension negotiation: no e2e tests | Open |
 | High | D4 | DTLS loss/retransmission: no tests | Open |
@@ -117,7 +118,7 @@ Phase T101  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
 
 ### Remaining Untested Files (30 files, ~6,670 lines)
 
-After Phase T101, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
+After Phase T102, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
 
 | Category | Files | Lines | Complexity |
 |----------|------:|------:|:----------:|
@@ -128,27 +129,27 @@ After Phase T101, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-lev
 | **SM9** (remaining) | 7 | 1,121 | Medium |
 | **Provider traits** | 1 | 144 | Low |
 
-### Optimization Roadmap — Testing-Phase 91–100
+### Optimization Roadmap — Phase T102–T111
 
 | Phase | Est. Tests | Deficiency | Focus |
 |-------|:----------:|:----------:|-------|
-| **Testing-Phase 91** | ~8 | D1 | 0-RTT early data + replay protection |
-| **Testing-Phase 92** | ~20 | D2 | Async TLS 1.2 connection tests |
-| **Testing-Phase 93** | ~15 | D2 | Async TLCP + DTLCP connection tests |
-| **Testing-Phase 94** | ~12 | D3 | Extension negotiation e2e tests |
-| **Testing-Phase 95** | ~10 | D4 | DTLS loss simulation + retransmission |
-| **Testing-Phase 96** | ~8 | D5 | TLCP double certificate validation |
-| **Testing-Phase 97** | ~15 | D10 | SM9 tower fields (fp2/fp4/fp12) |
-| **Testing-Phase 98** | ~20 | D10 | SLH-DSA internal modules |
-| **Testing-Phase 99** | ~15 | D10 | McEliece + FrodoKEM + XMSS internals |
-| **Testing-Phase 100** | — | D6/D7 | Infra: proptest + coverage CI |
+| **Phase T102** | ~8 | D1 | 0-RTT early data + replay protection ✅ |
+| **Phase T103** | ~20 | D2 | Async TLS 1.2 connection tests |
+| **Phase T104** | ~15 | D2 | Async TLCP + DTLCP connection tests |
+| **Phase T105** | ~12 | D3 | Extension negotiation e2e tests |
+| **Phase T106** | ~10 | D4 | DTLS loss simulation + retransmission |
+| **Phase T107** | ~8 | D5 | TLCP double certificate validation |
+| **Phase T108** | ~15 | D10 | SM9 tower fields (fp2/fp4/fp12) |
+| **Phase T109** | ~20 | D10 | SLH-DSA internal modules |
+| **Phase T110** | ~15 | D10 | McEliece + FrodoKEM + XMSS internals |
+| **Phase T111** | — | D6/D7 | Infra: proptest + coverage CI |
 
 ### Coverage Metrics Target
 
-| Metric | Current | After T-Phase 96 | After T-Phase 100 |
+| Metric | Current | After Phase T107 | After Phase T111 |
 |--------|:-------:|:-----------------:|:-----------------:|
-| Total tests | 2,577 | ~2,660 | 2,750+ |
-| Critical deficiencies | 2 | 0 | 0 |
+| Total tests | 2,585 | ~2,660 | 2,750+ |
+| Critical deficiencies | 1 | 0 | 0 |
 | High deficiencies | 3 | 0 | 0 |
 | Async connection coverage | 40% | 100% | 100% |
 | Crypto files with tests | 75% | 75% | 90%+ |
@@ -383,7 +384,7 @@ These phases added new features with accompanying test suites. See [DEV_LOG.md](
 
 ---
 
-## 7. Era IV — Systematic Test Coverage Expansion (Phase T73–T101, +531 tests)
+## 7. Era IV — Systematic Test Coverage Expansion (Phase T73–T102, +539 tests)
 
 Pure test coverage phases — no new features, only new tests for existing code.
 

@@ -1607,4 +1607,51 @@ mod tests {
             .process_finished(&[20, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
             .is_err());
     }
+
+    // ===================================================================
+    // 0-RTT Early Data offering tests (Testing-Phase 91)
+    // ===================================================================
+
+    /// Client without resumption_session should NOT offer early data.
+    #[test]
+    fn test_client_no_psk_no_early_data_offered() {
+        let config = TlsConfig::builder().max_early_data_size(16384).build();
+        let mut hs = ClientHandshake::new(config);
+        let _ch = hs.build_client_hello().unwrap();
+        assert!(
+            !hs.offered_early_data(),
+            "no resumption session → must not offer early data"
+        );
+        assert!(hs.early_traffic_secret().is_empty());
+    }
+
+    /// Client with session that has max_early_data=0 should NOT offer early data.
+    #[test]
+    fn test_client_session_zero_max_early_data_not_offered() {
+        let session = crate::session::TlsSession {
+            id: Vec::new(),
+            cipher_suite: crate::CipherSuite::TLS_AES_128_GCM_SHA256,
+            master_secret: vec![0x01; 32],
+            alpn_protocol: None,
+            ticket: Some(vec![0xAA; 16]),
+            ticket_lifetime: 3600,
+            max_early_data: 0, // zero → no early data
+            ticket_age_add: 0,
+            ticket_nonce: vec![0x01],
+            created_at: 0,
+            psk: vec![0x01; 32],
+            extended_master_secret: false,
+        };
+
+        let config = TlsConfig::builder()
+            .resumption_session(session)
+            .max_early_data_size(16384)
+            .build();
+        let mut hs = ClientHandshake::new(config);
+        let _ch = hs.build_client_hello().unwrap();
+        assert!(
+            !hs.offered_early_data(),
+            "session.max_early_data=0 → must not offer early data"
+        );
+    }
 }

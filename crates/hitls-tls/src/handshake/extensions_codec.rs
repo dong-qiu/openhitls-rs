@@ -2451,4 +2451,44 @@ mod tests {
         let result = parse_alpn_sh(&data);
         assert!(result.is_err());
     }
+
+    // ===================================================================
+    // Early Data extension codec tests (Testing-Phase 91)
+    // ===================================================================
+
+    #[test]
+    fn test_build_early_data_ch_empty() {
+        let ext = build_early_data_ch();
+        assert_eq!(ext.extension_type, ExtensionType::EARLY_DATA);
+        assert!(ext.data.is_empty(), "ClientHello early_data must be empty");
+    }
+
+    #[test]
+    fn test_build_early_data_ee_empty() {
+        let ext = build_early_data_ee();
+        assert_eq!(ext.extension_type, ExtensionType::EARLY_DATA);
+        assert!(
+            ext.data.is_empty(),
+            "EncryptedExtensions early_data must be empty"
+        );
+    }
+
+    #[test]
+    fn test_build_early_data_nst_max_size() {
+        let ext = build_early_data_nst(16384);
+        assert_eq!(ext.extension_type, ExtensionType::EARLY_DATA);
+        assert_eq!(ext.data.len(), 4, "NST early_data must be 4 bytes");
+        let val = u32::from_be_bytes(ext.data[..4].try_into().unwrap());
+        assert_eq!(val, 16384);
+
+        // Zero max size
+        let ext0 = build_early_data_nst(0);
+        let val0 = u32::from_be_bytes(ext0.data[..4].try_into().unwrap());
+        assert_eq!(val0, 0);
+
+        // Max u32
+        let ext_max = build_early_data_nst(u32::MAX);
+        let val_max = u32::from_be_bytes(ext_max.data[..4].try_into().unwrap());
+        assert_eq!(val_max, u32::MAX);
+    }
 }

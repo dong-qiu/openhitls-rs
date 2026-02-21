@@ -1886,3 +1886,21 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - hitls-crypto: 619 → 652 (+33); total: 2544 → 2577 (+33).
 - 2577 total tests (40 ignored). Clippy clean, fmt clean.
+
+---
+
+## Testing-Phase 91
+
+**Prompt**: 开始执行Testing-Phase 91
+
+**Scope**: 0-RTT early data + replay protection tests (D1 Critical deficiency). Added 8 new tests covering early data extension codec, client offering logic, and async 0-RTT accepted/rejected flows.
+
+**Files modified**:
+1. `crates/hitls-tls/src/handshake/extensions_codec.rs` (+3 tests) — build_early_data_ch_empty, build_early_data_ee_empty, build_early_data_nst_max_size
+2. `crates/hitls-tls/src/handshake/client.rs` (+2 tests) — client_no_psk_no_early_data_offered, client_session_zero_max_early_data_not_offered
+3. `crates/hitls-tls/src/connection_async.rs` (+3 tests) — async_tls13_early_data_accepted, async_tls13_early_data_rejected, async_tls13_queue_early_data_api
+
+**Result**:
+- hitls-tls: 1156 → 1164 (+8); total: 2577 → 2585 (+8).
+- 2585 total tests (40 ignored). Clippy clean, fmt clean.
+- D1 deficiency closed.

@@ -1951,4 +1951,179 @@ mod tests {
             .unwrap();
         assert_eq!(ekm1, s_ekm1, "server export must match client");
     }
+
+    // ===================================================================
+    // Async 0-RTT Early Data tests (Testing-Phase 91)
+    // ===================================================================
+
+    fn make_tls13_early_data_configs(max_early_data_size: u32) -> (TlsConfig, TlsConfig, Vec<u8>) {
+        use crate::config::ServerPrivateKey;
+        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let seed = [0x42u8; 32];
+        let ticket_key = vec![0xAB; 32];
+
+        let server_config = TlsConfig::builder()
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed.to_vec()))
+            .verify_peer(false)
+            .ticket_key(ticket_key.clone())
+            .max_early_data_size(max_early_data_size)
+            .build();
+
+        let client_config = TlsConfig::builder().verify_peer(false).build();
+
+        (client_config, server_config, ticket_key)
+    }
+
+    /// Async 0-RTT: queue early data, server accepts, data received correctly.
+    #[tokio::test]
+    async fn test_async_tls13_early_data_accepted() {
+        // Step 1: initial handshake to get session with max_early_data
+        let (client_config, server_config, ticket_key) = make_tls13_early_data_configs(16384);
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        // Exchange data to trigger NST delivery
+        client.write(b"trigger nst").await.unwrap();
+        let mut buf = [0u8; 256];
+        let _ = server.read(&mut buf).await.unwrap();
+        server.write(b"ack").await.unwrap();
+        let _ = client.read(&mut buf).await.unwrap();
+
+        let session = client
+            .take_session()
+            .expect("should have received session ticket");
+        assert!(
+            session.max_early_data > 0,
+            "session should allow early data"
+        );
+
+        // Step 2: resumption handshake with 0-RTT
+        let client_config2 = TlsConfig::builder()
+            .verify_peer(false)
+            .resumption_session(session)
+            .max_early_data_size(16384)
+            .build();
+        let server_config2 = {
+            use crate::config::ServerPrivateKey;
+            let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+            let seed = [0x42u8; 32];
+            TlsConfig::builder()
+                .certificate_chain(vec![fake_cert])
+                .private_key(ServerPrivateKey::Ed25519(seed.to_vec()))
+                .verify_peer(false)
+                .ticket_key(ticket_key)
+                .max_early_data_size(16384)
+                .build()
+        };
+
+        let (client_stream2, server_stream2) = tokio::io::duplex(64 * 1024);
+        let mut client2 = AsyncTlsClientConnection::new(client_stream2, client_config2);
+        let mut server2 = AsyncTlsServerConnection::new(server_stream2, server_config2);
+
+        // Queue early data before handshake
+        client2.queue_early_data(b"0-RTT async hello");
+        assert!(!client2.early_data_accepted()); // not yet
+
+        let (c_res2, s_res2) = tokio::join!(client2.handshake(), server2.handshake());
+        c_res2.unwrap();
+        s_res2.unwrap();
+
+        assert!(client2.early_data_accepted(), "server should accept 0-RTT");
+
+        // Server receives early data first (buffered during handshake)
+        let n = server2.read(&mut buf).await.unwrap();
+        assert_eq!(
+            &buf[..n],
+            b"0-RTT async hello",
+            "server should receive early data"
+        );
+
+        // Post-handshake data exchange still works
+        client2.write(b"post-0rtt").await.unwrap();
+        let n = server2.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"post-0rtt");
+    }
+
+    /// Async 0-RTT: server rejects early data, handshake still completes.
+    #[tokio::test]
+    async fn test_async_tls13_early_data_rejected() {
+        // Step 1: initial handshake with max_early_data > 0
+        let (client_config, server_config, ticket_key) = make_tls13_early_data_configs(16384);
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+
+        let mut client = AsyncTlsClientConnection::new(client_stream, client_config);
+        let mut server = AsyncTlsServerConnection::new(server_stream, server_config);
+
+        let (c_res, s_res) = tokio::join!(client.handshake(), server.handshake());
+        c_res.unwrap();
+        s_res.unwrap();
+
+        client.write(b"trigger").await.unwrap();
+        let mut buf = [0u8; 256];
+        let _ = server.read(&mut buf).await.unwrap();
+        server.write(b"ack").await.unwrap();
+        let _ = client.read(&mut buf).await.unwrap();
+
+        let session = client.take_session().expect("should have session");
+
+        // Step 2: resumption with server max_early_data_size=0 (reject)
+        let client_config2 = TlsConfig::builder()
+            .verify_peer(false)
+            .resumption_session(session)
+            .max_early_data_size(16384)
+            .build();
+        let server_config2 = {
+            use crate::config::ServerPrivateKey;
+            let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+            let seed = [0x42u8; 32];
+            TlsConfig::builder()
+                .certificate_chain(vec![fake_cert])
+                .private_key(ServerPrivateKey::Ed25519(seed.to_vec()))
+                .verify_peer(false)
+                .ticket_key(ticket_key)
+                .max_early_data_size(0) // reject
+                .build()
+        };
+
+        let (client_stream2, server_stream2) = tokio::io::duplex(64 * 1024);
+        let mut client2 = AsyncTlsClientConnection::new(client_stream2, client_config2);
+        let mut server2 = AsyncTlsServerConnection::new(server_stream2, server_config2);
+
+        // Don't queue early data — just verify the rejection flag.
+        // (If early data were sent, server can't decrypt it since it lacks
+        // early read keys when rejecting, matching RFC 8446 §4.2.10.)
+
+        let (c_res2, s_res2) = tokio::join!(client2.handshake(), server2.handshake());
+        c_res2.unwrap();
+        s_res2.unwrap();
+
+        assert!(!client2.early_data_accepted(), "server should reject 0-RTT");
+
+        // 1-RTT data exchange works normally
+        client2.write(b"fallback 1rtt").await.unwrap();
+        let n = server2.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"fallback 1rtt");
+    }
+
+    /// Async 0-RTT: queue_early_data API and early_data_accepted before handshake.
+    #[tokio::test]
+    async fn test_async_tls13_queue_early_data_api() {
+        let (client_config, _) = make_tls13_configs();
+        let (client_stream, _) = tokio::io::duplex(16 * 1024);
+        let mut conn = AsyncTlsClientConnection::new(client_stream, client_config);
+
+        assert!(!conn.early_data_accepted());
+        conn.queue_early_data(b"hello");
+        conn.queue_early_data(b" world");
+        assert!(!conn.early_data_accepted());
+        // Queue should accumulate
+        assert_eq!(conn.early_data_queue, b"hello world");
+    }
 }
