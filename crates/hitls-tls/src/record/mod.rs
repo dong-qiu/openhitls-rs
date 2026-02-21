@@ -157,8 +157,9 @@ impl RecordLayer {
         suite: CipherSuite,
         keys: &TrafficKeys,
     ) -> Result<(), TlsError> {
-        self.encryptor =
-            Some(RecordEncryptorVariant::Tls13(RecordEncryptor::new(suite, keys)?));
+        self.encryptor = Some(RecordEncryptorVariant::Tls13(RecordEncryptor::new(
+            suite, keys,
+        )?));
         Ok(())
     }
 
@@ -180,8 +181,9 @@ impl RecordLayer {
         suite: CipherSuite,
         keys: &TrafficKeys,
     ) -> Result<(), TlsError> {
-        self.decryptor =
-            Some(RecordDecryptorVariant::Tls13(RecordDecryptor::new(suite, keys)?));
+        self.decryptor = Some(RecordDecryptorVariant::Tls13(RecordDecryptor::new(
+            suite, keys,
+        )?));
         Ok(())
     }
 
@@ -222,9 +224,9 @@ impl RecordLayer {
         mac_key: Vec<u8>,
         mac_len: usize,
     ) {
-        self.encryptor = Some(RecordEncryptorVariant::Tls12Cbc(
-            RecordEncryptor12Cbc::new(enc_key, mac_key, mac_len),
-        ));
+        self.encryptor = Some(RecordEncryptorVariant::Tls12Cbc(RecordEncryptor12Cbc::new(
+            enc_key, mac_key, mac_len,
+        )));
     }
 
     /// Activate TLS 1.2 CBC read decryption.
@@ -234,9 +236,9 @@ impl RecordLayer {
         mac_key: Vec<u8>,
         mac_len: usize,
     ) {
-        self.decryptor = Some(RecordDecryptorVariant::Tls12Cbc(
-            RecordDecryptor12Cbc::new(enc_key, mac_key, mac_len),
-        ));
+        self.decryptor = Some(RecordDecryptorVariant::Tls12Cbc(RecordDecryptor12Cbc::new(
+            enc_key, mac_key, mac_len,
+        )));
     }
 
     /// Activate TLS 1.2 Encrypt-Then-MAC write encryption (RFC 7366).
@@ -246,9 +248,9 @@ impl RecordLayer {
         mac_key: Vec<u8>,
         mac_len: usize,
     ) {
-        self.encryptor = Some(RecordEncryptorVariant::Tls12EtM(
-            RecordEncryptor12EtM::new(enc_key, mac_key, mac_len),
-        ));
+        self.encryptor = Some(RecordEncryptorVariant::Tls12EtM(RecordEncryptor12EtM::new(
+            enc_key, mac_key, mac_len,
+        )));
     }
 
     /// Activate TLS 1.2 Encrypt-Then-MAC read decryption (RFC 7366).
@@ -258,9 +260,9 @@ impl RecordLayer {
         mac_key: Vec<u8>,
         mac_len: usize,
     ) {
-        self.decryptor = Some(RecordDecryptorVariant::Tls12EtM(
-            RecordDecryptor12EtM::new(enc_key, mac_key, mac_len),
-        ));
+        self.decryptor = Some(RecordDecryptorVariant::Tls12EtM(RecordDecryptor12EtM::new(
+            enc_key, mac_key, mac_len,
+        )));
     }
 
     /// Activate TLCP write encryption.
