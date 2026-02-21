@@ -130,7 +130,6 @@ fn hmac_sha1(key: &[u8], data: &[u8]) -> Result<Vec<u8>, PkiError> {
         .map_err(|e| PkiError::Pkcs12Error(format!("HMAC-SHA1: {e}")))
 }
 
-
 fn generate_random(len: usize) -> Result<Vec<u8>, PkiError> {
     let mut buf = vec![0u8; len];
     getrandom::getrandom(&mut buf)

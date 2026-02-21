@@ -11,9 +11,7 @@ use hitls_utils::oid::known;
 use crate::encoding::{bytes_to_u32, enc_explicit_ctx, enc_int, enc_octet, enc_oid, enc_seq};
 
 use super::enveloped::{CmsEncryptionAlg, EncryptedContentInfo};
-use super::{
-    cerr, parse_algorithm_identifier, AlgorithmIdentifier, CmsContentType, CmsMessage,
-};
+use super::{cerr, parse_algorithm_identifier, AlgorithmIdentifier, CmsContentType, CmsMessage};
 
 // ── EncryptedData structure ─────────────────────────────────────────
 

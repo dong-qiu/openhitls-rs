@@ -115,7 +115,6 @@ fn cerr(msg: &str) -> PkiError {
     PkiError::CmsError(msg.into())
 }
 
-
 // ── Parsing ──────────────────────────────────────────────────────────
 
 impl CmsMessage {
@@ -464,7 +463,9 @@ fn parse_signed_data(data: &[u8]) -> Result<SignedData, PkiError> {
     })
 }
 
-pub(crate) fn parse_algorithm_identifier(dec: &mut Decoder) -> Result<AlgorithmIdentifier, PkiError> {
+pub(crate) fn parse_algorithm_identifier(
+    dec: &mut Decoder,
+) -> Result<AlgorithmIdentifier, PkiError> {
     let mut seq = dec
         .read_sequence()
         .map_err(|e| cerr(&format!("AlgId: {e}")))?;
