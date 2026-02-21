@@ -541,7 +541,7 @@ The C codebase has a comprehensive FIPS/CMVP subsystem in `crypto/provider/src/c
 
 ³ **Provider architecture**: The ISO/SM Provider framework (6,500 LOC) is a C EAL architectural pattern for runtime algorithm dispatch via function pointer tables. Rust replaces this entirely with compile-time trait dispatch (`Digest`, `Aead`, `Signer`, `Verifier` traits) — more type-safe, zero runtime overhead, no wrapper code needed.
 
-⁴ **Algorithm constraints**: C enforces FIPS-approved algorithm restrictions at the provider level. Rust achieves the same via: (a) compile-time feature flags exclude unapproved algorithms entirely, (b) `SecurityCallback` (Phase 81) provides runtime filtering of cipher suites/groups/signature algorithms by security level.
+⁴ **Algorithm constraints**: C enforces FIPS-approved algorithm restrictions at the provider level. Rust achieves the same via: (a) compile-time feature flags exclude unapproved algorithms entirely, (b) `SecurityCallback` (Phase 90) provides runtime filtering of cipher suites/groups/signature algorithms by security level.
 
 ⁵ **Event logging**: This is operational infrastructure, not a cryptographic function. Rust applications can integrate `tracing`/`log` crates as needed. The C implementation is tightly coupled to the provider framework.
 

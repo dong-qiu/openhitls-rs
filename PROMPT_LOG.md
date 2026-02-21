@@ -1605,9 +1605,9 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 1892 total tests (40 ignored). Clippy clean, fmt clean.
 
-## Testing-Phase 72: CLI Command Unit Tests + Session Cache Concurrency (2026-02-17)
+## Phase T73: CLI Command Unit Tests + Session Cache Concurrency (2026-02-17)
 
-**Prompt**: 分析当前测试完整性，制定测试优化计划，将阶段A（CLI命令单元测试7个文件 +45 tests；Session Cache并发安全 +6 tests）映射为Testing-Phase 72并实现。每次完成后更新 TEST_LOG.md, PROMPT_LOG.md, CLAUDE.md, README.md。
+**Prompt**: 分析当前测试完整性，制定测试优化计划，将阶段A（CLI命令单元测试7个文件 +45 tests；Session Cache并发安全 +6 tests）映射为Phase T73并实现。每次完成后更新 TEST_LOG.md, PROMPT_LOG.md, CLAUDE.md, README.md。
 
 **Result**: +72 new tests (1880 → 1952 total). Seven CLI command modules (dgst, x509cmd, genpkey, pkey, req, crl, verify) went from 0 tests to full coverage: 17+15+19+5+9+6+4 = 75 new CLI tests. Session cache module added 6 Arc<Mutex<>> concurrency tests covering basic wrapper, 4-thread concurrent puts, concurrent read+write, eviction-under-load (capacity=5), shared-across-two-arcs, and trait-object Box<dyn SessionCache>. hitls-cli: 40→117 tests (+77). hitls-tls: 684→690 tests (+6). All Clippy warnings resolved (len_zero → is_empty). All CRL tests use include_str! referencing existing test vectors. Self-signed cert helper uses seed [0x55;32] and not_after=9_999_999_999 to avoid expiry. RSA generation excluded from genpkey unit tests (too slow). verify.rs success path tested; failure path skipped (calls process::exit(1)).
 
@@ -1615,9 +1615,9 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ---
 
-## Phase 73: KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3) (2026-02-18)
+## Phase 74: KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3) (2026-02-18)
 
-**Prompt**: Implement Phase 73 — KeyUpdate loop protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3). Add `key_update_recv_count` counter to all 4 TLS 1.3 connection types, reject after 128 consecutive KeyUpdates without application data, reset on app data receipt. Add `MaxFragmentLength` enum (512/1024/2048/4096) with codec, config, TLS 1.2 client/server negotiation, record layer enforcement (lower priority than RSL). Add `signature_algorithms_cert` codec (reuses wire format) with config, TLS 1.3 ClientHello building + HRR path, server parsing + getter. Modify 10 files: config/mod.rs, extensions_codec.rs, connection.rs, connection_async.rs, client12.rs, server12.rs, connection12.rs, connection12_async.rs, client.rs, server.rs. Expected ~13 new tests.
+**Prompt**: Implement Phase 74 — KeyUpdate loop protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3). Add `key_update_recv_count` counter to all 4 TLS 1.3 connection types, reject after 128 consecutive KeyUpdates without application data, reset on app data receipt. Add `MaxFragmentLength` enum (512/1024/2048/4096) with codec, config, TLS 1.2 client/server negotiation, record layer enforcement (lower priority than RSL). Add `signature_algorithms_cert` codec (reuses wire format) with config, TLS 1.3 ClientHello building + HRR path, server parsing + getter. Modify 10 files: config/mod.rs, extensions_codec.rs, connection.rs, connection_async.rs, client12.rs, server12.rs, connection12.rs, connection12_async.rs, client.rs, server.rs. Expected ~13 new tests.
 
 **Result**: 13 new tests (11 in hitls-tls + 2 in server.rs). Modified 10 files. KeyUpdate protection: added `key_update_recv_count: u32` field to TlsClientConnection, TlsServerConnection, AsyncTlsClientConnection, AsyncTlsServerConnection (init 0 in new()). Increment + check > 128 at top of handle_key_update() in all 4 types. Reset to 0 in read() ApplicationData branch in all 4 types. MFL: added MaxFragmentLength enum with to_size()/from_u8() in config/mod.rs, max_fragment_length config field + builder method. build_max_fragment_length (1-byte body) + parse_max_fragment_length in extensions_codec.rs. Client12: build in build_client_hello(), parse in process_server_hello(), getter, renegotiation reset. Server12: parse in process_client_hello(), echo in build_server_hello(), getter, renegotiation reset. Connection12 sync+async: apply MFL to record_layer.max_fragment_size before RSL check (RSL overwrites if present). Sig_algs_cert: build_signature_algorithms_cert + parse_signature_algorithms_cert (reuses parse_signature_algorithms_ch) in extensions_codec.rs. Client.rs: added in build_client_hello() + HRR path after signature_algorithms. Server.rs: added client_sig_algs_cert field, parsed in process_client_hello(), getter.
 
@@ -1625,9 +1625,9 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ---
 
-## Testing-Phase 73: Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
+## Phase T75: Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
 
-**Prompt**: Start implementing Testing-Phase 73 (async TLS 1.3 unit tests + cipher suite integration tests).
+**Prompt**: Start implementing Phase T75 (async TLS 1.3 unit tests + cipher suite integration tests).
 
 **Result**:
 - B1: Added 12 async TLS 1.3 unit tests to `connection_async.rs` using `tokio::io::duplex`, covering all key async code paths (read/write before handshake, full handshake + bidirectional data, version and cipher suite verification, graceful shutdown + double shutdown, 32KB large payload, multi-message exchange, key_update() after handshake, take_session(), connection_info() API, ALPN negotiation, is_session_resumed()).
@@ -1638,9 +1638,9 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ---
 
-## Phase 74: Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 Session Cache (2026-02-18)
+## Phase 76: Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 Session Cache (2026-02-18)
 
-**Prompt**: Implement Phase 74 — certificate_authorities extension (RFC 8446) + early exporter master secret + DTLS 1.2 session cache. (1) Add `build_certificate_authorities()`/`parse_certificate_authorities()` codec functions for extension type 47, `certificate_authorities: Vec<Vec<u8>>` config field, TLS 1.3 ClientHello building + server parsing. (2) Add `derive_early_exporter_master_secret()` in key_schedule (label `"e exp master"`, EarlySecret stage), `tls13_export_early_keying_material()` export function, `export_early_keying_material()` API on all 4 TLS 1.3 connection types (sync+async client+server). (3) Add `session_id` field to `Dtls12ServerHandshake`, DTLS 1.2 session cache auto-store after handshake (client by server_name, server by session_id). Modify 10 files. Expected ~15 new tests.
+**Prompt**: Implement Phase 76 — certificate_authorities extension (RFC 8446) + early exporter master secret + DTLS 1.2 session cache. (1) Add `build_certificate_authorities()`/`parse_certificate_authorities()` codec functions for extension type 47, `certificate_authorities: Vec<Vec<u8>>` config field, TLS 1.3 ClientHello building + server parsing. (2) Add `derive_early_exporter_master_secret()` in key_schedule (label `"e exp master"`, EarlySecret stage), `tls13_export_early_keying_material()` export function, `export_early_keying_material()` API on all 4 TLS 1.3 connection types (sync+async client+server). (3) Add `session_id` field to `Dtls12ServerHandshake`, DTLS 1.2 session cache auto-store after handshake (client by server_name, server by session_id). Modify 10 files. Expected ~15 new tests.
 
 **Result**: 15 new tests (753 hitls-tls, up from 738). Modified 10 files. Certificate Authorities: `build_certificate_authorities()` encodes `ca_list_length(2) || [dn_length(2) || dn_bytes]*` per RFC 8446 §4.2.4, `parse_certificate_authorities()` validates and returns `Vec<Vec<u8>>` of DER DNs. Config adds `certificate_authorities: Vec<Vec<u8>>` with builder method. Client pushes extension in `build_client_hello()` when non-empty. Server parses in `process_client_hello()` extension loop, stores in `client_certificate_authorities` field with getter. Early Exporter: `derive_early_exporter_master_secret()` added to KeySchedule with EarlySecret stage check, uses `Derive-Secret(ES, "e exp master", ClientHello_hash)`. Client derives after PSK binder computation and in `process_server_hello()` between `derive_early_secret()` and `derive_handshake_secret()`. Server derives in `build_server_flight()` when PSK mode. `tls13_export_early_keying_material()` delegates to existing exporter with different input secret. `export_early_keying_material()` API on all 4 TLS 1.3 connections returns error if no PSK was offered. Async connections also gained missing `exporter_master_secret` + `export_keying_material()`. DTLS 1.2: `session_id` field on `Dtls12ServerHandshake` stored from ServerHello. Auto-store in `connection_dtls12.rs` before key material zeroize — client by server_name, server by session_id (guard: skip if empty).
 
@@ -1648,9 +1648,9 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ---
 
-## Testing-Phase 74 (2026-02-18)
+## Phase T77 (2026-02-18)
 
-**Prompt**: 开始实现 Testing-Phase 74
+**Prompt**: 开始实现 Phase T77
 
 **Work performed**:
 - C1: Created 66 structured fuzz seed corpus files across all 10 fuzz targets in `fuzz/corpus/<target>/`:
@@ -1676,9 +1676,9 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ---
 
-## Testing-Phase 75 — Phase 74 Feature Integration Tests + Async Export Unit Tests (2026-02-18)
+## Phase T79 — Phase 76 Feature Integration Tests + Async Export Unit Tests (2026-02-18)
 
-**Prompt**: 开始实现 Testing-Phase 75 (Start implementing Testing-Phase 75)
+**Prompt**: 开始实现 Phase T79 (Start implementing Phase T79)
 
 **Implementation**:
 - E1 (10 integration tests in tests/interop/src/lib.rs):
@@ -1697,9 +1697,9 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ---
 
-## Phase 75: PADDING Extension (RFC 7685) + OID Filters Extension (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake (2026-02-18)
+## Phase 78: PADDING Extension (RFC 7685) + OID Filters Extension (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake (2026-02-18)
 
-**Prompt**: Implement Phase 75 — PADDING extension (type 21, RFC 7685) codec + config + TLS 1.3 ClientHello integration, OID Filters extension (type 48, RFC 8446 §4.2.5) codec + config + TLS 1.3 CertificateRequest, DTLS 1.2 abbreviated handshake (session cache lookup, abbreviated flow mirroring TLS 1.2 pattern).
+**Prompt**: Implement Phase 78 — PADDING extension (type 21, RFC 7685) codec + config + TLS 1.3 ClientHello integration, OID Filters extension (type 48, RFC 8446 §4.2.5) codec + config + TLS 1.3 CertificateRequest, DTLS 1.2 abbreviated handshake (session cache lookup, abbreviated flow mirroring TLS 1.2 pattern).
 
 **Work performed**:
 - PADDING extension (RFC 7685): build_padding/parse_padding codec (validates all-zero bytes per spec), `padding_target: u16` config field, added to TLS 1.3 ClientHello (after custom extensions, before PSK which must be last)
@@ -1715,9 +1715,9 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ---
 
-## Phase 76: Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) (2026-02-18)
+## Phase 80: Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) (2026-02-18)
 
-**Prompt**: Implement Phase 76 — Async DTLS 1.2 (AsyncDtls12ClientConnection + AsyncDtls12ServerConnection, full/abbreviated handshake, read/write/shutdown, anti-replay, session cache), Heartbeat extension (RFC 6520, type 15 codec + config), GREASE (RFC 8701, ClientHello injection).
+**Prompt**: Implement Phase 80 — Async DTLS 1.2 (AsyncDtls12ClientConnection + AsyncDtls12ServerConnection, full/abbreviated handshake, read/write/shutdown, anti-replay, session cache), Heartbeat extension (RFC 6520, type 15 codec + config), GREASE (RFC 8701, ClientHello injection).
 
 **Work performed**:
 - Async DTLS 1.2: New connection_dtls12_async.rs with full/abbreviated handshake, async read/write/shutdown, anti-replay, epoch management, session cache auto-store
@@ -1730,7 +1730,7 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 2105 total tests (40 ignored). Clippy clean, fmt clean.
 
-## Testing-Phase 76: cert_verify Unit Tests + Config Callbacks + Integration Tests (2026-02-18)
+## Phase T81: cert_verify Unit Tests + Config Callbacks + Integration Tests (2026-02-18)
 
 **Prompt**: Add comprehensive test coverage for cert_verify module, config callbacks, and additional integration tests.
 
@@ -1744,9 +1744,9 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 2131 total tests (40 ignored). Clippy clean, fmt clean.
 
-## Phase 77: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4 (2026-02-19)
+## Phase 82: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4 (2026-02-19)
 
-**Prompt**: 开始 Phase 77 — Implement TLS callback framework (7 callbacks: MsgCallback, InfoCallback, RecordPaddingCallback, DhTmpCallback, CookieGenCallback, CookieVerifyCallback, ClientHelloCallback), missing legacy alert codes, and CBC-MAC-SM4.
+**Prompt**: 开始 Phase 82 — Implement TLS callback framework (7 callbacks: MsgCallback, InfoCallback, RecordPaddingCallback, DhTmpCallback, CookieGenCallback, CookieVerifyCallback, ClientHelloCallback), missing legacy alert codes, and CBC-MAC-SM4.
 
 **Work performed**:
 - TLS Callbacks: 7 callback type aliases + ClientHelloInfo struct + ClientHelloAction enum + config fields + builder methods
@@ -1758,13 +1758,13 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 - Files: config/mod.rs, alert/mod.rs, cbc_mac.rs (NEW), lib.rs, Cargo.toml, encryption.rs, record/mod.rs, connection.rs, server.rs, server12.rs, server_dtls12.rs, server_dtlcp.rs
 
 **Result**:
-- hitls-crypto: 593 → 603 (+10 CBC-MAC tests); hitls-tls: 881 → 892 (+11 callback/alert tests); total: 2218 → 2239 tests (rebased on Testing-Phase 80).
+- hitls-crypto: 593 → 603 (+10 CBC-MAC tests); hitls-tls: 881 → 892 (+11 callback/alert tests); total: 2218 → 2239 tests (rebased on Phase T89).
 
 2239 total tests (40 ignored). Clippy clean, fmt clean.
 
-## Phase 78: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9) (2026-02-19)
+## Phase 84: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9) (2026-02-19)
 
-**Prompt**: Implement Phase 78 — Trusted CA Keys (RFC 6066 §6, type 3) codec + config + ClientHello integration, USE_SRTP (RFC 5764, type 14) codec + config + ClientHello integration, STATUS_REQUEST_V2 (RFC 6961, type 17) codec + config + ClientHello integration, CMS AuthenticatedData (RFC 5652 §9) parse/encode/create/verify with HMAC-SHA-256/384/512.
+**Prompt**: Implement Phase 84 — Trusted CA Keys (RFC 6066 §6, type 3) codec + config + ClientHello integration, USE_SRTP (RFC 5764, type 14) codec + config + ClientHello integration, STATUS_REQUEST_V2 (RFC 6961, type 17) codec + config + ClientHello integration, CMS AuthenticatedData (RFC 5652 §9) parse/encode/create/verify with HMAC-SHA-256/384/512.
 
 **Work performed**:
 - Trusted CA Keys (RFC 6066 §6): ExtensionType TRUSTED_CA_KEYS(3) + build_trusted_ca_keys/parse_trusted_ca_keys codec + TrustedAuthority enum (PreAgreed/KeySha1Hash/X509Name/CertSha1Hash) + config field trusted_ca_keys + builder method + ClientHello integration (TLS 1.3 + 1.2) + 3 codec tests + 1 config test
@@ -1779,9 +1779,9 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 2256 total tests (40 ignored). Clippy clean, fmt clean.
 
-## Phase 79: DTLS Config Enhancements + Integration Tests (2026-02-19)
+## Phase 86: DTLS Config Enhancements + Integration Tests (2026-02-19)
 
-**Prompt**: 开始 Phase 79 — DTLS configuration enhancements (flight_transmit_enable, empty_records_limit) + integration tests for Phase 77-78 features (MsgCallback, InfoCallback, ClientHelloCallback, CBC-MAC-SM4, CMS AuthenticatedData, RecordPaddingCallback).
+**Prompt**: å¼å§ Phase 86 â DTLS configuration enhancements (flight_transmit_enable, empty_records_limit) + integration tests for Phase 82–84 features (MsgCallback, InfoCallback, ClientHelloCallback, CBC-MAC-SM4, CMS AuthenticatedData, RecordPaddingCallback).
 
 **Work performed**:
 - DTLS config: flight_transmit_enable (bool, default true) + empty_records_limit (u32, default 32) in TlsConfig/TlsConfigBuilder
@@ -1797,23 +1797,23 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ## Phases 80-82: Final C→Rust Feature Parity (2026-02-19)
 
-**Prompt**: Implement the 3-phase migration plan (Phases 80-82) to achieve 100% C→Rust feature parity. Phase 80: Encrypted PKCS#8 + Session ID Context + quiet_shutdown. Phase 81: TicketKeyCallback + SecurityCallback. Phase 82: SM4-CTR-DRBG + CMS ML-DSA + integration tests + documentation sync.
+**Prompt**: Implement the 3-phase migration plan (Phases 80-82) to achieve 100% C→Rust feature parity. Phase 88: Encrypted PKCS#8 + Session ID Context + quiet_shutdown. Phase 90: TicketKeyCallback + SecurityCallback. Phase 92: SM4-CTR-DRBG + CMS ML-DSA + integration tests + documentation sync.
 
 **Work performed**:
 
-### Phase 80 (+12 tests, 2323→2335)
+### Phase 88 (+12 tests, 2323→2335)
 - Encrypted PKCS#8 (EncryptedPrivateKeyInfo): new file `crates/hitls-pki/src/pkcs8/encrypted.rs` with PBES2 decrypt/encrypt (PBKDF2-HMAC-SHA256 + AES-256-CBC/AES-128-CBC), DER+PEM APIs
 - Session ID Context: `session_id_context: Option<Vec<u8>>` in TlsConfig for session cache isolation
 - quiet_shutdown: `quiet_shutdown: bool` config to skip close_notify, wired into all 6 connection types (TLS 1.3/1.2/DTLS 1.2 × sync/async)
 - Files: pkcs8/encrypted.rs (NEW), pkcs8/mod.rs, config/mod.rs, connection.rs, connection12.rs, connection_async.rs, connection12_async.rs, connection_dtls12.rs, connection_dtls12_async.rs
 
-### Phase 81 (+12 tests, 2335→2347)
+### Phase 90 (+12 tests, 2335→2347)
 - TicketKeyCallback: `Arc<dyn Fn(&[u8], bool) -> Option<TicketKeyResult> + Send + Sync>` for session ticket key rotation
 - SecurityCallback: `Arc<dyn Fn(u32, u32, u16) -> bool + Send + Sync>` for filtering cipher/group/sigalg by security level
 - security_level config (default: 1)
 - Files: config/mod.rs
 
-### Phase 82 (+10 tests, 2347→2357)
+### Phase 92 (+10 tests, 2347→2357)
 - SM4-CTR-DRBG: new file `crates/hitls-crypto/src/drbg/sm4_ctr_drbg.rs` implementing NIST SP 800-90A §10.2 with SM4 (16-byte key, 32-byte seed)
 - CMS ML-DSA: ML-DSA-44/65/87 OID constants + verification dispatch in CMS SignedData
 - 3 integration tests: quiet_shutdown e2e, security_callback e2e, encrypted_pkcs8 e2e
@@ -1827,13 +1827,13 @@ Files changed: `crates/hitls-utils/src/asn1/encoder.rs`, `crates/hitls-utils/src
 
 ---
 
-## Session 37: Testing-Phase 88
+## Session 37: Phase T99
 
-**Prompt**: 开始实现 Testing-Phase 88
+**Prompt**: 开始实现 Phase T99
 
 **Work performed**:
 
-### Testing-Phase 88 (+40 tests, 2479→2519)
+### Phase T99 (+40 tests, 2479→2519)
 
 Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, codec error paths, and async connection accessors across 7 files:
 
@@ -1851,9 +1851,9 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 ---
 
-## Testing-Phase 89
+## Phase T100
 
-**Prompt**: Testing-Phase 89 — ECC curve parameter validation, DH group parameter validation, TLCP public API tests, DTLCP error path tests, DTLCP encryption edge cases (+25 tests, 2519→2544)
+**Prompt**: Phase T100 — ECC curve parameter validation, DH group parameter validation, TLCP public API tests, DTLCP error path tests, DTLCP encryption edge cases (+25 tests, 2519→2544)
 
 **Scope**: Add unit tests to previously untested modules (ecc/curves.rs, dh/groups.rs) and thin-coverage areas (connection_tlcp public API, connection_dtlcp error paths, encryption_dtlcp edge cases).
 
@@ -1870,9 +1870,9 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 ---
 
-## Testing-Phase 90
+## Phase T101
 
-**Prompt**: 开始实现 Testing-Phase 90
+**Prompt**: 开始实现 Phase T101
 
 **Scope**: First-ever unit tests for 5 previously untested crypto implementation files: ECC Jacobian point arithmetic, AES software S-box, SM9 BN256 Fp field, SM9 G1 point operations, McEliece bit vector utilities.
 

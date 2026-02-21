@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 82 complete + Testing-Phase 90 — 100% C→Rust feature parity (2577 tests)
+- **Status**: Phase 92 complete + Phase T101 — 100% C→Rust feature parity (2577 tests)
 
 ## Workspace Structure
 
@@ -97,7 +97,7 @@ cargo fmt --all -- --check
 ### Post-Task Documentation Updates
 After completing each implementation task (phase/feature), **always** update the following files:
 - `DEV_LOG.md` — Add a new phase entry with summary, files modified, implementation details, test counts, and build status
-- `TEST_LOG.md` — Add a new Testing-Phase entry with test details and per-crate counts (for testing phases)
+- `TEST_LOG.md` — Add a new Phase T entry with test details and per-crate counts (for testing phases)
 - `PROMPT_LOG.md` — Record the prompt and result for the phase
 - `CLAUDE.md` — Update status line, test counts, and workspace structure annotations
 - `README.md` — Update test counts in Building & Testing section; update protocol/algorithm tables if new features added
@@ -113,11 +113,11 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases 0–82 complete + Testing-Phase 72–89 (2544 tests, 40 ignored). **100% C→Rust feature parity achieved.**
+Phase 0–92 complete + Phase T73–T101 (2577 tests, 40 ignored). **100% C→Rust feature parity achieved.**
 
 ### Completed Phases (Summary)
 
-Implementation phases 0–82 cover all crypto algorithms (48 modules), TLS 1.3/1.2 (91 cipher suites), DTLS 1.2, TLCP, DTLCP, PKI/X.509/CMS, FIPS/CMVP, entropy health testing, CLI (14 commands), and async I/O. Testing-Phase 72–89 provide comprehensive unit test coverage across all modules.
+Implementation Phase 0–92 cover all crypto algorithms (48 modules), TLS 1.3/1.2 (91 cipher suites), DTLS 1.2, TLCP, DTLCP, PKI/X.509/CMS, FIPS/CMVP, entropy health testing, CLI (14 commands), and async I/O. Phase T73–T101 provide comprehensive unit test coverage across all modules.
 
 Key milestones:
 - Phase 21–39: TLS 1.3/1.2/DTLS/TLCP completeness, ECC curves, DRBG, PKI, cipher suites, extensions
@@ -125,9 +125,9 @@ Key milestones:
 - Phase 45–49: DH groups, FIPS/CMVP, entropy health, Ed448/X448/Curve448
 - Phase 50–61: Test coverage expansion (PKI vectors, unit tests, edge cases)
 - Phase 62–67: CCM/CCM_8/PSK cipher suites, DHE_DSS, DH_ANON/ECDH_ANON
-- Phase 68–76: Renegotiation, hostname verification, session cache, async DTLS, GREASE, Heartbeat
-- Phase 77–79: TLS callbacks (10 types), Trusted CA Keys/USE_SRTP/STATUS_REQUEST_V2, CMS AuthenticatedData
-- Phase 80–82: Encrypted PKCS#8, TicketKeyCallback/SecurityCallback, SM4-CTR-DRBG, CMS ML-DSA
-- Testing-Phase 72–90: CLI unit tests, async connection tests, cipher suite integration, codec/state machine edge cases, ECC point/AES soft/SM9 field arithmetic/McEliece vector
+- Phase 68–80: Renegotiation, hostname verification, session cache, async DTLS, GREASE, Heartbeat
+- Phase 82–86: TLS callbacks (10 types), Trusted CA Keys/USE_SRTP/STATUS_REQUEST_V2, CMS AuthenticatedData
+- Phase 88–92: Encrypted PKCS#8, TicketKeyCallback/SecurityCallback, SM4-CTR-DRBG, CMS ML-DSA
+- Phase T73–T101: CLI unit tests, async connection tests, cipher suite integration, codec/state machine edge cases, ECC point/AES soft/SM9 field arithmetic/McEliece vector
 
 See `DEV_LOG.md` for detailed phase tables, `TEST_LOG.md` for testing history, and `PROMPT_LOG.md` for prompt/response log.

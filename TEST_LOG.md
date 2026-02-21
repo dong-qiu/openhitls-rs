@@ -22,29 +22,29 @@
 Phase       Tests   Delta   Period
 ─────────   ─────   ─────   ──────────────────
 Baseline    1,104           Pre-testing effort
-T-Phase 49  1,291    +187   Foundation (core crypto + TLS + PKI)
+Phase 49  1,291    +187   Foundation (core crypto + TLS + PKI)
 Phase 50–61 1,782    +491   Unit test expansion (crypto + TLS edge cases)
 Phase 62–69 1,846     +64   Cipher suite feature tests (CCM/PSK/DSS/ANON/renego)
-Phase 70–82 2,026    +180   Feature-driven tests (hostname/session/callbacks/PQC)
-T-Phase 72  1,964     +72   CLI + session cache concurrency (*)
-T-Phase 73  2,021     +33   Async TLS 1.3 + cipher suite integration (*)
-T-Phase 74  2,054     +18   Fuzz corpus + error scenario integration (*)
-T-Phase 75  2,070     +16   Key export + async export unit tests (*)
-T-Phase 76  2,131     +26   cert_verify + config callbacks + integration (*)
-T-Phase 77  2,144     +13   SniCallback + DTLS abbreviated + extensions (*)
-T-Phase 78  2,166     +22   GREASE + Heartbeat + async DTLS edge cases (*)
-T-Phase 79  2,194     +28   DTLS handshake + TLS 1.3 server + record + PRF (*)
-T-Phase 80  2,218     +24   TLCP server + transcript + key schedule + session (*)
-T-Phase 81  2,299     +25   Client TLCP + cipher params + Ed448 + HKDF (*)
-T-Phase 82  2,323     +24   Codec + server12 + client12 + dtls12 + config (*)
-T-Phase 83  2,348     +25   Session + client + server + async + dtls12-async (*)
-T-Phase 84  2,372     +24   Record + extensions + export + codec + connection (*)
-T-Phase 85  2,397     +25   AEAD + crypt + alert + signing + config (*)
-T-Phase 86  2,420     +23   Retransmit + keylog + fragment + anti_replay (*)
-T-Phase 87  2,445     +25   Async TLS 1.2 + DTLCP + encryption + lib.rs (*)
-T-Phase 88  2,519     +40   ConnectionInfo + handshake enums + codec errors (*)
-T-Phase 89  2,544     +25   ECC/DH params + TLCP API + DTLCP encryption (*)
-T-Phase 90  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
+Phase 70–92 2,026    +180   Feature-driven tests (hostname/session/callbacks/PQC)
+Phase T73  1,964     +72   CLI + session cache concurrency (*)
+Phase T75  2,021     +33   Async TLS 1.3 + cipher suite integration (*)
+Phase T77  2,054     +18   Fuzz corpus + error scenario integration (*)
+Phase T79  2,070     +16   Key export + async export unit tests (*)
+Phase T81  2,131     +26   cert_verify + config callbacks + integration (*)
+Phase T83  2,144     +13   SniCallback + DTLS abbreviated + extensions (*)
+Phase T85  2,166     +22   GREASE + Heartbeat + async DTLS edge cases (*)
+Phase T87  2,194     +28   DTLS handshake + TLS 1.3 server + record + PRF (*)
+Phase T89  2,218     +24   TLCP server + transcript + key schedule + session (*)
+Phase T91  2,299     +25   Client TLCP + cipher params + Ed448 + HKDF (*)
+Phase T93  2,323     +24   Codec + server12 + client12 + dtls12 + config (*)
+Phase T94  2,348     +25   Session + client + server + async + dtls12-async (*)
+Phase T95  2,372     +24   Record + extensions + export + codec + connection (*)
+Phase T96  2,397     +25   AEAD + crypt + alert + signing + config (*)
+Phase T97  2,420     +23   Retransmit + keylog + fragment + anti_replay (*)
+Phase T98  2,445     +25   Async TLS 1.2 + DTLCP + encryption + lib.rs (*)
+Phase T99  2,519     +40   ConnectionInfo + handshake enums + codec errors (*)
+Phase T100  2,544     +25   ECC/DH params + TLCP API + DTLCP encryption (*)
+Phase T101  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -117,7 +117,7 @@ T-Phase 90  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
 
 ### Remaining Untested Files (30 files, ~6,670 lines)
 
-All in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
+After Phase T101, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
 
 | Category | Files | Lines | Complexity |
 |----------|------:|------:|:----------:|
@@ -157,7 +157,7 @@ All in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
 
 ---
 
-## 4. Era I — Foundation Tests (Testing-Phase 49, +187 tests, 1,104 → 1,291)
+## 4. Era I — Foundation Tests (Phase 49, +187 tests, 1,104 → 1,291)
 
 ### §A — Critical Core Crypto (64 new tests)
 
@@ -249,7 +249,7 @@ These phases focused on expanding unit test coverage alongside implementation wo
 
 ---
 
-## 6. Era III — Cipher Suite & Protocol Feature Tests (Phase 62–82, +244 tests)
+## 6. Era III — Cipher Suite & Protocol Feature Tests (Phase 62–92, +244 tests)
 
 Tests added alongside new TLS cipher suites, protocol features, and callbacks.
 
@@ -383,13 +383,13 @@ These phases added new features with accompanying test suites. See [DEV_LOG.md](
 
 ---
 
-## 7. Era IV — Systematic Test Coverage Expansion (Testing-Phase 72–90, +531 tests)
+## 7. Era IV — Systematic Test Coverage Expansion (Phase T73–T101, +531 tests)
 
 Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 72 — CLI Command Unit Tests + Session Cache Concurrency (2026-02-17)
+## Phase T73 — CLI Command Unit Tests + Session Cache Concurrency (2026-02-17)
 
 **Scope**: Stage A of the test optimization plan — fills gaps identified in the test completeness analysis.
 **New tests**: +72 (1880 → 1952 total, 40 ignored unchanged)
@@ -417,7 +417,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_cache_arc_mutex_shared_across_two_arcs | session/mod.rs | Two Arc clones see same underlying data |
 | test_cache_trait_object_via_arc_mutex | session/mod.rs | Arc<Mutex<Box<dyn SessionCache>>> trait-object pattern |
 
-### Workspace Test Counts After Testing-Phase 72
+### Workspace Test Counts After Phase T73
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -436,7 +436,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 73 — Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
+## Phase T75 — Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
 
 **Scope**: Stage B of the test optimization plan — async connection coverage and cipher suite TCP loopback integration.
 **New tests**: +33 (1988 → 2021 total, 40 ignored unchanged)
@@ -468,7 +468,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | DH_ANON/ECDH_ANON | 4 | `tests/interop/src/lib.rs` | DH_ANON+GCM/CBC, ECDH_ANON+CBC(x2) |
 | TLS 1.3 additional | 4 | `tests/interop/src/lib.rs` | AES256-GCM, ChaCha20, CCM_8, RSA cert |
 
-### Workspace Test Counts After Testing-Phase 73
+### Workspace Test Counts After Phase T75
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -487,7 +487,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 74 — Fuzz Seed Corpus + Error Scenario Integration Tests (2026-02-18)
+## Phase T77 — Fuzz Seed Corpus + Error Scenario Integration Tests (2026-02-18)
 
 **Scope**: Stage C of the test optimization plan — structured fuzz seeds for all 10 targets and error/edge-case integration tests.
 **New items**: 66 seed corpus files + 18 new integration tests (2036 → 2054 total, 40 ignored unchanged)
@@ -531,7 +531,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_tls13_session_take_after_handshake | Session | session_resumption(true) + first conn not resumed |
 | test_tls12_empty_write | Edge Case | Empty write(b"") succeeds without sending record |
 
-### Workspace Test Counts After Testing-Phase 74
+### Workspace Test Counts After Phase T77
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -550,14 +550,14 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 75 — Phase 74 Feature Integration Tests + Async Export Unit Tests (2026-02-18)
+## Phase T79 — Phase 76 Feature Integration Tests + Async Export Unit Tests (2026-02-18)
 
-**Scope**: E1: Integration tests for Phase 74 features (certificate_authorities, key material export, session cache); E2: Async export API unit tests.
+**Scope**: E1: Integration tests for Phase 76 features (certificate_authorities, key material export, session cache); E2: Async export API unit tests.
 **New items**: 10 new integration tests (E1) + 6 new async unit tests (E2) = +16 tests total (2054 → 2070)
 **hitls-integration-tests**: 78 → 88 tests
 **hitls-tls**: 753 → 759 tests
 
-### E1: Integration Tests for Phase 74 Features (+10)
+### E1: Integration Tests for Phase 76 Features (+10)
 
 | Test | Category | Description |
 |------|----------|-------------|
@@ -583,7 +583,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_async_tls13_certificate_authorities_config | Async Cert Auth | Handshake with CA config succeeds, export also works |
 | test_async_tls13_export_keying_material_deterministic | Async EKM | Same label+context always returns same bytes |
 
-### Workspace Test Counts After Testing-Phase 75
+### Workspace Test Counts After Phase T79
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -602,7 +602,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase 76 — Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) (2026-02-18)
+## Phase 80 — Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) (2026-02-18)
 
 **Scope**: Async DTLS 1.2 connections, Heartbeat extension codec, GREASE ClientHello injection.
 **New items**: +19 tests (2086 → 2105)
@@ -634,7 +634,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 76 — cert_verify Unit Tests + Config Callbacks + Integration Tests (2026-02-18)
+## Phase T81 — cert_verify Unit Tests + Config Callbacks + Integration Tests (2026-02-18)
 
 **Scope**: F1: cert_verify module unit tests; F2: config callback tests; F3: integration tests.
 **New items**: 13 cert_verify unit tests (F1) + 7 config callback tests (F2) + 6 integration tests (F3) = +26 tests total (2105 → 2131)
@@ -682,7 +682,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_tls12_key_log_callback_invoked | Lines start with CLIENT_RANDOM |
 | test_tls12_server_renegotiation | Server-initiated renegotiation end-to-end |
 
-### Workspace Test Counts After Testing-Phase 76
+### Workspace Test Counts After Phase T81
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -701,7 +701,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 77 — SniCallback + PADDING + OID Filters + DTLS Abbreviated + PskServerCallback (2026-02-19)
+## Phase T83 — SniCallback + PADDING + OID Filters + DTLS Abbreviated + PskServerCallback (2026-02-19)
 
 **Scope**: Integration tests for Phase 75-76 features — SNI-based certificate selection, PADDING extension target, OID Filters in CertificateRequest, DTLS abbreviated handshake session resumption, and PskServerCallback.
 **New tests**: +13 (2131 → 2144)
@@ -727,7 +727,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 78 — GREASE + Heartbeat + Async DTLS Edge Cases + Extension Codec Negative Tests (2026-02-19)
+## Phase T85 — GREASE + Heartbeat + Async DTLS Edge Cases + Extension Codec Negative Tests (2026-02-19)
 
 **Scope**: GREASE ClientHello validation, Heartbeat config/codec, async DTLS 1.2 edge cases, and extension codec negative/boundary tests.
 **New tests**: +22 (2144 → 2166)
@@ -775,7 +775,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_build_parse_certificate_authorities_roundtrip | certificate_authorities codec roundtrip |
 | test_parse_signature_algorithms_cert_truncated | Truncated sig_algs_cert → parse error |
 
-### Workspace Test Counts After Testing-Phase 78
+### Workspace Test Counts After Phase T85
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -794,7 +794,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 79 — DTLS 1.2 Handshake + TLS 1.3 Server + Record Layer + PRF Unit Tests
+## Phase T87 — DTLS 1.2 Handshake + TLS 1.3 Server + Record Layer + PRF Unit Tests
 
 **Date**: 2026-02-19
 **Tests added**: +28 (2166 → 2194)
@@ -855,7 +855,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_prf_empty_secret | Empty secret → valid output |
 | test_prf_different_seeds_differ | Different seeds → different output |
 
-### Workspace Test Counts After Testing-Phase 79
+### Workspace Test Counts After Phase T87
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -874,7 +874,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 80 — TLCP Server + Transcript + Key Schedule 1.2 + Cert Verify + TLS 1.3 Client + Session Unit Tests
+## Phase T89 — TLCP Server + Transcript + Key Schedule 1.2 + Cert Verify + TLS 1.3 Client + Session Unit Tests
 
 **Date**: 2026-02-19
 **Tests added**: +24 (2194 → 2218)
@@ -936,7 +936,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_session_ticket_lifetime_roundtrip | ticket_lifetime preserved in encode/decode |
 | test_session_ems_flag_roundtrip | extended_master_secret flag preserved |
 
-### Workspace Test Counts After Testing-Phase 80
+### Workspace Test Counts After Phase T89
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -955,7 +955,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 81 — Client TLCP + Cipher Suite Params + Verify Ed448 + HKDF Edge Cases
+## Phase T91 — Client TLCP + Cipher Suite Params + Verify Ed448 + HKDF Edge Cases
 
 **Date**: 2026-02-19
 **Tests added**: +25 (2274 → 2299)
@@ -1008,7 +1008,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_hkdf_empty_data_hmac | HMAC with empty data finishes successfully |
 | test_hkdf_expand_exact_hash_length | Expand to exact hash_len output |
 
-### Workspace Test Counts After Testing-Phase 81
+### Workspace Test Counts After Phase T91
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1027,7 +1027,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 82: codec/server12/client12/dtls12/config Unit Tests
+## Phase T93: codec/server12/client12/dtls12/config Unit Tests
 
 **Date**: 2026-02-19
 **Tests added**: +24 (2299 → 2323)
@@ -1082,7 +1082,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_config_default_supported_groups_non_empty | Default config has non-empty supported groups |
 | test_config_default_signature_algorithms_non_empty | Default config has non-empty signature algorithms |
 
-### Workspace Test Counts After Testing-Phase 82
+### Workspace Test Counts After Phase T93
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1101,7 +1101,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 83: session/client/server/async/dtls12-async Unit Tests
+## Phase T94: session/client/server/async/dtls12-async Unit Tests
 
 **Date**: 2026-02-19
 **Tests added**: +25 (2323 → 2348)
@@ -1157,7 +1157,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_async_dtls12_peer_certificates_empty | Server peer_certs empty when verify_peer=false |
 | test_async_dtls12_bidirectional_after_handshake | Client→Server and Server→Client data exchange |
 
-### Workspace Test Counts After Testing-Phase 83
+### Workspace Test Counts After Phase T94
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1174,7 +1174,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2348** | **40** |
 
-## Testing-Phase 84: record/extensions/export/codec/connection Unit Tests
+## Phase T95: record/extensions/export/codec/connection Unit Tests
 
 **Date**: 2026-02-19
 **Scope**: Record layer, extensions framework, key material export, extensions codec, TLS 1.3 connection
@@ -1209,7 +1209,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 23 | connection.rs | test_tls13_queue_early_data_and_accepted | Queue early data + verify early_data_accepted is false |
 | 24 | connection.rs | test_tls13_server_key_update_before_connected | Server key_update before connected fails |
 
-### Workspace Test Counts After Testing-Phase 84
+### Workspace Test Counts After Phase T95
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1226,7 +1226,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2372** | **40** |
 
-## Testing-Phase 85: aead/crypt/alert/signing/config Unit Tests
+## Phase T96: aead/crypt/alert/signing/config Unit Tests
 
 **Date**: 2026-02-19
 **Scope**: AEAD constructors, cipher suite params, alert codes, signing dispatch, config builder
@@ -1262,7 +1262,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 24 | config/mod.rs | test_config_multiple_trusted_certs | Accumulate 2 trusted certs |
 | 25 | config/mod.rs | test_config_builder_all_version_range_combinations | TLS 1.2-only and TLS 1.3-only ranges |
 
-### Workspace Test Counts After Testing-Phase 85
+### Workspace Test Counts After Phase T96
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1279,7 +1279,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2397** | **40** |
 
-## Testing-Phase 86: retransmit/keylog/fragment/anti_replay/key_exchange Unit Tests
+## Phase T97: retransmit/keylog/fragment/anti_replay/key_exchange Unit Tests
 
 **Date**: 2026-02-19
 **Scope**: DTLS retransmission timer, NSS key logging, handshake fragmentation, anti-replay window, key exchange
@@ -1313,7 +1313,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 22 | key_exchange.rs | test_key_exchange_secp256r1_shared_secret_symmetry | Both directions produce equal shared secret |
 | 23 | key_exchange.rs | test_key_exchange_x448_roundtrip | X448 DH both directions equal, len=56 |
 
-### Workspace Test Counts After Testing-Phase 86
+### Workspace Test Counts After Phase T97
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1330,7 +1330,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2420** | **40** |
 
-## Testing-Phase 87: connection12_async/server_dtlcp/client_dtlcp/encryption_dtlcp/lib.rs Unit Tests
+## Phase T98: connection12_async/server_dtlcp/client_dtlcp/encryption_dtlcp/lib.rs Unit Tests
 
 **Date**: 2026-02-20
 **Scope**: Async TLS 1.2 accessors + handshake, DTLCP client+server wrong-state, DTLCP record encryption edge cases, core enum tests
@@ -1366,7 +1366,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 24 | lib.rs | test_cipher_suite_hash_and_eq | HashSet deduplication works |
 | 25 | lib.rs | test_cipher_suite_fallback_scsv | TLS_FALLBACK_SCSV = 0x5600 |
 
-### Workspace Test Counts After Testing-Phase 87
+### Workspace Test Counts After Phase T98
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1383,7 +1383,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2445** | **40** |
 
-## Testing-Phase 88: connection_info/handshake enums/lib.rs constants/codec error paths/async accessors
+## Phase T99: connection_info/handshake enums/lib.rs constants/codec error paths/async accessors
 
 **Date**: 2026-02-20
 **Scope**: ConnectionInfo struct tests, HandshakeType/HandshakeState enum coverage, TLS 1.2/TLCP/PSK cipher suite constants, TLCP+DTLS codec error paths, async TLS 1.2 + DTLS 1.2 accessor tests
@@ -1434,7 +1434,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 39 | connection_dtls12_async.rs | test_async_dtls12_server_accessors_after_handshake | Server info/cipher/version after handshake |
 | 40 | connection_dtls12_async.rs | test_async_dtls12_client_connection_info_before_handshake | All client accessors return defaults |
 
-### Workspace Test Counts After Testing-Phase 88
+### Workspace Test Counts After Phase T99
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1453,7 +1453,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 89: ECC curve params/DH group params/TLCP public API/DTLCP error paths/DTLCP encryption
+## Phase T100: ECC curve params/DH group params/TLCP public API/DTLCP error paths/DTLCP encryption
 
 **Date**: 2026-02-20
 **Scope**: ECC curve parameter validation (9 curves), DH group parameter validation (13 groups), TLCP public API (TlcpClientConnection/TlcpServerConnection), DTLCP seal/open before connected error paths, DTLCP encryption edge cases
@@ -1468,7 +1468,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | DTLCP Connection | `hitls-tls/src/connection_dtlcp.rs` | 4 | client_seal_before_connected, client_open_before_connected, server_seal_before_connected, server_open_before_connected |
 | DTLCP Encryption | `hitls-tls/src/record/encryption_dtlcp.rs` | 4 | explicit_nonce_format, gcm_empty_plaintext_roundtrip, cbc_sequential_records, cbc_large_plaintext_roundtrip |
 
-### Workspace Test Counts After Testing-Phase 89
+### Workspace Test Counts After Phase T100
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1487,7 +1487,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Testing-Phase 90: ECC Jacobian point/AES software S-box/SM9 Fp field/SM9 G1/McEliece bit vector
+## Phase T101: ECC Jacobian point/AES software S-box/SM9 Fp field/SM9 G1/McEliece bit vector
 
 **Date**: 2026-02-20
 **Scope**: First-ever unit tests for 5 previously untested crypto implementation files: ECC Jacobian point arithmetic, AES software (S-box) implementation, SM9 BN256 Fp field arithmetic, SM9 G1 point operations, and Classic McEliece bit vector utilities
@@ -1502,7 +1502,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | SM9 EcPointG1 | `hitls-crypto/src/sm9/ecp.rs` | 5 | generator_on_curve, infinity_add_generator, negate_add_gives_infinity, scalar_mul_by_order_gives_infinity, serialization_roundtrip |
 | McEliece Vector | `hitls-crypto/src/mceliece/vector.rs` | 4 | set_get_bit_roundtrip, flip_bit, hamming_weight, pop64_count_ones |
 
-### Workspace Test Counts After Testing-Phase 90
+### Workspace Test Counts After Phase T101
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|

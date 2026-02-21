@@ -2,7 +2,7 @@
 
 ## Migration Roadmap Archive
 
-> The following phase tables document the complete C→Rust migration history (Phase 21–82).
+> The following phase tables document the complete C→Rust migration history (Phase 21–92).
 > They were moved here from README.md to keep the README focused on feature showcase.
 > For the current feature summary, see [README.md](README.md).
 
@@ -460,7 +460,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | Write record fragmentation (auto-split by max_fragment_size) | **Done** |
 | All 8 connection types (4 sync + 4 async) | **Done** |
 
-### Phase 73: KeyUpdate Loop Protection + Max Fragment Length + Signature Algorithms Cert
+### Phase 74: KeyUpdate Loop Protection + Max Fragment Length + Signature Algorithms Cert
 
 | Feature | Standard | Status |
 |---------|----------|--------|
@@ -468,7 +468,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | Max Fragment Length (512/1024/2048/4096) | RFC 6066 | **Done** |
 | Signature Algorithms Cert extension | RFC 8446 §4.2.3 | **Done** |
 
-### Phase 74: Certificate Authorities + Early Exporter + DTLS 1.2 Session Cache
+### Phase 76: Certificate Authorities + Early Exporter + DTLS 1.2 Session Cache
 
 | Feature | Standard | Status |
 |---------|----------|--------|
@@ -476,7 +476,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | Early exporter master secret + API | RFC 8446 §7.5 | **Done** |
 | DTLS 1.2 session cache auto-store | RFC 6347 | **Done** |
 
-### Phase 75: PADDING + OID Filters + DTLS 1.2 Abbreviated Handshake
+### Phase 78: PADDING + OID Filters + DTLS 1.2 Abbreviated Handshake
 
 | Feature | Standard | Status |
 |---------|----------|--------|
@@ -484,7 +484,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | OID Filters extension (type 48) | RFC 8446 §4.2.5 | **Done** |
 | DTLS 1.2 abbreviated handshake (session resumption) | RFC 6347 | **Done** |
 
-### Phase 76: Async DTLS 1.2 + Heartbeat + GREASE
+### Phase 80: Async DTLS 1.2 + Heartbeat + GREASE
 
 | Feature | Standard | Status |
 |---------|----------|--------|
@@ -492,7 +492,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | Heartbeat extension (type 15) | RFC 6520 | **Done** |
 | GREASE injection (cipher suites/extensions/groups/sig_algs/key_share) | RFC 8701 | **Done** |
 
-### Phase 77: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4
+### Phase 82: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4
 
 | Feature | Description |
 |---------|-------------|
@@ -500,7 +500,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | Missing Alert Codes | 6 legacy codes added |
 | CBC-MAC-SM4 | SM4 CBC-MAC with zero-padding, feature-gated `cbc-mac` |
 
-### Phase 78: Trusted CA Keys + USE_SRTP + STATUS_REQUEST_V2 + CMS AuthenticatedData
+### Phase 84: Trusted CA Keys + USE_SRTP + STATUS_REQUEST_V2 + CMS AuthenticatedData
 
 | Feature | Standard | Status |
 |---------|----------|--------|
@@ -509,7 +509,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | STATUS_REQUEST_V2 (type 17) | RFC 6961 | **Done** |
 | CMS AuthenticatedData (HMAC-SHA-256/384/512) | RFC 5652 §9 | **Done** |
 
-### Phase 79: DTLS Config Enhancements + Integration Tests
+### Phase 86: DTLS Config Enhancements + Integration Tests
 
 | Feature | Description |
 |---------|-------------|
@@ -517,7 +517,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | empty_records_limit | Consecutive empty record DoS protection (default: 32) |
 | Integration tests | MsgCallback, InfoCallback, ClientHelloCallback, CBC-MAC-SM4, CMS AuthenticatedData |
 
-### Phase 80: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
+### Phase 88: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
 
 | Feature | Description | Status |
 |---------|-------------|--------|
@@ -525,7 +525,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | Session ID Context | session_id_context for session cache isolation | **Done** |
 | quiet_shutdown | Skip close_notify on shutdown (all 6 connection types) | **Done** |
 
-### Phase 81: TicketKeyCallback + SecurityCallback
+### Phase 90: TicketKeyCallback + SecurityCallback
 
 | Feature | Description | Status |
 |---------|-------------|--------|
@@ -533,7 +533,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | SecurityCallback | Cipher/group/sigalg security filtering | **Done** |
 | security_level config | Configurable security level (default: 1) | **Done** |
 
-### Phase 82: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests
+### Phase 92: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests
 
 | Feature | Description | Status |
 |---------|-------------|--------|
@@ -556,7 +556,7 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 
 ---
 
-## Testing-Phase 88: connection_info / handshake enums / lib.rs constants / codec error paths / async accessors
+## Phase T99: connection_info / handshake enums / lib.rs constants / codec error paths / async accessors
 
 ### Date: 2026-02-20
 
@@ -636,7 +636,7 @@ Added 40 unit tests across 7 files targeting zero-test or thin-coverage areas:
 
 ---
 
-## Phase 82: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests + Documentation Sync
+## Phase 92: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests + Documentation Sync
 
 ### Date: 2026-02-19
 
@@ -682,7 +682,7 @@ Implemented three features plus documentation sync, completing 100% C→Rust fea
 
 ---
 
-## Phase 81: TicketKeyCallback + SecurityCallback
+## Phase 90: TicketKeyCallback + SecurityCallback
 
 ### Date: 2026-02-19
 
@@ -722,7 +722,7 @@ Implemented two TLS config callback features:
 
 ---
 
-## Phase 80: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
+## Phase 88: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
 
 ### Date: 2026-02-19
 
@@ -771,7 +771,7 @@ Implemented three features:
 
 ---
 
-## Phase 79: DTLS Config Enhancements + Integration Tests for Phase 77-78 Features
+## Phase 86: DTLS Config Enhancements + Integration Tests for Phase 82–84 Features
 
 ### Date: 2026-02-19
 
@@ -779,7 +779,7 @@ Implemented three features:
 
 Implemented two features:
 1. **DTLS Configuration Enhancements** — Added `flight_transmit_enable` (bool, default true) and `empty_records_limit` (u32, default 32) to TlsConfig + TlsConfigBuilder. Implemented `check_empty_record()` in RecordLayer for DoS protection: tracks consecutive empty plaintext records, rejects empty Alert/ApplicationData records, rejects empty encrypted records, and returns fatal error when limit exceeded. 2 config tests + 7 record layer tests.
-2. **Integration Tests for Phase 77-78 Features** — 9 integration tests covering: MsgCallback TLS 1.3/1.2 (config acceptance + handshake success), InfoCallback (server-side events), ClientHelloCallback (cipher suite observation), CBC-MAC-SM4 (create/verify/determinism), CMS AuthenticatedData (create/verify/DER roundtrip), RecordPaddingCallback (wired + handshake + data exchange), DTLS config enhancements (flight_transmit_enable + empty_records_limit + handshake), RecordLayer empty records limit (DoS protection).
+2. **Integration Tests for Phase 82–84 Features** â 9 integration tests covering: MsgCallback TLS 1.3/1.2 (config acceptance + handshake success), InfoCallback (server-side events), ClientHelloCallback (cipher suite observation), CBC-MAC-SM4 (create/verify/determinism), CMS AuthenticatedData (create/verify/DER roundtrip), RecordPaddingCallback (wired + handshake + data exchange), DTLS config enhancements (flight_transmit_enable + empty_records_limit + handshake), RecordLayer empty records limit (DoS protection).
 
 ### Files Modified
 
@@ -820,7 +820,7 @@ Implemented two features:
 
 ---
 
-## Phase 78: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9)
+## Phase 84: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9)
 
 ### Date: 2026-02-19
 
@@ -878,7 +878,7 @@ Implemented four features:
 
 ---
 
-## Phase 77: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4
+## Phase 82: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4
 
 ### Date: 2026-02-19
 
@@ -947,7 +947,7 @@ Implemented three features:
 
 +21 tests (2218 → 2239)
 
-Note: Phase 77 was applied on top of Testing-Phase 80 (2218 tests). The +21 count reflects the net new tests added by Phase 77 features (10 CBC-MAC + 10 config callbacks + 1 alert test). Some existing tests were also updated (e.g., alert variant count 28→34).
+Note: Phase 82 was applied on top of Phase T89 (2218 tests). The +21 count reflects the net new tests added by Phase 82 features (10 CBC-MAC + 10 config callbacks + 1 alert test). Some existing tests were also updated (e.g., alert variant count 28→34).
 
 ### Build Status
 - `cargo test --workspace --all-features`: 2239 passed, 0 failed, 40 ignored
@@ -956,7 +956,7 @@ Note: Phase 77 was applied on top of Testing-Phase 80 (2218 tests). The +21 coun
 
 ---
 
-## Phase 76: Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701)
+## Phase 80: Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701)
 
 ### Date: 2026-02-18
 
@@ -1018,7 +1018,7 @@ Implemented three features:
 
 ---
 
-## Testing-Phase 76: cert_verify Unit Tests + Config Callbacks + Integration Tests
+## Phase T81: cert_verify Unit Tests + Config Callbacks + Integration Tests
 
 ### Date: 2026-02-18
 
@@ -1046,7 +1046,7 @@ Added comprehensive tests for cert_verify module and config callbacks:
 
 ---
 
-## Phase 75: PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake
+## Phase 78: PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake
 
 ### Date: 2026-02-18
 
@@ -1082,7 +1082,7 @@ Added three features: (1) PADDING extension (type 21, RFC 7685) with codec (buil
 - **Session ID for full handshake**: Server now generates a fresh random session_id for full handshakes (instead of echoing client's), preventing false abbreviation detection.
 - **Session cache TTL**: Cached sessions respect InMemorySessionCache TTL expiration (default 2h).
 
-### Test Counts (Phase 75)
+### Test Counts (Phase 78)
 - **hitls-tls**: 768 [was: 753] (+15 new tests)
 - **Total workspace**: 2069 (40 ignored) [was: 2036 (actually 2003 + 33 auth)]
 
@@ -1113,13 +1113,13 @@ Added three features: (1) PADDING extension (type 21, RFC 7685) with codec (buil
 
 ---
 
-## Testing-Phase 75: Phase 74 Feature Integration Tests + Async Export Unit Tests
+## Phase T79: Phase 76 Feature Integration Tests + Async Export Unit Tests
 
 ### Date: 2026-02-18
 
 ### Summary
 
-Added integration and async unit tests for Phase 74 features:
+Added integration and async unit tests for Phase 76 features:
 1. **Integration tests** (+10): certificate_authorities config handshake, export_keying_material client/server match + different labels + before handshake + various lengths + server-side, export_early_keying_material no-PSK error, TLS 1.2 export_keying_material match, TLS 1.2 session cache + ticket resumption.
 2. **Async unit tests** (+6): export_keying_material before handshake, early export no-PSK, both-sides match, different labels, CA config, deterministic.
 
@@ -1139,7 +1139,7 @@ Added integration and async unit tests for Phase 74 features:
 
 ---
 
-## Testing-Phase 74: Fuzz Seed Corpus + Error Scenario Integration Tests
+## Phase T77: Fuzz Seed Corpus + Error Scenario Integration Tests
 
 ### Date: 2026-02-18
 
@@ -1165,7 +1165,7 @@ Added structured fuzz seed corpus and error scenario integration tests:
 
 ---
 
-## Phase 74: Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 Session Cache
+## Phase 76: Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 Session Cache
 
 ### Date: 2026-02-18
 
@@ -1202,7 +1202,7 @@ Added three features: (1) Certificate Authorities extension (type 47) with full 
 - **Async exporter gap fixed**: Async connections were missing `exporter_master_secret` entirely — both regular and early exporter were added
 - **DTLS 1.2 session cache**: Auto-store only (not auto-lookup/abbreviated handshake), must happen before key material zeroize
 
-### Test Counts (Phase 74)
+### Test Counts (Phase 76)
 - **hitls-tls**: 741 [was: 726] (+15 new tests)
 - **Total workspace**: 2003 (40 ignored) [was: 1988]
 
@@ -1233,7 +1233,7 @@ Added three features: (1) Certificate Authorities extension (type 47) with full 
 
 ---
 
-## Phase 73: KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3)
+## Phase 74: KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3)
 
 ### Date: 2026-02-18
 
@@ -1269,7 +1269,7 @@ Added three features: (1) KeyUpdate DoS protection with a 128-consecutive-limit 
 - **MFL server policy**: Server echoes client's MFL value (accept-all); no separate server config needed
 - **sig_algs_cert reuse**: Wire format identical to `signature_algorithms` — just different `ExtensionType(50)`
 
-### Test Counts (Phase 73)
+### Test Counts (Phase 74)
 - **hitls-tls**: 720 [was: 709] (+11 new tests in hitls-tls, +2 in config)
 - **Total workspace**: 1905 (40 ignored) [was: 1892]
 
@@ -7355,12 +7355,12 @@ Added client-side session cache (auto-store/auto-lookup by server_name) and writ
 - Formatting: clean (`cargo fmt --check`)
 - 1892 workspace tests passing (40 ignored)
 
-## Testing-Phase 72: CLI Command Unit Tests + Session Cache Concurrency
+## Phase T73: CLI Command Unit Tests + Session Cache Concurrency
 
 ### Date: 2026-02-17
 
 ### Summary
-Systematic test coverage improvement for the seven previously-untested CLI command modules and Arc<Mutex<>> concurrency safety for the InMemorySessionCache added in Phase 71. Part of the Testing-Phase roadmap (Testing-Phase 72 = Stage A of the test optimization plan). Added 72 new tests total: 77 in hitls-cli (net +77 from 40→117) and 6 in hitls-tls session module.
+Systematic test coverage improvement for the seven previously-untested CLI command modules and Arc<Mutex<>> concurrency safety for the InMemorySessionCache added in Phase 71. Part of the testing phase roadmap (Phase T73 = Stage A of the test optimization plan). Added 72 new tests total: 77 in hitls-cli (net +77 from 40→117) and 6 in hitls-tls session module.
 
 ### Files Modified
 
@@ -7397,7 +7397,7 @@ Systematic test coverage improvement for the seven previously-untested CLI comma
 - Formatting: clean (`cargo fmt --check`)
 - 1952 workspace tests passing (40 ignored)
 
-## Testing-Phase 73: Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
+## Phase T75: Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
 
 ### Summary
 Added 33 new tests across hitls-tls and hitls-integration-tests:
@@ -7444,7 +7444,7 @@ New helpers: `run_tls12_tcp_loopback`, `run_tls13_tcp_loopback`, `make_psk_confi
 - `TLS_AES_128_CCM_SHA256` (0x1304) is NOT in `CipherSuiteParams::from_suite()` for TLS 1.3 (only `TLS_AES_128_CCM_8_SHA256` 0x1305 is). Replaced `test_tcp_tls13_aes128_ccm` with `test_tcp_tls13_rsa_server_cert`.
 - TLS 1.2 integration tests must use `Tls12ClientConnection`/`Tls12ServerConnection`, not `TlsClientConnection`/`TlsServerConnection` (which are TLS 1.3 only).
 
-### Test Counts (Testing-Phase 73)
+### Test Counts (Phase T75)
 
 | Crate | Before | After | Delta |
 |-------|--------|-------|-------|
@@ -7452,7 +7452,7 @@ New helpers: `run_tls12_tcp_loopback`, `run_tls13_tcp_loopback`, `make_psk_confi
 | hitls-integration-tests | 39 | 60 | +21 |
 | **Workspace total** | **1988** | **2021** | **+33** |
 
-### Workspace Test Breakdown After Testing-Phase 73
+### Workspace Test Breakdown After Phase T75
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -7476,7 +7476,7 @@ New helpers: `run_tls12_tcp_loopback`, `run_tls13_tcp_loopback`, `make_psk_confi
 
 ---
 
-## Testing-Phase 89: ECC Curve Params / DH Group Params / TLCP Public API / DTLCP Error Paths / DTLCP Encryption
+## Phase T100: ECC Curve Params / DH Group Params / TLCP Public API / DTLCP Error Paths / DTLCP Encryption
 
 **Date**: 2026-02-20
 **Scope**: Unit tests for previously untested parameter modules and thin-coverage connection/encryption modules
@@ -7500,7 +7500,7 @@ Added 25 new tests covering:
 | `crates/hitls-tls/src/connection_dtlcp.rs` | +4 tests |
 | `crates/hitls-tls/src/record/encryption_dtlcp.rs` | +4 tests |
 
-### Workspace Test Counts After Testing-Phase 89
+### Workspace Test Counts After Phase T100
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -7524,7 +7524,7 @@ Added 25 new tests covering:
 
 ---
 
-## Testing-Phase 90: ECC Jacobian point/AES software S-box/SM9 Fp field/SM9 G1/McEliece bit vector
+## Phase T101: ECC Jacobian point/AES software S-box/SM9 Fp field/SM9 G1/McEliece bit vector
 
 **Date**: 2026-02-20
 **Scope**: First-ever unit tests for 5 previously untested crypto implementation files
@@ -7548,7 +7548,7 @@ Added 33 new tests covering:
 | `crates/hitls-crypto/src/sm9/ecp.rs` | +5 tests (new test module) |
 | `crates/hitls-crypto/src/mceliece/vector.rs` | +4 tests (new test module) |
 
-### Workspace Test Counts After Testing-Phase 90
+### Workspace Test Counts After Phase T101
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|

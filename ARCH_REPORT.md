@@ -462,7 +462,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 ## 7. Refactoring Plan
 
-### Phase R1: PKI Encoding Consolidation (Priority: Critical)
+### Phase R102: PKI Encoding Consolidation (Priority: Critical)
 
 **Goal**: Eliminate 24 duplicated ASN.1 encoding helpers and 5 duplicated utility functions
 
@@ -488,7 +488,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Low — internal refactoring only, no public API changes
 
-### Phase R2: Record Layer Enum Dispatch (Priority: High)
+### Phase R103: Record Layer Enum Dispatch (Priority: High)
 
 **Goal**: Replace `Option<T>` field proliferation with type-safe enum dispatch
 
@@ -521,7 +521,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Medium — requires updating all record layer callers
 
-### Phase R3: Connection File Decomposition (Priority: High)
+### Phase R104: Connection File Decomposition (Priority: High)
 
 **Goal**: Split the two largest files (7,324 + 7,004 lines) into manageable modules
 
@@ -539,7 +539,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Low — pure structural reorganization, no logic changes
 
-### Phase R4: Hash Digest Enum Dispatch (Priority: Medium)
+### Phase R105: Hash Digest Enum Dispatch (Priority: Medium)
 
 **Goal**: Replace `Box<dyn Digest>` + factory closure with enum dispatch for known hash algorithms
 
@@ -574,7 +574,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Medium — touches core crypto infrastructure. Requires careful testing.
 
-### Phase R5: Sync/Async Unification via Macros (Priority: Medium)
+### Phase R106: Sync/Async Unification via Macros (Priority: Medium)
 
 **Goal**: Reduce ~6,189 lines of sync/async duplication
 
@@ -598,7 +598,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: High — significant structural change. Macro complexity. Must maintain feature parity. Consider as a multi-iteration effort.
 
-### Phase R6: X.509 Module Decomposition (Priority: Medium)
+### Phase R107: X.509 Module Decomposition (Priority: Medium)
 
 **Goal**: Split `x509/mod.rs` (3,441 lines) into focused submodules
 
@@ -613,7 +613,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Low — pure structural reorganization
 
-### Phase R7: Integration Test Modularization (Priority: Medium)
+### Phase R108: Integration Test Modularization (Priority: Medium)
 
 **Goal**: Split monolithic 7,675-line test file into focused test modules
 
@@ -632,7 +632,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Low — test-only change
 
-### Phase R8: Test Helper Consolidation (Priority: Low)
+### Phase R109: Test Helper Consolidation (Priority: Low)
 
 **Goal**: Eliminate 53 duplicated `hex()`/`to_hex()` test helpers
 
@@ -645,7 +645,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Low — test-only change
 
-### Phase R9: Parameter Struct Refactoring (Priority: Low)
+### Phase R110: Parameter Struct Refactoring (Priority: Low)
 
 **Goal**: Address 8 `too_many_arguments` suppressions
 
@@ -672,7 +672,7 @@ fn process_handshake(ctx: &mut HandshakeContext, record: &Record) -> Result<()>
 
 **Risk**: Low — localized changes
 
-### Phase R10: DRBG State Machine Unification (Priority: Low)
+### Phase R111: DRBG State Machine Unification (Priority: Low)
 
 **Goal**: Extract shared DRBG lifecycle (instantiate/generate/reseed) into a common abstraction
 
@@ -700,20 +700,20 @@ fn process_handshake(ctx: &mut HandshakeContext, record: &Record) -> Result<()>
 
 | Phase | Priority | Risk | Est. Lines Saved | Dependencies |
 |-------|----------|------|-------------------|-------------|
-| R1: PKI Encoding Consolidation | Critical | Low | ~200 | None |
-| R2: Record Layer Enum Dispatch | High | Medium | ~300 | None |
-| R3: Connection File Decomposition | High | Low | 0 (structural) | None |
-| R4: Hash Digest Enum Dispatch | Medium | Medium | ~100 | None |
-| R5: Sync/Async Unification | Medium | High | ~3,000-4,000 | R3 |
-| R6: X.509 Module Decomposition | Medium | Low | 0 (structural) | R1 |
-| R7: Integration Test Modularization | Medium | Low | 0 (structural) | None |
-| R8: Test Helper Consolidation | Low | Low | ~200 | None |
-| R9: Parameter Struct Refactoring | Low | Low | ~50 | None |
-| R10: DRBG State Machine Unification | Low | Medium | ~300 | None |
+| Phase R102: PKI Encoding Consolidation | Critical | Low | ~200 | None |
+| Phase R103: Record Layer Enum Dispatch | High | Medium | ~300 | None |
+| Phase R104: Connection File Decomposition | High | Low | 0 (structural) | None |
+| Phase R105: Hash Digest Enum Dispatch | Medium | Medium | ~100 | None |
+| Phase R106: Sync/Async Unification | Medium | High | ~3,000-4,000 | Phase R104 |
+| Phase R107: X.509 Module Decomposition | Medium | Low | 0 (structural) | Phase R102 |
+| Phase R108: Integration Test Modularization | Medium | Low | 0 (structural) | None |
+| Phase R109: Test Helper Consolidation | Low | Low | ~200 | None |
+| Phase R110: Parameter Struct Refactoring | Low | Low | ~50 | None |
+| Phase R111: DRBG State Machine Unification | Low | Medium | ~300 | None |
 
-**Recommended Execution Order**: R1 → R3 → R2 → R6 → R7 → R4 → R8 → R9 → R10 → R5
+**Recommended Execution Order**: Phase R102 → Phase R104 → Phase R103 → Phase R107 → Phase R108 → Phase R105 → Phase R109 → Phase R110 → Phase R111 → Phase R106
 
-R5 (Sync/Async Unification) is placed last due to its high complexity and risk — it should be attempted only after the foundational refactorings (R1-R4) stabilize the codebase.
+Phase R106 (Sync/Async Unification) is placed last due to its high complexity and risk — it should be attempted only after the foundational refactorings (Phase R102-Phase R105) stabilize the codebase.
 
 ---
 
