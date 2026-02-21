@@ -98,42 +98,62 @@ T-Phase 90  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
 
 ## 3. Coverage Gap Analysis & Optimization Plan
 
+> Full quality analysis: [QUALITY_REPORT.md](QUALITY_REPORT.md)
+
+### Identified Deficiencies
+
+| Severity | ID | Description | Status |
+|:--------:|:--:|-------------|:------:|
+| Critical | D1 | 0-RTT replay protection: zero tests | Open |
+| Critical | D2 | Async TLS 1.2/TLCP/DTLCP: zero tests | Open |
+| High | D3 | Extension negotiation: no e2e tests | Open |
+| High | D4 | DTLS loss/retransmission: no tests | Open |
+| High | D5 | TLCP double certificate: untested | Open |
+| Medium | D6 | No property-based testing framework | Open |
+| Medium | D7 | No code coverage metrics in CI | Open |
+| Medium | D8 | No cross-implementation interop | Open |
+| Low-Med | D9 | Fuzz targets: parse-only | Open |
+| Low | D10 | 30 crypto files without unit tests | Open |
+
 ### Remaining Untested Files (30 files, ~6,670 lines)
 
-After Testing-Phase 90, 30 crypto implementation files still lack direct unit tests:
+All in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
 
-| Category | Files | Lines | Complexity | Priority |
-|----------|------:|------:|:----------:|:--------:|
-| **SLH-DSA** (FIPS 205) | 6 | 1,224 | High | P1 |
-| **Classic McEliece** | 7 | 1,686 | High | P1 |
-| **XMSS** (RFC 8391) | 5 | 752 | Medium | P2 |
-| **FrodoKEM** | 3 | 743 | Medium | P2 |
-| **SM9** (remaining) | 7 | 1,121 | Medium | P2 |
-| **Provider traits** | 1 | 144 | Low | P3 |
+| Category | Files | Lines | Complexity |
+|----------|------:|------:|:----------:|
+| **SLH-DSA** (FIPS 205) | 6 | 1,224 | High |
+| **Classic McEliece** | 7 | 1,686 | High |
+| **XMSS** (RFC 8391) | 5 | 752 | Medium |
+| **FrodoKEM** | 3 | 743 | Medium |
+| **SM9** (remaining) | 7 | 1,121 | Medium |
+| **Provider traits** | 1 | 144 | Low |
 
-**Note**: All untested files are in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
+### Optimization Roadmap — Testing-Phase 91–100
 
-### Optimization Plan — Next Priorities
-
-| Priority | Target | Est. Tests | Rationale |
-|:--------:|--------|:----------:|-----------|
-| **P1** | SM9 tower fields (fp2, fp4, fp12) | ~15 | Field arithmetic is foundation for pairing; verify algebraic identities |
-| **P1** | SLH-DSA (address, FORS, WOTS, hypertree) | ~20 | Post-quantum standard (FIPS 205); high-value coverage |
-| **P2** | McEliece (poly, matrix, decode, benes) | ~15 | PQC key encapsulation; complex linear algebra |
-| **P2** | FrodoKEM (matrix, pke, params) | ~10 | PQC lattice-based; matrix sampling correctness |
-| **P2** | XMSS (hash, tree, WOTS, address) | ~10 | Hash-based stateful signatures |
-| **P3** | Stress / performance regression tests | ~5 | Large payload, concurrent connections |
-| **P3** | Negative integration tests | ~10 | Protocol-level error injection, malformed records |
+| Phase | Est. Tests | Deficiency | Focus |
+|-------|:----------:|:----------:|-------|
+| **Testing-Phase 91** | ~8 | D1 | 0-RTT early data + replay protection |
+| **Testing-Phase 92** | ~20 | D2 | Async TLS 1.2 connection tests |
+| **Testing-Phase 93** | ~15 | D2 | Async TLCP + DTLCP connection tests |
+| **Testing-Phase 94** | ~12 | D3 | Extension negotiation e2e tests |
+| **Testing-Phase 95** | ~10 | D4 | DTLS loss simulation + retransmission |
+| **Testing-Phase 96** | ~8 | D5 | TLCP double certificate validation |
+| **Testing-Phase 97** | ~15 | D10 | SM9 tower fields (fp2/fp4/fp12) |
+| **Testing-Phase 98** | ~20 | D10 | SLH-DSA internal modules |
+| **Testing-Phase 99** | ~15 | D10 | McEliece + FrodoKEM + XMSS internals |
+| **Testing-Phase 100** | — | D6/D7 | Infra: proptest + coverage CI |
 
 ### Coverage Metrics Target
 
-| Metric | Current | Target |
-|--------|:-------:|:------:|
-| Total tests | 2,577 | 2,700+ |
-| Crypto files with tests | 75% | 90%+ |
-| TLS files with tests | 100% | 100% |
-| Integration tests | 125 | 140+ |
-| Fuzz corpus seeds | 66 | 100+ |
+| Metric | Current | After T-Phase 96 | After T-Phase 100 |
+|--------|:-------:|:-----------------:|:-----------------:|
+| Total tests | 2,577 | ~2,660 | 2,750+ |
+| Critical deficiencies | 2 | 0 | 0 |
+| High deficiencies | 3 | 0 | 0 |
+| Async connection coverage | 40% | 100% | 100% |
+| Crypto files with tests | 75% | 75% | 90%+ |
+| Property-based testing | No | No | Yes |
+| Code coverage in CI | No | No | Yes |
 
 ---
 
