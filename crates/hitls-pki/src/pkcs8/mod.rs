@@ -24,6 +24,8 @@ use hitls_types::{CryptoError, EccCurveId};
 use hitls_utils::asn1::{Decoder, Encoder};
 use hitls_utils::oid::{known, Oid};
 
+use crate::oid_mapping;
+
 /// A parsed PKCS#8 private key.
 pub enum Pkcs8PrivateKey {
     /// RSA private key (PKCS#1).
@@ -220,28 +222,7 @@ fn parse_ec_curve_oid(params: &[u8]) -> Result<EccCurveId, CryptoError> {
     let oid_bytes = dec.read_oid()?;
     let curve_oid = Oid::from_der_value(oid_bytes)?;
 
-    oid_to_curve_id(&curve_oid)
-}
-
-/// Map a curve OID to an EccCurveId.
-fn oid_to_curve_id(oid: &Oid) -> Result<EccCurveId, CryptoError> {
-    if *oid == known::secp224r1() {
-        Ok(EccCurveId::NistP224)
-    } else if *oid == known::prime256v1() {
-        Ok(EccCurveId::NistP256)
-    } else if *oid == known::secp384r1() {
-        Ok(EccCurveId::NistP384)
-    } else if *oid == known::secp521r1() {
-        Ok(EccCurveId::NistP521)
-    } else if *oid == known::brainpool_p256r1() {
-        Ok(EccCurveId::BrainpoolP256r1)
-    } else if *oid == known::brainpool_p384r1() {
-        Ok(EccCurveId::BrainpoolP384r1)
-    } else if *oid == known::brainpool_p512r1() {
-        Ok(EccCurveId::BrainpoolP512r1)
-    } else {
-        Err(CryptoError::DecodeUnknownOid)
-    }
+    oid_mapping::oid_to_curve_id(&curve_oid).ok_or(CryptoError::DecodeUnknownOid)
 }
 
 /// Map an EccCurveId to its OID.

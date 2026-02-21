@@ -3,56 +3,13 @@
 //! Provides offline OCSP request/response parsing (no HTTP transport).
 
 use hitls_types::PkiError;
-use hitls_utils::asn1::{Decoder, Encoder, TagClass};
+use hitls_utils::asn1::{Decoder, TagClass};
 use hitls_utils::oid::{known, Oid};
+
+use crate::encoding::{enc_int, enc_null, enc_octet, enc_oid, enc_raw_parts, enc_seq, enc_tlv};
 
 use super::crl::{verify_signature_with_oid, RevocationReason};
 use super::{compute_hash, Certificate, HashAlg};
-
-/// Helper: build an Encoder, apply writes, and finish.
-fn enc_seq(contents: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_sequence(contents);
-    e.finish()
-}
-
-fn enc_octet(value: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_octet_string(value);
-    e.finish()
-}
-
-fn enc_oid(oid: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_oid(oid);
-    e.finish()
-}
-
-fn enc_int(value: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_integer(value);
-    e.finish()
-}
-
-fn enc_tlv(tag: u8, value: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_tlv(tag, value);
-    e.finish()
-}
-
-fn enc_null() -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_null();
-    e.finish()
-}
-
-fn enc_raw_parts(parts: &[&[u8]]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    for p in parts {
-        e.write_raw(p);
-    }
-    e.finish()
-}
 
 /// OCSP certificate identifier (RFC 6960 §4.1.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -549,7 +506,7 @@ fn parse_single_response(dec: &mut Decoder) -> Result<OcspSingleResponse, PkiErr
 
 #[cfg(test)]
 fn enc_bit_string(unused: u8, value: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
+    let mut e = hitls_utils::asn1::Encoder::new();
     e.write_bit_string(unused, value);
     e.finish()
 }

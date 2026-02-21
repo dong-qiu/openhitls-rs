@@ -7,10 +7,11 @@ use hitls_types::PkiError;
 use hitls_utils::asn1::{tags, Decoder, Encoder};
 use hitls_utils::oid::{known, Oid};
 
-use super::{
-    cerr, enc_explicit_ctx, enc_int, enc_octet, enc_oid, enc_seq, enc_set, enc_tlv,
-    AlgorithmIdentifier, CmsContentType, CmsMessage,
+use crate::encoding::{
+    bytes_to_u32, enc_explicit_ctx, enc_int, enc_octet, enc_oid, enc_seq, enc_set, enc_tlv,
 };
+
+use super::{cerr, parse_algorithm_identifier, AlgorithmIdentifier, CmsContentType, CmsMessage};
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -473,28 +474,6 @@ pub(crate) fn encode_enveloped_data_cms(ed: &EnvelopedData) -> Vec<u8> {
 }
 
 // ── Parsing ──────────────────────────────────────────────────────────
-
-fn bytes_to_u32(bytes: &[u8]) -> u32 {
-    bytes
-        .iter()
-        .fold(0u32, |acc, &b| acc.wrapping_shl(8) | b as u32)
-}
-
-fn parse_algorithm_identifier(dec: &mut Decoder) -> Result<AlgorithmIdentifier, PkiError> {
-    let mut seq = dec
-        .read_sequence()
-        .map_err(|e| cerr(&format!("AlgId: {e}")))?;
-    let oid = seq
-        .read_oid()
-        .map_err(|e| cerr(&format!("alg OID: {e}")))?
-        .to_vec();
-    let params = if !seq.is_empty() {
-        Some(seq.remaining().to_vec())
-    } else {
-        None
-    };
-    Ok(AlgorithmIdentifier { oid, params })
-}
 
 fn parse_key_trans_recipient_info(dec: &mut Decoder) -> Result<KeyTransRecipientInfo, PkiError> {
     let mut seq = dec

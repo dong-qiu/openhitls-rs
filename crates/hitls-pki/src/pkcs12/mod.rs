@@ -10,59 +10,13 @@ use hitls_crypto::pbkdf2;
 use hitls_crypto::provider::Digest;
 use hitls_crypto::sha1::Sha1;
 use hitls_types::PkiError;
-use hitls_utils::asn1::{tags, Decoder, Encoder};
+use hitls_utils::asn1::Decoder;
 use hitls_utils::oid::{known, Oid};
 use zeroize::Zeroize;
 
-// ── Encoder helpers (Encoder::write_* returns &mut Self, finish takes self) ──
-
-fn enc_seq(content: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_sequence(content);
-    e.finish()
-}
-
-fn enc_set(content: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_set(content);
-    e.finish()
-}
-
-fn enc_octet(content: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_octet_string(content);
-    e.finish()
-}
-
-fn enc_oid(oid_bytes: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_oid(oid_bytes);
-    e.finish()
-}
-
-fn enc_int(value: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_integer(value);
-    e.finish()
-}
-
-fn enc_null() -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_null();
-    e.finish()
-}
-
-fn enc_tlv(tag: u8, value: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_tlv(tag, value);
-    e.finish()
-}
-
-/// Encode EXPLICIT context-specific tag.
-fn enc_explicit_ctx(tag_num: u8, content: &[u8]) -> Vec<u8> {
-    let tag = tags::CONTEXT_SPECIFIC | tags::CONSTRUCTED | tag_num;
-    enc_tlv(tag, content)
-}
+use crate::encoding::{
+    bytes_to_u32, enc_explicit_ctx, enc_int, enc_null, enc_octet, enc_oid, enc_seq, enc_set,
+};
 
 /// A parsed PKCS#12 container.
 #[derive(Debug)]
@@ -176,11 +130,6 @@ fn hmac_sha1(key: &[u8], data: &[u8]) -> Result<Vec<u8>, PkiError> {
         .map_err(|e| PkiError::Pkcs12Error(format!("HMAC-SHA1: {e}")))
 }
 
-fn bytes_to_u32(bytes: &[u8]) -> u32 {
-    bytes
-        .iter()
-        .fold(0u32, |acc, &b| acc.wrapping_shl(8) | b as u32)
-}
 
 fn generate_random(len: usize) -> Result<Vec<u8>, PkiError> {
     let mut buf = vec![0u8; len];

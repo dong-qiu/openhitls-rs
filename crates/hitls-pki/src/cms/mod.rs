@@ -7,6 +7,11 @@ use hitls_types::PkiError;
 use hitls_utils::asn1::{tags, Decoder, Encoder};
 use hitls_utils::oid::{known, Oid};
 
+use crate::encoding::{
+    bytes_to_u32, enc_explicit_ctx, enc_int, enc_octet, enc_oid, enc_seq, enc_set, enc_tlv,
+};
+use crate::oid_mapping::oid_to_curve_id;
+
 /// CMS content type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmsContentType {
@@ -106,81 +111,10 @@ pub struct CmsMessage {
     pub raw: Vec<u8>,
 }
 
-// ── Encoder helpers ──────────────────────────────────────────────────
-
-fn enc_seq(content: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_sequence(content);
-    e.finish()
-}
-
-fn enc_set(content: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_set(content);
-    e.finish()
-}
-
-fn enc_octet(content: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_octet_string(content);
-    e.finish()
-}
-
-fn enc_oid(oid_bytes: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_oid(oid_bytes);
-    e.finish()
-}
-
-fn enc_int(value: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_integer(value);
-    e.finish()
-}
-
-fn enc_tlv(tag: u8, value: &[u8]) -> Vec<u8> {
-    let mut e = Encoder::new();
-    e.write_tlv(tag, value);
-    e.finish()
-}
-
-fn enc_explicit_ctx(tag_num: u8, content: &[u8]) -> Vec<u8> {
-    enc_tlv(
-        tags::CONTEXT_SPECIFIC | tags::CONSTRUCTED | tag_num,
-        content,
-    )
-}
-
 fn cerr(msg: &str) -> PkiError {
     PkiError::CmsError(msg.into())
 }
 
-fn cms_oid_to_curve_id(oid: &Oid) -> Option<hitls_types::EccCurveId> {
-    use hitls_types::EccCurveId;
-    if *oid == known::secp224r1() {
-        Some(EccCurveId::NistP224)
-    } else if *oid == known::prime256v1() {
-        Some(EccCurveId::NistP256)
-    } else if *oid == known::secp384r1() {
-        Some(EccCurveId::NistP384)
-    } else if *oid == known::secp521r1() {
-        Some(EccCurveId::NistP521)
-    } else if *oid == known::brainpool_p256r1() {
-        Some(EccCurveId::BrainpoolP256r1)
-    } else if *oid == known::brainpool_p384r1() {
-        Some(EccCurveId::BrainpoolP384r1)
-    } else if *oid == known::brainpool_p512r1() {
-        Some(EccCurveId::BrainpoolP512r1)
-    } else {
-        None
-    }
-}
-
-fn bytes_to_u32(bytes: &[u8]) -> u32 {
-    bytes
-        .iter()
-        .fold(0u32, |acc, &b| acc.wrapping_shl(8) | b as u32)
-}
 
 // ── Parsing ──────────────────────────────────────────────────────────
 
@@ -530,7 +464,7 @@ fn parse_signed_data(data: &[u8]) -> Result<SignedData, PkiError> {
     })
 }
 
-fn parse_algorithm_identifier(dec: &mut Decoder) -> Result<AlgorithmIdentifier, PkiError> {
+pub(crate) fn parse_algorithm_identifier(dec: &mut Decoder) -> Result<AlgorithmIdentifier, PkiError> {
     let mut seq = dec
         .read_sequence()
         .map_err(|e| cerr(&format!("AlgId: {e}")))?;
@@ -799,7 +733,7 @@ fn verify_signature_with_cert(
             .ok_or_else(|| cerr("missing EC curve in cert"))?;
         let curve_oid =
             Oid::from_der_value(curve_oid_bytes).map_err(|e| cerr(&format!("curve OID: {e}")))?;
-        let curve_id = cms_oid_to_curve_id(&curve_oid)
+        let curve_id = oid_to_curve_id(&curve_oid)
             .ok_or_else(|| cerr(&format!("unsupported EC curve: {curve_oid}")))?;
         let verifier = hitls_crypto::ecdsa::EcdsaKeyPair::from_public_key(
             curve_id,
@@ -905,7 +839,7 @@ fn sign_digest(
             .ok_or_else(|| cerr("missing EC curve"))?;
         let curve_oid =
             Oid::from_der_value(curve_oid_bytes).map_err(|e| cerr(&format!("curve: {e}")))?;
-        let curve_id = cms_oid_to_curve_id(&curve_oid)
+        let curve_id = oid_to_curve_id(&curve_oid)
             .ok_or_else(|| cerr(&format!("unsupported curve: {curve_oid}")))?;
 
         let ec_key_bytes = parse_ec_private_key(private_key_der)?;

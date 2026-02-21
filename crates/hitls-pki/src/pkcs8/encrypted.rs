@@ -13,6 +13,8 @@ use hitls_crypto::modes::cbc;
 use hitls_crypto::pbkdf2;
 use hitls_types::CryptoError;
 use hitls_utils::asn1::{Decoder, Encoder};
+
+use crate::encoding::bytes_to_u32;
 use hitls_utils::oid::{known, Oid};
 
 /// Default PBKDF2 iteration count for encryption.
@@ -147,14 +149,6 @@ fn decrypt_pbes2(
 
     let key = pbkdf2::pbkdf2(password.as_bytes(), &salt, iterations, key_len)?;
     cbc::cbc_decrypt(&key, &iv, encrypted)
-}
-
-fn bytes_to_u32(bytes: &[u8]) -> u32 {
-    let mut result: u32 = 0;
-    for &b in bytes {
-        result = (result << 8) | b as u32;
-    }
-    result
 }
 
 /// Encode EncryptedPrivateKeyInfo ASN.1:

@@ -11,6 +11,8 @@ use hitls_utils::asn1::{tags, Decoder, TagClass};
 use hitls_utils::oid::known;
 use hitls_utils::oid::Oid;
 
+use crate::oid_mapping;
+
 /// An X.509 certificate.
 #[derive(Debug, Clone)]
 pub struct Certificate {
@@ -1047,26 +1049,8 @@ pub(crate) fn verify_rsa(
 }
 
 pub(crate) fn oid_to_curve_id(oid: &Oid) -> Result<EccCurveId, PkiError> {
-    if *oid == known::secp224r1() {
-        Ok(EccCurveId::NistP224)
-    } else if *oid == known::prime256v1() {
-        Ok(EccCurveId::NistP256)
-    } else if *oid == known::secp384r1() {
-        Ok(EccCurveId::NistP384)
-    } else if *oid == known::secp521r1() {
-        Ok(EccCurveId::NistP521)
-    } else if *oid == known::brainpool_p256r1() {
-        Ok(EccCurveId::BrainpoolP256r1)
-    } else if *oid == known::brainpool_p384r1() {
-        Ok(EccCurveId::BrainpoolP384r1)
-    } else if *oid == known::brainpool_p512r1() {
-        Ok(EccCurveId::BrainpoolP512r1)
-    } else {
-        Err(PkiError::InvalidCert(format!(
-            "unsupported EC curve: {}",
-            oid
-        )))
-    }
+    oid_mapping::oid_to_curve_id(oid)
+        .ok_or_else(|| PkiError::InvalidCert(format!("unsupported EC curve: {}", oid)))
 }
 
 pub(crate) fn verify_ecdsa(

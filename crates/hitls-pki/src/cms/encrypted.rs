@@ -8,10 +8,11 @@ use hitls_types::PkiError;
 use hitls_utils::asn1::{Decoder, Encoder};
 use hitls_utils::oid::known;
 
+use crate::encoding::{bytes_to_u32, enc_explicit_ctx, enc_int, enc_octet, enc_oid, enc_seq};
+
 use super::enveloped::{CmsEncryptionAlg, EncryptedContentInfo};
 use super::{
-    cerr, enc_explicit_ctx, enc_int, enc_octet, enc_oid, enc_seq, AlgorithmIdentifier,
-    CmsContentType, CmsMessage,
+    cerr, parse_algorithm_identifier, AlgorithmIdentifier, CmsContentType, CmsMessage,
 };
 
 // ── EncryptedData structure ─────────────────────────────────────────
@@ -161,22 +162,6 @@ fn encode_encrypted_data_cms(ed: &EncryptedData) -> Vec<u8> {
 
 // ── Parsing ─────────────────────────────────────────────────────────
 
-fn parse_algorithm_identifier(dec: &mut Decoder) -> Result<AlgorithmIdentifier, PkiError> {
-    let mut seq = dec
-        .read_sequence()
-        .map_err(|e| cerr(&format!("AlgId: {e}")))?;
-    let oid = seq
-        .read_oid()
-        .map_err(|e| cerr(&format!("alg OID: {e}")))?
-        .to_vec();
-    let params = if !seq.is_empty() {
-        Some(seq.remaining().to_vec())
-    } else {
-        None
-    };
-    Ok(AlgorithmIdentifier { oid, params })
-}
-
 fn parse_encrypted_content_info(dec: &mut Decoder) -> Result<EncryptedContentInfo, PkiError> {
     let mut seq = dec
         .read_sequence()
@@ -200,12 +185,6 @@ fn parse_encrypted_content_info(dec: &mut Decoder) -> Result<EncryptedContentInf
         content_encryption_algorithm,
         encrypted_content,
     })
-}
-
-fn bytes_to_u32(bytes: &[u8]) -> u32 {
-    bytes
-        .iter()
-        .fold(0u32, |acc, &b| acc.wrapping_shl(8) | b as u32)
 }
 
 pub(crate) fn parse_encrypted_data(data: &[u8]) -> Result<EncryptedData, PkiError> {

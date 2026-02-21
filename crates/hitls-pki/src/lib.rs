@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 #![doc = "PKI certificate management for openHiTLS."]
 
+pub(crate) mod encoding;
+pub(crate) mod oid_mapping;
+
 #[cfg(feature = "x509")]
 pub mod x509;
 
