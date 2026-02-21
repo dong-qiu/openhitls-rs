@@ -104,6 +104,94 @@ Returns `Option` — callers wrap in their own error types (`CryptoError`, `PkiE
 
 ---
 
+## Phase R103: Record Layer Enum Dispatch
+
+### Date: 2026-02-22
+
+### Goal
+
+Replace `Option<T>` field proliferation in `RecordLayer` with type-safe enum dispatch. The struct had 8–10 `Option` fields (only 2 active at any time), leading to verbose dispatch chains, manual variant clearing, and multi-field state checks.
+
+### Problem
+
+| Pattern | Before |
+|---------|--------|
+| `Option<T>` encryptor/decryptor fields | 8 (10 with TLCP feature) |
+| `seal_record()` dispatch | 5-way `if/else` chain |
+| `open_record()` dispatch | 5 separate `if-let-Some` blocks |
+| `is_encrypting()`/`is_decrypting()` | 5-field `\|\|` chains |
+| `activate_*` methods clearing others | 10 methods, each clears 1–3 competing variants |
+| `deactivate_*` methods | Each lists all 5+ variants to clear |
+
+### Solution
+
+Defined two enum types that unify all encryption/decryption variants:
+
+**1. `RecordEncryptorVariant`** — 5 variants (4 + TLCP feature-gated)
+
+```rust
+enum RecordEncryptorVariant {
+    Tls13(RecordEncryptor),        // TLS 1.3 AEAD (with padding callback)
+    Tls12Aead(RecordEncryptor12),  // TLS 1.2 GCM/CCM
+    Tls12Cbc(RecordEncryptor12Cbc),// TLS 1.2 CBC
+    Tls12EtM(RecordEncryptor12EtM),// TLS 1.2 Encrypt-Then-MAC (RFC 7366)
+    #[cfg(feature = "tlcp")]
+    Tlcp(TlcpEncryptor),           // TLCP (itself an enum: Cbc | Gcm)
+}
+```
+
+All variants share `encrypt_record(content_type, plaintext) -> Result<Record, TlsError>`.
+
+**2. `RecordDecryptorVariant`** — same 5 variants with unified `decrypt_record()`:
+
+- TLS 1.3: extracts inner content type from encrypted ApplicationData records
+- TLS 1.2/TLCP: preserves original content type, skips ChangeCipherSpec
+
+**3. Simplified `RecordLayer` struct**:
+
+```rust
+pub struct RecordLayer {
+    pub max_fragment_size: usize,
+    pub empty_record_count: u32,
+    pub empty_records_limit: u32,
+    encryptor: Option<RecordEncryptorVariant>,  // was 5 Option fields
+    decryptor: Option<RecordDecryptorVariant>,  // was 5 Option fields
+}
+```
+
+### Files Modified
+
+| File | Action |
+|------|--------|
+| `crates/hitls-tls/src/record/mod.rs` | **ONLY FILE** — added 2 enums + impl blocks, simplified struct (8→2 fields) + all methods |
+
+### Not Changed (by design)
+
+- **DTLS encryption** (`encryption_dtls12.rs`, `encryption_dtlcp.rs`) — DTLS types are NOT part of `RecordLayer`; managed separately in `connection_dtls12.rs` and `connection_dtlcp.rs` with different method signatures (explicit epoch/seq params).
+- **Individual encryption type files** (`encryption.rs`, `encryption12.rs`, `encryption12_cbc.rs`, `encryption_tlcp.rs`) — unchanged, the enum wraps existing types as-is.
+- **Connection files** (`connection.rs`, `connection12.rs`, `connection_async.rs`, etc.) — unchanged, all use `RecordLayer`'s public API which retains identical method signatures.
+
+### Impact
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| `Option<T>` fields in RecordLayer | 8 (10 with TLCP) | 2 | −6 (−8) |
+| `seal_record()` dispatch branches | 5 if/else | 1 enum match | −4 |
+| `open_record()` dispatch blocks | 5 if-let-Some | 1 enum match | −4 |
+| `is_encrypting()`/`is_decrypting()` | 5-field `\|\|` chain each | `.is_some()` | −10 checks |
+| `activate_*` variant-clearing lines | ~20 | 0 | −20 |
+| `deactivate_*` body lines | ~10 per method | 1 per method | −8 |
+| Lines in mod.rs (non-test) | ~467 | ~390 | ~−77 |
+
+### Build Status
+
+- `cargo test -p hitls-tls --all-features`: **1164 passed**, 0 failed, 0 ignored
+- `cargo test --workspace --all-features`: **2585 passed**, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy -p hitls-tls --all-features --all-targets`: **0 warnings**
+- Public API: **zero changes** — all method signatures unchanged, no callers modified
+
+---
+
 ## Refactoring Queue
 
 The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and have not yet been started:
@@ -111,7 +199,7 @@ The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and hav
 | Phase | Title | Priority | Status |
 |-------|-------|----------|--------|
 | Phase R102 | PKI Encoding Consolidation | Critical | **Done** |
-| Phase R103 | Record Layer Enum Dispatch | High | Pending |
+| Phase R103 | Record Layer Enum Dispatch | High | **Done** |
 | Phase R104 | Connection File Decomposition | High | Pending |
 | Phase R105 | Hash Digest Enum Dispatch | Medium | Pending |
 | Phase R106 | Sync/Async Unification via Macros | Medium | Pending |

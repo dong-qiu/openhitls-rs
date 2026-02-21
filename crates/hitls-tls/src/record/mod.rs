@@ -43,6 +43,68 @@ pub struct Record {
     pub fragment: Vec<u8>,
 }
 
+/// Unified encryptor variant — at most one is active at any time.
+enum RecordEncryptorVariant {
+    Tls13(RecordEncryptor),
+    Tls12Aead(RecordEncryptor12),
+    Tls12Cbc(RecordEncryptor12Cbc),
+    Tls12EtM(RecordEncryptor12EtM),
+    #[cfg(feature = "tlcp")]
+    Tlcp(TlcpEncryptor),
+}
+
+impl RecordEncryptorVariant {
+    fn encrypt_record(
+        &mut self,
+        content_type: ContentType,
+        plaintext: &[u8],
+    ) -> Result<Record, TlsError> {
+        match self {
+            Self::Tls13(enc) => enc.encrypt_record(content_type, plaintext),
+            Self::Tls12Aead(enc) => enc.encrypt_record(content_type, plaintext),
+            Self::Tls12Cbc(enc) => enc.encrypt_record(content_type, plaintext),
+            Self::Tls12EtM(enc) => enc.encrypt_record(content_type, plaintext),
+            #[cfg(feature = "tlcp")]
+            Self::Tlcp(enc) => enc.encrypt_record(content_type, plaintext),
+        }
+    }
+}
+
+/// Unified decryptor variant — at most one is active at any time.
+enum RecordDecryptorVariant {
+    Tls13(RecordDecryptor),
+    Tls12Aead(RecordDecryptor12),
+    Tls12Cbc(RecordDecryptor12Cbc),
+    Tls12EtM(RecordDecryptor12EtM),
+    #[cfg(feature = "tlcp")]
+    Tlcp(TlcpDecryptor),
+}
+
+impl RecordDecryptorVariant {
+    /// Returns true if this is a TLS 1.3 decryptor.
+    ///
+    /// TLS 1.3 only decrypts `ApplicationData` records (content type hiding),
+    /// while TLS 1.2/TLCP skip `ChangeCipherSpec` but decrypt all others.
+    fn is_tls13(&self) -> bool {
+        matches!(self, Self::Tls13(_))
+    }
+
+    /// Unified decrypt — returns (content_type, plaintext).
+    ///
+    /// TLS 1.3: extracts inner content type from encrypted record.
+    /// TLS 1.2/TLCP: preserves the record's original content type.
+    fn decrypt_record(&mut self, record: &Record) -> Result<(ContentType, Vec<u8>), TlsError> {
+        match self {
+            Self::Tls13(dec) => dec.decrypt_record(record),
+            Self::Tls12Aead(dec) => Ok((record.content_type, dec.decrypt_record(record)?)),
+            Self::Tls12Cbc(dec) => Ok((record.content_type, dec.decrypt_record(record)?)),
+            Self::Tls12EtM(dec) => Ok((record.content_type, dec.decrypt_record(record)?)),
+            #[cfg(feature = "tlcp")]
+            Self::Tlcp(dec) => Ok((record.content_type, dec.decrypt_record(record)?)),
+        }
+    }
+}
+
 /// Record layer state for reading and writing TLS records.
 ///
 /// Supports both plaintext mode (initial handshake) and encrypted mode
@@ -58,28 +120,10 @@ pub struct RecordLayer {
     pub empty_record_count: u32,
     /// Maximum consecutive empty records before fatal error (DoS protection).
     pub empty_records_limit: u32,
-    /// Optional TLS 1.3 encryptor for outgoing records.
-    encryptor: Option<RecordEncryptor>,
-    /// Optional TLS 1.3 decryptor for incoming records.
-    decryptor: Option<RecordDecryptor>,
-    /// Optional TLS 1.2 AEAD encryptor for outgoing records.
-    encryptor12: Option<RecordEncryptor12>,
-    /// Optional TLS 1.2 AEAD decryptor for incoming records.
-    decryptor12: Option<RecordDecryptor12>,
-    /// Optional TLS 1.2 CBC encryptor for outgoing records.
-    encryptor12_cbc: Option<RecordEncryptor12Cbc>,
-    /// Optional TLS 1.2 CBC decryptor for incoming records.
-    decryptor12_cbc: Option<RecordDecryptor12Cbc>,
-    /// Optional TLS 1.2 Encrypt-Then-MAC encryptor (RFC 7366).
-    encryptor12_etm: Option<RecordEncryptor12EtM>,
-    /// Optional TLS 1.2 Encrypt-Then-MAC decryptor (RFC 7366).
-    decryptor12_etm: Option<RecordDecryptor12EtM>,
-    /// Optional TLCP encryptor for outgoing records.
-    #[cfg(feature = "tlcp")]
-    encryptor_tlcp: Option<TlcpEncryptor>,
-    /// Optional TLCP decryptor for incoming records.
-    #[cfg(feature = "tlcp")]
-    decryptor_tlcp: Option<TlcpDecryptor>,
+    /// Active encryptor for outgoing records (TLS 1.3, 1.2, or TLCP).
+    encryptor: Option<RecordEncryptorVariant>,
+    /// Active decryptor for incoming records (TLS 1.3, 1.2, or TLCP).
+    decryptor: Option<RecordDecryptorVariant>,
 }
 
 impl RecordLayer {
@@ -90,49 +134,17 @@ impl RecordLayer {
             empty_records_limit: DEFAULT_EMPTY_RECORDS_LIMIT,
             encryptor: None,
             decryptor: None,
-            encryptor12: None,
-            decryptor12: None,
-            encryptor12_cbc: None,
-            decryptor12_cbc: None,
-            encryptor12_etm: None,
-            decryptor12_etm: None,
-            #[cfg(feature = "tlcp")]
-            encryptor_tlcp: None,
-            #[cfg(feature = "tlcp")]
-            decryptor_tlcp: None,
         }
     }
 
     /// Returns true if write encryption is active (TLS 1.2, 1.3, or TLCP).
     pub fn is_encrypting(&self) -> bool {
-        if self.encryptor.is_some()
-            || self.encryptor12.is_some()
-            || self.encryptor12_cbc.is_some()
-            || self.encryptor12_etm.is_some()
-        {
-            return true;
-        }
-        #[cfg(feature = "tlcp")]
-        if self.encryptor_tlcp.is_some() {
-            return true;
-        }
-        false
+        self.encryptor.is_some()
     }
 
     /// Returns true if read decryption is active (TLS 1.2, 1.3, or TLCP).
     pub fn is_decrypting(&self) -> bool {
-        if self.decryptor.is_some()
-            || self.decryptor12.is_some()
-            || self.decryptor12_cbc.is_some()
-            || self.decryptor12_etm.is_some()
-        {
-            return true;
-        }
-        #[cfg(feature = "tlcp")]
-        if self.decryptor_tlcp.is_some() {
-            return true;
-        }
-        false
+        self.decryptor.is_some()
     }
 
     /// Activate write encryption with the given traffic keys.
@@ -145,7 +157,8 @@ impl RecordLayer {
         suite: CipherSuite,
         keys: &TrafficKeys,
     ) -> Result<(), TlsError> {
-        self.encryptor = Some(RecordEncryptor::new(suite, keys)?);
+        self.encryptor =
+            Some(RecordEncryptorVariant::Tls13(RecordEncryptor::new(suite, keys)?));
         Ok(())
     }
 
@@ -154,7 +167,7 @@ impl RecordLayer {
         &mut self,
         cb: std::sync::Arc<dyn Fn(u8, usize) -> usize + Send + Sync>,
     ) {
-        if let Some(enc) = &mut self.encryptor {
+        if let Some(RecordEncryptorVariant::Tls13(enc)) = &mut self.encryptor {
             enc.set_padding_callback(cb);
         }
     }
@@ -167,7 +180,8 @@ impl RecordLayer {
         suite: CipherSuite,
         keys: &TrafficKeys,
     ) -> Result<(), TlsError> {
-        self.decryptor = Some(RecordDecryptor::new(suite, keys)?);
+        self.decryptor =
+            Some(RecordDecryptorVariant::Tls13(RecordDecryptor::new(suite, keys)?));
         Ok(())
     }
 
@@ -178,12 +192,11 @@ impl RecordLayer {
         key: &[u8],
         fixed_iv: Vec<u8>,
     ) -> Result<(), TlsError> {
-        self.encryptor = None; // Clear any TLS 1.3 encryptor
-        self.encryptor12 = Some(RecordEncryptor12::new(
+        self.encryptor = Some(RecordEncryptorVariant::Tls12Aead(RecordEncryptor12::new(
             encryption12::tls12_suite_to_aead_suite(suite)?,
             key,
             fixed_iv,
-        )?);
+        )?));
         Ok(())
     }
 
@@ -194,12 +207,11 @@ impl RecordLayer {
         key: &[u8],
         fixed_iv: Vec<u8>,
     ) -> Result<(), TlsError> {
-        self.decryptor = None; // Clear any TLS 1.3 decryptor
-        self.decryptor12 = Some(RecordDecryptor12::new(
+        self.decryptor = Some(RecordDecryptorVariant::Tls12Aead(RecordDecryptor12::new(
             encryption12::tls12_suite_to_aead_suite(suite)?,
             key,
             fixed_iv,
-        )?);
+        )?));
         Ok(())
     }
 
@@ -210,9 +222,9 @@ impl RecordLayer {
         mac_key: Vec<u8>,
         mac_len: usize,
     ) {
-        self.encryptor = None;
-        self.encryptor12 = None;
-        self.encryptor12_cbc = Some(RecordEncryptor12Cbc::new(enc_key, mac_key, mac_len));
+        self.encryptor = Some(RecordEncryptorVariant::Tls12Cbc(
+            RecordEncryptor12Cbc::new(enc_key, mac_key, mac_len),
+        ));
     }
 
     /// Activate TLS 1.2 CBC read decryption.
@@ -222,9 +234,9 @@ impl RecordLayer {
         mac_key: Vec<u8>,
         mac_len: usize,
     ) {
-        self.decryptor = None;
-        self.decryptor12 = None;
-        self.decryptor12_cbc = Some(RecordDecryptor12Cbc::new(enc_key, mac_key, mac_len));
+        self.decryptor = Some(RecordDecryptorVariant::Tls12Cbc(
+            RecordDecryptor12Cbc::new(enc_key, mac_key, mac_len),
+        ));
     }
 
     /// Activate TLS 1.2 Encrypt-Then-MAC write encryption (RFC 7366).
@@ -234,10 +246,9 @@ impl RecordLayer {
         mac_key: Vec<u8>,
         mac_len: usize,
     ) {
-        self.encryptor = None;
-        self.encryptor12 = None;
-        self.encryptor12_cbc = None;
-        self.encryptor12_etm = Some(RecordEncryptor12EtM::new(enc_key, mac_key, mac_len));
+        self.encryptor = Some(RecordEncryptorVariant::Tls12EtM(
+            RecordEncryptor12EtM::new(enc_key, mac_key, mac_len),
+        ));
     }
 
     /// Activate TLS 1.2 Encrypt-Then-MAC read decryption (RFC 7366).
@@ -247,52 +258,31 @@ impl RecordLayer {
         mac_key: Vec<u8>,
         mac_len: usize,
     ) {
-        self.decryptor = None;
-        self.decryptor12 = None;
-        self.decryptor12_cbc = None;
-        self.decryptor12_etm = Some(RecordDecryptor12EtM::new(enc_key, mac_key, mac_len));
+        self.decryptor = Some(RecordDecryptorVariant::Tls12EtM(
+            RecordDecryptor12EtM::new(enc_key, mac_key, mac_len),
+        ));
     }
 
     /// Activate TLCP write encryption.
     #[cfg(feature = "tlcp")]
     pub fn activate_write_encryption_tlcp(&mut self, enc: TlcpEncryptor) {
-        self.encryptor = None;
-        self.encryptor12 = None;
-        self.encryptor12_cbc = None;
-        self.encryptor_tlcp = Some(enc);
+        self.encryptor = Some(RecordEncryptorVariant::Tlcp(enc));
     }
 
     /// Activate TLCP read decryption.
     #[cfg(feature = "tlcp")]
     pub fn activate_read_decryption_tlcp(&mut self, dec: TlcpDecryptor) {
-        self.decryptor = None;
-        self.decryptor12 = None;
-        self.decryptor12_cbc = None;
-        self.decryptor_tlcp = Some(dec);
+        self.decryptor = Some(RecordDecryptorVariant::Tlcp(dec));
     }
 
     /// Deactivate write encryption (return to plaintext mode).
     pub fn deactivate_write_encryption(&mut self) {
         self.encryptor = None;
-        self.encryptor12 = None;
-        self.encryptor12_cbc = None;
-        self.encryptor12_etm = None;
-        #[cfg(feature = "tlcp")]
-        {
-            self.encryptor_tlcp = None;
-        }
     }
 
     /// Deactivate read decryption (return to plaintext mode).
     pub fn deactivate_read_decryption(&mut self) {
         self.decryptor = None;
-        self.decryptor12 = None;
-        self.decryptor12_cbc = None;
-        self.decryptor12_etm = None;
-        #[cfg(feature = "tlcp")]
-        {
-            self.decryptor_tlcp = None;
-        }
     }
 
     /// Encrypt (if active) and serialize a record for sending.
@@ -311,18 +301,7 @@ impl RecordLayer {
         }
         let record = if let Some(enc) = &mut self.encryptor {
             enc.encrypt_record(content_type, plaintext)?
-        } else if let Some(enc12) = &mut self.encryptor12 {
-            enc12.encrypt_record(content_type, plaintext)?
-        } else if let Some(enc12_etm) = &mut self.encryptor12_etm {
-            enc12_etm.encrypt_record(content_type, plaintext)?
-        } else if let Some(enc12_cbc) = &mut self.encryptor12_cbc {
-            enc12_cbc.encrypt_record(content_type, plaintext)?
         } else {
-            #[cfg(feature = "tlcp")]
-            if let Some(enc_tlcp) = &mut self.encryptor_tlcp {
-                let record = enc_tlcp.encrypt_record(content_type, plaintext)?;
-                return Ok(self.serialize_record(&record));
-            }
             Record {
                 content_type,
                 version: TLS13_LEGACY_VERSION,
@@ -340,40 +319,17 @@ impl RecordLayer {
     /// the actual inner content type and plaintext.
     pub fn open_record(&mut self, data: &[u8]) -> Result<(ContentType, Vec<u8>, usize), TlsError> {
         let (record, consumed) = self.parse_record(data)?;
-        // TLS 1.3: encrypted records always have ApplicationData content type
         if let Some(dec) = &mut self.decryptor {
-            if record.content_type == ContentType::ApplicationData {
+            // TLS 1.3: only decrypt ApplicationData (content type hiding).
+            // TLS 1.2/TLCP: decrypt everything except ChangeCipherSpec.
+            let should_decrypt = if dec.is_tls13() {
+                record.content_type == ContentType::ApplicationData
+            } else {
+                record.content_type != ContentType::ChangeCipherSpec
+            };
+            if should_decrypt {
                 let (ct, pt) = dec.decrypt_record(&record)?;
                 return Ok((ct, pt, consumed));
-            }
-        }
-        // TLS 1.2 AEAD: encrypted records keep their actual content type
-        if let Some(dec12) = &mut self.decryptor12 {
-            if record.content_type != ContentType::ChangeCipherSpec {
-                let pt = dec12.decrypt_record(&record)?;
-                return Ok((record.content_type, pt, consumed));
-            }
-        }
-        // TLS 1.2 Encrypt-Then-MAC: encrypted records keep their actual content type
-        if let Some(dec12_etm) = &mut self.decryptor12_etm {
-            if record.content_type != ContentType::ChangeCipherSpec {
-                let pt = dec12_etm.decrypt_record(&record)?;
-                return Ok((record.content_type, pt, consumed));
-            }
-        }
-        // TLS 1.2 CBC: encrypted records keep their actual content type
-        if let Some(dec12_cbc) = &mut self.decryptor12_cbc {
-            if record.content_type != ContentType::ChangeCipherSpec {
-                let pt = dec12_cbc.decrypt_record(&record)?;
-                return Ok((record.content_type, pt, consumed));
-            }
-        }
-        // TLCP: encrypted records keep their actual content type
-        #[cfg(feature = "tlcp")]
-        if let Some(dec_tlcp) = &mut self.decryptor_tlcp {
-            if record.content_type != ContentType::ChangeCipherSpec {
-                let pt = dec_tlcp.decrypt_record(&record)?;
-                return Ok((record.content_type, pt, consumed));
             }
         }
         Ok((record.content_type, record.fragment, consumed))
