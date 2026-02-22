@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 #![doc = "TLS protocol implementation for openHiTLS."]
 
+#[macro_use]
+mod macros;
+
 pub mod alert;
 pub mod cert_verify;
 pub mod config;
