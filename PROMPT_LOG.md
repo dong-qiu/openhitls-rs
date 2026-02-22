@@ -2006,3 +2006,40 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 **Result**:
 - ARCH_LOG.md created.
+
+---
+
+## Phase R104: Connection File Decomposition
+
+**Prompt**: Implement the plan for Phase R104 — Connection File Decomposition
+
+**Scope**: Decompose `connection.rs` (7,324 lines) and `connection12.rs` (7,004 lines) into directory modules with client/server/tests subfiles.
+
+**Work performed**:
+- Analyzed split points: ConnectionState enum, client struct boundary, server struct boundary, test module boundary
+- Created `connection/` directory: mod.rs (19), client.rs (894), server.rs (829), tests.rs (5,603)
+- Created `connection12/` directory: mod.rs (23), client.rs (1,147), server.rs (1,048), tests.rs (4,779)
+- Changed ConnectionState visibility to `pub(crate)` for cross-submodule access
+- Marked 11 struct fields and 1 method as `pub(super)` for test access
+- Added explicit imports to tests.rs files (replacing implicit `use super::*;` from flat file)
+- Removed unused imports, ran `cargo fmt` to fix line-width changes from dedenting
+- Verified: 1164 hitls-tls tests pass, 2585 workspace tests pass, 0 clippy warnings
+
+**Files created**:
+1. `crates/hitls-tls/src/connection/mod.rs` — ConnectionState enum + re-exports
+2. `crates/hitls-tls/src/connection/client.rs` — TlsClientConnection
+3. `crates/hitls-tls/src/connection/server.rs` — TlsServerConnection
+4. `crates/hitls-tls/src/connection/tests.rs` — all TLS 1.3 connection tests
+5. `crates/hitls-tls/src/connection12/mod.rs` — ConnectionState enum + re-exports
+6. `crates/hitls-tls/src/connection12/client.rs` — Tls12ClientConnection
+7. `crates/hitls-tls/src/connection12/server.rs` — Tls12ServerConnection
+8. `crates/hitls-tls/src/connection12/tests.rs` — all TLS 1.2 connection tests
+
+**Files deleted**:
+9. `crates/hitls-tls/src/connection.rs` — replaced by directory
+10. `crates/hitls-tls/src/connection12.rs` — replaced by directory
+
+**Result**:
+- 10 files changed (2 deleted, 8 created). Zero logic changes, zero public API changes.
+- Largest implementation file reduced from 7,324 lines to 1,147 lines.
+- All tests pass (2585/2585). Clippy: 0 warnings.

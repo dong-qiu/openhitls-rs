@@ -7613,3 +7613,35 @@ Added 8 new tests covering:
 - `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Refactoring-Phase R104: Connection File Decomposition
+
+**Date**: 2026-02-22
+**Scope**: Decompose `connection.rs` (7,324 lines) and `connection12.rs` (7,004 lines) into directory modules
+
+### Summary
+
+Split the two largest files in `hitls-tls` into focused subfiles. Each flat file was converted to a directory module with `mod.rs` (shared enum + re-exports), `client.rs` (client connection struct + impl), `server.rs` (server connection struct + impl), and `tests.rs` (all unit tests).
+
+This is a pure structural reorganization — zero logic changes, zero public API changes.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/connection.rs` | **DELETED** → `connection/` directory |
+| `crates/hitls-tls/src/connection/mod.rs` | **NEW** — 19 lines, ConnectionState enum + re-exports |
+| `crates/hitls-tls/src/connection/client.rs` | **NEW** — 894 lines, TlsClientConnection |
+| `crates/hitls-tls/src/connection/server.rs` | **NEW** — 829 lines, TlsServerConnection |
+| `crates/hitls-tls/src/connection/tests.rs` | **NEW** — 5,603 lines, all tests |
+| `crates/hitls-tls/src/connection12.rs` | **DELETED** → `connection12/` directory |
+| `crates/hitls-tls/src/connection12/mod.rs` | **NEW** — 23 lines, ConnectionState enum + re-exports |
+| `crates/hitls-tls/src/connection12/client.rs` | **NEW** — 1,147 lines, Tls12ClientConnection |
+| `crates/hitls-tls/src/connection12/server.rs` | **NEW** — 1,048 lines, Tls12ServerConnection |
+| `crates/hitls-tls/src/connection12/tests.rs` | **NEW** — 4,779 lines, all tests |
+
+### Build Status
+- `cargo test -p hitls-tls --all-features`: 1164 passed, 0 failed, 0 ignored
+- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

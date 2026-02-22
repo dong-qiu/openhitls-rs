@@ -192,6 +192,87 @@ pub struct RecordLayer {
 
 ---
 
+## Phase R104: Connection File Decomposition
+
+### Date: 2026-02-22
+
+### Goal
+
+Decompose the two largest files in `hitls-tls` — `connection.rs` (7,324 lines) and `connection12.rs` (7,004 lines) — into directory modules with focused subfiles. Both files contained client struct + server struct + large test suites in a single flat file (tests accounted for 69–76% of content).
+
+### Problem
+
+| File | Total Lines | Implementation | Tests | % Tests |
+|------|-------------|---------------|-------|---------|
+| `connection.rs` | 7,324 | ~1,700 | ~5,600 | 76% |
+| `connection12.rs` | 7,004 | ~2,200 | ~4,800 | 69% |
+
+### Solution
+
+Converted each flat file into a directory module (`mod.rs` + `client.rs` + `server.rs` + `tests.rs`):
+
+**`connection/` directory**:
+- `mod.rs` (19 lines) — `ConnectionState` enum, module declarations, re-exports
+- `client.rs` (894 lines) — `TlsClientConnection<S>` struct + impl + `Drop` + `TlsConnection` trait impl
+- `server.rs` (829 lines) — `TlsServerConnection<S>` struct + impl + `Drop` + `TlsConnection` trait impl
+- `tests.rs` (5,603 lines) — all unit tests, with explicit imports replacing `use super::*;` dependencies
+
+**`connection12/` directory**:
+- `mod.rs` (23 lines) — `ConnectionState` enum (with `Renegotiating` variant), module declarations, re-exports
+- `client.rs` (1,147 lines) — `Tls12ClientConnection<S>` struct + impl
+- `server.rs` (1,048 lines) — `Tls12ServerConnection<S>` struct + impl
+- `tests.rs` (4,779 lines) — all unit tests with explicit imports
+
+Key implementation details:
+- `ConnectionState` enum visibility changed to `pub(crate)` (was module-private)
+- Test-accessed struct fields marked `pub(super)`: `state`, `cipher_params`, `client_app_secret`, `server_app_secret`, `early_exporter_master_secret`, `early_data_queue`, `key_update_recv_count`, `record_layer`, `session`, `sent_close_notify`, `received_close_notify`
+- One private method `handle_post_hs_cert_request` marked `pub(super)` for test access
+- Tests dedented by 4 spaces (removed `mod tests { }` wrapper indentation)
+- `lib.rs` unchanged — Rust resolves `mod connection;` to `connection/mod.rs` automatically
+
+### Files Modified
+
+| File | Action |
+|------|--------|
+| `crates/hitls-tls/src/connection.rs` | **DELETED** — replaced by directory |
+| `crates/hitls-tls/src/connection/mod.rs` | **NEW** — 19 lines |
+| `crates/hitls-tls/src/connection/client.rs` | **NEW** — 894 lines |
+| `crates/hitls-tls/src/connection/server.rs` | **NEW** — 829 lines |
+| `crates/hitls-tls/src/connection/tests.rs` | **NEW** — 5,603 lines |
+| `crates/hitls-tls/src/connection12.rs` | **DELETED** — replaced by directory |
+| `crates/hitls-tls/src/connection12/mod.rs` | **NEW** — 23 lines |
+| `crates/hitls-tls/src/connection12/client.rs` | **NEW** — 1,147 lines |
+| `crates/hitls-tls/src/connection12/server.rs` | **NEW** — 1,048 lines |
+| `crates/hitls-tls/src/connection12/tests.rs` | **NEW** — 4,779 lines |
+| `crates/hitls-tls/src/lib.rs` | **NO CHANGE** |
+
+### Not Changed (by design)
+
+- `connection_async.rs` (2,129 lines) — Phase R106 will address async code
+- `connection12_async.rs` (2,480 lines) — same rationale
+- `connection_tlcp.rs` (780 lines) — small enough
+- `connection_dtls12.rs` (1,151 lines) — small enough
+- `connection_dtlcp.rs` (838 lines) — small enough
+
+### Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| `connection.rs` | 7,324 lines (1 file) | 4 files: mod.rs (19) + client.rs (894) + server.rs (829) + tests.rs (5,603) |
+| `connection12.rs` | 7,004 lines (1 file) | 4 files: mod.rs (23) + client.rs (1,147) + server.rs (1,048) + tests.rs (4,779) |
+| Largest implementation file | 7,324 lines | 1,147 lines (connection12/client.rs) |
+| Total lines | 14,328 | 14,342 (+14 for module headers/imports) |
+
+### Build Status
+
+- `cargo test -p hitls-tls --all-features`: **1164 passed**, 0 failed, 0 ignored
+- `cargo test --workspace --all-features`: **2585 passed**, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: **0 warnings**
+- `cargo fmt --all -- --check`: **clean**
+- Public API: **zero changes** — all types re-exported from module root
+
+---
+
 ## Refactoring Queue
 
 The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and have not yet been started:
@@ -200,7 +281,7 @@ The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and hav
 |-------|-------|----------|--------|
 | Phase R102 | PKI Encoding Consolidation | Critical | **Done** |
 | Phase R103 | Record Layer Enum Dispatch | High | **Done** |
-| Phase R104 | Connection File Decomposition | High | Pending |
+| Phase R104 | Connection File Decomposition | High | **Done** |
 | Phase R105 | Hash Digest Enum Dispatch | Medium | Pending |
 | Phase R106 | Sync/Async Unification via Macros | Medium | Pending |
 | Phase R107 | X.509 Module Decomposition | Medium | Pending |

@@ -129,5 +129,6 @@ Key milestones:
 - Phase 82–86: TLS callbacks (10 types), Trusted CA Keys/USE_SRTP/STATUS_REQUEST_V2, CMS AuthenticatedData
 - Phase 88–92: Encrypted PKCS#8, TicketKeyCallback/SecurityCallback, SM4-CTR-DRBG, CMS ML-DSA
 - Phase T73–T102: CLI unit tests, async connection tests, cipher suite integration, codec/state machine edge cases, ECC point/AES soft/SM9 field arithmetic/McEliece vector, 0-RTT early data tests
+- Phase R102–R104: Architecture refactoring — PKI encoding consolidation, record layer enum dispatch, connection file decomposition
 
-See `DEV_LOG.md` for detailed phase tables, `TEST_LOG.md` for testing history, and `PROMPT_LOG.md` for prompt/response log.
+See `DEV_LOG.md` for detailed phase tables, `TEST_LOG.md` for testing history, `PROMPT_LOG.md` for prompt/response log, and `ARCH_LOG.md` for refactoring execution log.
