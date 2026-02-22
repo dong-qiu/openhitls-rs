@@ -395,6 +395,61 @@ Total: **24 files**, +633 / −621 lines.
 
 ---
 
+## Phase R107: X.509 Module Decomposition
+
+### Date: 2026-02-22
+
+### Goal
+
+Split the monolithic `crates/hitls-pki/src/x509/mod.rs` (3,425 lines, 13 logical groups) into 4 focused submodules, improving navigability and reviewability while maintaining zero sibling module impact.
+
+### Problem
+
+The `x509/mod.rs` file contained all X.509 functionality in a single file: core type definitions, extension structs and parsing, DN helpers, ASN.1 parsing helpers, certificate parsing/verification, signature verification, DER encoding, SigningKey abstraction, CSR handling, CertificateBuilder, and 1,443 lines of tests.
+
+### Solution
+
+Created 4 new submodules with a clear dependency graph (no cycles):
+
+| File | Lines | Contents |
+|------|-------|----------|
+| `x509/signing.rs` | 330 | `HashAlg`, `compute_hash`, 6 `verify_*` functions, `SigningKey` enum + impl, `curve_id_to_oid`, `ALG_PARAMS_NULL` |
+| `x509/certificate.rs` | 628 | 5 core type structs, DN helpers, 5 ASN.1 parsing helpers, Certificate/CSR parsing & verification |
+| `x509/extensions.rs` | 519 | 12 extension type structs, 11 parsing functions, 10 Certificate convenience methods |
+| `x509/builder.rs` | 526 | 6 DER encoding helpers, `CertificateRequestBuilder`, `CertificateBuilder` + Default |
+| `x509/mod.rs` | 1,516 | Module declarations, pub + pub(crate) re-exports, 1,443 lines of tests |
+
+Dependency graph: `signing.rs` → no sibling deps; `certificate.rs` → `signing`; `extensions.rs` → `certificate`; `builder.rs` → all three.
+
+All `pub(crate)` items used by sibling modules (`crl.rs`, `ocsp.rs`, `verify.rs`, `text.rs`, `hostname.rs`) are re-exported from mod.rs, requiring zero import changes in those files.
+
+### Files Modified
+
+| File | Action |
+|------|--------|
+| `crates/hitls-pki/src/x509/signing.rs` | **NEW** — 330 lines |
+| `crates/hitls-pki/src/x509/certificate.rs` | **NEW** — 628 lines |
+| `crates/hitls-pki/src/x509/extensions.rs` | **NEW** — 519 lines |
+| `crates/hitls-pki/src/x509/builder.rs` | **NEW** — 526 lines |
+| `crates/hitls-pki/src/x509/mod.rs` | Modified — 3,425 → 1,516 lines |
+
+### Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Largest file (x509/mod.rs) | 3,425 lines | 1,516 lines |
+| Total files in x509/ | 6 | 10 |
+| Sibling module changes | — | 0 |
+| Public API changes | — | 0 |
+
+### Build Status
+- `cargo test -p hitls-pki --all-features`: 349 passed, 0 failed, 1 ignored
+- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Refactoring Queue
 
 The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and have not yet been started:
@@ -406,7 +461,7 @@ The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and hav
 | Phase R104 | Connection File Decomposition | High | **Done** |
 | Phase R105 | Hash Digest Enum Dispatch | Medium | **Done** |
 | Phase R106 | Sync/Async Unification via Macros | Medium | **Done** |
-| Phase R107 | X.509 Module Decomposition | Medium | Pending |
+| Phase R107 | X.509 Module Decomposition | Medium | **Done** |
 | Phase R108 | Integration Test Modularization | Medium | Pending |
 | Phase R109 | Test Helper Consolidation | Low | Pending |
 | Phase R110 | Parameter Struct Refactoring | Low | Pending |

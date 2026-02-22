@@ -7725,3 +7725,35 @@ Async files now import `ConnectionState` from their sync counterparts instead of
 - `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Refactoring-Phase R107: X.509 Module Decomposition
+
+**Date**: 2026-02-22
+**Scope**: Split `crates/hitls-pki/src/x509/mod.rs` (3,425 lines) into 4 focused submodules
+
+### Summary
+
+The `x509/mod.rs` file contained 13 logical groups totalling 3,425 lines: core types, extension types, extension parsing, DN helpers, certificate extension convenience methods, ASN.1 parsing helpers, certificate parsing & verification, signature verification helpers, DER encoding helpers, SigningKey abstraction, CSR parsing/generation, CertificateBuilder, and 1,443 lines of tests. This made the file difficult to navigate and review.
+
+Split into 4 new submodules with mod.rs retaining re-exports and tests. All `pub(crate)` items are re-exported from mod.rs so that sibling modules (`crl.rs`, `ocsp.rs`, `verify.rs`, `text.rs`, `hostname.rs`) require zero import changes.
+
+### New Files
+
+| File | Lines | Contents |
+|------|-------|----------|
+| `x509/signing.rs` | 330 | `HashAlg`, `compute_hash`, `verify_*` (6 functions), `SigningKey` enum + impl, `curve_id_to_oid`, `ALG_PARAMS_NULL` |
+| `x509/certificate.rs` | 628 | Core type structs (5), DN helpers, ASN.1 parsing helpers (5 functions), Certificate/CSR parsing & verification |
+| `x509/extensions.rs` | 519 | Extension type structs (12), parsing functions (11), Certificate convenience methods (10) |
+| `x509/builder.rs` | 526 | DER encoding helpers (6), `CertificateRequestBuilder`, `CertificateBuilder` + Default |
+
+### Files Modified
+
+| File | Before | After | Changes |
+|------|--------|-------|---------|
+| `x509/mod.rs` | 3,425 | 1,516 | Stripped to module declarations, re-exports, and tests |
+
+### Build Status
+- `cargo test -p hitls-pki --all-features`: 349 passed, 0 failed, 1 ignored
+- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

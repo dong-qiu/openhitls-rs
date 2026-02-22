@@ -2105,3 +2105,31 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - All 2585 workspace tests pass, 0 clippy warnings, formatting clean.
 - Zero public API changes. All type names, module paths, and trait impls unchanged.
 - Public API: `HashAlgId` and `DigestVariant` are new pub types; `HashFactory` removed (was internal only).
+
+---
+
+## Phase R107: X.509 Module Decomposition
+
+**Prompt**: Implement Phase R107 — X.509 Module Decomposition (plan from binary-exploring-wand.md)
+
+**Scope**: Split `crates/hitls-pki/src/x509/mod.rs` (3,425 lines) into 4 focused submodules + mod.rs with re-exports and tests.
+
+**Work performed**:
+- Created `x509/signing.rs` (330 lines): `HashAlg` enum, `compute_hash`, 6 `verify_*` functions, `SigningKey` enum + impl (from_pkcs8_der/pem, sign, algorithm_oid, algorithm_params, public_key_info), `curve_id_to_oid`, `ALG_PARAMS_NULL`
+- Created `x509/certificate.rs` (628 lines): Core type structs (`Certificate`, `DistinguishedName`, `SubjectPublicKeyInfo`, `X509Extension`, `CertificateRequest`), DN helpers, 5 ASN.1 parsing helpers, Certificate/CSR from_der/from_pem/to_der/verify_signature
+- Created `x509/extensions.rs` (519 lines): 12 extension type structs, 11 parsing functions, 10 Certificate convenience methods (basic_constraints, key_usage, is_ca, etc.)
+- Created `x509/builder.rs` (526 lines): 6 DER encoding helpers, `CertificateRequestBuilder`, `CertificateBuilder` + Default
+- Rewrote `x509/mod.rs` (3,425→1,516 lines): module declarations, pub + pub(crate) re-exports, 1,443 lines of tests unchanged
+- All sibling modules (`crl.rs`, `ocsp.rs`, `verify.rs`, `text.rs`, `hostname.rs`) required zero import changes
+
+**Files created/modified**:
+1. `crates/hitls-pki/src/x509/signing.rs` — **NEW**, 330 lines
+2. `crates/hitls-pki/src/x509/certificate.rs` — **NEW**, 628 lines
+3. `crates/hitls-pki/src/x509/extensions.rs` — **NEW**, 519 lines
+4. `crates/hitls-pki/src/x509/builder.rs` — **NEW**, 526 lines
+5. `crates/hitls-pki/src/x509/mod.rs` — Stripped to re-exports + tests (3,425→1,516 lines)
+
+**Result**:
+- 5 files changed (4 created, 1 modified). 3,425 lines → 3,519 lines across 5 files (net +94 lines from imports/module boilerplate).
+- All 2585 workspace tests pass, 0 clippy warnings, formatting clean.
+- Zero public API changes. Zero sibling module changes.
