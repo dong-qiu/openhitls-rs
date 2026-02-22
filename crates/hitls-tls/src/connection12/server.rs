@@ -105,10 +105,12 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
                 "export_keying_material: not connected".into(),
             ));
         }
-        let factory =
-            crate::crypt::Tls12CipherSuiteParams::hash_factory_for_len(self.export_hash_len);
+        let alg = match self.export_hash_len {
+            48 => crate::crypt::HashAlgId::Sha384,
+            _ => crate::crypt::HashAlgId::Sha256,
+        };
         crate::crypt::export::tls12_export_keying_material(
-            &*factory,
+            alg,
             &self.export_master_secret,
             &self.export_client_random,
             &self.export_server_random,

@@ -4,6 +4,7 @@ use std::io::Cursor;
 use crate::config::TlsConfig;
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
+use crate::crypt::DigestVariant;
 use crate::handshake::client::{ClientHandshake, ServerHelloResult};
 use crate::handshake::codec::{
     decode_certificate_request, decode_key_update, encode_certificate, encode_certificate_request,
@@ -16,6 +17,7 @@ use crate::handshake::{HandshakeState, HandshakeType};
 use crate::record::{ContentType, RecordLayer};
 use crate::session::TlsSession;
 use crate::{CipherSuite, TlsConnection};
+use hitls_crypto::provider::Digest;
 
 #[test]
 fn test_connection_creation() {
@@ -1137,7 +1139,7 @@ fn test_hrr_transcript_hash() {
     use crate::crypt::transcript::TranscriptHash;
     use hitls_crypto::sha2::Sha256;
 
-    let mut th = TranscriptHash::new(|| Box::new(Sha256::new()));
+    let mut th = TranscriptHash::new(crate::crypt::HashAlgId::Sha256);
     th.update(b"original ClientHello data").unwrap();
     let hash_before = th.current_hash().unwrap();
 
@@ -1763,19 +1765,18 @@ fn test_ticket_encrypt_decrypt() {
 
     let params =
         crate::crypt::CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
-    let factory = params.hash_factory();
+    let alg = params.hash_alg_id();
     let ticket_key = vec![0x42; 32];
     let psk = vec![0xDE; 32];
     let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
     let created_at = 1700000000u64;
     let age_add = 12345u32;
 
-    let encrypted =
-        encrypt_ticket(&factory, &ticket_key, &psk, suite, created_at, age_add).unwrap();
+    let encrypted = encrypt_ticket(alg, &ticket_key, &psk, suite, created_at, age_add).unwrap();
     assert!(!encrypted.is_empty());
 
     let (dec_psk, dec_suite, dec_created, dec_age) =
-        decrypt_ticket(&factory, &ticket_key, &encrypted).unwrap();
+        decrypt_ticket(alg, &ticket_key, &encrypted).unwrap();
     assert_eq!(dec_psk, psk);
     assert_eq!(dec_suite, suite);
     assert_eq!(dec_created, created_at);
@@ -1789,13 +1790,13 @@ fn test_ticket_decrypt_wrong_key() {
 
     let params =
         crate::crypt::CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
-    let factory = params.hash_factory();
+    let alg = params.hash_alg_id();
     let ticket_key = vec![0x42; 32];
     let wrong_key = vec![0x99; 32];
     let psk = vec![0xDE; 32];
 
     let encrypted = encrypt_ticket(
-        &factory,
+        alg,
         &ticket_key,
         &psk,
         CipherSuite::TLS_AES_128_GCM_SHA256,
@@ -1804,7 +1805,7 @@ fn test_ticket_decrypt_wrong_key() {
     )
     .unwrap();
 
-    let result = decrypt_ticket(&factory, &wrong_key, &encrypted);
+    let result = decrypt_ticket(alg, &wrong_key, &encrypted);
     assert!(result.is_err(), "decryption with wrong key should fail");
 }
 
@@ -1825,8 +1826,8 @@ fn test_psk_binder_computation() {
     assert_eq!(finished_key.len(), 32);
 
     // Compute binder over some test data
-    let factory = params.hash_factory();
-    let mut hasher = (*factory)();
+    let alg = params.hash_alg_id();
+    let mut hasher = DigestVariant::new(alg);
     hasher.update(b"test transcript data").unwrap();
     let mut hash = vec![0u8; 32];
     hasher.finish(&mut hash).unwrap();
@@ -1837,7 +1838,7 @@ fn test_psk_binder_computation() {
     assert_eq!(binder.len(), 32);
 
     // Verify determinism
-    let mut hasher2 = (*factory)();
+    let mut hasher2 = DigestVariant::new(alg);
     hasher2.update(b"test transcript data").unwrap();
     let mut hash2 = vec![0u8; 32];
     hasher2.finish(&mut hash2).unwrap();
@@ -2834,12 +2835,12 @@ fn test_post_hs_auth_roundtrip() {
     let cert_msg_encoded = encode_certificate(&cert_msg_struct);
 
     // Transcript: Hash(CertificateRequest)
-    let factory = params.hash_factory();
+    let alg = params.hash_alg_id();
     let ks = KeySchedule::new(params.clone());
     let cr_msg_bytes = &cr_plain[..cr_total];
 
     // Compute hash for CertificateVerify: Hash(CR || Certificate)
-    let mut cv_hasher = (*factory)();
+    let mut cv_hasher = DigestVariant::new(alg);
     cv_hasher.update(cr_msg_bytes).unwrap();
     cv_hasher.update(&cert_msg_encoded).unwrap();
     let mut cv_hash = vec![0u8; params.hash_len];
@@ -2857,7 +2858,7 @@ fn test_post_hs_auth_roundtrip() {
     });
 
     // Compute hash for Finished: Hash(CR || Certificate || CertificateVerify)
-    let mut fin_hasher = (*factory)();
+    let mut fin_hasher = DigestVariant::new(alg);
     fin_hasher.update(cr_msg_bytes).unwrap();
     fin_hasher.update(&cert_msg_encoded).unwrap();
     fin_hasher.update(&cv_msg).unwrap();
@@ -2967,9 +2968,9 @@ fn test_post_hs_auth_no_cert() {
         .unwrap();
 
     // Client sends Finished (hash of CR || empty Certificate)
-    let factory = params.hash_factory();
+    let alg = params.hash_alg_id();
     let ks = KeySchedule::new(params.clone());
-    let mut fin_hasher = (*factory)();
+    let mut fin_hasher = DigestVariant::new(alg);
     fin_hasher.update(cr_msg_bytes).unwrap();
     fin_hasher.update(&cert_encoded).unwrap();
     let mut fin_hash = vec![0u8; params.hash_len];

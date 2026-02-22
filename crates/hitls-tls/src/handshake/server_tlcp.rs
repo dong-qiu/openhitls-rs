@@ -8,6 +8,7 @@ use crate::crypt::key_schedule12::{
     compute_verify_data, derive_master_secret, derive_tlcp_key_block,
 };
 use crate::crypt::transcript::TranscriptHash;
+use crate::crypt::HashAlgId;
 use crate::crypt::{KeyExchangeAlg, NamedGroup, SignatureScheme, TlcpCipherSuiteParams};
 use crate::handshake::codec::{decode_client_hello, encode_server_hello, ClientHello, ServerHello};
 use crate::handshake::codec12::{
@@ -20,7 +21,6 @@ use crate::handshake::codec_tlcp::{
 };
 use crate::handshake::key_exchange::KeyExchange;
 use crate::CipherSuite;
-use hitls_crypto::sm3::Sm3;
 use hitls_types::TlsError;
 use std::mem;
 use zeroize::Zeroize;
@@ -84,7 +84,7 @@ impl TlcpServerHandshake {
             config,
             state: TlcpServerState::Idle,
             params: None,
-            transcript: TranscriptHash::new(|| Box::new(Sm3::new())),
+            transcript: TranscriptHash::new(HashAlgId::Sm3),
             client_random: [0u8; 32],
             server_random: [0u8; 32],
             is_ecc_static: false,
@@ -279,9 +279,9 @@ impl TlcpServerHandshake {
         self.transcript.update(raw_msg)?;
 
         // Derive master secret and key block
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let master_secret = derive_master_secret(
-            &*factory,
+            alg,
             &pre_master_secret,
             &self.client_random,
             &self.server_random,
@@ -289,7 +289,7 @@ impl TlcpServerHandshake {
         crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
 
         let mut key_block = derive_tlcp_key_block(
-            &*factory,
+            alg,
             &master_secret,
             &self.server_random,
             &self.client_random,
@@ -343,14 +343,10 @@ impl TlcpServerHandshake {
         let received_verify_data = &raw_msg[4..4 + 12];
 
         // Verify client Finished
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let transcript_hash = self.transcript.current_hash()?;
-        let expected = compute_verify_data(
-            &*factory,
-            master_secret,
-            "client finished",
-            &transcript_hash,
-        )?;
+        let expected =
+            compute_verify_data(alg, master_secret, "client finished", &transcript_hash)?;
 
         use subtle::ConstantTimeEq;
         if !bool::from(received_verify_data.ct_eq(&expected)) {
@@ -363,12 +359,8 @@ impl TlcpServerHandshake {
 
         // Build server Finished
         let transcript_hash = self.transcript.current_hash()?;
-        let server_verify_data = compute_verify_data(
-            &*factory,
-            master_secret,
-            "server finished",
-            &transcript_hash,
-        )?;
+        let server_verify_data =
+            compute_verify_data(alg, master_secret, "server finished", &transcript_hash)?;
         let finished_msg = encode_finished12(&server_verify_data);
         self.transcript.update(&finished_msg)?;
 

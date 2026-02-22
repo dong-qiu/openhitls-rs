@@ -7,6 +7,7 @@
 use crate::config::TlsConfig;
 use crate::crypt::key_schedule12::{compute_verify_data, derive_key_block, derive_master_secret};
 use crate::crypt::transcript::TranscriptHash;
+use crate::crypt::HashAlgId;
 use crate::crypt::{SignatureScheme, Tls12CipherSuiteParams};
 use crate::extensions::ExtensionType;
 use crate::handshake::codec::{encode_server_hello, ClientHello, ServerHello};
@@ -28,7 +29,6 @@ use crate::handshake::server12::{
 use crate::handshake::HandshakeType;
 use crate::record::dtls::DTLS12_VERSION;
 use crate::CipherSuite;
-use hitls_crypto::sha2::Sha256;
 use hitls_types::TlsError;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
@@ -170,7 +170,7 @@ impl Dtls12ServerHandshake {
             config,
             state: Dtls12ServerState::Idle,
             params: None,
-            transcript: TranscriptHash::new(|| Box::new(Sha256::new())),
+            transcript: TranscriptHash::new(HashAlgId::Sha256),
             client_random: [0u8; 32],
             server_random: [0u8; 32],
             ephemeral_key: None,
@@ -332,7 +332,7 @@ impl Dtls12ServerHandshake {
 
         // Switch transcript hash if SHA-384
         if params.hash_len == 48 {
-            self.transcript = TranscriptHash::new(|| Box::new(hitls_crypto::sha2::Sha384::new()));
+            self.transcript = TranscriptHash::new(HashAlgId::Sha384);
         }
 
         // Add ClientHello to transcript in TLS format
@@ -358,9 +358,9 @@ impl Dtls12ServerHandshake {
         self.transcript.update(&sh_tls)?;
 
         // Derive keys from cached master_secret + new randoms
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let key_block = derive_key_block(
-            &*factory,
+            alg,
             cached_master_secret,
             &self.server_random,
             &self.client_random,
@@ -370,7 +370,7 @@ impl Dtls12ServerHandshake {
         // Compute server Finished: PRF(ms, "server finished", Hash(CH + SH))
         let transcript_hash = self.transcript.current_hash()?;
         let server_verify_data = compute_verify_data(
-            &*factory,
+            alg,
             cached_master_secret,
             "server finished",
             &transcript_hash,
@@ -421,10 +421,9 @@ impl Dtls12ServerHandshake {
         let received_verify_data = &tls_msg[4..4 + 12];
 
         // Verify client Finished: PRF(ms, "client finished", Hash(CH + SH + SF))
-        let factory = params.hash_factory();
         let transcript_hash = self.transcript.current_hash()?;
         let expected = compute_verify_data(
-            &*factory,
+            params.hash_alg_id(),
             &self.master_secret,
             "client finished",
             &transcript_hash,
@@ -466,7 +465,7 @@ impl Dtls12ServerHandshake {
 
         // Switch transcript hash if SHA-384
         if params.hash_len == 48 {
-            self.transcript = TranscriptHash::new(|| Box::new(hitls_crypto::sha2::Sha384::new()));
+            self.transcript = TranscriptHash::new(HashAlgId::Sha384);
         }
 
         // Add ClientHello to transcript in TLS format
@@ -590,9 +589,9 @@ impl Dtls12ServerHandshake {
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher suite params".into()))?;
 
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let master_secret = derive_master_secret(
-            &*factory,
+            alg,
             &pre_master_secret,
             &self.client_random,
             &self.server_random,
@@ -600,7 +599,7 @@ impl Dtls12ServerHandshake {
         crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
 
         let key_block = derive_key_block(
-            &*factory,
+            alg,
             &master_secret,
             &self.server_random,
             &self.client_random,
@@ -654,10 +653,10 @@ impl Dtls12ServerHandshake {
         let received_verify_data = &tls_msg[4..4 + 12];
 
         // Verify client Finished
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let transcript_hash = self.transcript.current_hash()?;
         let expected = compute_verify_data(
-            &*factory,
+            alg,
             &self.master_secret,
             "client finished",
             &transcript_hash,
@@ -675,7 +674,7 @@ impl Dtls12ServerHandshake {
         // Compute server Finished
         let transcript_hash = self.transcript.current_hash()?;
         let server_verify_data = compute_verify_data(
-            &*factory,
+            alg,
             &self.master_secret,
             "server finished",
             &transcript_hash,

@@ -7,7 +7,7 @@
 use crate::config::TlsConfig;
 use crate::crypt::key_schedule12::{compute_verify_data, derive_key_block, derive_master_secret};
 use crate::crypt::transcript::TranscriptHash;
-use crate::crypt::{NamedGroup, Tls12CipherSuiteParams};
+use crate::crypt::{HashAlgId, NamedGroup, Tls12CipherSuiteParams};
 use crate::handshake::codec::ServerHello;
 use crate::handshake::codec12::{build_ske_params, build_ske_signed_data, ServerKeyExchange};
 use crate::handshake::codec_dtls::{
@@ -16,7 +16,6 @@ use crate::handshake::codec_dtls::{
 use crate::handshake::key_exchange::KeyExchange;
 use crate::handshake::HandshakeType;
 use crate::CipherSuite;
-use hitls_crypto::sha2::Sha256;
 use hitls_types::TlsError;
 use zeroize::Zeroize;
 
@@ -114,7 +113,7 @@ impl Dtls12ClientHandshake {
             config,
             state: Dtls12ClientState::Idle,
             params: None,
-            transcript: TranscriptHash::new(|| Box::new(Sha256::new())),
+            transcript: TranscriptHash::new(HashAlgId::Sha256),
             client_random: [0u8; 32],
             server_random: [0u8; 32],
             server_certs: Vec::new(),
@@ -256,7 +255,7 @@ impl Dtls12ClientHandshake {
 
         // HVR is NOT added to the transcript (RFC 6347 §4.2.1)
         // Reset transcript for fresh start with the retried ClientHello
-        self.transcript = TranscriptHash::new(|| Box::new(Sha256::new()));
+        self.transcript = TranscriptHash::new(HashAlgId::Sha256);
 
         // Rebuild ClientHello with cookie
         self.build_client_hello_with_cookie(&self.cookie.clone())
@@ -281,7 +280,7 @@ impl Dtls12ClientHandshake {
 
         // Switch transcript hash if SHA-384 suite
         if params.hash_len == 48 {
-            self.transcript = TranscriptHash::new(|| Box::new(hitls_crypto::sha2::Sha384::new()));
+            self.transcript = TranscriptHash::new(HashAlgId::Sha384);
             self.transcript.update(&self.client_hello_tls_bytes)?;
         }
 
@@ -298,9 +297,8 @@ impl Dtls12ClientHandshake {
         {
             self.abbreviated = true;
             // Derive keys from cached master_secret + new randoms
-            let factory = params.hash_factory();
             let key_block = derive_key_block(
-                &*factory,
+                params.hash_alg_id(),
                 &self.cached_master_secret,
                 &self.server_random,
                 &self.client_random,
@@ -365,14 +363,10 @@ impl Dtls12ClientHandshake {
         let received_verify_data = &tls_msg[4..4 + 12];
 
         // Verify server Finished: PRF(ms, "server finished", Hash(CH + SH))
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let transcript_hash = self.transcript.current_hash()?;
-        let expected = compute_verify_data(
-            &*factory,
-            master_secret,
-            "server finished",
-            &transcript_hash,
-        )?;
+        let expected =
+            compute_verify_data(alg, master_secret, "server finished", &transcript_hash)?;
 
         use subtle::ConstantTimeEq;
         if !bool::from(received_verify_data.ct_eq(&expected)) {
@@ -386,12 +380,8 @@ impl Dtls12ClientHandshake {
 
         // Compute client Finished: PRF(ms, "client finished", Hash(CH + SH + SF))
         let transcript_hash = self.transcript.current_hash()?;
-        let client_verify_data = compute_verify_data(
-            &*factory,
-            master_secret,
-            "client finished",
-            &transcript_hash,
-        )?;
+        let client_verify_data =
+            compute_verify_data(alg, master_secret, "client finished", &transcript_hash)?;
         let finished_tls = crate::handshake::codec12::encode_finished12(&client_verify_data);
 
         let seq = self.message_seq;
@@ -506,9 +496,9 @@ impl Dtls12ClientHandshake {
         self.transcript.update(&cke_tls_msg)?;
 
         // Derive keys
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let master_secret = derive_master_secret(
-            &*factory,
+            alg,
             &pre_master_secret,
             &self.client_random,
             &self.server_random,
@@ -516,7 +506,7 @@ impl Dtls12ClientHandshake {
         crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
 
         let key_block = derive_key_block(
-            &*factory,
+            alg,
             &master_secret,
             &self.server_random,
             &self.client_random,
@@ -525,12 +515,8 @@ impl Dtls12ClientHandshake {
 
         // Compute client Finished
         let transcript_hash = self.transcript.current_hash()?;
-        let verify_data = compute_verify_data(
-            &*factory,
-            &master_secret,
-            "client finished",
-            &transcript_hash,
-        )?;
+        let verify_data =
+            compute_verify_data(alg, &master_secret, "client finished", &transcript_hash)?;
         let finished_tls_msg = crate::handshake::codec12::encode_finished12(&verify_data);
         self.transcript.update(&finished_tls_msg)?;
 
@@ -587,10 +573,9 @@ impl Dtls12ClientHandshake {
         }
         let received_verify_data = &tls_msg[4..4 + 12];
 
-        let factory = params.hash_factory();
         let transcript_hash = self.transcript.current_hash()?;
         let expected = compute_verify_data(
-            &*factory,
+            params.hash_alg_id(),
             master_secret,
             "server finished",
             &transcript_hash,

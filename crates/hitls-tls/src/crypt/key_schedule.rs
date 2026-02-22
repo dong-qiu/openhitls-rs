@@ -4,7 +4,8 @@
 //! Early Secret → Handshake Secret → Master Secret → Traffic Secrets.
 
 use super::hkdf::{derive_secret, hkdf_expand_label, hkdf_extract, hmac_hash};
-use super::{CipherSuiteParams, HashFactory};
+use super::{CipherSuiteParams, DigestVariant, HashAlgId};
+use hitls_crypto::provider::Digest;
 use hitls_types::TlsError;
 use zeroize::Zeroize;
 
@@ -22,7 +23,7 @@ pub enum KeyScheduleStage {
 /// Tracks the current secret and stage. All secret material is zeroized on drop.
 pub struct KeySchedule {
     params: CipherSuiteParams,
-    hash_factory: HashFactory,
+    hash_alg: HashAlgId,
     stage: KeyScheduleStage,
     current_secret: Vec<u8>,
 }
@@ -36,10 +37,10 @@ impl Drop for KeySchedule {
 impl KeySchedule {
     /// Create a new KeySchedule for the given cipher suite.
     pub fn new(params: CipherSuiteParams) -> Self {
-        let hash_factory = params.hash_factory();
+        let hash_alg = params.hash_alg_id();
         Self {
             params,
-            hash_factory,
+            hash_alg,
             stage: KeyScheduleStage::Initial,
             current_secret: Vec::new(),
         }
@@ -57,7 +58,7 @@ impl KeySchedule {
 
     /// Compute Hash("") for the "derived" label context.
     fn empty_hash(&self) -> Result<Vec<u8>, TlsError> {
-        let mut hasher = (self.hash_factory)();
+        let mut hasher = DigestVariant::new(self.hash_alg);
         let mut out = vec![0u8; self.params.hash_len];
         hasher.finish(&mut out).map_err(TlsError::CryptoError)?;
         Ok(out)
@@ -74,7 +75,7 @@ impl KeySchedule {
         }
         let zero_psk = vec![0u8; self.params.hash_len];
         let ikm = psk.unwrap_or(&zero_psk);
-        self.current_secret = hkdf_extract(&*self.hash_factory, &[], ikm)?;
+        self.current_secret = hkdf_extract(self.hash_alg, &[], ikm)?;
         self.stage = KeyScheduleStage::EarlySecret;
         Ok(())
     }
@@ -91,14 +92,9 @@ impl KeySchedule {
             ));
         }
         let empty_hash = self.empty_hash()?;
-        let mut salt = derive_secret(
-            &*self.hash_factory,
-            &self.current_secret,
-            b"derived",
-            &empty_hash,
-        )?;
+        let mut salt = derive_secret(self.hash_alg, &self.current_secret, b"derived", &empty_hash)?;
         self.current_secret.zeroize();
-        self.current_secret = hkdf_extract(&*self.hash_factory, &salt, dhe_shared_secret)?;
+        self.current_secret = hkdf_extract(self.hash_alg, &salt, dhe_shared_secret)?;
         salt.zeroize();
         self.stage = KeyScheduleStage::HandshakeSecret;
         Ok(())
@@ -119,13 +115,13 @@ impl KeySchedule {
             ));
         }
         let client = derive_secret(
-            &*self.hash_factory,
+            self.hash_alg,
             &self.current_secret,
             b"c hs traffic",
             transcript_hash,
         )?;
         let server = derive_secret(
-            &*self.hash_factory,
+            self.hash_alg,
             &self.current_secret,
             b"s hs traffic",
             transcript_hash,
@@ -145,15 +141,10 @@ impl KeySchedule {
             ));
         }
         let empty_hash = self.empty_hash()?;
-        let mut salt = derive_secret(
-            &*self.hash_factory,
-            &self.current_secret,
-            b"derived",
-            &empty_hash,
-        )?;
+        let mut salt = derive_secret(self.hash_alg, &self.current_secret, b"derived", &empty_hash)?;
         let zero_ikm = vec![0u8; self.params.hash_len];
         self.current_secret.zeroize();
-        self.current_secret = hkdf_extract(&*self.hash_factory, &salt, &zero_ikm)?;
+        self.current_secret = hkdf_extract(self.hash_alg, &salt, &zero_ikm)?;
         salt.zeroize();
         self.stage = KeyScheduleStage::MasterSecret;
         Ok(())
@@ -174,13 +165,13 @@ impl KeySchedule {
             ));
         }
         let client = derive_secret(
-            &*self.hash_factory,
+            self.hash_alg,
             &self.current_secret,
             b"c ap traffic",
             transcript_hash,
         )?;
         let server = derive_secret(
-            &*self.hash_factory,
+            self.hash_alg,
             &self.current_secret,
             b"s ap traffic",
             transcript_hash,
@@ -201,7 +192,7 @@ impl KeySchedule {
             ));
         }
         derive_secret(
-            &*self.hash_factory,
+            self.hash_alg,
             &self.current_secret,
             b"exp master",
             transcript_hash,
@@ -221,7 +212,7 @@ impl KeySchedule {
             ));
         }
         derive_secret(
-            &*self.hash_factory,
+            self.hash_alg,
             &self.current_secret,
             b"res master",
             transcript_hash,
@@ -233,7 +224,7 @@ impl KeySchedule {
     /// `finished_key = HKDF-Expand-Label(base_key, "finished", "", Hash.length)`
     pub fn derive_finished_key(&self, base_key: &[u8]) -> Result<Vec<u8>, TlsError> {
         hkdf_expand_label(
-            &*self.hash_factory,
+            self.hash_alg,
             base_key,
             b"finished",
             b"",
@@ -249,7 +240,7 @@ impl KeySchedule {
         finished_key: &[u8],
         transcript_hash: &[u8],
     ) -> Result<Vec<u8>, TlsError> {
-        hmac_hash(&*self.hash_factory, finished_key, transcript_hash)
+        hmac_hash(self.hash_alg, finished_key, transcript_hash)
     }
 
     /// Derive the client early traffic secret (for 0-RTT data).
@@ -264,7 +255,7 @@ impl KeySchedule {
             ));
         }
         derive_secret(
-            &*self.hash_factory,
+            self.hash_alg,
             &self.current_secret,
             b"c e traffic",
             transcript_hash,
@@ -286,7 +277,7 @@ impl KeySchedule {
             ));
         }
         derive_secret(
-            &*self.hash_factory,
+            self.hash_alg,
             &self.current_secret,
             b"e exp master",
             transcript_hash,
@@ -309,12 +300,7 @@ impl KeySchedule {
             b"res binder"
         };
         let empty_hash = self.empty_hash()?;
-        derive_secret(
-            &*self.hash_factory,
-            &self.current_secret,
-            label,
-            &empty_hash,
-        )
+        derive_secret(self.hash_alg, &self.current_secret, label, &empty_hash)
     }
 
     /// Derive resumption PSK from the resumption master secret and a ticket nonce.
@@ -324,7 +310,7 @@ impl KeySchedule {
     /// This can be called at any stage since it doesn't use the current secret.
     pub fn derive_resumption_psk(&self, rms: &[u8], nonce: &[u8]) -> Result<Vec<u8>, TlsError> {
         hkdf_expand_label(
-            &*self.hash_factory,
+            self.hash_alg,
             rms,
             b"resumption",
             nonce,
@@ -337,7 +323,7 @@ impl KeySchedule {
     /// `new_secret = HKDF-Expand-Label(current_secret, "traffic upd", "", Hash.length)`
     pub fn update_traffic_secret(&self, current_secret: &[u8]) -> Result<Vec<u8>, TlsError> {
         hkdf_expand_label(
-            &*self.hash_factory,
+            self.hash_alg,
             current_secret,
             b"traffic upd",
             b"",

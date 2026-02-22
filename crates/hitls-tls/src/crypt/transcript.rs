@@ -2,6 +2,7 @@
 //!
 //! Maintains a running hash over all handshake messages in order.
 
+use super::{DigestVariant, HashAlgId};
 use hitls_crypto::provider::Digest;
 use hitls_types::TlsError;
 
@@ -11,17 +12,17 @@ use hitls_types::TlsError;
 /// hasher, replays all buffered data, and finishes to get the intermediate hash.
 /// The live hasher is never finalized, so `update()` continues to work.
 pub struct TranscriptHash {
-    factory: Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>,
+    alg: HashAlgId,
     message_buffer: Vec<u8>,
     hash_len: usize,
 }
 
 impl TranscriptHash {
-    /// Create a new TranscriptHash with the given hash factory.
-    pub fn new(factory: impl Fn() -> Box<dyn Digest> + Send + Sync + 'static) -> Self {
-        let hash_len = factory().output_size();
+    /// Create a new TranscriptHash with the given hash algorithm.
+    pub fn new(alg: HashAlgId) -> Self {
+        let hash_len = DigestVariant::output_size_for(alg);
         Self {
-            factory: Box::new(factory),
+            alg,
             message_buffer: Vec::new(),
             hash_len,
         }
@@ -37,7 +38,7 @@ impl TranscriptHash {
     ///
     /// Creates a fresh hasher, replays all buffered messages, and finishes.
     pub fn current_hash(&self) -> Result<Vec<u8>, TlsError> {
-        let mut hasher = (self.factory)();
+        let mut hasher = DigestVariant::new(self.alg);
         hasher
             .update(&self.message_buffer)
             .map_err(TlsError::CryptoError)?;
@@ -50,7 +51,7 @@ impl TranscriptHash {
     ///
     /// Needed for `Derive-Secret(secret, "derived", "")`.
     pub fn empty_hash(&self) -> Result<Vec<u8>, TlsError> {
-        let mut hasher = (self.factory)();
+        let mut hasher = DigestVariant::new(self.alg);
         let mut out = vec![0u8; self.hash_len];
         hasher.finish(&mut out).map_err(TlsError::CryptoError)?;
         Ok(out)
@@ -83,17 +84,13 @@ mod tests {
     use super::*;
     use hitls_crypto::sha2::Sha256;
 
-    fn sha256_factory() -> Box<dyn Digest> {
-        Box::new(Sha256::new())
-    }
-
     fn to_hex(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{:02x}", b)).collect()
     }
 
     #[test]
     fn test_transcript_empty_hash() {
-        let th = TranscriptHash::new(sha256_factory);
+        let th = TranscriptHash::new(HashAlgId::Sha256);
         let empty = th.empty_hash().unwrap();
         assert_eq!(
             to_hex(&empty),
@@ -103,7 +100,7 @@ mod tests {
 
     #[test]
     fn test_transcript_incremental() {
-        let mut th = TranscriptHash::new(sha256_factory);
+        let mut th = TranscriptHash::new(HashAlgId::Sha256);
         th.update(b"hello").unwrap();
         let h1 = th.current_hash().unwrap();
 
@@ -117,13 +114,13 @@ mod tests {
         assert_ne!(h1, h3);
 
         // h3 should equal SHA-256("hello world")
-        let expected = hitls_crypto::sha2::Sha256::digest(b"hello world").unwrap();
+        let expected = Sha256::digest(b"hello world").unwrap();
         assert_eq!(h3, expected.to_vec());
     }
 
     #[test]
     fn test_transcript_replace_with_message_hash() {
-        let mut th = TranscriptHash::new(sha256_factory);
+        let mut th = TranscriptHash::new(HashAlgId::Sha256);
         th.update(b"ClientHello").unwrap();
         th.update(b"ServerHello").unwrap();
         let hash_before = th.current_hash().unwrap();
@@ -139,13 +136,9 @@ mod tests {
         assert_eq!(th.hash_len(), 32);
     }
 
-    fn sha384_factory() -> Box<dyn Digest> {
-        Box::new(hitls_crypto::sha2::Sha384::new())
-    }
-
     #[test]
     fn test_transcript_sha384() {
-        let th = TranscriptHash::new(sha384_factory);
+        let th = TranscriptHash::new(HashAlgId::Sha384);
         assert_eq!(th.hash_len(), 48);
 
         // SHA-384("") known value
@@ -158,13 +151,13 @@ mod tests {
 
     #[test]
     fn test_transcript_hash_len_sha256() {
-        let th = TranscriptHash::new(sha256_factory);
+        let th = TranscriptHash::new(HashAlgId::Sha256);
         assert_eq!(th.hash_len(), 32);
     }
 
     #[test]
     fn test_transcript_empty_update() {
-        let mut th = TranscriptHash::new(sha256_factory);
+        let mut th = TranscriptHash::new(HashAlgId::Sha256);
         th.update(b"").unwrap();
         let h = th.current_hash().unwrap();
         let empty = th.empty_hash().unwrap();
@@ -174,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_transcript_binary_data() {
-        let mut th = TranscriptHash::new(sha256_factory);
+        let mut th = TranscriptHash::new(HashAlgId::Sha256);
         // Feed raw binary data including null bytes and high bytes
         let data: Vec<u8> = (0..=255).collect();
         th.update(&data).unwrap();
@@ -188,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_transcript_double_replace_message_hash() {
-        let mut th = TranscriptHash::new(sha256_factory);
+        let mut th = TranscriptHash::new(HashAlgId::Sha256);
         th.update(b"ClientHello1").unwrap();
         th.update(b"ServerHello+HRR").unwrap();
         th.replace_with_message_hash().unwrap();
@@ -207,7 +200,7 @@ mod tests {
     #[test]
     fn test_transcript_current_hash_fresh() {
         // current_hash on a freshly created transcript should equal empty_hash
-        let th = TranscriptHash::new(sha256_factory);
+        let th = TranscriptHash::new(HashAlgId::Sha256);
         let current = th.current_hash().unwrap();
         let empty = th.empty_hash().unwrap();
         assert_eq!(current, empty);
@@ -215,7 +208,7 @@ mod tests {
 
     #[test]
     fn test_transcript_update_after_replace() {
-        let mut th = TranscriptHash::new(sha256_factory);
+        let mut th = TranscriptHash::new(HashAlgId::Sha256);
         th.update(b"msg1").unwrap();
         th.replace_with_message_hash().unwrap();
         let h_after_replace = th.current_hash().unwrap();

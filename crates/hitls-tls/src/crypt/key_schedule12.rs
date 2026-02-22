@@ -4,12 +4,9 @@
 //! the master secret into a key block containing per-direction keys and IVs.
 
 use super::prf::prf;
-use super::Tls12CipherSuiteParams;
-use hitls_crypto::provider::Digest;
+use super::{HashAlgId, Tls12CipherSuiteParams};
 use hitls_types::TlsError;
 use zeroize::Zeroize;
-
-type Factory = dyn Fn() -> Box<dyn Digest> + Send + Sync;
 
 /// TLS 1.2 key block: MAC keys (CBC only), symmetric keys, and IVs.
 ///
@@ -43,7 +40,7 @@ impl Drop for Tls12KeyBlock {
 ///                     ClientHello.random + ServerHello.random)[0..47]
 /// ```
 pub fn derive_master_secret(
-    factory: &Factory,
+    alg: HashAlgId,
     pre_master_secret: &[u8],
     client_random: &[u8; 32],
     server_random: &[u8; 32],
@@ -51,7 +48,7 @@ pub fn derive_master_secret(
     let mut seed = Vec::with_capacity(64);
     seed.extend_from_slice(client_random);
     seed.extend_from_slice(server_random);
-    prf(factory, pre_master_secret, "master secret", &seed, 48)
+    prf(alg, pre_master_secret, "master secret", &seed, 48)
 }
 
 /// Derive the 48-byte master secret using the Extended Master Secret extension (RFC 7627).
@@ -64,12 +61,12 @@ pub fn derive_master_secret(
 /// `session_hash` is the hash of all handshake messages up to and including
 /// the ClientKeyExchange message.
 pub fn derive_extended_master_secret(
-    factory: &Factory,
+    alg: HashAlgId,
     pre_master_secret: &[u8],
     session_hash: &[u8],
 ) -> Result<Vec<u8>, TlsError> {
     prf(
-        factory,
+        alg,
         pre_master_secret,
         "extended master secret",
         session_hash,
@@ -91,7 +88,7 @@ pub fn derive_extended_master_secret(
 /// client_write_iv[fixed_iv_len] || server_write_iv[fixed_iv_len]
 /// ```
 pub fn derive_key_block(
-    factory: &Factory,
+    alg: HashAlgId,
     master_secret: &[u8],
     server_random: &[u8; 32],
     client_random: &[u8; 32],
@@ -103,7 +100,7 @@ pub fn derive_key_block(
     seed.extend_from_slice(client_random);
 
     let total_len = params.key_block_len();
-    let key_block = prf(factory, master_secret, "key expansion", &seed, total_len)?;
+    let key_block = prf(alg, master_secret, "key expansion", &seed, total_len)?;
 
     // RFC 5246 §6.3: MAC keys → enc keys → IVs
     let mut offset = 0;
@@ -139,12 +136,12 @@ pub fn derive_key_block(
 ///
 /// `label` is `"client finished"` or `"server finished"`.
 pub fn compute_verify_data(
-    factory: &Factory,
+    alg: HashAlgId,
     master_secret: &[u8],
     label: &str,
     handshake_hash: &[u8],
 ) -> Result<Vec<u8>, TlsError> {
-    prf(factory, master_secret, label, handshake_hash, 12)
+    prf(alg, master_secret, label, handshake_hash, 12)
 }
 
 /// TLCP key block: MAC keys, symmetric keys, and IVs for both directions.
@@ -183,7 +180,7 @@ impl Drop for TlcpKeyBlock {
 /// ```
 #[cfg(feature = "tlcp")]
 pub fn derive_tlcp_key_block(
-    factory: &Factory,
+    alg: HashAlgId,
     master_secret: &[u8],
     server_random: &[u8; 32],
     client_random: &[u8; 32],
@@ -194,7 +191,7 @@ pub fn derive_tlcp_key_block(
     seed.extend_from_slice(client_random);
 
     let total_len = params.key_block_len();
-    let key_block = prf(factory, master_secret, "key expansion", &seed, total_len)?;
+    let key_block = prf(alg, master_secret, "key expansion", &seed, total_len)?;
 
     let mut offset = 0;
     let client_write_mac_key = key_block[offset..offset + params.mac_key_len].to_vec();
@@ -222,15 +219,6 @@ pub fn derive_tlcp_key_block(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hitls_crypto::sha2::{Sha256, Sha384};
-
-    fn sha256_factory() -> Box<dyn Fn() -> Box<dyn Digest> + Send + Sync> {
-        Box::new(|| Box::new(Sha256::new()))
-    }
-
-    fn sha384_factory() -> Box<dyn Fn() -> Box<dyn Digest> + Send + Sync> {
-        Box::new(|| Box::new(Sha384::new()))
-    }
 
     fn hex(s: &str) -> Vec<u8> {
         (0..s.len())
@@ -245,13 +233,14 @@ mod tests {
 
     #[test]
     fn test_derive_master_secret_deterministic() {
-        let factory = sha256_factory();
         let pms = hex("0303aabbccdd");
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
 
-        let ms1 = derive_master_secret(&*factory, &pms, &client_random, &server_random).unwrap();
-        let ms2 = derive_master_secret(&*factory, &pms, &client_random, &server_random).unwrap();
+        let ms1 =
+            derive_master_secret(HashAlgId::Sha256, &pms, &client_random, &server_random).unwrap();
+        let ms2 =
+            derive_master_secret(HashAlgId::Sha256, &pms, &client_random, &server_random).unwrap();
         assert_eq!(ms1, ms2);
         assert_eq!(ms1.len(), 48);
         eprintln!("master_secret: {}", to_hex(&ms1));
@@ -259,20 +248,20 @@ mod tests {
 
     #[test]
     fn test_derive_master_secret_different_inputs() {
-        let factory = sha256_factory();
         let pms = hex("0303aabbccdd");
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
         let other_random = [0x03u8; 32];
 
-        let ms1 = derive_master_secret(&*factory, &pms, &client_random, &server_random).unwrap();
-        let ms2 = derive_master_secret(&*factory, &pms, &client_random, &other_random).unwrap();
+        let ms1 =
+            derive_master_secret(HashAlgId::Sha256, &pms, &client_random, &server_random).unwrap();
+        let ms2 =
+            derive_master_secret(HashAlgId::Sha256, &pms, &client_random, &other_random).unwrap();
         assert_ne!(ms1, ms2);
     }
 
     #[test]
     fn test_derive_key_block_aes128_gcm() {
-        let factory = sha256_factory();
         let master_secret = [0xABu8; 48];
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
@@ -283,7 +272,7 @@ mod tests {
         .unwrap();
 
         let kb = derive_key_block(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             &server_random,
             &client_random,
@@ -301,7 +290,6 @@ mod tests {
 
     #[test]
     fn test_derive_key_block_aes256_gcm() {
-        let factory = sha384_factory();
         let master_secret = [0xCDu8; 48];
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
@@ -312,7 +300,7 @@ mod tests {
         .unwrap();
 
         let kb = derive_key_block(
-            &*factory,
+            HashAlgId::Sha384,
             &master_secret,
             &server_random,
             &client_random,
@@ -328,12 +316,11 @@ mod tests {
 
     #[test]
     fn test_compute_verify_data_client() {
-        let factory = sha256_factory();
         let master_secret = [0xABu8; 48];
         let handshake_hash = [0xCDu8; 32];
 
         let vd = compute_verify_data(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             "client finished",
             &handshake_hash,
@@ -343,7 +330,7 @@ mod tests {
 
         // Deterministic
         let vd2 = compute_verify_data(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             "client finished",
             &handshake_hash,
@@ -353,7 +340,7 @@ mod tests {
 
         // Server label produces different result
         let vd_server = compute_verify_data(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             "server finished",
             &handshake_hash,
@@ -365,28 +352,27 @@ mod tests {
 
     #[test]
     fn test_derive_extended_master_secret() {
-        let factory = sha256_factory();
         let pms = hex("0303aabbccdd");
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
         let session_hash = hex("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
 
         // EMS should produce 48-byte master secret
-        let ems = derive_extended_master_secret(&*factory, &pms, &session_hash).unwrap();
+        let ems = derive_extended_master_secret(HashAlgId::Sha256, &pms, &session_hash).unwrap();
         assert_eq!(ems.len(), 48);
 
         // EMS should differ from standard master secret derivation
         let standard =
-            derive_master_secret(&*factory, &pms, &client_random, &server_random).unwrap();
+            derive_master_secret(HashAlgId::Sha256, &pms, &client_random, &server_random).unwrap();
         assert_ne!(ems, standard);
 
         // EMS should be deterministic
-        let ems2 = derive_extended_master_secret(&*factory, &pms, &session_hash).unwrap();
+        let ems2 = derive_extended_master_secret(HashAlgId::Sha256, &pms, &session_hash).unwrap();
         assert_eq!(ems, ems2);
 
         // Different session_hash → different EMS
         let other_hash = hex("1111111111111111111111111111111111111111111111111111111111111111");
-        let ems3 = derive_extended_master_secret(&*factory, &pms, &other_hash).unwrap();
+        let ems3 = derive_extended_master_secret(HashAlgId::Sha256, &pms, &other_hash).unwrap();
         assert_ne!(ems, ems3);
     }
 
@@ -409,7 +395,6 @@ mod tests {
 
     #[test]
     fn test_derive_key_block_cbc_with_mac_keys() {
-        let factory = sha256_factory();
         let master_secret = [0xABu8; 48];
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
@@ -423,7 +408,7 @@ mod tests {
         assert_eq!(params.mac_key_len, 20);
 
         let kb = derive_key_block(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             &server_random,
             &client_random,
@@ -455,7 +440,6 @@ mod tests {
 
     #[test]
     fn test_derive_key_block_chacha20_poly1305() {
-        let factory = sha256_factory();
         let master_secret = [0xEFu8; 48];
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
@@ -468,7 +452,7 @@ mod tests {
         assert!(!params.is_cbc);
 
         let kb = derive_key_block(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             &server_random,
             &client_random,
@@ -485,29 +469,27 @@ mod tests {
 
     #[test]
     fn test_derive_master_secret_sha384() {
-        let factory = sha384_factory();
         let pms = hex("0303aabbccdd");
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
 
-        let ms = derive_master_secret(&*factory, &pms, &client_random, &server_random).unwrap();
+        let ms =
+            derive_master_secret(HashAlgId::Sha384, &pms, &client_random, &server_random).unwrap();
         assert_eq!(ms.len(), 48);
 
         // SHA-384 should produce different master secret than SHA-256
-        let factory256 = sha256_factory();
         let ms256 =
-            derive_master_secret(&*factory256, &pms, &client_random, &server_random).unwrap();
+            derive_master_secret(HashAlgId::Sha256, &pms, &client_random, &server_random).unwrap();
         assert_ne!(ms, ms256);
     }
 
     #[test]
     fn test_compute_verify_data_length() {
-        let factory = sha384_factory();
         let master_secret = [0xABu8; 48];
         let handshake_hash = [0xCDu8; 48];
 
         let vd = compute_verify_data(
-            &*factory,
+            HashAlgId::Sha384,
             &master_secret,
             "client finished",
             &handshake_hash,
@@ -521,7 +503,6 @@ mod tests {
     fn test_key_block_seed_order() {
         // Key expansion uses server_random + client_random (reversed)
         // Verify that swapping client/server randoms gives different key blocks
-        let factory = sha256_factory();
         let master_secret = [0xABu8; 48];
         let random_a = [0x01u8; 32];
         let random_b = [0x02u8; 32];
@@ -531,10 +512,22 @@ mod tests {
         )
         .unwrap();
 
-        let kb1 =
-            derive_key_block(&*factory, &master_secret, &random_a, &random_b, &params).unwrap();
-        let kb2 =
-            derive_key_block(&*factory, &master_secret, &random_b, &random_a, &params).unwrap();
+        let kb1 = derive_key_block(
+            HashAlgId::Sha256,
+            &master_secret,
+            &random_a,
+            &random_b,
+            &params,
+        )
+        .unwrap();
+        let kb2 = derive_key_block(
+            HashAlgId::Sha256,
+            &master_secret,
+            &random_b,
+            &random_a,
+            &params,
+        )
+        .unwrap();
 
         // Swapped randoms → different keys
         assert_ne!(kb1.client_write_key, kb2.client_write_key);
@@ -543,13 +536,6 @@ mod tests {
     #[cfg(feature = "tlcp")]
     #[test]
     fn test_derive_tlcp_key_block_cbc() {
-        use hitls_crypto::sm3::Sm3;
-
-        fn sm3_factory() -> Box<dyn Fn() -> Box<dyn Digest> + Send + Sync> {
-            Box::new(|| Box::new(Sm3::new()))
-        }
-
-        let factory = sm3_factory();
         let master_secret = [0xABu8; 48];
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
@@ -559,7 +545,7 @@ mod tests {
                 .unwrap();
 
         let kb = derive_tlcp_key_block(
-            &*factory,
+            HashAlgId::Sm3,
             &master_secret,
             &server_random,
             &client_random,
@@ -581,13 +567,6 @@ mod tests {
     #[cfg(feature = "tlcp")]
     #[test]
     fn test_derive_tlcp_key_block_gcm() {
-        use hitls_crypto::sm3::Sm3;
-
-        fn sm3_factory() -> Box<dyn Fn() -> Box<dyn Digest> + Send + Sync> {
-            Box::new(|| Box::new(Sm3::new()))
-        }
-
-        let factory = sm3_factory();
         let master_secret = [0xCDu8; 48];
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
@@ -597,7 +576,7 @@ mod tests {
                 .unwrap();
 
         let kb = derive_tlcp_key_block(
-            &*factory,
+            HashAlgId::Sm3,
             &master_secret,
             &server_random,
             &client_random,
@@ -616,12 +595,11 @@ mod tests {
 
     #[test]
     fn test_compute_verify_data_server_label() {
-        let factory = sha256_factory();
         let master_secret = [0xBBu8; 48];
         let handshake_hash = [0xAAu8; 32];
 
         let vd = compute_verify_data(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             "server finished",
             &handshake_hash,
@@ -631,7 +609,7 @@ mod tests {
 
         // Same inputs → same result (deterministic)
         let vd2 = compute_verify_data(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             "server finished",
             &handshake_hash,
@@ -641,21 +619,25 @@ mod tests {
 
         // Different hash → different verify_data
         let other_hash = [0xFFu8; 32];
-        let vd3 =
-            compute_verify_data(&*factory, &master_secret, "server finished", &other_hash).unwrap();
+        let vd3 = compute_verify_data(
+            HashAlgId::Sha256,
+            &master_secret,
+            "server finished",
+            &other_hash,
+        )
+        .unwrap();
         assert_ne!(vd, vd3);
     }
 
     #[test]
     fn test_ems_then_key_block_derivation() {
         // End-to-end: EMS → key block, verifying the full derivation pipeline
-        let factory = sha256_factory();
         let pms = hex("0303aabbccdd");
         let session_hash = hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
 
-        let ems = derive_extended_master_secret(&*factory, &pms, &session_hash).unwrap();
+        let ems = derive_extended_master_secret(HashAlgId::Sha256, &pms, &session_hash).unwrap();
         assert_eq!(ems.len(), 48);
 
         let params = Tls12CipherSuiteParams::from_suite(
@@ -663,8 +645,14 @@ mod tests {
         )
         .unwrap();
 
-        let kb =
-            derive_key_block(&*factory, &ems, &server_random, &client_random, &params).unwrap();
+        let kb = derive_key_block(
+            HashAlgId::Sha256,
+            &ems,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
         assert_eq!(kb.client_write_key.len(), 16);
         assert_eq!(kb.server_write_key.len(), 16);
         assert_ne!(kb.client_write_key, kb.server_write_key);
@@ -672,7 +660,6 @@ mod tests {
 
     #[test]
     fn test_derive_key_block_deterministic() {
-        let factory = sha256_factory();
         let master_secret = [0xDDu8; 48];
         let client_random = [0x11u8; 32];
         let server_random = [0x22u8; 32];
@@ -683,7 +670,7 @@ mod tests {
         .unwrap();
 
         let kb1 = derive_key_block(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             &server_random,
             &client_random,
@@ -691,7 +678,7 @@ mod tests {
         )
         .unwrap();
         let kb2 = derive_key_block(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             &server_random,
             &client_random,
@@ -707,7 +694,6 @@ mod tests {
 
     #[test]
     fn test_derive_key_block_ccm_suite() {
-        let factory = sha256_factory();
         let master_secret = [0xEEu8; 48];
         let client_random = [0x01u8; 32];
         let server_random = [0x02u8; 32];
@@ -717,7 +703,7 @@ mod tests {
                 .unwrap();
 
         let kb = derive_key_block(
-            &*factory,
+            HashAlgId::Sha256,
             &master_secret,
             &server_random,
             &client_random,

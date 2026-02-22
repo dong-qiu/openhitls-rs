@@ -9,7 +9,7 @@ use crate::crypt::key_schedule12::{
     compute_verify_data, derive_master_secret, derive_tlcp_key_block,
 };
 use crate::crypt::transcript::TranscriptHash;
-use crate::crypt::{KeyExchangeAlg, NamedGroup, TlcpCipherSuiteParams};
+use crate::crypt::{HashAlgId, KeyExchangeAlg, NamedGroup, TlcpCipherSuiteParams};
 use crate::handshake::codec::ServerHello;
 use crate::handshake::codec12::{
     build_ske_params, build_ske_signed_data, encode_client_key_exchange, encode_finished12,
@@ -24,7 +24,6 @@ use crate::handshake::key_exchange::KeyExchange;
 use crate::handshake::HandshakeType;
 use crate::record::encryption_dtlcp::DTLCP_VERSION;
 use crate::CipherSuite;
-use hitls_crypto::sm3::Sm3;
 use hitls_types::TlsError;
 use std::mem;
 use zeroize::Zeroize;
@@ -98,7 +97,7 @@ impl DtlcpClientHandshake {
             config,
             state: DtlcpClientState::Idle,
             params: None,
-            transcript: TranscriptHash::new(|| Box::new(Sm3::new())),
+            transcript: TranscriptHash::new(HashAlgId::Sm3),
             client_random: [0u8; 32],
             server_random: [0u8; 32],
             server_sign_certs: Vec::new(),
@@ -206,7 +205,7 @@ impl DtlcpClientHandshake {
 
         // HVR is NOT added to the transcript (RFC 6347 S4.2.1)
         // Reset transcript for fresh start with the retried ClientHello
-        self.transcript = TranscriptHash::new(|| Box::new(Sm3::new()));
+        self.transcript = TranscriptHash::new(HashAlgId::Sm3);
 
         // Rebuild ClientHello with cookie
         self.build_client_hello_with_cookie(&self.cookie.clone())
@@ -375,9 +374,9 @@ impl DtlcpClientHandshake {
         self.transcript.update(&cke_tls_msg)?;
 
         // Derive master secret and key block
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let master_secret = derive_master_secret(
-            &*factory,
+            alg,
             &pre_master_secret,
             &self.client_random,
             &self.server_random,
@@ -385,7 +384,7 @@ impl DtlcpClientHandshake {
         crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
 
         let mut key_block = derive_tlcp_key_block(
-            &*factory,
+            alg,
             &master_secret,
             &self.server_random,
             &self.client_random,
@@ -394,12 +393,8 @@ impl DtlcpClientHandshake {
 
         // Compute client Finished
         let transcript_hash = self.transcript.current_hash()?;
-        let verify_data = compute_verify_data(
-            &*factory,
-            &master_secret,
-            "client finished",
-            &transcript_hash,
-        )?;
+        let verify_data =
+            compute_verify_data(alg, &master_secret, "client finished", &transcript_hash)?;
         let finished_tls_msg = encode_finished12(&verify_data);
         self.transcript.update(&finished_tls_msg)?;
 
@@ -458,10 +453,9 @@ impl DtlcpClientHandshake {
         }
         let received_verify_data = &tls_msg[4..4 + 12];
 
-        let factory = params.hash_factory();
         let transcript_hash = self.transcript.current_hash()?;
         let expected = compute_verify_data(
-            &*factory,
+            params.hash_alg_id(),
             master_secret,
             "server finished",
             &transcript_hash,

@@ -9,10 +9,10 @@ use crate::crypt::hkdf::{hkdf_expand, hmac_hash};
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
 use crate::crypt::transcript::TranscriptHash;
-use crate::crypt::{CipherSuiteParams, HashFactory, NamedGroup, SignatureScheme};
+use crate::crypt::{CipherSuiteParams, HashAlgId, NamedGroup, SignatureScheme};
 use crate::extensions::ExtensionType;
 use crate::CipherSuite;
-use hitls_crypto::sha2::Sha256;
+use hitls_crypto::provider::Digest;
 use hitls_types::TlsError;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
@@ -115,7 +115,7 @@ pub struct ClientFinishedActions {
 /// Format: nonce(12) || ciphertext(XOR-encrypted) || hmac(hash_len).
 /// Plaintext: psk_len(2) || psk || suite(2) || created_at(8) || age_add(4).
 pub(crate) fn encrypt_ticket(
-    factory: &HashFactory,
+    alg: HashAlgId,
     ticket_key: &[u8],
     psk: &[u8],
     suite: CipherSuite,
@@ -136,7 +136,7 @@ pub(crate) fn encrypt_ticket(
         .map_err(|_| TlsError::HandshakeFailed("ticket nonce gen failed".into()))?;
 
     // Derive key stream
-    let key_stream = hkdf_expand(&**factory, ticket_key, &nonce, plaintext.len())?;
+    let key_stream = hkdf_expand(alg, ticket_key, &nonce, plaintext.len())?;
 
     // XOR encrypt
     let ciphertext: Vec<u8> = plaintext
@@ -149,7 +149,7 @@ pub(crate) fn encrypt_ticket(
     let mut mac_input = Vec::with_capacity(12 + ciphertext.len());
     mac_input.extend_from_slice(&nonce);
     mac_input.extend_from_slice(&ciphertext);
-    let mac = hmac_hash(&**factory, ticket_key, &mac_input)?;
+    let mac = hmac_hash(alg, ticket_key, &mac_input)?;
 
     let mut ticket = Vec::with_capacity(12 + ciphertext.len() + mac.len());
     ticket.extend_from_slice(&nonce);
@@ -160,11 +160,11 @@ pub(crate) fn encrypt_ticket(
 
 /// Decrypt a ticket to recover (psk, suite, created_at, age_add).
 pub(crate) fn decrypt_ticket(
-    factory: &HashFactory,
+    alg: HashAlgId,
     ticket_key: &[u8],
     ticket: &[u8],
 ) -> Result<(Vec<u8>, CipherSuite, u64, u32), TlsError> {
-    let mac_len = (*factory)().output_size();
+    let mac_len = crate::crypt::DigestVariant::output_size_for(alg);
     if ticket.len() < 12 + mac_len {
         return Err(TlsError::HandshakeFailed("ticket too short".into()));
     }
@@ -177,7 +177,7 @@ pub(crate) fn decrypt_ticket(
     let mut mac_input = Vec::with_capacity(12 + ciphertext.len());
     mac_input.extend_from_slice(nonce);
     mac_input.extend_from_slice(ciphertext);
-    let expected_mac = hmac_hash(&**factory, ticket_key, &mac_input)?;
+    let expected_mac = hmac_hash(alg, ticket_key, &mac_input)?;
 
     if !bool::from(mac.ct_eq(&expected_mac)) {
         return Err(TlsError::HandshakeFailed(
@@ -186,7 +186,7 @@ pub(crate) fn decrypt_ticket(
     }
 
     // Derive key stream and decrypt
-    let key_stream = hkdf_expand(&**factory, ticket_key, nonce, ciphertext.len())?;
+    let key_stream = hkdf_expand(alg, ticket_key, nonce, ciphertext.len())?;
     let plaintext: Vec<u8> = ciphertext
         .iter()
         .zip(key_stream.iter())
@@ -274,7 +274,7 @@ impl Drop for ServerHandshake {
 impl ServerHandshake {
     /// Create a new server handshake.
     pub fn new(config: TlsConfig) -> Self {
-        let transcript = TranscriptHash::new(|| Box::new(Sha256::new()));
+        let transcript = TranscriptHash::new(HashAlgId::Sha256);
         Self {
             config,
             state: HandshakeState::WaitClientHello,
@@ -550,7 +550,7 @@ impl ServerHandshake {
 
         // If SHA-384, re-init transcript
         if params.hash_len == 48 {
-            self.transcript = TranscriptHash::new(|| Box::new(hitls_crypto::sha2::Sha384::new()));
+            self.transcript = TranscriptHash::new(HashAlgId::Sha384);
         }
 
         // --- Check for PSK ---
@@ -574,9 +574,8 @@ impl ServerHandshake {
                         identities.first().zip(binders.first())
                     {
                         // Try to decrypt ticket
-                        let factory = params.hash_factory();
                         if let Ok((psk, ticket_suite, _created_at, _age_add)) =
-                            decrypt_ticket(&factory, ticket_key, identity)
+                            decrypt_ticket(params.hash_alg_id(), ticket_key, identity)
                         {
                             // Verify the ticket's cipher suite matches
                             if ticket_suite == suite {
@@ -1088,8 +1087,6 @@ impl ServerHandshake {
         // Generate NewSessionTicket(s) if ticket_key is configured
         let mut new_session_ticket_msgs = Vec::new();
         if let Some(ref ticket_key) = self.config.ticket_key {
-            let factory = params.hash_factory();
-
             // Generate ticket nonce and age_add
             let mut nonce_bytes = [0u8; 8];
             getrandom::getrandom(&mut nonce_bytes)
@@ -1109,8 +1106,14 @@ impl ServerHandshake {
                 .as_secs();
 
             // Encrypt ticket
-            let ticket_data =
-                encrypt_ticket(&factory, ticket_key, &psk, suite, created_at, age_add)?;
+            let ticket_data = encrypt_ticket(
+                params.hash_alg_id(),
+                ticket_key,
+                &psk,
+                suite,
+                created_at,
+                age_add,
+            )?;
 
             let mut nst_extensions = Vec::new();
             if self.config.max_early_data_size > 0 {
@@ -1160,8 +1163,7 @@ fn verify_binder(
     let finished_key = ks.derive_finished_key(&binder_key)?;
 
     // Hash the truncated CH
-    let factory = params.hash_factory();
-    let mut hasher = (*factory)();
+    let mut hasher = crate::crypt::DigestVariant::new(params.hash_alg_id());
     hasher.update(truncated_ch).map_err(TlsError::CryptoError)?;
     let mut hash = vec![0u8; params.hash_len];
     hasher.finish(&mut hash).map_err(TlsError::CryptoError)?;

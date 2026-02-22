@@ -30,9 +30,9 @@ impl TrafficKeys {
     /// iv  = HKDF-Expand-Label(secret, "iv", "", iv_length)
     /// ```
     pub fn derive(params: &CipherSuiteParams, traffic_secret: &[u8]) -> Result<Self, TlsError> {
-        let factory = params.hash_factory();
-        let key = hkdf_expand_label(&*factory, traffic_secret, b"key", b"", params.key_len)?;
-        let iv = hkdf_expand_label(&*factory, traffic_secret, b"iv", b"", params.iv_len)?;
+        let alg = params.hash_alg_id();
+        let key = hkdf_expand_label(alg, traffic_secret, b"key", b"", params.key_len)?;
+        let iv = hkdf_expand_label(alg, traffic_secret, b"iv", b"", params.iv_len)?;
         Ok(TrafficKeys { key, iv })
     }
 }

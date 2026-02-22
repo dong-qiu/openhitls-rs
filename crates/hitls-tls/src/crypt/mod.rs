@@ -18,10 +18,124 @@ use hitls_crypto::sha1::Sha1;
 use hitls_crypto::sha2::{Sha256, Sha384};
 #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
 use hitls_crypto::sm3::Sm3;
-use hitls_types::TlsError;
+use hitls_types::{CryptoError, TlsError};
 
-/// A factory closure that creates fresh Digest instances.
-pub type HashFactory = Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>;
+/// Lightweight identifier for the hash algorithm used in a TLS cipher suite.
+///
+/// This is a `Copy` enum used to replace `HashFactory` closures with stack-allocated
+/// enum dispatch, avoiding double heap allocation per hash operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashAlgId {
+    Sha256,
+    Sha384,
+    Sha1,
+    #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+    Sm3,
+}
+
+/// Concrete enum wrapping the hash implementations used by TLS.
+///
+/// Implements the `Digest` trait by delegating to the inner variant,
+/// avoiding `Box<dyn Digest>` heap allocations.
+pub enum DigestVariant {
+    Sha256(Sha256),
+    Sha384(Sha384),
+    Sha1(Sha1),
+    #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+    Sm3(Sm3),
+}
+
+impl DigestVariant {
+    /// Create a new stack-allocated digest for the given algorithm.
+    pub fn new(alg: HashAlgId) -> Self {
+        match alg {
+            HashAlgId::Sha256 => DigestVariant::Sha256(Sha256::new()),
+            HashAlgId::Sha384 => DigestVariant::Sha384(Sha384::new()),
+            HashAlgId::Sha1 => DigestVariant::Sha1(Sha1::new()),
+            #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+            HashAlgId::Sm3 => DigestVariant::Sm3(Sm3::new()),
+        }
+    }
+
+    /// Return the output size for a given algorithm without instantiation.
+    pub fn output_size_for(alg: HashAlgId) -> usize {
+        match alg {
+            HashAlgId::Sha256 => 32,
+            HashAlgId::Sha384 => 48,
+            HashAlgId::Sha1 => 20,
+            #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+            HashAlgId::Sm3 => 32,
+        }
+    }
+}
+
+impl Digest for DigestVariant {
+    fn output_size(&self) -> usize {
+        match self {
+            DigestVariant::Sha256(h) => h.output_size(),
+            DigestVariant::Sha384(h) => h.output_size(),
+            DigestVariant::Sha1(h) => h.output_size(),
+            #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+            DigestVariant::Sm3(h) => h.output_size(),
+        }
+    }
+
+    fn block_size(&self) -> usize {
+        match self {
+            DigestVariant::Sha256(h) => h.block_size(),
+            DigestVariant::Sha384(h) => h.block_size(),
+            DigestVariant::Sha1(h) => h.block_size(),
+            #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+            DigestVariant::Sm3(h) => h.block_size(),
+        }
+    }
+
+    fn update(&mut self, data: &[u8]) -> Result<(), CryptoError> {
+        match self {
+            DigestVariant::Sha256(h) => h.update(data),
+            DigestVariant::Sha384(h) => h.update(data),
+            DigestVariant::Sha1(h) => h.update(data),
+            #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+            DigestVariant::Sm3(h) => h.update(data),
+        }
+    }
+
+    fn finish(&mut self, out: &mut [u8]) -> Result<(), CryptoError> {
+        match self {
+            DigestVariant::Sha256(h) => {
+                let result = h.finish()?;
+                out[..result.len()].copy_from_slice(&result);
+                Ok(())
+            }
+            DigestVariant::Sha384(h) => {
+                let result = h.finish()?;
+                out[..result.len()].copy_from_slice(&result);
+                Ok(())
+            }
+            DigestVariant::Sha1(h) => {
+                let result = h.finish()?;
+                out[..result.len()].copy_from_slice(&result);
+                Ok(())
+            }
+            #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+            DigestVariant::Sm3(h) => {
+                let result = h.finish()?;
+                out[..result.len()].copy_from_slice(&result);
+                Ok(())
+            }
+        }
+    }
+
+    fn reset(&mut self) {
+        match self {
+            DigestVariant::Sha256(h) => h.reset(),
+            DigestVariant::Sha384(h) => h.reset(),
+            DigestVariant::Sha1(h) => h.reset(),
+            #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+            DigestVariant::Sm3(h) => h.reset(),
+        }
+    }
+}
 
 /// Parameters associated with a TLS 1.3 cipher suite.
 #[derive(Debug, Clone)]
@@ -90,19 +204,18 @@ impl CipherSuiteParams {
         }
     }
 
-    /// Create a HashFactory for this cipher suite's hash algorithm.
-    pub fn hash_factory(&self) -> HashFactory {
+    /// Return the hash algorithm ID for this cipher suite.
+    pub fn hash_alg_id(&self) -> HashAlgId {
         #[cfg(feature = "sm_tls13")]
-        {
-            if self.suite == CipherSuite::TLS_SM4_GCM_SM3
-                || self.suite == CipherSuite::TLS_SM4_CCM_SM3
-            {
-                return Box::new(|| Box::new(Sm3::new()) as Box<dyn Digest>);
-            }
+        if matches!(
+            self.suite,
+            CipherSuite::TLS_SM4_GCM_SM3 | CipherSuite::TLS_SM4_CCM_SM3
+        ) {
+            return HashAlgId::Sm3;
         }
         match self.hash_len {
-            48 => Box::new(|| Box::new(Sha384::new()) as Box<dyn Digest>),
-            _ => Box::new(|| Box::new(Sha256::new()) as Box<dyn Digest>),
+            48 => HashAlgId::Sha384,
+            _ => HashAlgId::Sha256,
         }
     }
 }
@@ -1476,26 +1589,21 @@ impl Tls12CipherSuiteParams {
         }
     }
 
-    /// Create a HashFactory for this cipher suite's PRF hash algorithm.
-    pub fn hash_factory(&self) -> HashFactory {
-        Self::hash_factory_for_len(self.hash_len)
-    }
-
-    /// Create a HashFactory for a given PRF hash length.
-    pub fn hash_factory_for_len(hash_len: usize) -> HashFactory {
-        match hash_len {
-            48 => Box::new(|| Box::new(Sha384::new()) as Box<dyn Digest>),
-            _ => Box::new(|| Box::new(Sha256::new()) as Box<dyn Digest>),
+    /// Return the PRF hash algorithm ID for this cipher suite.
+    pub fn hash_alg_id(&self) -> HashAlgId {
+        match self.hash_len {
+            48 => HashAlgId::Sha384,
+            _ => HashAlgId::Sha256,
         }
     }
 
-    /// Create a HashFactory for the MAC hash algorithm (CBC suites only).
+    /// Return the MAC hash algorithm ID for CBC suites.
     /// Returns SHA-1 for mac_len=20, SHA-256 for mac_len=32, SHA-384 for mac_len=48.
-    pub fn mac_hash_factory(&self) -> HashFactory {
+    pub fn mac_hash_alg_id(&self) -> HashAlgId {
         match self.mac_len {
-            20 => Box::new(|| Box::new(Sha1::new()) as Box<dyn Digest>),
-            48 => Box::new(|| Box::new(Sha384::new()) as Box<dyn Digest>),
-            _ => Box::new(|| Box::new(Sha256::new()) as Box<dyn Digest>),
+            20 => HashAlgId::Sha1,
+            48 => HashAlgId::Sha384,
+            _ => HashAlgId::Sha256,
         }
     }
 
@@ -1592,9 +1700,9 @@ impl TlcpCipherSuiteParams {
         }
     }
 
-    /// Create a HashFactory for SM3 (always SM3 for TLCP).
-    pub fn hash_factory(&self) -> HashFactory {
-        Box::new(|| Box::new(Sm3::new()) as Box<dyn Digest>)
+    /// Return the hash algorithm ID (always SM3 for TLCP).
+    pub fn hash_alg_id(&self) -> HashAlgId {
+        HashAlgId::Sm3
     }
 
     /// SM3 hash output length (always 32).
@@ -1666,18 +1774,18 @@ mod tests_cipher_suite_params {
     }
 
     #[test]
-    fn test_tls13_hash_factory_sha256() {
+    fn test_tls13_hash_alg_id_sha256() {
         let p = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
-        let factory = p.hash_factory();
-        let hasher = factory();
+        assert_eq!(p.hash_alg_id(), HashAlgId::Sha256);
+        let hasher = DigestVariant::new(p.hash_alg_id());
         assert_eq!(hasher.output_size(), 32);
     }
 
     #[test]
-    fn test_tls13_hash_factory_sha384() {
+    fn test_tls13_hash_alg_id_sha384() {
         let p = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_256_GCM_SHA384).unwrap();
-        let factory = p.hash_factory();
-        let hasher = factory();
+        assert_eq!(p.hash_alg_id(), HashAlgId::Sha384);
+        let hasher = DigestVariant::new(p.hash_alg_id());
         assert_eq!(hasher.output_size(), 48);
     }
 
@@ -1779,18 +1887,16 @@ mod tests_cipher_suite_params {
     }
 
     #[test]
-    fn test_tls13_hash_factory_produces_correct_output_size() {
+    fn test_digest_variant_produces_correct_output_size() {
         let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
-        let factory = params.hash_factory();
-        let mut hasher = factory();
+        let mut hasher = DigestVariant::new(params.hash_alg_id());
         hasher.update(b"test").unwrap();
         let mut out = vec![0u8; params.hash_len];
         hasher.finish(&mut out).unwrap();
         assert_eq!(out.len(), 32);
 
         let params384 = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_256_GCM_SHA384).unwrap();
-        let factory384 = params384.hash_factory();
-        let mut hasher384 = factory384();
+        let mut hasher384 = DigestVariant::new(params384.hash_alg_id());
         hasher384.update(b"test").unwrap();
         let mut out384 = vec![0u8; params384.hash_len];
         hasher384.finish(&mut out384).unwrap();
@@ -1844,10 +1950,10 @@ mod tests_tlcp {
     }
 
     #[test]
-    fn test_tlcp_sm3_hash_factory() {
+    fn test_tlcp_sm3_digest_variant() {
         let params = TlcpCipherSuiteParams::from_suite(CipherSuite::ECDHE_SM4_CBC_SM3).unwrap();
-        let factory = params.hash_factory();
-        let mut hasher = factory();
+        assert_eq!(params.hash_alg_id(), HashAlgId::Sm3);
+        let mut hasher = DigestVariant::new(params.hash_alg_id());
         hasher.update(b"abc").unwrap();
         let mut digest = vec![0u8; 32];
         hasher.finish(&mut digest).unwrap();

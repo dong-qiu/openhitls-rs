@@ -9,6 +9,7 @@ use crate::crypt::key_schedule12::{
     compute_verify_data, derive_master_secret, derive_tlcp_key_block,
 };
 use crate::crypt::transcript::TranscriptHash;
+use crate::crypt::HashAlgId;
 use crate::crypt::{KeyExchangeAlg, NamedGroup, SignatureScheme, TlcpCipherSuiteParams};
 use crate::handshake::codec::{encode_server_hello, ClientHello, ServerHello};
 use crate::handshake::codec12::{
@@ -27,7 +28,6 @@ use crate::handshake::key_exchange::KeyExchange;
 use crate::handshake::HandshakeType;
 use crate::record::encryption_dtlcp::DTLCP_VERSION;
 use crate::CipherSuite;
-use hitls_crypto::sm3::Sm3;
 use hitls_types::TlsError;
 use std::mem;
 use subtle::ConstantTimeEq;
@@ -131,7 +131,7 @@ impl DtlcpServerHandshake {
             config,
             state: DtlcpServerState::Idle,
             params: None,
-            transcript: TranscriptHash::new(|| Box::new(Sm3::new())),
+            transcript: TranscriptHash::new(HashAlgId::Sm3),
             client_random: [0u8; 32],
             server_random: [0u8; 32],
             is_ecc_static: false,
@@ -410,9 +410,9 @@ impl DtlcpServerHandshake {
         };
 
         // Derive master secret and key block
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let master_secret = derive_master_secret(
-            &*factory,
+            alg,
             &pre_master_secret,
             &self.client_random,
             &self.server_random,
@@ -420,7 +420,7 @@ impl DtlcpServerHandshake {
         crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
 
         let mut key_block = derive_tlcp_key_block(
-            &*factory,
+            alg,
             &master_secret,
             &self.server_random,
             &self.client_random,
@@ -474,10 +474,10 @@ impl DtlcpServerHandshake {
         let received_verify_data = &tls_msg[4..4 + 12];
 
         // Verify client Finished
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let transcript_hash = self.transcript.current_hash()?;
         let expected = compute_verify_data(
-            &*factory,
+            alg,
             &self.master_secret,
             "client finished",
             &transcript_hash,
@@ -495,7 +495,7 @@ impl DtlcpServerHandshake {
         // Compute server Finished
         let transcript_hash = self.transcript.current_hash()?;
         let server_verify_data = compute_verify_data(
-            &*factory,
+            alg,
             &self.master_secret,
             "server finished",
             &transcript_hash,

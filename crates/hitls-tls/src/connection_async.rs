@@ -6,7 +6,7 @@ use crate::config::TlsConfig;
 use crate::connection_info::ConnectionInfo;
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
-use crate::crypt::{CipherSuiteParams, NamedGroup};
+use crate::crypt::{CipherSuiteParams, DigestVariant, NamedGroup};
 use crate::handshake::client::{ClientHandshake, ServerHelloResult};
 use crate::handshake::codec::{
     decode_certificate_request, decode_key_update, encode_certificate, encode_certificate_verify,
@@ -18,6 +18,7 @@ use crate::handshake::{HandshakeState, HandshakeType};
 use crate::record::{ContentType, RecordLayer};
 use crate::session::TlsSession;
 use crate::{AsyncTlsConnection, CipherSuite, TlsError, TlsVersion};
+use hitls_crypto::provider::Digest;
 use zeroize::Zeroize;
 
 /// Connection state.
@@ -178,9 +179,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
             .cipher_params
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
-        let factory = params.hash_factory();
         crate::crypt::export::tls13_export_keying_material(
-            &*factory,
+            params.hash_alg_id(),
             &self.exporter_master_secret,
             label,
             context,
@@ -205,9 +205,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
             .cipher_params
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
-        let factory = params.hash_factory();
         crate::crypt::export::tls13_export_early_keying_material(
-            &*factory,
+            params.hash_alg_id(),
             &self.early_exporter_master_secret,
             label,
             context,
@@ -336,10 +335,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?
             .clone();
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let ks = KeySchedule::new(params.clone());
 
-        let mut hasher = (*factory)();
+        let mut hasher = DigestVariant::new(alg);
         hasher.update(full_msg).map_err(TlsError::CryptoError)?;
         let mut cr_hash = vec![0u8; params.hash_len];
         hasher.finish(&mut cr_hash).map_err(TlsError::CryptoError)?;
@@ -365,7 +364,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
         };
         let cert_encoded = encode_certificate(&cert_msg);
 
-        let mut hasher2 = (*factory)();
+        let mut hasher2 = DigestVariant::new(alg);
         hasher2.update(full_msg).map_err(TlsError::CryptoError)?;
         hasher2
             .update(&cert_encoded)
@@ -383,7 +382,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
             let scheme = select_signature_scheme(client_key, &server_sig_algs)?;
 
             let mut cv_hash = vec![0u8; params.hash_len];
-            let mut hasher3 = (*factory)();
+            let mut hasher3 = DigestVariant::new(alg);
             hasher3.update(full_msg).map_err(TlsError::CryptoError)?;
             hasher3
                 .update(&cert_encoded)
@@ -408,7 +407,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
 
             let finished_key = ks.derive_finished_key(&self.client_app_secret)?;
             let mut fin_hash = vec![0u8; params.hash_len];
-            let mut hasher4 = (*factory)();
+            let mut hasher4 = DigestVariant::new(alg);
             hasher4.update(full_msg).map_err(TlsError::CryptoError)?;
             hasher4
                 .update(&cert_encoded)
@@ -966,9 +965,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
             .cipher_params
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
-        let factory = params.hash_factory();
         crate::crypt::export::tls13_export_keying_material(
-            &*factory,
+            params.hash_alg_id(),
             &self.exporter_master_secret,
             label,
             context,
@@ -993,9 +991,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
             .cipher_params
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
-        let factory = params.hash_factory();
         crate::crypt::export::tls13_export_early_keying_material(
-            &*factory,
+            params.hash_alg_id(),
             &self.early_exporter_master_secret,
             label,
             context,

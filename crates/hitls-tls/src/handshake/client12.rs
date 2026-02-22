@@ -10,7 +10,9 @@ use crate::crypt::key_schedule12::{
     compute_verify_data, derive_extended_master_secret, derive_key_block, derive_master_secret,
 };
 use crate::crypt::transcript::TranscriptHash;
-use crate::crypt::{KeyExchangeAlg, NamedGroup, SignatureScheme, Tls12CipherSuiteParams};
+use crate::crypt::{
+    HashAlgId, KeyExchangeAlg, NamedGroup, SignatureScheme, Tls12CipherSuiteParams,
+};
 use crate::extensions::ExtensionType;
 use crate::handshake::codec::{encode_client_hello, ClientHello, ServerHello};
 use crate::handshake::codec12::{
@@ -30,7 +32,6 @@ use crate::handshake::server12::select_signature_scheme_tls12;
 use crate::CipherSuite;
 use hitls_crypto::dh::{DhKeyPair, DhParams};
 use hitls_crypto::rsa::{RsaPadding, RsaPublicKey};
-use hitls_crypto::sha2::Sha256;
 use hitls_types::TlsError;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
@@ -197,7 +198,7 @@ impl Tls12ClientHandshake {
             config,
             state: Tls12ClientState::Idle,
             params: None,
-            transcript: TranscriptHash::new(|| Box::new(Sha256::new())),
+            transcript: TranscriptHash::new(HashAlgId::Sha256),
             client_random: [0u8; 32],
             server_random: [0u8; 32],
             server_certs: Vec::new(),
@@ -347,7 +348,7 @@ impl Tls12ClientHandshake {
         self.prev_server_verify_data = std::mem::take(&mut self.server_verify_data);
         self.state = Tls12ClientState::Idle;
         self.params = None;
-        self.transcript = TranscriptHash::new(|| Box::new(Sha256::new()));
+        self.transcript = TranscriptHash::new(HashAlgId::Sha256);
         self.client_random = [0u8; 32];
         self.server_random = [0u8; 32];
         self.server_certs.clear();
@@ -672,7 +673,7 @@ impl Tls12ClientHandshake {
 
         // Switch transcript hash if the negotiated suite uses SHA-384
         if params.hash_len == 48 {
-            self.transcript = TranscriptHash::new(|| Box::new(hitls_crypto::sha2::Sha384::new()));
+            self.transcript = TranscriptHash::new(HashAlgId::Sha384);
             // Replay the ClientHello into the new transcript
             self.transcript.update(&self.client_hello_bytes)?;
         }
@@ -703,9 +704,8 @@ impl Tls12ClientHandshake {
             self.abbreviated = true;
 
             // Derive keys from cached master_secret + new randoms
-            let factory = params.hash_factory();
             let key_block = derive_key_block(
-                &*factory,
+                params.hash_alg_id(),
                 &self.cached_master_secret,
                 &self.server_random,
                 &self.client_random,
@@ -1197,13 +1197,13 @@ impl Tls12ClientHandshake {
         self.transcript.update(&cke_msg)?;
 
         // Derive master secret (EMS uses transcript hash instead of randoms)
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let master_secret = if self.use_extended_master_secret {
             let session_hash = self.transcript.current_hash()?;
-            derive_extended_master_secret(&*factory, &pre_master_secret, &session_hash)?
+            derive_extended_master_secret(alg, &pre_master_secret, &session_hash)?
         } else {
             derive_master_secret(
-                &*factory,
+                alg,
                 &pre_master_secret,
                 &self.client_random,
                 &self.server_random,
@@ -1213,7 +1213,7 @@ impl Tls12ClientHandshake {
 
         // Derive key block
         let key_block = derive_key_block(
-            &*factory,
+            alg,
             &master_secret,
             &self.server_random,
             &self.client_random,
@@ -1244,12 +1244,8 @@ impl Tls12ClientHandshake {
 
         // Compute client Finished
         let transcript_hash = self.transcript.current_hash()?;
-        let verify_data = compute_verify_data(
-            &*factory,
-            &master_secret,
-            "client finished",
-            &transcript_hash,
-        )?;
+        let verify_data =
+            compute_verify_data(alg, &master_secret, "client finished", &transcript_hash)?;
         self.client_verify_data = verify_data.clone();
         let finished_msg = encode_finished12(&verify_data);
         // The Finished message itself is added to the transcript for verifying server Finished
@@ -1313,10 +1309,10 @@ impl Tls12ClientHandshake {
         let received_verify_data = &raw_msg[4..4 + 12];
 
         // Verify server Finished: PRF(ms, "server finished", Hash(CH + SH))
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let transcript_hash = self.transcript.current_hash()?;
         let expected = compute_verify_data(
-            &*factory,
+            alg,
             &self.cached_master_secret,
             "server finished",
             &transcript_hash,
@@ -1336,7 +1332,7 @@ impl Tls12ClientHandshake {
         // Compute client Finished: PRF(ms, "client finished", Hash(CH + SH + server_Finished))
         let transcript_hash = self.transcript.current_hash()?;
         let client_verify_data = compute_verify_data(
-            &*factory,
+            alg,
             &self.cached_master_secret,
             "client finished",
             &transcript_hash,
@@ -1372,10 +1368,9 @@ impl Tls12ClientHandshake {
         let received_verify_data = &raw_msg[4..4 + 12];
 
         // Compute expected verify_data
-        let factory = params.hash_factory();
         let transcript_hash = self.transcript.current_hash()?;
         let expected = compute_verify_data(
-            &*factory,
+            params.hash_alg_id(),
             master_secret,
             "server finished",
             &transcript_hash,

@@ -5,7 +5,7 @@ use crate::config::TlsConfig;
 use crate::connection_info::ConnectionInfo;
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
-use crate::crypt::{CipherSuiteParams, NamedGroup};
+use crate::crypt::{CipherSuiteParams, DigestVariant, NamedGroup};
 use crate::handshake::codec::{
     decode_certificate, decode_certificate_verify, decode_finished, decode_key_update,
     encode_certificate_request, encode_key_update, parse_handshake_header, CertificateRequestMsg,
@@ -15,6 +15,7 @@ use crate::handshake::server::{ClientHelloResult, ServerHandshake};
 use crate::handshake::HandshakeType;
 use crate::record::{ContentType, RecordLayer};
 use crate::{CipherSuite, TlsConnection, TlsError, TlsVersion};
+use hitls_crypto::provider::Digest;
 use zeroize::Zeroize;
 
 /// A synchronous TLS 1.3 server connection.
@@ -112,9 +113,8 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .cipher_params
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
-        let factory = params.hash_factory();
         crate::crypt::export::tls13_export_keying_material(
-            &*factory,
+            params.hash_alg_id(),
             &self.exporter_master_secret,
             label,
             context,
@@ -142,9 +142,8 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .cipher_params
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?;
-        let factory = params.hash_factory();
         crate::crypt::export::tls13_export_early_keying_material(
-            &*factory,
+            params.hash_alg_id(),
             &self.early_exporter_master_secret,
             label,
             context,
@@ -312,7 +311,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?
             .clone();
-        let factory = params.hash_factory();
+        let alg = params.hash_alg_id();
         let ks = KeySchedule::new(params.clone());
 
         // Generate random context for this request
@@ -350,7 +349,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
         // Start transcript for this post-HS exchange (just the CertificateRequest)
-        let mut hasher = (*factory)();
+        let mut hasher = DigestVariant::new(alg);
         hasher.update(&cr_msg).map_err(TlsError::CryptoError)?;
 
         // Read client Certificate
@@ -391,7 +390,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             // Client sent empty Certificate — no CertificateVerify expected.
             // Read Finished.
             let mut fin_hash_buf = vec![0u8; params.hash_len];
-            let mut hasher_fin = (*factory)();
+            let mut hasher_fin = DigestVariant::new(alg);
             hasher_fin.update(&cr_msg).map_err(TlsError::CryptoError)?;
             hasher_fin
                 .update(cert_msg_data)
@@ -444,7 +443,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
 
         // Verify CertificateVerify signature against transcript hash
         let mut cv_hash = vec![0u8; params.hash_len];
-        let mut hasher_cv = (*factory)();
+        let mut hasher_cv = DigestVariant::new(alg);
         hasher_cv.update(&cr_msg).map_err(TlsError::CryptoError)?;
         hasher_cv
             .update(cert_msg_data)
@@ -470,7 +469,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .map_err(TlsError::CryptoError)?;
         // We need a fresh hasher for the Finished hash that includes CR+Cert+CV
         let mut fin_hash_buf = vec![0u8; params.hash_len];
-        let mut hasher_fin = (*factory)();
+        let mut hasher_fin = DigestVariant::new(alg);
         hasher_fin.update(&cr_msg).map_err(TlsError::CryptoError)?;
         hasher_fin
             .update(cert_msg_data)

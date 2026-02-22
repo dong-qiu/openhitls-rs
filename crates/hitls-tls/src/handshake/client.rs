@@ -8,10 +8,10 @@ use crate::config::TlsConfig;
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
 use crate::crypt::transcript::TranscriptHash;
-use crate::crypt::{CipherSuiteParams, NamedGroup};
+use crate::crypt::{CipherSuiteParams, DigestVariant, HashAlgId, NamedGroup};
 use crate::extensions::ExtensionType;
 use crate::CipherSuite;
-use hitls_crypto::sha2::Sha256;
+use hitls_crypto::provider::Digest;
 use hitls_types::TlsError;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
@@ -153,7 +153,7 @@ impl ClientHandshake {
     pub fn new(config: TlsConfig) -> Self {
         // Start with SHA-256 transcript (we'll re-initialize if the server
         // selects SHA-384, but TLS_AES_128_GCM_SHA256 is most common).
-        let transcript = TranscriptHash::new(|| Box::new(Sha256::new()));
+        let transcript = TranscriptHash::new(HashAlgId::Sha256);
         Self {
             config,
             state: HandshakeState::Idle,
@@ -491,8 +491,8 @@ impl ClientHandshake {
             let finished_key = ks.derive_finished_key(&binder_key)?;
 
             // Hash truncated CH
-            let factory = params.hash_factory();
-            let mut hasher = (*factory)();
+            let alg = params.hash_alg_id();
+            let mut hasher = DigestVariant::new(alg);
             hasher.update(truncated_ch).map_err(TlsError::CryptoError)?;
             let mut hash = vec![0u8; hash_len];
             hasher.finish(&mut hash).map_err(TlsError::CryptoError)?;
@@ -510,7 +510,7 @@ impl ClientHandshake {
             // Derive early exporter master secret (RFC 8446 §7.5)
             // Hash the full CH (with real binder) for the transcript
             {
-                let mut eems_hasher = (*factory)();
+                let mut eems_hasher = DigestVariant::new(alg);
                 eems_hasher.update(&msg).map_err(TlsError::CryptoError)?;
                 let mut eems_hash = vec![0u8; hash_len];
                 eems_hasher
@@ -523,7 +523,7 @@ impl ClientHandshake {
             // Derive early traffic secret for 0-RTT if offering early data
             if offer_early_data {
                 // Hash the full CH (with real binder) for the early traffic secret
-                let mut ch_hasher = (*factory)();
+                let mut ch_hasher = DigestVariant::new(alg);
                 ch_hasher.update(&msg).map_err(TlsError::CryptoError)?;
                 let mut ch_hash = vec![0u8; hash_len];
                 ch_hasher
@@ -595,7 +595,7 @@ impl ClientHandshake {
 
         // If the cipher suite uses SHA-384, re-initialize the transcript
         if params.hash_len == 48 && !self.hrr_done {
-            self.transcript = TranscriptHash::new(|| Box::new(hitls_crypto::sha2::Sha384::new()));
+            self.transcript = TranscriptHash::new(HashAlgId::Sha384);
         }
 
         // Feed ClientHello + ServerHello to transcript
@@ -723,7 +723,7 @@ impl ClientHandshake {
 
         // Re-init transcript if SHA-384
         if params.hash_len == 48 {
-            self.transcript = TranscriptHash::new(|| Box::new(hitls_crypto::sha2::Sha384::new()));
+            self.transcript = TranscriptHash::new(HashAlgId::Sha384);
         }
 
         // Feed original CH to transcript, then replace with message_hash

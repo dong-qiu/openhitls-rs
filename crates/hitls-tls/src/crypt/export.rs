@@ -4,10 +4,9 @@
 
 use super::hkdf::{derive_secret, hkdf_expand_label};
 use super::prf::prf;
+use super::{DigestVariant, HashAlgId};
 use hitls_crypto::provider::Digest;
 use hitls_types::TlsError;
-
-type Factory = dyn Fn() -> Box<dyn Digest> + Send + Sync;
 
 /// Reserved labels that MUST NOT be used with key export (RFC 5705 §4).
 const RESERVED_LABELS: &[&str] = &[
@@ -39,7 +38,7 @@ pub fn validate_exporter_label(label: &[u8]) -> Result<(), TlsError> {
 /// out = HKDF-Expand-Label(tmp, "exporter", Hash(context), length)
 /// ```
 pub fn tls13_export_keying_material(
-    factory: &Factory,
+    alg: HashAlgId,
     exporter_master_secret: &[u8],
     label: &[u8],
     context: Option<&[u8]>,
@@ -49,44 +48,38 @@ pub fn tls13_export_keying_material(
 
     // Step 1: tmp = Derive-Secret(exporter_master_secret, label, "")
     // Derive-Secret uses Hash("") as the transcript_hash
-    let mut empty_hasher = factory();
+    let mut empty_hasher = DigestVariant::new(alg);
     let hash_len = empty_hasher.output_size();
     let mut empty_hash = vec![0u8; hash_len];
     empty_hasher
         .finish(&mut empty_hash)
         .map_err(TlsError::CryptoError)?;
 
-    let tmp = derive_secret(factory, exporter_master_secret, label, &empty_hash)?;
+    let tmp = derive_secret(alg, exporter_master_secret, label, &empty_hash)?;
 
     // Step 2: out = HKDF-Expand-Label(tmp, "exporter", Hash(context), length)
     let ctx = context.unwrap_or(b"");
-    let mut ctx_hasher = factory();
+    let mut ctx_hasher = DigestVariant::new(alg);
     ctx_hasher.update(ctx).map_err(TlsError::CryptoError)?;
     let mut ctx_hash = vec![0u8; hash_len];
     ctx_hasher
         .finish(&mut ctx_hash)
         .map_err(TlsError::CryptoError)?;
 
-    hkdf_expand_label(factory, &tmp, b"exporter", &ctx_hash, length)
+    hkdf_expand_label(alg, &tmp, b"exporter", &ctx_hash, length)
 }
 
 /// TLS 1.3 early key material export (RFC 8446 §7.5, for 0-RTT context).
 ///
 /// Uses the same algorithm as regular exporter but with the early exporter master secret.
 pub fn tls13_export_early_keying_material(
-    factory: &Factory,
+    alg: HashAlgId,
     early_exporter_master_secret: &[u8],
     label: &[u8],
     context: Option<&[u8]>,
     length: usize,
 ) -> Result<Vec<u8>, TlsError> {
-    tls13_export_keying_material(
-        factory,
-        early_exporter_master_secret,
-        label,
-        context,
-        length,
-    )
+    tls13_export_keying_material(alg, early_exporter_master_secret, label, context, length)
 }
 
 /// TLS 1.2 key material export (RFC 5705).
@@ -96,7 +89,7 @@ pub fn tls13_export_early_keying_material(
 /// PRF(master_secret, label, seed, length)
 /// ```
 pub fn tls12_export_keying_material(
-    factory: &Factory,
+    alg: HashAlgId,
     master_secret: &[u8],
     client_random: &[u8; 32],
     server_random: &[u8; 32],
@@ -119,21 +112,12 @@ pub fn tls12_export_keying_material(
         seed.extend_from_slice(ctx);
     }
 
-    prf(factory, master_secret, label_str, &seed, length)
+    prf(alg, master_secret, label_str, &seed, length)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hitls_crypto::sha2::{Sha256, Sha384};
-
-    fn sha256_factory() -> Box<dyn Fn() -> Box<dyn Digest> + Send + Sync> {
-        Box::new(|| Box::new(Sha256::new()))
-    }
-
-    fn sha384_factory() -> Box<dyn Fn() -> Box<dyn Digest> + Send + Sync> {
-        Box::new(|| Box::new(Sha384::new()))
-    }
 
     #[test]
     fn test_validate_exporter_label_ok() {
@@ -152,39 +136,39 @@ mod tests {
 
     #[test]
     fn test_tls13_export_deterministic() {
-        let factory = sha256_factory();
         let ems = vec![0xAA; 32]; // fake exporter_master_secret
         let label = b"test-exporter";
         let ctx = b"context data";
 
-        let out1 = tls13_export_keying_material(&*factory, &ems, label, Some(ctx), 32).unwrap();
-        let out2 = tls13_export_keying_material(&*factory, &ems, label, Some(ctx), 32).unwrap();
+        let out1 =
+            tls13_export_keying_material(HashAlgId::Sha256, &ems, label, Some(ctx), 32).unwrap();
+        let out2 =
+            tls13_export_keying_material(HashAlgId::Sha256, &ems, label, Some(ctx), 32).unwrap();
         assert_eq!(out1, out2);
         assert_eq!(out1.len(), 32);
     }
 
     #[test]
     fn test_tls13_export_no_context_differs() {
-        let factory = sha256_factory();
         let ems = vec![0xBB; 32];
         let label = b"test-exporter";
 
-        let out_none = tls13_export_keying_material(&*factory, &ems, label, None, 32).unwrap();
+        let out_none =
+            tls13_export_keying_material(HashAlgId::Sha256, &ems, label, None, 32).unwrap();
         let out_empty =
-            tls13_export_keying_material(&*factory, &ems, label, Some(b""), 32).unwrap();
+            tls13_export_keying_material(HashAlgId::Sha256, &ems, label, Some(b""), 32).unwrap();
         // None and Some(b"") should produce the same result since both hash empty data
         assert_eq!(out_none, out_empty);
     }
 
     #[test]
     fn test_tls13_export_different_lengths() {
-        let factory = sha256_factory();
         let ems = vec![0xCC; 32];
         let label = b"test-exporter";
 
-        let out16 = tls13_export_keying_material(&*factory, &ems, label, None, 16).unwrap();
-        let out32 = tls13_export_keying_material(&*factory, &ems, label, None, 32).unwrap();
-        let out64 = tls13_export_keying_material(&*factory, &ems, label, None, 64).unwrap();
+        let out16 = tls13_export_keying_material(HashAlgId::Sha256, &ems, label, None, 16).unwrap();
+        let out32 = tls13_export_keying_material(HashAlgId::Sha256, &ems, label, None, 32).unwrap();
+        let out64 = tls13_export_keying_material(HashAlgId::Sha256, &ems, label, None, 64).unwrap();
 
         assert_eq!(out16.len(), 16);
         assert_eq!(out32.len(), 32);
@@ -196,47 +180,49 @@ mod tests {
 
     #[test]
     fn test_tls13_export_forbidden_label() {
-        let factory = sha256_factory();
         let ems = vec![0xDD; 32];
-        assert!(tls13_export_keying_material(&*factory, &ems, b"master secret", None, 32).is_err());
+        assert!(
+            tls13_export_keying_material(HashAlgId::Sha256, &ems, b"master secret", None, 32)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_tls13_export_sha384() {
-        let factory = sha384_factory();
         let ems = vec![0xEE; 48];
         let out =
-            tls13_export_keying_material(&*factory, &ems, b"test-384", Some(b"ctx"), 48).unwrap();
+            tls13_export_keying_material(HashAlgId::Sha384, &ems, b"test-384", Some(b"ctx"), 48)
+                .unwrap();
         assert_eq!(out.len(), 48);
     }
 
     #[test]
     fn test_tls12_export_deterministic() {
-        let factory = sha256_factory();
         let ms = vec![0x42; 48];
         let cr = [1u8; 32];
         let sr = [2u8; 32];
 
-        let out1 = tls12_export_keying_material(&*factory, &ms, &cr, &sr, b"test-label", None, 32)
-            .unwrap();
-        let out2 = tls12_export_keying_material(&*factory, &ms, &cr, &sr, b"test-label", None, 32)
-            .unwrap();
+        let out1 =
+            tls12_export_keying_material(HashAlgId::Sha256, &ms, &cr, &sr, b"test-label", None, 32)
+                .unwrap();
+        let out2 =
+            tls12_export_keying_material(HashAlgId::Sha256, &ms, &cr, &sr, b"test-label", None, 32)
+                .unwrap();
         assert_eq!(out1, out2);
         assert_eq!(out1.len(), 32);
     }
 
     #[test]
     fn test_tls12_export_with_context() {
-        let factory = sha256_factory();
         let ms = vec![0x42; 48];
         let cr = [1u8; 32];
         let sr = [2u8; 32];
 
         let out_none =
-            tls12_export_keying_material(&*factory, &ms, &cr, &sr, b"test-label", None, 32)
+            tls12_export_keying_material(HashAlgId::Sha256, &ms, &cr, &sr, b"test-label", None, 32)
                 .unwrap();
         let out_ctx = tls12_export_keying_material(
-            &*factory,
+            HashAlgId::Sha256,
             &ms,
             &cr,
             &sr,
@@ -251,42 +237,43 @@ mod tests {
 
     #[test]
     fn test_tls13_early_export_deterministic() {
-        let factory = sha256_factory();
         let eems = vec![0x11; 32]; // fake early_exporter_master_secret
         let label = b"test-early-exporter";
         let ctx = b"early context";
 
         let out1 =
-            tls13_export_early_keying_material(&*factory, &eems, label, Some(ctx), 32).unwrap();
+            tls13_export_early_keying_material(HashAlgId::Sha256, &eems, label, Some(ctx), 32)
+                .unwrap();
         let out2 =
-            tls13_export_early_keying_material(&*factory, &eems, label, Some(ctx), 32).unwrap();
+            tls13_export_early_keying_material(HashAlgId::Sha256, &eems, label, Some(ctx), 32)
+                .unwrap();
         assert_eq!(out1, out2);
         assert_eq!(out1.len(), 32);
     }
 
     #[test]
     fn test_tls13_early_export_differs_from_regular() {
-        let factory = sha256_factory();
         let label = b"test-exporter";
         let regular_secret = vec![0xAA; 32];
         let early_secret = vec![0xBB; 32];
 
         let regular =
-            tls13_export_keying_material(&*factory, &regular_secret, label, None, 32).unwrap();
+            tls13_export_keying_material(HashAlgId::Sha256, &regular_secret, label, None, 32)
+                .unwrap();
         let early =
-            tls13_export_early_keying_material(&*factory, &early_secret, label, None, 32).unwrap();
+            tls13_export_early_keying_material(HashAlgId::Sha256, &early_secret, label, None, 32)
+                .unwrap();
         // Different secrets → different output
         assert_ne!(regular, early);
     }
 
     #[test]
     fn test_tls12_export_forbidden_label() {
-        let factory = sha256_factory();
         let ms = vec![0x42; 48];
         let cr = [1u8; 32];
         let sr = [2u8; 32];
         assert!(tls12_export_keying_material(
-            &*factory,
+            HashAlgId::Sha256,
             &ms,
             &cr,
             &sr,
@@ -299,12 +286,11 @@ mod tests {
 
     #[test]
     fn test_tls12_export_non_utf8_label() {
-        let factory = sha256_factory();
         let ms = vec![0x42; 48];
         let cr = [1u8; 32];
         let sr = [2u8; 32];
         let err = tls12_export_keying_material(
-            &*factory,
+            HashAlgId::Sha256,
             &ms,
             &cr,
             &sr,
@@ -318,15 +304,30 @@ mod tests {
 
     #[test]
     fn test_tls12_export_different_randoms() {
-        let factory = sha256_factory();
         let ms = vec![0x42; 48];
         let cr1 = [1u8; 32];
         let cr2 = [2u8; 32];
         let sr = [3u8; 32];
-        let out1 = tls12_export_keying_material(&*factory, &ms, &cr1, &sr, b"test-label", None, 32)
-            .unwrap();
-        let out2 = tls12_export_keying_material(&*factory, &ms, &cr2, &sr, b"test-label", None, 32)
-            .unwrap();
+        let out1 = tls12_export_keying_material(
+            HashAlgId::Sha256,
+            &ms,
+            &cr1,
+            &sr,
+            b"test-label",
+            None,
+            32,
+        )
+        .unwrap();
+        let out2 = tls12_export_keying_material(
+            HashAlgId::Sha256,
+            &ms,
+            &cr2,
+            &sr,
+            b"test-label",
+            None,
+            32,
+        )
+        .unwrap();
         assert_ne!(
             out1, out2,
             "different randoms should produce different output"
@@ -335,11 +336,12 @@ mod tests {
 
     #[test]
     fn test_tls13_export_different_secrets() {
-        let factory = sha256_factory();
         let ems1 = vec![0xAA; 32];
         let ems2 = vec![0xBB; 32];
-        let out1 = tls13_export_keying_material(&*factory, &ems1, b"test-label", None, 32).unwrap();
-        let out2 = tls13_export_keying_material(&*factory, &ems2, b"test-label", None, 32).unwrap();
+        let out1 = tls13_export_keying_material(HashAlgId::Sha256, &ems1, b"test-label", None, 32)
+            .unwrap();
+        let out2 = tls13_export_keying_material(HashAlgId::Sha256, &ems2, b"test-label", None, 32)
+            .unwrap();
         assert_ne!(
             out1, out2,
             "different secrets should produce different output"
@@ -348,21 +350,25 @@ mod tests {
 
     #[test]
     fn test_tls13_early_export_forbidden_label() {
-        let factory = sha256_factory();
         let eems = vec![0x11; 32];
-        let err = tls13_export_early_keying_material(&*factory, &eems, b"master secret", None, 32)
-            .unwrap_err();
+        let err = tls13_export_early_keying_material(
+            HashAlgId::Sha256,
+            &eems,
+            b"master secret",
+            None,
+            32,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("reserved"));
     }
 
     #[test]
     fn test_tls12_export_context_affects_output() {
-        let factory = sha256_factory();
         let ms = vec![0x42; 48];
         let cr = [1u8; 32];
         let sr = [2u8; 32];
         let out_a = tls12_export_keying_material(
-            &*factory,
+            HashAlgId::Sha256,
             &ms,
             &cr,
             &sr,
@@ -372,7 +378,7 @@ mod tests {
         )
         .unwrap();
         let out_b = tls12_export_keying_material(
-            &*factory,
+            HashAlgId::Sha256,
             &ms,
             &cr,
             &sr,
@@ -382,7 +388,7 @@ mod tests {
         )
         .unwrap();
         let out_none =
-            tls12_export_keying_material(&*factory, &ms, &cr, &sr, b"test-label", None, 32)
+            tls12_export_keying_material(HashAlgId::Sha256, &ms, &cr, &sr, b"test-label", None, 32)
                 .unwrap();
         assert_ne!(out_a, out_b, "different contexts → different output");
         assert_ne!(out_a, out_none, "context vs no context → different output");
