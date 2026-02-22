@@ -2043,3 +2043,28 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - 10 files changed (2 deleted, 8 created). Zero logic changes, zero public API changes.
 - Largest implementation file reduced from 7,324 lines to 1,147 lines.
 - All tests pass (2585/2585). Clippy: 0 warnings.
+
+---
+
+## Phase R105: Hash Digest Enum Dispatch
+
+**Prompt**: Implement the plan for Phase R105 — Hash Digest Enum Dispatch
+
+**Scope**: Replace `HashFactory = Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>` with stack-allocated enum dispatch using `HashAlgId` (Copy enum) and `DigestVariant` (concrete enum wrapping Sha256/Sha384/Sha1/Sm3). Eliminates double heap allocation per hash operation.
+
+**Work performed**:
+- Added `HashAlgId` enum and `DigestVariant` enum with `Digest` trait delegation to `crypt/mod.rs`
+- Added `hash_alg_id()` and `mac_hash_alg_id()` methods to all cipher suite param types
+- Rewrote `hkdf.rs`, `prf.rs`, `transcript.rs`, `key_schedule.rs`, `key_schedule12.rs`, `traffic_keys.rs`, `export.rs` to use `HashAlgId` instead of `&Factory`/`HashFactory`
+- Updated all 10 handshake client/server files to pass `HashAlgId` to TranscriptHash, key derivation, and PRF functions
+- Updated 6 connection files (client, server, tests, connection12 client/server, async) to use `DigestVariant::new()` instead of `(*factory)()`
+- Removed `HashFactory` type alias, all `hash_factory()`, `mac_hash_factory()`, `hash_factory_for_len()` methods
+- Updated 3 test functions in `crypt/mod.rs` to test `DigestVariant` instead of `hash_factory()`
+- Fixed `DigestVariant::finish()` impl to bridge inherent `finish() -> Result<[u8; N]>` to trait `finish(&mut [u8]) -> Result<()>`
+- Removed unnecessary `drop(sample)` flagged by clippy
+
+**Files modified**: 24 files (+633 / -621 lines)
+
+**Result**:
+- Commit `aa0fd49`. All 2585 workspace tests pass, 0 clippy warnings, formatting clean.
+- Public API: `HashAlgId` and `DigestVariant` are new pub types; `HashFactory` removed (was internal only).

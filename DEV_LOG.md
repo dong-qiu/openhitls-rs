@@ -7645,3 +7645,46 @@ This is a pure structural reorganization — zero logic changes, zero public API
 - `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Refactoring-Phase R105: Hash Digest Enum Dispatch
+
+**Date**: 2026-02-22
+**Scope**: Replace `HashFactory` (heap-allocated closures) with stack-allocated enum dispatch (`HashAlgId` + `DigestVariant`)
+
+### Summary
+
+Replaced `HashFactory = Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>` with two new types: `HashAlgId` (lightweight `Copy` enum identifying the hash algorithm) and `DigestVariant` (concrete enum wrapping `Sha256`/`Sha384`/`Sha1`/`Sm3` with `Digest` trait delegation). This eliminates double heap allocation (boxed closure + boxed trait object) per hash operation across HKDF, PRF, transcript, key schedule, and key export code paths.
+
+### New Types
+
+- `HashAlgId` — `#[derive(Copy)]` enum: `Sha256`, `Sha384`, `Sha1`, `Sm3` (feature-gated)
+- `DigestVariant` — enum wrapping concrete hash types, implementing the `Digest` trait via delegation
+- `hash_alg_id()` methods added to `CipherSuiteParams`, `Tls12CipherSuiteParams`, `TlcpCipherSuiteParams`
+- `mac_hash_alg_id()` added to `Tls12CipherSuiteParams` (returns `Sha1`/`Sha256`/`Sha384`)
+
+### Files Modified (24 files)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/crypt/mod.rs` | Added `HashAlgId`, `DigestVariant`, `hash_alg_id()` methods; removed `HashFactory` type, `hash_factory()`, `mac_hash_factory()`, `hash_factory_for_len()` |
+| `crates/hitls-tls/src/crypt/hkdf.rs` | `&Factory` → `HashAlgId` in all functions |
+| `crates/hitls-tls/src/crypt/prf.rs` | `&Factory` → `HashAlgId` in all functions |
+| `crates/hitls-tls/src/crypt/transcript.rs` | Stored factory closure → `HashAlgId` field |
+| `crates/hitls-tls/src/crypt/key_schedule.rs` | Stored `HashFactory` → `HashAlgId` field |
+| `crates/hitls-tls/src/crypt/key_schedule12.rs` | `&Factory` → `HashAlgId` in all functions |
+| `crates/hitls-tls/src/crypt/traffic_keys.rs` | Uses `params.hash_alg_id()` |
+| `crates/hitls-tls/src/crypt/export.rs` | `&Factory` → `HashAlgId` in all functions |
+| `crates/hitls-tls/src/handshake/client*.rs` (5 files) | Updated TranscriptHash, key derivation, PSK binder callers |
+| `crates/hitls-tls/src/handshake/server*.rs` (5 files) | Updated TranscriptHash, encrypt/decrypt_ticket, key derivation callers |
+| `crates/hitls-tls/src/connection/client.rs` | Updated post-handshake cert request hashers, export callers |
+| `crates/hitls-tls/src/connection/server.rs` | Updated post-handshake auth hashers, export callers |
+| `crates/hitls-tls/src/connection/tests.rs` | Updated hash_factory/TranscriptHash test callers |
+| `crates/hitls-tls/src/connection12/client.rs` | Updated export_keying_material callers |
+| `crates/hitls-tls/src/connection12/server.rs` | Updated export_keying_material callers |
+| `crates/hitls-tls/src/connection_async.rs` | Updated post-handshake cert request hashers, export callers |
+
+### Build Status
+- `cargo test -p hitls-tls --all-features`: 1164 passed, 0 failed, 0 ignored
+- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

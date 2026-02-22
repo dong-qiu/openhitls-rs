@@ -273,6 +273,105 @@ Key implementation details:
 
 ---
 
+## Phase R105: Hash Digest Enum Dispatch
+
+### Date: 2026-02-22
+
+### Commit: `aa0fd49`
+
+### Goal
+
+Replace `HashFactory = Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>` with stack-allocated enum dispatch, eliminating double heap allocation (boxed closure + boxed trait object) per hash operation in HKDF, PRF, transcript hash, key schedule, and key export code paths.
+
+### Problem
+
+| Pattern | Impact |
+|---------|--------|
+| `HashFactory` closure | 1 heap alloc per factory creation |
+| `factory()` call | 1 heap alloc per `Box<dyn Digest>` |
+| HKDF inner loop | 2–3 `factory()` calls per HMAC |
+| Key derivation | Multiple HMAC calls per operation |
+| Only 4 concrete types used | Sha256, Sha384, Sha1, Sm3 |
+
+### Solution
+
+**1. `HashAlgId`** — lightweight `Copy` enum identifying the hash algorithm:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashAlgId {
+    Sha256, Sha384, Sha1,
+    #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+    Sm3,
+}
+```
+
+**2. `DigestVariant`** — concrete enum wrapping hash implementations:
+
+```rust
+pub enum DigestVariant {
+    Sha256(Sha256), Sha384(Sha384), Sha1(Sha1),
+    #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+    Sm3(Sm3),
+}
+```
+
+`DigestVariant` implements the `Digest` trait by delegating to the inner variant. Construction is stack-allocated via `DigestVariant::new(alg)`. Static size lookup via `DigestVariant::output_size_for(alg)`.
+
+**3. `hash_alg_id()` methods** added to `CipherSuiteParams`, `Tls12CipherSuiteParams`, `TlcpCipherSuiteParams`. Also `mac_hash_alg_id()` on `Tls12CipherSuiteParams`.
+
+**4. Migration pattern** applied across all files:
+- `factory: &Factory` → `alg: HashAlgId`
+- `factory()` / `(*factory)()` → `DigestVariant::new(alg)`
+- `TranscriptHash::new(closure)` → `TranscriptHash::new(HashAlgId::Variant)`
+- `hash_factory: HashFactory` (stored field) → `hash_alg: HashAlgId`
+
+### Files Modified
+
+| File | Action |
+|------|--------|
+| `crates/hitls-tls/src/crypt/mod.rs` | Added `HashAlgId`, `DigestVariant`, `hash_alg_id()` methods; removed `HashFactory`, `hash_factory()`, `mac_hash_factory()` |
+| `crates/hitls-tls/src/crypt/hkdf.rs` | `&Factory` → `HashAlgId` in 6 functions |
+| `crates/hitls-tls/src/crypt/prf.rs` | `&Factory` → `HashAlgId` in 2 functions |
+| `crates/hitls-tls/src/crypt/transcript.rs` | Stored closure → `HashAlgId` field |
+| `crates/hitls-tls/src/crypt/key_schedule.rs` | Stored `HashFactory` → `HashAlgId` field |
+| `crates/hitls-tls/src/crypt/key_schedule12.rs` | `&Factory` → `HashAlgId` in 5 functions |
+| `crates/hitls-tls/src/crypt/traffic_keys.rs` | Uses `params.hash_alg_id()` |
+| `crates/hitls-tls/src/crypt/export.rs` | `&Factory` → `HashAlgId` in 3 functions |
+| `crates/hitls-tls/src/handshake/client*.rs` (5) | Updated TranscriptHash, key derivation, PSK binder callers |
+| `crates/hitls-tls/src/handshake/server*.rs` (5) | Updated TranscriptHash, encrypt/decrypt_ticket, key derivation callers |
+| `crates/hitls-tls/src/connection/*.rs` (5) | Updated post-HS hashers, export callers |
+| `crates/hitls-tls/src/connection_async.rs` | Updated post-HS hashers, export callers |
+
+Total: **24 files**, +633 / −621 lines.
+
+### Not Changed (by design)
+
+- **`hitls-crypto`** crate — No changes. The `Digest` trait and concrete hash structs remain as-is.
+- **`hitls-crypto/src/hmac/mod.rs`** — Not touched. The hitls-crypto `Hmac` struct keeps its own factory-based API.
+- Any crate outside `hitls-tls`.
+
+### Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Heap allocs per hash operation | 2 (closure + trait object) | 0 (stack enum) |
+| `HashFactory` type | 1 boxed closure type | Removed |
+| `hash_factory()` methods | 4 methods returning `Box<dyn Fn>` | Removed |
+| `HashAlgId` | N/A | New `Copy` enum |
+| `DigestVariant` | N/A | New stack-allocated `Digest` impl |
+| Function signatures | `factory: &Factory` | `alg: HashAlgId` (Copy, no ref needed) |
+
+### Build Status
+
+- `cargo test -p hitls-tls --all-features`: **1164 passed**, 0 failed, 0 ignored
+- `cargo test --workspace --all-features`: **2585 passed**, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: **0 warnings**
+- `cargo fmt --all -- --check`: **clean**
+- Public API: `HashAlgId` and `DigestVariant` added as new pub types; `HashFactory` removed (was internal)
+
+---
+
 ## Refactoring Queue
 
 The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and have not yet been started:
@@ -282,7 +381,7 @@ The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and hav
 | Phase R102 | PKI Encoding Consolidation | Critical | **Done** |
 | Phase R103 | Record Layer Enum Dispatch | High | **Done** |
 | Phase R104 | Connection File Decomposition | High | **Done** |
-| Phase R105 | Hash Digest Enum Dispatch | Medium | Pending |
+| Phase R105 | Hash Digest Enum Dispatch | Medium | **Done** |
 | Phase R106 | Sync/Async Unification via Macros | Medium | Pending |
 | Phase R107 | X.509 Module Decomposition | Medium | Pending |
 | Phase R108 | Integration Test Modularization | Medium | Pending |
@@ -290,4 +389,4 @@ The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and hav
 | Phase R110 | Parameter Struct Refactoring | Low | Pending |
 | Phase R111 | DRBG State Machine Unification | Low | Pending |
 
-**Recommended execution order**: R103 → R104 → R105 → R107 → R108 → R109 → R110 → R111 → R106
+**Recommended execution order**: R107 → R108 → R109 → R110 → R111 → R106
