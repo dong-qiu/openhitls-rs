@@ -372,6 +372,29 @@ Total: **24 files**, +633 / −621 lines.
 
 ---
 
+## Phase R106: Sync/Async Unification via Body Macros
+
+**Prompt**: Implement Phase R106 — Sync/Async Unification via Body Macros
+
+**Scope**: Eliminate ~2,900 lines of sync/async code duplication using `macro_rules!` body macros with `maybe_await!` pattern.
+
+**Work performed**:
+1. Created `macros.rs` with `maybe_await!` (sync/is_async mode), 18 I/O body macros, 4 accessor macros
+2. Refactored TLS 1.3 client: sync (893→197 lines) and async portion of `connection_async.rs`
+3. Refactored TLS 1.3 server: sync (828→369 lines) and async portion of `connection_async.rs`
+4. Refactored TLS 1.2 client: sync (1,149→1,025 lines) and async portion of `connection12_async.rs`
+5. Refactored TLS 1.2 server: sync (1,050→927 lines) and async portion of `connection12_async.rs`
+6. Removed 2 duplicate `ConnectionState` enum definitions from async files
+7. TLS 1.2 complex methods (do_handshake, renegotiation) kept as-is due to structural differences
+
+**Files modified**: 8 files (1 new + 7 modified), +1,511 / −2,871 lines (net −1,360)
+
+**Result**:
+- All 2585 workspace tests pass, 0 clippy warnings, formatting clean.
+- Zero public API changes.
+
+---
+
 ## Refactoring Queue
 
 The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and have not yet been started:
@@ -382,7 +405,7 @@ The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and hav
 | Phase R103 | Record Layer Enum Dispatch | High | **Done** |
 | Phase R104 | Connection File Decomposition | High | **Done** |
 | Phase R105 | Hash Digest Enum Dispatch | Medium | **Done** |
-| Phase R106 | Sync/Async Unification via Macros | Medium | Pending |
+| Phase R106 | Sync/Async Unification via Macros | Medium | **Done** |
 | Phase R107 | X.509 Module Decomposition | Medium | Pending |
 | Phase R108 | Integration Test Modularization | Medium | Pending |
 | Phase R109 | Test Helper Consolidation | Low | Pending |

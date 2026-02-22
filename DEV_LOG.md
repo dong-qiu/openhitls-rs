@@ -7688,3 +7688,40 @@ Replaced `HashFactory = Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>` with two
 - `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Refactoring-Phase R106: Sync/Async Unification via Body Macros
+
+**Date**: 2026-02-22
+**Scope**: Eliminate ~2,900 lines of sync/async code duplication using `macro_rules!` body macros
+
+### Summary
+
+The TLS crate had 3 async connection files (`connection_async.rs`, `connection12_async.rs`) that duplicated their sync counterparts nearly verbatim. The ONLY differences between sync and async versions were: (1) `fn` vs `async fn` signatures, (2) `.await` after I/O calls, and (3) `Read+Write` vs `AsyncRead+AsyncWrite+Unpin` trait bounds. This created ~2,900 lines of duplication that required identical edits in two places for any bug fix or feature change.
+
+Introduced a `maybe_await!` macro that conditionally `.await`s expressions based on a mode flag (`sync` or `is_async`), and per-method body macros containing shared logic. Each sync/async method retains its hand-written 2-3 line signature, invoking the body macro with the appropriate mode flag. Non-I/O accessor methods are shared via `impl_tls13_client_accessors!`, `impl_tls13_server_accessors!`, `impl_tls12_client_accessors!`, and `impl_tls12_server_accessors!` macros.
+
+Async files now import `ConnectionState` from their sync counterparts instead of defining local copies, eliminating 2 duplicate enum definitions.
+
+### New File
+
+| File | Description |
+|------|-------------|
+| `crates/hitls-tls/src/macros.rs` | **NEW** — 1,377 lines. `maybe_await!` + 18 body macros + 4 accessor macros |
+
+### Files Modified (7 files, +1,511 / −2,871 lines)
+
+| File | Before | After | Changes |
+|------|--------|-------|---------|
+| `src/lib.rs` | — | — | Added `#[macro_use] mod macros;` |
+| `src/connection/client.rs` | 893 | 197 | Replaced I/O method bodies + accessors with macro invocations |
+| `src/connection/server.rs` | 828 | 369 | Same; kept `request_client_auth()` hand-written (sync-only) |
+| `src/connection_async.rs` | 2,126 | 1,039 | Removed `ConnectionState`, replaced all bodies with macros |
+| `src/connection12/client.rs` | 1,149 | 1,025 | Replaced I/O helpers + accessors; kept complex do_handshake as-is |
+| `src/connection12/server.rs` | 1,050 | 927 | Same; kept complex handshake and renegotiation methods as-is |
+| `src/connection12_async.rs` | 2,534 | 2,229 | Removed `ConnectionState`, replaced I/O helpers + accessors |
+
+### Build Status
+- `cargo test -p hitls-tls --all-features`: 1164 passed, 0 failed, 0 ignored
+- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

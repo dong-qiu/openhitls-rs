@@ -2067,4 +2067,41 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 **Result**:
 - Commit `aa0fd49`. All 2585 workspace tests pass, 0 clippy warnings, formatting clean.
+
+---
+
+## Phase R106: Sync/Async Unification via Body Macros
+
+**Prompt**: Continue implementing Phase R106 — Sync/Async Unification via Body Macros (plan from binary-exploring-wand.md)
+
+**Scope**: Eliminate sync/async code duplication in TLS connection files using `macro_rules!` body macros with a `maybe_await!` pattern.
+
+**Work performed**:
+- Created `macros.rs` with `maybe_await!` macro (sync mode returns expr, is_async mode adds `.await`)
+- Extracted 18 body macros for I/O methods: `fill_buf_body!`, `read_record_body!`, `tls_write_trait_body!`, `tls12_read_handshake_msg_body!`, `tls12_handshake_trait_body!`, `tls13_client_*_body!` (9 macros), `tls13_server_*_body!` (5 macros), `tls13_client_shutdown_trait_body!`
+- Created 4 accessor macros: `impl_tls13_client_accessors!`, `impl_tls13_server_accessors!`, `impl_tls12_client_accessors!`, `impl_tls12_server_accessors!`
+- Refactored `connection/client.rs` from 893 to 197 lines (all I/O bodies + accessors replaced)
+- Refactored `connection/server.rs` from 828 to 369 lines (kept `request_client_auth()` sync-only)
+- Refactored `connection_async.rs` from 2,126 to 1,039 lines (removed `ConnectionState`, all bodies replaced)
+- Refactored `connection12/client.rs` from 1,149 to 1,025 lines (I/O helpers + accessors replaced, complex handshake kept)
+- Refactored `connection12/server.rs` from 1,050 to 927 lines (I/O helpers + accessors replaced, complex handshake kept)
+- Refactored `connection12_async.rs` from 2,534 to 2,229 lines (removed `ConnectionState`, I/O helpers + accessors replaced)
+- Fixed `$ConnectionState:path` → `$ConnectionState:ident` macro fragment specifier issue
+- Removed orphaned doc comment flagged by clippy
+- TLS 1.2 do_handshake / renegotiation methods left as-is (structural differences between sync/async prevented full macro extraction)
+
+**Files created/modified**:
+1. `crates/hitls-tls/src/macros.rs` — **NEW**, 1,377 lines (all body + accessor macros)
+2. `crates/hitls-tls/src/lib.rs` — Added `#[macro_use] mod macros;`
+3. `crates/hitls-tls/src/connection/client.rs` — I/O bodies + accessors → macros
+4. `crates/hitls-tls/src/connection/server.rs` — I/O bodies + accessors → macros
+5. `crates/hitls-tls/src/connection_async.rs` — Removed ConnectionState, all bodies → macros
+6. `crates/hitls-tls/src/connection12/client.rs` — I/O helpers + accessors → macros
+7. `crates/hitls-tls/src/connection12/server.rs` — I/O helpers + accessors → macros
+8. `crates/hitls-tls/src/connection12_async.rs` — Removed ConnectionState, I/O helpers + accessors → macros
+
+**Result**:
+- 8 files changed (1 created, 7 modified). +1,511 / −2,871 lines (net −1,360 lines).
+- All 2585 workspace tests pass, 0 clippy warnings, formatting clean.
+- Zero public API changes. All type names, module paths, and trait impls unchanged.
 - Public API: `HashAlgId` and `DigestVariant` are new pub types; `HashFactory` removed (was internal only).
