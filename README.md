@@ -264,7 +264,7 @@ cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 652 tests + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 1156 tests
+cargo test -p hitls-tls --all-features      # 1164 tests
 cargo test -p hitls-pki --all-features      # 349 tests
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
