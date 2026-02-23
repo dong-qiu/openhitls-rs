@@ -1090,13 +1090,15 @@ fn run_full_handshake_get_session(suite: CipherSuite) -> TlsSession {
     );
     activate_write_cbc_or_etm(
         &mut server_rl,
-        suite_neg,
-        keys.is_cbc,
-        server_etm,
-        &keys.server_write_key,
-        &keys.server_write_mac_key,
-        keys.mac_len,
-        keys.server_write_iv.clone(),
+        &CryptoActivationParams {
+            suite: suite_neg,
+            is_cbc: keys.is_cbc,
+            use_etm: server_etm,
+            key: &keys.server_write_key,
+            mac_key: &keys.server_write_mac_key,
+            mac_len: keys.mac_len,
+            iv: keys.server_write_iv.clone(),
+        },
     );
     s2c.extend_from_slice(
         &server_rl
@@ -1113,13 +1115,15 @@ fn run_full_handshake_get_session(suite: CipherSuite) -> TlsSession {
 
     activate_read_cbc_or_etm(
         &mut client_rl,
-        suite_neg,
-        cflight.is_cbc,
-        client_etm,
-        &cflight.server_write_key,
-        &cflight.server_write_mac_key,
-        cflight.mac_len,
-        cflight.server_write_iv.clone(),
+        &CryptoActivationParams {
+            suite: suite_neg,
+            is_cbc: cflight.is_cbc,
+            use_etm: client_etm,
+            key: &cflight.server_write_key,
+            mac_key: &cflight.server_write_mac_key,
+            mac_len: cflight.mac_len,
+            iv: cflight.server_write_iv.clone(),
+        },
     );
 
     let (_, sfin_plain, consumed) = client_rl.open_record(&s2c).unwrap();
@@ -1152,45 +1156,36 @@ fn run_full_handshake_get_session(suite: CipherSuite) -> TlsSession {
     }
 }
 
-// Activate CBC/ETM/AEAD encryption on the given record layer (helper for test fns).
-#[allow(clippy::too_many_arguments)]
-fn activate_write_cbc_or_etm(
-    rl: &mut RecordLayer,
+struct CryptoActivationParams<'a> {
     suite: CipherSuite,
     is_cbc: bool,
     use_etm: bool,
-    write_key: &[u8],
-    mac_key: &[u8],
+    key: &'a [u8],
+    mac_key: &'a [u8],
     mac_len: usize,
     iv: Vec<u8>,
-) {
-    if is_cbc && use_etm {
-        rl.activate_write_encryption12_etm(write_key.to_vec(), mac_key.to_vec(), mac_len);
-    } else if is_cbc {
-        rl.activate_write_encryption12_cbc(write_key.to_vec(), mac_key.to_vec(), mac_len);
+}
+
+// Activate CBC/ETM/AEAD encryption on the given record layer (helper for test fns).
+fn activate_write_cbc_or_etm(rl: &mut RecordLayer, p: &CryptoActivationParams) {
+    if p.is_cbc && p.use_etm {
+        rl.activate_write_encryption12_etm(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len);
+    } else if p.is_cbc {
+        rl.activate_write_encryption12_cbc(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len);
     } else {
-        rl.activate_write_encryption12(suite, write_key, iv)
+        rl.activate_write_encryption12(p.suite, p.key, p.iv.clone())
             .unwrap();
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn activate_read_cbc_or_etm(
-    rl: &mut RecordLayer,
-    suite: CipherSuite,
-    is_cbc: bool,
-    use_etm: bool,
-    write_key: &[u8],
-    mac_key: &[u8],
-    mac_len: usize,
-    iv: Vec<u8>,
-) {
-    if is_cbc && use_etm {
-        rl.activate_read_decryption12_etm(write_key.to_vec(), mac_key.to_vec(), mac_len);
-    } else if is_cbc {
-        rl.activate_read_decryption12_cbc(write_key.to_vec(), mac_key.to_vec(), mac_len);
+fn activate_read_cbc_or_etm(rl: &mut RecordLayer, p: &CryptoActivationParams) {
+    if p.is_cbc && p.use_etm {
+        rl.activate_read_decryption12_etm(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len);
+    } else if p.is_cbc {
+        rl.activate_read_decryption12_cbc(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len);
     } else {
-        rl.activate_read_decryption12(suite, write_key, iv).unwrap();
+        rl.activate_read_decryption12(p.suite, p.key, p.iv.clone())
+            .unwrap();
     }
 }
 
@@ -1270,13 +1265,15 @@ fn run_abbreviated_handshake(
             // 5. Activate server write encryption
             activate_write_cbc_or_etm(
                 &mut server_rl,
-                abbr.suite,
-                abbr.is_cbc,
-                server_etm,
-                &abbr.server_write_key,
-                &abbr.server_write_mac_key,
-                abbr.mac_len,
-                abbr.server_write_iv.clone(),
+                &CryptoActivationParams {
+                    suite: abbr.suite,
+                    is_cbc: abbr.is_cbc,
+                    use_etm: server_etm,
+                    key: &abbr.server_write_key,
+                    mac_key: &abbr.server_write_mac_key,
+                    mac_len: abbr.mac_len,
+                    iv: abbr.server_write_iv.clone(),
+                },
             );
 
             // 6. Server → Finished (encrypted)
@@ -1302,13 +1299,15 @@ fn run_abbreviated_handshake(
             // 9. Activate client read decryption (server write key)
             activate_read_cbc_or_etm(
                 &mut client_rl,
-                keys.suite,
-                keys.is_cbc,
-                client_etm,
-                &keys.server_write_key,
-                &keys.server_write_mac_key,
-                keys.mac_len,
-                keys.server_write_iv.clone(),
+                &CryptoActivationParams {
+                    suite: keys.suite,
+                    is_cbc: keys.is_cbc,
+                    use_etm: client_etm,
+                    key: &keys.server_write_key,
+                    mac_key: &keys.server_write_mac_key,
+                    mac_len: keys.mac_len,
+                    iv: keys.server_write_iv.clone(),
+                },
             );
 
             // 10. Client reads server Finished (encrypted) → returns client Finished
@@ -1324,13 +1323,15 @@ fn run_abbreviated_handshake(
             // 12. Activate client write encryption
             activate_write_cbc_or_etm(
                 &mut client_rl,
-                keys.suite,
-                keys.is_cbc,
-                client_etm,
-                &keys.client_write_key,
-                &keys.client_write_mac_key,
-                keys.mac_len,
-                keys.client_write_iv.clone(),
+                &CryptoActivationParams {
+                    suite: keys.suite,
+                    is_cbc: keys.is_cbc,
+                    use_etm: client_etm,
+                    key: &keys.client_write_key,
+                    mac_key: &keys.client_write_mac_key,
+                    mac_len: keys.mac_len,
+                    iv: keys.client_write_iv.clone(),
+                },
             );
 
             // 13. Client → Finished (encrypted)
@@ -1347,13 +1348,15 @@ fn run_abbreviated_handshake(
             // 15. Activate server read decryption (client write key)
             activate_read_cbc_or_etm(
                 &mut server_rl,
-                abbr.suite,
-                abbr.is_cbc,
-                server_etm,
-                &abbr.client_write_key,
-                &abbr.client_write_mac_key,
-                abbr.mac_len,
-                abbr.client_write_iv.clone(),
+                &CryptoActivationParams {
+                    suite: abbr.suite,
+                    is_cbc: abbr.is_cbc,
+                    use_etm: server_etm,
+                    key: &abbr.client_write_key,
+                    mac_key: &abbr.client_write_mac_key,
+                    mac_len: abbr.mac_len,
+                    iv: abbr.client_write_iv.clone(),
+                },
             );
 
             // 16. Server processes client Finished (encrypted)

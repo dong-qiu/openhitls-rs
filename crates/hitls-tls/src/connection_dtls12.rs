@@ -315,44 +315,40 @@ pub fn dtls12_handshake_in_memory(
         }
     };
 
+    let mut ctx = DtlsHandshakeContext {
+        client_conn: &mut client_conn,
+        server_conn: &mut server_conn,
+        client_hs: &mut client_hs,
+        server_hs: &mut server_hs,
+        server_to_client: &mut server_to_client,
+        client_to_server: &mut client_to_server,
+    };
+
     match server_result {
         DtlsServerHelloResult::Full(flight) => {
-            do_full_handshake(
-                &mut client_conn,
-                &mut server_conn,
-                &mut client_hs,
-                &mut server_hs,
-                flight,
-                &mut server_to_client,
-                &mut client_to_server,
-            )?;
+            do_full_handshake(&mut ctx, flight)?;
         }
         DtlsServerHelloResult::Abbreviated(mut abbr) => {
-            do_abbreviated_handshake(
-                &mut client_conn,
-                &mut server_conn,
-                &mut client_hs,
-                &mut server_hs,
-                &mut abbr,
-                &mut server_to_client,
-                &mut client_to_server,
-            )?;
+            do_abbreviated_handshake(&mut ctx, &mut abbr)?;
         }
     }
 
     Ok((client_conn, server_conn))
 }
 
+struct DtlsHandshakeContext<'a> {
+    client_conn: &'a mut Dtls12ClientConnection,
+    server_conn: &'a mut Dtls12ServerConnection,
+    client_hs: &'a mut Dtls12ClientHandshake,
+    server_hs: &'a mut Dtls12ServerHandshake,
+    server_to_client: &'a mut Vec<Vec<u8>>,
+    client_to_server: &'a mut Vec<Vec<u8>>,
+}
+
 /// Full DTLS 1.2 handshake flow (after ServerHello result).
-#[allow(clippy::too_many_arguments)]
 fn do_full_handshake(
-    client_conn: &mut Dtls12ClientConnection,
-    server_conn: &mut Dtls12ServerConnection,
-    client_hs: &mut Dtls12ClientHandshake,
-    server_hs: &mut Dtls12ServerHandshake,
+    ctx: &mut DtlsHandshakeContext,
     flight: crate::handshake::server_dtls12::DtlsServerFlightResult,
-    server_to_client: &mut Vec<Vec<u8>>,
-    client_to_server: &mut Vec<Vec<u8>>,
 ) -> Result<(), TlsError> {
     let suite = flight.suite;
 
@@ -363,57 +359,61 @@ fn do_full_handshake(
         &flight.server_key_exchange,
         &flight.server_hello_done,
     ] {
-        let datagram = wrap_handshake_record(&mut server_conn.write_epoch, msg)?;
-        server_to_client.push(datagram);
+        let datagram = wrap_handshake_record(&mut ctx.server_conn.write_epoch, msg)?;
+        ctx.server_to_client.push(datagram);
     }
 
     // === Client processes server flight ===
     // ServerHello
-    let sh_datagram = server_to_client.remove(0);
+    let sh_datagram = ctx.server_to_client.remove(0);
     let (sh_record, _) = parse_dtls_record(&sh_datagram)?;
     let sh_hs_msg = &sh_record.fragment;
     let sh_tls = dtls_to_tls_handshake(sh_hs_msg)?;
     let (_, sh_body, _) = crate::handshake::codec::parse_handshake_header(&sh_tls)?;
     let sh: ServerHello = decode_server_hello(sh_body)?;
-    client_hs.process_server_hello(sh_hs_msg, &sh)?;
+    ctx.client_hs.process_server_hello(sh_hs_msg, &sh)?;
 
     // Certificate
-    let cert_datagram = server_to_client.remove(0);
+    let cert_datagram = ctx.server_to_client.remove(0);
     let (cert_record, _) = parse_dtls_record(&cert_datagram)?;
     let cert_hs_msg = &cert_record.fragment;
     let cert_tls = dtls_to_tls_handshake(cert_hs_msg)?;
     let (_, cert_body, _) = crate::handshake::codec::parse_handshake_header(&cert_tls)?;
     let cert12 = decode_certificate12(cert_body)?;
-    client_hs.process_certificate(cert_hs_msg, &cert12.certificate_list)?;
+    ctx.client_hs
+        .process_certificate(cert_hs_msg, &cert12.certificate_list)?;
 
     // ServerKeyExchange
-    let ske_datagram = server_to_client.remove(0);
+    let ske_datagram = ctx.server_to_client.remove(0);
     let (ske_record, _) = parse_dtls_record(&ske_datagram)?;
     let ske_hs_msg = &ske_record.fragment;
     let ske_tls = dtls_to_tls_handshake(ske_hs_msg)?;
     let (_, ske_body, _) = crate::handshake::codec::parse_handshake_header(&ske_tls)?;
     let ske = decode_server_key_exchange(ske_body)?;
-    client_hs.process_server_key_exchange(ske_hs_msg, &ske)?;
+    ctx.client_hs
+        .process_server_key_exchange(ske_hs_msg, &ske)?;
 
     // ServerHelloDone
-    let shd_datagram = server_to_client.remove(0);
+    let shd_datagram = ctx.server_to_client.remove(0);
     let (shd_record, _) = parse_dtls_record(&shd_datagram)?;
     let shd_hs_msg = &shd_record.fragment;
 
     // === Client produces flight: CKE + CCS + Finished ===
-    let mut cflight = client_hs.process_server_hello_done(shd_hs_msg)?;
+    let mut cflight = ctx.client_hs.process_server_hello_done(shd_hs_msg)?;
 
     // Send CKE (plaintext, epoch 0)
-    let cke_datagram =
-        wrap_handshake_record(&mut client_conn.write_epoch, &cflight.client_key_exchange)?;
-    client_to_server.push(cke_datagram);
+    let cke_datagram = wrap_handshake_record(
+        &mut ctx.client_conn.write_epoch,
+        &cflight.client_key_exchange,
+    )?;
+    ctx.client_to_server.push(cke_datagram);
 
     // Send CCS (epoch 0)
-    let ccs_datagram = wrap_ccs_record(&mut client_conn.write_epoch)?;
-    client_to_server.push(ccs_datagram);
+    let ccs_datagram = wrap_ccs_record(&mut ctx.client_conn.write_epoch)?;
+    ctx.client_to_server.push(ccs_datagram);
 
     // Bump client write epoch (0 → 1)
-    client_conn.write_epoch.next_epoch();
+    ctx.client_conn.write_epoch.next_epoch();
     let mut client_enc = DtlsRecordEncryptor12::new(
         suite,
         &cflight.client_write_key,
@@ -422,63 +422,65 @@ fn do_full_handshake(
 
     // Send Finished (encrypted, epoch 1)
     let fin_datagram = wrap_encrypted_handshake_record(
-        &mut client_conn.write_epoch,
+        &mut ctx.client_conn.write_epoch,
         &mut client_enc,
         &cflight.finished,
     )?;
-    client_to_server.push(fin_datagram);
+    ctx.client_to_server.push(fin_datagram);
 
     // === Server processes client flight ===
     // CKE
-    let cke_datagram = client_to_server.remove(0);
+    let cke_datagram = ctx.client_to_server.remove(0);
     let (cke_record, _) = parse_dtls_record(&cke_datagram)?;
-    let mut keys = server_hs.process_client_key_exchange(&cke_record.fragment)?;
+    let mut keys = ctx
+        .server_hs
+        .process_client_key_exchange(&cke_record.fragment)?;
 
     // CCS
-    let ccs_datagram = client_to_server.remove(0);
+    let ccs_datagram = ctx.client_to_server.remove(0);
     let (ccs_record, _) = parse_dtls_record(&ccs_datagram)?;
     assert_eq!(ccs_record.content_type, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec()?;
+    ctx.server_hs.process_change_cipher_spec()?;
 
     // Bump server read epoch (0 → 1)
-    server_conn.read_epoch.next_epoch();
+    ctx.server_conn.read_epoch.next_epoch();
     let mut server_dec =
         DtlsRecordDecryptor12::new(suite, &keys.client_write_key, keys.client_write_iv.clone())?;
 
     // Client Finished (encrypted)
-    let fin_datagram = client_to_server.remove(0);
+    let fin_datagram = ctx.client_to_server.remove(0);
     let (fin_record, _) = parse_dtls_record(&fin_datagram)?;
     let fin_plain = server_dec.decrypt_record(&fin_record)?;
 
     // Convert decrypted DTLS HS to proper format for process_finished
     let (fin_header, _, _) = parse_dtls_handshake_header(&fin_plain)?;
     assert_eq!(fin_header.msg_type, HandshakeType::Finished);
-    let server_fin_result = server_hs.process_finished(&fin_plain)?;
+    let server_fin_result = ctx.server_hs.process_finished(&fin_plain)?;
 
     // === Server sends CCS + Finished ===
-    let ccs_datagram = wrap_ccs_record(&mut server_conn.write_epoch)?;
-    server_to_client.push(ccs_datagram);
+    let ccs_datagram = wrap_ccs_record(&mut ctx.server_conn.write_epoch)?;
+    ctx.server_to_client.push(ccs_datagram);
 
     // Bump server write epoch (0 → 1)
-    server_conn.write_epoch.next_epoch();
+    ctx.server_conn.write_epoch.next_epoch();
     let mut server_enc =
         DtlsRecordEncryptor12::new(suite, &keys.server_write_key, keys.server_write_iv.clone())?;
 
     let sfin_datagram = wrap_encrypted_handshake_record(
-        &mut server_conn.write_epoch,
+        &mut ctx.server_conn.write_epoch,
         &mut server_enc,
         &server_fin_result.finished,
     )?;
-    server_to_client.push(sfin_datagram);
+    ctx.server_to_client.push(sfin_datagram);
 
     // === Client processes server CCS + Finished ===
-    let ccs_datagram = server_to_client.remove(0);
+    let ccs_datagram = ctx.server_to_client.remove(0);
     let (ccs_record, _) = parse_dtls_record(&ccs_datagram)?;
     assert_eq!(ccs_record.content_type, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec()?;
+    ctx.client_hs.process_change_cipher_spec()?;
 
     // Bump client read epoch (0 → 1)
-    client_conn.read_epoch.next_epoch();
+    ctx.client_conn.read_epoch.next_epoch();
     let mut client_dec = DtlsRecordDecryptor12::new(
         suite,
         &cflight.server_write_key,
@@ -486,32 +488,38 @@ fn do_full_handshake(
     )?;
 
     // Server Finished (encrypted)
-    let sfin_datagram = server_to_client.remove(0);
+    let sfin_datagram = ctx.server_to_client.remove(0);
     let (sfin_record, _) = parse_dtls_record(&sfin_datagram)?;
     let sfin_plain = client_dec.decrypt_record(&sfin_record)?;
 
     let (sfin_header, _, _) = parse_dtls_handshake_header(&sfin_plain)?;
     assert_eq!(sfin_header.msg_type, HandshakeType::Finished);
-    client_hs.process_finished(&sfin_plain, &cflight.master_secret)?;
+    ctx.client_hs
+        .process_finished(&sfin_plain, &cflight.master_secret)?;
 
     // === Handshake complete ===
-    assert_eq!(client_hs.state(), Dtls12ClientState::Connected);
-    assert_eq!(server_hs.state(), Dtls12ServerState::Connected);
+    assert_eq!(ctx.client_hs.state(), Dtls12ClientState::Connected);
+    assert_eq!(ctx.server_hs.state(), Dtls12ServerState::Connected);
 
     // Install application data keys
-    client_conn.encryptor = Some(client_enc);
-    client_conn.decryptor = Some(client_dec);
-    client_conn.state = DtlsConnectionState::Connected;
-    client_conn.negotiated_suite = Some(suite);
+    ctx.client_conn.encryptor = Some(client_enc);
+    ctx.client_conn.decryptor = Some(client_dec);
+    ctx.client_conn.state = DtlsConnectionState::Connected;
+    ctx.client_conn.negotiated_suite = Some(suite);
 
-    server_conn.encryptor = Some(server_enc);
-    server_conn.decryptor = Some(server_dec);
-    server_conn.state = DtlsConnectionState::Connected;
-    server_conn.negotiated_suite = Some(suite);
+    ctx.server_conn.encryptor = Some(server_enc);
+    ctx.server_conn.decryptor = Some(server_dec);
+    ctx.server_conn.state = DtlsConnectionState::Connected;
+    ctx.server_conn.negotiated_suite = Some(suite);
 
     // Auto-store sessions in cache
-    store_client_session(client_conn, server_hs, suite, &cflight.master_secret);
-    store_server_session(server_conn, server_hs, suite, &keys.master_secret);
+    store_client_session(
+        ctx.client_conn,
+        ctx.server_hs,
+        suite,
+        &cflight.master_secret,
+    );
+    store_server_session(ctx.server_conn, ctx.server_hs, suite, &keys.master_secret);
 
     // Zeroize key material
     cflight.master_secret.zeroize();
@@ -533,80 +541,76 @@ fn do_full_handshake(
 /// 4. Client sends CCS + encrypted client Finished
 /// 5. Server processes client CCS + client Finished
 /// 6. Both Connected
-#[allow(clippy::too_many_arguments)]
 fn do_abbreviated_handshake(
-    client_conn: &mut Dtls12ClientConnection,
-    server_conn: &mut Dtls12ServerConnection,
-    client_hs: &mut Dtls12ClientHandshake,
-    server_hs: &mut Dtls12ServerHandshake,
+    ctx: &mut DtlsHandshakeContext,
     abbr: &mut crate::handshake::server_dtls12::DtlsAbbreviatedServerResult,
-    server_to_client: &mut Vec<Vec<u8>>,
-    client_to_server: &mut Vec<Vec<u8>>,
 ) -> Result<(), TlsError> {
     let suite = abbr.suite;
 
     // === Server sends SH (plaintext) ===
-    let sh_datagram = wrap_handshake_record(&mut server_conn.write_epoch, &abbr.server_hello)?;
-    server_to_client.push(sh_datagram);
+    let sh_datagram = wrap_handshake_record(&mut ctx.server_conn.write_epoch, &abbr.server_hello)?;
+    ctx.server_to_client.push(sh_datagram);
 
     // === Server sends CCS (plaintext) ===
-    let ccs_datagram = wrap_ccs_record(&mut server_conn.write_epoch)?;
-    server_to_client.push(ccs_datagram);
+    let ccs_datagram = wrap_ccs_record(&mut ctx.server_conn.write_epoch)?;
+    ctx.server_to_client.push(ccs_datagram);
 
     // === Server sends Finished (encrypted, epoch 1) ===
-    server_conn.write_epoch.next_epoch();
+    ctx.server_conn.write_epoch.next_epoch();
     let mut server_enc =
         DtlsRecordEncryptor12::new(suite, &abbr.server_write_key, abbr.server_write_iv.clone())?;
     let sfin_datagram = wrap_encrypted_handshake_record(
-        &mut server_conn.write_epoch,
+        &mut ctx.server_conn.write_epoch,
         &mut server_enc,
         &abbr.finished,
     )?;
-    server_to_client.push(sfin_datagram);
+    ctx.server_to_client.push(sfin_datagram);
 
     // === Client processes ServerHello → detects abbreviated ===
-    let sh_datagram = server_to_client.remove(0);
+    let sh_datagram = ctx.server_to_client.remove(0);
     let (sh_record, _) = parse_dtls_record(&sh_datagram)?;
     let sh_hs_msg = &sh_record.fragment;
     let sh_tls = dtls_to_tls_handshake(sh_hs_msg)?;
     let (_, sh_body, _) = crate::handshake::codec::parse_handshake_header(&sh_tls)?;
     let sh: ServerHello = decode_server_hello(sh_body)?;
-    client_hs.process_server_hello(sh_hs_msg, &sh)?;
-    assert!(client_hs.is_abbreviated());
+    ctx.client_hs.process_server_hello(sh_hs_msg, &sh)?;
+    assert!(ctx.client_hs.is_abbreviated());
 
-    let mut client_keys = client_hs
+    let mut client_keys = ctx
+        .client_hs
         .take_abbreviated_keys()
         .ok_or_else(|| TlsError::HandshakeFailed("no abbreviated keys".into()))?;
 
     // === Client processes CCS ===
-    let ccs_datagram = server_to_client.remove(0);
+    let ccs_datagram = ctx.server_to_client.remove(0);
     let (ccs_record, _) = parse_dtls_record(&ccs_datagram)?;
     assert_eq!(ccs_record.content_type, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec()?;
+    ctx.client_hs.process_change_cipher_spec()?;
 
     // === Client processes server Finished (encrypted) ===
-    client_conn.read_epoch.next_epoch();
+    ctx.client_conn.read_epoch.next_epoch();
     let mut client_dec = DtlsRecordDecryptor12::new(
         suite,
         &client_keys.server_write_key,
         client_keys.server_write_iv.clone(),
     )?;
 
-    let sfin_datagram = server_to_client.remove(0);
+    let sfin_datagram = ctx.server_to_client.remove(0);
     let (sfin_record, _) = parse_dtls_record(&sfin_datagram)?;
     let sfin_plain = client_dec.decrypt_record(&sfin_record)?;
 
     let (sfin_header, _, _) = parse_dtls_handshake_header(&sfin_plain)?;
     assert_eq!(sfin_header.msg_type, HandshakeType::Finished);
 
-    let client_finished =
-        client_hs.process_abbreviated_server_finished(&sfin_plain, &client_keys.master_secret)?;
+    let client_finished = ctx
+        .client_hs
+        .process_abbreviated_server_finished(&sfin_plain, &client_keys.master_secret)?;
 
     // === Client sends CCS + Finished ===
-    let ccs_datagram = wrap_ccs_record(&mut client_conn.write_epoch)?;
-    client_to_server.push(ccs_datagram);
+    let ccs_datagram = wrap_ccs_record(&mut ctx.client_conn.write_epoch)?;
+    ctx.client_to_server.push(ccs_datagram);
 
-    client_conn.write_epoch.next_epoch();
+    ctx.client_conn.write_epoch.next_epoch();
     let mut client_enc = DtlsRecordEncryptor12::new(
         suite,
         &client_keys.client_write_key,
@@ -614,47 +618,52 @@ fn do_abbreviated_handshake(
     )?;
 
     let cfin_datagram = wrap_encrypted_handshake_record(
-        &mut client_conn.write_epoch,
+        &mut ctx.client_conn.write_epoch,
         &mut client_enc,
         &client_finished,
     )?;
-    client_to_server.push(cfin_datagram);
+    ctx.client_to_server.push(cfin_datagram);
 
     // === Server processes client CCS + Finished ===
-    let ccs_datagram = client_to_server.remove(0);
+    let ccs_datagram = ctx.client_to_server.remove(0);
     let (ccs_record, _) = parse_dtls_record(&ccs_datagram)?;
     assert_eq!(ccs_record.content_type, ContentType::ChangeCipherSpec);
 
-    server_conn.read_epoch.next_epoch();
+    ctx.server_conn.read_epoch.next_epoch();
     let mut server_dec =
         DtlsRecordDecryptor12::new(suite, &abbr.client_write_key, abbr.client_write_iv.clone())?;
 
-    let cfin_datagram = client_to_server.remove(0);
+    let cfin_datagram = ctx.client_to_server.remove(0);
     let (cfin_record, _) = parse_dtls_record(&cfin_datagram)?;
     let cfin_plain = server_dec.decrypt_record(&cfin_record)?;
 
     let (cfin_header, _, _) = parse_dtls_handshake_header(&cfin_plain)?;
     assert_eq!(cfin_header.msg_type, HandshakeType::Finished);
-    server_hs.process_abbreviated_finished(&cfin_plain)?;
+    ctx.server_hs.process_abbreviated_finished(&cfin_plain)?;
 
     // === Handshake complete ===
-    assert_eq!(client_hs.state(), Dtls12ClientState::Connected);
-    assert_eq!(server_hs.state(), Dtls12ServerState::Connected);
+    assert_eq!(ctx.client_hs.state(), Dtls12ClientState::Connected);
+    assert_eq!(ctx.server_hs.state(), Dtls12ServerState::Connected);
 
     // Install application data keys
-    client_conn.encryptor = Some(client_enc);
-    client_conn.decryptor = Some(client_dec);
-    client_conn.state = DtlsConnectionState::Connected;
-    client_conn.negotiated_suite = Some(suite);
+    ctx.client_conn.encryptor = Some(client_enc);
+    ctx.client_conn.decryptor = Some(client_dec);
+    ctx.client_conn.state = DtlsConnectionState::Connected;
+    ctx.client_conn.negotiated_suite = Some(suite);
 
-    server_conn.encryptor = Some(server_enc);
-    server_conn.decryptor = Some(server_dec);
-    server_conn.state = DtlsConnectionState::Connected;
-    server_conn.negotiated_suite = Some(suite);
+    ctx.server_conn.encryptor = Some(server_enc);
+    ctx.server_conn.decryptor = Some(server_dec);
+    ctx.server_conn.state = DtlsConnectionState::Connected;
+    ctx.server_conn.negotiated_suite = Some(suite);
 
     // Auto-store sessions
-    store_client_session(client_conn, server_hs, suite, &client_keys.master_secret);
-    store_server_session(server_conn, server_hs, suite, &abbr.master_secret);
+    store_client_session(
+        ctx.client_conn,
+        ctx.server_hs,
+        suite,
+        &client_keys.master_secret,
+    );
+    store_server_session(ctx.server_conn, ctx.server_hs, suite, &abbr.master_secret);
 
     // Zeroize
     client_keys.master_secret.zeroize();

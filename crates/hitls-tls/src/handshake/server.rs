@@ -264,6 +264,17 @@ pub struct ServerHandshake {
     client_certificate_authorities: Vec<Vec<u8>>,
 }
 
+struct ServerFlightParams<'a> {
+    msg_data: &'a [u8],
+    ch: &'a super::codec::ClientHello,
+    suite: CipherSuite,
+    params: CipherSuiteParams,
+    client_group: NamedGroup,
+    client_pub_key: &'a [u8],
+    client_sig_algs: &'a [crate::crypt::SignatureScheme],
+    verified_psk: Option<Vec<u8>>,
+}
+
 impl Drop for ServerHandshake {
     fn drop(&mut self) {
         self.client_hs_secret.zeroize();
@@ -605,16 +616,16 @@ impl ServerHandshake {
 
         if let Some((client_group, client_pub_key)) = matched_share {
             // --- Normal handshake path (with or without PSK) ---
-            self.build_server_flight(
+            self.build_server_flight(ServerFlightParams {
                 msg_data,
-                &ch,
+                ch: &ch,
                 suite,
                 params,
                 client_group,
-                &client_pub_key,
-                &client_sig_algs,
+                client_pub_key: &client_pub_key,
+                client_sig_algs: &client_sig_algs,
                 verified_psk,
-            )
+            })
             .map(|a| ClientHelloResult::Actions(Box::new(a)))
         } else {
             // --- HelloRetryRequest path ---
@@ -732,51 +743,43 @@ impl ServerHandshake {
             TlsError::HandshakeFailed("no matching key_share in retried CH".into())
         })?;
 
-        self.build_server_flight(
+        self.build_server_flight(ServerFlightParams {
             msg_data,
-            &ch,
+            ch: &ch,
             suite,
             params,
             client_group,
-            &client_pub_key,
-            &client_sig_algs,
-            None, // No PSK on HRR retry
-        )
+            client_pub_key: &client_pub_key,
+            client_sig_algs: &client_sig_algs,
+            verified_psk: None, // No PSK on HRR retry
+        })
     }
 
     /// Build the server flight (SH + EE + [Cert + CV] + Finished) and derive all keys.
     ///
     /// Used by both normal and HRR paths after a matching key_share is found.
     /// If `verified_psk` is Some, PSK mode is used (skip Certificate + CertificateVerify).
-    #[allow(clippy::too_many_arguments)]
     fn build_server_flight(
         &mut self,
-        msg_data: &[u8],
-        ch: &super::codec::ClientHello,
-        suite: CipherSuite,
-        params: CipherSuiteParams,
-        client_group: NamedGroup,
-        client_pub_key: &[u8],
-        client_sig_algs: &[crate::crypt::SignatureScheme],
-        verified_psk: Option<Vec<u8>>,
+        p: ServerFlightParams<'_>,
     ) -> Result<ClientHelloActions, TlsError> {
-        let psk_mode = verified_psk.is_some();
-        self.negotiated_group = Some(client_group);
+        let psk_mode = p.verified_psk.is_some();
+        self.negotiated_group = Some(p.client_group);
 
         // Check if client offered early_data and server can accept it
-        let client_offered_early_data = ch
-            .extensions
-            .iter()
-            .any(|e| e.extension_type == ExtensionType::EARLY_DATA);
+        let client_offered_early_data =
+            p.ch.extensions
+                .iter()
+                .any(|e| e.extension_type == ExtensionType::EARLY_DATA);
         let accept_early_data =
             psk_mode && client_offered_early_data && self.config.max_early_data_size > 0;
 
         // Feed ClientHello to transcript
-        self.transcript.update(msg_data)?;
+        self.transcript.update(p.msg_data)?;
 
         // Key schedule — derive early secret before anything else
-        let mut ks = KeySchedule::new(params.clone());
-        ks.derive_early_secret(verified_psk.as_deref())?;
+        let mut ks = KeySchedule::new(p.params.clone());
+        ks.derive_early_secret(p.verified_psk.as_deref())?;
 
         // Derive early traffic keys for 0-RTT BEFORE feeding SH to transcript
         // (early traffic secret = Derive-Secret(ES, "c e traffic", Hash(CH)))
@@ -789,13 +792,13 @@ impl ServerHandshake {
                 &self.client_random,
                 &early_secret,
             );
-            Some(TrafficKeys::derive(&params, &early_secret)?)
+            Some(TrafficKeys::derive(&p.params, &early_secret)?)
         } else {
             None
         };
 
         // Derive early exporter master secret (requires EarlySecret stage)
-        let early_exporter_master_secret = if verified_psk.is_some() {
+        let early_exporter_master_secret = if p.verified_psk.is_some() {
             let ch_hash = self.transcript.current_hash()?;
             ks.derive_early_exporter_master_secret(&ch_hash)?
         } else {
@@ -803,11 +806,11 @@ impl ServerHandshake {
         };
 
         // Key exchange: KEM (encapsulate) or DH (generate + compute)
-        let (shared_secret, server_key_share_bytes) = if client_group.is_kem() {
-            KeyExchange::encapsulate(client_group, client_pub_key)?
+        let (shared_secret, server_key_share_bytes) = if p.client_group.is_kem() {
+            KeyExchange::encapsulate(p.client_group, p.client_pub_key)?
         } else {
-            let server_kx = KeyExchange::generate(client_group)?;
-            let ss = server_kx.compute_shared_secret(client_pub_key)?;
+            let server_kx = KeyExchange::generate(p.client_group)?;
+            let ss = server_kx.compute_shared_secret(p.client_pub_key)?;
             (ss, server_kx.public_key_bytes().to_vec())
         };
 
@@ -818,7 +821,7 @@ impl ServerHandshake {
 
         let mut sh_extensions = vec![
             build_supported_versions_sh(),
-            build_key_share_sh(client_group, &server_key_share_bytes),
+            build_key_share_sh(p.client_group, &server_key_share_bytes),
         ];
         if psk_mode {
             sh_extensions.push(build_pre_shared_key_sh(0));
@@ -826,8 +829,8 @@ impl ServerHandshake {
 
         let sh = ServerHello {
             random,
-            legacy_session_id: ch.legacy_session_id.clone(),
-            cipher_suite: suite,
+            legacy_session_id: p.ch.legacy_session_id.clone(),
+            cipher_suite: p.suite,
             extensions: sh_extensions,
         };
         let server_hello_msg = encode_server_hello(&sh);
@@ -851,8 +854,8 @@ impl ServerHandshake {
             &server_hs_secret,
         );
 
-        let server_hs_keys = TrafficKeys::derive(&params, &server_hs_secret)?;
-        let client_hs_keys = TrafficKeys::derive(&params, &client_hs_secret)?;
+        let server_hs_keys = TrafficKeys::derive(&p.params, &server_hs_secret)?;
+        let client_hs_keys = TrafficKeys::derive(&p.params, &client_hs_secret)?;
 
         // Build EncryptedExtensions
         let mut ee_extensions = Vec::new();
@@ -946,7 +949,7 @@ impl ServerHandshake {
             let private_key = self.config.private_key.as_ref().ok_or_else(|| {
                 TlsError::HandshakeFailed("no server private key configured".into())
             })?;
-            let sig_scheme = select_signature_scheme(private_key, client_sig_algs)?;
+            let sig_scheme = select_signature_scheme(private_key, p.client_sig_algs)?;
             let cv_transcript_hash = self.transcript.current_hash()?;
             let signature =
                 sign_certificate_verify(private_key, sig_scheme, &cv_transcript_hash, true)?;
@@ -984,8 +987,8 @@ impl ServerHandshake {
             &self.client_random,
             &server_app_secret,
         );
-        let server_app_keys = TrafficKeys::derive(&params, &server_app_secret)?;
-        let client_app_keys = TrafficKeys::derive(&params, &client_app_secret)?;
+        let server_app_keys = TrafficKeys::derive(&p.params, &server_app_secret)?;
+        let client_app_keys = TrafficKeys::derive(&p.params, &client_app_secret)?;
 
         // Derive exporter master secret (RFC 8446 §7.5)
         let exporter_master_secret = ks.derive_exporter_master_secret(&transcript_hash_sf)?;
@@ -1000,8 +1003,8 @@ impl ServerHandshake {
         self.client_hs_secret = client_hs_secret;
         self.server_hs_secret = server_hs_secret;
         self.key_schedule = Some(ks);
-        self.params = Some(params.clone());
-        self.negotiated_suite = Some(suite);
+        self.params = Some(p.params.clone());
+        self.negotiated_suite = Some(p.suite);
         self.state = HandshakeState::WaitClientFinished;
 
         Ok(ClientHelloActions {
@@ -1014,10 +1017,10 @@ impl ServerHandshake {
             client_hs_keys,
             server_app_keys,
             client_app_keys,
-            suite,
+            suite: p.suite,
             client_app_secret,
             server_app_secret,
-            cipher_params: params,
+            cipher_params: p.params,
             exporter_master_secret,
             early_exporter_master_secret,
             psk_mode,

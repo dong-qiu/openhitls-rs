@@ -2,27 +2,30 @@
 
 use std::fs;
 
-#[allow(clippy::too_many_arguments)]
-pub fn run(
-    input: Option<&str>,
-    password: &str,
-    info: bool,
-    nokeys: bool,
-    nocerts: bool,
-    export: bool,
-    inkey: Option<&str>,
-    cert_file: Option<&str>,
-    output: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if export {
-        return run_export(inkey, cert_file, password, output);
+pub struct Pkcs12Options<'a> {
+    pub input: Option<&'a str>,
+    pub password: &'a str,
+    pub info: bool,
+    pub nokeys: bool,
+    pub nocerts: bool,
+    pub export: bool,
+    pub inkey: Option<&'a str>,
+    pub cert_file: Option<&'a str>,
+    pub output: Option<&'a str>,
+}
+
+pub fn run(opts: &Pkcs12Options) -> Result<(), Box<dyn std::error::Error>> {
+    if opts.export {
+        return run_export(opts.inkey, opts.cert_file, opts.password, opts.output);
     }
 
-    let input = input.ok_or("--input is required when not in --export mode")?;
+    let input = opts
+        .input
+        .ok_or("--input is required when not in --export mode")?;
     let p12_data = fs::read(input)?;
-    let p12 = hitls_pki::pkcs12::Pkcs12::from_der(&p12_data, password)?;
+    let p12 = hitls_pki::pkcs12::Pkcs12::from_der(&p12_data, opts.password)?;
 
-    if info {
+    if opts.info {
         // Display summary info
         println!("PKCS#12 file: {input}");
         println!(
@@ -47,7 +50,7 @@ pub fn run(
     let mut out = String::new();
 
     // Extract private key
-    if !nokeys {
+    if !opts.nokeys {
         if let Some(pk_der) = &p12.private_key {
             let pem = hitls_utils::pem::encode("PRIVATE KEY", pk_der);
             out.push_str(&pem);
@@ -55,14 +58,14 @@ pub fn run(
     }
 
     // Extract certificates
-    if !nocerts {
+    if !opts.nocerts {
         for cert_der in &p12.certificates {
             let pem = hitls_utils::pem::encode("CERTIFICATE", cert_der);
             out.push_str(&pem);
         }
     }
 
-    if let Some(path) = output {
+    if let Some(path) = opts.output {
         fs::write(path, &out)?;
     } else {
         print!("{out}");
@@ -157,17 +160,17 @@ mod tests {
         let p12_data = create_test_p12("testpass");
         let tmp = std::env::temp_dir().join("test_pkcs12_info.p12");
         fs::write(&tmp, &p12_data).unwrap();
-        let result = run(
-            Some(tmp.to_str().unwrap()),
-            "testpass",
-            true,
-            false,
-            false,
-            false,
-            None,
-            None,
-            None,
-        );
+        let result = run(&Pkcs12Options {
+            input: Some(tmp.to_str().unwrap()),
+            password: "testpass",
+            info: true,
+            nokeys: false,
+            nocerts: false,
+            export: false,
+            inkey: None,
+            cert_file: None,
+            output: None,
+        });
         assert!(result.is_ok());
         let _ = fs::remove_file(&tmp);
     }
@@ -178,17 +181,17 @@ mod tests {
         let tmp_p12 = std::env::temp_dir().join("test_pkcs12_extract.p12");
         let tmp_out = std::env::temp_dir().join("test_pkcs12_extract.pem");
         fs::write(&tmp_p12, &p12_data).unwrap();
-        let result = run(
-            Some(tmp_p12.to_str().unwrap()),
-            "extract",
-            false,
-            false,
-            false,
-            false,
-            None,
-            None,
-            Some(tmp_out.to_str().unwrap()),
-        );
+        let result = run(&Pkcs12Options {
+            input: Some(tmp_p12.to_str().unwrap()),
+            password: "extract",
+            info: false,
+            nokeys: false,
+            nocerts: false,
+            export: false,
+            inkey: None,
+            cert_file: None,
+            output: Some(tmp_out.to_str().unwrap()),
+        });
         assert!(result.is_ok());
         let pem = fs::read_to_string(&tmp_out).unwrap();
         assert!(pem.contains("PRIVATE KEY"));
@@ -203,17 +206,17 @@ mod tests {
         let tmp_p12 = std::env::temp_dir().join("test_pkcs12_nokeys.p12");
         let tmp_out = std::env::temp_dir().join("test_pkcs12_nokeys.pem");
         fs::write(&tmp_p12, &p12_data).unwrap();
-        let result = run(
-            Some(tmp_p12.to_str().unwrap()),
-            "nokeys",
-            false,
-            true,
-            false,
-            false,
-            None,
-            None,
-            Some(tmp_out.to_str().unwrap()),
-        );
+        let result = run(&Pkcs12Options {
+            input: Some(tmp_p12.to_str().unwrap()),
+            password: "nokeys",
+            info: false,
+            nokeys: true,
+            nocerts: false,
+            export: false,
+            inkey: None,
+            cert_file: None,
+            output: Some(tmp_out.to_str().unwrap()),
+        });
         assert!(result.is_ok());
         let pem = fs::read_to_string(&tmp_out).unwrap();
         assert!(!pem.contains("PRIVATE KEY"));
@@ -271,17 +274,17 @@ mod tests {
         fs::write(&tmp_key, &key_pem).unwrap();
         fs::write(&tmp_cert, &cert_pem).unwrap();
 
-        let result = run(
-            None,
-            "exportpass",
-            false,
-            false,
-            false,
-            true,
-            Some(tmp_key.to_str().unwrap()),
-            Some(tmp_cert.to_str().unwrap()),
-            Some(tmp_p12.to_str().unwrap()),
-        );
+        let result = run(&Pkcs12Options {
+            input: None,
+            password: "exportpass",
+            info: false,
+            nokeys: false,
+            nocerts: false,
+            export: true,
+            inkey: Some(tmp_key.to_str().unwrap()),
+            cert_file: Some(tmp_cert.to_str().unwrap()),
+            output: Some(tmp_p12.to_str().unwrap()),
+        });
         assert!(result.is_ok());
 
         // Verify the exported P12
