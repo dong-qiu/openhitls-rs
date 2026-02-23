@@ -8147,3 +8147,30 @@ Added 20 proptest property-based tests (12 in hitls-crypto, 8 in hitls-utils) an
 - `cargo test --workspace --all-features`: 2709 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase T112: TLCP SM3 Cryptographic Path Coverage (+15 tests, 2,709→2,724)
+
+**Date**: 2026-02-24
+**Scope**: Close D5 (Partial) — SM3-specific cryptographic code paths in transcript hash, PRF, key schedule, and verify_data were untested. All 10 existing transcript tests used SHA-256/384, all 13 PRF tests used SHA-256/384, and all 3 verify_data tests used SHA-256.
+
+### Summary
+
+Added 15 SM3 path coverage tests across 3 TLS crypto modules:
+
+- **SM3 transcript hash** (3 tests): Empty hash against GM/T 0004-2012 known vector, incremental update with `SM3("abc")` known vector, hash_len verification
+- **SM3 PRF** (4 tests): Basic determinism, SM3-vs-SHA-256 divergence, various output lengths with prefix consistency, manual P_SM3 cross-validation
+- **SM3 key schedule** (5 tests): Master secret derivation with SM3, TLCP CBC/GCM key block deterministic derivation, client/server verify_data with SM3
+- **SM3 E2E pipeline** (3 tests): Extended master secret → TLCP key block pipeline, seed order sensitivity, full master secret → transcript → verify_data pipeline
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/crypt/transcript.rs` | Added 3 SM3 transcript tests |
+| `crates/hitls-tls/src/crypt/prf.rs` | Added 4 SM3 PRF tests |
+| `crates/hitls-tls/src/crypt/key_schedule12.rs` | Added 8 SM3 key schedule + pipeline tests |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2724 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

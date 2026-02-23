@@ -2413,3 +2413,20 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 17 source files modified, 0 files created. hitls-crypto: 697→709, hitls-utils: 53→61, total: 2689→2709.
 - All 2709 workspace tests pass, 0 clippy warnings, formatting clean.
+
+## Phase T112: TLCP SM3 Cryptographic Path Coverage
+
+**Prompt**: Implement Phase T112 — TLCP SM3 Cryptographic Path Coverage. Add 15 SM3-specific tests to cover untested SM3 code paths: 3 SM3 transcript hash tests (transcript.rs), 4 SM3 PRF tests (prf.rs), 5 SM3 key schedule tests + 3 SM3 E2E pipeline tests (key_schedule12.rs). Close D5 SM3 coverage gap.
+
+**Scope**: Close D5 (Partial) — SM3-specific cryptographic code paths in transcript hash, PRF, key schedule, and verify_data were untested (all existing tests used SHA-256/384 only).
+
+**Work performed**:
+1. Added 3 SM3 transcript tests to `crates/hitls-tls/src/crypt/transcript.rs`: empty hash (GM/T 0004-2012), incremental update with known vector, hash_len verification
+2. Added 4 SM3 PRF tests to `crates/hitls-tls/src/crypt/prf.rs`: basic determinism, SM3-vs-SHA-256 divergence, various output lengths, manual P_SM3 cross-validation
+3. Added 5 SM3 key schedule tests to `crates/hitls-tls/src/crypt/key_schedule12.rs`: master secret, TLCP CBC/GCM deterministic derivation, client/server verify_data
+4. Added 3 SM3 E2E pipeline tests to `crates/hitls-tls/src/crypt/key_schedule12.rs`: EMS→key block, seed order sensitivity, full verify pipeline
+5. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-tls: 1199→1214, total: 2709→2724.
+- All 2724 workspace tests pass, 0 clippy warnings, formatting clean.

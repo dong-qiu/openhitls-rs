@@ -216,4 +216,50 @@ mod tests {
         assert_ne!(h_after_replace, h_after_update);
         assert_eq!(h_after_update.len(), 32);
     }
+
+    // ===== Phase T112: SM3 transcript hash tests =====
+
+    #[test]
+    fn test_transcript_sm3_empty_hash() {
+        // GM/T 0004-2012: SM3("") known value
+        let th = TranscriptHash::new(HashAlgId::Sm3);
+        let empty = th.empty_hash().unwrap();
+        assert_eq!(
+            to_hex(&empty),
+            "1ab21d8355cfa17f8e61194831e81a8f22bec8c728fefb747ed035eb5082aa2b"
+        );
+    }
+
+    #[test]
+    fn test_transcript_sm3_incremental() {
+        let mut th = TranscriptHash::new(HashAlgId::Sm3);
+        th.update(b"abc").unwrap();
+        let h1 = th.current_hash().unwrap();
+
+        // SM3("abc") known value from GM/T 0004-2012
+        assert_eq!(
+            to_hex(&h1),
+            "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0"
+        );
+
+        // current_hash() should be non-destructive
+        let h2 = th.current_hash().unwrap();
+        assert_eq!(h1, h2);
+
+        // After more data, the hash should change
+        th.update(b"def").unwrap();
+        let h3 = th.current_hash().unwrap();
+        assert_ne!(h1, h3);
+        assert_eq!(h3.len(), 32);
+    }
+
+    #[test]
+    fn test_transcript_sm3_hash_len() {
+        let th = TranscriptHash::new(HashAlgId::Sm3);
+        assert_eq!(th.hash_len(), 32);
+
+        // empty_hash() output should be exactly 32 bytes
+        let empty = th.empty_hash().unwrap();
+        assert_eq!(empty.len(), 32);
+    }
 }

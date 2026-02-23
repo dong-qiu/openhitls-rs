@@ -1923,14 +1923,58 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
+## Phase T112: TLCP SM3 Cryptographic Path Coverage (+15 tests, 2,709→2,724)
+
+**Date**: 2026-02-24
+**Scope**: SM3-specific code paths in transcript hash, PRF, key schedule, and verify_data — previously all tested only with SHA-256/384.
+
+### Tests Added
+
+| # | Test | File | Property |
+|---|------|------|----------|
+| 1 | `test_transcript_sm3_empty_hash` | transcript.rs | SM3("") == GM/T 0004-2012 known value |
+| 2 | `test_transcript_sm3_incremental` | transcript.rs | SM3("abc") known value, non-destructive current_hash, update changes hash |
+| 3 | `test_transcript_sm3_hash_len` | transcript.rs | hash_len() == 32, empty_hash() is 32 bytes |
+| 4 | `test_prf_sm3_basic` | prf.rs | SM3 PRF deterministic, correct output length |
+| 5 | `test_prf_sm3_vs_sha256_differ` | prf.rs | Same inputs with SM3 vs SHA-256 produce different output |
+| 6 | `test_prf_sm3_various_output_lengths` | prf.rs | SM3 PRF works for lengths [1..256], prefix consistency |
+| 7 | `test_prf_sm3_known_vector_manual` | prf.rs | Cross-validate SM3 PRF against manual P_SM3 computation |
+| 8 | `test_derive_master_secret_sm3` | key_schedule12.rs | 48-byte output, deterministic, differs from SHA-256 |
+| 9 | `test_derive_tlcp_key_block_cbc_deterministic` | key_schedule12.rs | TLCP CBC key block with SM3: all fields deterministic |
+| 10 | `test_derive_tlcp_key_block_gcm_deterministic` | key_schedule12.rs | TLCP GCM key block with SM3: all fields deterministic |
+| 11 | `test_compute_verify_data_sm3_client` | key_schedule12.rs | SM3 verify_data: 12 bytes, deterministic, client != server |
+| 12 | `test_compute_verify_data_sm3_server` | key_schedule12.rs | SM3 verify_data: 12 bytes, differs from SHA-256 |
+| 13 | `test_sm3_ems_then_key_block_pipeline` | key_schedule12.rs | EMS with SM3 → TLCP GCM key block pipeline |
+| 14 | `test_tlcp_key_block_seed_order_sm3` | key_schedule12.rs | Swapped randoms → different keys with SM3 |
+| 15 | `test_sm3_full_verify_pipeline` | key_schedule12.rs | SM3 master secret → transcript → verify_data full pipeline |
+
+**Per-crate counts after Phase T112**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 709 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1214 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 61 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2724** | **40** |
+
+---
+
 ## 8. Verification & Quality Gates
 
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,709 tests pass
+# Full test suite — all 2,724 tests pass
 cargo test --workspace --all-features
-# Result: 2,709 passed, 0 failed, 40 ignored
+# Result: 2,724 passed, 0 failed, 40 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

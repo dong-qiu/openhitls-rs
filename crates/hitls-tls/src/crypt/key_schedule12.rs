@@ -707,4 +707,274 @@ mod tests {
         assert!(kb.client_write_mac_key.is_empty());
         assert!(kb.server_write_mac_key.is_empty());
     }
+
+    // ===== Phase T112: SM3 key schedule tests =====
+
+    #[test]
+    fn test_derive_master_secret_sm3() {
+        let pms = hex("0303aabbccdd");
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        // SM3 master secret should produce 48-byte output
+        let ms =
+            derive_master_secret(HashAlgId::Sm3, &pms, &client_random, &server_random).unwrap();
+        assert_eq!(ms.len(), 48);
+
+        // Deterministic
+        let ms2 =
+            derive_master_secret(HashAlgId::Sm3, &pms, &client_random, &server_random).unwrap();
+        assert_eq!(ms, ms2);
+
+        // SM3 should differ from SHA-256 result
+        let ms_sha256 =
+            derive_master_secret(HashAlgId::Sha256, &pms, &client_random, &server_random).unwrap();
+        assert_ne!(ms, ms_sha256);
+
+        eprintln!("SM3 master_secret: {}", to_hex(&ms));
+    }
+
+    #[cfg(feature = "tlcp")]
+    #[test]
+    fn test_derive_tlcp_key_block_cbc_deterministic() {
+        let master_secret = [0xABu8; 48];
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        let params =
+            crate::crypt::TlcpCipherSuiteParams::from_suite(crate::CipherSuite::ECDHE_SM4_CBC_SM3)
+                .unwrap();
+
+        let kb1 = derive_tlcp_key_block(
+            HashAlgId::Sm3,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+        let kb2 = derive_tlcp_key_block(
+            HashAlgId::Sm3,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+
+        // All fields must match on repeated derivation
+        assert_eq!(kb1.client_write_mac_key, kb2.client_write_mac_key);
+        assert_eq!(kb1.server_write_mac_key, kb2.server_write_mac_key);
+        assert_eq!(kb1.client_write_key, kb2.client_write_key);
+        assert_eq!(kb1.server_write_key, kb2.server_write_key);
+        assert_eq!(kb1.client_write_iv, kb2.client_write_iv);
+        assert_eq!(kb1.server_write_iv, kb2.server_write_iv);
+    }
+
+    #[cfg(feature = "tlcp")]
+    #[test]
+    fn test_derive_tlcp_key_block_gcm_deterministic() {
+        let master_secret = [0xCDu8; 48];
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        let params =
+            crate::crypt::TlcpCipherSuiteParams::from_suite(crate::CipherSuite::ECDHE_SM4_GCM_SM3)
+                .unwrap();
+
+        let kb1 = derive_tlcp_key_block(
+            HashAlgId::Sm3,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+        let kb2 = derive_tlcp_key_block(
+            HashAlgId::Sm3,
+            &master_secret,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+
+        // All fields must match on repeated derivation
+        assert_eq!(kb1.client_write_key, kb2.client_write_key);
+        assert_eq!(kb1.server_write_key, kb2.server_write_key);
+        assert_eq!(kb1.client_write_iv, kb2.client_write_iv);
+        assert_eq!(kb1.server_write_iv, kb2.server_write_iv);
+        // GCM: MAC keys are empty
+        assert!(kb1.client_write_mac_key.is_empty());
+        assert!(kb1.server_write_mac_key.is_empty());
+    }
+
+    #[test]
+    fn test_compute_verify_data_sm3_client() {
+        let master_secret = [0xABu8; 48];
+        let handshake_hash = [0xCDu8; 32];
+
+        let vd = compute_verify_data(
+            HashAlgId::Sm3,
+            &master_secret,
+            "client finished",
+            &handshake_hash,
+        )
+        .unwrap();
+        assert_eq!(vd.len(), 12);
+
+        // Deterministic
+        let vd2 = compute_verify_data(
+            HashAlgId::Sm3,
+            &master_secret,
+            "client finished",
+            &handshake_hash,
+        )
+        .unwrap();
+        assert_eq!(vd, vd2);
+
+        // Server label produces different result
+        let vd_server = compute_verify_data(
+            HashAlgId::Sm3,
+            &master_secret,
+            "server finished",
+            &handshake_hash,
+        )
+        .unwrap();
+        assert_ne!(vd, vd_server);
+    }
+
+    #[test]
+    fn test_compute_verify_data_sm3_server() {
+        let master_secret = [0xBBu8; 48];
+        let handshake_hash = [0xAAu8; 32];
+
+        let vd_sm3 = compute_verify_data(
+            HashAlgId::Sm3,
+            &master_secret,
+            "server finished",
+            &handshake_hash,
+        )
+        .unwrap();
+        assert_eq!(vd_sm3.len(), 12);
+
+        // SM3 verify_data should differ from SHA-256 verify_data
+        let vd_sha256 = compute_verify_data(
+            HashAlgId::Sha256,
+            &master_secret,
+            "server finished",
+            &handshake_hash,
+        )
+        .unwrap();
+        assert_ne!(vd_sm3, vd_sha256);
+    }
+
+    // ===== Phase T112: SM3 E2E key derivation pipeline tests =====
+
+    #[cfg(feature = "tlcp")]
+    #[test]
+    fn test_sm3_ems_then_key_block_pipeline() {
+        // Extended master secret with SM3 → TLCP key block derivation
+        let pms = hex("0303aabbccdd");
+        let session_hash = hex("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
+        let client_random = [0x01u8; 32];
+        let server_random = [0x02u8; 32];
+
+        let ems = derive_extended_master_secret(HashAlgId::Sm3, &pms, &session_hash).unwrap();
+        assert_eq!(ems.len(), 48);
+
+        // Deterministic EMS
+        let ems2 = derive_extended_master_secret(HashAlgId::Sm3, &pms, &session_hash).unwrap();
+        assert_eq!(ems, ems2);
+
+        // Use EMS to derive TLCP GCM key block
+        let params =
+            crate::crypt::TlcpCipherSuiteParams::from_suite(crate::CipherSuite::ECDHE_SM4_GCM_SM3)
+                .unwrap();
+
+        let kb = derive_tlcp_key_block(
+            HashAlgId::Sm3,
+            &ems,
+            &server_random,
+            &client_random,
+            &params,
+        )
+        .unwrap();
+
+        assert_eq!(kb.client_write_key.len(), 16);
+        assert_eq!(kb.server_write_key.len(), 16);
+        assert_eq!(kb.client_write_iv.len(), 4);
+        assert_eq!(kb.server_write_iv.len(), 4);
+        assert_ne!(kb.client_write_key, kb.server_write_key);
+    }
+
+    #[cfg(feature = "tlcp")]
+    #[test]
+    fn test_tlcp_key_block_seed_order_sm3() {
+        // Swapping client/server randoms in TLCP key block derivation must produce different keys
+        let master_secret = [0xABu8; 48];
+        let random_a = [0x01u8; 32];
+        let random_b = [0x02u8; 32];
+
+        let params =
+            crate::crypt::TlcpCipherSuiteParams::from_suite(crate::CipherSuite::ECDHE_SM4_GCM_SM3)
+                .unwrap();
+
+        let kb1 = derive_tlcp_key_block(
+            HashAlgId::Sm3,
+            &master_secret,
+            &random_a,
+            &random_b,
+            &params,
+        )
+        .unwrap();
+        let kb2 = derive_tlcp_key_block(
+            HashAlgId::Sm3,
+            &master_secret,
+            &random_b,
+            &random_a,
+            &params,
+        )
+        .unwrap();
+
+        // Swapped randoms → different keys
+        assert_ne!(kb1.client_write_key, kb2.client_write_key);
+    }
+
+    #[test]
+    fn test_sm3_full_verify_pipeline() {
+        // Full pipeline: SM3 master secret → SM3 transcript hash → SM3 verify_data
+        use super::super::transcript::TranscriptHash;
+
+        let pms = hex("0303aabbccddeeff");
+        let client_random = [0x11u8; 32];
+        let server_random = [0x22u8; 32];
+
+        // Step 1: Derive master secret with SM3
+        let ms =
+            derive_master_secret(HashAlgId::Sm3, &pms, &client_random, &server_random).unwrap();
+        assert_eq!(ms.len(), 48);
+
+        // Step 2: Build SM3 transcript hash
+        let mut th = TranscriptHash::new(HashAlgId::Sm3);
+        th.update(b"ClientHello").unwrap();
+        th.update(b"ServerHello").unwrap();
+        th.update(b"Certificate").unwrap();
+        th.update(b"ServerKeyExchange").unwrap();
+        th.update(b"ClientKeyExchange").unwrap();
+        let handshake_hash = th.current_hash().unwrap();
+        assert_eq!(handshake_hash.len(), 32);
+
+        // Step 3: Compute verify_data with SM3
+        let vd =
+            compute_verify_data(HashAlgId::Sm3, &ms, "client finished", &handshake_hash).unwrap();
+        assert_eq!(vd.len(), 12);
+
+        // Deterministic: same pipeline → same result
+        let vd2 =
+            compute_verify_data(HashAlgId::Sm3, &ms, "client finished", &handshake_hash).unwrap();
+        assert_eq!(vd, vd2);
+
+        eprintln!("SM3 full pipeline verify_data: {}", to_hex(&vd));
+    }
 }

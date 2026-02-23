@@ -277,4 +277,78 @@ mod tests {
         let out2 = prf(HashAlgId::Sha256, secret, label, b"seed2", 32).unwrap();
         assert_ne!(out1, out2);
     }
+
+    // ===== Phase T112: SM3 PRF tests =====
+
+    #[test]
+    fn test_prf_sm3_basic() {
+        // Basic smoke test: SM3 PRF should produce deterministic output
+        let secret = b"test secret";
+        let label = "test label";
+        let seed = b"test seed";
+
+        let output1 = prf(HashAlgId::Sm3, secret, label, seed, 32).unwrap();
+        let output2 = prf(HashAlgId::Sm3, secret, label, seed, 32).unwrap();
+        assert_eq!(output1, output2);
+        assert_eq!(output1.len(), 32);
+    }
+
+    #[test]
+    fn test_prf_sm3_vs_sha256_differ() {
+        // Same inputs with SM3 vs SHA-256 must produce different output
+        let secret = b"same secret";
+        let label = "same label";
+        let seed = b"same seed";
+
+        let out_sm3 = prf(HashAlgId::Sm3, secret, label, seed, 48).unwrap();
+        let out_sha256 = prf(HashAlgId::Sha256, secret, label, seed, 48).unwrap();
+        assert_ne!(out_sm3, out_sha256);
+    }
+
+    #[test]
+    fn test_prf_sm3_various_output_lengths() {
+        let secret = b"secret";
+        let label = "label";
+        let seed = b"seed";
+
+        // Test various output lengths including those that cross hash output boundaries
+        // SM3 output is 32 bytes, so 33+ requires multiple P_hash iterations
+        for len in [1, 16, 31, 32, 33, 48, 64, 100, 256] {
+            let output = prf(HashAlgId::Sm3, secret, label, seed, len).unwrap();
+            assert_eq!(output.len(), len);
+        }
+
+        // Verify prefix consistency: longer output should start with shorter output
+        let short = prf(HashAlgId::Sm3, secret, label, seed, 32).unwrap();
+        let long = prf(HashAlgId::Sm3, secret, label, seed, 64).unwrap();
+        assert_eq!(&long[..32], &short[..]);
+    }
+
+    #[test]
+    fn test_prf_sm3_known_vector_manual() {
+        // Cross-validate SM3 PRF against manual P_SM3 computation
+        let secret = hex("9bbe436ba940f017b17652849a71db35");
+        let label = "test label";
+        let seed = hex("a0a1a2a3a4a5a6a7a8a9");
+
+        let output = prf(HashAlgId::Sm3, &secret, label, &seed, 32).unwrap();
+
+        // Manual computation:
+        // label_seed = "test label" || seed
+        let mut label_seed = Vec::new();
+        label_seed.extend_from_slice(label.as_bytes());
+        label_seed.extend_from_slice(&seed);
+
+        // A(1) = HMAC-SM3(secret, label_seed)
+        let a1 = hmac_hash(HashAlgId::Sm3, &secret, &label_seed).unwrap();
+        // P(1) = HMAC-SM3(secret, A(1) || label_seed)
+        let mut a1_seed = a1.clone();
+        a1_seed.extend_from_slice(&label_seed);
+        let p1 = hmac_hash(HashAlgId::Sm3, &secret, &a1_seed).unwrap();
+
+        // For 32 bytes output, P(1) is exactly one SM3 block
+        assert_eq!(output, p1);
+
+        eprintln!("SM3 PRF output: {}", to_hex(&output));
+    }
 }
