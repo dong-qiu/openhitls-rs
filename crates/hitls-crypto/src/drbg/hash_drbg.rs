@@ -8,8 +8,7 @@ use crate::sha2::{Sha256, Sha384, Sha512};
 use hitls_types::CryptoError;
 use zeroize::Zeroize;
 
-/// Maximum number of generate requests before reseed is required.
-const RESEED_INTERVAL: u64 = 1 << 48;
+use super::RESEED_INTERVAL;
 
 /// Hash algorithm selection for Hash-DRBG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,16 +180,7 @@ impl HashDrbg {
     pub fn from_system_entropy(hash_type: HashDrbgType) -> Result<Self, CryptoError> {
         let seed_len = hash_type.seed_len();
         let mut entropy = vec![0u8; seed_len];
-        #[cfg(feature = "entropy")]
-        {
-            let mut es =
-                crate::entropy::EntropySource::new(crate::entropy::EntropyConfig::default());
-            es.get_entropy(&mut entropy)?;
-        }
-        #[cfg(not(feature = "entropy"))]
-        {
-            getrandom::getrandom(&mut entropy).map_err(|_| CryptoError::BnRandGenFail)?;
-        }
+        super::get_system_entropy(&mut entropy)?;
         let result = Self::new(hash_type, &entropy);
         entropy.zeroize();
         result
@@ -260,13 +250,6 @@ impl HashDrbg {
         Ok(())
     }
 
-    /// Generate `len` pseudorandom bytes (convenience method).
-    pub fn generate_bytes(&mut self, len: usize) -> Result<Vec<u8>, CryptoError> {
-        let mut output = vec![0u8; len];
-        self.generate(&mut output, None)?;
-        Ok(output)
-    }
-
     /// Reseed the DRBG with fresh entropy (SP 800-90A §10.1.1.3).
     pub fn reseed(
         &mut self,
@@ -299,9 +282,28 @@ impl HashDrbg {
     }
 }
 
+impl super::Drbg for HashDrbg {
+    fn generate(
+        &mut self,
+        output: &mut [u8],
+        additional_input: Option<&[u8]>,
+    ) -> Result<(), CryptoError> {
+        HashDrbg::generate(self, output, additional_input)
+    }
+
+    fn reseed(
+        &mut self,
+        entropy: &[u8],
+        additional_input: Option<&[u8]>,
+    ) -> Result<(), CryptoError> {
+        HashDrbg::reseed(self, entropy, additional_input)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::drbg::Drbg;
 
     #[test]
     fn test_hash_drbg_sha256_instantiate() {

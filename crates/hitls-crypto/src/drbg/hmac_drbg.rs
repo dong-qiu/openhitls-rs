@@ -9,8 +9,7 @@ use crate::sha2::Sha256;
 use hitls_types::CryptoError;
 use zeroize::Zeroize;
 
-/// Maximum number of generate requests before reseed is required.
-const RESEED_INTERVAL: u64 = 1 << 48;
+use super::RESEED_INTERVAL;
 
 /// HMAC output size for SHA-256.
 const HMAC_SIZE: usize = 32;
@@ -74,16 +73,7 @@ impl HmacDrbg {
     /// Otherwise, `getrandom` is used directly.
     pub fn from_system_entropy(seed_len: usize) -> Result<Self, CryptoError> {
         let mut entropy = vec![0u8; seed_len];
-        #[cfg(feature = "entropy")]
-        {
-            let mut es =
-                crate::entropy::EntropySource::new(crate::entropy::EntropyConfig::default());
-            es.get_entropy(&mut entropy)?;
-        }
-        #[cfg(not(feature = "entropy"))]
-        {
-            getrandom::getrandom(&mut entropy).map_err(|_| CryptoError::BnRandGenFail)?;
-        }
+        super::get_system_entropy(&mut entropy)?;
         let result = Self::new(&entropy);
         entropy.zeroize();
         result
@@ -156,13 +146,6 @@ impl HmacDrbg {
         Ok(())
     }
 
-    /// Generate `len` pseudorandom bytes (convenience method).
-    pub fn generate_bytes(&mut self, len: usize) -> Result<Vec<u8>, CryptoError> {
-        let mut output = vec![0u8; len];
-        self.generate(&mut output, None)?;
-        Ok(output)
-    }
-
     /// Reseed the DRBG with fresh entropy (SP 800-90A Section 10.1.2.4).
     pub fn reseed(
         &mut self,
@@ -182,9 +165,28 @@ impl HmacDrbg {
     }
 }
 
+impl super::Drbg for HmacDrbg {
+    fn generate(
+        &mut self,
+        output: &mut [u8],
+        additional_input: Option<&[u8]>,
+    ) -> Result<(), CryptoError> {
+        HmacDrbg::generate(self, output, additional_input)
+    }
+
+    fn reseed(
+        &mut self,
+        entropy: &[u8],
+        additional_input: Option<&[u8]>,
+    ) -> Result<(), CryptoError> {
+        HmacDrbg::reseed(self, entropy, additional_input)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::drbg::Drbg;
 
     #[test]
     fn test_hmac_drbg_instantiate() {

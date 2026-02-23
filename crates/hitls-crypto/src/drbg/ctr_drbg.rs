@@ -8,14 +8,14 @@ use crate::aes::AesKey;
 use hitls_types::CryptoError;
 use zeroize::Zeroize;
 
+use super::RESEED_INTERVAL;
+
 /// AES-256 key length in bytes.
 const KEY_LEN: usize = 32;
 /// AES block size in bytes.
 const BLOCK_LEN: usize = 16;
 /// Seed length = key length + block length (48 bytes for AES-256).
 const SEED_LEN: usize = KEY_LEN + BLOCK_LEN;
-/// Maximum number of generate requests before reseed is required.
-const RESEED_INTERVAL: u64 = 1 << 48;
 
 /// CTR-DRBG context using AES-256 (NIST SP 800-90A Section 10.2).
 pub struct CtrDrbg {
@@ -34,6 +34,8 @@ impl Drop for CtrDrbg {
     }
 }
 
+use super::increment_counter;
+
 /// Encrypt a single AES-256 block in-place.
 fn aes256_encrypt_block(
     key: &[u8; KEY_LEN],
@@ -41,16 +43,6 @@ fn aes256_encrypt_block(
 ) -> Result<(), CryptoError> {
     let cipher = AesKey::new(key)?;
     cipher.encrypt_block(block)
-}
-
-/// Increment a 128-bit counter (big-endian).
-fn increment_counter(v: &mut [u8; BLOCK_LEN]) {
-    for i in (0..BLOCK_LEN).rev() {
-        v[i] = v[i].wrapping_add(1);
-        if v[i] != 0 {
-            break;
-        }
-    }
 }
 
 impl CtrDrbg {
@@ -111,16 +103,7 @@ impl CtrDrbg {
     /// Otherwise, `getrandom` is used directly.
     pub fn from_system_entropy() -> Result<Self, CryptoError> {
         let mut entropy = [0u8; SEED_LEN];
-        #[cfg(feature = "entropy")]
-        {
-            let mut es =
-                crate::entropy::EntropySource::new(crate::entropy::EntropyConfig::default());
-            es.get_entropy(&mut entropy)?;
-        }
-        #[cfg(not(feature = "entropy"))]
-        {
-            getrandom::getrandom(&mut entropy).map_err(|_| CryptoError::BnRandGenFail)?;
-        }
+        super::get_system_entropy(&mut entropy)?;
         let result = Self::new(&entropy);
         entropy.zeroize();
         result
@@ -213,13 +196,6 @@ impl CtrDrbg {
         Ok(())
     }
 
-    /// Generate `len` pseudorandom bytes (convenience method).
-    pub fn generate_bytes(&mut self, len: usize) -> Result<Vec<u8>, CryptoError> {
-        let mut output = vec![0u8; len];
-        self.generate(&mut output, None)?;
-        Ok(output)
-    }
-
     /// Reseed the DRBG with fresh entropy (SP 800-90A §10.2.1.6).
     pub fn reseed(
         &mut self,
@@ -254,6 +230,24 @@ impl CtrDrbg {
         self.reseed_counter = 1;
 
         Ok(())
+    }
+}
+
+impl super::Drbg for CtrDrbg {
+    fn generate(
+        &mut self,
+        output: &mut [u8],
+        additional_input: Option<&[u8]>,
+    ) -> Result<(), CryptoError> {
+        CtrDrbg::generate(self, output, additional_input)
+    }
+
+    fn reseed(
+        &mut self,
+        entropy: &[u8],
+        additional_input: Option<&[u8]>,
+    ) -> Result<(), CryptoError> {
+        CtrDrbg::reseed(self, entropy, additional_input)
     }
 }
 
@@ -326,6 +320,7 @@ fn block_cipher_df(input: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::drbg::Drbg;
 
     #[test]
     fn test_ctr_drbg_instantiate() {
