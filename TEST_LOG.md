@@ -1607,6 +1607,52 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2610** | **40** |
 
+### 7.17 Phase T105 — Extension Negotiation E2E Tests (+14 tests)
+
+**Date**: 2026-02-23
+**Deficiency**: D3 (High) — Extension negotiation flows lack E2E tests
+
+**E2E TCP loopback tests** (12 tests in `tests/interop/tests/ext_negotiation.rs`):
+
+| # | Test | Protocol | Result |
+|:-:|------|----------|--------|
+| 1 | test_tls13_alpn_no_common_protocol | TLS 1.3 | ALPN = None (no overlap) |
+| 2 | test_tls12_alpn_server_selects_first_match | TLS 1.2 | Server preference: http/1.1 |
+| 3 | test_tls12_alpn_no_common_protocol | TLS 1.2 | ALPN = None (no overlap) |
+| 4 | test_tls13_sni_propagated_to_both_sides | TLS 1.3 | SNI on both sides |
+| 5 | test_tls12_sni_visible_on_server | TLS 1.2 | SNI on both sides |
+| 6 | test_tls13_group_server_preference | TLS 1.3 | X25519 (from key_share) |
+| 7 | test_tls13_group_mismatch_triggers_hrr | TLS 1.3 | HRR P256→X25519 |
+| 8 | test_tls13_no_common_group_fails | TLS 1.3 | Handshake failure |
+| 9 | test_tls12_max_fragment_length_e2e | TLS 1.2 | MFL=2048 works |
+| 10 | test_tls13_record_size_limit_e2e | TLS 1.3 | RSL 2048/4096 works |
+| 11 | test_tls12_record_size_limit_e2e | TLS 1.2 | RSL 1024/2048 works |
+| 12 | test_tls13_multiple_extensions_combined | TLS 1.3 | ALPN+SNI+group via ConnectionInfo |
+
+**Codec edge-case tests** (2 tests in `extensions_codec.rs`):
+
+| # | Test | Result |
+|:-:|------|--------|
+| 13 | test_duplicate_extension_type_both_returned | Both returned (no dedup) |
+| 14 | test_zero_length_extension_parses_ok | PADDING(0 bytes) parses OK |
+
+**Per-crate counts after Phase T105**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 652 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 137 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1191 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2624** | **40** |
+
 ---
 
 ## 8. Verification & Quality Gates
@@ -1614,9 +1660,9 @@ Pure test coverage phases — no new features, only new tests for existing code.
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,610 tests pass
+# Full test suite — all 2,624 tests pass
 cargo test --workspace --all-features
-# Result: 2,610 passed, 0 failed, 40 ignored
+# Result: 2,624 passed, 0 failed, 40 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

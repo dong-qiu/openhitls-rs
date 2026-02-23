@@ -77,7 +77,7 @@ Severity   ID   Description                              Impact
 ────────   ──   ──────────────────────────────────────   ──────────────────────────
 CLOSED     D1   0-RTT replay protection: +8 tests         Resolved (Phase T102)
 CLOSED     D2   Async TLCP/DTLCP: zero tests               Resolved (Phase T104: +15)
-High       D3   Extension negotiation: no e2e tests       Protocol compliance risk
+CLOSED     D3   Extension negotiation: +14 e2e tests       Resolved (Phase T105: +14)
 High       D4   DTLS loss/retransmission: no tests        Core DTLS feature unverified
 High       D5   TLCP double certificate: untested         GM compliance risk
 Medium     D6   No property-based testing framework       Input space coverage gap
@@ -115,16 +115,15 @@ Remaining uncovered areas (lower risk, tracked for future phases):
 
 Remaining async gaps are coverage depth (fewer test scenarios than sync), not missing connection types.
 
-### 2.4 D3 — Extension Negotiation (High)
+### 2.4 D3 — Extension Negotiation ~~(High)~~ — **CLOSED** (Phase T105)
 
-The extensions module has 14 tests covering only the custom extension framework. **Standard extension negotiation flows (client proposes → server selects/rejects)** lack dedicated tests:
-
-- ALPN negotiation failure path (server supports none of client's protocols)
-- SNI mismatch behavior
-- `supported_groups` / `key_share` matching logic
-- `max_fragment_length` vs `record_size_limit` conflict
-- Duplicate extension detection
-- Server returning extensions not proposed by client
+Phase T105 added 14 E2E tests covering all identified gaps:
+- ALPN no-common-protocol (TLS 1.3 + 1.2), server preference order (TLS 1.2)
+- SNI accessor verification on both client and server (TLS 1.3 + 1.2)
+- Group negotiation: server preference, HRR trigger, no-common-group failure
+- Max fragment length (TLS 1.2), record size limit (TLS 1.3 + 1.2)
+- Combined ALPN + SNI + group verification via ConnectionInfo
+- Codec: duplicate extension type, zero-length extension parsing
 
 ### 2.5 D4 — DTLS Loss/Retransmission (High)
 
@@ -202,7 +201,7 @@ Phase              Est. Tests   Deficiency   Focus
 Phase T102        ~8      D1           0-RTT early data + replay protection ✅
 Phase T103       +10      D2           Async TLS 1.2 deep coverage ✅
 Phase T104       +15      D2           Async TLCP + DTLCP connection tests ✅
-Phase T105       ~12      D3           Extension negotiation e2e tests
+Phase T105       +14      D3           Extension negotiation e2e tests ✅
 Phase T106       ~10      D4           DTLS loss simulation + retransmission
 Phase T107        ~8      D5           TLCP double certificate validation
 Phase T108       ~15      D10          SM9 tower fields (fp2/fp4/fp12)
@@ -211,7 +210,7 @@ Phase T110       ~15      D10          McEliece + FrodoKEM + XMSS internals
 Phase T111        —       D6/D7        Infra: proptest + coverage CI
 ```
 
-**Target**: 2,610 → 2,700+ tests, close remaining High deficiencies (D3-D5).
+**Target**: 2,624 → 2,700+ tests, close remaining High deficiencies (D4-D5).
 
 ### 3.2 Phase T102 — 0-RTT Early Data + Replay Protection (~8 tests) ✅
 
@@ -269,24 +268,26 @@ Phase T111        —       D6/D7        Infra: proptest + coverage CI
 | 14 | test_async_dtlcp_bidirectional | ✅ |
 | 15 | test_async_dtlcp_large_payload | ✅ |
 
-### 3.5 Phase T105 — Extension Negotiation E2E Tests (~12 tests)
+### 3.5 Phase T105 — Extension Negotiation E2E Tests (+14 tests) ✅
 
-**Deficiency**: D3 (High)
+**Deficiency**: D3 (High) — **CLOSED**
 
-| # | Test | Description |
-|:-:|------|-------------|
-| 1 | test_alpn_no_common_protocol | ALPN mismatch → handshake failure |
-| 2 | test_alpn_server_selects_preferred | Server selects first matching protocol |
-| 3 | test_sni_mismatch_rejection | SNI hostname mismatch → alert |
-| 4 | test_supported_groups_no_common | No common group → HRR or failure |
-| 5 | test_key_share_group_mismatch | Key share group not in supported_groups |
-| 6 | test_sig_algs_client_server_match | Signature algorithm negotiation |
-| 7 | test_max_fragment_length_negotiation | MFL client/server agreement |
-| 8 | test_record_size_limit_enforcement | RSL overrides default record size |
-| 9 | test_duplicate_extension_rejected | Duplicate extension → decode error |
-| 10 | test_server_unsolicited_extension | Server sends unrequested extension |
-| 11 | test_session_ticket_extension_flow | Ticket extension in CH/SH/NST |
-| 12 | test_early_data_extension_codec | Early data extension roundtrip |
+| # | Test | Description | Status |
+|:-:|------|-------------|--------|
+| 1 | test_tls13_alpn_no_common_protocol | TLS 1.3 ALPN no overlap → None | ✅ |
+| 2 | test_tls12_alpn_server_selects_first_match | TLS 1.2 server preference wins | ✅ |
+| 3 | test_tls12_alpn_no_common_protocol | TLS 1.2 ALPN no overlap → None | ✅ |
+| 4 | test_tls13_sni_propagated_to_both_sides | TLS 1.3 SNI on both sides | ✅ |
+| 5 | test_tls12_sni_visible_on_server | TLS 1.2 SNI on both sides | ✅ |
+| 6 | test_tls13_group_server_preference | X25519 from key_share | ✅ |
+| 7 | test_tls13_group_mismatch_triggers_hrr | HRR P256→X25519 | ✅ |
+| 8 | test_tls13_no_common_group_fails | P256 vs X448 → failure | ✅ |
+| 9 | test_tls12_max_fragment_length_e2e | MFL=2048 works | ✅ |
+| 10 | test_tls13_record_size_limit_e2e | RSL 2048/4096 works | ✅ |
+| 11 | test_tls12_record_size_limit_e2e | RSL 1024/2048 works | ✅ |
+| 12 | test_tls13_multiple_extensions_combined | ALPN+SNI+group via ConnectionInfo | ✅ |
+| 13 | test_duplicate_extension_type_both_returned | Codec: both returned | ✅ |
+| 14 | test_zero_length_extension_parses_ok | Codec: PADDING(0) OK | ✅ |
 
 ### 3.6 Phase T106 — DTLS Loss Simulation + Retransmission (~10 tests)
 
@@ -370,13 +371,13 @@ Phase T111        —       D6/D7        Infra: proptest + coverage CI
 
 | Metric | Current | After Phase T107 | After Phase T111 |
 |--------|:-------:|:--------------:|:---------------:|
-| Total tests | 2,610 | ~2,660 | ~2,750+ |
+| Total tests | 2,624 | ~2,660 | ~2,750+ |
 | Critical deficiencies (D1-D2) | 0 | 0 | 0 |
-| High deficiencies (D3-D5) | 3 | 0 | 0 |
+| High deficiencies (D3-D5) | 2 | 0 | 0 |
 | Crypto files with tests | 75% | 75% | 90%+ |
 | TLS files with tests | 100% | 100% | 100% |
 | Async connection type coverage | 40% | 100% | 100% |
-| Extension negotiation coverage | ~20% | 80%+ | 80%+ |
+| Extension negotiation coverage | 80%+ | 80%+ | 80%+ |
 | DTLS loss scenario coverage | 0% | 70%+ | 70%+ |
 | Property-based testing | No | No | Yes |
 | Code coverage in CI | No | No | Yes |

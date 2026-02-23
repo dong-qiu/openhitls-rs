@@ -2276,3 +2276,18 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 2 files created, 2 files modified. hitls-tls: 1174→1189, total: 2595→2610.
 - All 2610 workspace tests pass, 0 clippy warnings, formatting clean.
+
+## Phase T105: Extension Negotiation E2E Tests
+
+**Prompt**: Implement Phase T105 — Extension Negotiation E2E Tests. Create 12 TCP loopback tests for ALPN, SNI, group negotiation/HRR, MFL, RSL, and combined extensions. Add 2 codec edge-case tests for duplicate and zero-length extensions. Target: +14 tests.
+
+**Scope**: Close D3 (High) — extension negotiation flows lacked E2E tests.
+
+**Work performed**:
+1. Created `tests/interop/tests/ext_negotiation.rs` with 12 E2E TCP loopback tests: 3 ALPN (TLS 1.3 no-overlap, TLS 1.2 server preference, TLS 1.2 no-overlap), 2 SNI (TLS 1.3 both sides, TLS 1.2 both sides), 3 group negotiation (server preference, HRR trigger, no-common-group failure), 3 fragment/RSL (TLS 1.2 MFL, TLS 1.3 RSL, TLS 1.2 RSL), 1 combined (ALPN+SNI+group via ConnectionInfo)
+2. Added 2 codec tests to `extensions_codec.rs`: duplicate extension type returns both, zero-length extension parses OK
+3. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 1 file created, 1 file modified. hitls-tls: 1189→1191, hitls-integration: 125→137, total: 2610→2624.
+- All 2624 workspace tests pass, 0 clippy warnings, formatting clean.

@@ -7896,3 +7896,36 @@ Implemented `AsyncTlcpClientConnection` / `AsyncTlcpServerConnection` (TLS recor
 - `cargo test --workspace --all-features`: 2610 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase T105: Extension Negotiation E2E Tests (+14 tests, 2,610→2,624)
+
+**Date**: 2026-02-23
+**Scope**: Close D3 (High) — Extension negotiation flows (client proposes → server selects/rejects) lacked dedicated E2E tests. Added 12 TCP loopback tests + 2 codec edge-case tests.
+
+### Summary
+
+Created `tests/interop/tests/ext_negotiation.rs` with 12 E2E TCP loopback tests covering ALPN, SNI, group negotiation/HRR, max fragment length, record size limit, and combined extension negotiation across TLS 1.3 and TLS 1.2. Added 2 codec tests to `extensions_codec.rs` for duplicate extension and zero-length extension parsing.
+
+**ALPN (3 tests)**: TLS 1.3 no-common-protocol (both have ALPN but no overlap → None), TLS 1.2 server preference order (http/1.1 wins over h2), TLS 1.2 no-common-protocol
+
+**SNI (2 tests)**: TLS 1.3 SNI propagated to both sides via server_name() accessor, TLS 1.2 SNI visible on server side
+
+**Group negotiation (3 tests)**: TLS 1.3 group server preference (X25519 from key_share), TLS 1.3 group mismatch triggers HRR (P256→X25519), TLS 1.3 no common group fails (P256 vs X448)
+
+**Fragment/RSL (3 tests)**: TLS 1.2 MFL=2048 handshake + data, TLS 1.3 RSL client=2048/server=4096, TLS 1.2 RSL client=1024/server=2048
+
+**Combined (1 test)**: TLS 1.3 ALPN + SNI + X25519 group all verified via ConnectionInfo
+
+**Codec (2 tests)**: Duplicate extension type returns both entries, zero-length extension (PADDING) parses OK
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `tests/interop/tests/ext_negotiation.rs` | **NEW** — 12 E2E extension negotiation TCP loopback tests |
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Added 2 codec edge-case tests |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2624 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

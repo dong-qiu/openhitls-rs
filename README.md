@@ -2,7 +2,7 @@
 
 A production-grade cryptographic and TLS library in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **100% C→Rust feature parity achieved** — 2610 tests, 10 fuzz targets, 5000+ Wycheproof vectors
+> **100% C→Rust feature parity achieved** — 2624 tests, 10 fuzz targets, 5000+ Wycheproof vectors
 
 ## Feature Highlights
 
@@ -23,7 +23,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | CLI Tools | ~8K | ~2.2K | **100%** | 14 commands (dgst, genpkey, x509, s-client, s-server, etc.) |
 | FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
-| Test Infrastructure | ~20K | ~3.5K | **95%** | 2610 tests + Wycheproof + 10 fuzz targets + security audit |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | 2624 tests + Wycheproof + 10 fuzz targets + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
 
 ### Not Migrated (by design)
@@ -259,18 +259,18 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2610 tests, 40 ignored)
+# Run all tests (2624 tests, 40 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
 cargo test -p hitls-crypto --all-features   # 652 tests + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 1189 tests
+cargo test -p hitls-tls --all-features      # 1191 tests
 cargo test -p hitls-pki --all-features      # 349 tests
 cargo test -p hitls-bignum                  # 49 tests
 cargo test -p hitls-utils                   # 53 tests
 cargo test -p hitls-auth --all-features     # 33 tests
 cargo test -p hitls-cli --all-features      # 117 tests
-cargo test -p hitls-integration-tests       # 125 tests
+cargo test -p hitls-integration-tests       # 137 tests
 
 # Lint (zero warnings required)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

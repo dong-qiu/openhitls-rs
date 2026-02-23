@@ -2491,4 +2491,48 @@ mod tests {
         let val_max = u32::from_be_bytes(ext_max.data[..4].try_into().unwrap());
         assert_eq!(val_max, u32::MAX);
     }
+
+    // ===================================================================
+    // Phase T105 — Extension parsing edge-case tests
+    // ===================================================================
+
+    #[test]
+    fn test_duplicate_extension_type_both_returned() {
+        // Build raw bytes with two extensions of the same type (SERVER_NAME = 0x0000).
+        // parse_extensions_raw returns both — no dedup/rejection.
+        let mut data = Vec::new();
+        // Extension 1: type=0x0000, data_len=3, data=[0x01,0x02,0x03]
+        data.extend_from_slice(&[0x00, 0x00]); // type
+        data.extend_from_slice(&[0x00, 0x03]); // length
+        data.extend_from_slice(&[0x01, 0x02, 0x03]); // data
+                                                     // Extension 2: type=0x0000, data_len=2, data=[0x04,0x05]
+        data.extend_from_slice(&[0x00, 0x00]); // type
+        data.extend_from_slice(&[0x00, 0x02]); // length
+        data.extend_from_slice(&[0x04, 0x05]); // data
+
+        let exts = parse_extensions_raw(&data).unwrap();
+        assert_eq!(
+            exts.len(),
+            2,
+            "both duplicate extensions should be returned"
+        );
+        assert_eq!(exts[0].extension_type, ExtensionType::SERVER_NAME);
+        assert_eq!(exts[0].data, vec![0x01, 0x02, 0x03]);
+        assert_eq!(exts[1].extension_type, ExtensionType::SERVER_NAME);
+        assert_eq!(exts[1].data, vec![0x04, 0x05]);
+    }
+
+    #[test]
+    fn test_zero_length_extension_parses_ok() {
+        // Extension with data length 0 (valid for PADDING with 0-byte pad).
+        let mut data = Vec::new();
+        // type=PADDING(0x0015=21), data_len=0
+        data.extend_from_slice(&[0x00, 0x15]); // type
+        data.extend_from_slice(&[0x00, 0x00]); // length = 0
+
+        let exts = parse_extensions_raw(&data).unwrap();
+        assert_eq!(exts.len(), 1);
+        assert_eq!(exts[0].extension_type, ExtensionType::PADDING);
+        assert!(exts[0].data.is_empty(), "zero-length extension data");
+    }
 }
