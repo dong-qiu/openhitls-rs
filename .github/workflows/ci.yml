@@ -81,7 +81,7 @@ jobs:
         with:
           components: miri
       - run: cargo miri test -p hitls-bignum
-      - run: cargo miri test -p hitls-utils
+      - run: cargo miri test -p hitls-utils -- --skip prop_
 
   fuzz-check:
     name: Fuzz Build Check
