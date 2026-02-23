@@ -7957,3 +7957,42 @@ Created `tests/interop/tests/dtls_resilience.rs` with 8 integration tests that e
 - `cargo test --workspace --all-features`: 2634 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T107: TLCP Double Certificate Validation Tests (+10 tests, 2,634→2,644)
+
+**Date**: 2026-02-23
+**Scope**: Partially close D5 (High) — TLCP (GM/T 0024) uniquely requires dual certificates (signing cert + encryption cert) per server entity, but no test verified error behavior when the double-cert configuration is incomplete or incorrect. All existing tests provided valid configs — this phase exercises the error paths for missing/wrong certificates.
+
+### Summary
+
+Added 6 unit tests (3 to server_tlcp.rs, 3 to server_dtlcp.rs) that exercise server-side error paths when TLCP double-certificate configuration is incomplete or incorrect. Added 4 integration tests to `tests/interop/tests/tlcp.rs` that verify full-stack handshake failure with incomplete server configs. Made `make_sm2_tlcp_identity()` public in the integration test helper library.
+
+**Unit tests** (6 tests):
+- `test_tlcp_server_missing_enc_certificate` — Config has sign cert + sign key but empty enc cert → "no TLCP encryption certificate"
+- `test_tlcp_server_missing_signing_key` — Config has sign cert + enc cert but no private_key → "no signing private key"
+- `test_tlcp_server_wrong_signing_key_type` — Config has Ed25519 key instead of SM2 → "TLCP signing key must be SM2"
+- `test_dtlcp_server_missing_enc_certificate` — Same as above, DTLCP variant
+- `test_dtlcp_server_missing_signing_key` — Same as above, DTLCP variant
+- `test_dtlcp_server_wrong_signing_key_type` — Ed25519 key → "DTLCP signing key must be SM2"
+
+**Integration tests** (4 tests):
+- `test_tlcp_handshake_fails_without_enc_cert` — Full-stack TLCP handshake fails when server has no enc cert
+- `test_tlcp_handshake_fails_without_signing_key` — Full-stack TLCP handshake fails when server has no signing key
+- `test_dtlcp_handshake_fails_without_enc_cert` — Full-stack DTLCP handshake fails when server has no enc cert
+- `test_dtlcp_handshake_fails_without_signing_key` — Full-stack DTLCP handshake fails when server has no signing key
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `tests/interop/src/lib.rs` | Made `make_sm2_tlcp_identity()` public |
+| `crates/hitls-tls/src/handshake/server_tlcp.rs` | Added 3 unit tests + helper functions |
+| `crates/hitls-tls/src/handshake/server_dtlcp.rs` | Added 3 unit tests + helper functions |
+| `tests/interop/tests/tlcp.rs` | Added 4 integration tests |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2644 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

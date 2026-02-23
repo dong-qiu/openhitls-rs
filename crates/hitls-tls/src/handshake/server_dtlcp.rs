@@ -584,6 +584,76 @@ fn dtls_get_body(msg: &[u8]) -> Result<&[u8], TlsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ServerPrivateKey;
+    use crate::crypt::SignatureScheme;
+    use crate::handshake::client_dtlcp::DtlcpClientHandshake;
+
+    /// Create SM2 key pairs and self-signed certificates for testing.
+    fn create_test_sm2_certs() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+        use hitls_crypto::sm2::Sm2KeyPair;
+        use hitls_pki::x509::{
+            CertificateBuilder, DistinguishedName, SigningKey, SubjectPublicKeyInfo,
+        };
+        use hitls_utils::oid::known;
+
+        let sign_kp = Sm2KeyPair::generate().unwrap();
+        let sign_pubkey = sign_kp.public_key_bytes().unwrap();
+        let sign_privkey = sign_kp.private_key_bytes().unwrap();
+
+        let enc_kp = Sm2KeyPair::generate().unwrap();
+        let enc_pubkey = enc_kp.public_key_bytes().unwrap();
+        let enc_privkey = enc_kp.private_key_bytes().unwrap();
+
+        let sign_spki = SubjectPublicKeyInfo {
+            algorithm_oid: known::ec_public_key().to_der_value(),
+            algorithm_params: Some(known::sm2_curve().to_der_value()),
+            public_key: sign_pubkey,
+        };
+        let sign_sk = SigningKey::Sm2(sign_kp);
+        let sign_dn = DistinguishedName {
+            entries: vec![("CN".into(), "DTLCP Sign".into())],
+        };
+        let sign_cert = CertificateBuilder::new()
+            .serial_number(&[0x01])
+            .issuer(sign_dn.clone())
+            .subject(sign_dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(sign_spki)
+            .build(&sign_sk)
+            .unwrap();
+
+        let enc_spki = SubjectPublicKeyInfo {
+            algorithm_oid: known::ec_public_key().to_der_value(),
+            algorithm_params: Some(known::sm2_curve().to_der_value()),
+            public_key: enc_pubkey,
+        };
+        let enc_sk = SigningKey::Sm2(enc_kp);
+        let enc_dn = DistinguishedName {
+            entries: vec![("CN".into(), "DTLCP Enc".into())],
+        };
+        let enc_cert = CertificateBuilder::new()
+            .serial_number(&[0x02])
+            .issuer(enc_dn.clone())
+            .subject(enc_dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(enc_spki)
+            .build(&enc_sk)
+            .unwrap();
+
+        (sign_privkey, sign_cert.raw, enc_privkey, enc_cert.raw)
+    }
+
+    /// Build a valid DTLCP ClientHello message for testing server error paths.
+    fn build_valid_dtlcp_client_hello() -> Vec<u8> {
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::ECDHE_SM4_CBC_SM3])
+            .signature_algorithms(&[SignatureScheme::SM2_SM3])
+            .verify_peer(false)
+            .build();
+        let mut client_hs = DtlcpClientHandshake::new(client_config);
+        client_hs.build_client_hello().unwrap()
+    }
+
     #[test]
     fn test_dtlcp_server_state_initial() {
         let config = TlsConfig::builder().build();
@@ -645,5 +715,81 @@ mod tests {
         let exact_msg = vec![0u8; 12];
         let body = dtls_get_body(&exact_msg).unwrap();
         assert!(body.is_empty());
+    }
+
+    #[test]
+    fn test_dtlcp_server_missing_enc_certificate() {
+        let ch_msg = build_valid_dtlcp_client_hello();
+        let (sign_privkey, sign_cert, _enc_privkey, _enc_cert) = create_test_sm2_certs();
+
+        // Server config with sign cert + sign key but NO enc cert
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::ECDHE_SM4_CBC_SM3])
+            .signature_algorithms(&[SignatureScheme::SM2_SM3])
+            .certificate_chain(vec![sign_cert])
+            .private_key(ServerPrivateKey::Sm2 {
+                private_key: sign_privkey,
+            })
+            .verify_peer(false)
+            .build();
+
+        let mut server_hs = DtlcpServerHandshake::new(server_config, false);
+        let result = server_hs.process_client_hello(&ch_msg);
+        assert!(result.is_err());
+        let msg = format!("{}", result.err().unwrap());
+        assert!(
+            msg.contains("no TLCP encryption certificate"),
+            "expected 'no TLCP encryption certificate', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_dtlcp_server_missing_signing_key() {
+        let ch_msg = build_valid_dtlcp_client_hello();
+        let (_sign_privkey, sign_cert, _enc_privkey, enc_cert) = create_test_sm2_certs();
+
+        // Server config with sign cert + enc cert but NO private_key
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::ECDHE_SM4_CBC_SM3])
+            .signature_algorithms(&[SignatureScheme::SM2_SM3])
+            .certificate_chain(vec![sign_cert])
+            .tlcp_enc_certificate_chain(vec![enc_cert])
+            .verify_peer(false)
+            .build();
+
+        let mut server_hs = DtlcpServerHandshake::new(server_config, false);
+        let result = server_hs.process_client_hello(&ch_msg);
+        assert!(result.is_err());
+        let msg = format!("{}", result.err().unwrap());
+        assert!(
+            msg.contains("no signing private key"),
+            "expected 'no signing private key', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_dtlcp_server_wrong_signing_key_type() {
+        let ch_msg = build_valid_dtlcp_client_hello();
+        let (_sign_privkey, sign_cert, _enc_privkey, enc_cert) = create_test_sm2_certs();
+
+        // Server config with sign cert + enc cert but Ed25519 key (wrong type for DTLCP)
+        let ed25519_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[CipherSuite::ECDHE_SM4_CBC_SM3])
+            .signature_algorithms(&[SignatureScheme::SM2_SM3])
+            .certificate_chain(vec![sign_cert])
+            .private_key(ServerPrivateKey::Ed25519(ed25519_kp.seed().to_vec()))
+            .tlcp_enc_certificate_chain(vec![enc_cert])
+            .verify_peer(false)
+            .build();
+
+        let mut server_hs = DtlcpServerHandshake::new(server_config, false);
+        let result = server_hs.process_client_hello(&ch_msg);
+        assert!(result.is_err());
+        let msg = format!("{}", result.err().unwrap());
+        assert!(
+            msg.contains("DTLCP signing key must be SM2"),
+            "expected 'DTLCP signing key must be SM2', got: {msg}"
+        );
     }
 }

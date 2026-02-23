@@ -106,3 +106,143 @@ fn test_dtlcp_with_cookie() {
     assert_eq!(client.version(), Some(TlsVersion::Dtlcp));
     assert_eq!(server.version(), Some(TlsVersion::Dtlcp));
 }
+
+// -------------------------------------------------------
+// TLCP/DTLCP double-certificate validation error tests
+// -------------------------------------------------------
+
+#[test]
+fn test_tlcp_handshake_fails_without_enc_cert() {
+    use hitls_tls::config::{ServerPrivateKey, TlsConfig};
+    use hitls_tls::connection_tlcp::tlcp_handshake_in_memory;
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::CipherSuite;
+
+    let (sign_privkey, sign_cert, _enc_privkey, _enc_cert) = make_sm2_tlcp_identity();
+
+    let client_config = TlsConfig::builder()
+        .cipher_suites(&[CipherSuite::ECDHE_SM4_GCM_SM3])
+        .signature_algorithms(&[SignatureScheme::SM2_SM3])
+        .verify_peer(false)
+        .build();
+
+    let server_config = TlsConfig::builder()
+        .cipher_suites(&[CipherSuite::ECDHE_SM4_GCM_SM3])
+        .signature_algorithms(&[SignatureScheme::SM2_SM3])
+        .certificate_chain(vec![sign_cert])
+        .private_key(ServerPrivateKey::Sm2 {
+            private_key: sign_privkey,
+        })
+        // NO enc cert
+        .verify_peer(false)
+        .build();
+
+    let result = tlcp_handshake_in_memory(client_config, server_config);
+    assert!(result.is_err());
+    let msg = format!("{}", result.err().unwrap());
+    assert!(
+        msg.contains("no TLCP encryption certificate"),
+        "expected 'no TLCP encryption certificate', got: {msg}"
+    );
+}
+
+#[test]
+fn test_tlcp_handshake_fails_without_signing_key() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection_tlcp::tlcp_handshake_in_memory;
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::CipherSuite;
+
+    let (_sign_privkey, sign_cert, _enc_privkey, enc_cert) = make_sm2_tlcp_identity();
+
+    let client_config = TlsConfig::builder()
+        .cipher_suites(&[CipherSuite::ECDHE_SM4_GCM_SM3])
+        .signature_algorithms(&[SignatureScheme::SM2_SM3])
+        .verify_peer(false)
+        .build();
+
+    let server_config = TlsConfig::builder()
+        .cipher_suites(&[CipherSuite::ECDHE_SM4_GCM_SM3])
+        .signature_algorithms(&[SignatureScheme::SM2_SM3])
+        .certificate_chain(vec![sign_cert])
+        // NO private_key
+        .tlcp_enc_certificate_chain(vec![enc_cert])
+        .verify_peer(false)
+        .build();
+
+    let result = tlcp_handshake_in_memory(client_config, server_config);
+    assert!(result.is_err());
+    let msg = format!("{}", result.err().unwrap());
+    assert!(
+        msg.contains("no signing private key"),
+        "expected 'no signing private key', got: {msg}"
+    );
+}
+
+#[test]
+fn test_dtlcp_handshake_fails_without_enc_cert() {
+    use hitls_tls::config::{ServerPrivateKey, TlsConfig};
+    use hitls_tls::connection_dtlcp::dtlcp_handshake_in_memory;
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::CipherSuite;
+
+    let (sign_privkey, sign_cert, _enc_privkey, _enc_cert) = make_sm2_tlcp_identity();
+
+    let client_config = TlsConfig::builder()
+        .cipher_suites(&[CipherSuite::ECDHE_SM4_GCM_SM3])
+        .signature_algorithms(&[SignatureScheme::SM2_SM3])
+        .verify_peer(false)
+        .build();
+
+    let server_config = TlsConfig::builder()
+        .cipher_suites(&[CipherSuite::ECDHE_SM4_GCM_SM3])
+        .signature_algorithms(&[SignatureScheme::SM2_SM3])
+        .certificate_chain(vec![sign_cert])
+        .private_key(ServerPrivateKey::Sm2 {
+            private_key: sign_privkey,
+        })
+        // NO enc cert
+        .verify_peer(false)
+        .build();
+
+    let result = dtlcp_handshake_in_memory(client_config, server_config, false);
+    assert!(result.is_err());
+    let msg = format!("{}", result.err().unwrap());
+    assert!(
+        msg.contains("no TLCP encryption certificate"),
+        "expected 'no TLCP encryption certificate', got: {msg}"
+    );
+}
+
+#[test]
+fn test_dtlcp_handshake_fails_without_signing_key() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection_dtlcp::dtlcp_handshake_in_memory;
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::CipherSuite;
+
+    let (_sign_privkey, sign_cert, _enc_privkey, enc_cert) = make_sm2_tlcp_identity();
+
+    let client_config = TlsConfig::builder()
+        .cipher_suites(&[CipherSuite::ECDHE_SM4_GCM_SM3])
+        .signature_algorithms(&[SignatureScheme::SM2_SM3])
+        .verify_peer(false)
+        .build();
+
+    let server_config = TlsConfig::builder()
+        .cipher_suites(&[CipherSuite::ECDHE_SM4_GCM_SM3])
+        .signature_algorithms(&[SignatureScheme::SM2_SM3])
+        .certificate_chain(vec![sign_cert])
+        // NO private_key
+        .tlcp_enc_certificate_chain(vec![enc_cert])
+        .verify_peer(false)
+        .build();
+
+    let result = dtlcp_handshake_in_memory(client_config, server_config, false);
+    assert!(result.is_err());
+    let msg = format!("{}", result.err().unwrap());
+    assert!(
+        msg.contains("no signing private key"),
+        "expected 'no signing private key', got: {msg}"
+    );
+}

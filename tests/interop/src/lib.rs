@@ -87,7 +87,7 @@ pub fn make_dtls12_configs() -> (hitls_tls::config::TlsConfig, hitls_tls::config
     (client_config, server_config)
 }
 
-fn make_sm2_tlcp_identity() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+pub fn make_sm2_tlcp_identity() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     use hitls_crypto::sm2::Sm2KeyPair;
     use hitls_pki::x509::{
         CertificateBuilder, DistinguishedName, SigningKey, SubjectPublicKeyInfo,

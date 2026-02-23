@@ -79,7 +79,7 @@ CLOSED     D1   0-RTT replay protection: +8 tests         Resolved (Phase T102)
 CLOSED     D2   Async TLCP/DTLCP: zero tests               Resolved (Phase T104: +15)
 CLOSED     D3   Extension negotiation: +14 e2e tests       Resolved (Phase T105: +14)
 PARTIAL    D4   DTLS loss/resilience: +10 tests             Partially resolved (Phase T106)
-High       D5   TLCP double certificate: untested         GM compliance risk
+PARTIAL    D5   TLCP double certificate: +10 tests         Partially resolved (Phase T107)
 Medium     D6   No property-based testing framework       Input space coverage gap
 Medium     D7   No code coverage metrics in CI            Cannot quantify quality
 Medium     D8   No cross-implementation interop           Compatibility risk
@@ -140,14 +140,16 @@ Phase T105 added 14 E2E tests covering all identified gaps:
 - Out-of-order handshake flight delivery (Finished before Certificate)
 - Retransmission backoff algorithm integration-level verification
 
-### 2.6 D5 — TLCP Double Certificate (High)
+### 2.6 D5 — TLCP Double Certificate ~~(High)~~ — **PARTIALLY CLOSED** (Phase T107)
 
-TLCP's core differentiator is the **dual certificate mechanism** (signing cert + encryption cert):
+**Partially resolved**: Phase T107 added 10 tests covering:
+- Missing encryption certificate error path (TLCP + DTLCP, unit + integration)
+- Missing signing private key error path (TLCP + DTLCP, unit + integration)
+- Wrong signing key type (Ed25519 instead of SM2) error path (TLCP + DTLCP)
 
-- No validation that both certificates are present and correct type
-- Signing cert used in ServerKeyExchange signature verification: no dedicated test
-- Encryption cert used in ClientKeyExchange SM2 encryption: no dedicated test
+**Remaining gaps**:
 - SM3 transcript hash and SM3-PRF correctness: no dedicated test
+- Encryption cert used in ClientKeyExchange SM2 encryption: covered by existing happy-path tests but no dedicated edge-case test
 
 ### 2.7 D6 — No Property-Based Testing (Medium)
 
@@ -216,7 +218,7 @@ Phase T110       ~15      D10          McEliece + FrodoKEM + XMSS internals
 Phase T111        —       D6/D7        Infra: proptest + coverage CI
 ```
 
-**Target**: 2,624 → 2,700+ tests, close remaining High deficiencies (D4-D5).
+**Target**: 2,644 → 2,700+ tests, close remaining partial deficiencies (D4-D5).
 
 ### 3.2 Phase T102 — 0-RTT Early Data + Replay Protection (~8 tests) ✅
 
@@ -312,20 +314,22 @@ Phase T111        —       D6/D7        Infra: proptest + coverage CI
 | 9 | test_dtls_fragment_reassembly_partial | Partial fragment arrival → buffered |
 | 10 | test_dtls_cookie_replay_rejected | Replayed cookie from old HVR rejected |
 
-### 3.7 Phase T107 — TLCP Double Certificate Validation (~8 tests)
+### 3.7 Phase T107 — TLCP Double Certificate Validation (+10 tests) ✅
 
-**Deficiency**: D5 (High)
+**Deficiency**: D5 (High) — Partially closed
 
 | # | Test | Description |
 |:-:|------|-------------|
-| 1 | test_tlcp_dual_cert_both_present | Both signing + encryption certs present |
-| 2 | test_tlcp_signing_cert_verification | Signing cert used in SKE signature |
-| 3 | test_tlcp_encryption_cert_sm2_encrypt | Encryption cert used in CKE SM2 encrypt |
-| 4 | test_tlcp_missing_encryption_cert | Missing encryption cert → error |
-| 5 | test_tlcp_missing_signing_cert | Missing signing cert → error |
-| 6 | test_tlcp_sm3_transcript_hash | SM3 transcript hash correctness |
-| 7 | test_tlcp_sm3_prf_master_secret | SM3-based PRF for master secret |
-| 8 | test_tlcp_cert_issuer_mismatch | Signing/encryption cert issuer mismatch |
+| 1 | test_tlcp_server_missing_enc_certificate | Missing enc cert → "no TLCP encryption certificate" |
+| 2 | test_tlcp_server_missing_signing_key | Missing signing key → "no signing private key" |
+| 3 | test_tlcp_server_wrong_signing_key_type | Ed25519 key → "TLCP signing key must be SM2" |
+| 4 | test_dtlcp_server_missing_enc_certificate | DTLCP: missing enc cert |
+| 5 | test_dtlcp_server_missing_signing_key | DTLCP: missing signing key |
+| 6 | test_dtlcp_server_wrong_signing_key_type | DTLCP: wrong key type |
+| 7 | test_tlcp_handshake_fails_without_enc_cert | Full-stack TLCP: no enc cert |
+| 8 | test_tlcp_handshake_fails_without_signing_key | Full-stack TLCP: no signing key |
+| 9 | test_dtlcp_handshake_fails_without_enc_cert | Full-stack DTLCP: no enc cert |
+| 10 | test_dtlcp_handshake_fails_without_signing_key | Full-stack DTLCP: no signing key |
 
 ### 3.8 Phase T108 — SM9 Tower Fields (~15 tests)
 
@@ -377,9 +381,9 @@ Phase T111        —       D6/D7        Infra: proptest + coverage CI
 
 | Metric | Current | After Phase T107 | After Phase T111 |
 |--------|:-------:|:--------------:|:---------------:|
-| Total tests | 2,634 | ~2,660 | ~2,750+ |
+| Total tests | 2,644 | 2,644 | ~2,750+ |
 | Critical deficiencies (D1-D2) | 0 | 0 | 0 |
-| High deficiencies (D3-D5) | 2 | 0 | 0 |
+| High deficiencies (D3-D5) | 1 | 1 | 0 |
 | Crypto files with tests | 75% | 75% | 90%+ |
 | TLS files with tests | 100% | 100% | 100% |
 | Async connection type coverage | 40% | 100% | 100% |

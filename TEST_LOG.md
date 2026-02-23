@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,634** (40 ignored) |
-| **Test growth** | 1,104 → 2,634 (+139% since baseline) |
+| **Total tests** | **2,644** (40 ignored) |
+| **Test growth** | 1,104 → 2,644 (+140% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,634 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 2,644 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -50,6 +50,7 @@ Phase T103  2,595     +10   Async TLS 1.2 deep coverage + session resumption fix
 Phase T104  2,610     +15   Async TLCP + DTLCP connection types & tests (*)
 Phase T105  2,624     +14   Extension negotiation E2E tests (*)
 Phase T106  2,634     +10   DTLS loss simulation & resilience tests (*)
+Phase T107  2,644     +10   TLCP double certificate validation tests (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -76,10 +77,10 @@ Phase T106  2,634     +10   DTLS loss simulation & resilience tests (*)
 
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
-| hitls-tls | 1,189 | 0 | 45.6% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
+| hitls-tls | 1,199 | 0 | 45.4% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
 | hitls-crypto | 652 | 31 | 25.1% | 48 algorithm modules + hardware acceleration |
 | hitls-pki | 349 | 1 | 13.4% | X.509, PKCS#8/12, CMS (5 content types) |
-| hitls-integration | 125 | 3 | 4.8% | Cross-crate TCP loopback, error scenarios, concurrency |
+| hitls-integration | 149 | 3 | 5.6% | Cross-crate TCP loopback, error scenarios, concurrency |
 | hitls-cli | 117 | 5 | 4.5% | 14 CLI commands (dgst, x509, genpkey, etc.) |
 | hitls-utils | 53 | 0 | 2.1% | ASN.1, Base64, PEM, OID |
 | hitls-bignum | 49 | 0 | 1.9% | Montgomery, Miller-Rabin, modular arithmetic |
@@ -141,8 +142,8 @@ After Phase T102, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-lev
 | **Phase T103** | ~20 | D2 | Async TLS 1.2 connection tests ✅ |
 | **Phase T104** | ~15 | D2 | Async TLCP + DTLCP connection tests |
 | **Phase T105** | ~12 | D3 | Extension negotiation e2e tests |
-| **Phase T106** | ~10 | D4 | DTLS loss simulation + retransmission |
-| **Phase T107** | ~8 | D5 | TLCP double certificate validation |
+| **Phase T106** | +10 | D4 | DTLS loss simulation + retransmission ✅ |
+| **Phase T107** | +10 | D5 | TLCP double certificate validation ✅ |
 | **Phase T108** | ~15 | D10 | SM9 tower fields (fp2/fp4/fp12) |
 | **Phase T109** | ~20 | D10 | SLH-DSA internal modules |
 | **Phase T110** | ~15 | D10 | McEliece + FrodoKEM + XMSS internals |
@@ -152,9 +153,9 @@ After Phase T102, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-lev
 
 | Metric | Current | After Phase T107 | After Phase T111 |
 |--------|:-------:|:-----------------:|:-----------------:|
-| Total tests | 2,585 | ~2,660 | 2,750+ |
-| Critical deficiencies | 1 | 0 | 0 |
-| High deficiencies | 3 | 0 | 0 |
+| Total tests | 2,644 | 2,644 | 2,750+ |
+| Critical deficiencies | 0 | 0 | 0 |
+| High deficiencies | 1 | 1 | 0 |
 | Async connection coverage | 40% | 100% | 100% |
 | Crypto files with tests | 75% | 75% | 90%+ |
 | Property-based testing | No | No | Yes |
@@ -1698,14 +1699,57 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
+### Phase T107 — TLCP Double Certificate Validation Tests (+10 tests, 2,634→2,644)
+
+**Scope**: Partially close D5 (High) — TLCP double certificate error paths untested.
+
+**Unit tests** (6 tests):
+
+| # | Test | File | Error Path |
+|:-:|------|------|------------|
+| 1 | test_tlcp_server_missing_enc_certificate | server_tlcp.rs | "no TLCP encryption certificate" |
+| 2 | test_tlcp_server_missing_signing_key | server_tlcp.rs | "no signing private key" |
+| 3 | test_tlcp_server_wrong_signing_key_type | server_tlcp.rs | "TLCP signing key must be SM2" |
+| 4 | test_dtlcp_server_missing_enc_certificate | server_dtlcp.rs | "no TLCP encryption certificate" |
+| 5 | test_dtlcp_server_missing_signing_key | server_dtlcp.rs | "no signing private key" |
+| 6 | test_dtlcp_server_wrong_signing_key_type | server_dtlcp.rs | "DTLCP signing key must be SM2" |
+
+**Integration tests** (4 tests in `tests/interop/tests/tlcp.rs`):
+
+| # | Test | Protocol | Error |
+|:-:|------|----------|-------|
+| 7 | test_tlcp_handshake_fails_without_enc_cert | TLCP | no enc cert |
+| 8 | test_tlcp_handshake_fails_without_signing_key | TLCP | no signing key |
+| 9 | test_dtlcp_handshake_fails_without_enc_cert | DTLCP | no enc cert |
+| 10 | test_dtlcp_handshake_fails_without_signing_key | DTLCP | no signing key |
+
+**Per-crate counts after Phase T107**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 652 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1199 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2644** | **40** |
+
+---
+
 ## 8. Verification & Quality Gates
 
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,634 tests pass
+# Full test suite — all 2,644 tests pass
 cargo test --workspace --all-features
-# Result: 2,634 passed, 0 failed, 40 ignored
+# Result: 2,644 passed, 0 failed, 40 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

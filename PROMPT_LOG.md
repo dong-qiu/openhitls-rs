@@ -2306,3 +2306,22 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 1 file created, 1 file modified. hitls-tls: 1191→1193, hitls-integration: 137→145, total: 2624→2634.
 - All 2634 workspace tests pass, 0 clippy warnings, formatting clean.
+
+---
+
+## Phase T107: TLCP Double Certificate Validation Tests
+
+**Prompt**: Implement Phase T107 — TLCP Double Certificate Validation Tests. Add 6 unit tests (3 to server_tlcp.rs, 3 to server_dtlcp.rs) exercising error paths for missing/wrong certificates. Add 4 integration tests to tests/interop/tests/tlcp.rs for full-stack handshake failures. Make make_sm2_tlcp_identity() public. Target: +10 tests, partially close D5.
+
+**Scope**: Partially close D5 (High) — TLCP double certificate error paths untested.
+
+**Work performed**:
+1. Made `make_sm2_tlcp_identity()` public in `tests/interop/src/lib.rs`
+2. Added 3 unit tests to `server_tlcp.rs`: missing enc cert, missing signing key, wrong signing key type (Ed25519 instead of SM2)
+3. Added 3 unit tests to `server_dtlcp.rs`: same 3 error paths for DTLCP variant
+4. Added 4 integration tests to `tests/interop/tests/tlcp.rs`: full-stack TLCP/DTLCP handshake failure with incomplete server configs
+5. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 3 files modified, 0 files created. hitls-tls: 1193→1199, hitls-integration: 145→149, total: 2634→2644.
+- All 2644 workspace tests pass, 0 clippy warnings, formatting clean.
