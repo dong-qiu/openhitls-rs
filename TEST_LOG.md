@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,659** (40 ignored) |
-| **Test growth** | 1,104 → 2,659 (+141% since baseline) |
+| **Total tests** | **2,674** (40 ignored) |
+| **Test growth** | 1,104 → 2,674 (+142% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,659 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 2,674 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -52,6 +52,7 @@ Phase T105  2,624     +14   Extension negotiation E2E tests (*)
 Phase T106  2,634     +10   DTLS loss simulation & resilience tests (*)
 Phase T107  2,644     +10   TLCP double certificate validation tests (*)
 Phase T108  2,659     +15   SM9 tower field (Fp2/Fp4/Fp12) unit tests (*)
+Phase T109  2,674     +15   SLH-DSA internal module unit tests (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -79,7 +80,7 @@ Phase T108  2,659     +15   SM9 tower field (Fp2/Fp4/Fp12) unit tests (*)
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
 | hitls-tls | 1,199 | 0 | 45.4% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
-| hitls-crypto | 667 | 31 | 25.1% | 48 algorithm modules + hardware acceleration |
+| hitls-crypto | 682 | 31 | 25.5% | 48 algorithm modules + hardware acceleration |
 | hitls-pki | 349 | 1 | 13.4% | X.509, PKCS#8/12, CMS (5 content types) |
 | hitls-integration | 149 | 3 | 5.6% | Cross-crate TCP loopback, error scenarios, concurrency |
 | hitls-cli | 117 | 5 | 4.5% | 14 CLI commands (dgst, x509, genpkey, etc.) |
@@ -146,15 +147,15 @@ After Phase T102, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-lev
 | **Phase T106** | +10 | D4 | DTLS loss simulation + retransmission ✅ |
 | **Phase T107** | +10 | D5 | TLCP double certificate validation ✅ |
 | **Phase T108** | ~15 | D10 | SM9 tower fields (fp2/fp4/fp12) ✅ |
-| **Phase T109** | ~20 | D10 | SLH-DSA internal modules |
+| **Phase T109** | ~15 | D10 | SLH-DSA internal modules ✅ |
 | **Phase T110** | ~15 | D10 | McEliece + FrodoKEM + XMSS internals |
 | **Phase T111** | — | D6/D7 | Infra: proptest + coverage CI |
 
 ### Coverage Metrics Target
 
-| Metric | Current | After Phase T108 | After Phase T111 |
+| Metric | Current | After Phase T109 | After Phase T111 |
 |--------|:-------:|:-----------------:|:-----------------:|
-| Total tests | 2,659 | 2,659 | 2,750+ |
+| Total tests | 2,674 | 2,674 | 2,750+ |
 | Critical deficiencies | 0 | 0 | 0 |
 | High deficiencies | 1 | 1 | 0 |
 | Async connection coverage | 40% | 100% | 100% |
@@ -1785,14 +1786,58 @@ Added 15 algebraic property tests across the three tower extension fields:
 
 ---
 
+### Phase T109: SLH-DSA Internal Module Unit Tests (+15 tests, 2,659→2,674)
+
+**Date**: 2026-02-23
+**Deficiency**: D10 (Low) — SLH-DSA (FIPS 205) had 6 internal modules (1,224 lines) with zero direct unit tests. All coverage was indirect through 12 high-level roundtrip tests in `mod.rs`.
+
+Added 15 dedicated unit tests covering address encoding, parameter validation, hash function dispatch, WOTS+ base conversion, and tree operations:
+
+| # | Test | File | What It Verifies |
+|:-:|------|------|-----------------|
+| 1 | `test_adrs_uncompressed_set_get` | address.rs | 32-byte mode: set/get layer/tree/type/keypair/chain/tree_index, byte positions |
+| 2 | `test_adrs_compressed_set_get` | address.rs | 22-byte mode: same fields, compressed offsets |
+| 3 | `test_adrs_set_type_clears_trailing` | address.rs | set_type zeros fields 1-3 in both modes |
+| 4 | `test_adrs_copy_key_pair_addr` | address.rs | copy_key_pair_addr transfers keypair field correctly |
+| 5 | `test_params_fips205_table2_values` | params.rs | Shake128f + Sha2256s exact parameter values from FIPS 205 Table 2 |
+| 6 | `test_params_structural_invariants` | params.rs | All 12 sets: h=d*hp, wots_len=2n+3, sig_bytes formula |
+| 7 | `test_make_hasher_n_m_values` | hash.rs | SHAKE + SHA-2 hasher n()/m() match params |
+| 8 | `test_shake_prf_f_determinism` | hash.rs | SHAKE mode: prf/f deterministic, output length = n |
+| 9 | `test_sha2_prf_f_determinism` | hash.rs | SHA-2 mode: prf/f deterministic, output length = n |
+| 10 | `test_hash_h_msg_prf_msg_lengths` | hash.rs | h_msg returns m bytes, prf_msg returns n bytes (both modes) |
+| 11 | `test_base_b_four_bit` | wots.rs | base_b 4-bit extraction: [0x12,0x34]→[1,2,3,4], 0xFF→[15,15] |
+| 12 | `test_base_b_eight_bit` | wots.rs | base_b 8-bit extraction: identity per byte |
+| 13 | `test_wots_sign_pk_recovery` | wots.rs | pk_gen → sign → pk_from_sig recovers same pk |
+| 14 | `test_fors_sign_pk_recovery` | fors.rs | fors_sign → fors_pk_from_sig roundtrip + determinism |
+| 15 | `test_xmss_root_consistency` | hypertree.rs | xmss_compute_root == xmss_compute_root_with_auth, auth_path=hp*n |
+
+**Per-crate counts after Phase T109**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 682 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1199 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2674** | **40** |
+
+---
+
 ## 8. Verification & Quality Gates
 
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,659 tests pass
+# Full test suite — all 2,674 tests pass
 cargo test --workspace --all-features
-# Result: 2,659 passed, 0 failed, 40 ignored
+# Result: 2,674 passed, 0 failed, 40 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

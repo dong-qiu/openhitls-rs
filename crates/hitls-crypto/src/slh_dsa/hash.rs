@@ -275,3 +275,107 @@ pub(crate) fn make_hasher(
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slh_dsa::params::get_params;
+    use hitls_types::SlhDsaParamId;
+
+    #[test]
+    fn test_make_hasher_n_m_values() {
+        // SHAKE mode
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let seed = vec![0u8; p.n];
+        let root = vec![0u8; p.n];
+        let h = make_hasher(p, &seed, &root);
+        assert_eq!(h.n(), 16);
+        assert_eq!(h.m(), 34);
+
+        // SHA-2 mode
+        let p2 = get_params(SlhDsaParamId::Sha2128f);
+        let seed2 = vec![0u8; p2.n];
+        let root2 = vec![0u8; p2.n];
+        let h2 = make_hasher(p2, &seed2, &root2);
+        assert_eq!(h2.n(), 16);
+        assert_eq!(h2.m(), 34);
+    }
+
+    #[test]
+    fn test_shake_prf_f_determinism() {
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let seed = vec![0xABu8; p.n];
+        let root = vec![0xCDu8; p.n];
+        let h = make_hasher(p, &seed, &root);
+
+        let adrs = Adrs::new(false);
+        let sk_seed = vec![0x42u8; p.n];
+
+        let prf1 = h.prf(&adrs, &sk_seed).unwrap();
+        let prf2 = h.prf(&adrs, &sk_seed).unwrap();
+        assert_eq!(prf1, prf2);
+        assert_eq!(prf1.len(), p.n);
+
+        let msg = vec![0x55u8; p.n];
+        let f1 = h.f(&adrs, &msg).unwrap();
+        let f2 = h.f(&adrs, &msg).unwrap();
+        assert_eq!(f1, f2);
+        assert_eq!(f1.len(), p.n);
+    }
+
+    #[test]
+    fn test_sha2_prf_f_determinism() {
+        let p = get_params(SlhDsaParamId::Sha2128f);
+        let seed = vec![0xABu8; p.n];
+        let root = vec![0xCDu8; p.n];
+        let h = make_hasher(p, &seed, &root);
+
+        let adrs = Adrs::new(true); // SHA-2 uses compressed addresses
+        let sk_seed = vec![0x42u8; p.n];
+
+        let prf1 = h.prf(&adrs, &sk_seed).unwrap();
+        let prf2 = h.prf(&adrs, &sk_seed).unwrap();
+        assert_eq!(prf1, prf2);
+        assert_eq!(prf1.len(), p.n);
+
+        let msg = vec![0x55u8; p.n];
+        let f1 = h.f(&adrs, &msg).unwrap();
+        let f2 = h.f(&adrs, &msg).unwrap();
+        assert_eq!(f1, f2);
+        assert_eq!(f1.len(), p.n);
+    }
+
+    #[test]
+    fn test_hash_h_msg_prf_msg_lengths() {
+        // SHAKE mode
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let seed = vec![0xABu8; p.n];
+        let root = vec![0xCDu8; p.n];
+        let h = make_hasher(p, &seed, &root);
+
+        let r = vec![0x11u8; p.n];
+        let msg = b"test message";
+        let h_msg_result = h.h_msg(&r, msg).unwrap();
+        assert_eq!(h_msg_result.len(), p.m);
+
+        let sk_prf = vec![0x22u8; p.n];
+        let opt_rand = vec![0x33u8; p.n];
+        let prf_msg_result = h.prf_msg(&sk_prf, &opt_rand, msg).unwrap();
+        assert_eq!(prf_msg_result.len(), p.n);
+
+        // SHA-2 mode
+        let p2 = get_params(SlhDsaParamId::Sha2128f);
+        let seed2 = vec![0xABu8; p2.n];
+        let root2 = vec![0xCDu8; p2.n];
+        let h2 = make_hasher(p2, &seed2, &root2);
+
+        let r2 = vec![0x11u8; p2.n];
+        let h_msg2 = h2.h_msg(&r2, msg).unwrap();
+        assert_eq!(h_msg2.len(), p2.m);
+
+        let sk_prf2 = vec![0x22u8; p2.n];
+        let opt_rand2 = vec![0x33u8; p2.n];
+        let prf_msg2 = h2.prf_msg(&sk_prf2, &opt_rand2, msg).unwrap();
+        assert_eq!(prf_msg2.len(), p2.n);
+    }
+}

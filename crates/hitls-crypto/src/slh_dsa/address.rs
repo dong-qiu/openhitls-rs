@@ -120,3 +120,119 @@ impl Adrs {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_adrs_uncompressed_set_get() {
+        let mut adrs = Adrs::new(false);
+        adrs.set_layer_addr(5);
+        adrs.set_tree_addr(0x123456);
+        adrs.set_type(AdrsType::WotsHash);
+        adrs.set_key_pair_addr(7);
+        adrs.set_chain_addr(3);
+        adrs.set_tree_index(42);
+
+        assert_eq!(adrs.as_bytes().len(), 32);
+        assert_eq!(adrs.get_tree_index(), 42);
+
+        let b = adrs.as_bytes();
+        // Layer at [0:4] big-endian
+        assert_eq!(&b[0..4], &5u32.to_be_bytes());
+        // Tree address at [8:16] big-endian
+        assert_eq!(&b[8..16], &0x123456u64.to_be_bytes());
+        // Type at [16:20] = WotsHash = 0
+        assert_eq!(&b[16..20], &0u32.to_be_bytes());
+        // Keypair at [20:24]
+        assert_eq!(&b[20..24], &7u32.to_be_bytes());
+        // Chain at [24:28]
+        assert_eq!(&b[24..28], &3u32.to_be_bytes());
+        // TreeIndex at [28:32]
+        assert_eq!(&b[28..32], &42u32.to_be_bytes());
+    }
+
+    #[test]
+    fn test_adrs_compressed_set_get() {
+        let mut adrs = Adrs::new(true);
+        adrs.set_layer_addr(5);
+        adrs.set_tree_addr(0x123456);
+        adrs.set_type(AdrsType::WotsHash);
+        adrs.set_key_pair_addr(7);
+        adrs.set_chain_addr(3);
+        adrs.set_tree_index(42);
+
+        assert_eq!(adrs.as_bytes().len(), 22);
+        assert_eq!(adrs.get_tree_index(), 42);
+
+        let b = adrs.as_bytes();
+        // Layer at [0]
+        assert_eq!(b[0], 5);
+        // Tree at [1:9]
+        assert_eq!(&b[1..9], &0x123456u64.to_be_bytes());
+        // Type at [9] = WotsHash = 0
+        assert_eq!(b[9], 0);
+        // Keypair at [10:14]
+        assert_eq!(&b[10..14], &7u32.to_be_bytes());
+        // Chain at [14:18]
+        assert_eq!(&b[14..18], &3u32.to_be_bytes());
+        // TreeIndex at [18:22]
+        assert_eq!(&b[18..22], &42u32.to_be_bytes());
+    }
+
+    #[test]
+    fn test_adrs_set_type_clears_trailing() {
+        // Uncompressed mode
+        let mut adrs = Adrs::new(false);
+        adrs.set_type(AdrsType::WotsHash);
+        adrs.set_key_pair_addr(99);
+        adrs.set_chain_addr(55);
+        adrs.set_hash_addr(77);
+
+        // Verify fields are set
+        let b = adrs.as_bytes();
+        assert_eq!(&b[20..24], &99u32.to_be_bytes());
+        assert_eq!(&b[24..28], &55u32.to_be_bytes());
+        assert_eq!(&b[28..32], &77u32.to_be_bytes());
+
+        // set_type should zero fields 1-3 (bytes [20:32])
+        adrs.set_type(AdrsType::Tree);
+        let b = adrs.as_bytes();
+        assert_eq!(&b[20..32], &[0u8; 12]);
+
+        // Compressed mode
+        let mut adrs_c = Adrs::new(true);
+        adrs_c.set_type(AdrsType::WotsHash);
+        adrs_c.set_key_pair_addr(99);
+        adrs_c.set_chain_addr(55);
+        adrs_c.set_hash_addr(77);
+
+        adrs_c.set_type(AdrsType::Tree);
+        let b = adrs_c.as_bytes();
+        assert_eq!(&b[10..22], &[0u8; 12]);
+    }
+
+    #[test]
+    fn test_adrs_copy_key_pair_addr() {
+        // Uncompressed
+        let mut src = Adrs::new(false);
+        src.set_type(AdrsType::WotsHash);
+        src.set_key_pair_addr(99);
+
+        let mut dst = Adrs::new(false);
+        dst.set_type(AdrsType::WotsHash);
+        dst.copy_key_pair_addr(&src);
+        assert_eq!(&dst.as_bytes()[20..24], &99u32.to_be_bytes());
+
+        // Compressed
+        let mut src_c = Adrs::new(true);
+        src_c.set_type(AdrsType::WotsHash);
+        src_c.set_key_pair_addr(99);
+
+        let mut dst_c = Adrs::new(true);
+        dst_c.set_type(AdrsType::WotsHash);
+        dst_c.copy_key_pair_addr(&src_c);
+        assert_eq!(&dst_c.as_bytes()[10..14], &99u32.to_be_bytes());
+    }
+}

@@ -308,3 +308,36 @@ pub(crate) fn hypertree_verify(
     // Compare computed root with expected root
     Ok(subtle::ConstantTimeEq::ct_eq(node.as_slice(), pk_root).into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slh_dsa::address::Adrs;
+    use crate::slh_dsa::hash::make_hasher;
+    use crate::slh_dsa::params::get_params;
+    use hitls_types::SlhDsaParamId;
+
+    #[test]
+    fn test_xmss_root_consistency() {
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let pk_seed = vec![0xAAu8; p.n];
+        let pk_root = vec![0xBBu8; p.n];
+        let sk_seed = vec![0xCCu8; p.n];
+        let h = make_hasher(p, &pk_seed, &pk_root);
+
+        let mut adrs1 = Adrs::new(false);
+        adrs1.set_layer_addr(0);
+        adrs1.set_tree_addr(0);
+        let root1 = xmss_compute_root(&*h, &sk_seed, &mut adrs1, p).unwrap();
+
+        let mut adrs2 = Adrs::new(false);
+        adrs2.set_layer_addr(0);
+        adrs2.set_tree_addr(0);
+        let (root2, auth_path) =
+            xmss_compute_root_with_auth(&*h, &sk_seed, 0, &mut adrs2, p).unwrap();
+
+        assert_eq!(root1, root2);
+        // Auth path: hp * n bytes = 3 * 16 = 48 bytes
+        assert_eq!(auth_path.len(), p.hp * p.n);
+    }
+}

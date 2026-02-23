@@ -8039,3 +8039,37 @@ Added 15 unit tests across 3 files (5 per tower field level) verifying algebraic
 - `cargo test --workspace --all-features`: 2659 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T109: SLH-DSA Internal Module Unit Tests (+15 tests, 2,659→2,674)
+
+**Date**: 2026-02-23
+**Scope**: Partially close D10 (Low) — SLH-DSA (FIPS 205) had 6 internal modules (1,224 lines) with zero direct unit tests. All coverage was indirect through 12 high-level roundtrip tests in `mod.rs`. This phase adds 15 dedicated unit tests covering address encoding, parameter validation, hash function dispatch, WOTS+ base conversion, and tree operations.
+
+### Summary
+
+Added 15 unit tests across 6 files:
+
+- **address.rs** (4 tests): Uncompressed/compressed set/get, set_type clears trailing fields, copy_key_pair_addr
+- **params.rs** (2 tests): FIPS 205 Table 2 exact values (Shake128f + Sha2256s), structural invariants across all 12 param sets (h=d*hp, wots_len=2n+3, sig_bytes formula)
+- **hash.rs** (4 tests): make_hasher n/m values, SHAKE prf/f determinism, SHA-2 prf/f determinism, h_msg/prf_msg output lengths
+- **wots.rs** (3 tests): base_b 4-bit/8-bit extraction, WOTS+ sign→pk_from_sig roundtrip
+- **fors.rs** (1 test): FORS sign→pk_from_sig roundtrip + determinism
+- **hypertree.rs** (1 test): xmss_compute_root == xmss_compute_root_with_auth, auth_path length
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/slh_dsa/address.rs` | Added 4 unit tests |
+| `crates/hitls-crypto/src/slh_dsa/params.rs` | Added 2 unit tests |
+| `crates/hitls-crypto/src/slh_dsa/hash.rs` | Added 4 unit tests |
+| `crates/hitls-crypto/src/slh_dsa/wots.rs` | Added 3 unit tests |
+| `crates/hitls-crypto/src/slh_dsa/fors.rs` | Added 1 unit test |
+| `crates/hitls-crypto/src/slh_dsa/hypertree.rs` | Added 1 unit test |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2674 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

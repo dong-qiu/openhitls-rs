@@ -209,3 +209,81 @@ pub(crate) fn get_params(param_id: SlhDsaParamId) -> &'static SlhDsaParams {
     };
     &PARAMS[idx]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hitls_types::SlhDsaParamId;
+
+    #[test]
+    fn test_params_fips205_table2_values() {
+        // Shake128f
+        let p = get_params(SlhDsaParamId::Shake128f);
+        assert_eq!(p.n, 16);
+        assert_eq!(p.h, 66);
+        assert_eq!(p.d, 22);
+        assert_eq!(p.hp, 3);
+        assert_eq!(p.a, 6);
+        assert_eq!(p.k, 33);
+        assert_eq!(p.m, 34);
+        assert_eq!(p.wots_len, 35);
+        assert_eq!(p.sig_bytes, 17088);
+        assert!(!p.is_sha2);
+        assert_eq!(p.sec_category, 1);
+
+        // Sha2256s
+        let p = get_params(SlhDsaParamId::Sha2256s);
+        assert_eq!(p.n, 32);
+        assert_eq!(p.h, 64);
+        assert_eq!(p.d, 8);
+        assert_eq!(p.hp, 8);
+        assert_eq!(p.a, 14);
+        assert_eq!(p.k, 22);
+        assert_eq!(p.m, 47);
+        assert_eq!(p.wots_len, 67);
+        assert_eq!(p.sig_bytes, 29792);
+        assert!(p.is_sha2);
+        assert_eq!(p.sec_category, 5);
+    }
+
+    #[test]
+    fn test_params_structural_invariants() {
+        let all_ids = [
+            SlhDsaParamId::Sha2128s,
+            SlhDsaParamId::Shake128s,
+            SlhDsaParamId::Sha2128f,
+            SlhDsaParamId::Shake128f,
+            SlhDsaParamId::Sha2192s,
+            SlhDsaParamId::Shake192s,
+            SlhDsaParamId::Sha2192f,
+            SlhDsaParamId::Shake192f,
+            SlhDsaParamId::Sha2256s,
+            SlhDsaParamId::Shake256s,
+            SlhDsaParamId::Sha2256f,
+            SlhDsaParamId::Shake256f,
+        ];
+
+        for (i, id) in all_ids.iter().enumerate() {
+            let p = get_params(*id);
+
+            // h == d * hp
+            assert_eq!(p.h, p.d * p.hp, "h != d*hp for param set {}", i);
+
+            // wots_len == 2*n + 3
+            assert_eq!(
+                p.wots_len,
+                2 * p.n + 3,
+                "wots_len != 2n+3 for param set {}",
+                i
+            );
+
+            // sig_bytes == (d*(wots_len+hp) + k*(a+1) + 1) * n
+            let expected_sig = (p.d * (p.wots_len + p.hp) + p.k * (p.a + 1) + 1) * p.n;
+            assert_eq!(
+                p.sig_bytes, expected_sig,
+                "sig_bytes mismatch for param set {}",
+                i
+            );
+        }
+    }
+}

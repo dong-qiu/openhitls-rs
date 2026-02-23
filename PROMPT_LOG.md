@@ -2341,3 +2341,22 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 3 files modified, 0 files created. hitls-crypto: 652→667, total: 2644→2659.
 - All 2659 workspace tests pass, 0 clippy warnings, formatting clean.
+
+## Phase T109: SLH-DSA Internal Module Unit Tests
+
+**Prompt**: Implement Phase T109 — SLH-DSA Internal Module Unit Tests. Add 15 dedicated unit tests across 6 internal SLH-DSA modules (address, params, hash, wots, fors, hypertree). Partially close D10. Target: +15 tests.
+
+**Scope**: Partially close D10 (Low) — SLH-DSA had 6 internal modules (1,224 lines) with zero direct unit tests.
+
+**Work performed**:
+1. Added 4 tests to `crates/hitls-crypto/src/slh_dsa/address.rs`: uncompressed/compressed set/get, set_type clears trailing, copy_key_pair_addr
+2. Added 2 tests to `crates/hitls-crypto/src/slh_dsa/params.rs`: FIPS 205 Table 2 values, structural invariants (all 12 param sets)
+3. Added 4 tests to `crates/hitls-crypto/src/slh_dsa/hash.rs`: make_hasher n/m, SHAKE/SHA-2 prf/f determinism, h_msg/prf_msg lengths
+4. Added 3 tests to `crates/hitls-crypto/src/slh_dsa/wots.rs`: base_b 4-bit/8-bit, WOTS+ sign/pk recovery roundtrip
+5. Added 1 test to `crates/hitls-crypto/src/slh_dsa/fors.rs`: FORS sign/pk recovery + determinism
+6. Added 1 test to `crates/hitls-crypto/src/slh_dsa/hypertree.rs`: xmss_compute_root consistency + auth_path length
+7. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md
+
+**Result**:
+- 6 files modified, 0 files created. hitls-crypto: 667→682, total: 2659→2674.
+- All 2674 workspace tests pass, 0 clippy warnings, formatting clean.

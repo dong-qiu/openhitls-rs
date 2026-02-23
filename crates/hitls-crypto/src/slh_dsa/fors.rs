@@ -143,3 +143,47 @@ pub(crate) fn fors_pk_from_sig(
     fors_pk_adrs.copy_key_pair_addr(adrs);
     h.t_l(&fors_pk_adrs, &roots)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slh_dsa::hash::make_hasher;
+    use crate::slh_dsa::params::get_params;
+    use hitls_types::SlhDsaParamId;
+
+    #[test]
+    fn test_fors_sign_pk_recovery() {
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let pk_seed = vec![0xAAu8; p.n];
+        let pk_root = vec![0xBBu8; p.n];
+        let sk_seed = vec![0xCCu8; p.n];
+        let h = make_hasher(p, &pk_seed, &pk_root);
+
+        // Message digest: m bytes (34 for Shake128f)
+        let md = vec![0x42u8; p.m];
+
+        let mut adrs1 = Adrs::new(false);
+        adrs1.set_type(AdrsType::ForsTree);
+        adrs1.set_key_pair_addr(0);
+        let sig = fors_sign(&*h, &sk_seed, &md, &mut adrs1, p).unwrap();
+
+        let mut adrs2 = Adrs::new(false);
+        adrs2.set_type(AdrsType::ForsTree);
+        adrs2.set_key_pair_addr(0);
+        let pk1 = fors_pk_from_sig(&*h, &sig, &md, &mut adrs2, p).unwrap();
+
+        // Repeat with same inputs → determinism
+        let mut adrs3 = Adrs::new(false);
+        adrs3.set_type(AdrsType::ForsTree);
+        adrs3.set_key_pair_addr(0);
+        let sig2 = fors_sign(&*h, &sk_seed, &md, &mut adrs3, p).unwrap();
+
+        let mut adrs4 = Adrs::new(false);
+        adrs4.set_type(AdrsType::ForsTree);
+        adrs4.set_key_pair_addr(0);
+        let pk2 = fors_pk_from_sig(&*h, &sig2, &md, &mut adrs4, p).unwrap();
+
+        assert_eq!(pk1, pk2);
+        assert_eq!(sig, sig2);
+    }
+}
