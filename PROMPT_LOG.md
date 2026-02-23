@@ -2463,3 +2463,19 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 3 source files modified, 0 files created. hitls-tls: 1229→1244, total: 2739→2754.
 - All 2754 workspace tests pass, 0 clippy warnings, formatting clean.
+
+## Phase T115: TLS 1.2 CBC Padding Security + DTLS Parsing + TLS 1.3 Inner Plaintext Edge Cases
+
+**Prompt**: Implement Phase T115 — TLS 1.2 CBC Padding Security + DTLS Parsing + TLS 1.3 Inner Plaintext Edge Cases. Add 5 CBC/EtM tests (fragment-too-short, not-block-aligned, empty plaintext, wrong enc_key, EtM fragment-too-short). Add 5 DTLS tests (invalid content type, body truncation, zero-length fragment, all content types roundtrip, epoch wrapping). Add 5 TLS 1.3 tests (wrong outer content type, fragment-too-short, empty plaintext, inner plaintext all-zeros, inner plaintext unknown type).
+
+**Scope**: Three critical record layer files remained under-tested: encryption12_cbc.rs (CBC padding oracle prevention), dtls.rs (DTLS record parsing), encryption.rs (TLS 1.3 inner plaintext framing).
+
+**Work performed**:
+1. Added 5 CBC/EtM tests to `crates/hitls-tls/src/record/encryption12_cbc.rs`: fragment-too-short, not-block-aligned, empty plaintext roundtrip, wrong encryption key, EtM fragment-too-short
+2. Added 5 DTLS tests to `crates/hitls-tls/src/record/dtls.rs`: invalid content type (0xFF), body shorter than declared, zero-length fragment roundtrip, all 4 content types roundtrip, epoch wrapping 0xFFFF→0
+3. Added 5 TLS 1.3 tests to `crates/hitls-tls/src/record/encryption.rs`: wrong outer content type rejection, fragment-too-short, empty plaintext roundtrip, all-zeros inner plaintext, unknown inner content type
+4. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-tls: 1244→1259, total: 2754→2769.
+- All 2769 workspace tests pass, 0 clippy warnings, formatting clean.

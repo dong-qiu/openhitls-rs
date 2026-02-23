@@ -235,4 +235,94 @@ mod tests {
         // Next call should fail (overflow)
         assert!(state.next_write_seq().is_err());
     }
+
+    // ====== Phase T115: DTLS parsing/epoch edge-case tests ======
+
+    #[test]
+    fn test_parse_invalid_content_type() {
+        // Valid 13-byte header with invalid content type 0xFF
+        let data = vec![
+            0xFF, // invalid content type
+            0xFE, 0xFD, // DTLS 1.2
+            0x00, 0x00, // epoch=0
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // seq=0
+            0x00, 0x00, // length=0
+        ];
+        let err = parse_dtls_record(&data).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown content type"),
+            "expected 'unknown content type', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_body_shorter_than_declared() {
+        // Header declares length=100, only 50 body bytes available
+        let mut data = vec![
+            22, // Handshake
+            0xFE, 0xFD, // DTLS 1.2
+            0x00, 0x00, // epoch=0
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // seq=0
+            0x00, 0x64, // length=100
+        ];
+        data.extend_from_slice(&[0xAA; 50]); // only 50 bytes of body
+        let err = parse_dtls_record(&data).unwrap_err();
+        assert!(
+            err.to_string().contains("incomplete DTLS record body"),
+            "expected 'incomplete DTLS record body', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_zero_length_fragment() {
+        let record = DtlsRecord {
+            content_type: ContentType::Handshake,
+            version: DTLS12_VERSION,
+            epoch: 0,
+            sequence_number: 0,
+            fragment: vec![],
+        };
+        let bytes = serialize_dtls_record(&record);
+        assert_eq!(bytes.len(), DTLS_RECORD_HEADER_LEN);
+        // length field should be 0
+        assert_eq!(&bytes[11..13], &[0x00, 0x00]);
+
+        let (parsed, consumed) = parse_dtls_record(&bytes).unwrap();
+        assert_eq!(consumed, DTLS_RECORD_HEADER_LEN);
+        assert!(parsed.fragment.is_empty());
+        assert_eq!(parsed.content_type, ContentType::Handshake);
+    }
+
+    #[test]
+    fn test_all_content_types_roundtrip() {
+        let types = [
+            (ContentType::ChangeCipherSpec, 20u8),
+            (ContentType::Alert, 21),
+            (ContentType::Handshake, 22),
+            (ContentType::ApplicationData, 23),
+        ];
+        for (ct, byte_val) in types {
+            let record = DtlsRecord {
+                content_type: ct,
+                version: DTLS12_VERSION,
+                epoch: 0,
+                sequence_number: 0,
+                fragment: vec![0x01],
+            };
+            let bytes = serialize_dtls_record(&record);
+            assert_eq!(bytes[0], byte_val);
+            let (parsed, _) = parse_dtls_record(&bytes).unwrap();
+            assert_eq!(parsed.content_type, ct);
+        }
+    }
+
+    #[test]
+    fn test_epoch_state_wrapping() {
+        let mut state = EpochState::new();
+        state.epoch = 0xFFFF;
+        state.write_seq = 42;
+        state.next_epoch();
+        assert_eq!(state.epoch, 0); // wraps via wrapping_add
+        assert_eq!(state.write_seq, 0); // seq resets to 0
+    }
 }

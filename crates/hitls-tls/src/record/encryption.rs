@@ -587,4 +587,86 @@ mod tests {
         assert_eq!(enc.sequence_number(), 5);
         assert_eq!(dec.sequence_number(), 5);
     }
+
+    // ====== Phase T115: TLS 1.3 inner plaintext edge-case tests ======
+
+    #[test]
+    fn test_decrypt_wrong_content_type_rejected() {
+        let keys = make_keys_128();
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let mut dec = RecordDecryptor::new(suite, &keys).unwrap();
+
+        // Encrypted records MUST have outer content_type = ApplicationData
+        let record = Record {
+            content_type: ContentType::Handshake,
+            version: TLS13_LEGACY_VERSION,
+            fragment: vec![0xAA; 32],
+        };
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("expected ApplicationData"),
+            "expected 'expected ApplicationData', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_decrypt_fragment_too_short() {
+        let keys = make_keys_128();
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let mut dec = RecordDecryptor::new(suite, &keys).unwrap();
+
+        // GCM tag = 16 bytes; need at least tag_len + 1 = 17 bytes
+        // Provide exactly 16 bytes (tag only, no inner content type byte)
+        let record = Record {
+            content_type: ContentType::ApplicationData,
+            version: TLS13_LEGACY_VERSION,
+            fragment: vec![0xAA; 16],
+        };
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("encrypted record too short"),
+            "expected 'encrypted record too short', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_tls13_empty_plaintext_roundtrip() {
+        let keys = make_keys_128();
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let mut enc = RecordEncryptor::new(suite, &keys).unwrap();
+        let mut dec = RecordDecryptor::new(suite, &keys).unwrap();
+
+        // Empty plaintext → inner = [content_type(1)] + tag(16) = 17 bytes
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, b"")
+            .unwrap();
+        assert_eq!(record.fragment.len(), 1 + 16); // 1 byte content type + 16 byte tag
+
+        let (ct, pt) = dec.decrypt_record(&record).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert!(pt.is_empty());
+    }
+
+    #[test]
+    fn test_parse_inner_plaintext_all_zeros() {
+        // All-zero buffer — no non-zero byte found scanning from end
+        let buf = vec![0u8; 16];
+        let err = parse_inner_plaintext(&buf).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("inner plaintext has no content type"),
+            "expected 'inner plaintext has no content type', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_inner_plaintext_unknown_type() {
+        // [0x41, 0xFF] — last non-zero byte 0xFF is not a valid content type
+        let buf = vec![0x41, 0xFF];
+        let err = parse_inner_plaintext(&buf).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown inner content type"),
+            "expected 'unknown inner content type', got: {err}"
+        );
+    }
 }

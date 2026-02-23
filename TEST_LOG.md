@@ -2051,14 +2051,55 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
+### Phase T115: TLS 1.2 CBC Padding Security + DTLS Parsing + TLS 1.3 Inner Plaintext Edge Cases (+15 tests, 2,754→2,769)
+
+**Date**: 2026-02-24
+
+| # | Test | File | Property |
+|---|------|------|----------|
+| 1 | `test_cbc_decrypt_fragment_too_short` | encryption12_cbc.rs | Fragment < IV+min_encrypted → "CBC record too short" |
+| 2 | `test_cbc_decrypt_not_block_aligned` | encryption12_cbc.rs | Ciphertext not multiple of AES_BLOCK_SIZE → "CBC ciphertext not block-aligned" |
+| 3 | `test_cbc_empty_plaintext_roundtrip` | encryption12_cbc.rs | Empty plaintext → encrypt → decrypt → empty (64 bytes fragment) |
+| 4 | `test_cbc_wrong_enc_key_fails` | encryption12_cbc.rs | Wrong enc_key → garbled padding/MAC → error |
+| 5 | `test_etm_decrypt_fragment_too_short` | encryption12_cbc.rs | EtM fragment < IV+block+MAC → "ETM record too short" |
+| 6 | `test_parse_invalid_content_type` | dtls.rs | Content type 0xFF → "unknown content type" |
+| 7 | `test_parse_body_shorter_than_declared` | dtls.rs | Declared length > actual body → "incomplete DTLS record body" |
+| 8 | `test_serialize_zero_length_fragment` | dtls.rs | Empty fragment → 13 bytes → parses back with empty fragment |
+| 9 | `test_all_content_types_roundtrip` | dtls.rs | CCS/Alert/Handshake/AppData → serialize → parse → type preserved |
+| 10 | `test_epoch_state_wrapping` | dtls.rs | Epoch 0xFFFF → next_epoch → 0, seq resets |
+| 11 | `test_decrypt_wrong_content_type_rejected` | encryption.rs | Outer type ≠ ApplicationData → "expected ApplicationData" |
+| 12 | `test_decrypt_fragment_too_short` | encryption.rs | Fragment = tag_len bytes → "encrypted record too short" |
+| 13 | `test_tls13_empty_plaintext_roundtrip` | encryption.rs | Empty plaintext → 17 bytes (1 type + 16 tag) → decrypts to empty |
+| 14 | `test_parse_inner_plaintext_all_zeros` | encryption.rs | All-zero buffer → "inner plaintext has no content type" |
+| 15 | `test_parse_inner_plaintext_unknown_type` | encryption.rs | [0x41, 0xFF] → "unknown inner content type" |
+
+**Per-crate counts after Phase T115**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 709 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1259 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 61 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2769** | **40** |
+
+---
+
 ## 8. Verification & Quality Gates
 
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,754 tests pass
+# Full test suite — all 2,769 tests pass
 cargo test --workspace --all-features
-# Result: 2,754 passed, 0 failed, 40 ignored
+# Result: 2,769 passed, 0 failed, 40 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

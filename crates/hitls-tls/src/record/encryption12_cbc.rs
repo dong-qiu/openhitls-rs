@@ -742,4 +742,98 @@ mod tests {
         assert_eq!(enc.sequence_number(), 5);
         assert_eq!(dec.sequence_number(), 5);
     }
+
+    // ====== Phase T115: CBC/EtM edge-case tests ======
+
+    #[test]
+    fn test_cbc_decrypt_fragment_too_short() {
+        // SHA-256: mac_len=32, min_encrypted_len = ceil((32+1)/16)*16 = 48
+        // minimum fragment = IV(16) + 48 = 64 bytes; provide 63
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+
+        let record = Record {
+            content_type: ContentType::ApplicationData,
+            version: TLS12_VERSION,
+            fragment: vec![0xCC; 63],
+        };
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("CBC record too short"),
+            "expected 'CBC record too short', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_cbc_decrypt_not_block_aligned() {
+        // Provide IV(16) + 49 bytes = 65 total; ciphertext portion (49) not block-aligned
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+
+        let record = Record {
+            content_type: ContentType::ApplicationData,
+            version: TLS12_VERSION,
+            fragment: vec![0xCC; 65],
+        };
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("CBC ciphertext not block-aligned"),
+            "expected 'CBC ciphertext not block-aligned', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_cbc_empty_plaintext_roundtrip() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, b"")
+            .unwrap();
+        // IV(16) + encrypted(MAC(32) + padding(16)) = 64 bytes
+        assert_eq!(record.fragment.len(), 64);
+
+        let plaintext = dec.decrypt_record(&record).unwrap();
+        assert!(plaintext.is_empty());
+    }
+
+    #[test]
+    fn test_cbc_wrong_enc_key_fails() {
+        let enc_key_a = vec![0x42u8; 16];
+        let enc_key_b = vec![0x99u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12Cbc::new(enc_key_a, mac_key.clone(), 32);
+        // Decrypt with different enc_key → garbled plaintext → bad padding/MAC
+        let mut dec = RecordDecryptor12Cbc::new(enc_key_b, mac_key, 32);
+
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, b"secret payload")
+            .unwrap();
+        assert!(dec.decrypt_record(&record).is_err());
+    }
+
+    #[test]
+    fn test_etm_decrypt_fragment_too_short() {
+        // EtM minimum: IV(16) + one_block(16) + MAC(32) = 64; provide 63
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+
+        let record = Record {
+            content_type: ContentType::ApplicationData,
+            version: TLS12_VERSION,
+            fragment: vec![0xCC; 63],
+        };
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("ETM record too short"),
+            "expected 'ETM record too short', got: {err}"
+        );
+    }
 }

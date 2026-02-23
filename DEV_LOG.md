@@ -8226,3 +8226,29 @@ Added 15 edge-case tests across 3 record layer encryption modules:
 - `cargo test --workspace --all-features`: 2754 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase T115: TLS 1.2 CBC Padding Security + DTLS Parsing + TLS 1.3 Inner Plaintext Edge Cases (+15 tests, 2,754→2,769)
+
+**Date**: 2026-02-24
+**Scope**: TLS 1.2 CBC MAC-then-encrypt/EtM error paths, DTLS record parsing edge cases, TLS 1.3 inner plaintext framing failures.
+
+### Summary
+
+Added 15 edge-case tests across 3 record layer modules:
+
+- **TLS 1.2 CBC encryption** (5 tests): Fragment-too-short (below IV+min-encrypted threshold), ciphertext not block-aligned, empty plaintext roundtrip, wrong encryption key decryption failure, EtM fragment-too-short
+- **DTLS parsing** (5 tests): Invalid content type byte (0xFF), body shorter than declared length, zero-length fragment serialize/parse roundtrip, all 4 content types roundtrip, epoch wrapping at 0xFFFF→0
+- **TLS 1.3 encryption** (5 tests): Wrong outer content type rejection, fragment-too-short (tag-only, no inner type byte), empty plaintext roundtrip, inner plaintext all-zeros (no content type), inner plaintext unknown content type (0xFF)
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/record/encryption12_cbc.rs` | Added 5 TLS 1.2 CBC/EtM edge-case tests |
+| `crates/hitls-tls/src/record/dtls.rs` | Added 5 DTLS parsing/epoch tests |
+| `crates/hitls-tls/src/record/encryption.rs` | Added 5 TLS 1.3 inner plaintext edge-case tests |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2769 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
