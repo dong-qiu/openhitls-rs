@@ -273,4 +273,24 @@ mod tests {
         // First 64 bytes of ct should match (the last 16 bytes are padding)
         assert_eq!(to_hex(&ct[..64]), expected_ct);
     }
+
+    mod proptests {
+        use super::super::{cbc_decrypt, cbc_encrypt};
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_cbc_encrypt_decrypt(
+                key in prop::array::uniform16(any::<u8>()),
+                iv in prop::array::uniform16(any::<u8>()),
+                pt in proptest::collection::vec(any::<u8>(), 1..128),
+            ) {
+                let ct = cbc_encrypt(&key, &iv, &pt).unwrap();
+                let recovered = cbc_decrypt(&key, &iv, &ct).unwrap();
+                prop_assert_eq!(recovered, pt);
+            }
+        }
+    }
 }

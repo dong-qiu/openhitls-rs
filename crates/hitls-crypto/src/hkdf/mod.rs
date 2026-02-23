@@ -172,4 +172,25 @@ mod tests {
         let okm = hkdf.expand(&[], 0).unwrap();
         assert!(okm.is_empty());
     }
+
+    mod proptests {
+        use super::super::Hkdf;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_hkdf_expand_determinism(
+                ikm in proptest::collection::vec(any::<u8>(), 16..64),
+                info in proptest::collection::vec(any::<u8>(), 0..64),
+                len in 1usize..128,
+            ) {
+                let hkdf = Hkdf::new(&[], &ikm).unwrap();
+                let okm1 = hkdf.expand(&info, len).unwrap();
+                let okm2 = hkdf.expand(&info, len).unwrap();
+                prop_assert_eq!(okm1, okm2);
+            }
+        }
+    }
 }

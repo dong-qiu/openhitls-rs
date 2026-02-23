@@ -627,4 +627,26 @@ If I could offer you only one tip for the future, sunscreen would be it.";
         assert!(aead.encrypt(&[0u8; 13], b"", b"test").is_err());
         assert!(aead.decrypt(&[0u8; 11], b"", &[0u8; 20]).is_err());
     }
+
+    mod proptests {
+        use super::super::ChaCha20Poly1305;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_chacha20_poly1305_roundtrip(
+                key in prop::array::uniform32(any::<u8>()),
+                nonce in proptest::collection::vec(any::<u8>(), 12..=12),
+                aad in proptest::collection::vec(any::<u8>(), 0..64),
+                pt in proptest::collection::vec(any::<u8>(), 0..128),
+            ) {
+                let aead = ChaCha20Poly1305::new(&key).unwrap();
+                let ct = aead.encrypt(&nonce, &aad, &pt).unwrap();
+                let recovered = aead.decrypt(&nonce, &aad, &ct).unwrap();
+                prop_assert_eq!(recovered, pt);
+            }
+        }
+    }
 }

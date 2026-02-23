@@ -168,4 +168,35 @@ mod tests {
         let decoded = decode(&encoded).unwrap();
         assert_eq!(decoded, data);
     }
+
+    mod proptests {
+        use super::super::{decode, encode};
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            #[test]
+            fn prop_base64_roundtrip(
+                data in proptest::collection::vec(any::<u8>(), 0..256),
+            ) {
+                let encoded = encode(&data);
+                let decoded = decode(&encoded).unwrap();
+                prop_assert_eq!(decoded, data);
+            }
+
+            #[test]
+            fn prop_base64_length_property(
+                data in proptest::collection::vec(any::<u8>(), 0..256),
+            ) {
+                let encoded = encode(&data);
+                let expected_len = if data.is_empty() {
+                    0
+                } else {
+                    data.len().div_ceil(3) * 4
+                };
+                prop_assert_eq!(encoded.len(), expected_len);
+            }
+        }
+    }
 }

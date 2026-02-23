@@ -304,4 +304,37 @@ mod tests {
         // 32 bytes (double block, not supported for single-block API)
         assert!(cipher.encrypt_block(&mut [0u8; 32]).is_err());
     }
+
+    mod proptests {
+        use super::super::AesKey;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_aes128_block_roundtrip(
+                key in prop::array::uniform16(any::<u8>()),
+                block in prop::array::uniform16(any::<u8>()),
+            ) {
+                let cipher = AesKey::new(&key).unwrap();
+                let mut buf = block;
+                cipher.encrypt_block(&mut buf).unwrap();
+                cipher.decrypt_block(&mut buf).unwrap();
+                prop_assert_eq!(buf, block);
+            }
+
+            #[test]
+            fn prop_aes256_block_roundtrip(
+                key in prop::array::uniform32(any::<u8>()),
+                block in prop::array::uniform16(any::<u8>()),
+            ) {
+                let cipher = AesKey::new(&key).unwrap();
+                let mut buf = block;
+                cipher.encrypt_block(&mut buf).unwrap();
+                cipher.decrypt_block(&mut buf).unwrap();
+                prop_assert_eq!(buf, block);
+            }
+        }
+    }
 }

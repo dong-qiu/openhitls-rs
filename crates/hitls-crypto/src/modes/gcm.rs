@@ -469,4 +469,25 @@ mod tests {
         ct[len - 1] ^= 0x01;
         assert!(sm4_gcm_decrypt(&key, &nonce, &[], &ct).is_err());
     }
+
+    mod proptests {
+        use super::super::{gcm_decrypt, gcm_encrypt};
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_gcm_encrypt_decrypt(
+                key in prop::array::uniform16(any::<u8>()),
+                nonce in prop::array::uniform12(any::<u8>()),
+                aad in proptest::collection::vec(any::<u8>(), 0..64),
+                pt in proptest::collection::vec(any::<u8>(), 0..128),
+            ) {
+                let ct = gcm_encrypt(&key, &nonce, &aad, &pt).unwrap();
+                let recovered = gcm_decrypt(&key, &nonce, &aad, &ct).unwrap();
+                prop_assert_eq!(recovered, pt);
+            }
+        }
+    }
 }

@@ -310,4 +310,24 @@ mod tests {
         assert_eq!(result1.len(), 32);
         assert_eq!(result1, result2);
     }
+
+    mod proptests {
+        use super::super::Hmac;
+        use super::sha256_factory;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_hmac_sha256_determinism(
+                key in proptest::collection::vec(any::<u8>(), 1..64),
+                data in proptest::collection::vec(any::<u8>(), 0..256),
+            ) {
+                let r1 = Hmac::mac(sha256_factory, &key, &data).unwrap();
+                let r2 = Hmac::mac(sha256_factory, &key, &data).unwrap();
+                prop_assert_eq!(r1, r2);
+            }
+        }
+    }
 }

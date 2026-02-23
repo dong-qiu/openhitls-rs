@@ -293,4 +293,103 @@ mod tests {
         // 2025-11-15 00:00:00 = 1763164800
         assert_eq!(unix_to_datetime(1_763_164_800), (2025, 11, 15, 0, 0, 0));
     }
+
+    mod proptests {
+        use crate::asn1::{Decoder, Encoder};
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            #[test]
+            fn prop_asn1_integer_roundtrip(
+                value in proptest::collection::vec(any::<u8>(), 1..32),
+            ) {
+                let mut enc = Encoder::new();
+                enc.write_integer(&value);
+                let der = enc.finish();
+                let mut dec = Decoder::new(&der);
+                let decoded = dec.read_integer().unwrap();
+                // DER integer encoding may strip leading zeros or add a
+                // leading 0x00 for sign, so compare via BigInt-style
+                // normalization: strip leading zeros from both sides
+                let strip_zeros = |s: &[u8]| -> Vec<u8> {
+                    let start = s.iter().position(|&b| b != 0).unwrap_or(s.len());
+                    if start == s.len() { vec![0] } else { s[start..].to_vec() }
+                };
+                let norm_orig = strip_zeros(&value);
+                let norm_dec = strip_zeros(decoded);
+                // If the original value had high bit set, DER prepends 0x00
+                // so decoded value stripped of leading zeros should match
+                prop_assert_eq!(norm_dec, norm_orig);
+            }
+
+            #[test]
+            fn prop_asn1_octet_string_roundtrip(
+                value in proptest::collection::vec(any::<u8>(), 0..64),
+            ) {
+                let mut enc = Encoder::new();
+                enc.write_octet_string(&value);
+                let der = enc.finish();
+                let mut dec = Decoder::new(&der);
+                let decoded = dec.read_octet_string().unwrap();
+                prop_assert_eq!(decoded, value.as_slice());
+            }
+
+            #[test]
+            fn prop_asn1_boolean_roundtrip(value: bool) {
+                let mut enc = Encoder::new();
+                enc.write_boolean(value);
+                let der = enc.finish();
+                let mut dec = Decoder::new(&der);
+                let decoded = dec.read_boolean().unwrap();
+                prop_assert_eq!(decoded, value);
+            }
+
+            #[test]
+            fn prop_asn1_utf8_string_roundtrip(
+                s in "[a-zA-Z0-9 ]{0,64}",
+            ) {
+                let mut enc = Encoder::new();
+                enc.write_utf8_string(&s);
+                let der = enc.finish();
+                let mut dec = Decoder::new(&der);
+                let decoded = dec.read_string().unwrap();
+                prop_assert_eq!(decoded, s);
+            }
+
+            #[test]
+            fn prop_asn1_sequence_roundtrip(
+                int_val in proptest::collection::vec(1u8..=255, 1..8),
+                bytes in proptest::collection::vec(any::<u8>(), 0..16),
+                flag: bool,
+            ) {
+                let mut seq_enc = Encoder::new();
+                seq_enc.write_integer(&int_val);
+                seq_enc.write_octet_string(&bytes);
+                seq_enc.write_boolean(flag);
+                let seq_body = seq_enc.finish();
+
+                let mut enc = Encoder::new();
+                enc.write_sequence(&seq_body);
+                let der = enc.finish();
+
+                let mut dec = Decoder::new(&der);
+                let mut seq_dec = dec.read_sequence().unwrap();
+
+                let dec_int = seq_dec.read_integer().unwrap();
+                let dec_bytes = seq_dec.read_octet_string().unwrap();
+                let dec_flag = seq_dec.read_boolean().unwrap();
+
+                // Integer: strip leading zeros from original for comparison
+                let strip = |s: &[u8]| -> Vec<u8> {
+                    let start = s.iter().position(|&b| b != 0).unwrap_or(s.len());
+                    if start == s.len() { vec![0] } else { s[start..].to_vec() }
+                };
+                prop_assert_eq!(strip(dec_int), strip(&int_val));
+                prop_assert_eq!(dec_bytes, bytes.as_slice());
+                prop_assert_eq!(dec_flag, flag);
+            }
+        }
+    }
 }

@@ -9,6 +9,9 @@ description = "Utility functions for openHiTLS: ASN.1, Base64, PEM, OID"
 [dependencies]
 hitls-types = { path = "../hitls-types" }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [features]
 default = ["asn1", "base64", "pem", "oid"]
 asn1 = []

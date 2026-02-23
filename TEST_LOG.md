@@ -1875,14 +1875,62 @@ Added 15 dedicated unit tests across 11 files covering parameter invariants, GF 
 
 ---
 
+### Phase T111: Infrastructure — proptest Property-Based Tests + Coverage CI (+20 tests, 2,689→2,709)
+
+**Date**: 2026-02-23
+
+Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus a cargo-tarpaulin coverage CI job.
+
+| # | Test | File | What It Verifies |
+|:-:|------|------|-----------------|
+| 1 | `prop_aes128_block_roundtrip` | aes/mod.rs | decrypt(encrypt(block)) == block for random 16B keys/blocks |
+| 2 | `prop_aes256_block_roundtrip` | aes/mod.rs | Same for random 32B keys |
+| 3 | `prop_sm4_block_roundtrip` | sm4/mod.rs | SM4 decrypt(encrypt(block)) == block |
+| 4 | `prop_gcm_encrypt_decrypt` | modes/gcm.rs | GCM AEAD roundtrip for variable-length pt/aad |
+| 5 | `prop_cbc_encrypt_decrypt` | modes/cbc.rs | CBC roundtrip for variable-length plaintext |
+| 6 | `prop_chacha20_poly1305_roundtrip` | chacha20/mod.rs | ChaCha20-Poly1305 AEAD roundtrip |
+| 7 | `prop_sha256_determinism` | sha2/mod.rs | sha256(x) == sha256(x) for random inputs |
+| 8 | `prop_sha256_incremental_equiv` | sha2/mod.rs | sha256(a\|\|b) == update(a).update(b).finish() |
+| 9 | `prop_hmac_sha256_determinism` | hmac/mod.rs | hmac(k,x) == hmac(k,x) for random k/x |
+| 10 | `prop_ed25519_sign_verify` | ed25519/mod.rs | verify(pk, msg, sign(sk, msg)) == true |
+| 11 | `prop_x25519_dh_commutativity` | x25519/mod.rs | dh(a, pub(b)) == dh(b, pub(a)) |
+| 12 | `prop_hkdf_expand_determinism` | hkdf/mod.rs | hkdf_expand(prk, info, len) is deterministic |
+| 13 | `prop_base64_roundtrip` | base64/mod.rs | decode(encode(x)) == x |
+| 14 | `prop_base64_length_property` | base64/mod.rs | encode(x).len() == 4*ceil(x.len()/3) |
+| 15 | `prop_hex_roundtrip` | hex.rs | hex(to_hex(x)) == x |
+| 16 | `prop_asn1_integer_roundtrip` | asn1/encoder.rs | decode(encode_integer(x)) == x (normalized) |
+| 17 | `prop_asn1_octet_string_roundtrip` | asn1/encoder.rs | decode(encode_octet(x)) == x |
+| 18 | `prop_asn1_boolean_roundtrip` | asn1/encoder.rs | decode(encode_bool(x)) == x |
+| 19 | `prop_asn1_utf8_string_roundtrip` | asn1/encoder.rs | decode(encode_utf8(s)) == s |
+| 20 | `prop_asn1_sequence_roundtrip` | asn1/encoder.rs | Encode(int,bytes,bool) in SEQUENCE, decode all fields match |
+
+**Per-crate counts after Phase T111**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 709 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1199 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 61 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2709** | **40** |
+
+---
+
 ## 8. Verification & Quality Gates
 
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,689 tests pass
+# Full test suite — all 2,709 tests pass
 cargo test --workspace --all-features
-# Result: 2,689 passed, 0 failed, 40 ignored
+# Result: 2,709 passed, 0 failed, 40 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

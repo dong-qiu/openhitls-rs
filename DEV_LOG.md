@@ -8107,3 +8107,43 @@ Added 15 unit tests across 11 files in 3 PQC families:
 - `cargo test --workspace --all-features`: 2689 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase T111: Infrastructure — proptest Property-Based Tests + Coverage CI (+20 tests, 2,689→2,709)
+
+**Date**: 2026-02-23
+**Scope**: Close D6 + D7 (Medium) — The project had zero property-based tests and no code coverage metrics in CI. For a cryptographic library, property-based testing is critical to catch input-space gaps beyond hand-written edge cases. Coverage metrics provide quantitative quality visibility.
+
+### Summary
+
+Added 20 proptest property-based tests (12 in hitls-crypto, 8 in hitls-utils) and a cargo-tarpaulin coverage CI job:
+
+- **hitls-crypto** (12 proptests): AES-128/256 block roundtrip, SM4 block roundtrip, AES-GCM AEAD roundtrip, CBC encrypt/decrypt roundtrip, ChaCha20-Poly1305 AEAD roundtrip, SHA-256 determinism + incremental equivalence, HMAC-SHA-256 determinism, Ed25519 sign/verify, X25519 DH commutativity, HKDF expand determinism
+- **hitls-utils** (8 proptests): Base64 roundtrip + length property, hex roundtrip, ASN.1 integer/octet-string/boolean/UTF8-string/sequence roundtrips
+- **CI**: Added coverage job using cargo-tarpaulin with Codecov upload
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `Cargo.toml` | Added `proptest = "1.5"` to workspace dependencies |
+| `crates/hitls-crypto/Cargo.toml` | Added proptest dev-dependency |
+| `crates/hitls-utils/Cargo.toml` | Added proptest dev-dependency |
+| `crates/hitls-crypto/src/aes/mod.rs` | Added 2 proptest tests (AES-128/256 block roundtrip) |
+| `crates/hitls-crypto/src/sm4/mod.rs` | Added 1 proptest test (SM4 block roundtrip) |
+| `crates/hitls-crypto/src/modes/gcm.rs` | Added 1 proptest test (GCM AEAD roundtrip) |
+| `crates/hitls-crypto/src/modes/cbc.rs` | Added 1 proptest test (CBC roundtrip) |
+| `crates/hitls-crypto/src/chacha20/mod.rs` | Added 1 proptest test (ChaCha20-Poly1305 roundtrip) |
+| `crates/hitls-crypto/src/sha2/mod.rs` | Added 2 proptest tests (SHA-256 determinism + incremental) |
+| `crates/hitls-crypto/src/hmac/mod.rs` | Added 1 proptest test (HMAC determinism) |
+| `crates/hitls-crypto/src/ed25519/mod.rs` | Added 1 proptest test (sign/verify) |
+| `crates/hitls-crypto/src/x25519/mod.rs` | Added 1 proptest test (DH commutativity) |
+| `crates/hitls-crypto/src/hkdf/mod.rs` | Added 1 proptest test (expand determinism) |
+| `crates/hitls-utils/src/base64/mod.rs` | Added 2 proptest tests (roundtrip + length) |
+| `crates/hitls-utils/src/hex.rs` | Added 1 proptest test (roundtrip) |
+| `crates/hitls-utils/src/asn1/encoder.rs` | Added 5 proptest tests (integer/octet/bool/utf8/sequence) |
+| `.github/workflows/ci.yml` | Added coverage job (cargo-tarpaulin + Codecov) |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2709 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

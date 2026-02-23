@@ -873,4 +873,38 @@ mod tests {
         let incr = ctx.finish().unwrap();
         assert_eq!(incr, oneshot);
     }
+
+    mod proptests {
+        use super::super::Sha256;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_sha256_determinism(
+                data in proptest::collection::vec(any::<u8>(), 0..256),
+            ) {
+                let h1 = Sha256::digest(&data).unwrap();
+                let h2 = Sha256::digest(&data).unwrap();
+                prop_assert_eq!(h1, h2);
+            }
+
+            #[test]
+            fn prop_sha256_incremental_equiv(
+                a in proptest::collection::vec(any::<u8>(), 0..128),
+                b in proptest::collection::vec(any::<u8>(), 0..128),
+            ) {
+                let mut combined = a.clone();
+                combined.extend_from_slice(&b);
+                let oneshot = Sha256::digest(&combined).unwrap();
+
+                let mut ctx = Sha256::new();
+                ctx.update(&a).unwrap();
+                ctx.update(&b).unwrap();
+                let incremental = ctx.finish().unwrap();
+                prop_assert_eq!(oneshot, incremental);
+            }
+        }
+    }
 }

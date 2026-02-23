@@ -259,4 +259,35 @@ mod tests {
         assert!(X25519PublicKey::new(&[0u8; 31]).is_err());
         assert!(X25519PublicKey::new(&[0u8; 33]).is_err());
     }
+
+    mod proptests {
+        use super::super::{X25519PrivateKey, X25519PublicKey};
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_x25519_dh_commutativity(
+                seed_a in prop::array::uniform32(any::<u8>()),
+                seed_b in prop::array::uniform32(any::<u8>()),
+            ) {
+                let prv_a = X25519PrivateKey::new(&seed_a).unwrap();
+                let prv_b = X25519PrivateKey::new(&seed_b).unwrap();
+                let pub_a = X25519PublicKey::new(prv_a.public_key().as_bytes()).unwrap();
+                let pub_b = X25519PublicKey::new(prv_b.public_key().as_bytes()).unwrap();
+
+                let shared_ab = prv_a.diffie_hellman(&pub_b);
+                let shared_ba = prv_b.diffie_hellman(&pub_a);
+
+                // Both should either succeed with the same value, or both fail
+                // (all-zero result from low-order point)
+                match (shared_ab, shared_ba) {
+                    (Ok(ab), Ok(ba)) => prop_assert_eq!(ab, ba),
+                    (Err(_), Err(_)) => {} // both rejected low-order point
+                    _ => prop_assert!(false, "asymmetric DH result"),
+                }
+            }
+        }
+    }
 }

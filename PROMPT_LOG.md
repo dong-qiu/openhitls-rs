@@ -2384,3 +2384,32 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 11 files modified, 0 files created. hitls-crypto: 682→697, total: 2674→2689.
 - All 2689 workspace tests pass, 0 clippy warnings, formatting clean.
+
+## Phase T111: Infrastructure — proptest Property-Based Tests + Coverage CI
+
+**Prompt**: Implement Phase T111 — Infrastructure: proptest + Coverage CI. Add proptest as workspace dev-dependency. Add 12 proptest property-based tests to hitls-crypto (AES, SM4, GCM, CBC, ChaCha20-Poly1305, SHA-256, HMAC, Ed25519, X25519, HKDF). Add 8 proptest property-based tests to hitls-utils (Base64, hex, ASN.1). Add cargo-tarpaulin coverage CI job. Close D6 + D7.
+
+**Scope**: Close D6 (Medium) — zero property-based tests; Close D7 (Medium) — no code coverage metrics in CI.
+
+**Work performed**:
+1. Added `proptest = "1.5"` to workspace dependencies
+2. Added proptest dev-dependency to hitls-crypto and hitls-utils Cargo.toml
+3. Added 2 proptests to aes/mod.rs: AES-128/256 block roundtrip
+4. Added 1 proptest to sm4/mod.rs: SM4 block roundtrip
+5. Added 1 proptest to modes/gcm.rs: AES-GCM AEAD roundtrip
+6. Added 1 proptest to modes/cbc.rs: AES-CBC roundtrip
+7. Added 1 proptest to chacha20/mod.rs: ChaCha20-Poly1305 AEAD roundtrip
+8. Added 2 proptests to sha2/mod.rs: SHA-256 determinism + incremental equivalence
+9. Added 1 proptest to hmac/mod.rs: HMAC-SHA-256 determinism
+10. Added 1 proptest to ed25519/mod.rs: Ed25519 sign/verify
+11. Added 1 proptest to x25519/mod.rs: X25519 DH commutativity
+12. Added 1 proptest to hkdf/mod.rs: HKDF expand determinism
+13. Added 2 proptests to base64/mod.rs: roundtrip + output length property
+14. Added 1 proptest to hex.rs: hex roundtrip
+15. Added 5 proptests to asn1/encoder.rs: integer/octet/boolean/UTF8/sequence roundtrips
+16. Added coverage CI job to .github/workflows/ci.yml (cargo-tarpaulin + Codecov)
+17. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md
+
+**Result**:
+- 17 source files modified, 0 files created. hitls-crypto: 697→709, hitls-utils: 53→61, total: 2689→2709.
+- All 2709 workspace tests pass, 0 clippy warnings, formatting clean.

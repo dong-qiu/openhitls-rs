@@ -424,4 +424,23 @@ mod tests {
         assert!(Ed25519KeyPair::from_public_key(&[0u8; 31]).is_err());
         assert!(Ed25519KeyPair::from_public_key(&[0u8; 33]).is_err());
     }
+
+    mod proptests {
+        use super::super::Ed25519KeyPair;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_ed25519_sign_verify(
+                seed in prop::array::uniform32(any::<u8>()),
+                msg in proptest::collection::vec(any::<u8>(), 0..256),
+            ) {
+                let key = Ed25519KeyPair::from_seed(&seed).unwrap();
+                let sig = key.sign(&msg).unwrap();
+                prop_assert!(key.verify(&msg, &sig).unwrap());
+            }
+        }
+    }
 }

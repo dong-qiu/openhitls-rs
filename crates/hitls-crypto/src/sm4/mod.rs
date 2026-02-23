@@ -294,4 +294,25 @@ mod tests {
         cipher.decrypt_block(&mut block).unwrap();
         assert_eq!(block, pt);
     }
+
+    mod proptests {
+        use super::super::Sm4Key;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_sm4_block_roundtrip(
+                key in prop::array::uniform16(any::<u8>()),
+                block in prop::array::uniform16(any::<u8>()),
+            ) {
+                let cipher = Sm4Key::new(&key).unwrap();
+                let mut buf = block;
+                cipher.encrypt_block(&mut buf).unwrap();
+                cipher.decrypt_block(&mut buf).unwrap();
+                prop_assert_eq!(buf, block);
+            }
+        }
+    }
 }
