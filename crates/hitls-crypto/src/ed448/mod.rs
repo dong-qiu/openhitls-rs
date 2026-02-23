@@ -458,12 +458,7 @@ fn scalar_is_canonical_57(s: &[u8; 57]) -> bool {
 mod tests {
     use super::*;
 
-    fn hex(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
+    use hitls_utils::hex::hex;
 
     /// RFC 8032 §7.4 Test Vector: Ed448, blank message.
     #[test]

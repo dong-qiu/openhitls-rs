@@ -309,6 +309,7 @@ dependencies = [
  "hitls-bignum",
  "hitls-crypto",
  "hitls-types",
+ "hitls-utils",
  "subtle",
  "zeroize",
 ]

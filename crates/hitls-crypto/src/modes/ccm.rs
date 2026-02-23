@@ -303,21 +303,15 @@ fn cbc_mac<C: BlockCipher>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
+    use hitls_utils::hex::hex;
 
     // NIST SP 800-38C Example 1 (RFC 3610 Packet Vector #1)
     #[test]
     fn test_ccm_nist_example1() {
-        let key = hex_to_bytes("404142434445464748494a4b4c4d4e4f");
-        let nonce = hex_to_bytes("10111213141516");
-        let aad = hex_to_bytes("0001020304050607");
-        let pt = hex_to_bytes("20212223");
+        let key = hex("404142434445464748494a4b4c4d4e4f");
+        let nonce = hex("10111213141516");
+        let aad = hex("0001020304050607");
+        let pt = hex("20212223");
         let tag_len = 4;
 
         let ct = ccm_encrypt(&key, &nonce, &aad, &pt, tag_len).unwrap();
@@ -330,10 +324,10 @@ mod tests {
     // NIST SP 800-38C Example 2
     #[test]
     fn test_ccm_nist_example2() {
-        let key = hex_to_bytes("404142434445464748494a4b4c4d4e4f");
-        let nonce = hex_to_bytes("1011121314151617");
-        let aad = hex_to_bytes("000102030405060708090a0b0c0d0e0f");
-        let pt = hex_to_bytes("202122232425262728292a2b2c2d2e2f");
+        let key = hex("404142434445464748494a4b4c4d4e4f");
+        let nonce = hex("1011121314151617");
+        let aad = hex("000102030405060708090a0b0c0d0e0f");
+        let pt = hex("202122232425262728292a2b2c2d2e2f");
         let tag_len = 6;
 
         let ct = ccm_encrypt(&key, &nonce, &aad, &pt, tag_len).unwrap();

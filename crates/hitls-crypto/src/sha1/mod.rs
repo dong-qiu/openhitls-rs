@@ -189,17 +189,14 @@ impl crate::provider::Digest for Sha1 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::to_hex;
 
     // RFC 3174 test vector: "abc"
     #[test]
     fn test_sha1_abc() {
         let expected = "a9993e364706816aba3e25717850c26c9cd0d89d";
         let digest = Sha1::digest(b"abc").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     // RFC 3174 test vector: "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
@@ -208,14 +205,14 @@ mod tests {
         let expected = "84983e441c3bd26ebaae4aa1f95129e5e54670f1";
         let input = b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
         let digest = Sha1::digest(input).unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_sha1_empty() {
         let expected = "da39a3ee5e6b4b0d3255bfef95601890afd80709";
         let digest = Sha1::digest(b"").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     // Incremental update test
@@ -228,7 +225,7 @@ mod tests {
             .unwrap();
         let digest = ctx.finish().unwrap();
         let expected = "84983e441c3bd26ebaae4aa1f95129e5e54670f1";
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
@@ -236,7 +233,7 @@ mod tests {
         let mut ctx = Sha1::new();
         ctx.update(b"abc").unwrap();
         let d1 = ctx.finish().unwrap();
-        assert_eq!(hex(&d1), "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(to_hex(&d1), "a9993e364706816aba3e25717850c26c9cd0d89d");
 
         // Reset and hash "abc" again — should get same result
         ctx.reset();
@@ -247,7 +244,7 @@ mod tests {
         // Reset and hash empty string
         ctx.reset();
         let d3 = ctx.finish().unwrap();
-        assert_eq!(hex(&d3), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+        assert_eq!(to_hex(&d3), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
     }
 
     // NIST vector: SHA-1 of one million "a" characters
@@ -260,6 +257,6 @@ mod tests {
             ctx.update(&chunk).unwrap();
         }
         let digest = ctx.finish().unwrap();
-        assert_eq!(hex(&digest), "34aa973cd4c4daa4f61eeb2bdbad27316534016f");
+        assert_eq!(to_hex(&digest), "34aa973cd4c4daa4f61eeb2bdbad27316534016f");
     }
 }

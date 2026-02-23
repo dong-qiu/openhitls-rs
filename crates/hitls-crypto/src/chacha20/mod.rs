@@ -486,10 +486,7 @@ impl ChaCha20Poly1305 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::to_hex;
 
     fn from_hex(h: &str) -> Vec<u8> {
         (0..h.len())
@@ -527,7 +524,7 @@ If I could offer you only one tip for the future, sunscreen would be it.";
         mac.update(msg);
         let tag = mac.finish();
 
-        assert_eq!(hex(&tag), "a8061dc1305136c6c22b8baf0c0127a9");
+        assert_eq!(to_hex(&tag), "a8061dc1305136c6c22b8baf0c0127a9");
     }
 
     #[test]

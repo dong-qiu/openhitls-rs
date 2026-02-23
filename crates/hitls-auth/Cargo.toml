@@ -8,6 +8,7 @@ description = "Authentication protocols for openHiTLS"
 
 [dependencies]
 hitls-types = { path = "../hitls-types" }
+hitls-utils = { path = "../hitls-utils" }
 hitls-bignum = { path = "../hitls-bignum" }
 hitls-crypto = { path = "../hitls-crypto", features = ["hmac", "sha1", "sha2", "pbkdf2", "hkdf", "ecc"] }
 zeroize = { version = "1.8", features = ["derive"] }

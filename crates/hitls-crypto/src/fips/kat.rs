@@ -4,13 +4,7 @@
 //! verifies the output matches the expected value from NIST CAVP or RFCs.
 
 use hitls_types::CmvpError;
-
-fn hex(s: &str) -> Vec<u8> {
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-        .collect()
-}
+use hitls_utils::hex::hex;
 
 /// Run all KAT self-tests. Returns on first failure.
 pub(crate) fn run_all_kat() -> Result<(), CmvpError> {

@@ -10,11 +10,7 @@
 //! - TLS 1.2 / DTLS 1.2 / TLCP / DTLCP: CLIENT_RANDOM
 
 use crate::config::TlsConfig;
-
-/// Convert bytes to lowercase hex string.
-fn to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
+use hitls_utils::hex::to_hex;
 
 /// Log a key material line in NSS key log format.
 ///

@@ -8,6 +8,7 @@ use hitls_crypto::hmac::Hmac;
 use hitls_crypto::provider::Digest;
 use hitls_crypto::sha2::Sha256;
 use hitls_types::{CryptoError, EccCurveId};
+use hitls_utils::hex::hex;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
@@ -146,13 +147,6 @@ fn m_point(group: &EcGroup) -> Result<EcPoint, CryptoError> {
 fn n_point(group: &EcGroup) -> Result<EcPoint, CryptoError> {
     let compressed = hex("03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49");
     decompress_point(group, &compressed)
-}
-
-fn hex(s: &str) -> Vec<u8> {
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-        .collect()
 }
 
 /// Encode length-prefixed data for the transcript TT.

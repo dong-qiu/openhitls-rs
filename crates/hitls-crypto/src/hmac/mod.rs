@@ -142,10 +142,7 @@ impl Drop for Hmac {
 mod tests {
     use super::*;
     use crate::sha2::Sha256;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::to_hex;
 
     fn sha256_factory() -> Box<dyn Digest> {
         Box::new(Sha256::new())
@@ -159,7 +156,7 @@ mod tests {
         let expected = "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7";
 
         let result = Hmac::mac(sha256_factory, &key, data).unwrap();
-        assert_eq!(hex(&result), expected);
+        assert_eq!(to_hex(&result), expected);
     }
 
     // RFC 4231 Test Case 2
@@ -170,7 +167,7 @@ mod tests {
         let expected = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
 
         let result = Hmac::mac(sha256_factory, key, data).unwrap();
-        assert_eq!(hex(&result), expected);
+        assert_eq!(to_hex(&result), expected);
     }
 
     // RFC 4231 Test Case 3
@@ -181,7 +178,7 @@ mod tests {
         let expected = "773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe";
 
         let result = Hmac::mac(sha256_factory, &key, &data).unwrap();
-        assert_eq!(hex(&result), expected);
+        assert_eq!(to_hex(&result), expected);
     }
 
     // RFC 4231 Test Case 4
@@ -192,7 +189,7 @@ mod tests {
         let expected = "82558a389a443c0ea4cc819899f2083a85f0faa3e578f8077a2e3ff46729665b";
 
         let result = Hmac::mac(sha256_factory, &key, &data).unwrap();
-        assert_eq!(hex(&result), expected);
+        assert_eq!(to_hex(&result), expected);
     }
 
     // RFC 4231 Test Case 6 (key longer than block size)
@@ -203,7 +200,7 @@ mod tests {
         let expected = "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54";
 
         let result = Hmac::mac(sha256_factory, &key, data).unwrap();
-        assert_eq!(hex(&result), expected);
+        assert_eq!(to_hex(&result), expected);
     }
 
     // RFC 4231 Test Case 7 (key and data longer than block size)
@@ -215,7 +212,7 @@ mod tests {
         let expected = "9b09ffa71b942fcb27635fbcd5b0e944bfdc63644f0713938a7f51535c3a35e2";
 
         let result = Hmac::mac(sha256_factory, &key, data).unwrap();
-        assert_eq!(hex(&result), expected);
+        assert_eq!(to_hex(&result), expected);
     }
 
     // Test reset functionality
@@ -229,14 +226,14 @@ mod tests {
         ctx.update(data).unwrap();
         let mut out1 = vec![0u8; 32];
         ctx.finish(&mut out1).unwrap();
-        assert_eq!(hex(&out1), expected);
+        assert_eq!(to_hex(&out1), expected);
 
         // Reset and compute again
         ctx.reset();
         ctx.update(data).unwrap();
         let mut out2 = vec![0u8; 32];
         ctx.finish(&mut out2).unwrap();
-        assert_eq!(hex(&out2), expected);
+        assert_eq!(to_hex(&out2), expected);
     }
 
     #[cfg(feature = "sha1")]
@@ -261,7 +258,7 @@ mod tests {
         let expected = "b617318655057264e28bc0b6fb378c8ef146be00";
 
         let result = Hmac::mac(sha1_factory, &key, data).unwrap();
-        assert_eq!(hex(&result), expected);
+        assert_eq!(to_hex(&result), expected);
     }
 
     // RFC 2202 Case 2: HMAC-SHA1
@@ -273,7 +270,7 @@ mod tests {
         let expected = "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79";
 
         let result = Hmac::mac(sha1_factory, key, data).unwrap();
-        assert_eq!(hex(&result), expected);
+        assert_eq!(to_hex(&result), expected);
     }
 
     // RFC 4231 Case 1: HMAC-SHA384
@@ -286,7 +283,7 @@ mod tests {
                         faea9ea9076ede7f4af152e8b2fa9cb6";
 
         let result = Hmac::mac(sha384_factory, &key, data).unwrap();
-        assert_eq!(hex(&result), expected);
+        assert_eq!(to_hex(&result), expected);
     }
 
     // RFC 4231 Case 1: HMAC-SHA512
@@ -300,7 +297,7 @@ mod tests {
                         be9d914eeb61f1702e696c203a126854";
 
         let result = Hmac::mac(sha512_factory, &key, data).unwrap();
-        assert_eq!(hex(&result), expected);
+        assert_eq!(to_hex(&result), expected);
     }
 
     // HMAC-SHA256 with empty message

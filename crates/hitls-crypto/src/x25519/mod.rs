@@ -143,13 +143,7 @@ mod tests {
     use super::*;
 
     fn hex_to_bytes(s: &str) -> [u8; 32] {
-        let bytes: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        let mut out = [0u8; 32];
-        out.copy_from_slice(&bytes);
-        out
+        hitls_utils::hex::hex(s).try_into().unwrap()
     }
 
     /// RFC 7748 §6.1 test vector.

@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 #![doc = "Utility functions for openHiTLS: ASN.1, Base64, PEM, OID."]
 
+pub mod hex;
+
 #[cfg(feature = "asn1")]
 pub mod asn1;
 

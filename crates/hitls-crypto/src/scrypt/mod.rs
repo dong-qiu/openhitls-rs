@@ -162,10 +162,7 @@ fn salsa_qr(x: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // RFC 7914 §12 Test Vector 1
     #[test]
@@ -179,7 +176,7 @@ mod tests {
 
         let dk = scrypt(password, salt, n, r, p, dk_len).unwrap();
         assert_eq!(
-            hex(&dk),
+            to_hex(&dk),
             "77d6576238657b203b19ca42c18a0497\
              f16b4844e3074ae8dfdffa3fede21442\
              fcd0069ded0948f8326a753a0fc81f17\
@@ -200,7 +197,7 @@ mod tests {
 
         let dk = scrypt(password, salt, n, r, p, dk_len).unwrap();
         assert_eq!(
-            hex(&dk),
+            to_hex(&dk),
             "fdbabe1c9d3472007856e7190d01e9fe\
              7c6ad7cbc8237830e77376634b373162\
              2eaf30d92e22a3886ff109279d9830da\
@@ -212,28 +209,17 @@ mod tests {
     // RFC 7914 §8 Salsa20/8 Core test vector
     #[test]
     fn test_salsa20_8_core() {
-        let input = hex_to_bytes(
-            "7e879a214f3ec9867ca940e641718f26\
+        let input = hex("7e879a214f3ec9867ca940e641718f26\
              baee555b8c61c1b50df846116dcd3b1d\
              ee24f319df9b3d8514121e4b5ac5aa32\
-             76021d2909c74829edebc68db8b8c25e",
-        );
-        let expected = hex_to_bytes(
-            "a41f859c6608cc993b81cacb020cef05\
+             76021d2909c74829edebc68db8b8c25e");
+        let expected = hex("a41f859c6608cc993b81cacb020cef05\
              044b2181a2fd337dfd7b1c6396682f29\
              b4393168e3c9e6bcfe6bc5b7a06d96ba\
-             e424cc102c91745c24ad673dc7618f81",
-        );
+             e424cc102c91745c24ad673dc7618f81");
         let mut block: [u8; 64] = input.try_into().unwrap();
         super::salsa20_8_core(&mut block);
-        assert_eq!(hex(&block), hex(&expected));
-    }
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
+        assert_eq!(to_hex(&block), to_hex(&expected));
     }
 
     #[test]

@@ -178,47 +178,37 @@ impl crate::provider::BlockCipher for Sm4Key {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // GB/T 32907-2016 Appendix A
     #[test]
     fn test_sm4_encrypt() {
-        let key = hex_to_bytes("0123456789abcdeffedcba9876543210");
-        let pt = hex_to_bytes("0123456789abcdeffedcba9876543210");
+        let key = hex("0123456789abcdeffedcba9876543210");
+        let pt = hex("0123456789abcdeffedcba9876543210");
         let expected = "681edf34d206965e86b3e94f536e4246";
 
         let cipher = Sm4Key::new(&key).unwrap();
         let mut block = pt;
         cipher.encrypt_block(&mut block).unwrap();
-        assert_eq!(hex(&block), expected);
+        assert_eq!(to_hex(&block), expected);
     }
 
     #[test]
     fn test_sm4_decrypt() {
-        let key = hex_to_bytes("0123456789abcdeffedcba9876543210");
-        let ct = hex_to_bytes("681edf34d206965e86b3e94f536e4246");
+        let key = hex("0123456789abcdeffedcba9876543210");
+        let ct = hex("681edf34d206965e86b3e94f536e4246");
         let expected = "0123456789abcdeffedcba9876543210";
 
         let cipher = Sm4Key::new(&key).unwrap();
         let mut block = ct;
         cipher.decrypt_block(&mut block).unwrap();
-        assert_eq!(hex(&block), expected);
+        assert_eq!(to_hex(&block), expected);
     }
 
     #[test]
     fn test_sm4_roundtrip() {
-        let key = hex_to_bytes("0123456789abcdeffedcba9876543210");
-        let pt = hex_to_bytes("aabbccddeeff00112233445566778899");
+        let key = hex("0123456789abcdeffedcba9876543210");
+        let pt = hex("aabbccddeeff00112233445566778899");
 
         let cipher = Sm4Key::new(&key).unwrap();
         let mut block = pt.clone();
@@ -238,13 +228,13 @@ mod tests {
     #[test]
     #[ignore] // slow
     fn test_sm4_1million_iterations() {
-        let key = hex_to_bytes("0123456789abcdeffedcba9876543210");
+        let key = hex("0123456789abcdeffedcba9876543210");
         let cipher = Sm4Key::new(&key).unwrap();
-        let mut block = hex_to_bytes("0123456789abcdeffedcba9876543210");
+        let mut block = hex("0123456789abcdeffedcba9876543210");
         for _ in 0..1_000_000 {
             cipher.encrypt_block(&mut block).unwrap();
         }
-        assert_eq!(hex(&block), "595298c7c6fd271f0402f804c33d3f66");
+        assert_eq!(to_hex(&block), "595298c7c6fd271f0402f804c33d3f66");
     }
 
     /// Encrypt all-zeros key and plaintext.

@@ -213,29 +213,19 @@ pub fn xts_decrypt(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // IEEE P1619 Vector 1: 256-bit data unit key, 128-bit tweak
     #[test]
     fn test_xts_ieee_vector1() {
-        let key1 = hex_to_bytes("00000000000000000000000000000000");
-        let key2 = hex_to_bytes("00000000000000000000000000000000");
-        let tweak = hex_to_bytes("00000000000000000000000000000000");
-        let pt = hex_to_bytes("0000000000000000000000000000000000000000000000000000000000000000");
+        let key1 = hex("00000000000000000000000000000000");
+        let key2 = hex("00000000000000000000000000000000");
+        let tweak = hex("00000000000000000000000000000000");
+        let pt = hex("0000000000000000000000000000000000000000000000000000000000000000");
         let expected_ct = "917cf69ebd68b2ec9b9fe9a3eadda692cd43d2f59598ed858c02c2652fbf922e";
 
         let ct = xts_encrypt(&key1, &key2, &tweak, &pt).unwrap();
-        assert_eq!(hex(&ct), expected_ct);
+        assert_eq!(to_hex(&ct), expected_ct);
 
         let decrypted = xts_decrypt(&key1, &key2, &tweak, &ct).unwrap();
         assert_eq!(decrypted, pt);

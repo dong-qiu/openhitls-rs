@@ -567,12 +567,7 @@ mod tests {
         encode_x25519_pkcs8_der(&key)
     }
 
-    fn hex(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
+    use hitls_utils::hex::hex;
 
     #[test]
     fn test_parse_ed25519_pkcs8_der() {

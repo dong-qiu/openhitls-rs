@@ -402,13 +402,7 @@ fn generate_blind_factor(n: &BigNum) -> Result<(BigNum, BigNum), CryptoError> {
 mod tests {
     use super::*;
 
-    /// Helper: hex string to bytes.
-    fn hex(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
+    use hitls_utils::hex::hex;
 
     // A valid RSA-1024 key for testing (same as hitls-crypto RSA test key).
     // NOT for production use -- 1024-bit RSA is insecure.

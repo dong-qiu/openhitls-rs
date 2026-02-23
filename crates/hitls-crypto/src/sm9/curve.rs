@@ -5,6 +5,7 @@
 //! Tower: Fp2=Fp[u]/(u²+2), Fp4=Fp2[v]/(v²-u), Fp12=Fp4[w]/(w³-v)
 
 use hitls_bignum::BigNum;
+use hitls_utils::hex::hex;
 
 /// BN256 prime: p
 pub fn p() -> BigNum {
@@ -72,11 +73,4 @@ pub fn p2_y1() -> BigNum {
 /// Miller loop parameter: 6t + 2 = 0x2400000000215D93E
 pub fn miller_param() -> BigNum {
     BigNum::from_bytes_be(&hex("02400000000215D93E"))
-}
-
-fn hex(s: &str) -> Vec<u8> {
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-        .collect()
 }

@@ -764,6 +764,7 @@ impl crate::provider::Digest for Sha384 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hitls_utils::hex::to_hex;
 
     // RFC 6234 test vectors
 
@@ -771,14 +772,14 @@ mod tests {
     fn test_sha256_empty() {
         let expected = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
         let digest = Sha256::digest(b"").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_sha256_abc() {
         let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
         let digest = Sha256::digest(b"abc").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
@@ -786,7 +787,7 @@ mod tests {
         let expected = "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1";
         let digest =
             Sha256::digest(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
@@ -798,35 +799,35 @@ mod tests {
             .unwrap();
         let digest = ctx.finish().unwrap();
         let expected = "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1";
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_sha224_abc() {
         let expected = "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7";
         let digest = Sha224::digest(b"abc").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_sha512_empty() {
         let expected = "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e";
         let digest = Sha512::digest(b"").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_sha512_abc() {
         let expected = "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
         let digest = Sha512::digest(b"abc").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_sha384_abc() {
         let expected = "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7";
         let digest = Sha384::digest(b"abc").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
@@ -871,9 +872,5 @@ mod tests {
         ctx.update(&data).unwrap();
         let incr = ctx.finish().unwrap();
         assert_eq!(incr, oneshot);
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 }

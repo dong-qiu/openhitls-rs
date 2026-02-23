@@ -59,10 +59,7 @@ pub fn pbkdf2(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::to_hex;
 
     // PBKDF2-HMAC-SHA256 test vectors
     // From RFC 7914 Section 11 and other known-good sources
@@ -71,7 +68,7 @@ mod tests {
         // password="passwd", salt="salt", c=1, dkLen=64
         let dk = pbkdf2(b"passwd", b"salt", 1, 64).unwrap();
         let expected = "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783";
-        assert_eq!(hex(&dk), expected);
+        assert_eq!(to_hex(&dk), expected);
     }
 
     #[test]
@@ -79,7 +76,7 @@ mod tests {
         // password="Password", salt="NaCl", c=80000, dkLen=64
         let dk = pbkdf2(b"Password", b"NaCl", 80000, 64).unwrap();
         let expected = "4ddcd8f60b98be21830cee5ef22701f9641a4418d04c0414aeff08876b34ab56a1d425a1225833549adb841b51c9b3176a272bdebba1d078478f62b397f33c8d";
-        assert_eq!(hex(&dk), expected);
+        assert_eq!(to_hex(&dk), expected);
     }
 
     #[test]

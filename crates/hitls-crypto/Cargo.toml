@@ -48,7 +48,7 @@ ed448 = ["sha3", "hitls-bignum"]
 x25519 = []
 x448 = []
 sm2 = ["ecc", "sm3", "hitls-utils"]
-sm9 = ["ecc", "sm3"]
+sm9 = ["ecc", "sm3", "hitls-utils"]
 paillier = ["hitls-bignum"]
 elgamal = ["hitls-bignum"]
 
@@ -76,7 +76,7 @@ modes = ["aes"]
 entropy = ["sha2"]
 
 # FIPS/CMVP compliance
-fips = ["sha2", "hmac", "aes", "modes", "drbg", "rsa", "ecdsa", "ed25519", "hkdf", "entropy"]
+fips = ["sha2", "hmac", "aes", "modes", "drbg", "rsa", "ecdsa", "ed25519", "hkdf", "entropy", "hitls-utils"]
 
 # Expose low-level internals
 hazmat = []
@@ -84,6 +84,7 @@ hazmat = []
 [dev-dependencies]
 criterion = { workspace = true }
 hitls-bignum = { path = "../hitls-bignum" }
+hitls-utils = { path = "../hitls-utils" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

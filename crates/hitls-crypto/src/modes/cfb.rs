@@ -75,30 +75,20 @@ pub fn cfb_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // NIST SP 800-38A CFB128-AES128 roundtrip + first block verification
     #[test]
     fn test_cfb_aes128_roundtrip() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let iv = hex_to_bytes("000102030405060708090a0b0c0d0e0f");
-        let pt = hex_to_bytes("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
+        let pt = hex("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710");
 
         let ct = cfb_encrypt(&key, &iv, &pt).unwrap();
         assert_eq!(ct.len(), pt.len());
 
         // First block: C1 = P1 XOR E_K(IV) — same as OFB/CTR first block
-        assert_eq!(hex(&ct[..16]), "3b3fd92eb72dad20333449f8e83cfb4a");
+        assert_eq!(to_hex(&ct[..16]), "3b3fd92eb72dad20333449f8e83cfb4a");
 
         let decrypted = cfb_decrypt(&key, &iv, &ct).unwrap();
         assert_eq!(decrypted, pt);
@@ -148,9 +138,9 @@ mod tests {
     #[test]
     fn test_cfb_aes256_roundtrip() {
         // AES-256 CFB with 32-byte key, 64-byte plaintext
-        let key = hex_to_bytes("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
-        let iv = hex_to_bytes("000102030405060708090a0b0c0d0e0f");
-        let pt = hex_to_bytes(
+        let key = hex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
+        let pt = hex(
             "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51\
              30c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710",
         );

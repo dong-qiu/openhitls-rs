@@ -206,45 +206,42 @@ impl crate::provider::Digest for Md5 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::to_hex;
 
     // RFC 1321 test vectors
     #[test]
     fn test_md5_empty() {
         let expected = "d41d8cd98f00b204e9800998ecf8427e";
         let digest = Md5::digest(b"").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_md5_a() {
         let expected = "0cc175b9c0f1b6a831c399e269772661";
         let digest = Md5::digest(b"a").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_md5_abc() {
         let expected = "900150983cd24fb0d6963f7d28e17f72";
         let digest = Md5::digest(b"abc").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_md5_message_digest() {
         let expected = "f96b697d7cb7938d525a2f31aaf161d0";
         let digest = Md5::digest(b"message digest").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_md5_alphabet() {
         let expected = "c3fcd3d76192e4007dfb496cca67e13b";
         let digest = Md5::digest(b"abcdefghijklmnopqrstuvwxyz").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
@@ -252,7 +249,7 @@ mod tests {
         let expected = "d174ab98d277d9f5a5611c2c9f419d9f";
         let digest =
             Md5::digest(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
@@ -262,7 +259,7 @@ mod tests {
             b"12345678901234567890123456789012345678901234567890123456789012345678901234567890",
         )
         .unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     // Incremental update
@@ -274,7 +271,7 @@ mod tests {
         ctx.update(b"digest").unwrap();
         let digest = ctx.finish().unwrap();
         let expected = "f96b697d7cb7938d525a2f31aaf161d0";
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]

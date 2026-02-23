@@ -83,10 +83,7 @@ impl TranscriptHash {
 mod tests {
     use super::*;
     use hitls_crypto::sha2::Sha256;
-
-    fn to_hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect()
-    }
+    use hitls_utils::hex::to_hex;
 
     #[test]
     fn test_transcript_empty_hash() {

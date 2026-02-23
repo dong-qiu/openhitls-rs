@@ -38,27 +38,17 @@ pub fn ecb_decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // NIST SP 800-38A F.1.1: AES-128 ECB
     #[test]
     fn test_ecb_aes128() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let pt = hex_to_bytes("6bc1bee22e409f96e93d7e117393172a");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let pt = hex("6bc1bee22e409f96e93d7e117393172a");
         let expected = "3ad77bb40d7a3660a89ecaf32466ef97";
 
         let ct = ecb_encrypt(&key, &pt).unwrap();
-        assert_eq!(hex(&ct), expected);
+        assert_eq!(to_hex(&ct), expected);
 
         let decrypted = ecb_decrypt(&key, &ct).unwrap();
         assert_eq!(decrypted, pt);
@@ -66,8 +56,8 @@ mod tests {
 
     #[test]
     fn test_ecb_multi_block() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let pt = hex_to_bytes(
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let pt = hex(
             "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710",
         );
 
@@ -78,7 +68,7 @@ mod tests {
 
     #[test]
     fn test_ecb_invalid_length() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
         assert!(ecb_encrypt(&key, &[0u8; 15]).is_err());
         assert!(ecb_encrypt(&key, &[]).is_err());
     }
@@ -86,12 +76,12 @@ mod tests {
     // NIST SP 800-38A F.1.5: AES-256 ECB Encrypt
     #[test]
     fn test_ecb_aes256_nist_vector() {
-        let key = hex_to_bytes("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
-        let pt = hex_to_bytes("6bc1bee22e409f96e93d7e117393172a");
+        let key = hex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let pt = hex("6bc1bee22e409f96e93d7e117393172a");
         let expected = "f3eed1bdb5d2a03c064b5a7e3db181f8";
 
         let ct = ecb_encrypt(&key, &pt).unwrap();
-        assert_eq!(hex(&ct), expected);
+        assert_eq!(to_hex(&ct), expected);
 
         let decrypted = ecb_decrypt(&key, &ct).unwrap();
         assert_eq!(decrypted, pt);

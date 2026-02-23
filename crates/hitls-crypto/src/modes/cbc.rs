@@ -160,24 +160,14 @@ pub fn sm4_cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // NIST SP 800-38A F.2.1: AES-128 CBC (without padding — aligned input)
     #[test]
     fn test_cbc_aes128_roundtrip() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let iv = hex_to_bytes("000102030405060708090a0b0c0d0e0f");
-        let pt = hex_to_bytes("6bc1bee22e409f96e93d7e117393172a");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
+        let pt = hex("6bc1bee22e409f96e93d7e117393172a");
 
         let ct = cbc_encrypt(&key, &iv, &pt).unwrap();
         // ct has padding block appended
@@ -187,8 +177,8 @@ mod tests {
 
     #[test]
     fn test_cbc_padding_short() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let iv = hex_to_bytes("000102030405060708090a0b0c0d0e0f");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
         let pt = b"Hello, World!"; // 13 bytes, needs 3 bytes padding
 
         let ct = cbc_encrypt(&key, &iv, pt).unwrap();
@@ -199,8 +189,8 @@ mod tests {
 
     #[test]
     fn test_cbc_padding_aligned() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let iv = hex_to_bytes("000102030405060708090a0b0c0d0e0f");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
         let pt = [0xaau8; 16]; // Exactly one block — gets full padding block
 
         let ct = cbc_encrypt(&key, &iv, &pt).unwrap();
@@ -211,8 +201,8 @@ mod tests {
 
     #[test]
     fn test_cbc_empty() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let iv = hex_to_bytes("000102030405060708090a0b0c0d0e0f");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
 
         let ct = cbc_encrypt(&key, &iv, b"").unwrap();
         assert_eq!(ct.len(), 16); // Padding-only block
@@ -222,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_cbc_invalid_iv() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
         assert!(cbc_encrypt(&key, &[0u8; 15], b"test").is_err());
     }
 
@@ -271,9 +261,9 @@ mod tests {
     // NIST SP 800-38A F.2.1: verify first ciphertext block
     #[test]
     fn test_cbc_aes128_nist_vector() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let iv = hex_to_bytes("000102030405060708090a0b0c0d0e0f");
-        let pt = hex_to_bytes(
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
+        let pt = hex(
             "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710",
         );
         // Expected ciphertext blocks (without padding)
@@ -281,6 +271,6 @@ mod tests {
 
         let ct = cbc_encrypt(&key, &iv, &pt).unwrap();
         // First 64 bytes of ct should match (the last 16 bytes are padding)
-        assert_eq!(hex(&ct[..64]), expected_ct);
+        assert_eq!(to_hex(&ct[..64]), expected_ct);
     }
 }

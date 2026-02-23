@@ -36,30 +36,20 @@ pub fn ofb_crypt(key: &[u8], iv: &[u8], data: &mut [u8]) -> Result<(), CryptoErr
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // NIST SP 800-38A F.4.1 OFB-AES128.Encrypt
     #[test]
     fn test_ofb_aes128_nist_vector() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let iv = hex_to_bytes("000102030405060708090a0b0c0d0e0f");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
         let pt_hex = "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710";
         let expected_ct = "3b3fd92eb72dad20333449f8e83cfb4a7789508d16918f03f53c52dac54ed8259740051e9c5fecf64344f7a82260edcc304c6528f659c77866a510d9c1d6ae5e";
 
-        let mut data = hex_to_bytes(pt_hex);
+        let mut data = hex(pt_hex);
         let original_pt = data.clone();
         ofb_crypt(&key, &iv, &mut data).unwrap();
-        assert_eq!(hex(&data), expected_ct);
+        assert_eq!(to_hex(&data), expected_ct);
 
         // Decrypt (same operation)
         ofb_crypt(&key, &iv, &mut data).unwrap();

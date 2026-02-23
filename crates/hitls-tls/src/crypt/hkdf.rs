@@ -171,17 +171,7 @@ pub fn derive_secret(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn to_hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // RFC 5869 Test Case 1 (SHA-256)
     #[test]

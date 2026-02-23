@@ -559,16 +559,13 @@ impl Shake256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::to_hex;
 
     #[test]
     fn test_sha3_256_empty() {
         let out = Sha3_256::digest(b"").unwrap();
         assert_eq!(
-            hex(&out),
+            to_hex(&out),
             "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"
         );
     }
@@ -577,7 +574,7 @@ mod tests {
     fn test_sha3_256_abc() {
         let out = Sha3_256::digest(b"abc").unwrap();
         assert_eq!(
-            hex(&out),
+            to_hex(&out),
             "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532"
         );
     }
@@ -600,7 +597,7 @@ mod tests {
     fn test_sha3_512_empty() {
         let out = Sha3_512::digest(b"").unwrap();
         assert_eq!(
-            hex(&out),
+            to_hex(&out),
             "a69f73cca23a9ac5c8b567dc185a756e97c982164fe25859e0d1dcc1475c80a6\
              15b2123af1f5f94c11e3e9402c3ac558f500199d95b6d3e301758586281dcd26"
         );
@@ -610,7 +607,7 @@ mod tests {
     fn test_sha3_512_abc() {
         let out = Sha3_512::digest(b"abc").unwrap();
         assert_eq!(
-            hex(&out),
+            to_hex(&out),
             "b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d0240d2712e\
              10e116e9192af3c91a7ec57647e3934057340b4cf408d5a56592f8274eec53f0"
         );
@@ -620,7 +617,7 @@ mod tests {
     fn test_sha3_224_abc() {
         let out = Sha3_224::digest(b"abc").unwrap();
         assert_eq!(
-            hex(&out),
+            to_hex(&out),
             "e642824c3f8cf24ad09234ee7d3c766fc9a3a5168d0c94ad73b46fdf"
         );
     }
@@ -629,7 +626,7 @@ mod tests {
     fn test_sha3_384_abc() {
         let out = Sha3_384::digest(b"abc").unwrap();
         assert_eq!(
-            hex(&out),
+            to_hex(&out),
             "ec01498288516fc926459f58e2c6ad8df9b473cb0fc08c2596da7cf0e49be4b2\
              98d88cea927ac7f539f1edf228376d25"
         );
@@ -644,7 +641,7 @@ mod tests {
 
         // Known SHAKE128("") first 32 bytes
         assert_eq!(
-            hex(&out32),
+            to_hex(&out32),
             "7f9c2ba4e88f827d616045507605853ed73b8093f6efbc88eb1a6eacfa66ef26"
         );
     }
@@ -657,7 +654,7 @@ mod tests {
 
         // Known SHAKE256("") first 32 bytes
         assert_eq!(
-            hex(&out32),
+            to_hex(&out32),
             "46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f"
         );
     }

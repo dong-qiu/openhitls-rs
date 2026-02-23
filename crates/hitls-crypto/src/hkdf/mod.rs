@@ -91,69 +91,59 @@ impl Drop for Hkdf {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // RFC 5869 Test Case 1
     #[test]
     fn test_hkdf_case1() {
-        let ikm = hex_to_bytes("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
-        let salt = hex_to_bytes("000102030405060708090a0b0c");
-        let info = hex_to_bytes("f0f1f2f3f4f5f6f7f8f9");
+        let ikm = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let salt = hex("000102030405060708090a0b0c");
+        let info = hex("f0f1f2f3f4f5f6f7f8f9");
         let expected_prk = "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5";
         let expected_okm =
             "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865";
 
         let hkdf = Hkdf::new(&salt, &ikm).unwrap();
-        assert_eq!(hex(&hkdf.prk), expected_prk);
+        assert_eq!(to_hex(&hkdf.prk), expected_prk);
         let okm = hkdf.expand(&info, 42).unwrap();
-        assert_eq!(hex(&okm), expected_okm);
+        assert_eq!(to_hex(&okm), expected_okm);
     }
 
     // RFC 5869 Test Case 2 (longer inputs)
     #[test]
     fn test_hkdf_case2() {
-        let ikm = hex_to_bytes(
+        let ikm = hex(
             "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f",
         );
-        let salt = hex_to_bytes(
+        let salt = hex(
             "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
         );
-        let info = hex_to_bytes(
+        let info = hex(
             "b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
         );
         let expected_okm = "b11e398dc80327a1c8e7f78c596a49344f012eda2d4efad8a050cc4c19afa97c59045a99cac7827271cb41c65e590e09da3275600c2f09b8367793a9aca3db71cc30c58179ec3e87c14c01d5c1f3434f1d87";
 
         let okm = Hkdf::derive(&salt, &ikm, &info, 82).unwrap();
-        assert_eq!(hex(&okm), expected_okm);
+        assert_eq!(to_hex(&okm), expected_okm);
     }
 
     // RFC 5869 Test Case 3 (zero-length salt and info)
     #[test]
     fn test_hkdf_case3() {
-        let ikm = hex_to_bytes("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let ikm = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
         let expected_okm =
             "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8";
 
         let okm = Hkdf::derive(&[], &ikm, &[], 42).unwrap();
-        assert_eq!(hex(&okm), expected_okm);
+        assert_eq!(to_hex(&okm), expected_okm);
     }
 
     /// Verify that `from_prk()` produces the same OKM as `new()` for Case 1.
     #[test]
     fn test_hkdf_from_prk() {
-        let ikm = hex_to_bytes("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
-        let salt = hex_to_bytes("000102030405060708090a0b0c");
-        let info = hex_to_bytes("f0f1f2f3f4f5f6f7f8f9");
+        let ikm = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let salt = hex("000102030405060708090a0b0c");
+        let info = hex("f0f1f2f3f4f5f6f7f8f9");
 
         let hkdf_full = Hkdf::new(&salt, &ikm).unwrap();
         let okm_full = hkdf_full.expand(&info, 42).unwrap();
@@ -168,7 +158,7 @@ mod tests {
     /// Expand with length exceeding 255*HashLen should fail.
     #[test]
     fn test_hkdf_expand_max_length_error() {
-        let ikm = hex_to_bytes("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let ikm = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
         let hkdf = Hkdf::new(&[], &ikm).unwrap();
         // 255 * 32 = 8160 is the max; 8161 should fail
         assert!(hkdf.expand(&[], 255 * 32 + 1).is_err());
@@ -177,7 +167,7 @@ mod tests {
     /// Expand with zero length should produce empty output.
     #[test]
     fn test_hkdf_expand_zero_length() {
-        let ikm = hex_to_bytes("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let ikm = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
         let hkdf = Hkdf::new(&[], &ikm).unwrap();
         let okm = hkdf.expand(&[], 0).unwrap();
         assert!(okm.is_empty());

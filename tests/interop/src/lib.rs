@@ -4,12 +4,7 @@
 //! under `tests/`. Each `tests/*.rs` file imports these via
 //! `use hitls_integration_tests::*;`.
 
-pub fn hex(s: &str) -> Vec<u8> {
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-        .collect()
-}
+pub use hitls_utils::hex::hex;
 
 pub fn make_ed25519_server_identity() -> (Vec<Vec<u8>>, hitls_tls::config::ServerPrivateKey) {
     use hitls_pki::x509::{CertificateBuilder, DistinguishedName, SigningKey};

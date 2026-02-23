@@ -282,57 +282,47 @@ impl NeonAesKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // FIPS 197 Appendix B: AES-128
     #[test]
     fn test_neon_aes128_encrypt() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let pt = hex_to_bytes("3243f6a8885a308d313198a2e0370734");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let pt = hex("3243f6a8885a308d313198a2e0370734");
         let expected = "3925841d02dc09fbdc118597196a0b32";
         let cipher = NeonAesKey::new(&key).unwrap();
         let mut block = pt;
         cipher.encrypt_block(&mut block).unwrap();
-        assert_eq!(hex(&block), expected);
+        assert_eq!(to_hex(&block), expected);
     }
 
     #[test]
     fn test_neon_aes128_decrypt() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
-        let ct = hex_to_bytes("3925841d02dc09fbdc118597196a0b32");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let ct = hex("3925841d02dc09fbdc118597196a0b32");
         let expected = "3243f6a8885a308d313198a2e0370734";
         let cipher = NeonAesKey::new(&key).unwrap();
         let mut block = ct;
         cipher.decrypt_block(&mut block).unwrap();
-        assert_eq!(hex(&block), expected);
+        assert_eq!(to_hex(&block), expected);
     }
 
     // FIPS 197 Appendix C.3: AES-256
     #[test]
     fn test_neon_aes256_encrypt() {
-        let key = hex_to_bytes("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
-        let pt = hex_to_bytes("00112233445566778899aabbccddeeff");
+        let key = hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let pt = hex("00112233445566778899aabbccddeeff");
         let expected = "8ea2b7ca516745bfeafc49904b496089";
         let cipher = NeonAesKey::new(&key).unwrap();
         let mut block = pt;
         cipher.encrypt_block(&mut block).unwrap();
-        assert_eq!(hex(&block), expected);
+        assert_eq!(to_hex(&block), expected);
     }
 
     #[test]
     fn test_neon_aes256_roundtrip() {
-        let key = hex_to_bytes("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
-        let pt = hex_to_bytes("00112233445566778899aabbccddeeff");
+        let key = hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let pt = hex("00112233445566778899aabbccddeeff");
         let cipher = NeonAesKey::new(&key).unwrap();
         let mut block = pt.clone();
         cipher.encrypt_block(&mut block).unwrap();
@@ -343,8 +333,8 @@ mod tests {
     // AES-192 roundtrip
     #[test]
     fn test_neon_aes192_roundtrip() {
-        let key = hex_to_bytes("000102030405060708090a0b0c0d0e0f1011121314151617");
-        let pt = hex_to_bytes("00112233445566778899aabbccddeeff");
+        let key = hex("000102030405060708090a0b0c0d0e0f1011121314151617");
+        let pt = hex("00112233445566778899aabbccddeeff");
         let cipher = NeonAesKey::new(&key).unwrap();
         let mut block = pt.clone();
         cipher.encrypt_block(&mut block).unwrap();
@@ -361,7 +351,7 @@ mod tests {
 
     #[test]
     fn test_neon_aes_invalid_block_len() {
-        let key = hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c");
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
         let cipher = NeonAesKey::new(&key).unwrap();
         let mut short = [0u8; 15];
         assert!(cipher.encrypt_block(&mut short).is_err());

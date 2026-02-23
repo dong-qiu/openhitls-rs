@@ -307,28 +307,18 @@ pub fn sm4_gcm_decrypt(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     // NIST SP 800-38D Test Case 1: empty PT, empty AAD
     #[test]
     fn test_gcm_case1() {
-        let key = hex_to_bytes("00000000000000000000000000000000");
-        let nonce = hex_to_bytes("000000000000000000000000");
+        let key = hex("00000000000000000000000000000000");
+        let nonce = hex("000000000000000000000000");
         let expected_tag = "58e2fccefa7e3061367f1d57a4e7455a";
 
         let result = gcm_encrypt(&key, &nonce, &[], &[]).unwrap();
         assert_eq!(result.len(), GCM_TAG_SIZE);
-        assert_eq!(hex(&result), expected_tag);
+        assert_eq!(to_hex(&result), expected_tag);
 
         // Decrypt
         let pt = gcm_decrypt(&key, &nonce, &[], &result).unwrap();
@@ -338,15 +328,15 @@ mod tests {
     // NIST SP 800-38D Test Case 2: 16 bytes PT, empty AAD
     #[test]
     fn test_gcm_case2() {
-        let key = hex_to_bytes("00000000000000000000000000000000");
-        let nonce = hex_to_bytes("000000000000000000000000");
-        let pt = hex_to_bytes("00000000000000000000000000000000");
+        let key = hex("00000000000000000000000000000000");
+        let nonce = hex("000000000000000000000000");
+        let pt = hex("00000000000000000000000000000000");
         let expected_ct = "0388dace60b6a392f328c2b971b2fe78";
         let expected_tag = "ab6e47d42cec13bdf53a67b21257bddf";
 
         let result = gcm_encrypt(&key, &nonce, &[], &pt).unwrap();
-        assert_eq!(hex(&result[..16]), expected_ct);
-        assert_eq!(hex(&result[16..]), expected_tag);
+        assert_eq!(to_hex(&result[..16]), expected_ct);
+        assert_eq!(to_hex(&result[16..]), expected_tag);
 
         let decrypted = gcm_decrypt(&key, &nonce, &[], &result).unwrap();
         assert_eq!(decrypted, pt);
@@ -355,19 +345,19 @@ mod tests {
     // NIST SP 800-38D Test Case 4: 60-byte PT with AAD
     #[test]
     fn test_gcm_case3() {
-        let key = hex_to_bytes("feffe9928665731c6d6a8f9467308308");
-        let nonce = hex_to_bytes("cafebabefacedbaddecaf888");
-        let pt = hex_to_bytes(
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce = hex("cafebabefacedbaddecaf888");
+        let pt = hex(
             "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
         );
-        let aad = hex_to_bytes("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+        let aad = hex("feedfacedeadbeeffeedfacedeadbeefabaddad2");
         let expected_ct = "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091";
         let expected_tag = "5bc94fbc3221a5db94fae95ae7121a47";
 
         let result = gcm_encrypt(&key, &nonce, &aad, &pt).unwrap();
         let ct_len = pt.len();
-        assert_eq!(hex(&result[..ct_len]), expected_ct);
-        assert_eq!(hex(&result[ct_len..]), expected_tag);
+        assert_eq!(to_hex(&result[..ct_len]), expected_ct);
+        assert_eq!(to_hex(&result[ct_len..]), expected_tag);
 
         let decrypted = gcm_decrypt(&key, &nonce, &aad, &result).unwrap();
         assert_eq!(decrypted, pt);
@@ -376,9 +366,9 @@ mod tests {
     // Test authentication failure
     #[test]
     fn test_gcm_auth_failure() {
-        let key = hex_to_bytes("00000000000000000000000000000000");
-        let nonce = hex_to_bytes("000000000000000000000000");
-        let pt = hex_to_bytes("00000000000000000000000000000000");
+        let key = hex("00000000000000000000000000000000");
+        let nonce = hex("000000000000000000000000");
+        let pt = hex("00000000000000000000000000000000");
 
         let mut result = gcm_encrypt(&key, &nonce, &[], &pt).unwrap();
         // Tamper with ciphertext
@@ -389,8 +379,8 @@ mod tests {
     // Test too-short ciphertext
     #[test]
     fn test_gcm_short_ciphertext() {
-        let key = hex_to_bytes("00000000000000000000000000000000");
-        let nonce = hex_to_bytes("000000000000000000000000");
+        let key = hex("00000000000000000000000000000000");
+        let nonce = hex("000000000000000000000000");
         assert!(gcm_decrypt(&key, &nonce, &[], &[0u8; 15]).is_err());
     }
 
@@ -414,7 +404,7 @@ mod tests {
 
     #[test]
     fn test_gcm_invalid_key_length() {
-        let nonce = hex_to_bytes("000000000000000000000000");
+        let nonce = hex("000000000000000000000000");
         // 15-byte key — not a valid AES key length
         assert!(gcm_encrypt(&[0u8; 15], &nonce, &[], &[1, 2, 3]).is_err());
         assert!(gcm_encrypt(&[0u8; 17], &nonce, &[], &[1, 2, 3]).is_err());
@@ -424,19 +414,19 @@ mod tests {
     // NIST SP 800-38D Test Case 14: AES-256 with AAD
     #[test]
     fn test_gcm_aes256_nist_case14() {
-        let key = hex_to_bytes("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308");
-        let nonce = hex_to_bytes("cafebabefacedbaddecaf888");
-        let pt = hex_to_bytes(
+        let key = hex("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308");
+        let nonce = hex("cafebabefacedbaddecaf888");
+        let pt = hex(
             "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
         );
-        let aad = hex_to_bytes("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+        let aad = hex("feedfacedeadbeeffeedfacedeadbeefabaddad2");
         let expected_ct = "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662";
         let expected_tag = "76fc6ece0f4e1768cddf8853bb2d551b";
 
         let result = gcm_encrypt(&key, &nonce, &aad, &pt).unwrap();
         let ct_len = pt.len();
-        assert_eq!(hex(&result[..ct_len]), expected_ct);
-        assert_eq!(hex(&result[ct_len..]), expected_tag);
+        assert_eq!(to_hex(&result[..ct_len]), expected_ct);
+        assert_eq!(to_hex(&result[ct_len..]), expected_tag);
 
         let decrypted = gcm_decrypt(&key, &nonce, &aad, &result).unwrap();
         assert_eq!(decrypted, pt);
@@ -444,8 +434,8 @@ mod tests {
 
     #[test]
     fn test_gcm_empty_plaintext_with_aad() {
-        let key = hex_to_bytes("feffe9928665731c6d6a8f9467308308");
-        let nonce = hex_to_bytes("cafebabefacedbaddecaf888");
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce = hex("cafebabefacedbaddecaf888");
         let aad = b"some authenticated data";
 
         // Empty plaintext + AAD → result is tag-only (16 bytes)

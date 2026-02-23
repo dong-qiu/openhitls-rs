@@ -75,9 +75,7 @@ fn hash_data(
 mod tests {
     use super::*;
 
-    fn to_hex(data: &[u8]) -> String {
-        data.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::to_hex;
 
     #[test]
     fn test_hash_data_md5_empty() {

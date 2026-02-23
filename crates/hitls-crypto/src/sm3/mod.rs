@@ -233,17 +233,14 @@ impl crate::provider::Digest for Sm3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::to_hex;
 
     // GB/T 32905-2016 test vector 1: "abc"
     #[test]
     fn test_sm3_abc() {
         let expected = "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0";
         let digest = Sm3::digest(b"abc").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     // GB/T 32905-2016 test vector 2: "abcd" repeated 16 times (64 bytes)
@@ -252,14 +249,14 @@ mod tests {
         let expected = "debe9ff92275b8a138604889c18e5a4d6fdb70e5387e5765293dcba39c0c5732";
         let input = b"abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd";
         let digest = Sm3::digest(input).unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     #[test]
     fn test_sm3_empty() {
         let expected = "1ab21d8355cfa17f8e61194831e81a8f22bec8c728fefb747ed035eb5082aa2b";
         let digest = Sm3::digest(b"").unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 
     /// Incremental update should produce the same hash as one-shot digest.
@@ -337,6 +334,6 @@ mod tests {
             ctx.update(&chunk).unwrap();
         }
         let digest = ctx.finish().unwrap();
-        assert_eq!(hex(&digest), expected);
+        assert_eq!(to_hex(&digest), expected);
     }
 }

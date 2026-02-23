@@ -120,23 +120,13 @@ impl Gmac {
 mod tests {
     use super::*;
     use crate::modes::gcm;
-
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    use hitls_utils::hex::{hex, to_hex};
 
     #[test]
     fn test_gmac_vs_gcm_auth_only() {
         // GMAC should produce the same tag as GCM with empty plaintext
-        let key = hex_to_bytes("00000000000000000000000000000000");
-        let nonce = hex_to_bytes("000000000000000000000000");
+        let key = hex("00000000000000000000000000000000");
+        let nonce = hex("000000000000000000000000");
         let aad = b"authenticated data for testing";
 
         // GCM with empty plaintext
@@ -149,14 +139,14 @@ mod tests {
         let mut gmac_tag = [0u8; 16];
         gmac.finish(&mut gmac_tag).unwrap();
 
-        assert_eq!(hex(&gmac_tag), hex(gcm_tag));
+        assert_eq!(to_hex(&gmac_tag), to_hex(gcm_tag));
     }
 
     #[test]
     fn test_gmac_empty_aad() {
         // GMAC with no AAD should match GCM with empty plaintext and empty AAD
-        let key = hex_to_bytes("00000000000000000000000000000000");
-        let nonce = hex_to_bytes("000000000000000000000000");
+        let key = hex("00000000000000000000000000000000");
+        let nonce = hex("000000000000000000000000");
 
         let gcm_result = gcm::gcm_encrypt(&key, &nonce, &[], &[]).unwrap();
 
@@ -164,13 +154,13 @@ mod tests {
         let mut tag = [0u8; 16];
         gmac.finish(&mut tag).unwrap();
 
-        assert_eq!(hex(&tag), hex(&gcm_result));
+        assert_eq!(to_hex(&tag), to_hex(&gcm_result));
     }
 
     #[test]
     fn test_gmac_reset() {
-        let key = hex_to_bytes("feffe9928665731c6d6a8f9467308308");
-        let nonce1 = hex_to_bytes("cafebabefacedbaddecaf888");
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce1 = hex("cafebabefacedbaddecaf888");
         let aad = b"test data";
 
         let mut gmac = Gmac::new(&key, &nonce1).unwrap();
@@ -189,8 +179,8 @@ mod tests {
 
     #[test]
     fn test_gmac_update_after_finalize() {
-        let key = hex_to_bytes("00000000000000000000000000000000");
-        let nonce = hex_to_bytes("000000000000000000000000");
+        let key = hex("00000000000000000000000000000000");
+        let nonce = hex("000000000000000000000000");
         let mut gmac = Gmac::new(&key, &nonce).unwrap();
         gmac.update(b"data").unwrap();
         let mut tag = [0u8; 16];
@@ -202,8 +192,8 @@ mod tests {
 
     #[test]
     fn test_gmac_finish_output_too_small() {
-        let key = hex_to_bytes("00000000000000000000000000000000");
-        let nonce = hex_to_bytes("000000000000000000000000");
+        let key = hex("00000000000000000000000000000000");
+        let nonce = hex("000000000000000000000000");
         let mut gmac = Gmac::new(&key, &nonce).unwrap();
         let mut small_buf = [0u8; 8];
         assert!(gmac.finish(&mut small_buf).is_err());
