@@ -2258,3 +2258,21 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 1 file modified (connection12_async.rs: +10 tests). hitls-tls: 1164→1174, total: 2585→2595.
 - All 2595 workspace tests pass, 0 clippy warnings, formatting clean.
+
+## Phase T104: Async TLCP + DTLCP Connection Types & Tests
+
+**Prompt**: Execute Phase T104 — create async connection types for TLCP and DTLCP with 15 tests to close D2 deficiency.
+
+**Scope**: Close D2 (Critical) — TLCP and DTLCP had 0 async connection tests and no async connection types. Create `AsyncTlcpClientConnection`/`AsyncTlcpServerConnection` (TLS record pattern) and `AsyncDtlcpClientConnection`/`AsyncDtlcpServerConnection` (DTLS record pattern) with 15 tests.
+
+**Work performed**:
+1. Created `connection_tlcp_async.rs` with async TLCP client/server + 8 tests (CBC, GCM, ECC cipher suites)
+2. Created `connection_dtlcp_async.rs` with async DTLCP client/server + 7 tests (with/without cookie exchange)
+3. Made `activate_tlcp_write`/`activate_tlcp_read` pub(crate) in `connection_tlcp.rs`
+4. Registered new modules in `lib.rs` with `#[cfg(all(feature = "async", feature = "tlcp/dtlcp"))]`
+5. Fixed clippy `never_loop` warnings in read() methods
+6. Updated CLAUDE.md, TEST_LOG.md, DEV_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 2 files created, 2 files modified. hitls-tls: 1174→1189, total: 2595→2610.
+- All 2610 workspace tests pass, 0 clippy warnings, formatting clean.

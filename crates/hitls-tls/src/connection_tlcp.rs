@@ -90,7 +90,7 @@ impl TlcpServerConnection {
 // Helpers
 // ===========================================================================
 
-fn activate_tlcp_write(
+pub(crate) fn activate_tlcp_write(
     rl: &mut RecordLayer,
     suite: CipherSuite,
     enc_key: &[u8],
@@ -113,7 +113,7 @@ fn activate_tlcp_write(
     }
 }
 
-fn activate_tlcp_read(
+pub(crate) fn activate_tlcp_read(
     rl: &mut RecordLayer,
     suite: CipherSuite,
     enc_key: &[u8],

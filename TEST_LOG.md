@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,595** (40 ignored) |
-| **Test growth** | 1,104 → 2,595 (+135% since baseline) |
+| **Total tests** | **2,610** (40 ignored) |
+| **Test growth** | 1,104 → 2,610 (+136% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,595 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 2,610 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -47,6 +47,7 @@ Phase T100  2,544     +25   ECC/DH params + TLCP API + DTLCP encryption (*)
 Phase T101  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
 Phase T102  2,585      +8   0-RTT early data + replay protection (*)
 Phase T103  2,595     +10   Async TLS 1.2 deep coverage + session resumption fix (*)
+Phase T104  2,610     +15   Async TLCP + DTLCP connection types & tests (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -73,10 +74,10 @@ Phase T103  2,595     +10   Async TLS 1.2 deep coverage + session resumption fix
 
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
-| hitls-tls | 1,174 | 0 | 45.2% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
-| hitls-crypto | 652 | 31 | 25.3% | 48 algorithm modules + hardware acceleration |
-| hitls-pki | 349 | 1 | 13.5% | X.509, PKCS#8/12, CMS (5 content types) |
-| hitls-integration | 125 | 3 | 4.9% | Cross-crate TCP loopback, error scenarios, concurrency |
+| hitls-tls | 1,189 | 0 | 45.6% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
+| hitls-crypto | 652 | 31 | 25.1% | 48 algorithm modules + hardware acceleration |
+| hitls-pki | 349 | 1 | 13.4% | X.509, PKCS#8/12, CMS (5 content types) |
+| hitls-integration | 125 | 3 | 4.8% | Cross-crate TCP loopback, error scenarios, concurrency |
 | hitls-cli | 117 | 5 | 4.5% | 14 CLI commands (dgst, x509, genpkey, etc.) |
 | hitls-utils | 53 | 0 | 2.1% | ASN.1, Base64, PEM, OID |
 | hitls-bignum | 49 | 0 | 1.9% | Montgomery, Miller-Rabin, modular arithmetic |
@@ -135,7 +136,7 @@ After Phase T102, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-lev
 | Phase | Est. Tests | Deficiency | Focus |
 |-------|:----------:|:----------:|-------|
 | **Phase T102** | ~8 | D1 | 0-RTT early data + replay protection ✅ |
-| **Phase T103** | ~20 | D2 | Async TLS 1.2 connection tests |
+| **Phase T103** | ~20 | D2 | Async TLS 1.2 connection tests ✅ |
 | **Phase T104** | ~15 | D2 | Async TLCP + DTLCP connection tests |
 | **Phase T105** | ~12 | D3 | Extension negotiation e2e tests |
 | **Phase T106** | ~10 | D4 | DTLS loss simulation + retransmission |
@@ -1557,6 +1558,55 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2595** | **40** |
 
+### 7.18 Phase T104 — Async TLCP + DTLCP Connection Types & Tests (+15 tests, 2,595→2,610)
+
+**Date**: 2026-02-23
+**Files created**: `crates/hitls-tls/src/connection_tlcp_async.rs`, `crates/hitls-tls/src/connection_dtlcp_async.rs`
+**Files modified**: `crates/hitls-tls/src/connection_tlcp.rs` (pub(crate) visibility), `crates/hitls-tls/src/lib.rs` (module registration)
+**Deficiency closed**: D2 (Critical) — TLCP/DTLCP async coverage from 0 to 15 tests
+
+**TLCP async tests (8)**:
+
+| Test | File | Description |
+|------|------|-------------|
+| test_async_tlcp_read_before_handshake | connection_tlcp_async.rs | Error on premature read |
+| test_async_tlcp_full_handshake_and_data | connection_tlcp_async.rs | ECDHE_SM4_CBC_SM3 handshake + bidirectional data |
+| test_async_tlcp_gcm_handshake | connection_tlcp_async.rs | ECDHE_SM4_GCM_SM3 handshake + data |
+| test_async_tlcp_ecc_handshake | connection_tlcp_async.rs | ECC_SM4_GCM_SM3 static key exchange |
+| test_async_tlcp_shutdown | connection_tlcp_async.rs | Graceful shutdown + double shutdown idempotent |
+| test_async_tlcp_connection_info | connection_tlcp_async.rs | version/cipher_suite after handshake |
+| test_async_tlcp_large_payload | connection_tlcp_async.rs | 32KB payload exchange |
+| test_async_tlcp_multi_message | connection_tlcp_async.rs | Multiple sequential messages |
+
+**DTLCP async tests (7)**:
+
+| Test | File | Description |
+|------|------|-------------|
+| test_async_dtlcp_read_before_handshake | connection_dtlcp_async.rs | Error on premature read |
+| test_async_dtlcp_full_handshake_and_data | connection_dtlcp_async.rs | ECDHE_SM4_GCM_SM3 no cookie + data |
+| test_async_dtlcp_with_cookie | connection_dtlcp_async.rs | ECDHE_SM4_GCM_SM3 with cookie exchange |
+| test_async_dtlcp_shutdown | connection_dtlcp_async.rs | Graceful shutdown |
+| test_async_dtlcp_connection_info | connection_dtlcp_async.rs | version/cipher_suite after handshake |
+| test_async_dtlcp_bidirectional | connection_dtlcp_async.rs | Bidirectional data exchange |
+| test_async_dtlcp_large_payload | connection_dtlcp_async.rs | 32KB payload exchange |
+
+### Workspace Test Counts After Phase T104
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 652 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 125 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1189 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2610** | **40** |
+
 ---
 
 ## 8. Verification & Quality Gates
@@ -1564,9 +1614,9 @@ Pure test coverage phases — no new features, only new tests for existing code.
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,595 tests pass
+# Full test suite — all 2,610 tests pass
 cargo test --workspace --all-features
-# Result: 2,595 passed, 0 failed, 40 ignored
+# Result: 2,610 passed, 0 failed, 40 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

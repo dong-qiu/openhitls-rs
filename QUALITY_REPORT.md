@@ -12,7 +12,7 @@
 | Layer | Mechanism | Coverage | Status |
 |:-----:|-----------|----------|:------:|
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | Complete |
-| **L2** | Unit Tests | 2,595 tests (40 ignored), 100% pass rate | Coverage uneven |
+| **L2** | Unit Tests | 2,610 tests (40 ignored), 100% pass rate | Coverage uneven |
 | **L3** | Integration Tests | 125 cross-crate TCP loopback tests | Scenarios insufficient |
 | **L4** | Fuzz Testing | 10 fuzz targets + 66 seed corpus files | Parse-only |
 | **L5** | Security Audit | rustsec/audit-check + Miri (bignum/utils) | Scope limited |
@@ -35,18 +35,18 @@ GitHub Actions (.github/workflows/ci.yml)
 
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
-| hitls-tls | 1,174 | 0 | 45.2% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
-| hitls-crypto | 652 | 31 | 25.3% | 48 algorithm modules + hardware acceleration |
-| hitls-pki | 349 | 1 | 13.5% | X.509, PKCS#8/12, CMS (5 content types) |
-| hitls-integration | 125 | 3 | 4.9% | Cross-crate TCP loopback, error scenarios, concurrency |
+| hitls-tls | 1,189 | 0 | 45.6% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
+| hitls-crypto | 652 | 31 | 25.1% | 48 algorithm modules + hardware acceleration |
+| hitls-pki | 349 | 1 | 13.4% | X.509, PKCS#8/12, CMS (5 content types) |
+| hitls-integration | 125 | 3 | 4.8% | Cross-crate TCP loopback, error scenarios, concurrency |
 | hitls-cli | 117 | 5 | 4.5% | 14 CLI commands |
-| hitls-utils | 53 | 0 | 2.1% | ASN.1, Base64, PEM, OID |
+| hitls-utils | 53 | 0 | 2.0% | ASN.1, Base64, PEM, OID |
 | hitls-bignum | 49 | 0 | 1.9% | Montgomery, Miller-Rabin, modular arithmetic |
 | hitls-auth | 33 | 0 | 1.3% | HOTP/TOTP, SPAKE2+, Privacy Pass |
 | hitls-types | 26 | 0 | 1.0% | Enum definitions, error types |
 | Wycheproof | 15 | 0 | 0.6% | 5,000+ vectors across 15 test groups |
 | Doc-tests | 2 | 0 | 0.1% | API documentation examples |
-| **Total** | **2,595** | **40** | **100%** | |
+| **Total** | **2,610** | **40** | **100%** | |
 
 ### 1.4 Standard Compliance Coverage
 
@@ -76,7 +76,7 @@ GitHub Actions (.github/workflows/ci.yml)
 Severity   ID   Description                              Impact
 ────────   ──   ──────────────────────────────────────   ──────────────────────────
 CLOSED     D1   0-RTT replay protection: +8 tests         Resolved (Phase T102)
-Partial    D2   Async TLCP/DTLCP: zero tests               T103: TLS 1.2 async +10
+CLOSED     D2   Async TLCP/DTLCP: zero tests               Resolved (Phase T104: +15)
 High       D3   Extension negotiation: no e2e tests       Protocol compliance risk
 High       D4   DTLS loss/retransmission: no tests        Core DTLS feature unverified
 High       D5   TLCP double certificate: untested         GM compliance risk
@@ -101,19 +101,19 @@ Remaining uncovered areas (lower risk, tracked for future phases):
 - Binder verification for replay prevention
 - `EndOfEarlyData` message codec roundtrip
 
-### 2.3 D2 — Async/Sync Test Coverage Asymmetry (Critical)
+### 2.3 D2 — Async/Sync Test Coverage Asymmetry ~~(Critical)~~ — **CLOSED** (Phase T104)
 
-Async paths use independent code files but have severely uneven test coverage:
+**Resolved**: Phase T103 added 10 async TLS 1.2 tests. Phase T104 created async connection types for TLCP and DTLCP and added 15 tests (8 TLCP + 7 DTLCP). All 5 protocol variants now have async tests.
 
 | Connection Type | Sync Tests | Async Tests | Gap |
 |-----------------|:----------:|:-----------:|:---:|
 | TLS 1.3 | 61 | 25 | -36 |
 | TLS 1.2 | 53 | 28 | -25 |
 | DTLS 1.2 | 20 | 8 | -12 |
-| TLCP | 15 | **0** | -15 |
-| DTLCP | 6 | **0** | -6 |
+| TLCP | 15 | **8** | -7 |
+| DTLCP | 6 | **7** | +1 |
 
-TLCP async and DTLCP async have **zero tests**. TLS 1.2 async now has 28 tests (Phase T103: +10).
+Remaining async gaps are coverage depth (fewer test scenarios than sync), not missing connection types.
 
 ### 2.4 D3 — Extension Negotiation (High)
 
@@ -201,7 +201,7 @@ Phase              Est. Tests   Deficiency   Focus
 ─────────────────  ──────────   ──────────   ──────────────────────────────────
 Phase T102        ~8      D1           0-RTT early data + replay protection ✅
 Phase T103       +10      D2           Async TLS 1.2 deep coverage ✅
-Phase T104       ~15      D2           Async TLCP + DTLCP connection tests
+Phase T104       +15      D2           Async TLCP + DTLCP connection tests ✅
 Phase T105       ~12      D3           Extension negotiation e2e tests
 Phase T106       ~10      D4           DTLS loss simulation + retransmission
 Phase T107        ~8      D5           TLCP double certificate validation
@@ -211,7 +211,7 @@ Phase T110       ~15      D10          McEliece + FrodoKEM + XMSS internals
 Phase T111        —       D6/D7        Infra: proptest + coverage CI
 ```
 
-**Target**: 2,595 → 2,700+ tests, close all Critical/High deficiencies.
+**Target**: 2,610 → 2,700+ tests, close remaining High deficiencies (D3-D5).
 
 ### 3.2 Phase T102 — 0-RTT Early Data + Replay Protection (~8 tests) ✅
 
@@ -230,7 +230,7 @@ Phase T111        —       D6/D7        Infra: proptest + coverage CI
 
 ### 3.3 Phase T103 — Async TLS 1.2 Deep Coverage (+10 tests) ✅ COMPLETED
 
-**Deficiency**: D2 (async TLS 1.2 now has 28 tests, 25-test deficit vs 53 sync)
+**Deficiency**: D2 (async TLS 1.2 now has 28 tests; D2 fully closed in Phase T104)
 **Bug found**: Session ticket encryption key must be 32 bytes (AES-256-GCM), not 48.
 
 | # | Test | Status |
@@ -246,27 +246,28 @@ Phase T111        —       D6/D7        Infra: proptest + coverage CI
 | 9 | test_async_tls12_bidirectional_server_first | ✅ |
 | 10 | test_async_tls12_write_after_shutdown | ✅ |
 
-### 3.4 Phase T104 — Async TLCP + DTLCP Connection Tests (~15 tests)
+### 3.4 Phase T104 — Async TLCP + DTLCP Connection Tests (+15 tests) ✅ COMPLETED
 
-**Deficiency**: D2 (Critical)
+**Deficiency**: D2 (Critical) — **CLOSED**
+**Files created**: `connection_tlcp_async.rs`, `connection_dtlcp_async.rs`
 
-| # | Test | Description |
-|:-:|------|-------------|
-| 1 | test_async_tlcp_read_before_handshake | Error on premature read |
-| 2 | test_async_tlcp_full_handshake_data | ECDHE_SM4_CBC_SM3 handshake + data |
-| 3 | test_async_tlcp_gcm_handshake | SM4-GCM cipher suite |
-| 4 | test_async_tlcp_ecc_handshake | ECC key exchange |
-| 5 | test_async_tlcp_shutdown | Graceful shutdown |
-| 6 | test_async_tlcp_connection_info | ConnectionInfo fields |
-| 7 | test_async_tlcp_large_payload | 32KB payload |
-| 8 | test_async_dtlcp_read_before_handshake | Error on premature read |
-| 9 | test_async_dtlcp_full_handshake_data | DTLCP ECDHE handshake + data |
-| 10 | test_async_dtlcp_gcm_handshake | DTLCP GCM cipher suite |
-| 11 | test_async_dtlcp_shutdown | Graceful shutdown |
-| 12 | test_async_dtlcp_connection_info | ConnectionInfo fields |
-| 13 | test_async_dtlcp_bidirectional | Bidirectional data exchange |
-| 14 | test_async_tlcp_multi_message | Multiple sequential messages |
-| 15 | test_async_dtlcp_large_payload | 32KB payload |
+| # | Test | Status |
+|:-:|------|:------:|
+| 1 | test_async_tlcp_read_before_handshake | ✅ |
+| 2 | test_async_tlcp_full_handshake_and_data | ✅ |
+| 3 | test_async_tlcp_gcm_handshake | ✅ |
+| 4 | test_async_tlcp_ecc_handshake | ✅ |
+| 5 | test_async_tlcp_shutdown | ✅ |
+| 6 | test_async_tlcp_connection_info | ✅ |
+| 7 | test_async_tlcp_large_payload | ✅ |
+| 8 | test_async_tlcp_multi_message | ✅ |
+| 9 | test_async_dtlcp_read_before_handshake | ✅ |
+| 10 | test_async_dtlcp_full_handshake_and_data | ✅ |
+| 11 | test_async_dtlcp_with_cookie | ✅ |
+| 12 | test_async_dtlcp_shutdown | ✅ |
+| 13 | test_async_dtlcp_connection_info | ✅ |
+| 14 | test_async_dtlcp_bidirectional | ✅ |
+| 15 | test_async_dtlcp_large_payload | ✅ |
 
 ### 3.5 Phase T105 — Extension Negotiation E2E Tests (~12 tests)
 
@@ -369,8 +370,8 @@ Phase T111        —       D6/D7        Infra: proptest + coverage CI
 
 | Metric | Current | After Phase T107 | After Phase T111 |
 |--------|:-------:|:--------------:|:---------------:|
-| Total tests | 2,595 | ~2,660 | ~2,750+ |
-| Critical deficiencies (D1-D2) | 2 | 0 | 0 |
+| Total tests | 2,610 | ~2,660 | ~2,750+ |
+| Critical deficiencies (D1-D2) | 0 | 0 | 0 |
 | High deficiencies (D3-D5) | 3 | 0 | 0 |
 | Crypto files with tests | 75% | 75% | 90%+ |
 | TLS files with tests | 100% | 100% | 100% |

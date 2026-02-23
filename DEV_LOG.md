@@ -7867,3 +7867,32 @@ Added 10 new async TLS 1.2 tests covering scenarios not covered by existing 18 t
 - `cargo test --workspace --all-features`: 2595 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase T104: Async TLCP + DTLCP Connection Types & Tests (+15 tests, 2,595→2,610)
+
+**Date**: 2026-02-23
+**Scope**: Close D2 (Critical) — TLCP and DTLCP had 0 async connection tests and no async connection types. Created async wrappers for both protocols and added 15 tests.
+
+### Summary
+
+Implemented `AsyncTlcpClientConnection` / `AsyncTlcpServerConnection` (TLS record layer pattern from `connection12_async.rs`) and `AsyncDtlcpClientConnection` / `AsyncDtlcpServerConnection` (DTLS record layer pattern from `connection_dtls12_async.rs`). Added 15 tests total: 8 TLCP async + 7 DTLCP async.
+
+**TLCP async** (8 tests):
+- Read before handshake error, ECDHE_SM4_CBC_SM3 full handshake + data, ECDHE_SM4_GCM_SM3 handshake, ECC_SM4_GCM_SM3 static key exchange, graceful shutdown, connection info, 32KB large payload, multiple sequential messages
+
+**DTLCP async** (7 tests):
+- Read before handshake error, ECDHE_SM4_GCM_SM3 handshake + data (no cookie), cookie exchange, graceful shutdown, connection info, bidirectional data, 32KB large payload
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/connection_tlcp_async.rs` | **NEW** — AsyncTlcpClientConnection + AsyncTlcpServerConnection + 8 tests |
+| `crates/hitls-tls/src/connection_dtlcp_async.rs` | **NEW** — AsyncDtlcpClientConnection + AsyncDtlcpServerConnection + 7 tests |
+| `crates/hitls-tls/src/connection_tlcp.rs` | Made `activate_tlcp_write`/`activate_tlcp_read` pub(crate) |
+| `crates/hitls-tls/src/lib.rs` | Registered 2 new async modules with feature gates |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2610 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
