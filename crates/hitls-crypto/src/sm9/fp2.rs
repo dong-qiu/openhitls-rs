@@ -149,3 +149,79 @@ impl PartialEq for Fp2 {
 }
 
 impl Eq for Fp2 {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sm9::fp::Fp;
+
+    fn fp2(a: u64, b: u64) -> Fp2 {
+        Fp2::new(Fp::from_u64(a), Fp::from_u64(b))
+    }
+
+    #[test]
+    fn test_fp2_add_sub_identity() {
+        let a = fp2(3, 7);
+        let zero = Fp2::zero();
+        // a + 0 = a
+        assert_eq!(a.add(&zero).unwrap(), a);
+        // a - a = 0
+        let diff = a.sub(&a).unwrap();
+        assert!(diff.is_zero());
+        assert_eq!(diff, zero);
+    }
+
+    #[test]
+    fn test_fp2_mul_one_commutativity() {
+        let a = fp2(5, 11);
+        let one = Fp2::one();
+        // a * 1 = a
+        assert_eq!(a.mul(&one).unwrap(), a);
+        // commutativity: a * b = b * a
+        let b = fp2(13, 17);
+        assert_eq!(a.mul(&b).unwrap(), b.mul(&a).unwrap());
+    }
+
+    #[test]
+    fn test_fp2_neg_double() {
+        let a = fp2(42, 99);
+        // neg(neg(a)) = a
+        assert_eq!(a.neg().unwrap().neg().unwrap(), a);
+        // a + neg(a) = 0
+        assert!(a.add(&a.neg().unwrap()).unwrap().is_zero());
+        // double(a) = a + a
+        assert_eq!(a.double().unwrap(), a.add(&a).unwrap());
+    }
+
+    #[test]
+    fn test_fp2_sqr_inv_mul_u_frobenius() {
+        let a = fp2(5, 3);
+        // sqr(a) = a * a
+        assert_eq!(a.sqr().unwrap(), a.mul(&a).unwrap());
+        // a * inv(a) = 1
+        let inv_a = a.inv().unwrap();
+        assert_eq!(a.mul(&inv_a).unwrap(), Fp2::one());
+        // mul_u: (a0 + a1·u)·u = -2·a1 + a0·u
+        let mu = a.mul_u().unwrap();
+        let expected = Fp2::new(a.c1.double().unwrap().neg().unwrap(), a.c0.clone());
+        assert_eq!(mu, expected);
+        // frobenius: (a0 + a1·u) → (a0 - a1·u)
+        let frob = a.frobenius().unwrap();
+        assert_eq!(frob, Fp2::new(a.c0.clone(), a.c1.neg().unwrap()));
+    }
+
+    #[test]
+    fn test_fp2_serialization_and_mul_fp() {
+        let a = fp2(0xDEAD, 0xBEEF);
+        // bytes roundtrip
+        let bytes = a.to_bytes_be();
+        assert_eq!(bytes.len(), 64);
+        let b = Fp2::from_bytes_be(&bytes).unwrap();
+        assert_eq!(a, b);
+        // mul_fp: a.mul_fp(s) = (c0*s, c1*s)
+        let s = Fp::from_u64(7);
+        let result = a.mul_fp(&s).unwrap();
+        assert_eq!(result.c0, a.c0.mul(&s).unwrap());
+        assert_eq!(result.c1, a.c1.mul(&s).unwrap());
+    }
+}

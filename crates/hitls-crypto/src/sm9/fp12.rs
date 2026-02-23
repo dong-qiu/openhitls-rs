@@ -218,3 +218,91 @@ impl PartialEq for Fp12 {
 }
 
 impl Eq for Fp12 {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sm9::fp::Fp;
+    use crate::sm9::fp2::Fp2;
+    use crate::sm9::fp4::Fp4;
+
+    fn make_fp12() -> Fp12 {
+        let f = |v: u64| Fp::from_u64(v);
+        Fp12::new(
+            Fp4::new(Fp2::new(f(2), f(3)), Fp2::new(f(5), f(7))),
+            Fp4::new(Fp2::new(f(11), f(13)), Fp2::new(f(17), f(19))),
+            Fp4::new(Fp2::new(f(23), f(29)), Fp2::new(f(31), f(37))),
+        )
+    }
+
+    #[test]
+    fn test_fp12_add_sub_identity() {
+        let a = make_fp12();
+        let zero = Fp12::zero();
+        // a + 0 = a
+        assert_eq!(a.add(&zero).unwrap(), a);
+        // a - a = 0
+        let diff = a.sub(&a).unwrap();
+        assert!(diff.is_zero());
+        assert_eq!(diff, zero);
+    }
+
+    #[test]
+    fn test_fp12_mul_one_commutativity() {
+        let a = make_fp12();
+        let one = Fp12::one();
+        // a * 1 = a
+        assert_eq!(a.mul(&one).unwrap(), a);
+        // commutativity with a different element
+        let f = |v: u64| Fp::from_u64(v);
+        let b = Fp12::new(
+            Fp4::new(Fp2::new(f(41), f(43)), Fp2::new(f(47), f(53))),
+            Fp4::new(Fp2::new(f(59), f(61)), Fp2::new(f(67), f(71))),
+            Fp4::new(Fp2::new(f(73), f(79)), Fp2::new(f(83), f(89))),
+        );
+        assert_eq!(a.mul(&b).unwrap(), b.mul(&a).unwrap());
+    }
+
+    #[test]
+    fn test_fp12_neg_sqr_inv() {
+        let a = make_fp12();
+        // neg(neg(a)) = a
+        assert_eq!(a.neg().unwrap().neg().unwrap(), a);
+        // a + neg(a) = 0
+        assert!(a.add(&a.neg().unwrap()).unwrap().is_zero());
+        // sqr(a) = a * a
+        assert_eq!(a.sqr().unwrap(), a.mul(&a).unwrap());
+        // a * inv(a) = 1
+        let inv_a = a.inv().unwrap();
+        assert_eq!(a.mul(&inv_a).unwrap(), Fp12::one());
+    }
+
+    #[test]
+    fn test_fp12_pow() {
+        let x = make_fp12();
+        let bn0 = hitls_bignum::BigNum::from_u64(0);
+        let bn1 = hitls_bignum::BigNum::from_u64(1);
+        let bn2 = hitls_bignum::BigNum::from_u64(2);
+        let bn3 = hitls_bignum::BigNum::from_u64(3);
+        // x^0 = 1
+        assert_eq!(x.pow(&bn0).unwrap(), Fp12::one());
+        // x^1 = x
+        assert_eq!(x.pow(&bn1).unwrap(), x);
+        // x^2 = sqr(x)
+        assert_eq!(x.pow(&bn2).unwrap(), x.sqr().unwrap());
+        // x^3 = x * x * x
+        let x_cubed = x.mul(&x).unwrap().mul(&x).unwrap();
+        assert_eq!(x.pow(&bn3).unwrap(), x_cubed);
+    }
+
+    #[test]
+    fn test_fp12_frobenius_consistency() {
+        let a = make_fp12();
+        let f1 = a.frobenius().unwrap();
+        // frobenius2 = frobenius ∘ frobenius
+        assert_eq!(a.frobenius2().unwrap(), f1.frobenius().unwrap());
+        // frobenius3 = frobenius2 ∘ frobenius
+        let f2 = a.frobenius2().unwrap();
+        assert_eq!(a.frobenius3().unwrap(), f2.frobenius().unwrap());
+    }
+}

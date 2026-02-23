@@ -7996,3 +7996,46 @@ Added 6 unit tests (3 to server_tlcp.rs, 3 to server_dtlcp.rs) that exercise ser
 - `cargo test --workspace --all-features`: 2644 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase T108: SM9 Tower Field Unit Tests (+15 tests, 2,644→2,659)
+
+**Date**: 2026-02-23
+**Scope**: Partially close D10 (Low) — SM9's tower field arithmetic (Fp2, Fp4, Fp12) had zero direct unit tests across 44 public functions. All coverage was indirect through pairing/sign/encrypt tests (most `#[ignore]`d). This phase adds 15 dedicated unit tests verifying algebraic properties.
+
+### Summary
+
+Added 15 unit tests across 3 files (5 per tower field level) verifying algebraic identities: additive/multiplicative identity, commutativity, double-negation, squaring consistency, inverse correctness, serialization roundtrip, and Frobenius endomorphism consistency.
+
+**Fp2 tests** (5 tests in `fp2.rs`):
+- `test_fp2_add_sub_identity` — a+0=a, a-a=0, is_zero checks
+- `test_fp2_mul_one_commutativity` — a*1=a, a*b=b*a
+- `test_fp2_neg_double` — neg(neg(a))=a, a+neg(a)=0, double(a)=a+a
+- `test_fp2_sqr_inv_mul_u_frobenius` — sqr(a)=a*a, a*inv(a)=1, mul_u semantics, frobenius=conjugation
+- `test_fp2_serialization_and_mul_fp` — bytes roundtrip, a.mul_fp(s)=(c0*s, c1*s)
+
+**Fp4 tests** (5 tests in `fp4.rs`):
+- `test_fp4_add_sub_identity` — a+0=a, a-a=0, is_zero checks
+- `test_fp4_mul_one_commutativity` — a*1=a, a*b=b*a
+- `test_fp4_neg_double` — neg(neg(a))=a, a+neg(a)=0, double(a)=a+a
+- `test_fp4_sqr_inv` — sqr(a)=a*a, a*inv(a)=1
+- `test_fp4_mul_v_conjugate_mul_fp2` — mul_v semantics, conjugate involution, scalar mul
+
+**Fp12 tests** (5 tests in `fp12.rs`):
+- `test_fp12_add_sub_identity` — a+0=a, a-a=0, is_zero checks
+- `test_fp12_mul_one_commutativity` — a*1=a, a*b=b*a
+- `test_fp12_neg_sqr_inv` — neg(neg(a))=a, sqr=a*a, a*inv(a)=1
+- `test_fp12_pow` — x^0=1, x^1=x, x^2=sqr(x), x^3=x*x*x
+- `test_fp12_frobenius_consistency` — frob2=frob∘frob, frob3=frob2∘frob
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/sm9/fp2.rs` | Added 5 unit tests (test module + helper) |
+| `crates/hitls-crypto/src/sm9/fp4.rs` | Added 5 unit tests (test module + helper) |
+| `crates/hitls-crypto/src/sm9/fp12.rs` | Added 5 unit tests (test module + helper) |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2659 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

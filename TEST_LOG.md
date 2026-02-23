@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,644** (40 ignored) |
-| **Test growth** | 1,104 → 2,644 (+140% since baseline) |
+| **Total tests** | **2,659** (40 ignored) |
+| **Test growth** | 1,104 → 2,659 (+141% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,644 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 2,659 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -51,6 +51,7 @@ Phase T104  2,610     +15   Async TLCP + DTLCP connection types & tests (*)
 Phase T105  2,624     +14   Extension negotiation E2E tests (*)
 Phase T106  2,634     +10   DTLS loss simulation & resilience tests (*)
 Phase T107  2,644     +10   TLCP double certificate validation tests (*)
+Phase T108  2,659     +15   SM9 tower field (Fp2/Fp4/Fp12) unit tests (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -78,7 +79,7 @@ Phase T107  2,644     +10   TLCP double certificate validation tests (*)
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
 | hitls-tls | 1,199 | 0 | 45.4% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
-| hitls-crypto | 652 | 31 | 25.1% | 48 algorithm modules + hardware acceleration |
+| hitls-crypto | 667 | 31 | 25.1% | 48 algorithm modules + hardware acceleration |
 | hitls-pki | 349 | 1 | 13.4% | X.509, PKCS#8/12, CMS (5 content types) |
 | hitls-integration | 149 | 3 | 5.6% | Cross-crate TCP loopback, error scenarios, concurrency |
 | hitls-cli | 117 | 5 | 4.5% | 14 CLI commands (dgst, x509, genpkey, etc.) |
@@ -88,7 +89,7 @@ Phase T107  2,644     +10   TLCP double certificate validation tests (*)
 | hitls-types | 26 | 0 | 1.0% | Enum definitions, error types |
 | Wycheproof | 15 | 0 | 0.6% | 5,000+ vectors across 15 test groups |
 | Doc-tests | 2 | 0 | 0.1% | API documentation examples |
-| **Total** | **2,585** | **40** | **100%** | |
+| **Total** | **2,659** | **40** | **100%** | |
 
 ### Test Quality Principles
 
@@ -144,20 +145,20 @@ After Phase T102, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-lev
 | **Phase T105** | ~12 | D3 | Extension negotiation e2e tests |
 | **Phase T106** | +10 | D4 | DTLS loss simulation + retransmission ✅ |
 | **Phase T107** | +10 | D5 | TLCP double certificate validation ✅ |
-| **Phase T108** | ~15 | D10 | SM9 tower fields (fp2/fp4/fp12) |
+| **Phase T108** | ~15 | D10 | SM9 tower fields (fp2/fp4/fp12) ✅ |
 | **Phase T109** | ~20 | D10 | SLH-DSA internal modules |
 | **Phase T110** | ~15 | D10 | McEliece + FrodoKEM + XMSS internals |
 | **Phase T111** | — | D6/D7 | Infra: proptest + coverage CI |
 
 ### Coverage Metrics Target
 
-| Metric | Current | After Phase T107 | After Phase T111 |
+| Metric | Current | After Phase T108 | After Phase T111 |
 |--------|:-------:|:-----------------:|:-----------------:|
-| Total tests | 2,644 | 2,644 | 2,750+ |
+| Total tests | 2,659 | 2,659 | 2,750+ |
 | Critical deficiencies | 0 | 0 | 0 |
 | High deficiencies | 1 | 1 | 0 |
 | Async connection coverage | 40% | 100% | 100% |
-| Crypto files with tests | 75% | 75% | 90%+ |
+| Crypto files with tests | 75% | 78% | 90%+ |
 | Property-based testing | No | No | Yes |
 | Code coverage in CI | No | No | Yes |
 
@@ -1740,6 +1741,48 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2644** | **40** |
 
+### Phase T108: SM9 Tower Field Unit Tests (+15 tests, 2,644→2,659)
+
+**Date**: 2026-02-23
+**Deficiency**: D10 (Low) — SM9 tower field arithmetic (Fp2, Fp4, Fp12) had zero direct unit tests.
+
+Added 15 algebraic property tests across the three tower extension fields:
+
+| # | Test | File | Algebraic Properties |
+|:-:|------|------|---------------------|
+| 1 | `test_fp2_add_sub_identity` | fp2.rs | a+0=a, a-a=0, is_zero |
+| 2 | `test_fp2_mul_one_commutativity` | fp2.rs | a*1=a, a*b=b*a |
+| 3 | `test_fp2_neg_double` | fp2.rs | neg(neg(a))=a, a+neg(a)=0, double=a+a |
+| 4 | `test_fp2_sqr_inv_mul_u_frobenius` | fp2.rs | sqr=a*a, a*inv(a)=1, mul_u, frobenius |
+| 5 | `test_fp2_serialization_and_mul_fp` | fp2.rs | bytes roundtrip, scalar mul |
+| 6 | `test_fp4_add_sub_identity` | fp4.rs | a+0=a, a-a=0, is_zero |
+| 7 | `test_fp4_mul_one_commutativity` | fp4.rs | a*1=a, a*b=b*a |
+| 8 | `test_fp4_neg_double` | fp4.rs | neg(neg(a))=a, a+neg(a)=0, double=a+a |
+| 9 | `test_fp4_sqr_inv` | fp4.rs | sqr=a*a, a*inv(a)=1 |
+| 10 | `test_fp4_mul_v_conjugate_mul_fp2` | fp4.rs | mul_v, conjugate involution, scalar mul |
+| 11 | `test_fp12_add_sub_identity` | fp12.rs | a+0=a, a-a=0, is_zero |
+| 12 | `test_fp12_mul_one_commutativity` | fp12.rs | a*1=a, a*b=b*a |
+| 13 | `test_fp12_neg_sqr_inv` | fp12.rs | neg(neg(a))=a, sqr=a*a, a*inv(a)=1 |
+| 14 | `test_fp12_pow` | fp12.rs | x^0=1, x^1=x, x^2=sqr, x^3=x*x*x |
+| 15 | `test_fp12_frobenius_consistency` | fp12.rs | frob2=frob∘frob, frob3=frob2∘frob |
+
+**Per-crate counts after Phase T108**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 667 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1199 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 53 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2659** | **40** |
+
 ---
 
 ## 8. Verification & Quality Gates
@@ -1747,9 +1790,9 @@ Pure test coverage phases — no new features, only new tests for existing code.
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,644 tests pass
+# Full test suite — all 2,659 tests pass
 cargo test --workspace --all-features
-# Result: 2,644 passed, 0 failed, 40 ignored
+# Result: 2,659 passed, 0 failed, 40 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

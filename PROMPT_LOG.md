@@ -2325,3 +2325,19 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 3 files modified, 0 files created. hitls-tls: 1193→1199, hitls-integration: 145→149, total: 2634→2644.
 - All 2644 workspace tests pass, 0 clippy warnings, formatting clean.
+
+## Phase T108: SM9 Tower Field Unit Tests
+
+**Prompt**: Implement Phase T108 — SM9 Tower Field Unit Tests. Add 15 dedicated unit tests (5 each to fp2.rs, fp4.rs, fp12.rs) verifying algebraic properties of SM9's tower field arithmetic. Partially close D10. Target: +15 tests.
+
+**Scope**: Partially close D10 (Low) — SM9 tower field arithmetic had zero direct unit tests.
+
+**Work performed**:
+1. Added 5 tests to `crates/hitls-crypto/src/sm9/fp2.rs`: add/sub identity, mul/commutativity, neg/double, sqr/inv/mul_u/frobenius, serialization/mul_fp
+2. Added 5 tests to `crates/hitls-crypto/src/sm9/fp4.rs`: add/sub identity, mul/commutativity, neg/double, sqr/inv, mul_v/conjugate/mul_fp2
+3. Added 5 tests to `crates/hitls-crypto/src/sm9/fp12.rs`: add/sub identity, mul/commutativity, neg/sqr/inv, pow, frobenius consistency
+4. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md
+
+**Result**:
+- 3 files modified, 0 files created. hitls-crypto: 652→667, total: 2644→2659.
+- All 2659 workspace tests pass, 0 clippy warnings, formatting clean.
