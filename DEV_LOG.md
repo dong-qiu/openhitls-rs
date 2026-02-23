@@ -8174,3 +8174,29 @@ Added 15 SM3 path coverage tests across 3 TLS crypto modules:
 - `cargo test --workspace --all-features`: 2724 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase T113: TLS 1.3 Key Schedule & HKDF Robustness Tests (+15 tests, 2,724→2,739)
+
+**Date**: 2026-02-24
+**Scope**: TLS 1.3 key schedule SHA-384 full pipeline, stage enforcement gaps, SM3 HKDF coverage, HMAC key boundary, RFC 8448 application traffic key vectors, CCM_8/SM4-GCM-SM3 cipher suite coverage.
+
+### Summary
+
+Added 15 robustness tests across 3 TLS 1.3 crypto modules:
+
+- **Key schedule** (5 tests): SHA-384 full pipeline with correctness verification, stage enforcement for `derive_handshake_traffic_secrets` (all 3 wrong stages), stage enforcement for `derive_app_traffic_secrets` + `derive_resumption_master_secret` (6 wrong stages), PSK values sensitivity, SM4-GCM-SM3 full pipeline
+- **HKDF** (5 tests): HMAC-SM3 determinism/divergence, HKDF-Extract SM3, HKDF-Expand SM3 various lengths with prefix consistency, HMAC key at block boundary (64 vs 65 bytes), multi-iteration boundaries (32/64/96 bytes)
+- **Traffic keys** (5 tests): RFC 8448 server app write key/iv, RFC 8448 client app write key/iv, AES-128-CCM_8 cipher suite, key update produces different keys, TLS_SM4_GCM_SM3 cipher suite
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/crypt/key_schedule.rs` | Added 5 TLS 1.3 key schedule tests |
+| `crates/hitls-tls/src/crypt/hkdf.rs` | Added 5 SM3 HKDF + boundary tests |
+| `crates/hitls-tls/src/crypt/traffic_keys.rs` | Added 5 RFC 8448 + CCM + SM4 traffic key tests |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2739 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

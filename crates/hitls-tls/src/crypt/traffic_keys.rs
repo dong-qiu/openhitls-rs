@@ -145,4 +145,91 @@ mod tests {
         assert_eq!(tk128.iv.len(), 12);
         assert_eq!(tk256.iv.len(), 12);
     }
+
+    #[test]
+    fn test_traffic_keys_rfc8448_server_app() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let server_app_secret =
+            hex("a11af9f05531f856ad47116b45a950328204b4f44bfb6b3a4b4f1f3fcb631643");
+        let tk = TrafficKeys::derive(&params, &server_app_secret).unwrap();
+        assert_eq!(
+            to_hex(&tk.key),
+            to_hex(&hex("9f02283b6c9c07efc26bb9f2ac92e356"))
+        );
+        assert_eq!(to_hex(&tk.iv), to_hex(&hex("cf782b88dd83549aadf1e984")));
+    }
+
+    #[test]
+    fn test_traffic_keys_rfc8448_client_app() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let client_app_secret =
+            hex("9e40646ce79a7f9dc05af8889bce6552875afa0b06df0087f792ebb7c17504a5");
+        let tk = TrafficKeys::derive(&params, &client_app_secret).unwrap();
+        // RFC 8448 §3: client application write key/iv
+        assert_eq!(
+            to_hex(&tk.key),
+            to_hex(&hex("17422dda596ed5d9acd890e3c63f5051"))
+        );
+        assert_eq!(to_hex(&tk.iv), to_hex(&hex("5b78923dee08579033e523d9")));
+    }
+
+    #[test]
+    fn test_traffic_keys_ccm8() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_CCM_8_SHA256).unwrap();
+        let secret = vec![0xCC; 32];
+        let tk = TrafficKeys::derive(&params, &secret).unwrap();
+        assert_eq!(tk.key.len(), 16); // AES-128
+        assert_eq!(tk.iv.len(), 12);
+
+        // Deterministic
+        let tk2 = TrafficKeys::derive(&params, &secret).unwrap();
+        assert_eq!(tk.key, tk2.key);
+        assert_eq!(tk.iv, tk2.iv);
+    }
+
+    #[test]
+    fn test_traffic_keys_after_key_update() {
+        use crate::crypt::hkdf::hkdf_expand_label;
+        use crate::crypt::HashAlgId;
+
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let original_secret = vec![0xDD; 32];
+
+        // Derive keys from original secret
+        let tk_original = TrafficKeys::derive(&params, &original_secret).unwrap();
+
+        // Simulate KeyUpdate: update_traffic_secret
+        let updated_secret =
+            hkdf_expand_label(HashAlgId::Sha256, &original_secret, b"traffic upd", b"", 32)
+                .unwrap();
+
+        // Derive keys from updated secret
+        let tk_updated = TrafficKeys::derive(&params, &updated_secret).unwrap();
+
+        // Keys must differ after key update
+        assert_ne!(tk_original.key, tk_updated.key);
+        assert_ne!(tk_original.iv, tk_updated.iv);
+    }
+
+    #[cfg(feature = "sm_tls13")]
+    #[test]
+    fn test_traffic_keys_sm4_gcm_sm3() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_SM4_GCM_SM3).unwrap();
+        let secret = vec![0xEE; 32];
+        let tk = TrafficKeys::derive(&params, &secret).unwrap();
+        assert_eq!(tk.key.len(), 16); // SM4: 128-bit key
+        assert_eq!(tk.iv.len(), 12);
+
+        // Deterministic
+        let tk2 = TrafficKeys::derive(&params, &secret).unwrap();
+        assert_eq!(tk.key, tk2.key);
+        assert_eq!(tk.iv, tk2.iv);
+
+        // Differs from AES-128-GCM-SHA256 keys (different hash algorithm)
+        let params_aes =
+            CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let tk_aes = TrafficKeys::derive(&params_aes, &secret).unwrap();
+        assert_ne!(tk.key, tk_aes.key);
+        assert_ne!(tk.iv, tk_aes.iv);
+    }
 }

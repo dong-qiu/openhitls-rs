@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,689** (40 ignored) |
-| **Test growth** | 1,104 → 2,689 (+144% since baseline) |
+| **Total tests** | **2,739** (40 ignored) |
+| **Test growth** | 1,104 → 2,739 (+148% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,689 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 2,739 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -54,6 +54,9 @@ Phase T107  2,644     +10   TLCP double certificate validation tests (*)
 Phase T108  2,659     +15   SM9 tower field (Fp2/Fp4/Fp12) unit tests (*)
 Phase T109  2,674     +15   SLH-DSA internal module unit tests (*)
 Phase T110  2,689     +15   McEliece + FrodoKEM + XMSS internal tests (*)
+Phase T111  2,709     +20   proptest property-based + coverage CI (*)
+Phase T112  2,724     +15   TLCP SM3 cryptographic path coverage (*)
+Phase T113  2,739     +15   TLS 1.3 key schedule & HKDF robustness (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -1965,6 +1968,48 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | doc-tests | 2 | 0 |
 | **Total** | **2724** | **40** |
 
+## Phase T113: TLS 1.3 Key Schedule & HKDF Robustness Tests (+15 tests, 2,724→2,739)
+
+**Date**: 2026-02-24
+**Scope**: SHA-384 full pipeline correctness, stage enforcement gaps, SM3 HKDF coverage, HMAC key boundary, RFC 8448 app traffic key vectors, CCM_8/SM4-GCM-SM3 cipher suites.
+
+### Tests Added
+
+| # | Test | File | Property |
+|---|------|------|----------|
+| 1 | `test_key_schedule_sha384_full_pipeline` | key_schedule.rs | SHA-384 full pipeline: all secrets 48 bytes, deterministic, differs from SHA-256 |
+| 2 | `test_stage_enforcement_handshake_traffic_all_wrong` | key_schedule.rs | derive_handshake_traffic_secrets fails from Initial/EarlySecret/MasterSecret |
+| 3 | `test_stage_enforcement_app_and_resumption_wrong` | key_schedule.rs | derive_app_traffic_secrets + derive_resumption_master_secret fail from 3 wrong stages each |
+| 4 | `test_psk_values_sensitivity` | key_schedule.rs | Different PSKs differ, None==zeros, different lengths differ |
+| 5 | `test_key_schedule_sm4_gcm_sm3_pipeline` | key_schedule.rs | SM4-GCM-SM3: full pipeline, hash_alg=SM3, differs from SHA-256 |
+| 6 | `test_hmac_hash_sm3` | hkdf.rs | HMAC-SM3: 32 bytes, deterministic, differs from SHA-256 |
+| 7 | `test_hkdf_extract_sm3` | hkdf.rs | HKDF-Extract SM3: 32-byte PRK, deterministic, differs from SHA-256 |
+| 8 | `test_hkdf_expand_sm3_various_lengths` | hkdf.rs | HKDF-Expand SM3 for lengths [1,16,32,33,64,100], prefix consistency |
+| 9 | `test_hmac_hash_key_at_block_boundary` | hkdf.rs | Key 64 bytes (not hashed) vs 65 bytes (hashed): different results |
+| 10 | `test_hkdf_expand_multi_iteration_boundaries` | hkdf.rs | 32/64/96 bytes (1×/2×/3× SHA-256): prefix consistency |
+| 11 | `test_traffic_keys_rfc8448_server_app` | traffic_keys.rs | RFC 8448 server app key/iv exact match |
+| 12 | `test_traffic_keys_rfc8448_client_app` | traffic_keys.rs | RFC 8448 client app key/iv exact match |
+| 13 | `test_traffic_keys_ccm8` | traffic_keys.rs | AES-128-CCM_8: key=16, iv=12, deterministic |
+| 14 | `test_traffic_keys_after_key_update` | traffic_keys.rs | KeyUpdate produces different traffic keys |
+| 15 | `test_traffic_keys_sm4_gcm_sm3` | traffic_keys.rs | TLS_SM4_GCM_SM3: key=16, iv=12, differs from AES-128-GCM |
+
+**Per-crate counts after Phase T113**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 709 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 349 | 1 |
+| hitls-tls | 1229 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 61 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2739** | **40** |
+
 ---
 
 ## 8. Verification & Quality Gates
@@ -1972,9 +2017,9 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,724 tests pass
+# Full test suite — all 2,739 tests pass
 cargo test --workspace --all-features
-# Result: 2,724 passed, 0 failed, 40 ignored
+# Result: 2,739 passed, 0 failed, 40 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

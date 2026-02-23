@@ -2430,3 +2430,20 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 3 source files modified, 0 files created. hitls-tls: 1199→1214, total: 2709→2724.
 - All 2724 workspace tests pass, 0 clippy warnings, formatting clean.
+
+## Phase T113: TLS 1.3 Key Schedule & HKDF Robustness Tests
+
+**Prompt**: Implement Phase T113 — TLS 1.3 Key Schedule & HKDF Robustness Tests. Add 5 key schedule tests (SHA-384 full pipeline, stage enforcement gaps, PSK sensitivity, SM4-GCM-SM3 pipeline). Add 5 HKDF tests (SM3 HMAC/Extract/Expand, key block boundary, multi-iteration boundaries). Add 5 traffic keys tests (RFC 8448 server/client app vectors, CCM_8, key update, SM4-GCM-SM3).
+
+**Scope**: TLS 1.3 key schedule had SHA-384 pipeline only checking lengths (no correctness), 8 untested stage transitions, zero SM3 HKDF coverage, missing HMAC key boundary test, and no CCM_8/SM4-GCM-SM3 traffic key coverage.
+
+**Work performed**:
+1. Added 5 key schedule tests to `crates/hitls-tls/src/crypt/key_schedule.rs`: SHA-384 full pipeline with determinism/divergence, derive_handshake_traffic_secrets wrong stages (3), derive_app_traffic_secrets + derive_resumption_master_secret wrong stages (6), PSK sensitivity, SM4-GCM-SM3 full pipeline
+2. Added 5 HKDF tests to `crates/hitls-tls/src/crypt/hkdf.rs`: HMAC-SM3, HKDF-Extract SM3, HKDF-Expand SM3 various lengths, key at block boundary (64 vs 65 bytes), multi-iteration boundaries (32/64/96 bytes)
+3. Added 5 traffic key tests to `crates/hitls-tls/src/crypt/traffic_keys.rs`: RFC 8448 server/client app write key/iv, AES-128-CCM_8, KeyUpdate derivation, TLS_SM4_GCM_SM3
+4. Fixed plan's incorrect RFC 8448 client app write key (verified against RFC 8448: correct value is `17422dda596ed5d9acd890e3c63f5051`)
+5. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-tls: 1214→1229, total: 2724→2739.
+- All 2739 workspace tests pass, 0 clippy warnings, formatting clean.

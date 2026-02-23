@@ -703,4 +703,188 @@ mod tests {
         assert_eq!(secret1.len(), 32);
         assert_eq!(secret2.len(), 32);
     }
+
+    #[test]
+    fn test_key_schedule_sha384_full_pipeline() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_256_GCM_SHA384).unwrap();
+        let mut ks = KeySchedule::new(params);
+        assert_eq!(ks.hash_len(), 48);
+
+        // Early Secret (no PSK)
+        ks.derive_early_secret(None).unwrap();
+        assert_eq!(ks.stage(), KeyScheduleStage::EarlySecret);
+        assert_eq!(ks.current_secret.len(), 48);
+        let early_384 = ks.current_secret.clone();
+
+        // Handshake Secret
+        let dhe = [0x42u8; 48];
+        ks.derive_handshake_secret(&dhe).unwrap();
+        assert_eq!(ks.stage(), KeyScheduleStage::HandshakeSecret);
+        assert_eq!(ks.current_secret.len(), 48);
+
+        // Handshake traffic secrets
+        let transcript = [0xAA; 48];
+        let (client_hs, server_hs) = ks.derive_handshake_traffic_secrets(&transcript).unwrap();
+        assert_eq!(client_hs.len(), 48);
+        assert_eq!(server_hs.len(), 48);
+        assert_ne!(client_hs, server_hs);
+
+        // Master Secret
+        ks.derive_master_secret().unwrap();
+        assert_eq!(ks.stage(), KeyScheduleStage::MasterSecret);
+        assert_eq!(ks.current_secret.len(), 48);
+
+        // App traffic secrets
+        let transcript_sf = [0xBB; 48];
+        let (client_app, server_app) = ks.derive_app_traffic_secrets(&transcript_sf).unwrap();
+        assert_eq!(client_app.len(), 48);
+        assert_eq!(server_app.len(), 48);
+        assert_ne!(client_app, server_app);
+
+        // Deterministic: same inputs → same early secret
+        let params2 = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_256_GCM_SHA384).unwrap();
+        let mut ks2 = KeySchedule::new(params2);
+        ks2.derive_early_secret(None).unwrap();
+        assert_eq!(ks2.current_secret, early_384);
+
+        // SHA-384 early secret differs from SHA-256 early secret (different hash)
+        let params256 = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks256 = KeySchedule::new(params256);
+        ks256.derive_early_secret(None).unwrap();
+        assert_ne!(ks256.current_secret.len(), early_384.len());
+    }
+
+    #[test]
+    fn test_stage_enforcement_handshake_traffic_all_wrong() {
+        let transcript = [0u8; 32];
+
+        // From Initial stage
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let ks = KeySchedule::new(params);
+        assert!(ks.derive_handshake_traffic_secrets(&transcript).is_err());
+
+        // From EarlySecret stage
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+        assert!(ks.derive_handshake_traffic_secrets(&transcript).is_err());
+
+        // From MasterSecret stage
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+        ks.derive_handshake_secret(&[0u8; 32]).unwrap();
+        ks.derive_master_secret().unwrap();
+        assert!(ks.derive_handshake_traffic_secrets(&transcript).is_err());
+    }
+
+    #[test]
+    fn test_stage_enforcement_app_and_resumption_wrong() {
+        let transcript = [0u8; 32];
+
+        // derive_app_traffic_secrets from Initial
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let ks = KeySchedule::new(params);
+        assert!(ks.derive_app_traffic_secrets(&transcript).is_err());
+
+        // derive_app_traffic_secrets from EarlySecret
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+        assert!(ks.derive_app_traffic_secrets(&transcript).is_err());
+
+        // derive_app_traffic_secrets from HandshakeSecret
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+        ks.derive_handshake_secret(&[0u8; 32]).unwrap();
+        assert!(ks.derive_app_traffic_secrets(&transcript).is_err());
+
+        // derive_resumption_master_secret from Initial
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let ks = KeySchedule::new(params);
+        assert!(ks.derive_resumption_master_secret(&transcript).is_err());
+
+        // derive_resumption_master_secret from EarlySecret
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+        assert!(ks.derive_resumption_master_secret(&transcript).is_err());
+
+        // derive_resumption_master_secret from HandshakeSecret
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks = KeySchedule::new(params);
+        ks.derive_early_secret(None).unwrap();
+        ks.derive_handshake_secret(&[0u8; 32]).unwrap();
+        assert!(ks.derive_resumption_master_secret(&transcript).is_err());
+    }
+
+    #[test]
+    fn test_psk_values_sensitivity() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+
+        // Different PSK values → different early secrets
+        let mut ks_aa = KeySchedule::new(params.clone());
+        ks_aa.derive_early_secret(Some(&[0xAA; 32])).unwrap();
+        let secret_aa = ks_aa.current_secret.clone();
+
+        let mut ks_bb = KeySchedule::new(params.clone());
+        ks_bb.derive_early_secret(Some(&[0xBB; 32])).unwrap();
+        let secret_bb = ks_bb.current_secret.clone();
+        assert_ne!(secret_aa, secret_bb);
+
+        // None PSK uses zero IKM of hash_len bytes — same as explicit all-zeros PSK
+        let mut ks_none = KeySchedule::new(params.clone());
+        ks_none.derive_early_secret(None).unwrap();
+        let secret_none = ks_none.current_secret.clone();
+
+        let mut ks_zeros = KeySchedule::new(params.clone());
+        ks_zeros.derive_early_secret(Some(&[0u8; 32])).unwrap();
+        assert_eq!(secret_none, ks_zeros.current_secret);
+
+        // Non-zero PSK differs from None
+        assert_ne!(secret_aa, secret_none);
+
+        // PSK length 1 vs 32 both work and produce different secrets
+        let mut ks_short = KeySchedule::new(params.clone());
+        ks_short.derive_early_secret(Some(&[0xFF])).unwrap();
+        assert_eq!(ks_short.current_secret.len(), 32);
+
+        let mut ks_long = KeySchedule::new(params);
+        ks_long.derive_early_secret(Some(&[0xFF; 32])).unwrap();
+        assert_eq!(ks_long.current_secret.len(), 32);
+        assert_ne!(ks_short.current_secret, ks_long.current_secret);
+    }
+
+    #[cfg(feature = "sm_tls13")]
+    #[test]
+    fn test_key_schedule_sm4_gcm_sm3_pipeline() {
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_SM4_GCM_SM3).unwrap();
+        let mut ks = KeySchedule::new(params);
+        assert_eq!(ks.hash_len(), 32);
+        assert_eq!(ks.hash_alg, HashAlgId::Sm3);
+
+        // Full pipeline: early → handshake → master → app traffic
+        ks.derive_early_secret(None).unwrap();
+        assert_eq!(ks.current_secret.len(), 32);
+        let sm3_early = ks.current_secret.clone();
+
+        let dhe = [0x42u8; 32];
+        ks.derive_handshake_secret(&dhe).unwrap();
+        assert_eq!(ks.current_secret.len(), 32);
+
+        ks.derive_master_secret().unwrap();
+        assert_eq!(ks.current_secret.len(), 32);
+
+        let transcript = [0xAA; 32];
+        let (client_app, server_app) = ks.derive_app_traffic_secrets(&transcript).unwrap();
+        assert_eq!(client_app.len(), 32);
+        assert_eq!(server_app.len(), 32);
+
+        // SM3 early secret differs from SHA-256 early secret (same None PSK)
+        let params256 = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        let mut ks256 = KeySchedule::new(params256);
+        ks256.derive_early_secret(None).unwrap();
+        assert_ne!(sm3_early, ks256.current_secret);
+    }
 }

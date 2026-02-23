@@ -370,4 +370,99 @@ mod tests {
         let okm = hkdf_expand(HashAlgId::Sha256, &prk, b"test", 32).unwrap();
         assert_eq!(okm.len(), 32);
     }
+
+    #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+    #[test]
+    fn test_hmac_hash_sm3() {
+        let key = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let data = b"Hi There";
+        let result = hmac_hash(HashAlgId::Sm3, &key, data).unwrap();
+        assert_eq!(result.len(), 32); // SM3 output is 32 bytes
+
+        // Deterministic
+        let result2 = hmac_hash(HashAlgId::Sm3, &key, data).unwrap();
+        assert_eq!(result, result2);
+
+        // Differs from HMAC-SHA256 with same inputs
+        let sha256_result = hmac_hash(HashAlgId::Sha256, &key, data).unwrap();
+        assert_ne!(result, sha256_result);
+    }
+
+    #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+    #[test]
+    fn test_hkdf_extract_sm3() {
+        let salt = hex("000102030405060708090a0b0c");
+        let ikm = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
+        let prk = hkdf_extract(HashAlgId::Sm3, &salt, &ikm).unwrap();
+        assert_eq!(prk.len(), 32); // SM3 output is 32 bytes
+
+        // Deterministic
+        let prk2 = hkdf_extract(HashAlgId::Sm3, &salt, &ikm).unwrap();
+        assert_eq!(prk, prk2);
+
+        // Differs from SHA-256
+        let sha256_prk = hkdf_extract(HashAlgId::Sha256, &salt, &ikm).unwrap();
+        assert_ne!(prk, sha256_prk);
+    }
+
+    #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+    #[test]
+    fn test_hkdf_expand_sm3_various_lengths() {
+        let prk = vec![0x42; 32];
+        let info = b"test info";
+        let lengths = [1, 16, 32, 33, 64, 100];
+        let mut results = Vec::new();
+        for &len in &lengths {
+            let okm = hkdf_expand(HashAlgId::Sm3, &prk, info, len).unwrap();
+            assert_eq!(okm.len(), len);
+            results.push(okm);
+        }
+
+        // Prefix consistency: shorter outputs are prefixes of longer ones
+        assert_eq!(&results[0][..1], &results[1][..1]); // 1 ⊂ 16
+        assert_eq!(&results[1][..16], &results[2][..16]); // 16 ⊂ 32
+        assert_eq!(&results[2][..32], &results[3][..32]); // 32 ⊂ 33
+        assert_eq!(&results[3][..33], &results[4][..33]); // 33 ⊂ 64
+        assert_eq!(&results[4][..64], &results[5][..64]); // 64 ⊂ 100
+    }
+
+    #[test]
+    fn test_hmac_hash_key_at_block_boundary() {
+        let data = b"boundary test data";
+
+        // Key exactly 64 bytes (SHA-256 block_size): NOT hashed, used directly
+        let key_64 = vec![0xAA; 64];
+        let result_64 = hmac_hash(HashAlgId::Sha256, &key_64, data).unwrap();
+        assert_eq!(result_64.len(), 32);
+
+        // Key 65 bytes: IS hashed (key > block_size triggers hash)
+        let key_65 = vec![0xAA; 65];
+        let result_65 = hmac_hash(HashAlgId::Sha256, &key_65, data).unwrap();
+        assert_eq!(result_65.len(), 32);
+
+        // Results must differ (different effective keys)
+        assert_ne!(result_64, result_65);
+    }
+
+    #[test]
+    fn test_hkdf_expand_multi_iteration_boundaries() {
+        let prk = vec![0x42; 32];
+        let info = b"multi iter boundary";
+
+        // 32 bytes: 1 iteration (1 × 32)
+        let okm_32 = hkdf_expand(HashAlgId::Sha256, &prk, info, 32).unwrap();
+        assert_eq!(okm_32.len(), 32);
+
+        // 64 bytes: 2 iterations (2 × 32)
+        let okm_64 = hkdf_expand(HashAlgId::Sha256, &prk, info, 64).unwrap();
+        assert_eq!(okm_64.len(), 64);
+
+        // 96 bytes: 3 iterations (3 × 32)
+        let okm_96 = hkdf_expand(HashAlgId::Sha256, &prk, info, 96).unwrap();
+        assert_eq!(okm_96.len(), 96);
+
+        // Prefix consistency
+        assert_eq!(&okm_64[..32], &okm_32[..]);
+        assert_eq!(&okm_96[..64], &okm_64[..]);
+    }
 }
