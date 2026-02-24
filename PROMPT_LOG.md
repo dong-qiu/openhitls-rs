@@ -2721,3 +2721,23 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 3 source files modified, 0 files created. hitls-crypto: 719→729, hitls-pki: 369→374, total: 2829→2844.
 - All 2844 workspace tests pass, 0 clippy warnings, formatting clean.
+
+---
+
+## Phase 93–97: Feature & Performance Optimization (Middlebox + HW Accel + P-256)
+
+**Prompt**: Implement 5-phase migration plan: (M1) TLS 1.3 Middlebox Compatibility Mode per RFC 8446 §D.4, (P1) SHA-2 hardware acceleration via ARMv8 SHA-NI / x86-64 SHA-NI, (P2) GHASH/CLMUL hardware acceleration via ARMv8 PMULL / x86-64 PCLMULQDQ, (P3) P-256 specialized field arithmetic (4×u64 Montgomery form, Jacobian points, w=4 fixed-window scalar mul, Shamir's trick), (P4) ChaCha20 SIMD optimization via ARMv8 NEON / x86-64 SSE2.
+
+**Scope**: Close remaining TLS 1.3 enterprise compatibility gap (middlebox mode) and eliminate C/Rust performance gaps in the hottest crypto paths (SHA-256, AES-GCM GHASH, ECDSA P-256, ChaCha20-Poly1305).
+
+**Work performed**:
+1. **Phase 93 — Middlebox Compat**: Added `middlebox_compat` config field (default true), 32-byte random session ID in ClientHello, `send_fake_ccs_body!` macro for fake CCS emission, version-aware CCS filtering in `read_record_body!` (TLS 1.3 only, not TLS 1.2/TLCP). 6 tests.
+2. **Phase 94 — SHA-2 HW Accel**: Created `sha256_arm.rs` (ARMv8 SHA-2 intrinsics) and `sha256_x86.rs` (x86-64 SHA-NI intrinsics). Runtime dispatch in `sha256_compress()`. 3 tests on aarch64.
+3. **Phase 95 — GHASH HW Accel**: Created `ghash_arm.rs` (ARMv8 PMULL with Karatsuba+Barrett) and `ghash_x86.rs` (x86-64 PCLMULQDQ). Runtime dispatch via `detect_ghash_hw()` on GhashTable. 8 tests on aarch64.
+4. **Phase 96 — P-256 Fast Path**: Created `p256_field.rs` (4×u64 Montgomery field with specialized modular reduction) and `p256_point.rs` (Jacobian point ops with a=-3 doubling, w=4 scalar mul, Shamir's trick). Auto-dispatch in EcGroup for NistP256. 47 tests.
+5. **Phase 97 — ChaCha20 SIMD**: Created `chacha20_neon.rs` (NEON row-packed vectors) and `chacha20_x86.rs` (SSE2). Runtime dispatch in `chacha20_block()`. 3 tests on aarch64.
+6. Updated CLAUDE.md, README.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, QUALITY_REPORT.md, MIGRATION_REPORT.md.
+
+**Result**:
+- 16 source files modified/created across hitls-tls and hitls-crypto. +67 tests on aarch64. hitls-crypto: 824→885, hitls-tls: 1284→1290, total: 2954→3021 (50 ignored unchanged).
+- All 3021 workspace tests pass, 0 clippy warnings, formatting clean.

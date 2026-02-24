@@ -8623,6 +8623,143 @@ Added 15 tests across 3 BigNum core modules validating constant-time security pr
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
+## Phase 93: TLS 1.3 Middlebox Compatibility Mode (RFC 8446 §D.4) (+6 tests, 2,954→2,960)
+
+**Date**: 2026-02-24
+**Scope**: Implement TLS 1.3 middlebox compatibility mode per RFC 8446 §D.4 to prevent connection failures through enterprise middleboxes (firewalls, DPI, proxies) that expect to see ChangeCipherSpec messages.
+
+### Summary
+
+Added middlebox compatibility mode to TLS 1.3:
+
+- **Config**: `middlebox_compat: bool` field on `TlsConfig` (default `true`), with builder method
+- **Client**: Generate 32-byte random session ID in ClientHello when enabled (uses `getrandom`)
+- **Fake CCS emission**: `send_fake_ccs_body!` macro sends unencrypted CCS record (`[0x14, 0x03, 0x03, 0x00, 0x01, 0x01]`) at correct handshake points for both client and server (normal + HRR paths)
+- **CCS filtering**: `read_record_body!` macro silently ignores peer CCS records during TLS 1.3 handshake (version-aware: only TLS 1.3 connections filter CCS, TLS 1.2/TLCP pass CCS through normally)
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/config/mod.rs` | Added `middlebox_compat` field + builder + 3 config tests |
+| `crates/hitls-tls/src/handshake/client.rs` | Random session ID generation in `build_client_hello()` + 3 session ID tests |
+| `crates/hitls-tls/src/macros.rs` | Added `send_fake_ccs_body!` macro, CCS filter in `read_record_body!` with version-aware dispatch |
+| `crates/hitls-tls/src/connection/client.rs` | TLS 1.3 CCS filter enabled |
+| `crates/hitls-tls/src/connection/server.rs` | TLS 1.3 CCS filter enabled |
+| `crates/hitls-tls/src/connection_async.rs` | Async TLS 1.3 CCS filter enabled |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2960 passed, 0 failed, 50 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 94: SHA-2 Hardware Acceleration — ARMv8 SHA-NI / x86-64 SHA-NI (+3 tests on aarch64, 2,960→2,963)
+
+**Date**: 2026-02-24
+**Scope**: Add hardware-accelerated SHA-256 compression using ARMv8 SHA-2 intrinsics and x86-64 SHA-NI intrinsics, with runtime detection and software fallback.
+
+### Summary
+
+- **ARMv8 SHA-256** (`sha256_arm.rs`): Uses `vsha256hq_u32`, `vsha256h2q_u32` (round function), `vsha256su0q_u32`, `vsha256su1q_u32` (message schedule). Processes 64-byte blocks with 4-round unrolled loop. 3 tests: single-block/multi-block/FIPS-180-4 consistency with scalar.
+- **x86-64 SHA-NI** (`sha256_x86.rs`): Uses `_mm_sha256rnds2_epu32`, `_mm_sha256msg1_epu32`, `_mm_sha256msg2_epu32`. 2 tests with feature detection guard.
+- **Runtime dispatch**: `sha256_compress()` checks `is_aarch64_feature_detected!("sha2")` or `is_x86_feature_detected!("sha")`, falls back to `sha256_compress_soft()`.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/sha2/sha256_arm.rs` | New: 396 lines, ARMv8 SHA-2 intrinsics + 3 tests |
+| `crates/hitls-crypto/src/sha2/sha256_x86.rs` | New: 298 lines, x86-64 SHA-NI intrinsics + 2 tests |
+| `crates/hitls-crypto/src/sha2/mod.rs` | Runtime dispatch in `sha256_compress()`, module declarations |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2963 passed, 0 failed, 50 ignored (aarch64)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 95: GHASH/CLMUL Hardware Acceleration — ARMv8 PMULL / x86-64 PCLMULQDQ (+8 tests on aarch64, 2,963→2,971)
+
+**Date**: 2026-02-24
+**Scope**: Add hardware-accelerated GHASH (GF(2^128) multiplication for AES-GCM) using ARMv8 PMULL and x86-64 PCLMULQDQ carry-less multiplication intrinsics.
+
+### Summary
+
+- **ARMv8 PMULL** (`ghash_arm.rs`): Uses `vmull_p64` for carry-less multiplication, Karatsuba decomposition for 128×128→256 bit multiply, Barrett reduction mod x^128+x^7+x^2+x+1. 8 tests: NIST SP 800-38D vectors, pattern comparison with software.
+- **x86-64 PCLMULQDQ** (`ghash_x86.rs`): Uses `_mm_clmulepi64_si128` with same Karatsuba + Barrett approach. 7 tests with feature detection guard.
+- **Runtime dispatch**: `detect_ghash_hw()` sets `use_hw` flag on `GhashTable`, transparent acceleration for all AES-GCM operations.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/modes/ghash_arm.rs` | New: 509 lines, ARMv8 PMULL + 8 tests |
+| `crates/hitls-crypto/src/modes/ghash_x86.rs` | New: 611 lines, x86-64 PCLMULQDQ + 7 tests |
+| `crates/hitls-crypto/src/modes/gcm.rs` | Runtime dispatch via `detect_ghash_hw()`, `use_hw` flag |
+| `crates/hitls-crypto/src/modes/mod.rs` | Module declarations |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2971 passed, 0 failed, 50 ignored (aarch64)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 96: P-256 Specialized Field Arithmetic and Fast ECC Path (+47 tests, 2,971→3,018)
+
+**Date**: 2026-02-24
+**Scope**: Replace generic BigNum-based P-256 operations with specialized 4×u64 Montgomery field arithmetic and Jacobian point operations, closing the ~31× performance gap with C.
+
+### Summary
+
+- **P-256 Field Element** (`p256_field.rs`): 4×u64 limb Montgomery representation (R=2^256). Specialized add/sub with carry/borrow chains, Montgomery mul/sqr using P-256 modular reduction, Fermat addition chain inversion. 33 tests covering roundtrip, algebraic laws, edge cases.
+- **P-256 Point Operations** (`p256_point.rs`): Jacobian coordinates with a=-3 optimized doubling (M=3(X+Z²)(X-Z²)), full addition, w=4 fixed-window scalar multiplication (16-entry precomputed table), base point multiplication, Shamir's trick for k1*G+k2*Q. 14 tests including cross-validation with generic BigNum path.
+- **Auto-dispatch**: `EcGroup` methods check `curve_id == NistP256` and route to specialized path; other curves unchanged. All Wycheproof ECDSA/ECDH P-256 vectors pass.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/ecc/p256_field.rs` | New: 696 lines, Montgomery field + 33 tests |
+| `crates/hitls-crypto/src/ecc/p256_point.rs` | New: 495 lines, Jacobian point ops + 14 tests |
+| `crates/hitls-crypto/src/ecc/mod.rs` | P-256 dispatch in `scalar_mul`/`scalar_mul_base`/`scalar_mul_add` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3018 passed, 0 failed, 50 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 97: ChaCha20 SIMD Optimization — ARMv8 NEON / x86-64 SSE2 (+3 tests on aarch64, 3,018→3,021)
+
+**Date**: 2026-02-24
+**Scope**: Add vectorized ChaCha20 block function using ARMv8 NEON and x86-64 SSE2 intrinsics for the second most common AEAD cipher suite.
+
+### Summary
+
+- **ARMv8 NEON** (`chacha20_neon.rs`): Row-packed state vectors (4×uint32x4_t), `vextq_u32` for diagonal rotation, `vrev32q_u16` for 16-bit rotation, `vqtbl1q_u8` byte lookup for 8-bit rotation. 3 tests comparing NEON vs scalar output.
+- **x86-64 SSE2** (`chacha20_x86.rs`): Same row-packed approach with `_mm_shuffle_epi32` (0x39/0x4E/0x93 immediates) for diagonal rotation. 2 tests with feature detection guard.
+- **Runtime dispatch**: `chacha20_block()` checks CPU features, falls back to `chacha20_block_soft()` (renamed from `chacha20_block()`).
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/chacha20/chacha20_neon.rs` | New: 156 lines, NEON block function + 3 tests |
+| `crates/hitls-crypto/src/chacha20/chacha20_x86.rs` | New: 153 lines, SSE2 block function + 2 tests |
+| `crates/hitls-crypto/src/chacha20/mod.rs` | Runtime dispatch, renamed `chacha20_block_soft` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3021 passed, 0 failed, 50 ignored (aarch64)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
 ## Phase T127: XMSS Hash Abstraction + XMSS Address Scheme + ML-KEM NTT Deepening (+15 tests, 2,924→2,939)
 
 **Date**: 2026-02-24

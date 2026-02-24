@@ -2,14 +2,14 @@
 
 A production-grade cryptographic and TLS library in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **100% C→Rust feature parity achieved** — 2954 tests, 10 fuzz targets, 5000+ Wycheproof vectors
+> **100% C→Rust feature parity achieved** — 3021 tests, 10 fuzz targets, 5000+ Wycheproof vectors
 
 ## Feature Highlights
 
 - **Memory safe** — Rust ownership system eliminates buffer overflows, use-after-free, and data races
 - **Full TLS stack** — TLS 1.3 + TLS 1.2 (91 cipher suites) + DTLS 1.2 + TLCP + DTLCP, 10 connection types (5 sync + 5 async via tokio)
 - **48+ crypto algorithms** — Classical, national (SM2/SM3/SM4/SM9), and post-quantum (ML-KEM, ML-DSA, SLH-DSA, FrodoKEM, McEliece)
-- **Hardware acceleration** — AES-NI (x86-64) + ARMv8 NEON, feature-gated algorithm selection for minimal binary size
+- **Hardware acceleration** — AES-NI, SHA-NI, PCLMULQDQ (x86-64) + ARMv8 NEON/SHA2/PMULL, P-256 specialized fast path, feature-gated algorithm selection for minimal binary size
 - **FIPS/CMVP ready** — KAT self-tests, pairwise consistency tests, integrity check, NIST SP 800-90B entropy health testing
 - **Complete PKI** — X.509 chain validation, CRL, OCSP, CSR/cert generation, PKCS#8/12, CMS (5 content types)
 
@@ -17,13 +17,13 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 
 | Component | C (lines) | Rust (lines) | Coverage | Notes |
 |-----------|-----------|--------------|----------|-------|
-| Crypto Algorithms | ~132K | ~27K | **100%** | 48 modules, hardware AES, 13 DH groups, FIPS, entropy health |
+| Crypto Algorithms | ~132K | ~27K | **100%** | 48 modules, hardware AES/SHA-2/GHASH/ChaCha20, P-256 fast path, 13 DH groups, FIPS, entropy health |
 | TLS Protocol | ~52K | ~15K | **100%** | TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP, 91 suites, 10 conn types |
 | PKI / X.509 | ~17K | ~4.5K | **100%** | X.509, PKCS#8/12, CMS (5 content types), hostname verification |
 | CLI Tools | ~8K | ~2.2K | **100%** | 14 commands (dgst, genpkey, x509, s-client, s-server, etc.) |
 | FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
-| Test Infrastructure | ~20K | ~3.5K | **95%** | 2784 tests + Wycheproof + 10 fuzz targets + security audit |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | 3021 tests + Wycheproof + 10 fuzz targets + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
 
 ### Not Migrated (by design)
@@ -108,7 +108,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 
 ### Big Number Arithmetic (`hitls-bignum`)
 
-Montgomery multiplication/exponentiation, Miller-Rabin primality, GCD/mod-inverse, constant-time operations, cryptographic random generation. 49 tests.
+Montgomery multiplication/exponentiation, Miller-Rabin primality, GCD/mod-inverse, constant-time operations, cryptographic random generation. 64 tests.
 
 ## Protocol Support
 
@@ -117,6 +117,7 @@ Montgomery multiplication/exponentiation, Miller-Rabin primality, GCD/mod-invers
 | Feature | Standard |
 |---------|----------|
 | Full handshake + HelloRetryRequest | RFC 8446 |
+| Middlebox Compatibility Mode (fake CCS) | RFC 8446 §D.4 |
 | PSK / Session Tickets / 0-RTT Early Data | RFC 8446 |
 | Post-handshake client auth + KeyUpdate | RFC 8446 |
 | Certificate Compression | RFC 8879 |
@@ -259,12 +260,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (2954 tests, 50 ignored)
+# Run all tests (3021 tests, 50 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 824 tests + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 1284 tests
+cargo test -p hitls-crypto --all-features   # 885 tests + 15 Wycheproof
+cargo test -p hitls-tls --all-features      # 1290 tests
 cargo test -p hitls-pki --all-features      # 374 tests
 cargo test -p hitls-bignum                  # 64 tests
 cargo test -p hitls-utils                   # 66 tests
@@ -313,4 +314,4 @@ Licensed under the [Mulan Permissive Software License, Version 2](http://license
 
 ## Acknowledgments
 
-This project is a Rust rewrite of [openHiTLS](https://gitee.com/openhitls/openhitls), an open-source cryptographic and TLS library originally written in C. See [DEV_LOG.md](DEV_LOG.md) for the detailed migration history (Phase 0–92).
+This project is a Rust rewrite of [openHiTLS](https://gitee.com/openhitls/openhitls), an open-source cryptographic and TLS library originally written in C. See [DEV_LOG.md](DEV_LOG.md) for the detailed migration history (Phase 0–97).

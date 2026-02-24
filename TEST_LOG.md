@@ -2637,14 +2637,46 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
+### Phase 93–97: Feature & Performance Optimization (+67 tests, 2,954→3,021)
+
+**Date**: 2026-02-24
+**Scope**: TLS 1.3 middlebox compatibility + 4 hardware acceleration / specialized arithmetic optimizations.
+
+| # | Phase | Tests Added | File(s) | Property |
+|---|-------|:-----------:|---------|----------|
+| 1 | Phase 93 — Middlebox Compat | 6 | config/mod.rs, handshake/client.rs | Config defaults, session ID generation (32-byte random vs empty) |
+| 2 | Phase 94 — SHA-2 HW Accel | 3 (aarch64) | sha2/sha256_arm.rs | Single-block, multi-block, FIPS-180-4 scalar consistency |
+| 3 | Phase 95 — GHASH HW Accel | 8 (aarch64) | modes/ghash_arm.rs | NIST SP 800-38D vectors, exhaustive pattern comparison |
+| 4 | Phase 96 — P-256 Fast Path | 47 | ecc/p256_field.rs, ecc/p256_point.rs | Montgomery roundtrip, algebraic laws, Jacobian point ops, cross-validation with BigNum |
+| 5 | Phase 97 — ChaCha20 SIMD | 3 (aarch64) | chacha20/chacha20_neon.rs | RFC 8439 vector, counter-zero, all-0xFF key NEON-vs-scalar |
+
+**Per-crate counts after Phase 97**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 64 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 885 | 41 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 374 | 1 |
+| hitls-tls | 1290 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 66 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **3021** | **50** |
+
+---
+
 ## 8. Verification & Quality Gates
 
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,954 tests pass
+# Full test suite — all 3,021 tests pass
 cargo test --workspace --all-features
-# Result: 2,954 passed, 0 failed, 50 ignored
+# Result: 3,021 passed, 0 failed, 50 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

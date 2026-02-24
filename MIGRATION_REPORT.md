@@ -1,6 +1,6 @@
 # openHiTLS C→Rust Migration Report
 
-> **Generated**: 2026-02-20 | **Status**: 100% feature parity | **Tests**: 2,519 pass (40 ignored)
+> **Generated**: 2026-02-20 | **Updated**: 2026-02-25 | **Status**: 100% feature parity + HW acceleration | **Tests**: 3,021 pass (50 ignored)
 
 ## 1. Executive Summary
 
@@ -17,7 +17,7 @@ openHiTLS-rs is a complete rewrite of [openHiTLS](https://gitee.com/openhitls/op
 | Protocol variants | 5 (TLS1.3/1.2/DTLS/TLCP/DTLCP) | 5 | **100%** |
 | Connection types | 5 (sync only) | 10 (5 sync + 5 async) | **200%** |
 | CLI commands | 14 | 16 | **114%** |
-| Test cases | ~189K LOC (SDV framework) | 2,519 tests (inline) | — |
+| Test cases | ~189K LOC (SDV framework) | 3,021 tests (inline) | — |
 
 **Key finding**: The Rust implementation achieves 100% feature parity with 4.7× code reduction, while adding async I/O support not present in the C version.
 
@@ -864,6 +864,11 @@ The C codebase has a large, multi-layered test infrastructure in `testcode/`:
 | Feature | Benefit |
 |---------|---------|
 | Async I/O (tokio) | 5 async connection types for high-concurrency servers |
+| TLS 1.3 Middlebox Compat | RFC 8446 §D.4 fake CCS for enterprise middlebox traversal |
+| SHA-2 HW Acceleration | ARMv8 SHA-NI + x86-64 SHA-NI intrinsics |
+| GHASH HW Acceleration | ARMv8 PMULL + x86-64 PCLMULQDQ for AES-GCM |
+| P-256 Specialized Arithmetic | 4×u64 Montgomery field, w=4 scalar mul, Shamir's trick |
+| ChaCha20 SIMD | ARMv8 NEON + x86-64 SSE2 vectorized block function |
 | HOTP/TOTP | Authentication protocol support (RFC 4226/6238) |
 | SPAKE2+ | Password-authenticated key exchange (RFC 9382) |
 | Privacy Pass | RSA blind signature issuance/redemption (RFC 9578) |
@@ -888,3 +893,5 @@ The C codebase has a large, multi-layered test infrastructure in `testcode/`:
 4. **Architecture improvement**: C's EAL provider framework (27K LOC) is replaced by Rust traits (~500 LOC) with zero-cost static dispatch, maintaining the same extensibility with better type safety and performance.
 
 5. **Only 1 functional gap**: SHA256-MB (multi-buffer) is the sole algorithm not migrated, as it is a performance optimization with no functional impact.
+
+6. **Hardware acceleration parity**: Phase 93–97 added TLS 1.3 middlebox compatibility (RFC 8446 §D.4), SHA-2 hardware acceleration (ARMv8 SHA-NI / x86-64 SHA-NI), GHASH hardware acceleration (ARMv8 PMULL / x86-64 PCLMULQDQ), P-256 specialized field arithmetic (closing a ~31× performance gap), and ChaCha20 SIMD optimization (ARMv8 NEON / x86-64 SSE2). The Rust implementation now matches C-level performance in the critical hot paths.
