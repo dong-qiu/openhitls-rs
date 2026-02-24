@@ -4,6 +4,12 @@
 
 use hitls_types::CryptoError;
 
+#[cfg(target_arch = "aarch64")]
+mod sha256_arm;
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+mod sha256_x86;
+
 // ===== SHA-256 constants =====
 
 /// SHA-256 round constants (first 32 bits of fractional parts of cube roots of first 64 primes).
@@ -138,9 +144,39 @@ const H384: [u64; 8] = [
     0x47b5481dbefa4fa4,
 ];
 
-// ===== SHA-256 compression =====
+// ===== SHA-256 compression with runtime dispatch =====
 
+/// SHA-256 compress function with automatic hardware acceleration.
+///
+/// - **ARMv8**: SHA-2 Crypto Extensions (`vsha256hq_u32` etc.)
+/// - **x86-64**: SHA-NI (`_mm_sha256rnds2_epu32` etc.)
+/// - **Fallback**: Pure-Rust software implementation
 fn sha256_compress(state: &mut [u32; 8], block: &[u8]) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("sha2") {
+            // SAFETY: feature detection confirmed sha2 is available
+            unsafe {
+                sha256_arm::sha256_compress_arm(state, block);
+            }
+            return;
+        }
+    }
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        if is_x86_feature_detected!("sha") {
+            // SAFETY: feature detection confirmed sha is available
+            unsafe {
+                sha256_x86::sha256_compress_x86(state, block);
+            }
+            return;
+        }
+    }
+    sha256_compress_soft(state, block);
+}
+
+/// Software-only SHA-256 compress (pure Rust fallback).
+fn sha256_compress_soft(state: &mut [u32; 8], block: &[u8]) {
     let mut w = [0u32; 64];
 
     // Parse block into 16 big-endian u32 words
