@@ -44,10 +44,14 @@ macro_rules! fill_buf_body {
 }
 
 /// Body for `read_record`: read a single TLS record from the stream.
-/// Automatically skips fake CCS records when `middlebox_compat` is true and
-/// the connection is in TLS 1.3 handshake mode (no TLS 1.2 decryptor active).
+/// When `$filter_ccs` is `true`, automatically skips fake CCS records for
+/// middlebox compatibility (RFC 8446 §D.4). Only TLS 1.3 connections should
+/// pass `true`; TLS 1.2 and TLCP connections use CCS as a real protocol message.
 macro_rules! read_record_body {
-    ($mode:ident, $self:ident) => {{
+    ($mode:ident, $self:ident) => {
+        read_record_body!($mode, $self, false)
+    };
+    ($mode:ident, $self:ident, $filter_ccs:expr) => {{
         loop {
             maybe_await!($mode, $self.fill_buf(5))?;
             let length = u16::from_be_bytes([$self.read_buf[3], $self.read_buf[4]]) as usize;
@@ -55,7 +59,8 @@ macro_rules! read_record_body {
             let (ct, plaintext, consumed) = $self.record_layer.open_record(&$self.read_buf)?;
             $self.read_buf.drain(..consumed);
             // RFC 8446 §D.4: silently ignore CCS during TLS 1.3 handshake
-            if ct == ContentType::ChangeCipherSpec
+            if $filter_ccs
+                && ct == ContentType::ChangeCipherSpec
                 && $self.config.middlebox_compat
                 && plaintext == [0x01]
             {

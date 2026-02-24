@@ -112,7 +112,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
     }
 
     async fn read_record(&mut self) -> Result<(ContentType, Vec<u8>), TlsError> {
-        read_record_body!(is_async, self)
+        read_record_body!(is_async, self, true)
     }
 
     /// Initiate a key update (RFC 8446 §4.6.3).
@@ -267,7 +267,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
     }
 
     async fn read_record(&mut self) -> Result<(ContentType, Vec<u8>), TlsError> {
-        read_record_body!(is_async, self)
+        read_record_body!(is_async, self, true)
     }
 
     /// Initiate a key update (RFC 8446 §4.6.3).

@@ -120,7 +120,7 @@ impl<S: Read + Write> TlsClientConnection<S> {
     }
 
     fn read_record(&mut self) -> Result<(ContentType, Vec<u8>), TlsError> {
-        read_record_body!(sync, self)
+        read_record_body!(sync, self, true)
     }
 
     /// Initiate a key update (RFC 8446 §4.6.3).
