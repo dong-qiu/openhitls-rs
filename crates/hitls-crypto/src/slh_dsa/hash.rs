@@ -283,6 +283,106 @@ mod tests {
     use hitls_types::SlhDsaParamId;
 
     #[test]
+    fn test_sha2_cat3_h_uses_sha512() {
+        // sec_category=3 uses SHA-512 for H (not SHA-256)
+        let p = get_params(SlhDsaParamId::Sha2192s);
+        let seed = vec![0xAAu8; p.n];
+        let root = vec![0xBBu8; p.n];
+        let h = make_hasher(p, &seed, &root);
+
+        let adrs = Adrs::new(true);
+        let msg = vec![0x55u8; 2 * p.n]; // H takes 2n-byte input
+
+        let result = h.h(&adrs, &msg).unwrap();
+        assert_eq!(result.len(), p.n); // n=24 for 192-bit
+        assert_eq!(result.len(), 24);
+
+        // sec_category=5 also uses SHA-512
+        let p5 = get_params(SlhDsaParamId::Sha2256s);
+        let seed5 = vec![0xAAu8; p5.n];
+        let root5 = vec![0xBBu8; p5.n];
+        let h5 = make_hasher(p5, &seed5, &root5);
+
+        let adrs5 = Adrs::new(true);
+        let msg5 = vec![0x55u8; 2 * p5.n];
+        let result5 = h5.h(&adrs5, &msg5).unwrap();
+        assert_eq!(result5.len(), 32);
+    }
+
+    #[test]
+    fn test_shake_vs_sha2_different_outputs() {
+        let p_shake = get_params(SlhDsaParamId::Shake128f);
+        let p_sha2 = get_params(SlhDsaParamId::Sha2128f);
+        let seed = vec![0xAAu8; 16];
+        let root = vec![0xBBu8; 16];
+
+        let h_shake = make_hasher(p_shake, &seed, &root);
+        let h_sha2 = make_hasher(p_sha2, &seed, &root);
+
+        let adrs_shake = Adrs::new(false);
+        let adrs_sha2 = Adrs::new(true);
+        let msg = vec![0x55u8; 16];
+
+        let out_shake = h_shake.f(&adrs_shake, &msg).unwrap();
+        let out_sha2 = h_sha2.f(&adrs_sha2, &msg).unwrap();
+        assert_eq!(out_shake.len(), out_sha2.len());
+        // Different hash algorithms should produce different outputs
+        assert_ne!(out_shake, out_sha2);
+    }
+
+    #[test]
+    fn test_h_and_t_l_output_lengths() {
+        for id in [SlhDsaParamId::Shake256s, SlhDsaParamId::Sha2192f] {
+            let p = get_params(id);
+            let seed = vec![0xAAu8; p.n];
+            let root = vec![0xBBu8; p.n];
+            let h = make_hasher(p, &seed, &root);
+            let adrs = Adrs::new(p.is_sha2);
+
+            let msg = vec![0x55u8; 2 * p.n];
+            let h_out = h.h(&adrs, &msg).unwrap();
+            assert_eq!(h_out.len(), p.n);
+
+            let tl_msg = vec![0x66u8; p.wots_len * p.n];
+            let tl_out = h.t_l(&adrs, &tl_msg).unwrap();
+            assert_eq!(tl_out.len(), p.n);
+        }
+    }
+
+    #[test]
+    fn test_prf_different_sk_different_output() {
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let seed = vec![0xAAu8; p.n];
+        let root = vec![0xBBu8; p.n];
+        let h = make_hasher(p, &seed, &root);
+        let adrs = Adrs::new(false);
+
+        let sk1 = vec![0x11u8; p.n];
+        let sk2 = vec![0x22u8; p.n];
+        let out1 = h.prf(&adrs, &sk1).unwrap();
+        let out2 = h.prf(&adrs, &sk2).unwrap();
+        assert_ne!(out1, out2, "different sk_seed should produce different PRF");
+    }
+
+    #[test]
+    fn test_h_msg_different_messages_different_output() {
+        let p = get_params(SlhDsaParamId::Sha2128f);
+        let seed = vec![0xAAu8; p.n];
+        let root = vec![0xBBu8; p.n];
+        let h = make_hasher(p, &seed, &root);
+
+        let r = vec![0x11u8; p.n];
+        let out1 = h.h_msg(&r, b"message A").unwrap();
+        let out2 = h.h_msg(&r, b"message B").unwrap();
+        assert_eq!(out1.len(), p.m);
+        assert_eq!(out2.len(), p.m);
+        assert_ne!(
+            out1, out2,
+            "different messages should produce different h_msg"
+        );
+    }
+
+    #[test]
     fn test_make_hasher_n_m_values() {
         // SHAKE mode
         let p = get_params(SlhDsaParamId::Shake128f);

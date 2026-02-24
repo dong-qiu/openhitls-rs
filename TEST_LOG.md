@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,954** (50 ignored) |
-| **Test growth** | 1,104 → 2,954 (+168% since baseline) |
+| **Total tests** | **3,036** (50 ignored) |
+| **Test growth** | 1,104 → 3,036 (+175% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,954 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 3,036 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -2650,14 +2650,41 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 4 | Phase 96 — P-256 Fast Path | 47 | ecc/p256_field.rs, ecc/p256_point.rs | Montgomery roundtrip, algebraic laws, Jacobian point ops, cross-validation with BigNum |
 | 5 | Phase 97 — ChaCha20 SIMD | 3 (aarch64) | chacha20/chacha20_neon.rs | RFC 8439 vector, counter-zero, all-0xFF key NEON-vs-scalar |
 
-**Per-crate counts after Phase 97**:
+**Per-crate counts after Phase 97**: (see Phase T129 below for latest)
+
+---
+
+### Phase T129: SLH-DSA Params + Hash Abstraction + Address Scheme Deepening (+15 tests, 3,021→3,036)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three SLH-DSA (FIPS 205) internal modules: params.rs (289 lines, 2→7 tests), hash.rs (381 lines, 4→9 tests), address.rs (238 lines, 4→9 tests).
+
+| # | Test | File | Property |
+|---|------|------|----------|
+| 1 | `test_sha2_shake_pairs_identical_except_mode` | params.rs | SHA2/SHAKE pairs identical except is_sha2 flag |
+| 2 | `test_security_category_mapping` | params.rs | n=16→cat1, n=24→cat3, n=32→cat5 |
+| 3 | `test_s_vs_f_signature_size` | params.rs | s variant sig_bytes < f variant, s.d < f.d |
+| 4 | `test_all_twelve_params_accessible` | params.rs | All 12 IDs return valid non-zero params |
+| 5 | `test_m_greater_than_n` | params.rs | m > n for all parameter sets |
+| 6 | `test_sha2_cat3_h_uses_sha512` | hash.rs | sec_cat 3/5 use SHA-512 path for H function |
+| 7 | `test_shake_vs_sha2_different_outputs` | hash.rs | SHAKE vs SHA-2 produce different outputs |
+| 8 | `test_h_and_t_l_output_lengths` | hash.rs | h() and t_l() produce n-byte outputs |
+| 9 | `test_prf_different_sk_different_output` | hash.rs | Different sk_seed → different PRF output |
+| 10 | `test_h_msg_different_messages_different_output` | hash.rs | Different messages → different h_msg output |
+| 11 | `test_adrs_new_all_zeros` | address.rs | new(false)→32 zeros, new(true)→22 zeros |
+| 12 | `test_all_adrs_types` | address.rs | All 7 AdrsType values correct in both modes |
+| 13 | `test_adrs_clone_independence` | address.rs | Clone mutation doesn't affect original |
+| 14 | `test_field_overlap_height_chain` | address.rs | tree_height/chain_addr same field2 offset |
+| 15 | `test_hash_addr_tree_index_same_offset` | address.rs | hash_addr/tree_index same field3 offset |
+
+**Per-crate counts after Phase T129**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
 | hitls-auth | 33 | 0 |
 | hitls-bignum | 64 | 0 |
 | hitls-cli | 117 | 5 |
-| hitls-crypto | 885 | 41 |
+| hitls-crypto | 900 | 41 |
 | wycheproof | 15 | 0 |
 | hitls-integration | 149 | 3 |
 | hitls-pki | 374 | 1 |
@@ -2665,7 +2692,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | hitls-types | 26 | 0 |
 | hitls-utils | 66 | 0 |
 | doc-tests | 2 | 0 |
-| **Total** | **3021** | **50** |
+| **Total** | **3036** | **50** |
 
 ---
 
@@ -2674,9 +2701,9 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 3,021 tests pass
+# Full test suite — all 3,036 tests pass
 cargo test --workspace --all-features
-# Result: 3,021 passed, 0 failed, 50 ignored
+# Result: 3,036 passed, 0 failed, 50 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

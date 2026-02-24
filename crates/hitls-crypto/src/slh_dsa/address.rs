@@ -126,6 +126,101 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_adrs_new_all_zeros() {
+        let uncomp = Adrs::new(false);
+        assert_eq!(uncomp.as_bytes().len(), 32);
+        assert!(uncomp.as_bytes().iter().all(|&b| b == 0));
+
+        let comp = Adrs::new(true);
+        assert_eq!(comp.as_bytes().len(), 22);
+        assert!(comp.as_bytes().iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn test_all_adrs_types() {
+        let types = [
+            (AdrsType::WotsHash, 0u32),
+            (AdrsType::WotsPk, 1),
+            (AdrsType::Tree, 2),
+            (AdrsType::ForsTree, 3),
+            (AdrsType::ForsRoots, 4),
+            (AdrsType::WotsPrf, 5),
+            (AdrsType::ForsPrf, 6),
+        ];
+        for (ty, expected_val) in &types {
+            // Uncompressed: type at [16:20]
+            let mut a = Adrs::new(false);
+            a.set_type(*ty);
+            assert_eq!(
+                &a.as_bytes()[16..20],
+                &expected_val.to_be_bytes(),
+                "uncompressed type mismatch for {expected_val}"
+            );
+
+            // Compressed: type at [9]
+            let mut c = Adrs::new(true);
+            c.set_type(*ty);
+            assert_eq!(c.as_bytes()[9], *expected_val as u8);
+        }
+    }
+
+    #[test]
+    fn test_adrs_clone_independence() {
+        let mut orig = Adrs::new(false);
+        orig.set_layer_addr(10);
+        orig.set_tree_addr(200);
+        orig.set_type(AdrsType::WotsHash);
+        orig.set_key_pair_addr(5);
+
+        let mut cloned = orig.clone();
+        cloned.set_layer_addr(99);
+        cloned.set_key_pair_addr(77);
+
+        // Original unchanged
+        assert_eq!(&orig.as_bytes()[0..4], &10u32.to_be_bytes());
+        assert_eq!(&orig.as_bytes()[20..24], &5u32.to_be_bytes());
+        // Clone modified
+        assert_eq!(&cloned.as_bytes()[0..4], &99u32.to_be_bytes());
+        assert_eq!(&cloned.as_bytes()[20..24], &77u32.to_be_bytes());
+    }
+
+    #[test]
+    fn test_field_overlap_height_chain() {
+        // set_tree_height and set_chain_addr write to the same offset (field2)
+        let mut a1 = Adrs::new(false);
+        a1.set_tree_height(42);
+        let mut a2 = Adrs::new(false);
+        a2.set_chain_addr(42);
+        assert_eq!(&a1.as_bytes()[24..28], &a2.as_bytes()[24..28]);
+
+        // Compressed mode
+        let mut c1 = Adrs::new(true);
+        c1.set_tree_height(42);
+        let mut c2 = Adrs::new(true);
+        c2.set_chain_addr(42);
+        assert_eq!(&c1.as_bytes()[14..18], &c2.as_bytes()[14..18]);
+    }
+
+    #[test]
+    fn test_hash_addr_tree_index_same_offset() {
+        // set_hash_addr and set_tree_index write to the same offset (field3)
+        let mut a1 = Adrs::new(false);
+        a1.set_hash_addr(123);
+        let mut a2 = Adrs::new(false);
+        a2.set_tree_index(123);
+        assert_eq!(&a1.as_bytes()[28..32], &a2.as_bytes()[28..32]);
+        assert_eq!(a1.get_tree_index(), 123);
+        assert_eq!(a2.get_tree_index(), 123);
+
+        // Compressed
+        let mut c1 = Adrs::new(true);
+        c1.set_hash_addr(456);
+        let mut c2 = Adrs::new(true);
+        c2.set_tree_index(456);
+        assert_eq!(&c1.as_bytes()[18..22], &c2.as_bytes()[18..22]);
+    }
+
+    #[test]
     fn test_adrs_uncompressed_set_get() {
         let mut adrs = Adrs::new(false);
         adrs.set_layer_addr(5);

@@ -12,7 +12,7 @@
 | Layer | Mechanism | Coverage | Status |
 |:-----:|-----------|----------|:------:|
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | Complete |
-| **L2** | Unit Tests | 3,021 tests (50 ignored), 100% pass rate | Comprehensive |
+| **L2** | Unit Tests | 3,036 tests (50 ignored), 100% pass rate | Comprehensive |
 | **L3** | Integration Tests | 149 cross-crate tests (TCP loopback + DTLS resilience) | Good |
 | **L4** | Fuzz Testing | 10 fuzz targets + 66 seed corpus files | Parse-only |
 | **L5** | Security Audit | rustsec/audit-check + Miri (bignum/utils) + cargo-tarpaulin coverage | Good |
@@ -36,8 +36,8 @@ GitHub Actions (.github/workflows/ci.yml)
 
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
-| hitls-tls | 1,290 | 0 | 42.7% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat |
-| hitls-crypto | 885 | 41 | 29.3% | 48 algorithm modules + hardware acceleration (AES/SHA-2/GHASH/ChaCha20) + P-256 fast path + proptest |
+| hitls-tls | 1,290 | 0 | 42.5% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat |
+| hitls-crypto | 900 | 41 | 29.6% | 48 algorithm modules + hardware acceleration (AES/SHA-2/GHASH/ChaCha20) + P-256 fast path + proptest |
 | hitls-pki | 374 | 1 | 13.2% | X.509, PKCS#8/12, CMS (5 content types), encoding helpers |
 | hitls-integration | 149 | 3 | 5.3% | Cross-crate TCP loopback, error scenarios, concurrency, DTLS resilience |
 | hitls-cli | 117 | 5 | 4.1% | 14 CLI commands |
@@ -47,7 +47,7 @@ GitHub Actions (.github/workflows/ci.yml)
 | hitls-types | 26 | 0 | 0.9% | Enum definitions, error types |
 | Wycheproof | 15 | 0 | 0.5% | 5,000+ vectors across 15 test groups |
 | Doc-tests | 2 | 0 | 0.1% | API documentation examples |
-| **Total** | **3,021** | **50** | **100%** | |
+| **Total** | **3,036** | **50** | **100%** | |
 
 ### 1.4 Standard Compliance Coverage
 

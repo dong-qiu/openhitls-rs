@@ -215,6 +215,105 @@ mod tests {
     use super::*;
     use hitls_types::SlhDsaParamId;
 
+    const ALL_IDS: [SlhDsaParamId; 12] = [
+        SlhDsaParamId::Sha2128s,
+        SlhDsaParamId::Shake128s,
+        SlhDsaParamId::Sha2128f,
+        SlhDsaParamId::Shake128f,
+        SlhDsaParamId::Sha2192s,
+        SlhDsaParamId::Shake192s,
+        SlhDsaParamId::Sha2192f,
+        SlhDsaParamId::Shake192f,
+        SlhDsaParamId::Sha2256s,
+        SlhDsaParamId::Shake256s,
+        SlhDsaParamId::Sha2256f,
+        SlhDsaParamId::Shake256f,
+    ];
+
+    #[test]
+    fn test_sha2_shake_pairs_identical_except_mode() {
+        // Params come in SHA2/SHAKE pairs: indices 0/1, 2/3, 4/5, 6/7, 8/9, 10/11
+        for chunk in ALL_IDS.chunks(2) {
+            let sha2 = get_params(chunk[0]);
+            let shake = get_params(chunk[1]);
+            assert_eq!(sha2.n, shake.n);
+            assert_eq!(sha2.h, shake.h);
+            assert_eq!(sha2.d, shake.d);
+            assert_eq!(sha2.hp, shake.hp);
+            assert_eq!(sha2.a, shake.a);
+            assert_eq!(sha2.k, shake.k);
+            assert_eq!(sha2.m, shake.m);
+            assert_eq!(sha2.wots_len, shake.wots_len);
+            assert_eq!(sha2.sig_bytes, shake.sig_bytes);
+            assert_eq!(sha2.sec_category, shake.sec_category);
+            assert!(sha2.is_sha2);
+            assert!(!shake.is_sha2);
+        }
+    }
+
+    #[test]
+    fn test_security_category_mapping() {
+        for id in &ALL_IDS {
+            let p = get_params(*id);
+            match p.n {
+                16 => assert_eq!(p.sec_category, 1, "n=16 should be cat 1"),
+                24 => assert_eq!(p.sec_category, 3, "n=24 should be cat 3"),
+                32 => assert_eq!(p.sec_category, 5, "n=32 should be cat 5"),
+                _ => panic!("unexpected n={}", p.n),
+            }
+        }
+    }
+
+    #[test]
+    fn test_s_vs_f_signature_size() {
+        // "s" (small) variants have smaller signatures than "f" (fast) variants
+        let pairs = [
+            (SlhDsaParamId::Sha2128s, SlhDsaParamId::Sha2128f),
+            (SlhDsaParamId::Sha2192s, SlhDsaParamId::Sha2192f),
+            (SlhDsaParamId::Sha2256s, SlhDsaParamId::Sha2256f),
+            (SlhDsaParamId::Shake128s, SlhDsaParamId::Shake128f),
+            (SlhDsaParamId::Shake192s, SlhDsaParamId::Shake192f),
+            (SlhDsaParamId::Shake256s, SlhDsaParamId::Shake256f),
+        ];
+        for (s_id, f_id) in &pairs {
+            let s = get_params(*s_id);
+            let f = get_params(*f_id);
+            assert!(
+                s.sig_bytes < f.sig_bytes,
+                "s variant ({}) should have smaller sig than f variant ({})",
+                s.sig_bytes,
+                f.sig_bytes
+            );
+            // f variant has more layers (higher d) for faster signing
+            assert!(s.d < f.d, "s.d ({}) should be < f.d ({})", s.d, f.d);
+        }
+    }
+
+    #[test]
+    fn test_all_twelve_params_accessible() {
+        assert_eq!(ALL_IDS.len(), 12);
+        for id in &ALL_IDS {
+            let p = get_params(*id);
+            assert!(p.n > 0);
+            assert!(p.h > 0);
+            assert!(p.d > 0);
+            assert!(p.sig_bytes > 0);
+        }
+    }
+
+    #[test]
+    fn test_m_greater_than_n() {
+        for id in &ALL_IDS {
+            let p = get_params(*id);
+            assert!(
+                p.m > p.n,
+                "m ({}) should be > n ({}) for message digest security",
+                p.m,
+                p.n
+            );
+        }
+    }
+
     #[test]
     fn test_params_fips205_table2_values() {
         // Shake128f

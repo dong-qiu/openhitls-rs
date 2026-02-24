@@ -2562,6 +2562,24 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 ---
 
+## Phase T129: SLH-DSA Params + Hash Abstraction + Address Scheme Deepening
+
+**Prompt**: Continue implementing Phase T129. Deepen test coverage for three SLH-DSA (FIPS 205) internal modules: params.rs (289 lines, 2 tests), hash.rs (381 lines, 4 tests), address.rs (238 lines, 4 tests).
+
+**Scope**: SLH-DSA parameter set invariants (SHA2/SHAKE pairs, security category mapping, s-vs-f signature sizes, m>n relationship), hash abstraction behavior (SHA-512 path for cat3/5, SHAKE vs SHA-2 divergence, output lengths, PRF sensitivity, h_msg sensitivity), address scheme correctness (compressed/uncompressed initialization, all 7 AdrsType values, clone independence, field2/field3 offset overlaps).
+
+**Work performed**:
+1. Added 5 params tests to `crates/hitls-crypto/src/slh_dsa/params.rs`: SHA2/SHAKE pair equivalence, security category mapping, s-vs-f signature sizes, all 12 IDs accessible, m > n
+2. Added 5 hash tests to `crates/hitls-crypto/src/slh_dsa/hash.rs`: SHA-512 cat3/5 path, SHAKE vs SHA-2 different outputs, h/t_l output lengths, PRF sk_seed sensitivity, h_msg message sensitivity
+3. Added 5 address tests to `crates/hitls-crypto/src/slh_dsa/address.rs`: new all-zeros, all AdrsType values, clone independence, field2 height/chain overlap, field3 hash/index overlap
+4. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-crypto: 824→839 (41 ignored unchanged), total: 2954→2969 (50 ignored unchanged).
+- All 2969 workspace tests pass, 0 clippy warnings, formatting clean.
+
+---
+
 ## Phase T128: BigNum Constant-Time + Primality Testing + Core Type Deepening
 
 **Prompt**: Continue implementing Phase T128. Deepen test coverage for three hitls-bignum core modules: constant-time operations (ct.rs, 136 lines, 3 tests), primality testing (prime.rs, 101 lines, 3 tests), core BigNum type (bignum.rs, 324 lines, 4 tests).

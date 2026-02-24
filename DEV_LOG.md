@@ -8597,6 +8597,32 @@ Added 15 tests across 3 files (12 non-ignored + 3 ignored):
 
 ---
 
+## Phase T129: SLH-DSA Params + Hash Abstraction + Address Scheme Deepening (+15 tests, 2,954→2,969)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three SLH-DSA (FIPS 205) internal modules with existing but low test density: params.rs (289 lines, 2 tests), hash.rs (381 lines, 4 tests), address.rs (238 lines, 4 tests).
+
+### Summary
+
+Added 15 tests across 3 SLH-DSA internal modules validating parameter set invariants, hash function behavior, and address scheme correctness:
+
+- **SLH-DSA params** (5 tests): SHA2/SHAKE pairs identical except is_sha2 mode flag, security category mapping (n=16→cat1, n=24→cat3, n=32→cat5), s variants have smaller signatures than f variants (sig_bytes and d), all 12 parameter sets accessible with non-zero fields, m > n for all parameter sets
+- **SLH-DSA hash** (5 tests): SHA-2 category 3/5 uses SHA-512 for H function, SHAKE vs SHA-2 produce different outputs for same inputs, h() and t_l() produce n-byte outputs for multiple parameter sets, different sk_seed → different PRF output, different messages → different h_msg output
+- **SLH-DSA address** (5 tests): new() all-zeros initialization for both compressed (22 bytes) and uncompressed (32 bytes), all 7 AdrsType values set correctly in both modes, clone independence (mutation doesn't affect original), tree_height/chain_addr write to same field2 offset, hash_addr/tree_index write to same field3 offset
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/slh_dsa/params.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/slh_dsa/hash.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/slh_dsa/address.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2969 passed, 0 failed, 50 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
 ## Phase T128: BigNum Constant-Time + Primality Testing + Core Type Deepening (+15 tests, 2,939→2,954)
 
 **Date**: 2026-02-24
