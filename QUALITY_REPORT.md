@@ -12,7 +12,7 @@
 | Layer | Mechanism | Coverage | Status |
 |:-----:|-----------|----------|:------:|
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | Complete |
-| **L2** | Unit Tests | 2,939 tests (50 ignored), 100% pass rate | Comprehensive |
+| **L2** | Unit Tests | 2,954 tests (50 ignored), 100% pass rate | Comprehensive |
 | **L3** | Integration Tests | 149 cross-crate tests (TCP loopback + DTLS resilience) | Good |
 | **L4** | Fuzz Testing | 10 fuzz targets + 66 seed corpus files | Parse-only |
 | **L5** | Security Audit | rustsec/audit-check + Miri (bignum/utils) + cargo-tarpaulin coverage | Good |
@@ -42,12 +42,12 @@ GitHub Actions (.github/workflows/ci.yml)
 | hitls-integration | 149 | 3 | 5.3% | Cross-crate TCP loopback, error scenarios, concurrency, DTLS resilience |
 | hitls-cli | 117 | 5 | 4.1% | 14 CLI commands |
 | hitls-utils | 66 | 0 | 2.3% | ASN.1, Base64, PEM, OID, proptest roundtrips |
-| hitls-bignum | 49 | 0 | 1.7% | Montgomery, Miller-Rabin, modular arithmetic |
+| hitls-bignum | 64 | 0 | 2.2% | Montgomery, Miller-Rabin, modular arithmetic, constant-time |
 | hitls-auth | 33 | 0 | 1.2% | HOTP/TOTP, SPAKE2+, Privacy Pass |
 | hitls-types | 26 | 0 | 0.9% | Enum definitions, error types |
 | Wycheproof | 15 | 0 | 0.5% | 5,000+ vectors across 15 test groups |
 | Doc-tests | 2 | 0 | 0.1% | API documentation examples |
-| **Total** | **2,939** | **50** | **100%** | |
+| **Total** | **2,954** | **50** | **100%** | |
 
 ### 1.4 Standard Compliance Coverage
 
@@ -243,9 +243,10 @@ Phase T124         +15      —            McEliece GF + Benes + matrix deepenin
 Phase T125         +12      —            FrodoKEM matrix + SLH-DSA hypertree + poly  ✅
 Phase T126         +15      —            McEliece + FrodoKEM + XMSS params deepening ✅
 Phase T127         +15      —            XMSS hash + address + ML-KEM NTT deepening  ✅
+Phase T128         +15      —            BigNum CT + primality + core type deepening  ✅
 ```
 
-**Result**: 2,585 → 2,939 tests (+354), all planned deficiencies addressed.
+**Result**: 2,585 → 2,954 tests (+369), all planned deficiencies addressed.
 
 ### 3.2 Phase T102 — 0-RTT Early Data + Replay Protection (~8 tests) ✅
 

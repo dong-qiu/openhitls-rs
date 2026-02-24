@@ -8597,6 +8597,32 @@ Added 15 tests across 3 files (12 non-ignored + 3 ignored):
 
 ---
 
+## Phase T128: BigNum Constant-Time + Primality Testing + Core Type Deepening (+15 tests, 2,939→2,954)
+
+**Date**: 2026-02-24
+**Scope**: Deepen test coverage for three hitls-bignum core modules: constant-time operations (ct.rs, 136 lines, 3 tests), primality testing (prime.rs, 101 lines, 3 tests), core BigNum type (bignum.rs, 324 lines, 4 tests).
+
+### Summary
+
+Added 15 tests across 3 BigNum core modules validating constant-time security properties, primality detection accuracy, and core type operations:
+
+- **Constant-time ops** (5 tests): ct_eq with different limb counts and multi-limb values, ct_eq with negative numbers and negative-zero normalization, ct_select sign preservation for negative values, ct_sub_if_gte with multi-limb (>2^64) values, ConstantTimeEq trait implementation consistency
+- **Primality testing** (5 tests): zero not prime (early return), negative not prime, even composites (4/6/8/100/1000/10000), medium primes (53/97/997/7919/104729), Carmichael numbers (561/1105) detected as composite
+- **Core BigNum** (5 tests): get_bit/set_bit with auto-extend and out-of-range, is_one/is_even/is_odd predicates, negative sign and Ord ordering (-5<-3<0<5), from_bytes_be edge cases (empty/single/leading-zeros/>64-bit), from_limbs normalization (trailing zeros/empty/multi-limb)
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-bignum/src/ct.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-bignum/src/prime.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-bignum/src/bignum.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2954 passed, 0 failed, 50 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
 ## Phase T127: XMSS Hash Abstraction + XMSS Address Scheme + ML-KEM NTT Deepening (+15 tests, 2,924→2,939)
 
 **Date**: 2026-02-24

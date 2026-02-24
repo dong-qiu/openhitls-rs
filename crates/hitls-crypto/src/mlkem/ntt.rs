@@ -245,8 +245,8 @@ mod tests {
     #[test]
     fn test_to_mont_and_reduce_poly() {
         let mut f = [0i16; N];
-        for i in 0..N {
-            f[i] = (i as i16 % Q).min(Q - 1);
+        for (i, coeff) in f.iter_mut().enumerate() {
+            *coeff = (i as i16 % Q).min(Q - 1);
         }
 
         // to_mont multiplies by R mod q
@@ -292,13 +292,9 @@ mod tests {
         }
 
         // All entries distinct (zetas are distinct roots of unity)
-        for i in 0..ZETAS.len() {
-            for j in (i + 1)..ZETAS.len() {
-                assert_ne!(
-                    ZETAS[i], ZETAS[j],
-                    "ZETAS[{i}]={} should differ from ZETAS[{j}]={}",
-                    ZETAS[i], ZETAS[j]
-                );
+        for (i, &zi) in ZETAS.iter().enumerate() {
+            for (j, &zj) in ZETAS.iter().enumerate().skip(i + 1) {
+                assert_ne!(zi, zj, "ZETAS[{i}]={zi} should differ from ZETAS[{j}]={zj}");
             }
         }
     }

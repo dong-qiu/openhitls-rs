@@ -96,6 +96,90 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_ct_eq_different_lengths() {
+        // Same value but potentially different limb counts
+        let a = BigNum::from_u64(42);
+        let b = BigNum::from_limbs(vec![42, 0, 0]); // extra zero limbs get normalized
+        assert_eq!(a.ct_eq(&b).unwrap_u8(), 1);
+
+        // Large multi-limb value
+        let bytes = vec![0x01; 16]; // 128-bit value
+        let c = BigNum::from_bytes_be(&bytes);
+        let d = BigNum::from_bytes_be(&bytes);
+        assert_eq!(c.ct_eq(&d).unwrap_u8(), 1);
+
+        // Zero with different representations
+        let z1 = BigNum::zero();
+        let z2 = BigNum::from_u64(0);
+        assert_eq!(z1.ct_eq(&z2).unwrap_u8(), 1);
+    }
+
+    #[test]
+    fn test_ct_eq_negative() {
+        let mut neg5 = BigNum::from_u64(5);
+        neg5.set_negative(true);
+        let mut neg5b = BigNum::from_u64(5);
+        neg5b.set_negative(true);
+        let pos5 = BigNum::from_u64(5);
+
+        // -5 == -5
+        assert_eq!(neg5.ct_eq(&neg5b).unwrap_u8(), 1);
+        // -5 != 5
+        assert_eq!(neg5.ct_eq(&pos5).unwrap_u8(), 0);
+
+        // -0 == 0 (is_negative returns false for zero regardless of sign flag)
+        let mut neg0 = BigNum::zero();
+        neg0.set_negative(true);
+        let pos0 = BigNum::zero();
+        // Both should report is_negative() as false
+        assert!(!neg0.is_negative());
+        assert_eq!(neg0.ct_eq(&pos0).unwrap_u8(), 1);
+    }
+
+    #[test]
+    fn test_ct_select_negative() {
+        let pos = BigNum::from_u64(10);
+        let mut neg = BigNum::from_u64(20);
+        neg.set_negative(true);
+
+        let r0 = BigNum::ct_select(&pos, &neg, Choice::from(0));
+        assert_eq!(r0, pos);
+        assert!(!r0.is_negative());
+
+        let r1 = BigNum::ct_select(&pos, &neg, Choice::from(1));
+        assert_eq!(r1, neg);
+        assert!(r1.is_negative());
+    }
+
+    #[test]
+    fn test_ct_sub_if_gte_multi_limb() {
+        // Multi-limb: 2^64 + 100
+        let mut big = BigNum::from_limbs(vec![100, 1]);
+        let modulus = BigNum::from_limbs(vec![50, 1]); // 2^64 + 50
+
+        // big (2^64+100) >= modulus (2^64+50), should subtract → 50
+        let result = big.ct_sub_if_gte(&modulus);
+        assert_eq!(result, BigNum::from_u64(50));
+
+        // Smaller than modulus: should keep original
+        big = BigNum::from_u64(10);
+        let result2 = big.ct_sub_if_gte(&modulus);
+        assert_eq!(result2, BigNum::from_u64(10));
+    }
+
+    #[test]
+    fn test_constant_time_eq_trait() {
+        use subtle::ConstantTimeEq;
+        let a = BigNum::from_u64(12345);
+        let b = BigNum::from_u64(12345);
+        let c = BigNum::from_u64(54321);
+
+        // Trait method should work the same as inherent method
+        assert_eq!(ConstantTimeEq::ct_eq(&a, &b).unwrap_u8(), 1);
+        assert_eq!(ConstantTimeEq::ct_eq(&a, &c).unwrap_u8(), 0);
+    }
+
+    #[test]
     fn test_ct_eq() {
         let a = BigNum::from_u64(42);
         let b = BigNum::from_u64(42);

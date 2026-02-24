@@ -2562,6 +2562,24 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 ---
 
+## Phase T128: BigNum Constant-Time + Primality Testing + Core Type Deepening
+
+**Prompt**: Continue implementing Phase T128. Deepen test coverage for three hitls-bignum core modules: constant-time operations (ct.rs, 136 lines, 3 tests), primality testing (prime.rs, 101 lines, 3 tests), core BigNum type (bignum.rs, 324 lines, 4 tests).
+
+**Scope**: BigNum constant-time equality/select/conditional-subtraction with multi-limb and negative numbers, Miller-Rabin primality testing for edge cases (zero, negative, even composites, Carmichael numbers), core BigNum bit operations/predicates/ordering/serialization.
+
+**Work performed**:
+1. Added 5 constant-time tests to `crates/hitls-bignum/src/ct.rs`: ct_eq different lengths, ct_eq negative, ct_select negative, ct_sub_if_gte multi-limb, ConstantTimeEq trait
+2. Added 5 primality tests to `crates/hitls-bignum/src/prime.rs`: zero not prime, negative not prime, even composites, medium primes, Carmichael composites
+3. Added 5 core BigNum tests to `crates/hitls-bignum/src/bignum.rs`: bit operations, is predicates, negative ordering, from_bytes_be edge cases, from_limbs normalize
+4. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-bignum: 49→64 (0 ignored unchanged), total: 2939→2954 (50 ignored unchanged).
+- All 2954 workspace tests pass, 0 clippy warnings, formatting clean.
+
+---
+
 ## Phase T127: XMSS Hash Abstraction + XMSS Address Scheme + ML-KEM NTT Deepening
 
 **Prompt**: Continue implementing Phase T127. Deepen test coverage for three PQC internal modules with low test density: XMSS hash abstraction (hash.rs, 247 lines, 2 tests), XMSS address scheme (address.rs, 120 lines, 2 tests), ML-KEM NTT (ntt.rs, 229 lines, 3 tests).

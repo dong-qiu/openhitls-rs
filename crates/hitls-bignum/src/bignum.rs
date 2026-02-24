@@ -287,6 +287,109 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_bit_operations() {
+        let n = BigNum::from_u64(0b1010_1100); // 172
+        assert_eq!(n.get_bit(0), 0);
+        assert_eq!(n.get_bit(2), 1);
+        assert_eq!(n.get_bit(3), 1);
+        assert_eq!(n.get_bit(5), 1);
+        assert_eq!(n.get_bit(7), 1);
+        // Out-of-range returns 0
+        assert_eq!(n.get_bit(100), 0);
+        assert_eq!(n.get_bit(1000), 0);
+
+        // set_bit extends limbs if needed
+        let mut m = BigNum::zero();
+        m.set_bit(0);
+        assert_eq!(m, BigNum::from_u64(1));
+        m.set_bit(7);
+        assert_eq!(m, BigNum::from_u64(129)); // 2^7 + 1 = 129
+                                              // Set a bit beyond current limbs
+        m.set_bit(128);
+        assert_eq!(m.get_bit(128), 1);
+        assert_eq!(m.get_bit(0), 1);
+    }
+
+    #[test]
+    fn test_is_predicates() {
+        assert!(BigNum::from_u64(1).is_one());
+        assert!(!BigNum::from_u64(0).is_one());
+        assert!(!BigNum::from_u64(2).is_one());
+
+        assert!(BigNum::from_u64(0).is_even());
+        assert!(BigNum::from_u64(2).is_even());
+        assert!(BigNum::from_u64(100).is_even());
+        assert!(!BigNum::from_u64(1).is_even());
+        assert!(!BigNum::from_u64(99).is_even());
+
+        assert!(BigNum::from_u64(1).is_odd());
+        assert!(BigNum::from_u64(3).is_odd());
+        assert!(!BigNum::from_u64(0).is_odd());
+        assert!(!BigNum::from_u64(4).is_odd());
+    }
+
+    #[test]
+    fn test_negative_and_ordering() {
+        let mut neg5 = BigNum::from_u64(5);
+        neg5.set_negative(true);
+        let mut neg3 = BigNum::from_u64(3);
+        neg3.set_negative(true);
+        let pos5 = BigNum::from_u64(5);
+        let zero = BigNum::zero();
+
+        // -5 < -3 < 0 < 5
+        assert!(neg5 < neg3);
+        assert!(neg3 < zero);
+        assert!(zero < pos5);
+        assert!(neg5 < pos5);
+
+        // is_negative flag
+        assert!(neg5.is_negative());
+        assert!(!pos5.is_negative());
+        assert!(!zero.is_negative());
+    }
+
+    #[test]
+    fn test_from_bytes_be_edge_cases() {
+        // Empty bytes → zero
+        let z = BigNum::from_bytes_be(&[]);
+        assert!(z.is_zero());
+
+        // Single byte
+        let one = BigNum::from_bytes_be(&[1]);
+        assert_eq!(one, BigNum::from_u64(1));
+
+        // Leading zero bytes are preserved in input but normalized
+        let n = BigNum::from_bytes_be(&[0x00, 0x00, 0xFF]);
+        assert_eq!(n, BigNum::from_u64(0xFF));
+        assert_eq!(n.to_bytes_be(), vec![0xFF]); // leading zeros stripped
+
+        // Large value (>64 bits)
+        let big_bytes = vec![0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+        let big = BigNum::from_bytes_be(&big_bytes);
+        assert_eq!(big.to_bytes_be(), big_bytes);
+        assert!(big.bit_len() > 64);
+    }
+
+    #[test]
+    fn test_from_limbs_and_normalize() {
+        // Trailing zero limbs get normalized away
+        let n = BigNum::from_limbs(vec![42, 0, 0, 0]);
+        assert_eq!(n.num_limbs(), 1);
+        assert_eq!(n, BigNum::from_u64(42));
+
+        // Empty limbs → zero
+        let z = BigNum::from_limbs(vec![]);
+        assert!(z.is_zero());
+        assert_eq!(z.num_limbs(), 1);
+
+        // Multi-limb preserved when significant
+        let m = BigNum::from_limbs(vec![1, 1]);
+        assert_eq!(m.num_limbs(), 2);
+        assert!(!m.is_zero());
+    }
+
+    #[test]
     fn test_zero() {
         let z = BigNum::zero();
         assert!(z.is_zero());

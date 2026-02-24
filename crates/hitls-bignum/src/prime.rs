@@ -79,6 +79,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_zero_not_prime() {
+        assert!(!BigNum::zero().is_probably_prime(10).unwrap());
+    }
+
+    #[test]
+    fn test_negative_not_prime() {
+        let mut neg = BigNum::from_u64(7);
+        neg.set_negative(true);
+        assert!(!neg.is_probably_prime(10).unwrap());
+    }
+
+    #[test]
+    fn test_even_composites() {
+        for &n in &[4u64, 6, 8, 100, 1000, 10000] {
+            let bn = BigNum::from_u64(n);
+            assert!(
+                !bn.is_probably_prime(10).unwrap(),
+                "{n} should not be prime"
+            );
+        }
+    }
+
+    #[test]
+    fn test_medium_primes() {
+        for &p in &[53u64, 97, 997, 7919, 104729] {
+            let bn = BigNum::from_u64(p);
+            assert!(bn.is_probably_prime(10).unwrap(), "{p} should be prime");
+        }
+    }
+
+    #[test]
+    fn test_carmichael_composite() {
+        // 561 = 3 × 11 × 17 is the smallest Carmichael number
+        let n = BigNum::from_u64(561);
+        assert!(!n.is_probably_prime(15).unwrap(), "561 should not be prime");
+
+        // 1105 = 5 × 13 × 17 is another Carmichael number
+        let n2 = BigNum::from_u64(1105);
+        assert!(
+            !n2.is_probably_prime(15).unwrap(),
+            "1105 should not be prime"
+        );
+    }
+
+    #[test]
     fn test_small_primes() {
         for &p in &SMALL_PRIMES {
             let n = BigNum::from_u64(p);

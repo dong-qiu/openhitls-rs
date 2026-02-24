@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,939** (50 ignored) |
-| **Test growth** | 1,104 → 2,939 (+166% since baseline) |
+| **Total tests** | **2,954** (50 ignored) |
+| **Test growth** | 1,104 → 2,954 (+168% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,939 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 2,954 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -71,6 +71,7 @@ Phase T124  2,897     +15   McEliece GF(2^13) + Benes network + matrix deepening
 Phase T125  2,909     +12   FrodoKEM matrix ops + SLH-DSA hypertree + McEliece poly (*)
 Phase T126  2,924     +15   McEliece + FrodoKEM + XMSS parameter set validation (*)
 Phase T127  2,939     +15   XMSS hash + address + ML-KEM NTT deepening (*)
+Phase T128  2,954     +15   BigNum CT + primality + core type deepening (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -2594,14 +2595,56 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
+### Phase T128: BigNum Constant-Time + Primality Testing + Core Type Deepening (+15 tests, 2,939→2,954)
+
+**Date**: 2026-02-24
+**Scope**: Deepen test coverage for three hitls-bignum core modules: constant-time operations (ct.rs, 136 lines, 3 tests), primality testing (prime.rs, 101 lines, 3 tests), core BigNum type (bignum.rs, 324 lines, 4 tests).
+
+| # | Test | File | Property |
+|---|------|------|----------|
+| 1 | `test_ct_eq_different_lengths` | ct.rs | ct_eq with different limb counts, multi-limb, zero representations |
+| 2 | `test_ct_eq_negative` | ct.rs | -5==-5, -5!=5, -0==0 (negative zero normalization) |
+| 3 | `test_ct_select_negative` | ct.rs | ct_select preserves sign for positive and negative values |
+| 4 | `test_ct_sub_if_gte_multi_limb` | ct.rs | Multi-limb (>2^64) conditional subtraction |
+| 5 | `test_constant_time_eq_trait` | ct.rs | ConstantTimeEq trait impl matches inherent method |
+| 6 | `test_zero_not_prime` | prime.rs | BigNum::zero() is not prime (early return path) |
+| 7 | `test_negative_not_prime` | prime.rs | Negative numbers rejected as not prime |
+| 8 | `test_even_composites` | prime.rs | 4, 6, 8, 100, 1000, 10000 all composite |
+| 9 | `test_medium_primes` | prime.rs | 53, 97, 997, 7919, 104729 all prime |
+| 10 | `test_carmichael_composite` | prime.rs | 561 (3×11×17) and 1105 (5×13×17) detected as composite |
+| 11 | `test_bit_operations` | bignum.rs | get_bit/set_bit, out-of-range returns 0, auto-extend limbs |
+| 12 | `test_is_predicates` | bignum.rs | is_one, is_even, is_odd for various values |
+| 13 | `test_negative_and_ordering` | bignum.rs | -5 < -3 < 0 < 5 ordering, is_negative flag |
+| 14 | `test_from_bytes_be_edge_cases` | bignum.rs | Empty→zero, single byte, leading zeros, >64-bit roundtrip |
+| 15 | `test_from_limbs_and_normalize` | bignum.rs | Trailing zero limbs normalized, empty→zero, multi-limb preserved |
+
+**Per-crate counts after Phase T128**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 64 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 824 | 41 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 374 | 1 |
+| hitls-tls | 1284 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 66 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2954** | **50** |
+
+---
+
 ## 8. Verification & Quality Gates
 
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,939 tests pass
+# Full test suite — all 2,954 tests pass
 cargo test --workspace --all-features
-# Result: 2,939 passed, 0 failed, 50 ignored
+# Result: 2,954 passed, 0 failed, 50 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
