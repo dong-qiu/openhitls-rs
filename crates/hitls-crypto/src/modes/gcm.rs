@@ -70,8 +70,13 @@ impl Gf128 {
 }
 
 /// Precomputed GHASH table (16 entries for 4-bit multiplication).
+/// Also stores the raw H value for hardware-accelerated paths.
 pub(crate) struct GhashTable {
     table: [Gf128; 16],
+    /// Raw hash subkey H (big-endian bytes) for hardware GHASH.
+    h_raw: [u8; 16],
+    /// Whether hardware GHASH is available.
+    use_hw: bool,
 }
 
 impl GhashTable {
@@ -104,11 +109,28 @@ impl GhashTable {
             }
         }
 
-        Self { table }
+        let use_hw = detect_ghash_hw();
+        Self {
+            table,
+            h_raw: *h,
+            use_hw,
+        }
     }
 
     /// GHASH multiplication: result = result XOR block, then multiply by H.
+    /// Uses hardware acceleration (PMULL/PCLMULQDQ) when available.
     pub(crate) fn ghash_block(&self, state: &mut Gf128, block: &[u8; 16]) {
+        if self.use_hw {
+            let mut state_bytes = state.to_bytes();
+            ghash_block_hw(&self.h_raw, &mut state_bytes, block);
+            *state = Gf128::from_bytes(&state_bytes);
+            return;
+        }
+        self.ghash_block_soft(state, block);
+    }
+
+    /// Software-only GHASH block multiply (4-bit table lookup).
+    fn ghash_block_soft(&self, state: &mut Gf128, block: &[u8; 16]) {
         let input = Gf128::from_bytes(block);
         let mut z = Gf128::default();
         let x = state.xor(input);
@@ -141,6 +163,48 @@ impl GhashTable {
             block[..chunk.len()].copy_from_slice(chunk);
             self.ghash_block(state, &block);
         }
+    }
+}
+
+/// Detect whether hardware GHASH is available.
+fn detect_ghash_hw() -> bool {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("aes") {
+            return true;
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("pclmulqdq") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Hardware-accelerated GHASH block multiply (dispatches to platform intrinsics).
+#[inline]
+fn ghash_block_hw(h: &[u8; 16], state: &mut [u8; 16], block: &[u8; 16]) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: detect_ghash_hw() verified "aes" feature (includes PMULL)
+        unsafe {
+            super::ghash_arm::ghash_block_arm(h, state, block);
+        }
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY: detect_ghash_hw() verified "pclmulqdq" feature
+        unsafe {
+            super::ghash_x86::ghash_block_x86(h, state, block);
+        }
+        return;
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (h, state, block);
     }
 }
 

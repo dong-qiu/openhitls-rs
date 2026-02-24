@@ -11,6 +11,10 @@ pub mod cfb;
 pub mod ctr;
 pub mod ecb;
 pub mod gcm;
+#[cfg(target_arch = "aarch64")]
+mod ghash_arm;
+#[cfg(target_arch = "x86_64")]
+mod ghash_x86;
 pub mod hctr;
 pub mod ofb;
 pub mod wrap;
