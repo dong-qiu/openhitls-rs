@@ -2527,3 +2527,19 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 3 source files modified, 0 files created. hitls-pki: 349→354, hitls-crypto: 714→719, hitls-utils: 61→66, total: 2799→2814.
 - All 2814 workspace tests pass, 0 clippy warnings, formatting clean.
+
+## Phase T119: PKI Encoding Helpers + X.509 Signing Dispatch + Certificate Builder Encoding
+
+**Prompt**: Implement Phase T119 — PKI Encoding Helpers + X.509 Signing Dispatch + Certificate Builder Encoding. Add 5 encoding helper tests (enc_seq, enc_octet, enc_null, enc_explicit_ctx, bytes_to_u32). Add 5 signing dispatch tests (compute_hash SHA-256/384/1 empty-input vectors, curve_id_to_oid known curves roundtrip, unsupported curve error). Add 5 builder encoding tests (encode_distinguished_name CN, encode_algorithm_identifier with/without NULL, encode_validity roundtrip, encode_extensions critical flag).
+
+**Scope**: Three core PKI infrastructure files had zero test coverage: encoding.rs (80 lines, shared ASN.1 encoding helpers used across all PKI modules), signing.rs (330 lines, hash dispatch + curve OID mapping critical for certificate signature verification), builder.rs (526 lines, DER encoding for DN/AlgorithmIdentifier/SPKI/validity/extensions).
+
+**Work performed**:
+1. Added 5 encoding helper tests to `crates/hitls-pki/src/encoding.rs`: enc_seq SEQUENCE wrapping, enc_octet OCTET STRING, enc_null NULL, enc_explicit_ctx context [0], bytes_to_u32 various lengths
+2. Added 5 signing dispatch tests to `crates/hitls-pki/src/x509/signing.rs`: compute_hash SHA-256/384/1 with NIST empty-input vectors, curve_id_to_oid P-256/384/521 roundtrip, Sm2Prime256 unsupported error
+3. Added 5 builder encoding tests to `crates/hitls-pki/src/x509/builder.rs`: encode_distinguished_name CN, encode_algorithm_identifier with NULL, without params, encode_validity Decoder roundtrip, encode_extensions critical BOOLEAN TRUE
+4. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-pki: 354→369, total: 2814→2829.
+- All 2829 workspace tests pass, 0 clippy warnings, formatting clean.

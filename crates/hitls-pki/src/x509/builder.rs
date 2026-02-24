@@ -524,3 +524,103 @@ impl Default for CertificateBuilder {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hitls_utils::asn1::Decoder;
+
+    #[test]
+    fn test_encode_distinguished_name_cn() {
+        let dn = DistinguishedName {
+            entries: vec![("CN".to_string(), "Test".to_string())],
+        };
+        let der = encode_distinguished_name(&dn);
+        // Must start with SEQUENCE tag
+        assert_eq!(der[0], 0x30);
+        // Must contain OID 2.5.4.3 (CN) — DER value bytes: 55 04 03
+        assert!(
+            der.windows(3).any(|w| w == [0x55, 0x04, 0x03]),
+            "DER should contain CN OID (2.5.4.3)"
+        );
+        // Must contain UTF8String "Test"
+        assert!(
+            der.windows(4).any(|w| w == b"Test"),
+            "DER should contain the value 'Test'"
+        );
+    }
+
+    #[test]
+    fn test_encode_algorithm_identifier_with_null() {
+        let oid = known::sha256_with_rsa_encryption().to_der_value();
+        let der = encode_algorithm_identifier(&oid, Some(&[0x05, 0x00]));
+        // Outer SEQUENCE tag
+        assert_eq!(der[0], 0x30);
+        // Must contain NULL TLV (05 00)
+        assert!(
+            der.windows(2).any(|w| w == [0x05, 0x00]),
+            "DER should contain NULL parameter"
+        );
+    }
+
+    #[test]
+    fn test_encode_algorithm_identifier_no_params() {
+        let oid = known::ed25519().to_der_value();
+        let der = encode_algorithm_identifier(&oid, None);
+        // Outer SEQUENCE tag
+        assert_eq!(der[0], 0x30);
+        // Must NOT contain NULL TLV (05 00)
+        assert!(
+            !der.windows(2).any(|w| w == [0x05, 0x00]),
+            "DER should not contain NULL when params is None"
+        );
+    }
+
+    #[test]
+    fn test_encode_validity_parseable() {
+        // 2024-01-01 00:00:00 UTC = 1704067200
+        // 2025-01-01 00:00:00 UTC = 1735689600
+        let not_before = 1_704_067_200i64;
+        let not_after = 1_735_689_600i64;
+        let der = encode_validity(not_before, not_after);
+        // Must be a SEQUENCE
+        assert_eq!(der[0], 0x30);
+        // Parse it back: SEQUENCE { time, time }
+        let mut dec = Decoder::new(&der);
+        let mut seq = dec.read_sequence().expect("should parse as SEQUENCE");
+        let t1 = seq.read_time().expect("should read notBefore");
+        let t2 = seq.read_time().expect("should read notAfter");
+        assert_eq!(t1, not_before);
+        assert_eq!(t2, not_after);
+    }
+
+    #[test]
+    fn test_encode_extensions_critical_flag() {
+        let oid = known::basic_constraints().to_der_value();
+        let value = vec![0x30, 0x00]; // empty SEQUENCE
+
+        // Critical extension: should contain BOOLEAN TRUE (01 01 FF)
+        let critical_ext = X509Extension {
+            oid: oid.clone(),
+            critical: true,
+            value: value.clone(),
+        };
+        let der_crit = encode_extensions(&[critical_ext]);
+        assert!(
+            der_crit.windows(3).any(|w| w == [0x01, 0x01, 0xFF]),
+            "Critical extension DER should contain BOOLEAN TRUE"
+        );
+
+        // Non-critical extension: should NOT contain BOOLEAN TRUE
+        let non_critical_ext = X509Extension {
+            oid,
+            critical: false,
+            value,
+        };
+        let der_non = encode_extensions(&[non_critical_ext]);
+        assert!(
+            !der_non.windows(3).any(|w| w == [0x01, 0x01, 0xFF]),
+            "Non-critical extension DER should not contain BOOLEAN TRUE"
+        );
+    }
+}

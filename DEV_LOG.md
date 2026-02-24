@@ -8330,3 +8330,29 @@ Added 15 edge-case tests across 3 modules in 3 crates:
 - `cargo test --workspace --all-features`: 2814 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase T119: PKI Encoding Helpers + X.509 Signing Dispatch + Certificate Builder Encoding (+15 tests, 2,814→2,829)
+
+**Date**: 2026-02-24
+**Scope**: PKI shared ASN.1 encoding helpers (encoding.rs, 80 lines, 0 tests), X.509 signing hash dispatch and curve OID mapping (signing.rs, 330 lines, 0 tests), certificate builder DER encoding for DN/AlgorithmIdentifier/validity/extensions (builder.rs, 526 lines, 0 tests).
+
+### Summary
+
+Added 15 tests across 3 core PKI infrastructure files that previously had zero test coverage:
+
+- **Encoding helpers** (5 tests in hitls-pki): enc_seq SEQUENCE wrapping, enc_octet OCTET STRING encoding, enc_null NULL encoding, enc_explicit_ctx context-specific tagging, bytes_to_u32 big-endian decoding
+- **Signing dispatch** (5 tests in hitls-pki): compute_hash SHA-256/384/1 with NIST empty-input vectors, curve_id_to_oid roundtrip for P-256/384/521, unsupported curve error for Sm2Prime256
+- **Builder encoding** (5 tests in hitls-pki): encode_distinguished_name with CN, encode_algorithm_identifier with/without NULL params, encode_validity Decoder roundtrip, encode_extensions critical BOOLEAN TRUE flag
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-pki/src/encoding.rs` | Added `#[cfg(test)] mod tests` with 5 encoding helper tests |
+| `crates/hitls-pki/src/x509/signing.rs` | Added `#[cfg(test)] mod tests` with 5 signing dispatch tests |
+| `crates/hitls-pki/src/x509/builder.rs` | Added `#[cfg(test)] mod tests` with 5 builder encoding tests |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2829 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

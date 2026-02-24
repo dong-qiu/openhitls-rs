@@ -77,3 +77,44 @@ pub(crate) fn bytes_to_u32(bytes: &[u8]) -> u32 {
         .iter()
         .fold(0u32, |acc, &b| acc.wrapping_shl(8) | b as u32)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_enc_seq_wraps_content() {
+        // SEQUENCE containing INTEGER 5: 30 03 02 01 05
+        let content = &[0x02, 0x01, 0x05];
+        let result = enc_seq(content);
+        assert_eq!(result, vec![0x30, 0x03, 0x02, 0x01, 0x05]);
+    }
+
+    #[test]
+    fn test_enc_octet_encodes_payload() {
+        let result = enc_octet(&[0xAB, 0xCD]);
+        assert_eq!(result, vec![0x04, 0x02, 0xAB, 0xCD]);
+    }
+
+    #[test]
+    fn test_enc_null_encoding() {
+        let result = enc_null();
+        assert_eq!(result, vec![0x05, 0x00]);
+    }
+
+    #[test]
+    fn test_enc_explicit_ctx_tag() {
+        // [0] EXPLICIT containing INTEGER 3: A0 03 02 01 03
+        let content = &[0x02, 0x01, 0x03];
+        let result = enc_explicit_ctx(0, content);
+        assert_eq!(result, vec![0xA0, 0x03, 0x02, 0x01, 0x03]);
+    }
+
+    #[test]
+    fn test_bytes_to_u32_various() {
+        assert_eq!(bytes_to_u32(&[]), 0);
+        assert_eq!(bytes_to_u32(&[0x01]), 1);
+        assert_eq!(bytes_to_u32(&[0x01, 0x00]), 256);
+        assert_eq!(bytes_to_u32(&[0x01, 0x02, 0x03, 0x04]), 0x01020304);
+    }
+}

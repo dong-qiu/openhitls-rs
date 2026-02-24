@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,814** (40 ignored) |
-| **Test growth** | 1,104 → 2,814 (+155% since baseline) |
+| **Total tests** | **2,829** (40 ignored) |
+| **Test growth** | 1,104 → 2,829 (+156% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,814 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 2,829 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -62,6 +62,7 @@ Phase T115  2,769     +15   TLS 1.2 CBC padding + DTLS parsing + TLS 1.3 inner p
 Phase T116  2,784     +15   DTLS fragmentation/retransmission + CertificateVerify (*)
 Phase T117  2,799     +15   DTLS codec edge cases + anti-replay boundaries + entropy (*)
 Phase T118  2,814     +15   X.509 extension parsing + WOTS+ base conversion + ASN.1 tag (*)
+Phase T119  2,829     +15   PKI encoding helpers + X.509 signing dispatch + builder encoding (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -2212,6 +2213,45 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | doc-tests | 2 | 0 |
 | **Total** | **2814** | **40** |
 
+### Phase T119: PKI Encoding Helpers + X.509 Signing Dispatch + Certificate Builder Encoding (+15 tests, 2,814→2,829)
+
+**Date**: 2026-02-24
+
+| # | Test | File | Property |
+|---|------|------|----------|
+| 1 | `test_enc_seq_wraps_content` | encoding.rs | `enc_seq(&[0x02, 0x01, 0x05])` → `[0x30, 0x03, 0x02, 0x01, 0x05]` |
+| 2 | `test_enc_octet_encodes_payload` | encoding.rs | `enc_octet(&[0xAB, 0xCD])` → `[0x04, 0x02, 0xAB, 0xCD]` |
+| 3 | `test_enc_null_encoding` | encoding.rs | `enc_null()` → `[0x05, 0x00]` |
+| 4 | `test_enc_explicit_ctx_tag` | encoding.rs | `enc_explicit_ctx(0, ...)` → `[0xA0, 0x03, ...]` context [0] EXPLICIT |
+| 5 | `test_bytes_to_u32_various` | encoding.rs | Empty→0, `[0x01]`→1, `[0x01, 0x00]`→256, 4-byte→0x01020304 |
+| 6 | `test_compute_hash_sha256_empty` | signing.rs | SHA-256("") → known NIST digest (32 bytes) |
+| 7 | `test_compute_hash_sha384_empty` | signing.rs | SHA-384("") → known NIST digest (48 bytes) |
+| 8 | `test_compute_hash_sha1_empty` | signing.rs | SHA-1("") → known digest (20 bytes) |
+| 9 | `test_curve_id_to_oid_known_curves` | signing.rs | P-256/384/521 → OID roundtrip via oid_mapping |
+| 10 | `test_curve_id_to_oid_unsupported` | signing.rs | Sm2Prime256 → error "unsupported curve" |
+| 11 | `test_encode_distinguished_name_cn` | builder.rs | DN with CN="Test" → DER SEQUENCE containing OID 2.5.4.3 + "Test" |
+| 12 | `test_encode_algorithm_identifier_with_null` | builder.rs | OID + Some(NULL) → SEQUENCE with 0x05 0x00 present |
+| 13 | `test_encode_algorithm_identifier_no_params` | builder.rs | OID + None → SEQUENCE without NULL TLV |
+| 14 | `test_encode_validity_parseable` | builder.rs | Encode 2024/2025 timestamps → Decoder roundtrip matches |
+| 15 | `test_encode_extensions_critical_flag` | builder.rs | Critical → BOOLEAN TRUE (01 01 FF); non-critical → absent |
+
+**Per-crate counts after Phase T119**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 719 | 31 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 369 | 1 |
+| hitls-tls | 1284 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 66 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2829** | **40** |
+
 ---
 
 ## 8. Verification & Quality Gates
@@ -2219,9 +2259,9 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,814 tests pass
+# Full test suite — all 2,829 tests pass
 cargo test --workspace --all-features
-# Result: 2,814 passed, 0 failed, 40 ignored
+# Result: 2,829 passed, 0 failed, 40 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

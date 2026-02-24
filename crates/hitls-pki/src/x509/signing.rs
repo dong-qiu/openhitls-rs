@@ -328,3 +328,71 @@ fn curve_id_to_oid(curve_id: EccCurveId) -> Result<Oid, PkiError> {
         ))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hitls_utils::hex::hex;
+
+    #[test]
+    fn test_compute_hash_sha256_empty() {
+        let digest = compute_hash(b"", &HashAlg::Sha256).unwrap();
+        assert_eq!(digest.len(), 32);
+        let expected = hex("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(digest, expected);
+    }
+
+    #[test]
+    fn test_compute_hash_sha384_empty() {
+        let digest = compute_hash(b"", &HashAlg::Sha384).unwrap();
+        assert_eq!(digest.len(), 48);
+        let expected = hex(
+            "38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da\
+             274edebfe76f65fbd51ad2f14898b95b",
+        );
+        assert_eq!(digest, expected);
+    }
+
+    #[test]
+    fn test_compute_hash_sha1_empty() {
+        let digest = compute_hash(b"", &HashAlg::Sha1).unwrap();
+        assert_eq!(digest.len(), 20);
+        let expected = hex("da39a3ee5e6b4b0d3255bfef95601890afd80709");
+        assert_eq!(digest, expected);
+    }
+
+    #[test]
+    fn test_curve_id_to_oid_known_curves() {
+        // P-256 → prime256v1, roundtrip via oid_mapping
+        let oid = curve_id_to_oid(EccCurveId::NistP256).unwrap();
+        assert_eq!(oid, known::prime256v1());
+        assert_eq!(
+            oid_mapping::oid_to_curve_id(&oid),
+            Some(EccCurveId::NistP256)
+        );
+
+        // P-384 → secp384r1
+        let oid = curve_id_to_oid(EccCurveId::NistP384).unwrap();
+        assert_eq!(oid, known::secp384r1());
+        assert_eq!(
+            oid_mapping::oid_to_curve_id(&oid),
+            Some(EccCurveId::NistP384)
+        );
+
+        // P-521 → secp521r1
+        let oid = curve_id_to_oid(EccCurveId::NistP521).unwrap();
+        assert_eq!(oid, known::secp521r1());
+        assert_eq!(
+            oid_mapping::oid_to_curve_id(&oid),
+            Some(EccCurveId::NistP521)
+        );
+    }
+
+    #[test]
+    fn test_curve_id_to_oid_unsupported() {
+        let result = curve_id_to_oid(EccCurveId::Sm2Prime256);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("unsupported curve"));
+    }
+}
