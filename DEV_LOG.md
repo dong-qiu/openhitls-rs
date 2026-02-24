@@ -8357,6 +8357,34 @@ Added 15 tests across 3 core PKI infrastructure files that previously had zero t
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+## Phase T123: XMSS Tree Operations + XMSS WOTS+ Deepening + SLH-DSA FORS Deepening (+15 tests, 2,872→2,882)
+
+**Date**: 2026-02-24
+**Scope**: XMSS Merkle tree operations (tree.rs, 161 lines, 0 tests — the last truly untested logic file), XMSS WOTS+ chain/compress/sign operations (wots.rs, 198 lines, 1 test), SLH-DSA FORS few-time signature internals (fors.rs, 146 lines, 1 test).
+
+### Summary
+
+Added 15 tests across 3 post-quantum signature scheme files, shifting from "zero-test files" to "low-density deepening" as nearly all zero-test files are now covered:
+
+- **XMSS tree operations** (5 tests, all #[ignore]): compute_root determinism, auth_path length validation, compute_root_with_auth matches compute_root, xmss_sign signature length, xmss_sign→root_from_sig roundtrip. All ignored because tree height h=10 requires 1024 WOTS+ leaf generations.
+- **XMSS WOTS+** (5 tests): msg_to_base_w output length (67 for n=32), base-W values all in [0,15] range, chain zero-steps identity (steps=0 → input unchanged), l_tree single-chunk passthrough, WOTS+ sign→pk_from_sig roundtrip (verifies sign+verify recovers pk_gen output)
+- **SLH-DSA FORS** (5 tests): fors_sk_gen determinism, fors_sk_gen different indices → different sks, fors_sign output length (k*(1+a)*n), fors_node leaf output length and determinism, FORS pk message-independence (same pk regardless of message — characteristic FORS property)
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/xmss/tree.rs` | Added `#[cfg(test)] mod tests` with 5 tree operation tests (all #[ignore]) |
+| `crates/hitls-crypto/src/xmss/wots.rs` | Added 5 tests to existing `mod tests` (msg_to_base_w, chain, l_tree, roundtrip) |
+| `crates/hitls-crypto/src/slh_dsa/fors.rs` | Added 5 tests to existing `mod tests` (sk_gen, sign length, node, pk independence) |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2882 passed, 0 failed, 47 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase T122: McEliece Keygen Helpers + McEliece Encoding + McEliece Decoding (+15 tests, 2,857→2,872)
 
 **Date**: 2026-02-24

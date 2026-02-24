@@ -186,4 +186,120 @@ mod tests {
         assert_eq!(pk1, pk2);
         assert_eq!(sig, sig2);
     }
+
+    #[test]
+    fn test_fors_sk_gen_deterministic() {
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let pk_seed = vec![0xAAu8; p.n];
+        let pk_root = vec![0xBBu8; p.n];
+        let sk_seed = vec![0xCCu8; p.n];
+        let h = make_hasher(p, &pk_seed, &pk_root);
+
+        let mut adrs = Adrs::new(false);
+        adrs.set_type(AdrsType::ForsTree);
+        adrs.set_key_pair_addr(0);
+
+        let sk1 = fors_sk_gen(&*h, &sk_seed, &adrs, 0).unwrap();
+        let sk2 = fors_sk_gen(&*h, &sk_seed, &adrs, 0).unwrap();
+        assert_eq!(sk1, sk2);
+        assert_eq!(sk1.len(), p.n);
+    }
+
+    #[test]
+    fn test_fors_sk_gen_different_indices_different_sks() {
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let pk_seed = vec![0xAAu8; p.n];
+        let pk_root = vec![0xBBu8; p.n];
+        let sk_seed = vec![0xCCu8; p.n];
+        let h = make_hasher(p, &pk_seed, &pk_root);
+
+        let mut adrs = Adrs::new(false);
+        adrs.set_type(AdrsType::ForsTree);
+        adrs.set_key_pair_addr(0);
+
+        let sk0 = fors_sk_gen(&*h, &sk_seed, &adrs, 0).unwrap();
+        let sk1 = fors_sk_gen(&*h, &sk_seed, &adrs, 1).unwrap();
+        assert_ne!(sk0, sk1);
+    }
+
+    #[test]
+    fn test_fors_sign_output_length() {
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let pk_seed = vec![0xAAu8; p.n];
+        let pk_root = vec![0xBBu8; p.n];
+        let sk_seed = vec![0xCCu8; p.n];
+        let h = make_hasher(p, &pk_seed, &pk_root);
+
+        let md = vec![0x42u8; p.m];
+        let mut adrs = Adrs::new(false);
+        adrs.set_type(AdrsType::ForsTree);
+        adrs.set_key_pair_addr(0);
+        let sig = fors_sign(&*h, &sk_seed, &md, &mut adrs, p).unwrap();
+        // FORS signature = k * (1 + a) * n bytes
+        assert_eq!(sig.len(), p.k * (1 + p.a) * h.n());
+    }
+
+    #[test]
+    fn test_fors_node_leaf_output_length() {
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let pk_seed = vec![0xAAu8; p.n];
+        let pk_root = vec![0xBBu8; p.n];
+        let sk_seed = vec![0xCCu8; p.n];
+        let h = make_hasher(p, &pk_seed, &pk_root);
+
+        let mut adrs = Adrs::new(false);
+        adrs.set_type(AdrsType::ForsTree);
+        adrs.set_key_pair_addr(0);
+
+        // Leaf node (height=0) should produce n bytes
+        let leaf = fors_node(&*h, &sk_seed, 0, 0, &mut adrs).unwrap();
+        assert_eq!(leaf.len(), p.n);
+
+        // Determinism: same inputs → same leaf
+        let mut adrs2 = Adrs::new(false);
+        adrs2.set_type(AdrsType::ForsTree);
+        adrs2.set_key_pair_addr(0);
+        let leaf2 = fors_node(&*h, &sk_seed, 0, 0, &mut adrs2).unwrap();
+        assert_eq!(leaf, leaf2);
+    }
+
+    #[test]
+    fn test_fors_pk_same_for_different_messages() {
+        // FORS pk is the hash of all k tree roots, which are deterministic
+        // given sk_seed — different messages select different leaves but
+        // recover the same tree roots, yielding the same pk.
+        let p = get_params(SlhDsaParamId::Shake128f);
+        let pk_seed = vec![0xAAu8; p.n];
+        let pk_root = vec![0xBBu8; p.n];
+        let sk_seed = vec![0xCCu8; p.n];
+        let h = make_hasher(p, &pk_seed, &pk_root);
+
+        let md1 = vec![0x42u8; p.m];
+        let md2 = vec![0x43u8; p.m];
+
+        let mut adrs1 = Adrs::new(false);
+        adrs1.set_type(AdrsType::ForsTree);
+        adrs1.set_key_pair_addr(0);
+        let sig1 = fors_sign(&*h, &sk_seed, &md1, &mut adrs1, p).unwrap();
+
+        let mut adrs2 = Adrs::new(false);
+        adrs2.set_type(AdrsType::ForsTree);
+        adrs2.set_key_pair_addr(0);
+        let pk1 = fors_pk_from_sig(&*h, &sig1, &md1, &mut adrs2, p).unwrap();
+
+        let mut adrs3 = Adrs::new(false);
+        adrs3.set_type(AdrsType::ForsTree);
+        adrs3.set_key_pair_addr(0);
+        let sig2 = fors_sign(&*h, &sk_seed, &md2, &mut adrs3, p).unwrap();
+
+        let mut adrs4 = Adrs::new(false);
+        adrs4.set_type(AdrsType::ForsTree);
+        adrs4.set_key_pair_addr(0);
+        let pk2 = fors_pk_from_sig(&*h, &sig2, &md2, &mut adrs4, p).unwrap();
+
+        // Different messages but same FORS public key
+        assert_eq!(pk1, pk2);
+        // Signatures differ (different leaves selected)
+        assert_ne!(sig1, sig2);
+    }
 }

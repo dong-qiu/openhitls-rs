@@ -2544,6 +2544,24 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - 3 source files modified, 0 files created. hitls-pki: 354→369, total: 2814→2829.
 - All 2829 workspace tests pass, 0 clippy warnings, formatting clean.
 
+## Phase T123: XMSS Tree Operations + XMSS WOTS+ Deepening + SLH-DSA FORS Deepening
+
+**Prompt**: Continue implementing Phase T123. Shift from zero-test files to low-density deepening: XMSS tree.rs (161 lines, 0 tests — last untested file), XMSS wots.rs (198 lines, 1 test), SLH-DSA fors.rs (146 lines, 1 test). Add 5 tree tests (all #[ignore] due to h=10 → 1024 leaves), 5 WOTS+ tests (msg_to_base_w, chain, l_tree, roundtrip), 5 FORS tests (sk_gen, sign length, node, pk independence).
+
+**Scope**: Three post-quantum signature scheme files: XMSS Merkle tree (compute_root, auth_path, sign/verify), XMSS WOTS+ (msg_to_base_w, chain, l_tree, sign/pk_from_sig roundtrip), SLH-DSA FORS (sk_gen, sign, fors_node, pk message-independence).
+
+**Work performed**:
+1. Added 5 tree operation tests to `crates/hitls-crypto/src/xmss/tree.rs` (new #[cfg(test)] mod): compute_root determinism, auth_path length, root match, sign length, sign→verify roundtrip — all #[ignore] (1024 WOTS+ leaf generations per tree)
+2. Added 5 WOTS+ tests to `crates/hitls-crypto/src/xmss/wots.rs` (existing mod): msg_to_base_w length/range, chain zero-steps identity, l_tree single-chunk passthrough, WOTS+ sign→pk_from_sig roundtrip
+3. Added 5 FORS tests to `crates/hitls-crypto/src/slh_dsa/fors.rs` (existing mod): fors_sk_gen determinism/distinctness, fors_sign output length, fors_node leaf length, fors_pk same for different messages
+4. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-crypto: 757→767 (33→38 ignored), total: 2872→2882 (42→47 ignored).
+- All 2882 workspace tests pass, 0 clippy warnings, formatting clean.
+
+---
+
 ## Phase T122: McEliece Keygen Helpers + McEliece Encoding + McEliece Decoding
 
 **Prompt**: Implement Phase T122 — McEliece Keygen Helpers + McEliece Encoding + McEliece Decoding. Add 5 keygen helper tests (bitrev zero, bitrev single bit, bitrev involution, SHAKE256 output length, PRG determinism). Add 5 encoding tests (fixed_weight_vector weight, length, distinct calls, zero error encoding, encode output length). Add 5 decoding tests (decode zero received, BM zero syndrome, BM degree bounded, compute_syndrome zero, syndrome length).

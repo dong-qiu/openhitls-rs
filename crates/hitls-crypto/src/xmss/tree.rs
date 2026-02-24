@@ -159,3 +159,87 @@ pub(crate) fn xmss_root_from_sig(
 
     Ok(node)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::xmss::address::XmssAdrs;
+    use crate::xmss::hash::XmssHasher;
+    use crate::xmss::params::{get_params, XmssHashMode};
+    use hitls_types::XmssParamId;
+
+    fn make_hasher() -> XmssHasher {
+        XmssHasher {
+            n: 32,
+            mode: XmssHashMode::Shake256,
+            sk_seed: vec![0xAAu8; 32],
+            pk_seed: vec![0xBBu8; 32],
+        }
+    }
+
+    fn test_params() -> &'static XmssParams {
+        get_params(XmssParamId::Shake256_10_256)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_compute_root_deterministic() {
+        let h = make_hasher();
+        let p = test_params();
+        let mut adrs1 = XmssAdrs::new();
+        let mut adrs2 = XmssAdrs::new();
+        let root1 = compute_root(&h, &mut adrs1, p).unwrap();
+        let root2 = compute_root(&h, &mut adrs2, p).unwrap();
+        assert_eq!(root1, root2);
+        assert_eq!(root1.len(), p.n);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_compute_root_with_auth_path_length() {
+        let h = make_hasher();
+        let p = test_params();
+        let mut adrs = XmssAdrs::new();
+        let (root, auth) = compute_root_with_auth(&h, 0, &mut adrs, p).unwrap();
+        assert_eq!(root.len(), p.n);
+        assert_eq!(auth.len(), p.h * p.n);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_compute_root_with_auth_matches_compute_root() {
+        let h = make_hasher();
+        let p = test_params();
+        let mut adrs1 = XmssAdrs::new();
+        let mut adrs2 = XmssAdrs::new();
+        let root1 = compute_root(&h, &mut adrs1, p).unwrap();
+        let (root2, _) = compute_root_with_auth(&h, 5, &mut adrs2, p).unwrap();
+        assert_eq!(root1, root2);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_xmss_sign_signature_length() {
+        let h = make_hasher();
+        let p = test_params();
+        let msg = vec![0x42u8; p.n];
+        let mut adrs = XmssAdrs::new();
+        let (sig, root) = xmss_sign(&h, &msg, 0, &mut adrs, p).unwrap();
+        assert_eq!(sig.len(), (p.wots_len + p.h) * p.n);
+        assert_eq!(root.len(), p.n);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_xmss_sign_verify_roundtrip() {
+        let h = make_hasher();
+        let p = test_params();
+        let msg = vec![0x42u8; p.n];
+        let leaf_idx = 3;
+        let mut adrs1 = XmssAdrs::new();
+        let (sig, root) = xmss_sign(&h, &msg, leaf_idx, &mut adrs1, p).unwrap();
+        let mut adrs2 = XmssAdrs::new();
+        let recovered = xmss_root_from_sig(&h, &msg, &sig, leaf_idx, &mut adrs2, p).unwrap();
+        assert_eq!(root, recovered);
+    }
+}

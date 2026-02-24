@@ -199,6 +199,9 @@ pub(crate) fn wots_pk_from_sig(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xmss::hash::XmssHasher;
+    use crate::xmss::params::{get_params, XmssHashMode};
+    use hitls_types::XmssParamId;
 
     #[test]
     fn test_xmss_base_w_extraction() {
@@ -213,5 +216,89 @@ mod tests {
 
         // Single digit
         assert_eq!(base_w(&[0x70], 1), vec![7]);
+    }
+
+    #[test]
+    fn test_msg_to_base_w_length() {
+        // For n=32: len_1 = 64, len_2 = 3, total wots_len = 67
+        let msg = vec![0x55u8; 32];
+        let vals = msg_to_base_w(&msg, 32);
+        assert_eq!(vals.len(), 67);
+    }
+
+    #[test]
+    fn test_msg_to_base_w_all_values_in_range() {
+        // All base-W values must be in [0, W-1] = [0, 15]
+        let msg = vec![0xFFu8; 32];
+        let vals = msg_to_base_w(&msg, 32);
+        for &v in &vals {
+            assert!(v <= 15, "base-W value {} exceeds W-1=15", v);
+        }
+        // Also test with zeros
+        let msg_zero = vec![0x00u8; 32];
+        let vals_zero = msg_to_base_w(&msg_zero, 32);
+        for &v in &vals_zero {
+            assert!(v <= 15, "base-W value {} exceeds W-1=15", v);
+        }
+    }
+
+    #[test]
+    fn test_chain_zero_steps_identity() {
+        let hasher = XmssHasher {
+            n: 32,
+            mode: XmssHashMode::Shake256,
+            sk_seed: vec![0xAAu8; 32],
+            pk_seed: vec![0xBBu8; 32],
+        };
+        let input = vec![0x42u8; 32];
+        let mut adrs = XmssAdrs::new();
+        adrs.set_type(XmssAdrsType::Ots);
+        let result = chain(&hasher, &input, 0, 0, &mut adrs).unwrap();
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_l_tree_single_chunk_passthrough() {
+        // With a single n-byte chunk, l_tree returns it unchanged (loop body not entered)
+        let hasher = XmssHasher {
+            n: 32,
+            mode: XmssHashMode::Shake256,
+            sk_seed: vec![0xAAu8; 32],
+            pk_seed: vec![0xBBu8; 32],
+        };
+        let p = get_params(XmssParamId::Shake256_10_256);
+        let single = vec![0x77u8; 32];
+        let mut adrs = XmssAdrs::new();
+        adrs.set_type(XmssAdrsType::LTree);
+        let result = l_tree(&hasher, &single, &mut adrs, p).unwrap();
+        assert_eq!(result, single);
+    }
+
+    #[test]
+    fn test_wots_sign_pk_from_sig_roundtrip() {
+        let hasher = XmssHasher {
+            n: 32,
+            mode: XmssHashMode::Shake256,
+            sk_seed: vec![0xAAu8; 32],
+            pk_seed: vec![0xBBu8; 32],
+        };
+        let p = get_params(XmssParamId::Shake256_10_256);
+        let msg = vec![0x42u8; 32];
+        let ots_addr = 0;
+
+        // Generate WOTS+ public key
+        let mut adrs1 = XmssAdrs::new();
+        let pk = wots_pk_gen(&hasher, ots_addr, &mut adrs1, p).unwrap();
+        assert_eq!(pk.len(), p.n);
+
+        // Sign message
+        let mut adrs2 = XmssAdrs::new();
+        let sig = wots_sign(&hasher, &msg, ots_addr, &mut adrs2, p).unwrap();
+        assert_eq!(sig.len(), p.wots_len * p.n);
+
+        // Recover public key from signature
+        let mut adrs3 = XmssAdrs::new();
+        let recovered = wots_pk_from_sig(&hasher, &sig, &msg, ots_addr, &mut adrs3, p).unwrap();
+        assert_eq!(pk, recovered);
     }
 }

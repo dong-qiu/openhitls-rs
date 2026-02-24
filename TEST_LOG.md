@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,872** (42 ignored) |
-| **Test growth** | 1,104 → 2,872 (+160% since baseline) |
+| **Total tests** | **2,882** (47 ignored) |
+| **Test growth** | 1,104 → 2,882 (+161% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,872 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 2,882 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -66,6 +66,7 @@ Phase T119  2,829     +15   PKI encoding helpers + X.509 signing dispatch + buil
 Phase T120  2,844     +15   X.509 certificate parsing + SM9 G2 + SM9 pairing (*)
 Phase T121  2,857     +13   SM9 hash functions + algorithm helpers + curve params (*)
 Phase T122  2,872     +15   McEliece keygen helpers + encoding + decoding (*)
+Phase T123  2,882     +10   XMSS tree ops + WOTS+ deepening + FORS deepening (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -2254,6 +2255,48 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | hitls-utils | 66 | 0 |
 | doc-tests | 2 | 0 |
 | **Total** | **2829** | **40** |
+
+---
+
+## Phase T123: XMSS Tree Operations + XMSS WOTS+ Deepening + SLH-DSA FORS Deepening (+15 tests, 2,872→2,882)
+
+**Date**: 2026-02-24
+**Scope**: XMSS Merkle tree operations (tree.rs, 161 lines, 0 tests — last truly untested logic file), XMSS WOTS+ chain/compress/sign (wots.rs, 198 lines, 1 test), SLH-DSA FORS few-time signature internals (fors.rs, 146 lines, 1 test). Shift from zero-test files to low-density deepening.
+
+| # | Test | File | Property |
+|---|------|------|----------|
+| 1 | `test_compute_root_deterministic` | tree.rs | `#[ignore]` Same hasher/params → identical root; root length = n |
+| 2 | `test_compute_root_with_auth_path_length` | tree.rs | `#[ignore]` auth_path length = h * n bytes |
+| 3 | `test_compute_root_with_auth_matches_compute_root` | tree.rs | `#[ignore]` Root from compute_root_with_auth == compute_root |
+| 4 | `test_xmss_sign_signature_length` | tree.rs | `#[ignore]` Signature length = (wots_len + h) * n |
+| 5 | `test_xmss_sign_verify_roundtrip` | tree.rs | `#[ignore]` xmss_sign → xmss_root_from_sig recovers same root |
+| 6 | `test_msg_to_base_w_length` | wots.rs | Output length = 67 (len_1=64 + len_2=3) for n=32 |
+| 7 | `test_msg_to_base_w_all_values_in_range` | wots.rs | All base-W values ∈ [0, 15] (W=16) |
+| 8 | `test_chain_zero_steps_identity` | wots.rs | chain(x, 0, 0, adrs) returns x unchanged |
+| 9 | `test_l_tree_single_chunk_passthrough` | wots.rs | l_tree with single n-byte chunk returns it as-is |
+| 10 | `test_wots_sign_pk_from_sig_roundtrip` | wots.rs | wots_sign → wots_pk_from_sig == wots_pk_gen |
+| 11 | `test_fors_sk_gen_deterministic` | fors.rs | Same inputs → same FORS secret key element |
+| 12 | `test_fors_sk_gen_different_indices_different_sks` | fors.rs | Different tree index → different secret key |
+| 13 | `test_fors_sign_output_length` | fors.rs | Signature length = k * (1 + a) * n bytes |
+| 14 | `test_fors_node_leaf_output_length` | fors.rs | Leaf node (height=0) produces n bytes; deterministic |
+| 15 | `test_fors_pk_same_for_different_messages` | fors.rs | Different messages → same FORS pk (tree roots are deterministic) |
+
+**Per-crate counts after Phase T123**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 767 | 38 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 374 | 1 |
+| hitls-tls | 1284 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 66 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2882** | **47** |
 
 ---
 
