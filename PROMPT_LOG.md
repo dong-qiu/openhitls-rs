@@ -2544,6 +2544,24 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - 3 source files modified, 0 files created. hitls-pki: 354→369, total: 2814→2829.
 - All 2829 workspace tests pass, 0 clippy warnings, formatting clean.
 
+## Phase T121: SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters
+
+**Prompt**: Implement Phase T121 — SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters. Add 5 hash function tests (h1 range, h2 range, h1 deterministic, KDF output length, h1 different IDs). Add 5 algorithm helper tests (bignum_to_32bytes zero, bignum_to_32bytes small, fp12_to_bytes length, sign/verify roundtrip [ignored], encrypt/decrypt roundtrip [ignored]). Add 5 curve parameter tests (prime 256-bit, order 256-bit, order < prime, b_coeff == 5, generator coordinates nonzero).
+
+**Scope**: Three SM9 module files with zero test coverage: hash.rs (81 lines, H1/H2 hash-to-range and KDF), alg.rs (370 lines, sign/verify/encrypt/decrypt and serialization helpers), curve.rs (76 lines, BN256 domain parameter constants).
+
+**Work performed**:
+1. Added 5 hash function tests to `crates/hitls-crypto/src/sm9/hash.rs`: h1 range [1,n-1], h2 range [1,n-1], h1 deterministic, KDF output length (48 and 100 bytes), h1 different IDs divergence
+2. Added 5 algorithm helper tests to `crates/hitls-crypto/src/sm9/alg.rs`: bignum_to_32bytes zero padding, bignum_to_32bytes small value, fp12_to_bytes 384-byte length, sign→verify roundtrip (ignored), encrypt→decrypt roundtrip (ignored)
+3. Added 5 curve parameter tests to `crates/hitls-crypto/src/sm9/curve.rs`: prime 256-bit, order 256-bit, order < prime, b_coeff == 5, generator coordinates nonzero
+4. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-crypto: 729→742 (31→33 ignored), total: 2844→2857 (40→42 ignored).
+- All 2857 workspace tests pass, 0 clippy warnings, formatting clean.
+
+---
+
 ## Phase T120: X.509 Certificate Parsing + SM9 G2 Point Arithmetic + SM9 Pairing Helpers
 
 **Prompt**: Implement Phase T120 — X.509 Certificate Parsing + SM9 G2 Point Arithmetic + SM9 Pairing Helpers. Add 5 certificate parsing tests (DN Display, DN get, parse_algorithm_identifier RSA+NULL, parse_algorithm_identifier EC params, self-signed cert roundtrip). Add 5 G2 point arithmetic tests (infinity properties, add identity, double=add self, negate+add=infinity, serialize roundtrip). Add 5 pairing helper tests (pairing infinity G1, pairing infinity G2, fp2_pow zero, fp2_pow one, fp2_pow squaring).

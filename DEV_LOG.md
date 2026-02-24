@@ -8357,6 +8357,34 @@ Added 15 tests across 3 core PKI infrastructure files that previously had zero t
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+## Phase T121: SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters (+15 tests, 2,844→2,857)
+
+**Date**: 2026-02-24
+**Scope**: SM9 hash-to-range functions H1/H2 and KDF (hash.rs, 81 lines, 0 tests), SM9 top-level algorithm functions — sign/verify/encrypt/decrypt and serialization helpers (alg.rs, 370 lines, 0 tests), BN256 domain parameter constants (curve.rs, 76 lines, 0 tests).
+
+### Summary
+
+Added 15 tests across 3 SM9 module files that previously had zero test coverage:
+
+- **Hash functions** (5 tests): h1 range validation, h2 range validation, h1 determinism, KDF output length correctness, h1 different-input divergence
+- **Algorithm helpers** (3 tests + 2 ignored): bignum_to_32bytes zero padding, bignum_to_32bytes small value, fp12_to_bytes 384-byte length, sign→verify roundtrip (ignored), encrypt→decrypt roundtrip (ignored)
+- **Curve parameters** (5 tests): prime is 256-bit, order is 256-bit, order < prime, b_coeff == 5, all generator coordinates nonzero
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/sm9/hash.rs` | Added `#[cfg(test)] mod tests` with 5 hash function tests |
+| `crates/hitls-crypto/src/sm9/alg.rs` | Added `#[cfg(test)] mod tests` with 5 algorithm helper tests (2 ignored) |
+| `crates/hitls-crypto/src/sm9/curve.rs` | Added `#[cfg(test)] mod tests` with 5 curve parameter tests |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2857 passed, 0 failed, 42 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase T120: X.509 Certificate Parsing + SM9 G2 Point Arithmetic + SM9 Pairing Helpers (+15 tests, 2,829→2,844)
 
 **Date**: 2026-02-24

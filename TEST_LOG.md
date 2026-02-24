@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **2,829** (40 ignored) |
-| **Test growth** | 1,104 → 2,829 (+156% since baseline) |
+| **Total tests** | **2,857** (42 ignored) |
+| **Test growth** | 1,104 → 2,857 (+159% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 2,829 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 2,857 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -63,6 +63,8 @@ Phase T116  2,784     +15   DTLS fragmentation/retransmission + CertificateVerif
 Phase T117  2,799     +15   DTLS codec edge cases + anti-replay boundaries + entropy (*)
 Phase T118  2,814     +15   X.509 extension parsing + WOTS+ base conversion + ASN.1 tag (*)
 Phase T119  2,829     +15   PKI encoding helpers + X.509 signing dispatch + builder encoding (*)
+Phase T120  2,844     +15   X.509 certificate parsing + SM9 G2 + SM9 pairing (*)
+Phase T121  2,857     +13   SM9 hash functions + algorithm helpers + curve params (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -2254,6 +2256,48 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
+## Phase T121: SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters (+15 tests, 2,844→2,857)
+
+**Date**: 2026-02-24
+**Scope**: SM9 hash-to-range functions H1/H2 and KDF (hash.rs, 81 lines, 0 tests), SM9 top-level algorithm functions and serialization helpers (alg.rs, 370 lines, 0 tests), BN256 domain parameter constants (curve.rs, 76 lines, 0 tests).
+
+| # | Test | File | Property |
+|---|------|------|----------|
+| 1 | `test_h1_in_range` | hash.rs | `h1(b"Alice\x01", 0x01)` ∈ [1, n-1] (not zero, less than n) |
+| 2 | `test_h2_in_range` | hash.rs | `h2(b"test data")` ∈ [1, n-1] (not zero, less than n) |
+| 3 | `test_h1_deterministic` | hash.rs | Two calls to `h1` with same input produce identical output |
+| 4 | `test_kdf_output_length` | hash.rs | `kdf(b"seed", 48)` → 48 bytes; `kdf(b"seed", 100)` → 100 bytes |
+| 5 | `test_h1_different_ids_different_values` | hash.rs | `h1(b"Alice\x01", 0x01)` ≠ `h1(b"Bob\x01", 0x01)` |
+| 6 | `test_bignum_to_32bytes_zero` | alg.rs | `bignum_to_32bytes(&BigNum::zero())` → `[0u8; 32]` |
+| 7 | `test_bignum_to_32bytes_small` | alg.rs | `bignum_to_32bytes(&BigNum::from_u64(0xFF))` → 31 zeros + `0xFF` |
+| 8 | `test_fp12_to_bytes_length` | alg.rs | `fp12_to_bytes(&Fp12::one())` → exactly 384 bytes |
+| 9 | `test_sign_verify_roundtrip` | alg.rs | `#[ignore]` master_keygen(Sign) → extract_user_key → sign → verify → true |
+| 10 | `test_encrypt_decrypt_roundtrip` | alg.rs | `#[ignore]` master_keygen(Encrypt) → extract_user_key → encrypt → decrypt → match |
+| 11 | `test_prime_is_256_bit` | curve.rs | `p().to_bytes_be().len()` == 32 (256 bits) |
+| 12 | `test_order_is_256_bit` | curve.rs | `order().to_bytes_be().len()` == 32 (256 bits) |
+| 13 | `test_order_less_than_prime` | curve.rs | `order()` < `p()` (subgroup order < field prime) |
+| 14 | `test_b_coeff_is_five` | curve.rs | `b_coeff()` == `BigNum::from_u64(5)` |
+| 15 | `test_generator_coordinates_nonzero` | curve.rs | All 6 generator coordinates (p1_x, p1_y, p2_x0, p2_x1, p2_y0, p2_y1) nonzero |
+
+**Per-crate counts after Phase T121**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 49 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 742 | 33 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 149 | 3 |
+| hitls-pki | 374 | 1 |
+| hitls-tls | 1284 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 66 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **2857** | **42** |
+
+---
+
 ## Phase T120: X.509 Certificate Parsing + SM9 G2 Point Arithmetic + SM9 Pairing Helpers (+15 tests, 2,829→2,844)
 
 **Date**: 2026-02-24
@@ -2301,9 +2345,9 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 All phases verified with the same quality gates:
 
 ```bash
-# Full test suite — all 2,844 tests pass
+# Full test suite — all 2,857 tests pass
 cargo test --workspace --all-features
-# Result: 2,844 passed, 0 failed, 40 ignored
+# Result: 2,857 passed, 0 failed, 42 ignored
 
 # Clippy — zero warnings enforced
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
@@ -2312,4 +2356,4 @@ RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
 cargo fmt --all -- --check
 ```
 
-**Ignored tests** (40 total): Slow operations marked `#[ignore]` — RSA/DH/DSA key generation, ML-KEM/ML-DSA full-parameter tests, SM9 pairing operations, and long-running XMSS/McEliece tests. All pass when explicitly run with `cargo test -- --ignored`.
+**Ignored tests** (42 total): Slow operations marked `#[ignore]` — RSA/DH/DSA key generation, ML-KEM/ML-DSA full-parameter tests, SM9 pairing operations (sign/verify and encrypt/decrypt roundtrips), and long-running XMSS/McEliece tests. All pass when explicitly run with `cargo test -- --ignored`.

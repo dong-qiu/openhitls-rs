@@ -79,3 +79,46 @@ pub(crate) fn kdf(z: &[u8], klen: usize) -> Result<Vec<u8>, CryptoError> {
 
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_h1_in_range() {
+        let n = curve::order();
+        let val = h1(b"Alice\x01", 0x01).unwrap();
+        assert!(!val.is_zero(), "h1 result must not be zero");
+        assert!(val < n, "h1 result must be less than n");
+    }
+
+    #[test]
+    fn test_h2_in_range() {
+        let n = curve::order();
+        let val = h2(b"test data").unwrap();
+        assert!(!val.is_zero(), "h2 result must not be zero");
+        assert!(val < n, "h2 result must be less than n");
+    }
+
+    #[test]
+    fn test_h1_deterministic() {
+        let a = h1(b"Alice\x01", 0x01).unwrap();
+        let b = h1(b"Alice\x01", 0x01).unwrap();
+        assert_eq!(a, b, "h1 must be deterministic");
+    }
+
+    #[test]
+    fn test_kdf_output_length() {
+        let k48 = kdf(b"seed", 48).unwrap();
+        assert_eq!(k48.len(), 48);
+        let k100 = kdf(b"seed", 100).unwrap();
+        assert_eq!(k100.len(), 100);
+    }
+
+    #[test]
+    fn test_h1_different_ids_different_values() {
+        let a = h1(b"Alice\x01", 0x01).unwrap();
+        let b = h1(b"Bob\x01", 0x01).unwrap();
+        assert_ne!(a, b, "different IDs must produce different hash values");
+    }
+}

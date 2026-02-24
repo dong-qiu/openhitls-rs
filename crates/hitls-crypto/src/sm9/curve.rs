@@ -74,3 +74,51 @@ pub fn p2_y1() -> BigNum {
 pub fn miller_param() -> BigNum {
     BigNum::from_bytes_be(&hex("02400000000215D93E"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hitls_bignum::BigNum;
+
+    #[test]
+    fn test_prime_is_256_bit() {
+        let prime = p();
+        assert_eq!(
+            prime.to_bytes_be().len(),
+            32,
+            "prime must be 256 bits (32 bytes)"
+        );
+    }
+
+    #[test]
+    fn test_order_is_256_bit() {
+        let n = order();
+        assert_eq!(
+            n.to_bytes_be().len(),
+            32,
+            "order must be 256 bits (32 bytes)"
+        );
+    }
+
+    #[test]
+    fn test_order_less_than_prime() {
+        let n = order();
+        let prime = p();
+        assert!(n < prime, "subgroup order must be less than field prime");
+    }
+
+    #[test]
+    fn test_b_coeff_is_five() {
+        assert_eq!(b_coeff(), BigNum::from_u64(5));
+    }
+
+    #[test]
+    fn test_generator_coordinates_nonzero() {
+        assert!(!p1_x().is_zero(), "P1.x must be nonzero");
+        assert!(!p1_y().is_zero(), "P1.y must be nonzero");
+        assert!(!p2_x0().is_zero(), "P2.x0 must be nonzero");
+        assert!(!p2_x1().is_zero(), "P2.x1 must be nonzero");
+        assert!(!p2_y0().is_zero(), "P2.y0 must be nonzero");
+        assert!(!p2_y1().is_zero(), "P2.y1 must be nonzero");
+    }
+}

@@ -368,3 +368,56 @@ fn bignum_to_32bytes(n: &BigNum) -> [u8; 32] {
     out[start..start + copy_len].copy_from_slice(&bytes[bytes.len() - copy_len..]);
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hitls_bignum::BigNum;
+
+    #[test]
+    fn test_bignum_to_32bytes_zero() {
+        let result = bignum_to_32bytes(&BigNum::from_u64(0));
+        assert_eq!(result, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_bignum_to_32bytes_small() {
+        let result = bignum_to_32bytes(&BigNum::from_u64(0xFF));
+        let mut expected = [0u8; 32];
+        expected[31] = 0xFF;
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_fp12_to_bytes_length() {
+        let one = Fp12::one();
+        let bytes = fp12_to_bytes(&one);
+        assert_eq!(bytes.len(), 384, "Fp12 serialization must be 384 bytes");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_sign_verify_roundtrip() {
+        let (ks, ppub) = master_keygen(Sm9KeyType::Sign).unwrap();
+        let user_id = b"Alice";
+        let user_key = extract_user_key(&ks, user_id, Sm9KeyType::Sign).unwrap();
+        let message = b"hello SM9 signing";
+        let sig = sign(message, &user_key, &ppub).unwrap();
+        assert_eq!(sig.len(), 96, "signature must be 96 bytes (h=32 + S=64)");
+        let valid = verify(message, user_id, &sig, &ppub).unwrap();
+        assert!(valid, "signature must verify");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_encrypt_decrypt_roundtrip() {
+        let (ke, ppub) = master_keygen(Sm9KeyType::Encrypt).unwrap();
+        let user_id = b"Bob";
+        let user_key = extract_user_key(&ke, user_id, Sm9KeyType::Encrypt).unwrap();
+        let message = b"hello SM9 encryption";
+        let ct = encrypt(message, user_id, &ppub).unwrap();
+        assert!(ct.len() >= 96, "ciphertext must be at least 96 bytes");
+        let pt = decrypt(&ct, &user_key, user_id).unwrap();
+        assert_eq!(pt, message, "decrypted plaintext must match original");
+    }
+}
