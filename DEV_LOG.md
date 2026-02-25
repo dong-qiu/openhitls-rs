@@ -8840,6 +8840,20 @@ Added 15 tests across 3 parameter set files validating cross-variant consistency
 
 ---
 
+## Phase T135: XTS Mode + Edwards Curve + GMAC Deepening (+15 tests, 3,154→3,169)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three crypto modules: AES-XTS mode (xts.rs, 293 lines, 5 tests), Ed25519 Edwards curve arithmetic (edwards.rs, 277 lines, 5 tests), GMAC authentication (gmac/mod.rs, 201 lines, 5 tests).
+
+**Files modified**:
+- `crates/hitls-crypto/src/modes/xts.rs` — +5 tests (GF multiply, different tweaks, CTS various lengths, single block, invalid tweak)
+- `crates/hitls-crypto/src/curve25519/edwards.rs` — +5 tests (identity neutral, scalar mul zero, scalar mul 3, invalid point, commutativity)
+- `crates/hitls-crypto/src/gmac/mod.rs` — +5 tests (deterministic, different keys, incremental update, non-12byte IV, reset different IV)
+
+**Build**: `cargo test --workspace --all-features` — 3,169 passed, 7 ignored. Clippy clean. Fmt clean.
+
+---
+
 ## Phase T134: ML-DSA Poly + X.509 Extensions + X.509 Text Deepening (+15 tests, 3,139→3,154)
 
 **Date**: 2026-02-25

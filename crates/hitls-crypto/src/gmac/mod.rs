@@ -191,6 +191,115 @@ mod tests {
     }
 
     #[test]
+    fn test_gmac_deterministic() {
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce = hex("cafebabefacedbaddecaf888");
+        let aad = b"deterministic test data";
+
+        let mut gmac1 = Gmac::new(&key, &nonce).unwrap();
+        gmac1.update(aad).unwrap();
+        let mut tag1 = [0u8; 16];
+        gmac1.finish(&mut tag1).unwrap();
+
+        let mut gmac2 = Gmac::new(&key, &nonce).unwrap();
+        gmac2.update(aad).unwrap();
+        let mut tag2 = [0u8; 16];
+        gmac2.finish(&mut tag2).unwrap();
+
+        assert_eq!(tag1, tag2);
+    }
+
+    #[test]
+    fn test_gmac_different_keys_different_tags() {
+        let key_a = hex("00000000000000000000000000000000");
+        let key_b = hex("00000000000000000000000000000001");
+        let nonce = hex("000000000000000000000000");
+        let aad = b"same data";
+
+        let mut gmac_a = Gmac::new(&key_a, &nonce).unwrap();
+        gmac_a.update(aad).unwrap();
+        let mut tag_a = [0u8; 16];
+        gmac_a.finish(&mut tag_a).unwrap();
+
+        let mut gmac_b = Gmac::new(&key_b, &nonce).unwrap();
+        gmac_b.update(aad).unwrap();
+        let mut tag_b = [0u8; 16];
+        gmac_b.finish(&mut tag_b).unwrap();
+
+        assert_ne!(tag_a, tag_b, "different keys must produce different tags");
+    }
+
+    #[test]
+    fn test_gmac_incremental_update() {
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce = hex("cafebabefacedbaddecaf888");
+        let data = b"hello world, this is a longer test message for GMAC";
+
+        // Single update
+        let mut gmac1 = Gmac::new(&key, &nonce).unwrap();
+        gmac1.update(data).unwrap();
+        let mut tag1 = [0u8; 16];
+        gmac1.finish(&mut tag1).unwrap();
+
+        // Multiple incremental updates
+        let mut gmac2 = Gmac::new(&key, &nonce).unwrap();
+        gmac2.update(&data[..16]).unwrap();
+        gmac2.update(&data[16..32]).unwrap();
+        gmac2.update(&data[32..]).unwrap();
+        let mut tag2 = [0u8; 16];
+        gmac2.finish(&mut tag2).unwrap();
+
+        assert_eq!(tag1, tag2, "incremental updates must produce same tag");
+    }
+
+    #[test]
+    fn test_gmac_non_12byte_iv() {
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let aad = b"test data for non-standard IV";
+
+        // 8-byte IV (non-standard, uses GHASH-based J0 derivation)
+        let iv_8 = hex("0102030405060708");
+        let mut gmac1 = Gmac::new(&key, &iv_8).unwrap();
+        gmac1.update(aad).unwrap();
+        let mut tag1 = [0u8; 16];
+        gmac1.finish(&mut tag1).unwrap();
+
+        // 16-byte IV (also non-standard)
+        let iv_16 = hex("0102030405060708090a0b0c0d0e0f10");
+        let mut gmac2 = Gmac::new(&key, &iv_16).unwrap();
+        gmac2.update(aad).unwrap();
+        let mut tag2 = [0u8; 16];
+        gmac2.finish(&mut tag2).unwrap();
+
+        // Both should succeed and produce different tags
+        assert_ne!(tag1, tag2, "different IVs must produce different tags");
+    }
+
+    #[test]
+    fn test_gmac_reset_different_iv_different_tag() {
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce1 = hex("cafebabefacedbaddecaf888");
+        let nonce2 = hex("000000000000000000000001");
+        let aad = b"test data";
+
+        let mut gmac = Gmac::new(&key, &nonce1).unwrap();
+        gmac.update(aad).unwrap();
+        let mut tag1 = [0u8; 16];
+        gmac.finish(&mut tag1).unwrap();
+
+        // Reset with different IV
+        gmac.reset(&nonce2).unwrap();
+        gmac.update(aad).unwrap();
+        let mut tag2 = [0u8; 16];
+        gmac.finish(&mut tag2).unwrap();
+
+        assert_ne!(
+            tag1, tag2,
+            "different IVs must produce different tags after reset"
+        );
+    }
+
+    #[test]
     fn test_gmac_finish_output_too_small() {
         let key = hex("00000000000000000000000000000000");
         let nonce = hex("000000000000000000000000");

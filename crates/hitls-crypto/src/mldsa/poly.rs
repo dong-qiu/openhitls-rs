@@ -638,7 +638,10 @@ mod tests {
         let sigma = [0x42u8; 32];
         let poly = rej_bounded_poly(&sigma, 2, 0);
         for (i, &c) in poly.iter().enumerate() {
-            assert!((-2..=2).contains(&c), "eta=2 coeff[{i}] = {c} out of [-2, 2]");
+            assert!(
+                (-2..=2).contains(&c),
+                "eta=2 coeff[{i}] = {c} out of [-2, 2]"
+            );
         }
         // Different nonce should give different polynomial
         let poly2 = rej_bounded_poly(&sigma, 2, 1);
@@ -653,7 +656,10 @@ mod tests {
         let sigma = [0xAB; 32];
         let poly = rej_bounded_poly(&sigma, 4, 7);
         for (i, &c) in poly.iter().enumerate() {
-            assert!((-4..=4).contains(&c), "eta=4 coeff[{i}] = {c} out of [-4, 4]");
+            assert!(
+                (-4..=4).contains(&c),
+                "eta=4 coeff[{i}] = {c} out of [-4, 4]"
+            );
         }
     }
 

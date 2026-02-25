@@ -2742,6 +2742,24 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 ---
 
+## Phase T135: XTS Mode + Edwards Curve + GMAC Deepening
+
+**Prompt**: Continue implementing Phase T135. Deepen test coverage for three crypto modules with low test density: AES-XTS mode (xts.rs, 293 lines, 5 tests), Ed25519 Edwards curve arithmetic (edwards.rs, 277 lines, 5 tests), GMAC authentication (gmac/mod.rs, 201 lines, 5 tests).
+
+**Scope**: XTS GF(2^128) multiply-by-alpha, different tweaks produce different ciphertext, ciphertext stealing various lengths, single block roundtrip, invalid tweak length rejection. Edwards curve identity neutral element, scalar mul zero/three, invalid point decoding, addition commutativity. GMAC determinism, different keys produce different tags, incremental update equivalence, non-12-byte IV handling, reset with different IV.
+
+**Work performed**:
+1. Added 5 XTS mode tests to `crates/hitls-crypto/src/modes/xts.rs`: gf_mul_alpha, different tweaks, CTS lengths, single block, invalid tweak
+2. Added 5 Edwards curve tests to `crates/hitls-crypto/src/curve25519/edwards.rs`: identity, scalar mul 0/3, invalid point, commutativity
+3. Added 5 GMAC tests to `crates/hitls-crypto/src/gmac/mod.rs`: deterministic, different keys, incremental, non-12byte IV, reset different IV
+4. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-crypto: 994→1009, total: 3154→3169 (7 ignored unchanged).
+- All 3169 workspace tests pass, 0 clippy warnings, formatting clean.
+
+---
+
 ## Phase T134: ML-DSA Poly + X.509 Extensions + X.509 Text Deepening
 
 **Prompt**: Continue implementing Phase T134. Deepen test coverage for three modules with low test density: ML-DSA polynomial operations (poly.rs, 609 lines, 6 tests), X.509 extension parsing (extensions.rs, 580 lines, 5 tests), X.509 text output (text.rs, 606 lines, 7 tests).

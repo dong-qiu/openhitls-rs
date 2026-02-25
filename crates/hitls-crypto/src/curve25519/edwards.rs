@@ -266,6 +266,65 @@ mod tests {
     }
 
     #[test]
+    fn test_add_identity_neutral() {
+        let bp = GeExtended::basepoint();
+        let id = GeExtended::identity();
+        // P + O = P
+        let result = point_add(&bp, &id);
+        assert_eq!(result.to_bytes(), bp.to_bytes());
+        // O + P = P
+        let result2 = point_add(&id, &bp);
+        assert_eq!(result2.to_bytes(), bp.to_bytes());
+    }
+
+    #[test]
+    fn test_scalar_mul_zero_is_identity() {
+        let bp = GeExtended::basepoint();
+        let scalar = [0u8; 32];
+        let result = scalar_mul(&scalar, &bp);
+        let id = GeExtended::identity();
+        assert_eq!(result.to_bytes(), id.to_bytes());
+    }
+
+    #[test]
+    fn test_scalar_mul_three_equals_repeated_add() {
+        let bp = GeExtended::basepoint();
+        // 3 * B via scalar_mul
+        let mut scalar = [0u8; 32];
+        scalar[0] = 3;
+        let result_scalar = scalar_mul(&scalar, &bp);
+        // B + B + B via repeated addition
+        let two_b = point_add(&bp, &bp);
+        let three_b = point_add(&two_b, &bp);
+        assert_eq!(result_scalar.to_bytes(), three_b.to_bytes());
+    }
+
+    #[test]
+    fn test_from_bytes_invalid_point() {
+        // y=1 with x_sign=1: x must be 0 (since u=y²-1=0), but x_sign=1
+        // means requesting negative x while x=0 → error
+        let mut y1_signed = [0u8; 32];
+        y1_signed[0] = 1; // y = 1 (little-endian)
+        y1_signed[31] = 0x80; // set x_sign = 1
+        assert!(GeExtended::from_bytes(&y1_signed).is_err());
+
+        // Also verify that y=1 without sign bit IS valid (the identity point)
+        let mut y1_unsigned = [0u8; 32];
+        y1_unsigned[0] = 1;
+        assert!(GeExtended::from_bytes(&y1_unsigned).is_ok());
+    }
+
+    #[test]
+    fn test_point_add_commutative() {
+        let bp = GeExtended::basepoint();
+        let two_b = point_double(&bp);
+        // B + 2B should equal 2B + B
+        let r1 = point_add(&bp, &two_b);
+        let r2 = point_add(&two_b, &bp);
+        assert_eq!(r1.to_bytes(), r2.to_bytes());
+    }
+
+    #[test]
     fn test_scalar_mul_two() {
         let bp = GeExtended::basepoint();
         let mut scalar = [0u8; 32];

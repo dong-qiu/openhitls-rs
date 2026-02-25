@@ -271,6 +271,86 @@ mod tests {
     }
 
     #[test]
+    fn test_gf_mul_alpha_known_value() {
+        // Multiplying by α in GF(2^128) shifts left by 1 bit.
+        // For input [1, 0, ..., 0] (= 1), result should be [2, 0, ..., 0] (= α).
+        let mut tweak = [0u8; AES_BLOCK_SIZE];
+        tweak[0] = 1;
+        gf_mul_alpha(&mut tweak);
+        assert_eq!(tweak[0], 2);
+        assert!(tweak[1..].iter().all(|&b| b == 0));
+
+        // For input with MSB set: [0, ..., 0, 0x80], carry triggers XOR with 0x87
+        let mut tweak2 = [0u8; AES_BLOCK_SIZE];
+        tweak2[15] = 0x80;
+        gf_mul_alpha(&mut tweak2);
+        // After shift: all zeros with carry=1, so tweak2[0] ^= 0x87
+        assert_eq!(tweak2[0], 0x87);
+        assert!(tweak2[1..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn test_xts_different_tweaks_different_ciphertext() {
+        let key1 = [0xAAu8; 16];
+        let key2 = [0xBBu8; 16];
+        let pt = vec![0x42u8; 32];
+
+        let tweak_a = [0u8; 16];
+        let mut tweak_b = [0u8; 16];
+        tweak_b[0] = 1; // sector 1
+
+        let ct_a = xts_encrypt(&key1, &key2, &tweak_a, &pt).unwrap();
+        let ct_b = xts_encrypt(&key1, &key2, &tweak_b, &pt).unwrap();
+        assert_ne!(
+            ct_a, ct_b,
+            "different tweaks must produce different ciphertext"
+        );
+    }
+
+    #[test]
+    fn test_xts_ciphertext_stealing_various_lengths() {
+        let key1 = [0x11u8; 16];
+        let key2 = [0x22u8; 16];
+        let tweak = [0u8; 16];
+
+        // Test CTS with various partial block sizes: 17, 20, 24, 28, 31
+        for len in [17, 20, 24, 28, 31] {
+            let pt = vec![0xABu8; len];
+            let ct = xts_encrypt(&key1, &key2, &tweak, &pt).unwrap();
+            assert_eq!(ct.len(), pt.len());
+            let decrypted = xts_decrypt(&key1, &key2, &tweak, &ct).unwrap();
+            assert_eq!(decrypted, pt, "roundtrip failed for length {len}");
+        }
+    }
+
+    #[test]
+    fn test_xts_single_block_exact() {
+        let key1 = [0xFFu8; 16];
+        let key2 = [0xEEu8; 16];
+        let tweak = [0u8; 16];
+        // Exactly one block (16 bytes) — no CTS needed
+        let pt = vec![0x55u8; 16];
+        let ct = xts_encrypt(&key1, &key2, &tweak, &pt).unwrap();
+        assert_eq!(ct.len(), 16);
+        assert_ne!(ct, pt);
+        let decrypted = xts_decrypt(&key1, &key2, &tweak, &ct).unwrap();
+        assert_eq!(decrypted, pt);
+    }
+
+    #[test]
+    fn test_xts_invalid_tweak_length() {
+        let key1 = [0u8; 16];
+        let key2 = [0u8; 16];
+        let pt = vec![0u8; 32];
+        // Tweak too short
+        assert!(xts_encrypt(&key1, &key2, &[0u8; 8], &pt).is_err());
+        // Tweak too long
+        assert!(xts_encrypt(&key1, &key2, &[0u8; 32], &pt).is_err());
+        // Decrypt with wrong tweak length
+        assert!(xts_decrypt(&key1, &key2, &[0u8; 12], &pt).is_err());
+    }
+
+    #[test]
     fn test_xts_too_short_plaintext() {
         let key1 = [0x42u8; 16];
         let key2 = [0x43u8; 16];

@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **3,154** (7 ignored) |
-| **Test growth** | 1,104 → 3,154 (+186% since baseline) |
+| **Total tests** | **3,169** (7 ignored) |
+| **Test growth** | 1,104 → 3,169 (+187% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 3,154 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 3,169 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -78,6 +78,7 @@ Phase T131  3,094     +15   ML-DSA NTT + SM4-CTR-DRBG + BigNum random (*)
 Phase T132  3,109     +15   DH group params + entropy pool + SHA-1 (*)
 Phase T133  3,124     +15   ML-KEM poly + SM9 Fp12 + encrypted PKCS#8 (*)
 Phase T134  3,154     +15   ML-DSA poly + X.509 extensions + X.509 text (*)
+Phase T135  3,169     +15   XTS mode + Edwards curve + GMAC deepening (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -2687,6 +2688,32 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
+### Phase T135: XTS Mode + Edwards Curve + GMAC Deepening (+15 tests, 3,154→3,169)
+
+**Date**: 2026-02-25
+
+| # | Test | File | Property |
+|:-:|------|------|----------|
+| 1 | `test_gf_mul_alpha_known_value` | modes/xts.rs | GF(2^128) multiply-by-α: shift + reduction constant |
+| 2 | `test_xts_different_tweaks_different_ciphertext` | modes/xts.rs | Same plaintext, different tweaks → different ciphertext |
+| 3 | `test_xts_ciphertext_stealing_various_lengths` | modes/xts.rs | CTS roundtrip for lengths 17, 20, 24, 28, 31 |
+| 4 | `test_xts_single_block_exact` | modes/xts.rs | Exactly 16 bytes (one block, no CTS) roundtrip |
+| 5 | `test_xts_invalid_tweak_length` | modes/xts.rs | Wrong tweak lengths (8, 12, 32) rejected |
+| 6 | `test_add_identity_neutral` | curve25519/edwards.rs | P + O = P and O + P = P for basepoint |
+| 7 | `test_scalar_mul_zero_is_identity` | curve25519/edwards.rs | 0 * B = identity |
+| 8 | `test_scalar_mul_three_equals_repeated_add` | curve25519/edwards.rs | 3*B == B + B + B |
+| 9 | `test_from_bytes_invalid_point` | curve25519/edwards.rs | y=1 with x_sign=1 (x=0 signed) → error |
+| 10 | `test_point_add_commutative` | curve25519/edwards.rs | B + 2B == 2B + B |
+| 11 | `test_gmac_deterministic` | gmac/mod.rs | Same inputs → same tag |
+| 12 | `test_gmac_different_keys_different_tags` | gmac/mod.rs | Different keys → different tags |
+| 13 | `test_gmac_incremental_update` | gmac/mod.rs | Single update == multiple incremental updates |
+| 14 | `test_gmac_non_12byte_iv` | gmac/mod.rs | Non-standard IV lengths (8, 16 bytes) work correctly |
+| 15 | `test_gmac_reset_different_iv_different_tag` | gmac/mod.rs | Reset with different IV → different tag |
+
+**Per-crate counts**: hitls-crypto 1,009 (+15) | Total: 3,169 (+15)
+
+---
+
 ### Phase T134: ML-DSA Poly + X.509 Extensions + X.509 Text Deepening (+15 tests, 3,139→3,154)
 
 **Date**: 2026-02-25
@@ -2717,7 +2744,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | hitls-auth | 33 | 0 |
 | hitls-bignum | 69 | 0 |
 | hitls-cli | 117 | 5 |
-| hitls-crypto | 994 | 2 |
+| hitls-crypto | 1,009 | 2 |
 | wycheproof | 15 | 0 |
 | hitls-integration | 152 | 0 |
 | hitls-pki | 390 | 0 |
