@@ -606,4 +606,96 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_make_hint_use_hint_consistency() {
+        // For gamma2 = (Q-1)/32, UseHint with hint=false should return highbits(r)
+        let gamma2 = (Q - 1) / 32;
+        for r in [0, 1000, 261888, 523776, 4190208, 8380416] {
+            let h = highbits(r, gamma2);
+            assert_eq!(
+                use_hint(false, r, gamma2),
+                h,
+                "use_hint(false) != highbits for r={r}"
+            );
+        }
+        // When make_hint returns false, high bits are unchanged
+        for (z, r) in [(0, 1000), (100, 261000), (1, 0)] {
+            let hint = make_hint(z, r, gamma2);
+            if !hint {
+                let r1 = highbits(r, gamma2);
+                let v1 = highbits(ntt::freeze(r + z), gamma2);
+                assert_eq!(
+                    r1, v1,
+                    "make_hint false but highbits differ for z={z}, r={r}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_rej_bounded_poly_eta2_range() {
+        let sigma = [0x42u8; 32];
+        let poly = rej_bounded_poly(&sigma, 2, 0);
+        for (i, &c) in poly.iter().enumerate() {
+            assert!((-2..=2).contains(&c), "eta=2 coeff[{i}] = {c} out of [-2, 2]");
+        }
+        // Different nonce should give different polynomial
+        let poly2 = rej_bounded_poly(&sigma, 2, 1);
+        assert_ne!(
+            poly, poly2,
+            "Different nonces should produce different polys"
+        );
+    }
+
+    #[test]
+    fn test_rej_bounded_poly_eta4_range() {
+        let sigma = [0xAB; 32];
+        let poly = rej_bounded_poly(&sigma, 4, 7);
+        for (i, &c) in poly.iter().enumerate() {
+            assert!((-4..=4).contains(&c), "eta=4 coeff[{i}] = {c} out of [-4, 4]");
+        }
+    }
+
+    #[test]
+    fn test_sample_in_ball_tau_count() {
+        // sample_in_ball produces exactly tau non-zero coefficients, all ±1
+        for tau in [39usize, 49, 60] {
+            let seed = [tau as u8; 32];
+            let c = sample_in_ball(&seed, tau);
+            let nonzero: usize = c.iter().filter(|&&v| v != 0).count();
+            assert_eq!(
+                nonzero, tau,
+                "tau={tau}: expected {tau} nonzero, got {nonzero}"
+            );
+            for (i, &v) in c.iter().enumerate() {
+                assert!(
+                    v == -1 || v == 0 || v == 1,
+                    "tau={tau}: c[{i}] = {v}, expected -1/0/1"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_poly_chknorm_boundary() {
+        let mut poly = [0i32; N];
+        // All zeros: norm < any positive bound
+        assert!(
+            poly_chknorm(&poly, 1),
+            "zero poly should pass norm check with bound=1"
+        );
+        // Set one coefficient to bound-1: should pass
+        poly[0] = 99;
+        assert!(poly_chknorm(&poly, 100), "max=99 should pass bound=100");
+        // Set one coefficient to bound: should fail
+        poly[0] = 100;
+        assert!(!poly_chknorm(&poly, 100), "max=100 should fail bound=100");
+        // Negative coefficient at -bound: should fail
+        poly[0] = -100;
+        assert!(!poly_chknorm(&poly, 100), "min=-100 should fail bound=100");
+        // Negative coefficient at -(bound-1): should pass
+        poly[0] = -99;
+        assert!(poly_chknorm(&poly, 100), "min=-99 should pass bound=100");
+    }
 }

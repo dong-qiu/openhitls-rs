@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **3,124** (22 ignored) |
-| **Test growth** | 1,104 → 3,124 (+183% since baseline) |
+| **Total tests** | **3,154** (7 ignored) |
+| **Test growth** | 1,104 → 3,154 (+186% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 3,124 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 3,154 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -77,6 +77,7 @@ Phase T130  3,079     +15   FrodoKEM PKE + SM9 G1 point + SM9 Fp field (*)
 Phase T131  3,094     +15   ML-DSA NTT + SM4-CTR-DRBG + BigNum random (*)
 Phase T132  3,109     +15   DH group params + entropy pool + SHA-1 (*)
 Phase T133  3,124     +15   ML-KEM poly + SM9 Fp12 + encrypted PKCS#8 (*)
+Phase T134  3,154     +15   ML-DSA poly + X.509 extensions + X.509 text (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -2655,7 +2656,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 4 | Phase 96 — P-256 Fast Path | 47 | ecc/p256_field.rs, ecc/p256_point.rs | Montgomery roundtrip, algebraic laws, Jacobian point ops, cross-validation with BigNum |
 | 5 | Phase 97 — ChaCha20 SIMD | 3 (aarch64) | chacha20/chacha20_neon.rs | RFC 8439 vector, counter-zero, all-0xFF key NEON-vs-scalar |
 
-**Per-crate counts after Phase 97**: (see Phase T133 above for latest)
+**Per-crate counts after Phase 97**: (see Phase T134 above for latest)
 
 ---
 
@@ -2682,7 +2683,49 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_field_overlap_height_chain` | address.rs | tree_height/chain_addr same field2 offset |
 | 15 | `test_hash_addr_tree_index_same_offset` | address.rs | hash_addr/tree_index same field3 offset |
 
-**Per-crate counts after Phase T129**: (see Phase T133 above for latest)
+**Per-crate counts after Phase T129**: (see Phase T134 above for latest)
+
+---
+
+### Phase T134: ML-DSA Poly + X.509 Extensions + X.509 Text Deepening (+15 tests, 3,139→3,154)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three modules: ML-DSA polynomial operations (poly.rs, 609 lines, 6→11 tests), X.509 extension parsing (extensions.rs, 580 lines, 5→10 tests), X.509 text output (text.rs, 606 lines, 7→12 tests).
+
+| # | Test | File | Property |
+|---|------|------|----------|
+| 1 | `test_make_hint_use_hint_consistency` | poly.rs | hint=false returns highbits(r); make_hint=false ⇒ unchanged highbits |
+| 2 | `test_rej_bounded_poly_eta2_range` | poly.rs | All coefficients in [-2, 2]; different nonce → different poly |
+| 3 | `test_rej_bounded_poly_eta4_range` | poly.rs | All coefficients in [-4, 4] |
+| 4 | `test_sample_in_ball_tau_count` | poly.rs | Exactly tau non-zero coefficients, all ±1 |
+| 5 | `test_poly_chknorm_boundary` | poly.rs | Zero poly passes; coeff=bound fails; coeff=bound-1 passes |
+| 6 | `test_parse_extended_key_usage_server_client` | extensions.rs | Parse EKU with serverAuth + clientAuth OIDs |
+| 7 | `test_parse_subject_key_identifier` | extensions.rs | Parse SKI from OCTET STRING |
+| 8 | `test_parse_key_usage_crl_sign_only` | extensions.rs | CRL Sign bit only set |
+| 9 | `test_parse_subject_alt_name_email_uri` | extensions.rs | SAN with rfc822Name + URI |
+| 10 | `test_key_usage_has_method` | extensions.rs | KeyUsage bit flag has() method |
+| 11 | `test_format_time_epoch` | text.rs | format_time(0) = Jan 1 1970 midnight |
+| 12 | `test_format_time_known_date` | text.rs | 1771934400 = Feb 24 2026 noon |
+| 13 | `test_days_to_ymd_known_dates` | text.rs | 1970/2000/2024-leap/1999-12-31 |
+| 14 | `test_oid_name_invalid_bytes_hex_fallback` | text.rs | Invalid OID → hex:colon fallback |
+| 15 | `test_format_basic_constraints_not_ca` | text.rs | CA:FALSE, pathlen:none |
+
+**Per-crate counts after Phase T134**:
+
+| Crate | Tests | Ignored |
+|-------|------:|-------:|
+| hitls-auth | 33 | 0 |
+| hitls-bignum | 69 | 0 |
+| hitls-cli | 117 | 5 |
+| hitls-crypto | 994 | 2 |
+| wycheproof | 15 | 0 |
+| hitls-integration | 152 | 0 |
+| hitls-pki | 390 | 0 |
+| hitls-tls | 1290 | 0 |
+| hitls-types | 26 | 0 |
+| hitls-utils | 66 | 0 |
+| doc-tests | 2 | 0 |
+| **Total** | **3154** | **7** |
 
 ---
 
@@ -2709,22 +2752,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_encrypted_pkcs8_different_encryptions_differ` | encrypted.rs | Random salt/IV → different DER |
 | 15 | `test_encrypted_pkcs8_decrypt_twice_same_result` | encrypted.rs | Deterministic decrypt |
 
-**Per-crate counts after Phase T133**:
-
-| Crate | Tests | Ignored |
-|-------|------:|-------:|
-| hitls-auth | 33 | 0 |
-| hitls-bignum | 69 | 0 |
-| hitls-cli | 117 | 5 |
-| hitls-crypto | 974 | 17 |
-| wycheproof | 15 | 0 |
-| hitls-integration | 152 | 0 |
-| hitls-pki | 380 | 0 |
-| hitls-tls | 1290 | 0 |
-| hitls-types | 26 | 0 |
-| hitls-utils | 66 | 0 |
-| doc-tests | 2 | 0 |
-| **Total** | **3124** | **22** |
+**Per-crate counts after Phase T133**: (see Phase T134 above for latest)
 
 ---
 
@@ -2751,7 +2779,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_sha1_padding_boundary_56` | sha1/mod.rs | 56 bytes forces two-block |
 | 15 | `test_sha1_clone_mid_update` | sha1/mod.rs | Clone mid-update consistency |
 
-**Per-crate counts after Phase T132**: (see Phase T133 above for latest)
+**Per-crate counts after Phase T132**: (see Phase T134 above for latest)
 
 ---
 
@@ -2778,7 +2806,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_random_different_calls` | rand.rs | Two random(256) calls differ |
 | 15 | `test_random_large_bits` | rand.rs | 512/1024/2048 bit correct bit_len |
 
-**Per-crate counts after Phase T131**: (see Phase T133 above for latest)
+**Per-crate counts after Phase T131**: (see Phase T134 above for latest)
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2797,7 +2825,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-**Per-crate counts after Phase T130**: (see Phase T133 above for latest)
+**Per-crate counts after Phase T130**: (see Phase T134 above for latest)
 
 ### Phase T130: FrodoKEM PKE + SM9 G1 Point + SM9 Fp Field Deepening (+15 tests, 3,065→3,079)
 
@@ -2822,7 +2850,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `mul_u64_consistency` | fp.rs | mul_u64(c) == mul(Fp::from_u64(c)) |
 | 15 | `distributive_law` | fp.rs | a*(b+c) == a*b + a*c |
 
-**Per-crate counts after Phase T130**: (see Phase T133 above for latest)
+**Per-crate counts after Phase T130**: (see Phase T134 above for latest)
 
 ---
 

@@ -577,4 +577,79 @@ mod tests {
         let aki = parse_authority_key_identifier(&der).unwrap();
         assert_eq!(aki.key_identifier, Some(vec![0x01, 0x02, 0x03, 0x04]));
     }
+
+    #[test]
+    fn test_parse_extended_key_usage_server_client() {
+        // SEQUENCE { OID(serverAuth 1.3.6.1.5.5.7.3.1), OID(clientAuth 1.3.6.1.5.5.7.3.2) }
+        let der = [
+            0x30, 0x14, // SEQUENCE, 20 bytes
+            0x06, 0x08, 0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03,
+            0x01, // OID 1.3.6.1.5.5.7.3.1
+            0x06, 0x08, 0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03,
+            0x02, // OID 1.3.6.1.5.5.7.3.2
+        ];
+        let eku = parse_extended_key_usage(&der).unwrap();
+        assert_eq!(eku.purposes.len(), 2);
+        assert_eq!(eku.purposes[0].to_dot_string(), "1.3.6.1.5.5.7.3.1");
+        assert_eq!(eku.purposes[1].to_dot_string(), "1.3.6.1.5.5.7.3.2");
+    }
+
+    #[test]
+    fn test_parse_subject_key_identifier() {
+        // OCTET STRING wrapping 4-byte key identifier
+        let der = [0x04, 0x04, 0xDE, 0xAD, 0xBE, 0xEF];
+        let ski = parse_subject_key_identifier(&der).unwrap();
+        assert_eq!(ski, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    #[test]
+    fn test_parse_key_usage_crl_sign_only() {
+        // BIT STRING: unused_bits=1, data=[0x02] → bit 6 (CRL_SIGN=0x0002)
+        let der = [0x03, 0x02, 0x01, 0x02];
+        let ku = parse_key_usage(&der).unwrap();
+        assert!(ku.has(KeyUsage::CRL_SIGN));
+        assert!(!ku.has(KeyUsage::DIGITAL_SIGNATURE));
+        assert!(!ku.has(KeyUsage::KEY_CERT_SIGN));
+        assert!(!ku.has(KeyUsage::KEY_ENCIPHERMENT));
+    }
+
+    #[test]
+    fn test_parse_subject_alt_name_email_uri() {
+        // SEQUENCE {
+        //   [1] "a@b.com"                   (rfc822Name)
+        //   [6] "https://example.com"       (URI)
+        // }
+        let email = b"a@b.com";
+        let uri = b"https://example.com";
+        let mut der = vec![0x30, 0x00]; // placeholder length
+                                        // [1] rfc822Name
+        der.push(0x81);
+        der.push(email.len() as u8);
+        der.extend_from_slice(email);
+        // [6] URI
+        der.push(0x86);
+        der.push(uri.len() as u8);
+        der.extend_from_slice(uri);
+        // Fix length
+        der[1] = (der.len() - 2) as u8;
+
+        let san = parse_subject_alt_name(&der).unwrap();
+        assert_eq!(san.email_addresses, vec!["a@b.com"]);
+        assert_eq!(san.uris, vec!["https://example.com"]);
+        assert!(san.dns_names.is_empty());
+        assert!(san.ip_addresses.is_empty());
+    }
+
+    #[test]
+    fn test_key_usage_has_method() {
+        let ku = KeyUsage(KeyUsage::DIGITAL_SIGNATURE | KeyUsage::KEY_CERT_SIGN);
+        assert!(ku.has(KeyUsage::DIGITAL_SIGNATURE));
+        assert!(ku.has(KeyUsage::KEY_CERT_SIGN));
+        assert!(!ku.has(KeyUsage::CRL_SIGN));
+        assert!(!ku.has(KeyUsage::KEY_ENCIPHERMENT));
+        assert!(!ku.has(KeyUsage::DECIPHER_ONLY));
+        // Empty flags
+        let empty = KeyUsage(0);
+        assert!(!empty.has(KeyUsage::DIGITAL_SIGNATURE));
+    }
 }

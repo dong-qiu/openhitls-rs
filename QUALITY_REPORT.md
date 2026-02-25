@@ -12,7 +12,7 @@
 | Layer | Mechanism | Coverage | Status |
 |:-----:|-----------|----------|:------:|
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | Complete |
-| **L2** | Unit Tests | 3,124 tests (22 ignored), 100% pass rate | Comprehensive |
+| **L2** | Unit Tests | 3,154 tests (7 ignored), 100% pass rate | Comprehensive |
 | **L3** | Integration Tests | 149 cross-crate tests (TCP loopback + DTLS resilience) | Good |
 | **L4** | Fuzz Testing | 10 fuzz targets + 66 seed corpus files | Parse-only |
 | **L5** | Security Audit | rustsec/audit-check + Miri (bignum/utils) + cargo-tarpaulin coverage | Good |
@@ -37,8 +37,8 @@ GitHub Actions (.github/workflows/ci.yml)
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
 | hitls-tls | 1,290 | 0 | 41.9% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat |
-| hitls-crypto | 974 | 17 | 31.2% | 48 algorithm modules + hardware acceleration (AES/SHA-2/GHASH/ChaCha20) + P-256 fast path + proptest |
-| hitls-pki | 380 | 0 | 12.2% | X.509, PKCS#8/12, CMS (5 content types), encoding helpers |
+| hitls-crypto | 994 | 2 | 31.5% | 48 algorithm modules + hardware acceleration (AES/SHA-2/GHASH/ChaCha20) + P-256 fast path + proptest |
+| hitls-pki | 390 | 0 | 12.4% | X.509, PKCS#8/12, CMS (5 content types), encoding helpers |
 | hitls-integration | 152 | 0 | 4.9% | Cross-crate TCP loopback, error scenarios, concurrency, DTLS resilience |
 | hitls-cli | 117 | 5 | 3.8% | 14 CLI commands |
 | hitls-utils | 66 | 0 | 2.1% | ASN.1, Base64, PEM, OID, proptest roundtrips |
@@ -47,7 +47,7 @@ GitHub Actions (.github/workflows/ci.yml)
 | hitls-types | 26 | 0 | 0.8% | Enum definitions, error types |
 | Wycheproof | 15 | 0 | 0.5% | 5,000+ vectors across 15 test groups |
 | Doc-tests | 2 | 0 | 0.1% | API documentation examples |
-| **Total** | **3,124** | **22** | **100%** | |
+| **Total** | **3,154** | **7** | **100%** | |
 
 ### 1.4 Standard Compliance Coverage
 
@@ -244,9 +244,15 @@ Phase T125         +12      —            FrodoKEM matrix + SLH-DSA hypertree +
 Phase T126         +15      —            McEliece + FrodoKEM + XMSS params deepening ✅
 Phase T127         +15      —            XMSS hash + address + ML-KEM NTT deepening  ✅
 Phase T128         +15      —            BigNum CT + primality + core type deepening  ✅
+Phase T129         +15      —            SLH-DSA params + hash abstraction + address  ✅
+Phase T130         +15      —            ML-DSA NTT + PKI text + X.509 cert parsing   ✅
+Phase T131         +15      —            ML-DSA signing + XMSS keygen + FrodoKEM enc  ✅
+Phase T132         +15      —            ML-KEM indcpa + McEliece field + BigNum shift ✅
+Phase T133         +15      —            ML-DSA packing + X.509 builder + PKI CSR      ✅
+Phase T134         +15      —            ML-DSA poly + X.509 extensions + PKI text     ✅
 ```
 
-**Result**: 2,585 → 2,954 tests (+369), all planned deficiencies addressed.
+**Result**: 2,585 → 3,154 tests (+569), all planned deficiencies addressed.
 
 ### 3.2 Phase T102 — 0-RTT Early Data + Replay Protection (~8 tests) ✅
 
@@ -427,9 +433,9 @@ Phases T112–T119 continued hardening beyond the original roadmap:
 
 ## 4. Coverage Targets — Final Status
 
-| Metric | Original (T106) | Target (T111) | **Actual (T123)** |
+| Metric | Original (T106) | Target (T111) | **Actual (T134)** |
 |--------|:---------------:|:-------------:|:-----------------:|
-| Total tests | 2,634 | ~2,750+ | **2,924** |
+| Total tests | 2,634 | ~2,750+ | **3,154** |
 | Critical deficiencies (D1-D2) | 0 | 0 | **0** |
 | High deficiencies (D3-D5) | 2 partial | 0 | **0** (D4/D5 mostly closed) |
 | Crypto files with tests | 75% | 90%+ | **~90%** |

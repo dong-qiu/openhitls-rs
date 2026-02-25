@@ -8840,6 +8840,32 @@ Added 15 tests across 3 parameter set files validating cross-variant consistency
 
 ---
 
+## Phase T134: ML-DSA Poly + X.509 Extensions + X.509 Text Deepening (+15 tests, 3,139→3,154)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three modules with low test density: ML-DSA polynomial operations (poly.rs, 609 lines, 6 tests), X.509 extension parsing (extensions.rs, 580 lines, 5 tests), X.509 text output (text.rs, 606 lines, 7 tests).
+
+### Summary
+
+Added 15 tests across 3 modules validating lattice signature polynomial properties, X.509 extension DER parsing, and certificate text formatting:
+
+- **ML-DSA poly** (5 tests): make_hint/use_hint consistency (hint=false returns highbits), rej_bounded_poly eta=2 range [-2,2] + nonce divergence, rej_bounded_poly eta=4 range [-4,4], sample_in_ball tau non-zero count + all ±1, poly_chknorm boundary pass/fail
+- **X.509 extensions** (5 tests): ExtendedKeyUsage parsing (serverAuth + clientAuth OIDs), SubjectKeyIdentifier parsing, KeyUsage CRL Sign only bit, SubjectAltName email + URI parsing, KeyUsage.has() method flag tests
+- **X.509 text** (5 tests): format_time epoch (Jan 1 1970), format_time known date (2026-02-24), days_to_ymd known dates (1970/2000/2024 leap/1999), invalid OID hex fallback, format_basic_constraints CA:FALSE
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/mldsa/poly.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-pki/src/x509/extensions.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-pki/src/x509/text.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3154 passed, 0 failed, 7 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
 ## Phase T133: ML-KEM Poly + SM9 Fp12 + Encrypted PKCS#8 Deepening (+15 tests, 3,109→3,124)
 
 **Date**: 2026-02-25

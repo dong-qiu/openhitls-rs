@@ -603,4 +603,55 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         assert!(text.contains("id-ecPublicKey") || text.contains("ecPublicKey"));
         assert!(text.contains("Signature Algorithm:"));
     }
+
+    #[test]
+    fn test_format_time_epoch() {
+        // Unix epoch: Jan 1 00:00:00 1970 UTC
+        let s = format_time(0);
+        assert!(s.contains("Jan"), "epoch should be January: {s}");
+        assert!(s.contains("1970"), "epoch should be 1970: {s}");
+        assert!(s.contains("00:00:00"), "epoch should be midnight: {s}");
+    }
+
+    #[test]
+    fn test_format_time_known_date() {
+        // 2026-02-24 12:00:00 UTC = 1771934400
+        let s = format_time(1_771_934_400);
+        assert!(s.contains("2026"), "expected 2026: {s}");
+        assert!(s.contains("Feb"), "expected Feb: {s}");
+        assert!(s.contains("24"), "expected day 24: {s}");
+        assert!(s.contains("12:00:00"), "expected noon: {s}");
+    }
+
+    #[test]
+    fn test_days_to_ymd_known_dates() {
+        // 1970-01-01 = day 0
+        assert_eq!(days_to_ymd(0), (1970, 1, 1));
+        // 2000-01-01 = day 10957
+        assert_eq!(days_to_ymd(10957), (2000, 1, 1));
+        // 2024-02-29 (leap day) = day 19782
+        assert_eq!(days_to_ymd(19782), (2024, 2, 29));
+        // 1999-12-31 = day 10956
+        assert_eq!(days_to_ymd(10956), (1999, 12, 31));
+    }
+
+    #[test]
+    fn test_oid_name_invalid_bytes_hex_fallback() {
+        // Invalid/empty OID bytes should fall back to hex:colon representation
+        let invalid = &[0xFF, 0xFE];
+        let result = oid_name(invalid);
+        assert!(
+            result.contains("ff") || result.contains("FF"),
+            "Invalid OID should fall back to hex: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_basic_constraints_not_ca() {
+        // SEQUENCE { BOOLEAN FALSE } → isCA=false, no pathlen
+        let der = [0x30, 0x03, 0x01, 0x01, 0x00];
+        let s = format_basic_constraints(&der);
+        assert!(s.contains("CA:FALSE"), "Expected CA:FALSE: {s}");
+        assert!(s.contains("pathlen:none"), "Expected pathlen:none: {s}");
+    }
 }

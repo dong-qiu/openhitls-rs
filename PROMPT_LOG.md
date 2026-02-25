@@ -2742,6 +2742,24 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 ---
 
+## Phase T134: ML-DSA Poly + X.509 Extensions + X.509 Text Deepening
+
+**Prompt**: Continue implementing Phase T134. Deepen test coverage for three modules with low test density: ML-DSA polynomial operations (poly.rs, 609 lines, 6 tests), X.509 extension parsing (extensions.rs, 580 lines, 5 tests), X.509 text output (text.rs, 606 lines, 7 tests).
+
+**Scope**: ML-DSA make_hint/use_hint consistency, rej_bounded_poly eta=2/4 coefficient range, sample_in_ball tau non-zero count, poly_chknorm boundary. X.509 ExtendedKeyUsage parsing, SubjectKeyIdentifier, KeyUsage CRL Sign only, SubjectAltName email/URI, KeyUsage.has() method. X.509 text format_time epoch/known date, days_to_ymd conversions, OID invalid hex fallback, format_basic_constraints CA:FALSE.
+
+**Work performed**:
+1. Added 5 ML-DSA poly tests to `crates/hitls-crypto/src/mldsa/poly.rs`: make_hint/use_hint, rej_bounded eta=2/4, sample_in_ball, poly_chknorm
+2. Added 5 X.509 extension tests to `crates/hitls-pki/src/x509/extensions.rs`: EKU, SKI, CRL sign, email/URI SAN, KeyUsage.has()
+3. Added 5 X.509 text tests to `crates/hitls-pki/src/x509/text.rs`: format_time epoch/known, days_to_ymd, OID hex fallback, format_basic_constraints
+4. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-crypto: 979→994, hitls-pki: 380→390, total: 3139→3154 (7 ignored unchanged).
+- All 3154 workspace tests pass, 0 clippy warnings, formatting clean.
+
+---
+
 ## Phase T133: ML-KEM Poly + SM9 Fp12 + Encrypted PKCS#8 Deepening
 
 **Prompt**: Continue implementing Phase T133. Deepen test coverage for three modules with low test density: ML-KEM polynomial operations (poly.rs, 339 lines, 5 tests), SM9 Fp12 tower field arithmetic (fp12.rs, 309 lines, 5 tests), encrypted PKCS#8 (encrypted.rs, 305 lines, 5 tests).
