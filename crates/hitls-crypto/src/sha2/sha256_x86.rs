@@ -3,11 +3,46 @@
 //! Uses Intel SHA Extensions (SHA-NI) available on modern x86-64 processors
 //! (Intel Goldmont/Ice Lake+, AMD Zen+). Each `_mm_sha256rnds2_epu32` call
 //! performs two SHA-256 rounds, so a pair of calls covers four rounds.
+//!
+//! Based on the well-tested RustCrypto pattern: message schedule is computed
+//! in full (sha256msg1 + alignr + sha256msg2) before overwriting registers,
+//! avoiding corruption from partial sigma0 values.
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
+
+/// Compute the next 4 expanded message words from four 4-word blocks.
+///
+/// schedule(v0, v1, v2, v3) = sha256msg2(sha256msg1(v0, v1) + alignr(v3, v2, 4), v3)
+///
+/// This produces W[t..t+3] from W[t-16..t-13], W[t-12..t-9], W[t-8..t-5], W[t-4..t-1].
+#[inline(always)]
+#[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
+unsafe fn schedule(v0: __m128i, v1: __m128i, v2: __m128i, v3: __m128i) -> __m128i {
+    let t1 = _mm_sha256msg1_epu32(v0, v1);
+    let t2 = _mm_alignr_epi8(v3, v2, 4);
+    let t3 = _mm_add_epi32(t1, t2);
+    _mm_sha256msg2_epu32(t3, v3)
+}
+
+/// Execute 4 SHA-256 rounds (2 calls to sha256rnds2, each doing 2 rounds).
+#[inline(always)]
+#[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
+unsafe fn rounds4(
+    abef: &mut __m128i,
+    cdgh: &mut __m128i,
+    msg: __m128i,
+    k_ptr: *const u32,
+    k_offset: usize,
+) {
+    let kv = _mm_loadu_si128(k_ptr.add(k_offset) as *const __m128i);
+    let t1 = _mm_add_epi32(msg, kv);
+    *cdgh = _mm_sha256rnds2_epu32(*cdgh, *abef, t1);
+    let t2 = _mm_shuffle_epi32(t1, 0x0E);
+    *abef = _mm_sha256rnds2_epu32(*abef, *cdgh, t2);
+}
 
 /// SHA-256 block compression using x86 SHA-NI intrinsics.
 ///
@@ -24,22 +59,22 @@ pub(super) unsafe fn sha256_compress_x86(state: &mut [u32; 8], block: &[u8]) {
 
     // Load current state into two 128-bit registers.
     // state0 holds [A, B, C, D], state1 holds [E, F, G, H] in memory order.
-    let mut state0 = _mm_loadu_si128(state.as_ptr() as *const __m128i);
-    let mut state1 = _mm_loadu_si128(state[4..].as_ptr() as *const __m128i);
+    let mut abef = _mm_loadu_si128(state.as_ptr() as *const __m128i);
+    let mut cdgh = _mm_loadu_si128(state[4..].as_ptr() as *const __m128i);
 
     // SHA-NI expects a specific lane arrangement:
-    //   state0 = (A, B, E, F)  — "ABEF"
-    //   state1 = (C, D, G, H)  — "CDGH"
+    //   abef = [F, E, B, A] in lane order  (bits [127:96]=A, [95:64]=B, [63:32]=E, [31:0]=F)
+    //   cdgh = [H, G, D, C] in lane order  (bits [127:96]=C, [95:64]=D, [63:32]=G, [31:0]=H)
     //
     // Rearrange from standard [A,B,C,D] / [E,F,G,H] layout.
-    let tmp = _mm_shuffle_epi32(state0, 0xB1); // [B, A, D, C]
-    state1 = _mm_shuffle_epi32(state1, 0x1B); // [H, G, F, E]
-    state0 = _mm_alignr_epi8(tmp, state1, 8); // ABEF
-    state1 = _mm_blend_epi16(state1, tmp, 0xF0); // CDGH
+    let cdab = _mm_shuffle_epi32(abef, 0xB1); // [B, A, D, C]
+    let efgh = _mm_shuffle_epi32(cdgh, 0x1B); // [H, G, F, E]
+    abef = _mm_alignr_epi8(cdab, efgh, 8); // ABEF
+    cdgh = _mm_blend_epi16(efgh, cdab, 0xF0); // CDGH
 
     // Save initial state for the Davies-Meyer feed-forward at the end.
-    let abef_save = state0;
-    let cdgh_save = state1;
+    let abef_save = abef;
+    let cdgh_save = cdgh;
 
     // Byte-swap mask: SHA-256 message words are big-endian, x86 is little-endian.
     let shuf_mask = _mm_set_epi64x(
@@ -48,168 +83,80 @@ pub(super) unsafe fn sha256_compress_x86(state: &mut [u32; 8], block: &[u8]) {
     );
 
     // Load four 128-bit message chunks (16 bytes = 4 words each) and byte-swap.
-    let mut msg0 = _mm_shuffle_epi8(_mm_loadu_si128(block.as_ptr() as *const __m128i), shuf_mask);
-    let mut msg1 = _mm_shuffle_epi8(
+    let mut w0 = _mm_shuffle_epi8(_mm_loadu_si128(block.as_ptr() as *const __m128i), shuf_mask);
+    let mut w1 = _mm_shuffle_epi8(
         _mm_loadu_si128(block.as_ptr().add(16) as *const __m128i),
         shuf_mask,
     );
-    let mut msg2 = _mm_shuffle_epi8(
+    let mut w2 = _mm_shuffle_epi8(
         _mm_loadu_si128(block.as_ptr().add(32) as *const __m128i),
         shuf_mask,
     );
-    let mut msg3 = _mm_shuffle_epi8(
+    let mut w3 = _mm_shuffle_epi8(
         _mm_loadu_si128(block.as_ptr().add(48) as *const __m128i),
         shuf_mask,
     );
+    let mut w4: __m128i;
 
     let k = super::K256.as_ptr();
-    let mut tmp: __m128i;
 
-    // ===== Rounds 0–3 =====
-    tmp = _mm_add_epi32(msg0, _mm_loadu_si128(k.add(0) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+    // Rounds 0–15: use the original 16 message words directly, no schedule needed.
+    rounds4(&mut abef, &mut cdgh, w0, k, 0); // rounds 0–3
+    rounds4(&mut abef, &mut cdgh, w1, k, 4); // rounds 4–7
+    rounds4(&mut abef, &mut cdgh, w2, k, 8); // rounds 8–11
+    rounds4(&mut abef, &mut cdgh, w3, k, 12); // rounds 12–15
 
-    // ===== Rounds 4–7 =====
-    tmp = _mm_add_epi32(msg1, _mm_loadu_si128(k.add(4) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+    // Rounds 16–63: compute message schedule on-the-fly using 5-register rotation.
+    // schedule(a, b, c, d) computes W[t..t+3] from the preceding 16 words.
+    w4 = schedule(w0, w1, w2, w3);
+    rounds4(&mut abef, &mut cdgh, w4, k, 16); // rounds 16–19
 
-    // ===== Rounds 8–11 =====
-    tmp = _mm_add_epi32(msg2, _mm_loadu_si128(k.add(8) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+    w0 = schedule(w1, w2, w3, w4);
+    rounds4(&mut abef, &mut cdgh, w0, k, 20); // rounds 20–23
 
-    // ===== Rounds 12–15 =====
-    tmp = _mm_add_epi32(msg3, _mm_loadu_si128(k.add(12) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg0 = _mm_add_epi32(msg0, _mm_alignr_epi8(msg3, msg2, 4));
-    msg0 = _mm_sha256msg2_epu32(msg0, msg3);
-    msg3 = _mm_sha256msg1_epu32(msg3, msg0);
+    w1 = schedule(w2, w3, w4, w0);
+    rounds4(&mut abef, &mut cdgh, w1, k, 24); // rounds 24–27
 
-    // ===== Rounds 16–19 =====
-    tmp = _mm_add_epi32(msg0, _mm_loadu_si128(k.add(16) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg1 = _mm_add_epi32(msg1, _mm_alignr_epi8(msg0, msg3, 4));
-    msg1 = _mm_sha256msg2_epu32(msg1, msg0);
-    msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+    w2 = schedule(w3, w4, w0, w1);
+    rounds4(&mut abef, &mut cdgh, w2, k, 28); // rounds 28–31
 
-    // ===== Rounds 20–23 =====
-    tmp = _mm_add_epi32(msg1, _mm_loadu_si128(k.add(20) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg2 = _mm_add_epi32(msg2, _mm_alignr_epi8(msg1, msg0, 4));
-    msg2 = _mm_sha256msg2_epu32(msg2, msg1);
-    msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+    w3 = schedule(w4, w0, w1, w2);
+    rounds4(&mut abef, &mut cdgh, w3, k, 32); // rounds 32–35
 
-    // ===== Rounds 24–27 =====
-    tmp = _mm_add_epi32(msg2, _mm_loadu_si128(k.add(24) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg3 = _mm_add_epi32(msg3, _mm_alignr_epi8(msg2, msg1, 4));
-    msg3 = _mm_sha256msg2_epu32(msg3, msg2);
-    msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+    w4 = schedule(w0, w1, w2, w3);
+    rounds4(&mut abef, &mut cdgh, w4, k, 36); // rounds 36–39
 
-    // ===== Rounds 28–31 =====
-    tmp = _mm_add_epi32(msg3, _mm_loadu_si128(k.add(28) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg0 = _mm_add_epi32(msg0, _mm_alignr_epi8(msg3, msg2, 4));
-    msg0 = _mm_sha256msg2_epu32(msg0, msg3);
-    msg3 = _mm_sha256msg1_epu32(msg3, msg0);
+    w0 = schedule(w1, w2, w3, w4);
+    rounds4(&mut abef, &mut cdgh, w0, k, 40); // rounds 40–43
 
-    // ===== Rounds 32–35 =====
-    tmp = _mm_add_epi32(msg0, _mm_loadu_si128(k.add(32) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg1 = _mm_add_epi32(msg1, _mm_alignr_epi8(msg0, msg3, 4));
-    msg1 = _mm_sha256msg2_epu32(msg1, msg0);
-    msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+    w1 = schedule(w2, w3, w4, w0);
+    rounds4(&mut abef, &mut cdgh, w1, k, 44); // rounds 44–47
 
-    // ===== Rounds 36–39 =====
-    tmp = _mm_add_epi32(msg1, _mm_loadu_si128(k.add(36) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg2 = _mm_add_epi32(msg2, _mm_alignr_epi8(msg1, msg0, 4));
-    msg2 = _mm_sha256msg2_epu32(msg2, msg1);
-    msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+    w2 = schedule(w3, w4, w0, w1);
+    rounds4(&mut abef, &mut cdgh, w2, k, 48); // rounds 48–51
 
-    // ===== Rounds 40–43 =====
-    tmp = _mm_add_epi32(msg2, _mm_loadu_si128(k.add(40) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg3 = _mm_add_epi32(msg3, _mm_alignr_epi8(msg2, msg1, 4));
-    msg3 = _mm_sha256msg2_epu32(msg3, msg2);
-    msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+    w3 = schedule(w4, w0, w1, w2);
+    rounds4(&mut abef, &mut cdgh, w3, k, 52); // rounds 52–55
 
-    // ===== Rounds 44–47 =====
-    tmp = _mm_add_epi32(msg3, _mm_loadu_si128(k.add(44) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg0 = _mm_add_epi32(msg0, _mm_alignr_epi8(msg3, msg2, 4));
-    msg0 = _mm_sha256msg2_epu32(msg0, msg3);
-    msg3 = _mm_sha256msg1_epu32(msg3, msg0);
+    w4 = schedule(w0, w1, w2, w3);
+    rounds4(&mut abef, &mut cdgh, w4, k, 56); // rounds 56–59
 
-    // ===== Rounds 48–51 =====
-    tmp = _mm_add_epi32(msg0, _mm_loadu_si128(k.add(48) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg1 = _mm_add_epi32(msg1, _mm_alignr_epi8(msg0, msg3, 4));
-    msg1 = _mm_sha256msg2_epu32(msg1, msg0);
-
-    // ===== Rounds 52–55 =====
-    tmp = _mm_add_epi32(msg1, _mm_loadu_si128(k.add(52) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg2 = _mm_add_epi32(msg2, _mm_alignr_epi8(msg1, msg0, 4));
-    msg2 = _mm_sha256msg2_epu32(msg2, msg1);
-
-    // ===== Rounds 56–59 =====
-    tmp = _mm_add_epi32(msg2, _mm_loadu_si128(k.add(56) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
-    msg3 = _mm_add_epi32(msg3, _mm_alignr_epi8(msg2, msg1, 4));
-    msg3 = _mm_sha256msg2_epu32(msg3, msg2);
-
-    // ===== Rounds 60–63 =====
-    tmp = _mm_add_epi32(msg3, _mm_loadu_si128(k.add(60) as *const __m128i));
-    state1 = _mm_sha256rnds2_epu32(state1, state0, tmp);
-    tmp = _mm_shuffle_epi32(tmp, 0x0E);
-    state0 = _mm_sha256rnds2_epu32(state0, state1, tmp);
+    w0 = schedule(w1, w2, w3, w4);
+    rounds4(&mut abef, &mut cdgh, w0, k, 60); // rounds 60–63
 
     // Davies-Meyer feed-forward: add the saved initial state.
-    state0 = _mm_add_epi32(state0, abef_save);
-    state1 = _mm_add_epi32(state1, cdgh_save);
+    abef = _mm_add_epi32(abef, abef_save);
+    cdgh = _mm_add_epi32(cdgh, cdgh_save);
 
     // Unshuffle back from SHA-NI layout (ABEF / CDGH) to standard (ABCD / EFGH).
-    let tmp = _mm_shuffle_epi32(state0, 0x1B); // FEBA
-    state1 = _mm_shuffle_epi32(state1, 0xB1); // DCHG
-    state0 = _mm_blend_epi16(tmp, state1, 0xF0); // DCBA → stored as [A,B,C,D]
-    state1 = _mm_alignr_epi8(state1, tmp, 8); // HGFE → stored as [E,F,G,H]
+    let feba = _mm_shuffle_epi32(abef, 0x1B);
+    let dchg = _mm_shuffle_epi32(cdgh, 0xB1);
+    let dcba = _mm_blend_epi16(feba, dchg, 0xF0); // [A, B, C, D]
+    let hgfe = _mm_alignr_epi8(dchg, feba, 8); // [E, F, G, H]
 
     // Store state back.
-    _mm_storeu_si128(state.as_mut_ptr() as *mut __m128i, state0);
-    _mm_storeu_si128(state[4..].as_mut_ptr() as *mut __m128i, state1);
+    _mm_storeu_si128(state.as_mut_ptr() as *mut __m128i, dcba);
+    _mm_storeu_si128(state[4..].as_mut_ptr() as *mut __m128i, hgfe);
 }
 
 #[cfg(test)]
