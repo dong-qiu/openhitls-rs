@@ -12,7 +12,7 @@
 | Layer | Mechanism | Coverage | Status |
 |:-----:|-----------|----------|:------:|
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | Complete |
-| **L2** | Unit Tests | 3,169 tests (7 ignored), 100% pass rate | Comprehensive |
+| **L2** | Unit Tests | 3,184 tests (7 ignored), 100% pass rate | Comprehensive |
 | **L3** | Integration Tests | 149 cross-crate tests (TCP loopback + DTLS resilience) | Good |
 | **L4** | Fuzz Testing | 10 fuzz targets + 66 seed corpus files | Parse-only |
 | **L5** | Security Audit | rustsec/audit-check + Miri (bignum/utils) + cargo-tarpaulin coverage | Good |
@@ -37,7 +37,7 @@ GitHub Actions (.github/workflows/ci.yml)
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
 | hitls-tls | 1,290 | 0 | 41.9% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat |
-| hitls-crypto | 1,009 | 2 | 31.9% | 48 algorithm modules + hardware acceleration (AES/SHA-2/GHASH/ChaCha20) + P-256 fast path + proptest |
+| hitls-crypto | 1,024 | 2 | 32.2% | 48 algorithm modules + hardware acceleration (AES/SHA-2/GHASH/ChaCha20) + P-256 fast path + proptest |
 | hitls-pki | 390 | 0 | 12.4% | X.509, PKCS#8/12, CMS (5 content types), encoding helpers |
 | hitls-integration | 152 | 0 | 4.9% | Cross-crate TCP loopback, error scenarios, concurrency, DTLS resilience |
 | hitls-cli | 117 | 5 | 3.8% | 14 CLI commands |
@@ -47,7 +47,7 @@ GitHub Actions (.github/workflows/ci.yml)
 | hitls-types | 26 | 0 | 0.8% | Enum definitions, error types |
 | Wycheproof | 15 | 0 | 0.5% | 5,000+ vectors across 15 test groups |
 | Doc-tests | 2 | 0 | 0.1% | API documentation examples |
-| **Total** | **3,169** | **7** | **100%** | |
+| **Total** | **3,184** | **7** | **100%** | |
 
 ### 1.4 Standard Compliance Coverage
 
@@ -252,7 +252,7 @@ Phase T133         +15      —            ML-DSA packing + X.509 builder + PKI 
 Phase T134         +15      —            ML-DSA poly + X.509 extensions + PKI text     ✅
 ```
 
-**Result**: 2,585 → 3,169 tests (+584), all planned deficiencies addressed.
+**Result**: 2,585 → 3,184 tests (+599), all planned deficiencies addressed.
 
 ### 3.2 Phase T102 — 0-RTT Early Data + Replay Protection (~8 tests) ✅
 
@@ -433,9 +433,9 @@ Phases T112–T119 continued hardening beyond the original roadmap:
 
 ## 4. Coverage Targets — Final Status
 
-| Metric | Original (T106) | Target (T111) | **Actual (T135)** |
+| Metric | Original (T106) | Target (T111) | **Actual (T136)** |
 |--------|:---------------:|:-------------:|:-----------------:|
-| Total tests | 2,634 | ~2,750+ | **3,169** |
+| Total tests | 2,634 | ~2,750+ | **3,184** |
 | Critical deficiencies (D1-D2) | 0 | 0 | **0** |
 | High deficiencies (D3-D5) | 2 partial | 0 | **0** (D4/D5 mostly closed) |
 | Crypto files with tests | 75% | 90%+ | **~90%** |

@@ -8840,6 +8840,20 @@ Added 15 tests across 3 parameter set files validating cross-variant consistency
 
 ---
 
+## Phase T136: scrypt + CFB Mode + X448 Deepening (+15 tests, 3,169→3,184)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three crypto modules: scrypt KDF (scrypt/mod.rs, 244 lines, 5 tests), CFB cipher mode (modes/cfb.rs, 155 lines, 5 tests), X448 Diffie-Hellman (x448/mod.rs, 290 lines, 5 tests).
+
+**Files modified**:
+- `crates/hitls-crypto/src/scrypt/mod.rs` — +5 tests (deterministic, different salts, different dk_len, different N, Salsa20/8 all-zero)
+- `crates/hitls-crypto/src/modes/cfb.rs` — +5 tests (different IV, single byte, multi-block exact, feedback diffusion, AES-192)
+- `crates/hitls-crypto/src/x448/mod.rs` — +5 tests (wrong length, deterministic pubkey, clamping, pubkey roundtrip, all-zero DH rejection)
+
+**Build**: `cargo test --workspace --all-features` — 3,184 passed, 7 ignored. Clippy clean. Fmt clean.
+
+---
+
 ## Phase T135: XTS Mode + Edwards Curve + GMAC Deepening (+15 tests, 3,154→3,169)
 
 **Date**: 2026-02-25

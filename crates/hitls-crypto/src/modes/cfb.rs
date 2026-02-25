@@ -136,6 +136,65 @@ mod tests {
     }
 
     #[test]
+    fn test_cfb_different_iv_different_ciphertext() {
+        let key = [0x42u8; 16];
+        let pt = vec![0xAB; 32];
+        let iv_a = [0u8; 16];
+        let mut iv_b = [0u8; 16];
+        iv_b[0] = 1;
+        let ct_a = cfb_encrypt(&key, &iv_a, &pt).unwrap();
+        let ct_b = cfb_encrypt(&key, &iv_b, &pt).unwrap();
+        assert_ne!(
+            ct_a, ct_b,
+            "different IVs must produce different ciphertext"
+        );
+    }
+
+    #[test]
+    fn test_cfb_single_byte() {
+        let key = [0x99u8; 16];
+        let iv = [0x11u8; 16];
+        let pt = [0x42u8];
+        let ct = cfb_encrypt(&key, &iv, &pt).unwrap();
+        assert_eq!(ct.len(), 1);
+        let decrypted = cfb_decrypt(&key, &iv, &ct).unwrap();
+        assert_eq!(decrypted, pt);
+    }
+
+    #[test]
+    fn test_cfb_multi_block_exact() {
+        let key = [0xAA; 16];
+        let iv = [0xBB; 16];
+        let pt = vec![0x55u8; 48]; // exactly 3 blocks
+        let ct = cfb_encrypt(&key, &iv, &pt).unwrap();
+        assert_eq!(ct.len(), 48);
+        let decrypted = cfb_decrypt(&key, &iv, &ct).unwrap();
+        assert_eq!(decrypted, pt);
+    }
+
+    #[test]
+    fn test_cfb_feedback_produces_different_blocks() {
+        // CFB feedback: identical plaintext blocks should produce different ciphertext blocks
+        let key = [0x42u8; 16];
+        let iv = [0u8; 16];
+        let pt = vec![0xAA; 32]; // two identical 16-byte blocks
+        let ct = cfb_encrypt(&key, &iv, &pt).unwrap();
+        // Due to feedback, the two ciphertext blocks should differ
+        assert_ne!(&ct[..16], &ct[16..32]);
+    }
+
+    #[test]
+    fn test_cfb_aes192_roundtrip() {
+        let key = [0x01u8; 24]; // AES-192
+        let iv = [0u8; 16];
+        let pt = b"AES-192 CFB mode test with 24-byte key!";
+        let ct = cfb_encrypt(&key, &iv, pt).unwrap();
+        assert_eq!(ct.len(), pt.len());
+        let decrypted = cfb_decrypt(&key, &iv, &ct).unwrap();
+        assert_eq!(decrypted, pt);
+    }
+
+    #[test]
     fn test_cfb_aes256_roundtrip() {
         // AES-256 CFB with 32-byte key, 64-byte plaintext
         let key = hex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");

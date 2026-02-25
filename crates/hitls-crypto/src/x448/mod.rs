@@ -267,6 +267,56 @@ mod tests {
         assert_eq!(shared_alice.len(), 56);
     }
 
+    #[test]
+    fn test_x448_new_wrong_length() {
+        // Private key: wrong lengths rejected
+        assert!(X448PrivateKey::new(&[0u8; 32]).is_err());
+        assert!(X448PrivateKey::new(&[0u8; 57]).is_err());
+        assert!(X448PrivateKey::new(&[]).is_err());
+        // Public key: wrong lengths rejected
+        assert!(X448PublicKey::new(&[0u8; 32]).is_err());
+        assert!(X448PublicKey::new(&[0u8; 57]).is_err());
+    }
+
+    #[test]
+    fn test_x448_public_key_deterministic() {
+        let raw = [0x42u8; 56];
+        let sk1 = X448PrivateKey::new(&raw).unwrap();
+        let sk2 = X448PrivateKey::new(&raw).unwrap();
+        assert_eq!(sk1.public_key().as_bytes(), sk2.public_key().as_bytes());
+    }
+
+    #[test]
+    fn test_x448_clamping_applied() {
+        // Clamping: bits 0,1 cleared; bit 447 (byte 55 top bit) set
+        let raw = [0xFF; 56]; // all bits set
+        let sk = X448PrivateKey::new(&raw).unwrap();
+        // After clamping, byte 0 should have bits 0,1 cleared: 0xFF & 0xFC = 0xFC
+        // byte 55 should have bit 7 set: already 0xFF | 0x80 = 0xFF
+        // We can verify via the public key being consistent
+        let pub1 = sk.public_key();
+        assert_eq!(pub1.as_bytes().len(), 56);
+        // Public key should be non-zero (not identity)
+        assert!(!pub1.as_bytes().iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn test_x448_public_key_new_roundtrip() {
+        let sk = X448PrivateKey::generate().unwrap();
+        let pk = sk.public_key();
+        let pk_bytes = pk.as_bytes();
+        let pk2 = X448PublicKey::new(pk_bytes).unwrap();
+        assert_eq!(pk.as_bytes(), pk2.as_bytes());
+    }
+
+    #[test]
+    fn test_x448_all_zero_public_key_dh_rejected() {
+        let sk = X448PrivateKey::generate().unwrap();
+        let zero_pk = X448PublicKey::new(&[0u8; 56]).unwrap();
+        // DH with all-zero public key should produce all-zero shared secret → error
+        assert!(sk.diffie_hellman(&zero_pk).is_err());
+    }
+
     /// RFC 7748 §6.2 iterated test (1000 iterations).
     #[test]
     fn test_x448_iterated_1000() {

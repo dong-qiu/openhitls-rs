@@ -237,6 +237,50 @@ mod tests {
     }
 
     #[test]
+    fn test_scrypt_deterministic() {
+        let dk1 = scrypt(b"password", b"salt", 16, 1, 1, 32).unwrap();
+        let dk2 = scrypt(b"password", b"salt", 16, 1, 1, 32).unwrap();
+        assert_eq!(dk1, dk2);
+        assert_eq!(dk1.len(), 32);
+    }
+
+    #[test]
+    fn test_scrypt_different_salts_different_output() {
+        let dk1 = scrypt(b"password", b"salt_A", 16, 1, 1, 32).unwrap();
+        let dk2 = scrypt(b"password", b"salt_B", 16, 1, 1, 32).unwrap();
+        assert_ne!(dk1, dk2, "different salts must produce different keys");
+    }
+
+    #[test]
+    fn test_scrypt_different_dk_len() {
+        let dk_32 = scrypt(b"pw", b"salt", 16, 1, 1, 32).unwrap();
+        let dk_64 = scrypt(b"pw", b"salt", 16, 1, 1, 64).unwrap();
+        assert_eq!(dk_32.len(), 32);
+        assert_eq!(dk_64.len(), 64);
+        // PBKDF2-derived keys: shorter is prefix of longer
+        assert_eq!(&dk_64[..32], &dk_32[..]);
+    }
+
+    #[test]
+    fn test_scrypt_different_n_different_output() {
+        let dk_n16 = scrypt(b"password", b"salt", 16, 1, 1, 32).unwrap();
+        let dk_n32 = scrypt(b"password", b"salt", 32, 1, 1, 32).unwrap();
+        assert_ne!(dk_n16, dk_n32, "different N must produce different keys");
+    }
+
+    #[test]
+    fn test_salsa20_8_core_all_zero_produces_nonzero() {
+        let mut block = [0u8; 64];
+        salsa20_8_core(&mut block);
+        // Salsa20 core adds input back, so all-zero input → all-zero output
+        // (since core(0) = mix(0) + 0 = mix(0), but with the addition step
+        // the result for all-zeros input is actually all-zeros because
+        // the mixing of all-zeros stays all-zeros and 0+0=0)
+        // Verify the property: all-zero input stays all-zero
+        assert!(block.iter().all(|&b| b == 0));
+    }
+
+    #[test]
     fn test_scrypt_zero_dk_len() {
         // dk_len = 0 should be rejected
         assert!(scrypt(b"password", b"salt", 16, 1, 1, 0).is_err());

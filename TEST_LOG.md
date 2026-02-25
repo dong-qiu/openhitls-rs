@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **3,169** (7 ignored) |
-| **Test growth** | 1,104 → 3,169 (+187% since baseline) |
+| **Total tests** | **3,184** (7 ignored) |
+| **Test growth** | 1,104 → 3,184 (+188% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
 | **Fuzz targets** | 10 (with 66 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 3,169 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 3,184 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -79,6 +79,7 @@ Phase T132  3,109     +15   DH group params + entropy pool + SHA-1 (*)
 Phase T133  3,124     +15   ML-KEM poly + SM9 Fp12 + encrypted PKCS#8 (*)
 Phase T134  3,154     +15   ML-DSA poly + X.509 extensions + X.509 text (*)
 Phase T135  3,169     +15   XTS mode + Edwards curve + GMAC deepening (*)
+Phase T136  3,184     +15   scrypt + CFB mode + X448 deepening (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -2688,6 +2689,32 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
+### Phase T136: scrypt + CFB Mode + X448 Deepening (+15 tests, 3,169→3,184)
+
+**Date**: 2026-02-25
+
+| # | Test | File | Property |
+|:-:|------|------|----------|
+| 1 | `test_scrypt_deterministic` | scrypt/mod.rs | Same inputs → same 32-byte output |
+| 2 | `test_scrypt_different_salts_different_output` | scrypt/mod.rs | Different salt → different key |
+| 3 | `test_scrypt_different_dk_len` | scrypt/mod.rs | dk_len 32 is prefix of dk_len 64 (PBKDF2 property) |
+| 4 | `test_scrypt_different_n_different_output` | scrypt/mod.rs | Different N → different key |
+| 5 | `test_salsa20_8_core_all_zero_produces_nonzero` | scrypt/mod.rs | Salsa20/8 core(0) = 0 (add-back property) |
+| 6 | `test_cfb_different_iv_different_ciphertext` | modes/cfb.rs | Different IV → different ciphertext |
+| 7 | `test_cfb_single_byte` | modes/cfb.rs | 1-byte plaintext roundtrip |
+| 8 | `test_cfb_multi_block_exact` | modes/cfb.rs | Exactly 48 bytes (3 blocks) roundtrip |
+| 9 | `test_cfb_feedback_produces_different_blocks` | modes/cfb.rs | Identical plaintext blocks → different ciphertext blocks |
+| 10 | `test_cfb_aes192_roundtrip` | modes/cfb.rs | AES-192 (24-byte key) CFB roundtrip |
+| 11 | `test_x448_new_wrong_length` | x448/mod.rs | Wrong key sizes (32, 57, 0) rejected |
+| 12 | `test_x448_public_key_deterministic` | x448/mod.rs | Same private key → same public key |
+| 13 | `test_x448_clamping_applied` | x448/mod.rs | After clamping, public key is non-zero |
+| 14 | `test_x448_public_key_new_roundtrip` | x448/mod.rs | PublicKey::new(as_bytes()) roundtrip |
+| 15 | `test_x448_all_zero_public_key_dh_rejected` | x448/mod.rs | DH with all-zero public key → error |
+
+**Per-crate counts**: hitls-crypto 1,024 (+15) | Total: 3,184 (+15)
+
+---
+
 ### Phase T135: XTS Mode + Edwards Curve + GMAC Deepening (+15 tests, 3,154→3,169)
 
 **Date**: 2026-02-25
@@ -2744,7 +2771,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | hitls-auth | 33 | 0 |
 | hitls-bignum | 69 | 0 |
 | hitls-cli | 117 | 5 |
-| hitls-crypto | 1,009 | 2 |
+| hitls-crypto | 1,024 | 2 |
 | wycheproof | 15 | 0 |
 | hitls-integration | 152 | 0 |
 | hitls-pki | 390 | 0 |

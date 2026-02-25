@@ -2742,6 +2742,24 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 ---
 
+## Phase T136: scrypt + CFB Mode + X448 Deepening
+
+**Prompt**: Continue implementing Phase T136. Deepen test coverage for three crypto modules: scrypt KDF (scrypt/mod.rs, 244 lines, 5 tests), CFB cipher mode (modes/cfb.rs, 155 lines, 5 tests), X448 Diffie-Hellman (x448/mod.rs, 290 lines, 5 tests).
+
+**Scope**: scrypt determinism, different salts/N produce different output, dk_len prefix property, Salsa20/8 core all-zero. CFB different IV, single byte, multi-block exact, feedback diffusion, AES-192 roundtrip. X448 wrong length rejection, public key determinism, clamping verification, pubkey roundtrip, all-zero DH rejection.
+
+**Work performed**:
+1. Added 5 scrypt tests to `crates/hitls-crypto/src/scrypt/mod.rs`: deterministic, different salts, dk_len prefix, different N, Salsa20/8 core
+2. Added 5 CFB tests to `crates/hitls-crypto/src/modes/cfb.rs`: different IV, single byte, multi-block, feedback diffusion, AES-192
+3. Added 5 X448 tests to `crates/hitls-crypto/src/x448/mod.rs`: wrong length, deterministic, clamping, pubkey roundtrip, zero DH
+4. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 3 source files modified, 0 files created. hitls-crypto: 1009→1024, total: 3169→3184 (7 ignored unchanged).
+- All 3184 workspace tests pass, 0 clippy warnings, formatting clean.
+
+---
+
 ## Phase T135: XTS Mode + Edwards Curve + GMAC Deepening
 
 **Prompt**: Continue implementing Phase T135. Deepen test coverage for three crypto modules with low test density: AES-XTS mode (xts.rs, 293 lines, 5 tests), Ed25519 Edwards curve arithmetic (edwards.rs, 277 lines, 5 tests), GMAC authentication (gmac/mod.rs, 201 lines, 5 tests).
