@@ -322,11 +322,13 @@ mod tests {
 
     #[test]
     fn test_mceliece_6688128_roundtrip() {
-        let kp = McElieceKeyPair::generate(McElieceParamId::McEliece6688128).unwrap();
-        let (ct, ss1) = kp.encapsulate().unwrap();
-        let ss2 = kp.decapsulate(&ct).unwrap();
-        assert_eq!(ss1, ss2);
-        assert_eq!(ss1.len(), 32);
+        for _ in 0..10 {
+            let kp = McElieceKeyPair::generate(McElieceParamId::McEliece6688128).unwrap();
+            let (ct, ss1) = kp.encapsulate().unwrap();
+            let ss2 = kp.decapsulate(&ct).unwrap();
+            assert_eq!(ss1, ss2);
+            assert_eq!(ss1.len(), 32);
+        }
     }
 
     #[test]

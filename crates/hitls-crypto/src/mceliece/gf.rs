@@ -89,11 +89,14 @@ pub(crate) fn gf_div(a: GfElement, b: GfElement) -> GfElement {
 
 /// GF(2^13) exponentiation.
 pub(crate) fn gf_pow(base: GfElement, exp: i32) -> GfElement {
-    if base == 0 {
-        return 0;
-    }
+    // Check exp == 0 first: x^0 = 1 for all x, including x = 0.
+    // This is required for correct Goppa code syndrome computation
+    // when support contains the zero element.
     if exp == 0 {
         return 1;
+    }
+    if base == 0 {
+        return 0;
     }
     let t = tables();
     let l = t.log_table[base as usize] as u64;
