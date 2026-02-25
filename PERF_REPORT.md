@@ -266,33 +266,199 @@ AES-128-CBC dec         ░░░░░░░░░░░░░░░░░░�
 
 ---
 
-## 5. Optimization Recommendations (Priority Order)
+## 5. Performance Optimization Roadmap (Phase P1–P8)
 
-### P0 — High Impact
+All pending optimization tasks are tracked as numbered phases (Phase P1–P8), ordered by priority and TLS handshake impact.
 
-| Optimization | Affected Algorithms | Expected Improvement | Effort |
-|-------------|--------------------|--------------------|--------|
-| **Specialized P-256 field** | ECDSA P-256, ECDH P-256 → TLS 1.3/1.2 handshakes | 10–20x | High |
-| **Optimized NTT for ML-KEM** | ML-KEM-512/768/1024 → TLS 1.3 hybrid KEM | 5–10x | High |
-| **ARM SHA-NI intrinsics** | SHA-256/384/512 → HMAC, HKDF, TLS PRF | 1.35x (close to parity) | Medium |
+### Phase Overview
 
-### P1 — Medium Impact
+| Phase | Optimization | Current Gap | Target | Effort | Status |
+|-------|-------------|-------------|--------|--------|--------|
+| **P1** | P-256 深度优化 (预计算表 + Solinas 约简) | 16–32× | 2–3× | High | Pending |
+| **P2** | ML-KEM SIMD NTT 向量化 | 6–18× | 2–3× | High | Pending |
+| **P3** | BigNum REDC 内循环 + Karatsuba 大数乘法 | 7–12× | 2–3× | High | Pending |
+| **P4** | SM4 T-table 查表优化 | 2.2–2.4× | ~1× | Medium | Pending |
+| **P5** | ML-DSA SIMD NTT 向量化 | 2–6× | ~1.5× | Medium | Pending |
+| **P6** | SM2 专用字段算术 | 2.8–6.1× | ~1.5× | Medium | Pending |
+| **P7** | SHA-512 硬件加速 (ARMv8.2 SHA512) | 1.35× | ~1× | Low | Pending |
+| **P8** | Ed25519 基点预计算表 | 2× | ~1.2× | Low | Pending |
 
-| Optimization | Affected Algorithms | Expected Improvement | Effort |
-|-------------|--------------------|--------------------|--------|
-| **Optimized NTT for ML-DSA** | ML-DSA-44/65/87 → PQC signatures | 3–5x | Medium |
-| **SM4 lookup table optimization** | SM4-CBC, SM4-GCM → TLCP | 2x | Medium |
-| **Montgomery exponentiation** | DH, RSA → key exchange, signing | 3–5x | High |
+---
 
-### P2 — Lower Priority (Gaps already small)
+### Phase P1 — P-256 深度优化 (预计算生成点表 + Solinas 快速约简)
 
-| Optimization | Affected Algorithms | Expected Improvement | Effort |
-|-------------|--------------------|--------------------|--------|
-| **PCLMULQDQ/PMULL for GHASH** | AES-GCM, GMAC | 1.5x | Medium |
-| **SM2 specialized field** | SM2 sign/verify/encrypt/decrypt | 3–5x | Medium |
-| **ARM SHA3 intrinsics** | SHA3, SHAKE → ML-KEM/ML-DSA sampling | 2x | Medium |
+**Current gap**: ECDSA P-256 sign 32×, verify 15×, ECDH 16× slower than C
+
+**Already implemented** (Phase 96):
+- `p256_field.rs`: 4×u64 Montgomery representation, stack-allocated
+- `p256_point.rs`: w=4 fixed-window scalar multiplication, Shamir's trick
+- Point doubling with a=-3 optimization
+
+**Remaining bottlenecks**:
+
+| Bottleneck | Impact | Detail |
+|------------|--------|--------|
+| **No precomputed generator table** | ~4× | Each sign/keygen rebuilds 16-entry table. BoringSSL/ring use 64-entry static table (w=7) for generator G, eliminating runtime table construction |
+| **Schoolbook 4×4 multiplication** | ~2× | `mont_mul()` uses 16 u64×u64→u128 multiplications. Comba method reduces carry propagation; P-256 special modulus enables Solinas reduction |
+| **P-256 NIST fast reduction unused** | ~1.5× | p = 2^256 - 2^224 + 2^192 + 2^96 - 1 allows shift/add/sub reduction instead of full Montgomery REDC |
+| **Window size w=4 conservative** | ~1.3× | Generator point can use w=7 (128-entry table); arbitrary points can use wNAF-5 instead of simple binary windowing |
+| **Affine conversion overhead** | ~1.2× | Final field inversion (~30 multiplications) per scalar mul; batch inversion can optimize verification |
+
+**Affected algorithms**: ECDSA P-256 sign/verify, ECDH P-256, TLS 1.3/1.2 ECDHE handshakes
+
+**Expected improvement**: 848 ops/s → 10,000–15,000 ops/s (12–18×), approaching C's 26,848 ops/s
+
+---
+
+### Phase P2 — ML-KEM SIMD NTT 向量化
+
+**Current gap**: ML-KEM-768 encaps 13×, decaps 8×, keygen 5× slower than C
+
+**Already implemented**:
+- `mlkem/ntt.rs`: 128-entry precomputed ZETAS table (Montgomery form)
+- Cooley-Tukey forward / Gentleman-Sande inverse NTT
+- Barrett reduction, Montgomery R=2^16 field arithmetic
+
+**Remaining bottlenecks**:
+
+| Bottleneck | Impact | Detail |
+|------------|--------|--------|
+| **No SIMD butterfly operations** | ~3–4× | C uses NEON/AVX2 to process 4–8 butterflies in parallel. Rust is pure scalar, element-by-element |
+| **SHAKE sampling unoptimized** | ~1.5–2× | CBD sampling and rejection sampling are byte-at-a-time; batch SHAKE squeeze (4 blocks) would improve throughput |
+| **Polynomial serialization overhead** | ~1.2× | `compress`/`decompress` process coefficients individually; vectorizable |
+| **Heap allocation for temporaries** | ~1.1× | Temporary polynomial arrays allocated on heap; fixed-size stack arrays preferred |
+
+**Affected algorithms**: ML-KEM-512/768/1024, TLS 1.3 hybrid KEM
+
+**Expected improvement**: 9,190 ops/s → 40,000–60,000 ops/s (4–6×), approaching C's 119,805 ops/s
+
+---
+
+### Phase P3 — BigNum REDC 内循环优化 + Karatsuba 大数乘法
+
+**Current gap**: DH-2048 7×, DH-3072 8×, DH-4096 12× slower than C
+
+**Already implemented**:
+- `montgomery.rs`: Sliding window exponentiation (w=1 to w=6), precomputed table
+- Full multi-precision REDC reduction
+- Montgomery form throughout exponentiation
+
+**Remaining bottlenecks**:
+
+| Bottleneck | Impact | Detail |
+|------------|--------|--------|
+| **REDC inner loop unoptimized** | ~3–4× | Each REDC performs m × m u64×u64+carry operations. C uses assembly or SIMD for the inner loop. Rust u128 compiles to `umulh`+`mul` but carry chains cannot auto-vectorize |
+| **No Karatsuba multiplication** | ~1.5× | For 2048-bit (32 limbs), schoolbook needs 32²=1024 multiplies; Karatsuba ~300 (O(n^1.585)) |
+| **Conservative window size** | ~1.2× | w=6 for >512 bits is near-optimal, but w=7 (128-entry table) may help for 2048+ bit exponents |
+| **Binary long division** | ~1.5× | Knuth's Algorithm D not yet implemented (noted in `ops.rs`); current binary division is O(n²) |
+
+**Affected algorithms**: DH (FFDHE-2048/3072/4096), RSA-2048 sign/decrypt
+
+**Expected improvement**: DH-2048 174 ops/s → 600–800 ops/s (3.5–4.5×)
+
+---
+
+### Phase P4 — SM4 T-table 查表优化
+
+**Current gap**: SM4-CBC 2.4×, SM4-GCM 1.8× slower than C
+
+**Current implementation**: Pure Rust, per-round S-box lookup + L linear transform (no hardware acceleration).
+
+**Optimization plan**:
+- Precompute 4 T-tables (T0–T3) combining S-box substitution and L linear transform into single 32-bit table lookups
+- Each round: 4 table lookups + 3 XOR operations (replaces S-box + shift + XOR chain)
+- Table size: 4 × 256 × 4 bytes = 4 KB (cache-friendly)
+
+**Affected algorithms**: SM4-CBC, SM4-GCM, SM4-CTR → TLCP cipher suites
+
+**Expected improvement**: 50.8 MB/s → 100–120 MB/s (~2×), approaching C's 119.9 MB/s
+
+---
+
+### Phase P5 — ML-DSA SIMD NTT 向量化
+
+**Current gap**: ML-DSA-87 keygen 6×, verify 4.5×, sign 2.6× slower than C
+
+**Already implemented**:
+- `mldsa/ntt.rs`: Montgomery R=2^32 field arithmetic, 256-entry ZETAS table
+- 8-layer Cooley-Tukey NTT (modulus q=8380417, 24-bit)
+- Barrett reduction, freeze normalization
+
+**Remaining bottlenecks** (similar to Phase P2):
+
+| Bottleneck | Impact | Detail |
+|------------|--------|--------|
+| **No SIMD butterfly operations** | ~2–3× | Larger modulus (24-bit) still fits NEON i32 lanes; 4-way parallel butterflies feasible |
+| **Rejection loop in signing** | ~1.3× | Signature generation may reject and retry full NTT computation; hint-based approach reduces retries |
+| **SHAKE-256 batch squeeze** | ~1.2× | Sampling from SHAKE output is sequential; batch squeeze improves throughput |
+
+**Affected algorithms**: ML-DSA-44/65/87 (PQC digital signatures)
+
+**Expected improvement**: 3–5× improvement across keygen/sign/verify
+
+---
+
+### Phase P6 — SM2 专用字段算术
+
+**Current gap**: SM2 sign 3×, verify 6.6×, encrypt 3×, decrypt 3× slower than C
+
+**Current implementation**: Uses generic ECC code path backed by `hitls-bignum` (heap-allocated BigNum for all field operations).
+
+**Optimization plan** (mirrors Phase P1 approach for P-256):
+- Implement `sm2_field.rs`: 4×u64 Montgomery representation for SM2 prime p
+- SM2 modulus: p = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF 00000000 FFFFFFFF FFFFFFFF
+- Specialized point operations with `sm2_point.rs`
+- Precomputed generator table for SM2 base point
+- Dispatch via `EccCurveId::Sm2` in `EcGroup`
+
+**Affected algorithms**: SM2 sign/verify/encrypt/decrypt → Chinese national cryptography (国密) scenarios
+
+**Expected improvement**: 850 ops/s → 3,000–5,000 ops/s (4–6×)
+
+---
+
+### Phase P7 — SHA-512 硬件加速
+
+**Current gap**: SHA-512 1.34× slower than C (662.8 vs 885.7 MB/s)
+
+**Current implementation**: SHA-256 has hardware paths (ARMv8 SHA-NI + x86 SHA-NI), but **SHA-512 is pure software only**.
+
+**Optimization plan**:
+- ARMv8.2-A: `SHA512H`, `SHA512H2`, `SHA512SU0`, `SHA512SU1` intrinsics (requires `sha512` target feature)
+- x86-64: No SHA-512 hardware instruction; use AVX2 2-way parallel software implementation
+- Runtime feature detection with software fallback
+
+**Affected algorithms**: SHA-384, SHA-512, HMAC-SHA384/SHA512, HKDF, TLS 1.2 PRF (SHA-384)
+
+**Expected improvement**: 662.8 MB/s → ~850 MB/s (1.3×, approaching C's 885.7 MB/s)
+
+---
+
+### Phase P8 — Ed25519 基点预计算表
+
+**Current gap**: Ed25519 sign 2×, verify 1.3× slower than C
+
+**Current implementation**: Ed25519 uses Curve25519 field arithmetic (which performs well — X25519 is already 10% faster than C). The gap is in scalar multiplication lacking a precomputed base point table.
+
+**Optimization plan**:
+- Precomputed table for Ed25519 generator B (static, const-evaluated)
+- w=5 or w=6 windowed scalar multiplication for base point operations
+- Extended coordinates for faster point addition (if not already used)
+
+**Affected algorithms**: Ed25519 sign/verify, TLS Ed25519 cipher suites
+
+**Expected improvement**: Ed25519 sign ~1.5× faster (reaching near-parity with C)
+
+---
 
 ### Impact on TLS Handshake Latency
+
+| Handshake Type | Current (Rust) | After Phase P1 | C Reference |
+|---------------|---------------|----------------|-------------|
+| **ECDHE-P256 + AES-128-GCM** | ~3.8 ms | ~0.3–0.5 ms | 0.21 ms |
+| **X25519 + AES-128-GCM** | ~0.018 ms | 0.018 ms (no change needed) | 0.020 ms |
+| **ML-KEM-768 hybrid** | ~0.11 ms | ~0.025 ms (after P2) | 0.008 ms |
+| **FFDHE-2048** | ~5.8 ms | ~1.5 ms (after P3) | 0.82 ms |
 
 A TLS 1.3 handshake with ECDHE-P256 + AES-128-GCM involves:
 - 1 ECDH key derive (~1.2 ms Rust vs ~0.074 ms C)
@@ -300,11 +466,9 @@ A TLS 1.3 handshake with ECDHE-P256 + AES-128-GCM involves:
 - 1 ECDSA P-256 sign (~1.2 ms Rust vs ~0.037 ms C)
 - HKDF/SHA-256 derivations (~negligible at small sizes)
 
-**Estimated handshake overhead**: ~3.8 ms (Rust) vs ~0.21 ms (C) — **18x slower** (improved from 42x)
+**Phase P1 alone** would reduce ECDHE-P256 handshake from ~3.8 ms to ~0.3 ms, bringing it within 1.5× of C.
 
-Optimizing P-256 field arithmetic alone would reduce this to ~0.3 ms, bringing it within 1.5x of C.
-
-For **X25519-based handshakes**: ~0.018 ms (Rust) vs ~0.020 ms (C) — **Rust is now faster!** This is the recommended key exchange for Rust deployments.
+For **X25519-based handshakes**: ~0.018 ms (Rust) vs ~0.020 ms (C) — **Rust is already faster!** This is the recommended key exchange for Rust deployments.
 
 ---
 
