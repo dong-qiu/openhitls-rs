@@ -4,6 +4,12 @@
 //! carry-less multiplication (CLMUL) instructions for fast GF(2^128) arithmetic.
 //! It is only compiled on `x86_64` targets and requires runtime detection of
 //! PCLMULQDQ, SSE2, and SSSE3 support before calling.
+//!
+//! GHASH uses reflected bit ordering internally. Byte-reversing the big-endian
+//! inputs produces the reflected (POLYVAL) representation. The GHASH-to-POLYVAL
+//! conversion requires multiplying the hash key H by x in the POLYVAL field
+//! (the "mulX" step), per RFC 8452. The reduction uses the POLYVAL irreducible
+//! polynomial x^128 + x^127 + x^126 + x^121 + 1.
 
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
@@ -13,23 +19,40 @@ use core::arch::x86_64::*;
 /// Computes `state = (state XOR block) * H` in GF(2^128) using the GHASH
 /// polynomial x^128 + x^7 + x^2 + x + 1.
 ///
+/// Internally, inputs are byte-reversed into POLYVAL representation. The hash
+/// key H is further multiplied by x (mulX) to account for the GHASH-to-POLYVAL
+/// conversion factor. Karatsuba carry-less multiplication and Barrett reduction
+/// are then performed with the POLYVAL polynomial.
+///
 /// # Safety
 ///
 /// Caller must ensure the CPU supports `pclmulqdq`, `sse2`, and `ssse3`
 /// features. Use `is_x86_feature_detected!("pclmulqdq")` before calling.
-/// The byte layout matches the GHASH convention: big-endian byte order in the
-/// 16-byte arrays (MSB at index 0), with the reflected-bit representation
-/// used internally by PCLMULQDQ.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "pclmulqdq,sse2,ssse3")]
 pub(super) unsafe fn ghash_block_x86(h: &[u8; 16], state: &mut [u8; 16], block: &[u8; 16]) {
     // Byte-swap mask: GHASH uses big-endian byte order, but PCLMULQDQ operates
-    // on little-endian 128-bit values. This mask reverses the 16 bytes.
+    // on little-endian 128-bit values. This mask reverses the 16 bytes,
+    // converting from GHASH big-endian to POLYVAL (reflected) representation.
     let bswap_mask = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 
-    // Load H and byte-swap to reflected bit order
+    // POLYVAL reduction polynomial lower part: x^127 + x^126 + x^121 + 1
+    let poly = _mm_set_epi64x(0xC200000000000000_u64 as i64, 1);
+
+    // Load H and byte-swap to POLYVAL representation.
     let h_be = _mm_loadu_si128(h.as_ptr() as *const __m128i);
-    let h_val = _mm_shuffle_epi8(h_be, bswap_mask);
+    let h_rev = _mm_shuffle_epi8(h_be, bswap_mask);
+
+    // mulX: multiply H by x in GF(2^128) with the POLYVAL polynomial.
+    // This is the GHASH-to-POLYVAL conversion factor (RFC 8452).
+    // Left-shift by 1; if bit 127 overflows, XOR with the polynomial.
+    let overflow = _mm_srai_epi32(h_rev, 31); // broadcast sign bit per dword
+    let overflow = _mm_shuffle_epi32(overflow, 0xFF); // broadcast dword 3 to all
+    let carry = _mm_srli_epi64(h_rev, 63); // MSB of each 64-bit lane
+    let carry = _mm_slli_si128(carry, 8); // shift low carry to high lane
+    let h_val = _mm_slli_epi64(h_rev, 1); // left shift each lane by 1
+    let h_val = _mm_or_si128(h_val, carry); // fix lane boundary
+    let h_val = _mm_xor_si128(h_val, _mm_and_si128(overflow, poly)); // reduce
 
     // Load state and block, byte-swap both
     let state_be = _mm_loadu_si128(state.as_ptr() as *const __m128i);
@@ -59,21 +82,19 @@ pub(super) unsafe fn ghash_block_x86(h: &[u8; 16], state: &mut [u8; 16], block: 
     let lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
     let hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
 
-    // --- Reduction modulo x^128 + x^7 + x^2 + x + 1 ---
-    // Uses Intel's recommended CLMUL-based Barrett reduction.
-    // The reflected polynomial constant is 0xC200000000000000 (bits 127..64 of
-    // the shifted irreducible polynomial without the x^128 term).
-    let xmm_poly = _mm_set_epi64x(0xC200000000000000_u64 as i64, 1);
+    // --- Reduction modulo POLYVAL polynomial x^128 + x^127 + x^126 + x^121 + 1 ---
+    // Uses CLMUL-based two-phase reduction. Each phase multiplies the low 64 bits
+    // by the polynomial's high half (x^63 + x^62 + x^57 = 0xC200000000000000),
+    // swaps the 64-bit halves (which accounts for the constant term), and XORs.
 
     // Step 1: multiply low 64 bits of `lo` by the polynomial high half
-    // tmp = lo_lo * poly_hi (imm8=0x10 means low64(lo) * high64(poly))
-    let tmp = _mm_clmulepi64_si128(lo, xmm_poly, 0x10);
+    let tmp = _mm_clmulepi64_si128(lo, poly, 0x10);
     // Swap the 64-bit halves of lo, then XOR with tmp
     let lo = _mm_shuffle_epi32(lo, 78); // 78 = 0b01001110 swaps halves
     let lo = _mm_xor_si128(lo, tmp);
 
     // Step 2: repeat the same reduction step on the partially-reduced value
-    let tmp2 = _mm_clmulepi64_si128(lo, xmm_poly, 0x10);
+    let tmp2 = _mm_clmulepi64_si128(lo, poly, 0x10);
     let lo = _mm_shuffle_epi32(lo, 78);
     let lo = _mm_xor_si128(lo, tmp2);
 
