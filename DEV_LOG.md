@@ -49,46 +49,43 @@
 | 41 | 40 | DTLCP + Custom Extensions + Key Logging | 2026-02-11 |
 | 42 | 41 | Wycheproof + Fuzzing + Security Audit | 2026-02-11 |
 | 43 | 42 | Feature Completeness | 2026-02-11 |
-| 44 | 43a | Remaining Feature Conversions | 2026-02-11 |
-| 45 | 43b | Complete DH Groups + TLS FFDHE Expansion | 2026-02-13 |
-| 46 | 44 | FIPS/CMVP Compliance Framework | 2026-02-13 |
-| 47 | 45 | CLI Enhancements + CMS DigestedData | 2026-02-13 |
-| 48 | 46 | Entropy Health Testing — NIST SP 800-90B | 2026-02-13 |
-| 49 | 47 | Ed448 / X448 / Curve448 | 2026-02-14 |
-| 50 | 49 | Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT | 2026-02-14 |
-| 51 | 50 | C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop | 2026-02-14 |
-| 52 | 51 | X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup | — |
-| 53 | 52 | C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests | 2026-02-14 |
-| 54 | 53 | PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths | — |
-| 55 | 54 | TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness | 2026-02-14 |
-| 56 | 55 | Integration Test Expansion + TLCP Public API + Code Quality | 2026-02-14 |
-| 57 | 56 | Unit Test Coverage Expansion | 2026-02-14 |
-| 58 | 57 | Unit Test Coverage Expansion — Crypto RFC Vectors + ASN.1 Negative Tests + TL... | 2026-02-15 |
-| 59 | 58 | Unit Test Coverage Expansion — Cipher Modes, PQC Negative Tests, DRBG State, ... | 2026-02-15 |
-| 60 | 59 | Unit Test Coverage Expansion — CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3... | 2026-02-15 |
-| 61 | 60 | Unit Test Coverage Expansion — RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, ... | 2026-02-15 |
-| 62 | 61 | TLS 1.2 CCM Cipher Suites (RFC 6655 / RFC 7251) | 2026-02-16 |
-| 63 | 62 | CCM_8 (8-byte tag) + PSK+CCM Cipher Suites | 2026-02-16 |
-| 64 | 63 | PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites | 2026-02-16 |
-| 65 | 64 | PSK CCM Completion + CCM_8 Authentication Cipher Suites | 2026-02-16 |
-| 66 | 65 | DHE_DSS Cipher Suites (DSA Authentication for TLS 1.2) | 2026-02-16 |
-| 67 | 66 | DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2) | 2026-02-16 |
-| 68 | 67 | TLS 1.2 Renegotiation (RFC 5746) | 2026-02-17 |
-| 69 | 68 | Connection Info APIs + Graceful Shutdown + ALPN Completion | 2026-02-17 |
-| 70 | 69 | Hostname Verification + Certificate Chain Validation + SNI Callback | 2026-02-17 |
-| 71 | 70 | Server-Side Session Cache + Session Expiration + Cipher Preference | 2026-02-17 |
-| 72 | 71 | Client-Side Session Cache + Write Record Fragmentation | 2026-02-17 |
-| 73 | 73 | KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algori... | 2026-02-18 |
-| 74 | 75 | Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master S... | 2026-02-18 |
-| 75 | 78 | PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbre... | 2026-02-18 |
-| 76 | 80 | Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) | 2026-02-18 |
-| 77 | 85 | TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4 | 2026-02-19 |
-| 78 | 86 | Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC ... | 2026-02-19 |
-| 79 | 87 | DTLS Config Enhancements + Integration Tests for Phase 85–86 Features | 2026-02-19 |
-| 80 | 94a | Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown | 2026-02-19 |
-| 81 | 94b | TicketKeyCallback + SecurityCallback | 2026-02-19 |
-| 82 | 94c | SM4-CTR-DRBG + CMS ML-DSA + Integration Tests + Documentation Sync | 2026-02-19 |
-| 83 | 136 | TLS 1.3 Middlebox Compatibility Mode (RFC 8446 §D.4) | — |
+| 44 | 43 | Remaining Features + DH Groups + TLS FFDHE Expansion | 2026-02-11 |
+| 45 | 44 | FIPS/CMVP Compliance Framework | 2026-02-13 |
+| 46 | 45 | CLI Enhancements + CMS DigestedData | 2026-02-13 |
+| 47 | 46 | Entropy Health Testing — NIST SP 800-90B | 2026-02-13 |
+| 48 | 47 | Ed448 / X448 / Curve448 | 2026-02-14 |
+| 49 | 49 | Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT | 2026-02-14 |
+| 50 | 50 | C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop | 2026-02-14 |
+| 51 | 51 | X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup | — |
+| 52 | 52 | C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests | 2026-02-14 |
+| 53 | 53 | PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths | — |
+| 54 | 54 | TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness | 2026-02-14 |
+| 55 | 55 | Integration Test Expansion + TLCP Public API + Code Quality | 2026-02-14 |
+| 56 | 56 | Unit Test Coverage Expansion | 2026-02-14 |
+| 57 | 57 | Unit Test Coverage Expansion — Crypto RFC Vectors + ASN.1 Negative Tests + TL... | 2026-02-15 |
+| 58 | 58 | Unit Test Coverage Expansion — Cipher Modes, PQC Negative Tests, DRBG State, ... | 2026-02-15 |
+| 59 | 59 | Unit Test Coverage Expansion — CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3... | 2026-02-15 |
+| 60 | 60 | Unit Test Coverage Expansion — RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, ... | 2026-02-15 |
+| 61 | 61 | TLS 1.2 CCM Cipher Suites (RFC 6655 / RFC 7251) | 2026-02-16 |
+| 62 | 62 | CCM_8 (8-byte tag) + PSK+CCM Cipher Suites | 2026-02-16 |
+| 63 | 63 | PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites | 2026-02-16 |
+| 64 | 64 | PSK CCM Completion + CCM_8 Authentication Cipher Suites | 2026-02-16 |
+| 65 | 65 | DHE_DSS Cipher Suites (DSA Authentication for TLS 1.2) | 2026-02-16 |
+| 66 | 66 | DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2) | 2026-02-16 |
+| 67 | 67 | TLS 1.2 Renegotiation (RFC 5746) | 2026-02-17 |
+| 68 | 68 | Connection Info APIs + Graceful Shutdown + ALPN Completion | 2026-02-17 |
+| 69 | 69 | Hostname Verification + Certificate Chain Validation + SNI Callback | 2026-02-17 |
+| 70 | 70 | Server-Side Session Cache + Session Expiration + Cipher Preference | 2026-02-17 |
+| 71 | 71 | Client-Side Session Cache + Write Record Fragmentation | 2026-02-17 |
+| 72 | 73 | KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algori... | 2026-02-18 |
+| 73 | 75 | Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master S... | 2026-02-18 |
+| 74 | 78 | PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbre... | 2026-02-18 |
+| 75 | 80 | Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) | 2026-02-18 |
+| 76 | 85 | TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4 | 2026-02-19 |
+| 77 | 86 | Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC ... | 2026-02-19 |
+| 78 | 87 | DTLS Config Enhancements + Integration Tests for Phase 85–86 Features | 2026-02-19 |
+| 79 | 94 | Encrypted PKCS#8 + Callbacks + SM4-CTR-DRBG + CMS ML-DSA | 2026-02-19 |
+| 80 | 136 | TLS 1.3 Middlebox Compatibility Mode (RFC 8446 §D.4) | — |
 
 ### Testing (Phase TN)
 
@@ -427,11 +424,9 @@
 | Privacy Pass | RFC 9578 Type 2: RSA blind signatures | **Done** |
 | CLI: list, rand, pkeyutl, speed | 4 new subcommands (14 total CLI commands) | **Done** |
 
-### Phase 43a: Remaining Features (NistP192, HCTR mode, CMS EncryptedData)
+### Phase 43: Remaining Features + DH Groups + TLS FFDHE Expansion
 
-Completed P-192, HCTR mode, CMS EncryptedData.
-
-### Phase 43b: Complete DH Groups + TLS FFDHE Expansion
+Completed P-192, HCTR mode, CMS EncryptedData, plus all 13 DH group primes and TLS FFDHE expansion.
 
 | Feature | Standard | Status |
 |---------|----------|--------|
@@ -686,26 +681,16 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | empty_records_limit | Consecutive empty record DoS protection (default: 32) |
 | Integration tests | MsgCallback, InfoCallback, ClientHelloCallback, CBC-MAC-SM4, CMS AuthenticatedData |
 
-### Phase 94a: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
+### Phase 94: Encrypted PKCS#8 + Callbacks + SM4-CTR-DRBG + CMS ML-DSA
 
 | Feature | Description | Status |
 |---------|-------------|--------|
 | Encrypted PKCS#8 | PBES2 (PBKDF2-HMAC-SHA256 + AES-256-CBC/AES-128-CBC) | **Done** |
 | Session ID Context | session_id_context for session cache isolation | **Done** |
 | quiet_shutdown | Skip close_notify on shutdown (all 6 connection types) | **Done** |
-
-### Phase 94b: TicketKeyCallback + SecurityCallback
-
-| Feature | Description | Status |
-|---------|-------------|--------|
 | TicketKeyCallback | Session ticket key rotation callback | **Done** |
 | SecurityCallback | Cipher/group/sigalg security filtering | **Done** |
 | security_level config | Configurable security level (default: 1) | **Done** |
-
-### Phase 94c: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests
-
-| Feature | Description | Status |
-|---------|-------------|--------|
 | SM4-CTR-DRBG | NIST SP 800-90A §10.2 with SM4 cipher | **Done** |
 | CMS ML-DSA | ML-DSA-44/65/87 OID dispatch in CMS SignedData | **Done** |
 | Integration tests | quiet_shutdown, security_callback, encrypted_pkcs8 e2e | **Done** |
@@ -4947,9 +4932,11 @@ Blind signature flow: `msg * r^e mod n → sign → blind_sig * r^(-1) mod n →
 
 ---
 
-## Phase 43a: Remaining Feature Conversions (2026-02-11)
+## Phase 43: Remaining Features + DH Groups + TLS FFDHE Expansion (2026-02-11)
 
-### Goal
+### Part A: Remaining Feature Conversions
+
+#### Goal
 Complete the last 3 identified gaps from the C reference:
 1. **NistP192 (secp192r1) curve** — missing from ECC module
 2. **HCTR mode** — wide-block tweakable cipher
@@ -5021,22 +5008,20 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - `crates/hitls-pki/src/cms/enveloped.rs` — pub(crate) for key_len/oid, encrypted_data field
 - `CLAUDE.md`, `DEV_LOG.md`, `README.md`, `PROMPT_LOG.md` — Updated
 
-### Build Status
+#### Build Status (Part A)
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1038 workspace tests passing (28 ignored)
 
----
+### Part B: Complete DH Groups + TLS FFDHE Expansion (2026-02-13)
 
-## Phase 43b: Complete DH Groups + TLS FFDHE Expansion (Session 2026-02-13)
-
-### Goals
+#### Goals
 - Implement all 13 DH group prime constants (RFC 2409, RFC 3526, RFC 7919)
 - Add TLS NamedGroup FFDHE6144 (0x0103) and FFDHE8192 (0x0104)
 - Expand TLS DHE negotiation to support all 5 FFDHE groups
 - Add tests for all 13 DH groups (prime size validation + key exchange roundtrip)
 
-### Completed Steps
+#### Completed Steps
 
 #### 1. DH Group Primes (`hitls-crypto/src/dh/groups.rs`)
 - Rewrote `groups.rs` with all 13 DH group prime hex constants extracted from C source (`crypto/dh/src/dh_para.c`)
@@ -5060,18 +5045,18 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - `test_dh_invalid_peer_public_key`: Validates rejection of 0 and 1 as peer public keys
 - 14 new tests total (8 running + 6 ignored for slow large-group modexp)
 
-### Test Results
+#### Test Results (Part B)
 - hitls-crypto: 364 passed, 25 ignored (was 359/19) — +5 running, +6 ignored
 - Total workspace: 1046 tests (34 ignored)
 
-### Files Modified
+#### Files Modified (Part B)
 - `crates/hitls-crypto/src/dh/groups.rs` — Rewritten with all 13 DH group primes
 - `crates/hitls-crypto/src/dh/mod.rs` — Added 14 new tests
 - `crates/hitls-tls/src/crypt/mod.rs` — Added FFDHE6144/FFDHE8192 NamedGroup constants
 - `crates/hitls-tls/src/handshake/server12.rs` — Updated is_ffdhe_group() and named_group_to_dh_param_id()
 - `CLAUDE.md`, `DEV_LOG.md`, `README.md`, `PROMPT_LOG.md` — Updated
 
-### Build Status
+#### Build Status (Part B)
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1046 workspace tests passing (34 ignored)
@@ -7539,11 +7524,9 @@ Implemented two features:
 
 ---
 
-## Phase 94a: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
+## Phase 94: Encrypted PKCS#8 + Callbacks + SM4-CTR-DRBG + CMS ML-DSA (2026-02-19)
 
-### Date: 2026-02-19
-
-### Summary
+### Part A: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
 
 Implemented three features:
 1. **Encrypted PKCS#8 (EncryptedPrivateKeyInfo)** — RFC 5958 EncryptedPrivateKeyInfo parsing and encoding with PBES2 (PBKDF2-HMAC-SHA256 + AES-256-CBC default, AES-128-CBC optional). Functions: `decrypt_pkcs8_der()`, `decrypt_pkcs8_pem()`, `encrypt_pkcs8_der()`, `encrypt_pkcs8_der_with()`, `encrypt_pkcs8_pem()`. 5 tests.
@@ -7581,18 +7564,12 @@ Implemented three features:
 
 +12 tests (2323 → 2335): hitls-pki 341 → 346 (+5), hitls-tls 936 → 943 (+7)
 
-### Build Status
+#### Build Status (Part A)
 - `cargo test --workspace --all-features`: 2335 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
----
-
-## Phase 94b: TicketKeyCallback + SecurityCallback
-
-### Date: 2026-02-19
-
-### Summary
+### Part B: TicketKeyCallback + SecurityCallback
 
 Implemented two TLS config callback features:
 1. **TicketKeyCallback** — `Arc<dyn Fn(&[u8], bool) -> Option<TicketKeyResult> + Send + Sync>` for session ticket key rotation. `TicketKeyResult` struct with `key_name`, `key`, `iv`. Config field + builder method. 5 tests.
@@ -7621,18 +7598,12 @@ Implemented two TLS config callback features:
 
 +12 tests (2335 → 2347): hitls-tls 943 → 955 (+12)
 
-### Build Status
+#### Build Status (Part B)
 - `cargo test --workspace --all-features`: 2347 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
----
-
-## Phase 94c: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests + Documentation Sync
-
-### Date: 2026-02-19
-
-### Summary
+### Part C: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests
 
 Implemented three features plus documentation sync, completing 100% C→Rust feature parity:
 1. **SM4-CTR-DRBG** — NIST SP 800-90A Section 10.2 CTR-DRBG using SM4 as the block cipher (128-bit key, 128-bit block, 32-byte seed). `Sm4CtrDrbg` struct with `new()`, `generate()`, `generate_bytes()`, `reseed()`. Feature-gated under `sm4`. 4 tests.
