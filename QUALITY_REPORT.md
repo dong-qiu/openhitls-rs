@@ -7,15 +7,17 @@
 
 ## 1. Current Quality Safety Net
 
-### 1.1 Defense Layers (5-Layer Model)
+### 1.1 Defense Layers (7-Layer Model)
 
-| Layer | Mechanism | Coverage | Status |
-|:-----:|-----------|----------|:------:|
-| **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | Complete |
-| **L2** | Unit Tests | 3,184 tests (7 ignored), 100% pass rate | Comprehensive |
-| **L3** | Integration Tests | 149 cross-crate tests (TCP loopback + DTLS resilience) | Good |
-| **L4** | Fuzz Testing | 10 fuzz targets + 66 seed corpus files | Parse-only |
-| **L5** | Security Audit | rustsec/audit-check + Miri (bignum/utils) + cargo-tarpaulin coverage | Good |
+| Layer | Mechanism | Coverage | Rating | Notes |
+|:-----:|-----------|----------|:------:|-------|
+| **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | **A** | Full workspace, all features, all targets |
+| **L2** | Unit Tests | 3,184 tests (7 ignored), 100% pass rate | **A−** | 3,058 test fns + 92 async + 15 Wycheproof suites; ~14 files indirect-only |
+| **L3** | Integration Tests | 152 cross-crate tests (TCP loopback + DTLS resilience) | **B+** | 12 test files; 5 protocol variants × sync/async; no cross-impl interop |
+| **L4** | Fuzz Testing | 10 fuzz targets + 66 seed corpus files | **C+** | Parse-only (ASN.1/PEM/X.509/TLS/CMS/PKCS); no semantic/state-machine fuzz |
+| **L5** | Property-Based Testing | 13 proptest blocks across hitls-crypto + hitls-utils | **C** | Only 2 of 9 crates; no hitls-tls/pki/bignum/auth proptest coverage |
+| **L6** | Standard Vectors | 15 Wycheproof suites + 7 FIPS KATs + 11 RFC vector sets + 10+ GB/T | **A** | 5,000+ vectors; all major algorithms covered |
+| **L7** | Concurrency & Side-Channel | 38 concurrency-aware tests; 0 timing tests | **D** | No constant-time verification; minimal thread-safety stress tests |
 
 ### 1.2 CI/CD Pipeline
 
@@ -62,10 +64,42 @@ GitHub Actions (.github/workflows/ci.yml)
 
 | Mechanism | Implementation | Test Coverage |
 |-----------|---------------|:-------------:|
-| Zeroize on drop | All secret types (keys, intermediate states) | Compile-time (derive) |
-| Constant-time comparison | `subtle::ConstantTimeEq` in all crypto comparisons | Structural (no timing tests) |
-| Unsafe code confinement | ~67 blocks: AES-NI (8), AES-NEON (6), SHA-2 HW (8), GHASH HW (10), ChaCha20 SIMD (6), McEliece (2), lib.rs stubs (5), test SIMD calls (~22) | All with NIST/RFC vectors |
+| Zeroize on drop | All secret types (keys, intermediate states) | Compile-time (derive); no runtime verification |
+| Constant-time comparison | `subtle::ConstantTimeEq` in all crypto comparisons | Structural only (**no timing tests**) |
+| Unsafe code confinement | ~44 blocks: AES-NI (8), AES-NEON (6), SHA-2 HW (8), GHASH HW (22), ChaCha20 SIMD (15), McEliece (2) | All with NIST/RFC vectors; no HW↔SW cross-validation |
 | Random generation | `getrandom` crate, never `rand` | Indirect |
+
+### 1.6 Test Type Distribution
+
+| Category | Count | % | Description |
+|----------|------:|--:|-------------|
+| Error handling | 308 | 10.1% | invalid/reject/wrong/error/fail paths |
+| Roundtrip | 301 | 9.8% | encrypt↔decrypt, sign↔verify, encode↔decode |
+| Edge case | 265 | 8.7% | empty/zero/boundary/single-byte/partial block |
+| Standard vectors | 106 | 3.5% | RFC/NIST/Wycheproof/KAT/GB/T test vectors |
+| Async | 92 | 3.0% | tokio::test async connection + handshake |
+| State machine | 557 | 18.2% | handshake/connected/not-connected state transitions |
+| Property-based | 13 | 0.4% | proptest blocks (hitls-crypto + hitls-utils only) |
+| Concurrency | 38 | 1.2% | Arc/Mutex/thread::spawn/tokio::spawn patterns |
+| Other (deterministic, helper, etc.) | ~1,378 | 45.1% | Specific algorithm/module unit tests |
+
+**Key observations**: Error-handling tests (308) outnumber roundtrip tests (301), indicating good negative-path coverage. However, property-based and concurrency tests are disproportionately low.
+
+### 1.7 High-Risk Zero Direct Unit Test Files
+
+These source files have **0 direct unit tests** (`#[test]`) but contain significant logic:
+
+| File | Lines | Risk | Coverage Mechanism |
+|------|------:|:----:|-------------------|
+| `hitls-tls/src/macros.rs` | 1,417 | **High** | Indirect via async connection tests (generates both sync & async method bodies) |
+| `hitls-tls/src/connection12/client.rs` | 1,025 | **High** | Indirect via integration tests (`connection_tls12_*.rs`) |
+| `hitls-tls/src/connection12/server.rs` | 927 | **High** | Indirect via integration tests (`connection_tls12_*.rs`) |
+| `hitls-tls/src/connection/server.rs` | 369 | **Medium** | Indirect via integration tests (`connection_tls13_*.rs`) |
+| `hitls-tls/src/connection/client.rs` | 197 | **Medium** | Indirect via integration tests (`connection_tls13_*.rs`) |
+| `hitls-crypto/src/provider.rs` | 144 | **Low** | Trait definitions; compile-time coverage |
+| **Total** | **4,079** | | 3,938 lines TLS connection code with zero direct unit tests |
+
+These files are the **largest untested surface** in the codebase. While integration tests exercise the happy path, state-machine edge cases (e.g., unexpected message ordering, partial read/write, error propagation mid-handshake) are not directly covered.
 
 ---
 
@@ -74,18 +108,27 @@ GitHub Actions (.github/workflows/ci.yml)
 ### 2.1 Deficiency Map
 
 ```
-Severity         ID   Description                              Impact
-────────────     ──   ──────────────────────────────────────   ──────────────────────────
-CLOSED           D1   0-RTT replay protection: +8 tests         Resolved (Phase T99)
-CLOSED           D2   Async TLCP/DTLCP: zero tests               Resolved (Phase T111: +15)
-CLOSED           D3   Extension negotiation: +14 e2e tests       Resolved (Phase T112: +14)
-MOSTLY CLOSED    D4   DTLS loss/resilience: +30 tests            Resolved (Phase T113/123/124)
-MOSTLY CLOSED    D5   TLCP double certificate: +25 tests         Resolved (Phase T114/119)
-CLOSED           D6   Property-based testing: +20 proptest       Resolved (Phase T118)
-CLOSED           D7   Code coverage metrics in CI                Resolved (Phase T118: tarpaulin)
-Medium           D8   No cross-implementation interop           Compatibility risk
-Low-Med          D9   Fuzz targets: parse-only                  Deep bugs missed
-MOSTLY CLOSED    D10  Crypto files without unit tests            Resolved (Phase T115–T117/125)
+Severity         ID   Description                                  Impact
+────────────     ──   ──────────────────────────────────────────   ──────────────────────────
+CLOSED           D1   0-RTT replay protection: +8 tests             Resolved (Phase T99)
+CLOSED           D2   Async TLCP/DTLCP: zero tests                   Resolved (Phase T111: +15)
+CLOSED           D3   Extension negotiation: +14 e2e tests           Resolved (Phase T112: +14)
+MOSTLY CLOSED    D4   DTLS loss/resilience: +30 tests                Resolved (Phase T113/123/124)
+MOSTLY CLOSED    D5   TLCP double certificate: +25 tests             Resolved (Phase T114/119)
+CLOSED           D6   Property-based testing: +20 proptest           Resolved (Phase T118)
+CLOSED           D7   Code coverage metrics in CI                    Resolved (Phase T118: tarpaulin)
+Medium           D8   No cross-implementation interop               Compatibility risk
+Low-Med          D9   Fuzz targets: parse-only                      Deep bugs missed
+MOSTLY CLOSED    D10  Crypto files without unit tests                Resolved (Phase T115–T117/125)
+──────── NEW (Phase T150 深度分析) ────────
+Critical         D11  Semantic/state-machine fuzz missing            10 fuzz targets are parse-only
+Critical         D12  No side-channel/timing test infrastructure     Constant-time claims unverified
+Critical         D13  3,938 lines TLS connection code: 0 unit tests  State machine edge cases uncovered
+High             D14  Proptest scope too narrow (2/9 crates)         Only hitls-crypto + hitls-utils
+High             D15  Concurrency testing minimal (38 tests)         Thread-safety / data-race risk
+High             D16  HW accel: no soft↔HW cross-validation         44 unsafe blocks trust-only
+Medium           D17  No zeroize runtime verification                Zeroize correctness assumed
+Medium           D18  Feature flag combinations untested             Only all-features tested in CI
 ```
 
 ### 2.2 D1 — 0-RTT Replay Protection ~~(Critical)~~ — **CLOSED** (Phase T99)
@@ -207,6 +250,95 @@ All 10 fuzz targets cover **parsing** (ASN.1, PEM, X.509, TLS record/handshake, 
 | Provider traits | 1 | 144 | Compile-time coverage |
 
 These modules have indirect coverage through top-level roundtrip tests and are lower risk.
+
+### 2.12 D11 — Semantic/State-Machine Fuzz Missing (Critical) — **OPEN**
+
+All 10 fuzz targets exclusively cover **parsing** (ASN.1, PEM, X.509, TLS record/handshake, CMS, PKCS#8/12). No fuzz target exercises:
+
+- **State machine fuzzing**: Arbitrary message sequences driving the TLS state machine through unexpected transitions. The 5-protocol × sync/async handshake drivers represent ~4,000 lines of complex state logic.
+- **Cryptographic semantic fuzzing**: Mutated ciphertexts → decrypt, truncated MACs → verify, corrupted signatures → reject. This would catch panic paths in crypto primitives.
+- **Protocol-level fuzzing**: Malformed handshake message *content* (valid framing, corrupt payloads) → verify correct rejection without panic or memory unsafety.
+
+**Impact**: Parse-only fuzz catches malformed input crashes but misses logic bugs in state transitions and crypto operations — the highest-value attack surface.
+
+### 2.13 D12 — No Side-Channel/Timing Test Infrastructure (Critical) — **OPEN**
+
+The codebase claims constant-time operations via `subtle::ConstantTimeEq`, but there is **zero runtime verification**:
+
+- No timing tests (e.g., `dudect` statistical timing analysis or `ctgrind` instrumentation)
+- No verification that branch-free code paths remain branch-free after compiler optimization
+- ~44 unsafe blocks in hardware acceleration code bypass Rust's safety guarantees; timing behavior is architecture-dependent
+
+**Specific concern**: While `subtle::ConstantTimeEq` is used for cryptographic comparisons, there is no automated check that new code doesn't introduce variable-time comparisons (e.g., accidental use of `==` for secret data).
+
+### 2.14 D13 — TLS Connection Code: 3,938 Lines with Zero Direct Unit Tests (Critical) — **OPEN**
+
+The largest untested code surface in the codebase:
+
+| File | Lines | Function |
+|------|------:|----------|
+| `hitls-tls/src/macros.rs` | 1,417 | Sync/async method body generation macros |
+| `hitls-tls/src/connection12/client.rs` | 1,025 | TLS 1.2 synchronous client connection |
+| `hitls-tls/src/connection12/server.rs` | 927 | TLS 1.2 synchronous server connection |
+| `hitls-tls/src/connection/server.rs` | 369 | TLS 1.3 synchronous server connection |
+| `hitls-tls/src/connection/client.rs` | 197 | TLS 1.3 synchronous client connection |
+
+These files are **only exercised through integration tests** (happy-path TCP loopback). Edge cases in state transitions — unexpected message ordering, partial read/write mid-handshake, error propagation between layers — have no dedicated tests.
+
+**Mitigation difficulty**: These are tightly coupled to I/O and difficult to unit test without refactoring to injectable transport.
+
+### 2.15 D14 — Proptest Scope Too Narrow (High) — **OPEN**
+
+Property-based testing exists in only **2 of 9 crates** (hitls-crypto + hitls-utils):
+
+| Crate | proptest Blocks | Status |
+|-------|:---------------:|:------:|
+| hitls-crypto | 10 | Covered (AES/SM4/GCM/CBC/ChaCha20/SHA-256/HMAC/Ed25519/X25519/HKDF) |
+| hitls-utils | 3 | Covered (Base64/hex/ASN.1) |
+| hitls-tls | 0 | **No proptest** — codec roundtrips, extension encode/decode, record layer |
+| hitls-pki | 0 | **No proptest** — X.509 encode/decode, PKCS#8/12 roundtrips |
+| hitls-bignum | 0 | **No proptest** — modular arithmetic commutativity/associativity |
+| hitls-auth | 0 | **No proptest** — HOTP/TOTP counter properties |
+| hitls-cli | 0 | **No proptest** |
+| hitls-types | 0 | Not applicable (enum definitions) |
+
+**Impact**: Without proptest in hitls-tls and hitls-pki, complex codec and certificate parsing logic relies solely on hand-written vectors and may miss corner cases.
+
+### 2.16 D15 — Concurrency Testing Minimal (High) — **OPEN**
+
+Only **38 tests** use concurrency patterns (Arc/Mutex/thread::spawn/tokio::spawn), concentrated in:
+- Session cache thread-safety tests (~2 dedicated concurrent tests)
+- Async TLS connection tests (92 `#[tokio::test]` — concurrent but single-threaded runtime)
+
+**Missing**:
+- Multi-threaded stress tests for shared state (session cache, DRBG reseed, key rotation)
+- Race condition tests for connection shutdown/renegotiation
+- Concurrent client/server pair saturation tests
+
+### 2.17 D16 — Hardware Acceleration: No Soft↔HW Cross-Validation (High) — **OPEN**
+
+44 unsafe blocks across 12 files implement hardware-accelerated crypto (AES-NI, SHA-NI, PCLMULQDQ, PMULL, NEON, SSE2). Each is tested with standard vectors (NIST/RFC), but:
+
+- **No cross-validation**: Software fallback and hardware paths are never compared against each other for the same input
+- **No differential testing**: A single wrong intrinsic usage could produce incorrect but consistent results that pass known-answer tests
+- **Platform-dependent coverage**: CI tests on x86-64 Ubuntu and macOS; ARM NEON paths only tested if CI runner supports it
+
+### 2.18 D17 — No Zeroize Runtime Verification (Medium) — **OPEN**
+
+All secret types use `#[derive(Zeroize)]` + `#[zeroize(drop)]`, which is verified at compile time. However:
+
+- No runtime test confirms memory is actually zeroed after drop (would require `unsafe` memory inspection or Miri shadow memory)
+- Stack-allocated temporaries inside crypto functions may not be zeroized (e.g., intermediate Montgomery multiplication results)
+
+### 2.19 D18 — Feature Flag Combinations Untested (Medium) — **OPEN**
+
+CI tests only with `--all-features`. Missing:
+
+- Default features only (no `sm2`, `pqc`, `sm9`, etc.)
+- Minimal feature set (single algorithm)
+- Conflicting/complementary feature combinations (e.g., `aes` without `gcm`)
+
+Feature-gated code may have compilation errors or runtime panics when specific combinations are disabled.
 
 ---
 
@@ -411,31 +543,43 @@ Phase T150         +15      —            scrypt + CFB mode + X448 deepening   
 | KDF/codec tests (9) | HKDF, Base64, hex, ASN.1 integer/octet/bool/UTF8/sequence | ✅ |
 | Coverage CI job | `cargo-tarpaulin` → Cobertura XML | ✅ |
 
-### 3.12 Phase T119–T126 — Deep Edge-Case Coverage (+120 tests) ✅
+### 3.12 Phase T119–T135, T141–T150 — Deep Edge-Case Coverage (+495 tests) ✅
 
-Phases T112–T119 continued hardening beyond the original roadmap:
+Continued hardening beyond the original roadmap:
 
 | Phase | Tests | Focus |
 |-------|:-----:|-------|
-| T112 | +15 | TLCP SM3 transcript hash, PRF, key schedule, verify_data (closes D5 SM3 gap) |
-| T113 | +15 | TLS 1.3 key schedule SHA-384 pipeline, stage enforcement, SM4-GCM-SM3 |
-| T114 | +15 | Record layer AEAD encryption edge cases, failure modes, epoch transitions |
-| T115 | +15 | TLS 1.2 CBC padding oracle, DTLS record parsing, TLS 1.3 inner plaintext |
-| T116 | +15 | DTLS fragmentation/reassembly, retransmission timer, CertificateVerify (extends D4) |
-| T117 | +15 | DTLS codec all types, anti-replay window boundaries, entropy conditioning (extends D4) |
-| T118 | +15 | X.509 extension parsing, SLH-DSA WOTS+ base conversion, ASN.1 tag long-form (extends D10) |
-| T119 | +15 | PKI shared encoding helpers, X.509 signing hash dispatch, certificate builder DER encoding |
-| T120 | +15 | X.509 certificate parsing, SM9 G2 point arithmetic, SM9 pairing helpers |
-| T121 | +13 | SM9 hash functions H1/H2/KDF, SM9 algorithm sign/verify/encrypt/decrypt, BN256 curve parameters |
-| T122 | +15 | McEliece keygen helpers (bitrev/SHAKE256/PRG), encoding (error vector), decoding (Berlekamp-Massey) |
-| T123 | +10 | XMSS tree operations (compute_root/sign/verify), WOTS+ deepening, SLH-DSA FORS deepening |
-| T124 | +15 | McEliece GF(2^13) field algebra, Benes network permutation/sort, binary matrix Gaussian elimination |
+| T119 | +15 | TLCP SM3 transcript hash, PRF, key schedule, verify_data (closes D5 SM3 gap) |
+| T120 | +15 | TLS 1.3 key schedule SHA-384 pipeline, stage enforcement, SM4-GCM-SM3 |
+| T121 | +15 | Record layer AEAD encryption edge cases, failure modes, epoch transitions |
+| T122 | +15 | TLS 1.2 CBC padding oracle, DTLS record parsing, TLS 1.3 inner plaintext |
+| T123 | +15 | DTLS fragmentation/reassembly, retransmission timer, CertificateVerify (extends D4) |
+| T124 | +15 | DTLS codec all types, anti-replay window boundaries, entropy conditioning (extends D4) |
+| T125 | +15 | X.509 extension parsing, SLH-DSA WOTS+ base conversion, ASN.1 tag long-form (extends D10) |
+| T126 | +15 | PKI shared encoding helpers, X.509 signing hash dispatch, certificate builder DER encoding |
+| T127 | +15 | X.509 certificate parsing, SM9 G2 point arithmetic, SM9 pairing helpers |
+| T128 | +13 | SM9 hash functions H1/H2/KDF, SM9 algorithm sign/verify/encrypt/decrypt, BN256 curve parameters |
+| T129 | +15 | McEliece keygen helpers (bitrev/SHAKE256/PRG), encoding (error vector), decoding (Berlekamp-Massey) |
+| T130 | +10 | XMSS tree operations (compute_root/sign/verify), WOTS+ deepening, SLH-DSA FORS deepening |
+| T131 | +15 | McEliece GF(2^13) field algebra, Benes network permutation/sort, binary matrix Gaussian elimination |
+| T132 | +12 | FrodoKEM matrix ops, SLH-DSA hypertree, McEliece polynomial deepening |
+| T133 | +15 | McEliece + FrodoKEM + XMSS parameter set validation deepening |
+| T134 | +15 | XMSS hash abstraction + XMSS address scheme + ML-KEM NTT deepening |
+| T135 | +15 | BigNum constant-time + primality testing + core type deepening |
+| T141 | +15 | SLH-DSA params + hash abstraction + address scheme deepening |
+| T143 | +15 | FrodoKEM PKE + SM9 G1 point + SM9 Fp field deepening |
+| T144 | +15 | ML-DSA NTT + SM4-CTR-DRBG + BigNum random deepening |
+| T145 | +15 | DH group params + entropy pool + SHA-1 deepening |
+| T147 | +15 | ML-KEM poly + SM9 Fp12 + encrypted PKCS#8 deepening |
+| T148 | +15 | ML-DSA poly + X.509 extensions + X.509 text deepening |
+| T149 | +15 | XTS mode + Edwards curve + GMAC deepening |
+| T150 | +15 | scrypt + CFB mode + X448 deepening |
 
 ---
 
 ## 4. Coverage Targets — Final Status
 
-| Metric | Original (T106) | Target (T111) | **Actual (T136)** |
+| Metric | Original (T98) | Target (T118) | **Actual (T150)** |
 |--------|:---------------:|:-------------:|:-----------------:|
 | Total tests | 2,634 | ~2,750+ | **3,184** |
 | Critical deficiencies (D1-D2) | 0 | 0 | **0** |
@@ -453,30 +597,130 @@ All original targets met or exceeded.
 
 ---
 
-## 5. Remaining Gaps (Low Priority)
+## 5. Priority Improvement Roadmap
 
-| ID | Description | Risk | Effort |
-|----|-------------|:----:|:------:|
-| D8 | No cross-implementation interop (OpenSSL/BoringSSL) | Medium | High |
-| D9 | Fuzz targets parse-only (no state machine / crypto fuzzing) | Low-Med | Medium |
-| D4r | Handshake-level DTLS loss simulation (requires driver refactoring) | Low | High |
-| D10r | ~14 crypto files with indirect-only coverage | Low | Low |
+### 5.1 Overview
+
+```
+Priority   Deficiency   Effort    Impact                                  Recommendation
+────────   ──────────   ──────    ──────────────────────────────────────  ──────────────────────────────
+P0 (Now)   D13          Medium    3,938 lines zero unit tests             Refactor connection code for testability
+P0 (Now)   D11          Medium    Parse-only fuzz misses logic bugs       Add 3 semantic fuzz targets
+P1 (Next)  D12          High      CT claims unverified                    Integrate dudect or ctgrind
+P1 (Next)  D16          Low       HW accel correctness risk               Add soft↔HW differential tests
+P1 (Next)  D14          Low       Narrow proptest (2/9 crates)            Extend proptest to hitls-tls/pki/bignum
+P2 (Plan)  D15          Medium    Concurrency edge cases                  Multi-threaded stress + race tests
+P2 (Plan)  D8           High      No cross-impl compatibility             OpenSSL interop test harness
+P2 (Plan)  D18          Low       Feature flag combinations               CI matrix for feature subsets
+P3 (Wish)  D17          Medium    Zeroize runtime verification            Miri shadow memory or unsafe inspection
+P3 (Wish)  D4r          High      DTLS handshake-level loss               Requires handshake driver refactoring
+```
+
+### 5.2 P0 — Immediate Actions
+
+**P0-1: TLS Connection Code Testability (D13)**
+
+The 3,938-line connection code surface is the single largest gap. Recommended approach:
+1. Extract handshake state machine logic from I/O-bound connection types into pure functions
+2. Add mock transport trait (already partially exists via `Read`/`Write` generics)
+3. Write unit tests for state transitions: unexpected message type, mid-handshake error, partial write resume
+4. Target: 30+ unit tests covering the 5 connection types × common edge cases
+
+**P0-2: Semantic Fuzz Targets (D11)**
+
+Add 3 new fuzz targets beyond parse-only:
+1. `fuzz_tls_state_machine` — arbitrary message sequences against TLS 1.3 state machine
+2. `fuzz_aead_decrypt` — corrupted ciphertexts/nonces/AAD → verify graceful rejection
+3. `fuzz_x509_verify` — mutated certificates + signatures → verify no panic in verification path
+
+### 5.3 P1 — Next Priority
+
+**P1-1: Side-Channel Testing Infrastructure (D12)**
+
+Integrate `dudect-bencher` or equivalent for statistical timing analysis:
+- Priority targets: ECDSA signing (k-nonce), AES constant-time lookup, HMAC comparison
+- Add CI job with timing regression threshold
+- Estimated: 5-10 timing test benchmarks
+
+**P1-2: Hardware↔Software Cross-Validation (D16)**
+
+For each hardware-accelerated algorithm, add a test that:
+1. Forces software fallback (via feature flag or runtime detection bypass)
+2. Runs same input through both paths
+3. Asserts output equality
+
+Targets: AES-NI vs soft AES, SHA-256 SHA-NI vs soft SHA-256, GHASH CLMUL vs soft GHASH, ChaCha20 SSE2/NEON vs soft ChaCha20.
+
+**P1-3: Proptest Expansion (D14)**
+
+Add proptest blocks to:
+- `hitls-tls`: TLS record encode↔decode, extension codec roundtrip, handshake message serialization
+- `hitls-pki`: X.509 certificate DER encode↔decode, PKCS#8 private key roundtrip
+- `hitls-bignum`: Modular arithmetic properties (commutativity, associativity, inverse correctness)
+
+### 5.4 P2 — Planned
+
+**P2-1: Concurrency Stress Tests (D15)**
+- Session cache: 100 concurrent insert/lookup/eviction threads
+- DRBG: Concurrent reseed + generate from multiple threads
+- Connection: Parallel handshakes sharing session cache
+
+**P2-2: Cross-Implementation Interop (D8)**
+- OpenSSL CLI-based test harness: `openssl s_client` ↔ hitls-rs s_server
+- Focus on cipher suite negotiation, certificate chain validation, session resumption
+
+**P2-3: Feature Flag CI Matrix (D18)**
+- Add CI jobs for: default features, `aes+sha2` only, `sm2+sm4+sm3`, `pqc` only
+- Verify compile + basic smoke test for each combination
+
+### 5.5 P3 — Wishlist
+
+- **D17**: Runtime zeroize verification via Miri shadow memory or `unsafe` post-drop memory inspection
+- **D4r**: Handshake-level DTLS loss simulation (requires refactoring handshake flight driver to be injectable)
+
+### 5.6 Quantified Gap Summary
+
+| Metric | Current | Target (P0+P1) | Target (All) |
+|--------|:-------:|:---------------:|:------------:|
+| Total tests | 3,184 | ~3,260 | ~3,400 |
+| Fuzz targets | 10 (parse-only) | 13 (3 semantic) | 15+ |
+| Proptest crates | 2/9 | 5/9 | 7/9 |
+| Concurrency tests | 38 | 38 | ~70 |
+| Timing tests | 0 | 5-10 | 10+ |
+| HW↔SW cross-validation | 0 | 4 | 6 |
+| TLS connection unit tests | 0 | 30+ | 50+ |
+| Feature flag CI combos | 1 (all) | 4 | 6+ |
+| Defense model rating (avg) | **B** | **B+** | **A−** |
 
 ---
 
 ## 6. Strengths Summary
 
-The current safety net has significant strengths:
+The current safety net has significant strengths across multiple dimensions:
 
-1. **Multi-layer defense**: Unit + Integration + Fuzz + Benchmark + CI/CD + Coverage
-2. **Zero-warning policy**: Clippy enforced across entire workspace
-3. **Standard compliance**: 15 Wycheproof suites (5,000+ vectors) + 7 FIPS KATs + 11 RFC vector sets
-4. **100% Zeroize compliance**: All secret material types properly zeroized on drop
-5. **Constant-time operations**: `subtle::ConstantTimeEq` in all cryptographic comparisons
-6. **Unsafe confinement**: 21 unsafe blocks confined to hardware acceleration, all tested with NIST vectors
-7. **Miri validation**: Undefined behavior detection on bignum and utils crates
-8. **Security audit automation**: rustsec/audit-check in CI pipeline
-9. **Property-based testing**: 20 proptest tests covering crypto roundtrips, codec symmetry, DH commutativity
-10. **Code coverage tracking**: cargo-tarpaulin integrated in CI pipeline
-11. **Deterministic testing**: Fixed seeds/keys for reproducible results
-12. **Comprehensive wrong-state tests**: Every TLS state machine transition has invalid-state tests
+### 6.1 Static & Compile-Time Guarantees
+1. **Zero-warning policy**: `RUSTFLAGS="-D warnings" cargo clippy` enforced across entire workspace, all features, all targets
+2. **Rust type system**: Strong typing prevents entire categories of bugs (buffer overflow, use-after-free, null deref)
+3. **100% Zeroize compliance**: All secret material types use `#[derive(Zeroize)]` + `#[zeroize(drop)]`
+4. **Unsafe confinement**: 44 unsafe blocks restricted to hardware acceleration (6 files) + McEliece binary ops (1 file)
+
+### 6.2 Test Coverage Breadth
+5. **3,184 tests** with 100% pass rate (7 ignored: slow keygen/prime generation)
+6. **Error-first culture**: 308 error-handling tests (invalid input, wrong state, rejected parameters) outnumber roundtrip tests (301)
+7. **Edge case density**: 265 boundary/empty/partial tests catch off-by-one and corner cases
+8. **State machine coverage**: 557 tests exercise handshake/connection/not-connected transitions
+9. **Async parity**: 92 async tests across all 5 protocol variants (TLS 1.3/1.2/DTLS/TLCP/DTLCP)
+
+### 6.3 Standard Compliance
+10. **Wycheproof**: 15 test suites covering 5,000+ vectors (AES-GCM/CCM/CBC, ChaCha20, ECDSA, ECDH, Ed25519, X25519, RSA, HKDF, HMAC)
+11. **RFC vectors**: Ed25519/Ed448 (RFC 8032), X25519/X448 (RFC 7748), HKDF (RFC 5869), HMAC (RFC 4231/2202), ChaCha20 (RFC 8439), AES Key Wrap (RFC 3394), Scrypt (RFC 7914)
+12. **FIPS KATs**: SHA-256, AES, GCM, HMAC-DRBG — 7 known-answer tests for FIPS 140-3 readiness
+13. **GB/T vectors**: SM3 (GB/T 32905), SM4 (GB/T 32907) — Chinese national standard compliance
+
+### 6.4 Infrastructure & Automation
+14. **CI/CD pipeline**: GitHub Actions with format + lint + test matrix (Ubuntu + macOS × stable + MSRV 1.75) + security audit + Miri + fuzz build + bench verify + coverage
+15. **Property-based testing**: 13 proptest blocks across hitls-crypto + hitls-utils
+16. **Code coverage tracking**: cargo-tarpaulin → Cobertura XML in CI
+17. **Miri validation**: Undefined behavior detection on hitls-bignum + hitls-utils
+18. **Deterministic testing**: Fixed seeds/keys for reproducible results across platforms
+19. **Comprehensive wrong-state tests**: Every TLS state machine transition has invalid-state rejection tests
