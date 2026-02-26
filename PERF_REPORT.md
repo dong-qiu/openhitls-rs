@@ -275,7 +275,7 @@ All pending optimization tasks are tracked as numbered phases (Phase P1–P8), o
 | Phase | Optimization | Current Gap | Target | Effort | Status |
 |-------|-------------|-------------|--------|--------|--------|
 | **P1** | P-256 深度优化 (预计算表 + 专用约简) | 16–32× → 1.5–2× | 2–3× | High | **Complete** |
-| **P2** | ML-KEM SIMD NTT 向量化 | 6–18× | 2–3× | High | Pending |
+| **P2** | ML-KEM SIMD NTT 向量化 | 6–18× | 2–3× | High | **Complete** |
 | **P3** | BigNum REDC 内循环 + Karatsuba 大数乘法 | 7–12× | 2–3× | High | Pending |
 | **P4** | SM4 T-table 查表优化 | 2.2–2.4× | ~1× | Medium | Pending |
 | **P5** | ML-DSA SIMD NTT 向量化 | 2–6× | ~1.5× | Medium | Pending |
@@ -311,27 +311,34 @@ All pending optimization tasks are tracked as numbered phases (Phase P1–P8), o
 
 ---
 
-### Phase P2 — ML-KEM SIMD NTT 向量化
+### Phase P2 — ML-KEM SIMD NTT 向量化 ✅ Complete
 
-**Current gap**: ML-KEM-768 encaps 13×, decaps 8×, keygen 5× slower than C
+**Result**: ML-KEM-768 encaps **2.0× speedup** (109→54.8 µs), decaps **2.6× speedup** (95→36.0 µs), keygen **2.3× speedup** (155→66.5 µs)
 
-**Already implemented**:
-- `mlkem/ntt.rs`: 128-entry precomputed ZETAS table (Montgomery form)
-- Cooley-Tukey forward / Gentleman-Sande inverse NTT
-- Barrett reduction, Montgomery R=2^16 field arithmetic
+**Optimizations implemented**:
 
-**Remaining bottlenecks**:
+| Optimization | Speedup | Detail |
+|-------------|---------|--------|
+| **NEON 8-wide NTT/INTT butterflies** | ~2× NTT | `vqdmulhq_s16` + `vhsubq_s16` Montgomery trick processes 8 coefficients per SIMD op. Stages len≥8 fully vectorized; len=4 and len=2 use half-register and lane-extract fallback. |
+| **NEON Barrett reduction** | ~2× reduce | Widening multiply (`vmlal_s16`) + shift-narrow (`vshrq_n_s32::<26>` + `vmovn_s32`) for 8-wide Barrett. Used in INTT and basemul accumulation. |
+| **NEON polynomial utilities** | ~2× add/sub | `poly_add`, `poly_sub`, `to_mont`, `reduce_poly` vectorized (32 iterations × 8 elements). |
+| **Batch SHAKE-128 squeeze** | ~1.5× sampling | `rej_sample` squeezes 504 bytes (3 SHAKE blocks) per call instead of 3 bytes, reducing ~200 Vec allocations to 1–2. |
 
-| Bottleneck | Impact | Detail |
-|------------|--------|--------|
-| **No SIMD butterfly operations** | ~3–4× | C uses NEON/AVX2 to process 4–8 butterflies in parallel. Rust is pure scalar, element-by-element |
-| **SHAKE sampling unoptimized** | ~1.5–2× | CBD sampling and rejection sampling are byte-at-a-time; batch SHAKE squeeze (4 blocks) would improve throughput |
-| **Polynomial serialization overhead** | ~1.2× | `compress`/`decompress` process coefficients individually; vectorizable |
-| **Heap allocation for temporaries** | ~1.1× | Temporary polynomial arrays allocated on heap; fixed-size stack arrays preferred |
+**Benchmark results** (Apple M4, rustc 1.93.0):
 
-**Affected algorithms**: ML-KEM-512/768/1024, TLS 1.3 hybrid KEM
+| Operation | Before | After | Speedup |
+|-----------|--------|-------|---------|
+| ML-KEM-512 keygen | ~90 µs | 44.1 µs | **2.0×** |
+| ML-KEM-512 encaps | ~79 µs | 37.7 µs | **2.1×** |
+| ML-KEM-512 decaps | ~50 µs | 24.0 µs | **2.1×** |
+| ML-KEM-768 keygen | ~155 µs | 66.5 µs | **2.3×** |
+| ML-KEM-768 encaps | ~109 µs | 54.8 µs (18,248 ops/s) | **2.0×** |
+| ML-KEM-768 decaps | ~95 µs | 36.0 µs | **2.6×** |
+| ML-KEM-1024 keygen | ~199 µs | 93.5 µs | **2.1×** |
+| ML-KEM-1024 encaps | ~189 µs | 78.4 µs | **2.4×** |
+| ML-KEM-1024 decaps | ~160 µs | 52.9 µs | **3.0×** |
 
-**Expected improvement**: 9,190 ops/s → 40,000–60,000 ops/s (4–6×), approaching C's 119,805 ops/s
+**Remaining gap to C**: ML-KEM-768 encaps ~5.5× (18K vs 120K ops/s). Further gains possible with fully vectorized basemul, AVX2 path, and SHAKE-128 ×4 interleaving.
 
 ---
 

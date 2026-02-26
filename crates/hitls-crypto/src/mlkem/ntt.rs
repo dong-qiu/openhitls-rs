@@ -2,6 +2,10 @@
 //!
 //! Operates on polynomials in Z_q[X]/(X^256+1) with q = 3329.
 //! Uses Montgomery arithmetic with R = 2^16.
+//! On aarch64 with NEON, vectorized implementations process 8 coefficients at a time.
+
+#[cfg(target_arch = "aarch64")]
+use crate::mlkem::ntt_neon;
 
 /// ML-KEM modulus.
 pub(crate) const Q: i16 = 3329;
@@ -55,7 +59,19 @@ pub(crate) fn fqmul(a: i16, b: i16) -> i16 {
 /// Forward NTT (Cooley-Tukey butterflies).
 ///
 /// Transforms polynomial from normal domain to NTT domain.
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn ntt(r: &mut Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::ntt_neon(r) };
+        }
+    }
+    ntt_scalar(r)
+}
+
+/// Scalar forward NTT (Cooley-Tukey butterflies).
+fn ntt_scalar(r: &mut Poly) {
     let mut k: usize = 1;
     let mut len = 128;
     while len >= 2 {
@@ -77,7 +93,19 @@ pub(crate) fn ntt(r: &mut Poly) {
 /// Inverse NTT (Gentleman-Sande butterflies).
 ///
 /// Transforms polynomial from NTT domain back to normal domain.
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn invntt(r: &mut Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::invntt_neon(r) };
+        }
+    }
+    invntt_scalar(r)
+}
+
+/// Scalar inverse NTT (Gentleman-Sande butterflies).
+fn invntt_scalar(r: &mut Poly) {
     let mut k: usize = 127;
     let mut len = 2;
     while len <= 128 {
@@ -104,7 +132,19 @@ pub(crate) fn invntt(r: &mut Poly) {
 /// Pointwise multiplication of two NTT-domain polynomials.
 ///
 /// Uses base-case multiplication for degree-1 factors.
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn basemul_acc(r: &mut Poly, a: &[Poly], b: &[Poly]) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::basemul_acc_neon(r, a, b) };
+        }
+    }
+    basemul_acc_scalar(r, a, b)
+}
+
+/// Scalar pointwise multiplication of two NTT-domain polynomials.
+fn basemul_acc_scalar(r: &mut Poly, a: &[Poly], b: &[Poly]) {
     debug_assert_eq!(a.len(), b.len());
     // Zero the result
     *r = [0i16; N];
@@ -113,7 +153,7 @@ pub(crate) fn basemul_acc(r: &mut Poly, a: &[Poly], b: &[Poly]) {
         // 64 base-case multiplications over degree-1 factors
         for i in 0..64 {
             let idx = 4 * i;
-            let zeta = fqmul(ZETAS[64 + i], ZETAS[64 + i]); // Not needed like this
+            let _zeta = fqmul(ZETAS[64 + i], ZETAS[64 + i]); // Not needed like this
 
             // Actually use the correct zeta for each basemul pair
             // In NTT domain, pairs (r[2i], r[2i+1]) share a base-case zeta
@@ -154,6 +194,12 @@ const R2_MOD_Q: i16 = 1353;
 /// (which introduces R^{-1}) to cancel the Montgomery factor before adding
 /// non-Montgomery values (e.g., NTT(e)).
 pub(crate) fn to_mont(r: &mut Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::to_mont_neon(r) };
+        }
+    }
     for coeff in r.iter_mut() {
         // fqmul(x, R²) = x * R² * R^{-1} = x * R
         *coeff = fqmul(*coeff, R2_MOD_Q);
@@ -162,6 +208,12 @@ pub(crate) fn to_mont(r: &mut Poly) {
 
 /// Reduce all coefficients of a polynomial using Barrett reduction.
 pub(crate) fn reduce_poly(r: &mut Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::reduce_poly_neon(r) };
+        }
+    }
     for coeff in r.iter_mut() {
         *coeff = barrett_reduce(*coeff);
     }
@@ -169,6 +221,12 @@ pub(crate) fn reduce_poly(r: &mut Poly) {
 
 /// Add two polynomials: r = a + b.
 pub(crate) fn poly_add(r: &mut Poly, a: &Poly, b: &Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::poly_add_neon(r, a, b) };
+        }
+    }
     for i in 0..N {
         r[i] = a[i] + b[i];
     }
@@ -176,6 +234,12 @@ pub(crate) fn poly_add(r: &mut Poly, a: &Poly, b: &Poly) {
 
 /// Subtract two polynomials: r = a - b.
 pub(crate) fn poly_sub(r: &mut Poly, a: &Poly, b: &Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::poly_sub_neon(r, a, b) };
+        }
+    }
     for i in 0..N {
         r[i] = a[i] - b[i];
     }
@@ -339,5 +403,148 @@ mod tests {
         assert_eq!(barrett_reduce(0), 0);
         let r = barrett_reduce(1000);
         assert_eq!(r, 1000);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    mod neon_tests {
+        use super::*;
+        use crate::mlkem::ntt_neon;
+
+        /// Normalize to [0, q) for comparison.
+        fn normalize(x: i16) -> i16 {
+            ((x as i32 % Q as i32 + Q as i32) % Q as i32) as i16
+        }
+
+        #[test]
+        fn test_neon_fqmul_matches_scalar() {
+            if !std::arch::is_aarch64_feature_detected!("neon") {
+                return;
+            }
+            let test_cases: [(i16, i16); 8] = [
+                (0, 0),
+                (1, 1),
+                (100, 200),
+                (-500, 300),
+                (1664, 1664),
+                (-1664, 1664),
+                (3328, 1),
+                (-3328, -1),
+            ];
+            for &(a, b) in &test_cases {
+                let scalar = fqmul(a, b);
+                let neon = unsafe { ntt_neon::fqmul_neon_scalar(a, b) };
+                assert_eq!(
+                    normalize(scalar),
+                    normalize(neon),
+                    "fqmul mismatch for ({a}, {b}): scalar={scalar}, neon={neon}"
+                );
+            }
+        }
+
+        #[test]
+        fn test_neon_barrett_matches_scalar() {
+            if !std::arch::is_aarch64_feature_detected!("neon") {
+                return;
+            }
+            let test_values: [i16; 10] = [0, 1, -1, 3329, -3329, 1000, -1000, 1664, -1664, 3328];
+            for &a in &test_values {
+                let scalar = barrett_reduce(a);
+                let neon = unsafe { ntt_neon::barrett_reduce_neon_scalar(a) };
+                assert_eq!(
+                    normalize(scalar),
+                    normalize(neon),
+                    "barrett mismatch for {a}: scalar={scalar}, neon={neon}"
+                );
+            }
+        }
+
+        #[test]
+        fn test_neon_ntt_matches_scalar() {
+            if !std::arch::is_aarch64_feature_detected!("neon") {
+                return;
+            }
+            let mut poly = [0i16; N];
+            for (i, c) in poly.iter_mut().enumerate() {
+                *c = (i as i16 * 7 + 3) % Q;
+            }
+            let mut scalar_poly = poly;
+            let mut neon_poly = poly;
+
+            ntt_scalar(&mut scalar_poly);
+            unsafe { ntt_neon::ntt_neon(&mut neon_poly) };
+
+            for i in 0..N {
+                assert_eq!(
+                    normalize(scalar_poly[i]),
+                    normalize(neon_poly[i]),
+                    "NTT mismatch at index {i}: scalar={}, neon={}",
+                    scalar_poly[i],
+                    neon_poly[i]
+                );
+            }
+        }
+
+        #[test]
+        fn test_neon_invntt_matches_scalar() {
+            if !std::arch::is_aarch64_feature_detected!("neon") {
+                return;
+            }
+            // Start from NTT domain (apply scalar NTT first)
+            let mut poly = [0i16; N];
+            for (i, c) in poly.iter_mut().enumerate() {
+                *c = (i as i16 * 13 + 5) % Q;
+            }
+            ntt_scalar(&mut poly);
+
+            let mut scalar_poly = poly;
+            let mut neon_poly = poly;
+
+            invntt_scalar(&mut scalar_poly);
+            unsafe { ntt_neon::invntt_neon(&mut neon_poly) };
+
+            for i in 0..N {
+                assert_eq!(
+                    normalize(scalar_poly[i]),
+                    normalize(neon_poly[i]),
+                    "INTT mismatch at index {i}: scalar={}, neon={}",
+                    scalar_poly[i],
+                    neon_poly[i]
+                );
+            }
+        }
+
+        #[test]
+        fn test_neon_basemul_matches_scalar() {
+            if !std::arch::is_aarch64_feature_detected!("neon") {
+                return;
+            }
+            // Create two polynomials in NTT domain
+            let mut a = [0i16; N];
+            let mut b = [0i16; N];
+            for (i, c) in a.iter_mut().enumerate() {
+                *c = (i as i16 * 11 + 2) % Q;
+            }
+            for (i, c) in b.iter_mut().enumerate() {
+                *c = (i as i16 * 17 + 3) % Q;
+            }
+            ntt_scalar(&mut a);
+            ntt_scalar(&mut b);
+
+            let mut scalar_r = [0i16; N];
+            let mut neon_r = [0i16; N];
+
+            basemul_acc_scalar(&mut scalar_r, &[a], &[b]);
+            unsafe { ntt_neon::basemul_acc_neon(&mut neon_r, &[a], &[b]) };
+
+            for i in 0..N {
+                assert_eq!(
+                    normalize(scalar_r[i]),
+                    normalize(neon_r[i]),
+                    "basemul mismatch at index {i}: scalar={}, neon={}",
+                    scalar_r[i],
+                    neon_r[i]
+                );
+            }
+        }
     }
 }

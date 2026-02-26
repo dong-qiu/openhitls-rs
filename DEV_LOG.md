@@ -9076,3 +9076,66 @@ Deep analysis revealed that bumping `hitls-crypto` from `opt-level = 1` to `opt-
 - `cargo test --workspace --all-features`: 3191 passed, 0 failed, 7 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase P2: ML-KEM NEON NTT Optimization
+
+**Date**: 2026-02-27
+**Summary**: ML-KEM NEON NTT optimization with 8-wide vectorized NTT/INTT butterflies, NEON Barrett reduction, NEON polynomial utilities, and batch SHAKE-128 squeeze.
+
+### Performance Results
+
+| Operation | Before | After | Speedup |
+|-----------|--------|-------|---------|
+| ML-KEM-512 keygen | ~90 µs | 44.1 µs | **2.0×** |
+| ML-KEM-512 encaps | ~79 µs | 37.7 µs | **2.1×** |
+| ML-KEM-512 decaps | ~50 µs | 24.0 µs | **2.1×** |
+| ML-KEM-768 keygen | ~155 µs | 66.5 µs | **2.3×** |
+| ML-KEM-768 encaps | ~109 µs | 54.8 µs (18,248 ops/s) | **2.0×** |
+| ML-KEM-768 decaps | ~95 µs | 36.0 µs | **2.6×** |
+| ML-KEM-1024 keygen | ~199 µs | 93.5 µs | **2.1×** |
+| ML-KEM-1024 encaps | ~189 µs | 78.4 µs | **2.4×** |
+| ML-KEM-1024 decaps | ~160 µs | 52.9 µs | **3.0×** |
+
+### Implementation Details
+
+1. **NEON 8-wide Montgomery multiply (`fqmul_neon`)**: Uses `vqdmulhq_s16` (doubling saturating multiply high) + `vhsubq_s16` (halving subtract) trick. `vqdmulhq` computes `(2·a·b) >> 16`, and `vhsubq` computes `(a-b)/2`. Combined: `((2·a·b >> 16) - (2·t·Q >> 16)) / 2 = (a·b - t·Q) >> 16`, exactly Montgomery reduction.
+
+2. **NEON forward NTT (Cooley-Tukey)**: Stages with len≥8 fully vectorized — load 8 coefficients, broadcast zeta, apply butterfly with `fqmul_neon` + `vaddq_s16`/`vsubq_s16`. Stage len=4 uses half-register ops (`vget_low_s16`/`vget_high_s16`). Stage len=2 uses lane extraction fallback for per-group zeta values.
+
+3. **NEON inverse NTT (Gentleman-Sande)**: Mirror structure. Stage len=2 uses lane extraction. Stage len=4 uses half-register Barrett + fqmul. Stages len≥8 fully vectorized with `barrett_reduce_neon` for sum and `fqmul_neon` for scaled difference.
+
+4. **NEON Barrett reduction**: Uses widening multiply `vmlal_s16` (int16×4 → int32×4), adds rounding constant, shifts right 26 via `vshrq_n_s32::<26>` + `vmovn_s32` narrow. Final `vmlsq_s16` (multiply-subtract) computes `a - t*q`.
+
+5. **Batch SHAKE-128 squeeze**: `rej_sample` now squeezes 504 bytes (3 SHAKE-128 rate blocks) at once instead of 3 bytes per call. Reduces ~200 `Vec<u8>` allocations to 1–2 calls.
+
+6. **Runtime dispatch**: Follows ChaCha20 pattern (`is_aarch64_feature_detected!("neon")`). Each function (`ntt`, `invntt`, `basemul_acc`, `poly_add`, `poly_sub`, `to_mont`, `reduce_poly`) checks at runtime and dispatches to NEON or scalar fallback.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/mlkem/ntt_neon.rs` | **New file**: NEON-vectorized `fqmul_neon`, `barrett_reduce_neon`, `ntt_neon`, `invntt_neon`, `basemul_acc_neon`, `poly_add_neon`, `poly_sub_neon`, `to_mont_neon`, `reduce_poly_neon`, plus test helpers |
+| `crates/hitls-crypto/src/mlkem/ntt.rs` | Added `#[cfg(target_arch = "aarch64")]` import, runtime dispatch for 7 functions (ntt/invntt/basemul_acc/poly_add/poly_sub/to_mont/reduce_poly), renamed originals to `_scalar` variants, added 5 NEON correctness tests |
+| `crates/hitls-crypto/src/mlkem/poly.rs` | Batch SHAKE-128 squeeze in `rej_sample` (504 bytes per call vs 3 bytes) |
+| `crates/hitls-crypto/src/mlkem/mod.rs` | Registered `ntt_neon` submodule with `#[cfg(target_arch = "aarch64")]` |
+| `PERF_REPORT.md` | Updated Phase P2 status from Pending to Complete with benchmark results |
+| `CLAUDE.md` | Updated status line, test counts (3191→3196), added Phase P2 to completed phases |
+
+### Test Counts
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| hitls-crypto | 1036 (+5) | 2 |
+| hitls-tls | 1290 | 0 |
+| hitls-pki | 390 | 0 |
+| hitls-bignum | 69 | 0 |
+| hitls-utils | 66 | 0 |
+| hitls-auth | 33 | 0 |
+| hitls-cli | 117 | 5 |
+| interop | 152 | 0 |
+| **Total** | **3196** (+5) | **7** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3196 passed, 0 failed, 7 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

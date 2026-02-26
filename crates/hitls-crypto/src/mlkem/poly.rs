@@ -169,23 +169,27 @@ pub(crate) fn poly_to_msg(poly: &Poly) -> [u8; 32] {
 /// Rejection sampling: generate a polynomial from SHAKE128 XOF output.
 ///
 /// Parse 3-byte chunks into two 12-bit candidates, reject if >= q.
+/// Squeezes in 504-byte blocks (3 × SHAKE-128 rate) to minimize allocations.
 pub(crate) fn rej_sample(xof: &mut Shake128) -> Poly {
     let mut r = [0i16; N];
     let mut ctr = 0;
+    // Squeeze 504 bytes at once (3 SHAKE-128 blocks of 168 bytes).
+    // This yields ~336 12-bit candidates; we need ~341 on average (256/0.75).
     while ctr < N {
-        let buf = xof.squeeze(3).unwrap();
-        let d1 = (buf[0] as u16) | ((buf[1] as u16 & 0x0F) << 8);
-        let d2 = ((buf[1] as u16) >> 4) | ((buf[2] as u16) << 4);
-        if d1 < Q as u16 {
-            r[ctr] = d1 as i16;
-            ctr += 1;
-            if ctr >= N {
-                break;
+        let block = xof.squeeze(504).unwrap();
+        let mut pos = 0;
+        while pos + 2 < block.len() && ctr < N {
+            let d1 = (block[pos] as u16) | ((block[pos + 1] as u16 & 0x0F) << 8);
+            let d2 = ((block[pos + 1] as u16) >> 4) | ((block[pos + 2] as u16) << 4);
+            pos += 3;
+            if d1 < Q as u16 {
+                r[ctr] = d1 as i16;
+                ctr += 1;
             }
-        }
-        if d2 < Q as u16 {
-            r[ctr] = d2 as i16;
-            ctr += 1;
+            if ctr < N && d2 < Q as u16 {
+                r[ctr] = d2 as i16;
+                ctr += 1;
+            }
         }
     }
     r

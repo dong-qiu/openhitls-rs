@@ -6,6 +6,8 @@
 //! (MLWE) problem. Supports ML-KEM-512, ML-KEM-768, and ML-KEM-1024.
 
 pub(crate) mod ntt;
+#[cfg(target_arch = "aarch64")]
+mod ntt_neon;
 pub(crate) mod poly;
 
 use hitls_types::CryptoError;

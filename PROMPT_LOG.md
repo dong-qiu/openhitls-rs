@@ -2901,3 +2901,20 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 3080 tests pass, 6 ignored (1 XMSS h=16 + 5 s_client network). 0 clippy warnings, formatting clean.
 - Ignored tests reduced from 21→6 (combined R112+R113: 50→6, 88% reduction).
+
+### Phase P2 — ML-KEM NEON NTT Optimization
+
+**Prompt**: Implement NEON-vectorized NTT, INTT, basemul, polynomial utilities for ML-KEM. Batch SHAKE-128 squeeze optimization. Runtime dispatch following ChaCha20 pattern.
+
+**Scope**: ML-KEM NTT bottleneck (scalar butterflies, per-3-byte SHAKE squeeze, scalar poly ops).
+
+**Work performed**:
+1. Created `ntt_neon.rs` with 8-wide Montgomery multiply (vqdmulhq+vhsubq trick), forward/inverse NTT, Barrett reduction, basemul, poly add/sub/to_mont/reduce
+2. Added runtime dispatch in `ntt.rs` for 7 functions via `is_aarch64_feature_detected!("neon")`
+3. Optimized `rej_sample` batch SHAKE squeeze (504 bytes vs 3 bytes per call)
+4. Added 5 NEON correctness tests (fqmul, barrett, NTT, INTT, basemul scalar-vs-NEON)
+
+**Result**:
+- ML-KEM-768 encaps 2.0× (109→54.8 µs), decaps 2.6× (95→36.0 µs), keygen 2.3× (155→66.5 µs)
+- ML-KEM-1024 decaps 3.0× speedup (largest improvement due to higher polynomial count)
+- 3196 tests pass (+5 NEON tests), 7 ignored. 0 clippy warnings, formatting clean.
