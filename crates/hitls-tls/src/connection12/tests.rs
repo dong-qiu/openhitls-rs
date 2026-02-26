@@ -4780,3 +4780,183 @@ fn test_tls12_mfl_server_no_support() {
         Some(MaxFragmentLength::Bits512)
     );
 }
+
+// ===================================================================
+// Phase T153 — TLS 1.2 handshake + post-HS auth edge cases
+// ===================================================================
+
+/// TLS 1.2 client export_keying_material() before Connected → error.
+#[test]
+fn test_tls12_export_keying_material_before_connected() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().build();
+    let conn = Tls12ClientConnection::new(stream, config);
+    let result = conn.export_keying_material(b"test_label", Some(b"ctx"), 32);
+    assert!(result.is_err());
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(
+        err_msg.contains("not connected"),
+        "unexpected error: {err_msg}"
+    );
+}
+
+/// TLS 1.2 server export_keying_material() before Connected → error.
+#[test]
+fn test_tls12_server_export_keying_material_before_connected() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().role(crate::TlsRole::Server).build();
+    let conn = Tls12ServerConnection::new(stream, config);
+    let result = conn.export_keying_material(b"test_label", Some(b"ctx"), 32);
+    assert!(result.is_err());
+}
+
+/// TLS 1.2 client write() before handshake → error.
+#[test]
+fn test_tls12_write_before_handshake_errors() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().build();
+    let mut conn = Tls12ClientConnection::new(stream, config);
+    let result = conn.write(b"hello");
+    assert!(result.is_err());
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(
+        err_msg.contains("not connected"),
+        "unexpected error: {err_msg}"
+    );
+}
+
+/// TLS 1.2 client read() before handshake → error.
+#[test]
+fn test_tls12_read_before_handshake_errors() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().build();
+    let mut conn = Tls12ClientConnection::new(stream, config);
+    let mut buf = [0u8; 64];
+    let result = conn.read(&mut buf);
+    assert!(result.is_err());
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(
+        err_msg.contains("not connected"),
+        "unexpected error: {err_msg}"
+    );
+}
+
+/// TLS 1.2 server write() before handshake → error.
+#[test]
+fn test_tls12_server_write_before_handshake_errors() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().role(crate::TlsRole::Server).build();
+    let mut conn = Tls12ServerConnection::new(stream, config);
+    let result = conn.write(b"hello");
+    assert!(result.is_err());
+}
+
+/// TLS 1.2 server read() before handshake → error.
+#[test]
+fn test_tls12_server_read_before_handshake_errors() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().role(crate::TlsRole::Server).build();
+    let mut conn = Tls12ServerConnection::new(stream, config);
+    let mut buf = [0u8; 64];
+    let result = conn.read(&mut buf);
+    assert!(result.is_err());
+}
+
+/// TLS 1.2 handshake failure sets Error state.
+#[test]
+fn test_tls12_handshake_failure_sets_error_state() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().verify_peer(false).build();
+    let mut conn = Tls12ClientConnection::new(stream, config);
+    let result = conn.handshake();
+    assert!(result.is_err());
+    assert_eq!(conn.state, ConnectionState::Error);
+}
+
+/// TLS 1.2 double handshake after error → error.
+#[test]
+fn test_tls12_double_handshake_after_error() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().verify_peer(false).build();
+    let mut conn = Tls12ClientConnection::new(stream, config);
+    let _first = conn.handshake();
+    assert_eq!(conn.state, ConnectionState::Error);
+    let result = conn.handshake();
+    assert!(result.is_err());
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(
+        err_msg.contains("already completed"),
+        "unexpected error: {err_msg}"
+    );
+}
+
+/// TLS 1.2 client verify_data starts empty before handshake.
+#[test]
+fn test_tls12_verify_data_empty_before_handshake() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().build();
+    let conn = Tls12ClientConnection::new(stream, config);
+    assert!(conn.peer_verify_data().is_empty());
+    assert!(conn.local_verify_data().is_empty());
+}
+
+/// TLS 1.2 connection_info returns None before handshake.
+#[test]
+fn test_tls12_connection_info_none_before_handshake() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().build();
+    let conn = Tls12ClientConnection::new(stream, config);
+    assert!(conn.connection_info().is_none());
+}
+
+/// TLS 1.2 server connection_info returns None before handshake.
+#[test]
+fn test_tls12_server_connection_info_none_before_handshake() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().role(crate::TlsRole::Server).build();
+    let conn = Tls12ServerConnection::new(stream, config);
+    assert!(conn.connection_info().is_none());
+}
+
+/// TLS 1.2 shutdown before connected transitions to Closed.
+#[test]
+fn test_tls12_shutdown_before_connected() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().build();
+    let mut conn = Tls12ClientConnection::new(stream, config);
+    let result = conn.shutdown();
+    assert!(result.is_ok());
+    assert_eq!(conn.state, ConnectionState::Closed);
+}
+
+/// TLS 1.2 take_session returns None before handshake.
+#[test]
+fn test_tls12_take_session_before_handshake() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().build();
+    let mut conn = Tls12ClientConnection::new(stream, config);
+    assert!(conn.take_session().is_none());
+}
+
+/// TLS 1.2 server double handshake after error → error.
+#[test]
+fn test_tls12_server_double_handshake_after_error() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().role(crate::TlsRole::Server).build();
+    let mut conn = Tls12ServerConnection::new(stream, config);
+    let _first = conn.handshake();
+    assert_eq!(conn.state, ConnectionState::Error);
+    let result = conn.handshake();
+    assert!(result.is_err());
+}
+
+/// TLS 1.2 empty write returns 0 when connected.
+#[test]
+fn test_tls12_empty_write_returns_zero() {
+    let stream = Cursor::new(Vec::<u8>::new());
+    let config = TlsConfig::builder().build();
+    let mut conn = Tls12ClientConnection::new(stream, config);
+    conn.state = ConnectionState::Connected;
+    let result = conn.write(&[]);
+    assert_eq!(result.unwrap(), 0);
+}
