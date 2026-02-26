@@ -9018,3 +9018,61 @@ Deep analysis revealed that bumping `hitls-crypto` from `opt-level = 1` to `opt-
 - `cargo test --workspace --all-features`: 3124 passed, 0 failed, 7 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P1: P-256 Deep Optimization
+
+**Date**: 2026-02-26
+**Summary**: P-256 deep optimization with precomputed base table, dedicated squaring, specialized Montgomery reduction, and mixed Jacobian-affine addition.
+
+### Performance Results
+
+| Operation | Before | After | Speedup |
+|-----------|--------|-------|---------|
+| ECDSA P-256 sign | 1179 µs (848 ops/s) | 55.6 µs (~18,000 ops/s) | **21×** |
+| ECDSA P-256 verify | 1423 µs (703 ops/s) | 102.5 µs (~9,756 ops/s) | **14×** |
+| ECDH P-256 derive | ~1.1 ms | 72.4 µs (~13,800 ops/s) | **15×** |
+
+### Implementation Details
+
+1. **Dedicated `mont_sqr()` in p256_field.rs**: Exploits a[i]*a[j] = a[j]*a[i] symmetry — computes upper triangle (6 multiplies), doubles, adds diagonal (4 multiplies). Total: 10 vs 16 u64×u64 multiplies for schoolbook.
+
+2. **P-256 specialized Montgomery reduction**: Unrolled reduction exploiting P-256 prime structure:
+   - P[0] = 0xFFFF_FFFF_FFFF_FFFF: `m*P[0]+t[i] = m*2^64` (no multiply, carry = m)
+   - P[2] = 0: skip multiply entirely (just propagate carry)
+   - Saves 2 multiplies per iteration (8 total over 4 iterations)
+
+3. **Mixed Jacobian-affine addition (`p256_point_add_mixed`)**: When second operand has Z=1, saves 1 sqr + 4 mul vs full Jacobian addition. Cost: 8 mul + 3 sqr (vs 12 mul + 4 sqr).
+
+4. **Precomputed base point table (comb method)**: 64 groups × 16 affine points, lazy-initialized via `OnceLock`. Uses Montgomery's batch inversion trick (1 inversion + ~2880 muls vs 960 individual inversions). Base point scalar mul: ~64 mixed additions, 0 doublings.
+
+5. **Optimized `p256_scalar_mul_add`**: Computes k1*G via comb table + k2*Q via w=4 window, then adds results. Replaces bit-by-bit Shamir's trick.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/ecc/p256_field.rs` | Added dedicated `mont_sqr()` (symmetry optimization), extracted `p256_mont_reduce()` with P-256 specialized reduction (P[0]=-1, P[2]=0), added 2 new tests |
+| `crates/hitls-crypto/src/ecc/p256_point.rs` | Added `P256AffinePoint` struct, `p256_point_add_mixed()`, precomputed base table via `OnceLock` with batch inversion, rewrote `p256_scalar_mul_base()` to use comb table, rewrote `p256_scalar_mul_add()` to use separate multiplication, added 5 new tests |
+| `PERF_REPORT.md` | Updated Phase P1 status from Pending to Complete with benchmark results |
+| `CLAUDE.md` | Updated status line, test counts (3184→3191), added Phase P1 to completed phases |
+
+### Test Counts
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| hitls-crypto | 1031 (+7) | 2 |
+| hitls-tls | 1290 | 0 |
+| hitls-pki | 390 | 0 |
+| hitls-bignum | 69 | 0 |
+| hitls-utils | 66 | 0 |
+| hitls-auth | 33 | 0 |
+| hitls-cli | 117 | 5 |
+| interop | 152 | 0 |
+| **Total** | **3191** (+7) | **7** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3191 passed, 0 failed, 7 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

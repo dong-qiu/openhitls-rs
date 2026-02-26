@@ -274,7 +274,7 @@ All pending optimization tasks are tracked as numbered phases (Phase P1–P8), o
 
 | Phase | Optimization | Current Gap | Target | Effort | Status |
 |-------|-------------|-------------|--------|--------|--------|
-| **P1** | P-256 深度优化 (预计算表 + Solinas 约简) | 16–32× | 2–3× | High | Pending |
+| **P1** | P-256 深度优化 (预计算表 + 专用约简) | 16–32× → 1.5–2× | 2–3× | High | **Complete** |
 | **P2** | ML-KEM SIMD NTT 向量化 | 6–18× | 2–3× | High | Pending |
 | **P3** | BigNum REDC 内循环 + Karatsuba 大数乘法 | 7–12× | 2–3× | High | Pending |
 | **P4** | SM4 T-table 查表优化 | 2.2–2.4× | ~1× | Medium | Pending |
@@ -285,28 +285,29 @@ All pending optimization tasks are tracked as numbered phases (Phase P1–P8), o
 
 ---
 
-### Phase P1 — P-256 深度优化 (预计算生成点表 + Solinas 快速约简)
+### Phase P1 — P-256 深度优化 (预计算生成点表 + 专用约简) ✅ Complete
 
-**Current gap**: ECDSA P-256 sign 32×, verify 15×, ECDH 16× slower than C
+**Result**: ECDSA P-256 sign **21× speedup** (1179→55.6 µs), verify **14× speedup** (1423→102.5 µs)
 
-**Already implemented** (Phase 96):
-- `p256_field.rs`: 4×u64 Montgomery representation, stack-allocated
-- `p256_point.rs`: w=4 fixed-window scalar multiplication, Shamir's trick
-- Point doubling with a=-3 optimization
+**Optimizations implemented**:
 
-**Remaining bottlenecks**:
+| Optimization | Speedup | Detail |
+|-------------|---------|--------|
+| **Precomputed base table (comb method)** | ~5× sign | 64 groups × 16 affine points, lazy-initialized via `OnceLock`. Base point mul uses ~64 mixed additions, 0 doublings (vs 256 doublings + 48 additions). Batch inversion (Montgomery's trick) for efficient table generation. |
+| **Dedicated `mont_sqr()`** | ~15% all ops | Exploits a[i]*a[j] = a[j]*a[i] symmetry: 10 u64×u64 multiplies (6 cross + 4 diagonal) vs 16 for schoolbook. |
+| **P-256 specialized Montgomery reduction** | ~30% all ops | Exploits P[0]=-1 (carry=m, no multiply) and P[2]=0 (skip multiply): 8 multiplies per reduction vs 16 generic. |
+| **Mixed Jacobian-affine addition** | ~25% table lookups | `p256_point_add_mixed`: 8 mul + 3 sqr (vs 12 mul + 4 sqr for full Jacobian). Used by comb table lookups. |
+| **Separate k1*G + k2*Q for verify** | ~1.3× verify | Uses precomputed base table for k1*G (fast) + w=4 window for k2*Q, replacing bit-by-bit Shamir. |
 
-| Bottleneck | Impact | Detail |
-|------------|--------|--------|
-| **No precomputed generator table** | ~4× | Each sign/keygen rebuilds 16-entry table. BoringSSL/ring use 64-entry static table (w=7) for generator G, eliminating runtime table construction |
-| **Schoolbook 4×4 multiplication** | ~2× | `mont_mul()` uses 16 u64×u64→u128 multiplications. Comba method reduces carry propagation; P-256 special modulus enables Solinas reduction |
-| **P-256 NIST fast reduction unused** | ~1.5× | p = 2^256 - 2^224 + 2^192 + 2^96 - 1 allows shift/add/sub reduction instead of full Montgomery REDC |
-| **Window size w=4 conservative** | ~1.3× | Generator point can use w=7 (128-entry table); arbitrary points can use wNAF-5 instead of simple binary windowing |
-| **Affine conversion overhead** | ~1.2× | Final field inversion (~30 multiplications) per scalar mul; batch inversion can optimize verification |
+**Benchmark results** (Apple M4, rustc 1.93.0):
 
-**Affected algorithms**: ECDSA P-256 sign/verify, ECDH P-256, TLS 1.3/1.2 ECDHE handshakes
+| Operation | Before | After | Speedup | C Reference |
+|-----------|--------|-------|---------|-------------|
+| ECDSA P-256 sign | 1179 µs (848 ops/s) | 55.6 µs (~18,000 ops/s) | **21×** | 37.2 µs (26,848 ops/s) |
+| ECDSA P-256 verify | 1423 µs (703 ops/s) | 102.5 µs (~9,756 ops/s) | **14×** | 94.1 µs (10,628 ops/s) |
+| ECDH P-256 derive | ~1.1 ms | 72.4 µs (~13,800 ops/s) | **15×** | — |
 
-**Expected improvement**: 848 ops/s → 10,000–15,000 ops/s (12–18×), approaching C's 26,848 ops/s
+**Remaining gap to C**: sign ~1.5×, verify ~1.1× (within striking distance)
 
 ---
 
@@ -453,9 +454,9 @@ All pending optimization tasks are tracked as numbered phases (Phase P1–P8), o
 
 ### Impact on TLS Handshake Latency
 
-| Handshake Type | Current (Rust) | After Phase P1 | C Reference |
+| Handshake Type | Before P1 (Rust) | After Phase P1 | C Reference |
 |---------------|---------------|----------------|-------------|
-| **ECDHE-P256 + AES-128-GCM** | ~3.8 ms | ~0.3–0.5 ms | 0.21 ms |
+| **ECDHE-P256 + AES-128-GCM** | ~3.8 ms | **~0.23 ms** | 0.21 ms |
 | **X25519 + AES-128-GCM** | ~0.018 ms | 0.018 ms (no change needed) | 0.020 ms |
 | **ML-KEM-768 hybrid** | ~0.11 ms | ~0.025 ms (after P2) | 0.008 ms |
 | **FFDHE-2048** | ~5.8 ms | ~1.5 ms (after P3) | 0.82 ms |
@@ -466,7 +467,7 @@ A TLS 1.3 handshake with ECDHE-P256 + AES-128-GCM involves:
 - 1 ECDSA P-256 sign (~1.2 ms Rust vs ~0.037 ms C)
 - HKDF/SHA-256 derivations (~negligible at small sizes)
 
-**Phase P1 alone** would reduce ECDHE-P256 handshake from ~3.8 ms to ~0.3 ms, bringing it within 1.5× of C.
+**Phase P1** reduced ECDHE-P256 handshake from ~3.8 ms to ~0.23 ms, **within 1.1× of C** (0.21 ms).
 
 For **X25519-based handshakes**: ~0.018 ms (Rust) vs ~0.020 ms (C) — **Rust is already faster!** This is the recommended key exchange for Rust deployments.
 

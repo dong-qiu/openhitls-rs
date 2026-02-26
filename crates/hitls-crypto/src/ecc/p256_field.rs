@@ -118,8 +118,11 @@ impl P256FieldElement {
     }
 
     /// Field squaring: a^2 mod p in Montgomery form.
+    ///
+    /// Uses dedicated squaring exploiting a[i]*a[j] = a[j]*a[i] symmetry:
+    /// 10 u64×u64 multiplies (6 cross + 4 diagonal) vs 16 for schoolbook.
     pub fn sqr(&self) -> Self {
-        self.mont_mul(self)
+        self.mont_sqr()
     }
 
     /// Field inversion using Fermat's little theorem: a^(-1) = a^(p-2) mod p.
@@ -239,8 +242,10 @@ impl P256FieldElement {
         e
     }
 
-    /// Montgomery multiplication: computes (a * b * R^(-1)) mod p
-    /// using schoolbook 4-limb multiplication with u128 intermediates.
+    /// Montgomery multiplication: computes (a * b * R^(-1)) mod p.
+    ///
+    /// Uses schoolbook 4-limb multiplication (16 u64×u64 multiplies) followed
+    /// by P-256 specialized Montgomery reduction exploiting P[0]=-1 and P[2]=0.
     fn mont_mul(&self, other: &Self) -> Self {
         let a = &self.0;
         let b = &other.0;
@@ -260,48 +265,154 @@ impl P256FieldElement {
             t[i + 4] = carry;
         }
 
-        // Montgomery reduction: for each limb i, eliminate t[i]
-        // by adding m * p << (64*i), where m = t[i] * N0 mod 2^64.
-        //
-        // We track overflow past t[7] in a separate variable, since the
-        // reduction can temporarily produce values exceeding 2^512.
-        let mut overflow: u64 = 0;
-
-        for i in 0..4 {
-            let m = t[i].wrapping_mul(N0); // m = t[i] since N0 = 1
-            let mut carry: u64 = 0;
-
-            // Add m * P to t, shifted by i limbs
-            for j in 0..4 {
-                let product = (m as u128) * (P[j] as u128) + (t[i + j] as u128) + (carry as u128);
-                t[i + j] = product as u64;
-                carry = (product >> 64) as u64;
-            }
-
-            // Propagate carry through remaining limbs
-            for item in &mut t[(i + 4)..8] {
-                if carry == 0 {
-                    break;
-                }
-                let sum = (*item as u128) + (carry as u128);
-                *item = sum as u64;
-                carry = (sum >> 64) as u64;
-            }
-
-            // Any remaining carry overflows past t[7]
-            overflow += carry;
-        }
-
-        // Result is in t[4..8]
-        let mut r = [t[4], t[5], t[6], t[7]];
-
-        // Final conditional subtraction: if overflow or r >= p, subtract p
-        if overflow != 0 || cmp_u256(&r, &P) != Ordering::Less {
-            sub_borrow_u256(&mut r, &P);
-        }
-
-        Self(r)
+        p256_mont_reduce(t)
     }
+
+    /// Montgomery squaring exploiting a[i]*a[j] = a[j]*a[i] symmetry.
+    ///
+    /// Computes upper triangle cross products (6 multiplies), doubles them,
+    /// then adds diagonal terms (4 multiplies). Total: 10 vs 16 for schoolbook.
+    fn mont_sqr(&self) -> Self {
+        let a = &self.0;
+        let mut t = [0u64; 8];
+
+        // Upper triangle cross products (i < j), accumulated row by row.
+        // Row 0: a[0] * a[1..4]
+        let mut carry: u64;
+        let p = (a[0] as u128) * (a[1] as u128);
+        t[1] = p as u64;
+        carry = (p >> 64) as u64;
+
+        let p = (a[0] as u128) * (a[2] as u128) + (carry as u128);
+        t[2] = p as u64;
+        carry = (p >> 64) as u64;
+
+        let p = (a[0] as u128) * (a[3] as u128) + (carry as u128);
+        t[3] = p as u64;
+        carry = (p >> 64) as u64;
+        t[4] = carry;
+
+        // Row 1: a[1] * a[2..4]
+        let p = (a[1] as u128) * (a[2] as u128) + (t[3] as u128);
+        t[3] = p as u64;
+        carry = (p >> 64) as u64;
+
+        let p = (a[1] as u128) * (a[3] as u128) + (t[4] as u128) + (carry as u128);
+        t[4] = p as u64;
+        carry = (p >> 64) as u64;
+        t[5] = carry;
+
+        // Row 2: a[2] * a[3]
+        let p = (a[2] as u128) * (a[3] as u128) + (t[5] as u128);
+        t[5] = p as u64;
+        t[6] = (p >> 64) as u64;
+
+        // Double the cross products (left shift by 1 across all 8 limbs).
+        t[7] = t[6] >> 63;
+        t[6] = (t[6] << 1) | (t[5] >> 63);
+        t[5] = (t[5] << 1) | (t[4] >> 63);
+        t[4] = (t[4] << 1) | (t[3] >> 63);
+        t[3] = (t[3] << 1) | (t[2] >> 63);
+        t[2] = (t[2] << 1) | (t[1] >> 63);
+        t[1] <<= 1;
+        // t[0] stays 0
+
+        // Add diagonal terms a[i]^2 at positions (2*i, 2*i+1).
+        let d = (a[0] as u128) * (a[0] as u128);
+        t[0] = d as u64;
+        let mut c = d >> 64;
+
+        let s = (t[1] as u128) + c;
+        t[1] = s as u64;
+        c = s >> 64;
+
+        let d = (a[1] as u128) * (a[1] as u128) + (t[2] as u128) + c;
+        t[2] = d as u64;
+        c = d >> 64;
+
+        let s = (t[3] as u128) + c;
+        t[3] = s as u64;
+        c = s >> 64;
+
+        let d = (a[2] as u128) * (a[2] as u128) + (t[4] as u128) + c;
+        t[4] = d as u64;
+        c = d >> 64;
+
+        let s = (t[5] as u128) + c;
+        t[5] = s as u64;
+        c = s >> 64;
+
+        let d = (a[3] as u128) * (a[3] as u128) + (t[6] as u128) + c;
+        t[6] = d as u64;
+        c = d >> 64;
+
+        t[7] = ((t[7] as u128) + c) as u64;
+
+        p256_mont_reduce(t)
+    }
+}
+
+// ========================================================================
+// P-256 specialized Montgomery reduction
+// ========================================================================
+
+/// P-256 specialized Montgomery reduction.
+///
+/// Exploits the structure of the P-256 prime for faster reduction:
+/// - P\[0\] = 0xFFFF_FFFF_FFFF_FFFF: `m * P[0] + t[i] = m * 2^64` (no multiply needed)
+/// - P\[2\] = 0: skip multiply entirely
+///
+/// Saves 2 multiplies per iteration (8 total over 4 iterations) vs generic reduction.
+fn p256_mont_reduce(mut t: [u64; 8]) -> P256FieldElement {
+    let mut overflow: u64 = 0;
+
+    for i in 0..4 {
+        let m = t[i]; // N0 = 1, so m = t[i] * N0 = t[i]
+
+        // j=0: P[0] = 0xFFFF_FFFF_FFFF_FFFF
+        // m * P[0] + t[i] = m * (2^64 - 1) + m = m * 2^64
+        // Low 64 bits = 0 (eliminates t[i]), carry = m.
+        let mut carry: u64 = m;
+
+        // j=1: P[1] = 0x0000_0000_FFFF_FFFF
+        let p =
+            (m as u128) * (0x0000_0000_FFFF_FFFFu64 as u128) + (t[i + 1] as u128) + (carry as u128);
+        t[i + 1] = p as u64;
+        carry = (p >> 64) as u64;
+
+        // j=2: P[2] = 0 → no multiply, just propagate carry
+        let p = (t[i + 2] as u128) + (carry as u128);
+        t[i + 2] = p as u64;
+        carry = (p >> 64) as u64;
+
+        // j=3: P[3] = 0xFFFF_FFFF_0000_0001
+        let p =
+            (m as u128) * (0xFFFF_FFFF_0000_0001u64 as u128) + (t[i + 3] as u128) + (carry as u128);
+        t[i + 3] = p as u64;
+        carry = (p >> 64) as u64;
+
+        // Propagate carry through remaining limbs
+        for item in &mut t[(i + 4)..8] {
+            if carry == 0 {
+                break;
+            }
+            let s = (*item as u128) + (carry as u128);
+            *item = s as u64;
+            carry = (s >> 64) as u64;
+        }
+
+        overflow += carry;
+    }
+
+    // Result is in t[4..8]
+    let mut r = [t[4], t[5], t[6], t[7]];
+
+    // Final conditional subtraction: if overflow or r >= p, subtract p
+    if overflow != 0 || cmp_u256(&r, &P) != Ordering::Less {
+        sub_borrow_u256(&mut r, &P);
+    }
+
+    P256FieldElement(r)
 }
 
 // ========================================================================
@@ -692,5 +803,29 @@ mod tests {
         ];
         let pm1 = P256FieldElement::from_bytes(&pm1_bytes);
         assert_eq!(pm1.inv(), pm1);
+    }
+
+    #[test]
+    fn test_mont_sqr_equals_mont_mul_large() {
+        // Test dedicated sqr vs mul(self) on large values near p
+        let a_bytes: [u8; 32] = [
+            0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB,
+            0xCD, 0xEF, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10, 0x11, 0x22, 0x33, 0x44,
+            0x55, 0x66, 0x77, 0x88,
+        ];
+        let a = P256FieldElement::from_bytes(&a_bytes);
+        assert_eq!(a.sqr(), a.mul(&a));
+    }
+
+    #[test]
+    fn test_mont_sqr_equals_mont_mul_near_p() {
+        // p - 2
+        let pm2_bytes: [u8; 32] = [
+            0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFD,
+        ];
+        let a = P256FieldElement::from_bytes(&pm2_bytes);
+        assert_eq!(a.sqr(), a.mul(&a));
     }
 }

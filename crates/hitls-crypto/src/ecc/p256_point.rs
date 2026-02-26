@@ -1,8 +1,13 @@
 //! P-256 specialized Jacobian point arithmetic.
 //!
 //! Uses [`P256FieldElement`] for all field operations, avoiding BigNum heap
-//! allocation overhead. Combined with a w=4 fixed-window scalar multiplication,
-//! this provides a significant speedup for ECDSA/ECDH P-256.
+//! allocation overhead. Key optimizations:
+//! - w=4 fixed-window scalar multiplication for arbitrary points
+//! - Precomputed comb table (64 groups × 16 affine points) for base point G
+//! - Mixed Jacobian-affine addition (saves 1 sqr + 4 mul per addition)
+//! - Batch inversion for efficient table generation
+
+use std::sync::OnceLock;
 
 use super::p256_field::P256FieldElement;
 use hitls_bignum::BigNum;
@@ -19,6 +24,10 @@ const P256_GY: [u8; 32] = [
     0x4F, 0xE3, 0x42, 0xE2, 0xFE, 0x1A, 0x7F, 0x9B, 0x8E, 0xE7, 0xEB, 0x4A, 0x7C, 0x0F, 0x9E, 0x16,
     0x2B, 0xCE, 0x33, 0x57, 0x6B, 0x31, 0x5E, 0xCE, 0xCB, 0xB6, 0x40, 0x68, 0x37, 0xBF, 0x51, 0xF5,
 ];
+
+// ========================================================================
+// Point types
+// ========================================================================
 
 /// A P-256 point in Jacobian projective coordinates.
 ///
@@ -66,6 +75,28 @@ impl P256JacobianPoint {
     }
 }
 
+/// A P-256 point in affine coordinates (x, y).
+///
+/// Used for precomputed tables where Z=1 is implicit, enabling cheaper
+/// mixed Jacobian-affine additions. The point at infinity is represented
+/// with x = ZERO, y = ZERO.
+#[derive(Clone, Copy)]
+struct P256AffinePoint {
+    x: P256FieldElement,
+    y: P256FieldElement,
+}
+
+impl P256AffinePoint {
+    /// Check if this represents the point at infinity.
+    fn is_infinity(&self) -> bool {
+        self.x.is_zero() && self.y.is_zero()
+    }
+}
+
+// ========================================================================
+// Point arithmetic
+// ========================================================================
+
 /// Point doubling: R = 2A.
 ///
 /// Optimized for P-256 (a = -3): uses M = 3*(X+Z^2)*(X-Z^2).
@@ -108,7 +139,7 @@ fn p256_point_double(a: &P256JacobianPoint) -> P256JacobianPoint {
     }
 }
 
-/// Point addition: R = A + B.
+/// Point addition: R = A + B (full Jacobian-Jacobian).
 fn p256_point_add(a: &P256JacobianPoint, b: &P256JacobianPoint) -> P256JacobianPoint {
     if a.is_infinity() {
         return *b;
@@ -156,6 +187,149 @@ fn p256_point_add(a: &P256JacobianPoint, b: &P256JacobianPoint) -> P256JacobianP
     }
 }
 
+/// Mixed Jacobian-affine point addition: R = Jac + Aff.
+///
+/// When the second operand is in affine form (Z=1), we skip computing
+/// Z2^2, Z2^3, and reduce Z3 = H*Z1 (vs H*Z1*Z2).
+/// Cost: 8 mul + 3 sqr (vs 12 mul + 4 sqr for full Jacobian).
+fn p256_point_add_mixed(jac: &P256JacobianPoint, aff: &P256AffinePoint) -> P256JacobianPoint {
+    if aff.is_infinity() {
+        return *jac;
+    }
+    if jac.is_infinity() {
+        return P256JacobianPoint::from_affine(&aff.x, &aff.y);
+    }
+
+    // Since Z2 = 1: U1 = X1, S1 = Y1
+    // U2 = X2 * Z1^2, S2 = Y2 * Z1^3
+    let z1_sq = jac.z.sqr();
+    let z1_cu = z1_sq.mul(&jac.z);
+    let u2 = aff.x.mul(&z1_sq);
+    let s2 = aff.y.mul(&z1_cu);
+
+    let h = u2.sub(&jac.x);
+    let r = s2.sub(&jac.y);
+
+    if h.is_zero() {
+        return if r.is_zero() {
+            p256_point_double(jac)
+        } else {
+            P256JacobianPoint::infinity()
+        };
+    }
+
+    let h_sq = h.sqr();
+    let h_cu = h_sq.mul(&h);
+    let u1h2 = jac.x.mul(&h_sq);
+
+    // X3 = R^2 - H^3 - 2*U1*H^2
+    let x3 = r.sqr().sub(&h_cu).sub(&u1h2).sub(&u1h2);
+
+    // Y3 = R*(U1*H^2 - X3) - S1*H^3  (S1 = Y1)
+    let y3 = r.mul(&u1h2.sub(&x3)).sub(&jac.y.mul(&h_cu));
+
+    // Z3 = H * Z1  (since Z2 = 1)
+    let z3 = h.mul(&jac.z);
+
+    P256JacobianPoint {
+        x: x3,
+        y: y3,
+        z: z3,
+    }
+}
+
+// ========================================================================
+// Precomputed base point table
+// ========================================================================
+
+/// Number of 4-bit groups in a 256-bit scalar.
+const NUM_GROUPS: usize = 64;
+/// Number of entries per group (0..15).
+const GROUP_SIZE: usize = 16;
+
+/// Returns a lazily-initialized precomputed table of base point multiples.
+///
+/// The table has 64 groups of 16 affine points each:
+/// - Group `i` stores `[O, 1·B_i, 2·B_i, ..., 15·B_i]` where `B_i = 2^(4i)·G`.
+/// - At runtime, a 256-bit scalar is split into 64 nibbles and each nibble
+///   selects one affine point; the result is their sum via mixed additions.
+/// - This eliminates all 256 point doublings from base-point scalar mul.
+///
+/// Uses Montgomery's batch inversion trick for efficient Jacobian→affine conversion
+/// (1 inversion + ~2880 multiplications instead of 960 individual inversions).
+fn p256_base_table() -> &'static [P256AffinePoint] {
+    static TABLE: OnceLock<Vec<P256AffinePoint>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let zero_aff = P256AffinePoint {
+            x: P256FieldElement::ZERO,
+            y: P256FieldElement::ZERO,
+        };
+        let mut table = vec![zero_aff; NUM_GROUPS * GROUP_SIZE];
+
+        let gx = P256FieldElement::from_bytes(&P256_GX);
+        let gy = P256FieldElement::from_bytes(&P256_GY);
+        let mut base = P256JacobianPoint::from_affine(&gx, &gy);
+
+        // Phase 1: Compute all Jacobian points.
+        // For each group, compute [1*B, 2*B, ..., 15*B] where B = 2^(4*group)*G.
+        let mut jac_points: Vec<P256JacobianPoint> = Vec::with_capacity(NUM_GROUPS * 15);
+
+        for _group in 0..NUM_GROUPS {
+            // table[group*16 + 0] = infinity (already zeroed)
+            jac_points.push(base); // j=1: base itself
+            let mut accum = base;
+            for _j in 2..GROUP_SIZE {
+                accum = p256_point_add(&accum, &base);
+                jac_points.push(accum);
+            }
+            // Advance base: B_{i+1} = 16 * B_i
+            for _ in 0..4 {
+                base = p256_point_double(&base);
+            }
+        }
+
+        // Phase 2: Batch inversion of all Z coordinates (Montgomery's trick).
+        // Given Z_1..Z_n, computes all Z_i^{-1} with 1 inversion + 3*(n-1) muls.
+        let n = jac_points.len();
+        let mut z_inv = vec![P256FieldElement::ZERO; n];
+
+        // Forward pass: running products
+        let mut prods = vec![P256FieldElement::ONE; n];
+        prods[0] = jac_points[0].z;
+        for i in 1..n {
+            prods[i] = prods[i - 1].mul(&jac_points[i].z);
+        }
+
+        // Single inversion of the accumulated product
+        let mut inv = prods[n - 1].inv();
+
+        // Backward pass: unwind to get individual inverses
+        for i in (1..n).rev() {
+            z_inv[i] = inv.mul(&prods[i - 1]);
+            inv = inv.mul(&jac_points[i].z);
+        }
+        z_inv[0] = inv;
+
+        // Phase 3: Convert to affine using inverted Z values.
+        for (idx, (pt, zi)) in jac_points.iter().zip(z_inv.iter()).enumerate() {
+            let group = idx / 15;
+            let j = (idx % 15) + 1; // j = 1..15
+            let zi2 = zi.sqr();
+            let zi3 = zi2.mul(zi);
+            table[group * GROUP_SIZE + j] = P256AffinePoint {
+                x: pt.x.mul(&zi2),
+                y: pt.y.mul(&zi3),
+            };
+        }
+
+        table
+    })
+}
+
+// ========================================================================
+// Scalar multiplication
+// ========================================================================
+
 /// Scalar multiplication using w=4 fixed-window method: R = k * P.
 pub(crate) fn p256_scalar_mul(k: &BigNum, point: &P256JacobianPoint) -> P256JacobianPoint {
     if k.is_zero() || point.is_infinity() {
@@ -198,15 +372,49 @@ pub(crate) fn p256_scalar_mul(k: &BigNum, point: &P256JacobianPoint) -> P256Jaco
     result
 }
 
-/// Scalar multiplication with base point: R = k * G.
+/// Scalar multiplication with base point using precomputed comb table: R = k * G.
+///
+/// Splits the 256-bit scalar into 64 nibbles, looks up one affine point per
+/// nibble from the precomputed table, and sums them via mixed additions.
+/// Cost: ~64 mixed additions, 0 doublings (vs ~256 doublings + ~48 additions).
 pub(crate) fn p256_scalar_mul_base(k: &BigNum) -> P256JacobianPoint {
-    let gx = P256FieldElement::from_bytes(&P256_GX);
-    let gy = P256FieldElement::from_bytes(&P256_GY);
-    let g = P256JacobianPoint::from_affine(&gx, &gy);
-    p256_scalar_mul(k, &g)
+    if k.is_zero() {
+        return P256JacobianPoint::infinity();
+    }
+
+    let table = p256_base_table();
+    let k_bytes = match k.to_bytes_be_padded(32) {
+        Ok(b) => b,
+        Err(_) => {
+            // Fallback for oversized scalars (shouldn't happen in practice)
+            let gx = P256FieldElement::from_bytes(&P256_GX);
+            let gy = P256FieldElement::from_bytes(&P256_GY);
+            let g = P256JacobianPoint::from_affine(&gx, &gy);
+            return p256_scalar_mul(k, &g);
+        }
+    };
+
+    let mut result = P256JacobianPoint::infinity();
+
+    for group in (0..NUM_GROUPS).rev() {
+        // Extract 4-bit nibble for this group.
+        // Nibble `i` covers bits [4i+3 : 4i].
+        // In big-endian bytes: byte = 31 - i/2, shift = (i%2)*4.
+        let byte_idx = 31 - group / 2;
+        let nibble = ((k_bytes[byte_idx] >> ((group & 1) * 4)) & 0x0F) as usize;
+
+        if nibble != 0 {
+            result = p256_point_add_mixed(&result, &table[group * GROUP_SIZE + nibble]);
+        }
+    }
+
+    result
 }
 
-/// Combined scalar multiplication (Shamir's trick): R = k1*G + k2*Q.
+/// Combined scalar multiplication: R = k1*G + k2*Q.
+///
+/// Uses the precomputed base table for k1*G (fast) and w=4 window for k2*Q,
+/// then adds the results.
 pub(crate) fn p256_scalar_mul_add(
     k1: &BigNum,
     k2: &BigNum,
@@ -215,42 +423,22 @@ pub(crate) fn p256_scalar_mul_add(
     if k1.is_zero() && k2.is_zero() {
         return P256JacobianPoint::infinity();
     }
-
-    let gx = P256FieldElement::from_bytes(&P256_GX);
-    let gy = P256FieldElement::from_bytes(&P256_GY);
-    let g = P256JacobianPoint::from_affine(&gx, &gy);
-
     if k1.is_zero() {
         return p256_scalar_mul(k2, q);
     }
     if k2.is_zero() {
-        return p256_scalar_mul(k1, &g);
+        return p256_scalar_mul_base(k1);
     }
 
-    let g_plus_q = p256_point_add(&g, q);
-
-    let bits1 = k1.bit_len();
-    let bits2 = k2.bit_len();
-    let max_bits = bits1.max(bits2);
-
-    let mut result = P256JacobianPoint::infinity();
-
-    for i in (0..max_bits).rev() {
-        result = p256_point_double(&result);
-
-        let b1 = i < bits1 && k1.get_bit(i) != 0;
-        let b2 = i < bits2 && k2.get_bit(i) != 0;
-
-        match (b1, b2) {
-            (true, true) => result = p256_point_add(&result, &g_plus_q),
-            (true, false) => result = p256_point_add(&result, &g),
-            (false, true) => result = p256_point_add(&result, q),
-            _ => {}
-        }
-    }
-
-    result
+    // k1*G via precomputed table + k2*Q via windowed method
+    let r1 = p256_scalar_mul_base(k1);
+    let r2 = p256_scalar_mul(k2, q);
+    p256_point_add(&r1, &r2)
 }
+
+// ========================================================================
+// BigNum conversion helpers
+// ========================================================================
 
 /// Convert BigNum affine coordinates to a P256JacobianPoint.
 pub(crate) fn bignum_to_p256_point(
@@ -397,7 +585,6 @@ mod tests {
 
     #[test]
     fn test_scalar_mul_add_consistency() {
-        let params = get_curve_params(EccCurveId::NistP256).unwrap();
         let k1 = BigNum::from_u64(3);
         let k2 = BigNum::from_u64(5);
 
@@ -491,5 +678,112 @@ mod tests {
 
         let result = p256_point_add(&g, &neg_g);
         assert!(result.is_infinity());
+    }
+
+    // ====================================================================
+    // New tests for Phase P1 optimizations
+    // ====================================================================
+
+    #[test]
+    fn test_mixed_addition_matches_full_add() {
+        let g = p256_generator();
+        let two_g = p256_point_double(&g);
+        let (two_gx, two_gy) = two_g.to_affine().unwrap();
+        let two_g_aff = P256AffinePoint {
+            x: two_gx,
+            y: two_gy,
+        };
+
+        // G + 2G via full Jacobian add
+        let full = p256_point_add(&g, &two_g);
+        let (fx, fy) = full.to_affine().unwrap();
+
+        // G + 2G via mixed add
+        let mixed = p256_point_add_mixed(&g, &two_g_aff);
+        let (mx, my) = mixed.to_affine().unwrap();
+
+        assert_eq!(fx, mx, "mixed add x differs");
+        assert_eq!(fy, my, "mixed add y differs");
+    }
+
+    #[test]
+    fn test_mixed_addition_with_infinity() {
+        let g = p256_generator();
+        let (gx, gy) = g.to_affine().unwrap();
+        let g_aff = P256AffinePoint { x: gx, y: gy };
+        let inf_aff = P256AffinePoint {
+            x: P256FieldElement::ZERO,
+            y: P256FieldElement::ZERO,
+        };
+
+        // inf + G_aff = G
+        let r1 = p256_point_add_mixed(&P256JacobianPoint::infinity(), &g_aff);
+        let (x1, y1) = r1.to_affine().unwrap();
+        assert_eq!(x1.to_bytes(), P256_GX);
+        assert_eq!(y1.to_bytes(), P256_GY);
+
+        // G + inf_aff = G
+        let r2 = p256_point_add_mixed(&g, &inf_aff);
+        let (x2, y2) = r2.to_affine().unwrap();
+        assert_eq!(x2.to_bytes(), P256_GX);
+        assert_eq!(y2.to_bytes(), P256_GY);
+    }
+
+    #[test]
+    fn test_base_table_consistency() {
+        let table = p256_base_table();
+
+        // table[0][1] should be the generator G
+        let entry = &table[1];
+        assert_eq!(entry.x.to_bytes(), P256_GX, "table[0][1].x != Gx");
+        assert_eq!(entry.y.to_bytes(), P256_GY, "table[0][1].y != Gy");
+
+        // table[0][2] should be 2G
+        let two_g = p256_point_double(&p256_generator());
+        let (two_gx, two_gy) = two_g.to_affine().unwrap();
+        let entry2 = &table[2];
+        assert_eq!(entry2.x, two_gx, "table[0][2].x != 2Gx");
+        assert_eq!(entry2.y, two_gy, "table[0][2].y != 2Gy");
+
+        // table[1][1] should be 16*G = 2^4 * G
+        let k16 = BigNum::from_u64(16);
+        let sixteen_g = p256_scalar_mul(&k16, &p256_generator());
+        let (sgx, sgy) = sixteen_g.to_affine().unwrap();
+        let entry_1_1 = &table[GROUP_SIZE + 1];
+        assert_eq!(entry_1_1.x, sgx, "table[1][1].x != 16*Gx");
+        assert_eq!(entry_1_1.y, sgy, "table[1][1].y != 16*Gy");
+    }
+
+    #[test]
+    fn test_precomputed_base_mul_matches_windowed() {
+        // Use a non-trivial scalar
+        let k = BigNum::from_u64(123456789);
+
+        // Precomputed comb method
+        let precomp = p256_scalar_mul_base(&k);
+        let (px, py) = precomp.to_affine().unwrap();
+
+        // Direct w=4 windowed method (bypass precomputed table)
+        let g = p256_generator();
+        let windowed = p256_scalar_mul(&k, &g);
+        let (wx, wy) = windowed.to_affine().unwrap();
+
+        assert_eq!(px, wx);
+        assert_eq!(py, wy);
+    }
+
+    #[test]
+    fn test_precomputed_base_mul_large_scalar() {
+        let params = get_curve_params(EccCurveId::NistP256).unwrap();
+
+        // n-1 (should give -G, i.e. (Gx, p-Gy))
+        let k = params.n.sub(&BigNum::from_u64(1));
+        let result = p256_scalar_mul_base(&k);
+        let (rx, ry) = result.to_affine().unwrap();
+
+        let gx = P256FieldElement::from_bytes(&P256_GX);
+        let gy = P256FieldElement::from_bytes(&P256_GY);
+        assert_eq!(rx, gx, "(n-1)*G should have Gx");
+        assert_eq!(ry, gy.neg(), "(n-1)*G should have -Gy");
     }
 }
