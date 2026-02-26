@@ -2923,7 +2923,7 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - Fuzz build succeeds with all 13 targets
 - D11 deficiency: Critical → PARTIALLY CLOSED (semantic targets added; DTLS/DSA fuzzing remains)
 
-### Phase P2 — ML-KEM NEON NTT Optimization
+### Phase P153 — ML-KEM NEON NTT Optimization
 
 **Prompt**: Implement NEON-vectorized NTT, INTT, basemul, polynomial utilities for ML-KEM. Batch SHAKE-128 squeeze optimization. Runtime dispatch following ChaCha20 pattern.
 
@@ -2940,7 +2940,7 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - ML-KEM-1024 decaps 3.0× speedup (largest improvement due to higher polynomial count)
 - 3196 tests pass (+5 NEON tests), 7 ignored. 0 clippy warnings, formatting clean.
 
-### Phase P3 — BigNum CIOS Montgomery + Pre-allocated Exponentiation
+### Phase P154 — BigNum CIOS Montgomery + Pre-allocated Exponentiation
 
 **Prompt**: 实施 Phase P3 BigNum REDC 优化
 

@@ -163,6 +163,7 @@
 | 4 | P140 | ChaCha20 SIMD Optimization — ARMv8 NEON / x86-64 SSE2 | — |
 | 5 | P152 | P-256 Deep Optimization | — |
 | 6 | P153 | ML-KEM NEON NTT Optimization | — |
+| 7 | P154 | BigNum CIOS Montgomery + Pre-allocated Exponentiation | — |
 
 ---
 
@@ -9778,8 +9779,8 @@ QUALITY_REPORT.md D11 identified all 10 existing fuzz targets as parse-only — 
 |------|--------|
 | `crates/hitls-crypto/src/ecc/p256_field.rs` | Added dedicated `mont_sqr()` (symmetry optimization), extracted `p256_mont_reduce()` with P-256 specialized reduction (P[0]=-1, P[2]=0), added 2 new tests |
 | `crates/hitls-crypto/src/ecc/p256_point.rs` | Added `P256AffinePoint` struct, `p256_point_add_mixed()`, precomputed base table via `OnceLock` with batch inversion, rewrote `p256_scalar_mul_base()` to use comb table, rewrote `p256_scalar_mul_add()` to use separate multiplication, added 5 new tests |
-| `PERF_REPORT.md` | Updated Phase P1 status from Pending to Complete with benchmark results |
-| `CLAUDE.md` | Updated status line, test counts (3184→3191), added Phase P1 to completed phases |
+| `PERF_REPORT.md` | Updated Phase P152 status from Pending to Complete with benchmark results |
+| `CLAUDE.md` | Updated status line, test counts (3184→3191), added Phase P152 to completed phases |
 
 ### Test Counts
 
@@ -9843,8 +9844,8 @@ QUALITY_REPORT.md D11 identified all 10 existing fuzz targets as parse-only — 
 | `crates/hitls-crypto/src/mlkem/ntt.rs` | Added `#[cfg(target_arch = "aarch64")]` import, runtime dispatch for 7 functions (ntt/invntt/basemul_acc/poly_add/poly_sub/to_mont/reduce_poly), renamed originals to `_scalar` variants, added 5 NEON correctness tests |
 | `crates/hitls-crypto/src/mlkem/poly.rs` | Batch SHAKE-128 squeeze in `rej_sample` (504 bytes per call vs 3 bytes) |
 | `crates/hitls-crypto/src/mlkem/mod.rs` | Registered `ntt_neon` submodule with `#[cfg(target_arch = "aarch64")]` |
-| `PERF_REPORT.md` | Updated Phase P2 status from Pending to Complete with benchmark results |
-| `CLAUDE.md` | Updated status line, test counts (3191→3196), added Phase P2 to completed phases |
+| `PERF_REPORT.md` | Updated Phase P153 status from Pending to Complete with benchmark results |
+| `CLAUDE.md` | Updated status line, test counts (3191→3196), added Phase P153 to completed phases |
 
 ### Test Counts
 
@@ -9867,7 +9868,7 @@ QUALITY_REPORT.md D11 identified all 10 existing fuzz targets as parse-only — 
 
 ---
 
-## Phase P3 — BigNum CIOS Montgomery + Pre-allocated Exponentiation
+## Phase P154 — BigNum CIOS Montgomery + Pre-allocated Exponentiation
 
 **Summary**: CIOS (Coarsely Integrated Operand Scanning) fused multiply+reduce for Montgomery multiplication, pre-allocated flat limb table for exponentiation, and optimized squaring with symmetry exploitation.
 
@@ -9912,8 +9913,8 @@ The remaining gap to C (~5.6× for DH-2048) is dominated by the inner loop: C us
 |------|--------|
 | `crates/hitls-bignum/src/montgomery.rs` | Complete rewrite: CIOS `cios_mul`, `sqr_limbs` with symmetry, `redc_limbs` (for `mont_sqr`), `limbs_ge`, `limbs_sub_in_place`, pre-allocated `mont_exp` with flat table. 6 new tests. |
 | `crates/hitls-crypto/benches/crypto_bench.rs` | Added `mod_exp` benchmarks (1024/2048/4096-bit) to bignum group |
-| `PERF_REPORT.md` | Updated Phase P3 status, DH/RSA numbers, executive summary, gap chart |
-| `CLAUDE.md` | Updated status line, test counts, Phase P3 in completed phases |
+| `PERF_REPORT.md` | Updated Phase P154 status, DH/RSA numbers, executive summary, gap chart |
+| `CLAUDE.md` | Updated status line, test counts, Phase P154 in completed phases |
 
 ### Test Counts
 
