@@ -26,72 +26,69 @@
 | 18 | 17 | PKCS#12 + CMS + Auth Protocols | 2026-02-08 |
 | 19 | 18 | SLH-DSA (FIPS 205) + XMSS (RFC 8391) | 2026-02-08 |
 | 20 | 19 | FrodoKEM + SM9 + Classic McEliece + CLI Tool + Integration Tests | 2026-02-06 |
-| 21 | 20.3 | PSK / Session Tickets | — |
-| 22 | 20.4 | 0-RTT Early Data | — |
-| 23 | 20.5 | Post-Handshake Client Auth | — |
-| 24 | 20c | Certificate Compression (RFC 8879) | — |
-| 25 | 21 | ECC Curve Additions | — |
-| 26 | 22 | CTR-DRBG + Hash-DRBG + PKCS#8 Key Parsing | 2026-02-08 |
-| 27 | 23 | CRL Parsing + Validation + Revocation Checking + OCSP | 2026-02-09 |
-| 28 | 24 | CSR Generation, X.509 Certificate Generation, TLS 1.2 PRF, CLI req | 2026-02-09 |
-| 29 | 25 | TLS 1.2 Handshake (ECDHE-GCM) | — |
-| 30 | 26 | DTLS 1.2 (RFC 6347) | — |
-| 31 | 27 | TLCP (GM/T 0024 / GB/T 38636-2020) | — |
-| 32 | 28 | TLS 1.2 CBC + ChaCha20-Poly1305 + ALPN + SNI | 2026-02-06 |
-| 33 | 29 | TLS 1.2 Session Resumption + Client Certificate Auth (mTLS) | 2026-02-10 |
-| 34 | 30 | s_client CLI + Network I/O | 2026-02-10 |
-| 35 | 31 | s_server CLI + Key Conversion | 2026-02-10 |
-| 36 | 32 | TCP Loopback Integration Tests | — |
-| 37 | 33 | TLS 1.2 Session Ticket (RFC 5077) | 2026-02-10 |
-| 38 | 34 | TLS 1.2 Extended Master Secret + Encrypt-Then-MAC + Renegotiation Indication | 2026-02-10 |
-| 39 | 35 | TLS 1.2 RSA + DHE Key Exchange — 13 New Cipher Suites | 2026-02-10 |
-| 40 | 36 | TLS 1.2 PSK Cipher Suites — 20 New Cipher Suites | 2026-02-11 |
-| 41 | 37 | TLS 1.3 Post-Quantum Hybrid KEM — X25519MLKEM768 | 2026-02-11 |
-| 42 | 38 | TLS Extensions Completeness — Record Size Limit, Fallback SCSV, OCSP Stapling... | 2026-02-11 |
-| 43 | 39 | Async I/O + Hardware AES + Benchmarks | 2026-02-10 |
-| 44 | 40 | DTLCP + Custom Extensions + Key Logging | 2026-02-11 |
-| 45 | 41 | Wycheproof + Fuzzing + Security Audit | 2026-02-11 |
-| 46 | 42 | Feature Completeness | 2026-02-11 |
-| 47 | 43a | Remaining Feature Conversions | 2026-02-11 |
-| 48 | 43b | Complete DH Groups + TLS FFDHE Expansion | 2026-02-13 |
-| 49 | 44 | FIPS/CMVP Compliance Framework | 2026-02-13 |
-| 50 | 45 | CLI Enhancements + CMS DigestedData | 2026-02-13 |
-| 51 | 46 | Entropy Health Testing — NIST SP 800-90B | 2026-02-13 |
-| 52 | 47 | Ed448 / X448 / Curve448 | 2026-02-14 |
-| 53 | 49 | Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT | 2026-02-14 |
-| 54 | 50 | C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop | 2026-02-14 |
-| 55 | 51 | X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup | — |
-| 56 | 52 | C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests | 2026-02-14 |
-| 57 | 53 | PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths | — |
-| 58 | 54 | TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness | 2026-02-14 |
-| 59 | 55 | Integration Test Expansion + TLCP Public API + Code Quality | 2026-02-14 |
-| 60 | 56 | Unit Test Coverage Expansion | 2026-02-14 |
-| 61 | 57 | Unit Test Coverage Expansion — Crypto RFC Vectors + ASN.1 Negative Tests + TL... | 2026-02-15 |
-| 62 | 58 | Unit Test Coverage Expansion — Cipher Modes, PQC Negative Tests, DRBG State, ... | 2026-02-15 |
-| 63 | 59 | Unit Test Coverage Expansion — CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3... | 2026-02-15 |
-| 64 | 60 | Unit Test Coverage Expansion — RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, ... | 2026-02-15 |
-| 65 | 61 | TLS 1.2 CCM Cipher Suites (RFC 6655 / RFC 7251) | 2026-02-16 |
-| 66 | 62 | CCM_8 (8-byte tag) + PSK+CCM Cipher Suites | 2026-02-16 |
-| 67 | 63 | PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites | 2026-02-16 |
-| 68 | 64 | PSK CCM Completion + CCM_8 Authentication Cipher Suites | 2026-02-16 |
-| 69 | 65 | DHE_DSS Cipher Suites (DSA Authentication for TLS 1.2) | 2026-02-16 |
-| 70 | 66 | DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2) | 2026-02-16 |
-| 71 | 67 | TLS 1.2 Renegotiation (RFC 5746) | 2026-02-17 |
-| 72 | 68 | Connection Info APIs + Graceful Shutdown + ALPN Completion | 2026-02-17 |
-| 73 | 69 | Hostname Verification + Certificate Chain Validation + SNI Callback | 2026-02-17 |
-| 74 | 70 | Server-Side Session Cache + Session Expiration + Cipher Preference | 2026-02-17 |
-| 75 | 71 | Client-Side Session Cache + Write Record Fragmentation | 2026-02-17 |
-| 76 | 73 | KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algori... | 2026-02-18 |
-| 77 | 75 | Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master S... | 2026-02-18 |
-| 78 | 78 | PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbre... | 2026-02-18 |
-| 79 | 80 | Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) | 2026-02-18 |
-| 80 | 85 | TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4 | 2026-02-19 |
-| 81 | 86 | Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC ... | 2026-02-19 |
-| 82 | 87 | DTLS Config Enhancements + Integration Tests for Phase 85–86 Features | 2026-02-19 |
-| 83 | 94a | Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown | 2026-02-19 |
-| 84 | 94b | TicketKeyCallback + SecurityCallback | 2026-02-19 |
-| 85 | 94c | SM4-CTR-DRBG + CMS ML-DSA + Integration Tests + Documentation Sync | 2026-02-19 |
-| 86 | 136 | TLS 1.3 Middlebox Compatibility Mode (RFC 8446 §D.4) | — |
+| 21 | 20 | TLS 1.3 Completeness (PSK, 0-RTT, Post-HS Auth, Cert Compression) | — |
+| 22 | 21 | ECC Curve Additions | — |
+| 23 | 22 | CTR-DRBG + Hash-DRBG + PKCS#8 Key Parsing | 2026-02-08 |
+| 24 | 23 | CRL Parsing + Validation + Revocation Checking + OCSP | 2026-02-09 |
+| 25 | 24 | CSR Generation, X.509 Certificate Generation, TLS 1.2 PRF, CLI req | 2026-02-09 |
+| 26 | 25 | TLS 1.2 Handshake (ECDHE-GCM) | — |
+| 27 | 26 | DTLS 1.2 (RFC 6347) | — |
+| 28 | 27 | TLCP (GM/T 0024 / GB/T 38636-2020) | — |
+| 29 | 28 | TLS 1.2 CBC + ChaCha20-Poly1305 + ALPN + SNI | 2026-02-06 |
+| 30 | 29 | TLS 1.2 Session Resumption + Client Certificate Auth (mTLS) | 2026-02-10 |
+| 31 | 30 | s_client CLI + Network I/O | 2026-02-10 |
+| 32 | 31 | s_server CLI + Key Conversion | 2026-02-10 |
+| 33 | 32 | TCP Loopback Integration Tests | — |
+| 34 | 33 | TLS 1.2 Session Ticket (RFC 5077) | 2026-02-10 |
+| 35 | 34 | TLS 1.2 Extended Master Secret + Encrypt-Then-MAC + Renegotiation Indication | 2026-02-10 |
+| 36 | 35 | TLS 1.2 RSA + DHE Key Exchange — 13 New Cipher Suites | 2026-02-10 |
+| 37 | 36 | TLS 1.2 PSK Cipher Suites — 20 New Cipher Suites | 2026-02-11 |
+| 38 | 37 | TLS 1.3 Post-Quantum Hybrid KEM — X25519MLKEM768 | 2026-02-11 |
+| 39 | 38 | TLS Extensions Completeness — Record Size Limit, Fallback SCSV, OCSP Stapling... | 2026-02-11 |
+| 40 | 39 | Async I/O + Hardware AES + Benchmarks | 2026-02-10 |
+| 41 | 40 | DTLCP + Custom Extensions + Key Logging | 2026-02-11 |
+| 42 | 41 | Wycheproof + Fuzzing + Security Audit | 2026-02-11 |
+| 43 | 42 | Feature Completeness | 2026-02-11 |
+| 44 | 43a | Remaining Feature Conversions | 2026-02-11 |
+| 45 | 43b | Complete DH Groups + TLS FFDHE Expansion | 2026-02-13 |
+| 46 | 44 | FIPS/CMVP Compliance Framework | 2026-02-13 |
+| 47 | 45 | CLI Enhancements + CMS DigestedData | 2026-02-13 |
+| 48 | 46 | Entropy Health Testing — NIST SP 800-90B | 2026-02-13 |
+| 49 | 47 | Ed448 / X448 / Curve448 | 2026-02-14 |
+| 50 | 49 | Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT | 2026-02-14 |
+| 51 | 50 | C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop | 2026-02-14 |
+| 52 | 51 | X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup | — |
+| 53 | 52 | C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests | 2026-02-14 |
+| 54 | 53 | PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths | — |
+| 55 | 54 | TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness | 2026-02-14 |
+| 56 | 55 | Integration Test Expansion + TLCP Public API + Code Quality | 2026-02-14 |
+| 57 | 56 | Unit Test Coverage Expansion | 2026-02-14 |
+| 58 | 57 | Unit Test Coverage Expansion — Crypto RFC Vectors + ASN.1 Negative Tests + TL... | 2026-02-15 |
+| 59 | 58 | Unit Test Coverage Expansion — Cipher Modes, PQC Negative Tests, DRBG State, ... | 2026-02-15 |
+| 60 | 59 | Unit Test Coverage Expansion — CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3... | 2026-02-15 |
+| 61 | 60 | Unit Test Coverage Expansion — RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, ... | 2026-02-15 |
+| 62 | 61 | TLS 1.2 CCM Cipher Suites (RFC 6655 / RFC 7251) | 2026-02-16 |
+| 63 | 62 | CCM_8 (8-byte tag) + PSK+CCM Cipher Suites | 2026-02-16 |
+| 64 | 63 | PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites | 2026-02-16 |
+| 65 | 64 | PSK CCM Completion + CCM_8 Authentication Cipher Suites | 2026-02-16 |
+| 66 | 65 | DHE_DSS Cipher Suites (DSA Authentication for TLS 1.2) | 2026-02-16 |
+| 67 | 66 | DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2) | 2026-02-16 |
+| 68 | 67 | TLS 1.2 Renegotiation (RFC 5746) | 2026-02-17 |
+| 69 | 68 | Connection Info APIs + Graceful Shutdown + ALPN Completion | 2026-02-17 |
+| 70 | 69 | Hostname Verification + Certificate Chain Validation + SNI Callback | 2026-02-17 |
+| 71 | 70 | Server-Side Session Cache + Session Expiration + Cipher Preference | 2026-02-17 |
+| 72 | 71 | Client-Side Session Cache + Write Record Fragmentation | 2026-02-17 |
+| 73 | 73 | KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algori... | 2026-02-18 |
+| 74 | 75 | Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master S... | 2026-02-18 |
+| 75 | 78 | PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbre... | 2026-02-18 |
+| 76 | 80 | Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) | 2026-02-18 |
+| 77 | 85 | TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4 | 2026-02-19 |
+| 78 | 86 | Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC ... | 2026-02-19 |
+| 79 | 87 | DTLS Config Enhancements + Integration Tests for Phase 85–86 Features | 2026-02-19 |
+| 80 | 94a | Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown | 2026-02-19 |
+| 81 | 94b | TicketKeyCallback + SecurityCallback | 2026-02-19 |
+| 82 | 94c | SM4-CTR-DRBG + CMS ML-DSA + Integration Tests + Documentation Sync | 2026-02-19 |
+| 83 | 136 | TLS 1.3 Middlebox Compatibility Mode (RFC 8446 §D.4) | — |
 
 ### Testing (Phase TN)
 
@@ -2851,7 +2848,9 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
 
 ---
 
-## Phase 20, Step 3: PSK / Session Tickets
+## Phase 20: TLS 1.3 Completeness — PSK, 0-RTT, Post-HS Auth, Cert Compression
+
+### Step 3: PSK / Session Tickets
 
 - Implemented PSK session resumption for TLS 1.3 (RFC 8446 §4.2.11, §4.6.1)
 - Added NewSessionTicket codec (encode/decode), ticket encryption/decryption (XOR + HMAC)
@@ -2864,9 +2863,7 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
 - 8 new tests: session resumption roundtrip, NST generation, ticket encrypt/decrypt, binder computation, cache operations, PSK extension codec, resumption_master_secret derivation
 - 97 TLS tests, 524 workspace total
 
----
-
-## Phase 20, Step 4: 0-RTT Early Data
+### Step 4: 0-RTT Early Data
 
 - Implemented 0-RTT Early Data for TLS 1.3 (RFC 8446 §4.2.10, §2.3)
 - Added EndOfEarlyData codec (encode/decode) for handshake message type
@@ -2880,9 +2877,7 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
   2. Client app traffic secrets were derived from Hash(CH..SF..EOED) instead of Hash(CH..SF) — fixed by reordering EOED transcript update to after app secret derivation per RFC 8446 §7.1
 - 102 TLS tests, 529 workspace total
 
----
-
-## Phase 20, Step 5: Post-Handshake Client Auth
+### Step 5: Post-Handshake Client Auth
 
 - Implemented Post-Handshake Client Authentication for TLS 1.3 (RFC 8446 §4.6.2)
 - CertificateRequest codec (encode/decode) in codec.rs
@@ -2896,16 +2891,11 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
 - 6 new tests: test_certificate_request_codec, test_post_hs_auth_codec, test_post_hs_auth_roundtrip, test_post_hs_auth_no_cert, test_post_hs_auth_not_offered, test_post_hs_auth_server_not_connected
 - 108 TLS tests, 535 workspace total
 
----
+### Step 6: Certificate Compression (RFC 8879)
 
-## Phase 20 Completion — Certificate Compression (RFC 8879)
-
-### Summary
 Implemented the remaining Phase 20 feature: TLS Certificate Compression (RFC 8879). Also fixed the README Phase 20 table to correctly mark HRR and KeyUpdate as Done (they were already implemented but the docs were outdated).
 
-### Changes
-
-#### 1. Certificate Compression (RFC 8879)
+#### Certificate Compression Details
 - **Extension**: `compress_certificate` (type 27) — client sends list of supported compression algorithms in ClientHello
 - **Message**: `CompressedCertificate` (handshake type 25) — server sends compressed Certificate message body
 - **Algorithm**: zlib (algorithm ID 1) via `flate2` crate, feature-gated behind `cert-compression`
@@ -2913,11 +2903,11 @@ Implemented the remaining Phase 20 feature: TLS Certificate Compression (RFC 887
 - **Transcript**: Uses CompressedCertificate message as-is in transcript hash (per RFC 8879 §4)
 - **Safety**: 16 MiB decompression limit, uncompressed_length validation
 
-#### 2. Dependencies
+#### Dependencies
 - Added `flate2 = "1"` to workspace (pure Rust via miniz_oxide backend)
 - Feature flag `cert-compression = ["flate2"]` in hitls-tls
 
-#### 3. Files Modified
+#### Files Modified
 - `Cargo.toml` (workspace): Added `flate2` dependency
 - `crates/hitls-tls/Cargo.toml`: Added `flate2` optional dep + `cert-compression` feature
 - `crates/hitls-tls/src/extensions/mod.rs`: Added `COMPRESS_CERTIFICATE` constant
@@ -2929,7 +2919,7 @@ Implemented the remaining Phase 20 feature: TLS Certificate Compression (RFC 887
 - `crates/hitls-tls/src/handshake/server.rs`: Parse extension, compress Certificate when negotiated
 - `crates/hitls-tls/src/connection.rs`: Dispatch CompressedCertificate in WaitCertCertReq state
 
-#### 4. Tests (7 new)
+#### Tests (7 new)
 - `test_compressed_certificate_codec_roundtrip` — encode/decode CompressedCertificate message
 - `test_compress_decompress_zlib` — compress/decompress Certificate body roundtrip
 - `test_build_parse_compress_certificate` — extension encode/decode roundtrip
@@ -2938,7 +2928,7 @@ Implemented the remaining Phase 20 feature: TLS Certificate Compression (RFC 887
 - `test_cert_compression_handshake` — full client-server handshake with compression
 - `test_cert_compression_server_disabled` — normal Certificate when server doesn't enable compression
 
-### Test Results
+### Build Status
 - **568 tests total** (20 auth + 46 bignum + 304 crypto + 47 pki + 115 tls + 26 utils + 10 integration), 19 ignored
 - All clippy warnings resolved, formatting clean
 
