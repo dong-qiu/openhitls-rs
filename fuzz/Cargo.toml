@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 hitls-utils = { path = "../crates/hitls-utils" }
+hitls-crypto = { path = "../crates/hitls-crypto", features = ["aes", "modes", "chacha20"] }
 hitls-pki = { path = "../crates/hitls-pki" }
 hitls-tls = { path = "../crates/hitls-tls", features = ["tls12", "dtls12", "tlcp"] }
 
@@ -61,4 +62,19 @@ doc = false
 [[bin]]
 name = "fuzz_tls_handshake"
 path = "fuzz_targets/fuzz_tls_handshake.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_aead_decrypt"
+path = "fuzz_targets/fuzz_aead_decrypt.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_x509_verify"
+path = "fuzz_targets/fuzz_x509_verify.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_tls_handshake_deep"
+path = "fuzz_targets/fuzz_tls_handshake_deep.rs"
 doc = false

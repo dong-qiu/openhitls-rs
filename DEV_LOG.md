@@ -9076,3 +9076,40 @@ Deep analysis revealed that bumping `hitls-crypto` from `opt-level = 1` to `opt-
 - `cargo test --workspace --all-features`: 3191 passed, 0 failed, 7 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T151 — Semantic Fuzz Target Expansion (+3 targets, 10→13)
+
+**Date**: 2026-02-26
+**Summary**: Resolve D11 (Critical) deficiency from QUALITY_REPORT.md by adding 3 semantic fuzz targets beyond parse-only coverage. Fuzz targets now exercise cryptographic operations (AEAD decrypt), verification logic (X.509 chain), and deep protocol decoding (all 10 handshake decoders).
+
+### Motivation
+
+QUALITY_REPORT.md D11 identified all 10 existing fuzz targets as parse-only — no fuzz target exercised cryptographic operations, verification logic, or protocol-level decoding. This phase adds semantic fuzz coverage for the three highest-value attack surfaces.
+
+### New Fuzz Targets
+
+| Target | Crate | Strategy |
+|--------|-------|----------|
+| `fuzz_aead_decrypt` | hitls-crypto | Split fuzz data into key/nonce/AAD/ciphertext, call AES-128-GCM and ChaCha20-Poly1305 decrypt. Verifies no panic on any corrupted input. |
+| `fuzz_x509_verify` | hitls-pki | Parse DER as certificate, attempt self-signed signature verification and chain verification. Exercises crypto verify path. |
+| `fuzz_tls_handshake_deep` | hitls-tls | Dispatch on first byte to exercise all 10 decode_* functions (ClientHello through CompressedCertificate) + parse_handshake_header. |
+
+### Files Modified/Created
+
+| File | Change |
+|------|--------|
+| `fuzz/Cargo.toml` | Added `hitls-crypto` dependency (aes, modes, chacha20 features) + 3 `[[bin]]` entries |
+| `fuzz/fuzz_targets/fuzz_aead_decrypt.rs` | NEW — AEAD decrypt semantic fuzzing |
+| `fuzz/fuzz_targets/fuzz_x509_verify.rs` | NEW — X.509 verification path fuzzing |
+| `fuzz/fuzz_targets/fuzz_tls_handshake_deep.rs` | NEW — Deep handshake decoder fuzzing (10 decoders) |
+| `fuzz/corpus/fuzz_aead_decrypt/` | NEW — 5 seed files |
+| `fuzz/corpus/fuzz_x509_verify/` | NEW — 3 seed files |
+| `fuzz/corpus/fuzz_tls_handshake_deep/` | NEW — 5 seed files |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3191 passed, 0 failed, 7 ignored
+- `cargo fuzz build`: 13 targets compile successfully
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean

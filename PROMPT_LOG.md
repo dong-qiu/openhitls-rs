@@ -2901,3 +2901,24 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - 3080 tests pass, 6 ignored (1 XMSS h=16 + 5 s_client network). 0 clippy warnings, formatting clean.
 - Ignored tests reduced from 21→6 (combined R112+R113: 50→6, 88% reduction).
+
+---
+
+### Phase T151 — Semantic Fuzz Target Expansion
+
+**Prompt**: Implement Phase T151 — Add 3 semantic fuzz targets to resolve D11 (Critical) deficiency: (1) AEAD decrypt fuzzing (AES-128-GCM + ChaCha20-Poly1305), (2) X.509 certificate verification path fuzzing, (3) deep TLS handshake decoder fuzzing (all 10 decoders). Create seed corpus directories. Update all documentation.
+
+**Work performed**:
+1. Added `hitls-crypto` dependency (aes, modes, chacha20 features) to `fuzz/Cargo.toml`
+2. Created `fuzz/fuzz_targets/fuzz_aead_decrypt.rs` — splits fuzz data into key/nonce/AAD/ciphertext, calls GCM and ChaCha20-Poly1305 decrypt
+3. Created `fuzz/fuzz_targets/fuzz_x509_verify.rs` — parses DER, exercises self-signed verification and chain verification
+4. Created `fuzz/fuzz_targets/fuzz_tls_handshake_deep.rs` — dispatches on first byte to 10 decoders + header parsing
+5. Added 3 `[[bin]]` entries to `fuzz/Cargo.toml`
+6. Created seed corpus: 5 AEAD seeds, 3 X.509 seeds (reused), 5 TLS handshake seeds (66→79 files)
+7. Updated CLAUDE.md (status, fuzz count, milestones), README.md (fuzz counts), TEST_LOG.md (executive summary, pyramid, phase entry), QUALITY_REPORT.md (L4 rating C+→B−, D11 partially closed), DEV_LOG.md (phase entry)
+
+**Result**:
+- 3 new fuzz targets created (10→13 total), 13 seed corpus files added (66→79 total)
+- All 3184 workspace tests pass, 0 clippy warnings, formatting clean
+- Fuzz build succeeds with all 13 targets
+- D11 deficiency: Critical → PARTIALLY CLOSED (semantic targets added; DTLS/DSA fuzzing remains)

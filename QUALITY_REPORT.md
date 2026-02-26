@@ -14,7 +14,7 @@
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | **A** | Full workspace, all features, all targets |
 | **L2** | Unit Tests | 3,184 tests (7 ignored), 100% pass rate | **A−** | 3,058 test fns + 92 async + 15 Wycheproof suites; ~14 files indirect-only |
 | **L3** | Integration Tests | 152 cross-crate tests (TCP loopback + DTLS resilience) | **B+** | 12 test files; 5 protocol variants × sync/async; no cross-impl interop |
-| **L4** | Fuzz Testing | 10 fuzz targets + 66 seed corpus files | **C+** | Parse-only (ASN.1/PEM/X.509/TLS/CMS/PKCS); no semantic/state-machine fuzz |
+| **L4** | Fuzz Testing | 13 fuzz targets + 79 seed corpus files | **B−** | 10 parse-only + 3 semantic (AEAD decrypt, X.509 verify, deep handshake); remaining: DTLS/DSA fuzzing |
 | **L5** | Property-Based Testing | 13 proptest blocks across hitls-crypto + hitls-utils | **C** | Only 2 of 9 crates; no hitls-tls/pki/bignum/auth proptest coverage |
 | **L6** | Standard Vectors | 15 Wycheproof suites + 7 FIPS KATs + 11 RFC vector sets + 10+ GB/T | **A** | 5,000+ vectors; all major algorithms covered |
 | **L7** | Concurrency & Side-Channel | 38 concurrency-aware tests; 0 timing tests | **D** | No constant-time verification; minimal thread-safety stress tests |
@@ -29,7 +29,7 @@ GitHub Actions (.github/workflows/ci.yml)
 ├── Feature Testing  Individual feature flags (aes, sha2, rsa, sm2, pqc)
 ├── Security Audit   rustsec/audit-check@v2
 ├── UB Detection     Miri on hitls-bignum + hitls-utils
-├── Fuzz Build       cargo fuzz build (nightly)
+├── Fuzz Build       cargo fuzz build (nightly) — 13 targets: 10 parse + 3 semantic
 ├── Bench Verify     cargo bench --no-run
 └── Coverage         cargo-tarpaulin → Cobertura XML (added Phase T118)
 ```
@@ -121,7 +121,7 @@ Medium           D8   No cross-implementation interop               Compatibilit
 Low-Med          D9   Fuzz targets: parse-only                      Deep bugs missed
 MOSTLY CLOSED    D10  Crypto files without unit tests                Resolved (Phase T115–T117/125)
 ──────── NEW (Phase T150 深度分析) ────────
-Critical         D11  Semantic/state-machine fuzz missing            10 fuzz targets are parse-only
+PARTIALLY CLOSED D11  Semantic/state-machine fuzz (Phase T151)       3 semantic targets added; DTLS/DSA remain
 Critical         D12  No side-channel/timing test infrastructure     Constant-time claims unverified
 Critical         D13  3,938 lines TLS connection code: 0 unit tests  State machine edge cases uncovered
 High             D14  Proptest scope too narrow (2/9 crates)         Only hitls-crypto + hitls-utils
@@ -251,15 +251,22 @@ All 10 fuzz targets cover **parsing** (ASN.1, PEM, X.509, TLS record/handshake, 
 
 These modules have indirect coverage through top-level roundtrip tests and are lower risk.
 
-### 2.12 D11 — Semantic/State-Machine Fuzz Missing (Critical) — **OPEN**
+### 2.12 D11 — Semantic/State-Machine Fuzz Missing — **PARTIALLY CLOSED** (Phase T151)
 
-All 10 fuzz targets exclusively cover **parsing** (ASN.1, PEM, X.509, TLS record/handshake, CMS, PKCS#8/12). No fuzz target exercises:
+**Phase T151** added 3 semantic fuzz targets to complement the existing 10 parse-only targets:
 
-- **State machine fuzzing**: Arbitrary message sequences driving the TLS state machine through unexpected transitions. The 5-protocol × sync/async handshake drivers represent ~4,000 lines of complex state logic.
-- **Cryptographic semantic fuzzing**: Mutated ciphertexts → decrypt, truncated MACs → verify, corrupted signatures → reject. This would catch panic paths in crypto primitives.
-- **Protocol-level fuzzing**: Malformed handshake message *content* (valid framing, corrupt payloads) → verify correct rejection without panic or memory unsafety.
+| Target | Type | Focus |
+|--------|------|-------|
+| `fuzz_aead_decrypt` | Cryptographic semantic | AES-128-GCM + ChaCha20-Poly1305 decrypt with corrupted ciphertext/nonce/AAD → verify graceful error, no panic |
+| `fuzz_x509_verify` | Verification path | Parse DER → self-signed signature verification → chain verification → verify no panic on invalid certs |
+| `fuzz_tls_handshake_deep` | Protocol-level | All 10 handshake message decoders (ClientHello through CompressedCertificate) + header parsing |
 
-**Impact**: Parse-only fuzz catches malformed input crashes but misses logic bugs in state transitions and crypto operations — the highest-value attack surface.
+**Remaining gaps** (P2 priority):
+- DTLS-specific state machine fuzzing (loss/retransmission scenarios)
+- DSA/RSA signature generation fuzzing (crypto primitives, not verification)
+- Full TLS connection state machine fuzzing (arbitrary message sequences against live connection)
+
+**Impact**: Semantic fuzz now covers 3 high-value attack surfaces (cryptographic operations, certificate validation, protocol decoding). L4 defense rating upgraded from C+ to B−.
 
 ### 2.13 D12 — No Side-Channel/Timing Test Infrastructure (Critical) — **OPEN**
 

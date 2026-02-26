@@ -12,7 +12,7 @@
 | **Total tests** | **3,184** (7 ignored) |
 | **Test growth** | 1,104 → 3,184 (+188% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
-| **Fuzz targets** | 10 (with 66 seed corpus files) |
+| **Fuzz targets** | 13 (with 79 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
 | **Zero failures** | All 3,184 tests pass, clippy clean, fmt clean |
 
@@ -92,7 +92,7 @@ Phase T150  3,184     +15   scrypt + CFB mode + X448 deepening (*)
 
 ```
                     ┌─────────────┐
-                    │  Fuzz (10)  │  libfuzzer targets: ASN.1, PEM, X.509, TLS, CMS...
+                    │  Fuzz (13)  │  libfuzzer targets: ASN.1, PEM, X.509, TLS, CMS, AEAD, verify...
                    ─┼─────────────┼─
                   │   Integration  │  125 cross-crate TCP/loopback tests
                  ─┼────────────────┼─
@@ -2925,3 +2925,54 @@ cargo fmt --all -- --check
 ```
 
 **Ignored tests** (7 total): Slow operations marked `#[ignore]` — 5 s_client network tests, ElGamal generate (flaky BnRandGenFail), X448 iterated (~25s). All pass when explicitly run with `cargo test -- --ignored` (except ElGamal which is intermittently flaky).
+
+---
+
+## Phase T151: Semantic Fuzz Target Expansion (+3 targets, 10→13)
+
+**Date**: 2026-02-26
+**Scope**: Resolve D11 (Critical) deficiency from QUALITY_REPORT.md by adding 3 semantic fuzz targets beyond parse-only coverage.
+
+### New Fuzz Targets
+
+| # | Target | Module | Focus |
+|---|--------|--------|-------|
+| 1 | `fuzz_aead_decrypt` | `hitls-crypto` | AES-128-GCM + ChaCha20-Poly1305 decrypt with corrupted ciphertext/nonce/AAD |
+| 2 | `fuzz_x509_verify` | `hitls-pki` | Certificate parsing → self-signed signature verification → chain verification |
+| 3 | `fuzz_tls_handshake_deep` | `hitls-tls` | All 10 handshake message decoders + header parsing (dispatch on first byte) |
+
+### Files Created/Modified
+
+| File | Action |
+|------|--------|
+| `fuzz/Cargo.toml` | Added `hitls-crypto` dependency + 3 `[[bin]]` entries |
+| `fuzz/fuzz_targets/fuzz_aead_decrypt.rs` | NEW — AEAD decrypt semantic fuzzing |
+| `fuzz/fuzz_targets/fuzz_x509_verify.rs` | NEW — X.509 verification path fuzzing |
+| `fuzz/fuzz_targets/fuzz_tls_handshake_deep.rs` | NEW — Deep handshake decoder fuzzing (10 decoders) |
+| `fuzz/corpus/fuzz_aead_decrypt/` | NEW — 5 seed files |
+| `fuzz/corpus/fuzz_x509_verify/` | NEW — 3 seed files (reused from fuzz_x509) |
+| `fuzz/corpus/fuzz_tls_handshake_deep/` | NEW — 5 seed files |
+
+### Fuzz Target Inventory (13 total)
+
+| # | Target | Type | Crate |
+|---|--------|------|-------|
+| 1 | `fuzz_asn1` | Parse | hitls-utils |
+| 2 | `fuzz_base64` | Parse | hitls-utils |
+| 3 | `fuzz_pem` | Parse | hitls-utils |
+| 4 | `fuzz_x509` | Parse | hitls-pki |
+| 5 | `fuzz_crl` | Parse | hitls-pki |
+| 6 | `fuzz_pkcs8` | Parse | hitls-pki |
+| 7 | `fuzz_pkcs12` | Parse | hitls-pki |
+| 8 | `fuzz_cms` | Parse | hitls-pki |
+| 9 | `fuzz_tls_record` | Parse | hitls-tls |
+| 10 | `fuzz_tls_handshake` | Parse | hitls-tls |
+| 11 | `fuzz_aead_decrypt` | **Semantic** | hitls-crypto |
+| 12 | `fuzz_x509_verify` | **Semantic** | hitls-pki |
+| 13 | `fuzz_tls_handshake_deep` | **Semantic** | hitls-tls |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3,184 passed, 0 failed, 7 ignored (unchanged)
+- `cargo fuzz build` (via main repo): 13 targets compile successfully
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
