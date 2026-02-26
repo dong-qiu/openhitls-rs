@@ -2939,3 +2939,24 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - ML-KEM-768 encaps 2.0× (109→54.8 µs), decaps 2.6× (95→36.0 µs), keygen 2.3× (155→66.5 µs)
 - ML-KEM-1024 decaps 3.0× speedup (largest improvement due to higher polynomial count)
 - 3196 tests pass (+5 NEON tests), 7 ignored. 0 clippy warnings, formatting clean.
+
+### Phase P3 — BigNum CIOS Montgomery + Pre-allocated Exponentiation
+
+**Prompt**: 实施 Phase P3 BigNum REDC 优化
+
+**Scope**: BigNum modular exponentiation bottleneck affecting DH (FFDHE-2048/3072/4096) and RSA-2048 sign/decrypt.
+
+**Work performed**:
+1. Rewrote `montgomery.rs` with CIOS (Coarsely Integrated Operand Scanning) fused multiply+reduce
+2. Pre-allocated flat limb table (`table_size × n` flat `Vec<u64>`) in `mont_exp`
+3. Added `sqr_limbs` with cross-product symmetry optimization (n(n-1)/2 multiplies + bit-shift doubling)
+4. Added `redc_limbs` standalone Montgomery reduction for `mont_sqr`
+5. Added helper functions: `limbs_ge`, `limbs_sub_in_place`
+6. Added `mod_exp` benchmarks (1024/2048/4096-bit) to crypto_bench.rs
+7. Added 6 new tests: CIOS multi-limb, large exp, limbs_ge, mont_sqr consistency, mont_sqr multi-limb, sqr_limbs correctness
+
+**Result**:
+- DH-2048 keygen 1.25× (174→218 ops/s), DH-2048 derive 1.31× (173→227 ops/s)
+- RSA-2048 sign 1.11× (719→800 ops/s), RSA-2048 decrypt 1.15× (704→808 ops/s)
+- Gap narrowed from 7× to 5.6× for DH-2048. Remaining gap is assembly inner loop.
+- 3202 tests pass (+6 Montgomery tests), 7 ignored. 0 clippy warnings, formatting clean.

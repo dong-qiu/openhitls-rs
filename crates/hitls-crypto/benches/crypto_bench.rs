@@ -678,6 +678,23 @@ fn bench_bignum(c: &mut Criterion) {
         });
     }
 
+    // Modular exponentiation benchmarks
+    group.sample_size(20);
+    for size in [1024, 2048, 4096] {
+        let base_bytes = vec![0x42u8; size / 8];
+        let base = BigNum::from_bytes_be(&base_bytes);
+        let exp_bytes = vec![0xFFu8; size / 8];
+        let exp = BigNum::from_bytes_be(&exp_bytes);
+        // Use a prime-like modulus (odd number with top bit set)
+        let mut mod_bytes = vec![0xFFu8; size / 8];
+        mod_bytes[size / 8 - 1] = 0xFD; // ensure odd
+        let modulus = BigNum::from_bytes_be(&mod_bytes);
+
+        group.bench_with_input(BenchmarkId::new("mod_exp", size), &size, |bench, _| {
+            bench.iter(|| base.mod_exp(&exp, &modulus).unwrap());
+        });
+    }
+
     group.finish();
 }
 

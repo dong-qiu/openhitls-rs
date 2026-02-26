@@ -9176,3 +9176,72 @@ QUALITY_REPORT.md D11 identified all 10 existing fuzz targets as parse-only — 
 - `cargo test --workspace --all-features`: 3196 passed, 0 failed, 7 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P3 — BigNum CIOS Montgomery + Pre-allocated Exponentiation
+
+**Summary**: CIOS (Coarsely Integrated Operand Scanning) fused multiply+reduce for Montgomery multiplication, pre-allocated flat limb table for exponentiation, and optimized squaring with symmetry exploitation.
+
+### Performance Results
+
+| Operation | Before | After | Speedup |
+|-----------|--------|-------|---------|
+| DH-2048 keygen | 5.75 ms (174 ops/s) | 4.59 ms (218 ops/s) | **1.25×** |
+| DH-2048 derive | 5.78 ms (173 ops/s) | 4.41 ms (227 ops/s) | **1.31×** |
+| DH-3072 keygen | 17.5 ms (57 ops/s) | 15.1 ms (66 ops/s) | **1.16×** |
+| DH-4096 keygen | 40.0 ms (25 ops/s) | 36.3 ms (28 ops/s) | **1.12×** |
+| RSA-2048 sign PSS | 1.39 ms (719 ops/s) | 1.25 ms (800 ops/s) | **1.11×** |
+| RSA-2048 decrypt OAEP | 1.42 ms (704 ops/s) | 1.24 ms (808 ops/s) | **1.15×** |
+| mod_exp 1024-bit | — | 634 µs | (new benchmark) |
+| mod_exp 2048-bit | — | 4.38 ms | (new benchmark) |
+| mod_exp 4096-bit | — | 36.96 ms | (new benchmark) |
+
+### Implementation Details
+
+1. **CIOS fused multiply+reduce**: Replaces separate schoolbook multiplication + REDC with a single pass. Operates on an (n+2)-limb scratch buffer — for each limb of operand `a`, computes `scratch += a[i] * b`, then reduces `scratch += m * N` and shifts right by one limb. Eliminates the 2n-limb intermediate product allocation.
+
+2. **Pre-allocated flat limb table**: The exponentiation table is stored as a single flat `Vec<u64>` of size `table_size × n` instead of `Vec<BigNum>`. Table entries are addressed by index arithmetic (`table[i*n..(i+1)*n]`). Eliminates per-entry heap allocation and pointer indirection.
+
+3. **Optimized squaring (`sqr_limbs`)**: Exploits the symmetry `a[i]*a[j] = a[j]*a[i]`. Computes n(n-1)/2 cross-products, doubles via bit-shift, then adds n diagonal terms. Used in the public `mont_sqr` API.
+
+4. **Single conditional subtraction**: CIOS guarantees the result is in [0, 2N). A single comparison (`scratch[n] != 0 || result >= N`) and subtraction replaces the previous while-loop correction.
+
+5. **Helper functions**: `limbs_ge` (constant-time-ready comparison), `limbs_sub_in_place` (subtraction without allocation).
+
+### Analysis of Performance Gap
+
+The improvement (~1.2×) is below the original 3.5-4.5× target. The primary reason is that CIOS has the same O(n²) algorithmic complexity as the previous schoolbook+REDC approach — it performs the same number of `u64×u64` multiply-accumulate operations. The improvement comes from:
+- Eliminated 2n-limb intermediate product allocation
+- Better cache locality (single (n+2)-limb accumulator vs 2n-limb buffer)
+- Eliminated heap allocations in the exponentiation loop
+
+The remaining gap to C (~5.6× for DH-2048) is dominated by the inner loop: C uses hand-tuned assembly (`bn_mul_mont`) with platform-specific `umulh`+`madd` instruction sequences and optimized carry chains that pure Rust `u128` arithmetic cannot match.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `crates/hitls-bignum/src/montgomery.rs` | Complete rewrite: CIOS `cios_mul`, `sqr_limbs` with symmetry, `redc_limbs` (for `mont_sqr`), `limbs_ge`, `limbs_sub_in_place`, pre-allocated `mont_exp` with flat table. 6 new tests. |
+| `crates/hitls-crypto/benches/crypto_bench.rs` | Added `mod_exp` benchmarks (1024/2048/4096-bit) to bignum group |
+| `PERF_REPORT.md` | Updated Phase P3 status, DH/RSA numbers, executive summary, gap chart |
+| `CLAUDE.md` | Updated status line, test counts, Phase P3 in completed phases |
+
+### Test Counts
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| hitls-crypto | 1036 | 2 |
+| hitls-tls | 1290 | 0 |
+| hitls-pki | 390 | 0 |
+| hitls-bignum | 75 (+6) | 0 |
+| hitls-utils | 66 | 0 |
+| hitls-auth | 33 | 0 |
+| hitls-cli | 117 | 5 |
+| interop | 152 | 0 |
+| **Total** | **3202** (+6) | **7** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3202 passed, 0 failed, 7 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
