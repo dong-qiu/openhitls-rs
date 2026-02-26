@@ -1,6 +1,172 @@
 # openHiTLS Rust Migration — Development Log
 
-## Migration Roadmap Archive
+## Phase Index by Category
+
+### Implementation & Migration (Phase N)
+
+| # | Phase | Title | Date |
+|---|-------|-------|------|
+| 1 | 0 | Project Scaffolding | 2026-02-06 |
+| 2 | 1 | Tooling + BigNum | 2026-02-06 |
+| 3 | 2 | Hash + HMAC | 2026-02-06 |
+| 4 | 3 | Symmetric Ciphers + Block Cipher Modes + KDF | 2026-02-06 |
+| 5 | 4 | RSA Asymmetric Cryptography | 2026-02-06 |
+| 6 | 5 | ECC + ECDSA + ECDH | 2026-02-06 |
+| 7 | 6 | Ed25519 + X25519 + DH | 2026-02-06 |
+| 8 | 7 | DSA + SM2 + HMAC-DRBG | 2026-02-06 |
+| 9 | 8 | SHA-3/SHAKE + ChaCha20-Poly1305 + Symmetric Suite Completion | 2026-02-06 |
+| 10 | 9 | ML-KEM (FIPS 203) + ML-DSA (FIPS 204) | 2026-02-07 |
+| 11 | 10 | HPKE + AES Key Wrap + HybridKEM + Paillier + ElGamal | 2026-02-06 |
+| 12 | 11 | X.509 Certificate Parsing + Signature Verification | — |
+| 13 | 12 | X.509 Verification + Chain Building | 2026-02-07 |
+| 14 | 13 | TLS 1.3 Key Schedule + Crypto Adapter | 2026-02-06 |
+| 15 | 14 | TLS Record Layer Encryption | 2026-02-08 |
+| 16 | 15 | TLS 1.3 Client Handshake | 2026-02-08 |
+| 17 | 16 | TLS 1.3 Server Handshake + Application Data | 2026-02-08 |
+| 18 | 17 | PKCS#12 + CMS + Auth Protocols | 2026-02-08 |
+| 19 | 18 | SLH-DSA (FIPS 205) + XMSS (RFC 8391) | 2026-02-08 |
+| 20 | 19 | FrodoKEM + SM9 + Classic McEliece + CLI Tool + Integration Tests | 2026-02-06 |
+| 21 | 20 | TLS 1.3 Completeness (PSK, 0-RTT, Post-HS Auth, Cert Compression) | — |
+| 22 | 21 | ECC Curve Additions | — |
+| 23 | 22 | CTR-DRBG + Hash-DRBG + PKCS#8 Key Parsing | 2026-02-08 |
+| 24 | 23 | CRL Parsing + Validation + Revocation Checking + OCSP | 2026-02-09 |
+| 25 | 24 | CSR Generation, X.509 Certificate Generation, TLS 1.2 PRF, CLI req | 2026-02-09 |
+| 26 | 25 | TLS 1.2 Handshake (ECDHE-GCM) | — |
+| 27 | 26 | DTLS 1.2 (RFC 6347) | — |
+| 28 | 27 | TLCP (GM/T 0024 / GB/T 38636-2020) | — |
+| 29 | 28 | TLS 1.2 CBC + ChaCha20-Poly1305 + ALPN + SNI | 2026-02-06 |
+| 30 | 29 | TLS 1.2 Session Resumption + Client Certificate Auth (mTLS) | 2026-02-10 |
+| 31 | 30 | s_client CLI + Network I/O | 2026-02-10 |
+| 32 | 31 | s_server CLI + Key Conversion | 2026-02-10 |
+| 33 | 32 | TCP Loopback Integration Tests | — |
+| 34 | 33 | TLS 1.2 Session Ticket (RFC 5077) | 2026-02-10 |
+| 35 | 34 | TLS 1.2 Extended Master Secret + Encrypt-Then-MAC + Renegotiation Indication | 2026-02-10 |
+| 36 | 35 | TLS 1.2 RSA + DHE Key Exchange — 13 New Cipher Suites | 2026-02-10 |
+| 37 | 36 | TLS 1.2 PSK Cipher Suites — 20 New Cipher Suites | 2026-02-11 |
+| 38 | 37 | TLS 1.3 Post-Quantum Hybrid KEM — X25519MLKEM768 | 2026-02-11 |
+| 39 | 38 | TLS Extensions Completeness — Record Size Limit, Fallback SCSV, OCSP Stapling... | 2026-02-11 |
+| 40 | 39 | Async I/O + Hardware AES + Benchmarks | 2026-02-10 |
+| 41 | 40 | DTLCP + Custom Extensions + Key Logging | 2026-02-11 |
+| 42 | 41 | Wycheproof + Fuzzing + Security Audit | 2026-02-11 |
+| 43 | 42 | Feature Completeness | 2026-02-11 |
+| 44 | 43 | Remaining Features + DH Groups + TLS FFDHE Expansion | 2026-02-11 |
+| 45 | 44 | FIPS/CMVP Compliance Framework | 2026-02-13 |
+| 46 | 45 | CLI Enhancements + CMS DigestedData | 2026-02-13 |
+| 47 | 46 | Entropy Health Testing — NIST SP 800-90B | 2026-02-13 |
+| 48 | 47 | Ed448 / X448 / Curve448 | 2026-02-14 |
+| 49 | 49 | Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT | 2026-02-14 |
+| 50 | 50 | C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop | 2026-02-14 |
+| 51 | 51 | X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup | — |
+| 52 | 52 | C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests | 2026-02-14 |
+| 53 | 53 | PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths | — |
+| 54 | 54 | TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness | 2026-02-14 |
+| 55 | 55 | Integration Test Expansion + TLCP Public API + Code Quality | 2026-02-14 |
+| 56 | 56 | Unit Test Coverage Expansion | 2026-02-14 |
+| 57 | 57 | Unit Test Coverage Expansion — Crypto RFC Vectors + ASN.1 Negative Tests + TL... | 2026-02-15 |
+| 58 | 58 | Unit Test Coverage Expansion — Cipher Modes, PQC Negative Tests, DRBG State, ... | 2026-02-15 |
+| 59 | 59 | Unit Test Coverage Expansion — CTR/CCM/GCM/KeyWrap, DSA, HPKE, HybridKEM, SM3... | 2026-02-15 |
+| 60 | 60 | Unit Test Coverage Expansion — RSA, ECDH, SM2, ElGamal, Paillier, ECC, Hash, ... | 2026-02-15 |
+| 61 | 61 | TLS 1.2 CCM Cipher Suites (RFC 6655 / RFC 7251) | 2026-02-16 |
+| 62 | 62 | CCM_8 (8-byte tag) + PSK+CCM Cipher Suites | 2026-02-16 |
+| 63 | 63 | PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites | 2026-02-16 |
+| 64 | 64 | PSK CCM Completion + CCM_8 Authentication Cipher Suites | 2026-02-16 |
+| 65 | 65 | DHE_DSS Cipher Suites (DSA Authentication for TLS 1.2) | 2026-02-16 |
+| 66 | 66 | DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2) | 2026-02-16 |
+| 67 | 67 | TLS 1.2 Renegotiation (RFC 5746) | 2026-02-17 |
+| 68 | 68 | Connection Info APIs + Graceful Shutdown + ALPN Completion | 2026-02-17 |
+| 69 | 69 | Hostname Verification + Certificate Chain Validation + SNI Callback | 2026-02-17 |
+| 70 | 70 | Server-Side Session Cache + Session Expiration + Cipher Preference | 2026-02-17 |
+| 71 | 71 | Client-Side Session Cache + Write Record Fragmentation | 2026-02-17 |
+| 72 | 73 | KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algori... | 2026-02-18 |
+| 73 | 75 | Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master S... | 2026-02-18 |
+| 74 | 78 | PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbre... | 2026-02-18 |
+| 75 | 80 | Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) | 2026-02-18 |
+| 76 | 85 | TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4 | 2026-02-19 |
+| 77 | 86 | Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC ... | 2026-02-19 |
+| 78 | 87 | DTLS Config Enhancements + Integration Tests for Phase 85–86 Features | 2026-02-19 |
+| 79 | 94 | Encrypted PKCS#8 + Callbacks + SM4-CTR-DRBG + CMS ML-DSA | 2026-02-19 |
+| 80 | 136 | TLS 1.3 Middlebox Compatibility Mode (RFC 8446 §D.4) | — |
+
+### Testing (Phase TN)
+
+| # | Phase | Title | Date |
+|---|-------|-------|------|
+| 1 | T72 | CLI Command Unit Tests + Session Cache Concurrency | 2026-02-17 |
+| 2 | T74 | Async TLS 1.3 Unit Tests + Cipher Suite Integration | 2026-02-18 |
+| 3 | T76 | Fuzz Seed Corpus + Error Scenario Integration Tests | 2026-02-18 |
+| 4 | T77 | Phase 75 Feature Integration Tests + Async Export Unit Tests | 2026-02-18 |
+| 5 | T79 | cert_verify Unit Tests + Config Callbacks + Integration Tests | 2026-02-18 |
+| 6 | T96 | connection_info / handshake enums / lib.rs constants / codec error paths / as... | 2026-02-20 |
+| 7 | T97 | ECC Curve Params / DH Group Params / TLCP Public API / DTLCP Error Paths / DT... | — |
+| 8 | T98 | ECC Jacobian point/AES software S-box/SM9 Fp field/SM9 G1/McEliece bit vector | — |
+| 9 | T99 | 0-RTT early data + replay protection tests | — |
+| 10 | T110 | Async TLS 1.2 Deep Coverage | — |
+| 11 | T111 | Async TLCP + DTLCP Connection Types & Tests | — |
+| 12 | T112 | Extension Negotiation E2E Tests | — |
+| 13 | T113 | DTLS Loss Simulation & Resilience Tests | — |
+| 14 | T114 | TLCP Double Certificate Validation Tests | — |
+| 15 | T115 | SM9 Tower Field Unit Tests | — |
+| 16 | T116 | SLH-DSA Internal Module Unit Tests | — |
+| 17 | T117 | McEliece + FrodoKEM + XMSS Internal Module Tests | — |
+| 18 | T118 | Infrastructure — proptest Property-Based Tests + Coverage CI | — |
+| 19 | T119 | TLCP SM3 Cryptographic Path Coverage | — |
+| 20 | T120 | TLS 1.3 Key Schedule & HKDF Robustness Tests | — |
+| 21 | T121 | Record Layer Encryption Edge Cases & AEAD Failure Modes | — |
+| 22 | T122 | TLS 1.2 CBC Padding Security + DTLS Parsing + TLS 1.3 Inner Plaintext Edge Cases | — |
+| 23 | T123 | DTLS Fragmentation/Retransmission + CertificateVerify Edge Cases | — |
+| 24 | T124 | DTLS Codec Edge Cases + Anti-Replay Window Boundaries + Entropy Conditioning | — |
+| 25 | T125 | X.509 Extension Parsing + SLH-DSA WOTS+ Base Conversion + ASN.1 Tag Edge Cases | — |
+| 26 | T126 | PKI Encoding Helpers + X.509 Signing Dispatch + Certificate Builder Encoding | — |
+| 27 | T127 | X.509 Certificate Parsing + SM9 G2 Point Arithmetic + SM9 Pairing Helpers | — |
+| 28 | T128 | SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters | — |
+| 29 | T129 | McEliece Keygen Helpers + McEliece Encoding + McEliece Decoding | — |
+| 30 | T130 | XMSS Tree Operations + XMSS WOTS+ Deepening + SLH-DSA FORS Deepening | — |
+| 31 | T131 | McEliece GF(2^13) + Benes Network + Binary Matrix Deepening | — |
+| 32 | T132 | FrodoKEM Matrix Ops + SLH-DSA Hypertree + McEliece Polynomial Deepening | — |
+| 33 | T133 | McEliece + FrodoKEM + XMSS Parameter Set Validation Deepening | — |
+| 34 | T134 | XMSS Hash Abstraction + XMSS Address Scheme + ML-KEM NTT Deepening | — |
+| 35 | T135 | BigNum Constant-Time + Primality Testing + Core Type Deepening | — |
+| 36 | T141 | SLH-DSA Params + Hash Abstraction + Address Scheme Deepening | — |
+| 37 | T143 | FrodoKEM PKE + SM9 G1 Point + SM9 Fp Field Deepening | — |
+| 38 | T144 | ML-DSA NTT + SM4-CTR-DRBG + BigNum Random Deepening | — |
+| 39 | T145 | DH Group Params + Entropy Pool + SHA-1 Deepening | — |
+| 40 | T147 | ML-KEM Poly + SM9 Fp12 + Encrypted PKCS#8 Deepening | — |
+| 41 | T148 | ML-DSA Poly + X.509 Extensions + X.509 Text Deepening | 2026-02-24 |
+| 42 | T149 | XTS Mode + Edwards Curve + GMAC Deepening | — |
+| 43 | T150 | scrypt + CFB Mode + X448 Deepening | — |
+| 44 | T151 | Semantic Fuzz Target Expansion | — |
+
+### Refactoring (Phase RN)
+
+| # | Phase | Title | Date |
+|---|-------|-------|------|
+| 1 | R100 | PKI Encoding Consolidation | 2026-02-21 |
+| 2 | R101 | Record Layer Enum Dispatch | 2026-02-22 |
+| 3 | R102 | Connection File Decomposition | 2026-02-22 |
+| 4 | R103 | Hash Digest Enum Dispatch | 2026-02-22 |
+| 5 | R104 | Sync/Async Unification via Body Macros | 2026-02-22 |
+| 6 | R105 | X.509 Module Decomposition | 2026-02-22 |
+| 7 | R106 | Integration Test Modularization | 2026-02-23 |
+| 8 | R107 | Test Helper Consolidation | 2026-02-23 |
+| 9 | R108 | Parameter Struct Refactoring | 2026-02-23 |
+| 10 | R109 | DRBG State Machine Unification | 2026-02-23 |
+| 11 | R142 | Dev Profile Optimization: Accelerate Ignored Tests | — |
+| 12 | R146 | Dev Profile opt-level=2 Upgrade + Un-ignore 15 Tests | — |
+
+### Performance Optimization (Phase PN)
+
+| # | Phase | Title | Date |
+|---|-------|-------|------|
+| 1 | P137 | SHA-2 Hardware Acceleration — ARMv8 SHA-NI / x86-64 SHA-NI | — |
+| 2 | P138 | GHASH/CLMUL Hardware Acceleration — ARMv8 PMULL / x86-64 PCLMULQDQ | — |
+| 3 | P139 | P-256 Specialized Field Arithmetic and Fast ECC Path | — |
+| 4 | P140 | ChaCha20 SIMD Optimization — ARMv8 NEON / x86-64 SSE2 | — |
+| 5 | P152 | P-256 Deep Optimization | — |
+| 6 | P153 | ML-KEM NEON NTT Optimization | — |
+
+---
+
+## Part I: Migration Roadmap Archive
 
 > The following phase tables document the complete C→Rust migration history (Phase 20–94).
 > They were moved here from README.md to keep the README focused on feature showcase.
@@ -258,11 +424,9 @@
 | Privacy Pass | RFC 9578 Type 2: RSA blind signatures | **Done** |
 | CLI: list, rand, pkeyutl, speed | 4 new subcommands (14 total CLI commands) | **Done** |
 
-### Phase 43a: Remaining Features (NistP192, HCTR mode, CMS EncryptedData)
+### Phase 43: Remaining Features + DH Groups + TLS FFDHE Expansion
 
-Completed P-192, HCTR mode, CMS EncryptedData.
-
-### Phase 43b: Complete DH Groups + TLS FFDHE Expansion
+Completed P-192, HCTR mode, CMS EncryptedData, plus all 13 DH group primes and TLS FFDHE expansion.
 
 | Feature | Standard | Status |
 |---------|----------|--------|
@@ -517,26 +681,16 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 | empty_records_limit | Consecutive empty record DoS protection (default: 32) |
 | Integration tests | MsgCallback, InfoCallback, ClientHelloCallback, CBC-MAC-SM4, CMS AuthenticatedData |
 
-### Phase 94a: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
+### Phase 94: Encrypted PKCS#8 + Callbacks + SM4-CTR-DRBG + CMS ML-DSA
 
 | Feature | Description | Status |
 |---------|-------------|--------|
 | Encrypted PKCS#8 | PBES2 (PBKDF2-HMAC-SHA256 + AES-256-CBC/AES-128-CBC) | **Done** |
 | Session ID Context | session_id_context for session cache isolation | **Done** |
 | quiet_shutdown | Skip close_notify on shutdown (all 6 connection types) | **Done** |
-
-### Phase 94b: TicketKeyCallback + SecurityCallback
-
-| Feature | Description | Status |
-|---------|-------------|--------|
 | TicketKeyCallback | Session ticket key rotation callback | **Done** |
 | SecurityCallback | Cipher/group/sigalg security filtering | **Done** |
 | security_level config | Configurable security level (default: 1) | **Done** |
-
-### Phase 94c: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests
-
-| Feature | Description | Status |
-|---------|-------------|--------|
 | SM4-CTR-DRBG | NIST SP 800-90A §10.2 with SM4 cipher | **Done** |
 | CMS ML-DSA | ML-DSA-44/65/87 OID dispatch in CMS SignedData | **Done** |
 | Integration tests | quiet_shutdown, security_callback, encrypted_pkcs8 e2e | **Done** |
@@ -556,745 +710,219 @@ Completed P-192, HCTR mode, CMS EncryptedData.
 
 ---
 
-## Phase T96: connection_info / handshake enums / lib.rs constants / codec error paths / async accessors
+---
 
-### Date: 2026-02-20
+## Part II: Test Architecture & Coverage
 
-### Summary
+### 1. Executive Summary
 
-Added 40 unit tests across 7 files targeting zero-test or thin-coverage areas:
+| Metric | Value |
+|--------|-------|
+| **Total tests** | **3,184** (7 ignored) |
+| **Test growth** | 1,104 → 3,184 (+188% since baseline) |
+| **Crates covered** | 8/8 (100% crate-level coverage) |
+| **Fuzz targets** | 13 (with 79 seed corpus files) |
+| **Wycheproof vectors** | 5,000+ (15 test groups) |
+| **Zero failures** | All 3,184 tests pass, clippy clean, fmt clean |
 
-1. **connection_info.rs** (+5) — ConnectionInfo struct construction, optional fields, Debug/Clone traits, large peer certs
-2. **handshake/mod.rs** (+5) — HandshakeType wire-format discriminant values (all 18), distinctness, HandshakeState 12 variants, Debug/Clone, HandshakeMessage construction
-3. **lib.rs** (+7) — TLS 1.2 ECDHE/RSA/DHE/PSK/TLCP cipher suite constant verification, TlsRole enum, CipherSuite Debug, TlsVersion Hash
-4. **codec_tlcp.rs** (+7) — All error paths: certificate too short/body truncated/entry truncated, SKE too short/sig truncated, CKE too short/data truncated
-5. **codec_dtls.rs** (+9) — All error paths: HVR too short/cookie truncated, unknown handshake type, tls_to_dtls too short/length mismatch, dtls_to_tls too short/body mismatch, body truncated, CH too short
-6. **connection12_async.rs** (+4) — Multi-message exchange, verify_data cross-match, negotiated_group, server connection_info
-7. **connection_dtls12_async.rs** (+3) — Server/client connection_info before handshake, server accessors after handshake
+#### Test Growth Timeline
 
-### Files Modified
+```
+Phase       Tests   Delta   Period
+─────────   ─────   ─────   ──────────────────
+Baseline    1,104           Pre-testing effort
+Phase 47  1,291    +187   Foundation (core crypto + TLS + PKI)
+Phase 49–60 1,782    +491   Unit test expansion (crypto + TLS edge cases)
+Phase 61–68 1,846     +64   Cipher suite feature tests (CCM/PSK/DSS/ANON/renego)
+Phase 69–94 2,026    +180   Feature-driven tests (hostname/session/callbacks/PQC)
+Phase T72  1,964     +72   CLI + session cache concurrency (*)
+Phase T74  2,021     +33   Async TLS 1.3 + cipher suite integration (*)
+Phase T76  2,054     +18   Fuzz corpus + error scenario integration (*)
+Phase T77  2,070     +16   Key export + async export unit tests (*)
+Phase T79  2,131     +26   cert_verify + config callbacks + integration (*)
+Phase T81  2,144     +13   SniCallback + DTLS abbreviated + extensions (*)
+Phase T82  2,166     +22   GREASE + Heartbeat + async DTLS edge cases (*)
+Phase T83  2,194     +28   DTLS handshake + TLS 1.3 server + record + PRF (*)
+Phase T84  2,218     +24   TLCP server + transcript + key schedule + session (*)
+Phase T88  2,299     +25   Client TLCP + cipher params + Ed448 + HKDF (*)
+Phase T89  2,323     +24   Codec + server12 + client12 + dtls12 + config (*)
+Phase T90  2,348     +25   Session + client + server + async + dtls12-async (*)
+Phase T91  2,372     +24   Record + extensions + export + codec + connection (*)
+Phase T92  2,397     +25   AEAD + crypt + alert + signing + config (*)
+Phase T93  2,420     +23   Retransmit + keylog + fragment + anti_replay (*)
+Phase T95  2,445     +25   Async TLS 1.2 + DTLCP + encryption + lib.rs (*)
+Phase T96  2,519     +40   ConnectionInfo + handshake enums + codec errors (*)
+Phase T97  2,544     +25   ECC/DH params + TLCP API + DTLCP encryption (*)
+Phase T98  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
+Phase T99  2,585      +8   0-RTT early data + replay protection (*)
+Phase T110  2,595     +10   Async TLS 1.2 deep coverage + session resumption fix (*)
+Phase T111  2,610     +15   Async TLCP + DTLCP connection types & tests (*)
+Phase T112  2,624     +14   Extension negotiation E2E tests (*)
+Phase T113  2,634     +10   DTLS loss simulation & resilience tests (*)
+Phase T114  2,644     +10   TLCP double certificate validation tests (*)
+Phase T115  2,659     +15   SM9 tower field (Fp2/Fp4/Fp12) unit tests (*)
+Phase T116  2,674     +15   SLH-DSA internal module unit tests (*)
+Phase T117  2,689     +15   McEliece + FrodoKEM + XMSS internal tests (*)
+Phase T118  2,709     +20   proptest property-based + coverage CI (*)
+Phase T119  2,724     +15   TLCP SM3 cryptographic path coverage (*)
+Phase T120  2,739     +15   TLS 1.3 key schedule & HKDF robustness (*)
+Phase T121  2,754     +15   Record layer encryption edge cases & AEAD failure modes (*)
+Phase T122  2,769     +15   TLS 1.2 CBC padding + DTLS parsing + TLS 1.3 inner plaintext (*)
+Phase T123  2,784     +15   DTLS fragmentation/retransmission + CertificateVerify (*)
+Phase T124  2,799     +15   DTLS codec edge cases + anti-replay boundaries + entropy (*)
+Phase T125  2,814     +15   X.509 extension parsing + WOTS+ base conversion + ASN.1 tag (*)
+Phase T126  2,829     +15   PKI encoding helpers + X.509 signing dispatch + builder encoding (*)
+Phase T127  2,844     +15   X.509 certificate parsing + SM9 G2 + SM9 pairing (*)
+Phase T128  2,857     +13   SM9 hash functions + algorithm helpers + curve params (*)
+Phase T129  2,872     +15   McEliece keygen helpers + encoding + decoding (*)
+Phase T130  2,882     +10   XMSS tree ops + WOTS+ deepening + FORS deepening (*)
+Phase T131  2,897     +15   McEliece GF(2^13) + Benes network + matrix deepening (*)
+Phase T132  2,909     +12   FrodoKEM matrix ops + SLH-DSA hypertree + McEliece poly (*)
+Phase T133  2,924     +15   McEliece + FrodoKEM + XMSS parameter set validation (*)
+Phase T134  2,939     +15   XMSS hash + address + ML-KEM NTT deepening (*)
+Phase T135  2,954     +15   BigNum CT + primality + core type deepening (*)
+Phase T141  2,969     +15   SLH-DSA params + hash abstraction + address deepening (*)
+Phase T143  3,079     +15   FrodoKEM PKE + SM9 G1 point + SM9 Fp field (*)
+Phase T144  3,094     +15   ML-DSA NTT + SM4-CTR-DRBG + BigNum random (*)
+Phase T145  3,109     +15   DH group params + entropy pool + SHA-1 (*)
+Phase T147  3,124     +15   ML-KEM poly + SM9 Fp12 + encrypted PKCS#8 (*)
+Phase T148  3,154     +15   ML-DSA poly + X.509 extensions + X.509 text (*)
+Phase T149  3,169     +15   XTS mode + Edwards curve + GMAC deepening (*)
+Phase T150  3,184     +15   scrypt + CFB mode + X448 deepening (*)
+```
 
-1. **`crates/hitls-tls/src/connection_info.rs`** — Added `#[cfg(test)] mod tests` with 5 tests
-2. **`crates/hitls-tls/src/handshake/mod.rs`** — Added `#[cfg(test)] mod tests` with 5 tests
-3. **`crates/hitls-tls/src/lib.rs`** — Added 7 tests to existing test module
-4. **`crates/hitls-tls/src/handshake/codec_tlcp.rs`** — Added 7 error-path tests
-5. **`crates/hitls-tls/src/handshake/codec_dtls.rs`** — Added 9 error-path tests
-6. **`crates/hitls-tls/src/connection12_async.rs`** — Added 4 async accessor/data tests
-7. **`crates/hitls-tls/src/connection_dtls12_async.rs`** — Added 3 async accessor tests
-
-### Test Counts
-
-| # | Test | File |
-|---|------|------|
-| 1 | test_connection_info_construction_all_fields | connection_info.rs |
-| 2 | test_connection_info_optional_fields_none | connection_info.rs |
-| 3 | test_connection_info_debug_format | connection_info.rs |
-| 4 | test_connection_info_clone_independence | connection_info.rs |
-| 5 | test_connection_info_large_peer_certs | connection_info.rs |
-| 6 | test_handshake_type_discriminant_values | handshake/mod.rs |
-| 7 | test_handshake_type_all_variants_distinct | handshake/mod.rs |
-| 8 | test_handshake_state_variants | handshake/mod.rs |
-| 9 | test_handshake_type_debug_clone | handshake/mod.rs |
-| 10 | test_handshake_message_construction | handshake/mod.rs |
-| 11 | test_cipher_suite_tls12_ecdhe_constants | lib.rs |
-| 12 | test_cipher_suite_tls12_rsa_dhe_constants | lib.rs |
-| 13 | test_cipher_suite_tls12_psk_constants | lib.rs |
-| 14 | test_cipher_suite_tlcp_constants | lib.rs |
-| 15 | test_tls_role_enum | lib.rs |
-| 16 | test_cipher_suite_debug | lib.rs |
-| 17 | test_tls_version_hash | lib.rs |
-| 18 | test_decode_tlcp_certificate_too_short | codec_tlcp.rs |
-| 19 | test_decode_tlcp_certificate_body_truncated | codec_tlcp.rs |
-| 20 | test_decode_tlcp_certificate_entry_truncated | codec_tlcp.rs |
-| 21 | test_decode_ecc_server_key_exchange_too_short | codec_tlcp.rs |
-| 22 | test_decode_ecc_server_key_exchange_sig_truncated | codec_tlcp.rs |
-| 23 | test_decode_ecc_client_key_exchange_too_short | codec_tlcp.rs |
-| 24 | test_decode_ecc_client_key_exchange_data_truncated | codec_tlcp.rs |
-| 25 | test_decode_hello_verify_request_too_short | codec_dtls.rs |
-| 26 | test_decode_hello_verify_request_cookie_truncated | codec_dtls.rs |
-| 27 | test_dtls_handshake_unknown_type | codec_dtls.rs |
-| 28 | test_tls_to_dtls_too_short | codec_dtls.rs |
-| 29 | test_tls_to_dtls_length_mismatch | codec_dtls.rs |
-| 30 | test_dtls_to_tls_too_short | codec_dtls.rs |
-| 31 | test_dtls_to_tls_body_length_mismatch | codec_dtls.rs |
-| 32 | test_dtls_get_body_truncated | codec_dtls.rs |
-| 33 | test_dtls_client_hello_too_short_for_version | codec_dtls.rs |
-| 34 | test_async_tls12_multi_message_exchange | connection12_async.rs |
-| 35 | test_async_tls12_verify_data_after_handshake | connection12_async.rs |
-| 36 | test_async_tls12_negotiated_group_after_handshake | connection12_async.rs |
-| 37 | test_async_tls12_server_connection_info_after_handshake | connection12_async.rs |
-| 38 | test_async_dtls12_server_connection_info_before_handshake | connection_dtls12_async.rs |
-| 39 | test_async_dtls12_server_accessors_after_handshake | connection_dtls12_async.rs |
-| 40 | test_async_dtls12_client_connection_info_before_handshake | connection_dtls12_async.rs |
-
-+40 tests (2479 → 2519): hitls-tls 1103 → 1143 (+40)
-
-### Build Status
-- `cargo test --workspace --all-features`: 2519 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
+(*) Testing-only phases (no new features, pure test coverage)
 
 ---
 
-## Phase 94c: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests + Documentation Sync
+### 2. Test Architecture
 
-### Date: 2026-02-19
+#### Test Pyramid
 
-### Summary
+```
+                    ┌─────────────┐
+                    │  Fuzz (13)  │  libfuzzer targets: ASN.1, PEM, X.509, TLS, CMS, AEAD, verify...
+                   ─┼─────────────┼─
+                  │   Integration  │  125 cross-crate TCP/loopback tests
+                 ─┼────────────────┼─
+               │   Wycheproof 5000+ │  Standard test vectors (NIST, RFC, GB/T)
+              ─┼─────────────────────┼─
+            │      Unit Tests 2,327    │  Per-module: roundtrip, negative, edge cases
+           ─┴─────────────────────────┴─
+```
 
-Implemented three features plus documentation sync, completing 100% C→Rust feature parity:
-1. **SM4-CTR-DRBG** — NIST SP 800-90A Section 10.2 CTR-DRBG using SM4 as the block cipher (128-bit key, 128-bit block, 32-byte seed). `Sm4CtrDrbg` struct with `new()`, `generate()`, `generate_bytes()`, `reseed()`. Feature-gated under `sm4`. 4 tests.
-2. **CMS ML-DSA OID Integration** — Added ML-DSA-44/65/87 OID constants to `hitls-utils`. Wired ML-DSA verification dispatch into CMS SignedData `verify_signature_with_cert()`. Made `mldsa_verify`, `get_params`, `MlDsaParams` public. Feature-gated under `mldsa`. 3 tests.
-3. **Integration Tests** — 3 end-to-end integration tests: quiet_shutdown (TLS 1.3, no close_notify sent), security_callback (reject weak cipher suites), encrypted_pkcs8 (encrypt/decrypt roundtrip).
-4. **Documentation Sync** — Updated CLAUDE.md, DEV_LOG.md, PROMPT_LOG.md, README.md.
+#### Per-Crate Breakdown (Current)
 
-### Files Modified
+| Crate | Tests | Ignored | % of Total | Focus |
+|-------|------:|--------:|:----------:|-------|
+| hitls-tls | 1,199 | 0 | 45.4% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks |
+| hitls-crypto | 697 | 31 | 25.9% | 48 algorithm modules + hardware acceleration |
+| hitls-pki | 354 | 1 | 13.4% | X.509, PKCS#8/12, CMS (5 content types) |
+| hitls-integration | 149 | 3 | 5.6% | Cross-crate TCP loopback, error scenarios, concurrency |
+| hitls-cli | 117 | 5 | 4.5% | 14 CLI commands (dgst, x509, genpkey, etc.) |
+| hitls-utils | 53 | 0 | 2.1% | ASN.1, Base64, PEM, OID |
+| hitls-bignum | 49 | 0 | 1.9% | Montgomery, Miller-Rabin, modular arithmetic |
+| hitls-auth | 33 | 0 | 1.3% | HOTP/TOTP, SPAKE2+, Privacy Pass |
+| hitls-types | 26 | 0 | 1.0% | Enum definitions, error types |
+| Wycheproof | 15 | 0 | 0.6% | 5,000+ vectors across 15 test groups |
+| Doc-tests | 2 | 0 | 0.1% | API documentation examples |
+| **Total** | **2,689** | **40** | **100%** | |
 
-1. **`crates/hitls-crypto/src/drbg/sm4_ctr_drbg.rs`** — NEW: SM4-CTR-DRBG implementation (Sm4CtrDrbg struct, update/generate/reseed, 4 tests)
-2. **`crates/hitls-crypto/src/drbg/mod.rs`** — Added `sm4_ctr_drbg` module + `Sm4CtrDrbg` re-export
-3. **`crates/hitls-utils/src/oid/mod.rs`** — Added ML-DSA OIDs: ml_dsa_44(), ml_dsa_65(), ml_dsa_87()
-4. **`crates/hitls-pki/src/cms/mod.rs`** — ML-DSA verification dispatch + 3 tests
-5. **`crates/hitls-pki/Cargo.toml`** — Added `mldsa` feature
-6. **`crates/hitls-crypto/src/mldsa/mod.rs`** — Made MlDsaParams/get_params/mldsa_verify public
-7. **`tests/interop/src/lib.rs`** — 3 new integration tests
+#### Test Quality Principles
 
-### Test Counts
-
-| # | Test | File |
-|---|------|------|
-| 1 | test_sm4_ctr_drbg_generate | drbg/sm4_ctr_drbg.rs |
-| 2 | test_sm4_ctr_drbg_reseed | drbg/sm4_ctr_drbg.rs |
-| 3 | test_sm4_ctr_drbg_deterministic | drbg/sm4_ctr_drbg.rs |
-| 4 | test_sm4_ctr_drbg_vs_aes_different_output | drbg/sm4_ctr_drbg.rs |
-| 5 | test_cms_mldsa_oid_definitions | cms/mod.rs |
-| 6 | test_cms_mldsa_sign_verify_roundtrip | cms/mod.rs |
-| 7 | test_cms_mldsa_tampered_signature | cms/mod.rs |
-| 8 | test_quiet_shutdown_e2e | interop/lib.rs |
-| 9 | test_security_callback_e2e | interop/lib.rs |
-| 10 | test_encrypted_pkcs8_e2e | interop/lib.rs |
-
-+10 tests (2347 → 2357): hitls-crypto 603 → 607 (+4), hitls-pki 346 → 349 (+3), hitls-integration 122 → 125 (+3)
-
-### Build Status
-- `cargo test --workspace --all-features`: 2357 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
----
-
-## Phase 94b: TicketKeyCallback + SecurityCallback
-
-### Date: 2026-02-19
-
-### Summary
-
-Implemented two TLS config callback features:
-1. **TicketKeyCallback** — `Arc<dyn Fn(&[u8], bool) -> Option<TicketKeyResult> + Send + Sync>` for session ticket key rotation. `TicketKeyResult` struct with `key_name`, `key`, `iv`. Config field + builder method. 5 tests.
-2. **SecurityCallback** — `Arc<dyn Fn(u32, u32, u16) -> bool + Send + Sync>` for filtering cipher suites/groups/signature algorithms by security policy. Config field `security_cb` + `security_level: u32` + builder methods. 7 tests.
-
-### Files Modified
-
-1. **`crates/hitls-tls/src/config/mod.rs`** — TicketKeyResult struct, TicketKeyCallback/SecurityCallback type aliases, 5 config fields + builder methods + Debug impl + 12 tests
-
-### Test Counts
-
-| # | Test | File |
-|---|------|------|
-| 1 | test_config_ticket_key_cb | config/mod.rs |
-| 2 | test_config_ticket_key_cb_encrypt_decrypt | config/mod.rs |
-| 3 | test_config_ticket_key_cb_reject | config/mod.rs |
-| 4 | test_config_ticket_key_cb_default_none | config/mod.rs |
-| 5 | test_config_ticket_key_cb_clone | config/mod.rs |
-| 6 | test_config_security_cb | config/mod.rs |
-| 7 | test_config_security_cb_reject_cipher | config/mod.rs |
-| 8 | test_config_security_cb_reject_group | config/mod.rs |
-| 9 | test_config_security_cb_reject_sigalg | config/mod.rs |
-| 10 | test_config_security_level | config/mod.rs |
-| 11 | test_config_security_cb_default_none | config/mod.rs |
-| 12 | test_config_security_cb_clone | config/mod.rs |
-
-+12 tests (2335 → 2347): hitls-tls 943 → 955 (+12)
-
-### Build Status
-- `cargo test --workspace --all-features`: 2347 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
+- **RFC / standard test vectors**: FIPS 197, RFC 8448, RFC 5869, RFC 7539, RFC 8032, RFC 4231, GB/T 32905/32907
+- **Roundtrip tests**: All encrypt/decrypt and sign/verify paths
+- **Negative tests**: Wrong key, tampered data, invalid lengths, scheme mismatches
+- **Edge cases**: Empty input, single byte, max-size data, boundary values
+- **Wrong-state tests**: Every TLS handshake state machine transition with invalid states
+- **Determinism checks**: Same input → same output
+- **Constant-time equality**: `subtle::ConstantTimeEq` in all cryptographic comparisons
 
 ---
 
-## Phase 94a: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
+### 3. Coverage Gap Analysis & Optimization Plan
 
-### Date: 2026-02-19
+> Full quality analysis: [QUALITY_REPORT.md](QUALITY_REPORT.md)
 
-### Summary
+#### Identified Deficiencies
 
-Implemented three features:
-1. **Encrypted PKCS#8 (EncryptedPrivateKeyInfo)** — RFC 5958 EncryptedPrivateKeyInfo parsing and encoding with PBES2 (PBKDF2-HMAC-SHA256 + AES-256-CBC default, AES-128-CBC optional). Functions: `decrypt_pkcs8_der()`, `decrypt_pkcs8_pem()`, `encrypt_pkcs8_der()`, `encrypt_pkcs8_der_with()`, `encrypt_pkcs8_pem()`. 5 tests.
-2. **Session ID Context** — `session_id_context: Option<Vec<u8>>` config field for server-side session cache isolation. Builder method. 3 tests.
-3. **quiet_shutdown** — `quiet_shutdown: bool` config (default false) to skip sending close_notify alert on shutdown. Wired into all 6 connection types (TLS 1.3, TLS 1.2, DTLS 1.2 × sync/async). 4 tests.
+| Severity | ID | Description | Status |
+|:--------:|:--:|-------------|:------:|
+| Critical | D1 | 0-RTT replay protection: zero tests | **Closed** (Phase T99: +8 tests) |
+| Critical | D2 | Async TLS 1.2/TLCP/DTLCP: zero tests | Open |
+| High | D3 | Extension negotiation: no e2e tests | Open |
+| High | D4 | DTLS loss/retransmission: no tests | Open |
+| High | D5 | TLCP double certificate: untested | Open |
+| Medium | D6 | No property-based testing framework | Open |
+| Medium | D7 | No code coverage metrics in CI | Open |
+| Medium | D8 | No cross-implementation interop | Open |
+| Low-Med | D9 | Fuzz targets: parse-only | Open |
+| Low | D10 | 30 crypto files without unit tests | Open |
 
-### Files Modified
+#### Remaining Untested Files (30 files, ~6,670 lines)
 
-1. **`crates/hitls-pki/src/pkcs8/encrypted.rs`** — NEW: Encrypted PKCS#8 implementation + 5 tests
-2. **`crates/hitls-pki/src/pkcs8/mod.rs`** — Added `pub mod encrypted;`
-3. **`crates/hitls-tls/src/config/mod.rs`** — session_id_context + quiet_shutdown fields + builder + 7 tests
-4. **`crates/hitls-tls/src/connection.rs`** — quiet_shutdown guard in TLS 1.3 shutdown
-5. **`crates/hitls-tls/src/connection12.rs`** — quiet_shutdown guard in TLS 1.2 shutdown
-6. **`crates/hitls-tls/src/connection_async.rs`** — quiet_shutdown guard in async TLS 1.3 shutdown
-7. **`crates/hitls-tls/src/connection12_async.rs`** — quiet_shutdown guard in async TLS 1.2 shutdown
-8. **`crates/hitls-tls/src/connection_dtls12.rs`** — quiet_shutdown guard in DTLS 1.2 sync shutdown
-9. **`crates/hitls-tls/src/connection_dtls12_async.rs`** — quiet_shutdown guard in async DTLS 1.2 shutdown
+After Phase T99, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
 
-### Test Counts
+| Category | Files | Lines | Complexity |
+|----------|------:|------:|:----------:|
+| **SLH-DSA** (FIPS 205) | 6 | 1,224 | High |
+| **Classic McEliece** | 7 | 1,686 | High |
+| **XMSS** (RFC 8391) | 5 | 752 | Medium |
+| **FrodoKEM** | 3 | 743 | Medium |
+| **SM9** (remaining) | 7 | 1,121 | Medium |
+| **Provider traits** | 1 | 144 | Low |
 
-| # | Test | File |
-|---|------|------|
-| 1 | test_encrypted_pkcs8_roundtrip_ed25519 | pkcs8/encrypted.rs |
-| 2 | test_encrypted_pkcs8_roundtrip_ec | pkcs8/encrypted.rs |
-| 3 | test_encrypted_pkcs8_wrong_password | pkcs8/encrypted.rs |
-| 4 | test_encrypted_pkcs8_aes128_compat | pkcs8/encrypted.rs |
-| 5 | test_encrypted_pkcs8_pem_roundtrip | pkcs8/encrypted.rs |
-| 6 | test_config_session_id_context | config/mod.rs |
-| 7 | test_config_session_id_context_none | config/mod.rs |
-| 8 | test_config_session_id_context_clone | config/mod.rs |
-| 9 | test_config_quiet_shutdown | config/mod.rs |
-| 10 | test_config_quiet_shutdown_default | config/mod.rs |
-| 11 | test_config_quiet_shutdown_clone | config/mod.rs |
-| 12 | test_config_quiet_shutdown_builder | config/mod.rs |
+#### Optimization Roadmap — Phase T99–T118
 
-+12 tests (2323 → 2335): hitls-pki 341 → 346 (+5), hitls-tls 936 → 943 (+7)
+| Phase | Est. Tests | Deficiency | Focus |
+|-------|:----------:|:----------:|-------|
+| **Phase T99** | ~8 | D1 | 0-RTT early data + replay protection ✅ |
+| **Phase T110** | ~20 | D2 | Async TLS 1.2 connection tests ✅ |
+| **Phase T111** | ~15 | D2 | Async TLCP + DTLCP connection tests |
+| **Phase T112** | ~12 | D3 | Extension negotiation e2e tests |
+| **Phase T113** | +10 | D4 | DTLS loss simulation + retransmission ✅ |
+| **Phase T114** | +10 | D5 | TLCP double certificate validation ✅ |
+| **Phase T115** | ~15 | D10 | SM9 tower fields (fp2/fp4/fp12) ✅ |
+| **Phase T116** | ~15 | D10 | SLH-DSA internal modules ✅ |
+| **Phase T117** | ~15 | D10 | McEliece + FrodoKEM + XMSS internals ✅ |
+| **Phase T118** | — | D6/D7 | Infra: proptest + coverage CI |
 
-### Build Status
-- `cargo test --workspace --all-features`: 2335 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
+#### Coverage Metrics Target
 
----
-
-## Phase 87: DTLS Config Enhancements + Integration Tests for Phase 85–86 Features
-
-### Date: 2026-02-19
-
-### Summary
-
-Implemented two features:
-1. **DTLS Configuration Enhancements** — Added `flight_transmit_enable` (bool, default true) and `empty_records_limit` (u32, default 32) to TlsConfig + TlsConfigBuilder. Implemented `check_empty_record()` in RecordLayer for DoS protection: tracks consecutive empty plaintext records, rejects empty Alert/ApplicationData records, rejects empty encrypted records, and returns fatal error when limit exceeded. 2 config tests + 7 record layer tests.
-2. **Integration Tests for Phase 85–86 Features** â 9 integration tests covering: MsgCallback TLS 1.3/1.2 (config acceptance + handshake success), InfoCallback (server-side events), ClientHelloCallback (cipher suite observation), CBC-MAC-SM4 (create/verify/determinism), CMS AuthenticatedData (create/verify/DER roundtrip), RecordPaddingCallback (wired + handshake + data exchange), DTLS config enhancements (flight_transmit_enable + empty_records_limit + handshake), RecordLayer empty records limit (DoS protection).
-
-### Files Modified
-
-1. **`crates/hitls-tls/src/config/mod.rs`** — 2 new config fields (flight_transmit_enable, empty_records_limit) + builder methods + 2 tests
-2. **`crates/hitls-tls/src/record/mod.rs`** — empty_record_count/empty_records_limit fields + check_empty_record() method + DEFAULT_EMPTY_RECORDS_LIMIT constant + 7 tests
-3. **`tests/interop/src/lib.rs`** — 9 new integration tests
-4. **`tests/interop/Cargo.toml`** — Added `cbc-mac` feature to hitls-crypto dependency
-
-### Test Counts
-
-| # | Test | File |
-|---|------|------|
-| 1 | test_config_flight_transmit_enable | config/mod.rs |
-| 2 | test_config_empty_records_limit | config/mod.rs |
-| 3 | test_empty_record_defaults | record/mod.rs |
-| 4 | test_empty_record_non_empty_resets | record/mod.rs |
-| 5 | test_empty_record_limit_exceeded | record/mod.rs |
-| 6 | test_empty_record_alert_rejected | record/mod.rs |
-| 7 | test_empty_record_app_data_rejected | record/mod.rs |
-| 8 | test_empty_record_ccs_allowed | record/mod.rs |
-| 9 | test_empty_record_zero_limit | record/mod.rs |
-| 10 | test_tls13_msg_callback | interop/lib.rs |
-| 11 | test_tls12_msg_callback | interop/lib.rs |
-| 12 | test_tls13_info_callback | interop/lib.rs |
-| 13 | test_tls13_client_hello_callback | interop/lib.rs |
-| 14 | test_cbc_mac_sm4_integration | interop/lib.rs |
-| 15 | test_cms_authenticated_data_integration | interop/lib.rs |
-| 16 | test_tls13_record_padding_callback | interop/lib.rs |
-| 17 | test_dtls12_config_enhancements | interop/lib.rs |
-| 18 | test_record_layer_empty_records_limit | interop/lib.rs |
-
-+18 tests (2256 → 2274): hitls-tls 904 → 913 (+9), hitls-integration 113 → 122 (+9)
-
-### Build Status
-- `cargo test --workspace --all-features`: 2274 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
+| Metric | Current | After Phase T117 | After Phase T118 |
+|--------|:-------:|:-----------------:|:-----------------:|
+| Total tests | 2,689 | 2,689 | 2,750+ |
+| Critical deficiencies | 0 | 0 | 0 |
+| High deficiencies | 1 | 1 | 0 |
+| Async connection coverage | 40% | 100% | 100% |
+| Crypto files with tests | 75% | 78% | 90%+ |
+| Property-based testing | No | No | Yes |
+| Code coverage in CI | No | No | Yes |
 
 ---
 
-## Phase 86: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9)
+### Refactoring Queue Summary
 
-### Date: 2026-02-19
+The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and have not yet been started:
 
-### Summary
+| Phase | Title | Priority | Status |
+|-------|-------|----------|--------|
+| Phase R100 | PKI Encoding Consolidation | Critical | **Done** |
+| Phase R101 | Record Layer Enum Dispatch | High | **Done** |
+| Phase R102 | Connection File Decomposition | High | **Done** |
+| Phase R103 | Hash Digest Enum Dispatch | Medium | **Done** |
+| Phase R104 | Sync/Async Unification via Macros | Medium | **Done** |
+| Phase R105 | X.509 Module Decomposition | Medium | **Done** |
+| Phase R106 | Integration Test Modularization | Medium | **Done** |
+| Phase R107 | Test Helper Consolidation | Low | **Done** |
+| Phase R108 | Parameter Struct Refactoring | Low | **Done** |
+| Phase R109 | DRBG State Machine Unification | Low | **Done** |
 
-Implemented four features:
-1. **Trusted CA Keys (RFC 6066 §6, type 3)** — ExtensionType constant + codec (build_trusted_ca_keys/parse_trusted_ca_keys) + config field `trusted_ca_keys: Vec<TrustedAuthority>` + builder method + ClientHello integration (TLS 1.3 + TLS 1.2). 3 codec tests + 1 config test.
-2. **USE_SRTP (RFC 5764, type 14)** — ExtensionType constant + codec (build_use_srtp/parse_use_srtp) + config field `srtp_profiles: Vec<u16>` + builder method + ClientHello integration (TLS 1.3 + TLS 1.2). 3 codec tests + 1 config test.
-3. **STATUS_REQUEST_V2 (RFC 6961, type 17)** — ExtensionType constant + codec (build_status_request_v2/parse_status_request_v2) + config field `enable_ocsp_multi_stapling: bool` + builder method + ClientHello integration (TLS 1.3 + TLS 1.2). 2 codec tests + 1 config test.
-4. **CMS AuthenticatedData (RFC 5652 §9)** — AuthenticatedData struct + parse/encode + create (CmsMessage::authenticate) + verify (CmsMessage::verify_mac) + HMAC-SHA-256/384/512 support + OID (1.2.840.113549.1.9.16.1.2) + DER roundtrip + 5 tests.
-
-### Files Modified
-
-1. **`crates/hitls-tls/src/extensions/mod.rs`** — 3 new ExtensionType constants (TRUSTED_CA_KEYS type 3, USE_SRTP type 14, STATUS_REQUEST_V2 type 17)
-2. **`crates/hitls-tls/src/handshake/extensions_codec.rs`** — 6 codec functions (build/parse for each extension) + 9 tests (3 trusted_ca_keys + 3 use_srtp + 2 status_request_v2 + 1 roundtrip)
-3. **`crates/hitls-tls/src/config/mod.rs`** — 3 new config fields (trusted_ca_keys, srtp_profiles, enable_ocsp_multi_stapling) + builder methods + 3 config tests
-4. **`crates/hitls-tls/src/handshake/client.rs`** — 3 extension building calls in TLS 1.3 ClientHello
-5. **`crates/hitls-tls/src/handshake/client12.rs`** — 3 extension building calls in TLS 1.2 ClientHello
-6. **`crates/hitls-pki/src/cms/mod.rs`** — AuthenticatedData struct + parse/encode/create/verify + 5 tests
-7. **`crates/hitls-pki/src/cms/encrypted.rs`** — authenticated_data field added
-8. **`crates/hitls-pki/src/cms/enveloped.rs`** — authenticated_data field added
-9. **`crates/hitls-utils/src/oid/mod.rs`** — 3 new OIDs (cms_authenticated_data, hmac_sha384, hmac_sha512)
-
-### Implementation Details
-
-- **Trusted CA Keys**: TrustedAuthority enum with PreAgreed, KeySha1Hash([u8;20]), X509Name(Vec<u8>), CertSha1Hash([u8;20]) variants per RFC 6066 §6 IdentifierType. Wire format: authorities_length(2) || [identifier_type(1) || data]*. Added to ClientHello when trusted_ca_keys is non-empty.
-- **USE_SRTP**: Wire format: profiles_length(2) || [profile_id(2)]* || mki_length(1) || mki. Config stores Vec<u16> of SRTP protection profiles. Added to ClientHello when srtp_profiles is non-empty.
-- **STATUS_REQUEST_V2**: Wire format: list_length(2) || [status_type(1)=2 || request_length(2) || responder_id_list_length(2)=0 || request_extensions_length(2)=0]*. Single OCSP_MULTI request item emitted. Added to ClientHello when enable_ocsp_multi_stapling is true.
-- **CMS AuthenticatedData**: ContentInfo with OID 1.2.840.113549.1.9.16.1.2, version 0, originatorInfo absent, recipientInfos with KeyTransRecipientInfo (RSA key transport), macAlgorithm (HMAC-SHA-256/384/512), encapContentInfo with eContentType id-data, mac value. authenticate() creates with random MAC key encrypted to recipient RSA public key. verify_mac() decrypts MAC key with recipient private key and re-computes HMAC.
-
-### Test Counts
-
-| # | Test | File |
-|---|------|------|
-| 1 | test_build_parse_trusted_ca_keys | extensions_codec.rs |
-| 2 | test_trusted_ca_keys_empty | extensions_codec.rs |
-| 3 | test_trusted_ca_keys_roundtrip | extensions_codec.rs |
-| 4 | test_build_parse_use_srtp | extensions_codec.rs |
-| 5 | test_use_srtp_empty | extensions_codec.rs |
-| 6 | test_use_srtp_roundtrip | extensions_codec.rs |
-| 7 | test_build_parse_status_request_v2 | extensions_codec.rs |
-| 8 | test_status_request_v2_roundtrip | extensions_codec.rs |
-| 9 | test_status_request_v2_parse_empty | extensions_codec.rs |
-| 10 | test_config_trusted_ca_keys | config/mod.rs |
-| 11 | test_config_srtp_profiles | config/mod.rs |
-| 12 | test_config_enable_ocsp_multi_stapling | config/mod.rs |
-| 13-15 | CMS AuthenticatedData tests (create/verify, DER roundtrip, HMAC variants) | cms/mod.rs |
-
-+17 tests (2239 → 2256): hitls-tls 892 → 904 (+12), hitls-pki 336 → 341 (+5)
-
-### Build Status
-- `cargo test --workspace --all-features`: 2256 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
+All 10 refactoring phases complete.
 
 ---
 
-## Phase 85: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4
-
-### Date: 2026-02-19
-
-### Summary
-
-Implemented three features:
-1. **TLS Callback Framework** — 7 new callback types (`MsgCallback`, `InfoCallback`, `RecordPaddingCallback`, `DhTmpCallback`, `CookieGenCallback`, `CookieVerifyCallback`, `ClientHelloCallback`) with `ClientHelloInfo` struct and `ClientHelloAction` enum. All callbacks use `Arc<dyn Fn(...) + Send + Sync>` pattern. Wired `record_padding_cb` into TLS 1.3 `RecordEncryptor`, `cookie_gen/verify_callback` into DTLS 1.2/DTLCP servers, `client_hello_callback` into TLS 1.3/1.2 servers.
-2. **Missing Legacy Alert Codes** — Added 6 legacy/deprecated alert codes to `AlertDescription`: `DecryptionFailed(21)`, `DecompressionFailure(30)`, `NoCertificateReserved(41)`, `ExportRestrictionReserved(60)`, `CertificateUnobtainable(111)`, `BadCertificateHashValue(114)`. Updated `from_u8()` and tests (28→34 variants).
-3. **CBC-MAC-SM4** — New `CbcMacSm4` implementation using SM4 block cipher with zero-padding. Feature-gated behind `cbc-mac = ["sm4"]`. Implements `new(key)`, `update(data)`, `finish(out)`, `reset()` API pattern. Derives `Zeroize`/`ZeroizeOnDrop`.
-
-### Files Modified
-
-1. **`crates/hitls-tls/src/config/mod.rs`** — 7 callback type aliases + `ClientHelloInfo` struct + `ClientHelloAction` enum + 7 config fields + 7 builder methods + Debug impl entries + 10 tests
-2. **`crates/hitls-tls/src/alert/mod.rs`** — 6 new alert codes + updated `from_u8()` + updated tests (34 variants) + `test_legacy_alert_codes` test
-3. **`crates/hitls-crypto/src/cbc_mac.rs`** — NEW: CBC-MAC-SM4 implementation with 10 unit tests
-4. **`crates/hitls-crypto/src/lib.rs`** — Registered `cbc_mac` module under `#[cfg(feature = "cbc-mac")]`
-5. **`crates/hitls-crypto/Cargo.toml`** — Added `cbc-mac = ["sm4"]` feature flag
-6. **`crates/hitls-tls/src/record/encryption.rs`** — Added `padding_cb` field to `RecordEncryptor`, `set_padding_callback()` method, invocation in `encrypt_record()`
-7. **`crates/hitls-tls/src/record/mod.rs`** — Added `set_record_padding_callback()` on `RecordLayer`
-8. **`crates/hitls-tls/src/connection.rs`** — Wired `record_padding_callback` from config at 2 app key activation points (client + server)
-9. **`crates/hitls-tls/src/handshake/server.rs`** — Wired `client_hello_callback` into TLS 1.3 server after SNI
-10. **`crates/hitls-tls/src/handshake/server12.rs`** — Wired `client_hello_callback` into TLS 1.2 server after SNI
-11. **`crates/hitls-tls/src/handshake/server_dtls12.rs`** — Wired `cookie_gen_callback`/`cookie_verify_callback` into DTLS 1.2 server
-12. **`crates/hitls-tls/src/handshake/server_dtlcp.rs`** — Wired `cookie_gen_callback`/`cookie_verify_callback` into DTLCP server
-
-### Implementation Details
-
-- **Callback signatures** match C openHiTLS typedefs (`HITLS_MsgCb`, `HITLS_InfoCb`, etc.) adapted to Rust idioms
-- **MsgCallback**: `fn(is_write: bool, content_type: u16, version: u8, data: &[u8])` — observes all protocol messages
-- **InfoCallback**: `fn(event_type: i32, value: i32)` — state change/alert notifications
-- **RecordPaddingCallback**: `fn(content_type: u8, plaintext_len: usize) -> usize` — returns padding length for TLS 1.3 records
-- **DhTmpCallback**: `fn(is_export: bool, key_length: u32) -> Option<Vec<u8>>` — dynamic DH parameter generation
-- **CookieGenCallback**: `fn(client_hello_hash: &[u8]) -> Vec<u8>` — custom DTLS cookie generation
-- **CookieVerifyCallback**: `fn(cookie: &[u8], client_hello_hash: &[u8]) -> bool` — custom DTLS cookie verification
-- **ClientHelloCallback**: `fn(&ClientHelloInfo) -> ClientHelloAction` — observe/control ClientHello processing (Success/Retry/Failed)
-- **CBC-MAC algorithm**: state = E_K(state XOR block), zero-padding for final incomplete block, 16-byte output
-- Cookie callbacks fall back to default HMAC-SHA256 when not configured
-- client_hello_callback placed after SNI callback but before cipher suite selection
-
-### Test Counts
-
-| # | Test | File |
-|---|------|------|
-| 1 | test_config_msg_callback | config/mod.rs |
-| 2 | test_config_info_callback | config/mod.rs |
-| 3 | test_config_record_padding_callback | config/mod.rs |
-| 4 | test_config_dh_tmp_callback | config/mod.rs |
-| 5 | test_config_cookie_gen_callback | config/mod.rs |
-| 6 | test_config_cookie_verify_callback | config/mod.rs |
-| 7 | test_config_client_hello_callback | config/mod.rs |
-| 8 | test_config_callbacks_default_none | config/mod.rs |
-| 9 | test_client_hello_info_debug | config/mod.rs |
-| 10 | test_client_hello_action_variants | config/mod.rs |
-| 11 | test_alert_description_all_34_variants | alert/mod.rs |
-| 12 | test_legacy_alert_codes | alert/mod.rs |
-| 13 | test_cbc_mac_sm4_single_block | cbc_mac.rs |
-| 14 | test_cbc_mac_sm4_empty_message | cbc_mac.rs |
-| 15 | test_cbc_mac_sm4_multi_block | cbc_mac.rs |
-| 16 | test_cbc_mac_sm4_partial_block | cbc_mac.rs |
-| 17 | test_cbc_mac_sm4_incremental_update | cbc_mac.rs |
-| 18 | test_cbc_mac_sm4_reset | cbc_mac.rs |
-| 19 | test_cbc_mac_sm4_invalid_key_length | cbc_mac.rs |
-| 20 | test_cbc_mac_sm4_output_size | cbc_mac.rs |
-| 21 | test_cbc_mac_sm4_buffer_too_small | cbc_mac.rs |
-| 22 | test_cbc_mac_sm4_deterministic | cbc_mac.rs |
-
-+21 tests (2218 → 2239)
-
-Note: Phase 85 was applied on top of Phase T84 (2218 tests). The +21 count reflects the net new tests added by Phase 85 features (10 CBC-MAC + 10 config callbacks + 1 alert test). Some existing tests were also updated (e.g., alert variant count 28→34).
-
-### Build Status
-- `cargo test --workspace --all-features`: 2239 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
----
-
-## Phase 80: Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701)
-
-### Date: 2026-02-18
-
-### Summary
-
-Implemented three features:
-1. **Async DTLS 1.2** — `AsyncDtls12ClientConnection<S>` + `AsyncDtls12ServerConnection<S>` with full handshake (cookie exchange), abbreviated handshake (session resumption), async read/write/shutdown, anti-replay, epoch management, session cache auto-store.
-2. **Heartbeat Extension (RFC 6520)** — Extension type 15 codec (build/parse), `heartbeat_mode: u8` config field (0=disabled, 1=peer_allowed_to_send, 2=peer_not_allowed_to_send). Extension negotiation only.
-3. **GREASE (RFC 8701)** — `grease: bool` config field. When enabled, injects random GREASE values (0x?A?A pattern) into ClientHello: cipher suites (prepend), supported_versions, supported_groups, signature_algorithms, key_share (with 1-byte dummy), and one random empty GREASE extension.
-
-### Files Modified
-
-1. **`crates/hitls-tls/src/connection_dtls12_async.rs`** — NEW: Async DTLS 1.2 client + server connections (full/abbreviated handshake, read/write/shutdown, anti-replay, session cache, 10 tests)
-2. **`crates/hitls-tls/src/lib.rs`** — Register `connection_dtls12_async` module under `#[cfg(all(feature = "async", feature = "dtls12"))]`
-3. **`crates/hitls-tls/src/extensions/mod.rs`** — Add `HEARTBEAT: Self = Self(15)` constant
-4. **`crates/hitls-tls/src/handshake/extensions_codec.rs`** — Heartbeat codec (build_heartbeat, parse_heartbeat), GREASE helpers (GREASE_VALUES, is_grease_value, grease_value, build_grease_extension, build_supported_versions_ch_grease, build_supported_groups_grease, build_signature_algorithms_grease, build_key_share_ch_grease), 5 tests
-5. **`crates/hitls-tls/src/config/mod.rs`** — Add `heartbeat_mode: u8` and `grease: bool` config fields with builder methods and defaults, 2 tests
-6. **`crates/hitls-tls/src/handshake/client.rs`** — GREASE injection in `build_client_hello()` (cipher suites prepend, extension builders, empty GREASE extension), heartbeat extension when configured, 2 tests
-
-### Implementation Details
-
-- Async DTLS 1.2 follows patterns from `connection12_async.rs` (async I/O orchestration) and `connection_dtls12.rs` (DTLS-specific: EpochState, DtlsRecord, encryption/decryption, anti-replay, cookie exchange)
-- DTLS record format: 13-byte header (content_type + version + epoch + sequence_number + length), self-framing over stream transport
-- Session cache locking: MutexGuard acquired and released synchronously, never held across `.await` points
-- GREASE values are independently random per list (different `grease_value()` calls for cipher suite, versions, groups, sig_algs, key_share, extension)
-- Heartbeat: mode validation rejects 0, 3+, empty, and oversized data
-- All secrets zeroized after handshake completion
-
-### Test Counts
-
-| # | Test | File |
-|---|------|------|
-| 1 | test_heartbeat_codec_roundtrip | extensions_codec.rs |
-| 2 | test_heartbeat_invalid_mode | extensions_codec.rs |
-| 3 | test_grease_value_is_valid | extensions_codec.rs |
-| 4 | test_grease_extension_build | extensions_codec.rs |
-| 5 | test_grease_supported_versions | extensions_codec.rs |
-| 6 | test_config_heartbeat_mode | config/mod.rs |
-| 7 | test_config_grease | config/mod.rs |
-| 8 | test_grease_in_client_hello | client.rs |
-| 9 | test_no_grease_when_disabled | client.rs |
-| 10 | test_async_dtls12_read_before_handshake | connection_dtls12_async.rs |
-| 11 | test_async_dtls12_write_before_handshake | connection_dtls12_async.rs |
-| 12 | test_async_dtls12_full_handshake | connection_dtls12_async.rs |
-| 13 | test_async_dtls12_version_check | connection_dtls12_async.rs |
-| 14 | test_async_dtls12_cipher_suite | connection_dtls12_async.rs |
-| 15 | test_async_dtls12_connection_info | connection_dtls12_async.rs |
-| 16 | test_async_dtls12_shutdown | connection_dtls12_async.rs |
-| 17 | test_async_dtls12_large_payload | connection_dtls12_async.rs |
-| 18 | test_async_dtls12_abbreviated_handshake | connection_dtls12_async.rs |
-| 19 | test_async_dtls12_session_resumed | connection_dtls12_async.rs |
-
-+19 tests (2086 → 2105)
-
-### Build Status
-- `cargo test --workspace --all-features`: 2105 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
----
-
-## Phase T79: cert_verify Unit Tests + Config Callbacks + Integration Tests
-
-### Date: 2026-02-18
-
-### Summary
-
-Added comprehensive tests for cert_verify module and config callbacks:
-1. **cert_verify.rs** — 13 unit tests covering all code paths of `verify_server_certificate()`: verify_peer=false bypass, empty chain rejection, invalid DER rejection, chain fails with no trusted certs, hostname verification skip, CertVerifyCallback (accept/reject/info fields), hostname mismatch, Debug impl, callback-not-invoked when verify_peer=false.
-2. **config/mod.rs** — 7 unit tests for builder methods: cert_verify_callback, sni_callback, key_log_callback, verify_hostname toggle, trusted_cert accumulation, SniAction variants, Debug format.
-3. **tests/interop/src/lib.rs** — 6 integration tests: TLS 1.3/1.2 cert_verify_callback accept/reject, TLS 1.3/1.2 key_log_callback, TLS 1.2 server-initiated renegotiation.
-
-### Files Modified
-
-1. **`crates/hitls-tls/src/cert_verify.rs`** — NEW: TLS cert verification orchestration with 13 unit tests
-2. **`crates/hitls-tls/src/config/mod.rs`** — 7 new config callback unit tests
-3. **`tests/interop/src/lib.rs`** — 6 new integration tests
-
-### Test Counts
-
-+26 tests (2105 → 2131)
-
-### Build Status
-- `cargo test --workspace --all-features`: 2131 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
----
-
-## Phase 78: PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake
-
-### Date: 2026-02-18
-
-### Summary
-Added three features: (1) PADDING extension (type 21, RFC 7685) with codec (build/parse), config field `padding_target`, TLS 1.3 ClientHello integration (added before PSK); (2) OID Filters extension (type 48, RFC 8446 §4.2.5) with codec (build/parse), config field `oid_filters`, wired into TLS 1.3 server CertificateRequest; (3) DTLS 1.2 abbreviated (resumed) handshake with session cache lookup, abbreviated flow (server CCS+Finished first, then client CCS+Finished), mirroring the TLS 1.2 pattern.
-
-### Features (3)
-
-| Feature | Description |
-|---------|-------------|
-| PADDING Extension (RFC 7685) | `build_padding`/`parse_padding` codec, `ExtensionType::PADDING` (21), `padding_target: u16` config (0=disabled), TLS 1.3 ClientHello integration (padding added before PSK which must be last), parse validates all zero bytes |
-| OID Filters (RFC 8446 §4.2.5) | `build_oid_filters`/`parse_oid_filters` codec, `ExtensionType::OID_FILTERS` (48), `oid_filters: Vec<(Vec<u8>, Vec<u8>)>` config, wired into server `request_client_auth()` CertificateRequest |
-| DTLS 1.2 Abbreviated Handshake | Client session cache lookup in `build_client_hello`, abbreviated detection in `process_server_hello` (session_id match), `DtlsAbbreviatedClientKeys`/`DtlsAbbreviatedServerResult` structs, `do_abbreviated()` server method, abbreviated Finished processing (both sides), `do_abbreviated_handshake()` connection driver, full→abbreviated→app data flow |
-
-### Files Modified (8)
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-tls/src/extensions/mod.rs` | Added `PADDING` (21) and `OID_FILTERS` (48) extension type constants |
-| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Added `build_padding`/`parse_padding`, `build_oid_filters`/`parse_oid_filters` codec functions (+5 tests) |
-| `crates/hitls-tls/src/config/mod.rs` | Added `padding_target: u16` and `oid_filters: Vec<(Vec<u8>, Vec<u8>)>` to TlsConfig + builder methods (+2 tests) |
-| `crates/hitls-tls/src/handshake/client.rs` | Added PADDING extension to `build_client_hello()` after custom extensions, before PSK (+3 tests) |
-| `crates/hitls-tls/src/connection.rs` | Added OID Filters to server `request_client_auth()` CertificateRequest when configured |
-| `crates/hitls-tls/src/handshake/client_dtls12.rs` | Added abbreviated handshake fields, session cache lookup in `build_client_hello_with_cookie`, abbreviated detection in `process_server_hello`, `process_abbreviated_server_finished`, getters (+1 test) |
-| `crates/hitls-tls/src/handshake/server_dtls12.rs` | Added `DtlsAbbreviatedServerResult`, `DtlsServerHelloResult` enum, `do_abbreviated()`, `process_abbreviated_finished()`, session cache lookup in both `process_client_hello` methods, new session_id generation for full handshake |
-| `crates/hitls-tls/src/connection_dtls12.rs` | Refactored into `do_full_handshake`/`do_abbreviated_handshake` helpers, session store helpers, abbreviated handshake driver (+4 tests) |
-
-### Implementation Details
-- **PADDING placement**: Added as last extension before PSK (which MUST be last per RFC 8446). Padding is only added if ClientHello size + 4 (ext overhead) < target.
-- **PADDING validation**: `parse_padding()` validates all bytes are zero per RFC 7685 — non-zero bytes are rejected.
-- **OID Filters wire format**: `filters_length(2) || [oid_length(1) || oid || values_length(2) || values]*`
-- **DTLS 1.2 abbreviated flow**: Server sends SH → CCS → Finished (encrypted), client detects via session_id match, processes server Finished, sends CCS → Finished (encrypted). Server verifies client Finished.
-- **Session ID for full handshake**: Server now generates a fresh random session_id for full handshakes (instead of echoing client's), preventing false abbreviation detection.
-- **Session cache TTL**: Cached sessions respect InMemorySessionCache TTL expiration (default 2h).
-
-### Test Counts (Phase 78)
-- **hitls-tls**: 768 [was: 753] (+15 new tests)
-- **Total workspace**: 2069 (40 ignored) [was: 2036 (actually 2003 + 33 auth)]
-
-### New Tests (15)
-
-| # | Test | File | Description |
-|---|------|------|-------------|
-| 1 | `test_padding_codec_roundtrip` | extensions_codec.rs | Build padding (0, 1, 100, 512), verify roundtrip |
-| 2 | `test_padding_rejects_nonzero` | extensions_codec.rs | parse_padding rejects non-zero bytes |
-| 3 | `test_oid_filters_codec_roundtrip` | extensions_codec.rs | Build single + multiple OID filters, verify roundtrip |
-| 4 | `test_oid_filters_empty` | extensions_codec.rs | Empty filter list produces valid extension |
-| 5 | `test_oid_filters_truncated_rejected` | extensions_codec.rs | Truncated data returns error |
-| 6 | `test_config_padding_target` | config/mod.rs | Builder sets padding_target, default is 0 |
-| 7 | `test_config_oid_filters` | config/mod.rs | Builder sets oid_filters, default is empty |
-| 8 | `test_padding_in_tls13_client_hello` | client.rs | CH with padding_target=512, PADDING ext present |
-| 9 | `test_no_padding_when_disabled` | client.rs | padding_target=0 → no PADDING ext |
-| 10 | `test_no_padding_when_already_large` | client.rs | CH > target → no padding added |
-| 11 | `test_dtls12_client_detects_abbreviated` | client_dtls12.rs | Unit test: abbreviated detection via session_id match |
-| 12 | `test_dtls12_abbreviated_handshake` | connection_dtls12.rs | Full HS → abbreviated HS succeeds |
-| 13 | `test_dtls12_abbreviated_app_data` | connection_dtls12.rs | App data after abbreviated HS |
-| 14 | `test_dtls12_abbreviated_falls_back_to_full` | connection_dtls12.rs | Mismatched session → full handshake |
-| 15 | `test_dtls12_abbreviated_with_cookie` | connection_dtls12.rs | Abbreviated + cookie exchange combined |
-
-### Build Status
-- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
-- Formatting: clean (`cargo fmt --check`)
-- 2069 workspace tests passing (40 ignored)
-
----
-
-## Phase T77: Phase 75 Feature Integration Tests + Async Export Unit Tests
-
-### Date: 2026-02-18
-
-### Summary
-
-Added integration and async unit tests for Phase 75 features:
-1. **Integration tests** (+10): certificate_authorities config handshake, export_keying_material client/server match + different labels + before handshake + various lengths + server-side, export_early_keying_material no-PSK error, TLS 1.2 export_keying_material match, TLS 1.2 session cache + ticket resumption.
-2. **Async unit tests** (+6): export_keying_material before handshake, early export no-PSK, both-sides match, different labels, CA config, deterministic.
-
-### Files Modified
-
-1. **`tests/interop/src/lib.rs`** — 10 new integration tests
-2. **`crates/hitls-tls/src/connection_async.rs`** — 6 new async export unit tests
-
-### Test Counts
-
-+16 tests (2054 → 2070)
-
-### Build Status
-- `cargo test --workspace --all-features`: 2070 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
----
-
-## Phase T76: Fuzz Seed Corpus + Error Scenario Integration Tests
-
-### Date: 2026-02-18
-
-### Summary
-
-Added structured fuzz seed corpus and error scenario integration tests:
-1. **Fuzz seed corpus** (C1): 66 binary seed files across all 10 fuzz targets in `fuzz/corpus/<target>/`.
-2. **Integration tests** (C2): +18 tests covering version mismatch, cipher suite mismatch, PSK wrong key, ALPN negotiation, 5 concurrent TLS 1.3/1.2 connections, 64KB payload fragmentation, ConnectionInfo field validation, session_resumed checks, multi-message exchange, graceful shutdown, multi-suite negotiation, empty write.
-
-### Files Modified
-
-1. **`fuzz/corpus/`** — 66 binary seed files across 10 fuzz targets
-2. **`tests/interop/src/lib.rs`** — 18 new integration tests
-
-### Test Counts
-
-+18 tests (2036 → 2054)
-
-### Build Status
-- `cargo test --workspace --all-features`: 2054 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
----
-
-## Phase 75: Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 Session Cache
-
-### Date: 2026-02-18
-
-### Summary
-Added three features: (1) Certificate Authorities extension (type 47) with full codec (build/parse), TlsConfig field, TLS 1.3 ClientHello building and server parsing; (2) Early Exporter Master Secret derivation (`"e exp master"` label) in key schedule with `export_early_keying_material()` API on all 4 TLS 1.3 connection types; (3) DTLS 1.2 session cache auto-store after handshake (client by server_name, server by session_id).
-
-### Features (3)
-
-| Feature | Description |
-|---------|-------------|
-| Certificate Authorities (RFC 8446 §4.2.4) | `build_certificate_authorities`/`parse_certificate_authorities` codec, `certificate_authorities: Vec<Vec<u8>>` config field, TLS 1.3 ClientHello building (when non-empty), server parsing in `process_client_hello()`, getter `client_certificate_authorities()` |
-| Early Exporter Master Secret (RFC 8446 §7.5) | `derive_early_exporter_master_secret()` in key_schedule (EarlySecret stage, label `"e exp master"`), `tls13_export_early_keying_material()` export function, `export_early_keying_material()` API on all 4 TLS 1.3 connection types (2 sync + 2 async), returns error if no PSK offered |
-| DTLS 1.2 Session Cache | `session_id` field + getter on `Dtls12ServerHandshake`, auto-store after handshake (client by server_name, server by session_id), before key material zeroize |
-
-### Files Modified (10)
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Added `build_certificate_authorities()` and `parse_certificate_authorities()` codec functions (+3 tests) |
-| `crates/hitls-tls/src/config/mod.rs` | Added `certificate_authorities: Vec<Vec<u8>>` to TlsConfig + TlsConfigBuilder + builder method (+1 test) |
-| `crates/hitls-tls/src/crypt/key_schedule.rs` | Added `derive_early_exporter_master_secret()` method with EarlySecret stage check (+2 tests) |
-| `crates/hitls-tls/src/crypt/export.rs` | Added `tls13_export_early_keying_material()` delegating to existing exporter (+2 tests) |
-| `crates/hitls-tls/src/handshake/client.rs` | Added `early_exporter_master_secret` field (zeroize on drop), certificate_authorities in ClientHello, early exporter derivation after PSK, pass in FinishedActions |
-| `crates/hitls-tls/src/handshake/server.rs` | Added `client_certificate_authorities` field + getter, parse in `process_client_hello()`, `early_exporter_master_secret` in ClientHelloActions, derive in `build_server_flight()` when PSK (+2 tests) |
-| `crates/hitls-tls/src/connection.rs` | Added `early_exporter_master_secret` field on both client + server, `export_early_keying_material()` API (+2 tests) |
-| `crates/hitls-tls/src/connection_async.rs` | Added both `exporter_master_secret` + `early_exporter_master_secret` on async client + server (async was missing regular exporter), both `export_keying_material()` + `export_early_keying_material()` APIs |
-| `crates/hitls-tls/src/handshake/server_dtls12.rs` | Added `session_id` field, init, getter, store from ServerHello |
-| `crates/hitls-tls/src/connection_dtls12.rs` | Added session cache auto-store before zeroize (client by server_name, server by session_id) (+3 tests) |
-
-### Implementation Details
-- **Certificate Authorities wire format**: RFC 8446 §4.2.4 — `ca_list_length(2) || [dn_length(2) || dn_bytes(DER)]*`
-- **Early exporter derivation timing**: Client derives after PSK binder computation (EarlySecret stage); server derives after `derive_early_secret()` with verified PSK, before `derive_handshake_secret()`
-- **Early exporter API**: `export_early_keying_material()` delegates to `tls13_export_keying_material()` internally — same algorithm, different input secret. Returns error if no PSK offered (empty secret)
-- **Async exporter gap fixed**: Async connections were missing `exporter_master_secret` entirely — both regular and early exporter were added
-- **DTLS 1.2 session cache**: Auto-store only (not auto-lookup/abbreviated handshake), must happen before key material zeroize
-
-### Test Counts (Phase 75)
-- **hitls-tls**: 741 [was: 726] (+15 new tests)
-- **Total workspace**: 2003 (40 ignored) [was: 1988]
-
-### New Tests (15)
-
-| # | Test | File | Description |
-|---|------|------|-------------|
-| 1 | `test_certificate_authorities_codec_roundtrip` | extensions_codec.rs | Build/parse single + multiple DNs |
-| 2 | `test_certificate_authorities_empty` | extensions_codec.rs | Empty ca_list produces valid extension |
-| 3 | `test_certificate_authorities_truncated_rejected` | extensions_codec.rs | Truncated data returns error |
-| 4 | `test_config_certificate_authorities` | config/mod.rs | Builder sets certificate_authorities, default is empty |
-| 5 | `test_early_exporter_master_secret` | key_schedule.rs | Derive from EarlySecret stage, deterministic, varies with transcript |
-| 6 | `test_early_exporter_master_secret_wrong_stage` | key_schedule.rs | Fails in Initial/HandshakeSecret/MasterSecret stages |
-| 7 | `test_tls13_early_export_deterministic` | export.rs | Early export produces consistent output |
-| 8 | `test_tls13_early_export_differs_from_regular` | export.rs | Same label, different secrets → different outputs |
-| 9 | `test_tls13_server_parses_certificate_authorities` | server.rs | Server parses CA extension from ClientHello |
-| 10 | `test_tls13_certificate_authorities_empty_default` | server.rs | No CA extension when not configured |
-| 11 | `test_tls13_early_export_no_psk_fails` | connection.rs | export_early_keying_material fails without PSK |
-| 12 | `test_tls13_early_export_with_psk` | connection.rs | export_early_keying_material succeeds with PSK session |
-| 13 | `test_dtls12_client_session_cache_auto_store` | connection_dtls12.rs | Client auto-stores session keyed by server_name |
-| 14 | `test_dtls12_server_session_cache_auto_store` | connection_dtls12.rs | Server auto-stores session keyed by session_id |
-| 15 | `test_dtls12_no_cache_no_error` | connection_dtls12.rs | No session_cache configured → no error |
-
-### Build Status
-- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
-- Formatting: clean (`cargo fmt --check`)
-- 2003 workspace tests passing (40 ignored)
-
----
-
-## Phase 73: KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3)
-
-### Date: 2026-02-18
-
-### Summary
-Added three features: (1) KeyUpdate DoS protection with a 128-consecutive-limit counter that resets on application data receipt across all 4 TLS 1.3 connection types; (2) Max Fragment Length extension (RFC 6066) with codec, config, TLS 1.2 client/server negotiation and record layer enforcement; (3) Signature Algorithms Cert extension (RFC 8446 §4.2.3) with codec, config, TLS 1.3 ClientHello building and server parsing.
-
-### Features (3)
-
-| Feature | Description |
-|---------|-------------|
-| KeyUpdate loop protection | `key_update_recv_count` counter rejects after 128 consecutive KeyUpdates without app data; resets on ApplicationData receipt; all 4 TLS 1.3 connection types (2 sync + 2 async) |
-| Max Fragment Length (RFC 6066) | `MaxFragmentLength` enum (512/1024/2048/4096), codec (`build_max_fragment_length`/`parse_max_fragment_length`), TLS 1.2 client sends in ClientHello, server echoes in ServerHello, record layer enforcement (lower priority than RSL) |
-| Signature Algorithms Cert (RFC 8446 §4.2.3) | Codec reuses `signature_algorithms` wire format with type 50, config `signature_algorithms_cert`, TLS 1.3 ClientHello building + HRR path, server parsing + getter |
-
-### Files Modified (10)
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-tls/src/config/mod.rs` | Added `MaxFragmentLength` enum, `max_fragment_length` + `signature_algorithms_cert` config fields + builder methods (+3 tests) |
-| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Added MFL + sig_algs_cert build/parse codec functions (+2 tests) |
-| `crates/hitls-tls/src/connection.rs` | Added `key_update_recv_count` to client + server, increment/check in `handle_key_update()`, reset in `read()` (+2 tests) |
-| `crates/hitls-tls/src/connection_async.rs` | Mirror sync KeyUpdate protection for async client + server |
-| `crates/hitls-tls/src/handshake/client12.rs` | Added `negotiated_max_fragment_length` field, MFL in `build_client_hello()`, parse in `process_server_hello()`, getter, renegotiation reset |
-| `crates/hitls-tls/src/handshake/server12.rs` | Added `client_max_fragment_length` field, parse in `process_client_hello()`, echo in `build_server_hello()`, getter, renegotiation reset |
-| `crates/hitls-tls/src/connection12.rs` | MFL enforcement in client + server `do_handshake()` (lower priority than RSL) (+2 tests) |
-| `crates/hitls-tls/src/connection12_async.rs` | Mirror sync MFL enforcement for async client + server |
-| `crates/hitls-tls/src/handshake/client.rs` | Added `build_signature_algorithms_cert()` in ClientHello + HRR path |
-| `crates/hitls-tls/src/handshake/server.rs` | Added `client_sig_algs_cert` field, parse in `process_client_hello()`, getter (+2 tests) |
-
-### Implementation Details
-- **KeyUpdate limit**: 128 consecutive KeyUpdates without ApplicationData triggers error; counter resets to 0 when app data arrives
-- **MFL priority**: MFL set first, then RSL overwrites if also present (RFC 8449 supersedes RFC 6066)
-- **MFL server policy**: Server echoes client's MFL value (accept-all); no separate server config needed
-- **sig_algs_cert reuse**: Wire format identical to `signature_algorithms` — just different `ExtensionType(50)`
-
-### Test Counts (Phase 73)
-- **hitls-tls**: 720 [was: 709] (+11 new tests in hitls-tls, +2 in config)
-- **Total workspace**: 1905 (40 ignored) [was: 1892]
-
-### New Tests (13)
-
-| # | Test | File | Description |
-|---|------|------|-------------|
-| 1 | `test_config_max_fragment_length` | config/mod.rs | Builder sets MFL, default is None |
-| 2 | `test_config_signature_algorithms_cert` | config/mod.rs | Builder sets sig_algs_cert, default is empty |
-| 3 | `test_mfl_size_values` | config/mod.rs | `MaxFragmentLength::to_size()` and `from_u8()` correctness |
-| 4 | `test_mfl_codec_roundtrip` | extensions_codec.rs | Build/parse each MFL value (1-4), invalid values rejected |
-| 5 | `test_sig_algs_cert_codec_roundtrip` | extensions_codec.rs | Build/parse sig_algs_cert, verify type=50 |
-| 6 | `test_key_update_loop_protection` | connection.rs | Counter init=0, limit=128 verified for client + server |
-| 7 | `test_key_update_counter_reset_on_data` | connection.rs | Counter resets to 0 on app data for client + server |
-| 8 | `test_tls12_mfl_negotiation` | connection12.rs | Client offers MFL 2048 → server echoes → both negotiate correctly |
-| 9 | `test_tls12_mfl_server_no_support` | connection12.rs | Client offers MFL 512 → server echoes (accept-all policy) |
-| 10 | `test_tls13_server_parses_sig_algs_cert` | server.rs | Server receives and stores sig_algs_cert from ClientHello |
-| 11 | `test_tls13_sig_algs_cert_empty_default` | server.rs | No sig_algs_cert by default → empty vec |
-
-### Build Status
-- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
-- Formatting: clean (`cargo fmt --check`)
-- 1905 workspace tests passing (40 ignored)
-
----
+## Part III: Detailed Phase Entries
 
 ## Phase 0: Project Scaffolding (Session 2026-02-06)
 
@@ -1438,7 +1066,7 @@ openhitls-rs/
 
 ---
 
-## Phase 0–1: Tooling + BigNum (Session 2026-02-06)
+## Phase 1: Tooling + BigNum (Session 2026-02-06)
 
 ### Goals
 - Fix compilation issues from Phase 0 scaffolding
@@ -3205,7 +2833,9 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
 
 ---
 
-## Phase 20, Step 3: PSK / Session Tickets
+## Phase 20: TLS 1.3 Completeness — PSK, 0-RTT, Post-HS Auth, Cert Compression
+
+### Step 3: PSK / Session Tickets
 
 - Implemented PSK session resumption for TLS 1.3 (RFC 8446 §4.2.11, §4.6.1)
 - Added NewSessionTicket codec (encode/decode), ticket encryption/decryption (XOR + HMAC)
@@ -3218,9 +2848,7 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
 - 8 new tests: session resumption roundtrip, NST generation, ticket encrypt/decrypt, binder computation, cache operations, PSK extension codec, resumption_master_secret derivation
 - 97 TLS tests, 524 workspace total
 
----
-
-## Phase 20, Step 4: 0-RTT Early Data
+### Step 4: 0-RTT Early Data
 
 - Implemented 0-RTT Early Data for TLS 1.3 (RFC 8446 §4.2.10, §2.3)
 - Added EndOfEarlyData codec (encode/decode) for handshake message type
@@ -3234,9 +2862,7 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
   2. Client app traffic secrets were derived from Hash(CH..SF..EOED) instead of Hash(CH..SF) — fixed by reordering EOED transcript update to after app secret derivation per RFC 8446 §7.1
 - 102 TLS tests, 529 workspace total
 
----
-
-## Phase 20, Step 5: Post-Handshake Client Auth
+### Step 5: Post-Handshake Client Auth
 
 - Implemented Post-Handshake Client Authentication for TLS 1.3 (RFC 8446 §4.6.2)
 - CertificateRequest codec (encode/decode) in codec.rs
@@ -3249,6 +2875,47 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
 - **Bug fixed**: SPKI construction in cert builder was missing AlgorithmIdentifier SEQUENCE wrapper
 - 6 new tests: test_certificate_request_codec, test_post_hs_auth_codec, test_post_hs_auth_roundtrip, test_post_hs_auth_no_cert, test_post_hs_auth_not_offered, test_post_hs_auth_server_not_connected
 - 108 TLS tests, 535 workspace total
+
+### Step 6: Certificate Compression (RFC 8879)
+
+Implemented the remaining Phase 20 feature: TLS Certificate Compression (RFC 8879). Also fixed the README Phase 20 table to correctly mark HRR and KeyUpdate as Done (they were already implemented but the docs were outdated).
+
+#### Certificate Compression Details
+- **Extension**: `compress_certificate` (type 27) — client sends list of supported compression algorithms in ClientHello
+- **Message**: `CompressedCertificate` (handshake type 25) — server sends compressed Certificate message body
+- **Algorithm**: zlib (algorithm ID 1) via `flate2` crate, feature-gated behind `cert-compression`
+- **Protocol flow**: Client advertises → Server compresses Certificate body → Client decompresses and processes normally
+- **Transcript**: Uses CompressedCertificate message as-is in transcript hash (per RFC 8879 §4)
+- **Safety**: 16 MiB decompression limit, uncompressed_length validation
+
+#### Dependencies
+- Added `flate2 = "1"` to workspace (pure Rust via miniz_oxide backend)
+- Feature flag `cert-compression = ["flate2"]` in hitls-tls
+
+#### Files Modified
+- `Cargo.toml` (workspace): Added `flate2` dependency
+- `crates/hitls-tls/Cargo.toml`: Added `flate2` optional dep + `cert-compression` feature
+- `crates/hitls-tls/src/extensions/mod.rs`: Added `COMPRESS_CERTIFICATE` constant
+- `crates/hitls-tls/src/handshake/mod.rs`: Added `CompressedCertificate` variant
+- `crates/hitls-tls/src/handshake/codec.rs`: Added codec, compress/decompress helpers
+- `crates/hitls-tls/src/handshake/extensions_codec.rs`: Added build/parse for extension
+- `crates/hitls-tls/src/config/mod.rs`: Added `cert_compression_algos` config field
+- `crates/hitls-tls/src/handshake/client.rs`: Extension in CH, `process_compressed_certificate()`
+- `crates/hitls-tls/src/handshake/server.rs`: Parse extension, compress Certificate when negotiated
+- `crates/hitls-tls/src/connection.rs`: Dispatch CompressedCertificate in WaitCertCertReq state
+
+#### Tests (7 new)
+- `test_compressed_certificate_codec_roundtrip` — encode/decode CompressedCertificate message
+- `test_compress_decompress_zlib` — compress/decompress Certificate body roundtrip
+- `test_build_parse_compress_certificate` — extension encode/decode roundtrip
+- `test_build_parse_compress_certificate_single` — single algorithm extension
+- `test_cert_compression_config` — config builder test
+- `test_cert_compression_handshake` — full client-server handshake with compression
+- `test_cert_compression_server_disabled` — normal Certificate when server doesn't enable compression
+
+### Build Status
+- **568 tests total** (20 auth + 46 bignum + 304 crypto + 47 pki + 115 tls + 26 utils + 10 integration), 19 ignored
+- All clippy warnings resolved, formatting clean
 
 ---
 
@@ -3283,52 +2950,6 @@ All 21 phases (0-20) of the openHiTLS C-to-Rust migration are now complete.
 ### Test Results
 - **561 tests total** (20 auth + 46 bignum + 304 crypto + 47 pki + 108 tls + 26 utils + 10 integration), 19 ignored
 - hitls-crypto: 304 tests (19 ignored)
-- All clippy warnings resolved, formatting clean
-
----
-
-## Phase 20 Completion — Certificate Compression (RFC 8879)
-
-### Summary
-Implemented the remaining Phase 20 feature: TLS Certificate Compression (RFC 8879). Also fixed the README Phase 20 table to correctly mark HRR and KeyUpdate as Done (they were already implemented but the docs were outdated).
-
-### Changes
-
-#### 1. Certificate Compression (RFC 8879)
-- **Extension**: `compress_certificate` (type 27) — client sends list of supported compression algorithms in ClientHello
-- **Message**: `CompressedCertificate` (handshake type 25) — server sends compressed Certificate message body
-- **Algorithm**: zlib (algorithm ID 1) via `flate2` crate, feature-gated behind `cert-compression`
-- **Protocol flow**: Client advertises → Server compresses Certificate body → Client decompresses and processes normally
-- **Transcript**: Uses CompressedCertificate message as-is in transcript hash (per RFC 8879 §4)
-- **Safety**: 16 MiB decompression limit, uncompressed_length validation
-
-#### 2. Dependencies
-- Added `flate2 = "1"` to workspace (pure Rust via miniz_oxide backend)
-- Feature flag `cert-compression = ["flate2"]` in hitls-tls
-
-#### 3. Files Modified
-- `Cargo.toml` (workspace): Added `flate2` dependency
-- `crates/hitls-tls/Cargo.toml`: Added `flate2` optional dep + `cert-compression` feature
-- `crates/hitls-tls/src/extensions/mod.rs`: Added `COMPRESS_CERTIFICATE` constant
-- `crates/hitls-tls/src/handshake/mod.rs`: Added `CompressedCertificate` variant
-- `crates/hitls-tls/src/handshake/codec.rs`: Added codec, compress/decompress helpers
-- `crates/hitls-tls/src/handshake/extensions_codec.rs`: Added build/parse for extension
-- `crates/hitls-tls/src/config/mod.rs`: Added `cert_compression_algos` config field
-- `crates/hitls-tls/src/handshake/client.rs`: Extension in CH, `process_compressed_certificate()`
-- `crates/hitls-tls/src/handshake/server.rs`: Parse extension, compress Certificate when negotiated
-- `crates/hitls-tls/src/connection.rs`: Dispatch CompressedCertificate in WaitCertCertReq state
-
-#### 4. Tests (7 new)
-- `test_compressed_certificate_codec_roundtrip` — encode/decode CompressedCertificate message
-- `test_compress_decompress_zlib` — compress/decompress Certificate body roundtrip
-- `test_build_parse_compress_certificate` — extension encode/decode roundtrip
-- `test_build_parse_compress_certificate_single` — single algorithm extension
-- `test_cert_compression_config` — config builder test
-- `test_cert_compression_handshake` — full client-server handshake with compression
-- `test_cert_compression_server_disabled` — normal Certificate when server doesn't enable compression
-
-### Test Results
-- **568 tests total** (20 auth + 46 bignum + 304 crypto + 47 pki + 115 tls + 26 utils + 10 integration), 19 ignored
 - All clippy warnings resolved, formatting clean
 
 ---
@@ -3630,6 +3251,8 @@ New tests (37):
 - Formatting: clean (`cargo fmt --check`)
 - 661 workspace tests passing (19 ignored)
 
+---
+
 ## Phase 25: TLS 1.2 Handshake (ECDHE-GCM)
 
 ### Step 1: TLS 1.2 Cipher Suite Params + Key Derivation
@@ -3681,6 +3304,8 @@ New tests (37):
 - Key exchange: SECP256R1, SECP384R1, X25519
 - Record encryption: GCM with explicit nonce
 - **701 tests total** (46 bignum + 326 crypto + 162 tls + 98 pki + 35 utils + 20 auth + 14 integration), 19 ignored
+
+---
 
 ## Phase 26: DTLS 1.2 (RFC 6347)
 
@@ -3814,6 +3439,8 @@ New tests (48):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 749 workspace tests passing (19 ignored)
+
+---
 
 ## Phase 27: TLCP (GM/T 0024 / GB/T 38636-2020)
 
@@ -4032,6 +3659,8 @@ New tests (18):
 - Formatting: clean (`cargo fmt --check`)
 - 806 workspace tests passing (19 ignored)
 
+---
+
 ## Phase 29: TLS 1.2 Session Resumption + Client Certificate Auth (mTLS) (Session 2026-02-10)
 
 ### Goals
@@ -4141,6 +3770,8 @@ New tests (28):
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 834 workspace tests passing (19 ignored)
+
+---
 
 ## Phase 30: s_client CLI + Network I/O (Session 2026-02-10)
 
@@ -4478,6 +4109,8 @@ Phase 34 adds three TLS 1.2 security extensions that harden the protocol against
 - Formatting: clean (`cargo fmt --check`)
 - 880 workspace tests passing (25 ignored)
 
+---
+
 ## Phase 35: TLS 1.2 RSA + DHE Key Exchange — 13 New Cipher Suites (Session 2026-02-10)
 
 ### Goals
@@ -4581,6 +4214,8 @@ Phase 35 adds two new TLS 1.2 key exchange mechanisms — RSA static and DHE_RSA
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 890 workspace tests passing (27 ignored)
+
+---
 
 ## Phase 36: TLS 1.2 PSK Cipher Suites — 20 New Cipher Suites (Session 2026-02-11)
 
@@ -5076,6 +4711,8 @@ Max Fragment Length (RFC 6066) was intentionally skipped as it is not present in
 - Formatting: clean (`cargo fmt --check`)
 - 982 workspace tests passing (27 ignored)
 
+---
+
 ## Phase 41: Wycheproof + Fuzzing + Security Audit (Session 2026-02-11)
 
 ### Goals
@@ -5295,9 +4932,11 @@ Blind signature flow: `msg * r^e mod n → sign → blind_sig * r^(-1) mod n →
 
 ---
 
-## Phase 43a: Remaining Feature Conversions (2026-02-11)
+## Phase 43: Remaining Features + DH Groups + TLS FFDHE Expansion (2026-02-11)
 
-### Goal
+### Part A: Remaining Feature Conversions
+
+#### Goal
 Complete the last 3 identified gaps from the C reference:
 1. **NistP192 (secp192r1) curve** — missing from ECC module
 2. **HCTR mode** — wide-block tweakable cipher
@@ -5369,22 +5008,20 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - `crates/hitls-pki/src/cms/enveloped.rs` — pub(crate) for key_len/oid, encrypted_data field
 - `CLAUDE.md`, `DEV_LOG.md`, `README.md`, `PROMPT_LOG.md` — Updated
 
-### Build Status
+#### Build Status (Part A)
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1038 workspace tests passing (28 ignored)
 
----
+### Part B: Complete DH Groups + TLS FFDHE Expansion (2026-02-13)
 
-## Phase 43b: Complete DH Groups + TLS FFDHE Expansion (Session 2026-02-13)
-
-### Goals
+#### Goals
 - Implement all 13 DH group prime constants (RFC 2409, RFC 3526, RFC 7919)
 - Add TLS NamedGroup FFDHE6144 (0x0103) and FFDHE8192 (0x0104)
 - Expand TLS DHE negotiation to support all 5 FFDHE groups
 - Add tests for all 13 DH groups (prime size validation + key exchange roundtrip)
 
-### Completed Steps
+#### Completed Steps
 
 #### 1. DH Group Primes (`hitls-crypto/src/dh/groups.rs`)
 - Rewrote `groups.rs` with all 13 DH group prime hex constants extracted from C source (`crypto/dh/src/dh_para.c`)
@@ -5408,18 +5045,18 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - `test_dh_invalid_peer_public_key`: Validates rejection of 0 and 1 as peer public keys
 - 14 new tests total (8 running + 6 ignored for slow large-group modexp)
 
-### Test Results
+#### Test Results (Part B)
 - hitls-crypto: 364 passed, 25 ignored (was 359/19) — +5 running, +6 ignored
 - Total workspace: 1046 tests (34 ignored)
 
-### Files Modified
+#### Files Modified (Part B)
 - `crates/hitls-crypto/src/dh/groups.rs` — Rewritten with all 13 DH group primes
 - `crates/hitls-crypto/src/dh/mod.rs` — Added 14 new tests
 - `crates/hitls-tls/src/crypt/mod.rs` — Added FFDHE6144/FFDHE8192 NamedGroup constants
 - `crates/hitls-tls/src/handshake/server12.rs` — Updated is_ffdhe_group() and named_group_to_dh_param_id()
 - `CLAUDE.md`, `DEV_LOG.md`, `README.md`, `PROMPT_LOG.md` — Updated
 
-### Build Status
+#### Build Status (Part B)
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1046 workspace tests passing (34 ignored)
@@ -5766,6 +5403,8 @@ Note: crypto went from 359 to 375 = +16 (net: 6 P-192 + 7 HCTR + 7→6 replaced 
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1157 workspace tests passing (37 ignored), +87 new tests
+
+---
 
 ## Phase 49: Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT (Session 2026-02-14)
 
@@ -6303,6 +5942,8 @@ Added `ecdh`, `ed448`, `x448` feature flags to hitls-pki and hitls-cli Cargo.tom
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1604 workspace tests passing (37 ignored)
+
+---
 
 ## Phase 56: Unit Test Coverage Expansion (Session 2026-02-14)
 
@@ -6869,6 +6510,8 @@ Added 6 TLS 1.2 DHE_DSS cipher suites (RFC 5246) with DSA authentication. New `A
 - Formatting: clean (`cargo fmt --check`)
 - 1826 workspace tests passing (40 ignored)
 
+---
+
 ## Phase 66: DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2)
 
 ### Date: 2026-02-16
@@ -6907,6 +6550,8 @@ Added 8 TLS 1.2 anonymous cipher suites (RFC 5246 / RFC 4492) with no authentica
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1836 workspace tests passing (40 ignored)
+
+---
 
 ## Phase 67: TLS 1.2 Renegotiation (RFC 5746)
 
@@ -7101,6 +6746,8 @@ Security-critical phase: client now validates server certificate chain against t
 - Formatting: clean (`cargo fmt --check`)
 - 1869 workspace tests passing (40 ignored)
 
+---
+
 ## Phase 70 — Server-Side Session Cache + Session Expiration + Cipher Preference (2026-02-17)
 
 ### Summary
@@ -7227,6 +6874,8 @@ Added client-side session cache (auto-store/auto-lookup by server_name) and writ
 - Formatting: clean (`cargo fmt --check`)
 - 1892 workspace tests passing (40 ignored)
 
+---
+
 ## Phase T72: CLI Command Unit Tests + Session Cache Concurrency
 
 ### Date: 2026-02-17
@@ -7268,6 +6917,71 @@ Systematic test coverage improvement for the seven previously-untested CLI comma
 - Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
 - Formatting: clean (`cargo fmt --check`)
 - 1952 workspace tests passing (40 ignored)
+
+---
+
+## Phase 73: KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert (RFC 8446 §4.2.3)
+
+### Date: 2026-02-18
+
+### Summary
+Added three features: (1) KeyUpdate DoS protection with a 128-consecutive-limit counter that resets on application data receipt across all 4 TLS 1.3 connection types; (2) Max Fragment Length extension (RFC 6066) with codec, config, TLS 1.2 client/server negotiation and record layer enforcement; (3) Signature Algorithms Cert extension (RFC 8446 §4.2.3) with codec, config, TLS 1.3 ClientHello building and server parsing.
+
+### Features (3)
+
+| Feature | Description |
+|---------|-------------|
+| KeyUpdate loop protection | `key_update_recv_count` counter rejects after 128 consecutive KeyUpdates without app data; resets on ApplicationData receipt; all 4 TLS 1.3 connection types (2 sync + 2 async) |
+| Max Fragment Length (RFC 6066) | `MaxFragmentLength` enum (512/1024/2048/4096), codec (`build_max_fragment_length`/`parse_max_fragment_length`), TLS 1.2 client sends in ClientHello, server echoes in ServerHello, record layer enforcement (lower priority than RSL) |
+| Signature Algorithms Cert (RFC 8446 §4.2.3) | Codec reuses `signature_algorithms` wire format with type 50, config `signature_algorithms_cert`, TLS 1.3 ClientHello building + HRR path, server parsing + getter |
+
+### Files Modified (10)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/config/mod.rs` | Added `MaxFragmentLength` enum, `max_fragment_length` + `signature_algorithms_cert` config fields + builder methods (+3 tests) |
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Added MFL + sig_algs_cert build/parse codec functions (+2 tests) |
+| `crates/hitls-tls/src/connection.rs` | Added `key_update_recv_count` to client + server, increment/check in `handle_key_update()`, reset in `read()` (+2 tests) |
+| `crates/hitls-tls/src/connection_async.rs` | Mirror sync KeyUpdate protection for async client + server |
+| `crates/hitls-tls/src/handshake/client12.rs` | Added `negotiated_max_fragment_length` field, MFL in `build_client_hello()`, parse in `process_server_hello()`, getter, renegotiation reset |
+| `crates/hitls-tls/src/handshake/server12.rs` | Added `client_max_fragment_length` field, parse in `process_client_hello()`, echo in `build_server_hello()`, getter, renegotiation reset |
+| `crates/hitls-tls/src/connection12.rs` | MFL enforcement in client + server `do_handshake()` (lower priority than RSL) (+2 tests) |
+| `crates/hitls-tls/src/connection12_async.rs` | Mirror sync MFL enforcement for async client + server |
+| `crates/hitls-tls/src/handshake/client.rs` | Added `build_signature_algorithms_cert()` in ClientHello + HRR path |
+| `crates/hitls-tls/src/handshake/server.rs` | Added `client_sig_algs_cert` field, parse in `process_client_hello()`, getter (+2 tests) |
+
+### Implementation Details
+- **KeyUpdate limit**: 128 consecutive KeyUpdates without ApplicationData triggers error; counter resets to 0 when app data arrives
+- **MFL priority**: MFL set first, then RSL overwrites if also present (RFC 8449 supersedes RFC 6066)
+- **MFL server policy**: Server echoes client's MFL value (accept-all); no separate server config needed
+- **sig_algs_cert reuse**: Wire format identical to `signature_algorithms` — just different `ExtensionType(50)`
+
+### Test Counts (Phase 73)
+- **hitls-tls**: 720 [was: 709] (+11 new tests in hitls-tls, +2 in config)
+- **Total workspace**: 1905 (40 ignored) [was: 1892]
+
+### New Tests (13)
+
+| # | Test | File | Description |
+|---|------|------|-------------|
+| 1 | `test_config_max_fragment_length` | config/mod.rs | Builder sets MFL, default is None |
+| 2 | `test_config_signature_algorithms_cert` | config/mod.rs | Builder sets sig_algs_cert, default is empty |
+| 3 | `test_mfl_size_values` | config/mod.rs | `MaxFragmentLength::to_size()` and `from_u8()` correctness |
+| 4 | `test_mfl_codec_roundtrip` | extensions_codec.rs | Build/parse each MFL value (1-4), invalid values rejected |
+| 5 | `test_sig_algs_cert_codec_roundtrip` | extensions_codec.rs | Build/parse sig_algs_cert, verify type=50 |
+| 6 | `test_key_update_loop_protection` | connection.rs | Counter init=0, limit=128 verified for client + server |
+| 7 | `test_key_update_counter_reset_on_data` | connection.rs | Counter resets to 0 on app data for client + server |
+| 8 | `test_tls12_mfl_negotiation` | connection12.rs | Client offers MFL 2048 → server echoes → both negotiate correctly |
+| 9 | `test_tls12_mfl_server_no_support` | connection12.rs | Client offers MFL 512 → server echoes (accept-all policy) |
+| 10 | `test_tls13_server_parses_sig_algs_cert` | server.rs | Server receives and stores sig_algs_cert from ClientHello |
+| 11 | `test_tls13_sig_algs_cert_empty_default` | server.rs | No sig_algs_cert by default → empty vec |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 1905 workspace tests passing (40 ignored)
+
+---
 
 ## Phase T74: Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
 
@@ -7343,6 +7057,669 @@ New helpers: `run_tls12_tcp_loopback`, `run_tls13_tcp_loopback`, `make_psk_confi
 
 ### Build Status
 - `cargo test --workspace --all-features`: 2021 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 75: Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret (RFC 8446 §7.5) + DTLS 1.2 Session Cache
+
+### Date: 2026-02-18
+
+### Summary
+Added three features: (1) Certificate Authorities extension (type 47) with full codec (build/parse), TlsConfig field, TLS 1.3 ClientHello building and server parsing; (2) Early Exporter Master Secret derivation (`"e exp master"` label) in key schedule with `export_early_keying_material()` API on all 4 TLS 1.3 connection types; (3) DTLS 1.2 session cache auto-store after handshake (client by server_name, server by session_id).
+
+### Features (3)
+
+| Feature | Description |
+|---------|-------------|
+| Certificate Authorities (RFC 8446 §4.2.4) | `build_certificate_authorities`/`parse_certificate_authorities` codec, `certificate_authorities: Vec<Vec<u8>>` config field, TLS 1.3 ClientHello building (when non-empty), server parsing in `process_client_hello()`, getter `client_certificate_authorities()` |
+| Early Exporter Master Secret (RFC 8446 §7.5) | `derive_early_exporter_master_secret()` in key_schedule (EarlySecret stage, label `"e exp master"`), `tls13_export_early_keying_material()` export function, `export_early_keying_material()` API on all 4 TLS 1.3 connection types (2 sync + 2 async), returns error if no PSK offered |
+| DTLS 1.2 Session Cache | `session_id` field + getter on `Dtls12ServerHandshake`, auto-store after handshake (client by server_name, server by session_id), before key material zeroize |
+
+### Files Modified (10)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Added `build_certificate_authorities()` and `parse_certificate_authorities()` codec functions (+3 tests) |
+| `crates/hitls-tls/src/config/mod.rs` | Added `certificate_authorities: Vec<Vec<u8>>` to TlsConfig + TlsConfigBuilder + builder method (+1 test) |
+| `crates/hitls-tls/src/crypt/key_schedule.rs` | Added `derive_early_exporter_master_secret()` method with EarlySecret stage check (+2 tests) |
+| `crates/hitls-tls/src/crypt/export.rs` | Added `tls13_export_early_keying_material()` delegating to existing exporter (+2 tests) |
+| `crates/hitls-tls/src/handshake/client.rs` | Added `early_exporter_master_secret` field (zeroize on drop), certificate_authorities in ClientHello, early exporter derivation after PSK, pass in FinishedActions |
+| `crates/hitls-tls/src/handshake/server.rs` | Added `client_certificate_authorities` field + getter, parse in `process_client_hello()`, `early_exporter_master_secret` in ClientHelloActions, derive in `build_server_flight()` when PSK (+2 tests) |
+| `crates/hitls-tls/src/connection.rs` | Added `early_exporter_master_secret` field on both client + server, `export_early_keying_material()` API (+2 tests) |
+| `crates/hitls-tls/src/connection_async.rs` | Added both `exporter_master_secret` + `early_exporter_master_secret` on async client + server (async was missing regular exporter), both `export_keying_material()` + `export_early_keying_material()` APIs |
+| `crates/hitls-tls/src/handshake/server_dtls12.rs` | Added `session_id` field, init, getter, store from ServerHello |
+| `crates/hitls-tls/src/connection_dtls12.rs` | Added session cache auto-store before zeroize (client by server_name, server by session_id) (+3 tests) |
+
+### Implementation Details
+- **Certificate Authorities wire format**: RFC 8446 §4.2.4 — `ca_list_length(2) || [dn_length(2) || dn_bytes(DER)]*`
+- **Early exporter derivation timing**: Client derives after PSK binder computation (EarlySecret stage); server derives after `derive_early_secret()` with verified PSK, before `derive_handshake_secret()`
+- **Early exporter API**: `export_early_keying_material()` delegates to `tls13_export_keying_material()` internally — same algorithm, different input secret. Returns error if no PSK offered (empty secret)
+- **Async exporter gap fixed**: Async connections were missing `exporter_master_secret` entirely — both regular and early exporter were added
+- **DTLS 1.2 session cache**: Auto-store only (not auto-lookup/abbreviated handshake), must happen before key material zeroize
+
+### Test Counts (Phase 75)
+- **hitls-tls**: 741 [was: 726] (+15 new tests)
+- **Total workspace**: 2003 (40 ignored) [was: 1988]
+
+### New Tests (15)
+
+| # | Test | File | Description |
+|---|------|------|-------------|
+| 1 | `test_certificate_authorities_codec_roundtrip` | extensions_codec.rs | Build/parse single + multiple DNs |
+| 2 | `test_certificate_authorities_empty` | extensions_codec.rs | Empty ca_list produces valid extension |
+| 3 | `test_certificate_authorities_truncated_rejected` | extensions_codec.rs | Truncated data returns error |
+| 4 | `test_config_certificate_authorities` | config/mod.rs | Builder sets certificate_authorities, default is empty |
+| 5 | `test_early_exporter_master_secret` | key_schedule.rs | Derive from EarlySecret stage, deterministic, varies with transcript |
+| 6 | `test_early_exporter_master_secret_wrong_stage` | key_schedule.rs | Fails in Initial/HandshakeSecret/MasterSecret stages |
+| 7 | `test_tls13_early_export_deterministic` | export.rs | Early export produces consistent output |
+| 8 | `test_tls13_early_export_differs_from_regular` | export.rs | Same label, different secrets → different outputs |
+| 9 | `test_tls13_server_parses_certificate_authorities` | server.rs | Server parses CA extension from ClientHello |
+| 10 | `test_tls13_certificate_authorities_empty_default` | server.rs | No CA extension when not configured |
+| 11 | `test_tls13_early_export_no_psk_fails` | connection.rs | export_early_keying_material fails without PSK |
+| 12 | `test_tls13_early_export_with_psk` | connection.rs | export_early_keying_material succeeds with PSK session |
+| 13 | `test_dtls12_client_session_cache_auto_store` | connection_dtls12.rs | Client auto-stores session keyed by server_name |
+| 14 | `test_dtls12_server_session_cache_auto_store` | connection_dtls12.rs | Server auto-stores session keyed by session_id |
+| 15 | `test_dtls12_no_cache_no_error` | connection_dtls12.rs | No session_cache configured → no error |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 2003 workspace tests passing (40 ignored)
+
+---
+
+## Phase T76: Fuzz Seed Corpus + Error Scenario Integration Tests
+
+### Date: 2026-02-18
+
+### Summary
+
+Added structured fuzz seed corpus and error scenario integration tests:
+1. **Fuzz seed corpus** (C1): 66 binary seed files across all 10 fuzz targets in `fuzz/corpus/<target>/`.
+2. **Integration tests** (C2): +18 tests covering version mismatch, cipher suite mismatch, PSK wrong key, ALPN negotiation, 5 concurrent TLS 1.3/1.2 connections, 64KB payload fragmentation, ConnectionInfo field validation, session_resumed checks, multi-message exchange, graceful shutdown, multi-suite negotiation, empty write.
+
+### Files Modified
+
+1. **`fuzz/corpus/`** — 66 binary seed files across 10 fuzz targets
+2. **`tests/interop/src/lib.rs`** — 18 new integration tests
+
+### Test Counts
+
++18 tests (2036 → 2054)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2054 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T77: Phase 75 Feature Integration Tests + Async Export Unit Tests
+
+### Date: 2026-02-18
+
+### Summary
+
+Added integration and async unit tests for Phase 75 features:
+1. **Integration tests** (+10): certificate_authorities config handshake, export_keying_material client/server match + different labels + before handshake + various lengths + server-side, export_early_keying_material no-PSK error, TLS 1.2 export_keying_material match, TLS 1.2 session cache + ticket resumption.
+2. **Async unit tests** (+6): export_keying_material before handshake, early export no-PSK, both-sides match, different labels, CA config, deterministic.
+
+### Files Modified
+
+1. **`tests/interop/src/lib.rs`** — 10 new integration tests
+2. **`crates/hitls-tls/src/connection_async.rs`** — 6 new async export unit tests
+
+### Test Counts
+
++16 tests (2054 → 2070)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2070 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 78: PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated Handshake
+
+### Date: 2026-02-18
+
+### Summary
+Added three features: (1) PADDING extension (type 21, RFC 7685) with codec (build/parse), config field `padding_target`, TLS 1.3 ClientHello integration (added before PSK); (2) OID Filters extension (type 48, RFC 8446 §4.2.5) with codec (build/parse), config field `oid_filters`, wired into TLS 1.3 server CertificateRequest; (3) DTLS 1.2 abbreviated (resumed) handshake with session cache lookup, abbreviated flow (server CCS+Finished first, then client CCS+Finished), mirroring the TLS 1.2 pattern.
+
+### Features (3)
+
+| Feature | Description |
+|---------|-------------|
+| PADDING Extension (RFC 7685) | `build_padding`/`parse_padding` codec, `ExtensionType::PADDING` (21), `padding_target: u16` config (0=disabled), TLS 1.3 ClientHello integration (padding added before PSK which must be last), parse validates all zero bytes |
+| OID Filters (RFC 8446 §4.2.5) | `build_oid_filters`/`parse_oid_filters` codec, `ExtensionType::OID_FILTERS` (48), `oid_filters: Vec<(Vec<u8>, Vec<u8>)>` config, wired into server `request_client_auth()` CertificateRequest |
+| DTLS 1.2 Abbreviated Handshake | Client session cache lookup in `build_client_hello`, abbreviated detection in `process_server_hello` (session_id match), `DtlsAbbreviatedClientKeys`/`DtlsAbbreviatedServerResult` structs, `do_abbreviated()` server method, abbreviated Finished processing (both sides), `do_abbreviated_handshake()` connection driver, full→abbreviated→app data flow |
+
+### Files Modified (8)
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-tls/src/extensions/mod.rs` | Added `PADDING` (21) and `OID_FILTERS` (48) extension type constants |
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Added `build_padding`/`parse_padding`, `build_oid_filters`/`parse_oid_filters` codec functions (+5 tests) |
+| `crates/hitls-tls/src/config/mod.rs` | Added `padding_target: u16` and `oid_filters: Vec<(Vec<u8>, Vec<u8>)>` to TlsConfig + builder methods (+2 tests) |
+| `crates/hitls-tls/src/handshake/client.rs` | Added PADDING extension to `build_client_hello()` after custom extensions, before PSK (+3 tests) |
+| `crates/hitls-tls/src/connection.rs` | Added OID Filters to server `request_client_auth()` CertificateRequest when configured |
+| `crates/hitls-tls/src/handshake/client_dtls12.rs` | Added abbreviated handshake fields, session cache lookup in `build_client_hello_with_cookie`, abbreviated detection in `process_server_hello`, `process_abbreviated_server_finished`, getters (+1 test) |
+| `crates/hitls-tls/src/handshake/server_dtls12.rs` | Added `DtlsAbbreviatedServerResult`, `DtlsServerHelloResult` enum, `do_abbreviated()`, `process_abbreviated_finished()`, session cache lookup in both `process_client_hello` methods, new session_id generation for full handshake |
+| `crates/hitls-tls/src/connection_dtls12.rs` | Refactored into `do_full_handshake`/`do_abbreviated_handshake` helpers, session store helpers, abbreviated handshake driver (+4 tests) |
+
+### Implementation Details
+- **PADDING placement**: Added as last extension before PSK (which MUST be last per RFC 8446). Padding is only added if ClientHello size + 4 (ext overhead) < target.
+- **PADDING validation**: `parse_padding()` validates all bytes are zero per RFC 7685 — non-zero bytes are rejected.
+- **OID Filters wire format**: `filters_length(2) || [oid_length(1) || oid || values_length(2) || values]*`
+- **DTLS 1.2 abbreviated flow**: Server sends SH → CCS → Finished (encrypted), client detects via session_id match, processes server Finished, sends CCS → Finished (encrypted). Server verifies client Finished.
+- **Session ID for full handshake**: Server now generates a fresh random session_id for full handshakes (instead of echoing client's), preventing false abbreviation detection.
+- **Session cache TTL**: Cached sessions respect InMemorySessionCache TTL expiration (default 2h).
+
+### Test Counts (Phase 78)
+- **hitls-tls**: 768 [was: 753] (+15 new tests)
+- **Total workspace**: 2069 (40 ignored) [was: 2036 (actually 2003 + 33 auth)]
+
+### New Tests (15)
+
+| # | Test | File | Description |
+|---|------|------|-------------|
+| 1 | `test_padding_codec_roundtrip` | extensions_codec.rs | Build padding (0, 1, 100, 512), verify roundtrip |
+| 2 | `test_padding_rejects_nonzero` | extensions_codec.rs | parse_padding rejects non-zero bytes |
+| 3 | `test_oid_filters_codec_roundtrip` | extensions_codec.rs | Build single + multiple OID filters, verify roundtrip |
+| 4 | `test_oid_filters_empty` | extensions_codec.rs | Empty filter list produces valid extension |
+| 5 | `test_oid_filters_truncated_rejected` | extensions_codec.rs | Truncated data returns error |
+| 6 | `test_config_padding_target` | config/mod.rs | Builder sets padding_target, default is 0 |
+| 7 | `test_config_oid_filters` | config/mod.rs | Builder sets oid_filters, default is empty |
+| 8 | `test_padding_in_tls13_client_hello` | client.rs | CH with padding_target=512, PADDING ext present |
+| 9 | `test_no_padding_when_disabled` | client.rs | padding_target=0 → no PADDING ext |
+| 10 | `test_no_padding_when_already_large` | client.rs | CH > target → no padding added |
+| 11 | `test_dtls12_client_detects_abbreviated` | client_dtls12.rs | Unit test: abbreviated detection via session_id match |
+| 12 | `test_dtls12_abbreviated_handshake` | connection_dtls12.rs | Full HS → abbreviated HS succeeds |
+| 13 | `test_dtls12_abbreviated_app_data` | connection_dtls12.rs | App data after abbreviated HS |
+| 14 | `test_dtls12_abbreviated_falls_back_to_full` | connection_dtls12.rs | Mismatched session → full handshake |
+| 15 | `test_dtls12_abbreviated_with_cookie` | connection_dtls12.rs | Abbreviated + cookie exchange combined |
+
+### Build Status
+- Clippy: zero warnings (`RUSTFLAGS="-D warnings"`)
+- Formatting: clean (`cargo fmt --check`)
+- 2069 workspace tests passing (40 ignored)
+
+---
+
+## Phase T79: cert_verify Unit Tests + Config Callbacks + Integration Tests
+
+### Date: 2026-02-18
+
+### Summary
+
+Added comprehensive tests for cert_verify module and config callbacks:
+1. **cert_verify.rs** — 13 unit tests covering all code paths of `verify_server_certificate()`: verify_peer=false bypass, empty chain rejection, invalid DER rejection, chain fails with no trusted certs, hostname verification skip, CertVerifyCallback (accept/reject/info fields), hostname mismatch, Debug impl, callback-not-invoked when verify_peer=false.
+2. **config/mod.rs** — 7 unit tests for builder methods: cert_verify_callback, sni_callback, key_log_callback, verify_hostname toggle, trusted_cert accumulation, SniAction variants, Debug format.
+3. **tests/interop/src/lib.rs** — 6 integration tests: TLS 1.3/1.2 cert_verify_callback accept/reject, TLS 1.3/1.2 key_log_callback, TLS 1.2 server-initiated renegotiation.
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/cert_verify.rs`** — NEW: TLS cert verification orchestration with 13 unit tests
+2. **`crates/hitls-tls/src/config/mod.rs`** — 7 new config callback unit tests
+3. **`tests/interop/src/lib.rs`** — 6 new integration tests
+
+### Test Counts
+
++26 tests (2105 → 2131)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2131 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 80: Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701)
+
+### Date: 2026-02-18
+
+### Summary
+
+Implemented three features:
+1. **Async DTLS 1.2** — `AsyncDtls12ClientConnection<S>` + `AsyncDtls12ServerConnection<S>` with full handshake (cookie exchange), abbreviated handshake (session resumption), async read/write/shutdown, anti-replay, epoch management, session cache auto-store.
+2. **Heartbeat Extension (RFC 6520)** — Extension type 15 codec (build/parse), `heartbeat_mode: u8` config field (0=disabled, 1=peer_allowed_to_send, 2=peer_not_allowed_to_send). Extension negotiation only.
+3. **GREASE (RFC 8701)** — `grease: bool` config field. When enabled, injects random GREASE values (0x?A?A pattern) into ClientHello: cipher suites (prepend), supported_versions, supported_groups, signature_algorithms, key_share (with 1-byte dummy), and one random empty GREASE extension.
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/connection_dtls12_async.rs`** — NEW: Async DTLS 1.2 client + server connections (full/abbreviated handshake, read/write/shutdown, anti-replay, session cache, 10 tests)
+2. **`crates/hitls-tls/src/lib.rs`** — Register `connection_dtls12_async` module under `#[cfg(all(feature = "async", feature = "dtls12"))]`
+3. **`crates/hitls-tls/src/extensions/mod.rs`** — Add `HEARTBEAT: Self = Self(15)` constant
+4. **`crates/hitls-tls/src/handshake/extensions_codec.rs`** — Heartbeat codec (build_heartbeat, parse_heartbeat), GREASE helpers (GREASE_VALUES, is_grease_value, grease_value, build_grease_extension, build_supported_versions_ch_grease, build_supported_groups_grease, build_signature_algorithms_grease, build_key_share_ch_grease), 5 tests
+5. **`crates/hitls-tls/src/config/mod.rs`** — Add `heartbeat_mode: u8` and `grease: bool` config fields with builder methods and defaults, 2 tests
+6. **`crates/hitls-tls/src/handshake/client.rs`** — GREASE injection in `build_client_hello()` (cipher suites prepend, extension builders, empty GREASE extension), heartbeat extension when configured, 2 tests
+
+### Implementation Details
+
+- Async DTLS 1.2 follows patterns from `connection12_async.rs` (async I/O orchestration) and `connection_dtls12.rs` (DTLS-specific: EpochState, DtlsRecord, encryption/decryption, anti-replay, cookie exchange)
+- DTLS record format: 13-byte header (content_type + version + epoch + sequence_number + length), self-framing over stream transport
+- Session cache locking: MutexGuard acquired and released synchronously, never held across `.await` points
+- GREASE values are independently random per list (different `grease_value()` calls for cipher suite, versions, groups, sig_algs, key_share, extension)
+- Heartbeat: mode validation rejects 0, 3+, empty, and oversized data
+- All secrets zeroized after handshake completion
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_heartbeat_codec_roundtrip | extensions_codec.rs |
+| 2 | test_heartbeat_invalid_mode | extensions_codec.rs |
+| 3 | test_grease_value_is_valid | extensions_codec.rs |
+| 4 | test_grease_extension_build | extensions_codec.rs |
+| 5 | test_grease_supported_versions | extensions_codec.rs |
+| 6 | test_config_heartbeat_mode | config/mod.rs |
+| 7 | test_config_grease | config/mod.rs |
+| 8 | test_grease_in_client_hello | client.rs |
+| 9 | test_no_grease_when_disabled | client.rs |
+| 10 | test_async_dtls12_read_before_handshake | connection_dtls12_async.rs |
+| 11 | test_async_dtls12_write_before_handshake | connection_dtls12_async.rs |
+| 12 | test_async_dtls12_full_handshake | connection_dtls12_async.rs |
+| 13 | test_async_dtls12_version_check | connection_dtls12_async.rs |
+| 14 | test_async_dtls12_cipher_suite | connection_dtls12_async.rs |
+| 15 | test_async_dtls12_connection_info | connection_dtls12_async.rs |
+| 16 | test_async_dtls12_shutdown | connection_dtls12_async.rs |
+| 17 | test_async_dtls12_large_payload | connection_dtls12_async.rs |
+| 18 | test_async_dtls12_abbreviated_handshake | connection_dtls12_async.rs |
+| 19 | test_async_dtls12_session_resumed | connection_dtls12_async.rs |
+
++19 tests (2086 → 2105)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2105 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 85: TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4
+
+### Date: 2026-02-19
+
+### Summary
+
+Implemented three features:
+1. **TLS Callback Framework** — 7 new callback types (`MsgCallback`, `InfoCallback`, `RecordPaddingCallback`, `DhTmpCallback`, `CookieGenCallback`, `CookieVerifyCallback`, `ClientHelloCallback`) with `ClientHelloInfo` struct and `ClientHelloAction` enum. All callbacks use `Arc<dyn Fn(...) + Send + Sync>` pattern. Wired `record_padding_cb` into TLS 1.3 `RecordEncryptor`, `cookie_gen/verify_callback` into DTLS 1.2/DTLCP servers, `client_hello_callback` into TLS 1.3/1.2 servers.
+2. **Missing Legacy Alert Codes** — Added 6 legacy/deprecated alert codes to `AlertDescription`: `DecryptionFailed(21)`, `DecompressionFailure(30)`, `NoCertificateReserved(41)`, `ExportRestrictionReserved(60)`, `CertificateUnobtainable(111)`, `BadCertificateHashValue(114)`. Updated `from_u8()` and tests (28→34 variants).
+3. **CBC-MAC-SM4** — New `CbcMacSm4` implementation using SM4 block cipher with zero-padding. Feature-gated behind `cbc-mac = ["sm4"]`. Implements `new(key)`, `update(data)`, `finish(out)`, `reset()` API pattern. Derives `Zeroize`/`ZeroizeOnDrop`.
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/config/mod.rs`** — 7 callback type aliases + `ClientHelloInfo` struct + `ClientHelloAction` enum + 7 config fields + 7 builder methods + Debug impl entries + 10 tests
+2. **`crates/hitls-tls/src/alert/mod.rs`** — 6 new alert codes + updated `from_u8()` + updated tests (34 variants) + `test_legacy_alert_codes` test
+3. **`crates/hitls-crypto/src/cbc_mac.rs`** — NEW: CBC-MAC-SM4 implementation with 10 unit tests
+4. **`crates/hitls-crypto/src/lib.rs`** — Registered `cbc_mac` module under `#[cfg(feature = "cbc-mac")]`
+5. **`crates/hitls-crypto/Cargo.toml`** — Added `cbc-mac = ["sm4"]` feature flag
+6. **`crates/hitls-tls/src/record/encryption.rs`** — Added `padding_cb` field to `RecordEncryptor`, `set_padding_callback()` method, invocation in `encrypt_record()`
+7. **`crates/hitls-tls/src/record/mod.rs`** — Added `set_record_padding_callback()` on `RecordLayer`
+8. **`crates/hitls-tls/src/connection.rs`** — Wired `record_padding_callback` from config at 2 app key activation points (client + server)
+9. **`crates/hitls-tls/src/handshake/server.rs`** — Wired `client_hello_callback` into TLS 1.3 server after SNI
+10. **`crates/hitls-tls/src/handshake/server12.rs`** — Wired `client_hello_callback` into TLS 1.2 server after SNI
+11. **`crates/hitls-tls/src/handshake/server_dtls12.rs`** — Wired `cookie_gen_callback`/`cookie_verify_callback` into DTLS 1.2 server
+12. **`crates/hitls-tls/src/handshake/server_dtlcp.rs`** — Wired `cookie_gen_callback`/`cookie_verify_callback` into DTLCP server
+
+### Implementation Details
+
+- **Callback signatures** match C openHiTLS typedefs (`HITLS_MsgCb`, `HITLS_InfoCb`, etc.) adapted to Rust idioms
+- **MsgCallback**: `fn(is_write: bool, content_type: u16, version: u8, data: &[u8])` — observes all protocol messages
+- **InfoCallback**: `fn(event_type: i32, value: i32)` — state change/alert notifications
+- **RecordPaddingCallback**: `fn(content_type: u8, plaintext_len: usize) -> usize` — returns padding length for TLS 1.3 records
+- **DhTmpCallback**: `fn(is_export: bool, key_length: u32) -> Option<Vec<u8>>` — dynamic DH parameter generation
+- **CookieGenCallback**: `fn(client_hello_hash: &[u8]) -> Vec<u8>` — custom DTLS cookie generation
+- **CookieVerifyCallback**: `fn(cookie: &[u8], client_hello_hash: &[u8]) -> bool` — custom DTLS cookie verification
+- **ClientHelloCallback**: `fn(&ClientHelloInfo) -> ClientHelloAction` — observe/control ClientHello processing (Success/Retry/Failed)
+- **CBC-MAC algorithm**: state = E_K(state XOR block), zero-padding for final incomplete block, 16-byte output
+- Cookie callbacks fall back to default HMAC-SHA256 when not configured
+- client_hello_callback placed after SNI callback but before cipher suite selection
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_config_msg_callback | config/mod.rs |
+| 2 | test_config_info_callback | config/mod.rs |
+| 3 | test_config_record_padding_callback | config/mod.rs |
+| 4 | test_config_dh_tmp_callback | config/mod.rs |
+| 5 | test_config_cookie_gen_callback | config/mod.rs |
+| 6 | test_config_cookie_verify_callback | config/mod.rs |
+| 7 | test_config_client_hello_callback | config/mod.rs |
+| 8 | test_config_callbacks_default_none | config/mod.rs |
+| 9 | test_client_hello_info_debug | config/mod.rs |
+| 10 | test_client_hello_action_variants | config/mod.rs |
+| 11 | test_alert_description_all_34_variants | alert/mod.rs |
+| 12 | test_legacy_alert_codes | alert/mod.rs |
+| 13 | test_cbc_mac_sm4_single_block | cbc_mac.rs |
+| 14 | test_cbc_mac_sm4_empty_message | cbc_mac.rs |
+| 15 | test_cbc_mac_sm4_multi_block | cbc_mac.rs |
+| 16 | test_cbc_mac_sm4_partial_block | cbc_mac.rs |
+| 17 | test_cbc_mac_sm4_incremental_update | cbc_mac.rs |
+| 18 | test_cbc_mac_sm4_reset | cbc_mac.rs |
+| 19 | test_cbc_mac_sm4_invalid_key_length | cbc_mac.rs |
+| 20 | test_cbc_mac_sm4_output_size | cbc_mac.rs |
+| 21 | test_cbc_mac_sm4_buffer_too_small | cbc_mac.rs |
+| 22 | test_cbc_mac_sm4_deterministic | cbc_mac.rs |
+
++21 tests (2218 → 2239)
+
+Note: Phase 85 was applied on top of Phase T84 (2218 tests). The +21 count reflects the net new tests added by Phase 85 features (10 CBC-MAC + 10 config callbacks + 1 alert test). Some existing tests were also updated (e.g., alert variant count 28→34).
+
+### Build Status
+- `cargo test --workspace --all-features`: 2239 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 86: Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) + CMS AuthenticatedData (RFC 5652 §9)
+
+### Date: 2026-02-19
+
+### Summary
+
+Implemented four features:
+1. **Trusted CA Keys (RFC 6066 §6, type 3)** — ExtensionType constant + codec (build_trusted_ca_keys/parse_trusted_ca_keys) + config field `trusted_ca_keys: Vec<TrustedAuthority>` + builder method + ClientHello integration (TLS 1.3 + TLS 1.2). 3 codec tests + 1 config test.
+2. **USE_SRTP (RFC 5764, type 14)** — ExtensionType constant + codec (build_use_srtp/parse_use_srtp) + config field `srtp_profiles: Vec<u16>` + builder method + ClientHello integration (TLS 1.3 + TLS 1.2). 3 codec tests + 1 config test.
+3. **STATUS_REQUEST_V2 (RFC 6961, type 17)** — ExtensionType constant + codec (build_status_request_v2/parse_status_request_v2) + config field `enable_ocsp_multi_stapling: bool` + builder method + ClientHello integration (TLS 1.3 + TLS 1.2). 2 codec tests + 1 config test.
+4. **CMS AuthenticatedData (RFC 5652 §9)** — AuthenticatedData struct + parse/encode + create (CmsMessage::authenticate) + verify (CmsMessage::verify_mac) + HMAC-SHA-256/384/512 support + OID (1.2.840.113549.1.9.16.1.2) + DER roundtrip + 5 tests.
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/extensions/mod.rs`** — 3 new ExtensionType constants (TRUSTED_CA_KEYS type 3, USE_SRTP type 14, STATUS_REQUEST_V2 type 17)
+2. **`crates/hitls-tls/src/handshake/extensions_codec.rs`** — 6 codec functions (build/parse for each extension) + 9 tests (3 trusted_ca_keys + 3 use_srtp + 2 status_request_v2 + 1 roundtrip)
+3. **`crates/hitls-tls/src/config/mod.rs`** — 3 new config fields (trusted_ca_keys, srtp_profiles, enable_ocsp_multi_stapling) + builder methods + 3 config tests
+4. **`crates/hitls-tls/src/handshake/client.rs`** — 3 extension building calls in TLS 1.3 ClientHello
+5. **`crates/hitls-tls/src/handshake/client12.rs`** — 3 extension building calls in TLS 1.2 ClientHello
+6. **`crates/hitls-pki/src/cms/mod.rs`** — AuthenticatedData struct + parse/encode/create/verify + 5 tests
+7. **`crates/hitls-pki/src/cms/encrypted.rs`** — authenticated_data field added
+8. **`crates/hitls-pki/src/cms/enveloped.rs`** — authenticated_data field added
+9. **`crates/hitls-utils/src/oid/mod.rs`** — 3 new OIDs (cms_authenticated_data, hmac_sha384, hmac_sha512)
+
+### Implementation Details
+
+- **Trusted CA Keys**: TrustedAuthority enum with PreAgreed, KeySha1Hash([u8;20]), X509Name(Vec<u8>), CertSha1Hash([u8;20]) variants per RFC 6066 §6 IdentifierType. Wire format: authorities_length(2) || [identifier_type(1) || data]*. Added to ClientHello when trusted_ca_keys is non-empty.
+- **USE_SRTP**: Wire format: profiles_length(2) || [profile_id(2)]* || mki_length(1) || mki. Config stores Vec<u16> of SRTP protection profiles. Added to ClientHello when srtp_profiles is non-empty.
+- **STATUS_REQUEST_V2**: Wire format: list_length(2) || [status_type(1)=2 || request_length(2) || responder_id_list_length(2)=0 || request_extensions_length(2)=0]*. Single OCSP_MULTI request item emitted. Added to ClientHello when enable_ocsp_multi_stapling is true.
+- **CMS AuthenticatedData**: ContentInfo with OID 1.2.840.113549.1.9.16.1.2, version 0, originatorInfo absent, recipientInfos with KeyTransRecipientInfo (RSA key transport), macAlgorithm (HMAC-SHA-256/384/512), encapContentInfo with eContentType id-data, mac value. authenticate() creates with random MAC key encrypted to recipient RSA public key. verify_mac() decrypts MAC key with recipient private key and re-computes HMAC.
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_build_parse_trusted_ca_keys | extensions_codec.rs |
+| 2 | test_trusted_ca_keys_empty | extensions_codec.rs |
+| 3 | test_trusted_ca_keys_roundtrip | extensions_codec.rs |
+| 4 | test_build_parse_use_srtp | extensions_codec.rs |
+| 5 | test_use_srtp_empty | extensions_codec.rs |
+| 6 | test_use_srtp_roundtrip | extensions_codec.rs |
+| 7 | test_build_parse_status_request_v2 | extensions_codec.rs |
+| 8 | test_status_request_v2_roundtrip | extensions_codec.rs |
+| 9 | test_status_request_v2_parse_empty | extensions_codec.rs |
+| 10 | test_config_trusted_ca_keys | config/mod.rs |
+| 11 | test_config_srtp_profiles | config/mod.rs |
+| 12 | test_config_enable_ocsp_multi_stapling | config/mod.rs |
+| 13-15 | CMS AuthenticatedData tests (create/verify, DER roundtrip, HMAC variants) | cms/mod.rs |
+
++17 tests (2239 → 2256): hitls-tls 892 → 904 (+12), hitls-pki 336 → 341 (+5)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2256 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 87: DTLS Config Enhancements + Integration Tests for Phase 85–86 Features
+
+### Date: 2026-02-19
+
+### Summary
+
+Implemented two features:
+1. **DTLS Configuration Enhancements** — Added `flight_transmit_enable` (bool, default true) and `empty_records_limit` (u32, default 32) to TlsConfig + TlsConfigBuilder. Implemented `check_empty_record()` in RecordLayer for DoS protection: tracks consecutive empty plaintext records, rejects empty Alert/ApplicationData records, rejects empty encrypted records, and returns fatal error when limit exceeded. 2 config tests + 7 record layer tests.
+2. **Integration Tests for Phase 85–86 Features** â 9 integration tests covering: MsgCallback TLS 1.3/1.2 (config acceptance + handshake success), InfoCallback (server-side events), ClientHelloCallback (cipher suite observation), CBC-MAC-SM4 (create/verify/determinism), CMS AuthenticatedData (create/verify/DER roundtrip), RecordPaddingCallback (wired + handshake + data exchange), DTLS config enhancements (flight_transmit_enable + empty_records_limit + handshake), RecordLayer empty records limit (DoS protection).
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/config/mod.rs`** — 2 new config fields (flight_transmit_enable, empty_records_limit) + builder methods + 2 tests
+2. **`crates/hitls-tls/src/record/mod.rs`** — empty_record_count/empty_records_limit fields + check_empty_record() method + DEFAULT_EMPTY_RECORDS_LIMIT constant + 7 tests
+3. **`tests/interop/src/lib.rs`** — 9 new integration tests
+4. **`tests/interop/Cargo.toml`** — Added `cbc-mac` feature to hitls-crypto dependency
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_config_flight_transmit_enable | config/mod.rs |
+| 2 | test_config_empty_records_limit | config/mod.rs |
+| 3 | test_empty_record_defaults | record/mod.rs |
+| 4 | test_empty_record_non_empty_resets | record/mod.rs |
+| 5 | test_empty_record_limit_exceeded | record/mod.rs |
+| 6 | test_empty_record_alert_rejected | record/mod.rs |
+| 7 | test_empty_record_app_data_rejected | record/mod.rs |
+| 8 | test_empty_record_ccs_allowed | record/mod.rs |
+| 9 | test_empty_record_zero_limit | record/mod.rs |
+| 10 | test_tls13_msg_callback | interop/lib.rs |
+| 11 | test_tls12_msg_callback | interop/lib.rs |
+| 12 | test_tls13_info_callback | interop/lib.rs |
+| 13 | test_tls13_client_hello_callback | interop/lib.rs |
+| 14 | test_cbc_mac_sm4_integration | interop/lib.rs |
+| 15 | test_cms_authenticated_data_integration | interop/lib.rs |
+| 16 | test_tls13_record_padding_callback | interop/lib.rs |
+| 17 | test_dtls12_config_enhancements | interop/lib.rs |
+| 18 | test_record_layer_empty_records_limit | interop/lib.rs |
+
++18 tests (2256 → 2274): hitls-tls 904 → 913 (+9), hitls-integration 113 → 122 (+9)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2274 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase 94: Encrypted PKCS#8 + Callbacks + SM4-CTR-DRBG + CMS ML-DSA (2026-02-19)
+
+### Part A: Encrypted PKCS#8 (PBES2) + Session ID Context + quiet_shutdown
+
+Implemented three features:
+1. **Encrypted PKCS#8 (EncryptedPrivateKeyInfo)** — RFC 5958 EncryptedPrivateKeyInfo parsing and encoding with PBES2 (PBKDF2-HMAC-SHA256 + AES-256-CBC default, AES-128-CBC optional). Functions: `decrypt_pkcs8_der()`, `decrypt_pkcs8_pem()`, `encrypt_pkcs8_der()`, `encrypt_pkcs8_der_with()`, `encrypt_pkcs8_pem()`. 5 tests.
+2. **Session ID Context** — `session_id_context: Option<Vec<u8>>` config field for server-side session cache isolation. Builder method. 3 tests.
+3. **quiet_shutdown** — `quiet_shutdown: bool` config (default false) to skip sending close_notify alert on shutdown. Wired into all 6 connection types (TLS 1.3, TLS 1.2, DTLS 1.2 × sync/async). 4 tests.
+
+### Files Modified
+
+1. **`crates/hitls-pki/src/pkcs8/encrypted.rs`** — NEW: Encrypted PKCS#8 implementation + 5 tests
+2. **`crates/hitls-pki/src/pkcs8/mod.rs`** — Added `pub mod encrypted;`
+3. **`crates/hitls-tls/src/config/mod.rs`** — session_id_context + quiet_shutdown fields + builder + 7 tests
+4. **`crates/hitls-tls/src/connection.rs`** — quiet_shutdown guard in TLS 1.3 shutdown
+5. **`crates/hitls-tls/src/connection12.rs`** — quiet_shutdown guard in TLS 1.2 shutdown
+6. **`crates/hitls-tls/src/connection_async.rs`** — quiet_shutdown guard in async TLS 1.3 shutdown
+7. **`crates/hitls-tls/src/connection12_async.rs`** — quiet_shutdown guard in async TLS 1.2 shutdown
+8. **`crates/hitls-tls/src/connection_dtls12.rs`** — quiet_shutdown guard in DTLS 1.2 sync shutdown
+9. **`crates/hitls-tls/src/connection_dtls12_async.rs`** — quiet_shutdown guard in async DTLS 1.2 shutdown
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_encrypted_pkcs8_roundtrip_ed25519 | pkcs8/encrypted.rs |
+| 2 | test_encrypted_pkcs8_roundtrip_ec | pkcs8/encrypted.rs |
+| 3 | test_encrypted_pkcs8_wrong_password | pkcs8/encrypted.rs |
+| 4 | test_encrypted_pkcs8_aes128_compat | pkcs8/encrypted.rs |
+| 5 | test_encrypted_pkcs8_pem_roundtrip | pkcs8/encrypted.rs |
+| 6 | test_config_session_id_context | config/mod.rs |
+| 7 | test_config_session_id_context_none | config/mod.rs |
+| 8 | test_config_session_id_context_clone | config/mod.rs |
+| 9 | test_config_quiet_shutdown | config/mod.rs |
+| 10 | test_config_quiet_shutdown_default | config/mod.rs |
+| 11 | test_config_quiet_shutdown_clone | config/mod.rs |
+| 12 | test_config_quiet_shutdown_builder | config/mod.rs |
+
++12 tests (2323 → 2335): hitls-pki 341 → 346 (+5), hitls-tls 936 → 943 (+7)
+
+#### Build Status (Part A)
+- `cargo test --workspace --all-features`: 2335 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+### Part B: TicketKeyCallback + SecurityCallback
+
+Implemented two TLS config callback features:
+1. **TicketKeyCallback** — `Arc<dyn Fn(&[u8], bool) -> Option<TicketKeyResult> + Send + Sync>` for session ticket key rotation. `TicketKeyResult` struct with `key_name`, `key`, `iv`. Config field + builder method. 5 tests.
+2. **SecurityCallback** — `Arc<dyn Fn(u32, u32, u16) -> bool + Send + Sync>` for filtering cipher suites/groups/signature algorithms by security policy. Config field `security_cb` + `security_level: u32` + builder methods. 7 tests.
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/config/mod.rs`** — TicketKeyResult struct, TicketKeyCallback/SecurityCallback type aliases, 5 config fields + builder methods + Debug impl + 12 tests
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_config_ticket_key_cb | config/mod.rs |
+| 2 | test_config_ticket_key_cb_encrypt_decrypt | config/mod.rs |
+| 3 | test_config_ticket_key_cb_reject | config/mod.rs |
+| 4 | test_config_ticket_key_cb_default_none | config/mod.rs |
+| 5 | test_config_ticket_key_cb_clone | config/mod.rs |
+| 6 | test_config_security_cb | config/mod.rs |
+| 7 | test_config_security_cb_reject_cipher | config/mod.rs |
+| 8 | test_config_security_cb_reject_group | config/mod.rs |
+| 9 | test_config_security_cb_reject_sigalg | config/mod.rs |
+| 10 | test_config_security_level | config/mod.rs |
+| 11 | test_config_security_cb_default_none | config/mod.rs |
+| 12 | test_config_security_cb_clone | config/mod.rs |
+
++12 tests (2335 → 2347): hitls-tls 943 → 955 (+12)
+
+#### Build Status (Part B)
+- `cargo test --workspace --all-features`: 2347 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+### Part C: SM4-CTR-DRBG + CMS ML-DSA + Integration Tests
+
+Implemented three features plus documentation sync, completing 100% C→Rust feature parity:
+1. **SM4-CTR-DRBG** — NIST SP 800-90A Section 10.2 CTR-DRBG using SM4 as the block cipher (128-bit key, 128-bit block, 32-byte seed). `Sm4CtrDrbg` struct with `new()`, `generate()`, `generate_bytes()`, `reseed()`. Feature-gated under `sm4`. 4 tests.
+2. **CMS ML-DSA OID Integration** — Added ML-DSA-44/65/87 OID constants to `hitls-utils`. Wired ML-DSA verification dispatch into CMS SignedData `verify_signature_with_cert()`. Made `mldsa_verify`, `get_params`, `MlDsaParams` public. Feature-gated under `mldsa`. 3 tests.
+3. **Integration Tests** — 3 end-to-end integration tests: quiet_shutdown (TLS 1.3, no close_notify sent), security_callback (reject weak cipher suites), encrypted_pkcs8 (encrypt/decrypt roundtrip).
+4. **Documentation Sync** — Updated CLAUDE.md, DEV_LOG.md, PROMPT_LOG.md, README.md.
+
+### Files Modified
+
+1. **`crates/hitls-crypto/src/drbg/sm4_ctr_drbg.rs`** — NEW: SM4-CTR-DRBG implementation (Sm4CtrDrbg struct, update/generate/reseed, 4 tests)
+2. **`crates/hitls-crypto/src/drbg/mod.rs`** — Added `sm4_ctr_drbg` module + `Sm4CtrDrbg` re-export
+3. **`crates/hitls-utils/src/oid/mod.rs`** — Added ML-DSA OIDs: ml_dsa_44(), ml_dsa_65(), ml_dsa_87()
+4. **`crates/hitls-pki/src/cms/mod.rs`** — ML-DSA verification dispatch + 3 tests
+5. **`crates/hitls-pki/Cargo.toml`** — Added `mldsa` feature
+6. **`crates/hitls-crypto/src/mldsa/mod.rs`** — Made MlDsaParams/get_params/mldsa_verify public
+7. **`tests/interop/src/lib.rs`** — 3 new integration tests
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_sm4_ctr_drbg_generate | drbg/sm4_ctr_drbg.rs |
+| 2 | test_sm4_ctr_drbg_reseed | drbg/sm4_ctr_drbg.rs |
+| 3 | test_sm4_ctr_drbg_deterministic | drbg/sm4_ctr_drbg.rs |
+| 4 | test_sm4_ctr_drbg_vs_aes_different_output | drbg/sm4_ctr_drbg.rs |
+| 5 | test_cms_mldsa_oid_definitions | cms/mod.rs |
+| 6 | test_cms_mldsa_sign_verify_roundtrip | cms/mod.rs |
+| 7 | test_cms_mldsa_tampered_signature | cms/mod.rs |
+| 8 | test_quiet_shutdown_e2e | interop/lib.rs |
+| 9 | test_security_callback_e2e | interop/lib.rs |
+| 10 | test_encrypted_pkcs8_e2e | interop/lib.rs |
+
++10 tests (2347 → 2357): hitls-crypto 603 → 607 (+4), hitls-pki 346 → 349 (+3), hitls-integration 122 → 125 (+3)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2357 passed, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T96: connection_info / handshake enums / lib.rs constants / codec error paths / async accessors
+
+### Date: 2026-02-20
+
+### Summary
+
+Added 40 unit tests across 7 files targeting zero-test or thin-coverage areas:
+
+1. **connection_info.rs** (+5) — ConnectionInfo struct construction, optional fields, Debug/Clone traits, large peer certs
+2. **handshake/mod.rs** (+5) — HandshakeType wire-format discriminant values (all 18), distinctness, HandshakeState 12 variants, Debug/Clone, HandshakeMessage construction
+3. **lib.rs** (+7) — TLS 1.2 ECDHE/RSA/DHE/PSK/TLCP cipher suite constant verification, TlsRole enum, CipherSuite Debug, TlsVersion Hash
+4. **codec_tlcp.rs** (+7) — All error paths: certificate too short/body truncated/entry truncated, SKE too short/sig truncated, CKE too short/data truncated
+5. **codec_dtls.rs** (+9) — All error paths: HVR too short/cookie truncated, unknown handshake type, tls_to_dtls too short/length mismatch, dtls_to_tls too short/body mismatch, body truncated, CH too short
+6. **connection12_async.rs** (+4) — Multi-message exchange, verify_data cross-match, negotiated_group, server connection_info
+7. **connection_dtls12_async.rs** (+3) — Server/client connection_info before handshake, server accessors after handshake
+
+### Files Modified
+
+1. **`crates/hitls-tls/src/connection_info.rs`** — Added `#[cfg(test)] mod tests` with 5 tests
+2. **`crates/hitls-tls/src/handshake/mod.rs`** — Added `#[cfg(test)] mod tests` with 5 tests
+3. **`crates/hitls-tls/src/lib.rs`** — Added 7 tests to existing test module
+4. **`crates/hitls-tls/src/handshake/codec_tlcp.rs`** — Added 7 error-path tests
+5. **`crates/hitls-tls/src/handshake/codec_dtls.rs`** — Added 9 error-path tests
+6. **`crates/hitls-tls/src/connection12_async.rs`** — Added 4 async accessor/data tests
+7. **`crates/hitls-tls/src/connection_dtls12_async.rs`** — Added 3 async accessor tests
+
+### Test Counts
+
+| # | Test | File |
+|---|------|------|
+| 1 | test_connection_info_construction_all_fields | connection_info.rs |
+| 2 | test_connection_info_optional_fields_none | connection_info.rs |
+| 3 | test_connection_info_debug_format | connection_info.rs |
+| 4 | test_connection_info_clone_independence | connection_info.rs |
+| 5 | test_connection_info_large_peer_certs | connection_info.rs |
+| 6 | test_handshake_type_discriminant_values | handshake/mod.rs |
+| 7 | test_handshake_type_all_variants_distinct | handshake/mod.rs |
+| 8 | test_handshake_state_variants | handshake/mod.rs |
+| 9 | test_handshake_type_debug_clone | handshake/mod.rs |
+| 10 | test_handshake_message_construction | handshake/mod.rs |
+| 11 | test_cipher_suite_tls12_ecdhe_constants | lib.rs |
+| 12 | test_cipher_suite_tls12_rsa_dhe_constants | lib.rs |
+| 13 | test_cipher_suite_tls12_psk_constants | lib.rs |
+| 14 | test_cipher_suite_tlcp_constants | lib.rs |
+| 15 | test_tls_role_enum | lib.rs |
+| 16 | test_cipher_suite_debug | lib.rs |
+| 17 | test_tls_version_hash | lib.rs |
+| 18 | test_decode_tlcp_certificate_too_short | codec_tlcp.rs |
+| 19 | test_decode_tlcp_certificate_body_truncated | codec_tlcp.rs |
+| 20 | test_decode_tlcp_certificate_entry_truncated | codec_tlcp.rs |
+| 21 | test_decode_ecc_server_key_exchange_too_short | codec_tlcp.rs |
+| 22 | test_decode_ecc_server_key_exchange_sig_truncated | codec_tlcp.rs |
+| 23 | test_decode_ecc_client_key_exchange_too_short | codec_tlcp.rs |
+| 24 | test_decode_ecc_client_key_exchange_data_truncated | codec_tlcp.rs |
+| 25 | test_decode_hello_verify_request_too_short | codec_dtls.rs |
+| 26 | test_decode_hello_verify_request_cookie_truncated | codec_dtls.rs |
+| 27 | test_dtls_handshake_unknown_type | codec_dtls.rs |
+| 28 | test_tls_to_dtls_too_short | codec_dtls.rs |
+| 29 | test_tls_to_dtls_length_mismatch | codec_dtls.rs |
+| 30 | test_dtls_to_tls_too_short | codec_dtls.rs |
+| 31 | test_dtls_to_tls_body_length_mismatch | codec_dtls.rs |
+| 32 | test_dtls_get_body_truncated | codec_dtls.rs |
+| 33 | test_dtls_client_hello_too_short_for_version | codec_dtls.rs |
+| 34 | test_async_tls12_multi_message_exchange | connection12_async.rs |
+| 35 | test_async_tls12_verify_data_after_handshake | connection12_async.rs |
+| 36 | test_async_tls12_negotiated_group_after_handshake | connection12_async.rs |
+| 37 | test_async_tls12_server_connection_info_after_handshake | connection12_async.rs |
+| 38 | test_async_dtls12_server_connection_info_before_handshake | connection_dtls12_async.rs |
+| 39 | test_async_dtls12_server_accessors_after_handshake | connection_dtls12_async.rs |
+| 40 | test_async_dtls12_client_connection_info_before_handshake | connection_dtls12_async.rs |
+
++40 tests (2479 → 2519): hitls-tls 1103 → 1143 (+40)
+
+### Build Status
+- `cargo test --workspace --all-features`: 2519 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
@@ -7442,6 +7819,8 @@ Added 33 new tests covering:
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
 ## Phase T99: 0-RTT early data + replay protection tests
 
 **Date**: 2026-02-21
@@ -7486,199 +7865,446 @@ Added 8 new tests covering:
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
 ## Phase R100: PKI Encoding Consolidation
 
-**Date**: 2026-02-21
-**Scope**: Eliminate 32 duplicated ASN.1 encoding helpers and OID mapping functions across the hitls-pki crate
+### Date: 2026-02-21
 
-### Summary
+### Commit: `32cb3d1`
 
-Created `encoding.rs` (11 shared `pub(crate)` ASN.1 helpers) and `oid_mapping.rs` (unified OID-to-curve mapping) in hitls-pki crate root. Removed 32 duplicate function definitions from 7 files (cms/mod.rs, pkcs12/mod.rs, x509/ocsp.rs, cms/enveloped.rs, cms/encrypted.rs, pkcs8/mod.rs, pkcs8/encrypted.rs). Made `cms::parse_algorithm_identifier` `pub(crate)` to eliminate 2 more copies.
+### Goal
+
+Eliminate duplicated ASN.1 encoding helpers and OID mapping functions scattered across the `hitls-pki` crate. These identical functions were copy-pasted into `cms/mod.rs`, `pkcs12/mod.rs`, `x509/ocsp.rs`, and other modules during the original C→Rust migration.
+
+### Problem
+
+| Function | Copies | Files |
+|----------|--------|-------|
+| `enc_seq` | 3 | cms/mod.rs, pkcs12/mod.rs, x509/ocsp.rs |
+| `enc_set` | 2 | cms/mod.rs, pkcs12/mod.rs |
+| `enc_octet` | 3 | cms/mod.rs, pkcs12/mod.rs, x509/ocsp.rs |
+| `enc_oid` | 3 | cms/mod.rs, pkcs12/mod.rs, x509/ocsp.rs |
+| `enc_int` | 3 | cms/mod.rs, pkcs12/mod.rs, x509/ocsp.rs |
+| `enc_null` | 2 | pkcs12/mod.rs, x509/ocsp.rs |
+| `enc_tlv` | 3 | cms/mod.rs, pkcs12/mod.rs, x509/ocsp.rs |
+| `enc_explicit_ctx` | 2 | cms/mod.rs, pkcs12/mod.rs |
+| `bytes_to_u32` | 5 | cms/mod.rs, cms/enveloped.rs, cms/encrypted.rs, pkcs12/mod.rs, pkcs8/encrypted.rs |
+| `oid_to_curve_id` | 3 | pkcs8/mod.rs, x509/mod.rs, cms/mod.rs |
+| `parse_algorithm_identifier` | 3 identical | cms/mod.rs, cms/enveloped.rs, cms/encrypted.rs |
+
+Total: **32 duplicate function definitions** across 7 files.
+
+### Solution
+
+Created two shared `pub(crate)` modules at the crate root, available to all feature-gated submodules:
+
+**1. `crates/hitls-pki/src/encoding.rs`** — 11 ASN.1 encoding helpers
+
+| Function | Wraps |
+|----------|-------|
+| `enc_seq(content)` | `Encoder::write_sequence` |
+| `enc_set(content)` | `Encoder::write_set` |
+| `enc_octet(content)` | `Encoder::write_octet_string` |
+| `enc_oid(oid_bytes)` | `Encoder::write_oid` |
+| `enc_int(value)` | `Encoder::write_integer` |
+| `enc_null()` | `Encoder::write_null` |
+| `enc_tlv(tag, value)` | `Encoder::write_tlv` |
+| `enc_explicit_ctx(tag_num, content)` | `enc_tlv` with CONTEXT_SPECIFIC \| CONSTRUCTED |
+| `enc_raw_parts(parts)` | `Encoder::write_raw` for each part |
+| `bytes_to_u32(bytes)` | Big-endian bytes → u32 conversion |
+
+**2. `crates/hitls-pki/src/oid_mapping.rs`** — Unified OID-to-algorithm mapping
+
+| Function | Return Type | Curves Supported |
+|----------|-------------|-----------------|
+| `oid_to_curve_id(oid)` | `Option<EccCurveId>` | secp224r1, prime256v1, secp384r1, secp521r1, brainpoolP256r1/384r1/512r1 |
+
+Returns `Option` — callers wrap in their own error types (`CryptoError`, `PkiError`, etc.).
+
+**3. Additional consolidation**: Made `cms::parse_algorithm_identifier` `pub(crate)` so `enveloped.rs` and `encrypted.rs` import it from `super` instead of maintaining identical copies.
 
 ### Files Modified
 
-| File | Changes |
-|------|---------|
+| File | Action |
+|------|--------|
 | `crates/hitls-pki/src/encoding.rs` | **NEW** — 79 lines, 11 shared helpers |
 | `crates/hitls-pki/src/oid_mapping.rs` | **NEW** — 27 lines, unified OID mapping |
-| `crates/hitls-pki/src/lib.rs` | 2 module declarations |
-| `crates/hitls-pki/src/cms/mod.rs` | Removed 10 functions, `parse_algorithm_identifier` → `pub(crate)` |
-| `crates/hitls-pki/src/cms/enveloped.rs` | Removed 2 functions |
-| `crates/hitls-pki/src/cms/encrypted.rs` | Removed 2 functions |
-| `crates/hitls-pki/src/pkcs12/mod.rs` | Removed 9 functions |
-| `crates/hitls-pki/src/x509/ocsp.rs` | Removed 7 functions |
-| `crates/hitls-pki/src/pkcs8/mod.rs` | Thin wrapper over `oid_mapping` |
-| `crates/hitls-pki/src/pkcs8/encrypted.rs` | Removed `bytes_to_u32` |
-| `crates/hitls-pki/src/x509/mod.rs` | Thin wrapper over `oid_mapping` |
+| `crates/hitls-pki/src/lib.rs` | Added 2 non-feature-gated module declarations |
+| `crates/hitls-pki/src/cms/mod.rs` | Removed 10 local functions, added imports, `parse_algorithm_identifier` → `pub(crate)` |
+| `crates/hitls-pki/src/cms/enveloped.rs` | Removed `bytes_to_u32` + `parse_algorithm_identifier`, updated imports |
+| `crates/hitls-pki/src/cms/encrypted.rs` | Removed `bytes_to_u32` + `parse_algorithm_identifier`, updated imports |
+| `crates/hitls-pki/src/pkcs12/mod.rs` | Removed 9 local `enc_*` + `bytes_to_u32`, removed unused `Encoder`/`tags` imports |
+| `crates/hitls-pki/src/x509/ocsp.rs` | Removed 7 local `enc_*`, removed unused `Encoder` import |
+| `crates/hitls-pki/src/pkcs8/mod.rs` | Removed `oid_to_curve_id`, uses `oid_mapping::oid_to_curve_id` with `.ok_or()` |
+| `crates/hitls-pki/src/pkcs8/encrypted.rs` | Removed `bytes_to_u32`, added import |
+| `crates/hitls-pki/src/x509/mod.rs` | `oid_to_curve_id` → thin wrapper over `oid_mapping::oid_to_curve_id` |
+
+### Not Changed (by design)
+
+- **`x509/mod.rs::parse_algorithm_identifier`** — Returns `(Vec<u8>, Option<Vec<u8>>)` with distinct NULL-handling semantics (reads TLV, maps NULL tag to `None`). Different interface from CMS version. Used by 6+ call sites in x509 and crl. Not consolidatable without API change.
+- **`cms/mod.rs::cerr`** — CMS-specific error helper, already shared via `use super::cerr` by enveloped.rs and encrypted.rs.
+- **`x509/ocsp.rs::enc_bit_string`** — Test-only (`#[cfg(test)]`), not worth sharing.
+- **`x509/ocsp.rs::enc_generalized_time`** — Test-only (`#[cfg(test)]`), OCSP-specific.
+
+### Impact
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| Duplicate function definitions | 32 | 0 | −32 |
+| Lines (across 11 files) | 416 | 141 | −275 |
+| Shared modules | 0 | 2 | +2 |
+| `oid_to_curve_id` implementations | 3 independent | 1 canonical + 1 thin wrapper | −2 |
+| `parse_algorithm_identifier` copies | 4 (3 identical) | 2 (different types) | −2 |
 
 ### Build Status
-- 11 files changed, 141 insertions, 275 deletions (net −134 lines)
-- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
+
+- `cargo test -p hitls-pki --all-features`: **349 passed**, 0 failed, 1 ignored
+- `cargo test --workspace --all-features`: all passed, 0 failed
+- `RUSTFLAGS="-D warnings" cargo clippy -p hitls-pki --all-features --all-targets`: **0 warnings**
+- Public API: **zero changes** — all modifications are `pub(crate)` internal
 
 ---
 
 ## Phase R101: Record Layer Enum Dispatch
 
-**Date**: 2026-02-22
-**Scope**: Replace `Option<T>` field proliferation in `RecordLayer` with type-safe enum dispatch
+### Date: 2026-02-22
 
-### Summary
+### Goal
 
-Defined `RecordEncryptorVariant` (5 variants) and `RecordDecryptorVariant` (5 variants) enums to replace 8–10 `Option` fields in `RecordLayer` (only 2 active at any time). Simplified `seal_record()` and `open_record()` from 5-way `if/else` chains to single `match` dispatches. Reduced `is_encrypting()`/`is_decrypting()` from 5-field `||` chains to `.is_some()`. Eliminated ~20 variant-clearing lines in `activate_*` methods.
+Replace `Option<T>` field proliferation in `RecordLayer` with type-safe enum dispatch. The struct had 8–10 `Option` fields (only 2 active at any time), leading to verbose dispatch chains, manual variant clearing, and multi-field state checks.
+
+### Problem
+
+| Pattern | Before |
+|---------|--------|
+| `Option<T>` encryptor/decryptor fields | 8 (10 with TLCP feature) |
+| `seal_record()` dispatch | 5-way `if/else` chain |
+| `open_record()` dispatch | 5 separate `if-let-Some` blocks |
+| `is_encrypting()`/`is_decrypting()` | 5-field `\|\|` chains |
+| `activate_*` methods clearing others | 10 methods, each clears 1–3 competing variants |
+| `deactivate_*` methods | Each lists all 5+ variants to clear |
+
+### Solution
+
+Defined two enum types that unify all encryption/decryption variants:
+
+**1. `RecordEncryptorVariant`** — 5 variants (4 + TLCP feature-gated)
+
+```rust
+enum RecordEncryptorVariant {
+    Tls13(RecordEncryptor),        // TLS 1.3 AEAD (with padding callback)
+    Tls12Aead(RecordEncryptor12),  // TLS 1.2 GCM/CCM
+    Tls12Cbc(RecordEncryptor12Cbc),// TLS 1.2 CBC
+    Tls12EtM(RecordEncryptor12EtM),// TLS 1.2 Encrypt-Then-MAC (RFC 7366)
+    #[cfg(feature = "tlcp")]
+    Tlcp(TlcpEncryptor),           // TLCP (itself an enum: Cbc | Gcm)
+}
+```
+
+All variants share `encrypt_record(content_type, plaintext) -> Result<Record, TlsError>`.
+
+**2. `RecordDecryptorVariant`** — same 5 variants with unified `decrypt_record()`:
+
+- TLS 1.3: extracts inner content type from encrypted ApplicationData records
+- TLS 1.2/TLCP: preserves original content type, skips ChangeCipherSpec
+
+**3. Simplified `RecordLayer` struct**:
+
+```rust
+pub struct RecordLayer {
+    pub max_fragment_size: usize,
+    pub empty_record_count: u32,
+    pub empty_records_limit: u32,
+    encryptor: Option<RecordEncryptorVariant>,  // was 5 Option fields
+    decryptor: Option<RecordDecryptorVariant>,  // was 5 Option fields
+}
+```
 
 ### Files Modified
 
-| File | Changes |
-|------|---------|
-| `crates/hitls-tls/src/record/mod.rs` | Only file changed — added 2 enums, simplified struct (8→2 fields) |
+| File | Action |
+|------|--------|
+| `crates/hitls-tls/src/record/mod.rs` | **ONLY FILE** — added 2 enums + impl blocks, simplified struct (8→2 fields) + all methods |
+
+### Not Changed (by design)
+
+- **DTLS encryption** (`encryption_dtls12.rs`, `encryption_dtlcp.rs`) — DTLS types are NOT part of `RecordLayer`; managed separately in `connection_dtls12.rs` and `connection_dtlcp.rs` with different method signatures (explicit epoch/seq params).
+- **Individual encryption type files** (`encryption.rs`, `encryption12.rs`, `encryption12_cbc.rs`, `encryption_tlcp.rs`) — unchanged, the enum wraps existing types as-is.
+- **Connection files** (`connection.rs`, `connection12.rs`, `connection_async.rs`, etc.) — unchanged, all use `RecordLayer`'s public API which retains identical method signatures.
+
+### Impact
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| `Option<T>` fields in RecordLayer | 8 (10 with TLCP) | 2 | −6 (−8) |
+| `seal_record()` dispatch branches | 5 if/else | 1 enum match | −4 |
+| `open_record()` dispatch blocks | 5 if-let-Some | 1 enum match | −4 |
+| `is_encrypting()`/`is_decrypting()` | 5-field `\|\|` chain each | `.is_some()` | −10 checks |
+| `activate_*` variant-clearing lines | ~20 | 0 | −20 |
+| `deactivate_*` body lines | ~10 per method | 1 per method | −8 |
+| Lines in mod.rs (non-test) | ~467 | ~390 | ~−77 |
 
 ### Build Status
-- ~77 lines removed. Zero public API changes.
-- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
+
+- `cargo test -p hitls-tls --all-features`: **1164 passed**, 0 failed, 0 ignored
+- `cargo test --workspace --all-features`: **2585 passed**, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy -p hitls-tls --all-features --all-targets`: **0 warnings**
+- Public API: **zero changes** — all method signatures unchanged, no callers modified
 
 ---
 
 ## Phase R102: Connection File Decomposition
 
-**Date**: 2026-02-22
-**Scope**: Decompose `connection.rs` (7,324 lines) and `connection12.rs` (7,004 lines) into directory modules
+### Date: 2026-02-22
 
-### Summary
+### Goal
 
-Split the two largest files in `hitls-tls` into focused subfiles. Each flat file was converted to a directory module with `mod.rs` (shared enum + re-exports), `client.rs` (client connection struct + impl), `server.rs` (server connection struct + impl), and `tests.rs` (all unit tests).
+Decompose the two largest files in `hitls-tls` — `connection.rs` (7,324 lines) and `connection12.rs` (7,004 lines) — into directory modules with focused subfiles. Both files contained client struct + server struct + large test suites in a single flat file (tests accounted for 69–76% of content).
 
-This is a pure structural reorganization — zero logic changes, zero public API changes.
+### Problem
+
+| File | Total Lines | Implementation | Tests | % Tests |
+|------|-------------|---------------|-------|---------|
+| `connection.rs` | 7,324 | ~1,700 | ~5,600 | 76% |
+| `connection12.rs` | 7,004 | ~2,200 | ~4,800 | 69% |
+
+### Solution
+
+Converted each flat file into a directory module (`mod.rs` + `client.rs` + `server.rs` + `tests.rs`):
+
+**`connection/` directory**:
+- `mod.rs` (19 lines) — `ConnectionState` enum, module declarations, re-exports
+- `client.rs` (894 lines) — `TlsClientConnection<S>` struct + impl + `Drop` + `TlsConnection` trait impl
+- `server.rs` (829 lines) — `TlsServerConnection<S>` struct + impl + `Drop` + `TlsConnection` trait impl
+- `tests.rs` (5,603 lines) — all unit tests, with explicit imports replacing `use super::*;` dependencies
+
+**`connection12/` directory**:
+- `mod.rs` (23 lines) — `ConnectionState` enum (with `Renegotiating` variant), module declarations, re-exports
+- `client.rs` (1,147 lines) — `Tls12ClientConnection<S>` struct + impl
+- `server.rs` (1,048 lines) — `Tls12ServerConnection<S>` struct + impl
+- `tests.rs` (4,779 lines) — all unit tests with explicit imports
+
+Key implementation details:
+- `ConnectionState` enum visibility changed to `pub(crate)` (was module-private)
+- Test-accessed struct fields marked `pub(super)`: `state`, `cipher_params`, `client_app_secret`, `server_app_secret`, `early_exporter_master_secret`, `early_data_queue`, `key_update_recv_count`, `record_layer`, `session`, `sent_close_notify`, `received_close_notify`
+- One private method `handle_post_hs_cert_request` marked `pub(super)` for test access
+- Tests dedented by 4 spaces (removed `mod tests { }` wrapper indentation)
+- `lib.rs` unchanged — Rust resolves `mod connection;` to `connection/mod.rs` automatically
 
 ### Files Modified
 
-| File | Changes |
-|------|---------|
-| `crates/hitls-tls/src/connection.rs` | **DELETED** → `connection/` directory |
-| `crates/hitls-tls/src/connection/mod.rs` | **NEW** — 19 lines, ConnectionState enum + re-exports |
-| `crates/hitls-tls/src/connection/client.rs` | **NEW** — 894 lines, TlsClientConnection |
-| `crates/hitls-tls/src/connection/server.rs` | **NEW** — 829 lines, TlsServerConnection |
-| `crates/hitls-tls/src/connection/tests.rs` | **NEW** — 5,603 lines, all tests |
-| `crates/hitls-tls/src/connection12.rs` | **DELETED** → `connection12/` directory |
-| `crates/hitls-tls/src/connection12/mod.rs` | **NEW** — 23 lines, ConnectionState enum + re-exports |
-| `crates/hitls-tls/src/connection12/client.rs` | **NEW** — 1,147 lines, Tls12ClientConnection |
-| `crates/hitls-tls/src/connection12/server.rs` | **NEW** — 1,048 lines, Tls12ServerConnection |
-| `crates/hitls-tls/src/connection12/tests.rs` | **NEW** — 4,779 lines, all tests |
+| File | Action |
+|------|--------|
+| `crates/hitls-tls/src/connection.rs` | **DELETED** — replaced by directory |
+| `crates/hitls-tls/src/connection/mod.rs` | **NEW** — 19 lines |
+| `crates/hitls-tls/src/connection/client.rs` | **NEW** — 894 lines |
+| `crates/hitls-tls/src/connection/server.rs` | **NEW** — 829 lines |
+| `crates/hitls-tls/src/connection/tests.rs` | **NEW** — 5,603 lines |
+| `crates/hitls-tls/src/connection12.rs` | **DELETED** — replaced by directory |
+| `crates/hitls-tls/src/connection12/mod.rs` | **NEW** — 23 lines |
+| `crates/hitls-tls/src/connection12/client.rs` | **NEW** — 1,147 lines |
+| `crates/hitls-tls/src/connection12/server.rs` | **NEW** — 1,048 lines |
+| `crates/hitls-tls/src/connection12/tests.rs` | **NEW** — 4,779 lines |
+| `crates/hitls-tls/src/lib.rs` | **NO CHANGE** |
+
+### Not Changed (by design)
+
+- `connection_async.rs` (2,129 lines) — Phase R104 will address async code
+- `connection12_async.rs` (2,480 lines) — same rationale
+- `connection_tlcp.rs` (780 lines) — small enough
+- `connection_dtls12.rs` (1,151 lines) — small enough
+- `connection_dtlcp.rs` (838 lines) — small enough
+
+### Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| `connection.rs` | 7,324 lines (1 file) | 4 files: mod.rs (19) + client.rs (894) + server.rs (829) + tests.rs (5,603) |
+| `connection12.rs` | 7,004 lines (1 file) | 4 files: mod.rs (23) + client.rs (1,147) + server.rs (1,048) + tests.rs (4,779) |
+| Largest implementation file | 7,324 lines | 1,147 lines (connection12/client.rs) |
+| Total lines | 14,328 | 14,342 (+14 for module headers/imports) |
 
 ### Build Status
-- `cargo test -p hitls-tls --all-features`: 1164 passed, 0 failed, 0 ignored
-- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
+
+- `cargo test -p hitls-tls --all-features`: **1164 passed**, 0 failed, 0 ignored
+- `cargo test --workspace --all-features`: **2585 passed**, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: **0 warnings**
+- `cargo fmt --all -- --check`: **clean**
+- Public API: **zero changes** — all types re-exported from module root
+
+---
 
 ## Phase R103: Hash Digest Enum Dispatch
 
-**Date**: 2026-02-22
-**Scope**: Replace `HashFactory` (heap-allocated closures) with stack-allocated enum dispatch (`HashAlgId` + `DigestVariant`)
+### Date: 2026-02-22
 
-### Summary
+### Commit: `aa0fd49`
 
-Replaced `HashFactory = Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>` with two new types: `HashAlgId` (lightweight `Copy` enum identifying the hash algorithm) and `DigestVariant` (concrete enum wrapping `Sha256`/`Sha384`/`Sha1`/`Sm3` with `Digest` trait delegation). This eliminates double heap allocation (boxed closure + boxed trait object) per hash operation across HKDF, PRF, transcript, key schedule, and key export code paths.
+### Goal
 
-### New Types
+Replace `HashFactory = Box<dyn Fn() -> Box<dyn Digest> + Send + Sync>` with stack-allocated enum dispatch, eliminating double heap allocation (boxed closure + boxed trait object) per hash operation in HKDF, PRF, transcript hash, key schedule, and key export code paths.
 
-- `HashAlgId` — `#[derive(Copy)]` enum: `Sha256`, `Sha384`, `Sha1`, `Sm3` (feature-gated)
-- `DigestVariant` — enum wrapping concrete hash types, implementing the `Digest` trait via delegation
-- `hash_alg_id()` methods added to `CipherSuiteParams`, `Tls12CipherSuiteParams`, `TlcpCipherSuiteParams`
-- `mac_hash_alg_id()` added to `Tls12CipherSuiteParams` (returns `Sha1`/`Sha256`/`Sha384`)
+### Problem
 
-### Files Modified (24 files)
+| Pattern | Impact |
+|---------|--------|
+| `HashFactory` closure | 1 heap alloc per factory creation |
+| `factory()` call | 1 heap alloc per `Box<dyn Digest>` |
+| HKDF inner loop | 2–3 `factory()` calls per HMAC |
+| Key derivation | Multiple HMAC calls per operation |
+| Only 4 concrete types used | Sha256, Sha384, Sha1, Sm3 |
 
-| File | Changes |
-|------|---------|
-| `crates/hitls-tls/src/crypt/mod.rs` | Added `HashAlgId`, `DigestVariant`, `hash_alg_id()` methods; removed `HashFactory` type, `hash_factory()`, `mac_hash_factory()`, `hash_factory_for_len()` |
-| `crates/hitls-tls/src/crypt/hkdf.rs` | `&Factory` → `HashAlgId` in all functions |
-| `crates/hitls-tls/src/crypt/prf.rs` | `&Factory` → `HashAlgId` in all functions |
-| `crates/hitls-tls/src/crypt/transcript.rs` | Stored factory closure → `HashAlgId` field |
-| `crates/hitls-tls/src/crypt/key_schedule.rs` | Stored `HashFactory` → `HashAlgId` field |
-| `crates/hitls-tls/src/crypt/key_schedule12.rs` | `&Factory` → `HashAlgId` in all functions |
-| `crates/hitls-tls/src/crypt/traffic_keys.rs` | Uses `params.hash_alg_id()` |
-| `crates/hitls-tls/src/crypt/export.rs` | `&Factory` → `HashAlgId` in all functions |
-| `crates/hitls-tls/src/handshake/client*.rs` (5 files) | Updated TranscriptHash, key derivation, PSK binder callers |
-| `crates/hitls-tls/src/handshake/server*.rs` (5 files) | Updated TranscriptHash, encrypt/decrypt_ticket, key derivation callers |
-| `crates/hitls-tls/src/connection/client.rs` | Updated post-handshake cert request hashers, export callers |
-| `crates/hitls-tls/src/connection/server.rs` | Updated post-handshake auth hashers, export callers |
-| `crates/hitls-tls/src/connection/tests.rs` | Updated hash_factory/TranscriptHash test callers |
-| `crates/hitls-tls/src/connection12/client.rs` | Updated export_keying_material callers |
-| `crates/hitls-tls/src/connection12/server.rs` | Updated export_keying_material callers |
-| `crates/hitls-tls/src/connection_async.rs` | Updated post-handshake cert request hashers, export callers |
+### Solution
 
-### Build Status
-- `cargo test -p hitls-tls --all-features`: 1164 passed, 0 failed, 0 ignored
-- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
+**1. `HashAlgId`** — lightweight `Copy` enum identifying the hash algorithm:
 
-## Phase R104: Sync/Async Unification via Body Macros
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashAlgId {
+    Sha256, Sha384, Sha1,
+    #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+    Sm3,
+}
+```
 
-**Date**: 2026-02-22
-**Scope**: Eliminate ~2,900 lines of sync/async code duplication using `macro_rules!` body macros
+**2. `DigestVariant`** — concrete enum wrapping hash implementations:
 
-### Summary
+```rust
+pub enum DigestVariant {
+    Sha256(Sha256), Sha384(Sha384), Sha1(Sha1),
+    #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+    Sm3(Sm3),
+}
+```
 
-The TLS crate had 3 async connection files (`connection_async.rs`, `connection12_async.rs`) that duplicated their sync counterparts nearly verbatim. The ONLY differences between sync and async versions were: (1) `fn` vs `async fn` signatures, (2) `.await` after I/O calls, and (3) `Read+Write` vs `AsyncRead+AsyncWrite+Unpin` trait bounds. This created ~2,900 lines of duplication that required identical edits in two places for any bug fix or feature change.
+`DigestVariant` implements the `Digest` trait by delegating to the inner variant. Construction is stack-allocated via `DigestVariant::new(alg)`. Static size lookup via `DigestVariant::output_size_for(alg)`.
 
-Introduced a `maybe_await!` macro that conditionally `.await`s expressions based on a mode flag (`sync` or `is_async`), and per-method body macros containing shared logic. Each sync/async method retains its hand-written 2-3 line signature, invoking the body macro with the appropriate mode flag. Non-I/O accessor methods are shared via `impl_tls13_client_accessors!`, `impl_tls13_server_accessors!`, `impl_tls12_client_accessors!`, and `impl_tls12_server_accessors!` macros.
+**3. `hash_alg_id()` methods** added to `CipherSuiteParams`, `Tls12CipherSuiteParams`, `TlcpCipherSuiteParams`. Also `mac_hash_alg_id()` on `Tls12CipherSuiteParams`.
 
-Async files now import `ConnectionState` from their sync counterparts instead of defining local copies, eliminating 2 duplicate enum definitions.
-
-### New File
-
-| File | Description |
-|------|-------------|
-| `crates/hitls-tls/src/macros.rs` | **NEW** — 1,377 lines. `maybe_await!` + 18 body macros + 4 accessor macros |
-
-### Files Modified (7 files, +1,511 / −2,871 lines)
-
-| File | Before | After | Changes |
-|------|--------|-------|---------|
-| `src/lib.rs` | — | — | Added `#[macro_use] mod macros;` |
-| `src/connection/client.rs` | 893 | 197 | Replaced I/O method bodies + accessors with macro invocations |
-| `src/connection/server.rs` | 828 | 369 | Same; kept `request_client_auth()` hand-written (sync-only) |
-| `src/connection_async.rs` | 2,126 | 1,039 | Removed `ConnectionState`, replaced all bodies with macros |
-| `src/connection12/client.rs` | 1,149 | 1,025 | Replaced I/O helpers + accessors; kept complex do_handshake as-is |
-| `src/connection12/server.rs` | 1,050 | 927 | Same; kept complex handshake and renegotiation methods as-is |
-| `src/connection12_async.rs` | 2,534 | 2,229 | Removed `ConnectionState`, replaced I/O helpers + accessors |
-
-### Build Status
-- `cargo test -p hitls-tls --all-features`: 1164 passed, 0 failed, 0 ignored
-- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
-## Phase R105: X.509 Module Decomposition
-
-**Date**: 2026-02-22
-**Scope**: Split `crates/hitls-pki/src/x509/mod.rs` (3,425 lines) into 4 focused submodules
-
-### Summary
-
-The `x509/mod.rs` file contained 13 logical groups totalling 3,425 lines: core types, extension types, extension parsing, DN helpers, certificate extension convenience methods, ASN.1 parsing helpers, certificate parsing & verification, signature verification helpers, DER encoding helpers, SigningKey abstraction, CSR parsing/generation, CertificateBuilder, and 1,443 lines of tests. This made the file difficult to navigate and review.
-
-Split into 4 new submodules with mod.rs retaining re-exports and tests. All `pub(crate)` items are re-exported from mod.rs so that sibling modules (`crl.rs`, `ocsp.rs`, `verify.rs`, `text.rs`, `hostname.rs`) require zero import changes.
-
-### New Files
-
-| File | Lines | Contents |
-|------|-------|----------|
-| `x509/signing.rs` | 330 | `HashAlg`, `compute_hash`, `verify_*` (6 functions), `SigningKey` enum + impl, `curve_id_to_oid`, `ALG_PARAMS_NULL` |
-| `x509/certificate.rs` | 628 | Core type structs (5), DN helpers, ASN.1 parsing helpers (5 functions), Certificate/CSR parsing & verification |
-| `x509/extensions.rs` | 519 | Extension type structs (12), parsing functions (11), Certificate convenience methods (10) |
-| `x509/builder.rs` | 526 | DER encoding helpers (6), `CertificateRequestBuilder`, `CertificateBuilder` + Default |
+**4. Migration pattern** applied across all files:
+- `factory: &Factory` → `alg: HashAlgId`
+- `factory()` / `(*factory)()` → `DigestVariant::new(alg)`
+- `TranscriptHash::new(closure)` → `TranscriptHash::new(HashAlgId::Variant)`
+- `hash_factory: HashFactory` (stored field) → `hash_alg: HashAlgId`
 
 ### Files Modified
 
-| File | Before | After | Changes |
-|------|--------|-------|---------|
-| `x509/mod.rs` | 3,425 | 1,516 | Stripped to module declarations, re-exports, and tests |
+| File | Action |
+|------|--------|
+| `crates/hitls-tls/src/crypt/mod.rs` | Added `HashAlgId`, `DigestVariant`, `hash_alg_id()` methods; removed `HashFactory`, `hash_factory()`, `mac_hash_factory()` |
+| `crates/hitls-tls/src/crypt/hkdf.rs` | `&Factory` → `HashAlgId` in 6 functions |
+| `crates/hitls-tls/src/crypt/prf.rs` | `&Factory` → `HashAlgId` in 2 functions |
+| `crates/hitls-tls/src/crypt/transcript.rs` | Stored closure → `HashAlgId` field |
+| `crates/hitls-tls/src/crypt/key_schedule.rs` | Stored `HashFactory` → `HashAlgId` field |
+| `crates/hitls-tls/src/crypt/key_schedule12.rs` | `&Factory` → `HashAlgId` in 5 functions |
+| `crates/hitls-tls/src/crypt/traffic_keys.rs` | Uses `params.hash_alg_id()` |
+| `crates/hitls-tls/src/crypt/export.rs` | `&Factory` → `HashAlgId` in 3 functions |
+| `crates/hitls-tls/src/handshake/client*.rs` (5) | Updated TranscriptHash, key derivation, PSK binder callers |
+| `crates/hitls-tls/src/handshake/server*.rs` (5) | Updated TranscriptHash, encrypt/decrypt_ticket, key derivation callers |
+| `crates/hitls-tls/src/connection/*.rs` (5) | Updated post-HS hashers, export callers |
+| `crates/hitls-tls/src/connection_async.rs` | Updated post-HS hashers, export callers |
+
+Total: **24 files**, +633 / −621 lines.
+
+### Not Changed (by design)
+
+- **`hitls-crypto`** crate — No changes. The `Digest` trait and concrete hash structs remain as-is.
+- **`hitls-crypto/src/hmac/mod.rs`** — Not touched. The hitls-crypto `Hmac` struct keeps its own factory-based API.
+- Any crate outside `hitls-tls`.
+
+### Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Heap allocs per hash operation | 2 (closure + trait object) | 0 (stack enum) |
+| `HashFactory` type | 1 boxed closure type | Removed |
+| `hash_factory()` methods | 4 methods returning `Box<dyn Fn>` | Removed |
+| `HashAlgId` | N/A | New `Copy` enum |
+| `DigestVariant` | N/A | New stack-allocated `Digest` impl |
+| Function signatures | `factory: &Factory` | `alg: HashAlgId` (Copy, no ref needed) |
+
+### Build Status
+
+- `cargo test -p hitls-tls --all-features`: **1164 passed**, 0 failed, 0 ignored
+- `cargo test --workspace --all-features`: **2585 passed**, 0 failed, 40 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: **0 warnings**
+- `cargo fmt --all -- --check`: **clean**
+- Public API: `HashAlgId` and `DigestVariant` added as new pub types; `HashFactory` removed (was internal)
+
+---
+
+## Phase R104: Sync/Async Unification via Body Macros
+
+### Date: 2026-02-22
+
+**Prompt**: Implement Phase R104 — Sync/Async Unification via Body Macros
+
+**Scope**: Eliminate ~2,900 lines of sync/async code duplication using `macro_rules!` body macros with `maybe_await!` pattern.
+
+**Work performed**:
+1. Created `macros.rs` with `maybe_await!` (sync/is_async mode), 18 I/O body macros, 4 accessor macros
+2. Refactored TLS 1.3 client: sync (893→197 lines) and async portion of `connection_async.rs`
+3. Refactored TLS 1.3 server: sync (828→369 lines) and async portion of `connection_async.rs`
+4. Refactored TLS 1.2 client: sync (1,149→1,025 lines) and async portion of `connection12_async.rs`
+5. Refactored TLS 1.2 server: sync (1,050→927 lines) and async portion of `connection12_async.rs`
+6. Removed 2 duplicate `ConnectionState` enum definitions from async files
+7. TLS 1.2 complex methods (do_handshake, renegotiation) kept as-is due to structural differences
+
+**Files modified**: 8 files (1 new + 7 modified), +1,511 / −2,871 lines (net −1,360)
+
+**Result**:
+- All 2585 workspace tests pass, 0 clippy warnings, formatting clean.
+- Zero public API changes.
+
+---
+
+## Phase R105: X.509 Module Decomposition
+
+### Date: 2026-02-22
+
+### Goal
+
+Split the monolithic `crates/hitls-pki/src/x509/mod.rs` (3,425 lines, 13 logical groups) into 4 focused submodules, improving navigability and reviewability while maintaining zero sibling module impact.
+
+### Problem
+
+The `x509/mod.rs` file contained all X.509 functionality in a single file: core type definitions, extension structs and parsing, DN helpers, ASN.1 parsing helpers, certificate parsing/verification, signature verification, DER encoding, SigningKey abstraction, CSR handling, CertificateBuilder, and 1,443 lines of tests.
+
+### Solution
+
+Created 4 new submodules with a clear dependency graph (no cycles):
+
+| File | Lines | Contents |
+|------|-------|----------|
+| `x509/signing.rs` | 330 | `HashAlg`, `compute_hash`, 6 `verify_*` functions, `SigningKey` enum + impl, `curve_id_to_oid`, `ALG_PARAMS_NULL` |
+| `x509/certificate.rs` | 628 | 5 core type structs, DN helpers, 5 ASN.1 parsing helpers, Certificate/CSR parsing & verification |
+| `x509/extensions.rs` | 519 | 12 extension type structs, 11 parsing functions, 10 Certificate convenience methods |
+| `x509/builder.rs` | 526 | 6 DER encoding helpers, `CertificateRequestBuilder`, `CertificateBuilder` + Default |
+| `x509/mod.rs` | 1,516 | Module declarations, pub + pub(crate) re-exports, 1,443 lines of tests |
+
+Dependency graph: `signing.rs` → no sibling deps; `certificate.rs` → `signing`; `extensions.rs` → `certificate`; `builder.rs` → all three.
+
+All `pub(crate)` items used by sibling modules (`crl.rs`, `ocsp.rs`, `verify.rs`, `text.rs`, `hostname.rs`) are re-exported from mod.rs, requiring zero import changes in those files.
+
+### Files Modified
+
+| File | Action |
+|------|--------|
+| `crates/hitls-pki/src/x509/signing.rs` | **NEW** — 330 lines |
+| `crates/hitls-pki/src/x509/certificate.rs` | **NEW** — 628 lines |
+| `crates/hitls-pki/src/x509/extensions.rs` | **NEW** — 519 lines |
+| `crates/hitls-pki/src/x509/builder.rs` | **NEW** — 526 lines |
+| `crates/hitls-pki/src/x509/mod.rs` | Modified — 3,425 → 1,516 lines |
+
+### Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Largest file (x509/mod.rs) | 3,425 lines | 1,516 lines |
+| Total files in x509/ | 6 | 10 |
+| Sibling module changes | — | 0 |
+| Public API changes | — | 0 |
 
 ### Build Status
 - `cargo test -p hitls-pki --all-features`: 349 passed, 0 failed, 1 ignored
@@ -7686,18 +8312,23 @@ Split into 4 new submodules with mod.rs retaining re-exports and tests. All `pub
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
 ## Phase R106: Integration Test Modularization
 
-**Date**: 2026-02-23
-**Scope**: Split `tests/interop/src/lib.rs` (7,675 lines) into helper library + 10 integration test files
+### Date: 2026-02-23
 
-### Summary
+### Goal
 
-The integration test crate contained a single monolithic `src/lib.rs` file with 128 test functions and 12 helper functions inside a `#[cfg(test)] mod tests { ... }` block. This made it difficult to navigate, run targeted test subsets, or find specific protocol tests.
+Split the monolithic `tests/interop/src/lib.rs` (7,675 lines, 128 test functions) into a helper library plus 10 focused integration test files under `tests/`. Enables targeted test runs (e.g., `cargo test --test tls13`) and improves navigability.
 
-Transformed the crate into a test utility library (`src/lib.rs` with `pub` helpers, ~400 lines) plus 10 integration test files under `tests/`. Each test file is a separate Cargo compilation unit that imports helpers via `use hitls_integration_tests::*;`.
+### Solution
 
-### New Files
+Transformed the `#[cfg(test)] mod tests { ... }` block into:
+- `src/lib.rs` (404 lines): 11 `pub fn` helpers + 1 internal helper, no `#[cfg(test)]` wrapper
+- 10 integration test files under `tests/`, each importing `use hitls_integration_tests::*;`
+
+### Files Created
 
 | File | Tests | Lines | Contents |
 |------|-------|-------|----------|
@@ -7714,9 +8345,18 @@ Transformed the crate into a test utility library (`src/lib.rs` with `pub` helpe
 
 ### Files Modified
 
-| File | Before | After | Changes |
-|------|--------|-------|---------|
-| `src/lib.rs` | 7,675 | 404 | Stripped to 12 pub helper functions (no `#[cfg(test)]` wrapper) |
+| File | Change |
+|------|--------|
+| `tests/interop/src/lib.rs` | Modified — 7,675 → 404 lines |
+
+### Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Largest file (lib.rs) | 7,675 lines | 2,166 lines (tls12.rs) |
+| Total test files | 1 | 10 |
+| Test count | 128 | 128 (unchanged) |
+| Targeted test runs | Not possible | `cargo test --test tls13` etc. |
 
 ### Build Status
 - `cargo test -p hitls-integration-tests --all-features`: 125 passed, 0 failed, 3 ignored
@@ -7728,38 +8368,29 @@ Transformed the crate into a test utility library (`src/lib.rs` with `pub` helpe
 
 ## Phase R107: Test Helper Consolidation
 
-**Date**: 2026-02-23
-**Scope**: Consolidate ~54 duplicate `hex()`/`to_hex()`/`hex_to_bytes()` helper functions into `hitls-utils/src/hex.rs`
+### Date: 2026-02-23
+**ARCH_REPORT ref**: §7 — Test Helper Consolidation
 
-### Summary
+### Problem
+~54 duplicate `hex()`/`to_hex()`/`hex_to_bytes()` helper functions scattered across test modules and 4 production files. Identical 5-line functions copy-pasted independently, adding maintenance burden.
 
-Scattered across the codebase were ~54 identical hex conversion helpers: `fn hex(s: &str) -> Vec<u8>` (decode), `fn to_hex(bytes: &[u8]) -> String` (encode), and `fn hex_to_bytes(s: &str) -> Vec<u8>` (alias). These were copy-pasted into `#[cfg(test)]` modules and 4 production files. Consolidated all into a single `hitls_utils::hex` module.
+### Solution
+Created `crates/hitls-utils/src/hex.rs` with canonical `pub fn hex(s: &str) -> Vec<u8>` and `pub fn to_hex(bytes: &[u8]) -> String`. Replaced all duplicates with imports.
 
-### New Files
+### Execution
+1. Created `hex.rs` (15 lines), added `pub mod hex;` to `lib.rs`
+2. Updated `hitls-crypto/Cargo.toml` (dev-dependency + `sm9`/`fips` features) and `hitls-auth/Cargo.toml` (dependency)
+3. Replaced 4 production call sites: `fips/kat.rs`, `sm9/curve.rs`, `spake2plus/mod.rs`, `keylog.rs`
+4. Replaced interop helper with `pub use hitls_utils::hex::hex;`
+5. Replaced 45 test modules: removed local definitions, added imports, renamed `hex_to_bytes()`→`hex()` and `hex(&bytes)`→`to_hex(&bytes)` where needed
+6. Preserved x25519 special case (`[u8; 32]` return type) as thin delegator
 
-| File | Lines | Contents |
-|------|-------|----------|
-| `crates/hitls-utils/src/hex.rs` | 15 | `pub fn hex()` + `pub fn to_hex()` |
+### Impact
+- 1 new file, 53 modified files
+- Net ~345 lines removed (661−, 316+)
+- Zero logic changes, zero public API changes
 
-### Files Modified
-
-- **1 new file**: `crates/hitls-utils/src/hex.rs`
-- **53 files modified**: lib.rs, 2 Cargo.toml, 4 production files, 1 interop helper, 45 test modules
-- **Net ~345 lines removed** (661 deletions, 316 insertions)
-
-### Changes by Crate
-
-| Crate | Files | Changes |
-|-------|-------|---------|
-| hitls-utils | 2 | New `hex.rs` module + `lib.rs` export |
-| hitls-crypto | 35 | 2 production (`fips/kat.rs`, `sm9/curve.rs`) + 33 test modules + Cargo.toml |
-| hitls-tls | 7 | 1 production (`keylog.rs`) + 6 test modules |
-| hitls-pki | 3 | 3 test modules |
-| hitls-cli | 2 | 2 test modules |
-| hitls-auth | 2 | 1 production (`spake2plus`) + 1 test module + Cargo.toml |
-| tests/interop | 1 | Re-export via `pub use` |
-
-### Build Status
+### Verification
 - `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
@@ -7768,33 +8399,35 @@ Scattered across the codebase were ~54 identical hex conversion helpers: `fn hex
 
 ## Phase R108: Parameter Struct Refactoring
 
-**Date**: 2026-02-23
-**Scope**: Replace `#[allow(clippy::too_many_arguments)]` suppressions with parameter structs
+### Date: 2026-02-23
 
-### Summary
+**Priority**: Low
+**ARCH_REPORT ref**: §7 — `#[allow(clippy::too_many_arguments)]` suppressions
 
-Introduced parameter structs to bundle function arguments where `#[allow(clippy::too_many_arguments)]` was previously required. 6 of 8 suppressions removed; 2 retained in `slh_dsa/hypertree.rs` (FIPS 205 spec-faithful recursive functions where parameter structs would obscure the specification correspondence).
+### Problem
+8 functions across the codebase used `#[allow(clippy::too_many_arguments)]` to suppress clippy warnings for functions with 7–9 parameters. Long parameter lists reduce readability and make call sites error-prone.
 
-### Parameter Structs Introduced
+### Solution
+Introduced 4 parameter structs to bundle related arguments:
+- `Pkcs12Options` (9 fields) — CLI pkcs12 subcommand options
+- `CryptoActivationParams` (7 fields) — CBC/ETM/AEAD activation for TLS 1.2 record layer tests
+- `DtlsHandshakeContext` (6 fields) — shared DTLS 1.2 handshake state (connections + buffers)
+- `ServerFlightParams` (8 fields) — parsed ClientHello results for TLS 1.3 server flight construction
 
-| Struct | File | Replaces | Params |
-|--------|------|----------|--------|
-| `Pkcs12Options` | `crates/hitls-cli/src/pkcs12.rs` | `run()` 9 params | 9 |
-| `CryptoActivationParams` | `crates/hitls-tls/src/connection12/tests.rs` | `activate_write/read_cbc_or_etm()` 8 params each | 7 |
-| `DtlsHandshakeContext` | `crates/hitls-tls/src/connection_dtls12.rs` | `do_full/abbreviated_handshake()` 7 params each | 6 |
-| `ServerFlightParams` | `crates/hitls-tls/src/handshake/server.rs` | `build_server_flight()` 9 params | 8 |
+Kept 2 suppressions in `slh_dsa/hypertree.rs` (`xmss_node`, `hypertree_verify`) — these are FIPS 205 §7 spec-faithful recursive algorithms where parameters map 1:1 to specification variables.
 
-### Files Modified
+### Execution
+1. `pkcs12.rs` + `main.rs`: `Pkcs12Options` struct, updated `run()` + 4 test sites + 1 caller
+2. `connection12/tests.rs`: `CryptoActivationParams` struct, updated 2 helper fns + 6 call sites
+3. `connection_dtls12.rs`: `DtlsHandshakeContext` struct, updated 2 functions + 1 call site (context constructed once, passed to both)
+4. `handshake/server.rs`: `ServerFlightParams` struct, updated 1 function + 2 call sites
 
-| File | Changes |
-|------|---------|
-| `crates/hitls-cli/src/pkcs12.rs` | Added `Pkcs12Options` struct, updated `run()` and 4 test call sites |
-| `crates/hitls-cli/src/main.rs` | Updated `Pkcs12` match arm to construct `Pkcs12Options` |
-| `crates/hitls-tls/src/connection12/tests.rs` | Added `CryptoActivationParams`, updated 2 helpers + 6 call sites |
-| `crates/hitls-tls/src/connection_dtls12.rs` | Added `DtlsHandshakeContext`, updated 2 functions + 2 call sites |
-| `crates/hitls-tls/src/handshake/server.rs` | Added `ServerFlightParams`, updated `build_server_flight()` + 2 call sites |
+### Impact
+- 5 files modified, 4 structs added
+- 6 of 8 `#[allow(clippy::too_many_arguments)]` suppressions removed
+- Zero public API changes, zero logic changes
 
-### Build Status
+### Verification
 - `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
@@ -7803,37 +8436,44 @@ Introduced parameter structs to bundle function arguments where `#[allow(clippy:
 
 ## Phase R109: DRBG State Machine Unification
 
-**Date**: 2026-02-23
-**Scope**: Extract shared DRBG utilities and introduce `Drbg` trait
+### Date: 2026-02-23
 
-### Summary
+**Priority**: Low
+**ARCH_REPORT ref**: §7 — DRBG code duplication
 
-Unified 4 DRBG variants by extracting duplicated constants, utility functions, and convenience methods into shared `drbg/mod.rs`. Introduced a `Drbg` trait with default `generate_bytes()` implementation.
+### Problem
+4 DRBG variants (`hmac_drbg.rs`, `hash_drbg.rs`, `ctr_drbg.rs`, `sm4_ctr_drbg.rs`) contained ~76 lines of exact duplication:
+- `RESEED_INTERVAL: u64 = 1 << 48` — defined 4× (identical)
+- `generate_bytes()` — 4 identical 4-line convenience methods
+- `from_system_entropy()` — 3 copies of ~12-line entropy sourcing (HMAC/Hash/CTR; SM4 lacks it)
+- `increment_counter()` — 2 identical 7-line functions (CTR + SM4-CTR)
 
-### Shared Items Extracted
+### Solution
+Extracted shared items into `drbg/mod.rs` and introduced a `Drbg` trait with default `generate_bytes()`:
+- `RESEED_INTERVAL` constant (1×, `pub(crate)`)
+- `get_system_entropy()` helper (1×, `pub(crate)`)
+- `increment_counter()` function (1×, `pub(crate)`)
+- `Drbg` trait with `generate()`, `reseed()`, and default `generate_bytes()`
+- 4 trait impl blocks delegating to inherent methods
 
-| Item | Type | Copies Removed |
-|------|------|----------------|
-| `RESEED_INTERVAL` | `pub(crate) const` | 4 → 1 |
-| `get_system_entropy()` | `pub(crate) fn` | 3 → 1 |
-| `increment_counter()` | `pub(crate) fn` | 2 → 1 |
-| `generate_bytes()` | trait default method | 4 → 1 |
-| `Drbg` trait | `pub trait` | New |
+### Execution
+1. `drbg/mod.rs`: Added shared constant, 2 utility functions, `Drbg` trait
+2. `hmac_drbg.rs`: Removed constant + entropy block + `generate_bytes`, added `Drbg` impl
+3. `hash_drbg.rs`: Removed constant + entropy block + `generate_bytes`, added `Drbg` impl
+4. `ctr_drbg.rs`: Removed constant + counter fn + entropy block + `generate_bytes`, added `Drbg` impl
+5. `sm4_ctr_drbg.rs`: Removed constant + counter fn + `generate_bytes`, added `Drbg` impl
 
-### Files Modified
+### Impact
+- 5 files modified, ~76 lines removed, ~40 lines added (net ~36 lines reduced)
+- Zero public API changes, zero logic changes
+- `Drbg` trait added as new public interface
 
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/drbg/mod.rs` | Added `RESEED_INTERVAL`, `get_system_entropy()`, `increment_counter()`, `Drbg` trait |
-| `crates/hitls-crypto/src/drbg/hmac_drbg.rs` | Removed constant + entropy block + `generate_bytes`, added `Drbg` impl |
-| `crates/hitls-crypto/src/drbg/hash_drbg.rs` | Removed constant + entropy block + `generate_bytes`, added `Drbg` impl |
-| `crates/hitls-crypto/src/drbg/ctr_drbg.rs` | Removed constant + counter fn + entropy block + `generate_bytes`, added `Drbg` impl |
-| `crates/hitls-crypto/src/drbg/sm4_ctr_drbg.rs` | Removed constant + counter fn + `generate_bytes`, added `Drbg` impl |
-
-### Build Status
-- `cargo test --workspace --all-features`: 2585 passed, 0 failed, 40 ignored
+### Verification
+- `cargo test -p hitls-crypto --all-features -- drbg`: 37 passed (36 DRBG + 1 FIPS KAT)
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
 
 ## Phase T110: Async TLS 1.2 Deep Coverage (+10 tests, 2,585→2,595)
 
@@ -7868,6 +8508,8 @@ Added 10 new async TLS 1.2 tests covering scenarios not covered by existing 18 t
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
 ## Phase T111: Async TLCP + DTLCP Connection Types & Tests (+15 tests, 2,595→2,610)
 
 **Date**: 2026-02-23
@@ -7896,6 +8538,8 @@ Implemented `AsyncTlcpClientConnection` / `AsyncTlcpServerConnection` (TLS recor
 - `cargo test --workspace --all-features`: 2610 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
 
 ## Phase T112: Extension Negotiation E2E Tests (+14 tests, 2,610→2,624)
 
@@ -7929,6 +8573,8 @@ Created `tests/interop/tests/ext_negotiation.rs` with 12 E2E TCP loopback tests 
 - `cargo test --workspace --all-features`: 2624 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
 
 ## Phase T113: DTLS Loss Simulation & Resilience Tests (+10 tests, 2,624→2,634)
 
@@ -7996,6 +8642,8 @@ Added 6 unit tests (3 to server_tlcp.rs, 3 to server_dtlcp.rs) that exercise ser
 - `cargo test --workspace --all-features`: 2644 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
 
 ## Phase T115: SM9 Tower Field Unit Tests (+15 tests, 2,644→2,659)
 
@@ -8074,6 +8722,8 @@ Added 15 unit tests across 6 files:
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
 ## Phase T117: McEliece + FrodoKEM + XMSS Internal Module Tests (+15 tests, 2,674→2,689)
 
 **Date**: 2026-02-23
@@ -8107,6 +8757,8 @@ Added 15 unit tests across 11 files in 3 PQC families:
 - `cargo test --workspace --all-features`: 2689 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
 
 ## Phase T118: Infrastructure — proptest Property-Based Tests + Coverage CI (+20 tests, 2,689→2,709)
 
@@ -8148,6 +8800,8 @@ Added 20 proptest property-based tests (12 in hitls-crypto, 8 in hitls-utils) an
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
 ## Phase T119: TLCP SM3 Cryptographic Path Coverage (+15 tests, 2,709→2,724)
 
 **Date**: 2026-02-24
@@ -8175,6 +8829,8 @@ Added 15 SM3 path coverage tests across 3 TLS crypto modules:
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
 ## Phase T120: TLS 1.3 Key Schedule & HKDF Robustness Tests (+15 tests, 2,724→2,739)
 
 **Date**: 2026-02-24
@@ -8200,6 +8856,8 @@ Added 15 robustness tests across 3 TLS 1.3 crypto modules:
 - `cargo test --workspace --all-features`: 2739 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
 
 ## Phase T121: Record Layer Encryption Edge Cases & AEAD Failure Modes (+15 tests, 2,739→2,754)
 
@@ -8227,6 +8885,8 @@ Added 15 edge-case tests across 3 record layer encryption modules:
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
 ## Phase T122: TLS 1.2 CBC Padding Security + DTLS Parsing + TLS 1.3 Inner Plaintext Edge Cases (+15 tests, 2,754→2,769)
 
 **Date**: 2026-02-24
@@ -8252,6 +8912,8 @@ Added 15 edge-case tests across 3 record layer modules:
 - `cargo test --workspace --all-features`: 2769 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
 
 ## Phase T123: DTLS Fragmentation/Retransmission + CertificateVerify Edge Cases (+15 tests, 2,769→2,784)
 
@@ -8279,6 +8941,8 @@ Added 15 edge-case tests across 3 handshake-layer modules:
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
 ## Phase T124: DTLS Codec Edge Cases + Anti-Replay Window Boundaries + Entropy Conditioning (+15 tests, 2,784→2,799)
 
 **Date**: 2026-02-24
@@ -8304,6 +8968,8 @@ Added 15 edge-case tests across 3 modules in 2 crates:
 - `cargo test --workspace --all-features`: 2799 passed, 0 failed, 40 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
 
 ## Phase T125: X.509 Extension Parsing + SLH-DSA WOTS+ Base Conversion + ASN.1 Tag Edge Cases (+15 tests, 2,799→2,814)
 
@@ -8331,6 +8997,8 @@ Added 15 edge-case tests across 3 modules in 3 crates:
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
+---
+
 ## Phase T126: PKI Encoding Helpers + X.509 Signing Dispatch + Certificate Builder Encoding (+15 tests, 2,814→2,829)
 
 **Date**: 2026-02-24
@@ -8354,116 +9022,6 @@ Added 15 tests across 3 core PKI infrastructure files that previously had zero t
 
 ### Build Status
 - `cargo test --workspace --all-features`: 2829 passed, 0 failed, 40 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
-## Phase T131: McEliece GF(2^13) + Benes Network + Binary Matrix Deepening (+15 tests, 2,882→2,897)
-
-**Date**: 2026-02-24
-**Scope**: McEliece GF(2^13) finite field arithmetic (gf.rs, 135 lines, 1 test), Benes network control bits and permutation reconstruction (benes.rs, 380 lines, 1 test), binary matrix operations and Gaussian elimination (matrix.rs, 433 lines, 1 test).
-
-### Summary
-
-Added 15 tests across 3 McEliece internal module files, deepening coverage of foundational algebraic and combinatorial operations:
-
-- **GF(2^13) field arithmetic** (5 tests): multiplication commutativity, power matches repeated multiplication, division = multiplication by inverse, inv(0) = 0 sentinel, negative exponent = inverse
-- **Benes network** (5 tests): reverse permutation roundtrip, control bits output length, bitrev involution (self-inverse), radix sort correctness, adjacent-swap permutation support uniqueness
-- **Binary matrix** (5 tests): new matrix all-zeros, identity matrix diagonal, reduce_to_systematic on identity (no-op), same_mask equal → all 1s, same_mask unequal → 0
-
-### Files Modified
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/mceliece/gf.rs` | Added 5 tests to existing `mod tests` |
-| `crates/hitls-crypto/src/mceliece/benes.rs` | Added 5 tests to existing `mod tests` |
-| `crates/hitls-crypto/src/mceliece/matrix.rs` | Added 5 tests to existing `mod tests` |
-
-### Build Status
-- `cargo test --workspace --all-features`: 2897 passed, 0 failed, 47 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
----
-
-## Phase T130: XMSS Tree Operations + XMSS WOTS+ Deepening + SLH-DSA FORS Deepening (+15 tests, 2,872→2,882)
-
-**Date**: 2026-02-24
-**Scope**: XMSS Merkle tree operations (tree.rs, 161 lines, 0 tests — the last truly untested logic file), XMSS WOTS+ chain/compress/sign operations (wots.rs, 198 lines, 1 test), SLH-DSA FORS few-time signature internals (fors.rs, 146 lines, 1 test).
-
-### Summary
-
-Added 15 tests across 3 post-quantum signature scheme files, shifting from "zero-test files" to "low-density deepening" as nearly all zero-test files are now covered:
-
-- **XMSS tree operations** (5 tests, all #[ignore]): compute_root determinism, auth_path length validation, compute_root_with_auth matches compute_root, xmss_sign signature length, xmss_sign→root_from_sig roundtrip. All ignored because tree height h=10 requires 1024 WOTS+ leaf generations.
-- **XMSS WOTS+** (5 tests): msg_to_base_w output length (67 for n=32), base-W values all in [0,15] range, chain zero-steps identity (steps=0 → input unchanged), l_tree single-chunk passthrough, WOTS+ sign→pk_from_sig roundtrip (verifies sign+verify recovers pk_gen output)
-- **SLH-DSA FORS** (5 tests): fors_sk_gen determinism, fors_sk_gen different indices → different sks, fors_sign output length (k*(1+a)*n), fors_node leaf output length and determinism, FORS pk message-independence (same pk regardless of message — characteristic FORS property)
-
-### Files Modified
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/xmss/tree.rs` | Added `#[cfg(test)] mod tests` with 5 tree operation tests (all #[ignore]) |
-| `crates/hitls-crypto/src/xmss/wots.rs` | Added 5 tests to existing `mod tests` (msg_to_base_w, chain, l_tree, roundtrip) |
-| `crates/hitls-crypto/src/slh_dsa/fors.rs` | Added 5 tests to existing `mod tests` (sk_gen, sign length, node, pk independence) |
-
-### Build Status
-- `cargo test --workspace --all-features`: 2882 passed, 0 failed, 47 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
----
-
-## Phase T129: McEliece Keygen Helpers + McEliece Encoding + McEliece Decoding (+15 tests, 2,857→2,872)
-
-**Date**: 2026-02-24
-**Scope**: Classic McEliece PQC algorithm internals — key generation helpers (keygen.rs, 242 lines, 0 tests), encoding and error vector generation (encode.rs, 123 lines, 0 tests), Goppa code decoding via Berlekamp-Massey (decode.rs, 180 lines, 0 tests).
-
-### Summary
-
-Added 15 tests across 3 McEliece module files that previously had zero test coverage:
-
-- **Key generation helpers** (5 tests): bitrev_u16 zero case, bitrev_u16 single-bit mapping, bitrev involution (self-inverse) property, SHAKE256 output length, McEliece PRG determinism
-- **Encoding** (5 tests): fixed_weight_vector correct Hamming weight, fixed_weight_vector correct length, fixed_weight_vector randomness (distinct calls), zero error encoding gives zero ciphertext, encode output length matches mt_bytes
-- **Decoding** (5 tests): decode zero received vector, Berlekamp-Massey zero syndrome → sigma=x^t, BM degree bounded by t, compute_syndrome zero received → all-zero syndrome, syndrome length = 2*t
-
-### Files Modified
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/mceliece/keygen.rs` | Added `#[cfg(test)] mod tests` with 5 keygen helper tests |
-| `crates/hitls-crypto/src/mceliece/encode.rs` | Added `#[cfg(test)] mod tests` with 5 encoding tests |
-| `crates/hitls-crypto/src/mceliece/decode.rs` | Added `#[cfg(test)] mod tests` with 5 decoding tests |
-
-### Build Status
-- `cargo test --workspace --all-features`: 2872 passed, 0 failed, 42 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
----
-
-## Phase T128: SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters (+15 tests, 2,844→2,857)
-
-**Date**: 2026-02-24
-**Scope**: SM9 hash-to-range functions H1/H2 and KDF (hash.rs, 81 lines, 0 tests), SM9 top-level algorithm functions — sign/verify/encrypt/decrypt and serialization helpers (alg.rs, 370 lines, 0 tests), BN256 domain parameter constants (curve.rs, 76 lines, 0 tests).
-
-### Summary
-
-Added 15 tests across 3 SM9 module files that previously had zero test coverage:
-
-- **Hash functions** (5 tests): h1 range validation, h2 range validation, h1 determinism, KDF output length correctness, h1 different-input divergence
-- **Algorithm helpers** (3 tests + 2 ignored): bignum_to_32bytes zero padding, bignum_to_32bytes small value, fp12_to_bytes 384-byte length, sign→verify roundtrip (ignored), encrypt→decrypt roundtrip (ignored)
-- **Curve parameters** (5 tests): prime is 256-bit, order is 256-bit, order < prime, b_coeff == 5, all generator coordinates nonzero
-
-### Files Modified
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/sm9/hash.rs` | Added `#[cfg(test)] mod tests` with 5 hash function tests |
-| `crates/hitls-crypto/src/sm9/alg.rs` | Added `#[cfg(test)] mod tests` with 5 algorithm helper tests (2 ignored) |
-| `crates/hitls-crypto/src/sm9/curve.rs` | Added `#[cfg(test)] mod tests` with 5 curve parameter tests |
-
-### Build Status
-- `cargo test --workspace --all-features`: 2857 passed, 0 failed, 42 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
@@ -8497,6 +9055,118 @@ Added 15 tests across 3 files that previously had zero test coverage:
 
 ---
 
+## Phase T128: SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters (+15 tests, 2,844→2,857)
+
+**Date**: 2026-02-24
+**Scope**: SM9 hash-to-range functions H1/H2 and KDF (hash.rs, 81 lines, 0 tests), SM9 top-level algorithm functions — sign/verify/encrypt/decrypt and serialization helpers (alg.rs, 370 lines, 0 tests), BN256 domain parameter constants (curve.rs, 76 lines, 0 tests).
+
+### Summary
+
+Added 15 tests across 3 SM9 module files that previously had zero test coverage:
+
+- **Hash functions** (5 tests): h1 range validation, h2 range validation, h1 determinism, KDF output length correctness, h1 different-input divergence
+- **Algorithm helpers** (3 tests + 2 ignored): bignum_to_32bytes zero padding, bignum_to_32bytes small value, fp12_to_bytes 384-byte length, sign→verify roundtrip (ignored), encrypt→decrypt roundtrip (ignored)
+- **Curve parameters** (5 tests): prime is 256-bit, order is 256-bit, order < prime, b_coeff == 5, all generator coordinates nonzero
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/sm9/hash.rs` | Added `#[cfg(test)] mod tests` with 5 hash function tests |
+| `crates/hitls-crypto/src/sm9/alg.rs` | Added `#[cfg(test)] mod tests` with 5 algorithm helper tests (2 ignored) |
+| `crates/hitls-crypto/src/sm9/curve.rs` | Added `#[cfg(test)] mod tests` with 5 curve parameter tests |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2857 passed, 0 failed, 42 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T129: McEliece Keygen Helpers + McEliece Encoding + McEliece Decoding (+15 tests, 2,857→2,872)
+
+**Date**: 2026-02-24
+**Scope**: Classic McEliece PQC algorithm internals — key generation helpers (keygen.rs, 242 lines, 0 tests), encoding and error vector generation (encode.rs, 123 lines, 0 tests), Goppa code decoding via Berlekamp-Massey (decode.rs, 180 lines, 0 tests).
+
+### Summary
+
+Added 15 tests across 3 McEliece module files that previously had zero test coverage:
+
+- **Key generation helpers** (5 tests): bitrev_u16 zero case, bitrev_u16 single-bit mapping, bitrev involution (self-inverse) property, SHAKE256 output length, McEliece PRG determinism
+- **Encoding** (5 tests): fixed_weight_vector correct Hamming weight, fixed_weight_vector correct length, fixed_weight_vector randomness (distinct calls), zero error encoding gives zero ciphertext, encode output length matches mt_bytes
+- **Decoding** (5 tests): decode zero received vector, Berlekamp-Massey zero syndrome → sigma=x^t, BM degree bounded by t, compute_syndrome zero received → all-zero syndrome, syndrome length = 2*t
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/mceliece/keygen.rs` | Added `#[cfg(test)] mod tests` with 5 keygen helper tests |
+| `crates/hitls-crypto/src/mceliece/encode.rs` | Added `#[cfg(test)] mod tests` with 5 encoding tests |
+| `crates/hitls-crypto/src/mceliece/decode.rs` | Added `#[cfg(test)] mod tests` with 5 decoding tests |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2872 passed, 0 failed, 42 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T130: XMSS Tree Operations + XMSS WOTS+ Deepening + SLH-DSA FORS Deepening (+15 tests, 2,872→2,882)
+
+**Date**: 2026-02-24
+**Scope**: XMSS Merkle tree operations (tree.rs, 161 lines, 0 tests — the last truly untested logic file), XMSS WOTS+ chain/compress/sign operations (wots.rs, 198 lines, 1 test), SLH-DSA FORS few-time signature internals (fors.rs, 146 lines, 1 test).
+
+### Summary
+
+Added 15 tests across 3 post-quantum signature scheme files, shifting from "zero-test files" to "low-density deepening" as nearly all zero-test files are now covered:
+
+- **XMSS tree operations** (5 tests, all #[ignore]): compute_root determinism, auth_path length validation, compute_root_with_auth matches compute_root, xmss_sign signature length, xmss_sign→root_from_sig roundtrip. All ignored because tree height h=10 requires 1024 WOTS+ leaf generations.
+- **XMSS WOTS+** (5 tests): msg_to_base_w output length (67 for n=32), base-W values all in [0,15] range, chain zero-steps identity (steps=0 → input unchanged), l_tree single-chunk passthrough, WOTS+ sign→pk_from_sig roundtrip (verifies sign+verify recovers pk_gen output)
+- **SLH-DSA FORS** (5 tests): fors_sk_gen determinism, fors_sk_gen different indices → different sks, fors_sign output length (k*(1+a)*n), fors_node leaf output length and determinism, FORS pk message-independence (same pk regardless of message — characteristic FORS property)
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/xmss/tree.rs` | Added `#[cfg(test)] mod tests` with 5 tree operation tests (all #[ignore]) |
+| `crates/hitls-crypto/src/xmss/wots.rs` | Added 5 tests to existing `mod tests` (msg_to_base_w, chain, l_tree, roundtrip) |
+| `crates/hitls-crypto/src/slh_dsa/fors.rs` | Added 5 tests to existing `mod tests` (sk_gen, sign length, node, pk independence) |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2882 passed, 0 failed, 47 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T131: McEliece GF(2^13) + Benes Network + Binary Matrix Deepening (+15 tests, 2,882→2,897)
+
+**Date**: 2026-02-24
+**Scope**: McEliece GF(2^13) finite field arithmetic (gf.rs, 135 lines, 1 test), Benes network control bits and permutation reconstruction (benes.rs, 380 lines, 1 test), binary matrix operations and Gaussian elimination (matrix.rs, 433 lines, 1 test).
+
+### Summary
+
+Added 15 tests across 3 McEliece internal module files, deepening coverage of foundational algebraic and combinatorial operations:
+
+- **GF(2^13) field arithmetic** (5 tests): multiplication commutativity, power matches repeated multiplication, division = multiplication by inverse, inv(0) = 0 sentinel, negative exponent = inverse
+- **Benes network** (5 tests): reverse permutation roundtrip, control bits output length, bitrev involution (self-inverse), radix sort correctness, adjacent-swap permutation support uniqueness
+- **Binary matrix** (5 tests): new matrix all-zeros, identity matrix diagonal, reduce_to_systematic on identity (no-op), same_mask equal → all 1s, same_mask unequal → 0
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/mceliece/gf.rs` | Added 5 tests to existing `mod tests` |
+| `crates/hitls-crypto/src/mceliece/benes.rs` | Added 5 tests to existing `mod tests` |
+| `crates/hitls-crypto/src/mceliece/matrix.rs` | Added 5 tests to existing `mod tests` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2897 passed, 0 failed, 47 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase T132: FrodoKEM Matrix Ops + SLH-DSA Hypertree + McEliece Polynomial Deepening (+15 tests, 2,897→2,909)
 
 **Date**: 2026-02-24
@@ -8525,31 +9195,61 @@ Added 15 tests across 3 files (12 non-ignored + 3 ignored):
 
 ---
 
-## Phase T141: SLH-DSA Params + Hash Abstraction + Address Scheme Deepening (+15 tests, 2,954→2,969)
+## Phase T133: McEliece + FrodoKEM + XMSS Parameter Set Validation Deepening (+15 tests, 2,909→2,924)
 
-**Date**: 2026-02-25
-**Scope**: Deepen test coverage for three SLH-DSA (FIPS 205) internal modules with existing but low test density: params.rs (289 lines, 2 tests), hash.rs (381 lines, 4 tests), address.rs (238 lines, 4 tests).
+**Date**: 2026-02-24
+**Scope**: Deepen parameter set validation for three PQC parameter modules with low test density: McEliece params (params.rs, 284 lines, 1 test), FrodoKEM params (params.rs, 359 lines, 2 tests), XMSS params (params.rs, 169 lines, 1 test).
 
 ### Summary
 
-Added 15 tests across 3 SLH-DSA internal modules validating parameter set invariants, hash function behavior, and address scheme correctness:
+Added 15 tests across 3 parameter set files validating cross-variant consistency, mathematical relationships, and domain-specific invariants:
 
-- **SLH-DSA params** (5 tests): SHA2/SHAKE pairs identical except is_sha2 mode flag, security category mapping (n=16→cat1, n=24→cat3, n=32→cat5), s variants have smaller signatures than f variants (sig_bytes and d), all 12 parameter sets accessible with non-zero fields, m > n for all parameter sets
-- **SLH-DSA hash** (5 tests): SHA-2 category 3/5 uses SHA-512 for H function, SHAKE vs SHA-2 produce different outputs for same inputs, h() and t_l() produce n-byte outputs for multiple parameter sets, different sk_seed → different PRF output, different messages → different h_msg output
-- **SLH-DSA address** (5 tests): new() all-zeros initialization for both compressed (22 bytes) and uncompressed (32 bytes), all 7 AdrsType values set correctly in both modes, clone independence (mutation doesn't affect original), tree_height/chain_addr write to same field2 offset, hash_addr/tree_index write to same field3 offset
+- **McEliece params** (5 tests): ALL_PARAM_IDS count and group structure, F/Pcf semi-systematic flag consistency, public_key_bytes = mt × k_bytes formula, k_bytes/mt_bytes byte-alignment consistency, module constants (Q=2^13, Q_1, L_BYTES, SIGMA/MU/NU)
+- **FrodoKEM params** (5 tests): SHAKE/AES variant dimensional equivalence, eFrodoKEM salt_len=0 vs FrodoKEM salt_len>0, CDF table monotonicity and 2^15-1 termination, security level → ss_len/extracted_bits/logq mapping, CDF table length matches security parameter
+- **XMSS params** (5 tests): tree height validity (h ∈ {10,16,20}), OID uniqueness across all 9 variants, hash_mode dispatch consistency, same height → same sig_bytes across hash modes, sig_bytes monotonically increases with height
 
 ### Files Modified
 
 | File | Changes |
 |------|---------|
-| `crates/hitls-crypto/src/slh_dsa/params.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/slh_dsa/hash.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/slh_dsa/address.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/mceliece/params.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/frodokem/params.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/xmss/params.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
 
 ### Build Status
-- `cargo test --workspace --all-features`: 2969 passed, 0 failed, 50 ignored
+- `cargo test --workspace --all-features`: 2924 passed, 0 failed, 50 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T134: XMSS Hash Abstraction + XMSS Address Scheme + ML-KEM NTT Deepening (+15 tests, 2,924→2,939)
+
+**Date**: 2026-02-24
+**Scope**: Deepen test coverage for three PQC internal modules with low test density: XMSS hash abstraction (hash.rs, 247 lines, 2 tests), XMSS address scheme (address.rs, 120 lines, 2 tests), ML-KEM NTT (ntt.rs, 229 lines, 3 tests).
+
+### Summary
+
+Added 15 tests across 3 PQC internal modules validating hash function domain separation, address manipulation correctness, and NTT algebraic properties:
+
+- **XMSS hash** (5 tests): to_byte domain separation padding (0/1/3/256), PRF address sensitivity (different ADRS → different output), F function determinism with SHAKE128, h_msg determinism and idx sensitivity, prf_msg output length and idx sensitivity
+- **XMSS address** (5 tests): new() all-zeros initialization, LTree type=1 and set_ltree_addr, clone independence, tree_height/tree_index byte offset overlap with chain/hash addr, large u64::MAX tree address and u32::MAX layer
+- **ML-KEM NTT** (5 tests): NTT of zero polynomial stays zero, fqmul commutativity and zero-multiplication, poly_add/poly_sub inverse recovery, to_mont coefficient conversion and reduce_poly bounding, ZETAS table properties (128 nonzero distinct entries all in (-Q,Q))
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/xmss/hash.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/xmss/address.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/mlkem/ntt.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 2939 passed, 0 failed, 50 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
 
 ## Phase T135: BigNum Constant-Time + Primality Testing + Core Type Deepening (+15 tests, 2,939→2,954)
 
@@ -8611,7 +9311,7 @@ Added middlebox compatibility mode to TLS 1.3:
 
 ---
 
-## Phase 137: SHA-2 Hardware Acceleration — ARMv8 SHA-NI / x86-64 SHA-NI (+3 tests on aarch64, 2,960→2,963)
+## Phase P137: SHA-2 Hardware Acceleration — ARMv8 SHA-NI / x86-64 SHA-NI (+3 tests on aarch64, 2,960→2,963)
 
 **Date**: 2026-02-24
 **Scope**: Add hardware-accelerated SHA-256 compression using ARMv8 SHA-2 intrinsics and x86-64 SHA-NI intrinsics, with runtime detection and software fallback.
@@ -8637,7 +9337,7 @@ Added middlebox compatibility mode to TLS 1.3:
 
 ---
 
-## Phase 138: GHASH/CLMUL Hardware Acceleration — ARMv8 PMULL / x86-64 PCLMULQDQ (+8 tests on aarch64, 2,963→2,971)
+## Phase P138: GHASH/CLMUL Hardware Acceleration — ARMv8 PMULL / x86-64 PCLMULQDQ (+8 tests on aarch64, 2,963→2,971)
 
 **Date**: 2026-02-24
 **Scope**: Add hardware-accelerated GHASH (GF(2^128) multiplication for AES-GCM) using ARMv8 PMULL and x86-64 PCLMULQDQ carry-less multiplication intrinsics.
@@ -8664,7 +9364,7 @@ Added middlebox compatibility mode to TLS 1.3:
 
 ---
 
-## Phase 139: P-256 Specialized Field Arithmetic and Fast ECC Path (+47 tests, 2,971→3,018)
+## Phase P139: P-256 Specialized Field Arithmetic and Fast ECC Path (+47 tests, 2,971→3,018)
 
 **Date**: 2026-02-24
 **Scope**: Replace generic BigNum-based P-256 operations with specialized 4×u64 Montgomery field arithmetic and Jacobian point operations, closing the ~31× performance gap with C.
@@ -8690,7 +9390,7 @@ Added middlebox compatibility mode to TLS 1.3:
 
 ---
 
-## Phase 140: ChaCha20 SIMD Optimization — ARMv8 NEON / x86-64 SSE2 (+3 tests on aarch64, 3,018→3,021)
+## Phase P140: ChaCha20 SIMD Optimization — ARMv8 NEON / x86-64 SSE2 (+3 tests on aarch64, 3,018→3,021)
 
 **Date**: 2026-02-24
 **Scope**: Add vectorized ChaCha20 block function using ARMv8 NEON and x86-64 SSE2 intrinsics for the second most common AEAD cipher suite.
@@ -8714,218 +9414,35 @@ Added middlebox compatibility mode to TLS 1.3:
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
-## Phase T134: XMSS Hash Abstraction + XMSS Address Scheme + ML-KEM NTT Deepening (+15 tests, 2,924→2,939)
+---
 
-**Date**: 2026-02-24
-**Scope**: Deepen test coverage for three PQC internal modules with low test density: XMSS hash abstraction (hash.rs, 247 lines, 2 tests), XMSS address scheme (address.rs, 120 lines, 2 tests), ML-KEM NTT (ntt.rs, 229 lines, 3 tests).
+## Phase T141: SLH-DSA Params + Hash Abstraction + Address Scheme Deepening (+15 tests, 2,954→2,969)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three SLH-DSA (FIPS 205) internal modules with existing but low test density: params.rs (289 lines, 2 tests), hash.rs (381 lines, 4 tests), address.rs (238 lines, 4 tests).
 
 ### Summary
 
-Added 15 tests across 3 PQC internal modules validating hash function domain separation, address manipulation correctness, and NTT algebraic properties:
+Added 15 tests across 3 SLH-DSA internal modules validating parameter set invariants, hash function behavior, and address scheme correctness:
 
-- **XMSS hash** (5 tests): to_byte domain separation padding (0/1/3/256), PRF address sensitivity (different ADRS → different output), F function determinism with SHAKE128, h_msg determinism and idx sensitivity, prf_msg output length and idx sensitivity
-- **XMSS address** (5 tests): new() all-zeros initialization, LTree type=1 and set_ltree_addr, clone independence, tree_height/tree_index byte offset overlap with chain/hash addr, large u64::MAX tree address and u32::MAX layer
-- **ML-KEM NTT** (5 tests): NTT of zero polynomial stays zero, fqmul commutativity and zero-multiplication, poly_add/poly_sub inverse recovery, to_mont coefficient conversion and reduce_poly bounding, ZETAS table properties (128 nonzero distinct entries all in (-Q,Q))
+- **SLH-DSA params** (5 tests): SHA2/SHAKE pairs identical except is_sha2 mode flag, security category mapping (n=16→cat1, n=24→cat3, n=32→cat5), s variants have smaller signatures than f variants (sig_bytes and d), all 12 parameter sets accessible with non-zero fields, m > n for all parameter sets
+- **SLH-DSA hash** (5 tests): SHA-2 category 3/5 uses SHA-512 for H function, SHAKE vs SHA-2 produce different outputs for same inputs, h() and t_l() produce n-byte outputs for multiple parameter sets, different sk_seed → different PRF output, different messages → different h_msg output
+- **SLH-DSA address** (5 tests): new() all-zeros initialization for both compressed (22 bytes) and uncompressed (32 bytes), all 7 AdrsType values set correctly in both modes, clone independence (mutation doesn't affect original), tree_height/chain_addr write to same field2 offset, hash_addr/tree_index write to same field3 offset
 
 ### Files Modified
 
 | File | Changes |
 |------|---------|
-| `crates/hitls-crypto/src/xmss/hash.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/xmss/address.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/mlkem/ntt.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/slh_dsa/params.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/slh_dsa/hash.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/slh_dsa/address.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
 
 ### Build Status
-- `cargo test --workspace --all-features`: 2939 passed, 0 failed, 50 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
-## Phase T133: McEliece + FrodoKEM + XMSS Parameter Set Validation Deepening (+15 tests, 2,909→2,924)
-
-**Date**: 2026-02-24
-**Scope**: Deepen parameter set validation for three PQC parameter modules with low test density: McEliece params (params.rs, 284 lines, 1 test), FrodoKEM params (params.rs, 359 lines, 2 tests), XMSS params (params.rs, 169 lines, 1 test).
-
-### Summary
-
-Added 15 tests across 3 parameter set files validating cross-variant consistency, mathematical relationships, and domain-specific invariants:
-
-- **McEliece params** (5 tests): ALL_PARAM_IDS count and group structure, F/Pcf semi-systematic flag consistency, public_key_bytes = mt × k_bytes formula, k_bytes/mt_bytes byte-alignment consistency, module constants (Q=2^13, Q_1, L_BYTES, SIGMA/MU/NU)
-- **FrodoKEM params** (5 tests): SHAKE/AES variant dimensional equivalence, eFrodoKEM salt_len=0 vs FrodoKEM salt_len>0, CDF table monotonicity and 2^15-1 termination, security level → ss_len/extracted_bits/logq mapping, CDF table length matches security parameter
-- **XMSS params** (5 tests): tree height validity (h ∈ {10,16,20}), OID uniqueness across all 9 variants, hash_mode dispatch consistency, same height → same sig_bytes across hash modes, sig_bytes monotonically increases with height
-
-### Files Modified
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/mceliece/params.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/frodokem/params.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/xmss/params.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-
-### Build Status
-- `cargo test --workspace --all-features`: 2924 passed, 0 failed, 50 ignored
+- `cargo test --workspace --all-features`: 2969 passed, 0 failed, 50 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
 ---
-
-## Phase T150: scrypt + CFB Mode + X448 Deepening (+15 tests, 3,169→3,184)
-
-**Date**: 2026-02-25
-**Scope**: Deepen test coverage for three crypto modules: scrypt KDF (scrypt/mod.rs, 244 lines, 5 tests), CFB cipher mode (modes/cfb.rs, 155 lines, 5 tests), X448 Diffie-Hellman (x448/mod.rs, 290 lines, 5 tests).
-
-**Files modified**:
-- `crates/hitls-crypto/src/scrypt/mod.rs` — +5 tests (deterministic, different salts, different dk_len, different N, Salsa20/8 all-zero)
-- `crates/hitls-crypto/src/modes/cfb.rs` — +5 tests (different IV, single byte, multi-block exact, feedback diffusion, AES-192)
-- `crates/hitls-crypto/src/x448/mod.rs` — +5 tests (wrong length, deterministic pubkey, clamping, pubkey roundtrip, all-zero DH rejection)
-
-**Build**: `cargo test --workspace --all-features` — 3,184 passed, 7 ignored. Clippy clean. Fmt clean.
-
----
-
-## Phase T149: XTS Mode + Edwards Curve + GMAC Deepening (+15 tests, 3,154→3,169)
-
-**Date**: 2026-02-25
-**Scope**: Deepen test coverage for three crypto modules: AES-XTS mode (xts.rs, 293 lines, 5 tests), Ed25519 Edwards curve arithmetic (edwards.rs, 277 lines, 5 tests), GMAC authentication (gmac/mod.rs, 201 lines, 5 tests).
-
-**Files modified**:
-- `crates/hitls-crypto/src/modes/xts.rs` — +5 tests (GF multiply, different tweaks, CTS various lengths, single block, invalid tweak)
-- `crates/hitls-crypto/src/curve25519/edwards.rs` — +5 tests (identity neutral, scalar mul zero, scalar mul 3, invalid point, commutativity)
-- `crates/hitls-crypto/src/gmac/mod.rs` — +5 tests (deterministic, different keys, incremental update, non-12byte IV, reset different IV)
-
-**Build**: `cargo test --workspace --all-features` — 3,169 passed, 7 ignored. Clippy clean. Fmt clean.
-
----
-
-## Phase T148: ML-DSA Poly + X.509 Extensions + X.509 Text Deepening (+15 tests, 3,139→3,154)
-
-**Date**: 2026-02-25
-**Scope**: Deepen test coverage for three modules with low test density: ML-DSA polynomial operations (poly.rs, 609 lines, 6 tests), X.509 extension parsing (extensions.rs, 580 lines, 5 tests), X.509 text output (text.rs, 606 lines, 7 tests).
-
-### Summary
-
-Added 15 tests across 3 modules validating lattice signature polynomial properties, X.509 extension DER parsing, and certificate text formatting:
-
-- **ML-DSA poly** (5 tests): make_hint/use_hint consistency (hint=false returns highbits), rej_bounded_poly eta=2 range [-2,2] + nonce divergence, rej_bounded_poly eta=4 range [-4,4], sample_in_ball tau non-zero count + all ±1, poly_chknorm boundary pass/fail
-- **X.509 extensions** (5 tests): ExtendedKeyUsage parsing (serverAuth + clientAuth OIDs), SubjectKeyIdentifier parsing, KeyUsage CRL Sign only bit, SubjectAltName email + URI parsing, KeyUsage.has() method flag tests
-- **X.509 text** (5 tests): format_time epoch (Jan 1 1970), format_time known date (2026-02-24), days_to_ymd known dates (1970/2000/2024 leap/1999), invalid OID hex fallback, format_basic_constraints CA:FALSE
-
-### Files Modified
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/mldsa/poly.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-pki/src/x509/extensions.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-pki/src/x509/text.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-
-### Build Status
-- `cargo test --workspace --all-features`: 3154 passed, 0 failed, 7 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
-## Phase T147: ML-KEM Poly + SM9 Fp12 + Encrypted PKCS#8 Deepening (+15 tests, 3,109→3,124)
-
-**Date**: 2026-02-25
-**Scope**: Deepen test coverage for three modules with low test density: ML-KEM polynomial operations (poly.rs, 339 lines, 5 tests), SM9 Fp12 tower field arithmetic (fp12.rs, 309 lines, 5 tests), encrypted PKCS#8 (encrypted.rs, 305 lines, 5 tests).
-
-### Summary
-
-Added 15 tests across 3 modules validating lattice polynomial operations, tower field algebraic laws, and encrypted private key handling:
-
-- **ML-KEM poly** (5 tests): CBD2 zero input → all-zero coefficients, CBD3 zero input → all-zero coefficients, sample_cbd invalid eta → error, compress/decompress full roundtrip error bounds, msg_to_poly/poly_to_msg with 0x00/0xFF
-- **SM9 Fp12** (5 tests): a * zero = zero, inv(one) = one, (a*b)*c == a*(b*c) associativity, a*(b+c) == a*b + a*c distributive law, inv(inv(a)) == a
-- **Encrypted PKCS#8** (5 tests): invalid key_len (24/8) → error, empty password roundtrip, custom iterations (1/100/10000) roundtrip, different encryptions differ (random salt/IV), decrypt twice → same result
-
-### Files Modified
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/mlkem/poly.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/sm9/fp12.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-pki/src/pkcs8/encrypted.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-
-### Build Status
-- `cargo test --workspace --all-features`: 3124 passed, 0 failed, 22 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
-## Phase T145: DH Group Params + Entropy Pool + SHA-1 Deepening (+15 tests, 3,094→3,109)
-
-**Date**: 2026-02-25
-**Scope**: Deepen test coverage for three modules with low test density: DH group parameters (groups.rs, 462 lines, 6 tests), entropy pool circular buffer (pool.rs, 229 lines, 7 tests), SHA-1 hash function (sha1/mod.rs, 261 lines, 6 tests).
-
-### Summary
-
-Added 15 tests across 3 modules validating DH parameter constants, entropy buffer correctness, and SHA-1 padding boundaries:
-
-- **DH groups** (5 tests): all primes are odd (LSB=1), all primes have MSB set, bit sizes match group names (768–8192), RFC 2409/3526 groups share Oakley prefix, all RFC 7919 groups share FFDHE prefix (240+ bytes)
-- **Entropy pool** (5 tests): default capacity construction, multiple push/pop cycles (10 rounds), fill-drain-refill cycle, interleaved push/pop with wrap-around, zero-length push/pop operations
-- **SHA-1** (5 tests): single byte "a" (NIST vector), exactly one block (64 bytes) boundary, 55-byte padding boundary (max single-block), 56-byte padding boundary (forces two-block), clone mid-update consistency
-
-### Files Modified
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/dh/groups.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/entropy/pool.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/sha1/mod.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-
-### Build Status
-- `cargo test --workspace --all-features`: 3109 passed, 0 failed, 22 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
-## Phase T144: ML-DSA NTT + SM4-CTR-DRBG + BigNum Random Deepening (+15 tests, 3,079→3,094)
-
-**Date**: 2026-02-25
-**Scope**: Deepen test coverage for three modules with low test density: ML-DSA NTT (ntt.rs, 244 lines, 4 tests), SM4-CTR-DRBG (sm4_ctr_drbg.rs, 254 lines, 4 tests), BigNum random generation (rand.rs, 132 lines, 4 tests).
-
-### Summary
-
-Added 15 tests across 3 modules validating NTT algebraic properties, DRBG correctness/error handling, and random number generation bounds:
-
-- **ML-DSA NTT** (5 tests): NTT of zero polynomial stays zero, fqmul commutativity (5 pairs including edge cases), poly_add/poly_sub inverse roundtrip, poly_shiftl multiplies by 2^D, caddq conditional add q behavior (positive/negative values)
-- **SM4-CTR-DRBG** (5 tests): invalid seed length → error (0/16/31/33/48 bytes), generate with additional_input changes output, reseed changes output stream, generate various sizes (1/15/16/17/31/32/48/100 bytes), reseed invalid entropy length → error
-- **BigNum random** (5 tests): random(0 bits) → zero, random_range error cases (zero/one upper), random_range_inclusive_zero bounds (allows zero, upper=1 always returns 0), two random(256) calls produce different values, random large bits (512/1024/2048) correct bit_len
-
-### Files Modified
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/mldsa/ntt.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/drbg/sm4_ctr_drbg.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-bignum/src/rand.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-
-### Build Status
-- `cargo test --workspace --all-features`: 3094 passed, 0 failed, 22 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
-## Phase T143: FrodoKEM PKE + SM9 G1 Point + SM9 Fp Field Deepening (+15 tests, 3,065→3,079)
-
-**Date**: 2026-02-25
-**Scope**: Deepen test coverage for three crypto internal modules with low test density: FrodoKEM inner PKE (pke.rs, 160 lines, 1 test), SM9 G1 point operations (ecp.rs, 244 lines, 5 tests), SM9 Fp field arithmetic (fp.rs, 178 lines, 6 tests). Also re-ignored flaky ElGamal generate test (BnRandGenFail).
-
-### Summary
-
-Added 15 tests across 3 cryptographic modules validating PKE correctness, elliptic curve point algebra, and finite field algebraic laws:
-
-- **FrodoKEM PKE** (5 tests): keygen determinism (same seeds → same keys), different seeds → different keys, ciphertext dimension validation (c1=n_bar×n, c2=n_bar×n_bar packed sizes), wrong secret key → decryption failure, different messages → same C1 but different C2 (noise-independent message encoding)
-- **SM9 G1 point** (5 tests): double() == add(self) consistency, scalar_mul [1]G/[2]G/[3]G small values, add commutativity (P+Q==Q+P), from_bytes wrong length → error (63/65/0 bytes), infinity properties (is_infinity, to_affine error, double(inf)==inf)
-- **SM9 Fp field** (5 tests): mul commutativity (a*b==b*a with small and large values), sqr()==mul(self) for 5 values including 0/1/MAX, double()==add(self), mul_u64 consistency with full mul for 6 constants, distributive law a*(b+c)==a*b+a*c
-
-### Files Modified
-
-| File | Changes |
-|------|---------|
-| `crates/hitls-crypto/src/frodokem/pke.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/sm9/ecp.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/sm9/fp.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
-| `crates/hitls-crypto/src/elgamal/mod.rs` | Re-added `#[ignore]` to flaky `test_elgamal_generate` (BnRandGenFail) |
-
-### Build Status
-- `cargo test --workspace --all-features`: 3079 passed, 0 failed, 22 ignored
-- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
-- `cargo fmt --all -- --check`: clean
 
 ## Phase R142 — Dev Profile Optimization: Accelerate Ignored Tests
 
@@ -8978,6 +9495,91 @@ Added per-crate Cargo profile overrides to optimize compute-intensive crates (`h
 
 ---
 
+## Phase T143: FrodoKEM PKE + SM9 G1 Point + SM9 Fp Field Deepening (+15 tests, 3,065→3,079)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three crypto internal modules with low test density: FrodoKEM inner PKE (pke.rs, 160 lines, 1 test), SM9 G1 point operations (ecp.rs, 244 lines, 5 tests), SM9 Fp field arithmetic (fp.rs, 178 lines, 6 tests). Also re-ignored flaky ElGamal generate test (BnRandGenFail).
+
+### Summary
+
+Added 15 tests across 3 cryptographic modules validating PKE correctness, elliptic curve point algebra, and finite field algebraic laws:
+
+- **FrodoKEM PKE** (5 tests): keygen determinism (same seeds → same keys), different seeds → different keys, ciphertext dimension validation (c1=n_bar×n, c2=n_bar×n_bar packed sizes), wrong secret key → decryption failure, different messages → same C1 but different C2 (noise-independent message encoding)
+- **SM9 G1 point** (5 tests): double() == add(self) consistency, scalar_mul [1]G/[2]G/[3]G small values, add commutativity (P+Q==Q+P), from_bytes wrong length → error (63/65/0 bytes), infinity properties (is_infinity, to_affine error, double(inf)==inf)
+- **SM9 Fp field** (5 tests): mul commutativity (a*b==b*a with small and large values), sqr()==mul(self) for 5 values including 0/1/MAX, double()==add(self), mul_u64 consistency with full mul for 6 constants, distributive law a*(b+c)==a*b+a*c
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/frodokem/pke.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/sm9/ecp.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/sm9/fp.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/elgamal/mod.rs` | Re-added `#[ignore]` to flaky `test_elgamal_generate` (BnRandGenFail) |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3079 passed, 0 failed, 22 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T144: ML-DSA NTT + SM4-CTR-DRBG + BigNum Random Deepening (+15 tests, 3,079→3,094)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three modules with low test density: ML-DSA NTT (ntt.rs, 244 lines, 4 tests), SM4-CTR-DRBG (sm4_ctr_drbg.rs, 254 lines, 4 tests), BigNum random generation (rand.rs, 132 lines, 4 tests).
+
+### Summary
+
+Added 15 tests across 3 modules validating NTT algebraic properties, DRBG correctness/error handling, and random number generation bounds:
+
+- **ML-DSA NTT** (5 tests): NTT of zero polynomial stays zero, fqmul commutativity (5 pairs including edge cases), poly_add/poly_sub inverse roundtrip, poly_shiftl multiplies by 2^D, caddq conditional add q behavior (positive/negative values)
+- **SM4-CTR-DRBG** (5 tests): invalid seed length → error (0/16/31/33/48 bytes), generate with additional_input changes output, reseed changes output stream, generate various sizes (1/15/16/17/31/32/48/100 bytes), reseed invalid entropy length → error
+- **BigNum random** (5 tests): random(0 bits) → zero, random_range error cases (zero/one upper), random_range_inclusive_zero bounds (allows zero, upper=1 always returns 0), two random(256) calls produce different values, random large bits (512/1024/2048) correct bit_len
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/mldsa/ntt.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/drbg/sm4_ctr_drbg.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-bignum/src/rand.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3094 passed, 0 failed, 22 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T145: DH Group Params + Entropy Pool + SHA-1 Deepening (+15 tests, 3,094→3,109)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three modules with low test density: DH group parameters (groups.rs, 462 lines, 6 tests), entropy pool circular buffer (pool.rs, 229 lines, 7 tests), SHA-1 hash function (sha1/mod.rs, 261 lines, 6 tests).
+
+### Summary
+
+Added 15 tests across 3 modules validating DH parameter constants, entropy buffer correctness, and SHA-1 padding boundaries:
+
+- **DH groups** (5 tests): all primes are odd (LSB=1), all primes have MSB set, bit sizes match group names (768–8192), RFC 2409/3526 groups share Oakley prefix, all RFC 7919 groups share FFDHE prefix (240+ bytes)
+- **Entropy pool** (5 tests): default capacity construction, multiple push/pop cycles (10 rounds), fill-drain-refill cycle, interleaved push/pop with wrap-around, zero-length push/pop operations
+- **SHA-1** (5 tests): single byte "a" (NIST vector), exactly one block (64 bytes) boundary, 55-byte padding boundary (max single-block), 56-byte padding boundary (forces two-block), clone mid-update consistency
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/dh/groups.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/entropy/pool.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/sha1/mod.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3109 passed, 0 failed, 22 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
 ## Phase R146 — Dev Profile opt-level=2 Upgrade + Un-ignore 15 Tests
 
 ### Summary
@@ -9021,7 +9623,128 @@ Deep analysis revealed that bumping `hitls-crypto` from `opt-level = 1` to `opt-
 
 ---
 
-## Phase P1: P-256 Deep Optimization
+## Phase T147: ML-KEM Poly + SM9 Fp12 + Encrypted PKCS#8 Deepening (+15 tests, 3,109→3,124)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three modules with low test density: ML-KEM polynomial operations (poly.rs, 339 lines, 5 tests), SM9 Fp12 tower field arithmetic (fp12.rs, 309 lines, 5 tests), encrypted PKCS#8 (encrypted.rs, 305 lines, 5 tests).
+
+### Summary
+
+Added 15 tests across 3 modules validating lattice polynomial operations, tower field algebraic laws, and encrypted private key handling:
+
+- **ML-KEM poly** (5 tests): CBD2 zero input → all-zero coefficients, CBD3 zero input → all-zero coefficients, sample_cbd invalid eta → error, compress/decompress full roundtrip error bounds, msg_to_poly/poly_to_msg with 0x00/0xFF
+- **SM9 Fp12** (5 tests): a * zero = zero, inv(one) = one, (a*b)*c == a*(b*c) associativity, a*(b+c) == a*b + a*c distributive law, inv(inv(a)) == a
+- **Encrypted PKCS#8** (5 tests): invalid key_len (24/8) → error, empty password roundtrip, custom iterations (1/100/10000) roundtrip, different encryptions differ (random salt/IV), decrypt twice → same result
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/mlkem/poly.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-crypto/src/sm9/fp12.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-pki/src/pkcs8/encrypted.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3124 passed, 0 failed, 22 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T148: ML-DSA Poly + X.509 Extensions + X.509 Text Deepening (+15 tests, 3,139→3,154)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three modules with low test density: ML-DSA polynomial operations (poly.rs, 609 lines, 6 tests), X.509 extension parsing (extensions.rs, 580 lines, 5 tests), X.509 text output (text.rs, 606 lines, 7 tests).
+
+### Summary
+
+Added 15 tests across 3 modules validating lattice signature polynomial properties, X.509 extension DER parsing, and certificate text formatting:
+
+- **ML-DSA poly** (5 tests): make_hint/use_hint consistency (hint=false returns highbits), rej_bounded_poly eta=2 range [-2,2] + nonce divergence, rej_bounded_poly eta=4 range [-4,4], sample_in_ball tau non-zero count + all ±1, poly_chknorm boundary pass/fail
+- **X.509 extensions** (5 tests): ExtendedKeyUsage parsing (serverAuth + clientAuth OIDs), SubjectKeyIdentifier parsing, KeyUsage CRL Sign only bit, SubjectAltName email + URI parsing, KeyUsage.has() method flag tests
+- **X.509 text** (5 tests): format_time epoch (Jan 1 1970), format_time known date (2026-02-24), days_to_ymd known dates (1970/2000/2024 leap/1999), invalid OID hex fallback, format_basic_constraints CA:FALSE
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/mldsa/poly.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-pki/src/x509/extensions.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+| `crates/hitls-pki/src/x509/text.rs` | Added 5 tests to existing `#[cfg(test)] mod tests` |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3154 passed, 0 failed, 7 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T149: XTS Mode + Edwards Curve + GMAC Deepening (+15 tests, 3,154→3,169)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three crypto modules: AES-XTS mode (xts.rs, 293 lines, 5 tests), Ed25519 Edwards curve arithmetic (edwards.rs, 277 lines, 5 tests), GMAC authentication (gmac/mod.rs, 201 lines, 5 tests).
+
+**Files modified**:
+- `crates/hitls-crypto/src/modes/xts.rs` — +5 tests (GF multiply, different tweaks, CTS various lengths, single block, invalid tweak)
+- `crates/hitls-crypto/src/curve25519/edwards.rs` — +5 tests (identity neutral, scalar mul zero, scalar mul 3, invalid point, commutativity)
+- `crates/hitls-crypto/src/gmac/mod.rs` — +5 tests (deterministic, different keys, incremental update, non-12byte IV, reset different IV)
+
+**Build**: `cargo test --workspace --all-features` — 3,169 passed, 7 ignored. Clippy clean. Fmt clean.
+
+---
+
+## Phase T150: scrypt + CFB Mode + X448 Deepening (+15 tests, 3,169→3,184)
+
+**Date**: 2026-02-25
+**Scope**: Deepen test coverage for three crypto modules: scrypt KDF (scrypt/mod.rs, 244 lines, 5 tests), CFB cipher mode (modes/cfb.rs, 155 lines, 5 tests), X448 Diffie-Hellman (x448/mod.rs, 290 lines, 5 tests).
+
+**Files modified**:
+- `crates/hitls-crypto/src/scrypt/mod.rs` — +5 tests (deterministic, different salts, different dk_len, different N, Salsa20/8 all-zero)
+- `crates/hitls-crypto/src/modes/cfb.rs` — +5 tests (different IV, single byte, multi-block exact, feedback diffusion, AES-192)
+- `crates/hitls-crypto/src/x448/mod.rs` — +5 tests (wrong length, deterministic pubkey, clamping, pubkey roundtrip, all-zero DH rejection)
+
+**Build**: `cargo test --workspace --all-features` — 3,184 passed, 7 ignored. Clippy clean. Fmt clean.
+
+---
+
+## Phase T151 — Semantic Fuzz Target Expansion (+3 targets, 10→13)
+
+**Date**: 2026-02-26
+**Summary**: Resolve D11 (Critical) deficiency from QUALITY_REPORT.md by adding 3 semantic fuzz targets beyond parse-only coverage. Fuzz targets now exercise cryptographic operations (AEAD decrypt), verification logic (X.509 chain), and deep protocol decoding (all 10 handshake decoders).
+
+### Motivation
+
+QUALITY_REPORT.md D11 identified all 10 existing fuzz targets as parse-only — no fuzz target exercised cryptographic operations, verification logic, or protocol-level decoding. This phase adds semantic fuzz coverage for the three highest-value attack surfaces.
+
+### New Fuzz Targets
+
+| Target | Crate | Strategy |
+|--------|-------|----------|
+| `fuzz_aead_decrypt` | hitls-crypto | Split fuzz data into key/nonce/AAD/ciphertext, call AES-128-GCM and ChaCha20-Poly1305 decrypt. Verifies no panic on any corrupted input. |
+| `fuzz_x509_verify` | hitls-pki | Parse DER as certificate, attempt self-signed signature verification and chain verification. Exercises crypto verify path. |
+| `fuzz_tls_handshake_deep` | hitls-tls | Dispatch on first byte to exercise all 10 decode_* functions (ClientHello through CompressedCertificate) + parse_handshake_header. |
+
+### Files Modified/Created
+
+| File | Change |
+|------|--------|
+| `fuzz/Cargo.toml` | Added `hitls-crypto` dependency (aes, modes, chacha20 features) + 3 `[[bin]]` entries |
+| `fuzz/fuzz_targets/fuzz_aead_decrypt.rs` | NEW — AEAD decrypt semantic fuzzing |
+| `fuzz/fuzz_targets/fuzz_x509_verify.rs` | NEW — X.509 verification path fuzzing |
+| `fuzz/fuzz_targets/fuzz_tls_handshake_deep.rs` | NEW — Deep handshake decoder fuzzing (10 decoders) |
+| `fuzz/corpus/fuzz_aead_decrypt/` | NEW — 5 seed files |
+| `fuzz/corpus/fuzz_x509_verify/` | NEW — 3 seed files |
+| `fuzz/corpus/fuzz_tls_handshake_deep/` | NEW — 5 seed files |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3191 passed, 0 failed, 7 ignored
+- `cargo fuzz build`: 13 targets compile successfully
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P152: P-256 Deep Optimization
 
 **Date**: 2026-02-26
 **Summary**: P-256 deep optimization with precomputed base table, dedicated squaring, specialized Montgomery reduction, and mixed Jacobian-affine addition.
@@ -9079,42 +9802,7 @@ Deep analysis revealed that bumping `hitls-crypto` from `opt-level = 1` to `opt-
 
 ---
 
-## Phase T151 — Semantic Fuzz Target Expansion (+3 targets, 10→13)
-
-**Date**: 2026-02-26
-**Summary**: Resolve D11 (Critical) deficiency from QUALITY_REPORT.md by adding 3 semantic fuzz targets beyond parse-only coverage. Fuzz targets now exercise cryptographic operations (AEAD decrypt), verification logic (X.509 chain), and deep protocol decoding (all 10 handshake decoders).
-
-### Motivation
-
-QUALITY_REPORT.md D11 identified all 10 existing fuzz targets as parse-only — no fuzz target exercised cryptographic operations, verification logic, or protocol-level decoding. This phase adds semantic fuzz coverage for the three highest-value attack surfaces.
-
-### New Fuzz Targets
-
-| Target | Crate | Strategy |
-|--------|-------|----------|
-| `fuzz_aead_decrypt` | hitls-crypto | Split fuzz data into key/nonce/AAD/ciphertext, call AES-128-GCM and ChaCha20-Poly1305 decrypt. Verifies no panic on any corrupted input. |
-| `fuzz_x509_verify` | hitls-pki | Parse DER as certificate, attempt self-signed signature verification and chain verification. Exercises crypto verify path. |
-| `fuzz_tls_handshake_deep` | hitls-tls | Dispatch on first byte to exercise all 10 decode_* functions (ClientHello through CompressedCertificate) + parse_handshake_header. |
-
-### Files Modified/Created
-
-| File | Change |
-|------|--------|
-| `fuzz/Cargo.toml` | Added `hitls-crypto` dependency (aes, modes, chacha20 features) + 3 `[[bin]]` entries |
-| `fuzz/fuzz_targets/fuzz_aead_decrypt.rs` | NEW — AEAD decrypt semantic fuzzing |
-| `fuzz/fuzz_targets/fuzz_x509_verify.rs` | NEW — X.509 verification path fuzzing |
-| `fuzz/fuzz_targets/fuzz_tls_handshake_deep.rs` | NEW — Deep handshake decoder fuzzing (10 decoders) |
-| `fuzz/corpus/fuzz_aead_decrypt/` | NEW — 5 seed files |
-| `fuzz/corpus/fuzz_x509_verify/` | NEW — 3 seed files |
-| `fuzz/corpus/fuzz_tls_handshake_deep/` | NEW — 5 seed files |
-
-### Build Status
-- `cargo test --workspace --all-features`: 3191 passed, 0 failed, 7 ignored
-- `cargo fuzz build`: 13 targets compile successfully
-- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
-- `cargo fmt --all -- --check`: clean
-
-## Phase P2: ML-KEM NEON NTT Optimization
+## Phase P153: ML-KEM NEON NTT Optimization
 
 **Date**: 2026-02-27
 **Summary**: ML-KEM NEON NTT optimization with 8-wide vectorized NTT/INTT butterflies, NEON Barrett reduction, NEON polynomial utilities, and batch SHAKE-128 squeeze.

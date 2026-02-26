@@ -96,8 +96,7 @@ cargo fmt --all -- --check
 
 ### Post-Task Documentation Updates
 After completing each implementation task (phase/feature), **always** update the following files:
-- `DEV_LOG.md` — Add a new phase entry with summary, files modified, implementation details, test counts, and build status
-- `TEST_LOG.md` — Add a new Phase entry with test details and per-crate counts (for testing phases)
+- `DEV_LOG.md` — Add a new phase entry with summary, files modified, implementation details, test counts, and build status (all phase types: N, TN, RN, PN)
 - `PROMPT_LOG.md` — Record the prompt and result for the phase
 - `CLAUDE.md` — Update status line, test counts, and workspace structure annotations
 - `README.md` — Update test counts in Building & Testing section; update protocol/algorithm tables if new features added
@@ -137,4 +136,4 @@ Key milestones:
 - Phase P2: ML-KEM NEON NTT optimization — 8-wide Montgomery multiply (`vqdmulhq_s16` + `vhsubq_s16` trick), NEON forward/inverse NTT (stages len≥8 fully vectorized), NEON Barrett reduction (widening multiply + shift-narrow), NEON poly utilities (add/sub/to_mont/reduce), batch SHAKE-128 squeeze (504-byte blocks vs 3-byte). ML-KEM-768 encaps 2.0× speedup, decaps 2.6× speedup.
 - Phase P3: BigNum CIOS Montgomery — CIOS fused multiply+reduce (single (n+2)-limb accumulator vs 2n-limb intermediate), pre-allocated flat limb table for exponentiation, optimized sqr_limbs with cross-product symmetry, single conditional subtraction. DH-2048 1.25× speedup (174→218 ops/s), RSA-2048 sign 1.11× speedup (719→800 ops/s). Gap narrowed from 7× to 5.6× vs C.
 
-See `DEV_LOG.md` for detailed phase tables, `TEST_LOG.md` for testing history, `PROMPT_LOG.md` for prompt/response log, and `ARCH_LOG.md` for refactoring execution log.
+See `DEV_LOG.md` for detailed phase tables (including test, refactoring, and performance phases) and `PROMPT_LOG.md` for prompt/response log.
