@@ -7,7 +7,7 @@
 | # | Phase | Title | Date |
 |---|-------|-------|------|
 | 1 | 0 | Project Scaffolding | 2026-02-06 |
-| 2 | 0-1 | Tooling + BigNum | 2026-02-06 |
+| 2 | 1 | Tooling + BigNum | 2026-02-06 |
 | 3 | 2 | Hash + HMAC | 2026-02-06 |
 | 4 | 3 | Symmetric Ciphers + Block Cipher Modes + KDF | 2026-02-06 |
 | 5 | 4 | RSA Asymmetric Cryptography | 2026-02-06 |
@@ -1084,7 +1084,7 @@ openhitls-rs/
 
 ---
 
-## Phase 0–1: Tooling + BigNum (Session 2026-02-06)
+## Phase 1: Tooling + BigNum (Session 2026-02-06)
 
 ### Goals
 - Fix compilation issues from Phase 0 scaffolding
