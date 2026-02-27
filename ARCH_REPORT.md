@@ -462,7 +462,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 ## 7. Refactoring Plan
 
-### Phase R1: PKI Encoding Consolidation (Priority: Critical)
+### Phase R100: PKI Encoding Consolidation (Priority: Critical)
 
 **Goal**: Eliminate 24 duplicated ASN.1 encoding helpers and 5 duplicated utility functions
 
@@ -488,7 +488,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Low — internal refactoring only, no public API changes
 
-### Phase R2: Record Layer Enum Dispatch (Priority: High)
+### Phase R101: Record Layer Enum Dispatch (Priority: High)
 
 **Goal**: Replace `Option<T>` field proliferation with type-safe enum dispatch
 
@@ -521,7 +521,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Medium — requires updating all record layer callers
 
-### Phase R3: Connection File Decomposition (Priority: High)
+### Phase R102: Connection File Decomposition (Priority: High)
 
 **Goal**: Split the two largest files (7,324 + 7,004 lines) into manageable modules
 
@@ -539,7 +539,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Low — pure structural reorganization, no logic changes
 
-### Phase R4: Hash Digest Enum Dispatch (Priority: Medium)
+### Phase R103: Hash Digest Enum Dispatch (Priority: Medium)
 
 **Goal**: Replace `Box<dyn Digest>` + factory closure with enum dispatch for known hash algorithms
 
@@ -574,7 +574,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Medium — touches core crypto infrastructure. Requires careful testing.
 
-### Phase R5: Sync/Async Unification via Macros (Priority: Medium)
+### Phase R104: Sync/Async Unification via Macros (Priority: Medium)
 
 **Goal**: Reduce ~6,189 lines of sync/async duplication
 
@@ -598,7 +598,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: High — significant structural change. Macro complexity. Must maintain feature parity. Consider as a multi-iteration effort.
 
-### Phase R6: X.509 Module Decomposition (Priority: Medium)
+### Phase R105: X.509 Module Decomposition (Priority: Medium)
 
 **Goal**: Split `x509/mod.rs` (3,441 lines) into focused submodules
 
@@ -613,7 +613,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Low — pure structural reorganization
 
-### Phase R7: Integration Test Modularization (Priority: Medium)
+### Phase R106: Integration Test Modularization (Priority: Medium)
 
 **Goal**: Split monolithic 7,675-line test file into focused test modules
 
@@ -632,7 +632,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Low — test-only change
 
-### Phase R8: Test Helper Consolidation (Priority: Low)
+### Phase R107: Test Helper Consolidation (Priority: Low)
 
 **Goal**: Eliminate 53 duplicated `hex()`/`to_hex()` test helpers
 
@@ -645,7 +645,7 @@ Four DRBG variants (CTR-DRBG, SM4-CTR-DRBG, HMAC-DRBG, Hash-DRBG) share a common
 
 **Risk**: Low — test-only change
 
-### Phase R9: Parameter Struct Refactoring (Priority: Low)
+### Phase R108: Parameter Struct Refactoring (Priority: Low)
 
 **Goal**: Address 8 `too_many_arguments` suppressions
 
@@ -672,7 +672,7 @@ fn process_handshake(ctx: &mut HandshakeContext, record: &Record) -> Result<()>
 
 **Risk**: Low — localized changes
 
-### Phase R10: DRBG State Machine Unification (Priority: Low)
+### Phase R109: DRBG State Machine Unification (Priority: Low)
 
 **Goal**: Extract shared DRBG lifecycle (instantiate/generate/reseed) into a common abstraction
 
@@ -700,20 +700,20 @@ fn process_handshake(ctx: &mut HandshakeContext, record: &Record) -> Result<()>
 
 | Phase | Priority | Risk | Est. Lines Saved | Dependencies |
 |-------|----------|------|-------------------|-------------|
-| Phase R1: PKI Encoding Consolidation | Critical | Low | ~200 | None |
-| Phase R2: Record Layer Enum Dispatch | High | Medium | ~300 | None |
-| Phase R3: Connection File Decomposition | High | Low | 0 (structural) | None |
-| Phase R4: Hash Digest Enum Dispatch | Medium | Medium | ~100 | None |
-| Phase R5: Sync/Async Unification | Medium | High | ~3,000-4,000 | Phase R3 |
-| Phase R6: X.509 Module Decomposition | Medium | Low | 0 (structural) | Phase R1 |
-| Phase R7: Integration Test Modularization | Medium | Low | 0 (structural) | None |
-| Phase R8: Test Helper Consolidation | Low | Low | ~200 | None |
-| Phase R9: Parameter Struct Refactoring | Low | Low | ~50 | None |
-| Phase R10: DRBG State Machine Unification | Low | Medium | ~300 | None |
+| Phase R100: PKI Encoding Consolidation | Critical | Low | ~200 | None |
+| Phase R101: Record Layer Enum Dispatch | High | Medium | ~300 | None |
+| Phase R102: Connection File Decomposition | High | Low | 0 (structural) | None |
+| Phase R103: Hash Digest Enum Dispatch | Medium | Medium | ~100 | None |
+| Phase R104: Sync/Async Unification | Medium | High | ~3,000-4,000 | Phase R102 |
+| Phase R105: X.509 Module Decomposition | Medium | Low | 0 (structural) | Phase R100 |
+| Phase R106: Integration Test Modularization | Medium | Low | 0 (structural) | None |
+| Phase R107: Test Helper Consolidation | Low | Low | ~200 | None |
+| Phase R108: Parameter Struct Refactoring | Low | Low | ~50 | None |
+| Phase R109: DRBG State Machine Unification | Low | Medium | ~300 | None |
 
-**Recommended Execution Order**: Phase R1 → Phase R3 → Phase R2 → Phase R6 → Phase R7 → Phase R4 → Phase R8 → Phase R9 → Phase R10 → Phase R5
+**Recommended Execution Order**: Phase R100 → Phase R102 → Phase R101 → Phase R105 → Phase R106 → Phase R103 → Phase R107 → Phase R108 → Phase R109 → Phase R104
 
-Phase R5 (Sync/Async Unification) is placed last due to its high complexity and risk — it should be attempted only after the foundational refactorings (Phase R1-Phase R4) stabilize the codebase.
+Phase R104 (Sync/Async Unification) is placed last due to its high complexity and risk — it should be attempted only after the foundational refactorings (Phase R100-Phase R103) stabilize the codebase.
 
 ---
 
@@ -822,13 +822,13 @@ benches/
 
 ## 10. Post-Refactoring Architecture Analysis
 
-> Generated: 2026-02-23 | Branch: `refactoring` | After Phase R1–R10 (10 phases complete)
+> Generated: 2026-02-23 | Branch: `refactoring` | After Phase R100–R109 (10 phases complete)
 
 ### 10.1 Executive Summary
 
-Ten phases of architectural refactoring (R3–R111) have successfully addressed all 10 issues identified in §6 of this report. The refactoring eliminated ~2,700 lines of duplication, decomposed 4 oversized monolithic files into 30+ focused modules, introduced zero-cost enum dispatch in cryptographic hot paths, and unified sync/async connection code via macro-generated method bodies.
+Ten phases of architectural refactoring (R102–R111) have successfully addressed all 10 issues identified in §6 of this report. The refactoring eliminated ~2,700 lines of duplication, decomposed 4 oversized monolithic files into 30+ focused modules, introduced zero-cost enum dispatch in cryptographic hot paths, and unified sync/async connection code via macro-generated method bodies.
 
-The codebase has grown from 121,589 to 128,618 lines (+5.8%), primarily from increased test coverage (Phase T1–T20 ran in parallel). Source file count increased from 228 to 253 (+11%), reflecting the intentional decomposition of monolithic files into focused submodules. Code quality indicators have improved across all measured dimensions.
+The codebase has grown from 121,589 to 128,618 lines (+5.8%), primarily from increased test coverage (Phase T72–T99 ran in parallel). Source file count increased from 228 to 253 (+11%), reflecting the intentional decomposition of monolithic files into focused submodules. Code quality indicators have improved across all measured dimensions.
 
 ### 10.2 Before vs. After Metrics
 
@@ -861,11 +861,11 @@ The codebase has grown from 121,589 to 128,618 lines (+5.8%), primarily from inc
 | tests/interop | 1 | 7,675 | 11 | 7,590 | −85 |
 
 Key observations:
-- **hitls-tls** shrunk by 1,156 lines despite adding tests — sync/async macro unification (Phase R5) removed ~1,360 lines net
-- **hitls-pki** shrunk by 57 lines — encoding consolidation (R3) removed 134 lines, offset by X.509 decomposition boilerplate (R8)
+- **hitls-tls** shrunk by 1,156 lines despite adding tests — sync/async macro unification (Phase R104) removed ~1,360 lines net
+- **hitls-pki** shrunk by 57 lines — encoding consolidation (R102) removed 134 lines, offset by X.509 decomposition boilerplate (R107)
 - **hitls-crypto** grew by 651 lines — new tests (T100–T101 added 45 tests to ECC/AES/SM9/McEliece) plus DRBG trait addition (R111)
-- **hitls-utils** grew by 17 lines — shared `hex.rs` module added (R10)
-- **tests/interop** shrunk by 85 lines from 1 → 11 files — modularization (R9) with cleaner helper reuse
+- **hitls-utils** grew by 17 lines — shared `hex.rs` module added (R109)
+- **tests/interop** shrunk by 85 lines from 1 → 11 files — modularization (R108) with cleaner helper reuse
 
 #### 10.2.3 Top 15 Largest Files — Before vs. After
 
@@ -888,7 +888,7 @@ Key observations:
 
 ### 10.3 Issue Resolution Status
 
-#### Issue 1: PKI Encoding Helper Duplication → **Resolved (R3)**
+#### Issue 1: PKI Encoding Helper Duplication → **Resolved (R102)**
 
 | Metric | Before | After |
 |--------|--------|-------|
@@ -899,7 +899,7 @@ Key observations:
 
 **New shared modules**: `encoding.rs` (79 lines), `oid_mapping.rs` (27 lines). Zero remaining duplication.
 
-#### Issue 2: Sync/Async Connection Duplication → **Partially Resolved (R7)**
+#### Issue 2: Sync/Async Connection Duplication → **Partially Resolved (R106)**
 
 | Connection Pair | Before (sync + async) | After (sync + async) | Reduction |
 |----------------|----------------------|---------------------|-----------|
@@ -915,24 +915,24 @@ DTLS 1.2 was not unified via macros — the retransmission timer and cookie exch
 
 #### Issue 3: Protocol Variant Proliferation → **Acknowledged, Acceptable**
 
-This issue was not directly targeted by R3–R111 because the protocol variants (TLS 1.3, TLS 1.2, DTLS 1.2, TLCP, DTLCP) represent genuinely different wire protocols with distinct state machines. Current state:
+This issue was not directly targeted by R102–R111 because the protocol variants (TLS 1.3, TLS 1.2, DTLS 1.2, TLCP, DTLCP) represent genuinely different wire protocols with distinct state machines. Current state:
 
 | Subsystem | Files | Lines | Notes |
 |-----------|-------|-------|-------|
 | Handshake state machines | 21 | 21,473 | 5 protocol variants × client/server + shared utilities |
-| Record encryption | 9 | 5,861 | Unified via `RecordEncryptorVariant` enum (R4) |
-| Connection layer | 12 | ~16,500 | Partially unified via macros (R7) |
+| Record encryption | 9 | 5,861 | Unified via `RecordEncryptorVariant` enum (R103) |
+| Connection layer | 12 | ~16,500 | Partially unified via macros (R106) |
 
-The record layer was successfully unified (R4) from 10 `Option<T>` fields to a single `Option<RecordEncryptorVariant>` enum. Handshake state machines remain separate by design — they implement fundamentally different RFC specifications.
+The record layer was successfully unified (R103) from 10 `Option<T>` fields to a single `Option<RecordEncryptorVariant>` enum. Handshake state machines remain separate by design — they implement fundamentally different RFC specifications.
 
-#### Issue 4: Oversized Files → **Resolved (R5, R8, R9)**
+#### Issue 4: Oversized Files → **Resolved (R104, R107, R108)**
 
 | File | Before | After | Method |
 |------|--------|-------|--------|
-| `connection.rs` | 7,324 | 197 + 369 + 5,604 (3 files) | Directory split (R5) |
-| `connection12.rs` | 7,004 | 1,025 + 927 + 4,782 (3 files) | Directory split (R5) |
-| `x509/mod.rs` | 3,441 | 1,511 + 4 submodules (10 files total) | Decomposition (R8) |
-| `tests/interop/src/lib.rs` | 7,675 | 399 + 10 test files | Modularization (R9) |
+| `connection.rs` | 7,324 | 197 + 369 + 5,604 (3 files) | Directory split (R104) |
+| `connection12.rs` | 7,004 | 1,025 + 927 + 4,782 (3 files) | Directory split (R104) |
+| `x509/mod.rs` | 3,441 | 1,511 + 4 submodules (10 files total) | Decomposition (R107) |
+| `tests/interop/src/lib.rs` | 7,675 | 399 + 10 test files | Modularization (R108) |
 
 All 4 targeted monolithic files have been decomposed. The largest non-test implementation file dropped from 7,324 to 2,666 lines.
 
@@ -953,7 +953,7 @@ Files still exceeding 2,000 lines (10 total):
 
 These remaining files represent either (a) test suites where locality aids comprehension, or (b) implementations of complex RFC specifications where further splitting would fragment the state machine logic.
 
-#### Issue 5: Dynamic Dispatch in Hot Paths → **Resolved for TLS (R6)**
+#### Issue 5: Dynamic Dispatch in Hot Paths → **Resolved for TLS (R105)**
 
 | Component | Before | After |
 |-----------|--------|-------|
@@ -964,7 +964,7 @@ These remaining files represent either (a) test suites where locality aids compr
 
 The TLS layer (hitls-tls) now uses zero-cost `DigestVariant` enum dispatch for all hash operations during handshake. The underlying `hitls-crypto` HMAC implementation still uses `Box<dyn Digest>` for generality — this is acceptable because HMAC is instantiated once per key derivation step, not per hash block.
 
-#### Issue 6: RecordLayer Struct Width → **Resolved (R4)**
+#### Issue 6: RecordLayer Struct Width → **Resolved (R103)**
 
 Before:
 ```rust
@@ -988,7 +988,7 @@ pub struct RecordLayer {
 
 Memory per connection reduced from 10 `Option<T>` fields (mostly `None`) to 2. Type safety enforced at compile time — only one encryption mode can be active.
 
-#### Issue 7: Monolithic Integration Test File → **Resolved (R9)**
+#### Issue 7: Monolithic Integration Test File → **Resolved (R108)**
 
 | Before | After |
 |--------|-------|
@@ -997,7 +997,7 @@ Memory per connection reduced from 10 `Option<T>` fields (mostly `None`) to 2. T
 
 Test modules: `crypto.rs`, `pki.rs`, `tls13.rs`, `tls13_callbacks.rs`, `tls12.rs`, `tls12_suites.rs`, `dtls12.rs`, `tlcp.rs`, `async_io.rs`, `error_protocol.rs`.
 
-#### Issue 8: Test Helper Duplication → **Resolved (R10)**
+#### Issue 8: Test Helper Duplication → **Resolved (R109)**
 
 | Before | After |
 |--------|-------|
@@ -1057,11 +1057,11 @@ Total DRBG module: 1,594 lines across 5 files (down from 1,539 + trait overhead)
 
 ### 10.5 Remaining Technical Debt
 
-The following items were intentionally **not addressed** by R3–R111, either because the benefit-to-risk ratio was unfavorable or the scope was beyond targeted refactoring:
+The following items were intentionally **not addressed** by R102–R111, either because the benefit-to-risk ratio was unfavorable or the scope was beyond targeted refactoring:
 
 #### 10.5.1 HMAC Dynamic Dispatch (hitls-crypto)
 
-The `Hmac` struct in `hitls-crypto/src/hmac/mod.rs` still uses `Box<dyn Digest>` for inner/outer hash state and a `Box<dyn Fn() -> Box<dyn Digest>>` factory for resets. This is a design choice for the crypto library — it supports arbitrary hash algorithms including future additions without modifying `Hmac`. The TLS layer bypasses this overhead via its own `DigestVariant` enum dispatch (R6).
+The `Hmac` struct in `hitls-crypto/src/hmac/mod.rs` still uses `Box<dyn Digest>` for inner/outer hash state and a `Box<dyn Fn() -> Box<dyn Digest>>` factory for resets. This is a design choice for the crypto library — it supports arbitrary hash algorithms including future additions without modifying `Hmac`. The TLS layer bypasses this overhead via its own `DigestVariant` enum dispatch (R105).
 
 #### 10.5.2 Sync/Async Duplication in TLS 1.2 and DTLS
 
@@ -1101,10 +1101,10 @@ Two test files exceed 4,000 lines (`connection/tests.rs` at 5,604 and `connectio
 
 ### 10.7 Conclusion
 
-The R3–R111 refactoring plan achieved its goals:
+The R102–R111 refactoring plan achieved its goals:
 
 1. **All 10 identified issues addressed** — 6 fully resolved, 4 partially resolved or acknowledged as acceptable trade-offs
-2. **Net code reduction in hitls-tls** (−1,156 lines) despite adding test coverage — the sync/async macro unification (R7) was the single largest contributor
+2. **Net code reduction in hitls-tls** (−1,156 lines) despite adding test coverage — the sync/async macro unification (R106) was the single largest contributor
 3. **Zero regressions** — all 2,585 tests pass, zero clippy warnings, formatting clean throughout all 10 phases
 4. **Preserved architecture strengths** — clean dependency hierarchy, feature flag granularity, security discipline, and test vector infrastructure are all intact
 
@@ -1122,7 +1122,7 @@ crates/
 │   ├── lib.rs (8), algorithm.rs (583), error.rs (502)
 ├── hitls-utils/src/
 │   ├── lib.rs (14)
-│   ├── hex.rs (17)                           [NEW — R10]
+│   ├── hex.rs (17)                           [NEW — R109]
 │   ├── asn1/mod.rs (51), decoder.rs (461), encoder.rs (296), tag.rs (128)
 │   ├── base64/mod.rs (171), pem/mod.rs (140), oid/mod.rs (603)
 ├── hitls-bignum/src/                         (unchanged)
@@ -1133,33 +1133,33 @@ crates/
 │   │   ├── hmac_drbg.rs (294), sm4_ctr_drbg.rs (254)
 │   ├── (all other modules unchanged)
 ├── hitls-tls/src/
-│   ├── macros.rs (1,377)                     [NEW — R7: 24 sync/async body macros]
-│   ├── connection/                           [DECOMPOSED from connection.rs — R5]
+│   ├── macros.rs (1,377)                     [NEW — R106: 24 sync/async body macros]
+│   ├── connection/                           [DECOMPOSED from connection.rs — R104]
 │   │   ├── mod.rs (19), client.rs (197), server.rs (369), tests.rs (5,604)
-│   ├── connection12/                         [DECOMPOSED from connection12.rs — R5]
+│   ├── connection12/                         [DECOMPOSED from connection12.rs — R104]
 │   │   ├── mod.rs (23), client.rs (1,025), server.rs (927), tests.rs (4,782)
-│   ├── connection_async.rs (1,039)           [MODIFIED — R7: macro-unified, from 1,954]
-│   ├── connection12_async.rs (2,229)         [MODIFIED — R7: partially macro-unified, from 2,480]
-│   ├── crypt/mod.rs (1,995)                  [MODIFIED — R6: +DigestVariant, +HashAlgId, −HashFactory]
-│   ├── record/mod.rs (1,061)                 [MODIFIED — R4: +RecordEncryptorVariant/DecryptorVariant enum]
+│   ├── connection_async.rs (1,039)           [MODIFIED — R106: macro-unified, from 1,954]
+│   ├── connection12_async.rs (2,229)         [MODIFIED — R106: partially macro-unified, from 2,480]
+│   ├── crypt/mod.rs (1,995)                  [MODIFIED — R105: +DigestVariant, +HashAlgId, −HashFactory]
+│   ├── record/mod.rs (1,061)                 [MODIFIED — R103: +RecordEncryptorVariant/DecryptorVariant enum]
 │   ├── handshake/server.rs (1,938)           [MODIFIED — R110: +ServerFlightParams]
 │   ├── (all other files unchanged)
 ├── hitls-pki/src/
-│   ├── encoding.rs (79)                      [NEW — R3]
-│   ├── oid_mapping.rs (27)                   [NEW — R3]
+│   ├── encoding.rs (79)                      [NEW — R102]
+│   ├── oid_mapping.rs (27)                   [NEW — R102]
 │   ├── x509/
-│   │   ├── mod.rs (1,511)                    [MODIFIED — R8: decomposed from 3,441]
-│   │   ├── certificate.rs (628)              [NEW — R8]
-│   │   ├── builder.rs (526)                  [NEW — R8]
-│   │   ├── extensions.rs (519)               [NEW — R8]
-│   │   ├── signing.rs (330)                  [NEW — R8]
+│   │   ├── mod.rs (1,511)                    [MODIFIED — R107: decomposed from 3,441]
+│   │   ├── certificate.rs (628)              [NEW — R107]
+│   │   ├── builder.rs (526)                  [NEW — R107]
+│   │   ├── extensions.rs (519)               [NEW — R107]
+│   │   ├── signing.rs (330)                  [NEW — R107]
 │   │   ├── verify.rs (2,138), ocsp.rs (1,028), crl.rs (712)
 │   │   ├── text.rs (606), hostname.rs (381)
 │   ├── (cms, pkcs8, pkcs12 — modified imports only)
 tests/
 ├── interop/
-│   ├── src/lib.rs (399)                      [MODIFIED — R9: from 7,675, now helper-only]
-│   ├── tests/                                [NEW — R9]
+│   ├── src/lib.rs (399)                      [MODIFIED — R108: from 7,675, now helper-only]
+│   ├── tests/                                [NEW — R108]
 │   │   ├── tls13.rs (1,687), tls13_callbacks.rs (1,131)
 │   │   ├── tls12.rs (2,166), tls12_suites.rs (563)
 │   │   ├── dtls12.rs (297), tlcp.rs (108)
