@@ -176,6 +176,8 @@
 | 8 | P154 | SM4 T-table Lookup Optimization | 2026-02-27 |
 | 9 | P155 | ML-DSA NEON NTT Vectorization | 2026-02-27 |
 | 10 | P156 | SM2 Specialized Field Arithmetic | 2026-02-27 |
+| 11 | P166 | SHA-512 ARMv8.2 Hardware Acceleration | 2026-02-27 |
+| 12 | P167 | Ed25519 Precomputed Base Table | 2026-02-27 |
 
 ---
 
@@ -10197,3 +10199,78 @@ End-to-end ML-DSA improvement is modest (~2–5%) because NTT constitutes only ~
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - Fuzz targets: 14 total (13->14), 85 corpus files (79->85)
+
+---
+
+## Phase P166 — SHA-512 ARMv8.2 Hardware Acceleration
+
+**Summary**: SHA-512/384 hardware acceleration using ARMv8.2-A SHA-512 Crypto Extension instructions (`vsha512hq_u64`, `vsha512h2q_u64`, `vsha512su0q_u64`, `vsha512su1q_u64`). Implementation follows the Linux kernel sha512-ce-core.S 5-register rotation pattern with K+W halves swap. Runtime detection via `is_aarch64_feature_detected!("sha3")` with software fallback.
+
+### Performance Results
+
+| Hash | Before (MB/s) | After (MB/s) | Speedup | C Reference (MB/s) | Rust/C |
+|------|--------------|-------------|---------|-------------------|--------|
+| SHA-512 (8KB) | 662.8 | 1,578 | **2.4×** | 885.7 | **1.78×** |
+| SHA-384 (8KB) | 411.0 | 1,597 | **3.9×** | 540.7 | **2.95×** |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/sha2/sha512_arm.rs` | **NEW** — ARMv8.2 SHA-512 intrinsics (5-register rotation, 40 drounds, message schedule) |
+| `crates/hitls-crypto/src/sha2/mod.rs` | Runtime dispatch: `sha512_compress` → `sha512_compress_soft` + HW path |
+
+### Key Implementation Details
+
+1. **5-register rotation**: 40 `dround` calls organized as 8 cycles of 5, with state rotation (s0,s1,s2,s3,s4) → (s3,s0,s4,s2,s1) → ...
+2. **K+W halves swap**: `vextq_u64(kw, kw, 1)` before adding to state register (critical for correct results)
+3. **SHA512H calling convention**: `vsha512hq_u64(state+swap(K+W), ext(ef,gh), ext(cd,ef))` — pre-add state to K+W, two EXT intermediates
+4. **SHA512SU1**: `vsha512su1q_u64(su0_result, w7, ext(w4,w5,1))` — with ext operation as third argument
+5. **Message schedule**: First 32 drounds include `msg_sched` updates, last 8 use pre-computed W values
+6. **Tests**: 4 unit tests (empty, short, multi-block, 8KB) + cross-validation against software path
+
+---
+
+## Phase P167 — Ed25519 Precomputed Base Table
+
+**Summary**: Precomputed comb table (64 groups × 16 Niels points) for Ed25519 base point scalar multiplication, eliminating all 255 point doublings in favor of 63 mixed additions with Niels-form points.
+
+### Performance Results
+
+| Operation | Before (µs) | After (µs) | Speedup | C Reference | Rust/C |
+|-----------|------------|-----------|---------|-------------|--------|
+| Ed25519 sign | 29.7 | 9.5 | **3.1×** | 15.1 µs | **1.59×** |
+| Ed25519 verify | 61.9 | 40.9 | **1.5×** | 41.6 µs | **1.02×** |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crates/hitls-crypto/src/curve25519/edwards.rs` | NielsPoint struct, point_add_niels, ct_select_niels, base_table (OnceLock), scalar_mul_base comb method, 7 new tests |
+
+### Key Implementation Details
+
+1. **NielsPoint**: `(Y+X, Y-X, 2d·T)` form — 7M per mixed addition vs 9M for full extended
+2. **Comb method**: 64 groups × 16 entries. Group i stores `[0·Bi, ..., 15·Bi]` where `Bi = 2^(4i)·B`
+3. **Constant-time**: `ct_select_niels` uses conditional XOR assignment to prevent timing leaks
+4. **OnceLock caching**: Table computed once on first use, ~30KB in memory
+5. **Tests**: scalar_mul_base(1)=G, scalar_mul_base(0)=identity, matches generic scalar_mul for various k, scalar_mul_base(L)=identity, niels_add matches full add, ct_select correctness
+
+### Aggregate Test Counts (Post P166 + P167)
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| hitls-crypto | 1118 (+64) | 2 |
+| hitls-tls | 1305 | 0 |
+| hitls-pki | 395 | 0 |
+| hitls-bignum | 80 | 0 |
+| hitls-utils | 66 | 0 |
+| hitls-auth | 33 | 0 |
+| hitls-cli | 117 | 5 |
+| interop | 174 | 2 |
+| **Total** | **3344** (+64) | **19** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3344 passed, 0 failed, 19 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean

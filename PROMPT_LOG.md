@@ -3046,3 +3046,32 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - SM2 encrypt: 2.88ms → 154.2µs (**18.7× speedup**), Rust now 5.05× faster than C
 - SM2 decrypt: 1.43ms → 70.6µs (**20.2× speedup**), Rust now 5.48× faster than C
 - 3331 tests pass (+51: 34 field + 17 point), 19 ignored. 0 clippy warnings, formatting clean.
+
+---
+
+## Phase P166 — SHA-512 ARMv8.2 Hardware Acceleration
+
+**Prompt**: Complete P166 SHA-512 ARMv8.2 hardware acceleration as part of "请继续完成任务P156, P166, P167"
+
+**Actions**:
+1. Created `crates/hitls-crypto/src/sha2/sha512_arm.rs` — ARMv8.2-A SHA-512 Crypto Extension intrinsics, 5-register rotation pattern (following Linux kernel sha512-ce-core.S), K+W halves swap, 40 drounds in 8 cycles of 5, message schedule with SHA512SU0/SU1
+2. Modified `crates/hitls-crypto/src/sha2/mod.rs` — runtime dispatch via `is_aarch64_feature_detected!("sha3")`, renamed `sha512_compress` → `sha512_compress_soft`, cross-validation tests
+
+**Result**:
+- SHA-512 (8KB): 662.8 → 1,578 MB/s (**2.4× speedup**), Rust now 1.78× faster than C (885.7 MB/s)
+- SHA-384 (8KB): 411.0 → 1,597 MB/s (**3.9× speedup**), Rust now 2.95× faster than C (540.7 MB/s)
+- 4 unit tests + cross-validation. All workspace tests pass. 0 clippy warnings.
+
+---
+
+## Phase P167 — Ed25519 Precomputed Base Table
+
+**Prompt**: Complete P167 Ed25519 base point precomputed table as part of "请继续完成任务P156, P166, P167"
+
+**Actions**:
+1. Modified `crates/hitls-crypto/src/curve25519/edwards.rs` — added NielsPoint struct (Y+X, Y-X, 2d·T), point_add_niels (7M mixed addition), ct_select_niels (constant-time lookup), base_table (64×16 OnceLock-cached Niels points), replaced scalar_mul_base with comb method (63 additions, 0 doublings), 7 new tests
+
+**Result**:
+- Ed25519 sign: 29.7 → 9.5 µs (**3.1× speedup**), Rust now 1.59× faster than C (66K ops/s)
+- Ed25519 verify: 61.9 → 40.9 µs (**1.5× speedup**), Rust now at parity with C (24K ops/s)
+- 3344 tests pass (+13: 4 SHA-512 HW + 2 cross-val + 7 Ed25519), 19 ignored. 0 clippy warnings.
