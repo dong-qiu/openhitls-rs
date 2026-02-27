@@ -2982,3 +2982,18 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - SM4-GCM encrypt 3.09× (47.6→146.9 MB/s), decrypt 3.06× (47.4→145.3 MB/s)
 - SM4 goes from "C 2.2–2.4× faster" to "Rust at parity (CBC) or 1.7× faster (GCM)"
 - 3207 tests pass (+5 SM4 cross-validation tests), 7 ignored. 0 clippy warnings, formatting clean.
+
+## Phase P156 — ML-DSA NEON NTT Vectorization
+
+**Prompt**: Implement ML-DSA NEON NTT vectorization using 4-wide i32 (`int32x4_t`) SIMD intrinsics. Create `ntt_neon.rs` with NEON implementations, add dispatch wrappers in `ntt.rs`, add cross-validation tests.
+
+**Implementation**:
+1. Created `crates/hitls-crypto/src/mldsa/ntt_neon.rs` (~250 lines): 4-wide Montgomery multiply (`vqdmulhq_s32` + `vhsubq_s32`), Barrett reduction (`vmlsq_s32`), forward NTT (len≥4 vectorized, len=2 half-register, len=1 scalar), inverse NTT (mirror structure), pointwise_mul, pointwise_mul_acc, to_mont, reduce_poly, poly_add, poly_sub
+2. Added `#[cfg(target_arch = "aarch64")] mod ntt_neon;` to `mod.rs`
+3. Modified `ntt.rs`: added NEON import, dispatch wrappers for 8 functions (`ntt`, `invntt`, `to_mont`, `pointwise_mul`, `pointwise_mul_acc`, `reduce_poly`, `poly_add`, `poly_sub`), renamed scalar implementations with `_scalar` suffix
+4. Added 5 cross-validation tests: `test_fqmul_neon_matches_scalar`, `test_ntt_neon_matches_scalar`, `test_invntt_neon_matches_scalar`, `test_pointwise_mul_neon_matches_scalar`, `test_ntt_invntt_neon_roundtrip`
+
+**Result**:
+- NTT micro-benchmark: Forward NTT 2.31× (427→185 ns), Inverse NTT 2.54× (527→207 ns)
+- End-to-end ML-DSA improvement modest (~2–5%) — NTT is only ~3–4% of total time; SHAKE-128 sampling in ExpandA dominates
+- 3212 tests pass (+5 NEON cross-validation tests), 7 ignored. 0 clippy warnings, formatting clean.

@@ -7,6 +7,8 @@
 //! Supports ML-DSA-44, ML-DSA-65, and ML-DSA-87.
 
 mod ntt;
+#[cfg(target_arch = "aarch64")]
+mod ntt_neon;
 mod poly;
 
 use hitls_types::CryptoError;

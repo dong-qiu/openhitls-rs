@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phase 0–151 + Phase P152–P155 complete (3207 tests, 7 ignored)
+- **Status**: Phase 0–151 + Phase P152–P156 complete (3212 tests, 7 ignored)
 
 ## Workspace Structure
 
@@ -18,7 +18,7 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error enums
 │   ├── hitls-utils/     # Hex, ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (CIOS Montgomery, Miller-Rabin) (75 tests)
-│   ├── hitls-crypto/    # Cryptographic algorithms (feature-gated): AES, SM4, ChaCha20, SHA-2/3, SM3, HMAC, RSA, ECC, Ed25519/448, X25519/448, DH, DSA, SM2, SM9, PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), DRBG, FIPS/CMVP, entropy health, hardware AES/SHA-2/GHASH/ChaCha20, P-256 fast path, ML-KEM NEON NTT, SM4 T-table (1041 tests + 15 Wycheproof, 2 ignored)
+│   ├── hitls-crypto/    # Cryptographic algorithms (feature-gated): AES, SM4, ChaCha20, SHA-2/3, SM3, HMAC, RSA, ECC, Ed25519/448, X25519/448, DH, DSA, SM2, SM9, PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), DRBG, FIPS/CMVP, entropy health, hardware AES/SHA-2/GHASH/ChaCha20, P-256 fast path, ML-KEM NEON NTT, ML-DSA NEON NTT, SM4 T-table (1046 tests + 15 Wycheproof, 2 ignored)
 │   ├── hitls-tls/       # TLS 1.3/1.2 (91 cipher suites), DTLS 1.2, TLCP, DTLCP; 10 connection types (5 sync + 5 async via tokio); 15 TLS extensions; 10 callbacks; session cache, hostname verification, renegotiation, GREASE, custom extensions, NSS key logging, middlebox compat (1290 tests)
 │   ├── hitls-pki/       # X.509, PKCS#8 (incl. Encrypted PBES2), PKCS#12, CMS (SignedData/EnvelopedData/EncryptedData/DigestedData/AuthenticatedData), hostname verification (390 tests)
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass (33 tests)
@@ -35,11 +35,11 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3207 tests, 7 ignored)
+# Run all tests (3212 tests, 7 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1041 tests (2 ignored) + 15 Wycheproof
+cargo test -p hitls-crypto --all-features   # 1046 tests (2 ignored) + 15 Wycheproof
 cargo test -p hitls-tls --all-features      # 1290 tests
 
 cargo test -p hitls-pki --all-features      # 390 tests
@@ -118,7 +118,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phase 0–151 + Phase P152–P155 complete (3207 tests, 7 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization in progress.**
+Phase 0–151 + Phase P152–P156 complete (3212 tests, 7 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization in progress.**
 
 ### Completed Phases (Summary)
 
@@ -142,5 +142,6 @@ Key milestones:
 - Phase P153: ML-KEM NEON NTT optimization — 8-wide Montgomery multiply (`vqdmulhq_s16` + `vhsubq_s16` trick), NEON forward/inverse NTT (stages len≥8 fully vectorized), NEON Barrett reduction (widening multiply + shift-narrow), NEON poly utilities (add/sub/to_mont/reduce), batch SHAKE-128 squeeze (504-byte blocks vs 3-byte). ML-KEM-768 encaps 2.0× speedup, decaps 2.6× speedup.
 - Phase P154: BigNum CIOS Montgomery — CIOS fused multiply+reduce (single (n+2)-limb accumulator vs 2n-limb intermediate), pre-allocated flat limb table for exponentiation, optimized sqr_limbs with cross-product symmetry, single conditional subtraction. DH-2048 1.25× speedup (174→218 ops/s), RSA-2048 sign 1.11× speedup (719→800 ops/s). Gap narrowed from 7× to 5.6× vs C.
 - Phase P155: SM4 T-table lookup optimization — compile-time T-tables (XBOX_0–3/KBOX_0–3) fusing S-box + L/L' transform into u32 lookups, 4-way unrolled rounds, precomputed decrypt keys. SM4-CBC 2.37× speedup (50.8→120.2 MB/s, parity with C), SM4-GCM 3.09× speedup (47.6→146.9 MB/s, 1.68× faster than C).
+- Phase P156: ML-DSA NEON NTT vectorization — 4-wide i32 NEON intrinsics (`vqdmulhq_s32` + `vhsubq_s32` Montgomery trick), forward/inverse NTT (len≥4 vectorized, len=2 half-register, len=1 scalar), Barrett reduction, pointwise multiply, poly utilities. NTT 2.31× speedup, INTT 2.54× speedup. End-to-end ML-DSA improvement modest (~2–5%) due to SHAKE-128 sampling dominance.
 
 See `DEV_LOG.md` for detailed phase tables (including test, refactoring, and performance phases) and `PROMPT_LOG.md` for prompt/response log.

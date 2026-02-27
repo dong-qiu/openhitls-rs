@@ -3,6 +3,9 @@
 //! Operates on polynomials in Z_q[X]/(X^256+1) with q = 8380417.
 //! Uses Montgomery arithmetic with R = 2^32.
 
+#[cfg(target_arch = "aarch64")]
+use crate::mldsa::ntt_neon;
+
 /// ML-DSA modulus: q = 2^23 - 2^13 + 1.
 pub(crate) const Q: i32 = 8380417;
 
@@ -94,7 +97,19 @@ pub(crate) fn fqmul(a: i32, b: i32) -> i32 {
 /// Forward NTT (Cooley-Tukey butterflies, 8 layers).
 ///
 /// Transforms polynomial from normal domain to NTT domain.
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn ntt(a: &mut Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::ntt_neon(a) };
+        }
+    }
+    ntt_scalar(a)
+}
+
+/// Scalar forward NTT (Cooley-Tukey butterflies).
+fn ntt_scalar(a: &mut Poly) {
     let mut k: usize = 0;
     let mut len = 128;
     while len >= 1 {
@@ -117,7 +132,19 @@ pub(crate) fn ntt(a: &mut Poly) {
 ///
 /// Transforms polynomial from NTT domain back to normal domain.
 /// Includes normalization by 256^{-1} and Montgomery correction.
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn invntt(a: &mut Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::invntt_neon(a) };
+        }
+    }
+    invntt_scalar(a)
+}
+
+/// Scalar inverse NTT (Gentleman-Sande butterflies).
+fn invntt_scalar(a: &mut Poly) {
     let mut k: usize = 256;
     let mut len = 1;
     while len <= 128 {
@@ -144,42 +171,89 @@ pub(crate) fn invntt(a: &mut Poly) {
 /// Convert polynomial to Montgomery representation.
 ///
 /// Multiplies each coefficient by R = 2^32 mod q.
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn to_mont(r: &mut Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::to_mont_neon(r) };
+        }
+    }
     for coeff in r.iter_mut() {
         *coeff = fqmul(*coeff, R2_MOD_Q);
     }
 }
 
 /// Pointwise multiplication of two NTT-domain polynomials.
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn pointwise_mul(c: &mut Poly, a: &Poly, b: &Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::pointwise_mul_neon(c, a, b) };
+        }
+    }
+    pointwise_mul_scalar(c, a, b)
+}
+
+/// Scalar pointwise multiplication.
+fn pointwise_mul_scalar(c: &mut Poly, a: &Poly, b: &Poly) {
     for i in 0..N {
         c[i] = fqmul(a[i], b[i]);
     }
 }
 
 /// Pointwise multiply-accumulate: c += a * b (in NTT domain).
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn pointwise_mul_acc(c: &mut Poly, a: &Poly, b: &Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::pointwise_mul_acc_neon(c, a, b) };
+        }
+    }
     for i in 0..N {
         c[i] += fqmul(a[i], b[i]);
     }
 }
 
 /// Reduce all coefficients using reduce32.
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn reduce_poly(r: &mut Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::reduce_poly_neon(r) };
+        }
+    }
     for coeff in r.iter_mut() {
         *coeff = reduce32(*coeff);
     }
 }
 
 /// Add two polynomials: r = a + b.
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn poly_add(r: &mut Poly, a: &Poly, b: &Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::poly_add_neon(r, a, b) };
+        }
+    }
     for i in 0..N {
         r[i] = a[i] + b[i];
     }
 }
 
 /// Subtract two polynomials: r = a - b.
+/// Dispatches to NEON implementation on aarch64.
 pub(crate) fn poly_sub(r: &mut Poly, a: &Poly, b: &Poly) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { ntt_neon::poly_sub_neon(r, a, b) };
+        }
+    }
     for i in 0..N {
         r[i] = a[i] - b[i];
     }
@@ -313,5 +387,154 @@ mod tests {
         assert_eq!(caddq(-1), Q - 1);
         assert_eq!(caddq(-Q), 0);
         assert_eq!(caddq(-(Q - 1)), 1);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    mod neon_tests {
+        use super::*;
+        use crate::mldsa::ntt_neon;
+
+        /// Normalize to [0, q) for comparison.
+        fn normalize(x: i32) -> i32 {
+            ((x as i64 % Q as i64 + Q as i64) % Q as i64) as i32
+        }
+
+        #[test]
+        fn test_fqmul_neon_matches_scalar() {
+            if !std::arch::is_aarch64_feature_detected!("neon") {
+                return;
+            }
+            let test_cases: [(i32, i32); 8] = [
+                (0, 0),
+                (1, 1),
+                (100, 200),
+                (-500000, 300000),
+                (4190208, 4190208),
+                (-4190208, 4190208),
+                (Q - 1, 1),
+                (-Q + 1, -1),
+            ];
+            for &(a, b) in &test_cases {
+                let scalar = fqmul(a, b);
+                let neon = unsafe { ntt_neon::fqmul_neon_scalar(a, b) };
+                assert_eq!(
+                    normalize(scalar),
+                    normalize(neon),
+                    "fqmul mismatch for ({a}, {b}): scalar={scalar}, neon={neon}"
+                );
+            }
+        }
+
+        #[test]
+        fn test_ntt_neon_matches_scalar() {
+            if !std::arch::is_aarch64_feature_detected!("neon") {
+                return;
+            }
+            let mut poly = [0i32; N];
+            for (i, c) in poly.iter_mut().enumerate() {
+                *c = (i as i32 * 7 + 3) % Q;
+            }
+            let mut scalar_poly = poly;
+            let mut neon_poly = poly;
+
+            ntt_scalar(&mut scalar_poly);
+            unsafe { ntt_neon::ntt_neon(&mut neon_poly) };
+
+            for i in 0..N {
+                assert_eq!(
+                    normalize(scalar_poly[i]),
+                    normalize(neon_poly[i]),
+                    "NTT mismatch at index {i}: scalar={}, neon={}",
+                    scalar_poly[i],
+                    neon_poly[i]
+                );
+            }
+        }
+
+        #[test]
+        fn test_invntt_neon_matches_scalar() {
+            if !std::arch::is_aarch64_feature_detected!("neon") {
+                return;
+            }
+            let mut poly = [0i32; N];
+            for (i, c) in poly.iter_mut().enumerate() {
+                *c = (i as i32 * 13 + 5) % Q;
+            }
+            ntt_scalar(&mut poly);
+
+            let mut scalar_poly = poly;
+            let mut neon_poly = poly;
+
+            invntt_scalar(&mut scalar_poly);
+            unsafe { ntt_neon::invntt_neon(&mut neon_poly) };
+
+            for i in 0..N {
+                assert_eq!(
+                    normalize(scalar_poly[i]),
+                    normalize(neon_poly[i]),
+                    "INTT mismatch at index {i}: scalar={}, neon={}",
+                    scalar_poly[i],
+                    neon_poly[i]
+                );
+            }
+        }
+
+        #[test]
+        fn test_pointwise_mul_neon_matches_scalar() {
+            if !std::arch::is_aarch64_feature_detected!("neon") {
+                return;
+            }
+            let mut a = [0i32; N];
+            let mut b = [0i32; N];
+            for (i, c) in a.iter_mut().enumerate() {
+                *c = (i as i32 * 11 + 2) % Q;
+            }
+            for (i, c) in b.iter_mut().enumerate() {
+                *c = (i as i32 * 17 + 3) % Q;
+            }
+            ntt_scalar(&mut a);
+            ntt_scalar(&mut b);
+
+            let mut scalar_r = [0i32; N];
+            let mut neon_r = [0i32; N];
+
+            pointwise_mul_scalar(&mut scalar_r, &a, &b);
+            unsafe { ntt_neon::pointwise_mul_neon(&mut neon_r, &a, &b) };
+
+            for i in 0..N {
+                assert_eq!(
+                    normalize(scalar_r[i]),
+                    normalize(neon_r[i]),
+                    "pointwise_mul mismatch at {i}: scalar={}, neon={}",
+                    scalar_r[i],
+                    neon_r[i]
+                );
+            }
+        }
+
+        #[test]
+        fn test_ntt_invntt_neon_roundtrip() {
+            if !std::arch::is_aarch64_feature_detected!("neon") {
+                return;
+            }
+            let mut f = [0i32; N];
+            for (i, coeff) in f.iter_mut().enumerate() {
+                *coeff = (i as i32 * 13 + 5) % Q;
+            }
+            let orig = f;
+            unsafe {
+                ntt_neon::ntt_neon(&mut f);
+                ntt_neon::invntt_neon(&mut f);
+            }
+            for i in 0..N {
+                let recovered = montgomery_reduce(f[i] as i64);
+                let expected = normalize(orig[i]);
+                let got = normalize(recovered);
+                assert_eq!(
+                    got, expected,
+                    "NEON roundtrip mismatch at {i}: got {got}, expected {expected}"
+                );
+            }
+        }
     }
 }

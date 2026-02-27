@@ -165,6 +165,7 @@
 | 6 | P153 | ML-KEM NEON NTT Optimization | — |
 | 7 | P154 | BigNum CIOS Montgomery + Pre-allocated Exponentiation | — |
 | 8 | P155 | SM4 T-table Lookup Optimization | 2026-02-27 |
+| 9 | P156 | ML-DSA NEON NTT Vectorization | 2026-02-27 |
 
 ---
 
@@ -9992,5 +9993,67 @@ SM4 goes from "C 2.2–2.4× faster" to "Rust at parity (CBC) or 1.7× faster (G
 
 ### Build Status
 - `cargo test --workspace --all-features`: 3207 passed, 0 failed, 7 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P156 — ML-DSA NEON NTT Vectorization
+
+**Summary**: ARMv8 NEON vectorization of ML-DSA (Dilithium) NTT operations using 4-wide i32 (`int32x4_t`) SIMD intrinsics. Montgomery multiplication via `vqdmulhq_s32` + `vhsubq_s32` trick. Forward NTT, inverse NTT, pointwise multiply, poly add/sub, to_mont, and reduce_poly all dispatched to NEON on aarch64.
+
+### Performance Results
+
+| Operation | Scalar | NEON | Speedup |
+|-----------|--------|------|---------|
+| Forward NTT (256-coeff) | 427 ns | 185 ns | **2.31×** |
+| Inverse NTT (256-coeff) | 527 ns | 207 ns | **2.54×** |
+
+End-to-end ML-DSA improvement is modest (~2–5%) because NTT constitutes only ~3–4% of total operation time. The dominant cost is SHAKE-128 sampling in ExpandA.
+
+### Implementation Details
+
+1. **4-wide Montgomery multiply (`fqmul_neon`)**: Uses `vqdmulhq_s32` (doubled high-half multiply) + `vhsubq_s32` (halving subtract) for exact Montgomery reduction with R=2^32. Constants: Q=8380417, QINV=58728449.
+
+2. **Forward NTT (Cooley-Tukey)**: 8 layers, vectorized by stage width:
+   - len ≥ 4 (layers 1–6): 4-wide `vld1q_s32`/`vst1q_s32` load/store, broadcast zeta, butterfly via `fqmul_neon` + `vaddq_s32`/`vsubq_s32`
+   - len = 2 (layer 7): Half-register trick using `vget_low_s32`/`vget_high_s32` + `vcombine_s32`
+   - len = 1 (layer 8): Scalar fallback using imported `fqmul`
+
+3. **Inverse NTT (Gentleman-Sande)**: Mirror structure in reverse:
+   - len = 1: scalar, len = 2: half-register, len ≥ 4: 4-wide vectorized
+   - Final normalization by F_INV256=41978 using `fqmul_neon`
+
+4. **Barrett reduction (`reduce32_neon`)**: t = (a + 2^22) >> 23, then `vmlsq_s32(a, t, q)`.
+
+5. **Utility functions**: `pointwise_mul_neon`, `pointwise_mul_acc_neon`, `to_mont_neon`, `reduce_poly_neon`, `poly_add_neon`, `poly_sub_neon` — all process 256 coefficients in chunks of 4.
+
+6. **Dispatch pattern**: Follows ML-KEM (Phase P153) pattern — `#[cfg(target_arch = "aarch64")]` + `is_aarch64_feature_detected!("neon")` runtime check with scalar fallback.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/mldsa/ntt_neon.rs` | **NEW** (~250 lines): NEON-vectorized NTT, INTT, and polynomial utility functions |
+| `crates/hitls-crypto/src/mldsa/ntt.rs` | Added `ntt_neon` import, dispatch wrappers for 8 functions, renamed scalar implementations, 5 cross-validation tests |
+| `crates/hitls-crypto/src/mldsa/mod.rs` | Added `#[cfg(target_arch = "aarch64")] mod ntt_neon;` |
+| `PERF_REPORT.md` | Updated P156 status, ML-DSA analysis |
+| `CLAUDE.md` | Updated status line, test counts |
+| `DEV_LOG.md` | Added P156 entry |
+
+### Test Counts
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| hitls-crypto | 1046 (+5) | 2 |
+| hitls-tls | 1290 | 0 |
+| hitls-pki | 390 | 0 |
+| hitls-bignum | 75 | 0 |
+| hitls-utils | 66 | 0 |
+| hitls-auth | 33 | 0 |
+| hitls-cli | 117 | 5 |
+| interop | 152 | 0 |
+| **Total** | **3212** (+5) | **7** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3212 passed, 0 failed, 7 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean

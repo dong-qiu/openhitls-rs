@@ -287,7 +287,7 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 | **P153** | ML-KEM SIMD NTT 向量化 | 6–18× | 2–3× | High | **Complete** |
 | **P154** | BigNum CIOS 融合乘+约简 + 预分配缓冲 | 7–12× → 5.6–10× | 2–3× | High | **Complete** |
 | **P155** | SM4 T-table 查表优化 | 2.2–2.4× → 1.0× | ~1× | Medium | **Complete** |
-| **P156** | ML-DSA SIMD NTT 向量化 | 2–6× | ~1.5× | Medium | Pending |
+| **P156** | ML-DSA SIMD NTT 向量化 | 2–6× | NTT 2.3×; E2E ~1.02× | Medium | **Complete** |
 | **P157** | SM2 专用字段算术 | 2.8–6.1× | ~1.5× | Medium | Pending |
 | **P158** | SHA-512 硬件加速 (ARMv8.2 SHA512) | 1.35× | ~1× | Low | Pending |
 | **P159** | Ed25519 基点预计算表 | 2× | ~1.2× | Low | Pending |
@@ -409,26 +409,22 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 
 ---
 
-### Phase P156 — ML-DSA SIMD NTT 向量化
+### Phase P156 — ML-DSA SIMD NTT 向量化 ✅ Complete
 
-**Current gap**: ML-DSA-87 keygen 6×, verify 4.5×, sign 2.6× slower than C
+**NTT micro-benchmark**: Forward NTT 2.31× (427→185 ns), Inverse NTT 2.54× (527→207 ns).
 
-**Already implemented**:
-- `mldsa/ntt.rs`: Montgomery R=2^32 field arithmetic, 256-entry ZETAS table
-- 8-layer Cooley-Tukey NTT (modulus q=8380417, 24-bit)
-- Barrett reduction, freeze normalization
+**End-to-end impact**: Modest (~2–5%) because NTT constitutes only ~3–4% of total ML-DSA operation time. The dominant cost is SHAKE-128 sampling in ExpandA.
 
-**Remaining bottlenecks** (similar to Phase P153):
+**Implementation**: 4-wide `int32x4_t` NEON intrinsics for Montgomery multiply (`vqdmulhq_s32` + `vhsubq_s32`), forward/inverse NTT (len≥4 fully vectorized, len=2 half-register, len=1 scalar), Barrett reduction (`vmlsq_s32`), and 6 polynomial utility functions. Runtime dispatch via `is_aarch64_feature_detected!("neon")` with scalar fallback.
+
+**Remaining ML-DSA bottlenecks**:
 
 | Bottleneck | Impact | Detail |
 |------------|--------|--------|
-| **No SIMD butterfly operations** | ~2–3× | Larger modulus (24-bit) still fits NEON i32 lanes; 4-way parallel butterflies feasible |
-| **Rejection loop in signing** | ~1.3× | Signature generation may reject and retry full NTT computation; hint-based approach reduces retries |
-| **SHAKE-256 batch squeeze** | ~1.2× | Sampling from SHAKE output is sequential; batch squeeze improves throughput |
+| **SHAKE-128/256 sampling** | ~5–10× | ExpandA dominates keygen/verify; SHAKE is ~70–90% of total time |
+| **Rejection loop in signing** | ~1.3× | Signature generation may reject and retry; varies per attempt |
 
 **Affected algorithms**: ML-DSA-44/65/87 (PQC digital signatures)
-
-**Expected improvement**: 3–5× improvement across keygen/sign/verify
 
 ---
 
