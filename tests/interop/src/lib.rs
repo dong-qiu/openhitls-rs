@@ -61,6 +61,84 @@ pub fn make_rsa_server_identity() -> (Vec<Vec<u8>>, hitls_tls::config::ServerPri
     )
 }
 
+/// Generate a DSA server identity for DHE-DSS cipher suites.
+///
+/// Uses dynamically generated 512/160-bit DSA parameters (fast for testing).
+/// This is sufficient for E2E cipher suite testing.
+pub fn make_dsa_server_identity() -> (Vec<Vec<u8>>, hitls_tls::config::ServerPrivateKey) {
+    use hitls_crypto::dsa::DsaKeyPair;
+    use hitls_pki::x509::{CertificateBuilder, DistinguishedName, SigningKey};
+
+    let params = test_dsa_params();
+    let kp = DsaKeyPair::generate(params).unwrap();
+    let params_der = kp.params().to_der();
+    let priv_bytes = kp.private_key_bytes();
+
+    let sk = SigningKey::Dsa(kp);
+    let dn = DistinguishedName {
+        entries: vec![("CN".into(), "localhost".into())],
+    };
+    let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+    (
+        vec![cert.raw],
+        hitls_tls::config::ServerPrivateKey::Dsa {
+            params_der,
+            private_key: priv_bytes,
+        },
+    )
+}
+
+/// Return valid DSA test parameters (small but functional for TLS testing).
+/// p = 23, q = 11, g = 4. These are minimal DSA params where g^q mod p = 1.
+fn test_dsa_params() -> hitls_crypto::dsa::DsaParams {
+    // Minimal valid DSA params: p=23 (prime), q=11 (prime divides p-1=22),
+    // g=4 (4^11 mod 23 = 1, so g has order 11 mod 23).
+    hitls_crypto::dsa::DsaParams::new(&[23], &[11], &[4]).unwrap()
+}
+
+/// Build RSA_PSK configs: server has RSA cert + PSK, client has PSK.
+pub fn make_rsa_psk_configs(
+    suite: hitls_tls::CipherSuite,
+) -> (hitls_tls::config::TlsConfig, hitls_tls::config::TlsConfig) {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::{TlsRole, TlsVersion};
+
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let psk = b"integration-test-psk-32-bytes!!!".to_vec();
+    let psk_identity = b"test-client".to_vec();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .psk(psk.clone())
+        .psk_identity(psk_identity)
+        .build();
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .psk(psk)
+        .psk_identity_hint(b"server-hint".to_vec())
+        .build();
+
+    (client_config, server_config)
+}
+
 pub fn make_dtls12_configs() -> (hitls_tls::config::TlsConfig, hitls_tls::config::TlsConfig) {
     use hitls_tls::config::TlsConfig;
     use hitls_tls::crypt::{NamedGroup, SignatureScheme};

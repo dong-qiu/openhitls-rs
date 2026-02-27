@@ -58,6 +58,33 @@ impl DsaParams {
     pub fn q_bits(&self) -> usize {
         self.q.bit_len()
     }
+
+    /// Return p as big-endian bytes.
+    pub fn p_bytes(&self) -> Vec<u8> {
+        self.p.to_bytes_be()
+    }
+
+    /// Return q as big-endian bytes.
+    pub fn q_bytes(&self) -> Vec<u8> {
+        self.q.to_bytes_be()
+    }
+
+    /// Return g as big-endian bytes.
+    pub fn g_bytes(&self) -> Vec<u8> {
+        self.g.to_bytes_be()
+    }
+
+    /// Encode DSA parameters as DER: SEQUENCE { INTEGER p, INTEGER q, INTEGER g }.
+    pub fn to_der(&self) -> Vec<u8> {
+        let mut inner = Encoder::new();
+        inner
+            .write_integer(&self.p.to_bytes_be())
+            .write_integer(&self.q.to_bytes_be())
+            .write_integer(&self.g.to_bytes_be());
+        let mut outer = Encoder::new();
+        outer.write_sequence(&inner.finish());
+        outer.finish()
+    }
 }
 
 /// A DSA key pair for signing and verification.
@@ -206,6 +233,16 @@ impl DsaKeyPair {
     /// Return the public key in big-endian bytes.
     pub fn public_key_bytes(&self) -> Vec<u8> {
         self.public_key.to_bytes_be()
+    }
+
+    /// Return the private key in big-endian bytes.
+    pub fn private_key_bytes(&self) -> Vec<u8> {
+        self.private_key.to_bytes_be()
+    }
+
+    /// Return a reference to the DSA domain parameters.
+    pub fn params(&self) -> &DsaParams {
+        &self.params
     }
 }
 
