@@ -541,7 +541,7 @@ The C codebase has a comprehensive FIPS/CMVP subsystem in `crypto/provider/src/c
 
 ³ **Provider architecture**: The ISO/SM Provider framework (6,500 LOC) is a C EAL architectural pattern for runtime algorithm dispatch via function pointer tables. Rust replaces this entirely with compile-time trait dispatch (`Digest`, `Aead`, `Signer`, `Verifier` traits) — more type-safe, zero runtime overhead, no wrapper code needed.
 
-⁴ **Algorithm constraints**: C enforces FIPS-approved algorithm restrictions at the provider level. Rust achieves the same via: (a) compile-time feature flags exclude unapproved algorithms entirely, (b) `SecurityCallback` (Phase 94b) provides runtime filtering of cipher suites/groups/signature algorithms by security level.
+⁴ **Algorithm constraints**: C enforces FIPS-approved algorithm restrictions at the provider level. Rust achieves the same via: (a) compile-time feature flags exclude unapproved algorithms entirely, (b) `SecurityCallback` (Phase 78 Part B) provides runtime filtering of cipher suites/groups/signature algorithms by security level.
 
 ⁵ **Event logging**: This is operational infrastructure, not a cryptographic function. Rust applications can integrate `tracing`/`log` crates as needed. The C implementation is tightly coupled to the provider framework.
 
@@ -894,4 +894,4 @@ The C codebase has a large, multi-layered test infrastructure in `testcode/`:
 
 5. **Only 1 functional gap**: SHA256-MB (multi-buffer) is the sole algorithm not migrated, as it is a performance optimization with no functional impact.
 
-6. **Hardware acceleration parity**: Phase 136–140 added TLS 1.3 middlebox compatibility (RFC 8446 §D.4), SHA-2 hardware acceleration (ARMv8 SHA-NI / x86-64 SHA-NI), GHASH hardware acceleration (ARMv8 PMULL / x86-64 PCLMULQDQ), P-256 specialized field arithmetic (closing a ~31× performance gap), and ChaCha20 SIMD optimization (ARMv8 NEON / x86-64 SSE2). The Rust implementation now matches C-level performance in the critical hot paths.
+6. **Hardware acceleration parity**: Phase 79, P1–P4 added TLS 1.3 middlebox compatibility (RFC 8446 §D.4), SHA-2 hardware acceleration (ARMv8 SHA-NI / x86-64 SHA-NI), GHASH hardware acceleration (ARMv8 PMULL / x86-64 PCLMULQDQ), P-256 specialized field arithmetic (closing a ~31× performance gap), and ChaCha20 SIMD optimization (ARMv8 NEON / x86-64 SSE2). The Rust implementation now matches C-level performance in the critical hot paths.
