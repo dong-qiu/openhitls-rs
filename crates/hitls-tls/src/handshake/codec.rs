@@ -1379,4 +1379,126 @@ mod tests {
         // Empty body
         assert!(decode_key_update(&[]).is_err());
     }
+
+    // ===================================================================
+    // Phase T155 — Proptest: TLS codec roundtrip properties
+    // ===================================================================
+
+    mod proptests {
+        use super::super::*;
+        use crate::crypt::SignatureScheme;
+        use crate::extensions::ExtensionType;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(32))]
+
+            /// Arbitrary ServerHello → encode → decode → fields match.
+            #[test]
+            fn prop_server_hello_roundtrip(
+                random in prop::array::uniform32(any::<u8>()),
+                session_id in proptest::collection::vec(any::<u8>(), 0..32),
+                suite_val in prop::sample::select(vec![
+                    0x1301u16, 0x1302, 0x1303, 0x1304, 0x1305,
+                ]),
+            ) {
+                let sh = ServerHello {
+                    random,
+                    legacy_session_id: session_id.clone(),
+                    cipher_suite: CipherSuite(suite_val),
+                    extensions: vec![Extension {
+                        extension_type: ExtensionType::SUPPORTED_VERSIONS,
+                        data: vec![0x03, 0x04],
+                    }],
+                };
+                let encoded = encode_server_hello(&sh);
+                let (hs_type, body, total) = parse_handshake_header(&encoded).unwrap();
+                prop_assert_eq!(hs_type, HandshakeType::ServerHello);
+                prop_assert_eq!(total, encoded.len());
+                let decoded = decode_server_hello(body).unwrap();
+                prop_assert_eq!(decoded.random, random);
+                prop_assert_eq!(decoded.cipher_suite, CipherSuite(suite_val));
+                prop_assert_eq!(decoded.legacy_session_id, session_id);
+            }
+
+            /// Arbitrary CertificateVerify → encode → decode → fields match.
+            #[test]
+            fn prop_certificate_verify_roundtrip(
+                sig_bytes in proptest::collection::vec(any::<u8>(), 1..128),
+                scheme_val in prop::sample::select(vec![
+                    SignatureScheme::ED25519,
+                    SignatureScheme::ECDSA_SECP256R1_SHA256,
+                    SignatureScheme::RSA_PSS_RSAE_SHA256,
+                ]),
+            ) {
+                let cv = CertificateVerifyMsg {
+                    algorithm: scheme_val,
+                    signature: sig_bytes.clone(),
+                };
+                let encoded = encode_certificate_verify(&cv);
+                let (hs_type, body, _) = parse_handshake_header(&encoded).unwrap();
+                prop_assert_eq!(hs_type, HandshakeType::CertificateVerify);
+                let decoded = decode_certificate_verify(body).unwrap();
+                prop_assert_eq!(decoded.algorithm, scheme_val);
+                prop_assert_eq!(decoded.signature, sig_bytes);
+            }
+
+            /// Arbitrary KeyUpdate → encode → decode → request matches.
+            #[test]
+            fn prop_key_update_roundtrip(
+                request in proptest::bool::ANY,
+            ) {
+                let ku = KeyUpdateMsg {
+                    request_update: if request {
+                        KeyUpdateRequest::UpdateRequested
+                    } else {
+                        KeyUpdateRequest::UpdateNotRequested
+                    },
+                };
+                let encoded = encode_key_update(&ku);
+                let (hs_type, body, _) = parse_handshake_header(&encoded).unwrap();
+                prop_assert_eq!(hs_type, HandshakeType::KeyUpdate);
+                let decoded = decode_key_update(body).unwrap();
+                prop_assert_eq!(decoded.request_update, ku.request_update);
+            }
+
+            /// Arbitrary Finished → encode → parse_header → body matches.
+            #[test]
+            fn prop_finished_roundtrip(
+                verify_data in proptest::collection::vec(any::<u8>(), 32..=48),
+            ) {
+                let encoded = encode_finished(&verify_data);
+                let (hs_type, body, total) = parse_handshake_header(&encoded).unwrap();
+                prop_assert_eq!(hs_type, HandshakeType::Finished);
+                prop_assert_eq!(total, encoded.len());
+                prop_assert_eq!(body, verify_data.as_slice());
+            }
+
+            /// Handshake header roundtrip: arbitrary type + body → encode → parse → match.
+            #[test]
+            fn prop_handshake_header_roundtrip(
+                hs_type in prop::sample::select(vec![
+                    HandshakeType::HelloRequest,
+                    HandshakeType::ClientHello,
+                    HandshakeType::ServerHello,
+                    HandshakeType::NewSessionTicket,
+                    HandshakeType::Certificate,
+                    HandshakeType::ServerKeyExchange,
+                    HandshakeType::CertificateRequest,
+                    HandshakeType::ServerHelloDone,
+                    HandshakeType::CertificateVerify,
+                    HandshakeType::ClientKeyExchange,
+                    HandshakeType::Finished,
+                    HandshakeType::KeyUpdate,
+                ]),
+                body in proptest::collection::vec(any::<u8>(), 0..64),
+            ) {
+                let encoded = wrap_handshake(hs_type, &body);
+                let (parsed_type, parsed_body, total) = parse_handshake_header(&encoded).unwrap();
+                prop_assert_eq!(parsed_type, hs_type);
+                prop_assert_eq!(total, encoded.len());
+                prop_assert_eq!(parsed_body, body.as_slice());
+            }
+        }
+    }
 }

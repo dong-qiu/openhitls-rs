@@ -22,6 +22,9 @@ version = "1"
 features = ["io-util", "net", "macros", "rt"]
 optional = true
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [features]
 default = ["tls13"]
 tls12 = []

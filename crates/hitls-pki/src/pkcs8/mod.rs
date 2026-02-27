@@ -833,4 +833,83 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             _ => panic!("Expected EC public key"),
         }
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(32))]
+
+            /// Any 32-byte seed → encode Ed25519 PKCS#8 → parse → produces valid Ed25519 keypair.
+            #[test]
+            fn prop_ed25519_pkcs8_roundtrip(seed in any::<[u8; 32]>()) {
+                let der = encode_ed25519_pkcs8_der(&seed);
+                let key = parse_pkcs8_der(&der).unwrap();
+                match key {
+                    Pkcs8PrivateKey::Ed25519(kp) => {
+                        // Verify the keypair can sign and verify
+                        let msg = b"proptest roundtrip";
+                        let sig = kp.sign(msg).unwrap();
+                        prop_assert!(kp.verify(msg, &sig).unwrap());
+                    }
+                    _ => prop_assert!(false, "Expected Ed25519 key"),
+                }
+            }
+
+            /// Any 32-byte key → encode X25519 PKCS#8 → parse → produces valid X25519 key.
+            #[test]
+            fn prop_x25519_pkcs8_roundtrip(key_bytes in any::<[u8; 32]>()) {
+                let der = encode_x25519_pkcs8_der(&key_bytes);
+                let key = parse_pkcs8_der(&der).unwrap();
+                match key {
+                    Pkcs8PrivateKey::X25519(_) => {}
+                    _ => prop_assert!(false, "Expected X25519 key"),
+                }
+            }
+
+            /// Any 32-byte pubkey → encode X25519 SPKI → parse → bytes match exactly.
+            #[test]
+            fn prop_x25519_spki_roundtrip(pub_bytes in any::<[u8; 32]>()) {
+                let spki_der = encode_x25519_spki_der(&pub_bytes);
+                let parsed = parse_spki_der(&spki_der).unwrap();
+                match parsed {
+                    SpkiPublicKey::X25519(bytes) => {
+                        prop_assert_eq!(bytes.as_slice(), &pub_bytes[..]);
+                    }
+                    _ => prop_assert!(false, "Expected X25519 public key"),
+                }
+            }
+
+            /// Any 56-byte pubkey → encode X448 SPKI → parse → bytes match exactly.
+            #[test]
+            fn prop_x448_spki_roundtrip(pub_bytes in proptest::collection::vec(any::<u8>(), 56..=56)) {
+                let mut arr = [0u8; 56];
+                arr.copy_from_slice(&pub_bytes);
+                let spki_der = encode_x448_spki_der(&arr);
+                let parsed = parse_spki_der(&spki_der).unwrap();
+                match parsed {
+                    SpkiPublicKey::X448(bytes) => {
+                        prop_assert_eq!(bytes.as_slice(), &arr[..]);
+                    }
+                    _ => prop_assert!(false, "Expected X448 public key"),
+                }
+            }
+
+            /// Any 57-byte seed → encode Ed448 PKCS#8 → parse → produces valid Ed448 keypair.
+            #[test]
+            fn prop_ed448_pkcs8_roundtrip(seed in proptest::collection::vec(any::<u8>(), 57..=57)) {
+                let der = encode_ed448_pkcs8_der(&seed);
+                let key = parse_pkcs8_der(&der).unwrap();
+                match key {
+                    Pkcs8PrivateKey::Ed448(kp) => {
+                        let msg = b"proptest roundtrip ed448";
+                        let sig = kp.sign(msg).unwrap();
+                        prop_assert!(kp.verify(msg, &sig).unwrap());
+                    }
+                    _ => prop_assert!(false, "Expected Ed448 key"),
+                }
+            }
+        }
+    }
 }

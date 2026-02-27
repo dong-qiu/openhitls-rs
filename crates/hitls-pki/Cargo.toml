@@ -13,6 +13,9 @@ hitls-utils = { path = "../hitls-utils" }
 zeroize = { version = "1.8", features = ["derive"] }
 getrandom = "0.2"
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [features]
 default = ["x509", "pkcs12", "cms", "pkcs8", "mldsa"]
 x509 = []

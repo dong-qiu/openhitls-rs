@@ -753,4 +753,93 @@ mod tests {
             );
         }
     }
+
+    // ===================================================================
+    // Phase T155 — Proptest: BigNum algebraic invariants
+    // ===================================================================
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn arb_bignum_small() -> impl Strategy<Value = BigNum> {
+            (0u64..=0xFFFF_FFFF).prop_map(BigNum::from_u64)
+        }
+
+        fn arb_modulus() -> impl Strategy<Value = BigNum> {
+            (2u64..=0xFFFF).prop_map(BigNum::from_u64)
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            /// (a + b) mod m == (b + a) mod m
+            #[test]
+            fn prop_mod_add_commutative(
+                a in arb_bignum_small(),
+                b in arb_bignum_small(),
+                m in arb_modulus(),
+            ) {
+                let ab = a.mod_add(&b, &m).unwrap();
+                let ba = b.mod_add(&a, &m).unwrap();
+                prop_assert_eq!(ab, ba);
+            }
+
+            /// (a * b) mod m == (b * a) mod m
+            #[test]
+            fn prop_mod_mul_commutative(
+                a in arb_bignum_small(),
+                b in arb_bignum_small(),
+                m in arb_modulus(),
+            ) {
+                let ab = a.mod_mul(&b, &m).unwrap();
+                let ba = b.mod_mul(&a, &m).unwrap();
+                prop_assert_eq!(ab, ba);
+            }
+
+            /// (a + 0) mod m == a mod m
+            #[test]
+            fn prop_mod_add_identity(
+                a in arb_bignum_small(),
+                m in arb_modulus(),
+            ) {
+                let zero = BigNum::zero();
+                let result = a.mod_add(&zero, &m).unwrap();
+                let expected = a.mod_reduce(&m).unwrap();
+                prop_assert_eq!(result, expected);
+            }
+
+            /// ((a * b) * c) mod m == (a * (b * c)) mod m
+            #[test]
+            fn prop_mod_mul_associative(
+                a in (0u64..=0xFFFF).prop_map(BigNum::from_u64),
+                b in (0u64..=0xFFFF).prop_map(BigNum::from_u64),
+                c in (0u64..=0xFFFF).prop_map(BigNum::from_u64),
+                m in arb_modulus(),
+            ) {
+                let ab = a.mod_mul(&b, &m).unwrap();
+                let ab_c = ab.mod_mul(&c, &m).unwrap();
+                let bc = b.mod_mul(&c, &m).unwrap();
+                let a_bc = a.mod_mul(&bc, &m).unwrap();
+                prop_assert_eq!(ab_c, a_bc);
+            }
+
+            /// a * a^-1 mod m == 1 when gcd(a, m) == 1
+            #[test]
+            fn prop_mod_inv_correctness(
+                a_val in 1u64..=0xFFFF,
+                m_val in 2u64..=0xFFFF,
+            ) {
+                let a = BigNum::from_u64(a_val);
+                let m = BigNum::from_u64(m_val);
+                let g = a.gcd(&m).unwrap();
+                if g == BigNum::from_u64(1) {
+                    let inv = a.mod_inv(&m).unwrap();
+                    let product = a.mod_mul(&inv, &m).unwrap();
+                    prop_assert_eq!(product, BigNum::from_u64(1));
+                }
+                // Skip if gcd != 1 (no inverse exists)
+            }
+        }
+    }
 }
