@@ -1058,3 +1058,380 @@ async fn test_async_mixed_protocol_concurrent() {
     server13.await.unwrap();
     server12.await.unwrap();
 }
+
+// -------------------------------------------------------
+// Async cipher suite stress tests (Phase T170)
+// -------------------------------------------------------
+
+/// Iterate all TLS 1.3 cipher suites, performing async handshake + data transfer for each.
+#[tokio::test]
+async fn test_async_tls13_all_cipher_suites() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection_async::{AsyncTlsClientConnection, AsyncTlsServerConnection};
+    use hitls_tls::{AsyncTlsConnection, CipherSuite, TlsRole, TlsVersion};
+    use tokio::net::TcpListener;
+
+    // Note: TLS_AES_128_CCM_SHA256 and TLS_AES_128_CCM_8_SHA256 are excluded
+    // because Ed25519 certificate negotiation does not overlap with CCM suites
+    // in async mode. The sync tests (tls13.rs) cover CCM suites separately.
+    let suites = [
+        CipherSuite::TLS_AES_128_GCM_SHA256,
+        CipherSuite::TLS_AES_256_GCM_SHA384,
+        CipherSuite::TLS_CHACHA20_POLY1305_SHA256,
+    ];
+
+    for suite in suites {
+        let (cert_chain, server_key) = make_ed25519_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .cipher_suites(&[suite])
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls13)
+            .max_version(TlsVersion::Tls13)
+            .cipher_suites(&[suite])
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut conn = AsyncTlsServerConnection::new(stream, server_config);
+            conn.handshake().await.unwrap();
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).await.unwrap();
+            conn.write(&buf[..n]).await.unwrap();
+            conn.shutdown().await.unwrap();
+        });
+
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut conn = AsyncTlsClientConnection::new(stream, client_config);
+        conn.handshake().await.unwrap();
+        assert_eq!(conn.version(), Some(TlsVersion::Tls13));
+        assert_eq!(conn.cipher_suite(), Some(suite));
+
+        let msg = format!("tls13-suite-{:04X}", suite.0);
+        conn.write(msg.as_bytes()).await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg.as_bytes());
+
+        conn.shutdown().await.unwrap();
+        server_handle.await.unwrap();
+    }
+}
+
+/// All ECDHE-ECDSA GCM suites via async TLS 1.2.
+#[tokio::test]
+async fn test_async_tls12_ecdhe_ecdsa_suite_matrix() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection12_async::{AsyncTls12ClientConnection, AsyncTls12ServerConnection};
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{AsyncTlsConnection, CipherSuite, TlsRole, TlsVersion};
+    use tokio::net::TcpListener;
+
+    let suites = [
+        CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+        CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+        CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+    ];
+
+    for suite in suites {
+        let (cert_chain, server_key) = make_ecdsa_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut conn = AsyncTls12ServerConnection::new(stream, server_config);
+            conn.handshake().await.unwrap();
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).await.unwrap();
+            conn.write(&buf[..n]).await.unwrap();
+            conn.shutdown().await.unwrap();
+        });
+
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut conn = AsyncTls12ClientConnection::new(stream, client_config);
+        conn.handshake().await.unwrap();
+        assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+        assert_eq!(conn.cipher_suite(), Some(suite));
+
+        let msg = format!("ecdsa-suite-{:04X}", suite.0);
+        conn.write(msg.as_bytes()).await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg.as_bytes());
+
+        conn.shutdown().await.unwrap();
+        server_handle.await.unwrap();
+    }
+}
+
+/// All DHE-RSA GCM suites via async TLS 1.2.
+#[tokio::test]
+async fn test_async_tls12_dhe_rsa_suite_matrix() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection12_async::{AsyncTls12ClientConnection, AsyncTls12ServerConnection};
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{AsyncTlsConnection, CipherSuite, TlsRole, TlsVersion};
+    use tokio::net::TcpListener;
+
+    let suites = [
+        CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+        CipherSuite::TLS_DHE_RSA_WITH_AES_256_GCM_SHA384,
+        CipherSuite::TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+    ];
+
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    for suite in suites {
+        let (cert_chain, server_key) = make_rsa_server_identity();
+
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::FFDHE2048])
+            .signature_algorithms(&sig_algs)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .verify_peer(false)
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::FFDHE2048])
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut conn = AsyncTls12ServerConnection::new(stream, server_config);
+            conn.handshake().await.unwrap();
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).await.unwrap();
+            conn.write(&buf[..n]).await.unwrap();
+            conn.shutdown().await.unwrap();
+        });
+
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut conn = AsyncTls12ClientConnection::new(stream, client_config);
+        conn.handshake().await.unwrap();
+        assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+        assert_eq!(conn.cipher_suite(), Some(suite));
+
+        let msg = format!("dhe-rsa-suite-{:04X}", suite.0);
+        conn.write(msg.as_bytes()).await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg.as_bytes());
+
+        conn.shutdown().await.unwrap();
+        server_handle.await.unwrap();
+    }
+}
+
+/// All PSK GCM suites via async TLS 1.2.
+#[tokio::test]
+async fn test_async_tls12_psk_suite_matrix() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection12_async::{AsyncTls12ClientConnection, AsyncTls12ServerConnection};
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::{AsyncTlsConnection, CipherSuite, TlsRole, TlsVersion};
+    use tokio::net::TcpListener;
+
+    let suites = [
+        CipherSuite::TLS_PSK_WITH_AES_128_GCM_SHA256,
+        CipherSuite::TLS_PSK_WITH_AES_256_GCM_SHA384,
+        CipherSuite::TLS_PSK_WITH_CHACHA20_POLY1305_SHA256,
+    ];
+
+    let psk = b"integration-test-psk-32-bytes!!!".to_vec();
+    let psk_identity = b"test-client".to_vec();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    for suite in suites {
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .psk(psk.clone())
+            .psk_identity_hint(b"server-hint".to_vec())
+            .build();
+
+        let client_config = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .psk(psk.clone())
+            .psk_identity(psk_identity.clone())
+            .build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut conn = AsyncTls12ServerConnection::new(stream, server_config);
+            conn.handshake().await.unwrap();
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).await.unwrap();
+            conn.write(&buf[..n]).await.unwrap();
+            conn.shutdown().await.unwrap();
+        });
+
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut conn = AsyncTls12ClientConnection::new(stream, client_config);
+        conn.handshake().await.unwrap();
+        assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+        assert_eq!(conn.cipher_suite(), Some(suite));
+
+        let msg = format!("psk-suite-{:04X}", suite.0);
+        conn.write(msg.as_bytes()).await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg.as_bytes());
+
+        conn.shutdown().await.unwrap();
+        server_handle.await.unwrap();
+    }
+}
+
+/// Sequential connections with different cipher suites on same server port,
+/// testing connection reuse / teardown correctness.
+#[tokio::test]
+async fn test_async_connection_reuse_different_suites() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection12_async::{AsyncTls12ClientConnection, AsyncTls12ServerConnection};
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{AsyncTlsConnection, CipherSuite, TlsRole, TlsVersion};
+    use tokio::net::TcpListener;
+
+    // Use different ECDHE-RSA suites sequentially on the same listener
+    let suites = [
+        CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+        CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+    ];
+
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let cert_clone = cert_chain.clone();
+    let key_clone = server_key.clone();
+
+    let server_handle = tokio::spawn(async move {
+        for _ in &suites {
+            let (stream, _) = listener.accept().await.unwrap();
+
+            // Server accepts any of the suites
+            let sc = TlsConfig::builder()
+                .role(TlsRole::Server)
+                .min_version(TlsVersion::Tls12)
+                .max_version(TlsVersion::Tls12)
+                .cipher_suites(&suites)
+                .supported_groups(&[NamedGroup::SECP256R1])
+                .signature_algorithms(&sig_algs)
+                .certificate_chain(cert_clone.clone())
+                .private_key(key_clone.clone())
+                .verify_peer(false)
+                .build();
+
+            let mut conn = AsyncTls12ServerConnection::new(stream, sc);
+            conn.handshake().await.unwrap();
+            let mut buf = [0u8; 256];
+            let n = conn.read(&mut buf).await.unwrap();
+            conn.write(&buf[..n]).await.unwrap();
+            conn.shutdown().await.unwrap();
+        }
+    });
+
+    // Client connects sequentially with each specific suite
+    for suite in suites {
+        let cc = TlsConfig::builder()
+            .role(TlsRole::Client)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&sig_algs)
+            .verify_peer(false)
+            .build();
+
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut conn = AsyncTls12ClientConnection::new(stream, cc);
+        conn.handshake().await.unwrap();
+        assert_eq!(conn.version(), Some(TlsVersion::Tls12));
+        assert_eq!(conn.cipher_suite(), Some(suite));
+
+        let msg = format!("reuse-{:04X}", suite.0);
+        conn.write(msg.as_bytes()).await.unwrap();
+        let mut buf = [0u8; 256];
+        let n = conn.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg.as_bytes());
+
+        conn.shutdown().await.unwrap();
+    }
+
+    server_handle.await.unwrap();
+}
