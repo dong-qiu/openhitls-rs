@@ -371,6 +371,178 @@ fn test_tcp_tls12_psk_chacha20() {
 }
 
 // -------------------------------------------------------
+// PSK expansion (Phase T162)
+// -------------------------------------------------------
+
+#[test]
+fn test_tcp_tls12_psk_aes256_gcm() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_PSK_WITH_AES_256_GCM_SHA384;
+    let (cc, sc) = make_psk_configs(suite, &[]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_psk_aes128_cbc_sha() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_PSK_WITH_AES_128_CBC_SHA;
+    let (cc, sc) = make_psk_configs(suite, &[]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_psk_aes256_cbc_sha() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_PSK_WITH_AES_256_CBC_SHA;
+    let (cc, sc) = make_psk_configs(suite, &[]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_psk_aes128_cbc_sha256() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_PSK_WITH_AES_128_CBC_SHA256;
+    let (cc, sc) = make_psk_configs(suite, &[]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_psk_aes128_ccm_8() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_PSK_WITH_AES_128_CCM_8;
+    let (cc, sc) = make_psk_configs(suite, &[]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+// -------------------------------------------------------
+// DHE_PSK expansion (Phase T162)
+// -------------------------------------------------------
+
+#[test]
+fn test_tcp_tls12_dhe_psk_aes256_gcm() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_DHE_PSK_WITH_AES_256_GCM_SHA384;
+    let (cc, sc) = make_psk_configs(suite, &[NamedGroup::FFDHE2048]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_dhe_psk_aes128_cbc_sha() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_DHE_PSK_WITH_AES_128_CBC_SHA;
+    let (cc, sc) = make_psk_configs(suite, &[NamedGroup::FFDHE2048]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_dhe_psk_aes256_cbc_sha() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_DHE_PSK_WITH_AES_256_CBC_SHA;
+    let (cc, sc) = make_psk_configs(suite, &[NamedGroup::FFDHE2048]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_dhe_psk_aes128_ccm() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_DHE_PSK_WITH_AES_128_CCM;
+    let (cc, sc) = make_psk_configs(suite, &[NamedGroup::FFDHE2048]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_dhe_psk_chacha20_poly1305() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256;
+    let (cc, sc) = make_psk_configs(suite, &[NamedGroup::FFDHE2048]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+// -------------------------------------------------------
+// ECDHE_PSK expansion (Phase T162)
+// -------------------------------------------------------
+
+#[test]
+fn test_tcp_tls12_ecdhe_psk_aes256_gcm() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384;
+    let (cc, sc) = make_psk_configs(suite, &[NamedGroup::SECP256R1]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_ecdhe_psk_aes128_cbc_sha() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA;
+    let (cc, sc) = make_psk_configs(suite, &[NamedGroup::SECP256R1]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_ecdhe_psk_aes256_cbc_sha() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA;
+    let (cc, sc) = make_psk_configs(suite, &[NamedGroup::SECP256R1]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_ecdhe_psk_aes128_cbc_sha256() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA256;
+    let (cc, sc) = make_psk_configs(suite, &[NamedGroup::SECP256R1]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_ecdhe_psk_chacha20_poly1305() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256;
+    let (cc, sc) = make_psk_configs(suite, &[NamedGroup::SECP256R1]);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+// -------------------------------------------------------
 // 53–56. DH_ANON / ECDH_ANON cipher suites (RFC 5246/4492)
 // -------------------------------------------------------
 
@@ -414,6 +586,704 @@ fn test_tcp_tls12_ecdh_anon_aes256_cbc() {
     let suite = CipherSuite::TLS_ECDH_ANON_WITH_AES_256_CBC_SHA;
     let (cc, sc) = make_anon_configs(suite, &[NamedGroup::SECP256R1]);
     let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+// -------------------------------------------------------
+// DHE_DSS cipher suites (Phase T161)
+// -------------------------------------------------------
+
+#[test]
+fn test_tcp_tls12_dhe_dss_aes128_gcm() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_DHE_DSS_WITH_AES_128_GCM_SHA256;
+    let (cert_chain, server_key) = make_dsa_server_identity();
+    let sig_algs = [SignatureScheme::DSA_SHA256];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_dhe_dss_aes256_gcm() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_DHE_DSS_WITH_AES_256_GCM_SHA384;
+    let (cert_chain, server_key) = make_dsa_server_identity();
+    let sig_algs = [SignatureScheme::DSA_SHA256, SignatureScheme::DSA_SHA384];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_dhe_dss_aes128_cbc_sha() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_DHE_DSS_WITH_AES_128_CBC_SHA;
+    let (cert_chain, server_key) = make_dsa_server_identity();
+    let sig_algs = [SignatureScheme::DSA_SHA256];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_dhe_dss_aes256_cbc_sha() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_DHE_DSS_WITH_AES_256_CBC_SHA;
+    let (cert_chain, server_key) = make_dsa_server_identity();
+    let sig_algs = [SignatureScheme::DSA_SHA256];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_dhe_dss_aes128_cbc_sha256() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_DHE_DSS_WITH_AES_128_CBC_SHA256;
+    let (cert_chain, server_key) = make_dsa_server_identity();
+    let sig_algs = [SignatureScheme::DSA_SHA256];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_dhe_dss_aes256_cbc_sha256() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_DHE_DSS_WITH_AES_256_CBC_SHA256;
+    let (cert_chain, server_key) = make_dsa_server_identity();
+    let sig_algs = [SignatureScheme::DSA_SHA256];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::FFDHE2048])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+// -------------------------------------------------------
+// RSA static key exchange cipher suites (Phase T161)
+// -------------------------------------------------------
+
+#[test]
+fn test_tcp_tls12_rsa_aes128_cbc_sha() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA;
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_rsa_aes256_cbc_sha() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_RSA_WITH_AES_256_CBC_SHA;
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_rsa_aes128_cbc_sha256() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA256;
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_rsa_aes256_gcm_sha384() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_RSA_WITH_AES_256_GCM_SHA384;
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_rsa_aes128_ccm() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::SignatureScheme;
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_RSA_WITH_AES_128_CCM;
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+// -------------------------------------------------------
+// RSA_PSK cipher suites (Phase T161)
+// -------------------------------------------------------
+
+#[test]
+fn test_tcp_tls12_rsa_psk_aes128_gcm() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_RSA_PSK_WITH_AES_128_GCM_SHA256;
+    let (cc, sc) = make_rsa_psk_configs(suite);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_rsa_psk_aes256_gcm() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_RSA_PSK_WITH_AES_256_GCM_SHA384;
+    let (cc, sc) = make_rsa_psk_configs(suite);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_rsa_psk_aes128_cbc_sha() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_RSA_PSK_WITH_AES_128_CBC_SHA;
+    let (cc, sc) = make_rsa_psk_configs(suite);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_rsa_psk_aes256_cbc_sha() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_RSA_PSK_WITH_AES_256_CBC_SHA;
+    let (cc, sc) = make_rsa_psk_configs(suite);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_rsa_psk_aes128_cbc_sha256() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_RSA_PSK_WITH_AES_128_CBC_SHA256;
+    let (cc, sc) = make_rsa_psk_configs(suite);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_rsa_psk_aes256_cbc_sha384() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_RSA_PSK_WITH_AES_256_CBC_SHA384;
+    let (cc, sc) = make_rsa_psk_configs(suite);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tcp_tls12_rsa_psk_chacha20_poly1305() {
+    use hitls_tls::CipherSuite;
+    let suite = CipherSuite::TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256;
+    let (cc, sc) = make_rsa_psk_configs(suite);
+    let (cs, ss) = run_tls12_tcp_loopback(cc, sc);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+// -------------------------------------------------------
+// ECDHE_RSA CBC / ChaCha20 cipher suites (Phase T170)
+// -------------------------------------------------------
+
+#[test]
+fn test_tls12_ecdhe_rsa_aes128_cbc_sha() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA;
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tls12_ecdhe_rsa_aes256_cbc_sha() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA;
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tls12_ecdhe_rsa_aes128_cbc_sha256() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256;
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tls12_ecdhe_rsa_aes256_cbc_sha384() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384;
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
+    assert_eq!(cs, suite);
+    assert_eq!(ss, suite);
+}
+
+#[test]
+fn test_tls12_ecdhe_rsa_chacha20_poly1305() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::crypt::{NamedGroup, SignatureScheme};
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+
+    let suite = CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256;
+    let (cert_chain, server_key) = make_rsa_server_identity();
+    let sig_algs = [
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PKCS1_SHA256,
+    ];
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&sig_algs)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&sig_algs)
+        .verify_peer(false)
+        .build();
+
+    let (cs, ss) = run_tls12_tcp_loopback(client_config, server_config);
     assert_eq!(cs, suite);
     assert_eq!(ss, suite);
 }

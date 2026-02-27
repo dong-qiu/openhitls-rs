@@ -259,4 +259,198 @@ mod tests {
         let recovered = EcPointG2::from_bytes(&bytes).unwrap();
         assert_eq!(recovered, g);
     }
+
+    #[test]
+    fn test_g2_point_double_correctness() {
+        // Double the generator, then verify the result is on the twist curve
+        // y^2 = x^3 + 5u, and that 2G != G and 2G != O.
+        let g = EcPointG2::generator();
+        let g2 = g.double().unwrap();
+
+        assert!(!g2.is_infinity(), "2G should not be infinity");
+        assert_ne!(g2, g, "2G should differ from G");
+
+        // Verify 2G is on the curve: y^2 = x^3 + 5u
+        let (x, y) = g2.to_affine().unwrap();
+        let y2 = y.sqr().unwrap();
+        let x3 = x.sqr().unwrap().mul(&x).unwrap();
+        let b_twist = Fp2::new(Fp::zero(), Fp::from_u64(5));
+        let rhs = x3.add(&b_twist).unwrap();
+        assert_eq!(y2, rhs, "2G must satisfy y^2 = x^3 + 5u");
+
+        // Also verify 4G = double(2G) is consistent with 2G + 2G
+        let g4_via_double = g2.double().unwrap();
+        let g4_via_add = g2.add(&g2).unwrap();
+        assert_eq!(g4_via_double, g4_via_add, "double(2G) should equal 2G + 2G");
+    }
+
+    #[test]
+    fn test_g2_point_add_identity_non_generator() {
+        // Test P + O = P and O + P = P for a non-generator point (2G)
+        let g = EcPointG2::generator();
+        let p = g.double().unwrap();
+        let inf = EcPointG2::infinity();
+
+        let r1 = p.add(&inf).unwrap();
+        assert_eq!(r1, p, "P + O should equal P");
+
+        let r2 = inf.add(&p).unwrap();
+        assert_eq!(r2, p, "O + P should equal P");
+
+        // O + O = O
+        let r3 = inf.add(&inf).unwrap();
+        assert!(r3.is_infinity(), "O + O should be O");
+    }
+
+    #[test]
+    fn test_g2_point_add_inverse_non_generator() {
+        // Test P + (-P) = O for a non-generator point
+        let g = EcPointG2::generator();
+        let three = BigNum::from_u64(3);
+        let p = g.scalar_mul(&three).unwrap();
+
+        let neg_p = p.negate().unwrap();
+        let result = p.add(&neg_p).unwrap();
+        assert!(result.is_infinity(), "P + (-P) should be infinity");
+
+        // Also verify (-P) + P = O
+        let result2 = neg_p.add(&p).unwrap();
+        assert!(result2.is_infinity(), "(-P) + P should be infinity");
+    }
+
+    #[test]
+    fn test_g2_point_scalar_mul_identity() {
+        // 1 * G = G
+        let g = EcPointG2::generator();
+        let one = BigNum::from_u64(1);
+        let result = g.scalar_mul(&one).unwrap();
+        assert_eq!(result, g, "1 * G should equal G");
+
+        // 1 * (2G) = 2G
+        let g2 = g.double().unwrap();
+        let result2 = g2.scalar_mul(&one).unwrap();
+        assert_eq!(result2, g2, "1 * 2G should equal 2G");
+    }
+
+    #[test]
+    fn test_g2_point_scalar_mul_order() {
+        // n * G = O where n is the group order
+        let g = EcPointG2::generator();
+        let n = curve::order();
+        let result = g.scalar_mul(&n).unwrap();
+        assert!(result.is_infinity(), "n * G should be infinity");
+
+        // (n-1) * G should NOT be infinity, and (n-1)*G + G = O
+        let n_minus_1 = n.sub(&BigNum::from_u64(1));
+        let almost = g.scalar_mul(&n_minus_1).unwrap();
+        assert!(!almost.is_infinity(), "(n-1)*G should not be infinity");
+        let sum = almost.add(&g).unwrap();
+        assert!(sum.is_infinity(), "(n-1)*G + G should be infinity");
+
+        // Equivalently, (n-1)*G = -G
+        let neg_g = g.negate().unwrap();
+        assert_eq!(almost, neg_g, "(n-1)*G should equal -G");
+    }
+
+    #[test]
+    fn test_g2_point_from_bytes_invalid() {
+        // Construct 128 bytes that do NOT represent a valid point on the twist curve.
+        // Use the generator's x-coordinate but a corrupted y-coordinate.
+        let g = EcPointG2::generator();
+        let mut bytes = g.to_bytes().unwrap();
+        assert_eq!(bytes.len(), 128);
+
+        // Corrupt the y-coordinate (bytes 64..128 contain y1 || y0)
+        bytes[64] ^= 0xFF;
+        bytes[65] ^= 0xFF;
+
+        // from_bytes itself doesn't validate on-curve, so the point will parse but
+        // won't satisfy the curve equation. Verify this:
+        let bad_point = EcPointG2::from_bytes(&bytes).unwrap();
+        let (bx, by) = bad_point.to_affine().unwrap();
+        let y2 = by.sqr().unwrap();
+        let x3 = bx.sqr().unwrap().mul(&bx).unwrap();
+        let b_twist = Fp2::new(Fp::zero(), Fp::from_u64(5));
+        let rhs = x3.add(&b_twist).unwrap();
+        assert_ne!(y2, rhs, "Corrupted point should NOT be on the curve");
+
+        // Also test wrong length inputs
+        assert!(
+            EcPointG2::from_bytes(&[0u8; 127]).is_err(),
+            "127 bytes should fail"
+        );
+        assert!(
+            EcPointG2::from_bytes(&[0u8; 129]).is_err(),
+            "129 bytes should fail"
+        );
+        assert!(
+            EcPointG2::from_bytes(&[]).is_err(),
+            "empty input should fail"
+        );
+    }
+
+    #[test]
+    fn test_g2_multi_scalar_mul_consistency() {
+        // Compute a*P + b*Q using separate scalar_mul + add,
+        // then verify against (a+b*k)*G where P = G, Q = k*G.
+        let g = EcPointG2::generator();
+        let a = BigNum::from_u64(7);
+        let b = BigNum::from_u64(13);
+        let k = BigNum::from_u64(5);
+
+        let q = g.scalar_mul(&k).unwrap(); // Q = 5G
+
+        // Method 1: a*P + b*Q = 7*G + 13*(5*G), where P = G
+        let ap = g.scalar_mul(&a).unwrap();
+        let bq = q.scalar_mul(&b).unwrap();
+        let result1 = ap.add(&bq).unwrap();
+
+        // Method 2: (a + b*k)*G = (7 + 65)*G = 72*G
+        let bk = b.mul(&k);
+        let combined = a.add(&bk);
+        let result2 = g.scalar_mul(&combined).unwrap();
+
+        assert_eq!(
+            result1, result2,
+            "a*P + b*Q should equal (a+b*k)*G when Q = k*G"
+        );
+
+        // Verify commutativity: a*P + b*Q = b*Q + a*P
+        let result3 = bq.add(&ap).unwrap();
+        assert_eq!(result1, result3, "addition should be commutative");
+    }
+
+    #[test]
+    fn test_g2_point_affine_jacobian_roundtrip() {
+        // Convert generator to affine and back, verify equality
+        let g = EcPointG2::generator();
+        let (ax, ay) = g.to_affine().unwrap();
+        let recovered = EcPointG2::from_affine(ax, ay);
+        assert_eq!(
+            recovered, g,
+            "affine->jacobian roundtrip should preserve the point"
+        );
+
+        // Also test with a non-trivial Jacobian representation (Z != 1)
+        // After doubling, Z will generally not be 1
+        let g2 = g.double().unwrap();
+        assert_ne!(
+            g2.z,
+            Fp2::one(),
+            "doubled point should have non-trivial Z coordinate"
+        );
+        let (ax2, ay2) = g2.to_affine().unwrap();
+        let g2_recovered = EcPointG2::from_affine(ax2, ay2);
+        assert_eq!(
+            g2_recovered, g2,
+            "affine->jacobian roundtrip for doubled point should preserve the point"
+        );
+
+        // Infinity cannot be converted to affine (no affine representation)
+        let inf = EcPointG2::infinity();
+        assert!(
+            inf.to_affine().is_err(),
+            "converting infinity to affine should return an error"
+        );
+    }
 }

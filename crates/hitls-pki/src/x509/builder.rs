@@ -62,14 +62,21 @@ pub(crate) fn encode_algorithm_identifier(oid: &[u8], params_tlv: Option<&[u8]>)
 pub(crate) fn encode_subject_public_key_info(spki: &SubjectPublicKeyInfo) -> Vec<u8> {
     // algorithm_params stores raw VALUE bytes from parse_algorithm_identifier;
     // for EC keys this is the raw OID value; for RSA it's None (→ NULL).
+    // For DSA, it's the full DER-encoded DSAParameters SEQUENCE.
+    let alg_oid = Oid::from_der_value(&spki.algorithm_oid).ok();
+    let is_dsa = alg_oid.as_ref() == Some(&known::dsa());
     let params_tlv = if let Some(ref p) = spki.algorithm_params {
-        // Reconstruct full OID TLV from raw value bytes
-        let mut enc = Encoder::new();
-        enc.write_oid(p);
-        Some(enc.finish())
+        if is_dsa {
+            // DSA params are already a complete DER SEQUENCE TLV
+            Some(p.clone())
+        } else {
+            // EC keys: reconstruct full OID TLV from raw value bytes
+            let mut enc = Encoder::new();
+            enc.write_oid(p);
+            Some(enc.finish())
+        }
     } else {
         // RSA and Ed25519: RSA needs NULL, Ed25519 needs absent
-        let alg_oid = Oid::from_der_value(&spki.algorithm_oid).ok();
         if alg_oid.as_ref() == Some(&known::rsa_encryption()) {
             Some(ALG_PARAMS_NULL.to_vec())
         } else {

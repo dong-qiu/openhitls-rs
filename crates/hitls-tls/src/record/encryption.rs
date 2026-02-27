@@ -669,4 +669,107 @@ mod tests {
             "expected 'unknown inner content type', got: {err}"
         );
     }
+
+    // ====== Phase T165: Error path coverage tests ======
+
+    #[test]
+    fn test_tls13_record_padding_callback() {
+        let keys = make_keys_128();
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let mut enc = RecordEncryptor::new(suite, &keys).unwrap();
+        let mut dec = RecordDecryptor::new(suite, &keys).unwrap();
+
+        // Set padding callback: always add 64 bytes of padding
+        enc.set_padding_callback(std::sync::Arc::new(|_ct, _len| 64));
+
+        let plaintext = b"padded msg";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+
+        // Fragment should be: inner(10 + 1 + 64) + tag(16) = 91
+        assert_eq!(record.fragment.len(), 10 + 1 + 64 + 16);
+
+        // Decryption should strip padding and recover the original plaintext
+        let (ct, pt) = dec.decrypt_record(&record).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, plaintext);
+    }
+
+    #[test]
+    fn test_tls13_decrypt_truncated_ciphertext() {
+        let keys = make_keys_128();
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let mut enc = RecordEncryptor::new(suite, &keys).unwrap();
+        let mut dec = RecordDecryptor::new(suite, &keys).unwrap();
+
+        let record = enc
+            .encrypt_record(ContentType::Handshake, b"full message")
+            .unwrap();
+
+        // Truncate ciphertext (remove last 4 bytes from tag)
+        let mut truncated = record.clone();
+        truncated.fragment.truncate(record.fragment.len() - 4);
+
+        let err = dec.decrypt_record(&truncated).unwrap_err();
+        assert!(
+            err.to_string().contains("bad record MAC"),
+            "truncated ciphertext should cause bad MAC, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_tls13_inner_plaintext_ccs_type() {
+        // ChangeCipherSpec is a valid inner content type (used in middlebox compat)
+        let inner = build_inner_plaintext(ContentType::ChangeCipherSpec, &[0x01], 0).unwrap();
+        let (ct, content) = parse_inner_plaintext(&inner).unwrap();
+        assert_eq!(ct, ContentType::ChangeCipherSpec);
+        assert_eq!(content, &[0x01]);
+    }
+
+    #[test]
+    fn test_tls13_inner_plaintext_alert_type() {
+        let inner = build_inner_plaintext(ContentType::Alert, &[0x02, 0x32], 0).unwrap();
+        let (ct, content) = parse_inner_plaintext(&inner).unwrap();
+        assert_eq!(ct, ContentType::Alert);
+        assert_eq!(content, &[0x02, 0x32]);
+    }
+
+    #[test]
+    fn test_tls13_multiple_content_types_same_keys() {
+        // Encrypt Alert, Handshake, ApplicationData with same keys — all must decrypt correctly
+        let keys = make_keys_128();
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let mut enc = RecordEncryptor::new(suite, &keys).unwrap();
+        let mut dec = RecordDecryptor::new(suite, &keys).unwrap();
+
+        let types_and_data: &[(ContentType, &[u8])] = &[
+            (ContentType::Alert, &[0x02, 0x00]),
+            (ContentType::Handshake, b"client hello fragment"),
+            (ContentType::ApplicationData, b"GET / HTTP/1.1"),
+        ];
+
+        for (inner_type, data) in types_and_data {
+            let record = enc.encrypt_record(*inner_type, data).unwrap();
+            let (ct, pt) = dec.decrypt_record(&record).unwrap();
+            assert_eq!(ct, *inner_type);
+            assert_eq!(pt, *data);
+        }
+    }
+
+    #[test]
+    fn test_tls13_aes256_gcm_roundtrip() {
+        let keys = make_keys_256();
+        let suite = CipherSuite::TLS_AES_256_GCM_SHA384;
+        let mut enc = RecordEncryptor::new(suite, &keys).unwrap();
+        let mut dec = RecordDecryptor::new(suite, &keys).unwrap();
+
+        let plaintext = b"AES-256-GCM with SHA-384 traffic keys";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        let (ct, pt) = dec.decrypt_record(&record).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, plaintext);
+    }
 }

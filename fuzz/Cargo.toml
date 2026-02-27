@@ -83,3 +83,23 @@ doc = false
 name = "fuzz_dtls_state_machine"
 path = "fuzz_targets/fuzz_dtls_state_machine.rs"
 doc = false
+
+[[bin]]
+name = "fuzz_tls_extensions"
+path = "fuzz_targets/fuzz_tls_extensions.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_tls12_codec"
+path = "fuzz_targets/fuzz_tls12_codec.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_tlcp_codec"
+path = "fuzz_targets/fuzz_tlcp_codec.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_cbc_record"
+path = "fuzz_targets/fuzz_cbc_record.rs"
+doc = false

@@ -170,7 +170,7 @@ pub(crate) fn verify_rsa_pss(
 /// NULL parameter bytes for AlgorithmIdentifier (DER: 0x05 0x00).
 pub(super) const ALG_PARAMS_NULL: &[u8] = &[0x05, 0x00];
 
-/// A private key that can sign data. Supports RSA, ECDSA, Ed25519, and SM2.
+/// A private key that can sign data. Supports RSA, ECDSA, Ed25519, SM2, and DSA.
 pub enum SigningKey {
     /// RSA private key (signs with SHA-256 + PKCS#1 v1.5).
     Rsa(hitls_crypto::rsa::RsaPrivateKey),
@@ -183,6 +183,8 @@ pub enum SigningKey {
     Ed25519(hitls_crypto::ed25519::Ed25519KeyPair),
     /// SM2 private key (signs with SM2-SM3).
     Sm2(hitls_crypto::sm2::Sm2KeyPair),
+    /// DSA private key (signs with DSA-SHA256).
+    Dsa(hitls_crypto::dsa::DsaKeyPair),
 }
 
 impl SigningKey {
@@ -235,6 +237,10 @@ impl SigningKey {
                 Ok(sig.to_vec())
             }
             SigningKey::Sm2(sm2) => sm2.sign(data).map_err(PkiError::from),
+            SigningKey::Dsa(dsa) => {
+                let digest = compute_hash(data, &HashAlg::Sha256).map_err(PkiError::from)?;
+                dsa.sign(&digest).map_err(PkiError::from)
+            }
         }
     }
 
@@ -253,6 +259,7 @@ impl SigningKey {
             },
             SigningKey::Ed25519(_) => known::ed25519().to_der_value(),
             SigningKey::Sm2(_) => known::sm2_with_sm3().to_der_value(),
+            SigningKey::Dsa(_) => known::dsa_with_sha256().to_der_value(),
         }
     }
 
@@ -261,7 +268,10 @@ impl SigningKey {
     pub fn algorithm_params(&self) -> Option<Vec<u8>> {
         match self {
             SigningKey::Rsa(_) => Some(ALG_PARAMS_NULL.to_vec()),
-            SigningKey::Ecdsa { .. } | SigningKey::Ed25519(_) | SigningKey::Sm2(_) => None,
+            SigningKey::Ecdsa { .. }
+            | SigningKey::Ed25519(_)
+            | SigningKey::Sm2(_)
+            | SigningKey::Dsa(_) => None,
         }
     }
 
@@ -306,6 +316,21 @@ impl SigningKey {
                     algorithm_oid: known::ec_public_key().to_der_value(),
                     algorithm_params: Some(known::sm2_curve().to_der_value()),
                     public_key: pub_bytes,
+                })
+            }
+            SigningKey::Dsa(dsa) => {
+                // DSA SPKI: algorithm OID is id-dsa (1.2.840.10040.4.1),
+                // algorithm params is DER-encoded DSAParameters { p, q, g },
+                // public key is INTEGER y encoded as DER.
+                let params_der = dsa.params().to_der();
+                let pub_bytes = dsa.public_key_bytes();
+                // The public key in DSA SPKI BIT STRING is DER INTEGER y.
+                let mut y_enc = Encoder::new();
+                y_enc.write_integer(&pub_bytes);
+                Ok(SubjectPublicKeyInfo {
+                    algorithm_oid: known::dsa().to_der_value(),
+                    algorithm_params: Some(params_der),
+                    public_key: y_enc.finish(),
                 })
             }
         }

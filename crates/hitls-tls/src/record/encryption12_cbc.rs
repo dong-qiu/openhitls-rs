@@ -836,4 +836,223 @@ mod tests {
             "expected 'ETM record too short', got: {err}"
         );
     }
+
+    // ====== Phase T165: Error path coverage tests ======
+
+    #[test]
+    fn test_cbc_aes256_roundtrip() {
+        // AES-256 CBC + HMAC-SHA384 (larger key sizes)
+        let enc_key = vec![0x42u8; 32]; // AES-256
+        let mac_key = vec![0xABu8; 48]; // HMAC-SHA384
+
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 48);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 48);
+
+        let plaintext = b"hello AES-256 CBC with SHA-384";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_cbc_handshake_content_type_roundtrip() {
+        // Verify Handshake content type survives encryption → decryption
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 20];
+
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 20);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 20);
+
+        let record = enc
+            .encrypt_record(ContentType::Handshake, b"handshake body")
+            .unwrap();
+        assert_eq!(record.content_type, ContentType::Handshake);
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, b"handshake body");
+    }
+
+    #[test]
+    fn test_cbc_record_overflow_rejected() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+
+        // Fragment exceeding MAX_CIPHERTEXT_LENGTH
+        let record = Record {
+            content_type: ContentType::ApplicationData,
+            version: TLS12_VERSION,
+            fragment: vec![0xCC; MAX_CIPHERTEXT_LENGTH + 1],
+        };
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("record overflow"),
+            "expected 'record overflow', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_cbc_seq_number_tracks_correctly() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+
+        // Verify initial seq is 0
+        assert_eq!(enc.sequence_number(), 0);
+        assert_eq!(dec.sequence_number(), 0);
+
+        // Encrypt/decrypt 10 records, verify seq tracks
+        for i in 0..10 {
+            let record = enc
+                .encrypt_record(ContentType::ApplicationData, b"x")
+                .unwrap();
+            dec.decrypt_record(&record).unwrap();
+            assert_eq!(enc.sequence_number(), i + 1);
+            assert_eq!(dec.sequence_number(), i + 1);
+        }
+    }
+
+    #[test]
+    fn test_etm_not_block_aligned_rejected() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+
+        // IV(16) + 17 bytes ciphertext (not block-aligned) + MAC(32) = 65
+        let record = Record {
+            content_type: ContentType::ApplicationData,
+            version: TLS12_VERSION,
+            fragment: vec![0xCC; 65],
+        };
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("ETM ciphertext not block-aligned"),
+            "expected 'ETM ciphertext not block-aligned', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_etm_record_overflow_rejected() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+
+        let record = Record {
+            content_type: ContentType::ApplicationData,
+            version: TLS12_VERSION,
+            fragment: vec![0xCC; MAX_CIPHERTEXT_LENGTH + 1],
+        };
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("record overflow"),
+            "expected 'record overflow', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_etm_bad_mac_immediate_rejection() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
+        // Different MAC key → MAC mismatch before decryption
+        let mut dec = RecordDecryptor12EtM::new(enc_key, vec![0xCDu8; 32], 32);
+
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, b"test")
+            .unwrap();
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("bad record MAC"),
+            "expected 'bad record MAC', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_etm_empty_plaintext_roundtrip() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, b"")
+            .unwrap();
+        let plaintext = dec.decrypt_record(&record).unwrap();
+        assert!(plaintext.is_empty());
+    }
+
+    #[test]
+    fn test_etm_handshake_content_type() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+
+        let record = enc
+            .encrypt_record(ContentType::Handshake, b"hs body")
+            .unwrap();
+        assert_eq!(record.content_type, ContentType::Handshake);
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, b"hs body");
+    }
+
+    #[test]
+    fn test_etm_aes256_sha384_roundtrip() {
+        let enc_key = vec![0x42u8; 32]; // AES-256
+        let mac_key = vec![0xABu8; 48]; // HMAC-SHA384
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 48);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 48);
+
+        let plaintext = b"AES-256-CBC with SHA-384 ETM mode";
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, plaintext)
+            .unwrap();
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_cbc_large_plaintext_roundtrip() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+
+        // 4000 bytes — well within limits, tests multi-block CBC
+        let plaintext = vec![0xAA; 4000];
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, &plaintext)
+            .unwrap();
+        let decrypted = dec.decrypt_record(&record).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_etm_seq_number_tracking() {
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+
+        assert_eq!(enc.sequence_number(), 0);
+        assert_eq!(dec.sequence_number(), 0);
+
+        for i in 0..5 {
+            let record = enc
+                .encrypt_record(ContentType::ApplicationData, b"data")
+                .unwrap();
+            dec.decrypt_record(&record).unwrap();
+            assert_eq!(enc.sequence_number(), i + 1);
+            assert_eq!(dec.sequence_number(), i + 1);
+        }
+    }
 }
