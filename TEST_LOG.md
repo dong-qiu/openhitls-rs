@@ -2976,3 +2976,68 @@ cargo fmt --all -- --check
 - `cargo fuzz build` (via main repo): 13 targets compile successfully
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T152–T160 — Quality Improvement Roadmap
+
+> Comprehensive quality improvement: +68 tests, +12 ignored, +1 fuzz target, proptest 2/9→5/9 crates.
+
+### Phase T152: TLS Connection Unit Tests (+15)
+- `crates/hitls-tls/src/connection/tests.rs`: State guard tests (write/read/key_update/shutdown before connected), double handshake error, write after shutdown, read after close_notify, key_update recv counter (increment, reset, limit=128), connection_info/peer_certificates/negotiated_alpn accessors, record_size enforcement, empty write
+
+### Phase T153: TLS 1.2 Handshake Edge Cases (+15)
+- `crates/hitls-tls/src/connection/tests.rs`: TLS 1.2 EKM (with/without context, before connected), session resumption abbreviated, session cache auto-lookup, verify_data stored, MFL negotiation, TLS 1.3 post-HS cert request (context mismatch, empty cert, sig verify fail, finished fail, success), wrong message type, no shared cipher, optional cert request
+
+### Phase T154: HW↔SW Cross-Validation (+8)
+- `crates/hitls-crypto/src/aes/mod.rs`: AES-128/256 soft vs NI/NEON encrypt comparison (1000 random blocks)
+- `crates/hitls-crypto/src/sha2/mod.rs`: SHA-256 soft vs HW (0/1/64/1000 byte inputs)
+- `crates/hitls-crypto/src/modes/ghash.rs`: GHASH soft vs HW (test vectors)
+- `crates/hitls-crypto/src/chacha20/mod.rs`: ChaCha20 soft vs NEON/SSE2 (256 bytes)
+- `crates/hitls-crypto/src/modes/gcm.rs`: GCM full roundtrip soft vs HW
+- `crates/hitls-crypto/src/ecc/p256_point.rs`: P-256 scalar mul generic vs fast
+- `crates/hitls-crypto/src/mlkem/ntt.rs`: ML-KEM NTT soft vs NEON
+
+### Phase T155: Proptest Expansion (+15)
+- `crates/hitls-tls/src/handshake/codec.rs`: 5 TLS codec roundtrip properties
+- `crates/hitls-bignum/src/ops.rs`: 5 BigNum modular arithmetic algebraic invariants
+- `crates/hitls-pki/src/pkcs8/mod.rs`: 5 PKCS#8/SPKI DER encode↔parse roundtrip properties
+- Proptest coverage: 2/9 → 5/9 crates (added hitls-tls, hitls-pki, hitls-bignum already had it)
+
+### Phase T156: Side-Channel Timing Tests (+6, all #[ignore])
+- `crates/hitls-crypto/tests/timing.rs` (NEW, 304 lines)
+- Custom Welch's t-test infrastructure (10K samples, |t|>4.5 threshold, interleaved measurement)
+- Tests: HMAC ct_eq, AES-GCM tag verify, ECDSA verify, RSA PKCS#1v15 verify, X25519 DH, BigNum ct_eq
+- Must run with `--release --ignored` for meaningful results
+
+### Phase T157: Concurrency Stress Tests (+10)
+- `tests/interop/tests/concurrency.rs` (NEW, ~420 lines)
+- Session cache: insert+lookup (10 threads × 100 ops), eviction (capacity=50, 500 insertions), concurrent remove
+- DRBG: concurrent generate (10 threads), concurrent reseed+generate (5+5 threads)
+- TLS: 10 parallel TLS 1.3 handshakes, 10 parallel TLS 1.2 handshakes, 5 concurrent data transfers
+- Crypto: 10 concurrent ECDSA P-256 keygen, 20 concurrent SHA-256 hash ops
+
+### Phase T158: Feature Flag Smoke Tests (+4)
+- `crates/hitls-crypto/tests/feature_smoke.rs` (NEW, 96 lines)
+- `test_default_aes_sha2_hmac`: cfg(aes+sha2+hmac) — AES-128 encrypt + SHA-256 hash + HMAC
+- `test_sm_algorithms`: cfg(sm2+sm3+sm4) — SM4 encrypt + SM3 hash + SM2 sign/verify
+- `test_pqc_algorithms`: cfg(mlkem+mldsa) — ML-KEM-768 encaps/decaps + ML-DSA-65 sign/verify
+- `test_minimal_no_default`: always — CryptoError + algorithm ID types available
+
+### Phase T159: Zeroize Runtime Verification (+4, all #[ignore])
+- `crates/hitls-crypto/tests/zeroize_verify.rs` (NEW, 143 lines)
+- `test_aes_key_zeroed_on_drop`: Structural drop-path verification (inner SoftAesKey has #[zeroize(drop)])
+- `test_hmac_key_zeroed_on_drop`: Structural drop-path verification (key_block.zeroize() via Drop)
+- `test_ecdsa_private_key_zeroed_on_zeroize`: Drop + recreate verification
+- `test_x25519_private_key_zeroed_on_zeroize`: Explicit .zeroize() + raw memory comparison (before/after)
+
+### Phase T160: DTLS State Machine Fuzz + OpenSSL Interop (+1 fuzz, +2 tests #[ignore])
+- `fuzz/fuzz_targets/fuzz_dtls_state_machine.rs` (NEW): 8 code paths, 6 seed corpus files
+- `tests/interop/tests/openssl_interop.rs` (NEW): s_client→hitls-rs TLS 1.3 (passes), hitls-rs→s_server TLS 1.2 (reveals verify_data mismatch)
+- Fuzz target inventory: 13→14 targets, 79→85 corpus files
+
+### Build Status (Post T152–T160)
+- `cargo test --workspace --all-features`: 3,264 passed, 0 failed, 19 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- Fuzz targets: 14 total, 85 seed corpus files

@@ -2939,3 +2939,31 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - ML-KEM-768 encaps 2.0× (109→54.8 µs), decaps 2.6× (95→36.0 µs), keygen 2.3× (155→66.5 µs)
 - ML-KEM-1024 decaps 3.0× speedup (largest improvement due to higher polynomial count)
 - 3196 tests pass (+5 NEON tests), 7 ignored. 0 clippy warnings, formatting clean.
+
+### Phase T152–T160 — Quality Improvement Roadmap
+
+**Prompt**: Implement the Quality Improvement Roadmap (Phases T152–T160) targeting 8 open deficiencies from QUALITY_REPORT.md (D8, D11r, D12–D18). Each phase committed separately.
+
+**Scope**: TLS connection unit tests (D13), TLS 1.2 edge cases (D13), HW↔SW cross-validation (D16), proptest expansion (D14), side-channel timing (D12), concurrency stress (D15), feature flag smoke (D18), zeroize verification (D17), DTLS fuzz + interop (D11r/D8).
+
+**Work performed**:
+1. T152: +15 TLS connection state guard/I/O unit tests
+2. T153: +15 TLS 1.2 handshake + post-HS auth edge case tests
+3. T154: +8 HW↔SW cross-validation differential tests
+4. T155: +15 proptest properties across hitls-tls, hitls-pki, hitls-bignum (2/9→5/9 crates)
+5. T156: +6 side-channel timing tests (Welch's t-test, all #[ignore])
+6. T157: +10 concurrency stress tests (session cache, DRBG, TLS, keygen, hash)
+7. T158: +4 feature flag combination smoke tests
+8. T159: +4 zeroize runtime verification tests (all #[ignore])
+9. T160: +1 DTLS state machine fuzz target (8 paths, 6 seeds), +2 OpenSSL CLI interop tests
+10. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md, QUALITY_REPORT.md
+
+**Result**:
+- 3196→3264 tests (+68), 7→19 ignored (+12), 13→14 fuzz targets, 79→85 corpus files
+- Proptest coverage: 2/9→5/9 crates
+- TLS connection unit tests: 61→91+ (D13 significantly reduced)
+- Side-channel timing infrastructure established (D12 partially addressed)
+- Concurrency tests expanded: 38→48+ (D15 improved)
+- TLS 1.3 OpenSSL interop verified; TLS 1.2 verify_data mismatch discovered (tracked)
+- All 3264 workspace tests pass, 0 clippy warnings, formatting clean
+- Defense model rating: B → B+
