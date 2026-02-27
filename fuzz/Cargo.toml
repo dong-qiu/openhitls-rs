@@ -78,3 +78,8 @@ doc = false
 name = "fuzz_tls_handshake_deep"
 path = "fuzz_targets/fuzz_tls_handshake_deep.rs"
 doc = false
+
+[[bin]]
+name = "fuzz_dtls_state_machine"
+path = "fuzz_targets/fuzz_dtls_state_machine.rs"
+doc = false
