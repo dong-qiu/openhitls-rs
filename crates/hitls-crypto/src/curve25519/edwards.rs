@@ -3,6 +3,8 @@
 //! Uses extended coordinates (X, Y, Z, T) where T = XY/Z on the twisted
 //! Edwards curve: -x² + y² = 1 + d·x²·y² with d = -121665/121666.
 
+use std::sync::OnceLock;
+
 use hitls_types::CryptoError;
 
 use super::field::Fe25519;
@@ -200,6 +202,130 @@ pub(crate) fn point_double(a: &GeExtended) -> GeExtended {
     }
 }
 
+/// A point in Niels form for fast mixed addition with extended coordinates.
+///
+/// Stores precomputed values (Y+X, Y-X, 2d·T) from an affine point,
+/// eliminating 2 multiplications per addition compared to full extended add.
+#[derive(Clone)]
+struct NielsPoint {
+    ypx: Fe25519, // Y + X
+    ymx: Fe25519, // Y - X
+    td: Fe25519,  // 2d · T (= 2d · X·Y for affine points where Z=1)
+}
+
+impl NielsPoint {
+    /// The identity element in Niels form.
+    fn identity() -> Self {
+        // Identity: (X=0, Y=1, Z=1, T=0) → ypx = 1, ymx = 1, td = 0
+        NielsPoint {
+            ypx: Fe25519::one(),
+            ymx: Fe25519::one(),
+            td: Fe25519::zero(),
+        }
+    }
+
+    /// Convert an extended point to Niels form.
+    fn from_extended(p: &GeExtended) -> Self {
+        // For affine points (Z=1): ypx = Y+X, ymx = Y-X, td = 2d·X·Y
+        // For projective: we need to normalize first, but our table points are affine.
+        let z_inv = p.z.invert();
+        let x = p.x.mul(&z_inv);
+        let y = p.y.mul(&z_inv);
+        let t = x.mul(&y);
+        NielsPoint {
+            ypx: y.add(&x),
+            ymx: y.sub(&x),
+            td: t.mul(&D2),
+        }
+    }
+
+    /// Constant-time conditional assignment: self = src if mask is all-1s.
+    fn ct_assign(&mut self, src: &NielsPoint, mask: u64) {
+        for j in 0..5 {
+            self.ypx.0[j] ^= mask & (self.ypx.0[j] ^ src.ypx.0[j]);
+            self.ymx.0[j] ^= mask & (self.ymx.0[j] ^ src.ymx.0[j]);
+            self.td.0[j] ^= mask & (self.td.0[j] ^ src.td.0[j]);
+        }
+    }
+}
+
+/// Extended + Niels mixed addition: R = A + B (where B is in Niels form).
+///
+/// Cost: 7M + 6A (vs 9M + 6A for full extended addition).
+fn point_add_niels(a: &GeExtended, b: &NielsPoint) -> GeExtended {
+    let aa = a.y.sub(&a.x).mul(&b.ymx); // A = (Y1-X1)·(Y2-X2)
+    let bb = a.y.add(&a.x).mul(&b.ypx); // B = (Y1+X1)·(Y2+X2)
+    let cc = a.t.mul(&b.td); // C = T1·(2d·T2)
+    let dd = a.z.add(&a.z); // D = 2·Z1 (Z2=1 for Niels)
+
+    let e = bb.sub(&aa); // E = B - A
+    let f = dd.sub(&cc); // F = D - C
+    let g = dd.add(&cc); // G = D + C
+    let h = bb.add(&aa); // H = B + A
+
+    GeExtended {
+        x: e.mul(&f), // X3 = E·F
+        y: g.mul(&h), // Y3 = G·H
+        z: f.mul(&g), // Z3 = F·G
+        t: e.mul(&h), // T3 = E·H
+    }
+}
+
+/// Constant-time table lookup: select table[index] for index in 0..16.
+fn ct_select_niels(table: &[NielsPoint; 16], index: u8) -> NielsPoint {
+    let mut result = NielsPoint::identity();
+    for i in 1..16u8 {
+        // mask = all-1s if i == index, all-0s otherwise
+        let mask = (((i ^ index) as i64).wrapping_sub(1) >> 63) as u64;
+        result.ct_assign(&table[i as usize], mask);
+    }
+    result
+}
+
+/// Precomputed base point table for the comb method.
+///
+/// 64 groups × 16 entries. Group i stores [0·Bi, 1·Bi, ..., 15·Bi]
+/// where Bi = 2^(4i) · B. Each entry is in Niels form for fast mixed addition.
+///
+/// Total computation: sum over 64 groups of table[i][window_i] = scalar·B,
+/// requiring only 63 additions and 0 doublings.
+fn base_table() -> &'static [[NielsPoint; 16]; 64] {
+    static TABLE: OnceLock<Box<[[NielsPoint; 16]; 64]>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = Vec::with_capacity(64);
+
+        // Bi = 2^(4i) · B. Start with B, then double 4 times for each group.
+        let mut bi = GeExtended::basepoint();
+
+        for _group in 0..64 {
+            // Compute [0·Bi, 1·Bi, 2·Bi, ..., 15·Bi]
+            let mut group = Vec::with_capacity(16);
+            group.push(NielsPoint::identity()); // 0·Bi
+
+            let mut accum = bi.clone();
+            group.push(NielsPoint::from_extended(&accum)); // 1·Bi
+
+            for _j in 2..16 {
+                accum = point_add(&accum, &bi);
+                group.push(NielsPoint::from_extended(&accum));
+            }
+
+            let group_arr: [NielsPoint; 16] = group.try_into().unwrap_or_else(|_| unreachable!());
+            table.push(group_arr);
+
+            // Advance Bi: Bi+1 = 2^4 · Bi = 16 · Bi
+            bi = point_double(&bi);
+            bi = point_double(&bi);
+            bi = point_double(&bi);
+            bi = point_double(&bi);
+        }
+
+        let table_arr: [[NielsPoint; 16]; 64] =
+            table.try_into().unwrap_or_else(|_| unreachable!());
+        Box::new(table_arr)
+    })
+}
+
 /// Scalar multiplication: R = scalar * point using double-and-add (MSB to LSB).
 ///
 /// The scalar is a 256-bit little-endian byte array.
@@ -220,9 +346,37 @@ pub(crate) fn scalar_mul(scalar: &[u8; 32], point: &GeExtended) -> GeExtended {
 }
 
 /// Scalar multiplication with the base point: R = scalar * B.
+///
+/// Uses a precomputed comb table (64 groups × 16 Niels points) for
+/// fast constant-time base point multiplication: 63 mixed additions,
+/// 0 doublings.
 pub(crate) fn scalar_mul_base(scalar: &[u8; 32]) -> GeExtended {
-    let base = GeExtended::basepoint();
-    scalar_mul(scalar, &base)
+    let table = base_table();
+
+    // Decompose scalar into 64 4-bit windows.
+    // Window i covers bits [4i..4i+3] of the little-endian scalar.
+    let mut result = GeExtended::identity();
+
+    for (group_idx, group_table) in table.iter().enumerate() {
+        let bit_offset = group_idx * 4;
+        let byte_idx = bit_offset / 8;
+        let bit_idx = bit_offset % 8;
+
+        // Extract 4-bit window, handling the byte boundary
+        let window = if bit_idx <= 4 {
+            (scalar[byte_idx] >> bit_idx) & 0x0F
+        } else {
+            // Window spans two bytes
+            let lo = scalar[byte_idx] >> bit_idx;
+            let hi = scalar.get(byte_idx + 1).copied().unwrap_or(0) << (8 - bit_idx);
+            (lo | hi) & 0x0F
+        };
+
+        let niels = ct_select_niels(group_table, window);
+        result = point_add_niels(&result, &niels);
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -332,5 +486,124 @@ mod tests {
         let result = scalar_mul(&scalar, &bp);
         let doubled = point_double(&bp);
         assert_eq!(result.to_bytes(), doubled.to_bytes());
+    }
+
+    // --- Precomputed base table tests ---
+
+    #[test]
+    fn test_scalar_mul_base_one() {
+        let mut scalar = [0u8; 32];
+        scalar[0] = 1;
+        let result = scalar_mul_base(&scalar);
+        let bp = GeExtended::basepoint();
+        assert_eq!(result.to_bytes(), bp.to_bytes());
+    }
+
+    #[test]
+    fn test_scalar_mul_base_zero_is_identity() {
+        let scalar = [0u8; 32];
+        let result = scalar_mul_base(&scalar);
+        let id = GeExtended::identity();
+        assert_eq!(result.to_bytes(), id.to_bytes());
+    }
+
+    #[test]
+    fn test_scalar_mul_base_matches_generic() {
+        let bp = GeExtended::basepoint();
+        // Test several scalar values
+        for k in [2u8, 3, 7, 15, 16, 17, 100, 255] {
+            let mut scalar = [0u8; 32];
+            scalar[0] = k;
+            let fast = scalar_mul_base(&scalar);
+            let generic = scalar_mul(&scalar, &bp);
+            assert_eq!(
+                fast.to_bytes(),
+                generic.to_bytes(),
+                "mismatch for scalar = {k}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_scalar_mul_base_large_scalar() {
+        // Test with a larger scalar spanning multiple bytes
+        let bp = GeExtended::basepoint();
+        let mut scalar = [0u8; 32];
+        scalar[0] = 0xAB;
+        scalar[1] = 0xCD;
+        scalar[2] = 0xEF;
+        scalar[15] = 0x42;
+        scalar[31] = 0x07; // keep below L to avoid wrapping issues
+        let fast = scalar_mul_base(&scalar);
+        let generic = scalar_mul(&scalar, &bp);
+        assert_eq!(fast.to_bytes(), generic.to_bytes());
+    }
+
+    #[test]
+    fn test_scalar_mul_base_order_is_identity() {
+        // Ed25519 group order L (little-endian)
+        let l: [u8; 32] = [
+            0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9,
+            0xde, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x10,
+        ];
+        let result = scalar_mul_base(&l);
+        let id = GeExtended::identity();
+        assert_eq!(result.to_bytes(), id.to_bytes());
+    }
+
+    #[test]
+    fn test_niels_point_add_matches_full_add() {
+        let bp = GeExtended::basepoint();
+        let bp_niels = NielsPoint::from_extended(&bp);
+        let two_b = point_double(&bp);
+
+        // 2B + B via full addition
+        let three_b_full = point_add(&two_b, &bp);
+        // 2B + B via Niels mixed addition
+        let three_b_niels = point_add_niels(&two_b, &bp_niels);
+        assert_eq!(three_b_full.to_bytes(), three_b_niels.to_bytes());
+    }
+
+    #[test]
+    fn test_ct_select_niels_selects_correct_entry() {
+        // Build a small table where each entry is i*B
+        let bp = GeExtended::basepoint();
+        let mut table = [
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+            NielsPoint::identity(),
+        ];
+        let mut accum = GeExtended::identity();
+        for entry in &mut table {
+            *entry = NielsPoint::from_extended(&accum);
+            accum = point_add(&accum, &bp);
+        }
+
+        // Verify ct_select picks the right one
+        for i in 0..16u8 {
+            let selected = ct_select_niels(&table, i);
+            // Verify by adding identity to the selected point
+            let result = point_add_niels(&GeExtended::identity(), &selected);
+            let expected = point_add_niels(&GeExtended::identity(), &table[i as usize]);
+            assert_eq!(
+                result.to_bytes(),
+                expected.to_bytes(),
+                "ct_select mismatch at index {i}"
+            );
+        }
     }
 }
