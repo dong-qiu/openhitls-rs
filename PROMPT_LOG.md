@@ -2997,3 +2997,20 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - NTT micro-benchmark: Forward NTT 2.31× (427→185 ns), Inverse NTT 2.54× (527→207 ns)
 - End-to-end ML-DSA improvement modest (~2–5%) — NTT is only ~3–4% of total time; SHAKE-128 sampling in ExpandA dominates
 - 3212 tests pass (+5 NEON cross-validation tests), 7 ignored. 0 clippy warnings, formatting clean.
+
+## Phase P157 — SM2 Specialized Field Arithmetic
+
+**Prompt**: Implement SM2 specialized field arithmetic mirroring the P-256 fast path (Phase P152). Create `sm2_field.rs` with 4×u64 Montgomery form, `sm2_point.rs` with precomputed comb table, and add fast-path dispatch in `ecc/mod.rs`.
+
+**Implementation**:
+1. Created `crates/hitls-crypto/src/ecc/sm2_field.rs` (~490 lines): `Sm2FieldElement` with Montgomery arithmetic (SM2 prime P[0]=-1 trick, N0=1), `from_bytes`/`to_bytes`, `add`/`sub`/`neg`/`mul`/`sqr`/`inv`, optimized `sm2_mont_reduce` (3 muls/iteration × 4 = 12 total vs 16 generic), inversion chain (281 sqr + 17 mul), 34 tests
+2. Created `crates/hitls-crypto/src/ecc/sm2_point.rs` (~480 lines): `Sm2JacobianPoint` with a=-3 optimized doubling, mixed Jacobian-affine addition, precomputed comb table (64×16 affine points, OnceLock, batch inversion), `sm2_scalar_mul` (w=4 window), `sm2_scalar_mul_base` (comb table, 0 doublings), `sm2_scalar_mul_add`, BigNum conversion helpers, 17 tests
+3. Modified `ecc/mod.rs`: added SM2 fast-path dispatch in `scalar_mul`, `scalar_mul_base`, `scalar_mul_add` for `EccCurveId::Sm2Prime256`, added `sm2_result_to_ecpoint` helper, module declarations
+4. Added SM2 Criterion benchmarks to `benches/crypto_bench.rs`
+
+**Result**:
+- SM2 sign: 1.43ms → 56.6µs (**25.3× speedup**), Rust now 6.9× faster than C
+- SM2 verify: 1.75ms → 83.2µs (**21.1× speedup**), Rust now 2.65× faster than C
+- SM2 encrypt: 2.88ms → 154.2µs (**18.7× speedup**), Rust now 5.05× faster than C
+- SM2 decrypt: 1.43ms → 70.6µs (**20.2× speedup**), Rust now 5.48× faster than C
+- 3263 tests pass (+51: 34 field + 17 point), 7 ignored. 0 clippy warnings, formatting clean.

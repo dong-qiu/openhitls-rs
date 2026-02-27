@@ -166,6 +166,7 @@
 | 7 | P154 | BigNum CIOS Montgomery + Pre-allocated Exponentiation | — |
 | 8 | P155 | SM4 T-table Lookup Optimization | 2026-02-27 |
 | 9 | P156 | ML-DSA NEON NTT Vectorization | 2026-02-27 |
+| 10 | P157 | SM2 Specialized Field Arithmetic | 2026-02-27 |
 
 ---
 
@@ -10055,5 +10056,59 @@ End-to-end ML-DSA improvement is modest (~2–5%) because NTT constitutes only ~
 
 ### Build Status
 - `cargo test --workspace --all-features`: 3212 passed, 0 failed, 7 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+
+## Phase P157 — SM2 Specialized Field Arithmetic
+
+**Summary**: SM2 specialized field element arithmetic using 4×u64 Montgomery form, mirroring the P-256 fast path (Phase P152). SM2 and P-256 share identical structural properties (both 256-bit, both a=-3, both P[0]=-1 mod 2^64), enabling reuse of point arithmetic formulas. Includes precomputed comb table (64×16 affine points) for base point G, w=4 fixed-window scalar multiplication, and mixed Jacobian-affine addition. Internal dispatch only — no public API changes.
+
+### Performance Results
+
+| Operation | Before (generic BigNum) | After (fast path) | Speedup |
+|-----------|------------------------|-------------------|---------|
+| SM2 sign | 1.43 ms | 56.6 µs | **25.3×** |
+| SM2 verify | 1.75 ms | 83.2 µs | **21.1×** |
+| SM2 encrypt | 2.88 ms | 154.2 µs | **18.7×** |
+| SM2 decrypt | 1.43 ms | 70.6 µs | **20.2×** |
+
+### Implementation Details
+
+1. **SM2 Montgomery reduction** (`sm2_mont_reduce`): Exploits P[0]=-1 mod 2^64 (N0=1, skip P[0] multiply). Cost: 3 muls per iteration × 4 = 12 muls total (vs 16 for generic).
+
+2. **SM2 prime**: `p = 0xFFFFFFFE_FFFFFFFF_FFFFFFFF_FFFFFFFF_FFFFFFFF_00000000_FFFFFFFF_FFFFFFFF` in 4×u64 LE: `[0xFFFF_FFFF_FFFF_FFFF, 0xFFFF_FFFF_0000_0000, 0xFFFF_FFFF_FFFF_FFFF, 0xFFFF_FFFE_FFFF_FFFF]`.
+
+3. **Field inversion chain** (Fermat's little theorem, p-2): Precomputed x1..x32, then builds exponent `[31 ones][0][128 ones][32 zeros][30 ones][0][1]`. Total: 281 sqr + 17 mul.
+
+4. **Precomputed base table**: 64 groups × 16 affine points, OnceLock-cached, batch inversion via Montgomery's trick (1 inversion + ~2880 muls vs 960 individual inversions).
+
+5. **Point operations**: All identical to P-256 (both a=-3): point doubling uses M=3*(X+Z²)*(X-Z²), mixed Jacobian-affine addition (8 mul + 3 sqr).
+
+6. **Dispatch**: Internal fast-path dispatch in `EcGroup::scalar_mul`, `scalar_mul_base`, and `scalar_mul_add` for `EccCurveId::Sm2Prime256`.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/ecc/sm2_field.rs` | **NEW** (~490 lines): Sm2FieldElement with Montgomery arithmetic, 34 tests |
+| `crates/hitls-crypto/src/ecc/sm2_point.rs` | **NEW** (~480 lines): Sm2JacobianPoint, precomputed comb table, scalar multiplication, 17 tests |
+| `crates/hitls-crypto/src/ecc/mod.rs` | Added SM2 fast-path dispatch in 3 methods + `sm2_result_to_ecpoint` helper + module declarations |
+| `benches/crypto_bench.rs` | Added SM2 sign/verify/encrypt/decrypt Criterion benchmarks |
+
+### Test Counts
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| hitls-crypto | 1097 (+51) | 2 |
+| hitls-tls | 1290 | 0 |
+| hitls-pki | 390 | 0 |
+| hitls-bignum | 75 | 0 |
+| hitls-utils | 66 | 0 |
+| hitls-auth | 33 | 0 |
+| hitls-cli | 117 | 5 |
+| interop | 152 | 0 |
+| **Total** | **3263** (+51) | **7** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3263 passed, 0 failed, 7 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean

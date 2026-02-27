@@ -17,7 +17,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 | **SM4 (CBC/GCM)** | **Rust at parity to 1.7x faster** | T-table optimization + hardware GHASH close the gap |
 | **ECDSA / ECDH P-256** | **C 16–32x faster** | C has specialized P-256 field arithmetic; Rust uses generic BigNum |
 | **Ed25519 / X25519** | **Rust approaching parity** | Ed25519 sign: C 2x faster; X25519: Rust ~10% faster |
-| **SM2** | **C 2.8–6.1x faster** | Same root cause as ECDSA — generic BigNum vs specialized field ops |
+| **SM2** | **Rust 2.7–6.9× faster** | Phase P157: specialized 4×u64 Montgomery field + precomputed comb table |
 | **RSA-2048** | **Rust-only data** | C RSA not registered in benchmark binary |
 | **ML-KEM (Kyber)** | **C 6–18x faster** | C uses optimized NTT; Rust implementation is straightforward |
 | **ML-DSA (Dilithium)** | **C 2.1–6.1x faster** | Similar optimization gap to ML-KEM |
@@ -131,10 +131,10 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 | Ed25519 | Sign | 66,193 | 33,038 | **0.50** | Improved from 0.27 → 0.50 |
 | Ed25519 | Verify | 24,016 | 18,512 | **0.77** | Improved from 0.25 → 0.77 |
 | X25519 | DH | 49,594 | 54,462 | **1.10** | **Rust now faster!** |
-| SM2 | Sign | 2,560 | 850 | **0.33** | Improved from 0.18 → 0.33 |
-| SM2 | Verify | 4,527 | 684 | **0.15** | Improved from 0.087 → 0.15 |
-| SM2 | Encrypt | 1,283 | 432 | **0.34** | Improved from 0.19 → 0.34 |
-| SM2 | Decrypt | 2,584 | 871 | **0.34** | Improved from 0.16 → 0.34 |
+| SM2 | Sign | 2,560 | 17,668 | **6.90** | **P157: 25.3× speedup, Rust now 6.9× faster than C!** |
+| SM2 | Verify | 4,527 | 12,015 | **2.65** | **P157: 21.1× speedup, Rust now 2.65× faster than C!** |
+| SM2 | Encrypt | 1,283 | 6,485 | **5.05** | **P157: 18.7× speedup, Rust now 5× faster than C!** |
+| SM2 | Decrypt | 2,584 | 14,161 | **5.48** | **P157: 20.2× speedup, Rust now 5.5× faster than C!** |
 | RSA-2048 | Sign (PSS) | — | 800 | — | C RSA not in benchmark binary |
 | RSA-2048 | Verify (PSS) | — | 24,038 | — | — |
 | RSA-2048 | Encrypt (OAEP) | — | 23,148 | — | — |
@@ -143,7 +143,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 **Analysis**:
 - **ECDSA P-256 (16–32x gap)**: Still the largest performance gap, but improved from 65x. The C implementation uses specialized P-256 field arithmetic with Montgomery multiplication using machine-word-sized limbs, while Rust uses the generic `hitls-bignum` library. A dedicated P-256 field implementation (as in BoringSSL/ring) would bring performance within 2–3x of C.
 - **Ed25519/X25519**: Dramatically improved. Ed25519 sign gap narrowed from 3.7x to 2x; Ed25519 verify from 3.9x to 1.3x. **X25519 is now 10% faster in Rust** — the BigNum improvements and compiler optimizations have nearly eliminated the gap for Curve25519 operations.
-- **SM2 (3–6x gap)**: Improved from 5–11x. Same root cause as ECDSA — SM2 uses ECC infrastructure backed by generic BigNum.
+- **SM2 (Rust 2.7–6.9× FASTER)**: Phase P157 applied the same specialized field arithmetic as P-256. SM2 is now dramatically faster in Rust — sign is 6.9× faster than C, verify is 2.65× faster. Previous gap of 3–6× has been completely reversed.
 - **RSA-2048**: C RSA benchmark is declared but not registered in the C benchmark binary's `g_benchs[]` array. Rust RSA-2048 private key operations (sign/decrypt) run at ~710 ops/s.
 
 ---
@@ -254,9 +254,9 @@ ECDSA P-256 sign        ██████████████████�
 ML-KEM-768 encaps       █████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░  ×13
 DH-4096 keygen          ██████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ×10
 DH-2048 keygen          ████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ×5.6
-SM2 verify              █████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ×6.6
+SM2 verify              ████████████████████████████████████████████  ×0.38 (Rust 2.65× FASTER)
 ML-DSA-87 keygen        █████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ×6.3
-SM2 sign                ████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ×3.0
+SM2 sign                ████████████████████████████████████████████  ×0.14 (Rust 6.9× FASTER)
 Ed25519 sign            ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ×2.0
 SHA-256                 █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ×1.35
 SHA-512                 █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ×1.34
@@ -288,7 +288,7 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 | **P154** | BigNum CIOS 融合乘+约简 + 预分配缓冲 | 7–12× → 5.6–10× | 2–3× | High | **Complete** |
 | **P155** | SM4 T-table 查表优化 | 2.2–2.4× → 1.0× | ~1× | Medium | **Complete** |
 | **P156** | ML-DSA SIMD NTT 向量化 | 2–6× | NTT 2.3×; E2E ~1.02× | Medium | **Complete** |
-| **P157** | SM2 专用字段算术 | 2.8–6.1× | ~1.5× | Medium | Pending |
+| **P157** | SM2 专用字段算术 | 2.8–6.1× | 18–25× | Medium | **Complete** |
 | **P158** | SHA-512 硬件加速 (ARMv8.2 SHA512) | 1.35× | ~1× | Low | Pending |
 | **P159** | Ed25519 基点预计算表 | 2× | ~1.2× | Low | Pending |
 
