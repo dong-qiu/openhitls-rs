@@ -1,7 +1,7 @@
 # openHiTLS-rs — Quality Assurance Report
 
 > Quality safety net analysis and testing optimization roadmap.
-> Related docs: [TEST_LOG.md](TEST_LOG.md) | [DEV_LOG.md](DEV_LOG.md) | [README.md](README.md)
+> Related docs: [DEV_LOG.md](DEV_LOG.md) | [README.md](README.md)
 
 ---
 
