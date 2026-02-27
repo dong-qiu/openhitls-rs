@@ -17,7 +17,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 | **SM4 (CBC/GCM)** | **Rust at parity to 1.7x faster** | T-table optimization + hardware GHASH close the gap |
 | **ECDSA / ECDH P-256** | **C 16–32x faster** | C has specialized P-256 field arithmetic; Rust uses generic BigNum |
 | **Ed25519 / X25519** | **Rust approaching parity** | Ed25519 sign: C 2x faster; X25519: Rust ~10% faster |
-| **SM2** | **Rust 2.7–6.9× faster** | Phase P157: specialized 4×u64 Montgomery field + precomputed comb table |
+| **SM2** | **Rust 2.7–6.9× faster** | Phase P156: specialized 4×u64 Montgomery field + precomputed comb table |
 | **RSA-2048** | **Rust-only data** | C RSA not registered in benchmark binary |
 | **ML-KEM (Kyber)** | **C 6–18x faster** | C uses optimized NTT; Rust implementation is straightforward |
 | **ML-DSA (Dilithium)** | **C 2.1–6.1x faster** | Similar optimization gap to ML-KEM |
@@ -90,7 +90,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 - **AES-CTR**: Rust 5.4–5.6x faster (improved from 3.3x) — CTR mode naturally allows parallel block encryption.
 - **AES-GCM**: Rust 2.1–2.3x faster (improved from 1.3x) — GHASH still limits the advantage.
 - **ChaCha20-Poly1305**: Rust now **2x faster** (was near-parity). The rustc 1.93.0 compiler generates better SIMD-like code for the quarter-round operations.
-- **SM4-CBC**: Rust now **at parity** for encrypt (1.00×) and **1.22× faster** for decrypt. Phase P155 T-table optimization (fused S-box + L-transform into 4×u32 lookups + 3 XOR) yielded 2.4× block-level speedup. CBC decrypt benefits from parallelizable block processing.
+- **SM4-CBC**: Rust now **at parity** for encrypt (1.00×) and **1.22× faster** for decrypt. Phase P154 T-table optimization (fused S-box + L-transform into 4×u32 lookups + 3 XOR) yielded 2.4× block-level speedup. CBC decrypt benefits from parallelizable block processing.
 - **SM4-GCM**: Rust now **1.7× faster** — T-table SM4 combined with hardware-accelerated GHASH (ARMv8 PMULL) significantly outperforms C's software SM4 + GHASH combination.
 
 ---
@@ -131,10 +131,10 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 | Ed25519 | Sign | 66,193 | 33,038 | **0.50** | Improved from 0.27 → 0.50 |
 | Ed25519 | Verify | 24,016 | 18,512 | **0.77** | Improved from 0.25 → 0.77 |
 | X25519 | DH | 49,594 | 54,462 | **1.10** | **Rust now faster!** |
-| SM2 | Sign | 2,560 | 17,668 | **6.90** | **P157: 25.3× speedup, Rust now 6.9× faster than C!** |
-| SM2 | Verify | 4,527 | 12,015 | **2.65** | **P157: 21.1× speedup, Rust now 2.65× faster than C!** |
-| SM2 | Encrypt | 1,283 | 6,485 | **5.05** | **P157: 18.7× speedup, Rust now 5× faster than C!** |
-| SM2 | Decrypt | 2,584 | 14,161 | **5.48** | **P157: 20.2× speedup, Rust now 5.5× faster than C!** |
+| SM2 | Sign | 2,560 | 17,668 | **6.90** | **P156: 25.3× speedup, Rust now 6.9× faster than C!** |
+| SM2 | Verify | 4,527 | 12,015 | **2.65** | **P156: 21.1× speedup, Rust now 2.65× faster than C!** |
+| SM2 | Encrypt | 1,283 | 6,485 | **5.05** | **P156: 18.7× speedup, Rust now 5× faster than C!** |
+| SM2 | Decrypt | 2,584 | 14,161 | **5.48** | **P156: 20.2× speedup, Rust now 5.5× faster than C!** |
 | RSA-2048 | Sign (PSS) | — | 800 | — | C RSA not in benchmark binary |
 | RSA-2048 | Verify (PSS) | — | 24,038 | — | — |
 | RSA-2048 | Encrypt (OAEP) | — | 23,148 | — | — |
@@ -143,7 +143,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 **Analysis**:
 - **ECDSA P-256 (16–32x gap)**: Still the largest performance gap, but improved from 65x. The C implementation uses specialized P-256 field arithmetic with Montgomery multiplication using machine-word-sized limbs, while Rust uses the generic `hitls-bignum` library. A dedicated P-256 field implementation (as in BoringSSL/ring) would bring performance within 2–3x of C.
 - **Ed25519/X25519**: Dramatically improved. Ed25519 sign gap narrowed from 3.7x to 2x; Ed25519 verify from 3.9x to 1.3x. **X25519 is now 10% faster in Rust** — the BigNum improvements and compiler optimizations have nearly eliminated the gap for Curve25519 operations.
-- **SM2 (Rust 2.7–6.9× FASTER)**: Phase P157 applied the same specialized field arithmetic as P-256. SM2 is now dramatically faster in Rust — sign is 6.9× faster than C, verify is 2.65× faster. Previous gap of 3–6× has been completely reversed.
+- **SM2 (Rust 2.7–6.9× FASTER)**: Phase P156 applied the same specialized field arithmetic as P-256. SM2 is now dramatically faster in Rust — sign is 6.9× faster than C, verify is 2.65× faster. Previous gap of 3–6× has been completely reversed.
 - **RSA-2048**: C RSA benchmark is declared but not registered in the C benchmark binary's `g_benchs[]` array. Rust RSA-2048 private key operations (sign/decrypt) run at ~710 ops/s.
 
 ---
@@ -188,7 +188,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 | FFDHE-6144 | 136 | — | 133 | — | — | — |
 | FFDHE-8192 | 41 | — | 40 | — | — | — |
 
-**Analysis**: After Phase P154 (CIOS Montgomery), C is 5.6–10× faster for DH operations (improved from 7–12×). The gap remains significant because the O(n²) inner loop is unchanged — CIOS fuses multiply+reduce but performs the same number of `u64×u64+carry` operations. C uses hand-tuned assembly (`bn_mul_mont`) with optimized carry chains. Karatsuba multiplication (O(n^1.585)) would narrow the gap further. DH is rarely the bottleneck in modern TLS (ECDHE is strongly preferred).
+**Analysis**: After Phase P153 (CIOS Montgomery), C is 5.6–10× faster for DH operations (improved from 7–12×). The gap remains significant because the O(n²) inner loop is unchanged — CIOS fuses multiply+reduce but performs the same number of `u64×u64+carry` operations. C uses hand-tuned assembly (`bn_mul_mont`) with optimized carry chains. Karatsuba multiplication (O(n^1.585)) would narrow the gap further. DH is rarely the bottleneck in modern TLS (ECDHE is strongly preferred).
 
 ---
 
@@ -234,7 +234,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 
 BigNum multiplication at 2048-bit (~781 ns) improved from ~1.11 µs (1.4x faster). This directly impacts RSA and DH operations. The 4096-bit multiply at 3.25 µs (was 4.0 µs) explains DH-4096 performance.
 
-**Modular exponentiation** (Phase P154 CIOS Montgomery):
+**Modular exponentiation** (Phase P153 CIOS Montgomery):
 
 | Operation | Time |
 |-----------|------|
@@ -275,7 +275,7 @@ AES-128-CBC dec         ░░░░░░░░░░░░░░░░░░�
 
 ---
 
-## 5. Performance Optimization Roadmap (Phase P137–P160)
+## 5. Performance Optimization Roadmap (Phase P136–P160)
 
 All optimization tasks are tracked as numbered phases using unified global numbering (Phase PN), ordered by priority and TLS handshake impact.
 
@@ -283,18 +283,18 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 
 | Phase | Optimization | Current Gap | Target | Effort | Status |
 |-------|-------------|-------------|--------|--------|--------|
-| **P152** | P-256 深度优化 (预计算表 + 专用约简) | 16–32× → 1.5–2× | 2–3× | High | **Complete** |
-| **P153** | ML-KEM SIMD NTT 向量化 | 6–18× | 2–3× | High | **Complete** |
-| **P154** | BigNum CIOS 融合乘+约简 + 预分配缓冲 | 7–12× → 5.6–10× | 2–3× | High | **Complete** |
-| **P155** | SM4 T-table 查表优化 | 2.2–2.4× → 1.0× | ~1× | Medium | **Complete** |
-| **P156** | ML-DSA SIMD NTT 向量化 | 2–6× | NTT 2.3×; E2E ~1.02× | Medium | **Complete** |
-| **P157** | SM2 专用字段算术 | 2.8–6.1× | 18–25× | Medium | **Complete** |
-| **P158** | SHA-512 硬件加速 (ARMv8.2 SHA512) | 1.35× | ~1× | Low | Pending |
-| **P159** | Ed25519 基点预计算表 | 2× | ~1.2× | Low | Pending |
+| **P151** | P-256 深度优化 (预计算表 + 专用约简) | 16–32× → 1.5–2× | 2–3× | High | **Complete** |
+| **P152** | ML-KEM SIMD NTT 向量化 | 6–18× | 2–3× | High | **Complete** |
+| **P153** | BigNum CIOS 融合乘+约简 + 预分配缓冲 | 7–12× → 5.6–10× | 2–3× | High | **Complete** |
+| **P154** | SM4 T-table 查表优化 | 2.2–2.4× → 1.0× | ~1× | Medium | **Complete** |
+| **P155** | ML-DSA SIMD NTT 向量化 | 2–6× | NTT 2.3×; E2E ~1.02× | Medium | **Complete** |
+| **P156** | SM2 专用字段算术 | 2.8–6.1× | 18–25× | Medium | **Complete** |
+| **P166** | SHA-512 硬件加速 (ARMv8.2 SHA512) | 1.35× | ~1× | Low | Pending |
+| **P167** | Ed25519 基点预计算表 | 2× | ~1.2× | Low | Pending |
 
 ---
 
-### Phase P152 — P-256 深度优化 (预计算生成点表 + 专用约简) ✅ Complete
+### Phase P151 — P-256 深度优化 (预计算生成点表 + 专用约简) ✅ Complete
 
 **Result**: ECDSA P-256 sign **21× speedup** (1179→55.6 µs), verify **14× speedup** (1423→102.5 µs)
 
@@ -320,7 +320,7 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 
 ---
 
-### Phase P153 — ML-KEM SIMD NTT 向量化 ✅ Complete
+### Phase P152 — ML-KEM SIMD NTT 向量化 ✅ Complete
 
 **Result**: ML-KEM-768 encaps **2.0× speedup** (109→54.8 µs), decaps **2.6× speedup** (95→36.0 µs), keygen **2.3× speedup** (155→66.5 µs)
 
@@ -351,7 +351,7 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 
 ---
 
-### Phase P154 — BigNum CIOS 融合乘+约简 + 预分配缓冲 ✅ Complete
+### Phase P153 — BigNum CIOS 融合乘+约简 + 预分配缓冲 ✅ Complete
 
 **Result**: DH-2048 keygen **1.25× speedup** (174→218 ops/s), RSA-2048 sign **1.11× speedup** (719→800 ops/s)
 
@@ -381,7 +381,7 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 
 ---
 
-### Phase P155 — SM4 T-table 查表优化 ✅ Complete
+### Phase P154 — SM4 T-table 查表优化 ✅ Complete
 
 **Result**: SM4-CBC encrypt **2.37× speedup** (50.8→120.2 MB/s, parity with C), SM4-GCM encrypt **3.09× speedup** (47.6→146.9 MB/s, 1.68× faster than C)
 
@@ -405,11 +405,11 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 | SM4-GCM encrypt @8KB | 172.3 µs (47.6 MB/s) | 55.8 µs (146.9 MB/s) | **3.09×** | 87.6 MB/s |
 | SM4-GCM decrypt @8KB | 172.9 µs (47.4 MB/s) | 56.4 µs (145.3 MB/s) | **3.06×** | 87.6 MB/s |
 
-**Analysis**: SM4 goes from "C 2.2–2.4× faster" to "Rust at parity or 1.7× faster". The GCM improvement (3×) exceeds CBC (2.4×) because hardware-accelerated GHASH (ARMv8 PMULL, Phase P138) combines with optimized T-table SM4 to outperform C's software GHASH + hand-tuned SM4 assembly.
+**Analysis**: SM4 goes from "C 2.2–2.4× faster" to "Rust at parity or 1.7× faster". The GCM improvement (3×) exceeds CBC (2.4×) because hardware-accelerated GHASH (ARMv8 PMULL, Phase P137) combines with optimized T-table SM4 to outperform C's software GHASH + hand-tuned SM4 assembly.
 
 ---
 
-### Phase P156 — ML-DSA SIMD NTT 向量化 ✅ Complete
+### Phase P155 — ML-DSA SIMD NTT 向量化 ✅ Complete
 
 **NTT micro-benchmark**: Forward NTT 2.31× (427→185 ns), Inverse NTT 2.54× (527→207 ns).
 
@@ -428,13 +428,13 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 
 ---
 
-### Phase P157 — SM2 专用字段算术
+### Phase P156 — SM2 专用字段算术
 
 **Current gap**: SM2 sign 3×, verify 6.6×, encrypt 3×, decrypt 3× slower than C
 
 **Current implementation**: Uses generic ECC code path backed by `hitls-bignum` (heap-allocated BigNum for all field operations).
 
-**Optimization plan** (mirrors Phase P152 approach for P-256):
+**Optimization plan** (mirrors Phase P151 approach for P-256):
 - Implement `sm2_field.rs`: 4×u64 Montgomery representation for SM2 prime p
 - SM2 modulus: p = FFFFFFFE FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF 00000000 FFFFFFFF FFFFFFFF
 - Specialized point operations with `sm2_point.rs`
@@ -447,7 +447,7 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 
 ---
 
-### Phase P158 — SHA-512 硬件加速
+### Phase P166 — SHA-512 硬件加速
 
 **Current gap**: SHA-512 1.34× slower than C (662.8 vs 885.7 MB/s)
 
@@ -464,7 +464,7 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 
 ---
 
-### Phase P159 — Ed25519 基点预计算表
+### Phase P167 — Ed25519 基点预计算表
 
 **Current gap**: Ed25519 sign 2×, verify 1.3× slower than C
 
@@ -483,12 +483,12 @@ All optimization tasks are tracked as numbered phases using unified global numbe
 
 ### Impact on TLS Handshake Latency
 
-| Handshake Type | Before P152 (Rust) | After Phase P152 | C Reference |
+| Handshake Type | Before P151 (Rust) | After Phase P151 | C Reference |
 |---------------|---------------|----------------|-------------|
 | **ECDHE-P256 + AES-128-GCM** | ~3.8 ms | **~0.23 ms** | 0.21 ms |
 | **X25519 + AES-128-GCM** | ~0.018 ms | 0.018 ms (no change needed) | 0.020 ms |
-| **ML-KEM-768 hybrid** | ~0.11 ms | ~0.025 ms (after P153) | 0.008 ms |
-| **FFDHE-2048** | ~5.8 ms | **~4.4 ms** (P154 CIOS) | 0.82 ms |
+| **ML-KEM-768 hybrid** | ~0.11 ms | ~0.025 ms (after P152) | 0.008 ms |
+| **FFDHE-2048** | ~5.8 ms | **~4.4 ms** (P153 CIOS) | 0.82 ms |
 
 A TLS 1.3 handshake with ECDHE-P256 + AES-128-GCM involves:
 - 1 ECDH key derive (~1.2 ms Rust vs ~0.074 ms C)
@@ -496,7 +496,7 @@ A TLS 1.3 handshake with ECDHE-P256 + AES-128-GCM involves:
 - 1 ECDSA P-256 sign (~1.2 ms Rust vs ~0.037 ms C)
 - HKDF/SHA-256 derivations (~negligible at small sizes)
 
-**Phase P152** reduced ECDHE-P256 handshake from ~3.8 ms to ~0.23 ms, **within 1.1× of C** (0.21 ms).
+**Phase P151** reduced ECDHE-P256 handshake from ~3.8 ms to ~0.23 ms, **within 1.1× of C** (0.21 ms).
 
 For **X25519-based handshakes**: ~0.018 ms (Rust) vs ~0.020 ms (C) — **Rust is already faster!** This is the recommended key exchange for Rust deployments.
 
