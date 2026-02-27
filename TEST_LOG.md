@@ -23,63 +23,63 @@ Phase       Tests   Delta   Period
 ─────────   ─────   ─────   ──────────────────
 Baseline    1,104           Pre-testing effort
 Phase 47  1,291    +187   Foundation (core crypto + TLS + PKI)
-Phase 49–60 1,782    +491   Unit test expansion (crypto + TLS edge cases)
-Phase 61–68 1,846     +64   Cipher suite feature tests (CCM/PSK/DSS/ANON/renego)
-Phase 69–94 2,026    +180   Feature-driven tests (hostname/session/callbacks/PQC)
-Phase T72  1,964     +72   CLI + session cache concurrency (*)
-Phase T74  2,021     +33   Async TLS 1.3 + cipher suite integration (*)
-Phase T76  2,054     +18   Fuzz corpus + error scenario integration (*)
-Phase T77  2,070     +16   Key export + async export unit tests (*)
-Phase T79  2,131     +26   cert_verify + config callbacks + integration (*)
-Phase T81  2,144     +13   SniCallback + DTLS abbreviated + extensions (*)
-Phase T82  2,166     +22   GREASE + Heartbeat + async DTLS edge cases (*)
-Phase T83  2,194     +28   DTLS handshake + TLS 1.3 server + record + PRF (*)
-Phase T84  2,218     +24   TLCP server + transcript + key schedule + session (*)
-Phase T88  2,299     +25   Client TLCP + cipher params + Ed448 + HKDF (*)
-Phase T89  2,323     +24   Codec + server12 + client12 + dtls12 + config (*)
-Phase T90  2,348     +25   Session + client + server + async + dtls12-async (*)
-Phase T91  2,372     +24   Record + extensions + export + codec + connection (*)
-Phase T92  2,397     +25   AEAD + crypt + alert + signing + config (*)
-Phase T93  2,420     +23   Retransmit + keylog + fragment + anti_replay (*)
-Phase T95  2,445     +25   Async TLS 1.2 + DTLCP + encryption + lib.rs (*)
-Phase T96  2,519     +40   ConnectionInfo + handshake enums + codec errors (*)
-Phase T97  2,544     +25   ECC/DH params + TLCP API + DTLCP encryption (*)
-Phase T98  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
-Phase T99  2,585      +8   0-RTT early data + replay protection (*)
-Phase T110  2,595     +10   Async TLS 1.2 deep coverage + session resumption fix (*)
-Phase T111  2,610     +15   Async TLCP + DTLCP connection types & tests (*)
-Phase T112  2,624     +14   Extension negotiation E2E tests (*)
-Phase T113  2,634     +10   DTLS loss simulation & resilience tests (*)
-Phase T114  2,644     +10   TLCP double certificate validation tests (*)
-Phase T115  2,659     +15   SM9 tower field (Fp2/Fp4/Fp12) unit tests (*)
-Phase T116  2,674     +15   SLH-DSA internal module unit tests (*)
-Phase T117  2,689     +15   McEliece + FrodoKEM + XMSS internal tests (*)
-Phase T118  2,709     +20   proptest property-based + coverage CI (*)
-Phase T119  2,724     +15   TLCP SM3 cryptographic path coverage (*)
-Phase T120  2,739     +15   TLS 1.3 key schedule & HKDF robustness (*)
-Phase T121  2,754     +15   Record layer encryption edge cases & AEAD failure modes (*)
-Phase T122  2,769     +15   TLS 1.2 CBC padding + DTLS parsing + TLS 1.3 inner plaintext (*)
-Phase T123  2,784     +15   DTLS fragmentation/retransmission + CertificateVerify (*)
-Phase T124  2,799     +15   DTLS codec edge cases + anti-replay boundaries + entropy (*)
-Phase T125  2,814     +15   X.509 extension parsing + WOTS+ base conversion + ASN.1 tag (*)
-Phase T126  2,829     +15   PKI encoding helpers + X.509 signing dispatch + builder encoding (*)
-Phase T127  2,844     +15   X.509 certificate parsing + SM9 G2 + SM9 pairing (*)
-Phase T128  2,857     +13   SM9 hash functions + algorithm helpers + curve params (*)
-Phase T129  2,872     +15   McEliece keygen helpers + encoding + decoding (*)
-Phase T130  2,882     +10   XMSS tree ops + WOTS+ deepening + FORS deepening (*)
-Phase T131  2,897     +15   McEliece GF(2^13) + Benes network + matrix deepening (*)
-Phase T132  2,909     +12   FrodoKEM matrix ops + SLH-DSA hypertree + McEliece poly (*)
-Phase T133  2,924     +15   McEliece + FrodoKEM + XMSS parameter set validation (*)
-Phase T134  2,939     +15   XMSS hash + address + ML-KEM NTT deepening (*)
-Phase T135  2,954     +15   BigNum CT + primality + core type deepening (*)
-Phase T141  2,969     +15   SLH-DSA params + hash abstraction + address deepening (*)
-Phase T143  3,079     +15   FrodoKEM PKE + SM9 G1 point + SM9 Fp field (*)
-Phase T144  3,094     +15   ML-DSA NTT + SM4-CTR-DRBG + BigNum random (*)
-Phase T145  3,109     +15   DH group params + entropy pool + SHA-1 (*)
-Phase T147  3,124     +15   ML-KEM poly + SM9 Fp12 + encrypted PKCS#8 (*)
-Phase T148  3,154     +15   ML-DSA poly + X.509 extensions + X.509 text (*)
-Phase T149  3,169     +15   XTS mode + Edwards curve + GMAC deepening (*)
-Phase T150  3,184     +15   scrypt + CFB mode + X448 deepening (*)
+Phase 48–59 1,782    +491   Unit test expansion (crypto + TLS edge cases)
+Phase 60–67 1,846     +64   Cipher suite feature tests (CCM/PSK/DSS/ANON/renego)
+Phase 68–93 2,026    +180   Feature-driven tests (hostname/session/callbacks/PQC)
+Phase T71  1,964     +72   CLI + session cache concurrency (*)
+Phase T73  2,021     +33   Async TLS 1.3 + cipher suite integration (*)
+Phase T75  2,054     +18   Fuzz corpus + error scenario integration (*)
+Phase T76  2,070     +16   Key export + async export unit tests (*)
+Phase T78  2,131     +26   cert_verify + config callbacks + integration (*)
+Phase T80  2,144     +13   SniCallback + DTLS abbreviated + extensions (*)
+Phase T81  2,166     +22   GREASE + Heartbeat + async DTLS edge cases (*)
+Phase T82  2,194     +28   DTLS handshake + TLS 1.3 server + record + PRF (*)
+Phase T83  2,218     +24   TLCP server + transcript + key schedule + session (*)
+Phase T87  2,299     +25   Client TLCP + cipher params + Ed448 + HKDF (*)
+Phase T88  2,323     +24   Codec + server12 + client12 + dtls12 + config (*)
+Phase T89  2,348     +25   Session + client + server + async + dtls12-async (*)
+Phase T90  2,372     +24   Record + extensions + export + codec + connection (*)
+Phase T91  2,397     +25   AEAD + crypt + alert + signing + config (*)
+Phase T92  2,420     +23   Retransmit + keylog + fragment + anti_replay (*)
+Phase T94  2,445     +25   Async TLS 1.2 + DTLCP + encryption + lib.rs (*)
+Phase T95  2,519     +40   ConnectionInfo + handshake enums + codec errors (*)
+Phase T96  2,544     +25   ECC/DH params + TLCP API + DTLCP encryption (*)
+Phase T97  2,577     +33   ECC point + AES soft + SM9 + McEliece vector (*)
+Phase T98  2,585      +8   0-RTT early data + replay protection (*)
+Phase T109  2,595     +10   Async TLS 1.2 deep coverage + session resumption fix (*)
+Phase T110  2,610     +15   Async TLCP + DTLCP connection types & tests (*)
+Phase T111  2,624     +14   Extension negotiation E2E tests (*)
+Phase T112  2,634     +10   DTLS loss simulation & resilience tests (*)
+Phase T113  2,644     +10   TLCP double certificate validation tests (*)
+Phase T114  2,659     +15   SM9 tower field (Fp2/Fp4/Fp12) unit tests (*)
+Phase T115  2,674     +15   SLH-DSA internal module unit tests (*)
+Phase T116  2,689     +15   McEliece + FrodoKEM + XMSS internal tests (*)
+Phase T117  2,709     +20   proptest property-based + coverage CI (*)
+Phase T118  2,724     +15   TLCP SM3 cryptographic path coverage (*)
+Phase T119  2,739     +15   TLS 1.3 key schedule & HKDF robustness (*)
+Phase T120  2,754     +15   Record layer encryption edge cases & AEAD failure modes (*)
+Phase T121  2,769     +15   TLS 1.2 CBC padding + DTLS parsing + TLS 1.3 inner plaintext (*)
+Phase T122  2,784     +15   DTLS fragmentation/retransmission + CertificateVerify (*)
+Phase T123  2,799     +15   DTLS codec edge cases + anti-replay boundaries + entropy (*)
+Phase T124  2,814     +15   X.509 extension parsing + WOTS+ base conversion + ASN.1 tag (*)
+Phase T125  2,829     +15   PKI encoding helpers + X.509 signing dispatch + builder encoding (*)
+Phase T126  2,844     +15   X.509 certificate parsing + SM9 G2 + SM9 pairing (*)
+Phase T127  2,857     +13   SM9 hash functions + algorithm helpers + curve params (*)
+Phase T128  2,872     +15   McEliece keygen helpers + encoding + decoding (*)
+Phase T129  2,882     +10   XMSS tree ops + WOTS+ deepening + FORS deepening (*)
+Phase T130  2,897     +15   McEliece GF(2^13) + Benes network + matrix deepening (*)
+Phase T131  2,909     +12   FrodoKEM matrix ops + SLH-DSA hypertree + McEliece poly (*)
+Phase T132  2,924     +15   McEliece + FrodoKEM + XMSS parameter set validation (*)
+Phase T133  2,939     +15   XMSS hash + address + ML-KEM NTT deepening (*)
+Phase T134  2,954     +15   BigNum CT + primality + core type deepening (*)
+Phase T140  2,969     +15   SLH-DSA params + hash abstraction + address deepening (*)
+Phase T142  3,079     +15   FrodoKEM PKE + SM9 G1 point + SM9 Fp field (*)
+Phase T143  3,094     +15   ML-DSA NTT + SM4-CTR-DRBG + BigNum random (*)
+Phase T144  3,109     +15   DH group params + entropy pool + SHA-1 (*)
+Phase T146  3,124     +15   ML-KEM poly + SM9 Fp12 + encrypted PKCS#8 (*)
+Phase T147  3,154     +15   ML-DSA poly + X.509 extensions + X.509 text (*)
+Phase T148  3,169     +15   XTS mode + Edwards curve + GMAC deepening (*)
+Phase T149  3,184     +15   scrypt + CFB mode + X448 deepening (*)
 ```
 
 (*) Testing-only phases (no new features, pure test coverage)
@@ -139,7 +139,7 @@ Phase T150  3,184     +15   scrypt + CFB mode + X448 deepening (*)
 
 | Severity | ID | Description | Status |
 |:--------:|:--:|-------------|:------:|
-| Critical | D1 | 0-RTT replay protection: zero tests | **Closed** (Phase T99: +8 tests) |
+| Critical | D1 | 0-RTT replay protection: zero tests | **Closed** (Phase T98: +8 tests) |
 | Critical | D2 | Async TLS 1.2/TLCP/DTLCP: zero tests | Open |
 | High | D3 | Extension negotiation: no e2e tests | Open |
 | High | D4 | DTLS loss/retransmission: no tests | Open |
@@ -152,7 +152,7 @@ Phase T150  3,184     +15   scrypt + CFB mode + X448 deepening (*)
 
 ### Remaining Untested Files (30 files, ~6,670 lines)
 
-After Phase T99, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
+After Phase T98, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-level test coverage.
 
 | Category | Files | Lines | Complexity |
 |----------|------:|------:|:----------:|
@@ -163,24 +163,24 @@ After Phase T99, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-leve
 | **SM9** (remaining) | 7 | 1,121 | Medium |
 | **Provider traits** | 1 | 144 | Low |
 
-### Optimization Roadmap — Phase T99–T118
+### Optimization Roadmap — Phase T98–T117
 
 | Phase | Est. Tests | Deficiency | Focus |
 |-------|:----------:|:----------:|-------|
-| **Phase T99** | ~8 | D1 | 0-RTT early data + replay protection ✅ |
-| **Phase T110** | ~20 | D2 | Async TLS 1.2 connection tests ✅ |
-| **Phase T111** | ~15 | D2 | Async TLCP + DTLCP connection tests |
-| **Phase T112** | ~12 | D3 | Extension negotiation e2e tests |
-| **Phase T113** | +10 | D4 | DTLS loss simulation + retransmission ✅ |
-| **Phase T114** | +10 | D5 | TLCP double certificate validation ✅ |
-| **Phase T115** | ~15 | D10 | SM9 tower fields (fp2/fp4/fp12) ✅ |
-| **Phase T116** | ~15 | D10 | SLH-DSA internal modules ✅ |
-| **Phase T117** | ~15 | D10 | McEliece + FrodoKEM + XMSS internals ✅ |
-| **Phase T118** | — | D6/D7 | Infra: proptest + coverage CI |
+| **Phase T98** | ~8 | D1 | 0-RTT early data + replay protection ✅ |
+| **Phase T109** | ~20 | D2 | Async TLS 1.2 connection tests ✅ |
+| **Phase T110** | ~15 | D2 | Async TLCP + DTLCP connection tests |
+| **Phase T111** | ~12 | D3 | Extension negotiation e2e tests |
+| **Phase T112** | +10 | D4 | DTLS loss simulation + retransmission ✅ |
+| **Phase T113** | +10 | D5 | TLCP double certificate validation ✅ |
+| **Phase T114** | ~15 | D10 | SM9 tower fields (fp2/fp4/fp12) ✅ |
+| **Phase T115** | ~15 | D10 | SLH-DSA internal modules ✅ |
+| **Phase T116** | ~15 | D10 | McEliece + FrodoKEM + XMSS internals ✅ |
+| **Phase T117** | — | D6/D7 | Infra: proptest + coverage CI |
 
 ### Coverage Metrics Target
 
-| Metric | Current | After Phase T117 | After Phase T118 |
+| Metric | Current | After Phase T116 | After Phase T117 |
 |--------|:-------:|:-----------------:|:-----------------:|
 | Total tests | 2,689 | 2,689 | 2,750+ |
 | Critical deficiencies | 0 | 0 | 0 |
@@ -263,7 +263,7 @@ After Phase T99, all in `hitls-crypto`. The `hitls-tls` crate has 100% file-leve
 
 ---
 
-## 5. Era II — Feature-Driven Unit Test Expansion (Phase 49–60, +491 tests)
+## 5. Era II — Feature-Driven Unit Test Expansion (Phase 48–59, +491 tests)
 
 These phases focused on expanding unit test coverage alongside implementation work.
 
@@ -284,13 +284,13 @@ These phases focused on expanding unit test coverage alongside implementation wo
 
 ---
 
-## 6. Era III — Cipher Suite & Protocol Feature Tests (Phase 61–94, +244 tests)
+## 6. Era III — Cipher Suite & Protocol Feature Tests (Phase 60–93, +244 tests)
 
 Tests added alongside new TLS cipher suites, protocol features, and callbacks.
 
 ---
 
-## Phase 61: TLS 1.2 CCM Cipher Suites (RFC 6655 / RFC 7251) — 8 new tests
+## Phase 60: TLS 1.2 CCM Cipher Suites (RFC 6655 / RFC 7251) — 8 new tests
 
 ### Date: 2026-02-16
 
@@ -299,11 +299,11 @@ Tests added alongside new TLS cipher suites, protocol features, and callbacks.
 | AEAD (CCM) | `hitls-tls/src/crypt/aead.rs` | 3 | AesCcmAead encrypt/decrypt roundtrip, AES-128-CCM + AES-256-CCM key sizes, tag verification |
 | Record Layer (CCM) | `hitls-tls/src/record/encryption12.rs` | 5 | tls12_suite_to_aead_suite CCM mapping for all 6 suites, seal/open roundtrip with CCM encryptor, nonce construction (fixed_iv + explicit_nonce), AAD format verification, wrong-key rejection |
 
-**Workspace after Phase 61**: 1,790 tests, 40 ignored (+8 from Phase 60's 1,782)
+**Workspace after Phase 60**: 1,790 tests, 40 ignored (+8 from Phase 59's 1,782)
 
 ---
 
-## Phase 62: CCM_8 + PSK+CCM Cipher Suites — 12 new tests
+## Phase 61: CCM_8 + PSK+CCM Cipher Suites — 12 new tests
 
 ### Date: 2026-02-16
 
@@ -312,11 +312,11 @@ Tests added alongside new TLS cipher suites, protocol features, and callbacks.
 | AEAD (CCM_8) | `hitls-tls/src/crypt/aead.rs` | 4 | AesCcm8Aead 8-byte tag encrypt/decrypt roundtrip, wrong AAD rejection, key sizes, TLS 1.3 CCM_8 dispatch |
 | Record Layer (CCM_8/PSK+CCM) | `hitls-tls/src/record/encryption12.rs` | 8 | CCM_8 suite mapping (RSA 128/256), PSK+CCM suite mapping, CCM_8 128/256 encrypt/decrypt roundtrip, PSK CCM_8 tampered record, ECDHE_PSK CCM_8 params lookup |
 
-**Workspace after Phase 62**: 1,802 tests, 40 ignored (+12 from Phase 61's 1,790)
+**Workspace after Phase 61**: 1,802 tests, 40 ignored (+12 from Phase 60's 1,790)
 
 ---
 
-## Phase 63: PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites — 5 new tests
+## Phase 62: PSK CBC-SHA256/SHA384 + ECDHE_PSK GCM Cipher Suites — 5 new tests
 
 ### Date: 2026-02-16
 
@@ -324,23 +324,23 @@ Tests added alongside new TLS cipher suites, protocol features, and callbacks.
 |--------|------|:-----------:|-------------|
 | Record Layer (PSK CBC/GCM) | `hitls-tls/src/record/encryption12.rs` | 5 | PSK CBC-SHA256/SHA384 params lookup, ECDHE_PSK GCM params lookup, ECDHE_PSK GCM 128/256 suite mapping + encrypt/decrypt roundtrip |
 
-**Workspace after Phase 63**: 1,807 tests, 40 ignored (+5 from Phase 62's 1,802)
+**Workspace after Phase 62**: 1,807 tests, 40 ignored (+5 from Phase 61's 1,802)
 
 ---
 
-## Phase 64: PSK CCM Completion + CCM_8 Authentication Cipher Suites — 11 new tests
+## Phase 63: PSK CCM Completion + CCM_8 Authentication Cipher Suites — 11 new tests
 
 ### Date: 2026-02-16
 
 | Module | File | Tests Added | Description |
 |--------|------|:-----------:|-------------|
-| Record Layer (CCM/CCM_8) | `hitls-tls/src/record/encryption12.rs` | 11 | Phase 64 CCM/CCM_8 suite mapping, PSK CCM 128 encrypt/decrypt, PSK CCM_8 128/DHE_RSA CCM_8 256/ECDHE_ECDSA CCM_8 128 roundtrip, PSK CCM_8 tampered record, params lookup (PSK CCM/CCM_8, DHE_PSK CCM_8, ECDHE_PSK CCM_8, DHE_RSA CCM_8, ECDHE_ECDSA CCM_8) |
+| Record Layer (CCM/CCM_8) | `hitls-tls/src/record/encryption12.rs` | 11 | Phase 63 CCM/CCM_8 suite mapping, PSK CCM 128 encrypt/decrypt, PSK CCM_8 128/DHE_RSA CCM_8 256/ECDHE_ECDSA CCM_8 128 roundtrip, PSK CCM_8 tampered record, params lookup (PSK CCM/CCM_8, DHE_PSK CCM_8, ECDHE_PSK CCM_8, DHE_RSA CCM_8, ECDHE_ECDSA CCM_8) |
 
-**Workspace after Phase 64**: 1,818 tests, 40 ignored (+11 from Phase 63's 1,807)
+**Workspace after Phase 63**: 1,818 tests, 40 ignored (+11 from Phase 62's 1,807)
 
 ---
 
-## Phase 65: DHE_DSS Cipher Suites (DSA Authentication for TLS 1.2) — 8 new tests
+## Phase 64: DHE_DSS Cipher Suites (DSA Authentication for TLS 1.2) — 8 new tests
 
 ### Date: 2026-02-16
 
@@ -348,11 +348,11 @@ Tests added alongside new TLS cipher suites, protocol features, and callbacks.
 |--------|------|:-----------:|-------------|
 | Record Layer (DHE_DSS) | `hitls-tls/src/record/encryption12.rs` | 8 | DHE_DSS CBC-SHA params lookup (128/256), CBC-SHA256 params lookup (128/256), GCM params lookup (128/256), GCM suite mapping (128→AES_128_GCM_SHA256, 256→AES_256_GCM_SHA384), GCM 128/256 encrypt/decrypt roundtrip, DSA sign/verify roundtrip (via DsaKeyPair + verify_dsa_from_spki), DSA signature scheme selection (DSA_SHA256/SHA384 preference, no-match error) |
 
-**Workspace after Phase 65**: 1,826 tests, 40 ignored (+8 from Phase 64's 1,818)
+**Workspace after Phase 64**: 1,826 tests, 40 ignored (+8 from Phase 63's 1,818)
 
 ---
 
-## Phase 66: DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2) — 10 new tests
+## Phase 65: DH_ANON + ECDH_ANON Cipher Suites (Anonymous Key Exchange for TLS 1.2) — 10 new tests
 
 ### Date: 2026-02-16
 
@@ -361,11 +361,11 @@ Tests added alongside new TLS cipher suites, protocol features, and callbacks.
 | Record Layer (DH_ANON/ECDH_ANON) | `hitls-tls/src/record/encryption12.rs` | 8 | DH_ANON CBC-SHA params lookup (128/256), DH_ANON CBC-SHA256 params lookup (128/256), DH_ANON GCM params lookup (128/256), ECDH_ANON CBC-SHA params lookup (128/256), DH_ANON GCM suite AEAD mapping (128→AES_128_GCM_SHA256, 256→AES_256_GCM_SHA384), DH_ANON GCM 128/256 encrypt/decrypt roundtrip, anonymous requires_certificate false |
 | Codec (DH_ANON/ECDH_ANON) | `hitls-tls/src/handshake/codec12.rs` | 2 | DHE_ANON SKE codec roundtrip (encode→decode, 256-byte p/g/Ys), ECDHE_ANON SKE codec roundtrip (encode→decode, secp256r1 65-byte point) |
 
-**Workspace after Phase 66**: 1,836 tests, 40 ignored (+10 from Phase 65's 1,826)
+**Workspace after Phase 65**: 1,836 tests, 40 ignored (+10 from Phase 64's 1,826)
 
 ---
 
-## Phase 67: TLS 1.2 Renegotiation (RFC 5746) — 10 new tests
+## Phase 66: TLS 1.2 Renegotiation (RFC 5746) — 10 new tests
 
 ### Date: 2026-02-17
 
@@ -379,11 +379,11 @@ Tests added alongside new TLS cipher suites, protocol features, and callbacks.
 | Config | `hitls-tls/src/config/mod.rs` | 1 | Builder default false, set true, build, verify |
 | Connection (sync) | `hitls-tls/src/connection12.rs` | 3 | Full renegotiation TCP roundtrip (handshake → data → renego → data), renegotiation disabled rejects (no_renegotiation warning → connection continues), renegotiation no session resumption (with ticket_key, always full handshake) |
 
-**Workspace after Phase 67**: 1,846 tests, 40 ignored (+10 from Phase 66's 1,836)
+**Workspace after Phase 66**: 1,846 tests, 40 ignored (+10 from Phase 65's 1,836)
 
 ---
 
-## Phase 68: Connection Info APIs + Graceful Shutdown + ALPN Completion — 8 new tests
+## Phase 67: Connection Info APIs + Graceful Shutdown + ALPN Completion — 8 new tests
 
 ### Date: 2026-02-17
 
@@ -392,11 +392,11 @@ Tests added alongside new TLS cipher suites, protocol features, and callbacks.
 | Connection (TLS 1.2 sync) | `hitls-tls/src/connection12.rs` | 5 | connection_info cipher_suite/version/peer_certs/server_name/named_group/verify_data, ALPN negotiation (h2 selected from h2+http/1.1), session_resumed (full=false, abbreviated=true), graceful shutdown (close_notify send/receive, Ok(0) on read), close_notify_in_read (received_close_notify flag, ConnectionState::Closed) |
 | Connection (TLS 1.3 sync) | `hitls-tls/src/connection.rs` | 3 | connection_info (SNI, negotiated_group, server_certs, is_psk_mode, negotiated_alpn), ALPN negotiation (client offers h2+http/1.1, server selects h2, verified on both sides), graceful shutdown (close_notify exchange via record layer, bidirectional close) |
 
-**Workspace after Phase 68**: 1,854 tests, 40 ignored (+8 from Phase 67's 1,846)
+**Workspace after Phase 67**: 1,854 tests, 40 ignored (+8 from Phase 66's 1,846)
 
 ---
 
-### Implementation Phases 70–82 (feature tests, +172 tests)
+### Implementation Phases 69–82 (feature tests, +172 tests)
 
 These phases added new features with accompanying test suites. See [DEV_LOG.md](DEV_LOG.md) for implementation details.
 
@@ -418,13 +418,13 @@ These phases added new features with accompanying test suites. See [DEV_LOG.md](
 
 ---
 
-## 7. Era IV — Systematic Test Coverage Expansion (Phase T72–T99, +539 tests)
+## 7. Era IV — Systematic Test Coverage Expansion (Phase T71–T98, +539 tests)
 
 Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T72 — CLI Command Unit Tests + Session Cache Concurrency (2026-02-17)
+## Phase T71 — CLI Command Unit Tests + Session Cache Concurrency (2026-02-17)
 
 **Scope**: Stage A of the test optimization plan — fills gaps identified in the test completeness analysis.
 **New tests**: +72 (1880 → 1952 total, 40 ignored unchanged)
@@ -452,7 +452,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_cache_arc_mutex_shared_across_two_arcs | session/mod.rs | Two Arc clones see same underlying data |
 | test_cache_trait_object_via_arc_mutex | session/mod.rs | Arc<Mutex<Box<dyn SessionCache>>> trait-object pattern |
 
-### Workspace Test Counts After Phase T72
+### Workspace Test Counts After Phase T71
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -471,7 +471,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T74 — Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
+## Phase T73 — Async TLS 1.3 Unit Tests + Cipher Suite Integration (2026-02-18)
 
 **Scope**: Stage B of the test optimization plan — async connection coverage and cipher suite TCP loopback integration.
 **New tests**: +33 (1988 → 2021 total, 40 ignored unchanged)
@@ -503,7 +503,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | DH_ANON/ECDH_ANON | 4 | `tests/interop/src/lib.rs` | DH_ANON+GCM/CBC, ECDH_ANON+CBC(x2) |
 | TLS 1.3 additional | 4 | `tests/interop/src/lib.rs` | AES256-GCM, ChaCha20, CCM_8, RSA cert |
 
-### Workspace Test Counts After Phase T74
+### Workspace Test Counts After Phase T73
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -522,7 +522,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T76 — Fuzz Seed Corpus + Error Scenario Integration Tests (2026-02-18)
+## Phase T75 — Fuzz Seed Corpus + Error Scenario Integration Tests (2026-02-18)
 
 **Scope**: Stage C of the test optimization plan — structured fuzz seeds for all 10 targets and error/edge-case integration tests.
 **New items**: 66 seed corpus files + 18 new integration tests (2036 → 2054 total, 40 ignored unchanged)
@@ -566,7 +566,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_tls13_session_take_after_handshake | Session | session_resumption(true) + first conn not resumed |
 | test_tls12_empty_write | Edge Case | Empty write(b"") succeeds without sending record |
 
-### Workspace Test Counts After Phase T76
+### Workspace Test Counts After Phase T75
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -585,14 +585,14 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T77 — Phase 75 Feature Integration Tests + Async Export Unit Tests (2026-02-18)
+## Phase T76 — Phase 74 Feature Integration Tests + Async Export Unit Tests (2026-02-18)
 
-**Scope**: E1: Integration tests for Phase 75 features (certificate_authorities, key material export, session cache); E2: Async export API unit tests.
+**Scope**: E1: Integration tests for Phase 74 features (certificate_authorities, key material export, session cache); E2: Async export API unit tests.
 **New items**: 10 new integration tests (E1) + 6 new async unit tests (E2) = +16 tests total (2054 → 2070)
 **hitls-integration-tests**: 78 → 88 tests
 **hitls-tls**: 753 → 759 tests
 
-### E1: Integration Tests for Phase 75 Features (+10)
+### E1: Integration Tests for Phase 74 Features (+10)
 
 | Test | Category | Description |
 |------|----------|-------------|
@@ -618,7 +618,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_async_tls13_certificate_authorities_config | Async Cert Auth | Handshake with CA config succeeds, export also works |
 | test_async_tls13_export_keying_material_deterministic | Async EKM | Same label+context always returns same bytes |
 
-### Workspace Test Counts After Phase T77
+### Workspace Test Counts After Phase T76
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -637,7 +637,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase 80 — Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) (2026-02-18)
+## Phase 79 — Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) (2026-02-18)
 
 **Scope**: Async DTLS 1.2 connections, Heartbeat extension codec, GREASE ClientHello injection.
 **New items**: +19 tests (2086 → 2105)
@@ -669,7 +669,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T79 — cert_verify Unit Tests + Config Callbacks + Integration Tests (2026-02-18)
+## Phase T78 — cert_verify Unit Tests + Config Callbacks + Integration Tests (2026-02-18)
 
 **Scope**: F1: cert_verify module unit tests; F2: config callback tests; F3: integration tests.
 **New items**: 13 cert_verify unit tests (F1) + 7 config callback tests (F2) + 6 integration tests (F3) = +26 tests total (2105 → 2131)
@@ -717,7 +717,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_tls12_key_log_callback_invoked | Lines start with CLIENT_RANDOM |
 | test_tls12_server_renegotiation | Server-initiated renegotiation end-to-end |
 
-### Workspace Test Counts After Phase T79
+### Workspace Test Counts After Phase T78
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -736,9 +736,9 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T81 — SniCallback + PADDING + OID Filters + DTLS Abbreviated + PskServerCallback (2026-02-19)
+## Phase T80 — SniCallback + PADDING + OID Filters + DTLS Abbreviated + PskServerCallback (2026-02-19)
 
-**Scope**: Integration tests for Phase 75–78 features — SNI-based certificate selection, PADDING extension target, OID Filters in CertificateRequest, DTLS abbreviated handshake session resumption, and PskServerCallback.
+**Scope**: Integration tests for Phase 74–77 features — SNI-based certificate selection, PADDING extension target, OID Filters in CertificateRequest, DTLS abbreviated handshake session resumption, and PskServerCallback.
 **New tests**: +13 (2131 → 2144)
 **hitls-integration-tests**: 94 → 107 tests
 
@@ -762,7 +762,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T82 — GREASE + Heartbeat + Async DTLS Edge Cases + Extension Codec Negative Tests (2026-02-19)
+## Phase T81 — GREASE + Heartbeat + Async DTLS Edge Cases + Extension Codec Negative Tests (2026-02-19)
 
 **Scope**: GREASE ClientHello validation, Heartbeat config/codec, async DTLS 1.2 edge cases, and extension codec negative/boundary tests.
 **New tests**: +22 (2144 → 2166)
@@ -810,7 +810,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_build_parse_certificate_authorities_roundtrip | certificate_authorities codec roundtrip |
 | test_parse_signature_algorithms_cert_truncated | Truncated sig_algs_cert → parse error |
 
-### Workspace Test Counts After Phase T82
+### Workspace Test Counts After Phase T81
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -829,7 +829,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T83 — DTLS 1.2 Handshake + TLS 1.3 Server + Record Layer + PRF Unit Tests
+## Phase T82 — DTLS 1.2 Handshake + TLS 1.3 Server + Record Layer + PRF Unit Tests
 
 **Date**: 2026-02-19
 **Tests added**: +28 (2166 → 2194)
@@ -890,7 +890,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_prf_empty_secret | Empty secret → valid output |
 | test_prf_different_seeds_differ | Different seeds → different output |
 
-### Workspace Test Counts After Phase T83
+### Workspace Test Counts After Phase T82
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -909,7 +909,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T84 — TLCP Server + Transcript + Key Schedule 1.2 + Cert Verify + TLS 1.3 Client + Session Unit Tests
+## Phase T83 — TLCP Server + Transcript + Key Schedule 1.2 + Cert Verify + TLS 1.3 Client + Session Unit Tests
 
 **Date**: 2026-02-19
 **Tests added**: +24 (2194 → 2218)
@@ -971,7 +971,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_session_ticket_lifetime_roundtrip | ticket_lifetime preserved in encode/decode |
 | test_session_ems_flag_roundtrip | extended_master_secret flag preserved |
 
-### Workspace Test Counts After Phase T84
+### Workspace Test Counts After Phase T83
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -990,7 +990,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T88 — Client TLCP + Cipher Suite Params + Verify Ed448 + HKDF Edge Cases
+## Phase T87 — Client TLCP + Cipher Suite Params + Verify Ed448 + HKDF Edge Cases
 
 **Date**: 2026-02-19
 **Tests added**: +25 (2274 → 2299)
@@ -1043,7 +1043,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_hkdf_empty_data_hmac | HMAC with empty data finishes successfully |
 | test_hkdf_expand_exact_hash_length | Expand to exact hash_len output |
 
-### Workspace Test Counts After Phase T88
+### Workspace Test Counts After Phase T87
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1062,7 +1062,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T89: codec/server12/client12/dtls12/config Unit Tests
+## Phase T88: codec/server12/client12/dtls12/config Unit Tests
 
 **Date**: 2026-02-19
 **Tests added**: +24 (2299 → 2323)
@@ -1117,7 +1117,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_config_default_supported_groups_non_empty | Default config has non-empty supported groups |
 | test_config_default_signature_algorithms_non_empty | Default config has non-empty signature algorithms |
 
-### Workspace Test Counts After Phase T89
+### Workspace Test Counts After Phase T88
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1136,7 +1136,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T90: session/client/server/async/dtls12-async Unit Tests
+## Phase T89: session/client/server/async/dtls12-async Unit Tests
 
 **Date**: 2026-02-19
 **Tests added**: +25 (2323 → 2348)
@@ -1192,7 +1192,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_async_dtls12_peer_certificates_empty | Server peer_certs empty when verify_peer=false |
 | test_async_dtls12_bidirectional_after_handshake | Client→Server and Server→Client data exchange |
 
-### Workspace Test Counts After Phase T90
+### Workspace Test Counts After Phase T89
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1209,7 +1209,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2348** | **40** |
 
-## Phase T91: record/extensions/export/codec/connection Unit Tests
+## Phase T90: record/extensions/export/codec/connection Unit Tests
 
 **Date**: 2026-02-19
 **Scope**: Record layer, extensions framework, key material export, extensions codec, TLS 1.3 connection
@@ -1244,7 +1244,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 23 | connection.rs | test_tls13_queue_early_data_and_accepted | Queue early data + verify early_data_accepted is false |
 | 24 | connection.rs | test_tls13_server_key_update_before_connected | Server key_update before connected fails |
 
-### Workspace Test Counts After Phase T91
+### Workspace Test Counts After Phase T90
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1261,7 +1261,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2372** | **40** |
 
-## Phase T92: aead/crypt/alert/signing/config Unit Tests
+## Phase T91: aead/crypt/alert/signing/config Unit Tests
 
 **Date**: 2026-02-19
 **Scope**: AEAD constructors, cipher suite params, alert codes, signing dispatch, config builder
@@ -1297,7 +1297,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 24 | config/mod.rs | test_config_multiple_trusted_certs | Accumulate 2 trusted certs |
 | 25 | config/mod.rs | test_config_builder_all_version_range_combinations | TLS 1.2-only and TLS 1.3-only ranges |
 
-### Workspace Test Counts After Phase T92
+### Workspace Test Counts After Phase T91
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1314,7 +1314,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2397** | **40** |
 
-## Phase T93: retransmit/keylog/fragment/anti_replay/key_exchange Unit Tests
+## Phase T92: retransmit/keylog/fragment/anti_replay/key_exchange Unit Tests
 
 **Date**: 2026-02-19
 **Scope**: DTLS retransmission timer, NSS key logging, handshake fragmentation, anti-replay window, key exchange
@@ -1348,7 +1348,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 22 | key_exchange.rs | test_key_exchange_secp256r1_shared_secret_symmetry | Both directions produce equal shared secret |
 | 23 | key_exchange.rs | test_key_exchange_x448_roundtrip | X448 DH both directions equal, len=56 |
 
-### Workspace Test Counts After Phase T93
+### Workspace Test Counts After Phase T92
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1365,7 +1365,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2420** | **40** |
 
-## Phase T95: connection12_async/server_dtlcp/client_dtlcp/encryption_dtlcp/lib.rs Unit Tests
+## Phase T94: connection12_async/server_dtlcp/client_dtlcp/encryption_dtlcp/lib.rs Unit Tests
 
 **Date**: 2026-02-20
 **Scope**: Async TLS 1.2 accessors + handshake, DTLCP client+server wrong-state, DTLCP record encryption edge cases, core enum tests
@@ -1401,7 +1401,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 24 | lib.rs | test_cipher_suite_hash_and_eq | HashSet deduplication works |
 | 25 | lib.rs | test_cipher_suite_fallback_scsv | TLS_FALLBACK_SCSV = 0x5600 |
 
-### Workspace Test Counts After Phase T95
+### Workspace Test Counts After Phase T94
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1418,7 +1418,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2445** | **40** |
 
-## Phase T96: connection_info/handshake enums/lib.rs constants/codec error paths/async accessors
+## Phase T95: connection_info/handshake enums/lib.rs constants/codec error paths/async accessors
 
 **Date**: 2026-02-20
 **Scope**: ConnectionInfo struct tests, HandshakeType/HandshakeState enum coverage, TLS 1.2/TLCP/PSK cipher suite constants, TLCP+DTLS codec error paths, async TLS 1.2 + DTLS 1.2 accessor tests
@@ -1469,7 +1469,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 39 | connection_dtls12_async.rs | test_async_dtls12_server_accessors_after_handshake | Server info/cipher/version after handshake |
 | 40 | connection_dtls12_async.rs | test_async_dtls12_client_connection_info_before_handshake | All client accessors return defaults |
 
-### Workspace Test Counts After Phase T96
+### Workspace Test Counts After Phase T95
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1488,7 +1488,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T97: ECC curve params/DH group params/TLCP public API/DTLCP error paths/DTLCP encryption
+## Phase T96: ECC curve params/DH group params/TLCP public API/DTLCP error paths/DTLCP encryption
 
 **Date**: 2026-02-20
 **Scope**: ECC curve parameter validation (9 curves), DH group parameter validation (13 groups), TLCP public API (TlcpClientConnection/TlcpServerConnection), DTLCP seal/open before connected error paths, DTLCP encryption edge cases
@@ -1503,7 +1503,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | DTLCP Connection | `hitls-tls/src/connection_dtlcp.rs` | 4 | client_seal_before_connected, client_open_before_connected, server_seal_before_connected, server_open_before_connected |
 | DTLCP Encryption | `hitls-tls/src/record/encryption_dtlcp.rs` | 4 | explicit_nonce_format, gcm_empty_plaintext_roundtrip, cbc_sequential_records, cbc_large_plaintext_roundtrip |
 
-### Workspace Test Counts After Phase T97
+### Workspace Test Counts After Phase T96
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1522,7 +1522,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-## Phase T98: ECC Jacobian point/AES software S-box/SM9 Fp field/SM9 G1/McEliece bit vector
+## Phase T97: ECC Jacobian point/AES software S-box/SM9 Fp field/SM9 G1/McEliece bit vector
 
 **Date**: 2026-02-20
 **Scope**: First-ever unit tests for 5 previously untested crypto implementation files: ECC Jacobian point arithmetic, AES software (S-box) implementation, SM9 BN256 Fp field arithmetic, SM9 G1 point operations, and Classic McEliece bit vector utilities
@@ -1537,7 +1537,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | SM9 EcPointG1 | `hitls-crypto/src/sm9/ecp.rs` | 5 | generator_on_curve, infinity_add_generator, negate_add_gives_infinity, scalar_mul_by_order_gives_infinity, serialization_roundtrip |
 | McEliece Vector | `hitls-crypto/src/mceliece/vector.rs` | 4 | set_get_bit_roundtrip, flip_bit, hamming_weight, pop64_count_ones |
 
-### Workspace Test Counts After Phase T98
+### Workspace Test Counts After Phase T97
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1554,7 +1554,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2577** | **40** |
 
-### 7.17 Phase T110 — Async TLS 1.2 Deep Coverage (+10 tests, 2,585→2,595)
+### 7.17 Phase T109 — Async TLS 1.2 Deep Coverage (+10 tests, 2,585→2,595)
 
 **Date**: 2026-02-23
 **File modified**: `crates/hitls-tls/src/connection12_async.rs`
@@ -1573,7 +1573,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_async_tls12_bidirectional_server_first | connection12_async.rs | Server sends first, client replies |
 | test_async_tls12_write_after_shutdown | connection12_async.rs | Write after shutdown fails |
 
-### Workspace Test Counts After Phase T110
+### Workspace Test Counts After Phase T109
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1590,7 +1590,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2595** | **40** |
 
-### 7.18 Phase T111 — Async TLCP + DTLCP Connection Types & Tests (+15 tests, 2,595→2,610)
+### 7.18 Phase T110 — Async TLCP + DTLCP Connection Types & Tests (+15 tests, 2,595→2,610)
 
 **Date**: 2026-02-23
 **Files created**: `crates/hitls-tls/src/connection_tlcp_async.rs`, `crates/hitls-tls/src/connection_dtlcp_async.rs`
@@ -1622,7 +1622,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | test_async_dtlcp_bidirectional | connection_dtlcp_async.rs | Bidirectional data exchange |
 | test_async_dtlcp_large_payload | connection_dtlcp_async.rs | 32KB payload exchange |
 
-### Workspace Test Counts After Phase T111
+### Workspace Test Counts After Phase T110
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1639,7 +1639,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2610** | **40** |
 
-### 7.17 Phase T112 — Extension Negotiation E2E Tests (+14 tests)
+### 7.17 Phase T111 — Extension Negotiation E2E Tests (+14 tests)
 
 **Date**: 2026-02-23
 **Deficiency**: D3 (High) — Extension negotiation flows lack E2E tests
@@ -1668,7 +1668,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 13 | test_duplicate_extension_type_both_returned | Both returned (no dedup) |
 | 14 | test_zero_length_extension_parses_ok | PADDING(0 bytes) parses OK |
 
-**Per-crate counts after Phase T112**:
+**Per-crate counts after Phase T111**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1685,7 +1685,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2624** | **40** |
 
-### Phase T113 — DTLS Loss Simulation & Resilience Tests (+10 tests, 2,624→2,634)
+### Phase T112 — DTLS Loss Simulation & Resilience Tests (+10 tests, 2,624→2,634)
 
 **Scope**: Partially close D4 (High) — DTLS 1.2 had no tests for adverse delivery patterns.
 
@@ -1709,7 +1709,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 9 | test_dtls12_seal_app_data_not_connected | RecordError("not connected") |
 | 10 | test_dtls12_open_app_data_not_connected | RecordError("not connected") |
 
-**Per-crate counts after Phase T113**:
+**Per-crate counts after Phase T112**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1728,7 +1728,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 
 ---
 
-### Phase T114 — TLCP Double Certificate Validation Tests (+10 tests, 2,634→2,644)
+### Phase T113 — TLCP Double Certificate Validation Tests (+10 tests, 2,634→2,644)
 
 **Scope**: Partially close D5 (High) — TLCP double certificate error paths untested.
 
@@ -1752,7 +1752,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | 9 | test_dtlcp_handshake_fails_without_enc_cert | DTLCP | no enc cert |
 | 10 | test_dtlcp_handshake_fails_without_signing_key | DTLCP | no signing key |
 
-**Per-crate counts after Phase T114**:
+**Per-crate counts after Phase T113**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1769,7 +1769,7 @@ Pure test coverage phases — no new features, only new tests for existing code.
 | doc-tests | 2 | 0 |
 | **Total** | **2644** | **40** |
 
-### Phase T115: SM9 Tower Field Unit Tests (+15 tests, 2,644→2,659)
+### Phase T114: SM9 Tower Field Unit Tests (+15 tests, 2,644→2,659)
 
 **Date**: 2026-02-23
 **Deficiency**: D10 (Low) — SM9 tower field arithmetic (Fp2, Fp4, Fp12) had zero direct unit tests.
@@ -1794,7 +1794,7 @@ Added 15 algebraic property tests across the three tower extension fields:
 | 14 | `test_fp12_pow` | fp12.rs | x^0=1, x^1=x, x^2=sqr, x^3=x*x*x |
 | 15 | `test_fp12_frobenius_consistency` | fp12.rs | frob2=frob∘frob, frob3=frob2∘frob |
 
-**Per-crate counts after Phase T115**:
+**Per-crate counts after Phase T114**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1813,7 +1813,7 @@ Added 15 algebraic property tests across the three tower extension fields:
 
 ---
 
-### Phase T116: SLH-DSA Internal Module Unit Tests (+15 tests, 2,659→2,674)
+### Phase T115: SLH-DSA Internal Module Unit Tests (+15 tests, 2,659→2,674)
 
 **Date**: 2026-02-23
 **Deficiency**: D10 (Low) — SLH-DSA (FIPS 205) had 6 internal modules (1,224 lines) with zero direct unit tests. All coverage was indirect through 12 high-level roundtrip tests in `mod.rs`.
@@ -1838,7 +1838,7 @@ Added 15 dedicated unit tests covering address encoding, parameter validation, h
 | 14 | `test_fors_sign_pk_recovery` | fors.rs | fors_sign → fors_pk_from_sig roundtrip + determinism |
 | 15 | `test_xmss_root_consistency` | hypertree.rs | xmss_compute_root == xmss_compute_root_with_auth, auth_path=hp*n |
 
-**Per-crate counts after Phase T116**:
+**Per-crate counts after Phase T115**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1857,7 +1857,7 @@ Added 15 dedicated unit tests covering address encoding, parameter validation, h
 
 ---
 
-### Phase T117: McEliece + FrodoKEM + XMSS Internal Module Tests (+15 tests, 2,674→2,689)
+### Phase T116: McEliece + FrodoKEM + XMSS Internal Module Tests (+15 tests, 2,674→2,689)
 
 **Date**: 2026-02-23
 **Deficiency**: D10 (Low) — Three PQC families (Classic McEliece, FrodoKEM, XMSS) had internal modules with zero direct unit tests. All coverage was indirect through high-level keygen/encaps/sign roundtrip tests.
@@ -1882,7 +1882,7 @@ Added 15 dedicated unit tests across 11 files covering parameter invariants, GF 
 | 14 | `test_xmss_hasher_f_h_output_lengths` | xmss/hash.rs | F, H, h_msg all return n bytes |
 | 15 | `test_xmss_base_w_extraction` | xmss/wots.rs | base_w nibble extraction: [0x12,0x34]→[1,2,3,4], 0xFF→[15,15], etc. |
 
-**Per-crate counts after Phase T117**:
+**Per-crate counts after Phase T116**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1901,7 +1901,7 @@ Added 15 dedicated unit tests across 11 files covering parameter invariants, GF 
 
 ---
 
-### Phase T118: Infrastructure — proptest Property-Based Tests + Coverage CI (+20 tests, 2,689→2,709)
+### Phase T117: Infrastructure — proptest Property-Based Tests + Coverage CI (+20 tests, 2,689→2,709)
 
 **Date**: 2026-02-23
 
@@ -1930,7 +1930,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 19 | `prop_asn1_utf8_string_roundtrip` | asn1/encoder.rs | decode(encode_utf8(s)) == s |
 | 20 | `prop_asn1_sequence_roundtrip` | asn1/encoder.rs | Encode(int,bytes,bool) in SEQUENCE, decode all fields match |
 
-**Per-crate counts after Phase T118**:
+**Per-crate counts after Phase T117**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1949,7 +1949,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-## Phase T119: TLCP SM3 Cryptographic Path Coverage (+15 tests, 2,709→2,724)
+## Phase T118: TLCP SM3 Cryptographic Path Coverage (+15 tests, 2,709→2,724)
 
 **Date**: 2026-02-24
 **Scope**: SM3-specific code paths in transcript hash, PRF, key schedule, and verify_data — previously all tested only with SHA-256/384.
@@ -1974,7 +1974,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_tlcp_key_block_seed_order_sm3` | key_schedule12.rs | Swapped randoms → different keys with SM3 |
 | 15 | `test_sm3_full_verify_pipeline` | key_schedule12.rs | SM3 master secret → transcript → verify_data full pipeline |
 
-**Per-crate counts after Phase T119**:
+**Per-crate counts after Phase T118**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -1991,7 +1991,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | doc-tests | 2 | 0 |
 | **Total** | **2724** | **40** |
 
-## Phase T120: TLS 1.3 Key Schedule & HKDF Robustness Tests (+15 tests, 2,724→2,739)
+## Phase T119: TLS 1.3 Key Schedule & HKDF Robustness Tests (+15 tests, 2,724→2,739)
 
 **Date**: 2026-02-24
 **Scope**: SHA-384 full pipeline correctness, stage enforcement gaps, SM3 HKDF coverage, HMAC key boundary, RFC 8448 app traffic key vectors, CCM_8/SM4-GCM-SM3 cipher suites.
@@ -2016,7 +2016,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_traffic_keys_after_key_update` | traffic_keys.rs | KeyUpdate produces different traffic keys |
 | 15 | `test_traffic_keys_sm4_gcm_sm3` | traffic_keys.rs | TLS_SM4_GCM_SM3: key=16, iv=12, differs from AES-128-GCM |
 
-**Per-crate counts after Phase T120**:
+**Per-crate counts after Phase T119**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2033,7 +2033,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | doc-tests | 2 | 0 |
 | **Total** | **2739** | **40** |
 
-### Phase T121: Record Layer Encryption Edge Cases & AEAD Failure Modes (2026-02-24)
+### Phase T120: Record Layer Encryption Edge Cases & AEAD Failure Modes (2026-02-24)
 
 **+15 tests** across 3 modules (encryption_dtls12.rs, encryption_tlcp.rs, aead.rs).
 
@@ -2055,7 +2055,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_create_aead_unsupported_suite` | aead.rs | CipherSuite(0xFFFF) → NoSharedCipherSuite |
 | 15 | `test_sm4_gcm_invalid_key_length` | aead.rs | 15/17/0 bytes → error; 16 bytes → ok |
 
-**Per-crate counts after Phase T121**:
+**Per-crate counts after Phase T120**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2074,7 +2074,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-### Phase T122: TLS 1.2 CBC Padding Security + DTLS Parsing + TLS 1.3 Inner Plaintext Edge Cases (+15 tests, 2,754→2,769)
+### Phase T121: TLS 1.2 CBC Padding Security + DTLS Parsing + TLS 1.3 Inner Plaintext Edge Cases (+15 tests, 2,754→2,769)
 
 **Date**: 2026-02-24
 
@@ -2096,7 +2096,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_parse_inner_plaintext_all_zeros` | encryption.rs | All-zero buffer → "inner plaintext has no content type" |
 | 15 | `test_parse_inner_plaintext_unknown_type` | encryption.rs | [0x41, 0xFF] → "unknown inner content type" |
 
-**Per-crate counts after Phase T122**:
+**Per-crate counts after Phase T121**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2113,7 +2113,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | doc-tests | 2 | 0 |
 | **Total** | **2769** | **40** |
 
-### Phase T123: DTLS Fragmentation/Retransmission + CertificateVerify Edge Cases (+15 tests, 2,769→2,784)
+### Phase T122: DTLS Fragmentation/Retransmission + CertificateVerify Edge Cases (+15 tests, 2,769→2,784)
 
 **Date**: 2026-02-24
 
@@ -2135,7 +2135,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_build_verify_content_deterministic` | verify.rs | Same (hash, is_server) → identical output; different → different |
 | 15 | `test_verify_certificate_verify_ed25519_wrong_public_key` | verify.rs | Valid signature but different Ed25519 key → verification fails |
 
-**Per-crate counts after Phase T123**:
+**Per-crate counts after Phase T122**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2152,7 +2152,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | doc-tests | 2 | 0 |
 | **Total** | **2784** | **40** |
 
-### Phase T124: DTLS Codec Edge Cases + Anti-Replay Window Boundaries + Entropy Conditioning (+15 tests, 2,784→2,799)
+### Phase T123: DTLS Codec Edge Cases + Anti-Replay Window Boundaries + Entropy Conditioning (+15 tests, 2,784→2,799)
 
 **Date**: 2026-02-24
 
@@ -2174,7 +2174,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_conditioner_needed_input_len_various_rates` | conditioning.rs | Rates 2,3,4,6,7 bits/byte → correct ceiling-division results |
 | 15 | `test_conditioner_large_input` | conditioning.rs | 1000-byte input produces valid 32-byte output |
 
-**Per-crate counts after Phase T124**:
+**Per-crate counts after Phase T123**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2191,7 +2191,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | doc-tests | 2 | 0 |
 | **Total** | **2799** | **40** |
 
-### Phase T125: X.509 Extension Parsing + SLH-DSA WOTS+ Base Conversion + ASN.1 Tag Edge Cases (+15 tests, 2,799→2,814)
+### Phase T124: X.509 Extension Parsing + SLH-DSA WOTS+ Base Conversion + ASN.1 Tag Edge Cases (+15 tests, 2,799→2,814)
 
 **Date**: 2026-02-24
 
@@ -2213,7 +2213,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_tag_long_form_truncated_error` | tag.rs | 0x1F + 0x81 (no continuation) → DecodeAsn1Fail |
 | 15 | `test_tag_large_number_encoding` | tag.rs | Tag number=0x4000 → 3-byte long-form roundtrip |
 
-**Per-crate counts after Phase T125**:
+**Per-crate counts after Phase T124**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2230,7 +2230,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | doc-tests | 2 | 0 |
 | **Total** | **2814** | **40** |
 
-### Phase T126: PKI Encoding Helpers + X.509 Signing Dispatch + Certificate Builder Encoding (+15 tests, 2,814→2,829)
+### Phase T125: PKI Encoding Helpers + X.509 Signing Dispatch + Certificate Builder Encoding (+15 tests, 2,814→2,829)
 
 **Date**: 2026-02-24
 
@@ -2252,7 +2252,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_encode_validity_parseable` | builder.rs | Encode 2024/2025 timestamps → Decoder roundtrip matches |
 | 15 | `test_encode_extensions_critical_flag` | builder.rs | Critical → BOOLEAN TRUE (01 01 FF); non-critical → absent |
 
-**Per-crate counts after Phase T126**:
+**Per-crate counts after Phase T125**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2271,7 +2271,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-## Phase T131: McEliece GF(2^13) + Benes Network + Binary Matrix Deepening (+15 tests, 2,882→2,897)
+## Phase T130: McEliece GF(2^13) + Benes Network + Binary Matrix Deepening (+15 tests, 2,882→2,897)
 
 **Date**: 2026-02-24
 **Scope**: McEliece GF(2^13) field arithmetic (gf.rs, 135 lines, 1 test), Benes network control bits and support reconstruction (benes.rs, 380 lines, 1 test), binary matrix and Gaussian elimination (matrix.rs, 433 lines, 1 test). Low-density deepening of McEliece internals.
@@ -2294,7 +2294,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_same_mask_equal_returns_all_ones` | matrix.rs | same_mask(k, k) == u64::MAX |
 | 15 | `test_same_mask_unequal_returns_zero` | matrix.rs | same_mask(k, j) == 0 for k ≠ j |
 
-**Per-crate counts after Phase T131**:
+**Per-crate counts after Phase T130**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2313,7 +2313,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-## Phase T130: XMSS Tree Operations + XMSS WOTS+ Deepening + SLH-DSA FORS Deepening (+15 tests, 2,872→2,882)
+## Phase T129: XMSS Tree Operations + XMSS WOTS+ Deepening + SLH-DSA FORS Deepening (+15 tests, 2,872→2,882)
 
 **Date**: 2026-02-24
 **Scope**: XMSS Merkle tree operations (tree.rs, 161 lines, 0 tests — last truly untested logic file), XMSS WOTS+ chain/compress/sign (wots.rs, 198 lines, 1 test), SLH-DSA FORS few-time signature internals (fors.rs, 146 lines, 1 test). Shift from zero-test files to low-density deepening.
@@ -2336,7 +2336,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_fors_node_leaf_output_length` | fors.rs | Leaf node (height=0) produces n bytes; deterministic |
 | 15 | `test_fors_pk_same_for_different_messages` | fors.rs | Different messages → same FORS pk (tree roots are deterministic) |
 
-**Per-crate counts after Phase T130**:
+**Per-crate counts after Phase T129**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2355,7 +2355,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-## Phase T129: McEliece Keygen Helpers + McEliece Encoding + McEliece Decoding (+15 tests, 2,857→2,872)
+## Phase T128: McEliece Keygen Helpers + McEliece Encoding + McEliece Decoding (+15 tests, 2,857→2,872)
 
 **Date**: 2026-02-24
 **Scope**: Classic McEliece PQC algorithm internals — key generation helpers (keygen.rs, 242 lines, 0 tests), encoding and error vector generation (encode.rs, 123 lines, 0 tests), Goppa code decoding via Berlekamp-Massey (decode.rs, 180 lines, 0 tests).
@@ -2378,7 +2378,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_compute_syndrome_zero_received` | decode.rs | Zero received → all-zero syndrome |
 | 15 | `test_compute_syndrome_length` | decode.rs | Syndrome has exactly 2*t elements |
 
-**Per-crate counts after Phase T129**:
+**Per-crate counts after Phase T128**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2397,7 +2397,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-## Phase T128: SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters (+15 tests, 2,844→2,857)
+## Phase T127: SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters (+15 tests, 2,844→2,857)
 
 **Date**: 2026-02-24
 **Scope**: SM9 hash-to-range functions H1/H2 and KDF (hash.rs, 81 lines, 0 tests), SM9 top-level algorithm functions and serialization helpers (alg.rs, 370 lines, 0 tests), BN256 domain parameter constants (curve.rs, 76 lines, 0 tests).
@@ -2420,7 +2420,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_b_coeff_is_five` | curve.rs | `b_coeff()` == `BigNum::from_u64(5)` |
 | 15 | `test_generator_coordinates_nonzero` | curve.rs | All 6 generator coordinates (p1_x, p1_y, p2_x0, p2_x1, p2_y0, p2_y1) nonzero |
 
-**Per-crate counts after Phase T128**:
+**Per-crate counts after Phase T127**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2439,7 +2439,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-## Phase T127: X.509 Certificate Parsing + SM9 G2 Point Arithmetic + SM9 Pairing Helpers (+15 tests, 2,829→2,844)
+## Phase T126: X.509 Certificate Parsing + SM9 G2 Point Arithmetic + SM9 Pairing Helpers (+15 tests, 2,829→2,844)
 
 **Date**: 2026-02-24
 **Scope**: X.509 certificate core types and DER parsing (certificate.rs, 628 lines, 0 tests), SM9 G2 elliptic curve point operations on twist E'(Fp²) (ecp2.rs, 212 lines, 0 tests), R-ate pairing and Fp2 exponentiation helpers (pairing.rs, 286 lines, 0 tests).
@@ -2462,7 +2462,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_fp2_pow_one_gives_base` | pairing.rs | `fp2_pow(x, 1)` == x |
 | 15 | `test_fp2_pow_squaring` | pairing.rs | `fp2_pow(x, 2)` == `x.sqr()` |
 
-**Per-crate counts after Phase T127**:
+**Per-crate counts after Phase T126**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2479,7 +2479,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | doc-tests | 2 | 0 |
 | **Total** | **2844** | **40** |
 
-### Phase T132: FrodoKEM Matrix Ops + SLH-DSA Hypertree + McEliece Polynomial Deepening (+15 tests, 2,897→2,909)
+### Phase T131: FrodoKEM Matrix Ops + SLH-DSA Hypertree + McEliece Polynomial Deepening (+15 tests, 2,897→2,909)
 
 **Date**: 2026-02-24
 **Scope**: Deepen test coverage for three PQC internal modules with low test density: FrodoKEM matrix operations (matrix.rs, 343 lines, 1 test), SLH-DSA hypertree (hypertree.rs, 343 lines, 1 test), McEliece polynomial operations (poly.rs, 222 lines, 2 tests).
@@ -2502,7 +2502,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_gfpoly_eval_quadratic` | poly.rs | f(x)=x²+x+1: f(0)=1, f(1)=1, f(2)=7, f(3)=7 |
 | 15 | `test_gfpoly_eval_identity_polynomial` | poly.rs | f(x)=x: f(k)=k for k in {0,1,2,5,100,255,1000,8191} |
 
-**Per-crate counts after Phase T132**:
+**Per-crate counts after Phase T131**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2521,7 +2521,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-### Phase T133: McEliece + FrodoKEM + XMSS Parameter Set Validation Deepening (+15 tests, 2,909→2,924)
+### Phase T132: McEliece + FrodoKEM + XMSS Parameter Set Validation Deepening (+15 tests, 2,909→2,924)
 
 **Date**: 2026-02-24
 **Scope**: Deepen parameter set validation for three PQC modules: McEliece params (params.rs, 284 lines, 1 test), FrodoKEM params (params.rs, 359 lines, 2 tests), XMSS params (params.rs, 169 lines, 1 test).
@@ -2544,7 +2544,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_xmss_same_height_same_sig_size` | xmss/params.rs | Same h → same sig_bytes across hash modes |
 | 15 | `test_xmss_sig_bytes_monotonic_with_height` | xmss/params.rs | sig_bytes: h=10 < h=16 < h=20 |
 
-**Per-crate counts after Phase T133**:
+**Per-crate counts after Phase T132**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2561,7 +2561,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | doc-tests | 2 | 0 |
 | **Total** | **2924** | **50** |
 
-### Phase T134: XMSS Hash Abstraction + XMSS Address Scheme + ML-KEM NTT Deepening (+15 tests, 2,924→2,939)
+### Phase T133: XMSS Hash Abstraction + XMSS Address Scheme + ML-KEM NTT Deepening (+15 tests, 2,924→2,939)
 
 **Date**: 2026-02-24
 **Scope**: Deepen test coverage for three PQC internal modules: XMSS hash abstraction (hash.rs, 247 lines, 2 tests), XMSS address scheme (address.rs, 120 lines, 2 tests), ML-KEM NTT (ntt.rs, 229 lines, 3 tests).
@@ -2584,7 +2584,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_to_mont_and_reduce_poly` | mlkem/ntt.rs | to_mont changes nonzero coefficients; reduce_poly bounds |
 | 15 | `test_zetas_table_properties` | mlkem/ntt.rs | 128 entries, all nonzero, all in (-Q,Q), all distinct |
 
-**Per-crate counts after Phase T134**:
+**Per-crate counts after Phase T133**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2603,7 +2603,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-### Phase T135: BigNum Constant-Time + Primality Testing + Core Type Deepening (+15 tests, 2,939→2,954)
+### Phase T134: BigNum Constant-Time + Primality Testing + Core Type Deepening (+15 tests, 2,939→2,954)
 
 **Date**: 2026-02-24
 **Scope**: Deepen test coverage for three hitls-bignum core modules: constant-time operations (ct.rs, 136 lines, 3 tests), primality testing (prime.rs, 101 lines, 3 tests), core BigNum type (bignum.rs, 324 lines, 4 tests).
@@ -2626,7 +2626,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_from_bytes_be_edge_cases` | bignum.rs | Empty→zero, single byte, leading zeros, >64-bit roundtrip |
 | 15 | `test_from_limbs_and_normalize` | bignum.rs | Trailing zero limbs normalized, empty→zero, multi-limb preserved |
 
-**Per-crate counts after Phase T135**:
+**Per-crate counts after Phase T134**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2645,24 +2645,24 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-### Phase 136–140: Feature & Performance Optimization (+67 tests, 2,954→3,021)
+### Phase 135–139: Feature & Performance Optimization (+67 tests, 2,954→3,021)
 
 **Date**: 2026-02-24
 **Scope**: TLS 1.3 middlebox compatibility + 4 hardware acceleration / specialized arithmetic optimizations.
 
 | # | Phase | Tests Added | File(s) | Property |
 |---|-------|:-----------:|---------|----------|
-| 1 | Phase 136 — Middlebox Compat | 6 | config/mod.rs, handshake/client.rs | Config defaults, session ID generation (32-byte random vs empty) |
-| 2 | Phase 137 — SHA-2 HW Accel | 3 (aarch64) | sha2/sha256_arm.rs | Single-block, multi-block, FIPS-180-4 scalar consistency |
-| 3 | Phase 138 — GHASH HW Accel | 8 (aarch64) | modes/ghash_arm.rs | NIST SP 800-38D vectors, exhaustive pattern comparison |
-| 4 | Phase 139 — P-256 Fast Path | 47 | ecc/p256_field.rs, ecc/p256_point.rs | Montgomery roundtrip, algebraic laws, Jacobian point ops, cross-validation with BigNum |
-| 5 | Phase 140 — ChaCha20 SIMD | 3 (aarch64) | chacha20/chacha20_neon.rs | RFC 8439 vector, counter-zero, all-0xFF key NEON-vs-scalar |
+| 1 | Phase 135 — Middlebox Compat | 6 | config/mod.rs, handshake/client.rs | Config defaults, session ID generation (32-byte random vs empty) |
+| 2 | Phase P136 — SHA-2 HW Accel | 3 (aarch64) | sha2/sha256_arm.rs | Single-block, multi-block, FIPS-180-4 scalar consistency |
+| 3 | Phase P137 — GHASH HW Accel | 8 (aarch64) | modes/ghash_arm.rs | NIST SP 800-38D vectors, exhaustive pattern comparison |
+| 4 | Phase P138 — P-256 Fast Path | 47 | ecc/p256_field.rs, ecc/p256_point.rs | Montgomery roundtrip, algebraic laws, Jacobian point ops, cross-validation with BigNum |
+| 5 | Phase P139 — ChaCha20 SIMD | 3 (aarch64) | chacha20/chacha20_neon.rs | RFC 8439 vector, counter-zero, all-0xFF key NEON-vs-scalar |
 
-**Per-crate counts after Phase 140**: (see Phase T150 above for latest)
+**Per-crate counts after Phase P139**: (see Phase T149 above for latest)
 
 ---
 
-### Phase T141: SLH-DSA Params + Hash Abstraction + Address Scheme Deepening (+15 tests, 3,021→3,036)
+### Phase T140: SLH-DSA Params + Hash Abstraction + Address Scheme Deepening (+15 tests, 3,021→3,036)
 
 **Date**: 2026-02-25
 **Scope**: Deepen test coverage for three SLH-DSA (FIPS 205) internal modules: params.rs (289 lines, 2→7 tests), hash.rs (381 lines, 4→9 tests), address.rs (238 lines, 4→9 tests).
@@ -2685,11 +2685,11 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_field_overlap_height_chain` | address.rs | tree_height/chain_addr same field2 offset |
 | 15 | `test_hash_addr_tree_index_same_offset` | address.rs | hash_addr/tree_index same field3 offset |
 
-**Per-crate counts after Phase T141**: (see Phase T150 above for latest)
+**Per-crate counts after Phase T140**: (see Phase T149 above for latest)
 
 ---
 
-### Phase T150: scrypt + CFB Mode + X448 Deepening (+15 tests, 3,169→3,184)
+### Phase T149: scrypt + CFB Mode + X448 Deepening (+15 tests, 3,169→3,184)
 
 **Date**: 2026-02-25
 
@@ -2715,7 +2715,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-### Phase T149: XTS Mode + Edwards Curve + GMAC Deepening (+15 tests, 3,154→3,169)
+### Phase T148: XTS Mode + Edwards Curve + GMAC Deepening (+15 tests, 3,154→3,169)
 
 **Date**: 2026-02-25
 
@@ -2741,7 +2741,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-### Phase T148: ML-DSA Poly + X.509 Extensions + X.509 Text Deepening (+15 tests, 3,139→3,154)
+### Phase T147: ML-DSA Poly + X.509 Extensions + X.509 Text Deepening (+15 tests, 3,139→3,154)
 
 **Date**: 2026-02-25
 **Scope**: Deepen test coverage for three modules: ML-DSA polynomial operations (poly.rs, 609 lines, 6→11 tests), X.509 extension parsing (extensions.rs, 580 lines, 5→10 tests), X.509 text output (text.rs, 606 lines, 7→12 tests).
@@ -2764,7 +2764,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_oid_name_invalid_bytes_hex_fallback` | text.rs | Invalid OID → hex:colon fallback |
 | 15 | `test_format_basic_constraints_not_ca` | text.rs | CA:FALSE, pathlen:none |
 
-**Per-crate counts after Phase T148**:
+**Per-crate counts after Phase T147**:
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2783,7 +2783,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-### Phase T147: ML-KEM Poly + SM9 Fp12 + Encrypted PKCS#8 Deepening (+15 tests, 3,109→3,124)
+### Phase T146: ML-KEM Poly + SM9 Fp12 + Encrypted PKCS#8 Deepening (+15 tests, 3,109→3,124)
 
 **Date**: 2026-02-25
 **Scope**: Deepen test coverage for three modules: ML-KEM polynomial operations (poly.rs, 339 lines, 5→10 tests), SM9 Fp12 tower field (fp12.rs, 309 lines, 5→10 tests), encrypted PKCS#8 (encrypted.rs, 305 lines, 5→10 tests).
@@ -2806,11 +2806,11 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_encrypted_pkcs8_different_encryptions_differ` | encrypted.rs | Random salt/IV → different DER |
 | 15 | `test_encrypted_pkcs8_decrypt_twice_same_result` | encrypted.rs | Deterministic decrypt |
 
-**Per-crate counts after Phase T147**: (see Phase T150 above for latest)
+**Per-crate counts after Phase T146**: (see Phase T149 above for latest)
 
 ---
 
-### Phase T145: DH Group Params + Entropy Pool + SHA-1 Deepening (+15 tests, 3,094→3,109)
+### Phase T144: DH Group Params + Entropy Pool + SHA-1 Deepening (+15 tests, 3,094→3,109)
 
 **Date**: 2026-02-25
 **Scope**: Deepen test coverage for three modules: DH group parameters (groups.rs, 462 lines, 6→11 tests), entropy pool (pool.rs, 229 lines, 7→12 tests), SHA-1 (sha1/mod.rs, 261 lines, 6→11 tests).
@@ -2833,11 +2833,11 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_sha1_padding_boundary_56` | sha1/mod.rs | 56 bytes forces two-block |
 | 15 | `test_sha1_clone_mid_update` | sha1/mod.rs | Clone mid-update consistency |
 
-**Per-crate counts after Phase T145**: (see Phase T150 above for latest)
+**Per-crate counts after Phase T144**: (see Phase T149 above for latest)
 
 ---
 
-### Phase T144: ML-DSA NTT + SM4-CTR-DRBG + BigNum Random Deepening (+15 tests, 3,079→3,094)
+### Phase T143: ML-DSA NTT + SM4-CTR-DRBG + BigNum Random Deepening (+15 tests, 3,079→3,094)
 
 **Date**: 2026-02-25
 **Scope**: Deepen test coverage for three modules: ML-DSA NTT (ntt.rs, 244 lines, 4→9 tests), SM4-CTR-DRBG (sm4_ctr_drbg.rs, 254 lines, 4→9 tests), BigNum random (rand.rs, 132 lines, 4→9 tests).
@@ -2860,7 +2860,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `test_random_different_calls` | rand.rs | Two random(256) calls differ |
 | 15 | `test_random_large_bits` | rand.rs | 512/1024/2048 bit correct bit_len |
 
-**Per-crate counts after Phase T144**: (see Phase T150 above for latest)
+**Per-crate counts after Phase T143**: (see Phase T149 above for latest)
 
 | Crate | Tests | Ignored |
 |-------|------:|-------:|
@@ -2879,9 +2879,9 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 
 ---
 
-**Per-crate counts after Phase T143**: (see Phase T150 above for latest)
+**Per-crate counts after Phase T142**: (see Phase T149 above for latest)
 
-### Phase T143: FrodoKEM PKE + SM9 G1 Point + SM9 Fp Field Deepening (+15 tests, 3,065→3,079)
+### Phase T142: FrodoKEM PKE + SM9 G1 Point + SM9 Fp Field Deepening (+15 tests, 3,065→3,079)
 
 **Date**: 2026-02-25
 **Scope**: Deepen test coverage for three crypto internal modules: FrodoKEM PKE (pke.rs, 160 lines, 1→6 tests), SM9 G1 point (ecp.rs, 244 lines, 5→10 tests), SM9 Fp field (fp.rs, 178 lines, 6→11 tests). Also re-ignored flaky ElGamal generate test.
@@ -2904,7 +2904,7 @@ Added 20 proptest property-based tests across hitls-crypto and hitls-utils, plus
 | 14 | `mul_u64_consistency` | fp.rs | mul_u64(c) == mul(Fp::from_u64(c)) |
 | 15 | `distributive_law` | fp.rs | a*(b+c) == a*b + a*c |
 
-**Per-crate counts after Phase T143**: (see Phase T150 above for latest)
+**Per-crate counts after Phase T142**: (see Phase T149 above for latest)
 
 ---
 
@@ -2928,7 +2928,7 @@ cargo fmt --all -- --check
 
 ---
 
-## Phase T151: Semantic Fuzz Target Expansion (+3 targets, 10→13)
+## Phase T150: Semantic Fuzz Target Expansion (+3 targets, 10→13)
 
 **Date**: 2026-02-26
 **Scope**: Resolve D11 (Critical) deficiency from QUALITY_REPORT.md by adding 3 semantic fuzz targets beyond parse-only coverage.
@@ -2979,17 +2979,17 @@ cargo fmt --all -- --check
 
 ---
 
-## Phase T152–T160 — Quality Improvement Roadmap
+## Phase T157–T165 — Quality Improvement Roadmap
 
 > Comprehensive quality improvement: +68 tests, +12 ignored, +1 fuzz target, proptest 2/9→5/9 crates.
 
-### Phase T152: TLS Connection Unit Tests (+15)
+### Phase T157: TLS Connection Unit Tests (+15)
 - `crates/hitls-tls/src/connection/tests.rs`: State guard tests (write/read/key_update/shutdown before connected), double handshake error, write after shutdown, read after close_notify, key_update recv counter (increment, reset, limit=128), connection_info/peer_certificates/negotiated_alpn accessors, record_size enforcement, empty write
 
-### Phase T153: TLS 1.2 Handshake Edge Cases (+15)
+### Phase T158: TLS 1.2 Handshake Edge Cases (+15)
 - `crates/hitls-tls/src/connection/tests.rs`: TLS 1.2 EKM (with/without context, before connected), session resumption abbreviated, session cache auto-lookup, verify_data stored, MFL negotiation, TLS 1.3 post-HS cert request (context mismatch, empty cert, sig verify fail, finished fail, success), wrong message type, no shared cipher, optional cert request
 
-### Phase T154: HW↔SW Cross-Validation (+8)
+### Phase T159: HW↔SW Cross-Validation (+8)
 - `crates/hitls-crypto/src/aes/mod.rs`: AES-128/256 soft vs NI/NEON encrypt comparison (1000 random blocks)
 - `crates/hitls-crypto/src/sha2/mod.rs`: SHA-256 soft vs HW (0/1/64/1000 byte inputs)
 - `crates/hitls-crypto/src/modes/ghash.rs`: GHASH soft vs HW (test vectors)
@@ -2998,45 +2998,45 @@ cargo fmt --all -- --check
 - `crates/hitls-crypto/src/ecc/p256_point.rs`: P-256 scalar mul generic vs fast
 - `crates/hitls-crypto/src/mlkem/ntt.rs`: ML-KEM NTT soft vs NEON
 
-### Phase T155: Proptest Expansion (+15)
+### Phase T160: Proptest Expansion (+15)
 - `crates/hitls-tls/src/handshake/codec.rs`: 5 TLS codec roundtrip properties
 - `crates/hitls-bignum/src/ops.rs`: 5 BigNum modular arithmetic algebraic invariants
 - `crates/hitls-pki/src/pkcs8/mod.rs`: 5 PKCS#8/SPKI DER encode↔parse roundtrip properties
 - Proptest coverage: 2/9 → 5/9 crates (added hitls-tls, hitls-pki, hitls-bignum already had it)
 
-### Phase T156: Side-Channel Timing Tests (+6, all #[ignore])
+### Phase T161: Side-Channel Timing Tests (+6, all #[ignore])
 - `crates/hitls-crypto/tests/timing.rs` (NEW, 304 lines)
 - Custom Welch's t-test infrastructure (10K samples, |t|>4.5 threshold, interleaved measurement)
 - Tests: HMAC ct_eq, AES-GCM tag verify, ECDSA verify, RSA PKCS#1v15 verify, X25519 DH, BigNum ct_eq
 - Must run with `--release --ignored` for meaningful results
 
-### Phase T157: Concurrency Stress Tests (+10)
+### Phase T162: Concurrency Stress Tests (+10)
 - `tests/interop/tests/concurrency.rs` (NEW, ~420 lines)
 - Session cache: insert+lookup (10 threads × 100 ops), eviction (capacity=50, 500 insertions), concurrent remove
 - DRBG: concurrent generate (10 threads), concurrent reseed+generate (5+5 threads)
 - TLS: 10 parallel TLS 1.3 handshakes, 10 parallel TLS 1.2 handshakes, 5 concurrent data transfers
 - Crypto: 10 concurrent ECDSA P-256 keygen, 20 concurrent SHA-256 hash ops
 
-### Phase T158: Feature Flag Smoke Tests (+4)
+### Phase T163: Feature Flag Smoke Tests (+4)
 - `crates/hitls-crypto/tests/feature_smoke.rs` (NEW, 96 lines)
 - `test_default_aes_sha2_hmac`: cfg(aes+sha2+hmac) — AES-128 encrypt + SHA-256 hash + HMAC
 - `test_sm_algorithms`: cfg(sm2+sm3+sm4) — SM4 encrypt + SM3 hash + SM2 sign/verify
 - `test_pqc_algorithms`: cfg(mlkem+mldsa) — ML-KEM-768 encaps/decaps + ML-DSA-65 sign/verify
 - `test_minimal_no_default`: always — CryptoError + algorithm ID types available
 
-### Phase T159: Zeroize Runtime Verification (+4, all #[ignore])
+### Phase T164: Zeroize Runtime Verification (+4, all #[ignore])
 - `crates/hitls-crypto/tests/zeroize_verify.rs` (NEW, 143 lines)
 - `test_aes_key_zeroed_on_drop`: Structural drop-path verification (inner SoftAesKey has #[zeroize(drop)])
 - `test_hmac_key_zeroed_on_drop`: Structural drop-path verification (key_block.zeroize() via Drop)
 - `test_ecdsa_private_key_zeroed_on_zeroize`: Drop + recreate verification
 - `test_x25519_private_key_zeroed_on_zeroize`: Explicit .zeroize() + raw memory comparison (before/after)
 
-### Phase T160: DTLS State Machine Fuzz + OpenSSL Interop (+1 fuzz, +2 tests #[ignore])
+### Phase T165: DTLS State Machine Fuzz + OpenSSL Interop (+1 fuzz, +2 tests #[ignore])
 - `fuzz/fuzz_targets/fuzz_dtls_state_machine.rs` (NEW): 8 code paths, 6 seed corpus files
 - `tests/interop/tests/openssl_interop.rs` (NEW): s_client→hitls-rs TLS 1.3 (passes), hitls-rs→s_server TLS 1.2 (reveals verify_data mismatch)
 - Fuzz target inventory: 13→14 targets, 79→85 corpus files
 
-### Build Status (Post T152–T160)
+### Build Status (Post T157–T165)
 - `cargo test --workspace --all-features`: 3,264 passed, 0 failed, 19 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

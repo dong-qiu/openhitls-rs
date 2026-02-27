@@ -75,6 +75,8 @@ jobs:
     name: Miri (UB detection)
     runs-on: ubuntu-latest
     continue-on-error: true
+    env:
+      MIRIFLAGS: "-Zmiri-disable-isolation"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly

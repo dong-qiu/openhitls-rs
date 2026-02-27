@@ -8,6 +8,8 @@ pub(crate) mod curves;
 pub(crate) mod p256_field;
 pub(crate) mod p256_point;
 pub(crate) mod point;
+pub(crate) mod sm2_field;
+pub(crate) mod sm2_point;
 
 use hitls_bignum::BigNum;
 use hitls_types::{CryptoError, EccCurveId};
@@ -81,6 +83,11 @@ impl EcGroup {
             let result = p256_point::p256_scalar_mul(k, &pt);
             return p256_result_to_ecpoint(&result);
         }
+        if self.curve_id == EccCurveId::Sm2Prime256 {
+            let pt = sm2_point::bignum_to_sm2_point(&point.x, &point.y)?;
+            let result = sm2_point::sm2_scalar_mul(k, &pt);
+            return sm2_result_to_ecpoint(&result);
+        }
         let jp = JacobianPoint::from_affine(&point.x, &point.y);
         let result = scalar_mul(k, &jp, &self.params)?;
         jacobian_to_ecpoint(&result, &self.params)
@@ -91,6 +98,10 @@ impl EcGroup {
         if self.curve_id == EccCurveId::NistP256 {
             let result = p256_point::p256_scalar_mul_base(k);
             return p256_result_to_ecpoint(&result);
+        }
+        if self.curve_id == EccCurveId::Sm2Prime256 {
+            let result = sm2_point::sm2_scalar_mul_base(k);
+            return sm2_result_to_ecpoint(&result);
         }
         let g = JacobianPoint::from_affine(&self.params.gx, &self.params.gy);
         let result = scalar_mul(k, &g, &self.params)?;
@@ -134,6 +145,11 @@ impl EcGroup {
             let qp = p256_point::bignum_to_p256_point(&q.x, &q.y)?;
             let result = p256_point::p256_scalar_mul_add(k1, k2, &qp);
             return p256_result_to_ecpoint(&result);
+        }
+        if self.curve_id == EccCurveId::Sm2Prime256 {
+            let qp = sm2_point::bignum_to_sm2_point(&q.x, &q.y)?;
+            let result = sm2_point::sm2_scalar_mul_add(k1, k2, &qp);
+            return sm2_result_to_ecpoint(&result);
         }
         let g = JacobianPoint::from_affine(&self.params.gx, &self.params.gy);
         let qj = JacobianPoint::from_affine(&q.x, &q.y);
@@ -273,6 +289,14 @@ fn jacobian_to_ecpoint(jp: &JacobianPoint, params: &CurveParams) -> Result<EcPoi
 /// Convert a P256JacobianPoint to an EcPoint (affine).
 fn p256_result_to_ecpoint(pt: &p256_point::P256JacobianPoint) -> Result<EcPoint, CryptoError> {
     match p256_point::p256_point_to_affine(pt)? {
+        Some((x, y)) => Ok(EcPoint::new(x, y)),
+        None => Ok(EcPoint::infinity()),
+    }
+}
+
+/// Convert an Sm2JacobianPoint to an EcPoint (affine).
+fn sm2_result_to_ecpoint(pt: &sm2_point::Sm2JacobianPoint) -> Result<EcPoint, CryptoError> {
+    match sm2_point::sm2_point_to_affine(pt)? {
         Some((x, y)) => Ok(EcPoint::new(x, y)),
         None => Ok(EcPoint::infinity()),
     }

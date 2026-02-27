@@ -15,6 +15,16 @@
 //! Note: Must use `--release` for meaningful results. Debug builds add
 //! significant overhead that dominates the actual operation timing.
 
+// Only compile when all required features are present — these tests need --all-features.
+#![cfg(all(
+    feature = "aes",
+    feature = "hmac",
+    feature = "sha2",
+    feature = "ecdsa",
+    feature = "rsa",
+    feature = "x25519"
+))]
+
 use std::hint::black_box;
 use std::time::Instant;
 use subtle::ConstantTimeEq;

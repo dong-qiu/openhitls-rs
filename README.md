@@ -264,8 +264,8 @@ cargo build --workspace --all-features
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1054 tests + 15 Wycheproof
-cargo test -p hitls-tls --all-features      # 1305 tests
+cargo test -p hitls-crypto --all-features   # 1105 tests + 15 Wycheproof
+cargo test -p hitls-tls --all-features      # 1326 tests
 cargo test -p hitls-pki --all-features      # 395 tests
 cargo test -p hitls-bignum                  # 80 tests
 cargo test -p hitls-utils                   # 66 tests
@@ -314,4 +314,4 @@ Licensed under the [Mulan Permissive Software License, Version 2](http://license
 
 ## Acknowledgments
 
-This project is a Rust rewrite of [openHiTLS](https://gitee.com/openhitls/openhitls), an open-source cryptographic and TLS library originally written in C. See [DEV_LOG.md](DEV_LOG.md) for the detailed migration history (Phase 0–147).
+This project is a Rust rewrite of [openHiTLS](https://gitee.com/openhitls/openhitls), an open-source cryptographic and TLS library originally written in C. See [DEV_LOG.md](DEV_LOG.md) for the detailed migration history (Phase 0–146).

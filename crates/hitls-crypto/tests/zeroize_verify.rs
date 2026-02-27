@@ -10,8 +10,6 @@
 //!
 //! Run with: `cargo test -p hitls-crypto --all-features --ignored -- zeroize`
 
-use zeroize::Zeroize;
-
 /// Read the raw bytes of a value's memory representation.
 ///
 /// SAFETY: Caller must ensure `val` is a valid, live reference.
@@ -124,6 +122,7 @@ fn test_ecdsa_private_key_zeroed_on_zeroize() {
 #[ignore]
 fn test_x25519_private_key_zeroed_on_zeroize() {
     use hitls_crypto::x25519::X25519PrivateKey;
+    use zeroize::Zeroize;
 
     let mut key = X25519PrivateKey::new(&[0x77u8; 32]).unwrap();
 
