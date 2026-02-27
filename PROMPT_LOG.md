@@ -3029,3 +3029,33 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - TLS 1.3 OpenSSL interop verified; TLS 1.2 verify_data mismatch discovered (tracked)
 - All 3280 workspace tests pass, 0 clippy warnings, formatting clean
 - Defense model rating: B -> B+
+
+---
+
+## Phase T161–T170 — Quality Improvement Phase 2
+
+**Prompt**: Implement Phase T161–T170 from `/Users/dongqiu/.claude/plans/quality-phase2.md`. Deep quality analysis identified 8 deficiencies (D19–D26): cipher suite coverage gaps, protocol attack scenarios, fuzz coverage, error paths, async integration, state machine isolation, SM9 G2 arithmetic, TLS extension E2E.
+
+**Execution**:
+1. T161: +18 DHE-DSS + RSA static + RSA_PSK cipher suite E2E tests
+2. T162: +15 PSK/DHE_PSK/ECDHE_PSK cipher suite expansion tests
+3. T163: +16 protocol attack scenario tests (downgrade, truncation, renegotiation)
+4. T164: +4 fuzz targets (TLS extensions, TLS 1.2 codec, TLCP codec, CBC record), +39 corpus files
+5. T165: +18 error path coverage tests (CBC decrypt, TLS 1.3 AEAD, DTLS anti-replay)
+6. T166: +12 async integration tests (TLCP/DTLS/DTLCP + concurrent stress)
+7. T167: +16 TLS 1.2 handshake state machine unit isolation tests
+8. T168: +8 SM9 G2 point arithmetic tests (double, add, inverse, scalar-mul, multi-scalar-mul)
+9. T169: +8 TLS extension E2E tests (OCSP, early data, cert compression, SCT, EMS)
+10. T170: +10 ECDHE-RSA CBC + async cipher suite stress tests
+11. Updated CLAUDE.md, DEV_LOG.md, TEST_LOG.md, PROMPT_LOG.md, README.md
+
+**Result**:
+- 3,280→3,401 tests (+121), 19 ignored (unchanged), 14→18 fuzz targets, 85→124 corpus files
+- Cipher suite E2E: 34% → ~76% (31→69 of 91 suites)
+- Extension E2E: 41% → ~62% (16→24 of 39 extensions)
+- Async integration: 3→20 tests covering all 5 protocol variants
+- Protocol attack tests: 0→16
+- TLS 1.2 state machine isolation: 0→16
+- SM9 G2 tests: 5→13
+- All 3,401 tests pass, 0 clippy warnings, formatting clean
+- Defense model rating: B+ → A−

@@ -10137,8 +10137,65 @@ End-to-end ML-DSA improvement is modest (~2–5%) because NTT constitutes only ~
 | interop | 174 (+22) | 2 (+2) |
 | **Total** | **3280** (+84) | **19** (+12) |
 
-### Build Status
+### Build Status (Post T152-T160)
 - `cargo test --workspace --all-features`: 3280 passed, 0 failed, 19 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - Fuzz targets: 14 total (13->14), 85 corpus files (79->85)
+
+---
+
+## Phase T161–T170 — Quality Improvement Phase 2 (2026-02-27)
+
+### Summary
+Deep quality analysis identified 8 new deficiencies (D19–D26). 10 phases implemented in 3 priority sprints adding +121 tests and +4 fuzz targets.
+
+### Phase T161 — DHE-DSS + RSA Static + RSA_PSK E2E (+18 tests)
+- DHE-DSS (+6), RSA static kex (+5), RSA_PSK (+7) cipher suite E2E tests
+
+### Phase T162 — PSK/DHE_PSK/ECDHE_PSK Expansion (+15 tests)
+- PSK (+4), DHE_PSK (+5), ECDHE_PSK (+6) cipher suite tests
+
+### Phase T163 — Protocol Attack Scenarios (+16 tests)
+- Downgrade, truncation, renegotiation, version manipulation, alerts
+
+### Phase T164 — Fuzz Target Expansion (+4 targets, +39 corpus)
+- TLS extensions, TLS 1.2 codec, TLCP codec, CBC record fuzzing
+
+### Phase T165 — Error Path Coverage (+18 tests)
+- CBC decrypt, TLS 1.3 AEAD, DTLS record/anti-replay error paths
+
+### Phase T166 — Async Integration (+12 tests)
+- TLCP/DTLS/DTLCP async + concurrent stress (3→15 async tests)
+
+### Phase T167 — TLS 1.2 State Machine Unit Isolation (+16 tests)
+- Client (8) + server (7) state machine isolation + full handshake (1)
+
+### Phase T168 — SM9 G2 Point Arithmetic (+8 tests)
+- Double, add, inverse, scalar-mul, invalid bytes, multi-scalar-mul, affine roundtrip
+
+### Phase T169 — TLS Extension E2E (+8 tests)
+- OCSP (+2), early data (+2), cert compression (+2), SCT (+1), EMS (+1)
+
+### Phase T170 — ECDHE-RSA CBC + Async Stress (+10 tests)
+- 5 ECDHE-RSA cipher suites + 5 async cipher suite matrix tests
+
+### Aggregate Test Counts (Post T161–T170)
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| hitls-crypto | 1062 (+8) | 12 |
+| hitls-tls | 1360 (+55) | 0 |
+| hitls-pki | 395 | 0 |
+| hitls-bignum | 80 | 0 |
+| hitls-utils | 66 | 0 |
+| hitls-auth | 33 | 0 |
+| hitls-cli | 117 | 5 |
+| interop | 188 (+14) | 2 |
+| **Total** | **3,401** (+121) | **19** |
+
+### Build Status (Post T161–T170)
+- `cargo test --workspace --all-features`: 3,401 passed, 0 failed, 19 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- Fuzz targets: 18 (14→18), 124 corpus files (85→124)

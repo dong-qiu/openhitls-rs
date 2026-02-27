@@ -9,12 +9,12 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | **3,184** (7 ignored) |
-| **Test growth** | 1,104 → 3,184 (+188% since baseline) |
+| **Total tests** | **3,401** (19 ignored) |
+| **Test growth** | 1,104 → 3,401 (+208% since baseline) |
 | **Crates covered** | 8/8 (100% crate-level coverage) |
-| **Fuzz targets** | 13 (with 79 seed corpus files) |
+| **Fuzz targets** | 18 (with 124 seed corpus files) |
 | **Wycheproof vectors** | 5,000+ (15 test groups) |
-| **Zero failures** | All 3,184 tests pass, clippy clean, fmt clean |
+| **Zero failures** | All 3,401 tests pass, clippy clean, fmt clean |
 
 ### Test Growth Timeline
 
@@ -3041,3 +3041,91 @@ cargo fmt --all -- --check
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - Fuzz targets: 14 total, 85 seed corpus files
+
+---
+
+## Phase T161–T170: Quality Improvement Phase 2 (Deep Quality Analysis)
+
+### Phase T161: DHE-DSS + RSA Static + RSA_PSK Cipher Suite E2E (+18 tests, 3,280→3,298)
+- `tests/interop/tests/tls12_suites.rs` — 18 new cipher suite E2E tests
+- DHE-DSS family (+6): AES-128-CBC-SHA, AES-256-CBC-SHA, AES-128-CBC-SHA256, AES-256-CBC-SHA256, AES-128-GCM-SHA256, AES-256-GCM-SHA384
+- RSA static key exchange (+5): AES-128-CBC-SHA, AES-256-CBC-SHA, AES-128-CBC-SHA256, AES-256-GCM-SHA384, AES-128-CCM
+- RSA_PSK family (+7): AES-128-GCM, AES-256-GCM, AES-128-CBC-SHA, AES-256-CBC-SHA, AES-128-CBC-SHA256, AES-256-CBC-SHA384, ChaCha20-Poly1305
+
+### Phase T162: PSK/DHE_PSK/ECDHE_PSK Cipher Suite Expansion (+15 tests, 3,298→3,313)
+- `tests/interop/tests/tls12_suites.rs` — 15 new PSK-based cipher suite tests
+- PSK family (+4): AES-128-GCM, AES-256-GCM, AES-128-CCM, ChaCha20-Poly1305
+- DHE_PSK family (+5): AES-128-GCM, AES-256-GCM, AES-128-CBC-SHA, AES-128-CCM, ChaCha20-Poly1305
+- ECDHE_PSK family (+6): AES-256-GCM, AES-128-CBC-SHA, AES-256-CBC-SHA, AES-128-CBC-SHA256, ChaCha20-Poly1305
+
+### Phase T163: Protocol Attack Scenario Tests (+16 tests, 3,313→3,329)
+- `tests/interop/tests/protocol_attacks.rs` (NEW) — 16 protocol security tests
+- Downgrade resistance, truncation attacks, renegotiation defense, version manipulation
+- Alert protocol validation, close_notify handling, record layer injection
+- Cipher suite preference enforcement, session ID manipulation, SNI validation
+
+### Phase T164: Fuzz Target Expansion (+4 targets, +39 corpus files, 3,329→3,333)
+- `fuzz/fuzz_targets/fuzz_tls_extensions.rs` (NEW) — TLS extension parser fuzzing
+- `fuzz/fuzz_targets/fuzz_tls12_codec.rs` (NEW) — TLS 1.2 message codec fuzzing
+- `fuzz/fuzz_targets/fuzz_tlcp_codec.rs` (NEW) — TLCP message codec fuzzing
+- `fuzz/fuzz_targets/fuzz_cbc_record.rs` (NEW) — CBC record decryption fuzzing
+- Fuzz targets: 14→18, corpus files: 85→124
+
+### Phase T165: Error Path Coverage — CBC + EtM + TLS 1.3 Record Layer (+18 tests, 3,333→3,351)
+- `crates/hitls-tls/src/record/encryption12_cbc.rs` — 6 CBC decrypt error path tests
+- `crates/hitls-tls/src/record/encryption.rs` — 6 TLS 1.3 AEAD error path tests
+- `crates/hitls-tls/src/record/dtls.rs` + `anti_replay.rs` — 6 DTLS error path tests
+
+### Phase T166: Async Integration — TLCP/DTLS/DTLCP + Concurrent Stress (+12 tests, 3,351→3,363)
+- `tests/interop/tests/async_io.rs` — 12 new async integration tests
+- TLCP async: ECDHE-GCM, ECDHE-CBC, large payload (3 tests)
+- DTLS 1.2 async: handshake+data, multiple messages, large payload (3 tests)
+- DTLCP async: ECDHE-GCM, ECDHE-CBC, multiple messages (3 tests)
+- Concurrent stress: 10× TLS 1.3, 10× TLS 1.2, 5×TLS 1.3+5×TLS 1.2 mixed (3 tests)
+
+### Phase T167: TLS 1.2 Handshake State Machine Unit Isolation (+16 tests, 3,363→3,379)
+- `crates/hitls-tls/src/connection12/tests.rs` — 16 state machine tests
+- Client state machine: unexpected messages, duplicate ServerHello, invalid cipher, premature CCS, wrong verify data (8 tests)
+- Server state machine: empty cipher list, no shared cipher, incompatible suites, premature CCS, out-of-order messages (7 tests)
+- Full handshake state progression: Connected state verification (1 test)
+
+### Phase T168: SM9 G2 Point Arithmetic Complete Coverage (+8 tests, 3,379→3,387)
+- `crates/hitls-crypto/src/sm9/ecp2.rs` — 8 new G2 point arithmetic tests
+- Double correctness, add-identity (non-generator), add-inverse (non-generator)
+- Scalar mul by 1, scalar mul by group order (= infinity), invalid bytes deserialization
+- Multi-scalar-mul consistency (a*G + b*(k*G) == (a+b*k)*G), affine↔Jacobian roundtrip
+
+### Phase T169: TLS Extension E2E — OCSP/Early Data/CompressCert/SCT/EMS (+8 tests, 3,387→3,395)
+- `tests/interop/tests/ext_negotiation.rs` — 8 new extension E2E tests
+- STATUS_REQUEST: OCSP staple provided, OCSP no staple (2 tests)
+- EARLY_DATA: max_early_data_size negotiation + resumption, rejected without ticket (2 tests)
+- COMPRESS_CERTIFICATE: zlib compression negotiated, unsupported algorithm fallback (2 tests)
+- SCT: signed certificate timestamp roundtrip (1 test)
+- EXTENDED_MASTER_SECRET: standalone EMS without ETM (1 test)
+- Added `cert-compression` feature to integration test Cargo.toml
+
+### Phase T170: ECDHE-RSA CBC + Async Cipher Suite Stress (+10 tests, 3,395→3,401)
+- `tests/interop/tests/tls12_suites.rs` — 5 ECDHE-RSA CBC cipher suite tests
+  - AES-128-CBC-SHA, AES-256-CBC-SHA, AES-128-CBC-SHA256, AES-256-CBC-SHA384, ChaCha20-Poly1305
+- `tests/interop/tests/async_io.rs` — 5 async cipher suite stress tests
+  - TLS 1.3 all cipher suites, ECDHE-ECDSA GCM matrix, DHE-RSA GCM matrix, PSK GCM matrix, connection reuse with different suites
+
+### Aggregate Test Counts (Post T161–T170)
+
+| Crate | Tests | Ignored |
+|-------|-------|---------|
+| hitls-crypto | 1062 (+8) | 12 |
+| hitls-tls | 1360 (+55) | 0 |
+| hitls-pki | 395 | 0 |
+| hitls-bignum | 80 | 0 |
+| hitls-utils | 66 | 0 |
+| hitls-auth | 33 | 0 |
+| hitls-cli | 117 | 5 |
+| interop | 188 (+14) | 2 |
+| **Total** | **3,401** (+121) | **19** |
+
+### Build Status (Post T161–T170)
+- `cargo test --workspace --all-features`: 3,401 passed, 0 failed, 19 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- Fuzz targets: 18 total (14→18), 124 corpus files (85→124)
