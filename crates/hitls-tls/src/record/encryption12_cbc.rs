@@ -136,8 +136,7 @@ impl Drop for RecordEncryptor12Cbc {
 
 impl RecordEncryptor12Cbc {
     pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Result<Self, TlsError> {
-        let cipher =
-            hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
+        let cipher = hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
         Ok(Self {
             cipher,
             mac_key,
@@ -221,8 +220,7 @@ impl Drop for RecordDecryptor12Cbc {
 
 impl RecordDecryptor12Cbc {
     pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Result<Self, TlsError> {
-        let cipher =
-            hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
+        let cipher = hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
         Ok(Self {
             cipher,
             mac_key,
@@ -352,8 +350,7 @@ impl Drop for RecordEncryptor12EtM {
 
 impl RecordEncryptor12EtM {
     pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Result<Self, TlsError> {
-        let cipher =
-            hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
+        let cipher = hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
         Ok(Self {
             cipher,
             mac_key,
@@ -447,8 +444,7 @@ impl Drop for RecordDecryptor12EtM {
 
 impl RecordDecryptor12EtM {
     pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Result<Self, TlsError> {
-        let cipher =
-            hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
+        let cipher = hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
         Ok(Self {
             cipher,
             mac_key,

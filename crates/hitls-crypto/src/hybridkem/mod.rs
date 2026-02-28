@@ -69,7 +69,12 @@ fn get_params(param_id: HybridKemParamId) -> HybridKemParams {
         _ => unreachable!(),
     };
 
-    HybridKemParams { classic_type, mlkem_param, classic_pk_len, mlkem_ct_len }
+    HybridKemParams {
+        classic_type,
+        mlkem_param,
+        classic_pk_len,
+        mlkem_ct_len,
+    }
 }
 
 /// Return the ML-KEM encapsulation key length for a given parameter set.
@@ -95,13 +100,19 @@ fn classic_curve_id(ct: ClassicType) -> EccCurveId {
 /// Internal representation of the classic DH key material.
 enum ClassicDh {
     /// X25519 key pair with inline fixed-size arrays.
-    X25519 { sk_bytes: [u8; 32], pk_bytes: [u8; 32] },
+    X25519 {
+        sk_bytes: [u8; 32],
+        pk_bytes: [u8; 32],
+    },
     /// X25519 public key only (for encapsulate-only use).
     X25519PubOnly { pk_bytes: [u8; 32] },
     /// ECDH key pair (P-256/P-384/P-521).
     Ecdh(Box<EcdhKeyPair>),
     /// ECDH public key only (for encapsulate-only use).
-    EcdhPubOnly { curve_id: EccCurveId, pk_bytes: Vec<u8> },
+    EcdhPubOnly {
+        curve_id: EccCurveId,
+        pk_bytes: Vec<u8>,
+    },
 }
 
 impl Drop for ClassicDh {
@@ -117,8 +128,9 @@ impl ClassicDh {
     /// Return the public key bytes for this classic DH key.
     fn pk_bytes(&self) -> Result<Vec<u8>, CryptoError> {
         match self {
-            ClassicDh::X25519 { pk_bytes, .. }
-            | ClassicDh::X25519PubOnly { pk_bytes } => Ok(pk_bytes.to_vec()),
+            ClassicDh::X25519 { pk_bytes, .. } | ClassicDh::X25519PubOnly { pk_bytes } => {
+                Ok(pk_bytes.to_vec())
+            }
             ClassicDh::Ecdh(kp) => kp.public_key_bytes(),
             ClassicDh::EcdhPubOnly { pk_bytes, .. } => Ok(pk_bytes.clone()),
         }
@@ -129,8 +141,7 @@ impl ClassicDh {
     /// Returns `(ephemeral_public_key, shared_secret)`.
     fn encaps_dh(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
         match self {
-            ClassicDh::X25519 { pk_bytes, .. }
-            | ClassicDh::X25519PubOnly { pk_bytes } => {
+            ClassicDh::X25519 { pk_bytes, .. } | ClassicDh::X25519PubOnly { pk_bytes } => {
                 let sk_e = X25519PrivateKey::generate()?;
                 let pk_e = sk_e.public_key();
                 let pk_r = X25519PublicKey::new(pk_bytes)?;
@@ -188,11 +199,13 @@ impl HybridKemKeyPair {
         let classic = match params.classic_type {
             ClassicType::X25519 => {
                 let mut sk_bytes = [0u8; X25519_KEY_SIZE];
-                getrandom::getrandom(&mut sk_bytes)
-                    .map_err(|_| CryptoError::BnRandGenFail)?;
+                getrandom::getrandom(&mut sk_bytes).map_err(|_| CryptoError::BnRandGenFail)?;
                 let sk = X25519PrivateKey::new(&sk_bytes)?;
                 let pk = sk.public_key();
-                ClassicDh::X25519 { sk_bytes, pk_bytes: *pk.as_bytes() }
+                ClassicDh::X25519 {
+                    sk_bytes,
+                    pk_bytes: *pk.as_bytes(),
+                }
             }
             _ => {
                 let curve_id = classic_curve_id(params.classic_type);
@@ -201,7 +214,12 @@ impl HybridKemKeyPair {
         };
 
         let mlkem = MlKemKeyPair::generate(params.mlkem_param)?;
-        Ok(Self { param_id, params, classic, mlkem })
+        Ok(Self {
+            param_id,
+            params,
+            classic,
+            mlkem,
+        })
     }
 
     /// Construct a hybrid KEM key pair from a combined public key (encapsulate-only).
@@ -234,12 +252,20 @@ impl HybridKemKeyPair {
             }
             _ => {
                 let curve_id = classic_curve_id(params.classic_type);
-                ClassicDh::EcdhPubOnly { curve_id, pk_bytes: classic_pk.to_vec() }
+                ClassicDh::EcdhPubOnly {
+                    curve_id,
+                    pk_bytes: classic_pk.to_vec(),
+                }
             }
         };
 
         let mlkem = MlKemKeyPair::from_encapsulation_key(params.mlkem_param, mlkem_ek)?;
-        Ok(Self { param_id, params, classic, mlkem })
+        Ok(Self {
+            param_id,
+            params,
+            classic,
+            mlkem,
+        })
     }
 
     /// Return the `HybridKemParamId` for this key pair.
@@ -453,10 +479,8 @@ mod tests {
     fn test_cross_variant_decapsulation_fails() {
         // Different variants have different ciphertext sizes, so decapsulation
         // with the wrong variant should fail due to length mismatch.
-        let kp_768 =
-            HybridKemKeyPair::generate(HybridKemParamId::X25519MlKem768).unwrap();
-        let kp_512 =
-            HybridKemKeyPair::generate(HybridKemParamId::X25519MlKem512).unwrap();
+        let kp_768 = HybridKemKeyPair::generate(HybridKemParamId::X25519MlKem768).unwrap();
+        let kp_512 = HybridKemKeyPair::generate(HybridKemParamId::X25519MlKem512).unwrap();
         let (_, ct_768) = kp_768.encapsulate().unwrap();
         assert!(
             kp_512.decapsulate(&ct_768).is_err(),
@@ -466,8 +490,7 @@ mod tests {
 
     #[test]
     fn test_multiple_encapsulations_differ() {
-        let kp =
-            HybridKemKeyPair::generate(HybridKemParamId::X25519MlKem768).unwrap();
+        let kp = HybridKemKeyPair::generate(HybridKemParamId::X25519MlKem768).unwrap();
         let (ss1, ct1) = kp.encapsulate().unwrap();
         let (ss2, ct2) = kp.encapsulate().unwrap();
         assert_ne!(ct1, ct2, "ciphertexts should differ");
@@ -499,12 +522,10 @@ mod tests {
 
     #[test]
     fn test_from_public_key_decapsulate_fails() {
-        let kp =
-            HybridKemKeyPair::generate(HybridKemParamId::X25519MlKem768).unwrap();
+        let kp = HybridKemKeyPair::generate(HybridKemParamId::X25519MlKem768).unwrap();
         let pk = kp.public_key().unwrap();
         let kp_pub =
-            HybridKemKeyPair::from_public_key(HybridKemParamId::X25519MlKem768, &pk)
-                .unwrap();
+            HybridKemKeyPair::from_public_key(HybridKemParamId::X25519MlKem768, &pk).unwrap();
         let (_, ct) = kp.encapsulate().unwrap();
         assert!(
             kp_pub.decapsulate(&ct).is_err(),
@@ -514,11 +535,10 @@ mod tests {
 
     #[test]
     fn test_from_public_key_invalid_length() {
-        assert!(HybridKemKeyPair::from_public_key(
-            HybridKemParamId::X25519MlKem768,
-            &[0u8; 10]
-        )
-        .is_err());
+        assert!(
+            HybridKemKeyPair::from_public_key(HybridKemParamId::X25519MlKem768, &[0u8; 10])
+                .is_err()
+        );
     }
 
     #[test]
@@ -528,7 +548,10 @@ mod tests {
             let pk = kp.public_key().unwrap();
             let kp_pub = HybridKemKeyPair::from_public_key(param_id, &pk).unwrap();
             let pk2 = kp_pub.public_key().unwrap();
-            assert_eq!(pk, pk2, "public key should survive round-trip for {param_id:?}");
+            assert_eq!(
+                pk, pk2,
+                "public key should survive round-trip for {param_id:?}"
+            );
         }
     }
 }

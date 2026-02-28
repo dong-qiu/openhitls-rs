@@ -244,7 +244,8 @@ fn test_cbc_mac_vs_padding_failure_indistinguishable() {
     let record1 = enc1
         .encrypt_record(ContentType::ApplicationData, b"payload")
         .unwrap();
-    let mut dec_wrong_mac = RecordDecryptor12Cbc::new(enc_key.clone(), vec![0xCDu8; 32], 32).unwrap();
+    let mut dec_wrong_mac =
+        RecordDecryptor12Cbc::new(enc_key.clone(), vec![0xCDu8; 32], 32).unwrap();
     let mac_err = dec_wrong_mac.decrypt_record(&record1).unwrap_err();
 
     // Ciphertext tamper: same key but corrupted ciphertext (garbles both padding and MAC)

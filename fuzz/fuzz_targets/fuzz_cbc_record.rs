@@ -19,12 +19,22 @@ fuzz_target!(|data: &[u8]| {
     };
 
     // Test CBC MAC-then-encrypt decryption
-    let mut dec_cbc =
-        hitls_tls::record::encryption12_cbc::RecordDecryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
+    let mut dec_cbc = match hitls_tls::record::encryption12_cbc::RecordDecryptor12Cbc::new(
+        enc_key.clone(),
+        mac_key.clone(),
+        32,
+    ) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
     let _ = dec_cbc.decrypt_record(&record);
 
     // Test EtM decryption with same data
     let mut dec_etm =
-        hitls_tls::record::encryption12_cbc::RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        match hitls_tls::record::encryption12_cbc::RecordDecryptor12EtM::new(enc_key, mac_key, 32)
+        {
+            Ok(d) => d,
+            Err(_) => return,
+        };
     let _ = dec_etm.decrypt_record(&record);
 });
