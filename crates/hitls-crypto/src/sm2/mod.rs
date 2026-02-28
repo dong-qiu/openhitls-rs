@@ -232,10 +232,10 @@ impl Sm2KeyPair {
                 continue;
             }
 
-            // C2 = M XOR t
-            let mut c2 = vec![0u8; plaintext.len()];
-            for i in 0..plaintext.len() {
-                c2[i] = plaintext[i] ^ t[i];
+            // C2 = M XOR t (in-place on t)
+            let mut c2 = t;
+            for (c, m) in c2.iter_mut().zip(plaintext.iter()) {
+                *c ^= m;
             }
 
             // C3 = SM3(x2 || M || y2)
@@ -290,10 +290,10 @@ impl Sm2KeyPair {
         // t = KDF(x2 || y2, len(C2))
         let t = sm2_kdf(&x2, &y2, c2.len())?;
 
-        // M = C2 XOR t
-        let mut plaintext = vec![0u8; c2.len()];
-        for i in 0..c2.len() {
-            plaintext[i] = c2[i] ^ t[i];
+        // M = C2 XOR t (in-place on t)
+        let mut plaintext = t;
+        for (p, c) in plaintext.iter_mut().zip(c2.iter()) {
+            *p ^= c;
         }
 
         // u = SM3(x2 || M || y2)

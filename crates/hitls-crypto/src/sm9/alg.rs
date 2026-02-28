@@ -247,8 +247,11 @@ pub(crate) fn encrypt(
         let k1 = &k[..klen];
         let k2 = &k[klen..];
 
-        // C2 = M XOR K1
-        let c2: Vec<u8> = message.iter().zip(k1.iter()).map(|(m, k)| m ^ k).collect();
+        // C2 = M XOR K1 (in-place on k1 copy)
+        let mut c2 = k1.to_vec();
+        for (c, m) in c2.iter_mut().zip(message.iter()) {
+            *c ^= m;
+        }
 
         // C3 = SM3(M || K2)  — MAC
         let c3 = {
@@ -301,8 +304,11 @@ pub(crate) fn decrypt(
     let k1 = &k[..klen];
     let k2 = &k[klen..];
 
-    // M' = C2 XOR K1
-    let m_prime: Vec<u8> = c2.iter().zip(k1.iter()).map(|(c, k)| c ^ k).collect();
+    // M' = C2 XOR K1 (in-place on k1 copy)
+    let mut m_prime = k1.to_vec();
+    for (m, c) in m_prime.iter_mut().zip(c2.iter()) {
+        *m ^= c;
+    }
 
     // Verify: C3 == SM3(M' || K2)
     let c3_check = {

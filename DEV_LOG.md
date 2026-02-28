@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P43 (43 phases)
+- Performance: P1–P44 (44 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -209,6 +209,7 @@ Category summary:
 | 197 | P41 | Perf | RSA OAEP/PSS In-Place XOR | 2026-03-01 |
 | 198 | P42 | Perf | TLS 1.2 Key Schedule Seed Stack Arrays | 2026-03-01 |
 | 199 | P43 | Perf | ML-DSA Hint Encoding Stack Array | 2026-03-01 |
+| 200 | P44 | Perf | SM2/SM9 In-Place XOR | 2026-03-01 |
 
 ---
 
@@ -11320,6 +11321,26 @@ Replaced `vec![0u8; params.omega + params.k]` in `encode_sig()` with `[0u8; 96]`
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P43)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P44 — SM2/SM9 In-Place XOR (2026-03-01)
+
+### Summary
+Replaced XOR-with-allocation patterns in SM2 encrypt/decrypt and SM9 encrypt/decrypt with in-place XOR on existing buffers. SM2 reuses the KDF output `t` directly (XOR plaintext into it), eliminating the `c2` allocation. SM9 uses `k1.to_vec()` + in-place XOR instead of `.collect()`.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/sm2/mod.rs` | Encrypt: `let mut c2 = t; c2 XOR= plaintext` instead of allocating new `c2`. Decrypt: `let mut plaintext = t; plaintext XOR= c2` |
+| `crates/hitls-crypto/src/sm9/alg.rs` | Encrypt: `k1.to_vec()` + in-place XOR instead of `.collect()`. Decrypt: same pattern |
+
+### Test Results
+- All 61 SM2 tests pass, 89 SM9 tests pass
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P44)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

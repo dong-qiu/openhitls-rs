@@ -3381,3 +3381,14 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - `encode_sig`: heap alloc → stack `[0u8; 96]` (max 88 bytes for ML-DSA-87)
 - All 36 ML-DSA tests pass
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+## Phase P44 — SM2/SM9 In-Place XOR (2026-03-01)
+
+**Prompt**: Replace XOR-with-allocation patterns in SM2/SM9 encrypt/decrypt with in-place XOR.
+
+**Result**:
+- SM2 encrypt: reuse KDF output `t` → `c2 = t; c2 XOR= plaintext` (eliminates `vec![0u8; len]`)
+- SM2 decrypt: reuse KDF output `t` → `plaintext = t; plaintext XOR= c2` (eliminates `vec![0u8; len]`)
+- SM9 encrypt/decrypt: `k1.to_vec()` + in-place XOR instead of `.collect()`
+- All 61 SM2 + 89 SM9 tests pass
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
