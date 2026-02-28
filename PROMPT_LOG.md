@@ -3163,3 +3163,17 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - 26→34 fuzz targets, 158→238 corpus files
 - PQC fuzz coverage: 0→3/6 algorithms, sign-path fuzz: 0→5/7 algorithms
 - All tests pass (3,479), 0 clippy warnings, formatting clean
+
+---
+
+## Phase I81 — HybridKEM Generalization: All 12 Variants (2026-03-01)
+
+**Prompt**: Generalize HybridKEM from X25519+ML-KEM-768 only to all 12 parameter combinations (3 X25519 + 9 ECDH × ML-KEM variants). Add `from_public_key()` constructor, correct byte ordering per C reference, `param_id()` accessor. Update interop test.
+
+**Result**:
+- Rewrote `crates/hitls-crypto/src/hybridkem/mod.rs`: `ClassicDh` enum (X25519/X25519PubOnly/Ecdh/EcdhPubOnly), `HybridKemParams` lookup for all 12 `HybridKemParamId` variants, byte ordering matching C `CRYPT_HybridGetKeyPtr` (X25519: [ML-KEM||X25519], ECDH: [ECDH||ML-KEM])
+- API changes: `generate(param_id)`, `public_key() -> Result`, `from_public_key(param_id, pk)`, `param_id()` accessor
+- Added `"ecdh"` to `hybridkem` feature deps in `Cargo.toml`
+- Updated interop test: `generate()` → `generate(HybridKemParamId::X25519MlKem768)`
+- 12 unit tests: roundtrip (all 12), pk/ct lengths (all 12), tamper, cross-key, cross-variant, multiple encaps, from_public_key roundtrip/decap-fail/invalid-length/pk-match
+- 3,479→3,484 tests (+5 net), 21 ignored, 0 clippy warnings, formatting clean
