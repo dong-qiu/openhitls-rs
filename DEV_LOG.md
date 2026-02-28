@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P27 (27 phases)
+- Performance: P1–P29 (29 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -193,6 +193,8 @@ Category summary:
 | 181 | P25 | Perf | CBC Generic Path Stack Array Optimization | 2026-03-01 |
 | 182 | P26 | Perf | HMAC Reset + TLS 1.2 CBC HMAC Caching | 2026-03-01 |
 | 183 | P27 | Perf | CCM Zero-Allocation Tag + CBC-MAC | 2026-03-01 |
+| 184 | P28 | Perf | ChaCha20-Poly1305 Padding Stack Arrays | 2026-03-01 |
+| 185 | P29 | Perf | PBKDF2 Inner Loop Stack Arrays | 2026-03-01 |
 
 ---
 
@@ -10929,6 +10931,51 @@ Eliminated all heap allocations from CCM mode's hot path. Tag buffers replaced w
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P27)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P28 — ChaCha20-Poly1305 Padding Stack Arrays (2026-03-01)
+
+### Summary
+Replaced heap-allocated padding buffers in `compute_tag()` with a `const ZEROS: [u8; 15]` static array, eliminating 2 heap allocations per Poly1305 tag computation.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/chacha20/mod.rs` | `compute_tag()`: `vec![0u8; 16 - len % 16]` → `ZEROS[..16 - len % 16]` slice (AAD + ciphertext padding) |
+
+### Test Results
+- All ChaCha20-Poly1305 tests pass + Wycheproof
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P29 — PBKDF2 Inner Loop Stack Arrays (2026-03-01)
+
+### Summary
+Replaced all heap-allocated buffers in PBKDF2 inner loop with `[0u8; 32]` stack arrays. Eliminated the `u_next` intermediate buffer by calling `hmac.finish(&mut u)` in-place. For 80,000 iterations: 80K→0 heap allocations per derivation block.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/pbkdf2/mod.rs` | `u`: `vec![0u8; 32]` → `[0u8; 32]` stack |
+| `crates/hitls-crypto/src/pbkdf2/mod.rs` | `t`: `u.clone()` → `let mut t = u` (stack copy) |
+| `crates/hitls-crypto/src/pbkdf2/mod.rs` | `u_next`: eliminated — `hmac.finish(&mut u)` writes in-place |
+
+### Allocation Savings
+| Scenario | Before | After |
+|----------|--------|-------|
+| 80K iterations, 1 block | 80,001 Vec + 1 clone | 0 (all stack) |
+| 80K iterations, 2 blocks | 160,002 Vec + 2 clone | 0 (all stack) |
+
+### Test Results
+- All 6 PBKDF2 tests pass (including 80K iteration RFC vector)
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P28–P29)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
