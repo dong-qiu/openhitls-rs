@@ -716,4 +716,84 @@ mod tests {
         assert_eq!(&full[..136], &part1);
         assert_eq!(&full[136..], &part2);
     }
+
+    // -------------------------------------------------------
+    // HW↔SW cross-validation: Keccak-f[1600] ARM vs software
+    // -------------------------------------------------------
+
+    #[test]
+    #[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
+    fn test_keccak_arm_matches_software_zero_state() {
+        if !std::arch::is_aarch64_feature_detected!("sha3") {
+            return;
+        }
+        let mut state_hw = [0u64; 25];
+        let mut state_sw = [0u64; 25];
+        unsafe { super::keccak_arm::keccak_f1600_arm(&mut state_hw) };
+        keccak_f1600_soft(&mut state_sw);
+        assert_eq!(
+            state_hw, state_sw,
+            "Keccak ARM must match software on zero state"
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
+    fn test_keccak_arm_matches_software_nonzero_state() {
+        if !std::arch::is_aarch64_feature_detected!("sha3") {
+            return;
+        }
+        let mut state_hw = [0u64; 25];
+        let mut state_sw = [0u64; 25];
+        for i in 0..25 {
+            let v = (i as u64).wrapping_mul(0xDEAD_BEEF_CAFE_BABE);
+            state_hw[i] = v;
+            state_sw[i] = v;
+        }
+        unsafe { super::keccak_arm::keccak_f1600_arm(&mut state_hw) };
+        keccak_f1600_soft(&mut state_sw);
+        assert_eq!(
+            state_hw, state_sw,
+            "Keccak ARM must match software on non-zero state"
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
+    fn test_keccak_arm_matches_software_all_ones() {
+        if !std::arch::is_aarch64_feature_detected!("sha3") {
+            return;
+        }
+        let mut state_hw = [u64::MAX; 25];
+        let mut state_sw = [u64::MAX; 25];
+        unsafe { super::keccak_arm::keccak_f1600_arm(&mut state_hw) };
+        keccak_f1600_soft(&mut state_sw);
+        assert_eq!(
+            state_hw, state_sw,
+            "Keccak ARM must match software on all-ones"
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
+    fn test_keccak_arm_matches_software_multi_round() {
+        if !std::arch::is_aarch64_feature_detected!("sha3") {
+            return;
+        }
+        let mut state_hw = [0u64; 25];
+        let mut state_sw = [0u64; 25];
+        // Absorb some data then permute multiple times
+        state_hw[0] = 0x0102030405060708;
+        state_hw[1] = 0xFFEEDDCCBBAA9988;
+        state_sw[0] = state_hw[0];
+        state_sw[1] = state_hw[1];
+        for _ in 0..5 {
+            unsafe { super::keccak_arm::keccak_f1600_arm(&mut state_hw) };
+            keccak_f1600_soft(&mut state_sw);
+        }
+        assert_eq!(
+            state_hw, state_sw,
+            "Keccak ARM must match software after multiple rounds"
+        );
+    }
 }
