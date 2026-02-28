@@ -9,6 +9,9 @@ use hitls_crypto::provider::Digest;
 use hitls_types::TlsError;
 use zeroize::Zeroize;
 
+/// Maximum hash output size (SHA-384 = 48, SHA-512 = 64) for stack allocation.
+const MAX_OUTPUT_SIZE: usize = 64;
+
 /// Current stage of the TLS 1.3 key derivation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyScheduleStage {
@@ -56,11 +59,13 @@ impl KeySchedule {
         self.params.hash_len
     }
 
-    /// Compute Hash("") for the "derived" label context.
-    fn empty_hash(&self) -> Result<Vec<u8>, TlsError> {
+    /// Compute Hash("") for the "derived" label context. Stack-allocated output.
+    fn empty_hash(&self) -> Result<[u8; MAX_OUTPUT_SIZE], TlsError> {
         let mut hasher = DigestVariant::new(self.hash_alg);
-        let mut out = vec![0u8; self.params.hash_len];
-        hasher.finish(&mut out).map_err(TlsError::CryptoError)?;
+        let mut out = [0u8; MAX_OUTPUT_SIZE];
+        hasher
+            .finish(&mut out[..self.params.hash_len])
+            .map_err(TlsError::CryptoError)?;
         Ok(out)
     }
 
@@ -73,8 +78,8 @@ impl KeySchedule {
                 "derive_early_secret: wrong stage".into(),
             ));
         }
-        let zero_psk = vec![0u8; self.params.hash_len];
-        let ikm = psk.unwrap_or(&zero_psk);
+        let zero_psk = [0u8; MAX_OUTPUT_SIZE];
+        let ikm = psk.unwrap_or(&zero_psk[..self.params.hash_len]);
         self.current_secret = hkdf_extract(self.hash_alg, &[], ikm)?;
         self.stage = KeyScheduleStage::EarlySecret;
         Ok(())
@@ -92,7 +97,13 @@ impl KeySchedule {
             ));
         }
         let empty_hash = self.empty_hash()?;
-        let mut salt = derive_secret(self.hash_alg, &self.current_secret, b"derived", &empty_hash)?;
+        let hash_len = self.params.hash_len;
+        let mut salt = derive_secret(
+            self.hash_alg,
+            &self.current_secret,
+            b"derived",
+            &empty_hash[..hash_len],
+        )?;
         self.current_secret.zeroize();
         self.current_secret = hkdf_extract(self.hash_alg, &salt, dhe_shared_secret)?;
         salt.zeroize();
@@ -141,10 +152,16 @@ impl KeySchedule {
             ));
         }
         let empty_hash = self.empty_hash()?;
-        let mut salt = derive_secret(self.hash_alg, &self.current_secret, b"derived", &empty_hash)?;
-        let zero_ikm = vec![0u8; self.params.hash_len];
+        let hash_len = self.params.hash_len;
+        let mut salt = derive_secret(
+            self.hash_alg,
+            &self.current_secret,
+            b"derived",
+            &empty_hash[..hash_len],
+        )?;
+        let zero_ikm = [0u8; MAX_OUTPUT_SIZE];
         self.current_secret.zeroize();
-        self.current_secret = hkdf_extract(self.hash_alg, &salt, &zero_ikm)?;
+        self.current_secret = hkdf_extract(self.hash_alg, &salt, &zero_ikm[..hash_len])?;
         salt.zeroize();
         self.stage = KeyScheduleStage::MasterSecret;
         Ok(())
@@ -300,7 +317,12 @@ impl KeySchedule {
             b"res binder"
         };
         let empty_hash = self.empty_hash()?;
-        derive_secret(self.hash_alg, &self.current_secret, label, &empty_hash)
+        derive_secret(
+            self.hash_alg,
+            &self.current_secret,
+            label,
+            &empty_hash[..self.params.hash_len],
+        )
     }
 
     /// Derive resumption PSK from the resumption master secret and a ticket nonce.

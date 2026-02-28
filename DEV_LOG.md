@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P32 (32 phases)
+- Performance: P1–P33 (33 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -198,6 +198,7 @@ Category summary:
 | 186 | P30 | Perf | HKDF Expand Stack Arrays + HMAC Reuse | 2026-03-01 |
 | 187 | P31 | Perf | TLS PRF Stack Arrays | 2026-03-01 |
 | 188 | P32 | Perf | TLS HKDF Stack Arrays | 2026-03-01 |
+| 189 | P33 | Perf | Key Schedule + Export Stack Arrays | 2026-03-01 |
 
 ---
 
@@ -11061,6 +11062,40 @@ Replaced all Vec allocations in TLS 1.3 HKDF operations (`hmac_hash`, `hkdf_extr
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P32)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P33 — Key Schedule + Export Stack Arrays (2026-03-01)
+
+### Summary
+Replaced remaining `vec![0u8; hash_len]` heap allocations with `[0u8; MAX_OUTPUT_SIZE]` stack arrays in TLS 1.3 key schedule and key material export modules. Covers `empty_hash()`, `zero_psk`, `zero_ikm` in key schedule and `empty_hash`/`ctx_hash` in export. All 5 allocations eliminated on the TLS 1.3 handshake hot path.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-tls/src/crypt/key_schedule.rs` | Added `MAX_OUTPUT_SIZE = 64` constant |
+| `crates/hitls-tls/src/crypt/key_schedule.rs` | `empty_hash()`: returns `[u8; MAX_OUTPUT_SIZE]` instead of `Vec<u8>` |
+| `crates/hitls-tls/src/crypt/key_schedule.rs` | `derive_early_secret()`: `zero_psk` Vec → `[0u8; MAX_OUTPUT_SIZE]` stack + slice |
+| `crates/hitls-tls/src/crypt/key_schedule.rs` | `derive_master_secret()`: `zero_ikm` Vec → `[0u8; MAX_OUTPUT_SIZE]` stack + slice |
+| `crates/hitls-tls/src/crypt/export.rs` | Added `MAX_OUTPUT_SIZE = 64` constant |
+| `crates/hitls-tls/src/crypt/export.rs` | `empty_hash`/`ctx_hash` Vec → `[0u8; MAX_OUTPUT_SIZE]` stack + slice |
+
+### Allocation Savings
+| Location | Before | After |
+|----------|--------|-------|
+| `empty_hash()` (×3 callers) | `vec![0u8; 32/48]` | `[0u8; 64]` stack |
+| `derive_early_secret` zero PSK | `vec![0u8; 32/48]` | `[0u8; 64]` stack + slice |
+| `derive_master_secret` zero IKM | `vec![0u8; 32/48]` | `[0u8; 64]` stack + slice |
+| `tls13_export` empty_hash | `vec![0u8; 32/48]` | `[0u8; 64]` stack + slice |
+| `tls13_export` ctx_hash | `vec![0u8; 32/48]` | `[0u8; 64]` stack + slice |
+
+### Test Results
+- All 51 key_schedule tests pass (SHA-256, SHA-384, SM3, RFC 8448 vectors)
+- All 36 export tests pass (TLS 1.3 + TLS 1.2 export)
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P33)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

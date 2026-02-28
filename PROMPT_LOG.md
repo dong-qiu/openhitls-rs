@@ -3252,3 +3252,16 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - `hkdf_expand`: ipad/opad Vec collect → `[u8; 128]` stack XOR loops, t_prev/inner_hash Vec → `[u8; 64]` stack
 - Per HMAC call: ~6 Vec allocations eliminated. Per expand(N iterations): ~4N Vec allocations eliminated.
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P33 — Key Schedule + Export Stack Arrays (2026-03-01)
+
+**Prompt**: Replace remaining `vec![0u8; hash_len]` heap allocations in TLS 1.3 key schedule and export with stack arrays.
+
+**Result**:
+- `key_schedule.rs`: `empty_hash()` returns `[u8; 64]` stack instead of `Vec<u8>`, `zero_psk`/`zero_ikm` Vec → `[0u8; 64]` stack + slice
+- `export.rs`: `empty_hash`/`ctx_hash` Vec → `[0u8; 64]` stack + slice
+- 5 heap allocations eliminated per TLS 1.3 handshake (3 in key schedule, 2 in export)
+- All 51 key_schedule + 36 export tests pass
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
