@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I80 (80 phases)
+- Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P22 (22 phases)
@@ -187,6 +187,7 @@ Category summary:
 | 175 | P21 | Perf | AES-GCM/CBC Generic Monomorphization | 2026-03-01 |
 | 176 | P22 | Perf | Miller-Rabin Montgomery Optimization | 2026-03-01 |
 | 177 | T63 | Test | PQC Fuzz + Signature Sign Fuzz | 2026-03-01 |
+| 178 | I81 | Impl | HybridKEM Generalization — All 12 Variants | 2026-03-01 |
 
 ---
 
@@ -10700,3 +10701,71 @@ Add 8 new fuzz targets covering three critical gaps: PQC algorithms (ML-KEM, ML-
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - Fuzz targets: 34 (26→34), 238 corpus files (158→238)
+
+---
+
+## Phase I81 — HybridKEM Generalization: All 12 Variants (2026-03-01)
+
+### Summary
+Generalize HybridKEM from X25519+ML-KEM-768 only to all 12 parameter combinations: 3 X25519 × ML-KEM (512/768/1024) + 9 ECDH (P-256/P-384/P-521) × ML-KEM (512/768/1024). Adds `from_public_key()` constructor for encapsulate-only use, correct byte ordering per C reference convention, and `param_id()` accessor.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/Cargo.toml` | Modified | Added `"ecdh"` to `hybridkem` feature dependencies |
+| `crates/hitls-crypto/src/hybridkem/mod.rs` | Rewritten | Generalized to 12 variants with ClassicDh enum, parameter lookup, byte ordering |
+| `tests/interop/tests/crypto.rs` | Modified | Updated `generate()` → `generate(HybridKemParamId::X25519MlKem768)` |
+
+### Implementation Details
+
+#### ClassicDh Enum
+- `X25519 { sk_bytes, pk_bytes }` — inline fixed-size arrays, zeroized on drop
+- `X25519PubOnly { pk_bytes }` — encapsulate-only (no private key)
+- `Ecdh(Box<EcdhKeyPair>)` — full ECDH key pair (P-256/P-384/P-521)
+- `EcdhPubOnly { curve_id, pk_bytes }` — encapsulate-only ECDH
+
+#### Byte Ordering (matching C reference `CRYPT_HybridGetKeyPtr`)
+- **X25519 variants**: `[ML-KEM data || X25519 data]` (public key, ciphertext)
+- **ECDH variants**: `[ECDH data || ML-KEM data]` (public key, ciphertext)
+- Shared secret: SHA-256(ss_classical || ss_pq) for all variants
+
+#### API Changes
+- `generate()` → `generate(param_id: HybridKemParamId)` — breaking change
+- `public_key()` → returns `Result<Vec<u8>, CryptoError>` (ECDH is fallible)
+- `from_public_key(param_id, combined_pk)` — new encapsulate-only constructor
+- `param_id()` — new accessor
+
+#### Parameter Table
+
+| Classic | pk_len | ML-KEM | ek_len | ct_len |
+|---------|--------|--------|--------|--------|
+| X25519  | 32     | 512    | 800    | 768    |
+| X25519  | 32     | 768    | 1184   | 1088   |
+| X25519  | 32     | 1024   | 1568   | 1568   |
+| P-256   | 65     | 512/768/1024 | 800/1184/1568 | 768/1088/1568 |
+| P-384   | 97     | 512/768/1024 | 800/1184/1568 | 768/1088/1568 |
+| P-521   | 133    | 512/768/1024 | 800/1184/1568 | 768/1088/1568 |
+
+### Tests (12 tests, +5 net)
+
+| Test | Description |
+|------|-------------|
+| `test_roundtrip_all_variants` | Encaps/decaps roundtrip for all 12 variants |
+| `test_public_key_lengths` | Verify pk length for all 12 variants |
+| `test_ciphertext_lengths` | Verify ct length for all 12 variants |
+| `test_tampered_ciphertext` | Tampered ct produces different ss (all 12) |
+| `test_invalid_ciphertext_length` | Short/empty ct rejected (all 12) |
+| `test_cross_key_decapsulation` | Different key pair produces different ss (all 12) |
+| `test_cross_variant_decapsulation_fails` | Wrong variant ct length rejected |
+| `test_multiple_encapsulations_differ` | Fresh randomness each encaps |
+| `test_from_public_key_roundtrip` | Encaps with pub-only, decaps with full key (all 12) |
+| `test_from_public_key_decapsulate_fails` | Pub-only key pair cannot decapsulate |
+| `test_from_public_key_invalid_length` | Invalid pk length rejected |
+| `test_from_public_key_public_key_matches` | pk survives round-trip through from_public_key (all 12) |
+
+### Build Status (Post I81)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `cargo test -p hitls-crypto --all-features -- hybridkem`: 12 passed (was 7, +5 net)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
