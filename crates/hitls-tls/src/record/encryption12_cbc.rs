@@ -80,11 +80,12 @@ fn build_tls_padding(data_len: usize) -> Vec<u8> {
     vec![padding_length as u8; padding_length + 1]
 }
 
-/// AES-CBC encrypt in-place (data must be block-aligned).
-fn aes_cbc_encrypt_raw(key: &[u8], iv: &[u8], data: &mut [u8]) -> Result<(), TlsError> {
-    use hitls_crypto::aes::AesKey;
-
-    let cipher = AesKey::new(key).map_err(TlsError::CryptoError)?;
+/// AES-CBC encrypt in-place with a pre-expanded key (data must be block-aligned).
+fn aes_cbc_encrypt_with(
+    cipher: &hitls_crypto::aes::AesKey,
+    iv: &[u8],
+    data: &mut [u8],
+) -> Result<(), TlsError> {
     let mut prev = [0u8; AES_BLOCK_SIZE];
     prev.copy_from_slice(iv);
 
@@ -98,11 +99,12 @@ fn aes_cbc_encrypt_raw(key: &[u8], iv: &[u8], data: &mut [u8]) -> Result<(), Tls
     Ok(())
 }
 
-/// AES-CBC decrypt in-place (no padding removal).
-fn aes_cbc_decrypt_raw(key: &[u8], iv: &[u8], data: &mut [u8]) -> Result<(), TlsError> {
-    use hitls_crypto::aes::AesKey;
-
-    let cipher = AesKey::new(key).map_err(TlsError::CryptoError)?;
+/// AES-CBC decrypt in-place with a pre-expanded key (no padding removal).
+fn aes_cbc_decrypt_with(
+    cipher: &hitls_crypto::aes::AesKey,
+    iv: &[u8],
+    data: &mut [u8],
+) -> Result<(), TlsError> {
     let mut prev = [0u8; AES_BLOCK_SIZE];
     prev.copy_from_slice(iv);
 
@@ -118,8 +120,9 @@ fn aes_cbc_decrypt_raw(key: &[u8], iv: &[u8], data: &mut [u8]) -> Result<(), Tls
 }
 
 /// TLS 1.2 CBC MAC-then-encrypt record encryptor.
+/// Stores pre-expanded AES key to avoid per-record key expansion.
 pub struct RecordEncryptor12Cbc {
-    enc_key: Vec<u8>,
+    cipher: hitls_crypto::aes::AesKey,
     mac_key: Vec<u8>,
     mac_len: usize,
     seq: u64,
@@ -127,19 +130,20 @@ pub struct RecordEncryptor12Cbc {
 
 impl Drop for RecordEncryptor12Cbc {
     fn drop(&mut self) {
-        self.enc_key.zeroize();
         self.mac_key.zeroize();
     }
 }
 
 impl RecordEncryptor12Cbc {
-    pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Self {
-        Self {
-            enc_key,
+    pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Result<Self, TlsError> {
+        let cipher =
+            hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
+        Ok(Self {
+            cipher,
             mac_key,
             mac_len,
             seq: 0,
-        }
+        })
     }
 
     /// Encrypt a record with MAC-then-encrypt.
@@ -176,7 +180,7 @@ impl RecordEncryptor12Cbc {
         getrandom::getrandom(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
 
         // Encrypt in-place
-        aes_cbc_encrypt_raw(&self.enc_key, &iv, &mut encrypt_data)?;
+        aes_cbc_encrypt_with(&self.cipher, &iv, &mut encrypt_data)?;
 
         // Fragment = explicit_IV || ciphertext
         let mut fragment = Vec::with_capacity(AES_BLOCK_SIZE + encrypt_data.len());
@@ -201,8 +205,9 @@ impl RecordEncryptor12Cbc {
 }
 
 /// TLS 1.2 CBC record decryptor.
+/// Stores pre-expanded AES key to avoid per-record key expansion.
 pub struct RecordDecryptor12Cbc {
-    enc_key: Vec<u8>,
+    cipher: hitls_crypto::aes::AesKey,
     mac_key: Vec<u8>,
     mac_len: usize,
     seq: u64,
@@ -210,19 +215,20 @@ pub struct RecordDecryptor12Cbc {
 
 impl Drop for RecordDecryptor12Cbc {
     fn drop(&mut self) {
-        self.enc_key.zeroize();
         self.mac_key.zeroize();
     }
 }
 
 impl RecordDecryptor12Cbc {
-    pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Self {
-        Self {
-            enc_key,
+    pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Result<Self, TlsError> {
+        let cipher =
+            hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
+        Ok(Self {
+            cipher,
             mac_key,
             mac_len,
             seq: 0,
-        }
+        })
     }
 
     /// Decrypt a TLS 1.2 CBC record.
@@ -252,7 +258,7 @@ impl RecordDecryptor12Cbc {
         }
 
         let mut decrypted = encrypted.to_vec();
-        aes_cbc_decrypt_raw(&self.enc_key, iv, &mut decrypted)?;
+        aes_cbc_decrypt_with(&self.cipher, iv, &mut decrypted)?;
 
         // Read padding length from last byte
         let padding_length = decrypted[decrypted.len() - 1] as usize;
@@ -330,8 +336,9 @@ impl RecordDecryptor12Cbc {
 ///
 /// Reverses the order: encrypt plaintext+padding first, then MAC over the ciphertext.
 /// This eliminates padding oracle attacks.
+/// Stores pre-expanded AES key to avoid per-record key expansion.
 pub struct RecordEncryptor12EtM {
-    enc_key: Vec<u8>,
+    cipher: hitls_crypto::aes::AesKey,
     mac_key: Vec<u8>,
     mac_len: usize,
     seq: u64,
@@ -339,19 +346,20 @@ pub struct RecordEncryptor12EtM {
 
 impl Drop for RecordEncryptor12EtM {
     fn drop(&mut self) {
-        self.enc_key.zeroize();
         self.mac_key.zeroize();
     }
 }
 
 impl RecordEncryptor12EtM {
-    pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Self {
-        Self {
-            enc_key,
+    pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Result<Self, TlsError> {
+        let cipher =
+            hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
+        Ok(Self {
+            cipher,
             mac_key,
             mac_len,
             seq: 0,
-        }
+        })
     }
 
     /// Encrypt a record with Encrypt-Then-MAC.
@@ -380,7 +388,7 @@ impl RecordEncryptor12EtM {
         getrandom::getrandom(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
 
         // Encrypt in-place
-        aes_cbc_encrypt_raw(&self.enc_key, &iv, &mut encrypt_data)?;
+        aes_cbc_encrypt_with(&self.cipher, &iv, &mut encrypt_data)?;
 
         // Compute MAC over: seq(8) || type(1) || version(2) || length(2) || IV || ciphertext
         // length = len(IV + ciphertext), i.e., the ciphertext portion before MAC
@@ -423,8 +431,9 @@ impl RecordEncryptor12EtM {
 }
 
 /// TLS 1.2 Encrypt-Then-MAC record decryptor (RFC 7366).
+/// Stores pre-expanded AES key to avoid per-record key expansion.
 pub struct RecordDecryptor12EtM {
-    enc_key: Vec<u8>,
+    cipher: hitls_crypto::aes::AesKey,
     mac_key: Vec<u8>,
     mac_len: usize,
     seq: u64,
@@ -432,19 +441,20 @@ pub struct RecordDecryptor12EtM {
 
 impl Drop for RecordDecryptor12EtM {
     fn drop(&mut self) {
-        self.enc_key.zeroize();
         self.mac_key.zeroize();
     }
 }
 
 impl RecordDecryptor12EtM {
-    pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Self {
-        Self {
-            enc_key,
+    pub fn new(enc_key: Vec<u8>, mac_key: Vec<u8>, mac_len: usize) -> Result<Self, TlsError> {
+        let cipher =
+            hitls_crypto::aes::AesKey::new(&enc_key).map_err(TlsError::CryptoError)?;
+        Ok(Self {
+            cipher,
             mac_key,
             mac_len,
             seq: 0,
-        }
+        })
     }
 
     /// Decrypt a TLS 1.2 Encrypt-Then-MAC record.
@@ -500,7 +510,7 @@ impl RecordDecryptor12EtM {
 
         // MAC verified — now decrypt
         let mut decrypted = ciphertext.to_vec();
-        aes_cbc_decrypt_raw(&self.enc_key, iv, &mut decrypted)?;
+        aes_cbc_decrypt_with(&self.cipher, iv, &mut decrypted)?;
 
         // Remove TLS padding (since MAC was already verified, padding errors
         // can't be used as an oracle)
@@ -551,8 +561,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16]; // AES-128
         let mac_key = vec![0xABu8; 20]; // HMAC-SHA1 key
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 20);
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 20);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 20).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 20).unwrap();
 
         let plaintext = b"hello TLS 1.2 CBC-SHA";
         let record = enc
@@ -571,8 +581,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16]; // AES-128
         let mac_key = vec![0xABu8; 32]; // HMAC-SHA256 key
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
 
         let plaintext = b"hello TLS 1.2 CBC-SHA256";
         let record = enc
@@ -587,8 +597,8 @@ mod tests {
         let enc_key = vec![0x42u8; 32]; // AES-256
         let mac_key = vec![0xABu8; 48]; // HMAC-SHA384 key
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 48);
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 48);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 48).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 48).unwrap();
 
         let plaintext = b"hello TLS 1.2 CBC-SHA384";
         let record = enc
@@ -603,9 +613,9 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 20];
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 20);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 20).unwrap();
         // Different MAC key → MAC mismatch
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, vec![0xCDu8; 20], 20);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, vec![0xCDu8; 20], 20).unwrap();
 
         let record = enc
             .encrypt_record(ContentType::ApplicationData, b"secret")
@@ -618,8 +628,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
 
         let mut record = enc
             .encrypt_record(ContentType::ApplicationData, b"secret data")
@@ -635,8 +645,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 20];
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 20);
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 20);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 20).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 20).unwrap();
 
         for i in 0..5 {
             let msg = format!("message {i}");
@@ -657,8 +667,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16]; // AES-128
         let mac_key = vec![0xABu8; 32]; // HMAC-SHA256
 
-        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
         let plaintext = b"hello TLS 1.2 ETM";
         let record = enc
@@ -677,8 +687,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 20]; // HMAC-SHA1
 
-        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 20);
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 20);
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 20).unwrap();
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 20).unwrap();
 
         let plaintext = b"hello ETM SHA1";
         let record = enc
@@ -693,8 +703,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
         let mut record = enc
             .encrypt_record(ContentType::ApplicationData, b"secret")
@@ -711,8 +721,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
         let mut record = enc
             .encrypt_record(ContentType::ApplicationData, b"secret data")
@@ -728,8 +738,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
         for i in 0..5 {
             let msg = format!("ETM message {i}");
@@ -751,7 +761,7 @@ mod tests {
         // minimum fragment = IV(16) + 48 = 64 bytes; provide 63
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
 
         let record = Record {
             content_type: ContentType::ApplicationData,
@@ -770,7 +780,7 @@ mod tests {
         // Provide IV(16) + 49 bytes = 65 total; ciphertext portion (49) not block-aligned
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
 
         let record = Record {
             content_type: ContentType::ApplicationData,
@@ -789,8 +799,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
 
         let record = enc
             .encrypt_record(ContentType::ApplicationData, b"")
@@ -808,9 +818,9 @@ mod tests {
         let enc_key_b = vec![0x99u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key_a, mac_key.clone(), 32);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key_a, mac_key.clone(), 32).unwrap();
         // Decrypt with different enc_key → garbled plaintext → bad padding/MAC
-        let mut dec = RecordDecryptor12Cbc::new(enc_key_b, mac_key, 32);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key_b, mac_key, 32).unwrap();
 
         let record = enc
             .encrypt_record(ContentType::ApplicationData, b"secret payload")
@@ -823,7 +833,7 @@ mod tests {
         // EtM minimum: IV(16) + one_block(16) + MAC(32) = 64; provide 63
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
         let record = Record {
             content_type: ContentType::ApplicationData,
@@ -845,8 +855,8 @@ mod tests {
         let enc_key = vec![0x42u8; 32]; // AES-256
         let mac_key = vec![0xABu8; 48]; // HMAC-SHA384
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 48);
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 48);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 48).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 48).unwrap();
 
         let plaintext = b"hello AES-256 CBC with SHA-384";
         let record = enc
@@ -862,8 +872,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 20];
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 20);
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 20);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 20).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 20).unwrap();
 
         let record = enc
             .encrypt_record(ContentType::Handshake, b"handshake body")
@@ -877,7 +887,7 @@ mod tests {
     fn test_cbc_record_overflow_rejected() {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
 
         // Fragment exceeding MAX_CIPHERTEXT_LENGTH
         let record = Record {
@@ -897,8 +907,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
 
         // Verify initial seq is 0
         assert_eq!(enc.sequence_number(), 0);
@@ -919,7 +929,7 @@ mod tests {
     fn test_etm_not_block_aligned_rejected() {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
         // IV(16) + 17 bytes ciphertext (not block-aligned) + MAC(32) = 65
         let record = Record {
@@ -938,7 +948,7 @@ mod tests {
     fn test_etm_record_overflow_rejected() {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
         let record = Record {
             content_type: ContentType::ApplicationData,
@@ -957,9 +967,9 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
         // Different MAC key → MAC mismatch before decryption
-        let mut dec = RecordDecryptor12EtM::new(enc_key, vec![0xCDu8; 32], 32);
+        let mut dec = RecordDecryptor12EtM::new(enc_key, vec![0xCDu8; 32], 32).unwrap();
 
         let record = enc
             .encrypt_record(ContentType::ApplicationData, b"test")
@@ -976,8 +986,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
         let record = enc
             .encrypt_record(ContentType::ApplicationData, b"")
@@ -991,8 +1001,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
         let record = enc
             .encrypt_record(ContentType::Handshake, b"hs body")
@@ -1007,8 +1017,8 @@ mod tests {
         let enc_key = vec![0x42u8; 32]; // AES-256
         let mac_key = vec![0xABu8; 48]; // HMAC-SHA384
 
-        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 48);
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 48);
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 48).unwrap();
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 48).unwrap();
 
         let plaintext = b"AES-256-CBC with SHA-384 ETM mode";
         let record = enc
@@ -1023,8 +1033,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
 
         // 4000 bytes — well within limits, tests multi-block CBC
         let plaintext = vec![0xAA; 4000];
@@ -1040,8 +1050,8 @@ mod tests {
         let enc_key = vec![0x42u8; 16];
         let mac_key = vec![0xABu8; 32];
 
-        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
-        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
         assert_eq!(enc.sequence_number(), 0);
         assert_eq!(dec.sequence_number(), 0);

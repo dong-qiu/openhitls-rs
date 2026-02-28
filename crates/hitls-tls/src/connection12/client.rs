@@ -344,13 +344,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 flight.client_write_key.clone(),
                 flight.client_write_mac_key.clone(),
                 flight.mac_len,
-            );
+            )?;
         } else if flight.is_cbc {
             self.record_layer.activate_write_encryption12_cbc(
                 flight.client_write_key.clone(),
                 flight.client_write_mac_key.clone(),
                 flight.mac_len,
-            );
+            )?;
         } else {
             self.record_layer.activate_write_encryption12(
                 suite,
@@ -401,13 +401,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 flight.server_write_key.clone(),
                 flight.server_write_mac_key.clone(),
                 flight.mac_len,
-            );
+            )?;
         } else if flight.is_cbc {
             self.record_layer.activate_read_decryption12_cbc(
                 flight.server_write_key.clone(),
                 flight.server_write_mac_key.clone(),
                 flight.mac_len,
-            );
+            )?;
         } else {
             self.record_layer.activate_read_decryption12(
                 suite,
@@ -526,13 +526,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 keys.server_write_key.clone(),
                 keys.server_write_mac_key.clone(),
                 keys.mac_len,
-            );
+            )?;
         } else if keys.is_cbc {
             self.record_layer.activate_read_decryption12_cbc(
                 keys.server_write_key.clone(),
                 keys.server_write_mac_key.clone(),
                 keys.mac_len,
-            );
+            )?;
         } else {
             self.record_layer.activate_read_decryption12(
                 suite,
@@ -564,13 +564,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 keys.client_write_key.clone(),
                 keys.client_write_mac_key.clone(),
                 keys.mac_len,
-            );
+            )?;
         } else if keys.is_cbc {
             self.record_layer.activate_write_encryption12_cbc(
                 keys.client_write_key.clone(),
                 keys.client_write_mac_key.clone(),
                 keys.mac_len,
-            );
+            )?;
         } else {
             self.record_layer.activate_write_encryption12(
                 suite,
@@ -824,13 +824,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 flight.client_write_key.clone(),
                 flight.client_write_mac_key.clone(),
                 flight.mac_len,
-            );
+            )?;
         } else if flight.is_cbc {
             self.record_layer.activate_write_encryption12_cbc(
                 flight.client_write_key.clone(),
                 flight.client_write_mac_key.clone(),
                 flight.mac_len,
-            );
+            )?;
         } else {
             self.record_layer.activate_write_encryption12(
                 suite,
@@ -880,13 +880,13 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 flight.server_write_key.clone(),
                 flight.server_write_mac_key.clone(),
                 flight.mac_len,
-            );
+            )?;
         } else if flight.is_cbc {
             self.record_layer.activate_read_decryption12_cbc(
                 flight.server_write_key.clone(),
                 flight.server_write_mac_key.clone(),
                 flight.mac_len,
-            );
+            )?;
         } else {
             self.record_layer.activate_read_decryption12(
                 suite,

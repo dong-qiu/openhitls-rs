@@ -198,7 +198,7 @@ fn test_cbc_invalid_padding_all_produce_same_error() {
     let mac_key = vec![0xABu8; 32];
 
     // Encrypt a valid record first to get realistic ciphertext size
-    let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
+    let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
     let valid_record = enc
         .encrypt_record(ContentType::ApplicationData, b"test payload data here")
         .unwrap();
@@ -207,7 +207,7 @@ fn test_cbc_invalid_padding_all_produce_same_error() {
     // All should produce "bad record MAC" error, not distinct error types
     let mut error_messages = Vec::new();
     for tamper_byte in [0x00, 0x01, 0x0F, 0x10, 0x80, 0xFF] {
-        let mut dec = RecordDecryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
+        let mut dec = RecordDecryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
         let mut record = valid_record.clone();
         // Tamper with last byte of ciphertext (affects padding byte after decrypt)
         let last = record.fragment.len() - 1;
@@ -240,20 +240,20 @@ fn test_cbc_mac_vs_padding_failure_indistinguishable() {
     let mac_key = vec![0xABu8; 32];
 
     // MAC failure: decrypt with wrong MAC key
-    let mut enc1 = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
+    let mut enc1 = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
     let record1 = enc1
         .encrypt_record(ContentType::ApplicationData, b"payload")
         .unwrap();
-    let mut dec_wrong_mac = RecordDecryptor12Cbc::new(enc_key.clone(), vec![0xCDu8; 32], 32);
+    let mut dec_wrong_mac = RecordDecryptor12Cbc::new(enc_key.clone(), vec![0xCDu8; 32], 32).unwrap();
     let mac_err = dec_wrong_mac.decrypt_record(&record1).unwrap_err();
 
     // Ciphertext tamper: same key but corrupted ciphertext (garbles both padding and MAC)
-    let mut enc2 = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
+    let mut enc2 = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
     let mut record2 = enc2
         .encrypt_record(ContentType::ApplicationData, b"payload")
         .unwrap();
     record2.fragment[20] ^= 0xFF; // corrupt middle of ciphertext
-    let mut dec_correct = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+    let mut dec_correct = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
     let tamper_err = dec_correct.decrypt_record(&record2).unwrap_err();
 
     // Both must produce identical error message
@@ -514,8 +514,8 @@ fn test_cbc_sequence_number_tracking() {
     let enc_key = vec![0x42u8; 16];
     let mac_key = vec![0xABu8; 32];
 
-    let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32);
-    let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32);
+    let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+    let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
 
     // Encrypt 3 records
     let r0 = enc
@@ -549,8 +549,8 @@ fn test_etm_sequence_number_tracking() {
     let enc_key = vec![0x42u8; 16];
     let mac_key = vec![0xABu8; 32];
 
-    let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32);
-    let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32);
+    let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+    let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key, 32).unwrap();
 
     let r0 = enc
         .encrypt_record(ContentType::ApplicationData, b"etm0")

@@ -399,7 +399,7 @@ fn run_tls12_handshake(
             cflight.client_write_key.clone(),
             cflight.client_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else {
         client_rl
             .activate_write_encryption12(
@@ -434,7 +434,7 @@ fn run_tls12_handshake(
             keys.client_write_key.clone(),
             keys.client_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else {
         server_rl
             .activate_read_decryption12(
@@ -461,7 +461,7 @@ fn run_tls12_handshake(
             keys.server_write_key.clone(),
             keys.server_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else {
         server_rl
             .activate_write_encryption12(
@@ -488,7 +488,7 @@ fn run_tls12_handshake(
             cflight.server_write_key.clone(),
             cflight.server_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else {
         client_rl
             .activate_read_decryption12(
@@ -1019,13 +1019,13 @@ fn run_full_handshake_get_session(suite: CipherSuite) -> TlsSession {
             cflight.client_write_key.clone(),
             cflight.client_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else if cflight.is_cbc {
         client_rl.activate_write_encryption12_cbc(
             cflight.client_write_key.clone(),
             cflight.client_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else {
         client_rl
             .activate_write_encryption12(
@@ -1059,13 +1059,13 @@ fn run_full_handshake_get_session(suite: CipherSuite) -> TlsSession {
             keys.client_write_key.clone(),
             keys.client_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else if keys.is_cbc {
         server_rl.activate_read_decryption12_cbc(
             keys.client_write_key.clone(),
             keys.client_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else {
         server_rl
             .activate_read_decryption12(
@@ -1169,9 +1169,9 @@ struct CryptoActivationParams<'a> {
 // Activate CBC/ETM/AEAD encryption on the given record layer (helper for test fns).
 fn activate_write_cbc_or_etm(rl: &mut RecordLayer, p: &CryptoActivationParams) {
     if p.is_cbc && p.use_etm {
-        rl.activate_write_encryption12_etm(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len);
+        rl.activate_write_encryption12_etm(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len).unwrap();
     } else if p.is_cbc {
-        rl.activate_write_encryption12_cbc(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len);
+        rl.activate_write_encryption12_cbc(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len).unwrap();
     } else {
         rl.activate_write_encryption12(p.suite, p.key, p.iv.clone())
             .unwrap();
@@ -1180,9 +1180,9 @@ fn activate_write_cbc_or_etm(rl: &mut RecordLayer, p: &CryptoActivationParams) {
 
 fn activate_read_cbc_or_etm(rl: &mut RecordLayer, p: &CryptoActivationParams) {
     if p.is_cbc && p.use_etm {
-        rl.activate_read_decryption12_etm(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len);
+        rl.activate_read_decryption12_etm(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len).unwrap();
     } else if p.is_cbc {
-        rl.activate_read_decryption12_cbc(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len);
+        rl.activate_read_decryption12_cbc(p.key.to_vec(), p.mac_key.to_vec(), p.mac_len).unwrap();
     } else {
         rl.activate_read_decryption12(p.suite, p.key, p.iv.clone())
             .unwrap();
@@ -2143,13 +2143,13 @@ fn run_ems_etm_handshake(
             cflight.client_write_key.clone(),
             cflight.client_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else if cflight.is_cbc {
         client_rl.activate_write_encryption12_cbc(
             cflight.client_write_key.clone(),
             cflight.client_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else {
         client_rl
             .activate_write_encryption12(
@@ -2185,13 +2185,13 @@ fn run_ems_etm_handshake(
             keys.client_write_key.clone(),
             keys.client_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else if keys.is_cbc {
         server_rl.activate_read_decryption12_cbc(
             keys.client_write_key.clone(),
             keys.client_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else {
         server_rl
             .activate_read_decryption12(
@@ -2219,13 +2219,13 @@ fn run_ems_etm_handshake(
             keys.server_write_key.clone(),
             keys.server_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else if keys.is_cbc {
         server_rl.activate_write_encryption12_cbc(
             keys.server_write_key.clone(),
             keys.server_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else {
         server_rl
             .activate_write_encryption12(
@@ -2252,13 +2252,13 @@ fn run_ems_etm_handshake(
             cflight.server_write_key.clone(),
             cflight.server_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else if cflight.is_cbc {
         client_rl.activate_read_decryption12_cbc(
             cflight.server_write_key.clone(),
             cflight.server_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else {
         client_rl
             .activate_read_decryption12(
@@ -2545,7 +2545,7 @@ fn run_tls12_rsa_or_dhe_handshake(
             cflight.client_write_key.clone(),
             cflight.client_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else {
         client_rl
             .activate_write_encryption12(
@@ -2579,7 +2579,7 @@ fn run_tls12_rsa_or_dhe_handshake(
             keys.client_write_key.clone(),
             keys.client_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else {
         server_rl
             .activate_read_decryption12(
@@ -2606,7 +2606,7 @@ fn run_tls12_rsa_or_dhe_handshake(
             keys.server_write_key.clone(),
             keys.server_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else {
         server_rl
             .activate_write_encryption12(
@@ -2633,7 +2633,7 @@ fn run_tls12_rsa_or_dhe_handshake(
             cflight.server_write_key.clone(),
             cflight.server_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else {
         client_rl
             .activate_read_decryption12(
@@ -2967,7 +2967,7 @@ fn run_tls12_psk_handshake(
             cflight.client_write_key.clone(),
             cflight.client_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else {
         client_rl
             .activate_write_encryption12(
@@ -3001,7 +3001,7 @@ fn run_tls12_psk_handshake(
             keys.client_write_key.clone(),
             keys.client_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else {
         server_rl
             .activate_read_decryption12(
@@ -3028,7 +3028,7 @@ fn run_tls12_psk_handshake(
             keys.server_write_key.clone(),
             keys.server_write_mac_key.clone(),
             keys.mac_len,
-        );
+        ).unwrap();
     } else {
         server_rl
             .activate_write_encryption12(
@@ -3055,7 +3055,7 @@ fn run_tls12_psk_handshake(
             cflight.server_write_key.clone(),
             cflight.server_write_mac_key.clone(),
             cflight.mac_len,
-        );
+        ).unwrap();
     } else {
         client_rl
             .activate_read_decryption12(

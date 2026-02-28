@@ -223,10 +223,11 @@ impl RecordLayer {
         enc_key: Vec<u8>,
         mac_key: Vec<u8>,
         mac_len: usize,
-    ) {
+    ) -> Result<(), TlsError> {
         self.encryptor = Some(RecordEncryptorVariant::Tls12Cbc(RecordEncryptor12Cbc::new(
             enc_key, mac_key, mac_len,
-        )));
+        )?));
+        Ok(())
     }
 
     /// Activate TLS 1.2 CBC read decryption.
@@ -235,10 +236,11 @@ impl RecordLayer {
         enc_key: Vec<u8>,
         mac_key: Vec<u8>,
         mac_len: usize,
-    ) {
+    ) -> Result<(), TlsError> {
         self.decryptor = Some(RecordDecryptorVariant::Tls12Cbc(RecordDecryptor12Cbc::new(
             enc_key, mac_key, mac_len,
-        )));
+        )?));
+        Ok(())
     }
 
     /// Activate TLS 1.2 Encrypt-Then-MAC write encryption (RFC 7366).
@@ -247,10 +249,11 @@ impl RecordLayer {
         enc_key: Vec<u8>,
         mac_key: Vec<u8>,
         mac_len: usize,
-    ) {
+    ) -> Result<(), TlsError> {
         self.encryptor = Some(RecordEncryptorVariant::Tls12EtM(RecordEncryptor12EtM::new(
             enc_key, mac_key, mac_len,
-        )));
+        )?));
+        Ok(())
     }
 
     /// Activate TLS 1.2 Encrypt-Then-MAC read decryption (RFC 7366).
@@ -259,10 +262,11 @@ impl RecordLayer {
         enc_key: Vec<u8>,
         mac_key: Vec<u8>,
         mac_len: usize,
-    ) {
+    ) -> Result<(), TlsError> {
         self.decryptor = Some(RecordDecryptorVariant::Tls12EtM(RecordDecryptor12EtM::new(
             enc_key, mac_key, mac_len,
-        )));
+        )?));
+        Ok(())
     }
 
     /// Activate TLCP write encryption.
@@ -478,9 +482,9 @@ mod tests {
     #[test]
     fn test_activate_deactivate_tls12_cbc() {
         let mut rl = RecordLayer::new();
-        rl.activate_write_encryption12_cbc(vec![0; 16], vec![0; 20], 20);
+        rl.activate_write_encryption12_cbc(vec![0; 16], vec![0; 20], 20).unwrap();
         assert!(rl.is_encrypting());
-        rl.activate_read_decryption12_cbc(vec![0; 16], vec![0; 20], 20);
+        rl.activate_read_decryption12_cbc(vec![0; 16], vec![0; 20], 20).unwrap();
         assert!(rl.is_decrypting());
         rl.deactivate_write_encryption();
         rl.deactivate_read_decryption();
@@ -491,9 +495,9 @@ mod tests {
     #[test]
     fn test_activate_deactivate_tls12_etm() {
         let mut rl = RecordLayer::new();
-        rl.activate_write_encryption12_etm(vec![0; 16], vec![0; 32], 32);
+        rl.activate_write_encryption12_etm(vec![0; 16], vec![0; 32], 32).unwrap();
         assert!(rl.is_encrypting());
-        rl.activate_read_decryption12_etm(vec![0; 16], vec![0; 32], 32);
+        rl.activate_read_decryption12_etm(vec![0; 16], vec![0; 32], 32).unwrap();
         assert!(rl.is_decrypting());
         rl.deactivate_write_encryption();
         rl.deactivate_read_decryption();
@@ -848,8 +852,8 @@ mod tests {
         let mut rl = RecordLayer::new();
         let enc_key = vec![0x42u8; 16]; // AES-128 key
         let mac_key = vec![0x43u8; 20]; // SHA-1 HMAC key
-        rl.activate_write_encryption12_cbc(enc_key.clone(), mac_key.clone(), 20);
-        rl.activate_read_decryption12_cbc(enc_key, mac_key, 20);
+        rl.activate_write_encryption12_cbc(enc_key.clone(), mac_key.clone(), 20).unwrap();
+        rl.activate_read_decryption12_cbc(enc_key, mac_key, 20).unwrap();
 
         let plaintext = b"hello TLS 1.2 CBC";
         let sealed = rl
@@ -986,10 +990,10 @@ mod tests {
         let mac_len = 32;
 
         let mut write_rl = RecordLayer::new();
-        write_rl.activate_write_encryption12_etm(enc_key.clone(), mac_key.clone(), mac_len);
+        write_rl.activate_write_encryption12_etm(enc_key.clone(), mac_key.clone(), mac_len).unwrap();
 
         let mut read_rl = RecordLayer::new();
-        read_rl.activate_read_decryption12_etm(enc_key, mac_key, mac_len);
+        read_rl.activate_read_decryption12_etm(enc_key, mac_key, mac_len).unwrap();
 
         // Seal a record
         let plaintext = b"EtM roundtrip test payload";
@@ -1027,7 +1031,7 @@ mod tests {
     fn test_empty_encrypted_record_rejected() {
         let mut rl = RecordLayer::new();
         // Activate any decryptor to set is_decrypting() = true
-        rl.activate_read_decryption12_etm(vec![0; 16], vec![0; 32], 32);
+        rl.activate_read_decryption12_etm(vec![0; 16], vec![0; 32], 32).unwrap();
         assert!(rl.is_decrypting());
 
         // Empty record with active decryptor → should be rejected
