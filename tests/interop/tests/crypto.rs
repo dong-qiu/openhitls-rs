@@ -171,7 +171,10 @@ fn test_mldsa_all_params() {
 // -------------------------------------------------------
 #[test]
 fn test_hybridkem_roundtrip() {
-    let kp = hitls_crypto::hybridkem::HybridKemKeyPair::generate().unwrap();
+    let kp = hitls_crypto::hybridkem::HybridKemKeyPair::generate(
+        hitls_types::HybridKemParamId::X25519MlKem768,
+    )
+    .unwrap();
     let (ss1, ct) = kp.encapsulate().unwrap();
     let ss2 = kp.decapsulate(&ct).unwrap();
     assert_eq!(ss1, ss2, "HybridKEM shared secret mismatch");

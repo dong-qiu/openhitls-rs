@@ -60,7 +60,7 @@ slh-dsa = ["sha2", "sha3", "hmac"]
 xmss = ["sha2", "sha3"]
 frodokem = ["sha3", "aes"]
 mceliece = ["sha3"]
-hybridkem = ["x25519", "mlkem", "sha2"]
+hybridkem = ["x25519", "mlkem", "sha2", "ecdh"]
 
 # KDF and DRBG
 hkdf = ["hmac"]
