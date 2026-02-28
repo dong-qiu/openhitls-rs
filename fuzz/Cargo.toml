@@ -10,7 +10,10 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 hitls-utils = { path = "../crates/hitls-utils" }
-hitls-crypto = { path = "../crates/hitls-crypto", features = ["aes", "modes", "chacha20", "rsa", "ecdsa", "sm2", "hkdf"] }
+hitls-crypto = { path = "../crates/hitls-crypto", features = [
+    "aes", "modes", "chacha20", "rsa", "ecdsa", "sm2", "hkdf",
+    "mlkem", "mldsa", "slh-dsa", "ed25519", "dsa", "sha2", "sha3",
+] }
 hitls-pki = { path = "../crates/hitls-pki" }
 hitls-tls = { path = "../crates/hitls-tls", features = ["tls12", "tls13", "dtls12", "tlcp"] }
 hitls-types = { path = "../crates/hitls-types" }
@@ -143,4 +146,44 @@ doc = false
 [[bin]]
 name = "fuzz_tls12_state_machine"
 path = "fuzz_targets/fuzz_tls12_state_machine.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_mlkem"
+path = "fuzz_targets/fuzz_mlkem.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_mldsa_sign"
+path = "fuzz_targets/fuzz_mldsa_sign.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_slhdsa_sign"
+path = "fuzz_targets/fuzz_slhdsa_sign.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_rsa_sign"
+path = "fuzz_targets/fuzz_rsa_sign.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_ecdsa_sign"
+path = "fuzz_targets/fuzz_ecdsa_sign.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_ed25519"
+path = "fuzz_targets/fuzz_ed25519.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_sm2_sign"
+path = "fuzz_targets/fuzz_sm2_sign.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_dsa_sign"
+path = "fuzz_targets/fuzz_dsa_sign.rs"
 doc = false

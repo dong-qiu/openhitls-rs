@@ -3150,3 +3150,16 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - **P22**: Miller-Rabin optimization — single `MontgomeryCtx` (8→1 R²), `mont_exp_mont()`, `mont_sqr` inner loop (2–3× speedup)
 - 3,477→3,479 tests (+2), 21 ignored
 - All tests pass, 0 clippy warnings, formatting clean
+
+---
+
+## Phase T63 — PQC Fuzz + Signature Sign Fuzz (2026-03-01)
+
+**Prompt**: Add 8 new fuzz targets covering PQC algorithms (ML-KEM, ML-DSA, SLH-DSA), signature Sign paths (RSA, ECDSA, SM2, DSA), and Ed25519 full coverage. Include 80 corpus seed files.
+
+**Result**:
+- 8 new fuzz targets: `fuzz_mlkem` (encap/decap/fuzzed-ek), `fuzz_mldsa_sign` (sign/verify roundtrip), `fuzz_slhdsa_sign` (SHA2-128f/SHAKE-128f fast), `fuzz_rsa_sign` (PKCS1v15/PSS with OnceLock key cache), `fuzz_ecdsa_sign` (P-256/P-384/P-521), `fuzz_ed25519` (generate/from_seed/from_public_key/fuzzed-sig), `fuzz_sm2_sign` (sign/sign_with_id/encrypt/decrypt), `fuzz_dsa_sign` (small params p=23,q=11,g=4)
+- 80 corpus seeds across 8 directories (10+10+8+10+10+10+12+10)
+- 26→34 fuzz targets, 158→238 corpus files
+- PQC fuzz coverage: 0→3/6 algorithms, sign-path fuzz: 0→5/7 algorithms
+- All tests pass (3,479), 0 clippy warnings, formatting clean

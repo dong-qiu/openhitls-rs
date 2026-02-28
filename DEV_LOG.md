@@ -4,9 +4,9 @@
 
 Category summary:
 - Implementation: I1–I80 (80 phases)
-- Testing: T1–T62 (62 phases)
+- Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P18 (18 phases)
+- Performance: P1–P22 (22 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -186,6 +186,7 @@ Category summary:
 | 174 | P20 | Perf | CTR-DRBG AES/SM4 Key Caching | 2026-03-01 |
 | 175 | P21 | Perf | AES-GCM/CBC Generic Monomorphization | 2026-03-01 |
 | 176 | P22 | Perf | Miller-Rabin Montgomery Optimization | 2026-03-01 |
+| 177 | T63 | Test | PQC Fuzz + Signature Sign Fuzz | 2026-03-01 |
 
 ---
 
@@ -10641,3 +10642,61 @@ Optimized Miller-Rabin primality testing by creating a single `MontgomeryCtx` fo
 - `cargo test --workspace --all-features`: 3,479 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T63 — PQC Fuzz + Signature Sign Fuzz (2026-03-01)
+
+### Summary
+Add 8 new fuzz targets covering three critical gaps: PQC algorithms (ML-KEM, ML-DSA, SLH-DSA), signature Sign paths (RSA, ECDSA, SM2, DSA), and previously uncovered signature algorithms (Ed25519). Includes 80 new corpus seed files for structured fuzzing.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `fuzz/Cargo.toml` | Modified | Added `mlkem`, `mldsa`, `slh-dsa`, `ed25519`, `dsa`, `sha2`, `sha3` features; 8 new `[[bin]]` entries |
+| `fuzz/fuzz_targets/fuzz_mlkem.rs` | New | ML-KEM encapsulate/decapsulate roundtrip, tampered ct, fuzzed ek/ct |
+| `fuzz/fuzz_targets/fuzz_mldsa_sign.rs` | New | ML-DSA sign/verify roundtrip + fuzzed signature verify |
+| `fuzz/fuzz_targets/fuzz_slhdsa_sign.rs` | New | SLH-DSA sign/verify (fast variants only: Sha2128f, Shake128f) |
+| `fuzz/fuzz_targets/fuzz_rsa_sign.rs` | New | RSA sign/verify roundtrip (PKCS1v15/PSS) with OnceLock key cache |
+| `fuzz/fuzz_targets/fuzz_ecdsa_sign.rs` | New | ECDSA sign/verify roundtrip (P-256/P-384/P-521) + tamper |
+| `fuzz/fuzz_targets/fuzz_ed25519.rs` | New | Ed25519 generate/from_seed/from_public_key + sign/verify |
+| `fuzz/fuzz_targets/fuzz_sm2_sign.rs` | New | SM2 sign/verify, sign_with_id, encrypt/decrypt, fuzzed decrypt |
+| `fuzz/fuzz_targets/fuzz_dsa_sign.rs` | New | DSA sign/verify with small params (p=23,q=11,g=4) for fast iteration |
+| `fuzz/corpus/fuzz_mlkem/` | New | 10 seed files (roundtrip/fuzzed-ct/fuzzed-ek per param set) |
+| `fuzz/corpus/fuzz_mldsa_sign/` | New | 10 seed files (roundtrip/fuzzed-sig per param set) |
+| `fuzz/corpus/fuzz_slhdsa_sign/` | New | 8 seed files (roundtrip/fuzzed-sig for fast variants) |
+| `fuzz/corpus/fuzz_rsa_sign/` | New | 10 seed files (PKCS1v15/PSS × digest patterns) |
+| `fuzz/corpus/fuzz_ecdsa_sign/` | New | 10 seed files (P-256/P-384/P-521 × modes) |
+| `fuzz/corpus/fuzz_ed25519/` | New | 10 seed files (generate/from_seed/from_pk/fuzzed-sig) |
+| `fuzz/corpus/fuzz_sm2_sign/` | New | 12 seed files (sign/sign_with_id/encrypt/fuzzed-decrypt) |
+| `fuzz/corpus/fuzz_dsa_sign/` | New | 10 seed files (roundtrip/fuzzed-sig/from_private_key) |
+
+### New Fuzz Targets
+
+| Target | Algorithm | Coverage |
+|--------|-----------|----------|
+| `fuzz_mlkem` | ML-KEM-512/768/1024 | Encapsulate, decapsulate, implicit rejection, fuzzed ek |
+| `fuzz_mldsa_sign` | ML-DSA-44/65/87 | Sign, verify roundtrip, fuzzed signature verify |
+| `fuzz_slhdsa_sign` | SLH-DSA-SHA2-128f/SHAKE-128f | Sign, verify roundtrip, fuzzed signature verify |
+| `fuzz_rsa_sign` | RSA-2048 (PKCS1v15/PSS) | Sign, verify roundtrip, tampered digest/sig |
+| `fuzz_ecdsa_sign` | ECDSA (P-256/P-384/P-521) | Sign, verify roundtrip, tampered digest |
+| `fuzz_ed25519` | Ed25519 | Generate, from_seed, from_public_key, sign/verify, fuzzed sig |
+| `fuzz_sm2_sign` | SM2 | Sign/verify, sign_with_id, encrypt/decrypt, fuzzed decrypt |
+| `fuzz_dsa_sign` | DSA (small params) | Sign/verify roundtrip, fuzzed sig, from_private_key |
+
+### Aggregate Counts (Post T63)
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| Fuzz targets | 26 | 34 | +8 |
+| Corpus files | 158 | 238 | +80 |
+| PQC fuzz coverage | 0/6 | 3/6 | +3 (ML-KEM, ML-DSA, SLH-DSA) |
+| Sign path fuzz | 0/7 | 5/7 | +5 (RSA, ECDSA, Ed25519, SM2, DSA) |
+| Tests | 3,479 | 3,479 | 0 (fuzz-only change) |
+
+### Build Status (Post T63)
+- `cargo test --workspace --all-features`: 3,479 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- Fuzz targets: 34 (26→34), 238 corpus files (158→238)
