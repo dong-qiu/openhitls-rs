@@ -2224,4 +2224,296 @@ mod tests {
         let config = TlsConfig::builder().middlebox_compat(true).build();
         assert!(config.middlebox_compat);
     }
+
+    // -------------------------------------------------------
+    // Phase T64 — ServerPrivateKey variant tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_server_private_key_ed25519_variant() {
+        let key = ServerPrivateKey::Ed25519(vec![0x42; 32]);
+        match &key {
+            ServerPrivateKey::Ed25519(seed) => assert_eq!(seed.len(), 32),
+            _ => panic!("expected Ed25519"),
+        }
+    }
+
+    #[test]
+    fn test_server_private_key_ed448_variant() {
+        let key = ServerPrivateKey::Ed448(vec![0x42; 57]);
+        match &key {
+            ServerPrivateKey::Ed448(seed) => assert_eq!(seed.len(), 57),
+            _ => panic!("expected Ed448"),
+        }
+    }
+
+    #[test]
+    fn test_server_private_key_ecdsa_variant() {
+        let key = ServerPrivateKey::Ecdsa {
+            curve_id: EccCurveId::NistP256,
+            private_key: vec![0xAA; 32],
+        };
+        match &key {
+            ServerPrivateKey::Ecdsa {
+                curve_id,
+                private_key,
+            } => {
+                assert_eq!(*curve_id, EccCurveId::NistP256);
+                assert_eq!(private_key.len(), 32);
+            }
+            _ => panic!("expected Ecdsa"),
+        }
+    }
+
+    #[test]
+    fn test_server_private_key_rsa_variant() {
+        let key = ServerPrivateKey::Rsa {
+            n: vec![0x01; 256],
+            d: vec![0x02; 256],
+            e: vec![0x01, 0x00, 0x01],
+            p: vec![0x03; 128],
+            q: vec![0x04; 128],
+        };
+        match &key {
+            ServerPrivateKey::Rsa { n, d, e, p, q } => {
+                assert_eq!(n.len(), 256);
+                assert_eq!(d.len(), 256);
+                assert_eq!(e, &[0x01, 0x00, 0x01]);
+                assert_eq!(p.len(), 128);
+                assert_eq!(q.len(), 128);
+            }
+            _ => panic!("expected Rsa"),
+        }
+    }
+
+    #[test]
+    fn test_server_private_key_dsa_variant() {
+        let key = ServerPrivateKey::Dsa {
+            params_der: vec![0x30, 0x82, 0x01, 0x00],
+            private_key: vec![0xBB; 20],
+        };
+        match &key {
+            ServerPrivateKey::Dsa {
+                params_der,
+                private_key,
+            } => {
+                assert_eq!(params_der.len(), 4);
+                assert_eq!(private_key.len(), 20);
+            }
+            _ => panic!("expected Dsa"),
+        }
+    }
+
+    #[test]
+    fn test_server_private_key_clone() {
+        let key = ServerPrivateKey::Ed25519(vec![0x42; 32]);
+        let cloned = key.clone();
+        match (&key, &cloned) {
+            (ServerPrivateKey::Ed25519(a), ServerPrivateKey::Ed25519(b)) => {
+                assert_eq!(a, b);
+            }
+            _ => panic!("clone variant mismatch"),
+        }
+    }
+
+    #[test]
+    fn test_server_private_key_debug_format() {
+        let key = ServerPrivateKey::Ed25519(vec![0x42; 32]);
+        let debug = format!("{key:?}");
+        assert!(debug.contains("Ed25519"));
+    }
+
+    #[test]
+    fn test_config_builder_with_ed448_key() {
+        let config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .private_key(ServerPrivateKey::Ed448(vec![0x42; 57]))
+            .build();
+        match config.private_key.as_ref().unwrap() {
+            ServerPrivateKey::Ed448(seed) => assert_eq!(seed.len(), 57),
+            _ => panic!("expected Ed448"),
+        }
+    }
+
+    #[test]
+    fn test_config_builder_with_rsa_key() {
+        let config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .private_key(ServerPrivateKey::Rsa {
+                n: vec![0x01; 256],
+                d: vec![0x02; 256],
+                e: vec![0x01, 0x00, 0x01],
+                p: vec![0x03; 128],
+                q: vec![0x04; 128],
+            })
+            .build();
+        assert!(matches!(
+            config.private_key,
+            Some(ServerPrivateKey::Rsa { .. })
+        ));
+    }
+
+    #[test]
+    fn test_config_builder_with_dsa_key() {
+        let config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .private_key(ServerPrivateKey::Dsa {
+                params_der: vec![0x30; 100],
+                private_key: vec![0xCC; 20],
+            })
+            .build();
+        assert!(matches!(
+            config.private_key,
+            Some(ServerPrivateKey::Dsa { .. })
+        ));
+    }
+
+    #[test]
+    fn test_config_builder_with_ecdsa_key() {
+        let config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: EccCurveId::NistP384,
+                private_key: vec![0xDD; 48],
+            })
+            .build();
+        match config.private_key.as_ref().unwrap() {
+            ServerPrivateKey::Ecdsa {
+                curve_id,
+                private_key,
+            } => {
+                assert_eq!(*curve_id, EccCurveId::NistP384);
+                assert_eq!(private_key.len(), 48);
+            }
+            _ => panic!("expected Ecdsa"),
+        }
+    }
+
+    // -------------------------------------------------------
+    // Phase T64 — Config edge case and completeness tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_config_builder_empty_cipher_suites() {
+        let config = TlsConfig::builder().cipher_suites(&[]).build();
+        assert!(config.cipher_suites.is_empty());
+    }
+
+    #[test]
+    fn test_config_builder_empty_signature_algorithms() {
+        let config = TlsConfig::builder().signature_algorithms(&[]).build();
+        assert!(config.signature_algorithms.is_empty());
+    }
+
+    #[test]
+    fn test_config_builder_empty_supported_groups() {
+        let config = TlsConfig::builder().supported_groups(&[]).build();
+        assert!(config.supported_groups.is_empty());
+    }
+
+    #[test]
+    fn test_config_builder_empty_alpn() {
+        let config = TlsConfig::builder().alpn(&[]).build();
+        assert!(config.alpn_protocols.is_empty());
+    }
+
+    #[test]
+    fn test_config_builder_server_name_none_by_default() {
+        let config = TlsConfig::builder().build();
+        assert!(config.server_name.is_none());
+    }
+
+    #[test]
+    fn test_config_builder_private_key_none_by_default() {
+        let config = TlsConfig::builder().build();
+        assert!(config.private_key.is_none());
+    }
+
+    #[test]
+    fn test_config_clone_independence() {
+        let config1 = TlsConfig::builder()
+            .server_name("test.com")
+            .cipher_suites(&[CipherSuite::TLS_AES_128_GCM_SHA256])
+            .build();
+        let config2 = config1.clone();
+        assert_eq!(config1.server_name, config2.server_name);
+        assert_eq!(config1.cipher_suites, config2.cipher_suites);
+        assert_eq!(config1.role, config2.role);
+        assert_eq!(config1.min_version, config2.min_version);
+        assert_eq!(config1.max_version, config2.max_version);
+    }
+
+    #[test]
+    fn test_mfl_from_u8_boundary() {
+        // Test all valid u8 values
+        for v in 0..=255u8 {
+            let result = MaxFragmentLength::from_u8(v);
+            match v {
+                1..=4 => assert!(result.is_some()),
+                _ => assert!(result.is_none()),
+            }
+        }
+    }
+
+    #[test]
+    fn test_client_hello_info_clone() {
+        let info = ClientHelloInfo {
+            cipher_suites: vec![0x1301, 0x1302],
+            supported_versions: vec![0x0304, 0x0303],
+            server_name: Some("example.com".to_string()),
+            alpn_protocols: vec![b"h2".to_vec(), b"http/1.1".to_vec()],
+        };
+        let cloned = info.clone();
+        assert_eq!(cloned.cipher_suites, info.cipher_suites);
+        assert_eq!(cloned.supported_versions, info.supported_versions);
+        assert_eq!(cloned.server_name, info.server_name);
+        assert_eq!(cloned.alpn_protocols, info.alpn_protocols);
+    }
+
+    #[test]
+    fn test_client_hello_info_empty_fields() {
+        let info = ClientHelloInfo {
+            cipher_suites: vec![],
+            supported_versions: vec![],
+            server_name: None,
+            alpn_protocols: vec![],
+        };
+        assert!(info.cipher_suites.is_empty());
+        assert!(info.supported_versions.is_empty());
+        assert!(info.server_name.is_none());
+        assert!(info.alpn_protocols.is_empty());
+    }
+
+    #[test]
+    fn test_ticket_key_result_clone() {
+        let result = TicketKeyResult {
+            key_name: [0xAA; 16],
+            key: vec![0xBB; 32],
+            iv: vec![0xCC; 16],
+        };
+        let cloned = result.clone();
+        assert_eq!(cloned.key_name, result.key_name);
+        assert_eq!(cloned.key, result.key);
+        assert_eq!(cloned.iv, result.iv);
+    }
+
+    #[test]
+    fn test_config_custom_extensions_default_empty() {
+        let config = TlsConfig::builder().build();
+        assert!(config.custom_extensions.is_empty());
+    }
+
+    #[test]
+    fn test_config_builder_tls12_only_ciphers() {
+        let config = TlsConfig::builder()
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .cipher_suites(&[
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+            ])
+            .build();
+        assert_eq!(config.cipher_suites.len(), 2);
+        assert_eq!(config.min_version, TlsVersion::Tls12);
+    }
 }
