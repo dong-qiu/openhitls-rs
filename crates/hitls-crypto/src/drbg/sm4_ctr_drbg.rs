@@ -24,6 +24,8 @@ pub struct Sm4CtrDrbg {
     v: [u8; BLOCK_LEN],
     /// Number of generate requests since last (re)seed.
     reseed_counter: u64,
+    /// Cached SM4 expanded key (avoids re-expanding round keys per block).
+    cached_key: Sm4Key,
 }
 
 impl Drop for Sm4CtrDrbg {
@@ -34,12 +36,6 @@ impl Drop for Sm4CtrDrbg {
 }
 
 use super::increment_counter;
-
-/// Encrypt a single SM4 block in-place.
-fn sm4_encrypt_block(key: &[u8; KEY_LEN], block: &mut [u8; BLOCK_LEN]) -> Result<(), CryptoError> {
-    let cipher = Sm4Key::new(key)?;
-    cipher.encrypt_block(block)
-}
 
 impl Sm4CtrDrbg {
     /// Instantiate SM4-CTR-DRBG without derivation function (SP 800-90A §10.2.1.3).
@@ -54,6 +50,7 @@ impl Sm4CtrDrbg {
             key: [0u8; KEY_LEN],
             v: [0u8; BLOCK_LEN],
             reseed_counter: 0,
+            cached_key: Sm4Key::new(&[0u8; KEY_LEN])?,
         };
 
         drbg.update(seed_material)?;
@@ -70,7 +67,7 @@ impl Sm4CtrDrbg {
         while offset < SEED_LEN {
             increment_counter(&mut self.v);
             let mut block = self.v;
-            sm4_encrypt_block(&self.key, &mut block)?;
+            self.cached_key.encrypt_block(&mut block)?;
 
             let copy_len = (SEED_LEN - offset).min(BLOCK_LEN);
             temp[offset..offset + copy_len].copy_from_slice(&block[..copy_len]);
@@ -86,6 +83,7 @@ impl Sm4CtrDrbg {
         // Split into new Key and V
         self.key.copy_from_slice(&temp[..KEY_LEN]);
         self.v.copy_from_slice(&temp[KEY_LEN..SEED_LEN]);
+        self.cached_key = Sm4Key::new(&self.key)?;
 
         temp.zeroize();
         Ok(())
@@ -117,7 +115,7 @@ impl Sm4CtrDrbg {
         while offset < output.len() {
             increment_counter(&mut self.v);
             let mut block = self.v;
-            sm4_encrypt_block(&self.key, &mut block)?;
+            self.cached_key.encrypt_block(&mut block)?;
 
             let remaining = output.len() - offset;
             let copy_len = remaining.min(BLOCK_LEN);

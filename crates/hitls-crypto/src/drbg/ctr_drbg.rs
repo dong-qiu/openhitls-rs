@@ -25,6 +25,8 @@ pub struct CtrDrbg {
     v: [u8; BLOCK_LEN],
     /// Number of generate requests since last (re)seed.
     reseed_counter: u64,
+    /// Cached AES-256 expanded key (avoids re-expanding round keys per block).
+    cached_key: AesKey,
 }
 
 impl Drop for CtrDrbg {
@@ -35,15 +37,6 @@ impl Drop for CtrDrbg {
 }
 
 use super::increment_counter;
-
-/// Encrypt a single AES-256 block in-place.
-fn aes256_encrypt_block(
-    key: &[u8; KEY_LEN],
-    block: &mut [u8; BLOCK_LEN],
-) -> Result<(), CryptoError> {
-    let cipher = AesKey::new(key)?;
-    cipher.encrypt_block(block)
-}
 
 impl CtrDrbg {
     /// Instantiate CTR-DRBG without derivation function (SP 800-90A §10.2.1.3).
@@ -59,6 +52,7 @@ impl CtrDrbg {
             key: [0u8; KEY_LEN],
             v: [0u8; BLOCK_LEN],
             reseed_counter: 0,
+            cached_key: AesKey::new(&[0u8; KEY_LEN])?,
         };
 
         drbg.update(seed_material)?;
@@ -88,6 +82,7 @@ impl CtrDrbg {
             key: [0u8; KEY_LEN],
             v: [0u8; BLOCK_LEN],
             reseed_counter: 0,
+            cached_key: AesKey::new(&[0u8; KEY_LEN])?,
         };
 
         drbg.update(&seed_material)?;
@@ -120,7 +115,7 @@ impl CtrDrbg {
         while offset < SEED_LEN {
             increment_counter(&mut self.v);
             let mut block = self.v;
-            aes256_encrypt_block(&self.key, &mut block)?;
+            self.cached_key.encrypt_block(&mut block)?;
 
             let copy_len = (SEED_LEN - offset).min(BLOCK_LEN);
             temp[offset..offset + copy_len].copy_from_slice(&block[..copy_len]);
@@ -136,6 +131,7 @@ impl CtrDrbg {
         // Split into new Key and V
         self.key.copy_from_slice(&temp[..KEY_LEN]);
         self.v.copy_from_slice(&temp[KEY_LEN..SEED_LEN]);
+        self.cached_key = AesKey::new(&self.key)?;
 
         temp.zeroize();
         Ok(())
@@ -168,7 +164,7 @@ impl CtrDrbg {
         while offset < output.len() {
             increment_counter(&mut self.v);
             let mut block = self.v;
-            aes256_encrypt_block(&self.key, &mut block)?;
+            self.cached_key.encrypt_block(&mut block)?;
 
             let remaining = output.len() - offset;
             let copy_len = remaining.min(BLOCK_LEN);
@@ -280,6 +276,7 @@ fn block_cipher_df(input: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoErr
     let blocks_needed = (KEY_LEN + BLOCK_LEN).div_ceil(BLOCK_LEN);
     let mut temp = Vec::with_capacity(blocks_needed * BLOCK_LEN);
 
+    let df_cipher = AesKey::new(&df_key)?;
     for counter in 0..blocks_needed as u32 {
         // IV = counter(4) || zeros(12) for each BCC call
         let mut iv = [0u8; BLOCK_LEN];
@@ -292,7 +289,7 @@ fn block_cipher_df(input: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoErr
             for i in 0..BLOCK_LEN {
                 block[i] = chaining[i] ^ if i < chunk.len() { chunk[i] } else { 0 };
             }
-            aes256_encrypt_block(&df_key, &mut block)?;
+            df_cipher.encrypt_block(&mut block)?;
             chaining = block;
         }
         temp.extend_from_slice(&chaining);
@@ -305,9 +302,10 @@ fn block_cipher_df(input: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoErr
     x.copy_from_slice(&temp[KEY_LEN..KEY_LEN + BLOCK_LEN]);
 
     // Generate output_len bytes using K' in ECB mode
+    let new_cipher = AesKey::new(&new_key)?;
     let mut result = Vec::with_capacity(output_len);
     while result.len() < output_len {
-        aes256_encrypt_block(&new_key, &mut x)?;
+        new_cipher.encrypt_block(&mut x)?;
         let remaining = output_len - result.len();
         let copy_len = remaining.min(BLOCK_LEN);
         result.extend_from_slice(&x[..copy_len]);
