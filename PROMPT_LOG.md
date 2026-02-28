@@ -3300,6 +3300,17 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 **Result**:
 - Removed `encode_hkdf_label` function; inlined label encoding into `hkdf_expand_label`
 - Stack buffer `[0u8; 128]` (MAX_HKDF_LABEL) with byte-level copy; Vec fallback for >128 bytes
-- Updated test `test_encode_hkdf_label` → `test_hkdf_label_encoding` (no longer calls removed function)
+- Updated test `test_encode_hkdf_label` → `test_hkdf_label_encoding`
 - All 23 HKDF tests pass, 1,360 TLS tests pass, 188 integration tests pass
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+## Phase P37 — TLCP/DTLCP Record Stack Arrays (2026-03-01)
+
+**Prompt**: Eliminate per-record heap allocations in TLCP/DTLCP CBC record encryption.
+
+**Result**:
+- `compute_cbc_mac` / `compute_dtlcp_cbc_mac` return `[u8; 32]` instead of `Vec<u8>`
+- `build_tls_padding` returns `([u8; 16], usize)` instead of `Vec<u8>`
+- Callers updated: `extend_from_slice(&padding[..padding_len])`, `ct_eq(&expected_mac)`
+- All 13 TLCP + 15 DTLCP encryption tests pass
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings

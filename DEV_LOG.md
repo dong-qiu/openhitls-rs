@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P36 (36 phases)
+- Performance: P1–P37 (37 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -202,6 +202,7 @@ Category summary:
 | 190 | P34 | Perf | Handshake Hash Output Stack Arrays | 2026-03-01 |
 | 191 | P35 | Perf | RSA Padding Stack Arrays | 2026-03-01 |
 | 192 | P36 | Perf | HKDF Label Stack Encoding | 2026-03-01 |
+| 193 | P37 | Perf | TLCP/DTLCP Record Stack Arrays | 2026-03-01 |
 
 ---
 
@@ -11163,6 +11164,26 @@ Eliminated heap allocation in `hkdf_expand_label` by inlining the HkdfLabel enco
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P36)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P37 — TLCP/DTLCP Record Stack Arrays (2026-03-01)
+
+### Summary
+Eliminated per-record heap allocations in TLCP and DTLCP CBC record encryption/decryption. MAC computation functions (`compute_cbc_mac`, `compute_dtlcp_cbc_mac`) now return `[u8; SM3_MAC_SIZE]` stack arrays instead of `Vec<u8>`. Padding functions (`build_tls_padding`) now return `([u8; SM4_BLOCK_SIZE], usize)` stack tuples instead of `Vec<u8>`.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-tls/src/record/encryption_tlcp.rs` | `compute_cbc_mac` return `[u8; 32]`; `build_tls_padding` return `([u8; 16], usize)`; callers updated |
+| `crates/hitls-tls/src/record/encryption_dtlcp.rs` | `compute_dtlcp_cbc_mac` return `[u8; 32]`; `build_tls_padding` return `([u8; 16], usize)`; callers updated |
+
+### Test Results
+- All 13 TLCP encryption + 15 DTLCP encryption tests pass
+- 1,360 TLS tests pass, 0 clippy warnings
+
+### Build Status (Post P37)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

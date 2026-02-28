@@ -33,7 +33,7 @@ fn compute_cbc_mac(
     seq: u64,
     content_type: ContentType,
     fragment: &[u8],
-) -> Result<Vec<u8>, TlsError> {
+) -> Result<[u8; SM3_MAC_SIZE], TlsError> {
     use hitls_crypto::hmac::Hmac;
     use hitls_crypto::sm3::Sm3;
 
@@ -50,7 +50,7 @@ fn compute_cbc_mac(
         .map_err(TlsError::CryptoError)?;
     hmac.update(fragment).map_err(TlsError::CryptoError)?;
 
-    let mut mac = vec![0u8; SM3_MAC_SIZE];
+    let mut mac = [0u8; SM3_MAC_SIZE];
     hmac.finish(&mut mac).map_err(TlsError::CryptoError)?;
     Ok(mac)
 }
@@ -59,9 +59,12 @@ fn compute_cbc_mac(
 ///
 /// padding_length = (block_size - ((data_len + 1) % block_size)) % block_size
 /// Total padding = padding_length + 1 bytes, all set to padding_length.
-fn build_tls_padding(data_len: usize) -> Vec<u8> {
+/// Returns (buffer, total_len) where total_len <= SM4_BLOCK_SIZE.
+fn build_tls_padding(data_len: usize) -> ([u8; SM4_BLOCK_SIZE], usize) {
     let padding_length = (SM4_BLOCK_SIZE - ((data_len + 1) % SM4_BLOCK_SIZE)) % SM4_BLOCK_SIZE;
-    vec![padding_length as u8; padding_length + 1]
+    let total = padding_length + 1;
+    let buf = [padding_length as u8; SM4_BLOCK_SIZE];
+    (buf, total)
 }
 
 /// Raw SM4-CBC encrypt in-place (no padding; data must be block-aligned).
@@ -157,11 +160,11 @@ impl RecordEncryptorTlcpCbc {
 
         // Build: plaintext || MAC || TLS-padding
         let data_len = plaintext.len() + SM3_MAC_SIZE;
-        let padding = build_tls_padding(data_len);
-        let mut encrypt_data = Vec::with_capacity(data_len + padding.len());
+        let (padding, padding_len) = build_tls_padding(data_len);
+        let mut encrypt_data = Vec::with_capacity(data_len + padding_len);
         encrypt_data.extend_from_slice(plaintext);
         encrypt_data.extend_from_slice(&mac);
-        encrypt_data.extend_from_slice(&padding);
+        encrypt_data.extend_from_slice(&padding[..padding_len]);
 
         // Generate random explicit IV
         let mut iv = [0u8; SM4_BLOCK_SIZE];
@@ -284,7 +287,7 @@ impl RecordDecryptorTlcpCbc {
             // Dummy comparison against first SM3_MAC_SIZE bytes
             &decrypted[..SM3_MAC_SIZE]
         };
-        let mac_ok = mac_slice.ct_eq(expected_mac.as_slice()).unwrap_u8();
+        let mac_ok = mac_slice.ct_eq(&expected_mac).unwrap_u8();
 
         if pad_ok & mac_ok != 1 {
             return Err(TlsError::RecordError("bad record MAC".into()));
