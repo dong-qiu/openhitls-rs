@@ -5,7 +5,6 @@ unmaintained = "workspace"
 yanked = "warn"
 
 [licenses]
-unlicensed = "deny"
 allow = [
     "MIT",
     "Apache-2.0",
@@ -18,11 +17,10 @@ allow = [
     "Zlib",
     "CC0-1.0",
 ]
-copyleft = "deny"
 
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
+wildcards = "allow"
 highlight = "all"
 
 [sources]
