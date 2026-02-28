@@ -302,9 +302,9 @@ impl RecordDecryptor12Cbc {
             return Err(TlsError::RecordError("bad record MAC".into()));
         }
 
-        let plaintext = decrypted[..content_len].to_vec();
+        decrypted.truncate(content_len);
 
-        if plaintext.len() > MAX_PLAINTEXT_LENGTH {
+        if decrypted.len() > MAX_PLAINTEXT_LENGTH {
             return Err(TlsError::RecordError(
                 "decrypted plaintext too large".into(),
             ));
@@ -315,7 +315,7 @@ impl RecordDecryptor12Cbc {
         }
         self.seq += 1;
 
-        Ok(plaintext)
+        Ok(decrypted)
     }
 
     pub fn sequence_number(&self) -> u64 {
@@ -518,9 +518,9 @@ impl RecordDecryptor12EtM {
         }
 
         let plaintext_len = decrypted.len() - total_padding;
-        let plaintext = decrypted[..plaintext_len].to_vec();
+        decrypted.truncate(plaintext_len);
 
-        if plaintext.len() > MAX_PLAINTEXT_LENGTH {
+        if decrypted.len() > MAX_PLAINTEXT_LENGTH {
             return Err(TlsError::RecordError(
                 "decrypted plaintext too large".into(),
             ));
@@ -531,7 +531,7 @@ impl RecordDecryptor12EtM {
         }
         self.seq += 1;
 
-        Ok(plaintext)
+        Ok(decrypted)
     }
 
     pub fn sequence_number(&self) -> u64 {

@@ -294,9 +294,9 @@ impl RecordDecryptorTlcpCbc {
             return Err(TlsError::RecordError("bad record MAC".into()));
         }
 
-        let plaintext = decrypted[..content_len].to_vec();
+        decrypted.truncate(content_len);
 
-        if plaintext.len() > MAX_PLAINTEXT_LENGTH {
+        if decrypted.len() > MAX_PLAINTEXT_LENGTH {
             return Err(TlsError::RecordError(
                 "decrypted plaintext too large".into(),
             ));
@@ -307,7 +307,7 @@ impl RecordDecryptorTlcpCbc {
         }
         self.seq += 1;
 
-        Ok(plaintext)
+        Ok(decrypted)
     }
 
     pub fn sequence_number(&self) -> u64 {

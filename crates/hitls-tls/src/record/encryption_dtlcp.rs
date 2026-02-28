@@ -373,13 +373,13 @@ impl DtlcpRecordDecryptorCbc {
             return Err(TlsError::RecordError("bad record MAC".into()));
         }
 
-        let plaintext = decrypted[..content_len].to_vec();
-        if plaintext.len() > MAX_PLAINTEXT_LENGTH {
+        decrypted.truncate(content_len);
+        if decrypted.len() > MAX_PLAINTEXT_LENGTH {
             return Err(TlsError::RecordError(
                 "decrypted plaintext too large".into(),
             ));
         }
-        Ok(plaintext)
+        Ok(decrypted)
     }
 }
 

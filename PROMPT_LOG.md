@@ -3328,3 +3328,14 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - Eliminates 3 Box allocations (factory closure + inner digest + trait object) per record
 - All 13 TLCP + 15 DTLCP encryption tests pass, 1,360 TLS tests pass, 188 integration tests pass
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+## Phase P39 — CBC Decrypt Truncate-in-Place (2026-03-01)
+
+**Prompt**: Eliminate redundant heap allocation in CBC record decryption by replacing `decrypted[..content_len].to_vec()` with `decrypted.truncate(content_len)`.
+
+**Result**:
+- 4 decrypt paths updated: TLS 1.2 MtE, TLS 1.2 EtM, TLCP CBC, DTLCP CBC
+- `decrypted.truncate(content_len); Ok(decrypted)` replaces `let plaintext = decrypted[..content_len].to_vec(); Ok(plaintext)`
+- Eliminates one heap allocation per CBC record decryption
+- All 75 CBC + 136 TLCP/DTLCP tests pass, 1,360 TLS tests pass, 188 integration tests pass
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
