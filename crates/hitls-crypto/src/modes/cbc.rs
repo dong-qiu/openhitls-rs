@@ -89,15 +89,15 @@ pub fn cbc_encrypt_with<C: BlockCipher>(
     let mut data = plaintext.to_vec();
     data.extend(vec![pad_len as u8; pad_len]);
 
-    let mut prev = vec![0u8; bs];
-    prev.copy_from_slice(iv);
+    let mut prev = [0u8; 16];
+    prev[..bs].copy_from_slice(iv);
 
     for chunk in data.chunks_mut(bs) {
         for i in 0..bs {
             chunk[i] ^= prev[i];
         }
         cipher.encrypt_block(chunk)?;
-        prev.copy_from_slice(chunk);
+        prev[..bs].copy_from_slice(chunk);
     }
     Ok(data)
 }
@@ -117,16 +117,17 @@ pub fn cbc_decrypt_with<C: BlockCipher>(
     }
 
     let mut output = ciphertext.to_vec();
-    let mut prev = vec![0u8; bs];
-    prev.copy_from_slice(iv);
+    let mut prev = [0u8; 16];
+    prev[..bs].copy_from_slice(iv);
 
     for chunk in output.chunks_mut(bs) {
-        let ct_copy: Vec<u8> = chunk.to_vec();
+        let mut ct_copy = [0u8; 16];
+        ct_copy[..bs].copy_from_slice(chunk);
         cipher.decrypt_block(chunk)?;
         for i in 0..bs {
             chunk[i] ^= prev[i];
         }
-        prev.copy_from_slice(&ct_copy);
+        prev = ct_copy;
     }
 
     // PKCS#7 unpad (constant-time check)
