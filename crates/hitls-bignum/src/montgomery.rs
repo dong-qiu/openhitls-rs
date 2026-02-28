@@ -271,6 +271,7 @@ impl MontgomeryCtx {
         // Main exponentiation loop
         let mut result = vec![0u64; n];
         let mut temp = vec![0u64; n];
+        let mut sqr_buf = vec![0u64; 2 * n + 2]; // For sqr_limbs + redc_limbs
         result.copy_from_slice(&table[0..n]); // Start with 1 in Montgomery form
 
         // Process exponent from MSB to LSB in w-bit windows
@@ -279,9 +280,13 @@ impl MontgomeryCtx {
             let window_bits = if i >= w { w } else { i };
             i -= window_bits;
 
-            // Square window_bits times (using CIOS with a == b)
+            // Square window_bits times using dedicated sqr + redc (~33% fewer muls)
             for _ in 0..window_bits {
-                self.cios_mul(&mut temp, &result, &result, &mut scratch);
+                for x in sqr_buf.iter_mut() {
+                    *x = 0;
+                }
+                sqr_limbs(&result, n, &mut sqr_buf);
+                self.redc_limbs(&mut temp, &mut sqr_buf);
                 std::mem::swap(&mut result, &mut temp);
             }
 

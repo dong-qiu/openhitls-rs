@@ -4,12 +4,15 @@ fn main() {
     // Declare custom cfg to avoid unexpected_cfgs warnings.
     // Use single-colon syntax for MSRV 1.75 compatibility.
     println!("cargo:rustc-check-cfg=cfg(has_sha512_arm_intrinsics)");
+    println!("cargo:rustc-check-cfg=cfg(has_sha3_keccak_intrinsics)");
 
     // Detect Rust version to gate features that require newer intrinsics.
-    // SHA-512 ARM intrinsics (vsha512*) were stabilized in Rust 1.79.
+    // SHA-512 ARM intrinsics (vsha512*) and SHA-3 Keccak intrinsics
+    // (veor3q, vbcaxq, vrax1q) were stabilized in Rust 1.79.
     let version = rustc_minor_version();
     if version >= 79 {
         println!("cargo:rustc-cfg=has_sha512_arm_intrinsics");
+        println!("cargo:rustc-cfg=has_sha3_keccak_intrinsics");
     }
 }
 

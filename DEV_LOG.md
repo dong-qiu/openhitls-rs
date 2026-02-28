@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I80 (80 phases)
 - Testing: T1–T62 (62 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P10 complete + P11–P12 pending
+- Performance: P1–P18 (18 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -176,6 +176,12 @@ Category summary:
 | 164 | P10 | Perf | SM2 Specialized Field Arithmetic | 2026-02-27 |
 | 165 | P11 | Perf | SHA-512 ARMv8.2 Hardware Acceleration | 2026-02-27 |
 | 166 | P12 | Perf | Ed25519 Precomputed Base Table | 2026-02-27 |
+| 167 | P13 | Perf | ML-DSA Batch Squeeze Optimization | 2026-02-28 |
+| 168 | P14 | Perf | Keccak Heap Allocation Elimination | 2026-02-28 |
+| 169 | P15 | Perf | BigNum mont_exp Squaring Optimization | 2026-02-28 |
+| 170 | P16 | Perf | SM3 Compression Function Optimization | 2026-02-28 |
+| 171 | P17 | Perf | P-256 Scalar Field for ECDSA Sign | 2026-02-28 |
+| 172 | P18 | Perf | Keccak ARMv8 SHA-3 Hardware Acceleration | 2026-02-28 |
 
 ---
 
@@ -10402,3 +10408,140 @@ Deep quality analysis identified 8 new deficiencies (D19–D26). 10 phases imple
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - Fuzz targets: 26 (18→26), 158 corpus files (118→158)
+
+---
+
+## Phase P13 — ML-DSA Batch Squeeze Optimization (2026-02-28)
+
+### Summary
+Replace per-byte/per-3-byte `xof.squeeze()` calls in ML-DSA rejection sampling with batch squeeze (504-byte for SHAKE-128, 136-byte for SHAKE-256). Mirrors the ML-KEM `rej_sample()` pattern.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/mldsa/poly.rs` | `rej_ntt_poly()`: batch 504-byte squeeze replacing per-3-byte loop |
+| `crates/hitls-crypto/src/mldsa/poly.rs` | `rej_bounded_poly()`: batch 136-byte squeeze replacing per-1-byte loop |
+| `crates/hitls-crypto/src/mldsa/poly.rs` | `sample_in_ball()`: batch 136-byte squeeze with buffer tracking |
+
+### Test Results
+- All ML-DSA tests pass (71 tests including keygen/sign/verify for all parameter sets)
+
+---
+
+## Phase P14 — Keccak Heap Allocation Elimination (2026-02-28)
+
+### Summary
+Replace heap-allocated `Vec<u8>` in `KeccakState` with stack-allocated `[u8; 200]` array. Eliminates all heap allocations in SHA-3/SHAKE sponge operations.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/sha3/mod.rs` | `KeccakState.buf`: `Vec<u8>` → `[u8; 200]` + `buf_len: usize` |
+| `crates/hitls-crypto/src/sha3/mod.rs` | Derive `Clone, Copy` on `KeccakState` |
+| `crates/hitls-crypto/src/sha3/mod.rs` | `absorb()`: rewritten with array copy + direct full-block processing |
+| `crates/hitls-crypto/src/sha3/mod.rs` | Added `xor_rate_bytes()`, `xor_rate_bytes_from()` helper methods |
+| `crates/hitls-crypto/src/sha3/mod.rs` | Added `state_to_bytes_into()` replacing heap-allocating `state_to_bytes()` |
+| `crates/hitls-crypto/src/sha3/mod.rs` | `pad_and_switch()`: stack-allocated padding buffer |
+| `crates/hitls-crypto/src/sha3/mod.rs` | `squeeze()`: uses `buf_len` as consumed-bytes tracker |
+| `crates/hitls-crypto/src/sha3/mod.rs` | Simplified all 6 SHA-3/SHAKE Clone impls to `#[derive(Clone)]` |
+
+### Test Results
+- All SHA-3/SHAKE tests pass (16 tests)
+- All downstream SHAKE consumers (ML-KEM, ML-DSA, SLH-DSA) pass
+
+---
+
+## Phase P15 — BigNum mont_exp Squaring Optimization (2026-02-28)
+
+### Summary
+Use dedicated `sqr_limbs()` (cross-product symmetry, ~33% fewer multiplies) instead of generic `cios_mul(a, a)` for squaring steps in modular exponentiation.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-bignum/src/montgomery.rs` | `mont_exp()`: pre-allocate `sqr_buf` for squaring intermediates |
+| `crates/hitls-bignum/src/montgomery.rs` | `mont_exp()`: replace `cios_mul(&result, &result)` with `sqr_limbs + redc_limbs` |
+
+### Test Results
+- All BigNum tests pass (80 tests)
+- All RSA/DH tests pass
+
+---
+
+## Phase P16 — SM3 Compression Function Optimization (2026-02-28)
+
+### Summary
+Precompute rotated round constants, split compression loop into two phases (rounds 0–15 XOR, rounds 16–63 majority/choice), eliminate `wp[64]` array.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/sm3/mod.rs` | Added `const T_J_ROTATED: [u32; 64]` precomputed at compile time |
+| `crates/hitls-crypto/src/sm3/mod.rs` | Made `p0()`/`p1()` `#[inline(always)]` |
+| `crates/hitls-crypto/src/sm3/mod.rs` | Removed `ff()`, `gg()`, `t_j()` functions |
+| `crates/hitls-crypto/src/sm3/mod.rs` | Split compression: rounds 0–15 (XOR) and 16–63 (majority/choice) |
+| `crates/hitls-crypto/src/sm3/mod.rs` | Eliminated `wp[64]` — compute `w[j] ^ w[j+4]` inline |
+
+### Test Results
+- All SM3 tests pass (7 tests including GB/T 32905-2016 vectors)
+
+---
+
+## Phase P17 — P-256 Scalar Field for ECDSA Sign (2026-02-28)
+
+### Summary
+New 4×u64 Montgomery scalar field arithmetic (mod P-256 curve order n) for ECDSA signing. Replaces generic BigNum `mod_inv`/`mod_mul`/`mod_add` with specialized fixed-width operations and Fermat inversion.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/ecc/p256_scalar.rs` (NEW) | `P256ScalarElement([u64; 4])` in Montgomery form |
+| `crates/hitls-crypto/src/ecc/p256_scalar.rs` | Compile-time constants: N, N0 (Newton's method), R2 (512 doublings), ONE (256 doublings) |
+| `crates/hitls-crypto/src/ecc/p256_scalar.rs` | `mont_mul`: schoolbook 4×4 + generic 4-limb Montgomery reduction |
+| `crates/hitls-crypto/src/ecc/p256_scalar.rs` | `mont_sqr`: cross-product symmetry (10 vs 16 multiplies) |
+| `crates/hitls-crypto/src/ecc/p256_scalar.rs` | `inv()`: Fermat a^(n-2) with optimized addition chain + 4-bit window |
+| `crates/hitls-crypto/src/ecc/p256_scalar.rs` | 10 unit tests (roundtrip, add/mul, inv, cross-validation with BigNum) |
+| `crates/hitls-crypto/src/ecc/mod.rs` | Added `pub(crate) mod p256_scalar;` declaration |
+| `crates/hitls-crypto/src/ecdsa/mod.rs` | P-256 fast path in `sign()`: scalar field for k_inv, d*r, e+d*r, s |
+
+### Test Results
+- All 10 P256ScalarElement unit tests pass
+- All 18 ECDSA tests pass (P-256 + P-384 + secp256k1)
+
+---
+
+## Phase P18 — Keccak ARMv8 SHA-3 Hardware Acceleration (2026-02-28)
+
+### Summary
+ARMv8.2-A SHA-3 Crypto Extensions accelerated Keccak-f[1600] permutation. Uses EOR3 (3-input XOR), RAX1 (rotate-and-XOR), and BCAX (bit-clear-and-XOR) intrinsics for theta, d, and chi steps. Runtime dispatch with software fallback.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/sha3/keccak_arm.rs` (NEW) | `keccak_f1600_arm()` using SHA-3 crypto extension intrinsics |
+| `crates/hitls-crypto/src/sha3/keccak_arm.rs` | EOR3 for theta column parities (2 instructions per column pair) |
+| `crates/hitls-crypto/src/sha3/keccak_arm.rs` | RAX1 for theta d computation (fused rotate+XOR) |
+| `crates/hitls-crypto/src/sha3/keccak_arm.rs` | BCAX for chi step (fused NOT+AND+XOR, 2 lanes per instruction) |
+| `crates/hitls-crypto/src/sha3/mod.rs` | Added `keccak_arm` module (cfg-gated: `aarch64` + `has_sha3_keccak_intrinsics`) |
+| `crates/hitls-crypto/src/sha3/mod.rs` | Renamed `keccak_f1600` → `keccak_f1600_soft` |
+| `crates/hitls-crypto/src/sha3/mod.rs` | New `keccak_f1600` dispatch: runtime `sha3` detection → ARM or soft |
+| `crates/hitls-crypto/build.rs` | Added `has_sha3_keccak_intrinsics` cfg (Rust ≥ 1.79) |
+
+### Test Results
+- All SHA-3/SHAKE tests pass (16 tests, running via ARM hardware path on Apple Silicon)
+- All downstream ML-KEM/ML-DSA tests pass (71 tests)
+
+---
+
+### Aggregate Counts (Post P13–P18)
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| Tests | 3,467 | 3,477 | +10 |
+| Ignored | 21 | 21 | 0 |
+| New files | — | 2 | `p256_scalar.rs`, `keccak_arm.rs` |
+
+### Build Status (Post P13–P18)
+- `cargo test --workspace --all-features`: 3,477 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean

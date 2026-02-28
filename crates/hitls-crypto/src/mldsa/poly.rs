@@ -73,6 +73,9 @@ pub(crate) fn use_hint(hint: bool, r: i32, gamma2: i32) -> i32 {
 
 /// Sample a polynomial in NTT domain from SHAKE128 (ExpandA, Algorithm 30).
 /// Input: seed ρ and matrix indices (i, j).
+///
+/// Squeezes in 504-byte blocks (3 × SHAKE-128 rate of 168 bytes) to minimize
+/// heap allocations. Each 3-byte chunk yields one 23-bit candidate.
 pub(crate) fn rej_ntt_poly(rho: &[u8; 32], i: u8, j: u8) -> Poly {
     let mut xof = Shake128::new();
     xof.update(rho).unwrap();
@@ -81,12 +84,18 @@ pub(crate) fn rej_ntt_poly(rho: &[u8; 32], i: u8, j: u8) -> Poly {
     let mut r = [0i32; N];
     let mut ctr = 0;
     while ctr < N {
-        let buf = xof.squeeze(3).unwrap();
-        let mut t = (buf[0] as u32) | ((buf[1] as u32) << 8) | ((buf[2] as u32) << 16);
-        t &= 0x7F_FFFF; // 23-bit candidate
-        if t < Q as u32 {
-            r[ctr] = t as i32;
-            ctr += 1;
+        let block = xof.squeeze(504).unwrap();
+        let mut pos = 0;
+        while pos + 2 < block.len() && ctr < N {
+            let mut t = (block[pos] as u32)
+                | ((block[pos + 1] as u32) << 8)
+                | ((block[pos + 2] as u32) << 16);
+            t &= 0x7F_FFFF; // 23-bit candidate
+            pos += 3;
+            if t < Q as u32 {
+                r[ctr] = t as i32;
+                ctr += 1;
+            }
         }
     }
     r
@@ -104,6 +113,9 @@ pub(crate) fn expand_a(rho: &[u8; 32], k: usize, l: usize) -> Vec<Vec<Poly>> {
 }
 
 /// Sample a polynomial with coefficients in [-eta, eta] using rejection (ExpandS).
+///
+/// Squeezes in 136-byte blocks (SHAKE-256 rate) to minimize allocations.
+/// Each byte yields two 4-bit candidates.
 pub(crate) fn rej_bounded_poly(sigma: &[u8], eta: usize, nonce: u16) -> Poly {
     let mut xof = Shake256::new();
     xof.update(sigma).unwrap();
@@ -112,27 +124,31 @@ pub(crate) fn rej_bounded_poly(sigma: &[u8], eta: usize, nonce: u16) -> Poly {
     let mut r = [0i32; N];
     let mut ctr = 0;
     while ctr < N {
-        let buf = xof.squeeze(1).unwrap();
-        let b0 = (buf[0] & 0x0F) as i32;
-        let b1 = (buf[0] >> 4) as i32;
-        if eta == 2 {
-            if b0 < 15 {
-                r[ctr] = 2 - (b0 % 5);
-                ctr += 1;
-            }
-            if ctr < N && b1 < 15 {
-                r[ctr] = 2 - (b1 % 5);
-                ctr += 1;
-            }
-        } else {
-            // eta == 4
-            if b0 < 9 {
-                r[ctr] = 4 - b0;
-                ctr += 1;
-            }
-            if ctr < N && b1 < 9 {
-                r[ctr] = 4 - b1;
-                ctr += 1;
+        let block = xof.squeeze(136).unwrap();
+        let mut pos = 0;
+        while pos < block.len() && ctr < N {
+            let b0 = (block[pos] & 0x0F) as i32;
+            let b1 = (block[pos] >> 4) as i32;
+            pos += 1;
+            if eta == 2 {
+                if b0 < 15 {
+                    r[ctr] = 2 - (b0 % 5);
+                    ctr += 1;
+                }
+                if ctr < N && b1 < 15 {
+                    r[ctr] = 2 - (b1 % 5);
+                    ctr += 1;
+                }
+            } else {
+                // eta == 4
+                if b0 < 9 {
+                    r[ctr] = 4 - b0;
+                    ctr += 1;
+                }
+                if ctr < N && b1 < 9 {
+                    r[ctr] = 4 - b1;
+                    ctr += 1;
+                }
             }
         }
     }
@@ -198,24 +214,34 @@ pub(crate) fn sample_mask_poly(seed: &[u8], nonce: u16, gamma1: i32) -> Poly {
 }
 
 /// SampleInBall: generate a sparse polynomial c with exactly τ non-zero coefficients (±1).
+///
+/// Squeezes sign bytes + index bytes in a single 136-byte batch to minimize
+/// allocations, then refills from the buffer as needed.
 pub(crate) fn sample_in_ball(seed: &[u8], tau: usize) -> Poly {
     let mut xof = Shake256::new();
     xof.update(seed).unwrap();
 
-    let sign_bytes = xof.squeeze(8).unwrap();
+    // Squeeze a full SHAKE-256 block: first 8 bytes are sign bits, rest are index candidates
+    let mut buf = xof.squeeze(136).unwrap();
     let mut signs: u64 = 0;
-    for (i, &byte) in sign_bytes.iter().enumerate() {
+    for (i, &byte) in buf[..8].iter().enumerate() {
         signs |= (byte as u64) << (8 * i);
     }
+    let mut buf_pos = 8;
 
     let mut c = [0i32; N];
     for i in (N - tau)..N {
         // Sample j uniformly from [0, i]
-        let mut j;
+        let j;
         loop {
-            let buf = xof.squeeze(1).unwrap();
-            j = buf[0] as usize;
-            if j <= i {
+            if buf_pos >= buf.len() {
+                buf = xof.squeeze(136).unwrap();
+                buf_pos = 0;
+            }
+            let candidate = buf[buf_pos] as usize;
+            buf_pos += 1;
+            if candidate <= i {
+                j = candidate;
                 break;
             }
         }

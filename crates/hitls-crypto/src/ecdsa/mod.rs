@@ -115,10 +115,24 @@ impl EcdsaKeyPair {
             }
 
             // s = k^(-1) * (e + d*r) mod n
-            let k_inv = k.mod_inv(n)?;
-            let dr = self.private_key.mod_mul(&r, n)?;
-            let e_plus_dr = e.mod_add(&dr, n)?;
-            let s = k_inv.mod_mul(&e_plus_dr, n)?;
+            let s = if self.group.curve_id() == EccCurveId::NistP256 {
+                // Fast path: 4×u64 Montgomery scalar field
+                use crate::ecc::p256_scalar::P256ScalarElement;
+                let k_se = P256ScalarElement::from_bignum(&k);
+                let r_se = P256ScalarElement::from_bignum(&r);
+                let d_se = P256ScalarElement::from_bignum(&self.private_key);
+                let e_se = P256ScalarElement::from_bignum(&e);
+                let k_inv = k_se.inv();
+                let dr = d_se.mul(&r_se);
+                let e_dr = e_se.add(&dr);
+                let s_se = k_inv.mul(&e_dr);
+                s_se.to_bignum()
+            } else {
+                let k_inv = k.mod_inv(n)?;
+                let dr = self.private_key.mod_mul(&r, n)?;
+                let e_plus_dr = e.mod_add(&dr, n)?;
+                k_inv.mod_mul(&e_plus_dr, n)?
+            };
             if s.is_zero() {
                 continue;
             }

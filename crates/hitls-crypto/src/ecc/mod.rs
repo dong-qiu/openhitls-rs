@@ -7,6 +7,7 @@
 pub(crate) mod curves;
 pub(crate) mod p256_field;
 pub(crate) mod p256_point;
+pub(crate) mod p256_scalar;
 pub(crate) mod point;
 pub(crate) mod sm2_field;
 pub(crate) mod sm2_point;

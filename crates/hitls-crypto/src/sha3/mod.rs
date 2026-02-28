@@ -5,6 +5,9 @@
 
 use hitls_types::CryptoError;
 
+#[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
+mod keccak_arm;
+
 // ---------------------------------------------------------------------------
 // Keccak-f[1600] permutation
 // ---------------------------------------------------------------------------
@@ -42,8 +45,21 @@ const ROTATIONS: [u32; 25] = [
     0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14,
 ];
 
-/// The Keccak-f[1600] permutation on a 25-lane state.
+/// Keccak-f[1600] dispatch: use SHA-3 crypto extensions on ARMv8.2+ when available.
 fn keccak_f1600(state: &mut [u64; 25]) {
+    #[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
+    {
+        if std::arch::is_aarch64_feature_detected!("sha3") {
+            // SAFETY: feature detection ensures SHA-3 crypto extensions are available.
+            unsafe { keccak_arm::keccak_f1600_arm(state) };
+            return;
+        }
+    }
+    keccak_f1600_soft(state);
+}
+
+/// Software fallback: Keccak-f[1600] permutation on a 25-lane state.
+fn keccak_f1600_soft(state: &mut [u64; 25]) {
     for &rc in &RC {
         // θ (theta)
         let mut c = [0u64; 5];
@@ -87,9 +103,13 @@ fn keccak_f1600(state: &mut [u64; 25]) {
 // Keccak sponge state (shared by all SHA-3/SHAKE variants)
 // ---------------------------------------------------------------------------
 
+/// Maximum rate for any Keccak variant is 168 bytes (SHAKE128).
+/// We use 200 (= 25 × 8, the full state size) for the absorb buffer.
+#[derive(Clone, Copy)]
 struct KeccakState {
     state: [u64; 25],
-    buf: Vec<u8>,
+    buf: [u8; 200],
+    buf_len: usize,
     rate: usize,
     suffix: u8,
     squeezed: bool,
@@ -99,7 +119,8 @@ impl KeccakState {
     fn new(rate: usize, suffix: u8) -> Self {
         KeccakState {
             state: [0u64; 25],
-            buf: Vec::new(),
+            buf: [0u8; 200],
+            buf_len: 0,
             rate,
             suffix,
             squeezed: false,
@@ -108,28 +129,69 @@ impl KeccakState {
 
     fn reset(&mut self) {
         self.state = [0u64; 25];
-        self.buf.clear();
+        self.buf_len = 0;
         self.squeezed = false;
     }
 
     fn absorb(&mut self, data: &[u8]) {
-        self.buf.extend_from_slice(data);
-        while self.buf.len() >= self.rate {
-            // Inline XOR of rate bytes into state to avoid borrow conflict
-            for i in 0..self.rate / 8 {
-                let word = u64::from_le_bytes(self.buf[i * 8..(i + 1) * 8].try_into().unwrap());
-                self.state[i] ^= word;
+        let mut src = 0;
+        // If we have buffered data, fill up to one rate block
+        if self.buf_len > 0 {
+            let need = self.rate - self.buf_len;
+            if data.len() < need {
+                self.buf[self.buf_len..self.buf_len + data.len()].copy_from_slice(data);
+                self.buf_len += data.len();
+                return;
             }
-            let remaining = self.rate % 8;
-            if remaining > 0 {
-                let full_words = self.rate / 8;
-                let mut last = [0u8; 8];
-                last[..remaining]
-                    .copy_from_slice(&self.buf[full_words * 8..full_words * 8 + remaining]);
-                self.state[full_words] ^= u64::from_le_bytes(last);
-            }
+            self.buf[self.buf_len..self.buf_len + need].copy_from_slice(&data[..need]);
+            self.xor_rate_bytes(&self.buf.clone());
             keccak_f1600(&mut self.state);
-            self.buf.drain(..self.rate);
+            src = need;
+            self.buf_len = 0;
+        }
+
+        // Process full blocks directly from input
+        while src + self.rate <= data.len() {
+            self.xor_rate_bytes_from(&data[src..]);
+            keccak_f1600(&mut self.state);
+            src += self.rate;
+        }
+
+        // Buffer remaining bytes
+        let remaining = data.len() - src;
+        if remaining > 0 {
+            self.buf[..remaining].copy_from_slice(&data[src..]);
+            self.buf_len = remaining;
+        }
+    }
+
+    /// XOR the first `rate` bytes from a buffer into state.
+    fn xor_rate_bytes(&mut self, block: &[u8]) {
+        for i in 0..self.rate / 8 {
+            let word = u64::from_le_bytes(block[i * 8..(i + 1) * 8].try_into().unwrap());
+            self.state[i] ^= word;
+        }
+        let remaining = self.rate % 8;
+        if remaining > 0 {
+            let full_words = self.rate / 8;
+            let mut last = [0u8; 8];
+            last[..remaining].copy_from_slice(&block[full_words * 8..full_words * 8 + remaining]);
+            self.state[full_words] ^= u64::from_le_bytes(last);
+        }
+    }
+
+    /// XOR rate bytes from a slice (which may be longer than rate) into state.
+    fn xor_rate_bytes_from(&mut self, data: &[u8]) {
+        for i in 0..self.rate / 8 {
+            let word = u64::from_le_bytes(data[i * 8..(i + 1) * 8].try_into().unwrap());
+            self.state[i] ^= word;
+        }
+        let remaining = self.rate % 8;
+        if remaining > 0 {
+            let full_words = self.rate / 8;
+            let mut last = [0u8; 8];
+            last[..remaining].copy_from_slice(&data[full_words * 8..full_words * 8 + remaining]);
+            self.state[full_words] ^= u64::from_le_bytes(last);
         }
     }
 
@@ -138,7 +200,6 @@ impl KeccakState {
             let word = u64::from_le_bytes(block[i * 8..(i + 1) * 8].try_into().unwrap());
             self.state[i] ^= word;
         }
-        // Handle remaining bytes (if rate not multiple of 8)
         let full_words = block.len() / 8;
         let remaining = block.len() % 8;
         if remaining > 0 {
@@ -150,17 +211,24 @@ impl KeccakState {
 
     /// Pad and switch to squeeze phase.
     fn pad_and_switch(&mut self) {
-        // Pad: suffix byte + zero padding + 0x80 at end
-        let mut padded = vec![0u8; self.rate];
-        let buf_len = self.buf.len();
-        padded[..buf_len].copy_from_slice(&self.buf);
-        padded[buf_len] = self.suffix;
+        // Pad: suffix byte + zero padding + 0x80 at end (all on the stack)
+        let mut padded = [0u8; 200];
+        let blen = self.buf_len;
+        padded[..blen].copy_from_slice(&self.buf[..blen]);
+        padded[blen] = self.suffix;
         padded[self.rate - 1] |= 0x80;
 
-        self.xor_block(&padded);
+        self.xor_block(&padded[..self.rate]);
         keccak_f1600(&mut self.state);
-        self.buf.clear();
+        self.buf_len = 0;
         self.squeezed = true;
+    }
+
+    /// Write state as 200 little-endian bytes into a caller-provided buffer.
+    fn state_to_bytes_into(&self, out: &mut [u8; 200]) {
+        for (i, &lane) in self.state.iter().enumerate() {
+            out[i * 8..(i + 1) * 8].copy_from_slice(&lane.to_le_bytes());
+        }
     }
 
     /// Squeeze output bytes.
@@ -169,47 +237,39 @@ impl KeccakState {
             self.pad_and_switch();
         }
 
+        let mut state_bytes = [0u8; 200];
         let mut offset = 0;
-        // First, use any remaining bytes from current state
-        let state_bytes = self.state_to_bytes();
-        let buf_offset = self.buf.len(); // how many bytes already squeezed from this block
+        let buf_offset = self.buf_len; // how many bytes already squeezed from this block
 
         if buf_offset > 0 && buf_offset < self.rate {
+            self.state_to_bytes_into(&mut state_bytes);
             let available = self.rate - buf_offset;
             let copy_len = available.min(output.len());
             output[..copy_len].copy_from_slice(&state_bytes[buf_offset..buf_offset + copy_len]);
             offset = copy_len;
             if buf_offset + copy_len < self.rate {
-                // Track how many bytes we've consumed from current state
-                self.buf = vec![0u8; buf_offset + copy_len];
+                self.buf_len = buf_offset + copy_len;
                 return;
             }
-            self.buf.clear();
+            self.buf_len = 0;
         }
 
         while offset < output.len() {
             if offset > 0 || buf_offset > 0 {
                 keccak_f1600(&mut self.state);
             }
-            let state_bytes = self.state_to_bytes();
+            self.state_to_bytes_into(&mut state_bytes);
             let remaining = output.len() - offset;
             let copy_len = remaining.min(self.rate);
             output[offset..offset + copy_len].copy_from_slice(&state_bytes[..copy_len]);
             offset += copy_len;
 
             if copy_len < self.rate {
-                // Track partial consumption
-                self.buf = vec![0u8; copy_len];
+                self.buf_len = copy_len;
+            } else {
+                self.buf_len = 0;
             }
         }
-    }
-
-    fn state_to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(200);
-        for &lane in &self.state {
-            bytes.extend_from_slice(&lane.to_le_bytes());
-        }
-        bytes
     }
 
     /// Squeeze exactly `output_len` bytes for fixed-output hash.
@@ -217,7 +277,8 @@ impl KeccakState {
         if !self.squeezed {
             self.pad_and_switch();
         }
-        let state_bytes = self.state_to_bytes();
+        let mut state_bytes = [0u8; 200];
+        self.state_to_bytes_into(&mut state_bytes);
         output.copy_from_slice(&state_bytes[..output.len()]);
     }
 }
@@ -230,22 +291,9 @@ impl KeccakState {
 pub const SHA3_224_OUTPUT_SIZE: usize = 28;
 
 /// SHA3-224 hash context.
+#[derive(Clone)]
 pub struct Sha3_224 {
     inner: KeccakState,
-}
-
-impl Clone for Sha3_224 {
-    fn clone(&self) -> Self {
-        Sha3_224 {
-            inner: KeccakState {
-                state: self.inner.state,
-                buf: self.inner.buf.clone(),
-                rate: self.inner.rate,
-                suffix: self.inner.suffix,
-                squeezed: self.inner.squeezed,
-            },
-        }
-    }
 }
 
 impl Sha3_224 {
@@ -288,22 +336,9 @@ impl Sha3_224 {
 pub const SHA3_256_OUTPUT_SIZE: usize = 32;
 
 /// SHA3-256 hash context.
+#[derive(Clone)]
 pub struct Sha3_256 {
     inner: KeccakState,
-}
-
-impl Clone for Sha3_256 {
-    fn clone(&self) -> Self {
-        Sha3_256 {
-            inner: KeccakState {
-                state: self.inner.state,
-                buf: self.inner.buf.clone(),
-                rate: self.inner.rate,
-                suffix: self.inner.suffix,
-                squeezed: self.inner.squeezed,
-            },
-        }
-    }
 }
 
 impl Sha3_256 {
@@ -346,22 +381,9 @@ impl Sha3_256 {
 pub const SHA3_384_OUTPUT_SIZE: usize = 48;
 
 /// SHA3-384 hash context.
+#[derive(Clone)]
 pub struct Sha3_384 {
     inner: KeccakState,
-}
-
-impl Clone for Sha3_384 {
-    fn clone(&self) -> Self {
-        Sha3_384 {
-            inner: KeccakState {
-                state: self.inner.state,
-                buf: self.inner.buf.clone(),
-                rate: self.inner.rate,
-                suffix: self.inner.suffix,
-                squeezed: self.inner.squeezed,
-            },
-        }
-    }
 }
 
 impl Sha3_384 {
@@ -404,22 +426,9 @@ impl Sha3_384 {
 pub const SHA3_512_OUTPUT_SIZE: usize = 64;
 
 /// SHA3-512 hash context.
+#[derive(Clone)]
 pub struct Sha3_512 {
     inner: KeccakState,
-}
-
-impl Clone for Sha3_512 {
-    fn clone(&self) -> Self {
-        Sha3_512 {
-            inner: KeccakState {
-                state: self.inner.state,
-                buf: self.inner.buf.clone(),
-                rate: self.inner.rate,
-                suffix: self.inner.suffix,
-                squeezed: self.inner.squeezed,
-            },
-        }
-    }
 }
 
 impl Sha3_512 {
@@ -459,22 +468,9 @@ impl Sha3_512 {
 // ---------------------------------------------------------------------------
 
 /// SHAKE128 extendable-output function (XOF) context.
+#[derive(Clone)]
 pub struct Shake128 {
     inner: KeccakState,
-}
-
-impl Clone for Shake128 {
-    fn clone(&self) -> Self {
-        Shake128 {
-            inner: KeccakState {
-                state: self.inner.state,
-                buf: self.inner.buf.clone(),
-                rate: self.inner.rate,
-                suffix: self.inner.suffix,
-                squeezed: self.inner.squeezed,
-            },
-        }
-    }
 }
 
 impl Shake128 {
@@ -508,22 +504,9 @@ impl Shake128 {
 // ---------------------------------------------------------------------------
 
 /// SHAKE256 extendable-output function (XOF) context.
+#[derive(Clone)]
 pub struct Shake256 {
     inner: KeccakState,
-}
-
-impl Clone for Shake256 {
-    fn clone(&self) -> Self {
-        Shake256 {
-            inner: KeccakState {
-                state: self.inner.state,
-                buf: self.inner.buf.clone(),
-                rate: self.inner.rate,
-                suffix: self.inner.suffix,
-                squeezed: self.inner.squeezed,
-            },
-        }
-    }
 }
 
 impl Shake256 {

@@ -3120,3 +3120,19 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - 3,454→3,458 tests (+4), 19→21 ignored (+2), 18→26 fuzz targets (+8), 118→158 corpus (+40)
 - All tests pass, 0 clippy warnings, formatting clean
 - Defense model rating: B+ → A−
+
+---
+
+## Phase P13–P18 — Performance Optimization (Keccak/BigNum/SM3/ECDSA/SHA-3 HW) (2026-02-28)
+
+**Prompt**: Implement 6 performance optimization phases: P13 ML-DSA batch squeeze, P14 Keccak heap elimination, P15 BigNum mont_exp squaring, P16 SM3 compression optimization, P17 P-256 scalar field for ECDSA sign, P18 Keccak ARMv8 SHA-3 hardware acceleration.
+
+**Result**:
+- **P13**: ML-DSA batch squeeze — replaced per-byte/per-3-byte SHAKE squeeze with 504/136-byte batch operations in 3 rejection sampling functions
+- **P14**: Keccak heap elimination — `KeccakState.buf` from `Vec<u8>` to `[u8; 200]` stack array, zero heap allocations in sponge
+- **P15**: BigNum mont_exp squaring — dedicated `sqr_limbs` (33% fewer multiplies) replacing generic `cios_mul(a,a)` in exponentiation
+- **P16**: SM3 compression — precomputed `T_J_ROTATED[64]` const table, split loop (0–15 XOR / 16–63 majority+choice), eliminated `wp[64]`
+- **P17**: P-256 scalar field — new `P256ScalarElement` (4×u64 Montgomery mod n), compile-time constants, Fermat inversion, ECDSA sign fast path (+10 tests)
+- **P18**: Keccak ARMv8 SHA-3 HW — EOR3 (theta), RAX1 (d), BCAX (chi) crypto extension intrinsics, runtime dispatch, software fallback
+- 3,467→3,477 tests (+10), 21 ignored, 2 new files (`p256_scalar.rs`, `keccak_arm.rs`)
+- All tests pass, 0 clippy warnings, formatting clean

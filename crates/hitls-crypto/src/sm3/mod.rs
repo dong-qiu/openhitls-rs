@@ -16,37 +16,27 @@ const IV: [u32; 8] = [
     0x7380166f, 0x4914b2b9, 0x172442d7, 0xda8a0600, 0xa96f30bc, 0x163138aa, 0xe38dee4d, 0xb0fb0e4e,
 ];
 
-/// SM3 round constant T_j.
-const fn t_j(j: usize) -> u32 {
-    if j < 16 {
-        0x79cc4519
-    } else {
-        0x7a879d8a
+/// Precomputed `T_j.rotate_left(j % 32)` for all 64 rounds.
+/// Rounds 0–15 use T_j = 0x79cc4519, rounds 16–63 use T_j = 0x7a879d8a.
+const T_J_ROTATED: [u32; 64] = {
+    let mut table = [0u32; 64];
+    let mut j = 0u32;
+    while j < 64 {
+        let t = if j < 16 { 0x79cc4519u32 } else { 0x7a879d8au32 };
+        table[j as usize] = t.rotate_left(j % 32);
+        j += 1;
     }
-}
+    table
+};
 
+#[inline(always)]
 fn p0(x: u32) -> u32 {
     x ^ x.rotate_left(9) ^ x.rotate_left(17)
 }
 
+#[inline(always)]
 fn p1(x: u32) -> u32 {
     x ^ x.rotate_left(15) ^ x.rotate_left(23)
-}
-
-fn ff(x: u32, y: u32, z: u32, j: usize) -> u32 {
-    if j < 16 {
-        x ^ y ^ z
-    } else {
-        (x & y) | (x & z) | (y & z)
-    }
-}
-
-fn gg(x: u32, y: u32, z: u32, j: usize) -> u32 {
-    if j < 16 {
-        x ^ y ^ z
-    } else {
-        (x & y) | (!x & z)
-    }
 }
 
 fn sm3_compress(state: &mut [u32; 8], block: &[u8]) {
@@ -68,26 +58,52 @@ fn sm3_compress(state: &mut [u32; 8], block: &[u8]) {
             ^ w[i - 6];
     }
 
-    // W' array
-    let mut wp = [0u32; 64];
-    for i in 0..64 {
-        wp[i] = w[i] ^ w[i + 4];
-    }
-
     let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
 
-    for j in 0..64 {
-        let ss1 = (a
-            .rotate_left(12)
+    // Rounds 0–15: ff/gg use XOR form (x ^ y ^ z)
+    for j in 0..16 {
+        let a12 = a.rotate_left(12);
+        let ss1 = a12
             .wrapping_add(e)
-            .wrapping_add(t_j(j).rotate_left(j as u32 % 32)))
-        .rotate_left(7);
-        let ss2 = ss1 ^ a.rotate_left(12);
-        let tt1 = ff(a, b, c, j)
+            .wrapping_add(T_J_ROTATED[j])
+            .rotate_left(7);
+        let ss2 = ss1 ^ a12;
+        // ff(a,b,c) = a ^ b ^ c for j < 16
+        let tt1 = (a ^ b ^ c)
             .wrapping_add(d)
             .wrapping_add(ss2)
-            .wrapping_add(wp[j]);
-        let tt2 = gg(e, f, g, j)
+            .wrapping_add(w[j] ^ w[j + 4]);
+        // gg(e,f,g) = e ^ f ^ g for j < 16
+        let tt2 = (e ^ f ^ g)
+            .wrapping_add(h)
+            .wrapping_add(ss1)
+            .wrapping_add(w[j]);
+
+        d = c;
+        c = b.rotate_left(9);
+        b = a;
+        a = tt1;
+        h = g;
+        g = f.rotate_left(19);
+        f = e;
+        e = p0(tt2);
+    }
+
+    // Rounds 16–63: ff uses majority (x&y | x&z | y&z), gg uses choice (x&y | !x&z)
+    for j in 16..64 {
+        let a12 = a.rotate_left(12);
+        let ss1 = a12
+            .wrapping_add(e)
+            .wrapping_add(T_J_ROTATED[j])
+            .rotate_left(7);
+        let ss2 = ss1 ^ a12;
+        // ff(a,b,c) = (a & b) | (a & c) | (b & c) for j >= 16
+        let tt1 = ((a & b) | (a & c) | (b & c))
+            .wrapping_add(d)
+            .wrapping_add(ss2)
+            .wrapping_add(w[j] ^ w[j + 4]);
+        // gg(e,f,g) = (e & f) | (!e & g) for j >= 16
+        let tt2 = ((e & f) | (!e & g))
             .wrapping_add(h)
             .wrapping_add(ss1)
             .wrapping_add(w[j]);
