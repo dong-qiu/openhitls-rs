@@ -3292,3 +3292,14 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - PKCS1v15: `fill_nonzero_random` eliminated `vec![0u8; buf.len()]` wasted allocation (only 1 byte ever used per loop)
 - All 49 RSA tests pass
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+## Phase P36 — HKDF Label Stack Encoding (2026-03-01)
+
+**Prompt**: Inline `encode_hkdf_label` into `hkdf_expand_label` with stack buffer to eliminate per-call Vec allocation.
+
+**Result**:
+- Removed `encode_hkdf_label` function; inlined label encoding into `hkdf_expand_label`
+- Stack buffer `[0u8; 128]` (MAX_HKDF_LABEL) with byte-level copy; Vec fallback for >128 bytes
+- Updated test `test_encode_hkdf_label` → `test_hkdf_label_encoding` (no longer calls removed function)
+- All 23 HKDF tests pass, 1,360 TLS tests pass, 188 integration tests pass
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings

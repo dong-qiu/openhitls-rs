@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P35 (35 phases)
+- Performance: P1–P36 (36 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -201,6 +201,7 @@ Category summary:
 | 189 | P33 | Perf | Key Schedule + Export Stack Arrays | 2026-03-01 |
 | 190 | P34 | Perf | Handshake Hash Output Stack Arrays | 2026-03-01 |
 | 191 | P35 | Perf | RSA Padding Stack Arrays | 2026-03-01 |
+| 192 | P36 | Perf | HKDF Label Stack Encoding | 2026-03-01 |
 
 ---
 
@@ -11142,6 +11143,26 @@ Eliminated unnecessary heap allocations in RSA padding operations: OAEP seed use
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P35)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P36 — HKDF Label Stack Encoding (2026-03-01)
+
+### Summary
+Eliminated heap allocation in `hkdf_expand_label` by inlining the HkdfLabel encoding into a `[0u8; 128]` stack buffer. The old `encode_hkdf_label` function (which returned `Vec<u8>`) was removed and its logic inlined with byte-level copy into the stack array. Vec fallback preserved for labels exceeding 128 bytes (never occurs in TLS 1.3).
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-tls/src/crypt/hkdf.rs` | Removed `encode_hkdf_label` function; inlined label encoding into `hkdf_expand_label` with `[0u8; MAX_HKDF_LABEL]` stack buffer (MAX_HKDF_LABEL=128); Vec fallback for >128 bytes |
+
+### Test Results
+- All 23 HKDF tests pass (updated `test_encode_hkdf_label` → `test_hkdf_label_encoding`)
+- 1,360 TLS tests pass, 188 integration tests pass
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P36)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
