@@ -3228,3 +3228,14 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - **P28**: ChaCha20-Poly1305 `compute_tag()`: `vec![0u8; N]` padding → `const ZEROS: [u8; 15]` slice (2 allocs eliminated per tag)
 - **P29**: PBKDF2: `vec![0u8; 32]` → `[0u8; 32]` stack for u/t, eliminated `u_next` via in-place `hmac.finish(&mut u)`. 80K iterations: 80K→0 heap allocations.
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P30–P31 — HKDF + TLS PRF Stack Arrays (2026-03-01)
+
+**Prompt**: Replace heap allocations in HKDF expand() and TLS 1.2 PRF with stack arrays and HMAC reuse.
+
+**Result**:
+- **P30**: HKDF `expand()`: `t` Vec → `[u8; 32]` stack, single HMAC with `reset()` (N→1 instances), default salt stack array
+- **P31**: TLS PRF: label_seed Vec → `[u8; 128]` stack, ai_seed Vec → `[u8; 192]` stack, eliminated per-iteration concatenation allocation
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings

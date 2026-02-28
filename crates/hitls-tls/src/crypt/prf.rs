@@ -13,6 +13,10 @@ use super::hkdf::hmac_hash;
 use super::HashAlgId;
 use hitls_types::TlsError;
 
+/// Maximum label+seed size for stack allocation (covers all TLS 1.2 PRF uses).
+/// Largest: "key expansion" (13 bytes) + client_random (32) + server_random (32) = 77.
+const MAX_LABEL_SEED: usize = 128;
+
 /// TLS 1.2 PRF: Derive `output_len` bytes from `secret`, `label`, and `seed`.
 ///
 /// Uses the P_hash expansion function with the given hash algorithm
@@ -24,13 +28,24 @@ pub fn prf(
     seed: &[u8],
     output_len: usize,
 ) -> Result<Vec<u8>, TlsError> {
-    // Concatenate label + seed
-    let mut label_seed = Vec::with_capacity(label.len() + seed.len());
-    label_seed.extend_from_slice(label.as_bytes());
-    label_seed.extend_from_slice(seed);
-
-    p_hash(alg, secret, &label_seed, output_len)
+    // Concatenate label + seed into stack buffer
+    let ls_len = label.len() + seed.len();
+    let mut ls_buf = [0u8; MAX_LABEL_SEED];
+    if ls_len <= MAX_LABEL_SEED {
+        ls_buf[..label.len()].copy_from_slice(label.as_bytes());
+        ls_buf[label.len()..ls_len].copy_from_slice(seed);
+        p_hash(alg, secret, &ls_buf[..ls_len], output_len)
+    } else {
+        // Fallback for unusually large label+seed (should not occur in TLS)
+        let mut label_seed = Vec::with_capacity(ls_len);
+        label_seed.extend_from_slice(label.as_bytes());
+        label_seed.extend_from_slice(seed);
+        p_hash(alg, secret, &label_seed, output_len)
+    }
 }
+
+/// Maximum hash output size (SHA-384 = 48, SHA-512 = 64).
+const MAX_HASH_OUTPUT: usize = 64;
 
 /// P_hash expansion function (RFC 5246 §5).
 fn p_hash(
@@ -41,20 +56,25 @@ fn p_hash(
 ) -> Result<Vec<u8>, TlsError> {
     let mut result = Vec::with_capacity(output_len);
 
-    // A(0) = seed
-    let mut a = seed.to_vec();
+    // A(0) = seed → A(1) = HMAC(secret, seed)
+    let mut a = hmac_hash(alg, secret, seed)?;
+
+    // Stack buffer for A(i) || seed concatenation (max: 64 + 128 = 192)
+    let mut ai_seed_buf = [0u8; MAX_HASH_OUTPUT + MAX_LABEL_SEED];
+    let a_len = a.len();
 
     while result.len() < output_len {
-        // A(i) = HMAC_hash(secret, A(i-1))
-        a = hmac_hash(alg, secret, &a)?;
-
-        // HMAC_hash(secret, A(i) + seed)
-        let mut ai_seed = Vec::with_capacity(a.len() + seed.len());
-        ai_seed.extend_from_slice(&a);
-        ai_seed.extend_from_slice(seed);
-        let block = hmac_hash(alg, secret, &ai_seed)?;
+        // Build A(i) || seed in stack buffer
+        ai_seed_buf[..a_len].copy_from_slice(&a);
+        ai_seed_buf[a_len..a_len + seed.len()].copy_from_slice(seed);
+        let block = hmac_hash(alg, secret, &ai_seed_buf[..a_len + seed.len()])?;
 
         result.extend_from_slice(&block);
+
+        // A(i+1) = HMAC_hash(secret, A(i))
+        if result.len() < output_len {
+            a = hmac_hash(alg, secret, &a)?;
+        }
     }
 
     result.truncate(output_len);

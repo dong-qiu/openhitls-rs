@@ -36,12 +36,12 @@ impl Hkdf {
     /// If `salt` is empty, uses a hash-length zero-filled salt.
     pub fn new(salt: &[u8], ikm: &[u8]) -> Result<Self, CryptoError> {
         let hash_len = 32; // SHA-256
-        let effective_salt = if salt.is_empty() {
-            vec![0u8; hash_len]
+        let prk = if salt.is_empty() {
+            let zero_salt = [0u8; 32]; // Stack array instead of Vec
+            Hmac::mac(sha256_factory, &zero_salt, ikm)?
         } else {
-            salt.to_vec()
+            Hmac::mac(sha256_factory, salt, ikm)?
         };
-        let prk = Hmac::mac(sha256_factory, &effective_salt, ikm)?;
         Ok(Self { prk, hash_len })
     }
 
@@ -52,21 +52,27 @@ impl Hkdf {
         }
         let n = okm_len.div_ceil(self.hash_len);
         let mut okm = Vec::with_capacity(okm_len);
-        let mut t_prev = Vec::new();
+        let mut t = [0u8; 32]; // SHA-256 output, stack array
+        let mut t_len = 0usize; // 0 for first iteration, 32 after
+
+        // Reuse single HMAC instance across all iterations
+        let mut hmac = Hmac::new(sha256_factory, &self.prk)?;
 
         for i in 1..=n {
-            let mut hmac = Hmac::new(sha256_factory, &self.prk)?;
-            if !t_prev.is_empty() {
-                hmac.update(&t_prev)?;
+            if i > 1 {
+                hmac.reset();
+            }
+            if t_len > 0 {
+                hmac.update(&t[..t_len])?;
             }
             hmac.update(info)?;
             hmac.update(&[i as u8])?;
-            let mut t = vec![0u8; self.hash_len];
             hmac.finish(&mut t)?;
+            t_len = self.hash_len;
             let take = (okm_len - okm.len()).min(self.hash_len);
             okm.extend_from_slice(&t[..take]);
-            t_prev = t;
         }
+        t.zeroize();
         Ok(okm)
     }
 

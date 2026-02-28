@@ -4,9 +4,9 @@
 
 Category summary:
 - Implementation: I1–I81 (81 phases)
-- Testing: T1–T64 (64 phases)
+- Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P29 (29 phases)
+- Performance: P1–P31 (31 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -195,7 +195,8 @@ Category summary:
 | 183 | P27 | Perf | CCM Zero-Allocation Tag + CBC-MAC | 2026-03-01 |
 | 184 | P28 | Perf | ChaCha20-Poly1305 Padding Stack Arrays | 2026-03-01 |
 | 185 | P29 | Perf | PBKDF2 Inner Loop Stack Arrays | 2026-03-01 |
-| 186 | T64 | Test | Quality Defense Actions — Fuzz/CI/KAT/HW Cross-Validation | 2026-03-01 |
+| 186 | P30 | Perf | HKDF Expand Stack Arrays + HMAC Reuse | 2026-03-01 |
+| 187 | P31 | Perf | TLS PRF Stack Arrays | 2026-03-01 |
 
 ---
 
@@ -10983,58 +10984,48 @@ Replaced all heap-allocated buffers in PBKDF2 inner loop with `[0u8; 32]` stack 
 
 ---
 
-## Phase T64 — Quality Defense Actions: Fuzz/CI/KAT/HW Cross-Validation (2026-03-01)
+## Phase P30 — HKDF Expand Stack Arrays + HMAC Reuse (2026-03-01)
 
 ### Summary
-Execute 7 quality defense actions identified by post-T63 analysis: CI hardening, fuzz expansion, TLS config unit tests, HW↔SW cross-validation, ARM64 cross-compile CI, and ML-KEM/ML-DSA deterministic KAT infrastructure.
+Replaced Vec allocations in HKDF `expand()` with `[u8; 32]` stack array for the T buffer, reused a single `Hmac` instance with `reset()` across all expand iterations (instead of creating a new `Hmac` per iteration). Default salt uses `[0u8; 32]` stack array instead of `vec![0u8; 32]`.
 
 ### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/hkdf/mod.rs` | `new()`: zero-salt `vec![0u8; 32]` → `[0u8; 32]`, eliminated `salt.to_vec()` |
+| `crates/hitls-crypto/src/hkdf/mod.rs` | `expand()`: `t_prev`/`t` Vec → single `[u8; 32]` stack buffer, single HMAC with `reset()` |
 
-| File | Status | Description |
-|------|--------|-------------|
-| `.github/workflows/ci.yml` | Modified | Added `--workspace` to clippy and test commands; added `cross-check` job (aarch64-unknown-linux-gnu) |
-| `fuzz/Cargo.toml` | Modified | Added `hmac`, `x25519`, `drbg`, `pbkdf2`, `ed448`, `frodokem` features + 6 `[[bin]]` entries |
-| `fuzz/fuzz_targets/fuzz_hmac.rs` | New | HMAC one-shot vs incremental consistency, SHA-256/SHA-512 |
-| `fuzz/fuzz_targets/fuzz_x25519.rs` | New | X25519 DH roundtrip, from_bytes, fuzzed public keys |
-| `fuzz/fuzz_targets/fuzz_drbg.rs` | New | HMAC-DRBG + CTR-DRBG generate/reseed |
-| `fuzz/fuzz_targets/fuzz_pbkdf2.rs` | New | PBKDF2 determinism check, variable parameters |
-| `fuzz/fuzz_targets/fuzz_ed448.rs` | New | Ed448 sign/verify roundtrip, from_seed, context, fuzzed sigs |
-| `fuzz/fuzz_targets/fuzz_frodokem.rs` | New | FrodoKEM encaps/decaps roundtrip, tampered/fuzzed ct (OnceLock key cache) |
-| `fuzz/corpus/fuzz_hmac/` | New | 8 seed files |
-| `fuzz/corpus/fuzz_x25519/` | New | 8 seed files |
-| `fuzz/corpus/fuzz_drbg/` | New | 8 seed files |
-| `fuzz/corpus/fuzz_pbkdf2/` | New | 8 seed files |
-| `fuzz/corpus/fuzz_ed448/` | New | 8 seed files |
-| `fuzz/corpus/fuzz_frodokem/` | New | 8 seed files |
-| `crates/hitls-tls/src/config/mod.rs` | Modified | +24 unit tests (ServerPrivateKey variants, builder edge cases, MaxFragmentLength) |
-| `crates/hitls-crypto/src/sha3/mod.rs` | Modified | +4 Keccak ARM HW↔SW cross-validation tests (cfg-gated aarch64) |
-| `crates/hitls-crypto/src/mlkem/mod.rs` | Modified | Added `generate_from_seed(d,z)`, `encapsulate_deterministic(m)` (cfg(test)), +6 KAT tests |
-| `crates/hitls-crypto/src/mldsa/mod.rs` | Modified | Added `mldsa_keygen_from_seed(xi)`, `generate_from_seed(xi)` (cfg(test)), +7 KAT tests |
+### Allocation Savings Per HKDF Expand
+| Item | Before | After |
+|------|--------|-------|
+| HMAC instances | N (one per iteration) | 1 (reused via reset) |
+| T buffer | N Vec (one per iteration) | 1 stack `[u8; 32]` |
+| t_prev | N Vec reassign | eliminated (same buffer) |
+| Default salt | 1 Vec | 1 stack array |
 
-### Task Breakdown
+### Test Results
+- All 7 HKDF tests pass (3 RFC vectors + from_prk + max_len + zero_len + proptest)
+- 1 Wycheproof HKDF-SHA256 vector passes
+- 3,484 total tests, 21 ignored, 0 clippy warnings
 
-| # | Task | Commit | Result |
-|---|------|--------|--------|
-| 1 | Eliminate panic! in library code | N/A | No-op: zero panics in library code |
-| 2 | Add --workspace to CI test/clippy | `194aa87` | CI fix |
-| 3 | Add 6 fuzz targets (HMAC/X25519/DRBG/PBKDF2/Ed448/FrodoKEM) | `95510cf` | +6 targets, +48 corpus |
-| 4 | TLS config unit tests | `104cb40` | +24 tests |
-| 5 | Keccak ARM HW↔SW cross-validation | `8b03c9e` | +4 tests |
-| 6 | ARM64 cross-compile CI check | `06ac625` | CI job |
-| 7 | ML-KEM/ML-DSA deterministic KAT | `72583e9` | +13 tests |
+---
 
-### Aggregate Counts (Post T64)
+## Phase P31 — TLS PRF Stack Arrays (2026-03-01)
 
-| Metric | Before | After | Delta |
-|--------|--------|-------|-------|
-| Tests | 3,484 | 3,519 | +35 (TLS excl. config pre-existing) |
-| Ignored | 21 | 21 | 0 |
-| Fuzz targets | 34 | 40 | +6 |
-| Corpus files | 238 | 286 | +48 |
-| CI jobs | 9 | 10 | +1 (cross-check aarch64) |
+### Summary
+Replaced Vec concatenation buffers in TLS 1.2 PRF with stack arrays. `label_seed` uses `[u8; 128]` (covers all TLS label+seed combinations), `ai_seed` uses `[u8; 192]` (hash output + label_seed). Eliminated per-iteration Vec allocation for A(i)||seed concatenation.
 
-### Build Status (Post T64)
-- `cargo test --workspace --all-features`: 3,519 passed, 0 failed, 21 ignored
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-tls/src/crypt/prf.rs` | `prf()`: label_seed `Vec` → `[u8; 128]` stack with fallback |
+| `crates/hitls-tls/src/crypt/prf.rs` | `p_hash()`: `a = seed.to_vec()` eliminated, ai_seed `Vec` → `[u8; 192]` stack |
+
+### Test Results
+- All 17 PRF tests pass (SHA-256, SHA-384, SM3 variants)
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P30–P31)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
-- Fuzz targets: 40 (34→40), 286 corpus files (238→286)
