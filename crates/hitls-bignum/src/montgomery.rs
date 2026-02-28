@@ -308,6 +308,88 @@ impl MontgomeryCtx {
         self.cios_mul(&mut temp, &result, &[1u64], &mut scratch);
         Ok(BigNum::from_limbs(temp))
     }
+
+    /// Windowed Montgomery exponentiation returning result in Montgomery form.
+    ///
+    /// Same as `mont_exp` but skips the final from_mont conversion, useful when
+    /// the caller needs to continue operating in Montgomery form (e.g., Miller-Rabin).
+    pub fn mont_exp_mont(&self, base: &BigNum, exp: &BigNum) -> Result<BigNum, CryptoError> {
+        if exp.is_zero() {
+            if self.modulus.is_one() {
+                return Ok(BigNum::zero());
+            }
+            return self.to_mont(&BigNum::from_u64(1));
+        }
+
+        let n = self.m_size;
+        let exp_bits = exp.bit_len();
+        let w = get_window_size(exp_bits);
+        let table_size = 1usize << w;
+
+        let mut scratch = vec![0u64; n + 2];
+        let mut table = vec![0u64; table_size * n];
+
+        // table[0] = R mod N (Montgomery form of 1)
+        self.cios_mul(
+            &mut table[0..n],
+            &[1u64],
+            self.r_squared.limbs(),
+            &mut scratch,
+        );
+
+        // table[1] = base in Montgomery form
+        let base_reduced = base.mod_reduce(&self.modulus)?;
+        self.cios_mul(
+            &mut table[n..2 * n],
+            base_reduced.limbs(),
+            self.r_squared.limbs(),
+            &mut scratch,
+        );
+
+        let mut base_mont = vec![0u64; n];
+        base_mont.copy_from_slice(&table[n..2 * n]);
+        for i in 2..table_size {
+            let (left, right) = table.split_at_mut(i * n);
+            let prev = &left[(i - 1) * n..];
+            let cur = &mut right[..n];
+            self.cios_mul(cur, prev, &base_mont, &mut scratch);
+        }
+
+        let mut result = vec![0u64; n];
+        let mut temp = vec![0u64; n];
+        let mut sqr_buf = vec![0u64; 2 * n + 2];
+        result.copy_from_slice(&table[0..n]);
+
+        let mut i = exp_bits;
+        while i > 0 {
+            let window_bits = if i >= w { w } else { i };
+            i -= window_bits;
+
+            for _ in 0..window_bits {
+                for x in sqr_buf.iter_mut() {
+                    *x = 0;
+                }
+                sqr_limbs(&result, n, &mut sqr_buf);
+                self.redc_limbs(&mut temp, &mut sqr_buf);
+                std::mem::swap(&mut result, &mut temp);
+            }
+
+            let mut window_val = 0u64;
+            for b in 0..window_bits {
+                window_val |= exp.get_bit(i + b) << b;
+            }
+
+            if window_val != 0 {
+                let idx = window_val as usize;
+                let table_entry = &table[idx * n..(idx + 1) * n];
+                self.cios_mul(&mut temp, &result, table_entry, &mut scratch);
+                std::mem::swap(&mut result, &mut temp);
+            }
+        }
+
+        // Return in Montgomery form (no from_mont conversion)
+        Ok(BigNum::from_limbs(result))
+    }
 }
 
 /// Compute a² into out[0..2n+2]. `a` must have at least `n` limbs.

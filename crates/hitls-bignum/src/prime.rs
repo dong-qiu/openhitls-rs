@@ -1,6 +1,7 @@
 //! Prime number generation and testing.
 
 use crate::bignum::BigNum;
+use crate::montgomery::MontgomeryCtx;
 use hitls_types::CryptoError;
 
 /// Small primes for trial division.
@@ -10,6 +11,9 @@ impl BigNum {
     /// Check if this number is probably prime using Miller-Rabin test.
     ///
     /// `rounds` specifies the number of Miller-Rabin rounds (more rounds = higher confidence).
+    /// Uses a single Montgomery context for all witnesses and dedicated mont_sqr in the
+    /// inner loop, eliminating redundant R² computations and leveraging cross-product
+    /// symmetry in squaring.
     pub fn is_probably_prime(&self, rounds: usize) -> Result<bool, CryptoError> {
         if self.is_zero() || self.is_negative() {
             return Ok(false);
@@ -41,6 +45,11 @@ impl BigNum {
             r += 1;
         }
 
+        // Create Montgomery context ONCE for all witnesses
+        let ctx = MontgomeryCtx::new(&n)?;
+        let one_mont = ctx.to_mont(&one)?;
+        let n_minus_one_mont = ctx.to_mont(&n_minus_one)?;
+
         // Test with small prime witnesses
         let witnesses: Vec<u64> = SMALL_PRIMES.iter().copied().take(rounds).collect();
 
@@ -50,16 +59,17 @@ impl BigNum {
                 continue;
             }
 
-            let mut x = a.mod_exp(&d, &n)?;
+            // Get x in Montgomery form (avoids from_mont + to_mont roundtrip)
+            let mut x_mont = ctx.mont_exp_mont(&a, &d)?;
 
-            if x == one || x == n_minus_one {
+            if x_mont == one_mont || x_mont == n_minus_one_mont {
                 continue;
             }
 
             let mut composite = true;
             for _ in 0..r - 1 {
-                x = x.mul(&x).mod_reduce(&n)?;
-                if x == n_minus_one {
+                x_mont = ctx.mont_sqr(&x_mont);
+                if x_mont == n_minus_one_mont {
                     composite = false;
                     break;
                 }
