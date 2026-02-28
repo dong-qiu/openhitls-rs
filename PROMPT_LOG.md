@@ -3265,3 +3265,17 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - 5 heap allocations eliminated per TLS 1.3 handshake (3 in key schedule, 2 in export)
 - All 51 key_schedule + 36 export tests pass
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P34 — Handshake Hash Output Stack Arrays (2026-03-01)
+
+**Prompt**: Replace `vec![0u8; hash_len]` hash output buffers in TLS 1.3 handshake paths with stack arrays.
+
+**Result**:
+- `macros.rs`: cr_hash/cv_hash/fin_hash Vec → `[0u8; 64]` + slice (client post-HS auth)
+- `connection/server.rs`: fin_hash_buf (×2)/cv_hash Vec → `[0u8; 64]` + slice (server post-HS auth)
+- `handshake/server.rs`: PSK binder hash Vec → `[0u8; 64]` + slice
+- `handshake/client.rs`: binder/eems/ch hash (×3) Vec → `[0u8; 64]` + slice
+- 10 heap allocations eliminated across handshake code paths
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings

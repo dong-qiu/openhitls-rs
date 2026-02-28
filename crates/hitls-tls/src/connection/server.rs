@@ -218,14 +218,14 @@ impl<S: Read + Write> TlsServerConnection<S> {
         if client_certs.is_empty() {
             // Client sent empty Certificate — no CertificateVerify expected.
             // Read Finished.
-            let mut fin_hash_buf = vec![0u8; params.hash_len];
+            let mut fin_hash_buf = [0u8; 64];
             let mut hasher_fin = DigestVariant::new(alg);
             hasher_fin.update(&cr_msg).map_err(TlsError::CryptoError)?;
             hasher_fin
                 .update(cert_msg_data)
                 .map_err(TlsError::CryptoError)?;
             hasher_fin
-                .finish(&mut fin_hash_buf)
+                .finish(&mut fin_hash_buf[..params.hash_len])
                 .map_err(TlsError::CryptoError)?;
 
             let (ct3, fin_data) = self.read_record()?;
@@ -244,7 +244,8 @@ impl<S: Read + Write> TlsServerConnection<S> {
 
             // Verify Finished
             let finished_key = ks.derive_finished_key(&self.client_app_secret)?;
-            let expected = ks.compute_finished_verify_data(&finished_key, &fin_hash_buf)?;
+            let expected =
+                ks.compute_finished_verify_data(&finished_key, &fin_hash_buf[..params.hash_len])?;
             if fin_msg.verify_data != expected {
                 return Err(TlsError::HandshakeFailed(
                     "post-HS client Finished verification failed".into(),
@@ -271,14 +272,14 @@ impl<S: Read + Write> TlsServerConnection<S> {
         let cv_msg = decode_certificate_verify(cv_body)?;
 
         // Verify CertificateVerify signature against transcript hash
-        let mut cv_hash = vec![0u8; params.hash_len];
+        let mut cv_hash = [0u8; 64];
         let mut hasher_cv = DigestVariant::new(alg);
         hasher_cv.update(&cr_msg).map_err(TlsError::CryptoError)?;
         hasher_cv
             .update(cert_msg_data)
             .map_err(TlsError::CryptoError)?;
         hasher_cv
-            .finish(&mut cv_hash)
+            .finish(&mut cv_hash[..params.hash_len])
             .map_err(TlsError::CryptoError)?;
 
         // Parse the first client cert to verify the signature
@@ -288,7 +289,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             &client_cert,
             cv_msg.algorithm,
             &cv_msg.signature,
-            &cv_hash,
+            &cv_hash[..params.hash_len],
             false, // client CertificateVerify
         )?;
 
@@ -297,7 +298,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .update(cert_msg_data)
             .map_err(TlsError::CryptoError)?;
         // We need a fresh hasher for the Finished hash that includes CR+Cert+CV
-        let mut fin_hash_buf = vec![0u8; params.hash_len];
+        let mut fin_hash_buf = [0u8; 64];
         let mut hasher_fin = DigestVariant::new(alg);
         hasher_fin.update(&cr_msg).map_err(TlsError::CryptoError)?;
         hasher_fin
@@ -307,7 +308,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .update(cv_msg_data)
             .map_err(TlsError::CryptoError)?;
         hasher_fin
-            .finish(&mut fin_hash_buf)
+            .finish(&mut fin_hash_buf[..params.hash_len])
             .map_err(TlsError::CryptoError)?;
 
         // Read Finished
@@ -327,7 +328,8 @@ impl<S: Read + Write> TlsServerConnection<S> {
 
         // Verify Finished
         let finished_key = ks.derive_finished_key(&self.client_app_secret)?;
-        let expected = ks.compute_finished_verify_data(&finished_key, &fin_hash_buf)?;
+        let expected =
+            ks.compute_finished_verify_data(&finished_key, &fin_hash_buf[..params.hash_len])?;
         if fin_msg.verify_data != expected {
             return Err(TlsError::HandshakeFailed(
                 "post-HS client Finished verification failed".into(),

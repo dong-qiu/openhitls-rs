@@ -1168,11 +1168,13 @@ fn verify_binder(
     // Hash the truncated CH
     let mut hasher = crate::crypt::DigestVariant::new(params.hash_alg_id());
     hasher.update(truncated_ch).map_err(TlsError::CryptoError)?;
-    let mut hash = vec![0u8; params.hash_len];
-    hasher.finish(&mut hash).map_err(TlsError::CryptoError)?;
+    let mut hash = [0u8; 64];
+    hasher
+        .finish(&mut hash[..params.hash_len])
+        .map_err(TlsError::CryptoError)?;
 
     // Compute expected binder
-    let expected = ks.compute_finished_verify_data(&finished_key, &hash)?;
+    let expected = ks.compute_finished_verify_data(&finished_key, &hash[..params.hash_len])?;
 
     Ok(bool::from(binder.ct_eq(&expected)))
 }

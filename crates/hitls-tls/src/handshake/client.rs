@@ -506,11 +506,13 @@ impl ClientHandshake {
             let alg = params.hash_alg_id();
             let mut hasher = DigestVariant::new(alg);
             hasher.update(truncated_ch).map_err(TlsError::CryptoError)?;
-            let mut hash = vec![0u8; hash_len];
-            hasher.finish(&mut hash).map_err(TlsError::CryptoError)?;
+            let mut hash = [0u8; 64];
+            hasher
+                .finish(&mut hash[..hash_len])
+                .map_err(TlsError::CryptoError)?;
 
             // Compute binder
-            let binder = ks.compute_finished_verify_data(&finished_key, &hash)?;
+            let binder = ks.compute_finished_verify_data(&finished_key, &hash[..hash_len])?;
 
             // Write binder into msg (replacing placeholder)
             let binder_start = msg.len() - hash_len;
@@ -524,12 +526,12 @@ impl ClientHandshake {
             {
                 let mut eems_hasher = DigestVariant::new(alg);
                 eems_hasher.update(&msg).map_err(TlsError::CryptoError)?;
-                let mut eems_hash = vec![0u8; hash_len];
+                let mut eems_hash = [0u8; 64];
                 eems_hasher
-                    .finish(&mut eems_hash)
+                    .finish(&mut eems_hash[..hash_len])
                     .map_err(TlsError::CryptoError)?;
                 self.early_exporter_master_secret =
-                    ks.derive_early_exporter_master_secret(&eems_hash)?;
+                    ks.derive_early_exporter_master_secret(&eems_hash[..hash_len])?;
             }
 
             // Derive early traffic secret for 0-RTT if offering early data
@@ -537,11 +539,11 @@ impl ClientHandshake {
                 // Hash the full CH (with real binder) for the early traffic secret
                 let mut ch_hasher = DigestVariant::new(alg);
                 ch_hasher.update(&msg).map_err(TlsError::CryptoError)?;
-                let mut ch_hash = vec![0u8; hash_len];
+                let mut ch_hash = [0u8; 64];
                 ch_hasher
-                    .finish(&mut ch_hash)
+                    .finish(&mut ch_hash[..hash_len])
                     .map_err(TlsError::CryptoError)?;
-                self.early_traffic_secret = ks.derive_early_traffic_secret(&ch_hash)?;
+                self.early_traffic_secret = ks.derive_early_traffic_secret(&ch_hash[..hash_len])?;
                 crate::crypt::keylog::log_key(
                     &self.config,
                     "CLIENT_EARLY_TRAFFIC_SECRET",

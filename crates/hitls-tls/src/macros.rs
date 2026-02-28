@@ -216,8 +216,10 @@ macro_rules! tls13_client_handle_post_hs_cert_request_body {
 
         let mut hasher = DigestVariant::new(alg);
         hasher.update($full_msg).map_err(TlsError::CryptoError)?;
-        let mut cr_hash = vec![0u8; params.hash_len];
-        hasher.finish(&mut cr_hash).map_err(TlsError::CryptoError)?;
+        let mut cr_hash = [0u8; 64];
+        hasher
+            .finish(&mut cr_hash[..params.hash_len])
+            .map_err(TlsError::CryptoError)?;
 
         let cert_msg = if $self.config.client_certificate_chain.is_empty() {
             CertificateMsg {
@@ -255,17 +257,18 @@ macro_rules! tls13_client_handle_post_hs_cert_request_body {
         if let Some(ref client_key) = $self.config.client_private_key {
             let scheme = select_signature_scheme(client_key, &server_sig_algs)?;
 
-            let mut cv_hash = vec![0u8; params.hash_len];
+            let mut cv_hash = [0u8; 64];
             let mut hasher3 = DigestVariant::new(alg);
             hasher3.update($full_msg).map_err(TlsError::CryptoError)?;
             hasher3
                 .update(&cert_encoded)
                 .map_err(TlsError::CryptoError)?;
             hasher3
-                .finish(&mut cv_hash)
+                .finish(&mut cv_hash[..params.hash_len])
                 .map_err(TlsError::CryptoError)?;
 
-            let signature = sign_certificate_verify(client_key, scheme, &cv_hash, false)?;
+            let signature =
+                sign_certificate_verify(client_key, scheme, &cv_hash[..params.hash_len], false)?;
             let cv_msg = encode_certificate_verify(&CertificateVerifyMsg {
                 algorithm: scheme,
                 signature,
@@ -278,7 +281,7 @@ macro_rules! tls13_client_handle_post_hs_cert_request_body {
                 .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
             let finished_key = ks.derive_finished_key(&$self.client_app_secret)?;
-            let mut fin_hash = vec![0u8; params.hash_len];
+            let mut fin_hash = [0u8; 64];
             let mut hasher4 = DigestVariant::new(alg);
             hasher4.update($full_msg).map_err(TlsError::CryptoError)?;
             hasher4
@@ -286,10 +289,11 @@ macro_rules! tls13_client_handle_post_hs_cert_request_body {
                 .map_err(TlsError::CryptoError)?;
             hasher4.update(&cv_msg).map_err(TlsError::CryptoError)?;
             hasher4
-                .finish(&mut fin_hash)
+                .finish(&mut fin_hash[..params.hash_len])
                 .map_err(TlsError::CryptoError)?;
 
-            let verify_data = ks.compute_finished_verify_data(&finished_key, &fin_hash)?;
+            let verify_data =
+                ks.compute_finished_verify_data(&finished_key, &fin_hash[..params.hash_len])?;
             let fin_msg = encode_finished(&verify_data);
 
             let fin_record = $self

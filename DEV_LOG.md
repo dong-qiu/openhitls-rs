@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P33 (33 phases)
+- Performance: P1–P34 (34 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -199,6 +199,7 @@ Category summary:
 | 187 | P31 | Perf | TLS PRF Stack Arrays | 2026-03-01 |
 | 188 | P32 | Perf | TLS HKDF Stack Arrays | 2026-03-01 |
 | 189 | P33 | Perf | Key Schedule + Export Stack Arrays | 2026-03-01 |
+| 190 | P34 | Perf | Handshake Hash Output Stack Arrays | 2026-03-01 |
 
 ---
 
@@ -11096,6 +11097,29 @@ Replaced remaining `vec![0u8; hash_len]` heap allocations with `[0u8; MAX_OUTPUT
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P33)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P34 — Handshake Hash Output Stack Arrays (2026-03-01)
+
+### Summary
+Replaced all `vec![0u8; hash_len]` hash output buffers in TLS 1.3 handshake paths with `[0u8; 64]` stack arrays. Covers client post-handshake auth (macros.rs), server post-handshake auth (connection/server.rs), PSK binder verification (server.rs + client.rs), early exporter master secret, and early traffic secret derivation. 10 heap allocations eliminated across handshake code paths.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-tls/src/macros.rs` | `cr_hash`/`cv_hash`/`fin_hash`: `vec![0u8; hash_len]` → `[0u8; 64]` + slice |
+| `crates/hitls-tls/src/connection/server.rs` | `fin_hash_buf` (×2)/`cv_hash`: `vec![0u8; hash_len]` → `[0u8; 64]` + slice |
+| `crates/hitls-tls/src/handshake/server.rs` | PSK binder hash: `vec![0u8; hash_len]` → `[0u8; 64]` + slice |
+| `crates/hitls-tls/src/handshake/client.rs` | Binder/eems/ch hash (×3): `vec![0u8; hash_len]` → `[0u8; 64]` + slice |
+
+### Test Results
+- All 1360 TLS tests pass (including PSK, 0-RTT, post-HS auth paths)
+- All 188 integration tests pass
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P34)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
