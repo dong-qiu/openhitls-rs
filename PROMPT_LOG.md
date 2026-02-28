@@ -3217,3 +3217,14 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - Plaintext padding: replaced `plaintext.to_vec()` + push(0) with inline full/partial block processing
 - 4 heap allocations eliminated per CCM operation
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P28–P29 — ChaCha20-Poly1305 Padding + PBKDF2 Stack Arrays (2026-03-01)
+
+**Prompt**: Replace heap allocations with stack arrays in ChaCha20-Poly1305 `compute_tag()` padding and PBKDF2 inner loop.
+
+**Result**:
+- **P28**: ChaCha20-Poly1305 `compute_tag()`: `vec![0u8; N]` padding → `const ZEROS: [u8; 15]` slice (2 allocs eliminated per tag)
+- **P29**: PBKDF2: `vec![0u8; 32]` → `[0u8; 32]` stack for u/t, eliminated `u_next` via in-place `hmac.finish(&mut u)`. 80K iterations: 80K→0 heap allocations.
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings

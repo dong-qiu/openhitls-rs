@@ -31,18 +31,16 @@ pub fn pbkdf2(
         let mut hmac = Hmac::new(sha256_factory, password)?;
         hmac.update(salt)?;
         hmac.update(&(i as u32).to_be_bytes())?;
-        let mut u = vec![0u8; hash_len];
+        let mut u = [0u8; 32]; // SHA-256 output, stack array
         hmac.finish(&mut u)?;
 
-        let mut t = u.clone();
+        let mut t = u; // Copy on stack (no heap clone)
 
-        // U2..Uc
+        // U2..Uc — reuse single stack buffer for all iterations
         for _ in 1..iterations {
             hmac.reset();
             hmac.update(&u)?;
-            let mut u_next = vec![0u8; hash_len];
-            hmac.finish(&mut u_next)?;
-            u.copy_from_slice(&u_next);
+            hmac.finish(&mut u)?; // Overwrite u in-place, no u_next allocation
             for (tj, &uj) in t.iter_mut().zip(u.iter()) {
                 *tj ^= uj;
             }
