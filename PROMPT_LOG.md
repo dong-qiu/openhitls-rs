@@ -3351,3 +3351,15 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - `compute_finished_verify_data` and ticket encrypt/decrypt updated
 - All 23 HKDF + 17 PRF tests pass, 1,360 TLS tests pass, 188 integration tests pass
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+## Phase P41 — RSA OAEP/PSS In-Place XOR (2026-03-01)
+
+**Prompt**: Replace `.collect()` XOR allocation patterns in RSA OAEP/PSS with in-place `iter_mut().zip()` XOR loops.
+
+**Result**:
+- OAEP encrypt: `db` and `seed` XOR-ed in-place, eliminating `masked_db` and `masked_seed` Vec allocations
+- OAEP decrypt: `seed` as `[u8; H_LEN]` stack + in-place XOR, `db` as `to_vec()` + in-place XOR
+- PSS sign: `db` XOR-ed in-place instead of collecting to `masked_db`
+- PSS verify: `masked_db.to_vec()` + in-place XOR instead of collecting
+- All 49 RSA tests pass
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings

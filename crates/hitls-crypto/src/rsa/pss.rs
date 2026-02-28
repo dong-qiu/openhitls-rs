@@ -80,18 +80,20 @@ fn pss_encode(digest: &[u8], em_bits: usize, salt: &[u8]) -> Result<Vec<u8>, Cry
     // dbMask = MGF1(H, emLen - hLen - 1)
     let db_mask = mgf1_sha256(&h, db_len);
 
-    // maskedDB = DB XOR dbMask
-    let mut masked_db: Vec<u8> = db.iter().zip(db_mask.iter()).map(|(a, b)| a ^ b).collect();
+    // maskedDB = DB XOR dbMask (in-place on db)
+    for (d, m) in db.iter_mut().zip(db_mask.iter()) {
+        *d ^= m;
+    }
 
     // Set the leftmost 8*emLen - emBits bits of maskedDB to zero
     let top_bits = 8 * em_len - em_bits;
     if top_bits > 0 {
-        masked_db[0] &= 0xFF >> top_bits;
+        db[0] &= 0xFF >> top_bits;
     }
 
     // EM = maskedDB || H || 0xbc
     let mut em = Vec::with_capacity(em_len);
-    em.extend_from_slice(&masked_db);
+    em.extend_from_slice(&db);
     em.extend_from_slice(&h);
     em.push(0xbc);
     debug_assert_eq!(em.len(), em_len);
@@ -155,12 +157,11 @@ pub(crate) fn pss_verify_unpad_with_salt(
     // dbMask = MGF1(H, emLen - hLen - 1)
     let db_mask = mgf1_sha256(h, db_len);
 
-    // DB = maskedDB XOR dbMask
-    let mut db: Vec<u8> = masked_db
-        .iter()
-        .zip(db_mask.iter())
-        .map(|(a, b)| a ^ b)
-        .collect();
+    // DB = maskedDB XOR dbMask (in-place on copy)
+    let mut db = masked_db.to_vec();
+    for (d, m) in db.iter_mut().zip(db_mask.iter()) {
+        *d ^= m;
+    }
 
     // Set the leftmost 8*emLen - emBits bits of DB to zero
     if top_bits > 0 {

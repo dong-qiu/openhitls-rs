@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P40 (40 phases)
+- Performance: P1–P41 (41 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -206,6 +206,7 @@ Category summary:
 | 194 | P38 | Perf | TLCP/DTLCP CBC HMAC Caching | 2026-03-01 |
 | 195 | P39 | Perf | CBC Decrypt Truncate-in-Place | 2026-03-01 |
 | 196 | P40 | Perf | HMAC Hash Stack Return | 2026-03-01 |
+| 197 | P41 | Perf | RSA OAEP/PSS In-Place XOR | 2026-03-01 |
 
 ---
 
@@ -11257,6 +11258,26 @@ Changed `hmac_hash()` return type from `Vec<u8>` to `([u8; MAX_OUTPUT_SIZE], usi
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P40)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P41 — RSA OAEP/PSS In-Place XOR (2026-03-01)
+
+### Summary
+Replaced `.map(|(a, b)| a ^ b).collect()` XOR-with-allocation patterns in RSA OAEP and PSS with in-place `iter_mut().zip()` XOR loops. Eliminates 2 `Vec<u8>` allocations in OAEP encrypt, 1 in OAEP decrypt, 1 in PSS sign, and 1 in PSS verify — total 5 allocations per RSA operation.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/rsa/oaep.rs` | Encrypt: XOR `db` and `seed` in-place instead of `collect()` to `masked_db`/`masked_seed`; Decrypt: `seed` as `[u8; H_LEN]` stack + in-place XOR, `db` as `masked_db.to_vec()` + in-place XOR |
+| `crates/hitls-crypto/src/rsa/pss.rs` | Sign: XOR `db` in-place instead of `collect()` to `masked_db`; Verify: `masked_db.to_vec()` + in-place XOR instead of `collect()` |
+
+### Test Results
+- All 49 RSA tests pass
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P41)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

@@ -48,24 +48,24 @@ pub(crate) fn oaep_encrypt_pad(msg: &[u8], k: usize) -> Result<Vec<u8>, CryptoEr
     // dbMask = MGF1(seed, k - hLen - 1)
     let db_mask = mgf1_sha256(&seed, db_len);
 
-    // maskedDB = DB XOR dbMask
-    let masked_db: Vec<u8> = db.iter().zip(db_mask.iter()).map(|(a, b)| a ^ b).collect();
+    // maskedDB = DB XOR dbMask (in-place on db)
+    for (d, m) in db.iter_mut().zip(db_mask.iter()) {
+        *d ^= m;
+    }
 
     // seedMask = MGF1(maskedDB, hLen)
-    let seed_mask = mgf1_sha256(&masked_db, H_LEN);
+    let seed_mask = mgf1_sha256(&db, H_LEN);
 
-    // maskedSeed = seed XOR seedMask
-    let masked_seed: Vec<u8> = seed
-        .iter()
-        .zip(seed_mask.iter())
-        .map(|(a, b)| a ^ b)
-        .collect();
+    // maskedSeed = seed XOR seedMask (in-place on seed)
+    for (s, m) in seed.iter_mut().zip(seed_mask.iter()) {
+        *s ^= m;
+    }
 
     // EM = 0x00 || maskedSeed || maskedDB
     let mut em = Vec::with_capacity(k);
     em.push(0x00);
-    em.extend_from_slice(&masked_seed);
-    em.extend_from_slice(&masked_db);
+    em.extend_from_slice(&seed);
+    em.extend_from_slice(&db);
     debug_assert_eq!(em.len(), k);
 
     Ok(em)
@@ -89,22 +89,21 @@ pub(crate) fn oaep_decrypt_unpad(em: &[u8]) -> Result<Vec<u8>, CryptoError> {
     // seedMask = MGF1(maskedDB, hLen)
     let seed_mask = mgf1_sha256(masked_db, H_LEN);
 
-    // seed = maskedSeed XOR seedMask
-    let seed: Vec<u8> = masked_seed
-        .iter()
-        .zip(seed_mask.iter())
-        .map(|(a, b)| a ^ b)
-        .collect();
+    // seed = maskedSeed XOR seedMask (in-place on stack copy)
+    let mut seed = [0u8; H_LEN];
+    seed.copy_from_slice(masked_seed);
+    for (s, m) in seed.iter_mut().zip(seed_mask.iter()) {
+        *s ^= m;
+    }
 
     // dbMask = MGF1(seed, k - hLen - 1)
     let db_mask = mgf1_sha256(&seed, db_len);
 
-    // DB = maskedDB XOR dbMask
-    let db: Vec<u8> = masked_db
-        .iter()
-        .zip(db_mask.iter())
-        .map(|(a, b)| a ^ b)
-        .collect();
+    // DB = maskedDB XOR dbMask (in-place on copy)
+    let mut db = masked_db.to_vec();
+    for (d, m) in db.iter_mut().zip(db_mask.iter()) {
+        *d ^= m;
+    }
 
     // Verify: y must be 0x00
     // DB = lHash' || PS || 0x01 || M
