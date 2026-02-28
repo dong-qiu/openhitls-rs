@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P38 (38 phases)
+- Performance: P1–P39 (39 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -204,6 +204,7 @@ Category summary:
 | 192 | P36 | Perf | HKDF Label Stack Encoding | 2026-03-01 |
 | 193 | P37 | Perf | TLCP/DTLCP Record Stack Arrays | 2026-03-01 |
 | 194 | P38 | Perf | TLCP/DTLCP CBC HMAC Caching | 2026-03-01 |
+| 195 | P39 | Perf | CBC Decrypt Truncate-in-Place | 2026-03-01 |
 
 ---
 
@@ -11209,6 +11210,29 @@ Cached HMAC-SM3 instances in TLCP and DTLCP CBC record encryptor/decryptor struc
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P38)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P39 — CBC Decrypt Truncate-in-Place (2026-03-01)
+
+### Summary
+Eliminated redundant heap allocation in CBC record decryption across all 4 decrypt implementations (TLS 1.2 MtE, TLS 1.2 EtM, TLCP, DTLCP). Previously, after decrypting into a `Vec<u8>`, the plaintext was extracted via `decrypted[..content_len].to_vec()` — a second heap allocation copying the prefix. Now uses `decrypted.truncate(content_len)` to shrink in-place and returns the original `Vec` directly, eliminating one heap allocation per CBC record decryption.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-tls/src/record/encryption12_cbc.rs` | MtE decrypt: `decrypted[..content_len].to_vec()` → `decrypted.truncate(content_len); Ok(decrypted)` |
+| `crates/hitls-tls/src/record/encryption12_cbc.rs` | EtM decrypt: `decrypted[..plaintext_len].to_vec()` → `decrypted.truncate(plaintext_len); Ok(decrypted)` |
+| `crates/hitls-tls/src/record/encryption_tlcp.rs` | TLCP CBC decrypt: same truncate-in-place pattern |
+| `crates/hitls-tls/src/record/encryption_dtlcp.rs` | DTLCP CBC decrypt: same truncate-in-place pattern |
+
+### Test Results
+- All 75 CBC tests pass, 136 TLCP/DTLCP tests pass
+- 1,360 TLS tests pass, 188 integration tests pass
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P39)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
