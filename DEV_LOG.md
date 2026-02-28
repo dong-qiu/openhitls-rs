@@ -182,6 +182,10 @@ Category summary:
 | 170 | P16 | Perf | SM3 Compression Function Optimization | 2026-02-28 |
 | 171 | P17 | Perf | P-256 Scalar Field for ECDSA Sign | 2026-02-28 |
 | 172 | P18 | Perf | Keccak ARMv8 SHA-3 Hardware Acceleration | 2026-02-28 |
+| 173 | P19 | Perf | SHAKE squeeze_into Zero-Allocation Squeeze | 2026-03-01 |
+| 174 | P20 | Perf | CTR-DRBG AES/SM4 Key Caching | 2026-03-01 |
+| 175 | P21 | Perf | AES-GCM/CBC Generic Monomorphization | 2026-03-01 |
+| 176 | P22 | Perf | Miller-Rabin Montgomery Optimization | 2026-03-01 |
 
 ---
 
@@ -10543,5 +10547,97 @@ ARMv8.2-A SHA-3 Crypto Extensions accelerated Keccak-f[1600] permutation. Uses E
 
 ### Build Status (Post P13–P18)
 - `cargo test --workspace --all-features`: 3,477 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P19 — SHAKE squeeze_into Zero-Allocation Squeeze (2026-03-01)
+
+### Summary
+Added `squeeze_into(&mut [u8])` to `Shake128`/`Shake256` for zero-allocation SHAKE output. Replaced heap-allocating `squeeze()` calls in hot rejection-sampling loops across ML-KEM, ML-DSA, and FrodoKEM. Fixed a squeeze state machine bug where incremental calls with exact rate-sized chunks skipped keccak_f1600 permutation (`buf_len=0` ambiguity).
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/sha3/mod.rs` | Added `squeeze_into(&mut [u8])` to `Shake128` and `Shake256` |
+| `crates/hitls-crypto/src/sha3/mod.rs` | Fixed `KeccakState::squeeze` state machine: `buf_len` now tracks consumption correctly across incremental calls |
+| `crates/hitls-crypto/src/mlkem/poly.rs` | `rej_sample`: `xof.squeeze(504)?` → stack buffer `[0u8; 504]` + `squeeze_into` |
+| `crates/hitls-crypto/src/mldsa/poly.rs` | `rej_ntt_poly`: `xof.squeeze(504)?` → stack buffer + `squeeze_into` |
+| `crates/hitls-crypto/src/mldsa/poly.rs` | `rej_bounded_poly`: `xof.squeeze(136)?` → stack buffer + `squeeze_into` |
+| `crates/hitls-crypto/src/mldsa/poly.rs` | `sample_in_ball`: `xof.squeeze(136)?` → stack buffer + `squeeze_into` |
+| `crates/hitls-crypto/src/frodokem/matrix.rs` | `gen_a_mul_add_shake`: reuse `row_bytes` buffer with `squeeze_into` |
+| `crates/hitls-crypto/src/frodokem/matrix.rs` | `mul_add_sa_plus_e`: reuse `row_bytes` buffer with `squeeze_into` |
+
+### Test Results
+- +2 new tests: `test_shake128_squeeze_into_matches_squeeze`, `test_shake256_squeeze_into_incremental`
+- All ML-KEM (35), ML-DSA (36), FrodoKEM (33) tests pass as regression
+
+---
+
+## Phase P20 — CTR-DRBG AES/SM4 Key Caching (2026-03-01)
+
+### Summary
+Cached expanded `AesKey`/`Sm4Key` in `CtrDrbg`/`Sm4CtrDrbg` structs. Previously, `aes256_encrypt_block()` called `AesKey::new(key)` on every block encryption, performing redundant 15-round-key expansion. Key is now refreshed only in `update()` when raw key material changes. Also cached `AesKey` in `block_cipher_df` BCC loops.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/drbg/ctr_drbg.rs` | Added `cached_key: AesKey` field to `CtrDrbg` |
+| `crates/hitls-crypto/src/drbg/ctr_drbg.rs` | `update()`: uses `self.cached_key`, refreshes after key change |
+| `crates/hitls-crypto/src/drbg/ctr_drbg.rs` | `generate()`: uses `self.cached_key` instead of per-block `AesKey::new()` |
+| `crates/hitls-crypto/src/drbg/ctr_drbg.rs` | `block_cipher_df()`: creates `AesKey` once per key, not per-block |
+| `crates/hitls-crypto/src/drbg/sm4_ctr_drbg.rs` | Same pattern: `cached_key: Sm4Key` in `Sm4CtrDrbg` |
+
+### Test Results
+- All 42 DRBG tests pass (deterministic output unchanged)
+
+---
+
+## Phase P21 — AES-GCM/CBC Generic Monomorphization (2026-03-01)
+
+### Summary
+Replaced `&dyn BlockCipher` with generic `<C: BlockCipher>` in `gcm_crypt_generic`, `cbc_encrypt_with`, and `cbc_decrypt_with`. Compiler monomorphizes to `AesKey` and `Sm4Key` specializations, eliminating vtable indirect calls per 16-byte block and enabling inlining of `encrypt_block`/`decrypt_block`.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/modes/gcm.rs` | `gcm_crypt_generic`: `&dyn BlockCipher` → `<C: BlockCipher>` |
+| `crates/hitls-crypto/src/modes/cbc.rs` | `cbc_encrypt_with`: `&dyn BlockCipher` → `<C: BlockCipher>` |
+| `crates/hitls-crypto/src/modes/cbc.rs` | `cbc_decrypt_with`: `&dyn BlockCipher` → `<C: BlockCipher>` |
+
+### Test Results
+- All 85 modes tests pass (GCM, CBC, CTR, XTS, etc.)
+
+---
+
+## Phase P22 — Miller-Rabin Montgomery Optimization (2026-03-01)
+
+### Summary
+Optimized Miller-Rabin primality testing by creating a single `MontgomeryCtx` for all witnesses (8→1 R² computations), using `mont_exp_mont()` to stay in Montgomery form, and `mont_sqr` (dedicated squaring with cross-product symmetry) in the inner loop. Added `mont_exp_mont()` to `MontgomeryCtx` that returns Montgomery-form result without conversion.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-bignum/src/montgomery.rs` | Added `mont_exp_mont()`: windowed exponentiation returning Montgomery-form |
+| `crates/hitls-bignum/src/prime.rs` | `is_probably_prime()`: single `MontgomeryCtx` for all witnesses |
+| `crates/hitls-bignum/src/prime.rs` | Montgomery-form comparisons (`one_mont`, `n_minus_one_mont`) |
+| `crates/hitls-bignum/src/prime.rs` | Inner loop: `mont_sqr` instead of `mul + mod_reduce` |
+
+### Test Results
+- All 80 bignum tests pass (including Carmichael numbers, Mersenne prime)
+- All 49 RSA tests pass as regression
+
+---
+
+### Aggregate Counts (Post P19–P22)
+
+| Metric | Before | After | Delta |
+|--------|--------|-------|-------|
+| Tests | 3,477 | 3,479 | +2 |
+| Ignored | 21 | 21 | 0 |
+
+### Build Status (Post P19–P22)
+- `cargo test --workspace --all-features`: 3,479 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

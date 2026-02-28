@@ -3136,3 +3136,17 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - **P18**: Keccak ARMv8 SHA-3 HW — EOR3 (theta), RAX1 (d), BCAX (chi) crypto extension intrinsics, runtime dispatch, software fallback
 - 3,467→3,477 tests (+10), 21 ignored, 2 new files (`p256_scalar.rs`, `keccak_arm.rs`)
 - All tests pass, 0 clippy warnings, formatting clean
+
+---
+
+## Phase P19–P22 — Batch A Performance Optimizations (2026-03-01)
+
+**Prompt**: Implement 4 performance optimization phases: P19 SHAKE squeeze_into zero-allocation, P20 CTR-DRBG AES/SM4 key caching, P21 AES-GCM/CBC monomorphization, P22 Miller-Rabin Montgomery optimization.
+
+**Result**:
+- **P19**: SHAKE `squeeze_into(&mut [u8])` — zero-allocation squeeze for Shake128/Shake256, stack buffers in ML-KEM/ML-DSA/FrodoKEM, squeeze state machine fix (+2 tests)
+- **P20**: CTR-DRBG key caching — cached `AesKey`/`Sm4Key` in DRBG structs, eliminates per-block key expansion (67→1 per 1KB), `block_cipher_df` key reuse
+- **P21**: GCM/CBC monomorphization — `&dyn BlockCipher` → `<C: BlockCipher>` eliminates vtable dispatch, enables inlining
+- **P22**: Miller-Rabin optimization — single `MontgomeryCtx` (8→1 R²), `mont_exp_mont()`, `mont_sqr` inner loop (2–3× speedup)
+- 3,477→3,479 tests (+2), 21 ignored
+- All tests pass, 0 clippy warnings, formatting clean
