@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P26 (26 phases)
+- Performance: P1–P27 (27 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -192,6 +192,7 @@ Category summary:
 | 180 | P24 | Perf | TLS 1.2 CBC Per-Record AES Key Caching | 2026-03-01 |
 | 181 | P25 | Perf | CBC Generic Path Stack Array Optimization | 2026-03-01 |
 | 182 | P26 | Perf | HMAC Reset + TLS 1.2 CBC HMAC Caching | 2026-03-01 |
+| 183 | P27 | Perf | CCM Zero-Allocation Tag + CBC-MAC | 2026-03-01 |
 
 ---
 
@@ -10897,6 +10898,37 @@ Eliminated per-record HMAC construction in TLS 1.2 CBC record encryption/decrypt
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P26)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P27 — CCM Zero-Allocation Tag + CBC-MAC (2026-03-01)
+
+### Summary
+Eliminated all heap allocations from CCM mode's hot path. Tag buffers replaced with stack arrays, AAD encoding processed block-by-block via XOR into running CBC-MAC state (no Vec), plaintext CBC-MAC processed with inline partial-block handling (no `to_vec()` + padding).
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/modes/ccm.rs` | `encrypted_tag`/`decrypted_tag`: `vec![0u8; tag_len]` → `[u8; BLOCK_SIZE]` stack array |
+| `crates/hitls-crypto/src/modes/ccm.rs` | `cbc_mac` AAD: `Vec::new()` + extend → stack `[u8; 6]` header + block-by-block XOR |
+| `crates/hitls-crypto/src/modes/ccm.rs` | `cbc_mac` plaintext: `plaintext.to_vec()` + padding → inline full/partial block processing |
+
+### Allocation Savings Per CCM Operation
+| Buffer | Before | After |
+|--------|--------|-------|
+| `encrypted_tag` / `decrypted_tag` | `vec![0u8; tag_len]` (2 per record) | `[u8; 16]` stack |
+| AAD encoding | `Vec::new()` + extend (1 per record) | Stack `[u8; 6]` header + direct XOR |
+| Plaintext padding | `plaintext.to_vec()` (1 per record) | Inline block processing |
+
+### Test Results
+- All 9 CCM unit tests pass + 1 Wycheproof AES-CCM vector
+- All 38 TLS CCM tests pass
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P27)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

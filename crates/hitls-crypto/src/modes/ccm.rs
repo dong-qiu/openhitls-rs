@@ -184,13 +184,13 @@ fn ccm_encrypt_impl<C: BlockCipher>(
         counter += 1;
     }
 
-    // Encrypt tag with S0
-    let mut encrypted_tag = vec![0u8; tag_len];
-    for (i, t) in encrypted_tag.iter_mut().enumerate() {
-        *t = tag[i] ^ s0[i];
+    // Encrypt tag with S0 (stack array, max 16 bytes)
+    let mut encrypted_tag = [0u8; BLOCK_SIZE];
+    for i in 0..tag_len {
+        encrypted_tag[i] = tag[i] ^ s0[i];
     }
 
-    ciphertext.extend_from_slice(&encrypted_tag);
+    ciphertext.extend_from_slice(&encrypted_tag[..tag_len]);
     Ok(ciphertext)
 }
 
@@ -229,14 +229,18 @@ fn ccm_decrypt_impl<C: BlockCipher>(
     // Step 2: CBC-MAC on decrypted plaintext
     let expected_tag = cbc_mac(cipher, nonce, aad, &plaintext, tag_len)?;
 
-    // Decrypt received tag with S0
-    let mut decrypted_tag = vec![0u8; tag_len];
-    for (i, t) in decrypted_tag.iter_mut().enumerate() {
-        *t = received_tag[i] ^ s0[i];
+    // Decrypt received tag with S0 (stack array, max 16 bytes)
+    let mut decrypted_tag = [0u8; BLOCK_SIZE];
+    for i in 0..tag_len {
+        decrypted_tag[i] = received_tag[i] ^ s0[i];
     }
 
     // Constant-time tag comparison
-    if expected_tag[..tag_len].ct_eq(&decrypted_tag).unwrap_u8() != 1 {
+    if expected_tag[..tag_len]
+        .ct_eq(&decrypted_tag[..tag_len])
+        .unwrap_u8()
+        != 1
+    {
         return Err(CryptoError::AeadTagVerifyFail);
     }
 
@@ -300,45 +304,61 @@ fn cbc_mac<C: BlockCipher>(
     let mut x = b0;
     cipher.encrypt_block(&mut x)?;
 
-    // Process AAD
+    // Process AAD (zero heap allocation: XOR directly into running state)
     if !aad.is_empty() {
-        let mut aad_encoded = Vec::new();
-
-        // Encode AAD length
-        if aad.len() < 0xFF00 {
-            aad_encoded.push((aad.len() >> 8) as u8);
-            aad_encoded.push((aad.len() & 0xFF) as u8);
+        // Build length-prefixed header in a stack buffer (max 6 bytes)
+        let mut hdr = [0u8; 6];
+        let hdr_len = if aad.len() < 0xFF00 {
+            hdr[0] = (aad.len() >> 8) as u8;
+            hdr[1] = (aad.len() & 0xFF) as u8;
+            2
         } else {
-            aad_encoded.push(0xFF);
-            aad_encoded.push(0xFE);
-            aad_encoded.extend_from_slice(&(aad.len() as u32).to_be_bytes());
-        }
-        aad_encoded.extend_from_slice(aad);
+            hdr[0] = 0xFF;
+            hdr[1] = 0xFE;
+            hdr[2..6].copy_from_slice(&(aad.len() as u32).to_be_bytes());
+            6
+        };
 
-        // Pad to block boundary
-        while aad_encoded.len() % BLOCK_SIZE != 0 {
-            aad_encoded.push(0);
+        // XOR header + AAD + zero-padding into x, block by block
+        let total_len = hdr_len + aad.len();
+        let padded_len = total_len.div_ceil(BLOCK_SIZE) * BLOCK_SIZE;
+        let mut pos = 0usize; // position in logical stream (header ++ aad ++ zeros)
+        while pos < padded_len {
+            let end = (pos + BLOCK_SIZE).min(padded_len);
+            for i in pos..end {
+                let byte = if i < hdr_len {
+                    hdr[i]
+                } else if i < hdr_len + aad.len() {
+                    aad[i - hdr_len]
+                } else {
+                    0 // zero padding
+                };
+                x[i - pos] ^= byte;
+            }
+            cipher.encrypt_block(&mut x)?;
+            pos = end;
         }
+    }
 
-        for chunk in aad_encoded.chunks(BLOCK_SIZE) {
+    // Process plaintext (zero heap allocation: XOR directly, pad final block inline)
+    if !plaintext.is_empty() {
+        // Process full blocks
+        let full_blocks = plaintext.len() / BLOCK_SIZE;
+        for i in 0..full_blocks {
+            let chunk = &plaintext[i * BLOCK_SIZE..(i + 1) * BLOCK_SIZE];
             for (xi, &bi) in x.iter_mut().zip(chunk.iter()) {
                 *xi ^= bi;
             }
             cipher.encrypt_block(&mut x)?;
         }
-    }
-
-    // Process plaintext
-    if !plaintext.is_empty() {
-        let mut padded_pt = plaintext.to_vec();
-        while padded_pt.len() % BLOCK_SIZE != 0 {
-            padded_pt.push(0);
-        }
-
-        for chunk in padded_pt.chunks(BLOCK_SIZE) {
-            for (xi, &bi) in x.iter_mut().zip(chunk.iter()) {
+        // Process final partial block (if any) with zero padding
+        let remainder = plaintext.len() % BLOCK_SIZE;
+        if remainder > 0 {
+            let tail = &plaintext[full_blocks * BLOCK_SIZE..];
+            for (xi, &bi) in x.iter_mut().zip(tail.iter()) {
                 *xi ^= bi;
             }
+            // Remaining bytes are XOR'd with 0 (no-op), just encrypt
             cipher.encrypt_block(&mut x)?;
         }
     }

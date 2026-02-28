@@ -3204,3 +3204,16 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - `compute_cbc_mac()` → `compute_cbc_mac_with(&mut Hmac)` with stack MAC output
 - `build_tls_padding()` returns stack array `([u8; 16], usize)` instead of `Vec<u8>`
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P27 — CCM Zero-Allocation Tag + CBC-MAC (2026-03-01)
+
+**Prompt**: Eliminate heap allocations from CCM mode hot path: tag buffers, AAD encoding, plaintext padding in `cbc_mac`.
+
+**Result**:
+- Tag buffers `vec![0u8; tag_len]` → `[u8; 16]` stack arrays (encrypt + decrypt)
+- AAD encoding: replaced `Vec::new()` + extend with stack `[u8; 6]` header + block-by-block XOR into running state
+- Plaintext padding: replaced `plaintext.to_vec()` + push(0) with inline full/partial block processing
+- 4 heap allocations eliminated per CCM operation
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
