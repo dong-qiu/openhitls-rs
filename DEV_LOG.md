@@ -19,37 +19,37 @@ Category summary:
 | 7 | I7 | Impl | Ed25519 + X25519 + DH | 2026-02-06 |
 | 8 | I8 | Impl | DSA + SM2 + HMAC-DRBG | 2026-02-06 |
 | 9 | I9 | Impl | SHA-3/SHAKE + ChaCha20-Poly1305 + Symmetric Suite Completion | 2026-02-06 |
-| 10 | I10 | Impl | ML-KEM (FIPS 203) + ML-DSA (FIPS 204) | 2026-02-07 |
-| 11 | I11 | Impl | HPKE + AES Key Wrap + HybridKEM + Paillier + ElGamal | 2026-02-06 |
-| 12 | I12 | Impl | X.509 Certificate Parsing + Signature Verification | — |
-| 13 | I13 | Impl | X.509 Verification + Chain Building | 2026-02-07 |
-| 14 | I14 | Impl | TLS 1.3 Key Schedule + Crypto Adapter | 2026-02-06 |
-| 15 | I15 | Impl | TLS Record Layer Encryption | 2026-02-08 |
-| 16 | I16 | Impl | TLS 1.3 Client Handshake | 2026-02-08 |
-| 17 | I17 | Impl | TLS 1.3 Server Handshake + Application Data | 2026-02-08 |
-| 18 | I18 | Impl | PKCS#12 + CMS + Auth Protocols | 2026-02-08 |
-| 19 | I19 | Impl | SLH-DSA (FIPS 205) + XMSS (RFC 8391) | 2026-02-08 |
-| 20 | I20 | Impl | FrodoKEM + SM9 + Classic McEliece + CLI Tool + Integration Tests | 2026-02-06 |
-| 21 | I21 | Impl | TLS 1.3 Completeness (PSK, 0-RTT, Post-HS Auth, Cert Compression) | — |
-| 22 | I22 | Impl | ECC Curve Additions | — |
-| 23 | I23 | Impl | CTR-DRBG + Hash-DRBG + PKCS#8 Key Parsing | 2026-02-08 |
-| 24 | I24 | Impl | CRL Parsing + Validation + Revocation Checking + OCSP | 2026-02-09 |
-| 25 | I25 | Impl | CSR Generation, X.509 Certificate Generation, TLS 1.2 PRF, CLI req | 2026-02-09 |
-| 26 | I26 | Impl | TLS 1.2 Handshake (ECDHE-GCM) | — |
-| 27 | I27 | Impl | DTLS 1.2 (RFC 6347) | — |
-| 28 | I28 | Impl | TLCP (GM/T 0024 / GB/T 38636-2020) | — |
-| 29 | I29 | Impl | TLS 1.2 CBC + ChaCha20-Poly1305 + ALPN + SNI | 2026-02-06 |
+| 10 | I11 | Impl | HPKE + AES Key Wrap + HybridKEM + Paillier + ElGamal | 2026-02-06 |
+| 11 | I14 | Impl | TLS 1.3 Key Schedule + Crypto Adapter | 2026-02-06 |
+| 12 | I20 | Impl | FrodoKEM + SM9 + Classic McEliece + CLI Tool + Integration Tests | 2026-02-06 |
+| 13 | I29 | Impl | TLS 1.2 CBC + ChaCha20-Poly1305 + ALPN + SNI | 2026-02-06 |
+| 14 | I10 | Impl | ML-KEM (FIPS 203) + ML-DSA (FIPS 204) | 2026-02-07 |
+| 15 | I12 | Impl | X.509 Certificate Parsing + Signature Verification | 2026-02-07 |
+| 16 | I13 | Impl | X.509 Verification + Chain Building | 2026-02-07 |
+| 17 | I15 | Impl | TLS Record Layer Encryption | 2026-02-08 |
+| 18 | I16 | Impl | TLS 1.3 Client Handshake | 2026-02-08 |
+| 19 | I17 | Impl | TLS 1.3 Server Handshake + Application Data | 2026-02-08 |
+| 20 | I18 | Impl | PKCS#12 + CMS + Auth Protocols | 2026-02-08 |
+| 21 | I19 | Impl | SLH-DSA (FIPS 205) + XMSS (RFC 8391) | 2026-02-08 |
+| 22 | I21 | Impl | TLS 1.3 Completeness (PSK, 0-RTT, Post-HS Auth, Cert Compression) | 2026-02-08 |
+| 23 | I22 | Impl | ECC Curve Additions | 2026-02-08 |
+| 24 | I23 | Impl | CTR-DRBG + Hash-DRBG + PKCS#8 Key Parsing | 2026-02-08 |
+| 25 | I24 | Impl | CRL Parsing + Validation + Revocation Checking + OCSP | 2026-02-09 |
+| 26 | I25 | Impl | CSR Generation, X.509 Certificate Generation, TLS 1.2 PRF, CLI req | 2026-02-09 |
+| 27 | I26 | Impl | TLS 1.2 Handshake (ECDHE-GCM) | 2026-02-09 |
+| 28 | I27 | Impl | DTLS 1.2 (RFC 6347) | 2026-02-09 |
+| 29 | I28 | Impl | TLCP (GM/T 0024 / GB/T 38636-2020) | 2026-02-09 |
 | 30 | I30 | Impl | TLS 1.2 Session Resumption + Client Certificate Auth (mTLS) | 2026-02-10 |
 | 31 | I31 | Impl | s_client CLI + Network I/O | 2026-02-10 |
 | 32 | I32 | Impl | s_server CLI + Key Conversion | 2026-02-10 |
-| 33 | I33 | Impl | TCP Loopback Integration Tests | — |
+| 33 | I33 | Impl | TCP Loopback Integration Tests | 2026-02-10 |
 | 34 | I34 | Impl | TLS 1.2 Session Ticket (RFC 5077) | 2026-02-10 |
 | 35 | I35 | Impl | TLS 1.2 Extended Master Secret + Encrypt-Then-MAC + Renegotiation Indication | 2026-02-10 |
 | 36 | I36 | Impl | TLS 1.2 RSA + DHE Key Exchange — 13 New Cipher Suites | 2026-02-10 |
-| 37 | I37 | Impl | TLS 1.2 PSK Cipher Suites — 20 New Cipher Suites | 2026-02-11 |
-| 38 | I38 | Impl | TLS 1.3 Post-Quantum Hybrid KEM — X25519MLKEM768 | 2026-02-11 |
-| 39 | I39 | Impl | TLS Extensions Completeness — Record Size Limit, Fallback SCSV, OCSP Stapling... | 2026-02-11 |
-| 40 | I40 | Impl | Async I/O + Hardware AES + Benchmarks | 2026-02-10 |
+| 37 | I40 | Impl | Async I/O + Hardware AES + Benchmarks | 2026-02-10 |
+| 38 | I37 | Impl | TLS 1.2 PSK Cipher Suites — 20 New Cipher Suites | 2026-02-11 |
+| 39 | I38 | Impl | TLS 1.3 Post-Quantum Hybrid KEM — X25519MLKEM768 | 2026-02-11 |
+| 40 | I39 | Impl | TLS Extensions Completeness — Record Size Limit, Fallback SCSV, OCSP Stapling... | 2026-02-11 |
 | 41 | I41 | Impl | DTLCP + Custom Extensions + Key Logging | 2026-02-11 |
 | 42 | I42 | Impl | Wycheproof + Fuzzing + Security Audit | 2026-02-11 |
 | 43 | I43 | Impl | Feature Completeness | 2026-02-11 |
@@ -60,9 +60,9 @@ Category summary:
 | 48 | I48 | Impl | Ed448 / X448 / Curve448 | 2026-02-14 |
 | 49 | I49 | Impl | Test Coverage + CMS Ed25519 + enc CLI + TLS 1.2 OCSP/SCT | 2026-02-14 |
 | 50 | I50 | Impl | C Test Vectors Porting + CMS Real File Tests + PKCS#12 Interop | 2026-02-14 |
-| 51 | I51 | Impl | X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup | — |
+| 51 | I51 | Impl | X.509 Extension Parsing + EKU/SAN/AKI/SKI Enforcement + CMS SKI Lookup | 2026-02-14 |
 | 52 | I52 | Impl | C Test Vectors Round 2 + CertificatePolicies + CMS Chain/NoAttr Tests | 2026-02-14 |
-| 53 | I53 | Impl | PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths | — |
+| 53 | I53 | Impl | PKI Signature Coverage + OCSP/CRL Testing + CMS Error Paths | 2026-02-14 |
 | 54 | I54 | Impl | TLS RFC 5705 Key Export + CMS Detached Sign + pkeyutl Completeness | 2026-02-14 |
 | 55 | I55 | Impl | Integration Test Expansion + TLCP Public API + Code Quality | 2026-02-14 |
 | 56 | I56 | Impl | Unit Test Coverage Expansion | 2026-02-14 |
@@ -81,101 +81,101 @@ Category summary:
 | 69 | I69 | Impl | Hostname Verification + Certificate Chain Validation + SNI Callback | 2026-02-17 |
 | 70 | I70 | Impl | Server-Side Session Cache + Session Expiration + Cipher Preference | 2026-02-17 |
 | 71 | I71 | Impl | Client-Side Session Cache + Write Record Fragmentation | 2026-02-17 |
-| 72 | I72 | Impl | KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert | 2026-02-18 |
-| 73 | I73 | Impl | Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret | 2026-02-18 |
-| 74 | I74 | Impl | PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated | 2026-02-18 |
-| 75 | I75 | Impl | Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) | 2026-02-18 |
-| 76 | I76 | Impl | TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4 | 2026-02-19 |
-| 77 | I77 | Impl | Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) | 2026-02-19 |
-| 78 | I78 | Impl | DTLS Config Enhancements + Integration Tests for Phase I76–I77 Features | 2026-02-19 |
-| 79 | I79 | Impl | Encrypted PKCS#8 + Callbacks + SM4-CTR-DRBG + CMS ML-DSA | 2026-02-19 |
-| 80 | I80 | Impl | TLS 1.3 Middlebox Compatibility Mode (RFC 8446 §D.4) | — |
-| 81 | T1 | Test | CLI Command Unit Tests + Session Cache Concurrency | 2026-02-17 |
-| 82 | T2 | Test | Async TLS 1.3 Unit Tests + Cipher Suite Integration | 2026-02-18 |
-| 83 | T3 | Test | Fuzz Seed Corpus + Error Scenario Integration Tests | 2026-02-18 |
-| 84 | T4 | Test | Phase I73 Feature Integration Tests + Async Export Unit Tests | 2026-02-18 |
-| 85 | T5 | Test | cert_verify Unit Tests + Config Callbacks + Integration Tests | 2026-02-18 |
-| 86 | T6 | Test | connection_info / handshake enums / lib.rs constants / codec error paths | 2026-02-20 |
-| 87 | T7 | Test | ECC Curve Params / DH Group Params / TLCP Public API / DTLCP Error Paths | — |
-| 88 | T8 | Test | ECC Jacobian point / AES software S-box / SM9 Fp field / SM9 G1 / McEliece bit vector | — |
-| 89 | T9 | Test | 0-RTT early data + replay protection tests | — |
-| 90 | T10 | Test | Async TLS 1.2 Deep Coverage | — |
-| 91 | T11 | Test | Async TLCP + DTLCP Connection Types & Tests | — |
-| 92 | T12 | Test | Extension Negotiation E2E Tests | — |
-| 93 | T13 | Test | DTLS Loss Simulation & Resilience Tests | — |
-| 94 | T14 | Test | TLCP Double Certificate Validation Tests | — |
-| 95 | T15 | Test | SM9 Tower Field Unit Tests | — |
-| 96 | T16 | Test | SLH-DSA Internal Module Unit Tests | — |
-| 97 | T17 | Test | McEliece + FrodoKEM + XMSS Internal Module Tests | — |
-| 98 | T18 | Test | Infrastructure — proptest Property-Based Tests + Coverage CI | — |
-| 99 | T19 | Test | TLCP SM3 Cryptographic Path Coverage | — |
-| 100 | T20 | Test | TLS 1.3 Key Schedule & HKDF Robustness Tests | — |
-| 101 | T21 | Test | Record Layer Encryption Edge Cases & AEAD Failure Modes | — |
-| 102 | T22 | Test | TLS 1.2 CBC Padding Security + DTLS Parsing + TLS 1.3 Inner Plaintext Edge Cases | — |
-| 103 | T23 | Test | DTLS Fragmentation/Retransmission + CertificateVerify Edge Cases | — |
-| 104 | T24 | Test | DTLS Codec Edge Cases + Anti-Replay Window Boundaries + Entropy Conditioning | — |
-| 105 | T25 | Test | X.509 Extension Parsing + SLH-DSA WOTS+ Base Conversion + ASN.1 Tag Edge Cases | — |
-| 106 | T26 | Test | PKI Encoding Helpers + X.509 Signing Dispatch + Certificate Builder Encoding | — |
-| 107 | T27 | Test | X.509 Certificate Parsing + SM9 G2 Point Arithmetic + SM9 Pairing Helpers | — |
-| 108 | T28 | Test | SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters | — |
-| 109 | T29 | Test | McEliece Keygen Helpers + McEliece Encoding + McEliece Decoding | — |
-| 110 | T30 | Test | XMSS Tree Operations + XMSS WOTS+ Deepening + SLH-DSA FORS Deepening | — |
-| 111 | T31 | Test | McEliece GF(2^13) + Benes Network + Binary Matrix Deepening | — |
-| 112 | T32 | Test | FrodoKEM Matrix Ops + SLH-DSA Hypertree + McEliece Polynomial Deepening | — |
-| 113 | T33 | Test | McEliece + FrodoKEM + XMSS Parameter Set Validation Deepening | — |
-| 114 | T34 | Test | XMSS Hash Abstraction + XMSS Address Scheme + ML-KEM NTT Deepening | — |
-| 115 | T35 | Test | BigNum Constant-Time + Primality Testing + Core Type Deepening | — |
-| 116 | T36 | Test | SLH-DSA Params + Hash Abstraction + Address Scheme Deepening | — |
-| 117 | T37 | Test | FrodoKEM PKE + SM9 G1 Point + SM9 Fp Field Deepening | — |
-| 118 | T38 | Test | ML-DSA NTT + SM4-CTR-DRBG + BigNum Random Deepening | — |
-| 119 | T39 | Test | DH Group Params + Entropy Pool + SHA-1 Deepening | — |
-| 120 | T40 | Test | ML-KEM Poly + SM9 Fp12 + Encrypted PKCS#8 Deepening | — |
-| 121 | T41 | Test | ML-DSA Poly + X.509 Extensions + X.509 Text Deepening | 2026-02-24 |
-| 122 | T42 | Test | XTS Mode + Edwards Curve + GMAC Deepening | — |
-| 123 | T43 | Test | scrypt + CFB Mode + X448 Deepening | — |
-| 124 | T44 | Test | Semantic Fuzz Target Expansion | — |
-| 125 | T45 | Test | TLS Connection Unit Tests | — |
-| 126 | T46 | Test | TLS 1.2 Handshake Edge Cases | — |
-| 127 | T47 | Test | HW↔SW Cross-Validation | — |
-| 128 | T48 | Test | Proptest Expansion | — |
-| 129 | T49 | Test | Side-Channel Timing Tests | — |
-| 130 | T50 | Test | Concurrency Stress Tests | — |
-| 131 | T51 | Test | Feature Flag Smoke Tests | — |
-| 132 | T52 | Test | Zeroize Runtime Verification | — |
-| 133 | T53 | Test | DTLS State Machine Fuzz + OpenSSL Interop | — |
-| 134 | T54 | Test | Async Integration | — |
-| 135 | T55 | Test | TLS 1.2 State Machine Unit Isolation | — |
-| 136 | T56 | Test | SM9 G2 Point Arithmetic | — |
-| 137 | T57 | Test | TLS Extension E2E | — |
-| 138 | T58 | Test | ECDHE-RSA CBC + Async Stress | — |
-| 139 | T59 | Test | RSA Constant-Time Fix + Buffer Zeroize + Timing Tests | 2026-02-27 |
-| 140 | T60 | Test | Crypto Semantic Fuzz Targets | 2026-02-27 |
-| 141 | T61 | Test | TLS State Machine Fuzz + Corpus Enrichment | 2026-02-27 |
-| 142 | T62 | Test | Infrastructure Hardening (CI/Deps/Docs) | 2026-02-27 |
-| 143 | R1 | Refactor | PKI Encoding Consolidation | 2026-02-21 |
-| 144 | R2 | Refactor | Record Layer Enum Dispatch | 2026-02-22 |
-| 145 | R3 | Refactor | Connection File Decomposition | 2026-02-22 |
-| 146 | R4 | Refactor | Hash Digest Enum Dispatch | 2026-02-22 |
-| 147 | R5 | Refactor | Sync/Async Unification via Body Macros | 2026-02-22 |
-| 148 | R6 | Refactor | X.509 Module Decomposition | 2026-02-22 |
-| 149 | R7 | Refactor | Integration Test Modularization | 2026-02-23 |
-| 150 | R8 | Refactor | Test Helper Consolidation | 2026-02-23 |
-| 151 | R9 | Refactor | Parameter Struct Refactoring | 2026-02-23 |
-| 152 | R10 | Refactor | DRBG State Machine Unification | 2026-02-23 |
-| 153 | R11 | Refactor | Dev Profile Optimization: Accelerate Ignored Tests | — |
-| 154 | R12 | Refactor | Dev Profile opt-level=2 Upgrade + Un-ignore 15 Tests | — |
-| 155 | P1 | Perf | SHA-2 Hardware Acceleration — ARMv8 SHA-NI / x86-64 SHA-NI | — |
-| 156 | P2 | Perf | GHASH/CLMUL Hardware Acceleration — ARMv8 PMULL / x86-64 PCLMULQDQ | — |
-| 157 | P3 | Perf | P-256 Specialized Field Arithmetic and Fast ECC Path | — |
-| 158 | P4 | Perf | ChaCha20 SIMD Optimization — ARMv8 NEON / x86-64 SSE2 | — |
-| 159 | P5 | Perf | P-256 Deep Optimization | — |
-| 160 | P6 | Perf | ML-KEM NEON NTT Optimization | — |
-| 161 | P7 | Perf | BigNum CIOS Montgomery + Pre-allocated Exponentiation | — |
+| 72 | T1 | Test | CLI Command Unit Tests + Session Cache Concurrency | 2026-02-17 |
+| 73 | I72 | Impl | KeyUpdate Loop Protection + Max Fragment Length (RFC 6066) + Signature Algorithms Cert | 2026-02-18 |
+| 74 | I73 | Impl | Certificate Authorities Extension (RFC 8446 §4.2.4) + Early Exporter Master Secret | 2026-02-18 |
+| 75 | I74 | Impl | PADDING Extension (RFC 7685) + OID Filters (RFC 8446 §4.2.5) + DTLS 1.2 Abbreviated | 2026-02-18 |
+| 76 | I75 | Impl | Async DTLS 1.2 + Heartbeat Extension (RFC 6520) + GREASE (RFC 8701) | 2026-02-18 |
+| 77 | T2 | Test | Async TLS 1.3 Unit Tests + Cipher Suite Integration | 2026-02-18 |
+| 78 | T3 | Test | Fuzz Seed Corpus + Error Scenario Integration Tests | 2026-02-18 |
+| 79 | T4 | Test | Phase I73 Feature Integration Tests + Async Export Unit Tests | 2026-02-18 |
+| 80 | T5 | Test | cert_verify Unit Tests + Config Callbacks + Integration Tests | 2026-02-18 |
+| 81 | I76 | Impl | TLS Callback Framework + Missing Alert Codes + CBC-MAC-SM4 | 2026-02-19 |
+| 82 | I77 | Impl | Trusted CA Keys (RFC 6066 §6) + USE_SRTP (RFC 5764) + STATUS_REQUEST_V2 (RFC 6961) | 2026-02-19 |
+| 83 | I78 | Impl | DTLS Config Enhancements + Integration Tests for Phase I76–I77 Features | 2026-02-19 |
+| 84 | I79 | Impl | Encrypted PKCS#8 + Callbacks + SM4-CTR-DRBG + CMS ML-DSA | 2026-02-19 |
+| 85 | T6 | Test | connection_info / handshake enums / lib.rs constants / codec error paths | 2026-02-20 |
+| 86 | T7 | Test | ECC Curve Params / DH Group Params / TLCP Public API / DTLCP Error Paths | 2026-02-20 |
+| 87 | T8 | Test | ECC Jacobian point / AES software S-box / SM9 Fp field / SM9 G1 / McEliece bit vector | 2026-02-20 |
+| 88 | T9 | Test | 0-RTT early data + replay protection tests | 2026-02-21 |
+| 89 | R1 | Refactor | PKI Encoding Consolidation | 2026-02-21 |
+| 90 | R2 | Refactor | Record Layer Enum Dispatch | 2026-02-22 |
+| 91 | R3 | Refactor | Connection File Decomposition | 2026-02-22 |
+| 92 | R4 | Refactor | Hash Digest Enum Dispatch | 2026-02-22 |
+| 93 | R5 | Refactor | Sync/Async Unification via Body Macros | 2026-02-22 |
+| 94 | R6 | Refactor | X.509 Module Decomposition | 2026-02-22 |
+| 95 | T10 | Test | Async TLS 1.2 Deep Coverage | 2026-02-23 |
+| 96 | T11 | Test | Async TLCP + DTLCP Connection Types & Tests | 2026-02-23 |
+| 97 | T12 | Test | Extension Negotiation E2E Tests | 2026-02-23 |
+| 98 | T13 | Test | DTLS Loss Simulation & Resilience Tests | 2026-02-23 |
+| 99 | T14 | Test | TLCP Double Certificate Validation Tests | 2026-02-23 |
+| 100 | T15 | Test | SM9 Tower Field Unit Tests | 2026-02-23 |
+| 101 | T16 | Test | SLH-DSA Internal Module Unit Tests | 2026-02-23 |
+| 102 | T17 | Test | McEliece + FrodoKEM + XMSS Internal Module Tests | 2026-02-23 |
+| 103 | T18 | Test | Infrastructure — proptest Property-Based Tests + Coverage CI | 2026-02-23 |
+| 104 | R7 | Refactor | Integration Test Modularization | 2026-02-23 |
+| 105 | R8 | Refactor | Test Helper Consolidation | 2026-02-23 |
+| 106 | R9 | Refactor | Parameter Struct Refactoring | 2026-02-23 |
+| 107 | R10 | Refactor | DRBG State Machine Unification | 2026-02-23 |
+| 108 | I80 | Impl | TLS 1.3 Middlebox Compatibility Mode (RFC 8446 §D.4) | 2026-02-24 |
+| 109 | T19 | Test | TLCP SM3 Cryptographic Path Coverage | 2026-02-24 |
+| 110 | T20 | Test | TLS 1.3 Key Schedule & HKDF Robustness Tests | 2026-02-24 |
+| 111 | T21 | Test | Record Layer Encryption Edge Cases & AEAD Failure Modes | 2026-02-24 |
+| 112 | T22 | Test | TLS 1.2 CBC Padding Security + DTLS Parsing + TLS 1.3 Inner Plaintext Edge Cases | 2026-02-24 |
+| 113 | T23 | Test | DTLS Fragmentation/Retransmission + CertificateVerify Edge Cases | 2026-02-24 |
+| 114 | T24 | Test | DTLS Codec Edge Cases + Anti-Replay Window Boundaries + Entropy Conditioning | 2026-02-24 |
+| 115 | T25 | Test | X.509 Extension Parsing + SLH-DSA WOTS+ Base Conversion + ASN.1 Tag Edge Cases | 2026-02-24 |
+| 116 | T26 | Test | PKI Encoding Helpers + X.509 Signing Dispatch + Certificate Builder Encoding | 2026-02-24 |
+| 117 | T27 | Test | X.509 Certificate Parsing + SM9 G2 Point Arithmetic + SM9 Pairing Helpers | 2026-02-24 |
+| 118 | T28 | Test | SM9 Hash Functions + SM9 Algorithm Helpers + SM9 Curve Parameters | 2026-02-24 |
+| 119 | T29 | Test | McEliece Keygen Helpers + McEliece Encoding + McEliece Decoding | 2026-02-24 |
+| 120 | T30 | Test | XMSS Tree Operations + XMSS WOTS+ Deepening + SLH-DSA FORS Deepening | 2026-02-24 |
+| 121 | T31 | Test | McEliece GF(2^13) + Benes Network + Binary Matrix Deepening | 2026-02-24 |
+| 122 | T32 | Test | FrodoKEM Matrix Ops + SLH-DSA Hypertree + McEliece Polynomial Deepening | 2026-02-24 |
+| 123 | T33 | Test | McEliece + FrodoKEM + XMSS Parameter Set Validation Deepening | 2026-02-24 |
+| 124 | T34 | Test | XMSS Hash Abstraction + XMSS Address Scheme + ML-KEM NTT Deepening | 2026-02-24 |
+| 125 | T35 | Test | BigNum Constant-Time + Primality Testing + Core Type Deepening | 2026-02-24 |
+| 126 | P1 | Perf | SHA-2 Hardware Acceleration — ARMv8 SHA-NI / x86-64 SHA-NI | 2026-02-24 |
+| 127 | P2 | Perf | GHASH/CLMUL Hardware Acceleration — ARMv8 PMULL / x86-64 PCLMULQDQ | 2026-02-24 |
+| 128 | P3 | Perf | P-256 Specialized Field Arithmetic and Fast ECC Path | 2026-02-24 |
+| 129 | P4 | Perf | ChaCha20 SIMD Optimization — ARMv8 NEON / x86-64 SSE2 | 2026-02-24 |
+| 130 | T36 | Test | SLH-DSA Params + Hash Abstraction + Address Scheme Deepening | 2026-02-25 |
+| 131 | T37 | Test | FrodoKEM PKE + SM9 G1 Point + SM9 Fp Field Deepening | 2026-02-25 |
+| 132 | T38 | Test | ML-DSA NTT + SM4-CTR-DRBG + BigNum Random Deepening | 2026-02-25 |
+| 133 | T39 | Test | DH Group Params + Entropy Pool + SHA-1 Deepening | 2026-02-25 |
+| 134 | T40 | Test | ML-KEM Poly + SM9 Fp12 + Encrypted PKCS#8 Deepening | 2026-02-25 |
+| 135 | T41 | Test | ML-DSA Poly + X.509 Extensions + X.509 Text Deepening | 2026-02-25 |
+| 136 | T42 | Test | XTS Mode + Edwards Curve + GMAC Deepening | 2026-02-25 |
+| 137 | T43 | Test | scrypt + CFB Mode + X448 Deepening | 2026-02-25 |
+| 138 | R11 | Refactor | Dev Profile Optimization: Accelerate Ignored Tests | 2026-02-25 |
+| 139 | R12 | Refactor | Dev Profile opt-level=2 Upgrade + Un-ignore 15 Tests | 2026-02-25 |
+| 140 | T44 | Test | Semantic Fuzz Target Expansion | 2026-02-26 |
+| 141 | P5 | Perf | P-256 Deep Optimization | 2026-02-26 |
+| 142 | T45 | Test | TLS Connection Unit Tests | 2026-02-27 |
+| 143 | T46 | Test | TLS 1.2 Handshake Edge Cases | 2026-02-27 |
+| 144 | T47 | Test | HW↔SW Cross-Validation | 2026-02-27 |
+| 145 | T48 | Test | Proptest Expansion | 2026-02-27 |
+| 146 | T49 | Test | Side-Channel Timing Tests | 2026-02-27 |
+| 147 | T50 | Test | Concurrency Stress Tests | 2026-02-27 |
+| 148 | T51 | Test | Feature Flag Smoke Tests | 2026-02-27 |
+| 149 | T52 | Test | Zeroize Runtime Verification | 2026-02-27 |
+| 150 | T53 | Test | DTLS State Machine Fuzz + OpenSSL Interop | 2026-02-27 |
+| 151 | T54 | Test | Async Integration | 2026-02-27 |
+| 152 | T55 | Test | TLS 1.2 State Machine Unit Isolation | 2026-02-27 |
+| 153 | T56 | Test | SM9 G2 Point Arithmetic | 2026-02-27 |
+| 154 | T57 | Test | TLS Extension E2E | 2026-02-27 |
+| 155 | T58 | Test | ECDHE-RSA CBC + Async Stress | 2026-02-27 |
+| 156 | T59 | Test | RSA Constant-Time Fix + Buffer Zeroize + Timing Tests | 2026-02-27 |
+| 157 | T60 | Test | Crypto Semantic Fuzz Targets | 2026-02-27 |
+| 158 | T61 | Test | TLS State Machine Fuzz + Corpus Enrichment | 2026-02-27 |
+| 159 | T62 | Test | Infrastructure Hardening (CI/Deps/Docs) | 2026-02-27 |
+| 160 | P6 | Perf | ML-KEM NEON NTT Optimization | 2026-02-27 |
+| 161 | P7 | Perf | BigNum CIOS Montgomery + Pre-allocated Exponentiation | 2026-02-27 |
 | 162 | P8 | Perf | SM4 T-table Lookup Optimization | 2026-02-27 |
 | 163 | P9 | Perf | ML-DSA NEON NTT Vectorization | 2026-02-27 |
 | 164 | P10 | Perf | SM2 Specialized Field Arithmetic | 2026-02-27 |
-| 165 | P11 | Perf | SHA-512 ARMv8.2 Hardware Acceleration | — |
-| 166 | P12 | Perf | Ed25519 Precomputed Base Table | — |
+| 165 | P11 | Perf | SHA-512 ARMv8.2 Hardware Acceleration | 2026-02-27 |
+| 166 | P12 | Perf | Ed25519 Precomputed Base Table | 2026-02-27 |
 
 ---
 
