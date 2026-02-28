@@ -3372,3 +3372,12 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - 3 seed allocations in `derive_master_secret`, `derive_key_block`, `derive_tlcp_key_block` replaced with stack arrays
 - All 51 key_schedule tests pass
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+## Phase P43 — ML-DSA Hint Encoding Stack Array (2026-03-01)
+
+**Prompt**: Replace `vec![0u8; omega+k]` in `encode_sig` with `[0u8; 96]` stack array.
+
+**Result**:
+- `encode_sig`: heap alloc → stack `[0u8; 96]` (max 88 bytes for ML-DSA-87)
+- All 36 ML-DSA tests pass
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings

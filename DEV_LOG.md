@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P42 (42 phases)
+- Performance: P1–P43 (43 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -208,6 +208,7 @@ Category summary:
 | 196 | P40 | Perf | HMAC Hash Stack Return | 2026-03-01 |
 | 197 | P41 | Perf | RSA OAEP/PSS In-Place XOR | 2026-03-01 |
 | 198 | P42 | Perf | TLS 1.2 Key Schedule Seed Stack Arrays | 2026-03-01 |
+| 199 | P43 | Perf | ML-DSA Hint Encoding Stack Array | 2026-03-01 |
 
 ---
 
@@ -11300,6 +11301,25 @@ Replaced `Vec::with_capacity(64)` seed allocations in TLS 1.2 key schedule with 
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P42)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P43 — ML-DSA Hint Encoding Stack Array (2026-03-01)
+
+### Summary
+Replaced `vec![0u8; params.omega + params.k]` in `encode_sig()` with `[0u8; 96]` stack array. The maximum hint encoding size is 88 bytes (ML-DSA-87: omega=75 + k=8 + rounding). This eliminates a heap allocation on every ML-DSA sign operation.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/mldsa/mod.rs` | `encode_sig`: `vec![0u8; omega+k]` → `[0u8; 96]` with `debug_assert!(hint_len <= 96)`, `extend_from_slice(&hint_bytes[..hint_len])` |
+
+### Test Results
+- All 36 ML-DSA tests pass
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P43)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

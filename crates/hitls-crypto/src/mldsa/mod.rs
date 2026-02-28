@@ -181,8 +181,10 @@ fn encode_sig(c_tilde: &[u8], z: &[Poly], h: &[Vec<bool>], params: &MlDsaParams)
     for poly in z {
         sig.extend_from_slice(&pack_z(poly, params.gamma1));
     }
-    // Encode hints: omega + k bytes
-    let mut hint_bytes = vec![0u8; params.omega + params.k];
+    // Encode hints: omega + k bytes (max 88 for ML-DSA-87)
+    let hint_len = params.omega + params.k;
+    let mut hint_bytes = [0u8; 96];
+    debug_assert!(hint_len <= 96);
     let mut idx = 0;
     for (i, h_poly) in h.iter().enumerate() {
         for (j, &hint) in h_poly.iter().enumerate() {
@@ -193,7 +195,7 @@ fn encode_sig(c_tilde: &[u8], z: &[Poly], h: &[Vec<bool>], params: &MlDsaParams)
         }
         hint_bytes[params.omega + i] = idx as u8;
     }
-    sig.extend_from_slice(&hint_bytes);
+    sig.extend_from_slice(&hint_bytes[..hint_len]);
     let _ = z_bytes;
     sig
 }
