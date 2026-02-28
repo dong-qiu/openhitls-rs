@@ -3363,3 +3363,12 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - PSS verify: `masked_db.to_vec()` + in-place XOR instead of collecting
 - All 49 RSA tests pass
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+## Phase P42 — TLS 1.2 Key Schedule Seed Stack Arrays (2026-03-01)
+
+**Prompt**: Replace `Vec::with_capacity(64)` seed allocations with `[0u8; 64]` stack arrays in TLS 1.2 key schedule.
+
+**Result**:
+- 3 seed allocations in `derive_master_secret`, `derive_key_block`, `derive_tlcp_key_block` replaced with stack arrays
+- All 51 key_schedule tests pass
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings

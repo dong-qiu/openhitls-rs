@@ -45,9 +45,9 @@ pub fn derive_master_secret(
     client_random: &[u8; 32],
     server_random: &[u8; 32],
 ) -> Result<Vec<u8>, TlsError> {
-    let mut seed = Vec::with_capacity(64);
-    seed.extend_from_slice(client_random);
-    seed.extend_from_slice(server_random);
+    let mut seed = [0u8; 64];
+    seed[..32].copy_from_slice(client_random);
+    seed[32..].copy_from_slice(server_random);
     prf(alg, pre_master_secret, "master secret", &seed, 48)
 }
 
@@ -95,9 +95,9 @@ pub fn derive_key_block(
     params: &Tls12CipherSuiteParams,
 ) -> Result<Tls12KeyBlock, TlsError> {
     // Note: key expansion seed is server_random + client_random (reversed from master_secret)
-    let mut seed = Vec::with_capacity(64);
-    seed.extend_from_slice(server_random);
-    seed.extend_from_slice(client_random);
+    let mut seed = [0u8; 64];
+    seed[..32].copy_from_slice(server_random);
+    seed[32..].copy_from_slice(client_random);
 
     let total_len = params.key_block_len();
     let key_block = prf(alg, master_secret, "key expansion", &seed, total_len)?;
@@ -186,9 +186,9 @@ pub fn derive_tlcp_key_block(
     client_random: &[u8; 32],
     params: &crate::crypt::TlcpCipherSuiteParams,
 ) -> Result<TlcpKeyBlock, TlsError> {
-    let mut seed = Vec::with_capacity(64);
-    seed.extend_from_slice(server_random);
-    seed.extend_from_slice(client_random);
+    let mut seed = [0u8; 64];
+    seed[..32].copy_from_slice(server_random);
+    seed[32..].copy_from_slice(client_random);
 
     let total_len = params.key_block_len();
     let key_block = prf(alg, master_secret, "key expansion", &seed, total_len)?;

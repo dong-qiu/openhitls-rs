@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P41 (41 phases)
+- Performance: P1–P42 (42 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -207,6 +207,7 @@ Category summary:
 | 195 | P39 | Perf | CBC Decrypt Truncate-in-Place | 2026-03-01 |
 | 196 | P40 | Perf | HMAC Hash Stack Return | 2026-03-01 |
 | 197 | P41 | Perf | RSA OAEP/PSS In-Place XOR | 2026-03-01 |
+| 198 | P42 | Perf | TLS 1.2 Key Schedule Seed Stack Arrays | 2026-03-01 |
 
 ---
 
@@ -11278,6 +11279,27 @@ Replaced `.map(|(a, b)| a ^ b).collect()` XOR-with-allocation patterns in RSA OA
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P41)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P42 — TLS 1.2 Key Schedule Seed Stack Arrays (2026-03-01)
+
+### Summary
+Replaced `Vec::with_capacity(64)` seed allocations in TLS 1.2 key schedule with `[0u8; 64]` stack arrays. The seed is always exactly 64 bytes (two 32-byte randoms). Eliminates 3 heap allocations per TLS 1.2/TLCP handshake (master secret derivation + key expansion).
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-tls/src/crypt/key_schedule12.rs` | `derive_master_secret`: `Vec::with_capacity(64)` → `[0u8; 64]` with `copy_from_slice` |
+| `crates/hitls-tls/src/crypt/key_schedule12.rs` | `derive_key_block`: same pattern |
+| `crates/hitls-tls/src/crypt/key_schedule12.rs` | `derive_tlcp_key_block`: same pattern |
+
+### Test Results
+- All 51 key_schedule tests pass
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P42)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
