@@ -3239,3 +3239,16 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - **P30**: HKDF `expand()`: `t` Vec → `[u8; 32]` stack, single HMAC with `reset()` (N→1 instances), default salt stack array
 - **P31**: TLS PRF: label_seed Vec → `[u8; 128]` stack, ai_seed Vec → `[u8; 192]` stack, eliminated per-iteration concatenation allocation
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P32 — TLS HKDF Stack Arrays (2026-03-01)
+
+**Prompt**: Replace all Vec allocations in TLS 1.3 HKDF with stack arrays.
+
+**Result**:
+- `hmac_hash`: 6 Vec → 3 stack arrays (`[u8; 128]` key_block, `[u8; 128]` xor_key, `[u8; 64]` inner_hash)
+- `hkdf_extract`: empty salt Vec → `[u8; 64]` stack, eliminated `salt.to_vec()`
+- `hkdf_expand`: ipad/opad Vec collect → `[u8; 128]` stack XOR loops, t_prev/inner_hash Vec → `[u8; 64]` stack
+- Per HMAC call: ~6 Vec allocations eliminated. Per expand(N iterations): ~4N Vec allocations eliminated.
+- 3,484 tests (unchanged), 21 ignored, 0 clippy warnings

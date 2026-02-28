@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I81 (81 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P31 (31 phases)
+- Performance: P1–P32 (32 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -197,6 +197,7 @@ Category summary:
 | 185 | P29 | Perf | PBKDF2 Inner Loop Stack Arrays | 2026-03-01 |
 | 186 | P30 | Perf | HKDF Expand Stack Arrays + HMAC Reuse | 2026-03-01 |
 | 187 | P31 | Perf | TLS PRF Stack Arrays | 2026-03-01 |
+| 188 | P32 | Perf | TLS HKDF Stack Arrays | 2026-03-01 |
 
 ---
 
@@ -11026,6 +11027,40 @@ Replaced Vec concatenation buffers in TLS 1.2 PRF with stack arrays. `label_seed
 - 3,484 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P30–P31)
+- `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P32 — TLS HKDF Stack Arrays (2026-03-01)
+
+### Summary
+Replaced all Vec allocations in TLS 1.3 HKDF operations (`hmac_hash`, `hkdf_extract`, `hkdf_expand`) with stack arrays. Key blocks `[u8; 128]`, hash outputs `[u8; 64]`, ipad/opad keys `[u8; 128]`, and per-iteration buffers all moved to stack. Critical for TLS 1.3 handshake performance where `hkdf_expand` is called dozens of times.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-tls/src/crypt/hkdf.rs` | `prepare_key_block`: returns `[u8; 128]` stack instead of `Vec` |
+| `crates/hitls-tls/src/crypt/hkdf.rs` | `hmac_hash`: ipad/opad Vec collect → `[u8; 128]` XOR loop, inner_hash Vec → `[u8; 64]` |
+| `crates/hitls-tls/src/crypt/hkdf.rs` | `hkdf_extract`: empty salt Vec → `[u8; 64]` stack, eliminated `salt.to_vec()` |
+| `crates/hitls-tls/src/crypt/hkdf.rs` | `hkdf_expand`: ipad/opad Vec → stack, t_prev/inner_hash/out Vec → `[u8; 64]` stack |
+
+### Allocation Savings Per HMAC Call
+| Buffer | Before | After |
+|--------|--------|-------|
+| key_block | `vec![0u8; block_size]` | `[0u8; 128]` stack |
+| hashed key | `vec![0u8; output_size]` | `[0u8; 64]` stack |
+| ipad_key | `.map().collect()` Vec | `[0u8; 128]` XOR loop |
+| opad_key | `.map().collect()` Vec | `[0u8; 128]` XOR loop |
+| inner_hash | `vec![0u8; output_size]` | `[0u8; 64]` stack |
+| output | `vec![0u8; output_size]` | kept as Vec (returned) |
+
+### Test Results
+- All 23 TLS HKDF tests pass (SHA-256, SHA-384, SM3)
+- 3,484 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P32)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

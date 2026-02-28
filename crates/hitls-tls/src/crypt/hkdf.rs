@@ -7,18 +7,29 @@ use hitls_crypto::provider::Digest;
 use hitls_types::TlsError;
 use zeroize::Zeroize;
 
+/// Maximum block size of any TLS hash (SHA-512 = 128).
+const MAX_BLOCK_SIZE: usize = 128;
+/// Maximum output size of any TLS hash (SHA-512 = 64).
+const MAX_OUTPUT_SIZE: usize = 64;
+
 /// Prepare the HMAC key block: hash if longer than block_size, else zero-pad.
-fn prepare_key_block(alg: HashAlgId, key: &[u8]) -> Result<(Vec<u8>, usize, usize), TlsError> {
+/// Returns stack-allocated key_block, block_size, and output_size.
+fn prepare_key_block(
+    alg: HashAlgId,
+    key: &[u8],
+) -> Result<([u8; MAX_BLOCK_SIZE], usize, usize), TlsError> {
     let block_size = DigestVariant::new(alg).block_size();
     let output_size = DigestVariant::output_size_for(alg);
 
-    let mut key_block = vec![0u8; block_size];
+    let mut key_block = [0u8; MAX_BLOCK_SIZE];
     if key.len() > block_size {
         let mut hasher = DigestVariant::new(alg);
         hasher.update(key).map_err(TlsError::CryptoError)?;
-        let mut hashed = vec![0u8; output_size];
-        hasher.finish(&mut hashed).map_err(TlsError::CryptoError)?;
-        key_block[..output_size].copy_from_slice(&hashed);
+        let mut hashed = [0u8; MAX_OUTPUT_SIZE];
+        hasher
+            .finish(&mut hashed[..output_size])
+            .map_err(TlsError::CryptoError)?;
+        key_block[..output_size].copy_from_slice(&hashed[..output_size]);
         hashed.zeroize();
     } else {
         key_block[..key.len()].copy_from_slice(key);
@@ -26,29 +37,41 @@ fn prepare_key_block(alg: HashAlgId, key: &[u8]) -> Result<(Vec<u8>, usize, usiz
     Ok((key_block, block_size, output_size))
 }
 
-/// One-shot HMAC: `HMAC(key, data)`.
+/// One-shot HMAC: `HMAC(key, data)`. All buffers are stack-allocated.
 pub(crate) fn hmac_hash(alg: HashAlgId, key: &[u8], data: &[u8]) -> Result<Vec<u8>, TlsError> {
-    let (mut key_block, _block_size, output_size) = prepare_key_block(alg, key)?;
+    let (mut key_block, block_size, output_size) = prepare_key_block(alg, key)?;
 
-    // Inner: H((K XOR ipad) || data)
+    // Inner: H((K XOR ipad) || data) — XOR in-place into stack buffer
     let mut inner = DigestVariant::new(alg);
-    let ipad_key: Vec<u8> = key_block.iter().map(|b| b ^ 0x36).collect();
-    inner.update(&ipad_key).map_err(TlsError::CryptoError)?;
-    inner.update(data).map_err(TlsError::CryptoError)?;
-    let mut inner_hash = vec![0u8; output_size];
+    let mut xor_key = [0u8; MAX_BLOCK_SIZE];
+    for i in 0..block_size {
+        xor_key[i] = key_block[i] ^ 0x36;
+    }
     inner
-        .finish(&mut inner_hash)
+        .update(&xor_key[..block_size])
+        .map_err(TlsError::CryptoError)?;
+    inner.update(data).map_err(TlsError::CryptoError)?;
+    let mut inner_hash = [0u8; MAX_OUTPUT_SIZE];
+    inner
+        .finish(&mut inner_hash[..output_size])
         .map_err(TlsError::CryptoError)?;
 
     // Outer: H((K XOR opad) || inner_hash)
     let mut outer = DigestVariant::new(alg);
-    let opad_key: Vec<u8> = key_block.iter().map(|b| b ^ 0x5c).collect();
-    outer.update(&opad_key).map_err(TlsError::CryptoError)?;
-    outer.update(&inner_hash).map_err(TlsError::CryptoError)?;
+    for i in 0..block_size {
+        xor_key[i] = key_block[i] ^ 0x5c;
+    }
+    outer
+        .update(&xor_key[..block_size])
+        .map_err(TlsError::CryptoError)?;
+    outer
+        .update(&inner_hash[..output_size])
+        .map_err(TlsError::CryptoError)?;
     let mut out = vec![0u8; output_size];
     outer.finish(&mut out).map_err(TlsError::CryptoError)?;
 
     key_block.zeroize();
+    xor_key.zeroize();
     inner_hash.zeroize();
     Ok(out)
 }
@@ -57,13 +80,13 @@ pub(crate) fn hmac_hash(alg: HashAlgId, key: &[u8], data: &[u8]) -> Result<Vec<u
 ///
 /// This is `HMAC-Hash(salt, IKM)`. If salt is empty, uses `hash_len` zero bytes.
 pub fn hkdf_extract(alg: HashAlgId, salt: &[u8], ikm: &[u8]) -> Result<Vec<u8>, TlsError> {
-    let effective_salt = if salt.is_empty() {
+    if salt.is_empty() {
+        let zero_salt = [0u8; MAX_OUTPUT_SIZE];
         let hash_len = DigestVariant::output_size_for(alg);
-        vec![0u8; hash_len]
+        hmac_hash(alg, &zero_salt[..hash_len], ikm)
     } else {
-        salt.to_vec()
-    };
-    hmac_hash(alg, &effective_salt, ikm)
+        hmac_hash(alg, salt, ikm)
+    }
 }
 
 /// HKDF-Expand(PRK, info, length) -> OKM.
@@ -75,7 +98,7 @@ pub fn hkdf_expand(
     info: &[u8],
     length: usize,
 ) -> Result<Vec<u8>, TlsError> {
-    let (mut key_block, _block_size, output_size) = prepare_key_block(alg, prk)?;
+    let (mut key_block, block_size, output_size) = prepare_key_block(alg, prk)?;
 
     let n = length.div_ceil(output_size);
     if n > 255 {
@@ -84,37 +107,57 @@ pub fn hkdf_expand(
         ));
     }
 
-    let ipad_key: Vec<u8> = key_block.iter().map(|b| b ^ 0x36).collect();
-    let opad_key: Vec<u8> = key_block.iter().map(|b| b ^ 0x5c).collect();
+    // Pre-compute ipad/opad keys once (stack arrays)
+    let mut ipad_key = [0u8; MAX_BLOCK_SIZE];
+    let mut opad_key = [0u8; MAX_BLOCK_SIZE];
+    for i in 0..block_size {
+        ipad_key[i] = key_block[i] ^ 0x36;
+        opad_key[i] = key_block[i] ^ 0x5c;
+    }
 
     let mut okm = Vec::with_capacity(length);
-    let mut t_prev: Vec<u8> = Vec::new();
+    let mut t_prev = [0u8; MAX_OUTPUT_SIZE]; // Stack buffer for T(i-1)
+    let mut t_len = 0usize; // 0 for first iteration
 
     for i in 1..=n {
         // Inner: H((K XOR ipad) || T(i-1) || info || [i])
         let mut inner = DigestVariant::new(alg);
-        inner.update(&ipad_key).map_err(TlsError::CryptoError)?;
-        inner.update(&t_prev).map_err(TlsError::CryptoError)?;
+        inner
+            .update(&ipad_key[..block_size])
+            .map_err(TlsError::CryptoError)?;
+        if t_len > 0 {
+            inner
+                .update(&t_prev[..t_len])
+                .map_err(TlsError::CryptoError)?;
+        }
         inner.update(info).map_err(TlsError::CryptoError)?;
         inner.update(&[i as u8]).map_err(TlsError::CryptoError)?;
-        let mut inner_hash = vec![0u8; output_size];
+        let mut inner_hash = [0u8; MAX_OUTPUT_SIZE];
         inner
-            .finish(&mut inner_hash)
+            .finish(&mut inner_hash[..output_size])
             .map_err(TlsError::CryptoError)?;
 
         // Outer: H((K XOR opad) || inner_hash)
         let mut outer = DigestVariant::new(alg);
-        outer.update(&opad_key).map_err(TlsError::CryptoError)?;
-        outer.update(&inner_hash).map_err(TlsError::CryptoError)?;
-        let mut out = vec![0u8; output_size];
-        outer.finish(&mut out).map_err(TlsError::CryptoError)?;
+        outer
+            .update(&opad_key[..block_size])
+            .map_err(TlsError::CryptoError)?;
+        outer
+            .update(&inner_hash[..output_size])
+            .map_err(TlsError::CryptoError)?;
+        outer
+            .finish(&mut t_prev[..output_size])
+            .map_err(TlsError::CryptoError)?;
+        t_len = output_size;
 
         inner_hash.zeroize();
-        t_prev = out.clone();
-        okm.extend_from_slice(&out);
+        okm.extend_from_slice(&t_prev[..output_size]);
     }
 
     key_block.zeroize();
+    ipad_key.zeroize();
+    opad_key.zeroize();
+    t_prev.zeroize();
     okm.truncate(length);
     Ok(okm)
 }
@@ -130,7 +173,8 @@ pub fn hkdf_expand(
 /// ```
 fn encode_hkdf_label(length: u16, label: &[u8], context: &[u8]) -> Vec<u8> {
     let full_label_len = 6 + label.len(); // "tls13 " prefix = 6 bytes
-    let mut buf = Vec::with_capacity(2 + 1 + full_label_len + 1 + context.len());
+    let total = 2 + 1 + full_label_len + 1 + context.len();
+    let mut buf = Vec::with_capacity(total);
     buf.extend_from_slice(&length.to_be_bytes());
     buf.push(full_label_len as u8);
     buf.extend_from_slice(b"tls13 ");
