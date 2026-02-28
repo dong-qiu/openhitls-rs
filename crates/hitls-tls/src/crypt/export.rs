@@ -8,6 +8,9 @@ use super::{DigestVariant, HashAlgId};
 use hitls_crypto::provider::Digest;
 use hitls_types::TlsError;
 
+/// Maximum hash output size (SHA-384 = 48, SHA-512 = 64) for stack allocation.
+const MAX_OUTPUT_SIZE: usize = 64;
+
 /// Reserved labels that MUST NOT be used with key export (RFC 5705 §4).
 const RESERVED_LABELS: &[&str] = &[
     "client finished",
@@ -50,23 +53,23 @@ pub fn tls13_export_keying_material(
     // Derive-Secret uses Hash("") as the transcript_hash
     let mut empty_hasher = DigestVariant::new(alg);
     let hash_len = empty_hasher.output_size();
-    let mut empty_hash = vec![0u8; hash_len];
+    let mut empty_hash = [0u8; MAX_OUTPUT_SIZE];
     empty_hasher
-        .finish(&mut empty_hash)
+        .finish(&mut empty_hash[..hash_len])
         .map_err(TlsError::CryptoError)?;
 
-    let tmp = derive_secret(alg, exporter_master_secret, label, &empty_hash)?;
+    let tmp = derive_secret(alg, exporter_master_secret, label, &empty_hash[..hash_len])?;
 
     // Step 2: out = HKDF-Expand-Label(tmp, "exporter", Hash(context), length)
     let ctx = context.unwrap_or(b"");
     let mut ctx_hasher = DigestVariant::new(alg);
     ctx_hasher.update(ctx).map_err(TlsError::CryptoError)?;
-    let mut ctx_hash = vec![0u8; hash_len];
+    let mut ctx_hash = [0u8; MAX_OUTPUT_SIZE];
     ctx_hasher
-        .finish(&mut ctx_hash)
+        .finish(&mut ctx_hash[..hash_len])
         .map_err(TlsError::CryptoError)?;
 
-    hkdf_expand_label(alg, &tmp, b"exporter", &ctx_hash, length)
+    hkdf_expand_label(alg, &tmp, b"exporter", &ctx_hash[..hash_len], length)
 }
 
 /// TLS 1.3 early key material export (RFC 8446 §7.5, for 0-RTT context).
