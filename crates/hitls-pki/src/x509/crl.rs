@@ -242,6 +242,16 @@ impl CertificateRevocationList {
         )
     }
 
+    /// Return the DER-encoded CRL bytes.
+    pub fn to_der(&self) -> Vec<u8> {
+        self.raw.clone()
+    }
+
+    /// Return the PEM-encoded CRL string (label "X509 CRL").
+    pub fn to_pem(&self) -> String {
+        hitls_utils::pem::encode("X509 CRL", &self.raw)
+    }
+
     /// Get the CRL number extension value, if present.
     pub fn crl_number(&self) -> Option<Vec<u8>> {
         let crl_num_oid = known::crl_number().to_der_value();

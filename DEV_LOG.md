@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I81 (81 phases)
+- Implementation: I1–I82 (82 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P44 (44 phases)
@@ -210,6 +210,7 @@ Category summary:
 | 198 | P42 | Perf | TLS 1.2 Key Schedule Seed Stack Arrays | 2026-03-01 |
 | 199 | P43 | Perf | ML-DSA Hint Encoding Stack Array | 2026-03-01 |
 | 200 | P44 | Perf | SM2/SM9 In-Place XOR | 2026-03-01 |
+| 201 | I82 | Impl | CRL Builder (CrlBuilder + RevokedCertBuilder) | 2026-03-01 |
 
 ---
 
@@ -11342,5 +11343,61 @@ Replaced XOR-with-allocation patterns in SM2 encrypt/decrypt and SM9 encrypt/dec
 
 ### Build Status (Post P44)
 - `cargo test --workspace --all-features`: 3,484 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase I82 — CRL Builder (CrlBuilder + RevokedCertBuilder) (2026-03-01)
+
+### Summary
+Added CRL generation capability (CrlBuilder + RevokedCertBuilder) to hitls-pki, closing the last functional gap vs the C reference. Supports auto v1/v2 detection, CRL Number, Authority Key Identifier, CRLReason, InvalidityDate extensions, and RSA/ECDSA signing. Added `to_der()`/`to_pem()` output methods on `CertificateRevocationList`.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-pki/src/x509/builder.rs` | Added `CrlBuilder` + `RevokedCertBuilder` structs with builder pattern (~160 lines impl + ~170 lines tests) |
+| `crates/hitls-pki/src/x509/crl.rs` | Added `to_der()` and `to_pem()` output methods on `CertificateRevocationList` |
+| `crates/hitls-pki/src/x509/mod.rs` | Re-exported `CrlBuilder`, `RevokedCertBuilder` |
+
+### New Public API
+
+**`RevokedCertBuilder`**:
+- `new(serial_number, revocation_date)` — create entry
+- `reason(RevocationReason)` — CRLReason ext (OID 2.5.29.21)
+- `invalidity_date(i64)` — InvalidityDate ext (OID 2.5.29.24)
+- `add_extension(oid, critical, value)` — raw extension
+
+**`CrlBuilder`**:
+- `new(issuer, this_update)` — create builder
+- `next_update(i64)` — set nextUpdate
+- `add_revoked(RevokedCertBuilder)` — add revoked entry
+- `add_crl_number(&[u8])` — CRL Number ext (OID 2.5.29.20)
+- `add_authority_key_identifier(&[u8])` — AKI ext (OID 2.5.29.35)
+- `add_extension(oid, critical, value)` — raw extension
+- `build(SigningKey) -> Result<CertificateRevocationList>` — sign and build
+- `build_pem(SigningKey) -> Result<String>` — build as PEM
+
+**`CertificateRevocationList`**:
+- `to_der() -> Vec<u8>` — DER output
+- `to_pem() -> String` — PEM output (label "X509 CRL")
+
+### Tests Added: 10
+| Test | Description |
+|------|-------------|
+| `test_crl_builder_v1_empty` | No revoked certs, no extensions → v1 |
+| `test_crl_builder_v2_with_extensions` | CRL number + AKI → auto v2 |
+| `test_crl_builder_with_revoked_certs` | Revoked entries survive roundtrip |
+| `test_crl_builder_roundtrip_verify` | Build → parse → verify signature |
+| `test_crl_builder_roundtrip_pem` | build_pem → from_pem roundtrip |
+| `test_crl_builder_reason_roundtrip` | Reason code survives parse |
+| `test_crl_builder_invalidity_date_roundtrip` | Invalidity date survives parse |
+| `test_crl_builder_auto_upgrade_v2` | Entry extensions → auto v2 |
+| `test_crl_builder_to_der_to_pem` | Output methods |
+| `test_crl_builder_ecdsa_signing` | ECDSA-signed CRL |
+
+### Build Status (Post I82)
+- `cargo test --workspace --all-features`: 3,534 passed, 0 failed, 21 ignored
+- `cargo test -p hitls-pki --all-features`: 405 passed (+10)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

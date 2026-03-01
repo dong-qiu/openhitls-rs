@@ -3392,3 +3392,17 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - SM9 encrypt/decrypt: `k1.to_vec()` + in-place XOR instead of `.collect()`
 - All 61 SM2 + 89 SM9 tests pass
 - 3,484 tests (unchanged), 21 ignored, 0 clippy warnings
+
+---
+
+## Phase I82 — CRL Builder (2026-03-01)
+
+**Prompt**: Implement the CRL Builder plan (Phase I82): CrlBuilder + RevokedCertBuilder in builder.rs, to_der/to_pem on CertificateRevocationList in crl.rs, re-export from mod.rs, ~10 tests.
+
+**Result**:
+- Added `CrlBuilder` and `RevokedCertBuilder` to `crates/hitls-pki/src/x509/builder.rs` with builder pattern
+- Auto v1/v2 detection based on extensions, CRL Number, AKI, CRLReason, InvalidityDate support
+- Added `to_der()` / `to_pem()` output methods on `CertificateRevocationList`
+- Re-exported new types from `x509/mod.rs`
+- 10 new tests: v1 empty, v2 extensions, revoked certs, roundtrip verify, roundtrip PEM, reason code, invalidity date, auto v2 upgrade, DER/PEM output, ECDSA signing
+- hitls-pki: 395→405 tests, workspace: 3,534 tests, 21 ignored, 0 clippy warnings

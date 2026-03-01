@@ -532,10 +532,414 @@ impl Default for CertificateBuilder {
     }
 }
 
+// ---------------------------------------------------------------------------
+// CRL Builder
+// ---------------------------------------------------------------------------
+
+use super::crl::{CertificateRevocationList, RevocationReason};
+
+/// Builder for a single revoked-certificate entry within a CRL.
+pub struct RevokedCertBuilder {
+    serial_number: Vec<u8>,
+    revocation_date: i64,
+    extensions: Vec<X509Extension>,
+}
+
+impl RevokedCertBuilder {
+    /// Create a new revoked-certificate entry.
+    ///
+    /// `serial_number` is the DER-encoded serial (big-endian, no leading zeros
+    /// except the sign byte if needed). `revocation_date` is a UNIX timestamp.
+    pub fn new(serial_number: &[u8], revocation_date: i64) -> Self {
+        Self {
+            serial_number: serial_number.to_vec(),
+            revocation_date,
+            extensions: Vec::new(),
+        }
+    }
+
+    /// Set the CRLReason extension (OID 2.5.29.21).
+    pub fn reason(self, reason: RevocationReason) -> Self {
+        let mut enc = Encoder::new();
+        enc.write_enumerated(reason as u8);
+        let value = enc.finish();
+        self.add_extension(known::crl_reason().to_der_value(), false, value)
+    }
+
+    /// Set the InvalidityDate extension (OID 2.5.29.24).
+    pub fn invalidity_date(self, date: i64) -> Self {
+        let mut enc = Encoder::new();
+        enc.write_generalized_time(date);
+        let value = enc.finish();
+        self.add_extension(known::invalidity_date().to_der_value(), false, value)
+    }
+
+    /// Add a raw extension to this revoked-certificate entry.
+    pub fn add_extension(mut self, oid: Vec<u8>, critical: bool, value: Vec<u8>) -> Self {
+        self.extensions.push(X509Extension {
+            oid,
+            critical,
+            value,
+        });
+        self
+    }
+
+    /// Encode the entry to DER (SEQUENCE { serial INTEGER, time Time, exts? }).
+    fn encode(&self) -> Vec<u8> {
+        let mut inner = Encoder::new();
+        inner.write_integer(&self.serial_number);
+        inner.write_time(self.revocation_date);
+        if !self.extensions.is_empty() {
+            let ext_der = encode_extensions(&self.extensions);
+            inner.write_raw(&ext_der);
+        }
+        let mut seq = Encoder::new();
+        seq.write_sequence(&inner.finish());
+        seq.finish()
+    }
+
+    /// Whether this entry carries any extensions.
+    fn has_extensions(&self) -> bool {
+        !self.extensions.is_empty()
+    }
+}
+
+/// Builder for X.509 Certificate Revocation Lists (RFC 5280 §5).
+pub struct CrlBuilder {
+    issuer: DistinguishedName,
+    this_update: i64,
+    next_update: Option<i64>,
+    revoked_certs: Vec<RevokedCertBuilder>,
+    extensions: Vec<X509Extension>,
+}
+
+impl CrlBuilder {
+    /// Create a new CRL builder.
+    pub fn new(issuer: DistinguishedName, this_update: i64) -> Self {
+        Self {
+            issuer,
+            this_update,
+            next_update: None,
+            revoked_certs: Vec::new(),
+            extensions: Vec::new(),
+        }
+    }
+
+    /// Set the nextUpdate time.
+    pub fn next_update(mut self, time: i64) -> Self {
+        self.next_update = Some(time);
+        self
+    }
+
+    /// Add a revoked certificate entry.
+    pub fn add_revoked(mut self, entry: RevokedCertBuilder) -> Self {
+        self.revoked_certs.push(entry);
+        self
+    }
+
+    /// Add a CRL Number extension (OID 2.5.29.20, non-critical).
+    pub fn add_crl_number(self, number: &[u8]) -> Self {
+        let mut enc = Encoder::new();
+        enc.write_integer(number);
+        let value = enc.finish();
+        self.add_extension(known::crl_number().to_der_value(), false, value)
+    }
+
+    /// Add an Authority Key Identifier extension (OID 2.5.29.35, non-critical).
+    pub fn add_authority_key_identifier(self, key_id: &[u8]) -> Self {
+        let mut inner = Encoder::new();
+        inner.write_context_specific(0, false, key_id);
+        let mut seq = Encoder::new();
+        seq.write_sequence(&inner.finish());
+        let value = seq.finish();
+        self.add_extension(
+            known::authority_key_identifier().to_der_value(),
+            false,
+            value,
+        )
+    }
+
+    /// Add a raw extension to the CRL.
+    pub fn add_extension(mut self, oid: Vec<u8>, critical: bool, value: Vec<u8>) -> Self {
+        self.extensions.push(X509Extension {
+            oid,
+            critical,
+            value,
+        });
+        self
+    }
+
+    /// Build the CRL, signing with the given key.
+    pub fn build(self, signing_key: &SigningKey) -> Result<CertificateRevocationList, PkiError> {
+        let sig_alg_oid = signing_key.algorithm_oid();
+        let sig_alg_params = signing_key.algorithm_params();
+
+        // Determine version: v2 (1) if any CRL-level or entry-level extensions
+        let has_entry_exts = self.revoked_certs.iter().any(|e| e.has_extensions());
+        let is_v2 = !self.extensions.is_empty() || has_entry_exts;
+
+        // ---- TBSCertList (RFC 5280 §5.1) ----
+        let mut tbs = Encoder::new();
+
+        // version INTEGER OPTIONAL (v2 = 1)
+        if is_v2 {
+            tbs.write_integer(&[0x01]);
+        }
+
+        // signature AlgorithmIdentifier
+        let alg_id = encode_algorithm_identifier(&sig_alg_oid, sig_alg_params.as_deref());
+        tbs.write_raw(&alg_id);
+
+        // issuer Name
+        tbs.write_raw(&encode_distinguished_name(&self.issuer));
+
+        // thisUpdate Time
+        tbs.write_time(self.this_update);
+
+        // nextUpdate Time OPTIONAL
+        if let Some(nu) = self.next_update {
+            tbs.write_time(nu);
+        }
+
+        // revokedCertificates SEQUENCE OF OPTIONAL
+        if !self.revoked_certs.is_empty() {
+            let mut entries = Encoder::new();
+            for entry in &self.revoked_certs {
+                entries.write_raw(&entry.encode());
+            }
+            let mut seq = Encoder::new();
+            seq.write_sequence(&entries.finish());
+            tbs.write_raw(&seq.finish());
+        }
+
+        // crlExtensions [0] EXPLICIT Extensions OPTIONAL
+        if !self.extensions.is_empty() {
+            let ext_der = encode_extensions(&self.extensions);
+            tbs.write_context_specific(0, true, &ext_der);
+        }
+
+        let mut tbs_seq = Encoder::new();
+        tbs_seq.write_sequence(&tbs.finish());
+        let tbs_raw = tbs_seq.finish();
+
+        // Sign the TBS
+        let signature = signing_key.sign(&tbs_raw)?;
+
+        // Build outer CertificateList SEQUENCE
+        let mut outer = Encoder::new();
+        outer.write_raw(&tbs_raw);
+        outer.write_raw(&encode_algorithm_identifier(
+            &sig_alg_oid,
+            sig_alg_params.as_deref(),
+        ));
+        outer.write_bit_string(0, &signature);
+        let mut result = Encoder::new();
+        result.write_sequence(&outer.finish());
+        let raw = result.finish();
+
+        // Parse back to fill all fields consistently
+        CertificateRevocationList::from_der(&raw)
+    }
+
+    /// Build the CRL and encode as PEM string.
+    pub fn build_pem(self, signing_key: &SigningKey) -> Result<String, PkiError> {
+        let crl = self.build(signing_key)?;
+        Ok(crl.to_pem())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use hitls_utils::asn1::Decoder;
+
+    // -----------------------------------------------------------------------
+    // Helper: create a self-signed CA + signing key for CRL tests (RSA)
+    // -----------------------------------------------------------------------
+    fn make_rsa_ca() -> (Certificate, SigningKey) {
+        let rsa_key = hitls_crypto::rsa::RsaPrivateKey::generate(2048).unwrap();
+        let sk = SigningKey::Rsa(rsa_key);
+        let dn = DistinguishedName {
+            entries: vec![
+                ("C".into(), "CN".into()),
+                ("O".into(), "Test CA".into()),
+                ("CN".into(), "CRL Test CA".into()),
+            ],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+        (cert, sk)
+    }
+
+    // -----------------------------------------------------------------------
+    // CRL Builder tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_crl_builder_v1_empty() {
+        let (cert, sk) = make_rsa_ca();
+        let crl = CrlBuilder::new(cert.issuer.clone(), 1_700_000_000)
+            .next_update(1_710_000_000)
+            .build(&sk)
+            .unwrap();
+        assert_eq!(crl.version, 1);
+        assert!(crl.revoked_certs.is_empty());
+        assert!(crl.extensions.is_empty());
+        assert!(crl.next_update.is_some());
+    }
+
+    #[test]
+    fn test_crl_builder_v2_with_extensions() {
+        let (cert, sk) = make_rsa_ca();
+        let crl = CrlBuilder::new(cert.issuer.clone(), 1_700_000_000)
+            .next_update(1_710_000_000)
+            .add_crl_number(&[0x01])
+            .add_authority_key_identifier(&[0xAA; 20])
+            .build(&sk)
+            .unwrap();
+        assert_eq!(crl.version, 2);
+        assert!(!crl.extensions.is_empty());
+        let crl_num = crl.crl_number().unwrap();
+        assert_eq!(crl_num, vec![0x01]);
+    }
+
+    #[test]
+    fn test_crl_builder_with_revoked_certs() {
+        let (cert, sk) = make_rsa_ca();
+        let entry1 = RevokedCertBuilder::new(&[0x01], 1_700_100_000);
+        let entry2 = RevokedCertBuilder::new(&[0x02], 1_700_200_000);
+        let crl = CrlBuilder::new(cert.issuer.clone(), 1_700_000_000)
+            .add_revoked(entry1)
+            .add_revoked(entry2)
+            .build(&sk)
+            .unwrap();
+        assert_eq!(crl.revoked_certs.len(), 2);
+        assert_eq!(crl.revoked_certs[0].serial_number, vec![0x01]);
+        assert_eq!(crl.revoked_certs[1].serial_number, vec![0x02]);
+    }
+
+    #[test]
+    fn test_crl_builder_roundtrip_verify() {
+        let (cert, sk) = make_rsa_ca();
+        let entry =
+            RevokedCertBuilder::new(&[0x42], 1_700_100_000).reason(RevocationReason::KeyCompromise);
+        let crl = CrlBuilder::new(cert.issuer.clone(), 1_700_000_000)
+            .next_update(1_710_000_000)
+            .add_crl_number(&[0x01])
+            .add_revoked(entry)
+            .build(&sk)
+            .unwrap();
+
+        // Parse again from DER
+        let crl2 = CertificateRevocationList::from_der(&crl.to_der()).unwrap();
+        assert_eq!(crl2.version, crl.version);
+        assert_eq!(crl2.revoked_certs.len(), 1);
+
+        // Verify signature
+        assert!(crl2.verify_signature(&cert).unwrap());
+    }
+
+    #[test]
+    fn test_crl_builder_roundtrip_pem() {
+        let (cert, sk) = make_rsa_ca();
+        let pem = CrlBuilder::new(cert.issuer.clone(), 1_700_000_000)
+            .next_update(1_710_000_000)
+            .build_pem(&sk)
+            .unwrap();
+        assert!(pem.contains("-----BEGIN X509 CRL-----"));
+        assert!(pem.contains("-----END X509 CRL-----"));
+
+        let crl = CertificateRevocationList::from_pem(&pem).unwrap();
+        assert!(crl.verify_signature(&cert).unwrap());
+    }
+
+    #[test]
+    fn test_crl_builder_reason_roundtrip() {
+        let (cert, sk) = make_rsa_ca();
+        let entry =
+            RevokedCertBuilder::new(&[0x10], 1_700_100_000).reason(RevocationReason::CaCompromise);
+        let crl = CrlBuilder::new(cert.issuer.clone(), 1_700_000_000)
+            .add_revoked(entry)
+            .build(&sk)
+            .unwrap();
+        assert_eq!(crl.revoked_certs.len(), 1);
+        assert_eq!(
+            crl.revoked_certs[0].reason,
+            Some(RevocationReason::CaCompromise)
+        );
+    }
+
+    #[test]
+    fn test_crl_builder_invalidity_date_roundtrip() {
+        let (cert, sk) = make_rsa_ca();
+        let inv_date = 1_699_000_000i64;
+        let entry = RevokedCertBuilder::new(&[0x20], 1_700_100_000).invalidity_date(inv_date);
+        let crl = CrlBuilder::new(cert.issuer.clone(), 1_700_000_000)
+            .add_revoked(entry)
+            .build(&sk)
+            .unwrap();
+        assert_eq!(crl.revoked_certs.len(), 1);
+        assert_eq!(crl.revoked_certs[0].invalidity_date, Some(inv_date));
+    }
+
+    #[test]
+    fn test_crl_builder_auto_upgrade_v2() {
+        let (cert, sk) = make_rsa_ca();
+        // Entry with extensions but no CRL-level extensions → should auto v2
+        let entry =
+            RevokedCertBuilder::new(&[0x30], 1_700_100_000).reason(RevocationReason::Superseded);
+        let crl = CrlBuilder::new(cert.issuer.clone(), 1_700_000_000)
+            .add_revoked(entry)
+            .build(&sk)
+            .unwrap();
+        assert_eq!(crl.version, 2);
+    }
+
+    #[test]
+    fn test_crl_builder_to_der_to_pem() {
+        let (cert, sk) = make_rsa_ca();
+        let crl = CrlBuilder::new(cert.issuer.clone(), 1_700_000_000)
+            .build(&sk)
+            .unwrap();
+
+        let der = crl.to_der();
+        assert!(!der.is_empty());
+        assert_eq!(der[0], 0x30); // SEQUENCE tag
+
+        let pem = crl.to_pem();
+        assert!(pem.contains("-----BEGIN X509 CRL-----"));
+        let crl2 = CertificateRevocationList::from_pem(&pem).unwrap();
+        assert_eq!(crl2.raw, der);
+    }
+
+    #[test]
+    fn test_crl_builder_ecdsa_signing() {
+        use hitls_types::EccCurveId;
+        let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let sk = SigningKey::Ecdsa {
+            curve_id: EccCurveId::NistP256,
+            key_pair: kp,
+        };
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "ECDSA CRL CA".into())],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+
+        let entry =
+            RevokedCertBuilder::new(&[0x05], 1_700_100_000).reason(RevocationReason::KeyCompromise);
+        let crl = CrlBuilder::new(cert.issuer.clone(), 1_700_000_000)
+            .next_update(1_710_000_000)
+            .add_crl_number(&[0x01])
+            .add_revoked(entry)
+            .build(&sk)
+            .unwrap();
+
+        assert_eq!(crl.version, 2);
+        assert!(crl.verify_signature(&cert).unwrap());
+    }
+
+    // -----------------------------------------------------------------------
+    // Original DER encoding tests
+    // -----------------------------------------------------------------------
 
     #[test]
     fn test_encode_distinguished_name_cn() {

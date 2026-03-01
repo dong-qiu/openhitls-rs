@@ -15,7 +15,7 @@ pub mod verify;
 // Public re-exports (preserve existing public API)
 // ---------------------------------------------------------------------------
 
-pub use builder::{CertificateBuilder, CertificateRequestBuilder};
+pub use builder::{CertificateBuilder, CertificateRequestBuilder, CrlBuilder, RevokedCertBuilder};
 pub use certificate::{
     Certificate, CertificateRequest, DistinguishedName, SubjectPublicKeyInfo, X509Extension,
 };

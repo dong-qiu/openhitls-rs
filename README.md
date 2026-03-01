@@ -2,7 +2,7 @@
 
 A production-grade cryptographic and TLS library in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **100% C→Rust feature parity achieved** — 3519 tests, 40 fuzz targets, 5000+ Wycheproof vectors
+> **100% C→Rust feature parity achieved** — 3534 tests, 40 fuzz targets, 5000+ Wycheproof vectors
 
 ## Feature Highlights
 
@@ -11,7 +11,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 - **48+ crypto algorithms** — Classical, national (SM2/SM3/SM4/SM9), and post-quantum (ML-KEM, ML-DSA, SLH-DSA, FrodoKEM, McEliece)
 - **Hardware acceleration** — AES-NI, SHA-NI, PCLMULQDQ (x86-64) + ARMv8 NEON/SHA2/PMULL, P-256 specialized fast path, feature-gated algorithm selection for minimal binary size
 - **FIPS/CMVP ready** — KAT self-tests, pairwise consistency tests, integrity check, NIST SP 800-90B entropy health testing
-- **Complete PKI** — X.509 chain validation, CRL, OCSP, CSR/cert generation, PKCS#8/12, CMS (5 content types)
+- **Complete PKI** — X.509 chain validation, CRL (parse + generate), OCSP, CSR/cert/CRL generation, PKCS#8/12, CMS (5 content types)
 
 ## C vs Rust — Feature Coverage
 
@@ -19,11 +19,11 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 |-----------|-----------|--------------|----------|-------|
 | Crypto Algorithms | ~132K | ~27K | **100%** | 48 modules, hardware AES/SHA-2/GHASH/ChaCha20, P-256 fast path, 13 DH groups, FIPS, entropy health |
 | TLS Protocol | ~52K | ~15K | **100%** | TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP, 91 suites, 10 conn types |
-| PKI / X.509 | ~17K | ~4.5K | **100%** | X.509, PKCS#8/12, CMS (5 content types), hostname verification |
+| PKI / X.509 | ~17K | ~4.5K | **100%** | X.509, PKCS#8/12, CMS (5 content types), CRL builder, hostname verification |
 | CLI Tools | ~8K | ~2.2K | **100%** | 14 commands (dgst, genpkey, x509, s-client, s-server, etc.) |
 | FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
-| Test Infrastructure | ~20K | ~3.5K | **95%** | 3519 tests + Wycheproof + 40 fuzz targets + security audit |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | 3534 tests + Wycheproof + 40 fuzz targets + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
 
 ### Not Migrated (by design)
@@ -216,8 +216,8 @@ Montgomery multiplication/exponentiation, Miller-Rabin primality, GCD/mod-invers
 
 | Feature | Standard |
 |---------|----------|
-| X.509 parse, verify, chain, CRL, OCSP | RFC 5280 |
-| CSR generation + Certificate generation | RFC 2986, RFC 5280 |
+| X.509 parse, verify, chain, CRL (parse + generate), OCSP | RFC 5280 |
+| CSR generation + Certificate generation + CRL generation | RFC 2986, RFC 5280 |
 | Hostname verification (SAN/CN/wildcard/IP) | RFC 6125 |
 | Extension enforcement (EKU/SAN/AKI/SKI/AIA/NameConstraints/CertificatePolicies) | RFC 5280 |
 | PKCS#8 (incl. Encrypted PBES2) | RFC 5958 |
@@ -260,18 +260,18 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3519 tests, 21 ignored)
+# Run all tests (3534 tests, 21 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1167 tests + 15 Wycheproof
+cargo test -p hitls-crypto --all-features   # 1182 tests (14 ignored)
 cargo test -p hitls-tls --all-features      # 1384 tests
-cargo test -p hitls-pki --all-features      # 395 tests
+cargo test -p hitls-pki --all-features      # 405 tests
 cargo test -p hitls-bignum                  # 80 tests
 cargo test -p hitls-utils                   # 66 tests
 cargo test -p hitls-auth --all-features     # 33 tests
-cargo test -p hitls-cli --all-features      # 117 tests
-cargo test -p hitls-integration-tests       # 188 tests
+cargo test -p hitls-cli --all-features      # 117 tests (5 ignored)
+cargo test -p hitls-integration-tests       # 241 tests (2 ignored)
 
 # Lint (zero warnings required)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
