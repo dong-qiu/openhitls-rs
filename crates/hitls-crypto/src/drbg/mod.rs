@@ -99,6 +99,30 @@ mod tests {
     }
 
     #[test]
+    fn test_increment_counter_partial_carry() {
+        // 0x...00FF → 0x...0100 (single-byte carry)
+        let mut v = [0u8; 16];
+        v[15] = 0xFF;
+        increment_counter(&mut v);
+        assert_eq!(v[15], 0x00);
+        assert_eq!(v[14], 0x01);
+        assert_eq!(v[13], 0x00);
+    }
+
+    #[test]
+    fn test_increment_counter_multi_byte_carry() {
+        // 0x...00FFFF → 0x...010000 (two-byte carry)
+        let mut v = [0u8; 16];
+        v[14] = 0xFF;
+        v[15] = 0xFF;
+        increment_counter(&mut v);
+        assert_eq!(v[15], 0x00);
+        assert_eq!(v[14], 0x00);
+        assert_eq!(v[13], 0x01);
+        assert_eq!(v[12], 0x00);
+    }
+
+    #[test]
     fn test_hmac_drbg_generate() {
         let seed = [0x42u8; 48]; // entropy || nonce
         let mut drbg = HmacDrbg::new(&seed).unwrap();
@@ -106,5 +130,27 @@ mod tests {
         drbg.generate(&mut out, None).unwrap();
         // Should not be all zeros
         assert!(out.iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn test_generate_bytes_convenience() {
+        let seed = [0x42u8; 48];
+        let mut drbg = HmacDrbg::new(&seed).unwrap();
+
+        // Various lengths via the Drbg trait default method
+        let out1 = drbg.generate_bytes(1).unwrap();
+        assert_eq!(out1.len(), 1);
+
+        let out17 = drbg.generate_bytes(17).unwrap();
+        assert_eq!(out17.len(), 17);
+
+        let out256 = drbg.generate_bytes(256).unwrap();
+        assert_eq!(out256.len(), 256);
+        // Output should not be all zeros
+        assert!(out256.iter().any(|&b| b != 0));
+
+        // Zero length
+        let out0 = drbg.generate_bytes(0).unwrap();
+        assert!(out0.is_empty());
     }
 }

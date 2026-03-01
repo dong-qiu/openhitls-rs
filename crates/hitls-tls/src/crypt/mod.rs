@@ -2110,6 +2110,63 @@ mod tests_cipher_suite_params {
     }
 
     #[test]
+    fn test_tls12_rsa_aes128_gcm_params() {
+        let p = Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_RSA_WITH_AES_128_GCM_SHA256)
+            .unwrap();
+        assert_eq!(p.kx_alg, KeyExchangeAlg::Rsa);
+        assert_eq!(p.auth_alg, AuthAlg::Rsa);
+        assert!(!p.is_cbc);
+        assert_eq!(p.key_len, 16);
+        assert_eq!(p.fixed_iv_len, 4);
+        assert_eq!(p.record_iv_len, 8);
+        assert_eq!(p.tag_len, 16);
+    }
+
+    #[test]
+    fn test_tls12_rsa_aes256_gcm_params() {
+        let p = Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_RSA_WITH_AES_256_GCM_SHA384)
+            .unwrap();
+        assert_eq!(p.kx_alg, KeyExchangeAlg::Rsa);
+        assert_eq!(p.hash_len, 48); // SHA-384
+        assert_eq!(p.key_len, 32);
+    }
+
+    #[test]
+    fn test_tls12_dhe_psk_gcm_params() {
+        let p =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DHE_PSK_WITH_AES_128_GCM_SHA256)
+                .unwrap();
+        assert_eq!(p.kx_alg, KeyExchangeAlg::DhePsk);
+        assert_eq!(p.auth_alg, AuthAlg::Psk);
+        assert!(!p.is_cbc);
+        assert!(p.kx_alg.is_psk());
+        assert!(!p.kx_alg.requires_certificate());
+    }
+
+    #[test]
+    fn test_tls12_dhe_psk_cbc_params() {
+        let p =
+            Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DHE_PSK_WITH_AES_128_CBC_SHA256)
+                .unwrap();
+        assert!(p.is_cbc);
+        assert_eq!(p.mac_key_len, 32); // HMAC-SHA-256
+        assert_eq!(p.mac_len, 32);
+        assert_eq!(p.key_len, 16);
+    }
+
+    #[test]
+    fn test_tls12_ecdhe_ecdsa_aes256_gcm_params() {
+        let p = Tls12CipherSuiteParams::from_suite(
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+        )
+        .unwrap();
+        assert_eq!(p.kx_alg, KeyExchangeAlg::Ecdhe);
+        assert_eq!(p.auth_alg, AuthAlg::Ecdsa);
+        assert_eq!(p.hash_len, 48); // SHA-384
+        assert_eq!(p.key_len, 32); // AES-256
+    }
+
+    #[test]
     fn test_tls12_ecdhe_psk_suite_params() {
         let p =
             Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA256)

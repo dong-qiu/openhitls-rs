@@ -673,6 +673,75 @@ mod tests {
         ));
     }
 
+    /// GCM with 16-byte nonce (non-standard, triggers GHASH J0 computation).
+    #[test]
+    fn test_gcm_nonce_16_bytes() {
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce = vec![0xAB; 16];
+        let pt = b"sixteen byte nonce test";
+        let ct = gcm_encrypt(&key, &nonce, &[], pt).unwrap();
+        let recovered = gcm_decrypt(&key, &nonce, &[], &ct).unwrap();
+        assert_eq!(&recovered, pt);
+    }
+
+    /// GCM with large AAD (multiple GHASH blocks).
+    #[test]
+    fn test_gcm_large_aad_multi_block() {
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce = hex("cafebabefacedbaddecaf888");
+        let aad = vec![0x42u8; 256]; // 256 bytes = 16 GHASH blocks
+        let pt = b"test with large AAD";
+        let ct = gcm_encrypt(&key, &nonce, &aad, pt).unwrap();
+        let recovered = gcm_decrypt(&key, &nonce, &aad, &ct).unwrap();
+        assert_eq!(&recovered, pt);
+
+        // Wrong AAD → auth failure
+        let mut wrong_aad = aad.clone();
+        wrong_aad[100] ^= 0x01;
+        assert!(matches!(
+            gcm_decrypt(&key, &nonce, &wrong_aad, &ct),
+            Err(CryptoError::AeadTagVerifyFail)
+        ));
+    }
+
+    /// gcm_decrypt_with should reject short ciphertext.
+    #[test]
+    fn test_gcm_decrypt_with_short_ciphertext() {
+        use super::gcm_decrypt_with;
+        use super::GhashTable;
+        use crate::aes::AesKey;
+
+        let key_bytes = hex("feffe9928665731c6d6a8f9467308308");
+        let aes_key = AesKey::new(&key_bytes).unwrap();
+        let table = GhashTable::from_cipher(&aes_key).unwrap();
+        let nonce = hex("cafebabefacedbaddecaf888");
+
+        // Less than 16 bytes (tag size) → error
+        assert!(gcm_decrypt_with(&aes_key, &table, &nonce, &[], &[0u8; 15]).is_err());
+        assert!(gcm_decrypt_with(&aes_key, &table, &nonce, &[], &[0u8; 0]).is_err());
+    }
+
+    /// gcm_encrypt_with + gcm_decrypt_with roundtrip with AAD.
+    #[test]
+    fn test_gcm_encrypt_with_aad_roundtrip() {
+        use super::{gcm_decrypt_with, gcm_encrypt_with, GhashTable};
+        use crate::aes::AesKey;
+
+        let key_bytes = hex("feffe9928665731c6d6a8f9467308308");
+        let aes_key = AesKey::new(&key_bytes).unwrap();
+        let table = GhashTable::from_cipher(&aes_key).unwrap();
+        let nonce = hex("cafebabefacedbaddecaf888");
+        let aad = b"authenticated header data";
+        let pt = b"precomputed table with AAD test";
+
+        let ct = gcm_encrypt_with(&aes_key, &table, &nonce, aad, pt).unwrap();
+        let recovered = gcm_decrypt_with(&aes_key, &table, &nonce, aad, &ct).unwrap();
+        assert_eq!(&recovered, pt);
+
+        // Wrong AAD → auth failure
+        assert!(gcm_decrypt_with(&aes_key, &table, &nonce, b"wrong", &ct).is_err());
+    }
+
     mod proptests {
         use super::super::{gcm_decrypt, gcm_encrypt};
         use proptest::prelude::*;

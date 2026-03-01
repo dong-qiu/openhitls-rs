@@ -312,6 +312,24 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
     }
 
     #[test]
+    fn test_pkcs8_to_server_key_ec_p384() {
+        // P-384 key
+        let private_key = [0x42u8; 48]; // 48 bytes for P-384
+        let der = pkcs8::encode_ec_pkcs8_der(hitls_types::EccCurveId::NistP384, &private_key);
+        let key = pkcs8::parse_pkcs8_der(&der).unwrap();
+        let server_key = pkcs8_to_server_key(key).unwrap();
+        match &server_key {
+            ServerPrivateKey::Ecdsa {
+                curve_id,
+                private_key: _,
+            } => {
+                assert_eq!(*curve_id, hitls_types::EccCurveId::NistP384);
+            }
+            _ => panic!("expected ECDSA P-384"),
+        }
+    }
+
+    #[test]
     fn test_s_server_invalid_version() {
         let result = run(
             0,

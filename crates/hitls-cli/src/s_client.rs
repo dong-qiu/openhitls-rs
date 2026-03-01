@@ -267,6 +267,28 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_connect_port_boundaries() {
+        // Port 0 is valid syntactically
+        let (host, addr) = parse_connect("localhost:0").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(addr, "localhost:0");
+
+        // Port 65535 is max valid
+        let (host, addr) = parse_connect("localhost:65535").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(addr, "localhost:65535");
+
+        // Port 65536 overflows u16 → error
+        assert!(parse_connect("localhost:65536").is_err());
+    }
+
+    #[test]
+    fn test_s_client_unsupported_version() {
+        let result = run("127.0.0.1:1", None, "2.0", None, true, false, true);
+        assert!(result.is_err());
+    }
+
+    #[test]
     #[ignore] // Requires internet access
     fn test_s_client_tls12_with_alpn() {
         run(
