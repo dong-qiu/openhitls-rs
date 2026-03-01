@@ -168,7 +168,7 @@ impl DtlcpServerHandshake {
         if self.enable_cookie {
             if cookie.is_empty() {
                 // First ClientHello without cookie -- send HVR
-                let computed_cookie = self.compute_cookie(&ch);
+                let computed_cookie = self.compute_cookie(&ch)?;
                 self.expected_cookie = computed_cookie.clone();
 
                 let hvr = HelloVerifyRequest {
@@ -516,9 +516,9 @@ impl DtlcpServerHandshake {
     ///
     /// If a `cookie_gen_callback` is set in config, delegates to it.
     /// Otherwise uses HMAC-SHA256(cookie_secret, client_random || cipher_suites_hash).
-    fn compute_cookie(&self, ch: &ClientHello) -> Vec<u8> {
+    fn compute_cookie(&self, ch: &ClientHello) -> Result<Vec<u8>, TlsError> {
         if let Some(ref cb) = self.config.cookie_gen_callback {
-            return cb(&ch.random);
+            return Ok(cb(&ch.random));
         }
 
         use hitls_crypto::hmac::Hmac;
@@ -534,15 +534,18 @@ impl DtlcpServerHandshake {
             || -> Box<dyn hitls_crypto::hash::Digest> { Box::new(S256::new()) },
             &self.cookie_secret,
         )
-        .unwrap();
-        mac.update(&ch.random).unwrap();
-        mac.update(&suite_bytes).unwrap();
+        .map_err(TlsError::CryptoError)?;
+        mac.update(&ch.random)
+            .map_err(TlsError::CryptoError)?;
+        mac.update(&suite_bytes)
+            .map_err(TlsError::CryptoError)?;
 
         let mut out = vec![0u8; 32];
-        mac.finish(&mut out).unwrap();
+        mac.finish(&mut out)
+            .map_err(TlsError::CryptoError)?;
         // Truncate to 16 bytes for cookie (sufficient for DoS protection)
         out.truncate(16);
-        out
+        Ok(out)
     }
 
     /// Verify a cookie from the ClientHello.

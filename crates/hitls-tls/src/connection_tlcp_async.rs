@@ -174,7 +174,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlcpClientConnection<S> {
             &cflight.client_write_key,
             &cflight.client_write_mac_key,
             &cflight.client_write_iv,
-        );
+        )?;
 
         // 10. Send Finished (encrypted)
         let fin_record = self
@@ -201,7 +201,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlcpClientConnection<S> {
             &cflight.server_write_key,
             &cflight.server_write_mac_key,
             &cflight.server_write_iv,
-        );
+        )?;
 
         // 13. Read server Finished (encrypted)
         let (hs_type, fin_data) = self.read_handshake_msg().await?;
@@ -480,7 +480,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlcpServerConnection<S> {
             &skeys.client_write_key,
             &skeys.client_write_mac_key,
             &skeys.client_write_iv,
-        );
+        )?;
 
         // 10. Read client Finished (encrypted)
         let (hs_type, fin_data) = self.read_handshake_msg().await?;
@@ -507,7 +507,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlcpServerConnection<S> {
             &skeys.server_write_key,
             &skeys.server_write_mac_key,
             &skeys.server_write_iv,
-        );
+        )?;
 
         // 13. Send server Finished (encrypted)
         let sfin_record = self

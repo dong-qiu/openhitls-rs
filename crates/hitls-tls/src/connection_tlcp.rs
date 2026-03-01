@@ -96,20 +96,21 @@ pub(crate) fn activate_tlcp_write(
     enc_key: &[u8],
     mac_key: &[u8],
     iv: &[u8],
-) {
+) -> Result<(), TlsError> {
     let is_cbc = matches!(
         suite,
         CipherSuite::ECDHE_SM4_CBC_SM3 | CipherSuite::ECC_SM4_CBC_SM3
     );
     if is_cbc {
         rl.activate_write_encryption_tlcp(TlcpEncryptor::Cbc(
-            RecordEncryptorTlcpCbc::new(enc_key.to_vec(), mac_key.to_vec()).unwrap(),
+            RecordEncryptorTlcpCbc::new(enc_key.to_vec(), mac_key.to_vec())?,
         ));
     } else {
         rl.activate_write_encryption_tlcp(TlcpEncryptor::Gcm(
-            RecordEncryptorTlcpGcm::new(enc_key, iv.to_vec()).unwrap(),
+            RecordEncryptorTlcpGcm::new(enc_key, iv.to_vec())?,
         ));
     }
+    Ok(())
 }
 
 pub(crate) fn activate_tlcp_read(
@@ -118,20 +119,21 @@ pub(crate) fn activate_tlcp_read(
     enc_key: &[u8],
     mac_key: &[u8],
     iv: &[u8],
-) {
+) -> Result<(), TlsError> {
     let is_cbc = matches!(
         suite,
         CipherSuite::ECDHE_SM4_CBC_SM3 | CipherSuite::ECC_SM4_CBC_SM3
     );
     if is_cbc {
         rl.activate_read_decryption_tlcp(TlcpDecryptor::Cbc(
-            RecordDecryptorTlcpCbc::new(enc_key.to_vec(), mac_key.to_vec()).unwrap(),
+            RecordDecryptorTlcpCbc::new(enc_key.to_vec(), mac_key.to_vec())?,
         ));
     } else {
         rl.activate_read_decryption_tlcp(TlcpDecryptor::Gcm(
-            RecordDecryptorTlcpGcm::new(enc_key, iv.to_vec()).unwrap(),
+            RecordDecryptorTlcpGcm::new(enc_key, iv.to_vec())?,
         ));
     }
+    Ok(())
 }
 
 // ===========================================================================
@@ -219,7 +221,7 @@ pub fn tlcp_handshake_in_memory(
         &cflight.client_write_key,
         &cflight.client_write_mac_key,
         &cflight.client_write_iv,
-    );
+    )?;
 
     let fin_record = client_rl.seal_record(ContentType::Handshake, &cflight.finished)?;
     client_to_server.extend_from_slice(&fin_record);
@@ -245,7 +247,7 @@ pub fn tlcp_handshake_in_memory(
         &skeys.client_write_key,
         &skeys.client_write_mac_key,
         &skeys.client_write_iv,
-    );
+    )?;
 
     // 12. Server processes client Finished (encrypted)
     let (_, fin_plain, consumed) = server_rl.open_record(&client_to_server)?;
@@ -265,7 +267,7 @@ pub fn tlcp_handshake_in_memory(
         &skeys.server_write_key,
         &skeys.server_write_mac_key,
         &skeys.server_write_iv,
-    );
+    )?;
 
     let sfin_record = server_rl.seal_record(ContentType::Handshake, &server_fin)?;
     server_to_client.extend_from_slice(&sfin_record);
@@ -285,7 +287,7 @@ pub fn tlcp_handshake_in_memory(
         &cflight.server_write_key,
         &cflight.server_write_mac_key,
         &cflight.server_write_iv,
-    );
+    )?;
 
     // 15. Client processes server Finished (encrypted)
     let (_, sfin_plain, consumed) = client_rl.open_record(&server_to_client)?;
@@ -506,7 +508,8 @@ mod tests {
             &cflight.client_write_key,
             &cflight.client_write_mac_key,
             &cflight.client_write_iv,
-        );
+        )
+        .unwrap();
 
         let fin_record = client_rl
             .seal_record(ContentType::Handshake, &cflight.finished)
@@ -535,7 +538,8 @@ mod tests {
             &skeys.client_write_key,
             &skeys.client_write_mac_key,
             &skeys.client_write_iv,
-        );
+        )
+        .unwrap();
 
         // 12. Server processes client Finished (encrypted)
         let (ct, fin_plain, consumed) = server_rl.open_record(&client_to_server).unwrap();
@@ -559,7 +563,8 @@ mod tests {
             &skeys.server_write_key,
             &skeys.server_write_mac_key,
             &skeys.server_write_iv,
-        );
+        )
+        .unwrap();
 
         let sfin_record = server_rl
             .seal_record(ContentType::Handshake, &server_fin)
@@ -579,7 +584,8 @@ mod tests {
             &cflight.server_write_key,
             &cflight.server_write_mac_key,
             &cflight.server_write_iv,
-        );
+        )
+        .unwrap();
 
         // 15. Client processes server Finished (encrypted)
         let (ct, sfin_plain, consumed) = client_rl.open_record(&server_to_client).unwrap();
