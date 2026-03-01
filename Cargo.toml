@@ -39,7 +39,7 @@ thiserror = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 clap = { version = "4", features = ["derive"] }
-criterion = "0.5"
+criterion = "0.8"
 # Pin proptest <1.7 for MSRV 1.75 compatibility (1.10+ requires rustc 1.84)
 proptest = ">=1.5, <1.7"
 flate2 = "1"
