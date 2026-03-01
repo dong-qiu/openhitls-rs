@@ -3692,3 +3692,22 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - **+15 tests** (commit 4): gcm.rs (+4 nonce/AAD/table edge cases), drbg/mod.rs (+3 carry/generate_bytes), s_client.rs (+2 port/version), s_server.rs (+1 EC P-384), crypt/mod.rs (+5 RSA/DHE_PSK/ECDSA params)
 - **+21 doc updates** (commit 5): DEV_LOG.md, CLAUDE.md, README.md, PROMPT_LOG.md
 - All 3,666 tests pass, 21 ignored, 0 clippy/fmt/doc warnings
+
+---
+
+## Phase T67 — Code Quality Hardening (2026-03-01)
+
+**Prompt** (Part A): Create a Dependabot configuration for the repository to automate dependency updates for GitHub Actions and Cargo, with weekly cadence.
+
+**Prompt** (Part B): Add `windows-latest` to the CI test matrix so tests run on Windows in addition to Ubuntu and macOS.
+
+**Prompt** (Part C): Replace `CryptoError::InvalidArg` (unit variant) with `CryptoError::InvalidArg(&'static str)` throughout the workspace. Update all call sites. Additionally replace `.unwrap()` / `.expect()` on hash digest operations with `?` propagation.
+
+**Prompt** (Part D): Add descriptive context strings to `CryptoError::InvalidArg("")` in 16 specific `hitls-crypto` files. Replace the empty string `""` with short descriptive messages (e.g., `"key must be 32 bytes"`, `"GCM ciphertext too short"`, `"DSA g must be > 1"`).
+
+**Result**:
+- **Dependabot**: `.github/dependabot.yml` created with `github-actions` + `cargo` ecosystems, weekly schedule
+- **Windows CI**: `windows-latest` added to test matrix OS list
+- **InvalidArg payload**: `CryptoError::InvalidArg` now carries `&'static str` context; ~50+ call sites updated across workspace; hash ops (`sha512`, `reduce_scalar_wide`, `mgf1_sha256`, etc.) now propagate errors via `?` instead of panicking; `rsa/oaep.rs` test fixed for `l_hash()` returning `Result`
+- **Context strings**: 16 files updated with descriptive messages; `dsa/mod.rs` g-check split into two separate conditions for distinct error paths
+- All 3,666 tests pass, 21 ignored, 0 clippy/fmt warnings

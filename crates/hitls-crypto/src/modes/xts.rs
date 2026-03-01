@@ -36,10 +36,10 @@ pub fn xts_encrypt(
     plaintext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     if tweak.len() != AES_BLOCK_SIZE {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("XTS tweak must be 16 bytes"));
     }
     if plaintext.len() < AES_BLOCK_SIZE {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("XTS data too short"));
     }
     let cipher1 = AesKey::new(key1)?;
     let cipher2 = AesKey::new(key2)?;
@@ -127,10 +127,10 @@ pub fn xts_decrypt(
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     if tweak.len() != AES_BLOCK_SIZE {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("XTS tweak must be 16 bytes"));
     }
     if ciphertext.len() < AES_BLOCK_SIZE {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("XTS data too short"));
     }
     let cipher1 = AesKey::new(key1)?;
     let cipher2 = AesKey::new(key2)?;

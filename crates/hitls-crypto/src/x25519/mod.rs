@@ -43,7 +43,7 @@ impl X25519PrivateKey {
     /// Create an X25519 private key from 32 raw bytes.
     pub fn new(bytes: &[u8]) -> Result<Self, CryptoError> {
         if bytes.len() != 32 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("key must be 32 bytes"));
         }
         let mut key = [0u8; 32];
         key.copy_from_slice(bytes);
@@ -72,7 +72,7 @@ impl X25519PublicKey {
     /// Create an X25519 public key from 32 raw bytes.
     pub fn new(bytes: &[u8]) -> Result<Self, CryptoError> {
         if bytes.len() != 32 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("key must be 32 bytes"));
         }
         let mut key = [0u8; 32];
         key.copy_from_slice(bytes);

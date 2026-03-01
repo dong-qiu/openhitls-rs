@@ -66,7 +66,7 @@ pub(crate) fn extract_user_key(
     let t1 = h1_val.mod_add(ks, &n)?;
 
     if t1.is_zero() {
-        return Err(CryptoError::InvalidArg); // Reject this ID
+        return Err(CryptoError::InvalidArg("")); // Reject this ID
     }
 
     // t2 = ks · t1⁻¹ mod n
@@ -279,7 +279,7 @@ pub(crate) fn decrypt(
     user_id: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     if ciphertext.len() < 96 {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
 
     let c1_bytes = &ciphertext[..64];

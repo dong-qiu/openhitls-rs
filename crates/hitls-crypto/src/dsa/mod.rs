@@ -24,7 +24,7 @@ impl DsaParams {
     /// Create DSA parameters from big-endian byte arrays.
     pub fn new(p: &[u8], q: &[u8], g: &[u8]) -> Result<Self, CryptoError> {
         if p.is_empty() || q.is_empty() || g.is_empty() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("DSA p too small"));
         }
 
         let p_bn = BigNum::from_bytes_be(p);
@@ -33,13 +33,16 @@ impl DsaParams {
 
         // Basic validation
         if p_bn.is_even() || p_bn.bit_len() < 2 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("DSA p too small"));
         }
         if q_bn.is_even() || q_bn.bit_len() < 2 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("DSA q size mismatch"));
         }
-        if g_bn <= BigNum::from_u64(1) || g_bn >= p_bn {
-            return Err(CryptoError::InvalidArg);
+        if g_bn <= BigNum::from_u64(1) {
+            return Err(CryptoError::InvalidArg("DSA g must be > 1"));
+        }
+        if g_bn >= p_bn {
+            return Err(CryptoError::InvalidArg("DSA g must be < p"));
         }
 
         Ok(DsaParams {
@@ -129,7 +132,7 @@ impl DsaKeyPair {
         let x = BigNum::from_bytes_be(private_key);
 
         if x.is_zero() || x >= params.q {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("DSA private key out of range"));
         }
 
         let y = params.g.mod_exp(&x, &params.p)?;
@@ -146,7 +149,7 @@ impl DsaKeyPair {
         let y = BigNum::from_bytes_be(public_key);
 
         if y <= BigNum::from_u64(1) || y >= params.p {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("DSA public key out of range"));
         }
 
         Ok(DsaKeyPair {
@@ -159,7 +162,7 @@ impl DsaKeyPair {
     /// Sign a message digest, returning a DER-encoded (r, s) signature.
     pub fn sign(&self, digest: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if self.private_key.is_zero() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("DSA private key not set"));
         }
 
         let q = &self.params.q;
@@ -276,10 +279,14 @@ fn decode_der_signature(data: &[u8]) -> Result<(BigNum, BigNum), CryptoError> {
     let mut decoder = Decoder::new(data);
     let mut seq = decoder
         .read_sequence()
-        .map_err(|_| CryptoError::InvalidArg)?;
+        .map_err(|_| CryptoError::InvalidArg("invalid DSA signature encoding"))?;
 
-    let r_bytes = seq.read_integer().map_err(|_| CryptoError::InvalidArg)?;
-    let s_bytes = seq.read_integer().map_err(|_| CryptoError::InvalidArg)?;
+    let r_bytes = seq
+        .read_integer()
+        .map_err(|_| CryptoError::InvalidArg("invalid DSA signature encoding"))?;
+    let s_bytes = seq
+        .read_integer()
+        .map_err(|_| CryptoError::InvalidArg("invalid DSA signature encoding"))?;
 
     Ok((
         BigNum::from_bytes_be(r_bytes),

@@ -43,7 +43,7 @@ impl BigNum {
     /// Uses rejection sampling to ensure uniform distribution.
     pub fn random_range(upper: &BigNum) -> Result<BigNum, CryptoError> {
         if upper.is_zero() || upper.is_one() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let bits = upper.bit_len();
@@ -72,7 +72,7 @@ impl BigNum {
     /// Generate a random BigNum uniformly in [0, upper).
     pub fn random_range_inclusive_zero(upper: &BigNum) -> Result<BigNum, CryptoError> {
         if upper.is_zero() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let bits = upper.bit_len();

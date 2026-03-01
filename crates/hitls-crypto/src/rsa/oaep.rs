@@ -13,9 +13,9 @@ use super::mgf1_sha256;
 const H_LEN: usize = 32;
 
 /// Compute lHash = SHA-256("") for the default empty label.
-fn l_hash() -> [u8; H_LEN] {
+fn l_hash() -> Result<[u8; H_LEN], CryptoError> {
     let mut hasher = Sha256::new();
-    hasher.finish().unwrap()
+    hasher.finish()
 }
 
 /// EME-OAEP encoding (RFC 8017 §7.1.1 step 2).
@@ -28,7 +28,7 @@ pub(crate) fn oaep_encrypt_pad(msg: &[u8], k: usize) -> Result<Vec<u8>, CryptoEr
         return Err(CryptoError::InputOverflow);
     }
 
-    let lhash = l_hash();
+    let lhash = l_hash()?;
 
     // DB = lHash || PS || 0x01 || M
     let db_len = k - H_LEN - 1;
@@ -46,7 +46,7 @@ pub(crate) fn oaep_encrypt_pad(msg: &[u8], k: usize) -> Result<Vec<u8>, CryptoEr
     getrandom::getrandom(&mut seed).map_err(|_| CryptoError::BnRandGenFail)?;
 
     // dbMask = MGF1(seed, k - hLen - 1)
-    let db_mask = mgf1_sha256(&seed, db_len);
+    let db_mask = mgf1_sha256(&seed, db_len)?;
 
     // maskedDB = DB XOR dbMask (in-place on db)
     for (d, m) in db.iter_mut().zip(db_mask.iter()) {
@@ -54,7 +54,7 @@ pub(crate) fn oaep_encrypt_pad(msg: &[u8], k: usize) -> Result<Vec<u8>, CryptoEr
     }
 
     // seedMask = MGF1(maskedDB, hLen)
-    let seed_mask = mgf1_sha256(&db, H_LEN);
+    let seed_mask = mgf1_sha256(&db, H_LEN)?;
 
     // maskedSeed = seed XOR seedMask (in-place on seed)
     for (s, m) in seed.iter_mut().zip(seed_mask.iter()) {
@@ -87,7 +87,7 @@ pub(crate) fn oaep_decrypt_unpad(em: &[u8]) -> Result<Vec<u8>, CryptoError> {
     let db_len = masked_db.len();
 
     // seedMask = MGF1(maskedDB, hLen)
-    let seed_mask = mgf1_sha256(masked_db, H_LEN);
+    let seed_mask = mgf1_sha256(masked_db, H_LEN)?;
 
     // seed = maskedSeed XOR seedMask (in-place on stack copy)
     let mut seed = [0u8; H_LEN];
@@ -97,7 +97,7 @@ pub(crate) fn oaep_decrypt_unpad(em: &[u8]) -> Result<Vec<u8>, CryptoError> {
     }
 
     // dbMask = MGF1(seed, k - hLen - 1)
-    let db_mask = mgf1_sha256(&seed, db_len);
+    let db_mask = mgf1_sha256(&seed, db_len)?;
 
     // DB = maskedDB XOR dbMask (in-place on copy)
     let mut db = masked_db.to_vec();
@@ -107,7 +107,7 @@ pub(crate) fn oaep_decrypt_unpad(em: &[u8]) -> Result<Vec<u8>, CryptoError> {
 
     // Verify: y must be 0x00
     // DB = lHash' || PS || 0x01 || M
-    let lhash = l_hash();
+    let lhash = l_hash()?;
 
     // Check lHash matches (constant-time)
     let lhash_valid = db[..H_LEN].ct_eq(&lhash).unwrap_u8();
@@ -150,7 +150,7 @@ mod tests {
             0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
             0x78, 0x52, 0xb8, 0x55,
         ];
-        assert_eq!(l_hash(), expected);
+        assert_eq!(l_hash().unwrap(), expected);
     }
 
     #[test]
@@ -231,7 +231,7 @@ mod tests {
 
         // Now tamper: flip a byte in the DB region (after unmasking) by corrupting maskedDB.
         // The simplest approach: construct EM manually with bad PS byte.
-        let lhash = l_hash();
+        let lhash = l_hash().unwrap();
         let db_len = k - H_LEN - 1;
         let mut db = Vec::with_capacity(db_len);
         db.extend_from_slice(&lhash);
@@ -249,9 +249,9 @@ mod tests {
 
         // Use a fixed seed so the result is deterministic
         let seed = vec![0xAAu8; H_LEN];
-        let db_mask = mgf1_sha256(&seed, db_len);
+        let db_mask = mgf1_sha256(&seed, db_len).unwrap();
         let masked_db: Vec<u8> = db.iter().zip(db_mask.iter()).map(|(a, b)| a ^ b).collect();
-        let seed_mask = mgf1_sha256(&masked_db, H_LEN);
+        let seed_mask = mgf1_sha256(&masked_db, H_LEN).unwrap();
         let masked_seed: Vec<u8> = seed
             .iter()
             .zip(seed_mask.iter())

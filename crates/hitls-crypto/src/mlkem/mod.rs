@@ -67,7 +67,7 @@ fn get_params(parameter_set: u32) -> Result<MlKemParams, CryptoError> {
         512 => Ok(MLKEM_512),
         768 => Ok(MLKEM_768),
         1024 => Ok(MLKEM_1024),
-        _ => Err(CryptoError::InvalidArg),
+        _ => Err(CryptoError::InvalidArg("")),
     }
 }
 
@@ -307,7 +307,7 @@ impl MlKemKeyPair {
     pub fn from_encapsulation_key(parameter_set: u32, ek: &[u8]) -> Result<Self, CryptoError> {
         let params = get_params(parameter_set)?;
         if ek.len() != params.ek_len {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         Ok(Self {
             encapsulation_key: ek.to_vec(),
@@ -344,7 +344,7 @@ impl MlKemKeyPair {
         let params = get_params(self.parameter_set)?;
 
         if ciphertext.len() != params.ct_len {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let k = params.k;

@@ -37,7 +37,7 @@ impl PaillierKeyPair {
     /// `from_primes` with known small primes.
     pub fn generate(bits: usize) -> Result<Self, CryptoError> {
         if bits < 64 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let half_bits = bits / 2;
@@ -84,7 +84,7 @@ impl PaillierKeyPair {
 
         // Verify 0 <= m < n
         if m.cmp_abs(&self.n) != std::cmp::Ordering::Less {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // Generate random r in [1, n-1] with gcd(r, n) = 1
@@ -111,7 +111,7 @@ impl PaillierKeyPair {
         let one = BigNum::from_u64(1);
         let (l_val, rem) = cl.sub(&one).div_rem(&self.n)?;
         if !rem.is_zero() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // m = L(cl) * mu mod n

@@ -347,7 +347,7 @@ pub fn gcm_decrypt(
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     if ciphertext.len() < GCM_TAG_SIZE {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("GCM ciphertext too short"));
     }
     let ct_len = ciphertext.len() - GCM_TAG_SIZE;
     let (ct_data, received_tag) = ciphertext.split_at(ct_len);
@@ -386,7 +386,7 @@ pub fn gcm_decrypt_with<C: BlockCipher>(
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     if ciphertext.len() < GCM_TAG_SIZE {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("GCM ciphertext too short"));
     }
     let ct_len = ciphertext.len() - GCM_TAG_SIZE;
     let (ct_data, received_tag) = ciphertext.split_at(ct_len);
@@ -428,7 +428,7 @@ pub fn sm4_gcm_decrypt(
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     if ciphertext.len() < GCM_TAG_SIZE {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("GCM ciphertext too short"));
     }
     let ct_len = ciphertext.len() - GCM_TAG_SIZE;
     let (ct_data, received_tag) = ciphertext.split_at(ct_len);

@@ -38,12 +38,12 @@ impl TokenType {
     /// Parse a token type from its two-byte wire encoding.
     pub fn from_wire(bytes: &[u8]) -> Result<Self, CryptoError> {
         if bytes.len() < 2 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         match (bytes[0], bytes[1]) {
             (0x00, 0x02) => Ok(TokenType::PubliclyVerifiable),
             (0x00, 0x01) => Ok(TokenType::PrivatelyVerifiable),
-            _ => Err(CryptoError::InvalidArg),
+            _ => Err(CryptoError::InvalidArg("")),
         }
     }
 }
@@ -134,14 +134,14 @@ impl Issuer {
     /// Computes `blind_sig = blinded_element^d mod n` and returns it in a `TokenResponse`.
     pub fn issue(&self, request: &TokenRequest) -> Result<TokenResponse, CryptoError> {
         if request.token_type != TokenType::PubliclyVerifiable {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let blinded = BigNum::from_bytes_be(&request.blinded_element);
 
         // Validate: blinded_element must be in [1, n-1]
         if blinded.is_zero() || blinded >= self.n {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // blind_sig = blinded_element^d mod n
@@ -264,7 +264,7 @@ impl Client {
 
         // Validate: blind_sig must be in [1, n-1]
         if blind_sig.is_zero() || blind_sig >= self.n {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // Unblind: sig = blind_sig * r_inv mod n
@@ -299,11 +299,11 @@ pub fn verify_token(
     challenge: &[u8],
 ) -> Result<bool, CryptoError> {
     if token.token_type != TokenType::PubliclyVerifiable {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
 
     if token.nonce.len() != 32 {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
 
     let n_bn = BigNum::from_bytes_be(n);

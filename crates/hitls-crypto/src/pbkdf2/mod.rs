@@ -20,7 +20,7 @@ pub fn pbkdf2(
     dk_len: usize,
 ) -> Result<Vec<u8>, CryptoError> {
     if iterations == 0 || dk_len == 0 {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
     let hash_len = 32; // SHA-256
     let n = dk_len.div_ceil(hash_len);

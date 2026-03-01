@@ -83,7 +83,7 @@ impl McElieceKeyPair {
         let p = params::get_params(self.param_id);
 
         if ciphertext.len() != p.cipher_bytes {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // Deserialize private key
@@ -203,7 +203,7 @@ fn deserialize_private_key(
     let mut g = poly::GfPoly::new(p.t);
     for i in 0..=p.t {
         if offset + 2 > sk.len() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         let coeff = u16::from_le_bytes([sk[offset], sk[offset + 1]]);
         g.set_coeff(i, coeff);
@@ -214,7 +214,7 @@ fn deserialize_private_key(
     // s
     let s_end = offset + p.n_bytes;
     if s_end > sk.len() {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
     let s = sk[offset..s_end].to_vec();
     offset = s_end;

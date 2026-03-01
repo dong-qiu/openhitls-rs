@@ -93,7 +93,7 @@ pub fn encrypt_pkcs8_der_with(
     let cipher_oid = match key_len {
         16 => known::aes128_cbc(),
         32 => known::aes256_cbc(),
-        _ => return Err(CryptoError::InvalidArg),
+        _ => return Err(CryptoError::InvalidArg("")),
     };
 
     // Build the EncryptedPrivateKeyInfo ASN.1 structure

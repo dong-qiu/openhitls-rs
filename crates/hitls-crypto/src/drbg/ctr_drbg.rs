@@ -45,7 +45,7 @@ impl CtrDrbg {
     /// `entropy_input || personalization_string` padded/truncated to 48 bytes.
     pub fn new(seed_material: &[u8]) -> Result<Self, CryptoError> {
         if seed_material.len() != SEED_LEN {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let mut drbg = CtrDrbg {

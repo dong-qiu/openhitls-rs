@@ -26,17 +26,17 @@ pub fn scrypt(
 ) -> Result<Vec<u8>, CryptoError> {
     // Validate parameters
     if n == 0 || n & (n - 1) != 0 || n < 2 {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
     if r == 0 || p == 0 || dk_len == 0 {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
     // r * p must not overflow
     let rp = (r as u64)
         .checked_mul(p as u64)
-        .ok_or(CryptoError::InvalidArg)?;
+        .ok_or(CryptoError::InvalidArg(""))?;
     if rp >= (1 << 30) {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
 
     let block_size = 128 * r as usize;

@@ -47,7 +47,7 @@ impl CbcMacSm4 {
     /// Feed data into the CBC-MAC computation.
     pub fn update(&mut self, data: &[u8]) -> Result<(), CryptoError> {
         if !self.active {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let mut offset = 0;
@@ -90,7 +90,7 @@ impl CbcMacSm4 {
     /// `out` must be at least 16 bytes.
     pub fn finish(&mut self, out: &mut [u8]) -> Result<(), CryptoError> {
         if !self.active {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         if out.len() < SM4_BLOCK_SIZE {
             return Err(CryptoError::BufferTooSmall {

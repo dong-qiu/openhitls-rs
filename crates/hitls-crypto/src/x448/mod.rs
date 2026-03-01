@@ -45,7 +45,7 @@ impl X448PrivateKey {
     /// Create an X448 private key from 56 raw bytes.
     pub fn new(bytes: &[u8]) -> Result<Self, CryptoError> {
         if bytes.len() != 56 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("key must be 56 bytes"));
         }
         let mut key = [0u8; 56];
         key.copy_from_slice(bytes);
@@ -74,7 +74,7 @@ impl X448PublicKey {
     /// Create an X448 public key from 56 raw bytes.
     pub fn new(bytes: &[u8]) -> Result<Self, CryptoError> {
         if bytes.len() != 56 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("key must be 56 bytes"));
         }
         let mut key = [0u8; 56];
         key.copy_from_slice(bytes);

@@ -43,7 +43,7 @@ impl Sm4CtrDrbg {
     /// `seed_material` must be exactly `SEED_LEN` (32) bytes.
     pub fn new(seed_material: &[u8]) -> Result<Self, CryptoError> {
         if seed_material.len() != SEED_LEN {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let mut drbg = Sm4CtrDrbg {
@@ -150,7 +150,7 @@ impl Sm4CtrDrbg {
         additional_input: Option<&[u8]>,
     ) -> Result<(), CryptoError> {
         if entropy.len() != SEED_LEN {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let mut seed_material = [0u8; SEED_LEN];

@@ -120,7 +120,7 @@ impl ChaCha20 {
     /// Create a new ChaCha20 cipher with the given 32-byte key.
     pub fn new(key: &[u8]) -> Result<Self, CryptoError> {
         if key.len() != CHACHA20_KEY_SIZE {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("key must be 32 bytes"));
         }
         let mut k = [0u8; CHACHA20_KEY_SIZE];
         k.copy_from_slice(key);
@@ -135,7 +135,7 @@ impl ChaCha20 {
         data: &mut [u8],
     ) -> Result<(), CryptoError> {
         if nonce.len() != CHACHA20_NONCE_SIZE {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("nonce must be 12 bytes"));
         }
         let nonce_arr: [u8; 12] = nonce.try_into().unwrap();
 
@@ -405,7 +405,7 @@ impl ChaCha20Poly1305 {
     /// Create a new ChaCha20-Poly1305 AEAD with the given 32-byte key.
     pub fn new(key: &[u8]) -> Result<Self, CryptoError> {
         if key.len() != 32 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("key must be 32 bytes"));
         }
         let mut k = [0u8; 32];
         k.copy_from_slice(key);
@@ -420,7 +420,7 @@ impl ChaCha20Poly1305 {
         plaintext: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
         if nonce.len() != 12 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("nonce must be 12 bytes"));
         }
         let nonce_arr: [u8; 12] = nonce.try_into().unwrap();
 
@@ -448,10 +448,10 @@ impl ChaCha20Poly1305 {
         ciphertext_and_tag: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
         if nonce.len() != 12 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("nonce must be 12 bytes"));
         }
         if ciphertext_and_tag.len() < 16 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("invalid tag length"));
         }
         let nonce_arr: [u8; 12] = nonce.try_into().unwrap();
 

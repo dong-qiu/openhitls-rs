@@ -254,7 +254,7 @@ impl HpkeCtx {
         psk_id: &[u8],
     ) -> Result<(Self, Vec<u8>), CryptoError> {
         if psk.is_empty() || psk_id.is_empty() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         let pk_r = X25519PublicKey::new(recipient_public_key)?;
         let (shared_secret, enc) = kem_encap(&pk_r)?;
@@ -280,7 +280,7 @@ impl HpkeCtx {
         psk_id: &[u8],
     ) -> Result<Self, CryptoError> {
         if psk.is_empty() || psk_id.is_empty() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         let sk_r = X25519PrivateKey::new(private_key)?;
         let shared_secret = kem_decap(enc, &sk_r)?;
@@ -330,7 +330,7 @@ impl HpkeCtx {
     /// Increment the sequence number.
     fn increment_seq(&mut self) -> Result<(), CryptoError> {
         if self.seq == u64::MAX {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         self.seq += 1;
         Ok(())

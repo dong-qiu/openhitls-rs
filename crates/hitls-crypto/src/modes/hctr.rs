@@ -141,7 +141,7 @@ pub fn hctr_encrypt(
     plaintext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     if plaintext.len() < BLOCK {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
     let cipher = AesKey::new(key)?;
     let p0 = &plaintext[..BLOCK];
@@ -191,7 +191,7 @@ pub fn hctr_decrypt(
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     if ciphertext.len() < BLOCK {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
     let cipher = AesKey::new(key)?;
     let c0 = &ciphertext[..BLOCK];

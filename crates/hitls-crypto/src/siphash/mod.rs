@@ -57,7 +57,7 @@ impl SipHash {
     /// Create a new SipHash-2-4 instance with a 16-byte key.
     pub fn new(key: &[u8]) -> Result<Self, CryptoError> {
         if key.len() != 16 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let k0 = u64::from_le_bytes(key[..8].try_into().unwrap());

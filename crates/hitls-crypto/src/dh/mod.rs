@@ -23,7 +23,7 @@ impl DhParams {
     /// Create DH parameters from big-endian byte arrays for prime and generator.
     pub fn new(p: &[u8], g: &[u8]) -> Result<Self, CryptoError> {
         if p.is_empty() || g.is_empty() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("DH prime too small"));
         }
 
         let p_bn = BigNum::from_bytes_be(p);
@@ -31,10 +31,10 @@ impl DhParams {
 
         // Basic validation: p must be > 2 and odd, g must be > 1
         if p_bn.bit_len() < 2 || p_bn.is_even() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("DH prime too small"));
         }
         if g_bn <= BigNum::from_u64(1) {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("DH generator invalid"));
         }
 
         Ok(DhParams { p: p_bn, g: g_bn })
@@ -44,7 +44,7 @@ impl DhParams {
     pub fn from_group(id: DhParamId) -> Result<Self, CryptoError> {
         match groups::get_ffdhe_params(id) {
             Some((p, g)) => Ok(DhParams { p, g }),
-            None => Err(CryptoError::InvalidArg),
+            None => Err(CryptoError::InvalidArg("DH group not found")),
         }
     }
 
@@ -121,7 +121,7 @@ impl DhKeyPair {
 
         // Validate peer public key: 2 <= peer_pub <= p-2
         if peer_pub <= BigNum::from_u64(1) || peer_pub >= params.p.sub(&BigNum::from_u64(1)) {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("DH public key out of range"));
         }
 
         let shared = peer_pub.mod_exp(&self.private_key, &params.p)?;

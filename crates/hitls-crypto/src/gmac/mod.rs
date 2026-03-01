@@ -62,7 +62,7 @@ impl Gmac {
     /// Feed authenticated data into the GMAC computation.
     pub fn update(&mut self, data: &[u8]) -> Result<(), CryptoError> {
         if self.finalized {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         self.table.ghash_data(&mut self.ghash_state, data);
         self.aad_len += data.len() as u64;
@@ -72,7 +72,7 @@ impl Gmac {
     /// Finalize the GMAC computation and write the 16-byte tag to `out`.
     pub fn finish(&mut self, out: &mut [u8]) -> Result<(), CryptoError> {
         if out.len() < 16 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // Length block: [len(AAD) in bits || 0 (no ciphertext)]

@@ -396,11 +396,11 @@ pub(crate) fn bignum_to_sm2_point(x: &BigNum, y: &BigNum) -> Result<Sm2JacobianP
     let x_arr: &[u8; 32] = x_vec
         .as_slice()
         .try_into()
-        .map_err(|_| CryptoError::InvalidArg)?;
+        .map_err(|_| CryptoError::InvalidArg(""))?;
     let y_arr: &[u8; 32] = y_vec
         .as_slice()
         .try_into()
-        .map_err(|_| CryptoError::InvalidArg)?;
+        .map_err(|_| CryptoError::InvalidArg(""))?;
     let x_fe = Sm2FieldElement::from_bytes(x_arr);
     let y_fe = Sm2FieldElement::from_bytes(y_arr);
     Ok(Sm2JacobianPoint::from_affine(&x_fe, &y_fe))

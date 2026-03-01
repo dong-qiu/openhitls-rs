@@ -175,7 +175,7 @@ impl ClassicDh {
             }
             ClassicDh::Ecdh(kp) => kp.compute_shared_secret(peer_ephemeral_pk),
             ClassicDh::X25519PubOnly { .. } | ClassicDh::EcdhPubOnly { .. } => {
-                Err(CryptoError::InvalidArg)
+                Err(CryptoError::InvalidArg(""))
             }
         }
     }
@@ -234,7 +234,7 @@ impl HybridKemKeyPair {
         let ek_len = mlkem_ek_len(params.mlkem_param);
         let expected_len = params.classic_pk_len + ek_len;
         if combined_pk.len() != expected_len {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let (classic_pk, mlkem_ek) = split_combined(
@@ -321,7 +321,7 @@ impl HybridKemKeyPair {
     pub fn decapsulate(&self, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let expected_ct_len = self.params.classic_pk_len + self.params.mlkem_ct_len;
         if ciphertext.len() != expected_ct_len {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let (classic_ct, ct_pq) = if self.params.classic_type == ClassicType::X25519 {

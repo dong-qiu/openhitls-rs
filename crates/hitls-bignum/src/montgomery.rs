@@ -29,7 +29,7 @@ impl MontgomeryCtx {
             return Err(CryptoError::BnDivisionByZero);
         }
         if modulus.limbs()[0] & 1 == 0 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let m_size = modulus.num_limbs();

@@ -38,7 +38,7 @@ impl ElGamalKeyPair {
 
         // p must be > 2
         if p.cmp_abs(&two) != std::cmp::Ordering::Greater {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // x ∈ [2, p-2]: random in [0, p-3) then add 2
@@ -73,7 +73,7 @@ impl ElGamalKeyPair {
     /// of the order-q subgroup. This is slow for large bit sizes.
     pub fn generate(bits: usize) -> Result<Self, CryptoError> {
         if bits < 32 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let p = generate_safe_prime(bits)?;
@@ -91,7 +91,7 @@ impl ElGamalKeyPair {
 
         // Verify 0 < m < p (m = 0 would lose information)
         if m.is_zero() || m.cmp_abs(&self.p) != std::cmp::Ordering::Less {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // Random k ∈ [1, p-2]
@@ -129,7 +129,7 @@ impl ElGamalKeyPair {
     /// Decrypt a ciphertext, recovering the plaintext integer bytes.
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if ciphertext.len() < 5 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // Parse: 4-byte c1_len || c1 || c2
@@ -137,7 +137,7 @@ impl ElGamalKeyPair {
             u32::from_be_bytes([ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3]])
                 as usize;
         if ciphertext.len() < 4 + c1_len + 1 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let c1 = BigNum::from_bytes_be(&ciphertext[4..4 + c1_len]);

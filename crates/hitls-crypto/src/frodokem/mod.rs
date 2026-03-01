@@ -140,7 +140,7 @@ impl FrodoKemKeyPair {
         let n_bar = p.n_bar;
 
         if ciphertext.len() != p.ct_size {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // Parse secret key: s || pk || S^T_bytes || pk_hash

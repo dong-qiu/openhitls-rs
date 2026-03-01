@@ -84,7 +84,7 @@ pub fn get_params(parameter_set: u32) -> Result<MlDsaParams, CryptoError> {
         44 => Ok(MLDSA_44),
         65 => Ok(MLDSA_65),
         87 => Ok(MLDSA_87),
-        _ => Err(CryptoError::InvalidArg),
+        _ => Err(CryptoError::InvalidArg("")),
     }
 }
 
@@ -386,11 +386,7 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
     loop {
         // y = ExpandMask(ρ', κ)
         for (i, yi) in y.iter_mut().enumerate() {
-            *yi = sample_mask_poly(
-                &rho_prime,
-                (kappa + i as u32) as u16,
-                params.gamma1,
-            );
+            *yi = sample_mask_poly(&rho_prime, (kappa + i as u32) as u16, params.gamma1);
         }
 
         // y_hat = NTT(y) — copy then NTT in-place, no clone/alloc

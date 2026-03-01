@@ -91,7 +91,7 @@ impl Sm9MasterKey {
         signature: &[u8],
     ) -> Result<bool, CryptoError> {
         if self.key_type != Sm9KeyType::Sign {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         alg::verify(message, user_id, signature, &self.master_public)
     }
@@ -99,7 +99,7 @@ impl Sm9MasterKey {
     /// Encrypt a message to a user ID.
     pub fn encrypt(&self, user_id: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if self.key_type != Sm9KeyType::Encrypt {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         alg::encrypt(plaintext, user_id, &self.master_public)
     }
@@ -122,7 +122,7 @@ impl Sm9UserKey {
     /// Requires the master public key for computing the pairing.
     pub fn sign(&self, message: &[u8], master_pub: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if self.key_type != Sm9KeyType::Sign {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         alg::sign(message, &self.private_key, master_pub)
     }
@@ -130,7 +130,7 @@ impl Sm9UserKey {
     /// Decrypt an SM9 ciphertext using this user's private key.
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if self.key_type != Sm9KeyType::Encrypt {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         alg::decrypt(ciphertext, &self.private_key, &self.user_id)
     }

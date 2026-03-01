@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phases I1–I82, T1–T66, R1–R12, P1–P62 complete (3666 tests, 21 ignored)
+- **Status**: Phases I1–I82, T1–T67, R1–R12, P1–P62 complete (3666 tests, 21 ignored)
 
 ## Workspace Structure
 
@@ -132,7 +132,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases I1–I82, T1–T66, R1–R12, P1–P62 complete (3666 tests, 21 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
+Phases I1–I82, T1–T67, R1–R12, P1–P62 complete (3666 tests, 21 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
 
 ### Completed Phases (Summary)
 
@@ -217,5 +217,6 @@ Key milestones:
 - Phase T63: PQC fuzz + signature sign fuzz — ML-KEM encap/decap, ML-DSA sign/verify, SLH-DSA sign/verify (fast variants), RSA sign (PKCS1v15/PSS), ECDSA sign (P-256/P-384/P-521), Ed25519 full coverage, SM2 sign/encrypt/decrypt, DSA sign (small params). Total: +8 fuzz targets (26→34), +80 corpus seeds (158→238), PQC coverage 0→3/6, sign-path coverage 0→5/7.
 - Phase T65: Test coverage enhancement — CI switched from cargo-tarpaulin to cargo-llvm-cov with `--branch` coverage, +66 tests across TLS connection layer (+17 integration), crypto low-coverage files (+28), CLI commands (+14), TLS crate (+5). Coverage targets: GCM non-standard nonce, McEliece matrix ops, DRBG counter, DSA edge cases, FIPS KAT/PCT boundaries, ElGamal error paths, DigestVariant SHA-1, CLI s_client/s_server/speed.
 - Phase T66: CI hardening + HMAC fix + test coverage expansion — CI pipeline: `needs: [fmt, clippy]` job dependency graph, fuzz crash artifact fix, i686 32-bit cross-compilation, `cargo doc` CI with `-D warnings`. HMAC: `reset()` now fallible (`Result<(), CryptoError>`), proper error propagation in 6 callers. Tests: +66 across GCM (non-standard nonce, multi-block AAD, precomputed table), DRBG (carry propagation, generate_bytes), TLS cipher suite params (RSA/DHE_PSK/ECDHE_ECDSA), CLI (hex decode, cipher roundtrips, port boundaries, EC P-384). Total: 3666 tests (21 ignored).
+- Phase T67: Code quality hardening — Dependabot configuration, Windows CI matrix, `CryptoError::InvalidArg` changed from unit variant to `&'static str` payload, hash operations replace `.unwrap()` with `?` propagation across 50+ files, descriptive context strings added to 16 `InvalidArg` call sites. Test count unchanged: 3666 (21 ignored).
 
 See `DEV_LOG.md` for detailed phase tables (including test, refactoring, and performance phases) and `PROMPT_LOG.md` for prompt/response log.

@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I82 (82 phases)
-- Testing: T1–T66 (64 phases)
+- Testing: T1–T67 (65 phases)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P62 (62 phases)
 
@@ -231,6 +231,7 @@ Category summary:
 | 219 | P62 | Perf | GHASH HW Zero-Copy Batch Processing | 2026-03-01 |
 | 220 | T65 | Test | Test Coverage Enhancement (+66 tests, CI coverage infra) | 2026-03-01 |
 | 221 | T66 | Test | CI Hardening + HMAC Fix + Test Coverage Expansion (+66 tests) | 2026-03-01 |
+| 222 | T67 | Test | Code Quality Hardening — Dependabot, Windows CI, InvalidArg payload, hash ? propagation | 2026-03-01 |
 
 ---
 
@@ -12056,3 +12057,119 @@ Four-commit phase addressing CI pipeline hardening, HMAC error propagation fix, 
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - `cargo doc --workspace --all-features --no-deps`: 0 warnings
+
+---
+
+## Phase T67 — Code Quality Hardening (2026-03-01)
+
+### Summary
+Four-part quality hardening phase addressing supply-chain automation, CI platform coverage, error-handling robustness, and error message clarity across the `hitls-crypto` crate. No new tests added; test count remains 3666 (21 ignored).
+
+### Part A: Dependabot Configuration
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/dependabot.yml` | New | Dependabot config for GitHub Actions and Cargo ecosystems; weekly cadence; PRs assigned to `dongqiu` |
+
+### Part B: Windows CI Matrix
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/ci.yml` | Modified | Added `windows-latest` to test matrix OS list (was `[ubuntu-latest, macos-latest]`) |
+
+### Part C: `CryptoError::InvalidArg` Payload + Hash `?` Propagation
+
+Changed `CryptoError::InvalidArg` from a unit variant to a `&'static str` payload variant, enabling descriptive error context. Updated all ~50+ call sites across the workspace to pass a string argument (empty `""` initially). Simultaneously replaced `.unwrap()` / `.expect()` on hash digest operations with `?` propagation, making hash errors properly surfaced instead of panicking.
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-types/src/error.rs` | Modified | `InvalidArg` → `InvalidArg(&'static str)`; error message becomes `"invalid argument: {0}"` |
+| `crates/hitls-crypto/src/ed25519/mod.rs` | Modified | `sha512()` and `reduce_scalar_wide()` results use `?`; `InvalidArg` gets `""` |
+| `crates/hitls-crypto/src/ed448/mod.rs` | Modified | SHAKE operations and scalar ops use `?`; `InvalidArg` gets `""` |
+| `crates/hitls-crypto/src/rsa/mod.rs` | Modified | RSA padding/hashing operations use `?` |
+| `crates/hitls-crypto/src/rsa/oaep.rs` | Modified | `l_hash()` returns `Result`; `mgf1_sha256()` returns `Result`; test fixed |
+| `crates/hitls-crypto/src/rsa/pss.rs` | Modified | `mgf1_sha256()` uses `?` |
+| `crates/hitls-crypto/src/rsa/pkcs1v15.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/sha3/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/sm2/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/sm9/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/sm9/hash.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/sm9/ecp.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/sm9/ecp2.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/sm9/alg.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/sm9/fp2.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/ecc/p256_point.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/ecc/sm2_point.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/modes/gcm.rs` | Modified | `InvalidArg("")` |
+| `crates/hitls-crypto/src/modes/ccm.rs` | Modified | `InvalidArg("")` |
+| `crates/hitls-crypto/src/modes/hctr.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/modes/wrap.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/gmac/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/cbc_mac.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/cmac/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/drbg/ctr_drbg.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/drbg/sm4_ctr_drbg.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/pbkdf2/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/siphash/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/scrypt/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/hpke/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/hybridkem/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/mceliece/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/mldsa/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/mlkem/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/mlkem/poly.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/frodokem/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/xmss/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/elgamal/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-crypto/src/paillier/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-auth/src/privpass/mod.rs` | Modified | Hash ops use `?` |
+| `crates/hitls-bignum/src/gcd.rs` | Modified | `InvalidArg("")` |
+| `crates/hitls-bignum/src/montgomery.rs` | Modified | `InvalidArg("")` |
+| `crates/hitls-bignum/src/rand.rs` | Modified | `InvalidArg("")` |
+| `crates/hitls-pki/src/pkcs8/encrypted.rs` | Modified | `InvalidArg("")` |
+| `crates/hitls-utils/src/base64/mod.rs` | Modified | `InvalidArg("")` |
+
+### Part D: Descriptive `InvalidArg` Context Strings
+
+Replaced empty `""` strings in `InvalidArg("")` calls with descriptive messages in 16 specific `hitls-crypto` modules, making error messages actionable for callers.
+
+| File | Context Strings Added |
+|------|----------------------|
+| `crates/hitls-crypto/src/chacha20/mod.rs` | `"key must be 32 bytes"`, `"nonce must be 12 bytes"`, `"invalid tag length"` |
+| `crates/hitls-crypto/src/aes/soft.rs` | `"invalid AES block size"` |
+| `crates/hitls-crypto/src/aes/aes_neon.rs` | `"invalid AES block size"` |
+| `crates/hitls-crypto/src/aes/aes_ni.rs` | `"invalid AES block size"` |
+| `crates/hitls-crypto/src/sm4/mod.rs` | `"invalid SM4 block size"` |
+| `crates/hitls-crypto/src/modes/gcm.rs` | `"GCM ciphertext too short"` |
+| `crates/hitls-crypto/src/modes/ccm.rs` | `"CCM nonce length invalid"`, `"CCM tag length invalid"`, `"CCM input too long"` |
+| `crates/hitls-crypto/src/modes/cbc.rs` | `"CBC input not block-aligned"` |
+| `crates/hitls-crypto/src/modes/ecb.rs` | `"ECB input not block-aligned"` |
+| `crates/hitls-crypto/src/modes/xts.rs` | `"XTS tweak must be 16 bytes"`, `"XTS data too short"` |
+| `crates/hitls-crypto/src/ed25519/mod.rs` | `"seed must be 32 bytes"`, `"public key must be 32 bytes"` |
+| `crates/hitls-crypto/src/ed448/mod.rs` | `"seed must be 57 bytes"`, `"public key must be 57 bytes"`, `"context must be <= 255 bytes"` |
+| `crates/hitls-crypto/src/x25519/mod.rs` | `"key must be 32 bytes"` |
+| `crates/hitls-crypto/src/x448/mod.rs` | `"key must be 56 bytes"` |
+| `crates/hitls-crypto/src/dh/mod.rs` | `"DH prime too small"`, `"DH generator invalid"`, `"DH group not found"`, `"DH public key out of range"` |
+| `crates/hitls-crypto/src/dsa/mod.rs` | `"DSA p too small"`, `"DSA q size mismatch"`, `"DSA g must be > 1"`, `"DSA g must be < p"`, `"DSA private key out of range"`, `"DSA public key out of range"`, `"DSA private key not set"`, `"invalid DSA signature encoding"` |
+
+Note: `dsa/mod.rs` required splitting the combined `g_bn <= BigNum::from_u64(1) || g_bn >= p_bn` condition into two separate `if` checks to provide distinct error messages.
+
+### Test Count (Post T67)
+Test counts unchanged — all changes are code quality improvements, no new tests.
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1233 (14 ignored) |
+| hitls-tls | 1411 |
+| hitls-pki | 405 |
+| hitls-bignum | 80 |
+| hitls-utils | 66 |
+| hitls-auth | 33 |
+| hitls-cli | 152 (5 ignored) |
+| hitls-integration-tests | 260 (2 ignored) |
+| **Total** | **3666 (21 ignored)** |
+
+### Build Status (Post T67)
+- `cargo test --workspace --all-features`: 3,645 passed, 0 failed, 21 ignored (3,666 total)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean

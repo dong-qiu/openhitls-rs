@@ -34,7 +34,7 @@ fn digest_info_prefix(digest_len: usize) -> Result<&'static [u8], CryptoError> {
         32 => Ok(DIGEST_INFO_SHA256),
         48 => Ok(DIGEST_INFO_SHA384),
         64 => Ok(DIGEST_INFO_SHA512),
-        _ => Err(CryptoError::InvalidArg),
+        _ => Err(CryptoError::InvalidArg("")),
     }
 }
 

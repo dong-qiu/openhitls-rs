@@ -140,7 +140,7 @@ impl Cmac {
     /// Finalize the CMAC computation and write the result to `out`.
     pub fn finish(&mut self, out: &mut [u8]) -> Result<(), CryptoError> {
         if out.len() < AES_BLOCK_SIZE {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let mut last_block = [0u8; AES_BLOCK_SIZE];

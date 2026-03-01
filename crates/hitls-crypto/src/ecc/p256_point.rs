@@ -450,11 +450,11 @@ pub(crate) fn bignum_to_p256_point(
     let x_arr: &[u8; 32] = x_vec
         .as_slice()
         .try_into()
-        .map_err(|_| CryptoError::InvalidArg)?;
+        .map_err(|_| CryptoError::InvalidArg(""))?;
     let y_arr: &[u8; 32] = y_vec
         .as_slice()
         .try_into()
-        .map_err(|_| CryptoError::InvalidArg)?;
+        .map_err(|_| CryptoError::InvalidArg(""))?;
     let x_fe = P256FieldElement::from_bytes(x_arr);
     let y_fe = P256FieldElement::from_bytes(y_arr);
     Ok(P256JacobianPoint::from_affine(&x_fe, &y_fe))

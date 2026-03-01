@@ -52,14 +52,14 @@ impl Ed25519KeyPair {
     /// Create an Ed25519 key pair from a 32-byte private seed.
     pub fn from_seed(seed: &[u8]) -> Result<Self, CryptoError> {
         if seed.len() != 32 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("seed must be 32 bytes"));
         }
 
         let mut private_key = [0u8; 32];
         private_key.copy_from_slice(seed);
 
         // Derive public key: hash seed, clamp, scalar_mul_base
-        let h = sha512(&private_key);
+        let h = sha512(&private_key)?;
         let mut a = [0u8; 32];
         a.copy_from_slice(&h[..32]);
         clamp(&mut a);
@@ -76,7 +76,7 @@ impl Ed25519KeyPair {
     /// Create an Ed25519 verifier from a 32-byte public key (verify-only).
     pub fn from_public_key(public_key: &[u8]) -> Result<Self, CryptoError> {
         if public_key.len() != 32 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("public key must be 32 bytes"));
         }
 
         // Validate the public key can be decoded as a point
@@ -99,7 +99,7 @@ impl Ed25519KeyPair {
         }
 
         // Step 1: h = SHA-512(seed); a = clamp(h[0..32]); prefix = h[32..64]
-        let h = sha512(&self.private_key);
+        let h = sha512(&self.private_key)?;
         let mut a = [0u8; 32];
         a.copy_from_slice(&h[..32]);
         clamp(&mut a);
@@ -107,12 +107,14 @@ impl Ed25519KeyPair {
 
         // Step 2: r = SHA-512(prefix || message) mod L
         let mut hasher = Sha512::new();
-        hasher.update(prefix).map_err(|_| CryptoError::InvalidArg)?;
+        hasher
+            .update(prefix)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(message)
-            .map_err(|_| CryptoError::InvalidArg)?;
-        let r_hash = hasher.finish().map_err(|_| CryptoError::InvalidArg)?;
-        let r_scalar = reduce_scalar_wide(&r_hash);
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let r_hash = hasher.finish().map_err(|_| CryptoError::InvalidArg(""))?;
+        let r_scalar = reduce_scalar_wide(&r_hash)?;
 
         // Step 3: R = r * B
         let r_point = scalar_mul_base(&r_scalar);
@@ -122,18 +124,18 @@ impl Ed25519KeyPair {
         let mut hasher = Sha512::new();
         hasher
             .update(&r_bytes)
-            .map_err(|_| CryptoError::InvalidArg)?;
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(&self.public_key)
-            .map_err(|_| CryptoError::InvalidArg)?;
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(message)
-            .map_err(|_| CryptoError::InvalidArg)?;
-        let k_hash = hasher.finish().map_err(|_| CryptoError::InvalidArg)?;
-        let k_scalar = reduce_scalar_wide(&k_hash);
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_hash = hasher.finish().map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_scalar = reduce_scalar_wide(&k_hash)?;
 
         // Step 5: S = (r + k * a) mod L
-        let s_scalar = scalar_muladd(&k_scalar, &a, &r_scalar);
+        let s_scalar = scalar_muladd(&k_scalar, &a, &r_scalar)?;
 
         // Step 6: signature = R || S
         let mut sig = [0u8; 64];
@@ -177,15 +179,15 @@ impl Ed25519KeyPair {
         let mut hasher = Sha512::new();
         hasher
             .update(&r_bytes)
-            .map_err(|_| CryptoError::InvalidArg)?;
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(&self.public_key)
-            .map_err(|_| CryptoError::InvalidArg)?;
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(message)
-            .map_err(|_| CryptoError::InvalidArg)?;
-        let k_hash = hasher.finish().map_err(|_| CryptoError::InvalidArg)?;
-        let k_scalar = reduce_scalar_wide(&k_hash);
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_hash = hasher.finish().map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_scalar = reduce_scalar_wide(&k_hash)?;
 
         // Verify: S*B == R + k*A
         let sb = scalar_mul_base(&s_bytes);
@@ -202,10 +204,10 @@ impl Ed25519KeyPair {
 }
 
 /// SHA-512 helper.
-fn sha512(data: &[u8]) -> [u8; 64] {
+fn sha512(data: &[u8]) -> Result<[u8; 64], CryptoError> {
     let mut hasher = Sha512::new();
-    hasher.update(data).unwrap();
-    hasher.finish().unwrap()
+    hasher.update(data)?;
+    hasher.finish()
 }
 
 /// Clamp a 32-byte scalar for Ed25519.
@@ -216,7 +218,7 @@ fn clamp(a: &mut [u8; 32]) {
 }
 
 /// Reduce a 64-byte (512-bit) hash to a 32-byte scalar mod L using BigNum.
-fn reduce_scalar_wide(hash: &[u8; 64]) -> [u8; 32] {
+fn reduce_scalar_wide(hash: &[u8; 64]) -> Result<[u8; 32], CryptoError> {
     // Convert from little-endian to BigNum (big-endian)
     let mut be_bytes = [0u8; 64];
     for i in 0..64 {
@@ -232,7 +234,7 @@ fn reduce_scalar_wide(hash: &[u8; 64]) -> [u8; 32] {
     let l = BigNum::from_bytes_be(&l_be);
 
     // val mod L
-    let result = val.mod_reduce(&l).unwrap();
+    let result = val.mod_reduce(&l)?;
     let result_be = result.to_bytes_be();
 
     // Convert back to little-endian 32 bytes
@@ -241,11 +243,11 @@ fn reduce_scalar_wide(hash: &[u8; 64]) -> [u8; 32] {
     for i in 0..len {
         out[i] = result_be[result_be.len() - 1 - i];
     }
-    out
+    Ok(out)
 }
 
 /// Compute (a * b + c) mod L using BigNum. All inputs are 32-byte little-endian scalars.
-fn scalar_muladd(a: &[u8; 32], b: &[u8; 32], c: &[u8; 32]) -> [u8; 32] {
+fn scalar_muladd(a: &[u8; 32], b: &[u8; 32], c: &[u8; 32]) -> Result<[u8; 32], CryptoError> {
     // Convert to big-endian
     let to_be = |le: &[u8; 32]| -> [u8; 32] {
         let mut be = [0u8; 32];
@@ -268,7 +270,7 @@ fn scalar_muladd(a: &[u8; 32], b: &[u8; 32], c: &[u8; 32]) -> [u8; 32] {
     // (a * b + c) mod L
     let ab = a_bn.mul(&b_bn);
     let abc = ab.add(&c_bn);
-    let result = abc.mod_reduce(&l).unwrap();
+    let result = abc.mod_reduce(&l)?;
     let result_be = result.to_bytes_be();
 
     // Convert back to LE 32 bytes
@@ -277,7 +279,7 @@ fn scalar_muladd(a: &[u8; 32], b: &[u8; 32], c: &[u8; 32]) -> [u8; 32] {
     for i in 0..len {
         out[i] = result_be[result_be.len() - 1 - i];
     }
-    out
+    Ok(out)
 }
 
 /// Check if a scalar is canonical (< L).

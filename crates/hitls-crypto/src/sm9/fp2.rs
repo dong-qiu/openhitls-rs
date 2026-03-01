@@ -133,7 +133,7 @@ impl Fp2 {
 
     pub fn from_bytes_be(data: &[u8]) -> Result<Fp2, CryptoError> {
         if data.len() < 64 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         Ok(Fp2 {
             c0: Fp::from_bytes_be(&data[..32])?,

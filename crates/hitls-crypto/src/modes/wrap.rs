@@ -16,7 +16,7 @@ const DEFAULT_IV: [u8; 8] = [0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6];
 /// Returns the wrapped key (8 bytes longer than `plaintext_key`).
 pub fn key_wrap(kek: &[u8], plaintext_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if plaintext_key.len() < 16 || plaintext_key.len() % 8 != 0 {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
 
     let n = plaintext_key.len() / 8;
@@ -67,7 +67,7 @@ pub fn key_wrap(kek: &[u8], plaintext_key: &[u8]) -> Result<Vec<u8>, CryptoError
 /// Returns the unwrapped key (8 bytes shorter than `wrapped_key`).
 pub fn key_unwrap(kek: &[u8], wrapped_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if wrapped_key.len() < 24 || wrapped_key.len() % 8 != 0 {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
 
     let n = wrapped_key.len() / 8 - 1;
@@ -174,10 +174,13 @@ mod tests {
         // 8-byte plaintext — min is 16
         assert!(matches!(
             key_wrap(&kek, &[0u8; 8]),
-            Err(CryptoError::InvalidArg)
+            Err(CryptoError::InvalidArg(_))
         ));
         // 0 bytes
-        assert!(matches!(key_wrap(&kek, &[]), Err(CryptoError::InvalidArg)));
+        assert!(matches!(
+            key_wrap(&kek, &[]),
+            Err(CryptoError::InvalidArg(_))
+        ));
     }
 
     #[test]
@@ -186,12 +189,12 @@ mod tests {
         // 17-byte plaintext — not a multiple of 8
         assert!(matches!(
             key_wrap(&kek, &[0u8; 17]),
-            Err(CryptoError::InvalidArg)
+            Err(CryptoError::InvalidArg(""))
         ));
         // 25-byte wrapped — not a multiple of 8 for unwrap
         assert!(matches!(
             key_unwrap(&kek, &[0u8; 25]),
-            Err(CryptoError::InvalidArg)
+            Err(CryptoError::InvalidArg(""))
         ));
     }
 

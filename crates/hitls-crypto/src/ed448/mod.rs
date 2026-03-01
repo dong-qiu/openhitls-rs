@@ -44,14 +44,14 @@ impl Ed448KeyPair {
     /// Create an Ed448 key pair from a 57-byte private seed.
     pub fn from_seed(seed: &[u8]) -> Result<Self, CryptoError> {
         if seed.len() != 57 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("seed must be 57 bytes"));
         }
 
         let mut private_key = [0u8; 57];
         private_key.copy_from_slice(seed);
 
         // Derive public key: SHAKE256(seed, 114) → first 57 bytes = scalar (clamped)
-        let h = shake256_114(&private_key);
+        let h = shake256_114(&private_key)?;
         let mut a = [0u8; 57];
         a.copy_from_slice(&h[..57]);
         clamp(&mut a);
@@ -68,7 +68,7 @@ impl Ed448KeyPair {
     /// Create an Ed448 verifier from a 57-byte public key (verify-only).
     pub fn from_public_key(public_key: &[u8]) -> Result<Self, CryptoError> {
         if public_key.len() != 57 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("public key must be 57 bytes"));
         }
 
         // Validate the public key can be decoded as a point
@@ -99,11 +99,11 @@ impl Ed448KeyPair {
             return Err(CryptoError::EccInvalidPrivateKey);
         }
         if context.len() > 255 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("context must be <= 255 bytes"));
         }
 
         // Step 1: h = SHAKE256(seed, 114); a = clamp(h[0..57]); prefix = h[57..114]
-        let h = shake256_114(&self.private_key);
+        let h = shake256_114(&self.private_key)?;
         let mut a = [0u8; 57];
         a.copy_from_slice(&h[..57]);
         clamp(&mut a);
@@ -113,13 +113,19 @@ impl Ed448KeyPair {
 
         // Step 2: r = SHAKE256(dom4 || prefix || message, 114) mod L
         let mut hasher = Shake256::new();
-        hasher.update(&dom4).map_err(|_| CryptoError::InvalidArg)?;
-        hasher.update(prefix).map_err(|_| CryptoError::InvalidArg)?;
+        hasher
+            .update(&dom4)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        hasher
+            .update(prefix)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(message)
-            .map_err(|_| CryptoError::InvalidArg)?;
-        let r_hash = hasher.squeeze(114).map_err(|_| CryptoError::InvalidArg)?;
-        let r_scalar = reduce_scalar_wide_114(&r_hash);
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let r_hash = hasher
+            .squeeze(114)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let r_scalar = reduce_scalar_wide_114(&r_hash)?;
 
         // Step 3: R = r * B
         let r_point = scalar_mul_base(&r_scalar);
@@ -127,21 +133,25 @@ impl Ed448KeyPair {
 
         // Step 4: k = SHAKE256(dom4 || R || public_key || message, 114) mod L
         let mut hasher = Shake256::new();
-        hasher.update(&dom4).map_err(|_| CryptoError::InvalidArg)?;
+        hasher
+            .update(&dom4)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(&r_bytes)
-            .map_err(|_| CryptoError::InvalidArg)?;
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(&self.public_key)
-            .map_err(|_| CryptoError::InvalidArg)?;
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(message)
-            .map_err(|_| CryptoError::InvalidArg)?;
-        let k_hash = hasher.squeeze(114).map_err(|_| CryptoError::InvalidArg)?;
-        let k_scalar = reduce_scalar_wide_114(&k_hash);
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_hash = hasher
+            .squeeze(114)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_scalar = reduce_scalar_wide_114(&k_hash)?;
 
         // Step 5: S = (r + k * a) mod L
-        let s_scalar = scalar_muladd(&k_scalar, &a, &r_scalar);
+        let s_scalar = scalar_muladd(&k_scalar, &a, &r_scalar)?;
 
         // Step 6: signature = R(57) || S(57)
         let mut sig = [0u8; 114];
@@ -168,7 +178,7 @@ impl Ed448KeyPair {
             return Ok(false);
         }
         if context.len() > 255 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("context must be <= 255 bytes"));
         }
 
         // Parse signature: R = sig[0..57], S = sig[57..114]
@@ -198,18 +208,22 @@ impl Ed448KeyPair {
 
         // k = SHAKE256(dom4 || R || A || message, 114) mod L
         let mut hasher = Shake256::new();
-        hasher.update(&dom4).map_err(|_| CryptoError::InvalidArg)?;
+        hasher
+            .update(&dom4)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(&r_bytes)
-            .map_err(|_| CryptoError::InvalidArg)?;
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(&self.public_key)
-            .map_err(|_| CryptoError::InvalidArg)?;
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(message)
-            .map_err(|_| CryptoError::InvalidArg)?;
-        let k_hash = hasher.squeeze(114).map_err(|_| CryptoError::InvalidArg)?;
-        let k_scalar = reduce_scalar_wide_114(&k_hash);
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_hash = hasher
+            .squeeze(114)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_scalar = reduce_scalar_wide_114(&k_hash)?;
 
         // Verify: [S]B == R + [k]A
         let sb = scalar_mul_base(&s_bytes);
@@ -242,10 +256,10 @@ impl Ed448KeyPair {
             return Err(CryptoError::EccInvalidPrivateKey);
         }
         if context.len() > 255 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("context must be <= 255 bytes"));
         }
 
-        let h = shake256_114(&self.private_key);
+        let h = shake256_114(&self.private_key)?;
         let mut a = [0u8; 57];
         a.copy_from_slice(&h[..57]);
         clamp(&mut a);
@@ -254,28 +268,42 @@ impl Ed448KeyPair {
         let dom4 = dom4_prefix(1, context); // flag=1 for Ed448ph
 
         let mut hasher = Shake256::new();
-        hasher.update(&dom4).map_err(|_| CryptoError::InvalidArg)?;
-        hasher.update(prefix).map_err(|_| CryptoError::InvalidArg)?;
-        hasher.update(ph_msg).map_err(|_| CryptoError::InvalidArg)?;
-        let r_hash = hasher.squeeze(114).map_err(|_| CryptoError::InvalidArg)?;
-        let r_scalar = reduce_scalar_wide_114(&r_hash);
+        hasher
+            .update(&dom4)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        hasher
+            .update(prefix)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        hasher
+            .update(ph_msg)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let r_hash = hasher
+            .squeeze(114)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let r_scalar = reduce_scalar_wide_114(&r_hash)?;
 
         let r_point = scalar_mul_base(&r_scalar);
         let r_bytes = r_point.to_bytes();
 
         let mut hasher = Shake256::new();
-        hasher.update(&dom4).map_err(|_| CryptoError::InvalidArg)?;
+        hasher
+            .update(&dom4)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(&r_bytes)
-            .map_err(|_| CryptoError::InvalidArg)?;
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(&self.public_key)
-            .map_err(|_| CryptoError::InvalidArg)?;
-        hasher.update(ph_msg).map_err(|_| CryptoError::InvalidArg)?;
-        let k_hash = hasher.squeeze(114).map_err(|_| CryptoError::InvalidArg)?;
-        let k_scalar = reduce_scalar_wide_114(&k_hash);
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        hasher
+            .update(ph_msg)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_hash = hasher
+            .squeeze(114)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_scalar = reduce_scalar_wide_114(&k_hash)?;
 
-        let s_scalar = scalar_muladd(&k_scalar, &a, &r_scalar);
+        let s_scalar = scalar_muladd(&k_scalar, &a, &r_scalar)?;
 
         let mut sig = [0u8; 114];
         sig[..57].copy_from_slice(&r_bytes);
@@ -315,16 +343,22 @@ impl Ed448KeyPair {
         let dom4 = dom4_prefix(1, context);
 
         let mut hasher = Shake256::new();
-        hasher.update(&dom4).map_err(|_| CryptoError::InvalidArg)?;
+        hasher
+            .update(&dom4)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(&r_bytes)
-            .map_err(|_| CryptoError::InvalidArg)?;
+            .map_err(|_| CryptoError::InvalidArg(""))?;
         hasher
             .update(&self.public_key)
-            .map_err(|_| CryptoError::InvalidArg)?;
-        hasher.update(ph_msg).map_err(|_| CryptoError::InvalidArg)?;
-        let k_hash = hasher.squeeze(114).map_err(|_| CryptoError::InvalidArg)?;
-        let k_scalar = reduce_scalar_wide_114(&k_hash);
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        hasher
+            .update(ph_msg)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_hash = hasher
+            .squeeze(114)
+            .map_err(|_| CryptoError::InvalidArg(""))?;
+        let k_scalar = reduce_scalar_wide_114(&k_hash)?;
 
         let sb = scalar_mul_base(&s_bytes);
         let ka = scalar_mul(&k_scalar, &a_point);
@@ -350,10 +384,10 @@ fn dom4_prefix(flag: u8, context: &[u8]) -> Vec<u8> {
 }
 
 /// SHAKE256 helper: hash data and squeeze 114 bytes.
-fn shake256_114(data: &[u8]) -> Vec<u8> {
+fn shake256_114(data: &[u8]) -> Result<Vec<u8>, CryptoError> {
     let mut hasher = Shake256::new();
-    hasher.update(data).unwrap();
-    hasher.squeeze(114).unwrap()
+    hasher.update(data)?;
+    hasher.squeeze(114)
 }
 
 /// Prehash for Ed448ph: SHAKE256(msg, 64).
@@ -361,8 +395,10 @@ fn prehash(message: &[u8]) -> Result<[u8; 64], CryptoError> {
     let mut hasher = Shake256::new();
     hasher
         .update(message)
-        .map_err(|_| CryptoError::InvalidArg)?;
-    let result = hasher.squeeze(64).map_err(|_| CryptoError::InvalidArg)?;
+        .map_err(|_| CryptoError::InvalidArg(""))?;
+    let result = hasher
+        .squeeze(64)
+        .map_err(|_| CryptoError::InvalidArg(""))?;
     let mut out = [0u8; 64];
     out.copy_from_slice(&result);
     Ok(out)
@@ -377,7 +413,7 @@ fn clamp(a: &mut [u8; 57]) {
 }
 
 /// Reduce a 114-byte (912-bit) hash to a 57-byte scalar mod L using BigNum.
-fn reduce_scalar_wide_114(hash: &[u8]) -> [u8; 57] {
+fn reduce_scalar_wide_114(hash: &[u8]) -> Result<[u8; 57], CryptoError> {
     // Convert from little-endian to BigNum (big-endian)
     let len = hash.len();
     let mut be_bytes = vec![0u8; len];
@@ -394,7 +430,7 @@ fn reduce_scalar_wide_114(hash: &[u8]) -> [u8; 57] {
     let l = BigNum::from_bytes_be(&l_be);
 
     // val mod L
-    let result = val.mod_reduce(&l).unwrap();
+    let result = val.mod_reduce(&l)?;
     let result_be = result.to_bytes_be();
 
     // Convert back to little-endian 57 bytes
@@ -403,11 +439,11 @@ fn reduce_scalar_wide_114(hash: &[u8]) -> [u8; 57] {
     for i in 0..rlen {
         out[i] = result_be[result_be.len() - 1 - i];
     }
-    out
+    Ok(out)
 }
 
 /// Compute (a * b + c) mod L using BigNum. All inputs are 57-byte little-endian scalars.
-fn scalar_muladd(a: &[u8; 57], b: &[u8; 57], c: &[u8; 57]) -> [u8; 57] {
+fn scalar_muladd(a: &[u8; 57], b: &[u8; 57], c: &[u8; 57]) -> Result<[u8; 57], CryptoError> {
     let to_be = |le: &[u8; 57]| -> [u8; 57] {
         let mut be = [0u8; 57];
         for i in 0..57 {
@@ -429,7 +465,7 @@ fn scalar_muladd(a: &[u8; 57], b: &[u8; 57], c: &[u8; 57]) -> [u8; 57] {
     // (a * b + c) mod L
     let ab = a_bn.mul(&b_bn);
     let abc = ab.add(&c_bn);
-    let result = abc.mod_reduce(&l).unwrap();
+    let result = abc.mod_reduce(&l)?;
     let result_be = result.to_bytes_be();
 
     // Convert back to LE 57 bytes
@@ -438,7 +474,7 @@ fn scalar_muladd(a: &[u8; 57], b: &[u8; 57], c: &[u8; 57]) -> [u8; 57] {
     for i in 0..len {
         out[i] = result_be[result_be.len() - 1 - i];
     }
-    out
+    Ok(out)
 }
 
 /// Check if a 57-byte scalar is canonical (< L).

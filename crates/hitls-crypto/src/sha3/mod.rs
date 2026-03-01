@@ -206,8 +206,7 @@ impl KeccakState {
             // XOR buf into state inline (avoids buf.clone() to work around borrow)
             let rate = self.rate;
             for i in 0..rate / 8 {
-                let word =
-                    u64::from_le_bytes(self.buf[i * 8..(i + 1) * 8].try_into().unwrap());
+                let word = u64::from_le_bytes(self.buf[i * 8..(i + 1) * 8].try_into().unwrap());
                 self.state[i] ^= word;
             }
             keccak_f1600(&mut self.state);
@@ -367,7 +366,7 @@ impl Sha3_224 {
 
     pub fn update(&mut self, data: &[u8]) -> Result<(), CryptoError> {
         if self.inner.squeezed {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         self.inner.absorb(data);
         Ok(())
@@ -412,7 +411,7 @@ impl Sha3_256 {
 
     pub fn update(&mut self, data: &[u8]) -> Result<(), CryptoError> {
         if self.inner.squeezed {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         self.inner.absorb(data);
         Ok(())
@@ -457,7 +456,7 @@ impl Sha3_384 {
 
     pub fn update(&mut self, data: &[u8]) -> Result<(), CryptoError> {
         if self.inner.squeezed {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         self.inner.absorb(data);
         Ok(())
@@ -502,7 +501,7 @@ impl Sha3_512 {
 
     pub fn update(&mut self, data: &[u8]) -> Result<(), CryptoError> {
         if self.inner.squeezed {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         self.inner.absorb(data);
         Ok(())
@@ -544,7 +543,7 @@ impl Shake128 {
 
     pub fn update(&mut self, data: &[u8]) -> Result<(), CryptoError> {
         if self.inner.squeezed {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         self.inner.absorb(data);
         Ok(())
@@ -585,7 +584,7 @@ impl Shake256 {
 
     pub fn update(&mut self, data: &[u8]) -> Result<(), CryptoError> {
         if self.inner.squeezed {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         self.inner.absorb(data);
         Ok(())

@@ -40,7 +40,7 @@ pub fn cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, 
         return Err(CryptoError::InvalidIvLength);
     }
     if ciphertext.len() % AES_BLOCK_SIZE != 0 || ciphertext.is_empty() {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("CBC input not block-aligned"));
     }
     let cipher = AesKey::new(key)?;
 
@@ -119,7 +119,7 @@ pub fn cbc_decrypt_with<C: BlockCipher>(
         return Err(CryptoError::InvalidIvLength);
     }
     if ciphertext.len() % bs != 0 || ciphertext.is_empty() {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("CBC input not block-aligned"));
     }
 
     let mut output = ciphertext.to_vec();

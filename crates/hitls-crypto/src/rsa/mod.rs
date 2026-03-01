@@ -102,7 +102,7 @@ impl RsaPublicKey {
                 self.raw_encrypt(&em)
             }
             RsaPadding::None => self.raw_encrypt(plaintext),
-            _ => Err(CryptoError::InvalidArg),
+            _ => Err(CryptoError::InvalidArg("")),
         }
     }
 
@@ -122,7 +122,7 @@ impl RsaPublicKey {
         match padding {
             RsaPadding::Pkcs1v15Sign => pkcs1v15::pkcs1v15_verify_unpad(&em, digest, self.k),
             RsaPadding::Pss => pss::pss_verify_unpad(&em, digest, self.bits - 1),
-            _ => Err(CryptoError::InvalidArg),
+            _ => Err(CryptoError::InvalidArg("")),
         }
     }
 
@@ -150,7 +150,7 @@ impl RsaPublicKey {
     fn raw_encrypt(&self, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let m = BigNum::from_bytes_be(data);
         if m >= self.n {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         let c = m.mod_exp(&self.e, &self.n)?;
         c.to_bytes_be_padded(self.k)
@@ -292,7 +292,7 @@ impl RsaPrivateKey {
     /// Decrypt ciphertext using this private key.
     pub fn decrypt(&self, padding: RsaPadding, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if ciphertext.len() != self.k {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let em = self.raw_decrypt(ciphertext)?;
@@ -301,7 +301,7 @@ impl RsaPrivateKey {
             RsaPadding::Pkcs1v15Encrypt => pkcs1v15::pkcs1v15_decrypt_unpad(&em),
             RsaPadding::Oaep => oaep::oaep_decrypt_unpad(&em),
             RsaPadding::None => Ok(em),
-            _ => Err(CryptoError::InvalidArg),
+            _ => Err(CryptoError::InvalidArg("")),
         }
     }
 
@@ -317,7 +317,7 @@ impl RsaPrivateKey {
                 self.raw_decrypt(&em)
             }
             RsaPadding::None => self.raw_decrypt(digest),
-            _ => Err(CryptoError::InvalidArg),
+            _ => Err(CryptoError::InvalidArg("")),
         }
     }
 
@@ -361,7 +361,7 @@ impl RsaPrivateKey {
     fn raw_decrypt(&self, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let c = BigNum::from_bytes_be(data);
         if c >= self.n {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         // CRT: m1 = c^dp mod p, m2 = c^dq mod q
@@ -411,7 +411,7 @@ fn generate_rsa_prime(bits: usize, e: &BigNum) -> Result<BigNum, CryptoError> {
 
 /// MGF1 mask generation function (RFC 8017 B.2.1).
 /// Uses SHA-256 as the hash function.
-pub(crate) fn mgf1_sha256(seed: &[u8], mask_len: usize) -> Vec<u8> {
+pub(crate) fn mgf1_sha256(seed: &[u8], mask_len: usize) -> Result<Vec<u8>, CryptoError> {
     use crate::sha2::Sha256;
 
     let h_len = 32; // SHA-256 output size
@@ -420,14 +420,14 @@ pub(crate) fn mgf1_sha256(seed: &[u8], mask_len: usize) -> Vec<u8> {
 
     for counter in 0..iterations {
         let mut hasher = Sha256::new();
-        hasher.update(seed).unwrap();
-        hasher.update(&(counter as u32).to_be_bytes()).unwrap();
-        let hash = hasher.finish().unwrap();
+        hasher.update(seed)?;
+        hasher.update(&(counter as u32).to_be_bytes())?;
+        let hash = hasher.finish()?;
         t.extend_from_slice(&hash);
     }
 
     t.truncate(mask_len);
-    t
+    Ok(t)
 }
 
 #[cfg(test)]
@@ -610,12 +610,12 @@ mod tests {
         // RFC 8017 doesn't provide standalone MGF1 test vectors,
         // so we test basic properties: deterministic and correct length
         let seed = b"test seed";
-        let mask1 = mgf1_sha256(seed, 48);
-        let mask2 = mgf1_sha256(seed, 48);
+        let mask1 = mgf1_sha256(seed, 48).unwrap();
+        let mask2 = mgf1_sha256(seed, 48).unwrap();
         assert_eq!(mask1.len(), 48);
         assert_eq!(mask1, mask2); // deterministic
 
-        let mask3 = mgf1_sha256(seed, 64);
+        let mask3 = mgf1_sha256(seed, 64).unwrap();
         assert_eq!(mask3.len(), 64);
         assert_eq!(&mask3[..48], &mask1[..]); // prefix matches shorter mask
     }

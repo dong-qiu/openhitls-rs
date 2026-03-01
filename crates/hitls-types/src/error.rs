@@ -8,8 +8,8 @@ pub enum CryptoError {
     MemAllocFail,
     #[error("invalid algorithm id")]
     InvalidAlgId,
-    #[error("invalid argument")]
-    InvalidArg,
+    #[error("invalid argument: {0}")]
+    InvalidArg(&'static str),
     #[error("operation not supported")]
     NotSupported,
     #[error("invalid key")]
@@ -248,7 +248,10 @@ mod tests {
             CryptoError::InvalidAlgId.to_string(),
             "invalid algorithm id"
         );
-        assert_eq!(CryptoError::InvalidArg.to_string(), "invalid argument");
+        assert_eq!(
+            CryptoError::InvalidArg("").to_string(),
+            "invalid argument: "
+        );
         assert_eq!(
             CryptoError::NotSupported.to_string(),
             "operation not supported"

@@ -11,7 +11,7 @@ use hitls_types::CryptoError;
 /// Input must be a multiple of 16 bytes (no padding).
 pub fn ecb_encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if plaintext.len() % AES_BLOCK_SIZE != 0 || plaintext.is_empty() {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("ECB input not block-aligned"));
     }
     let cipher = AesKey::new(key)?;
     let mut output = plaintext.to_vec();
@@ -25,7 +25,7 @@ pub fn ecb_encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>
 /// Input must be a multiple of 16 bytes.
 pub fn ecb_decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if ciphertext.len() % AES_BLOCK_SIZE != 0 || ciphertext.is_empty() {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("ECB input not block-aligned"));
     }
     let cipher = AesKey::new(key)?;
     let mut output = ciphertext.to_vec();

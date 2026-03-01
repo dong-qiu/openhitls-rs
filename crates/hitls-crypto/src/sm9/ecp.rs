@@ -46,7 +46,7 @@ impl EcPointG1 {
     /// Convert to affine (x, y).
     pub fn to_affine(&self) -> Result<(Fp, Fp), CryptoError> {
         if self.is_infinity() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         let z_inv = self.z.inv()?;
         let z2 = z_inv.sqr()?;
@@ -203,7 +203,7 @@ impl EcPointG1 {
     /// Deserialize from 64 bytes.
     pub fn from_bytes(data: &[u8]) -> Result<Self, CryptoError> {
         if data.len() != 64 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         let x = Fp::from_bytes_be(&data[..32])?;
         let y = Fp::from_bytes_be(&data[32..64])?;

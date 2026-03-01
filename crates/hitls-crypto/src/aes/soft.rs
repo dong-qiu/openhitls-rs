@@ -125,7 +125,7 @@ impl SoftAesKey {
     /// Encrypt a single 16-byte block in place.
     pub fn encrypt_block(&self, block: &mut [u8]) -> Result<(), CryptoError> {
         if block.len() != AES_BLOCK_SIZE {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("invalid AES block size"));
         }
         let mut s = [0u8; 16];
         s.copy_from_slice(block);
@@ -150,7 +150,7 @@ impl SoftAesKey {
     /// Decrypt a single 16-byte block in place.
     pub fn decrypt_block(&self, block: &mut [u8]) -> Result<(), CryptoError> {
         if block.len() != AES_BLOCK_SIZE {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("invalid AES block size"));
         }
         let mut s = [0u8; 16];
         s.copy_from_slice(block);

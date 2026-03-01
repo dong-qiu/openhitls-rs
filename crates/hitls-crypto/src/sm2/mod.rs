@@ -198,7 +198,7 @@ impl Sm2KeyPair {
     /// Returns ciphertext in new format: C1 || C3 || C2 (GB/T 32918.4-2016).
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if plaintext.is_empty() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let n = self.group.order();
@@ -400,10 +400,14 @@ fn decode_der_signature(data: &[u8]) -> Result<(BigNum, BigNum), CryptoError> {
     let mut decoder = Decoder::new(data);
     let mut seq = decoder
         .read_sequence()
-        .map_err(|_| CryptoError::InvalidArg)?;
+        .map_err(|_| CryptoError::InvalidArg(""))?;
 
-    let r_bytes = seq.read_integer().map_err(|_| CryptoError::InvalidArg)?;
-    let s_bytes = seq.read_integer().map_err(|_| CryptoError::InvalidArg)?;
+    let r_bytes = seq
+        .read_integer()
+        .map_err(|_| CryptoError::InvalidArg(""))?;
+    let s_bytes = seq
+        .read_integer()
+        .map_err(|_| CryptoError::InvalidArg(""))?;
 
     Ok((
         BigNum::from_bytes_be(r_bytes),

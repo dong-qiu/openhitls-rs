@@ -74,7 +74,7 @@ pub(crate) fn kdf(z: &[u8], klen: usize) -> Result<Vec<u8>, CryptoError> {
 
     // Check that the key is not all zeros
     if result.iter().all(|&b| b == 0) {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
 
     Ok(result)

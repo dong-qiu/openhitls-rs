@@ -209,7 +209,7 @@ impl Sm4Key {
     /// Encrypt a single 16-byte block in place.
     pub fn encrypt_block(&self, block: &mut [u8]) -> Result<(), CryptoError> {
         if block.len() != SM4_BLOCK_SIZE {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("invalid SM4 block size"));
         }
         self.crypt_block(block, &self.round_keys_enc)
     }
@@ -217,7 +217,7 @@ impl Sm4Key {
     /// Decrypt a single 16-byte block in place.
     pub fn decrypt_block(&self, block: &mut [u8]) -> Result<(), CryptoError> {
         if block.len() != SM4_BLOCK_SIZE {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg("invalid SM4 block size"));
         }
         self.crypt_block(block, &self.round_keys_dec)
     }

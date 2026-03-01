@@ -7,7 +7,7 @@ impl BigNum {
     /// Compute the greatest common divisor of self and other using the Euclidean algorithm.
     pub fn gcd(&self, other: &BigNum) -> Result<BigNum, CryptoError> {
         if self.is_zero() && other.is_zero() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         if self.is_zero() {
             let mut r = other.clone();
@@ -47,7 +47,7 @@ impl BigNum {
     /// Returns `Err(BnNoInverse)` if gcd(self, modulus) != 1.
     pub fn mod_inv(&self, modulus: &BigNum) -> Result<BigNum, CryptoError> {
         if modulus.is_zero() || modulus.is_one() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let one = BigNum::from_u64(1);

@@ -98,7 +98,7 @@ impl XmssKeyPair {
     /// Returns signature: idx(4) || R(n) || WOTS_sig(wots_len*n) || auth(h*n).
     pub fn sign(&mut self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if self.leaf_idx >= self.max_signatures {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
 
         let p = get_params(self.param_id);

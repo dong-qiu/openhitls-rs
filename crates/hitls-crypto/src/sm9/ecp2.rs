@@ -54,7 +54,7 @@ impl EcPointG2 {
     /// Convert to affine.
     pub fn to_affine(&self) -> Result<(Fp2, Fp2), CryptoError> {
         if self.is_infinity() {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         let z_inv = self.z.inv()?;
         let z2 = z_inv.sqr()?;
@@ -216,7 +216,7 @@ impl EcPointG2 {
     /// SM9 convention: x1(32) || x0(32) || y1(32) || y0(32).
     pub fn from_bytes(data: &[u8]) -> Result<Self, CryptoError> {
         if data.len() != 128 {
-            return Err(CryptoError::InvalidArg);
+            return Err(CryptoError::InvalidArg(""));
         }
         let x = Fp2::new(
             Fp::from_bytes_be(&data[32..64])?, // c0

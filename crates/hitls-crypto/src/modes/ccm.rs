@@ -203,7 +203,7 @@ fn ccm_decrypt_impl<C: BlockCipher>(
 ) -> Result<Vec<u8>, CryptoError> {
     validate_params(nonce, tag_len)?;
     if ciphertext.len() < tag_len {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("CCM input too long"));
     }
 
     let ct_len = ciphertext.len() - tag_len;
@@ -250,11 +250,11 @@ fn ccm_decrypt_impl<C: BlockCipher>(
 fn validate_params(nonce: &[u8], tag_len: usize) -> Result<(), CryptoError> {
     // Nonce length: 7-13 bytes
     if nonce.len() < 7 || nonce.len() > 13 {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("CCM nonce length invalid"));
     }
     // Tag length: must be even, 4-16
     if !(4..=16).contains(&tag_len) || tag_len % 2 != 0 {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg("CCM tag length invalid"));
     }
     Ok(())
 }
@@ -431,11 +431,11 @@ mod tests {
         // 6-byte nonce — min is 7
         assert!(matches!(
             ccm_encrypt(&key, &[0u8; 6], &[], &[1, 2, 3], 8),
-            Err(CryptoError::InvalidArg)
+            Err(CryptoError::InvalidArg("CCM nonce length invalid"))
         ));
         assert!(matches!(
             ccm_decrypt(&key, &[0u8; 6], &[], &[0u8; 24], 8),
-            Err(CryptoError::InvalidArg)
+            Err(CryptoError::InvalidArg("CCM nonce length invalid"))
         ));
     }
 
@@ -445,11 +445,11 @@ mod tests {
         // 14-byte nonce — max is 13
         assert!(matches!(
             ccm_encrypt(&key, &[0u8; 14], &[], &[1, 2, 3], 8),
-            Err(CryptoError::InvalidArg)
+            Err(CryptoError::InvalidArg("CCM nonce length invalid"))
         ));
         assert!(matches!(
             ccm_decrypt(&key, &[0u8; 14], &[], &[0u8; 24], 8),
-            Err(CryptoError::InvalidArg)
+            Err(CryptoError::InvalidArg("CCM nonce length invalid"))
         ));
     }
 

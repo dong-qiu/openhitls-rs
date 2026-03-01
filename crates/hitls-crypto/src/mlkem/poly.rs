@@ -50,7 +50,7 @@ pub(crate) fn sample_cbd(buf: &[u8], eta: usize) -> Result<Poly, CryptoError> {
     match eta {
         2 => Ok(cbd2(buf)),
         3 => Ok(cbd3(buf)),
-        _ => Err(CryptoError::InvalidArg),
+        _ => Err(CryptoError::InvalidArg("")),
     }
 }
 

@@ -27,7 +27,7 @@ pub(crate) fn pss_sign_pad_with_salt(
     salt_len: usize,
 ) -> Result<Vec<u8>, CryptoError> {
     if digest.len() != H_LEN {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
 
     let em_len = em_bits.div_ceil(8);
@@ -64,8 +64,8 @@ fn pss_encode(digest: &[u8], em_bits: usize, salt: &[u8]) -> Result<Vec<u8>, Cry
 
     // H = Hash(M')
     let mut hasher = Sha256::new();
-    hasher.update(&m_prime).unwrap();
-    let h = hasher.finish().unwrap();
+    hasher.update(&m_prime)?;
+    let h = hasher.finish()?;
 
     // DB = PS || 0x01 || salt
     // PS = zero octets, length = emLen - hLen - sLen - 2
@@ -78,7 +78,7 @@ fn pss_encode(digest: &[u8], em_bits: usize, salt: &[u8]) -> Result<Vec<u8>, Cry
     debug_assert_eq!(db.len(), db_len);
 
     // dbMask = MGF1(H, emLen - hLen - 1)
-    let db_mask = mgf1_sha256(&h, db_len);
+    let db_mask = mgf1_sha256(&h, db_len)?;
 
     // maskedDB = DB XOR dbMask (in-place on db)
     for (d, m) in db.iter_mut().zip(db_mask.iter()) {
@@ -122,7 +122,7 @@ pub(crate) fn pss_verify_unpad_with_salt(
     salt_len: usize,
 ) -> Result<bool, CryptoError> {
     if digest.len() != H_LEN {
-        return Err(CryptoError::InvalidArg);
+        return Err(CryptoError::InvalidArg(""));
     }
 
     let em_len = em_bits.div_ceil(8);
@@ -155,7 +155,7 @@ pub(crate) fn pss_verify_unpad_with_salt(
     }
 
     // dbMask = MGF1(H, emLen - hLen - 1)
-    let db_mask = mgf1_sha256(h, db_len);
+    let db_mask = mgf1_sha256(h, db_len)?;
 
     // DB = maskedDB XOR dbMask (in-place on copy)
     let mut db = masked_db.to_vec();
@@ -190,8 +190,8 @@ pub(crate) fn pss_verify_unpad_with_salt(
 
     // H' = Hash(M')
     let mut hasher = Sha256::new();
-    hasher.update(&m_prime).unwrap();
-    let h_prime = hasher.finish().unwrap();
+    hasher.update(&m_prime)?;
+    let h_prime = hasher.finish()?;
 
     // Compare H == H' (constant-time)
     use subtle::ConstantTimeEq;
