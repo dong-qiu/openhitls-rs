@@ -336,15 +336,12 @@ fn mldsa_keygen(params: &MlDsaParams) -> Result<(Vec<u8>, Vec<u8>), CryptoError>
 
 /// ML-DSA Sign (Algorithm 2 of FIPS 204).
 fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>, CryptoError> {
-    let (rho, key, tr, s1, s2, t0) = decode_sk(sk, params);
+    let (rho, key, tr, mut s1_hat, mut s2_hat, mut t0_hat) = decode_sk(sk, params);
 
     // A = ExpandA(ρ)
     let a_hat = expand_a(&rho, params.k, params.l);
 
-    // NTT(s1), NTT(s2), NTT(t0)
-    let mut s1_hat: Vec<Poly> = s1.clone();
-    let mut s2_hat: Vec<Poly> = s2.clone();
-    let mut t0_hat: Vec<Poly> = t0.clone();
+    // NTT in-place — originals are never used in non-NTT form
     for poly in s1_hat.iter_mut() {
         ntt::ntt(poly);
     }
@@ -373,46 +370,57 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
     let mut hash_input = vec![0u8; hash_input_len];
     hash_input[..64].copy_from_slice(&mu);
 
+    // Pre-allocate all loop-local buffers once (zero per-iteration heap allocation)
+    let k = params.k;
+    let l = params.l;
+    let mut y = vec![[0i32; N]; l];
+    let mut y_hat = vec![[0i32; N]; l];
+    let mut w_hat = vec![[0i32; N]; k];
+    let mut w = vec![[0i32; N]; k];
+    let mut z = vec![[0i32; N]; l];
+    let mut r0_vec = vec![[0i32; N]; k];
+    let mut ct0 = vec![[0i32; N]; k];
+    let mut h = vec![vec![false; N]; k];
+
     let mut kappa: u32 = 0;
     loop {
         // y = ExpandMask(ρ', κ)
-        let mut y = Vec::with_capacity(params.l);
-        for i in 0..params.l {
-            y.push(sample_mask_poly(
+        for (i, yi) in y.iter_mut().enumerate() {
+            *yi = sample_mask_poly(
                 &rho_prime,
                 (kappa + i as u32) as u16,
                 params.gamma1,
-            ));
+            );
         }
 
-        // w = A * NTT(y)
-        let mut y_hat: Vec<Poly> = y.clone();
-        for poly in y_hat.iter_mut() {
-            ntt::ntt(poly);
+        // y_hat = NTT(y) — copy then NTT in-place, no clone/alloc
+        for i in 0..l {
+            y_hat[i] = y[i];
+            ntt::ntt(&mut y_hat[i]);
         }
-        let mut w_hat = matvec_mul(&a_hat, &y_hat, params.k, params.l);
-        // basemul R^{-1} + invntt F_INV256 correction = correct result
-        let mut w = vec![[0i32; N]; params.k];
-        for i in 0..params.k {
+
+        // w = INTT(A * y_hat) — use pre-allocated w_hat buffer
+        for p in w_hat.iter_mut() {
+            *p = [0i32; N];
+        }
+        matvec_mul_into(&mut w_hat, &a_hat, &y_hat, k, l);
+        for i in 0..k {
             ntt::invntt(&mut w_hat[i]);
             for j in 0..N {
                 w[i][j] = ntt::caddq(ntt::reduce32(w_hat[i][j]));
             }
         }
 
-        // w1 = HighBits(w)
-        let mut w1 = vec![[0i32; N]; params.k];
-        for i in 0..params.k {
+        // c_tilde = H(μ || pack_w1(HighBits(w)), ct_len)
+        // Compute HighBits and pack directly — no w1 buffer needed
+        for (i, wi) in w[..k].iter().enumerate() {
+            let offset = 64 + i * w1_bytes;
+            let mut w1_poly = [0i32; N];
             for j in 0..N {
-                w1[i][j] = highbits(w[i][j], params.gamma2);
+                w1_poly[j] = highbits(wi[j], params.gamma2);
             }
-        }
-
-        // c_tilde = H(μ || pack_w1(w1), ct_len) — pack directly into pre-allocated buffer
-        for (idx, poly) in w1.iter().enumerate() {
-            let offset = 64 + idx * w1_bytes;
             pack_w1_into(
-                poly,
+                &w1_poly,
                 params.gamma2,
                 &mut hash_input[offset..offset + w1_bytes],
             );
@@ -425,9 +433,9 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
         let mut c_hat = c;
         ntt::ntt(&mut c_hat);
 
-        // z = y + c*s1
-        let mut z = y.clone();
-        for i in 0..params.l {
+        // z = y + c*s1 — copy y into pre-allocated z, no clone/alloc
+        z[..l].copy_from_slice(&y[..l]);
+        for i in 0..l {
             let mut cs1 = [0i32; N];
             ntt::pointwise_mul(&mut cs1, &c_hat, &s1_hat[i]);
             ntt::invntt(&mut cs1);
@@ -443,13 +451,13 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
             .iter()
             .all(|poly| poly_chknorm(poly, params.gamma1 - params.beta));
         if !z_ok {
-            kappa += params.l as u32;
+            kappa += l as u32;
             continue;
         }
 
-        // w - c*s2
-        let mut r0_vec = w.clone();
-        for i in 0..params.k {
+        // r0_vec = w - c*s2 — copy w into pre-allocated r0_vec, no clone/alloc
+        r0_vec[..k].copy_from_slice(&w[..k]);
+        for i in 0..k {
             let mut cs2 = [0i32; N];
             ntt::pointwise_mul(&mut cs2, &c_hat, &s2_hat[i]);
             ntt::invntt(&mut cs2);
@@ -467,13 +475,12 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
             })
         });
         if !r0_ok {
-            kappa += params.l as u32;
+            kappa += l as u32;
             continue;
         }
 
-        // c*t0
-        let mut ct0 = vec![[0i32; N]; params.k];
-        for i in 0..params.k {
+        // c*t0 — reuse pre-allocated ct0 buffer
+        for i in 0..k {
             ntt::pointwise_mul(&mut ct0[i], &c_hat, &t0_hat[i]);
             ntt::invntt(&mut ct0[i]);
             ntt::reduce_poly(&mut ct0[i]);
@@ -482,14 +489,16 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
         // Check 3: ||ct0||∞ < gamma2
         let ct0_ok = ct0.iter().all(|poly| poly_chknorm(poly, params.gamma2));
         if !ct0_ok {
-            kappa += params.l as u32;
+            kappa += l as u32;
             continue;
         }
 
-        // Compute hints
-        let mut h = vec![vec![false; N]; params.k];
+        // Compute hints — reuse pre-allocated h buffer
+        for row in h.iter_mut() {
+            row.fill(false);
+        }
         let mut hint_count = 0;
-        for i in 0..params.k {
+        for i in 0..k {
             for j in 0..N {
                 let w_minus_cs2_plus_ct0 = ntt::freeze(r0_vec[i][j] + ct0[i][j]);
                 if make_hint(-ct0[i][j], w_minus_cs2_plus_ct0, params.gamma2) {
@@ -500,7 +509,7 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
         }
 
         if hint_count > params.omega {
-            kappa += params.l as u32;
+            kappa += l as u32;
             continue;
         }
 

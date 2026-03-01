@@ -524,12 +524,24 @@ pub(crate) fn hash_h2_into(a: &[u8], b: &[u8], output: &mut [u8]) {
 /// Matrix-vector product in NTT domain: r = A * s.
 pub(crate) fn matvec_mul(a_hat: &[Vec<Poly>], s_hat: &[Poly], k: usize, l: usize) -> Vec<Poly> {
     let mut r = vec![[0i32; N]; k];
+    matvec_mul_into(&mut r, a_hat, s_hat, k, l);
+    r
+}
+
+/// Matrix-vector product in NTT domain into pre-allocated buffer.
+/// Caller must ensure `r.len() >= k` and each element is zeroed before call.
+pub(crate) fn matvec_mul_into(
+    r: &mut [Poly],
+    a_hat: &[Vec<Poly>],
+    s_hat: &[Poly],
+    k: usize,
+    l: usize,
+) {
     for i in 0..k {
         for j in 0..l {
             ntt::pointwise_mul_acc(&mut r[i], &a_hat[i][j], &s_hat[j]);
         }
     }
-    r
 }
 
 /// Compute infinity norm of a polynomial.
