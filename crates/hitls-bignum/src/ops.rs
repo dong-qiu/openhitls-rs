@@ -186,7 +186,7 @@ impl BigNum {
 
     /// Optimized squaring: self * self.
     ///
-    /// Exploits the symmetry a[i]*a[j] == a[j]*a[i] to compute cross-products
+    /// Exploits the symmetry `a[i]*a[j] == a[j]*a[i]` to compute cross-products
     /// once and double them, then add diagonal terms.
     pub fn sqr(&self) -> BigNum {
         let a = self.limbs();

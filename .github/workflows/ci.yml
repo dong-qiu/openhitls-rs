@@ -36,6 +36,7 @@ jobs:
 
   test:
     name: Test
+    needs: [fmt, clippy]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -52,6 +53,7 @@ jobs:
 
   test-features:
     name: Test Feature Combinations
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -83,6 +85,7 @@ jobs:
 
   miri:
     name: Miri (UB detection)
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     env:
       MIRIFLAGS: "-Zmiri-disable-isolation"
@@ -109,6 +112,7 @@ jobs:
 
   coverage:
     name: Code Coverage
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -133,18 +137,33 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   cross-check:
-    name: Cross-compile Check (aarch64)
+    name: Cross-compile Check
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [aarch64-unknown-linux-gnu, i686-unknown-linux-gnu]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace --all-features --target aarch64-unknown-linux-gnu
+      - run: cargo check --workspace --all-features --target ${{ matrix.target }}
+
+  doc:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: "-D warnings"
 
   ignored-tests:
     name: Slow & Ignored Tests
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -182,8 +201,9 @@ jobs:
             cargo fuzz run "$target" -- -max_total_time=60 -jobs=2 || true
           done
       - name: Upload crash artifacts
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-crashes
           path: fuzz/artifacts/
+          if-no-files-found: ignore

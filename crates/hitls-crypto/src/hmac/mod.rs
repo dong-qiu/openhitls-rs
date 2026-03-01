@@ -107,7 +107,7 @@ impl Hmac {
     }
 
     /// Reset the HMAC state for reuse with the same key.
-    /// Uses Digest::reset() to avoid Box<dyn Digest> re-allocation.
+    /// Uses `Digest::reset()` to avoid `Box<dyn Digest>` re-allocation.
     pub fn reset(&mut self) {
         let bs = self.block_size;
 
