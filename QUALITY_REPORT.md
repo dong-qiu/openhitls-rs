@@ -12,9 +12,9 @@
 | Layer | Mechanism | Coverage | Rating | Notes |
 |:-----:|-----------|----------|:------:|-------|
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | **A** | Full workspace, all features, all targets |
-| **L2** | Unit Tests | 3,600 tests (21 ignored), 100% pass rate | **A** | 3,400+ test fns + 92 async + 15 Wycheproof suites; all high-risk files directly tested |
-| **L3** | Integration Tests | 258 cross-crate tests (TCP loopback + DTLS resilience + OpenSSL interop) | **A** | 14 test files; 5 protocol variants × sync/async; OpenSSL s_client/s_server interop |
-| **L4** | Fuzz Testing | 40 fuzz targets + 238 seed corpus files | **A−** | 10 parse + 22 crypto semantic + 8 PQC/sign-path; coverage: RSA/ECDSA/SM2/ML-KEM/ML-DSA/SLH-DSA/DSA/Ed25519 |
+| **L2** | Unit Tests | 3,666 tests (21 ignored), 100% pass rate | **A** | 3,400+ test fns + 92 async + 15 Wycheproof suites; all high-risk files directly tested |
+| **L3** | Integration Tests | 260 cross-crate tests (TCP loopback + DTLS resilience + OpenSSL interop) | **A** | 14 test files; 5 protocol variants × sync/async; OpenSSL s_client/s_server interop |
+| **L4** | Fuzz Testing | 40 fuzz targets + 286 seed corpus files | **A−** | 10 parse + 22 crypto semantic + 8 PQC/sign-path; coverage: RSA/ECDSA/SM2/ML-KEM/ML-DSA/SLH-DSA/DSA/Ed25519 |
 | **L5** | Property-Based Testing | ~28 proptest blocks across 5 crates | **B−** | hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum |
 | **L6** | Standard Vectors | 15 Wycheproof suites + 7 FIPS KATs + 11 RFC vector sets + 10+ GB/T | **A** | 5,000+ vectors; all major algorithms covered |
 | **L7** | Concurrency & Side-Channel | 48 concurrency-aware tests; 6 timing tests | **C+** | Statistical timing analysis (Welch's t-test); multi-threaded stress tests |
@@ -22,33 +22,38 @@
 ### 1.2 CI/CD Pipeline
 
 ```
-GitHub Actions (.github/workflows/ci.yml)
-├── Format Check     cargo fmt --all -- --check
-├── Lint             cargo clippy --all-targets --all-features -- -D warnings
-├── Test Matrix      Ubuntu + macOS × Rust stable + MSRV 1.75
-├── Feature Testing  Individual feature flags (aes, sha2, rsa, sm2, pqc)
-├── Security Audit   rustsec/audit-check@v2
-├── UB Detection     Miri on hitls-bignum + hitls-utils
-├── Supply Chain     cargo-deny check (advisories + licenses + bans + sources)
-├── Fuzz Build       cargo fuzz build (nightly) — 40 targets: 10 parse + 22 semantic + 8 PQC/sign
-├── Bench Verify     cargo bench --no-run
-└── Coverage         cargo-llvm-cov → Codecov JSON + branch coverage (upgraded Phase T65)
+GitHub Actions (.github/workflows/ci.yml) — 14 jobs, dependency graph: fmt/clippy → test/coverage/miri/ignored
+├── Format Check       cargo fmt --all -- --check
+├── Clippy Lint        cargo clippy --all-targets --all-features -- -D warnings
+├── Test Matrix        Ubuntu + macOS + Windows × Rust stable + MSRV 1.75 (6 jobs)
+├── Feature Testing    Individual + combo feature flags (aes, sha2, rsa, sm2, pqc, tls13, tls12, tlcp)
+├── Security Audit     rustsec/audit-check@v2
+├── UB Detection       Miri on hitls-bignum + hitls-utils + hitls-crypto::benes
+├── Supply Chain       cargo-deny check (advisories + licenses + bans + sources)
+├── Fuzz Build         cargo fuzz check (nightly) — 40 targets
+├── Cross-compile      aarch64-unknown-linux-gnu + i686-unknown-linux-gnu
+├── Documentation      cargo doc --workspace --all-features -D warnings
+├── Ignored Tests      Timing + zeroize + slow keygen (weekly + on-demand)
+├── Bench Verify       cargo bench --no-run
+├── Coverage           cargo-llvm-cov → Codecov JSON + branch coverage
+├── Scheduled Fuzz     Weekly: all 40 targets × 60s each (Monday 03:00 UTC)
+└── Dependabot         Weekly cargo + github-actions dependency updates
 ```
 
 ### 1.3 Per-Crate Test Distribution
 
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
-| hitls-tls | 1,389 | 0 | 38.6% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat, connection state guards, crypt suite params |
-| hitls-crypto | 1,210 | 14 | 33.6% | 48 algorithm modules + HW accel + P-256 fast path + proptest + HW↔SW cross-validation + timing + zeroize + DRBG + GCM + FIPS PCT/KAT |
-| hitls-pki | 405 | 0 | 11.3% | X.509, PKCS#8/12, CMS (5 content types), encoding helpers, proptest roundtrips |
-| hitls-integration | 258 | 2 | 7.2% | Cross-crate TCP loopback, error scenarios, concurrency stress, DTLS resilience, OpenSSL interop, TLS 1.3/1.2 key_update + session resumption |
-| hitls-cli | 131 | 5 | 3.6% | 14 CLI commands, speed benchmarks, s_client/s_server edge cases |
-| hitls-utils | 66 | 0 | 1.8% | ASN.1, Base64, PEM, OID, proptest roundtrips |
+| hitls-tls | 1,411 | 0 | 38.5% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat, connection state guards, crypt suite params |
+| hitls-crypto | 1,233 | 14 | 33.6% | 48 algorithm modules + HW accel + P-256 fast path + proptest + HW↔SW cross-validation + timing + zeroize + DRBG + GCM + FIPS PCT/KAT |
+| hitls-pki | 405 | 0 | 11.0% | X.509, PKCS#8/12, CMS (5 content types), encoding helpers, proptest roundtrips |
+| hitls-integration | 260 | 2 | 7.1% | Cross-crate TCP loopback, error scenarios, concurrency stress, DTLS resilience, OpenSSL interop, TLS 1.3/1.2 key_update + session resumption |
+| hitls-cli | 152 | 5 | 4.1% | 14 CLI commands, speed benchmarks, s_client/s_server edge cases, hex/cipher/port edge cases |
 | hitls-bignum | 80 | 0 | 2.2% | Montgomery, Miller-Rabin, modular arithmetic, constant-time, random generation, proptest |
+| hitls-utils | 66 | 0 | 1.8% | ASN.1, Base64, PEM, OID, proptest roundtrips |
 | hitls-auth | 33 | 0 | 0.9% | HOTP/TOTP, SPAKE2+, Privacy Pass |
 | hitls-types | 26 | 0 | 0.7% | Enum definitions, error types |
-| **Total** | **3,600** | **21** | **100%** | |
+| **Total** | **3,666** | **21** | **100%** | |
 
 ### 1.4 Standard Compliance Coverage
 
@@ -72,20 +77,20 @@ GitHub Actions (.github/workflows/ci.yml)
 
 | Category | Count | % | Description |
 |----------|------:|--:|-------------|
-| Error handling | 358 | 9.9% | invalid/reject/wrong/error/fail paths |
-| Roundtrip | 340 | 9.4% | encrypt↔decrypt, sign↔verify, encode↔decode |
-| Edge case | 310 | 8.6% | empty/zero/boundary/single-byte/partial block |
-| Standard vectors | 106 | 2.9% | RFC/NIST/Wycheproof/KAT/GB/T test vectors |
-| Async | 92 | 2.6% | tokio::test async connection + handshake |
-| State machine | 590 | 16.4% | handshake/connected/not-connected state transitions |
+| Error handling | ~370 | 10.1% | invalid/reject/wrong/error/fail paths |
+| Roundtrip | ~350 | 9.5% | encrypt↔decrypt, sign↔verify, encode↔decode |
+| Edge case | ~325 | 8.9% | empty/zero/boundary/single-byte/partial block |
+| Standard vectors | ~106 | 2.9% | RFC/NIST/Wycheproof/KAT/GB/T test vectors |
+| Async | 92 | 2.5% | tokio::test async connection + handshake |
+| State machine | ~600 | 16.4% | handshake/connected/not-connected state transitions |
 | Property-based | ~28 | 0.8% | proptest blocks (5 crates: crypto + utils + tls + pki + bignum) |
 | Concurrency | 48 | 1.3% | Arc/Mutex/thread::spawn/tokio::spawn stress tests |
 | Timing/side-channel | 6 | 0.2% | Welch's t-test statistical timing analysis |
 | HW↔SW cross-validation | 8 | 0.2% | Software/hardware path differential tests |
 | Zeroize verification | 4 | 0.1% | Drop-based memory zeroing verification |
-| Other (deterministic, helper, etc.) | ~1,610 | 44.7% | Specific algorithm/module unit tests |
+| Other (deterministic, helper, etc.) | ~1,729 | 47.2% | Specific algorithm/module unit tests |
 
-**Key observations**: Error-handling tests (358) outnumber roundtrip tests (340), indicating good negative-path coverage. Property-based testing now spans 5/9 crates. Concurrency and timing tests have been significantly expanded. Fuzz coverage expanded from 14 → 40 targets with PQC and signature-path coverage.
+**Key observations**: Error-handling tests (~370) outnumber roundtrip tests (~350), indicating good negative-path coverage. Property-based testing now spans 5/9 crates. Concurrency and timing tests have been significantly expanded. Fuzz coverage expanded from 14 → 40 targets with PQC and signature-path coverage. Phase T67 added `CryptoError::InvalidArg(&'static str)` with ~30 descriptive context strings and eliminated 16 `.unwrap()` panic risks in crypto library code.
 
 ### 1.7 High-Risk Zero Direct Unit Test Files — **SIGNIFICANTLY REDUCED** (Phase T45–T46)
 
@@ -122,14 +127,17 @@ PARTIALLY CLOSED D8   Cross-implementation interop (Phase T53)      OpenSSL s_cl
 CLOSED           D9   Fuzz targets: parse-only                      Resolved (Phase T44/T59–T63: 40 targets, full crypto semantic + PQC coverage)
 MOSTLY CLOSED    D10  Crypto files without unit tests                Resolved (Phase T15–T17/T25/T65)
 ──────── Phase T43 深度分析 → Phase T45–T65 Quality Improvement ────────
-CLOSED           D11  Semantic/state-machine fuzz (Phase T44/T59–T63) 40 targets (10 parse + 22 semantic + 8 PQC/sign); 238 corpus files
+CLOSED           D11  Semantic/state-machine fuzz (Phase T44/T59–T63) 40 targets (10 parse + 22 semantic + 8 PQC/sign); 286 corpus files
 PARTIALLY CLOSED D12  Side-channel timing tests (Phase T49)         6 timing tests added (Welch's t-test); more algorithms needed
-CLOSED           D13  TLS connection code unit tests (Phase T45/153) +30 state guard + handshake edge case tests
+CLOSED           D13  TLS connection code unit tests (Phase T45/T46) +30 state guard + handshake edge case tests
 MOSTLY CLOSED    D14  Proptest scope expanded (Phase T48)           5/9 crates covered (was 2/9)
 PARTIALLY CLOSED D15  Concurrency stress tests (Phase T50)          +10 multi-threaded stress tests (48 total)
 CLOSED           D16  HW↔SW cross-validation (Phase T47)           +8 differential tests across all HW-accel modules
 CLOSED           D17  Zeroize runtime verification (Phase T52)      +4 drop-based memory zeroing tests
 CLOSED           D18  Feature flag smoke tests (Phase T51)          +4 smoke tests for feature subsets
+──────── Phase T66–T67 CI Hardening + Code Quality ────────
+CLOSED           D19  CI pipeline hardening (Phase T66)             Job dependency graph, Windows CI, cross-compile, cargo doc, Dependabot
+CLOSED           D20  Panic-free crypto library (Phase T67)         16 .unwrap()→? in hash/ed25519/ed448/rsa; InvalidArg context strings
 ```
 
 ### 2.2 D1 — 0-RTT Replay Protection ~~(Critical)~~ — **CLOSED** (Phase T9)
@@ -249,7 +257,7 @@ coverage:
 | AEAD + X.509 + deep handshake | 3 | GCM/ChaCha20 decrypt, X.509 verify, all 10 handshake decoders (Phase T44) |
 | PQC | 3 | ML-KEM encap/decap, ML-DSA sign/verify, SLH-DSA sign/verify (Phase T63) |
 | Signature sign-path | 5 | RSA PKCS1v15/PSS, ECDSA P-256/384/521, Ed25519, SM2, DSA (Phase T63) |
-| **Total** | **40** | **238 corpus seed files** |
+| **Total** | **40** | **286 corpus seed files** |
 
 ### 2.11 D10 — ~~30~~ ~14 Crypto Files Without Direct Unit Tests ~~(Low)~~ — **MOSTLY CLOSED** (Phase T15–T17/125)
 
@@ -284,7 +292,7 @@ Fuzz coverage expanded across 5 phases from 10 parse-only to 40 comprehensive ta
 | T61 | +2 | TLS 1.3 + TLS 1.2 state machine fuzz (arbitrary message sequences) |
 | T63 | +8 | PQC (ML-KEM/ML-DSA/SLH-DSA) + signature sign-path (RSA/ECDSA/Ed25519/SM2/DSA) |
 
-**Corpus**: 238 seed corpus files (79 original + 6 DTLS + 40 T59–T62 + 33 T61 + 80 T63).
+**Corpus**: 286 seed corpus files (79 original + 6 DTLS + 40 T59–T62 + 33 T61 + 80 T63 + 48 T65–T66).
 
 **Remaining gaps** (low priority):
 - Full TLS connection state machine fuzzing (arbitrary message sequences against live connection with crypto state)
@@ -416,11 +424,44 @@ Tests are `#[ignore]` (best-effort verification via drop behavior). Verified tha
 | `test_pqc_algorithms` | `cfg(feature="pqc")` | ML-KEM-768 encaps + ML-DSA-65 sign |
 | `test_minimal_no_default` | always | Verify `CryptoError` and basic types available |
 
-**CI matrix recommendation** (for future implementation):
-- `--no-default-features` — verify base compiles
-- `--features "aes,sha2,hmac"` — minimal default set
-- `--features "sm2,sm3,sm4"` — Chinese national algorithms
+**CI matrix recommendation** — now implemented in CI (Phase T66):
+- `--no-default-features` — verify base compiles (in test job)
+- `--features "aes,sha2"` / `--features "rsa,ecdsa"` / `--features "sm2,sm4"` — combo tests
 - `--features "pqc"` — post-quantum algorithms only
+- `--features "tls13"` / `--features "tls12"` / `--features "tlcp"` — protocol features
+
+### 2.20 D19 — CI Pipeline Hardening — **CLOSED** (Phase T66 + T67)
+
+**Phase T66** restructured CI with job dependency graph and added new jobs:
+
+| Improvement | Before | After |
+|------------|--------|-------|
+| Job dependencies | None (all parallel) | `needs: [fmt, clippy]` for test/coverage/miri/ignored |
+| OS matrix | Ubuntu + macOS (4 jobs) | Ubuntu + macOS + **Windows** (6 jobs) |
+| Cross-compile | None | aarch64-unknown-linux-gnu + **i686-unknown-linux-gnu** |
+| Documentation | None | `cargo doc --workspace -D warnings` |
+| Ignored tests | Not run in CI | Dedicated job runs timing/zeroize/slow keygen |
+| Fuzz artifacts | Not uploaded | `actions/upload-artifact@v4` on crash |
+| Dependabot | None | Weekly cargo + github-actions dependency updates |
+| Scheduled fuzz | None | Weekly: all 40 targets × 60s × 2 jobs |
+
+**Impact**: CI now catches documentation warnings, Windows-specific issues, 32-bit compilation failures, and automatically updates dependencies. Test matrix expanded from 4→6 jobs.
+
+### 2.21 D20 — Panic-Free Crypto Library Code — **CLOSED** (Phase T67)
+
+**Phase T67** eliminated all 16 `.unwrap()` calls on fallible crypto operations in library (non-test) code:
+
+| Module | Functions Changed | Unwraps Eliminated |
+|--------|------------------|:------------------:|
+| `rsa/pss.rs` | `pss_encode`, `pss_verify_unpad_with_salt` | 4 (hasher.update/finish) |
+| `rsa/mod.rs` | `mgf1_sha256` → `Result<Vec<u8>>` | 3 (update×2, finish) |
+| `rsa/oaep.rs` | `l_hash` → `Result<[u8; H_LEN]>` | 2 (update, finish) |
+| `ed25519/mod.rs` | `sha512`, `reduce_scalar_wide`, `scalar_muladd` → `Result` | 4 |
+| `ed448/mod.rs` | `shake256_114`, `reduce_scalar_wide_114`, `scalar_muladd` → `Result` | 3 |
+
+Additionally, `CryptoError::InvalidArg` changed from unit variant to `InvalidArg(&'static str)`, with ~30 high-value sites receiving descriptive context strings (key length, nonce length, parameter range, buffer size).
+
+**Impact**: Zero `.unwrap()` on fallible crypto ops in library code — panic risk eliminated. Error messages now include diagnostic context for faster debugging.
 
 ---
 
@@ -484,9 +525,12 @@ Phase T61         +2 fuzz  D11          TLS 1.3/1.2 state machine fuzz          
 Phase T62         infra    —            cargo-deny + CI hardening + subtle unification ✅
 Phase T63         +8 fuzz  D9/D11       PQC fuzz + signature sign-path fuzz            ✅
 Phase T65         +66      D7/D10       Test coverage enhancement + CI llvm-cov        ✅
+──────── CI Hardening + Code Quality (Phase T66–T67) ────────
+Phase T66         +66      D19          CI hardening + HMAC fix + test expansion        ✅
+Phase T67         0        D19/D20      Dependabot + Windows CI + unwrap→? + InvalidArg ✅
 ```
 
-**Result**: 2,585 → 3,600 tests (+1,015), 40 fuzz targets (238 corpus), all planned deficiencies addressed or significantly reduced.
+**Result**: 2,585 → 3,666 tests (+1,081), 40 fuzz targets (286 corpus), all planned deficiencies addressed or significantly reduced.
 
 ### 3.2 Phase T9 — 0-RTT Early Data + Replay Protection (~8 tests) ✅
 
@@ -679,36 +723,40 @@ Continued hardening beyond the original roadmap:
 
 ## 4. Coverage Targets — Final Status
 
-| Metric | Original (T8) | Target (T18) | Actual (T43) | Actual (T53) | **Actual (T65)** |
-|--------|:---------------:|:-------------:|:-------------:|:-----------:|:-----------------:|
-| Total tests | 2,634 | ~2,750+ | 3,184 | 3,264 | **3,600** |
-| Fuzz targets | 10 | 13 | 13 | 14 | **40** |
-| Fuzz corpus | 66 | ~79 | 79 | 85 | **238** |
-| Critical deficiencies (D1-D2) | 0 | 0 | 0 | 0 | **0** |
-| High deficiencies (D3-D5) | 2 partial | 0 | 0 | 0 | **0** (all closed) |
-| Crypto files with tests | 75% | 90%+ | ~90% | ~95% | **~97%** |
-| TLS files with tests | 100% | 100% | 100% | 100% | **100%** (+33 connection unit tests) |
-| PKI files with tests | ~85% | ~85% | 100% | 100% | **100%** |
-| Async connection type coverage | 100% | 100% | 100% | 100% | **100%** |
-| Extension negotiation coverage | 80%+ | 80%+ | 95%+ | 95%+ | **95%+** |
-| DTLS loss scenario coverage | 70%+ | 70%+ | 90%+ | 90%+ | **90%+** |
-| Property-based testing | No | Yes | Yes (20) | ~28 (5/9) | **~28 (5/9 crates)** |
-| Code coverage in CI | No | Yes | Yes | tarpaulin | **llvm-cov + branch** |
-| Timing tests | 0 | — | 0 | 6 | **6** (Welch's t-test) |
-| HW↔SW cross-validation | 0 | — | 0 | 8 | **8** differential tests |
-| Concurrency stress tests | 38 | — | 38 | 48 | **48** |
-| Zeroize verification | 0 | — | 0 | 4 | **4** drop-based tests |
-| Feature flag smoke tests | 0 | — | 0 | 4 | **4** combination tests |
-| Cross-impl interop | 0 | — | 0 | 2 | **2** OpenSSL tests |
-| Supply-chain policy | No | — | No | No | **Yes** (cargo-deny) |
+| Metric | Original (T8) | Target (T18) | Actual (T43) | Actual (T53) | Actual (T65) | **Actual (T67)** |
+|--------|:---------------:|:-------------:|:-------------:|:-----------:|:-----------:|:-----------------:|
+| Total tests | 2,634 | ~2,750+ | 3,184 | 3,264 | 3,600 | **3,666** |
+| Fuzz targets | 10 | 13 | 13 | 14 | 40 | **40** |
+| Fuzz corpus | 66 | ~79 | 79 | 85 | 238 | **286** |
+| Critical deficiencies (D1-D2) | 0 | 0 | 0 | 0 | 0 | **0** |
+| High deficiencies (D3-D5) | 2 partial | 0 | 0 | 0 | 0 | **0** (all closed) |
+| Crypto files with tests | 75% | 90%+ | ~90% | ~95% | ~97% | **~97%** |
+| TLS files with tests | 100% | 100% | 100% | 100% | 100% | **100%** (+33 connection unit tests) |
+| PKI files with tests | ~85% | ~85% | 100% | 100% | 100% | **100%** |
+| Async connection type coverage | 100% | 100% | 100% | 100% | 100% | **100%** |
+| Extension negotiation coverage | 80%+ | 80%+ | 95%+ | 95%+ | 95%+ | **95%+** |
+| DTLS loss scenario coverage | 70%+ | 70%+ | 90%+ | 90%+ | 90%+ | **90%+** |
+| Property-based testing | No | Yes | Yes (20) | ~28 (5/9) | ~28 (5/9) | **~28 (5/9 crates)** |
+| Code coverage in CI | No | Yes | Yes | tarpaulin | llvm-cov | **llvm-cov + branch** |
+| Timing tests | 0 | — | 0 | 6 | 6 | **6** (Welch's t-test) |
+| HW↔SW cross-validation | 0 | — | 0 | 8 | 8 | **8** differential tests |
+| Concurrency stress tests | 38 | — | 38 | 48 | 48 | **48** |
+| Zeroize verification | 0 | — | 0 | 4 | 4 | **4** drop-based tests |
+| Feature flag smoke tests | 0 | — | 0 | 4 | 4 | **4** combination tests |
+| Cross-impl interop | 0 | — | 0 | 2 | 2 | **2** OpenSSL tests |
+| Supply-chain policy | No | — | No | No | Yes | **Yes** (cargo-deny) |
+| CI OS coverage | 2 | — | 2 | 2 | 2 | **3** (+ Windows) |
+| Dependabot | No | — | No | No | No | **Yes** (cargo + GH Actions) |
+| Crypto unwrap panic risk | 16 | — | 16 | 16 | 16 | **0** (all → Result) |
+| InvalidArg context strings | 0 | — | 0 | 0 | 0 | **~30** diagnostic messages |
 
-All original targets met or exceeded. Quality Improvement Roadmap (T45–T65) closed or significantly addressed all remaining deficiencies. Defense model rating: **A−**.
+All original targets met or exceeded. Quality Improvement Roadmap (T45–T67) closed or significantly addressed all remaining deficiencies. Defense model rating: **A−**.
 
 ---
 
 ## 5. Priority Improvement Roadmap
 
-### 5.1 Overview — Post-T65 Status
+### 5.1 Overview — Post-T67 Status
 
 ```
 Priority   Deficiency   Status            Phase       Result
@@ -723,18 +771,20 @@ P1         D14          MOSTLY CLOSED     T48         Proptest in 5/9 crates (wa
 P2         D15          PARTIALLY CLOSED  T50         +10 stress tests (48 total)
 P2         D8           PARTIALLY CLOSED  T53         OpenSSL interop (TLS 1.3 ✅, TLS 1.2 known gap)
 P2         D18          CLOSED            T51         4 feature smoke tests
+P2         D19          CLOSED            T66/T67     CI hardening: Windows, cross-compile, doc check, Dependabot
+P2         D20          CLOSED            T67         16 unwrap→? + InvalidArg(&'static str) context
 P3         D17          CLOSED            T52         4 zeroize drop verification tests
 P3         D4r          OPEN              —           Requires handshake driver refactoring
 ```
 
-### 5.2 Completed Actions (Phase T45–T65)
+### 5.2 Completed Actions (Phase T45–T67)
 
 All P0, P1, P2, and P3 actions have been addressed:
 
 | Priority | Deficiency | Action | Phase | Result |
 |----------|-----------|--------|-------|--------|
 | P0 | D13 | TLS connection unit tests | T45/T46 | +30 tests (state guards + handshake edge cases) |
-| P0 | D11 | Semantic + protocol fuzz | T44/T53/T59–T63 | 40 fuzz targets + 238 corpus (full crypto + PQC + sign-path) |
+| P0 | D11 | Semantic + protocol fuzz | T44/T53/T59–T63 | 40 fuzz targets + 286 corpus (full crypto + PQC + sign-path) |
 | P0 | D9 | Fuzz comprehensiveness | T44/T59–T63 | Parse-only → semantic + state-machine + PQC coverage |
 | P0 | D7 | Coverage infrastructure | T18/T65 | cargo-llvm-cov + branch coverage (replaces tarpaulin) |
 | P1 | D12 | Timing test infrastructure | T49 | 6 Welch's t-test timing tests |
@@ -743,10 +793,13 @@ All P0, P1, P2, and P3 actions have been addressed:
 | P2 | D15 | Concurrency stress | T50 | +10 multi-threaded stress tests (48 total) |
 | P2 | D8 | OpenSSL interop | T53 | TLS 1.3 pass; TLS 1.2 verify_data gap found |
 | P2 | D18 | Feature flag testing | T51 | 4 feature subset smoke tests |
+| P2 | D19 | CI pipeline hardening | T66/T67 | Windows CI, cross-compile, cargo doc, Dependabot, job deps |
+| P2 | D20 | Panic-free crypto library | T67 | 16 .unwrap()→?, InvalidArg(&'static str) with ~30 context strings |
 | P3 | D17 | Zeroize verification | T52 | 4 drop-based zeroing tests |
 | — | D10 | Crypto file coverage | T65 | +30 crypto tests (provider, matrix, DRBG, GCM, PCT, KAT, DSA, ElGamal) |
 | — | — | TLS connection coverage | T65 | +17 TLS 1.3/1.2 integration tests (key_update, session resumption, accessors) |
-| — | — | CLI command coverage | T65 | +14 CLI tests (s_client, s_server, speed edge cases) |
+| — | — | CLI command coverage | T65/T66 | +35 CLI tests (s_client, s_server, speed, hex, cipher, port edge cases) |
+| — | — | HMAC API fix | T66 | `Hmac::reset()` fallible, proper error propagation in 6 callers |
 
 ### 5.3 Remaining Gaps (Future Work)
 
@@ -759,25 +812,29 @@ All P0, P1, P2, and P3 actions have been addressed:
 | Wish | D14 | Proptest for hitls-auth, hitls-cli (7/9 crates) |
 | Wish | — | BoringSSL/GnuTLS cross-implementation interop |
 
-### 5.4 Quantified Gap Summary — Post-T65
+### 5.4 Quantified Gap Summary — Post-T67
 
-| Metric | Before (T43) | After (T53) | **After (T65)** | Change (T43→T65) |
-|--------|:-------------:|:------------:|:---------------:|:----------------:|
-| Total tests | 3,184 | 3,264 | **3,600** | +416 |
-| Fuzz targets | 13 | 14 | **40** | +27 |
-| Fuzz corpus | 79 | 85 | **238** | +159 |
-| Proptest crates | 2/9 | 5/9 | **5/9** | +3 crates |
-| Concurrency tests | 38 | 48 | **48** | +10 |
-| Timing tests | 0 | 6 | **6** | +6 |
-| HW↔SW cross-validation | 0 | 8 | **8** | +8 |
-| TLS connection unit tests | 0 | 30 | **33** | +33 |
-| Feature flag smoke tests | 0 | 4 | **4** | +4 |
-| Zeroize verification | 0 | 4 | **4** | +4 |
-| Cross-impl interop | 0 | 2 | **2** | +2 |
-| Supply-chain policy | No | No | **Yes** | cargo-deny |
-| CI branch coverage | No | No | **Yes** | llvm-cov --branch |
-| Deficiencies OPEN | 8 | 2 partial | **0** | −8 (all closed/partially closed) |
-| Defense model rating (avg) | **B** | **B+** | **A−** | ↑↑ |
+| Metric | Before (T43) | After (T53) | After (T65) | **After (T67)** | Change (T43→T67) |
+|--------|:-------------:|:------------:|:------------:|:---------------:|:----------------:|
+| Total tests | 3,184 | 3,264 | 3,600 | **3,666** | +482 |
+| Fuzz targets | 13 | 14 | 40 | **40** | +27 |
+| Fuzz corpus | 79 | 85 | 238 | **286** | +207 |
+| Proptest crates | 2/9 | 5/9 | 5/9 | **5/9** | +3 crates |
+| Concurrency tests | 38 | 48 | 48 | **48** | +10 |
+| Timing tests | 0 | 6 | 6 | **6** | +6 |
+| HW↔SW cross-validation | 0 | 8 | 8 | **8** | +8 |
+| TLS connection unit tests | 0 | 30 | 33 | **33** | +33 |
+| Feature flag smoke tests | 0 | 4 | 4 | **4** | +4 |
+| Zeroize verification | 0 | 4 | 4 | **4** | +4 |
+| Cross-impl interop | 0 | 2 | 2 | **2** | +2 |
+| Supply-chain policy | No | No | Yes | **Yes** | cargo-deny |
+| CI branch coverage | No | No | Yes | **Yes** | llvm-cov --branch |
+| CI OS coverage | 2 | 2 | 2 | **3** | +Windows |
+| Dependabot | No | No | No | **Yes** | cargo + GH Actions |
+| Crypto unwrap panics | 16 | 16 | 16 | **0** | −16 (all → Result) |
+| InvalidArg diagnostics | 0 | 0 | 0 | **~30** | context strings |
+| Deficiencies OPEN | 8 | 2 partial | 0 | **0** | −8 (all closed) |
+| Defense model rating (avg) | **B** | **B+** | **A−** | **A−** | ↑↑ |
 
 ---
 
@@ -792,10 +849,10 @@ The current safety net has significant strengths across multiple dimensions:
 4. **Unsafe confinement**: 44 unsafe blocks restricted to hardware acceleration (6 files) + McEliece binary ops (1 file)
 
 ### 6.2 Test Coverage Breadth
-5. **3,600 tests** with 100% pass rate (21 ignored: slow keygen/timing/zeroize)
-6. **Error-first culture**: 358 error-handling tests (invalid input, wrong state, rejected parameters) outnumber roundtrip tests (340)
-7. **Edge case density**: 310 boundary/empty/partial tests catch off-by-one and corner cases
-8. **State machine coverage**: 590 tests exercise handshake/connection/not-connected transitions
+5. **3,666 tests** with 100% pass rate (21 ignored: slow keygen/timing/zeroize)
+6. **Error-first culture**: ~370 error-handling tests (invalid input, wrong state, rejected parameters) outnumber roundtrip tests (~350)
+7. **Edge case density**: ~325 boundary/empty/partial tests catch off-by-one and corner cases
+8. **State machine coverage**: ~600 tests exercise handshake/connection/not-connected transitions
 9. **Async parity**: 92 async tests across all 5 protocol variants (TLS 1.3/1.2/DTLS/TLCP/DTLCP)
 
 ### 6.3 Standard Compliance
@@ -805,7 +862,7 @@ The current safety net has significant strengths across multiple dimensions:
 13. **GB/T vectors**: SM3 (GB/T 32905), SM4 (GB/T 32907) — Chinese national standard compliance
 
 ### 6.4 Infrastructure & Automation
-14. **CI/CD pipeline**: GitHub Actions with format + lint + test matrix (Ubuntu + macOS × stable + MSRV 1.75) + security audit + Miri + fuzz build + bench verify + coverage + cargo-deny supply-chain check
+14. **CI/CD pipeline**: GitHub Actions with 14 jobs: format + lint + test matrix (Ubuntu + macOS + Windows × stable + MSRV 1.75) + feature combos + security audit + Miri + fuzz build + cross-compile (aarch64 + i686) + doc check + ignored tests + bench verify + coverage (llvm-cov + branch) + cargo-deny + Dependabot (weekly cargo + GH Actions)
 15. **Property-based testing**: ~28 proptest blocks across 5 crates (hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum)
 16. **Code coverage tracking**: cargo-llvm-cov → Codecov JSON with branch coverage in CI
 17. **Miri validation**: Undefined behavior detection on hitls-bignum + hitls-utils
@@ -814,3 +871,7 @@ The current safety net has significant strengths across multiple dimensions:
 20. **Side-channel verification**: 6 statistical timing tests (Welch's t-test) for constant-time operations
 21. **HW↔SW cross-validation**: 8 differential tests comparing hardware-accelerated and software fallback paths
 22. **OpenSSL interop**: TLS 1.3 handshake verified against OpenSSL s_client
+23. **Panic-free crypto library**: Zero `.unwrap()` on fallible crypto ops in library code — all propagated via `?` operator
+24. **Diagnostic error context**: `CryptoError::InvalidArg(&'static str)` with ~30 descriptive messages for key/nonce/parameter validation failures
+25. **Automated dependency updates**: Dependabot for cargo + GitHub Actions (weekly), with MSRV-aware review for pinned dependencies
+26. **Cross-platform CI**: Ubuntu + macOS + Windows test matrix + aarch64/i686 cross-compile checks
