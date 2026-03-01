@@ -13,8 +13,8 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 | **AES (CBC/CTR/GCM)** | **Rust 2.3–6.4x faster** | Both use ARM Crypto Extension; Rust benefits from monomorphization + LTO |
 | **ChaCha20-Poly1305** | **Rust 1.05x faster** | Rust 361 MB/s vs C 344 MB/s |
 | **Hash (SHA-256/384/512)** | **Rust 1.3–3.5x faster** | SHA-256 HW 3.5x; SHA-512/384 HW 1.3–2.1x |
-| **SM3** | **C 1.6x faster** | P56 ring buffer improved ~16%, still no HW accel |
-| **HMAC** | **Rust 0.5–4.4x** | HMAC-SHA256 4.4x; HMAC-SHA512 1.5x; HMAC-SM3 C 2.0x faster |
+| **SM3** | **C 1.7x faster** | P56 ring buffer; no HW accel available |
+| **HMAC** | **Rust 0.9–4.4x** | HMAC-SHA256 4.4x; HMAC-SHA512 1.5x; HMAC-SM3 near parity (C 1.09x) |
 | **SM4 (CBC/GCM)** | **Rust 0.9–1.6x** | T-table + GHASH HW |
 | **ECDSA P-256** | **Near parity** | P-256 fast path: sign C 1.18x, **verify Rust 1.14x faster** (P54) |
 | **ECDH P-256** | **C 1.2x faster** | P-256 fast path |
@@ -27,7 +27,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 
 **Bottom line**: Symmetric ciphers (AES, ChaCha20) and hashes (SHA-256/384/512) remain **faster in Rust**. Phase P54–P62 delivered major improvements: **ECDSA P-256 verify now faster than C** (P54 scalar field), **ML-DSA-44/87 sign now faster than C** (P57/P59 Keccak unroll), ML-KEM gap narrowed to 1.6–4.1x (P58/P59), Ed25519 verify improved 23% (P55), X25519 DH improved 12% (P60).
 
-> **Note**: Symmetric/hash numbers from P53-era full suite run. Asymmetric/PQC re-run after P54–P62. BigNum-dependent (RSA, DH, mod_exp) from P53 isolated runs.
+> **Note**: Symmetric/hash numbers from P53-era full suite run, except SM3/HMAC-SM3 (isolated re-run). Asymmetric/PQC re-run after P54–P62. BigNum-dependent (RSA, DH, mod_exp) from P53 isolated runs.
 
 ---
 
@@ -59,17 +59,17 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 | SHA-256 | 571.7 | 2,013 | **3.52** | **HW accel (SHA-NI), Rust 3.5x faster** |
 | SHA-384 | 540.7 | 1,146 | **2.12** | **HW accel (SHA-512 CE), Rust 2.1x faster** |
 | SHA-512 | 885.7 | 1,232 | **1.39** | **HW accel (SHA-512 CE), Rust 1.4x faster** |
-| SM3 | 528.0 | 326 | **0.62** | No HW accel; C 1.6x faster |
+| SM3 | 528.0 | 303 | **0.57** | No HW accel; C 1.7x faster |
 
 <details>
 <summary>Methodology</summary>
 
 - **C**: `openhitls_benchmark_static -t 10000 -l 8192` — SHA-256: 69,792 ops/s, SHA-512: 108,120 ops/s, SM3: 64,448 ops/s; SHA-384 fresh: 65,987 ops/s
-- **Rust**: Criterion median — SHA-256: 4.07 µs, SHA-384: 7.15 µs, SHA-512: 6.65 µs, SM3: 25.14 µs
+- **Rust**: Criterion median — SHA-256: 4.07 µs, SHA-384: 7.15 µs, SHA-512: 6.65 µs, SM3: 27.03 µs (isolated run)
 - MB/s = 8192 / (time_µs × 1e-6) / 1e6
 </details>
 
-**Analysis**: All three SHA-2 variants use hardware acceleration in Rust: SHA-256 via ARMv8 SHA-NI (Phase P1), SHA-512/384 via ARMv8.2 SHA-512 Crypto Extensions (Phase P11). SHA-256 achieves **3.5x speedup over C**, suggesting the C implementation may not fully utilize SHA-NI. SM3 retains a 1.6x gap to C (no hardware acceleration available for SM3).
+**Analysis**: All three SHA-2 variants use hardware acceleration in Rust: SHA-256 via ARMv8 SHA-NI (Phase P1), SHA-512/384 via ARMv8.2 SHA-512 Crypto Extensions (Phase P11). SHA-256 achieves **3.5x speedup over C**, suggesting the C implementation may not fully utilize SHA-NI. SM3 retains a 1.7x gap to C (no hardware acceleration available for SM3; P56 ring buffer optimization improved small-message throughput).
 
 ---
 
@@ -105,7 +105,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 |-----------|----------|-------------|-------------|-------|
 | HMAC-SHA256 | 319.8 | 1,400 | **4.38** | **Rust 4.4x faster** (follows SHA-256 HW speedup) |
 | HMAC-SHA512 | 507.7 | 786 | **1.55** | **Rust 1.5x faster** (follows SHA-512 HW speedup) |
-| HMAC-SM3 | 327.7 | 167 | **0.51** | C 2.0x faster |
+| HMAC-SM3 | 327.7 | 302 | **0.92** | Near parity (C 1.09x); P26 HMAC caching eliminated factory overhead |
 
 <details>
 <summary>C fresh data (5000 iterations)</summary>
@@ -115,7 +115,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 - HMAC-SM3: 40,000 ops/s → 327.7 MB/s
 </details>
 
-**Analysis**: HMAC performance directly follows the underlying hash. HMAC-SHA256 is **4.4x faster in Rust** thanks to SHA-256 hardware acceleration. HMAC-SHA512 is **1.5x faster**. HMAC-SM3 is 2.0x slower, reflecting the SM3 gap and potential HMAC overhead.
+**Analysis**: HMAC performance directly follows the underlying hash. HMAC-SHA256 is **4.4x faster in Rust** thanks to SHA-256 hardware acceleration. HMAC-SHA512 is **1.5x faster**. HMAC-SM3 is now near parity (C 1.09x) — the P53-era value (167 MB/s) was severely degraded by thermal throttling in the full suite run; isolated measurement reveals the P26 HMAC caching optimization (removing `Box<dyn Fn>` factory) made HMAC overhead negligible.
 
 ---
 
@@ -228,7 +228,7 @@ Comprehensive benchmarks across 60+ cryptographic algorithms comparing the origi
 DH-4096 keygen          ████████████████░░░░░░░░░░░░░░░░░░░░░░░░░  C x7.1
 ML-KEM-768 encaps       █████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x3.5
 DH-2048 keygen          ███████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x3.7
-SM3                     ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x1.6
+SM3                     █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x1.74
 X25519 DH               █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x1.49
 Ed25519 verify          ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x1.24
 ECDH P-256              ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x1.19
@@ -380,8 +380,8 @@ Criterion 0.5 provides:
 | AES-256-GCM decrypt | 591 | AEAD |
 | ChaCha20-Poly1305 decrypt | 370 | AEAD |
 | ChaCha20-Poly1305 encrypt | 363 | AEAD |
-| SM3 | 326 | Hash |
-| HMAC-SM3 | 185 | MAC |
+| SM3 | 320 | Hash |
+| HMAC-SM3 | 311 | MAC |
 | SM4-CBC decrypt | 129 | Symmetric |
 | SM4-GCM decrypt | 122 | Symmetric |
 | SM4-GCM encrypt | 115 | Symmetric |
@@ -476,19 +476,19 @@ sm4-gcm enc @16KB:      142,300 ns    sm4-gcm dec @16KB:      133,960 ns
 
 === Hash Functions ===
 sha256 @1KB:                507 ns    sha384 @1KB:                913 ns
-sha512 @1KB:                915 ns    sm3 @1KB:                 4,135 ns
+sha512 @1KB:                915 ns    sm3 @1KB:                 2,822 ns
 sha256 @8KB:              4,067 ns    sha384 @8KB:              7,151 ns
-sha512 @8KB:              6,646 ns    sm3 @8KB:                25,140 ns
+sha512 @8KB:              6,646 ns    sm3 @8KB:                27,025 ns
 sha256 @16KB:             8,094 ns    sha384 @16KB:            13,752 ns
-sha512 @16KB:            13,708 ns    sm3 @16KB:               99,033 ns*
+sha512 @16KB:            13,708 ns    sm3 @16KB:               51,279 ns
 
 === HMAC ===
 hmac-sha256 @1KB:         1,172 ns    hmac-sha512 @1KB:         2,245 ns
-hmac-sm3 @1KB:            9,818 ns
+hmac-sm3 @1KB:            5,865 ns
 hmac-sha256 @8KB:         5,855 ns    hmac-sha512 @8KB:        10,415 ns
-hmac-sm3 @8KB:           49,041 ns
+hmac-sm3 @8KB:           27,097 ns
 hmac-sha256 @16KB:       11,754 ns    hmac-sha512 @16KB:       20,918 ns
-hmac-sm3 @16KB:          88,704 ns
+hmac-sm3 @16KB:          52,658 ns
 
 === Elliptic Curves ===
 ecdsa-p256 sign:         43,824 ns    ecdsa-p256 verify:       84,039 ns
@@ -532,7 +532,7 @@ bignum mod_exp 1024:    495,280 ns    bignum mod_exp 2048:  3,245,000 ns
 bignum mod_exp 4096:  25,121,000 ns
 ```
 
-*SM3 @16KB has high variance (76.9–124.0 µs CI); the 8 KB value is more representative.
+SM3 and HMAC-SM3 values from isolated benchmark runs (not full suite) for thermal-stable results.
 
 ## Appendix D: Historical Comparison (2026-02-27 → P52 → P53 → P62)
 
@@ -542,6 +542,8 @@ bignum mod_exp 4096:  25,121,000 ns
 | SHA-512 @8KB | 5.61 µs | 6.65 µs | — | — | — | Thermal effects |
 | AES-128-GCM enc @8KB | 10.22 µs | 12.71 µs | — | — | — | Thermal effects |
 | ChaCha20 enc @8KB | 17.16 µs | 22.69 µs | — | — | — | Thermal effects |
+| SM3 @8KB | — | 25.14 µs | — | 27.03 µs | +7% | Within noise (isolated run) |
+| HMAC-SM3 @8KB | — | 49.04 µs | — | **27.10 µs** | **-45%** | **P26 HMAC caching** (P53 thermally degraded) |
 | ECDSA P-256 sign | 53.60 µs | 55.59 µs | — | **43.82 µs** | **-21%** | **P54 scalar field** |
 | ECDSA P-256 verify | — | 138.28 µs | — | **84.04 µs** | **-39%** | **P54 scalar field** |
 | Ed25519 sign | 10.95 µs | 15.90 µs | — | 15.40 µs | -3% | Within noise |
@@ -567,6 +569,7 @@ bignum mod_exp 4096:  25,121,000 ns
 - Phase P54 (scalar field optimization) achieves **-39% for ECDSA P-256 verify** — Rust now **faster than C** for verify.
 - Phase P55–P60 deliver 11–18% improvements across Ed25519 verify, X25519 DH, ML-KEM, and ML-DSA.
 - ML-DSA-65 sign outlier resolved: 913→221 µs (rejection sampling variance stabilized).
+- HMAC-SM3 isolated run reveals P53-era value (49 µs) was thermally degraded; true value 27 µs (**near parity with C**).
 
 ## Appendix E: Raw Data Sources
 
