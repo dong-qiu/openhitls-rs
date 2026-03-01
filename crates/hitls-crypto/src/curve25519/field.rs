@@ -57,6 +57,23 @@ impl Fe25519 {
         .carry()
     }
 
+    /// Subtraction without carry propagation.
+    ///
+    /// SAFETY: Only use when BOTH operands have limbs ≤ 52 bits (e.g., from
+    /// mul/square output). The result has limbs ≤ 53 bits, which is safe for
+    /// subsequent mul/square (products fit in u128: 77 × 2^106 < 2^113).
+    /// Do NOT chain sub_fast results through add→sub_fast without an intervening
+    /// mul/square, as limb widths will grow and cause underflow.
+    pub(crate) fn sub_fast(&self, rhs: &Fe25519) -> Fe25519 {
+        Fe25519([
+            (self.0[0] + 0xFFFFFFFFFFFDA) - rhs.0[0],
+            (self.0[1] + 0xFFFFFFFFFFFFE) - rhs.0[1],
+            (self.0[2] + 0xFFFFFFFFFFFFE) - rhs.0[2],
+            (self.0[3] + 0xFFFFFFFFFFFFE) - rhs.0[3],
+            (self.0[4] + 0xFFFFFFFFFFFFE) - rhs.0[4],
+        ])
+    }
+
     /// Negation: h = -f (mod p).
     pub fn neg(&self) -> Fe25519 {
         Fe25519::zero().sub(self)
@@ -132,6 +149,15 @@ impl Fe25519 {
         let h4 = f0_2 * f[4] as u128 + f1_2 * f[3] as u128 + f[2] as u128 * f[2] as u128;
 
         Self::carry128([h0, h1, h2, h3, h4])
+    }
+
+    /// Square n times: f^(2^n). Avoids intermediate Fe25519 construction overhead.
+    pub fn square_times(&self, n: u32) -> Fe25519 {
+        let mut r = self.square();
+        for _ in 1..n {
+            r = r.square();
+        }
+        r
     }
 
     /// Multiply by the constant 121666 (used in X25519, a24 = (A-2)/4 = 121665, a24+1 = 121666).
@@ -256,61 +282,20 @@ impl Fe25519 {
         let f = *self;
 
         let z2 = f.square();
-        let z8 = z2.square().square();
+        let z8 = z2.square_times(2);
         let z9 = f.mul(&z8);
         let z11 = z2.mul(&z9);
         let z22 = z11.square();
         let z_5_0 = z9.mul(&z22); // 2^5 - 1
 
-        let mut t = z_5_0.square();
-        for _ in 1..5 {
-            t = t.square();
-        }
-        let z_10_0 = t.mul(&z_5_0); // 2^10 - 1
-
-        t = z_10_0.square();
-        for _ in 1..10 {
-            t = t.square();
-        }
-        let z_20_0 = t.mul(&z_10_0); // 2^20 - 1
-
-        t = z_20_0.square();
-        for _ in 1..20 {
-            t = t.square();
-        }
-        t = t.mul(&z_20_0); // 2^40 - 1
-
-        t = t.square();
-        for _ in 1..10 {
-            t = t.square();
-        }
-        let z_50_0 = t.mul(&z_10_0); // 2^50 - 1
-
-        t = z_50_0.square();
-        for _ in 1..50 {
-            t = t.square();
-        }
-        let z_100_0 = t.mul(&z_50_0); // 2^100 - 1
-
-        t = z_100_0.square();
-        for _ in 1..100 {
-            t = t.square();
-        }
-        t = t.mul(&z_100_0); // 2^200 - 1
-
-        t = t.square();
-        for _ in 1..50 {
-            t = t.square();
-        }
-        t = t.mul(&z_50_0); // 2^250 - 1
-
-        // 5 squares: 2^255 - 32
-        t = t.square(); // 2^251 - 2
-        t = t.square(); // 2^252 - 4
-        t = t.square(); // 2^253 - 8
-        t = t.square(); // 2^254 - 16
-        t = t.square(); // 2^255 - 32
-        t.mul(&z11) // 2^255 - 32 + 11 = 2^255 - 21 = p - 2
+        let z_10_0 = z_5_0.square_times(5).mul(&z_5_0); // 2^10 - 1
+        let z_20_0 = z_10_0.square_times(10).mul(&z_10_0); // 2^20 - 1
+        let t = z_20_0.square_times(20).mul(&z_20_0); // 2^40 - 1
+        let z_50_0 = t.square_times(10).mul(&z_10_0); // 2^50 - 1
+        let z_100_0 = z_50_0.square_times(50).mul(&z_50_0); // 2^100 - 1
+        let t = z_100_0.square_times(100).mul(&z_100_0); // 2^200 - 1
+        let t = t.square_times(50).mul(&z_50_0); // 2^250 - 1
+        t.square_times(5).mul(&z11) // 2^255 - 21 = p - 2
     }
 
     /// Compute f^((p-5)/8) = f^(2^252 - 3), used for square root in Ed25519 point decompression.
@@ -318,57 +303,20 @@ impl Fe25519 {
         let f = *self;
 
         let z2 = f.square();
-        let z8 = z2.square().square();
+        let z8 = z2.square_times(2);
         let z9 = f.mul(&z8);
         let z11 = z2.mul(&z9);
         let z22 = z11.square();
         let z_5_0 = z9.mul(&z22);
 
-        let mut t = z_5_0.square();
-        for _ in 1..5 {
-            t = t.square();
-        }
-        let z_10_0 = t.mul(&z_5_0);
-
-        t = z_10_0.square();
-        for _ in 1..10 {
-            t = t.square();
-        }
-        let z_20_0 = t.mul(&z_10_0);
-
-        t = z_20_0.square();
-        for _ in 1..20 {
-            t = t.square();
-        }
-        t = t.mul(&z_20_0);
-
-        t = t.square();
-        for _ in 1..10 {
-            t = t.square();
-        }
-        let z_50_0 = t.mul(&z_10_0);
-
-        t = z_50_0.square();
-        for _ in 1..50 {
-            t = t.square();
-        }
-        let z_100_0 = t.mul(&z_50_0);
-
-        t = z_100_0.square();
-        for _ in 1..100 {
-            t = t.square();
-        }
-        t = t.mul(&z_100_0);
-
-        t = t.square();
-        for _ in 1..50 {
-            t = t.square();
-        }
-        t = t.mul(&z_50_0);
-
-        t = t.square();
-        t = t.square();
-        t.mul(&f) // 2^252 - 3
+        let z_10_0 = z_5_0.square_times(5).mul(&z_5_0);
+        let z_20_0 = z_10_0.square_times(10).mul(&z_10_0);
+        let t = z_20_0.square_times(20).mul(&z_20_0);
+        let z_50_0 = t.square_times(10).mul(&z_10_0);
+        let z_100_0 = z_50_0.square_times(50).mul(&z_50_0);
+        let t = z_100_0.square_times(100).mul(&z_100_0);
+        let t = t.square_times(50).mul(&z_50_0);
+        t.square_times(2).mul(&f) // 2^252 - 3
     }
 
     /// Decode a 32-byte little-endian representation into a field element.
@@ -396,35 +344,16 @@ impl Fe25519 {
         let h = self.reduce().0;
         let mut out = [0u8; 32];
 
-        // Pack 5 × 51-bit limbs into 32 bytes (256 bits, LE).
-        // Reconstruct a 256-bit value from 5 limbs and serialize.
-        let mut bits = [0u64; 4]; // 4 × 64 = 256 bits, LE
-                                  // h[0] occupies bits [0, 51)
-        bits[0] = h[0]; // bits 0..50
+        // Pack 5 × 51-bit limbs into 4 × u64 = 256 bits, LE
+        let w0 = h[0] | (h[1] << 51);
+        let w1 = (h[1] >> 13) | (h[2] << 38);
+        let w2 = (h[2] >> 26) | (h[3] << 25);
+        let w3 = (h[3] >> 39) | (h[4] << 12);
 
-        // h[1] occupies bits [51, 102)
-        bits[0] |= h[1] << 51; // bits 51..63 into bits[0]
-        bits[1] = h[1] >> 13; // bits 64..101
-
-        // h[2] occupies bits [102, 153)
-        bits[1] |= h[2] << 38; // bits 102..127
-        bits[2] = h[2] >> 26; // bits 128..152
-
-        // h[3] occupies bits [153, 204)
-        bits[2] |= h[3] << 25; // bits 153..191
-        bits[3] = h[3] >> 39; // bits 192..203
-
-        // h[4] occupies bits [204, 255)
-        bits[3] |= h[4] << 12; // bits 204..255
-
-        for (i, &word) in bits.iter().enumerate() {
-            let start = i * 8;
-            for j in 0..8 {
-                if start + j < 32 {
-                    out[start + j] = (word >> (j * 8)) as u8;
-                }
-            }
-        }
+        out[0..8].copy_from_slice(&w0.to_le_bytes());
+        out[8..16].copy_from_slice(&w1.to_le_bytes());
+        out[16..24].copy_from_slice(&w2.to_le_bytes());
+        out[24..32].copy_from_slice(&w3.to_le_bytes());
 
         out
     }

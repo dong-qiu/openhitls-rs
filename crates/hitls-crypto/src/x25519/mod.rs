@@ -117,15 +117,15 @@ fn x25519_scalar_mul(scalar: &[u8; 32], u_bytes: &[u8; 32]) -> [u8; 32] {
 
         let a = x_2.add(&z_2);
         let aa = a.square();
-        let b = x_2.sub(&z_2);
+        let b = x_2.sub_fast(&z_2);
         let bb = b.square();
-        let e = aa.sub(&bb);
+        let e = aa.sub_fast(&bb);
         let c = x_3.add(&z_3);
-        let d = x_3.sub(&z_3);
+        let d = x_3.sub_fast(&z_3);
         let da = d.mul(&a);
         let cb = c.mul(&b);
         x_3 = da.add(&cb).square();
-        z_3 = u.mul(&da.sub(&cb).square());
+        z_3 = u.mul(&da.sub_fast(&cb).square());
         x_2 = aa.mul(&bb);
         z_2 = e.mul(&bb.add(&e.mul121666()));
     }
