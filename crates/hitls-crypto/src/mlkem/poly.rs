@@ -69,16 +69,73 @@ fn decompress_coeff(y: u16, d: u32) -> i16 {
 }
 
 /// Compress a polynomial into caller-provided buffer (zero-allocation).
+///
+/// Uses byte-aligned bulk packing for d=4,5,10,11 (ML-KEM parameter values).
 pub(crate) fn poly_compress_into(r: &Poly, d: u32, out: &mut [u8]) {
-    out[..N * d as usize / 8].fill(0);
-    let mut bit_pos = 0usize;
-    for &coeff in r.iter() {
-        let val = compress_coeff(coeff, d);
-        for j in 0..d as usize {
-            if val & (1 << j) != 0 {
-                out[bit_pos / 8] |= 1 << (bit_pos % 8);
+    match d {
+        4 => {
+            // 2 coefficients → 1 byte (4+4 bits)
+            for i in 0..N / 2 {
+                let a = compress_coeff(r[2 * i], 4) as u8;
+                let b = compress_coeff(r[2 * i + 1], 4) as u8;
+                out[i] = a | (b << 4);
             }
-            bit_pos += 1;
+        }
+        5 => {
+            // 8 coefficients → 5 bytes (8×5 = 40 bits)
+            for i in 0..N / 8 {
+                let c: [u16; 8] = std::array::from_fn(|j| compress_coeff(r[8 * i + j], 5));
+                let o = &mut out[5 * i..5 * i + 5];
+                o[0] = (c[0] | (c[1] << 5)) as u8;
+                o[1] = ((c[1] >> 3) | (c[2] << 2) | (c[3] << 7)) as u8;
+                o[2] = ((c[3] >> 1) | (c[4] << 4)) as u8;
+                o[3] = ((c[4] >> 4) | (c[5] << 1) | (c[6] << 6)) as u8;
+                o[4] = ((c[6] >> 2) | (c[7] << 3)) as u8;
+            }
+        }
+        10 => {
+            // 4 coefficients → 5 bytes (4×10 = 40 bits)
+            for i in 0..N / 4 {
+                let c: [u16; 4] = std::array::from_fn(|j| compress_coeff(r[4 * i + j], 10));
+                let o = &mut out[5 * i..5 * i + 5];
+                o[0] = c[0] as u8;
+                o[1] = ((c[0] >> 8) | (c[1] << 2)) as u8;
+                o[2] = ((c[1] >> 6) | (c[2] << 4)) as u8;
+                o[3] = ((c[2] >> 4) | (c[3] << 6)) as u8;
+                o[4] = (c[3] >> 2) as u8;
+            }
+        }
+        11 => {
+            // 8 coefficients → 11 bytes (8×11 = 88 bits)
+            for i in 0..N / 8 {
+                let c: [u16; 8] = std::array::from_fn(|j| compress_coeff(r[8 * i + j], 11));
+                let o = &mut out[11 * i..11 * i + 11];
+                o[0] = c[0] as u8;
+                o[1] = ((c[0] >> 8) | (c[1] << 3)) as u8;
+                o[2] = ((c[1] >> 5) | (c[2] << 6)) as u8;
+                o[3] = (c[2] >> 2) as u8;
+                o[4] = ((c[2] >> 10) | (c[3] << 1)) as u8;
+                o[5] = ((c[3] >> 7) | (c[4] << 4)) as u8;
+                o[6] = ((c[4] >> 4) | (c[5] << 7)) as u8;
+                o[7] = (c[5] >> 1) as u8;
+                o[8] = ((c[5] >> 9) | (c[6] << 2)) as u8;
+                o[9] = ((c[6] >> 6) | (c[7] << 5)) as u8;
+                o[10] = (c[7] >> 3) as u8;
+            }
+        }
+        _ => {
+            // Generic bit-by-bit fallback
+            out[..N * d as usize / 8].fill(0);
+            let mut bit_pos = 0usize;
+            for &coeff in r.iter() {
+                let val = compress_coeff(coeff, d);
+                for j in 0..d as usize {
+                    if val & (1 << j) != 0 {
+                        out[bit_pos / 8] |= 1 << (bit_pos % 8);
+                    }
+                    bit_pos += 1;
+                }
+            }
         }
     }
 }
@@ -91,33 +148,139 @@ pub(crate) fn poly_compress(r: &Poly, d: u32) -> Vec<u8> {
 }
 
 /// Decompress a polynomial from d-bit packed representation.
+///
+/// Uses byte-aligned bulk unpacking for d=4,5,10,11 (ML-KEM parameter values).
 pub(crate) fn poly_decompress(data: &[u8], d: u32) -> Poly {
     let mut r = [0i16; N];
-    let mut bit_pos = 0usize;
-    for coeff in r.iter_mut() {
-        let mut val = 0u16;
-        for j in 0..d as usize {
-            if data[bit_pos / 8] & (1 << (bit_pos % 8)) != 0 {
-                val |= 1 << j;
+    match d {
+        4 => {
+            // 1 byte → 2 coefficients
+            for i in 0..N / 2 {
+                r[2 * i] = decompress_coeff(data[i] as u16 & 0xF, 4);
+                r[2 * i + 1] = decompress_coeff((data[i] >> 4) as u16, 4);
             }
-            bit_pos += 1;
         }
-        *coeff = decompress_coeff(val, d);
+        5 => {
+            // 5 bytes → 8 coefficients
+            for i in 0..N / 8 {
+                let b = &data[5 * i..5 * i + 5];
+                let mask = (1u16 << 5) - 1;
+                r[8 * i] = decompress_coeff(b[0] as u16 & mask, 5);
+                r[8 * i + 1] =
+                    decompress_coeff(((b[0] as u16 >> 5) | ((b[1] as u16) << 3)) & mask, 5);
+                r[8 * i + 2] = decompress_coeff((b[1] as u16 >> 2) & mask, 5);
+                r[8 * i + 3] =
+                    decompress_coeff(((b[1] as u16 >> 7) | ((b[2] as u16) << 1)) & mask, 5);
+                r[8 * i + 4] =
+                    decompress_coeff(((b[2] as u16 >> 4) | ((b[3] as u16) << 4)) & mask, 5);
+                r[8 * i + 5] = decompress_coeff((b[3] as u16 >> 1) & mask, 5);
+                r[8 * i + 6] =
+                    decompress_coeff(((b[3] as u16 >> 6) | ((b[4] as u16) << 2)) & mask, 5);
+                r[8 * i + 7] = decompress_coeff((b[4] as u16 >> 3) & mask, 5);
+            }
+        }
+        10 => {
+            // 5 bytes → 4 coefficients
+            let mask = (1u16 << 10) - 1;
+            for i in 0..N / 4 {
+                let b = &data[5 * i..5 * i + 5];
+                r[4 * i] = decompress_coeff((b[0] as u16 | ((b[1] as u16) << 8)) & mask, 10);
+                r[4 * i + 1] =
+                    decompress_coeff(((b[1] as u16 >> 2) | ((b[2] as u16) << 6)) & mask, 10);
+                r[4 * i + 2] =
+                    decompress_coeff(((b[2] as u16 >> 4) | ((b[3] as u16) << 4)) & mask, 10);
+                r[4 * i + 3] =
+                    decompress_coeff(((b[3] as u16 >> 6) | ((b[4] as u16) << 2)) & mask, 10);
+            }
+        }
+        11 => {
+            // 11 bytes → 8 coefficients
+            let mask = (1u16 << 11) - 1;
+            for i in 0..N / 8 {
+                let b = &data[11 * i..11 * i + 11];
+                r[8 * i] = decompress_coeff((b[0] as u16 | ((b[1] as u16) << 8)) & mask, 11);
+                r[8 * i + 1] =
+                    decompress_coeff(((b[1] as u16 >> 3) | ((b[2] as u16) << 5)) & mask, 11);
+                r[8 * i + 2] = decompress_coeff(
+                    ((b[2] as u16 >> 6) | ((b[3] as u16) << 2) | ((b[4] as u16) << 10)) & mask,
+                    11,
+                );
+                r[8 * i + 3] =
+                    decompress_coeff(((b[4] as u16 >> 1) | ((b[5] as u16) << 7)) & mask, 11);
+                r[8 * i + 4] =
+                    decompress_coeff(((b[5] as u16 >> 4) | ((b[6] as u16) << 4)) & mask, 11);
+                r[8 * i + 5] = decompress_coeff(
+                    ((b[6] as u16 >> 7) | ((b[7] as u16) << 1) | ((b[8] as u16) << 9)) & mask,
+                    11,
+                );
+                r[8 * i + 6] =
+                    decompress_coeff(((b[8] as u16 >> 2) | ((b[9] as u16) << 6)) & mask, 11);
+                r[8 * i + 7] =
+                    decompress_coeff(((b[9] as u16 >> 5) | ((b[10] as u16) << 3)) & mask, 11);
+            }
+        }
+        _ => {
+            // Generic bit-by-bit fallback
+            let mut bit_pos = 0usize;
+            for coeff in r.iter_mut() {
+                let mut val = 0u16;
+                for j in 0..d as usize {
+                    if data[bit_pos / 8] & (1 << (bit_pos % 8)) != 0 {
+                        val |= 1 << j;
+                    }
+                    bit_pos += 1;
+                }
+                *coeff = decompress_coeff(val, d);
+            }
+        }
     }
     r
 }
 
 /// Encode a polynomial into caller-provided buffer (zero-allocation).
+///
+/// Uses byte-aligned bulk packing for d=1,12 (ML-KEM encode values).
 pub(crate) fn byte_encode_into(poly: &Poly, d: usize, out: &mut [u8]) {
-    out[..N * d / 8].fill(0);
-    let mut bit_pos = 0usize;
-    for &coeff in poly.iter() {
-        let val = ((coeff as i32 % Q as i32 + Q as i32) % Q as i32) as u16;
-        for j in 0..d {
-            if val & (1 << j) != 0 {
-                out[bit_pos / 8] |= 1 << (bit_pos % 8);
+    // Normalize coefficient to [0, q)
+    #[inline]
+    fn normalize(c: i16) -> u16 {
+        ((c as i32 % Q as i32 + Q as i32) % Q as i32) as u16
+    }
+
+    match d {
+        1 => {
+            // 8 coefficients → 1 byte (message encoding)
+            for i in 0..N / 8 {
+                let mut byte = 0u8;
+                for j in 0..8 {
+                    byte |= (normalize(poly[8 * i + j]) as u8 & 1) << j;
+                }
+                out[i] = byte;
             }
-            bit_pos += 1;
+        }
+        12 => {
+            // 2 coefficients → 3 bytes (2×12 = 24 bits, NTT encoding)
+            for i in 0..N / 2 {
+                let a = normalize(poly[2 * i]);
+                let b = normalize(poly[2 * i + 1]);
+                out[3 * i] = a as u8;
+                out[3 * i + 1] = ((a >> 8) | (b << 4)) as u8;
+                out[3 * i + 2] = (b >> 4) as u8;
+            }
+        }
+        _ => {
+            // Generic bit-by-bit fallback
+            out[..N * d / 8].fill(0);
+            let mut bit_pos = 0usize;
+            for &coeff in poly.iter() {
+                let val = normalize(coeff);
+                for j in 0..d {
+                    if val & (1 << j) != 0 {
+                        out[bit_pos / 8] |= 1 << (bit_pos % 8);
+                    }
+                    bit_pos += 1;
+                }
+            }
         }
     }
 }
@@ -130,18 +293,42 @@ pub(crate) fn byte_encode(poly: &Poly, d: usize) -> Vec<u8> {
 }
 
 /// Decode a polynomial from d-bit packed bytes.
+///
+/// Uses byte-aligned bulk unpacking for d=1,12 (ML-KEM decode values).
 pub(crate) fn byte_decode(data: &[u8], d: usize) -> Poly {
     let mut r = [0i16; N];
-    let mut bit_pos = 0usize;
-    for coeff in r.iter_mut() {
-        let mut val = 0u16;
-        for j in 0..d {
-            if data[bit_pos / 8] & (1 << (bit_pos % 8)) != 0 {
-                val |= 1 << j;
+    match d {
+        1 => {
+            // 1 byte → 8 coefficients (message decoding)
+            for i in 0..N / 8 {
+                let byte = data[i];
+                for j in 0..8 {
+                    r[8 * i + j] = ((byte >> j) & 1) as i16;
+                }
             }
-            bit_pos += 1;
         }
-        *coeff = val as i16;
+        12 => {
+            // 3 bytes → 2 coefficients (NTT decoding)
+            for i in 0..N / 2 {
+                let b = &data[3 * i..3 * i + 3];
+                r[2 * i] = (b[0] as i16 | ((b[1] as i16 & 0xF) << 8)) & 0xFFF;
+                r[2 * i + 1] = ((b[1] as i16 >> 4) | ((b[2] as i16) << 4)) & 0xFFF;
+            }
+        }
+        _ => {
+            // Generic bit-by-bit fallback
+            let mut bit_pos = 0usize;
+            for coeff in r.iter_mut() {
+                let mut val = 0u16;
+                for j in 0..d {
+                    if data[bit_pos / 8] & (1 << (bit_pos % 8)) != 0 {
+                        val |= 1 << j;
+                    }
+                    bit_pos += 1;
+                }
+                *coeff = val as i16;
+            }
+        }
     }
     r
 }

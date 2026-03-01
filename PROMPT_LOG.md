@@ -3473,3 +3473,18 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - `cbc_encrypt_with`: same pattern with `[0u8; 16]`
 - Also changed `plaintext.to_vec()` → `Vec::with_capacity(len + pad_len)` for right-sized single allocation
 - All 3,534 tests pass, 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P50 — ML-KEM Byte-Aligned Bit-Packing (2026-03-01)
+
+**Prompt**: Continue performance optimizations. ML-KEM polynomial compression/decompression and encoding/decoding use bit-by-bit operations (O(N×d) branches per polynomial). Replace with byte-aligned bulk operations for ML-KEM parameter-specific d values.
+
+**Result**:
+- `poly_compress_into`: match on d=4,5,10,11 — group coefficients by byte alignment (e.g., d=4: 2→1 byte, d=12: 2→3 bytes)
+- `poly_decompress`: match on d=4,5,10,11 — bulk byte unpacking with shift/mask
+- `byte_encode_into`: match on d=1,12 — bulk packing (d=12: 2 coefficients → 3 bytes)
+- `byte_decode`: match on d=1,12 — bulk unpacking
+- Eliminates per-bit branching: d=12 goes from 3072 branches → 128 3-byte writes
+- Generic bit-by-bit fallback retained for unsupported d values
+- All 3,534 tests pass, 21 ignored, 0 clippy warnings

@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phases I1–I82, T1–T63, R1–R12, P1–P49 complete (3534 tests, 21 ignored)
+- **Status**: Phases I1–I82, T1–T63, R1–R12, P1–P50 complete (3534 tests, 21 ignored)
 
 ## Workspace Structure
 
@@ -118,7 +118,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases I1–I82, T1–T63, R1–R12, P1–P49 complete (3534 tests, 21 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
+Phases I1–I82, T1–T63, R1–R12, P1–P50 complete (3534 tests, 21 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
 
 ### Completed Phases (Summary)
 
@@ -185,6 +185,7 @@ Key milestones:
 - Phase P47: TranscriptHash stack-allocated output — `HashOutput` wrapper (`[u8; 64]` + len) with `Deref<Target=[u8]>`, replacing `Vec<u8>` return from `current_hash()`/`empty_hash()`. Zero caller changes across ~47 callsites. Eliminates 5–15 heap allocs per TLS handshake.
 - Phase P48: ML-KEM g_input stack arrays — `Vec::with_capacity(33/64)` → `[0u8; 33/64]` for `g_input` in `kpke_keygen`, `encapsulate`, `decapsulate`. Eliminates 3 heap allocations per ML-KEM operation.
 - Phase P49: CBC padding Vec elimination — `vec![pad_len; pad_len]` → `[0u8; 16]` stack array + `fill()` in `cbc_encrypt`/`cbc_encrypt_with`. Right-sized initial Vec allocation.
+- Phase P50: ML-KEM byte-aligned bit-packing — bit-by-bit → byte-aligned bulk operations for `poly_compress_into` (d=4,5,10,11), `poly_decompress` (d=4,5,10,11), `byte_encode_into` (d=1,12), `byte_decode` (d=1,12). Eliminates per-bit branching.
 - Phase T45–T53: Quality improvement roadmap — TLS connection unit tests (+15), TLS 1.2 handshake edge cases (+15), HW↔SW cross-validation (+8), proptest expansion to 5/9 crates (+15), side-channel timing tests (+6), concurrency stress tests (+10), feature flag smoke tests (+4), zeroize runtime verification (+4), DTLS fuzz + OpenSSL interop (+1 fuzz target, +2 tests). Total: +80 tests, 13→14 fuzz targets, defense model B→B+.
 - Phase T59–T62: Test optimization & deep defense — RSA OAEP/PKCS1v15 constant-time fix (timing side-channel elimination), CBC/GCM buffer zeroize on error, RSA timing tests (+2 ignored), unit tests (+2), crypto semantic fuzz targets (+6: RSA/ECDSA/HKDF/SM2/CCM/TLS PRF), TLS 1.3/1.2 state machine fuzz (+2), corpus enrichment (+40 seeds), cargo-deny supply-chain policy, CI hardening (miri blocking, feature combos, cargo-deny job), subtle version unification. Total: +4 tests, 18→26 fuzz targets, 118→158 corpus, defense model B+→A-.
 - Phase T63: PQC fuzz + signature sign fuzz — ML-KEM encap/decap, ML-DSA sign/verify, SLH-DSA sign/verify (fast variants), RSA sign (PKCS1v15/PSS), ECDSA sign (P-256/P-384/P-521), Ed25519 full coverage, SM2 sign/encrypt/decrypt, DSA sign (small params). Total: +8 fuzz targets (26→34), +80 corpus seeds (158→238), PQC coverage 0→3/6, sign-path coverage 0→5/7.

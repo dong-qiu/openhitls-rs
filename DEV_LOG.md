@@ -216,6 +216,7 @@ Category summary:
 | 204 | P47 | Perf | TranscriptHash Stack-Allocated Output | 2026-03-01 |
 | 205 | P48 | Perf | ML-KEM g_input Stack Arrays | 2026-03-01 |
 | 206 | P49 | Perf | CBC Padding Vec Elimination | 2026-03-01 |
+| 207 | P50 | Perf | ML-KEM Byte-Aligned Bit-Packing | 2026-03-01 |
 
 ---
 
@@ -11539,6 +11540,32 @@ Replaced `vec![pad_len as u8; pad_len]` temporary heap allocation in CBC encrypt
 - 3,534 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P49)
+- `cargo test --workspace --all-features`: 3,534 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P50 — ML-KEM Byte-Aligned Bit-Packing (2026-03-01)
+
+### Summary
+Replaced bit-by-bit polynomial compression/decompression and encoding/decoding in ML-KEM with byte-aligned bulk operations for all parameter-specific `d` values (4, 5, 10, 11 for compress/decompress; 1, 12 for encode/decode). The bit-by-bit approach processed each coefficient's bits individually (O(N×d) branch operations); the byte-aligned approach processes groups of coefficients that align to byte boundaries (e.g., 2 coefficients → 3 bytes for d=12) using direct byte arithmetic.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/mlkem/poly.rs` | `poly_compress_into`: match on d=4,5,10,11 with bulk byte packing. `poly_decompress`: match on d=4,5,10,11 with bulk byte unpacking. `byte_encode_into`: match on d=1,12 with bulk packing. `byte_decode`: match on d=1,12 with bulk unpacking. Generic bit-by-bit fallback retained for other d values |
+
+### Impact
+- Eliminates per-bit branch (N×d → N/group byte operations)
+- d=12: 256 coefficients × 12 bits = 3072 branches → 128 × 3-byte writes
+- d=10: 256 × 10 = 2560 branches → 64 × 5-byte writes
+- d=4: 256 × 4 = 1024 branches → 128 × 1-byte writes
+- All ML-KEM encaps/decaps operations benefit (compress + encode in both directions)
+
+### Test Results
+- All 41 ML-KEM tests pass (including deterministic keygen KAT, roundtrip, and compression tests)
+- 3,534 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P50)
 - `cargo test --workspace --all-features`: 3,534 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
