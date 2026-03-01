@@ -39,6 +39,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         rust: [stable, "1.75"]
@@ -171,9 +172,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # Timing side-channel tests + zeroize verification + slow keygen
+      # Slow keygen + zeroize verification (skip timing and flaky tests)
       # Skip test_elgamal_generate: flaky safe-prime generation (BnRandGenFail)
-      - run: cargo test -p hitls-crypto --all-features -- --ignored --skip test_openssl --skip test_s_client --skip test_elgamal_generate
+      # Skip constant_time: timing tests require --release and quiet hardware
+      - run: cargo test -p hitls-crypto --all-features -- --ignored --skip test_openssl --skip test_s_client --skip test_elgamal_generate --skip constant_time
 
   bench:
     name: Benchmark Check

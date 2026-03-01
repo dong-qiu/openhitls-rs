@@ -1727,6 +1727,11 @@ fn test_tls13_key_update_server_initiated() {
         let n = conn.read(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"after key update");
         conn.write(b"ack2").unwrap();
+
+        // Wait for client "done" before dropping — key_update's complex
+        // protocol flow makes bare TcpStream drop unreliable on Windows.
+        let n = conn.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"done");
     });
 
     let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
@@ -1749,6 +1754,8 @@ fn test_tls13_key_update_server_initiated() {
     let n = conn.read(&mut buf).unwrap();
     assert_eq!(&buf[..n], b"ack2");
 
+    // Signal server that client has read all data
+    conn.write(b"done").unwrap();
     let _ = conn.shutdown();
     server_handle.join().unwrap();
 }
