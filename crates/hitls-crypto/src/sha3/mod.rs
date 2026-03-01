@@ -58,41 +58,100 @@ fn keccak_f1600(state: &mut [u64; 25]) {
     keccak_f1600_soft(state);
 }
 
+/// Precomputed π destination table: for each src index (x + 5*y),
+/// PI_DEST[src] = y + 5*((2*x + 3*y) % 5).
+const PI_DEST: [usize; 25] = {
+    let mut table = [0usize; 25];
+    let mut x = 0;
+    while x < 5 {
+        let mut y = 0;
+        while y < 5 {
+            table[x + 5 * y] = y + 5 * ((2 * x + 3 * y) % 5);
+            y += 1;
+        }
+        x += 1;
+    }
+    table
+};
+
 /// Software fallback: Keccak-f[1600] permutation on a 25-lane state.
 fn keccak_f1600_soft(state: &mut [u64; 25]) {
     for &rc in &RC {
-        // θ (theta)
-        let mut c = [0u64; 5];
-        for x in 0..5 {
-            c[x] = state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20];
-        }
-        let mut d = [0u64; 5];
-        for x in 0..5 {
-            d[x] = c[(x + 4) % 5] ^ c[(x + 1) % 5].rotate_left(1);
-        }
-        for x in 0..5 {
-            for y in 0..5 {
-                state[x + 5 * y] ^= d[x];
-            }
-        }
+        // θ (theta) — column parities and diff
+        let c0 = state[0] ^ state[5] ^ state[10] ^ state[15] ^ state[20];
+        let c1 = state[1] ^ state[6] ^ state[11] ^ state[16] ^ state[21];
+        let c2 = state[2] ^ state[7] ^ state[12] ^ state[17] ^ state[22];
+        let c3 = state[3] ^ state[8] ^ state[13] ^ state[18] ^ state[23];
+        let c4 = state[4] ^ state[9] ^ state[14] ^ state[19] ^ state[24];
 
-        // ρ (rho) and π (pi) combined
+        let d0 = c4 ^ c1.rotate_left(1);
+        let d1 = c0 ^ c2.rotate_left(1);
+        let d2 = c1 ^ c3.rotate_left(1);
+        let d3 = c2 ^ c4.rotate_left(1);
+        let d4 = c3 ^ c0.rotate_left(1);
+
+        state[0] ^= d0;
+        state[5] ^= d0;
+        state[10] ^= d0;
+        state[15] ^= d0;
+        state[20] ^= d0;
+        state[1] ^= d1;
+        state[6] ^= d1;
+        state[11] ^= d1;
+        state[16] ^= d1;
+        state[21] ^= d1;
+        state[2] ^= d2;
+        state[7] ^= d2;
+        state[12] ^= d2;
+        state[17] ^= d2;
+        state[22] ^= d2;
+        state[3] ^= d3;
+        state[8] ^= d3;
+        state[13] ^= d3;
+        state[18] ^= d3;
+        state[23] ^= d3;
+        state[4] ^= d4;
+        state[9] ^= d4;
+        state[14] ^= d4;
+        state[19] ^= d4;
+        state[24] ^= d4;
+
+        // ρ (rho) and π (pi) combined — precomputed destination table
         let mut b = [0u64; 25];
-        for x in 0..5 {
-            for y in 0..5 {
-                let src = x + 5 * y;
-                let dst = y + 5 * ((2 * x + 3 * y) % 5);
-                b[dst] = state[src].rotate_left(ROTATIONS[src]);
-            }
+        for i in 0..25 {
+            b[PI_DEST[i]] = state[i].rotate_left(ROTATIONS[i]);
         }
 
-        // χ (chi)
-        for x in 0..5 {
-            for y in 0..5 {
-                state[x + 5 * y] =
-                    b[x + 5 * y] ^ (!b[(x + 1) % 5 + 5 * y] & b[(x + 2) % 5 + 5 * y]);
-            }
-        }
+        // χ (chi) — unrolled by row to avoid % 5
+        state[0] = b[0] ^ (!b[1] & b[2]);
+        state[1] = b[1] ^ (!b[2] & b[3]);
+        state[2] = b[2] ^ (!b[3] & b[4]);
+        state[3] = b[3] ^ (!b[4] & b[0]);
+        state[4] = b[4] ^ (!b[0] & b[1]);
+
+        state[5] = b[5] ^ (!b[6] & b[7]);
+        state[6] = b[6] ^ (!b[7] & b[8]);
+        state[7] = b[7] ^ (!b[8] & b[9]);
+        state[8] = b[8] ^ (!b[9] & b[5]);
+        state[9] = b[9] ^ (!b[5] & b[6]);
+
+        state[10] = b[10] ^ (!b[11] & b[12]);
+        state[11] = b[11] ^ (!b[12] & b[13]);
+        state[12] = b[12] ^ (!b[13] & b[14]);
+        state[13] = b[13] ^ (!b[14] & b[10]);
+        state[14] = b[14] ^ (!b[10] & b[11]);
+
+        state[15] = b[15] ^ (!b[16] & b[17]);
+        state[16] = b[16] ^ (!b[17] & b[18]);
+        state[17] = b[17] ^ (!b[18] & b[19]);
+        state[18] = b[18] ^ (!b[19] & b[15]);
+        state[19] = b[19] ^ (!b[15] & b[16]);
+
+        state[20] = b[20] ^ (!b[21] & b[22]);
+        state[21] = b[21] ^ (!b[22] & b[23]);
+        state[22] = b[22] ^ (!b[23] & b[24]);
+        state[23] = b[23] ^ (!b[24] & b[20]);
+        state[24] = b[24] ^ (!b[20] & b[21]);
 
         // ι (iota)
         state[0] ^= rc;
@@ -144,7 +203,13 @@ impl KeccakState {
                 return;
             }
             self.buf[self.buf_len..self.buf_len + need].copy_from_slice(&data[..need]);
-            self.xor_rate_bytes(&self.buf.clone());
+            // XOR buf into state inline (avoids buf.clone() to work around borrow)
+            let rate = self.rate;
+            for i in 0..rate / 8 {
+                let word =
+                    u64::from_le_bytes(self.buf[i * 8..(i + 1) * 8].try_into().unwrap());
+                self.state[i] ^= word;
+            }
             keccak_f1600(&mut self.state);
             src = need;
             self.buf_len = 0;
@@ -225,6 +290,7 @@ impl KeccakState {
     }
 
     /// Write state as 200 little-endian bytes into a caller-provided buffer.
+    #[inline]
     fn state_to_bytes_into(&self, out: &mut [u8; 200]) {
         for (i, &lane) in self.state.iter().enumerate() {
             out[i * 8..(i + 1) * 8].copy_from_slice(&lane.to_le_bytes());
