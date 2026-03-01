@@ -1467,7 +1467,7 @@ fn bench_frodokem(c: &mut Criterion) {
             b.iter(|| kp.encapsulate().unwrap());
         });
 
-        let (_, ct) = kp.encapsulate().unwrap();
+        let (ct, _) = kp.encapsulate().unwrap();
         group.bench_function(format!("{label}/decaps"), |b| {
             b.iter(|| kp.decapsulate(&ct).unwrap());
         });
@@ -1689,7 +1689,7 @@ fn bench_mceliece(c: &mut Criterion) {
         b.iter(|| kp.encapsulate().unwrap());
     });
 
-    let (_, ct) = kp.encapsulate().unwrap();
+    let (ct, _) = kp.encapsulate().unwrap();
     group.bench_function("6688128/decaps", |b| {
         b.iter(|| kp.decapsulate(&ct).unwrap());
     });
