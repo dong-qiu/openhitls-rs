@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I82 (82 phases)
-- Testing: T1–T64 (64 phases)
+- Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P44 (44 phases)
 
@@ -195,23 +195,23 @@ Category summary:
 | 183 | P27 | Perf | CCM Zero-Allocation Tag + CBC-MAC | 2026-03-01 |
 | 184 | P28 | Perf | ChaCha20-Poly1305 Padding Stack Arrays | 2026-03-01 |
 | 185 | P29 | Perf | PBKDF2 Inner Loop Stack Arrays | 2026-03-01 |
-| 186 | T64 | Test | Quality Defense Actions — Fuzz/CI/KAT/HW Cross-Validation | 2026-03-01 |
-| 187 | P30 | Perf | HKDF Expand Stack Arrays + HMAC Reuse | 2026-03-01 |
-| 188 | P31 | Perf | TLS PRF Stack Arrays | 2026-03-01 |
-| 189 | P32 | Perf | TLS HKDF Stack Arrays | 2026-03-01 |
-| 190 | P33 | Perf | Key Schedule + Export Stack Arrays | 2026-03-01 |
-| 191 | P34 | Perf | Handshake Hash Output Stack Arrays | 2026-03-01 |
-| 192 | P35 | Perf | RSA Padding Stack Arrays | 2026-03-01 |
-| 193 | P36 | Perf | HKDF Label Stack Encoding | 2026-03-01 |
-| 194 | P37 | Perf | TLCP/DTLCP Record Stack Arrays | 2026-03-01 |
-| 195 | P38 | Perf | TLCP/DTLCP CBC HMAC Caching | 2026-03-01 |
-| 196 | P39 | Perf | CBC Decrypt Truncate-in-Place | 2026-03-01 |
-| 197 | P40 | Perf | HMAC Hash Stack Return | 2026-03-01 |
-| 198 | P41 | Perf | RSA OAEP/PSS In-Place XOR | 2026-03-01 |
-| 199 | P42 | Perf | TLS 1.2 Key Schedule Seed Stack Arrays | 2026-03-01 |
-| 200 | P43 | Perf | ML-DSA Hint Encoding Stack Array | 2026-03-01 |
-| 201 | P44 | Perf | SM2/SM9 In-Place XOR | 2026-03-01 |
-| 202 | I82 | Impl | CRL Builder (CrlBuilder + RevokedCertBuilder) | 2026-03-01 |
+| 186 | P30 | Perf | HKDF Expand Stack Arrays + HMAC Reuse | 2026-03-01 |
+| 187 | P31 | Perf | TLS PRF Stack Arrays | 2026-03-01 |
+| 188 | P32 | Perf | TLS HKDF Stack Arrays | 2026-03-01 |
+| 189 | P33 | Perf | Key Schedule + Export Stack Arrays | 2026-03-01 |
+| 190 | P34 | Perf | Handshake Hash Output Stack Arrays | 2026-03-01 |
+| 191 | P35 | Perf | RSA Padding Stack Arrays | 2026-03-01 |
+| 192 | P36 | Perf | HKDF Label Stack Encoding | 2026-03-01 |
+| 193 | P37 | Perf | TLCP/DTLCP Record Stack Arrays | 2026-03-01 |
+| 194 | P38 | Perf | TLCP/DTLCP CBC HMAC Caching | 2026-03-01 |
+| 195 | P39 | Perf | CBC Decrypt Truncate-in-Place | 2026-03-01 |
+| 196 | P40 | Perf | HMAC Hash Stack Return | 2026-03-01 |
+| 197 | P41 | Perf | RSA OAEP/PSS In-Place XOR | 2026-03-01 |
+| 198 | P42 | Perf | TLS 1.2 Key Schedule Seed Stack Arrays | 2026-03-01 |
+| 199 | P43 | Perf | ML-DSA Hint Encoding Stack Array | 2026-03-01 |
+| 200 | P44 | Perf | SM2/SM9 In-Place XOR | 2026-03-01 |
+| 201 | I82 | Impl | CRL Builder (CrlBuilder + RevokedCertBuilder) | 2026-03-01 |
+| 202 | P45 | Perf | ML-DSA Signing Loop Heap Elimination | 2026-03-01 |
 
 ---
 
@@ -11405,24 +11405,33 @@ Added CRL generation capability (CrlBuilder + RevokedCertBuilder) to hitls-pki, 
 
 ---
 
-## Phase T64 — Quality Defense Actions: Fuzz/CI/KAT/HW Cross-Validation (2026-03-01)
-
-> **Note**: This phase was implemented between P29 and P30 (chronological row 186) but its documentation entry was lost during a merge. Reconstructed here for completeness.
+## Phase P45 — ML-DSA Signing Loop Heap Elimination (2026-03-01)
 
 ### Summary
-Execute quality defense actions: CI hardening, fuzz expansion, TLS config unit tests, HW↔SW cross-validation, ARM64 cross-compile CI, and ML-KEM/ML-DSA deterministic KAT infrastructure.
+Replaced per-iteration heap allocations in ML-DSA sign/verify with stack arrays and zero-copy `_into` variants. Key changes: `sample_mask_poly` uses `squeeze_into` with a `[0u8; 640]` stack buffer instead of `squeeze()` → `Vec`; `hash_h`/`hash_h2` → `hash_h_into`/`hash_h2_into` writing directly to caller's `[u8; 64]`/`[u8; 128]` stack buffers; `pack_w1_into`/`pack_z_into` write directly into pre-allocated output buffers; signing loop pre-allocates `hash_input` Vec once before the loop (was cloned per iteration); `decode_sk` returns `[u8; 64]` for `tr` instead of `Vec<u8>`.
 
 ### Changes
 | File | Change |
 |------|--------|
-| `.github/workflows/ci.yml` | Added `--workspace` to clippy and test; added `cross-check` job (aarch64-unknown-linux-gnu) |
-| `fuzz/Cargo.toml` + 6 new fuzz targets | `fuzz_hmac`, `fuzz_x25519`, `fuzz_drbg`, `fuzz_pbkdf2`, `fuzz_ed448`, `fuzz_frodokem` (+48 corpus seeds) |
-| `crates/hitls-tls/src/config/mod.rs` | +24 unit tests (ServerPrivateKey variants, builder edge cases, MaxFragmentLength) |
-| `crates/hitls-crypto/src/sha3/mod.rs` | +4 Keccak ARM HW↔SW cross-validation tests (cfg-gated aarch64) |
-| `crates/hitls-crypto/src/mlkem/mod.rs` | `generate_from_seed(d,z)`, `encapsulate_deterministic(m)` (cfg(test)), +6 KAT tests |
-| `crates/hitls-crypto/src/mldsa/mod.rs` | `mldsa_keygen_from_seed(xi)`, `generate_from_seed(xi)` (cfg(test)), +7 KAT tests |
+| `crates/hitls-crypto/src/mldsa/poly.rs` | `sample_mask_poly`: `squeeze_into` with `[0u8; 640]` stack buffer. New `pack_w1_into`/`pack_z_into` zero-copy variants, originals delegate to them. `hash_h` → `hash_h_into`, `hash_h2` → `hash_h2_into` writing to caller buffer |
+| `crates/hitls-crypto/src/mldsa/mod.rs` | `mldsa_keygen`: stack arrays for `expanded`/`tr`. `mldsa_sign`: stack arrays for `mu`/`rho_prime`/`c_tilde`, pre-allocated `hash_input` Vec with `pack_w1_into` direct writes. `mldsa_verify`: stack arrays for `tr`/`mu`/`c_tilde_prime`, `pack_w1_into` direct writes. `encode_sig`: `pack_z_into` direct writes. `decode_sk`: returns `[u8; 64]` for tr. Test helper `mldsa_keygen_from_seed` updated |
+
+### Allocation Savings (per sign loop iteration, ML-DSA-65: k=6, l=5)
+| Before | After |
+|--------|-------|
+| 5× `sample_mask_poly` → 5× 640-byte Vec | 5× `[0u8; 640]` stack buffer |
+| 1× `mu.clone()` → 64-byte Vec | Pre-allocated, written once |
+| 6× `pack_w1()` → 6× 128-byte Vec | `pack_w1_into` into pre-allocated buffer |
+| 1× `hash_h()` → ct_len Vec | `hash_h_into` to `[0u8; 64]` stack |
+| 1× `hash_h2()` μ → 64-byte Vec | `hash_h2_into` to `[0u8; 64]` stack |
+| 1× `hash_h2()` ρ' → 64-byte Vec | `hash_h2_into` to `[0u8; 64]` stack |
+| Total: ~14 heap allocs/iter | 1 pre-allocated Vec (reused) + stack arrays |
 
 ### Test Results
-- +6 fuzz targets (34→40), +48 corpus seeds (238→286)
-- +24 TLS config unit tests, +4 HW↔SW tests, +13 ML-KEM/ML-DSA KAT tests
+- All 42 ML-DSA tests pass
 - 3,534 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P45)
+- `cargo test --workspace --all-features`: 3,534 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean

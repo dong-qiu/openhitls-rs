@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phases I1–I82, T1–T64, R1–R12, P1–P44 complete (3534 tests, 21 ignored)
+- **Status**: Phases I1–I82, T1–T63, R1–R12, P1–P45 complete (3534 tests, 21 ignored)
 
 ## Workspace Structure
 
@@ -62,7 +62,7 @@ cargo fmt --all -- --check
 - `rustfmt.toml`: max_width=100, use_field_init_shorthand, use_try_shorthand
 - `clippy.toml`: cognitive-complexity-threshold=30
 - Always run `cargo fmt` before committing
-- **Sync before task**: Before starting any implementation task, always sync the remote main branch to the current working branch first (`git fetch origin main && git rebase origin/main`) to ensure the local codebase is up to date
+- **Sync before task**: Before starting any implementation task, always pull the latest remote main branch first (`git pull origin main`) to ensure the local codebase is up to date
 
 ### Error Handling
 - Use `hitls_types::CryptoError` for all crypto errors (thiserror-based)
@@ -101,13 +101,6 @@ After completing each implementation task (phase/feature), **always** update the
 - `CLAUDE.md` — Update status line, test counts, workspace structure annotations, and phase number references to match DEV_LOG.md
 - `README.md` — Update test counts in Building & Testing section; update protocol/algorithm tables if new features added
 
-### Post-Push CI Monitoring
-After pushing changes to the remote repository, **always** monitor the CI pipeline execution:
-- Use `gh run list --branch <branch> --limit 1` to check the latest CI run status
-- If CI fails, use `gh run view <run-id> --log-failed` to retrieve failure logs
-- Analyze the root cause, fix the issue locally, and push a follow-up commit
-- Repeat until CI passes (all jobs green)
-
 ### Phase Numbering Rules
 - **No sub-phases**: All phases use integer IDs (e.g., Phase I44, not Phase I44a/I44b). If a task has multiple parts, use a single Phase entry with `### Part A / Part B` subsections inside.
 - **Four categories**: Implementation (I-prefix, e.g., I43), Testing (T-prefix, e.g., T6), Refactoring (R-prefix, e.g., R1), Performance (P-prefix, e.g., P1).
@@ -125,7 +118,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases I1–I82, T1–T64, R1–R12, P1–P44 complete (3534 tests, 21 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
+Phases I1–I82, T1–T63, R1–R12, P1–P45 complete (3534 tests, 21 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
 
 ### Completed Phases (Summary)
 
@@ -187,9 +180,9 @@ Key milestones:
 - Phase P42: TLS 1.2 key schedule seed stack arrays — `Vec::with_capacity(64)` → `[0u8; 64]` for seed (always 2×32-byte randoms). Eliminates 3 heap allocations per TLS 1.2/TLCP handshake.
 - Phase P43: ML-DSA hint encoding stack array — `vec![0u8; omega+k]` → `[0u8; 96]` in `encode_sig`. Eliminates per-sign heap allocation.
 - Phase P44: SM2/SM9 in-place XOR — reuse KDF output `t` for XOR (SM2) and `k1.to_vec()` + in-place XOR (SM9) instead of `.collect()`. Eliminates 2 Vec allocations per SM2 encrypt/decrypt, 2 per SM9 encrypt/decrypt.
+- Phase P45: ML-DSA signing loop heap elimination — `sample_mask_poly` `squeeze_into` with `[0u8; 640]` stack buffer, `hash_h_into`/`hash_h2_into` to caller stack arrays, `pack_w1_into`/`pack_z_into` zero-copy packing, pre-allocated `hash_input` Vec (1 alloc vs ~14/iter), `decode_sk` returns `[u8; 64]` for tr.
 - Phase T45–T53: Quality improvement roadmap — TLS connection unit tests (+15), TLS 1.2 handshake edge cases (+15), HW↔SW cross-validation (+8), proptest expansion to 5/9 crates (+15), side-channel timing tests (+6), concurrency stress tests (+10), feature flag smoke tests (+4), zeroize runtime verification (+4), DTLS fuzz + OpenSSL interop (+1 fuzz target, +2 tests). Total: +80 tests, 13→14 fuzz targets, defense model B→B+.
 - Phase T59–T62: Test optimization & deep defense — RSA OAEP/PKCS1v15 constant-time fix (timing side-channel elimination), CBC/GCM buffer zeroize on error, RSA timing tests (+2 ignored), unit tests (+2), crypto semantic fuzz targets (+6: RSA/ECDSA/HKDF/SM2/CCM/TLS PRF), TLS 1.3/1.2 state machine fuzz (+2), corpus enrichment (+40 seeds), cargo-deny supply-chain policy, CI hardening (miri blocking, feature combos, cargo-deny job), subtle version unification. Total: +4 tests, 18→26 fuzz targets, 118→158 corpus, defense model B+→A-.
 - Phase T63: PQC fuzz + signature sign fuzz — ML-KEM encap/decap, ML-DSA sign/verify, SLH-DSA sign/verify (fast variants), RSA sign (PKCS1v15/PSS), ECDSA sign (P-256/P-384/P-521), Ed25519 full coverage, SM2 sign/encrypt/decrypt, DSA sign (small params). Total: +8 fuzz targets (26→34), +80 corpus seeds (158→238), PQC coverage 0→3/6, sign-path coverage 0→5/7.
-- Phase T64: Quality defense actions — 6 fuzz targets (HMAC/X25519/DRBG/PBKDF2/Ed448/FrodoKEM), 24 TLS config unit tests, 4 Keccak ARM HW↔SW cross-validation tests, ML-KEM/ML-DSA deterministic KAT (+13), ARM64 cross-compile CI. Total: +6 fuzz targets (34→40), +~45 tests.
 
 See `DEV_LOG.md` for detailed phase tables (including test, refactoring, and performance phases) and `PROMPT_LOG.md` for prompt/response log.

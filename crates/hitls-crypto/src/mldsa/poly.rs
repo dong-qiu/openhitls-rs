@@ -165,7 +165,8 @@ pub(crate) fn sample_mask_poly(seed: &[u8], nonce: u16, gamma1: i32) -> Poly {
 
     let bits = if gamma1 == (1 << 17) { 18 } else { 20 }; // gamma1 = 2^17 or 2^19
     let bytes_needed = N * bits / 8;
-    let buf = xof.squeeze(bytes_needed).unwrap();
+    let mut buf = [0u8; 640]; // max(576, 640)
+    xof.squeeze_into(&mut buf[..bytes_needed]);
 
     let mut r = [0i32; N];
     if bits == 18 {
@@ -393,11 +394,10 @@ pub(crate) fn unpack_eta(data: &[u8], eta: usize) -> Poly {
     r
 }
 
-/// Pack z polynomial (gamma1-bounded signed coefficients).
-pub(crate) fn pack_z(poly: &Poly, gamma1: i32) -> Vec<u8> {
+/// Pack z polynomial into caller-provided buffer (zero-allocation).
+pub(crate) fn pack_z_into(poly: &Poly, gamma1: i32, out: &mut [u8]) {
     if gamma1 == (1 << 17) {
-        // 18-bit packing
-        let mut out = vec![0u8; 576]; // 256 * 18 / 8
+        // 18-bit packing → 576 bytes
         for i in 0..N / 4 {
             let mut t = [0i32; 4];
             for j in 0..4 {
@@ -413,10 +413,8 @@ pub(crate) fn pack_z(poly: &Poly, gamma1: i32) -> Vec<u8> {
             out[9 * i + 7] = (t[3] >> 2) as u8;
             out[9 * i + 8] = (t[3] >> 10) as u8;
         }
-        out
     } else {
-        // gamma1 == 2^19, 20-bit packing
-        let mut out = vec![0u8; 640]; // 256 * 20 / 8
+        // gamma1 == 2^19, 20-bit packing → 640 bytes
         for i in 0..N / 2 {
             let t0 = gamma1 - poly[2 * i];
             let t1 = gamma1 - poly[2 * i + 1];
@@ -426,8 +424,15 @@ pub(crate) fn pack_z(poly: &Poly, gamma1: i32) -> Vec<u8> {
             out[5 * i + 3] = (t1 >> 4) as u8;
             out[5 * i + 4] = (t1 >> 12) as u8;
         }
-        out
     }
+}
+
+/// Pack z polynomial (allocating wrapper for tests).
+pub(crate) fn pack_z(poly: &Poly, gamma1: i32) -> Vec<u8> {
+    let size = if gamma1 == (1 << 17) { 576 } else { 640 };
+    let mut out = vec![0u8; size];
+    pack_z_into(poly, gamma1, &mut out);
+    out
 }
 
 /// Unpack z polynomial.
@@ -470,44 +475,48 @@ pub(crate) fn unpack_z(data: &[u8], gamma1: i32) -> Poly {
     r
 }
 
-/// Pack w1 coefficients (for challenge hash computation).
+/// Pack w1 coefficients into caller-provided buffer (zero-allocation).
 /// ML-DSA-44: gamma2=(Q-1)/88, w1 in [0, 43], 6-bit packing → 192 bytes
 /// ML-DSA-65/87: gamma2=(Q-1)/32, w1 in [0, 15], 4-bit packing → 128 bytes
-pub(crate) fn pack_w1(poly: &Poly, gamma2: i32) -> Vec<u8> {
+pub(crate) fn pack_w1_into(poly: &Poly, gamma2: i32, out: &mut [u8]) {
     if gamma2 == (Q - 1) / 88 {
-        // 6-bit packing
-        let mut out = vec![0u8; 192]; // 256 * 6 / 8
+        // 6-bit packing → 192 bytes
         for i in 0..N / 4 {
             out[3 * i] = (poly[4 * i] | (poly[4 * i + 1] << 6)) as u8;
             out[3 * i + 1] = ((poly[4 * i + 1] >> 2) | (poly[4 * i + 2] << 4)) as u8;
             out[3 * i + 2] = ((poly[4 * i + 2] >> 4) | (poly[4 * i + 3] << 2)) as u8;
         }
-        out
     } else {
-        // 4-bit packing
-        let mut out = vec![0u8; 128]; // 256 * 4 / 8
+        // 4-bit packing → 128 bytes
         for i in 0..N / 2 {
             out[i] = (poly[2 * i] | (poly[2 * i + 1] << 4)) as u8;
         }
-        out
     }
+}
+
+/// Pack w1 coefficients (allocating wrapper for tests).
+pub(crate) fn pack_w1(poly: &Poly, gamma2: i32) -> Vec<u8> {
+    let size = if gamma2 == (Q - 1) / 88 { 192 } else { 128 };
+    let mut out = vec![0u8; size];
+    pack_w1_into(poly, gamma2, &mut out);
+    out
 }
 
 // ─── Hash wrappers ──────────────────────────────────────────────
 
-/// H: SHAKE256(input, output_len).
-pub(crate) fn hash_h(input: &[u8], output_len: usize) -> Vec<u8> {
+/// H: SHAKE256(input) squeezed into caller-provided buffer.
+pub(crate) fn hash_h_into(input: &[u8], output: &mut [u8]) {
     let mut xof = Shake256::new();
     xof.update(input).unwrap();
-    xof.squeeze(output_len).unwrap()
+    xof.squeeze_into(output);
 }
 
-/// H with two inputs concatenated.
-pub(crate) fn hash_h2(a: &[u8], b: &[u8], output_len: usize) -> Vec<u8> {
+/// H with two inputs concatenated, squeezed into caller-provided buffer.
+pub(crate) fn hash_h2_into(a: &[u8], b: &[u8], output: &mut [u8]) {
     let mut xof = Shake256::new();
     xof.update(a).unwrap();
     xof.update(b).unwrap();
-    xof.squeeze(output_len).unwrap()
+    xof.squeeze_into(output);
 }
 
 // ─── Vector/Matrix operations ───────────────────────────────────

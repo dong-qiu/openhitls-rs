@@ -3420,3 +3420,18 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - Re-exported new types from `x509/mod.rs`
 - 10 new tests: v1 empty, v2 extensions, revoked certs, roundtrip verify, roundtrip PEM, reason code, invalidity date, auto v2 upgrade, DER/PEM output, ECDSA signing
 - hitls-pki: 395→405 tests, workspace: 3,534 tests, 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P45 — ML-DSA Signing Loop Heap Elimination (2026-03-01)
+
+**Prompt**: Continue performance optimizations. Identified ML-DSA signing loop as highest-impact target: ~14 heap allocations per signing loop iteration from squeeze(), hash_h()/hash_h2() Vec returns, pack_w1() Vec returns, mu.clone(), and pack_z() in encode_sig.
+
+**Result**:
+- `sample_mask_poly`: `squeeze_into` with `[0u8; 640]` stack buffer (was `squeeze()` → Vec)
+- `hash_h` → `hash_h_into`, `hash_h2` → `hash_h2_into`: write directly to caller's stack arrays
+- `pack_w1_into` / `pack_z_into`: zero-copy packing variants, originals delegate to them
+- Signing loop: pre-allocate `hash_input` Vec once before loop (was `mu.clone()` + extend per iter)
+- `decode_sk` returns `[u8; 64]` for `tr` instead of `Vec<u8>`
+- Updated all callers in keygen, sign, verify, encode_sig, and test helper
+- All 42 ML-DSA tests pass, 3,534 total tests, 21 ignored, 0 clippy warnings

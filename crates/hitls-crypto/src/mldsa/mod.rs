@@ -144,13 +144,21 @@ fn encode_sk(
 fn decode_sk(
     sk: &[u8],
     params: &MlDsaParams,
-) -> ([u8; 32], [u8; 32], Vec<u8>, Vec<Poly>, Vec<Poly>, Vec<Poly>) {
+) -> (
+    [u8; 32],
+    [u8; 32],
+    [u8; 64],
+    Vec<Poly>,
+    Vec<Poly>,
+    Vec<Poly>,
+) {
     let eta_bytes = if params.eta == 2 { 96 } else { 128 };
     let mut rho = [0u8; 32];
     let mut key = [0u8; 32];
     rho.copy_from_slice(&sk[..32]);
     key.copy_from_slice(&sk[32..64]);
-    let tr = sk[64..128].to_vec();
+    let mut tr = [0u8; 64];
+    tr.copy_from_slice(&sk[64..128]);
 
     let mut offset = 128;
     let mut s1 = Vec::with_capacity(params.l);
@@ -179,7 +187,9 @@ fn encode_sig(c_tilde: &[u8], z: &[Poly], h: &[Vec<bool>], params: &MlDsaParams)
     let mut sig = Vec::with_capacity(params.sig_len);
     sig.extend_from_slice(c_tilde);
     for poly in z {
-        sig.extend_from_slice(&pack_z(poly, params.gamma1));
+        let start = sig.len();
+        sig.resize(start + z_bytes, 0);
+        pack_z_into(poly, params.gamma1, &mut sig[start..start + z_bytes]);
     }
     // Encode hints: omega + k bytes (max 88 for ML-DSA-87)
     let hint_len = params.omega + params.k;
@@ -257,7 +267,8 @@ fn mldsa_keygen(params: &MlDsaParams) -> Result<(Vec<u8>, Vec<u8>), CryptoError>
     seed_input.extend_from_slice(&xi);
     seed_input.push(params.k as u8);
     seed_input.push(params.l as u8);
-    let expanded = hash_h(&seed_input, 128);
+    let mut expanded = [0u8; 128];
+    hash_h_into(&seed_input, &mut expanded);
     let mut rho = [0u8; 32];
     let mut rho_prime = [0u8; 64];
     let mut key = [0u8; 32];
@@ -314,7 +325,8 @@ fn mldsa_keygen(params: &MlDsaParams) -> Result<(Vec<u8>, Vec<u8>), CryptoError>
     let pk = encode_pk(&rho, &t1, params);
 
     // tr = H(pk, 64)
-    let tr = hash_h(&pk, 64);
+    let mut tr = [0u8; 64];
+    hash_h_into(&pk, &mut tr);
 
     // sk = encode_sk(ρ, K, tr, s1, s2, t0)
     let sk = encode_sk(&rho, &key, &tr, &s1, &s2, &t0, params);
@@ -344,10 +356,22 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
     }
 
     // μ = H(tr || M, 64)
-    let mu = hash_h2(&tr, message, 64);
+    let mut mu = [0u8; 64];
+    hash_h2_into(&tr, message, &mut mu);
 
     // ρ' = H(K || μ, 64)  (deterministic signing)
-    let rho_prime = hash_h2(&key, &mu, 64);
+    let mut rho_prime = [0u8; 64];
+    hash_h2_into(&key, &mu, &mut rho_prime);
+
+    // Pre-allocate hash_input buffer: μ (64 bytes) + k × w1_bytes
+    let w1_bytes = if params.gamma2 == (Q - 1) / 88 {
+        192
+    } else {
+        128
+    };
+    let hash_input_len = 64 + params.k * w1_bytes;
+    let mut hash_input = vec![0u8; hash_input_len];
+    hash_input[..64].copy_from_slice(&mu);
 
     let mut kappa: u32 = 0;
     loop {
@@ -384,15 +408,20 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
             }
         }
 
-        // c_tilde = H(μ || pack_w1(w1), 32)
-        let mut hash_input = mu.clone();
-        for poly in &w1 {
-            hash_input.extend_from_slice(&pack_w1(poly, params.gamma2));
+        // c_tilde = H(μ || pack_w1(w1), ct_len) — pack directly into pre-allocated buffer
+        for (idx, poly) in w1.iter().enumerate() {
+            let offset = 64 + idx * w1_bytes;
+            pack_w1_into(
+                poly,
+                params.gamma2,
+                &mut hash_input[offset..offset + w1_bytes],
+            );
         }
-        let c_tilde = hash_h(&hash_input, params.ct_len);
+        let mut c_tilde = [0u8; 64];
+        hash_h_into(&hash_input, &mut c_tilde[..params.ct_len]);
 
         // c = SampleInBall(c_tilde)
-        let c = sample_in_ball(&c_tilde, params.tau);
+        let c = sample_in_ball(&c_tilde[..params.ct_len], params.tau);
         let mut c_hat = c;
         ntt::ntt(&mut c_hat);
 
@@ -476,7 +505,7 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
         }
 
         // Encode signature
-        return Ok(encode_sig(&c_tilde, &z, &h, params));
+        return Ok(encode_sig(&c_tilde[..params.ct_len], &z, &h, params));
     }
 }
 
@@ -512,10 +541,12 @@ pub fn mldsa_verify(
     let a_hat = expand_a(&rho, params.k, params.l);
 
     // tr = H(pk, 64)
-    let tr = hash_h(pk, 64);
+    let mut tr = [0u8; 64];
+    hash_h_into(pk, &mut tr);
 
     // μ = H(tr || M, 64)
-    let mu = hash_h2(&tr, message, 64);
+    let mut mu = [0u8; 64];
+    hash_h2_into(&tr, message, &mut mu);
 
     // c = SampleInBall(c_tilde)
     let c = sample_in_ball(&c_tilde, params.tau);
@@ -559,14 +590,27 @@ pub fn mldsa_verify(
         }
     }
 
-    // c_tilde' = H(μ || pack_w1(w1'), 32)
-    let mut hash_input = mu;
-    for poly in &w1_prime {
-        hash_input.extend_from_slice(&pack_w1(poly, params.gamma2));
+    // c_tilde' = H(μ || pack_w1(w1'), ct_len)
+    let w1_bytes = if params.gamma2 == (Q - 1) / 88 {
+        192
+    } else {
+        128
+    };
+    let hash_input_len = 64 + params.k * w1_bytes;
+    let mut hash_input = vec![0u8; hash_input_len];
+    hash_input[..64].copy_from_slice(&mu);
+    for (idx, poly) in w1_prime.iter().enumerate() {
+        let offset = 64 + idx * w1_bytes;
+        pack_w1_into(
+            poly,
+            params.gamma2,
+            &mut hash_input[offset..offset + w1_bytes],
+        );
     }
-    let c_tilde_prime = hash_h(&hash_input, params.ct_len);
+    let mut c_tilde_prime = [0u8; 64];
+    hash_h_into(&hash_input, &mut c_tilde_prime[..params.ct_len]);
 
-    Ok(c_tilde == c_tilde_prime)
+    Ok(c_tilde[..] == c_tilde_prime[..params.ct_len])
 }
 
 // ─── Public API ─────────────────────────────────────────────────
@@ -626,7 +670,8 @@ fn mldsa_keygen_from_seed(
     seed_input.extend_from_slice(xi);
     seed_input.push(params.k as u8);
     seed_input.push(params.l as u8);
-    let expanded = hash_h(&seed_input, 128);
+    let mut expanded = [0u8; 128];
+    hash_h_into(&seed_input, &mut expanded);
     let mut rho = [0u8; 32];
     let mut rho_prime = [0u8; 64];
     let mut key = [0u8; 32];
@@ -674,7 +719,8 @@ fn mldsa_keygen_from_seed(
     }
 
     let pk = encode_pk(&rho, &t1, params);
-    let tr = hash_h(&pk, 64);
+    let mut tr = [0u8; 64];
+    hash_h_into(&pk, &mut tr);
     let sk = encode_sk(&rho, &key, &tr, &s1, &s2, &t0, params);
 
     Ok((pk, sk))
