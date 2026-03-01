@@ -3548,6 +3548,20 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 ---
 
+## Phase P54 — ECDSA P-256 Verify Scalar Field Fast Path (2026-03-01)
+
+**Prompt**: Add P-256 fast path dispatch in ECDSA verify for scalar field operations. The verify path uses generic BigNum `mod_inv`/`mod_mul` for `s^(-1) mod n`, `u1 = e * w mod n`, `u2 = r * w mod n`. The sign path already uses P256ScalarElement since P17. Dispatch to P256ScalarElement in verify too.
+
+**Result**:
+- Added P-256 fast path in `verify()` (ecdsa/mod.rs lines 163-178): `P256ScalarElement::from_bignum` + `.inv()` + `.mul()` when `curve_id() == NistP256`
+- Falls back to generic BigNum `mod_inv`/`mod_mul` for other curves (P-384, P-521, Brainpool)
+- ECDSA P-256 verify: ~99µs → 91µs (8% speedup)
+- Sign unchanged (already used P256ScalarElement since P17)
+- All ECDSA tests pass (including Wycheproof P-256/P-384/P-521 vectors)
+- All 3,600 tests pass, 21 ignored, 0 clippy warnings
+
+---
+
 ## Phase T65 — Test Coverage Enhancement (+66 tests, CI coverage infrastructure) (2026-03-01)
 
 **Prompt**: Implement Phase T65 — Test Coverage Enhancement. Switch CI from cargo-tarpaulin to cargo-llvm-cov with branch coverage. Add ~70 tests targeting low-coverage files: TLS 1.3 server, TLS 1.2 client/server, crypto primitives (DRBG, GCM, McEliece matrix, provider, DSA, ElGamal, FIPS KAT/PCT), and CLI commands (s_client, s_server, speed).

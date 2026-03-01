@@ -160,15 +160,22 @@ impl EcdsaKeyPair {
         // e = truncate(digest, bit_len(n))
         let e = truncate_digest(digest, n_bits);
 
-        // w = s^(-1) mod n
-        let w = match s.mod_inv(n) {
-            Ok(w) => w,
-            Err(_) => return Ok(false),
+        // u1 = e * s^(-1) mod n, u2 = r * s^(-1) mod n
+        let (u1, u2) = if self.group.curve_id() == EccCurveId::NistP256 {
+            // Fast path: 4×u64 Montgomery scalar field (Fermat inversion)
+            use crate::ecc::p256_scalar::P256ScalarElement;
+            let s_se = P256ScalarElement::from_bignum(&s);
+            let w_se = s_se.inv();
+            let u1_se = P256ScalarElement::from_bignum(&e).mul(&w_se);
+            let u2_se = P256ScalarElement::from_bignum(&r).mul(&w_se);
+            (u1_se.to_bignum(), u2_se.to_bignum())
+        } else {
+            let w = match s.mod_inv(n) {
+                Ok(w) => w,
+                Err(_) => return Ok(false),
+            };
+            (e.mod_mul(&w, n)?, r.mod_mul(&w, n)?)
         };
-
-        // u1 = e*w mod n, u2 = r*w mod n
-        let u1 = e.mod_mul(&w, n)?;
-        let u2 = r.mod_mul(&w, n)?;
 
         // (x1, y1) = u1*G + u2*Q
         let point = self.group.scalar_mul_add(&u1, &u2, &self.public_key)?;

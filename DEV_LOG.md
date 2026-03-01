@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I82 (82 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P44 (44 phases)
+- Performance: P1–P54 (54 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -220,7 +220,8 @@ Category summary:
 | 208 | P51 | Perf | SM9 Windowed Scalar Multiplication | 2026-03-01 |
 | 209 | P52 | Perf | ECC/EdDSA Windowed Scalar Multiplication | 2026-03-01 |
 | 210 | P53 | Perf | BigNum CIOS Inner Loop Optimization | 2026-03-01 |
-| 211 | T65 | Test | Test Coverage Enhancement (+66 tests, CI coverage infra) | 2026-03-01 |
+| 211 | P54 | Perf | ECDSA P-256 Verify Scalar Field Fast Path | 2026-03-01 |
+| 212 | T65 | Test | Test Coverage Enhancement (+66 tests, CI coverage infra) | 2026-03-01 |
 
 ---
 
@@ -11664,6 +11665,41 @@ Optimized the CIOS Montgomery multiplication inner loop in `hitls-bignum` by add
 
 ### Build Status (Post P53)
 - `cargo test --workspace --all-features`: 3,534 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P54 — ECDSA P-256 Verify Scalar Field Fast Path (2026-03-01)
+
+### Summary
+Added P-256 fast path dispatch in ECDSA verify for scalar field operations. The verify path now uses `P256ScalarElement` (4×u64 Montgomery mod curve order n) for `s^(-1) mod n`, `u1 = e * w mod n`, and `u2 = r * w mod n` instead of generic BigNum `mod_inv`/`mod_mul`. The sign path already used P256ScalarElement since Phase P17.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/ecdsa/mod.rs` | Added P-256 fast path in `verify()` (lines 163-178): dispatches to `P256ScalarElement::from_bignum` + `.inv()` + `.mul()` when `curve_id() == NistP256`, falls back to generic BigNum for other curves. |
+
+### Implementation Details
+1. **Fast path condition**: `self.group.curve_id() == EccCurveId::NistP256` — zero-cost at runtime (enum comparison)
+2. **P256ScalarElement operations**: `from_bignum` converts to 4×u64 Montgomery form, `inv()` uses Fermat inversion with specialized addition chain (Phase P17), `mul()` uses schoolbook 4-limb multiply with modular reduction
+3. **Fallback**: Other curves (P-384, P-521, Brainpool, SM2) continue using generic BigNum `mod_inv`/`mod_mul`
+4. **Sign path unchanged**: Already used P256ScalarElement since Phase P17
+
+### Benchmark Results (Apple M4, macOS 15.4)
+| Benchmark | Before (P53) | After (P54) | Speedup |
+|-----------|-------------|-------------|---------|
+| ecdsa-p256 verify | ~99 µs | 91.0 µs | 1.09× |
+| ecdsa-p256 sign | ~46 µs | 44.3 µs | — (noise) |
+
+~8% verify speedup from eliminating generic BigNum modular inversion (which uses full CIOS Montgomery exponentiation) in favor of specialized 4×u64 Fermat inversion.
+
+### Test Results
+- All ECDSA tests pass (including Wycheproof P-256/P-384/P-521 vectors)
+- 3,600 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P54)
+- `cargo test --workspace --all-features`: 3,600 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 
