@@ -3607,6 +3607,80 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 ---
 
+## Phase P57 — ML-DSA Sign Zero-Allocation Retry Loop (2026-03-01)
+
+**Prompt**: Optimize ML-DSA signing loop. Pre-allocate sig_bytes, hash_input, hint_buf outside the rejection-sampling retry loop and reuse across iterations.
+
+**Result**:
+- Pre-allocated `sig_bytes`, `hash_input`, `hint_buf` outside signing loop, `clear()` + reuse per iteration
+- ML-DSA-65 sign ~5% faster
+- All 3,600 tests pass, 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P58 — ML-KEM Clone Elimination + Buffer Reuse (2026-03-01)
+
+**Prompt**: Eliminate unnecessary `.clone()` calls and Vec allocations in ML-KEM keygen/encaps/decaps paths by reusing buffers and avoiding intermediate copies.
+
+**Result**:
+- Removed `.clone()` on polynomial vectors where ownership transfer/borrowing suffices
+- Shared scratch buffers across compress/encode steps
+- Direct encode to pre-allocated output
+- ML-KEM-768 keygen ~5% faster, encaps ~5%, decaps ~3%
+- All 3,600 tests pass, 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P59 — Keccak keccak_f1600_soft Unroll + Absorb Clone Elimination (2026-03-01)
+
+**Prompt**: Optimize Keccak-f[1600] software permutation. Fully unroll theta/rho/pi/chi steps with precomputed constants. Eliminate self.buf.clone() in absorb path.
+
+**Result**:
+- `keccak_f1600_soft`: precomputed `PI_DEST[25]` const table for π, explicit theta c0-c4/d0-d4, chi unrolled by row
+- Absorb: `self.buf.clone()` → inline XOR loop (avoids borrow conflict without clone)
+- Added `#[inline]` on `state_to_bytes_into`
+- ML-KEM-768 decaps: 32µs → 25µs (22% faster), encaps: 22µs → 18µs (18% faster)
+- All 3,600 tests pass, 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P60 — Fe25519 sub_fast Carry Elision + Inversion Chain Cleanup (2026-03-01)
+
+**Prompt**: Optimize Fe25519 field operations for X25519. Add carry-deferred subtraction for Montgomery ladder, compact inversion chains, optimize to_bytes encoding.
+
+**Result**:
+- Added `sub_fast()` — subtraction with 2p bias, no carry propagation. Safe only when inputs bounded (from mul/square) and result flows into mul/square
+- Used in X25519 Montgomery ladder (4 sub→sub_fast replacements)
+- Added `square_times(n)` helper, compacted `invert()`/`pow25523()`
+- Optimized `to_bytes()` with direct `to_le_bytes()` + `copy_from_slice`
+- X25519 diffie_hellman: 20.1µs → 18.3µs (9% faster)
+- All 3,600 tests pass, 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P61 — BigNum ARM64 umulh Investigation (Skipped) (2026-03-01)
+
+**Prompt**: Investigate adding explicit ARM64 umulh intrinsics to BigNum Montgomery multiplication to close performance gap to C.
+
+**Result**:
+- Generated ARM64 assembly and found LLVM already produces 31 `umulh` + 106 `mul` instructions
+- u128 multiplication patterns correctly lowered to optimal instruction pairs
+- 7.1× gap to C is from loop overhead and C's hand-tuned assembly, not missing intrinsics
+- No code changes — phase skipped
+
+---
+
+## Phase P62 — GHASH HW Zero-Copy Batch Processing (2026-03-01)
+
+**Prompt**: Optimize GHASH hardware path in GCM. Eliminate per-block Gf128↔bytes conversion by keeping state as [u8; 16] during the HW loop.
+
+**Result**:
+- `ghash_data()` HW path: state→bytes once, process all blocks, bytes→state once (1 pair vs 2N)
+- AES-128-GCM 1KB encrypt -6%, decrypt -7%
+- All 3,600 tests pass, 21 ignored, 0 clippy warnings
+
+---
+
 ## Phase T66 — CI Hardening + HMAC Fix + Test Coverage Expansion (+66 tests) (2026-03-01)
 
 **Prompt**: 请按照优先行动建议，分阶段执行优化方案，每阶段完成后提交修改的代码 (Follow priority action recommendations from quality analysis, execute step by step with commits after each phase).

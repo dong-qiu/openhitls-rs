@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I82 (82 phases)
 - Testing: T1–T66 (64 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P56 (56 phases)
+- Performance: P1–P62 (62 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -223,8 +223,14 @@ Category summary:
 | 211 | P54 | Perf | ECDSA P-256 Verify Scalar Field Fast Path | 2026-03-01 |
 | 212 | P55 | Perf | Ed25519/Ed448 Verify Projective Point Comparison | 2026-03-01 |
 | 213 | P56 | Perf | SM3 Ring Buffer Message Schedule | 2026-03-01 |
-| 214 | T65 | Test | Test Coverage Enhancement (+66 tests, CI coverage infra) | 2026-03-01 |
-| 215 | T66 | Test | CI Hardening + HMAC Fix + Test Coverage Expansion (+66 tests) | 2026-03-01 |
+| 214 | P57 | Perf | ML-DSA Sign Zero-Allocation Retry Loop | 2026-03-01 |
+| 215 | P58 | Perf | ML-KEM Clone Elimination + Buffer Reuse | 2026-03-01 |
+| 216 | P59 | Perf | Keccak keccak_f1600_soft Unroll + Absorb Clone Elimination | 2026-03-01 |
+| 217 | P60 | Perf | Fe25519 sub_fast Carry Elision + Inversion Chain Cleanup | 2026-03-01 |
+| 218 | P61 | Perf | BigNum ARM64 umulh Investigation (Skipped — LLVM already optimal) | 2026-03-01 |
+| 219 | P62 | Perf | GHASH HW Zero-Copy Batch Processing | 2026-03-01 |
+| 220 | T65 | Test | Test Coverage Enhancement (+66 tests, CI coverage infra) | 2026-03-01 |
+| 221 | T66 | Test | CI Hardening + HMAC Fix + Test Coverage Expansion (+66 tests) | 2026-03-01 |
 
 ---
 
@@ -11823,6 +11829,168 @@ Enhance test coverage across TLS connection layer, cryptographic primitives, and
 | **Total** | **3534 (21 ign)** | **3600 (21 ign)** | **+66** |
 
 ### Build Status (Post T65)
+- `cargo test --workspace --all-features`: 3,600 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P57 — ML-DSA Sign Zero-Allocation Retry Loop (2026-03-01)
+
+### Summary
+Eliminated per-retry heap allocations in ML-DSA signing loop by pre-allocating all buffers outside the loop and reusing them across iterations.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/mldsa/mod.rs` | Pre-allocate `sig_bytes`, `hash_input`, `hint_buf` outside signing loop. Reuse buffers across rejection-sampling retries instead of allocating fresh Vecs each iteration. |
+
+### Implementation Details
+1. **Pre-allocated signature buffer**: `sig_bytes` Vec allocated once at full capacity before the retry loop, reused each iteration.
+2. **Hash input reuse**: `hash_input` Vec allocated once, `clear()` + reuse each iteration instead of fresh allocation.
+3. **Hint buffer reuse**: `hint_buf` allocated once at `omega + k` capacity, reused across retries.
+
+### Benchmark Results (Apple M4, macOS 15.4)
+| Benchmark | Before (P56) | After (P57) | Improvement |
+|-----------|-------------|-------------|-------------|
+| ML-DSA-65 sign | ~195 µs | ~185 µs | ~5% faster |
+
+Modest improvement because ML-DSA signing typically succeeds in 1-3 iterations, limiting the benefit of buffer reuse.
+
+### Build Status (Post P57)
+- `cargo test --workspace --all-features`: 3,600 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P58 — ML-KEM Clone Elimination + Buffer Reuse (2026-03-01)
+
+### Summary
+Eliminated unnecessary `.clone()` calls and Vec allocations in ML-KEM keygen/encaps/decaps paths by reusing buffers and avoiding intermediate copies.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/mlkem/mod.rs` | Eliminated `.clone()` on polynomial vectors in keygen/encaps/decaps. Replaced intermediate Vec allocations with direct buffer writes. |
+
+### Implementation Details
+1. **Clone elimination**: Removed `.clone()` on `NttPoly` vectors where ownership transfer or borrowing suffices.
+2. **Buffer reuse**: Shared scratch buffers across compress/encode steps instead of allocating fresh output Vecs.
+3. **Direct encode**: Write encoded bytes directly to pre-allocated output instead of collecting into intermediate Vecs.
+
+### Benchmark Results (Apple M4, macOS 15.4)
+| Benchmark | Before (P57) | After (P58) | Improvement |
+|-----------|-------------|-------------|-------------|
+| ML-KEM-768 keygen | ~21 µs | ~20 µs | ~5% faster |
+| ML-KEM-768 encaps | ~23 µs | ~22 µs | ~5% faster |
+| ML-KEM-768 decaps | ~32 µs | ~31 µs | ~3% faster |
+
+### Build Status (Post P58)
+- `cargo test --workspace --all-features`: 3,600 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P59 — Keccak keccak_f1600_soft Unroll + Absorb Clone Elimination (2026-03-01)
+
+### Summary
+Optimized the Keccak-f[1600] software permutation by fully unrolling theta/rho/pi/chi steps with precomputed constants, and eliminated a `self.buf.clone()` in the absorb path.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/sha3/mod.rs` | Fully unrolled `keccak_f1600_soft`: precomputed `PI_DEST[25]` const table for π step, explicit theta c0-c4/d0-d4 XOR, chi unrolled by row (5 iterations × 5 elements). Absorb path: replaced `self.xor_rate_bytes(&self.buf.clone())` with inline XOR loop to avoid borrow conflict and clone. Added `#[inline]` on `state_to_bytes_into`. |
+
+### Implementation Details
+1. **PI_DEST const table**: Precomputed π destination indices as `[usize; 25]`, replacing runtime `(2*x + 3*y) % 5` computation.
+2. **Theta unroll**: Explicit `c0..c4` column parities and `d0..d4` diffusion, all named variables instead of array indexing.
+3. **Chi by row**: 5 iterations over rows, each computing 5 chi outputs with explicit temporaries. Avoids `% 5` modular indexing.
+4. **Absorb clone elimination**: `self.buf.clone()` was needed because `xor_rate_bytes` borrows `self` mutably while `self.buf` is also borrowed. Replaced with inline loop that XORs `self.buf` words directly into `self.state`.
+
+### Benchmark Results (Apple M4, macOS 15.4)
+| Benchmark | Before (P58) | After (P59) | Improvement |
+|-----------|-------------|-------------|-------------|
+| ML-KEM-768 decaps | ~32 µs | ~25 µs | 22% faster |
+| ML-KEM-768 encaps | ~22 µs | ~18 µs | 18% faster |
+| SHA3-256 | baseline | ~5% faster | moderate |
+
+Keccak-f[1600] is the dominant cost in ML-KEM (via SHAKE-128/256), so permutation optimization propagates to all PQC primitives.
+
+### Build Status (Post P59)
+- `cargo test --workspace --all-features`: 3,600 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P60 — Fe25519 sub_fast Carry Elision + Inversion Chain Cleanup (2026-03-01)
+
+### Summary
+Added `sub_fast()` (carry-deferred subtraction) to Fe25519 for use in the X25519 Montgomery ladder where inputs are guaranteed bounded. Compacted inversion chains with `square_times()` helper. Optimized `to_bytes()` encoding.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/curve25519/field.rs` | Added `sub_fast()` — subtraction with 2p bias but no carry propagation. Added `square_times(n)` helper for repeated squaring. Compacted `invert()` and `pow25523()` using `square_times`. Optimized `to_bytes()` with direct `to_le_bytes()` + `copy_from_slice` instead of per-byte loop. |
+| `crates/hitls-crypto/src/x25519/mod.rs` | Replaced 4 `sub()` calls with `sub_fast()` in Montgomery ladder inner loop. Safe because all inputs come from mul/square output (≤52-bit limbs) and results flow directly into mul/square. |
+
+### Implementation Details
+1. **`sub_fast()`**: Adds `2*p` bias (per-limb: `0xFFFFFFFFFFFDA, 0xFFFFFFFFFFFFE×4`) then subtracts. Skips carry propagation — limbs may exceed 51 bits but stay within u64 range. Safe only when result flows into `mul()` or `square()` which handle arbitrary-width limbs via u128 arithmetic.
+2. **Safety analysis**: In the Montgomery ladder, x_2/z_2/x_3/z_3 always come from mul/square output (~51-52 bit limbs). `sub_fast` produces ~52-53 bit limbs which are consumed by mul/square in the same iteration. Loop variables are re-bounded each iteration.
+3. **NOT safe for Edwards arithmetic**: Ed25519/Ed448 have chained sub→add→sub patterns where limb widths grow. Global sub→sub_fast caused "attempt to subtract with overflow" in Ed25519 tests.
+4. **`square_times(n)`**: Eliminates boilerplate `for _ in 1..n { t = t.square(); }` patterns in inversion chains.
+5. **`to_bytes()` optimization**: Replaced branchy per-byte extraction with 4 direct 64-bit word compositions + `to_le_bytes()`.
+
+### Benchmark Results (Apple M4, macOS 15.4)
+| Benchmark | Before (P59) | After (P60) | Improvement |
+|-----------|-------------|-------------|-------------|
+| X25519 diffie_hellman | 20.1 µs | 18.3 µs | 9% faster |
+
+### Build Status (Post P60)
+- `cargo test --workspace --all-features`: 3,600 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P61 — BigNum ARM64 umulh Investigation (Skipped) (2026-03-01)
+
+### Summary
+Investigated whether adding explicit ARM64 `umulh` intrinsics to BigNum Montgomery multiplication would close the gap to C. Assembly analysis showed LLVM already generates optimal code — 31 `umulh` + 106 `mul` instructions for the CIOS inner loop. The 7.1× gap to C is from loop overhead, bounds checks, and C's hand-tuned assembly unrolling, not missing intrinsics.
+
+### Implementation Details
+1. **Assembly analysis**: Generated ARM64 assembly via `cargo rustc -p hitls-bignum --release -- --emit asm`. Found LLVM correctly lowers `u128` multiplication to `mul`+`umulh` instruction pairs.
+2. **Instruction count**: 31 `umulh` instructions found in Montgomery multiplication hot path, matching the expected count for CIOS n-limb multiply.
+3. **Conclusion**: No code changes needed. The remaining performance gap is structural (loop control flow, conditional branches, register pressure from bounds checks) and cannot be closed with inline assembly for individual instructions. Would require full hand-written assembly for the entire CIOS loop to match C.
+
+### No Changes — Phase Skipped
+
+---
+
+## Phase P62 — GHASH HW Zero-Copy Batch Processing (2026-03-01)
+
+### Summary
+Optimized the hardware GHASH path in GCM to batch-process data blocks without per-block Gf128↔bytes conversion. State stays as `[u8; 16]` throughout the HW loop, with only one conversion pair (start/end) instead of 2N for N blocks.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/modes/gcm.rs` | Refactored `ghash_data()` to keep state as `[u8; 16]` during HW GHASH loop. Converts `Gf128→bytes` once at start, processes all blocks, then converts `bytes→Gf128` once at end. Eliminates 2(N-1) conversions for N data blocks. |
+
+### Implementation Details
+1. **Before**: `ghash_data()` called `self.ghash_block(state, &block)` per block, which internally converted `state` to/from `Gf128` each call via the HW path in `ghash_block`.
+2. **After**: HW path in `ghash_data()` converts state to `[u8; 16]` once, iterates all blocks calling `ghash_block_hw(&self.h_raw, &mut state_bytes, &block)` directly, then converts back to `Gf128` once.
+3. **Software fallback**: Unchanged — continues to call `self.ghash_block()` per block (SW path does computation in `Gf128` directly).
+
+### Benchmark Results (Apple M4, macOS 15.4)
+| Benchmark | Before (P60) | After (P62) | Improvement |
+|-----------|-------------|-------------|-------------|
+| AES-128-GCM encrypt 1KB | baseline | -6% | moderate |
+| AES-128-GCM decrypt 1KB | baseline | -7% | moderate |
+
+### Build Status (Post P62)
 - `cargo test --workspace --all-features`: 3,600 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
