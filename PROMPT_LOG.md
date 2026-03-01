@@ -3462,3 +3462,17 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - Zero caller changes needed — Rust deref coercion handles `&HashOutput` → `&[u8]` automatically
 - Eliminates 5–15 heap allocations per TLS handshake
 - All 3,534 tests pass, 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P48 — ML-KEM g_input Stack Arrays (2026-03-01)
+
+**Prompt**: Continue performance optimizations. ML-KEM kpke_keygen/encapsulate/decapsulate use Vec::with_capacity() for fixed-size g_input buffers (33 and 64 bytes).
+
+**Result**:
+- `kpke_keygen`: `Vec::with_capacity(33)` → `[0u8; 33]` with `copy_from_slice`
+- `encapsulate`: `Vec::with_capacity(64)` → `[0u8; 64]` with `copy_from_slice`
+- `decapsulate`: `Vec::with_capacity(64)` → `[0u8; 64]` with `copy_from_slice`
+- Eliminates 3 heap allocations per ML-KEM keygen/encaps/decaps
+- `j_input` in implicit rejection path left as Vec (variable-size, rare path)
+- All 3,534 tests pass, 21 ignored, 0 clippy warnings

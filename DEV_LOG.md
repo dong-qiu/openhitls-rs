@@ -214,6 +214,7 @@ Category summary:
 | 202 | P45 | Perf | ML-DSA Signing Loop Heap Elimination | 2026-03-01 |
 | 203 | P46 | Perf | ML-KEM Keygen/Encaps Heap Elimination | 2026-03-01 |
 | 204 | P47 | Perf | TranscriptHash Stack-Allocated Output | 2026-03-01 |
+| 205 | P48 | Perf | ML-KEM g_input Stack Arrays | 2026-03-01 |
 
 ---
 
@@ -11490,6 +11491,30 @@ Replaced `Vec<u8>` heap allocation in `TranscriptHash::current_hash()` and `empt
 - 3,534 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P47)
+- `cargo test --workspace --all-features`: 3,534 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase P48 — ML-KEM g_input Stack Arrays (2026-03-01)
+
+### Summary
+Replaced `Vec::with_capacity()` heap allocations for fixed-size `g_input` buffers in ML-KEM `kpke_keygen`, `encapsulate`, and `decapsulate` with `[0u8; N]` stack arrays. These are 33-byte and 64-byte buffers called on every keygen/encaps/decaps operation.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/mlkem/mod.rs` | `kpke_keygen`: `Vec::with_capacity(33)` → `[0u8; 33]` for `g_input`. `encapsulate`: `Vec::with_capacity(64)` → `[0u8; 64]` for `g_input`. `decapsulate`: `Vec::with_capacity(64)` → `[0u8; 64]` for `g_input`. All use `copy_from_slice` instead of `extend_from_slice` |
+
+### Impact
+- Eliminates 3 heap allocations per ML-KEM keygen/encaps/decaps (one each)
+- All buffers are fixed-size (33 or 64 bytes), well-suited for stack allocation
+- `j_input` in implicit rejection path left as Vec (variable-size, rare path)
+
+### Test Results
+- All 41 ML-KEM tests pass
+- 3,534 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P48)
 - `cargo test --workspace --all-features`: 3,534 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

@@ -91,9 +91,9 @@ fn kpke_keygen(d: &[u8; 32], params: &MlKemParams) -> Result<(Vec<u8>, Vec<u8>),
     let k = params.k;
 
     // (ρ, σ) = G(d || k)
-    let mut g_input = Vec::with_capacity(33);
-    g_input.extend_from_slice(d);
-    g_input.push(k as u8);
+    let mut g_input = [0u8; 33];
+    g_input[..32].copy_from_slice(d);
+    g_input[32] = k as u8;
     let g_out = hash_g(&g_input);
     let rho: [u8; 32] = g_out[..32].try_into().unwrap();
     let sigma: [u8; 32] = g_out[32..64].try_into().unwrap();
@@ -329,9 +329,9 @@ impl MlKemKeyPair {
 
         // (K, r) = G(m || H(ek))
         let h_ek = hash_h(&self.encapsulation_key);
-        let mut g_input = Vec::with_capacity(64);
-        g_input.extend_from_slice(&m);
-        g_input.extend_from_slice(&h_ek);
+        let mut g_input = [0u8; 64];
+        g_input[..32].copy_from_slice(&m);
+        g_input[32..64].copy_from_slice(&h_ek);
         let g_out = hash_g(&g_input);
         let shared_secret: Vec<u8> = g_out[..32].to_vec();
         let r: [u8; 32] = g_out[32..64].try_into().unwrap();
@@ -364,9 +364,9 @@ impl MlKemKeyPair {
         let m_prime = kpke_decrypt(dk_pke, ciphertext, &params);
 
         // (K', r') = G(m' || h)
-        let mut g_input = Vec::with_capacity(64);
-        g_input.extend_from_slice(&m_prime);
-        g_input.extend_from_slice(h_ek);
+        let mut g_input = [0u8; 64];
+        g_input[..32].copy_from_slice(&m_prime);
+        g_input[32..64].copy_from_slice(h_ek);
         let g_out = hash_g(&g_input);
         let k_prime: Vec<u8> = g_out[..32].to_vec();
         let r_prime: [u8; 32] = g_out[32..64].try_into().unwrap();
