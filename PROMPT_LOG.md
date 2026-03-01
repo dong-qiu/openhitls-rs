@@ -3421,3 +3421,17 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - `decode_sk` returns `[u8; 64]` for `tr` instead of `Vec<u8>`
 - Updated all callers in keygen, sign, verify, encode_sig, and test helper
 - All 42 ML-DSA tests pass, 3,534 total tests, 21 ignored, 0 clippy warnings
+
+---
+
+## Phase P46 — ML-KEM Keygen/Encaps Heap Elimination (2026-03-01)
+
+**Prompt**: Continue ML-KEM performance optimizations after P45. Identified prf(), poly_compress(), byte_encode(), hash_j() as heap-allocating functions in keygen/encrypt/decapsulate paths.
+
+**Result**:
+- `prf` → `prf_into`: squeeze_into with `[0u8; 192]` stack buffer (max 64*eta1=192)
+- `poly_compress_into` / `byte_encode_into`: zero-copy variants writing to pre-sized buffers
+- `hash_j` → `hash_j_into`: write to `[0u8; 32]` stack buffer
+- kpke_keygen: pre-sized ek/dk Vecs with direct slice writes
+- kpke_encrypt: pre-sized ct Vec, prf_into stack reuse
+- All 41 ML-KEM tests pass, 3,534 total tests, 21 ignored, 0 clippy warnings

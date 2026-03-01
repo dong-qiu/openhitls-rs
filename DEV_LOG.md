@@ -212,6 +212,7 @@ Category summary:
 | 200 | P44 | Perf | SM2/SM9 In-Place XOR | 2026-03-01 |
 | 201 | I82 | Impl | CRL Builder (CrlBuilder + RevokedCertBuilder) | 2026-03-01 |
 | 202 | P45 | Perf | ML-DSA Signing Loop Heap Elimination | 2026-03-01 |
+| 203 | P46 | Perf | ML-KEM Keygen/Encaps Heap Elimination | 2026-03-01 |
 
 ---
 
@@ -11432,6 +11433,36 @@ Replaced per-iteration heap allocations in ML-DSA sign/verify with stack arrays 
 - 3,534 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P45)
+- `cargo test --workspace --all-features`: 3,534 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P46 — ML-KEM Keygen/Encaps Heap Elimination (2026-03-01)
+
+### Summary
+Replaced per-call heap allocations in ML-KEM keygen/encrypt/decapsulate with stack arrays and zero-copy `_into` variants. `prf_into` uses `squeeze_into` with a `[0u8; 192]` stack buffer; `poly_compress_into` and `byte_encode_into` write directly into pre-sized output buffers; `hash_j_into` writes to a `[0u8; 32]` stack buffer. Ciphertext and key encoding now use pre-allocated Vecs with direct slice writes instead of `extend_from_slice`.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/mlkem/poly.rs` | `prf` → `prf_into(seed, nonce, &mut [u8])`. `poly_compress_into` / `byte_encode_into` zero-copy variants, originals delegate. `hash_j` → `hash_j_into(input, &mut [u8])` |
+| `crates/hitls-crypto/src/mlkem/mod.rs` | `kpke_keygen`: `prf_into` with `[0u8; 192]` stack, `byte_encode_into` direct writes to pre-sized ek/dk. `kpke_encrypt`: `prf_into` stack, `poly_compress_into` direct writes to pre-sized ct. `decapsulate`: `hash_j_into` to `[0u8; 32]` stack |
+
+### Allocation Savings (ML-KEM-768, k=3)
+| Path | Before | After |
+|------|--------|-------|
+| `kpke_keygen` | 2k=6 `prf()` → 6× 128-byte Vec, 2k=6 `byte_encode()` → 6× 384-byte Vec | 1× `[0u8; 192]` stack (reused), ek/dk pre-sized |
+| `kpke_encrypt` | 2k+1=7 `prf()` → 7× 128-byte Vec, k+1=4 `poly_compress()` → 4× 320/128-byte Vec | 1× `[0u8; 192]` stack (reused), ct pre-sized |
+| `decapsulate` | `hash_j()` → 32-byte Vec | `[0u8; 32]` stack |
+| Total per encaps | ~17 heap allocs eliminated | Stack + pre-sized Vecs only |
+
+### Test Results
+- All 41 ML-KEM tests pass
+- 3,534 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P46)
 - `cargo test --workspace --all-features`: 3,534 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

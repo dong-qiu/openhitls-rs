@@ -104,13 +104,15 @@ fn kpke_keygen(d: &[u8; 32], params: &MlKemParams) -> Result<(Vec<u8>, Vec<u8>),
     // Sample secret vector s and error vector e
     let mut s = Vec::with_capacity(k);
     let mut e = Vec::with_capacity(k);
+    let mut prf_buf = [0u8; 192]; // max(64*eta1=192 for eta=3, 128 for eta=2)
+    let prf_len = 64 * params.eta1;
     for i in 0..k {
-        let prf_out = prf(&sigma, i as u8, 64 * params.eta1);
-        s.push(sample_cbd(&prf_out, params.eta1)?);
+        prf_into(&sigma, i as u8, &mut prf_buf[..prf_len]);
+        s.push(sample_cbd(&prf_buf[..prf_len], params.eta1)?);
     }
     for i in 0..k {
-        let prf_out = prf(&sigma, (k + i) as u8, 64 * params.eta1);
-        e.push(sample_cbd(&prf_out, params.eta1)?);
+        prf_into(&sigma, (k + i) as u8, &mut prf_buf[..prf_len]);
+        e.push(sample_cbd(&prf_buf[..prf_len], params.eta1)?);
     }
 
     // NTT(s), NTT(e)
@@ -135,16 +137,17 @@ fn kpke_keygen(d: &[u8; 32], params: &MlKemParams) -> Result<(Vec<u8>, Vec<u8>),
     }
 
     // Encode encapsulation key: ek = ByteEncode_12(t_hat) || ρ
-    let mut ek = Vec::new();
-    for poly in t_hat.iter() {
-        ek.extend_from_slice(&byte_encode(poly, 12));
+    let poly_bytes = 384; // 256 * 12 / 8
+    let mut ek = vec![0u8; k * poly_bytes + 32];
+    for (i, poly) in t_hat.iter().enumerate() {
+        byte_encode_into(poly, 12, &mut ek[i * poly_bytes..(i + 1) * poly_bytes]);
     }
-    ek.extend_from_slice(&rho);
+    ek[k * poly_bytes..].copy_from_slice(&rho);
 
     // Encode decapsulation key: dk = ByteEncode_12(s_hat)
-    let mut dk = Vec::new();
-    for poly in s_hat.iter() {
-        dk.extend_from_slice(&byte_encode(poly, 12));
+    let mut dk = vec![0u8; k * poly_bytes];
+    for (i, poly) in s_hat.iter().enumerate() {
+        byte_encode_into(poly, 12, &mut dk[i * poly_bytes..(i + 1) * poly_bytes]);
     }
 
     Ok((ek, dk))
@@ -173,16 +176,19 @@ fn kpke_encrypt(
     // Sample r, e1, e2
     let mut r_vec = Vec::with_capacity(k);
     let mut e1 = Vec::with_capacity(k);
+    let mut prf_buf = [0u8; 192]; // max(64*eta1=192 for eta=3, 128 for eta=2)
+    let prf_len1 = 64 * params.eta1;
     for i in 0..k {
-        let prf_out = prf(randomness, i as u8, 64 * params.eta1);
-        r_vec.push(sample_cbd(&prf_out, params.eta1)?);
+        prf_into(randomness, i as u8, &mut prf_buf[..prf_len1]);
+        r_vec.push(sample_cbd(&prf_buf[..prf_len1], params.eta1)?);
     }
+    let prf_len2 = 64 * params.eta2;
     for i in 0..k {
-        let prf_out = prf(randomness, (k + i) as u8, 64 * params.eta2);
-        e1.push(sample_cbd(&prf_out, params.eta2)?);
+        prf_into(randomness, (k + i) as u8, &mut prf_buf[..prf_len2]);
+        e1.push(sample_cbd(&prf_buf[..prf_len2], params.eta2)?);
     }
-    let prf_out = prf(randomness, (2 * k) as u8, 64 * params.eta2);
-    let e2 = sample_cbd(&prf_out, params.eta2)?;
+    prf_into(randomness, (2 * k) as u8, &mut prf_buf[..prf_len2]);
+    let e2 = sample_cbd(&prf_buf[..prf_len2], params.eta2)?;
 
     // NTT(r)
     let mut r_hat: Vec<Poly> = r_vec.clone();
@@ -213,11 +219,13 @@ fn kpke_encrypt(
     ntt::reduce_poly(&mut v);
 
     // Ciphertext: c1 = Compress(u, du) || c2 = Compress(v, dv)
-    let mut ct = Vec::new();
-    for poly in u.iter() {
-        ct.extend_from_slice(&poly_compress(poly, params.du));
+    let du_bytes = N * params.du as usize / 8;
+    let dv_bytes = N * params.dv as usize / 8;
+    let mut ct = vec![0u8; k * du_bytes + dv_bytes];
+    for (i, poly) in u.iter().enumerate() {
+        poly_compress_into(poly, params.du, &mut ct[i * du_bytes..(i + 1) * du_bytes]);
     }
-    ct.extend_from_slice(&poly_compress(&v, params.dv));
+    poly_compress_into(&v, params.dv, &mut ct[k * du_bytes..]);
     Ok(ct)
 }
 
@@ -375,7 +383,9 @@ impl MlKemKeyPair {
             let mut j_input = Vec::with_capacity(z.len() + ciphertext.len());
             j_input.extend_from_slice(z);
             j_input.extend_from_slice(ciphertext);
-            Ok(hash_j(&j_input, 32))
+            let mut j_out = [0u8; 32];
+            hash_j_into(&j_input, &mut j_out);
+            Ok(j_out.to_vec())
         }
     }
 

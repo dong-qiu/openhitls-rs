@@ -68,9 +68,9 @@ fn decompress_coeff(y: u16, d: u32) -> i16 {
     ((y as u32 * Q as u32 + (1 << (d - 1))) >> d) as i16
 }
 
-/// Compress a polynomial (each coefficient to d bits).
-pub(crate) fn poly_compress(r: &Poly, d: u32) -> Vec<u8> {
-    let mut out = vec![0u8; N * d as usize / 8];
+/// Compress a polynomial into caller-provided buffer (zero-allocation).
+pub(crate) fn poly_compress_into(r: &Poly, d: u32, out: &mut [u8]) {
+    out[..N * d as usize / 8].fill(0);
     let mut bit_pos = 0usize;
     for &coeff in r.iter() {
         let val = compress_coeff(coeff, d);
@@ -81,6 +81,12 @@ pub(crate) fn poly_compress(r: &Poly, d: u32) -> Vec<u8> {
             bit_pos += 1;
         }
     }
+}
+
+/// Compress a polynomial (allocating wrapper for tests).
+pub(crate) fn poly_compress(r: &Poly, d: u32) -> Vec<u8> {
+    let mut out = vec![0u8; N * d as usize / 8];
+    poly_compress_into(r, d, &mut out);
     out
 }
 
@@ -101,11 +107,9 @@ pub(crate) fn poly_decompress(data: &[u8], d: u32) -> Poly {
     r
 }
 
-/// Encode a polynomial with d-bit coefficients into bytes.
-///
-/// Each coefficient is treated as an unsigned value in [0, 2^d).
-pub(crate) fn byte_encode(poly: &Poly, d: usize) -> Vec<u8> {
-    let mut out = vec![0u8; N * d / 8];
+/// Encode a polynomial into caller-provided buffer (zero-allocation).
+pub(crate) fn byte_encode_into(poly: &Poly, d: usize, out: &mut [u8]) {
+    out[..N * d / 8].fill(0);
     let mut bit_pos = 0usize;
     for &coeff in poly.iter() {
         let val = ((coeff as i32 % Q as i32 + Q as i32) % Q as i32) as u16;
@@ -116,6 +120,12 @@ pub(crate) fn byte_encode(poly: &Poly, d: usize) -> Vec<u8> {
             bit_pos += 1;
         }
     }
+}
+
+/// Encode a polynomial with d-bit coefficients into bytes (allocating wrapper).
+pub(crate) fn byte_encode(poly: &Poly, d: usize) -> Vec<u8> {
+    let mut out = vec![0u8; N * d / 8];
+    byte_encode_into(poly, d, &mut out);
     out
 }
 
@@ -212,12 +222,12 @@ pub(crate) fn expand_a(rho: &[u8; 32], k: usize) -> Vec<Vec<Poly>> {
     a
 }
 
-/// PRF: SHAKE256(seed || nonce) → output_len bytes.
-pub(crate) fn prf(seed: &[u8], nonce: u8, output_len: usize) -> Vec<u8> {
+/// PRF: SHAKE256(seed || nonce) squeezed into caller-provided buffer.
+pub(crate) fn prf_into(seed: &[u8], nonce: u8, output: &mut [u8]) {
     let mut xof = Shake256::new();
     xof.update(seed).unwrap();
     xof.update(&[nonce]).unwrap();
-    xof.squeeze(output_len).unwrap()
+    xof.squeeze_into(output);
 }
 
 /// H: SHA3-256 hash.
@@ -230,11 +240,11 @@ pub(crate) fn hash_g(data: &[u8]) -> [u8; 64] {
     Sha3_512::digest(data).unwrap()
 }
 
-/// J: SHAKE256(input) → output_len bytes.
-pub(crate) fn hash_j(input: &[u8], output_len: usize) -> Vec<u8> {
+/// J: SHAKE256(input) squeezed into caller-provided buffer.
+pub(crate) fn hash_j_into(input: &[u8], output: &mut [u8]) {
     let mut xof = Shake256::new();
     xof.update(input).unwrap();
-    xof.squeeze(output_len).unwrap()
+    xof.squeeze_into(output);
 }
 
 /// Matrix-vector product in NTT domain: r = A_hat * s_hat.
