@@ -3577,6 +3577,22 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 ---
 
+## Phase P56 — SM3 Ring Buffer Message Schedule (2026-03-01)
+
+**Prompt**: Optimize SM3 compression function. Replace 68-word full message expansion array with 16-word ring buffer using on-the-fly expansion. Optimize Boolean functions and add inline annotation.
+
+**Result**:
+- Replaced `w[68]` with `w[16]` ring buffer (272→64 bytes on stack)
+- Added `expand()` helper using `& 15` modular indexing for on-the-fly W expansion
+- Split rounds: 0-11 (no expansion), 12-15 (expand, XOR form), 16-63 (expand, majority/choice)
+- Majority: `(a&b)|(a&c)|(b&c)` → `(a&(b|c))|(b&c)` (saves 1 AND per round)
+- Choice: `(e&f)|(!e&g)` → `g^(e&(f^g))` (saves NOT+OR per round)
+- Added `#[inline]` to `sm3_compress`
+- SM3 hash: ~16% faster, HMAC-SM3: ~29% faster
+- All 7 SM3 tests pass, all 3,600 total tests pass, 0 clippy warnings
+
+---
+
 ## Phase T65 — Test Coverage Enhancement (+66 tests, CI coverage infrastructure) (2026-03-01)
 
 **Prompt**: Implement Phase T65 — Test Coverage Enhancement. Switch CI from cargo-tarpaulin to cargo-llvm-cov with branch coverage. Add ~70 tests targeting low-coverage files: TLS 1.3 server, TLS 1.2 client/server, crypto primitives (DRBG, GCM, McEliece matrix, provider, DSA, ElGamal, FIPS KAT/PCT), and CLI commands (s_client, s_server, speed).

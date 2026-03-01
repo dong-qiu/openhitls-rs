@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phases I1–I82, T1–T65, R1–R12, P1–P55 complete (3600 tests, 21 ignored)
+- **Status**: Phases I1–I82, T1–T65, R1–R12, P1–P56 complete (3600 tests, 21 ignored)
 
 ## Workspace Structure
 
@@ -133,7 +133,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases I1–I82, T1–T65, R1–R12, P1–P55 complete (3600 tests, 21 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
+Phases I1–I82, T1–T65, R1–R12, P1–P56 complete (3600 tests, 21 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
 
 ### Completed Phases (Summary)
 
@@ -206,6 +206,7 @@ Key milestones:
 - Phase P53: BigNum CIOS inner loop optimization — specialized `cios_mul_n()` with `get_unchecked` for n-limb operands (eliminates bounds-check branches from O(n²) hot loop), redundant `sqr_buf` clearing removal, `sqr_limbs` `.fill(0)`. DH-4096 1.41× speedup (35.5→25.2ms), DH-2048 1.44× (4.58→3.19ms), RSA-2048 sign 1.43× (1.37ms→957µs). ~30% speedup across all Montgomery exponentiation.
 - Phase P54: ECDSA P-256 verify scalar field fast path — P256ScalarElement (4×u64 Montgomery) for `s^(-1)`, `u1 = e*w`, `u2 = r*w` in verify path (was generic BigNum `mod_inv`/`mod_mul`). Verify ~8% faster (99→91µs). Sign unchanged (already used P256ScalarElement since P17).
 - Phase P55: Ed25519/Ed448 verify projective point comparison — `to_bytes().ct_eq()` → projective cross-product `points_equal_ct()` (4 field muls vs 2 field inversions). Ed25519 verify ~19% faster (44→35.8µs), Ed448 verify similarly improved.
+- Phase P56: SM3 ring buffer message schedule — `w[68]` → `w[16]` ring buffer with on-the-fly `expand()`, majority/choice Boolean optimization, `#[inline]` on `sm3_compress`. SM3 ~16% faster, HMAC-SM3 ~29% faster.
 - Phase T45–T53: Quality improvement roadmap — TLS connection unit tests (+15), TLS 1.2 handshake edge cases (+15), HW↔SW cross-validation (+8), proptest expansion to 5/9 crates (+15), side-channel timing tests (+6), concurrency stress tests (+10), feature flag smoke tests (+4), zeroize runtime verification (+4), DTLS fuzz + OpenSSL interop (+1 fuzz target, +2 tests). Total: +80 tests, 13→14 fuzz targets, defense model B→B+.
 - Phase T59–T62: Test optimization & deep defense — RSA OAEP/PKCS1v15 constant-time fix (timing side-channel elimination), CBC/GCM buffer zeroize on error, RSA timing tests (+2 ignored), unit tests (+2), crypto semantic fuzz targets (+6: RSA/ECDSA/HKDF/SM2/CCM/TLS PRF), TLS 1.3/1.2 state machine fuzz (+2), corpus enrichment (+40 seeds), cargo-deny supply-chain policy, CI hardening (miri blocking, feature combos, cargo-deny job), subtle version unification. Total: +4 tests, 18→26 fuzz targets, 118→158 corpus, defense model B+→A-.
 - Phase T63: PQC fuzz + signature sign fuzz — ML-KEM encap/decap, ML-DSA sign/verify, SLH-DSA sign/verify (fast variants), RSA sign (PKCS1v15/PSS), ECDSA sign (P-256/P-384/P-521), Ed25519 full coverage, SM2 sign/encrypt/decrypt, DSA sign (small params). Total: +8 fuzz targets (26→34), +80 corpus seeds (158→238), PQC coverage 0→3/6, sign-path coverage 0→5/7.

@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I82 (82 phases)
 - Testing: T1–T63 (63 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P55 (55 phases)
+- Performance: P1–P56 (56 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -222,7 +222,8 @@ Category summary:
 | 210 | P53 | Perf | BigNum CIOS Inner Loop Optimization | 2026-03-01 |
 | 211 | P54 | Perf | ECDSA P-256 Verify Scalar Field Fast Path | 2026-03-01 |
 | 212 | P55 | Perf | Ed25519/Ed448 Verify Projective Point Comparison | 2026-03-01 |
-| 213 | T65 | Test | Test Coverage Enhancement (+66 tests, CI coverage infra) | 2026-03-01 |
+| 213 | P56 | Perf | SM3 Ring Buffer Message Schedule | 2026-03-01 |
+| 214 | T65 | Test | Test Coverage Enhancement (+66 tests, CI coverage infra) | 2026-03-01 |
 
 ---
 
@@ -11737,6 +11738,41 @@ Replaced `to_bytes().ct_eq()` point comparison in Ed25519 and Ed448 verify with 
 - 3,600 total tests, 21 ignored, 0 clippy warnings
 
 ### Build Status (Post P55)
+- `cargo test --workspace --all-features`: 3,600 passed, 0 failed, 21 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P56 — SM3 Ring Buffer Message Schedule (2026-03-01)
+
+### Summary
+Replaced the 68-word full message expansion array with a 16-word ring buffer with on-the-fly expansion. Stack usage reduced from 272 to 64 bytes. Optimized Boolean functions (majority/choice) and added `#[inline]` to `sm3_compress`.
+
+### Changes
+| File | Change |
+|------|--------|
+| `crates/hitls-crypto/src/sm3/mod.rs` | Replaced `w[68]` with `w[16]` ring buffer. Added `expand()` helper for on-the-fly W expansion. Split compression into 3 loops: rounds 0-11 (no expansion, XOR form), rounds 12-15 (expand w[j+4], XOR form), rounds 16-63 (expand w[j+4], majority/choice form). Optimized majority: `(a & (b\|c)) \| (b & c)` (saves 1 AND). Optimized choice: `g ^ (e & (f ^ g))` (saves NOT+OR). Added `#[inline]` to `sm3_compress`. |
+
+### Implementation Details
+1. **Ring buffer**: `w[16]` with on-the-fly `expand()` using `& 15` modular indexing. At round j (j ≥ 12), expand `w[j+4]` into position `(j+4) & 15`, read `w[j]` from position `j & 15`. Ring buffer correctness relies on SM3's message schedule dependencies all being within [i-16, i-1].
+2. **Majority optimization**: `(a & b) | (a & c) | (b & c)` → `(a & (b | c)) | (b & c)`. Saves 1 AND op per round (48 rounds).
+3. **Choice optimization**: `(e & f) | (!e & g)` → `g ^ (e & (f ^ g))`. Saves NOT + OR per round (48 rounds).
+4. **Inline annotation**: `#[inline]` on `sm3_compress` helps multi-block processing.
+
+### Benchmark Results (Apple M4, macOS 15.4)
+| Benchmark | Before (P55) | After (P56) | Improvement |
+|-----------|-------------|-------------|-------------|
+| SM3 @8KB | ~22 µs | 18.6 µs | ~16% faster |
+| HMAC-SM3 @16KB | ~54 µs | 38.1 µs | ~29% faster |
+
+Ring buffer reduces stack pressure and improves cache locality. HMAC-SM3 benefits more (29%) because HMAC calls compress multiple times per operation.
+
+### Test Results
+- All 7 SM3 tests pass (including GB/T 32905-2016 vectors and 1M×'a' test)
+- 3,600 total tests, 21 ignored, 0 clippy warnings
+
+### Build Status (Post P56)
 - `cargo test --workspace --all-features`: 3,600 passed, 0 failed, 21 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
