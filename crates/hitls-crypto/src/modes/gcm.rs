@@ -171,7 +171,20 @@ impl GhashTable {
     }
 
     /// GHASH over variable-length data (pad to block boundary).
+    ///
+    /// When hardware GHASH is available, keeps state as bytes throughout the loop
+    /// to avoid per-block Gf128↔bytes conversion (1 conversion pair vs 2N).
     pub(crate) fn ghash_data(&self, state: &mut Gf128, data: &[u8]) {
+        if self.use_hw && !data.is_empty() {
+            let mut state_bytes = state.to_bytes();
+            for chunk in data.chunks(16) {
+                let mut block = [0u8; 16];
+                block[..chunk.len()].copy_from_slice(chunk);
+                ghash_block_hw(&self.h_raw, &mut state_bytes, &block);
+            }
+            *state = Gf128::from_bytes(&state_bytes);
+            return;
+        }
         for chunk in data.chunks(16) {
             let mut block = [0u8; 16];
             block[..chunk.len()].copy_from_slice(chunk);
