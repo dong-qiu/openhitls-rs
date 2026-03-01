@@ -471,13 +471,19 @@ fn bench_ecdh(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("ecdh");
 
-    let kp1 = EcdhKeyPair::generate(EccCurveId::NistP256).unwrap();
-    let kp2 = EcdhKeyPair::generate(EccCurveId::NistP256).unwrap();
-    let pk2 = kp2.public_key_bytes().unwrap();
+    for (curve, label) in [
+        (EccCurveId::NistP256, "p256"),
+        (EccCurveId::NistP384, "p384"),
+        (EccCurveId::NistP521, "p521"),
+    ] {
+        let kp1 = EcdhKeyPair::generate(curve).unwrap();
+        let kp2 = EcdhKeyPair::generate(curve).unwrap();
+        let pk2 = kp2.public_key_bytes().unwrap();
 
-    group.bench_function("p256/key_derive", |b| {
-        b.iter(|| kp1.compute_shared_secret(&pk2).unwrap());
-    });
+        group.bench_function(format!("{label}/key_derive"), |b| {
+            b.iter(|| kp1.compute_shared_secret(&pk2).unwrap());
+        });
+    }
 
     group.finish();
 }
@@ -698,6 +704,416 @@ fn bench_bignum(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// SHA-3 + SHAKE benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_sha3(c: &mut Criterion) {
+    use hitls_crypto::sha3::{Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
+
+    // SHA-3 fixed-output hashes
+    {
+        let mut group = c.benchmark_group("sha3");
+        for size in [1024usize, 8192, 16384] {
+            group.throughput(Throughput::Bytes(size as u64));
+            let data = vec![0u8; size];
+
+            group.bench_with_input(BenchmarkId::new("sha3-256", size), &size, |b, _| {
+                b.iter(|| {
+                    let mut h = Sha3_256::new();
+                    h.update(&data).unwrap();
+                    h.finish().unwrap()
+                });
+            });
+
+            group.bench_with_input(BenchmarkId::new("sha3-384", size), &size, |b, _| {
+                b.iter(|| {
+                    let mut h = Sha3_384::new();
+                    h.update(&data).unwrap();
+                    h.finish().unwrap()
+                });
+            });
+
+            group.bench_with_input(BenchmarkId::new("sha3-512", size), &size, |b, _| {
+                b.iter(|| {
+                    let mut h = Sha3_512::new();
+                    h.update(&data).unwrap();
+                    h.finish().unwrap()
+                });
+            });
+        }
+        group.finish();
+    }
+
+    // SHAKE XOFs
+    {
+        let mut group = c.benchmark_group("shake");
+        for size in [1024usize, 8192, 16384] {
+            group.throughput(Throughput::Bytes(size as u64));
+            let data = vec![0u8; size];
+
+            group.bench_with_input(BenchmarkId::new("shake128", size), &size, |b, _| {
+                let mut out = vec![0u8; size];
+                b.iter(|| {
+                    let mut h = Shake128::new();
+                    h.update(&data).unwrap();
+                    h.squeeze_into(&mut out);
+                });
+            });
+
+            group.bench_with_input(BenchmarkId::new("shake256", size), &size, |b, _| {
+                let mut out = vec![0u8; size];
+                b.iter(|| {
+                    let mut h = Shake256::new();
+                    h.update(&data).unwrap();
+                    h.squeeze_into(&mut out);
+                });
+            });
+        }
+        group.finish();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SLH-DSA benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_slh_dsa(c: &mut Criterion) {
+    use hitls_crypto::slh_dsa::SlhDsaKeyPair;
+    use hitls_types::SlhDsaParamId;
+
+    let mut group = c.benchmark_group("slh-dsa");
+    group.sample_size(10);
+
+    let msg = b"benchmark message for SLH-DSA signing";
+
+    for (param_id, label) in [
+        (SlhDsaParamId::Sha2128f, "sha2-128f"),
+        (SlhDsaParamId::Shake128f, "shake-128f"),
+        (SlhDsaParamId::Sha2192f, "sha2-192f"),
+        (SlhDsaParamId::Sha2256f, "sha2-256f"),
+    ] {
+        group.bench_function(format!("{label}/keygen"), |b| {
+            b.iter(|| SlhDsaKeyPair::generate(param_id).unwrap());
+        });
+
+        let kp = SlhDsaKeyPair::generate(param_id).unwrap();
+
+        group.bench_function(format!("{label}/sign"), |b| {
+            b.iter(|| kp.sign(msg).unwrap());
+        });
+
+        let sig = kp.sign(msg).unwrap();
+        group.bench_function(format!("{label}/verify"), |b| {
+            b.iter(|| kp.verify(msg, &sig).unwrap());
+        });
+    }
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// SM9 benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_sm9(c: &mut Criterion) {
+    use hitls_crypto::sm9::{Sm9KeyType, Sm9MasterKey};
+
+    let mut group = c.benchmark_group("sm9");
+    group.sample_size(20);
+
+    let user_id = b"alice@example.com";
+    let msg = b"benchmark message for SM9 signing";
+
+    // Sign
+    let master_sign = Sm9MasterKey::generate(Sm9KeyType::Sign).unwrap();
+    let user_sign = master_sign.extract_user_key(user_id).unwrap();
+    let master_pub = master_sign.master_public_key().to_vec();
+
+    group.bench_function("sign", |b| {
+        b.iter(|| user_sign.sign(msg, &master_pub).unwrap());
+    });
+
+    let sig = user_sign.sign(msg, &master_pub).unwrap();
+    group.bench_function("verify", |b| {
+        b.iter(|| master_sign.verify(user_id, msg, &sig).unwrap());
+    });
+
+    // Encrypt
+    let master_enc = Sm9MasterKey::generate(Sm9KeyType::Encrypt).unwrap();
+    let user_enc = master_enc.extract_user_key(user_id).unwrap();
+
+    group.bench_function("encrypt", |b| {
+        b.iter(|| master_enc.encrypt(user_id, msg).unwrap());
+    });
+
+    let ct = master_enc.encrypt(user_id, msg).unwrap();
+    group.bench_function("decrypt", |b| {
+        b.iter(|| user_enc.decrypt(&ct).unwrap());
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Ed448 benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_ed448(c: &mut Criterion) {
+    use hitls_crypto::ed448::Ed448KeyPair;
+
+    let mut group = c.benchmark_group("ed448");
+
+    let seed = [0x42u8; 57];
+    let kp = Ed448KeyPair::from_seed(&seed).unwrap();
+    let msg = b"benchmark message for Ed448 signing";
+
+    group.bench_function("sign", |b| {
+        b.iter(|| kp.sign(msg).unwrap());
+    });
+
+    let sig = kp.sign(msg).unwrap();
+    group.bench_function("verify", |b| {
+        b.iter(|| kp.verify(msg, &sig).unwrap());
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// X448 benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_x448(c: &mut Criterion) {
+    use hitls_crypto::x448::X448PrivateKey;
+
+    let mut group = c.benchmark_group("x448");
+
+    let sk1_bytes = [0x42u8; 56];
+    let sk2_bytes = [0x43u8; 56];
+    let sk1 = X448PrivateKey::new(&sk1_bytes).unwrap();
+    let sk2 = X448PrivateKey::new(&sk2_bytes).unwrap();
+    let pk2 = sk2.public_key();
+
+    group.bench_function("diffie_hellman", |b| {
+        b.iter(|| sk1.diffie_hellman(&pk2).unwrap());
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// ECDSA P-384 / P-521 benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_ecdsa_curves(c: &mut Criterion) {
+    use hitls_crypto::ecdsa::EcdsaKeyPair;
+    use hitls_types::EccCurveId;
+
+    // P-384
+    {
+        let mut group = c.benchmark_group("ecdsa-p384");
+        let kp = EcdsaKeyPair::generate(EccCurveId::NistP384).unwrap();
+        let digest = [0x42u8; 48];
+
+        group.bench_function("sign", |b| {
+            b.iter(|| kp.sign(&digest).unwrap());
+        });
+
+        let sig = kp.sign(&digest).unwrap();
+        group.bench_function("verify", |b| {
+            b.iter(|| kp.verify(&digest, &sig).unwrap());
+        });
+
+        group.finish();
+    }
+
+    // P-521
+    {
+        let mut group = c.benchmark_group("ecdsa-p521");
+        let kp = EcdsaKeyPair::generate(EccCurveId::NistP521).unwrap();
+        let digest = [0x42u8; 64];
+
+        group.bench_function("sign", |b| {
+            b.iter(|| kp.sign(&digest).unwrap());
+        });
+
+        let sig = kp.sign(&digest).unwrap();
+        group.bench_function("verify", |b| {
+            b.iter(|| kp.verify(&digest, &sig).unwrap());
+        });
+
+        group.finish();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AES-CCM benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_aes_ccm(c: &mut Criterion) {
+    use hitls_crypto::modes::ccm::{ccm_decrypt, ccm_encrypt};
+
+    let mut group = c.benchmark_group("aes-ccm");
+
+    for size in [1024usize, 8192, 16384] {
+        group.throughput(Throughput::Bytes(size as u64));
+
+        let key = [0x42u8; 16];
+        let nonce = [0u8; 12];
+        let aad = b"benchmark";
+        let plaintext = vec![0u8; size];
+
+        group.bench_with_input(
+            BenchmarkId::new("aes-128-ccm/encrypt", size),
+            &size,
+            |b, _| {
+                b.iter(|| ccm_encrypt(&key, &nonce, aad, &plaintext, 16).unwrap());
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("aes-128-ccm/decrypt", size),
+            &size,
+            |b, _| {
+                let ct = ccm_encrypt(&key, &nonce, aad, &plaintext, 16).unwrap();
+                b.iter(|| ccm_decrypt(&key, &nonce, aad, &ct, 16).unwrap());
+            },
+        );
+    }
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// CMAC benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_cmac(c: &mut Criterion) {
+    use hitls_crypto::cmac::Cmac;
+
+    let mut group = c.benchmark_group("cmac");
+
+    for (key_len, label) in [(16, "aes-128"), (32, "aes-256")] {
+        for size in [1024usize, 8192, 16384] {
+            group.throughput(Throughput::Bytes(size as u64));
+
+            let key = vec![0x42u8; key_len];
+            let data = vec![0u8; size];
+
+            group.bench_with_input(
+                BenchmarkId::new(format!("{label}/compute"), size),
+                &size,
+                |b, _| {
+                    b.iter(|| {
+                        let mut mac = Cmac::new(&key).unwrap();
+                        mac.update(&data).unwrap();
+                        let mut tag = [0u8; 16];
+                        mac.finish(&mut tag).unwrap();
+                    });
+                },
+            );
+        }
+    }
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// HMAC-SHA384 benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_hmac_sha384(c: &mut Criterion) {
+    use hitls_crypto::hmac::Hmac;
+    use hitls_crypto::sha2::Sha384;
+
+    let mut group = c.benchmark_group("hmac-sha384");
+
+    for size in [1024usize, 8192, 16384] {
+        group.throughput(Throughput::Bytes(size as u64));
+        let key = [0x42u8; 48];
+        let data = vec![0u8; size];
+
+        group.bench_with_input(BenchmarkId::new("compute", size), &size, |b, _| {
+            b.iter(|| {
+                let factory: fn() -> Box<dyn hitls_crypto::provider::Digest> =
+                    || Box::new(Sha384::new());
+                let mut mac = Hmac::new(factory, &key).unwrap();
+                mac.update(&data).unwrap();
+                let mut out = [0u8; 48];
+                mac.finish(&mut out).unwrap();
+            });
+        });
+    }
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// KDF benchmarks (HKDF, PBKDF2, DRBG)
+// ---------------------------------------------------------------------------
+
+fn bench_kdf(c: &mut Criterion) {
+    use hitls_crypto::drbg::{CtrDrbg, HmacDrbg};
+    use hitls_crypto::hkdf::Hkdf;
+    use hitls_crypto::pbkdf2::pbkdf2;
+
+    // HKDF
+    {
+        let mut group = c.benchmark_group("hkdf");
+        let salt = [0x42u8; 32];
+        let ikm = [0x42u8; 32];
+        let info = b"benchmark";
+
+        group.bench_function("extract+expand/32B", |b| {
+            b.iter(|| Hkdf::derive(&salt, &ikm, info, 32).unwrap());
+        });
+
+        group.bench_function("extract+expand/64B", |b| {
+            b.iter(|| Hkdf::derive(&salt, &ikm, info, 64).unwrap());
+        });
+
+        group.finish();
+    }
+
+    // PBKDF2
+    {
+        let mut group = c.benchmark_group("pbkdf2");
+        group.sample_size(10);
+        let password = b"benchmark-password";
+        let salt = b"benchmark-salt";
+
+        group.bench_function("1000_iters", |b| {
+            b.iter(|| pbkdf2(password, salt, 1000, 32).unwrap());
+        });
+
+        group.bench_function("10000_iters", |b| {
+            b.iter(|| pbkdf2(password, salt, 10000, 32).unwrap());
+        });
+
+        group.finish();
+    }
+
+    // DRBG
+    {
+        let mut group = c.benchmark_group("drbg");
+
+        group.bench_function("ctr-drbg/generate_32B", |b| {
+            let mut drbg = CtrDrbg::new(&[0x42u8; 48]).unwrap();
+            let mut out = [0u8; 32];
+            b.iter(|| drbg.generate(&mut out, None).unwrap());
+        });
+
+        group.bench_function("hmac-drbg/generate_32B", |b| {
+            let mut drbg = HmacDrbg::new(&[0x42u8; 48]).unwrap();
+            let mut out = [0u8; 32];
+            b.iter(|| drbg.generate(&mut out, None).unwrap());
+        });
+
+        group.finish();
+    }
+}
+
 criterion_group!(
     benches,
     bench_aes,
@@ -721,5 +1137,15 @@ criterion_group!(
     bench_mldsa,
     bench_dh,
     bench_bignum,
+    bench_sha3,
+    bench_slh_dsa,
+    bench_sm9,
+    bench_ed448,
+    bench_x448,
+    bench_ecdsa_curves,
+    bench_aes_ccm,
+    bench_cmac,
+    bench_hmac_sha384,
+    bench_kdf,
 );
 criterion_main!(benches);
