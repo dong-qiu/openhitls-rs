@@ -3,6 +3,8 @@
 //! These functions wrap `hitls_utils::asn1::Encoder` to produce DER-encoded
 //! ASN.1 primitives. They are used across x509, pkcs8, pkcs12, and cms modules.
 
+#![allow(dead_code)]
+
 use hitls_utils::asn1::{tags, Encoder};
 
 /// Encode a SEQUENCE containing `content`.

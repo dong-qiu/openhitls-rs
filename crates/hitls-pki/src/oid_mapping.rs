@@ -1,5 +1,7 @@
 //! Shared OID-to-algorithm mapping helpers for the PKI crate.
 
+#![allow(dead_code)]
+
 use hitls_types::EccCurveId;
 use hitls_utils::oid::{known, Oid};
 

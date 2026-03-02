@@ -15,6 +15,7 @@
 /// SAFETY: Caller must ensure `val` is a valid, live reference.
 /// This reads the raw memory of the value, which is safe as long
 /// as the value hasn't been dropped.
+#[allow(dead_code)]
 unsafe fn read_raw_bytes<T>(val: &T) -> Vec<u8> {
     let ptr = val as *const T as *const u8;
     let len = std::mem::size_of::<T>();
@@ -22,6 +23,7 @@ unsafe fn read_raw_bytes<T>(val: &T) -> Vec<u8> {
 }
 
 /// Check if any bytes in a slice are non-zero.
+#[allow(dead_code)]
 fn has_nonzero(data: &[u8]) -> bool {
     data.iter().any(|&b| b != 0)
 }
