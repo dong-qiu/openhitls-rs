@@ -610,4 +610,23 @@ mod tests {
         // SK: SK.seed(n) + SK.prf(n) + PK.seed(n) + PK.root(n)
         assert_eq!(kp.private_key.len(), 4 * mt.n);
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(3))]
+
+            #[test]
+            fn prop_xmss_sign_verify_roundtrip(
+                msg in prop::collection::vec(any::<u8>(), 1..64),
+            ) {
+                let mut kp =
+                    XmssKeyPair::generate(XmssParamId::Sha2_10_256).unwrap();
+                let sig = kp.sign(&msg).unwrap();
+                prop_assert!(kp.verify(&msg, &sig).unwrap());
+            }
+        }
+    }
 }

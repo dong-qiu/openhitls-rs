@@ -3827,3 +3827,16 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - Added certificate_issuer OID (2.5.29.29)
 - Re-exported CrlDistributionPoints, DistributionPoint, IssuingDistributionPoint
 - +12 tests (3,874 total), 22 ignored, 0 clippy/fmt warnings
+
+---
+
+## Phase T71 — Quality Safety Net P2 Enhancement (2026-03-03)
+
+**Prompt**: Implement Phase T71 — P2 quality safety net: +8 fuzz targets (X448/XMSS/HybridKEM/HPKE/SM9/DSA-verify/ML-DSA-verify/SLH-DSA-verify), +12 proptest blocks (BigNum montgomery/ct/prime, HPKE, SM9, XMSS, HybridKEM, PBKDF2, scrypt, CMAC, OTP, SPAKE2+), +8 CI feature flags (xmss/gmac/cbc-mac/siphash/elgamal/paillier/otp/spake2plus), +2 Miri runs (SM3/SM4).
+
+**Result**:
+- T71-A: +8 fuzz targets (fuzz_x448, fuzz_xmss, fuzz_hybridkem, fuzz_hpke, fuzz_sm9, fuzz_dsa_verify, fuzz_mldsa_verify, fuzz_slhdsa_verify) with 48 corpus seeds; total 52→60 targets, 358→406 corpus
+- T71-B: +12 proptest blocks (+18 test fns) — Montgomery roundtrip+commutativity, ct_eq reflexive+ct_select, gen_prime_is_odd, HPKE base+PSK mode roundtrip, SM9 encrypt/decrypt, XMSS sign/verify, HybridKEM P-256+P-384 roundtrip, PBKDF2+scrypt deterministic, CMAC incremental, HOTP roundtrip+range, SPAKE2+ exchange
+- T71-C: +8 CI feature flag tests — xmss, gmac, cbc-mac, siphash, elgamal, paillier, otp, spake2plus; total 47→55 combos
+- T71-D: +2 Miri runs — sm3::tests, sm4::tests (pure software paths); total 9→11 runs
+- All 3,870 tests pass (3,892 total), 22 ignored, 0 clippy/fmt warnings

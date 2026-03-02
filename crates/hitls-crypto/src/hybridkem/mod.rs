@@ -574,6 +574,32 @@ mod tests {
                 let ss_dec = kp.decapsulate(&ct).unwrap();
                 prop_assert_eq!(ss_enc, ss_dec);
             }
+
+            #[test]
+            fn prop_hybridkem_ecdh_p256_mlkem768_roundtrip(
+                _seed in prop::array::uniform32(any::<u8>()),
+            ) {
+                let kp = HybridKemKeyPair::generate(
+                    HybridKemParamId::EcdhNistP256MlKem768,
+                )
+                .unwrap();
+                let (ss_enc, ct) = kp.encapsulate().unwrap();
+                let ss_dec = kp.decapsulate(&ct).unwrap();
+                prop_assert_eq!(ss_enc, ss_dec);
+            }
+
+            #[test]
+            fn prop_hybridkem_ecdh_p384_mlkem768_roundtrip(
+                _seed in prop::array::uniform32(any::<u8>()),
+            ) {
+                let kp = HybridKemKeyPair::generate(
+                    HybridKemParamId::EcdhNistP384MlKem768,
+                )
+                .unwrap();
+                let (ss_enc, ct) = kp.encapsulate().unwrap();
+                let ss_dec = kp.decapsulate(&ct).unwrap();
+                prop_assert_eq!(ss_enc, ss_dec);
+            }
         }
     }
 }

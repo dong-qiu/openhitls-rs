@@ -698,4 +698,36 @@ mod tests {
         // Invalid point encoding (10 random bytes, not a valid P-256 point)
         assert!(ctx.process_share(&[0xFF; 10]).is_err());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(3))]
+
+            #[test]
+            fn prop_spake2plus_same_password_succeeds(
+                password in prop::collection::vec(any::<u8>(), 8..32),
+            ) {
+                let mut prover = Spake2Plus::new(Spake2Role::Prover).unwrap();
+                let mut verifier = Spake2Plus::new(Spake2Role::Verifier).unwrap();
+
+                prover.setup_from_password(&password, b"salt", 100).unwrap();
+                verifier.setup_from_password(&password, b"salt", 100).unwrap();
+
+                let pa = prover.generate_share().unwrap();
+                let pb = verifier.generate_share().unwrap();
+
+                let ke_p = prover.process_share(&pb).unwrap();
+                let ke_v = verifier.process_share(&pa).unwrap();
+                prop_assert_eq!(ke_p, ke_v);
+
+                let conf_p = prover.get_confirmation().unwrap();
+                let conf_v = verifier.get_confirmation().unwrap();
+                prop_assert!(verifier.verify_confirmation(&conf_p).unwrap());
+                prop_assert!(prover.verify_confirmation(&conf_v).unwrap());
+            }
+        }
+    }
 }

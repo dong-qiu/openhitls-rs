@@ -217,4 +217,41 @@ mod tests {
         let c = BigNum::from_u64(97);
         assert_eq!(c.ct_sub_if_gte(&modulus), BigNum::from_u64(0));
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            #[test]
+            fn prop_ct_eq_reflexive(val in any::<u64>()) {
+                let a = BigNum::from_u64(val);
+                prop_assert_eq!(a.ct_eq(&a).unwrap_u8(), 1);
+            }
+
+            #[test]
+            fn prop_ct_select_choice0(
+                a_val in any::<u64>(),
+                b_val in any::<u64>(),
+            ) {
+                let a = BigNum::from_u64(a_val);
+                let b = BigNum::from_u64(b_val);
+                let r = BigNum::ct_select(&a, &b, Choice::from(0));
+                prop_assert_eq!(r, a);
+            }
+
+            #[test]
+            fn prop_ct_select_choice1(
+                a_val in any::<u64>(),
+                b_val in any::<u64>(),
+            ) {
+                let a = BigNum::from_u64(a_val);
+                let b = BigNum::from_u64(b_val);
+                let r = BigNum::ct_select(&a, &b, Choice::from(1));
+                prop_assert_eq!(r, b);
+            }
+        }
+    }
 }

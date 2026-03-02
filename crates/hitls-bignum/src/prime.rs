@@ -221,4 +221,25 @@ mod tests {
         let q = p.sub(&BigNum::from_u64(1)).shr(1);
         assert!(q.is_probably_prime(10).unwrap());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(10))]
+
+            #[test]
+            fn prop_gen_prime_is_odd(bits in 32u64..=64) {
+                let bits = bits as usize;
+                let p = BigNum::gen_prime(bits, false).unwrap();
+                // Generated prime must be odd
+                prop_assert_eq!(p.limbs()[0] & 1, 1);
+                // Generated prime must have the correct bit length
+                prop_assert_eq!(p.bit_len(), bits);
+                // Generated prime must pass primality test
+                prop_assert!(p.is_probably_prime(10).unwrap());
+            }
+        }
+    }
 }

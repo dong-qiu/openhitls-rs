@@ -705,4 +705,43 @@ mod tests {
 
         assert_eq!(&sqr_out[..2 * n], &mul_out[..2 * n]);
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn arb_odd_modulus() -> impl Strategy<Value = BigNum> {
+            (3u64..=0xFFFF).prop_map(|v| BigNum::from_u64(v | 1))
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(20))]
+
+            #[test]
+            fn prop_mont_roundtrip(
+                val in 1u64..=0xFFFF,
+                modulus in arb_odd_modulus(),
+            ) {
+                let ctx = MontgomeryCtx::new(&modulus).unwrap();
+                let a = BigNum::from_u64(val).mod_reduce(&modulus).unwrap();
+                let a_mont = ctx.to_mont(&a).unwrap();
+                let a_back = ctx.from_mont(&a_mont);
+                prop_assert_eq!(a, a_back);
+            }
+
+            #[test]
+            fn prop_mont_mul_commutative(
+                a_val in 1u64..=0xFFFF,
+                b_val in 1u64..=0xFFFF,
+                modulus in arb_odd_modulus(),
+            ) {
+                let ctx = MontgomeryCtx::new(&modulus).unwrap();
+                let a = ctx.to_mont(&BigNum::from_u64(a_val).mod_reduce(&modulus).unwrap()).unwrap();
+                let b = ctx.to_mont(&BigNum::from_u64(b_val).mod_reduce(&modulus).unwrap()).unwrap();
+                let ab = ctx.mont_mul(&a, &b);
+                let ba = ctx.mont_mul(&b, &a);
+                prop_assert_eq!(ab, ba);
+            }
+        }
+    }
 }

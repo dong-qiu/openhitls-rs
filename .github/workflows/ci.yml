@@ -122,6 +122,16 @@ jobs:
       # Crypto advanced feature isolation
       - run: cargo test -p hitls-crypto --no-default-features --features hybridkem
       - run: cargo test -p hitls-crypto --no-default-features --features hpke
+      # T71-C: Additional feature isolation
+      - run: cargo test -p hitls-crypto --no-default-features --features xmss
+      - run: cargo test -p hitls-crypto --no-default-features --features gmac
+      - run: cargo test -p hitls-crypto --no-default-features --features cbc-mac
+      - run: cargo test -p hitls-crypto --no-default-features --features siphash
+      - run: cargo test -p hitls-crypto --no-default-features --features elgamal
+      - run: cargo test -p hitls-crypto --no-default-features --features paillier
+      # Auth individual features
+      - run: cargo test -p hitls-auth --no-default-features --features otp
+      - run: cargo test -p hitls-auth --no-default-features --features spake2plus
 
   audit:
     name: Security Audit
@@ -155,6 +165,10 @@ jobs:
       - run: cargo miri test -p hitls-crypto --all-features -- sha3::tests
       # ChaCha20 software path (skip HW cross-validation tests using SIMD)
       - run: cargo miri test -p hitls-crypto --all-features -- chacha20::tests --skip soft_vs_dispatch_stress --skip keystream_256_bytes_consistency
+      # SM3 software path (no SIMD)
+      - run: cargo miri test -p hitls-crypto --all-features -- sm3::tests
+      # SM4 software path (T-table, no intrinsics)
+      - run: cargo miri test -p hitls-crypto --all-features -- sm4::tests
 
   fuzz-check:
     name: Fuzz Build Check

@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I86 (86 phases)
-- Testing: T1–T70 (68 phases)
+- Testing: T1–T71 (69 phases)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P62 (62 phases)
 
@@ -245,6 +245,7 @@ Category summary:
 | 233 | P68 | Perf | RSA CRT Montgomery Optimization | 2026-03-02 |
 | 234 | I85 | Impl | XMSS-MT Multi-Tree + Extended XMSS Parameter Sets | 2026-03-02 |
 | 235 | I86 | Impl | PKI CRL Extensions + Certificate CRL Distribution Points | 2026-03-03 |
+| 236 | T71 | Test | Quality Safety Net P2 — +8 fuzz targets, +12 proptests, +8 CI feature flags, +2 Miri runs | 2026-03-03 |
 
 ---
 
@@ -12599,6 +12600,129 @@ Added `Clone` to `MontgomeryCtx`, cached Montgomery contexts (mont_p, mont_q, qi
 - `cargo test --workspace --all-features`: 3,813 passed, 0 failed, 22 ignored (3,835 total)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T71 — Quality Safety Net P2 Enhancement (2026-03-03)
+
+### Summary
+
+P2 tier quality enhancement following T70's P1 roadmap. Focus areas: fuzz coverage for uncovered crypto modules (X448, XMSS, HybridKEM, HPKE, SM9), verify-path fuzz for signature algorithms (DSA, ML-DSA, SLH-DSA), proptest expansion to BigNum core/Auth/crypto advanced modules, and CI feature-flag expansion.
+
+### T71-A: Fuzz Target Expansion (+8 targets, +48 corpus seeds)
+
+8 new fuzz targets covering key exchange, signatures, KEM, and encryption:
+
+| Target | Algorithm | Property Tested |
+|--------|-----------|-----------------|
+| fuzz_x448 | X448 DH | Commutativity + fuzzed public key |
+| fuzz_xmss | XMSS (Sha2_10_256) | Sign→verify roundtrip + fuzzed verify |
+| fuzz_hybridkem | HybridKEM (3 variants) | Encap/decap roundtrip + fuzzed decap |
+| fuzz_hpke | HPKE (2 AEAD suites) | Seal/open roundtrip + fuzzed open |
+| fuzz_sm9 | SM9 (sign + encrypt) | Sign/verify + encrypt/decrypt roundtrip |
+| fuzz_dsa_verify | DSA (small params) | Sign→verify + fuzzed signature |
+| fuzz_mldsa_verify | ML-DSA (44/65) | Verify with fuzzed signatures |
+| fuzz_slhdsa_verify | SLH-DSA (Sha2128f/Shake128f) | Verify with fuzzed signatures |
+
+Corpus: 6 seeds per target (mode variants, short/medium/long payloads) = 48 new seeds.
+
+### T71-B: Proptest Expansion (+12 proptest blocks, +18 test functions)
+
+| Module | Property | Cases |
+|--------|----------|-------|
+| bignum/montgomery.rs | Montgomery roundtrip (to_mont → from_mont) | 20 |
+| bignum/montgomery.rs | Montgomery mul commutativity | 20 |
+| bignum/ct.rs | ct_eq reflexive | 64 |
+| bignum/ct.rs | ct_select choice=0 returns a | 64 |
+| bignum/ct.rs | ct_select choice=1 returns b | 64 |
+| bignum/prime.rs | gen_prime result is odd and correct width | 10 |
+| crypto/hpke/mod.rs | HPKE base mode seal/open roundtrip | 5 |
+| crypto/hpke/mod.rs | HPKE PSK mode seal/open roundtrip | 5 |
+| crypto/sm9/mod.rs | SM9 encrypt/decrypt roundtrip | 3 |
+| crypto/xmss/mod.rs | XMSS sign/verify roundtrip | 3 |
+| crypto/hybridkem/mod.rs | P-256+ML-KEM-768 roundtrip | 3 |
+| crypto/hybridkem/mod.rs | P-384+ML-KEM-768 roundtrip | 3 |
+| crypto/pbkdf2/mod.rs | PBKDF2 deterministic | 10 |
+| crypto/scrypt/mod.rs | scrypt deterministic | 10 |
+| crypto/cmac/mod.rs | CMAC incremental equivalence | 20 |
+| auth/otp/mod.rs | HOTP generate/verify roundtrip | 20 |
+| auth/otp/mod.rs | HOTP output range (< 10^digits) | 20 |
+| auth/spake2plus/mod.rs | SPAKE2+ same password succeeds | 3 |
+
+### T71-C: CI Feature Flag Expansion (+8 tests)
+
+New feature isolation tests in `.github/workflows/ci.yml`:
+
+| Feature | Crate | Purpose |
+|---------|-------|---------|
+| xmss | hitls-crypto | XMSS hash-based signatures |
+| gmac | hitls-crypto | GMAC authentication |
+| cbc-mac | hitls-crypto | CBC-MAC-SM4 |
+| siphash | hitls-crypto | SipHash-2-4 |
+| elgamal | hitls-crypto | ElGamal encryption |
+| paillier | hitls-crypto | Paillier homomorphic encryption |
+| otp | hitls-auth | HOTP/TOTP |
+| spake2plus | hitls-auth | SPAKE2+ PAKE |
+
+Feature flag combos: 47→55.
+
+### T71-D: Miri Expansion (+2 runs)
+
+| Module | Skip Patterns | Reason |
+|--------|---------------|--------|
+| sm3::tests | (none) | Pure software path, no SIMD |
+| sm4::tests | (none) | T-table lookup, no intrinsics |
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| fuzz/Cargo.toml | Modified | +x448, xmss, hybridkem, hpke, sm9 features; +8 [[bin]] entries |
+| fuzz/fuzz_targets/fuzz_x448.rs | New | X448 DH commutativity fuzz |
+| fuzz/fuzz_targets/fuzz_xmss.rs | New | XMSS sign/verify fuzz |
+| fuzz/fuzz_targets/fuzz_hybridkem.rs | New | HybridKEM encap/decap fuzz |
+| fuzz/fuzz_targets/fuzz_hpke.rs | New | HPKE seal/open fuzz |
+| fuzz/fuzz_targets/fuzz_sm9.rs | New | SM9 sign/verify + encrypt/decrypt fuzz |
+| fuzz/fuzz_targets/fuzz_dsa_verify.rs | New | DSA verify fuzz |
+| fuzz/fuzz_targets/fuzz_mldsa_verify.rs | New | ML-DSA verify fuzz |
+| fuzz/fuzz_targets/fuzz_slhdsa_verify.rs | New | SLH-DSA verify fuzz |
+| fuzz/corpus/fuzz_{x448,xmss,hybridkem,hpke,sm9,dsa_verify,mldsa_verify,slhdsa_verify}/ | New | 48 seed files (6 per target) |
+| crates/hitls-bignum/src/montgomery.rs | Modified | +2 proptests |
+| crates/hitls-bignum/src/ct.rs | Modified | +3 proptests |
+| crates/hitls-bignum/src/prime.rs | Modified | +1 proptest |
+| crates/hitls-crypto/src/hpke/mod.rs | Modified | +2 proptests |
+| crates/hitls-crypto/src/sm9/mod.rs | Modified | +1 proptest (expand existing block) |
+| crates/hitls-crypto/src/xmss/mod.rs | Modified | +1 proptest |
+| crates/hitls-crypto/src/hybridkem/mod.rs | Modified | +2 proptests (expand existing block) |
+| crates/hitls-crypto/src/pbkdf2/mod.rs | Modified | +1 proptest |
+| crates/hitls-crypto/src/scrypt/mod.rs | Modified | +1 proptest |
+| crates/hitls-crypto/src/cmac/mod.rs | Modified | +1 proptest |
+| crates/hitls-auth/Cargo.toml | Modified | +proptest dev-dependency |
+| crates/hitls-auth/src/otp/mod.rs | Modified | +2 proptests |
+| crates/hitls-auth/src/spake2plus/mod.rs | Modified | +1 proptest |
+| .github/workflows/ci.yml | Modified | +8 feature flag tests, +2 Miri runs |
+
+### Test Count (Post T71)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1396 (14 ignored) |
+| hitls-tls | 1414 |
+| hitls-pki | 405 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 36 |
+| hitls-cli | 166 (5 ignored) |
+| hitls-integration-tests | 260 (2 ignored) |
+| **Total** | **3880 (22 ignored)** |
+
+### Build Status (Post T71)
+- `cargo test --workspace --all-features`: 3,858 passed, 0 failed, 22 ignored (3,880 total)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- Fuzz targets: 60 (52→60), corpus seeds: 406 (358→406)
+- CI feature flag combos: 55 (47→55)
+- Miri runs: 11 (9→11)
 
 ---
 

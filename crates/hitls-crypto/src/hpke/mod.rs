@@ -1503,4 +1503,65 @@ mod tests {
         assert_eq!(s_export, r_export);
         assert_eq!(s_export.len(), 64);
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(5))]
+
+            #[test]
+            fn prop_hpke_base_mode_roundtrip(
+                pt in proptest::collection::vec(any::<u8>(), 0..128),
+                aad in proptest::collection::vec(any::<u8>(), 0..32),
+            ) {
+                let suite = DEFAULT_SUITE;
+                let mut sk_bytes = [0u8; 32];
+                getrandom::getrandom(&mut sk_bytes).unwrap();
+                let sk = X25519PrivateKey::new(&sk_bytes).unwrap();
+                let pk = sk.public_key();
+
+                let (mut sender, enc) =
+                    HpkeCtx::setup_sender_with_suite(suite, pk.as_bytes(), b"info")
+                        .unwrap();
+                let ct = sender.seal(&aad, &pt).unwrap();
+
+                let mut recipient =
+                    HpkeCtx::setup_recipient_with_suite(suite, &sk_bytes, &enc, b"info")
+                        .unwrap();
+                let decrypted = recipient.open(&aad, &ct).unwrap();
+                prop_assert_eq!(pt, decrypted);
+            }
+
+            #[test]
+            fn prop_hpke_psk_mode_roundtrip(
+                pt in proptest::collection::vec(any::<u8>(), 0..64),
+            ) {
+                let suite = DEFAULT_SUITE;
+                let mut sk_bytes = [0u8; 32];
+                getrandom::getrandom(&mut sk_bytes).unwrap();
+                let sk = X25519PrivateKey::new(&sk_bytes).unwrap();
+                let pk = sk.public_key();
+
+                let psk = b"shared secret psk";
+                let psk_id = b"psk-id-001";
+
+                let (mut sender, enc) =
+                    HpkeCtx::setup_sender_psk_with_suite(
+                        suite, pk.as_bytes(), b"info", psk, psk_id,
+                    )
+                    .unwrap();
+                let ct = sender.seal(b"", &pt).unwrap();
+
+                let mut recipient =
+                    HpkeCtx::setup_recipient_psk_with_suite(
+                        suite, &sk_bytes, &enc, b"info", psk, psk_id,
+                    )
+                    .unwrap();
+                let decrypted = recipient.open(b"", &ct).unwrap();
+                prop_assert_eq!(pt, decrypted);
+            }
+        }
+    }
 }

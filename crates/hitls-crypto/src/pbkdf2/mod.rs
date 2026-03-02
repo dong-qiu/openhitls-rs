@@ -175,4 +175,25 @@ mod tests {
         let dk2 = pbkdf2_with_hmac(sm3_factory, b"password", b"salt", 1, 32).unwrap();
         assert_eq!(dk, dk2);
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(10))]
+
+            #[test]
+            fn prop_pbkdf2_deterministic(
+                password in prop::collection::vec(any::<u8>(), 1..32),
+                salt in prop::collection::vec(any::<u8>(), 1..16),
+                dk_len in 1usize..=64,
+            ) {
+                let dk1 = pbkdf2(&password, &salt, 1, dk_len).unwrap();
+                let dk2 = pbkdf2(&password, &salt, 1, dk_len).unwrap();
+                prop_assert_eq!(&dk1, &dk2);
+                prop_assert_eq!(dk1.len(), dk_len);
+            }
+        }
+    }
 }

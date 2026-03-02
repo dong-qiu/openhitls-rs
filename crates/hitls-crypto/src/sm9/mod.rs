@@ -482,6 +482,17 @@ mod tests {
                 let sig = user.sign(&msg, master.master_public_key()).unwrap();
                 prop_assert!(master.verify(b"Alice", &msg, &sig).unwrap());
             }
+
+            #[test]
+            fn prop_sm9_encrypt_decrypt_roundtrip(
+                pt in prop::collection::vec(any::<u8>(), 1..64),
+            ) {
+                let master = Sm9MasterKey::generate(Sm9KeyType::Encrypt).unwrap();
+                let user = master.extract_user_key(b"Bob").unwrap();
+                let ct = master.encrypt(b"Bob", &pt).unwrap();
+                let decrypted = user.decrypt(&ct).unwrap();
+                prop_assert_eq!(pt, decrypted);
+            }
         }
     }
 }

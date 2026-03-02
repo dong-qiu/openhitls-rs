@@ -285,4 +285,25 @@ mod tests {
         // dk_len = 0 should be rejected
         assert!(scrypt(b"password", b"salt", 16, 1, 1, 0).is_err());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(10))]
+
+            #[test]
+            fn prop_scrypt_deterministic(
+                password in prop::collection::vec(any::<u8>(), 1..16),
+                salt in prop::collection::vec(any::<u8>(), 1..16),
+                dk_len in 1usize..=32,
+            ) {
+                let dk1 = scrypt(&password, &salt, 16, 1, 1, dk_len).unwrap();
+                let dk2 = scrypt(&password, &salt, 16, 1, 1, dk_len).unwrap();
+                prop_assert_eq!(&dk1, &dk2);
+                prop_assert_eq!(dk1.len(), dk_len);
+            }
+        }
+    }
 }

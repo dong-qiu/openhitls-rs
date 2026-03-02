@@ -286,4 +286,33 @@ mod tests {
         let otp_b = totp.generate(30).unwrap();
         assert_ne!(otp_a, otp_b, "OTPs at different time steps should differ");
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(20))]
+
+            #[test]
+            fn prop_hotp_generate_verify_roundtrip(
+                secret in prop::collection::vec(any::<u8>(), 10..32),
+                counter in any::<u64>(),
+            ) {
+                let hotp = Hotp::new(&secret, 6);
+                let otp = hotp.generate(counter).unwrap();
+                prop_assert!(hotp.verify(otp, counter).unwrap());
+            }
+
+            #[test]
+            fn prop_hotp_output_range(
+                secret in prop::collection::vec(any::<u8>(), 10..32),
+                counter in any::<u64>(),
+            ) {
+                let hotp = Hotp::new(&secret, 6);
+                let otp = hotp.generate(counter).unwrap();
+                prop_assert!(otp < 1_000_000, "6-digit OTP must be < 10^6");
+            }
+        }
+    }
 }

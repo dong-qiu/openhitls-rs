@@ -2,7 +2,7 @@
 
 A production-grade cryptographic and TLS library in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **100% C→Rust feature parity achieved** — 3874 tests, 52 fuzz targets, 5000+ Wycheproof vectors
+> **100% C→Rust feature parity achieved** — 3892 tests, 60 fuzz targets, 5000+ Wycheproof vectors
 
 ## Feature Highlights
 
@@ -23,7 +23,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | CLI Tools | ~8K | ~2.5K | **100%** | 16 commands (dgst, genpkey, x509, s-client, s-server, prime, kdf, etc.) |
 | FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
-| Test Infrastructure | ~20K | ~3.5K | **95%** | 3874 tests + Wycheproof + 52 fuzz targets (358 corpus) + security audit |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | 3892 tests + Wycheproof + 60 fuzz targets (406 corpus) + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
 
 ### Not Migrated (by design)
@@ -108,7 +108,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 
 ### Big Number Arithmetic (`hitls-bignum`)
 
-Montgomery multiplication/exponentiation, Miller-Rabin primality, prime generation (safe prime), GCD/mod-inverse, constant-time operations, cryptographic random generation, hex/decimal string conversions. 90 tests.
+Montgomery multiplication/exponentiation, Miller-Rabin primality, prime generation (safe prime), GCD/mod-inverse, constant-time operations, cryptographic random generation, hex/decimal string conversions. 95 tests.
 
 ## Protocol Support
 
@@ -250,7 +250,7 @@ openhitls-rs/
 │   └── hitls-cli/       # Command-line tool (16 commands)
 ├── tests/interop/       # Integration tests (260 cross-crate)
 ├── tests/vectors/       # Test vectors (NIST, Wycheproof, GM/T)
-├── fuzz/                # 52 libfuzzer fuzz targets
+├── fuzz/                # 60 libfuzzer fuzz targets
 └── benches/             # Criterion benchmarks
 ```
 
@@ -260,16 +260,16 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3874 tests, 22 ignored)
+# Run all tests (3892 tests, 22 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1387 tests (14 ignored)
+cargo test -p hitls-crypto --all-features   # 1396 tests (14 ignored)
 cargo test -p hitls-tls --all-features      # 1414 tests
 cargo test -p hitls-pki --all-features      # 417 tests
-cargo test -p hitls-bignum                  # 90 tests (1 ignored)
+cargo test -p hitls-bignum                  # 95 tests (1 ignored)
 cargo test -p hitls-utils                   # 68 tests
-cargo test -p hitls-auth --all-features     # 33 tests
+cargo test -p hitls-auth --all-features     # 36 tests
 cargo test -p hitls-cli --all-features      # 166 tests (5 ignored)
 cargo test -p hitls-integration-tests       # 260 tests (2 ignored)
 
@@ -314,4 +314,4 @@ Licensed under the [Mulan Permissive Software License, Version 2](http://license
 
 ## Acknowledgments
 
-This project is a Rust rewrite of [openHiTLS](https://gitee.com/openhitls/openhitls), an open-source cryptographic and TLS library originally written in C. See [DEV_LOG.md](DEV_LOG.md) for the detailed migration history (Phases I1–I86, T1–T70, R1–R12, P1–P68).
+This project is a Rust rewrite of [openHiTLS](https://gitee.com/openhitls/openhitls), an open-source cryptographic and TLS library originally written in C. See [DEV_LOG.md](DEV_LOG.md) for the detailed migration history (Phases I1–I86, T1–T71, R1–R12, P1–P68).

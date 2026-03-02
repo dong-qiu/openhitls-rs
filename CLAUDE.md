@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phases I1–I86, T1–T70, R1–R12, P1–P68 complete (3874 tests, 22 ignored)
+- **Status**: Phases I1–I86, T1–T71, R1–R12, P1–P68 complete (3892 tests, 22 ignored)
 
 ## Workspace Structure
 
@@ -17,15 +17,15 @@ openhitls-rs/
 ├── crates/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error enums
 │   ├── hitls-utils/     # Hex, ASN.1, Base64, PEM, OID utilities
-│   ├── hitls-bignum/    # Big number arithmetic (CIOS Montgomery, Miller-Rabin, prime generation, hex/dec string) (90 tests, 1 ignored)
-│   ├── hitls-crypto/    # Cryptographic algorithms (feature-gated): AES, SM4, ChaCha20, SHA-2/3, SM3, HMAC, RSA, ECC, Ed25519/448, X25519/448, DH, DSA, SM2, SM9, PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS+XMSS-MT/FrodoKEM/McEliece), HybridKEM (12 variants), DRBG, FIPS/CMVP, entropy health, hardware AES/SHA-2/GHASH/ChaCha20, P-256/P-384/P-521 fast paths, SM2 fast path, ML-KEM NEON NTT, ML-DSA NEON NTT, SM4 T-table, SHA-512 HW accel, Ed25519/Ed448 precomputed tables, Keccak SHA-3 HW accel, P-256/P-384/P-521 scalar fields, HPKE full RFC 9180 (4 KEMs/3 KDFs/4 AEADs/4 modes) (1387 tests, 14 ignored)
+│   ├── hitls-bignum/    # Big number arithmetic (CIOS Montgomery, Miller-Rabin, prime generation, hex/dec string) (95 tests, 1 ignored)
+│   ├── hitls-crypto/    # Cryptographic algorithms (feature-gated): AES, SM4, ChaCha20, SHA-2/3, SM3, HMAC, RSA, ECC, Ed25519/448, X25519/448, DH, DSA, SM2, SM9, PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS+XMSS-MT/FrodoKEM/McEliece), HybridKEM (12 variants), DRBG, FIPS/CMVP, entropy health, hardware AES/SHA-2/GHASH/ChaCha20, P-256/P-384/P-521 fast paths, SM2 fast path, ML-KEM NEON NTT, ML-DSA NEON NTT, SM4 T-table, SHA-512 HW accel, Ed25519/Ed448 precomputed tables, Keccak SHA-3 HW accel, P-256/P-384/P-521 scalar fields, HPKE full RFC 9180 (4 KEMs/3 KDFs/4 AEADs/4 modes) (1396 tests, 14 ignored)
 │   ├── hitls-tls/       # TLS 1.3/1.2 (91 cipher suites), DTLS 1.2, TLCP, DTLCP; 10 connection types (5 sync + 5 async via tokio); 15 TLS extensions; 10 callbacks; session cache, hostname verification, renegotiation, GREASE, custom extensions, NSS key logging, middlebox compat (1414 tests)
 │   ├── hitls-pki/       # X.509, PKCS#8 (incl. Encrypted PBES2), PKCS#12, CMS (SignedData/EnvelopedData/EncryptedData/DigestedData/AuthenticatedData), CRL builder+extensions, hostname verification (417 tests)
-│   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass (33 tests)
+│   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass (36 tests)
 │   └── hitls-cli/       # CLI tool: dgst, genpkey, x509, verify, enc, pkey, crl, req, s-client, s-server, list, rand, pkeyutl, speed, pkcs12, mac, prime, kdf (166 tests, 5 ignored)
 ├── tests/interop/       # Integration tests (260 cross-crate tests) — 14 test files + helper lib
 ├── tests/vectors/       # Standard test vectors (NIST, Wycheproof, GM/T)
-├── fuzz/                # Fuzz targets (cargo-fuzz, 52 targets, 358 corpus seeds)
+├── fuzz/                # Fuzz targets (cargo-fuzz, 60 targets, 406 corpus seeds)
 ```
 
 ## Build & Test Commands
@@ -34,17 +34,17 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3874 tests, 22 ignored)
+# Run all tests (3892 tests, 22 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1387 tests (14 ignored)
+cargo test -p hitls-crypto --all-features   # 1396 tests (14 ignored)
 cargo test -p hitls-tls --all-features      # 1414 tests
 
 cargo test -p hitls-pki --all-features      # 417 tests
-cargo test -p hitls-bignum                  # 90 tests (1 ignored)
+cargo test -p hitls-bignum                  # 95 tests (1 ignored)
 cargo test -p hitls-utils                   # 68 tests
-cargo test -p hitls-auth --all-features     # 33 tests
+cargo test -p hitls-auth --all-features     # 36 tests
 cargo test -p hitls-cli --all-features      # 166 tests (5 ignored)
 cargo test -p hitls-integration-tests       # 260 tests (2 ignored)
 
@@ -132,7 +132,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases I1–I86, T1–T70, R1–R12, P1–P68 complete (3874 tests, 22 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
+Phases I1–I86, T1–T71, R1–R12, P1–P68 complete (3892 tests, 22 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
 
 ### Completed Phases (Summary)
 
@@ -233,5 +233,6 @@ Key milestones:
 - Phase I84: CLI prime/kdf commands — BigNum hex/dec string conversions (`from_hex_str`/`to_hex_str`/`from_dec_str`/`to_dec_str`), `gen_prime(bits, safe)`, `pbkdf2_with_hmac()` generalization, CLI `prime` (generate/check) and `kdf` (PBKDF2, 6 MAC options). +24 tests (10 bignum, 4 pbkdf2, 14 CLI). Total: 3845 (22 ignored).
 - Phase I85: XMSS-MT Multi-Tree + Extended XMSS Parameter Sets — XmssParamId 9→21 single-tree variants (+12: SHA-512 n=64, SHAKE256 n=64, SHA-256 truncated n=24, SHAKE256 n=24), XmssMtParamId 56 multi-tree variants (7 hash families × 8 h/d combos), SHA-512 hash backend, padding_len generalization for variable n, hypertree_sign/hypertree_verify, XmssMtKeyPair struct. +17 tests. Total: 3862 (22 ignored).
 - Phase I86: PKI CRL Extensions + Certificate CRL Distribution Points — CrlDistributionPoints/DistributionPoint/IssuingDistributionPoint types, parse_crl_distribution_points/parse_issuing_distribution_point parse functions, Certificate::crl_distribution_points(), CRL authority_key_identifier()/issuing_distribution_point()/delta_crl_indicator() convenience methods, RevokedCertificate.certificate_issuer field (OID 2.5.29.29), CrlBuilder::add_issuing_distribution_point()/add_delta_crl_indicator(), CertificateBuilder::add_crl_distribution_points(). +12 tests. Total: 3874 (22 ignored).
+- Phase T71: Quality safety net P2 — +8 fuzz targets (X448/XMSS/HybridKEM/HPKE/SM9/DSA-verify/ML-DSA-verify/SLH-DSA-verify, 52→60 targets, +48 corpus seeds 358→406), +12 proptest blocks (+18 test fns: Montgomery roundtrip+commutativity, ct_eq+ct_select, gen_prime, HPKE base+PSK, SM9 encrypt, XMSS sign, HybridKEM P-256+P-384, PBKDF2+scrypt deterministic, CMAC incremental, HOTP roundtrip+range, SPAKE2+ exchange), +8 CI feature flags (xmss/gmac/cbc-mac/siphash/elgamal/paillier/otp/spake2plus, 47→55), +2 Miri runs (sm3/sm4, 9→11). Total: 3892 (22 ignored).
 
 See `DEV_LOG.md` for detailed phase tables (including test, refactoring, and performance phases) and `PROMPT_LOG.md` for prompt/response log.

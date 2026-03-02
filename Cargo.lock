@@ -365,6 +365,7 @@ dependencies = [
  "hitls-crypto",
  "hitls-types",
  "hitls-utils",
+ "proptest",
  "subtle",
  "zeroize",
 ]

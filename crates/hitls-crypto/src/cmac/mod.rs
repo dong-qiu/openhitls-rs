@@ -294,4 +294,38 @@ mod tests {
         let mut small_buf = [0u8; 8];
         assert!(cmac.finish(&mut small_buf).is_err());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(20))]
+
+            #[test]
+            fn prop_cmac_incremental_equiv(
+                key in prop::array::uniform16(any::<u8>()),
+                a in proptest::collection::vec(any::<u8>(), 0..64),
+                b in proptest::collection::vec(any::<u8>(), 0..64),
+            ) {
+                let mut combined = a.clone();
+                combined.extend_from_slice(&b);
+
+                // One-shot
+                let mut oneshot = Cmac::new(&key).unwrap();
+                oneshot.update(&combined).unwrap();
+                let mut tag1 = [0u8; 16];
+                oneshot.finish(&mut tag1).unwrap();
+
+                // Incremental
+                let mut incr = Cmac::new(&key).unwrap();
+                incr.update(&a).unwrap();
+                incr.update(&b).unwrap();
+                let mut tag2 = [0u8; 16];
+                incr.finish(&mut tag2).unwrap();
+
+                prop_assert_eq!(tag1, tag2);
+            }
+        }
+    }
 }

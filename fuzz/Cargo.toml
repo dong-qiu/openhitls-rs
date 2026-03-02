@@ -16,6 +16,7 @@ hitls-crypto = { path = "../crates/hitls-crypto", features = [
     "hmac", "x25519", "drbg", "pbkdf2", "ed448", "frodokem",
     "cmac", "scrypt", "mceliece", "ecc",
     "sm3", "sm4", "dh",
+    "x448", "xmss", "hybridkem", "hpke", "sm9",
 ] }
 hitls-pki = { path = "../crates/hitls-pki" }
 hitls-tls = { path = "../crates/hitls-tls", features = ["tls12", "tls13", "dtls12", "tlcp"] }
@@ -279,4 +280,44 @@ doc = false
 [[bin]]
 name = "fuzz_ecc_point"
 path = "fuzz_targets/fuzz_ecc_point.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_x448"
+path = "fuzz_targets/fuzz_x448.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_xmss"
+path = "fuzz_targets/fuzz_xmss.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_hybridkem"
+path = "fuzz_targets/fuzz_hybridkem.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_hpke"
+path = "fuzz_targets/fuzz_hpke.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_sm9"
+path = "fuzz_targets/fuzz_sm9.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_dsa_verify"
+path = "fuzz_targets/fuzz_dsa_verify.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_mldsa_verify"
+path = "fuzz_targets/fuzz_mldsa_verify.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_slhdsa_verify"
+path = "fuzz_targets/fuzz_slhdsa_verify.rs"
 doc = false
