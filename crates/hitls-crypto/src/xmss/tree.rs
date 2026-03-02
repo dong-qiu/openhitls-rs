@@ -1,12 +1,13 @@
 //! XMSS Merkle tree operations (RFC 8391 Section 4).
 //!
 //! Single-tree XMSS: compute root, sign (WOTS+ + auth path), verify.
+//! Multi-tree XMSS-MT: hypertree sign and verify.
 
 use hitls_types::CryptoError;
 
 use super::address::{XmssAdrs, XmssAdrsType};
 use super::hash::XmssHasher;
-use super::params::XmssParams;
+use super::params::{XmssMtParams, XmssParams};
 use super::wots;
 
 /// Build the full Merkle tree and return (root, auth_path for leaf_idx).
@@ -160,6 +161,96 @@ pub(crate) fn xmss_root_from_sig(
     Ok(node)
 }
 
+/// Create single-layer XmssParams from MT params for use in per-layer operations.
+pub(crate) fn layer_params(mt: &XmssMtParams) -> XmssParams {
+    XmssParams {
+        n: mt.n,
+        h: mt.hp,
+        wots_len: mt.wots_len,
+        sig_bytes: 4 + mt.n + (mt.wots_len + mt.hp) * mt.n,
+        padding_len: mt.padding_len,
+    }
+}
+
+/// XMSS-MT hypertree sign (RFC 8391 Section 4.2.4).
+///
+/// Signs `msg` (n bytes, already hashed) using the multi-tree structure.
+/// Returns the concatenation of d single-tree signatures.
+pub(crate) fn hypertree_sign(
+    hasher: &XmssHasher,
+    msg: &[u8],
+    global_idx: u64,
+    mt: &XmssMtParams,
+) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+    let lp = layer_params(mt);
+    let hp = mt.hp;
+    let d = mt.d;
+    let layer_sig_len = (mt.wots_len + hp) * mt.n;
+
+    let mut leaf_idx = (global_idx & ((1u64 << hp) - 1)) as u32;
+    let mut tree_idx = global_idx >> hp;
+
+    let mut sig = Vec::with_capacity(d * layer_sig_len);
+    let mut current_msg = msg.to_vec();
+
+    for j in 0..d {
+        let mut adrs = XmssAdrs::new();
+        adrs.set_layer_addr(j as u32);
+        adrs.set_tree_addr(tree_idx);
+
+        let (layer_sig, root) = xmss_sign(hasher, &current_msg, leaf_idx, &mut adrs, &lp)?;
+        sig.extend_from_slice(&layer_sig);
+
+        current_msg = root;
+
+        if j + 1 < d {
+            leaf_idx = (tree_idx & ((1u64 << hp) - 1)) as u32;
+            tree_idx >>= hp;
+        }
+    }
+
+    Ok((sig, current_msg))
+}
+
+/// XMSS-MT hypertree verify (RFC 8391 Section 4.2.5).
+///
+/// Recovers root from multi-tree signature. Caller compares with pk_root via ct_eq.
+pub(crate) fn hypertree_verify(
+    hasher: &XmssHasher,
+    msg: &[u8],
+    sig: &[u8],
+    global_idx: u64,
+    mt: &XmssMtParams,
+) -> Result<Vec<u8>, CryptoError> {
+    let lp = layer_params(mt);
+    let hp = mt.hp;
+    let d = mt.d;
+    let layer_sig_len = (mt.wots_len + hp) * mt.n;
+
+    let mut leaf_idx = (global_idx & ((1u64 << hp) - 1)) as u32;
+    let mut tree_idx = global_idx >> hp;
+
+    let mut current_msg = msg.to_vec();
+
+    for j in 0..d {
+        let layer_sig = &sig[j * layer_sig_len..(j + 1) * layer_sig_len];
+
+        let mut adrs = XmssAdrs::new();
+        adrs.set_layer_addr(j as u32);
+        adrs.set_tree_addr(tree_idx);
+
+        let node = xmss_root_from_sig(hasher, &current_msg, layer_sig, leaf_idx, &mut adrs, &lp)?;
+        current_msg = node;
+
+        if j + 1 < d {
+            leaf_idx = (tree_idx & ((1u64 << hp) - 1)) as u32;
+            tree_idx >>= hp;
+        }
+    }
+
+    Ok(current_msg)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,13 +262,14 @@ mod tests {
     fn make_hasher() -> XmssHasher {
         XmssHasher {
             n: 32,
+            padding_len: 32,
             mode: XmssHashMode::Shake256,
             sk_seed: vec![0xAAu8; 32],
             pk_seed: vec![0xBBu8; 32],
         }
     }
 
-    fn test_params() -> &'static XmssParams {
+    fn test_params() -> XmssParams {
         get_params(XmssParamId::Shake256_10_256)
     }
 
@@ -187,8 +279,8 @@ mod tests {
         let p = test_params();
         let mut adrs1 = XmssAdrs::new();
         let mut adrs2 = XmssAdrs::new();
-        let root1 = compute_root(&h, &mut adrs1, p).unwrap();
-        let root2 = compute_root(&h, &mut adrs2, p).unwrap();
+        let root1 = compute_root(&h, &mut adrs1, &p).unwrap();
+        let root2 = compute_root(&h, &mut adrs2, &p).unwrap();
         assert_eq!(root1, root2);
         assert_eq!(root1.len(), p.n);
     }
@@ -198,7 +290,7 @@ mod tests {
         let h = make_hasher();
         let p = test_params();
         let mut adrs = XmssAdrs::new();
-        let (root, auth) = compute_root_with_auth(&h, 0, &mut adrs, p).unwrap();
+        let (root, auth) = compute_root_with_auth(&h, 0, &mut adrs, &p).unwrap();
         assert_eq!(root.len(), p.n);
         assert_eq!(auth.len(), p.h * p.n);
     }
@@ -209,8 +301,8 @@ mod tests {
         let p = test_params();
         let mut adrs1 = XmssAdrs::new();
         let mut adrs2 = XmssAdrs::new();
-        let root1 = compute_root(&h, &mut adrs1, p).unwrap();
-        let (root2, _) = compute_root_with_auth(&h, 5, &mut adrs2, p).unwrap();
+        let root1 = compute_root(&h, &mut adrs1, &p).unwrap();
+        let (root2, _) = compute_root_with_auth(&h, 5, &mut adrs2, &p).unwrap();
         assert_eq!(root1, root2);
     }
 
@@ -220,7 +312,7 @@ mod tests {
         let p = test_params();
         let msg = vec![0x42u8; p.n];
         let mut adrs = XmssAdrs::new();
-        let (sig, root) = xmss_sign(&h, &msg, 0, &mut adrs, p).unwrap();
+        let (sig, root) = xmss_sign(&h, &msg, 0, &mut adrs, &p).unwrap();
         assert_eq!(sig.len(), (p.wots_len + p.h) * p.n);
         assert_eq!(root.len(), p.n);
     }
@@ -232,9 +324,9 @@ mod tests {
         let msg = vec![0x42u8; p.n];
         let leaf_idx = 3;
         let mut adrs1 = XmssAdrs::new();
-        let (sig, root) = xmss_sign(&h, &msg, leaf_idx, &mut adrs1, p).unwrap();
+        let (sig, root) = xmss_sign(&h, &msg, leaf_idx, &mut adrs1, &p).unwrap();
         let mut adrs2 = XmssAdrs::new();
-        let recovered = xmss_root_from_sig(&h, &msg, &sig, leaf_idx, &mut adrs2, p).unwrap();
+        let recovered = xmss_root_from_sig(&h, &msg, &sig, leaf_idx, &mut adrs2, &p).unwrap();
         assert_eq!(root, recovered);
     }
 }

@@ -1,7 +1,7 @@
 //! XMSS hash function abstraction (RFC 8391 Section 5).
 //!
 //! ROBUST mode: F and H use bitmask XOR before hashing.
-//! Three hash backends: SHA-256, SHAKE128, SHAKE256.
+//! Four hash backends: SHA-256, SHA-512, SHAKE128, SHAKE256.
 
 use hitls_types::CryptoError;
 
@@ -9,15 +9,12 @@ use super::address::XmssAdrs;
 use super::params::XmssHashMode;
 
 /// Padding bytes for domain separation (RFC 8391 Section 5.1).
-/// toByte(0, 32) = 0x00...00 (32 bytes) for F
-/// toByte(1, 32) = 0x00...01 (32 bytes) for H
-/// toByte(2, 32) = 0x00...02 (32 bytes) for H_msg
-/// toByte(3, 32) = 0x00...03 (32 bytes) for PRF
-fn to_byte(val: u32, n: usize) -> Vec<u8> {
-    let mut buf = vec![0u8; n];
+/// toByte(0, padding_len) for F, toByte(1, padding_len) for H, etc.
+fn to_byte(val: u32, len: usize) -> Vec<u8> {
+    let mut buf = vec![0u8; len];
     let bytes = val.to_be_bytes();
-    let start = n.saturating_sub(4);
-    buf[start..n].copy_from_slice(&bytes[4 - (n - start)..]);
+    let start = len.saturating_sub(4);
+    buf[start..len].copy_from_slice(&bytes[4 - (len - start)..]);
     buf
 }
 
@@ -26,6 +23,12 @@ fn core_hash(mode: XmssHashMode, input: &[u8], n: usize) -> Result<Vec<u8>, Cryp
     match mode {
         XmssHashMode::Sha256 => {
             let mut h = crate::sha2::Sha256::new();
+            h.update(input)?;
+            let digest = h.finish()?;
+            Ok(digest[..n].to_vec())
+        }
+        XmssHashMode::Sha512 => {
+            let mut h = crate::sha2::Sha512::new();
             h.update(input)?;
             let digest = h.finish()?;
             Ok(digest[..n].to_vec())
@@ -46,16 +49,17 @@ fn core_hash(mode: XmssHashMode, input: &[u8], n: usize) -> Result<Vec<u8>, Cryp
 /// XMSS hash function context.
 pub(crate) struct XmssHasher {
     pub n: usize,
+    pub padding_len: usize,
     pub mode: XmssHashMode,
     pub sk_seed: Vec<u8>,
     pub pk_seed: Vec<u8>,
 }
 
 impl XmssHasher {
-    /// PRF: H(toByte(3,n) || SEED || ADRS)
+    /// PRF: H(toByte(3,padding_len) || SEED || ADRS)
     pub fn prf(&self, seed: &[u8], adrs: &XmssAdrs) -> Result<Vec<u8>, CryptoError> {
-        let pad = to_byte(3, self.n);
-        let mut input = Vec::with_capacity(self.n + seed.len() + 32);
+        let pad = to_byte(3, self.padding_len);
+        let mut input = Vec::with_capacity(self.padding_len + seed.len() + 32);
         input.extend_from_slice(&pad);
         input.extend_from_slice(seed);
         input.extend_from_slice(adrs.as_bytes());
@@ -63,48 +67,36 @@ impl XmssHasher {
     }
 
     /// PRF_keygen: Generate a WOTS+ secret key element.
-    /// PRF(SK.seed, ADRS) = H(toByte(3,n) || SK.seed || ADRS)
     pub fn prf_keygen(&self, adrs: &XmssAdrs) -> Result<Vec<u8>, CryptoError> {
         self.prf(&self.sk_seed, adrs)
     }
 
-    /// F (ROBUST): F(KEY, M ⊕ BM)
-    /// KEY = PRF(PK.seed, ADRS with km=0)
-    /// BM  = PRF(PK.seed, ADRS with km=1)
-    /// Result = H(toByte(0,n) || KEY || (M ⊕ BM))
+    /// F (ROBUST): F(KEY, M XOR BM)
     pub fn f(&self, adrs: &XmssAdrs, msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let n = self.n;
 
-        // Generate KEY
         let mut adrs_key = adrs.clone();
         adrs_key.set_key_and_mask(0);
         let key = self.prf(&self.pk_seed, &adrs_key)?;
 
-        // Generate BM
         let mut adrs_bm = adrs.clone();
         adrs_bm.set_key_and_mask(1);
         let bm = self.prf(&self.pk_seed, &adrs_bm)?;
 
-        // XOR message with bitmask
         let mut xored = Vec::with_capacity(n);
         for i in 0..n {
             xored.push(msg[i] ^ bm[i]);
         }
 
-        // Hash: toByte(0,n) || KEY || xored
-        let pad = to_byte(0, n);
-        let mut input = Vec::with_capacity(3 * n);
+        let pad = to_byte(0, self.padding_len);
+        let mut input = Vec::with_capacity(self.padding_len + n + n);
         input.extend_from_slice(&pad);
         input.extend_from_slice(&key);
         input.extend_from_slice(&xored);
         core_hash(self.mode, &input, n)
     }
 
-    /// H (ROBUST): H(KEY, left ⊕ BM0 || right ⊕ BM1)
-    /// KEY = PRF(PK.seed, ADRS with km=0)
-    /// BM0 = PRF(PK.seed, ADRS with km=1)
-    /// BM1 = PRF(PK.seed, ADRS with km=2)
-    /// Result = H(toByte(1,n) || KEY || (left ⊕ BM0) || (right ⊕ BM1))
+    /// H (ROBUST): H(KEY, left XOR BM0 || right XOR BM1)
     pub fn h(&self, adrs: &XmssAdrs, left: &[u8], right: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let n = self.n;
 
@@ -120,7 +112,6 @@ impl XmssHasher {
         adrs_bm1.set_key_and_mask(2);
         let bm1 = self.prf(&self.pk_seed, &adrs_bm1)?;
 
-        // XOR
         let mut xored = Vec::with_capacity(2 * n);
         for i in 0..n {
             xored.push(left[i] ^ bm0[i]);
@@ -129,8 +120,8 @@ impl XmssHasher {
             xored.push(right[i] ^ bm1[i]);
         }
 
-        let pad = to_byte(1, n);
-        let mut input = Vec::with_capacity(n + n + 2 * n);
+        let pad = to_byte(1, self.padding_len);
+        let mut input = Vec::with_capacity(self.padding_len + n + 2 * n);
         input.extend_from_slice(&pad);
         input.extend_from_slice(&key);
         input.extend_from_slice(&xored);
@@ -138,7 +129,7 @@ impl XmssHasher {
     }
 
     /// H_msg: Randomized message hash.
-    /// H(toByte(2,n) || R || root || toByte(idx, n) || msg)
+    /// H(toByte(2,padding_len) || R || root || toByte(idx, n) || msg)
     pub fn h_msg(
         &self,
         r: &[u8],
@@ -147,7 +138,7 @@ impl XmssHasher {
         msg: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
         let n = self.n;
-        let pad = to_byte(2, n);
+        let pad = to_byte(2, self.padding_len);
         let idx_bytes = {
             let mut buf = vec![0u8; n];
             let be = idx.to_be_bytes();
@@ -157,7 +148,7 @@ impl XmssHasher {
             buf
         };
 
-        let mut input = Vec::with_capacity(4 * n + msg.len());
+        let mut input = Vec::with_capacity(self.padding_len + 2 * n + n + msg.len());
         input.extend_from_slice(&pad);
         input.extend_from_slice(r);
         input.extend_from_slice(root);
@@ -167,10 +158,9 @@ impl XmssHasher {
     }
 
     /// PRF_msg: Generate randomness for signing.
-    /// PRF(SK.prf, idx_bytes || msg)
     pub fn prf_msg(&self, sk_prf: &[u8], idx: u64, msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let n = self.n;
-        let pad = to_byte(3, n);
+        let pad = to_byte(3, self.padding_len);
         let idx_bytes = {
             let mut buf = vec![0u8; 32];
             let be = idx.to_be_bytes();
@@ -178,7 +168,7 @@ impl XmssHasher {
             buf
         };
 
-        let mut input = Vec::with_capacity(n + 32 + sk_prf.len() + msg.len());
+        let mut input = Vec::with_capacity(self.padding_len + 32 + sk_prf.len() + msg.len());
         input.extend_from_slice(&pad);
         input.extend_from_slice(sk_prf);
         input.extend_from_slice(&idx_bytes);
@@ -194,31 +184,39 @@ mod tests {
 
     #[test]
     fn test_to_byte_padding() {
-        // toByte(0, 32) = all zeros
         let b0 = super::to_byte(0, 32);
         assert_eq!(b0.len(), 32);
         assert!(b0.iter().all(|&x| x == 0));
 
-        // toByte(1, 32) = 31 zeros + 0x01
         let b1 = super::to_byte(1, 32);
         assert_eq!(b1.len(), 32);
         assert!(b1[..31].iter().all(|&x| x == 0));
         assert_eq!(b1[31], 1);
 
-        // toByte(3, 32) = 31 zeros + 0x03
         let b3 = super::to_byte(3, 32);
         assert_eq!(b3[31], 3);
 
-        // toByte(256, 32) = value 0x100 in big-endian
         let b256 = super::to_byte(256, 32);
         assert_eq!(b256[30], 1);
         assert_eq!(b256[31], 0);
+
+        // 4-byte padding (for n=24 / 192-bit variants)
+        let b4 = super::to_byte(3, 4);
+        assert_eq!(b4.len(), 4);
+        assert_eq!(b4, vec![0, 0, 0, 3]);
+
+        // 64-byte padding (for n=64 / 512-bit variants)
+        let b64 = super::to_byte(2, 64);
+        assert_eq!(b64.len(), 64);
+        assert_eq!(b64[63], 2);
+        assert!(b64[..63].iter().all(|&x| x == 0));
     }
 
     #[test]
     fn test_xmss_hasher_prf_different_addresses() {
         let hasher = XmssHasher {
             n: 32,
+            padding_len: 32,
             mode: XmssHashMode::Sha256,
             sk_seed: vec![0x11u8; 32],
             pk_seed: vec![0x22u8; 32],
@@ -242,6 +240,7 @@ mod tests {
     fn test_xmss_hasher_f_deterministic() {
         let hasher = XmssHasher {
             n: 32,
+            padding_len: 32,
             mode: XmssHashMode::Shake128,
             sk_seed: vec![0xAAu8; 32],
             pk_seed: vec![0xBBu8; 32],
@@ -259,6 +258,7 @@ mod tests {
     fn test_xmss_hasher_h_msg_idx_sensitivity() {
         let hasher = XmssHasher {
             n: 32,
+            padding_len: 32,
             mode: XmssHashMode::Sha256,
             sk_seed: vec![0xAAu8; 32],
             pk_seed: vec![0xBBu8; 32],
@@ -267,12 +267,10 @@ mod tests {
         let root = vec![0x22u8; 32];
         let msg = b"test message";
 
-        // Same inputs → deterministic
         let h1 = hasher.h_msg(&r, &root, 0, msg).unwrap();
         let h2 = hasher.h_msg(&r, &root, 0, msg).unwrap();
         assert_eq!(h1, h2);
 
-        // Different idx → different output
         let h3 = hasher.h_msg(&r, &root, 1, msg).unwrap();
         assert_ne!(h1, h3, "different idx should produce different h_msg");
     }
@@ -281,6 +279,7 @@ mod tests {
     fn test_xmss_hasher_prf_msg_output() {
         let hasher = XmssHasher {
             n: 32,
+            padding_len: 32,
             mode: XmssHashMode::Shake256,
             sk_seed: vec![0xAAu8; 32],
             pk_seed: vec![0xBBu8; 32],
@@ -290,11 +289,9 @@ mod tests {
         let out = hasher.prf_msg(&sk_prf, 42, b"hello").unwrap();
         assert_eq!(out.len(), 32);
 
-        // Deterministic
         let out2 = hasher.prf_msg(&sk_prf, 42, b"hello").unwrap();
         assert_eq!(out, out2);
 
-        // Different idx → different output
         let out3 = hasher.prf_msg(&sk_prf, 43, b"hello").unwrap();
         assert_ne!(out, out3);
     }
@@ -303,6 +300,7 @@ mod tests {
     fn test_xmss_hasher_prf_determinism() {
         let hasher = XmssHasher {
             n: 32,
+            padding_len: 32,
             mode: XmssHashMode::Shake256,
             sk_seed: vec![0xAAu8; 32],
             pk_seed: vec![0xBBu8; 32],
@@ -316,7 +314,6 @@ mod tests {
         assert_eq!(prf1, prf2);
         assert_eq!(prf1.len(), 32);
 
-        // prf_keygen uses sk_seed
         let pk1 = hasher.prf_keygen(&adrs).unwrap();
         let pk2 = hasher.prf_keygen(&adrs).unwrap();
         assert_eq!(pk1, pk2);
@@ -327,6 +324,7 @@ mod tests {
     fn test_xmss_hasher_f_h_output_lengths() {
         let hasher = XmssHasher {
             n: 32,
+            padding_len: 32,
             mode: XmssHashMode::Sha256,
             sk_seed: vec![0xAAu8; 32],
             pk_seed: vec![0xBBu8; 32],
@@ -335,20 +333,53 @@ mod tests {
         let adrs = XmssAdrs::new();
         let msg = vec![0x55u8; 32];
 
-        // F output = n bytes
         let f_out = hasher.f(&adrs, &msg).unwrap();
         assert_eq!(f_out.len(), 32);
 
-        // H output = n bytes (takes left || right, each n bytes)
         let left = vec![0x11u8; 32];
         let right = vec![0x22u8; 32];
         let h_out = hasher.h(&adrs, &left, &right).unwrap();
         assert_eq!(h_out.len(), 32);
 
-        // h_msg output = n bytes
         let r = vec![0x33u8; 32];
         let root = vec![0x44u8; 32];
         let hm_out = hasher.h_msg(&r, &root, 0, b"test").unwrap();
         assert_eq!(hm_out.len(), 32);
+    }
+
+    #[test]
+    fn test_xmss_hasher_n64_sha512() {
+        let hasher = XmssHasher {
+            n: 64,
+            padding_len: 64,
+            mode: XmssHashMode::Sha512,
+            sk_seed: vec![0xAAu8; 64],
+            pk_seed: vec![0xBBu8; 64],
+        };
+        let adrs = XmssAdrs::new();
+        let out = hasher.prf_keygen(&adrs).unwrap();
+        assert_eq!(out.len(), 64);
+
+        let msg = vec![0x55u8; 64];
+        let f_out = hasher.f(&adrs, &msg).unwrap();
+        assert_eq!(f_out.len(), 64);
+    }
+
+    #[test]
+    fn test_xmss_hasher_n24_truncated() {
+        let hasher = XmssHasher {
+            n: 24,
+            padding_len: 4,
+            mode: XmssHashMode::Sha256,
+            sk_seed: vec![0xAAu8; 24],
+            pk_seed: vec![0xBBu8; 24],
+        };
+        let adrs = XmssAdrs::new();
+        let out = hasher.prf_keygen(&adrs).unwrap();
+        assert_eq!(out.len(), 24);
+
+        let msg = vec![0x55u8; 24];
+        let f_out = hasher.f(&adrs, &msg).unwrap();
+        assert_eq!(f_out.len(), 24);
     }
 }

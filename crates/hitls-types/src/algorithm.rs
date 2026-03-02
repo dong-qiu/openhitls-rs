@@ -187,7 +187,7 @@ pub enum SlhDsaParamId {
     Shake256f,
 }
 
-/// XMSS parameter set identifiers (RFC 8391, single-tree).
+/// XMSS parameter set identifiers (RFC 8391, single-tree, 21 variants).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum XmssParamId {
     /// XMSS-SHA2_10_256: SHA-256, h=10, n=32 (1024 signatures)
@@ -196,6 +196,12 @@ pub enum XmssParamId {
     Sha2_16_256,
     /// XMSS-SHA2_20_256: SHA-256, h=20, n=32 (1048576 signatures)
     Sha2_20_256,
+    /// XMSS-SHA2_10_512: SHA-512, h=10, n=64
+    Sha2_10_512,
+    /// XMSS-SHA2_16_512: SHA-512, h=16, n=64
+    Sha2_16_512,
+    /// XMSS-SHA2_20_512: SHA-512, h=20, n=64
+    Sha2_20_512,
     /// XMSS-SHAKE_10_256: SHAKE128, h=10, n=32
     Shake128_10_256,
     /// XMSS-SHAKE_16_256: SHAKE128, h=16, n=32
@@ -208,6 +214,92 @@ pub enum XmssParamId {
     Shake256_16_256,
     /// XMSS-SHAKE256_20_256: SHAKE256, h=20, n=32
     Shake256_20_256,
+    /// XMSS-SHAKE256_10_512: SHAKE256, h=10, n=64
+    Shake256_10_512,
+    /// XMSS-SHAKE256_16_512: SHAKE256, h=16, n=64
+    Shake256_16_512,
+    /// XMSS-SHAKE256_20_512: SHAKE256, h=20, n=64
+    Shake256_20_512,
+    /// XMSS-SHA2_10_192: SHA-256 truncated, h=10, n=24
+    Sha2_10_192,
+    /// XMSS-SHA2_16_192: SHA-256 truncated, h=16, n=24
+    Sha2_16_192,
+    /// XMSS-SHA2_20_192: SHA-256 truncated, h=20, n=24
+    Sha2_20_192,
+    /// XMSS-SHAKE256_10_192: SHAKE256, h=10, n=24
+    Shake256_10_192,
+    /// XMSS-SHAKE256_16_192: SHAKE256, h=16, n=24
+    Shake256_16_192,
+    /// XMSS-SHAKE256_20_192: SHAKE256, h=20, n=24
+    Shake256_20_192,
+}
+
+/// XMSS-MT multi-tree parameter set identifiers (RFC 8391, 56 variants).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum XmssMtParamId {
+    // SHA2-256 (n=32): 8 (h,d) combos
+    Sha2_20_2_256,
+    Sha2_20_4_256,
+    Sha2_40_2_256,
+    Sha2_40_4_256,
+    Sha2_40_8_256,
+    Sha2_60_3_256,
+    Sha2_60_6_256,
+    Sha2_60_12_256,
+    // SHA2-512 (n=64)
+    Sha2_20_2_512,
+    Sha2_20_4_512,
+    Sha2_40_2_512,
+    Sha2_40_4_512,
+    Sha2_40_8_512,
+    Sha2_60_3_512,
+    Sha2_60_6_512,
+    Sha2_60_12_512,
+    // SHAKE128-256 (n=32)
+    Shake128_20_2_256,
+    Shake128_20_4_256,
+    Shake128_40_2_256,
+    Shake128_40_4_256,
+    Shake128_40_8_256,
+    Shake128_60_3_256,
+    Shake128_60_6_256,
+    Shake128_60_12_256,
+    // SHAKE256-512 (n=64)
+    Shake256_20_2_512,
+    Shake256_20_4_512,
+    Shake256_40_2_512,
+    Shake256_40_4_512,
+    Shake256_40_8_512,
+    Shake256_60_3_512,
+    Shake256_60_6_512,
+    Shake256_60_12_512,
+    // SHA2-192 (n=24)
+    Sha2_20_2_192,
+    Sha2_20_4_192,
+    Sha2_40_2_192,
+    Sha2_40_4_192,
+    Sha2_40_8_192,
+    Sha2_60_3_192,
+    Sha2_60_6_192,
+    Sha2_60_12_192,
+    // SHAKE256-256 (n=32)
+    Shake256_20_2_256,
+    Shake256_20_4_256,
+    Shake256_40_2_256,
+    Shake256_40_4_256,
+    Shake256_40_8_256,
+    Shake256_60_3_256,
+    Shake256_60_6_256,
+    Shake256_60_12_256,
+    // SHAKE256-192 (n=24)
+    Shake256_20_2_192,
+    Shake256_20_4_192,
+    Shake256_40_2_192,
+    Shake256_40_4_192,
+    Shake256_40_8_192,
+    Shake256_60_3_192,
+    Shake256_60_6_192,
+    Shake256_60_12_192,
 }
 
 /// FrodoKEM parameter set identifiers.

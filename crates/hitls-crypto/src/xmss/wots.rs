@@ -246,6 +246,7 @@ mod tests {
     fn test_chain_zero_steps_identity() {
         let hasher = XmssHasher {
             n: 32,
+            padding_len: 32,
             mode: XmssHashMode::Shake256,
             sk_seed: vec![0xAAu8; 32],
             pk_seed: vec![0xBBu8; 32],
@@ -262,6 +263,7 @@ mod tests {
         // With a single n-byte chunk, l_tree returns it unchanged (loop body not entered)
         let hasher = XmssHasher {
             n: 32,
+            padding_len: 32,
             mode: XmssHashMode::Shake256,
             sk_seed: vec![0xAAu8; 32],
             pk_seed: vec![0xBBu8; 32],
@@ -270,7 +272,7 @@ mod tests {
         let single = vec![0x77u8; 32];
         let mut adrs = XmssAdrs::new();
         adrs.set_type(XmssAdrsType::LTree);
-        let result = l_tree(&hasher, &single, &mut adrs, p).unwrap();
+        let result = l_tree(&hasher, &single, &mut adrs, &p).unwrap();
         assert_eq!(result, single);
     }
 
@@ -278,6 +280,7 @@ mod tests {
     fn test_wots_sign_pk_from_sig_roundtrip() {
         let hasher = XmssHasher {
             n: 32,
+            padding_len: 32,
             mode: XmssHashMode::Shake256,
             sk_seed: vec![0xAAu8; 32],
             pk_seed: vec![0xBBu8; 32],
@@ -288,17 +291,17 @@ mod tests {
 
         // Generate WOTS+ public key
         let mut adrs1 = XmssAdrs::new();
-        let pk = wots_pk_gen(&hasher, ots_addr, &mut adrs1, p).unwrap();
+        let pk = wots_pk_gen(&hasher, ots_addr, &mut adrs1, &p).unwrap();
         assert_eq!(pk.len(), p.n);
 
         // Sign message
         let mut adrs2 = XmssAdrs::new();
-        let sig = wots_sign(&hasher, &msg, ots_addr, &mut adrs2, p).unwrap();
+        let sig = wots_sign(&hasher, &msg, ots_addr, &mut adrs2, &p).unwrap();
         assert_eq!(sig.len(), p.wots_len * p.n);
 
         // Recover public key from signature
         let mut adrs3 = XmssAdrs::new();
-        let recovered = wots_pk_from_sig(&hasher, &sig, &msg, ots_addr, &mut adrs3, p).unwrap();
+        let recovered = wots_pk_from_sig(&hasher, &sig, &msg, ots_addr, &mut adrs3, &p).unwrap();
         assert_eq!(pk, recovered);
     }
 }

@@ -2,7 +2,7 @@
 
 A production-grade cryptographic and TLS library in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **100% C→Rust feature parity achieved** — 3845 tests, 52 fuzz targets, 5000+ Wycheproof vectors
+> **100% C→Rust feature parity achieved** — 3862 tests, 52 fuzz targets, 5000+ Wycheproof vectors
 
 ## Feature Highlights
 
@@ -23,7 +23,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | CLI Tools | ~8K | ~2.5K | **100%** | 16 commands (dgst, genpkey, x509, s-client, s-server, prime, kdf, etc.) |
 | FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
-| Test Infrastructure | ~20K | ~3.5K | **95%** | 3845 tests + Wycheproof + 52 fuzz targets (358 corpus) + security audit |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | 3862 tests + Wycheproof + 52 fuzz targets (358 corpus) + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
 
 ### Not Migrated (by design)
@@ -92,7 +92,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | ML-KEM (Kyber) | `mlkem` | 512 / 768 / 1024 |
 | ML-DSA (Dilithium) | `mldsa` | 44 / 65 / 87 |
 | SLH-DSA (SPHINCS+) | `slh-dsa` | FIPS 205 |
-| XMSS | `xmss` | RFC 8391 |
+| XMSS | `xmss` | RFC 8391 (21 single-tree + 56 multi-tree parameter sets) |
 | FrodoKEM | `frodokem` | 640/976/1344 × SHAKE/AES |
 | Classic McEliece | `mceliece` | 6688128 / 6960119 / 8192128 |
 | Hybrid KEM | `hybridkem` | X25519/P-256/P-384/P-521 × ML-KEM-512/768/1024 (12 variants) |
@@ -260,7 +260,7 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3845 tests, 22 ignored)
+# Run all tests (3862 tests, 22 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate

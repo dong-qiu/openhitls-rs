@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I84 (84 phases)
+- Implementation: I1–I85 (85 phases)
 - Testing: T1–T70 (68 phases)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P62 (62 phases)
@@ -243,6 +243,7 @@ Category summary:
 | 231 | P66 | Perf | Fe448 square_times + sub_fast Cleanup | 2026-03-02 |
 | 232 | P67 | Perf | BigNum Fused CIOS Squaring | 2026-03-02 |
 | 233 | P68 | Perf | RSA CRT Montgomery Optimization | 2026-03-02 |
+| 234 | I85 | Impl | XMSS-MT Multi-Tree + Extended XMSS Parameter Sets | 2026-03-02 |
 
 ---
 
@@ -12704,3 +12705,74 @@ Feature flag combos: 39→47.
 - Fuzz targets: 52 (46→52), corpus seeds: 358 (322→358)
 - CI feature flag combos: 47 (39→47)
 - Miri runs: 9 (6→9)
+
+---
+
+## Phase I85 — XMSS-MT Multi-Tree + Extended XMSS Parameter Sets (2026-03-02)
+
+### Summary
+
+Extended XMSS from 9 to 21 single-tree parameter sets and added full XMSS-MT (multi-tree) support with 56 parameter variants. Implemented SHA-512 hash backend, variable-length padding for n=24/32/64, hypertree sign/verify operations, and the XmssMtKeyPair API.
+
+### Part A: Extended Single-Tree Parameter Sets
+
+- Extended `XmssParamId` from 9 to 21 variants (+12 new):
+  - SHA-512 with n=64: XMSS_SHA2_64_10, XMSS_SHA2_64_16, XMSS_SHA2_64_20
+  - SHAKE256 with n=64: XMSS_SHAKE256_64_10, XMSS_SHAKE256_64_16, XMSS_SHAKE256_64_20
+  - SHA-256 truncated with n=24: XMSS_SHA2_24_10, XMSS_SHA2_24_16, XMSS_SHA2_24_20
+  - SHAKE256 with n=24: XMSS_SHAKE256_24_10, XMSS_SHAKE256_24_16, XMSS_SHAKE256_24_20
+- 4 tests for extended single-tree keygen/sign/verify
+
+### Part B: XMSS-MT Multi-Tree Parameter Sets
+
+- Added `XmssMtParamId` enum with 56 variants (7 hash families x 8 h/d combos):
+  - SHA-256 n=32: h/d = 20/2, 20/4, 40/2, 40/4, 40/8, 60/3, 60/6, 60/12
+  - SHA-512 n=64: same 8 h/d combos
+  - SHAKE128 n=32: same 8 h/d combos
+  - SHAKE256 n=32: same 8 h/d combos
+  - SHAKE256 n=64: same 8 h/d combos
+  - SHA-256 truncated n=24: same 8 h/d combos
+  - SHAKE256 truncated n=24: same 8 h/d combos
+- 3 parameter validation tests
+
+### Part C: SHA-512 Hash Backend + Variable Padding
+
+- Added SHA-512 hash backend alongside existing SHA-256/SHAKE backends
+- Generalized `padding_len` for variable n values (24, 32, 64 bytes)
+- 2 hash tests for SHA-512 backend correctness
+
+### Part D: Hypertree Operations + XmssMtKeyPair
+
+- Implemented `hypertree_sign()` for multi-tree signing across d layers
+- Implemented `hypertree_verify()` for multi-tree verification
+- Added `XmssMtKeyPair` struct with `generate()`, `sign()`, `verify()`, `remaining_signatures()`
+- 8 XMSS-MT keygen/sign/verify/remaining tests
+
+### Files Modified
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/xmss/algorithm.rs` | Modified | SHA-512 hash backend, XmssMtKeyPair with generate/sign/verify/remaining_signatures, hypertree_sign/hypertree_verify |
+| `crates/hitls-crypto/src/xmss/params.rs` | Modified | XmssParamId extended to 21 variants, XmssMtParamId enum with 56 variants |
+| `crates/hitls-crypto/src/xmss/hash.rs` | Modified | SHA-512 hash functions, padding_len generalization for variable n (24/32/64) |
+| `crates/hitls-crypto/src/xmss/tree.rs` | Modified | Hypertree sign/verify multi-layer operations |
+| `crates/hitls-crypto/src/xmss/mod.rs` | Modified | Public API exports for XmssMtKeyPair, XmssMtParamId |
+| `crates/hitls-crypto/src/xmss/wots.rs` | Modified | Test fixes for extended parameter sets |
+
+### Test Count (Post I85)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1387 (14 ignored) |
+| hitls-tls | 1414 |
+| hitls-pki | 405 |
+| hitls-bignum | 90 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 33 |
+| hitls-cli | 166 (5 ignored) |
+| hitls-integration-tests | 260 (2 ignored) |
+| **Total** | **3862 (22 ignored)** |
+
+### Build Status (Post I85)
+- `cargo test --workspace --all-features`: 3,840 passed, 0 failed, 22 ignored (3,862 total)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean

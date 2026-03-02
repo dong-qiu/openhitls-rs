@@ -3799,3 +3799,15 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - T70-C: +8 CI feature flag tests — sm_tls13, dtlcp, tls13+async, cert-compression, cms, pkcs12, hybridkem, hpke; total 39→47 combos
 - T70-D: +3 Miri runs — sha2::tests, sha3::tests, chacha20::tests (with SIMD skip patterns); total 6→9 runs
 - All 3,823 tests pass (3,845 total), 22 ignored, 0 clippy/fmt warnings
+
+---
+
+## Phase I85 — XMSS-MT Multi-Tree + Extended XMSS Parameter Sets (2026-03-02)
+
+**Prompt**: Implement Phase I85 — XMSS-MT multi-tree support and extended XMSS parameter sets. Extend XMSS from 9 to 21 single-tree parameter sets (SHA-512/SHAKE256 n=64, SHA-256/SHAKE256 n=24) and add 56 XMSS-MT multi-tree parameter sets with hypertree sign/verify. Add XmssMtKeyPair struct.
+
+**Result**:
+- Extended XMSS single-tree from 9 to 21 parameter sets: added SHA-512 n=64 (3 sets), SHAKE256 n=64 (3 sets), SHA-256 n=24 (3 sets), SHAKE256 n=24 (3 sets)
+- Added 56 XMSS-MT multi-tree parameter sets with hypertree sign/verify
+- New `XmssMtKeyPair` struct for multi-tree key management
+- +17 tests (3,862 total), 22 ignored, 0 clippy/fmt warnings

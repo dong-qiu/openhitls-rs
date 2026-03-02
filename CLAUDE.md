@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phases I1–I84, T1–T70, R1–R12, P1–P68 complete (3845 tests, 22 ignored)
+- **Status**: Phases I1–I85, T1–T70, R1–R12, P1–P68 complete (3862 tests, 22 ignored)
 
 ## Workspace Structure
 
@@ -18,7 +18,7 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error enums
 │   ├── hitls-utils/     # Hex, ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (CIOS Montgomery, Miller-Rabin, prime generation, hex/dec string) (90 tests, 1 ignored)
-│   ├── hitls-crypto/    # Cryptographic algorithms (feature-gated): AES, SM4, ChaCha20, SHA-2/3, SM3, HMAC, RSA, ECC, Ed25519/448, X25519/448, DH, DSA, SM2, SM9, PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), HybridKEM (12 variants), DRBG, FIPS/CMVP, entropy health, hardware AES/SHA-2/GHASH/ChaCha20, P-256/P-384/P-521 fast paths, SM2 fast path, ML-KEM NEON NTT, ML-DSA NEON NTT, SM4 T-table, SHA-512 HW accel, Ed25519/Ed448 precomputed tables, Keccak SHA-3 HW accel, P-256/P-384/P-521 scalar fields, HPKE full RFC 9180 (4 KEMs/3 KDFs/4 AEADs/4 modes) (1370 tests, 14 ignored)
+│   ├── hitls-crypto/    # Cryptographic algorithms (feature-gated): AES, SM4, ChaCha20, SHA-2/3, SM3, HMAC, RSA, ECC, Ed25519/448, X25519/448, DH, DSA, SM2, SM9, PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS+XMSS-MT/FrodoKEM/McEliece), HybridKEM (12 variants), DRBG, FIPS/CMVP, entropy health, hardware AES/SHA-2/GHASH/ChaCha20, P-256/P-384/P-521 fast paths, SM2 fast path, ML-KEM NEON NTT, ML-DSA NEON NTT, SM4 T-table, SHA-512 HW accel, Ed25519/Ed448 precomputed tables, Keccak SHA-3 HW accel, P-256/P-384/P-521 scalar fields, HPKE full RFC 9180 (4 KEMs/3 KDFs/4 AEADs/4 modes) (1387 tests, 14 ignored)
 │   ├── hitls-tls/       # TLS 1.3/1.2 (91 cipher suites), DTLS 1.2, TLCP, DTLCP; 10 connection types (5 sync + 5 async via tokio); 15 TLS extensions; 10 callbacks; session cache, hostname verification, renegotiation, GREASE, custom extensions, NSS key logging, middlebox compat (1414 tests)
 │   ├── hitls-pki/       # X.509, PKCS#8 (incl. Encrypted PBES2), PKCS#12, CMS (SignedData/EnvelopedData/EncryptedData/DigestedData/AuthenticatedData), CRL builder, hostname verification (405 tests)
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass (33 tests)
@@ -34,11 +34,11 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3845 tests, 22 ignored)
+# Run all tests (3862 tests, 22 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1370 tests (14 ignored)
+cargo test -p hitls-crypto --all-features   # 1387 tests (14 ignored)
 cargo test -p hitls-tls --all-features      # 1414 tests
 
 cargo test -p hitls-pki --all-features      # 405 tests
@@ -132,7 +132,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases I1–I84, T1–T70, R1–R12, P1–P68 complete (3845 tests, 22 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
+Phases I1–I85, T1–T70, R1–R12, P1–P68 complete (3862 tests, 22 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
 
 ### Completed Phases (Summary)
 
@@ -231,5 +231,6 @@ Key milestones:
 - Phase T69: Quality safety net P0 — Miri CI expansion (+mlkem::ntt + mldsa::ntt + modes::gcm, skip NEON), feature flag isolation +12 tests (sha1/sha3/ecdh/x25519/x448/hkdf/pbkdf2/sm9/frodokem/mceliece/drbg/fips + dtls12 + pki + auth; fix `aes,gcm`→`aes,modes`), +10 proptest blocks (DH commutativity, DSA sign/verify + tamper, Ed448 sign/verify + different-key, SM2 sign/verify + encrypt/decrypt, SM9 sign/verify, SLH-DSA sign/verify + tamper). Fix ML-DSA tampered_sig → wrong_message proptest. QUALITY_REPORT D27 mostly closed, D29–D31 closed. Total: 3731 (22 ignored).
 - Phase T70: Quality safety net P1 — +6 fuzz targets (SHA-2/SHA-3/SM3/SM4/DH/ECC point, 46→52 targets, +36 corpus seeds 322→358), +8 proptest blocks (SHA3 incremental+SHAKE128, CBC-MAC-SM4 incremental, FrodoKEM roundtrip, HybridKEM roundtrip, HMAC-DRBG determinism, ASN.1 integer+octet string roundtrip, SM3 incremental, X448 DH commutativity), +8 CI feature flag tests (sm_tls13/dtlcp/tls13+async/cert-compression/cms/pkcs12/hybridkem/hpke), +3 Miri runs (sha2/sha3/chacha20). Total: 3845 (22 ignored).
 - Phase I84: CLI prime/kdf commands — BigNum hex/dec string conversions (`from_hex_str`/`to_hex_str`/`from_dec_str`/`to_dec_str`), `gen_prime(bits, safe)`, `pbkdf2_with_hmac()` generalization, CLI `prime` (generate/check) and `kdf` (PBKDF2, 6 MAC options). +24 tests (10 bignum, 4 pbkdf2, 14 CLI). Total: 3845 (22 ignored).
+- Phase I85: XMSS-MT Multi-Tree + Extended XMSS Parameter Sets — XmssParamId 9→21 single-tree variants (+12: SHA-512 n=64, SHAKE256 n=64, SHA-256 truncated n=24, SHAKE256 n=24), XmssMtParamId 56 multi-tree variants (7 hash families × 8 h/d combos), SHA-512 hash backend, padding_len generalization for variable n, hypertree_sign/hypertree_verify, XmssMtKeyPair struct. +17 tests. Total: 3862 (22 ignored).
 
 See `DEV_LOG.md` for detailed phase tables (including test, refactoring, and performance phases) and `PROMPT_LOG.md` for prompt/response log.
