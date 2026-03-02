@@ -1165,8 +1165,17 @@ fn test_tls13_early_data_max_size_negotiation() {
         let mut conn = TlsServerConnection::new(stream, server_config2);
         conn.handshake().unwrap();
         let mut buf = [0u8; 128];
+        // Read and echo: early data + post-handshake may arrive as 1 or 2 reads
         let n = conn.read(&mut buf).unwrap();
         conn.write(&buf[..n]).unwrap();
+        // Drain any remaining app data until "done" sentinel
+        loop {
+            let n = conn.read(&mut buf).unwrap();
+            if &buf[..n] == b"done" {
+                break;
+            }
+            conn.write(&buf[..n]).unwrap();
+        }
     });
 
     let client_config2 = TlsConfig::builder()
@@ -1205,6 +1214,7 @@ fn test_tls13_early_data_max_size_negotiation() {
     // or just the first chunk depending on read timing.
     assert!(n > 0, "should receive echoed data");
 
+    conn2.write(b"done").unwrap();
     let _ = conn2.shutdown();
     server_handle2.join().unwrap();
 }
