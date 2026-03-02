@@ -1,12 +1,12 @@
 # Architecture Analysis Report — openHiTLS-rs
 
-> Generated: 2026-02-20 | Branch: `refactoring` | Commit: `33eae3a`
+> Generated: 2026-02-20 | Updated: 2026-03-02 | Branch: `main`
 
 ---
 
 ## 1. Executive Summary
 
-openHiTLS-rs is a 121,589-line pure Rust rewrite of the C-based openHiTLS library, organized as a Cargo workspace with 8 crates. The codebase has achieved 100% C-to-Rust feature parity with 2,544 tests passing, zero clippy warnings, and comprehensive algorithm coverage spanning classical, modern, and post-quantum cryptography.
+openHiTLS-rs is a pure Rust rewrite of the C-based openHiTLS library, organized as a Cargo workspace with 8 crates. The codebase has achieved 100% C-to-Rust feature parity with 3,699 tests passing (22 ignored), zero clippy warnings, and comprehensive algorithm coverage spanning classical, modern, and post-quantum cryptography.
 
 **Architecture Verdict**: The codebase has a clean layered dependency hierarchy with no circular dependencies and strong security practices (zeroize, constant-time, minimal unsafe). However, rapid feature-parity development has introduced significant structural debt: code duplication across protocol variants (~6,000+ lines of sync/async mirroring), PKI encoding helper proliferation (24 duplicated functions), oversized monolithic files (7,324-line connection.rs), and double-indirection dynamic dispatch in cryptographic hot paths. A targeted refactoring effort can reduce total code volume by an estimated 8-12% while improving maintainability and performance.
 
@@ -23,10 +23,10 @@ openHiTLS-rs is a 121,589-line pure Rust rewrite of the C-based openHiTLS librar
 | Workspace crates | 8 + integration test crate |
 | External dependencies | 11 unique |
 | Feature flags | 50+ |
-| Test count | 2,544 (40 ignored) |
-| Fuzz targets | 10 |
-| Benchmark groups | 8 |
-| Unsafe blocks | 16 (confined to 3 files) |
+| Test count | 3,721 (22 ignored) |
+| Fuzz targets | 46 |
+| Benchmark groups | 59 |
+| Unsafe blocks | ~44 (confined to AES-NI, AES-NEON, SHA-2 HW, GHASH HW, ChaCha20 SIMD, McEliece) |
 | Dynamic dispatch sites | 129 `Box<dyn ...>` |
 | Suppressed warnings | 47 `#[allow(...)]` |
 
@@ -37,7 +37,7 @@ openHiTLS-rs is a 121,589-line pure Rust rewrite of the C-based openHiTLS librar
 | hitls-tls | 55 | 60,950 | 50.1% | 1,156 |
 | hitls-crypto | 120 | 36,066 | 29.7% | 619 + 15 Wycheproof |
 | hitls-pki | 13 | 14,487 | 11.9% | 349 |
-| hitls-cli | 17 | 3,618 | 3.0% | 117 |
+| hitls-cli | 19 | ~4,000 | 3.0% | 166 |
 | hitls-bignum | 8 | 1,934 | 1.6% | 49 |
 | hitls-utils | 8 | 1,864 | 1.5% | 53 |
 | hitls-auth | 4 | 1,577 | 1.3% | 33 |
@@ -93,7 +93,7 @@ openHiTLS-rs is a 121,589-line pure Rust rewrite of the C-based openHiTLS librar
 2. **Utilities**: `hitls-utils` (ASN.1, Base64, PEM, OID), `hitls-bignum` (big integer math)
 3. **Cryptography**: `hitls-crypto` (48 algorithm modules, 36 feature flags)
 4. **Protocol**: `hitls-tls` (5 TLS protocol variants), `hitls-pki` (X.509/CMS/PKCS)
-5. **Application**: `hitls-auth` (OTP/SPAKE2+/PrivacyPass), `hitls-cli` (14 commands)
+5. **Application**: `hitls-auth` (OTP/SPAKE2+/PrivacyPass), `hitls-cli` (16 commands)
 
 **Key Properties**:
 - No circular dependencies
@@ -136,7 +136,7 @@ openHiTLS-rs is a 121,589-line pure Rust rewrite of the C-based openHiTLS librar
 | Asymmetric | RSA/ECC/ECDSA/ECDH/DSA/Ed25519/Ed448/X25519/X448 | ~6,500 | `Signer`/`Verifier`/`KeyAgreement` traits |
 | PQC | ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece/HybridKEM | ~8,000 | `Kem` trait; NTT-based polynomial arithmetic |
 | Pairing | SM9 | ~2,300 | Field tower: Fp → Fp2 → Fp4 → Fp12 |
-| KDF/DRBG | HKDF/PBKDF2/Scrypt/CTR-DRBG/HMAC-DRBG/Hash-DRBG | ~2,600 | `Kdf` trait; 4 independent DRBG implementations |
+| KDF/DRBG | HKDF/PBKDF2/Scrypt/CTR-DRBG/HMAC-DRBG/Hash-DRBG/HPKE | ~3,800 | `Kdf` trait; 4 DRBG implementations; HPKE full RFC 9180 (4 KEMs, 3 KDFs, 4 AEADs, 4 modes) |
 | FIPS/Entropy | FIPS state machine, KAT, PCT, health testing | ~1,700 | State machine: PreOperational → SelfTesting → Operational |
 
 **Core Traits** (`provider.rs`, 145 lines — 11 traits):

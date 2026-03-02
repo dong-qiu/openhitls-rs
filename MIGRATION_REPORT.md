@@ -1,6 +1,6 @@
 # openHiTLS C→Rust Migration Report
 
-> **Generated**: 2026-02-20 | **Updated**: 2026-02-25 | **Status**: 100% feature parity + HW acceleration | **Tests**: 3,021 pass (50 ignored)
+> **Generated**: 2026-02-20 | **Updated**: 2026-03-02 | **Status**: 100% feature parity + HW acceleration | **Tests**: 3,699 pass (22 ignored)
 
 ## 1. Executive Summary
 
@@ -16,8 +16,8 @@ openHiTLS-rs is a complete rewrite of [openHiTLS](https://gitee.com/openhitls/op
 | TLS cipher suites | 91 | 91 | **100%** |
 | Protocol variants | 5 (TLS1.3/1.2/DTLS/TLCP/DTLCP) | 5 | **100%** |
 | Connection types | 5 (sync only) | 10 (5 sync + 5 async) | **200%** |
-| CLI commands | 14 | 16 | **114%** |
-| Test cases | ~189K LOC (SDV framework) | 3,021 tests (inline) | — |
+| CLI commands | 14 | 18 | **129%** |
+| Test cases | ~189K LOC (SDV framework) | 3,721 tests (inline) | — |
 
 **Key finding**: The Rust implementation achieves 100% feature parity with 4.7× code reduction, while adding async I/O support not present in the C version.
 
@@ -84,7 +84,7 @@ Functions are mapped by:
 | — Base64/PEM/OID | ~2,000 | ~660 | 3.0× | 100% |
 | — SAL (OS Abstraction) | ~8,000 | 0 | N/A | N/A (Rust std) |
 | — Error/Log/Params | ~6,000 | ~1,100 | 5.5× | 95% |
-| **CLI Tools** | ~8,000 | 3,618 | 2.2× | 100% |
+| **CLI Tools** | ~8,000 | ~4,000 | 2.0× | 100% |
 | **Auth Protocols** | 0 | 1,577 | — | New in Rust |
 | **Tests/Infra** | ~189,450 | ~8,000 (inline) | — | Independent |
 | **Total** | **~460K** | **~120K** | **3.8×** | **~100%** |
@@ -105,7 +105,7 @@ Functions are mapped by:
 | TLS Extensions | 20+ | 20+ | **100%** |
 | TLS Callbacks | 11 | 11 | **100%** |
 | PKI Features | 12 | 12 | **100%** |
-| CLI Commands | 14 | 16 | **114%** |
+| CLI Commands | 14 | 18 | **129%** |
 
 ---
 
@@ -469,7 +469,7 @@ The C implementation uses an **Engine Abstraction Layer (EAL)** with function po
 | EAL Provider Framework | ~27,000 | Replaced by Rust traits (more idiomatic, zero-cost) |
 | SAL (OS Abstraction Layer) | ~8,000 | Rust `std` provides equivalent functionality |
 | BSL Params system | ~3,000 | Rust type system replaces generic key-value params |
-| genrsa/rsa/prime CLI | ~1,500 | Covered by existing genpkey/pkey commands |
+| genrsa/rsa CLI | ~1,500 | Covered by existing genpkey/pkey commands |
 | FIPS ISO/SM Provider wrappers | ~6,500 | C EAL provider architecture; replaced by Rust traits (see §6.1) |
 | FIPS additional KATs (14 algorithms) | ~3,500 | 2,519 unit tests with RFC/NIST vectors provide equivalent coverage |
 | FIPS algorithm parameter constraints | ~600 | Feature flags + SecurityCallback provide equivalent filtering |
@@ -845,7 +845,7 @@ The C codebase has a large, multi-layered test infrastructure in `testcode/`:
 | TLCP/DTLCP | 4+4 | 4+4 | 0 | **100%** |
 | PKI / X.509 | 12 | 12 | 0 | **100%** |
 | CMS Content Types | 5 | 5 | 0 | **100%** |
-| CLI Commands | 14 | 16 | 0 | **114%** |
+| CLI Commands | 14 | 18 | 0 | **129%** |
 | Auth Protocols | 0 | 3 (new) | — | New |
 | Async I/O | 0 | 5 conn types (new) | — | New |
 
@@ -874,17 +874,19 @@ The C codebase has a large, multi-layered test infrastructure in `testcode/`:
 | Privacy Pass | RSA blind signature issuance/redemption (RFC 9578) |
 | `pkcs12` CLI | PKCS#12 file handling command |
 | `mac` CLI | MAC computation command |
+| `prime` CLI | Primality testing and prime generation command |
+| `kdf` CLI | PBKDF2 key derivation command (6 MAC options) |
 | Memory safety | Buffer overflow/use-after-free/data race elimination |
 | Zeroize-on-drop | Guaranteed secret material cleanup |
 | Feature flags | Compile-time algorithm selection for minimal binary size |
 | Wycheproof vectors | 5,000+ additional test vectors from Google |
-| Fuzz targets | 10 libfuzzer targets for continuous fuzzing |
+| Fuzz targets | 46 libfuzzer targets for continuous fuzzing |
 
 ---
 
 ## 10. Conclusions
 
-1. **100% feature parity achieved**: All 48 crypto algorithms, 91 cipher suites, 5 protocol variants, 20+ TLS extensions, 11 callbacks, 12 PKI features, and 14 CLI commands have been migrated.
+1. **100% feature parity achieved**: All 48 crypto algorithms, 91 cipher suites, 5 protocol variants, 20+ TLS extensions, 11 callbacks, 12 PKI features, and 18 CLI commands have been migrated.
 
 2. **4.7× code reduction**: Rust idioms (ownership, traits, generics, `Result<T,E>`, `std` library) eliminate the need for manual memory management, OS abstraction layers, dispatch tables, and header file declarations.
 

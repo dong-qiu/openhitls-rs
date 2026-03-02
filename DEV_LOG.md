@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I82 (82 phases)
+- Implementation: I1–I84 (84 phases)
 - Testing: T1–T68 (66 phases)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P62 (62 phases)
@@ -233,6 +233,8 @@ Category summary:
 | 221 | T66 | Test | CI Hardening + HMAC Fix + Test Coverage Expansion (+66 tests) | 2026-03-01 |
 | 222 | T67 | Test | Code Quality Hardening — Dependabot, Windows CI, InvalidArg payload, hash ? propagation | 2026-03-01 |
 | 223 | T68 | Test | Quality Safety Net Enhancement — CI fuzz-smoke/feature expansion, +6 fuzz targets, +9 proptests, record zeroize | 2026-03-02 |
+| 224 | I83 | Impl | HPKE Full RFC 9180 Coverage — 4 KEMs, 3 KDFs, 4 AEADs, 4 Modes | 2026-03-02 |
+| 225 | I84 | Impl | CLI prime/kdf Commands + BigNum String Conversions + PBKDF2 Generalization | 2026-03-02 |
 
 ---
 
@@ -12255,3 +12257,122 @@ CI pipeline hardening, +6 fuzz targets with 36 corpus seeds, +9 proptest blocks,
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - Fuzz targets: 46 (40 → 46), corpus: 322 (286 → 322)
+
+---
+
+## Phase I83 — HPKE Full RFC 9180 Coverage (2026-03-02)
+
+### Summary
+
+Extended HPKE from single-suite (X25519/SHA-256/AES-128-GCM, Base/PSK modes) to full RFC 9180 coverage with 4 KEMs, 3 KDFs, 4 AEADs, and 4 modes.
+
+### Part A: HKDF Generalization
+
+Generalized `Hkdf` struct with `hash_factory: fn() -> Box<dyn Digest>` field. Added `from_prk_with_factory()`, `new_with_factory()`, `hash_len()`, `hash_factory()` methods. Widened `t` buffer from `[0u8; 32]` to `[0u8; 64]` for SHA-512 support. Existing `new()`/`from_prk()` default to SHA-256.
+
+### Part B: HPKE Multi-Suite Architecture
+
+Complete rewrite of `hpke/mod.rs` with:
+- **3 enums**: `HpkeKem` (4 variants: X25519, P-256, P-384, P-521), `HpkeKdf` (3: SHA-256/384/512), `HpkeAead` (4: AES-128/256-GCM, ChaCha20-Poly1305, ExportOnly)
+- **CipherSuite struct**: `{ kem, kdf, aead }` with parameter methods
+- **KEM dispatch**: X25519 (existing) + ECC via `EcdhKeyPair` with counter-based rejection sampling (RFC 9180 §7.1.3), P-521 bitmask
+- **AEAD dispatch**: AES-128/256-GCM + ChaCha20-Poly1305 + ExportOnly error
+- **4 modes**: Base, PSK, Auth (dual DH), AuthPSK
+- **Backward-compatible API**: existing `setup_sender()` delegates to `setup_sender_with_suite(DEFAULT_SUITE, ...)`
+- **8 new suite-parameterized methods**: `setup_{sender,recipient}_{with_suite,psk_with_suite,auth,auth_psk}`
+- **Generalized key schedule**: `labeled_extract`/`labeled_expand` accept `hash_factory` + `nh` params
+
+### Part C: Supporting API Additions
+
+- `X25519PrivateKey::to_bytes()` — return raw 32-byte private key
+- `EcdhKeyPair::private_key_bytes()` — return raw private key bytes (big-endian, padded)
+- Updated `hpke` feature to include `chacha20` and `ecdh` dependencies
+
+### Files Modified
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/hkdf/mod.rs` | Modified | hash_factory field, from_prk_with_factory, new_with_factory, 64-byte buffer |
+| `crates/hitls-crypto/src/hpke/mod.rs` | Modified | Complete rewrite: multi-suite HPKE with 4 KEMs, 3 KDFs, 4 AEADs, 4 modes |
+| `crates/hitls-crypto/src/x25519/mod.rs` | Modified | Added to_bytes() method |
+| `crates/hitls-crypto/src/ecdh/mod.rs` | Modified | Added private_key_bytes() method |
+| `crates/hitls-crypto/Cargo.toml` | Modified | hpke feature: +chacha20, +ecdh |
+
+---
+
+## Phase I84 — CLI prime/kdf Commands + BigNum/PBKDF2 Generalization (2026-03-02)
+
+### Summary
+
+Added BigNum hex/decimal string conversions, prime generation with Miller-Rabin and safe prime support, generalized PBKDF2 with configurable HMAC hash function, and two new CLI commands (`prime` for primality testing/generation, `kdf` for PBKDF2 key derivation).
+
+### Part A: BigNum String Conversions
+
+- `from_hex_str()` — parse hex string (with optional `0x` prefix) to BigNum
+- `to_hex_str()` — format BigNum as hex string
+- `from_dec_str()` — parse decimal string to BigNum
+- `to_dec_str()` — format BigNum as decimal string (repeated div_rem(10))
+- 6 tests: hex/dec roundtrip, zero, invalid input, 0x prefix
+
+### Part B: Prime Generation
+
+- `BigNum::gen_prime(bits, safe)` — generate probable prime using Miller-Rabin
+- MR rounds: bits ≥ 512 → 5, else 10; max 10,000 attempts
+- Safe prime: generate q of (bits-1) bits, p = 2q+1, verify both
+- 4 tests (1 `#[ignore]` for safe prime)
+
+### Part C: PBKDF2 Generalization
+
+- `pbkdf2_with_hmac(factory, password, salt, iterations, dk_len)` — configurable hash
+- `pbkdf2()` delegates to `pbkdf2_with_hmac(sha256_factory, ...)`
+- Stack buffers `[0u8; 64]` for u/t (covers SHA-512)
+- 4 tests: SHA-1 (RFC 6070 vector), SHA-384, SHA-512, SM3
+
+### Part D: CLI Commands
+
+**prime command** (`crates/hitls-cli/src/prime.rs`):
+```
+hitls prime --generate --bits 2048 [--safe] [--hex]
+hitls prime [--hex] [--checks 20] <number>
+```
+- Generate mode: `BigNum::gen_prime()`, output decimal or hex
+- Check mode: `BigNum::is_probably_prime()`, exit code 1 for composite
+- 6 tests
+
+**kdf command** (`crates/hitls-cli/src/kdf.rs`):
+```
+hitls kdf pbkdf2 --mac hmac-sha256 --pass <pw> --salt <s> --iter <N> --keylen <N> [--out <file>] [--binary]
+```
+- 6 MAC options: hmac-sha1/sha224/sha256/sha384/sha512/sm3
+- `--hexpass`/`--hexsalt` for hex-encoded input
+- `--binary`/`--out` for raw output to file
+- 8 tests
+
+### Files Modified
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-bignum/src/bignum.rs` | Modified | from_hex_str, to_hex_str, from_dec_str, to_dec_str + 6 tests |
+| `crates/hitls-bignum/src/prime.rs` | Modified | gen_prime(bits, safe) + 4 tests |
+| `crates/hitls-crypto/src/pbkdf2/mod.rs` | Modified | pbkdf2_with_hmac() + 4 tests |
+| `crates/hitls-cli/src/prime.rs` | New | prime command + 6 tests |
+| `crates/hitls-cli/src/kdf.rs` | New | kdf command + 8 tests |
+| `crates/hitls-cli/src/main.rs` | Modified | Prime/Kdf command variants + dispatch |
+| `crates/hitls-cli/Cargo.toml` | Modified | +hitls-bignum dep, +pbkdf2 feature |
+
+### Test Count (Post I83/I84)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1261 (14 ignored) |
+| hitls-tls | 1414 |
+| hitls-pki | 405 |
+| hitls-bignum | 90 (1 ignored) |
+| hitls-utils | 66 |
+| hitls-auth | 33 |
+| hitls-cli | 166 (5 ignored) |
+| hitls-integration-tests | 260 (2 ignored) |
+| **Total** | **3721 (22 ignored)** |
+
+### Build Status (Post I83/I84)
+- `cargo test --workspace --all-features`: 3,699 passed, 0 failed, 22 ignored (3,721 total)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean

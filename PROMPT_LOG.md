@@ -3725,3 +3725,34 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - **T68-D**: `decrypted.zeroize()` added to 13 error returns across 3 record encryption files; +3 unit tests (`test_cbc_mte_bad_mac_zeroizes_buffer`, `test_cbc_mte_bad_padding_zeroizes_buffer`, `test_cbc_etm_bad_mac_zeroizes_buffer`)
 - QUALITY_REPORT D21–D25 closed (D23 mostly closed — 6/12 algorithms covered)
 - All 3,678 tests pass, 21 ignored, 0 clippy/fmt warnings
+
+---
+
+## Phase I83 — HPKE Full RFC 9180 Coverage (2026-03-02)
+
+**Prompt**: Implement the following plan: Phase I83 — HPKE Full Coverage. Extend HPKE from single-suite (X25519/SHA-256/AES-128-GCM, Base/PSK) to full RFC 9180 coverage with 4 KEMs (X25519, P-256, P-384, P-521), 3 KDFs (SHA-256/384/512), 4 AEADs (AES-128/256-GCM, ChaCha20-Poly1305, ExportOnly), and 4 modes (Base, PSK, Auth, AuthPSK). Generalize HKDF with hash_factory, generalize labeled_extract/labeled_expand, add ECC DeriveKeyPair with rejection sampling, Auth/AuthPSK dual DH, backward-compatible API.
+
+**Result**:
+- Generalized `Hkdf` with `hash_factory` field, `from_prk_with_factory()`, `new_with_factory()`, 64-byte buffer
+- Complete `hpke/mod.rs` rewrite: `HpkeKem` (4 variants), `HpkeKdf` (3), `HpkeAead` (4), `CipherSuite` struct
+- KEM dispatch: X25519 + ECC (P-256/P-384/P-521) with counter-based rejection sampling (RFC 9180 §7.1.3)
+- AEAD dispatch: AES-128/256-GCM + ChaCha20-Poly1305 + ExportOnly error
+- All 4 modes: Base, PSK, Auth (dual DH), AuthPSK
+- 8 new suite-parameterized methods, backward-compatible existing API
+- Added `X25519PrivateKey::to_bytes()`, `EcdhKeyPair::private_key_bytes()`
+- Updated `hpke` feature: +chacha20, +ecdh
+- +19 hitls-crypto tests (14 HPKE + 5 HKDF/PBKDF2-related)
+
+---
+
+## Phase I84 — CLI prime/kdf Commands + BigNum/PBKDF2 Generalization (2026-03-02)
+
+**Prompt**: Implement Phase I84 — CLI prime/kdf commands. Add BigNum hex/dec string conversions, gen_prime(bits, safe), generalize PBKDF2 with configurable HMAC hash, add CLI prime (generate/check) and kdf (PBKDF2) commands with 6 MAC options.
+
+**Result**:
+- BigNum: `from_hex_str()`, `to_hex_str()`, `from_dec_str()`, `to_dec_str()` + 6 tests
+- `gen_prime(bits, safe)` with Miller-Rabin, safe prime support + 4 tests (1 ignored)
+- `pbkdf2_with_hmac(factory, ...)` + `pbkdf2()` delegation + 4 tests (SHA-1/SHA-384/SHA-512/SM3)
+- CLI `prime` command: generate/check modes, hex output + 6 tests
+- CLI `kdf` command: PBKDF2 with 6 MAC options, hexpass/hexsalt, file output + 8 tests
+- All 3,699 tests pass (3,721 total), 22 ignored, 0 clippy/fmt warnings

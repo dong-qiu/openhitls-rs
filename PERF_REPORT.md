@@ -1,6 +1,6 @@
 # Performance Comparison: openHiTLS (C) vs openHiTLS-rs (Rust)
 
-> **Date**: 2026-03-02 (P1–P62 complete) | **Platform**: Apple M4, macOS 15.4, 10 cores, 16 GB RAM
+> **Date**: 2026-03-02 (P1–P62, I83–I84 complete) | **Platform**: Apple M4, macOS 15.4, 10 cores, 16 GB RAM
 > **Benchmark suite**: 291 test points across 59 algorithm groups (expanded from 120 points / 21 groups)
 
 ---

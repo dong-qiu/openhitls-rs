@@ -2,13 +2,13 @@
 
 A production-grade cryptographic and TLS library in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **100% C→Rust feature parity achieved** — 3678 tests, 46 fuzz targets, 5000+ Wycheproof vectors
+> **100% C→Rust feature parity achieved** — 3721 tests, 46 fuzz targets, 5000+ Wycheproof vectors
 
 ## Feature Highlights
 
 - **Memory safe** — Rust ownership system eliminates buffer overflows, use-after-free, and data races
 - **Full TLS stack** — TLS 1.3 + TLS 1.2 (91 cipher suites) + DTLS 1.2 + TLCP + DTLCP, 10 connection types (5 sync + 5 async via tokio)
-- **48+ crypto algorithms** — Classical, national (SM2/SM3/SM4/SM9), and post-quantum (ML-KEM, ML-DSA, SLH-DSA, FrodoKEM, McEliece)
+- **48+ crypto algorithms** — Classical, national (SM2/SM3/SM4/SM9), and post-quantum (ML-KEM, ML-DSA, SLH-DSA, FrodoKEM, McEliece), full HPKE (RFC 9180)
 - **Hardware acceleration** — AES-NI, SHA-NI, PCLMULQDQ (x86-64) + ARMv8 NEON/SHA2/PMULL, P-256 specialized fast path, feature-gated algorithm selection for minimal binary size
 - **FIPS/CMVP ready** — KAT self-tests, pairwise consistency tests, integrity check, NIST SP 800-90B entropy health testing
 - **Complete PKI** — X.509 chain validation, CRL (parse + generate), OCSP, CSR/cert/CRL generation, PKCS#8/12, CMS (5 content types)
@@ -20,10 +20,10 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | Crypto Algorithms | ~132K | ~27K | **100%** | 48 modules, hardware AES/SHA-2/GHASH/ChaCha20, P-256 fast path, 13 DH groups, FIPS, entropy health |
 | TLS Protocol | ~52K | ~15K | **100%** | TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP, 91 suites, 10 conn types |
 | PKI / X.509 | ~17K | ~4.5K | **100%** | X.509, PKCS#8/12, CMS (5 content types), CRL builder, hostname verification |
-| CLI Tools | ~8K | ~2.2K | **100%** | 14 commands (dgst, genpkey, x509, s-client, s-server, etc.) |
+| CLI Tools | ~8K | ~2.5K | **100%** | 16 commands (dgst, genpkey, x509, s-client, s-server, prime, kdf, etc.) |
 | FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
-| Test Infrastructure | ~20K | ~3.5K | **95%** | 3678 tests + Wycheproof + 46 fuzz targets (322 corpus) + security audit |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | 3721 tests + Wycheproof + 46 fuzz targets (322 corpus) + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
 
 ### Not Migrated (by design)
@@ -33,7 +33,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | eFrodoKEM variants | Optimization, not a functional gap |
 | Multi-buffer SHA-256 | Performance optimization only |
 | EAL Provider Framework | Rust traits are more idiomatic |
-| genrsa/rsa/prime CLI | Covered by existing genpkey/pkey |
+| genrsa/rsa CLI | Covered by existing genpkey/pkey |
 | Conditional FIPS algorithm disabling | Low priority |
 | SDV compliance tests | Requires specific test infrastructure |
 
@@ -95,20 +95,20 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | XMSS | `xmss` | RFC 8391 |
 | FrodoKEM | `frodokem` | 640/976/1344 × SHAKE/AES |
 | Classic McEliece | `mceliece` | 6688128 / 6960119 / 8192128 |
-| Hybrid KEM | `hybridkem` | X25519 + ML-KEM-768 |
+| Hybrid KEM | `hybridkem` | X25519/P-256/P-384/P-521 × ML-KEM-512/768/1024 (12 variants) |
 
 ### KDF & DRBG
 
 | Algorithm | Feature Flag | Standard |
 |-----------|-------------|----------|
-| HKDF | `hkdf` | RFC 5869 |
-| PBKDF2 / scrypt | `pbkdf2` / `scrypt` | RFC 7914 |
-| HPKE | `hpke` | RFC 9180 |
+| HKDF (SHA-256/384/512) | `hkdf` | RFC 5869 |
+| PBKDF2 (HMAC-SHA1/224/256/384/512/SM3) / scrypt | `pbkdf2` / `scrypt` | RFC 8018 / RFC 7914 |
+| HPKE (4 KEMs × 3 KDFs × 4 AEADs, 4 modes) | `hpke` | RFC 9180 |
 | HMAC-DRBG / CTR-DRBG (AES/SM4) / Hash-DRBG | `drbg` | NIST SP 800-90A |
 
 ### Big Number Arithmetic (`hitls-bignum`)
 
-Montgomery multiplication/exponentiation, Miller-Rabin primality, GCD/mod-inverse, constant-time operations, cryptographic random generation. 64 tests.
+Montgomery multiplication/exponentiation, Miller-Rabin primality, prime generation (safe prime), GCD/mod-inverse, constant-time operations, cryptographic random generation, hex/decimal string conversions. 90 tests.
 
 ## Protocol Support
 
@@ -247,10 +247,10 @@ openhitls-rs/
 │   ├── hitls-tls/       # TLS 1.3/1.2, DTLS 1.2, TLCP, DTLCP
 │   ├── hitls-pki/       # X.509, PKCS#8/12, CMS
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
-│   └── hitls-cli/       # Command-line tool (14 commands)
-├── tests/interop/       # Integration tests (241 cross-crate)
+│   └── hitls-cli/       # Command-line tool (16 commands)
+├── tests/interop/       # Integration tests (260 cross-crate)
 ├── tests/vectors/       # Test vectors (NIST, Wycheproof, GM/T)
-├── fuzz/                # 40 libfuzzer fuzz targets
+├── fuzz/                # 46 libfuzzer fuzz targets
 └── benches/             # Criterion benchmarks
 ```
 
@@ -260,17 +260,17 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3678 tests, 21 ignored)
+# Run all tests (3721 tests, 22 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1226 tests (14 ignored)
-cargo test -p hitls-tls --all-features      # 1389 tests
+cargo test -p hitls-crypto --all-features   # 1261 tests (14 ignored)
+cargo test -p hitls-tls --all-features      # 1414 tests
 cargo test -p hitls-pki --all-features      # 405 tests
-cargo test -p hitls-bignum                  # 80 tests
+cargo test -p hitls-bignum                  # 90 tests (1 ignored)
 cargo test -p hitls-utils                   # 66 tests
 cargo test -p hitls-auth --all-features     # 33 tests
-cargo test -p hitls-cli --all-features      # 136 tests (5 ignored)
+cargo test -p hitls-cli --all-features      # 166 tests (5 ignored)
 cargo test -p hitls-integration-tests       # 260 tests (2 ignored)
 
 # Lint (zero warnings required)

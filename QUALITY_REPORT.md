@@ -12,7 +12,7 @@
 | Layer | Mechanism | Coverage | Rating | Notes |
 |:-----:|-----------|----------|:------:|-------|
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | **A** | Full workspace, all features, all targets |
-| **L2** | Unit Tests | 3,678 tests (21 ignored), 100% pass rate | **A** | 3,400+ test fns + 92 async + 15 Wycheproof suites; all high-risk files directly tested |
+| **L2** | Unit Tests | 3,721 tests (22 ignored), 100% pass rate | **A** | 3,400+ test fns + 92 async + 15 Wycheproof suites; all high-risk files directly tested |
 | **L3** | Integration Tests | 260 cross-crate tests (TCP loopback + DTLS resilience + OpenSSL interop) | **A** | 14 test files; 5 protocol variants × sync/async; OpenSSL s_client/s_server interop |
 | **L4** | Fuzz Testing | 46 fuzz targets + 322 seed corpus files | **A** | 10 parse + 28 crypto semantic + 8 PQC/sign-path; +fuzz-smoke on PR/push |
 | **L5** | Property-Based Testing | ~37 proptest blocks across 5 crates | **B+** | hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum; PQC/RSA/ECDSA/ECDH covered |
@@ -44,16 +44,16 @@ GitHub Actions (.github/workflows/ci.yml) — 14 jobs, dependency graph: fmt/cli
 
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
-| hitls-tls | 1,411 | 0 | 38.5% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat, connection state guards, crypt suite params |
-| hitls-crypto | 1,233 | 14 | 33.6% | 48 algorithm modules + HW accel + P-256 fast path + proptest + HW↔SW cross-validation + timing + zeroize + DRBG + GCM + FIPS PCT/KAT |
-| hitls-pki | 405 | 0 | 11.0% | X.509, PKCS#8/12, CMS (5 content types), encoding helpers, proptest roundtrips |
-| hitls-integration | 260 | 2 | 7.1% | Cross-crate TCP loopback, error scenarios, concurrency stress, DTLS resilience, OpenSSL interop, TLS 1.3/1.2 key_update + session resumption |
-| hitls-cli | 152 | 5 | 4.1% | 14 CLI commands, speed benchmarks, s_client/s_server edge cases, hex/cipher/port edge cases |
-| hitls-bignum | 80 | 0 | 2.2% | Montgomery, Miller-Rabin, modular arithmetic, constant-time, random generation, proptest |
+| hitls-tls | 1,414 | 0 | 38.1% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat, connection state guards, crypt suite params |
+| hitls-crypto | 1,261 | 14 | 33.9% | 48 algorithm modules + HW accel + P-256 fast path + proptest + HW↔SW cross-validation + timing + zeroize + DRBG + GCM + FIPS PCT/KAT + HPKE full RFC 9180 |
+| hitls-pki | 405 | 0 | 10.9% | X.509, PKCS#8/12, CMS (5 content types), encoding helpers, proptest roundtrips |
+| hitls-integration | 260 | 2 | 7.0% | Cross-crate TCP loopback, error scenarios, concurrency stress, DTLS resilience, OpenSSL interop, TLS 1.3/1.2 key_update + session resumption |
+| hitls-cli | 166 | 5 | 4.5% | 16 CLI commands, speed benchmarks, s_client/s_server edge cases, hex/cipher/port edge cases, prime/kdf |
+| hitls-bignum | 90 | 1 | 2.4% | Montgomery, Miller-Rabin, prime generation, modular arithmetic, constant-time, random generation, hex/dec string, proptest |
 | hitls-utils | 66 | 0 | 1.8% | ASN.1, Base64, PEM, OID, proptest roundtrips |
 | hitls-auth | 33 | 0 | 0.9% | HOTP/TOTP, SPAKE2+, Privacy Pass |
 | hitls-types | 26 | 0 | 0.7% | Enum definitions, error types |
-| **Total** | **3,666** | **21** | **100%** | |
+| **Total** | **3,721** | **22** | **100%** | |
 
 ### 1.4 Standard Compliance Coverage
 
