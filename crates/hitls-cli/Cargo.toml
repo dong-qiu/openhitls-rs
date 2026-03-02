@@ -18,7 +18,9 @@ hitls-crypto = { path = "../hitls-crypto", features = [
     "hmac", "cmac",
     "rsa", "ecdsa", "ecdh", "ed25519", "x25519", "ed448", "x448",
     "mlkem", "mldsa",
+    "pbkdf2",
 ] }
+hitls-bignum = { path = "../hitls-bignum" }
 hitls-tls = { path = "../hitls-tls", features = ["tls13", "tls12"] }
 hitls-pki = { path = "../hitls-pki" }
 hitls-auth = { path = "../hitls-auth" }

@@ -57,6 +57,11 @@ impl X25519PrivateKey {
         X25519PublicKey { key: result }
     }
 
+    /// Return the raw 32-byte private key (clamped).
+    pub fn to_bytes(&self) -> [u8; X25519_KEY_SIZE] {
+        self.key
+    }
+
     /// Perform the X25519 Diffie-Hellman function with a peer's public key.
     pub fn diffie_hellman(&self, peer_public: &X25519PublicKey) -> Result<Vec<u8>, CryptoError> {
         let shared = x25519_scalar_mul(&self.key, &peer_public.key);

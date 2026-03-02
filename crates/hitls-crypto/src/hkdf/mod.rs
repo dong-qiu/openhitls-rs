@@ -18,31 +18,60 @@ fn sha256_factory() -> Box<dyn Digest> {
 pub struct Hkdf {
     prk: Vec<u8>,
     hash_len: usize,
+    hash_factory: fn() -> Box<dyn Digest>,
 }
 
 impl Hkdf {
     /// Create an HKDF instance from an existing PRK (skip the extract step).
     ///
     /// This is useful when the extract step has already been performed externally
-    /// (e.g., in HPKE's LabeledExtract).
+    /// (e.g., in HPKE's LabeledExtract). Uses SHA-256 by default.
     pub fn from_prk(prk: &[u8]) -> Self {
         Self {
             prk: prk.to_vec(),
             hash_len: 32,
+            hash_factory: sha256_factory,
+        }
+    }
+
+    /// Create an HKDF instance from an existing PRK with a custom hash function.
+    pub fn from_prk_with_factory(
+        prk: &[u8],
+        factory: fn() -> Box<dyn Digest>,
+        hash_len: usize,
+    ) -> Self {
+        Self {
+            prk: prk.to_vec(),
+            hash_len,
+            hash_factory: factory,
         }
     }
 
     /// Create a new HKDF instance by performing the extract step with SHA-256.
     /// If `salt` is empty, uses a hash-length zero-filled salt.
     pub fn new(salt: &[u8], ikm: &[u8]) -> Result<Self, CryptoError> {
-        let hash_len = 32; // SHA-256
+        Self::new_with_factory(salt, ikm, sha256_factory, 32)
+    }
+
+    /// Create a new HKDF instance by performing the extract step with a custom hash.
+    /// If `salt` is empty, uses a hash-length zero-filled salt.
+    pub fn new_with_factory(
+        salt: &[u8],
+        ikm: &[u8],
+        factory: fn() -> Box<dyn Digest>,
+        hash_len: usize,
+    ) -> Result<Self, CryptoError> {
         let prk = if salt.is_empty() {
-            let zero_salt = [0u8; 32]; // Stack array instead of Vec
-            Hmac::mac(sha256_factory, &zero_salt, ikm)?
+            let zero_salt = [0u8; 64];
+            Hmac::mac(factory, &zero_salt[..hash_len], ikm)?
         } else {
-            Hmac::mac(sha256_factory, salt, ikm)?
+            Hmac::mac(factory, salt, ikm)?
         };
-        Ok(Self { prk, hash_len })
+        Ok(Self {
+            prk,
+            hash_len,
+            hash_factory: factory,
+        })
     }
 
     /// Perform the expand step to derive `okm_len` bytes.
@@ -52,11 +81,11 @@ impl Hkdf {
         }
         let n = okm_len.div_ceil(self.hash_len);
         let mut okm = Vec::with_capacity(okm_len);
-        let mut t = [0u8; 32]; // SHA-256 output, stack array
-        let mut t_len = 0usize; // 0 for first iteration, 32 after
+        let mut t = [0u8; 64]; // Max SHA-512 output
+        let mut t_len = 0usize; // 0 for first iteration, hash_len after
 
         // Reuse single HMAC instance across all iterations
-        let mut hmac = Hmac::new(sha256_factory, &self.prk)?;
+        let mut hmac = Hmac::new(self.hash_factory, &self.prk)?;
 
         for i in 1..=n {
             if i > 1 {
@@ -67,7 +96,7 @@ impl Hkdf {
             }
             hmac.update(info)?;
             hmac.update(&[i as u8])?;
-            hmac.finish(&mut t)?;
+            hmac.finish(&mut t[..self.hash_len])?;
             t_len = self.hash_len;
             let take = (okm_len - okm.len()).min(self.hash_len);
             okm.extend_from_slice(&t[..take]);
@@ -85,6 +114,16 @@ impl Hkdf {
     ) -> Result<Vec<u8>, CryptoError> {
         let hkdf = Self::new(salt, ikm)?;
         hkdf.expand(info, okm_len)
+    }
+
+    /// Return the hash length of this HKDF instance.
+    pub fn hash_len(&self) -> usize {
+        self.hash_len
+    }
+
+    /// Return the hash factory of this HKDF instance.
+    pub fn hash_factory(&self) -> fn() -> Box<dyn Digest> {
+        self.hash_factory
     }
 }
 

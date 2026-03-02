@@ -67,7 +67,7 @@ hkdf = ["hmac"]
 pbkdf2 = ["hmac"]
 scrypt = ["pbkdf2"]
 drbg = ["hmac", "sha2", "aes"]
-hpke = ["hkdf", "x25519", "sha2", "aes", "modes"]
+hpke = ["hkdf", "x25519", "sha2", "aes", "modes", "chacha20", "ecdh"]
 
 # Modes of operation
 modes = ["aes"]

@@ -77,6 +77,14 @@ impl EcdhKeyPair {
         shared_point.x().to_bytes_be_padded(self.group.field_size())
     }
 
+    /// Return the raw private key bytes (big-endian, padded to field size).
+    pub fn private_key_bytes(&self) -> Vec<u8> {
+        let field_size = self.group.field_size();
+        self.private_key
+            .to_bytes_be_padded(field_size)
+            .unwrap_or_else(|_| self.private_key.to_bytes_be())
+    }
+
     /// Return the public key in uncompressed point encoding.
     pub fn public_key_bytes(&self) -> Result<Vec<u8>, CryptoError> {
         self.public_key.to_uncompressed(&self.group)

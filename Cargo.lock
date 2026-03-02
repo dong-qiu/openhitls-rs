@@ -387,6 +387,7 @@ dependencies = [
  "clap",
  "getrandom 0.2.17",
  "hitls-auth",
+ "hitls-bignum",
  "hitls-crypto",
  "hitls-pki",
  "hitls-tls",

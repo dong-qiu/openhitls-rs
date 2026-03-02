@@ -8,6 +8,42 @@ use hitls_types::CryptoError;
 const SMALL_PRIMES: [u64; 15] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47];
 
 impl BigNum {
+    /// Generate a random probable prime of the given bit length.
+    ///
+    /// If `safe` is true, generates a safe prime p where (p-1)/2 is also prime.
+    /// Returns error if `bits < 2` or if no prime is found within 10000 attempts.
+    pub fn gen_prime(bits: usize, safe: bool) -> Result<Self, CryptoError> {
+        if bits < 2 {
+            return Err(CryptoError::InvalidArg("prime bits must be >= 2"));
+        }
+        let rounds = if bits >= 512 { 5 } else { 10 };
+        let max_attempts = 10_000;
+
+        if safe {
+            // Safe prime: p = 2q + 1 where q is also prime
+            for _ in 0..max_attempts {
+                let q = BigNum::random(bits - 1, true)?;
+                if !q.is_probably_prime(rounds)? {
+                    continue;
+                }
+                // p = 2q + 1
+                let p = q.shl(1).add(&BigNum::from_u64(1));
+                if p.bit_len() == bits && p.is_probably_prime(rounds)? {
+                    return Ok(p);
+                }
+            }
+        } else {
+            for _ in 0..max_attempts {
+                let candidate = BigNum::random(bits, true)?;
+                if candidate.is_probably_prime(rounds)? {
+                    return Ok(candidate);
+                }
+            }
+        }
+
+        Err(CryptoError::BnRandGenFail)
+    }
+
     /// Check if this number is probably prime using Miller-Rabin test.
     ///
     /// `rounds` specifies the number of Miller-Rabin rounds (more rounds = higher confidence).
@@ -152,5 +188,37 @@ mod tests {
         // Mersenne prime 2^61 - 1
         let n = BigNum::from_u64((1u64 << 61) - 1);
         assert!(n.is_probably_prime(10).unwrap());
+    }
+
+    #[test]
+    fn test_gen_prime_small() {
+        let p = BigNum::gen_prime(16, false).unwrap();
+        assert_eq!(p.bit_len(), 16);
+        assert!(p.is_probably_prime(10).unwrap());
+    }
+
+    #[test]
+    fn test_gen_prime_exact_bits() {
+        for bits in [8, 32, 64, 128] {
+            let p = BigNum::gen_prime(bits, false).unwrap();
+            assert_eq!(p.bit_len(), bits, "gen_prime({bits}) wrong bit_len");
+            assert!(p.is_probably_prime(10).unwrap());
+        }
+    }
+
+    #[test]
+    fn test_gen_prime_invalid() {
+        assert!(BigNum::gen_prime(0, false).is_err());
+        assert!(BigNum::gen_prime(1, false).is_err());
+    }
+
+    #[test]
+    #[ignore] // Safe prime generation is slow
+    fn test_gen_prime_safe() {
+        let p = BigNum::gen_prime(32, true).unwrap();
+        assert!(p.is_probably_prime(10).unwrap());
+        // (p-1)/2 should also be prime
+        let q = p.sub(&BigNum::from_u64(1)).shr(1);
+        assert!(q.is_probably_prime(10).unwrap());
     }
 }

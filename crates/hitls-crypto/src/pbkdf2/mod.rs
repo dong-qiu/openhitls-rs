@@ -1,6 +1,7 @@
 //! PBKDF2 (Password-Based Key Derivation Function 2) implementation.
 //!
-//! Defined in RFC 8018 (PKCS#5 v2.1). Uses HMAC-SHA-256 as the PRF.
+//! Defined in RFC 8018 (PKCS#5 v2.1). Uses HMAC as the PRF.
+//! Default: HMAC-SHA-256. Use `pbkdf2_with_hmac` for other hash functions.
 
 use crate::hmac::Hmac;
 use crate::provider::Digest;
@@ -12,37 +13,39 @@ fn sha256_factory() -> Box<dyn Digest> {
     Box::new(Sha256::new())
 }
 
-/// Derive a key from a password using PBKDF2-HMAC-SHA256.
-pub fn pbkdf2(
+/// Derive a key from a password using PBKDF2 with a custom HMAC hash function.
+pub fn pbkdf2_with_hmac(
+    factory: fn() -> Box<dyn Digest>,
     password: &[u8],
     salt: &[u8],
     iterations: u32,
     dk_len: usize,
 ) -> Result<Vec<u8>, CryptoError> {
     if iterations == 0 || dk_len == 0 {
-        return Err(CryptoError::InvalidArg(""));
+        return Err(CryptoError::InvalidArg("iterations and dk_len must be > 0"));
     }
-    let hash_len = 32; // SHA-256
+    let hash_len = factory().output_size();
     let n = dk_len.div_ceil(hash_len);
     let mut dk = Vec::with_capacity(dk_len);
 
     for i in 1..=n {
         // U1 = HMAC(password, salt || i_be32)
-        let mut hmac = Hmac::new(sha256_factory, password)?;
+        let mut hmac = Hmac::new(factory, password)?;
         hmac.update(salt)?;
         hmac.update(&(i as u32).to_be_bytes())?;
-        let mut u = [0u8; 32]; // SHA-256 output, stack array
-        hmac.finish(&mut u)?;
+        let mut u = [0u8; 64]; // Max SHA-512 output
+        hmac.finish(&mut u[..hash_len])?;
 
-        let mut t = u; // Copy on stack (no heap clone)
+        let mut t = [0u8; 64];
+        t[..hash_len].copy_from_slice(&u[..hash_len]);
 
         // U2..Uc — reuse single stack buffer for all iterations
         for _ in 1..iterations {
             hmac.reset()?;
-            hmac.update(&u)?;
-            hmac.finish(&mut u)?; // Overwrite u in-place, no u_next allocation
-            for (tj, &uj) in t.iter_mut().zip(u.iter()) {
-                *tj ^= uj;
+            hmac.update(&u[..hash_len])?;
+            hmac.finish(&mut u[..hash_len])?;
+            for j in 0..hash_len {
+                t[j] ^= u[j];
             }
         }
 
@@ -52,6 +55,16 @@ pub fn pbkdf2(
         u.zeroize();
     }
     Ok(dk)
+}
+
+/// Derive a key from a password using PBKDF2-HMAC-SHA256.
+pub fn pbkdf2(
+    password: &[u8],
+    salt: &[u8],
+    iterations: u32,
+    dk_len: usize,
+) -> Result<Vec<u8>, CryptoError> {
+    pbkdf2_with_hmac(sha256_factory, password, salt, iterations, dk_len)
 }
 
 #[cfg(test)]
@@ -105,5 +118,61 @@ mod tests {
         let dk1 = pbkdf2(b"secret", b"pepper", 100, 32).unwrap();
         let dk2 = pbkdf2(b"secret", b"pepper", 100, 32).unwrap();
         assert_eq!(dk1, dk2);
+    }
+
+    // Test pbkdf2_with_hmac using SHA-1 (RFC 6070 test vector)
+    #[cfg(feature = "sha1")]
+    #[test]
+    fn test_pbkdf2_with_sha1() {
+        use crate::sha1::Sha1;
+        fn sha1_factory() -> Box<dyn Digest> {
+            Box::new(Sha1::new())
+        }
+        // RFC 6070 Test Vector 1: "password", "salt", c=1, dkLen=20
+        let dk = pbkdf2_with_hmac(sha1_factory, b"password", b"salt", 1, 20).unwrap();
+        assert_eq!(to_hex(&dk), "0c60c80f961f0e71f3a9b524af6012062fe037a6");
+    }
+
+    // Test with SHA-384
+    #[test]
+    fn test_pbkdf2_with_sha384() {
+        use crate::sha2::Sha384;
+        fn sha384_factory() -> Box<dyn Digest> {
+            Box::new(Sha384::new())
+        }
+        let dk = pbkdf2_with_hmac(sha384_factory, b"password", b"salt", 1, 48).unwrap();
+        assert_eq!(dk.len(), 48);
+        // Deterministic
+        let dk2 = pbkdf2_with_hmac(sha384_factory, b"password", b"salt", 1, 48).unwrap();
+        assert_eq!(dk, dk2);
+    }
+
+    // Test with SHA-512
+    #[test]
+    fn test_pbkdf2_with_sha512() {
+        use crate::sha2::Sha512;
+        fn sha512_factory() -> Box<dyn Digest> {
+            Box::new(Sha512::new())
+        }
+        let dk = pbkdf2_with_hmac(sha512_factory, b"password", b"salt", 1, 64).unwrap();
+        assert_eq!(dk.len(), 64);
+        // Deterministic
+        let dk2 = pbkdf2_with_hmac(sha512_factory, b"password", b"salt", 1, 64).unwrap();
+        assert_eq!(dk, dk2);
+    }
+
+    // Test with SM3
+    #[cfg(feature = "sm3")]
+    #[test]
+    fn test_pbkdf2_with_sm3() {
+        use crate::sm3::Sm3;
+        fn sm3_factory() -> Box<dyn Digest> {
+            Box::new(Sm3::new())
+        }
+        let dk = pbkdf2_with_hmac(sm3_factory, b"password", b"salt", 1, 32).unwrap();
+        assert_eq!(dk.len(), 32);
+        // Deterministic
+        let dk2 = pbkdf2_with_hmac(sm3_factory, b"password", b"salt", 1, 32).unwrap();
+        assert_eq!(dk, dk2);
     }
 }

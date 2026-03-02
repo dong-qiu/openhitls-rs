@@ -4,11 +4,13 @@ mod crl;
 mod dgst;
 mod enc;
 mod genpkey;
+mod kdf;
 mod list;
 mod mac;
 mod pkcs12;
 mod pkey;
 mod pkeyutl;
+mod prime;
 mod rand_cmd;
 mod req;
 mod s_client;
@@ -240,6 +242,59 @@ enum Commands {
         /// Input file (use - for stdin).
         file: String,
     },
+    /// Prime number generation and testing.
+    Prime {
+        /// Generate a prime number.
+        #[arg(long)]
+        generate: bool,
+        /// Number of bits for generated prime.
+        #[arg(short, long)]
+        bits: Option<usize>,
+        /// Generate a safe prime (p and (p-1)/2 both prime).
+        #[arg(long)]
+        safe: bool,
+        /// Use hexadecimal format for input/output.
+        #[arg(long)]
+        hex: bool,
+        /// Number of Miller-Rabin checks (default 20).
+        #[arg(long)]
+        checks: Option<usize>,
+        /// Number to test for primality.
+        number: Option<String>,
+    },
+    /// Key derivation function (PBKDF2).
+    Kdf {
+        /// KDF algorithm (pbkdf2).
+        #[arg(default_value = "pbkdf2")]
+        algorithm: String,
+        /// MAC algorithm (hmac-sha1, hmac-sha224, hmac-sha256, hmac-sha384, hmac-sha512, hmac-sm3).
+        #[arg(long, default_value = "hmac-sha256")]
+        mac: String,
+        /// Password.
+        #[arg(long)]
+        pass: String,
+        /// Salt.
+        #[arg(long)]
+        salt: String,
+        /// Number of iterations.
+        #[arg(long, default_value = "10000")]
+        iter: u32,
+        /// Output key length in bytes.
+        #[arg(long, default_value = "32")]
+        keylen: usize,
+        /// Output file (default: stdout).
+        #[arg(long)]
+        out: Option<String>,
+        /// Output raw binary instead of hex.
+        #[arg(long)]
+        binary: bool,
+        /// Interpret --pass as hex.
+        #[arg(long)]
+        hexpass: bool,
+        /// Interpret --salt as hex.
+        #[arg(long)]
+        hexsalt: bool,
+    },
     /// Benchmark cryptographic algorithm throughput.
     Speed {
         /// Algorithm: aes-128-gcm, aes-256-gcm, chacha20-poly1305, sha256, sha384, sha512, sm3, all.
@@ -353,6 +408,44 @@ fn main() {
             key,
             file,
         } => mac::run(algorithm, key, file),
+        Commands::Prime {
+            generate,
+            bits,
+            safe,
+            hex,
+            checks,
+            number,
+        } => prime::run(&prime::PrimeArgs {
+            generate: *generate,
+            bits: *bits,
+            safe: *safe,
+            hex: *hex,
+            checks: *checks,
+            number: number.clone(),
+        }),
+        Commands::Kdf {
+            algorithm,
+            mac,
+            pass,
+            salt,
+            iter,
+            keylen,
+            out,
+            binary,
+            hexpass,
+            hexsalt,
+        } => kdf::run(&kdf::KdfArgs {
+            algorithm: algorithm.clone(),
+            mac: mac.clone(),
+            pass: pass.clone(),
+            salt: salt.clone(),
+            iter: *iter,
+            keylen: *keylen,
+            out: out.clone(),
+            binary: *binary,
+            hexpass: *hexpass,
+            hexsalt: *hexsalt,
+        }),
         Commands::Speed { algorithm, seconds } => speed::run(algorithm, *seconds),
     };
 

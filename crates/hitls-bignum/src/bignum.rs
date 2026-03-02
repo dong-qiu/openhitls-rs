@@ -185,6 +185,116 @@ impl BigNum {
         Ok(out)
     }
 
+    /// Create a BigNum from a hexadecimal string (optional "0x" or "0X" prefix).
+    pub fn from_hex_str(s: &str) -> Result<Self, CryptoError> {
+        let s = s.trim();
+        let s = s
+            .strip_prefix("0x")
+            .or_else(|| s.strip_prefix("0X"))
+            .unwrap_or(s);
+        if s.is_empty() {
+            return Ok(Self::zero());
+        }
+        // Validate hex characters
+        if !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(CryptoError::InvalidArg("invalid hex character"));
+        }
+        // Decode hex to bytes
+        let byte_len = s.len().div_ceil(2);
+        let mut bytes = vec![0u8; byte_len];
+        let padded = if s.len() % 2 == 1 {
+            format!("0{s}")
+        } else {
+            s.to_string()
+        };
+        for (i, chunk) in padded.as_bytes().chunks(2).enumerate() {
+            let hi = Self::hex_nibble(chunk[0]);
+            let lo = Self::hex_nibble(chunk[1]);
+            bytes[i] = (hi << 4) | lo;
+        }
+        Ok(Self::from_bytes_be(&bytes))
+    }
+
+    fn hex_nibble(c: u8) -> u8 {
+        match c {
+            b'0'..=b'9' => c - b'0',
+            b'a'..=b'f' => c - b'a' + 10,
+            b'A'..=b'F' => c - b'A' + 10,
+            _ => 0,
+        }
+    }
+
+    /// Convert to a hexadecimal string (lowercase, no prefix).
+    pub fn to_hex_str(&self) -> String {
+        if self.is_zero() {
+            return "0".to_string();
+        }
+        let bytes = self.to_bytes_be();
+        let mut s = String::with_capacity(bytes.len() * 2);
+        for (i, &b) in bytes.iter().enumerate() {
+            if i == 0 {
+                // Skip leading zero in first byte
+                if b >> 4 != 0 {
+                    s.push(char::from_digit((b >> 4) as u32, 16).unwrap());
+                }
+                s.push(char::from_digit((b & 0x0f) as u32, 16).unwrap());
+            } else {
+                s.push(char::from_digit((b >> 4) as u32, 16).unwrap());
+                s.push(char::from_digit((b & 0x0f) as u32, 16).unwrap());
+            }
+        }
+        s
+    }
+
+    /// Create a BigNum from a decimal string.
+    pub fn from_dec_str(s: &str) -> Result<Self, CryptoError> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Ok(Self::zero());
+        }
+        let (neg, s) = if let Some(rest) = s.strip_prefix('-') {
+            (true, rest)
+        } else {
+            (false, s)
+        };
+        if !s.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(CryptoError::InvalidArg("invalid decimal character"));
+        }
+        let ten = Self::from_u64(10);
+        let mut acc = Self::zero();
+        for &b in s.as_bytes() {
+            let digit = Self::from_u64((b - b'0') as u64);
+            acc = acc.mul(&ten).add(&digit);
+        }
+        if neg && !acc.is_zero() {
+            acc.set_negative(true);
+        }
+        Ok(acc)
+    }
+
+    /// Convert to a decimal string.
+    pub fn to_dec_str(&self) -> String {
+        if self.is_zero() {
+            return "0".to_string();
+        }
+        let ten = Self::from_u64(10);
+        let mut digits = Vec::new();
+        let mut val = self.clone();
+        val.set_negative(false);
+        while !val.is_zero() {
+            // div_rem cannot fail with divisor=10
+            let (q, r) = val.div_rem(&ten).unwrap();
+            let d = if r.is_zero() { 0u8 } else { r.limbs()[0] as u8 };
+            digits.push(b'0' + d);
+            val = q;
+        }
+        if self.is_negative() {
+            digits.push(b'-');
+        }
+        digits.reverse();
+        String::from_utf8(digits).unwrap()
+    }
+
     /// Remove leading zero limbs.
     pub(crate) fn normalize(&mut self) {
         while self.limbs.len() > 1 && *self.limbs.last().unwrap() == 0 {
@@ -423,5 +533,79 @@ mod tests {
         // Too small should error
         let big = BigNum::from_bytes_be(&[0x01, 0x02, 0x03]);
         assert!(big.to_bytes_be_padded(2).is_err());
+    }
+
+    #[test]
+    fn test_from_hex_str() {
+        assert_eq!(BigNum::from_hex_str("0").unwrap(), BigNum::zero());
+        assert_eq!(BigNum::from_hex_str("ff").unwrap(), BigNum::from_u64(0xff));
+        assert_eq!(
+            BigNum::from_hex_str("0xFF").unwrap(),
+            BigNum::from_u64(0xff)
+        );
+        assert_eq!(
+            BigNum::from_hex_str("0X1a2B").unwrap(),
+            BigNum::from_u64(0x1a2b)
+        );
+        // Odd-length hex string
+        assert_eq!(
+            BigNum::from_hex_str("abc").unwrap(),
+            BigNum::from_u64(0xabc)
+        );
+        // Invalid
+        assert!(BigNum::from_hex_str("xyz").is_err());
+    }
+
+    #[test]
+    fn test_to_hex_str() {
+        assert_eq!(BigNum::zero().to_hex_str(), "0");
+        assert_eq!(BigNum::from_u64(0xff).to_hex_str(), "ff");
+        assert_eq!(BigNum::from_u64(0x1a2b).to_hex_str(), "1a2b");
+        assert_eq!(BigNum::from_u64(1).to_hex_str(), "1");
+    }
+
+    #[test]
+    fn test_hex_str_roundtrip() {
+        for val in [0u64, 1, 255, 65535, 0xdeadbeef, u64::MAX] {
+            let n = BigNum::from_u64(val);
+            let hex = n.to_hex_str();
+            let back = BigNum::from_hex_str(&hex).unwrap();
+            assert_eq!(n, back, "hex roundtrip failed for {val}");
+        }
+    }
+
+    #[test]
+    fn test_from_dec_str() {
+        assert_eq!(BigNum::from_dec_str("0").unwrap(), BigNum::zero());
+        assert_eq!(BigNum::from_dec_str("255").unwrap(), BigNum::from_u64(255));
+        assert_eq!(
+            BigNum::from_dec_str("12345678901234567890").unwrap(),
+            BigNum::from_bytes_be(&[0xab, 0x54, 0xa9, 0x8c, 0xeb, 0x1f, 0x0a, 0xd2])
+        );
+        // Negative
+        let neg = BigNum::from_dec_str("-42").unwrap();
+        assert!(neg.is_negative());
+        // Invalid
+        assert!(BigNum::from_dec_str("12x3").is_err());
+    }
+
+    #[test]
+    fn test_to_dec_str() {
+        assert_eq!(BigNum::zero().to_dec_str(), "0");
+        assert_eq!(BigNum::from_u64(255).to_dec_str(), "255");
+        assert_eq!(BigNum::from_u64(1000000).to_dec_str(), "1000000");
+        let mut neg = BigNum::from_u64(42);
+        neg.set_negative(true);
+        assert_eq!(neg.to_dec_str(), "-42");
+    }
+
+    #[test]
+    fn test_dec_str_roundtrip() {
+        for val in [0u64, 1, 255, 65535, 999999999, u64::MAX] {
+            let n = BigNum::from_u64(val);
+            let dec = n.to_dec_str();
+            let back = BigNum::from_dec_str(&dec).unwrap();
+            assert_eq!(n, back, "dec roundtrip failed for {val}");
+        }
     }
 }

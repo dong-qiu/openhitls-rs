@@ -81,8 +81,10 @@ dependencies = [
 name = "hitls-fuzz"
 version = "0.0.0"
 dependencies = [
+ "hitls-crypto",
  "hitls-pki",
  "hitls-tls",
+ "hitls-types",
  "hitls-utils",
  "libfuzzer-sys",
 ]
