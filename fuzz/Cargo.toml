@@ -14,6 +14,7 @@ hitls-crypto = { path = "../crates/hitls-crypto", features = [
     "aes", "modes", "chacha20", "rsa", "ecdsa", "sm2", "hkdf",
     "mlkem", "mldsa", "slh-dsa", "ed25519", "dsa", "sha2", "sha3",
     "hmac", "x25519", "drbg", "pbkdf2", "ed448", "frodokem",
+    "cmac", "scrypt", "mceliece", "ecc",
 ] }
 hitls-pki = { path = "../crates/hitls-pki" }
 hitls-tls = { path = "../crates/hitls-tls", features = ["tls12", "tls13", "dtls12", "tlcp"] }
@@ -217,4 +218,34 @@ doc = false
 [[bin]]
 name = "fuzz_frodokem"
 path = "fuzz_targets/fuzz_frodokem.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_aes_block"
+path = "fuzz_targets/fuzz_aes_block.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_chacha20"
+path = "fuzz_targets/fuzz_chacha20.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_cmac"
+path = "fuzz_targets/fuzz_cmac.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_ecdh"
+path = "fuzz_targets/fuzz_ecdh.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_scrypt"
+path = "fuzz_targets/fuzz_scrypt.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_mceliece"
+path = "fuzz_targets/fuzz_mceliece.rs"
 doc = false

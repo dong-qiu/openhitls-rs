@@ -706,4 +706,39 @@ mod tests {
         let rej2 = kp.decapsulate(&ct).unwrap();
         assert_eq!(rej1, rej2, "implicit rejection must be deterministic");
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(3))]
+
+            #[test]
+            fn prop_mlkem768_roundtrip(seed in prop::array::uniform32(any::<u8>())) {
+                let d = seed;
+                let z = seed.map(|b| b.wrapping_add(1));
+                let kp = MlKemKeyPair::generate_from_seed(768, &d, &z).unwrap();
+                let (ss, ct) = kp.encapsulate().unwrap();
+                let ss2 = kp.decapsulate(&ct).unwrap();
+                prop_assert_eq!(ss, ss2);
+            }
+
+            #[test]
+            fn prop_mlkem768_tampered_ct_implicit_rejection(
+                seed in prop::array::uniform32(any::<u8>()),
+                tamper_byte in any::<u8>(),
+            ) {
+                let d = seed;
+                let z = seed.map(|b| b.wrapping_add(1));
+                let kp = MlKemKeyPair::generate_from_seed(768, &d, &z).unwrap();
+                let (ss, mut ct) = kp.encapsulate().unwrap();
+                // Tamper first byte
+                ct[0] ^= tamper_byte | 1; // ensure non-zero tamper
+                let ss_rej = kp.decapsulate(&ct).unwrap();
+                // Implicit rejection: must get a different shared secret
+                prop_assert_ne!(ss, ss_rej);
+            }
+        }
+    }
 }

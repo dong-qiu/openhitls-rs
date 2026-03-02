@@ -291,18 +291,21 @@ impl RecordDecryptorTlcpCbc {
         let mac_ok = mac_slice.ct_eq(&expected_mac).unwrap_u8();
 
         if pad_ok & mac_ok != 1 {
+            decrypted.zeroize();
             return Err(TlsError::RecordError("bad record MAC".into()));
         }
 
         decrypted.truncate(content_len);
 
         if decrypted.len() > MAX_PLAINTEXT_LENGTH {
+            decrypted.zeroize();
             return Err(TlsError::RecordError(
                 "decrypted plaintext too large".into(),
             ));
         }
 
         if self.seq == u64::MAX {
+            decrypted.zeroize();
             return Err(TlsError::RecordError("sequence number overflow".into()));
         }
         self.seq += 1;

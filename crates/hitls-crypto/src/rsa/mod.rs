@@ -683,4 +683,39 @@ mod tests {
             }
         }
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(3))]
+
+            #[test]
+            fn prop_rsa1024_pss_sign_verify_roundtrip(
+                digest in prop::array::uniform32(any::<u8>()),
+            ) {
+                let (n, e, d, p, q) = test_key_1024();
+                let priv_key = RsaPrivateKey::new(&n, &d, &e, &p, &q).unwrap();
+                let pub_key = priv_key.public_key();
+                let sig = priv_key.sign(RsaPadding::Pss, &digest).unwrap();
+                prop_assert!(pub_key.verify(RsaPadding::Pss, &digest, &sig).unwrap());
+            }
+
+            #[test]
+            fn prop_rsa1024_tampered_sig_rejected(
+                digest in prop::array::uniform32(any::<u8>()),
+                tamper_pos in any::<usize>(),
+            ) {
+                let (n, e, d, p, q) = test_key_1024();
+                let priv_key = RsaPrivateKey::new(&n, &d, &e, &p, &q).unwrap();
+                let pub_key = priv_key.public_key();
+                let mut sig = priv_key.sign(RsaPadding::Pss, &digest).unwrap();
+                let pos = tamper_pos % sig.len();
+                sig[pos] ^= 0xFF;
+                let valid = pub_key.verify(RsaPadding::Pss, &digest, &sig).unwrap_or(false);
+                prop_assert!(!valid);
+            }
+        }
+    }
 }

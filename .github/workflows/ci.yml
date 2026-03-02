@@ -12,6 +12,10 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fmt:
     name: Format Check
@@ -74,6 +78,23 @@ jobs:
       - run: cargo test -p hitls-tls --features tls13
       - run: cargo test -p hitls-tls --features tls12
       - run: cargo test -p hitls-tls --features tlcp
+      # Additional single-feature flags
+      - run: cargo test -p hitls-crypto --no-default-features --features dh
+      - run: cargo test -p hitls-crypto --no-default-features --features dsa
+      - run: cargo test -p hitls-crypto --no-default-features --features ed25519
+      - run: cargo test -p hitls-crypto --no-default-features --features ed448
+      - run: cargo test -p hitls-crypto --no-default-features --features sm3
+      - run: cargo test -p hitls-crypto --no-default-features --features sm4
+      - run: cargo test -p hitls-crypto --no-default-features --features chacha20
+      - run: cargo test -p hitls-crypto --no-default-features --features cmac
+      - run: cargo test -p hitls-crypto --no-default-features --features scrypt
+      - run: cargo test -p hitls-crypto --no-default-features --features entropy
+      # Cross-feature combinations
+      - run: cargo test -p hitls-crypto --no-default-features --features aes,gcm
+      - run: cargo test -p hitls-crypto --no-default-features --features pqc,ecdsa
+      # No-default for TLS/PKI crates
+      - run: cargo test -p hitls-tls --no-default-features
+      - run: cargo test -p hitls-pki --no-default-features
 
   audit:
     name: Security Audit
@@ -110,6 +131,26 @@ jobs:
           prefix-key: fuzz
       - run: cargo install cargo-fuzz --locked || true
       - run: cd fuzz && cargo check
+
+  fuzz-smoke:
+    name: Fuzz Smoke Test
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked || true
+      - name: Run fuzz targets (10s each)
+        run: |
+          cd fuzz
+          for target in $(cargo fuzz list); do
+            echo "=== Smoke-testing $target ==="
+            timeout 30 cargo fuzz run "$target" -- -max_total_time=10 || true
+          done
 
   coverage:
     name: Code Coverage

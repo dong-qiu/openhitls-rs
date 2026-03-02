@@ -242,4 +242,24 @@ mod tests {
         // Shared secret with self should be non-zero
         assert!(secret.iter().any(|&b| b != 0));
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(10))]
+
+            #[test]
+            fn prop_ecdh_p256_commutativity(_seed in any::<u64>()) {
+                let kp_a = EcdhKeyPair::generate(EccCurveId::NistP256).unwrap();
+                let kp_b = EcdhKeyPair::generate(EccCurveId::NistP256).unwrap();
+                let pub_a = kp_a.public_key_bytes().unwrap();
+                let pub_b = kp_b.public_key_bytes().unwrap();
+                let ss_ab = kp_a.compute_shared_secret(&pub_b).unwrap();
+                let ss_ba = kp_b.compute_shared_secret(&pub_a).unwrap();
+                prop_assert_eq!(ss_ab, ss_ba);
+            }
+        }
+    }
 }

@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I82 (82 phases)
-- Testing: T1–T67 (65 phases)
+- Testing: T1–T68 (66 phases)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P62 (62 phases)
 
@@ -232,6 +232,7 @@ Category summary:
 | 220 | T65 | Test | Test Coverage Enhancement (+66 tests, CI coverage infra) | 2026-03-01 |
 | 221 | T66 | Test | CI Hardening + HMAC Fix + Test Coverage Expansion (+66 tests) | 2026-03-01 |
 | 222 | T67 | Test | Code Quality Hardening — Dependabot, Windows CI, InvalidArg payload, hash ? propagation | 2026-03-01 |
+| 223 | T68 | Test | Quality Safety Net Enhancement — CI fuzz-smoke/feature expansion, +6 fuzz targets, +9 proptests, record zeroize | 2026-03-02 |
 
 ---
 
@@ -12173,3 +12174,84 @@ Test counts unchanged — all changes are code quality improvements, no new test
 - `cargo test --workspace --all-features`: 3,645 passed, 0 failed, 21 ignored (3,666 total)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T68 — Quality Safety Net Enhancement (2026-03-02)
+
+### Summary
+CI pipeline hardening, +6 fuzz targets with 36 corpus seeds, +9 proptest blocks, record layer zeroize on error, deny.toml hardening, +3 unit tests. Closes QUALITY_REPORT deficiencies D21–D25.
+
+### Part A: CI Pipeline Hardening + deny.toml
+- Added `fuzz-smoke` CI job: runs each fuzz target for 10s on every PR/push (catches immediate regressions)
+- Expanded `test-features` job from 9 → 24 feature combinations: +10 single-feature flags (dh, dsa, ed25519, ed448, sm3, sm4, chacha20, cmac, scrypt, entropy), +2 cross-feature (aes+gcm, pqc+ecdsa), +2 no-default crate tests (hitls-tls, hitls-pki)
+- Added `concurrency:` block for CI job deduplication (cancel-in-progress)
+- `deny.toml`: `yanked = "warn"` → `yanked = "deny"`
+
+### Part B: Fuzz Target Expansion (+6 targets, +36 corpus)
+- `fuzz_aes_block`: AES-128/192/256 block encrypt→decrypt roundtrip
+- `fuzz_chacha20`: ChaCha20-Poly1305 AEAD roundtrip + tamper detection
+- `fuzz_cmac`: CMAC one-shot vs incremental consistency (AES-128/256)
+- `fuzz_ecdh`: ECDH P-256/384/521 commutativity verification
+- `fuzz_scrypt`: Scrypt determinism with bounded parameters (n=2..16, r=1..2)
+- `fuzz_mceliece`: McEliece-6688128 encaps→decaps roundtrip + tamper
+- 6 corpus seed directories × 6 seeds each = 36 new corpus files
+- Added features `cmac`, `scrypt`, `mceliece`, `ecc` to fuzz Cargo.toml
+
+### Part C: Proptest Expansion (+9 property blocks)
+- `mlkem/mod.rs`: ML-KEM-768 roundtrip + tampered ct implicit rejection (3 cases each)
+- `mldsa/mod.rs`: ML-DSA-65 sign→verify roundtrip + tampered sig rejection (3 cases each)
+- `rsa/mod.rs`: RSA-1024 PSS sign→verify roundtrip + tampered sig rejection (3 cases, static key)
+- `ecdsa/mod.rs`: P-256 sign→verify roundtrip + different key rejection (10 cases each)
+- `ecdh/mod.rs`: P-256 ECDH commutativity (10 cases)
+
+### Part D: Security Hardening + Unit Tests
+- Added `decrypted.zeroize()` before all error returns in CBC decrypt paths:
+  - `encryption12_cbc.rs` MtE: 3 zeroize points (bad MAC, plaintext too large, seq overflow)
+  - `encryption12_cbc.rs` EtM: 5 zeroize points (empty, bad padding len/bytes, plaintext too large, seq overflow)
+  - `encryption_tlcp.rs` TLCP CBC: 3 zeroize points
+  - `encryption_dtlcp.rs` DTLCP CBC: 2 zeroize points
+- +3 unit tests: `test_cbc_mte_bad_mac_zeroizes_buffer`, `test_cbc_mte_bad_padding_zeroizes_buffer`, `test_cbc_etm_bad_mac_zeroizes_buffer`
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `.github/workflows/ci.yml` | +fuzz-smoke job, +15 feature combos, +concurrency block |
+| `deny.toml` | yanked warn→deny |
+| `fuzz/Cargo.toml` | +4 features, +6 [[bin]] entries |
+| `fuzz/fuzz_targets/fuzz_aes_block.rs` | New: AES block roundtrip fuzz |
+| `fuzz/fuzz_targets/fuzz_chacha20.rs` | New: ChaCha20-Poly1305 AEAD fuzz |
+| `fuzz/fuzz_targets/fuzz_cmac.rs` | New: CMAC consistency fuzz |
+| `fuzz/fuzz_targets/fuzz_ecdh.rs` | New: ECDH commutativity fuzz |
+| `fuzz/fuzz_targets/fuzz_scrypt.rs` | New: Scrypt determinism fuzz |
+| `fuzz/fuzz_targets/fuzz_mceliece.rs` | New: McEliece roundtrip fuzz |
+| `fuzz/corpus/fuzz_{aes_block,...}/` | 6 new dirs × 6 seeds = 36 files |
+| `crates/hitls-crypto/src/mlkem/mod.rs` | +2 proptest blocks |
+| `crates/hitls-crypto/src/mldsa/mod.rs` | +2 proptest blocks |
+| `crates/hitls-crypto/src/rsa/mod.rs` | +2 proptest blocks |
+| `crates/hitls-crypto/src/ecdsa/mod.rs` | +2 proptest blocks |
+| `crates/hitls-crypto/src/ecdh/mod.rs` | +1 proptest block |
+| `crates/hitls-tls/src/record/encryption12_cbc.rs` | +zeroize on error, +3 unit tests |
+| `crates/hitls-tls/src/record/encryption_tlcp.rs` | +zeroize on error |
+| `crates/hitls-tls/src/record/encryption_dtlcp.rs` | +zeroize on error |
+| `QUALITY_REPORT.md` | D21–D25 CLOSED, updated counts |
+
+### Test Count (Post T68)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1242 (14 ignored) |
+| hitls-tls | 1414 |
+| hitls-pki | 405 |
+| hitls-bignum | 80 |
+| hitls-utils | 66 |
+| hitls-auth | 33 |
+| hitls-cli | 152 (5 ignored) |
+| hitls-integration-tests | 260 (2 ignored) |
+| **Total** | **3678 (21 ignored)** |
+
+### Build Status (Post T68)
+- `cargo test --workspace --all-features`: 3,657 passed, 0 failed, 21 ignored (3,678 total)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- Fuzz targets: 46 (40 → 46), corpus: 322 (286 → 322)

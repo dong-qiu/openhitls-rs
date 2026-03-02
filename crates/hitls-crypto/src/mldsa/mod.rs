@@ -976,4 +976,38 @@ mod tests {
             "verify with reconstructed public key"
         );
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(3))]
+
+            #[test]
+            fn prop_mldsa65_sign_verify_roundtrip(
+                msg in prop::collection::vec(any::<u8>(), 0..128),
+            ) {
+                let xi = [0xAB; 32];
+                let kp = MlDsaKeyPair::generate_from_seed(65, &xi).unwrap();
+                let sig = kp.sign(&msg).unwrap();
+                prop_assert!(kp.verify(&msg, &sig).unwrap());
+            }
+
+            #[test]
+            fn prop_mldsa65_tampered_sig_rejected(
+                msg in prop::collection::vec(any::<u8>(), 1..64),
+                tamper_pos in any::<usize>(),
+            ) {
+                let xi = [0xCD; 32];
+                let kp = MlDsaKeyPair::generate_from_seed(65, &xi).unwrap();
+                let mut sig = kp.sign(&msg).unwrap();
+                // Tamper a byte in the signature
+                let pos = tamper_pos % sig.len();
+                sig[pos] ^= 0xFF;
+                let valid = kp.verify(&msg, &sig).unwrap_or(false);
+                prop_assert!(!valid);
+            }
+        }
+    }
 }

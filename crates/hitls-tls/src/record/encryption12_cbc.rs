@@ -9,6 +9,7 @@ use hitls_crypto::hmac::Hmac;
 use hitls_crypto::provider::Digest;
 use hitls_types::TlsError;
 use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 
 use super::encryption::{MAX_CIPHERTEXT_LENGTH, MAX_PLAINTEXT_LENGTH};
 
@@ -299,18 +300,21 @@ impl RecordDecryptor12Cbc {
         let mac_ok = mac_slice.ct_eq(&expected_mac[..self.mac_len]).unwrap_u8();
 
         if pad_ok & mac_ok != 1 {
+            decrypted.zeroize();
             return Err(TlsError::RecordError("bad record MAC".into()));
         }
 
         decrypted.truncate(content_len);
 
         if decrypted.len() > MAX_PLAINTEXT_LENGTH {
+            decrypted.zeroize();
             return Err(TlsError::RecordError(
                 "decrypted plaintext too large".into(),
             ));
         }
 
         if self.seq == u64::MAX {
+            decrypted.zeroize();
             return Err(TlsError::RecordError("sequence number overflow".into()));
         }
         self.seq += 1;
@@ -502,17 +506,20 @@ impl RecordDecryptor12EtM {
         // Remove TLS padding (since MAC was already verified, padding errors
         // can't be used as an oracle)
         if decrypted.is_empty() {
+            decrypted.zeroize();
             return Err(TlsError::RecordError("empty decrypted data".into()));
         }
         let padding_length = decrypted[decrypted.len() - 1] as usize;
         let total_padding = padding_length + 1;
         if total_padding > decrypted.len() {
+            decrypted.zeroize();
             return Err(TlsError::RecordError("invalid padding".into()));
         }
 
         // Verify padding bytes
         for &b in &decrypted[decrypted.len() - total_padding..] {
             if b != padding_length as u8 {
+                decrypted.zeroize();
                 return Err(TlsError::RecordError("invalid padding".into()));
             }
         }
@@ -521,12 +528,14 @@ impl RecordDecryptor12EtM {
         decrypted.truncate(plaintext_len);
 
         if decrypted.len() > MAX_PLAINTEXT_LENGTH {
+            decrypted.zeroize();
             return Err(TlsError::RecordError(
                 "decrypted plaintext too large".into(),
             ));
         }
 
         if self.seq == u64::MAX {
+            decrypted.zeroize();
             return Err(TlsError::RecordError("sequence number overflow".into()));
         }
         self.seq += 1;
@@ -1051,5 +1060,65 @@ mod tests {
             assert_eq!(enc.sequence_number(), i + 1);
             assert_eq!(dec.sequence_number(), i + 1);
         }
+    }
+
+    // ====== Phase T68: Zeroize-on-error coverage tests ======
+
+    #[test]
+    fn test_cbc_mte_bad_mac_zeroizes_buffer() {
+        // Encrypt with key A, decrypt with different MAC key → error path exercises zeroize
+        let enc_key = vec![0x42u8; 16];
+        let mac_key_a = vec![0xAAu8; 32];
+        let mac_key_b = vec![0xBBu8; 32];
+
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key_a, 32).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key_b, 32).unwrap();
+
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, b"secret payload")
+            .unwrap();
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("bad record MAC"),
+            "expected 'bad record MAC', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_cbc_mte_bad_padding_zeroizes_buffer() {
+        // Tamper last byte of ciphertext → padding error → exercises zeroize path
+        let enc_key = vec![0x42u8; 16];
+        let mac_key = vec![0xABu8; 32];
+
+        let mut enc = RecordEncryptor12Cbc::new(enc_key.clone(), mac_key.clone(), 32).unwrap();
+        let mut dec = RecordDecryptor12Cbc::new(enc_key, mac_key, 32).unwrap();
+
+        let mut record = enc
+            .encrypt_record(ContentType::ApplicationData, b"tamper test")
+            .unwrap();
+        // Tamper the last encrypted block (affects padding after decryption)
+        let last = record.fragment.len() - 1;
+        record.fragment[last] ^= 0xFF;
+        assert!(dec.decrypt_record(&record).is_err());
+    }
+
+    #[test]
+    fn test_cbc_etm_bad_mac_zeroizes_buffer() {
+        // EtM: different MAC key → MAC verification fails before decryption
+        let enc_key = vec![0x42u8; 16];
+        let mac_key_a = vec![0xAAu8; 32];
+        let mac_key_b = vec![0xBBu8; 32];
+
+        let mut enc = RecordEncryptor12EtM::new(enc_key.clone(), mac_key_a, 32).unwrap();
+        let mut dec = RecordDecryptor12EtM::new(enc_key, mac_key_b, 32).unwrap();
+
+        let record = enc
+            .encrypt_record(ContentType::ApplicationData, b"etm secret")
+            .unwrap();
+        let err = dec.decrypt_record(&record).unwrap_err();
+        assert!(
+            err.to_string().contains("bad record MAC"),
+            "expected 'bad record MAC', got: {err}"
+        );
     }
 }

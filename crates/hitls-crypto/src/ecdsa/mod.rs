@@ -428,4 +428,33 @@ mod tests {
         let result = EcdsaKeyPair::from_private_key(EccCurveId::NistP256, &[0u8; 32]);
         assert!(result.is_err());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(10))]
+
+            #[test]
+            fn prop_ecdsa_p256_sign_verify_roundtrip(
+                digest in prop::array::uniform32(any::<u8>()),
+            ) {
+                let kp = EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+                let sig = kp.sign(&digest).unwrap();
+                prop_assert!(kp.verify(&digest, &sig).unwrap());
+            }
+
+            #[test]
+            fn prop_ecdsa_different_key_rejects(
+                digest in prop::array::uniform32(any::<u8>()),
+            ) {
+                let kp_a = EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+                let kp_b = EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+                let sig = kp_a.sign(&digest).unwrap();
+                let valid = kp_b.verify(&digest, &sig).unwrap_or(false);
+                prop_assert!(!valid);
+            }
+        }
+    }
 }

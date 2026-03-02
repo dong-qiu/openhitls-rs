@@ -3711,3 +3711,17 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - **InvalidArg payload**: `CryptoError::InvalidArg` now carries `&'static str` context; ~50+ call sites updated across workspace; hash ops (`sha512`, `reduce_scalar_wide`, `mgf1_sha256`, etc.) now propagate errors via `?` instead of panicking; `rsa/oaep.rs` test fixed for `l_hash()` returning `Result`
 - **Context strings**: 16 files updated with descriptive messages; `dsa/mod.rs` g-check split into two separate conditions for distinct error paths
 - All 3,666 tests pass, 21 ignored, 0 clippy/fmt warnings
+
+---
+
+## Phase T68 — Quality Safety Net Enhancement (2026-03-02)
+
+**Prompt**: Implement Phase T68 quality safety net enhancements: (A) CI pipeline hardening — add fuzz-smoke job on PR/push, expand test-features from 9→24 combos, add concurrency block, deny.toml yanked→deny; (B) +6 fuzz targets (AES block, ChaCha20-Poly1305, CMAC, ECDH, Scrypt, McEliece) with 36 corpus seeds; (C) +9 proptest blocks (ML-KEM, ML-DSA, RSA, ECDSA, ECDH); (D) Record layer zeroize on CBC decrypt error paths (TLS 1.2 MtE/EtM, TLCP, DTLCP) + 3 unit tests. Close QUALITY_REPORT deficiencies D21–D25.
+
+**Result**:
+- **T68-A**: `.github/workflows/ci.yml` updated with `fuzz-smoke` job (10s per target on every PR/push), 15 additional feature combos in `test-features`, `concurrency:` block for CI deduplication; `deny.toml` yanked `warn` → `deny`
+- **T68-B**: 6 new fuzz targets (40→46): `fuzz_aes_block`, `fuzz_chacha20`, `fuzz_cmac`, `fuzz_ecdh`, `fuzz_scrypt`, `fuzz_mceliece`; 36 new corpus seeds (286→322); features `cmac`, `scrypt`, `mceliece`, `ecc` added to fuzz Cargo.toml
+- **T68-C**: 9 new proptest blocks: ML-KEM roundtrip+tamper (3 cases), ML-DSA sign+tamper (3 cases), RSA PSS sign+tamper (3 cases, static key), ECDSA P-256 sign+different key (10 cases), ECDH P-256 commutativity (10 cases)
+- **T68-D**: `decrypted.zeroize()` added to 13 error returns across 3 record encryption files; +3 unit tests (`test_cbc_mte_bad_mac_zeroizes_buffer`, `test_cbc_mte_bad_padding_zeroizes_buffer`, `test_cbc_etm_bad_mac_zeroizes_buffer`)
+- QUALITY_REPORT D21–D25 closed (D23 mostly closed — 6/12 algorithms covered)
+- All 3,678 tests pass, 21 ignored, 0 clippy/fmt warnings
