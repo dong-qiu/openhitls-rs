@@ -1,33 +1,36 @@
-//! Field arithmetic over GF(2^448 − 2^224 − 1) using 16×28-bit limb representation.
+//! Field arithmetic over GF(2^448 − 2^224 − 1) using 8×56-bit limb representation.
 //!
 //! The prime p = 2^448 − 2^224 − 1 is the "Goldilocks" prime, which allows
 //! efficient reduction via the identity 2^448 ≡ 2^224 + 1 (mod p).
+//!
+//! Uses Karatsuba multiplication with 4-limb (224-bit) splits, exploiting the
+//! Goldilocks structure for 48 u128 multiplies per field mul (vs 256 u32 muls
+//! in the old 16×28-bit representation).
 
 /// A field element in GF(p) where p = 2^448 − 2^224 − 1.
 ///
-/// Stored in radix-2^28 representation: value = Σ l[i] × 2^(28i), i=0..15.
+/// Stored in radix-2^56 representation: value = Σ l[i] × 2^(56i), i=0..7.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Fe448(pub(crate) [u32; 16]);
+pub(crate) struct Fe448(pub(crate) [u64; 8]);
 
-const LIMB_BITS: u32 = 28;
-const MASK28: u32 = (1u32 << 28) - 1;
+const MASK56: u64 = (1u64 << 56) - 1;
 
 impl Fe448 {
     /// The zero element.
     pub fn zero() -> Self {
-        Fe448([0; 16])
+        Fe448([0; 8])
     }
 
     /// The one element.
     pub fn one() -> Self {
-        let mut r = [0u32; 16];
+        let mut r = [0u64; 8];
         r[0] = 1;
         Fe448(r)
     }
 
     /// Addition: h = f + g.
     pub fn add(&self, rhs: &Fe448) -> Fe448 {
-        let mut r = [0u32; 16];
+        let mut r = [0u64; 8];
         for (i, ri) in r.iter_mut().enumerate() {
             *ri = self.0[i] + rhs.0[i];
         }
@@ -37,51 +40,70 @@ impl Fe448 {
     /// Subtraction: h = f - g.
     /// Add 2*p to avoid underflow before carry propagation.
     pub fn sub(&self, rhs: &Fe448) -> Fe448 {
-        // 2*p in 16×28-bit limbs:
-        // p = 2^448 − 2^224 − 1
-        // In limb form, p has all limbs = 2^28 - 1 = MASK28, except:
-        //   limb 0 has MASK28 - 1 + 1 ... actually let me compute carefully.
-        // p = 2^448 - 2^224 - 1
-        // In base 2^28, limb i represents bits [28i, 28(i+1)).
-        // 2^224 = 2^(28*8), so it affects limb 8.
-        // 2^448 = 2^(28*16), which overflows beyond our 16 limbs.
-        // p = (2^448 - 1) - 2^224
-        //   = (all 1s in 448 bits) - 2^224
-        // All limbs of (2^448 - 1) are MASK28.
-        // Subtracting 2^224: limb 8 -= 1.
-        // So p[i] = MASK28 for i != 8, p[8] = MASK28 - 1.
-        // 2*p[i] = 2*MASK28 for i != 8, 2*p[8] = 2*(MASK28 - 1).
+        // p = 2^448 - 2^224 - 1 = (2^448 - 1) - 2^224
+        // In radix 2^56: p[0..3] = MASK56, p[4] = MASK56-1, p[5..7] = MASK56
+        // 2p[i]: doubled values
+        let two_p: [u64; 8] = [
+            2 * MASK56,
+            2 * MASK56,
+            2 * MASK56,
+            2 * MASK56,
+            2 * (MASK56 - 1),
+            2 * MASK56,
+            2 * MASK56,
+            2 * MASK56,
+        ];
 
-        let two_p_normal = 2 * MASK28;
-        let two_p_8 = 2 * (MASK28 - 1);
-
-        let mut r = [0u64; 16];
-        for (i, ri) in r.iter_mut().enumerate() {
-            let bias = if i == 8 { two_p_8 } else { two_p_normal };
-            *ri = (self.0[i] as u64 + bias as u64) - rhs.0[i] as u64;
+        let mut r = [0u128; 8];
+        for i in 0..8 {
+            r[i] = (self.0[i] as u128 + two_p[i] as u128) - rhs.0[i] as u128;
         }
 
-        // Carry propagate
-        let mut out = [0u32; 16];
-        let mut carry = 0i64;
-        for i in 0..16 {
-            let val = r[i] as i64 + carry;
-            out[i] = (val as u32) & MASK28;
-            carry = val >> LIMB_BITS;
+        // Carry propagate with Goldilocks folding
+        let mut out = [0u64; 8];
+        let mut carry = 0i128;
+        for i in 0..8 {
+            let val = r[i] as i128 + carry;
+            out[i] = (val as u64) & MASK56;
+            carry = val >> 56;
         }
-        // Wrap carry: top carry goes to limb 0 (× 1) and limb 8 (× 1)
-        // because 2^448 ≡ 2^224 + 1 (mod p)
-        let val = out[0] as i64 + carry;
-        out[0] = (val as u32) & MASK28;
-        let carry2 = val >> LIMB_BITS;
-        out[1] = ((out[1] as i64) + carry2) as u32;
+        // Wrap carry: 2^448 ≡ 2^224 + 1
+        // carry goes to limb 0 and limb 4 independently
+        let val = out[0] as i128 + carry;
+        out[0] = (val as u64) & MASK56;
+        let c_lo = val >> 56;
+        if c_lo != 0 {
+            out[1] = ((out[1] as i128) + c_lo) as u64;
+        }
 
-        let val = out[8] as i64 + carry;
-        out[8] = (val as u32) & MASK28;
-        let carry2 = val >> LIMB_BITS;
-        out[9] = ((out[9] as i64) + carry2) as u32;
+        let val = out[4] as i128 + carry;
+        out[4] = (val as u64) & MASK56;
+        let c_hi = val >> 56;
+        if c_hi != 0 {
+            out[5] = ((out[5] as i128) + c_hi) as u64;
+        }
 
         Fe448(out)
+    }
+
+    /// Subtraction without full carry: add 2p bias only.
+    /// Safe only when result feeds directly into mul/square (bounded output).
+    pub fn sub_fast(&self, rhs: &Fe448) -> Fe448 {
+        let two_p: [u64; 8] = [
+            2 * MASK56,
+            2 * MASK56,
+            2 * MASK56,
+            2 * MASK56,
+            2 * (MASK56 - 1),
+            2 * MASK56,
+            2 * MASK56,
+            2 * MASK56,
+        ];
+        let mut r = [0u64; 8];
+        for i in 0..8 {
+            r[i] = self.0[i] + two_p[i] - rhs.0[i];
+        }
+        Fe448(r)
     }
 
     /// Negation: h = -f (mod p).
@@ -91,178 +113,98 @@ impl Fe448 {
 
     /// Multiplication: h = f * g.
     ///
-    /// Uses 16×16 schoolbook multiply followed by Goldilocks reduction
-    /// via the identity 2^448 ≡ 2^224 + 1 (mod p).
+    /// Uses Karatsuba with 4-limb (224-bit) splits and Goldilocks reduction.
+    /// Total: 48 u128 multiplies.
     pub fn mul(&self, rhs: &Fe448) -> Fe448 {
-        Self::mul_and_reduce(&self.0, &rhs.0)
+        let a = &self.0;
+        let b = &rhs.0;
+
+        // Karatsuba: split at 4 limbs (224 bits)
+        let p0 = mul_4x4([a[0], a[1], a[2], a[3]], [b[0], b[1], b[2], b[3]]);
+        let p2 = mul_4x4([a[4], a[5], a[6], a[7]], [b[4], b[5], b[6], b[7]]);
+
+        let mid_a = [a[0] + a[4], a[1] + a[5], a[2] + a[6], a[3] + a[7]];
+        let mid_b = [b[0] + b[4], b[1] + b[5], b[2] + b[6], b[3] + b[7]];
+        let p1 = mul_4x4(mid_a, mid_b);
+
+        let mut cross = [0i128; 7];
+        for i in 0..7 {
+            cross[i] = p1[i] - p0[i] - p2[i];
+        }
+
+        goldilocks_reduce(&p0, &cross, &p2)
     }
 
-    /// Full 32-limb schoolbook multiply followed by Goldilocks reduction.
-    fn mul_and_reduce(f: &[u32; 16], g: &[u32; 16]) -> Fe448 {
-        // Schoolbook: 16×16 → 31 limbs of partial sums in u64
-        let mut prod = [0u64; 31];
-        for i in 0..16 {
-            for j in 0..16 {
-                prod[i + j] += f[i] as u64 * g[j] as u64;
-            }
-        }
-
-        // Reduce: 2^448 ≡ 2^224 + 1 (mod p).
-        // Limb 16 corresponds to 2^(28*16) = 2^448 ≡ 2^224 + 1.
-        // So prod[16+k] * 2^(28*(16+k)) ≡ prod[16+k] * (2^(28*(8+k)) + 2^(28*k)).
-        // In other words, fold prod[16..30] into prod[0..14] and prod[8..22].
-        let mut acc = [0u64; 16];
-        for i in 0..16 {
-            acc[i] += prod[i];
-        }
-        for i in 0..15 {
-            // prod[16+i] folds to limb i (×1) and limb i+8 (×1)
-            acc[i] += prod[16 + i];
-            acc[(i + 8) % 16] += prod[16 + i];
-            // When i+8 >= 16 (i.e., i >= 8), we wrap again: limb (i+8-16)
-            // gets an additional fold due to 2^(28*(i+8)) with i+8 >= 16
-            // means 2^(448 + 28*(i-8)) which again ≡ 2^(224+28*(i-8)) + 2^(28*(i-8)).
-            // But (i+8)%16 = i-8 when i>=8, and we already added to acc[i-8].
-            // The second fold: when i+8>=16, also add to acc[(i+8-16)+8] = acc[i].
-            // But that's acc[i] which already has prod[16+i]. We need to also add
-            // to acc[i] again? No — let me think more carefully.
-            //
-            // For i < 8: target = i and i+8. Both < 16. Fine.
-            // For i >= 8: (i+8)%16 = i-8 < 8. So we add to acc[i] and acc[i-8].
-            // But wait: when i >= 8, prod[16+i] * 2^(28*(16+i)) maps to:
-            //   2^(28*(16+i)) = 2^448 * 2^(28*i) ≡ (2^224 + 1) * 2^(28*i)
-            //     = 2^(28*(i+8)) + 2^(28*i)
-            //   Now 2^(28*(i+8)): when i+8 >= 16 (i >= 8):
-            //     2^(28*(i+8)) = 2^(28*16) * 2^(28*(i-8)) = 2^448 * 2^(28*(i-8))
-            //     ≡ (2^224 + 1) * 2^(28*(i-8)) = 2^(28*(i-8+8)) + 2^(28*(i-8))
-            //     = 2^(28*i) + 2^(28*(i-8))
-            //   So total: 2^(28*i) + 2^(28*(i-8)) + 2^(28*i) = 2*2^(28*i) + 2^(28*(i-8))
-            //
-            // So for i >= 8: prod[16+i] contributes:
-            //   2× to acc[i] and 1× to acc[i-8]
-            // For i < 8: prod[16+i] contributes:
-            //   1× to acc[i] and 1× to acc[i+8]
-            if i >= 8 {
-                // We already added 1× to acc[i] and 1× to acc[i-8] above.
-                // Need one more × to acc[i].
-                acc[i] += prod[16 + i];
-            }
-        }
-
-        // Carry propagate with Goldilocks folding
-        Self::carry_wide(&mut acc)
-    }
-
-    /// Carry propagate a 16-limb u64 accumulator, folding overflow via Goldilocks.
-    fn carry_wide(acc: &mut [u64; 16]) -> Fe448 {
-        let mut r = [0u32; 16];
-
-        // First pass: propagate carries linearly
-        let mut carry: u64 = 0;
-        for i in 0..16 {
-            let val = acc[i] + carry;
-            r[i] = (val as u32) & MASK28;
-            carry = val >> LIMB_BITS;
-        }
-
-        // Top carry folds back: 2^448 ≡ 2^224 + 1
-        // carry * 2^448 ≡ carry * (2^224 + 1) = carry * 2^(28*8) + carry
-        let c = carry;
-        let val = r[0] as u64 + c;
-        r[0] = (val as u32) & MASK28;
-        let mut c2 = val >> LIMB_BITS;
-        // Propagate carry through limbs 1..7
-        for limb in r.iter_mut().take(8).skip(1) {
-            let val = *limb as u64 + c2;
-            *limb = (val as u32) & MASK28;
-            c2 = val >> LIMB_BITS;
-            if c2 == 0 {
-                break;
-            }
-        }
-
-        let val = r[8] as u64 + c + c2;
-        r[8] = (val as u32) & MASK28;
-        let mut c3 = val >> LIMB_BITS;
-        for limb in r.iter_mut().take(16).skip(9) {
-            let val = *limb as u64 + c3;
-            *limb = (val as u32) & MASK28;
-            c3 = val >> LIMB_BITS;
-            if c3 == 0 {
-                break;
-            }
-        }
-
-        // If there's still carry, do one more fold (extremely unlikely)
-        if c3 > 0 {
-            let val = r[0] as u64 + c3;
-            r[0] = (val as u32) & MASK28;
-            let val = r[8] as u64 + c3;
-            r[8] = (val as u32) & MASK28;
-        }
-
-        Fe448(r)
-    }
-
-    /// Squaring: h = f^2 (slightly optimized by exploiting symmetry).
+    /// Squaring: h = f^2.
+    ///
+    /// Uses Karatsuba with cross-product symmetry: 30 u128 multiplies.
     pub fn square(&self) -> Fe448 {
-        let f = &self.0;
+        let a = &self.0;
 
-        // Schoolbook with doubled cross-terms
-        let mut prod = [0u64; 31];
-        for i in 0..16 {
-            prod[2 * i] += f[i] as u64 * f[i] as u64;
-            for j in (i + 1)..16 {
-                prod[i + j] += 2 * (f[i] as u64 * f[j] as u64);
-            }
+        let p0 = sqr_4x4([a[0], a[1], a[2], a[3]]);
+        let p2 = sqr_4x4([a[4], a[5], a[6], a[7]]);
+
+        let mid = [a[0] + a[4], a[1] + a[5], a[2] + a[6], a[3] + a[7]];
+        let p1 = sqr_4x4(mid);
+
+        let mut cross = [0i128; 7];
+        for i in 0..7 {
+            cross[i] = p1[i] - p0[i] - p2[i];
         }
 
-        // Same reduction as mul
-        let mut acc = [0u64; 16];
-        for i in 0..16 {
-            acc[i] += prod[i];
-        }
-        for i in 0..15 {
-            acc[i] += prod[16 + i];
-            acc[(i + 8) % 16] += prod[16 + i];
-            if i >= 8 {
-                acc[i] += prod[16 + i];
-            }
-        }
-
-        Self::carry_wide(&mut acc)
+        goldilocks_reduce(&p0, &cross, &p2)
     }
 
     /// Multiply by a small constant: h = f * c.
     pub fn mul_small(&self, c: u32) -> Fe448 {
-        let mut acc = [0u64; 16];
+        let mut acc = [0u128; 8];
         for (i, a) in acc.iter_mut().enumerate() {
-            *a = self.0[i] as u64 * c as u64;
+            *a = self.0[i] as u128 * c as u128;
         }
-        Self::carry_wide(&mut acc)
+        // Carry propagate
+        let mut r = [0u64; 8];
+        let mut carry = 0u128;
+        for i in 0..8 {
+            let val = acc[i] + carry;
+            r[i] = (val as u64) & MASK56;
+            carry = val >> 56;
+        }
+        // Top carry folds: 2^448 ≡ 2^224 + 1
+        r[0] += carry as u64;
+        r[4] += carry as u64;
+        // One more carry pass
+        for i in 0..7 {
+            let c = r[i] >> 56;
+            r[i] &= MASK56;
+            r[i + 1] += c;
+            if c == 0 {
+                break;
+            }
+        }
+        Fe448(r)
     }
 
-    /// Carry propagation for u32 limbs.
+    /// Carry propagation for u64 limbs.
     fn carry(&self) -> Fe448 {
         let mut r = self.0;
 
         // Linear carry propagation
-        for i in 0..15 {
-            let c = r[i] >> LIMB_BITS;
-            r[i] &= MASK28;
+        for i in 0..7 {
+            let c = r[i] >> 56;
+            r[i] &= MASK56;
             r[i + 1] += c;
         }
-        let c = r[15] >> LIMB_BITS;
-        r[15] &= MASK28;
+        let c = r[7] >> 56;
+        r[7] &= MASK56;
 
         // Goldilocks fold: 2^448 ≡ 2^224 + 1
         r[0] += c;
-        r[8] += c;
+        r[4] += c;
 
         // One more carry if needed
-        for i in 0..15 {
-            let c = r[i] >> LIMB_BITS;
-            r[i] &= MASK28;
+        for i in 0..7 {
+            let c = r[i] >> 56;
+            r[i] &= MASK56;
             r[i + 1] += c;
             if c == 0 {
                 break;
@@ -277,30 +219,22 @@ impl Fe448 {
     pub fn reduce(&self) -> Fe448 {
         let mut r = self.carry().0;
 
-        // Subtracting p is equivalent to adding (1 + 2^224) and subtracting 2^448.
-        // If (r + 1 + 2^224) overflows 448 bits, then r >= p, and the lower 448 bits
-        // of the sum equal r - p.
-
-        let mut test = [0u64; 16];
-        for i in 0..16 {
-            test[i] = r[i] as u64;
-        }
-        test[0] += 1;
-        test[8] += 1;
+        // Subtracting p is equivalent to adding (1 + 2^224) and checking overflow.
+        let mut test = r;
+        test[0] = test[0].wrapping_add(1);
+        test[4] = test[4].wrapping_add(1);
 
         // Propagate carries
-        for i in 0..15 {
-            test[i + 1] += test[i] >> LIMB_BITS;
-            test[i] &= MASK28 as u64;
+        for i in 0..7 {
+            test[i + 1] += test[i] >> 56;
+            test[i] &= MASK56;
         }
-        let overflow = test[15] >> LIMB_BITS;
-        test[15] &= MASK28 as u64;
+        let overflow = test[7] >> 56;
+        test[7] &= MASK56;
 
         // If overflow > 0, r >= p. Use test (which is r - p).
         if overflow > 0 {
-            for i in 0..16 {
-                r[i] = test[i] as u32;
-            }
+            r = test;
         }
 
         Fe448(r)
@@ -323,7 +257,6 @@ impl Fe448 {
     /// Compute self^(p-2) for inversion using compact addition chain.
     fn pow_p_minus_2(&self) -> Fe448 {
         // p - 2 = 2^448 - 2^224 - 3
-        // = (2^223 - 1) * 2^225 + (2^222 - 1) * 4 + 1
         let a = *self;
         let a3 = a.square().mul(&a);
         let a7 = a3.square().mul(&a);
@@ -360,25 +293,13 @@ impl Fe448 {
 
     /// Decode a 56-byte little-endian representation into a field element.
     pub fn from_bytes(bytes: &[u8; 56]) -> Fe448 {
-        // Each limb is 28 bits = 3.5 bytes. Pack from LE bytes.
-        let mut r = [0u32; 16];
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..16 {
-            // Limb i covers bits [28*i, 28*(i+1)).
-            // Byte-level: bit 28*i starts at byte (28*i)/8 = 3.5*i
-            let bit_start = 28 * i;
-            let byte_start = bit_start / 8;
-            let bit_offset = bit_start % 8;
-
-            // Read 4 bytes (enough for 28 + bit_offset bits)
-            let mut val = 0u32;
-            for j in 0..4 {
-                let idx = byte_start + j;
-                if idx < 56 {
-                    val |= (bytes[idx] as u32) << (j * 8);
-                }
-            }
-            r[i] = (val >> bit_offset) & MASK28;
+        let mut r = [0u64; 8];
+        // 7 bytes per limb (56 bits = 7 bytes exactly), 8 limbs = 56 bytes
+        for (i, ri) in r.iter_mut().enumerate() {
+            let base = i * 7;
+            let mut buf = [0u8; 8];
+            buf[..7].copy_from_slice(&bytes[base..base + 7]);
+            *ri = u64::from_le_bytes(buf) & MASK56;
         }
         Fe448(r)
     }
@@ -387,37 +308,25 @@ impl Fe448 {
     pub fn to_bytes(self) -> [u8; 56] {
         let h = self.reduce().0;
         let mut out = [0u8; 56];
-
-        // Pack 16 × 28-bit limbs into 448 bits (56 bytes, LE).
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..16 {
-            let bit_start = 28 * i;
-            let byte_start = bit_start / 8;
-            let bit_offset = bit_start % 8;
-
-            let val = (h[i] as u64) << bit_offset;
-            for j in 0..4 {
-                let idx = byte_start + j;
-                if idx < 56 {
-                    out[idx] |= (val >> (j * 8)) as u8;
-                }
-            }
+        for (i, &limb) in h.iter().enumerate() {
+            let base = i * 7;
+            let bytes = limb.to_le_bytes();
+            out[base..base + 7].copy_from_slice(&bytes[..7]);
         }
-
         out
     }
 
     /// Constant-time conditional swap: swap self and other if swap == 1.
     pub fn conditional_swap(&mut self, other: &mut Fe448, swap: u8) {
-        let mask = (-(swap as i32)) as u32;
-        for i in 0..16 {
+        let mask = (-(swap as i64)) as u64;
+        for i in 0..8 {
             let t = mask & (self.0[i] ^ other.0[i]);
             self.0[i] ^= t;
             other.0[i] ^= t;
         }
     }
 
-    /// Returns 1 if the field element is negative (LSB of canonical encoding is 1), 0 otherwise.
+    /// Returns 1 if the field element is negative (LSB of canonical encoding is 1).
     pub fn is_negative(&self) -> u8 {
         let bytes = self.to_bytes();
         bytes[0] & 1
@@ -428,6 +337,113 @@ impl Fe448 {
         let r = self.reduce();
         r.0.iter().all(|&x| x == 0)
     }
+}
+
+/// Schoolbook 4×4 multiplication: 16 u128 multiplies → 7 output limbs.
+#[inline]
+fn mul_4x4(a: [u64; 4], b: [u64; 4]) -> [i128; 7] {
+    let mut r = [0i128; 7];
+    for i in 0..4 {
+        for j in 0..4 {
+            r[i + j] += a[i] as i128 * b[j] as i128;
+        }
+    }
+    r
+}
+
+/// Schoolbook 4×4 squaring with cross-product symmetry: 10 u128 multiplies → 7 limbs.
+#[inline]
+fn sqr_4x4(a: [u64; 4]) -> [i128; 7] {
+    let mut r = [0i128; 7];
+    // Diagonal terms
+    for i in 0..4 {
+        r[2 * i] += a[i] as i128 * a[i] as i128;
+    }
+    // Doubled cross terms
+    for i in 0..4 {
+        for j in (i + 1)..4 {
+            r[i + j] += 2 * (a[i] as i128 * a[j] as i128);
+        }
+    }
+    r
+}
+
+/// Goldilocks reduction: combine p0 (pos 0..6), cross (pos 4..10), p2 (pos 8..14)
+/// into 8 limbs using 2^448 ≡ 2^224 + 1.
+///
+/// Fold schedule (position j ≥ 8 maps to (j-4) + (j-8)):
+///   pos 8..11 → simple fold to (j-4) + (j-8)
+///   pos 12..14 → double cascade: 2×(j-8) + (j-12)
+#[inline]
+fn goldilocks_reduce(p0: &[i128; 7], cross: &[i128; 7], p2: &[i128; 7]) -> Fe448 {
+    let mut acc = [0i128; 8];
+
+    // p0 at positions 0..6
+    for i in 0..7 {
+        acc[i] += p0[i];
+    }
+
+    // cross at positions 4..10, with Goldilocks fold for 8..10
+    for i in 0..4 {
+        acc[i + 4] += cross[i];
+    }
+    for i in 4..7 {
+        acc[i - 4] += cross[i]; // fold pos (i+4) → pos (i-4)
+        acc[i] += cross[i]; // fold pos (i+4) → pos i
+    }
+
+    // p2 at positions 8..14, with cascaded fold for 12..14
+    for i in 0..4 {
+        acc[i] += p2[i]; // fold pos (i+8) → pos i
+        acc[i + 4] += p2[i]; // fold pos (i+8) → pos (i+4)
+    }
+    for i in 4..7 {
+        acc[i - 4] += p2[i]; // cascade: pos(i+8)→pos(i+4)→pos(i-4) (×1)
+        acc[i] += 2 * p2[i]; // cascade: pos(i+8)→pos i (×1) + pos(i+4)→pos i (×1) = ×2
+    }
+
+    carry_wide_signed(&acc)
+}
+
+/// Carry propagation for signed i128 accumulators with Goldilocks folding.
+#[inline]
+fn carry_wide_signed(acc: &[i128; 8]) -> Fe448 {
+    let mut c = *acc;
+
+    // First pass: carry propagation
+    for i in 0..7 {
+        let carry = c[i] >> 56;
+        c[i] -= carry << 56;
+        c[i + 1] += carry;
+    }
+    let carry = c[7] >> 56;
+    c[7] -= carry << 56;
+
+    // Goldilocks fold of top carry
+    c[0] += carry;
+    c[4] += carry;
+
+    // Second pass to normalize
+    for i in 0..7 {
+        let carry = c[i] >> 56;
+        c[i] -= carry << 56;
+        c[i + 1] += carry;
+    }
+    let carry = c[7] >> 56;
+    c[7] -= carry << 56;
+    c[0] += carry;
+    c[4] += carry;
+
+    Fe448([
+        c[0] as u64,
+        c[1] as u64,
+        c[2] as u64,
+        c[3] as u64,
+        c[4] as u64,
+        c[5] as u64,
+        c[6] as u64,
+        c[7] as u64,
+    ])
 }
 
 impl PartialEq for Fe448 {
@@ -492,7 +508,6 @@ mod tests {
         for (i, b) in bytes.iter_mut().enumerate() {
             *b = i as u8;
         }
-        // Ensure top bits are below p (should be fine for small values)
         let a = Fe448::from_bytes(&bytes);
         let encoded = a.to_bytes();
         let b = Fe448::from_bytes(&encoded);
@@ -521,9 +536,9 @@ mod tests {
     fn test_goldilocks_reduction() {
         // Test that p ≡ 0: construct p and verify it reduces to 0.
         // p = 2^448 - 2^224 - 1
-        // In limbs: all MASK28, except limb 8 is MASK28 - 1
-        let mut p_limbs = [MASK28; 16];
-        p_limbs[8] = MASK28 - 1;
+        // In 8×u64: p[0] = MASK56-1, p[1..3] = MASK56, p[4] = MASK56-1, p[5..7] = MASK56
+        let mut p_limbs = [MASK56; 8];
+        p_limbs[4] = MASK56 - 1;
         let p_val = Fe448(p_limbs);
         assert!(p_val.reduce().is_zero());
     }
@@ -639,5 +654,16 @@ mod tests {
         let one = Fe448::one();
         let inv = one.invert();
         assert_eq!(inv.to_bytes(), one.to_bytes());
+    }
+
+    #[test]
+    fn test_sub_fast_consistency() {
+        // sub_fast should produce same result as sub (modulo carry)
+        let a = Fe448::from_bytes(&[0x42; 56]);
+        let b = Fe448::from_bytes(&[0x37; 56]);
+        let slow = a.sub(&b);
+        let fast = a.sub_fast(&b);
+        // The results should be equal after reduction
+        assert_eq!(slow.to_bytes(), fast.reduce().to_bytes());
     }
 }

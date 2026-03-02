@@ -271,58 +271,91 @@ pub(crate) fn point_double(a: &GeExtended448) -> GeExtended448 {
     }
 }
 
-/// Scalar multiplication: R = scalar * point using w=4 fixed-window method.
+/// Batch-convert 15 extended points to affine Ed448TablePoints using Montgomery trick.
 ///
-/// The scalar is a little-endian byte array (57 bytes for Ed448).
-/// Precomputes [0P, 1P, ..., 15P], processes 4 bits at a time.
-pub(crate) fn scalar_mul(scalar: &[u8], point: &GeExtended448) -> GeExtended448 {
-    // Precompute table: table[i] = i * P for i = 0..16
-    let mut table = Vec::with_capacity(16);
-    table.push(GeExtended448::identity()); // 0P
-    table.push(*point); // 1P
-    table.push(point_double(point)); // 2P
-    for i in 3..16usize {
-        table.push(point_add(&table[i - 1], point));
+/// Uses a single field inversion + 28 field multiplications (vs 15 inversions).
+fn batch_to_table_points(points: &[GeExtended448; 15]) -> [Ed448TablePoint; 15] {
+    let d = d_const();
+
+    // Forward pass: accumulate Z products
+    let mut z_acc = [Fe448::one(); 15];
+    z_acc[0] = points[0].z;
+    for i in 1..15 {
+        z_acc[i] = z_acc[i - 1].mul(&points[i].z);
     }
 
+    // Single inversion of the accumulated product
+    let mut inv = z_acc[14].invert();
+
+    // Backward pass: extract individual 1/Z_i
+    let mut result = [Ed448TablePoint::identity(); 15];
+    for i in (1..15).rev() {
+        let z_inv = inv.mul(&z_acc[i - 1]); // 1/Z_i
+        inv = inv.mul(&points[i].z); // update for next iteration
+
+        let x = points[i].x.mul(&z_inv);
+        let y = points[i].y.mul(&z_inv);
+        result[i] = Ed448TablePoint {
+            xpy: x.add(&y),
+            d_xy: d.mul(&x).mul(&y),
+            x,
+            y,
+        };
+    }
+
+    // i = 0: inv is now 1/Z_0
+    let x = points[0].x.mul(&inv);
+    let y = points[0].y.mul(&inv);
+    result[0] = Ed448TablePoint {
+        xpy: x.add(&y),
+        d_xy: d.mul(&x).mul(&y),
+        x,
+        y,
+    };
+
+    result
+}
+
+/// Scalar multiplication: R = scalar * point.
+///
+/// Constant-time w=4 fixed-window with affine precomputed table and mixed additions.
+/// The scalar is a little-endian byte array (57 bytes for Ed448).
+///
+/// Security: always doubles 4×, always does ct_select + mixed add (identity is no-op).
+pub(crate) fn scalar_mul(scalar: &[u8], point: &GeExtended448) -> GeExtended448 {
+    // Precompute [1P, 2P, ..., 15P] in extended coordinates
+    let mut ext_table = [GeExtended448::identity(); 15];
+    ext_table[0] = *point; // 1P
+    ext_table[1] = point_double(point); // 2P
+    for i in 2..15 {
+        ext_table[i] = point_add(&ext_table[i - 1], point);
+    }
+
+    // Batch convert to affine Ed448TablePoint (single inversion)
+    let affine_pts = batch_to_table_points(&ext_table);
+
+    // Build 16-entry table with identity at index 0
+    let mut table = [Ed448TablePoint::identity(); 16];
+    table[1..16].copy_from_slice(&affine_pts);
+
+    // Process MSB to LSB: scalar is little-endian, iterate bytes in reverse
     let mut result = GeExtended448::identity();
-    let mut started = false;
-
-    // Process from MSB to LSB: scalar is little-endian, so iterate bytes in reverse
     for &byte in scalar.iter().rev() {
-        // High nibble (MSB of this byte)
         let hi = (byte >> 4) & 0xF;
-        if started {
-            result = point_double(&result);
-            result = point_double(&result);
-            result = point_double(&result);
-            result = point_double(&result);
-        }
-        if hi != 0 {
-            if started {
-                result = point_add(&result, &table[hi as usize]);
-            } else {
-                result = table[hi as usize];
-                started = true;
-            }
-        }
+        result = point_double(&result);
+        result = point_double(&result);
+        result = point_double(&result);
+        result = point_double(&result);
+        let selected = ct_select_table(&table, hi);
+        result = point_add_mixed(&result, &selected);
 
-        // Low nibble (LSB of this byte)
         let lo = byte & 0xF;
-        if started {
-            result = point_double(&result);
-            result = point_double(&result);
-            result = point_double(&result);
-            result = point_double(&result);
-        }
-        if lo != 0 {
-            if started {
-                result = point_add(&result, &table[lo as usize]);
-            } else {
-                result = table[lo as usize];
-                started = true;
-            }
-        }
+        result = point_double(&result);
+        result = point_double(&result);
+        result = point_double(&result);
+        result = point_double(&result);
+        let selected = ct_select_table(&table, lo);
+        result = point_add_mixed(&result, &selected);
     }
 
     result
@@ -356,12 +389,11 @@ impl Ed448TablePoint {
 
     /// Constant-time conditional assignment: self = other if mask is all-1s.
     fn ct_assign(&mut self, other: &Ed448TablePoint, mask: u64) {
-        let m = mask as u32;
-        for i in 0..16 {
-            self.x.0[i] ^= m & (self.x.0[i] ^ other.x.0[i]);
-            self.y.0[i] ^= m & (self.y.0[i] ^ other.y.0[i]);
-            self.xpy.0[i] ^= m & (self.xpy.0[i] ^ other.xpy.0[i]);
-            self.d_xy.0[i] ^= m & (self.d_xy.0[i] ^ other.d_xy.0[i]);
+        for i in 0..8 {
+            self.x.0[i] ^= mask & (self.x.0[i] ^ other.x.0[i]);
+            self.y.0[i] ^= mask & (self.y.0[i] ^ other.y.0[i]);
+            self.xpy.0[i] ^= mask & (self.xpy.0[i] ^ other.xpy.0[i]);
+            self.d_xy.0[i] ^= mask & (self.d_xy.0[i] ^ other.d_xy.0[i]);
         }
     }
 }
