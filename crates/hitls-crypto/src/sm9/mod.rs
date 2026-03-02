@@ -465,4 +465,23 @@ mod tests {
         ct[70] ^= 0xFF; // Tamper with MAC area
         assert!(user.decrypt(&ct).is_err());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(3))]
+
+            #[test]
+            fn prop_sm9_sign_verify_roundtrip(
+                msg in prop::collection::vec(any::<u8>(), 1..64),
+            ) {
+                let master = Sm9MasterKey::generate(Sm9KeyType::Sign).unwrap();
+                let user = master.extract_user_key(b"Alice").unwrap();
+                let sig = user.sign(&msg, master.master_public_key()).unwrap();
+                prop_assert!(master.verify(b"Alice", &msg, &sig).unwrap());
+            }
+        }
+    }
 }

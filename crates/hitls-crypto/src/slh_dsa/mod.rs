@@ -342,4 +342,37 @@ mod tests {
         let sig = kp.sign(&msg).unwrap();
         assert!(kp.verify(&msg, &sig).unwrap());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(3))]
+
+            #[test]
+            fn prop_slhdsa_shake128f_sign_verify(
+                msg in prop::collection::vec(any::<u8>(), 0..128),
+            ) {
+                let kp = SlhDsaKeyPair::generate(SlhDsaParamId::Shake128f).unwrap();
+                let sig = kp.sign(&msg).unwrap();
+                prop_assert!(kp.verify(&msg, &sig).unwrap());
+            }
+
+            #[test]
+            fn prop_slhdsa_tampered_sig_rejected(
+                msg in prop::collection::vec(any::<u8>(), 1..64),
+                tamper_pos in 0..100usize,
+            ) {
+                let kp = SlhDsaKeyPair::generate(SlhDsaParamId::Shake128f).unwrap();
+                let sig = kp.sign(&msg).unwrap();
+                let mut tampered = sig.clone();
+                let idx = tamper_pos % tampered.len();
+                tampered[idx] ^= 0x01;
+                if let Ok(valid) = kp.verify(&msg, &tampered) {
+                    prop_assert!(!valid);
+                }
+            }
+        }
+    }
 }

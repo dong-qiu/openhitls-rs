@@ -444,4 +444,40 @@ mod tests {
         let result = DsaKeyPair::from_private_key(params, &[0]);
         assert!(result.is_err(), "x=0 should be rejected");
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(10))]
+
+            #[test]
+            fn prop_dsa_small_sign_verify_roundtrip(
+                msg in prop::collection::vec(any::<u8>(), 1..64),
+            ) {
+                let params = small_params();
+                let kp = DsaKeyPair::generate(params).unwrap();
+                let sig = kp.sign(&msg).unwrap();
+                prop_assert!(kp.verify(&msg, &sig).unwrap());
+            }
+
+            #[test]
+            fn prop_dsa_small_tampered_sig_rejected(
+                msg in prop::collection::vec(any::<u8>(), 1..64),
+                tamper_byte in any::<u8>(),
+            ) {
+                let params = small_params();
+                let kp = DsaKeyPair::generate(params).unwrap();
+                let sig = kp.sign(&msg).unwrap();
+                if sig.is_empty() { return Ok(()); }
+                let mut tampered = sig.clone();
+                tampered[0] ^= tamper_byte | 1; // ensure at least 1 bit flipped
+                // Tampered sig should either error or return false
+                if let Ok(valid) = kp.verify(&msg, &tampered) {
+                    prop_assert!(!valid);
+                }
+            }
+        }
+    }
 }

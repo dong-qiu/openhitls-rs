@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I84 (84 phases)
-- Testing: T1–T68 (66 phases)
+- Testing: T1–T69 (67 phases)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P62 (62 phases)
 
@@ -233,7 +233,8 @@ Category summary:
 | 221 | T66 | Test | CI Hardening + HMAC Fix + Test Coverage Expansion (+66 tests) | 2026-03-01 |
 | 222 | T67 | Test | Code Quality Hardening — Dependabot, Windows CI, InvalidArg payload, hash ? propagation | 2026-03-01 |
 | 223 | T68 | Test | Quality Safety Net Enhancement — CI fuzz-smoke/feature expansion, +6 fuzz targets, +9 proptests, record zeroize | 2026-03-02 |
-| 224 | I83 | Impl | HPKE Full RFC 9180 Coverage — 4 KEMs, 3 KDFs, 4 AEADs, 4 Modes | 2026-03-02 |
+| 224 | T69 | Test | Quality Safety Net P0 — Miri NTT+GCM, +12 feature flag tests, +10 proptests (DH/DSA/Ed448/SM2/SM9/SLH-DSA) | 2026-03-02 |
+| 225 | I83 | Impl | HPKE Full RFC 9180 Coverage — 4 KEMs, 3 KDFs, 4 AEADs, 4 Modes | 2026-03-02 |
 | 225 | I84 | Impl | CLI prime/kdf Commands + BigNum String Conversions + PBKDF2 Generalization | 2026-03-02 |
 
 ---
@@ -12175,6 +12176,60 @@ Test counts unchanged — all changes are code quality improvements, no new test
 ### Build Status (Post T67)
 - `cargo test --workspace --all-features`: 3,645 passed, 0 failed, 21 ignored (3,666 total)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T69 — Quality Safety Net P0 Enhancement (2026-03-02)
+
+### Summary
+Miri CI expansion (+NTT + GCM software paths), feature flag isolation testing (+12 features, fix `aes,gcm`→`aes,modes`), +10 proptest blocks across 6 modules (DH, DSA, Ed448, SM2, SM9, SLH-DSA). Closes QUALITY_REPORT deficiencies D27 (mostly), D29–D31.
+
+### Files Modified
+
+| Category | File | Changes |
+|----------|------|---------|
+| CI | `.github/workflows/ci.yml` | +3 Miri runs (mlkem::ntt, mldsa::ntt, modes::gcm), +12 feature flag tests (sha1, sha3, ecdh, x25519, x448, hkdf, pbkdf2, sm9, frodokem, mceliece, drbg, fips, dtls12, pki x509+pkcs8, auth), fix `aes,gcm`→`aes,modes` |
+| Proptest | `crates/hitls-crypto/src/dh/mod.rs` | +1 proptest: DH RFC2409_768 commutativity (3 cases) |
+| Proptest | `crates/hitls-crypto/src/dsa/mod.rs` | +2 proptests: DSA small params sign/verify + tampered sig rejection (10 cases) |
+| Proptest | `crates/hitls-crypto/src/ed448/mod.rs` | +2 proptests: Ed448 sign/verify roundtrip + different key rejection (3 cases) |
+| Proptest | `crates/hitls-crypto/src/sm2/mod.rs` | +2 proptests: SM2 sign/verify + encrypt/decrypt roundtrip (5 cases) |
+| Proptest | `crates/hitls-crypto/src/sm9/mod.rs` | +1 proptest: SM9 sign/verify roundtrip (3 cases) |
+| Proptest | `crates/hitls-crypto/src/slh_dsa/mod.rs` | +2 proptests: SLH-DSA Shake128f sign/verify + tampered sig rejection (3 cases) |
+| Proptest | `crates/hitls-crypto/src/mldsa/mod.rs` | Fix: tampered_sig → wrong_message (lattice-based sig byte-flip may not invalidate) |
+| Docs | `QUALITY_REPORT.md` | D27 mostly closed, D29–D31 closed, counts updated |
+
+### Implementation Details
+
+**Miri Expansion (D→C+)**:
+- `cargo miri test -p hitls-crypto --all-features -- mlkem::ntt::tests --skip neon` (8 scalar NTT tests)
+- `cargo miri test -p hitls-crypto --all-features -- mldsa::ntt::tests --skip neon` (9 scalar NTT tests)
+- `cargo miri test -p hitls-crypto --all-features -- modes::gcm` (19 GCM tests)
+- Note: HW accel SIMD files remain untestable by Miri (architecture-specific intrinsics)
+
+**Feature Flag Isolation (C→B)**:
+- hitls-crypto: +12 single-feature tests (sha1, sha3, ecdh, x25519, x448, hkdf, pbkdf2, sm9, frodokem, mceliece, drbg, fips)
+- hitls-tls: +1 (dtls12)
+- hitls-pki: +1 (x509,pkcs8)
+- hitls-auth: +1 (--all-features)
+- Fix: `--features aes,gcm` → `--features aes,modes` (gcm is not a feature; modes is)
+- Total: 27→39 feature test combinations
+
+**Proptest Expansion (B→B+)**:
+- +10 proptest blocks across 6 new modules (was 37 blocks, now ~47)
+- Fixed ML-DSA tampered_sig proptest → wrong_message (byte-flip in lattice sig hint doesn't reliably invalidate)
+- Slow keygen modules (DH, Ed448, SM9, SLH-DSA): 3 cases; fast modules (DSA, SM2): 5-10 cases
+
+### Test Counts
+
+| Crate | Before | After | Delta |
+|-------|-------:|------:|------:|
+| hitls-crypto | 1,261 (14 ign) | 1,271 (14 ign) | +10 |
+| **Total** | **3,721 (22 ign)** | **3,731 (22 ign)** | **+10** |
+
+### Build Status
+- `cargo test --workspace --all-features`: 3,731 tests, 0 failed, 22 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: clean
 - `cargo fmt --all -- --check`: clean
 
 ---

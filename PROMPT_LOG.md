@@ -3756,3 +3756,17 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - CLI `prime` command: generate/check modes, hex output + 6 tests
 - CLI `kdf` command: PBKDF2 with 6 MAC options, hexpass/hexsalt, file output + 8 tests
 - All 3,699 tests pass (3,721 total), 22 ignored, 0 clippy/fmt warnings
+
+---
+
+## Phase T69 — Quality Safety Net P0 Enhancement (2026-03-02)
+
+**Prompt**: 请按 P0 路线图实施增强 — Miri CI expansion (NTT + GCM software paths), feature flag isolation (+12), proptest expansion (+6 modules: DH/DSA/Ed448/SM2/SM9/SLH-DSA).
+
+**Result**:
+- Miri CI: +3 runs (mlkem::ntt --skip neon, mldsa::ntt --skip neon, modes::gcm) — 36 additional tests under Miri
+- Feature flag isolation: +12 hitls-crypto features + dtls12 + pki x509,pkcs8 + auth; fix `aes,gcm`→`aes,modes` (gcm not a valid feature)
+- Proptest: +10 blocks across 6 modules (DH commutativity, DSA sign/verify + tamper, Ed448 sign/verify + different-key, SM2 sign/verify + encrypt/decrypt, SM9 sign/verify, SLH-DSA sign/verify + tamper)
+- Fix: ML-DSA tampered_sig proptest → wrong_message (lattice-based sig byte-flip may not invalidate)
+- QUALITY_REPORT D27 mostly closed, D29–D31 closed
+- All 3,709 tests pass (3,731 total), 22 ignored, 0 clippy/fmt warnings

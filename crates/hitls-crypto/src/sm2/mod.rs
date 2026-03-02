@@ -536,4 +536,32 @@ mod tests {
             assert!(!valid, "corrupted signature should not verify");
         }
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(5))]
+
+            #[test]
+            fn prop_sm2_sign_verify_roundtrip(
+                msg in prop::collection::vec(any::<u8>(), 1..128),
+            ) {
+                let kp = Sm2KeyPair::generate().unwrap();
+                let sig = kp.sign(&msg).unwrap();
+                prop_assert!(kp.verify(&msg, &sig).unwrap());
+            }
+
+            #[test]
+            fn prop_sm2_encrypt_decrypt_roundtrip(
+                pt in prop::collection::vec(any::<u8>(), 1..64),
+            ) {
+                let kp = Sm2KeyPair::generate().unwrap();
+                let ct = kp.encrypt(&pt).unwrap();
+                let recovered = kp.decrypt(&ct).unwrap();
+                prop_assert_eq!(recovered, pt);
+            }
+        }
+    }
 }

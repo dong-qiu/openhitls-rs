@@ -403,4 +403,27 @@ mod tests {
         one[255] = 1;
         assert!(alice.compute_shared_secret(&params, &one).is_err());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(3))]
+
+            #[test]
+            fn prop_dh_rfc2409_768_commutativity(
+                _seed in prop::array::uniform32(any::<u8>()),
+            ) {
+                let params = DhParams::from_group(DhParamId::Rfc2409_768).unwrap();
+                let alice = DhKeyPair::generate(&params).unwrap();
+                let bob = DhKeyPair::generate(&params).unwrap();
+                let alice_pub = alice.public_key_bytes(&params).unwrap();
+                let bob_pub = bob.public_key_bytes(&params).unwrap();
+                let ss_ab = alice.compute_shared_secret(&params, &bob_pub).unwrap();
+                let ss_ba = bob.compute_shared_secret(&params, &alice_pub).unwrap();
+                prop_assert_eq!(ss_ab, ss_ba);
+            }
+        }
+    }
 }

@@ -92,9 +92,25 @@ jobs:
       # Cross-feature combinations
       - run: cargo test -p hitls-crypto --no-default-features --features aes,modes
       - run: cargo test -p hitls-crypto --no-default-features --features pqc,ecdsa
-      # No-default for TLS/PKI crates
+      # Additional single-feature isolation
+      - run: cargo test -p hitls-crypto --no-default-features --features sha1
+      - run: cargo test -p hitls-crypto --no-default-features --features sha3
+      - run: cargo test -p hitls-crypto --no-default-features --features ecdh
+      - run: cargo test -p hitls-crypto --no-default-features --features x25519
+      - run: cargo test -p hitls-crypto --no-default-features --features x448
+      - run: cargo test -p hitls-crypto --no-default-features --features hkdf
+      - run: cargo test -p hitls-crypto --no-default-features --features pbkdf2
+      - run: cargo test -p hitls-crypto --no-default-features --features sm9
+      - run: cargo test -p hitls-crypto --no-default-features --features frodokem
+      - run: cargo test -p hitls-crypto --no-default-features --features mceliece
+      - run: cargo test -p hitls-crypto --no-default-features --features drbg
+      - run: cargo test -p hitls-crypto --no-default-features --features fips
+      # No-default for TLS/PKI/Auth crates
       - run: cargo test -p hitls-tls --no-default-features
+      - run: cargo test -p hitls-tls --no-default-features --features dtls12
       - run: cargo test -p hitls-pki --no-default-features
+      - run: cargo test -p hitls-pki --no-default-features --features x509,pkcs8
+      - run: cargo test -p hitls-auth --all-features
 
   audit:
     name: Security Audit
@@ -119,6 +135,9 @@ jobs:
       - run: cargo miri test -p hitls-bignum
       - run: cargo miri test -p hitls-utils -- --skip prop_
       - run: cargo miri test -p hitls-crypto --all-features -- mceliece::benes
+      - run: cargo miri test -p hitls-crypto --all-features -- mlkem::ntt::tests --skip neon
+      - run: cargo miri test -p hitls-crypto --all-features -- mldsa::ntt::tests --skip neon
+      - run: cargo miri test -p hitls-crypto --all-features -- modes::gcm
 
   fuzz-check:
     name: Fuzz Build Check

@@ -12,31 +12,31 @@
 | Layer | Mechanism | Coverage | Rating | Notes |
 |:-----:|-----------|----------|:------:|-------|
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI | **A** | Full workspace, all features, all targets |
-| **L2** | Unit Tests | 3,721 tests (22 ignored), 100% pass rate | **A** | 3,400+ test fns + 92 async + 15 Wycheproof suites; all high-risk files directly tested |
+| **L2** | Unit Tests | 3,731 tests (22 ignored), 100% pass rate | **A** | 3,400+ test fns + 92 async + 15 Wycheproof suites; all high-risk files directly tested |
 | **L3** | Integration Tests | 260 cross-crate tests (TCP loopback + DTLS resilience + OpenSSL interop) | **A** | 14 test files; 5 protocol variants × sync/async; OpenSSL s_client/s_server interop |
 | **L4** | Fuzz Testing | 46 fuzz targets + 322 seed corpus files | **A** | 10 parse + 28 crypto semantic + 8 PQC/sign-path; +fuzz-smoke on PR/push |
-| **L5** | Property-Based Testing | ~37 proptest blocks across 5 crates | **B+** | hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum; PQC/RSA/ECDSA/ECDH covered |
+| **L5** | Property-Based Testing | ~47 proptest blocks across 6 crates | **A-** | hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum; PQC/RSA/ECDSA/ECDH/DH/DSA/Ed448/SM2/SM9/SLH-DSA covered |
 | **L6** | Standard Vectors | 15 Wycheproof suites + 7 FIPS KATs + 11 RFC vector sets + 10+ GB/T | **A** | 5,000+ vectors; all major algorithms covered |
 | **L7** | Concurrency & Side-Channel | 48 concurrency-aware tests; 6 timing tests | **C+** | Statistical timing analysis (Welch's t-test); multi-threaded stress tests |
 
 ### 1.2 CI/CD Pipeline
 
 ```
-GitHub Actions (.github/workflows/ci.yml) — 14 jobs, dependency graph: fmt/clippy → test/coverage/miri/ignored
+GitHub Actions (.github/workflows/ci.yml) — 15 jobs, dependency graph: fmt/clippy → test/coverage/miri/ignored
 ├── Format Check       cargo fmt --all -- --check
 ├── Clippy Lint        cargo clippy --all-targets --all-features -- -D warnings
 ├── Test Matrix        Ubuntu + macOS + Windows × Rust stable + MSRV 1.75 (6 jobs)
-├── Feature Testing    Individual + combo feature flags (aes, sha2, rsa, sm2, pqc, tls13, tls12, tlcp)
+├── Feature Testing    Individual + combo feature flags (27→39 combos: aes, sha2, rsa, sm2, pqc, +12 new: sha1, sha3, ecdh, x25519, x448, hkdf, pbkdf2, sm9, frodokem, mceliece, drbg, fips + dtls12 + auth + pki)
 ├── Security Audit     rustsec/audit-check@v2
-├── UB Detection       Miri on hitls-bignum + hitls-utils + hitls-crypto::benes
+├── UB Detection       Miri on hitls-bignum + hitls-utils + hitls-crypto (benes + mlkem::ntt + mldsa::ntt + modes::gcm)
 ├── Supply Chain       cargo-deny check (advisories + licenses + bans + sources)
-├── Fuzz Build         cargo fuzz check (nightly) — 40 targets
+├── Fuzz Build         cargo fuzz check (nightly) — 46 targets
 ├── Cross-compile      aarch64-unknown-linux-gnu + i686-unknown-linux-gnu
 ├── Documentation      cargo doc --workspace --all-features -D warnings
 ├── Ignored Tests      Timing + zeroize + slow keygen (weekly + on-demand)
 ├── Bench Verify       cargo bench --no-run
 ├── Coverage           cargo-llvm-cov → Codecov JSON + branch coverage
-├── Scheduled Fuzz     Weekly: all 40 targets × 60s each (Monday 03:00 UTC)
+├── Scheduled Fuzz     Weekly: all 46 targets × 60s each (Monday 03:00 UTC)
 └── Dependabot         Weekly cargo + github-actions dependency updates
 ```
 
@@ -45,7 +45,7 @@ GitHub Actions (.github/workflows/ci.yml) — 14 jobs, dependency graph: fmt/cli
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
 | hitls-tls | 1,414 | 0 | 38.1% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat, connection state guards, crypt suite params |
-| hitls-crypto | 1,261 | 14 | 33.9% | 48 algorithm modules + HW accel + P-256 fast path + proptest + HW↔SW cross-validation + timing + zeroize + DRBG + GCM + FIPS PCT/KAT + HPKE full RFC 9180 |
+| hitls-crypto | 1,271 | 14 | 34.1% | 48 algorithm modules + HW accel + P-256 fast path + proptest + HW↔SW cross-validation + timing + zeroize + DRBG + GCM + FIPS PCT/KAT + HPKE full RFC 9180 |
 | hitls-pki | 405 | 0 | 10.9% | X.509, PKCS#8/12, CMS (5 content types), encoding helpers, proptest roundtrips |
 | hitls-integration | 260 | 2 | 7.0% | Cross-crate TCP loopback, error scenarios, concurrency stress, DTLS resilience, OpenSSL interop, TLS 1.3/1.2 key_update + session resumption |
 | hitls-cli | 166 | 5 | 4.5% | 16 CLI commands, speed benchmarks, s_client/s_server edge cases, hex/cipher/port edge cases, prime/kdf |
@@ -53,7 +53,7 @@ GitHub Actions (.github/workflows/ci.yml) — 14 jobs, dependency graph: fmt/cli
 | hitls-utils | 66 | 0 | 1.8% | ASN.1, Base64, PEM, OID, proptest roundtrips |
 | hitls-auth | 33 | 0 | 0.9% | HOTP/TOTP, SPAKE2+, Privacy Pass |
 | hitls-types | 26 | 0 | 0.7% | Enum definitions, error types |
-| **Total** | **3,721** | **22** | **100%** | |
+| **Total** | **3,731** | **22** | **100%** | |
 
 ### 1.4 Standard Compliance Coverage
 
@@ -83,14 +83,14 @@ GitHub Actions (.github/workflows/ci.yml) — 14 jobs, dependency graph: fmt/cli
 | Standard vectors | ~106 | 2.9% | RFC/NIST/Wycheproof/KAT/GB/T test vectors |
 | Async | 92 | 2.5% | tokio::test async connection + handshake |
 | State machine | ~600 | 16.4% | handshake/connected/not-connected state transitions |
-| Property-based | ~28 | 0.8% | proptest blocks (5 crates: crypto + utils + tls + pki + bignum) |
+| Property-based | ~47 | 1.3% | proptest blocks (6 crates: crypto + utils + tls + pki + bignum; DH/DSA/Ed448/SM2/SM9/SLH-DSA added T69) |
 | Concurrency | 48 | 1.3% | Arc/Mutex/thread::spawn/tokio::spawn stress tests |
 | Timing/side-channel | 6 | 0.2% | Welch's t-test statistical timing analysis |
 | HW↔SW cross-validation | 8 | 0.2% | Software/hardware path differential tests |
 | Zeroize verification | 4 | 0.1% | Drop-based memory zeroing verification |
 | Other (deterministic, helper, etc.) | ~1,729 | 47.2% | Specific algorithm/module unit tests |
 
-**Key observations**: Error-handling tests (~370) outnumber roundtrip tests (~350), indicating good negative-path coverage. Property-based testing now spans 5/9 crates. Concurrency and timing tests have been significantly expanded. Fuzz coverage expanded from 14 → 40 targets with PQC and signature-path coverage. Phase T67 added `CryptoError::InvalidArg(&'static str)` with ~30 descriptive context strings and eliminated 16 `.unwrap()` panic risks in crypto library code.
+**Key observations**: Error-handling tests (~370) outnumber roundtrip tests (~350), indicating good negative-path coverage. Property-based testing now spans 6/9 crates with ~47 proptest blocks. Concurrency and timing tests have been significantly expanded. Fuzz coverage expanded from 14 → 46 targets with PQC and signature-path coverage. Phase T67 added `CryptoError::InvalidArg(&'static str)` with ~30 descriptive context strings and eliminated 16 `.unwrap()` panic risks in crypto library code. Phase T69 expanded Miri coverage to NTT + GCM, feature flag isolation to 39 combos, and proptests to 6 additional crypto modules.
 
 ### 1.7 High-Risk Zero Direct Unit Test Files — **SIGNIFICANTLY REDUCED** (Phase T45–T46)
 
@@ -145,8 +145,12 @@ MOSTLY CLOSED    D23  +6 fuzz targets (Phase T68-B)                AES/ChaCha20/
 CLOSED           D24  Record layer zeroize on error (Phase T68-D)  CBC MtE/EtM + TLCP + DTLCP decrypt paths; +3 tests
 CLOSED           D25  Proptest PQC/RSA/ECDSA/ECDH (Phase T68-C)   +9 proptest blocks across 5 modules
 OPEN             D26  Benchmarks lack regression detection          cargo bench --no-run only builds; no baseline comparison
-OPEN             D27  Miri covers only 3/21 unsafe modules          hitls-crypto HW accel unsafe blocks untested by Miri
+MOSTLY CLOSED    D27  Miri covers only 3/21 unsafe modules          T69: +NTT (mlkem+mldsa) + GCM; remaining: HW accel SIMD (untestable by Miri)
 OPEN             D28  hitls-tls/hitls-auth/PKI low test density     1.1 tests/KLOC (tls), 1.2 tests/100L (cert parsing)
+──────── Phase T69 Quality Safety Net P0 Enhancement ────────
+CLOSED           D29  Feature flag isolation (Phase T69)            15→27 hitls-crypto single features + dtls12 + pki + auth; `aes,gcm`→`aes,modes` fix
+CLOSED           D30  Miri NTT + GCM expansion (Phase T69)         +mlkem::ntt + mldsa::ntt (skip NEON) + modes::gcm; D→C+
+CLOSED           D31  Proptest +6 modules (Phase T69)              DH/DSA/Ed448/SM2/SM9/SLH-DSA; 37→47 blocks; B→B+
 ```
 
 ### 2.2 D1 — 0-RTT Replay Protection ~~(Critical)~~ — **CLOSED** (Phase T9)
@@ -266,7 +270,8 @@ coverage:
 | AEAD + X.509 + deep handshake | 3 | GCM/ChaCha20 decrypt, X.509 verify, all 10 handshake decoders (Phase T44) |
 | PQC | 3 | ML-KEM encap/decap, ML-DSA sign/verify, SLH-DSA sign/verify (Phase T63) |
 | Signature sign-path | 5 | RSA PKCS1v15/PSS, ECDSA P-256/384/521, Ed25519, SM2, DSA (Phase T63) |
-| **Total** | **40** | **286 corpus seed files** |
+| Crypto roundtrip (T68) | 6 | AES block, ChaCha20-Poly1305, CMAC, ECDH, Scrypt, McEliece (Phase T68) |
+| **Total** | **46** | **322 corpus seed files** |
 
 ### 2.11 D10 — ~~30~~ ~14 Crypto Files Without Direct Unit Tests ~~(Low)~~ — **MOSTLY CLOSED** (Phase T15–T17/125)
 
@@ -291,7 +296,7 @@ These modules have indirect coverage through top-level roundtrip tests and are l
 
 ### 2.12 D11 — Semantic/State-Machine Fuzz — **CLOSED** (Phase T44 + T53 + T59–T63)
 
-Fuzz coverage expanded across 5 phases from 10 parse-only to 40 comprehensive targets:
+Fuzz coverage expanded across 6 phases from 10 parse-only to 46 comprehensive targets:
 
 | Phase | Targets Added | Focus |
 |-------|:------------:|-------|
@@ -300,8 +305,9 @@ Fuzz coverage expanded across 5 phases from 10 parse-only to 40 comprehensive ta
 | T59–T60 | +6 | Crypto semantic: RSA encrypt/decrypt, ECDSA sign/verify, HKDF derive, SM2 encrypt/sign, CCM encrypt/decrypt, TLS PRF |
 | T61 | +2 | TLS 1.3 + TLS 1.2 state machine fuzz (arbitrary message sequences) |
 | T63 | +8 | PQC (ML-KEM/ML-DSA/SLH-DSA) + signature sign-path (RSA/ECDSA/Ed25519/SM2/DSA) |
+| T68 | +6 | Crypto roundtrip: AES block, ChaCha20-Poly1305, CMAC, ECDH, Scrypt, McEliece |
 
-**Corpus**: 286 seed corpus files (79 original + 6 DTLS + 40 T59–T62 + 33 T61 + 80 T63 + 48 T65–T66).
+**Corpus**: 322 seed corpus files (79 original + 6 DTLS + 40 T59–T62 + 33 T61 + 80 T63 + 48 T65–T66 + 36 T68).
 
 **Remaining gaps** (low priority):
 - Full TLS connection state machine fuzzing (arbitrary message sequences against live connection with crypto state)
@@ -1080,7 +1086,7 @@ The current safety net has significant strengths across multiple dimensions:
 4. **Unsafe confinement**: 44 unsafe blocks restricted to hardware acceleration (6 files) + McEliece binary ops (1 file)
 
 ### 6.2 Test Coverage Breadth
-5. **3,666 tests** with 100% pass rate (21 ignored: slow keygen/timing/zeroize)
+5. **3,731 tests** with 100% pass rate (22 ignored: slow keygen/timing/zeroize)
 6. **Error-first culture**: ~370 error-handling tests (invalid input, wrong state, rejected parameters) outnumber roundtrip tests (~350)
 7. **Edge case density**: ~325 boundary/empty/partial tests catch off-by-one and corner cases
 8. **State machine coverage**: ~600 tests exercise handshake/connection/not-connected transitions
@@ -1093,10 +1099,10 @@ The current safety net has significant strengths across multiple dimensions:
 13. **GB/T vectors**: SM3 (GB/T 32905), SM4 (GB/T 32907) — Chinese national standard compliance
 
 ### 6.4 Infrastructure & Automation
-14. **CI/CD pipeline**: GitHub Actions with 14 jobs: format + lint + test matrix (Ubuntu + macOS + Windows × stable + MSRV 1.75) + feature combos + security audit + Miri + fuzz build + cross-compile (aarch64 + i686) + doc check + ignored tests + bench verify + coverage (llvm-cov + branch) + cargo-deny + Dependabot (weekly cargo + GH Actions)
-15. **Property-based testing**: ~28 proptest blocks across 5 crates (hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum)
+14. **CI/CD pipeline**: GitHub Actions with 15 jobs: format + lint + test matrix (Ubuntu + macOS + Windows × stable + MSRV 1.75) + feature combos (39 combinations) + security audit + Miri (NTT + GCM) + fuzz build + fuzz smoke + cross-compile (aarch64 + i686) + doc check + ignored tests + bench verify + coverage (llvm-cov + branch) + cargo-deny + Dependabot (weekly cargo + GH Actions)
+15. **Property-based testing**: ~47 proptest blocks across 6 crates (hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum; DH/DSA/Ed448/SM2/SM9/SLH-DSA added T69)
 16. **Code coverage tracking**: cargo-llvm-cov → Codecov JSON with branch coverage in CI
-17. **Miri validation**: Undefined behavior detection on hitls-bignum + hitls-utils
+17. **Miri validation**: Undefined behavior detection on hitls-bignum + hitls-utils + hitls-crypto (benes + mlkem::ntt + mldsa::ntt + modes::gcm)
 18. **Deterministic testing**: Fixed seeds/keys for reproducible results across platforms
 19. **Comprehensive wrong-state tests**: Every TLS state machine transition has invalid-state rejection tests
 20. **Side-channel verification**: 6 statistical timing tests (Welch's t-test) for constant-time operations

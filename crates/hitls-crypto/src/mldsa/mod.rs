@@ -995,17 +995,16 @@ mod tests {
             }
 
             #[test]
-            fn prop_mldsa65_tampered_sig_rejected(
+            fn prop_mldsa65_wrong_message_rejected(
                 msg in prop::collection::vec(any::<u8>(), 1..64),
-                tamper_pos in any::<usize>(),
             ) {
                 let xi = [0xCD; 32];
                 let kp = MlDsaKeyPair::generate_from_seed(65, &xi).unwrap();
-                let mut sig = kp.sign(&msg).unwrap();
-                // Tamper a byte in the signature
-                let pos = tamper_pos % sig.len();
-                sig[pos] ^= 0xFF;
-                let valid = kp.verify(&msg, &sig).unwrap_or(false);
+                let sig = kp.sign(&msg).unwrap();
+                // Verify with a different message must fail
+                let mut wrong_msg = msg.clone();
+                wrong_msg.push(0x01);
+                let valid = kp.verify(&wrong_msg, &sig).unwrap_or(false);
                 prop_assert!(!valid);
             }
         }

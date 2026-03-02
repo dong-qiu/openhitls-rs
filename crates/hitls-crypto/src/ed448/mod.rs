@@ -651,4 +651,33 @@ mod tests {
         // Empty context should fail
         assert!(!key.verify(msg, &sig).unwrap());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(3))]
+
+            #[test]
+            fn prop_ed448_sign_verify_roundtrip(
+                msg in prop::collection::vec(any::<u8>(), 0..128),
+            ) {
+                let kp = Ed448KeyPair::generate().unwrap();
+                let sig = kp.sign(&msg).unwrap();
+                prop_assert!(kp.verify(&msg, &sig).unwrap());
+            }
+
+            #[test]
+            fn prop_ed448_different_key_rejects(
+                msg in prop::collection::vec(any::<u8>(), 1..64),
+            ) {
+                let kp_a = Ed448KeyPair::generate().unwrap();
+                let kp_b = Ed448KeyPair::generate().unwrap();
+                let sig = kp_a.sign(&msg).unwrap();
+                // Verify with different key should fail
+                prop_assert!(!kp_b.verify(&msg, &sig).unwrap());
+            }
+        }
+    }
 }
