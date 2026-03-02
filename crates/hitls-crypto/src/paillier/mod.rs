@@ -256,6 +256,44 @@ mod tests {
         assert!(kp.decrypt(&[0u8; 4]).is_err());
     }
 
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(5))]
+
+            #[test]
+            fn prop_paillier_encrypt_decrypt_roundtrip(
+                val in 1u64..999_999_999u64,
+            ) {
+                let (p, q) = small_primes();
+                let kp = PaillierKeyPair::from_primes(&p, &q).unwrap();
+                let m = BigNum::from_u64(val);
+                let ct = kp.encrypt(&m.to_bytes_be()).unwrap();
+                let pt = kp.decrypt(&ct).unwrap();
+                let recovered = BigNum::from_bytes_be(&pt);
+                prop_assert_eq!(recovered.to_bytes_be(), m.to_bytes_be());
+            }
+
+            #[test]
+            fn prop_paillier_homomorphic_add(
+                a in 1u64..100_000u64,
+                b in 1u64..100_000u64,
+            ) {
+                let (p, q) = small_primes();
+                let kp = PaillierKeyPair::from_primes(&p, &q).unwrap();
+                let ct1 = kp.encrypt(&BigNum::from_u64(a).to_bytes_be()).unwrap();
+                let ct2 = kp.encrypt(&BigNum::from_u64(b).to_bytes_be()).unwrap();
+                let ct_sum = kp.add_ciphertexts(&ct1, &ct2).unwrap();
+                let pt_sum = kp.decrypt(&ct_sum).unwrap();
+                let sum = BigNum::from_bytes_be(&pt_sum);
+                let expected = BigNum::from_u64(a + b);
+                prop_assert_eq!(sum.to_bytes_be(), expected.to_bytes_be());
+            }
+        }
+    }
+
     #[test]
     fn test_paillier_triple_homomorphic_add() {
         let (p, q) = small_primes();

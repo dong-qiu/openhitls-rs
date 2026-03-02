@@ -456,6 +456,27 @@ mod tests {
         assert!(!success, "random input should not decode correctly");
     }
 
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(3))]
+
+            #[test]
+            fn prop_mceliece_encap_decap_roundtrip(
+                _seed in any::<u64>(), // for randomness variation
+            ) {
+                let kp =
+                    McElieceKeyPair::generate(McElieceParamId::McEliece6688128).unwrap();
+                let (ct, ss1) = kp.encapsulate().unwrap();
+                let ss2 = kp.decapsulate(&ct).unwrap();
+                prop_assert_eq!(&ss1, &ss2);
+                prop_assert_eq!(ss1.len(), 32);
+            }
+        }
+    }
+
     #[test]
     fn test_mceliece_cross_key_decaps() {
         // Test that decapsulating with wrong key fails

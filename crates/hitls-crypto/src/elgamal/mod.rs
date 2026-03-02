@@ -353,6 +353,42 @@ mod tests {
         assert!(kp.decrypt(&[0, 0, 0, 1]).is_err());
     }
 
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(10))]
+
+            #[test]
+            fn prop_elgamal_encrypt_decrypt_roundtrip(
+                val in 1u64..22u64, // < p=23
+            ) {
+                let p = BigNum::from_u64(23);
+                let g = BigNum::from_u64(5);
+                let x = BigNum::from_u64(7);
+                let kp = ElGamalKeyPair::from_private_key(&p, &g, &x).unwrap();
+                let m = BigNum::from_u64(val);
+                let ct = kp.encrypt(&m.to_bytes_be()).unwrap();
+                let pt = kp.decrypt(&ct).unwrap();
+                let recovered = BigNum::from_bytes_be(&pt);
+                prop_assert_eq!(recovered.to_bytes_be(), m.to_bytes_be());
+            }
+
+            #[test]
+            fn prop_elgamal_public_key_deterministic(
+                x_val in 2u64..22u64,
+            ) {
+                let p = BigNum::from_u64(23);
+                let g = BigNum::from_u64(5);
+                let x = BigNum::from_u64(x_val);
+                let kp1 = ElGamalKeyPair::from_private_key(&p, &g, &x).unwrap();
+                let kp2 = ElGamalKeyPair::from_private_key(&p, &g, &x).unwrap();
+                prop_assert_eq!(kp1.public_key_bytes(), kp2.public_key_bytes());
+            }
+        }
+    }
+
     #[test]
     fn test_elgamal_decrypt_c1_len_exceeds_data() {
         let p = BigNum::from_u64(23);
