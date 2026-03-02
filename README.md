@@ -2,7 +2,7 @@
 
 A production-grade cryptographic and TLS library in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **100% C→Rust feature parity achieved** — 3731 tests, 46 fuzz targets, 5000+ Wycheproof vectors
+> **100% C→Rust feature parity achieved** — 3835 tests, 46 fuzz targets, 5000+ Wycheproof vectors
 
 ## Feature Highlights
 
@@ -23,7 +23,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | CLI Tools | ~8K | ~2.5K | **100%** | 16 commands (dgst, genpkey, x509, s-client, s-server, prime, kdf, etc.) |
 | FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
-| Test Infrastructure | ~20K | ~3.5K | **95%** | 3731 tests + Wycheproof + 46 fuzz targets (322 corpus) + security audit |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | 3835 tests + Wycheproof + 46 fuzz targets (322 corpus) + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
 
 ### Not Migrated (by design)
@@ -260,11 +260,11 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3731 tests, 22 ignored)
+# Run all tests (3835 tests, 22 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1261 tests (14 ignored)
+cargo test -p hitls-crypto --all-features   # 1362 tests (14 ignored)
 cargo test -p hitls-tls --all-features      # 1414 tests
 cargo test -p hitls-pki --all-features      # 405 tests
 cargo test -p hitls-bignum                  # 90 tests (1 ignored)

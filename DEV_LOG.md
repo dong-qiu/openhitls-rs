@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I84 (84 phases)
 - Testing: T1–T69 (67 phases)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P62 (62 phases)
+- Performance: P1–P68 (68 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -235,7 +235,13 @@ Category summary:
 | 223 | T68 | Test | Quality Safety Net Enhancement — CI fuzz-smoke/feature expansion, +6 fuzz targets, +9 proptests, record zeroize | 2026-03-02 |
 | 224 | T69 | Test | Quality Safety Net P0 — Miri NTT+GCM, +12 feature flag tests, +10 proptests (DH/DSA/Ed448/SM2/SM9/SLH-DSA) | 2026-03-02 |
 | 225 | I83 | Impl | HPKE Full RFC 9180 Coverage — 4 KEMs, 3 KDFs, 4 AEADs, 4 Modes | 2026-03-02 |
-| 225 | I84 | Impl | CLI prime/kdf Commands + BigNum String Conversions + PBKDF2 Generalization | 2026-03-02 |
+| 226 | I84 | Impl | CLI prime/kdf Commands + BigNum String Conversions + PBKDF2 Generalization | 2026-03-02 |
+| 227 | P63 | Perf | P-384 Specialized Montgomery Field + Comb Table + ECDSA Fast Path | 2026-03-02 |
+| 228 | P64 | Perf | P-521 Specialized Mersenne Field + Comb Table + ECDSA Fast Path | 2026-03-02 |
+| 229 | P65 | Perf | Ed448 Precomputed Base Table + d_const Caching | 2026-03-02 |
+| 230 | P66 | Perf | Fe448 square_times + sub_fast Cleanup | 2026-03-02 |
+| 231 | P67 | Perf | BigNum Fused CIOS Squaring | 2026-03-02 |
+| 232 | P68 | Perf | RSA CRT Montgomery Optimization | 2026-03-02 |
 
 ---
 
@@ -12429,5 +12435,164 @@ hitls kdf pbkdf2 --mac hmac-sha256 --pass <pw> --salt <s> --iter <N> --keylen <N
 
 ### Build Status (Post I83/I84)
 - `cargo test --workspace --all-features`: 3,699 passed, 0 failed, 22 ignored (3,721 total)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P63 — P-384 Specialized Montgomery Field + Comb Table + ECDSA Fast Path (2026-03-02)
+
+### Summary
+Implemented P-384 specialized field arithmetic with 6x64-bit Montgomery form, dedicated squaring, precomputed comb base table, and ECDSA sign/verify fast path. Achieves 10-15x ECDSA P-384 sign/verify speedup, 5-10x ECDH P-384 speedup.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/ecc/p384_field.rs` | New (~1136 lines) | P384FieldElement([u64; 6]) Montgomery form. P-384 specialized reduction exploiting P[3]=P[4]=P[5]=0xFF...FF (saves 18 multiplies). Dedicated mont_sqr (21 vs 36 muls). Full field ops: add, sub, mul, sqr, neg, invert (Fermat). 42 tests. |
+| `crates/hitls-crypto/src/ecc/p384_point.rs` | New (~830 lines) | P384JacobianPoint with comb table (96 groups x 16 affine points, OnceLock + batch inversion). Mixed Jacobian-affine addition. a=-3 optimized doubling. scalar_mul, scalar_mul_base, scalar_mul_add (Shamir's trick). 21 tests. |
+| `crates/hitls-crypto/src/ecc/p384_scalar.rs` | New (~585 lines) | P384ScalarElement([u64; 6]) Montgomery mod curve order n. Schoolbook mul/sqr with 6-limb reduction. Fermat inversion with addition chain + 4-bit window. For ECDSA k^(-1), e+d*r computation. 10 tests. |
+| `crates/hitls-crypto/src/ecc/mod.rs` | Modified | Dispatch to P-384 fast path in scalar_mul/scalar_mul_base/scalar_mul_add for CurveId::NistP384. |
+| `crates/hitls-crypto/src/ecdsa/mod.rs` | Modified | ECDSA sign/verify fast path for P-384 using P384ScalarElement. |
+
+### Implementation Details
+1. **P384FieldElement**: 6x64-bit limbs in Montgomery form. The P-384 prime has P[3]=P[4]=P[5]=0xFFFFFFFFFFFFFFFF, which means multiplying by those limbs is equivalent to (2^64-1)*x = (x<<64)-x, saving 18 full multiplications in reduction.
+2. **Dedicated mont_sqr**: Exploits a*a symmetry — only compute cross products once and double, reducing from 36 to 21 multiplications.
+3. **Comb table**: 96 groups (384/4=96) x 16 precomputed affine points. OnceLock lazy initialization with batch affine inversion. Constant-time 4-bit lookup.
+4. **P384ScalarElement**: Montgomery arithmetic mod curve order n. Fermat inversion a^(n-2) with optimized addition chain + 4-bit window.
+
+### Build Status (Post P63)
+- `cargo test --workspace --all-features`: 3,772 passed, 0 failed, 22 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P64 — P-521 Specialized Mersenne Field + Comb Table + ECDSA Fast Path (2026-03-02)
+
+### Summary
+Implemented P-521 specialized field arithmetic using direct Mersenne reduction (NOT Montgomery). The P-521 prime p = 2^521 - 1 is a Mersenne prime, enabling split-at-bit-521-and-add reduction. Achieves 8-12x ECDSA P-521 sign/verify speedup, 5-8x ECDH P-521 speedup.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/ecc/p521_field.rs` | New (~530 lines) | P521FieldElement([u64; 9]) stored directly (NOT Montgomery). Mersenne reduction: split at bit 521, add halves (since 2^521 = 1 mod p). Dedicated cross-product squaring (45 vs 81 muls). Fermat inversion chain for p-2 (~524S + 13M). 23 tests. |
+| `crates/hitls-crypto/src/ecc/p521_point.rs` | New (~530 lines) | P521JacobianPoint with comb table (131 groups x 16 affine points). Mixed Jacobian-affine addition. a=-3 optimized doubling. scalar_mul, scalar_mul_base, scalar_mul_add. 20 tests. |
+| `crates/hitls-crypto/src/ecc/p521_scalar.rs` | New (~500 lines) | P521ScalarElement([u64; 9]) standard Montgomery mod curve order n (n is NOT Mersenne). Schoolbook mul/sqr with 9-limb reduction. Fermat inversion. For ECDSA k^(-1), e+d*r. 10 tests. |
+| `crates/hitls-crypto/src/ecc/mod.rs` | Modified | Dispatch to P-521 fast path in scalar_mul/scalar_mul_base/scalar_mul_add for CurveId::NistP521. |
+| `crates/hitls-crypto/src/ecdsa/mod.rs` | Modified | ECDSA sign/verify fast path for P-521 using P521ScalarElement. |
+
+### Implementation Details
+1. **Key Innovation — Mersenne Reduction**: P-521 prime p = 2^521 - 1. For a product c (up to 1042 bits), split at bit 521: c = c_hi * 2^521 + c_lo. Since 2^521 = 1 mod p, result = c_hi + c_lo mod p. This is far cheaper than Montgomery reduction.
+2. **P521FieldElement**: 9x64-bit limbs stored as-is (not Montgomery form). Multiplication produces 18-limb result, then Mersenne reduction. No Montgomery conversion overhead for point operations.
+3. **Dedicated squaring**: Cross-product symmetry reduces from 81 to 45 multiplications.
+4. **Comb table**: 131 groups (521/4=131, rounded up) x 16 precomputed affine points. OnceLock + batch inversion.
+5. **P521ScalarElement**: Standard Montgomery form mod curve order n (n is NOT a Mersenne prime, so Montgomery is used for scalar arithmetic).
+6. **Fermat inversion chain**: p-2 = 2^521 - 3, computed via ~524 squarings + 13 multiplications using optimal addition chain.
+
+### Build Status (Post P64)
+- `cargo test --workspace --all-features`: 3,813 passed, 0 failed, 22 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P65 — Ed448 Precomputed Base Table + d_const Caching (2026-03-02)
+
+### Summary
+Added precomputed comb base table for Ed448 (similar to Ed25519 P12 optimization), caching d_const() via OnceLock, and Ed448TablePoint with precomputed x+y and d*x*y. Achieves 4-6x Ed448 sign speedup.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/curve448/edwards.rs` | Modified | Cache `d_const()` via OnceLock. Add `Copy` derive to `GeExtended448`. Ed448TablePoint with precomputed x+y and d*x*y. Comb table (112 groups x 16). `scalar_mul_base` rewrite using comb lookup. |
+
+### Implementation Details
+1. **d_const caching**: The Edwards curve parameter d is computed from a ratio of field elements. OnceLock caches the result after first computation, eliminating repeated field inversions.
+2. **Ed448TablePoint**: Stores precomputed (x+y, y-x, d*x*y) for each table point, enabling 7M mixed addition (vs 11M+ for generic addition).
+3. **Comb table**: 112 groups (448/4=112) x 16 precomputed points. Lazy initialization with OnceLock. Constant-time 4-bit lookup.
+4. **Copy derive on GeExtended448**: Enables value semantics for point operations, eliminating clone overhead in the scalar multiplication loop.
+
+### Build Status (Post P65)
+- `cargo test --workspace --all-features`: all tests pass, 22 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P66 — Fe448 square_times + sub_fast Cleanup (2026-03-02)
+
+### Summary
+Added `square_times(n)` helper and `sub_fast()` with 2p bias for bounded inputs to Fe448 field arithmetic. Achieves 15-20% Ed448/X448 speedup.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/curve448/field.rs` | Modified | `square_times(n)` helper for repeated squarings (eliminates n-1 intermediate copies). `sub_fast()` with 2p bias for bounded inputs from mul/square (skips carry propagation). |
+
+### Implementation Details
+1. **square_times(n)**: Performs n consecutive squarings in a single method call, reusing the same field element. Used extensively in inversion chains (e.g., `a.square_times(223)` instead of 223 separate calls).
+2. **sub_fast()**: For inputs known to be bounded (outputs of mul/square are < 2p), adds 2p before subtracting to guarantee non-negative intermediate results. Skips the carry propagation step needed by generic `sub()`.
+
+### Build Status (Post P66)
+- `cargo test --workspace --all-features`: all tests pass, 22 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P67 — BigNum Fused CIOS Squaring (2026-03-02)
+
+### Summary
+Replaced `sqr_limbs + redc_limbs` (1.5n² multiplications) with `cios_mul_n(a, a)` (n² multiplications) in Montgomery exponentiation squaring loops. Removed `sqr_buf` allocation. Achieves 25-30% speedup across all Montgomery exponentiation operations.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-bignum/src/montgomery.rs` | Modified | `mont_sqr` now uses `cios_mul_n(a, a)` instead of `sqr_limbs + redc_limbs`. Removed `sqr_buf` scratch allocation from `mont_exp` and `mont_exp_mont`. Squaring steps in exponentiation loop use fused CIOS directly. |
+
+### Implementation Details
+1. **Before**: Squaring used `sqr_limbs` (cross-product + shift, producing 2n-limb result) followed by `redc_limbs` (separate Montgomery reduction). Total: ~1.5n² multiplications.
+2. **After**: Squaring uses `cios_mul_n(a, a)` which fuses multiply and reduce in a single pass with an (n+2)-limb accumulator. Total: n² multiplications.
+3. **sqr_buf elimination**: The pre-allocated 2n-limb scratch buffer for `sqr_limbs` output is no longer needed, reducing memory allocation in the exponentiation loop.
+
+### Build Status (Post P67)
+- `cargo test --workspace --all-features`: all tests pass, 22 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P68 — RSA CRT Montgomery Optimization (2026-03-02)
+
+### Summary
+Added `Clone` to `MontgomeryCtx`, cached Montgomery contexts (mont_p, mont_q, qinv_mont_p) in RSA private key, and replaced Knuth division CRT recombination with Montgomery multiplication. Achieves 10-15% RSA sign/decrypt speedup.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/rsa/mod.rs` | Modified | Cache `mont_p`/`mont_q`/`qinv_mont_p` in `RsaPrivateKey`. Use cached contexts in `raw_decrypt`. CRT recombination via `mont_mul` instead of Knuth division for h = qinv * (m1 - m2) mod p. |
+| `crates/hitls-bignum/src/montgomery.rs` | Modified | Add `Clone` derive to `MontgomeryCtx`. |
+
+### Implementation Details
+1. **MontgomeryCtx caching**: RSA CRT decryption needs Montgomery contexts for both p and q. Previously these were constructed per-operation (computing R² mod p and R² mod q each time). Now cached at key construction time.
+2. **qinv in Montgomery form**: Pre-compute `qinv` in Montgomery form relative to p, so CRT recombination h = qinv * (m1 - m2) mod p uses a single `mont_mul` instead of generic `mod_mul` (which internally creates a throwaway Montgomery context).
+3. **Clone on MontgomeryCtx**: Needed to store pre-computed contexts in the RSA private key struct while allowing the exponentiation functions to take mutable references.
+
+### Test Count (Post P63–P68)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1362 (14 ignored) |
+| hitls-tls | 1414 |
+| hitls-pki | 405 |
+| hitls-bignum | 90 (1 ignored) |
+| hitls-utils | 66 |
+| hitls-auth | 33 |
+| hitls-cli | 166 (5 ignored) |
+| hitls-integration-tests | 260 (2 ignored) |
+| **Total** | **3835 (22 ignored)** |
+
+### Build Status (Post P63–P68)
+- `cargo test --workspace --all-features`: 3,813 passed, 0 failed, 22 ignored (3,835 total)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

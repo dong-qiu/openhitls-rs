@@ -89,67 +89,12 @@ impl Fe448 {
         Fe448::zero().sub(self)
     }
 
-    /// Multiplication: h = f * g using Goldilocks Karatsuba.
+    /// Multiplication: h = f * g.
     ///
-    /// Exploits the structure p = 2^448 − 2^224 − 1 by splitting each operand
-    /// into two 224-bit halves and using the identity 2^448 ≡ 2^224 + 1.
+    /// Uses 16×16 schoolbook multiply followed by Goldilocks reduction
+    /// via the identity 2^448 ≡ 2^224 + 1 (mod p).
     pub fn mul(&self, rhs: &Fe448) -> Fe448 {
-        // Split: f = f_lo + f_hi * 2^224, g = g_lo + g_hi * 2^224
-        // where f_lo, f_hi, g_lo, g_hi are 8-limb (224-bit) values.
-        //
-        // f * g = f_lo*g_lo + (f_lo*g_hi + f_hi*g_lo)*2^224 + f_hi*g_hi*2^448
-        // Since 2^448 ≡ 2^224 + 1:
-        // f * g ≡ (f_lo*g_lo + f_hi*g_hi) + (f_lo*g_hi + f_hi*g_lo + f_hi*g_hi)*2^224
-
-        let f = &self.0;
-        let g = &rhs.0;
-
-        // Compute partial products in u64 accumulators
-        let mut lo_lo = [0u64; 15]; // f_lo * g_lo (8×8 schoolbook)
-        let mut hi_hi = [0u64; 15]; // f_hi * g_hi
-        let mut lo_hi = [0u64; 15]; // f_lo * g_hi
-        let mut hi_lo = [0u64; 15]; // f_hi * g_lo
-
-        for i in 0..8 {
-            for j in 0..8 {
-                lo_lo[i + j] += f[i] as u64 * g[j] as u64;
-                hi_hi[i + j] += f[i + 8] as u64 * g[j + 8] as u64;
-                lo_hi[i + j] += f[i] as u64 * g[j + 8] as u64;
-                hi_lo[i + j] += f[i + 8] as u64 * g[j] as u64;
-            }
-        }
-
-        // Combine: result = (lo_lo + hi_hi) + (lo_hi + hi_lo + hi_hi) * 2^224
-        // In limb terms: limb i gets (lo_lo + hi_hi)[i] and limb (i+8) gets cross terms
-        let mut acc = [0u64; 16];
-
-        // Add lo_lo[0..15] to acc[0..15]
-        for i in 0..15 {
-            acc[i % 16] += lo_lo[i];
-        }
-
-        // Add hi_hi[0..15] to acc[0..15] (contributes to low half due to 2^448 ≡ 2^224+1)
-        for i in 0..15 {
-            acc[i % 16] += hi_hi[i];
-        }
-
-        // Add (lo_hi + hi_lo + hi_hi)[0..15] shifted by 8 limbs (× 2^224)
-        for i in 0..15 {
-            let cross = lo_hi[i] + hi_lo[i] + hi_hi[i];
-            let target = (i + 8) % 16;
-            acc[target] += cross;
-            // If i + 8 >= 16, we've wrapped around past 2^448, so also add to (target + 8)
-            // because 2^448 ≡ 2^224 + 1
-            if i + 8 >= 16 {
-                acc[(target + 8) % 16] += cross;
-                acc[target % 16] += cross; // already added above, need to fix
-                                           // Actually, let me redo this more carefully.
-            }
-        }
-
-        // The above logic is getting complex. Let me use a cleaner approach:
-        // Build a 32-limb product, then reduce.
-        Self::mul_and_reduce(f, g)
+        Self::mul_and_reduce(&self.0, &rhs.0)
     }
 
     /// Full 32-limb schoolbook multiply followed by Goldilocks reduction.
@@ -361,333 +306,56 @@ impl Fe448 {
         Fe448(r)
     }
 
+    /// Repeated squaring helper: compute self^(2^n).
+    pub fn square_times(&self, n: usize) -> Fe448 {
+        let mut t = *self;
+        for _ in 0..n {
+            t = t.square();
+        }
+        t
+    }
+
     /// Modular inversion: h = f^(p−2) mod p using Fermat's little theorem.
-    ///
-    /// Uses an addition chain for p − 2 = 2^448 − 2^224 − 3.
     pub fn invert(&self) -> Fe448 {
-        // p - 2 = 2^448 - 2^224 - 3
-        // = (2^224 - 1) * 2^224 + (2^224 - 3)
-        // Strategy: build up powers using repeated squaring.
-
-        let x1 = *self; // x
-        let x2 = x1.square().mul(&x1); // x^3
-        let x3 = x2.square().mul(&x1); // x^7
-        let x6 = {
-            let mut t = x3;
-            for _ in 0..3 {
-                t = t.square();
-            }
-            t.mul(&x3)
-        }; // x^(2^6 - 1)
-        let x12 = {
-            let mut t = x6;
-            for _ in 0..6 {
-                t = t.square();
-            }
-            t.mul(&x6)
-        }; // x^(2^12 - 1)
-        let x24 = {
-            let mut t = x12;
-            for _ in 0..12 {
-                t = t.square();
-            }
-            t.mul(&x12)
-        }; // x^(2^24 - 1)
-        let x48 = {
-            let mut t = x24;
-            for _ in 0..24 {
-                t = t.square();
-            }
-            t.mul(&x24)
-        }; // x^(2^48 - 1)
-        let x96 = {
-            let mut t = x48;
-            for _ in 0..48 {
-                t = t.square();
-            }
-            t.mul(&x48)
-        }; // x^(2^96 - 1)
-        let x192 = {
-            let mut t = x96;
-            for _ in 0..96 {
-                t = t.square();
-            }
-            t.mul(&x96)
-        }; // x^(2^192 - 1)
-
-        // x^(2^224 - 1)
-        let x224_m1 = {
-            let mut t = x192;
-            for _ in 0..32 {
-                t = t.square();
-            }
-            // Need x^(2^32 - 1) to multiply in
-            let x32 = {
-                let mut s = x24;
-                for _ in 0..8 {
-                    s = s.square();
-                }
-                s.mul(&{
-                    let mut s2 = x3;
-                    for _ in 0..5 {
-                        s2 = s2.square();
-                    }
-                    s2.mul(&x3).square().square().mul(&x1)
-                })
-            };
-            t.mul(&x32)
-        };
-
-        // Actually, let me use a simpler addition chain.
-        // p - 2 = 2^448 - 2^224 - 3
-        // = (2^224 - 1) * (2^224 + 1) - 2
-        // Hmm, let me just compute x^(2^224-1), then use it.
-
-        // x^(2^224-1) is what we need.
-        // Then x^((2^224-1)*2^224) = x^(2^448 - 2^224)
-        // And x^(2^448 - 2^224 - 3) = x^(2^448 - 2^224) * x^(-3)
-        // No, that won't work. Let me use a different approach.
-
-        // p - 2 = 2^448 - 2^224 - 3
-        // Binary of p-2: 224 ones, then 223 ones, then 01 (i.e., ...11111101)
-        // Actually: p = 2^448 - 2^224 - 1
-        //   = 1...1 0...0 1...1  (224 ones, 224 bits where top is 0 and rest are 1)
-        //   Actually: 2^448 - 1 = 448 ones
-        //   Subtract 2^224: clear bit 224 and borrow
-        //   = bits[447..225] = all 1s (223 bits), bit[224] = 0,
-        //     minus borrow through: 2^448 - 1 - 2^224
-        //     = (2^224 - 1) * 2^224 + (2^224 - 1)
-        //     Hmm: 2^448 - 2^224 - 1 = (2^224 - 1) << 224 | (2^224 - 1)
-        //     No: (2^224 - 1) * 2^224 = 2^448 - 2^224
-        //     2^448 - 2^224 - 1 = (2^224 - 1)*2^224 + 2^224 - 1 - ... no.
-        //     2^448 - 2^224 - 1 = let's think in binary:
-        //       2^448 - 1 = 448 ones
-        //       subtract 2^224: borrow chain...
-        //       = bits 447..225 all 1 (223 ones), bit 224 = 0, bits 223..0 all 1 (224 ones)
-        //     So p = 0xFFFFFFFF...FE...FFFFFFFF (223 F nibbles, then E, then 224/4=56 F nibbles)
-        //
-        //   p - 2 = p minus 2 in binary:
-        //     bit 0 was 1, becomes 1-2 = borrow: bit 0 = 1, bit 1 was 1, becomes 0. Done.
-        //     So p-2 in binary: bits 447..2 same as p, bit 1 = 0, bit 0 = 1.
-        //     = 223 ones, 0, 222 ones, 0, 1
-        //     Nope let me just verify:
-        //     p   = ...1111 0 1111...1111 1
-        //     p-2 = ...1111 0 1111...1111 01  (bit 1 cleared)
-        //     So p-2 = ...1111 0 1111...1101
-        //     Bits from MSB: 223 ones, one 0, 220 ones, one 0, one 1
-        //
-        // Given the complexity, let me just use a clean square-and-multiply chain.
-
         self.pow_p_minus_2()
     }
 
-    /// Compute self^(p-2) for inversion.
+    /// Compute self^(p-2) for inversion using compact addition chain.
     fn pow_p_minus_2(&self) -> Fe448 {
         // p - 2 = 2^448 - 2^224 - 3
-        // Let's compute using repeated squaring with a clean chain.
-        //
-        // Strategy: Compute x^(2^k - 1) for various k, then combine.
-        // x^1 = self
+        // = (2^223 - 1) * 2^225 + (2^222 - 1) * 4 + 1
         let a = *self;
-        let a2 = a.square(); // a^2
-        let a3 = a2.mul(&a); // a^3
-        let a6 = a3.square(); // a^6
-        let a7 = a6.mul(&a); // a^7
-        let a8 = a7.mul(&a); // a^8 (= 2^3)
-
-        // a^(2^4 - 1) = a^15
-        let a15 = {
-            let mut t = a8;
-            t = t.square(); // a^16
-            t.mul(&a7) // a^(16-1) ... no, a^(16+7) = a^23. Wrong.
-        };
-        // Let me be more careful with addition chains for (2^k - 1).
-
-        // x^(2^2 - 1) = x^3 = a3
-        // x^(2^3 - 1) = x^7 = a7
-        // x^(2^6 - 1): square a7 three times → a^(7*8) = a^56, mul by a7 → a^63 = 2^6 - 1
-        let a_6 = {
-            let mut t = a7;
-            for _ in 0..3 {
-                t = t.square();
-            }
-            t.mul(&a7)
-        };
-        // x^(2^12 - 1)
-        let a_12 = {
-            let mut t = a_6;
-            for _ in 0..6 {
-                t = t.square();
-            }
-            t.mul(&a_6)
-        };
-        // x^(2^24 - 1)
-        let a_24 = {
-            let mut t = a_12;
-            for _ in 0..12 {
-                t = t.square();
-            }
-            t.mul(&a_12)
-        };
-        // x^(2^48 - 1)
-        let a_48 = {
-            let mut t = a_24;
-            for _ in 0..24 {
-                t = t.square();
-            }
-            t.mul(&a_24)
-        };
-        // x^(2^96 - 1)
-        let a_96 = {
-            let mut t = a_48;
-            for _ in 0..48 {
-                t = t.square();
-            }
-            t.mul(&a_48)
-        };
-        // x^(2^192 - 1)
-        let a_192 = {
-            let mut t = a_96;
-            for _ in 0..96 {
-                t = t.square();
-            }
-            t.mul(&a_96)
-        };
-        // x^(2^222 - 1)
-        let a_222 = {
-            let mut t = a_192;
-            // Need 30 more squarings then mul by x^(2^30-1)
-            for _ in 0..24 {
-                t = t.square();
-            }
-            t = t.mul(&a_24);
-            for _ in 0..6 {
-                t = t.square();
-            }
-            t.mul(&a_6)
-        };
-
-        // Now build p - 2 = 2^448 - 2^224 - 3
-        // In binary (from MSB, 448 bits total):
-        //   bits 447..225: all 1 (223 ones)
-        //   bit 224: 0
-        //   bits 223..2: all 1 (222 ones)
-        //   bit 1: 0
-        //   bit 0: 1
-        //
-        // So: x^(p-2) = x^(2^448 - 2^224 - 3)
-        //
-        // Start with x^(2^222 - 1) [covers the 222 ones at bits 223..2]
-        //
-        // Actually, let's build from MSB:
-        // We need exponent = (2^223 - 1) * 2^225 + (2^222 - 1) * 4 + 1
-        // = (2^223 - 1) * 2^225 + 2^224 - 4 + 1
-        // = (2^223 - 1) * 2^225 + 2^224 - 3
-        // Verify: (2^223 - 1) * 2^225 = 2^448 - 2^225
-        //         + 2^224 = 2^448 - 2^225 + 2^224 = 2^448 - 2^224
-        //         - 3: 2^448 - 2^224 - 3 ✓
-        //
-        // So we need:
-        // t = x^(2^223 - 1)
-        // t = t^(2^225) [225 squarings]
-        // t = t * x^(2^224 - 3)
-        //
-        // x^(2^223 - 1) = x^(2^222-1) * x^(2^222) * x ... no
-        //   = square(x^(2^222-1)) * x = x^(2^223 - 2) * x = x^(2^223 - 1) ✓
-        let a_223 = a_222.square().mul(&a); // x^(2^223 - 1)
-
-        // Now 225 squarings
-        let mut t = a_223;
-        for _ in 0..225 {
-            t = t.square();
-        }
-        // t = x^((2^223 - 1) * 2^225)
-
-        // Now multiply by x^(2^224 - 3)
-        // 2^224 - 3 = 2^224 - 4 + 1 = (2^222 - 1) * 4 + 1
-        // x^(2^222-1) squared twice: x^((2^222-1)*4) = x^(2^224-4)
-        // times x: x^(2^224-3)
-        let tail = a_222.square().square().mul(&a); // x^(2^224 - 3)
-
-        t.mul(&tail) // x^(p-2)
+        let a3 = a.square().mul(&a);
+        let a7 = a3.square().mul(&a);
+        let a_6 = a7.square_times(3).mul(&a7);
+        let a_12 = a_6.square_times(6).mul(&a_6);
+        let a_24 = a_12.square_times(12).mul(&a_12);
+        let a_48 = a_24.square_times(24).mul(&a_24);
+        let a_96 = a_48.square_times(48).mul(&a_48);
+        let a_192 = a_96.square_times(96).mul(&a_96);
+        let a_222 = a_192.square_times(24).mul(&a_24).square_times(6).mul(&a_6);
+        let a_223 = a_222.square().mul(&a);
+        let t = a_223.square_times(225);
+        let tail = a_222.square_times(2).mul(&a);
+        t.mul(&tail)
     }
 
     /// Compute sqrt(self) = self^((p+1)/4) mod p.
     /// Since p ≡ 3 (mod 4), this works directly.
     pub fn sqrt(&self) -> Fe448 {
-        // (p+1)/4 = (2^448 - 2^224) / 4 = 2^446 - 2^222
-        // So we need x^(2^446 - 2^222)
-        // = x^(2^222 * (2^224 - 1))
-        // = (x^(2^224 - 1))^(2^222)
-
-        // Build x^(2^224 - 1) using addition chain
+        // (p+1)/4 = (2^448 - 2^224) / 4 = 2^446 - 2^222 = (2^224 - 1) * 2^222
         let a = *self;
         let a3 = a.square().mul(&a);
         let a7 = a3.square().mul(&a);
-        let a_6 = {
-            let mut t = a7;
-            for _ in 0..3 {
-                t = t.square();
-            }
-            t.mul(&a7)
-        };
-        let a_12 = {
-            let mut t = a_6;
-            for _ in 0..6 {
-                t = t.square();
-            }
-            t.mul(&a_6)
-        };
-        let a_24 = {
-            let mut t = a_12;
-            for _ in 0..12 {
-                t = t.square();
-            }
-            t.mul(&a_12)
-        };
-        let a_48 = {
-            let mut t = a_24;
-            for _ in 0..24 {
-                t = t.square();
-            }
-            t.mul(&a_24)
-        };
-        let a_96 = {
-            let mut t = a_48;
-            for _ in 0..48 {
-                t = t.square();
-            }
-            t.mul(&a_48)
-        };
-        let a_192 = {
-            let mut t = a_96;
-            for _ in 0..96 {
-                t = t.square();
-            }
-            t.mul(&a_96)
-        };
-        // x^(2^222 - 1)
-        let a_222 = {
-            let mut t = a_192;
-            for _ in 0..24 {
-                t = t.square();
-            }
-            t = t.mul(&a_24);
-            for _ in 0..6 {
-                t = t.square();
-            }
-            t.mul(&a_6)
-        };
-        // x^(2^224 - 1) = x^(2^222-1) * 4 then * x^3
-        // Actually: x^(2^224 - 1) = (x^(2^222 - 1))^4 * x^3 = x^(4*(2^222-1)+3) = x^(2^224-1) ✓
-        let a_224 = a_222.square().square().mul(&a3);
-
-        // Now square 222 times: (x^(2^224-1))^(2^222) = x^((2^224-1)*2^222) = x^(2^446 - 2^222)
-        let mut t = a_224;
-        for _ in 0..222 {
-            t = t.square();
-        }
-        t
+        let a_6 = a7.square_times(3).mul(&a7);
+        let a_12 = a_6.square_times(6).mul(&a_6);
+        let a_24 = a_12.square_times(12).mul(&a_12);
+        let a_48 = a_24.square_times(24).mul(&a_24);
+        let a_96 = a_48.square_times(48).mul(&a_48);
+        let a_192 = a_96.square_times(96).mul(&a_96);
+        let a_222 = a_192.square_times(24).mul(&a_24).square_times(6).mul(&a_6);
+        let a_224 = a_222.square_times(2).mul(&a3);
+        a_224.square_times(222)
     }
 
     /// Decode a 56-byte little-endian representation into a field element.

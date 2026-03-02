@@ -127,6 +127,30 @@ impl EcdsaKeyPair {
                 let e_dr = e_se.add(&dr);
                 let s_se = k_inv.mul(&e_dr);
                 s_se.to_bignum()
+            } else if self.group.curve_id() == EccCurveId::NistP384 {
+                // Fast path: 6×u64 Montgomery scalar field
+                use crate::ecc::p384_scalar::P384ScalarElement;
+                let k_se = P384ScalarElement::from_bignum(&k);
+                let r_se = P384ScalarElement::from_bignum(&r);
+                let d_se = P384ScalarElement::from_bignum(&self.private_key);
+                let e_se = P384ScalarElement::from_bignum(&e);
+                let k_inv = k_se.inv();
+                let dr = d_se.mul(&r_se);
+                let e_dr = e_se.add(&dr);
+                let s_se = k_inv.mul(&e_dr);
+                s_se.to_bignum()
+            } else if self.group.curve_id() == EccCurveId::NistP521 {
+                // Fast path: 9×u64 Montgomery scalar field
+                use crate::ecc::p521_scalar::P521ScalarElement;
+                let k_se = P521ScalarElement::from_bignum(&k);
+                let r_se = P521ScalarElement::from_bignum(&r);
+                let d_se = P521ScalarElement::from_bignum(&self.private_key);
+                let e_se = P521ScalarElement::from_bignum(&e);
+                let k_inv = k_se.inv();
+                let dr = d_se.mul(&r_se);
+                let e_dr = e_se.add(&dr);
+                let s_se = k_inv.mul(&e_dr);
+                s_se.to_bignum()
             } else {
                 let k_inv = k.mod_inv(n)?;
                 let dr = self.private_key.mod_mul(&r, n)?;
@@ -168,6 +192,22 @@ impl EcdsaKeyPair {
             let w_se = s_se.inv();
             let u1_se = P256ScalarElement::from_bignum(&e).mul(&w_se);
             let u2_se = P256ScalarElement::from_bignum(&r).mul(&w_se);
+            (u1_se.to_bignum(), u2_se.to_bignum())
+        } else if self.group.curve_id() == EccCurveId::NistP384 {
+            // Fast path: 6×u64 Montgomery scalar field (Fermat inversion)
+            use crate::ecc::p384_scalar::P384ScalarElement;
+            let s_se = P384ScalarElement::from_bignum(&s);
+            let w_se = s_se.inv();
+            let u1_se = P384ScalarElement::from_bignum(&e).mul(&w_se);
+            let u2_se = P384ScalarElement::from_bignum(&r).mul(&w_se);
+            (u1_se.to_bignum(), u2_se.to_bignum())
+        } else if self.group.curve_id() == EccCurveId::NistP521 {
+            // Fast path: 9×u64 Montgomery scalar field (Fermat inversion)
+            use crate::ecc::p521_scalar::P521ScalarElement;
+            let s_se = P521ScalarElement::from_bignum(&s);
+            let w_se = s_se.inv();
+            let u1_se = P521ScalarElement::from_bignum(&e).mul(&w_se);
+            let u2_se = P521ScalarElement::from_bignum(&r).mul(&w_se);
             (u1_se.to_bignum(), u2_se.to_bignum())
         } else {
             let w = match s.mod_inv(n) {

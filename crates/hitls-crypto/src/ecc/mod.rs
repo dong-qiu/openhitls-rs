@@ -1,13 +1,19 @@
 //! Elliptic Curve Cryptography (ECC) core primitives.
 //!
 //! Provides fundamental elliptic curve types including points, groups (curves),
-//! and scalar arithmetic over NIST P-256 and P-384 Weierstrass curves.
+//! and scalar arithmetic over NIST P-256, P-384, and P-521 Weierstrass curves.
 //! This module underpins higher-level protocols such as ECDSA and ECDH.
 
 pub(crate) mod curves;
 pub(crate) mod p256_field;
 pub(crate) mod p256_point;
 pub(crate) mod p256_scalar;
+pub(crate) mod p384_field;
+pub(crate) mod p384_point;
+pub(crate) mod p384_scalar;
+pub(crate) mod p521_field;
+pub(crate) mod p521_point;
+pub(crate) mod p521_scalar;
 pub(crate) mod point;
 pub(crate) mod sm2_field;
 pub(crate) mod sm2_point;
@@ -84,6 +90,16 @@ impl EcGroup {
             let result = p256_point::p256_scalar_mul(k, &pt);
             return p256_result_to_ecpoint(&result);
         }
+        if self.curve_id == EccCurveId::NistP384 {
+            let pt = p384_point::bignum_to_p384_point(&point.x, &point.y)?;
+            let result = p384_point::p384_scalar_mul(k, &pt);
+            return p384_result_to_ecpoint(&result);
+        }
+        if self.curve_id == EccCurveId::NistP521 {
+            let pt = p521_point::bignum_to_p521_point(&point.x, &point.y)?;
+            let result = p521_point::p521_scalar_mul(k, &pt);
+            return p521_result_to_ecpoint(&result);
+        }
         if self.curve_id == EccCurveId::Sm2Prime256 {
             let pt = sm2_point::bignum_to_sm2_point(&point.x, &point.y)?;
             let result = sm2_point::sm2_scalar_mul(k, &pt);
@@ -99,6 +115,14 @@ impl EcGroup {
         if self.curve_id == EccCurveId::NistP256 {
             let result = p256_point::p256_scalar_mul_base(k);
             return p256_result_to_ecpoint(&result);
+        }
+        if self.curve_id == EccCurveId::NistP384 {
+            let result = p384_point::p384_scalar_mul_base(k);
+            return p384_result_to_ecpoint(&result);
+        }
+        if self.curve_id == EccCurveId::NistP521 {
+            let result = p521_point::p521_scalar_mul_base(k);
+            return p521_result_to_ecpoint(&result);
         }
         if self.curve_id == EccCurveId::Sm2Prime256 {
             let result = sm2_point::sm2_scalar_mul_base(k);
@@ -146,6 +170,16 @@ impl EcGroup {
             let qp = p256_point::bignum_to_p256_point(&q.x, &q.y)?;
             let result = p256_point::p256_scalar_mul_add(k1, k2, &qp);
             return p256_result_to_ecpoint(&result);
+        }
+        if self.curve_id == EccCurveId::NistP384 {
+            let qp = p384_point::bignum_to_p384_point(&q.x, &q.y)?;
+            let result = p384_point::p384_scalar_mul_add(k1, k2, &qp);
+            return p384_result_to_ecpoint(&result);
+        }
+        if self.curve_id == EccCurveId::NistP521 {
+            let qp = p521_point::bignum_to_p521_point(&q.x, &q.y)?;
+            let result = p521_point::p521_scalar_mul_add(k1, k2, &qp);
+            return p521_result_to_ecpoint(&result);
         }
         if self.curve_id == EccCurveId::Sm2Prime256 {
             let qp = sm2_point::bignum_to_sm2_point(&q.x, &q.y)?;
@@ -290,6 +324,22 @@ fn jacobian_to_ecpoint(jp: &JacobianPoint, params: &CurveParams) -> Result<EcPoi
 /// Convert a P256JacobianPoint to an EcPoint (affine).
 fn p256_result_to_ecpoint(pt: &p256_point::P256JacobianPoint) -> Result<EcPoint, CryptoError> {
     match p256_point::p256_point_to_affine(pt)? {
+        Some((x, y)) => Ok(EcPoint::new(x, y)),
+        None => Ok(EcPoint::infinity()),
+    }
+}
+
+/// Convert a P384JacobianPoint to an EcPoint (affine).
+fn p384_result_to_ecpoint(pt: &p384_point::P384JacobianPoint) -> Result<EcPoint, CryptoError> {
+    match p384_point::p384_point_to_affine(pt)? {
+        Some((x, y)) => Ok(EcPoint::new(x, y)),
+        None => Ok(EcPoint::infinity()),
+    }
+}
+
+/// Convert a P521JacobianPoint to an EcPoint (affine).
+fn p521_result_to_ecpoint(pt: &p521_point::P521JacobianPoint) -> Result<EcPoint, CryptoError> {
+    match p521_point::p521_point_to_affine(pt)? {
         Some((x, y)) => Ok(EcPoint::new(x, y)),
         None => Ok(EcPoint::infinity()),
     }

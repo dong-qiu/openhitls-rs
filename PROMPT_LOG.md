@@ -3770,3 +3770,19 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - Fix: ML-DSA tampered_sig proptest → wrong_message (lattice-based sig byte-flip may not invalidate)
 - QUALITY_REPORT D27 mostly closed, D29–D31 closed
 - All 3,709 tests pass (3,731 total), 22 ignored, 0 clippy/fmt warnings
+
+---
+
+## Phases P63–P68 — ECC Deep Optimization + BigNum/RSA Enhancement (2026-03-02)
+
+**Prompt**: Implement performance optimization phases P63-P68: P-384 specialized Montgomery field, P-521 specialized Mersenne field, Ed448 precomputed base table, Fe448 square_times cleanup, BigNum fused CIOS squaring, RSA CRT Montgomery optimization.
+
+**Result**:
+- **P63**: P384FieldElement([u64; 6]) Montgomery with P[3..5]=0xFF...FF reduction trick, mont_sqr (21 vs 36 muls), comb table (96x16), P384ScalarElement, ECDSA sign/verify fast path. 3 new files (~2551 lines, 73 tests). 10-15x ECDSA P-384 speedup.
+- **P64**: P521FieldElement([u64; 9]) with direct Mersenne reduction (p=2^521-1), cross-product squaring (45 vs 81 muls), comb table (131x16), P521ScalarElement (Montgomery mod n), ECDSA fast path. 3 new files (~1560 lines, 53 tests). 8-12x ECDSA P-521 speedup.
+- **P65**: Ed448 comb table (112x16 Ed448TablePoints), d_const() OnceLock, Copy on GeExtended448, precomputed x+y and d*x*y for 7M mixed addition. 4-6x Ed448 sign speedup.
+- **P66**: Fe448 `square_times(n)` for inversion chains, `sub_fast()` with 2p bias. 15-20% Ed448/X448 speedup.
+- **P67**: Replace `sqr_limbs + redc_limbs` (1.5n^2) with `cios_mul_n(a,a)` (n^2) in mont_exp squaring loops. 25-30% all Montgomery exponentiation.
+- **P68**: `Clone` on MontgomeryCtx, cached mont_p/mont_q/qinv_mont_p in RsaPrivateKey, CRT recombination via mont_mul. 10-15% RSA sign/decrypt.
+- All 3,813 tests pass (3,835 total), 22 ignored, 0 clippy/fmt warnings
+- hitls-crypto: 1,362 tests (14 ignored), up from 1,271

@@ -8,7 +8,7 @@ mod oaep;
 mod pkcs1v15;
 mod pss;
 
-use hitls_bignum::BigNum;
+use hitls_bignum::{BigNum, MontgomeryCtx};
 use hitls_types::CryptoError;
 use zeroize::Zeroize;
 
@@ -183,6 +183,15 @@ pub struct RsaPrivateKey {
     /// Modulus byte length (k).
     #[zeroize(skip)]
     k: usize,
+    /// Cached Montgomery context for mod p (avoids R² recomputation per CRT op).
+    #[zeroize(skip)]
+    mont_p: Option<MontgomeryCtx>,
+    /// Cached Montgomery context for mod q.
+    #[zeroize(skip)]
+    mont_q: Option<MontgomeryCtx>,
+    /// q^(-1) mod p in Montgomery form (avoids per-operation to_mont + mod_reduce).
+    #[zeroize(skip)]
+    qinv_mont: Option<BigNum>,
 }
 
 impl std::fmt::Debug for RsaPrivateKey {
@@ -239,6 +248,11 @@ impl RsaPrivateKey {
 
         let k = bits.div_ceil(8);
 
+        // Pre-build Montgomery contexts for CRT (eliminates R² recomputation per decrypt)
+        let mont_p = MontgomeryCtx::new(&p).ok();
+        let mont_q = MontgomeryCtx::new(&q).ok();
+        let qinv_mont = mont_p.as_ref().and_then(|ctx| ctx.to_mont(&qinv).ok());
+
         Ok(RsaPrivateKey {
             n,
             d,
@@ -250,6 +264,9 @@ impl RsaPrivateKey {
             qinv,
             bits,
             k,
+            mont_p,
+            mont_q,
+            qinv_mont,
         })
     }
 
@@ -275,6 +292,11 @@ impl RsaPrivateKey {
         let bits = n_bn.bit_len();
         let k = bits.div_ceil(8);
 
+        // Pre-build Montgomery contexts for CRT
+        let mont_p = MontgomeryCtx::new(&p_bn).ok();
+        let mont_q = MontgomeryCtx::new(&q_bn).ok();
+        let qinv_mont = mont_p.as_ref().and_then(|ctx| ctx.to_mont(&qinv).ok());
+
         Ok(RsaPrivateKey {
             n: n_bn,
             d: d_bn,
@@ -286,6 +308,9 @@ impl RsaPrivateKey {
             qinv,
             bits,
             k,
+            mont_p,
+            mont_q,
+            qinv_mont,
         })
     }
 
@@ -357,21 +382,40 @@ impl RsaPrivateKey {
     }
 
     /// Raw RSA private key operation: m = c^d mod n (RSADP).
-    /// Uses CRT optimization for ~4x speedup over direct exponentiation.
+    /// Uses CRT optimization with cached Montgomery contexts for ~4x speedup.
     fn raw_decrypt(&self, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let c = BigNum::from_bytes_be(data);
         if c >= self.n {
             return Err(CryptoError::InvalidArg(""));
         }
 
-        // CRT: m1 = c^dp mod p, m2 = c^dq mod q
-        let m1 = c.mod_exp(&self.dp, &self.p)?;
-        let m2 = c.mod_exp(&self.dq, &self.q)?;
+        // CRT with cached Montgomery contexts (skip R² recomputation per call)
+        let (m1, m2) = match (&self.mont_p, &self.mont_q) {
+            (Some(ctx_p), Some(ctx_q)) => {
+                let m1 = ctx_p.mont_exp(&c, &self.dp)?;
+                let m2 = ctx_q.mont_exp(&c, &self.dq)?;
+                (m1, m2)
+            }
+            _ => {
+                // Fallback: compute contexts on the fly
+                let m1 = c.mod_exp(&self.dp, &self.p)?;
+                let m2 = c.mod_exp(&self.dq, &self.q)?;
+                (m1, m2)
+            }
+        };
 
         // h = qinv * (m1 - m2 + p) mod p
-        // Add p to ensure non-negative before subtraction
         let diff = m1.add(&self.p).sub(&m2);
-        let h = diff.mul(&self.qinv).mod_reduce(&self.p)?;
+
+        // Use Montgomery multiplication for qinv * diff mod p when cached
+        let h = match (&self.mont_p, &self.qinv_mont) {
+            (Some(ctx_p), Some(qinv_m)) => {
+                let diff_m = ctx_p.to_mont(&diff)?;
+                let h_m = ctx_p.mont_mul(&diff_m, qinv_m);
+                ctx_p.from_mont(&h_m)
+            }
+            _ => diff.mul(&self.qinv).mod_reduce(&self.p)?,
+        };
 
         // m = m2 + h * q
         let m = m2.add(&h.mul(&self.q));

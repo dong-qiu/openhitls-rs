@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phases I1–I84, T1–T69, R1–R12, P1–P62 complete (3731 tests, 22 ignored)
+- **Status**: Phases I1–I84, T1–T69, R1–R12, P1–P68 complete (3835 tests, 22 ignored)
 
 ## Workspace Structure
 
@@ -18,7 +18,7 @@ openhitls-rs/
 │   ├── hitls-types/     # Shared types: algorithm IDs, error enums
 │   ├── hitls-utils/     # Hex, ASN.1, Base64, PEM, OID utilities
 │   ├── hitls-bignum/    # Big number arithmetic (CIOS Montgomery, Miller-Rabin, prime generation, hex/dec string) (90 tests, 1 ignored)
-│   ├── hitls-crypto/    # Cryptographic algorithms (feature-gated): AES, SM4, ChaCha20, SHA-2/3, SM3, HMAC, RSA, ECC, Ed25519/448, X25519/448, DH, DSA, SM2, SM9, PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), HybridKEM (12 variants), DRBG, FIPS/CMVP, entropy health, hardware AES/SHA-2/GHASH/ChaCha20, P-256 fast path, SM2 fast path, ML-KEM NEON NTT, ML-DSA NEON NTT, SM4 T-table, SHA-512 HW accel, Ed25519 precomputed table, Keccak SHA-3 HW accel, P-256 scalar field, HPKE full RFC 9180 (4 KEMs/3 KDFs/4 AEADs/4 modes) (1271 tests, 14 ignored)
+│   ├── hitls-crypto/    # Cryptographic algorithms (feature-gated): AES, SM4, ChaCha20, SHA-2/3, SM3, HMAC, RSA, ECC, Ed25519/448, X25519/448, DH, DSA, SM2, SM9, PQC (ML-KEM/ML-DSA/SLH-DSA/XMSS/FrodoKEM/McEliece), HybridKEM (12 variants), DRBG, FIPS/CMVP, entropy health, hardware AES/SHA-2/GHASH/ChaCha20, P-256/P-384/P-521 fast paths, SM2 fast path, ML-KEM NEON NTT, ML-DSA NEON NTT, SM4 T-table, SHA-512 HW accel, Ed25519/Ed448 precomputed tables, Keccak SHA-3 HW accel, P-256/P-384/P-521 scalar fields, HPKE full RFC 9180 (4 KEMs/3 KDFs/4 AEADs/4 modes) (1362 tests, 14 ignored)
 │   ├── hitls-tls/       # TLS 1.3/1.2 (91 cipher suites), DTLS 1.2, TLCP, DTLCP; 10 connection types (5 sync + 5 async via tokio); 15 TLS extensions; 10 callbacks; session cache, hostname verification, renegotiation, GREASE, custom extensions, NSS key logging, middlebox compat (1414 tests)
 │   ├── hitls-pki/       # X.509, PKCS#8 (incl. Encrypted PBES2), PKCS#12, CMS (SignedData/EnvelopedData/EncryptedData/DigestedData/AuthenticatedData), CRL builder, hostname verification (405 tests)
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass (33 tests)
@@ -34,11 +34,11 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3731 tests, 22 ignored)
+# Run all tests (3835 tests, 22 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1271 tests (14 ignored)
+cargo test -p hitls-crypto --all-features   # 1362 tests (14 ignored)
 cargo test -p hitls-tls --all-features      # 1414 tests
 
 cargo test -p hitls-pki --all-features      # 405 tests
@@ -132,7 +132,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases I1–I84, T1–T69, R1–R12, P1–P62 complete (3731 tests, 22 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
+Phases I1–I84, T1–T69, R1–R12, P1–P68 complete (3835 tests, 22 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
 
 ### Completed Phases (Summary)
 
@@ -214,6 +214,12 @@ Key milestones:
 - Phase P60: Fe25519 sub_fast carry elision — `sub_fast()` with 2p bias + no carry for X25519 Montgomery ladder (bounded inputs from mul/square), `square_times(n)` helper, compacted inversion chains, optimized `to_bytes()`. X25519 DH 9% faster (20.1→18.3µs).
 - Phase P61: BigNum ARM64 umulh investigation (skipped) — assembly analysis showed LLVM already generates 31 `umulh` + 106 `mul` instructions for CIOS inner loop. No code changes needed.
 - Phase P62: GHASH HW zero-copy batch processing — `ghash_data()` keeps state as `[u8; 16]` during HW loop (1 conversion pair vs 2N for N blocks). AES-128-GCM encrypt -6%, decrypt -7%.
+- Phase P63: P-384 specialized Montgomery field — P384FieldElement([u64; 6]) with P[3..5]=0xFF...FF reduction trick (saves 18 muls), dedicated mont_sqr (21 vs 36 muls), comb table (96x16), P384ScalarElement for ECDSA. 10-15x ECDSA P-384 sign/verify speedup.
+- Phase P64: P-521 specialized Mersenne field — P521FieldElement([u64; 9]) with direct Mersenne reduction (p=2^521-1, split at bit 521 and add), dedicated cross-product squaring (45 vs 81 muls), comb table (131x16), P521ScalarElement (Montgomery mod n). 8-12x ECDSA P-521 sign/verify speedup.
+- Phase P65: Ed448 precomputed base table — comb table (112 groups x 16 Ed448TablePoints), d_const() OnceLock caching, Copy derive on GeExtended448, precomputed x+y and d*x*y for 7M mixed addition. 4-6x Ed448 sign speedup.
+- Phase P66: Fe448 square_times + sub_fast — `square_times(n)` helper for inversion chains, `sub_fast()` with 2p bias for bounded inputs. 15-20% Ed448/X448 speedup.
+- Phase P67: BigNum fused CIOS squaring — replace `sqr_limbs + redc_limbs` (1.5n²) with `cios_mul_n(a,a)` (n²) in mont_exp/mont_exp_mont squaring loops, eliminate sqr_buf allocation. 25-30% all Montgomery exponentiation speedup.
+- Phase P68: RSA CRT Montgomery optimization — `Clone` on MontgomeryCtx, cached mont_p/mont_q/qinv_mont_p in RsaPrivateKey, CRT recombination via mont_mul instead of Knuth division. 10-15% RSA sign/decrypt speedup.
 - Phase T45–T53: Quality improvement roadmap — TLS connection unit tests (+15), TLS 1.2 handshake edge cases (+15), HW↔SW cross-validation (+8), proptest expansion to 5/9 crates (+15), side-channel timing tests (+6), concurrency stress tests (+10), feature flag smoke tests (+4), zeroize runtime verification (+4), DTLS fuzz + OpenSSL interop (+1 fuzz target, +2 tests). Total: +80 tests, 13→14 fuzz targets, defense model B→B+.
 - Phase T59–T62: Test optimization & deep defense — RSA OAEP/PKCS1v15 constant-time fix (timing side-channel elimination), CBC/GCM buffer zeroize on error, RSA timing tests (+2 ignored), unit tests (+2), crypto semantic fuzz targets (+6: RSA/ECDSA/HKDF/SM2/CCM/TLS PRF), TLS 1.3/1.2 state machine fuzz (+2), corpus enrichment (+40 seeds), cargo-deny supply-chain policy, CI hardening (miri blocking, feature combos, cargo-deny job), subtle version unification. Total: +4 tests, 18→26 fuzz targets, 118→158 corpus, defense model B+→A-.
 - Phase T63: PQC fuzz + signature sign fuzz — ML-KEM encap/decap, ML-DSA sign/verify, SLH-DSA sign/verify (fast variants), RSA sign (PKCS1v15/PSS), ECDSA sign (P-256/P-384/P-521), Ed25519 full coverage, SM2 sign/encrypt/decrypt, DSA sign (small params). Total: +8 fuzz targets (26→34), +80 corpus seeds (158→238), PQC coverage 0→3/6, sign-path coverage 0→5/7.
@@ -223,6 +229,6 @@ Key milestones:
 - Phase T68: Quality safety net enhancement — CI fuzz-smoke job on PR/push (10s per target), feature flag combos 9→24, `deny.toml` yanked deny, +6 fuzz targets (AES block/ChaCha20/CMAC/ECDH/Scrypt/McEliece) with 36 corpus seeds (40→46 targets, 286→322 corpus), +9 proptest blocks (ML-KEM/ML-DSA/RSA/ECDSA/ECDH), record layer zeroize on CBC decrypt error paths (TLS 1.2 MtE/EtM, TLCP, DTLCP), +3 unit tests. QUALITY_REPORT D21–D25 closed. Total: 3678 (21 ignored).
 - Phase I83: HPKE full RFC 9180 coverage — 4 KEMs (X25519/P-256/P-384/P-521), 3 KDFs (SHA-256/384/512), 4 AEADs (AES-128/256-GCM/ChaCha20-Poly1305/ExportOnly), 4 modes (Base/PSK/Auth/AuthPSK). HKDF generalized with `hash_factory` field. 8 new suite-parameterized methods. +19 crypto tests.
 - Phase T69: Quality safety net P0 — Miri CI expansion (+mlkem::ntt + mldsa::ntt + modes::gcm, skip NEON), feature flag isolation +12 tests (sha1/sha3/ecdh/x25519/x448/hkdf/pbkdf2/sm9/frodokem/mceliece/drbg/fips + dtls12 + pki + auth; fix `aes,gcm`→`aes,modes`), +10 proptest blocks (DH commutativity, DSA sign/verify + tamper, Ed448 sign/verify + different-key, SM2 sign/verify + encrypt/decrypt, SM9 sign/verify, SLH-DSA sign/verify + tamper). Fix ML-DSA tampered_sig → wrong_message proptest. QUALITY_REPORT D27 mostly closed, D29–D31 closed. Total: 3731 (22 ignored).
-- Phase I84: CLI prime/kdf commands — BigNum hex/dec string conversions (`from_hex_str`/`to_hex_str`/`from_dec_str`/`to_dec_str`), `gen_prime(bits, safe)`, `pbkdf2_with_hmac()` generalization, CLI `prime` (generate/check) and `kdf` (PBKDF2, 6 MAC options). +24 tests (10 bignum, 4 pbkdf2, 14 CLI). Total: 3721 (22 ignored).
+- Phase I84: CLI prime/kdf commands — BigNum hex/dec string conversions (`from_hex_str`/`to_hex_str`/`from_dec_str`/`to_dec_str`), `gen_prime(bits, safe)`, `pbkdf2_with_hmac()` generalization, CLI `prime` (generate/check) and `kdf` (PBKDF2, 6 MAC options). +24 tests (10 bignum, 4 pbkdf2, 14 CLI). Total: 3835 (22 ignored).
 
 See `DEV_LOG.md` for detailed phase tables (including test, refactoring, and performance phases) and `PROMPT_LOG.md` for prompt/response log.

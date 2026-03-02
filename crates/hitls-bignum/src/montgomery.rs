@@ -1,8 +1,9 @@
 //! Montgomery multiplication context for modular exponentiation.
 //!
-//! Uses CIOS (Coarsely Integrated Operand Scanning) for multiplication and
-//! optimized sqr + REDC for squaring, with pre-allocated buffers to eliminate
-//! heap allocation in the inner exponentiation loop.
+//! Uses CIOS (Coarsely Integrated Operand Scanning) for both multiplication and
+//! squaring, with fused multiply+reduce in a single (n+2)-limb accumulator.
+//! All working buffers are pre-allocated to eliminate heap allocation in the
+//! inner exponentiation loop.
 
 use crate::bignum::{BigNum, DoubleLimb, Limb, LIMB_BITS};
 use hitls_types::CryptoError;
@@ -11,6 +12,7 @@ use hitls_types::CryptoError;
 ///
 /// Precomputes values needed for efficient modular multiplication
 /// using the Montgomery form: R = 2^(m_size * LIMB_BITS).
+#[derive(Clone)]
 pub struct MontgomeryCtx {
     /// The modulus N (must be odd).
     modulus: BigNum,
@@ -89,17 +91,8 @@ impl MontgomeryCtx {
     pub fn mont_sqr(&self, a: &BigNum) -> BigNum {
         let n = self.m_size;
         let mut result = vec![0u64; n];
-        let mut sqr_buf = vec![0u64; 2 * n + 2];
-        // Pad input to n limbs if needed
-        let a_limbs = a.limbs();
-        if a_limbs.len() >= n {
-            sqr_limbs(a_limbs, n, &mut sqr_buf);
-        } else {
-            let mut padded = vec![0u64; n];
-            padded[..a_limbs.len()].copy_from_slice(a_limbs);
-            sqr_limbs(&padded, n, &mut sqr_buf);
-        }
-        self.redc_limbs(&mut result, &mut sqr_buf);
+        let mut scratch = vec![0u64; n + 2];
+        self.cios_mul(&mut result, a.limbs(), a.limbs(), &mut scratch);
         BigNum::from_limbs(result)
     }
 
@@ -226,50 +219,6 @@ impl MontgomeryCtx {
         }
     }
 
-    /// Montgomery reduction (REDC) on a 2n-limb value stored in `work`.
-    ///
-    /// Computes `result = work * R^(-1) mod N` by cancelling the low n limbs.
-    /// `work` must have at least `2 * m_size + 2` elements and is modified in place.
-    fn redc_limbs(&self, result: &mut [u64], work: &mut [u64]) {
-        let n = self.m_size;
-        let n_mod = self.modulus.limbs();
-        let np = self.n_prime;
-
-        debug_assert!(result.len() >= n);
-        debug_assert!(work.len() >= 2 * n + 2);
-
-        // SAFETY: work has 2n+2 elements, n_mod has n elements.
-        // We access work[0..2n+1] and n_mod[0..n-1].
-        unsafe {
-            for i in 0..n {
-                let m = work.get_unchecked(i).wrapping_mul(np);
-                let mut carry: u64 = 0;
-                for j in 0..n {
-                    let prod = m as DoubleLimb * *n_mod.get_unchecked(j) as DoubleLimb
-                        + *work.get_unchecked(i + j) as DoubleLimb
-                        + carry as DoubleLimb;
-                    *work.get_unchecked_mut(i + j) = prod as Limb;
-                    carry = (prod >> LIMB_BITS) as u64;
-                }
-                // Propagate carry through upper limbs
-                let mut k = i + n;
-                while carry != 0 && k < 2 * n + 2 {
-                    let sum = *work.get_unchecked(k) as DoubleLimb + carry as DoubleLimb;
-                    *work.get_unchecked_mut(k) = sum as Limb;
-                    carry = (sum >> LIMB_BITS) as u64;
-                    k += 1;
-                }
-            }
-        }
-
-        // Result is in work[n..2n]
-        result[..n].copy_from_slice(&work[n..2 * n]);
-        let overflow = work[2 * n];
-        if overflow != 0 || limbs_ge(&result[..n], n_mod) {
-            limbs_sub_in_place(result, n_mod, n);
-        }
-    }
-
     /// Windowed Montgomery exponentiation: base^exp mod N.
     ///
     /// Uses CIOS for multiplication and optimized sqr + REDC for squaring,
@@ -327,7 +276,6 @@ impl MontgomeryCtx {
         // Main exponentiation loop
         let mut result = vec![0u64; n];
         let mut temp = vec![0u64; n];
-        let mut sqr_buf = vec![0u64; 2 * n + 2]; // For sqr_limbs + redc_limbs
         result.copy_from_slice(&table[0..n]); // Start with 1 in Montgomery form
 
         // Process exponent from MSB to LSB in w-bit windows
@@ -336,10 +284,10 @@ impl MontgomeryCtx {
             let window_bits = if i >= w { w } else { i };
             i -= window_bits;
 
-            // Square window_bits times using dedicated sqr + redc (~33% fewer muls)
+            // Square window_bits times using fused CIOS (better cache locality)
             for _ in 0..window_bits {
-                sqr_limbs(&result, n, &mut sqr_buf);
-                self.redc_limbs(&mut temp, &mut sqr_buf);
+                // SAFETY: result has exactly n limbs
+                unsafe { self.cios_mul_n(&mut temp, &result, &result, &mut scratch) };
                 std::mem::swap(&mut result, &mut temp);
             }
 
@@ -412,7 +360,6 @@ impl MontgomeryCtx {
 
         let mut result = vec![0u64; n];
         let mut temp = vec![0u64; n];
-        let mut sqr_buf = vec![0u64; 2 * n + 2];
         result.copy_from_slice(&table[0..n]);
 
         let mut i = exp_bits;
@@ -420,9 +367,10 @@ impl MontgomeryCtx {
             let window_bits = if i >= w { w } else { i };
             i -= window_bits;
 
+            // Square window_bits times using fused CIOS
             for _ in 0..window_bits {
-                sqr_limbs(&result, n, &mut sqr_buf);
-                self.redc_limbs(&mut temp, &mut sqr_buf);
+                // SAFETY: result has exactly n limbs
+                unsafe { self.cios_mul_n(&mut temp, &result, &result, &mut scratch) };
                 std::mem::swap(&mut result, &mut temp);
             }
 
@@ -450,6 +398,7 @@ impl MontgomeryCtx {
 /// Exploits the symmetry `a[i]*a[j] == a[j]*a[i]` to compute cross products
 /// once and double them, then adds diagonal terms. Uses n(n+1)/2 multiplications
 /// instead of n² for the general case (~33% savings).
+#[cfg(test)]
 fn sqr_limbs(a: &[u64], n: usize, out: &mut [u64]) {
     debug_assert!(a.len() >= n);
     debug_assert!(out.len() >= 2 * n + 2);

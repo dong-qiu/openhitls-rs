@@ -4,27 +4,27 @@
 //! Edwards curve: x² + y² = 1 + d·x²·y² with **a = 1** (NOT a = −1 like Ed25519).
 //!
 //! d = −39081 mod p.
+//!
+//! Includes a precomputed comb table (114 groups × 16 affine points) for fast
+//! constant-time base point scalar multiplication.
+
+use std::sync::OnceLock;
 
 use hitls_types::CryptoError;
 use subtle::ConstantTimeEq;
 
 use super::field::Fe448;
 
-/// d = −39081 mod p = p − 39081.
-/// p = 2^448 − 2^224 − 1. So d = 2^448 − 2^224 − 39082.
-/// Computed as Fe448::zero().sub(&Fe448::from_small(39081)).
-fn d_const() -> Fe448 {
-    let mut bytes = [0u8; 56];
-    bytes[0] = 39081u16 as u8; // 0x98B9 & 0xFF = 0xB9
-    bytes[1] = (39081u16 >> 8) as u8; // 0x98
-    let pos = Fe448::from_bytes(&bytes);
-    Fe448::zero().sub(&pos) // -39081 mod p
-}
-
-/// 2*d mod p.
-fn d2_const() -> Fe448 {
-    let d = d_const();
-    d.add(&d)
+/// d = −39081 mod p, cached via OnceLock (avoids recomputation per point op).
+fn d_const() -> &'static Fe448 {
+    static D: OnceLock<Fe448> = OnceLock::new();
+    D.get_or_init(|| {
+        let mut bytes = [0u8; 56];
+        bytes[0] = 39081u16 as u8;
+        bytes[1] = (39081u16 >> 8) as u8;
+        let pos = Fe448::from_bytes(&bytes);
+        Fe448::zero().sub(&pos)
+    })
 }
 
 /// Base point Y coordinate for Ed448 (from RFC 8032 §5.2.5).
@@ -73,12 +73,22 @@ pub(crate) const L_BYTES_LE: [u8; 57] = [
 
 /// A point on the Edwards curve in extended coordinates.
 /// Represents the affine point (X/Z, Y/Z) with T = XY/Z.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct GeExtended448 {
     pub x: Fe448,
     pub y: Fe448,
     pub z: Fe448,
     pub t: Fe448,
+}
+
+/// An affine point precomputed for fast mixed addition on the a=1 curve.
+/// Stores (x, y, x+y, d*x*y) from an affine point where Z=1.
+#[derive(Clone, Copy)]
+struct Ed448TablePoint {
+    x: Fe448,
+    y: Fe448,
+    xpy: Fe448,  // x + y
+    d_xy: Fe448, // d * x * y
 }
 
 impl GeExtended448 {
@@ -105,7 +115,7 @@ impl GeExtended448 {
     }
 
     /// Encode a point to 57 bytes: y (56 bytes LE) with sign of x in top bit of byte[56].
-    pub fn to_bytes(&self) -> [u8; 57] {
+    pub fn to_bytes(self) -> [u8; 57] {
         let z_inv = self.z.invert();
         let x = self.x.mul(&z_inv);
         let y = self.y.mul(&z_inv);
@@ -135,7 +145,7 @@ impl GeExtended448 {
         // x² = (y² − 1) / (d·y² − 1)
         let y2 = y.square();
         let u = y2.sub(&Fe448::one()); // u = y² − 1
-        let v = y2.mul(&d).sub(&Fe448::one()); // v = d·y² − 1
+        let v = y2.mul(d).sub(&Fe448::one()); // v = d·y² − 1
 
         // x = sqrt(u/v) = sqrt(u) * sqrt(v^(-1))
         // Since p ≡ 3 (mod 4), we can use: x = (u/v)^((p+1)/4)
@@ -208,7 +218,7 @@ pub(crate) fn point_add(a: &GeExtended448, b: &GeExtended448) -> GeExtended448 {
 
     let p1 = a.x.mul(&b.x); // X1·X2
     let p2 = a.y.mul(&b.y); // Y1·Y2
-    let cc = d.mul(&a.t).mul(&b.t); // C = d·T1·T2
+    let cc = d.mul(&a.t).mul(&b.t); // C = d·T1·T2  (2M)
     let dd = a.z.mul(&b.z); // D = Z1·Z2
 
     // E = (X1+Y1)·(X2+Y2) − X1X2 − Y1Y2 = X1Y2 + X2Y1
@@ -269,7 +279,7 @@ pub(crate) fn scalar_mul(scalar: &[u8], point: &GeExtended448) -> GeExtended448 
     // Precompute table: table[i] = i * P for i = 0..16
     let mut table = Vec::with_capacity(16);
     table.push(GeExtended448::identity()); // 0P
-    table.push(point.clone()); // 1P
+    table.push(*point); // 1P
     table.push(point_double(point)); // 2P
     for i in 3..16usize {
         table.push(point_add(&table[i - 1], point));
@@ -292,7 +302,7 @@ pub(crate) fn scalar_mul(scalar: &[u8], point: &GeExtended448) -> GeExtended448 
             if started {
                 result = point_add(&result, &table[hi as usize]);
             } else {
-                result = table[hi as usize].clone();
+                result = table[hi as usize];
                 started = true;
             }
         }
@@ -309,7 +319,7 @@ pub(crate) fn scalar_mul(scalar: &[u8], point: &GeExtended448) -> GeExtended448 
             if started {
                 result = point_add(&result, &table[lo as usize]);
             } else {
-                result = table[lo as usize].clone();
+                result = table[lo as usize];
                 started = true;
             }
         }
@@ -318,10 +328,147 @@ pub(crate) fn scalar_mul(scalar: &[u8], point: &GeExtended448) -> GeExtended448 
     result
 }
 
+/// Number of comb groups: covers 57 bytes × 8 bits / 4 bits = 114 windows.
+const COMB_GROUPS: usize = 114;
+
+impl Ed448TablePoint {
+    fn identity() -> Self {
+        Ed448TablePoint {
+            x: Fe448::zero(),
+            y: Fe448::one(),
+            xpy: Fe448::one(),   // 0 + 1
+            d_xy: Fe448::zero(), // d * 0 * 1 = 0
+        }
+    }
+
+    fn from_extended(p: &GeExtended448) -> Self {
+        let z_inv = p.z.invert();
+        let x = p.x.mul(&z_inv);
+        let y = p.y.mul(&z_inv);
+        let d = d_const();
+        Ed448TablePoint {
+            xpy: x.add(&y),
+            d_xy: d.mul(&x).mul(&y),
+            x,
+            y,
+        }
+    }
+
+    /// Constant-time conditional assignment: self = other if mask is all-1s.
+    fn ct_assign(&mut self, other: &Ed448TablePoint, mask: u64) {
+        let m = mask as u32;
+        for i in 0..16 {
+            self.x.0[i] ^= m & (self.x.0[i] ^ other.x.0[i]);
+            self.y.0[i] ^= m & (self.y.0[i] ^ other.y.0[i]);
+            self.xpy.0[i] ^= m & (self.xpy.0[i] ^ other.xpy.0[i]);
+            self.d_xy.0[i] ^= m & (self.d_xy.0[i] ^ other.d_xy.0[i]);
+        }
+    }
+}
+
+/// Extended + affine mixed addition for a=1 Edwards curve: R = A + B.
+/// B is in Ed448TablePoint form (affine, Z=1, precomputed x+y and d*x*y).
+/// Cost: 8M (vs 9M for full extended addition).
+fn point_add_mixed(a: &GeExtended448, b: &Ed448TablePoint) -> GeExtended448 {
+    let p1 = a.x.mul(&b.x); // X1 * x2
+    let p2 = a.y.mul(&b.y); // Y1 * y2
+    let cc = a.t.mul(&b.d_xy); // T1 * d*x2*y2  (1M instead of 2M)
+                               // D = Z1 (since Z2 = 1)
+
+    let e = a.x.add(&a.y).mul(&b.xpy).sub(&p1).sub(&p2);
+    let f = a.z.sub(&cc);
+    let g = a.z.add(&cc);
+    let h = p2.sub(&p1); // a=1: H = B - a*A = B - A
+
+    GeExtended448 {
+        x: e.mul(&f),
+        y: g.mul(&h),
+        z: f.mul(&g),
+        t: e.mul(&h),
+    }
+}
+
+/// Constant-time table lookup: select table[index] for index in 0..16.
+fn ct_select_table(table: &[Ed448TablePoint; 16], index: u8) -> Ed448TablePoint {
+    let mut result = Ed448TablePoint::identity();
+    for i in 1..16u8 {
+        let mask = (((i ^ index) as i64).wrapping_sub(1) >> 63) as u64;
+        result.ct_assign(&table[i as usize], mask);
+    }
+    result
+}
+
+/// Get the precomputed comb table for the base point.
+/// 114 groups × 16 Ed448TablePoint entries, lazily initialized via OnceLock.
+fn base_table() -> &'static [[Ed448TablePoint; 16]; COMB_GROUPS] {
+    static TABLE: OnceLock<Box<[[Ed448TablePoint; 16]; COMB_GROUPS]>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table_vec: Vec<[Ed448TablePoint; 16]> = Vec::with_capacity(COMB_GROUPS);
+
+        // Bi = 2^(4*group) · B
+        let mut bi = GeExtended448::basepoint();
+
+        for _group in 0..COMB_GROUPS {
+            let mut group = [Ed448TablePoint::identity(); 16];
+
+            // group[1] = Bi
+            group[1] = Ed448TablePoint::from_extended(&bi);
+
+            // group[j] = j * Bi for j = 2..15
+            let mut accum = bi;
+            for slot in group.iter_mut().skip(2) {
+                accum = point_add(&accum, &bi);
+                *slot = Ed448TablePoint::from_extended(&accum);
+            }
+
+            table_vec.push(group);
+
+            // Advance: Bi+1 = 16 * Bi (4 doublings)
+            bi = point_double(&bi);
+            bi = point_double(&bi);
+            bi = point_double(&bi);
+            bi = point_double(&bi);
+        }
+
+        let table_arr: [[Ed448TablePoint; 16]; COMB_GROUPS] =
+            table_vec.try_into().unwrap_or_else(|_| unreachable!());
+        Box::new(table_arr)
+    })
+}
+
 /// Scalar multiplication with the base point: R = scalar * B.
+///
+/// Uses a precomputed comb table (114 groups × 16 affine points) for
+/// fast constant-time base point multiplication: 113 mixed additions,
+/// 0 doublings.
 pub(crate) fn scalar_mul_base(scalar: &[u8]) -> GeExtended448 {
-    let base = GeExtended448::basepoint();
-    scalar_mul(scalar, &base)
+    let table = base_table();
+
+    let mut result = GeExtended448::identity();
+
+    for (group_idx, group_table) in table.iter().enumerate() {
+        let bit_offset = group_idx * 4;
+        let byte_idx = bit_offset / 8;
+        let bit_idx = bit_offset % 8;
+
+        // Extract 4-bit window from little-endian scalar
+        let window = if byte_idx < scalar.len() {
+            let lo = scalar[byte_idx] >> bit_idx;
+            let hi = if bit_idx > 4 && byte_idx + 1 < scalar.len() {
+                scalar[byte_idx + 1] << (8 - bit_idx)
+            } else {
+                0
+            };
+            (lo | hi) & 0x0F
+        } else {
+            0
+        };
+
+        let point = ct_select_table(group_table, window);
+        result = point_add_mixed(&result, &point);
+    }
+
+    result
 }
 
 #[cfg(test)]
