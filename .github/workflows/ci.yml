@@ -132,6 +132,11 @@ jobs:
       # Auth individual features
       - run: cargo test -p hitls-auth --no-default-features --features otp
       - run: cargo test -p hitls-auth --no-default-features --features spake2plus
+      - run: cargo test -p hitls-auth --no-default-features --features privpass
+      # T72: Cross-feature combinations
+      - run: cargo test -p hitls-tls --no-default-features --features tls12,tls13
+      - run: cargo test -p hitls-crypto --no-default-features --features aes,modes,sha2
+      - run: cargo test -p hitls-pki --no-default-features --features x509,pkcs8,cms,pkcs12
 
   audit:
     name: Security Audit
@@ -239,7 +244,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [aarch64-unknown-linux-gnu, i686-unknown-linux-gnu]
+        target: [aarch64-unknown-linux-gnu, i686-unknown-linux-gnu, s390x-unknown-linux-gnu]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
