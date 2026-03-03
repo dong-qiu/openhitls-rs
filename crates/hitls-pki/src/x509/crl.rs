@@ -802,4 +802,65 @@ mod tests {
         assert!(aki.key_identifier.is_some());
         assert!(!aki.key_identifier.unwrap().is_empty());
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn make_ed25519_ca() -> (super::super::Certificate, super::super::super::signing::SigningKey)
+        {
+            let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+            let sk = super::super::super::signing::SigningKey::Ed25519(kp);
+            let dn = DistinguishedName {
+                entries: vec![("CN".into(), "Proptest CA".into())],
+            };
+            let cert = super::super::super::builder::CertificateBuilder::self_signed(
+                dn,
+                &sk,
+                1_700_000_000,
+                1_800_000_000,
+            )
+            .unwrap();
+            (cert, sk)
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(5))]
+
+            #[test]
+            fn prop_crl_build_parse_roundtrip(
+                serial in prop::collection::vec(1u8..=255, 1..8),
+                revocation_time in 1_700_000_000i64..1_750_000_000,
+                num_entries in 0usize..5,
+            ) {
+                let (ca_cert, sk) = make_ed25519_ca();
+                let dn = ca_cert.issuer.clone();
+
+                let mut builder = super::super::super::builder::CrlBuilder::new(
+                    dn,
+                    revocation_time,
+                ).next_update(revocation_time + 86400);
+
+                for i in 0..num_entries {
+                    let mut entry_serial = serial.clone();
+                    entry_serial.push(i as u8);
+                    builder = builder.add_revoked(
+                        super::super::super::builder::RevokedCertBuilder::new(
+                            &entry_serial,
+                            revocation_time,
+                        ),
+                    );
+                }
+
+                let crl = builder.build(&sk).unwrap();
+                let der = crl.to_der();
+                let parsed = CertificateRevocationList::from_der(&der).unwrap();
+
+                prop_assert_eq!(parsed.revoked_certs.len(), num_entries);
+                prop_assert_eq!(parsed.this_update, revocation_time);
+                prop_assert_eq!(parsed.next_update, Some(revocation_time + 86400));
+                prop_assert!(parsed.verify_signature(&ca_cert).unwrap());
+            }
+        }
+    }
 }

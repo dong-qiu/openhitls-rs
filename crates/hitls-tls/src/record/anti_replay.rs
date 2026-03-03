@@ -399,4 +399,41 @@ mod tests {
         w.accept(11);
         assert!(!w.check(11));
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(20))]
+
+            /// Accepted sequence numbers are always rejected on re-check.
+            #[test]
+            fn prop_accepted_seq_always_rejected(
+                seqs in prop::collection::vec(0u64..1000, 1..20),
+            ) {
+                let mut w = AntiReplayWindow::new();
+                for &seq in &seqs {
+                    w.accept(seq);
+                }
+                // Every accepted seq must now fail check
+                for &seq in &seqs {
+                    prop_assert!(!w.check(seq), "seq {} should be rejected after accept", seq);
+                }
+            }
+
+            /// New (unseen) sequence within window is always accepted.
+            #[test]
+            fn prop_new_seq_within_window_accepted(
+                max_seq in 64u64..200,
+                offset in 0u64..63,
+            ) {
+                let mut w = AntiReplayWindow::new();
+                w.accept(max_seq);
+                let test_seq = max_seq - offset;
+                // This seq was never accepted, it's within window
+                prop_assert!(w.check(test_seq), "seq {} should be accepted (unseen, within window of max {})", test_seq, max_seq);
+            }
+        }
+    }
 }
