@@ -191,6 +191,43 @@ unsafe fn decrypt_block_ni(block: &mut [u8; 16], dec_keys: &[[u8; 16]], rounds: 
     _mm_storeu_si128(block.as_mut_ptr() as *mut __m128i, state);
 }
 
+/// Encrypt 4 blocks in parallel using AES-NI pipeline.
+#[target_feature(enable = "aes")]
+unsafe fn encrypt_4_blocks_ni(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]], rounds: usize) {
+    let mut s0 = _mm_loadu_si128(blocks[0].as_ptr() as *const __m128i);
+    let mut s1 = _mm_loadu_si128(blocks[1].as_ptr() as *const __m128i);
+    let mut s2 = _mm_loadu_si128(blocks[2].as_ptr() as *const __m128i);
+    let mut s3 = _mm_loadu_si128(blocks[3].as_ptr() as *const __m128i);
+
+    // Initial round-key addition
+    let rk0 = load_key(&enc_keys[0]);
+    s0 = _mm_xor_si128(s0, rk0);
+    s1 = _mm_xor_si128(s1, rk0);
+    s2 = _mm_xor_si128(s2, rk0);
+    s3 = _mm_xor_si128(s3, rk0);
+
+    // Rounds 1 .. rounds-1
+    for rk in enc_keys.iter().take(rounds).skip(1) {
+        let k = load_key(rk);
+        s0 = _mm_aesenc_si128(s0, k);
+        s1 = _mm_aesenc_si128(s1, k);
+        s2 = _mm_aesenc_si128(s2, k);
+        s3 = _mm_aesenc_si128(s3, k);
+    }
+
+    // Final round
+    let kf = load_key(&enc_keys[rounds]);
+    s0 = _mm_aesenclast_si128(s0, kf);
+    s1 = _mm_aesenclast_si128(s1, kf);
+    s2 = _mm_aesenclast_si128(s2, kf);
+    s3 = _mm_aesenclast_si128(s3, kf);
+
+    _mm_storeu_si128(blocks[0].as_mut_ptr() as *mut __m128i, s0);
+    _mm_storeu_si128(blocks[1].as_mut_ptr() as *mut __m128i, s1);
+    _mm_storeu_si128(blocks[2].as_mut_ptr() as *mut __m128i, s2);
+    _mm_storeu_si128(blocks[3].as_mut_ptr() as *mut __m128i, s3);
+}
+
 // ---------------------------------------------------------------------------
 // NiAesKey — public(crate) struct
 // ---------------------------------------------------------------------------
@@ -264,6 +301,12 @@ impl NiAesKey {
         unsafe {
             decrypt_block_ni(blk, &self.dec_keys, self.rounds);
         }
+        Ok(())
+    }
+
+    /// Encrypt 4 blocks in place using pipelined AES-NI instructions.
+    pub fn encrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        unsafe { encrypt_4_blocks_ni(blocks, &self.enc_keys, self.rounds) }
         Ok(())
     }
 

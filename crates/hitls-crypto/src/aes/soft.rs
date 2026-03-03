@@ -172,6 +172,14 @@ impl SoftAesKey {
         Ok(())
     }
 
+    /// Encrypt 4 blocks in place (sequential software fallback).
+    pub fn encrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        for blk in blocks.iter_mut() {
+            self.encrypt_block(blk)?;
+        }
+        Ok(())
+    }
+
     /// Return the key length in bytes.
     pub fn key_len(&self) -> usize {
         self.key.len()

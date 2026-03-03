@@ -112,6 +112,128 @@ pub(super) unsafe fn chacha20_block_neon(
     out
 }
 
+/// Compute two ChaCha20 64-byte keystream blocks (128 bytes) for consecutive counters.
+///
+/// # Safety
+/// Requires the `neon` target feature.
+#[target_feature(enable = "neon")]
+pub(super) unsafe fn chacha20_2_blocks_neon(
+    key: &[u8; 32],
+    counter: u32,
+    nonce: &[u8; 12],
+) -> [u8; 128] {
+    // Shared setup
+    let consts: [u32; 4] = [0x6170_7865, 0x3320_646e, 0x7962_2d32, 0x6b20_6574];
+    let v0_init = vld1q_u32(consts.as_ptr());
+    let v1_init = vreinterpretq_u32_u8(vld1q_u8(key.as_ptr()));
+    let v2_init = vreinterpretq_u32_u8(vld1q_u8(key[16..].as_ptr()));
+
+    // Row 3 differs only in counter
+    let mut cn_a = [0u8; 16];
+    cn_a[0..4].copy_from_slice(&counter.to_le_bytes());
+    cn_a[4..16].copy_from_slice(nonce);
+    let v3a_init = vreinterpretq_u32_u8(vld1q_u8(cn_a.as_ptr()));
+
+    let mut cn_b = [0u8; 16];
+    cn_b[0..4].copy_from_slice(&counter.wrapping_add(1).to_le_bytes());
+    cn_b[4..16].copy_from_slice(nonce);
+    let v3b_init = vreinterpretq_u32_u8(vld1q_u8(cn_b.as_ptr()));
+
+    let (mut v0a, mut v1a, mut v2a, mut v3a) = (v0_init, v1_init, v2_init, v3a_init);
+    let (mut v0b, mut v1b, mut v2b, mut v3b) = (v0_init, v1_init, v2_init, v3b_init);
+
+    for _ in 0..10 {
+        // Column round — interleaved A and B
+        v0a = vaddq_u32(v0a, v1a);
+        v0b = vaddq_u32(v0b, v1b);
+        v3a = veorq_u32(v3a, v0a);
+        v3b = veorq_u32(v3b, v0b);
+        v3a = vrotl16(v3a);
+        v3b = vrotl16(v3b);
+        v2a = vaddq_u32(v2a, v3a);
+        v2b = vaddq_u32(v2b, v3b);
+        v1a = veorq_u32(v1a, v2a);
+        v1b = veorq_u32(v1b, v2b);
+        v1a = vrotl12(v1a);
+        v1b = vrotl12(v1b);
+        v0a = vaddq_u32(v0a, v1a);
+        v0b = vaddq_u32(v0b, v1b);
+        v3a = veorq_u32(v3a, v0a);
+        v3b = veorq_u32(v3b, v0b);
+        v3a = vrotl8(v3a);
+        v3b = vrotl8(v3b);
+        v2a = vaddq_u32(v2a, v3a);
+        v2b = vaddq_u32(v2b, v3b);
+        v1a = veorq_u32(v1a, v2a);
+        v1b = veorq_u32(v1b, v2b);
+        v1a = vrotl7(v1a);
+        v1b = vrotl7(v1b);
+
+        // Diagonal round — rotate rows
+        v1a = vextq_u32::<1>(v1a, v1a);
+        v1b = vextq_u32::<1>(v1b, v1b);
+        v2a = vextq_u32::<2>(v2a, v2a);
+        v2b = vextq_u32::<2>(v2b, v2b);
+        v3a = vextq_u32::<3>(v3a, v3a);
+        v3b = vextq_u32::<3>(v3b, v3b);
+
+        v0a = vaddq_u32(v0a, v1a);
+        v0b = vaddq_u32(v0b, v1b);
+        v3a = veorq_u32(v3a, v0a);
+        v3b = veorq_u32(v3b, v0b);
+        v3a = vrotl16(v3a);
+        v3b = vrotl16(v3b);
+        v2a = vaddq_u32(v2a, v3a);
+        v2b = vaddq_u32(v2b, v3b);
+        v1a = veorq_u32(v1a, v2a);
+        v1b = veorq_u32(v1b, v2b);
+        v1a = vrotl12(v1a);
+        v1b = vrotl12(v1b);
+        v0a = vaddq_u32(v0a, v1a);
+        v0b = vaddq_u32(v0b, v1b);
+        v3a = veorq_u32(v3a, v0a);
+        v3b = veorq_u32(v3b, v0b);
+        v3a = vrotl8(v3a);
+        v3b = vrotl8(v3b);
+        v2a = vaddq_u32(v2a, v3a);
+        v2b = vaddq_u32(v2b, v3b);
+        v1a = veorq_u32(v1a, v2a);
+        v1b = veorq_u32(v1b, v2b);
+        v1a = vrotl7(v1a);
+        v1b = vrotl7(v1b);
+
+        // Un-rotate rows
+        v1a = vextq_u32::<3>(v1a, v1a);
+        v1b = vextq_u32::<3>(v1b, v1b);
+        v2a = vextq_u32::<2>(v2a, v2a);
+        v2b = vextq_u32::<2>(v2b, v2b);
+        v3a = vextq_u32::<1>(v3a, v3a);
+        v3b = vextq_u32::<1>(v3b, v3b);
+    }
+
+    // Add initial state
+    v0a = vaddq_u32(v0a, v0_init);
+    v1a = vaddq_u32(v1a, v1_init);
+    v2a = vaddq_u32(v2a, v2_init);
+    v3a = vaddq_u32(v3a, v3a_init);
+    v0b = vaddq_u32(v0b, v0_init);
+    v1b = vaddq_u32(v1b, v1_init);
+    v2b = vaddq_u32(v2b, v2_init);
+    v3b = vaddq_u32(v3b, v3b_init);
+
+    let mut out = [0u8; 128];
+    vst1q_u8(out.as_mut_ptr(), vreinterpretq_u8_u32(v0a));
+    vst1q_u8(out[16..].as_mut_ptr(), vreinterpretq_u8_u32(v1a));
+    vst1q_u8(out[32..].as_mut_ptr(), vreinterpretq_u8_u32(v2a));
+    vst1q_u8(out[48..].as_mut_ptr(), vreinterpretq_u8_u32(v3a));
+    vst1q_u8(out[64..].as_mut_ptr(), vreinterpretq_u8_u32(v0b));
+    vst1q_u8(out[80..].as_mut_ptr(), vreinterpretq_u8_u32(v1b));
+    vst1q_u8(out[96..].as_mut_ptr(), vreinterpretq_u8_u32(v2b));
+    vst1q_u8(out[112..].as_mut_ptr(), vreinterpretq_u8_u32(v3b));
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

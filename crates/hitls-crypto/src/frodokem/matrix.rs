@@ -24,12 +24,14 @@ fn gen_a_mul_add_shake(
 
     // Generate A row-by-row and accumulate A·s
     // Process 4 rows at a time for efficiency (matching C code)
+    // Pre-allocate buffers outside the loop for reuse
+    let mut a_rows = vec![0u16; 4 * n];
+    let mut row_bytes = vec![0u8; n * 2];
+
     for i in (0..n).step_by(4) {
         let rows_this = core::cmp::min(4, n - i);
-        // Generate 4 rows of A using SHAKE128(row_index_le16 || seed_a)
-        let mut a_rows = vec![0u16; rows_this * n];
+        a_rows[..rows_this * n].fill(0);
 
-        let mut row_bytes = vec![0u8; n * 2];
         for r in 0..rows_this {
             let row_idx = (i + r) as u16;
             let mut xof = Shake128::new();
@@ -78,9 +80,11 @@ fn gen_a_mul_add_aes(
 
     // Generate A row-by-row using AES-128-ECB with counter blocks
     // Each block: row_le16(2) || col_le16(2) || 0(12) → encrypt → 8 u16 values
+    let mut a_rows = vec![0u16; 4 * n];
+
     for i in (0..n).step_by(4) {
         let rows_this = core::cmp::min(4, n - i);
-        let mut a_rows = vec![0u16; rows_this * n];
+        a_rows[..rows_this * n].fill(0);
 
         for r in 0..rows_this {
             let row_idx = (i + r) as u16;
@@ -147,11 +151,13 @@ pub(crate) fn mul_add_sa_plus_e(
         PrgMode::Shake => {
             use crate::sha3::Shake128;
             // Generate A row-by-row, accumulate S'·A
+            let mut a_rows = vec![0u16; 4 * n];
+            let mut row_bytes = vec![0u8; n * 2];
+
             for i in (0..n).step_by(4) {
                 let rows_this = core::cmp::min(4, n - i);
-                let mut a_rows = vec![0u16; rows_this * n];
+                a_rows[..rows_this * n].fill(0);
 
-                let mut row_bytes = vec![0u8; n * 2];
                 for r in 0..rows_this {
                     let row_idx = (i + r) as u16;
                     let mut xof = Shake128::new();
@@ -181,10 +187,11 @@ pub(crate) fn mul_add_sa_plus_e(
         PrgMode::Aes => {
             use crate::aes::AesKey;
             let cipher = AesKey::new(seed_a)?;
+            let mut a_rows = vec![0u16; 4 * n];
 
             for i in (0..n).step_by(4) {
                 let rows_this = core::cmp::min(4, n - i);
-                let mut a_rows = vec![0u16; rows_this * n];
+                a_rows[..rows_this * n].fill(0);
 
                 for r in 0..rows_this {
                     let row_idx = (i + r) as u16;

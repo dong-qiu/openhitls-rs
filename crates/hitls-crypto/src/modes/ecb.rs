@@ -15,9 +15,28 @@ pub fn ecb_encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>
     }
     let cipher = AesKey::new(key)?;
     let mut output = plaintext.to_vec();
-    for chunk in output.chunks_mut(AES_BLOCK_SIZE) {
-        cipher.encrypt_block(chunk)?;
+
+    let mut offset = 0;
+
+    // 4-block pipeline
+    while offset + 64 <= output.len() {
+        let mut blocks = [[0u8; 16]; 4];
+        for i in 0..4 {
+            blocks[i].copy_from_slice(&output[offset + i * 16..offset + (i + 1) * 16]);
+        }
+        cipher.encrypt_4_blocks(&mut blocks)?;
+        for i in 0..4 {
+            output[offset + i * 16..offset + (i + 1) * 16].copy_from_slice(&blocks[i]);
+        }
+        offset += 64;
     }
+
+    // Tail: single-block loop
+    while offset < output.len() {
+        cipher.encrypt_block(&mut output[offset..offset + 16])?;
+        offset += 16;
+    }
+
     Ok(output)
 }
 

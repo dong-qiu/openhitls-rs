@@ -26,13 +26,40 @@ pub fn ctr_crypt(key: &[u8], nonce: &[u8], data: &mut [u8]) -> Result<(), Crypto
     let mut counter = [0u8; AES_BLOCK_SIZE];
     counter.copy_from_slice(nonce);
 
-    for chunk in data.chunks_mut(AES_BLOCK_SIZE) {
+    let mut offset = 0;
+
+    // 4-block pipeline: process 64 bytes at a time
+    while offset + 64 <= data.len() {
+        let mut blocks = [counter; 4];
+        increment_counter(&mut counter);
+        blocks[1] = counter;
+        increment_counter(&mut counter);
+        blocks[2] = counter;
+        increment_counter(&mut counter);
+        blocks[3] = counter;
+        increment_counter(&mut counter);
+
+        cipher.encrypt_4_blocks(&mut blocks)?;
+
+        for (i, block) in blocks.iter().enumerate() {
+            let base = offset + i * AES_BLOCK_SIZE;
+            for j in 0..AES_BLOCK_SIZE {
+                data[base + j] ^= block[j];
+            }
+        }
+        offset += 64;
+    }
+
+    // Tail: single-block loop for remaining data
+    while offset < data.len() {
         let mut keystream = counter;
         cipher.encrypt_block(&mut keystream)?;
-        for (d, &k) in chunk.iter_mut().zip(keystream.iter()) {
-            *d ^= k;
+        let remaining = (data.len() - offset).min(AES_BLOCK_SIZE);
+        for j in 0..remaining {
+            data[offset + j] ^= keystream[j];
         }
         increment_counter(&mut counter);
+        offset += remaining;
     }
     Ok(())
 }

@@ -107,6 +107,21 @@ impl AesKey {
         }
     }
 
+    /// Encrypt 4 blocks in place, exploiting AES pipeline parallelism.
+    ///
+    /// On hardware AES (NEON/NI), all 4 blocks flow through each round
+    /// simultaneously, hiding the 4-cycle latency. Software falls back
+    /// to sequential single-block encryption.
+    pub fn encrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        match &self.inner {
+            AesImpl::Soft(k) => k.encrypt_4_blocks(blocks),
+            #[cfg(target_arch = "aarch64")]
+            AesImpl::Neon(k) => k.encrypt_4_blocks(blocks),
+            #[cfg(target_arch = "x86_64")]
+            AesImpl::Ni(k) => k.encrypt_4_blocks(blocks),
+        }
+    }
+
     /// Return the key length in bytes.
     pub fn key_len(&self) -> usize {
         match &self.inner {

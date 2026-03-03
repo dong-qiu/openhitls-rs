@@ -88,50 +88,48 @@ pub(crate) fn xmss_compute_root_with_auth(
     adrs: &mut Adrs,
     p: &SlhDsaParams,
 ) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
-    // We need a different approach: compute all leaves, then build tree bottom-up
-    // to correctly collect auth path nodes.
+    // Compute all leaves bottom-up into a flat buffer to avoid Vec<Vec<u8>>.
     let n = h.n();
     let hp = p.hp;
     let num_leaves = 1u32 << hp;
 
-    // Compute all leaf nodes (WOTS+ public keys)
-    let mut nodes: Vec<Vec<u8>> = Vec::with_capacity(num_leaves as usize);
+    // Flat buffer: nodes[i*n..(i+1)*n] = node i
+    let mut nodes = vec![0u8; num_leaves as usize * n];
     for i in 0..num_leaves {
         let mut wots_adrs = adrs.clone();
         wots_adrs.set_type(AdrsType::WotsHash);
         wots_adrs.set_key_pair_addr(i);
         let pk = wots::wots_pk_gen(h, sk_seed, &mut wots_adrs, p)?;
-        nodes.push(pk);
+        nodes[i as usize * n..(i as usize + 1) * n].copy_from_slice(&pk);
     }
 
-    // Build tree bottom-up, collecting auth path
+    // Build tree bottom-up in-place, collecting auth path
     let mut auth_path = Vec::with_capacity(hp * n);
     let mut current_idx = leaf_idx;
+    let mut current_count = num_leaves as usize;
+    let mut combined = vec![0u8; 2 * n];
 
     for height in 0..hp as u32 {
-        // Sibling of current_idx at this height
-        let sibling_idx = current_idx ^ 1;
-        auth_path.extend_from_slice(&nodes[sibling_idx as usize]);
+        let sibling_idx = (current_idx ^ 1) as usize;
+        auth_path.extend_from_slice(&nodes[sibling_idx * n..(sibling_idx + 1) * n]);
 
-        // Build next level
-        let num_nodes = nodes.len() / 2;
-        let mut next_level = Vec::with_capacity(num_nodes);
-        for j in 0..num_nodes {
+        let next_count = current_count / 2;
+        for j in 0..next_count {
             let mut tree_adrs = adrs.clone();
             tree_adrs.set_type(AdrsType::Tree);
             tree_adrs.set_tree_height(height + 1);
             tree_adrs.set_tree_index(j as u32);
 
-            let mut combined = nodes[2 * j].clone();
-            combined.extend_from_slice(&nodes[2 * j + 1]);
+            combined[..n].copy_from_slice(&nodes[2 * j * n..(2 * j + 1) * n]);
+            combined[n..2 * n].copy_from_slice(&nodes[(2 * j + 1) * n..(2 * j + 2) * n]);
             let parent = h.h(&tree_adrs, &combined)?;
-            next_level.push(parent);
+            nodes[j * n..(j + 1) * n].copy_from_slice(&parent);
         }
-        nodes = next_level;
+        current_count = next_count;
         current_idx >>= 1;
     }
 
-    Ok((nodes[0].clone(), auth_path))
+    Ok((nodes[..n].to_vec(), auth_path))
 }
 
 /// Compute just the XMSS tree root (no auth path needed).
@@ -141,36 +139,40 @@ pub(crate) fn xmss_compute_root(
     adrs: &mut Adrs,
     p: &SlhDsaParams,
 ) -> Result<Vec<u8>, CryptoError> {
+    let n = h.n();
     let hp = p.hp;
     let num_leaves = 1u32 << hp;
 
-    let mut nodes: Vec<Vec<u8>> = Vec::with_capacity(num_leaves as usize);
+    // Flat buffer: nodes[i*n..(i+1)*n] = node i
+    let mut nodes = vec![0u8; num_leaves as usize * n];
     for i in 0..num_leaves {
         let mut wots_adrs = adrs.clone();
         wots_adrs.set_type(AdrsType::WotsHash);
         wots_adrs.set_key_pair_addr(i);
         let pk = wots::wots_pk_gen(h, sk_seed, &mut wots_adrs, p)?;
-        nodes.push(pk);
+        nodes[i as usize * n..(i as usize + 1) * n].copy_from_slice(&pk);
     }
 
+    let mut current_count = num_leaves as usize;
+    let mut combined = vec![0u8; 2 * n];
+
     for height in 0..hp as u32 {
-        let num_nodes = nodes.len() / 2;
-        let mut next_level = Vec::with_capacity(num_nodes);
-        for j in 0..num_nodes {
+        let next_count = current_count / 2;
+        for j in 0..next_count {
             let mut tree_adrs = adrs.clone();
             tree_adrs.set_type(AdrsType::Tree);
             tree_adrs.set_tree_height(height + 1);
             tree_adrs.set_tree_index(j as u32);
 
-            let mut combined = nodes[2 * j].clone();
-            combined.extend_from_slice(&nodes[2 * j + 1]);
+            combined[..n].copy_from_slice(&nodes[2 * j * n..(2 * j + 1) * n]);
+            combined[n..2 * n].copy_from_slice(&nodes[(2 * j + 1) * n..(2 * j + 2) * n]);
             let parent = h.h(&tree_adrs, &combined)?;
-            next_level.push(parent);
+            nodes[j * n..(j + 1) * n].copy_from_slice(&parent);
         }
-        nodes = next_level;
+        current_count = next_count;
     }
 
-    Ok(nodes[0].clone())
+    Ok(nodes[..n].to_vec())
 }
 
 /// Verify a tree path: given a leaf node and auth path, recompute the root.
@@ -193,30 +195,27 @@ fn xmss_root_from_sig(
     wots_adrs.set_key_pair_addr(leaf_idx);
     let mut node = wots::wots_pk_from_sig(h, wots_sig, msg, &mut wots_adrs, p)?;
 
-    // Climb tree using auth path
+    // Climb tree using auth path with pre-allocated combined buffer
     let auth = &sig[wots_sig_len..];
     let mut idx = leaf_idx;
+    let mut combined = vec![0u8; 2 * n];
 
     for k in 0..hp {
         let mut tree_adrs = adrs.clone();
         tree_adrs.set_type(AdrsType::Tree);
         tree_adrs.set_tree_height((k + 1) as u32);
+        tree_adrs.set_tree_index(idx >> 1);
 
         let sibling = &auth[k * n..(k + 1) * n];
 
         if (idx & 1) == 1 {
-            // Right child
-            tree_adrs.set_tree_index(idx >> 1);
-            let mut combined = sibling.to_vec();
-            combined.extend_from_slice(&node);
-            node = h.h(&tree_adrs, &combined)?;
+            combined[..n].copy_from_slice(sibling);
+            combined[n..2 * n].copy_from_slice(&node);
         } else {
-            // Left child
-            tree_adrs.set_tree_index(idx >> 1);
-            let mut combined = node;
-            combined.extend_from_slice(sibling);
-            node = h.h(&tree_adrs, &combined)?;
+            combined[..n].copy_from_slice(&node);
+            combined[n..2 * n].copy_from_slice(sibling);
         }
+        node = h.h(&tree_adrs, &combined)?;
         idx >>= 1;
     }
 

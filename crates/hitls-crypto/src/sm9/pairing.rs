@@ -29,35 +29,38 @@ pub(crate) fn pairing(p: &EcPointG1, q: &EcPointG2) -> Result<Fp12, CryptoError>
     // Miller loop with parameter 6t + 2
     let param = curve::miller_param();
     let param_bytes = param.to_bytes_be();
-    let mut param_bits = Vec::new();
+
+    // Build bit array (O(n)) — avoid O(n²) remove(0) stripping
+    let mut param_bits = Vec::with_capacity(param_bytes.len() * 8);
     for byte in &param_bytes {
         for bit in (0..8).rev() {
             param_bits.push((byte >> bit) & 1);
         }
     }
-    // Strip leading zeros
-    while !param_bits.is_empty() && param_bits[0] == 0 {
-        param_bits.remove(0);
-    }
+    // Find start of non-zero bits (O(n) scan, no shifting)
+    let start = param_bits
+        .iter()
+        .position(|&b| b == 1)
+        .unwrap_or(param_bits.len());
 
-    // T starts as Q (affine copy into Jacobian)
-    let mut t = EcPointG2::from_affine(qx.clone(), qy.clone());
+    // Pre-compute Q as affine point once (avoid clone per iteration)
+    let q_affine = EcPointG2::from_affine(qx.clone(), qy.clone());
+    // Pre-compute yP as Fp2 for line evaluation (avoid clone per iteration)
+    let yp_fp2 = Fp2::new(py.clone(), Fp::zero());
+
+    let mut t = q_affine.clone();
     let mut f = Fp12::one();
 
     // Main loop (skip the first bit which is 1)
-    for i in 1..param_bits.len() {
-        // Square f
+    for i in (start + 1)..param_bits.len() {
         f = f.sqr()?;
 
-        // Line evaluation for doubling
-        let (line, t_new) = line_double(&t, &px, &py)?;
+        let (line, t_new) = line_double_opt(&t, &px, &yp_fp2)?;
         f = f.mul(&line)?;
         t = t_new;
 
         if param_bits[i] == 1 {
-            // Line evaluation for addition
-            let q_pt = EcPointG2::from_affine(qx.clone(), qy.clone());
-            let (line, t_new) = line_add(&t, &q_pt, &px, &py)?;
+            let (line, t_new) = line_add_opt(&t, &q_affine, &px, &yp_fp2)?;
             f = f.mul(&line)?;
             t = t_new;
         }
@@ -65,12 +68,12 @@ pub(crate) fn pairing(p: &EcPointG1, q: &EcPointG2) -> Result<Fp12, CryptoError>
 
     // Frobenius steps: Q1 = π(Q), Q2 = π²(Q) with negation
     let q1 = frobenius_map_g2(&qx, &qy)?;
-    let (line, t_new) = line_add(&t, &q1, &px, &py)?;
+    let (line, t_new) = line_add_opt(&t, &q1, &px, &yp_fp2)?;
     f = f.mul(&line)?;
     t = t_new;
 
     let q2 = frobenius_map_g2_neg(&qx, &qy)?;
-    let (line, _t_new) = line_add(&t, &q2, &px, &py)?;
+    let (line, _t_new) = line_add_opt(&t, &q2, &px, &yp_fp2)?;
     f = f.mul(&line)?;
 
     // Final exponentiation
@@ -112,6 +115,62 @@ fn line_double(t: &EcPointG2, px: &Fp, py: &Fp) -> Result<(Fp12, EcPointG2), Cry
     let t2 = t.double()?;
 
     Ok((line, t2))
+}
+
+/// Optimized line evaluation for point doubling with pre-computed yP as Fp2.
+fn line_double_opt(t: &EcPointG2, px: &Fp, yp_fp2: &Fp2) -> Result<(Fp12, EcPointG2), CryptoError> {
+    let (tx, ty) = t.to_affine()?;
+
+    let tx_sq = tx.sqr()?;
+    let lambda_num = tx_sq.double()?.add(&tx_sq)?;
+    let lambda_den = ty.double()?;
+    let lambda = lambda_num.mul(&lambda_den.inv()?)?;
+
+    let lxt_minus_yt = lambda.mul(&tx)?.sub(&ty)?;
+    let neg_l_xp = lambda.mul_fp(px)?.neg()?;
+
+    let c0 = Fp4::new(lxt_minus_yt, yp_fp2.clone());
+    let c1 = Fp4::zero();
+    let c2 = Fp4::new(neg_l_xp, Fp2::zero());
+
+    let line = Fp12::new(c0, c1, c2);
+    let t2 = t.double()?;
+
+    Ok((line, t2))
+}
+
+/// Optimized line evaluation for point addition with pre-computed yP as Fp2.
+fn line_add_opt(
+    t: &EcPointG2,
+    q: &EcPointG2,
+    px: &Fp,
+    yp_fp2: &Fp2,
+) -> Result<(Fp12, EcPointG2), CryptoError> {
+    let (tx, ty) = t.to_affine()?;
+    let (qx, qy) = q.to_affine()?;
+
+    if tx == qx {
+        if ty == qy {
+            return line_double_opt(t, px, yp_fp2);
+        }
+        return Ok((Fp12::one(), EcPointG2::infinity()));
+    }
+
+    let lambda_num = qy.sub(&ty)?;
+    let lambda_den = qx.sub(&tx)?;
+    let lambda = lambda_num.mul(&lambda_den.inv()?)?;
+
+    let lxt_minus_yt = lambda.mul(&tx)?.sub(&ty)?;
+    let neg_l_xp = lambda.mul_fp(px)?.neg()?;
+
+    let c0 = Fp4::new(lxt_minus_yt, yp_fp2.clone());
+    let c1 = Fp4::zero();
+    let c2 = Fp4::new(neg_l_xp, Fp2::zero());
+
+    let line = Fp12::new(c0, c1, c2);
+    let t_plus_q = t.add(q)?;
+
+    Ok((line, t_plus_q))
 }
 
 /// Line evaluation for point addition T + Q.

@@ -101,6 +101,7 @@ pub(crate) fn fors_pk_from_sig(
 
     let indices = base_b(md, a as u32, k);
     let mut roots = Vec::with_capacity(k * n);
+    let mut combined = vec![0u8; 2 * n];
 
     for (i, &idx_val) in indices.iter().enumerate().take(k) {
         let sig_offset = i * (1 + a) * n;
@@ -111,27 +112,24 @@ pub(crate) fn fors_pk_from_sig(
         adrs.set_tree_index(((i as u32) << (a as u32)) + idx_val);
         let mut node = h.f(adrs, sk)?;
 
-        // Climb tree using auth path
+        // Climb tree using auth path with pre-allocated combined buffer
         let auth_base = sig_offset + n;
         for j in 0..a {
             adrs.set_tree_height((j + 1) as u32);
             let sibling = &sig[auth_base + j * n..auth_base + (j + 1) * n];
 
             if (idx_val >> (j as u32)) & 1 == 1 {
-                // Current node is right child
                 let tree_idx = (adrs.get_tree_index() - 1) >> 1;
                 adrs.set_tree_index(tree_idx);
-                let mut combined = sibling.to_vec();
-                combined.extend_from_slice(&node);
-                node = h.h(adrs, &combined)?;
+                combined[..n].copy_from_slice(sibling);
+                combined[n..2 * n].copy_from_slice(&node);
             } else {
-                // Current node is left child
                 let tree_idx = adrs.get_tree_index() >> 1;
                 adrs.set_tree_index(tree_idx);
-                let mut combined = node;
-                combined.extend_from_slice(sibling);
-                node = h.h(adrs, &combined)?;
+                combined[..n].copy_from_slice(&node);
+                combined[n..2 * n].copy_from_slice(sibling);
             }
+            node = h.h(adrs, &combined)?;
         }
 
         roots.extend_from_slice(&node);

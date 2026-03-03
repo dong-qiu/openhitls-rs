@@ -310,6 +310,125 @@ fn gcm_crypt_with_table<C: BlockCipher>(
     Ok((output, tag))
 }
 
+/// AES-specific GCM with 4-block CTR + GHASH interleaving.
+///
+/// Generates 4 CTR keystream blocks in parallel using AesKey::encrypt_4_blocks,
+/// then interleaves GHASH processing for better cache locality and pipeline use.
+fn gcm_crypt_aes(
+    cipher: &AesKey,
+    table: &GhashTable,
+    nonce: &[u8],
+    aad: &[u8],
+    input: &[u8],
+    encrypting: bool,
+) -> Result<(Vec<u8>, [u8; GCM_TAG_SIZE]), CryptoError> {
+    // Compute J0
+    let mut j0 = [0u8; 16];
+    if nonce.len() == 12 {
+        j0[..12].copy_from_slice(nonce);
+        j0[15] = 1;
+    } else {
+        let mut state = Gf128::default();
+        table.ghash_data(&mut state, nonce);
+        let mut len_block = [0u8; 16];
+        len_block[8..16].copy_from_slice(&((nonce.len() as u64 * 8).to_be_bytes()));
+        table.ghash_block(&mut state, &len_block);
+        j0 = state.to_bytes();
+    }
+
+    // EK0 = Encrypt(J0)
+    let mut ek0 = j0;
+    cipher.encrypt_block(&mut ek0)?;
+
+    let mut counter = j0;
+    inc32(&mut counter);
+
+    let mut output = input.to_vec();
+    let mut ghash_state = Gf128::default();
+
+    // GHASH AAD
+    table.ghash_data(&mut ghash_state, aad);
+
+    let mut offset = 0;
+
+    // 4-block interleaved CTR + GHASH
+    while offset + 64 <= input.len() {
+        // Generate 4 CTR keystream blocks
+        let mut ks = [counter; 4];
+        inc32(&mut counter);
+        ks[1] = counter;
+        inc32(&mut counter);
+        ks[2] = counter;
+        inc32(&mut counter);
+        ks[3] = counter;
+        inc32(&mut counter);
+
+        cipher.encrypt_4_blocks(&mut ks)?;
+
+        // XOR with data
+        for (i, ks_block) in ks.iter().enumerate() {
+            let base = offset + i * 16;
+            for j in 0..16 {
+                output[base + j] ^= ks_block[j];
+            }
+        }
+
+        // GHASH 4 blocks (encrypt: hash output, decrypt: hash input)
+        for i in 0..4 {
+            let base = offset + i * 16;
+            let blk: &[u8; 16] = if encrypting {
+                output[base..base + 16].try_into().unwrap()
+            } else {
+                input[base..base + 16].try_into().unwrap()
+            };
+            table.ghash_block(&mut ghash_state, blk);
+        }
+
+        offset += 64;
+    }
+
+    // Handle remaining blocks (1-3 full + partial)
+    while offset < input.len() {
+        let mut keystream = counter;
+        cipher.encrypt_block(&mut keystream)?;
+        let remaining = (input.len() - offset).min(16);
+        for j in 0..remaining {
+            output[offset + j] ^= keystream[j];
+        }
+
+        // GHASH this block
+        let mut blk = [0u8; 16];
+        if encrypting {
+            blk[..remaining].copy_from_slice(&output[offset..offset + remaining]);
+        } else {
+            blk[..remaining].copy_from_slice(&input[offset..offset + remaining]);
+        }
+        table.ghash_block(&mut ghash_state, &blk);
+
+        inc32(&mut counter);
+        offset += remaining;
+    }
+
+    // Length block
+    let ciphertext_for_hash_len = if encrypting {
+        output.len()
+    } else {
+        input.len()
+    };
+    let mut len_block = [0u8; 16];
+    len_block[..8].copy_from_slice(&((aad.len() as u64 * 8).to_be_bytes()));
+    len_block[8..16].copy_from_slice(&((ciphertext_for_hash_len as u64 * 8).to_be_bytes()));
+    table.ghash_block(&mut ghash_state, &len_block);
+
+    // Tag = GHASH ^ EK0
+    let mut tag = ghash_state.to_bytes();
+    for (t, &e) in tag.iter_mut().zip(ek0.iter()) {
+        *t ^= e;
+    }
+
+    Ok((output, tag))
+}
+
 /// Internal GCM encrypt/decrypt (generic over block cipher).
 /// Computes GHASH table on each call — use `gcm_crypt_with_table` for repeated operations.
 fn gcm_crypt_generic<C: BlockCipher>(
@@ -332,7 +451,8 @@ pub fn gcm_encrypt(
     plaintext: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     let cipher = AesKey::new(key)?;
-    let (mut ct, tag) = gcm_crypt_generic(&cipher, nonce, aad, plaintext, true)?;
+    let table = GhashTable::from_cipher(&cipher)?;
+    let (mut ct, tag) = gcm_crypt_aes(&cipher, &table, nonce, aad, plaintext, true)?;
     ct.extend_from_slice(&tag);
     Ok(ct)
 }
@@ -353,9 +473,47 @@ pub fn gcm_decrypt(
     let (ct_data, received_tag) = ciphertext.split_at(ct_len);
 
     let cipher = AesKey::new(key)?;
-    let (mut plaintext, computed_tag) = gcm_crypt_generic(&cipher, nonce, aad, ct_data, false)?;
+    let table = GhashTable::from_cipher(&cipher)?;
+    let (mut plaintext, computed_tag) = gcm_crypt_aes(&cipher, &table, nonce, aad, ct_data, false)?;
 
     // Constant-time tag comparison
+    if computed_tag.ct_eq(received_tag).unwrap_u8() != 1 {
+        plaintext.zeroize();
+        return Err(CryptoError::AeadTagVerifyFail);
+    }
+
+    Ok(plaintext)
+}
+
+/// Encrypt using a pre-expanded AES cipher and GHASH table (4-block interleaved).
+pub fn gcm_encrypt_with_aes(
+    cipher: &AesKey,
+    table: &GhashTable,
+    nonce: &[u8],
+    aad: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let (mut ct, tag) = gcm_crypt_aes(cipher, table, nonce, aad, plaintext, true)?;
+    ct.extend_from_slice(&tag);
+    Ok(ct)
+}
+
+/// Decrypt using a pre-expanded AES cipher and GHASH table (4-block interleaved).
+pub fn gcm_decrypt_with_aes(
+    cipher: &AesKey,
+    table: &GhashTable,
+    nonce: &[u8],
+    aad: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    if ciphertext.len() < GCM_TAG_SIZE {
+        return Err(CryptoError::InvalidArg("GCM ciphertext too short"));
+    }
+    let ct_len = ciphertext.len() - GCM_TAG_SIZE;
+    let (ct_data, received_tag) = ciphertext.split_at(ct_len);
+
+    let (mut plaintext, computed_tag) = gcm_crypt_aes(cipher, table, nonce, aad, ct_data, false)?;
+
     if computed_tag.ct_eq(received_tag).unwrap_u8() != 1 {
         plaintext.zeroize();
         return Err(CryptoError::AeadTagVerifyFail);

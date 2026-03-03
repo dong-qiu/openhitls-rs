@@ -6,6 +6,9 @@
 //! demonstrated collision attacks. It is provided for legacy compatibility
 //! and should not be used for new security applications.
 
+#[cfg(target_arch = "aarch64")]
+mod sha1_arm;
+
 use hitls_types::CryptoError;
 
 /// SHA-1 output size in bytes.
@@ -21,6 +24,18 @@ const H_SHA1: [u32; 5] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2
 const K_SHA1: [u32; 4] = [0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xca62c1d6];
 
 fn sha1_compress(state: &mut [u32; 5], block: &[u8]) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("sha2") {
+            // Safety: sha2 feature detected, which includes SHA-1 CE instructions
+            unsafe { sha1_arm::sha1_compress_arm(state, block) };
+            return;
+        }
+    }
+    sha1_compress_soft(state, block);
+}
+
+fn sha1_compress_soft(state: &mut [u32; 5], block: &[u8]) {
     let mut w = [0u32; 80];
 
     // Parse 16 big-endian words

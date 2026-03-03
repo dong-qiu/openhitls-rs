@@ -57,6 +57,29 @@ fn chacha20_block(key: &[u8; 32], counter: u32, nonce: &[u8; 12]) -> [u8; 64] {
     chacha20_block_soft(key, counter, nonce)
 }
 
+/// Generate two 64-byte keystream blocks (128 bytes) for consecutive counters.
+fn chacha20_2_blocks(key: &[u8; 32], counter: u32, nonce: &[u8; 12]) -> [u8; 128] {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return unsafe { chacha20_neon::chacha20_2_blocks_neon(key, counter, nonce) };
+        }
+    }
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        if is_x86_feature_detected!("sse2") {
+            return unsafe { chacha20_x86::chacha20_2_blocks_x86(key, counter, nonce) };
+        }
+    }
+    // Software fallback: two sequential blocks
+    let mut out = [0u8; 128];
+    let b0 = chacha20_block_soft(key, counter, nonce);
+    let b1 = chacha20_block_soft(key, counter.wrapping_add(1), nonce);
+    out[..64].copy_from_slice(&b0);
+    out[64..].copy_from_slice(&b1);
+    out
+}
+
 /// Software-only 64-byte keystream block generation.
 pub(crate) fn chacha20_block_soft(key: &[u8; 32], counter: u32, nonce: &[u8; 12]) -> [u8; 64] {
     let mut state = [0u32; 16];
@@ -141,6 +164,18 @@ impl ChaCha20 {
 
         let mut offset = 0;
         let mut block_counter = counter;
+
+        // Process 128-byte (2-block) chunks
+        while offset + 128 <= data.len() {
+            let blocks = chacha20_2_blocks(&self.key, block_counter, &nonce_arr);
+            for i in 0..128 {
+                data[offset + i] ^= blocks[i];
+            }
+            offset += 128;
+            block_counter = block_counter.wrapping_add(2);
+        }
+
+        // Process remaining single blocks
         while offset < data.len() {
             let block = chacha20_block(&self.key, block_counter, &nonce_arr);
             let remaining = data.len() - offset;
@@ -162,6 +197,7 @@ impl ChaCha20 {
 /// Poly1305 one-time MAC (RFC 8439 §2.5).
 pub struct Poly1305 {
     r: [u32; 5],   // clamped r in radix-2^26 limbs
+    r2: [u32; 5],  // r² in radix-2^26 limbs (precomputed for 2-block batch)
     s: [u32; 4],   // s as 4×u32
     acc: [u32; 5], // accumulator in radix-2^26 limbs
     buf: [u8; 16],
@@ -209,13 +245,61 @@ impl Poly1305 {
         let s2 = u32::from_le_bytes(key[24..28].try_into().unwrap());
         let s3 = u32::from_le_bytes(key[28..32].try_into().unwrap());
 
+        // Precompute r² = r * r in radix-2^26
+        let r_limbs = [r0, r1, r2, r3, r4];
+        let r2_limbs = Self::mul_r_squared(r_limbs);
+
         Poly1305 {
-            r: [r0, r1, r2, r3, r4],
+            r: r_limbs,
+            r2: r2_limbs,
             s: [s0, s1, s2, s3],
             acc: [0; 5],
             buf: [0; 16],
             buf_len: 0,
         }
+    }
+
+    /// Compute r² = r * r in radix-2^26 representation.
+    fn mul_r_squared(r: [u32; 5]) -> [u32; 5] {
+        let r0 = r[0] as u64;
+        let r1 = r[1] as u64;
+        let r2 = r[2] as u64;
+        let r3 = r[3] as u64;
+        let r4 = r[4] as u64;
+        let s1 = r1 * 5;
+        let s2 = r2 * 5;
+        let s3 = r3 * 5;
+        let s4 = r4 * 5;
+
+        let d0 = r0 * r0 + r1 * s4 * 2 + r2 * s3 * 2;
+        let mut d1 = r0 * r1 * 2 + r2 * s4 * 2 + r3 * s3;
+        let mut d2 = r0 * r2 * 2 + r1 * r1 + r3 * s4 * 2;
+        let mut d3 = r0 * r3 * 2 + r1 * r2 * 2 + r4 * s4;
+        let mut d4 = r0 * r4 * 2 + r1 * r3 * 2 + r2 * r2;
+
+        let mut c: u64;
+        let o0 = (d0 & 0x03ff_ffff) as u32;
+        c = d0 >> 26;
+        d1 += c;
+        let o1 = (d1 & 0x03ff_ffff) as u32;
+        c = d1 >> 26;
+        d2 += c;
+        let o2 = (d2 & 0x03ff_ffff) as u32;
+        c = d2 >> 26;
+        d3 += c;
+        let o3 = (d3 & 0x03ff_ffff) as u32;
+        c = d3 >> 26;
+        d4 += c;
+        let mut o4 = (d4 & 0x03ff_ffff) as u32;
+        c = d4 >> 26;
+        let mut o0 = o0.wrapping_add((c * 5) as u32);
+        c = (o0 >> 26) as u64;
+        o0 &= 0x03ff_ffff;
+        let o1 = o1.wrapping_add(c as u32);
+        // Limb carry may leave o4 slightly above 2^26, acceptable for precompute
+        o4 &= 0x03ff_ffff;
+
+        [o0, o1, o2, o3, o4]
     }
 
     fn process_block(&mut self, block: &[u8], hibit: u32) {
@@ -276,6 +360,91 @@ impl Poly1305 {
         self.acc[1] = self.acc[1].wrapping_add(c as u32);
     }
 
+    /// Process 2 blocks at once using r² precomputation.
+    ///
+    /// Computes acc_new = (acc + b0) * r² + b1 * r, which equals the
+    /// sequential result ((acc + b0) * r + b1) * r.
+    fn process_2_blocks(&mut self, b0: &[u8], b1: &[u8]) {
+        // Decode b0 into radix-2^26 and add to accumulator
+        let t0_0 = u32::from_le_bytes(b0[0..4].try_into().unwrap());
+        let t1_0 = u32::from_le_bytes(b0[4..8].try_into().unwrap());
+        let t2_0 = u32::from_le_bytes(b0[8..12].try_into().unwrap());
+        let t3_0 = u32::from_le_bytes(b0[12..16].try_into().unwrap());
+
+        let a0 = (self.acc[0] + (t0_0 & 0x03ff_ffff)) as u64;
+        let a1 = (self.acc[1] + (((t0_0 >> 26) | (t1_0 << 6)) & 0x03ff_ffff)) as u64;
+        let a2 = (self.acc[2] + (((t1_0 >> 20) | (t2_0 << 12)) & 0x03ff_ffff)) as u64;
+        let a3 = (self.acc[3] + (((t2_0 >> 14) | (t3_0 << 18)) & 0x03ff_ffff)) as u64;
+        let a4 = (self.acc[4] + ((t3_0 >> 8) | (1 << 24))) as u64;
+
+        // Compute (acc + b0) * r²
+        let r20 = self.r2[0] as u64;
+        let r21 = self.r2[1] as u64;
+        let r22 = self.r2[2] as u64;
+        let r23 = self.r2[3] as u64;
+        let r24 = self.r2[4] as u64;
+        let s21 = r21 * 5;
+        let s22 = r22 * 5;
+        let s23 = r23 * 5;
+        let s24 = r24 * 5;
+
+        let mut d0 = a0 * r20 + a1 * s24 + a2 * s23 + a3 * s22 + a4 * s21;
+        let mut d1 = a0 * r21 + a1 * r20 + a2 * s24 + a3 * s23 + a4 * s22;
+        let mut d2 = a0 * r22 + a1 * r21 + a2 * r20 + a3 * s24 + a4 * s23;
+        let mut d3 = a0 * r23 + a1 * r22 + a2 * r21 + a3 * r20 + a4 * s24;
+        let mut d4 = a0 * r24 + a1 * r23 + a2 * r22 + a3 * r21 + a4 * r20;
+
+        // Decode b1 into radix-2^26
+        let t0_1 = u32::from_le_bytes(b1[0..4].try_into().unwrap());
+        let t1_1 = u32::from_le_bytes(b1[4..8].try_into().unwrap());
+        let t2_1 = u32::from_le_bytes(b1[8..12].try_into().unwrap());
+        let t3_1 = u32::from_le_bytes(b1[12..16].try_into().unwrap());
+
+        let b0v = (t0_1 & 0x03ff_ffff) as u64;
+        let b1v = (((t0_1 >> 26) | (t1_1 << 6)) & 0x03ff_ffff) as u64;
+        let b2v = (((t1_1 >> 20) | (t2_1 << 12)) & 0x03ff_ffff) as u64;
+        let b3v = (((t2_1 >> 14) | (t3_1 << 18)) & 0x03ff_ffff) as u64;
+        let b4v = ((t3_1 >> 8) | (1 << 24)) as u64;
+
+        // Compute b1 * r and add to d0..d4
+        let r0 = self.r[0] as u64;
+        let r1 = self.r[1] as u64;
+        let rr2 = self.r[2] as u64;
+        let r3 = self.r[3] as u64;
+        let r4 = self.r[4] as u64;
+        let sr1 = r1 * 5;
+        let sr2 = rr2 * 5;
+        let sr3 = r3 * 5;
+        let sr4 = r4 * 5;
+
+        d0 += b0v * r0 + b1v * sr4 + b2v * sr3 + b3v * sr2 + b4v * sr1;
+        d1 += b0v * r1 + b1v * r0 + b2v * sr4 + b3v * sr3 + b4v * sr2;
+        d2 += b0v * rr2 + b1v * r1 + b2v * r0 + b3v * sr4 + b4v * sr3;
+        d3 += b0v * r3 + b1v * rr2 + b2v * r1 + b3v * r0 + b4v * sr4;
+        d4 += b0v * r4 + b1v * r3 + b2v * rr2 + b3v * r1 + b4v * r0;
+
+        // Carry propagation
+        let mut c: u64;
+        c = d0 >> 26;
+        self.acc[0] = (d0 & 0x03ff_ffff) as u32;
+        d1 += c;
+        c = d1 >> 26;
+        self.acc[1] = (d1 & 0x03ff_ffff) as u32;
+        d2 += c;
+        c = d2 >> 26;
+        self.acc[2] = (d2 & 0x03ff_ffff) as u32;
+        d3 += c;
+        c = d3 >> 26;
+        self.acc[3] = (d3 & 0x03ff_ffff) as u32;
+        d4 += c;
+        c = d4 >> 26;
+        self.acc[4] = (d4 & 0x03ff_ffff) as u32;
+        self.acc[0] = self.acc[0].wrapping_add((c * 5) as u32);
+        c = (self.acc[0] >> 26) as u64;
+        self.acc[0] &= 0x03ff_ffff;
+        self.acc[1] = self.acc[1].wrapping_add(c as u32);
+    }
+
     /// Feed data into the MAC computation.
     pub fn update(&mut self, data: &[u8]) {
         let mut pos = 0;
@@ -295,7 +464,13 @@ impl Poly1305 {
             pos = want;
         }
 
-        // Process full 16-byte blocks
+        // Process pairs of 16-byte blocks using r² precomputation
+        while pos + 32 <= data.len() {
+            self.process_2_blocks(&data[pos..pos + 16], &data[pos + 16..pos + 32]);
+            pos += 32;
+        }
+
+        // Process remaining single full block
         while pos + 16 <= data.len() {
             let mut block = [0u8; 16];
             block.copy_from_slice(&data[pos..pos + 16]);

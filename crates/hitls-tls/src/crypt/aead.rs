@@ -45,8 +45,14 @@ impl AesGcmAead {
 
 impl TlsAead for AesGcmAead {
     fn encrypt(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, TlsError> {
-        hitls_crypto::modes::gcm::gcm_encrypt_with(&self.cipher, &self.table, nonce, aad, plaintext)
-            .map_err(TlsError::CryptoError)
+        hitls_crypto::modes::gcm::gcm_encrypt_with_aes(
+            &self.cipher,
+            &self.table,
+            nonce,
+            aad,
+            plaintext,
+        )
+        .map_err(TlsError::CryptoError)
     }
 
     fn decrypt(
@@ -55,7 +61,7 @@ impl TlsAead for AesGcmAead {
         aad: &[u8],
         ciphertext_with_tag: &[u8],
     ) -> Result<Vec<u8>, TlsError> {
-        hitls_crypto::modes::gcm::gcm_decrypt_with(
+        hitls_crypto::modes::gcm::gcm_decrypt_with_aes(
             &self.cipher,
             &self.table,
             nonce,

@@ -192,6 +192,46 @@ unsafe fn neon_decrypt_block(block: &mut [u8; 16], dec_keys: &[[u8; 16]], rounds
     vst1q_u8(block.as_mut_ptr(), state);
 }
 
+/// Encrypt 4 blocks in parallel using ARMv8 AES pipeline.
+///
+/// # Safety
+///
+/// Caller must ensure the CPU supports the ARMv8 AES and NEON extensions.
+#[target_feature(enable = "aes,neon")]
+unsafe fn neon_encrypt_4_blocks(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]], rounds: usize) {
+    let mut s0 = vld1q_u8(blocks[0].as_ptr());
+    let mut s1 = vld1q_u8(blocks[1].as_ptr());
+    let mut s2 = vld1q_u8(blocks[2].as_ptr());
+    let mut s3 = vld1q_u8(blocks[3].as_ptr());
+
+    // Rounds 0 .. rounds-2: AESE + AESMC on all 4 blocks
+    for rk_bytes in enc_keys.iter().take(rounds - 1) {
+        let rk = vld1q_u8(rk_bytes.as_ptr());
+        s0 = vaesmcq_u8(vaeseq_u8(s0, rk));
+        s1 = vaesmcq_u8(vaeseq_u8(s1, rk));
+        s2 = vaesmcq_u8(vaeseq_u8(s2, rk));
+        s3 = vaesmcq_u8(vaeseq_u8(s3, rk));
+    }
+
+    // Last round: AESE (no MixColumns) + XOR final round key
+    let rk_last = vld1q_u8(enc_keys[rounds - 1].as_ptr());
+    s0 = vaeseq_u8(s0, rk_last);
+    s1 = vaeseq_u8(s1, rk_last);
+    s2 = vaeseq_u8(s2, rk_last);
+    s3 = vaeseq_u8(s3, rk_last);
+
+    let rk_final = vld1q_u8(enc_keys[rounds].as_ptr());
+    s0 = veorq_u8(s0, rk_final);
+    s1 = veorq_u8(s1, rk_final);
+    s2 = veorq_u8(s2, rk_final);
+    s3 = veorq_u8(s3, rk_final);
+
+    vst1q_u8(blocks[0].as_mut_ptr(), s0);
+    vst1q_u8(blocks[1].as_mut_ptr(), s1);
+    vst1q_u8(blocks[2].as_mut_ptr(), s2);
+    vst1q_u8(blocks[3].as_mut_ptr(), s3);
+}
+
 // ---------------------------------------------------------------------------
 // Public type.
 // ---------------------------------------------------------------------------
@@ -274,6 +314,15 @@ impl NeonAesKey {
             neon_decrypt_block(buf, &self.dec_keys, self.rounds);
         }
 
+        Ok(())
+    }
+
+    /// Encrypt 4 blocks in place using pipelined NEON AES instructions.
+    ///
+    /// Processes all 4 blocks through each round simultaneously to exploit
+    /// the 4-cycle latency / 1-cycle throughput of the AES pipeline.
+    pub fn encrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        unsafe { neon_encrypt_4_blocks(blocks, &self.enc_keys, self.rounds) }
         Ok(())
     }
 

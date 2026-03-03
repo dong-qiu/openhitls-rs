@@ -39,21 +39,10 @@ fn p1(x: u32) -> u32 {
     x ^ x.rotate_left(15) ^ x.rotate_left(23)
 }
 
-/// Expand one message schedule word: w[i] from the 16-word ring buffer.
-///
-/// w[i] = P1(w[i-16] ^ w[i-9] ^ ROTL(w[i-3], 15)) ^ ROTL(w[i-13], 7) ^ w[i-6]
-/// With a 16-element ring buffer, indices map: w[i-k] → w[(i-k) & 15].
-#[inline(always)]
-fn expand(w: &[u32; 16], i: usize) -> u32 {
-    p1(w[i & 15] ^ w[(i + 7) & 15] ^ w[(i + 13) & 15].rotate_left(15))
-        ^ w[(i + 3) & 15].rotate_left(7)
-        ^ w[(i + 10) & 15]
-}
-
 #[inline]
 fn sm3_compress(state: &mut [u32; 8], block: &[u8]) {
-    // Parse 16 words (big-endian) into ring buffer
-    let mut w = [0u32; 16];
+    // Pre-expand full message schedule w[0..67]
+    let mut w = [0u32; 68];
     for i in 0..16 {
         w[i] = u32::from_be_bytes([
             block[4 * i],
@@ -62,11 +51,16 @@ fn sm3_compress(state: &mut [u32; 8], block: &[u8]) {
             block[4 * i + 3],
         ]);
     }
+    for i in 16..68 {
+        w[i] = p1(w[i - 16] ^ w[i - 9] ^ w[i - 3].rotate_left(15))
+            ^ w[i - 13].rotate_left(7)
+            ^ w[i - 6];
+    }
 
     let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
 
-    // Rounds 0–11: ff/gg use XOR form, no expansion needed (w[j] and w[j+4] both in 0..15)
-    for j in 0..12 {
+    // Rounds 0–15: ff/gg use XOR form
+    for j in 0..16 {
         let a12 = a.rotate_left(12);
         let ss1 = a12
             .wrapping_add(e)
@@ -92,57 +86,22 @@ fn sm3_compress(state: &mut [u32; 8], block: &[u8]) {
         e = p0(tt2);
     }
 
-    // Rounds 12–15: XOR form, expand w[j+4] on-the-fly into ring buffer
-    for j in 12..16 {
-        let wj4 = expand(&w, j + 4);
-        w[(j + 4) & 15] = wj4;
-        let wj = w[j];
-        let a12 = a.rotate_left(12);
-        let ss1 = a12
-            .wrapping_add(e)
-            .wrapping_add(T_J_ROTATED[j])
-            .rotate_left(7);
-        let ss2 = ss1 ^ a12;
-        let tt1 = (a ^ b ^ c)
-            .wrapping_add(d)
-            .wrapping_add(ss2)
-            .wrapping_add(wj ^ wj4);
-        let tt2 = (e ^ f ^ g)
-            .wrapping_add(h)
-            .wrapping_add(ss1)
-            .wrapping_add(wj);
-
-        d = c;
-        c = b.rotate_left(9);
-        b = a;
-        a = tt1;
-        h = g;
-        g = f.rotate_left(19);
-        f = e;
-        e = p0(tt2);
-    }
-
-    // Rounds 16–63: majority/choice form, expand w[j+4] on-the-fly
+    // Rounds 16–63: majority/choice form
     for j in 16..64 {
-        let wj4 = expand(&w, j + 4);
-        w[(j + 4) & 15] = wj4;
-        let wj = w[j & 15];
         let a12 = a.rotate_left(12);
         let ss1 = a12
             .wrapping_add(e)
             .wrapping_add(T_J_ROTATED[j])
             .rotate_left(7);
         let ss2 = ss1 ^ a12;
-        // majority: (a & (b | c)) | (b & c) — saves one AND vs (a&b)|(a&c)|(b&c)
         let tt1 = ((a & (b | c)) | (b & c))
             .wrapping_add(d)
             .wrapping_add(ss2)
-            .wrapping_add(wj ^ wj4);
-        // choice: g ^ (e & (f ^ g)) — saves one NOT and one OR vs (e&f)|(!e&g)
+            .wrapping_add(w[j] ^ w[j + 4]);
         let tt2 = (g ^ (e & (f ^ g)))
             .wrapping_add(h)
             .wrapping_add(ss1)
-            .wrapping_add(wj);
+            .wrapping_add(w[j]);
 
         d = c;
         c = b.rotate_left(9);
