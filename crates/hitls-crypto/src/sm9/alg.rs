@@ -413,6 +413,125 @@ mod tests {
         assert!(valid, "signature must verify");
     }
 
+    /// SM9 sign key extraction golden test.
+    ///
+    /// Validates that key extraction is deterministic: given the same master secret key ks
+    /// and user identity, `extract_user_key` always produces the same G1 point.
+    ///
+    /// Uses the fixed master secret key ks = 86DCD64FEB81A7196359F1A5C2F988BD39431B08A86363F0428D21DFFAF2BF89
+    /// from the SM9_FREE reference implementation (songgeng87/SM9_FREE on GitHub).
+    ///
+    /// The expected golden dA coordinates are the deterministic output of our implementation
+    /// of dA = [ks/(H1(ID||hid)+ks)]·P1, which is the standard formula from GM/T 0044.2.
+    ///
+    /// Golden values (computed by this implementation):
+    ///   dA.x = 7B18633385789909581B829A714EA5C17DB322752D0B9061D0E7300D9E56CA27
+    ///   dA.y = 2EADE663DF946ACD5667ECBB68D05585D6431C5C994D08F5334E22DF8B22B5EA
+    #[test]
+    fn test_sm9_standard_key_extraction() {
+        // Master secret key ks (32 bytes, big-endian) — from SM9_FREE reference
+        #[rustfmt::skip]
+        let ks_bytes: [u8; 32] = [
+            0x86, 0xDC, 0xD6, 0x4F, 0xEB, 0x81, 0xA7, 0x19, 0x63, 0x59, 0xF1, 0xA5, 0xC2, 0xF9,
+            0x88, 0xBD, 0x39, 0x43, 0x1B, 0x08, 0xA8, 0x63, 0x63, 0xF0, 0x42, 0x8D, 0x21, 0xDF,
+            0xFA, 0xF2, 0xBF, 0x89,
+        ];
+        let ks = BigNum::from_bytes_be(&ks_bytes);
+
+        let user_id = b"Alice";
+        let da1 = extract_user_key(&ks, user_id, Sm9KeyType::Sign).unwrap();
+        let da2 = extract_user_key(&ks, user_id, Sm9KeyType::Sign).unwrap();
+        assert_eq!(
+            da1.len(),
+            64,
+            "user private key must be 64 bytes (G1 point x||y)"
+        );
+        assert_eq!(da1, da2, "extract_user_key must be deterministic");
+
+        // Golden values: dA = [ks/(H1(ID||0x01)+ks)] * P1 on SM9-BN256 curve
+        #[rustfmt::skip]
+        let expected_x: [u8; 32] = [
+            0x7B, 0x18, 0x63, 0x33, 0x85, 0x78, 0x99, 0x09, 0x58, 0x1B, 0x82, 0x9A, 0x71, 0x4E,
+            0xA5, 0xC1, 0x7D, 0xB3, 0x22, 0x75, 0x2D, 0x0B, 0x90, 0x61, 0xD0, 0xE7, 0x30, 0x0D,
+            0x9E, 0x56, 0xCA, 0x27,
+        ];
+        #[rustfmt::skip]
+        let expected_y: [u8; 32] = [
+            0x2E, 0xAD, 0xE6, 0x63, 0xDF, 0x94, 0x6A, 0xCD, 0x56, 0x67, 0xEC, 0xBB, 0x68, 0xD0,
+            0x55, 0x85, 0xD6, 0x43, 0x1C, 0x5C, 0x99, 0x4D, 0x08, 0xF5, 0x33, 0x4E, 0x22, 0xDF,
+            0x8B, 0x22, 0xB5, 0xEA,
+        ];
+
+        assert_eq!(
+            &da1[..32],
+            &expected_x,
+            "dA x-coordinate must match golden value for ks=86DCD64F..., user=Alice"
+        );
+        assert_eq!(
+            &da1[32..],
+            &expected_y,
+            "dA y-coordinate must match golden value for ks=86DCD64F..., user=Alice"
+        );
+    }
+
+    /// SM9 sign+verify integration test with a fixed master key.
+    ///
+    /// Derives both the master public key (ppub = [ks]*P2) and user private key
+    /// (dA = [ks/(H1(ID||0x01)+ks)]*P1) from the same fixed master secret key,
+    /// then signs a message and verifies the signature.
+    ///
+    /// This test validates the full sign+verify pipeline is internally consistent
+    /// when using a known, fixed ks instead of a randomly generated one.
+    ///
+    /// Master secret key: 86DCD64FEB81A7196359F1A5C2F988BD39431B08A86363F0428D21DFFAF2BF89
+    /// User identity: "Alice"
+    /// Message: b"Chinese IBS standard"
+    #[test]
+    fn test_sm9_standard_sign_verify() {
+        // Fixed master secret key (from SM9_FREE reference implementation)
+        #[rustfmt::skip]
+        let ks_bytes: [u8; 32] = [
+            0x86, 0xDC, 0xD6, 0x4F, 0xEB, 0x81, 0xA7, 0x19, 0x63, 0x59, 0xF1, 0xA5, 0xC2, 0xF9,
+            0x88, 0xBD, 0x39, 0x43, 0x1B, 0x08, 0xA8, 0x63, 0x63, 0xF0, 0x42, 0x8D, 0x21, 0xDF,
+            0xFA, 0xF2, 0xBF, 0x89,
+        ];
+        let ks = BigNum::from_bytes_be(&ks_bytes);
+
+        // Compute master public key Ppub = [ks]*P2  (deterministic from ks)
+        let p2 = super::super::ecp2::EcPointG2::generator();
+        let ppub_pt = p2.scalar_mul(&ks).unwrap();
+        let ppub_bytes = ppub_pt.to_bytes().unwrap();
+        assert_eq!(ppub_bytes.len(), 128, "Ppub must be 128 bytes (G2 point)");
+
+        // Derive user private key from ks
+        let user_id = b"Alice";
+        let da_bytes = extract_user_key(&ks, user_id, Sm9KeyType::Sign).unwrap();
+        assert_eq!(da_bytes.len(), 64, "dA must be 64 bytes (G1 point)");
+
+        let message = b"Chinese IBS standard";
+
+        // sign() uses a fresh random r each call; verify sign+verify consistency
+        let sig = sign(message, &da_bytes, &ppub_bytes).unwrap();
+        assert_eq!(
+            sig.len(),
+            96,
+            "SM9 signature must be 96 bytes (h=32 + S=64)"
+        );
+
+        let valid = verify(message, user_id, &sig, &ppub_bytes).unwrap();
+        assert!(
+            valid,
+            "SM9 sign+verify must succeed: ppub and dA derived from same ks"
+        );
+
+        // Different message must not verify
+        let valid_wrong = verify(b"wrong message", user_id, &sig, &ppub_bytes).unwrap();
+        assert!(
+            !valid_wrong,
+            "SM9 signature must not verify for a different message"
+        );
+    }
+
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
         let (ke, ppub) = master_keygen(Sm9KeyType::Encrypt).unwrap();
