@@ -23,7 +23,7 @@ fuzz_target!(|data: &[u8]| {
         Err(_) => return,
     };
 
-    match mode_sel % 2 {
+    match mode_sel % 3 {
         0 => {
             // Mode 0: sign → verify roundtrip
             let sig = match kp.sign(rest) {
@@ -33,8 +33,19 @@ fuzz_target!(|data: &[u8]| {
             let valid = kp.verify(rest, &sig).unwrap_or(false);
             assert!(valid, "SLH-DSA roundtrip verification must succeed");
         }
+        1 => {
+            // Mode 1: sign → tamper message → verify must fail
+            let msg = b"SLH-DSA tamper test message";
+            let sig = match kp.sign(msg) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let wrong_msg = b"SLH-DSA tamper WRONG message";
+            let valid = kp.verify(wrong_msg, &sig).unwrap_or(false);
+            assert!(!valid, "SLH-DSA verify must fail with wrong message");
+        }
         _ => {
-            // Mode 1: verify fuzzed signature — must not panic
+            // Mode 2: verify fuzzed signature — must not panic
             let _ = kp.verify(b"fuzz test message", rest);
         }
     }
