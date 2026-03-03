@@ -3940,3 +3940,44 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - T74-G: +3 ct_verify.rs constant-time tests (#[ignore]: ChaCha20-Poly1305/CCM/GCM)
 - T74-H: Dependabot +fuzz directory entry + open-pull-requests-limit
 - All 3,965 tests pass, 25 ignored (+3 ct_verify), 0 clippy/fmt warnings
+
+---
+
+## Phase P81 — DH Precomputed Generator Tables (2026-03-04)
+
+**Prompt**: Implement P81: DH Precomputed Generator Tables — add MontExpTable to hitls-bignum and DhGroupCache with OnceLock-cached context + table per DH group in hitls-crypto.
+
+**Result**:
+- Added `MontExpTable` struct + `build_exp_table`/`mont_exp_with_table` to `montgomery.rs`
+- Re-exported `MontExpTable` from `hitls-bignum` crate root
+- Added `DhGroupCache` with `OnceLock<DhGroupCache>[13]` per DH group in `dh/mod.rs`
+- `DhParams.param_id: Option<DhParamId>` for cache lookup
+- `generate()` uses cached MontgomeryCtx + precomputed table for predefined groups
+- Test count unchanged: 3,965 (25 ignored), 0 clippy/fmt warnings
+- Expected: DH-2048 keygen 15-25% faster, DH-4096 keygen 20-30% faster
+
+---
+
+## Phase P82 — SM3 Pipelined Message Expansion (2026-03-04)
+
+**Prompt**: Implement P82: SM3 Pipelined Message Expansion — split sm3_compress into expand_schedule + compress_rounds, pipeline block N+1 expansion while compressing block N in update().
+
+**Result**:
+- Split `sm3_compress` into `expand_schedule` (w[68] pre-computation) + `compress_rounds` (64-round compression)
+- Multi-block `update()` path pipelines expansion of block N+1 while compressing block N
+- Single-block tail and `finish()` retain combined `sm3_compress`
+- Test count unchanged: 3,965 (25 ignored), 0 clippy/fmt warnings
+- Expected: SM3 @8KB ~5-10% faster due to CPU OoO execution overlap
+
+---
+
+## Phase P83 — ML-KEM SHAKE Clone-Fork (2026-03-04)
+
+**Prompt**: Implement P83: ML-KEM SHAKE Clone-Fork — pre-seed base SHAKE-128 with ρ in expand_a and clone per (i,j) entry; add prf_into_from clone-fork PRF for keygen/encrypt.
+
+**Result**:
+- `expand_a`: pre-seed base `Shake128` with ρ, clone for each `(i,j)` matrix entry (eliminates per-entry re-initialization)
+- New `prf_into_from(base: &Shake256, nonce, output)` clone-fork PRF function
+- `kpke_keygen` and `kpke_encrypt` use pre-seeded `Shake256` + clone-fork via `prf_into_from`
+- Test count unchanged: 3,965 (25 ignored), 0 clippy/fmt warnings
+- Expected: ML-KEM-768 ~3-5% faster, ML-KEM-1024 ~5-7% faster

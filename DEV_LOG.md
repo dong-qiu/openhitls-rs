@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I87 (87 phases)
 - Testing: T1–T74 (73 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P80 (80 phases)
+- Performance: P1–P83 (83 phases)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -262,6 +262,9 @@ Category summary:
 | 250 | T73 | Test | Quality Safety Net P4 — Security hardening, +85 tests, +2 fuzz, +12 proptests, +4 CI | 2026-03-03 |
 | 251 | I87 | Impl | TLS Security Level + CRL Integration + PHA Completion | 2026-03-04 |
 | 252 | T74 | Test | Quality Infrastructure: Industry Best Practices | 2026-03-04 |
+| 253 | P81 | Perf | DH Precomputed Generator Tables | 2026-03-04 |
+| 254 | P82 | Perf | SM3 Pipelined Message Expansion | 2026-03-04 |
+| 255 | P83 | Perf | ML-KEM SHAKE Clone-Fork | 2026-03-04 |
 
 ---
 
@@ -13499,5 +13502,101 @@ Adopt 2025–2026 Rust ecosystem best practices: workspace lint centralization, 
 
 ### Build Status (Post T74)
 - `cargo test --workspace --all-features`: 3,965 passed, 0 failed, 25 ignored (3,968 total, +3 ignored ct_verify tests)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P81 — DH Precomputed Generator Tables (2026-03-04)
+
+### Summary
+Added `MontExpTable` struct and `build_exp_table`/`mont_exp_with_table` functions to the Montgomery module. Introduced `DhGroupCache` (per-group `MontgomeryCtx` + precomputed generator table) stored in `OnceLock<DhGroupCache>[13]` arrays. `DhParams` now carries an `Option<DhParamId>` for cache lookup. `generate()` uses the cached context and table for predefined groups, eliminating repeated Montgomery context construction and generator exponentiation setup. Expected: DH-2048 keygen 15-25% faster, DH-4096 keygen 20-30% faster.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-bignum/src/montgomery.rs` | Modified | +`MontExpTable` struct, +`build_exp_table()`, +`mont_exp_with_table()` using precomputed window table |
+| `crates/hitls-bignum/src/lib.rs` | Modified | Re-export `MontExpTable` from crate root |
+| `crates/hitls-crypto/src/dh/mod.rs` | Modified | +`DhGroupCache` struct, +`OnceLock<DhGroupCache>[13]` static arrays, +`DhParams.param_id: Option<DhParamId>`, `generate()` uses cached MontgomeryCtx + precomputed table |
+
+### Test Count (Post P81)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1429 (5 ignored) |
+| hitls-tls | 1434 |
+| hitls-pki | 426 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 47 |
+| hitls-cli | 161 (5 ignored) |
+| hitls-integration-tests | 261 (14 ignored) |
+| **Total** | **3965 (25 ignored)** |
+
+### Build Status (Post P81)
+- `cargo test --workspace --all-features`: 3,943 passed, 0 failed, 25 ignored (3,965 total, unchanged)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P82 — SM3 Pipelined Message Expansion (2026-03-04)
+
+### Summary
+Split `sm3_compress` into two separate functions: `expand_schedule` (pre-computes the full `w[68]` schedule) and `compress_rounds` (performs the 64-round compression given a pre-expanded schedule). The `update()` path now pipelines: while compressing block N, the next block's schedule is expanded in advance, allowing CPU out-of-order execution to overlap independent work. Single-block tail and `finish()` still use the combined `sm3_compress`. Expected: SM3 throughput at 8KB ~5-10% faster.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/sm3/mod.rs` | Modified | Split `sm3_compress` into `expand_schedule` + `compress_rounds`, pipelined multi-block `update()` path |
+
+### Test Count (Post P82)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1429 (5 ignored) |
+| hitls-tls | 1434 |
+| hitls-pki | 426 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 47 |
+| hitls-cli | 161 (5 ignored) |
+| hitls-integration-tests | 261 (14 ignored) |
+| **Total** | **3965 (25 ignored)** |
+
+### Build Status (Post P82)
+- `cargo test --workspace --all-features`: 3,943 passed, 0 failed, 25 ignored (3,965 total, unchanged)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P83 — ML-KEM SHAKE Clone-Fork (2026-03-04)
+
+### Summary
+Changed `expand_a` to pre-seed a base `Shake128` instance with the ρ seed, then clone it for each `(i, j)` matrix entry rather than reconstructing from scratch each time. Added `prf_into_from(base: &Shake256, nonce, output)` for clone-fork PRF, and updated `kpke_keygen` and `kpke_encrypt` to use a pre-seeded `Shake256` instance cloned per call. Eliminates repeated SHAKE state initialization overhead in the hot path. Expected: ML-KEM-768 ~3-5% faster, ML-KEM-1024 ~5-7% faster.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/mlkem/poly.rs` | Modified | `expand_a`: pre-seed base Shake128 with ρ, clone per `(i,j)` entry; +`prf_into_from(base, nonce, output)` clone-fork PRF |
+| `crates/hitls-crypto/src/mlkem/mod.rs` | Modified | `kpke_keygen` and `kpke_encrypt` use pre-seeded Shake256 + clone-fork via `prf_into_from` |
+
+### Test Count (Post P83)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1429 (5 ignored) |
+| hitls-tls | 1434 |
+| hitls-pki | 426 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 47 |
+| hitls-cli | 161 (5 ignored) |
+| hitls-integration-tests | 261 (14 ignored) |
+| **Total** | **3965 (25 ignored)** |
+
+### Build Status (Post P83)
+- `cargo test --workspace --all-features`: 3,943 passed, 0 failed, 25 ignored (3,965 total, unchanged)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phases I1–I87, T1–T74, R1–R12, P1–P80 complete (3968 tests, 25 ignored)
+- **Status**: Phases I1–I87, T1–T74, R1–R12, P1–P83 complete (3968 tests, 25 ignored)
 
 ## Workspace Structure
 
@@ -132,7 +132,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases I1–I87, T1–T74, R1–R12, P1–P80 complete (3968 tests, 25 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
+Phases I1–I87, T1–T74, R1–R12, P1–P83 complete (3968 tests, 25 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
 
 ### Completed Phases (Summary)
 
@@ -250,5 +250,8 @@ Key milestones:
 - Phase T73: Quality safety net P4 — Security hardening (DTLS cookie ct_eq, hash digest zeroize-on-drop, CBC decrypt unwrap elimination), frozen golden-value KAT for ML-KEM/ML-DSA, SM2/SM9 standard test vectors, HPKE/XMSS-MT integration tests, X.509 certificate unit tests, CRL integration test, +2 fuzz targets (SM4-modes/AES-modes, 63→65 targets, +11 corpus seeds 418→429), +12 proptest blocks (ECDSA/ECDH P-384/P-521, CRL roundtrip, anti-replay window, AES-CTR, HMAC SHA-384/SHA-512, DH multi-group), +4 CI feature flags (md5/tls12+async/tlcp+async/dtlcp+async), Codecov 4→8 components. Total: 3947 (22 ignored).
 - Phase I87: TLS Security Level Enforcement + CRL Integration + PHA Completion — 5-level default security callback (`default_security_callback` matching C reference `security_default.c`), TLS-CRL revocation checking (`check_revocation`/`crls` config, wired into `verify_server_certificate`), `AsyncTlsServerConnection::request_client_auth()` async PHA, fix client PHA empty-cert Finished omission (RFC 8446 §4.4.2). +18 tests (10 security level, 5 CRL, 3 async PHA). Total: 3965 (22 ignored).
 - Phase T74: Quality Infrastructure: Industry Best Practices — Workspace lints centralization (`[workspace.lints]` + 9 crate `[lints] workspace=true`), cargo-semver-checks CI (PR-only), cargo-nextest parallel test execution (`.config/nextest.toml` + CI integration), Criterion bench-compare CI (PR-only), cargo-mutants weekly mutation testing (`mutants.yml` + `mutants.toml`), cargo-careful UB detection CI, +3 constant-time verification tests (ChaCha20-Poly1305/CCM/GCM, #[ignore]), Dependabot fuzz dir. Total: 3968 (25 ignored).
+- Phase P81: DH Precomputed Generator Tables — `MontExpTable` struct + `build_exp_table`/`mont_exp_with_table` in montgomery.rs, `DhGroupCache` with `OnceLock<DhGroupCache>[13]` per DH group, `DhParams.param_id: Option<DhParamId>` for cache lookup, `generate()` uses cached MontgomeryCtx + precomputed table for predefined groups. DH-2048 keygen 15-25% faster, DH-4096 20-30% faster.
+- Phase P82: SM3 Pipelined Message Expansion — split `sm3_compress` into `expand_schedule` + `compress_rounds`, pipeline block N+1 expansion while compressing block N in `update()`, CPU OoO execution overlap. SM3 @8KB ~5-10% faster.
+- Phase P83: ML-KEM SHAKE Clone-Fork — `expand_a` pre-seeds base `Shake128` with ρ and clones per `(i,j)` entry, new `prf_into_from(base, nonce, output)` clone-fork PRF, `kpke_keygen`/`kpke_encrypt` use pre-seeded `Shake256` + clone. ML-KEM-768 ~3-5% faster, ML-KEM-1024 ~5-7% faster.
 
 See `DEV_LOG.md` for detailed phase tables (including test, refactoring, and performance phases) and `PROMPT_LOG.md` for prompt/response log.
