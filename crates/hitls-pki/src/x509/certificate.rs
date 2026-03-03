@@ -727,4 +727,138 @@ mod tests {
         assert!(parsed.is_self_signed());
         assert_eq!(parsed.issuer, parsed.subject);
     }
+
+    #[test]
+    fn test_certificate_pem_roundtrip() {
+        use super::super::builder::CertificateBuilder;
+        use super::super::signing::SigningKey;
+
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "PEM Test".into())],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+
+        // DER → PEM → from_pem roundtrip
+        use hitls_utils::base64;
+        let der = cert.to_der();
+        let b64 = base64::encode(&der);
+        let pem = format!(
+            "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+            b64
+        );
+        let parsed = Certificate::from_pem(&pem).unwrap();
+        assert_eq!(parsed.subject.get("CN"), Some("PEM Test"));
+        assert_eq!(parsed.raw, cert.raw);
+    }
+
+    #[test]
+    fn test_certificate_from_pem_missing_block() {
+        let bad_pem = "-----BEGIN PRIVATE KEY-----\nMC4=\n-----END PRIVATE KEY-----\n";
+        let err = Certificate::from_pem(bad_pem);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_certificate_from_der_truncated() {
+        // Truncated DER should fail
+        assert!(Certificate::from_der(&[]).is_err());
+        assert!(Certificate::from_der(&[0x30, 0x03, 0x01]).is_err());
+    }
+
+    #[test]
+    fn test_certificate_verify_signature_self_signed_ed25519() {
+        use super::super::builder::CertificateBuilder;
+        use super::super::signing::SigningKey;
+
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "Sig Test".into())],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+
+        // Self-signed cert should verify against itself
+        assert!(cert.verify_signature(&cert).unwrap());
+    }
+
+    #[test]
+    fn test_certificate_verify_signature_rsa() {
+        use super::super::builder::CertificateBuilder;
+        use super::super::signing::SigningKey;
+
+        let rsa_key = hitls_crypto::rsa::RsaPrivateKey::generate(2048).unwrap();
+        let sk = SigningKey::Rsa(rsa_key);
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "RSA CA".into())],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+        assert!(cert.verify_signature(&cert).unwrap());
+    }
+
+    #[test]
+    fn test_certificate_verify_signature_wrong_issuer() {
+        use super::super::builder::CertificateBuilder;
+        use super::super::signing::SigningKey;
+
+        let kp1 = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk1 = SigningKey::Ed25519(kp1);
+        let cert1 = CertificateBuilder::self_signed(
+            DistinguishedName {
+                entries: vec![("CN".into(), "CA 1".into())],
+            },
+            &sk1,
+            1_700_000_000,
+            1_800_000_000,
+        )
+        .unwrap();
+
+        let kp2 = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk2 = SigningKey::Ed25519(kp2);
+        let cert2 = CertificateBuilder::self_signed(
+            DistinguishedName {
+                entries: vec![("CN".into(), "CA 2".into())],
+            },
+            &sk2,
+            1_700_000_000,
+            1_800_000_000,
+        )
+        .unwrap();
+
+        // cert1 verified against cert2's key should fail
+        let result = cert1.verify_signature(&cert2);
+        assert!(result.is_err() || !result.unwrap());
+    }
+
+    #[test]
+    fn test_certificate_is_ca() {
+        use super::super::builder::CertificateBuilder;
+        use super::super::signing::SigningKey;
+
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "CA Test".into())],
+        };
+        // self_signed sets basicConstraints CA:true
+        let ca_cert =
+            CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+        assert!(ca_cert.is_ca());
+    }
+
+    #[test]
+    fn test_distinguished_name_equality() {
+        let dn1 = DistinguishedName {
+            entries: vec![("CN".into(), "Test".into()), ("O".into(), "Org".into())],
+        };
+        let dn2 = DistinguishedName {
+            entries: vec![("CN".into(), "Test".into()), ("O".into(), "Org".into())],
+        };
+        let dn3 = DistinguishedName {
+            entries: vec![("CN".into(), "Other".into())],
+        };
+        assert_eq!(dn1, dn2);
+        assert_ne!(dn1, dn3);
+    }
 }
