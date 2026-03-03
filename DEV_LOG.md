@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I86 (86 phases)
+- Implementation: I1–I87 (87 phases)
 - Testing: T1–T72 (71 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P80 (80 phases)
@@ -260,6 +260,7 @@ Category summary:
 | 248 | P79 | Perf | FrodoKEM Matrix Buffer Reuse | 2026-03-03 |
 | 249 | P80 | Perf | SM9 Pairing O(n²) Fix + Clone Elimination | 2026-03-03 |
 | 250 | T73 | Test | Quality Safety Net P4 — Security hardening, +85 tests, +2 fuzz, +12 proptests, +4 CI | 2026-03-03 |
+| 251 | I87 | Impl | TLS Security Level + CRL Integration + PHA Completion | 2026-03-04 |
 
 ---
 
@@ -13372,5 +13373,54 @@ Replaced O(n²) `param_bits.remove(0)` with O(n) index-based iteration in Miller
 
 ### Build Status (Post P69-P80)
 - `cargo test --workspace --all-features`: 3,913 passed, 0 failed, 22 ignored (3,935 total)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase I87 — TLS Security Level Enforcement + CRL Integration + PHA Completion (2026-03-04)
+
+### Summary
+Three TLS migration gap closures: (A) 5-level default security callback matching C reference `security_default.c`, (B) TLS-CRL revocation checking wired into certificate verification, (C) async server-side post-handshake authentication + fix client PHA empty-cert Finished omission.
+
+### Part A: TLS Security Level Enforcement
+- `security_op` module with constants `CIPHER_SUITE=0, NAMED_GROUP=1, SIGNATURE_ALG=2, VERSION=3`
+- `LEVEL_MIN_BITS: [u32; 5] = [80, 112, 128, 192, 256]` mapping levels to minimum bit strengths
+- Helper functions: `cipher_suite_strength_bits()`, `cipher_suite_is_forward_secret()`, `cipher_suite_is_anon()`, `cipher_suite_uses_sha1_mac()`
+- `default_security_callback()` implementing 5-level policy (Level 0: allow all, Level 1+: reject anon/old versions, Level 3+: require forward secrecy, Level 4+: reject SHA-1 MAC, Level 5: require 256-bit)
+- Default `security_cb` changed from `None` to `Some(Arc::new(default_security_callback))`
+
+### Part B: TLS-CRL Integration
+- `crls: Vec<Vec<u8>>` and `check_revocation: bool` config fields with builder methods
+- `verify_server_certificate()` wired to parse CRL DERs, pass to `CertificateVerifier::add_crl()`, and enable revocation checking
+
+### Part C: Async Server PHA + Client PHA Fix
+- `AsyncTlsServerConnection::request_client_auth()` — async mirror of sync implementation (RFC 8446 §4.6.2)
+- Fix: client PHA handler now sends Finished even when `client_private_key` is None (empty certificate case, per RFC 8446 §4.4.2)
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/config/mod.rs` | Modified | +security_op module, +default_security_callback, +crls/check_revocation config, +10 security tests, +1 config test update |
+| `crates/hitls-tls/src/cert_verify.rs` | Modified | CRL parsing + CertificateVerifier wiring in verify_server_certificate, +5 CRL tests |
+| `crates/hitls-tls/src/connection_async.rs` | Modified | +request_client_auth() async, +build_ed25519_der_cert helper, +3 async PHA tests |
+| `crates/hitls-tls/src/macros.rs` | Modified | Fix empty-cert PHA: add else branch to send Finished when no client_private_key |
+
+### Test Count (Post I87)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1426 (2 ignored) |
+| hitls-tls | 1434 |
+| hitls-pki | 426 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 47 |
+| hitls-cli | 161 (5 ignored) |
+| hitls-integration-tests | 261 (14 ignored) |
+| **Total** | **3965 (22 ignored)** |
+
+### Build Status (Post I87)
+- `cargo test --workspace --all-features`: 3,943 passed, 0 failed, 22 ignored (3,965 total)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

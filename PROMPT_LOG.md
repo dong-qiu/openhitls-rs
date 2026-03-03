@@ -3911,3 +3911,15 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - P3: DTLS cookie ct_eq (DTLS 1.2 + DTLCP), AES-CTR/HMAC-SHA384/SHA512/DH multi-group proptests
 - All 3,947 tests pass, 22 ignored, 0 clippy/fmt warnings
 - 65 fuzz targets, 429 corpus seeds, ~87 proptest blocks, ~59 CI feature tests, 8 Codecov components
+
+---
+
+## Phase I87 — TLS Security Level Enforcement + CRL Integration + PHA Completion (2026-03-04)
+
+**Prompt**: "请依次实现高优先级的3项，并依次提交代码变更" (Implement 3 high-priority migration gap features: Security Level Enforcement, TLS-CRL Integration, Async PHA)
+
+**Result**:
+- Part A: 5-level default security callback (matching C reference security_default.c), +10 tests
+- Part B: TLS-CRL revocation checking wired into verify_server_certificate, +5 tests
+- Part C: AsyncTlsServerConnection::request_client_auth(), fix client PHA empty-cert Finished omission, +3 tests
+- All 3,965 tests pass, 22 ignored, 0 clippy/fmt warnings
