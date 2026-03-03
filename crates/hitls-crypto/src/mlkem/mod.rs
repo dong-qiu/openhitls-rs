@@ -707,6 +707,96 @@ mod tests {
         assert_eq!(rej1, rej2, "implicit rejection must be deterministic");
     }
 
+    /// Helper: SHA-256 fingerprint as hex string for golden-value assertions.
+    fn sha256_hex(data: &[u8]) -> String {
+        sha256_fingerprint(data)
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect()
+    }
+
+    #[test]
+    fn test_mlkem_512_golden_value_kat() {
+        let d = [0x42u8; 32];
+        let z = [0x37u8; 32];
+        let m = [0x03u8; 32];
+        let kp = MlKemKeyPair::generate_from_seed(512, &d, &z).unwrap();
+        assert_eq!(
+            sha256_hex(kp.encapsulation_key()),
+            "cf19bc6f358cbbab5e6d68f899b701cbe94c4df8fe8be5d24f72a2cde2498d14"
+        );
+        assert_eq!(
+            sha256_hex(&kp.decapsulation_key),
+            "51484e04d58821b643894de22c933e186a483212c82c3243b72b0ef00dff9546"
+        );
+        let (ss, ct) = kp.encapsulate_deterministic(&m).unwrap();
+        assert_eq!(
+            sha256_hex(&ss),
+            "ac26959384c679c0a789d6e8213671395b8ab600391fb3e3404c812bbf618cf6"
+        );
+        assert_eq!(
+            sha256_hex(&ct),
+            "8454386047797c2e878a6245d01fdb8c6ad0f173bbde39fb6686df199c066e8b"
+        );
+        // Roundtrip: decapsulate must recover the same shared secret
+        let ss_dec = kp.decapsulate(&ct).unwrap();
+        assert_eq!(ss, ss_dec);
+    }
+
+    #[test]
+    fn test_mlkem_768_golden_value_kat() {
+        let d = [0xAAu8; 32];
+        let z = [0xBBu8; 32];
+        let m = [0x03u8; 32];
+        let kp = MlKemKeyPair::generate_from_seed(768, &d, &z).unwrap();
+        assert_eq!(
+            sha256_hex(kp.encapsulation_key()),
+            "4cf1f67209384ea357bdc51826e4445afff52ad7819af3df2689fd8b65eab061"
+        );
+        assert_eq!(
+            sha256_hex(&kp.decapsulation_key),
+            "303f2578c4d25078662d9181b6f3e88851daa2c6148046a9286d533cb8b4e8c2"
+        );
+        let (ss, ct) = kp.encapsulate_deterministic(&m).unwrap();
+        assert_eq!(
+            sha256_hex(&ss),
+            "1496b9136a09fe5670dfaff9ba0086737c676afbb427d914dae81d25ead3a1f6"
+        );
+        assert_eq!(
+            sha256_hex(&ct),
+            "82a747c6bba81c345594b316f34da4bb2564b01259ea330b75203b9e4afc0d1a"
+        );
+        let ss_dec = kp.decapsulate(&ct).unwrap();
+        assert_eq!(ss, ss_dec);
+    }
+
+    #[test]
+    fn test_mlkem_1024_golden_value_kat() {
+        let d = [0x55u8; 32];
+        let z = [0xCCu8; 32];
+        let m = [0x03u8; 32];
+        let kp = MlKemKeyPair::generate_from_seed(1024, &d, &z).unwrap();
+        assert_eq!(
+            sha256_hex(kp.encapsulation_key()),
+            "b610a075017b1f47a8fb87148aaafe5a85b8d753497ee6e683c793cd77b2a32d"
+        );
+        assert_eq!(
+            sha256_hex(&kp.decapsulation_key),
+            "526b78035b238af0c2848ea6190613e796f0206d0673f86a00ddd73e4faad918"
+        );
+        let (ss, ct) = kp.encapsulate_deterministic(&m).unwrap();
+        assert_eq!(
+            sha256_hex(&ss),
+            "8bc4f26ebfafe617715bc59f2bf115340225a5ee112a1d148af9efd3b2db9e51"
+        );
+        assert_eq!(
+            sha256_hex(&ct),
+            "b87e7fb09d206550b4b3332ad876f43330183dc9216d80cfbcf87a31b2b4b6fd"
+        );
+        let ss_dec = kp.decapsulate(&ct).unwrap();
+        assert_eq!(ss, ss_dec);
+    }
+
     mod proptests {
         use super::*;
         use proptest::prelude::*;

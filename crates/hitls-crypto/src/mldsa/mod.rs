@@ -977,6 +977,77 @@ mod tests {
         );
     }
 
+    /// Helper: SHA-256 fingerprint as hex string.
+    fn sha256_hex(data: &[u8]) -> String {
+        sha256_fingerprint(data)
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect()
+    }
+
+    #[test]
+    fn test_mldsa_44_golden_value_kat() {
+        let xi = [0x42u8; 32];
+        let msg = b"deterministic KAT message";
+        let kp = MlDsaKeyPair::generate_from_seed(44, &xi).unwrap();
+        assert_eq!(
+            sha256_hex(kp.public_key()),
+            "19506c63f504c175013cf1b459397bbbc2ce6a3fd841bab68b3898f6f2fddc2f"
+        );
+        assert_eq!(
+            sha256_hex(&kp.private_key),
+            "52bf3751f1e31760c51f8eb35565686fc7efdfa6c48572968e71b8eacbd5da2e"
+        );
+        let sig = kp.sign(msg).unwrap();
+        assert_eq!(
+            sha256_hex(&sig),
+            "b025b4161adb08045ace0ac263b2b04dcb4ffe7c37dd844440144d240265086c"
+        );
+        assert!(kp.verify(msg, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_mldsa_65_golden_value_kat() {
+        let xi = [0xAAu8; 32];
+        let msg = b"deterministic KAT message";
+        let kp = MlDsaKeyPair::generate_from_seed(65, &xi).unwrap();
+        assert_eq!(
+            sha256_hex(kp.public_key()),
+            "c4fbd338d1665832bf51009e148cb0f8df0c6b0fa5638ab6ba8f194d504a18e7"
+        );
+        assert_eq!(
+            sha256_hex(&kp.private_key),
+            "4743c4ddd533f143b9e35b80aede8f8c6c8f54c5226d85a52d6ee18a5028ac5b"
+        );
+        let sig = kp.sign(msg).unwrap();
+        assert_eq!(
+            sha256_hex(&sig),
+            "9e92de5d4d6c437ab6f3f9673f918808c7a9de30539eda1292d9968e9d983bfc"
+        );
+        assert!(kp.verify(msg, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_mldsa_87_golden_value_kat() {
+        let xi = [0x55u8; 32];
+        let msg = b"deterministic KAT message";
+        let kp = MlDsaKeyPair::generate_from_seed(87, &xi).unwrap();
+        assert_eq!(
+            sha256_hex(kp.public_key()),
+            "008bb05b3e4fbe1ff4e9b2aa557f6f1d17cb3cd2a04a55ca8482b1cb87ce0fa9"
+        );
+        assert_eq!(
+            sha256_hex(&kp.private_key),
+            "7891dbe82542c5ce723819fb56acdfdd3f503a9b9c56b36f96ab08aa0f68e8af"
+        );
+        let sig = kp.sign(msg).unwrap();
+        assert_eq!(
+            sha256_hex(&sig),
+            "ec8c31b00e0cc0d137828b9afcc4b5c3cbafab11de97c2fc602e7fb3193b0b3a"
+        );
+        assert!(kp.verify(msg, &sig).unwrap());
+    }
+
     mod proptests {
         use super::*;
         use proptest::prelude::*;
