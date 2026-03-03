@@ -230,7 +230,7 @@ jobs:
           mkdir -p coverage
           cargo +nightly llvm-cov --workspace --all-features --branch --codecov --output-path coverage/codecov.json --ignore-filename-regex "tests/vectors/"
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: coverage/codecov.json
           fail_ci_if_error: true
