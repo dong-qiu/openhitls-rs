@@ -603,6 +603,76 @@ fn bench_rsa(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
+// RSA-3072 benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_rsa_3072(c: &mut Criterion) {
+    use hitls_crypto::rsa::{RsaPadding, RsaPrivateKey};
+
+    let mut group = c.benchmark_group("rsa-3072");
+    group.sample_size(10);
+
+    let sk = RsaPrivateKey::generate(3072).unwrap();
+    let pk = sk.public_key();
+    let digest = [0x42u8; 32];
+
+    group.bench_function("sign_pss", |b| {
+        b.iter(|| sk.sign(RsaPadding::Pss, &digest).unwrap());
+    });
+
+    let sig = sk.sign(RsaPadding::Pss, &digest).unwrap();
+    group.bench_function("verify_pss", |b| {
+        b.iter(|| pk.verify(RsaPadding::Pss, &digest, &sig).unwrap());
+    });
+
+    group.bench_function("encrypt_oaep", |b| {
+        b.iter(|| pk.encrypt(RsaPadding::Oaep, &digest).unwrap());
+    });
+
+    let ct = pk.encrypt(RsaPadding::Oaep, &digest).unwrap();
+    group.bench_function("decrypt_oaep", |b| {
+        b.iter(|| sk.decrypt(RsaPadding::Oaep, &ct).unwrap());
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// RSA-4096 benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_rsa_4096(c: &mut Criterion) {
+    use hitls_crypto::rsa::{RsaPadding, RsaPrivateKey};
+
+    let mut group = c.benchmark_group("rsa-4096");
+    group.sample_size(10);
+
+    let sk = RsaPrivateKey::generate(4096).unwrap();
+    let pk = sk.public_key();
+    let digest = [0x42u8; 32];
+
+    group.bench_function("sign_pss", |b| {
+        b.iter(|| sk.sign(RsaPadding::Pss, &digest).unwrap());
+    });
+
+    let sig = sk.sign(RsaPadding::Pss, &digest).unwrap();
+    group.bench_function("verify_pss", |b| {
+        b.iter(|| pk.verify(RsaPadding::Pss, &digest, &sig).unwrap());
+    });
+
+    group.bench_function("encrypt_oaep", |b| {
+        b.iter(|| pk.encrypt(RsaPadding::Oaep, &digest).unwrap());
+    });
+
+    let ct = pk.encrypt(RsaPadding::Oaep, &digest).unwrap();
+    group.bench_function("decrypt_oaep", |b| {
+        b.iter(|| sk.decrypt(RsaPadding::Oaep, &ct).unwrap());
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
 // ML-KEM benchmarks
 // ---------------------------------------------------------------------------
 
@@ -1456,6 +1526,7 @@ fn bench_frodokem(c: &mut Criterion) {
     for (param_id, label) in [
         (FrodoKemParamId::FrodoKem640Shake, "frodokem-640-shake"),
         (FrodoKemParamId::FrodoKem976Shake, "frodokem-976-shake"),
+        (FrodoKemParamId::FrodoKem1344Shake, "frodokem-1344-shake"),
     ] {
         group.bench_function(format!("{label}/keygen"), |b| {
             b.iter(|| FrodoKemKeyPair::generate(param_id).unwrap());
@@ -1645,6 +1716,33 @@ fn bench_cbc_mac_sm4(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
+// Poly1305 standalone benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_poly1305(c: &mut Criterion) {
+    use hitls_crypto::chacha20::Poly1305;
+
+    let mut group = c.benchmark_group("poly1305");
+
+    for size in [64usize, 1024, 8192, 16384] {
+        group.throughput(Throughput::Bytes(size as u64));
+
+        let key = [0x42u8; 32];
+        let data = vec![0u8; size];
+
+        group.bench_with_input(BenchmarkId::new("compute", size), &size, |b, _| {
+            b.iter(|| {
+                let mut mac = Poly1305::new(&key);
+                mac.update(&data);
+                mac.finish()
+            });
+        });
+    }
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
 // XMSS benchmarks
 // ---------------------------------------------------------------------------
 
@@ -1664,6 +1762,31 @@ fn bench_xmss(c: &mut Criterion) {
 
     // Verify-only benchmark (sign is stateful and consumes OTS keys)
     group.bench_function("sha2-10-256/verify", |b| {
+        b.iter(|| kp.verify(msg, &sig).unwrap());
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// XMSS-MT benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_xmss_mt(c: &mut Criterion) {
+    use hitls_crypto::xmss::XmssMtKeyPair;
+    use hitls_types::XmssMtParamId;
+
+    let mut group = c.benchmark_group("xmss-mt");
+    group.sample_size(10);
+
+    let param_id = XmssMtParamId::Sha2_20_2_256;
+    let msg = b"benchmark message for XMSS-MT signing";
+
+    let mut kp = XmssMtKeyPair::generate(param_id).unwrap();
+    let sig = kp.sign(msg).unwrap();
+
+    // Verify-only benchmark (sign is stateful and consumes OTS keys)
+    group.bench_function("sha2-20-2-256/verify", |b| {
         b.iter(|| kp.verify(msg, &sig).unwrap());
     });
 
@@ -1814,6 +1937,7 @@ criterion_group!(
     bench_gmac,
     bench_siphash,
     bench_cbc_mac_sm4,
+    bench_poly1305,
     // Asymmetric / signatures
     bench_ecdsa,
     bench_ecdsa_curves,
@@ -1825,6 +1949,8 @@ criterion_group!(
     bench_sm2,
     bench_sm9,
     bench_rsa,
+    bench_rsa_3072,
+    bench_rsa_4096,
     bench_dsa,
     bench_dh,
     bench_elgamal,
@@ -1838,6 +1964,7 @@ criterion_group!(
     bench_frodokem,
     bench_mceliece,
     bench_xmss,
+    bench_xmss_mt,
     // KDFs & DRBGs
     bench_kdf,
     bench_scrypt,
