@@ -5,6 +5,9 @@ edition = "2021"
 license = "MulanPSL-2.0"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 hitls-types = { path = "../../crates/hitls-types" }
 hitls-utils = { path = "../../crates/hitls-utils" }

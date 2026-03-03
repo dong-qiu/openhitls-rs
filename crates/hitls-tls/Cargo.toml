@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "TLS protocol implementation for openHiTLS"
 
+[lints]
+workspace = true
+
 [dependencies]
 hitls-types = { path = "../hitls-types" }
 hitls-crypto = { path = "../hitls-crypto", features = ["modes", "chacha20", "x25519", "x448", "ecdh", "ecdsa", "rsa", "ed25519", "ed448", "dh", "mlkem"] }

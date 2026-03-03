@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "PKI certificate management for openHiTLS"
 
+[lints]
+workspace = true
+
 [dependencies]
 hitls-types = { path = "../hitls-types" }
 hitls-crypto = { path = "../hitls-crypto", features = ["rsa", "ecdsa", "ecdh", "sha2", "sha1", "ed25519", "x25519", "ed448", "x448", "dsa", "hmac", "pbkdf2", "modes", "sm2", "sm3"] }

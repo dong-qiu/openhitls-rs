@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Cryptographic algorithm library for openHiTLS"
 
+[lints]
+workspace = true
+
 [dependencies]
 hitls-types = { path = "../hitls-types" }
 hitls-bignum = { path = "../hitls-bignum", optional = true }

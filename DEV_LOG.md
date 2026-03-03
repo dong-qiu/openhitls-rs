@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I87 (87 phases)
-- Testing: T1–T72 (71 phases, T64 skipped)
+- Testing: T1–T74 (73 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P80 (80 phases)
 
@@ -261,6 +261,7 @@ Category summary:
 | 249 | P80 | Perf | SM9 Pairing O(n²) Fix + Clone Elimination | 2026-03-03 |
 | 250 | T73 | Test | Quality Safety Net P4 — Security hardening, +85 tests, +2 fuzz, +12 proptests, +4 CI | 2026-03-03 |
 | 251 | I87 | Impl | TLS Security Level + CRL Integration + PHA Completion | 2026-03-04 |
+| 252 | T74 | Test | Quality Infrastructure: Industry Best Practices | 2026-03-04 |
 
 ---
 
@@ -13422,5 +13423,81 @@ Three TLS migration gap closures: (A) 5-level default security callback matching
 
 ### Build Status (Post I87)
 - `cargo test --workspace --all-features`: 3,943 passed, 0 failed, 22 ignored (3,965 total)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase T74 — Quality Infrastructure: Industry Best Practices (2026-03-04)
+
+### Summary
+Adopt 2025–2026 Rust ecosystem best practices: workspace lint centralization, cargo-semver-checks for API breakage detection, cargo-nextest for parallel test execution, Criterion bench-compare for PR regression detection, cargo-mutants for mutation testing, cargo-careful for UB detection beyond Miri, constant-time verification tests (dudect-style Welch's t-test for CCM/ChaCha20-Poly1305/GCM), and Dependabot fuzz directory coverage.
+
+### Part A: Workspace Lints Centralization
+- Root `Cargo.toml`: `[workspace.lints.clippy]` with 11 shared lint allows (cast_possible_truncation, cast_sign_loss, cast_possible_wrap, cast_lossless, new_without_default, module_name_repetitions, too_many_arguments, too_many_lines, similar_names, needless_range_loop, manual_range_contains)
+- All 9 crate `Cargo.toml` files: `[lints] workspace = true`
+- `hitls-crypto/src/lib.rs`: removed `clippy::new_without_default` from `#![allow(...)]` (now in workspace lints)
+
+### Part B: cargo-semver-checks CI Integration
+- `.github/workflows/ci.yml`: `semver` job (PR-only trigger, checks 7 library crates)
+
+### Part C: cargo-nextest Parallel Test Execution
+- `.config/nextest.toml`: default profile (no retries, 60s slow timeout) + ci profile (2 retries, fail-fast)
+- CI test job: `cargo nextest run` + `cargo test --doc` (nextest doesn't run doctests)
+
+### Part D: Criterion Benchmark Baselines
+- CI: `bench-compare` job (PR-only), base vs head with critcmp
+
+### Part E: cargo-mutants Mutation Testing
+- `.github/workflows/mutants.yml`: weekly scheduled workflow for hitls-bignum + hitls-utils
+- `mutants.toml`: exclude benches/fuzz/vectors, exclude unsafe/SIMD/intrinsics
+
+### Part F: cargo-careful UB Detection
+- CI: `careful` job testing hitls-bignum and hitls-crypto (aes,sha2,modes,hmac) with nightly cargo-careful
+
+### Part G: Constant-Time Verification Tests
+- `crates/hitls-crypto/tests/ct_verify.rs`: 3 dudect-style Welch's t-test timing tests (#[ignore])
+  - ChaCha20-Poly1305 tag verification constant-time
+  - AES-CCM tag verification constant-time
+  - AES-GCM ciphertext content independence
+
+### Part H: Dependabot Configuration
+- `.github/dependabot.yml`: added `/fuzz` cargo ecosystem entry + `open-pull-requests-limit: 5`
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `Cargo.toml` (root) | Modified | +[workspace.lints.clippy] (11 shared lints) |
+| `crates/hitls-types/Cargo.toml` | Modified | +[lints] workspace=true |
+| `crates/hitls-utils/Cargo.toml` | Modified | +[lints] workspace=true |
+| `crates/hitls-bignum/Cargo.toml` | Modified | +[lints] workspace=true |
+| `crates/hitls-crypto/Cargo.toml` | Modified | +[lints] workspace=true |
+| `crates/hitls-tls/Cargo.toml` | Modified | +[lints] workspace=true |
+| `crates/hitls-pki/Cargo.toml` | Modified | +[lints] workspace=true |
+| `crates/hitls-auth/Cargo.toml` | Modified | +[lints] workspace=true |
+| `crates/hitls-cli/Cargo.toml` | Modified | +[lints] workspace=true |
+| `tests/interop/Cargo.toml` | Modified | +[lints] workspace=true |
+| `crates/hitls-crypto/src/lib.rs` | Modified | Removed clippy::new_without_default (now in workspace) |
+| `.github/workflows/ci.yml` | Modified | +nextest in test job, +semver/bench-compare/careful jobs |
+| `.github/workflows/mutants.yml` | New | Weekly cargo-mutants workflow |
+| `.config/nextest.toml` | New | nextest configuration (default + ci profiles) |
+| `mutants.toml` | New | cargo-mutants exclusion config |
+| `crates/hitls-crypto/tests/ct_verify.rs` | New | 3 constant-time verification tests (#[ignore]) |
+| `.github/dependabot.yml` | Modified | +fuzz directory entry, +open-pull-requests-limit |
+
+### Test Count (Post T74)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1429 (5 ignored) |
+| hitls-tls | 1434 |
+| hitls-pki | 426 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 47 |
+| hitls-cli | 161 (5 ignored) |
+| hitls-integration-tests | 261 (14 ignored) |
+| **Total** | **3968 (25 ignored)** |
+
+### Build Status (Post T74)
+- `cargo test --workspace --all-features`: 3,965 passed, 0 failed, 25 ignored (3,968 total, +3 ignored ct_verify tests)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

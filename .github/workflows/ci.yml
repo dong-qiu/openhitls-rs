@@ -53,8 +53,10 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-features
-      - run: cargo test --workspace --no-default-features
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --workspace --all-features --profile ci
+      - run: cargo test --doc --workspace --all-features
+      - run: cargo nextest run --workspace --no-default-features --profile ci
 
   test-features:
     name: Test Feature Combinations
@@ -290,6 +292,48 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --all-features --no-run
+
+  semver:
+    name: Semver Check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: hitls-types,hitls-utils,hitls-bignum,hitls-crypto,hitls-tls,hitls-pki,hitls-auth
+
+  bench-compare:
+    name: Benchmark Comparison
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo bench --bench crypto_bench -- --save-baseline base
+      - uses: actions/checkout@v4
+      - run: cargo bench --bench crypto_bench -- --save-baseline head
+      - name: Compare benchmarks
+        run: cargo install critcmp --locked && critcmp base head
+
+  careful:
+    name: cargo-careful (UB detection)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-careful
+        run: cargo install cargo-careful --locked
+      - run: cargo careful test -p hitls-bignum
+      - run: cargo careful test -p hitls-crypto --features aes,sha2,modes,hmac
 
   fuzz-run:
     name: Scheduled Fuzzing

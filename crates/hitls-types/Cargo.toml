@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Common types, error codes, algorithm identifiers, and constants for openHiTLS"
 
+[lints]
+workspace = true
+
 [dependencies]
 thiserror = "2"
 

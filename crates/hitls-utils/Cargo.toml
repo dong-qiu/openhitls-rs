@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Utility functions for openHiTLS: ASN.1, Base64, PEM, OID"
 
+[lints]
+workspace = true
+
 [dependencies]
 hitls-types = { path = "../hitls-types" }
 

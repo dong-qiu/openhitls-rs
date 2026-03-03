@@ -3923,3 +3923,20 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - Part B: TLS-CRL revocation checking wired into verify_server_certificate, +5 tests
 - Part C: AsyncTlsServerConnection::request_client_auth(), fix client PHA empty-cert Finished omission, +3 tests
 - All 3,965 tests pass, 22 ignored, 0 clippy/fmt warnings
+
+---
+
+## Phase T74 — Quality Infrastructure: Industry Best Practices (2026-03-04)
+
+**Prompt**: Implement T74 plan: workspace lints centralization, cargo-semver-checks CI, cargo-nextest, Criterion bench-compare, cargo-mutants, cargo-careful, constant-time verification tests, Dependabot fuzz dir.
+
+**Result**:
+- T74-A: [workspace.lints.clippy] in root Cargo.toml (11 shared lints), [lints] workspace=true in all 9 crates
+- T74-B: cargo-semver-checks CI job (PR-only, 7 library crates)
+- T74-C: cargo-nextest (.config/nextest.toml, CI test job updated)
+- T74-D: Criterion bench-compare CI job (PR-only, base vs head + critcmp)
+- T74-E: cargo-mutants weekly workflow (hitls-bignum + hitls-utils) + mutants.toml
+- T74-F: cargo-careful CI job (nightly, hitls-bignum + hitls-crypto)
+- T74-G: +3 ct_verify.rs constant-time tests (#[ignore]: ChaCha20-Poly1305/CCM/GCM)
+- T74-H: Dependabot +fuzz directory entry + open-pull-requests-limit
+- All 3,965 tests pass, 25 ignored (+3 ct_verify), 0 clippy/fmt warnings

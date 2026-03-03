@@ -1,0 +1,5 @@
+# cargo-mutants configuration
+# https://mutants.rs/config.html
+
+exclude_globs = ["**/benches/**", "**/fuzz/**", "**/tests/vectors/**"]
+exclude_re = ["unsafe fn", "cfg.*target_arch", "asm!", "simd", "intrinsics"]

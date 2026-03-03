@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Command-line tool for openHiTLS"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "hitls"
 path = "src/main.rs"

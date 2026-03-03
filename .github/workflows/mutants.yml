@@ -1,0 +1,31 @@
+name: Mutation Testing
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Monday 6am UTC
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mutants:
+    name: cargo-mutants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+      - name: Mutate hitls-bignum
+        run: cargo mutants -p hitls-bignum --timeout 120
+      - name: Mutate hitls-utils
+        run: cargo mutants -p hitls-utils --timeout 120
+      - name: Upload mutation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-results
+          path: mutants.out/
+          if-no-files-found: ignore

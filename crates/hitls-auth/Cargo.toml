@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Authentication protocols for openHiTLS"
 
+[lints]
+workspace = true
+
 [dependencies]
 hitls-types = { path = "../hitls-types" }
 hitls-utils = { path = "../hitls-utils" }
