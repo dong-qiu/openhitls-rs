@@ -39,5 +39,21 @@ component_management:
       name: CLI Tool
       paths:
         - crates/hitls-cli/src/**
+    - component_id: hitls-bignum
+      name: Big Number Arithmetic
+      paths:
+        - crates/hitls-bignum/src/**
+    - component_id: hitls-utils
+      name: Utilities
+      paths:
+        - crates/hitls-utils/src/**
+    - component_id: hitls-auth
+      name: Authentication
+      paths:
+        - crates/hitls-auth/src/**
+    - component_id: hitls-types
+      name: Shared Types
+      paths:
+        - crates/hitls-types/src/**
 
 comment: false
