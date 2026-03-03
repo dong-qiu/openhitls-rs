@@ -2692,9 +2692,17 @@ mod tests {
     fn test_default_security_level0_allows_all() {
         use super::{default_security_callback, security_op};
         // Level 0 = no restrictions
-        assert!(default_security_callback(security_op::CIPHER_SUITE, 0, 0x002F));
+        assert!(default_security_callback(
+            security_op::CIPHER_SUITE,
+            0,
+            0x002F
+        ));
         assert!(default_security_callback(security_op::VERSION, 0, 0x0301));
-        assert!(default_security_callback(security_op::NAMED_GROUP, 0, 0x001D));
+        assert!(default_security_callback(
+            security_op::NAMED_GROUP,
+            0,
+            0x001D
+        ));
     }
 
     #[test]

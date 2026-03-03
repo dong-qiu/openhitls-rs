@@ -649,7 +649,11 @@ mod tests {
             .build();
 
         let result = verify_server_certificate(&config, &[leaf_der]);
-        assert!(result.is_ok(), "expected Ok with revocation check off, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "expected Ok with revocation check off, got: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -665,7 +669,11 @@ mod tests {
             .build();
 
         let result = verify_server_certificate(&config, &[leaf_der]);
-        assert!(result.is_ok(), "expected soft-fail when no CRL, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "expected soft-fail when no CRL, got: {:?}",
+            result.err()
+        );
     }
 
     #[test]
