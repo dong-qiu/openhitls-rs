@@ -342,3 +342,8 @@ doc = false
 name = "fuzz_sm4_modes"
 path = "fuzz_targets/fuzz_sm4_modes.rs"
 doc = false
+
+[[bin]]
+name = "fuzz_aes_modes"
+path = "fuzz_targets/fuzz_aes_modes.rs"
+doc = false
