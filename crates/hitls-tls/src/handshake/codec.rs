@@ -524,15 +524,15 @@ pub fn decompress_certificate_body(
     use flate2::read::ZlibDecoder;
     use std::io::Read;
 
+    // Cap decompressed size at 16 MiB to prevent decompression bombs
+    const MAX_DECOMPRESSED: u32 = 16 * 1024 * 1024;
+
     if algorithm != CertCompressionAlgorithm::ZLIB {
         return Err(TlsError::HandshakeFailed(format!(
             "unsupported cert compression algorithm: {}",
             algorithm.0
         )));
     }
-
-    // Cap decompressed size at 16 MiB to prevent decompression bombs
-    const MAX_DECOMPRESSED: u32 = 16 * 1024 * 1024;
     if uncompressed_length > MAX_DECOMPRESSED {
         return Err(TlsError::HandshakeFailed(
             "certificate uncompressed_length too large".into(),

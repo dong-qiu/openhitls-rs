@@ -342,6 +342,8 @@ impl Dtls12ClientHandshake {
         raw_dtls_msg: &[u8],
         master_secret: &[u8],
     ) -> Result<Vec<u8>, TlsError> {
+        use subtle::ConstantTimeEq;
+
         if self.state != Dtls12ClientState::WaitFinished || !self.abbreviated {
             return Err(TlsError::HandshakeFailed(
                 "unexpected abbreviated Finished".into(),
@@ -368,7 +370,6 @@ impl Dtls12ClientHandshake {
         let expected =
             compute_verify_data(alg, master_secret, "server finished", &transcript_hash)?;
 
-        use subtle::ConstantTimeEq;
         if !bool::from(received_verify_data.ct_eq(&expected)) {
             return Err(TlsError::HandshakeFailed(
                 "server Finished verify_data mismatch".into(),
@@ -555,6 +556,8 @@ impl Dtls12ClientHandshake {
         raw_dtls_msg: &[u8],
         master_secret: &[u8],
     ) -> Result<(), TlsError> {
+        use subtle::ConstantTimeEq;
+
         if self.state != Dtls12ClientState::WaitFinished {
             return Err(TlsError::HandshakeFailed("unexpected Finished".into()));
         }
@@ -581,7 +584,6 @@ impl Dtls12ClientHandshake {
             &transcript_hash,
         )?;
 
-        use subtle::ConstantTimeEq;
         if received_verify_data.ct_eq(&expected).into() {
             self.transcript.update(&tls_msg)?;
             self.state = Dtls12ClientState::Connected;

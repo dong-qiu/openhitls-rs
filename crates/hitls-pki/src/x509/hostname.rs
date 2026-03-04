@@ -240,7 +240,7 @@ mod tests {
 
     fn san_dns(names: &[&str]) -> SubjectAltName {
         SubjectAltName {
-            dns_names: names.iter().map(|s| s.to_string()).collect(),
+            dns_names: names.iter().map(|s| (*s).to_string()).collect(),
             ip_addresses: vec![],
             email_addresses: vec![],
             uris: vec![],
@@ -258,7 +258,7 @@ mod tests {
 
     fn san_dns_and_ip(names: &[&str], addrs: &[Vec<u8>]) -> SubjectAltName {
         SubjectAltName {
-            dns_names: names.iter().map(|s| s.to_string()).collect(),
+            dns_names: names.iter().map(|s| (*s).to_string()).collect(),
             ip_addresses: addrs.to_vec(),
             email_addresses: vec![],
             uris: vec![],

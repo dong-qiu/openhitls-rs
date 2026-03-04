@@ -546,7 +546,7 @@ pub(crate) fn matvec_mul_into(
 
 /// Compute infinity norm of a polynomial.
 pub(crate) fn poly_chknorm(poly: &Poly, bound: i32) -> bool {
-    for &c in poly.iter() {
+    for &c in poly {
         let t = if c < 0 { -c } else { c };
         if t >= bound {
             return false;

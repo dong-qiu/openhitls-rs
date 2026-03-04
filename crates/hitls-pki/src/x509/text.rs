@@ -2,6 +2,8 @@
 //!
 //! Provides `to_text()` methods that produce output similar to `openssl x509 -text`.
 
+use std::fmt::Write;
+
 use super::{
     Certificate, CertificateRequest, CertificateRevocationList, DistinguishedName,
     SubjectPublicKeyInfo, X509Extension,
@@ -151,7 +153,7 @@ fn format_pubkey_info(spki: &SubjectPublicKeyInfo) -> String {
     // Try to detect key type for more detail
     if alg_name == "rsaEncryption" {
         let bit_len = spki.public_key.len().saturating_sub(1) * 8;
-        out.push_str(&format!("            RSA Public-Key: ({bit_len} bit)\n"));
+        writeln!(out, "            RSA Public-Key: ({bit_len} bit)").unwrap();
     } else if alg_name == "id-ecPublicKey" {
         let curve_name = spki
             .algorithm_params
@@ -160,17 +162,21 @@ fn format_pubkey_info(spki: &SubjectPublicKeyInfo) -> String {
             .and_then(|o| oid_to_name(&o).map(|s| s.to_string()))
             .unwrap_or_else(|| "unknown".to_string());
         let bit_len = (spki.public_key.len().saturating_sub(1)) * 4;
-        out.push_str(&format!(
-            "            EC Public-Key: ({bit_len} bit, {curve_name})\n"
-        ));
+        writeln!(
+            out,
+            "            EC Public-Key: ({bit_len} bit, {curve_name})"
+        )
+        .unwrap();
     } else if alg_name == "Ed25519" {
         out.push_str("            ED25519 Public-Key: (256 bit)\n");
     }
 
-    out.push_str(&format!(
-        "            pub:\n{}\n",
+    writeln!(
+        out,
+        "            pub:\n{}",
         hex_dump(&spki.public_key, 16)
-    ));
+    )
+    .unwrap();
     out
 }
 
@@ -216,18 +222,20 @@ fn format_extension(ext: &X509Extension) -> String {
             }
             [2, 5, 29, 14] => {
                 // SubjectKeyIdentifier
-                out.push_str(&format!(
-                    "            {}\n",
+                writeln!(
+                    out,
+                    "            {}",
                     hex_colon(parse_ski(&ext.value))
-                ));
+                )
+                .unwrap();
             }
             _ => {
                 // Raw hex for unrecognized extensions
-                out.push_str(&format!("            {}\n", hex_colon(&ext.value)));
+                writeln!(out, "            {}", hex_colon(&ext.value)).unwrap();
             }
         }
     } else {
-        out.push_str(&format!("            {}\n", hex_colon(&ext.value)));
+        writeln!(out, "            {}", hex_colon(&ext.value)).unwrap();
     }
     out
 }
@@ -291,30 +299,40 @@ impl Certificate {
         let mut out = String::new();
         out.push_str("Certificate:\n");
         out.push_str("    Data:\n");
-        out.push_str(&format!(
-            "        Version: {} (0x{:x})\n",
+        writeln!(
+            out,
+            "        Version: {} (0x{:x})",
             self.version + 1,
             self.version
-        ));
-        out.push_str(&format!(
-            "        Serial Number: {}\n",
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Serial Number: {}",
             hex_colon(&self.serial_number)
-        ));
-        out.push_str(&format!(
-            "    Signature Algorithm: {}\n",
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    Signature Algorithm: {}",
             oid_name(&self.signature_algorithm)
-        ));
-        out.push_str(&format!("    Issuer: {}\n", format_dn(&self.issuer)));
+        )
+        .unwrap();
+        writeln!(out, "    Issuer: {}", format_dn(&self.issuer)).unwrap();
         out.push_str("    Validity\n");
-        out.push_str(&format!(
-            "        Not Before: {}\n",
+        writeln!(
+            out,
+            "        Not Before: {}",
             format_time(self.not_before)
-        ));
-        out.push_str(&format!(
-            "        Not After : {}\n",
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Not After : {}",
             format_time(self.not_after)
-        ));
-        out.push_str(&format!("    Subject: {}\n", format_dn(&self.subject)));
+        )
+        .unwrap();
+        writeln!(out, "    Subject: {}", format_dn(&self.subject)).unwrap();
         out.push_str("    Subject Public Key Info:\n");
         out.push_str(&format_pubkey_info(&self.public_key));
 
@@ -325,14 +343,18 @@ impl Certificate {
             }
         }
 
-        out.push_str(&format!(
-            "    Signature Algorithm: {}\n",
+        writeln!(
+            out,
+            "    Signature Algorithm: {}",
             oid_name(&self.signature_algorithm)
-        ));
-        out.push_str(&format!(
-            "         {}\n",
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "         {}",
             hex_dump(&self.signature_value, 9).trim_start()
-        ));
+        )
+        .unwrap();
         out
     }
 }
@@ -346,22 +368,28 @@ impl CertificateRevocationList {
     pub fn to_text(&self) -> String {
         let mut out = String::new();
         out.push_str("Certificate Revocation List (CRL):\n");
-        out.push_str(&format!(
-            "    Version: {} (0x{:x})\n",
+        writeln!(
+            out,
+            "    Version: {} (0x{:x})",
             self.version,
             self.version.saturating_sub(1)
-        ));
-        out.push_str(&format!(
-            "    Signature Algorithm: {}\n",
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    Signature Algorithm: {}",
             oid_name(&self.signature_algorithm)
-        ));
-        out.push_str(&format!("    Issuer: {}\n", format_dn(&self.issuer)));
-        out.push_str(&format!(
-            "    Last Update: {}\n",
+        )
+        .unwrap();
+        writeln!(out, "    Issuer: {}", format_dn(&self.issuer)).unwrap();
+        writeln!(
+            out,
+            "    Last Update: {}",
             format_time(self.this_update)
-        ));
+        )
+        .unwrap();
         if let Some(next) = self.next_update {
-            out.push_str(&format!("    Next Update: {}\n", format_time(next)));
+            writeln!(out, "    Next Update: {}", format_time(next)).unwrap();
         }
 
         if !self.extensions.is_empty() {
@@ -376,28 +404,36 @@ impl CertificateRevocationList {
         } else {
             out.push_str("Revoked Certificates:\n");
             for rc in &self.revoked_certs {
-                out.push_str(&format!(
-                    "    Serial Number: {}\n",
+                writeln!(
+            out,
+            "    Serial Number: {}",
                     hex_colon(&rc.serial_number)
-                ));
-                out.push_str(&format!(
-                    "        Revocation Date: {}\n",
+                )
+                .unwrap();
+                writeln!(
+            out,
+            "        Revocation Date: {}",
                     format_time(rc.revocation_date)
-                ));
+                )
+                .unwrap();
                 if let Some(reason) = &rc.reason {
-                    out.push_str(&format!("        Reason: {reason:?}\n"));
+                    writeln!(out, "        Reason: {reason:?}").unwrap();
                 }
             }
         }
 
-        out.push_str(&format!(
-            "    Signature Algorithm: {}\n",
+        writeln!(
+            out,
+            "    Signature Algorithm: {}",
             oid_name(&self.signature_algorithm)
-        ));
-        out.push_str(&format!(
-            "         {}\n",
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "         {}",
             hex_dump(&self.signature_value, 9).trim_start()
-        ));
+        )
+        .unwrap();
         out
     }
 }
@@ -412,17 +448,19 @@ impl CertificateRequest {
         let mut out = String::new();
         out.push_str("Certificate Request:\n");
         out.push_str("    Data:\n");
-        out.push_str(&format!(
-            "        Version: {} (0x{:x})\n",
+        writeln!(
+            out,
+            "        Version: {} (0x{:x})",
             self.version + 1,
             self.version
-        ));
-        out.push_str(&format!("        Subject: {}\n", format_dn(&self.subject)));
+        )
+        .unwrap();
+        writeln!(out, "        Subject: {}", format_dn(&self.subject)).unwrap();
         out.push_str("        Subject Public Key Info:\n");
         // Indent one extra level for CSR
         let pubkey_text = format_pubkey_info(&self.public_key);
         for line in pubkey_text.lines() {
-            out.push_str(&format!("    {line}\n"));
+            writeln!(out, "    {line}").unwrap();
         }
 
         if !self.attributes.is_empty() {
@@ -432,14 +470,18 @@ impl CertificateRequest {
             }
         }
 
-        out.push_str(&format!(
-            "    Signature Algorithm: {}\n",
+        writeln!(
+            out,
+            "    Signature Algorithm: {}",
             oid_name(&self.signature_algorithm)
-        ));
-        out.push_str(&format!(
-            "         {}\n",
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "         {}",
             hex_dump(&self.signature_value, 9).trim_start()
-        ));
+        )
+        .unwrap();
         out
     }
 }

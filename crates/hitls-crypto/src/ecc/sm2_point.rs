@@ -340,14 +340,11 @@ pub(crate) fn sm2_scalar_mul_base(k: &BigNum) -> Sm2JacobianPoint {
     }
 
     let table = sm2_base_table();
-    let k_bytes = match k.to_bytes_be_padded(32) {
-        Ok(b) => b,
-        Err(_) => {
-            let gx = Sm2FieldElement::from_bytes(&SM2_GX);
-            let gy = Sm2FieldElement::from_bytes(&SM2_GY);
-            let g = Sm2JacobianPoint::from_affine(&gx, &gy);
-            return sm2_scalar_mul(k, &g);
-        }
+    let Ok(k_bytes) = k.to_bytes_be_padded(32) else {
+        let gx = Sm2FieldElement::from_bytes(&SM2_GX);
+        let gy = Sm2FieldElement::from_bytes(&SM2_GY);
+        let g = Sm2JacobianPoint::from_affine(&gx, &gy);
+        return sm2_scalar_mul(k, &g);
     };
 
     let mut result = Sm2JacobianPoint::infinity();

@@ -383,15 +383,12 @@ pub(crate) fn p256_scalar_mul_base(k: &BigNum) -> P256JacobianPoint {
     }
 
     let table = p256_base_table();
-    let k_bytes = match k.to_bytes_be_padded(32) {
-        Ok(b) => b,
-        Err(_) => {
-            // Fallback for oversized scalars (shouldn't happen in practice)
-            let gx = P256FieldElement::from_bytes(&P256_GX);
-            let gy = P256FieldElement::from_bytes(&P256_GY);
-            let g = P256JacobianPoint::from_affine(&gx, &gy);
-            return p256_scalar_mul(k, &g);
-        }
+    let Ok(k_bytes) = k.to_bytes_be_padded(32) else {
+        // Fallback for oversized scalars (shouldn't happen in practice)
+        let gx = P256FieldElement::from_bytes(&P256_GX);
+        let gy = P256FieldElement::from_bytes(&P256_GY);
+        let g = P256JacobianPoint::from_affine(&gx, &gy);
+        return p256_scalar_mul(k, &g);
     };
 
     let mut result = P256JacobianPoint::infinity();

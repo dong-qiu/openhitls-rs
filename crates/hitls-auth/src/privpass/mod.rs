@@ -298,6 +298,8 @@ pub fn verify_token(
     e: &[u8],
     challenge: &[u8],
 ) -> Result<bool, CryptoError> {
+    use subtle::ConstantTimeEq;
+
     if token.token_type != TokenType::PubliclyVerifiable {
         return Err(CryptoError::InvalidArg(""));
     }
@@ -351,7 +353,6 @@ pub fn verify_token(
     expected_padded[max_len - expected_bytes.len()..].copy_from_slice(&expected_bytes);
     recovered_padded[max_len - recovered_bytes.len()..].copy_from_slice(&recovered_bytes);
 
-    use subtle::ConstantTimeEq;
     let eq: bool = expected_padded.ct_eq(&recovered_padded).into();
     Ok(eq)
 }

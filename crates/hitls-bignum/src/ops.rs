@@ -212,7 +212,7 @@ impl BigNum {
 
         // Double the cross products
         let mut carry = 0u64;
-        for limb in result.iter_mut() {
+        for limb in &mut result {
             let shifted = DoubleLimb::from(*limb) * 2 + DoubleLimb::from(carry);
             *limb = shifted as Limb;
             carry = (shifted >> LIMB_BITS) as u64;

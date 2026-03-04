@@ -1592,11 +1592,11 @@ fn sign_certificate_verify12(
 /// Extracts the SubjectPublicKeyInfo, decodes the RSA modulus and exponent,
 /// and returns an `RsaPublicKey` suitable for encryption.
 fn parse_rsa_public_key_from_cert(cert_der: &[u8]) -> Result<RsaPublicKey, TlsError> {
+    use hitls_utils::asn1::Decoder;
+
     let cert = hitls_pki::x509::Certificate::from_der(cert_der)
         .map_err(|e| TlsError::HandshakeFailed(format!("cert parse: {e}")))?;
     let spki = &cert.public_key;
-
-    use hitls_utils::asn1::Decoder;
     let mut key_dec = Decoder::new(&spki.public_key);
     let mut seq = key_dec
         .read_sequence()

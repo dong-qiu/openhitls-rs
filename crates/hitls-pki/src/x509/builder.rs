@@ -1212,9 +1212,10 @@ mod tests {
 
     #[test]
     fn test_revoked_entry_certificate_issuer() {
+        use hitls_utils::asn1::Encoder;
+
         let (cert, sk) = make_rsa_ca();
         // Build a revoked entry with Certificate Issuer extension
-        use hitls_utils::asn1::Encoder;
         let mut gn_enc = Encoder::new();
         gn_enc.write_context_specific(6, false, b"http://ca.example.com");
         let mut seq_enc = Encoder::new();

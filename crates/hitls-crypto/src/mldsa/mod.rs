@@ -295,7 +295,7 @@ fn mldsa_keygen(params: &MlDsaParams) -> Result<(Vec<u8>, Vec<u8>), CryptoError>
 
     // s1_hat = NTT(s1)
     let mut s1_hat: Vec<Poly> = s1.clone();
-    for poly in s1_hat.iter_mut() {
+    for poly in &mut s1_hat {
         ntt::ntt(poly);
     }
 
@@ -342,13 +342,13 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
     let a_hat = expand_a(&rho, params.k, params.l);
 
     // NTT in-place — originals are never used in non-NTT form
-    for poly in s1_hat.iter_mut() {
+    for poly in &mut s1_hat {
         ntt::ntt(poly);
     }
-    for poly in s2_hat.iter_mut() {
+    for poly in &mut s2_hat {
         ntt::ntt(poly);
     }
-    for poly in t0_hat.iter_mut() {
+    for poly in &mut t0_hat {
         ntt::ntt(poly);
     }
 
@@ -396,9 +396,7 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
         }
 
         // w = INTT(A * y_hat) — use pre-allocated w_hat buffer
-        for p in w_hat.iter_mut() {
-            *p = [0i32; N];
-        }
+        w_hat.fill([0i32; N]);
         matvec_mul_into(&mut w_hat, &a_hat, &y_hat, k, l);
         for i in 0..k {
             ntt::invntt(&mut w_hat[i]);
@@ -490,7 +488,7 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
         }
 
         // Compute hints — reuse pre-allocated h buffer
-        for row in h.iter_mut() {
+        for row in &mut h {
             row.fill(false);
         }
         let mut hint_count = 0;
@@ -523,9 +521,8 @@ pub fn mldsa_verify(
 ) -> Result<bool, CryptoError> {
     let (rho, t1) = decode_pk(pk, params);
 
-    let (c_tilde, z, h) = match decode_sig(sig, params) {
-        Some(v) => v,
-        None => return Ok(false),
+    let Some((c_tilde, z, h)) = decode_sig(sig, params) else {
+        return Ok(false);
     };
 
     // Check ||z||∞ < gamma1 - beta
@@ -560,7 +557,7 @@ pub fn mldsa_verify(
 
     // z_hat = NTT(z)
     let mut z_hat: Vec<Poly> = z.clone();
-    for poly in z_hat.iter_mut() {
+    for poly in &mut z_hat {
         ntt::ntt(poly);
     }
 
@@ -700,7 +697,7 @@ fn mldsa_keygen_from_seed(
     }
 
     let mut s1_hat: Vec<Poly> = s1.clone();
-    for poly in s1_hat.iter_mut() {
+    for poly in &mut s1_hat {
         ntt::ntt(poly);
     }
 

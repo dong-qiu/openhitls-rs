@@ -696,13 +696,13 @@ impl Dtls12ServerHandshake {
     /// If a `cookie_gen_callback` is set in config, delegates to it.
     /// Otherwise uses HMAC-SHA256(cookie_secret, client_random || cipher_suites_hash).
     fn compute_cookie(&self, ch: &ClientHello) -> Result<Vec<u8>, TlsError> {
+        use hitls_crypto::hmac::Hmac;
+        use hitls_crypto::sha2::Sha256 as S256;
+
         // Use cookie_gen_callback if configured
         if let Some(ref cb) = self.config.cookie_gen_callback {
             return Ok(cb(&ch.random));
         }
-
-        use hitls_crypto::hmac::Hmac;
-        use hitls_crypto::sha2::Sha256 as S256;
 
         // Hash the cipher suite list for a compact representation
         let mut suite_bytes = Vec::with_capacity(ch.cipher_suites.len() * 2);
@@ -860,9 +860,8 @@ mod tests {
 
         let result = hs.process_client_hello(&ch_msg).unwrap();
         // Should get HVR, not flight
-        let hvr_result = match result {
-            Err(hvr) => hvr,
-            Ok(_) => panic!("expected HVR"),
+        let Err(hvr_result) = result else {
+            panic!("expected HVR");
         };
 
         let (h, _, _) = parse_dtls_handshake_header(&hvr_result.hello_verify_request).unwrap();
@@ -881,9 +880,8 @@ mod tests {
         let ch1 =
             build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
         let result = hs.process_client_hello(&ch1).unwrap();
-        let hvr_result = match result {
-            Err(hvr) => hvr,
-            Ok(_) => panic!("expected HVR"),
+        let Err(hvr_result) = result else {
+            panic!("expected HVR");
         };
 
         // Extract cookie from HVR

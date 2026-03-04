@@ -36,6 +36,7 @@ fn test_default_aes_sha2_hmac() {
 #[cfg(all(feature = "sm2", feature = "sm3", feature = "sm4"))]
 #[test]
 fn test_sm_algorithms() {
+    use hitls_crypto::sm2::Sm2KeyPair;
     use hitls_crypto::sm3::Sm3;
     use hitls_crypto::sm4::Sm4Key;
 
@@ -55,7 +56,6 @@ fn test_sm_algorithms() {
     assert_eq!(digest.len(), 32);
 
     // SM2 key generation
-    use hitls_crypto::sm2::Sm2KeyPair;
     let kp = Sm2KeyPair::generate().unwrap();
     let msg = b"sm2 smoke test";
     let sig = kp.sign(msg).unwrap();

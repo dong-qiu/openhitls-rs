@@ -193,15 +193,13 @@ impl Ed448KeyPair {
         }
 
         // Decode R
-        let r_point = match GeExtended448::from_bytes(&r_bytes) {
-            Ok(p) => p,
-            Err(_) => return Ok(false),
+        let Ok(r_point) = GeExtended448::from_bytes(&r_bytes) else {
+            return Ok(false);
         };
 
         // Decode public key A
-        let a_point = match GeExtended448::from_bytes(&self.public_key) {
-            Ok(p) => p,
-            Err(_) => return Ok(false),
+        let Ok(a_point) = GeExtended448::from_bytes(&self.public_key) else {
+            return Ok(false);
         };
 
         let dom4 = dom4_prefix(0, context);
@@ -331,13 +329,11 @@ impl Ed448KeyPair {
             return Ok(false);
         }
 
-        let r_point = match GeExtended448::from_bytes(&r_bytes) {
-            Ok(p) => p,
-            Err(_) => return Ok(false),
+        let Ok(r_point) = GeExtended448::from_bytes(&r_bytes) else {
+            return Ok(false);
         };
-        let a_point = match GeExtended448::from_bytes(&self.public_key) {
-            Ok(p) => p,
-            Err(_) => return Ok(false),
+        let Ok(a_point) = GeExtended448::from_bytes(&self.public_key) else {
+            return Ok(false);
         };
 
         let dom4 = dom4_prefix(1, context);

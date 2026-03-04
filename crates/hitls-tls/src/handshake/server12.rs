@@ -403,9 +403,8 @@ impl Tls12ServerHandshake {
         suite: CipherSuite,
         lifetime: u32,
     ) -> Result<Option<Vec<u8>>, TlsError> {
-        let ticket_key = match self.config.ticket_key.as_ref() {
-            Some(k) => k,
-            None => return Ok(None),
+        let Some(ticket_key) = self.config.ticket_key.as_ref() else {
+            return Ok(None);
         };
         if self.master_secret.is_empty() {
             return Err(TlsError::HandshakeFailed(
@@ -1211,13 +1210,10 @@ impl Tls12ServerHandshake {
                 let private_key = self.config.private_key.as_ref().ok_or_else(|| {
                     TlsError::HandshakeFailed("no server private key configured".into())
                 })?;
-                let (n, d, e, p, q) = match private_key {
-                    ServerPrivateKey::Rsa { n, d, e, p, q } => (n, d, e, p, q),
-                    _ => {
-                        return Err(TlsError::HandshakeFailed(
-                            "RSA key exchange requires RSA private key".into(),
-                        ))
-                    }
+                let ServerPrivateKey::Rsa { n, d, e, p, q } = private_key else {
+                    return Err(TlsError::HandshakeFailed(
+                        "RSA key exchange requires RSA private key".into(),
+                    ));
                 };
                 let rsa_key =
                     CryptoRsaPrivateKey::new(n, d, e, p, q).map_err(TlsError::CryptoError)?;
@@ -1756,6 +1752,13 @@ pub(crate) fn parse_dsa_params_der(
     params_der: &[u8],
 ) -> Result<hitls_crypto::dsa::DsaParams, TlsError> {
     use hitls_utils::asn1::Decoder;
+
+    // Strip leading zero bytes (unsigned big-endian representation)
+    fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
+        let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+        &bytes[start..]
+    }
+
     let mut dec = Decoder::new(params_der);
     let mut seq = dec
         .read_sequence()
@@ -1769,11 +1772,6 @@ pub(crate) fn parse_dsa_params_der(
     let g = seq
         .read_integer()
         .map_err(|e| TlsError::HandshakeFailed(format!("DSA g parse: {e}")))?;
-    // Strip leading zero bytes (unsigned big-endian representation)
-    fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
-        let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
-        &bytes[start..]
-    }
     let p = strip_leading_zeros(p);
     let q = strip_leading_zeros(q);
     let g = strip_leading_zeros(g);
@@ -1789,21 +1787,23 @@ pub(crate) fn verify_dsa_from_spki(
     digest: &[u8],
     signature: &[u8],
 ) -> Result<bool, TlsError> {
+    use hitls_utils::asn1::Decoder;
+
+    fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
+        let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+        &bytes[start..]
+    }
+
     let params_der = spki
         .algorithm_params
         .as_ref()
         .ok_or_else(|| TlsError::HandshakeFailed("DSA SPKI missing algorithm params".into()))?;
     let params = parse_dsa_params_der(params_der)?;
     // Parse the public key y from DER INTEGER
-    use hitls_utils::asn1::Decoder;
     let mut key_dec = Decoder::new(&spki.public_key);
     let y = key_dec
         .read_integer()
         .map_err(|e| TlsError::HandshakeFailed(format!("DSA public key parse: {e}")))?;
-    fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
-        let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
-        &bytes[start..]
-    }
     let y = strip_leading_zeros(y);
     let kp =
         hitls_crypto::dsa::DsaKeyPair::from_public_key(params, y).map_err(TlsError::CryptoError)?;

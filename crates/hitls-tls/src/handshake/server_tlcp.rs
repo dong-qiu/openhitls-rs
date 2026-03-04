@@ -253,13 +253,10 @@ impl TlcpServerHandshake {
                 .as_ref()
                 .ok_or_else(|| TlsError::HandshakeFailed("no enc private key".into()))?;
 
-            let private_key_bytes = match enc_key {
-                ServerPrivateKey::Sm2 { private_key } => private_key,
-                _ => {
-                    return Err(TlsError::HandshakeFailed(
-                        "enc private key must be SM2".into(),
-                    ))
-                }
+            let ServerPrivateKey::Sm2 { private_key: private_key_bytes } = enc_key else {
+                return Err(TlsError::HandshakeFailed(
+                    "enc private key must be SM2".into(),
+                ));
             };
 
             let kp = hitls_crypto::sm2::Sm2KeyPair::from_private_key(private_key_bytes)
@@ -326,6 +323,8 @@ impl TlcpServerHandshake {
         raw_msg: &[u8],
         master_secret: &[u8],
     ) -> Result<Vec<u8>, TlsError> {
+        use subtle::ConstantTimeEq;
+
         if self.state != TlcpServerState::WaitFinished {
             return Err(TlsError::HandshakeFailed("unexpected Finished".into()));
         }
@@ -348,7 +347,6 @@ impl TlcpServerHandshake {
         let expected =
             compute_verify_data(alg, master_secret, "client finished", &transcript_hash)?;
 
-        use subtle::ConstantTimeEq;
         if !bool::from(received_verify_data.ct_eq(&expected)) {
             return Err(TlsError::HandshakeFailed(
                 "client Finished verify_data mismatch".into(),

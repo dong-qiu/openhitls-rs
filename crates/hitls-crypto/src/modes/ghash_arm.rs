@@ -432,15 +432,15 @@ mod tests {
             let mut block = [0u8; 16];
             let mut init_state = [0u8; 16];
 
-            for b in h.iter_mut() {
+            for b in &mut h {
                 seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
                 *b = (seed >> 33) as u8;
             }
-            for b in block.iter_mut() {
+            for b in &mut block {
                 seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
                 *b = (seed >> 33) as u8;
             }
-            for b in init_state.iter_mut() {
+            for b in &mut init_state {
                 seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
                 *b = (seed >> 33) as u8;
             }

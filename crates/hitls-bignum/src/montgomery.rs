@@ -125,7 +125,7 @@ impl MontgomeryCtx {
         let b_len = b.len();
 
         // Clear accumulator
-        for x in scratch[..n + 2].iter_mut() {
+        for x in &mut scratch[..n + 2] {
             *x = 0;
         }
 

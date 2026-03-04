@@ -54,6 +54,8 @@ pub fn parse(input: &str) -> Result<Vec<PemBlock>, CryptoError> {
 
 /// Encode binary data as a PEM string with the given label.
 pub fn encode(label: &str, data: &[u8]) -> String {
+    use std::fmt::Write;
+
     let base64 = crate::base64::encode(data);
     let mut output = format!("{BEGIN_PREFIX}{label}{DASHES_SUFFIX}\n");
 
@@ -62,8 +64,7 @@ pub fn encode(label: &str, data: &[u8]) -> String {
         output.push_str(std::str::from_utf8(chunk).unwrap());
         output.push('\n');
     }
-
-    output.push_str(&format!("{END_PREFIX}{label}{DASHES_SUFFIX}\n"));
+    writeln!(output, "{END_PREFIX}{label}{DASHES_SUFFIX}").unwrap();
     output
 }
 

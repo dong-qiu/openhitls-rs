@@ -168,6 +168,13 @@ impl P256ScalarElement {
 
     /// Scalar field inversion via Fermat's little theorem: a^(n-2) mod n.
     pub fn inv(&self) -> Self {
+        // Bits 127-0: BCE6FAAD_A7179E84_F3B9CAC2_FC63254F
+        // Process as 32 nibbles (4 bits each) from MSB to LSB.
+        const NIBBLES: [u8; 32] = [
+            0xB, 0xC, 0xE, 0x6, 0xF, 0xA, 0xA, 0xD, 0xA, 0x7, 0x1, 0x7, 0x9, 0xE, 0x8, 0x4, 0xF,
+            0x3, 0xB, 0x9, 0xC, 0xA, 0xC, 0x2, 0xF, 0xC, 0x6, 0x3, 0x2, 0x5, 0x4, 0xF,
+        ];
+
         // Precompute x_k = a^(2^k - 1)
         let x1 = *self;
         let x2 = x1.sqr().mul(&x1);
@@ -228,8 +235,6 @@ impl P256ScalarElement {
         }
         e = e.mul(&x64);
 
-        // Bits 127-0: BCE6FAAD_A7179E84_F3B9CAC2_FC63254F
-        // Process as 32 nibbles (4 bits each) from MSB to LSB.
         let mut table = [Self::ZERO; 16];
         table[0] = Self::ONE;
         table[1] = x1;
@@ -238,11 +243,6 @@ impl P256ScalarElement {
             table[i] = table[i - 1].mul(&x1);
             i += 1;
         }
-
-        const NIBBLES: [u8; 32] = [
-            0xB, 0xC, 0xE, 0x6, 0xF, 0xA, 0xA, 0xD, 0xA, 0x7, 0x1, 0x7, 0x9, 0xE, 0x8, 0x4, 0xF,
-            0x3, 0xB, 0x9, 0xC, 0xA, 0xC, 0x2, 0xF, 0xC, 0x6, 0x3, 0x2, 0x5, 0x4, 0xF,
-        ];
 
         for &nib in &NIBBLES {
             for _ in 0..4 {

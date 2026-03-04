@@ -380,15 +380,12 @@ pub(crate) fn p384_scalar_mul_base(k: &BigNum) -> P384JacobianPoint {
     }
 
     let table = p384_base_table();
-    let k_bytes = match k.to_bytes_be_padded(48) {
-        Ok(b) => b,
-        Err(_) => {
-            // Fallback for oversized scalars (shouldn't happen in practice)
-            let gx = P384FieldElement::from_bytes(&P384_GX);
-            let gy = P384FieldElement::from_bytes(&P384_GY);
-            let g = P384JacobianPoint::from_affine(&gx, &gy);
-            return p384_scalar_mul(k, &g);
-        }
+    let Ok(k_bytes) = k.to_bytes_be_padded(48) else {
+        // Fallback for oversized scalars (shouldn't happen in practice)
+        let gx = P384FieldElement::from_bytes(&P384_GX);
+        let gy = P384FieldElement::from_bytes(&P384_GY);
+        let g = P384JacobianPoint::from_affine(&gx, &gy);
+        return p384_scalar_mul(k, &g);
     };
 
     let mut result = P384JacobianPoint::infinity();

@@ -1222,15 +1222,16 @@ mod tests {
 
     #[test]
     fn test_server_rejects_missing_supported_versions() {
-        let config = make_server_config();
-        let mut hs = ServerHandshake::new(config);
-
-        // Build a minimal ClientHello without supported_versions
         use crate::handshake::codec::encode_client_hello;
         use crate::handshake::codec::ClientHello;
         use crate::handshake::extensions_codec::{
             build_key_share_ch, build_signature_algorithms, build_supported_groups,
         };
+
+        let config = make_server_config();
+        let mut hs = ServerHandshake::new(config);
+
+        // Build a minimal ClientHello without supported_versions
 
         let ch = ClientHello {
             random: [0xAA; 32],
@@ -1553,9 +1554,8 @@ mod tests {
             NamedGroup::X25519,
             &[0x55; 32],
         );
-        let _actions = match hs.process_client_hello(&msg).unwrap() {
-            ClientHelloResult::Actions(a) => a,
-            _ => panic!("expected Actions"),
+        let ClientHelloResult::Actions(_actions) = hs.process_client_hello(&msg).unwrap() else {
+            panic!("expected Actions");
         };
         // After processing CH, server should be in WaitClientFinished state
         assert_eq!(hs.state(), HandshakeState::WaitClientFinished);

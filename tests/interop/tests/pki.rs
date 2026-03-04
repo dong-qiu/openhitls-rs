@@ -12,12 +12,9 @@ fn test_x509_parse_and_verify() {
     let ee_pem_path = format!("{cert_dir}inter_cert.pem");
 
     // Try to load test certs; skip if not available
-    let ca_pem = match std::fs::read_to_string(&ca_pem_path) {
-        Ok(p) => p,
-        Err(_) => {
-            eprintln!("Skipping X.509 test: test certs not found at {ca_pem_path}");
-            return;
-        }
+    let Ok(ca_pem) = std::fs::read_to_string(&ca_pem_path) else {
+        eprintln!("Skipping X.509 test: test certs not found at {ca_pem_path}");
+        return;
     };
     let ee_pem = std::fs::read_to_string(&ee_pem_path).unwrap();
 
@@ -43,12 +40,9 @@ fn test_x509_chain_verification() {
     let inter_pem_path = format!("{cert_dir}inter_cert.pem");
     let ee_pem_path = format!("{cert_dir}server_cert.pem");
 
-    let ca_pem = match std::fs::read_to_string(&ca_pem_path) {
-        Ok(p) => p,
-        Err(_) => {
-            eprintln!("Skipping chain test: test certs not found");
-            return;
-        }
+    let Ok(ca_pem) = std::fs::read_to_string(&ca_pem_path) else {
+        eprintln!("Skipping chain test: test certs not found");
+        return;
     };
     let inter_pem = std::fs::read_to_string(&inter_pem_path).unwrap();
     let ee_pem = std::fs::read_to_string(&ee_pem_path).unwrap();
@@ -161,6 +155,7 @@ fn test_tls12_ecdhe_ecdsa_full_handshake() {
     use hitls_tls::handshake::server12::Tls12ServerHandshake;
     use hitls_tls::record::{ContentType, RecordLayer};
     use hitls_tls::CipherSuite;
+    use zeroize::Zeroize;
 
     let ecdsa_private = vec![
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
@@ -350,7 +345,6 @@ fn test_tls12_ecdhe_ecdsa_full_handshake() {
     assert_eq!(plain, reply);
 
     // Cleanup
-    use zeroize::Zeroize;
     cflight.master_secret.zeroize();
     keys.master_secret.zeroize();
 }

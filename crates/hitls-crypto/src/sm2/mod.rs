@@ -261,6 +261,8 @@ impl Sm2KeyPair {
     ///
     /// Expects new format: C1 || C3 || C2.
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        use subtle::ConstantTimeEq;
+
         if self.private_key.is_zero() {
             return Err(CryptoError::EccInvalidPrivateKey);
         }
@@ -304,7 +306,6 @@ impl Sm2KeyPair {
         let u = hasher.finish()?;
 
         // Constant-time comparison
-        use subtle::ConstantTimeEq;
         if u.ct_eq(c3).into() {
             Ok(plaintext)
         } else {

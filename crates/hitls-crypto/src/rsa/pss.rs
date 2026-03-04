@@ -121,6 +121,8 @@ pub(crate) fn pss_verify_unpad_with_salt(
     em_bits: usize,
     salt_len: usize,
 ) -> Result<bool, CryptoError> {
+    use subtle::ConstantTimeEq;
+
     if digest.len() != H_LEN {
         return Err(CryptoError::InvalidArg(""));
     }
@@ -194,7 +196,6 @@ pub(crate) fn pss_verify_unpad_with_salt(
     let h_prime = hasher.finish()?;
 
     // Compare H == H' (constant-time)
-    use subtle::ConstantTimeEq;
     Ok(h.ct_eq(&h_prime).into())
 }
 

@@ -239,9 +239,8 @@ pub(crate) fn encrypt(
         kdf_input.extend_from_slice(&w_bytes);
         kdf_input.extend_from_slice(user_id);
 
-        let k = match hash::kdf(&kdf_input, k_total) {
-            Ok(k) => k,
-            Err(_) => continue, // KDF returned all zeros, retry
+        let Ok(k) = hash::kdf(&kdf_input, k_total) else {
+            continue; // KDF returned all zeros, retry
         };
 
         let k1 = &k[..klen];

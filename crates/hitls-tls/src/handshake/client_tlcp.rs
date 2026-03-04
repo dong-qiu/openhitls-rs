@@ -340,6 +340,8 @@ impl TlcpClientHandshake {
         raw_msg: &[u8],
         master_secret: &[u8],
     ) -> Result<(), TlsError> {
+        use subtle::ConstantTimeEq;
+
         if self.state != TlcpClientState::WaitFinished {
             return Err(TlsError::HandshakeFailed("unexpected Finished".into()));
         }
@@ -364,7 +366,6 @@ impl TlcpClientHandshake {
             &transcript_hash,
         )?;
 
-        use subtle::ConstantTimeEq;
         if received_verify_data.ct_eq(&expected).into() {
             self.transcript.update(raw_msg)?;
             self.state = TlcpClientState::Connected;

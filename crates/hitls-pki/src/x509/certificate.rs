@@ -732,6 +732,7 @@ mod tests {
     fn test_certificate_pem_roundtrip() {
         use super::super::builder::CertificateBuilder;
         use super::super::signing::SigningKey;
+        use hitls_utils::base64;
 
         let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
         let sk = SigningKey::Ed25519(kp);
@@ -741,7 +742,6 @@ mod tests {
         let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
 
         // DER → PEM → from_pem roundtrip
-        use hitls_utils::base64;
         let der = cert.to_der();
         let b64 = base64::encode(&der);
         let pem = format!(

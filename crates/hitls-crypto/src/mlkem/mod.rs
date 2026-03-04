@@ -120,10 +120,10 @@ fn kpke_keygen(d: &[u8; 32], params: &MlKemParams) -> Result<(Vec<u8>, Vec<u8>),
     }
 
     // NTT in-place — originals are never used in non-NTT form
-    for poly in s.iter_mut() {
+    for poly in &mut s {
         ntt::ntt(poly);
     }
-    for poly in e.iter_mut() {
+    for poly in &mut e {
         ntt::ntt(poly);
     }
     // s and e are now in NTT domain (s_hat, e_hat)
@@ -198,14 +198,14 @@ fn kpke_encrypt(
     let e2 = sample_cbd(&prf_buf[..prf_len2], params.eta2)?;
 
     // NTT r in-place — original r_vec is never used in non-NTT form
-    for poly in r_vec.iter_mut() {
+    for poly in &mut r_vec {
         ntt::ntt(poly);
     }
     // r_vec is now in NTT domain (r_hat)
 
     // u = INTT(A^T * r_hat) + e1
     let mut u = matvec_mul_t(&a_hat, &r_vec, k);
-    for poly in u.iter_mut() {
+    for poly in &mut u {
         ntt::invntt(poly);
     }
     for i in 0..k {
@@ -260,7 +260,7 @@ fn kpke_decrypt(dk: &[u8], ct: &[u8], params: &MlKemParams) -> [u8; 32] {
     let v = poly_decompress(&ct[k * du_bytes..k * du_bytes + dv_bytes], params.dv);
 
     // NTT(u)
-    for poly in u.iter_mut() {
+    for poly in &mut u {
         ntt::ntt(poly);
     }
 
@@ -349,6 +349,8 @@ impl MlKemKeyPair {
 
     /// Decapsulate: recover the shared secret from a ciphertext.
     pub fn decapsulate(&self, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        use subtle::ConstantTimeEq;
+
         let params = get_params(self.parameter_set)?;
 
         if ciphertext.len() != params.ct_len {
@@ -380,7 +382,6 @@ impl MlKemKeyPair {
         let ct_prime = kpke_encrypt(ek, &m_prime, &r_prime, &params)?;
 
         // Constant-time comparison
-        use subtle::ConstantTimeEq;
         if ciphertext.ct_eq(&ct_prime).unwrap_u8() == 1 {
             Ok(k_prime)
         } else {

@@ -127,7 +127,7 @@ pub(crate) fn poly_compress_into(r: &Poly, d: u32, out: &mut [u8]) {
             // Generic bit-by-bit fallback
             out[..N * d as usize / 8].fill(0);
             let mut bit_pos = 0usize;
-            for &coeff in r.iter() {
+            for &coeff in r {
                 let val = compress_coeff(coeff, d);
                 for j in 0..d as usize {
                     if val & (1 << j) != 0 {
@@ -222,7 +222,7 @@ pub(crate) fn poly_decompress(data: &[u8], d: u32) -> Poly {
         _ => {
             // Generic bit-by-bit fallback
             let mut bit_pos = 0usize;
-            for coeff in r.iter_mut() {
+            for coeff in &mut r {
                 let mut val = 0u16;
                 for j in 0..d as usize {
                     if data[bit_pos / 8] & (1 << (bit_pos % 8)) != 0 {
@@ -272,7 +272,7 @@ pub(crate) fn byte_encode_into(poly: &Poly, d: usize, out: &mut [u8]) {
             // Generic bit-by-bit fallback
             out[..N * d / 8].fill(0);
             let mut bit_pos = 0usize;
-            for &coeff in poly.iter() {
+            for &coeff in poly {
                 let val = normalize(coeff);
                 for j in 0..d {
                     if val & (1 << j) != 0 {
@@ -318,7 +318,7 @@ pub(crate) fn byte_decode(data: &[u8], d: usize) -> Poly {
         _ => {
             // Generic bit-by-bit fallback
             let mut bit_pos = 0usize;
-            for coeff in r.iter_mut() {
+            for coeff in &mut r {
                 let mut val = 0u16;
                 for j in 0..d {
                     if data[bit_pos / 8] & (1 << (bit_pos % 8)) != 0 {

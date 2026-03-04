@@ -434,9 +434,8 @@ fn wycheproof_chacha20_poly1305() {
             let tag = hex_decode(&tc.tag);
             let ct_tag: Vec<u8> = ct.iter().chain(tag.iter()).copied().collect();
 
-            let cipher = match ChaCha20Poly1305::new(&key) {
-                Ok(c) => c,
-                Err(_) => continue,
+            let Ok(cipher) = ChaCha20Poly1305::new(&key) else {
+                continue;
             };
 
             match tc.result.as_str() {
@@ -606,9 +605,8 @@ fn run_ecdsa_tests(
 
     for group in &file.test_groups {
         let pk_bytes = hex_decode(&group.public_key.uncompressed);
-        let kp = match EcdsaKeyPair::from_public_key(curve_id, &pk_bytes) {
-            Ok(kp) => kp,
-            Err(_) => continue,
+        let Ok(kp) = EcdsaKeyPair::from_public_key(curve_id, &pk_bytes) else {
+            continue;
         };
 
         for tc in &group.tests {
@@ -702,26 +700,20 @@ fn run_ecdh_tests(filename: &str, curve_id: hitls_types::EccCurveId) {
             let private_bytes = hex_decode(&tc.private);
             let expected_shared = hex_decode(&tc.shared);
 
-            let peer_point = match extract_ec_point_from_spki(&public_der) {
-                Some(p) => p,
-                None => {
-                    if tc.result == "valid" && !tc.flags.contains(&"CompressedPoint".to_string()) {
-                        panic!("tc {}: failed to extract EC point from SPKI", tc.tc_id);
-                    }
-                    tested += 1;
-                    continue;
+            let Some(peer_point) = extract_ec_point_from_spki(&public_der) else {
+                if tc.result == "valid" && !tc.flags.contains(&"CompressedPoint".to_string()) {
+                    panic!("tc {}: failed to extract EC point from SPKI", tc.tc_id);
                 }
+                tested += 1;
+                continue;
             };
 
-            let kp = match EcdhKeyPair::from_private_key(curve_id, &private_bytes) {
-                Ok(kp) => kp,
-                Err(_) => {
-                    if tc.result == "valid" {
-                        panic!("tc {}: failed to create ECDH key pair", tc.tc_id);
-                    }
-                    tested += 1;
-                    continue;
+            let Ok(kp) = EcdhKeyPair::from_private_key(curve_id, &private_bytes) else {
+                if tc.result == "valid" {
+                    panic!("tc {}: failed to create ECDH key pair", tc.tc_id);
                 }
+                tested += 1;
+                continue;
             };
 
             match tc.result.as_str() {
@@ -804,9 +796,8 @@ fn wycheproof_ed25519() {
 
     for group in &file.test_groups {
         let pk_bytes = hex_decode(&group.public_key.pk);
-        let kp = match Ed25519KeyPair::from_public_key(&pk_bytes) {
-            Ok(kp) => kp,
-            Err(_) => continue,
+        let Ok(kp) = Ed25519KeyPair::from_public_key(&pk_bytes) else {
+            continue;
         };
 
         for tc in &group.tests {
@@ -858,26 +849,20 @@ fn wycheproof_x25519() {
             let public_bytes = hex_decode(&tc.public);
             let expected = hex_decode(&tc.shared);
 
-            let sk = match X25519PrivateKey::new(&private_bytes) {
-                Ok(k) => k,
-                Err(_) => {
-                    if tc.result == "valid" {
-                        panic!("tc {}: failed to create X25519 private key", tc.tc_id);
-                    }
-                    tested += 1;
-                    continue;
+            let Ok(sk) = X25519PrivateKey::new(&private_bytes) else {
+                if tc.result == "valid" {
+                    panic!("tc {}: failed to create X25519 private key", tc.tc_id);
                 }
+                tested += 1;
+                continue;
             };
 
-            let pk = match X25519PublicKey::new(&public_bytes) {
-                Ok(k) => k,
-                Err(_) => {
-                    if tc.result == "valid" {
-                        panic!("tc {}: failed to create X25519 public key", tc.tc_id);
-                    }
-                    tested += 1;
-                    continue;
+            let Ok(pk) = X25519PublicKey::new(&public_bytes) else {
+                if tc.result == "valid" {
+                    panic!("tc {}: failed to create X25519 public key", tc.tc_id);
                 }
+                tested += 1;
+                continue;
             };
 
             match tc.result.as_str() {

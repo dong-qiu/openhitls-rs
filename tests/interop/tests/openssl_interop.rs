@@ -39,14 +39,14 @@ fn free_port() -> u16 {
 #[test]
 #[ignore]
 fn test_openssl_s_client_tls13() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection::TlsServerConnection;
+    use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+
     if !openssl_available() {
         eprintln!("openssl not found, skipping");
         return;
     }
-
-    use hitls_tls::config::TlsConfig;
-    use hitls_tls::connection::TlsServerConnection;
-    use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
 
     let (cert_chain, server_key) = hitls_integration_tests::make_ecdsa_server_identity();
 
@@ -127,15 +127,15 @@ fn test_openssl_s_client_tls13() {
 #[test]
 #[ignore]
 fn test_openssl_s_server_tls12() {
-    if !openssl_available() {
-        eprintln!("openssl not found, skipping");
-        return;
-    }
-
     use hitls_tls::config::TlsConfig;
     use hitls_tls::connection12::Tls12ClientConnection;
     use hitls_tls::crypt::{NamedGroup, SignatureScheme};
     use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
+
+    if !openssl_available() {
+        eprintln!("openssl not found, skipping");
+        return;
+    }
 
     let port = free_port();
 

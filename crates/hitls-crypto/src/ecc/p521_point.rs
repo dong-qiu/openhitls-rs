@@ -367,15 +367,12 @@ pub(crate) fn p521_scalar_mul_base(k: &BigNum) -> P521JacobianPoint {
     }
 
     let table = p521_base_table();
-    let k_bytes = match k.to_bytes_be_padded(COORD_BYTES) {
-        Ok(b) => b,
-        Err(_) => {
-            // Fallback for oversized scalars
-            let gx = P521FieldElement::from_bytes(&P521_GX);
-            let gy = P521FieldElement::from_bytes(&P521_GY);
-            let g = P521JacobianPoint::from_affine(&gx, &gy);
-            return p521_scalar_mul(k, &g);
-        }
+    let Ok(k_bytes) = k.to_bytes_be_padded(COORD_BYTES) else {
+        // Fallback for oversized scalars
+        let gx = P521FieldElement::from_bytes(&P521_GX);
+        let gy = P521FieldElement::from_bytes(&P521_GY);
+        let g = P521JacobianPoint::from_affine(&gx, &gy);
+        return p521_scalar_mul(k, &g);
     };
 
     let mut result = P521JacobianPoint::infinity();

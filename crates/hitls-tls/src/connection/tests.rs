@@ -119,12 +119,11 @@ fn test_full_handshake_state_machine_roundtrip() {
     let (ct, sh_plaintext, _) = client_rl.open_record(&sh_record).unwrap();
     assert_eq!(ct, ContentType::Handshake);
     let (_, _, sh_total) = parse_handshake_header(&sh_plaintext).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_plaintext[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions, got HRR"),
+    else {
+        panic!("expected Actions, got HRR");
     };
     assert_eq!(client_hs.state(), HandshakeState::WaitEncryptedExtensions);
 
@@ -247,12 +246,11 @@ fn test_full_handshake_with_app_data() {
     // Client side
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions, got HRR"),
+    else {
+        panic!("expected Actions, got HRR");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -492,12 +490,11 @@ fn do_test_handshake() -> (
 
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions, got HRR"),
+    else {
+        panic!("expected Actions, got HRR");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -843,9 +840,8 @@ fn test_hrr_group_mismatch() {
         .process_client_hello(&ch1_data[..ch1_total])
         .unwrap();
 
-    let hrr_actions = match result {
-        ClientHelloResult::HelloRetryRequest(a) => a,
-        ClientHelloResult::Actions(_) => panic!("expected HRR, got Actions"),
+    let ClientHelloResult::HelloRetryRequest(hrr_actions) = result else {
+        panic!("expected HRR, got Actions");
     };
 
     // --- Server sends HRR ---
@@ -860,9 +856,8 @@ fn test_hrr_group_mismatch() {
         .process_server_hello(&hrr_data[..hrr_total])
         .unwrap();
 
-    let retry = match sh_result {
-        ServerHelloResult::RetryNeeded(r) => r,
-        ServerHelloResult::Actions(_) => panic!("expected RetryNeeded"),
+    let ServerHelloResult::RetryNeeded(retry) = sh_result else {
+        panic!("expected RetryNeeded");
     };
     assert_eq!(retry.selected_group, NamedGroup::X25519);
 
@@ -906,12 +901,11 @@ fn test_hrr_group_mismatch() {
     // --- Client processes real ServerHello ---
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions on second SH"),
+    else {
+        panic!("expected Actions on second SH");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -1055,12 +1049,11 @@ fn test_secp256r1_handshake_no_hrr() {
 
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -1272,12 +1265,11 @@ fn do_test_handshake_with_tickets() -> (
 
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions, got HRR"),
+    else {
+        panic!("expected Actions, got HRR");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -1541,12 +1533,11 @@ fn test_session_resumption_roundtrip() {
     // Client processes SH + encrypted flight
     let (_, sh_data, _) = client_rl.open_record(&sh_rec).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_act = match client_hs
+    let ServerHelloResult::Actions(sh_act) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_act.suite, &sh_act.server_hs_keys)
@@ -1681,12 +1672,11 @@ fn test_session_resumption_roundtrip() {
     // Client processes SH
     let (_, sh2_data, _) = client_rl2.open_record(&sh2_rec).unwrap();
     let (_, _, sh2_total) = parse_handshake_header(&sh2_data).unwrap();
-    let sh_act2 = match client_hs2
+    let ServerHelloResult::Actions(sh_act2) = client_hs2
         .process_server_hello(&sh2_data[..sh2_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl2
         .activate_read_decryption(sh_act2.suite, &sh_act2.server_hs_keys)
@@ -1944,12 +1934,11 @@ fn do_initial_handshake_for_early_data(
 
     let (_, sh_data, _) = client_rl.open_record(&sh_rec).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_act = match client_hs
+    let crate::handshake::client::ServerHelloResult::Actions(sh_act) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        crate::handshake::client::ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_act.suite, &sh_act.server_hs_keys)
@@ -2113,12 +2102,11 @@ fn test_early_data_accepted() {
     // Client processes SH
     let (_, sh_data, _) = client_rl.open_record(&sh_rec).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_act = match client_hs
+    let crate::handshake::client::ServerHelloResult::Actions(sh_act) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        crate::handshake::client::ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_act.suite, &sh_act.server_hs_keys)
@@ -2291,12 +2279,11 @@ fn test_early_data_rejected() {
 
     let (_, sh_data, _) = client_rl.open_record(&sh_rec).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_act = match client_hs
+    let crate::handshake::client::ServerHelloResult::Actions(sh_act) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        crate::handshake::client::ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_act.suite, &sh_act.server_hs_keys)
@@ -2446,12 +2433,11 @@ fn test_early_data_multiple_records() {
 
     let (_, sh_data, _) = client_rl.open_record(&sh_rec).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_act = match client_hs
+    let crate::handshake::client::ServerHelloResult::Actions(sh_act) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        crate::handshake::client::ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_act.suite, &sh_act.server_hs_keys)
@@ -2736,12 +2722,11 @@ fn test_post_hs_auth_roundtrip() {
 
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -3156,12 +3141,11 @@ fn test_cert_compression_handshake() {
     let (ct, sh_plaintext, _) = client_rl.open_record(&sh_record).unwrap();
     assert_eq!(ct, ContentType::Handshake);
     let (_, _, sh_total) = parse_handshake_header(&sh_plaintext).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_plaintext[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions, got HRR"),
+    else {
+        panic!("expected Actions, got HRR");
     };
 
     // Activate client HS decryption/encryption
@@ -3786,12 +3770,11 @@ fn test_hybrid_kem_handshake() {
     // Client processes ServerHello
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -3918,12 +3901,11 @@ fn test_hybrid_kem_hrr_fallback() {
     // Client processes HRR → RetryNeeded with X25519
     let (_, hrr_data, _) = client_rl.open_record(&hrr_rec).unwrap();
     let (_, _, hrr_total) = parse_handshake_header(&hrr_data).unwrap();
-    let retry = match client_hs
+    let ServerHelloResult::RetryNeeded(retry) = client_hs
         .process_server_hello(&hrr_data[..hrr_total])
         .unwrap()
-    {
-        ServerHelloResult::RetryNeeded(r) => r,
-        _ => panic!("expected RetryNeeded"),
+    else {
+        panic!("expected RetryNeeded");
     };
     assert_eq!(retry.selected_group, NamedGroup::X25519);
 
@@ -3967,12 +3949,11 @@ fn test_hybrid_kem_hrr_fallback() {
     // Client processes real ServerHello
     let (_, sh_data, _) = client_rl.open_record(&sh_rec).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions on second SH"),
+    else {
+        panic!("expected Actions on second SH");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -4112,12 +4093,11 @@ fn test_tls13_record_size_limit() {
     // Client processes ServerHello
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -4255,12 +4235,11 @@ fn test_tls13_ocsp_stapling() {
     // Client processes ServerHello
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -4358,12 +4337,11 @@ fn test_tls13_sct() {
     // Client processes ServerHello
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_actions.suite, &sh_actions.server_hs_keys)
@@ -4478,12 +4456,11 @@ fn test_tls13_connection_info() {
     // Client ← SH
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
 
     client_rl
@@ -4607,12 +4584,11 @@ fn test_tls13_alpn_negotiation() {
     // Client ← SH
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
 
     client_rl
@@ -4719,12 +4695,11 @@ fn test_tls13_graceful_shutdown() {
     // Client processes SH
     let (_, sh_data, _) = client_rl.open_record(&sh_record).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_actions = match client_hs
+    let ServerHelloResult::Actions(sh_actions) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
 
     client_rl
@@ -4883,12 +4858,11 @@ fn test_tls13_client_session_cache_auto_store() {
 
     let (_, sh_data, _) = client_rl.open_record(&sh_rec).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_act = match client_hs
+    let ServerHelloResult::Actions(sh_act) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_act.suite, &sh_act.server_hs_keys)
@@ -5227,12 +5201,11 @@ fn test_write_fragments_large_data() {
 
     let (_, sh_data, _) = client_rl.open_record(&sh_rec).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_act = match client_hs
+    let ServerHelloResult::Actions(sh_act) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_act.suite, &sh_act.server_hs_keys)
@@ -5364,12 +5337,11 @@ fn test_write_exact_boundary() {
 
     let (_, sh_data, _) = client_rl.open_record(&sh_rec).unwrap();
     let (_, _, sh_total) = parse_handshake_header(&sh_data).unwrap();
-    let sh_act = match client_hs
+    let ServerHelloResult::Actions(sh_act) = client_hs
         .process_server_hello(&sh_data[..sh_total])
         .unwrap()
-    {
-        ServerHelloResult::Actions(a) => a,
-        _ => panic!("expected Actions"),
+    else {
+        panic!("expected Actions");
     };
     client_rl
         .activate_read_decryption(sh_act.suite, &sh_act.server_hs_keys)

@@ -164,15 +164,13 @@ impl Ed25519KeyPair {
         }
 
         // Decode R
-        let r_point = match GeExtended::from_bytes(&r_bytes) {
-            Ok(p) => p,
-            Err(_) => return Ok(false),
+        let Ok(r_point) = GeExtended::from_bytes(&r_bytes) else {
+            return Ok(false);
         };
 
         // Decode public key A
-        let a_point = match GeExtended::from_bytes(&self.public_key) {
-            Ok(p) => p,
-            Err(_) => return Ok(false),
+        let Ok(a_point) = GeExtended::from_bytes(&self.public_key) else {
+            return Ok(false);
         };
 
         // k = SHA-512(R || A || message) mod L

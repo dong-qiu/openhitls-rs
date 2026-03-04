@@ -652,9 +652,10 @@ impl ChaCha20Poly1305 {
     }
 
     fn compute_tag(&self, poly_key: &[u8; 32], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
-        let mut mac = Poly1305::new(poly_key);
         // Stack zero buffer for padding (max 15 bytes needed)
         const ZEROS: [u8; 15] = [0u8; 15];
+
+        let mut mac = Poly1305::new(poly_key);
 
         // AAD + padding
         mac.update(aad);

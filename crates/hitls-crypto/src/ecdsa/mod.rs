@@ -210,9 +210,8 @@ impl EcdsaKeyPair {
             let u2_se = P521ScalarElement::from_bignum(&r).mul(&w_se);
             (u1_se.to_bignum(), u2_se.to_bignum())
         } else {
-            let w = match s.mod_inv(n) {
-                Ok(w) => w,
-                Err(_) => return Ok(false),
+            let Ok(w) = s.mod_inv(n) else {
+                return Ok(false);
             };
             (e.mod_mul(&w, n)?, r.mod_mul(&w, n)?)
         };
