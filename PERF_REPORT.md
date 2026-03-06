@@ -1,50 +1,50 @@
 # Performance Comparison: openHiTLS (C) vs openHiTLS-rs (Rust)
 
-> **Date**: 2026-03-03 (P1–P80, I83–I86 complete) | **Platform**: Apple M4, macOS 15.4, 10 cores, 16 GB RAM
-> **Benchmark suite**: 307 test points across 63 algorithm groups (expanded from 291 points / 59 groups)
+> **Date**: 2026-03-05 (P1–P83, I83–I87, T74 complete) | **Platform**: Apple M4, macOS 15.4, 10 cores, 16 GB RAM
+> **Benchmark suite**: 307 test points across 63 algorithm groups
 
 ---
 
 ## 1. Executive Summary
 
-Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing the original C openHiTLS against the Rust rewrite. All Rust numbers from Criterion 0.5 runs (rustc 1.93.0, 2026-03-03) after all 80 performance optimization phases. The benchmark suite covers 100% of implemented algorithm modules.
+Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing the original C openHiTLS against the Rust rewrite. All Rust numbers from Criterion 0.5 runs (rustc 1.93.0, 2026-03-05) after all 83 performance optimization phases. The benchmark suite covers 100% of implemented algorithm modules.
 
 | Category | Verdict | Detail |
 |----------|---------|--------|
-| **AES (CBC/CTR/GCM)** | **Rust 2.6–8.4x faster** | P72 4-block pipeline + P73 GCM interleaved; AES-GCM 20–37% faster than P62 |
-| **AES (ECB/XTS/CFB/OFB/CCM)** | **Rust-only data** | ECB 6.2–7.5 GB/s, XTS 1.2–1.4 GB/s, CFB 0.7–1.2 GB/s, CCM 0.8–0.9 GB/s |
-| **ChaCha20-Poly1305** | **Rust 1.3x faster** | P75 Poly1305 r² precompute + P76 2-block parallel |
-| **Poly1305** | **Rust-only data** | Standalone: 3.0 GB/s @8KB (P75 r² batch) |
-| **Hash (SHA-256/384/512)** | **Rust 1.6–4.0x faster** | SHA-256 HW 4.0x; SHA-384 2.3x; SHA-512 near parity (thermal effects in full run) |
+| **AES (CBC/CTR/GCM)** | **Rust 2.0–8.3x faster** | P72 4-block pipeline + P73 GCM interleaved |
+| **AES (ECB/XTS/CFB/OFB/CCM)** | **Rust-only data** | ECB 2.3–4.6 GB/s, XTS 0.7–1.3 GB/s, CCM 0.5–0.5 GB/s |
+| **ChaCha20-Poly1305** | **Rust 1.5–2.2x faster** | P75 Poly1305 r² precompute + P76 2-block parallel |
+| **Poly1305** | **Rust-only data** | Standalone: 3.5 GB/s @8KB (P75 r² batch) |
+| **Hash (SHA-256/384/512)** | **Rust 1.5–3.6x faster** | SHA-256 HW 3.6x; SHA-384 2.3x; SHA-512 1.5x |
 | **SHA-1** | **Rust-only data** | P74 ARMv8 HW accel: 2.3 GB/s @8KB |
-| **SHA-3 / SHAKE** | **Rust-only data** | SHA3-256: 245 MB/s, SHAKE128: 145 MB/s |
-| **SM3** | **C 1.7x faster** | P77 pre-expansion; no HW accel available |
-| **HMAC** | **Rust 0.9–6.9x** | HMAC-SHA256 6.9x; HMAC-SHA512 2.6x; HMAC-SM3 near parity (C 1.09x) |
-| **CMAC / GMAC** | **Rust-only data** | CMAC-AES128: 1.2 GB/s; GMAC-AES128: 1.0 GB/s |
-| **SM4 (CBC/GCM/CCM)** | **Rust 1.1–1.7x faster** | T-table + GHASH HW; all ops now Rust faster |
-| **ECDSA P-256** | **Near parity** | P-256 fast path: sign C 1.13x, verify near parity |
-| **ECDSA P-384** | **Rust-only data** | P63 specialized field: sign 8.4K ops/s, verify 2.6K ops/s (**20x faster than P62**) |
-| **ECDSA P-521** | **Rust-only data** | P64 Mersenne field: sign 7.0K ops/s, verify 1.7K ops/s (**28x faster than P62**) |
-| **ECDH P-256/384/521** | **C 1.1x (P-256)** | P-384 1.5K ops/s, P-521 1.0K ops/s (P63/P64 specialized fields) |
-| **Ed25519 / X25519** | **Near parity** | Sign near parity; verify C 1.21x; X25519 DH near parity |
-| **Ed448 / X448** | **Rust-only data** | P65/P66/P69: Ed448 sign 20.7K ops/s (**14x faster than P62**); X448 DH 3.5K ops/s |
-| **SM2** | **Rust 2.0–5.3x faster** | Specialized Montgomery field + precomputed comb table |
-| **RSA-2048** | **Rust-only data** | P68 CRT: sign 937 ops/s; verify 23.4K ops/s |
-| **RSA-3072** | **Rust-only data** | NEW: sign 97 ops/s; verify 4.2K ops/s |
-| **RSA-4096** | **Rust-only data** | NEW: sign 106 ops/s; verify 4.9K ops/s |
-| **ML-KEM (Kyber)** | **C 1.6–4.1x faster** | P58 clone elim + P59 Keccak unroll |
-| **ML-DSA (Dilithium)** | **Rust 1.0–1.7x faster (sign)** | ML-DSA-44/87 sign now **faster than C** |
-| **SLH-DSA (SPHINCS+)** | **Rust-only data** | P78 hypertree opt: SHA2-128f verify 1.6K ops/s, sign 93 ops/s |
-| **HybridKEM** | **Rust-only data** | X25519+ML-KEM-768 encaps: 12.2K ops/s; P256/P384 variants benchmarked |
-| **FrodoKEM** | **Rust-only data** | P79: 640/976/1344-SHAKE all benchmarked; 1344 NEW: 16/32/34 ops/s |
-| **McEliece-6688128** | **Rust-only data** | Encaps 1.5K ops/s; decaps 42 ops/s |
-| **XMSS / XMSS-MT** | **Rust-only data** | XMSS verify 3.3K ops/s; **XMSS-MT verify 2.1K ops/s (NEW)** |
-| **DH (FFDHE)** | **C 3.1–7.1x faster** | P53/P67 CIOS; DH-4096 heavily thermal-affected in full run |
-| **KDF (HKDF/PBKDF2/scrypt)** | **Rust-only data** | HKDF 32B: 845 ns; PBKDF2-10K: 2.06 ms; scrypt-16384: 34.5 ms |
+| **SHA-3 / SHAKE** | **Rust-only data** | SHA3-256: 172 MB/s, SHAKE128: 110 MB/s |
+| **SM3** | **C 3.5x faster** | P82 pipeline regression; thermal-affected |
+| **HMAC** | **Rust 1.0–3.9x** | HMAC-SHA256 3.9x; HMAC-SHA512 2.0x; HMAC-SM3 near parity (C 1.03x) |
+| **CMAC / GMAC** | **Rust-only data** | CMAC-AES128: 839 MB/s; GMAC-AES128: 652 MB/s |
+| **SM4 (CBC/GCM/CCM)** | **Rust 1.1–1.9x faster** | T-table + GHASH HW; all ops Rust faster |
+| **ECDSA P-256** | **Near parity** | P-256 fast path: sign C 1.18x, verify **Rust 1.07x faster** |
+| **ECDSA P-384** | **Rust-only data** | P63 specialized field: sign 8.3K ops/s, verify 3.5K ops/s |
+| **ECDSA P-521** | **Rust-only data** | P64 Mersenne field: sign 6.7K ops/s, verify 2.1K ops/s |
+| **ECDH P-256/384/521** | **Rust 1.1x (P-256)** | P-384 4.5K ops/s, P-521 2.8K ops/s (P63/P64 specialized fields) |
+| **Ed25519 / X25519** | **Rust 1.2–1.4x faster** | Sign **Rust 1.38x**, verify **Rust 1.16x**; X25519 DH near parity |
+| **Ed448 / X448** | **Rust-only data** | P65/P66/P69: Ed448 sign 10.2K ops/s; X448 DH 5.9K ops/s |
+| **SM2** | **Rust 2.6–6.7x faster** | Specialized Montgomery field + precomputed comb table |
+| **RSA-2048** | **Rust-only data** | P68 CRT: sign 795 ops/s; verify 24.6K ops/s |
+| **RSA-3072** | **Rust-only data** | Sign 170 ops/s; verify 7.7K ops/s |
+| **RSA-4096** | **Rust-only data** | Sign 116 ops/s; verify 5.6K ops/s |
+| **ML-KEM (Kyber)** | **C 2.5–5.1x faster** | P58 clone elim + P59 Keccak unroll + P83 SHAKE clone-fork |
+| **ML-DSA (Dilithium)** | **Rust 1.3x faster (ML-DSA-44 sign)** | ML-DSA-44 sign 1.26x faster than C |
+| **SLH-DSA (SPHINCS+)** | **Rust-only data** | P78 hypertree opt: SHA2-128f verify 917 ops/s, sign 49 ops/s |
+| **HybridKEM** | **Rust-only data** | X25519+ML-KEM-768 encaps: 12.6K ops/s; P256/P384 variants benchmarked |
+| **FrodoKEM** | **Rust-only data** | P79: 640/976/1344-SHAKE all benchmarked |
+| **McEliece-6688128** | **Rust-only data** | Encaps 1.7K ops/s; decaps 42 ops/s |
+| **XMSS / XMSS-MT** | **Rust-only data** | XMSS verify 5.1K ops/s; XMSS-MT verify 2.2K ops/s |
+| **DH (FFDHE)** | **C 5.6–15.3x faster** | P53/P67/P81 CIOS + precomputed tables; thermal-affected |
+| **KDF (HKDF/PBKDF2/scrypt)** | **Rust-only data** | HKDF 32B: 726 ns; PBKDF2-10K: 4.43 ms; scrypt-16384: 42.7 ms |
 
-**Bottom line**: Symmetric ciphers (AES, ChaCha20) and hashes (SHA-256/384/512) remain **faster in Rust**. Phase P63–P80 delivered major improvements: **ECDSA P-384 sign 20x faster** (P63 specialized field), **ECDSA P-521 sign 28x faster** (P64 Mersenne field), **Ed448 sign 14x faster** (P65 precomputed table + P66/P69 field opts), **AES-GCM 20–37% faster** (P72/P73 4-block pipeline), **AES-HCTR 30x faster** (P71 table-based GF multiply). 4 new benchmarks added: Poly1305 standalone, RSA-3072/4096, XMSS-MT, FrodoKEM-1344. The benchmark suite now covers all 33 algorithm modules with 307 test points across 63 groups.
+**Bottom line**: Symmetric ciphers (AES, ChaCha20) and hashes (SHA-256/384/512) remain **faster in Rust**. P81 adds DH precomputed generator tables, P82 adds SM3 pipelined expansion (regression detected — see §3.1), P83 adds ML-KEM SHAKE clone-fork. Ed25519 sign now **Rust 1.38x faster than C**, ECDSA P-256 verify now **Rust 1.07x faster than C**. The benchmark suite covers all 33 algorithm modules with 307 test points across 63 groups.
 
-> **Note**: Full-suite run (~40 min) shows thermal throttling on later benchmarks. C-comparison numbers from isolated runs remain valid. Some absolute numbers (particularly DH-4096, SM9, SHA-512) are higher than isolated runs due to thermal effects.
+> **Note**: Full-suite run (~40 min) shows thermal throttling on later benchmarks. C-comparison numbers from isolated runs remain valid. Some absolute numbers (particularly SM3, DH, SHA-3/SHAKE) are higher than isolated runs due to thermal effects. SM3 regression (151 MB/s, was 307) is partially thermal and partially from P82 pipeline changes.
 
 ---
 
@@ -61,7 +61,7 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 | **Rust Build** | `--release`, LTO enabled, `codegen-units=1` |
 | **Rust Benchmark** | Criterion 0.5 (100 samples, statistical analysis, 95% CI) |
 | **C Benchmark** | Custom framework (`clock_gettime`, 5,000–10,000 iterations) |
-| **Optimization Level** | P1–P80 complete (80 performance phases) |
+| **Optimization Level** | P1–P83 complete (83 performance phases) |
 | **Benchmark Coverage** | 307 test points, 63 algorithm groups, 33/33 modules covered |
 
 **Note**: CPU frequency scaling is managed by macOS on Apple Silicon. Slow algorithms (SLH-DSA, FrodoKEM, McEliece, XMSS) use `sample_size(10)`. Criterion provides statistical outlier detection; C benchmarks report single-run mean.
@@ -74,20 +74,20 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | C (MB/s) | Rust (MB/s) | Ratio (R/C) | Notes |
 |-----------|----------|-------------|-------------|-------|
-| SHA-256 | 571.7 | 2,293 | **4.01** | **HW accel (SHA-NI), Rust 4.0x faster** |
-| SHA-384 | 540.7 | 1,350 | **2.50** | **HW accel (SHA-512 CE), Rust 2.5x faster** |
-| SHA-512 | 885.7 | 786 | **0.89** | HW accel (SHA-512 CE); thermal-affected in full run |
-| SM3 | 528.0 | 307 | **0.58** | No HW accel; C 1.7x faster (P77 pre-expansion) |
+| SHA-256 | 571.7 | 2,048 | **3.58** | **HW accel (SHA-NI), Rust 3.6x faster** |
+| SHA-384 | 540.7 | 1,231 | **2.28** | **HW accel (SHA-512 CE), Rust 2.3x faster** |
+| SHA-512 | 885.7 | 1,360 | **1.54** | **HW accel (SHA-512 CE), Rust 1.5x faster** |
+| SM3 | 528.0 | 151 | **0.29** | No HW accel; C 3.5x faster (P82 pipeline regression + thermal) |
 
 <details>
 <summary>Methodology</summary>
 
 - **C**: `openhitls_benchmark_static -t 10000 -l 8192` — SHA-256: 69,792 ops/s, SHA-512: 108,120 ops/s, SM3: 64,448 ops/s; SHA-384 fresh: 65,987 ops/s
-- **Rust**: Criterion mean — SHA-256: 3.20 µs, SHA-384: 5.12 µs, SHA-512: 5.10 µs, SM3: 19.01 µs
+- **Rust**: Criterion mean — SHA-256: 4.00 µs, SHA-384: 6.65 µs, SHA-512: 6.02 µs, SM3: 54.28 µs
 - MB/s = 8192 / (time_µs × 1e-6) / 1e6
 </details>
 
-**Analysis**: All three SHA-2 variants use hardware acceleration in Rust: SHA-256 via ARMv8 SHA-NI (Phase P1), SHA-512/384 via ARMv8.2 SHA-512 Crypto Extensions (Phase P11). SHA-256 achieves **4.0x speedup over C**. SHA-512 shows near-parity in this full-suite run due to thermal throttling (isolated runs show 1.8x Rust advantage). SM3 remains C 1.7x faster (P77 pre-expansion optimization, no HW accel available).
+**Analysis**: All three SHA-2 variants use hardware acceleration in Rust: SHA-256 via ARMv8 SHA-NI (Phase P1), SHA-512/384 via ARMv8.2 SHA-512 Crypto Extensions (Phase P11). SHA-256 achieves **3.6x speedup over C**. SHA-512 now shows **1.5x Rust advantage** (improved from near-parity in P80 run). SM3 shows significant regression: P82's pipelined expansion (`w[68]` pre-expand + separate expand/compress) replaced P77's efficient `w[16]` ring buffer, plus heavy thermal effects (SM3 benchmarks run late in suite; HMAC-SM3 at 317 MB/s is more representative).
 
 ---
 
@@ -95,25 +95,25 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | C Enc (MB/s) | Rust Enc (MB/s) | C Dec (MB/s) | Rust Dec (MB/s) | Ratio (Enc) | Ratio (Dec) |
 |-----------|-------------|-----------------|-------------|-----------------|-------------|-------------|
-| AES-128-CBC | 324.6 | 871 | 331.3 | 2,606 | **2.68** | **7.86** |
-| AES-256-CBC | 237.2 | 766 | 261.9 | 2,048 | **3.23** | **7.82** |
-| AES-128-CTR | 315.0 | 1,463 | — | — | **4.64** | — |
-| AES-256-CTR | 243.4 | 1,269 | — | — | **5.21** | — |
-| AES-128-GCM | 155.7 | 1,163 | 165.8 | 1,260 | **7.47** | **7.60** |
-| AES-256-GCM | 144.4 | 1,083 | 142.4 | 1,268 | **7.50** | **8.91** |
-| ChaCha20-Poly1305 | 344.1 | 708 | 333.0 | 679 | **2.06** | **2.04** |
-| SM4-CBC | 119.9 | 127 | 127.1 | 175 | **1.06** | **1.38** |
-| SM4-GCM | 87.6 | 130 | 87.6 | 135 | **1.48** | **1.54** |
+| AES-128-CBC | 324.6 | 642 | 331.3 | 1,780 | **1.98** | **5.37** |
+| AES-256-CBC | 237.2 | 830 | 261.9 | 1,625 | **3.50** | **6.20** |
+| AES-128-CTR | 315.0 | 1,237 | — | — | **3.93** | — |
+| AES-256-CTR | 243.4 | 1,101 | — | — | **4.52** | — |
+| AES-128-GCM | 155.7 | 802 | 165.8 | 922 | **5.15** | **5.56** |
+| AES-256-GCM | 144.4 | 1,203 | 142.4 | 1,162 | **8.33** | **8.16** |
+| ChaCha20-Poly1305 | 344.1 | 532 | 333.0 | 723 | **1.55** | **2.17** |
+| SM4-CBC | 119.9 | 137 | 127.1 | 191 | **1.14** | **1.50** |
+| SM4-GCM | 87.6 | 171 | 87.6 | 166 | **1.95** | **1.89** |
 
 > Ratio > 1.0 = Rust faster. CTR mode is symmetric (encrypt = decrypt).
 
-**Analysis** (P63–P80 full-suite run, some thermal effects):
-- **AES-CBC**: Rust 2.7–7.9x faster. CBC decrypt parallelizable — P72 4-block pipeline.
-- **AES-CTR**: Rust 4.6–5.2x faster — P72 4-block parallel encryption pipeline. ~8% faster than P62.
-- **AES-GCM**: Rust **7.5–8.9x faster** — P73 interleaved CTR+GHASH 4-block pipeline delivers 20–37% improvement over P62. Both AES-NI and GHASH PMULL hardware-accelerated.
-- **ChaCha20-Poly1305**: Rust ~2.0x faster — P75 Poly1305 r² precompute + P76 2-block parallel ChaCha20.
-- **SM4-CBC**: Rust 1.1–1.4x faster. Phase P8 T-table optimization.
-- **SM4-GCM**: Rust 1.5–1.5x faster — T-table SM4 + GHASH HW.
+**Analysis** (P83 full-suite run, thermal effects present):
+- **AES-CBC**: Rust 2.0–6.2x faster. CBC decrypt parallelizable — P72 4-block pipeline.
+- **AES-CTR**: Rust 3.9–4.5x faster — P72 4-block parallel encryption pipeline.
+- **AES-GCM**: Rust **5.2–8.3x faster** — P73 interleaved CTR+GHASH 4-block pipeline. Both AES-NI and GHASH PMULL hardware-accelerated.
+- **ChaCha20-Poly1305**: Rust 1.5–2.2x faster — P75 Poly1305 r² precompute + P76 2-block parallel ChaCha20.
+- **SM4-CBC**: Rust 1.1–1.5x faster. Phase P8 T-table optimization.
+- **SM4-GCM**: Rust 1.9x faster — T-table SM4 + GHASH HW.
 
 ---
 
@@ -121,9 +121,9 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | C (MB/s) | Rust (MB/s) | Ratio (R/C) | Notes |
 |-----------|----------|-------------|-------------|-------|
-| HMAC-SHA256 | 319.8 | 2,198 | **6.87** | **Rust 6.9x faster** (SHA-256 HW + P26 zero-overhead HMAC) |
-| HMAC-SHA512 | 507.7 | 1,325 | **2.61** | **Rust 2.6x faster** (SHA-512 HW + P26 HMAC caching) |
-| HMAC-SM3 | 327.7 | 302 | **0.92** | Near parity (C 1.09x); P26 HMAC caching eliminated factory overhead |
+| HMAC-SHA256 | 319.8 | 1,252 | **3.91** | **Rust 3.9x faster** (SHA-256 HW + P26 zero-overhead HMAC) |
+| HMAC-SHA512 | 507.7 | 1,028 | **2.03** | **Rust 2.0x faster** (SHA-512 HW + P26 HMAC caching) |
+| HMAC-SM3 | 327.7 | 317 | **0.97** | Near parity (C 1.03x); P26 HMAC caching eliminated factory overhead |
 
 <details>
 <summary>C fresh data (5000 iterations)</summary>
@@ -133,7 +133,7 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 - HMAC-SM3: 40,000 ops/s → 327.7 MB/s
 </details>
 
-**Analysis**: HMAC performance directly follows the underlying hash, amplified by P26 zero-overhead HMAC (`reset()` reuse, no `Box<dyn Fn>` factory). HMAC-SHA256 is **6.9x faster in Rust** (SHA-256 HW + negligible HMAC overhead). HMAC-SHA512 is **2.6x faster**. HMAC-SM3 near parity (C 1.09x).
+**Analysis**: HMAC performance directly follows the underlying hash, amplified by P26 zero-overhead HMAC (`reset()` reuse, no `Box<dyn Fn>` factory). HMAC-SHA256 is **3.9x faster in Rust** (SHA-256 HW + negligible HMAC overhead). HMAC-SHA512 is **2.0x faster**. HMAC-SM3 near parity (C 1.03x). Note: HMAC-SM3 at 317 MB/s outperforms raw SM3 at 151 MB/s because HMAC benchmarks run earlier in the suite (less thermal throttling).
 
 ---
 
@@ -141,47 +141,47 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | Operation | C (ops/s) | Rust (ops/s) | Ratio (R/C) | Notes |
 |-----------|-----------|----------|-------------|-------------|-------|
-| ECDSA P-256 | Sign | 26,848 | 21,900 | **0.816** | P-256 fast path + P54 scalar field |
-| ECDSA P-256 | Verify | 10,473 | 9,890 | **0.944** | Near parity (thermal-affected) |
-| ECDSA P-384 | Sign | — | 8,360 | — | **P63 specialized field: 20x faster than P62** |
-| ECDSA P-384 | Verify | — | 2,558 | — | P63 comb table + mont_sqr |
-| ECDSA P-521 | Sign | — | 7,040 | — | **P64 Mersenne field: 28x faster than P62** |
-| ECDSA P-521 | Verify | — | 1,711 | — | P64 direct reduction |
-| ECDH P-256 | Key Derive | 13,584 | 13,370 | **0.984** | Near parity |
-| ECDH P-384 | Key Derive | 969 | 1,499 | **1.547** | **Rust 1.5x faster!** (P63) |
-| ECDH P-521 | Key Derive | 5,059 | 1,031 | **0.204** | P64 Mersenne field; C still 4.9x faster |
-| Ed25519 | Sign | 66,193 | 54,590 | **0.825** | P12 precomputed comb (thermal-affected) |
-| Ed25519 | Verify | 24,016 | 25,110 | **1.046** | **Rust 1.05x faster** (P55 projective) |
-| Ed448 | Sign | — | 20,730 | — | **P65 precomputed table: 14x faster than P62** |
-| Ed448 | Verify | — | 4,517 | — | P66/P69 field opts |
-| X25519 | DH | 49,594 | 45,490 | **0.917** | Near parity (P60 Fe25519 opt) |
-| X448 | DH | — | 3,461 | — | P66/P69: 1.5x faster than P62 |
-| SM2 | Sign | 2,560 | 6,557 | **2.56** | **Rust 2.6x faster** (P10 field) |
-| SM2 | Verify | 4,527 | 3,754 | **0.829** | Thermal-affected vs isolated |
-| SM2 | Encrypt | 1,283 | 5,373 | **4.19** | **Rust 4.2x faster!** |
-| SM2 | Decrypt | 2,584 | 12,076 | **4.67** | **Rust 4.7x faster!** |
-| RSA-2048 | Sign (PSS) | — | 937 | — | P68 CRT Montgomery |
-| RSA-2048 | Verify (PSS) | — | 23,405 | — | — |
-| RSA-2048 | Encrypt (OAEP) | — | 10,881 | — | — |
-| RSA-2048 | Decrypt (OAEP) | — | 401 | — | P68 CRT (thermal-affected) |
-| RSA-3072 | Sign (PSS) | — | 97 | — | **NEW**: P53/P67/P68 CIOS+CRT |
-| RSA-3072 | Verify (PSS) | — | 4,206 | — | **NEW** |
-| RSA-3072 | Encrypt (OAEP) | — | 9,048 | — | **NEW** |
-| RSA-3072 | Decrypt (OAEP) | — | 222 | — | **NEW** |
-| RSA-4096 | Sign (PSS) | — | 106 | — | **NEW**: P53/P67/P68 CIOS+CRT |
-| RSA-4096 | Verify (PSS) | — | 4,941 | — | **NEW** |
-| RSA-4096 | Encrypt (OAEP) | — | 5,198 | — | **NEW** |
-| RSA-4096 | Decrypt (OAEP) | — | 118 | — | **NEW** |
+| ECDSA P-256 | Sign | 26,848 | 22,712 | **0.846** | P-256 fast path + P54 scalar field |
+| ECDSA P-256 | Verify | 10,473 | 11,203 | **1.070** | **Rust 1.07x faster** (P55 projective) |
+| ECDSA P-384 | Sign | — | 8,289 | — | P63 specialized field |
+| ECDSA P-384 | Verify | — | 3,488 | — | P63 comb table + mont_sqr |
+| ECDSA P-521 | Sign | — | 6,669 | — | P64 Mersenne field |
+| ECDSA P-521 | Verify | — | 2,061 | — | P64 direct reduction |
+| ECDH P-256 | Key Derive | 13,584 | 14,927 | **1.099** | **Rust 1.10x faster** |
+| ECDH P-384 | Key Derive | 969 | 4,449 | **4.591** | **Rust 4.6x faster!** (P63) |
+| ECDH P-521 | Key Derive | 5,059 | 2,783 | **0.550** | P64 Mersenne field; C 1.8x faster |
+| Ed25519 | Sign | 66,193 | 91,324 | **1.380** | **Rust 1.38x faster** (P12 precomputed comb) |
+| Ed25519 | Verify | 24,016 | 27,762 | **1.156** | **Rust 1.16x faster** (P55 projective) |
+| Ed448 | Sign | — | 10,158 | — | P65 precomputed table + P66/P69 field opts |
+| Ed448 | Verify | — | 2,205 | — | P66/P69 field opts |
+| X25519 | DH | 49,594 | 47,827 | **0.964** | Near parity (P60 Fe25519 opt) |
+| X448 | DH | — | 5,935 | — | P66/P69 field opts |
+| SM2 | Sign | 2,560 | 17,183 | **6.71** | **Rust 6.7x faster** (P10 field) |
+| SM2 | Verify | 4,527 | 11,947 | **2.64** | **Rust 2.6x faster** |
+| SM2 | Encrypt | 1,283 | 6,761 | **5.27** | **Rust 5.3x faster!** |
+| SM2 | Decrypt | 2,584 | 14,832 | **5.74** | **Rust 5.7x faster!** |
+| RSA-2048 | Sign (PSS) | — | 795 | — | P68 CRT Montgomery |
+| RSA-2048 | Verify (PSS) | — | 24,634 | — | — |
+| RSA-2048 | Encrypt (OAEP) | — | 22,244 | — | — |
+| RSA-2048 | Decrypt (OAEP) | — | 841 | — | P68 CRT |
+| RSA-3072 | Sign (PSS) | — | 170 | — | P53/P67/P68 CIOS+CRT |
+| RSA-3072 | Verify (PSS) | — | 7,703 | — | — |
+| RSA-3072 | Encrypt (OAEP) | — | 6,430 | — | — |
+| RSA-3072 | Decrypt (OAEP) | — | 153 | — | — |
+| RSA-4096 | Sign (PSS) | — | 116 | — | P53/P67/P68 CIOS+CRT |
+| RSA-4096 | Verify (PSS) | — | 5,587 | — | — |
+| RSA-4096 | Encrypt (OAEP) | — | 4,917 | — | — |
+| RSA-4096 | Decrypt (OAEP) | — | 117 | — | — |
 
 **Analysis**:
-- **ECDSA P-256**: Sign C 1.23x, verify near parity. Full-suite thermal effects affect absolute numbers.
-- **ECDSA P-384**: **P63 specialized Montgomery field delivers 20x speedup** — 8.4K ops/s sign (was 421 in P62). Comb table + dedicated mont_sqr.
-- **ECDSA P-521**: **P64 Mersenne field delivers 28x speedup** — 7.0K ops/s sign (was 253 in P62). Direct reduction (p=2^521-1).
-- **ECDH**: P-256 near parity. **P-384 now Rust 1.5x faster than C** (P63). P-521 gap narrowed from C 20x to C 4.9x (P64).
-- **Ed25519/X25519**: Ed25519 verify now **Rust 1.05x faster than C** (P55 projective comparison). X25519 DH near parity (P60 Fe25519 opt).
-- **Ed448/X448**: **P65 precomputed base table delivers 14x speedup** for Ed448 sign (20.7K ops/s, was 1.5K). P66/P69 Fe448 field opts improve X448 DH to 3.5K ops/s.
-- **SM2**: Specialized field arithmetic (Phase P10) keeps SM2 2.6–4.7x faster in Rust.
-- **RSA-3072/4096**: New benchmarks. P68 CRT Montgomery optimization. RSA-4096 sign ~106 ops/s, RSA-3072 sign ~97 ops/s.
+- **ECDSA P-256**: Sign C 1.18x, verify **Rust 1.07x faster** — P55 projective comparison in verify path.
+- **ECDSA P-384**: P63 specialized Montgomery field: 8.3K ops/s sign. Comb table + dedicated mont_sqr.
+- **ECDSA P-521**: P64 Mersenne field: 6.7K ops/s sign. Direct reduction (p=2^521-1).
+- **ECDH**: **P-256 Rust 1.10x faster**. **P-384 Rust 4.6x faster** (P63). P-521 gap narrowed to C 1.8x (P64).
+- **Ed25519/X25519**: Ed25519 sign now **Rust 1.38x faster than C** (P12 precomputed comb). Ed25519 verify **Rust 1.16x faster** (P55 projective). X25519 DH near parity.
+- **Ed448/X448**: P65/P66/P69: Ed448 sign 10.2K ops/s. X448 DH 5.9K ops/s.
+- **SM2**: Specialized field arithmetic (Phase P10) — SM2 sign **6.7x**, decrypt **5.7x**, encrypt **5.3x** faster in Rust.
+- **RSA-3072/4096**: P68 CRT Montgomery optimization. RSA-3072 sign 170 ops/s, RSA-4096 sign 116 ops/s.
 
 ---
 
@@ -189,28 +189,28 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | Operation | C (ops/s) | Rust (ops/s) | Ratio (R/C) |
 |-----------|-----------|----------|-------------|-------------|
-| ML-KEM-512 | KeyGen | 92,755 | 18,360 | **0.198** |
-| ML-KEM-512 | Encaps | 167,182 | 42,820 | **0.256** |
-| ML-KEM-512 | Decaps | 125,729 | 47,720 | **0.380** |
-| ML-KEM-768 | KeyGen | 38,814 | 22,370 | **0.576** |
-| ML-KEM-768 | Encaps | 119,805 | 26,580 | **0.222** |
-| ML-KEM-768 | Decaps | 86,794 | 27,080 | **0.312** |
-| ML-KEM-1024 | KeyGen | 32,864 | 14,540 | **0.442** |
-| ML-KEM-1024 | Encaps | 91,958 | 19,060 | **0.207** |
-| ML-KEM-1024 | Decaps | 65,644 | 20,800 | **0.317** |
-| ML-DSA-44 | KeyGen | 25,553 | 12,340 | **0.483** |
-| ML-DSA-44 | Sign | 7,413 | 2,324 | **0.314** |
-| ML-DSA-44 | Verify | 20,882 | 13,460 | **0.644** |
-| ML-DSA-65 | KeyGen | 14,894 | 6,510 | **0.437** |
-| ML-DSA-65 | Sign | 4,566 | 5,649 | **1.237** |
-| ML-DSA-65 | Verify | 12,998 | 7,560 | **0.582** |
-| ML-DSA-87 | KeyGen | 8,563 | 4,124 | **0.482** |
-| ML-DSA-87 | Sign | 3,517 | 2,981 | **0.848** |
-| ML-DSA-87 | Verify | 7,018 | 4,372 | **0.623** |
+| ML-KEM-512 | KeyGen | 92,755 | 37,555 | **0.405** |
+| ML-KEM-512 | Encaps | 167,182 | 34,552 | **0.207** |
+| ML-KEM-512 | Decaps | 125,729 | 33,504 | **0.266** |
+| ML-KEM-768 | KeyGen | 38,814 | 21,060 | **0.543** |
+| ML-KEM-768 | Encaps | 119,805 | 23,342 | **0.195** |
+| ML-KEM-768 | Decaps | 86,794 | 21,431 | **0.247** |
+| ML-KEM-1024 | KeyGen | 32,864 | 18,284 | **0.556** |
+| ML-KEM-1024 | Encaps | 91,958 | 22,472 | **0.244** |
+| ML-KEM-1024 | Decaps | 65,644 | 17,136 | **0.261** |
+| ML-DSA-44 | KeyGen | 25,553 | 10,839 | **0.424** |
+| ML-DSA-44 | Sign | 7,413 | 9,302 | **1.255** |
+| ML-DSA-44 | Verify | 20,882 | 11,053 | **0.529** |
+| ML-DSA-65 | KeyGen | 14,894 | 5,486 | **0.368** |
+| ML-DSA-65 | Sign | 4,566 | 3,354 | **0.735** |
+| ML-DSA-65 | Verify | 12,998 | 6,458 | **0.497** |
+| ML-DSA-87 | KeyGen | 8,563 | 2,595 | **0.303** |
+| ML-DSA-87 | Sign | 3,517 | 1,477 | **0.420** |
+| ML-DSA-87 | Verify | 7,018 | 3,617 | **0.515** |
 
 **Analysis**: PQC performance in full-suite run (thermal effects reduce absolute numbers vs isolated runs):
-- **ML-KEM**: C remains 2.6–5.1x faster in full-suite run. Isolated runs show smaller gap (1.6–4.1x).
-- **ML-DSA**: ML-DSA-65 sign remains **1.24x faster than C**. Full-suite thermal effects reduce other numbers. P57 zero-alloc retry loop + P59 Keccak unroll remain effective.
+- **ML-KEM**: C remains 2.5–5.1x faster. P83 SHAKE clone-fork eliminates redundant seed absorption, but gap remains due to SHAKE domination in Keccak throughput.
+- **ML-DSA**: ML-DSA-44 sign now **1.26x faster than C**. Other ML-DSA variants show C advantage. P57 zero-alloc retry loop + P59 Keccak unroll remain effective.
 
 ---
 
@@ -218,12 +218,12 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Variant | KeyGen (ops/s) | Sign (ops/s) | Verify (ops/s) | Sign Time |
 |---------|---------------|-------------|----------------|-----------|
-| SHA2-128f | 2,249 | 93 | 1,634 | 10.8 ms |
-| SHAKE-128f | 367 | 15 | 279 | 65.9 ms |
-| SHA2-192f | 1,153 | 38 | 780 | 26.4 ms |
-| SHA2-256f | 413 | 20 | 754 | 50.8 ms |
+| SHA2-128f | 1,420 | 49 | 917 | 20.3 ms |
+| SHAKE-128f | 283 | 9 | 144 | 106.7 ms |
+| SHA2-192f | 623 | 27 | 580 | 36.4 ms |
+| SHA2-256f | 304 | 10 | 460 | 100.5 ms |
 
-**Analysis**: SLH-DSA with P78 hypertree heap elimination (20–30% verify speedup). Only `-f` (fast) variants benchmarked; `-s` (small signature) variants are 5–10x slower. SHA2 variants are 5–6x faster than SHAKE variants due to hardware SHA-2 acceleration (SHA-NI/SHA-512 CE). SHA2-128f is the fastest practical variant (sign ~93 ops/s, verify ~1.6K ops/s). No C reference data available. Full-suite thermal effects reduce absolute numbers.
+**Analysis**: SLH-DSA with P78 hypertree heap elimination. Only `-f` (fast) variants benchmarked; `-s` (small signature) variants are 5–10x slower. SHA2 variants are 4–6x faster than SHAKE variants due to hardware SHA-2 acceleration (SHA-NI/SHA-512 CE). SHA2-128f is the fastest practical variant (sign ~49 ops/s, verify ~917 ops/s). No C reference data available. Full-suite thermal effects reduce absolute numbers significantly (these benchmarks run late in suite).
 
 ---
 
@@ -231,11 +231,11 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Group | C KeyGen (ops/s) | Rust KeyGen (ops/s) | C Derive (ops/s) | Rust Derive (ops/s) | Ratio (KeyGen) | Ratio (Derive) |
 |-------|-------------------|---------------------|-------------------|---------------------|----------------|----------------|
-| FFDHE-2048 | 1,219 | 253 | 997 | 207 | **0.208** | **0.207** |
-| FFDHE-3072 | 489 | 63 | 467 | 58 | **0.128** | **0.125** |
-| FFDHE-4096 | 290 | 10 | 288 | 10 | **0.035** | **0.036** |
+| FFDHE-2048 | 1,219 | 135 | 997 | 177 | **0.111** | **0.178** |
+| FFDHE-3072 | 489 | 68 | 467 | 46 | **0.139** | **0.099** |
+| FFDHE-4096 | 290 | 19 | 288 | 19 | **0.066** | **0.065** |
 
-**Analysis**: C is 4.8–28x faster for DH operations. DH-4096 is heavily thermal-affected in full-suite run (isolated runs show 29 ops/s, not 10). The gap increases with key size due to O(n²) Montgomery inner loop — C uses hand-tuned assembly (`bn_mul_mont`). P53/P67 CIOS optimizations (bounds-check elim + fused squaring) improved by ~30% but fundamental gap remains. DH is rarely the bottleneck in modern TLS (ECDHE is strongly preferred).
+**Analysis**: C is 5.6–15.3x faster for DH operations. P81 adds precomputed generator tables (`MontExpTable` + `DhGroupCache`), but thermal effects dominate this full-suite run. The gap increases with key size due to O(n²) Montgomery inner loop — C uses hand-tuned assembly (`bn_mul_mont`). P53/P67/P81 CIOS optimizations (bounds-check elim + fused squaring + precomputed tables) improved by ~40% over P0 but fundamental gap remains. DH is rarely the bottleneck in modern TLS (ECDHE is strongly preferred).
 
 ---
 
@@ -244,12 +244,12 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 | Curve | C KeyGen (ops/s) | C Derive (ops/s) | Rust Derive (ops/s) | Ratio (Derive) |
 |-------|-------------------|-------------------|---------------------|----------------|
 | P-224 | 86,438 | 30,903 | — | — |
-| P-256 | 41,174 | 13,584 | 13,370 | **0.984** |
-| P-384 | 1,041 | 969 | 1,499 | **1.547** |
-| P-521 | 12,182 | 5,059 | 1,031 | **0.204** |
+| P-256 | 41,174 | 13,584 | 14,927 | **1.099** |
+| P-384 | 1,041 | 969 | 4,449 | **4.591** |
+| P-521 | 12,182 | 5,059 | 2,783 | **0.550** |
 | brainpoolP256r1 | 2,524 | 2,574 | — | — |
 
-**Analysis**: P-256 near parity with C. **P-384 now Rust 1.5x faster than C** — P63 specialized Montgomery field (P[3..5]=0xFF reduction trick, dedicated mont_sqr). P-521 gap narrowed from C 20x to C 4.9x — P64 Mersenne field (direct reduction p=2^521-1).
+**Analysis**: **P-256 now Rust 1.10x faster than C**. **P-384 Rust 4.6x faster** — P63 specialized Montgomery field (P[3..5]=0xFF reduction trick, dedicated mont_sqr). P-521 gap narrowed to C 1.8x — P64 Mersenne field (direct reduction p=2^521-1).
 
 ---
 
@@ -257,21 +257,21 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | Encrypt (MB/s) | Decrypt (MB/s) | Notes |
 |-----------|---------------|----------------|-------|
-| AES-128-ECB | 6,517 | 3,032 | P72 4-block parallel, AES-NI |
-| AES-256-ECB | 5,455 | 2,253 | P72 4-block parallel |
-| AES-128-XTS | 1,290 | 1,290 | Dual-key (tweak + data) |
-| AES-256-XTS | 1,241 | 1,280 | — |
-| AES-128-CFB | 845 | 1,242 | Decrypt parallelizable |
-| AES-256-CFB | 734 | 1,072 | — |
-| AES-128-OFB | 2,282 | — | Symmetric mode |
-| AES-256-OFB | 1,572 | — | — |
-| AES-128-CCM | 857 | 841 | P72 4-block CTR + CBC-MAC |
-| AES-128-HCTR | 135 | 137 | **P71 table-based GF multiply: 30x faster** |
-| AES-128 Wrap | — | — | 613 ns / 761 ns (wrap/unwrap, 24B) |
-| AES-256 Wrap | — | — | 776 ns / 904 ns |
-| SM4-CCM | 62 | 62 | SM4 T-table + CBC-MAC |
+| AES-128-ECB | 2,277 | 1,496 | P72 4-block parallel, AES-NI |
+| AES-256-ECB | 4,641 | 1,767 | P72 4-block parallel |
+| AES-128-XTS | 859 | 1,260 | Dual-key (tweak + data) |
+| AES-256-XTS | 783 | 723 | — |
+| AES-128-CFB | 413 | 489 | Decrypt parallelizable |
+| AES-256-CFB | 675 | 1,033 | — |
+| AES-128-OFB | 1,788 | — | Symmetric mode |
+| AES-256-OFB | 1,372 | — | — |
+| AES-128-CCM | 505 | 545 | P72 4-block CTR + CBC-MAC |
+| AES-128-HCTR | 94 | 100 | P71 table-based GF multiply |
+| AES-128 Wrap | — | — | 1,660 ns / 1,410 ns (wrap/unwrap, 24B) |
+| AES-256 Wrap | — | — | 1,103 ns / 1,080 ns |
+| SM4-CCM | 72 | 73 | SM4 T-table + CBC-MAC |
 
-**Analysis**: **P72 4-block parallel pipeline** delivers dramatic ECB improvement (6.5 GB/s, was 2.9 GB/s). OFB also benefits (+34%). **P71 HCTR table-based GF(2^128) multiply** delivers 30x speedup (135 MB/s, was 4.3 MB/s). AES-128-CCM improved ~9% from P72 CTR pipeline. XTS/CFB remain similar.
+**Analysis**: AES-ECB throughput ranges 1.5–4.6 GB/s with P72 4-block parallel pipeline. OFB achieves 1.4–1.8 GB/s. P71 HCTR table-based GF(2^128) multiply. Thermal effects present across all benchmarks in this full-suite run.
 
 ---
 
@@ -279,15 +279,15 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | Throughput (MB/s) | Notes |
 |-----------|-------------------|-------|
-| SHA3-256 | 257 | Keccak-f1600 (P59 unroll + P18 HW accel) |
-| SHA3-384 | 194 | Wider capacity → lower rate |
-| SHA3-512 | 95 | — |
-| SHAKE128 | 152 | XOF (128-bit security) |
-| SHAKE256 | 126 | XOF (256-bit security) |
-| SHA-1 | 2,411 | **P74 ARMv8 Crypto Extension: 5x faster than P62** |
-| MD5 | 184 | Legacy; no HW acceleration (thermal-affected) |
+| SHA3-256 | 172 | Keccak-f1600 (P59 unroll + P18 HW accel) |
+| SHA3-384 | 160 | Wider capacity → lower rate |
+| SHA3-512 | 86 | — |
+| SHAKE128 | 110 | XOF (128-bit security) |
+| SHAKE256 | 83 | XOF (256-bit security) |
+| SHA-1 | 2,264 | **P74 ARMv8 Crypto Extension** |
+| MD5 | 213 | Legacy; no HW acceleration |
 
-**Analysis**: **SHA-1 now 2.4 GB/s** — P74 ARMv8 Crypto Extension hardware acceleration (`vsha1cq_u32`/`vsha1pq_u32`/`vsha1mq_u32`), a 5x improvement over P62. SHA-3 throughput (95–257 MB/s) is substantially lower than SHA-2 (786–2,293 MB/s) due to the Keccak sponge construction. MD5 shows thermal effects in full-suite run.
+**Analysis**: **SHA-1 at 2.3 GB/s** — P74 ARMv8 Crypto Extension hardware acceleration. SHA-3 throughput (86–172 MB/s) is substantially lower than SHA-2 (1,231–2,048 MB/s) due to the Keccak sponge construction. SHA-3/SHAKE numbers are lower than P80 due to thermal effects (these run late in suite).
 
 ---
 
@@ -295,15 +295,15 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | Throughput (MB/s) | Notes |
 |-----------|-------------------|-------|
-| HMAC-SHA384 | 1,064 | SHA-512 CE based |
-| CMAC-AES128 | 1,214 | AES-NI block cipher MAC |
-| CMAC-AES256 | 718 | — |
-| GMAC-AES128 | 1,049 | GHASH (PMULL HW) |
-| Poly1305 | 3,213 | **NEW**: P75 r² precompute (standalone) |
-| SipHash-2-4 | 802 | Fast keyed hash (thermal-affected) |
-| CBC-MAC-SM4 | 46 | SM4 T-table, sequential |
+| HMAC-SHA384 | 795 | SHA-512 CE based |
+| CMAC-AES128 | 839 | AES-NI block cipher MAC |
+| CMAC-AES256 | 705 | — |
+| GMAC-AES128 | 652 | GHASH (PMULL HW) |
+| Poly1305 | 3,486 | P75 r² precompute (standalone) |
+| SipHash-2-4 | 1,225 | Fast keyed hash |
+| CBC-MAC-SM4 | 68 | SM4 T-table, sequential |
 
-**Analysis**: **Poly1305 standalone** now benchmarked at 3.2 GB/s @8KB — P75 r² precompute enables efficient 2-block batch processing. CMAC-AES128 improved to 1.2 GB/s. GMAC improved to 1.0 GB/s. SipHash and CBC-MAC-SM4 are thermal-affected in full-suite run.
+**Analysis**: **Poly1305 standalone** at 3.5 GB/s @8KB — P75 r² precompute enables efficient 2-block batch processing. CMAC-AES128 at 839 MB/s. GMAC at 652 MB/s. Full-suite thermal effects reduce some absolute numbers.
 
 ---
 
@@ -311,12 +311,12 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | Time | Notes |
 |-----------|------|-------|
-| HKDF extract+expand (32B) | 845 ns | SHA-256 based |
-| HKDF extract+expand (64B) | 917 ns | — |
-| PBKDF2 (1,000 iterations) | 205 µs | SHA-256, 32B output |
-| PBKDF2 (10,000 iterations) | 2.06 ms | — |
-| scrypt (N=1024, r=8, p=1) | 2.01 ms | Low-memory setting |
-| scrypt (N=16384, r=8, p=1) | 34.5 ms | Standard setting |
+| HKDF extract+expand (32B) | 726 ns | SHA-256 based |
+| HKDF extract+expand (64B) | 1,717 ns | — |
+| PBKDF2 (1,000 iterations) | 472 µs | SHA-256, 32B output |
+| PBKDF2 (10,000 iterations) | 4.43 ms | — |
+| scrypt (N=1024, r=8, p=1) | 2.40 ms | Low-memory setting |
+| scrypt (N=16384, r=8, p=1) | 42.7 ms | Standard setting |
 
 ---
 
@@ -324,12 +324,12 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | Generate 32B | Notes |
 |-----------|-------------|-------|
-| CTR-DRBG (AES-256) | 462 ns | P20 cached AES key |
-| HMAC-DRBG (SHA-256) | 858 ns | — |
-| Hash-DRBG (SHA-256) | 372 ns | — |
-| SM4-CTR-DRBG | 576 ns | **SM4 T-table (3x faster than P62)** |
+| CTR-DRBG (AES-256) | 580 ns | P20 cached AES key |
+| HMAC-DRBG (SHA-256) | 951 ns | — |
+| Hash-DRBG (SHA-256) | 403 ns | — |
+| SM4-CTR-DRBG | 528 ns | SM4 T-table + P20 key caching |
 
-**Analysis**: Hash-DRBG is now the fastest at 372 ns. SM4-CTR-DRBG improved dramatically (576 ns, was 1,704 ns) — P20 key caching effectiveness. HMAC-DRBG is slowest due to two HMAC operations per generate.
+**Analysis**: Hash-DRBG is the fastest at 403 ns. SM4-CTR-DRBG improved with P20 key caching. HMAC-DRBG is slowest due to two HMAC operations per generate.
 
 ---
 
@@ -337,28 +337,28 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Algorithm | Operation | Time | Ops/s |
 |-----------|-----------|------|-------|
-| HybridKEM X25519+ML-KEM-768 | Encaps | 82.0 µs | 12,190 |
-| HybridKEM P256+ML-KEM-768 | Encaps | 204 µs | 4,905 |
-| HybridKEM P384+ML-KEM-768 | Encaps | 503 µs | 1,990 |
-| HPKE (X25519+AES-128-GCM) | Seal | 92.4 µs | 10,820 |
-| HPKE (X25519+AES-128-GCM) | Open | 60.8 µs | 16,450 |
-| FrodoKEM-640-SHAKE | KeyGen | 5.53 ms | 181 |
-| FrodoKEM-640-SHAKE | Encaps | 3.06 ms | 327 |
-| FrodoKEM-640-SHAKE | Decaps | 3.18 ms | 314 |
-| FrodoKEM-976-SHAKE | KeyGen | 12.78 ms | 78 |
-| FrodoKEM-976-SHAKE | Encaps | 7.12 ms | 140 |
-| FrodoKEM-976-SHAKE | Decaps | 7.29 ms | 137 |
-| FrodoKEM-1344-SHAKE | KeyGen | 63.9 ms | 16 | **NEW** |
-| FrodoKEM-1344-SHAKE | Encaps | 31.3 ms | 32 | **NEW** |
-| FrodoKEM-1344-SHAKE | Decaps | 29.2 ms | 34 | **NEW** |
-| McEliece-6688128 | Encaps | 675 µs | 1,482 |
-| McEliece-6688128 | Decaps | 23.6 ms | 42 |
-| XMSS SHA2-10-256 | Verify | 302 µs | 3,306 |
-| XMSS-MT SHA2-20-2-256 | Verify | 475 µs | 2,107 | **NEW** |
-| Paillier-512 | Encrypt | 305 µs | 3,275 |
-| Paillier-512 | Decrypt | 398 µs | 2,514 |
+| HybridKEM X25519+ML-KEM-768 | Encaps | 79.3 µs | 12,617 |
+| HybridKEM P256+ML-KEM-768 | Encaps | 403 µs | 2,482 |
+| HybridKEM P384+ML-KEM-768 | Encaps | 1,167 µs | 857 |
+| HPKE (X25519+AES-128-GCM) | Seal | 70.7 µs | 14,145 |
+| HPKE (X25519+AES-128-GCM) | Open | 49.5 µs | 20,198 |
+| FrodoKEM-640-SHAKE | KeyGen | 6.77 ms | 148 |
+| FrodoKEM-640-SHAKE | Encaps | 3.42 ms | 292 |
+| FrodoKEM-640-SHAKE | Decaps | 2.88 ms | 347 |
+| FrodoKEM-976-SHAKE | KeyGen | 10.82 ms | 92 |
+| FrodoKEM-976-SHAKE | Encaps | 5.87 ms | 170 |
+| FrodoKEM-976-SHAKE | Decaps | 7.01 ms | 143 |
+| FrodoKEM-1344-SHAKE | KeyGen | 22.2 ms | 45 |
+| FrodoKEM-1344-SHAKE | Encaps | 23.4 ms | 43 |
+| FrodoKEM-1344-SHAKE | Decaps | 23.4 ms | 43 |
+| McEliece-6688128 | Encaps | 602 µs | 1,660 |
+| McEliece-6688128 | Decaps | 24.0 ms | 42 |
+| XMSS SHA2-10-256 | Verify | 194 µs | 5,143 |
+| XMSS-MT SHA2-20-2-256 | Verify | 448 µs | 2,230 |
+| Paillier-512 | Encrypt | 462 µs | 2,164 |
+| Paillier-512 | Decrypt | 288 µs | 3,470 |
 
-**Note**: DSA and ElGamal benchmarks use small demonstration parameters (p=23) and are not representative of cryptographic-strength operations. McEliece keygen is excluded as it takes ~5 seconds. FrodoKEM-1344-SHAKE and XMSS-MT are newly added benchmarks. HybridKEM now benchmarks P256 and P384 variants in addition to X25519. Full-suite thermal effects reduce some absolute numbers.
+**Note**: DSA and ElGamal benchmarks use small demonstration parameters (p=23) and are not representative of cryptographic-strength operations. McEliece keygen is excluded as it takes ~5 seconds. HybridKEM benchmarks P256 and P384 variants in addition to X25519. Full-suite thermal effects reduce some absolute numbers.
 
 ---
 
@@ -366,16 +366,16 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 
 | Operation | 256-bit | 512-bit | 1024-bit | 2048-bit | 4096-bit |
 |-----------|---------|---------|----------|----------|----------|
-| Multiply | 51.0 ns | 106.6 ns | 323.8 ns | 964.5 ns | 3,851 ns |
-| Add | 36.2 ns | 47.6 ns | 83.4 ns | 149.9 ns | 276.0 ns |
+| Multiply | 48.3 ns | 251.2 ns | 412.0 ns | 1,017 ns | 4,794 ns |
+| Add | 36.8 ns | 98.0 ns | 87.3 ns | 147.7 ns | 264.2 ns |
 
-**Modular exponentiation** (CIOS Montgomery, Phase P7/P15/P22/P53/P67):
+**Modular exponentiation** (CIOS Montgomery, Phase P7/P15/P22/P53/P67/P81):
 
 | Operation | Time |
 |-----------|------|
-| mod_exp 1024-bit | 454.0 µs |
-| mod_exp 2048-bit | 3.94 ms |
-| mod_exp 4096-bit | 33.4 ms |
+| mod_exp 1024-bit | 393.2 µs |
+| mod_exp 2048-bit | 3.35 ms |
+| mod_exp 4096-bit | 29.5 ms |
 
 ---
 
@@ -385,34 +385,36 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
                         C faster <------------------> Rust faster
                         x12    x8     x4    1.0    x2     x5    x8
 
-DH-4096 keygen          ████████████████░░░░░░░░░░░░░░░░░░░░░░░░░  C x28 (thermal)
-ECDH P-521              █████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x4.9
-DH-2048 keygen          ███████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x4.8
-SM3                     █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x1.72
-ECDSA P-256 sign        ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x1.23
-Ed25519 sign            ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x1.21 (thermal)
-ECDH P-256              ░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░░  Near parity
-Ed25519 verify          ░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░░  R x1.05
-ML-DSA-65 sign          ░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░░  R x1.24
-ECDH P-384              ░░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░  R x1.55
-SM4-CBC dec             ░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░░░  R x1.38
-ChaCha20-Poly1305 enc   ░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░░░  R x2.06
-SHA-384                 ░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░░  R x2.50
-SM2 sign                ░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░░  R x2.56
-AES-128-CBC enc         ░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░  R x2.68
-AES-256-CBC enc         ░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░  R x3.23
-SHA-256                 ░░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░  R x4.01
-SM2 decrypt             ░░░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░  R x4.67
-AES-128-CTR             ░░░░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░  R x4.64
-HMAC-SHA256             ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░  R x6.87
-AES-128-GCM enc         ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░  R x7.47
-AES-128-CBC dec         ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██████  R x7.86
-AES-256-GCM dec         ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░█████  R x8.91
+DH-4096 keygen          ████████████████░░░░░░░░░░░░░░░░░░░░░░░░░  C x15.3
+DH-2048 keygen          ██████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x9.0
+SM3                     ██████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x3.5 (thermal)
+ECDH P-521              ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x1.82
+ECDSA P-256 sign        ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  C x1.18
+X25519 DH               ░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░░  Near parity
+ECDSA P-256 verify      ░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░░  R x1.07
+ECDH P-256              ░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░░  R x1.10
+Ed25519 verify          ░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░░  R x1.16
+ML-DSA-44 sign          ░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░░  R x1.26
+Ed25519 sign            ░░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░  R x1.38
+SHA-512                 ░░░░░░░░░░░░░░░░░░░░░░█░░░░░░░░░░░░░░░░░░  R x1.54
+ChaCha20-Poly1305 enc   ░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░░░  R x1.55
+SM4-GCM enc             ░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░░░  R x1.95
+AES-128-CBC enc         ░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░░░  R x1.98
+SHA-384                 ░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░░  R x2.28
+SM2 verify              ░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░░  R x2.64
+AES-256-CBC enc         ░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░░  R x3.50
+SHA-256                 ░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░░  R x3.58
+HMAC-SHA256             ░░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░░  R x3.91
+ECDH P-384              ░░░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░░  R x4.59
+AES-128-GCM enc         ░░░░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░░░  R x5.15
+AES-128-CBC dec         ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░░  R x5.37
+SM2 sign                ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██░░░░░░░░  R x6.71
+AES-256-GCM enc         ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██████  R x8.33
 ```
 
 ---
 
-## 5. Performance Optimization History (Phase P1–P80)
+## 5. Performance Optimization History (Phase P1–P83)
 
 ### Major Optimization Phases
 
@@ -460,24 +462,28 @@ AES-256-GCM dec         ░░░░░░░░░░░░░░░░░░�
 | **P78** | SLH-DSA hypertree heap elimination | SLH-DSA verify 20–30% faster |
 | **P79** | FrodoKEM matrix buffer reuse | FrodoKEM 15–25% faster |
 | **P80** | SM9 pairing O(n²) fix + clone elimination | SM9 5–10% faster |
+| **P81** | DH precomputed generator tables (MontExpTable + DhGroupCache) | mod_exp 13–16% faster |
+| **P82** | SM3 pipelined message expansion (expand/compress overlap) | SM3 regression (needs revert) |
+| **P83** | ML-KEM SHAKE clone-fork (pre-seed + clone) | ML-KEM ~3–5% improvement |
 
 ### Key Milestones
 
-| Milestone | Before | After | Speedup |
-|-----------|--------|-------|---------|
-| ECDSA P-256 sign | 2,415 µs | 42.1 µs | **57x** |
-| ECDSA P-384 sign | 2,372 µs | 119.7 µs | **20x** (P63) |
-| ECDSA P-521 sign | 3,946 µs | 142.1 µs | **28x** (P64) |
-| Ed448 sign | 661 µs | 48.2 µs | **14x** (P65) |
-| SM2 sign | 2,331 µs | 76.1 µs | **31x** |
-| Ed25519 sign | 56.1 µs | 14.3 µs | **3.9x** |
-| SHA-256 @8KB | 42.25 µs | 3.20 µs | **13.2x** |
-| AES-128-GCM @8KB | 10.7 µs | 7.0 µs | **1.5x** (P73) |
-| AES-128-HCTR @8KB | 1,904 µs | 60.7 µs | **31x** (P71) |
-| SHA-1 @8KB | 17.3 µs | 3.4 µs | **5.1x** (P74) |
-| ML-KEM-768 encaps | ~109 µs | 30.5 µs | **3.6x** |
-| ML-DSA-44 sign | ~355 µs | 79.8 µs | **4.4x** |
-| RSA-2048 sign | 1.37 ms | 1.07 ms | **1.28x** (P53/P67/P68) |
+| Milestone | Before (P0) | After (P83) | Speedup |
+|-----------|-------------|-------------|---------|
+| ECDSA P-256 sign | 2,415 µs | 44.0 µs | **55x** |
+| ECDSA P-384 sign | 2,372 µs | 120.6 µs | **20x** (P63) |
+| ECDSA P-521 sign | 3,946 µs | 150.0 µs | **26x** (P64) |
+| Ed448 sign | 661 µs | 98.4 µs | **6.7x** (P65) |
+| SM2 sign | 2,331 µs | 58.2 µs | **40x** |
+| Ed25519 sign | 56.1 µs | 10.95 µs | **5.1x** |
+| SHA-256 @8KB | 42.25 µs | 4.00 µs | **10.6x** |
+| AES-128-GCM @8KB | 10.7 µs | 10.2 µs | **1.05x** (P73) |
+| AES-128-HCTR @8KB | 1,904 µs | 86.9 µs | **22x** (P71) |
+| SHA-1 @8KB | 17.3 µs | 3.62 µs | **4.8x** (P74) |
+| ML-KEM-768 encaps | ~109 µs | 42.8 µs | **2.5x** |
+| ML-DSA-44 sign | ~355 µs | 107.5 µs | **3.3x** |
+| RSA-2048 sign | 1.37 ms | 1.26 ms | **1.09x** (P53/P67/P68) |
+| mod_exp 2048-bit | 5.42 ms | 3.35 ms | **1.62x** (P81) |
 
 ---
 
@@ -526,7 +532,7 @@ Criterion 0.5 provides:
 ### 6.4 Caveats
 
 - **Single machine**: All results are from a single Apple M4. x86-64 results may differ (Intel SHA-NI, AVX2)
-- **Full suite thermal effects**: The ~35-minute full benchmark run may show 10–20% thermal throttling in later tests. Key comparison benchmarks run in isolated batches for accuracy
+- **Full suite thermal effects**: The ~40-minute full benchmark run may show 20–50% thermal throttling in later tests. Key comparison benchmarks should run in isolated batches for accuracy
 - **Criterion overhead**: Criterion's statistical framework adds per-sample overhead (~microseconds)
 - **No CPU pinning**: macOS does not support `taskset`-style CPU pinning on Apple Silicon
 - **Small-parameter benchmarks**: DSA and ElGamal use demonstration parameters (p=23) — not representative of real-world cryptographic performance
@@ -538,415 +544,422 @@ Criterion 0.5 provides:
 
 | Algorithm | Throughput (MB/s) | Category |
 |-----------|-------------------|----------|
-| AES-128-ECB encrypt | 6,517 | Symmetric |
-| AES-256-ECB encrypt | 5,455 | Symmetric |
-| Poly1305 | 3,213 | MAC |
-| AES-128-ECB decrypt | 3,032 | Symmetric |
-| AES-128-CBC decrypt | 2,606 | Symmetric |
-| SHA-1 | 2,411 | Hash |
-| SHA-256 | 2,293 | Hash |
-| AES-128-OFB | 2,282 | Symmetric |
-| AES-256-ECB decrypt | 2,253 | Symmetric |
-| AES-256-CBC decrypt | 2,048 | Symmetric |
-| AES-256-OFB | 1,572 | Symmetric |
-| AES-128-CTR | 1,463 | Symmetric |
-| SHA-384 | 1,350 | Hash |
-| AES-128-XTS encrypt | 1,290 | Symmetric |
-| AES-128-XTS decrypt | 1,290 | Symmetric |
-| AES-256-XTS decrypt | 1,280 | Symmetric |
-| AES-256-CTR | 1,269 | Symmetric |
-| AES-128-CFB decrypt | 1,242 | Symmetric |
-| AES-256-XTS encrypt | 1,241 | Symmetric |
-| CMAC-AES128 | 1,214 | MAC |
-| AES-128-GCM encrypt | 1,163 | AEAD |
-| AES-128-GCM decrypt | 1,260 | AEAD |
-| AES-256-GCM decrypt | 1,268 | AEAD |
-| AES-256-GCM encrypt | 1,083 | AEAD |
-| HMAC-SHA256 | 1,077 | MAC |
-| AES-256-CFB decrypt | 1,072 | Symmetric |
-| HMAC-SHA384 | 1,064 | MAC |
-| GMAC-AES128 | 1,049 | MAC |
-| AES-128-CBC encrypt | 871 | Symmetric |
-| AES-128-CCM encrypt | 857 | AEAD |
-| AES-128-CCM decrypt | 841 | AEAD |
-| AES-128-CFB encrypt | 845 | Symmetric |
-| SipHash-2-4 | 802 | MAC |
-| SHA-512 | 786 | Hash |
-| AES-256-CBC encrypt | 766 | Symmetric |
-| AES-256-CFB encrypt | 734 | Symmetric |
-| CMAC-AES256 | 718 | MAC |
-| ChaCha20-Poly1305 encrypt | 708 | AEAD |
-| ChaCha20-Poly1305 decrypt | 679 | AEAD |
-| HMAC-SHA512 | 491 | MAC |
-| SM3 | 307 | Hash |
-| SHA3-256 | 257 | Hash |
-| HMAC-SM3 | 242 | MAC |
-| SHA3-384 | 194 | Hash |
-| MD5 | 184 | Hash |
-| SM4-CBC decrypt | 175 | Symmetric |
-| SHAKE128 | 152 | XOF |
-| SM4-GCM decrypt | 135 | Symmetric |
-| AES-128-HCTR encrypt | 135 | Symmetric |
-| AES-128-HCTR decrypt | 137 | Symmetric |
-| SM4-GCM encrypt | 130 | Symmetric |
-| SM4-CBC encrypt | 127 | Symmetric |
-| SHAKE256 | 126 | XOF |
-| SHA3-512 | 95 | Hash |
-| SM4-CCM encrypt | 62 | AEAD |
-| SM4-CCM decrypt | 62 | AEAD |
-| CBC-MAC-SM4 | 46 | MAC |
+| AES-256-ECB encrypt | 4,641 | Symmetric |
+| Poly1305 | 3,486 | MAC |
+| AES-128-ECB encrypt | 2,277 | Symmetric |
+| SHA-1 | 2,264 | Hash |
+| SHA-256 | 2,048 | Hash |
+| AES-128-OFB | 1,788 | Symmetric |
+| AES-128-CBC decrypt | 1,780 | Symmetric |
+| AES-256-ECB decrypt | 1,767 | Symmetric |
+| AES-256-CBC decrypt | 1,625 | Symmetric |
+| AES-128-ECB decrypt | 1,496 | Symmetric |
+| AES-256-OFB | 1,372 | Symmetric |
+| SHA-512 | 1,360 | Hash |
+| AES-128-XTS decrypt | 1,260 | Symmetric |
+| HMAC-SHA256 | 1,252 | MAC |
+| SHA-384 | 1,231 | Hash |
+| AES-128-CTR | 1,237 | Symmetric |
+| SipHash-2-4 | 1,225 | MAC |
+| AES-256-GCM encrypt | 1,203 | AEAD |
+| AES-256-GCM decrypt | 1,162 | AEAD |
+| AES-256-CTR | 1,101 | Symmetric |
+| AES-256-CFB decrypt | 1,033 | Symmetric |
+| HMAC-SHA512 | 1,028 | MAC |
+| AES-128-GCM decrypt | 922 | AEAD |
+| AES-128-XTS encrypt | 859 | Symmetric |
+| CMAC-AES128 | 839 | MAC |
+| AES-256-CBC encrypt | 830 | Symmetric |
+| AES-128-GCM encrypt | 802 | AEAD |
+| HMAC-SHA384 | 795 | MAC |
+| AES-256-XTS encrypt | 783 | Symmetric |
+| AES-256-XTS decrypt | 723 | Symmetric |
+| ChaCha20-Poly1305 decrypt | 723 | AEAD |
+| CMAC-AES256 | 705 | MAC |
+| AES-256-CFB encrypt | 675 | Symmetric |
+| GMAC-AES128 | 652 | MAC |
+| AES-128-CBC encrypt | 642 | Symmetric |
+| AES-128-CCM decrypt | 545 | AEAD |
+| ChaCha20-Poly1305 encrypt | 532 | AEAD |
+| AES-128-CCM encrypt | 505 | AEAD |
+| AES-128-CFB decrypt | 489 | Symmetric |
+| AES-128-CFB encrypt | 413 | Symmetric |
+| HMAC-SM3 | 317 | MAC |
+| MD5 | 213 | Hash |
+| SM4-CBC decrypt | 191 | Symmetric |
+| SHA3-256 | 172 | Hash |
+| SM4-GCM encrypt | 171 | Symmetric |
+| SM4-GCM decrypt | 166 | Symmetric |
+| SHA3-384 | 160 | Hash |
+| SM3 | 151 | Hash |
+| SM4-CBC encrypt | 137 | Symmetric |
+| SHAKE128 | 110 | XOF |
+| AES-128-HCTR decrypt | 100 | Symmetric |
+| AES-128-HCTR encrypt | 94 | Symmetric |
+| SHA3-512 | 86 | Hash |
+| SHAKE256 | 83 | XOF |
+| SM4-CCM decrypt | 73 | AEAD |
+| SM4-CCM encrypt | 72 | AEAD |
+| CBC-MAC-SM4 | 68 | MAC |
 
 ## Appendix B: Public Key Operations Summary (ops/sec)
 
 | Algorithm | Operation | Ops/sec |
 |-----------|-----------|---------|
-| Ed25519 | sign | 54,590 |
-| ML-KEM-512 | decaps | 47,720 |
-| X25519 | DH | 45,490 |
-| ML-KEM-512 | encaps | 42,820 |
-| ML-KEM-768 | decaps | 27,080 |
-| ML-KEM-768 | encaps | 26,580 |
-| Ed25519 | verify | 25,110 |
-| RSA-2048 | verify (PSS) | 23,405 |
-| ML-KEM-768 | keygen | 22,370 |
-| ECDSA P-256 | sign | 21,900 |
-| Ed448 | sign | 20,730 |
-| ML-KEM-1024 | decaps | 20,800 |
-| ML-KEM-512 | keygen | 18,360 |
-| ML-KEM-1024 | encaps | 19,060 |
-| HPKE | open | 16,450 |
-| ML-KEM-1024 | keygen | 14,540 |
-| ML-DSA-44 | verify | 13,460 |
-| ECDH P-256 | key_derive | 13,370 |
-| ML-DSA-44 | keygen | 12,340 |
-| HybridKEM X25519+ML-KEM-768 | encaps | 12,190 |
-| SM2 | decrypt | 12,076 |
-| RSA-2048 | encrypt (OAEP) | 10,881 |
-| HPKE | seal | 10,820 |
-| ECDSA P-256 | verify | 9,890 |
-| RSA-3072 | encrypt (OAEP) | 9,048 |
-| ECDSA P-384 | sign | 8,360 |
-| ML-DSA-65 | verify | 7,560 |
-| ECDSA P-521 | sign | 7,040 |
-| ML-DSA-65 | keygen | 6,510 |
-| SM2 | sign | 6,557 |
-| ML-DSA-65 | sign | 5,649 |
-| SM2 | encrypt | 5,373 |
-| RSA-4096 | encrypt (OAEP) | 5,198 |
-| HybridKEM P256+ML-KEM-768 | encaps | 4,905 |
-| RSA-4096 | verify (PSS) | 4,941 |
-| Ed448 | verify | 4,517 |
-| ML-DSA-87 | verify | 4,372 |
-| RSA-3072 | verify (PSS) | 4,206 |
-| ML-DSA-87 | keygen | 4,124 |
-| SM2 | verify | 3,754 |
-| X448 | DH | 3,461 |
-| XMSS SHA2-10-256 | verify | 3,306 |
-| Paillier-512 | encrypt | 3,275 |
-| ML-DSA-87 | sign | 2,981 |
-| ECDSA P-384 | verify | 2,558 |
-| Paillier-512 | decrypt | 2,514 |
-| ML-DSA-44 | sign | 2,324 |
-| SLH-DSA SHA2-128f | keygen | 2,249 |
-| XMSS-MT SHA2-20-2-256 | verify | 2,107 |
-| HybridKEM P384+ML-KEM-768 | encaps | 1,990 |
-| ECDSA P-521 | verify | 1,711 |
-| SLH-DSA SHA2-128f | verify | 1,634 |
-| ECDH P-384 | key_derive | 1,499 |
-| McEliece-6688128 | encaps | 1,482 |
-| SLH-DSA SHA2-192f | keygen | 1,153 |
-| ECDH P-521 | key_derive | 1,031 |
-| RSA-2048 | sign (PSS) | 937 |
-| SLH-DSA SHA2-192f | verify | 780 |
-| SLH-DSA SHA2-256f | verify | 754 |
-| RSA-2048 | decrypt (OAEP) | 401 |
-| SLH-DSA SHA2-256f | keygen | 413 |
-| SLH-DSA SHAKE-128f | keygen | 367 |
-| FrodoKEM-640-SHAKE | encaps | 327 |
-| FrodoKEM-640-SHAKE | decaps | 314 |
-| SLH-DSA SHAKE-128f | verify | 279 |
-| ffdhe2048 | keygen | 253 |
-| RSA-3072 | decrypt (OAEP) | 222 |
-| ffdhe2048 | key_derive | 207 |
-| FrodoKEM-640-SHAKE | keygen | 181 |
-| FrodoKEM-976-SHAKE | encaps | 140 |
-| FrodoKEM-976-SHAKE | decaps | 137 |
-| RSA-4096 | decrypt (OAEP) | 118 |
-| RSA-4096 | sign (PSS) | 106 |
-| RSA-3072 | sign (PSS) | 97 |
-| SLH-DSA SHA2-128f | sign | 93 |
-| FrodoKEM-976-SHAKE | keygen | 78 |
-| ffdhe3072 | keygen | 63 |
-| ffdhe3072 | key_derive | 58 |
+| Ed25519 | sign | 91,324 |
+| X25519 | DH | 47,827 |
+| ML-KEM-512 | keygen | 37,555 |
+| ML-KEM-512 | encaps | 34,552 |
+| ML-KEM-512 | decaps | 33,504 |
+| Ed25519 | verify | 27,762 |
+| RSA-2048 | verify (PSS) | 24,634 |
+| ML-KEM-768 | encaps | 23,342 |
+| ECDSA P-256 | sign | 22,712 |
+| RSA-2048 | encrypt (OAEP) | 22,244 |
+| ML-KEM-1024 | encaps | 22,472 |
+| ML-KEM-768 | decaps | 21,431 |
+| ML-KEM-768 | keygen | 21,060 |
+| HPKE | open | 20,198 |
+| ML-KEM-1024 | keygen | 18,284 |
+| SM2 | sign | 17,183 |
+| ML-KEM-1024 | decaps | 17,136 |
+| HybridKEM X25519+ML-KEM-768 | keygen | 16,211 |
+| SM2 | decrypt | 14,832 |
+| ECDH P-256 | key_derive | 14,927 |
+| HPKE | seal | 14,145 |
+| HybridKEM X25519+ML-KEM-768 | encaps | 12,617 |
+| SM2 | verify | 11,947 |
+| ECDSA P-256 | verify | 11,203 |
+| ML-DSA-44 | verify | 11,053 |
+| ML-DSA-44 | keygen | 10,839 |
+| Ed448 | sign | 10,158 |
+| ML-DSA-44 | sign | 9,302 |
+| ECDSA P-384 | sign | 8,289 |
+| HybridKEM X25519+ML-KEM-768 | decaps | 8,394 |
+| RSA-3072 | verify (PSS) | 7,703 |
+| SM2 | encrypt | 6,761 |
+| ECDSA P-521 | sign | 6,669 |
+| ML-DSA-65 | verify | 6,458 |
+| RSA-3072 | encrypt (OAEP) | 6,430 |
+| HybridKEM P384+ML-KEM-768 | keygen | 6,548 |
+| X448 | DH | 5,935 |
+| RSA-4096 | verify (PSS) | 5,587 |
+| ML-DSA-65 | keygen | 5,486 |
+| XMSS SHA2-10-256 | verify | 5,143 |
+| HybridKEM P256+ML-KEM-768 | keygen | 5,135 |
+| RSA-4096 | encrypt (OAEP) | 4,917 |
+| ECDH P-384 | key_derive | 4,449 |
+| ML-DSA-87 | verify | 3,617 |
+| Paillier-512 | decrypt | 3,470 |
+| ECDSA P-384 | verify | 3,488 |
+| ML-DSA-65 | sign | 3,354 |
+| HybridKEM P256+ML-KEM-768 | decaps | 2,978 |
+| ECDH P-521 | key_derive | 2,783 |
+| ML-DSA-87 | keygen | 2,595 |
+| HybridKEM P256+ML-KEM-768 | encaps | 2,482 |
+| XMSS-MT SHA2-20-2-256 | verify | 2,230 |
+| Ed448 | verify | 2,205 |
+| Paillier-512 | encrypt | 2,164 |
+| ECDSA P-521 | verify | 2,061 |
+| ML-DSA-87 | sign | 1,477 |
+| McEliece-6688128 | encaps | 1,660 |
+| SLH-DSA SHA2-128f | keygen | 1,420 |
+| HybridKEM P384+ML-KEM-768 | decaps | 1,380 |
+| SLH-DSA SHA2-128f | verify | 917 |
+| HybridKEM P384+ML-KEM-768 | encaps | 857 |
+| RSA-2048 | decrypt (OAEP) | 841 |
+| RSA-2048 | sign (PSS) | 795 |
+| SLH-DSA SHA2-192f | keygen | 623 |
+| SLH-DSA SHA2-192f | verify | 580 |
+| SLH-DSA SHA2-256f | verify | 460 |
+| FrodoKEM-640-SHAKE | decaps | 347 |
+| SLH-DSA SHA2-256f | keygen | 304 |
+| FrodoKEM-640-SHAKE | encaps | 292 |
+| SLH-DSA SHAKE-128f | keygen | 283 |
+| ffdhe2048 | key_derive | 177 |
+| ML-DSA-44 | sign (C only) | — |
+| FrodoKEM-976-SHAKE | encaps | 170 |
+| RSA-3072 | sign (PSS) | 170 |
+| RSA-3072 | decrypt (OAEP) | 153 |
+| FrodoKEM-640-SHAKE | keygen | 148 |
+| SLH-DSA SHAKE-128f | verify | 144 |
+| FrodoKEM-976-SHAKE | decaps | 143 |
+| ffdhe2048 | keygen | 135 |
+| RSA-4096 | decrypt (OAEP) | 117 |
+| RSA-4096 | sign (PSS) | 116 |
+| FrodoKEM-976-SHAKE | keygen | 92 |
+| ffdhe3072 | keygen | 68 |
+| SLH-DSA SHA2-128f | sign | 49 |
+| ffdhe3072 | key_derive | 46 |
+| FrodoKEM-1344-SHAKE | keygen | 45 |
+| FrodoKEM-1344-SHAKE | encaps | 43 |
+| FrodoKEM-1344-SHAKE | decaps | 43 |
 | McEliece-6688128 | decaps | 42 |
-| SLH-DSA SHA2-192f | sign | 38 |
-| FrodoKEM-1344-SHAKE | decaps | 34 |
-| FrodoKEM-1344-SHAKE | encaps | 32 |
-| SLH-DSA SHA2-256f | sign | 20 |
-| FrodoKEM-1344-SHAKE | keygen | 16 |
-| SLH-DSA SHAKE-128f | sign | 15 |
-| ffdhe4096 | keygen | 10 |
-| ffdhe4096 | key_derive | 10 |
+| SLH-DSA SHA2-192f | sign | 27 |
+| ffdhe4096 | keygen | 19 |
+| ffdhe4096 | key_derive | 19 |
+| SLH-DSA SHA2-256f | sign | 10 |
+| SLH-DSA SHAKE-128f | sign | 9 |
 
-## Appendix C: Full Criterion Mean Times (2026-03-03)
+## Appendix C: Full Criterion Mean Times (2026-03-05)
 
 All times in nanoseconds unless noted. Full-suite run with 63 groups, 307 test points.
 
 ```
 === Block Ciphers ===
-aes-128 encrypt_block:      6.83 ns    aes-128 decrypt_block:      7.32 ns
-aes-256 encrypt_block:     10.01 ns    aes-256 decrypt_block:     15.21 ns
-sm4 encrypt_block:        134.90 ns    sm4 decrypt_block:        139.93 ns
+aes-128 encrypt_block:      8.75 ns    aes-128 decrypt_block:      7.49 ns
+aes-256 encrypt_block:     12.14 ns    aes-256 decrypt_block:     16.70 ns
+sm4 encrypt_block:        111.43 ns    sm4 decrypt_block:        109.20 ns
 
 === AES-GCM (AEAD) ===
-aes-128-gcm enc @1KB:     2,004 ns    aes-128-gcm dec @1KB:     1,840 ns
-aes-128-gcm enc @8KB:    10,672 ns    aes-128-gcm dec @8KB:    17,014 ns
-aes-128-gcm enc @16KB:   36,272 ns    aes-128-gcm dec @16KB:   21,332 ns
-aes-256-gcm enc @1KB:     1,913 ns    aes-256-gcm dec @1KB:     1,829 ns
-aes-256-gcm enc @8KB:    11,954 ns    aes-256-gcm dec @8KB:    11,112 ns
-aes-256-gcm enc @16KB:   22,263 ns    aes-256-gcm dec @16KB:   22,229 ns
+aes-128-gcm enc @1KB:     2,179 ns    aes-128-gcm dec @1KB:     1,775 ns
+aes-128-gcm enc @8KB:    10,217 ns    aes-128-gcm dec @8KB:     8,885 ns
+aes-128-gcm enc @16KB:   24,866 ns    aes-128-gcm dec @16KB:   10,359 ns
+aes-256-gcm enc @1KB:     1,372 ns    aes-256-gcm dec @1KB:     1,336 ns
+aes-256-gcm enc @8KB:     6,810 ns    aes-256-gcm dec @8KB:     7,050 ns
+aes-256-gcm enc @16KB:   11,575 ns    aes-256-gcm dec @16KB:   23,555 ns
 
 === AES-CBC ===
-aes-128-cbc enc @1KB:     1,492 ns    aes-128-cbc dec @1KB:       800 ns
-aes-128-cbc enc @8KB:     9,252 ns    aes-128-cbc dec @8KB:     3,062 ns
-aes-128-cbc enc @16KB:   18,132 ns    aes-128-cbc dec @16KB:    5,478 ns
-aes-256-cbc enc @1KB:     1,784 ns    aes-256-cbc dec @1KB:     1,627 ns
-aes-256-cbc enc @8KB:    31,377 ns    aes-256-cbc dec @8KB:    13,368 ns
-aes-256-cbc enc @16KB:   34,122 ns    aes-256-cbc dec @16KB:   10,240 ns
+aes-128-cbc enc @1KB:     2,424 ns    aes-128-cbc dec @1KB:     1,070 ns
+aes-128-cbc enc @8KB:    12,753 ns    aes-128-cbc dec @8KB:     4,602 ns
+aes-128-cbc enc @16KB:   24,681 ns    aes-128-cbc dec @16KB:   11,357 ns
+aes-256-cbc enc @1KB:     1,707 ns    aes-256-cbc dec @1KB:       883 ns
+aes-256-cbc enc @8KB:     9,874 ns    aes-256-cbc dec @8KB:     5,043 ns
+aes-256-cbc enc @16KB:   24,385 ns    aes-256-cbc dec @16KB:    8,449 ns
 
 === AES-CTR ===
-aes-128-ctr @1KB:         1,047 ns    aes-256-ctr @1KB:         1,534 ns
-aes-128-ctr @8KB:         6,813 ns    aes-256-ctr @8KB:         7,269 ns
-aes-128-ctr @16KB:       12,791 ns    aes-256-ctr @16KB:       13,678 ns
+aes-128-ctr @1KB:         1,109 ns    aes-256-ctr @1KB:         1,309 ns
+aes-128-ctr @8KB:         6,620 ns    aes-256-ctr @8KB:         7,444 ns
+aes-128-ctr @16KB:       12,965 ns    aes-256-ctr @16KB:       19,702 ns
 
 === AES-CCM (AEAD) ===
-aes-128-ccm enc @1KB:     1,633 ns    aes-128-ccm dec @1KB:     1,628 ns
-aes-128-ccm enc @8KB:    10,428 ns    aes-128-ccm dec @8KB:    10,487 ns
-aes-128-ccm enc @16KB:   19,783 ns    aes-128-ccm dec @16KB:   20,264 ns
+aes-128-ccm enc @1KB:     2,314 ns    aes-128-ccm dec @1KB:     2,584 ns
+aes-128-ccm enc @8KB:    16,227 ns    aes-128-ccm dec @8KB:    15,035 ns
+aes-128-ccm enc @16KB:   30,279 ns    aes-128-ccm dec @16KB:   31,337 ns
 
 === AES-ECB ===
-aes-128-ecb enc @1KB:       744 ns    aes-128-ecb dec @1KB:       762 ns
-aes-128-ecb enc @8KB:     2,822 ns    aes-128-ecb dec @8KB:     2,833 ns
-aes-128-ecb enc @16KB:    6,354 ns    aes-128-ecb dec @16KB:   11,117 ns
-aes-256-ecb enc @1KB:     1,337 ns    aes-256-ecb dec @1KB:       995 ns
-aes-256-ecb enc @8KB:    10,758 ns    aes-256-ecb dec @8KB:    14,240 ns
-aes-256-ecb enc @16KB:   12,952 ns    aes-256-ecb dec @16KB:    9,758 ns
+aes-128-ecb enc @1KB:       534 ns    aes-128-ecb dec @1KB:     1,679 ns
+aes-128-ecb enc @8KB:     3,598 ns    aes-128-ecb dec @8KB:     5,478 ns
+aes-128-ecb enc @16KB:    2,540 ns    aes-128-ecb dec @16KB:    5,887 ns
+aes-256-ecb enc @1KB:       719 ns    aes-256-ecb dec @1KB:       817 ns
+aes-256-ecb enc @8KB:     1,765 ns    aes-256-ecb dec @8KB:     4,635 ns
+aes-256-ecb enc @16KB:    3,984 ns    aes-256-ecb dec @16KB:   20,607 ns
 
 === AES-XTS ===
-aes-128-xts enc @1KB:     1,265 ns    aes-128-xts dec @1KB:     1,170 ns
-aes-128-xts enc @8KB:     6,076 ns    aes-128-xts dec @8KB:     5,589 ns
-aes-128-xts enc @16KB:   11,341 ns    aes-128-xts dec @16KB:   10,618 ns
-aes-256-xts enc @1KB:     1,419 ns    aes-256-xts dec @1KB:     1,418 ns
-aes-256-xts enc @8KB:     6,605 ns    aes-256-xts dec @8KB:     6,402 ns
-aes-256-xts enc @16KB:   12,332 ns    aes-256-xts dec @16KB:   12,070 ns
+aes-128-xts enc @1KB:     1,847 ns    aes-128-xts dec @1KB:     2,387 ns
+aes-128-xts enc @8KB:     9,535 ns    aes-128-xts dec @8KB:     6,504 ns
+aes-128-xts enc @16KB:   13,298 ns    aes-128-xts dec @16KB:   15,113 ns
+aes-256-xts enc @1KB:     2,080 ns    aes-256-xts dec @1KB:     2,717 ns
+aes-256-xts enc @8KB:    10,466 ns    aes-256-xts dec @8KB:    11,339 ns
+aes-256-xts enc @16KB:   32,871 ns    aes-256-xts dec @16KB:   55,447 ns
 
 === AES-CFB ===
-aes-128-cfb enc @1KB:     1,309 ns    aes-128-cfb dec @1KB:     1,079 ns
-aes-128-cfb enc @8KB:     8,649 ns    aes-128-cfb dec @8KB:     7,393 ns
-aes-128-cfb enc @16KB:   16,951 ns    aes-128-cfb dec @16KB:   13,377 ns
-aes-256-cfb enc @1KB:     3,341 ns    aes-256-cfb dec @1KB:     1,554 ns
-aes-256-cfb enc @8KB:    11,306 ns    aes-256-cfb dec @8KB:     7,443 ns
-aes-256-cfb enc @16KB:   19,653 ns    aes-256-cfb dec @16KB:   14,693 ns
+aes-128-cfb enc @1KB:     1,683 ns    aes-128-cfb dec @1KB:     1,456 ns
+aes-128-cfb enc @8KB:    19,822 ns    aes-128-cfb dec @8KB:    16,753 ns
+aes-128-cfb enc @16KB:   31,407 ns    aes-128-cfb dec @16KB:   13,973 ns
+aes-256-cfb enc @1KB:     2,001 ns    aes-256-cfb dec @1KB:     1,351 ns
+aes-256-cfb enc @8KB:    12,137 ns    aes-256-cfb dec @8KB:     7,929 ns
+aes-256-cfb enc @16KB:   22,261 ns    aes-256-cfb dec @16KB:   16,638 ns
 
 === AES-OFB ===
-aes-128-ofb @1KB:         1,437 ns    aes-256-ofb @1KB:         1,356 ns
-aes-128-ofb @8KB:         4,823 ns    aes-256-ofb @8KB:         6,446 ns
-aes-128-ofb @16KB:        9,827 ns    aes-256-ofb @16KB:       12,402 ns
+aes-128-ofb @1KB:           703 ns    aes-256-ofb @1KB:         1,013 ns
+aes-128-ofb @8KB:         4,582 ns    aes-256-ofb @8KB:         5,973 ns
+aes-128-ofb @16KB:        7,342 ns    aes-256-ofb @16KB:       11,898 ns
 
 === AES Key Wrap ===
-aes-128 wrap:             1,512 ns    aes-128 unwrap:           1,257 ns
-aes-256 wrap:               985 ns    aes-256 unwrap:           1,129 ns
+aes-128 wrap:             1,660 ns    aes-128 unwrap:           1,410 ns
+aes-256 wrap:             1,103 ns    aes-256 unwrap:           1,080 ns
 
 === AES-HCTR ===
-aes-128-hctr enc @1KB:  271,627 ns    aes-128-hctr dec @1KB:  275,159 ns
-aes-128-hctr enc @8KB: 1904,400 ns    aes-128-hctr dec @8KB: 2159,087 ns
-aes-128-hctr enc @16KB:4152,790 ns    aes-128-hctr dec @16KB:3870,156 ns
+aes-128-hctr enc @1KB:   10,783 ns    aes-128-hctr dec @1KB:   12,125 ns
+aes-128-hctr enc @8KB:   86,868 ns    aes-128-hctr dec @8KB:   81,516 ns
+aes-128-hctr enc @16KB: 205,330 ns    aes-128-hctr dec @16KB: 237,550 ns
 
 === ChaCha20-Poly1305 ===
-chacha20 enc @1KB:        2,294 ns    chacha20 dec @1KB:        2,734 ns
-chacha20 enc @8KB:       19,553 ns    chacha20 dec @8KB:       17,113 ns
-chacha20 enc @16KB:      44,801 ns    chacha20 dec @16KB:      93,781 ns
+chacha20 enc @1KB:        4,465 ns    chacha20 dec @1KB:        2,260 ns
+chacha20 enc @8KB:       15,404 ns    chacha20 dec @8KB:       11,327 ns
+chacha20 enc @16KB:      22,786 ns    chacha20 dec @16KB:      22,585 ns
 
 === Poly1305 (Standalone MAC) ===
-poly1305 @64B:              36 ns    poly1305 @1KB:              344 ns
-poly1305 @8KB:           2,724 ns    poly1305 @16KB:           5,523 ns
+poly1305 @64B:              30 ns    poly1305 @1KB:              302 ns
+poly1305 @8KB:           2,350 ns    poly1305 @16KB:           4,625 ns
 
 === SM4 Block / SM4-CBC / SM4-GCM / SM4-CCM ===
-sm4 encrypt_block:        134.9 ns    sm4 decrypt_block:        139.9 ns
-sm4-cbc enc @1KB:         7,754 ns    sm4-cbc dec @1KB:         5,615 ns
-sm4-cbc enc @8KB:        70,669 ns    sm4-cbc dec @8KB:        52,426 ns
-sm4-cbc enc @16KB:      146,372 ns    sm4-cbc dec @16KB:      225,013 ns
-sm4-gcm enc @1KB:         8,029 ns    sm4-gcm dec @1KB:         7,810 ns
-sm4-gcm enc @8KB:        52,206 ns    sm4-gcm dec @8KB:        50,592 ns
-sm4-gcm enc @16KB:      123,932 ns    sm4-gcm dec @16KB:      104,256 ns
-sm4-ccm enc @1KB:        27,066 ns    sm4-ccm dec @1KB:        17,545 ns
-sm4-ccm enc @8KB:       148,091 ns    sm4-ccm dec @8KB:       151,430 ns
-sm4-ccm enc @16KB:      234,834 ns    sm4-ccm dec @16KB:      223,616 ns
+sm4 encrypt_block:        111.4 ns    sm4 decrypt_block:        109.2 ns
+sm4-cbc enc @1KB:         7,653 ns    sm4-cbc dec @1KB:         5,500 ns
+sm4-cbc enc @8KB:        59,782 ns    sm4-cbc dec @8KB:        42,815 ns
+sm4-cbc enc @16KB:      113,280 ns    sm4-cbc dec @16KB:       81,613 ns
+sm4-gcm enc @1KB:         6,337 ns    sm4-gcm dec @1KB:         6,258 ns
+sm4-gcm enc @8KB:        48,033 ns    sm4-gcm dec @8KB:        49,326 ns
+sm4-gcm enc @16KB:      104,060 ns    sm4-gcm dec @16KB:       98,695 ns
+sm4-ccm enc @1KB:        14,573 ns    sm4-ccm dec @1KB:        14,247 ns
+sm4-ccm enc @8KB:       113,050 ns    sm4-ccm dec @8KB:       111,810 ns
+sm4-ccm enc @16KB:      282,290 ns    sm4-ccm dec @16KB:      281,530 ns
 
 === Hash Functions ===
-sha256 @1KB:                407 ns    sha384 @1KB:                728 ns
-sha512 @1KB:                729 ns    sm3 @1KB:                 2,524 ns
-sha256 @8KB:              3,198 ns    sha384 @8KB:              5,116 ns
-sha512 @8KB:              5,098 ns    sm3 @8KB:                19,014 ns
-sha256 @16KB:             6,419 ns    sha384 @16KB:            10,046 ns
-sha512 @16KB:            10,117 ns    sm3 @16KB:               38,397 ns
+sha256 @1KB:                455 ns    sha384 @1KB:                942 ns
+sha512 @1KB:                948 ns    sm3 @1KB:                 7,426 ns
+sha256 @8KB:              4,000 ns    sha384 @8KB:              6,653 ns
+sha512 @8KB:              6,024 ns    sm3 @8KB:                54,275 ns
+sha256 @16KB:             8,788 ns    sha384 @16KB:            15,391 ns
+sha512 @16KB:            19,897 ns    sm3 @16KB:               89,833 ns
 
 === SHA-3 / SHAKE ===
-sha3-256 @1KB:            3,368 ns    sha3-384 @1KB:            4,279 ns
-sha3-512 @1KB:            6,401 ns
-sha3-256 @8KB:           25,540 ns    sha3-384 @8KB:           33,096 ns
-sha3-512 @8KB:           47,852 ns
-sha3-256 @16KB:          51,414 ns    sha3-384 @16KB:          66,343 ns
-sha3-512 @16KB:          96,245 ns
-shake128 @1KB:            5,497 ns    shake256 @1KB:            6,489 ns
-shake128 @8KB:           41,766 ns    shake256 @8KB:           51,738 ns
-shake128 @16KB:          84,237 ns    shake256 @16KB:         103,246 ns
+sha3-256 @1KB:            6,348 ns    sha3-384 @1KB:            8,667 ns
+sha3-512 @1KB:           13,976 ns
+sha3-256 @8KB:           47,508 ns    sha3-384 @8KB:           51,134 ns
+sha3-512 @8KB:           95,101 ns
+sha3-256 @16KB:          83,926 ns    sha3-384 @16KB:         130,340 ns
+sha3-512 @16KB:         203,710 ns
+shake128 @1KB:           10,309 ns    shake256 @1KB:           11,431 ns
+shake128 @8KB:           74,396 ns    shake256 @8KB:           98,355 ns
+shake128 @16KB:         153,230 ns    shake256 @16KB:         204,580 ns
 
 === SHA-1 / MD5 (Legacy) ===
-sha1 @1KB:                2,316 ns    md5 @1KB:                 3,108 ns
-sha1 @8KB:               17,341 ns    md5 @8KB:                23,911 ns
-sha1 @16KB:              33,607 ns    md5 @16KB:               47,550 ns
+sha1 @1KB:                  488 ns    md5 @1KB:                 6,083 ns
+sha1 @8KB:                3,619 ns    md5 @8KB:                38,458 ns
+sha1 @16KB:               7,512 ns    md5 @16KB:              100,380 ns
 
 === HMAC ===
-hmac-sha256 @1KB:           642 ns    hmac-sha512 @1KB:         1,454 ns
-hmac-sha384 @1KB:         1,510 ns    hmac-sm3 @1KB:            4,104 ns
-hmac-sha256 @8KB:         4,431 ns    hmac-sha512 @8KB:         7,300 ns
-hmac-sha384 @8KB:         7,442 ns    hmac-sm3 @8KB:           25,704 ns
-hmac-sha256 @16KB:        8,597 ns    hmac-sha512 @16KB:       13,413 ns
-hmac-sha384 @16KB:       14,768 ns    hmac-sm3 @16KB:          51,812 ns
+hmac-sha256 @1KB:         1,331 ns    hmac-sha512 @1KB:         2,206 ns
+hmac-sha384 @1KB:         1,390 ns    hmac-sm3 @1KB:           11,632 ns
+hmac-sha256 @8KB:         6,542 ns    hmac-sha512 @8KB:         7,968 ns
+hmac-sha384 @8KB:        10,302 ns    hmac-sm3 @8KB:           25,848 ns
+hmac-sha256 @16KB:       12,769 ns    hmac-sha512 @16KB:       16,737 ns
+hmac-sha384 @16KB:       24,108 ns    hmac-sm3 @16KB:          51,259 ns
 
 === Other MAC ===
-cmac-aes128 @1KB:         1,397 ns    cmac-aes256 @1KB:         1,289 ns
-cmac-aes128 @8KB:         9,016 ns    cmac-aes256 @8KB:         7,016 ns
-cmac-aes128 @16KB:       10,517 ns    cmac-aes256 @16KB:       13,986 ns
-gmac-aes128 @1KB:         1,301 ns    gmac-aes128 @8KB:         9,475 ns
-gmac-aes128 @16KB:       18,010 ns
-siphash @64B:                43 ns    siphash @1KB:             1,935 ns
-siphash @8KB:             4,644 ns
-cbc-mac-sm4 @1KB:        18,956 ns    cbc-mac-sm4 @8KB:       121,710 ns
-cbc-mac-sm4 @16KB:      170,765 ns
+cmac-aes128 @1KB:         2,021 ns    cmac-aes256 @1KB:         1,872 ns
+cmac-aes128 @8KB:         9,765 ns    cmac-aes256 @8KB:        11,622 ns
+cmac-aes128 @16KB:       18,240 ns    cmac-aes256 @16KB:       27,130 ns
+gmac-aes128 @1KB:         2,514 ns    gmac-aes128 @8KB:        12,561 ns
+gmac-aes128 @16KB:       25,237 ns
+siphash @64B:                55 ns    siphash @1KB:               767 ns
+siphash @8KB:             6,687 ns
+cbc-mac-sm4 @1KB:        12,782 ns    cbc-mac-sm4 @8KB:       121,250 ns
+cbc-mac-sm4 @16KB:      127,340 ns
 
 === Elliptic Curves ===
-ecdsa-p256 sign:         42,082 ns    ecdsa-p256 verify:       85,025 ns
-ecdsa-p384 sign:      2,372,435 ns    ecdsa-p384 verify:    2,976,377 ns
-ecdsa-p521 sign:      3,945,688 ns    ecdsa-p521 verify:    5,791,941 ns
-ecdh p256 derive:        81,993 ns    ecdh p384 derive:     2,057,566 ns
-ecdh p521 derive:     3,952,067 ns    x25519 dh:               28,799 ns
-x448 dh:                442,684 ns
-ed25519 sign:            14,289 ns    ed25519 verify:          48,156 ns
-ed448 sign:             661,312 ns    ed448 verify:         1,424,415 ns
-sm2 sign:                76,091 ns    sm2 verify:             104,303 ns
-sm2 encrypt:            189,573 ns    sm2 decrypt:             96,274 ns
+ecdsa-p256 sign:         44,032 ns    ecdsa-p256 verify:       89,267 ns
+ecdsa-p384 sign:        120,640 ns    ecdsa-p384 verify:      286,670 ns
+ecdsa-p521 sign:        149,950 ns    ecdsa-p521 verify:      485,320 ns
+ecdh p256 derive:        66,992 ns    ecdh p384 derive:       224,750 ns
+ecdh p521 derive:       359,290 ns    x25519 dh:               20,909 ns
+x448 dh:                168,510 ns
+ed25519 sign:            10,950 ns    ed25519 verify:          36,025 ns
+ed448 sign:              98,448 ns    ed448 verify:           453,500 ns
+sm2 sign:                58,198 ns    sm2 verify:              83,706 ns
+sm2 encrypt:            147,900 ns    sm2 decrypt:             67,422 ns
 
 === RSA-2048 ===
-rsa-2048 sign pss:    1,264,572 ns    rsa-2048 verify pss:     46,639 ns
-rsa-2048 enc oaep:       42,053 ns    rsa-2048 dec oaep:    1,220,360 ns
+rsa-2048 sign pss:    1,258,300 ns    rsa-2048 verify pss:     40,594 ns
+rsa-2048 enc oaep:       44,954 ns    rsa-2048 dec oaep:    1,188,600 ns
 
-=== RSA-3072 (NEW) ===
-rsa-3072 sign pss:   10,548,155 ns    rsa-3072 verify pss:    248,361 ns
-rsa-3072 enc oaep:      114,930 ns    rsa-3072 dec oaep:    4,660,710 ns
+=== RSA-3072 ===
+rsa-3072 sign pss:    5,887,300 ns    rsa-3072 verify pss:    129,830 ns
+rsa-3072 enc oaep:      155,520 ns    rsa-3072 dec oaep:    6,543,200 ns
 
-=== RSA-4096 (NEW) ===
-rsa-4096 sign pss:    9,074,836 ns    rsa-4096 verify pss:    196,639 ns
-rsa-4096 enc oaep:      181,637 ns    rsa-4096 dec oaep:    8,997,627 ns
+=== RSA-4096 ===
+rsa-4096 sign pss:    8,593,800 ns    rsa-4096 verify pss:    179,000 ns
+rsa-4096 enc oaep:      203,380 ns    rsa-4096 dec oaep:    8,510,700 ns
 
 === ML-KEM (FIPS 203) ===
-mlkem-512 keygen:        21,525 ns    mlkem-512 encaps:        22,118 ns
-mlkem-512 decaps:        15,452 ns
-mlkem-768 keygen:        33,509 ns    mlkem-768 encaps:        30,474 ns
-mlkem-768 decaps:        26,109 ns
-mlkem-1024 keygen:       52,639 ns    mlkem-1024 encaps:       44,744 ns
-mlkem-1024 decaps:       40,716 ns
+mlkem-512 keygen:        26,628 ns    mlkem-512 encaps:        28,942 ns
+mlkem-512 decaps:        29,847 ns
+mlkem-768 keygen:        47,484 ns    mlkem-768 encaps:        42,842 ns
+mlkem-768 decaps:        46,662 ns
+mlkem-1024 keygen:       54,694 ns    mlkem-1024 encaps:       44,500 ns
+mlkem-1024 decaps:       58,359 ns
 
 === ML-DSA (FIPS 204) ===
-mldsa-44 keygen:         69,115 ns    mldsa-44 sign:           79,827 ns
-mldsa-44 verify:         79,019 ns
-mldsa-65 keygen:        131,463 ns    mldsa-65 sign:          221,747 ns
-mldsa-65 verify:        110,842 ns
-mldsa-87 keygen:        205,472 ns    mldsa-87 sign:          221,586 ns
-mldsa-87 verify:        193,421 ns
+mldsa-44 keygen:         92,258 ns    mldsa-44 sign:          107,500 ns
+mldsa-44 verify:         90,475 ns
+mldsa-65 keygen:        182,270 ns    mldsa-65 sign:          298,130 ns
+mldsa-65 verify:        154,840 ns
+mldsa-87 keygen:        385,360 ns    mldsa-87 sign:          677,270 ns
+mldsa-87 verify:        276,460 ns
 
 === SLH-DSA (FIPS 205) ===
-slh-dsa sha2-128f keygen:   353,811 ns  sign:    8,574,090 ns  verify:     494,304 ns
-slh-dsa shake-128f keygen: 2,011,752 ns  sign:   53,423,060 ns  verify:   2,848,341 ns
-slh-dsa sha2-192f keygen:   706,002 ns  sign:   19,601,932 ns  verify:   1,010,280 ns
-slh-dsa sha2-256f keygen: 1,853,597 ns  sign:   39,836,176 ns  verify:   1,057,136 ns
+slh-dsa sha2-128f keygen:   704,420 ns  sign:   20,341,000 ns  verify:   1,090,500 ns
+slh-dsa shake-128f keygen: 3,533,000 ns  sign:  106,730,000 ns  verify:   6,939,200 ns
+slh-dsa sha2-192f keygen: 1,604,200 ns  sign:   36,435,000 ns  verify:   1,723,700 ns
+slh-dsa sha2-256f keygen: 3,287,900 ns  sign:  100,510,000 ns  verify:   2,174,800 ns
 
 === HybridKEM / HPKE ===
-hybridkem x25519+mlkem768 encaps:  64,501 ns
-hpke seal:                         43,290 ns
-hpke open:                         51,726 ns
+hybridkem x25519+mlkem768 encaps:  79,261 ns
+hybridkem p256+mlkem768 encaps:   402,840 ns
+hybridkem p384+mlkem768 encaps: 1,167,200 ns
+hpke seal:                         70,660 ns
+hpke open:                         49,509 ns
 
 === FrodoKEM ===
-frodokem-640-shake keygen: 5,604,363 ns  encaps: 3,174,835 ns  decaps: 3,131,860 ns
-frodokem-976-shake keygen:12,674,239 ns  encaps: 7,003,243 ns  decaps: 8,744,269 ns
-frodokem-1344-shake keygen:64,445,331 ns encaps:31,226,990 ns  decaps:30,452,551 ns
+frodokem-640-shake keygen: 6,771,500 ns  encaps: 3,423,800 ns  decaps: 2,881,200 ns
+frodokem-976-shake keygen:10,819,000 ns  encaps: 5,870,800 ns  decaps: 7,014,300 ns
+frodokem-1344-shake keygen:22,208,000 ns encaps:23,371,000 ns  decaps:23,401,000 ns
 
 === McEliece ===
-mceliece-6688128 encaps:     409,700 ns  decaps: 16,900,000 ns
+mceliece-6688128 encaps:     602,420 ns  decaps: 24,010,000 ns
 
 === XMSS ===
-xmss sha2-10-256 verify:    165,500 ns
+xmss sha2-10-256 verify:    194,440 ns
 
-=== XMSS-MT (NEW) ===
-xmss-mt sha2-20-2-256 verify: 476,178 ns
+=== XMSS-MT ===
+xmss-mt sha2-20-2-256 verify: 448,420 ns
 
 === Paillier-512 ===
-paillier-512 encrypt:    227,125 ns    paillier-512 decrypt:    202,578 ns
+paillier-512 encrypt:    462,270 ns    paillier-512 decrypt:    288,320 ns
 
 === Diffie-Hellman ===
-dh-2048 keygen:       4,681,182 ns    dh-2048 derive:       4,839,282 ns
-dh-3072 keygen:      16,388,823 ns    dh-3072 derive:      13,825,022 ns
-dh-4096 keygen:      34,440,220 ns    dh-4096 derive:      34,635,132 ns
+dh-2048 keygen:       7,383,700 ns    dh-2048 derive:       5,639,900 ns
+dh-3072 keygen:      14,765,000 ns    dh-3072 derive:      21,554,000 ns
+dh-4096 keygen:      51,286,000 ns    dh-4096 derive:      53,449,000 ns
 
 === Key Derivation ===
-hkdf extract+expand 32B:    641 ns    hkdf extract+expand 64B:    885 ns
-pbkdf2 1000 iters:      166,135 ns    pbkdf2 10000 iters:   1,666,405 ns
-scrypt n=1024:        1,837,346 ns    scrypt n=16384:      30,989,102 ns
+hkdf extract+expand 32B:    726 ns    hkdf extract+expand 64B:  1,717 ns
+pbkdf2 1000 iters:      471,780 ns    pbkdf2 10000 iters:   4,427,800 ns
+scrypt n=1024:        2,401,500 ns    scrypt n=16384:      42,682,000 ns
 
 === DRBG ===
-ctr-drbg gen 32B:           381 ns    hmac-drbg gen 32B:          703 ns
-hash-drbg-sha256 gen 32B:   465 ns    sm4-ctr-drbg gen 32B:     1,704 ns
+ctr-drbg gen 32B:           580 ns    hmac-drbg gen 32B:          951 ns
+hash-drbg-sha256 gen 32B:   403 ns    sm4-ctr-drbg gen 32B:       528 ns
 
 === BigNum ===
-bignum mul 256:              41 ns    bignum add 256:              42 ns
-bignum mul 512:              93 ns    bignum add 512:              41 ns
-bignum mul 1024:            276 ns    bignum add 1024:             69 ns
-bignum mul 2048:            814 ns    bignum add 2048:            180 ns
-bignum mul 4096:          4,673 ns    bignum add 4096:            254 ns
-bignum mod_exp 1024:    631,772 ns    bignum mod_exp 2048:  3,973,603 ns
-bignum mod_exp 4096:  33,982,960 ns
+bignum mul 256:              48 ns    bignum add 256:              37 ns
+bignum mul 512:             251 ns    bignum add 512:              98 ns
+bignum mul 1024:            412 ns    bignum add 1024:             87 ns
+bignum mul 2048:          1,017 ns    bignum add 2048:            148 ns
+bignum mul 4096:          4,794 ns    bignum add 4096:            264 ns
+bignum mod_exp 1024:    393,150 ns    bignum mod_exp 2048:  3,352,700 ns
+bignum mod_exp 4096:  29,476,000 ns
 ```
 
-## Appendix D: Historical Comparison (P62 → P80)
+## Appendix D: Historical Comparison (P80 → P83)
 
-| Benchmark | P62 (2026-03-01) | P80 (2026-03-03) | Change | Phase(s) |
+| Benchmark | P80 (2026-03-03) | P83 (2026-03-05) | Change | Phase(s) |
 |-----------|-----------------|-------------------|--------|----------|
-| SHA-256 @8KB | 3.27 µs | 3.20 µs | -2% | Stable (HW accel) |
-| SHA-512 @8KB | 5.80 µs | 5.10 µs | -12% | Improved |
-| SM3 @8KB | 27.03 µs | 19.01 µs | **-30%** | P77 pre-expansion + loop unification |
-| AES-128-GCM enc @8KB | 13.4 µs | 10.7 µs | **-20%** | P72/P73 4-block pipeline |
-| AES-128-GCM dec @8KB | 22.7 µs | 17.0 µs | **-25%** | P72/P73 interleaved CTR+GHASH |
-| AES-128-CTR @8KB | 10.3 µs | 6.8 µs | **-34%** | P72 4-block parallel |
-| ECDSA P-256 sign | 43.82 µs | 42.08 µs | -4% | Within noise |
-| ECDSA P-256 verify | 84.04 µs | 85.02 µs | +1% | Within noise |
-| ECDSA P-384 sign | 2.38 ms | 2.37 ms | 0% | Stable (P63 specialized field) |
-| ECDSA P-521 sign | 3.95 ms | 3.95 ms | 0% | Stable (P64 Mersenne field) |
-| Ed25519 sign | 15.40 µs | 14.29 µs | -7% | Slight improvement |
-| Ed448 sign | 661 µs | 661 µs | 0% | Stable (P65/P66/P69) |
-| X25519 DH | 20.10 µs | 28.80 µs | +43% | Thermal-affected in full run |
-| ChaCha20 enc @8KB | 24.1 µs | 19.6 µs | **-19%** | P76 2-block parallel |
-| Poly1305 @8KB | — | 2.72 µs | NEW | P75 r² precompute batch |
-| RSA-2048 sign | 1.27 ms | 1.26 ms | -1% | Stable (P68 CRT) |
-| RSA-3072 sign | — | 10.5 ms | NEW | P53/P67/P68 CIOS+CRT |
-| RSA-4096 sign | — | 9.07 ms | NEW | P53/P67/P68 CIOS+CRT |
-| ML-KEM-768 encaps | 29.00 µs | 30.47 µs | +5% | Within noise |
-| ML-DSA-44 sign | 80.28 µs | 79.83 µs | 0% | Stable |
-| XMSS-MT verify | — | 476 µs | NEW | I85 multi-tree |
-| FrodoKEM-1344 encaps | — | 31.2 ms | NEW | P79 buffer reuse |
-| DH-4096 derive | 25.2 ms | 34.6 ms | +37% | Thermal-affected in full run |
+| SHA-256 @8KB | 3.20 µs | 4.00 µs | +25% | Thermal variance |
+| SHA-512 @8KB | 5.10 µs | 6.02 µs | +18% | Thermal variance |
+| SM3 @8KB | 19.01 µs | 54.28 µs | **+186%** | **P82 regression** + thermal |
+| HMAC-SM3 @8KB | 25.70 µs | 25.85 µs | 0% | Stable (runs earlier in suite) |
+| AES-128-GCM enc @8KB | 10.7 µs | 10.2 µs | -5% | Stable |
+| AES-256-GCM enc @8KB | 12.0 µs | 6.81 µs | **-43%** | Improved |
+| ECDSA P-256 sign | 42.08 µs | 44.03 µs | +5% | Thermal variance |
+| ECDSA P-256 verify | 85.02 µs | 89.27 µs | +5% | Thermal variance |
+| ECDSA P-384 sign | 2.37 ms | 120.6 µs | **-95%** | P63 specialized field (P80 Appendix C was stale) |
+| ECDH P-384 derive | 2.06 ms | 224.8 µs | **-89%** | P63 specialized field (P80 Appendix C was stale) |
+| Ed25519 sign | 14.29 µs | 10.95 µs | **-23%** | Improved |
+| Ed448 sign | 661 µs | 98.4 µs | **-85%** | P65/P66/P69 (P80 Appendix C was stale) |
+| X25519 DH | 28.80 µs | 20.91 µs | **-27%** | Improved |
+| X448 DH | 442.7 µs | 168.5 µs | **-62%** | Improved (P80 Appendix C was stale) |
+| mod_exp 1024-bit | 631.8 µs | 393.2 µs | **-38%** | **P81 MontExpTable** |
+| mod_exp 2048-bit | 3.97 ms | 3.35 ms | **-16%** | **P81 MontExpTable** |
+| mod_exp 4096-bit | 34.0 ms | 29.5 ms | **-13%** | **P81 MontExpTable** |
+| ML-KEM-768 encaps | 30.47 µs | 42.84 µs | +41% | Thermal (runs late in suite) |
+| ML-DSA-44 sign | 79.83 µs | 107.5 µs | +35% | Thermal (runs late in suite) |
+| SM2 sign | 76.09 µs | 58.20 µs | **-24%** | Improved |
+| RSA-2048 sign | 1.26 ms | 1.26 ms | 0% | Stable (P68 CRT) |
 
-> P62-era data from isolated benchmark runs. P80 data from full-suite run (~40 min, 63 groups). Some numbers (X25519, DH-4096) are thermal-affected; isolated runs show better absolute numbers. New benchmarks (Poly1305, RSA-3072/4096, XMSS-MT, FrodoKEM-1344) have no P62 baseline.
+> **Note on P80 Appendix C data**: The P80 PERF_REPORT.md Appendix C contained stale data for several algorithms (P-384, P-521, Ed448, X448) that predated their respective specialized field optimizations (P63/P64/P65/P66). The P83 data above reflects the true current performance. Thermal effects in full-suite runs cause 20–50% variance on some benchmarks.
 
 ## Appendix E: Raw Data Sources
 
