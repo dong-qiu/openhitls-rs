@@ -13490,18 +13490,19 @@ Adopt 2025–2026 Rust ecosystem best practices: workspace lint centralization, 
 
 | Crate | Count |
 |-------|-------|
-| hitls-crypto | 1429 (5 ignored) |
+| hitls-crypto | 1447 (17 ignored) |
 | hitls-tls | 1434 |
 | hitls-pki | 426 |
 | hitls-bignum | 95 (1 ignored) |
 | hitls-utils | 68 |
 | hitls-auth | 47 |
+| hitls-types | 26 |
 | hitls-cli | 161 (5 ignored) |
-| hitls-integration-tests | 261 (14 ignored) |
-| **Total** | **3968 (25 ignored)** |
+| hitls-integration-tests | 261 (2 ignored) |
+| **Total** | **3965 (25 ignored)** |
 
 ### Build Status (Post T74)
-- `cargo test --workspace --all-features`: 3,965 passed, 0 failed, 25 ignored (3,968 total, +3 ignored ct_verify tests)
+- `cargo test --workspace --all-features`: 3,965 passed, 0 failed, 25 ignored
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 

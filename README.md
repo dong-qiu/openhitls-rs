@@ -23,7 +23,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | CLI Tools | ~8K | ~2.5K | **100%** | 16 commands (dgst, genpkey, x509, s-client, s-server, prime, kdf, etc.) |
 | FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
-| Test Infrastructure | ~20K | ~3.5K | **95%** | 3935 tests + Wycheproof + 65 fuzz targets (429 corpus) + security audit |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | 3965 tests + Wycheproof + 65 fuzz targets (429 corpus) + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
 
 ### Not Migrated (by design)
@@ -248,9 +248,9 @@ openhitls-rs/
 │   ├── hitls-pki/       # X.509, PKCS#8/12, CMS
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
 │   └── hitls-cli/       # Command-line tool (16 commands)
-├── tests/interop/       # Integration tests (260 cross-crate)
+├── tests/interop/       # Integration tests (261 cross-crate)
 ├── tests/vectors/       # Test vectors (NIST, Wycheproof, GM/T)
-├── fuzz/                # 63 libfuzzer fuzz targets
+├── fuzz/                # 65 libfuzzer fuzz targets
 └── benches/             # Criterion benchmarks
 ```
 
@@ -260,12 +260,12 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3968 tests, 25 ignored)
+# Run all tests (3965 tests, 25 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1450 tests (17 ignored)
-cargo test -p hitls-tls --all-features      # 1416 tests
+cargo test -p hitls-crypto --all-features   # 1447 tests (17 ignored)
+cargo test -p hitls-tls --all-features      # 1434 tests
 cargo test -p hitls-pki --all-features      # 426 tests
 cargo test -p hitls-bignum                  # 95 tests (1 ignored)
 cargo test -p hitls-utils                   # 68 tests

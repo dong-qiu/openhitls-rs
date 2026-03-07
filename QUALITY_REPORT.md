@@ -13,7 +13,7 @@
 |:-----:|-----------|----------|:------:|-------|
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI + workspace lints | **A+** | Full workspace, all features, all targets; centralized `[workspace.lints]` (T74-A) |
 | **L2** | Unit Tests | 3,965 tests (25 ignored), 100% pass rate | **A** | 3,940+ test fns + 92 async + 15 Wycheproof suites; all high-risk files directly tested |
-| **L3** | Integration Tests | 261 cross-crate tests (TCP loopback + DTLS resilience + OpenSSL interop) | **A** | 14 test files; 5 protocol variants × sync/async; OpenSSL s_client/s_server interop |
+| **L3** | Integration Tests | 261 cross-crate tests (TCP loopback + DTLS resilience + OpenSSL interop) | **A** | 15 test files; 5 protocol variants × sync/async; OpenSSL s_client/s_server interop |
 | **L4** | Fuzz Testing | 65 fuzz targets + 429 seed corpus files | **A** | 10 parse + 34 crypto semantic + 8 PQC/sign-path + 13 additional; +fuzz-smoke on PR/push |
 | **L5** | Property-Based Testing | ~87 proptest blocks across 6 crates | **A** | hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum + hitls-auth; comprehensive algorithm coverage |
 | **L6** | Standard Vectors | 15 Wycheproof suites + 7 FIPS KATs + 11 RFC vector sets + 10+ GB/T | **A** | 5,000+ vectors; all major algorithms covered |
