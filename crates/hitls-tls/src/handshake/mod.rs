@@ -10,7 +10,7 @@ pub mod client_dtls12;
 pub mod client_tlcp;
 pub mod codec;
 pub mod codec12;
-#[cfg(feature = "dtls12")]
+#[cfg(any(feature = "dtls12", feature = "dtls13"))]
 pub mod codec_dtls;
 #[cfg(feature = "tlcp")]
 pub mod codec_tlcp;

@@ -21,6 +21,8 @@ pub mod connection_dtlcp_async;
 pub mod connection_dtls12;
 #[cfg(all(feature = "async", feature = "dtls12"))]
 pub mod connection_dtls12_async;
+#[cfg(feature = "dtls13")]
+pub mod connection_dtls13;
 pub mod connection_info;
 #[cfg(feature = "tlcp")]
 pub mod connection_tlcp;
@@ -40,6 +42,7 @@ pub enum TlsVersion {
     Tls12,
     Tls13,
     Dtls12,
+    Dtls13,
     Tlcp,
     Dtlcp,
 }
@@ -266,6 +269,7 @@ mod tests {
             TlsVersion::Tls12,
             TlsVersion::Tls13,
             TlsVersion::Dtls12,
+            TlsVersion::Dtls13,
             TlsVersion::Tlcp,
             TlsVersion::Dtlcp,
         ];
@@ -418,9 +422,10 @@ mod tests {
         set.insert(TlsVersion::Tls12);
         set.insert(TlsVersion::Tls13);
         set.insert(TlsVersion::Dtls12);
+        set.insert(TlsVersion::Dtls13);
         set.insert(TlsVersion::Tlcp);
         set.insert(TlsVersion::Dtlcp);
         set.insert(TlsVersion::Tls12); // duplicate
-        assert_eq!(set.len(), 5);
+        assert_eq!(set.len(), 6);
     }
 }
