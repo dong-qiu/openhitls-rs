@@ -1072,7 +1072,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
                 .config
                 .session_cache
                 .as_ref()
-                .map(|c| c.lock().unwrap());
+                .map(|c| c.lock().unwrap_or_else(|e| e.into_inner()));
             hs.process_client_hello_resumable(
                 &ch_data,
                 cache_ref
@@ -1501,7 +1501,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
                 .config
                 .session_cache
                 .as_ref()
-                .map(|c| c.lock().unwrap());
+                .map(|c| c.lock().unwrap_or_else(|e| e.into_inner()));
             hs.process_client_hello_resumable(
                 &ch_data,
                 cache_ref

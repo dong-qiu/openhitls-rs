@@ -213,10 +213,28 @@ jobs:
       - name: Run fuzz targets (10s each)
         run: |
           cd fuzz
+          FAILED=0
           for target in $(cargo fuzz list); do
             echo "=== Smoke-testing $target ==="
-            timeout 30 cargo fuzz run "$target" -- -max_total_time=10 || true
+            timeout 30 cargo fuzz run "$target" -- -max_total_time=10 && continue
+            EXIT_CODE=$?
+            # Exit 124 = timeout (normal for fuzz), anything else = crash
+            if [ $EXIT_CODE -ne 124 ]; then
+              echo "::error::CRASH detected in $target (exit code $EXIT_CODE)"
+              FAILED=1
+            fi
           done
+          if [ $FAILED -ne 0 ]; then
+            echo "::error::One or more fuzz targets crashed"
+            exit 1
+          fi
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-smoke-crashes
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
 
   coverage:
     name: Code Coverage
@@ -286,6 +304,7 @@ jobs:
 
   bench:
     name: Benchmark Check
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -325,6 +344,7 @@ jobs:
 
   careful:
     name: cargo-careful (UB detection)
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

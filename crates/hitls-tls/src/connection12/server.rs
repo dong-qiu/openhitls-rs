@@ -147,7 +147,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             .config
             .session_cache
             .as_ref()
-            .map(|c| c.lock().unwrap());
+            .map(|c| c.lock().unwrap_or_else(|e| e.into_inner()));
         let result = hs.process_client_hello_resumable(
             &ch_data,
             cache_ref
@@ -577,7 +577,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             .config
             .session_cache
             .as_ref()
-            .map(|c| c.lock().unwrap());
+            .map(|c| c.lock().unwrap_or_else(|e| e.into_inner()));
         let result = hs.process_client_hello_resumable(
             ch_data,
             cache_ref
