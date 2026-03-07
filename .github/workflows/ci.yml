@@ -218,7 +218,7 @@ jobs:
           FAILED=0
           for target in $(cargo fuzz list); do
             echo "=== Smoke-testing $target ==="
-            timeout 30 cargo fuzz run "$target" -- -max_total_time=10 && continue
+            timeout 30 cargo fuzz run "$target" -- -max_total_time=10 -dict=dictionary/common.dict && continue
             EXIT_CODE=$?
             # Exit 124 = timeout (normal for fuzz), anything else = crash
             if [ $EXIT_CODE -ne 124 ]; then
@@ -301,8 +301,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Slow keygen + zeroize verification (skip timing and flaky tests)
       # Skip test_elgamal_generate: flaky safe-prime generation (BnRandGenFail)
-      # Skip constant_time/ct_verify: timing tests require --release and quiet hardware
+      # Skip constant_time/ct_verify: timing tests run in dedicated job below
       - run: cargo test -p hitls-crypto --all-features -- --ignored --skip test_openssl --skip test_s_client --skip test_elgamal_generate --skip constant_time --skip ct_verify
+
+  timing-tests:
+    name: Constant-Time Verification
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run timing tests (release mode, advisory)
+        continue-on-error: true
+        run: cargo test -p hitls-crypto --all-features --release -- --ignored constant_time ct_verify
+      - name: Annotate flaky results
+        if: failure()
+        run: echo "::warning::Timing tests failed — may be CI environment noise (CPU frequency scaling, load)"
 
   bench:
     name: Benchmark Check
@@ -382,7 +397,7 @@ jobs:
           cd fuzz
           for target in $(cargo fuzz list); do
             echo "=== Fuzzing $target ==="
-            cargo fuzz run "$target" -- -max_total_time=60 -jobs=2 || true
+            cargo fuzz run "$target" -- -max_total_time=60 -jobs=2 -dict=dictionary/common.dict || true
           done
       - name: Upload crash artifacts
         if: always()

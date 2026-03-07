@@ -1,0 +1,84 @@
+# Common dictionary for fuzz targets
+# Shared magic bytes, protocol constants, and ASN.1 tags
+
+# TLS record types
+tls_change_cipher_spec="\x14"
+tls_alert="\x15"
+tls_handshake="\x16"
+tls_application_data="\x17"
+
+# TLS versions
+tls10="\x03\x01"
+tls11="\x03\x02"
+tls12="\x03\x03"
+tls13="\x03\x04"
+dtls12="\xfe\xfd"
+
+# TLS handshake types
+hs_client_hello="\x01"
+hs_server_hello="\x02"
+hs_certificate="\x0b"
+hs_server_key_exchange="\x0c"
+hs_certificate_request="\x0d"
+hs_server_hello_done="\x0e"
+hs_certificate_verify="\x0f"
+hs_client_key_exchange="\x10"
+hs_finished="\x14"
+hs_encrypted_extensions="\x08"
+
+# ASN.1 tags
+asn1_sequence="\x30"
+asn1_set="\x31"
+asn1_integer="\x02"
+asn1_bit_string="\x03"
+asn1_octet_string="\x04"
+asn1_null="\x05"
+asn1_oid="\x06"
+asn1_utf8_string="\x0c"
+asn1_printable_string="\x13"
+asn1_ia5_string="\x16"
+asn1_utc_time="\x17"
+asn1_generalized_time="\x18"
+asn1_context_0="\xa0"
+asn1_context_1="\xa1"
+asn1_context_2="\xa2"
+asn1_context_3="\xa3"
+
+# ASN.1 length encodings
+asn1_len_128="\x81\x80"
+asn1_len_256="\x82\x01\x00"
+
+# Common OIDs (DER-encoded value bytes)
+oid_rsa="\x2a\x86\x48\x86\xf7\x0d\x01\x01\x01"
+oid_sha256="\x60\x86\x48\x01\x65\x03\x04\x02\x01"
+oid_sha384="\x60\x86\x48\x01\x65\x03\x04\x02\x02"
+oid_sha512="\x60\x86\x48\x01\x65\x03\x04\x02\x03"
+oid_ecdsa_p256="\x2a\x86\x48\xce\x3d\x03\x01\x07"
+oid_ecdsa_p384="\x2b\x81\x04\x00\x22"
+oid_ecdsa_p521="\x2b\x81\x04\x00\x23"
+oid_ed25519="\x2b\x65\x70"
+oid_x25519="\x2b\x65\x6e"
+oid_sm2="\x2a\x81\x1c\xce\x2c"
+
+# PEM markers
+pem_begin="-----BEGIN "
+pem_end="-----END "
+pem_cert="CERTIFICATE-----"
+pem_key="PRIVATE KEY-----"
+
+# Crypto block sizes
+block_16="\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+block_32="\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+
+# Edge case values
+empty=""
+zero="\x00"
+one="\x01"
+ff="\xff"
+max_u16="\xff\xff"
+max_u32="\xff\xff\xff\xff"
+
+# PKCS#7 padding bytes
+pad_1="\x01"
+pad_2="\x02\x02"
+pad_16="\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10"

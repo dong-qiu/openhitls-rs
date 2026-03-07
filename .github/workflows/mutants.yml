@@ -22,6 +22,12 @@ jobs:
         run: cargo mutants -p hitls-bignum --timeout 120
       - name: Mutate hitls-utils
         run: cargo mutants -p hitls-utils --timeout 120
+      - name: Mutate hitls-crypto (GCM)
+        run: cargo mutants -p hitls-crypto --features aes,modes --timeout 180 -E 'modes::gcm'
+      - name: Mutate hitls-crypto (ECDSA)
+        run: cargo mutants -p hitls-crypto --features ecdsa --timeout 180 -E 'ecc::ecdsa'
+      - name: Mutate hitls-crypto (HMAC)
+        run: cargo mutants -p hitls-crypto --features hmac --timeout 180 -E 'hmac'
       - name: Upload mutation results
         if: always()
         uses: actions/upload-artifact@v4
