@@ -1,6 +1,8 @@
 //! Online Certificate Status Protocol (OCSP) support (RFC 6960).
 //!
-//! Provides offline OCSP request/response parsing (no HTTP transport).
+//! Provides OCSP request building, response parsing, signature verification,
+//! delegated responder validation, and response freshness checking.
+//! No HTTP transport — callers handle network I/O.
 
 use hitls_types::PkiError;
 use hitls_utils::asn1::{Decoder, TagClass};
@@ -26,20 +28,30 @@ pub struct OcspCertId {
 
 impl OcspCertId {
     /// Build a CertID from a certificate and its issuer using SHA-256.
+    ///
+    /// Hashes the issuer's raw DER-encoded Name and SubjectPublicKey per RFC 6960 §4.1.1.
     pub fn new(cert: &Certificate, issuer: &Certificate) -> Result<Self, PkiError> {
-        let sha256_oid = known::sha256().to_der_value();
+        Self::new_with_hash(cert, issuer, &HashAlg::Sha256)
+    }
 
-        // Hash of issuer's subject name (simplified — real OCSP hashes raw DER Name)
-        let issuer_name_bytes = format!("{}", issuer.subject).into_bytes();
+    /// Build a CertID with a configurable hash algorithm.
+    pub(crate) fn new_with_hash(
+        cert: &Certificate,
+        issuer: &Certificate,
+        hash_alg: &HashAlg,
+    ) -> Result<Self, PkiError> {
+        let hash_oid = hash_alg_to_oid(hash_alg);
+
+        // Hash of issuer's raw DER-encoded subject Name (RFC 6960 §4.1.1)
         let issuer_name_hash =
-            compute_hash(&issuer_name_bytes, &HashAlg::Sha256).map_err(PkiError::CryptoError)?;
+            compute_hash(&issuer.subject_raw, hash_alg).map_err(PkiError::CryptoError)?;
 
         // Hash of issuer's SubjectPublicKey BIT STRING value
-        let issuer_key_hash = compute_hash(&issuer.public_key.public_key, &HashAlg::Sha256)
+        let issuer_key_hash = compute_hash(&issuer.public_key.public_key, hash_alg)
             .map_err(PkiError::CryptoError)?;
 
         Ok(OcspCertId {
-            hash_algorithm: sha256_oid,
+            hash_algorithm: hash_oid,
             issuer_name_hash,
             issuer_key_hash,
             serial_number: cert.serial_number.clone(),
@@ -124,10 +136,114 @@ impl OcspRequest {
         })
     }
 
+    /// Add another certificate to the request list.
+    pub fn add_cert(
+        &mut self,
+        cert: &Certificate,
+        issuer: &Certificate,
+    ) -> Result<&mut Self, PkiError> {
+        let cert_id = OcspCertId::new(cert, issuer)?;
+        self.request_list.push(cert_id);
+        Ok(self)
+    }
+
     /// Set a nonce value for replay protection.
     pub fn set_nonce(&mut self, nonce: Vec<u8>) -> &mut Self {
         self.nonce = Some(nonce);
         self
+    }
+
+    /// Generate and set a random 16-byte nonce.
+    pub fn generate_nonce(&mut self) -> Result<&mut Self, PkiError> {
+        let mut buf = [0u8; 16];
+        getrandom::getrandom(&mut buf)
+            .map_err(|_| PkiError::CryptoError(hitls_types::CryptoError::InvalidArg(
+                "getrandom failed for OCSP nonce",
+            )))?;
+        self.nonce = Some(buf.to_vec());
+        Ok(self)
+    }
+
+    /// Parse an OCSP request from DER-encoded bytes.
+    pub fn from_der(data: &[u8]) -> Result<Self, PkiError> {
+        let mut outer = Decoder::new(data)
+            .read_sequence()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+
+        // tbsRequest TBSRequest
+        let mut tbs = outer
+            .read_sequence()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+
+        // version [0] EXPLICIT INTEGER DEFAULT v1 — skip if present
+        if !tbs.is_empty() {
+            let tag = tbs
+                .peek_tag()
+                .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+            if tag.class == TagClass::ContextSpecific && tag.number == 0 {
+                let _ = tbs.read_context_specific(0, true);
+            }
+        }
+
+        // requestorName [1] EXPLICIT GeneralName OPTIONAL — skip if present
+        if !tbs.is_empty() {
+            let tag = tbs
+                .peek_tag()
+                .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+            if tag.class == TagClass::ContextSpecific && tag.number == 1 {
+                let _ = tbs.read_context_specific(1, true);
+            }
+        }
+
+        // requestList SEQUENCE OF Request
+        let mut req_list_seq = tbs
+            .read_sequence()
+            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+        let mut request_list = Vec::new();
+        while !req_list_seq.is_empty() {
+            let mut req_seq = req_list_seq
+                .read_sequence()
+                .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+            let cert_id = OcspCertId::from_decoder(&mut req_seq)?;
+            request_list.push(cert_id);
+        }
+
+        // requestExtensions [2] EXPLICIT Extensions OPTIONAL
+        let mut nonce = None;
+        if !tbs.is_empty() {
+            if let Ok(Some(ext_tlv)) = tbs.try_read_context_specific(2, true) {
+                let mut ext_dec = Decoder::new(ext_tlv.value);
+                let mut exts_seq = ext_dec
+                    .read_sequence()
+                    .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                while !exts_seq.is_empty() {
+                    let mut ext_seq = exts_seq
+                        .read_sequence()
+                        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                    let oid_bytes = ext_seq
+                        .read_oid()
+                        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                    let oid = Oid::from_der_value(oid_bytes)
+                        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                    if oid == Oid::new(&[1, 3, 6, 1, 5, 5, 7, 48, 1, 2]) {
+                        // Nonce extension: value is OCTET STRING wrapping OCTET STRING
+                        let outer_oct = ext_seq
+                            .read_octet_string()
+                            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                        let mut nonce_dec = Decoder::new(outer_oct);
+                        let nonce_val = nonce_dec
+                            .read_octet_string()
+                            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                        nonce = Some(nonce_val.to_vec());
+                    }
+                }
+            }
+        }
+
+        Ok(OcspRequest {
+            request_list,
+            nonce,
+        })
     }
 
     /// Encode the OCSP request to DER.
@@ -220,6 +336,8 @@ pub struct OcspBasicResponse {
     pub responder_id: ResponderId,
     pub produced_at: i64,
     pub responses: Vec<OcspSingleResponse>,
+    /// Nonce extension value from responseExtensions (if present).
+    pub nonce: Option<Vec<u8>>,
     pub signature_algorithm: Vec<u8>,
     pub signature: Vec<u8>,
     pub certs: Vec<Certificate>,
@@ -367,6 +485,43 @@ impl OcspBasicResponse {
             responses.push(parse_single_response(&mut responses_seq)?);
         }
 
+        // responseExtensions [1] EXPLICIT Extensions OPTIONAL
+        let mut nonce = None;
+        if !tbs_dec.is_empty() {
+            if let Ok(Some(ext_tlv)) = tbs_dec.try_read_context_specific(1, true) {
+                let mut ext_dec = Decoder::new(ext_tlv.value);
+                let mut exts_seq = ext_dec
+                    .read_sequence()
+                    .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                while !exts_seq.is_empty() {
+                    let mut ext_seq = exts_seq
+                        .read_sequence()
+                        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                    let oid_bytes = ext_seq
+                        .read_oid()
+                        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                    let oid = Oid::from_der_value(oid_bytes)
+                        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                    // id-pkix-ocsp-nonce 1.3.6.1.5.5.7.48.1.2
+                    if oid == Oid::new(&[1, 3, 6, 1, 5, 5, 7, 48, 1, 2]) {
+                        let outer_oct = ext_seq
+                            .read_octet_string()
+                            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                        let mut nonce_dec = Decoder::new(outer_oct);
+                        let nonce_val = nonce_dec
+                            .read_octet_string()
+                            .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+                        nonce = Some(nonce_val.to_vec());
+                    } else {
+                        // Skip unknown extensions
+                        while !ext_seq.is_empty() {
+                            let _ = ext_seq.read_tlv();
+                        }
+                    }
+                }
+            }
+        }
+
         // signatureAlgorithm AlgorithmIdentifier
         let mut sig_alg_seq = outer
             .read_sequence()
@@ -406,6 +561,7 @@ impl OcspBasicResponse {
             responder_id,
             produced_at,
             responses,
+            nonce,
             signature_algorithm,
             signature: sig_bytes.to_vec(),
             certs,
@@ -419,10 +575,114 @@ impl OcspBasicResponse {
         verify_signature_with_oid(&sig_oid, &self.tbs_raw, &self.signature, &issuer.public_key)
     }
 
+    /// Verify signature using either the issuer directly or a delegated OCSP responder
+    /// certificate embedded in the response (RFC 6960 §4.2.2.2).
+    ///
+    /// A delegated responder must:
+    /// 1. Be signed by the issuer
+    /// 2. Have the id-kp-OCSPSigning extended key usage
+    pub fn verify_signature_or_delegated(
+        &self,
+        issuer: &Certificate,
+    ) -> Result<bool, PkiError> {
+        // First try direct verification against the issuer
+        if let Ok(true) = self.verify_signature(issuer) {
+            return Ok(true);
+        }
+
+        // Try each embedded certificate as a delegated responder
+        for responder_cert in &self.certs {
+            // Check: responder cert is signed by the issuer
+            if responder_cert.verify_signature(issuer)? {
+                // Check: responder cert has OCSPSigning EKU
+                if has_ocsp_signing_eku(responder_cert) {
+                    // Verify response signature against responder cert
+                    if self.verify_signature(responder_cert)? {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
     /// Find a response for the given CertID.
     pub fn find_response(&self, cert_id: &OcspCertId) -> Option<&OcspSingleResponse> {
         self.responses.iter().find(|r| r.cert_id.matches(cert_id))
     }
+
+    /// Verify the nonce in this response matches the expected nonce from the request.
+    pub fn verify_nonce(&self, expected: &[u8]) -> bool {
+        self.nonce.as_deref() == Some(expected)
+    }
+}
+
+impl OcspSingleResponse {
+    /// Check if this response is valid at the given time.
+    ///
+    /// Returns `true` if `now >= this_update` and (if `next_update` is present)
+    /// `now <= next_update`. The optional `max_age` parameter allows rejecting
+    /// responses older than a threshold even when `next_update` is absent.
+    pub fn check_validity(&self, now: i64, max_age: Option<i64>) -> bool {
+        if now < self.this_update {
+            return false;
+        }
+        if let Some(next) = self.next_update {
+            if now > next {
+                return false;
+            }
+        }
+        if let Some(age) = max_age {
+            if now - self.this_update > age {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl OcspResponse {
+    /// Convenience: check a single certificate's OCSP status.
+    ///
+    /// Builds a CertID, parses the response, verifies the signature (including
+    /// delegated responders), and returns the certificate status.
+    pub fn check_cert(
+        &self,
+        cert: &Certificate,
+        issuer: &Certificate,
+    ) -> Result<Option<OcspCertStatus>, PkiError> {
+        let cert_id = OcspCertId::new(cert, issuer)?;
+        let basic = match &self.basic_response {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+        if !basic.verify_signature_or_delegated(issuer)? {
+            return Err(PkiError::InvalidCert(
+                "OCSP response signature verification failed".into(),
+            ));
+        }
+        Ok(basic.find_response(&cert_id).map(|r| r.status.clone()))
+    }
+}
+
+/// Map a HashAlg to its OID DER value.
+fn hash_alg_to_oid(alg: &HashAlg) -> Vec<u8> {
+    match alg {
+        HashAlg::Sha1 => known::sha1_oid().to_der_value(),
+        HashAlg::Sha256 => known::sha256().to_der_value(),
+        HashAlg::Sha384 => known::sha384().to_der_value(),
+        HashAlg::Sha512 => known::sha512().to_der_value(),
+    }
+}
+
+/// Check if a certificate has the id-kp-OCSPSigning extended key usage.
+fn has_ocsp_signing_eku(cert: &Certificate) -> bool {
+    if let Some(eku) = cert.extended_key_usage() {
+        let ocsp_signing = known::kp_ocsp_signing();
+        return eku.purposes.contains(&ocsp_signing);
+    }
+    false
 }
 
 /// Parse a SingleResponse from a decoder.
@@ -1024,5 +1284,220 @@ mod tests {
             assert_eq!(resp.status, expected);
             assert!(resp.basic_response.is_none());
         }
+    }
+
+    // ---- Phase I88: New OCSP enhancement tests ----
+
+    #[test]
+    fn test_ocsp_cert_id_uses_raw_der_name() {
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server = Certificate::from_pem(SERVER1_PEM).unwrap();
+
+        // Ensure raw DER fields are populated
+        assert!(!ca.subject_raw.is_empty());
+        assert!(!ca.issuer_raw.is_empty());
+
+        let cert_id = OcspCertId::new(&server, &ca).unwrap();
+        // Hash of raw DER Name must be 32 bytes (SHA-256)
+        assert_eq!(cert_id.issuer_name_hash.len(), 32);
+        assert_eq!(cert_id.issuer_key_hash.len(), 32);
+
+        // Verify hash is of raw DER, not string: rebuild and compare
+        let cert_id2 = OcspCertId::new(&server, &ca).unwrap();
+        assert!(cert_id.matches(&cert_id2));
+    }
+
+    #[test]
+    fn test_ocsp_cert_id_new_with_hash_sha384() {
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server = Certificate::from_pem(SERVER1_PEM).unwrap();
+        let cert_id = OcspCertId::new_with_hash(&server, &ca, &HashAlg::Sha384).unwrap();
+        // SHA-384 hash is 48 bytes
+        assert_eq!(cert_id.issuer_name_hash.len(), 48);
+        assert_eq!(cert_id.issuer_key_hash.len(), 48);
+    }
+
+    #[test]
+    fn test_ocsp_request_add_cert() {
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server = Certificate::from_pem(SERVER1_PEM).unwrap();
+        let mut req = OcspRequest::new(&server, &ca).unwrap();
+        assert_eq!(req.request_list.len(), 1);
+
+        // Add same cert again (just to test multi-request)
+        req.add_cert(&server, &ca).unwrap();
+        assert_eq!(req.request_list.len(), 2);
+
+        let der = req.to_der().unwrap();
+        assert!(!der.is_empty());
+    }
+
+    #[test]
+    fn test_ocsp_request_generate_nonce() {
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server = Certificate::from_pem(SERVER1_PEM).unwrap();
+        let mut req = OcspRequest::new(&server, &ca).unwrap();
+        assert!(req.nonce.is_none());
+
+        req.generate_nonce().unwrap();
+        assert!(req.nonce.is_some());
+        assert_eq!(req.nonce.as_ref().unwrap().len(), 16);
+
+        // Nonces should be different each time
+        let nonce1 = req.nonce.clone().unwrap();
+        req.generate_nonce().unwrap();
+        let nonce2 = req.nonce.clone().unwrap();
+        assert_ne!(nonce1, nonce2);
+    }
+
+    #[test]
+    fn test_ocsp_request_der_roundtrip() {
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server = Certificate::from_pem(SERVER1_PEM).unwrap();
+        let mut req = OcspRequest::new(&server, &ca).unwrap();
+        req.set_nonce(vec![0xAA; 16]);
+
+        let der = req.to_der().unwrap();
+        let parsed = OcspRequest::from_der(&der).unwrap();
+
+        assert_eq!(parsed.request_list.len(), 1);
+        assert!(parsed.request_list[0].matches(&req.request_list[0]));
+        assert_eq!(parsed.nonce, Some(vec![0xAA; 16]));
+    }
+
+    #[test]
+    fn test_ocsp_request_from_der_no_nonce() {
+        let ca = Certificate::from_pem(CRL_CA_PEM).unwrap();
+        let server = Certificate::from_pem(SERVER1_PEM).unwrap();
+        let req = OcspRequest::new(&server, &ca).unwrap();
+
+        let der = req.to_der().unwrap();
+        let parsed = OcspRequest::from_der(&der).unwrap();
+
+        assert_eq!(parsed.request_list.len(), 1);
+        assert!(parsed.nonce.is_none());
+    }
+
+    #[test]
+    fn test_ocsp_single_response_check_validity() {
+        let resp = OcspSingleResponse {
+            cert_id: OcspCertId {
+                hash_algorithm: known::sha256().to_der_value(),
+                issuer_name_hash: vec![0u8; 32],
+                issuer_key_hash: vec![0u8; 32],
+                serial_number: vec![1],
+            },
+            status: OcspCertStatus::Good,
+            this_update: 1_000_000,
+            next_update: Some(2_000_000),
+        };
+
+        // Valid: within [this_update, next_update]
+        assert!(resp.check_validity(1_500_000, None));
+
+        // Invalid: before this_update
+        assert!(!resp.check_validity(999_999, None));
+
+        // Invalid: after next_update
+        assert!(!resp.check_validity(2_000_001, None));
+
+        // Valid: at exact boundaries
+        assert!(resp.check_validity(1_000_000, None));
+        assert!(resp.check_validity(2_000_000, None));
+    }
+
+    #[test]
+    fn test_ocsp_single_response_check_validity_max_age() {
+        let resp = OcspSingleResponse {
+            cert_id: OcspCertId {
+                hash_algorithm: known::sha256().to_der_value(),
+                issuer_name_hash: vec![0u8; 32],
+                issuer_key_hash: vec![0u8; 32],
+                serial_number: vec![1],
+            },
+            status: OcspCertStatus::Good,
+            this_update: 1_000_000,
+            next_update: None,
+        };
+
+        // Without max_age: valid at any future time
+        assert!(resp.check_validity(9_999_999, None));
+
+        // With max_age: stale response rejected
+        let max_age = 3600; // 1 hour
+        assert!(resp.check_validity(1_003_000, Some(max_age)));
+        assert!(!resp.check_validity(1_004_000, Some(max_age)));
+    }
+
+    #[test]
+    fn test_ocsp_verify_nonce() {
+        let basic = OcspBasicResponse {
+            tbs_raw: vec![],
+            responder_id: ResponderId::ByKey(vec![0u8; 32]),
+            produced_at: 1_763_164_800,
+            responses: vec![],
+            nonce: Some(vec![0xBB; 16]),
+            signature_algorithm: vec![],
+            signature: vec![],
+            certs: vec![],
+        };
+
+        assert!(basic.verify_nonce(&[0xBB; 16]));
+        assert!(!basic.verify_nonce(&[0xCC; 16]));
+    }
+
+    #[test]
+    fn test_ocsp_verify_nonce_absent() {
+        let basic = OcspBasicResponse {
+            tbs_raw: vec![],
+            responder_id: ResponderId::ByKey(vec![0u8; 32]),
+            produced_at: 1_763_164_800,
+            responses: vec![],
+            nonce: None,
+            signature_algorithm: vec![],
+            signature: vec![],
+            certs: vec![],
+        };
+
+        assert!(!basic.verify_nonce(&[0xBB; 16]));
+    }
+
+    #[test]
+    fn test_ocsp_check_cert_convenience() {
+        let kp =
+            hitls_crypto::ecdsa::EcdsaKeyPair::generate(hitls_types::EccCurveId::NistP256).unwrap();
+        let dn = crate::x509::DistinguishedName {
+            entries: vec![("CN".to_string(), "OCSP Check Test".to_string())],
+        };
+        let sk = crate::x509::SigningKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            key_pair: kp.clone(),
+        };
+        let cert =
+            crate::x509::CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000)
+                .unwrap();
+
+        let cert_id = OcspCertId {
+            hash_algorithm: known::sha256().to_der_value(),
+            issuer_name_hash: compute_hash(&cert.subject_raw, &HashAlg::Sha256).unwrap(),
+            issuer_key_hash: compute_hash(&cert.public_key.public_key, &HashAlg::Sha256).unwrap(),
+            serial_number: cert.serial_number.clone(),
+        };
+
+        let sig_alg_oid = known::ecdsa_with_sha256().to_der_value();
+        let der = build_signed_ocsp_response(
+            &[(cert_id, OcspCertStatus::Good, 1_763_164_800)],
+            &sig_alg_oid,
+            &|data: &[u8]| {
+                let mut h = hitls_crypto::sha2::Sha256::new();
+                h.update(data).unwrap();
+                let digest = h.finish().unwrap();
+                kp.sign(&digest).unwrap()
+            },
+        );
+
+        let resp = OcspResponse::from_der(&der).unwrap();
+        let status = resp.check_cert(&cert, &cert).unwrap();
+        assert_eq!(status, Some(OcspCertStatus::Good));
     }
 }

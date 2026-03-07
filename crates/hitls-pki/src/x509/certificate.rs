@@ -23,8 +23,12 @@ pub struct Certificate {
     pub serial_number: Vec<u8>,
     /// Issuer distinguished name.
     pub issuer: DistinguishedName,
+    /// Raw DER-encoded issuer Name (for OCSP CertID hashing).
+    pub issuer_raw: Vec<u8>,
     /// Subject distinguished name.
     pub subject: DistinguishedName,
+    /// Raw DER-encoded subject Name (for OCSP CertID hashing).
+    pub subject_raw: Vec<u8>,
     /// Not-before validity time (UNIX timestamp).
     pub not_before: i64,
     /// Not-after validity time (UNIX timestamp).
@@ -314,14 +318,20 @@ impl Certificate {
         // signature AlgorithmIdentifier (inner — must match outer)
         let (_inner_sig_oid, _inner_sig_params) = parse_algorithm_identifier(&mut tbs_dec)?;
 
-        // issuer Name
+        // issuer Name — capture raw DER for OCSP CertID hashing
+        let issuer_remaining = tbs_dec.remaining();
         let issuer = parse_name(&mut tbs_dec)?;
+        let issuer_consumed = issuer_remaining.len() - tbs_dec.remaining().len();
+        let issuer_raw = issuer_remaining[..issuer_consumed].to_vec();
 
         // validity Validity
         let (not_before, not_after) = parse_validity(&mut tbs_dec)?;
 
-        // subject Name
+        // subject Name — capture raw DER for OCSP CertID hashing
+        let subject_remaining = tbs_dec.remaining();
         let subject = parse_name(&mut tbs_dec)?;
+        let subject_consumed = subject_remaining.len() - tbs_dec.remaining().len();
+        let subject_raw = subject_remaining[..subject_consumed].to_vec();
 
         // subjectPublicKeyInfo SubjectPublicKeyInfo
         let public_key = parse_subject_public_key_info(&mut tbs_dec)?;
@@ -361,7 +371,9 @@ impl Certificate {
             version,
             serial_number,
             issuer,
+            issuer_raw,
             subject,
+            subject_raw,
             not_before,
             not_after,
             public_key,

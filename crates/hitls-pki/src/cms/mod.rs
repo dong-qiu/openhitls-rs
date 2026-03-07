@@ -1732,9 +1732,11 @@ mod tests {
             issuer: crate::x509::DistinguishedName {
                 entries: Vec::new(),
             },
+            issuer_raw: Vec::new(),
             subject: crate::x509::DistinguishedName {
                 entries: Vec::new(),
             },
+            subject_raw: Vec::new(),
             not_before: 0,
             not_after: 0,
             public_key: crate::x509::SubjectPublicKeyInfo {
@@ -1759,9 +1761,11 @@ mod tests {
             issuer: crate::x509::DistinguishedName {
                 entries: Vec::new(),
             },
+            issuer_raw: Vec::new(),
             subject: crate::x509::DistinguishedName {
                 entries: Vec::new(),
             },
+            subject_raw: Vec::new(),
             not_before: 0,
             not_after: 0,
             public_key: crate::x509::SubjectPublicKeyInfo {

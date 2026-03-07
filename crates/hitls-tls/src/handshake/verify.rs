@@ -237,9 +237,11 @@ mod tests {
             issuer: hitls_pki::x509::DistinguishedName {
                 entries: Vec::new(),
             },
+            issuer_raw: Vec::new(),
             subject: hitls_pki::x509::DistinguishedName {
                 entries: Vec::new(),
             },
+            subject_raw: Vec::new(),
             not_before: 0,
             not_after: 0,
             public_key: SubjectPublicKeyInfo {

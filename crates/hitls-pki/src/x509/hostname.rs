@@ -171,7 +171,9 @@ mod tests {
             version: 2,
             serial_number: vec![1],
             issuer: DistinguishedName { entries: vec![] },
+            issuer_raw: vec![],
             subject: DistinguishedName { entries },
+            subject_raw: vec![],
             not_before: 0,
             not_after: i64::MAX,
             public_key: SubjectPublicKeyInfo {
