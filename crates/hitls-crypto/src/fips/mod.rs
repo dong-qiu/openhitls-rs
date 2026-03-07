@@ -8,6 +8,7 @@
 //!
 //! All functionality is gated behind `#[cfg(feature = "fips")]`.
 
+pub mod boundary;
 mod integrity;
 mod kat;
 mod pct;
@@ -70,20 +71,24 @@ impl FipsModule {
         }
 
         self.state = FipsState::SelfTesting;
+        boundary::set_global_state(FipsState::SelfTesting);
 
         // Run Known Answer Tests
         if let Err(e) = kat::run_all_kat() {
             self.state = FipsState::Error;
+            boundary::set_global_state(FipsState::Error);
             return Err(e);
         }
 
         // Run Pairwise Consistency Tests
         if let Err(e) = pct::run_all_pct() {
             self.state = FipsState::Error;
+            boundary::set_global_state(FipsState::Error);
             return Err(e);
         }
 
         self.state = FipsState::Operational;
+        boundary::set_global_state(FipsState::Operational);
         Ok(())
     }
 
@@ -132,6 +137,8 @@ mod tests {
             .expect("FIPS self-tests should pass");
         assert_eq!(module.state(), FipsState::Operational);
         assert!(module.is_operational());
+        // Global state should be synced
+        assert_eq!(boundary::global_state(), FipsState::Operational);
     }
 
     #[test]
