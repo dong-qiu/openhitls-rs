@@ -59,91 +59,93 @@ jobs:
       - run: cargo nextest run --workspace --no-default-features --profile ci
 
   test-features:
-    name: Test Feature Combinations
+    name: "Features: ${{ matrix.group }}"
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [crypto-single, crypto-advanced, tls-protocol, pki-auth]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # Test individual feature flags for hitls-crypto
-      - run: cargo test -p hitls-crypto --features aes
-      - run: cargo test -p hitls-crypto --features sha2
-      - run: cargo test -p hitls-crypto --features rsa
-      - run: cargo test -p hitls-crypto --features sm2
-      - run: cargo test -p hitls-crypto --features pqc
-      # Test common feature combinations for hitls-crypto
-      - run: cargo test -p hitls-crypto --features aes,sha2
-      - run: cargo test -p hitls-crypto --features rsa,ecdsa
-      - run: cargo test -p hitls-crypto --features sm2,sm4
-      # Test individual TLS protocol features
-      - run: cargo test -p hitls-tls --features tls13
-      - run: cargo test -p hitls-tls --features tls12
-      - run: cargo test -p hitls-tls --features tlcp
-      # Additional single-feature flags
-      - run: cargo test -p hitls-crypto --no-default-features --features dh
-      - run: cargo test -p hitls-crypto --no-default-features --features dsa
-      - run: cargo test -p hitls-crypto --no-default-features --features ed25519
-      - run: cargo test -p hitls-crypto --no-default-features --features ed448
-      - run: cargo test -p hitls-crypto --no-default-features --features sm3
-      - run: cargo test -p hitls-crypto --no-default-features --features sm4
-      - run: cargo test -p hitls-crypto --no-default-features --features chacha20
-      - run: cargo test -p hitls-crypto --no-default-features --features cmac
-      - run: cargo test -p hitls-crypto --no-default-features --features scrypt
-      - run: cargo test -p hitls-crypto --no-default-features --features entropy
-      # Cross-feature combinations
-      - run: cargo test -p hitls-crypto --no-default-features --features aes,modes
-      - run: cargo test -p hitls-crypto --no-default-features --features pqc,ecdsa
-      # Additional single-feature isolation
-      - run: cargo test -p hitls-crypto --no-default-features --features sha1
-      - run: cargo test -p hitls-crypto --no-default-features --features sha3
-      - run: cargo test -p hitls-crypto --no-default-features --features ecdh
-      - run: cargo test -p hitls-crypto --no-default-features --features x25519
-      - run: cargo test -p hitls-crypto --no-default-features --features x448
-      - run: cargo test -p hitls-crypto --no-default-features --features hkdf
-      - run: cargo test -p hitls-crypto --no-default-features --features pbkdf2
-      - run: cargo test -p hitls-crypto --no-default-features --features sm9
-      - run: cargo test -p hitls-crypto --no-default-features --features frodokem
-      - run: cargo test -p hitls-crypto --no-default-features --features mceliece
-      - run: cargo test -p hitls-crypto --no-default-features --features drbg
-      - run: cargo test -p hitls-crypto --no-default-features --features fips
-      # No-default for TLS/PKI/Auth crates
-      - run: cargo test -p hitls-tls --no-default-features
-      - run: cargo test -p hitls-tls --no-default-features --features dtls12
-      - run: cargo test -p hitls-pki --no-default-features
-      - run: cargo test -p hitls-pki --no-default-features --features x509,pkcs8
-      - run: cargo test -p hitls-auth --all-features
-      # TLS protocol feature isolation
-      - run: cargo test -p hitls-tls --no-default-features --features sm_tls13
-      - run: cargo test -p hitls-tls --no-default-features --features dtlcp
-      - run: cargo test -p hitls-tls --no-default-features --features tls13,async
-      - run: cargo test -p hitls-tls --no-default-features --features cert-compression
-      # PKI feature isolation
-      - run: cargo test -p hitls-pki --no-default-features --features cms
-      - run: cargo test -p hitls-pki --no-default-features --features pkcs12
-      # Crypto advanced feature isolation
-      - run: cargo test -p hitls-crypto --no-default-features --features hybridkem
-      - run: cargo test -p hitls-crypto --no-default-features --features hpke
-      # T71-C: Additional feature isolation
-      - run: cargo test -p hitls-crypto --no-default-features --features xmss
-      - run: cargo test -p hitls-crypto --no-default-features --features gmac
-      - run: cargo test -p hitls-crypto --no-default-features --features cbc-mac
-      - run: cargo test -p hitls-crypto --no-default-features --features siphash
-      - run: cargo test -p hitls-crypto --no-default-features --features elgamal
-      - run: cargo test -p hitls-crypto --no-default-features --features paillier
-      # Auth individual features
-      - run: cargo test -p hitls-auth --no-default-features --features otp
-      - run: cargo test -p hitls-auth --no-default-features --features spake2plus
-      - run: cargo test -p hitls-auth --no-default-features --features privpass
-      # T72: Cross-feature combinations
-      - run: cargo test -p hitls-tls --no-default-features --features tls12,tls13
-      - run: cargo test -p hitls-crypto --no-default-features --features aes,modes,sha2
-      - run: cargo test -p hitls-pki --no-default-features --features x509,pkcs8,cms,pkcs12
-      # T73: Async protocol feature combinations
-      - run: cargo test -p hitls-crypto --no-default-features --features md5
-      - run: cargo test -p hitls-tls --no-default-features --features tls12,async
-      - run: cargo test -p hitls-tls --no-default-features --features tlcp,async
-      - run: cargo test -p hitls-tls --no-default-features --features dtlcp,async
+      - name: crypto-single
+        if: matrix.group == 'crypto-single'
+        run: |
+          cargo test -p hitls-crypto --features aes
+          cargo test -p hitls-crypto --features sha2
+          cargo test -p hitls-crypto --features rsa
+          cargo test -p hitls-crypto --features sm2
+          cargo test -p hitls-crypto --features pqc
+          cargo test -p hitls-crypto --features aes,sha2
+          cargo test -p hitls-crypto --features rsa,ecdsa
+          cargo test -p hitls-crypto --features sm2,sm4
+          cargo test -p hitls-crypto --no-default-features --features dh
+          cargo test -p hitls-crypto --no-default-features --features dsa
+          cargo test -p hitls-crypto --no-default-features --features ed25519
+          cargo test -p hitls-crypto --no-default-features --features ed448
+          cargo test -p hitls-crypto --no-default-features --features sm3
+          cargo test -p hitls-crypto --no-default-features --features sm4
+          cargo test -p hitls-crypto --no-default-features --features chacha20
+          cargo test -p hitls-crypto --no-default-features --features cmac
+          cargo test -p hitls-crypto --no-default-features --features scrypt
+          cargo test -p hitls-crypto --no-default-features --features entropy
+      - name: crypto-advanced
+        if: matrix.group == 'crypto-advanced'
+        run: |
+          cargo test -p hitls-crypto --no-default-features --features aes,modes
+          cargo test -p hitls-crypto --no-default-features --features pqc,ecdsa
+          cargo test -p hitls-crypto --no-default-features --features sha1
+          cargo test -p hitls-crypto --no-default-features --features sha3
+          cargo test -p hitls-crypto --no-default-features --features ecdh
+          cargo test -p hitls-crypto --no-default-features --features x25519
+          cargo test -p hitls-crypto --no-default-features --features x448
+          cargo test -p hitls-crypto --no-default-features --features hkdf
+          cargo test -p hitls-crypto --no-default-features --features pbkdf2
+          cargo test -p hitls-crypto --no-default-features --features sm9
+          cargo test -p hitls-crypto --no-default-features --features frodokem
+          cargo test -p hitls-crypto --no-default-features --features mceliece
+          cargo test -p hitls-crypto --no-default-features --features drbg
+          cargo test -p hitls-crypto --no-default-features --features fips
+          cargo test -p hitls-crypto --no-default-features --features hybridkem
+          cargo test -p hitls-crypto --no-default-features --features hpke
+          cargo test -p hitls-crypto --no-default-features --features xmss
+          cargo test -p hitls-crypto --no-default-features --features gmac
+          cargo test -p hitls-crypto --no-default-features --features cbc-mac
+          cargo test -p hitls-crypto --no-default-features --features siphash
+          cargo test -p hitls-crypto --no-default-features --features elgamal
+          cargo test -p hitls-crypto --no-default-features --features paillier
+          cargo test -p hitls-crypto --no-default-features --features md5
+          cargo test -p hitls-crypto --no-default-features --features aes,modes,sha2
+      - name: tls-protocol
+        if: matrix.group == 'tls-protocol'
+        run: |
+          cargo test -p hitls-tls --features tls13
+          cargo test -p hitls-tls --features tls12
+          cargo test -p hitls-tls --features tlcp
+          cargo test -p hitls-tls --no-default-features
+          cargo test -p hitls-tls --no-default-features --features dtls12
+          cargo test -p hitls-tls --no-default-features --features sm_tls13
+          cargo test -p hitls-tls --no-default-features --features dtlcp
+          cargo test -p hitls-tls --no-default-features --features tls13,async
+          cargo test -p hitls-tls --no-default-features --features cert-compression
+          cargo test -p hitls-tls --no-default-features --features tls12,tls13
+          cargo test -p hitls-tls --no-default-features --features tls12,async
+          cargo test -p hitls-tls --no-default-features --features tlcp,async
+          cargo test -p hitls-tls --no-default-features --features dtlcp,async
+      - name: pki-auth
+        if: matrix.group == 'pki-auth'
+        run: |
+          cargo test -p hitls-pki --no-default-features
+          cargo test -p hitls-pki --no-default-features --features x509,pkcs8
+          cargo test -p hitls-pki --no-default-features --features cms
+          cargo test -p hitls-pki --no-default-features --features pkcs12
+          cargo test -p hitls-pki --no-default-features --features x509,pkcs8,cms,pkcs12
+          cargo test -p hitls-auth --all-features
+          cargo test -p hitls-auth --no-default-features --features otp
+          cargo test -p hitls-auth --no-default-features --features spake2plus
+          cargo test -p hitls-auth --no-default-features --features privpass
 
   audit:
     name: Security Audit
@@ -242,13 +244,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate coverage
         run: |
           mkdir -p coverage
-          cargo +nightly llvm-cov --workspace --all-features --branch --codecov --output-path coverage/codecov.json --ignore-filename-regex "tests/vectors/"
+          cargo llvm-cov --workspace --all-features --branch --codecov --output-path coverage/codecov.json --ignore-filename-regex "tests/vectors/"
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -328,17 +330,22 @@ jobs:
   bench-compare:
     name: Benchmark Comparison
     if: github.event_name == 'pull_request'
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.base_ref }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo bench --bench crypto_bench -- --save-baseline base
-      - uses: actions/checkout@v4
-      - run: cargo bench --bench crypto_bench -- --save-baseline head
+      - name: Bench base branch
+        run: |
+          git checkout ${{ github.base_ref }}
+          cargo bench --bench crypto_bench -- --save-baseline base
+      - name: Bench PR head
+        run: |
+          git checkout ${{ github.sha }}
+          cargo bench --bench crypto_bench -- --save-baseline head
       - name: Compare benchmarks
         run: cargo install critcmp --locked && critcmp base head
 
@@ -354,6 +361,9 @@ jobs:
         run: cargo install cargo-careful --locked
       - run: cargo careful test -p hitls-bignum
       - run: cargo careful test -p hitls-crypto --features aes,sha2,modes,hmac
+      - run: cargo careful test -p hitls-crypto --no-default-features --features rsa
+      - run: cargo careful test -p hitls-crypto --no-default-features --features ecdsa,ecdh
+      - run: cargo careful test -p hitls-crypto --no-default-features --features pqc
 
   fuzz-run:
     name: Scheduled Fuzzing
