@@ -29,6 +29,8 @@ pub mod connection_tlcp;
 #[cfg(all(feature = "async", feature = "tlcp"))]
 pub mod connection_tlcp_async;
 pub mod crypt;
+#[cfg(feature = "ech")]
+pub mod ech;
 pub mod extensions;
 pub mod handshake;
 pub mod record;
