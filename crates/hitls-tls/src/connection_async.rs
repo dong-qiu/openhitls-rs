@@ -1467,4 +1467,28 @@ mod tests {
         let (n, buf) = client_read_result.unwrap();
         assert_eq!(&buf[..n], b"pha-empty-done");
     }
+
+    #[tokio::test]
+    async fn test_async_tls13_shutdown_sets_closed_state() {
+        let (client_stream, _server_stream) = tokio::io::duplex(16 * 1024);
+        let config = TlsConfig::builder().verify_peer(false).build();
+        let mut conn = AsyncTlsClientConnection::new(client_stream, config);
+        assert_eq!(conn.state, ConnectionState::Handshaking);
+        // Shutdown transitions to Closed even without handshake (quiet shutdown)
+        conn.shutdown().await.unwrap();
+        assert_eq!(conn.state, ConnectionState::Closed);
+        // Read after close should fail
+        let mut buf = [0u8; 16];
+        let result = conn.read(&mut buf).await;
+        assert!(result.is_err() || result.unwrap() == 0);
+    }
+
+    #[tokio::test]
+    async fn test_async_tls13_key_update_before_connected() {
+        let (client_stream, _server_stream) = tokio::io::duplex(16 * 1024);
+        let config = TlsConfig::builder().verify_peer(false).build();
+        let mut conn = AsyncTlsClientConnection::new(client_stream, config);
+        let result = conn.key_update(false).await;
+        assert!(result.is_err(), "key_update before handshake should fail");
+    }
 }

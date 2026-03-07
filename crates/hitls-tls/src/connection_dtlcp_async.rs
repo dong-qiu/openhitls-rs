@@ -1120,4 +1120,26 @@ mod tests {
         }
         assert_eq!(received, payload);
     }
+
+    #[tokio::test]
+    async fn test_async_dtlcp_write_before_handshake() {
+        let (client_stream, _server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncDtlcpClientConnection::new(
+            client_stream,
+            build_dtlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3).0,
+        );
+        let result = client.write(b"data").await;
+        assert!(result.is_err(), "write before handshake should fail");
+    }
+
+    #[tokio::test]
+    async fn test_async_dtlcp_shutdown_before_connected_fails() {
+        let (client_config, _server_config) =
+            build_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3);
+        let (cs, _ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncDtlcpClientConnection::new(cs, client_config);
+        // DTLCP requires Connected state for shutdown
+        let result = client.shutdown().await;
+        assert!(result.is_err(), "DTLCP shutdown before handshake should fail");
+    }
 }

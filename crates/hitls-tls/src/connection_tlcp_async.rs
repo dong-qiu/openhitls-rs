@@ -921,4 +921,28 @@ mod tests {
             assert_eq!(&buf[..n], msg.as_bytes());
         }
     }
+
+    #[tokio::test]
+    async fn test_async_tlcp_shutdown_transitions_state() {
+        let (client_config, _server_config) =
+            build_tlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3);
+        let (cs, _ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTlcpClientConnection::new(cs, client_config);
+        // Shutdown from any state transitions to Closed
+        client.shutdown().await.unwrap();
+        // After shutdown, write should fail
+        let result = client.write(b"hello").await;
+        assert!(result.is_err(), "write after shutdown should fail");
+    }
+
+    #[tokio::test]
+    async fn test_async_tlcp_write_before_handshake() {
+        let (client_stream, _server_stream) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTlcpClientConnection::new(
+            client_stream,
+            build_tlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3).0,
+        );
+        let result = client.write(b"hello").await;
+        assert!(result.is_err(), "write before handshake should fail");
+    }
 }

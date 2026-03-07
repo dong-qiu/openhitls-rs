@@ -2565,4 +2565,33 @@ mod tests {
         let result = client.write(b"after shutdown").await;
         assert!(result.is_err(), "write after shutdown should fail");
     }
+
+    #[tokio::test]
+    async fn test_async_tls12_read_after_shutdown() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(cs, client_config);
+        let mut server = AsyncTls12ServerConnection::new(ss, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        client.shutdown().await.unwrap();
+        let mut buf = [0u8; 64];
+        let result = client.read(&mut buf).await;
+        assert!(result.is_err() || result.unwrap() == 0, "read after shutdown should fail or return 0");
+    }
+
+    #[tokio::test]
+    async fn test_async_tls12_shutdown_sets_closed_state() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, _server_config) = make_configs(suite);
+        let (cs, _ss) = tokio::io::duplex(64 * 1024);
+        let mut conn = AsyncTls12ClientConnection::new(cs, client_config);
+        // Shutdown transitions to Closed even without handshake
+        conn.shutdown().await.unwrap();
+        assert_eq!(conn.state, ConnectionState::Closed);
+    }
 }

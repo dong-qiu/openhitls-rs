@@ -4,6 +4,8 @@ version = "0.0.0"
 publish = false
 edition = "2021"
 
+[workspace]
+
 [package.metadata]
 cargo-fuzz = true
 
@@ -18,7 +20,9 @@ hitls-crypto = { path = "../crates/hitls-crypto", features = [
     "sm3", "sm4", "dh",
     "x448", "xmss", "hybridkem", "hpke", "sm9",
     "cbc-mac", "gmac", "siphash",
+    "elgamal", "paillier",
 ] }
+hitls-bignum = { path = "../crates/hitls-bignum" }
 hitls-pki = { path = "../crates/hitls-pki" }
 hitls-tls = { path = "../crates/hitls-tls", features = ["tls12", "tls13", "dtls12", "tlcp"] }
 hitls-types = { path = "../crates/hitls-types" }
@@ -346,4 +350,19 @@ doc = false
 [[bin]]
 name = "fuzz_aes_modes"
 path = "fuzz_targets/fuzz_aes_modes.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_elgamal"
+path = "fuzz_targets/fuzz_elgamal.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_paillier"
+path = "fuzz_targets/fuzz_paillier.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_tls13_key_schedule"
+path = "fuzz_targets/fuzz_tls13_key_schedule.rs"
 doc = false

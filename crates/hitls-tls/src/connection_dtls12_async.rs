@@ -1752,4 +1752,25 @@ mod tests {
         assert_eq!(conn.version(), None);
         assert_eq!(conn.cipher_suite(), None);
     }
+
+    #[tokio::test]
+    async fn test_async_dtls12_epoch_initial_state() {
+        let (cs, _) = tokio::io::duplex(64 * 1024);
+        let conn = AsyncDtls12ClientConnection::new(cs, client_config());
+        // Epoch starts at 0 before handshake
+        assert_eq!(conn.write_epoch.epoch, 0);
+        assert_eq!(conn.read_epoch.epoch, 0);
+        assert_eq!(conn.write_epoch.write_seq, 0);
+    }
+
+    #[tokio::test]
+    async fn test_async_dtls12_anti_replay_initial_state() {
+        let (cs, _) = tokio::io::duplex(64 * 1024);
+        let _conn = AsyncDtls12ClientConnection::new(cs, client_config());
+        // Anti-replay window should accept sequence 0
+        let mut ar = AntiReplayWindow::new();
+        assert!(ar.check(0), "new anti-replay window should accept seq 0");
+        ar.accept(0);
+        assert!(!ar.check(0), "anti-replay should reject duplicate seq 0");
+    }
 }
