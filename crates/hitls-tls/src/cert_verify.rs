@@ -116,6 +116,34 @@ pub fn verify_server_certificate(
     Ok(())
 }
 
+/// Verify OCSP stapling requirements after certificate verification.
+///
+/// Called by TLS 1.2/1.3 clients after cert verification completes.
+///
+/// 1. If `config.must_staple` is true and no OCSP response was received → fail
+/// 2. If an OCSP response was received and `config.ocsp_stapling_callback` is set → call it
+pub fn verify_ocsp_stapling(
+    config: &TlsConfig,
+    cert_chain_der: &[Vec<u8>],
+    ocsp_response: Option<&[u8]>,
+) -> Result<(), TlsError> {
+    // Must-staple enforcement
+    if config.must_staple && ocsp_response.is_none() {
+        return Err(TlsError::CertVerifyFailed(
+            "must-staple: server did not provide OCSP response".into(),
+        ));
+    }
+
+    // Invoke OCSP stapling callback if present and response is available
+    if let (Some(ref cb), Some(ocsp)) = (&config.ocsp_stapling_callback, ocsp_response) {
+        cb(ocsp, cert_chain_der).map_err(|reason| {
+            TlsError::CertVerifyFailed(format!("OCSP stapling callback rejected: {reason}"))
+        })?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -713,5 +741,122 @@ mod tests {
             msg.contains("Revoked") || msg.contains("revoked"),
             "expected revocation in error: {msg}"
         );
+    }
+
+    // -------------------------------------------------------
+    // OCSP stapling verification tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_ocsp_stapling_no_must_staple_no_callback() {
+        // Default config: no must_staple, no callback → always passes
+        let config = TlsConfig::builder().verify_peer(false).build();
+        assert!(verify_ocsp_stapling(&config, &[], None).is_ok());
+        assert!(verify_ocsp_stapling(&config, &[], Some(&[0x30, 0x00])).is_ok());
+    }
+
+    #[test]
+    fn test_must_staple_fails_without_ocsp_response() {
+        let config = TlsConfig::builder()
+            .verify_peer(false)
+            .must_staple(true)
+            .build();
+        let result = verify_ocsp_stapling(&config, &[], None);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("must-staple"), "got: {err_msg}");
+    }
+
+    #[test]
+    fn test_must_staple_passes_with_ocsp_response() {
+        let config = TlsConfig::builder()
+            .verify_peer(false)
+            .must_staple(true)
+            .build();
+        assert!(verify_ocsp_stapling(&config, &[], Some(&[0x30, 0x00])).is_ok());
+    }
+
+    #[test]
+    fn test_ocsp_callback_accepts() {
+        use crate::config::OcspStaplingCallback;
+        let cb: OcspStaplingCallback = Arc::new(|_ocsp, _chain| Ok(()));
+        let config = TlsConfig::builder()
+            .verify_peer(false)
+            .ocsp_stapling_callback(cb)
+            .build();
+        assert!(verify_ocsp_stapling(&config, &[], Some(&[0x30, 0x00])).is_ok());
+    }
+
+    #[test]
+    fn test_ocsp_callback_rejects() {
+        use crate::config::OcspStaplingCallback;
+        let cb: OcspStaplingCallback =
+            Arc::new(|_ocsp, _chain| Err("bad OCSP response".into()));
+        let config = TlsConfig::builder()
+            .verify_peer(false)
+            .ocsp_stapling_callback(cb)
+            .build();
+        let result = verify_ocsp_stapling(&config, &[], Some(&[0x30, 0x00]));
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("bad OCSP response"), "got: {err_msg}");
+    }
+
+    #[test]
+    fn test_ocsp_callback_not_called_without_response() {
+        use crate::config::OcspStaplingCallback;
+        // Callback should NOT be called when no OCSP response is present
+        let cb: OcspStaplingCallback =
+            Arc::new(|_ocsp, _chain| Err("should not be called".into()));
+        let config = TlsConfig::builder()
+            .verify_peer(false)
+            .ocsp_stapling_callback(cb)
+            .build();
+        assert!(verify_ocsp_stapling(&config, &[], None).is_ok());
+    }
+
+    #[test]
+    fn test_ocsp_callback_receives_cert_chain() {
+        use crate::config::OcspStaplingCallback;
+        let cert_der = make_self_signed_cert_der("ocsp.example.com");
+        let chain = vec![cert_der.clone()];
+        let expected_len = chain.len();
+
+        let cb: OcspStaplingCallback = Arc::new(move |ocsp, chain| {
+            assert_eq!(chain.len(), expected_len);
+            assert_eq!(ocsp, &[0xAA, 0xBB]);
+            Ok(())
+        });
+        let config = TlsConfig::builder()
+            .verify_peer(false)
+            .ocsp_stapling_callback(cb)
+            .build();
+        assert!(verify_ocsp_stapling(&config, &chain, Some(&[0xAA, 0xBB])).is_ok());
+    }
+
+    #[test]
+    fn test_must_staple_with_callback_both_checked() {
+        use crate::config::OcspStaplingCallback;
+        // must_staple + callback: must_staple is checked first
+        let cb: OcspStaplingCallback =
+            Arc::new(|_ocsp, _chain| Err("rejected by callback".into()));
+
+        // No OCSP response → must_staple error (callback not reached)
+        let config = TlsConfig::builder()
+            .verify_peer(false)
+            .must_staple(true)
+            .ocsp_stapling_callback(cb.clone())
+            .build();
+        let result = verify_ocsp_stapling(&config, &[], None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must-staple"));
+
+        // With OCSP response → callback error
+        let result = verify_ocsp_stapling(&config, &[], Some(&[0x30]));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("rejected by callback"));
     }
 }

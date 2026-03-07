@@ -645,10 +645,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
 
         // Handle optional CertificateStatus
         let (hs_type, next_data) = if hs_type == HandshakeType::CertificateStatus {
+            let (_, cs_body, _) = parse_handshake_header(&next_data)?;
+            hs.process_certificate_status(cs_body)?;
             self.read_handshake_msg().await?
         } else {
             (hs_type, next_data)
         };
+
+        // Verify OCSP stapling (must-staple enforcement + callback)
+        crate::cert_verify::verify_ocsp_stapling(
+            &self.config,
+            hs.server_certs(),
+            hs.ocsp_response(),
+        )?;
 
         // Read ServerKeyExchange or skip
         let (hs_type, next_data) = if hs_type == HandshakeType::ServerKeyExchange {

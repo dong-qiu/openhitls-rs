@@ -190,6 +190,8 @@ pub struct Tls12ClientHandshake {
     negotiated_alpn: Option<Vec<u8>>,
     /// Negotiated max fragment length from ServerHello (RFC 6066).
     negotiated_max_fragment_length: Option<crate::config::MaxFragmentLength>,
+    /// OCSP response received from CertificateStatus message (RFC 6066).
+    ocsp_response: Option<Vec<u8>>,
 }
 
 impl Tls12ClientHandshake {
@@ -231,6 +233,7 @@ impl Tls12ClientHandshake {
             prev_server_verify_data: Vec::new(),
             negotiated_alpn: None,
             negotiated_max_fragment_length: None,
+            ocsp_response: None,
         }
     }
 
@@ -337,6 +340,19 @@ impl Tls12ClientHandshake {
     /// Get the negotiated ALPN protocol (if any).
     pub fn negotiated_alpn(&self) -> Option<&[u8]> {
         self.negotiated_alpn.as_deref()
+    }
+
+    /// OCSP response received from server's CertificateStatus message.
+    pub fn ocsp_response(&self) -> Option<&[u8]> {
+        self.ocsp_response.as_deref()
+    }
+
+    /// Process a TLS 1.2 CertificateStatus message body (RFC 6066 §8).
+    /// Extracts and stores the OCSP response DER bytes.
+    pub fn process_certificate_status(&mut self, body: &[u8]) -> Result<(), TlsError> {
+        let ocsp_response = crate::handshake::codec12::decode_certificate_status12(body)?;
+        self.ocsp_response = Some(ocsp_response);
+        Ok(())
     }
 
     /// Reset handshake state for renegotiation (RFC 5746).
@@ -2166,5 +2182,30 @@ mod tests {
         assert_eq!(hs.prev_server_verify_data, vec![0x02; 12]);
         assert!(hs.client_verify_data.is_empty());
         assert!(hs.server_verify_data.is_empty());
+    }
+
+    #[test]
+    fn test_process_certificate_status() {
+        let config = TlsConfig::builder().verify_peer(false).build();
+        let mut hs = Tls12ClientHandshake::new(config);
+
+        // Initially no OCSP response
+        assert!(hs.ocsp_response().is_none());
+
+        // Valid CertificateStatus body: type=1(ocsp), length=4, response=[0xDE,0xAD,0xBE,0xEF]
+        let body = vec![0x01, 0x00, 0x00, 0x04, 0xDE, 0xAD, 0xBE, 0xEF];
+        hs.process_certificate_status(&body).unwrap();
+
+        assert_eq!(hs.ocsp_response(), Some(&[0xDE, 0xAD, 0xBE, 0xEF][..]));
+    }
+
+    #[test]
+    fn test_process_certificate_status_invalid() {
+        let config = TlsConfig::builder().verify_peer(false).build();
+        let mut hs = Tls12ClientHandshake::new(config);
+
+        // Too-short body should fail
+        assert!(hs.process_certificate_status(&[0x01]).is_err());
+        assert!(hs.ocsp_response().is_none());
     }
 }

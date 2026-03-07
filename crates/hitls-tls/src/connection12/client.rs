@@ -210,13 +210,19 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
 
         // 3b. Handle optional CertificateStatus (RFC 6066, OCSP stapling)
         let (hs_type, next_data) = if hs_type == HandshakeType::CertificateStatus {
-            // CertificateStatus is added to transcript but contents are not used
-            // by the handshake — just available for the application.
-            // Read next message after CertificateStatus
+            let (_, cs_body, _) = parse_handshake_header(&next_data)?;
+            hs.process_certificate_status(cs_body)?;
             self.read_handshake_msg()?
         } else {
             (hs_type, next_data)
         };
+
+        // 3c. Verify OCSP stapling (must-staple enforcement + callback)
+        crate::cert_verify::verify_ocsp_stapling(
+            &self.config,
+            hs.server_certs(),
+            hs.ocsp_response(),
+        )?;
 
         // 4. Read ServerKeyExchange or skip
         let (hs_type, next_data) = if hs_type == HandshakeType::ServerKeyExchange {
@@ -702,10 +708,19 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
 
         // Handle optional CertificateStatus
         let (hs_type, next_data) = if hs_type == HandshakeType::CertificateStatus {
+            let (_, cs_body, _) = parse_handshake_header(&next_data)?;
+            hs.process_certificate_status(cs_body)?;
             self.read_handshake_msg()?
         } else {
             (hs_type, next_data)
         };
+
+        // Verify OCSP stapling (must-staple enforcement + callback)
+        crate::cert_verify::verify_ocsp_stapling(
+            &self.config,
+            hs.server_certs(),
+            hs.ocsp_response(),
+        )?;
 
         // Read ServerKeyExchange or skip
         let (hs_type, next_data) = if hs_type == HandshakeType::ServerKeyExchange {

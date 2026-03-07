@@ -184,6 +184,14 @@ pub type KeyLogCallback = Arc<dyn Fn(&str) + Send + Sync>;
 pub type CertVerifyCallback =
     Arc<dyn Fn(&crate::cert_verify::CertVerifyInfo) -> Result<(), String> + Send + Sync>;
 
+/// Callback for client-side OCSP stapling verification.
+///
+/// Called with the DER-encoded OCSP response and the server certificate chain
+/// (DER-encoded, leaf first). Returns `Ok(())` to accept, `Err(reason)` to reject.
+/// If no callback is set, the stapled OCSP response is stored but not validated.
+pub type OcspStaplingCallback =
+    Arc<dyn Fn(&[u8], &[Vec<u8>]) -> Result<(), String> + Send + Sync>;
+
 /// Callback for server-side SNI-based configuration selection.
 ///
 /// Called with the client's requested hostname. Returns an action to take.
@@ -452,6 +460,11 @@ pub struct TlsConfig {
     pub enable_ocsp_stapling: bool,
     /// Raw DER-encoded OCSP response for server-side stapling.
     pub ocsp_staple: Option<Vec<u8>>,
+    /// Require OCSP staple (must-staple): if true and the server provides no OCSP
+    /// response, the handshake fails. Default: false.
+    pub must_staple: bool,
+    /// Client-side OCSP stapling verification callback.
+    pub ocsp_stapling_callback: Option<OcspStaplingCallback>,
     /// Enable SCT (RFC 6962): client offers, server provides.
     pub enable_sct: bool,
     /// Raw SCT list bytes for server to provide in Certificate entries.
@@ -673,6 +686,8 @@ pub struct TlsConfigBuilder {
     allow_renegotiation: bool,
     enable_ocsp_stapling: bool,
     ocsp_staple: Option<Vec<u8>>,
+    must_staple: bool,
+    ocsp_stapling_callback: Option<OcspStaplingCallback>,
     enable_sct: bool,
     sct_list: Option<Vec<u8>>,
     #[cfg(feature = "tlcp")]
@@ -759,6 +774,8 @@ impl Default for TlsConfigBuilder {
             allow_renegotiation: false,
             enable_ocsp_stapling: false,
             ocsp_staple: None,
+            must_staple: false,
+            ocsp_stapling_callback: None,
             enable_sct: false,
             sct_list: None,
             #[cfg(feature = "tlcp")]
@@ -988,6 +1005,16 @@ impl TlsConfigBuilder {
         self
     }
 
+    pub fn must_staple(mut self, enabled: bool) -> Self {
+        self.must_staple = enabled;
+        self
+    }
+
+    pub fn ocsp_stapling_callback(mut self, cb: OcspStaplingCallback) -> Self {
+        self.ocsp_stapling_callback = Some(cb);
+        self
+    }
+
     pub fn enable_sct(mut self, enabled: bool) -> Self {
         self.enable_sct = enabled;
         self
@@ -1207,6 +1234,8 @@ impl TlsConfigBuilder {
             allow_renegotiation: self.allow_renegotiation,
             enable_ocsp_stapling: self.enable_ocsp_stapling,
             ocsp_staple: self.ocsp_staple,
+            must_staple: self.must_staple,
+            ocsp_stapling_callback: self.ocsp_stapling_callback,
             enable_sct: self.enable_sct,
             sct_list: self.sct_list,
             #[cfg(feature = "tlcp")]

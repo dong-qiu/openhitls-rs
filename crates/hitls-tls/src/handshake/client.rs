@@ -925,6 +925,11 @@ impl ClientHandshake {
         self.transcript.update(msg_data)?;
 
         crate::cert_verify::verify_server_certificate(&self.config, &self.server_certs)?;
+        crate::cert_verify::verify_ocsp_stapling(
+            &self.config,
+            &self.server_certs,
+            self.ocsp_response.as_deref(),
+        )?;
 
         self.state = HandshakeState::WaitCertVerify;
         Ok(())
