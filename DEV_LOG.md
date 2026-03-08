@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I87 (87 phases)
-- Testing: T1–T74 (73 phases, T64 skipped)
+- Testing: T1–T79 (78 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P83 (83 phases)
 
@@ -265,6 +265,11 @@ Category summary:
 | 253 | P81 | Perf | DH Precomputed Generator Tables | 2026-03-04 |
 | 254 | P82 | Perf | SM3 Pipelined Message Expansion | 2026-03-04 |
 | 255 | P83 | Perf | ML-KEM SHAKE Clone-Fork | 2026-03-04 |
+| 256 | T75 | Test | CI Hardening: Mutex Poison Tolerance + Fuzz Crash Detection | 2026-03-08 |
+| 257 | T76 | Test | CI Parallelization: Feature Tests + Coverage + Bench-Compare | 2026-03-08 |
+| 258 | T77 | Test | Timing Tests + Mutation Scope + Fuzz Dictionary | 2026-03-08 |
+| 259 | T78 | Test | Codecov Strict + Async Unit Tests + Fuzz Targets | 2026-03-08 |
+| 260 | T79 | Test | Quality Infrastructure: dudect + Differential + Supply Chain + Formal Verification | 2026-03-09 |
 
 ---
 
@@ -13599,5 +13604,131 @@ Changed `expand_a` to pre-seed a base `Shake128` instance with the ρ seed, then
 
 ### Build Status (Post P83)
 - `cargo test --workspace --all-features`: 3,943 passed, 0 failed, 25 ignored (3,965 total, unchanged)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T75 — CI Hardening: Mutex Poison Tolerance + Fuzz Crash Detection (2026-03-08)
+
+### Summary
+Fixed mutex poisoning panics in TLS connection tests by adding `.unwrap_or_else(|e| e.into_inner())` to all `Mutex::lock()` calls in test code. Fixed fuzz-smoke CI job to properly detect crashes (exit code 77). Fixed cargo-careful feature gates and semver check tolerance.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/*.rs` | Modified | Mutex poison tolerance in test code |
+| `.github/workflows/ci.yml` | Modified | Fuzz-smoke crash detection fix |
+
+### Build Status (Post T75)
+- `cargo test --workspace --all-features`: all passing
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T76 — CI Parallelization: Feature Tests + Coverage + Bench-Compare (2026-03-08)
+
+### Summary
+Parallelized feature flag CI tests into 4 groups for faster builds. Stabilized coverage job with nightly toolchain. Fixed benchmark comparison job configuration.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/ci.yml` | Modified | Feature test parallelization, coverage nightly, bench-compare fix |
+
+### Build Status (Post T76)
+- `cargo test --workspace --all-features`: all passing
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T77 — Timing Tests + Mutation Scope + Fuzz Dictionary (2026-03-08)
+
+### Summary
+Added CI timing-tests weekly job for constant-time verification. Expanded cargo-mutants scope to GCM, ECDSA, and HMAC modules. Created shared fuzz dictionary with TLS record types, ASN.1 tags, OIDs, and edge case values (84 entries).
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/ci.yml` | Modified | Add timing-tests weekly job |
+| `.github/workflows/mutants.yml` | Modified | Add GCM, ECDSA, HMAC mutation targets |
+| `fuzz/dictionary/common.dict` | Created | Shared fuzz dictionary (84 entries) |
+
+### Build Status (Post T77)
+- `cargo test --workspace --all-features`: all passing
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T78 — Codecov Strict + Async Unit Tests + Fuzz Targets (2026-03-08)
+
+### Summary
+Enabled strict Codecov upload (fail_ci_if_error: true) with PR comment layout. Added 10 async unit tests across 5 TLS connection types (TLS 1.3, TLS 1.2, TLCP, DTLCP, DTLS 1.2). Created 3 new fuzz targets (ElGamal, Paillier, TLS 1.3 key schedule) with 18 corpus seeds.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `.codecov.yml` | Modified | PR comment layout, strict upload |
+| `.github/workflows/ci.yml` | Modified | Codecov fail_ci_if_error: true |
+| `crates/hitls-tls/src/connection_async.rs` | Modified | +2 async TLS 1.3 tests |
+| `crates/hitls-tls/src/connection12_async.rs` | Modified | +2 async TLS 1.2 tests |
+| `crates/hitls-tls/src/connection_tlcp_async.rs` | Modified | +2 async TLCP tests |
+| `crates/hitls-tls/src/connection_dtlcp_async.rs` | Modified | +2 async DTLCP tests |
+| `crates/hitls-tls/src/connection_dtls12_async.rs` | Modified | +2 async DTLS 1.2 tests |
+| `fuzz/fuzz_targets/fuzz_elgamal.rs` | Created | ElGamal encrypt/decrypt fuzz |
+| `fuzz/fuzz_targets/fuzz_paillier.rs` | Created | Paillier encrypt/decrypt/add fuzz |
+| `fuzz/fuzz_targets/fuzz_tls13_key_schedule.rs` | Created | HKDF extract/expand/derive_secret fuzz |
+| `fuzz/Cargo.toml` | Modified | +3 fuzz targets, elgamal/paillier features |
+
+### Build Status (Post T78)
+- `cargo test --workspace --all-features`: all passing
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T79 — Quality Infrastructure: dudect + Differential + Supply Chain + Formal Verification (2026-03-09)
+
+### Summary
+Comprehensive quality infrastructure enhancement implementing 11 of 13 planned improvements from the industry best practices analysis. Added dudect-style percentile cropping to timing tests and 5 new constant-time verification tests (SM2, Ed25519, ECDSA P-256, SM4-GCM, HKDF). Added 5 OpenSSL differential tests. Initialized cargo-vet supply chain audit. Added SBOM generation, cargo-geiger unsafe audit, Kani formal verification proofs, OSS-Fuzz integration files, ASan sanitizer CI, reproducible build verification, and SLSA provenance attestation. Lowered cognitive complexity threshold from 30 to 15.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/tests/timing.rs` | Modified | +5 timing tests (SM2, Ed25519, ECDSA P-256 sign, SM4-GCM, HKDF), dudect percentile cropping |
+| `crates/hitls-crypto/tests/ct_verify.rs` | Modified | dudect percentile cropping upgrade |
+| `tests/interop/tests/openssl_interop.rs` | Modified | +5 OpenSSL differential tests (SHA-256, SHA-384, HMAC, AES-GCM, AES-CBC) |
+| `supply-chain/config.toml` | Created | cargo-vet configuration (126 exemptions) |
+| `supply-chain/audits.toml` | Created | cargo-vet audit records |
+| `supply-chain/imports.lock` | Created | cargo-vet import lock |
+| `crates/hitls-bignum/src/ct.rs` | Modified | +4 Kani proof harnesses (ct_eq reflexive/symmetric, ct_select choice0/1) |
+| `Cargo.toml` | Modified | Allow cfg(kani) in workspace lints |
+| `.github/workflows/kani.yml` | Created | Weekly Kani formal verification CI |
+| `.github/workflows/ci.yml` | Modified | +7 CI jobs: openssl-differential, cargo-vet, SBOM+provenance, geiger, ASan, reproducible builds |
+| `oss-fuzz/Dockerfile` | Created | OSS-Fuzz integration |
+| `oss-fuzz/build.sh` | Created | OSS-Fuzz build script |
+| `oss-fuzz/project.yaml` | Created | OSS-Fuzz project config |
+| `clippy.toml` | Modified | Cognitive complexity threshold 30→15 |
+
+### Test Count (Post T79)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1448 (22 ignored) |
+| hitls-tls | 1484 |
+| hitls-pki | 437 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 47 |
+| hitls-types | 26 |
+| hitls-cli | 161 (5 ignored) |
+| hitls-integration-tests | 264 (7 ignored) |
+| **Total** | **4065 (35 ignored)** |
+
+### Build Status (Post T79)
+- `cargo test --workspace --all-features`: 4,030 passed, 0 failed, 35 ignored (4,065 total)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean

@@ -14,15 +14,15 @@
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI + workspace lints | **A+** | Full workspace, all features, all targets; centralized `[workspace.lints]` (T74-A) |
 | **L2** | Unit Tests | 3,965 tests (25 ignored), 100% pass rate | **A** | 3,940+ test fns + 92 async + 15 Wycheproof suites; all high-risk files directly tested |
 | **L3** | Integration Tests | 261 cross-crate tests (TCP loopback + DTLS resilience + OpenSSL interop) | **A** | 15 test files; 5 protocol variants × sync/async; OpenSSL s_client/s_server interop |
-| **L4** | Fuzz Testing | 65 fuzz targets + 429 seed corpus files | **A** | 10 parse + 34 crypto semantic + 8 PQC/sign-path + 13 additional; +fuzz-smoke on PR/push |
+| **L4** | Fuzz Testing | 68 fuzz targets + 447 seed corpus files | **A** | 10 parse + 34 crypto semantic + 8 PQC/sign-path + 16 additional; +fuzz-smoke on PR/push |
 | **L5** | Property-Based Testing | ~87 proptest blocks across 6 crates | **A** | hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum + hitls-auth; comprehensive algorithm coverage |
 | **L6** | Standard Vectors | 15 Wycheproof suites + 7 FIPS KATs + 11 RFC vector sets + 10+ GB/T | **A** | 5,000+ vectors; all major algorithms covered |
-| **L7** | Concurrency & Side-Channel | 48 concurrency-aware tests; 9 timing tests | **B** | Statistical timing analysis (Welch's t-test); multi-threaded stress tests; +3 AEAD ct_verify tests (T74-G) |
+| **L7** | Concurrency & Side-Channel | 48 concurrency-aware tests; 16 timing tests | **A-** | Statistical timing analysis (dudect-style Welch's t-test with percentile cropping); multi-threaded stress tests; +3 AEAD ct_verify tests (T74-G) |
 
 ### 1.2 CI/CD Pipeline
 
 ```
-GitHub Actions (.github/workflows/ci.yml) — 20 jobs, dependency graph: fmt/clippy → test/coverage/miri/ignored
+GitHub Actions (.github/workflows/ci.yml) — 29 jobs, dependency graph: fmt/clippy → test/coverage/miri/ignored
 ├── Format Check       cargo fmt --all -- --check
 ├── Clippy Lint        cargo clippy --all-targets --all-features -- -D warnings
 ├── Test Matrix        Ubuntu + macOS + Windows × Rust stable + MSRV 1.75 (6 jobs)
@@ -31,7 +31,7 @@ GitHub Actions (.github/workflows/ci.yml) — 20 jobs, dependency graph: fmt/cli
 ├── Security Audit     rustsec/audit-check@v2
 ├── UB Detection       Miri on hitls-bignum + hitls-utils + hitls-crypto (benes + mlkem::ntt + mldsa::ntt + modes::gcm + sha2 + sha3 + chacha20 + sm3 + sm4 + p256 + p384 + p521)
 ├── Supply Chain       cargo-deny check (advisories + licenses + bans + sources)
-├── Fuzz Build         cargo fuzz check (nightly) — 65 targets
+├── Fuzz Build         cargo fuzz check (nightly) — 68 targets
 ├── Fuzz Smoke         Every PR/push: 10s per target smoke test (T68-A)
 ├── Cross-compile      aarch64-unknown-linux-gnu + i686-unknown-linux-gnu
 ├── Documentation      cargo doc --workspace --all-features -D warnings
@@ -41,7 +41,7 @@ GitHub Actions (.github/workflows/ci.yml) — 20 jobs, dependency graph: fmt/cli
 ├── Semver Check       PR-only: cargo-semver-checks on 7 library crates (T74-B)
 ├── Careful            cargo-careful UB detection on hitls-bignum + hitls-crypto (T74-F)
 ├── Coverage           cargo-llvm-cov → Codecov JSON + branch coverage (8 components)
-├── Scheduled Fuzz     Weekly: all 65 targets × 60s each (Monday 03:00 UTC)
+├── Scheduled Fuzz     Weekly: all 68 targets × 60s each (Monday 03:00 UTC)
 ├── Scheduled Mutants  Weekly: cargo-mutants on hitls-bignum + hitls-utils (T74-E)
 └── Dependabot         Weekly cargo + github-actions + fuzz dependency updates (T74-H)
 ```
@@ -75,7 +75,7 @@ GitHub Actions (.github/workflows/ci.yml) — 20 jobs, dependency graph: fmt/cli
 | Mechanism | Implementation | Test Coverage |
 |-----------|---------------|:-------------:|
 | Zeroize on drop | All secret types (keys, intermediate states) | Compile-time (derive) + 4 runtime drop verification tests (Phase T52) |
-| Constant-time comparison | `subtle::ConstantTimeEq` in all crypto comparisons | 9 statistical timing tests (Welch's t-test, Phase T49 + T74-G ct_verify) |
+| Constant-time comparison | `subtle::ConstantTimeEq` in all crypto comparisons | 16 statistical timing tests (dudect-style Welch's t-test, Phase T49 + T74-G ct_verify) |
 | Unsafe code confinement | ~44 blocks: AES-NI (8), AES-NEON (6), SHA-2 HW (8), GHASH HW (22), ChaCha20 SIMD (15), McEliece (2) | NIST/RFC vectors + 8 HW↔SW cross-validation tests (Phase T47) |
 | Random generation | `getrandom` crate, never `rand` | Indirect |
 
@@ -91,12 +91,12 @@ GitHub Actions (.github/workflows/ci.yml) — 20 jobs, dependency graph: fmt/cli
 | State machine | ~600 | 16.4% | handshake/connected/not-connected state transitions |
 | Property-based | ~87 | 2.2% | proptest blocks (6 crates: crypto + utils + tls + pki + bignum + auth; comprehensive algorithm + codec coverage) |
 | Concurrency | 48 | 1.2% | Arc/Mutex/thread::spawn/tokio::spawn stress tests |
-| Timing/side-channel | 9 | 0.2% | Welch's t-test statistical timing analysis (6 timing.rs + 3 ct_verify.rs) |
+| Timing/side-channel | 16 | 0.4% | dudect-style Welch's t-test statistical timing analysis (timing.rs + ct_verify.rs) |
 | HW↔SW cross-validation | 8 | 0.2% | Software/hardware path differential tests |
 | Zeroize verification | 4 | 0.1% | Drop-based memory zeroing verification |
 | Other (deterministic, helper, etc.) | ~1,729 | 47.2% | Specific algorithm/module unit tests |
 
-**Key observations**: Error-handling tests (~370) outnumber roundtrip tests (~350), indicating good negative-path coverage. Property-based testing now spans 6/9 crates with ~87 proptest blocks. Concurrency and timing tests have been significantly expanded. Fuzz coverage expanded from 14 → 65 targets with PQC and signature-path coverage. Phase T67 added `CryptoError::InvalidArg(&'static str)` with ~30 descriptive context strings and eliminated 16 `.unwrap()` panic risks in crypto library code. Phase T69–T73 expanded Miri coverage to NTT + GCM + SHA-2/3 + SM3/SM4 + P-256/384/521, feature flag isolation to 59 combos, and proptests to ~87 blocks across 6 crates. Phase T74 added quality infrastructure: workspace lint centralization, cargo-nextest, cargo-semver-checks, Criterion bench-compare, cargo-mutants, cargo-careful, and 3 new constant-time verification tests (ct_verify.rs).
+**Key observations**: Error-handling tests (~370) outnumber roundtrip tests (~350), indicating good negative-path coverage. Property-based testing now spans 6/9 crates with ~87 proptest blocks. Concurrency and timing tests have been significantly expanded. Fuzz coverage expanded from 14 → 68 targets with PQC and signature-path coverage. Phase T67 added `CryptoError::InvalidArg(&'static str)` with ~30 descriptive context strings and eliminated 16 `.unwrap()` panic risks in crypto library code. Phase T69–T73 expanded Miri coverage to NTT + GCM + SHA-2/3 + SM3/SM4 + P-256/384/521, feature flag isolation to 59 combos, and proptests to ~87 blocks across 6 crates. Phase T74 added quality infrastructure: workspace lint centralization, cargo-nextest, cargo-semver-checks, Criterion bench-compare, cargo-mutants, cargo-careful, and 3 new constant-time verification tests (ct_verify.rs).
 
 ### 1.7 High-Risk Zero Direct Unit Test Files — **SIGNIFICANTLY REDUCED** (Phase T45–T46)
 
@@ -673,7 +673,7 @@ Benchmarks exist for:
 
 | Check | Result | Details |
 |-------|:------:|---------|
-| Full test suite | **PASS** | 3,965 passed, 0 failed, 25 ignored |
+| Full test suite | **PASS** | **4,030 PASS, 0 FAIL, 35 IGNORED** (4,065 total) |
 | Clippy (`-D warnings`) | **PASS** | 0 warnings across all workspace, all features, all targets |
 | Format (`cargo fmt`) | **PASS** | All files formatted correctly |
 | No-default-features build | **PASS** | All crates compile without defaults |
@@ -705,7 +705,7 @@ Benchmarks exist for:
 
 | Finding | Severity | Status | Recommendation |
 |---------|:--------:|:------:|----------------|
-| All tests pass (3,965/0/25) | — | Green | Maintain |
+| All tests pass (4,030/0/35) | — | Green | Maintain |
 | Clippy/fmt/doc clean | — | Green | Maintain |
 | Feature isolation all pass | — | Green | Maintain |
 | 48 Mutex `.lock().unwrap()` in TLS | Medium | D34 Open | Replace with poison-tolerant pattern |
@@ -717,14 +717,14 @@ Benchmarks exist for:
 | Dimension | Score | Notes |
 |-----------|:-----:|-------|
 | Static analysis | 10/10 | Zero warnings, workspace lints, MSRV CI |
-| Unit test coverage | 9.5/10 | 3,990 total, all pass, comprehensive edge cases |
-| Fuzz coverage | 9/10 | 65 targets, 429 corpus seeds, smoke on PR |
+| Unit test coverage | 9.5/10 | 4,065 total, all pass, comprehensive edge cases |
+| Fuzz coverage | 9/10 | 68 targets, 447 corpus seeds, smoke on PR |
 | Property testing | 9/10 | ~87 proptest blocks across 6/9 crates |
-| CI/CD automation | 9.5/10 | 20 jobs, nextest, semver, bench, careful, mutants |
+| CI/CD automation | 9.5/10 | 29 jobs, nextest, semver, bench, careful, mutants |
 | Standard vectors | 10/10 | Wycheproof + RFC + FIPS + GB/T |
-| Side-channel defense | 8/10 | 9 timing tests, subtle ConstantTimeEq, ct_verify |
+| Side-channel defense | 9/10 | 16 timing tests, subtle ConstantTimeEq, ct_verify |
 | Code quality (panic-free) | 8.5/10 | 2 library panic!, ~48 Mutex unwrap |
-| **Overall** | **~9.2/10** | **Production-grade quality posture** |
+| **Overall** | **~9.5/10** | **Production-grade quality posture** |
 
 ---
 
@@ -1006,11 +1006,11 @@ Continued hardening beyond the original roadmap:
 
 ## 5. Coverage Targets — Final Status
 
-| Metric | Original (T8) | Target (T18) | **Actual (T74)** | Trend |
+| Metric | Original (T8) | Target (T18) | **Actual (T79)** | Trend |
 |--------|:---------------:|:-------------:|:------------------:|:-----:|
-| Total tests | 2,634 | ~2,750+ | **3,990** (25 ignored) | +51% |
-| Fuzz targets | 10 | 13 | **65** | +400% |
-| Fuzz corpus | 66 | ~79 | **429** | +443% |
+| Total tests | 2,634 | ~2,750+ | **4,065** (35 ignored) | +54% |
+| Fuzz targets | 10 | 13 | **68** | +580% |
+| Fuzz corpus | 66 | ~79 | **447** | +577% |
 | Critical deficiencies | 2 | 0 | **0** | Resolved |
 | High deficiencies | 3 | 0 | **0** | Resolved |
 | Crypto files with tests | 75% | 90%+ | **~97%** | Exceeded |
@@ -1018,7 +1018,7 @@ Continued hardening beyond the original roadmap:
 | PKI files with tests | ~85% | ~85% | **100%** | Exceeded |
 | Property-based testing | No | Yes | **~87 blocks (6/9 crates)** | Exceeded |
 | Code coverage in CI | No | Yes | **llvm-cov + branch (8 components)** | Exceeded |
-| Timing tests | 0 | — | **9** (Welch's t-test) | Strong |
+| Timing tests | 0 | — | **16** (dudect-style Welch's t-test) | Strong |
 | HW↔SW cross-validation | 0 | — | **8** differential tests | Strong |
 | Concurrency stress tests | 38 | — | **48** | Good |
 | Feature flag CI combos | — | — | **59** | Excellent |
@@ -1236,16 +1236,17 @@ The current safety net has significant strengths across multiple dimensions:
 15. **Frozen golden-value KATs**: ML-KEM-768 + ML-DSA-65 deterministic test vectors (Phase T73)
 
 ### 7.4 Infrastructure & Automation
-16. **CI/CD pipeline**: GitHub Actions with 20 jobs: format + lint + test matrix (Ubuntu + macOS + Windows × stable + MSRV 1.75, nextest parallel execution) + feature combos (59 combinations) + security audit + Miri (14 targets) + fuzz build + fuzz smoke (PR/push) + cross-compile (aarch64 + i686) + doc check + ignored tests + bench compare (PR-only critcmp) + semver-checks (PR-only) + cargo-careful (nightly UB) + coverage (llvm-cov + branch, 8 components) + cargo-deny + mutation testing (weekly) + Dependabot
+16. **CI/CD pipeline**: GitHub Actions with 29 jobs: format + lint + test matrix (Ubuntu + macOS + Windows × stable + MSRV 1.75, nextest parallel execution) + feature combos (59 combinations) + security audit + Miri (14 targets) + fuzz build + fuzz smoke (PR/push) + cross-compile (aarch64 + i686) + doc check + ignored tests + bench compare (PR-only critcmp) + semver-checks (PR-only) + cargo-careful (nightly UB) + coverage (llvm-cov + branch, 8 components) + cargo-deny + mutation testing (weekly) + Dependabot + cargo-vet + cargo-geiger + ASan sanitizer + reproducible build verification
 17. **Property-based testing**: ~87 proptest blocks across 6 crates (hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum + hitls-auth)
 18. **Code coverage tracking**: cargo-llvm-cov → Codecov JSON with branch coverage in CI (8 components)
 19. **Miri validation**: Undefined behavior detection on 14 targets (hitls-bignum + hitls-utils + hitls-crypto modules)
 20. **Deterministic testing**: Fixed seeds/keys for reproducible results across platforms
 21. **Comprehensive wrong-state tests**: Every TLS state machine transition has invalid-state rejection tests
-22. **Side-channel verification**: 9 statistical timing tests (Welch's t-test) for constant-time operations (timing.rs + ct_verify.rs)
+22. **Side-channel verification**: 16 timing tests (dudect-style Welch's t-test with percentile cropping) for constant-time operations (timing.rs + ct_verify.rs)
 23. **HW↔SW cross-validation**: 8 differential tests comparing hardware-accelerated and software fallback paths
 24. **OpenSSL interop**: TLS 1.3 handshake verified against OpenSSL s_client
-25. **Panic-free crypto library**: Zero `.unwrap()` on fallible crypto ops in library code — all propagated via `?` operator
+25. **OpenSSL differential crypto tests**: 5 OpenSSL differential crypto tests (SHA-256/384, HMAC, AES-GCM, AES-CBC)
+26. **Panic-free crypto library**: Zero `.unwrap()` on fallible crypto ops in library code — all propagated via `?` operator
 26. **Diagnostic error context**: `CryptoError::InvalidArg(&'static str)` with ~30 descriptive messages for key/nonce/parameter validation failures
 27. **Automated dependency updates**: Dependabot for cargo + GitHub Actions + fuzz (weekly), with MSRV-aware review
 28. **Cross-platform CI**: Ubuntu + macOS + Windows test matrix + aarch64/i686 cross-compile checks
@@ -1253,3 +1254,10 @@ The current safety net has significant strengths across multiple dimensions:
 30. **Mutation testing**: Weekly cargo-mutants on hitls-bignum + hitls-utils for test quality verification
 31. **Benchmark regression detection**: Criterion base vs head comparison with critcmp (PR-only)
 32. **Parallel test execution**: cargo-nextest with retry support (2 retries in CI profile)
+33. **Supply chain audit**: cargo-vet supply chain audit (126 dependencies tracked)
+34. **SBOM & provenance**: CycloneDX SBOM generation with SLSA provenance attestation
+35. **Unsafe code audit**: cargo-geiger unsafe code audit reporting
+36. **Formal verification**: 4 Kani formal verification proofs for BigNum constant-time operations
+37. **OSS-Fuzz integration**: OSS-Fuzz integration files ready for enrollment
+38. **Weekly sanitizer**: Weekly ASan sanitizer + reproducible build verification
+39. **Cognitive complexity**: Cognitive complexity threshold enforced at 15 (was 30)
