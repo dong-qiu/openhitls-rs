@@ -370,12 +370,22 @@ jobs:
           name: sbom-cyclonedx
           path: ./**/bom.json
           retention-days: 90
-      - name: Generate SLSA provenance attestation
+      - name: Compute SBOM digest
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: sbom-digest
+        run: |
+          # Find the first bom.json and compute its sha256
+          SBOM_FILE=$(find . -name "bom.json" -path "*/hitls-crypto/*" | head -1)
+          if [ -n "$SBOM_FILE" ]; then
+            DIGEST=$(sha256sum "$SBOM_FILE" | cut -d' ' -f1)
+            echo "digest=sha256:${DIGEST}" >> "$GITHUB_OUTPUT"
+            echo "path=${SBOM_FILE}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Generate SLSA provenance attestation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.sbom-digest.outputs.digest
         uses: actions/attest-build-provenance@v2
         with:
-          subject-name: sbom-cyclonedx
-          subject-digest: sha256:${{ steps.sbom-upload.outputs.artifact-digest }}
+          subject-path: ${{ steps.sbom-digest.outputs.path }}
           push-to-registry: false
 
   unsafe-audit:
