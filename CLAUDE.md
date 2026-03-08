@@ -110,7 +110,7 @@ cargo fmt --all -- --check
 ### Post-Task Documentation Updates
 After completing each implementation task (phase/feature), **always** update the following files:
 - `DEV_LOG.md` — Add a new phase entry with summary, files modified, implementation details, test counts, and build status (all phase types: N, TN, RN, PN). **After adding the entry, refresh the Phase Index tables at the top of the file**: recalculate the `#` column (sequential row number) for the affected category table (Implementation/Testing/Refactoring/Performance) to ensure numbering is contiguous.
-- `PROMPT_LOG.md` — Record the prompt and result for the phase
+- `PROMPT_LOG.md` — Record the prompt and result for the phase. The `>` quoted line must contain the user's **original CLI input verbatim** (not a Claude-generated summary or English translation). Copy the user's exact text as-is.
 - `CLAUDE.md` — Update status line, test counts, workspace structure annotations, and phase number references to match DEV_LOG.md
 - `README.md` — Update test counts in Building & Testing section; update protocol/algorithm tables if new features added
 
