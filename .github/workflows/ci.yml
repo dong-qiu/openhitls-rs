@@ -468,7 +468,14 @@ jobs:
           git checkout ${{ github.sha }}
           cargo bench --bench crypto_bench -- --save-baseline head
       - name: Compare benchmarks
-        run: cargo install critcmp --locked && critcmp base head
+        run: |
+          cargo install critcmp --locked
+          critcmp base head | tee bench-diff.txt
+      - name: Check for regressions (>10% slowdown)
+        run: |
+          if critcmp base head --threshold 10 2>&1 | grep -q "regressed"; then
+            echo "::warning::Performance regression detected (>10% slowdown)"
+          fi
 
   careful:
     name: cargo-careful (UB detection)
