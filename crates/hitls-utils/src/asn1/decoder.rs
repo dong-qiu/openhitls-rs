@@ -223,6 +223,9 @@ impl<'a> Decoder<'a> {
 /// Parse UTCTime string "YYMMDDHHMMSSZ" to UNIX timestamp.
 /// RFC 5280: 00-49 → 2000-2049, 50-99 → 1950-1999.
 fn parse_utc_time(s: &str) -> Result<i64, CryptoError> {
+    if !s.is_ascii() {
+        return Err(CryptoError::DecodeAsn1Fail);
+    }
     let s = s.strip_suffix('Z').unwrap_or(s);
     if s.len() < 12 {
         return Err(CryptoError::DecodeAsn1Fail);
@@ -239,6 +242,9 @@ fn parse_utc_time(s: &str) -> Result<i64, CryptoError> {
 
 /// Parse GeneralizedTime string "YYYYMMDDHHMMSSZ" to UNIX timestamp.
 fn parse_generalized_time(s: &str) -> Result<i64, CryptoError> {
+    if !s.is_ascii() {
+        return Err(CryptoError::DecodeAsn1Fail);
+    }
     let s = s.strip_suffix('Z').unwrap_or(s);
     if s.len() < 14 {
         return Err(CryptoError::DecodeAsn1Fail);
