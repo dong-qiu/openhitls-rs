@@ -348,9 +348,13 @@ jobs:
         run: cargo vet
 
   sbom:
-    name: SBOM Generation
+    name: SBOM Generation + Provenance
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -361,10 +365,18 @@ jobs:
         run: cargo cyclonedx --all --format json
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
+        id: sbom-upload
         with:
           name: sbom-cyclonedx
           path: ./**/bom.json
           retention-days: 90
+      - name: Generate SLSA provenance attestation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: sbom-cyclonedx
+          subject-digest: sha256:${{ steps.sbom-upload.outputs.artifact-digest }}
+          push-to-registry: false
 
   unsafe-audit:
     name: Unsafe Code Audit (cargo-geiger)
@@ -447,6 +459,46 @@ jobs:
       - run: cargo careful test -p hitls-crypto --no-default-features --features rsa
       - run: cargo careful test -p hitls-crypto --no-default-features --features ecdsa,ecdh
       - run: cargo careful test -p hitls-crypto --no-default-features --features pqc
+
+  reproducible-build:
+    name: Reproducible Build Verification
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build twice and compare checksums
+        run: |
+          cargo build --workspace --all-features --release
+          sha256sum target/release/libhitls_crypto.rlib > /tmp/build1.sha
+          sha256sum target/release/libhitls_bignum.rlib >> /tmp/build1.sha
+          sha256sum target/release/libhitls_tls.rlib >> /tmp/build1.sha
+          cargo clean
+          cargo build --workspace --all-features --release
+          sha256sum target/release/libhitls_crypto.rlib > /tmp/build2.sha
+          sha256sum target/release/libhitls_bignum.rlib >> /tmp/build2.sha
+          sha256sum target/release/libhitls_tls.rlib >> /tmp/build2.sha
+          diff /tmp/build1.sha /tmp/build2.sha
+        env:
+          RUSTFLAGS: ""
+
+  sanitizers:
+    name: AddressSanitizer
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests with ASan
+        env:
+          RUSTFLAGS: "-Z sanitizer=address -D warnings"
+          RUSTDOCFLAGS: "-Z sanitizer=address"
+        run: |
+          cargo +nightly test -p hitls-bignum --target x86_64-unknown-linux-gnu
+          cargo +nightly test -p hitls-crypto --features aes,sha2,modes,hmac --target x86_64-unknown-linux-gnu
+          cargo +nightly test -p hitls-utils --target x86_64-unknown-linux-gnu
 
   fuzz-run:
     name: Scheduled Fuzzing
