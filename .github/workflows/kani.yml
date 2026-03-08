@@ -10,10 +10,13 @@ jobs:
     name: Kani Proofs
     runs-on: ubuntu-latest
     continue-on-error: true
+    strategy:
+      matrix:
+        crate: [hitls-bignum, hitls-utils]
     steps:
       - uses: actions/checkout@v4
       - name: Install Kani
         uses: model-checking/kani-github-action@v1
         with:
           enable-propproof: false
-          args: --workspace -p hitls-bignum --harness kani_proof
+          args: -p ${{ matrix.crate }} --harness kani_proof

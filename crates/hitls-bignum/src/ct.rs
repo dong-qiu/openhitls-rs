@@ -143,6 +143,36 @@ mod kani_proofs {
         let ba = b.ct_eq(&a).unwrap_u8();
         assert!(ab == ba);
     }
+
+    /// Proof: ct_sub_if_gte returns value < modulus when value >= modulus.
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn kani_proof_ct_sub_if_gte_reduces() {
+        let val: u64 = kani::any();
+        let modulus_val: u64 = kani::any();
+        kani::assume(modulus_val > 0);
+        kani::assume(val >= modulus_val);
+        let v = BigNum::from_u64(val);
+        let m = BigNum::from_u64(modulus_val);
+        let result = v.ct_sub_if_gte(&m);
+        // result should equal val - modulus
+        let expected = BigNum::from_u64(val - modulus_val);
+        assert!(result.ct_eq(&expected).unwrap_u8() == 1);
+    }
+
+    /// Proof: ct_sub_if_gte is identity when value < modulus.
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn kani_proof_ct_sub_if_gte_identity() {
+        let val: u64 = kani::any();
+        let modulus_val: u64 = kani::any();
+        kani::assume(modulus_val > 0);
+        kani::assume(val < modulus_val);
+        let v = BigNum::from_u64(val);
+        let m = BigNum::from_u64(modulus_val);
+        let result = v.ct_sub_if_gte(&m);
+        assert!(result.ct_eq(&v).unwrap_u8() == 1);
+    }
 }
 
 #[cfg(test)]

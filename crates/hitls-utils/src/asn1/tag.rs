@@ -92,6 +92,46 @@ impl Tag {
     }
 }
 
+// Kani formal verification proofs
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Proof: short-form tag roundtrip (encode then decode recovers original).
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn kani_proof_tag_short_roundtrip() {
+        let class_val: u8 = kani::any();
+        kani::assume(class_val < 4);
+        let constructed: bool = kani::any();
+        let number: u32 = kani::any();
+        kani::assume(number < 0x1F); // short form
+
+        let class = match class_val {
+            0 => TagClass::Universal,
+            1 => TagClass::Application,
+            2 => TagClass::ContextSpecific,
+            _ => TagClass::Private,
+        };
+
+        let tag = Tag { class, constructed, number };
+        let encoded = tag.to_bytes();
+        let (decoded, len) = Tag::from_bytes(&encoded).unwrap();
+        assert!(len == encoded.len());
+        assert!(decoded.number == tag.number);
+        assert!(decoded.constructed == tag.constructed);
+    }
+
+    /// Proof: Tag::from_bytes never panics on arbitrary 1-byte input.
+    #[kani::proof]
+    fn kani_proof_tag_parse_no_panic() {
+        let byte: u8 = kani::any();
+        let input = [byte];
+        // Should return Ok or Err, never panic
+        let _ = Tag::from_bytes(&input);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
