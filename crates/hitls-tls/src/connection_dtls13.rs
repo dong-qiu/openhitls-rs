@@ -183,20 +183,15 @@ impl Dtls13ClientConnection {
                         self.write_epoch.set_epoch(EPOCH_HANDSHAKE);
                         self.read_epoch.set_epoch(EPOCH_HANDSHAKE);
 
-                        self.encryptor = Some(Dtls13RecordEncryptor::new(
-                            suite,
-                            &actions.client_hs_keys,
-                        )?);
-                        self.decryptor = Some(Dtls13RecordDecryptor::new(
-                            suite,
-                            &actions.server_hs_keys,
-                        )?);
+                        self.encryptor =
+                            Some(Dtls13RecordEncryptor::new(suite, &actions.client_hs_keys)?);
+                        self.decryptor =
+                            Some(Dtls13RecordDecryptor::new(suite, &actions.server_hs_keys)?);
                     }
                     ServerHelloResult::RetryNeeded(_retry) => {
                         // Build new ClientHello with the server's selected group
                         let ch2_msg = self.hs.build_client_hello()?;
-                        let dtls_ch2 =
-                            tls_to_dtls_handshake(&ch2_msg, self.next_msg_seq())?;
+                        let dtls_ch2 = tls_to_dtls_handshake(&ch2_msg, self.next_msg_seq())?;
                         let record = seal_plaintext_dtls13(
                             ContentType::Handshake,
                             &dtls_ch2,
@@ -237,10 +232,8 @@ impl Dtls13ClientConnection {
                     key: result.server_app_keys.key.clone(),
                     iv: result.server_app_keys.iv.clone(),
                 };
-                self.encryptor =
-                    Some(Dtls13RecordEncryptor::new(suite, &result.client_app_keys)?);
-                self.decryptor =
-                    Some(Dtls13RecordDecryptor::new(suite, &result.server_app_keys)?);
+                self.encryptor = Some(Dtls13RecordEncryptor::new(suite, &result.client_app_keys)?);
+                self.decryptor = Some(Dtls13RecordDecryptor::new(suite, &result.server_app_keys)?);
 
                 self.state = Dtls13State::Connected;
             }
@@ -262,27 +255,25 @@ impl Dtls13ClientConnection {
     /// Encrypt application data and return the datagram to send.
     pub fn write(&mut self, data: &[u8]) -> Result<Vec<u8>, TlsError> {
         if self.state != Dtls13State::Connected {
-            return Err(TlsError::HandshakeFailed(
-                "DTLS 1.3: not connected".into(),
-            ));
+            return Err(TlsError::HandshakeFailed("DTLS 1.3: not connected".into()));
         }
-        let enc = self.encryptor.as_mut().ok_or_else(|| {
-            TlsError::RecordError("DTLS 1.3: no encryptor".into())
-        })?;
+        let enc = self
+            .encryptor
+            .as_mut()
+            .ok_or_else(|| TlsError::RecordError("DTLS 1.3: no encryptor".into()))?;
         enc.encrypt_record(ContentType::ApplicationData, data, &mut self.write_epoch)
     }
 
     /// Decrypt an incoming application data datagram.
     pub fn read(&mut self, datagram: &[u8]) -> Result<Vec<u8>, TlsError> {
         if self.state != Dtls13State::Connected {
-            return Err(TlsError::HandshakeFailed(
-                "DTLS 1.3: not connected".into(),
-            ));
+            return Err(TlsError::HandshakeFailed("DTLS 1.3: not connected".into()));
         }
         let (record, _) = parse_dtls13_record(datagram)?;
-        let dec = self.decryptor.as_mut().ok_or_else(|| {
-            TlsError::RecordError("DTLS 1.3: no decryptor".into())
-        })?;
+        let dec = self
+            .decryptor
+            .as_mut()
+            .ok_or_else(|| TlsError::RecordError("DTLS 1.3: no decryptor".into()))?;
         let (ct, pt) = dec.decrypt_record(&record)?;
         if ct != ContentType::ApplicationData {
             return Err(TlsError::RecordError(
@@ -397,16 +388,12 @@ impl Dtls13ServerConnection {
                 // Activate handshake encryption
                 self.write_epoch.set_epoch(EPOCH_HANDSHAKE);
                 self.read_epoch.set_epoch(EPOCH_HANDSHAKE);
-                self.encryptor =
-                    Some(Dtls13RecordEncryptor::new(suite, &actions.server_hs_keys)?);
-                self.decryptor =
-                    Some(Dtls13RecordDecryptor::new(suite, &actions.client_hs_keys)?);
+                self.encryptor = Some(Dtls13RecordEncryptor::new(suite, &actions.server_hs_keys)?);
+                self.decryptor = Some(Dtls13RecordDecryptor::new(suite, &actions.client_hs_keys)?);
 
                 // EncryptedExtensions (encrypted)
-                let dtls_ee = tls_to_dtls_handshake(
-                    &actions.encrypted_extensions_msg,
-                    self.next_msg_seq(),
-                )?;
+                let dtls_ee =
+                    tls_to_dtls_handshake(&actions.encrypted_extensions_msg, self.next_msg_seq())?;
                 outgoing.push(self.encrypt_handshake(&dtls_ee)?);
 
                 // Certificate (encrypted)
@@ -415,10 +402,8 @@ impl Dtls13ServerConnection {
                 outgoing.push(self.encrypt_handshake(&dtls_cert)?);
 
                 // CertificateVerify (encrypted)
-                let dtls_cv = tls_to_dtls_handshake(
-                    &actions.certificate_verify_msg,
-                    self.next_msg_seq(),
-                )?;
+                let dtls_cv =
+                    tls_to_dtls_handshake(&actions.certificate_verify_msg, self.next_msg_seq())?;
                 outgoing.push(self.encrypt_handshake(&dtls_cv)?);
 
                 // Server Finished (encrypted)
@@ -445,10 +430,7 @@ impl Dtls13ServerConnection {
     }
 
     /// Process the client Finished datagram. Completes the handshake.
-    pub fn process_client_finished_datagram(
-        &mut self,
-        datagram: &[u8],
-    ) -> Result<(), TlsError> {
+    pub fn process_client_finished_datagram(&mut self, datagram: &[u8]) -> Result<(), TlsError> {
         let (record, _) = parse_dtls13_record(datagram)?;
 
         let (_, fragment) = if let Some(dec) = &mut self.decryptor {
@@ -466,10 +448,8 @@ impl Dtls13ServerConnection {
         self.read_epoch.set_epoch(EPOCH_APPLICATION);
 
         let suite = self.negotiated_suite.unwrap();
-        self.encryptor =
-            Some(Dtls13RecordEncryptor::new(suite, &self.server_app_keys)?);
-        self.decryptor =
-            Some(Dtls13RecordDecryptor::new(suite, &self.client_app_keys)?);
+        self.encryptor = Some(Dtls13RecordEncryptor::new(suite, &self.server_app_keys)?);
+        self.decryptor = Some(Dtls13RecordDecryptor::new(suite, &self.client_app_keys)?);
 
         self.state = Dtls13State::Connected;
         Ok(())
@@ -478,27 +458,25 @@ impl Dtls13ServerConnection {
     /// Encrypt application data.
     pub fn write(&mut self, data: &[u8]) -> Result<Vec<u8>, TlsError> {
         if self.state != Dtls13State::Connected {
-            return Err(TlsError::HandshakeFailed(
-                "DTLS 1.3: not connected".into(),
-            ));
+            return Err(TlsError::HandshakeFailed("DTLS 1.3: not connected".into()));
         }
-        let enc = self.encryptor.as_mut().ok_or_else(|| {
-            TlsError::RecordError("DTLS 1.3: no encryptor".into())
-        })?;
+        let enc = self
+            .encryptor
+            .as_mut()
+            .ok_or_else(|| TlsError::RecordError("DTLS 1.3: no encryptor".into()))?;
         enc.encrypt_record(ContentType::ApplicationData, data, &mut self.write_epoch)
     }
 
     /// Decrypt incoming application data.
     pub fn read(&mut self, datagram: &[u8]) -> Result<Vec<u8>, TlsError> {
         if self.state != Dtls13State::Connected {
-            return Err(TlsError::HandshakeFailed(
-                "DTLS 1.3: not connected".into(),
-            ));
+            return Err(TlsError::HandshakeFailed("DTLS 1.3: not connected".into()));
         }
         let (record, _) = parse_dtls13_record(datagram)?;
-        let dec = self.decryptor.as_mut().ok_or_else(|| {
-            TlsError::RecordError("DTLS 1.3: no decryptor".into())
-        })?;
+        let dec = self
+            .decryptor
+            .as_mut()
+            .ok_or_else(|| TlsError::RecordError("DTLS 1.3: no decryptor".into()))?;
         let (ct, pt) = dec.decrypt_record(&record)?;
         if ct != ContentType::ApplicationData {
             return Err(TlsError::RecordError(
@@ -560,9 +538,7 @@ mod tests {
     fn test_dtls13_client_server_handshake_and_data() {
         let (seed, _pub_key, cert) = make_ed25519_identity();
 
-        let client_config = TlsConfig::builder()
-            .verify_peer(false)
-            .build();
+        let client_config = TlsConfig::builder().verify_peer(false).build();
 
         let server_config = TlsConfig::builder()
             .role(TlsRole::Server)
@@ -579,7 +555,10 @@ mod tests {
 
         // Server processes ClientHello and returns flight (SH, EE, Cert, CV, Fin)
         let server_flight = server.process_client_hello_datagram(&ch_datagram).unwrap();
-        assert!(server_flight.len() >= 5, "expected at least 5 datagrams in server flight");
+        assert!(
+            server_flight.len() >= 5,
+            "expected at least 5 datagrams in server flight"
+        );
 
         // Client processes each server datagram
         // First datagram is ServerHello (plaintext)
@@ -603,7 +582,9 @@ mod tests {
         assert_eq!(client.version(), Some(TlsVersion::Dtls13));
 
         // Server processes client Finished
-        server.process_client_finished_datagram(&client_fin_datagram).unwrap();
+        server
+            .process_client_finished_datagram(&client_fin_datagram)
+            .unwrap();
         assert!(server.is_connected());
         assert_eq!(server.version(), Some(TlsVersion::Dtls13));
 

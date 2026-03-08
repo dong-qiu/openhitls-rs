@@ -161,9 +161,7 @@ impl Dtls13RecordDecryptor {
         let inner = self
             .aead
             .decrypt(&nonce, &aad, &record.fragment)
-            .map_err(|_| {
-                TlsError::RecordError("DTLS 1.3 decrypt: authentication failed".into())
-            })?;
+            .map_err(|_| TlsError::RecordError("DTLS 1.3 decrypt: authentication failed".into()))?;
 
         parse_inner_plaintext(&inner)
     }

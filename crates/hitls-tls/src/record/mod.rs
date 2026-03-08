@@ -4,13 +4,13 @@
 pub mod anti_replay;
 #[cfg(any(feature = "dtls12", feature = "dtls13"))]
 pub mod dtls;
+#[cfg(feature = "dtls13")]
+pub mod dtls13;
 pub mod encryption;
 pub mod encryption12;
 pub mod encryption12_cbc;
 #[cfg(feature = "dtlcp")]
 pub mod encryption_dtlcp;
-#[cfg(feature = "dtls13")]
-pub mod dtls13;
 #[cfg(feature = "dtls12")]
 pub mod encryption_dtls12;
 #[cfg(feature = "dtls13")]

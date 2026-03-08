@@ -196,7 +196,9 @@ mod tests {
     #[test]
     fn test_parse_incomplete_body() {
         // Header says 100 bytes but body is empty
-        let mut data = vec![22, 0xFE, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let mut data = vec![
+            22, 0xFE, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
         data.extend_from_slice(&100u16.to_be_bytes());
         assert!(parse_dtls13_record(&data).is_err());
     }

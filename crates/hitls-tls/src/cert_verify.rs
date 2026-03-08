@@ -790,8 +790,7 @@ mod tests {
     #[test]
     fn test_ocsp_callback_rejects() {
         use crate::config::OcspStaplingCallback;
-        let cb: OcspStaplingCallback =
-            Arc::new(|_ocsp, _chain| Err("bad OCSP response".into()));
+        let cb: OcspStaplingCallback = Arc::new(|_ocsp, _chain| Err("bad OCSP response".into()));
         let config = TlsConfig::builder()
             .verify_peer(false)
             .ocsp_stapling_callback(cb)
@@ -806,8 +805,7 @@ mod tests {
     fn test_ocsp_callback_not_called_without_response() {
         use crate::config::OcspStaplingCallback;
         // Callback should NOT be called when no OCSP response is present
-        let cb: OcspStaplingCallback =
-            Arc::new(|_ocsp, _chain| Err("should not be called".into()));
+        let cb: OcspStaplingCallback = Arc::new(|_ocsp, _chain| Err("should not be called".into()));
         let config = TlsConfig::builder()
             .verify_peer(false)
             .ocsp_stapling_callback(cb)
@@ -838,8 +836,7 @@ mod tests {
     fn test_must_staple_with_callback_both_checked() {
         use crate::config::OcspStaplingCallback;
         // must_staple + callback: must_staple is checked first
-        let cb: OcspStaplingCallback =
-            Arc::new(|_ocsp, _chain| Err("rejected by callback".into()));
+        let cb: OcspStaplingCallback = Arc::new(|_ocsp, _chain| Err("rejected by callback".into()));
 
         // No OCSP response → must_staple error (callback not reached)
         let config = TlsConfig::builder()

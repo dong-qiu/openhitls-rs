@@ -924,8 +924,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_async_tlcp_shutdown_transitions_state() {
-        let (client_config, _server_config) =
-            build_tlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3);
+        let (client_config, _server_config) = build_tlcp_configs(CipherSuite::ECDHE_SM4_CBC_SM3);
         let (cs, _ss) = tokio::io::duplex(64 * 1024);
         let mut client = AsyncTlcpClientConnection::new(cs, client_config);
         // Shutdown from any state transitions to Closed

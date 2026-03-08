@@ -2581,7 +2581,10 @@ mod tests {
         client.shutdown().await.unwrap();
         let mut buf = [0u8; 64];
         let result = client.read(&mut buf).await;
-        assert!(result.is_err() || result.unwrap() == 0, "read after shutdown should fail or return 0");
+        assert!(
+            result.is_err() || result.unwrap() == 0,
+            "read after shutdown should fail or return 0"
+        );
     }
 
     #[tokio::test]

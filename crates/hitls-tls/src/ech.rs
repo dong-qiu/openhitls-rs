@@ -16,9 +16,7 @@
 //!            || public_name_len(1) || public_name || extensions_len(2) || extensions
 //! ```
 
-use hitls_crypto::hpke::{
-    CipherSuite as HpkeCipherSuite, HpkeAead, HpkeCtx, HpkeKdf, HpkeKem,
-};
+use hitls_crypto::hpke::{CipherSuite as HpkeCipherSuite, HpkeAead, HpkeCtx, HpkeKdf, HpkeKem};
 use hitls_types::TlsError;
 
 /// ECH extension type: Outer = 0 (from client), Inner = 1 (not used in wire).
@@ -75,11 +73,15 @@ pub struct EchClientHello {
 /// Wire format: `ECHConfig...` (concatenated, each self-delimiting via length).
 pub fn parse_ech_config_list(data: &[u8]) -> Result<Vec<EchConfig>, TlsError> {
     if data.len() < 2 {
-        return Err(TlsError::HandshakeFailed("ECH: config list too short".into()));
+        return Err(TlsError::HandshakeFailed(
+            "ECH: config list too short".into(),
+        ));
     }
     let total_len = u16::from_be_bytes([data[0], data[1]]) as usize;
     if data.len() < 2 + total_len {
-        return Err(TlsError::HandshakeFailed("ECH: config list truncated".into()));
+        return Err(TlsError::HandshakeFailed(
+            "ECH: config list truncated".into(),
+        ));
     }
 
     let mut configs = Vec::new();
@@ -118,7 +120,9 @@ fn parse_ech_config(data: &[u8]) -> Result<(EchConfig, usize), TlsError> {
     }
 
     if data.len() < 4 + length {
-        return Err(TlsError::HandshakeFailed("ECH: config body truncated".into()));
+        return Err(TlsError::HandshakeFailed(
+            "ECH: config body truncated".into(),
+        ));
     }
 
     let body = &data[4..4 + length];
@@ -140,12 +144,16 @@ fn parse_ech_config(data: &[u8]) -> Result<(EchConfig, usize), TlsError> {
 
     // public_key (2 + N)
     if pos + 2 > body.len() {
-        return Err(TlsError::HandshakeFailed("ECH: missing public_key len".into()));
+        return Err(TlsError::HandshakeFailed(
+            "ECH: missing public_key len".into(),
+        ));
     }
     let pk_len = u16::from_be_bytes([body[pos], body[pos + 1]]) as usize;
     pos += 2;
     if pos + pk_len > body.len() {
-        return Err(TlsError::HandshakeFailed("ECH: public_key truncated".into()));
+        return Err(TlsError::HandshakeFailed(
+            "ECH: public_key truncated".into(),
+        ));
     }
     let public_key = body[pos..pos + pk_len].to_vec();
     pos += pk_len;
@@ -173,7 +181,9 @@ fn parse_ech_config(data: &[u8]) -> Result<(EchConfig, usize), TlsError> {
 
     // max_name_len (1)
     if pos >= body.len() {
-        return Err(TlsError::HandshakeFailed("ECH: missing max_name_len".into()));
+        return Err(TlsError::HandshakeFailed(
+            "ECH: missing max_name_len".into(),
+        ));
     }
     let max_name_len = body[pos];
     pos += 1;
@@ -187,7 +197,9 @@ fn parse_ech_config(data: &[u8]) -> Result<(EchConfig, usize), TlsError> {
     let name_len = body[pos] as usize;
     pos += 1;
     if pos + name_len > body.len() {
-        return Err(TlsError::HandshakeFailed("ECH: public_name truncated".into()));
+        return Err(TlsError::HandshakeFailed(
+            "ECH: public_name truncated".into(),
+        ));
     }
     let public_name = body[pos..pos + name_len].to_vec();
     pos += name_len;
@@ -266,9 +278,7 @@ pub fn encode_ech_config_list(configs: &[EchConfig]) -> Vec<u8> {
 
 /// Encode the ECHClientHello payload for the encrypted_client_hello extension.
 pub fn encode_ech_client_hello(ech: &EchClientHello) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(
-        1 + 4 + 1 + 2 + ech.enc.len() + 2 + ech.payload.len(),
-    );
+    let mut buf = Vec::with_capacity(1 + 4 + 1 + 2 + ech.enc.len() + 2 + ech.payload.len());
     buf.push(ech.ech_type);
     buf.extend_from_slice(&ech.cipher_suite.kdf_id.to_be_bytes());
     buf.extend_from_slice(&ech.cipher_suite.aead_id.to_be_bytes());
@@ -299,8 +309,7 @@ pub fn parse_ech_client_hello(data: &[u8]) -> Result<EchClientHello, TlsError> {
     let enc = data[8..8 + enc_len].to_vec();
 
     let payload_offset = 8 + enc_len;
-    let payload_len =
-        u16::from_be_bytes([data[payload_offset], data[payload_offset + 1]]) as usize;
+    let payload_len = u16::from_be_bytes([data[payload_offset], data[payload_offset + 1]]) as usize;
     if data.len() < payload_offset + 2 + payload_len {
         return Err(TlsError::HandshakeFailed("ECH: payload truncated".into()));
     }
@@ -387,9 +396,8 @@ pub fn encrypt_inner_client_hello(
     let hpke_suite = HpkeCipherSuite { kem, kdf, aead };
     let info = build_ech_info(config);
 
-    let (mut ctx, enc) =
-        HpkeCtx::setup_sender_with_suite(hpke_suite, &config.public_key, &info)
-            .map_err(|e| TlsError::HandshakeFailed(format!("ECH HPKE setup: {e}")))?;
+    let (mut ctx, enc) = HpkeCtx::setup_sender_with_suite(hpke_suite, &config.public_key, &info)
+        .map_err(|e| TlsError::HandshakeFailed(format!("ECH HPKE setup: {e}")))?;
 
     let ciphertext = ctx
         .seal(outer_aad, inner_ch)
@@ -437,7 +445,7 @@ mod tests {
             kem_id: 0x0020, // X25519
             public_key: vec![0xAA; 32],
             cipher_suites: vec![EchCipherSuite {
-                kdf_id: 0x0001, // HKDF-SHA256
+                kdf_id: 0x0001,  // HKDF-SHA256
                 aead_id: 0x0001, // AES-128-GCM
             }],
             max_name_len: 64,
@@ -537,7 +545,7 @@ mod tests {
             kem_id: 0x0020, // X25519
             public_key: pk.as_bytes().to_vec(),
             cipher_suites: vec![EchCipherSuite {
-                kdf_id: 0x0001, // HKDF-SHA256
+                kdf_id: 0x0001,  // HKDF-SHA256
                 aead_id: 0x0001, // AES-128-GCM
             }],
             max_name_len: 64,
@@ -555,13 +563,8 @@ mod tests {
         assert!(!ech_hello.payload.is_empty());
 
         // Server decrypts
-        let decrypted = decrypt_inner_client_hello(
-            &config,
-            &ech_hello,
-            &sk.to_bytes(),
-            outer_aad,
-        )
-        .unwrap();
+        let decrypted =
+            decrypt_inner_client_hello(&config, &ech_hello, &sk.to_bytes(), outer_aad).unwrap();
         assert_eq!(decrypted, inner_ch);
     }
 
@@ -584,18 +587,13 @@ mod tests {
             public_name: b"public.example.com".to_vec(),
         };
 
-        let ech_hello =
-            encrypt_inner_client_hello(&config, b"secret data", b"aad").unwrap();
+        let ech_hello = encrypt_inner_client_hello(&config, b"secret data", b"aad").unwrap();
 
         // Decrypt with wrong key
         let wrong_sk = X25519PrivateKey::generate().unwrap();
-        assert!(decrypt_inner_client_hello(
-            &config,
-            &ech_hello,
-            &wrong_sk.to_bytes(),
-            b"aad"
-        )
-        .is_err());
+        assert!(
+            decrypt_inner_client_hello(&config, &ech_hello, &wrong_sk.to_bytes(), b"aad").is_err()
+        );
     }
 
     #[test]
@@ -621,13 +619,9 @@ mod tests {
             encrypt_inner_client_hello(&config, b"inner hello", b"correct aad").unwrap();
 
         // Decrypt with wrong AAD
-        assert!(decrypt_inner_client_hello(
-            &config,
-            &ech_hello,
-            &sk.to_bytes(),
-            b"wrong aad"
-        )
-        .is_err());
+        assert!(
+            decrypt_inner_client_hello(&config, &ech_hello, &sk.to_bytes(), b"wrong aad").is_err()
+        );
     }
 
     #[test]
@@ -705,8 +699,7 @@ mod tests {
         // Encode → parse → decode → decrypt
         let wire = encode_ech_client_hello(&ech_hello);
         let parsed = parse_ech_client_hello(&wire).unwrap();
-        let decrypted =
-            decrypt_inner_client_hello(&config, &parsed, &sk.to_bytes(), aad).unwrap();
+        let decrypted = decrypt_inner_client_hello(&config, &parsed, &sk.to_bytes(), aad).unwrap();
         assert_eq!(decrypted, inner);
     }
 }

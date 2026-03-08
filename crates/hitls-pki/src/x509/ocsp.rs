@@ -47,8 +47,8 @@ impl OcspCertId {
             compute_hash(&issuer.subject_raw, hash_alg).map_err(PkiError::CryptoError)?;
 
         // Hash of issuer's SubjectPublicKey BIT STRING value
-        let issuer_key_hash = compute_hash(&issuer.public_key.public_key, hash_alg)
-            .map_err(PkiError::CryptoError)?;
+        let issuer_key_hash =
+            compute_hash(&issuer.public_key.public_key, hash_alg).map_err(PkiError::CryptoError)?;
 
         Ok(OcspCertId {
             hash_algorithm: hash_oid,
@@ -156,10 +156,11 @@ impl OcspRequest {
     /// Generate and set a random 16-byte nonce.
     pub fn generate_nonce(&mut self) -> Result<&mut Self, PkiError> {
         let mut buf = [0u8; 16];
-        getrandom::getrandom(&mut buf)
-            .map_err(|_| PkiError::CryptoError(hitls_types::CryptoError::InvalidArg(
+        getrandom::getrandom(&mut buf).map_err(|_| {
+            PkiError::CryptoError(hitls_types::CryptoError::InvalidArg(
                 "getrandom failed for OCSP nonce",
-            )))?;
+            ))
+        })?;
         self.nonce = Some(buf.to_vec());
         Ok(self)
     }
@@ -581,10 +582,7 @@ impl OcspBasicResponse {
     /// A delegated responder must:
     /// 1. Be signed by the issuer
     /// 2. Have the id-kp-OCSPSigning extended key usage
-    pub fn verify_signature_or_delegated(
-        &self,
-        issuer: &Certificate,
-    ) -> Result<bool, PkiError> {
+    pub fn verify_signature_or_delegated(&self, issuer: &Certificate) -> Result<bool, PkiError> {
         // First try direct verification against the issuer
         if let Ok(true) = self.verify_signature(issuer) {
             return Ok(true);

@@ -203,8 +203,7 @@ pub fn is_approved(alg: FipsAlgorithm) -> bool {
     use FipsAlgorithm::*;
     matches!(
         alg,
-        Sha1
-            | Sha224
+        Sha1 | Sha224
             | Sha256
             | Sha384
             | Sha512

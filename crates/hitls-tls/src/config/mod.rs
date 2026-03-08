@@ -189,8 +189,7 @@ pub type CertVerifyCallback =
 /// Called with the DER-encoded OCSP response and the server certificate chain
 /// (DER-encoded, leaf first). Returns `Ok(())` to accept, `Err(reason)` to reject.
 /// If no callback is set, the stapled OCSP response is stored but not validated.
-pub type OcspStaplingCallback =
-    Arc<dyn Fn(&[u8], &[Vec<u8>]) -> Result<(), String> + Send + Sync>;
+pub type OcspStaplingCallback = Arc<dyn Fn(&[u8], &[Vec<u8>]) -> Result<(), String> + Send + Sync>;
 
 /// Callback for server-side SNI-based configuration selection.
 ///
