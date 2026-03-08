@@ -22,7 +22,17 @@ const NUM_SAMPLES: usize = 10_000;
 /// Welch's t-test threshold. |t| > this value indicates timing leak.
 const T_THRESHOLD: f64 = 4.5;
 
-/// Welch's t-test for two input classes.
+/// Crop a sorted timing vector to the [lo_pct, hi_pct] percentile range.
+/// dudect-style outlier filtering to discard context switches and cache effects.
+fn percentile_crop(times: &mut Vec<f64>, lo_pct: f64, hi_pct: f64) {
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let n = times.len();
+    let lo = (n as f64 * lo_pct) as usize;
+    let hi = (n as f64 * hi_pct) as usize;
+    *times = times[lo..hi.min(n)].to_vec();
+}
+
+/// Welch's t-test with dudect-style percentile cropping.
 fn timing_t_test<I>(
     gen_class_a: impl Fn(usize) -> I,
     gen_class_b: impl Fn(usize) -> I,
@@ -61,6 +71,10 @@ fn timing_t_test<I>(
             times_a.push(start.elapsed().as_nanos() as f64);
         }
     }
+
+    // dudect-style: crop outliers at 5th/95th percentile
+    percentile_crop(&mut times_a, 0.05, 0.95);
+    percentile_crop(&mut times_b, 0.05, 0.95);
 
     let n_a = times_a.len() as f64;
     let n_b = times_b.len() as f64;

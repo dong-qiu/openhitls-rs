@@ -22,7 +22,12 @@
     feature = "sha2",
     feature = "ecdsa",
     feature = "rsa",
-    feature = "x25519"
+    feature = "x25519",
+    feature = "sm2",
+    feature = "ed25519",
+    feature = "hkdf",
+    feature = "modes",
+    feature = "sm4"
 ))]
 
 use std::hint::black_box;
@@ -36,10 +41,22 @@ const NUM_SAMPLES: usize = 10_000;
 /// dudect uses 4.5 as its threshold; we use the same.
 const T_THRESHOLD: f64 = 4.5;
 
-/// Simplified t-test for a single function with two input classes.
+/// Crop a sorted timing vector to the [lo_pct, hi_pct] percentile range.
+/// This is the dudect approach: discard outliers caused by context switches,
+/// cache cold-starts, and OS interrupts before computing the t-statistic.
+fn percentile_crop(times: &mut Vec<f64>, lo_pct: f64, hi_pct: f64) {
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let n = times.len();
+    let lo = (n as f64 * lo_pct) as usize;
+    let hi = (n as f64 * hi_pct) as usize;
+    *times = times[lo..hi.min(n)].to_vec();
+}
+
+/// Welch's t-test with dudect-style percentile cropping.
 ///
 /// Generates inputs from two classes, interleaves measurements to reduce
-/// systematic bias, and computes Welch's t-statistic.
+/// systematic bias, crops outliers at 5th/95th percentile, and computes
+/// Welch's t-statistic.
 fn timing_t_test<I>(
     gen_class_a: impl Fn(usize) -> I,
     gen_class_b: impl Fn(usize) -> I,
@@ -79,17 +96,23 @@ fn timing_t_test<I>(
         }
     }
 
-    // Compute means
+    // dudect-style: crop outliers at 5th/95th percentile
+    percentile_crop(&mut times_a, 0.05, 0.95);
+    percentile_crop(&mut times_b, 0.05, 0.95);
+
+    welch_t_statistic(&times_a, &times_b)
+}
+
+/// Compute Welch's t-statistic for two sample vectors.
+fn welch_t_statistic(times_a: &[f64], times_b: &[f64]) -> f64 {
     let n_a = times_a.len() as f64;
     let n_b = times_b.len() as f64;
     let mean_a = times_a.iter().sum::<f64>() / n_a;
     let mean_b = times_b.iter().sum::<f64>() / n_b;
 
-    // Compute variances
     let var_a = times_a.iter().map(|t| (t - mean_a).powi(2)).sum::<f64>() / (n_a - 1.0);
     let var_b = times_b.iter().map(|t| (t - mean_b).powi(2)).sum::<f64>() / (n_b - 1.0);
 
-    // Welch's t-statistic
     let se = (var_a / n_a + var_b / n_b).sqrt();
     if se == 0.0 {
         return 0.0;
@@ -387,5 +410,183 @@ fn test_rsa_pkcs1v15_decrypt_constant_time() {
     assert!(
         t < T_THRESHOLD,
         "RSA PKCS#1v15 decrypt may not be constant-time: |t| = {t:.2} (threshold: {T_THRESHOLD})"
+    );
+}
+
+// ============================================================
+// Test 9: SM2 sign — different message digests (scalar-dependent timing)
+// ============================================================
+#[test]
+#[ignore = "timing-sensitive: constant-time verification"]
+fn test_sm2_sign_constant_time() {
+    use hitls_crypto::sm2::Sm2KeyPair;
+
+    let kp = Sm2KeyPair::generate().unwrap();
+
+    let t = timing_t_test(
+        // Class A: digest with many high bits
+        |i| {
+            let mut msg = [0xFFu8; 32];
+            msg[0] = (i & 0xFF) as u8;
+            msg
+        },
+        // Class B: digest with many low bits
+        |i| {
+            let mut msg = [0x01u8; 32];
+            msg[0] = (i & 0xFF) as u8;
+            msg
+        },
+        // Operation: SM2 sign (exercises scalar multiplication)
+        |msg| {
+            let _ = black_box(kp.sign(msg));
+        },
+    );
+
+    assert!(
+        t < T_THRESHOLD,
+        "SM2 sign may not be constant-time: |t| = {t:.2} (threshold: {T_THRESHOLD})"
+    );
+}
+
+// ============================================================
+// Test 10: Ed25519 sign — different messages (secret scalar mul)
+// ============================================================
+#[test]
+#[ignore = "timing-sensitive: constant-time verification"]
+fn test_ed25519_sign_constant_time() {
+    use hitls_crypto::ed25519::Ed25519KeyPair;
+
+    let kp = Ed25519KeyPair::generate().unwrap();
+
+    let t = timing_t_test(
+        // Class A: message with many high bits
+        |i| {
+            let mut msg = [0xFFu8; 64];
+            msg[0] = (i & 0xFF) as u8;
+            msg
+        },
+        // Class B: message with many low bits
+        |i| {
+            let mut msg = [0x00u8; 64];
+            msg[0] = (i & 0xFF) as u8;
+            msg
+        },
+        // Operation: Ed25519 sign (exercises secret scalar multiplication)
+        |msg| {
+            let _ = black_box(kp.sign(msg));
+        },
+    );
+
+    assert!(
+        t < T_THRESHOLD,
+        "Ed25519 sign may not be constant-time: |t| = {t:.2} (threshold: {T_THRESHOLD})"
+    );
+}
+
+// ============================================================
+// Test 11: ECDSA P-256 sign — different digests (secret nonce scalar mul)
+// ============================================================
+#[test]
+#[ignore = "timing-sensitive: constant-time verification"]
+fn test_ecdsa_p256_sign_constant_time() {
+    use hitls_crypto::ecdsa::EcdsaKeyPair;
+    use hitls_types::EccCurveId;
+
+    let kp = EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+
+    let t = timing_t_test(
+        // Class A: digest near curve order (large scalar)
+        |i| {
+            let mut d = [0xFFu8; 32];
+            d[0] = (i & 0xFF) as u8;
+            d
+        },
+        // Class B: small digest (small scalar)
+        |i| {
+            let mut d = [0x00u8; 32];
+            d[31] = (i & 0xFF) as u8 | 0x01;
+            d
+        },
+        // Operation: ECDSA sign (exercises secret nonce generation + scalar mul)
+        |digest| {
+            let _ = black_box(kp.sign(digest));
+        },
+    );
+
+    assert!(
+        t < T_THRESHOLD,
+        "ECDSA P-256 sign may not be constant-time: |t| = {t:.2} (threshold: {T_THRESHOLD})"
+    );
+}
+
+// ============================================================
+// Test 12: SM4-GCM tag verify — valid vs corrupted tag
+// ============================================================
+#[test]
+#[ignore = "timing-sensitive: constant-time verification"]
+fn test_sm4_gcm_tag_verify_constant_time() {
+    use hitls_crypto::modes::gcm;
+
+    let key = [0x01u8; 16];
+    let nonce = [0x02u8; 12];
+    let aad = [0x03u8; 16];
+    let plaintext = [0x04u8; 64];
+
+    let ciphertext = gcm::sm4_gcm_encrypt(&key, &nonce, &aad, &plaintext).unwrap();
+
+    let t = timing_t_test(
+        // Class A: valid ciphertext (decryption succeeds)
+        |_| ciphertext.clone(),
+        // Class B: corrupted tag (decryption fails)
+        |i| {
+            let mut bad = ciphertext.clone();
+            let tag_offset = bad.len() - 16;
+            bad[tag_offset + (i % 16)] ^= 0xFF;
+            bad
+        },
+        // Operation: SM4-GCM decrypt (includes tag verification)
+        |ct| {
+            let _ = black_box(gcm::sm4_gcm_decrypt(&key, &nonce, &aad, ct));
+        },
+    );
+
+    assert!(
+        t < T_THRESHOLD,
+        "SM4-GCM tag verify may not be constant-time: |t| = {t:.2} (threshold: {T_THRESHOLD})"
+    );
+}
+
+// ============================================================
+// Test 13: HKDF extract — different IKM values (secret-dependent)
+// ============================================================
+#[test]
+#[ignore = "timing-sensitive: constant-time verification"]
+fn test_hkdf_extract_constant_time() {
+    use hitls_crypto::hkdf::Hkdf;
+
+    let salt = [0x00u8; 32];
+
+    let t = timing_t_test(
+        // Class A: IKM with many high bits
+        |i| {
+            let mut ikm = [0xFFu8; 32];
+            ikm[0] = (i & 0xFF) as u8;
+            ikm
+        },
+        // Class B: IKM with many low bits
+        |i| {
+            let mut ikm = [0x00u8; 32];
+            ikm[0] = (i & 0xFF) as u8;
+            ikm
+        },
+        // Operation: HKDF extract (HMAC-based, should be constant-time)
+        |ikm| {
+            let _ = black_box(Hkdf::new(&salt, ikm));
+        },
+    );
+
+    assert!(
+        t < T_THRESHOLD,
+        "HKDF extract may not be constant-time: |t| = {t:.2} (threshold: {T_THRESHOLD})"
     );
 }
