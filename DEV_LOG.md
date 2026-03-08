@@ -6,7 +6,7 @@ Category summary:
 - Implementation: I1–I87 (87 phases)
 - Testing: T1–T79 (78 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
-- Performance: P1–P83 (83 phases)
+- Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
 
 | # | Phase | Type | Title | Date |
 |---|-------|------|-------|------|
@@ -270,6 +270,10 @@ Category summary:
 | 258 | T77 | Test | Timing Tests + Mutation Scope + Fuzz Dictionary | 2026-03-08 |
 | 259 | T78 | Test | Codecov Strict + Async Unit Tests + Fuzz Targets | 2026-03-08 |
 | 260 | T79 | Test | Quality Infrastructure: dudect + Differential + Supply Chain + Formal Verification | 2026-03-09 |
+| 261 | P84 | Perf | VAES 256-bit + VPCLMULQDQ 4-block AES-GCM Pipeline | 2026-03-09 |
+| 262 | P85 | Perf | TLS Record Layer Enum Dispatch + Stack IV Allocation | 2026-03-09 |
+| 263 | P89 | Perf | Hot Path #[inline] Hints for Record Layer + Crypto Dispatch | 2026-03-09 |
+| 264 | P93 | Perf | Zero-Copy Inner Plaintext Parsing in TLS/DTLS 1.3 Decrypt | 2026-03-09 |
 
 ---
 
@@ -13729,6 +13733,98 @@ Comprehensive quality infrastructure enhancement implementing 11 of 13 planned i
 | **Total** | **4065 (35 ignored)** |
 
 ### Build Status (Post T79)
+- `cargo test --workspace --all-features`: 4,030 passed, 0 failed, 35 ignored (4,065 total)
+- `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase P84 — VAES 256-bit + VPCLMULQDQ 4-block AES-GCM Pipeline (2026-03-09)
+
+### Summary
+Added `#[allow(clippy::incompatible_msrv)]` to VAES/VPCLMULQDQ intrinsic functions (`encrypt_4_blocks_vaes` in aes_ni.rs and `ghash_4_blocks_vpclmul` in ghash_x86.rs) to fix clippy failures on x86_64 CI. These functions are already gated by `#[cfg(has_vaes_intrinsics)]` from build.rs, but clippy's MSRV check doesn't recognize build.rs feature detection.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/aes/aes_ni.rs` | Modified | `#[allow(clippy::incompatible_msrv)]` on `encrypt_4_blocks_vaes` |
+| `crates/hitls-crypto/src/modes/ghash_x86.rs` | Modified | `#[allow(clippy::incompatible_msrv)]` on `ghash_4_blocks_vpclmul` |
+
+---
+
+## Phase P85 — TLS Record Layer Enum Dispatch + Stack IV Allocation (2026-03-09)
+
+### Summary
+Replaced `Box<dyn TlsAead>` with `TlsAeadImpl` enum dispatch across all 7 TLS/DTLS record encryption modules, eliminating heap allocation and vtable indirection per AEAD call. Also replaced `Vec<u8>` IV/nonce storage with stack-allocated `[u8; 12]` / `[u8; 4]` arrays. Added `#[allow(clippy::large_enum_variant)]` where GCM variants are larger than CBC variants.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/crypt/aead.rs` | Modified | Created `TlsAeadImpl` enum, changed `create_aead()` return type |
+| `crates/hitls-tls/src/record/encryption.rs` | Modified | `aead: TlsAeadImpl`, `iv: [u8; 12]` |
+| `crates/hitls-tls/src/record/encryption12.rs` | Modified | `aead: TlsAeadImpl`, `fixed_iv: [u8; 4]` |
+| `crates/hitls-tls/src/record/encryption_dtls12.rs` | Modified | `aead: TlsAeadImpl`, `fixed_iv: [u8; 4]` |
+| `crates/hitls-tls/src/record/encryption_dtls13.rs` | Modified | `aead: TlsAeadImpl`, `iv: [u8; 12]` |
+| `crates/hitls-tls/src/record/encryption_tlcp.rs` | Modified | GCM: `aead: TlsAeadImpl`, `fixed_iv: [u8; 4]`, `#[allow(clippy::large_enum_variant)]` |
+| `crates/hitls-tls/src/record/encryption_dtlcp.rs` | Modified | GCM: `aead: TlsAeadImpl`, `fixed_iv: [u8; 4]`, `#[allow(clippy::large_enum_variant)]` |
+
+---
+
+## Phase P89 — Hot Path #[inline] Hints for Record Layer + Crypto Dispatch (2026-03-09)
+
+### Summary
+Added targeted `#[inline]` annotations to ~20 small, frequently-called functions on the TLS record encryption critical path: nonce construction, AAD building, AEAD dispatch methods, AES block operations, and GCM helper functions. These hints help the compiler inline across crate boundaries.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/crypt/aead.rs` | Modified | `#[inline]` on `TlsAeadImpl::encrypt/decrypt/tag_size` |
+| `crates/hitls-tls/src/record/encryption.rs` | Modified | `#[inline]` on `build_nonce_from_iv_seq`, `build_aad` |
+| `crates/hitls-tls/src/record/encryption12.rs` | Modified | `#[inline]` on `build_nonce_tls12`, `build_aad_tls12` |
+| `crates/hitls-tls/src/record/encryption_dtls12.rs` | Modified | `#[inline]` on `build_explicit_nonce`, `build_nonce_dtls12`, `build_aad_dtls12` |
+| `crates/hitls-tls/src/record/encryption_dtls13.rs` | Modified | `#[inline]` on `build_nonce` |
+| `crates/hitls-tls/src/record/encryption_tlcp.rs` | Modified | `#[inline]` on `build_aad_tlcp`, `build_nonce_tlcp` |
+| `crates/hitls-tls/src/record/encryption_dtlcp.rs` | Modified | `#[inline]` on `build_explicit_nonce`, `build_nonce_dtlcp`, `build_aad_dtlcp` |
+| `crates/hitls-crypto/src/aes/mod.rs` | Modified | `#[inline]` on `encrypt_block`, `decrypt_block`, `encrypt_4_blocks`, `key_len` |
+| `crates/hitls-crypto/src/modes/gcm.rs` | Modified | `#[inline]` on `inc32`, `Gf128::xor`, `Gf128::shr4`, `GhashTable::ghash_block` |
+
+---
+
+## Phase P93 — Zero-Copy Inner Plaintext Parsing in TLS/DTLS 1.3 Decrypt (2026-03-09)
+
+### Summary
+Eliminated one heap allocation per decrypted TLS 1.3 and DTLS 1.3 record by taking ownership of the AEAD output Vec and truncating in-place. In TLS 1.3, added `parse_inner_plaintext_owned()` that consumes the Vec instead of returning a slice + `.to_vec()`. In DTLS 1.3, changed `parse_inner_plaintext()` to take `mut inner: Vec<u8>` and use `inner.truncate(ct_pos)`. Also applied rustfmt to fix pre-existing formatting issues across 8 files.
+
+### Changes
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/record/encryption.rs` | Modified | +`parse_inner_plaintext_owned()`, old fn gated `#[cfg(test)]` |
+| `crates/hitls-tls/src/record/encryption_dtls13.rs` | Modified | `parse_inner_plaintext(mut inner: Vec<u8>)` + `inner.truncate(ct_pos)` |
+| `crates/hitls-crypto/src/chacha20/mod.rs` | Modified | rustfmt |
+| `crates/hitls-crypto/src/dh/mod.rs` | Modified | rustfmt |
+| `crates/hitls-crypto/src/mlkem/mod.rs` | Modified | rustfmt |
+| `crates/hitls-crypto/src/scrypt/mod.rs` | Modified | rustfmt |
+| `crates/hitls-crypto/src/sha3/mod.rs` | Modified | rustfmt |
+| `crates/hitls-crypto/src/sm9/ecp.rs` | Modified | rustfmt |
+| `crates/hitls-crypto/src/sm9/ecp2.rs` | Modified | rustfmt |
+| `crates/hitls-utils/src/asn1/tag.rs` | Modified | rustfmt |
+
+### Test Count (Post P93)
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1448 (22 ignored) |
+| hitls-tls | 1484 |
+| hitls-pki | 437 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 47 |
+| hitls-types | 26 |
+| hitls-cli | 161 (5 ignored) |
+| hitls-integration-tests | 264 (7 ignored) |
+| **Total** | **4065 (35 ignored)** |
+
+### Build Status (Post P93)
 - `cargo test --workspace --all-features`: 4,030 passed, 0 failed, 35 ignored (4,065 total)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
 - `cargo fmt --all -- --check`: clean
