@@ -10,6 +10,8 @@
 use core::cmp::Ordering;
 use hitls_bignum::BigNum;
 
+use super::field_ops::{cmp_limbs, sub_assign_limbs};
+
 /// The P-521 prime p = 2^521 - 1 (all-ones Mersenne prime).
 /// Stored as 9×u64 in little-endian limb order. Top limb = 0x1FF (9 bits).
 const P: [u64; 9] = [
@@ -267,9 +269,9 @@ impl P521FieldElement {
 
     /// Conditional subtraction: if self >= p, subtract p.
     fn reduce_once(self) -> Self {
-        if cmp_u521(&self.0, &P) != Ordering::Less {
+        if cmp_limbs(&self.0, &P) != Ordering::Less {
             let mut r = self.0;
-            sub_borrow_u521(&mut r, &P);
+            sub_assign_limbs(&mut r, &P);
             Self(r)
         } else {
             self
@@ -338,34 +340,6 @@ fn mersenne_reduce(t: [u64; 18]) -> P521FieldElement {
 
     // Final conditional subtraction
     P521FieldElement(r).reduce_once()
-}
-
-// ========================================================================
-// 521-bit arithmetic helpers
-// ========================================================================
-
-fn cmp_u521(a: &[u64; NLIMBS], b: &[u64; NLIMBS]) -> Ordering {
-    let mut i = NLIMBS - 1;
-    loop {
-        match a[i].cmp(&b[i]) {
-            Ordering::Equal => {}
-            other => return other,
-        }
-        if i == 0 {
-            break;
-        }
-        i -= 1;
-    }
-    Ordering::Equal
-}
-
-fn sub_borrow_u521(a: &mut [u64; NLIMBS], b: &[u64; NLIMBS]) {
-    let mut borrow = 0i128;
-    for i in 0..NLIMBS {
-        let diff = i128::from(a[i]) - i128::from(b[i]) + borrow;
-        a[i] = diff as u64;
-        borrow = diff >> 64;
-    }
 }
 
 // ========================================================================

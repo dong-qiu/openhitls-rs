@@ -6,6 +6,8 @@
 use core::cmp::Ordering;
 use hitls_bignum::BigNum;
 
+use super::field_ops::{add_limbs, cmp_limbs, sub_assign_limbs};
+
 /// The P-384 curve order n.
 /// n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC7634D81F4372DDF
 ///       581A0DB248B0A77AECEC196ACCC52973
@@ -143,9 +145,9 @@ impl P384ScalarElement {
 
     /// Scalar field addition: (a + b) mod n.
     pub fn add(&self, other: &Self) -> Self {
-        let (mut r, carry) = add_u384(&self.0, &other.0);
-        if carry != 0 || cmp_u384(&r, &N) != Ordering::Less {
-            sub_borrow_u384(&mut r, &N);
+        let (mut r, carry) = add_limbs(&self.0, &other.0);
+        if carry != 0 || cmp_limbs(&r, &N) != Ordering::Less {
+            sub_assign_limbs(&mut r, &N);
         }
         Self(r)
     }
@@ -441,50 +443,11 @@ fn scalar_mont_reduce(mut t: [u64; 12]) -> P384ScalarElement {
 
     let mut r = [t[6], t[7], t[8], t[9], t[10], t[11]];
 
-    if overflow != 0 || cmp_u384(&r, &N) != Ordering::Less {
-        sub_borrow_u384(&mut r, &N);
+    if overflow != 0 || cmp_limbs(&r, &N) != Ordering::Less {
+        sub_assign_limbs(&mut r, &N);
     }
 
     P384ScalarElement(r)
-}
-
-// ========================================================================
-// 384-bit arithmetic helpers
-// ========================================================================
-
-fn add_u384(a: &[u64; 6], b: &[u64; 6]) -> ([u64; 6], u64) {
-    let mut r = [0u64; 6];
-    let mut carry = 0u64;
-    for i in 0..6 {
-        let sum = u128::from(a[i]) + u128::from(b[i]) + u128::from(carry);
-        r[i] = sum as u64;
-        carry = (sum >> 64) as u64;
-    }
-    (r, carry)
-}
-
-fn cmp_u384(a: &[u64; 6], b: &[u64; 6]) -> Ordering {
-    let mut i = 5;
-    loop {
-        match a[i].cmp(&b[i]) {
-            Ordering::Equal => {}
-            other => return other,
-        }
-        if i == 0 {
-            break;
-        }
-        i -= 1;
-    }
-    Ordering::Equal
-}
-
-fn sub_borrow_u384(a: &mut [u64; 6], b: &[u64; 6]) {
-    let mut borrow = 0i128;
-    for i in 0..6 {
-        let diff = i128::from(a[i]) - i128::from(b[i]) + borrow;
-        a[i] = diff as u64;
-        borrow = diff >> 64;
-    }
 }
 
 #[cfg(test)]

@@ -7,6 +7,8 @@
 
 use core::cmp::Ordering;
 
+use super::field_ops::{add_assign_limbs, add_limbs, cmp_limbs, sub_assign_limbs, sub_limbs};
+
 /// The SM2 prime p = 0xFFFFFFFE_FFFFFFFF_FFFFFFFF_FFFFFFFF_FFFFFFFF_00000000_FFFFFFFF_FFFFFFFF.
 /// Stored as 4×u64 in little-endian limb order.
 const P: [u64; 4] = [
@@ -82,18 +84,18 @@ impl Sm2FieldElement {
 
     /// Field addition: (a + b) mod p.
     pub fn add(&self, other: &Self) -> Self {
-        let (mut r, carry) = add_u256(&self.0, &other.0);
-        if carry != 0 || cmp_u256(&r, &P) != Ordering::Less {
-            sub_borrow_u256(&mut r, &P);
+        let (mut r, carry) = add_limbs(&self.0, &other.0);
+        if carry != 0 || cmp_limbs(&r, &P) != Ordering::Less {
+            sub_assign_limbs(&mut r, &P);
         }
         Self(r)
     }
 
     /// Field subtraction: (a - b) mod p.
     pub fn sub(&self, other: &Self) -> Self {
-        let (mut r, borrow) = sub_u256(&self.0, &other.0);
+        let (mut r, borrow) = sub_limbs(&self.0, &other.0);
         if borrow != 0 {
-            add_carry_u256(&mut r, &P);
+            add_assign_limbs(&mut r, &P);
         }
         Self(r)
     }
@@ -103,7 +105,7 @@ impl Sm2FieldElement {
         if self.is_zero() {
             return *self;
         }
-        let (r, _) = sub_u256(&P, &self.0);
+        let (r, _) = sub_limbs(&P, &self.0);
         Self(r)
     }
 
@@ -410,75 +412,13 @@ fn sm2_mont_reduce(mut t: [u64; 8]) -> Sm2FieldElement {
     let mut r = [t[4], t[5], t[6], t[7]];
 
     // Final conditional subtraction: if overflow or r >= p, subtract p
-    if overflow != 0 || cmp_u256(&r, &P) != Ordering::Less {
-        sub_borrow_u256(&mut r, &P);
+    if overflow != 0 || cmp_limbs(&r, &P) != Ordering::Less {
+        sub_assign_limbs(&mut r, &P);
     }
 
     Sm2FieldElement(r)
 }
 
-// ========================================================================
-// 256-bit unsigned arithmetic helpers
-// ========================================================================
-
-/// 256-bit addition: returns (result, carry).
-fn add_u256(a: &[u64; 4], b: &[u64; 4]) -> ([u64; 4], u64) {
-    let mut r = [0u64; 4];
-    let mut carry = 0u64;
-
-    for i in 0..4 {
-        let sum = u128::from(a[i]) + u128::from(b[i]) + u128::from(carry);
-        r[i] = sum as u64;
-        carry = (sum >> 64) as u64;
-    }
-
-    (r, carry)
-}
-
-/// 256-bit subtraction: returns (result, borrow). Borrow is 1 if a < b.
-fn sub_u256(a: &[u64; 4], b: &[u64; 4]) -> ([u64; 4], u64) {
-    let mut r = [0u64; 4];
-    let mut borrow = 0i128;
-
-    for i in 0..4 {
-        let diff = i128::from(a[i]) - i128::from(b[i]) + borrow;
-        r[i] = diff as u64;
-        borrow = diff >> 64; // arithmetic shift: -1 if borrow, 0 otherwise
-    }
-
-    (r, if borrow < 0 { 1 } else { 0 })
-}
-
-/// Compare two 256-bit numbers (little-endian limb order).
-fn cmp_u256(a: &[u64; 4], b: &[u64; 4]) -> Ordering {
-    for i in (0..4).rev() {
-        match a[i].cmp(&b[i]) {
-            Ordering::Equal => continue,
-            other => return other,
-        }
-    }
-    Ordering::Equal
-}
-
-/// In-place 256-bit addition: a += b, ignoring overflow.
-fn add_carry_u256(a: &mut [u64; 4], b: &[u64; 4]) {
-    let mut carry = 0u64;
-    for i in 0..4 {
-        let sum = u128::from(a[i]) + u128::from(b[i]) + u128::from(carry);
-        a[i] = sum as u64;
-        carry = (sum >> 64) as u64;
-    }
-}
-
-/// In-place 256-bit subtraction: a -= b, ignoring underflow.
-fn sub_borrow_u256(a: &mut [u64; 4], b: &[u64; 4]) {
-    let mut borrow = 0i128;
-    for i in 0..4 {
-        let diff = i128::from(a[i]) - i128::from(b[i]) + borrow;
-        a[i] = diff as u64;
-        borrow = diff >> 64;
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -730,16 +670,16 @@ mod tests {
     }
 
     #[test]
-    fn test_cmp_u256_helper() {
+    fn test_cmp_limbs_helper() {
         let a = [1u64, 0, 0, 0];
         let b = [2u64, 0, 0, 0];
-        assert_eq!(cmp_u256(&a, &b), Ordering::Less);
-        assert_eq!(cmp_u256(&b, &a), Ordering::Greater);
-        assert_eq!(cmp_u256(&a, &a), Ordering::Equal);
+        assert_eq!(cmp_limbs(&a, &b), Ordering::Less);
+        assert_eq!(cmp_limbs(&b, &a), Ordering::Greater);
+        assert_eq!(cmp_limbs(&a, &a), Ordering::Equal);
 
         let c = [0u64, 0, 0, 1];
         let d = [u64::MAX, u64::MAX, u64::MAX, 0];
-        assert_eq!(cmp_u256(&c, &d), Ordering::Greater);
+        assert_eq!(cmp_limbs(&c, &d), Ordering::Greater);
     }
 
     #[test]

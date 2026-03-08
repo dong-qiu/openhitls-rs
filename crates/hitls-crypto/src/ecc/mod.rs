@@ -5,6 +5,7 @@
 //! This module underpins higher-level protocols such as ECDSA and ECDH.
 
 pub(crate) mod curves;
+pub(crate) mod field_ops;
 pub(crate) mod p256_field;
 pub(crate) mod p256_point;
 pub(crate) mod p256_scalar;
