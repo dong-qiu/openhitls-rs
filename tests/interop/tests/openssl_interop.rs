@@ -251,7 +251,12 @@ fn openssl_pipe(args: &[&str], input: &[u8]) -> Vec<u8> {
 
     child.stdin.take().unwrap().write_all(input).unwrap();
     let output = child.wait_with_output().expect("openssl failed");
-    assert!(output.status.success(), "openssl {:?} failed: {}", args, String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "openssl {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
     output.stdout
 }
 
@@ -268,7 +273,6 @@ fn test_openssl_differential_sha256() {
 
     use hitls_crypto::sha2::Sha256;
 
-
     let test_data = b"The quick brown fox jumps over the lazy dog";
 
     // hitls-rs SHA-256
@@ -284,7 +288,8 @@ fn test_openssl_differential_sha256() {
     let openssl_digest = hitls_utils::hex::hex(hex_str);
 
     assert_eq!(
-        our_digest, openssl_digest.as_slice(),
+        our_digest,
+        openssl_digest.as_slice(),
         "SHA-256 digest mismatch with OpenSSL"
     );
 }
@@ -312,7 +317,16 @@ fn test_openssl_differential_hmac_sha256() {
     // OpenSSL HMAC-SHA256 (use -macopt hexkey for binary keys)
     let key_hex = hitls_utils::hex::to_hex(&key);
     let openssl_out2 = openssl_pipe(
-        &["dgst", "-sha256", "-mac", "hmac", "-macopt", &format!("hexkey:{key_hex}"), "-hex", "-r"],
+        &[
+            "dgst",
+            "-sha256",
+            "-mac",
+            "hmac",
+            "-macopt",
+            &format!("hexkey:{key_hex}"),
+            "-hex",
+            "-r",
+        ],
         data,
     );
     let openssl_hex = String::from_utf8_lossy(&openssl_out2);
@@ -320,7 +334,8 @@ fn test_openssl_differential_hmac_sha256() {
     let openssl_mac = hitls_utils::hex::hex(hex_str);
 
     assert_eq!(
-        our_mac, openssl_mac.as_slice(),
+        our_mac,
+        openssl_mac.as_slice(),
         "HMAC-SHA256 mismatch with OpenSSL"
     );
 }
@@ -357,9 +372,13 @@ fn test_openssl_differential_aes_gcm() {
 
     let output = Command::new("openssl")
         .args([
-            "enc", "-aes-128-gcm", "-e",
-            "-K", &key_hex,
-            "-iv", &nonce_hex,
+            "enc",
+            "-aes-128-gcm",
+            "-e",
+            "-K",
+            &key_hex,
+            "-iv",
+            &nonce_hex,
             "-out",
         ])
         .arg(&ct_file)
@@ -381,7 +400,11 @@ fn test_openssl_differential_aes_gcm() {
             let openssl_ct = std::fs::read(&ct_file).unwrap_or_default();
             let openssl_tag = std::fs::read(&tag_file).unwrap_or_default();
 
-            assert_eq!(ct_body, openssl_ct.as_slice(), "AES-GCM ciphertext mismatch");
+            assert_eq!(
+                ct_body,
+                openssl_ct.as_slice(),
+                "AES-GCM ciphertext mismatch"
+            );
             assert_eq!(tag, openssl_tag.as_slice(), "AES-GCM tag mismatch");
         }
     }
@@ -419,7 +442,16 @@ fn test_openssl_differential_aes_cbc() {
 
     // OpenSSL encrypt (with PKCS7 padding, which is the default)
     let openssl_ct = openssl_pipe(
-        &["enc", "-aes-256-cbc", "-e", "-K", &key_hex, "-iv", &iv_hex, "-nosalt"],
+        &[
+            "enc",
+            "-aes-256-cbc",
+            "-e",
+            "-K",
+            &key_hex,
+            "-iv",
+            &iv_hex,
+            "-nosalt",
+        ],
         &plaintext,
     );
 
@@ -446,7 +478,6 @@ fn test_openssl_differential_sha384() {
 
     use hitls_crypto::sha2::Sha384;
 
-
     let test_data = b"abc";
 
     // hitls-rs
@@ -461,7 +492,8 @@ fn test_openssl_differential_sha384() {
     let openssl_digest = hitls_utils::hex::hex(hex_str);
 
     assert_eq!(
-        our_digest, openssl_digest.as_slice(),
+        our_digest,
+        openssl_digest.as_slice(),
         "SHA-384 digest mismatch with OpenSSL"
     );
 }
