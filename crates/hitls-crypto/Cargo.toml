@@ -40,7 +40,7 @@ gmac = ["aes", "modes"]
 siphash = []
 
 # Asymmetric algorithms
-rsa = ["hitls-bignum"]
+rsa = ["hitls-bignum", "sha2"]
 dsa = ["hitls-bignum", "hitls-utils"]
 ecc = ["hitls-bignum"]
 ecdsa = ["ecc", "hitls-utils"]
