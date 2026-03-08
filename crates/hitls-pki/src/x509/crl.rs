@@ -123,7 +123,7 @@ impl CertificateRevocationList {
                     .read_integer()
                     .map_err(|e| PkiError::InvalidCrl(e.to_string()))?;
                 let v = ver_bytes.last().copied().unwrap_or(0);
-                v + 1 // v1=0, v2=1
+                v.saturating_add(1) // v1=0, v2=1
             } else {
                 1 // default v1 (no version field present)
             }

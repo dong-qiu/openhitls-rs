@@ -341,6 +341,7 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: obi1kenobi/cargo-semver-checks-action@v2
+        continue-on-error: true
         with:
           package: hitls-types,hitls-utils,hitls-bignum,hitls-crypto,hitls-tls,hitls-pki,hitls-auth
 

@@ -60,13 +60,23 @@ fn p_hash(
     let (mut a, a_len) = hmac_hash(alg, secret, seed)?;
 
     // Stack buffer for A(i) || seed concatenation (max: 64 + 128 = 192)
-    let mut ai_seed_buf = [0u8; MAX_HASH_OUTPUT + MAX_LABEL_SEED];
+    let ai_seed_total = a_len + seed.len();
+
+    // Use stack buffer if it fits, otherwise heap-allocate
+    let mut ai_seed_heap;
+    let mut ai_seed_stack = [0u8; MAX_HASH_OUTPUT + MAX_LABEL_SEED];
+    let ai_seed_buf: &mut [u8] = if ai_seed_total <= ai_seed_stack.len() {
+        &mut ai_seed_stack[..ai_seed_total]
+    } else {
+        ai_seed_heap = vec![0u8; ai_seed_total];
+        &mut ai_seed_heap
+    };
 
     while result.len() < output_len {
-        // Build A(i) || seed in stack buffer
+        // Build A(i) || seed in buffer
         ai_seed_buf[..a_len].copy_from_slice(&a[..a_len]);
-        ai_seed_buf[a_len..a_len + seed.len()].copy_from_slice(seed);
-        let (block, block_len) = hmac_hash(alg, secret, &ai_seed_buf[..a_len + seed.len()])?;
+        ai_seed_buf[a_len..].copy_from_slice(seed);
+        let (block, block_len) = hmac_hash(alg, secret, ai_seed_buf)?;
 
         result.extend_from_slice(&block[..block_len]);
 

@@ -649,7 +649,7 @@ fn run_ecdsa_tests(
     );
 }
 
-#[cfg(feature = "ecdsa")]
+#[cfg(all(feature = "ecdsa", feature = "sha2"))]
 #[test]
 fn wycheproof_ecdsa_p256_sha256() {
     run_ecdsa_tests(
@@ -659,7 +659,7 @@ fn wycheproof_ecdsa_p256_sha256() {
     );
 }
 
-#[cfg(feature = "ecdsa")]
+#[cfg(all(feature = "ecdsa", feature = "sha2"))]
 #[test]
 fn wycheproof_ecdsa_p384_sha384() {
     run_ecdsa_tests(
@@ -669,7 +669,7 @@ fn wycheproof_ecdsa_p384_sha384() {
     );
 }
 
-#[cfg(feature = "ecdsa")]
+#[cfg(all(feature = "ecdsa", feature = "sha2"))]
 #[test]
 fn wycheproof_ecdsa_p521_sha512() {
     run_ecdsa_tests(

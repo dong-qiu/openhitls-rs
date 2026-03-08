@@ -40,7 +40,7 @@ fuzz_target!(|data: &[u8]| {
     assert!(valid, "RSA sign/verify roundtrip must succeed");
 
     // Tamper and verify must fail
-    if !tamper.is_empty() {
+    if !tamper.is_empty() && tamper[0] != 0 {
         let mut tampered_digest = digest.to_vec();
         tampered_digest[0] ^= tamper[0];
         let invalid = pk.verify(padding, &tampered_digest, &sig).unwrap_or(false);

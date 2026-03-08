@@ -303,7 +303,7 @@ impl Certificate {
                 let ver_bytes = v_dec
                     .read_integer()
                     .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
-                ver_bytes.last().copied().unwrap_or(0) + 1
+                ver_bytes.last().copied().unwrap_or(0).saturating_add(1)
             } else {
                 1 // default v1
             }
