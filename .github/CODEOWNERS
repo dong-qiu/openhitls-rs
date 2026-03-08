@@ -1,0 +1,17 @@
+# Default owner for all files
+* @dong-qiu
+
+# Cryptographic implementations — require crypto-aware review
+/crates/hitls-crypto/ @dong-qiu
+/crates/hitls-bignum/ @dong-qiu
+
+# TLS protocol
+/crates/hitls-tls/ @dong-qiu
+
+# PKI / X.509
+/crates/hitls-pki/ @dong-qiu
+
+# Security-sensitive files
+/SECURITY.md @dong-qiu
+/.github/workflows/ @dong-qiu
+/supply-chain/ @dong-qiu
