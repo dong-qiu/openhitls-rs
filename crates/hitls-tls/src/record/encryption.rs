@@ -3,7 +3,7 @@
 //! Handles nonce construction, inner plaintext framing, AAD generation,
 //! and sequence number management for TLS 1.3 AEAD record protection.
 
-use crate::crypt::aead::{create_aead, TlsAead};
+use crate::crypt::aead::{create_aead, TlsAeadImpl};
 use crate::crypt::traffic_keys::TrafficKeys;
 use crate::record::{ContentType, Record};
 use crate::CipherSuite;
@@ -104,8 +104,8 @@ fn parse_inner_plaintext(inner: &[u8]) -> Result<(ContentType, &[u8]), TlsError>
 ///
 /// Holds a write AEAD instance, the write IV, and a 64-bit sequence number.
 pub struct RecordEncryptor {
-    aead: Box<dyn TlsAead>,
-    iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    iv: [u8; NONCE_LEN],
     seq: u64,
     tag_len: usize,
     /// Optional record padding callback: (content_type, plaintext_len) -> padding_len.
@@ -123,9 +123,11 @@ impl RecordEncryptor {
     pub fn new(suite: CipherSuite, keys: &TrafficKeys) -> Result<Self, TlsError> {
         let aead = create_aead(suite, &keys.key)?;
         let tag_len = aead.tag_size();
+        let mut iv = [0u8; NONCE_LEN];
+        iv.copy_from_slice(&keys.iv);
         Ok(Self {
             aead,
-            iv: keys.iv.clone(),
+            iv,
             seq: 0,
             tag_len,
             padding_cb: None,
@@ -197,8 +199,8 @@ impl RecordEncryptor {
 ///
 /// Holds a read AEAD instance, the read IV, and a 64-bit sequence number.
 pub struct RecordDecryptor {
-    aead: Box<dyn TlsAead>,
-    iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    iv: [u8; NONCE_LEN],
     seq: u64,
     tag_len: usize,
 }
@@ -214,9 +216,11 @@ impl RecordDecryptor {
     pub fn new(suite: CipherSuite, keys: &TrafficKeys) -> Result<Self, TlsError> {
         let aead = create_aead(suite, &keys.key)?;
         let tag_len = aead.tag_size();
+        let mut iv = [0u8; NONCE_LEN];
+        iv.copy_from_slice(&keys.iv);
         Ok(Self {
             aead,
-            iv: keys.iv.clone(),
+            iv,
             seq: 0,
             tag_len,
         })

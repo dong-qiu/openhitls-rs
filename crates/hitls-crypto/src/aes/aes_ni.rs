@@ -238,6 +238,7 @@ unsafe fn encrypt_4_blocks_ni(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]],
 /// then processes all 4 blocks with just 2 VAES instructions per round
 /// (vs 4 AES-NI instructions in the non-VAES path).
 #[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+#[allow(clippy::incompatible_msrv)]
 #[target_feature(enable = "vaes,avx2")]
 unsafe fn encrypt_4_blocks_vaes(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]], rounds: usize) {
     // blocks is contiguous: [blk0 | blk1 | blk2 | blk3] = 64 bytes

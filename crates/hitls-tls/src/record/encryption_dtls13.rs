@@ -6,7 +6,7 @@
 use super::dtls13::{build_aad_dtls13, serialize_dtls13_record, Dtls13EpochState, Dtls13Record};
 use super::encryption::MAX_PLAINTEXT_LENGTH;
 use super::ContentType;
-use crate::crypt::aead::{create_aead, TlsAead};
+use crate::crypt::aead::{create_aead, TlsAeadImpl};
 use crate::crypt::traffic_keys::TrafficKeys;
 use crate::CipherSuite;
 use hitls_types::TlsError;
@@ -60,8 +60,8 @@ fn parse_inner_plaintext(inner: &[u8]) -> Result<(ContentType, Vec<u8>), TlsErro
 
 /// DTLS 1.3 record encryptor.
 pub struct Dtls13RecordEncryptor {
-    aead: Box<dyn TlsAead>,
-    iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    iv: [u8; NONCE_LEN],
 }
 
 impl Drop for Dtls13RecordEncryptor {
@@ -73,10 +73,9 @@ impl Drop for Dtls13RecordEncryptor {
 impl Dtls13RecordEncryptor {
     pub fn new(suite: CipherSuite, keys: &TrafficKeys) -> Result<Self, TlsError> {
         let aead = create_aead(suite, &keys.key)?;
-        Ok(Self {
-            aead,
-            iv: keys.iv.clone(),
-        })
+        let mut iv = [0u8; NONCE_LEN];
+        iv.copy_from_slice(&keys.iv);
+        Ok(Self { aead, iv })
     }
 
     /// Encrypt a plaintext record and return the serialized DTLS record bytes.
@@ -119,8 +118,8 @@ impl Dtls13RecordEncryptor {
 
 /// DTLS 1.3 record decryptor.
 pub struct Dtls13RecordDecryptor {
-    aead: Box<dyn TlsAead>,
-    iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    iv: [u8; NONCE_LEN],
 }
 
 impl Drop for Dtls13RecordDecryptor {
@@ -132,10 +131,9 @@ impl Drop for Dtls13RecordDecryptor {
 impl Dtls13RecordDecryptor {
     pub fn new(suite: CipherSuite, keys: &TrafficKeys) -> Result<Self, TlsError> {
         let aead = create_aead(suite, &keys.key)?;
-        Ok(Self {
-            aead,
-            iv: keys.iv.clone(),
-        })
+        let mut iv = [0u8; NONCE_LEN];
+        iv.copy_from_slice(&keys.iv);
+        Ok(Self { aead, iv })
     }
 
     /// Decrypt a DTLS 1.3 record. Returns (content_type, plaintext).

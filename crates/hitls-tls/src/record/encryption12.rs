@@ -4,7 +4,7 @@
 //! The explicit nonce is sent with each record (prepended to ciphertext).
 //! AAD is 13 bytes: `seq_num(8) || type(1) || version(2) || plaintext_length(2)`.
 
-use crate::crypt::aead::{create_aead, TlsAead};
+use crate::crypt::aead::{create_aead, TlsAeadImpl};
 use crate::record::{ContentType, Record};
 use crate::CipherSuite;
 use hitls_types::TlsError;
@@ -45,8 +45,8 @@ fn build_aad_tls12(seq: u64, content_type: ContentType, plaintext_len: u16) -> [
 ///
 /// The record fragment format is: `explicit_nonce(8) || ciphertext || tag(16)`.
 pub struct RecordEncryptor12 {
-    aead: Box<dyn TlsAead>,
-    fixed_iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    fixed_iv: [u8; 4],
     seq: u64,
 }
 
@@ -63,9 +63,11 @@ impl RecordEncryptor12 {
     /// The cipher suite determines which AEAD algorithm to use.
     pub fn new(suite: CipherSuite, key: &[u8], fixed_iv: Vec<u8>) -> Result<Self, TlsError> {
         let aead = create_aead(suite, key)?;
+        let mut iv = [0u8; 4];
+        iv.copy_from_slice(&fixed_iv);
         Ok(Self {
             aead,
-            fixed_iv,
+            fixed_iv: iv,
             seq: 0,
         })
     }
@@ -117,8 +119,8 @@ impl RecordEncryptor12 {
 
 /// Decrypts TLS 1.2 GCM records.
 pub struct RecordDecryptor12 {
-    aead: Box<dyn TlsAead>,
-    fixed_iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    fixed_iv: [u8; 4],
     seq: u64,
     tag_len: usize,
 }
@@ -134,9 +136,11 @@ impl RecordDecryptor12 {
     pub fn new(suite: CipherSuite, key: &[u8], fixed_iv: Vec<u8>) -> Result<Self, TlsError> {
         let aead = create_aead(suite, key)?;
         let tag_len = aead.tag_size();
+        let mut iv = [0u8; 4];
+        iv.copy_from_slice(&fixed_iv);
         Ok(Self {
             aead,
-            fixed_iv,
+            fixed_iv: iv,
             seq: 0,
             tag_len,
         })

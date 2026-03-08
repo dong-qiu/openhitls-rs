@@ -3,7 +3,7 @@
 //! CBC suites: MAC-then-encrypt with HMAC-SM3 + SM4-CBC.
 //! GCM suites: SM4-GCM AEAD (same pattern as TLS 1.2 AES-GCM).
 
-use crate::crypt::aead::{create_sm4_gcm_aead, TlsAead};
+use crate::crypt::aead::{create_sm4_gcm_aead, TlsAeadImpl};
 use crate::record::{ContentType, Record};
 use hitls_types::TlsError;
 use subtle::ConstantTimeEq;
@@ -323,8 +323,8 @@ impl RecordDecryptorTlcpCbc {
 
 /// TLCP GCM record encryptor (SM4-GCM).
 pub struct RecordEncryptorTlcpGcm {
-    aead: Box<dyn TlsAead>,
-    fixed_iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    fixed_iv: [u8; 4],
     seq: u64,
 }
 
@@ -337,9 +337,11 @@ impl Drop for RecordEncryptorTlcpGcm {
 impl RecordEncryptorTlcpGcm {
     pub fn new(key: &[u8], fixed_iv: Vec<u8>) -> Result<Self, TlsError> {
         let aead = create_sm4_gcm_aead(key)?;
+        let mut iv = [0u8; 4];
+        iv.copy_from_slice(&fixed_iv);
         Ok(Self {
             aead,
-            fixed_iv,
+            fixed_iv: iv,
             seq: 0,
         })
     }
@@ -385,8 +387,8 @@ impl RecordEncryptorTlcpGcm {
 
 /// TLCP GCM record decryptor (SM4-GCM).
 pub struct RecordDecryptorTlcpGcm {
-    aead: Box<dyn TlsAead>,
-    fixed_iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    fixed_iv: [u8; 4],
     seq: u64,
     tag_len: usize,
 }
@@ -401,9 +403,11 @@ impl RecordDecryptorTlcpGcm {
     pub fn new(key: &[u8], fixed_iv: Vec<u8>) -> Result<Self, TlsError> {
         let aead = create_sm4_gcm_aead(key)?;
         let tag_len = aead.tag_size();
+        let mut iv = [0u8; 4];
+        iv.copy_from_slice(&fixed_iv);
         Ok(Self {
             aead,
-            fixed_iv,
+            fixed_iv: iv,
             seq: 0,
             tag_len,
         })
@@ -457,6 +461,7 @@ impl RecordDecryptorTlcpGcm {
 // ─── Unified TLCP Encryptor/Decryptor ─────────────────────
 
 /// Unified TLCP record encryptor (dispatches CBC vs GCM).
+#[allow(clippy::large_enum_variant)]
 pub enum TlcpEncryptor {
     Cbc(RecordEncryptorTlcpCbc),
     Gcm(RecordEncryptorTlcpGcm),
@@ -476,6 +481,7 @@ impl TlcpEncryptor {
 }
 
 /// Unified TLCP record decryptor (dispatches CBC vs GCM).
+#[allow(clippy::large_enum_variant)]
 pub enum TlcpDecryptor {
     Cbc(RecordDecryptorTlcpCbc),
     Gcm(RecordDecryptorTlcpGcm),

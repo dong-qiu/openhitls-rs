@@ -301,27 +301,87 @@ impl TlsAead for Sm4CcmAead {
     }
 }
 
-/// Create a TlsAead instance for the given cipher suite and key.
-pub fn create_aead(suite: CipherSuite, key: &[u8]) -> Result<Box<dyn TlsAead>, TlsError> {
+/// Enum-dispatched AEAD — eliminates `Box<dyn TlsAead>` vtable indirection and heap allocation.
+pub enum TlsAeadImpl {
+    AesGcm(AesGcmAead),
+    AesCcm(AesCcmAead),
+    AesCcm8(AesCcm8Aead),
+    ChaCha20Poly1305(ChaCha20Poly1305Aead),
+    #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+    Sm4Gcm(Sm4GcmAead),
+    #[cfg(feature = "sm_tls13")]
+    Sm4Ccm(Sm4CcmAead),
+}
+
+impl TlsAeadImpl {
+    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, TlsError> {
+        match self {
+            Self::AesGcm(a) => a.encrypt(nonce, aad, plaintext),
+            Self::AesCcm(a) => a.encrypt(nonce, aad, plaintext),
+            Self::AesCcm8(a) => a.encrypt(nonce, aad, plaintext),
+            Self::ChaCha20Poly1305(a) => a.encrypt(nonce, aad, plaintext),
+            #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+            Self::Sm4Gcm(a) => a.encrypt(nonce, aad, plaintext),
+            #[cfg(feature = "sm_tls13")]
+            Self::Sm4Ccm(a) => a.encrypt(nonce, aad, plaintext),
+        }
+    }
+
+    pub fn decrypt(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        ciphertext_with_tag: &[u8],
+    ) -> Result<Vec<u8>, TlsError> {
+        match self {
+            Self::AesGcm(a) => a.decrypt(nonce, aad, ciphertext_with_tag),
+            Self::AesCcm(a) => a.decrypt(nonce, aad, ciphertext_with_tag),
+            Self::AesCcm8(a) => a.decrypt(nonce, aad, ciphertext_with_tag),
+            Self::ChaCha20Poly1305(a) => a.decrypt(nonce, aad, ciphertext_with_tag),
+            #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+            Self::Sm4Gcm(a) => a.decrypt(nonce, aad, ciphertext_with_tag),
+            #[cfg(feature = "sm_tls13")]
+            Self::Sm4Ccm(a) => a.decrypt(nonce, aad, ciphertext_with_tag),
+        }
+    }
+
+    pub fn tag_size(&self) -> usize {
+        match self {
+            Self::AesGcm(a) => a.tag_size(),
+            Self::AesCcm(a) => a.tag_size(),
+            Self::AesCcm8(a) => a.tag_size(),
+            Self::ChaCha20Poly1305(a) => a.tag_size(),
+            #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
+            Self::Sm4Gcm(a) => a.tag_size(),
+            #[cfg(feature = "sm_tls13")]
+            Self::Sm4Ccm(a) => a.tag_size(),
+        }
+    }
+}
+
+/// Create a TlsAeadImpl instance for the given cipher suite and key.
+pub fn create_aead(suite: CipherSuite, key: &[u8]) -> Result<TlsAeadImpl, TlsError> {
     match suite {
         CipherSuite::TLS_AES_128_GCM_SHA256 | CipherSuite::TLS_AES_256_GCM_SHA384 => {
-            Ok(Box::new(AesGcmAead::new(key)?))
+            Ok(TlsAeadImpl::AesGcm(AesGcmAead::new(key)?))
         }
-        CipherSuite::TLS_AES_128_CCM_SHA256 => Ok(Box::new(AesCcmAead::new(key)?)),
-        CipherSuite::TLS_AES_128_CCM_8_SHA256 => Ok(Box::new(AesCcm8Aead::new(key)?)),
-        CipherSuite::TLS_CHACHA20_POLY1305_SHA256 => Ok(Box::new(ChaCha20Poly1305Aead::new(key)?)),
+        CipherSuite::TLS_AES_128_CCM_SHA256 => Ok(TlsAeadImpl::AesCcm(AesCcmAead::new(key)?)),
+        CipherSuite::TLS_AES_128_CCM_8_SHA256 => Ok(TlsAeadImpl::AesCcm8(AesCcm8Aead::new(key)?)),
+        CipherSuite::TLS_CHACHA20_POLY1305_SHA256 => Ok(TlsAeadImpl::ChaCha20Poly1305(
+            ChaCha20Poly1305Aead::new(key)?,
+        )),
         #[cfg(feature = "sm_tls13")]
-        CipherSuite::TLS_SM4_GCM_SM3 => Ok(Box::new(Sm4GcmAead::new(key)?)),
+        CipherSuite::TLS_SM4_GCM_SM3 => Ok(TlsAeadImpl::Sm4Gcm(Sm4GcmAead::new(key)?)),
         #[cfg(feature = "sm_tls13")]
-        CipherSuite::TLS_SM4_CCM_SM3 => Ok(Box::new(Sm4CcmAead::new(key)?)),
+        CipherSuite::TLS_SM4_CCM_SM3 => Ok(TlsAeadImpl::Sm4Ccm(Sm4CcmAead::new(key)?)),
         _ => Err(TlsError::NoSharedCipherSuite),
     }
 }
 
 /// Create an SM4-GCM AEAD instance.
 #[cfg(feature = "tlcp")]
-pub fn create_sm4_gcm_aead(key: &[u8]) -> Result<Box<dyn TlsAead>, TlsError> {
-    Ok(Box::new(Sm4GcmAead::new(key)?))
+pub fn create_sm4_gcm_aead(key: &[u8]) -> Result<TlsAeadImpl, TlsError> {
+    Ok(TlsAeadImpl::Sm4Gcm(Sm4GcmAead::new(key)?))
 }
 
 #[cfg(test)]

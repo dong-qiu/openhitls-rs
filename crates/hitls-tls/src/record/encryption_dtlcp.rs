@@ -7,7 +7,7 @@
 use super::dtls::DtlsRecord;
 use super::encryption::{MAX_CIPHERTEXT_LENGTH, MAX_PLAINTEXT_LENGTH};
 use super::ContentType;
-use crate::crypt::aead::{create_sm4_gcm_aead, TlsAead};
+use crate::crypt::aead::{create_sm4_gcm_aead, TlsAeadImpl};
 use hitls_types::TlsError;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
@@ -138,8 +138,8 @@ fn sm4_cbc_decrypt_raw(key: &[u8], iv: &[u8], data: &mut [u8]) -> Result<(), Tls
 
 /// DTLCP GCM record encryptor.
 pub struct DtlcpRecordEncryptorGcm {
-    aead: Box<dyn TlsAead>,
-    fixed_iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    fixed_iv: [u8; 4],
 }
 
 impl Drop for DtlcpRecordEncryptorGcm {
@@ -151,7 +151,9 @@ impl Drop for DtlcpRecordEncryptorGcm {
 impl DtlcpRecordEncryptorGcm {
     pub fn new(key: &[u8], fixed_iv: Vec<u8>) -> Result<Self, TlsError> {
         let aead = create_sm4_gcm_aead(key)?;
-        Ok(Self { aead, fixed_iv })
+        let mut iv = [0u8; 4];
+        iv.copy_from_slice(&fixed_iv);
+        Ok(Self { aead, fixed_iv: iv })
     }
 
     /// Encrypt a record. Fragment = `explicit_nonce(8) || ciphertext || tag(16)`.
@@ -184,8 +186,8 @@ impl DtlcpRecordEncryptorGcm {
 
 /// DTLCP GCM record decryptor.
 pub struct DtlcpRecordDecryptorGcm {
-    aead: Box<dyn TlsAead>,
-    fixed_iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    fixed_iv: [u8; 4],
     tag_len: usize,
 }
 
@@ -199,9 +201,11 @@ impl DtlcpRecordDecryptorGcm {
     pub fn new(key: &[u8], fixed_iv: Vec<u8>) -> Result<Self, TlsError> {
         let aead = create_sm4_gcm_aead(key)?;
         let tag_len = aead.tag_size();
+        let mut iv = [0u8; 4];
+        iv.copy_from_slice(&fixed_iv);
         Ok(Self {
             aead,
-            fixed_iv,
+            fixed_iv: iv,
             tag_len,
         })
     }
@@ -389,6 +393,7 @@ impl DtlcpRecordDecryptorCbc {
 // ─── Dispatch Enum ────────────────────────────────────────
 
 /// DTLCP encryptor (dispatches CBC vs GCM).
+#[allow(clippy::large_enum_variant)]
 pub enum DtlcpEncryptor {
     Gcm(DtlcpRecordEncryptorGcm),
     Cbc(DtlcpRecordEncryptorCbc),
@@ -410,6 +415,7 @@ impl DtlcpEncryptor {
 }
 
 /// DTLCP decryptor (dispatches CBC vs GCM).
+#[allow(clippy::large_enum_variant)]
 pub enum DtlcpDecryptor {
     Gcm(DtlcpRecordDecryptorGcm),
     Cbc(DtlcpRecordDecryptorCbc),

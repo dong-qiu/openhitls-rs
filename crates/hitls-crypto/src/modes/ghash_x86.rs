@@ -189,6 +189,7 @@ unsafe fn gf128_mul_clmul(a: __m128i, b: __m128i, poly: __m128i) -> __m128i {
 /// # Safety
 /// Caller must ensure VPCLMULQDQ, AVX2, PCLMULQDQ, SSE2, SSSE3 are available.
 #[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+#[allow(clippy::incompatible_msrv)]
 #[target_feature(enable = "vpclmulqdq,avx2,pclmulqdq,sse2,ssse3")]
 pub(super) unsafe fn ghash_4_blocks_vpclmul(
     powers: &GhashPowers,

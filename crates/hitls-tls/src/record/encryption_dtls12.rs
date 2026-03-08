@@ -7,7 +7,7 @@
 use super::dtls::{DtlsRecord, DTLS12_VERSION};
 use super::encryption::MAX_PLAINTEXT_LENGTH;
 use super::ContentType;
-use crate::crypt::aead::{create_aead, TlsAead};
+use crate::crypt::aead::{create_aead, TlsAeadImpl};
 use crate::record::encryption12::tls12_suite_to_aead_suite;
 use crate::CipherSuite;
 use hitls_types::TlsError;
@@ -57,8 +57,8 @@ fn build_aad_dtls12(
 /// Unlike the TLS 1.2 encryptor, the caller provides epoch and sequence number
 /// from `EpochState`, since these appear in the DTLS record header.
 pub struct DtlsRecordEncryptor12 {
-    aead: Box<dyn TlsAead>,
-    fixed_iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    fixed_iv: [u8; 4],
 }
 
 impl Drop for DtlsRecordEncryptor12 {
@@ -72,7 +72,9 @@ impl DtlsRecordEncryptor12 {
     pub fn new(suite: CipherSuite, key: &[u8], fixed_iv: Vec<u8>) -> Result<Self, TlsError> {
         let aead_suite = tls12_suite_to_aead_suite(suite)?;
         let aead = create_aead(aead_suite, key)?;
-        Ok(Self { aead, fixed_iv })
+        let mut iv = [0u8; 4];
+        iv.copy_from_slice(&fixed_iv);
+        Ok(Self { aead, fixed_iv: iv })
     }
 
     /// Encrypt a plaintext and return a DTLS record.
@@ -113,8 +115,8 @@ impl DtlsRecordEncryptor12 {
 
 /// DTLS 1.2 record decryptor (epoch-aware).
 pub struct DtlsRecordDecryptor12 {
-    aead: Box<dyn TlsAead>,
-    fixed_iv: Vec<u8>,
+    aead: TlsAeadImpl,
+    fixed_iv: [u8; 4],
     tag_len: usize,
 }
 
@@ -130,9 +132,11 @@ impl DtlsRecordDecryptor12 {
         let aead_suite = tls12_suite_to_aead_suite(suite)?;
         let aead = create_aead(aead_suite, key)?;
         let tag_len = aead.tag_size();
+        let mut iv = [0u8; 4];
+        iv.copy_from_slice(&fixed_iv);
         Ok(Self {
             aead,
-            fixed_iv,
+            fixed_iv: iv,
             tag_len,
         })
     }
