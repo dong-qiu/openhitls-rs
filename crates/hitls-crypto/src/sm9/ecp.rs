@@ -224,8 +224,18 @@ impl PartialEq for EcPointG1 {
         let z2_sq = other.z.sqr().expect("field sqr");
         let lx = self.x.mul(&z2_sq).expect("field mul");
         let rx = other.x.mul(&z1_sq).expect("field mul");
-        let ly = self.y.mul(&z2_sq).expect("field mul").mul(&other.z).expect("field mul");
-        let ry = other.y.mul(&z1_sq).expect("field mul").mul(&self.z).expect("field mul");
+        let ly = self
+            .y
+            .mul(&z2_sq)
+            .expect("field mul")
+            .mul(&other.z)
+            .expect("field mul");
+        let ry = other
+            .y
+            .mul(&z1_sq)
+            .expect("field mul")
+            .mul(&self.z)
+            .expect("field mul");
         lx == rx && ly == ry
     }
 }

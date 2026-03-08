@@ -114,7 +114,11 @@ mod kani_proofs {
             _ => TagClass::Private,
         };
 
-        let tag = Tag { class, constructed, number };
+        let tag = Tag {
+            class,
+            constructed,
+            number,
+        };
         let encoded = tag.to_bytes();
         let (decoded, len) = Tag::from_bytes(&encoded).unwrap();
         assert!(len == encoded.len());

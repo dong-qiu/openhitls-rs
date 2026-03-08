@@ -39,7 +39,8 @@ fn build_inner_plaintext(content_type: ContentType, plaintext: &[u8]) -> Vec<u8>
 }
 
 /// Extract content type from inner plaintext (last non-zero byte).
-fn parse_inner_plaintext(inner: &[u8]) -> Result<(ContentType, Vec<u8>), TlsError> {
+/// Takes ownership of the Vec and truncates in-place to avoid a copy.
+fn parse_inner_plaintext(mut inner: Vec<u8>) -> Result<(ContentType, Vec<u8>), TlsError> {
     // Find the last non-zero byte (content type)
     let ct_pos = inner
         .iter()
@@ -56,7 +57,8 @@ fn parse_inner_plaintext(inner: &[u8]) -> Result<(ContentType, Vec<u8>), TlsErro
             ))
         }
     };
-    Ok((ct, inner[..ct_pos].to_vec()))
+    inner.truncate(ct_pos);
+    Ok((ct, inner))
 }
 
 /// DTLS 1.3 record encryptor.
@@ -162,7 +164,7 @@ impl Dtls13RecordDecryptor {
             .decrypt(&nonce, &aad, &record.fragment)
             .map_err(|_| TlsError::RecordError("DTLS 1.3 decrypt: authentication failed".into()))?;
 
-        parse_inner_plaintext(&inner)
+        parse_inner_plaintext(inner)
     }
 }
 

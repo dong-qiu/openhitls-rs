@@ -92,7 +92,11 @@ pub(crate) fn chacha20_block_soft(key: &[u8; 32], counter: u32, nonce: &[u8; 12]
 
     // Key (8 words)
     for i in 0..8 {
-        state[4 + i] = u32::from_le_bytes(key[4 * i..4 * i + 4].try_into().expect("exact 4-byte slice"));
+        state[4 + i] = u32::from_le_bytes(
+            key[4 * i..4 * i + 4]
+                .try_into()
+                .expect("exact 4-byte slice"),
+        );
     }
 
     // Counter
@@ -100,7 +104,11 @@ pub(crate) fn chacha20_block_soft(key: &[u8; 32], counter: u32, nonce: &[u8; 12]
 
     // Nonce (3 words)
     for i in 0..3 {
-        state[13 + i] = u32::from_le_bytes(nonce[4 * i..4 * i + 4].try_into().expect("exact 4-byte slice"));
+        state[13 + i] = u32::from_le_bytes(
+            nonce[4 * i..4 * i + 4]
+                .try_into()
+                .expect("exact 4-byte slice"),
+        );
     }
 
     let initial = state;
@@ -601,7 +609,9 @@ impl ChaCha20Poly1305 {
 
         // Generate Poly1305 key from block 0
         let poly_key_block = chacha20_block(&self.key, 0, &nonce_arr);
-        let poly_key: [u8; 32] = poly_key_block[..32].try_into().expect("exact 32-byte slice from 64-byte block");
+        let poly_key: [u8; 32] = poly_key_block[..32]
+            .try_into()
+            .expect("exact 32-byte slice from 64-byte block");
 
         // Encrypt plaintext starting at counter 1
         let mut ciphertext = plaintext.to_vec();
@@ -636,7 +646,9 @@ impl ChaCha20Poly1305 {
 
         // Generate Poly1305 key
         let poly_key_block = chacha20_block(&self.key, 0, &nonce_arr);
-        let poly_key: [u8; 32] = poly_key_block[..32].try_into().expect("exact 32-byte slice from 64-byte block");
+        let poly_key: [u8; 32] = poly_key_block[..32]
+            .try_into()
+            .expect("exact 32-byte slice from 64-byte block");
 
         // Verify tag
         let expected_tag = self.compute_tag(&poly_key, aad, ciphertext);

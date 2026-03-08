@@ -84,6 +84,7 @@ fn build_inner_plaintext(
 /// Parse inner plaintext: scan from end for first non-zero byte (the content type).
 ///
 /// Returns (actual_content_type, plaintext_content).
+#[cfg(test)]
 fn parse_inner_plaintext(inner: &[u8]) -> Result<(ContentType, &[u8]), TlsError> {
     for i in (0..inner.len()).rev() {
         if inner[i] != 0 {
@@ -95,6 +96,28 @@ fn parse_inner_plaintext(inner: &[u8]) -> Result<(ContentType, &[u8]), TlsError>
                 _ => return Err(TlsError::RecordError("unknown inner content type".into())),
             };
             return Ok((ct, &inner[..i]));
+        }
+    }
+    Err(TlsError::RecordError(
+        "inner plaintext has no content type".into(),
+    ))
+}
+
+/// Parse inner plaintext, taking ownership and truncating in-place to avoid a copy.
+///
+/// Returns (actual_content_type, plaintext_vec) where the Vec is truncated to content only.
+fn parse_inner_plaintext_owned(mut inner: Vec<u8>) -> Result<(ContentType, Vec<u8>), TlsError> {
+    for i in (0..inner.len()).rev() {
+        if inner[i] != 0 {
+            let ct = match inner[i] {
+                20 => ContentType::ChangeCipherSpec,
+                21 => ContentType::Alert,
+                22 => ContentType::Handshake,
+                23 => ContentType::ApplicationData,
+                _ => return Err(TlsError::RecordError("unknown inner content type".into())),
+            };
+            inner.truncate(i);
+            return Ok((ct, inner));
         }
     }
     Err(TlsError::RecordError(
@@ -255,9 +278,9 @@ impl RecordDecryptor {
             .decrypt(&nonce, &aad, &record.fragment)
             .map_err(|_| TlsError::RecordError("bad record MAC".into()))?;
 
-        let (ct, plaintext_slice) = parse_inner_plaintext(&inner)?;
+        let (ct, plaintext) = parse_inner_plaintext_owned(inner)?;
 
-        if plaintext_slice.len() > MAX_PLAINTEXT_LENGTH {
+        if plaintext.len() > MAX_PLAINTEXT_LENGTH {
             return Err(TlsError::RecordError(
                 "decrypted plaintext exceeds maximum length".into(),
             ));
@@ -268,7 +291,7 @@ impl RecordDecryptor {
         }
         self.seq += 1;
 
-        Ok((ct, plaintext_slice.to_vec()))
+        Ok((ct, plaintext))
     }
 
     /// Current read sequence number.

@@ -95,8 +95,12 @@ fn kpke_keygen(d: &[u8; 32], params: &MlKemParams) -> Result<(Vec<u8>, Vec<u8>),
     g_input[..32].copy_from_slice(d);
     g_input[32] = k as u8;
     let g_out = hash_g(&g_input);
-    let rho: [u8; 32] = g_out[..32].try_into().expect("exact 32-byte slice from G output");
-    let sigma: [u8; 32] = g_out[32..64].try_into().expect("exact 32-byte slice from G output");
+    let rho: [u8; 32] = g_out[..32]
+        .try_into()
+        .expect("exact 32-byte slice from G output");
+    let sigma: [u8; 32] = g_out[32..64]
+        .try_into()
+        .expect("exact 32-byte slice from G output");
 
     // Generate matrix A in NTT domain
     let a_hat = expand_a(&rho, k);
@@ -171,7 +175,9 @@ fn kpke_encrypt(
     for i in 0..k {
         t_hat.push(byte_decode(&ek[i * poly_bytes..(i + 1) * poly_bytes], 12));
     }
-    let rho: [u8; 32] = ek[k * poly_bytes..k * poly_bytes + 32].try_into().expect("exact 32-byte slice from encapsulation key");
+    let rho: [u8; 32] = ek[k * poly_bytes..k * poly_bytes + 32]
+        .try_into()
+        .expect("exact 32-byte slice from encapsulation key");
 
     // Generate matrix A in NTT domain
     let a_hat = expand_a(&rho, k);
@@ -339,7 +345,9 @@ impl MlKemKeyPair {
         g_input[32..64].copy_from_slice(&h_ek);
         let g_out = hash_g(&g_input);
         let shared_secret: Vec<u8> = g_out[..32].to_vec();
-        let r: [u8; 32] = g_out[32..64].try_into().expect("exact 32-byte slice from G output");
+        let r: [u8; 32] = g_out[32..64]
+            .try_into()
+            .expect("exact 32-byte slice from G output");
 
         // ct = K-PKE.Encrypt(ek, m, r)
         let ct = kpke_encrypt(&self.encapsulation_key, &m, &r, &params)?;
@@ -376,7 +384,9 @@ impl MlKemKeyPair {
         g_input[32..64].copy_from_slice(h_ek);
         let g_out = hash_g(&g_input);
         let k_prime: Vec<u8> = g_out[..32].to_vec();
-        let r_prime: [u8; 32] = g_out[32..64].try_into().expect("exact 32-byte slice from G output");
+        let r_prime: [u8; 32] = g_out[32..64]
+            .try_into()
+            .expect("exact 32-byte slice from G output");
 
         // ct' = K-PKE.Encrypt(ek, m', r')
         let ct_prime = kpke_encrypt(ek, &m_prime, &r_prime, &params)?;
@@ -434,7 +444,9 @@ impl MlKemKeyPair {
         g_input.extend_from_slice(&h_ek);
         let g_out = hash_g(&g_input);
         let shared_secret: Vec<u8> = g_out[..32].to_vec();
-        let r: [u8; 32] = g_out[32..64].try_into().expect("exact 32-byte slice from G output");
+        let r: [u8; 32] = g_out[32..64]
+            .try_into()
+            .expect("exact 32-byte slice from G output");
         let ct = kpke_encrypt(&self.encapsulation_key, m, &r, &params)?;
         Ok((shared_secret, ct))
     }
