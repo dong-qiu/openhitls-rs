@@ -347,6 +347,45 @@ jobs:
       - name: Run cargo-vet
         run: cargo vet
 
+  sbom:
+    name: SBOM Generation
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx
+      - name: Generate CycloneDX SBOM
+        run: cargo cyclonedx --all --format json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: ./**/bom.json
+          retention-days: 90
+
+  unsafe-audit:
+    name: Unsafe Code Audit (cargo-geiger)
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-geiger
+        run: cargo install cargo-geiger
+      - name: Run cargo-geiger report
+        run: cargo geiger --all-features --output-format ascii 2>&1 | tee geiger-report.txt || true
+      - name: Upload geiger report
+        uses: actions/upload-artifact@v4
+        with:
+          name: geiger-report
+          path: geiger-report.txt
+          retention-days: 90
+
   bench:
     name: Benchmark Check
     needs: [fmt, clippy]
