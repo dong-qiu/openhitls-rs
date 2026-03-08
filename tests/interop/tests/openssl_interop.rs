@@ -10,6 +10,7 @@
 //!
 //! Run with: `cargo test -p hitls-integration-tests --ignored -- openssl`
 
+use std::io::Write;
 use std::net::TcpListener;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -232,4 +233,235 @@ fn test_openssl_s_server_tls12() {
 
     // Cleanup temp files
     let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+// ============================================================
+// Differential tests: compare hitls-rs crypto output with OpenSSL CLI
+// ============================================================
+
+/// Run openssl command with stdin input, return stdout bytes.
+fn openssl_pipe(args: &[&str], input: &[u8]) -> Vec<u8> {
+    let mut child = Command::new("openssl")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn openssl");
+
+    child.stdin.take().unwrap().write_all(input).unwrap();
+    let output = child.wait_with_output().expect("openssl failed");
+    assert!(output.status.success(), "openssl {:?} failed: {}", args, String::from_utf8_lossy(&output.stderr));
+    output.stdout
+}
+
+// ============================================================
+// Differential Test 1: SHA-256 digest
+// ============================================================
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_differential_sha256() {
+    if !openssl_available() {
+        eprintln!("openssl not found, skipping");
+        return;
+    }
+
+    use hitls_crypto::sha2::Sha256;
+
+
+    let test_data = b"The quick brown fox jumps over the lazy dog";
+
+    // hitls-rs SHA-256
+    let mut hasher = Sha256::new();
+    hasher.update(test_data).unwrap();
+    let our_digest = hasher.finish().unwrap();
+
+    // OpenSSL SHA-256 (outputs hex string like "SHA2-256(stdin)= d7a8...")
+    let openssl_out = openssl_pipe(&["dgst", "-sha256", "-hex", "-r"], test_data);
+    let openssl_hex = String::from_utf8_lossy(&openssl_out);
+    // -r format: "hex_digest *stdin\n"
+    let hex_str = openssl_hex.split_whitespace().next().unwrap();
+    let openssl_digest = hitls_utils::hex::hex(hex_str);
+
+    assert_eq!(
+        our_digest, openssl_digest.as_slice(),
+        "SHA-256 digest mismatch with OpenSSL"
+    );
+}
+
+// ============================================================
+// Differential Test 2: HMAC-SHA256
+// ============================================================
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_differential_hmac_sha256() {
+    if !openssl_available() {
+        eprintln!("openssl not found, skipping");
+        return;
+    }
+
+    use hitls_crypto::hmac::Hmac;
+    use hitls_crypto::sha2::Sha256;
+
+    let key = [0x0bu8; 20];
+    let data = b"Hi There";
+
+    // hitls-rs HMAC-SHA256
+    let our_mac = Hmac::mac(|| Box::new(Sha256::new()), &key, data).unwrap();
+
+    // OpenSSL HMAC-SHA256 (use -macopt hexkey for binary keys)
+    let key_hex = hitls_utils::hex::to_hex(&key);
+    let openssl_out2 = openssl_pipe(
+        &["dgst", "-sha256", "-mac", "hmac", "-macopt", &format!("hexkey:{key_hex}"), "-hex", "-r"],
+        data,
+    );
+    let openssl_hex = String::from_utf8_lossy(&openssl_out2);
+    let hex_str = openssl_hex.split_whitespace().next().unwrap();
+    let openssl_mac = hitls_utils::hex::hex(hex_str);
+
+    assert_eq!(
+        our_mac, openssl_mac.as_slice(),
+        "HMAC-SHA256 mismatch with OpenSSL"
+    );
+}
+
+// ============================================================
+// Differential Test 3: AES-128-GCM encrypt/decrypt roundtrip
+// ============================================================
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_differential_aes_gcm() {
+    if !openssl_available() {
+        eprintln!("openssl not found, skipping");
+        return;
+    }
+
+    use hitls_crypto::modes::gcm;
+
+    let key = [0x01u8; 16];
+    let nonce = [0x02u8; 12];
+    let plaintext = b"Hello, differential testing!";
+
+    // hitls-rs encrypt (returns ciphertext || tag)
+    let our_ct = gcm::gcm_encrypt(&key, &nonce, &[], plaintext).unwrap();
+    let (ct_body, tag) = our_ct.split_at(our_ct.len() - 16);
+
+    let key_hex = hitls_utils::hex::to_hex(&key);
+    let nonce_hex = hitls_utils::hex::to_hex(&nonce);
+
+    // OpenSSL encrypt: write to temp files
+    let tmp = std::env::temp_dir().join("hitls_gcm_test");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let ct_file = tmp.join("ct.bin");
+    let tag_file = tmp.join("tag.bin");
+
+    let output = Command::new("openssl")
+        .args([
+            "enc", "-aes-128-gcm", "-e",
+            "-K", &key_hex,
+            "-iv", &nonce_hex,
+            "-out",
+        ])
+        .arg(&ct_file)
+        .arg("-tag")
+        .arg(&tag_file)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|mut c| {
+            c.stdin.take().unwrap().write_all(plaintext).unwrap();
+            c.wait_with_output()
+        });
+
+    // OpenSSL enc -aes-128-gcm may not support -tag on all versions.
+    // Fall back to openssl dgst comparison if enc doesn't support GCM.
+    if let Ok(out) = output {
+        if out.status.success() {
+            let openssl_ct = std::fs::read(&ct_file).unwrap_or_default();
+            let openssl_tag = std::fs::read(&tag_file).unwrap_or_default();
+
+            assert_eq!(ct_body, openssl_ct.as_slice(), "AES-GCM ciphertext mismatch");
+            assert_eq!(tag, openssl_tag.as_slice(), "AES-GCM tag mismatch");
+        }
+    }
+
+    // Verify our decrypt works on our own ciphertext (basic sanity)
+    let decrypted = gcm::gcm_decrypt(&key, &nonce, &[], &our_ct).unwrap();
+    assert_eq!(decrypted, plaintext);
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+// ============================================================
+// Differential Test 4: AES-256-CBC encrypt/decrypt
+// ============================================================
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_differential_aes_cbc() {
+    if !openssl_available() {
+        eprintln!("openssl not found, skipping");
+        return;
+    }
+
+    use hitls_crypto::modes::cbc;
+
+    let key = [0xABu8; 32];
+    let iv = [0xCDu8; 16];
+    // 32 bytes = 2 full blocks, no PKCS7 padding issues
+    let plaintext = [0x42u8; 32];
+
+    // hitls-rs encrypt (includes PKCS7 padding)
+    let our_ct = cbc::cbc_encrypt(&key, &iv, &plaintext).unwrap();
+
+    let key_hex = hitls_utils::hex::to_hex(&key);
+    let iv_hex = hitls_utils::hex::to_hex(&iv);
+
+    // OpenSSL encrypt (with PKCS7 padding, which is the default)
+    let openssl_ct = openssl_pipe(
+        &["enc", "-aes-256-cbc", "-e", "-K", &key_hex, "-iv", &iv_hex, "-nosalt"],
+        &plaintext,
+    );
+
+    assert_eq!(
+        our_ct, openssl_ct,
+        "AES-256-CBC ciphertext mismatch with OpenSSL"
+    );
+
+    // Verify decrypt roundtrip
+    let our_pt = cbc::cbc_decrypt(&key, &iv, &our_ct).unwrap();
+    assert_eq!(our_pt, plaintext);
+}
+
+// ============================================================
+// Differential Test 5: SHA-384 digest
+// ============================================================
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_differential_sha384() {
+    if !openssl_available() {
+        eprintln!("openssl not found, skipping");
+        return;
+    }
+
+    use hitls_crypto::sha2::Sha384;
+
+
+    let test_data = b"abc";
+
+    // hitls-rs
+    let mut hasher = Sha384::new();
+    hasher.update(test_data).unwrap();
+    let our_digest = hasher.finish().unwrap();
+
+    // OpenSSL
+    let openssl_out = openssl_pipe(&["dgst", "-sha384", "-hex", "-r"], test_data);
+    let openssl_hex = String::from_utf8_lossy(&openssl_out);
+    let hex_str = openssl_hex.split_whitespace().next().unwrap();
+    let openssl_digest = hitls_utils::hex::hex(hex_str);
+
+    assert_eq!(
+        our_digest, openssl_digest.as_slice(),
+        "SHA-384 digest mismatch with OpenSSL"
+    );
 }

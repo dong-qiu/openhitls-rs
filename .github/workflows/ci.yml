@@ -306,6 +306,19 @@ jobs:
       # Skip constant_time/ct_verify: timing tests run in dedicated job below
       - run: cargo test -p hitls-crypto --all-features -- --ignored --skip test_openssl --skip test_s_client --skip test_elgamal_generate --skip constant_time --skip ct_verify
 
+  openssl-differential:
+    name: OpenSSL Differential Tests
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify OpenSSL version
+        run: openssl version
+      - name: Run differential tests
+        run: cargo test -p hitls-integration-tests -- --ignored test_openssl_differential
+
   timing-tests:
     name: Constant-Time Verification
     if: github.event_name == 'schedule'
