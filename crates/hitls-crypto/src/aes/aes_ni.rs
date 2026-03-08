@@ -229,6 +229,43 @@ unsafe fn encrypt_4_blocks_ni(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]],
 }
 
 // ---------------------------------------------------------------------------
+// VAES 256-bit: encrypt 4 blocks using 2×__m256i (2 blocks each)
+// ---------------------------------------------------------------------------
+
+/// Encrypt 4 blocks in parallel using VAES 256-bit instructions.
+///
+/// Packs blocks[0..1] into one __m256i and blocks[2..3] into another,
+/// then processes all 4 blocks with just 2 VAES instructions per round
+/// (vs 4 AES-NI instructions in the non-VAES path).
+#[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+#[target_feature(enable = "vaes,avx2")]
+unsafe fn encrypt_4_blocks_vaes(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]], rounds: usize) {
+    // blocks is contiguous: [blk0 | blk1 | blk2 | blk3] = 64 bytes
+    let mut s01 = _mm256_loadu_si256(blocks[0].as_ptr() as *const __m256i);
+    let mut s23 = _mm256_loadu_si256(blocks[2].as_ptr() as *const __m256i);
+
+    // Broadcast 128-bit round key to both lanes of 256-bit register
+    let rk0 = _mm256_broadcastsi128_si256(load_key(&enc_keys[0]));
+    s01 = _mm256_xor_si256(s01, rk0);
+    s23 = _mm256_xor_si256(s23, rk0);
+
+    // Rounds 1 .. rounds-1
+    for rk in enc_keys.iter().take(rounds).skip(1) {
+        let k = _mm256_broadcastsi128_si256(load_key(rk));
+        s01 = _mm256_aesenc_epi128(s01, k);
+        s23 = _mm256_aesenc_epi128(s23, k);
+    }
+
+    // Final round
+    let kf = _mm256_broadcastsi128_si256(load_key(&enc_keys[rounds]));
+    s01 = _mm256_aesenclast_epi128(s01, kf);
+    s23 = _mm256_aesenclast_epi128(s23, kf);
+
+    _mm256_storeu_si256(blocks[0].as_mut_ptr() as *mut __m256i, s01);
+    _mm256_storeu_si256(blocks[2].as_mut_ptr() as *mut __m256i, s23);
+}
+
+// ---------------------------------------------------------------------------
 // NiAesKey — public(crate) struct
 // ---------------------------------------------------------------------------
 
@@ -304,8 +341,20 @@ impl NiAesKey {
         Ok(())
     }
 
-    /// Encrypt 4 blocks in place using pipelined AES-NI instructions.
+    /// Encrypt 4 blocks in place using pipelined AES instructions.
+    ///
+    /// Uses VAES 256-bit when available (2 instructions per round for 4 blocks),
+    /// falling back to AES-NI 128-bit pipeline (4 instructions per round).
     pub fn encrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        #[cfg(has_vaes_intrinsics)]
+        {
+            if is_x86_feature_detected!("vaes") {
+                // SAFETY: NiAesKey is only instantiated when AES is detected,
+                // and we just verified VAES + AVX2 support.
+                unsafe { encrypt_4_blocks_vaes(blocks, &self.enc_keys, self.rounds) }
+                return Ok(());
+            }
+        }
         unsafe { encrypt_4_blocks_ni(blocks, &self.enc_keys, self.rounds) }
         Ok(())
     }

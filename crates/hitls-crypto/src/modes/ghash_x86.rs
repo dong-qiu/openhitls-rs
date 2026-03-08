@@ -106,6 +106,179 @@ pub(super) unsafe fn ghash_block_x86(h: &[u8; 16], state: &mut [u8; 16], block: 
     _mm_storeu_si128(state.as_mut_ptr() as *mut __m128i, result_be);
 }
 
+/// Precomputed GHASH powers for multi-block VPCLMULQDQ acceleration.
+///
+/// Stores H, H^2, H^3, H^4 in POLYVAL (reflected) representation after mulX
+/// conversion. Built once per key and reused for all GCM operations.
+#[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+pub(super) struct GhashPowers {
+    /// H^1, H^2, H^3, H^4 — each 16 bytes in POLYVAL representation.
+    pub powers: [[u8; 16]; 4],
+}
+
+#[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+impl GhashPowers {
+    /// Build precomputed powers from raw H (big-endian GHASH key).
+    ///
+    /// # Safety
+    /// Caller must ensure PCLMULQDQ, SSE2, SSSE3 are available.
+    pub unsafe fn new(h: &[u8; 16]) -> Self {
+        let bswap_mask = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+        let poly = _mm_set_epi64x(0xC200000000000000_u64 as i64, 1);
+
+        let h_be = _mm_loadu_si128(h.as_ptr() as *const __m128i);
+        let h_rev = _mm_shuffle_epi8(h_be, bswap_mask);
+
+        // mulX: H → H_val in POLYVAL representation
+        let overflow = _mm_srai_epi32(h_rev, 31);
+        let overflow = _mm_shuffle_epi32(overflow, 0xFF);
+        let carry = _mm_srli_epi64(h_rev, 63);
+        let carry = _mm_slli_si128(carry, 8);
+        let h_val = _mm_slli_epi64(h_rev, 1);
+        let h_val = _mm_or_si128(h_val, carry);
+        let h_val = _mm_xor_si128(h_val, _mm_and_si128(overflow, poly));
+
+        // Compute H^1 through H^4
+        let mut powers = [[0u8; 16]; 4];
+        let mut cur = h_val;
+
+        // H^1
+        _mm_storeu_si128(powers[0].as_mut_ptr() as *mut __m128i, cur);
+
+        // H^n = H^(n-1) * H_val via CLMUL + Barrett reduction
+        for i in 1..4 {
+            cur = gf128_mul_clmul(cur, h_val, poly);
+            _mm_storeu_si128(powers[i].as_mut_ptr() as *mut __m128i, cur);
+        }
+
+        Self { powers }
+    }
+}
+
+/// GF(2^128) multiplication of two 128-bit values using CLMUL + Barrett reduction.
+///
+/// # Safety
+/// Requires PCLMULQDQ.
+#[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+#[target_feature(enable = "pclmulqdq,sse2,ssse3")]
+unsafe fn gf128_mul_clmul(a: __m128i, b: __m128i, poly: __m128i) -> __m128i {
+    let lo = _mm_clmulepi64_si128(a, b, 0x00);
+    let hi = _mm_clmulepi64_si128(a, b, 0x11);
+    let m1 = _mm_clmulepi64_si128(a, b, 0x01);
+    let m2 = _mm_clmulepi64_si128(a, b, 0x10);
+    let mid = _mm_xor_si128(m1, m2);
+    let lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
+    let hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
+
+    // Barrett reduction
+    let tmp = _mm_clmulepi64_si128(lo, poly, 0x10);
+    let lo = _mm_shuffle_epi32(lo, 78);
+    let lo = _mm_xor_si128(lo, tmp);
+    let tmp2 = _mm_clmulepi64_si128(lo, poly, 0x10);
+    let lo = _mm_shuffle_epi32(lo, 78);
+    let lo = _mm_xor_si128(lo, tmp2);
+    _mm_xor_si128(hi, lo)
+}
+
+/// Process 4 GHASH blocks in parallel using VPCLMULQDQ (256-bit carry-less multiply).
+///
+/// Computes state = (...((state ^ b0) * H^4) ^ b1) * H^3) ^ b2) * H^2) ^ b3) * H
+/// using schoolbook multiplication with 256-bit VPCLMULQDQ instructions,
+/// reducing the number of multiply instructions from 16 (4×4 Karatsuba) to 8.
+///
+/// # Safety
+/// Caller must ensure VPCLMULQDQ, AVX2, PCLMULQDQ, SSE2, SSSE3 are available.
+#[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+#[target_feature(enable = "vpclmulqdq,avx2,pclmulqdq,sse2,ssse3")]
+pub(super) unsafe fn ghash_4_blocks_vpclmul(
+    powers: &GhashPowers,
+    state: &mut [u8; 16],
+    blocks: &[[u8; 16]; 4],
+) {
+    let bswap_mask = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    let bswap256 = _mm256_broadcastsi128_si256(bswap_mask);
+    let poly128 = _mm_set_epi64x(0xC200000000000000_u64 as i64, 1);
+
+    // Load state, byte-swap, XOR with first block
+    let state_be = _mm_loadu_si128(state.as_ptr() as *const __m128i);
+    let state_val = _mm_shuffle_epi8(state_be, bswap_mask);
+    let block0_be = _mm_loadu_si128(blocks[0].as_ptr() as *const __m128i);
+    let block0_val = _mm_shuffle_epi8(block0_be, bswap_mask);
+    let a0 = _mm_xor_si128(state_val, block0_val);
+
+    // Load blocks 1-3, byte-swap
+    let a1_be = _mm_loadu_si128(blocks[1].as_ptr() as *const __m128i);
+    let a1 = _mm_shuffle_epi8(a1_be, bswap_mask);
+    let a2_be = _mm_loadu_si128(blocks[2].as_ptr() as *const __m128i);
+    let a2 = _mm_shuffle_epi8(a2_be, bswap_mask);
+    let a3_be = _mm_loadu_si128(blocks[3].as_ptr() as *const __m128i);
+    let a3 = _mm_shuffle_epi8(a3_be, bswap_mask);
+
+    // Load H powers: a0 uses H^4, a1 uses H^3, a2 uses H^2, a3 uses H^1
+    let h4 = _mm_loadu_si128(powers.powers[3].as_ptr() as *const __m128i);
+    let h3 = _mm_loadu_si128(powers.powers[2].as_ptr() as *const __m128i);
+    let h2 = _mm_loadu_si128(powers.powers[1].as_ptr() as *const __m128i);
+    let h1 = _mm_loadu_si128(powers.powers[0].as_ptr() as *const __m128i);
+
+    // Pack into 256-bit registers for VPCLMULQDQ:
+    // a_01 = [a0 | a1], h_43 = [h4 | h3]
+    // a_23 = [a2 | a3], h_21 = [h2 | h1]
+    let a_01 = _mm256_set_m128i(a1, a0);
+    let a_23 = _mm256_set_m128i(a3, a2);
+    let h_43 = _mm256_set_m128i(h3, h4);
+    let h_21 = _mm256_set_m128i(h1, h2);
+
+    // 256-bit Karatsuba: 4 multiplies yield products for 2 pairs simultaneously
+    let lo_01 = _mm256_clmulepi64_epi128(a_01, h_43, 0x00);
+    let hi_01 = _mm256_clmulepi64_epi128(a_01, h_43, 0x11);
+    let m1_01 = _mm256_clmulepi64_epi128(a_01, h_43, 0x01);
+    let m2_01 = _mm256_clmulepi64_epi128(a_01, h_43, 0x10);
+
+    let lo_23 = _mm256_clmulepi64_epi128(a_23, h_21, 0x00);
+    let hi_23 = _mm256_clmulepi64_epi128(a_23, h_21, 0x11);
+    let m1_23 = _mm256_clmulepi64_epi128(a_23, h_21, 0x01);
+    let m2_23 = _mm256_clmulepi64_epi128(a_23, h_21, 0x10);
+
+    // XOR all partial products together (sum all 4 multiplications)
+    let lo_all = _mm256_xor_si256(lo_01, lo_23);
+    let hi_all = _mm256_xor_si256(hi_01, hi_23);
+    let mid_all = _mm256_xor_si256(
+        _mm256_xor_si256(m1_01, m2_01),
+        _mm256_xor_si256(m1_23, m2_23),
+    );
+
+    // Reduce 256-bit halves to 128-bit by XORing high and low lanes
+    let lo128 = _mm_xor_si128(
+        _mm256_castsi256_si128(lo_all),
+        _mm256_extracti128_si256(lo_all, 1),
+    );
+    let hi128 = _mm_xor_si128(
+        _mm256_castsi256_si128(hi_all),
+        _mm256_extracti128_si256(hi_all, 1),
+    );
+    let mid128 = _mm_xor_si128(
+        _mm256_castsi256_si128(mid_all),
+        _mm256_extracti128_si256(mid_all, 1),
+    );
+
+    // Fold middle bits
+    let lo128 = _mm_xor_si128(lo128, _mm_slli_si128(mid128, 8));
+    let hi128 = _mm_xor_si128(hi128, _mm_srli_si128(mid128, 8));
+
+    // Barrett reduction
+    let tmp = _mm_clmulepi64_si128(lo128, poly128, 0x10);
+    let lo128 = _mm_shuffle_epi32(lo128, 78);
+    let lo128 = _mm_xor_si128(lo128, tmp);
+    let tmp2 = _mm_clmulepi64_si128(lo128, poly128, 0x10);
+    let lo128 = _mm_shuffle_epi32(lo128, 78);
+    let lo128 = _mm_xor_si128(lo128, tmp2);
+    let result = _mm_xor_si128(hi128, lo128);
+
+    // Byte-swap back and store
+    let result_be = _mm_shuffle_epi8(result, bswap_mask);
+    _mm_storeu_si128(state.as_mut_ptr() as *mut __m128i, result_be);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -5,6 +5,7 @@ fn main() {
     // Use single-colon syntax for MSRV 1.75 compatibility.
     println!("cargo:rustc-check-cfg=cfg(has_sha512_arm_intrinsics)");
     println!("cargo:rustc-check-cfg=cfg(has_sha3_keccak_intrinsics)");
+    println!("cargo:rustc-check-cfg=cfg(has_vaes_intrinsics)");
 
     // Detect Rust version to gate features that require newer intrinsics.
     // SHA-512 ARM intrinsics (vsha512*) and SHA-3 Keccak intrinsics
@@ -13,6 +14,12 @@ fn main() {
     if version >= 79 {
         println!("cargo:rustc-cfg=has_sha512_arm_intrinsics");
         println!("cargo:rustc-cfg=has_sha3_keccak_intrinsics");
+    }
+
+    // VAES (256-bit AES) and VPCLMULQDQ (256-bit carry-less multiply)
+    // intrinsics were stabilized in Rust 1.78.
+    if version >= 78 {
+        println!("cargo:rustc-cfg=has_vaes_intrinsics");
     }
 }
 

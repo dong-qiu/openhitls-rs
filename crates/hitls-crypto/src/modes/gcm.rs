@@ -82,6 +82,12 @@ pub struct GhashTable {
     h_raw: [u8; 16],
     /// Whether hardware GHASH is available.
     use_hw: bool,
+    /// Whether VPCLMULQDQ 4-block batch GHASH is available.
+    #[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+    use_vpclmul: bool,
+    /// Precomputed H powers for VPCLMULQDQ batch GHASH.
+    #[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+    powers: Option<super::ghash_x86::GhashPowers>,
 }
 
 impl GhashTable {
@@ -125,10 +131,26 @@ impl GhashTable {
         }
 
         let use_hw = detect_ghash_hw();
+
+        #[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+        let (use_vpclmul, powers) = {
+            if use_hw && is_x86_feature_detected!("vpclmulqdq") {
+                // SAFETY: We verified pclmulqdq (from use_hw) and vpclmulqdq above.
+                let p = unsafe { super::ghash_x86::GhashPowers::new(h) };
+                (true, Some(p))
+            } else {
+                (false, None)
+            }
+        };
+
         Self {
             table,
             h_raw: *h,
             use_hw,
+            #[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+            use_vpclmul,
+            #[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+            powers,
         }
     }
 
@@ -169,6 +191,33 @@ impl GhashTable {
         }
 
         *state = z;
+    }
+
+    /// GHASH 4 blocks at once using VPCLMULQDQ when available, else sequential.
+    ///
+    /// This processes blocks[0..4] in a single batched multiplication using
+    /// precomputed H powers, reducing 4 sequential multiply-and-reduce operations
+    /// to a single aggregated one.
+    pub(crate) fn ghash_4_blocks(&self, state: &mut Gf128, blocks: &[[u8; 16]; 4]) {
+        #[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+        {
+            if self.use_vpclmul {
+                if let Some(ref powers) = self.powers {
+                    let mut state_bytes = state.to_bytes();
+                    // SAFETY: use_vpclmul is only set when vpclmulqdq + pclmulqdq +
+                    // avx2 + sse2 + ssse3 are detected.
+                    unsafe {
+                        super::ghash_x86::ghash_4_blocks_vpclmul(powers, &mut state_bytes, blocks);
+                    }
+                    *state = Gf128::from_bytes(&state_bytes);
+                    return;
+                }
+            }
+        }
+        // Fallback: sequential single-block GHASH
+        for blk in blocks {
+            self.ghash_block(state, blk);
+        }
     }
 
     /// GHASH over variable-length data (pad to block boundary).
@@ -375,14 +424,15 @@ fn gcm_crypt_aes(
         }
 
         // GHASH 4 blocks (encrypt: hash output, decrypt: hash input)
-        for i in 0..4 {
-            let base = offset + i * 16;
-            let blk: &[u8; 16] = if encrypting {
-                output[base..base + 16].try_into().unwrap()
-            } else {
-                input[base..base + 16].try_into().unwrap()
-            };
-            table.ghash_block(&mut ghash_state, blk);
+        // Uses VPCLMULQDQ batch when available for ~2× throughput.
+        {
+            let src = if encrypting { &output[..] } else { input };
+            let mut blks = [[0u8; 16]; 4];
+            for i in 0..4 {
+                let base = offset + i * 16;
+                blks[i].copy_from_slice(&src[base..base + 16]);
+            }
+            table.ghash_4_blocks(&mut ghash_state, &blks);
         }
 
         offset += 64;
