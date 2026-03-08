@@ -100,6 +100,7 @@ fn sm4_cbc_decrypt_raw(key: &[u8], iv: &[u8], data: &mut [u8]) -> Result<(), Tls
 }
 
 /// Build TLCP AAD (13 bytes, same layout as TLS 1.2 but version = 0x0101).
+#[inline]
 fn build_aad_tlcp(seq: u64, content_type: ContentType, plaintext_len: u16) -> [u8; 13] {
     let mut aad = [0u8; 13];
     aad[..8].copy_from_slice(&seq.to_be_bytes());
@@ -110,6 +111,7 @@ fn build_aad_tlcp(seq: u64, content_type: ContentType, plaintext_len: u16) -> [u
 }
 
 /// Build GCM nonce: fixed_iv(4) || explicit_nonce(8).
+#[inline]
 fn build_nonce_tlcp(fixed_iv: &[u8], explicit_nonce: &[u8; GCM_EXPLICIT_NONCE_LEN]) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     nonce[..4].copy_from_slice(fixed_iv);

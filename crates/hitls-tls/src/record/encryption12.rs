@@ -19,6 +19,7 @@ pub const TLS12_VERSION: u16 = 0x0303;
 const EXPLICIT_NONCE_LEN: usize = 8;
 
 /// Build the TLS 1.2 GCM nonce: fixed_iv(4) || explicit_nonce(8).
+#[inline]
 fn build_nonce_tls12(fixed_iv: &[u8], explicit_nonce: &[u8; EXPLICIT_NONCE_LEN]) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     nonce[..4].copy_from_slice(fixed_iv);
@@ -28,6 +29,7 @@ fn build_nonce_tls12(fixed_iv: &[u8], explicit_nonce: &[u8; EXPLICIT_NONCE_LEN])
 
 /// Build the TLS 1.2 AAD (13 bytes):
 /// `seq_num(8) || content_type(1) || version(2) || plaintext_length(2)`
+#[inline]
 fn build_aad_tls12(seq: u64, content_type: ContentType, plaintext_len: u16) -> [u8; 13] {
     let seq_bytes = seq.to_be_bytes();
     let len_bytes = plaintext_len.to_be_bytes();

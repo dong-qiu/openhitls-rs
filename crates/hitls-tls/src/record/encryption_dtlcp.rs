@@ -27,6 +27,7 @@ const SM4_BLOCK_SIZE: usize = 16;
 // ─── Nonce / AAD Helpers ──────────────────────────────────
 
 /// Build explicit nonce (8 bytes): `epoch(2) || seq(6)`.
+#[inline]
 fn build_explicit_nonce(epoch: u16, seq: u64) -> [u8; EXPLICIT_NONCE_LEN] {
     let mut nonce = [0u8; EXPLICIT_NONCE_LEN];
     nonce[..2].copy_from_slice(&epoch.to_be_bytes());
@@ -36,6 +37,7 @@ fn build_explicit_nonce(epoch: u16, seq: u64) -> [u8; EXPLICIT_NONCE_LEN] {
 }
 
 /// Build GCM nonce (12 bytes): `fixed_iv(4) || epoch(2) || seq(6)`.
+#[inline]
 fn build_nonce_dtlcp(fixed_iv: &[u8], epoch: u16, seq: u64) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     nonce[..4].copy_from_slice(fixed_iv);
@@ -45,6 +47,7 @@ fn build_nonce_dtlcp(fixed_iv: &[u8], epoch: u16, seq: u64) -> [u8; 12] {
 
 /// Build DTLCP AAD (13 bytes):
 /// `epoch(2) || seq(6) || type(1) || version_0x0101(2) || plaintext_len(2)`
+#[inline]
 fn build_aad_dtlcp(
     epoch: u16,
     seq: u64,

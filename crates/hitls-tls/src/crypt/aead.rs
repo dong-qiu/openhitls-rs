@@ -314,6 +314,7 @@ pub enum TlsAeadImpl {
 }
 
 impl TlsAeadImpl {
+    #[inline]
     pub fn encrypt(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, TlsError> {
         match self {
             Self::AesGcm(a) => a.encrypt(nonce, aad, plaintext),
@@ -327,6 +328,7 @@ impl TlsAeadImpl {
         }
     }
 
+    #[inline]
     pub fn decrypt(
         &self,
         nonce: &[u8],
@@ -345,6 +347,7 @@ impl TlsAeadImpl {
         }
     }
 
+    #[inline]
     pub fn tag_size(&self) -> usize {
         match self {
             Self::AesGcm(a) => a.tag_size(),

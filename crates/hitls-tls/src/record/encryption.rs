@@ -32,6 +32,7 @@ const NONCE_LEN: usize = 12;
 /// Build the per-record nonce by XOR-ing IV with zero-padded sequence number.
 ///
 /// RFC 8446 §5.3: `nonce = iv XOR pad_left(sequence_number, iv_length)`
+#[inline]
 fn build_nonce_from_iv_seq(iv: &[u8], seq: u64) -> [u8; NONCE_LEN] {
     let mut nonce = [0u8; NONCE_LEN];
     let seq_bytes = seq.to_be_bytes();
@@ -47,6 +48,7 @@ fn build_nonce_from_iv_seq(iv: &[u8], seq: u64) -> [u8; NONCE_LEN] {
 ///
 /// RFC 8446 §5.2: additional_data = TLSCiphertext.opaque_type ||
 ///     TLSCiphertext.legacy_record_version || TLSCiphertext.length
+#[inline]
 fn build_aad(ciphertext_len: u16) -> [u8; 5] {
     let len_bytes = ciphertext_len.to_be_bytes();
     [

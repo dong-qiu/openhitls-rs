@@ -55,6 +55,7 @@ impl Gf128 {
         out
     }
 
+    #[inline]
     fn xor(self, other: Self) -> Self {
         Self {
             h: self.h ^ other.h,
@@ -63,6 +64,7 @@ impl Gf128 {
     }
 
     /// Right shift by 4 bits in GF(2^128).
+    #[inline]
     fn shr4(self) -> Self {
         Self {
             h: self.h >> 4,
@@ -156,6 +158,7 @@ impl GhashTable {
 
     /// GHASH multiplication: result = result XOR block, then multiply by H.
     /// Uses hardware acceleration (PMULL/PCLMULQDQ) when available.
+    #[inline]
     pub(crate) fn ghash_block(&self, state: &mut Gf128, block: &[u8; 16]) {
         if self.use_hw {
             let mut state_bytes = state.to_bytes();
@@ -286,6 +289,7 @@ fn ghash_block_hw(h: &[u8; 16], state: &mut [u8; 16], block: &[u8; 16]) {
 }
 
 /// Increment the last 4 bytes of a 16-byte counter (big-endian INC32).
+#[inline]
 fn inc32(counter: &mut [u8; 16]) {
     let ctr =
         u32::from_be_bytes([counter[12], counter[13], counter[14], counter[15]]).wrapping_add(1);

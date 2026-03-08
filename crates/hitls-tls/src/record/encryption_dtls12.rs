@@ -17,6 +17,7 @@ use zeroize::Zeroize;
 const EXPLICIT_NONCE_LEN: usize = 8;
 
 /// Build the DTLS 1.2 explicit nonce (8 bytes): `epoch(2) || seq(6)`.
+#[inline]
 fn build_explicit_nonce(epoch: u16, seq: u64) -> [u8; EXPLICIT_NONCE_LEN] {
     let mut nonce = [0u8; EXPLICIT_NONCE_LEN];
     nonce[..2].copy_from_slice(&epoch.to_be_bytes());
@@ -26,6 +27,7 @@ fn build_explicit_nonce(epoch: u16, seq: u64) -> [u8; EXPLICIT_NONCE_LEN] {
 }
 
 /// Build the DTLS 1.2 GCM nonce (12 bytes): `fixed_iv(4) || explicit_nonce(8)`.
+#[inline]
 fn build_nonce_dtls12(fixed_iv: &[u8], epoch: u16, seq: u64) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     nonce[..4].copy_from_slice(fixed_iv);
@@ -35,6 +37,7 @@ fn build_nonce_dtls12(fixed_iv: &[u8], epoch: u16, seq: u64) -> [u8; 12] {
 
 /// Build the DTLS 1.2 AAD (13 bytes):
 /// `epoch(2) || seq_num(6) || content_type(1) || version(2) || plaintext_length(2)`
+#[inline]
 fn build_aad_dtls12(
     epoch: u16,
     seq: u64,

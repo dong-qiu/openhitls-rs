@@ -19,6 +19,7 @@ const NONCE_LEN: usize = 12;
 const TAG_LEN: usize = 16;
 
 /// Build per-record nonce: `iv XOR pad_left(seq, 12)` (same as TLS 1.3).
+#[inline]
 fn build_nonce(iv: &[u8], seq: u64) -> [u8; NONCE_LEN] {
     let mut nonce = [0u8; NONCE_LEN];
     let seq_bytes = seq.to_be_bytes();

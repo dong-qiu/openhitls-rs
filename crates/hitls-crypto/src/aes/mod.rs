@@ -86,6 +86,7 @@ impl AesKey {
     }
 
     /// Encrypt a single 16-byte block in place.
+    #[inline]
     pub fn encrypt_block(&self, block: &mut [u8]) -> Result<(), CryptoError> {
         match &self.inner {
             AesImpl::Soft(k) => k.encrypt_block(block),
@@ -97,6 +98,7 @@ impl AesKey {
     }
 
     /// Decrypt a single 16-byte block in place.
+    #[inline]
     pub fn decrypt_block(&self, block: &mut [u8]) -> Result<(), CryptoError> {
         match &self.inner {
             AesImpl::Soft(k) => k.decrypt_block(block),
@@ -112,6 +114,7 @@ impl AesKey {
     /// On hardware AES (NEON/NI), all 4 blocks flow through each round
     /// simultaneously, hiding the 4-cycle latency. Software falls back
     /// to sequential single-block encryption.
+    #[inline]
     pub fn encrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
         match &self.inner {
             AesImpl::Soft(k) => k.encrypt_4_blocks(blocks),
@@ -123,6 +126,7 @@ impl AesKey {
     }
 
     /// Return the key length in bytes.
+    #[inline]
     pub fn key_len(&self) -> usize {
         match &self.inner {
             AesImpl::Soft(k) => k.key_len(),
