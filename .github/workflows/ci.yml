@@ -319,15 +319,31 @@ jobs:
       - name: Run differential tests
         run: cargo test -p hitls-integration-tests -- --ignored test_openssl_differential
 
-  timing-tests:
-    name: Constant-Time Verification
+  timing-tests-core:
+    name: Constant-Time Verification (Core)
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run core timing tests (comparison/verify — blocking)
+        run: |
+          cargo test -p hitls-crypto --all-features --release -- --ignored \
+            test_hmac_verify_constant_time \
+            test_aes_gcm_tag_verify_constant_time \
+            test_bignum_ct_eq_constant_time \
+            test_sm4_gcm_tag_verify_constant_time
+
+  timing-tests-extended:
+    name: Constant-Time Verification (Extended)
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Run timing tests (release mode, advisory)
+      - name: Run all timing tests (release mode, advisory)
         continue-on-error: true
         run: cargo test -p hitls-crypto --all-features --release -- --ignored constant_time ct_verify
       - name: Annotate flaky results
