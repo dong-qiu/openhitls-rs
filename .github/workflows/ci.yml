@@ -334,6 +334,19 @@ jobs:
         if: failure()
         run: echo "::warning::Timing tests failed — may be CI environment noise (CPU frequency scaling, load)"
 
+  supply-chain:
+    name: Supply Chain Audit (cargo-vet)
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-vet
+        run: cargo install cargo-vet
+      - name: Run cargo-vet
+        run: cargo vet
+
   bench:
     name: Benchmark Check
     needs: [fmt, clippy]
