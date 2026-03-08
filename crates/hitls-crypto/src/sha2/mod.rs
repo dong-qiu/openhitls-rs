@@ -563,6 +563,31 @@ impl Sha224 {
 pub const SHA256_OUTPUT_SIZE: usize = 32;
 
 /// SHA-256 hash context.
+///
+/// Provides incremental and one-shot hashing via `update`/`finish` or `digest`.
+///
+/// # Examples
+///
+/// One-shot hashing:
+///
+/// ```
+/// use hitls_crypto::sha2::Sha256;
+///
+/// let hash = Sha256::digest(b"hello world").unwrap();
+/// assert_eq!(hash.len(), 32);
+/// ```
+///
+/// Incremental hashing:
+///
+/// ```
+/// use hitls_crypto::sha2::Sha256;
+///
+/// let mut ctx = Sha256::new();
+/// ctx.update(b"hello ").unwrap();
+/// ctx.update(b"world").unwrap();
+/// let hash = ctx.finish().unwrap();
+/// assert_eq!(hash, Sha256::digest(b"hello world").unwrap());
+/// ```
 #[derive(Clone)]
 pub struct Sha256 {
     state: [u32; 8],

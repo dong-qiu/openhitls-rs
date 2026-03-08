@@ -18,6 +18,40 @@ const MAX_BLOCK_SIZE: usize = 128;
 const MAX_OUTPUT_SIZE: usize = 64;
 
 /// HMAC context using a boxed Digest for the underlying hash.
+///
+/// # Examples
+///
+/// One-shot HMAC-SHA-256 computation:
+///
+/// ```
+/// use hitls_crypto::hmac::Hmac;
+/// use hitls_crypto::sha2::Sha256;
+/// use hitls_crypto::provider::Digest;
+///
+/// let mac = Hmac::mac(
+///     || Box::new(Sha256::new()) as Box<dyn Digest>,
+///     b"secret key",
+///     b"message",
+/// ).unwrap();
+/// assert_eq!(mac.len(), 32);
+/// ```
+///
+/// Incremental HMAC computation:
+///
+/// ```
+/// use hitls_crypto::hmac::Hmac;
+/// use hitls_crypto::sha2::Sha256;
+/// use hitls_crypto::provider::Digest;
+///
+/// let mut ctx = Hmac::new(
+///     || Box::new(Sha256::new()) as Box<dyn Digest>,
+///     b"secret key",
+/// ).unwrap();
+/// ctx.update(b"message").unwrap();
+/// let mut out = vec![0u8; 32];
+/// ctx.finish(&mut out).unwrap();
+/// assert_eq!(out.len(), 32);
+/// ```
 pub struct Hmac {
     /// Inner hash context (initialized with ipad-xored key).
     inner: Box<dyn Digest>,

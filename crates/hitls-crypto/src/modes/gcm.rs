@@ -499,6 +499,23 @@ fn gcm_crypt_generic<C: BlockCipher>(
 
 /// Encrypt and authenticate data using AES-GCM.
 /// Returns ciphertext || 16-byte tag.
+///
+/// # Examples
+///
+/// ```
+/// use hitls_crypto::modes::gcm::{gcm_encrypt, gcm_decrypt};
+///
+/// let key = [0x42u8; 16]; // 128-bit AES key
+/// let nonce = [0x01u8; 12]; // 96-bit nonce
+/// let aad = b"additional data";
+/// let plaintext = b"hello world";
+///
+/// let ciphertext = gcm_encrypt(&key, &nonce, aad, plaintext).unwrap();
+/// assert_eq!(ciphertext.len(), plaintext.len() + 16); // plaintext + 16-byte tag
+///
+/// let recovered = gcm_decrypt(&key, &nonce, aad, &ciphertext).unwrap();
+/// assert_eq!(recovered, plaintext);
+/// ```
 pub fn gcm_encrypt(
     key: &[u8],
     nonce: &[u8],
