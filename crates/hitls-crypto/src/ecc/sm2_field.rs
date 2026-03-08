@@ -419,7 +419,6 @@ fn sm2_mont_reduce(mut t: [u64; 8]) -> Sm2FieldElement {
     Sm2FieldElement(r)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

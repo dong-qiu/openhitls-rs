@@ -103,10 +103,7 @@ pub(crate) fn schoolbook_mul<const N: usize, const N2: usize>(
 ///
 /// Writes the full 2N-limb result into `t` (which must be zeroed on entry).
 #[inline]
-pub(crate) fn schoolbook_sqr<const N: usize, const N2: usize>(
-    a: &[u64; N],
-    t: &mut [u64; N2],
-) {
+pub(crate) fn schoolbook_sqr<const N: usize, const N2: usize>(a: &[u64; N], t: &mut [u64; N2]) {
     // Cross-products (upper triangle): sum of a[i]*a[j] for i < j
     for i in 0..N {
         let mut carry = 0u64;

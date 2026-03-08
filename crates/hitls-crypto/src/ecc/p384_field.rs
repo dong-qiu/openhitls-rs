@@ -633,7 +633,6 @@ fn p384_mont_reduce(mut t: [u64; 12]) -> P384FieldElement {
     P384FieldElement(r)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

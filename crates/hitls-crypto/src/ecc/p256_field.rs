@@ -419,7 +419,6 @@ fn p256_mont_reduce(mut t: [u64; 8]) -> P256FieldElement {
     P256FieldElement(r)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
