@@ -320,7 +320,7 @@ impl NiAesKey {
             return Err(CryptoError::InvalidArg("invalid AES block size"));
         }
 
-        let blk: &mut [u8; 16] = block.try_into().unwrap();
+        let blk: &mut [u8; 16] = block.try_into().expect("block length validated above");
         // Safety: NiAesKey is only instantiated when AES-NI is available.
         unsafe {
             encrypt_block_ni(blk, &self.enc_keys, self.rounds);
@@ -334,7 +334,7 @@ impl NiAesKey {
             return Err(CryptoError::InvalidArg("invalid AES block size"));
         }
 
-        let blk: &mut [u8; 16] = block.try_into().unwrap();
+        let blk: &mut [u8; 16] = block.try_into().expect("block length validated above");
         // Safety: NiAesKey is only instantiated when AES-NI is available.
         unsafe {
             decrypt_block_ni(blk, &self.dec_keys, self.rounds);

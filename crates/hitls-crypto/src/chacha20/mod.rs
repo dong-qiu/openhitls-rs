@@ -92,7 +92,7 @@ pub(crate) fn chacha20_block_soft(key: &[u8; 32], counter: u32, nonce: &[u8; 12]
 
     // Key (8 words)
     for i in 0..8 {
-        state[4 + i] = u32::from_le_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
+        state[4 + i] = u32::from_le_bytes(key[4 * i..4 * i + 4].try_into().expect("exact 4-byte slice"));
     }
 
     // Counter
@@ -100,7 +100,7 @@ pub(crate) fn chacha20_block_soft(key: &[u8; 32], counter: u32, nonce: &[u8; 12]
 
     // Nonce (3 words)
     for i in 0..3 {
-        state[13 + i] = u32::from_le_bytes(nonce[4 * i..4 * i + 4].try_into().unwrap());
+        state[13 + i] = u32::from_le_bytes(nonce[4 * i..4 * i + 4].try_into().expect("exact 4-byte slice"));
     }
 
     let initial = state;
@@ -160,7 +160,7 @@ impl ChaCha20 {
         if nonce.len() != CHACHA20_NONCE_SIZE {
             return Err(CryptoError::InvalidArg("nonce must be 12 bytes"));
         }
-        let nonce_arr: [u8; 12] = nonce.try_into().unwrap();
+        let nonce_arr: [u8; 12] = nonce.try_into().expect("nonce length validated above");
 
         let mut offset = 0;
         let mut block_counter = counter;
@@ -228,10 +228,10 @@ impl Poly1305 {
         r_bytes[12] &= 252;
 
         // Decompose clamped r into radix-2^26 limbs
-        let t0 = u32::from_le_bytes(r_bytes[0..4].try_into().unwrap());
-        let t1 = u32::from_le_bytes(r_bytes[4..8].try_into().unwrap());
-        let t2 = u32::from_le_bytes(r_bytes[8..12].try_into().unwrap());
-        let t3 = u32::from_le_bytes(r_bytes[12..16].try_into().unwrap());
+        let t0 = u32::from_le_bytes(r_bytes[0..4].try_into().expect("exact 4-byte slice"));
+        let t1 = u32::from_le_bytes(r_bytes[4..8].try_into().expect("exact 4-byte slice"));
+        let t2 = u32::from_le_bytes(r_bytes[8..12].try_into().expect("exact 4-byte slice"));
+        let t3 = u32::from_le_bytes(r_bytes[12..16].try_into().expect("exact 4-byte slice"));
 
         let r0 = t0 & 0x03ff_ffff;
         let r1 = ((t0 >> 26) | (t1 << 6)) & 0x03ff_ffff;
@@ -240,10 +240,10 @@ impl Poly1305 {
         let r4 = t3 >> 8;
 
         // s = key[16..32]
-        let s0 = u32::from_le_bytes(key[16..20].try_into().unwrap());
-        let s1 = u32::from_le_bytes(key[20..24].try_into().unwrap());
-        let s2 = u32::from_le_bytes(key[24..28].try_into().unwrap());
-        let s3 = u32::from_le_bytes(key[28..32].try_into().unwrap());
+        let s0 = u32::from_le_bytes(key[16..20].try_into().expect("exact 4-byte slice"));
+        let s1 = u32::from_le_bytes(key[20..24].try_into().expect("exact 4-byte slice"));
+        let s2 = u32::from_le_bytes(key[24..28].try_into().expect("exact 4-byte slice"));
+        let s3 = u32::from_le_bytes(key[28..32].try_into().expect("exact 4-byte slice"));
 
         // Precompute r² = r * r in radix-2^26
         let r_limbs = [r0, r1, r2, r3, r4];
@@ -303,10 +303,10 @@ impl Poly1305 {
     }
 
     fn process_block(&mut self, block: &[u8], hibit: u32) {
-        let t0 = u32::from_le_bytes(block[0..4].try_into().unwrap());
-        let t1 = u32::from_le_bytes(block[4..8].try_into().unwrap());
-        let t2 = u32::from_le_bytes(block[8..12].try_into().unwrap());
-        let t3 = u32::from_le_bytes(block[12..16].try_into().unwrap());
+        let t0 = u32::from_le_bytes(block[0..4].try_into().expect("exact 4-byte slice"));
+        let t1 = u32::from_le_bytes(block[4..8].try_into().expect("exact 4-byte slice"));
+        let t2 = u32::from_le_bytes(block[8..12].try_into().expect("exact 4-byte slice"));
+        let t3 = u32::from_le_bytes(block[12..16].try_into().expect("exact 4-byte slice"));
 
         // Add to accumulator (radix-2^26)
         self.acc[0] = self.acc[0].wrapping_add(t0 & 0x03ff_ffff);
@@ -366,10 +366,10 @@ impl Poly1305 {
     /// sequential result ((acc + b0) * r + b1) * r.
     fn process_2_blocks(&mut self, b0: &[u8], b1: &[u8]) {
         // Decode b0 into radix-2^26 and add to accumulator
-        let t0_0 = u32::from_le_bytes(b0[0..4].try_into().unwrap());
-        let t1_0 = u32::from_le_bytes(b0[4..8].try_into().unwrap());
-        let t2_0 = u32::from_le_bytes(b0[8..12].try_into().unwrap());
-        let t3_0 = u32::from_le_bytes(b0[12..16].try_into().unwrap());
+        let t0_0 = u32::from_le_bytes(b0[0..4].try_into().expect("exact 4-byte slice"));
+        let t1_0 = u32::from_le_bytes(b0[4..8].try_into().expect("exact 4-byte slice"));
+        let t2_0 = u32::from_le_bytes(b0[8..12].try_into().expect("exact 4-byte slice"));
+        let t3_0 = u32::from_le_bytes(b0[12..16].try_into().expect("exact 4-byte slice"));
 
         let a0 = u64::from(self.acc[0] + (t0_0 & 0x03ff_ffff));
         let a1 = u64::from(self.acc[1] + (((t0_0 >> 26) | (t1_0 << 6)) & 0x03ff_ffff));
@@ -395,10 +395,10 @@ impl Poly1305 {
         let mut d4 = a0 * r24 + a1 * r23 + a2 * r22 + a3 * r21 + a4 * r20;
 
         // Decode b1 into radix-2^26
-        let t0_1 = u32::from_le_bytes(b1[0..4].try_into().unwrap());
-        let t1_1 = u32::from_le_bytes(b1[4..8].try_into().unwrap());
-        let t2_1 = u32::from_le_bytes(b1[8..12].try_into().unwrap());
-        let t3_1 = u32::from_le_bytes(b1[12..16].try_into().unwrap());
+        let t0_1 = u32::from_le_bytes(b1[0..4].try_into().expect("exact 4-byte slice"));
+        let t1_1 = u32::from_le_bytes(b1[4..8].try_into().expect("exact 4-byte slice"));
+        let t2_1 = u32::from_le_bytes(b1[8..12].try_into().expect("exact 4-byte slice"));
+        let t3_1 = u32::from_le_bytes(b1[12..16].try_into().expect("exact 4-byte slice"));
 
         let b0v = u64::from(t0_1 & 0x03ff_ffff);
         let b1v = u64::from(((t0_1 >> 26) | (t1_1 << 6)) & 0x03ff_ffff);
@@ -597,11 +597,11 @@ impl ChaCha20Poly1305 {
         if nonce.len() != 12 {
             return Err(CryptoError::InvalidArg("nonce must be 12 bytes"));
         }
-        let nonce_arr: [u8; 12] = nonce.try_into().unwrap();
+        let nonce_arr: [u8; 12] = nonce.try_into().expect("nonce length validated above");
 
         // Generate Poly1305 key from block 0
         let poly_key_block = chacha20_block(&self.key, 0, &nonce_arr);
-        let poly_key: [u8; 32] = poly_key_block[..32].try_into().unwrap();
+        let poly_key: [u8; 32] = poly_key_block[..32].try_into().expect("exact 32-byte slice from 64-byte block");
 
         // Encrypt plaintext starting at counter 1
         let mut ciphertext = plaintext.to_vec();
@@ -628,7 +628,7 @@ impl ChaCha20Poly1305 {
         if ciphertext_and_tag.len() < 16 {
             return Err(CryptoError::InvalidArg("invalid tag length"));
         }
-        let nonce_arr: [u8; 12] = nonce.try_into().unwrap();
+        let nonce_arr: [u8; 12] = nonce.try_into().expect("nonce length validated above");
 
         let ct_len = ciphertext_and_tag.len() - 16;
         let ciphertext = &ciphertext_and_tag[..ct_len];
@@ -636,7 +636,7 @@ impl ChaCha20Poly1305 {
 
         // Generate Poly1305 key
         let poly_key_block = chacha20_block(&self.key, 0, &nonce_arr);
-        let poly_key: [u8; 32] = poly_key_block[..32].try_into().unwrap();
+        let poly_key: [u8; 32] = poly_key_block[..32].try_into().expect("exact 32-byte slice from 64-byte block");
 
         // Verify tag
         let expected_tag = self.compute_tag(&poly_key, aad, ciphertext);

@@ -61,10 +61,10 @@ pub fn encode(label: &str, data: &[u8]) -> String {
 
     // Wrap at 64 characters per line
     for chunk in base64.as_bytes().chunks(64) {
-        output.push_str(std::str::from_utf8(chunk).unwrap());
+        output.push_str(std::str::from_utf8(chunk).expect("base64 is valid UTF-8"));
         output.push('\n');
     }
-    writeln!(output, "{END_PREFIX}{label}{DASHES_SUFFIX}").unwrap();
+    writeln!(output, "{END_PREFIX}{label}{DASHES_SUFFIX}").expect("write to String");
     output
 }
 

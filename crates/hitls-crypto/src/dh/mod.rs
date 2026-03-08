@@ -58,10 +58,10 @@ fn param_id_to_index(id: DhParamId) -> usize {
 fn get_group_cache(id: DhParamId, params: &DhParams) -> &'static DhGroupCache {
     let idx = param_id_to_index(id);
     GROUP_CACHES[idx].get_or_init(|| {
-        let ctx = MontgomeryCtx::new(&params.p).unwrap();
+        let ctx = MontgomeryCtx::new(&params.p).expect("valid DH prime");
         // exp_bits = prime bit length (private exponent up to p-1)
         let exp_bits = params.p.bit_len();
-        let gen_table = ctx.build_exp_table(&params.g, exp_bits).unwrap();
+        let gen_table = ctx.build_exp_table(&params.g, exp_bits).expect("valid DH generator");
         DhGroupCache { ctx, gen_table }
     })
 }

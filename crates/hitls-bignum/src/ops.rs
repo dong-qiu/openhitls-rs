@@ -279,7 +279,7 @@ fn add_unsigned(a: &[Limb], b: &[Limb]) -> BigNum {
     let mut bn = BigNum::from_u64(0);
     *bn.limbs_mut() = limbs;
     // Normalize to remove leading zeros
-    while bn.limbs().len() > 1 && *bn.limbs().last().unwrap() == 0 {
+    while bn.limbs().len() > 1 && *bn.limbs().last().expect("len > 1") == 0 {
         bn.limbs_mut().pop();
     }
     bn
@@ -320,7 +320,7 @@ fn sub_unsigned(a: &[Limb], b: &[Limb]) -> BigNum {
     let mut bn = BigNum::from_u64(0);
     *bn.limbs_mut() = limbs;
     bn.set_negative(negative);
-    while bn.limbs().len() > 1 && *bn.limbs().last().unwrap() == 0 {
+    while bn.limbs().len() > 1 && *bn.limbs().last().expect("len > 1") == 0 {
         bn.limbs_mut().pop();
     }
     bn
@@ -348,7 +348,7 @@ fn mul_unsigned(a: &[Limb], b: &[Limb]) -> BigNum {
 
     let mut bn = BigNum::from_u64(0);
     *bn.limbs_mut() = limbs;
-    while bn.limbs().len() > 1 && *bn.limbs().last().unwrap() == 0 {
+    while bn.limbs().len() > 1 && *bn.limbs().last().expect("len > 1") == 0 {
         bn.limbs_mut().pop();
     }
     bn

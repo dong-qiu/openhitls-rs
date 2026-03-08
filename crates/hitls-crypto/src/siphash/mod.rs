@@ -60,8 +60,8 @@ impl SipHash {
             return Err(CryptoError::InvalidArg(""));
         }
 
-        let k0 = u64::from_le_bytes(key[..8].try_into().unwrap());
-        let k1 = u64::from_le_bytes(key[8..].try_into().unwrap());
+        let k0 = u64::from_le_bytes(key[..8].try_into().expect("key length validated above"));
+        let k1 = u64::from_le_bytes(key[8..].try_into().expect("key length validated above"));
 
         Ok(SipHash {
             v0: k0 ^ 0x736f6d6570736575,
@@ -106,7 +106,7 @@ impl SipHash {
 
         // Process 8-byte words
         while pos + 8 <= data.len() {
-            let m = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+            let m = u64::from_le_bytes(data[pos..pos + 8].try_into().expect("exact 8-byte slice"));
             self.process_word(m);
             pos += 8;
         }

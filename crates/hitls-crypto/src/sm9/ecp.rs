@@ -220,12 +220,12 @@ impl PartialEq for EcPointG1 {
             return false;
         }
         // Compare in projective: X1·Z2² == X2·Z1² && Y1·Z2³ == Y2·Z1³
-        let z1_sq = self.z.sqr().unwrap();
-        let z2_sq = other.z.sqr().unwrap();
-        let lx = self.x.mul(&z2_sq).unwrap();
-        let rx = other.x.mul(&z1_sq).unwrap();
-        let ly = self.y.mul(&z2_sq).unwrap().mul(&other.z).unwrap();
-        let ry = other.y.mul(&z1_sq).unwrap().mul(&self.z).unwrap();
+        let z1_sq = self.z.sqr().expect("field sqr");
+        let z2_sq = other.z.sqr().expect("field sqr");
+        let lx = self.x.mul(&z2_sq).expect("field mul");
+        let rx = other.x.mul(&z1_sq).expect("field mul");
+        let ly = self.y.mul(&z2_sq).expect("field mul").mul(&other.z).expect("field mul");
+        let ry = other.y.mul(&z1_sq).expect("field mul").mul(&self.z).expect("field mul");
         lx == rx && ly == ry
     }
 }

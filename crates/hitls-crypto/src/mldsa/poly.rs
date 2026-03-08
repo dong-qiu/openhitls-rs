@@ -78,8 +78,8 @@ pub(crate) fn use_hint(hint: bool, r: i32, gamma2: i32) -> i32 {
 /// heap allocations. Each 3-byte chunk yields one 23-bit candidate.
 pub(crate) fn rej_ntt_poly(rho: &[u8; 32], i: u8, j: u8) -> Poly {
     let mut xof = Shake128::new();
-    xof.update(rho).unwrap();
-    xof.update(&[j, i]).unwrap();
+    xof.update(rho).expect("hash update");
+    xof.update(&[j, i]).expect("hash update");
 
     let mut r = [0i32; N];
     let mut ctr = 0;
@@ -119,8 +119,8 @@ pub(crate) fn expand_a(rho: &[u8; 32], k: usize, l: usize) -> Vec<Vec<Poly>> {
 /// Each byte yields two 4-bit candidates.
 pub(crate) fn rej_bounded_poly(sigma: &[u8], eta: usize, nonce: u16) -> Poly {
     let mut xof = Shake256::new();
-    xof.update(sigma).unwrap();
-    xof.update(&nonce.to_le_bytes()).unwrap();
+    xof.update(sigma).expect("hash update");
+    xof.update(&nonce.to_le_bytes()).expect("hash update");
 
     let mut r = [0i32; N];
     let mut ctr = 0;
@@ -160,8 +160,8 @@ pub(crate) fn rej_bounded_poly(sigma: &[u8], eta: usize, nonce: u16) -> Poly {
 /// ExpandMask: sample a polynomial with coefficients in [-gamma1+1, gamma1].
 pub(crate) fn sample_mask_poly(seed: &[u8], nonce: u16, gamma1: i32) -> Poly {
     let mut xof = Shake256::new();
-    xof.update(seed).unwrap();
-    xof.update(&nonce.to_le_bytes()).unwrap();
+    xof.update(seed).expect("hash update");
+    xof.update(&nonce.to_le_bytes()).expect("hash update");
 
     let bits = if gamma1 == (1 << 17) { 18 } else { 20 }; // gamma1 = 2^17 or 2^19
     let bytes_needed = N * bits / 8;
@@ -222,7 +222,7 @@ pub(crate) fn sample_mask_poly(seed: &[u8], nonce: u16, gamma1: i32) -> Poly {
 /// allocations, then refills from the buffer as needed.
 pub(crate) fn sample_in_ball(seed: &[u8], tau: usize) -> Poly {
     let mut xof = Shake256::new();
-    xof.update(seed).unwrap();
+    xof.update(seed).expect("hash update");
 
     // Squeeze a full SHAKE-256 block: first 8 bytes are sign bits, rest are index candidates
     let mut buf = [0u8; 136];
@@ -512,15 +512,15 @@ pub(crate) fn pack_w1(poly: &Poly, gamma2: i32) -> Vec<u8> {
 /// H: SHAKE256(input) squeezed into caller-provided buffer.
 pub(crate) fn hash_h_into(input: &[u8], output: &mut [u8]) {
     let mut xof = Shake256::new();
-    xof.update(input).unwrap();
+    xof.update(input).expect("hash update");
     xof.squeeze_into(output);
 }
 
 /// H with two inputs concatenated, squeezed into caller-provided buffer.
 pub(crate) fn hash_h2_into(a: &[u8], b: &[u8], output: &mut [u8]) {
     let mut xof = Shake256::new();
-    xof.update(a).unwrap();
-    xof.update(b).unwrap();
+    xof.update(a).expect("hash update");
+    xof.update(b).expect("hash update");
     xof.squeeze_into(output);
 }
 

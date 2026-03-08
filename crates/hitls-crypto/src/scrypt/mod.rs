@@ -73,7 +73,7 @@ fn romix(block: &mut [u8], n: usize, r: usize) {
         // j = Integerify(X) mod N
         // Integerify takes the last 64 bytes of X, interprets first 8 bytes as LE u64
         let offset = block_size - 64;
-        let j_bytes: [u8; 8] = x[offset..offset + 8].try_into().unwrap();
+        let j_bytes: [u8; 8] = x[offset..offset + 8].try_into().expect("exact 8-byte slice");
         let j = u64::from_le_bytes(j_bytes) as usize & (n - 1);
 
         // X = X XOR V[j]
@@ -120,7 +120,7 @@ fn block_mix(block: &mut [u8], r: usize) {
 fn salsa20_8_core(block: &mut [u8; 64]) {
     let mut x = [0u32; 16];
     for i in 0..16 {
-        x[i] = u32::from_le_bytes(block[4 * i..4 * i + 4].try_into().unwrap());
+        x[i] = u32::from_le_bytes(block[4 * i..4 * i + 4].try_into().expect("exact 4-byte slice"));
     }
 
     let input = x;

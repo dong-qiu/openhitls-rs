@@ -214,7 +214,7 @@ impl KeccakState {
             // XOR buf into state inline (avoids buf.clone() to work around borrow)
             let rate = self.rate;
             for i in 0..rate / 8 {
-                let word = u64::from_le_bytes(self.buf[i * 8..(i + 1) * 8].try_into().unwrap());
+                let word = u64::from_le_bytes(self.buf[i * 8..(i + 1) * 8].try_into().expect("exact 8-byte slice"));
                 self.state[i] ^= word;
             }
             keccak_f1600(&mut self.state);
@@ -240,7 +240,7 @@ impl KeccakState {
     /// XOR the first `rate` bytes from a buffer into state.
     fn xor_rate_bytes(&mut self, block: &[u8]) {
         for i in 0..self.rate / 8 {
-            let word = u64::from_le_bytes(block[i * 8..(i + 1) * 8].try_into().unwrap());
+            let word = u64::from_le_bytes(block[i * 8..(i + 1) * 8].try_into().expect("exact 8-byte slice"));
             self.state[i] ^= word;
         }
         let remaining = self.rate % 8;
@@ -255,7 +255,7 @@ impl KeccakState {
     /// XOR rate bytes from a slice (which may be longer than rate) into state.
     fn xor_rate_bytes_from(&mut self, data: &[u8]) {
         for i in 0..self.rate / 8 {
-            let word = u64::from_le_bytes(data[i * 8..(i + 1) * 8].try_into().unwrap());
+            let word = u64::from_le_bytes(data[i * 8..(i + 1) * 8].try_into().expect("exact 8-byte slice"));
             self.state[i] ^= word;
         }
         let remaining = self.rate % 8;
@@ -269,7 +269,7 @@ impl KeccakState {
 
     fn xor_block(&mut self, block: &[u8]) {
         for i in 0..block.len() / 8 {
-            let word = u64::from_le_bytes(block[i * 8..(i + 1) * 8].try_into().unwrap());
+            let word = u64::from_le_bytes(block[i * 8..(i + 1) * 8].try_into().expect("exact 8-byte slice"));
             self.state[i] ^= word;
         }
         let full_words = block.len() / 8;

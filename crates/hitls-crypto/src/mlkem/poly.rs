@@ -404,13 +404,13 @@ pub(crate) fn rej_sample(xof: &mut Shake128) -> Poly {
 /// avoiding redundant k² absorptions of the same 32-byte seed.
 pub(crate) fn expand_a(rho: &[u8; 32], k: usize) -> Vec<Vec<Poly>> {
     let mut base_xof = Shake128::new();
-    base_xof.update(rho).unwrap();
+    base_xof.update(rho).expect("hash update");
 
     let mut a = vec![vec![[0i16; N]; k]; k];
     for (i, row) in a.iter_mut().enumerate() {
         for (j, entry) in row.iter_mut().enumerate() {
             let mut xof = base_xof.clone();
-            xof.update(&[j as u8, i as u8]).unwrap();
+            xof.update(&[j as u8, i as u8]).expect("hash update");
             *entry = rej_sample(&mut xof);
         }
     }
@@ -420,8 +420,8 @@ pub(crate) fn expand_a(rho: &[u8; 32], k: usize) -> Vec<Vec<Poly>> {
 /// PRF: SHAKE256(seed || nonce) squeezed into caller-provided buffer.
 pub(crate) fn prf_into(seed: &[u8], nonce: u8, output: &mut [u8]) {
     let mut xof = Shake256::new();
-    xof.update(seed).unwrap();
-    xof.update(&[nonce]).unwrap();
+    xof.update(seed).expect("hash update");
+    xof.update(&[nonce]).expect("hash update");
     xof.squeeze_into(output);
 }
 
@@ -431,24 +431,24 @@ pub(crate) fn prf_into(seed: &[u8], nonce: u8, output: &mut [u8]) {
 /// have already absorbed the seed bytes.
 pub(crate) fn prf_into_from(base: &Shake256, nonce: u8, output: &mut [u8]) {
     let mut xof = base.clone();
-    xof.update(&[nonce]).unwrap();
+    xof.update(&[nonce]).expect("hash update");
     xof.squeeze_into(output);
 }
 
 /// H: SHA3-256 hash.
 pub(crate) fn hash_h(data: &[u8]) -> [u8; 32] {
-    Sha3_256::digest(data).unwrap()
+    Sha3_256::digest(data).expect("hash finalize")
 }
 
 /// G: SHA3-512 hash.
 pub(crate) fn hash_g(data: &[u8]) -> [u8; 64] {
-    Sha3_512::digest(data).unwrap()
+    Sha3_512::digest(data).expect("hash finalize")
 }
 
 /// J: SHAKE256(input) squeezed into caller-provided buffer.
 pub(crate) fn hash_j_into(input: &[u8], output: &mut [u8]) {
     let mut xof = Shake256::new();
-    xof.update(input).unwrap();
+    xof.update(input).expect("hash update");
     xof.squeeze_into(output);
 }
 

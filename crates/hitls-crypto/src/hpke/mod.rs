@@ -381,8 +381,8 @@ fn hex_literal(s: &str) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(s.len() / 2);
     let mut chars = s.chars();
     while let (Some(h), Some(l)) = (chars.next(), chars.next()) {
-        let hv = h.to_digit(16).unwrap() as u8;
-        let lv = l.to_digit(16).unwrap() as u8;
+        let hv = h.to_digit(16).expect("valid hex digit") as u8;
+        let lv = l.to_digit(16).expect("valid hex digit") as u8;
         bytes.push((hv << 4) | lv);
     }
     bytes

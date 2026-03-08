@@ -238,12 +238,12 @@ impl PartialEq for EcPointG2 {
         if self.is_infinity() || other.is_infinity() {
             return false;
         }
-        let z1_sq = self.z.sqr().unwrap();
-        let z2_sq = other.z.sqr().unwrap();
-        let lx = self.x.mul(&z2_sq).unwrap();
-        let rx = other.x.mul(&z1_sq).unwrap();
-        let ly = self.y.mul(&z2_sq).unwrap().mul(&other.z).unwrap();
-        let ry = other.y.mul(&z1_sq).unwrap().mul(&self.z).unwrap();
+        let z1_sq = self.z.sqr().expect("field sqr");
+        let z2_sq = other.z.sqr().expect("field sqr");
+        let lx = self.x.mul(&z2_sq).expect("field mul");
+        let rx = other.x.mul(&z1_sq).expect("field mul");
+        let ly = self.y.mul(&z2_sq).expect("field mul").mul(&other.z).expect("field mul");
+        let ry = other.y.mul(&z1_sq).expect("field mul").mul(&self.z).expect("field mul");
         lx == rx && ly == ry
     }
 }

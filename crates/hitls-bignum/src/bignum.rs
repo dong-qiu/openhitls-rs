@@ -235,12 +235,12 @@ impl BigNum {
             if i == 0 {
                 // Skip leading zero in first byte
                 if b >> 4 != 0 {
-                    s.push(char::from_digit(u32::from(b >> 4), 16).unwrap());
+                    s.push(char::from_digit(u32::from(b >> 4), 16).expect("nibble 0-15"));
                 }
-                s.push(char::from_digit(u32::from(b & 0x0f), 16).unwrap());
+                s.push(char::from_digit(u32::from(b & 0x0f), 16).expect("nibble 0-15"));
             } else {
-                s.push(char::from_digit(u32::from(b >> 4), 16).unwrap());
-                s.push(char::from_digit(u32::from(b & 0x0f), 16).unwrap());
+                s.push(char::from_digit(u32::from(b >> 4), 16).expect("nibble 0-15"));
+                s.push(char::from_digit(u32::from(b & 0x0f), 16).expect("nibble 0-15"));
             }
         }
         s
@@ -283,7 +283,7 @@ impl BigNum {
         val.set_negative(false);
         while !val.is_zero() {
             // div_rem cannot fail with divisor=10
-            let (q, r) = val.div_rem(&ten).unwrap();
+            let (q, r) = val.div_rem(&ten).expect("division by 10 cannot fail");
             let d = if r.is_zero() { 0u8 } else { r.limbs()[0] as u8 };
             digits.push(b'0' + d);
             val = q;
@@ -292,12 +292,12 @@ impl BigNum {
             digits.push(b'-');
         }
         digits.reverse();
-        String::from_utf8(digits).unwrap()
+        String::from_utf8(digits).expect("digits are valid ASCII")
     }
 
     /// Remove leading zero limbs.
     pub(crate) fn normalize(&mut self) {
-        while self.limbs.len() > 1 && *self.limbs.last().unwrap() == 0 {
+        while self.limbs.len() > 1 && *self.limbs.last().expect("len > 1") == 0 {
             self.limbs.pop();
         }
         if self.is_zero() {
