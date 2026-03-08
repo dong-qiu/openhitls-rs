@@ -1,0 +1,19 @@
+name: Kani Formal Verification
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"  # Weekly Monday 04:00 UTC
+  workflow_dispatch:
+
+jobs:
+  kani:
+    name: Kani Proofs
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Kani
+        uses: model-checking/kani-github-action@v1
+        with:
+          enable-propproof: false
+          args: --workspace -p hitls-bignum --harness kani_proof

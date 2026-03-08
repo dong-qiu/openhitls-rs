@@ -91,6 +91,60 @@ impl ConstantTimeEq for BigNum {
     }
 }
 
+// ============================================================
+// Kani formal verification proofs
+// ============================================================
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Proof: ct_select with choice=0 always returns the first operand.
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn kani_proof_ct_select_choice0() {
+        let a_val: u64 = kani::any();
+        let b_val: u64 = kani::any();
+        let a = BigNum::from_u64(a_val);
+        let b = BigNum::from_u64(b_val);
+        let result = BigNum::ct_select(&a, &b, Choice::from(0));
+        assert!(result.ct_eq(&a).unwrap_u8() == 1);
+    }
+
+    /// Proof: ct_select with choice=1 always returns the second operand.
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn kani_proof_ct_select_choice1() {
+        let a_val: u64 = kani::any();
+        let b_val: u64 = kani::any();
+        let a = BigNum::from_u64(a_val);
+        let b = BigNum::from_u64(b_val);
+        let result = BigNum::ct_select(&a, &b, Choice::from(1));
+        assert!(result.ct_eq(&b).unwrap_u8() == 1);
+    }
+
+    /// Proof: ct_eq is reflexive (a == a for all values).
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn kani_proof_ct_eq_reflexive() {
+        let val: u64 = kani::any();
+        let a = BigNum::from_u64(val);
+        assert!(a.ct_eq(&a).unwrap_u8() == 1);
+    }
+
+    /// Proof: ct_eq is symmetric (a == b implies b == a).
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn kani_proof_ct_eq_symmetric() {
+        let a_val: u64 = kani::any();
+        let b_val: u64 = kani::any();
+        let a = BigNum::from_u64(a_val);
+        let b = BigNum::from_u64(b_val);
+        let ab = a.ct_eq(&b).unwrap_u8();
+        let ba = b.ct_eq(&a).unwrap_u8();
+        assert!(ab == ba);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
