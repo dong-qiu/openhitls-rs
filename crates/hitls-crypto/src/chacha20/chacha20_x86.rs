@@ -9,31 +9,31 @@ use core::arch::x86::*;
 use core::arch::x86_64::*;
 
 /// Rotate each u32 lane left by 16 bits.
-#[inline(always)]
+#[inline]
 #[target_feature(enable = "sse2")]
 unsafe fn rotl16(v: __m128i) -> __m128i {
-    unsafe { _mm_or_si128(_mm_slli_epi32::<16>(v), _mm_srli_epi32::<16>(v)) }
+    _mm_or_si128(_mm_slli_epi32::<16>(v), _mm_srli_epi32::<16>(v))
 }
 
 /// Rotate each u32 lane left by 12 bits.
-#[inline(always)]
+#[inline]
 #[target_feature(enable = "sse2")]
 unsafe fn rotl12(v: __m128i) -> __m128i {
-    unsafe { _mm_or_si128(_mm_slli_epi32::<12>(v), _mm_srli_epi32::<20>(v)) }
+    _mm_or_si128(_mm_slli_epi32::<12>(v), _mm_srli_epi32::<20>(v))
 }
 
 /// Rotate each u32 lane left by 8 bits.
-#[inline(always)]
+#[inline]
 #[target_feature(enable = "sse2")]
 unsafe fn rotl8(v: __m128i) -> __m128i {
-    unsafe { _mm_or_si128(_mm_slli_epi32::<8>(v), _mm_srli_epi32::<24>(v)) }
+    _mm_or_si128(_mm_slli_epi32::<8>(v), _mm_srli_epi32::<24>(v))
 }
 
 /// Rotate each u32 lane left by 7 bits.
-#[inline(always)]
+#[inline]
 #[target_feature(enable = "sse2")]
 unsafe fn rotl7(v: __m128i) -> __m128i {
-    unsafe { _mm_or_si128(_mm_slli_epi32::<7>(v), _mm_srli_epi32::<25>(v)) }
+    _mm_or_si128(_mm_slli_epi32::<7>(v), _mm_srli_epi32::<25>(v))
 }
 
 /// Compute a ChaCha20 64-byte keystream block using SSE2.

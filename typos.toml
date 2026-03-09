@@ -20,6 +20,16 @@ flate = "flate"   # deflate/inflate compression
 benchs = "benchs" # informal plural of bench
 testca = "testca" # test CA certificate
 testin = "testin" # test input abbreviation
+adin = "adin"     # additional_input abbreviation in DRBG
+fo = "fo"         # variable/abbreviation in crypto code
+Fo = "Fo"         # capitalized variant
+Slq = "Slq"       # SLQ abbreviation in PQ crypto
+unparseable = "unparseable" # valid alternate spelling
+UE = "UE"         # ML-KEM/ML-DSA parameter (e.g. MLKEM_UE)
+MSIS = "MSIS"     # Module-SIS lattice problem
+Iin = "Iin"       # variable name in protocol code
+Alo = "Alo"       # variable/abbreviation
+Iy = "Iy"         # variable name
 
 [type.markdown]
 extend-glob = ["*.md"]
