@@ -1,0 +1,23 @@
+[files]
+extend-exclude = [
+    "tests/vectors/",
+    "fuzz/corpus/",
+    "*.json",
+    "*.lock",
+    "supply-chain/",
+]
+
+[default.extend-words]
+# Cryptographic terms that are not typos
+ede = "ede"       # Triple-DES EDE mode
+ba = "ba"         # Hex byte
+ot = "ot"         # Oblivious transfer
+nd = "nd"         # Bignum variable
+numer = "numer"   # Numerator in math
+datas = "datas"   # Plural in protocol specs
+keypair = "keypair"
+
+[default.extend-identifiers]
+# Variable names in crypto code
+nIn = "nIn"
+pOut = "pOut"
