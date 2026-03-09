@@ -167,6 +167,19 @@ jobs:
       - name: Check all feature combinations (depth 2)
         run: cargo hack check -p hitls-crypto --feature-powerset --depth 2 --no-dev-deps
 
+  minimal-versions:
+    name: Minimal Dependency Versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@cargo-minimal-versions
+      - name: Check with minimal versions
+        run: cargo minimal-versions check --workspace --all-features
+        continue-on-error: true
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
