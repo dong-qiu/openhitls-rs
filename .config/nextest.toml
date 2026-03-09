@@ -9,3 +9,14 @@ fail-fast = false
 [profile.ci]
 retries = 2
 fail-fast = true
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+# Hard timeout: kill any test exceeding 5 minutes
+[[profile.ci.overrides]]
+filter = "all()"
+test-timeout = "5m"
+
+# Ignored tests (keygen, timing) get more time
+[[profile.ci.overrides]]
+filter = "test(#ignored)"
+test-timeout = "10m"
