@@ -596,7 +596,7 @@ jobs:
         env:
           RUSTFLAGS: ""
 
-  sanitizers:
+  sanitizers-asan:
     name: AddressSanitizer
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -612,6 +612,22 @@ jobs:
           cargo +nightly test -p hitls-bignum --target x86_64-unknown-linux-gnu
           cargo +nightly test -p hitls-crypto --features aes,sha2,modes,hmac --target x86_64-unknown-linux-gnu
           cargo +nightly test -p hitls-utils --target x86_64-unknown-linux-gnu
+
+  sanitizers-tsan:
+    name: ThreadSanitizer
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Run TLS tests with TSan
+        env:
+          RUSTFLAGS: "-Z sanitizer=thread -D warnings"
+          TSAN_OPTIONS: "suppressions=tsan_suppressions.txt"
+        run: |
+          cargo +nightly test -p hitls-tls --all-features --target x86_64-unknown-linux-gnu -- --test-threads=1
+        continue-on-error: true
 
   fuzz-run:
     name: Scheduled Fuzzing
