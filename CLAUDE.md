@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phases I1–I87, T1–T79, R1–R12, P1–P93 complete (4065 tests, 35 ignored)
+- **Status**: Phases I1–I87, T1–T79, R1–R12, P1–P93 complete (4046 tests, 35 ignored)
 
 ## Workspace Structure
 
@@ -58,7 +58,7 @@ cargo fmt --all -- --check
 
 ### Formatting
 - `rustfmt.toml`: max_width=100, use_field_init_shorthand, use_try_shorthand
-- `clippy.toml`: cognitive-complexity-threshold=30
+- `clippy.toml`: cognitive-complexity-threshold=15
 - Always run `cargo fmt` before committing
 - **Sync before task**: Before starting any implementation task, always sync the remote main branch first (`git fetch origin main && git rebase origin/main`) to ensure the local codebase is up to date
 
@@ -131,12 +131,12 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases I1–I87, T1–T79, R1–R12, P1–P93 complete (4065 tests, 35 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
+Phases I1–I87, T1–T79, R1–R12, P1–P93 complete (4046 tests, 35 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete.**
 
 ### Completed Phases (Summary)
 
 - **Implementation (I1–I87)**: All crypto primitives (48 modules), TLS 1.3/1.2/DTLS/TLCP/DTLCP (91 cipher suites, 10 connection types), PKI/X.509/CMS, FIPS/CMVP, entropy health, CLI (18 commands), async I/O, HPKE (RFC 9180), HybridKEM (12 variants), XMSS-MT, CRL extensions, security levels, PHA
-- **Testing (T1–T79)**: Unit tests, proptest, fuzz (68 targets, 447 corpus seeds), CI hardening (Miri, cargo-deny, cargo-careful, cargo-mutants, cargo-semver-checks, nextest, llvm-cov), feature flag isolation, constant-time verification (16 dudect tests), OpenSSL differential testing, cargo-vet supply chain audit, SBOM/SLSA, Kani formal verification
+- **Testing (T1–T79)**: Unit tests, proptest, fuzz (68 targets, 447 corpus seeds), CI hardening (Miri, cargo-deny, cargo-careful, cargo-mutants, cargo-semver-checks, nextest, llvm-cov), feature flag isolation, constant-time verification (16 dudect tests), OpenSSL differential testing, cargo-vet supply chain audit, SBOM/SLSA/ASan, Kani formal verification
 - **Refactoring (R1–R12)**: Enum dispatch, sync/async body macros, module decomposition, dev profile opt-level overrides
 - **Performance (P1–P93)**: HW accel (AES-NI, SHA-NI, SHA-512 CE, SHA-3 EOR3/RAX1/BCAX, GHASH PMULL/CLMUL, ChaCha20 NEON/SSE2, SHA-1 CE, VAES/VPCLMULQDQ), specialized fields (P-256/P-384/P-521/SM2 Montgomery, Ed25519/Ed448 precomputed tables), CIOS BigNum optimizations, ML-KEM/ML-DSA NEON NTT, SM4 T-table, AES 4-block pipeline, GCM interleaved pipeline, Poly1305 r² batch, pervasive Vec→stack allocation, monomorphization, RSA CRT caching, DH precomputed tables, TLS record enum dispatch + stack IV + zero-copy decrypt
 

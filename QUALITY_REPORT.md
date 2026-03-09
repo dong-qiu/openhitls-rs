@@ -12,7 +12,7 @@
 | Layer | Mechanism | Coverage | Rating | Notes |
 |:-----:|-----------|----------|:------:|-------|
 | **L1** | Static Analysis | clippy zero-warning + rustfmt + MSRV 1.75 dual-version CI + workspace lints | **A+** | Full workspace, all features, all targets; centralized `[workspace.lints]` (T74-A) |
-| **L2** | Unit Tests | 3,965 tests (25 ignored), 100% pass rate | **A** | 3,940+ test fns + 92 async + 15 Wycheproof suites; all high-risk files directly tested |
+| **L2** | Unit Tests | 4,046 tests (35 ignored), 100% pass rate | **A** | 4,011+ test fns + 92 async + 15 Wycheproof suites; all high-risk files directly tested |
 | **L3** | Integration Tests | 261 cross-crate tests (TCP loopback + DTLS resilience + OpenSSL interop) | **A** | 15 test files; 5 protocol variants × sync/async; OpenSSL s_client/s_server interop |
 | **L4** | Fuzz Testing | 68 fuzz targets + 447 seed corpus files | **A** | 10 parse + 34 crypto semantic + 8 PQC/sign-path + 16 additional; +fuzz-smoke on PR/push |
 | **L5** | Property-Based Testing | ~87 proptest blocks across 6 crates | **A** | hitls-crypto + hitls-utils + hitls-tls + hitls-pki + hitls-bignum + hitls-auth; comprehensive algorithm coverage |
@@ -50,12 +50,12 @@ GitHub Actions (.github/workflows/ci.yml) — 29 jobs, dependency graph: fmt/cli
 
 | Crate | Tests | Ignored | % of Total | Focus |
 |-------|------:|--------:|:----------:|-------|
-| hitls-crypto | 1,464 | 17 | 36.7% | 48 algorithm modules + HW accel + P-256/384/521 fast path + proptest + HW↔SW cross-validation + timing + ct_verify + zeroize + DRBG + GCM + FIPS PCT/KAT + HPKE + KAT golden-values |
-| hitls-tls | 1,434 | 0 | 35.9% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat, connection state guards, security levels, CRL, PHA |
-| hitls-pki | 426 | 0 | 10.7% | X.509, PKCS#8/12, CMS (5 content types), CRL builder+extensions, encoding helpers, proptest roundtrips |
-| hitls-integration | 261 | 2 | 6.5% | Cross-crate TCP loopback, error scenarios, concurrency stress, DTLS resilience, OpenSSL interop, TLS 1.3/1.2 key_update + session resumption + HPKE + XMSS-MT + CRL |
-| hitls-cli | 161 | 5 | 4.0% | 16 CLI commands, speed benchmarks, s_client/s_server edge cases, hex/cipher/port edge cases, prime/kdf |
-| hitls-bignum | 95 | 1 | 2.4% | Montgomery, Miller-Rabin, prime generation, modular arithmetic, constant-time, random generation, hex/dec string, proptest |
+| hitls-crypto | 1,466 | 22 | 36.2% | 48 algorithm modules + HW accel + P-256/384/521 fast path + proptest + HW↔SW cross-validation + timing + ct_verify + zeroize + DRBG + GCM + FIPS PCT/KAT + HPKE + KAT golden-values |
+| hitls-tls | 1,484 | 0 | 36.7% | TLS 1.3/1.2/DTLS/TLCP/DTLCP handshake, record, extensions, callbacks, middlebox compat, connection state guards, security levels, CRL, PHA |
+| hitls-pki | 438 | 0 | 10.8% | X.509, PKCS#8/12, CMS (5 content types), CRL builder+extensions, encoding helpers, proptest roundtrips |
+| hitls-integration | 261 | 7 | 6.4% | Cross-crate TCP loopback, error scenarios, concurrency stress, DTLS resilience, OpenSSL interop, TLS 1.3/1.2 key_update + session resumption + HPKE + XMSS-MT + CRL |
+| hitls-cli | 161 | 5 | 4.0% | 18 CLI commands, speed benchmarks, s_client/s_server edge cases, hex/cipher/port edge cases, prime/kdf |
+| hitls-bignum | 95 | 1 | 2.3% | Montgomery, Miller-Rabin, prime generation, modular arithmetic, constant-time, random generation, hex/dec string, proptest |
 | hitls-utils | 68 | 0 | 1.7% | ASN.1, Base64, PEM, OID, proptest roundtrips |
 | hitls-auth | 47 | 0 | 1.2% | HOTP/TOTP, SPAKE2+, Privacy Pass (edge cases + proptest) |
 | hitls-types | 26 | 0 | 0.7% | Enum definitions, error types |
@@ -673,7 +673,7 @@ Benchmarks exist for:
 
 | Check | Result | Details |
 |-------|:------:|---------|
-| Full test suite | **PASS** | **4,030 PASS, 0 FAIL, 35 IGNORED** (4,065 total) |
+| Full test suite | **PASS** | **4,046 PASS, 0 FAIL, 35 IGNORED** (4,081 total) |
 | Clippy (`-D warnings`) | **PASS** | 0 warnings across all workspace, all features, all targets |
 | Format (`cargo fmt`) | **PASS** | All files formatted correctly |
 | No-default-features build | **PASS** | All crates compile without defaults |
@@ -717,7 +717,7 @@ Benchmarks exist for:
 | Dimension | Score | Notes |
 |-----------|:-----:|-------|
 | Static analysis | 10/10 | Zero warnings, workspace lints, MSRV CI |
-| Unit test coverage | 9.5/10 | 4,065 total, all pass, comprehensive edge cases |
+| Unit test coverage | 9.5/10 | 4,046 total, all pass, comprehensive edge cases |
 | Fuzz coverage | 9/10 | 68 targets, 447 corpus seeds, smoke on PR |
 | Property testing | 9/10 | ~87 proptest blocks across 6/9 crates |
 | CI/CD automation | 9.5/10 | 29 jobs, nextest, semver, bench, careful, mutants |
@@ -1008,7 +1008,7 @@ Continued hardening beyond the original roadmap:
 
 | Metric | Original (T8) | Target (T18) | **Actual (T79)** | Trend |
 |--------|:---------------:|:-------------:|:------------------:|:-----:|
-| Total tests | 2,634 | ~2,750+ | **4,065** (35 ignored) | +54% |
+| Total tests | 2,634 | ~2,750+ | **4,046** (35 ignored) | +54% |
 | Fuzz targets | 10 | 13 | **68** | +580% |
 | Fuzz corpus | 66 | ~79 | **447** | +577% |
 | Critical deficiencies | 2 | 0 | **0** | Resolved |
@@ -1222,7 +1222,7 @@ The current safety net has significant strengths across multiple dimensions:
 5. **Unsafe confinement**: 44 unsafe blocks restricted to hardware acceleration (6 files) + McEliece binary ops (1 file)
 
 ### 7.2 Test Coverage Breadth
-6. **3,990 test functions** (3,965 pass + 25 ignored) with 100% pass rate
+6. **4,081 test functions** (4,046 pass + 35 ignored) with 100% pass rate
 7. **Error-first culture**: ~370 error-handling tests (invalid input, wrong state, rejected parameters) outnumber roundtrip tests (~350)
 8. **Edge case density**: ~325 boundary/empty/partial tests catch off-by-one and corner cases
 9. **State machine coverage**: ~600 tests exercise handshake/connection/not-connected transitions

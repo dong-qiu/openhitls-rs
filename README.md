@@ -2,7 +2,7 @@
 
 A production-grade cryptographic and TLS library in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **100% C→Rust feature parity achieved** — 3965 tests, 65 fuzz targets, 5000+ Wycheproof vectors
+> **100% C→Rust feature parity achieved** — 4046 tests, 68 fuzz targets, 5000+ Wycheproof vectors
 
 ## Feature Highlights
 
@@ -20,10 +20,10 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | Crypto Algorithms | ~132K | ~27K | **100%** | 48 modules, hardware AES/SHA-2/GHASH/ChaCha20, P-256 fast path, 13 DH groups, FIPS, entropy health |
 | TLS Protocol | ~52K | ~15K | **100%** | TLS 1.3/1.2/DTLS 1.2/TLCP/DTLCP, 91 suites, 10 conn types |
 | PKI / X.509 | ~17K | ~4.5K | **100%** | X.509, PKCS#8/12, CMS (5 content types), CRL builder, hostname verification |
-| CLI Tools | ~8K | ~2.5K | **100%** | 16 commands (dgst, genpkey, x509, s-client, s-server, prime, kdf, etc.) |
+| CLI Tools | ~8K | ~2.5K | **100%** | 18 commands (dgst, genpkey, x509, s-client, s-server, prime, kdf, etc.) |
 | FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
-| Test Infrastructure | ~20K | ~3.5K | **95%** | 3965 tests + Wycheproof + 65 fuzz targets (429 corpus) + security audit |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | 4046 tests + Wycheproof + 68 fuzz targets (447 corpus) + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
 
 ### Not Migrated (by design)
@@ -108,7 +108,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 
 ### Big Number Arithmetic (`hitls-bignum`)
 
-Montgomery multiplication/exponentiation, Miller-Rabin primality, prime generation (safe prime), GCD/mod-inverse, constant-time operations, cryptographic random generation, hex/decimal string conversions. 96 tests.
+Montgomery multiplication/exponentiation, Miller-Rabin primality, prime generation (safe prime), GCD/mod-inverse, constant-time operations, cryptographic random generation, hex/decimal string conversions. 95 tests.
 
 ## Protocol Support
 
@@ -247,10 +247,10 @@ openhitls-rs/
 │   ├── hitls-tls/       # TLS 1.3/1.2, DTLS 1.2, TLCP, DTLCP
 │   ├── hitls-pki/       # X.509, PKCS#8/12, CMS
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
-│   └── hitls-cli/       # Command-line tool (16 commands)
+│   └── hitls-cli/       # Command-line tool (18 commands)
 ├── tests/interop/       # Integration tests (261 cross-crate)
 ├── tests/vectors/       # Test vectors (NIST, Wycheproof, GM/T)
-├── fuzz/                # 65 libfuzzer fuzz targets
+├── fuzz/                # 68 libfuzzer fuzz targets
 └── benches/             # Criterion benchmarks
 ```
 
@@ -260,18 +260,18 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (3965 tests, 25 ignored)
+# Run all tests (4046 tests, 35 ignored)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1447 tests (17 ignored)
-cargo test -p hitls-tls --all-features      # 1434 tests
-cargo test -p hitls-pki --all-features      # 426 tests
+cargo test -p hitls-crypto --all-features   # 1466 tests (22 ignored)
+cargo test -p hitls-tls --all-features      # 1484 tests
+cargo test -p hitls-pki --all-features      # 438 tests
 cargo test -p hitls-bignum                  # 95 tests (1 ignored)
 cargo test -p hitls-utils                   # 68 tests
 cargo test -p hitls-auth --all-features     # 47 tests
 cargo test -p hitls-cli --all-features      # 161 tests (5 ignored)
-cargo test -p hitls-integration-tests       # 261 tests (2 ignored)
+cargo test -p hitls-integration-tests       # 261 tests (7 ignored)
 
 # Lint (zero warnings required)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets
@@ -314,4 +314,4 @@ Licensed under the [Mulan Permissive Software License, Version 2](http://license
 
 ## Acknowledgments
 
-This project is a Rust rewrite of [openHiTLS](https://gitee.com/openhitls/openhitls), an open-source cryptographic and TLS library originally written in C. See [DEV_LOG.md](DEV_LOG.md) for the detailed migration history (Phases I1–I87, T1–T74, R1–R12, P1–P83).
+This project is a Rust rewrite of [openHiTLS](https://gitee.com/openhitls/openhitls), an open-source cryptographic and TLS library originally written in C. See [DEV_LOG.md](DEV_LOG.md) for the detailed migration history (Phases I1–I87, T1–T79, R1–R12, P1–P93).
