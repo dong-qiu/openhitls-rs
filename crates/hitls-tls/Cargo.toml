@@ -14,7 +14,7 @@ hitls-types = { path = "../hitls-types" }
 hitls-crypto = { path = "../hitls-crypto", features = ["modes", "chacha20", "x25519", "x448", "ecdh", "ecdsa", "rsa", "ed25519", "ed448", "dh", "mlkem"] }
 hitls-pki = { path = "../hitls-pki" }
 hitls-utils = { path = "../hitls-utils" }
-getrandom = "0.2"
+getrandom = "0.3"
 subtle = { workspace = true }
 zeroize = { version = "1.8", features = ["derive"] }
 flate2 = { workspace = true, optional = true }
