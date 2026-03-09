@@ -267,7 +267,13 @@ fn datetime_to_unix(
     min: u32,
     sec: u32,
 ) -> Result<i64, CryptoError> {
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || min > 59 || sec > 59 {
+    if year == 0
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || min > 59
+        || sec > 59
+    {
         return Err(CryptoError::DecodeAsn1Fail);
     }
     // Days from year 0 to the start of the given year (Gregorian)
