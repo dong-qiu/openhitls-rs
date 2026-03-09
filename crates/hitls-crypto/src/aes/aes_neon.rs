@@ -124,18 +124,21 @@ fn expand_round_keys(key: &[u8]) -> Result<(Vec<[u8; 16]>, usize), CryptoError> 
 /// Caller must ensure the CPU supports the ARMv8 AES and NEON extensions.
 #[target_feature(enable = "aes,neon")]
 unsafe fn prepare_dec_keys(enc_keys: &[[u8; 16]], rounds: usize) -> Vec<[u8; 16]> {
-    let mut dec = vec![[0u8; 16]; rounds + 1];
-    // First decrypt key is the last encrypt key.
-    dec[0] = enc_keys[rounds];
-    // Inner keys go through InvMixColumns.
-    for i in 1..rounds {
-        let rk = vld1q_u8(enc_keys[rounds - i].as_ptr());
-        let dk = vaesimcq_u8(rk);
-        vst1q_u8(dec[i].as_mut_ptr(), dk);
+    // SAFETY: caller guarantees CPU feature availability (aes + neon).
+    unsafe {
+        let mut dec = vec![[0u8; 16]; rounds + 1];
+        // First decrypt key is the last encrypt key.
+        dec[0] = enc_keys[rounds];
+        // Inner keys go through InvMixColumns.
+        for i in 1..rounds {
+            let rk = vld1q_u8(enc_keys[rounds - i].as_ptr());
+            let dk = vaesimcq_u8(rk);
+            vst1q_u8(dec[i].as_mut_ptr(), dk);
+        }
+        // Last decrypt key is the first encrypt key.
+        dec[rounds] = enc_keys[0];
+        dec
     }
-    // Last decrypt key is the first encrypt key.
-    dec[rounds] = enc_keys[0];
-    dec
 }
 
 // ---------------------------------------------------------------------------
@@ -149,22 +152,25 @@ unsafe fn prepare_dec_keys(enc_keys: &[[u8; 16]], rounds: usize) -> Vec<[u8; 16]
 /// Caller must ensure the CPU supports the ARMv8 AES and NEON extensions.
 #[target_feature(enable = "aes,neon")]
 unsafe fn neon_encrypt_block(block: &mut [u8; 16], enc_keys: &[[u8; 16]], rounds: usize) {
-    let mut state = vld1q_u8(block.as_ptr());
+    // SAFETY: caller guarantees CPU feature availability (aes + neon).
+    unsafe {
+        let mut state = vld1q_u8(block.as_ptr());
 
-    // Rounds 0 .. rounds-2: AESE (XOR + SubBytes + ShiftRows) then AESMC (MixColumns).
-    for rk_bytes in enc_keys.iter().take(rounds - 1) {
-        let rk = vld1q_u8(rk_bytes.as_ptr());
-        state = vaeseq_u8(state, rk);
-        state = vaesmcq_u8(state);
+        // Rounds 0 .. rounds-2: AESE (XOR + SubBytes + ShiftRows) then AESMC (MixColumns).
+        for rk_bytes in enc_keys.iter().take(rounds - 1) {
+            let rk = vld1q_u8(rk_bytes.as_ptr());
+            state = vaeseq_u8(state, rk);
+            state = vaesmcq_u8(state);
+        }
+
+        // Last round: AESE (no MixColumns) then XOR with final round key.
+        let rk_last = vld1q_u8(enc_keys[rounds - 1].as_ptr());
+        state = vaeseq_u8(state, rk_last);
+        let rk_final = vld1q_u8(enc_keys[rounds].as_ptr());
+        state = veorq_u8(state, rk_final);
+
+        vst1q_u8(block.as_mut_ptr(), state);
     }
-
-    // Last round: AESE (no MixColumns) then XOR with final round key.
-    let rk_last = vld1q_u8(enc_keys[rounds - 1].as_ptr());
-    state = vaeseq_u8(state, rk_last);
-    let rk_final = vld1q_u8(enc_keys[rounds].as_ptr());
-    state = veorq_u8(state, rk_final);
-
-    vst1q_u8(block.as_mut_ptr(), state);
 }
 
 /// Decrypt a single 16-byte block using ARMv8 AES instructions.
@@ -174,22 +180,25 @@ unsafe fn neon_encrypt_block(block: &mut [u8; 16], enc_keys: &[[u8; 16]], rounds
 /// Caller must ensure the CPU supports the ARMv8 AES and NEON extensions.
 #[target_feature(enable = "aes,neon")]
 unsafe fn neon_decrypt_block(block: &mut [u8; 16], dec_keys: &[[u8; 16]], rounds: usize) {
-    let mut state = vld1q_u8(block.as_ptr());
+    // SAFETY: caller guarantees CPU feature availability (aes + neon).
+    unsafe {
+        let mut state = vld1q_u8(block.as_ptr());
 
-    // Rounds 0 .. rounds-2: AESD (XOR + InvSubBytes + InvShiftRows) then AESIMC (InvMixColumns).
-    for rk_bytes in dec_keys.iter().take(rounds - 1) {
-        let rk = vld1q_u8(rk_bytes.as_ptr());
-        state = vaesdq_u8(state, rk);
-        state = vaesimcq_u8(state);
+        // Rounds 0 .. rounds-2: AESD (XOR + InvSubBytes + InvShiftRows) then AESIMC (InvMixColumns).
+        for rk_bytes in dec_keys.iter().take(rounds - 1) {
+            let rk = vld1q_u8(rk_bytes.as_ptr());
+            state = vaesdq_u8(state, rk);
+            state = vaesimcq_u8(state);
+        }
+
+        // Last round: AESD (no InvMixColumns) then XOR with final round key.
+        let rk_last = vld1q_u8(dec_keys[rounds - 1].as_ptr());
+        state = vaesdq_u8(state, rk_last);
+        let rk_final = vld1q_u8(dec_keys[rounds].as_ptr());
+        state = veorq_u8(state, rk_final);
+
+        vst1q_u8(block.as_mut_ptr(), state);
     }
-
-    // Last round: AESD (no InvMixColumns) then XOR with final round key.
-    let rk_last = vld1q_u8(dec_keys[rounds - 1].as_ptr());
-    state = vaesdq_u8(state, rk_last);
-    let rk_final = vld1q_u8(dec_keys[rounds].as_ptr());
-    state = veorq_u8(state, rk_final);
-
-    vst1q_u8(block.as_mut_ptr(), state);
 }
 
 /// Encrypt 4 blocks in parallel using ARMv8 AES pipeline.
@@ -199,37 +208,40 @@ unsafe fn neon_decrypt_block(block: &mut [u8; 16], dec_keys: &[[u8; 16]], rounds
 /// Caller must ensure the CPU supports the ARMv8 AES and NEON extensions.
 #[target_feature(enable = "aes,neon")]
 unsafe fn neon_encrypt_4_blocks(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]], rounds: usize) {
-    let mut s0 = vld1q_u8(blocks[0].as_ptr());
-    let mut s1 = vld1q_u8(blocks[1].as_ptr());
-    let mut s2 = vld1q_u8(blocks[2].as_ptr());
-    let mut s3 = vld1q_u8(blocks[3].as_ptr());
+    // SAFETY: caller guarantees CPU feature availability (aes + neon).
+    unsafe {
+        let mut s0 = vld1q_u8(blocks[0].as_ptr());
+        let mut s1 = vld1q_u8(blocks[1].as_ptr());
+        let mut s2 = vld1q_u8(blocks[2].as_ptr());
+        let mut s3 = vld1q_u8(blocks[3].as_ptr());
 
-    // Rounds 0 .. rounds-2: AESE + AESMC on all 4 blocks
-    for rk_bytes in enc_keys.iter().take(rounds - 1) {
-        let rk = vld1q_u8(rk_bytes.as_ptr());
-        s0 = vaesmcq_u8(vaeseq_u8(s0, rk));
-        s1 = vaesmcq_u8(vaeseq_u8(s1, rk));
-        s2 = vaesmcq_u8(vaeseq_u8(s2, rk));
-        s3 = vaesmcq_u8(vaeseq_u8(s3, rk));
+        // Rounds 0 .. rounds-2: AESE + AESMC on all 4 blocks
+        for rk_bytes in enc_keys.iter().take(rounds - 1) {
+            let rk = vld1q_u8(rk_bytes.as_ptr());
+            s0 = vaesmcq_u8(vaeseq_u8(s0, rk));
+            s1 = vaesmcq_u8(vaeseq_u8(s1, rk));
+            s2 = vaesmcq_u8(vaeseq_u8(s2, rk));
+            s3 = vaesmcq_u8(vaeseq_u8(s3, rk));
+        }
+
+        // Last round: AESE (no MixColumns) + XOR final round key
+        let rk_last = vld1q_u8(enc_keys[rounds - 1].as_ptr());
+        s0 = vaeseq_u8(s0, rk_last);
+        s1 = vaeseq_u8(s1, rk_last);
+        s2 = vaeseq_u8(s2, rk_last);
+        s3 = vaeseq_u8(s3, rk_last);
+
+        let rk_final = vld1q_u8(enc_keys[rounds].as_ptr());
+        s0 = veorq_u8(s0, rk_final);
+        s1 = veorq_u8(s1, rk_final);
+        s2 = veorq_u8(s2, rk_final);
+        s3 = veorq_u8(s3, rk_final);
+
+        vst1q_u8(blocks[0].as_mut_ptr(), s0);
+        vst1q_u8(blocks[1].as_mut_ptr(), s1);
+        vst1q_u8(blocks[2].as_mut_ptr(), s2);
+        vst1q_u8(blocks[3].as_mut_ptr(), s3);
     }
-
-    // Last round: AESE (no MixColumns) + XOR final round key
-    let rk_last = vld1q_u8(enc_keys[rounds - 1].as_ptr());
-    s0 = vaeseq_u8(s0, rk_last);
-    s1 = vaeseq_u8(s1, rk_last);
-    s2 = vaeseq_u8(s2, rk_last);
-    s3 = vaeseq_u8(s3, rk_last);
-
-    let rk_final = vld1q_u8(enc_keys[rounds].as_ptr());
-    s0 = veorq_u8(s0, rk_final);
-    s1 = veorq_u8(s1, rk_final);
-    s2 = veorq_u8(s2, rk_final);
-    s3 = veorq_u8(s3, rk_final);
-
-    vst1q_u8(blocks[0].as_mut_ptr(), s0);
-    vst1q_u8(blocks[1].as_mut_ptr(), s1);
-    vst1q_u8(blocks[2].as_mut_ptr(), s2);
-    vst1q_u8(blocks[3].as_mut_ptr(), s3);
 }
 
 // ---------------------------------------------------------------------------

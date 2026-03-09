@@ -31,12 +31,15 @@ use super::K256;
 #[cfg(target_arch = "aarch64")]
 #[inline(always)]
 unsafe fn load_msg_and_add_k(block_ptr: *const u32, k_ptr: *const u32) -> uint32x4_t {
-    // Load 4 message words (little-endian on ARM)
-    let msg = vld1q_u32(block_ptr);
-    // Byte-swap each 32-bit lane to convert from big-endian (SHA-256) to native
-    let msg = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg)));
-    // Add round constants
-    vaddq_u32(msg, vld1q_u32(k_ptr))
+    // SAFETY: caller guarantees CPU feature availability and valid pointers.
+    unsafe {
+        // Load 4 message words (little-endian on ARM)
+        let msg = vld1q_u32(block_ptr);
+        // Byte-swap each 32-bit lane to convert from big-endian (SHA-256) to native
+        let msg = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg)));
+        // Add round constants
+        vaddq_u32(msg, vld1q_u32(k_ptr))
+    }
 }
 
 /// ARMv8 SHA-256 hardware-accelerated compression function.
@@ -64,209 +67,212 @@ unsafe fn load_msg_and_add_k(block_ptr: *const u32, k_ptr: *const u32) -> uint32
 pub(super) unsafe fn sha256_compress_arm(state: &mut [u32; 8], block: &[u8]) {
     debug_assert!(block.len() >= 64);
 
-    let block_ptr = block.as_ptr() as *const u32;
-    let k_ptr = K256.as_ptr();
+    // SAFETY: caller guarantees CPU feature availability (sha2 + neon).
+    unsafe {
+        let block_ptr = block.as_ptr() as *const u32;
+        let k_ptr = K256.as_ptr();
 
-    // Load current hash state into two NEON registers.
-    // ARM SHA-256 intrinsics expect:
-    //   abcd = (a, b, c, d) = state[0..4]
-    //   efgh = (e, f, g, h) = state[4..8]
-    let mut abcd = vld1q_u32(state.as_ptr());
-    let mut efgh = vld1q_u32(state.as_ptr().add(4));
+        // Load current hash state into two NEON registers.
+        // ARM SHA-256 intrinsics expect:
+        //   abcd = (a, b, c, d) = state[0..4]
+        //   efgh = (e, f, g, h) = state[4..8]
+        let mut abcd = vld1q_u32(state.as_ptr());
+        let mut efgh = vld1q_u32(state.as_ptr().add(4));
 
-    // Save the initial state for the final addition (Davies-Meyer).
-    let abcd_save = abcd;
-    let efgh_save = efgh;
+        // Save the initial state for the final addition (Davies-Meyer).
+        let abcd_save = abcd;
+        let efgh_save = efgh;
 
-    // ---------------------------------------------------------------
-    // Load and byte-swap all 16 message words (4 NEON registers).
-    // We keep the raw (byte-swapped) messages in msg0..msg3 for the
-    // message schedule, and compute msg + K separately for rounds.
-    // ---------------------------------------------------------------
-    let mut msg0 = vld1q_u32(block_ptr);
-    msg0 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg0)));
-    let mut msg1 = vld1q_u32(block_ptr.add(4));
-    msg1 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg1)));
-    let mut msg2 = vld1q_u32(block_ptr.add(8));
-    msg2 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg2)));
-    let mut msg3 = vld1q_u32(block_ptr.add(12));
-    msg3 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg3)));
+        // ---------------------------------------------------------------
+        // Load and byte-swap all 16 message words (4 NEON registers).
+        // We keep the raw (byte-swapped) messages in msg0..msg3 for the
+        // message schedule, and compute msg + K separately for rounds.
+        // ---------------------------------------------------------------
+        let mut msg0 = vld1q_u32(block_ptr);
+        msg0 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg0)));
+        let mut msg1 = vld1q_u32(block_ptr.add(4));
+        msg1 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg1)));
+        let mut msg2 = vld1q_u32(block_ptr.add(8));
+        msg2 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg2)));
+        let mut msg3 = vld1q_u32(block_ptr.add(12));
+        msg3 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg3)));
 
-    // ---------------------------------------------------------------
-    // Rounds 0–3
-    // ---------------------------------------------------------------
-    let mut tmp = vaddq_u32(msg0, vld1q_u32(k_ptr));
-    let mut abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // ---------------------------------------------------------------
+        // Rounds 0–3
+        // ---------------------------------------------------------------
+        let mut tmp = vaddq_u32(msg0, vld1q_u32(k_ptr));
+        let mut abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
 
-    // ---------------------------------------------------------------
-    // Rounds 4–7
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg1, vld1q_u32(k_ptr.add(4)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg0 for rounds 16–19
-    msg0 = vsha256su0q_u32(msg0, msg1);
-    msg0 = vsha256su1q_u32(msg0, msg2, msg3);
+        // ---------------------------------------------------------------
+        // Rounds 4–7
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg1, vld1q_u32(k_ptr.add(4)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg0 for rounds 16–19
+        msg0 = vsha256su0q_u32(msg0, msg1);
+        msg0 = vsha256su1q_u32(msg0, msg2, msg3);
 
-    // ---------------------------------------------------------------
-    // Rounds 8–11
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg2, vld1q_u32(k_ptr.add(8)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg1 for rounds 20–23
-    msg1 = vsha256su0q_u32(msg1, msg2);
-    msg1 = vsha256su1q_u32(msg1, msg3, msg0);
+        // ---------------------------------------------------------------
+        // Rounds 8–11
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg2, vld1q_u32(k_ptr.add(8)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg1 for rounds 20–23
+        msg1 = vsha256su0q_u32(msg1, msg2);
+        msg1 = vsha256su1q_u32(msg1, msg3, msg0);
 
-    // ---------------------------------------------------------------
-    // Rounds 12–15
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg3, vld1q_u32(k_ptr.add(12)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg2 for rounds 24–27
-    msg2 = vsha256su0q_u32(msg2, msg3);
-    msg2 = vsha256su1q_u32(msg2, msg0, msg1);
+        // ---------------------------------------------------------------
+        // Rounds 12–15
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg3, vld1q_u32(k_ptr.add(12)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg2 for rounds 24–27
+        msg2 = vsha256su0q_u32(msg2, msg3);
+        msg2 = vsha256su1q_u32(msg2, msg0, msg1);
 
-    // ---------------------------------------------------------------
-    // Rounds 16–19
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg0, vld1q_u32(k_ptr.add(16)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg3 for rounds 28–31
-    msg3 = vsha256su0q_u32(msg3, msg0);
-    msg3 = vsha256su1q_u32(msg3, msg1, msg2);
+        // ---------------------------------------------------------------
+        // Rounds 16–19
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg0, vld1q_u32(k_ptr.add(16)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg3 for rounds 28–31
+        msg3 = vsha256su0q_u32(msg3, msg0);
+        msg3 = vsha256su1q_u32(msg3, msg1, msg2);
 
-    // ---------------------------------------------------------------
-    // Rounds 20–23
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg1, vld1q_u32(k_ptr.add(20)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg0 for rounds 32–35
-    msg0 = vsha256su0q_u32(msg0, msg1);
-    msg0 = vsha256su1q_u32(msg0, msg2, msg3);
+        // ---------------------------------------------------------------
+        // Rounds 20–23
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg1, vld1q_u32(k_ptr.add(20)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg0 for rounds 32–35
+        msg0 = vsha256su0q_u32(msg0, msg1);
+        msg0 = vsha256su1q_u32(msg0, msg2, msg3);
 
-    // ---------------------------------------------------------------
-    // Rounds 24–27
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg2, vld1q_u32(k_ptr.add(24)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg1 for rounds 36–39
-    msg1 = vsha256su0q_u32(msg1, msg2);
-    msg1 = vsha256su1q_u32(msg1, msg3, msg0);
+        // ---------------------------------------------------------------
+        // Rounds 24–27
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg2, vld1q_u32(k_ptr.add(24)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg1 for rounds 36–39
+        msg1 = vsha256su0q_u32(msg1, msg2);
+        msg1 = vsha256su1q_u32(msg1, msg3, msg0);
 
-    // ---------------------------------------------------------------
-    // Rounds 28–31
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg3, vld1q_u32(k_ptr.add(28)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg2 for rounds 40–43
-    msg2 = vsha256su0q_u32(msg2, msg3);
-    msg2 = vsha256su1q_u32(msg2, msg0, msg1);
+        // ---------------------------------------------------------------
+        // Rounds 28–31
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg3, vld1q_u32(k_ptr.add(28)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg2 for rounds 40–43
+        msg2 = vsha256su0q_u32(msg2, msg3);
+        msg2 = vsha256su1q_u32(msg2, msg0, msg1);
 
-    // ---------------------------------------------------------------
-    // Rounds 32–35
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg0, vld1q_u32(k_ptr.add(32)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg3 for rounds 44–47
-    msg3 = vsha256su0q_u32(msg3, msg0);
-    msg3 = vsha256su1q_u32(msg3, msg1, msg2);
+        // ---------------------------------------------------------------
+        // Rounds 32–35
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg0, vld1q_u32(k_ptr.add(32)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg3 for rounds 44–47
+        msg3 = vsha256su0q_u32(msg3, msg0);
+        msg3 = vsha256su1q_u32(msg3, msg1, msg2);
 
-    // ---------------------------------------------------------------
-    // Rounds 36–39
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg1, vld1q_u32(k_ptr.add(36)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg0 for rounds 48–51
-    msg0 = vsha256su0q_u32(msg0, msg1);
-    msg0 = vsha256su1q_u32(msg0, msg2, msg3);
+        // ---------------------------------------------------------------
+        // Rounds 36–39
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg1, vld1q_u32(k_ptr.add(36)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg0 for rounds 48–51
+        msg0 = vsha256su0q_u32(msg0, msg1);
+        msg0 = vsha256su1q_u32(msg0, msg2, msg3);
 
-    // ---------------------------------------------------------------
-    // Rounds 40–43
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg2, vld1q_u32(k_ptr.add(40)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg1 for rounds 52–55
-    msg1 = vsha256su0q_u32(msg1, msg2);
-    msg1 = vsha256su1q_u32(msg1, msg3, msg0);
+        // ---------------------------------------------------------------
+        // Rounds 40–43
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg2, vld1q_u32(k_ptr.add(40)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg1 for rounds 52–55
+        msg1 = vsha256su0q_u32(msg1, msg2);
+        msg1 = vsha256su1q_u32(msg1, msg3, msg0);
 
-    // ---------------------------------------------------------------
-    // Rounds 44–47
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg3, vld1q_u32(k_ptr.add(44)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg2 for rounds 56–59
-    msg2 = vsha256su0q_u32(msg2, msg3);
-    msg2 = vsha256su1q_u32(msg2, msg0, msg1);
+        // ---------------------------------------------------------------
+        // Rounds 44–47
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg3, vld1q_u32(k_ptr.add(44)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg2 for rounds 56–59
+        msg2 = vsha256su0q_u32(msg2, msg3);
+        msg2 = vsha256su1q_u32(msg2, msg0, msg1);
 
-    // ---------------------------------------------------------------
-    // Rounds 48–51
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg0, vld1q_u32(k_ptr.add(48)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
-    // Message schedule: update msg3 for rounds 60–63
-    msg3 = vsha256su0q_u32(msg3, msg0);
-    msg3 = vsha256su1q_u32(msg3, msg1, msg2);
+        // ---------------------------------------------------------------
+        // Rounds 48–51
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg0, vld1q_u32(k_ptr.add(48)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // Message schedule: update msg3 for rounds 60–63
+        msg3 = vsha256su0q_u32(msg3, msg0);
+        msg3 = vsha256su1q_u32(msg3, msg1, msg2);
 
-    // ---------------------------------------------------------------
-    // Rounds 52–55
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg1, vld1q_u32(k_ptr.add(52)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // ---------------------------------------------------------------
+        // Rounds 52–55
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg1, vld1q_u32(k_ptr.add(52)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
 
-    // ---------------------------------------------------------------
-    // Rounds 56–59
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg2, vld1q_u32(k_ptr.add(56)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // ---------------------------------------------------------------
+        // Rounds 56–59
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg2, vld1q_u32(k_ptr.add(56)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
 
-    // ---------------------------------------------------------------
-    // Rounds 60–63
-    // ---------------------------------------------------------------
-    tmp = vaddq_u32(msg3, vld1q_u32(k_ptr.add(60)));
-    abcd_tmp = abcd;
-    abcd = vsha256hq_u32(abcd, efgh, tmp);
-    efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
+        // ---------------------------------------------------------------
+        // Rounds 60–63
+        // ---------------------------------------------------------------
+        tmp = vaddq_u32(msg3, vld1q_u32(k_ptr.add(60)));
+        abcd_tmp = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, abcd_tmp, tmp);
 
-    // ---------------------------------------------------------------
-    // Davies-Meyer feed-forward: add saved initial state.
-    // ---------------------------------------------------------------
-    abcd = vaddq_u32(abcd, abcd_save);
-    efgh = vaddq_u32(efgh, efgh_save);
+        // ---------------------------------------------------------------
+        // Davies-Meyer feed-forward: add saved initial state.
+        // ---------------------------------------------------------------
+        abcd = vaddq_u32(abcd, abcd_save);
+        efgh = vaddq_u32(efgh, efgh_save);
 
-    // ---------------------------------------------------------------
-    // Store the updated state back.
-    // ---------------------------------------------------------------
-    vst1q_u32(state.as_mut_ptr(), abcd);
-    vst1q_u32(state.as_mut_ptr().add(4), efgh);
+        // ---------------------------------------------------------------
+        // Store the updated state back.
+        // ---------------------------------------------------------------
+        vst1q_u32(state.as_mut_ptr(), abcd);
+        vst1q_u32(state.as_mut_ptr().add(4), efgh);
+    } // unsafe
 }
 
 #[cfg(all(test, target_arch = "aarch64"))]

@@ -21,10 +21,13 @@ use core::arch::x86_64::*;
 #[inline]
 #[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
 unsafe fn schedule(v0: __m128i, v1: __m128i, v2: __m128i, v3: __m128i) -> __m128i {
-    let t1 = _mm_sha256msg1_epu32(v0, v1);
-    let t2 = _mm_alignr_epi8(v3, v2, 4);
-    let t3 = _mm_add_epi32(t1, t2);
-    _mm_sha256msg2_epu32(t3, v3)
+    // SAFETY: caller guarantees CPU feature availability (sha, sse2, ssse3, sse4.1).
+    unsafe {
+        let t1 = _mm_sha256msg1_epu32(v0, v1);
+        let t2 = _mm_alignr_epi8(v3, v2, 4);
+        let t3 = _mm_add_epi32(t1, t2);
+        _mm_sha256msg2_epu32(t3, v3)
+    }
 }
 
 /// Execute 4 SHA-256 rounds (2 calls to sha256rnds2, each doing 2 rounds).
@@ -37,11 +40,14 @@ unsafe fn rounds4(
     k_ptr: *const u32,
     k_offset: usize,
 ) {
-    let kv = _mm_loadu_si128(k_ptr.add(k_offset) as *const __m128i);
-    let t1 = _mm_add_epi32(msg, kv);
-    *cdgh = _mm_sha256rnds2_epu32(*cdgh, *abef, t1);
-    let t2 = _mm_shuffle_epi32(t1, 0x0E);
-    *abef = _mm_sha256rnds2_epu32(*abef, *cdgh, t2);
+    // SAFETY: caller guarantees CPU feature availability and valid pointer.
+    unsafe {
+        let kv = _mm_loadu_si128(k_ptr.add(k_offset) as *const __m128i);
+        let t1 = _mm_add_epi32(msg, kv);
+        *cdgh = _mm_sha256rnds2_epu32(*cdgh, *abef, t1);
+        let t2 = _mm_shuffle_epi32(t1, 0x0E);
+        *abef = _mm_sha256rnds2_epu32(*abef, *cdgh, t2);
+    }
 }
 
 /// SHA-256 block compression using x86 SHA-NI intrinsics.
@@ -57,106 +63,109 @@ unsafe fn rounds4(
 pub(super) unsafe fn sha256_compress_x86(state: &mut [u32; 8], block: &[u8]) {
     debug_assert!(block.len() >= 64);
 
-    // Load current state into two 128-bit registers.
-    // state0 holds [A, B, C, D], state1 holds [E, F, G, H] in memory order.
-    let mut abef = _mm_loadu_si128(state.as_ptr() as *const __m128i);
-    let mut cdgh = _mm_loadu_si128(state[4..].as_ptr() as *const __m128i);
+    // SAFETY: caller guarantees CPU feature availability (sha, sse2, ssse3, sse4.1).
+    unsafe {
+        // Load current state into two 128-bit registers.
+        // state0 holds [A, B, C, D], state1 holds [E, F, G, H] in memory order.
+        let mut abef = _mm_loadu_si128(state.as_ptr() as *const __m128i);
+        let mut cdgh = _mm_loadu_si128(state[4..].as_ptr() as *const __m128i);
 
-    // SHA-NI expects a specific lane arrangement:
-    //   abef = [F, E, B, A] in lane order  (bits [127:96]=A, [95:64]=B, [63:32]=E, [31:0]=F)
-    //   cdgh = [H, G, D, C] in lane order  (bits [127:96]=C, [95:64]=D, [63:32]=G, [31:0]=H)
-    //
-    // Rearrange from standard [A,B,C,D] / [E,F,G,H] layout.
-    let cdab = _mm_shuffle_epi32(abef, 0xB1); // [B, A, D, C]
-    let efgh = _mm_shuffle_epi32(cdgh, 0x1B); // [H, G, F, E]
-    abef = _mm_alignr_epi8(cdab, efgh, 8); // ABEF
-    cdgh = _mm_blend_epi16(efgh, cdab, 0xF0); // CDGH
+        // SHA-NI expects a specific lane arrangement:
+        //   abef = [F, E, B, A] in lane order  (bits [127:96]=A, [95:64]=B, [63:32]=E, [31:0]=F)
+        //   cdgh = [H, G, D, C] in lane order  (bits [127:96]=C, [95:64]=D, [63:32]=G, [31:0]=H)
+        //
+        // Rearrange from standard [A,B,C,D] / [E,F,G,H] layout.
+        let cdab = _mm_shuffle_epi32(abef, 0xB1); // [B, A, D, C]
+        let efgh = _mm_shuffle_epi32(cdgh, 0x1B); // [H, G, F, E]
+        abef = _mm_alignr_epi8(cdab, efgh, 8); // ABEF
+        cdgh = _mm_blend_epi16(efgh, cdab, 0xF0); // CDGH
 
-    // Save initial state for the Davies-Meyer feed-forward at the end.
-    let abef_save = abef;
-    let cdgh_save = cdgh;
+        // Save initial state for the Davies-Meyer feed-forward at the end.
+        let abef_save = abef;
+        let cdgh_save = cdgh;
 
-    // Byte-swap mask: SHA-256 message words are big-endian, x86 is little-endian.
-    let shuf_mask = _mm_set_epi64x(
-        0x0c0d0e0f_08090a0b_u64 as i64,
-        0x04050607_00010203_u64 as i64,
-    );
+        // Byte-swap mask: SHA-256 message words are big-endian, x86 is little-endian.
+        let shuf_mask = _mm_set_epi64x(
+            0x0c0d0e0f_08090a0b_u64 as i64,
+            0x04050607_00010203_u64 as i64,
+        );
 
-    // Load four 128-bit message chunks (16 bytes = 4 words each) and byte-swap.
-    let mut w0 = _mm_shuffle_epi8(_mm_loadu_si128(block.as_ptr() as *const __m128i), shuf_mask);
-    let mut w1 = _mm_shuffle_epi8(
-        _mm_loadu_si128(block.as_ptr().add(16) as *const __m128i),
-        shuf_mask,
-    );
-    let mut w2 = _mm_shuffle_epi8(
-        _mm_loadu_si128(block.as_ptr().add(32) as *const __m128i),
-        shuf_mask,
-    );
-    let mut w3 = _mm_shuffle_epi8(
-        _mm_loadu_si128(block.as_ptr().add(48) as *const __m128i),
-        shuf_mask,
-    );
-    let mut w4: __m128i;
+        // Load four 128-bit message chunks (16 bytes = 4 words each) and byte-swap.
+        let mut w0 = _mm_shuffle_epi8(_mm_loadu_si128(block.as_ptr() as *const __m128i), shuf_mask);
+        let mut w1 = _mm_shuffle_epi8(
+            _mm_loadu_si128(block.as_ptr().add(16) as *const __m128i),
+            shuf_mask,
+        );
+        let mut w2 = _mm_shuffle_epi8(
+            _mm_loadu_si128(block.as_ptr().add(32) as *const __m128i),
+            shuf_mask,
+        );
+        let mut w3 = _mm_shuffle_epi8(
+            _mm_loadu_si128(block.as_ptr().add(48) as *const __m128i),
+            shuf_mask,
+        );
+        let mut w4: __m128i;
 
-    let k = super::K256.as_ptr();
+        let k = super::K256.as_ptr();
 
-    // Rounds 0–15: use the original 16 message words directly, no schedule needed.
-    rounds4(&mut abef, &mut cdgh, w0, k, 0); // rounds 0–3
-    rounds4(&mut abef, &mut cdgh, w1, k, 4); // rounds 4–7
-    rounds4(&mut abef, &mut cdgh, w2, k, 8); // rounds 8–11
-    rounds4(&mut abef, &mut cdgh, w3, k, 12); // rounds 12–15
+        // Rounds 0–15: use the original 16 message words directly, no schedule needed.
+        rounds4(&mut abef, &mut cdgh, w0, k, 0); // rounds 0–3
+        rounds4(&mut abef, &mut cdgh, w1, k, 4); // rounds 4–7
+        rounds4(&mut abef, &mut cdgh, w2, k, 8); // rounds 8–11
+        rounds4(&mut abef, &mut cdgh, w3, k, 12); // rounds 12–15
 
-    // Rounds 16–63: compute message schedule on-the-fly using 5-register rotation.
-    // schedule(a, b, c, d) computes W[t..t+3] from the preceding 16 words.
-    w4 = schedule(w0, w1, w2, w3);
-    rounds4(&mut abef, &mut cdgh, w4, k, 16); // rounds 16–19
+        // Rounds 16–63: compute message schedule on-the-fly using 5-register rotation.
+        // schedule(a, b, c, d) computes W[t..t+3] from the preceding 16 words.
+        w4 = schedule(w0, w1, w2, w3);
+        rounds4(&mut abef, &mut cdgh, w4, k, 16); // rounds 16–19
 
-    w0 = schedule(w1, w2, w3, w4);
-    rounds4(&mut abef, &mut cdgh, w0, k, 20); // rounds 20–23
+        w0 = schedule(w1, w2, w3, w4);
+        rounds4(&mut abef, &mut cdgh, w0, k, 20); // rounds 20–23
 
-    w1 = schedule(w2, w3, w4, w0);
-    rounds4(&mut abef, &mut cdgh, w1, k, 24); // rounds 24–27
+        w1 = schedule(w2, w3, w4, w0);
+        rounds4(&mut abef, &mut cdgh, w1, k, 24); // rounds 24–27
 
-    w2 = schedule(w3, w4, w0, w1);
-    rounds4(&mut abef, &mut cdgh, w2, k, 28); // rounds 28–31
+        w2 = schedule(w3, w4, w0, w1);
+        rounds4(&mut abef, &mut cdgh, w2, k, 28); // rounds 28–31
 
-    w3 = schedule(w4, w0, w1, w2);
-    rounds4(&mut abef, &mut cdgh, w3, k, 32); // rounds 32–35
+        w3 = schedule(w4, w0, w1, w2);
+        rounds4(&mut abef, &mut cdgh, w3, k, 32); // rounds 32–35
 
-    w4 = schedule(w0, w1, w2, w3);
-    rounds4(&mut abef, &mut cdgh, w4, k, 36); // rounds 36–39
+        w4 = schedule(w0, w1, w2, w3);
+        rounds4(&mut abef, &mut cdgh, w4, k, 36); // rounds 36–39
 
-    w0 = schedule(w1, w2, w3, w4);
-    rounds4(&mut abef, &mut cdgh, w0, k, 40); // rounds 40–43
+        w0 = schedule(w1, w2, w3, w4);
+        rounds4(&mut abef, &mut cdgh, w0, k, 40); // rounds 40–43
 
-    w1 = schedule(w2, w3, w4, w0);
-    rounds4(&mut abef, &mut cdgh, w1, k, 44); // rounds 44–47
+        w1 = schedule(w2, w3, w4, w0);
+        rounds4(&mut abef, &mut cdgh, w1, k, 44); // rounds 44–47
 
-    w2 = schedule(w3, w4, w0, w1);
-    rounds4(&mut abef, &mut cdgh, w2, k, 48); // rounds 48–51
+        w2 = schedule(w3, w4, w0, w1);
+        rounds4(&mut abef, &mut cdgh, w2, k, 48); // rounds 48–51
 
-    w3 = schedule(w4, w0, w1, w2);
-    rounds4(&mut abef, &mut cdgh, w3, k, 52); // rounds 52–55
+        w3 = schedule(w4, w0, w1, w2);
+        rounds4(&mut abef, &mut cdgh, w3, k, 52); // rounds 52–55
 
-    w4 = schedule(w0, w1, w2, w3);
-    rounds4(&mut abef, &mut cdgh, w4, k, 56); // rounds 56–59
+        w4 = schedule(w0, w1, w2, w3);
+        rounds4(&mut abef, &mut cdgh, w4, k, 56); // rounds 56–59
 
-    w0 = schedule(w1, w2, w3, w4);
-    rounds4(&mut abef, &mut cdgh, w0, k, 60); // rounds 60–63
+        w0 = schedule(w1, w2, w3, w4);
+        rounds4(&mut abef, &mut cdgh, w0, k, 60); // rounds 60–63
 
-    // Davies-Meyer feed-forward: add the saved initial state.
-    abef = _mm_add_epi32(abef, abef_save);
-    cdgh = _mm_add_epi32(cdgh, cdgh_save);
+        // Davies-Meyer feed-forward: add the saved initial state.
+        abef = _mm_add_epi32(abef, abef_save);
+        cdgh = _mm_add_epi32(cdgh, cdgh_save);
 
-    // Unshuffle back from SHA-NI layout (ABEF / CDGH) to standard (ABCD / EFGH).
-    let feba = _mm_shuffle_epi32(abef, 0x1B);
-    let dchg = _mm_shuffle_epi32(cdgh, 0xB1);
-    let dcba = _mm_blend_epi16(feba, dchg, 0xF0); // [A, B, C, D]
-    let hgfe = _mm_alignr_epi8(dchg, feba, 8); // [E, F, G, H]
+        // Unshuffle back from SHA-NI layout (ABEF / CDGH) to standard (ABCD / EFGH).
+        let feba = _mm_shuffle_epi32(abef, 0x1B);
+        let dchg = _mm_shuffle_epi32(cdgh, 0xB1);
+        let dcba = _mm_blend_epi16(feba, dchg, 0xF0); // [A, B, C, D]
+        let hgfe = _mm_alignr_epi8(dchg, feba, 8); // [E, F, G, H]
 
-    // Store state back.
-    _mm_storeu_si128(state.as_mut_ptr() as *mut __m128i, dcba);
-    _mm_storeu_si128(state[4..].as_mut_ptr() as *mut __m128i, hgfe);
+        // Store state back.
+        _mm_storeu_si128(state.as_mut_ptr() as *mut __m128i, dcba);
+        _mm_storeu_si128(state[4..].as_mut_ptr() as *mut __m128i, hgfe);
+    } // unsafe
 }
 
 #[cfg(test)]

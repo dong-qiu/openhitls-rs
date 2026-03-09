@@ -1,6 +1,7 @@
 #![doc = "Cryptographic algorithm library for openHiTLS."]
 // Allow dead code and unused variables during the stub/scaffolding phase.
 #![allow(dead_code, unused_variables)]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 // Core traits
 pub mod provider;

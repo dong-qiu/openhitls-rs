@@ -50,154 +50,157 @@ use core::arch::aarch64::*;
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "aes")]
 pub(super) unsafe fn ghash_block_arm(h: &[u8; 16], state: &mut [u8; 16], block: &[u8; 16]) {
-    // ---------------------------------------------------------------
-    // Load and convert from GHASH reflected convention to natural polynomial.
-    //
-    // GHASH stores data in big-endian with the MSB of each byte as the
-    // lowest-degree coefficient. vrbitq_u8 reverses bits within each byte,
-    // converting to the convention where LSB = lowest degree, which is
-    // exactly what vmull_p64 expects.
-    //
-    // After vrbitq_u8 and extracting u64 lanes (ARM little-endian):
-    //   lane 0 (bytes 0-7): bit k = coefficient of x^k (k = 0..63)
-    //   lane 1 (bytes 8-15): bit k = coefficient of x^(64+k) (k = 0..63)
-    //
-    // Full polynomial: a(x) = lane1 * x^64 + lane0
-    // ---------------------------------------------------------------
+    // SAFETY: caller guarantees CPU feature availability (aes/PMULL + neon).
+    unsafe {
+        // ---------------------------------------------------------------
+        // Load and convert from GHASH reflected convention to natural polynomial.
+        //
+        // GHASH stores data in big-endian with the MSB of each byte as the
+        // lowest-degree coefficient. vrbitq_u8 reverses bits within each byte,
+        // converting to the convention where LSB = lowest degree, which is
+        // exactly what vmull_p64 expects.
+        //
+        // After vrbitq_u8 and extracting u64 lanes (ARM little-endian):
+        //   lane 0 (bytes 0-7): bit k = coefficient of x^k (k = 0..63)
+        //   lane 1 (bytes 8-15): bit k = coefficient of x^(64+k) (k = 0..63)
+        //
+        // Full polynomial: a(x) = lane1 * x^64 + lane0
+        // ---------------------------------------------------------------
 
-    let h_be = vld1q_u8(h.as_ptr());
-    let h_val = vrbitq_u8(h_be);
+        let h_be = vld1q_u8(h.as_ptr());
+        let h_val = vrbitq_u8(h_be);
 
-    let s_be = vld1q_u8(state.as_ptr());
-    let b_be = vld1q_u8(block.as_ptr());
-    let xor_be = veorq_u8(s_be, b_be);
-    let x_val = vrbitq_u8(xor_be);
+        let s_be = vld1q_u8(state.as_ptr());
+        let b_be = vld1q_u8(block.as_ptr());
+        let xor_be = veorq_u8(s_be, b_be);
+        let x_val = vrbitq_u8(xor_be);
 
-    // Extract 64-bit halves.
-    let x_u64 = vreinterpretq_u64_u8(x_val);
-    let h_u64 = vreinterpretq_u64_u8(h_val);
+        // Extract 64-bit halves.
+        let x_u64 = vreinterpretq_u64_u8(x_val);
+        let h_u64 = vreinterpretq_u64_u8(h_val);
 
-    let x_lo: u64 = vgetq_lane_u64(x_u64, 0); // x^0..x^63
-    let x_hi: u64 = vgetq_lane_u64(x_u64, 1); // x^64..x^127
-    let h_lo: u64 = vgetq_lane_u64(h_u64, 0);
-    let h_hi: u64 = vgetq_lane_u64(h_u64, 1);
+        let x_lo: u64 = vgetq_lane_u64(x_u64, 0); // x^0..x^63
+        let x_hi: u64 = vgetq_lane_u64(x_u64, 1); // x^64..x^127
+        let h_lo: u64 = vgetq_lane_u64(h_u64, 0);
+        let h_hi: u64 = vgetq_lane_u64(h_u64, 1);
 
-    // ---------------------------------------------------------------
-    // Karatsuba carry-less multiplication
-    //
-    // Product of (x_hi*x^64 + x_lo) * (h_hi*x^64 + h_lo):
-    //   p_hh = x_hi * h_hi                    (high * high, degree up to 126)
-    //   p_ll = x_lo * h_lo                     (low * low, degree up to 126)
-    //   p_mid = (x_hi ^ x_lo) * (h_hi ^ h_lo) (cross term)
-    //   mid = p_mid ^ p_hh ^ p_ll
-    //
-    // 256-bit result: p_hh * x^128 + mid * x^64 + p_ll
-    // ---------------------------------------------------------------
-    let p_hh = vmull_p64(x_hi, h_hi);
-    let p_ll = vmull_p64(x_lo, h_lo);
-    let p_mid = vmull_p64(x_hi ^ x_lo, h_hi ^ h_lo);
+        // ---------------------------------------------------------------
+        // Karatsuba carry-less multiplication
+        //
+        // Product of (x_hi*x^64 + x_lo) * (h_hi*x^64 + h_lo):
+        //   p_hh = x_hi * h_hi                    (high * high, degree up to 126)
+        //   p_ll = x_lo * h_lo                     (low * low, degree up to 126)
+        //   p_mid = (x_hi ^ x_lo) * (h_hi ^ h_lo) (cross term)
+        //   mid = p_mid ^ p_hh ^ p_ll
+        //
+        // 256-bit result: p_hh * x^128 + mid * x^64 + p_ll
+        // ---------------------------------------------------------------
+        let p_hh = vmull_p64(x_hi, h_hi);
+        let p_ll = vmull_p64(x_lo, h_lo);
+        let p_mid = vmull_p64(x_hi ^ x_lo, h_hi ^ h_lo);
 
-    let hh_u8 = vreinterpretq_u8_p128(p_hh);
-    let ll_u8 = vreinterpretq_u8_p128(p_ll);
-    let mid_u8 = vreinterpretq_u8_p128(p_mid);
+        let hh_u8 = vreinterpretq_u8_p128(p_hh);
+        let ll_u8 = vreinterpretq_u8_p128(p_ll);
+        let mid_u8 = vreinterpretq_u8_p128(p_mid);
 
-    let mid = veorq_u8(veorq_u8(mid_u8, hh_u8), ll_u8);
+        let mid = veorq_u8(veorq_u8(mid_u8, hh_u8), ll_u8);
 
-    // Assemble into two 128-bit halves:
-    //   high_128 = upper 128 bits of the 256-bit product
-    //   low_128 = lower 128 bits
-    let zero = vdupq_n_u8(0);
-    let mid_r64 = vextq_u8(mid, zero, 8); // mid >> 64
-    let mid_l64 = vextq_u8(zero, mid, 8); // mid << 64
+        // Assemble into two 128-bit halves:
+        //   high_128 = upper 128 bits of the 256-bit product
+        //   low_128 = lower 128 bits
+        let zero = vdupq_n_u8(0);
+        let mid_r64 = vextq_u8(mid, zero, 8); // mid >> 64
+        let mid_l64 = vextq_u8(zero, mid, 8); // mid << 64
 
-    let high_128 = veorq_u8(hh_u8, mid_r64);
-    let low_128 = veorq_u8(ll_u8, mid_l64);
+        let high_128 = veorq_u8(hh_u8, mid_r64);
+        let low_128 = veorq_u8(ll_u8, mid_l64);
 
-    // ---------------------------------------------------------------
-    // Reduction modulo P(x) = x^128 + x^7 + x^2 + x + 1
-    //
-    // In the natural polynomial domain (after vrbitq_u8), the reduction
-    // constant is q(x) = x^7 + x^2 + x + 1 = 0x87 (as u64).
-    //
-    // We need to reduce the 256-bit product [high_128 : low_128] mod P.
-    // Since x^128 ≡ q(x) mod P, we have:
-    //   high_128 * x^128 ≡ high_128 * q(x) mod P
-    //
-    // But high_128 * q(x) is at most degree 127 + 7 = 134, so bits 128-134
-    // need a second reduction pass.
-    //
-    // The two-phase PMULL reduction works by exploiting the polynomial structure:
-    //
-    // Phase 1: Reduce the HIGH 128 bits.
-    //   We compute high_128 * q(x) using two pmull operations (one for each 64-bit
-    //   half of high_128), accumulate into the low part, and handle overflow.
-    //
-    // Actually, for the natural-order polynomial, we use the "schoolbook" reduction:
-    //   result = low_128 ^ (high_128_lo * q) ^ ((high_128_hi * q) << 64)
-    //   with any overflow from high_128_hi * q >= x^128 handled by another pass.
-    //
-    // Since q = 0x87 has degree 7, high_128_hi (degree up to 63) * q has degree
-    // up to 70, which when shifted left by 64 gives degree up to 134. Bits 128-134
-    // need one more reduction: those 7 bits times q (degree 7) = degree 14, which
-    // fits in 128 bits.
-    //
-    // Two-pass approach:
-    //   1. r = low_128 ^ pmull(high_lo, q) ^ (pmull(high_hi, q) << 64)
-    //   2. overflow = pmull(high_hi, q) >> 64  (the bits that overflowed x^128)
-    //   3. result = r ^ pmull(overflow, q)  (but overflow is at most 7 bits, so this fits)
-    //
-    // Alternative: use the standard swap-based two-phase reduction.
-    // For the natural order, the reduction polynomial's "high" part is zero
-    // (all terms are below degree 8), so we need a different strategy than
-    // the reflected-domain approach.
-    //
-    // Let's use explicit reduction:
-    // ---------------------------------------------------------------
+        // ---------------------------------------------------------------
+        // Reduction modulo P(x) = x^128 + x^7 + x^2 + x + 1
+        //
+        // In the natural polynomial domain (after vrbitq_u8), the reduction
+        // constant is q(x) = x^7 + x^2 + x + 1 = 0x87 (as u64).
+        //
+        // We need to reduce the 256-bit product [high_128 : low_128] mod P.
+        // Since x^128 ≡ q(x) mod P, we have:
+        //   high_128 * x^128 ≡ high_128 * q(x) mod P
+        //
+        // But high_128 * q(x) is at most degree 127 + 7 = 134, so bits 128-134
+        // need a second reduction pass.
+        //
+        // The two-phase PMULL reduction works by exploiting the polynomial structure:
+        //
+        // Phase 1: Reduce the HIGH 128 bits.
+        //   We compute high_128 * q(x) using two pmull operations (one for each 64-bit
+        //   half of high_128), accumulate into the low part, and handle overflow.
+        //
+        // Actually, for the natural-order polynomial, we use the "schoolbook" reduction:
+        //   result = low_128 ^ (high_128_lo * q) ^ ((high_128_hi * q) << 64)
+        //   with any overflow from high_128_hi * q >= x^128 handled by another pass.
+        //
+        // Since q = 0x87 has degree 7, high_128_hi (degree up to 63) * q has degree
+        // up to 70, which when shifted left by 64 gives degree up to 134. Bits 128-134
+        // need one more reduction: those 7 bits times q (degree 7) = degree 14, which
+        // fits in 128 bits.
+        //
+        // Two-pass approach:
+        //   1. r = low_128 ^ pmull(high_lo, q) ^ (pmull(high_hi, q) << 64)
+        //   2. overflow = pmull(high_hi, q) >> 64  (the bits that overflowed x^128)
+        //   3. result = r ^ pmull(overflow, q)  (but overflow is at most 7 bits, so this fits)
+        //
+        // Alternative: use the standard swap-based two-phase reduction.
+        // For the natural order, the reduction polynomial's "high" part is zero
+        // (all terms are below degree 8), so we need a different strategy than
+        // the reflected-domain approach.
+        //
+        // Let's use explicit reduction:
+        // ---------------------------------------------------------------
 
-    // Extract 64-bit halves of high_128 and low_128
-    let high_u64 = vreinterpretq_u64_u8(high_128);
-    let low_u64 = vreinterpretq_u64_u8(low_128);
+        // Extract 64-bit halves of high_128 and low_128
+        let high_u64 = vreinterpretq_u64_u8(high_128);
+        let low_u64 = vreinterpretq_u64_u8(low_128);
 
-    let high_lo: u64 = vgetq_lane_u64(high_u64, 0); // bits 128-191 of the 256-bit product
-    let high_hi: u64 = vgetq_lane_u64(high_u64, 1); // bits 192-255
+        let high_lo: u64 = vgetq_lane_u64(high_u64, 0); // bits 128-191 of the 256-bit product
+        let high_hi: u64 = vgetq_lane_u64(high_u64, 1); // bits 192-255
 
-    let q: u64 = 0x87; // x^7 + x^2 + x + 1
+        let q: u64 = 0x87; // x^7 + x^2 + x + 1
 
-    // First reduction: high_lo * q (degree up to 63+7=70, fits in 128 bits)
-    let r1 = vmull_p64(high_lo, q);
-    // This contributes to bits 0-70 of the result
+        // First reduction: high_lo * q (degree up to 63+7=70, fits in 128 bits)
+        let r1 = vmull_p64(high_lo, q);
+        // This contributes to bits 0-70 of the result
 
-    // Second reduction: high_hi * q (degree up to 63+7=70, fits in 128 bits)
-    // But this is shifted left by 64, so it contributes to bits 64-134
-    let r2 = vmull_p64(high_hi, q);
-    let r2_u8 = vreinterpretq_u8_p128(r2);
+        // Second reduction: high_hi * q (degree up to 63+7=70, fits in 128 bits)
+        // But this is shifted left by 64, so it contributes to bits 64-134
+        let r2 = vmull_p64(high_hi, q);
+        let r2_u8 = vreinterpretq_u8_p128(r2);
 
-    // r2 shifted left by 64: bits 64-134
-    // The bits 128-134 (= r2 bits 64-70, i.e., r2's lane 1 bits 0-6) need further reduction
-    let r2_shifted = vextq_u8(zero, r2_u8, 8); // r2 << 64 (low 64 bits of r2 go to lane 1)
+        // r2 shifted left by 64: bits 64-134
+        // The bits 128-134 (= r2 bits 64-70, i.e., r2's lane 1 bits 0-6) need further reduction
+        let r2_shifted = vextq_u8(zero, r2_u8, 8); // r2 << 64 (low 64 bits of r2 go to lane 1)
 
-    // Combine: intermediate = low_128 ^ r1 ^ r2_shifted
-    let r1_u8 = vreinterpretq_u8_p128(r1);
-    let intermediate = veorq_u8(veorq_u8(low_128, r1_u8), r2_shifted);
+        // Combine: intermediate = low_128 ^ r1 ^ r2_shifted
+        let r1_u8 = vreinterpretq_u8_p128(r1);
+        let intermediate = veorq_u8(veorq_u8(low_128, r1_u8), r2_shifted);
 
-    // Now handle overflow: bits 128+ from r2 << 64
-    // r2's lane 1 (bits 64-70 of r2 result) is the overflow
-    let r2_u64 = vreinterpretq_u64_u8(r2_u8);
-    let overflow: u64 = vgetq_lane_u64(r2_u64, 1); // at most 7 bits (bits 64-70 of r2)
+        // Now handle overflow: bits 128+ from r2 << 64
+        // r2's lane 1 (bits 64-70 of r2 result) is the overflow
+        let r2_u64 = vreinterpretq_u64_u8(r2_u8);
+        let overflow: u64 = vgetq_lane_u64(r2_u64, 1); // at most 7 bits (bits 64-70 of r2)
 
-    // Reduce overflow: overflow * q (degree up to 7+7=14, fits in one u64)
-    let r3 = vmull_p64(overflow, q);
-    let r3_u8 = vreinterpretq_u8_p128(r3);
+        // Reduce overflow: overflow * q (degree up to 7+7=14, fits in one u64)
+        let r3 = vmull_p64(overflow, q);
+        let r3_u8 = vreinterpretq_u8_p128(r3);
 
-    // XOR into the result (r3 only affects lane 0, since it's at most degree 14)
-    let result = veorq_u8(intermediate, r3_u8);
+        // XOR into the result (r3 only affects lane 0, since it's at most degree 14)
+        let result = veorq_u8(intermediate, r3_u8);
 
-    // ---------------------------------------------------------------
-    // Convert back to GHASH reflected convention.
-    // vrbitq_u8 reverses bits within each byte, undoing the initial conversion.
-    // ---------------------------------------------------------------
-    let result_be = vrbitq_u8(result);
-    vst1q_u8(state.as_mut_ptr(), result_be);
+        // ---------------------------------------------------------------
+        // Convert back to GHASH reflected convention.
+        // vrbitq_u8 reverses bits within each byte, undoing the initial conversion.
+        // ---------------------------------------------------------------
+        let result_be = vrbitq_u8(result);
+        vst1q_u8(state.as_mut_ptr(), result_be);
+    } // unsafe
 }
 
 // ---------------------------------------------------------------------------

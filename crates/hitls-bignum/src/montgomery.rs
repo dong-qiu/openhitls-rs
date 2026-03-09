@@ -191,43 +191,65 @@ impl MontgomeryCtx {
         scratch[..n + 2].fill(0);
 
         for i in 0..n {
-            let ai = *a.get_unchecked(i);
+            // SAFETY: caller guarantees a.len() >= n
+            let ai = unsafe { *a.get_unchecked(i) };
 
             // Step 1: scratch += ai * b
             let mut carry: u64 = 0;
             for j in 0..n {
-                let prod = DoubleLimb::from(ai) * DoubleLimb::from(*b.get_unchecked(j))
-                    + DoubleLimb::from(*scratch.get_unchecked(j))
-                    + DoubleLimb::from(carry);
-                *scratch.get_unchecked_mut(j) = prod as Limb;
+                // SAFETY: caller guarantees b.len() >= n, scratch.len() >= n+2
+                let prod = unsafe {
+                    DoubleLimb::from(ai) * DoubleLimb::from(*b.get_unchecked(j))
+                        + DoubleLimb::from(*scratch.get_unchecked(j))
+                        + DoubleLimb::from(carry)
+                };
+                // SAFETY: j < n < scratch.len()
+                unsafe { *scratch.get_unchecked_mut(j) = prod as Limb };
                 carry = (prod >> LIMB_BITS) as u64;
             }
-            let sum = DoubleLimb::from(*scratch.get_unchecked(n)) + DoubleLimb::from(carry);
-            *scratch.get_unchecked_mut(n) = sum as Limb;
-            *scratch.get_unchecked_mut(n + 1) = (sum >> LIMB_BITS) as u64;
+            // SAFETY: scratch.len() >= n+2
+            let sum =
+                unsafe { DoubleLimb::from(*scratch.get_unchecked(n)) + DoubleLimb::from(carry) };
+            unsafe {
+                *scratch.get_unchecked_mut(n) = sum as Limb;
+                *scratch.get_unchecked_mut(n + 1) = (sum >> LIMB_BITS) as u64;
+            }
 
             // Step 2: Montgomery reduction shift
-            let m = scratch.get_unchecked(0).wrapping_mul(np);
+            // SAFETY: scratch.len() >= 1
+            let m = unsafe { scratch.get_unchecked(0).wrapping_mul(np) };
 
-            let prod0 = DoubleLimb::from(m) * DoubleLimb::from(*n_mod.get_unchecked(0))
-                + DoubleLimb::from(*scratch.get_unchecked(0));
+            // SAFETY: n_mod.len() >= n, scratch.len() >= n+2
+            let prod0 = unsafe {
+                DoubleLimb::from(m) * DoubleLimb::from(*n_mod.get_unchecked(0))
+                    + DoubleLimb::from(*scratch.get_unchecked(0))
+            };
             carry = (prod0 >> LIMB_BITS) as u64;
 
             for j in 1..n {
-                let prod = DoubleLimb::from(m) * DoubleLimb::from(*n_mod.get_unchecked(j))
-                    + DoubleLimb::from(*scratch.get_unchecked(j))
-                    + DoubleLimb::from(carry);
-                *scratch.get_unchecked_mut(j - 1) = prod as Limb;
+                // SAFETY: j < n <= n_mod.len(), j < n < scratch.len()
+                let prod = unsafe {
+                    DoubleLimb::from(m) * DoubleLimb::from(*n_mod.get_unchecked(j))
+                        + DoubleLimb::from(*scratch.get_unchecked(j))
+                        + DoubleLimb::from(carry)
+                };
+                // SAFETY: j-1 < n-1 < scratch.len()
+                unsafe { *scratch.get_unchecked_mut(j - 1) = prod as Limb };
                 carry = (prod >> LIMB_BITS) as u64;
             }
-            let sum = DoubleLimb::from(*scratch.get_unchecked(n)) + DoubleLimb::from(carry);
-            *scratch.get_unchecked_mut(n - 1) = sum as Limb;
-            *scratch.get_unchecked_mut(n) =
-                *scratch.get_unchecked(n + 1) + (sum >> LIMB_BITS) as u64;
+            // SAFETY: scratch.len() >= n+2
+            let sum =
+                unsafe { DoubleLimb::from(*scratch.get_unchecked(n)) + DoubleLimb::from(carry) };
+            unsafe {
+                *scratch.get_unchecked_mut(n - 1) = sum as Limb;
+                *scratch.get_unchecked_mut(n) =
+                    *scratch.get_unchecked(n + 1) + (sum >> LIMB_BITS) as u64;
+            }
         }
 
         result[..n].copy_from_slice(&scratch[..n]);
-        if *scratch.get_unchecked(n) != 0 || limbs_ge(&result[..n], n_mod) {
+        // SAFETY: scratch.len() >= n+1
+        if unsafe { *scratch.get_unchecked(n) } != 0 || limbs_ge(&result[..n], n_mod) {
             limbs_sub_in_place(result, n_mod, n);
         }
     }

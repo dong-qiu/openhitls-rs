@@ -109,13 +109,15 @@ fn words_to_blocks(words: &[u32], nr: usize) -> Vec<[u8; 16]> {
 /// Load a 128-bit key from a `[u8; 16]` array into an `__m128i` register.
 #[inline(always)]
 unsafe fn load_key(key: &[u8; 16]) -> __m128i {
-    _mm_loadu_si128(key.as_ptr() as *const __m128i)
+    // SAFETY: SIMD intrinsic with valid pointer.
+    unsafe { _mm_loadu_si128(key.as_ptr() as *const __m128i) }
 }
 
 /// Store a 128-bit register back into a `[u8; 16]` array.
 #[inline(always)]
 unsafe fn store_block(reg: __m128i, out: &mut [u8; 16]) {
-    _mm_storeu_si128(out.as_mut_ptr() as *mut __m128i, reg);
+    // SAFETY: SIMD intrinsic with valid pointer.
+    unsafe { _mm_storeu_si128(out.as_mut_ptr() as *mut __m128i, reg) }
 }
 
 // ---------------------------------------------------------------------------
@@ -131,22 +133,18 @@ unsafe fn store_block(reg: __m128i, out: &mut [u8; 16]) {
 /// ```
 #[target_feature(enable = "aes")]
 unsafe fn prepare_dec_keys(enc_keys: &[[u8; 16]], rounds: usize) -> Vec<[u8; 16]> {
-    let mut dec = vec![[0u8; 16]; rounds + 1];
-
-    // First decryption key = last encryption key (no InvMixColumns).
-    dec[0] = enc_keys[rounds];
-
-    // Middle keys: apply InvMixColumns.
-    for i in 1..rounds {
-        let ek = load_key(&enc_keys[rounds - i]);
-        let dk = _mm_aesimc_si128(ek);
-        store_block(dk, &mut dec[i]);
+    // SAFETY: caller guarantees CPU feature availability (aes).
+    unsafe {
+        let mut dec = vec![[0u8; 16]; rounds + 1];
+        dec[0] = enc_keys[rounds];
+        for i in 1..rounds {
+            let ek = load_key(&enc_keys[rounds - i]);
+            let dk = _mm_aesimc_si128(ek);
+            store_block(dk, &mut dec[i]);
+        }
+        dec[rounds] = enc_keys[0];
+        dec
     }
-
-    // Last decryption key = first encryption key (no InvMixColumns).
-    dec[rounds] = enc_keys[0];
-
-    dec
 }
 
 // ---------------------------------------------------------------------------
@@ -156,76 +154,68 @@ unsafe fn prepare_dec_keys(enc_keys: &[[u8; 16]], rounds: usize) -> Vec<[u8; 16]
 /// Encrypt a single 16-byte block in place using AES-NI instructions.
 #[target_feature(enable = "aes")]
 unsafe fn encrypt_block_ni(block: &mut [u8; 16], enc_keys: &[[u8; 16]], rounds: usize) {
-    let mut state = _mm_loadu_si128(block.as_ptr() as *const __m128i);
-
-    // Initial round-key addition.
-    state = _mm_xor_si128(state, load_key(&enc_keys[0]));
-
-    // Rounds 1 .. rounds-1: SubBytes, ShiftRows, MixColumns, AddRoundKey.
-    for rk in enc_keys.iter().take(rounds).skip(1) {
-        state = _mm_aesenc_si128(state, load_key(rk));
+    // SAFETY: caller guarantees CPU feature availability (aes).
+    unsafe {
+        let mut state = _mm_loadu_si128(block.as_ptr() as *const __m128i);
+        state = _mm_xor_si128(state, load_key(&enc_keys[0]));
+        for rk in enc_keys.iter().take(rounds).skip(1) {
+            state = _mm_aesenc_si128(state, load_key(rk));
+        }
+        state = _mm_aesenclast_si128(state, load_key(&enc_keys[rounds]));
+        _mm_storeu_si128(block.as_mut_ptr() as *mut __m128i, state);
     }
-
-    // Final round: SubBytes, ShiftRows, AddRoundKey (no MixColumns).
-    state = _mm_aesenclast_si128(state, load_key(&enc_keys[rounds]));
-
-    _mm_storeu_si128(block.as_mut_ptr() as *mut __m128i, state);
 }
 
 /// Decrypt a single 16-byte block in place using AES-NI instructions.
 #[target_feature(enable = "aes")]
 unsafe fn decrypt_block_ni(block: &mut [u8; 16], dec_keys: &[[u8; 16]], rounds: usize) {
-    let mut state = _mm_loadu_si128(block.as_ptr() as *const __m128i);
-
-    // Initial round-key addition.
-    state = _mm_xor_si128(state, load_key(&dec_keys[0]));
-
-    // Rounds 1 .. rounds-1: InvShiftRows, InvSubBytes, InvMixColumns, AddRoundKey.
-    for rk in dec_keys.iter().take(rounds).skip(1) {
-        state = _mm_aesdec_si128(state, load_key(rk));
+    // SAFETY: caller guarantees CPU feature availability (aes).
+    unsafe {
+        let mut state = _mm_loadu_si128(block.as_ptr() as *const __m128i);
+        state = _mm_xor_si128(state, load_key(&dec_keys[0]));
+        for rk in dec_keys.iter().take(rounds).skip(1) {
+            state = _mm_aesdec_si128(state, load_key(rk));
+        }
+        state = _mm_aesdeclast_si128(state, load_key(&dec_keys[rounds]));
+        _mm_storeu_si128(block.as_mut_ptr() as *mut __m128i, state);
     }
-
-    // Final round: InvShiftRows, InvSubBytes, AddRoundKey (no InvMixColumns).
-    state = _mm_aesdeclast_si128(state, load_key(&dec_keys[rounds]));
-
-    _mm_storeu_si128(block.as_mut_ptr() as *mut __m128i, state);
 }
 
 /// Encrypt 4 blocks in parallel using AES-NI pipeline.
 #[target_feature(enable = "aes")]
 unsafe fn encrypt_4_blocks_ni(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]], rounds: usize) {
-    let mut s0 = _mm_loadu_si128(blocks[0].as_ptr() as *const __m128i);
-    let mut s1 = _mm_loadu_si128(blocks[1].as_ptr() as *const __m128i);
-    let mut s2 = _mm_loadu_si128(blocks[2].as_ptr() as *const __m128i);
-    let mut s3 = _mm_loadu_si128(blocks[3].as_ptr() as *const __m128i);
+    // SAFETY: caller guarantees CPU feature availability (aes).
+    unsafe {
+        let mut s0 = _mm_loadu_si128(blocks[0].as_ptr() as *const __m128i);
+        let mut s1 = _mm_loadu_si128(blocks[1].as_ptr() as *const __m128i);
+        let mut s2 = _mm_loadu_si128(blocks[2].as_ptr() as *const __m128i);
+        let mut s3 = _mm_loadu_si128(blocks[3].as_ptr() as *const __m128i);
 
-    // Initial round-key addition
-    let rk0 = load_key(&enc_keys[0]);
-    s0 = _mm_xor_si128(s0, rk0);
-    s1 = _mm_xor_si128(s1, rk0);
-    s2 = _mm_xor_si128(s2, rk0);
-    s3 = _mm_xor_si128(s3, rk0);
+        let rk0 = load_key(&enc_keys[0]);
+        s0 = _mm_xor_si128(s0, rk0);
+        s1 = _mm_xor_si128(s1, rk0);
+        s2 = _mm_xor_si128(s2, rk0);
+        s3 = _mm_xor_si128(s3, rk0);
 
-    // Rounds 1 .. rounds-1
-    for rk in enc_keys.iter().take(rounds).skip(1) {
-        let k = load_key(rk);
-        s0 = _mm_aesenc_si128(s0, k);
-        s1 = _mm_aesenc_si128(s1, k);
-        s2 = _mm_aesenc_si128(s2, k);
-        s3 = _mm_aesenc_si128(s3, k);
+        for rk in enc_keys.iter().take(rounds).skip(1) {
+            let k = load_key(rk);
+            s0 = _mm_aesenc_si128(s0, k);
+            s1 = _mm_aesenc_si128(s1, k);
+            s2 = _mm_aesenc_si128(s2, k);
+            s3 = _mm_aesenc_si128(s3, k);
+        }
+
+        let kf = load_key(&enc_keys[rounds]);
+        s0 = _mm_aesenclast_si128(s0, kf);
+        s1 = _mm_aesenclast_si128(s1, kf);
+        s2 = _mm_aesenclast_si128(s2, kf);
+        s3 = _mm_aesenclast_si128(s3, kf);
+
+        _mm_storeu_si128(blocks[0].as_mut_ptr() as *mut __m128i, s0);
+        _mm_storeu_si128(blocks[1].as_mut_ptr() as *mut __m128i, s1);
+        _mm_storeu_si128(blocks[2].as_mut_ptr() as *mut __m128i, s2);
+        _mm_storeu_si128(blocks[3].as_mut_ptr() as *mut __m128i, s3);
     }
-
-    // Final round
-    let kf = load_key(&enc_keys[rounds]);
-    s0 = _mm_aesenclast_si128(s0, kf);
-    s1 = _mm_aesenclast_si128(s1, kf);
-    s2 = _mm_aesenclast_si128(s2, kf);
-    s3 = _mm_aesenclast_si128(s3, kf);
-
-    _mm_storeu_si128(blocks[0].as_mut_ptr() as *mut __m128i, s0);
-    _mm_storeu_si128(blocks[1].as_mut_ptr() as *mut __m128i, s1);
-    _mm_storeu_si128(blocks[2].as_mut_ptr() as *mut __m128i, s2);
-    _mm_storeu_si128(blocks[3].as_mut_ptr() as *mut __m128i, s3);
 }
 
 // ---------------------------------------------------------------------------
@@ -241,29 +231,28 @@ unsafe fn encrypt_4_blocks_ni(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]],
 #[allow(clippy::incompatible_msrv)]
 #[target_feature(enable = "vaes,avx2")]
 unsafe fn encrypt_4_blocks_vaes(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]], rounds: usize) {
-    // blocks is contiguous: [blk0 | blk1 | blk2 | blk3] = 64 bytes
-    let mut s01 = _mm256_loadu_si256(blocks[0].as_ptr() as *const __m256i);
-    let mut s23 = _mm256_loadu_si256(blocks[2].as_ptr() as *const __m256i);
+    // SAFETY: caller guarantees CPU feature availability (vaes, avx2).
+    unsafe {
+        let mut s01 = _mm256_loadu_si256(blocks[0].as_ptr() as *const __m256i);
+        let mut s23 = _mm256_loadu_si256(blocks[2].as_ptr() as *const __m256i);
 
-    // Broadcast 128-bit round key to both lanes of 256-bit register
-    let rk0 = _mm256_broadcastsi128_si256(load_key(&enc_keys[0]));
-    s01 = _mm256_xor_si256(s01, rk0);
-    s23 = _mm256_xor_si256(s23, rk0);
+        let rk0 = _mm256_broadcastsi128_si256(load_key(&enc_keys[0]));
+        s01 = _mm256_xor_si256(s01, rk0);
+        s23 = _mm256_xor_si256(s23, rk0);
 
-    // Rounds 1 .. rounds-1
-    for rk in enc_keys.iter().take(rounds).skip(1) {
-        let k = _mm256_broadcastsi128_si256(load_key(rk));
-        s01 = _mm256_aesenc_epi128(s01, k);
-        s23 = _mm256_aesenc_epi128(s23, k);
+        for rk in enc_keys.iter().take(rounds).skip(1) {
+            let k = _mm256_broadcastsi128_si256(load_key(rk));
+            s01 = _mm256_aesenc_epi128(s01, k);
+            s23 = _mm256_aesenc_epi128(s23, k);
+        }
+
+        let kf = _mm256_broadcastsi128_si256(load_key(&enc_keys[rounds]));
+        s01 = _mm256_aesenclast_epi128(s01, kf);
+        s23 = _mm256_aesenclast_epi128(s23, kf);
+
+        _mm256_storeu_si256(blocks[0].as_mut_ptr() as *mut __m256i, s01);
+        _mm256_storeu_si256(blocks[2].as_mut_ptr() as *mut __m256i, s23);
     }
-
-    // Final round
-    let kf = _mm256_broadcastsi128_si256(load_key(&enc_keys[rounds]));
-    s01 = _mm256_aesenclast_epi128(s01, kf);
-    s23 = _mm256_aesenclast_epi128(s23, kf);
-
-    _mm256_storeu_si256(blocks[0].as_mut_ptr() as *mut __m256i, s01);
-    _mm256_storeu_si256(blocks[2].as_mut_ptr() as *mut __m256i, s23);
 }
 
 // ---------------------------------------------------------------------------
