@@ -13,7 +13,7 @@ workspace = true
 hitls-types = { path = "../hitls-types" }
 zeroize = { version = "1.8", features = ["derive"] }
 subtle = "2.6"
-getrandom = "0.2"
+getrandom = "0.3"
 
 [dev-dependencies]
 proptest = { workspace = true }
