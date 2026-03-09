@@ -19,6 +19,7 @@ use core::arch::x86_64::*;
 ///
 /// This produces W[t..t+3] from W[t-16..t-13], W[t-12..t-9], W[t-8..t-5], W[t-4..t-1].
 #[inline]
+#[allow(unused_unsafe)]
 #[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
 unsafe fn schedule(v0: __m128i, v1: __m128i, v2: __m128i, v3: __m128i) -> __m128i {
     unsafe {

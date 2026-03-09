@@ -162,6 +162,7 @@ impl GhashPowers {
 /// # Safety
 /// Requires PCLMULQDQ.
 #[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+#[allow(unused_unsafe)]
 #[target_feature(enable = "pclmulqdq,sse2,ssse3")]
 unsafe fn gf128_mul_clmul(a: __m128i, b: __m128i, poly: __m128i) -> __m128i {
     unsafe {
