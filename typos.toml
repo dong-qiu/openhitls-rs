@@ -16,6 +16,17 @@ nd = "nd"         # Bignum variable
 numer = "numer"   # Numerator in math
 datas = "datas"   # Plural in protocol specs
 keypair = "keypair"
+flate = "flate"   # deflate/inflate compression
+benchs = "benchs" # informal plural of bench
+testca = "testca" # test CA certificate
+testin = "testin" # test input abbreviation
+
+[type.markdown]
+extend-glob = ["*.md"]
+[type.markdown.extend-words]
+# Phase numbering abbreviations in docs
+PN = "PN"         # Phase Number prefix
+FO = "FO"         # abbreviation in docs
 
 [default.extend-identifiers]
 # Variable names in crypto code
