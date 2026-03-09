@@ -130,3 +130,7 @@ pub mod entropy;
 // FIPS/CMVP compliance
 #[cfg(feature = "fips")]
 pub mod fips;
+
+// Zeroizing allocator
+#[cfg(feature = "zeroize-alloc")]
+pub mod zalloc;

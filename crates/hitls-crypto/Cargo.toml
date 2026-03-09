@@ -84,6 +84,9 @@ fips = ["sha2", "hmac", "aes", "modes", "drbg", "rsa", "ecdsa", "ed25519", "hkdf
 # Expose low-level internals
 hazmat = []
 
+# Zeroizing allocator wrapper
+zeroize-alloc = []
+
 [dev-dependencies]
 criterion = { workspace = true }
 hitls-bignum = { path = "../hitls-bignum" }
