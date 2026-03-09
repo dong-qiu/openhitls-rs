@@ -266,6 +266,14 @@ jobs:
         run: |
           mkdir -p coverage
           cargo llvm-cov --workspace --all-features --branch --codecov --output-path coverage/codecov.json --ignore-filename-regex "tests/vectors/"
+      - name: Check coverage threshold
+        run: |
+          LINE_COV=$(cargo llvm-cov --workspace --all-features --ignore-filename-regex "tests/vectors/" 2>&1 | tail -1 | awk '{print $10}' | tr -d '%')
+          echo "Line coverage: ${LINE_COV}%"
+          if [ -n "$LINE_COV" ] && [ "$(echo "$LINE_COV < 60" | bc -l)" = "1" ]; then
+            echo "::error::Coverage ${LINE_COV}% is below 60% threshold"
+            exit 1
+          fi
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
