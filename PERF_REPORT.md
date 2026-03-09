@@ -1,13 +1,13 @@
 # Performance Comparison: openHiTLS (C) vs openHiTLS-rs (Rust)
 
-> **Date**: 2026-03-05 (P1–P83, I83–I87, T74 complete) | **Platform**: Apple M4, macOS 15.4, 10 cores, 16 GB RAM
+> **Date**: 2026-03-05 (P1–P93, I83–I87, T74 complete) | **Platform**: Apple M4, macOS 15.4, 10 cores, 16 GB RAM
 > **Benchmark suite**: 307 test points across 63 algorithm groups
 
 ---
 
 ## 1. Executive Summary
 
-Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing the original C openHiTLS against the Rust rewrite. All Rust numbers from Criterion 0.5 runs (rustc 1.93.0, 2026-03-05) after all 83 performance optimization phases. The benchmark suite covers 100% of implemented algorithm modules.
+Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing the original C openHiTLS against the Rust rewrite. All Rust numbers from Criterion 0.5 runs (rustc 1.93.0, 2026-03-05) after all 87 performance optimization phases. The benchmark suite covers 100% of implemented algorithm modules.
 
 | Category | Verdict | Detail |
 |----------|---------|--------|
@@ -61,7 +61,7 @@ Comprehensive benchmarks across 63 algorithm groups (307 test points) comparing 
 | **Rust Build** | `--release`, LTO enabled, `codegen-units=1` |
 | **Rust Benchmark** | Criterion 0.5 (100 samples, statistical analysis, 95% CI) |
 | **C Benchmark** | Custom framework (`clock_gettime`, 5,000–10,000 iterations) |
-| **Optimization Level** | P1–P83 complete (83 performance phases) |
+| **Optimization Level** | P1–P93 complete (87 performance phases) |
 | **Benchmark Coverage** | 307 test points, 63 algorithm groups, 33/33 modules covered |
 
 **Note**: CPU frequency scaling is managed by macOS on Apple Silicon. Slow algorithms (SLH-DSA, FrodoKEM, McEliece, XMSS) use `sample_size(10)`. Criterion provides statistical outlier detection; C benchmarks report single-run mean.
@@ -414,7 +414,7 @@ AES-256-GCM enc         ░░░░░░░░░░░░░░░░░░�
 
 ---
 
-## 5. Performance Optimization History (Phase P1–P83)
+## 5. Performance Optimization History (Phase P1–P93)
 
 ### Major Optimization Phases
 
@@ -465,10 +465,14 @@ AES-256-GCM enc         ░░░░░░░░░░░░░░░░░░�
 | **P81** | DH precomputed generator tables (MontExpTable + DhGroupCache) | mod_exp 13–16% faster |
 | **P82** | SM3 pipelined message expansion (expand/compress overlap) | SM3 regression (needs revert) |
 | **P83** | ML-KEM SHAKE clone-fork (pre-seed + clone) | ML-KEM ~3–5% improvement |
+| **P84** | VAES 256-bit + VPCLMULQDQ 4-block AES-GCM pipeline (clippy compat) | x86-64 CI unblocked |
+| **P85** | TLS record layer enum dispatch + stack IV allocation | Eliminated vtable + heap alloc per AEAD call |
+| **P89** | Hot path `#[inline]` hints (record layer + crypto dispatch) | Cross-crate inlining for ~20 functions |
+| **P93** | Zero-copy inner plaintext parsing (TLS/DTLS 1.3 decrypt) | 1 fewer heap alloc per decrypted record |
 
 ### Key Milestones
 
-| Milestone | Before (P0) | After (P83) | Speedup |
+| Milestone | Before (P0) | After (P93) | Speedup |
 |-----------|-------------|-------------|---------|
 | ECDSA P-256 sign | 2,415 µs | 44.0 µs | **55x** |
 | ECDSA P-384 sign | 2,372 µs | 120.6 µs | **20x** (P63) |
