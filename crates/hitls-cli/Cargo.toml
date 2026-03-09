@@ -30,3 +30,6 @@ hitls-auth = { path = "../hitls-auth" }
 hitls-utils = { path = "../hitls-utils" }
 clap = { version = "4", features = ["derive"] }
 getrandom = "0.2"
+
+[dev-dependencies]
+insta = "1"
