@@ -147,6 +147,19 @@ jobs:
           cargo test -p hitls-auth --no-default-features --features spake2plus
           cargo test -p hitls-auth --no-default-features --features privpass
 
+  feature-powerset:
+    name: Feature Powerset Check
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+      - name: Check all feature combinations (depth 2)
+        run: cargo hack check -p hitls-crypto --feature-powerset --depth 2 --no-dev-deps
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
