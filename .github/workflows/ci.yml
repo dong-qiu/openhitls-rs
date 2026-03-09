@@ -463,11 +463,11 @@ jobs:
       - name: Bench base branch
         run: |
           git checkout ${{ github.base_ref }}
-          cargo bench --bench crypto_bench -- --save-baseline base
+          cargo bench --all-features --bench crypto_bench -- --save-baseline base
       - name: Bench PR head
         run: |
           git checkout ${{ github.sha }}
-          cargo bench --bench crypto_bench -- --save-baseline head
+          cargo bench --all-features --bench crypto_bench -- --save-baseline head
       - name: Compare benchmarks
         run: |
           cargo install critcmp --locked
