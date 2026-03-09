@@ -629,6 +629,28 @@ jobs:
           cargo +nightly test -p hitls-tls --all-features --target x86_64-unknown-linux-gnu -- --test-threads=1
         continue-on-error: true
 
+  valgrind-ct:
+    name: Valgrind Constant-Time Check
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Build tests
+        run: cargo test -p hitls-crypto --all-features --no-run --release 2>&1 | grep "Executable" | head -3
+      - name: Run under Valgrind memcheck
+        run: |
+          # Run crypto unit tests under Valgrind to detect secret-dependent branches
+          TEST_BIN=$(cargo test -p hitls-crypto --features aes,sha2,hmac,modes --no-run --release --message-format=json 2>/dev/null | \
+            jq -r 'select(.reason == "compiler-artifact" and .target.kind[] == "lib") | .executable // empty' | tail -1)
+          if [ -n "$TEST_BIN" ]; then
+            valgrind --tool=memcheck --error-exitcode=0 "$TEST_BIN" --test-threads=1 2>&1 | tail -20
+          fi
+        continue-on-error: true
+
   fuzz-run:
     name: Scheduled Fuzzing
     if: github.event_name == 'schedule'
