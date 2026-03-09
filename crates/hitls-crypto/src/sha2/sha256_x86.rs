@@ -21,10 +21,12 @@ use core::arch::x86_64::*;
 #[inline]
 #[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
 unsafe fn schedule(v0: __m128i, v1: __m128i, v2: __m128i, v3: __m128i) -> __m128i {
-    let t1 = _mm_sha256msg1_epu32(v0, v1);
-    let t2 = _mm_alignr_epi8(v3, v2, 4);
-    let t3 = _mm_add_epi32(t1, t2);
-    _mm_sha256msg2_epu32(t3, v3)
+    unsafe {
+        let t1 = _mm_sha256msg1_epu32(v0, v1);
+        let t2 = _mm_alignr_epi8(v3, v2, 4);
+        let t3 = _mm_add_epi32(t1, t2);
+        _mm_sha256msg2_epu32(t3, v3)
+    }
 }
 
 /// Execute 4 SHA-256 rounds (2 calls to sha256rnds2, each doing 2 rounds).

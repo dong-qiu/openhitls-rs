@@ -164,21 +164,23 @@ impl GhashPowers {
 #[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
 #[target_feature(enable = "pclmulqdq,sse2,ssse3")]
 unsafe fn gf128_mul_clmul(a: __m128i, b: __m128i, poly: __m128i) -> __m128i {
-    let lo = _mm_clmulepi64_si128(a, b, 0x00);
-    let hi = _mm_clmulepi64_si128(a, b, 0x11);
-    let m1 = _mm_clmulepi64_si128(a, b, 0x01);
-    let m2 = _mm_clmulepi64_si128(a, b, 0x10);
-    let mid = _mm_xor_si128(m1, m2);
-    let lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
-    let hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
+    unsafe {
+        let lo = _mm_clmulepi64_si128(a, b, 0x00);
+        let hi = _mm_clmulepi64_si128(a, b, 0x11);
+        let m1 = _mm_clmulepi64_si128(a, b, 0x01);
+        let m2 = _mm_clmulepi64_si128(a, b, 0x10);
+        let mid = _mm_xor_si128(m1, m2);
+        let lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
+        let hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
 
-    let tmp = _mm_clmulepi64_si128(lo, poly, 0x10);
-    let lo = _mm_shuffle_epi32(lo, 78);
-    let lo = _mm_xor_si128(lo, tmp);
-    let tmp2 = _mm_clmulepi64_si128(lo, poly, 0x10);
-    let lo = _mm_shuffle_epi32(lo, 78);
-    let lo = _mm_xor_si128(lo, tmp2);
-    _mm_xor_si128(hi, lo)
+        let tmp = _mm_clmulepi64_si128(lo, poly, 0x10);
+        let lo = _mm_shuffle_epi32(lo, 78);
+        let lo = _mm_xor_si128(lo, tmp);
+        let tmp2 = _mm_clmulepi64_si128(lo, poly, 0x10);
+        let lo = _mm_shuffle_epi32(lo, 78);
+        let lo = _mm_xor_si128(lo, tmp2);
+        _mm_xor_si128(hi, lo)
+    }
 }
 
 /// Process 4 GHASH blocks in parallel using VPCLMULQDQ (256-bit carry-less multiply).
