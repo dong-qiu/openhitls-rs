@@ -93,22 +93,26 @@ pub fn verify_certificate_verify(
 // Hash helpers
 // ---------------------------------------------------------------------------
 
+fn compute_hash(
+    mut hasher: impl hitls_crypto::provider::Digest,
+    data: &[u8],
+) -> Result<Vec<u8>, TlsError> {
+    hasher.update(data).map_err(TlsError::CryptoError)?;
+    let mut out = vec![0u8; hasher.output_size()];
+    hasher.finish(&mut out).map_err(TlsError::CryptoError)?;
+    Ok(out)
+}
+
 fn compute_sha256(data: &[u8]) -> Result<Vec<u8>, TlsError> {
-    let mut h = hitls_crypto::sha2::Sha256::new();
-    h.update(data).map_err(TlsError::CryptoError)?;
-    Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+    compute_hash(hitls_crypto::sha2::Sha256::new(), data)
 }
 
 fn compute_sha384(data: &[u8]) -> Result<Vec<u8>, TlsError> {
-    let mut h = hitls_crypto::sha2::Sha384::new();
-    h.update(data).map_err(TlsError::CryptoError)?;
-    Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+    compute_hash(hitls_crypto::sha2::Sha384::new(), data)
 }
 
 fn compute_sha512(data: &[u8]) -> Result<Vec<u8>, TlsError> {
-    let mut h = hitls_crypto::sha2::Sha512::new();
-    h.update(data).map_err(TlsError::CryptoError)?;
-    Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+    compute_hash(hitls_crypto::sha2::Sha512::new(), data)
 }
 
 // ---------------------------------------------------------------------------

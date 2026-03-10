@@ -16,10 +16,7 @@ pub fn run(algorithm: &str, key_hex: &str, file: &str) -> Result<(), Box<dyn std
 
     let (mac_value, alg_name) = compute_mac(algorithm, &key, &data)?;
 
-    let hex = mac_value
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
+    let hex = hitls_utils::hex::to_hex(&mac_value);
     if file == "-" {
         println!("{alg_name}(stdin)= {hex}");
     } else {

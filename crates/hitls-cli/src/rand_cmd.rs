@@ -10,8 +10,7 @@ pub fn run(num: usize, format: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     match format {
         "hex" => {
-            let hex: String = buf.iter().map(|b| format!("{b:02x}")).collect();
-            println!("{hex}");
+            println!("{}", hitls_utils::hex::to_hex(&buf));
         }
         "base64" => {
             let encoded = hitls_utils::base64::encode(&buf);

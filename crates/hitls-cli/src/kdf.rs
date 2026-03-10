@@ -43,7 +43,7 @@ fn run_pbkdf2(args: &KdfArgs) -> Result<(), Box<dyn std::error::Error>> {
             std::io::stdout().write_all(&dk)?;
         }
     } else {
-        let hex = dk.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let hex = hitls_utils::hex::to_hex(&dk);
         if let Some(ref path) = args.out {
             std::fs::write(path, format!("{hex}\n"))?;
         } else {

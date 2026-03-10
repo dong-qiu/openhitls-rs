@@ -3,6 +3,8 @@
 use std::fs;
 use std::io::{self, Read};
 
+use hitls_utils::hex::to_hex;
+
 pub fn run(algorithm: &str, file: &str) -> Result<(), Box<dyn std::error::Error>> {
     let data = if file == "-" {
         let mut buf = Vec::new();
@@ -14,10 +16,7 @@ pub fn run(algorithm: &str, file: &str) -> Result<(), Box<dyn std::error::Error>
 
     let (digest, alg_name) = hash_data(algorithm, &data)?;
 
-    let hex = digest
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
+    let hex = to_hex(&digest);
     if file == "-" {
         println!("{alg_name}(stdin)= {hex}");
     } else {
@@ -74,8 +73,6 @@ fn hash_data(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use hitls_utils::hex::to_hex;
 
     #[test]
     fn test_hash_data_md5_empty() {

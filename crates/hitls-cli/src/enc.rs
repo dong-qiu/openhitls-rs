@@ -128,7 +128,7 @@ fn aead_encrypt(
     out.extend_from_slice(&ct_with_tag);
     fs::write(output, &out)?;
 
-    let key_hex = key.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let key_hex = hitls_utils::hex::to_hex(&key);
     eprintln!("Key (save this): {key_hex}");
     Ok(())
 }

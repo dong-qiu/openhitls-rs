@@ -38,7 +38,7 @@ pub fn run(
         fs::write(out_path, &result)?;
         eprintln!("Output written to {out_path} ({} bytes)", result.len());
     } else {
-        let hex: String = result.iter().map(|b| format!("{b:02x}")).collect();
+        let hex = hitls_utils::hex::to_hex(&result);
         println!("{hex}");
     }
 
