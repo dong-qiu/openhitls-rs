@@ -533,6 +533,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTlsServerCon
 mod tests {
     use super::*;
 
+    /// Minimal fake DER-encoded certificate stub for tests that skip verification.
+    const TEST_FAKE_CERT: [u8; 4] = [0x30, 0x82, 0x01, 0x00];
+
     #[test]
     fn test_async_client_creation() {
         let (client, _server) = tokio::io::duplex(16 * 1024);
@@ -562,7 +565,7 @@ mod tests {
     fn make_tls13_configs() -> (TlsConfig, TlsConfig) {
         use crate::config::ServerPrivateKey;
         // Minimal ASN.1 SEQUENCE — accepted by TLS layer when verify_peer=false
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
         // Valid 32-byte Ed25519 seed
         let seed = [0x42u8; 32];
 
@@ -771,7 +774,7 @@ mod tests {
     #[tokio::test]
     async fn test_async_tls13_alpn_negotiation() {
         use crate::config::ServerPrivateKey;
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
         let seed = [0x43u8; 32];
 
         let server_config = TlsConfig::builder()
@@ -923,7 +926,7 @@ mod tests {
     async fn test_async_tls13_certificate_authorities_config() {
         use crate::config::ServerPrivateKey;
 
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
         let seed = [0x42u8; 32];
 
         let server_config = TlsConfig::builder()
@@ -1087,7 +1090,7 @@ mod tests {
 
     fn make_tls13_early_data_configs(max_early_data_size: u32) -> (TlsConfig, TlsConfig, Vec<u8>) {
         use crate::config::ServerPrivateKey;
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
         let seed = [0x42u8; 32];
         let ticket_key = vec![0xAB; 32];
 
@@ -1141,7 +1144,7 @@ mod tests {
             .build();
         let server_config2 = {
             use crate::config::ServerPrivateKey;
-            let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+            let fake_cert = TEST_FAKE_CERT.to_vec();
             let seed = [0x42u8; 32];
             TlsConfig::builder()
                 .certificate_chain(vec![fake_cert])
@@ -1210,7 +1213,7 @@ mod tests {
             .build();
         let server_config2 = {
             use crate::config::ServerPrivateKey;
-            let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+            let fake_cert = TEST_FAKE_CERT.to_vec();
             let seed = [0x42u8; 32];
             TlsConfig::builder()
                 .certificate_chain(vec![fake_cert])
@@ -1364,7 +1367,7 @@ mod tests {
         use crate::config::ServerPrivateKey;
 
         let server_seed = [0x42u8; 32];
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
 
         let client_seed = vec![0x99; 32];
         let client_cert_der = build_ed25519_der_cert(&client_seed);
@@ -1422,7 +1425,7 @@ mod tests {
         use crate::config::ServerPrivateKey;
 
         let server_seed = [0x42u8; 32];
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
 
         let server_config = TlsConfig::builder()
             .certificate_chain(vec![fake_cert])

@@ -1857,17 +1857,23 @@ mod tests {
     use crate::crypt::SignatureScheme;
     use crate::CipherSuite;
 
+    /// Shared ECDSA P-256 test private key bytes.
+    const TEST_ECDSA_PRIVATE: [u8; 32] = [
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+        0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+        0x1D, 0x1E, 0x1F, 0x20,
+    ];
+
+    /// Minimal fake DER-encoded certificate stub for tests that skip verification.
+    const TEST_FAKE_CERT: [u8; 4] = [0x30, 0x82, 0x01, 0x00];
+
     fn ecdsa_private_key() -> Vec<u8> {
-        vec![
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
-            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
-            0x1D, 0x1E, 0x1F, 0x20,
-        ]
+        TEST_ECDSA_PRIVATE.to_vec()
     }
 
     fn make_configs(suite: CipherSuite) -> (TlsConfig, TlsConfig) {
         let key_bytes = ecdsa_private_key();
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
 
         let client_config = TlsConfig::builder()
             .cipher_suites(&[suite])
@@ -2243,7 +2249,7 @@ mod tests {
     #[tokio::test]
     async fn test_async_tls12_alpn_negotiation() {
         let key_bytes = ecdsa_private_key();
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
 
         let client_config = TlsConfig::builder()
             .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
@@ -2281,7 +2287,7 @@ mod tests {
     #[tokio::test]
     async fn test_async_tls12_server_name_sni() {
         let key_bytes = ecdsa_private_key();
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
 
         let client_config = TlsConfig::builder()
             .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
@@ -2339,7 +2345,7 @@ mod tests {
     async fn test_async_tls12_x25519_key_exchange() {
         let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
         let key_bytes = ecdsa_private_key();
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
 
         let client_config = TlsConfig::builder()
             .cipher_suites(&[suite])
@@ -2380,7 +2386,7 @@ mod tests {
     async fn test_async_tls12_session_resumption_via_ticket() {
         let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
         let key_bytes = ecdsa_private_key();
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+        let fake_cert = TEST_FAKE_CERT.to_vec();
         let ticket_key = vec![0x99u8; 32];
 
         // Step 1: initial handshake to obtain session ticket

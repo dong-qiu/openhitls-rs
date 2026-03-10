@@ -19,6 +19,16 @@ use crate::session::TlsSession;
 use crate::{CipherSuite, TlsConnection};
 use hitls_crypto::provider::Digest;
 
+/// Shared ECDSA P-256 test private key bytes.
+const TEST_ECDSA_PRIVATE: [u8; 32] = [
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
+    0x1F, 0x20,
+];
+
+/// Minimal fake DER-encoded certificate stub for tests that skip verification.
+const TEST_FAKE_CERT: [u8; 4] = [0x30, 0x82, 0x01, 0x00];
+
 #[test]
 fn test_connection_creation() {
     let stream = Cursor::new(Vec::<u8>::new());
@@ -37,7 +47,7 @@ fn make_ed25519_server_identity() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let pub_key_bytes = kp.public_key().to_vec();
     // We use a fake DER cert since we'll disable peer verification.
     // In a real scenario, this would be a proper self-signed X.509 cert.
-    let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+    let fake_cert = TEST_FAKE_CERT.to_vec();
     (seed, pub_key_bytes, fake_cert)
 }
 
@@ -3271,13 +3281,9 @@ fn test_tls12_full_handshake_ecdhe_ecdsa() {
     use crate::handshake::server12::{Tls12ServerHandshake, Tls12ServerState};
 
     // Use a fixed P-256 private key (32 bytes, must be in [1, n-1])
-    let ecdsa_private = vec![
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
-        0x1F, 0x20,
-    ];
+    let ecdsa_private = TEST_ECDSA_PRIVATE.to_vec();
 
-    let fake_cert = vec![0x30, 0x82, 0x01, 0x00]; // fake DER cert
+    let fake_cert = TEST_FAKE_CERT.to_vec();
 
     let client_config = TlsConfig::builder()
         .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
@@ -3511,13 +3517,9 @@ fn test_tls12_full_handshake_x25519() {
     use crate::handshake::server12::{Tls12ServerHandshake, Tls12ServerState};
 
     // Use a fixed P-256 ECDSA private key
-    let ecdsa_private = vec![
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
-        0x1F, 0x20,
-    ];
+    let ecdsa_private = TEST_ECDSA_PRIVATE.to_vec();
 
-    let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+    let fake_cert = TEST_FAKE_CERT.to_vec();
     let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
 
     let client_config = TlsConfig::builder()
