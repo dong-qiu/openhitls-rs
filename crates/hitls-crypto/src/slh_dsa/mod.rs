@@ -78,7 +78,7 @@ impl SlhDsaKeyPair {
         getrandom::getrandom(&mut pk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
 
         // Compute public root: top layer (d-1) tree root
-        let placeholder_root = vec![0u8; n]; // temporary for hasher creation
+        let placeholder_root = vec![0u8; n]; // zero root used only to initialize hasher
         let hasher = make_hasher(p, &pk_seed, &placeholder_root);
 
         let compressed = p.is_sha2;

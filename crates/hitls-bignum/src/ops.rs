@@ -45,8 +45,6 @@ impl BigNum {
         if divisor.is_zero() {
             return Err(CryptoError::BnDivisionByZero);
         }
-        // TODO: Implement Knuth's Algorithm D
-        // Placeholder: simple binary long division
         let (q, r) = div_rem_unsigned(self.limbs(), divisor.limbs());
         Ok((q, r))
     }
