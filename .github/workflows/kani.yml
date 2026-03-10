@@ -14,7 +14,7 @@ jobs:
       matrix:
         crate: [hitls-bignum, hitls-utils]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install Kani
         uses: model-checking/kani-github-action@v1
         with:
