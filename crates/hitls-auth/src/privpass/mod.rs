@@ -514,17 +514,32 @@ mod tests {
 
     #[test]
     fn test_privpass_empty_key_rejected() {
-        // Empty n → InvalidKey
-        assert!(Issuer::new(&[], &[1], &[3]).is_err());
-        // Empty d → InvalidKey
-        assert!(Issuer::new(&[15], &[], &[3]).is_err());
-        // Empty e → InvalidKey
-        assert!(Issuer::new(&[15], &[1], &[]).is_err());
+        // Empty n → InvalidKey (zero value, rejected as invalid RSA modulus)
+        assert!(
+            matches!(Issuer::new(&[], &[1], &[3]), Err(CryptoError::InvalidKey)),
+            "Issuer with empty n should return InvalidKey"
+        );
+        // Empty d → InvalidKey (zero value)
+        assert!(
+            matches!(Issuer::new(&[15], &[], &[3]), Err(CryptoError::InvalidKey)),
+            "Issuer with empty d should return InvalidKey"
+        );
+        // Empty e → InvalidKey (zero value)
+        assert!(
+            matches!(Issuer::new(&[15], &[1], &[]), Err(CryptoError::InvalidKey)),
+            "Issuer with empty e should return InvalidKey"
+        );
 
         // Client: empty n
-        assert!(Client::new(&[], &[3]).is_err());
+        assert!(
+            matches!(Client::new(&[], &[3]), Err(CryptoError::InvalidKey)),
+            "Client with empty n should return InvalidKey"
+        );
         // Client: empty e
-        assert!(Client::new(&[15], &[]).is_err());
+        assert!(
+            matches!(Client::new(&[15], &[]), Err(CryptoError::InvalidKey)),
+            "Client with empty e should return InvalidKey"
+        );
     }
 
     #[test]
@@ -537,10 +552,28 @@ mod tests {
         assert_eq!(TokenType::from_wire(&priv_v.to_wire()).unwrap(), priv_v);
 
         // Invalid wire encoding [0xFF, 0xFF]
-        assert!(TokenType::from_wire(&[0xFF, 0xFF]).is_err());
+        assert!(
+            matches!(
+                TokenType::from_wire(&[0xFF, 0xFF]),
+                Err(CryptoError::InvalidArg(_))
+            ),
+            "Invalid wire encoding should return InvalidArg"
+        );
         // Too short
-        assert!(TokenType::from_wire(&[0x00]).is_err());
-        assert!(TokenType::from_wire(&[]).is_err());
+        assert!(
+            matches!(
+                TokenType::from_wire(&[0x00]),
+                Err(CryptoError::InvalidArg(_))
+            ),
+            "Too-short wire encoding should return InvalidArg"
+        );
+        assert!(
+            matches!(
+                TokenType::from_wire(&[]),
+                Err(CryptoError::InvalidArg(_))
+            ),
+            "Empty wire encoding should return InvalidArg"
+        );
     }
 
     #[test]
@@ -557,8 +590,20 @@ mod tests {
         assert_eq!(priv_v, TokenType::PrivatelyVerifiable);
 
         // Invalid wire encoding
-        assert!(TokenType::from_wire(&[0x00, 0x03]).is_err());
-        assert!(TokenType::from_wire(&[0x00]).is_err());
+        assert!(
+            matches!(
+                TokenType::from_wire(&[0x00, 0x03]),
+                Err(CryptoError::InvalidArg(_))
+            ),
+            "Unknown token type wire encoding should return InvalidArg"
+        );
+        assert!(
+            matches!(
+                TokenType::from_wire(&[0x00]),
+                Err(CryptoError::InvalidArg(_))
+            ),
+            "Too-short wire encoding should return InvalidArg"
+        );
     }
 
     #[test]
@@ -569,7 +614,10 @@ mod tests {
             token_type: TokenType::PrivatelyVerifiable,
             blinded_element: vec![1u8; 128],
         };
-        assert!(issuer.issue(&request).is_err());
+        assert!(
+            matches!(issuer.issue(&request), Err(CryptoError::InvalidArg(_))),
+            "Issuing PrivatelyVerifiable token should return InvalidArg"
+        );
     }
 
     #[test]
@@ -580,7 +628,13 @@ mod tests {
             nonce: vec![0u8; 32],
             authenticator: vec![1u8; 128],
         };
-        assert!(verify_token(&token, &n, &e, b"challenge").is_err());
+        assert!(
+            matches!(
+                verify_token(&token, &n, &e, b"challenge"),
+                Err(CryptoError::InvalidArg(_))
+            ),
+            "Verifying PrivatelyVerifiable token should return InvalidArg"
+        );
     }
 
     #[test]
@@ -591,7 +645,13 @@ mod tests {
             nonce: vec![0u8; 16], // wrong length, should be 32
             authenticator: vec![1u8; 128],
         };
-        assert!(verify_token(&token, &n, &e, b"challenge").is_err());
+        assert!(
+            matches!(
+                verify_token(&token, &n, &e, b"challenge"),
+                Err(CryptoError::InvalidArg(_))
+            ),
+            "Verifying token with bad nonce length should return InvalidArg"
+        );
     }
 
     #[test]
@@ -602,7 +662,10 @@ mod tests {
             token_type: TokenType::PubliclyVerifiable,
             blinded_element: vec![0u8; 128],
         };
-        assert!(issuer.issue(&request).is_err());
+        assert!(
+            matches!(issuer.issue(&request), Err(CryptoError::InvalidArg(_))),
+            "Issuing with zero blinded element should return InvalidArg"
+        );
     }
 
     #[test]
@@ -613,7 +676,13 @@ mod tests {
         let response = TokenResponse {
             blind_sig: vec![0u8; 128],
         };
-        assert!(client.finalize_token(&response, &state).is_err());
+        assert!(
+            matches!(
+                client.finalize_token(&response, &state),
+                Err(CryptoError::InvalidArg(_))
+            ),
+            "Finalizing with zero blind_sig should return InvalidArg"
+        );
     }
 
     #[test]
@@ -628,15 +697,27 @@ mod tests {
     #[test]
     fn test_privpass_even_n_rejected() {
         // Even n should be rejected (not a valid RSA modulus)
-        assert!(Issuer::new(&[4], &[1], &[3]).is_err());
-        assert!(Client::new(&[4], &[3]).is_err());
+        assert!(
+            matches!(Issuer::new(&[4], &[1], &[3]), Err(CryptoError::InvalidKey)),
+            "Issuer with even n should return InvalidKey"
+        );
+        assert!(
+            matches!(Client::new(&[4], &[3]), Err(CryptoError::InvalidKey)),
+            "Client with even n should return InvalidKey"
+        );
     }
 
     #[test]
     fn test_privpass_even_e_rejected() {
         // Even e should be rejected
-        assert!(Issuer::new(&[15], &[1], &[4]).is_err());
-        assert!(Client::new(&[15], &[4]).is_err());
+        assert!(
+            matches!(Issuer::new(&[15], &[1], &[4]), Err(CryptoError::InvalidKey)),
+            "Issuer with even e should return InvalidKey"
+        );
+        assert!(
+            matches!(Client::new(&[15], &[4]), Err(CryptoError::InvalidKey)),
+            "Client with even e should return InvalidKey"
+        );
     }
 
     #[test]

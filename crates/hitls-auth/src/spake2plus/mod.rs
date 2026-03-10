@@ -604,17 +604,26 @@ mod tests {
         let mut ctx = Spake2Plus::new(Spake2Role::Prover).unwrap();
 
         // Should fail: not set up
-        assert!(ctx.generate_share().is_err());
+        assert!(
+            matches!(ctx.generate_share(), Err(CryptoError::DrbgInvalidState)),
+            "generate_share before setup should return DrbgInvalidState"
+        );
 
         ctx.setup_from_password(b"pw", b"salt", 1000).unwrap();
         let share = ctx.generate_share().unwrap();
 
         // Should fail: can't process share before generating one (verifier side)
         let mut ctx2 = Spake2Plus::new(Spake2Role::Verifier).unwrap();
-        assert!(ctx2.process_share(&share).is_err());
+        assert!(
+            matches!(ctx2.process_share(&share), Err(CryptoError::DrbgInvalidState)),
+            "process_share before generate_share should return DrbgInvalidState"
+        );
 
         // Should fail: can't get confirmation before key derived
-        assert!(ctx.get_confirmation().is_err());
+        assert!(
+            matches!(ctx.get_confirmation(), Err(CryptoError::DrbgInvalidState)),
+            "get_confirmation before key derivation should return DrbgInvalidState"
+        );
     }
 
     #[test]
@@ -669,7 +678,10 @@ mod tests {
     fn test_spake2_setup_before_generate() {
         let mut ctx = Spake2Plus::new(Spake2Role::Prover).unwrap();
         // generate_share before setup should fail
-        assert!(ctx.generate_share().is_err());
+        assert!(
+            matches!(ctx.generate_share(), Err(CryptoError::DrbgInvalidState)),
+            "generate_share before setup should return DrbgInvalidState"
+        );
     }
 
     #[test]
@@ -696,7 +708,13 @@ mod tests {
         let _share = ctx.generate_share().unwrap();
 
         // Invalid point encoding (10 random bytes, not a valid P-256 point)
-        assert!(ctx.process_share(&[0xFF; 10]).is_err());
+        assert!(
+            matches!(
+                ctx.process_share(&[0xFF; 10]),
+                Err(CryptoError::EccInvalidPublicKey)
+            ),
+            "process_share with invalid point should return EccInvalidPublicKey"
+        );
     }
 
     mod proptests {
