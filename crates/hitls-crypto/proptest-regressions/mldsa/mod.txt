@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e7985d6513aca9874cdabfeaa7dd23ccf680f67151fbc6a25c514c9b5c74ca95 # shrinks to msg = [147, 70, 225, 63, 0, 115, 212, 15, 112, 56, 18, 169, 134, 69, 167, 82, 242, 68, 196, 114, 237, 83, 224, 246, 165, 196, 73, 100, 247, 135, 204, 231, 189, 147, 19, 197, 16, 142, 19, 36, 103, 81, 111, 188, 1, 166, 196], tamper_pos = 7597387349750017540
