@@ -625,8 +625,8 @@ fn test_openssl_differential_hmac_sha384() {
         &[
             "dgst",
             "-sha384",
-            "-hmac",
-            "",
+            "-mac",
+            "hmac",
             "-macopt",
             &format!("hexkey:{key_hex}"),
             "-hex",
