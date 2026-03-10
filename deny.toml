@@ -5,6 +5,7 @@ unmaintained = "workspace"
 yanked = "deny"
 
 [licenses]
+confidence-threshold = 0.93
 allow = [
     "MIT",
     "Apache-2.0",
