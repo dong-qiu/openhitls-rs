@@ -528,6 +528,36 @@ jobs:
         with:
           package: hitls-types,hitls-utils,hitls-bignum,hitls-crypto,hitls-tls,hitls-pki,hitls-auth
 
+  api-surface:
+    name: API Surface Report
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-public-api
+        run: cargo install cargo-public-api --locked
+      - name: Generate API surface reports
+        run: |
+          mkdir -p api-reports
+          for crate in hitls-types hitls-utils hitls-bignum hitls-crypto hitls-tls hitls-pki hitls-auth; do
+            cargo public-api -p "$crate" --all-features > "api-reports/${crate}.txt" 2>/dev/null || true
+          done
+          echo "## API Surface Summary" > api-reports/summary.txt
+          for f in api-reports/hitls-*.txt; do
+            crate=$(basename "$f" .txt)
+            count=$(wc -l < "$f" | tr -d ' ')
+            pub_fns=$(grep -c "^pub fn" "$f" || true)
+            pub_structs=$(grep -c "^pub struct" "$f" || true)
+            echo "$crate: $count items ($pub_fns functions, $pub_structs structs)" >> api-reports/summary.txt
+          done
+          cat api-reports/summary.txt
+      - name: Upload API reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-surface-reports
+          path: api-reports/
+
   bench-compare:
     name: Benchmark Comparison
     if: github.event_name == 'pull_request'
