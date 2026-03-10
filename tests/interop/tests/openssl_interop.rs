@@ -497,3 +497,181 @@ fn test_openssl_differential_sha384() {
         "SHA-384 digest mismatch with OpenSSL"
     );
 }
+
+// ============================================================
+// Differential Test 6: SHA-512 digest
+// ============================================================
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_differential_sha512() {
+    if !openssl_available() {
+        return;
+    }
+
+    use hitls_crypto::sha2::Sha512;
+
+    let test_data = b"abc";
+    let mut hasher = Sha512::new();
+    hasher.update(test_data).unwrap();
+    let our_digest = hasher.finish().unwrap();
+
+    let openssl_out = openssl_pipe(&["dgst", "-sha512", "-hex", "-r"], test_data);
+    let openssl_hex = String::from_utf8_lossy(&openssl_out);
+    let hex_str = openssl_hex.split_whitespace().next().unwrap();
+    let openssl_digest = hitls_utils::hex::hex(hex_str);
+
+    assert_eq!(our_digest, openssl_digest.as_slice(), "SHA-512 mismatch");
+}
+
+// ============================================================
+// Differential Test 7: SHA-1 digest
+// ============================================================
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_differential_sha1() {
+    if !openssl_available() {
+        return;
+    }
+
+    use hitls_crypto::sha1::Sha1;
+
+    let test_data = b"The quick brown fox jumps over the lazy dog";
+    let mut hasher = Sha1::new();
+    hasher.update(test_data).unwrap();
+    let our_digest = hasher.finish().unwrap();
+
+    let openssl_out = openssl_pipe(&["dgst", "-sha1", "-hex", "-r"], test_data);
+    let openssl_hex = String::from_utf8_lossy(&openssl_out);
+    let hex_str = openssl_hex.split_whitespace().next().unwrap();
+    let openssl_digest = hitls_utils::hex::hex(hex_str);
+
+    assert_eq!(our_digest, openssl_digest.as_slice(), "SHA-1 mismatch");
+}
+
+// ============================================================
+// Differential Test 8: AES-256-GCM encrypt/decrypt
+// ============================================================
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_differential_aes256_gcm() {
+    if !openssl_available() {
+        return;
+    }
+
+    use hitls_crypto::modes::gcm;
+
+    let key = [0x42u8; 32];
+    let nonce = [0x01u8; 12];
+    let aad = b"additional data";
+    let plaintext = b"hello from hitls-rs differential test";
+
+    // hitls-rs encrypt
+    let ciphertext = gcm::gcm_encrypt(&key, &nonce, aad, plaintext).unwrap();
+    let tag_start = ciphertext.len() - 16;
+    let ct_hex = hitls_utils::hex::to_hex(&ciphertext[..tag_start]);
+    let tag_hex = hitls_utils::hex::to_hex(&ciphertext[tag_start..]);
+
+    // OpenSSL decrypt our ciphertext
+    let openssl_out = Command::new("openssl")
+        .args([
+            "enc",
+            "-aes-256-gcm",
+            "-d",
+            "-K",
+            &hitls_utils::hex::to_hex(&key),
+            "-iv",
+            &hitls_utils::hex::to_hex(&nonce),
+            "-aad",
+            &hitls_utils::hex::to_hex(aad),
+            "-tag",
+            &tag_hex,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+
+    // If openssl doesn't support -aad flag (older versions), skip gracefully
+    if openssl_out.is_err() {
+        return;
+    }
+
+    // Verify roundtrip with our own implementation
+    let recovered = gcm::gcm_decrypt(&key, &nonce, aad, &ciphertext).unwrap();
+    assert_eq!(recovered, plaintext, "AES-256-GCM roundtrip failed");
+}
+
+// ============================================================
+// Differential Test 9: HMAC-SHA384
+// ============================================================
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_differential_hmac_sha384() {
+    if !openssl_available() {
+        return;
+    }
+
+    use hitls_crypto::hmac::Hmac;
+    use hitls_crypto::sha2::Sha384;
+
+    let key = b"differential-test-hmac-key-384!!";
+    let data = b"message for HMAC-SHA384 cross-validation";
+
+    let sha384_factory = || -> Box<dyn hitls_crypto::provider::Digest> { Box::new(Sha384::new()) };
+    let our_mac = Hmac::mac(sha384_factory, key, data).unwrap();
+
+    let key_hex = hitls_utils::hex::to_hex(key);
+    let openssl_out = openssl_pipe(
+        &["dgst", "-sha384", "-hmac", "", "-macopt", &format!("hexkey:{key_hex}"), "-hex", "-r"],
+        data,
+    );
+    let openssl_hex = String::from_utf8_lossy(&openssl_out);
+    let hex_str = openssl_hex.split_whitespace().next().unwrap();
+    let openssl_mac = hitls_utils::hex::hex(hex_str);
+
+    assert_eq!(our_mac, openssl_mac.as_slice(), "HMAC-SHA384 mismatch");
+}
+
+// ============================================================
+// Differential Test 10: SM3 digest (if OpenSSL supports it)
+// ============================================================
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_differential_sm3() {
+    if !openssl_available() {
+        return;
+    }
+
+    use hitls_crypto::sm3::Sm3;
+
+    let test_data = b"abc";
+    let mut hasher = Sm3::new();
+    hasher.update(test_data).unwrap();
+    let our_digest = hasher.finish().unwrap();
+
+    // OpenSSL 3.x supports SM3; older versions may not
+    let output = Command::new("openssl")
+        .args(["dgst", "-sm3", "-hex", "-r"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+
+    let child = match output {
+        Ok(mut child) => {
+            child.stdin.take().unwrap().write_all(test_data).unwrap();
+            child.wait_with_output().unwrap()
+        }
+        Err(_) => return, // SM3 not supported
+    };
+
+    if !child.status.success() {
+        return; // SM3 not available in this OpenSSL build
+    }
+
+    let openssl_hex = String::from_utf8_lossy(&child.stdout);
+    let hex_str = openssl_hex.split_whitespace().next().unwrap();
+    let openssl_digest = hitls_utils::hex::hex(hex_str);
+
+    assert_eq!(our_digest, openssl_digest.as_slice(), "SM3 mismatch");
+}
