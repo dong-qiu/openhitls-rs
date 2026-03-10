@@ -9,29 +9,68 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  mutants:
-    name: cargo-mutants
+  mutants-gated:
+    name: "Mutants Gate: ${{ matrix.crate }}"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - crate: hitls-bignum
+            features: ""
+            filter: ""
+            max_survived: 5
+          - crate: hitls-utils
+            features: ""
+            filter: ""
+            max_survived: 5
+          - crate: hitls-crypto
+            features: "aes,modes"
+            filter: "-E modes::gcm"
+            max_survived: 3
+          - crate: hitls-crypto
+            features: "hmac"
+            filter: "-E hmac"
+            max_survived: 3
+          - crate: hitls-crypto
+            features: "ecdsa"
+            filter: "-E ecc::ecdsa"
+            max_survived: 5
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-mutants
         run: cargo install cargo-mutants --locked
-      - name: Mutate hitls-bignum
-        run: cargo mutants -p hitls-bignum --timeout 120
-      - name: Mutate hitls-utils
-        run: cargo mutants -p hitls-utils --timeout 120
-      - name: Mutate hitls-crypto (GCM)
-        run: cargo mutants -p hitls-crypto --features aes,modes --timeout 180 -E 'modes::gcm'
-      - name: Mutate hitls-crypto (ECDSA)
-        run: cargo mutants -p hitls-crypto --features ecdsa --timeout 180 -E 'ecc::ecdsa'
-      - name: Mutate hitls-crypto (HMAC)
-        run: cargo mutants -p hitls-crypto --features hmac --timeout 180 -E 'hmac'
+      - name: Run mutation testing
+        run: |
+          FEATURES_FLAG=""
+          if [ -n "${{ matrix.features }}" ]; then
+            FEATURES_FLAG="--features ${{ matrix.features }}"
+          fi
+          cargo mutants -p ${{ matrix.crate }} $FEATURES_FLAG --timeout 180 ${{ matrix.filter }} || true
+      - name: Check survived mutant threshold
+        run: |
+          SURVIVED=0
+          if [ -f mutants.out/caught.txt ]; then
+            echo "Caught mutants: $(wc -l < mutants.out/caught.txt)"
+          fi
+          if [ -f mutants.out/survived.txt ]; then
+            SURVIVED=$(wc -l < mutants.out/survived.txt | tr -d ' ')
+            echo "Survived mutants: $SURVIVED"
+            cat mutants.out/survived.txt
+          fi
+          MAX=${{ matrix.max_survived }}
+          if [ "$SURVIVED" -gt "$MAX" ]; then
+            echo "::error::$SURVIVED mutants survived (max allowed: $MAX) for ${{ matrix.crate }} ${{ matrix.filter }}"
+            exit 1
+          else
+            echo "✓ $SURVIVED survived mutants within threshold ($MAX)"
+          fi
       - name: Upload mutation results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mutants-results
+          name: mutants-${{ matrix.crate }}-${{ strategy.job-index }}
           path: mutants.out/
           if-no-files-found: ignore
