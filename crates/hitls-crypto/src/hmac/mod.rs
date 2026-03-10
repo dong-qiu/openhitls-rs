@@ -242,6 +242,16 @@ mod tests {
         assert_eq!(to_hex(&result), expected);
     }
 
+    // RFC 4231 Test Case 5 (truncation to 128 bits)
+    #[test]
+    fn test_hmac_sha256_case5() {
+        let key = [0x0c; 20];
+        let data = b"Test With Truncation";
+        // Full HMAC-SHA-256 output, take first 16 bytes (128 bits)
+        let result = Hmac::mac(sha256_factory, &key, data).unwrap();
+        assert_eq!(to_hex(&result[..16]), "a3b6167473100ee06e0c796c2955552b");
+    }
+
     // RFC 4231 Test Case 6 (key longer than block size)
     #[test]
     fn test_hmac_sha256_case6() {

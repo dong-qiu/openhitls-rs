@@ -838,6 +838,40 @@ If I could offer you only one tip for the future, sunscreen would be it.";
         assert!(aead.decrypt(&[0u8; 11], b"", &[0u8; 20]).is_err());
     }
 
+    // RFC 8439 Appendix A.5 — AEAD Decryption test vector
+    #[test]
+    fn test_chacha20_poly1305_rfc8439_a5_decrypt() {
+        let key = from_hex("1c9240a5eb55d38af333888604f6b5f0473917c1402b80099dca5cbc207075c0");
+        let nonce = from_hex("000000000102030405060708");
+        let aad = from_hex("f33388860000000000004e91");
+        let ciphertext_and_tag = from_hex(
+            "64a0861575861af460f062c79be643bd\
+             5e805cfd345cf389f108670ac76c8cb2\
+             4c6cfc18755d43eea09ee94e382d26b0\
+             bdb7b73c321b0100d4f03b7f355894cf\
+             332f830e710b97ce98c8a84abd0b9481\
+             14ad176e008d33bd60f982b1ff37c855\
+             9797a06ef4f0ef61c186324e2b350638\
+             3606907b6a7c02b0f9f6157b53c867e4\
+             b9166c767b804d46a59b5216cde7a4e9\
+             9040c5a40433225ee282a1b0a06c523e\
+             af4534d7f83fa1155b0047718cbc546a\
+             0d072b04b3564eea1b422273f548271a\
+             0bb2316053fa76991955ebd63159434e\
+             cebb4e466dae5a1073a6727627097a10\
+             49e617d91d361094fa68f0ff77987130\
+             305beaba2eda04df997b714d6c6f2c29\
+             a6ad5cb4022b02709b\
+             eead9d67890cbb22392336fea1851f38",
+        );
+        let ct_len = ciphertext_and_tag.len() - 16;
+        let aead = ChaCha20Poly1305::new(&key).unwrap();
+        let pt = aead.decrypt(&nonce, &aad, &ciphertext_and_tag).unwrap();
+        assert_eq!(pt.len(), ct_len);
+        // Verify the decrypted plaintext starts with expected Internet Draft text
+        assert!(pt.starts_with(b"\x49\x6e\x74\x65\x72\x6e\x65\x74"));
+    }
+
     // ===================================================================
     // Phase T154 — HW↔SW cross-validation: ChaCha20 block
     // ===================================================================
