@@ -41,6 +41,12 @@ const NUM_SAMPLES: usize = 10_000;
 /// dudect uses 4.5 as its threshold; we use the same.
 const T_THRESHOLD: f64 = 4.5;
 
+/// Batch size for fast operations (ct_eq, etc.) where a single execution
+/// is too fast (~5-20ns) for `Instant::now()` to measure reliably.
+/// Running BATCH_SIZE iterations per sample amplifies the signal above
+/// measurement overhead noise.
+const BATCH_SIZE: usize = 1000;
+
 /// Crop a sorted timing vector to the [lo_pct, hi_pct] percentile range.
 /// This is the dudect approach: discard outliers caused by context switches,
 /// cache cold-starts, and OS interrupts before computing the t-statistic.
@@ -143,9 +149,12 @@ fn test_hmac_verify_constant_time() {
             bad[i % len] ^= 0xFF;
             bad
         },
-        // Operation: constant-time comparison
+        // Operation: batched constant-time comparison (single ct_eq is ~10ns,
+        // too fast for Instant::now() to measure above noise)
         |tag| {
-            let _ = black_box(valid_tag.as_slice().ct_eq(tag.as_slice()));
+            for _ in 0..BATCH_SIZE {
+                let _ = black_box(valid_tag.as_slice().ct_eq(black_box(tag.as_slice())));
+            }
         },
     );
 
@@ -171,13 +180,20 @@ fn test_aes_gcm_tag_verify_constant_time() {
     let ciphertext = gcm::gcm_encrypt(&key, &nonce, &aad, &plaintext).unwrap();
 
     let t = timing_t_test(
-        // Class A: valid ciphertext (decryption succeeds)
-        |_| ciphertext.clone(),
-        // Class B: corrupted tag (decryption fails)
-        |i| {
+        // Class A: tag corrupted in first byte (decryption fails)
+        |_| {
             let mut bad = ciphertext.clone();
             let tag_offset = bad.len() - 16;
-            bad[tag_offset + (i % 16)] ^= 0xFF;
+            bad[tag_offset] ^= 0xFF;
+            bad
+        },
+        // Class B: tag corrupted in last byte (decryption fails)
+        // Both classes fail, eliminating Ok/Err allocation path differences.
+        // A non-constant-time tag comparison would short-circuit differently.
+        |_| {
+            let mut bad = ciphertext.clone();
+            let last = bad.len() - 1;
+            bad[last] ^= 0xFF;
             bad
         },
         // Operation: GCM decrypt (includes tag verification)
@@ -327,9 +343,12 @@ fn test_bignum_ct_eq_constant_time() {
             bytes[i % 32] ^= 0xFF;
             BigNum::from_bytes_be(&bytes)
         },
-        // Operation: constant-time equality
+        // Operation: batched constant-time equality (single ct_eq is too fast
+        // for reliable measurement on noisy CI runners)
         |b| {
-            let _ = black_box(a.ct_eq(b));
+            for _ in 0..BATCH_SIZE {
+                let _ = black_box(a.ct_eq(black_box(b)));
+            }
         },
     );
 
@@ -535,13 +554,19 @@ fn test_sm4_gcm_tag_verify_constant_time() {
     let ciphertext = gcm::sm4_gcm_encrypt(&key, &nonce, &aad, &plaintext).unwrap();
 
     let t = timing_t_test(
-        // Class A: valid ciphertext (decryption succeeds)
-        |_| ciphertext.clone(),
-        // Class B: corrupted tag (decryption fails)
-        |i| {
+        // Class A: tag corrupted in first byte (decryption fails)
+        |_| {
             let mut bad = ciphertext.clone();
             let tag_offset = bad.len() - 16;
-            bad[tag_offset + (i % 16)] ^= 0xFF;
+            bad[tag_offset] ^= 0xFF;
+            bad
+        },
+        // Class B: tag corrupted in last byte (decryption fails)
+        // Both classes fail, eliminating Ok/Err allocation path differences.
+        |_| {
+            let mut bad = ciphertext.clone();
+            let last = bad.len() - 1;
+            bad[last] ^= 0xFF;
             bad
         },
         // Operation: SM4-GCM decrypt (includes tag verification)
