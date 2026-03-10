@@ -52,7 +52,6 @@ impl GfPoly {
 
     /// Evaluate polynomial given as coefficient slice at all support points.
     /// out[i] = f(L[i]) where f has degree t with f[t] as leading coefficient.
-    #[allow(clippy::needless_range_loop)]
     pub fn eval_roots(
         out: &mut [GfElement],
         f: &[GfElement],
@@ -74,7 +73,6 @@ impl GfPoly {
 /// Generate irreducible Goppa polynomial from random bits.
 /// Implements the GenPolyOverGF approach: build matrix of powers of f,
 /// then Gaussian elimination to find the minimal polynomial.
-#[allow(clippy::needless_range_loop)]
 pub(crate) fn gen_poly_over_gf(f: &[GfElement], t: usize) -> Result<Vec<GfElement>, CryptoError> {
     // Build (t+1) x t matrix: mat[r][c]
     // mat[0] = [1, 0, ..., 0]
@@ -128,7 +126,6 @@ pub(crate) fn gen_poly_over_gf(f: &[GfElement], t: usize) -> Result<Vec<GfElemen
 }
 
 /// Vector multiplication in GF((2^m)^t) with reduction by fixed pentanomial.
-#[allow(clippy::needless_range_loop)]
 fn gf_vec_mul(out: &mut [GfElement], in0: &[GfElement], in1: &[GfElement], t: usize) {
     let prod_len = t * 2 - 1;
     let mut prod = vec![0u16; prod_len];

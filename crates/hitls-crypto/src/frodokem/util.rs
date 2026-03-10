@@ -82,7 +82,6 @@ pub(crate) fn unpack(input: &[u8], count: usize, logq: u8) -> Vec<u16> {
 /// Encode a message (mu) into a matrix nBar×nBar by placing each bit into
 /// the high position of a q-element.
 /// Each bit of mu maps to `extracted_bits` positions in logq-bit space.
-#[allow(clippy::needless_range_loop)]
 pub(crate) fn encode(mu: &[u8], params: &FrodoParams) -> Vec<u16> {
     let n_bar = params.n_bar;
     let count = n_bar * n_bar; // 64
@@ -106,7 +105,6 @@ pub(crate) fn encode(mu: &[u8], params: &FrodoParams) -> Vec<u16> {
 }
 
 /// Decode a matrix nBar×nBar back to a message (mu).
-#[allow(clippy::needless_range_loop)]
 pub(crate) fn decode(input: &[u16], params: &FrodoParams) -> Vec<u8> {
     let n_bar = params.n_bar;
     let count = n_bar * n_bar;

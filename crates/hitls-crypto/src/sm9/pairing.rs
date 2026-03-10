@@ -15,7 +15,6 @@ use super::fp4::Fp4;
 
 /// Compute the R-ate pairing e(P, Q).
 /// P is a point on E(Fp), Q is a point on E'(Fp²).
-#[allow(clippy::needless_range_loop)]
 pub(crate) fn pairing(p: &EcPointG1, q: &EcPointG2) -> Result<Fp12, CryptoError> {
     if p.is_infinity() || q.is_infinity() {
         return Ok(Fp12::one());

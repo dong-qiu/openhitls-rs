@@ -18,7 +18,6 @@ pub(crate) fn cbits_from_perm(pi: &[i16], w: usize, n: usize) -> Result<Vec<u8>,
 }
 
 /// Reconstruct support L[0..len_n-1] from control bits.
-#[allow(clippy::needless_range_loop)]
 pub(crate) fn support_from_cbits(
     cbits: &[u8],
     w: usize,
@@ -123,7 +122,6 @@ fn write_1bit_le(buf: &mut [u8], bit_pos: u32, bit: u8) {
 }
 
 /// Recursive Benes network control bit generator.
-#[allow(clippy::needless_range_loop)]
 fn benes_controlbits(
     out: &mut [u8],
     pos: u32,
@@ -255,7 +253,6 @@ fn benes_controlbits(
     Ok(())
 }
 
-#[allow(clippy::needless_range_loop)]
 fn process_small_alphabet(
     area_a: &mut [u32],
     area_b: &mut [u32],
@@ -286,7 +283,6 @@ fn process_small_alphabet(
     Ok(())
 }
 
-#[allow(clippy::needless_range_loop)]
 fn process_large_alphabet(
     area_a: &mut [u32],
     area_b: &mut [u32],

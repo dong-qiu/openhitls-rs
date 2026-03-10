@@ -28,7 +28,6 @@ pub(crate) fn encode_vector(
 
         // Compute dot product of T row with e[mt..n]
         let mut dot = 0u8;
-        #[allow(clippy::needless_range_loop)]
         for byte_idx in 0..k_bytes {
             let e_byte_idx = (mt >> 3) + byte_idx;
             let shift = mt & 7;

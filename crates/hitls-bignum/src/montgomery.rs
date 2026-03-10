@@ -129,7 +129,6 @@ impl MontgomeryCtx {
             *x = 0;
         }
 
-        #[allow(clippy::needless_range_loop)]
         for i in 0..n {
             let ai = if i < a_len { a[i] } else { 0 };
 

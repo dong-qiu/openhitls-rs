@@ -26,7 +26,6 @@ fn init_tables() -> GfTables {
     // Build exp table using generator 3
     // Multiply by 3 (= x+1) in GF(2^13) with reduction poly 0x201B
     let mut a: u32 = 1;
-    #[allow(clippy::needless_range_loop)]
     for i in 0..(Q - 1) {
         exp_table[i] = a as u16;
         log_table[a as usize] = i as u16;

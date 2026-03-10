@@ -281,7 +281,6 @@ pub(crate) fn extract_t_semi(mat: &BitMatrix, params: &McElieceParams) -> Vec<u8
 }
 
 /// Column permutation for semi-systematic form.
-#[allow(clippy::needless_range_loop)]
 fn cols_permutation(
     mat_data: &mut [u8],
     cols_bytes: usize,

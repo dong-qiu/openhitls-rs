@@ -16,7 +16,6 @@ use super::wots;
 /// - `height`: current height (0 = leaf)
 /// - `auth_path`: if Some, collect siblings of the path to `leaf_idx`
 /// - `leaf_idx`: leaf whose auth path we collect
-#[allow(clippy::too_many_arguments)]
 fn xmss_node(
     h: &dyn SlhHashFunctions,
     sk_seed: &[u8],
@@ -271,7 +270,6 @@ pub(crate) fn hypertree_sign(
 }
 
 /// Verify a hypertree signature. Returns true if valid.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn hypertree_verify(
     h: &dyn SlhHashFunctions,
     msg: &[u8],

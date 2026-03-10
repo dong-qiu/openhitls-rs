@@ -104,7 +104,6 @@ fn systematic_loop(
     let alpha = generate_field_ordering(field_ord_bits, params)?;
 
     // Validate: g(alpha[i]) != 0 for i < n
-    #[allow(clippy::needless_range_loop)]
     for i in 0..params.n {
         if g.eval(alpha[i]) == 0 {
             return Err(CryptoError::McElieceKeygenFail);
@@ -180,7 +179,6 @@ fn generate_irreducible_poly(
 
     // Form monic g(x) = x^t + sum gl[i] x^i
     let mut g = GfPoly::new(t);
-    #[allow(clippy::needless_range_loop)]
     for i in 0..t {
         g.set_coeff(i, gl[i]);
     }

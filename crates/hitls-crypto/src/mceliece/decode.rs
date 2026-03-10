@@ -11,7 +11,6 @@ use super::vector::{vec_get_bit, vec_weight};
 
 /// Decode a received vector using the Goppa code.
 /// Returns (error_vector, success) where success indicates successful decoding.
-#[allow(clippy::needless_range_loop)]
 pub(crate) fn decode_goppa(
     received: &[u8],
     g: &GfPoly,
@@ -65,7 +64,6 @@ pub(crate) fn decode_goppa(
 }
 
 /// Compute syndrome from received vector.
-#[allow(clippy::needless_range_loop)]
 fn compute_syndrome(
     received: &[u8],
     g: &GfPoly,
