@@ -120,10 +120,10 @@ mod tests {
         assert_eq!(dk1, dk2);
     }
 
-    // Test pbkdf2_with_hmac using SHA-1 (RFC 6070 test vector)
+    // Test pbkdf2_with_hmac using SHA-1 (RFC 6070 test vectors)
     #[cfg(feature = "sha1")]
     #[test]
-    fn test_pbkdf2_with_sha1() {
+    fn test_pbkdf2_with_sha1_rfc6070_vector1() {
         use crate::sha1::Sha1;
         fn sha1_factory() -> Box<dyn Digest> {
             Box::new(Sha1::new())
@@ -131,6 +131,66 @@ mod tests {
         // RFC 6070 Test Vector 1: "password", "salt", c=1, dkLen=20
         let dk = pbkdf2_with_hmac(sha1_factory, b"password", b"salt", 1, 20).unwrap();
         assert_eq!(to_hex(&dk), "0c60c80f961f0e71f3a9b524af6012062fe037a6");
+    }
+
+    // RFC 6070 Test Vector 2: "password", "salt", c=2, dkLen=20
+    #[cfg(feature = "sha1")]
+    #[test]
+    fn test_pbkdf2_with_sha1_rfc6070_vector2() {
+        use crate::sha1::Sha1;
+        fn sha1_factory() -> Box<dyn Digest> {
+            Box::new(Sha1::new())
+        }
+        let dk = pbkdf2_with_hmac(sha1_factory, b"password", b"salt", 2, 20).unwrap();
+        assert_eq!(to_hex(&dk), "ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957");
+    }
+
+    // RFC 6070 Test Vector 3: "password", "salt", c=4096, dkLen=20
+    #[cfg(feature = "sha1")]
+    #[test]
+    fn test_pbkdf2_with_sha1_rfc6070_vector3() {
+        use crate::sha1::Sha1;
+        fn sha1_factory() -> Box<dyn Digest> {
+            Box::new(Sha1::new())
+        }
+        let dk = pbkdf2_with_hmac(sha1_factory, b"password", b"salt", 4096, 20).unwrap();
+        assert_eq!(to_hex(&dk), "4b007901b765489abead49d926f721d065a429c1");
+    }
+
+    // RFC 6070 Test Vector 4: "password", "salt", c=16777216, dkLen=20
+    // This test takes minutes to run due to 16M iterations.
+    #[cfg(feature = "sha1")]
+    #[test]
+    #[ignore]
+    fn test_pbkdf2_with_sha1_rfc6070_vector4() {
+        use crate::sha1::Sha1;
+        fn sha1_factory() -> Box<dyn Digest> {
+            Box::new(Sha1::new())
+        }
+        let dk = pbkdf2_with_hmac(sha1_factory, b"password", b"salt", 16_777_216, 20).unwrap();
+        assert_eq!(to_hex(&dk), "eefe3d61cd4da4e4e9945b3d6ba2158c2634e984");
+    }
+
+    // RFC 6070 Test Vector 5: long password and salt, c=4096, dkLen=25
+    #[cfg(feature = "sha1")]
+    #[test]
+    fn test_pbkdf2_with_sha1_rfc6070_vector5() {
+        use crate::sha1::Sha1;
+        fn sha1_factory() -> Box<dyn Digest> {
+            Box::new(Sha1::new())
+        }
+        let dk = pbkdf2_with_hmac(
+            sha1_factory,
+            b"passwordPASSWORDpassword",
+            b"saltSALTsaltSALTsaltSALTsaltSALTsalt",
+            4096,
+            25,
+        )
+        .unwrap();
+        assert_eq!(
+            to_hex(&dk),
+            "3d2eec4fe41c849b80c8d83662c0e44a8b291a964cf2f07038"
+        );
     }
 
     // Test with SHA-384

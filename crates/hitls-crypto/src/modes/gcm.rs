@@ -712,9 +712,32 @@ mod tests {
         assert_eq!(decrypted, pt);
     }
 
+    // NIST SP 800-38D Test Case 3: 64-byte PT, no AAD
+    #[test]
+    fn test_gcm_case3_nist() {
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce = hex("cafebabefacedbaddecaf888");
+        let pt = hex(
+            "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72\
+             1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255",
+        );
+        let expected_ct =
+            "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e\
+             21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091473f5985";
+        let expected_tag = "4d5c2af327cd64a62cf35abd2ba6fab4";
+
+        let result = gcm_encrypt(&key, &nonce, &[], &pt).unwrap();
+        let ct_len = pt.len();
+        assert_eq!(to_hex(&result[..ct_len]), expected_ct);
+        assert_eq!(to_hex(&result[ct_len..]), expected_tag);
+
+        let decrypted = gcm_decrypt(&key, &nonce, &[], &result).unwrap();
+        assert_eq!(decrypted, pt);
+    }
+
     // NIST SP 800-38D Test Case 4: 60-byte PT with AAD
     #[test]
-    fn test_gcm_case3() {
+    fn test_gcm_case4_nist() {
         let key = hex("feffe9928665731c6d6a8f9467308308");
         let nonce = hex("cafebabefacedbaddecaf888");
         let pt = hex(
@@ -723,6 +746,57 @@ mod tests {
         let aad = hex("feedfacedeadbeeffeedfacedeadbeefabaddad2");
         let expected_ct = "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091";
         let expected_tag = "5bc94fbc3221a5db94fae95ae7121a47";
+
+        let result = gcm_encrypt(&key, &nonce, &aad, &pt).unwrap();
+        let ct_len = pt.len();
+        assert_eq!(to_hex(&result[..ct_len]), expected_ct);
+        assert_eq!(to_hex(&result[ct_len..]), expected_tag);
+
+        let decrypted = gcm_decrypt(&key, &nonce, &aad, &result).unwrap();
+        assert_eq!(decrypted, pt);
+    }
+
+    // NIST SP 800-38D Test Case 5: 8-byte IV (non-96-bit), with AAD
+    #[test]
+    fn test_gcm_case5_nist() {
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce = hex("cafebabefacedbad");
+        let pt = hex(
+            "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72\
+             1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+        );
+        let aad = hex("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+        let expected_ct =
+            "61353b4c2806934a777ff51fa22a4755699b2a714fcdc6f83766e5f97b6c7423\
+             73806900e49f24b22b097544d4896b424989b5e1ebac0f07c23f4598";
+        let expected_tag = "3612d2e79e3b0785561be14aaca2fccb";
+
+        let result = gcm_encrypt(&key, &nonce, &aad, &pt).unwrap();
+        let ct_len = pt.len();
+        assert_eq!(to_hex(&result[..ct_len]), expected_ct);
+        assert_eq!(to_hex(&result[ct_len..]), expected_tag);
+
+        let decrypted = gcm_decrypt(&key, &nonce, &aad, &result).unwrap();
+        assert_eq!(decrypted, pt);
+    }
+
+    // NIST SP 800-38D Test Case 6: 60-byte IV, with AAD
+    #[test]
+    fn test_gcm_case6_nist() {
+        let key = hex("feffe9928665731c6d6a8f9467308308");
+        let nonce = hex(
+            "9313225df88406e555909c5aff5269aa6a7a9538534f7da1e4c303d2a318a728\
+             c3c0c95156809539fcf0e2429a6b525416aedbf5a0de6a57a637b39b",
+        );
+        let pt = hex(
+            "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72\
+             1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+        );
+        let aad = hex("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+        let expected_ct =
+            "8ce24998625615b603a033aca13fb894be9112a5c3a211a8ba262a3cca7e2ca7\
+             01e4a9a4fba43c90ccdcb281d48c7c6fd62875d2aca417034c34aee5";
+        let expected_tag = "619cc5aefffe0bfa462af43c1699d050";
 
         let result = gcm_encrypt(&key, &nonce, &aad, &pt).unwrap();
         let ct_len = pt.len();
