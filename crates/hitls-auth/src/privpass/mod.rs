@@ -568,10 +568,7 @@ mod tests {
             "Too-short wire encoding should return InvalidArg"
         );
         assert!(
-            matches!(
-                TokenType::from_wire(&[]),
-                Err(CryptoError::InvalidArg(_))
-            ),
+            matches!(TokenType::from_wire(&[]), Err(CryptoError::InvalidArg(_))),
             "Empty wire encoding should return InvalidArg"
         );
     }

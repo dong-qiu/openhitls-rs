@@ -615,7 +615,10 @@ mod tests {
         // Should fail: can't process share before generating one (verifier side)
         let mut ctx2 = Spake2Plus::new(Spake2Role::Verifier).unwrap();
         assert!(
-            matches!(ctx2.process_share(&share), Err(CryptoError::DrbgInvalidState)),
+            matches!(
+                ctx2.process_share(&share),
+                Err(CryptoError::DrbgInvalidState)
+            ),
             "process_share before generate_share should return DrbgInvalidState"
         );
 

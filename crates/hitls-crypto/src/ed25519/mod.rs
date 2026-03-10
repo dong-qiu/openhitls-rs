@@ -397,8 +397,7 @@ mod tests {
     #[test]
     fn test_ed25519_rfc8032_test4() {
         let seed = hex("f5e5767cf153319517630f226876b86c8160cc583bc013744c6bf255f5cc0ee5");
-        let expected_pub =
-            hex("278117fc144c72340f67d0f2316e8386ceffbf2b2428c9c51fef7c597f1d426e");
+        let expected_pub = hex("278117fc144c72340f67d0f2316e8386ceffbf2b2428c9c51fef7c597f1d426e");
         // Verified against RFC 8032 text: 1023 bytes, signature matches
         let message = hex(
             "08b8b2b733424243760fe426a4b54908632110a66c2f6591eabd3345e3e4eb98\
@@ -451,8 +450,7 @@ mod tests {
     #[test]
     fn test_ed25519_rfc8032_test5() {
         let seed = hex("833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42");
-        let expected_pub =
-            hex("ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf");
+        let expected_pub = hex("ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf");
         let message = hex(
             "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a\
              2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",

@@ -568,7 +568,7 @@ fn test_openssl_differential_aes256_gcm() {
     // hitls-rs encrypt
     let ciphertext = gcm::gcm_encrypt(&key, &nonce, aad, plaintext).unwrap();
     let tag_start = ciphertext.len() - 16;
-    let ct_hex = hitls_utils::hex::to_hex(&ciphertext[..tag_start]);
+    let _ct_hex = hitls_utils::hex::to_hex(&ciphertext[..tag_start]);
     let tag_hex = hitls_utils::hex::to_hex(&ciphertext[tag_start..]);
 
     // OpenSSL decrypt our ciphertext
@@ -622,7 +622,16 @@ fn test_openssl_differential_hmac_sha384() {
 
     let key_hex = hitls_utils::hex::to_hex(key);
     let openssl_out = openssl_pipe(
-        &["dgst", "-sha384", "-hmac", "", "-macopt", &format!("hexkey:{key_hex}"), "-hex", "-r"],
+        &[
+            "dgst",
+            "-sha384",
+            "-hmac",
+            "",
+            "-macopt",
+            &format!("hexkey:{key_hex}"),
+            "-hex",
+            "-r",
+        ],
         data,
     );
     let openssl_hex = String::from_utf8_lossy(&openssl_out);

@@ -30,6 +30,7 @@ MSIS = "MSIS"     # Module-SIS lattice problem
 Iin = "Iin"       # variable name in protocol code
 Alo = "Alo"       # variable/abbreviation
 Iy = "Iy"         # variable name
+PASSWOR = "PASSWOR" # RFC 6070 PBKDF2 test vector password string
 
 [type.markdown]
 extend-glob = ["*.md"]
