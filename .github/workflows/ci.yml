@@ -409,7 +409,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run core timing tests (comparison/verify — blocking)
         run: |
-          cargo test -p hitls-crypto --all-features --release -- --ignored \
+          cargo test -p hitls-crypto --all-features --release -- --ignored --test-threads=1 \
             test_hmac_verify_constant_time \
             test_aes_gcm_tag_verify_constant_time \
             test_bignum_ct_eq_constant_time \

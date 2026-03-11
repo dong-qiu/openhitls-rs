@@ -43,9 +43,9 @@ const T_THRESHOLD: f64 = 4.5;
 
 /// Batch size for fast operations (ct_eq, etc.) where a single execution
 /// is too fast (~5-20ns) for `Instant::now()` to measure reliably.
-/// Running BATCH_SIZE iterations per sample amplifies the signal above
-/// measurement overhead noise.
-const BATCH_SIZE: usize = 1000;
+/// Each batch produces ~50-100μs of signal, well above the ~20ns timer
+/// overhead and scheduling jitter on typical CI runners.
+const BATCH_SIZE: usize = 10_000;
 
 /// Crop a sorted timing vector to the [lo_pct, hi_pct] percentile range.
 /// This is the dudect approach: discard outliers caused by context switches,
