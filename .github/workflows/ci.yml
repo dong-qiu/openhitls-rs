@@ -265,7 +265,7 @@ jobs:
           fi
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-smoke-crashes
           path: fuzz/artifacts/
@@ -460,7 +460,7 @@ jobs:
       - name: Generate CycloneDX SBOM
         run: cargo cyclonedx --all --format json
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         id: sbom-upload
         with:
           name: sbom-cyclonedx
@@ -498,7 +498,7 @@ jobs:
       - name: Run cargo-geiger report
         run: cargo geiger --all-features --output-format ascii 2>&1 | tee geiger-report.txt || true
       - name: Upload geiger report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: geiger-report
           path: geiger-report.txt
@@ -553,7 +553,7 @@ jobs:
           done
           cat api-reports/summary.txt
       - name: Upload API reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: api-surface-reports
           path: api-reports/
@@ -702,7 +702,7 @@ jobs:
           done
       - name: Upload crash artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crashes
           path: fuzz/artifacts/
