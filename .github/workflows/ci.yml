@@ -479,7 +479,7 @@ jobs:
           fi
       - name: Generate SLSA provenance attestation
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.sbom-digest.outputs.digest
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ steps.sbom-digest.outputs.path }}
           push-to-registry: false
