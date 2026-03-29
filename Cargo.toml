@@ -41,7 +41,7 @@ serde = { version = "1", features = ["derive"] }
 clap = { version = "4", features = ["derive"] }
 criterion = "0.5"
 # Pin proptest <1.7 for MSRV 1.75 compatibility (1.10+ requires rustc 1.84)
-proptest = ">=1.5, <1.7"
+proptest = ">=1.5, <1.12"
 flate2 = "1"
 serde_json = "1"
 
