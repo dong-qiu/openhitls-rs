@@ -850,10 +850,8 @@ impl ClientHandshake {
         // Process extensions from EncryptedExtensions
         for ext in &ee.extensions {
             match ext.extension_type {
-                ExtensionType::EARLY_DATA => {
-                    if self.offered_early_data {
-                        self.early_data_accepted = true;
-                    }
+                ExtensionType::EARLY_DATA if self.offered_early_data => {
+                    self.early_data_accepted = true;
                 }
                 ExtensionType::RECORD_SIZE_LIMIT => {
                     let peer_limit = parse_record_size_limit(&ext.data)?;
