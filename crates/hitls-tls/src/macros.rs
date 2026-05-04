@@ -426,6 +426,15 @@ macro_rules! tls13_client_read_and_process_server_hello_body {
                 "expected ServerHello, got {hs_type:?}"
             )));
         }
+        // RFC 8446 §5.1: handshake messages MUST NOT span a key change.
+        // ServerHello marks the transition from initial to handshake read
+        // keys; any trailing bytes in this record would belong to a
+        // different key epoch.
+        if sh_data.len() != sh_total {
+            return Err(TlsError::RecordError(
+                "TLS 1.3 read key change not on record boundary".into(),
+            ));
+        }
         let sh_msg = &sh_data[..sh_total];
 
         match $hs.process_server_hello(sh_msg)? {
@@ -452,6 +461,12 @@ macro_rules! tls13_client_read_and_process_server_hello_body {
                     return Err(TlsError::HandshakeFailed(format!(
                         "expected ServerHello after HRR, got {hs_type2:?}"
                     )));
+                }
+                // RFC 8446 §5.1: ServerHello after HRR must not span a key change.
+                if sh2_data.len() != sh2_total {
+                    return Err(TlsError::RecordError(
+                        "TLS 1.3 read key change not on record boundary".into(),
+                    ));
                 }
                 let sh2_msg = &sh2_data[..sh2_total];
 
@@ -531,6 +546,15 @@ macro_rules! tls13_client_process_encrypted_flight_body {
                         )?;
                         maybe_await!($mode, $self.stream.write_all(&fin_record))
                             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+
+                        // RFC 8446 §5.1: handshake messages MUST NOT span a
+                        // key change. Reject any unconsumed handshake bytes
+                        // before switching to application read keys.
+                        if !hs_buffer.is_empty() {
+                            return Err(TlsError::RecordError(
+                                "TLS 1.3 read key change not on record boundary".into(),
+                            ));
+                        }
 
                         $self.record_layer.activate_read_decryption(
                             fin_actions.suite,
@@ -1057,6 +1081,14 @@ macro_rules! tls13_server_do_handshake_body {
             return Err(TlsError::HandshakeFailed(format!(
                 "expected Finished, got {hs_type:?}"
             )));
+        }
+        // RFC 8446 §5.1: handshake messages MUST NOT span a key change.
+        // The Finished record must not contain trailing bytes that would
+        // belong to the next (application) key epoch.
+        if fin_data.len() != fin_total {
+            return Err(TlsError::RecordError(
+                "TLS 1.3 read key change not on record boundary".into(),
+            ));
         }
         let fin_msg = &fin_data[..fin_total];
 

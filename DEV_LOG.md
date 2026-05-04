@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I87 (87 phases)
+- Implementation: I1–I88 (88 phases)
 - Testing: T1–T79 (78 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
@@ -274,6 +274,7 @@ Category summary:
 | 262 | P85 | Perf | TLS Record Layer Enum Dispatch + Stack IV Allocation | 2026-03-09 |
 | 263 | P89 | Perf | Hot Path #[inline] Hints for Record Layer + Crypto Dispatch | 2026-03-09 |
 | 264 | P93 | Perf | Zero-Copy Inner Plaintext Parsing in TLS/DTLS 1.3 Decrypt | 2026-03-09 |
+| 265 | I88 | Impl | Backport from openHiTLS C v0.3.2 — TLS 1.3 Record Boundary + PHA ct_eq + MtE Padding Constant-Time | 2026-05-05 |
 
 ---
 
@@ -13827,4 +13828,88 @@ Eliminated one heap allocation per decrypted TLS 1.3 and DTLS 1.3 record by taki
 ### Build Status (Post P93)
 - `cargo test --workspace --all-features`: 4,030 passed, 0 failed, 35 ignored (4,065 total)
 - `RUSTFLAGS="-D warnings" cargo clippy`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase I88 — Backport from openHiTLS C v0.3.2: Security Fixes (2026-05-05)
+
+### Summary
+Backported three independent P0 security fixes from openHiTLS C tag `openhitls-0.3.2` (commit `3d295814`) covering the gap since the previous C reference (`0d9b7121` ≈ 0.3.0-alpha5+63). The diff range contained 85 commits; per-commit analysis identified six items with security relevance, three of which had Rust-side gaps and required backporting:
+
+- **C `e4fb38d4`** TLS 1.3 read key activation must occur on a record boundary (RFC 8446 §5.1).
+- **C `a79581a9`** Replace plain comparisons with constant-time comparisons across PHA paths.
+- **C `c04ef8db`** CBC MtE padding verification must iterate a fixed number of times to defeat Lucky-13-style timing attacks.
+
+The remaining three commits (`855bffe3` `bn_get_bitlen` uninitialised, `67bf9c33` mlkem signed overflow, `27e354f3` mlkem/frodokem use-after-free) are precluded by Rust's type system / ownership model and required no Rust changes.
+
+### Part A — TLS 1.3 Read Key Change Record Boundary (C `e4fb38d4`)
+
+RFC 8446 §5.1 forbids handshake messages from spanning a key change. Three Rust call sites for `RecordLayer::activate_read_decryption(...)` lacked an empty-buffer assertion:
+
+1. **Client encrypted flight** (`tls13_client_process_encrypted_flight_body!`): on transition from handshake to application read keys after server `Finished`, the local `hs_buffer` must be empty.
+2. **Client `read_and_process_server_hello`**: on transition from initial to handshake read keys after `ServerHello` (and `ServerHello` after HRR), the record must contain exactly one `ServerHello` message.
+3. **Server `do_handshake` post-Finished**: the record carrying client `Finished` must contain exactly one handshake message.
+
+All three checks return `TlsError::RecordError("TLS 1.3 read key change not on record boundary")` when violated, mirroring the C-side `HITLS_REC_ERR_NOT_ON_RECORD_BOUNDARY` + `unexpected_message` alert.
+
+### Part B — Constant-Time PHA Comparisons (C `a79581a9`)
+
+Six post-handshake authentication (PHA) sites were using plain `!=` for security-critical equality checks of `verify_data` and `certificate_request_context`. Replaced with `subtle::ConstantTimeEq::ct_eq` to remove the data-dependent timing channel:
+
+- `connection/server.rs:201, 249, 333` — sync TLS 1.3 server PHA path.
+- `connection_async.rs:364, 412, 492` — async TLS 1.3 server PHA path.
+
+Other equality checks (DTLS cookie, PSK binder, AEAD tag, initial-handshake `Finished`, session ticket MAC) were already constant-time and required no changes. The C-side `MlKemCmpKey` and `CRYPT_SM9_Cmp` utility comparators have no Rust public API equivalent.
+
+### Part C — Constant-Time MtE Padding Loop (C `c04ef8db`)
+
+The CBC MtE padding verification loop in three record decryptors was iterating `padding_length + 1` bytes, leaking the (possibly attacker-controlled) padding length through loop count. Adopted the C v0.3.2 pattern: always iterate the maximum 255 positions, masking the read offset so out-of-range iterations fold onto the trailing length byte (which equals `padding_length` by definition) and the comparison passes harmlessly.
+
+The pattern now mirrors `tls/record/src/rec_crypto_cbc.c` `RecConnCbcDecCheckPaddingEtM` from C v0.3.2:
+
+```rust
+for i in 1u32..=255u32 {
+    let in_range = 1u8 ^ i.ct_gt(&(padding_length as u32)).unwrap_u8();
+    let select = pad_ok & in_range;
+    let mask: u32 = (select as u32).wrapping_neg();
+    let offset = (i & mask) as usize;
+    let byte = decrypted[last_idx - offset];
+    pad_ok &= byte.ct_eq(&pad_len_u8).unwrap_u8();
+}
+```
+
+The session-ticket CBC padding fix from the same C commit does not apply: the Rust ticket implementation uses HKDF + XOR + HMAC, not CBC. The EtM (Encrypt-then-MAC, RFC 7366) padding check is not constant-time but is also not vulnerable, since the MAC is verified before padding is inspected — leaving no oracle.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/macros.rs` | Modified | Part A: 4 record-boundary checks (encrypted flight, ServerHello x2, server post-Finished) |
+| `crates/hitls-tls/src/connection/server.rs` | Modified | Part B: import `ConstantTimeEq`; 3 PHA sites use `ct_eq` |
+| `crates/hitls-tls/src/connection_async.rs` | Modified | Part B: import `ConstantTimeEq`; 3 PHA sites use `ct_eq` |
+| `crates/hitls-tls/src/record/encryption12_cbc.rs` | Modified | Part C: import `ConstantTimeGreater`; constant-iteration MtE padding loop |
+| `crates/hitls-tls/src/record/encryption_tlcp.rs` | Modified | Part C: import `ConstantTimeGreater`; constant-iteration MtE padding loop |
+| `crates/hitls-tls/src/record/encryption_dtlcp.rs` | Modified | Part C: import `ConstantTimeGreater`; constant-iteration MtE padding loop |
+
+### Test Count (Post I88)
+
+Test counts unchanged from P93 baseline — no new tests added in this phase (boundary regressions covered by existing handshake roundtrip tests; ct improvements covered by existing dudect timing tests at module scope).
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1448 (22 ignored) |
+| hitls-tls | 1484 |
+| hitls-pki | 437 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 47 |
+| hitls-types | 26 |
+| hitls-cli | 161 (5 ignored) |
+| hitls-integration-tests | 264 (7 ignored) |
+| **Total** | **4065 (35 ignored)** |
+
+### Build Status (Post I88)
+- `cargo test --workspace --all-features`: 4,030 passed, 0 failed, 35 ignored (4,065 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean

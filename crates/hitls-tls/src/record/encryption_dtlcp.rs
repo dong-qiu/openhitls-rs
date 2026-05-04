@@ -9,7 +9,7 @@ use super::encryption::{MAX_CIPHERTEXT_LENGTH, MAX_PLAINTEXT_LENGTH};
 use super::ContentType;
 use crate::crypt::aead::{create_sm4_gcm_aead, TlsAeadImpl};
 use hitls_types::TlsError;
-use subtle::ConstantTimeEq;
+use subtle::{ConstantTimeEq, ConstantTimeGreater};
 use zeroize::Zeroize;
 
 /// DTLCP record version (same as TLCP).
@@ -348,10 +348,19 @@ impl DtlcpRecordDecryptorCbc {
             0u8
         };
 
-        let pad_start = decrypted.len().saturating_sub(padding_length + 1);
+        // Constant-time padding verification: always iterate 255 positions.
+        // When i > padding_length, the masked offset reads the trailing
+        // length byte (= padding_length), so the comparison passes harmlessly.
+        let pad_len_u8 = padding_length as u8;
+        let last_idx = decrypted.len() - 1;
         let mut pad_ok = good_length;
-        for &b in &decrypted[pad_start..] {
-            pad_ok &= b.ct_eq(&(padding_length as u8)).unwrap_u8();
+        for i in 1u32..=255u32 {
+            let in_range = 1u8 ^ i.ct_gt(&(padding_length as u32)).unwrap_u8();
+            let select = pad_ok & in_range;
+            let mask: u32 = (select as u32).wrapping_neg();
+            let offset = (i & mask) as usize;
+            let byte = decrypted[last_idx - offset];
+            pad_ok &= byte.ct_eq(&pad_len_u8).unwrap_u8();
         }
 
         let content_len = if good_length == 1 {

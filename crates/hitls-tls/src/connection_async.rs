@@ -21,6 +21,7 @@ use crate::record::{ContentType, RecordLayer};
 use crate::session::TlsSession;
 use crate::{AsyncTlsConnection, CipherSuite, TlsError, TlsVersion};
 use hitls_crypto::provider::Digest;
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 // ===========================================================================
@@ -360,8 +361,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
         let cert_msg_data = &cert_data[..cert_total];
         let cert_msg = decode_certificate(cert_body)?;
 
-        // Verify context matches
-        if cert_msg.certificate_request_context != context {
+        // Verify context matches (constant-time)
+        if !bool::from(cert_msg.certificate_request_context.ct_eq(&context)) {
             return Err(TlsError::HandshakeFailed(
                 "certificate_request_context mismatch".into(),
             ));
@@ -409,7 +410,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
             let finished_key = ks.derive_finished_key(&self.client_app_secret)?;
             let expected =
                 ks.compute_finished_verify_data(&finished_key, &fin_hash_buf[..params.hash_len])?;
-            if fin_msg.verify_data != expected {
+            if !bool::from(fin_msg.verify_data.ct_eq(&expected)) {
                 return Err(TlsError::HandshakeFailed(
                     "post-HS client Finished verification failed".into(),
                 ));
@@ -489,7 +490,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
         let finished_key = ks.derive_finished_key(&self.client_app_secret)?;
         let expected =
             ks.compute_finished_verify_data(&finished_key, &fin_hash_buf[..params.hash_len])?;
-        if fin_msg.verify_data != expected {
+        if !bool::from(fin_msg.verify_data.ct_eq(&expected)) {
             return Err(TlsError::HandshakeFailed(
                 "post-HS client Finished verification failed".into(),
             ));

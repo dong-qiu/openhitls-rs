@@ -4182,3 +4182,27 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - Updated PROMPT_LOG.md: +7 prompt entries (261-267)
 - Updated QUALITY_REPORT.md: refreshed quality metrics and infrastructure summary
 - Updated CLAUDE.md: status line and test counts
+
+### Prompt 268: openHiTLS C v0.3.2 Diff Analysis & Backport (I88)
+
+> 请分析当前迁移的 Rust 版本与最新的 C 版本差别是什么？请基于差别进行工作计划的制定
+
+**Follow-up**:
+
+> 从 Phase B1 开始
+
+**Result**:
+- Synced C reference repo to tag `openhitls-0.3.2` (commit `3d295814`); diff range `openhitls-0.3.0-alpha5..openhitls-0.3.2` = 85 commits.
+- Per-commit triage classified diff into 6 P0 security fixes, 2 P1 behavior changes, 7 P2 new features, and ~50 C-only changes. Six P0 commits cross-checked against Rust:
+  - `e4fb38d4` TLS 1.3 read key change must be on record boundary — **gap in Rust** → backported.
+  - `a79581a9` constant-time comparisons (memcmp→ct) — **6 PHA sites in Rust still using `!=`** → backported.
+  - `c04ef8db` CBC MtE constant-time padding — **Rust loop count still leaked padding_length** → backported.
+  - `855bffe3` `bn_get_bitlen` uninitialised — N/A (Rust enforces init at compile time).
+  - `67bf9c33` mlkem signed overflow — N/A (Rust uses Montgomery domain + `wrapping_mul`).
+  - `27e354f3` mlkem/frodokem use-after-free — N/A (Rust ownership + `Option<T>`).
+- Phase I88 implemented in `worktrees/bug-fix`:
+  - **Part A**: 4 record-boundary checks in `macros.rs` (encrypted flight `hs_buffer.is_empty()`; ServerHello x2 + post-Finished `data.len() == total`).
+  - **Part B**: 6 `!= → ct_eq` in `connection/server.rs` (3) + `connection_async.rs` (3) for PHA verify_data and certificate_request_context.
+  - **Part C**: 3 MtE padding loops rewritten to constant 255-iteration with masked offset, mirroring C `RecConnCbcDecCheckPaddingEtM` pattern, in `encryption12_cbc.rs` / `encryption_tlcp.rs` / `encryption_dtlcp.rs`.
+- Build: `cargo test --workspace --all-features` 4030 passed / 35 ignored / 0 failed; `RUSTFLAGS="-D warnings" cargo clippy` clean; `cargo fmt --check` clean.
+- Documentation: DEV_LOG.md +1 phase row + Phase I88 detail; CLAUDE.md status line; README.md test count 4046→4065; this PROMPT_LOG entry.
