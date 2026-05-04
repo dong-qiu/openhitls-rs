@@ -174,14 +174,12 @@ fn ccm_encrypt_impl<C: BlockCipher>(
 
     // Encrypt plaintext using CTR starting from counter 1
     let mut ciphertext = plaintext.to_vec();
-    let mut counter = 1u32;
-    for chunk in ciphertext.chunks_mut(BLOCK_SIZE) {
+    for (counter, chunk) in (1u32..).zip(ciphertext.chunks_mut(BLOCK_SIZE)) {
         ctr_block = format_ctr_block(nonce, counter);
         cipher.encrypt_block(&mut ctr_block)?;
         for (c, &k) in chunk.iter_mut().zip(ctr_block.iter()) {
             *c ^= k;
         }
-        counter += 1;
     }
 
     // Encrypt tag with S0 (stack array, max 16 bytes)
@@ -216,14 +214,12 @@ fn ccm_decrypt_impl<C: BlockCipher>(
     cipher.encrypt_block(&mut s0)?;
 
     let mut plaintext = ct_data.to_vec();
-    let mut counter = 1u32;
-    for chunk in plaintext.chunks_mut(BLOCK_SIZE) {
+    for (counter, chunk) in (1u32..).zip(plaintext.chunks_mut(BLOCK_SIZE)) {
         ctr_block = format_ctr_block(nonce, counter);
         cipher.encrypt_block(&mut ctr_block)?;
         for (p, &k) in chunk.iter_mut().zip(ctr_block.iter()) {
             *p ^= k;
         }
-        counter += 1;
     }
 
     // Step 2: CBC-MAC on decrypted plaintext

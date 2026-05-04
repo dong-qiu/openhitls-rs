@@ -174,15 +174,13 @@ fn xor_bytes(dst: &mut [u8], src: &[u8]) {
 
 /// Apply AES-CTR keystream to `data` in-place, using `ctr_base` XOR BE counter.
 fn apply_ctr(cipher: &AesKey, ctr_base: &[u8; BLOCK], data: &mut [u8]) -> Result<(), CryptoError> {
-    let mut counter = 1u64;
-    for chunk in data.chunks_mut(BLOCK) {
+    for (counter, chunk) in (1u64..).zip(data.chunks_mut(BLOCK)) {
         let mut ctr_block = *ctr_base;
         // XOR BE counter into last 8 bytes
         let counter_be = counter.to_be_bytes();
         xor_bytes(&mut ctr_block[8..], &counter_be);
         cipher.encrypt_block(&mut ctr_block)?;
         xor_bytes(chunk, &ctr_block);
-        counter += 1;
     }
     Ok(())
 }

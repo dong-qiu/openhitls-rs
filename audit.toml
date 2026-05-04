@@ -1,0 +1,13 @@
+# cargo-audit configuration — see https://docs.rs/cargo-audit/
+
+[advisories]
+# RUSTSEC-2026-0097: rand 0.8.5 is unsound when a custom `log` logger calls
+# `rand::rng()` and the ThreadRng reseeds inside the logger. We pull rand
+# 0.8.5 only as a transitive dev-dependency of proptest; it is never linked
+# into the openHiTLS-rs library or CLI binary, and proptest does not invoke
+# rand from inside a custom logger. The advisory is therefore not exploitable
+# by users of this crate.
+#
+# Tracking upgrade: when proptest releases a version that depends on rand
+# >=0.9.3, drop this ignore.
+ignore = ["RUSTSEC-2026-0097"]
