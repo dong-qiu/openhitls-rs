@@ -646,7 +646,6 @@ mod tests {
     /// Build a PKCS#8 DER for SM2 using the SM2 curve OID directly as the
     /// algorithm OID (Form 2 — the case the C v0.3.2 fix `ba677cc6` added).
     fn build_sm2_pkcs8_form2() -> Vec<u8> {
-        use hitls_utils::asn1::Encoder;
         let private_key = [0x42u8; 32];
         let mut ec_enc = Encoder::new();
         ec_enc.write_integer(&[1]);
