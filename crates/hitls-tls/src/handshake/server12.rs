@@ -600,9 +600,25 @@ impl Tls12ServerHandshake {
         // Store key exchange algorithm
         self.kx_alg = params.kx_alg;
 
-        // Negotiate EMS: echo if client offered and config enables it
-        if self.client_offered_ems && self.config.enable_extended_master_secret {
-            self.use_extended_master_secret = true;
+        // Negotiate EMS based on three-state policy (RFC 7627):
+        // - Forbid: never echo, even if client offered
+        // - Prefer: echo iff client offered (default)
+        // - Force:  reject the handshake if the client did not offer
+        match self.config.ems_mode {
+            crate::config::EmsMode::Forbid => {}
+            crate::config::EmsMode::Prefer => {
+                if self.client_offered_ems {
+                    self.use_extended_master_secret = true;
+                }
+            }
+            crate::config::EmsMode::Force => {
+                if !self.client_offered_ems {
+                    return Err(TlsError::HandshakeFailed(
+                        "EMS required by EmsMode::Force but client did not advertise it".into(),
+                    ));
+                }
+                self.use_extended_master_secret = true;
+            }
         }
 
         // Negotiate ETM: echo if client offered, config enables, AND suite is CBC

@@ -18,6 +18,7 @@ use hitls_crypto::ecdsa::EcdsaKeyPair;
 use hitls_crypto::ed25519::Ed25519KeyPair;
 use hitls_crypto::ed448::Ed448KeyPair;
 use hitls_crypto::rsa::RsaPrivateKey;
+use hitls_crypto::sm2::Sm2KeyPair;
 use hitls_crypto::x25519::X25519PrivateKey;
 use hitls_crypto::x448::X448PrivateKey;
 use hitls_types::{CryptoError, EccCurveId};
@@ -48,6 +49,8 @@ pub enum Pkcs8PrivateKey {
         params: DsaParams,
         key_pair: DsaKeyPair,
     },
+    /// SM2 private key (GB/T 32918, sm2p256v1).
+    Sm2(Sm2KeyPair),
 }
 
 /// A parsed SPKI (SubjectPublicKeyInfo) public key.
@@ -100,7 +103,18 @@ pub fn parse_pkcs8_der(der: &[u8]) -> Result<Pkcs8PrivateKey, CryptoError> {
     if algorithm_oid == known::rsa_encryption() {
         parse_rsa_private_key(private_key_bytes)
     } else if algorithm_oid == known::ec_public_key() {
-        parse_ec_private_key(&alg_params, private_key_bytes)
+        // SM2 keys may use the generic ecPublicKey alg OID with the SM2 curve
+        // OID in algorithm parameters — detect that and route to SM2.
+        if curve_params_are_sm2(&alg_params) {
+            parse_sm2_private_key(private_key_bytes)
+        } else {
+            parse_ec_private_key(&alg_params, private_key_bytes)
+        }
+    } else if algorithm_oid == known::sm2_curve() {
+        // Some Chinese implementations encode SM2 PKCS#8 with the SM2 curve
+        // OID directly as the algorithm OID (with NULL or absent parameters).
+        // C openHiTLS 0.3.2 added this acceptance path in `ba677cc6`.
+        parse_sm2_private_key(private_key_bytes)
     } else if algorithm_oid == known::ed25519() {
         parse_ed25519_private_key(private_key_bytes)
     } else if algorithm_oid == known::ed448() {
@@ -235,6 +249,7 @@ fn curve_id_to_oid(curve_id: EccCurveId) -> Oid {
         EccCurveId::BrainpoolP256r1 => known::brainpool_p256r1(),
         EccCurveId::BrainpoolP384r1 => known::brainpool_p384r1(),
         EccCurveId::BrainpoolP512r1 => known::brainpool_p512r1(),
+        EccCurveId::Sm2Prime256 => known::sm2_curve(),
         _ => known::prime256v1(), // fallback
     }
 }
@@ -263,6 +278,38 @@ fn parse_ec_private_key(alg_params: &[u8], data: &[u8]) -> Result<Pkcs8PrivateKe
 
     let key_pair = EcdsaKeyPair::from_private_key(curve_id, private_key)?;
     Ok(Pkcs8PrivateKey::Ec { curve_id, key_pair })
+}
+
+/// Return true iff the AlgorithmIdentifier parameters bytes encode the SM2
+/// curve OID. Used to disambiguate `ec_public_key` algorithm identifiers that
+/// carry SM2 vs. NIST curves in their parameters.
+fn curve_params_are_sm2(alg_params: &[u8]) -> bool {
+    if alg_params.is_empty() {
+        return false;
+    }
+    let mut dec = Decoder::new(alg_params);
+    let Ok(oid_bytes) = dec.read_oid() else {
+        return false;
+    };
+    let Ok(curve_oid) = Oid::from_der_value(oid_bytes) else {
+        return false;
+    };
+    curve_oid == known::sm2_curve()
+}
+
+/// Parse an SM2 PKCS#8 private key (RFC 5915 ECPrivateKey body).
+///
+/// Two algorithm-OID encodings are accepted: the standard `ec_public_key`
+/// algorithm OID with the SM2 curve OID in parameters, and the SM2 curve OID
+/// directly as the algorithm OID (the latter mirroring the C v0.3.2 fix in
+/// `ba677cc6`).
+fn parse_sm2_private_key(data: &[u8]) -> Result<Pkcs8PrivateKey, CryptoError> {
+    let mut dec = Decoder::new(data);
+    let mut seq = dec.read_sequence()?;
+    let _version = seq.read_integer()?;
+    let private_key = seq.read_octet_string()?;
+    let kp = Sm2KeyPair::from_private_key(private_key)?;
+    Ok(Pkcs8PrivateKey::Sm2(kp))
 }
 
 // ===== Ed25519 =====
@@ -586,6 +633,52 @@ mod tests {
         match key {
             Pkcs8PrivateKey::X25519(_) => {}
             _ => panic!("Expected X25519 key"),
+        }
+    }
+
+    /// Build a PKCS#8 DER for SM2 with the standard `ec_public_key` algorithm
+    /// OID and the SM2 curve OID in algorithm parameters (Form 1).
+    fn build_sm2_pkcs8_form1() -> Vec<u8> {
+        let private_key = [0x42u8; 32];
+        encode_ec_pkcs8_der(EccCurveId::Sm2Prime256, &private_key)
+    }
+
+    /// Build a PKCS#8 DER for SM2 using the SM2 curve OID directly as the
+    /// algorithm OID (Form 2 — the case the C v0.3.2 fix `ba677cc6` added).
+    fn build_sm2_pkcs8_form2() -> Vec<u8> {
+        use hitls_utils::asn1::Encoder;
+        let private_key = [0x42u8; 32];
+        let mut ec_enc = Encoder::new();
+        ec_enc.write_integer(&[1]);
+        ec_enc.write_octet_string(&private_key);
+        let ec_body = ec_enc.finish();
+        let mut ec_seq_enc = Encoder::new();
+        ec_seq_enc.write_sequence(&ec_body);
+        let private_key_der = ec_seq_enc.finish();
+        encode_pkcs8_der_raw(&known::sm2_curve(), None, &private_key_der)
+    }
+
+    #[test]
+    fn test_parse_sm2_pkcs8_ec_public_key_oid() {
+        // Form 1: AlgorithmIdentifier { ec_public_key, sm2_curve } — the most
+        // common SM2 PKCS#8 encoding.
+        let der = build_sm2_pkcs8_form1();
+        let key = parse_pkcs8_der(&der).unwrap();
+        match key {
+            Pkcs8PrivateKey::Sm2(_) => {}
+            _ => panic!("Expected SM2 key"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sm2_pkcs8_curve_oid_direct() {
+        // Form 2: AlgorithmIdentifier { sm2_curve, NULL } — the
+        // C openHiTLS 0.3.2 compatibility path (`ba677cc6`).
+        let der = build_sm2_pkcs8_form2();
+        let key = parse_pkcs8_der(&der).unwrap();
+        match key {
+            Pkcs8PrivateKey::Sm2(_) => {}
+            _ => panic!("Expected SM2 key"),
         }
     }
 

@@ -18,6 +18,24 @@ use crate::handshake::extensions_codec::TrustedAuthority;
 use crate::session::{SessionCache, TlsSession};
 use crate::{CipherSuite, TlsRole, TlsVersion};
 
+/// Extended Master Secret (RFC 7627) negotiation policy.
+///
+/// Mirrors `HITLS_EMS_MODE_*` in openHiTLS C v0.3.2 (`include/tls/hitls_type.h`).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum EmsMode {
+    /// Don't advertise the extension; ignore peer's offer. Allows interoperating
+    /// with TLS 1.2 peers that don't support EMS, but leaves the connection
+    /// vulnerable to triple-handshake attacks (RFC 7627 §5.1). Use only for
+    /// legacy interop and pair with renegotiation/ticket disabled.
+    Forbid,
+    /// Advertise EMS; echo it if the peer also offers (default behaviour).
+    #[default]
+    Prefer,
+    /// Require EMS — abort the handshake if the peer does not advertise it.
+    /// Recommended security posture; matches `HITLS_EMS_MODE_FORCE` in C.
+    Force,
+}
+
 /// TLS configuration.
 #[derive(Clone)]
 pub struct TlsConfig {
@@ -68,7 +86,16 @@ pub struct TlsConfig {
     /// Server: reject handshake if client provides no certificate (requires verify_client_cert).
     pub require_client_cert: bool,
     /// Enable Extended Master Secret extension (RFC 7627). Default: true.
+    ///
+    /// Note: prefer the more expressive [`ems_mode`] field — this boolean is a
+    /// view onto it: `false` ↔ [`EmsMode::Forbid`], `true` ↔ [`EmsMode::Prefer`]
+    /// or [`EmsMode::Force`]. Setting via [`TlsConfigBuilder::enable_extended_master_secret`]
+    /// maps `true → Prefer` and `false → Forbid`, preserving prior behaviour.
+    ///
+    /// [`ems_mode`]: TlsConfig::ems_mode
     pub enable_extended_master_secret: bool,
+    /// Extended Master Secret (RFC 7627) negotiation mode. Default: [`EmsMode::Prefer`].
+    pub ems_mode: EmsMode,
     /// Enable Encrypt-Then-MAC extension (RFC 7366, CBC suites only). Default: true.
     pub enable_encrypt_then_mac: bool,
     /// Certificate compression algorithms to offer/accept (RFC 8879).
@@ -307,7 +334,7 @@ pub struct TlsConfigBuilder {
     post_handshake_auth: bool,
     verify_client_cert: bool,
     require_client_cert: bool,
-    enable_extended_master_secret: bool,
+    ems_mode: EmsMode,
     enable_encrypt_then_mac: bool,
     cert_compression_algos: Vec<CertCompressionAlgorithm>,
     psk: Option<Vec<u8>>,
@@ -395,7 +422,7 @@ impl Default for TlsConfigBuilder {
             post_handshake_auth: false,
             verify_client_cert: false,
             require_client_cert: false,
-            enable_extended_master_secret: true,
+            ems_mode: EmsMode::Prefer,
             enable_encrypt_then_mac: true,
             cert_compression_algos: Vec::new(),
             psk: None,
@@ -578,8 +605,23 @@ impl TlsConfigBuilder {
         self
     }
 
+    /// Enable or disable EMS (RFC 7627), bool-typed legacy alias for [`Self::ems_mode`].
+    ///
+    /// `true → EmsMode::Prefer`, `false → EmsMode::Forbid`. The mapping is chosen to
+    /// preserve the existing semantics of "false means do not advertise EMS" — note
+    /// this differs from openHiTLS C v0.3.2, which maps `true → FORCE`.
     pub fn enable_extended_master_secret(mut self, enabled: bool) -> Self {
-        self.enable_extended_master_secret = enabled;
+        self.ems_mode = if enabled {
+            EmsMode::Prefer
+        } else {
+            EmsMode::Forbid
+        };
+        self
+    }
+
+    /// Set EMS (RFC 7627) negotiation policy explicitly.
+    pub fn ems_mode(mut self, mode: EmsMode) -> Self {
+        self.ems_mode = mode;
         self
     }
 
@@ -855,7 +897,8 @@ impl TlsConfigBuilder {
             post_handshake_auth: self.post_handshake_auth,
             verify_client_cert: self.verify_client_cert,
             require_client_cert: self.require_client_cert,
-            enable_extended_master_secret: self.enable_extended_master_secret,
+            enable_extended_master_secret: self.ems_mode != EmsMode::Forbid,
+            ems_mode: self.ems_mode,
             enable_encrypt_then_mac: self.enable_encrypt_then_mac,
             cert_compression_algos: self.cert_compression_algos,
             psk: self.psk,
@@ -1040,6 +1083,7 @@ mod tests {
         let config = TlsConfig::builder().build();
         assert!(config.enable_extended_master_secret);
         assert!(config.enable_encrypt_then_mac);
+        assert_eq!(config.ems_mode, EmsMode::Prefer);
     }
 
     #[test]
@@ -1050,6 +1094,38 @@ mod tests {
             .build();
         assert!(!config.enable_extended_master_secret);
         assert!(!config.enable_encrypt_then_mac);
+        assert_eq!(config.ems_mode, EmsMode::Forbid);
+    }
+
+    #[test]
+    fn test_config_builder_ems_mode_prefer() {
+        let config = TlsConfig::builder().ems_mode(EmsMode::Prefer).build();
+        assert_eq!(config.ems_mode, EmsMode::Prefer);
+        assert!(config.enable_extended_master_secret);
+    }
+
+    #[test]
+    fn test_config_builder_ems_mode_force() {
+        let config = TlsConfig::builder().ems_mode(EmsMode::Force).build();
+        assert_eq!(config.ems_mode, EmsMode::Force);
+        // Force still advertises EMS — bool view is true.
+        assert!(config.enable_extended_master_secret);
+    }
+
+    #[test]
+    fn test_config_builder_ems_mode_forbid() {
+        let config = TlsConfig::builder().ems_mode(EmsMode::Forbid).build();
+        assert_eq!(config.ems_mode, EmsMode::Forbid);
+        assert!(!config.enable_extended_master_secret);
+    }
+
+    #[test]
+    fn test_config_builder_ems_bool_legacy_true_maps_to_prefer() {
+        let config = TlsConfig::builder()
+            .enable_extended_master_secret(true)
+            .build();
+        // Legacy bool API: true → Prefer (preserve "advertise but don't require").
+        assert_eq!(config.ems_mode, EmsMode::Prefer);
     }
 
     #[test]

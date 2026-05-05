@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I88 (88 phases)
+- Implementation: I1–I89 (89 phases)
 - Testing: T1–T80 (79 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
@@ -276,6 +276,7 @@ Category summary:
 | 264 | P93 | Perf | Zero-Copy Inner Plaintext Parsing in TLS/DTLS 1.3 Decrypt | 2026-03-09 |
 | 265 | I88 | Impl | Backport from openHiTLS C v0.3.2 — TLS 1.3 Record Boundary + PHA ct_eq + MtE Padding Constant-Time | 2026-05-05 |
 | 266 | T80 | Test | CI Compatibility: Rust 1.95 Clippy Promotions + audit-check Ignore + Permissions | 2026-05-05 |
+| 267 | I89 | Impl | EMS Three-State Mode (RFC 7627) + SM2 PKCS#8 OID Compatibility | 2026-05-05 |
 
 ---
 
@@ -13984,3 +13985,85 @@ Test counts unchanged from I88 baseline — this phase modifies only CI-visible 
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean
 - **CI run 25334371125 conclusion: success** (35 jobs success, 1 known-flake `continue-on-error`, 9 schedule/PR-only skipped)
+
+---
+
+## Phase I89 — EMS Three-State Mode + SM2 PKCS#8 OID Compatibility (2026-05-05)
+
+### Summary
+Two independent feature alignments backported from openHiTLS C v0.3.2 (Phase B2 + B4):
+
+- **Part A (B2, C `80368d33`)**: replace the boolean Extended Master Secret (RFC 7627) toggle with a three-state policy enum mirroring `HITLS_EMS_MODE_*`. The new `EmsMode::Force` variant aborts the handshake if the peer does not advertise EMS, eliminating exposure to triple-handshake / renegotiation attack classes (RFC 7627 §5.4).
+- **Part B (B4, C `ba677cc6`)**: accept SM2 PKCS#8 private keys with the SM2 curve OID (`1.2.156.10197.1.301`) used either in algorithm parameters (with `ec_public_key` as alg OID — Form 1) **or** as the algorithm OID directly with NULL parameters (Form 2). The C v0.3.2 fix added Form 2 acceptance; Rust previously rejected both.
+
+The Phase B3 (batch C bug fixes) triage of 14 candidate commits found **zero actionable Rust gaps**: every issue was pre-empted by Rust's ownership model, type system, or `thiserror`-based error handling. Notable specifics:
+- `50d11c5f` AES-WRAP `outLen` check — Rust returns owned `Vec<u8>`, no caller-provided buffer to validate.
+- `43406fb6` DTLS UDP 2MSL `deadline` move — Rust DTLS 1.2 has no equivalent 2MSL state machine.
+- `cf2d4d86` `hitls_close` segfault on NULL `recCtx`/`alertCtx` — impossible by Rust ownership.
+- `e86efb06`, `17aa68b0` C reference counting / memory free fixes — N/A.
+- `9c4be4a0`, `dc9e241d`, `434c17bd`, `aac0b035`, `0eb34f5e`, `770e62a0` BSL/error stack reorderings — N/A (`thiserror`).
+- `80bd9ad7` prime gen unlimited iteration — Rust caps at 10 000 attempts which exceeds C's removed 256 cap and is sufficient for all practical RSA bit lengths.
+
+### Part A — EMS Three-State Mode
+
+API additions in `crates/hitls-tls/src/config/mod.rs`:
+
+```rust
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum EmsMode {
+    Forbid,         // never advertise; ignore peer offer
+    #[default] Prefer, // advertise; echo if peer also offers (current behaviour)
+    Force,          // require — abort handshake if peer doesn't advertise
+}
+```
+
+`TlsConfig` now exposes `ems_mode: EmsMode`. The legacy `enable_extended_master_secret(bool)` builder is preserved with the mapping `true → Prefer`, `false → Forbid` (chosen to preserve existing Rust callers' "false means do not advertise"; this differs from C v0.3.2 which maps `true → FORCE`). The `enable_extended_master_secret: bool` public field is now a derived view (`ems_mode != Forbid`).
+
+Handshake wiring:
+- **Client (`client12.rs`)**: `EmsMode::Forbid` skips sending the EMS extension; on ServerHello processing, `EmsMode::Force` aborts when the server did not echo EMS.
+- **Server (`server12.rs`)**: replace the prior `client_offered && config_enables` check with a 3-arm match: `Forbid` ignores the offer; `Prefer` echoes when offered (current); `Force` aborts when the client did not offer.
+
+Default behaviour is unchanged from earlier releases (Prefer = advertise + echo when peer agrees). `Force` is opt-in for callers who want strict RFC 7627 enforcement.
+
+### Part B — SM2 PKCS#8 OID Compatibility
+
+Rust previously had no SM2 dispatch in `parse_pkcs8_der` — both Form 1 (ecPublicKey + sm2_curve params) and Form 2 (sm2_curve as algorithm OID) returned `DecodeUnknownOid`. Added:
+
+1. `Pkcs8PrivateKey::Sm2(Sm2KeyPair)` variant.
+2. `parse_pkcs8_der` dispatch:
+   - `algorithm_oid == ec_public_key && curve_params == sm2_curve` → SM2 path.
+   - `algorithm_oid == sm2_curve` → SM2 path (the C `ba677cc6` Form 2 acceptance).
+3. `parse_sm2_private_key()` helper: parse RFC 5915 `ECPrivateKey` body, construct `Sm2KeyPair::from_private_key`.
+4. `oid_to_curve_id()` (`crates/hitls-pki/src/oid_mapping.rs`) and `curve_id_to_oid()` extended with `Sm2Prime256 ↔ sm2_curve` mapping.
+5. `hitls-cli`'s `pkcs8_to_server_key` (`s_server.rs`) now explicitly rejects SM2 keys with a clear message — the CLI bin builds without the `tlcp` feature on `hitls-tls`, so the `ServerPrivateKey::Sm2` variant is not in scope.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/config/mod.rs` | Modified | Part A: `EmsMode` enum (default Prefer); `ems_mode: EmsMode` field on builder + config; legacy bool API maps `true → Prefer` / `false → Forbid`; +5 unit tests for the new mode |
+| `crates/hitls-tls/src/handshake/client12.rs` | Modified | Part A: gate ClientHello EMS advertisement on `ems_mode != Forbid`; Force-mode rejection of ServerHello without EMS |
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | Part A: 3-arm `match` on `ems_mode` — Forbid skips, Prefer echoes when offered, Force rejects when not offered |
+| `crates/hitls-pki/src/pkcs8/mod.rs` | Modified | Part B: `Pkcs8PrivateKey::Sm2(Sm2KeyPair)` variant; SM2 OID dispatch (Forms 1+2); `parse_sm2_private_key` + `curve_params_are_sm2` helpers; +2 SM2 PKCS#8 round-trip tests |
+| `crates/hitls-pki/src/oid_mapping.rs` | Modified | Part B: `oid_to_curve_id` recognises `sm2_curve()` |
+| `crates/hitls-cli/src/s_server.rs` | Modified | Part B: explicit unsupported-key error for `Pkcs8PrivateKey::Sm2` (CLI builds without TLCP feature) |
+
+### Test Count (Post I89)
+
+| Crate | Count | Δ |
+|-------|------:|--:|
+| hitls-crypto | 1448 (22 ignored) | — |
+| hitls-tls | 1488 | +4 (EMS variants) |
+| hitls-pki | 439 | +2 (SM2 forms) |
+| hitls-bignum | 95 (1 ignored) | — |
+| hitls-utils | 68 | — |
+| hitls-auth | 47 | — |
+| hitls-types | 26 | — |
+| hitls-cli | 161 (5 ignored) | — |
+| hitls-integration-tests | 264 (7 ignored) | — |
+| **Total** | **4071 (35 ignored)** | **+6** |
+
+### Build Status (Post I89)
+- `cargo test --workspace --all-features`: 4,036 passed, 0 failed, 35 ignored (4,071 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean

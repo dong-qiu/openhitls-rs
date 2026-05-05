@@ -480,8 +480,9 @@ impl Tls12ClientHandshake {
             }
         }
 
-        // Extended Master Secret (RFC 7627)
-        if self.config.enable_extended_master_secret {
+        // Extended Master Secret (RFC 7627). Skip the extension entirely in
+        // EmsMode::Forbid; advertise in Prefer/Force.
+        if self.config.ems_mode != crate::config::EmsMode::Forbid {
             extensions.push(crate::handshake::extensions_codec::build_extended_master_secret());
         }
 
@@ -678,6 +679,16 @@ impl Tls12ClientHandshake {
                 }
                 _ => {}
             }
+        }
+
+        // EmsMode::Force — server MUST echo extended_master_secret. Otherwise
+        // we are exposed to the triple-handshake / renegotiation attack class
+        // (RFC 7627 §5.4) and must abort the handshake.
+        if self.config.ems_mode == crate::config::EmsMode::Force && !self.use_extended_master_secret
+        {
+            return Err(TlsError::HandshakeFailed(
+                "EMS required by EmsMode::Force but server did not advertise it".into(),
+            ));
         }
 
         // Parse custom extensions in ServerHello

@@ -192,6 +192,11 @@ fn pkcs8_to_server_key(
         }),
         Pkcs8PrivateKey::Ed25519(kp) => Ok(ServerPrivateKey::Ed25519(kp.seed().to_vec())),
         Pkcs8PrivateKey::Ed448(kp) => Ok(ServerPrivateKey::Ed448(kp.seed().to_vec())),
+        Pkcs8PrivateKey::Sm2(_) => {
+            // s_server is built without TLCP today (only tls12 + tls13 features
+            // on hitls-tls), so SM2 server keys are not supported here.
+            Err("SM2 server keys are not supported by s_server (TLCP feature not enabled)".into())
+        }
         Pkcs8PrivateKey::X25519(_) | Pkcs8PrivateKey::X448(_) | Pkcs8PrivateKey::Dsa { .. } => Err(
             "unsupported key type for TLS server (X25519/X448/DSA not valid for signing)".into(),
         ),

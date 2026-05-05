@@ -23,6 +23,8 @@ pub(crate) fn oid_to_curve_id(oid: &Oid) -> Option<EccCurveId> {
         Some(EccCurveId::BrainpoolP384r1)
     } else if *oid == known::brainpool_p512r1() {
         Some(EccCurveId::BrainpoolP512r1)
+    } else if *oid == known::sm2_curve() {
+        Some(EccCurveId::Sm2Prime256)
     } else {
         None
     }
