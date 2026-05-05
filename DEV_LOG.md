@@ -13996,7 +13996,7 @@ Two independent feature alignments backported from openHiTLS C v0.3.2 (Phase B2 
 - **Part A (B2, C `80368d33`)**: replace the boolean Extended Master Secret (RFC 7627) toggle with a three-state policy enum mirroring `HITLS_EMS_MODE_*`. The new `EmsMode::Force` variant aborts the handshake if the peer does not advertise EMS, eliminating exposure to triple-handshake / renegotiation attack classes (RFC 7627 §5.4).
 - **Part B (B4, C `ba677cc6`)**: accept SM2 PKCS#8 private keys with the SM2 curve OID (`1.2.156.10197.1.301`) used either in algorithm parameters (with `ec_public_key` as alg OID — Form 1) **or** as the algorithm OID directly with NULL parameters (Form 2). The C v0.3.2 fix added Form 2 acceptance; Rust previously rejected both.
 
-The Phase B3 (batch C bug fixes) triage of 14 candidate commits found **zero actionable Rust gaps**: every issue was pre-empted by Rust's ownership model, type system, or `thiserror`-based error handling. Notable specifics:
+The Phase B3 (batch C bug fixes) triage of 14 candidate commits found **zero actionable Rust gaps**: every issue was precluded by Rust's ownership model, type system, or `thiserror`-based error handling. Notable specifics:
 - `50d11c5f` AES-WRAP `outLen` check — Rust returns owned `Vec<u8>`, no caller-provided buffer to validate.
 - `43406fb6` DTLS UDP 2MSL `deadline` move — Rust DTLS 1.2 has no equivalent 2MSL state machine.
 - `cf2d4d86` `hitls_close` segfault on NULL `recCtx`/`alertCtx` — impossible by Rust ownership.
