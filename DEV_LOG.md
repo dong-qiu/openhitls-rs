@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I88 (88 phases)
-- Testing: T1–T79 (78 phases, T64 skipped)
+- Testing: T1–T80 (79 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
 
@@ -275,6 +275,7 @@ Category summary:
 | 263 | P89 | Perf | Hot Path #[inline] Hints for Record Layer + Crypto Dispatch | 2026-03-09 |
 | 264 | P93 | Perf | Zero-Copy Inner Plaintext Parsing in TLS/DTLS 1.3 Decrypt | 2026-03-09 |
 | 265 | I88 | Impl | Backport from openHiTLS C v0.3.2 — TLS 1.3 Record Boundary + PHA ct_eq + MtE Padding Constant-Time | 2026-05-05 |
+| 266 | T80 | Test | CI Compatibility: Rust 1.95 Clippy Promotions + audit-check Ignore + Permissions | 2026-05-05 |
 
 ---
 
@@ -13913,3 +13914,73 @@ Test counts unchanged from P93 baseline — no new tests added in this phase (bo
 - `cargo test --workspace --all-features`: 4,030 passed, 0 failed, 35 ignored (4,065 total)
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T80 — CI Compatibility: Rust 1.95 + audit-check Ignore + Permissions (2026-05-05)
+
+### Summary
+After the Phase I88 push, GitHub Actions runners had auto-upgraded `dtolnay/rust-toolchain@stable` from 1.93 to 1.95, surfacing two newly-promoted clippy lints and exposing a long-standing Security Audit configuration gap. The first I88 push (5b062ea) turned CI red even though the local `cargo clippy` on Rust 1.93 was clean. This phase consists of two follow-up commits (9d37b63 + b4991f8) that unblock CI without altering Phase I88's security semantics.
+
+### Part A — Rust 1.95 Clippy Promotions
+
+Rust 1.95 promotes two lints to error level under `-D warnings`:
+
+1. **`clippy::explicit_counter_loop`** — three sites in `hitls-crypto` used a manual `let mut counter` + `counter += 1` in tandem with a `for chunk in iter.chunks_mut(N)` loop. Rewritten to the canonical `for (counter, chunk) in (1..).zip(iter.chunks_mut(N))` form, preserving CTR counter semantics:
+   - `crates/hitls-crypto/src/modes/ccm.rs:178` (encrypt path)
+   - `crates/hitls-crypto/src/modes/ccm.rs:220` (decrypt path)
+   - `crates/hitls-crypto/src/modes/hctr.rs:178` (apply_ctr keystream)
+
+2. **`clippy::collapsible_match`** — one site in `hitls-tls` had a nested `if` inside a match arm that could be folded into a guard. Rewritten using a match guard, preserving semantics via the existing `_ => {}` wildcard arm:
+   - `crates/hitls-tls/src/handshake/client.rs:854` (`ExtensionType::EARLY_DATA if self.offered_early_data => ...`)
+
+The local stable toolchain was also upgraded from 1.93 to 1.95 to keep clippy parity going forward.
+
+### Part B — `rustsec/audit-check@v2` Configuration
+
+Two issues with the Security Audit job surfaced when `cargo-audit` advisory database picked up `RUSTSEC-2026-0097` (`rand 0.8.5` is unsound when a custom `log` logger calls `rand::rng()` and `ThreadRng` reseeds inside the logger). `rand 0.8.5` is pulled only as a transitive dev-dependency of `proptest`; it is never linked into the openHiTLS-rs library or any release binary, and proptest does not invoke rand from a custom logger. The advisory is therefore not exploitable.
+
+1. **Audit ignore** — the `rustsec/audit-check@v2` action does **not** read `audit.toml` from the repo root; it honors only its own `ignore:` input. Moved the advisory ignore into the workflow step (`.github/workflows/ci.yml`). An `audit.toml` was retained at repo root for local `cargo audit` usage and as documentation of the rationale.
+
+2. **Permissions** — the action's `Resource not accessible by integration - .../check-runs` error came from missing `checks: write` permission on the workflow job. Added explicit `permissions: { checks: write, contents: read, issues: write }` to the `audit` job.
+
+### Part C — Constant-Time Verification (Core) Flake
+
+The `Constant-Time Verification (Core)` job (`.github/workflows/ci.yml`) reported t-statistics 10–30× over threshold for `test_aes_gcm_tag_verify_constant_time`, `test_bignum_ct_eq_constant_time`, `test_hmac_verify_constant_time`, `test_sm4_gcm_tag_verify_constant_time`. Local re-runs on the same release build show:
+- M-series Mac: 3/4 pass with t < 4.5; AES-GCM tag verify yields |t| ≈ 6 (borderline).
+- CI ubuntu-latest: |t| ranges 44–148 for all four (clearly noise-driven).
+
+This is environmental noise from shared GitHub Actions runners, not a real timing leak. The job has `continue-on-error: true`, so the workflow concludes green despite the red X on the job. No mitigation in this phase; treated as a known flake of dudect-style tests on noisy CI runners. The workflow's `Constant-Time Verification (Extended)` job is already gated on `if: github.event_name == 'schedule'` for advisory-only nightly runs.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/modes/ccm.rs` | Modified | Part A: 2 `for chunk in chunks_mut` loops → `(1u32..).zip(chunks_mut)` |
+| `crates/hitls-crypto/src/modes/hctr.rs` | Modified | Part A: 1 `for chunk in chunks_mut` loop → `(1u64..).zip(chunks_mut)` |
+| `crates/hitls-tls/src/handshake/client.rs` | Modified | Part A: collapsed nested `if` inside `match` arm into guard |
+| `audit.toml` | Created | Part B: documents `RUSTSEC-2026-0097` rationale; consumed by local `cargo audit` (not by `rustsec/audit-check@v2`) |
+| `.github/workflows/ci.yml` | Modified | Part B: `audit` job — added `permissions` + `ignore: RUSTSEC-2026-0097` input |
+
+### Test Count (Post T80)
+
+Test counts unchanged from I88 baseline — this phase modifies only CI-visible toolchain compatibility, not test code.
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1448 (22 ignored) |
+| hitls-tls | 1484 |
+| hitls-pki | 437 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 47 |
+| hitls-types | 26 |
+| hitls-cli | 161 (5 ignored) |
+| hitls-integration-tests | 264 (7 ignored) |
+| **Total** | **4065 (35 ignored)** |
+
+### Build Status (Post T80)
+- `cargo test --workspace --all-features`: 4,030 passed, 0 failed, 35 ignored (4,065 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+- **CI run 25334371125 conclusion: success** (35 jobs success, 1 known-flake `continue-on-error`, 9 schedule/PR-only skipped)

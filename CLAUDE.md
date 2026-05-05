@@ -8,7 +8,7 @@ openHiTLS-rs is a pure Rust rewrite of [openHiTLS](https://gitee.com/openhitls/o
 
 - **Language**: Rust (MSRV 1.75, edition 2021)
 - **License**: MulanPSL-2.0
-- **Status**: Phases I1–I88, T1–T79, R1–R12, P1–P93 complete (4065 tests, 35 ignored)
+- **Status**: Phases I1–I88, T1–T80, R1–R12, P1–P93 complete (4065 tests, 35 ignored)
 
 ## Workspace Structure
 
@@ -131,7 +131,7 @@ The original C implementation is at `/Users/dongqiu/Dev/code/openhitls/`:
 
 ## Migration Roadmap
 
-Phases I1–I88, T1–T79, R1–R12, P1–P93 complete (4065 tests, 35 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete. Backport from openHiTLS C v0.3.2 security fixes complete.**
+Phases I1–I88, T1–T80, R1–R12, P1–P93 complete (4065 tests, 35 ignored). **100% C→Rust feature parity achieved. Architecture refactoring complete. Performance optimization and quality improvement complete. Backport from openHiTLS C v0.3.2 security fixes complete. CI compatible with Rust 1.95.**
 
 ### Completed Phases (Summary)
 
