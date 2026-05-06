@@ -164,8 +164,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-hack
         uses: taiki-e/install-action@cargo-hack
-      - name: Check all feature combinations (depth 2)
-        run: cargo hack check -p hitls-crypto --feature-powerset --depth 2 --no-dev-deps
+      # Depth 1 (single-feature) on PR/push — catches the common class of
+      # missing-feature-gate errors in <1 min. Depth 2 (every pair, ~10 min)
+      # runs nightly via the `schedule` trigger.
+      - name: Check feature combinations
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            cargo hack check -p hitls-crypto --feature-powerset --depth 2 --no-dev-deps
+          else
+            cargo hack check -p hitls-crypto --feature-powerset --depth 1 --no-dev-deps
+          fi
 
   minimal-versions:
     name: Minimal Dependency Versions
@@ -198,8 +206,12 @@ jobs:
           # proptest depends on rand >=0.9.3.
           ignore: RUSTSEC-2026-0097
 
-  miri:
-    name: Miri (UB detection)
+  miri-smoke:
+    name: Miri Smoke (PR/push)
+    # Fast UB-detection on the core BigNum arithmetic — the module most
+    # likely to introduce miri-detectable UB. Full fan-out runs nightly
+    # in `miri-full` below.
+    if: github.event_name != 'schedule'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     env:
@@ -209,26 +221,51 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
+      - uses: Swatinem/rust-cache@v2
       - run: cargo miri test -p hitls-bignum
-      - run: cargo miri test -p hitls-utils -- --skip prop_
-      - run: cargo miri test -p hitls-crypto --all-features -- mceliece::benes
-      - run: cargo miri test -p hitls-crypto --all-features -- mlkem::ntt::tests --skip neon
-      - run: cargo miri test -p hitls-crypto --all-features -- mldsa::ntt::tests --skip neon
-      - run: cargo miri test -p hitls-crypto --all-features -- modes::gcm
-      # SHA-2 software path (skip HW cross-validation tests using SIMD)
-      - run: cargo miri test -p hitls-crypto --all-features -- sha2::tests --skip compress_soft_vs_dispatch --skip multi_block_consistency
-      # SHA-3 software path (HW tests are cfg-gated on aarch64, auto-skipped)
-      - run: cargo miri test -p hitls-crypto --all-features -- sha3::tests
-      # ChaCha20 software path (skip HW cross-validation tests using SIMD)
-      - run: cargo miri test -p hitls-crypto --all-features -- chacha20::tests --skip soft_vs_dispatch_stress --skip keystream_256_bytes_consistency
-      # SM3 software path (no SIMD)
-      - run: cargo miri test -p hitls-crypto --all-features -- sm3::tests
-      # SM4 software path (T-table, no intrinsics)
-      - run: cargo miri test -p hitls-crypto --all-features -- sm4::tests
-      # P-256/P-384/P-521 specialized Montgomery field arithmetic (unsafe code)
-      - run: cargo miri test -p hitls-crypto --all-features -- ecc::p256_field::tests
-      - run: cargo miri test -p hitls-crypto --all-features -- ecc::p384_field::tests
-      - run: cargo miri test -p hitls-crypto --all-features -- ecc::p521_field::tests
+
+  miri-full:
+    name: "Miri: ${{ matrix.target.name }}"
+    # Fan-out across all 14 miri targets in parallel — schedule-only because
+    # the previous serial job was the wall-clock bottleneck (~80 min).
+    # Parallel execution caps the critical path at the slowest single
+    # target (~15-25 min depending on input).
+    if: github.event_name == 'schedule'
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: bignum,   args: "-p hitls-bignum" }
+          - { name: utils,    args: "-p hitls-utils -- --skip prop_" }
+          - { name: mceliece, args: "-p hitls-crypto --all-features -- mceliece::benes" }
+          - { name: mlkem,    args: "-p hitls-crypto --all-features -- mlkem::ntt::tests --skip neon" }
+          - { name: mldsa,    args: "-p hitls-crypto --all-features -- mldsa::ntt::tests --skip neon" }
+          - { name: gcm,      args: "-p hitls-crypto --all-features -- modes::gcm" }
+          # SHA-2 software path (skip HW cross-validation tests using SIMD)
+          - { name: sha2,     args: "-p hitls-crypto --all-features -- sha2::tests --skip compress_soft_vs_dispatch --skip multi_block_consistency" }
+          # SHA-3 software path (HW tests are cfg-gated on aarch64, auto-skipped)
+          - { name: sha3,     args: "-p hitls-crypto --all-features -- sha3::tests" }
+          # ChaCha20 software path (skip HW cross-validation tests using SIMD)
+          - { name: chacha20, args: "-p hitls-crypto --all-features -- chacha20::tests --skip soft_vs_dispatch_stress --skip keystream_256_bytes_consistency" }
+          # SM3 software path (no SIMD)
+          - { name: sm3,      args: "-p hitls-crypto --all-features -- sm3::tests" }
+          # SM4 software path (T-table, no intrinsics)
+          - { name: sm4,      args: "-p hitls-crypto --all-features -- sm4::tests" }
+          # P-256/P-384/P-521 specialized Montgomery field arithmetic (unsafe code)
+          - { name: p256,     args: "-p hitls-crypto --all-features -- ecc::p256_field::tests" }
+          - { name: p384,     args: "-p hitls-crypto --all-features -- ecc::p384_field::tests" }
+          - { name: p521,     args: "-p hitls-crypto --all-features -- ecc::p521_field::tests" }
+    env:
+      MIRIFLAGS: "-Zmiri-disable-isolation"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo miri test ${{ matrix.target.args }}
 
   fuzz-check:
     name: Fuzz Build Check
@@ -282,6 +319,11 @@ jobs:
 
   coverage:
     name: Code Coverage
+    # Schedule + PR only: coverage takes ~30 min and is the second-longest
+    # job after Miri. Pull-request runs supply diff coverage to reviewers;
+    # nightly runs publish a fresh snapshot to Codecov for trend tracking.
+    # Plain `push` events to main skip — the next PR or nightly will refresh.
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
