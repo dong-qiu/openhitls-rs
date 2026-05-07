@@ -27,14 +27,24 @@ pub mod tags {
     pub const SEQUENCE: u8 = 0x30;
     /// ASN.1 SET tag (0x31).
     pub const SET: u8 = 0x31;
+    /// ASN.1 NumericString tag (0x12).
+    pub const NUMERIC_STRING: u8 = 0x12;
     /// ASN.1 PrintableString tag (0x13).
     pub const PRINTABLE_STRING: u8 = 0x13;
+    /// ASN.1 T61String / TeletexString tag (0x14).
+    pub const T61_STRING: u8 = 0x14;
     /// ASN.1 IA5String tag (0x16).
     pub const IA5_STRING: u8 = 0x16;
     /// ASN.1 UTCTime tag (0x17).
     pub const UTC_TIME: u8 = 0x17;
     /// ASN.1 GeneralizedTime tag (0x18).
     pub const GENERALIZED_TIME: u8 = 0x18;
+    /// ASN.1 VisibleString tag (0x1A).
+    pub const VISIBLE_STRING: u8 = 0x1A;
+    /// ASN.1 UniversalString tag (0x1C) — UTF-32BE.
+    pub const UNIVERSAL_STRING: u8 = 0x1C;
+    /// ASN.1 BMPString tag (0x1E) — UTF-16BE.
+    pub const BMP_STRING: u8 = 0x1E;
     /// Context-specific tag class bit (0x80).
     pub const CONTEXT_SPECIFIC: u8 = 0x80;
     /// Constructed encoding bit (0x20).

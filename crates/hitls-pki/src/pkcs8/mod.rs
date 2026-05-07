@@ -13,6 +13,7 @@
 
 pub mod encrypted;
 
+use hitls_crypto::dh::{DhKeyPair, DhParams};
 use hitls_crypto::dsa::{DsaKeyPair, DsaParams};
 use hitls_crypto::ecdsa::EcdsaKeyPair;
 use hitls_crypto::ed25519::Ed25519KeyPair;
@@ -51,6 +52,13 @@ pub enum Pkcs8PrivateKey {
     },
     /// SM2 private key (GB/T 32918, sm2p256v1).
     Sm2(Sm2KeyPair),
+    /// Diffie-Hellman private key with domain parameters.
+    /// Carried under either `dhpublicnumber` (X9.42) or `dhKeyAgreement`
+    /// (PKCS#3) algorithm OIDs; both decode into this variant.
+    Dh {
+        params: DhParams,
+        key_pair: DhKeyPair,
+    },
 }
 
 /// A parsed SPKI (SubjectPublicKeyInfo) public key.
@@ -125,6 +133,10 @@ pub fn parse_pkcs8_der(der: &[u8]) -> Result<Pkcs8PrivateKey, CryptoError> {
         parse_x448_private_key(private_key_bytes)
     } else if algorithm_oid == known::dsa() {
         parse_dsa_private_key(&alg_params, private_key_bytes)
+    } else if algorithm_oid == known::dh_public_number()
+        || algorithm_oid == known::dh_key_agreement()
+    {
+        parse_dh_private_key(&alg_params, private_key_bytes)
     } else {
         Err(CryptoError::DecodeUnknownOid)
     }
@@ -412,6 +424,55 @@ fn parse_dsa_private_key(alg_params: &[u8], data: &[u8]) -> Result<Pkcs8PrivateK
     Ok(Pkcs8PrivateKey::Dsa { params, key_pair })
 }
 
+// ===== DH (RFC 3279 §2.3.3, PKCS#3) =====
+
+/// Parse DH domain parameters from an AlgorithmIdentifier `parameters` field.
+///
+/// X9.42 form (`dhpublicnumber`):
+/// ```text
+/// DomainParameters ::= SEQUENCE {
+///     p INTEGER,
+///     g INTEGER,
+///     q INTEGER,
+///     j INTEGER OPTIONAL,
+///     validationParms ValidationParms OPTIONAL
+/// }
+/// ```
+/// PKCS#3 form (`dhKeyAgreement`):
+/// ```text
+/// DHParameter ::= SEQUENCE {
+///     prime INTEGER,
+///     base INTEGER,
+///     privateValueLength INTEGER OPTIONAL
+/// }
+/// ```
+/// We parse just `p` and `g` from either form (X9.42's `q` and PKCS#3's
+/// `privateValueLength` are not needed to construct a [`DhParams`]).
+fn parse_dh_params(params: &[u8]) -> Result<DhParams, CryptoError> {
+    if params.is_empty() {
+        return Err(CryptoError::DecodeAsn1Fail);
+    }
+    let mut dec = Decoder::new(params);
+    let mut seq = dec.read_sequence()?;
+    let p = strip_leading_zero(seq.read_integer()?);
+    // Both forms put p first; the second integer is `g` in PKCS#3 and
+    // `g` in X9.42 too (X9.42 reorders to {p, g, q}, not {p, q, g}).
+    let g = strip_leading_zero(seq.read_integer()?);
+    DhParams::new(p, g)
+}
+
+/// Parse a DH private key from PKCS#8.
+///
+/// The privateKey OCTET STRING contains a DER-encoded INTEGER (the private
+/// exponent x). The public value y is recomputed from g, p, x.
+fn parse_dh_private_key(alg_params: &[u8], data: &[u8]) -> Result<Pkcs8PrivateKey, CryptoError> {
+    let params = parse_dh_params(alg_params)?;
+    let mut dec = Decoder::new(data);
+    let x = strip_leading_zero(dec.read_integer()?);
+    let key_pair = DhKeyPair::from_private_key(&params, x)?;
+    Ok(Pkcs8PrivateKey::Dh { params, key_pair })
+}
+
 // ===== Helpers =====
 
 /// Strip leading zero byte from DER integer (used for unsigned big-endian values).
@@ -491,6 +552,53 @@ pub fn encode_x448_pkcs8_der(seed: &[u8]) -> Vec<u8> {
     let private_key_der = inner_enc.finish();
 
     encode_pkcs8_der_raw(&known::x448(), None, &private_key_der)
+}
+
+/// Encode a DH private key as a PKCS#8 DER PrivateKeyInfo using the
+/// PKCS#3 `dhKeyAgreement` algorithm OID. Domain parameters are encoded
+/// as `DHParameter ::= SEQUENCE { prime INTEGER, base INTEGER }` (the
+/// optional `privateValueLength` is omitted).
+pub fn encode_dh_pkcs8_der(params: &DhParams, x_be: &[u8]) -> Vec<u8> {
+    // DHParameter ::= SEQUENCE { prime INTEGER, base INTEGER }
+    let mut params_enc = Encoder::new();
+    params_enc.write_integer(&params.p_bytes());
+    params_enc.write_integer(&params.g_bytes());
+    let params_body = params_enc.finish();
+    let mut params_seq = Encoder::new();
+    params_seq.write_sequence(&params_body);
+    let params_der = params_seq.finish();
+
+    // privateKey OCTET STRING wraps a DER `INTEGER(x)`
+    let mut x_enc = Encoder::new();
+    x_enc.write_integer(x_be);
+    let x_der = x_enc.finish();
+
+    encode_pkcs8_der_raw(&known::dh_key_agreement(), Some(&params_der), &x_der)
+}
+
+/// Encode a DSA private key as a PKCS#8 DER PrivateKeyInfo.
+///
+/// `params` carries the DSA domain parameters (`p`, `q`, `g`); `x_be` is
+/// the private exponent in big-endian. The output uses the
+/// `dsa` algorithm OID (1.2.840.10040.4.1) with `DSAParameters` in
+/// the algorithm parameters and a DER `INTEGER(x)` as the privateKey.
+pub fn encode_dsa_pkcs8_der(params: &hitls_crypto::dsa::DsaParams, x_be: &[u8]) -> Vec<u8> {
+    // DSAParameters ::= SEQUENCE { p INTEGER, q INTEGER, g INTEGER }
+    let mut params_enc = Encoder::new();
+    params_enc.write_integer(&params.p_bytes());
+    params_enc.write_integer(&params.q_bytes());
+    params_enc.write_integer(&params.g_bytes());
+    let params_body = params_enc.finish();
+    let mut params_seq = Encoder::new();
+    params_seq.write_sequence(&params_body);
+    let params_der = params_seq.finish();
+
+    // privateKey OCTET STRING wraps a DER `INTEGER(x)`
+    let mut x_enc = Encoder::new();
+    x_enc.write_integer(x_be);
+    let x_der = x_enc.finish();
+
+    encode_pkcs8_der_raw(&known::dsa(), Some(&params_der), &x_der)
 }
 
 // ===== SPKI (SubjectPublicKeyInfo) Parsing =====
@@ -633,6 +741,45 @@ mod tests {
         match key {
             Pkcs8PrivateKey::X25519(_) => {}
             _ => panic!("Expected X25519 key"),
+        }
+    }
+
+    #[test]
+    fn test_encode_dh_pkcs8_der_roundtrip() {
+        // Tiny RFC 7919 ffdhe2048-style toy params for fast round-trip:
+        // p = a small safe prime, g = 2, x = 5.
+        // Real DH uses 2048+ bits; this is just exercising the codec.
+        // NB: 23 (= 0x17) is a safe prime (q = 11) so DH is well-defined.
+        let params = hitls_crypto::dh::DhParams::new(&hex("17"), &hex("02")).unwrap();
+        let x = hex("05");
+        let der = encode_dh_pkcs8_der(&params, &x);
+
+        let parsed = parse_pkcs8_der(&der).unwrap();
+        match parsed {
+            Pkcs8PrivateKey::Dh { params: p, .. } => {
+                assert_eq!(p.p_bytes(), hex("17"));
+                assert_eq!(p.g_bytes(), hex("02"));
+            }
+            _ => panic!("Expected DH key"),
+        }
+    }
+
+    #[test]
+    fn test_encode_dsa_pkcs8_der_roundtrip() {
+        // Small parameters for test only — real DSA uses 1024+/160+ bit p/q.
+        // p = 23, q = 11, g = 4, x = 5
+        let params = hitls_crypto::dsa::DsaParams::new(&hex("17"), &hex("0b"), &hex("04")).unwrap();
+        let x = hex("05");
+        let der = encode_dsa_pkcs8_der(&params, &x);
+
+        let parsed = parse_pkcs8_der(&der).unwrap();
+        match parsed {
+            Pkcs8PrivateKey::Dsa { params: p, .. } => {
+                assert_eq!(p.p_bytes(), hex("17"));
+                assert_eq!(p.q_bytes(), hex("0b"));
+                assert_eq!(p.g_bytes(), hex("04"));
+            }
+            _ => panic!("Expected DSA key"),
         }
     }
 

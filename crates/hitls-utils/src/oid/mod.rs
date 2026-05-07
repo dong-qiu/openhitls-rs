@@ -259,6 +259,18 @@ pub mod known {
         Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 2])
     }
 
+    /// OID for ANSI X9.42 Diffie-Hellman public-number algorithm
+    /// (1.2.840.10046.2.1). Modern DH PKCS#8 / SPKI form, used in
+    /// `dhpublicnumber` AlgorithmIdentifier per RFC 3279 §2.3.3.
+    pub fn dh_public_number() -> Oid {
+        Oid::new(&[1, 2, 840, 10046, 2, 1])
+    }
+    /// OID for legacy PKCS#3 dhKeyAgreement (1.2.840.113549.1.3.1).
+    /// Older DH encoding; some toolchains still emit this.
+    pub fn dh_key_agreement() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 1, 3, 1])
+    }
+
     /// OID for sha1WithRSAEncryption (1.2.840.113549.1.1.5).
     pub fn sha1_with_rsa_encryption() -> Oid {
         Oid::new(&[1, 2, 840, 113549, 1, 1, 5])

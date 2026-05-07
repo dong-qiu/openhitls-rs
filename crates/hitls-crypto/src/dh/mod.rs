@@ -208,6 +208,45 @@ impl DhKeyPair {
     pub fn public_key_bytes(&self, params: &DhParams) -> Result<Vec<u8>, CryptoError> {
         self.public_key.to_bytes_be_padded(params.prime_size())
     }
+
+    /// Return the private exponent in big-endian bytes (no padding).
+    pub fn private_key_bytes(&self) -> Vec<u8> {
+        self.private_key.to_bytes_be()
+    }
+
+    /// Reconstruct a [`DhKeyPair`] from a known private exponent `x`.
+    ///
+    /// Computes the public value y = g^x mod p. Validates that x is in
+    /// [2, p-2] and that the resulting y is also in [2, p-2]; returns
+    /// `InvalidArg` otherwise. Used by PKCS#8 import paths.
+    pub fn from_private_key(params: &DhParams, x_be: &[u8]) -> Result<Self, CryptoError> {
+        let x = BigNum::from_bytes_be(x_be);
+        let two = BigNum::from_u64(2);
+        let p_minus_1 = params.p.sub(&BigNum::from_u64(1));
+        let p_minus_2 = params.p.sub(&two);
+
+        if x < two || x > p_minus_2 {
+            return Err(CryptoError::InvalidArg("DH private key out of range"));
+        }
+
+        let y = if let Some(id) = params.param_id {
+            let cache = get_group_cache(id, params);
+            cache.ctx.mont_exp_with_table(&cache.gen_table, &x)?
+        } else {
+            params.g.mod_exp(&x, &params.p)?
+        };
+
+        if y <= BigNum::from_u64(1) || y >= p_minus_1 {
+            return Err(CryptoError::InvalidArg(
+                "DH derived public key out of range",
+            ));
+        }
+
+        Ok(DhKeyPair {
+            private_key: x,
+            public_key: y,
+        })
+    }
 }
 
 #[cfg(test)]

@@ -117,6 +117,41 @@ impl Encoder {
         self.write_tlv(0x16, s.as_bytes())
     }
 
+    /// Write a NumericString (tag 0x12). Caller is responsible for ensuring
+    /// `s` contains only digits 0-9 and ASCII space; this helper does not
+    /// validate.
+    pub fn write_numeric_string(&mut self, s: &str) -> &mut Self {
+        self.write_tlv(0x12, s.as_bytes())
+    }
+
+    /// Write a VisibleString (tag 0x1A). Caller is responsible for ensuring
+    /// `s` is ASCII in the visible range (0x20-0x7E); this helper does not
+    /// validate.
+    pub fn write_visible_string(&mut self, s: &str) -> &mut Self {
+        self.write_tlv(0x1A, s.as_bytes())
+    }
+
+    /// Write a BMPString (tag 0x1E) using UTF-16BE encoding. Surrogate pairs
+    /// are emitted for code points outside the BMP, matching in-the-wild X.509
+    /// usage rather than the strict BMP-only definition.
+    pub fn write_bmp_string(&mut self, s: &str) -> &mut Self {
+        let mut bytes = Vec::with_capacity(s.len() * 2);
+        for u in s.encode_utf16() {
+            bytes.extend_from_slice(&u.to_be_bytes());
+        }
+        self.write_tlv(0x1E, &bytes)
+    }
+
+    /// Write a UniversalString (tag 0x1C) using UTF-32BE encoding (4 bytes
+    /// per code point).
+    pub fn write_universal_string(&mut self, s: &str) -> &mut Self {
+        let mut bytes = Vec::with_capacity(s.chars().count() * 4);
+        for ch in s.chars() {
+            bytes.extend_from_slice(&(ch as u32).to_be_bytes());
+        }
+        self.write_tlv(0x1C, &bytes)
+    }
+
     /// Write a BOOLEAN (tag 0x01).
     pub fn write_boolean(&mut self, val: bool) -> &mut Self {
         self.write_tlv(0x01, &[if val { 0xFF } else { 0x00 }])
@@ -226,6 +261,41 @@ mod tests {
         enc.write_printable_string("CN");
         let der = enc.finish();
         assert_eq!(der, &[0x13, 2, b'C', b'N']);
+    }
+
+    #[test]
+    fn test_write_numeric_string() {
+        let mut enc = Encoder::new();
+        enc.write_numeric_string("42");
+        assert_eq!(enc.finish(), &[0x12, 2, b'4', b'2']);
+    }
+
+    #[test]
+    fn test_write_visible_string() {
+        let mut enc = Encoder::new();
+        enc.write_visible_string("Hi");
+        assert_eq!(enc.finish(), &[0x1A, 2, b'H', b'i']);
+    }
+
+    #[test]
+    fn test_write_bmp_string_roundtrip() {
+        let mut enc = Encoder::new();
+        enc.write_bmp_string("中");
+        let der = enc.finish();
+        assert_eq!(&der[..2], &[0x1E, 2]);
+        let mut dec = Decoder::new(&der);
+        assert_eq!(dec.read_string().unwrap(), "中");
+    }
+
+    #[test]
+    fn test_write_universal_string_roundtrip() {
+        let mut enc = Encoder::new();
+        enc.write_universal_string("中Aa");
+        let der = enc.finish();
+        // 3 code points × 4 bytes
+        assert_eq!(&der[..2], &[0x1C, 12]);
+        let mut dec = Decoder::new(&der);
+        assert_eq!(dec.read_string().unwrap(), "中Aa");
     }
 
     #[test]

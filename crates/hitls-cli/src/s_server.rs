@@ -197,8 +197,11 @@ fn pkcs8_to_server_key(
             // on hitls-tls), so SM2 server keys are not supported here.
             Err("SM2 server keys are not supported by s_server (TLCP feature not enabled)".into())
         }
-        Pkcs8PrivateKey::X25519(_) | Pkcs8PrivateKey::X448(_) | Pkcs8PrivateKey::Dsa { .. } => Err(
-            "unsupported key type for TLS server (X25519/X448/DSA not valid for signing)".into(),
+        Pkcs8PrivateKey::X25519(_)
+        | Pkcs8PrivateKey::X448(_)
+        | Pkcs8PrivateKey::Dsa { .. }
+        | Pkcs8PrivateKey::Dh { .. } => Err(
+            "unsupported key type for TLS server (X25519/X448/DSA/DH not valid for signing)".into(),
         ),
     }
 }

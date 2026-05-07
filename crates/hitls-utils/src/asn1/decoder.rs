@@ -179,17 +179,39 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    /// Read a string value (UTF8String, PrintableString, IA5String,
-    /// T61String, or BMPString) and return it as a Rust `String`.
+    /// Read a string value and return it as a Rust `String`.
+    ///
+    /// Supported ASN.1 string types:
+    /// - UTF8String (0x0C), PrintableString (0x13), IA5String (0x16),
+    ///   VisibleString (0x1A), NumericString (0x12) — all 7-bit ASCII subsets
+    ///   that round-trip cleanly as UTF-8.
+    /// - T61String / TeletexString (0x14) — interpreted as Latin-1
+    ///   (the de-facto in-the-wild encoding; full T.61 mapping is rare).
+    /// - BMPString (0x1E) — UTF-16BE.
+    /// - UniversalString (0x1C) — UTF-32BE.
     pub fn read_string(&mut self) -> Result<String, CryptoError> {
         let tlv = self.read_tlv()?;
         match tlv.tag.number {
-            // UTF8String (0x0C), PrintableString (0x13), IA5String (0x16)
-            0x0C | 0x13 | 0x16 => {
+            // UTF8String (0x0C), NumericString (0x12), PrintableString (0x13),
+            // IA5String (0x16), VisibleString (0x1A) — all parse as UTF-8.
+            0x0C | 0x12 | 0x13 | 0x16 | 0x1A => {
                 String::from_utf8(tlv.value.to_vec()).map_err(|_| CryptoError::DecodeAsn1Fail)
             }
             // T61String / TeletexString (0x14) — treat as Latin-1
             0x14 => Ok(tlv.value.iter().map(|&b| b as char).collect()),
+            // UniversalString (0x1C) — UTF-32BE, 4 bytes per code point
+            0x1C => {
+                if tlv.value.len() % 4 != 0 {
+                    return Err(CryptoError::DecodeAsn1Fail);
+                }
+                let mut out = String::with_capacity(tlv.value.len() / 4);
+                for chunk in tlv.value.chunks(4) {
+                    let cp = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    let ch = char::from_u32(cp).ok_or(CryptoError::DecodeAsn1Fail)?;
+                    out.push(ch);
+                }
+                Ok(out)
+            }
             // BMPString (0x1E) — UTF-16BE
             0x1E => {
                 if tlv.value.len() % 2 != 0 {
@@ -367,6 +389,54 @@ mod tests {
         let data = [0x13, 0x02, b'C', b'N'];
         let mut dec = Decoder::new(&data);
         assert_eq!(dec.read_string().unwrap(), "CN");
+    }
+
+    #[test]
+    fn test_read_string_numeric() {
+        // NumericString "42 7"
+        let data = [0x12, 0x04, b'4', b'2', b' ', b'7'];
+        let mut dec = Decoder::new(&data);
+        assert_eq!(dec.read_string().unwrap(), "42 7");
+    }
+
+    #[test]
+    fn test_read_string_visible() {
+        // VisibleString "Hi!"
+        let data = [0x1A, 0x03, b'H', b'i', b'!'];
+        let mut dec = Decoder::new(&data);
+        assert_eq!(dec.read_string().unwrap(), "Hi!");
+    }
+
+    #[test]
+    fn test_read_string_universal() {
+        // UniversalString "中" — UTF-32BE: 0x0000 4E2D
+        let data = [0x1C, 0x04, 0x00, 0x00, 0x4E, 0x2D];
+        let mut dec = Decoder::new(&data);
+        assert_eq!(dec.read_string().unwrap(), "中");
+    }
+
+    #[test]
+    fn test_read_string_universal_odd_length_rejected() {
+        // UniversalString with 6 bytes (not a multiple of 4) → reject
+        let data = [0x1C, 0x06, 0x00, 0x00, 0x4E, 0x2D, 0x00, 0x00];
+        let mut dec = Decoder::new(&data);
+        assert!(dec.read_string().is_err());
+    }
+
+    #[test]
+    fn test_read_string_universal_invalid_codepoint_rejected() {
+        // UniversalString with 0x0011_0000 (above the Unicode max)
+        let data = [0x1C, 0x04, 0x00, 0x11, 0x00, 0x00];
+        let mut dec = Decoder::new(&data);
+        assert!(dec.read_string().is_err());
+    }
+
+    #[test]
+    fn test_read_string_bmp_roundtrip() {
+        // BMPString "中" — UTF-16BE: 0x4E2D
+        let data = [0x1E, 0x02, 0x4E, 0x2D];
+        let mut dec = Decoder::new(&data);
+        assert_eq!(dec.read_string().unwrap(), "中");
     }
 
     #[test]
