@@ -4233,3 +4233,56 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - **Deferred B4 items** (with rationale): X25519 cert (already supported in PKCS#8 path); ASN.1 charset (test count vs scope unclear, defer); ISO9796-2 RSA (legacy banking-only, low value); SHA256-MB (pure performance with complex SIMD, defer); DSA/DH key codec (large surface, low priority).
 - Tests: 4,036 passed / 35 ignored / 0 failed (+6 from I88 baseline). Clippy on Rust 1.95: 0 warnings. Fmt clean.
 - Documentation: DEV_LOG.md +1 phase index row + Phase I89 detail; CLAUDE.md status line updated to I89; README.md test count 4065→4071; this PROMPT_LOG entry.
+
+### Prompt 271: ct-Verification Schedule Gate
+
+> 每次运行 CI，Constant-Time Verification都会出错，主要是什么原因？
+
+**Result**:
+- Diagnosed root cause: dudect-style Welch's t-test on GH Actions shared runners produces |t| = 6-150 against 4.5 threshold even when the underlying ct_eq is provably constant-time. Root causes: CPU frequency scaling (Azure VMs), hyperthread neighbour cache pollution, hypervisor steal time, `Instant::now()` overhead (~20 ns) > measured op (~5-20 ns), Welch's t-test sensitivity to heavy-tailed distributions caused by OS interrupts in batches.
+- Industry practice (rustls / ring / BoringSSL): run dudect on bare-metal benchmarking hosts, not cloud CI.
+- The user requested gating to schedule-only.
+
+### Prompt 272: Implement ct Schedule Gate (T81 Part A)
+
+> 要做
+
+**Result**:
+- Commit `c1ae009` adds `if: github.event_name == 'schedule'` to the `Constant-Time Verification (Core)` job. The job retains `continue-on-error: true` and now matches the existing `(Extended)` job's schedule-only behaviour. Added an explanatory annotation step on failure.
+- CI run 25414052183: success — Core ct now appears as `skipped` instead of `failed` on PR/push. Workflow is finally green with no red X (35 success / 10 skipped / 0 failures).
+
+### Prompt 273: CI Wall-Clock Analysis
+
+> 现在 CI 的执行时间较长，验证效率低，有没有提升 CI 效率的建议？
+
+**Result**:
+- Analysed run 25378563244 timings: total ~84 min, Miri (UB detection) was the critical-path job at ~82 min (14 sequential `cargo miri test` invocations). Code Coverage second longest at ~31 min. Feature Powerset depth 2 at ~10.7 min.
+- Proposed 5-step plan ranked by ROI: (1) Miri matrix fan-out + smoke gate, (2) Coverage schedule gate, (3) Powerset depth gate, (4) rust-cache `save-if`, (5) self-hosted runner for ct.
+- Projected PR/push CI from 84 min → ~10 min (8×).
+
+### Prompt 274: Execute CI Optimisation Plan (T81 Parts B-D)
+
+> 继续
+
+**Result**:
+- Commit `6ae2c35` (Phase T81 main) implements:
+  - Miri split: `miri-smoke` (PR/push, runs `-p hitls-bignum` only, ~3 min) + `miri-full` (schedule, 14-way matrix fan-out, critical path ~25 min).
+  - Coverage gated to `pull_request || schedule`.
+  - Powerset depth 1 (PR/push) / depth 2 (schedule).
+- CI run 25417307186: 638 s (10.6 min wall) — 8× speed-up vs 84 min baseline. 34 success / 12 skipped / 0 failures.
+
+### Prompt 275: Continue Schedule-Run Optimisation (T81 Part C)
+
+> 继续优化 schedule run
+
+**Result**:
+- Commit `136128b` splits `Code Coverage` into 8-way per-crate matrix fan-out. Each entry uploads to Codecov with `flags: <crate>` so `.codecov.yml`'s 88% project + 70% patch thresholds keep working on merged data. Distinct `shared-key: cov-<crate>` cache per matrix entry. Dropped redundant inline `< 60%` Bash threshold check.
+- CI run 25419955339: 9.8 min wall (push, where Coverage matrix is correctly skipped). Schedule-run wall projection: ~25-30 min (Coverage 31 → ~10 min, Miri 80 → ~25 min serial → parallel).
+- Other schedule optimisations evaluated and declined (Test matrix trim, ASan split, Cross-compile reduction) — marginal gain vs loss of CI breadth on the nightly safety-net run.
+
+### Prompt 276: Phase T81 Documentation
+
+> 接下来该做什么？
+
+**Result**:
+- Per CLAUDE.md post-task documentation rules, added Phase T81 narrative covering all four parts (ct gate / Miri fan-out / Coverage matrix / Powerset depth) to DEV_LOG.md; updated index header (T1–T80 → T1–T81); updated CLAUDE.md status line; this PROMPT_LOG entry.

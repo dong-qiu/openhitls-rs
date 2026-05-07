@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I89 (89 phases)
-- Testing: T1–T80 (79 phases, T64 skipped)
+- Testing: T1–T81 (80 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
 
@@ -277,6 +277,7 @@ Category summary:
 | 265 | I88 | Impl | Backport from openHiTLS C v0.3.2 — TLS 1.3 Record Boundary + PHA ct_eq + MtE Padding Constant-Time | 2026-05-05 |
 | 266 | T80 | Test | CI Compatibility: Rust 1.95 Clippy Promotions + audit-check Ignore + Permissions | 2026-05-05 |
 | 267 | I89 | Impl | EMS Three-State Mode (RFC 7627) + SM2 PKCS#8 OID Compatibility | 2026-05-05 |
+| 268 | T81 | Test | CI Wall-Clock Optimisation: ct-Verification Gate + Miri Fan-Out + Coverage Per-Crate Matrix | 2026-05-06 |
 
 ---
 
@@ -14067,3 +14068,81 @@ Rust previously had no SM2 dispatch in `parse_pkcs8_der` — both Form 1 (ecPubl
 - `cargo test --workspace --all-features`: 4,036 passed, 0 failed, 35 ignored (4,071 total)
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase T81 — CI Wall-Clock Optimisation (2026-05-06)
+
+### Summary
+Reduced per-push/PR CI wall-clock time from **~84 min to ~10 min (8× speed-up)** and projected schedule-run time from **~80 min to ~25-30 min (3× speed-up)** by gating heavy jobs to nightly `schedule` runs and parallelising the two longest critical-path jobs (Miri, Coverage). Three independent commits on `main`:
+
+- `c1ae009` — gate Constant-Time Verification (Core) to `schedule` only
+- `6ae2c35` — Miri fan-out (smoke + 14-way matrix) + Coverage gate + Powerset depth gate
+- `136128b` — Coverage per-crate matrix fan-out
+
+### Part A — Constant-Time Verification gate (`c1ae009`)
+
+The `dudect`-style Welch's t-test job (`Constant-Time Verification (Core)`) was failing on every PR/push with `|t|`-statistics in the 6-150 range against a 4.5 threshold. Investigation showed all four flagged sites (HMAC verify, AES-GCM tag, BigNum `ct_eq`, SM4-GCM tag) use `subtle::ConstantTimeEq` and are provably constant-time at the source level — the failures were environmental noise from GH Actions shared runners (CPU frequency scaling, hyperthread neighbour interference, hypervisor steal time, `Instant::now()` overhead vs ~5-20 ns measured op).
+
+Industry practice (rustls / ring / BoringSSL) is to run `dudect` on bare-metal benchmarking hosts, not cloud CI. The job already had `continue-on-error: true` so it never blocked the workflow, but the red X on every PR was misleading. Moved behind `if: github.event_name == 'schedule'` so it runs only nightly alongside the existing `(Extended)` job — both retain `continue-on-error: true` and an explanatory annotation on failure. Genuine ct regressions still surface in the nightly report.
+
+### Part B — Miri fan-out (`6ae2c35`)
+
+The `Miri (UB detection)` job ran 14 sequential `cargo miri test` invocations in a single `ubuntu-latest` job; serial wall time was the dominant CI cost (~80 min). Split into:
+
+- `miri-smoke` (PR/push): runs only `cargo miri test -p hitls-bignum` — the module most likely to introduce miri-detectable UB in modular arithmetic. ~3 min wall.
+- `miri-full` (schedule): 14-way matrix fan-out — each target runs on its own runner. Critical path now equals the slowest single target (~15-25 min depending on input) instead of the sum of all 14.
+
+Both variants use `Swatinem/rust-cache@v2`; the previous serial job was uncached, so each push rebuilt the world from scratch.
+
+### Part C — Coverage gate + per-crate fan-out (`6ae2c35` + `136128b`)
+
+`Code Coverage` (cargo-llvm-cov) was ~31 min on every push. Two changes:
+
+1. **Gated to `pull_request || schedule`** — plain push to main no longer triggers the report; PRs still see diff coverage and nightly refreshes the Codecov trend.
+2. **Per-crate matrix fan-out** — split the workspace coverage into 8 parallel jobs, one per crate. Each entry uploads to Codecov with a `flags: <crate>` label so the `.codecov.yml` per-component thresholds (88% project / 70% patch) keep working on the merged data — Codecov auto-merges multiple uploads from the same commit. Distinct `shared-key: cov-<crate>` cache per matrix entry avoids cache thrashing. Critical path drops from ~31 min serial to ~10 min (longest single crate, hitls-crypto / hitls-tls).
+3. **Dropped inline `< 60%` Bash threshold** — it was weaker than `.codecov.yml`'s 88% project gate and only printed warnings; the proper enforcement path is the Codecov status check on the PR.
+
+### Part D — Feature Powerset depth gate (`6ae2c35`)
+
+`cargo hack --feature-powerset --depth 2 --no-dev-deps` (~10 min) ran on every push. Now gated:
+- PR/push: `--depth 1` — single-feature gates, catches the bulk of missing-`#[cfg(feature)]` errors. ~30 s.
+- schedule: `--depth 2` — every pair, full coverage. ~10 min, but parallel with other jobs in the same run.
+
+### Wall-Clock Measurements
+
+| Run | Time | Trigger | Notes |
+|-----|------|---------|-------|
+| 25378563244 | 84 min | push (pre-T81) | Miri serial 80 min dominates |
+| 25417307186 | 10.6 min | push (post-T81 Part A+B+D) | 8× speed-up, Miri smoke + Coverage skipped |
+| 25419955339 | 9.8 min | push (post-T81 Part C) | Same path, no regression from coverage matrix |
+| _next nightly_ | _projected ~25-30 min_ | schedule | Coverage matrix + Miri fan-out parallelised |
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/ci.yml` | Modified (3 commits) | Part A: ct-verification schedule gate; Part B: Miri smoke + full-matrix split; Part C: Coverage `pull_request`/`schedule` gate + per-crate matrix; Part D: Powerset depth gate |
+
+### Test Count (Post T81)
+
+Test counts unchanged from I89 — this phase modifies CI workflow only, not test or library code.
+
+| Crate | Count |
+|-------|-------|
+| hitls-crypto | 1448 (22 ignored) |
+| hitls-tls | 1488 |
+| hitls-pki | 439 |
+| hitls-bignum | 95 (1 ignored) |
+| hitls-utils | 68 |
+| hitls-auth | 47 |
+| hitls-types | 26 |
+| hitls-cli | 161 (5 ignored) |
+| hitls-integration-tests | 264 (7 ignored) |
+| **Total** | **4071 (35 ignored)** |
+
+### Build Status (Post T81)
+- `cargo test --workspace --all-features`: 4,036 passed, 0 failed, 35 ignored (4,071 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+- **CI run 25419955339 conclusion: success** (~9.8 min, 34 success / 12 skipped / 0 failures)
