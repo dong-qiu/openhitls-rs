@@ -6,3 +6,8 @@
 .DS_Store
 .vscode/
 .claude/settings.local.json
+.claude/settings.local.json.bak
+.claude/settings.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+/worktrees/
