@@ -1,9 +1,10 @@
 //! RSA (Rivest-Shamir-Adleman) public-key cryptosystem.
 //!
 //! Provides RSA key generation, encryption/decryption, and signing/verification.
-//! Supports PKCS#1 v1.5, OAEP, and PSS padding schemes. Key sizes of 2048,
-//! 3072, and 4096 bits are recommended.
+//! Supports PKCS#1 v1.5, OAEP, PSS, and ISO/IEC 9796-2:1997 Scheme 1 padding
+//! schemes. Key sizes of 2048, 3072, and 4096 bits are recommended.
 
+mod iso9796_2;
 mod oaep;
 mod pkcs1v15;
 mod pss;
@@ -32,6 +33,10 @@ pub enum RsaPadding {
     Oaep,
     /// PSS padding (for signatures).
     Pss,
+    /// ISO/IEC 9796-2:1997 Scheme 1 padding for signatures.
+    /// Encoded form: `0x6A || H(m) || 0xBC`. Deterministic, no message
+    /// recovery, no DigestInfo prefix.
+    Iso9796_2,
     /// No padding (raw RSA) -- use with extreme caution.
     None,
 }
@@ -122,6 +127,7 @@ impl RsaPublicKey {
         match padding {
             RsaPadding::Pkcs1v15Sign => pkcs1v15::pkcs1v15_verify_unpad(&em, digest, self.k),
             RsaPadding::Pss => pss::pss_verify_unpad(&em, digest, self.bits - 1),
+            RsaPadding::Iso9796_2 => iso9796_2::iso9796_2_verify(&em, digest),
             _ => Err(CryptoError::InvalidArg("")),
         }
     }
@@ -339,6 +345,10 @@ impl RsaPrivateKey {
             }
             RsaPadding::Pss => {
                 let em = pss::pss_sign_pad(digest, self.bits - 1)?;
+                self.raw_decrypt(&em)
+            }
+            RsaPadding::Iso9796_2 => {
+                let em = iso9796_2::iso9796_2_encode(digest, self.k)?;
                 self.raw_decrypt(&em)
             }
             RsaPadding::None => self.raw_decrypt(digest),
@@ -579,6 +589,53 @@ mod tests {
             .verify(RsaPadding::Pkcs1v15Sign, &bad_digest, &sig)
             .unwrap();
         assert!(!invalid);
+    }
+
+    #[test]
+    fn test_rsa_iso9796_2_sign_verify() {
+        let (n, e, d, p, q) = test_key_1024();
+        let pub_key = RsaPublicKey::new(&n, &e).unwrap();
+        let priv_key = RsaPrivateKey::new(&n, &d, &e, &p, &q).unwrap();
+
+        // SHA-256 digest of "hello" (32 bytes); RSA-1024 modulus is 128 bytes,
+        // so EM = 0x6A || hash(32) || 94 zero bytes || 0xBC fits comfortably.
+        let digest = hex("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+
+        let sig = priv_key.sign(RsaPadding::Iso9796_2, &digest).unwrap();
+        assert_eq!(sig.len(), priv_key.k);
+
+        let valid = pub_key
+            .verify(RsaPadding::Iso9796_2, &digest, &sig)
+            .unwrap();
+        assert!(valid);
+
+        // Tampered digest must fail.
+        let mut bad_digest = digest.clone();
+        bad_digest[0] ^= 0x01;
+        let invalid = pub_key
+            .verify(RsaPadding::Iso9796_2, &bad_digest, &sig)
+            .unwrap();
+        assert!(!invalid);
+
+        // Tampered signature must fail.
+        let mut bad_sig = sig.clone();
+        bad_sig[0] ^= 0x01;
+        let bad_verify = pub_key
+            .verify(RsaPadding::Iso9796_2, &digest, &bad_sig)
+            .unwrap();
+        assert!(!bad_verify);
+    }
+
+    #[test]
+    fn test_rsa_iso9796_2_determinism() {
+        // Scheme 1 is deterministic — signing the same digest twice must
+        // produce byte-identical signatures.
+        let (n, e, d, p, q) = test_key_1024();
+        let priv_key = RsaPrivateKey::new(&n, &d, &e, &p, &q).unwrap();
+        let digest = [0x55u8; 32];
+        let sig_a = priv_key.sign(RsaPadding::Iso9796_2, &digest).unwrap();
+        let sig_b = priv_key.sign(RsaPadding::Iso9796_2, &digest).unwrap();
+        assert_eq!(sig_a, sig_b);
     }
 
     #[test]
