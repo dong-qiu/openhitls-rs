@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I89 (89 phases)
+- Implementation: I1–I90 (90 phases)
 - Testing: T1–T81 (80 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
@@ -278,6 +278,7 @@ Category summary:
 | 266 | T80 | Test | CI Compatibility: Rust 1.95 Clippy Promotions + audit-check Ignore + Permissions | 2026-05-05 |
 | 267 | I89 | Impl | EMS Three-State Mode (RFC 7627) + SM2 PKCS#8 OID Compatibility | 2026-05-05 |
 | 268 | T81 | Test | CI Wall-Clock Optimisation: ct-Verification Gate + Miri Fan-Out + Coverage Per-Crate Matrix | 2026-05-06 |
+| 269 | I90 | Impl | ASN.1 Charset Expansion + DSA/DH PKCS#8 Codec | 2026-05-07 |
 
 ---
 
@@ -14146,3 +14147,107 @@ Test counts unchanged from I89 — this phase modifies CI workflow only, not tes
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean
 - **CI run 25419955339 conclusion: success** (~9.8 min, 34 success / 12 skipped / 0 failures)
+
+---
+
+## Phase I90 — ASN.1 Charset Expansion + DSA/DH PKCS#8 Codec (2026-05-07)
+
+### Summary
+Three independent improvements grouped under one phase, all derived from the openHiTLS C v0.3.2 deferred B4 backlog after the analysis in Phase I89:
+
+- **Part A (C `07ed2b31`)**: ASN.1 character-set parsing/encoding extended with UniversalString (UTF-32BE), VisibleString and NumericString.
+- **Part B (C `7d86fc7a`)**: Public `encode_dsa_pkcs8_der` helper symmetric with the existing `parse_dsa_private_key`.
+- **Part C (C `7d86fc7a`)**: Full DH PKCS#8 codec (OIDs, key-pair API, Pkcs8 enum variant, parser, encoder).
+
+Two B4 candidates were evaluated and excluded:
+- **X25519 cert support** (C `ce5f2fcf`): already complete in Rust — `parse_spki_der` dispatches X25519 (32 bytes) and X448 (56 bytes) bit strings into `SpkiPublicKey::X25519/X448`; X.509 certificate parsing is generic over algorithm OID, and chain verification uses the issuer's signature alg, so an X25519 cert just needs SPKI extraction (already there). The C commit added test fixture data, not new code paths Rust was missing.
+- **ISO9796-2:1997 RSA** (C `0d96cb28`) and **SHA256-MB** (C `17f4aebf`): deferred — niche legacy and high-effort SIMD, respectively.
+
+### Part A — ASN.1 Character Sets
+
+`hitls-utils/src/asn1/decoder.rs` `read_string` previously matched five tag numbers (UTF8 `0x0C`, PrintableString `0x13`, IA5 `0x16`, T61 `0x14`, BMP `0x1E`). Extended to also accept:
+
+- **NumericString (0x12)** — digits `0-9` and ASCII space; same UTF-8 path as Printable/IA5/UTF8.
+- **VisibleString (0x1A)** — ASCII `0x20-0x7E`; same UTF-8 path.
+- **UniversalString (0x1C)** — UTF-32BE, four bytes per code point. Validates length is a multiple of 4 and rejects values above U+10FFFF.
+
+`hitls-utils/src/asn1/encoder.rs` gained four new helpers, mirrored after `write_utf8_string` / `write_printable_string`:
+
+```rust
+pub fn write_numeric_string(&mut self, s: &str) -> &mut Self;
+pub fn write_visible_string(&mut self, s: &str) -> &mut Self;
+pub fn write_bmp_string(&mut self, s: &str) -> &mut Self;        // UTF-16BE
+pub fn write_universal_string(&mut self, s: &str) -> &mut Self;  // UTF-32BE
+```
+
+`hitls-utils/src/asn1/mod.rs` added the missing tag constants (`NUMERIC_STRING 0x12`, `T61_STRING 0x14`, `VISIBLE_STRING 0x1A`, `UNIVERSAL_STRING 0x1C`, `BMP_STRING 0x1E`).
+
+`+10 tests` covering each new tag (parse, encode, roundtrip, malformed-length rejection, out-of-range code-point rejection).
+
+### Part B — DSA PKCS#8 Encoder
+
+The existing `parse_dsa_private_key` in `hitls-pki/src/pkcs8/mod.rs` had no symmetric public encoder; existing tests synthesised the DER manually via `encode_pkcs8_der_raw`. Added:
+
+```rust
+pub fn encode_dsa_pkcs8_der(params: &hitls_crypto::dsa::DsaParams, x_be: &[u8]) -> Vec<u8>;
+```
+
+Builds the `DSAParameters ::= SEQUENCE { p, q, g }` AlgorithmIdentifier parameters and a `DER INTEGER(x)` privateKey, wrapped via `encode_pkcs8_der_raw` with the `dsa()` algorithm OID (1.2.840.10040.4.1).
+
+### Part C — DH PKCS#8 Full Codec
+
+Rust previously had **no** DH PKCS#8 path — `parse_pkcs8_der` returned `DecodeUnknownOid` for both encoding forms. Added:
+
+1. **OIDs** in `hitls-utils/src/oid/mod.rs`:
+   - `dh_public_number()` — ANSI X9.42 `dhpublicnumber` (1.2.840.10046.2.1), modern form per RFC 3279 §2.3.3.
+   - `dh_key_agreement()` — legacy PKCS#3 `dhKeyAgreement` (1.2.840.113549.1.3.1).
+
+2. **Crypto API** on `DhKeyPair` in `hitls-crypto/src/dh/mod.rs`:
+   - `private_key_bytes() -> Vec<u8>` — big-endian private exponent (no padding).
+   - `from_private_key(params, x_be) -> Result<Self, CryptoError>` — validates `x ∈ [2, p-2]`, computes `y = g^x mod p` (using the cached `MontExpTable` for predefined groups), and rejects boundary cases for the derived public value. Used by the PKCS#8 import path.
+
+3. **PKI enum + dispatch** in `hitls-pki/src/pkcs8/mod.rs`:
+   - New `Pkcs8PrivateKey::Dh { params, key_pair }` variant.
+   - `parse_pkcs8_der` dispatches both DH algorithm OIDs into `parse_dh_private_key`.
+   - `parse_dh_params` accepts both encodings: X9.42's `SEQUENCE { p, g, q, ... }` and PKCS#3's `SEQUENCE { p, g, [privateValueLength] }` — only `p` and `g` are read, which suffices for both forms.
+   - `parse_dh_private_key` reads the privateKey OCTET STRING's `INTEGER(x)` and reconstructs the key pair via `DhKeyPair::from_private_key`.
+   - `encode_dh_pkcs8_der(params, x_be)` emits the PKCS#3 form (the simpler `SEQUENCE { p, g }`).
+
+4. **CLI** (`hitls-cli/src/s_server.rs`): the unsupported-key match arm extended to reject `Pkcs8PrivateKey::Dh { .. }` — DH cannot sign for TLS.
+
+5. **Cargo wiring**: `hitls-pki/Cargo.toml` adds `dh` to its `hitls-crypto` feature set so the new `DhKeyPair`/`DhParams` imports build under `--all-features` and any feature combination that pulls in the PKCS#8 module.
+
+`+2 round-trip tests` in `hitls-pki/src/pkcs8/mod.rs` covering DSA encode→parse and DH encode→parse with toy small parameters.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-utils/src/asn1/decoder.rs` | Modified | Part A: extend `read_string` for tag numbers `0x12`/`0x1A`/`0x1C`; +6 tests |
+| `crates/hitls-utils/src/asn1/encoder.rs` | Modified | Part A: `write_numeric_string` / `write_visible_string` / `write_bmp_string` / `write_universal_string`; +4 tests |
+| `crates/hitls-utils/src/asn1/mod.rs` | Modified | Part A: tag constants for the new string types |
+| `crates/hitls-utils/src/oid/mod.rs` | Modified | Part C: `known::dh_public_number()` + `known::dh_key_agreement()` |
+| `crates/hitls-crypto/src/dh/mod.rs` | Modified | Part C: `DhKeyPair::private_key_bytes` + `DhKeyPair::from_private_key` |
+| `crates/hitls-pki/src/pkcs8/mod.rs` | Modified | Part B + C: `encode_dsa_pkcs8_der`; `Pkcs8PrivateKey::Dh` variant; DH parse + encode helpers; OID dispatch; +2 roundtrip tests |
+| `crates/hitls-pki/Cargo.toml` | Modified | Part C: pull `dh` feature from `hitls-crypto` |
+| `crates/hitls-cli/src/s_server.rs` | Modified | Part C: extend unsupported-key match arm with `Pkcs8PrivateKey::Dh` |
+
+### Test Count (Post I90)
+
+| Crate | Count | Δ |
+|-------|------:|--:|
+| hitls-crypto | 1448 (22 ignored) | — |
+| hitls-tls | 1488 | — |
+| hitls-pki | 441 | +2 (DSA + DH roundtrip) |
+| hitls-bignum | 95 (1 ignored) | — |
+| hitls-utils | 78 | +10 (ASN.1 charset) |
+| hitls-auth | 47 | — |
+| hitls-types | 26 | — |
+| hitls-cli | 161 (5 ignored) | — |
+| hitls-integration-tests | 264 (7 ignored) | — |
+| **Total** | **4083 (35 ignored)** | **+12** |
+
+### Build Status (Post I90)
+- `cargo test --workspace --all-features`: 4,048 passed, 0 failed, 35 ignored (4,083 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean

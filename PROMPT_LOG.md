@@ -4286,3 +4286,19 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 
 **Result**:
 - Per CLAUDE.md post-task documentation rules, added Phase T81 narrative covering all four parts (ct gate / Miri fan-out / Coverage matrix / Powerset depth) to DEV_LOG.md; updated index header (T1–T80 → T1–T81); updated CLAUDE.md status line; this PROMPT_LOG entry.
+
+### Prompt 277: Continue B4 Deferred Items (I90)
+
+> 从 2 开始
+
+**Result**:
+- Re-evaluated each B4 candidate against the current Rust source:
+  - **B4-1 DSA/DH PKCS#8**: real gaps. DSA had a parser but no public encoder; DH had no PKCS#8 path at all (no OID, no `DhKeyPair::private_key_bytes`, no `Pkcs8PrivateKey::Dh` variant).
+  - **B4-2 X25519 cert path**: already complete. `parse_spki_der` dispatches X25519/X448/EC generically; X.509 cert parsing is algorithm-agnostic; chain verification uses the issuer's signature alg. The C `ce5f2fcf` commit was test fixture data, not new code.
+  - **B4-3 ASN.1 charset**: real gap. Decoder accepted UTF8/Printable/IA5/T61/BMP but not UniversalString (UTF-32BE), VisibleString or NumericString. Encoder lacked the symmetric write helpers.
+  - **B4-4 ISO9796-2 RSA** and **B4-5 SHA256-MB**: deferred (niche legacy, high-effort SIMD).
+- Implemented Phase I90 in three parts (single commit `ad8dfe6`):
+  - **Part A (charset)**: `read_string` accepts `0x12` / `0x1A` / `0x1C`; encoder gains `write_numeric_string`, `write_visible_string`, `write_bmp_string`, `write_universal_string`; tag constants module updated. UniversalString validates 4-byte alignment + ≤ U+10FFFF. +10 hitls-utils tests.
+  - **Part B (DSA encoder)**: public `encode_dsa_pkcs8_der(params, x_be)` symmetric with the existing parser.
+  - **Part C (DH PKCS#8)**: `known::dh_public_number()` (X9.42) + `known::dh_key_agreement()` (PKCS#3) OIDs; `DhKeyPair::private_key_bytes()` + `from_private_key()`; `Pkcs8PrivateKey::Dh` enum variant; `parse_dh_params` (handles both X9.42 and PKCS#3 SEQUENCE forms); `parse_dh_private_key`; `encode_dh_pkcs8_der`; `s_server.rs` reject arm for DH; `hitls-pki/Cargo.toml` adds `dh` to its `hitls-crypto` features. +2 hitls-pki round-trip tests.
+- Tests: 4083 total (+12 from I89 baseline). Clippy on Rust 1.95: 0 warnings. Fmt clean.
