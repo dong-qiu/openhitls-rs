@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I90 (90 phases)
+- Implementation: I1–I91 (91 phases)
 - Testing: T1–T81 (80 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
@@ -279,6 +279,7 @@ Category summary:
 | 267 | I89 | Impl | EMS Three-State Mode (RFC 7627) + SM2 PKCS#8 OID Compatibility | 2026-05-05 |
 | 268 | T81 | Test | CI Wall-Clock Optimisation: ct-Verification Gate + Miri Fan-Out + Coverage Per-Crate Matrix | 2026-05-06 |
 | 269 | I90 | Impl | ASN.1 Charset Expansion + DSA/DH PKCS#8 Codec | 2026-05-07 |
+| 270 | I91 | Impl | ISO/IEC 9796-2:1997 Scheme 1 RSA Signature Padding | 2026-05-07 |
 
 ---
 
@@ -14249,5 +14250,64 @@ Rust previously had **no** DH PKCS#8 path — `parse_pkcs8_der` returned `Decode
 
 ### Build Status (Post I90)
 - `cargo test --workspace --all-features`: 4,048 passed, 0 failed, 35 ignored (4,083 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+---
+
+## Phase I91 — ISO/IEC 9796-2:1997 Scheme 1 RSA Signature Padding (2026-05-07)
+
+### Summary
+Closes the last actionable B4 deferred item from the openHiTLS C v0.3.2 backport queue (commit `0d96cb28`). Adds the ISO 9796-2 Scheme 1 deterministic, hash-only RSA signature padding — no message recovery, no PKCS#1 DigestInfo prefix, no random salt:
+
+```text
+EM = 0x6A || H(m) || 0xBC
+```
+
+The remaining v0.3.2 B4 item (SHA256-MB, C `17f4aebf`) is **deferred as a future P-phase**: 381 lines of ARMv8 NEON assembly plus 117 lines of EAL provider plumbing for a multi-buffer SHA-256 throughput optimisation that has no functional benefit over the existing single-buffer SHA-256 (which is already SHA-NI-accelerated on x86-64 and ARMv8). With that explicit deferral, **all functionally meaningful items from the openHiTLS C v0.3.2 diff are now ported to Rust.**
+
+### Implementation
+
+New module `crates/hitls-crypto/src/rsa/iso9796_2.rs` (~110 LoC) with two pure functions:
+
+```rust
+pub fn iso9796_2_encode(digest: &[u8], em_len: usize) -> Result<Vec<u8>, CryptoError>;
+pub fn iso9796_2_verify(em: &[u8], digest: &[u8]) -> Result<bool, CryptoError>;
+```
+
+`iso9796_2_encode` builds the full encoded message of length `em_len` (= modulus byte length `k`). The header `0x6A` and trailer `0xBC` flank the digest at the start and end; bytes in between are zero-padded. Returns `InvalidArg` when `k < hash_len + 2`.
+
+`iso9796_2_verify` checks the header and trailer, then compares the recovered hash against the supplied digest using `subtle::ConstantTimeEq` to avoid leaking timing through equality. Length-mismatched inputs return `Ok(false)` rather than an error so a tampered-signature decryption result that is too short still produces a clean false negative.
+
+`RsaPadding::Iso9796_2` enum variant added; `RsaPrivateKey::sign` and `RsaPublicKey::verify` wired up to dispatch to the new module. The `None` and other variants are unchanged.
+
+### Determinism Property
+
+Scheme 1 is deterministic — signing the same digest with the same private key produces byte-identical signatures. A test exercises this property (`test_rsa_iso9796_2_determinism`) so any future change to the encode path that introduces nondeterminism (e.g. accidental random salt) is caught immediately.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/rsa/iso9796_2.rs` | Created | `iso9796_2_encode` / `iso9796_2_verify` + 8 unit tests |
+| `crates/hitls-crypto/src/rsa/mod.rs` | Modified | Module declaration; `RsaPadding::Iso9796_2` enum variant; sign/verify dispatch arms; +2 RSA-1024 sign+verify+tamper+determinism tests |
+
+### Test Count (Post I91)
+
+| Crate | Count | Δ |
+|-------|------:|--:|
+| hitls-crypto | 1458 (22 ignored) | +10 |
+| hitls-tls | 1488 | — |
+| hitls-pki | 441 | — |
+| hitls-bignum | 95 (1 ignored) | — |
+| hitls-utils | 78 | — |
+| hitls-auth | 47 | — |
+| hitls-types | 26 | — |
+| hitls-cli | 161 (5 ignored) | — |
+| hitls-integration-tests | 264 (7 ignored) | — |
+| **Total** | **4093 (35 ignored)** | **+10** |
+
+### Build Status (Post I91)
+- `cargo test --workspace --all-features`: 4,058 passed, 0 failed, 35 ignored (4,093 total)
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean

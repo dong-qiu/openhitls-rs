@@ -4302,3 +4302,17 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
   - **Part B (DSA encoder)**: public `encode_dsa_pkcs8_der(params, x_be)` symmetric with the existing parser.
   - **Part C (DH PKCS#8)**: `known::dh_public_number()` (X9.42) + `known::dh_key_agreement()` (PKCS#3) OIDs; `DhKeyPair::private_key_bytes()` + `from_private_key()`; `Pkcs8PrivateKey::Dh` enum variant; `parse_dh_params` (handles both X9.42 and PKCS#3 SEQUENCE forms); `parse_dh_private_key`; `encode_dh_pkcs8_der`; `s_server.rs` reject arm for DH; `hitls-pki/Cargo.toml` adds `dh` to its `hitls-crypto` features. +2 hitls-pki round-trip tests.
 - Tests: 4083 total (+12 from I89 baseline). Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 278: Complete B4 Deferred Items (I91)
+
+> 请完成B4 deferred 余项
+
+**Result**:
+- Re-evaluated the two remaining B4 items:
+  - **B4-4 ISO9796-2:1997 RSA** (C `0d96cb28`): Scheme 1 only — deterministic, hash-only, EM = `0x6A || H(m) || 0xBC`. Implemented as Phase I91.
+  - **B4-5 SHA256-MB** (C `17f4aebf`): 381-line ARMv8 NEON assembly + 117 lines of EAL provider plumbing for multi-buffer SHA-256 throughput. Pure performance optimisation with no functional benefit over the existing single-buffer SHA-256 (already SHA-NI-accelerated). Deferred as a future P-phase, not implemented.
+- Phase I91 (commit `06c83f0`):
+  - New `crates/hitls-crypto/src/rsa/iso9796_2.rs` (~110 LoC) with `iso9796_2_encode` and `iso9796_2_verify` using `subtle::ConstantTimeEq` for the recovered-hash comparison.
+  - `RsaPadding::Iso9796_2` enum variant; `RsaPrivateKey::sign` and `RsaPublicKey::verify` dispatch arms.
+  - +8 unit tests (encode boundary / header / trailer / wrong-hash / short-EM) and +2 RSA-1024 end-to-end tests (sign+verify+tamper, determinism property).
+- Tests: 4093 total (+10 from I90 baseline). Clippy on Rust 1.95: 0 warnings. Fmt clean. With this and the deferral of SHA256-MB, the openHiTLS C v0.3.2 backport queue is **functionally complete** in Rust.
