@@ -720,6 +720,157 @@ mod tests {
         );
     }
 
+    // ================================================================
+    // Phase T85 — D28 coverage: SPAKE2+ negative paths and state-machine
+    // boundaries. Each test pins a functional contract that, if regressed,
+    // would let an attacker bypass key confirmation or coerce the protocol
+    // into a partial state.
+    // ================================================================
+
+    /// Helper: drive a complete prover ↔ verifier exchange to `KeyDerived`.
+    fn drive_to_key_derived(password: &[u8]) -> (Spake2Plus, Spake2Plus) {
+        let mut prover = Spake2Plus::new(Spake2Role::Prover).unwrap();
+        let mut verifier = Spake2Plus::new(Spake2Role::Verifier).unwrap();
+        prover.setup_from_password(password, b"salt", 100).unwrap();
+        verifier
+            .setup_from_password(password, b"salt", 100)
+            .unwrap();
+        let pa = prover.generate_share().unwrap();
+        let pb = verifier.generate_share().unwrap();
+        let _ = prover.process_share(&pb).unwrap();
+        let _ = verifier.process_share(&pa).unwrap();
+        (prover, verifier)
+    }
+
+    /// Confirmation verification must reject any single-bit flip in the
+    /// confirmation tag. This pins the functional contract on the existing
+    /// `subtle::ConstantTimeEq` path in `verify_confirmation`.
+    #[test]
+    fn test_spake2_verify_confirmation_rejects_tampered() {
+        let (prover, verifier) = drive_to_key_derived(b"password");
+        let mut conf_a = prover.get_confirmation().unwrap();
+        // Sanity: untampered confirmation accepts.
+        assert!(verifier.verify_confirmation(&conf_a).unwrap());
+        // Flip first byte → must reject.
+        conf_a[0] ^= 0x80;
+        assert!(!verifier.verify_confirmation(&conf_a).unwrap());
+        // Restore + flip last byte → also reject.
+        conf_a[0] ^= 0x80;
+        let last = conf_a.len() - 1;
+        conf_a[last] ^= 0x01;
+        assert!(!verifier.verify_confirmation(&conf_a).unwrap());
+    }
+
+    /// Length-mismatched confirmation must reject. `subtle::ConstantTimeEq`
+    /// only constant-time-compares equal-length slices, so the pre-check
+    /// must reject mismatches without panicking.
+    #[test]
+    fn test_spake2_verify_confirmation_length_mismatch_rejected() {
+        let (_prover, verifier) = drive_to_key_derived(b"password");
+        // Empty, short, oversized — all must return Ok(false), not panic.
+        assert!(!verifier.verify_confirmation(&[]).unwrap());
+        assert!(!verifier.verify_confirmation(&[0xAA; 16]).unwrap());
+        assert!(!verifier.verify_confirmation(&[0xAA; 64]).unwrap());
+    }
+
+    /// State-machine: `get_confirmation` before key derivation must reject.
+    /// Without the state guard a caller could read a stale/unset key.
+    #[test]
+    fn test_spake2_get_confirmation_before_key_derived_rejected() {
+        let mut ctx = Spake2Plus::new(Spake2Role::Prover).unwrap();
+        ctx.setup_from_password(b"pw", b"salt", 100).unwrap();
+        // Idle — must reject.
+        assert!(matches!(
+            ctx.get_confirmation(),
+            Err(CryptoError::DrbgInvalidState)
+        ));
+        // ShareGenerated — still must reject (peer share not yet processed).
+        let _ = ctx.generate_share().unwrap();
+        assert!(matches!(
+            ctx.get_confirmation(),
+            Err(CryptoError::DrbgInvalidState)
+        ));
+    }
+
+    /// State-machine: `verify_confirmation` before key derivation must reject.
+    /// Otherwise an attacker could feed a tag during share-generation and
+    /// observe whether the (unset) ke happens to match.
+    #[test]
+    fn test_spake2_verify_confirmation_before_key_derived_rejected() {
+        let mut ctx = Spake2Plus::new(Spake2Role::Verifier).unwrap();
+        ctx.setup_from_password(b"pw", b"salt", 100).unwrap();
+        assert!(matches!(
+            ctx.verify_confirmation(&[0u8; 32]),
+            Err(CryptoError::DrbgInvalidState)
+        ));
+        let _ = ctx.generate_share().unwrap();
+        assert!(matches!(
+            ctx.verify_confirmation(&[0u8; 32]),
+            Err(CryptoError::DrbgInvalidState)
+        ));
+    }
+
+    /// `peer_share()` accessor lifecycle: `None` before `process_share`,
+    /// `Some` after, and stays `Some` through `KeyDerived`.
+    #[test]
+    fn test_spake2_peer_share_accessor_lifecycle() {
+        let mut prover = Spake2Plus::new(Spake2Role::Prover).unwrap();
+        prover.setup_from_password(b"pw", b"salt", 100).unwrap();
+        assert!(prover.peer_share().is_none(), "Idle: no peer share");
+        let _ = prover.generate_share().unwrap();
+        assert!(
+            prover.peer_share().is_none(),
+            "ShareGenerated: still no peer share"
+        );
+
+        let mut verifier = Spake2Plus::new(Spake2Role::Verifier).unwrap();
+        verifier.setup_from_password(b"pw", b"salt", 100).unwrap();
+        let pb = verifier.generate_share().unwrap();
+        let _ = prover.process_share(&pb).unwrap();
+        assert!(
+            prover.peer_share().is_some(),
+            "KeyDerived: peer share recorded"
+        );
+        assert_eq!(
+            prover.peer_share().unwrap(),
+            pb.as_slice(),
+            "peer share must match what was passed in"
+        );
+    }
+
+    /// State-machine: calling `generate_share` twice must reject. A second
+    /// generation would replace `x_scalar` mid-protocol and let the peer's
+    /// already-sent share become useless without explicit error.
+    #[test]
+    fn test_spake2_double_generate_share_rejected() {
+        let mut ctx = Spake2Plus::new(Spake2Role::Prover).unwrap();
+        ctx.setup_from_password(b"pw", b"salt", 100).unwrap();
+        let _ = ctx.generate_share().unwrap();
+        assert!(matches!(
+            ctx.generate_share(),
+            Err(CryptoError::DrbgInvalidState)
+        ));
+    }
+
+    /// Setup followed by an unrelated method must reject — `generate_share`
+    /// requires `setup` first, but `process_share` requires `setup` *and*
+    /// `generate_share`. Calling `process_share` straight after `setup`
+    /// (skipping share generation) must error rather than panic.
+    #[test]
+    fn test_spake2_process_share_before_generate_rejected() {
+        let mut ctx = Spake2Plus::new(Spake2Role::Prover).unwrap();
+        ctx.setup_from_password(b"pw", b"salt", 100).unwrap();
+        // Build a syntactically valid peer share via a separate verifier so
+        // we exercise the *state* check, not the share-decode path.
+        let mut peer = Spake2Plus::new(Spake2Role::Verifier).unwrap();
+        peer.setup_from_password(b"pw", b"salt", 100).unwrap();
+        let pb = peer.generate_share().unwrap();
+        assert!(matches!(
+            ctx.process_share(&pb),
+            Err(CryptoError::DrbgInvalidState)
+        ));
+    }
+
     mod proptests {
         use super::*;
         use proptest::prelude::*;

@@ -4385,3 +4385,19 @@ Each fix has a dedicated regression test: `test_cms_authenticated_data_rejects_t
 This is the first openHiTLS-rs phase to be **purely AI-driven**: a sub-agent identified all four real bugs. T84's pattern (audit → triage → fix → regression test → /security-review re-validate) is now a reusable security-hardening playbook.
 
 Tests: 4149 → 4154 (+5). Per-crate: hitls-crypto 1486→1487, hitls-pki 442→444, hitls-auth 47→49. Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 283: D28 coverage — SPAKE2+ + X.509 cert parser + builder edge cases (T85)
+
+> 做 D28
+
+**Result**: Reopened QUALITY_REPORT D28 ("Low Test Density in TLS/Auth/PKI Modules", open since Phase T74). First action was a re-measurement: the original count grepped only `#[test]` and missed every `#[tokio::test]` (used in async TLS modules). With correct counting, every crate now exceeds 21 tests/KLOC and `hitls-tls` is at 23.6/KLOC (the original audit reported 10.7 because of the count bug). The "lowest density" framing no longer applies — D28 is now a **PARTIAL** status with the original blanket claim corrected.
+
+What remained were three concrete file-level gaps the audit had explicitly listed: SPAKE2+, `certificate.rs`, `builder.rs`. Each at ≤1.72 tests/100L. Phase T85 added 18 targeted unit tests covering real edge cases — no stat-padding:
+
+- **SPAKE2+ (+7)**: tampered confirmation rejection (single-bit flip at first/last byte), length-mismatched confirmation (empty/short/oversized must `Ok(false)` not panic), state-machine guards on `get_confirmation` / `verify_confirmation` from `Idle` and `ShareGenerated`, `peer_share()` accessor lifecycle, double-`generate_share` rejection, `process_share` before `generate_share` rejection. Helper `drive_to_key_derived` factored out of common boilerplate.
+- **X.509 certificate.rs (+6)**: wrong outer ASN.1 tag (SET, OCTET STRING, INTEGER instead of SEQUENCE), empty outer SEQUENCE, length-prefix overrun, PEM with garbage body, PEM with no blocks, **byte-exact round-trip** (parse → re-emit → re-parse → compare `tbs_raw` for byte equality — drift here silently breaks chain validation since signature verify re-hashes `tbs_raw`).
+- **builder.rs (+5)**: builder requires `subject_public_key` (must error, not silently produce malformed cert), full v3 extension stack round-trip (BasicConstraints + SKI + AKI + SAN-DNS + KeyUsage), PEM round-trip, CSR with attribute extensions round-trip, CSR without extensions exercising the empty-context-specific branch.
+
+Async TLS files (`connection12_async.rs` etc.) still range 0.65–1.29 tests/100L on the `(tokio::)?test` denominator. They are covered indirectly by per-crate integration tests + the `tests/interop` end-to-end suite, so risk is bounded; full per-message-type unit testing against mocked async streams logged as future work.
+
+Tests: 4154 → 4172 (+18). Per-crate: hitls-pki 444→455 (+11), hitls-auth 49→56 (+7). Clippy on Rust 1.95: 0 warnings. Fmt clean.

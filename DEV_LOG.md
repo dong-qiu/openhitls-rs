@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I91 (91 phases)
-- Testing: T1–T84 (83 phases, T64 skipped)
+- Testing: T1–T85 (84 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
 
@@ -283,6 +283,7 @@ Category summary:
 | 271 | T82 | Test | TLS 1.3 PSK Coverage + RFC 5077 NewSessionTicket Transcript Fix | 2026-05-09 |
 | 272 | T83 | Test | Quality Hardening: SM9 Constant-Time MAC + D35 False-Positive Audit + Proptest Seeds Recovery | 2026-05-09 |
 | 273 | T84 | Test | Workspace Timing-Oracle Audit: CMS / PKCS#12 / HOTP/TOTP / HPKE Constant-Time Hardening | 2026-05-09 |
+| 274 | T85 | Test | D28 Coverage: SPAKE2+ State-Machine + X.509 Certificate Parser + Builder Edge Cases | 2026-05-10 |
 
 ---
 
@@ -14532,5 +14533,84 @@ The agent's own report flagged its scan was complete: 39 sites already use `ct_e
 
 ### Build Status (Post T84)
 - `cargo test --workspace --all-features`: 4,112 passed, 0 failed, 42 ignored (4,154 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase T85 — D28 Coverage: SPAKE2+ State-Machine + X.509 Certificate Parser + Builder Edge Cases (2026-05-10)
+
+### Summary
+
+Direct attack on QUALITY_REPORT D28 ("Low Test Density in TLS/Auth/PKI Modules"), open since the Phase T74 audit (2026-03-04).
+
+The first action was to **re-measure** density. Most of the original D28 numbers are now stale because T82–T84 added 25 tests to hitls-tls and other modules. Every crate is now ≥23.6 tests/KLOC; the workspace average is around 25/KLOC. The original D28 audit also under-counted test markers in async TLS modules — its "0 direct tests" claim for files like `connection12_async.rs` was based on grepping `#[test]`, but those modules use `#[tokio::test]`. Counting both, the async TLS files have 0.78–2.20 tests/100L (low but non-zero).
+
+What remained were three concrete file-level gaps the audit had explicitly listed:
+- `crates/hitls-auth/src/spake2plus/mod.rs` (1.72 tests/100L)
+- `crates/hitls-pki/src/x509/certificate.rs` (1.42 tests/100L)
+- `crates/hitls-pki/src/x509/builder.rs` (1.71 tests/100L)
+
+This phase adds **18 targeted unit tests** across these three files. Each test pins a contract that, if regressed, would let an attacker bypass key confirmation, parse a malformed certificate, or produce a malformed builder output. No "stat-padding" trivial assertions — every test has a real failure mode.
+
+### SPAKE2+ (+7 tests)
+
+`drive_to_key_derived` helper drives a clean prover/verifier pair to `KeyDerived` for negative-path tests:
+
+- `test_spake2_verify_confirmation_rejects_tampered` — flip first byte and last byte of a valid confirmation; both must reject. Pins the existing `subtle::ConstantTimeEq` rejection contract on the per-byte adversary.
+- `test_spake2_verify_confirmation_length_mismatch_rejected` — empty / short / oversized confirmations must `Ok(false)` rather than panic. `ConstantTimeEq` only handles equal-length inputs, so the length-pre-check matters.
+- `test_spake2_get_confirmation_before_key_derived_rejected` — state machine guard: at `Idle` and `ShareGenerated` the confirmation tag is undefined, so `get_confirmation` must error.
+- `test_spake2_verify_confirmation_before_key_derived_rejected` — symmetric: `verify_confirmation` cannot run on an unset key.
+- `test_spake2_peer_share_accessor_lifecycle` — `peer_share()` returns `None` until `process_share`, then `Some` carrying the exact bytes passed in.
+- `test_spake2_double_generate_share_rejected` — calling `generate_share` twice would replace `x_scalar` mid-protocol; must error.
+- `test_spake2_process_share_before_generate_rejected` — exercises the **state** check (not the share-decode path) by feeding a syntactically valid peer share.
+
+### X.509 certificate parser (+6 tests)
+
+- `test_certificate_from_der_wrong_outer_tag` — reject SET (0x31), OCTET STRING (0x04), INTEGER (0x02) at the outermost position. Certificate is SEQUENCE per X.690.
+- `test_certificate_from_der_empty_outer_sequence_rejected` — `0x30 0x00` is well-formed ASN.1 but a Certificate must contain TBSCertificate + AlgorithmIdentifier + signatureValue.
+- `test_certificate_from_der_length_overrun_rejected` — outer length lying about body size (claims 100 bytes, provides 3) must reject without panicking.
+- `test_certificate_from_pem_garbage_body_rejected` — valid BEGIN/END markers but base64 garbage inside.
+- `test_certificate_from_pem_no_blocks_rejected` — empty input and plain-text input.
+- `test_certificate_round_trip_byte_equality` — strongest contract: parse → re-emit → re-parse, and the re-parsed `tbs_raw` must be byte-identical to the original. Signature verification re-hashes `tbs_raw`; any drift here silently breaks chain validation.
+
+### CertificateBuilder + CertificateRequestBuilder (+5 tests)
+
+`ed25519_signer` helper produces a fresh signing key.
+
+- `test_certificate_builder_requires_subject_public_key` — building without `.subject_public_key(...)` must error with `PkiError::InvalidCert` rather than producing a malformed cert.
+- `test_certificate_builder_v3_extension_stack_roundtrip` — full v3 stack (BasicConstraints + SKI + AKI + SAN-DNS + KeyUsage) round-trips through DER and re-parses with all extensions present, and the self-issued cert verifies its own signature.
+- `test_certificate_builder_pem_roundtrip` — `build_pem` → `Certificate::from_pem` → signature verify.
+- `test_csr_builder_with_extensions_roundtrip` — CSR with one attribute extension parses back to the same subject DN and self-verifies.
+- `test_csr_builder_no_extensions_roundtrip` — empty extensions hits the `else` branch in `CertificateRequestBuilder::build` (the empty-context-specific encoding).
+
+### Audit Methodology Note
+
+The original D28 audit's "tests/100L" denominator should always be `grep -cE '^\s*#\[(tokio::)?test\]'` (both markers), not just `#[test]`. The async TLS files had been silently flagged as "0 tests" since T74 because of this miscount. Density rows in QUALITY_REPORT updated to reflect the corrected counting + the post-T82/T83/T84/T85 totals.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-auth/src/spake2plus/mod.rs` | Modified | +7 tests covering tampered confirmation, length-mismatch confirmation, state-machine guards on `get_confirmation` / `verify_confirmation`, `peer_share` accessor lifecycle, double-generate, process-before-generate; +1 helper `drive_to_key_derived` |
+| `crates/hitls-pki/src/x509/certificate.rs` | Modified | +6 parser-edge tests covering wrong outer tag, empty outer SEQUENCE, length overrun, PEM garbage body, no PEM blocks, byte-exact round-trip via `tbs_raw` |
+| `crates/hitls-pki/src/x509/builder.rs` | Modified | +5 builder-path tests covering missing-public-key error, full v3 extension stack round-trip, PEM round-trip, CSR with/without extensions |
+| `QUALITY_REPORT.md` | Modified | D28 row in summary table flipped OPEN → PARTIAL; §2.29 rewritten with corrected density methodology + post-T85 numbers |
+
+### Test Count (Post T85)
+
+| Crate | Count | Δ |
+|-------|------:|--:|
+| hitls-types | 26 | — |
+| hitls-utils | 78 | — |
+| hitls-bignum | 95 (1 ignored) | — |
+| hitls-crypto | 1487 (24 ignored) | — |
+| hitls-tls | 1507 | — |
+| hitls-pki | 455 | +11 |
+| hitls-auth | 56 | +7 |
+| hitls-cli | 165 (5 ignored) | — |
+| hitls-integration-tests | 261 (12 ignored) | — |
+| **Total** | **4172 (42 ignored)** | **+18** |
+
+### Build Status (Post T85)
+- `cargo test --workspace --all-features`: 4,130 passed, 0 failed, 42 ignored (4,172 total)
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean

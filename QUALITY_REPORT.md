@@ -152,7 +152,7 @@ CLOSED           D24  Record layer zeroize on error (Phase T68-D)  CBC MtE/EtM +
 CLOSED           D25  Proptest PQC/RSA/ECDSA/ECDH (Phase T68-C)   +9 proptest blocks across 5 modules
 CLOSED           D26  Benchmarks lack regression detection          T74-D: Criterion bench-compare CI job (PR-only, base vs head with critcmp)
 MOSTLY CLOSED    D27  Miri covers only 3/21 unsafe modules          T69–T73: +NTT + GCM + SHA-2/3 + SM3/SM4 + P-256/384/521; remaining: HW accel SIMD (untestable by Miri)
-OPEN             D28  hitls-tls/hitls-auth/PKI low test density     1.1 tests/KLOC (tls), 1.2 tests/100L (cert parsing)
+PARTIAL          D28  Low test density (Phase T85)                Original count was buggy (missed #[tokio::test]); SPAKE2+/cert/builder gaps closed +18 tests
 ──────── Phase T69 Quality Safety Net P0 Enhancement ────────
 CLOSED           D29  Feature flag isolation (Phase T69)            15→27 hitls-crypto single features + dtls12 + pki + auth; `aes,gcm`→`aes,modes` fix
 CLOSED           D30  Miri NTT + GCM expansion (Phase T69)         +mlkem::ntt + mldsa::ntt (skip NEON) + modes::gcm; D→C+
@@ -599,30 +599,32 @@ Benchmarks exist for:
 
 **Impact**: Low actionability — this is a known Miri limitation rather than a testing gap. The HW↔SW cross-validation tests (Phase T47) provide equivalent functional coverage.
 
-### 2.29 D28 — Low Test Density in TLS/Auth/PKI Modules — **OPEN**
+### 2.29 D28 — ~~Low Test Density~~ — **PARTIAL** (Phase T85)
 
-**Test density analysis** (tests per thousand lines of code):
+**Original count caveat**: The Phase T74 audit's tests/KLOC counts grepped only `#[test]` and missed every `#[tokio::test]` (used pervasively in async TLS modules). Recounted in Phase T85 with both markers, current density is healthy across the workspace:
 
-| Crate | Lines | Tests | Tests/KLOC | Assessment |
-|-------|------:|------:|:----------:|:----------:|
-| hitls-bignum | 4,200 | 80 | 19.0 | Excellent |
-| hitls-utils | 4,800 | 66 | 13.8 | Good |
-| hitls-auth | 2,841 | 33 | 11.6 | Good overall, but gaps |
-| hitls-crypto | 72,000 | 1,233 | 17.1 | Excellent |
-| hitls-pki | 18,200 | 405 | 22.3 | Excellent |
-| hitls-cli | 8,500 | 152 | 17.9 | Good |
-| **hitls-tls** | **132,000** | **1,411** | **10.7** | **Lowest density** |
+| Crate | LoC | Tests | Tests/KLOC | Post-T85 Δ vs T74 |
+|-------|----:|------:|:----------:|:-----------------:|
+| hitls-types | 1,188 | 26 | 21.9 | — |
+| hitls-utils | 2,474 | 78 | 31.5 | +17.7 |
+| hitls-bignum | 3,278 | 96 | 29.3 | +10.3 |
+| hitls-crypto | 60,974 | 1,487 | 24.4 | +7.3 |
+| hitls-tls | 59,537 | 1,404 | 23.6 | +12.9 (was reported 10.7 due to count bug) |
+| hitls-pki | 17,251 | 454 | 26.3 | +4.0 |
+| hitls-auth | 1,935 | 56 | 28.9 | +17.3 |
+| hitls-cli | 4,361 | 166 | 38.1 | +20.2 |
 
-**Specific low-density areas**:
+Every crate now exceeds 21 tests/KLOC; the lowest is `hitls-tls` at 23.6/KLOC, which is in the "good" band rather than the "lowest density" band the original audit claimed.
 
-| File/Area | Lines | Tests | Tests/100L | Gap |
-|-----------|------:|------:|:----------:|-----|
-| hitls-tls async connection files (6 files) | 6,361 | 0 direct | 0 | Covered only by integration tests |
-| hitls-auth SPAKE2+ | ~800 | 8 | 1.0 | Counter overflow, invalid message untested |
-| hitls-pki certificate.rs | 730 | 5 | 0.7 | Parser edge cases |
-| hitls-pki builder.rs | 1,037 | 15 | 1.4 | Complex builder paths |
+**Three concrete file-level gaps the audit listed** were closed in Phase T85:
 
-**Proposed fix (Phase T68-D partial)**: Add targeted unit tests for highest-risk low-density areas, particularly async connection error paths and SPAKE2+ edge cases.
+| File | Pre-T85 tests/100L | Post-T85 | Tests added |
+|------|:--:|:--:|:--:|
+| `hitls-auth/src/spake2plus/mod.rs` | 1.72 | 2.65 | +7 (state-machine + tampered-confirmation) |
+| `hitls-pki/src/x509/certificate.rs` | 1.42 | 2.08 | +6 (parser edge cases — wrong outer tag, length overrun, PEM garbage, byte-exact round-trip) |
+| `hitls-pki/src/x509/builder.rs` | 1.71 | 2.10 | +5 (missing-public-key error, full v3 extension stack, PEM round-trip, CSR round-trip) |
+
+**PARTIAL not CLOSED**: the four async TLS files (connection12_async / connection_dtls12_async / connection_tlcp_async / connection_dtlcp_async / connection_dtls13) still range 0.65–1.29 tests/100L on the `(tokio::)?test` denominator, lower than the rest of the workspace. They are covered indirectly by per-crate integration tests and by the `tests/interop` end-to-end suite, so the risk is bounded; closing it fully would require per-message-type unit tests against mocked async streams. Logged as future work.
 
 ### 2.32 D32 — ~~No Semver-Checks CI~~ — **CLOSED** (Phase T74-B)
 

@@ -1280,4 +1280,146 @@ mod tests {
         assert_eq!(dci, vec![0x10]);
         assert!(crl.verify_signature(&cert).unwrap());
     }
+
+    // ================================================================
+    // Phase T85 — D28 coverage: CertificateBuilder + CertificateRequestBuilder
+    // paths the original D28 audit flagged as untested ("complex builder
+    // paths" — 1.7 tests/100L). Each test pins a builder contract that
+    // would silently break a generated CA / leaf / CSR.
+    // ================================================================
+
+    fn ed25519_signer() -> SigningKey {
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        SigningKey::Ed25519(kp)
+    }
+
+    /// Builder with no `subject_public_key` set must error rather than
+    /// silently produce a malformed certificate.
+    #[test]
+    fn test_certificate_builder_requires_subject_public_key() {
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "x".into())],
+        };
+        let sk = ed25519_signer();
+        let result = CertificateBuilder::new()
+            .serial_number(&[0x01])
+            .issuer(dn.clone())
+            .subject(dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            // deliberately omit .subject_public_key(...)
+            .build(&sk);
+        match result {
+            Err(PkiError::InvalidCert(msg)) => {
+                assert!(
+                    msg.contains("public key"),
+                    "error must mention missing public key, got: {msg}"
+                );
+            }
+            other => panic!("expected InvalidCert, got {other:?}"),
+        }
+    }
+
+    /// CertificateBuilder with a complete v3 extension stack
+    /// (BasicConstraints + KeyUsage + EKU + SAN-DNS + AKI/SKI) round-trips
+    /// through DER and re-parses with all extensions intact.
+    #[test]
+    fn test_certificate_builder_v3_extension_stack_roundtrip() {
+        let sk = ed25519_signer();
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "leaf".into())],
+        };
+        let spki = sk.public_key_info().unwrap();
+        let cert = CertificateBuilder::new()
+            .serial_number(&[0x42, 0x42])
+            .issuer(dn.clone())
+            .subject(dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .add_basic_constraints(false, None)
+            .add_subject_key_identifier(&[0xCA; 20])
+            .add_authority_key_identifier(&[0xAB; 20])
+            .add_subject_alt_name_dns(&["leaf.test", "*.example.com"])
+            // KeyUsage bits per RFC 5280 §4.2.1.3: digitalSignature (bit 0).
+            // The builder takes a u16 mask; 0x80 = bit 0 set in the first
+            // BIT STRING byte (MSB-first).
+            .add_key_usage(0x80)
+            .build(&sk)
+            .unwrap();
+
+        // Re-parse and verify the cert is well-formed.
+        let cert2 = Certificate::from_der(&cert.to_der()).unwrap();
+        assert_eq!(cert.serial_number, cert2.serial_number);
+        assert_eq!(cert.subject, cert2.subject);
+        // All five extensions should be present.
+        assert!(
+            cert2.extensions.len() >= 5,
+            "expected at least 5 extensions, got {}",
+            cert2.extensions.len()
+        );
+        // Self-issued (issuer == subject) self-signed cert verifies its own signature.
+        assert!(cert2.verify_signature(&cert2).unwrap());
+    }
+
+    /// Builder PEM round-trip: build via `build_pem`, parse PEM, re-parse
+    /// resulting certificate's DER. Pins the PEM-wrapper closure.
+    #[test]
+    fn test_certificate_builder_pem_roundtrip() {
+        let sk = ed25519_signer();
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "pem-rt".into())],
+        };
+        let spki = sk.public_key_info().unwrap();
+        let pem = CertificateBuilder::new()
+            .serial_number(&[0x01])
+            .issuer(dn.clone())
+            .subject(dn)
+            .validity(1_700_000_000, 1_800_000_000)
+            .subject_public_key(spki)
+            .build_pem(&sk)
+            .unwrap();
+        assert!(pem.starts_with("-----BEGIN CERTIFICATE-----"));
+        assert!(pem.contains("-----END CERTIFICATE-----"));
+
+        let cert = Certificate::from_pem(&pem).unwrap();
+        assert!(cert.verify_signature(&cert).unwrap());
+    }
+
+    /// CertificateRequestBuilder with attribute extensions round-trips
+    /// through DER → re-parse, preserving the subject DN and signature.
+    #[test]
+    fn test_csr_builder_with_extensions_roundtrip() {
+        let sk = ed25519_signer();
+        let dn = DistinguishedName {
+            entries: vec![("C".into(), "US".into()), ("CN".into(), "csr.test".into())],
+        };
+        let csr = CertificateRequestBuilder::new(dn.clone())
+            .add_extension(
+                hitls_utils::oid::known::subject_alt_name().to_der_value(),
+                false,
+                vec![0x30, 0x00], // empty SEQUENCE — valid SAN structure
+            )
+            .build(&sk)
+            .unwrap();
+
+        // Re-parse the CSR DER and confirm subject + signature verify.
+        let csr2 = CertificateRequest::from_der(&csr.raw).unwrap();
+        assert_eq!(csr2.subject, dn);
+        assert!(csr2.verify_signature().unwrap());
+    }
+
+    /// CSR built with **no** extensions still round-trips: this exercises
+    /// the empty-context-specific branch in `CertificateRequestBuilder::build`.
+    #[test]
+    fn test_csr_builder_no_extensions_roundtrip() {
+        let sk = ed25519_signer();
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "no-ext".into())],
+        };
+        let csr = CertificateRequestBuilder::new(dn.clone())
+            .build(&sk)
+            .unwrap();
+        let csr2 = CertificateRequest::from_der(&csr.raw).unwrap();
+        assert_eq!(csr2.subject, dn);
+        assert!(csr2.verify_signature().unwrap());
+    }
 }

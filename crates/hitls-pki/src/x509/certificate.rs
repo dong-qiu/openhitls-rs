@@ -817,6 +817,93 @@ mod tests {
         assert!(Certificate::from_der(&[0x30, 0x03, 0x01]).is_err());
     }
 
+    // ================================================================
+    // Phase T85 — D28 coverage: certificate parser edge cases.
+    // The original D28 audit flagged certificate.rs as 1.4 tests/100L
+    // with several unparser-edge classes uncovered. These tests pin
+    // negative-path contracts on inputs an attacker could construct.
+    // ================================================================
+
+    /// Wrong outermost tag (not SEQUENCE) must reject. ITU-T X.690 §8.1
+    /// requires Certificate to be encoded as SEQUENCE; a SET (0x31) or any
+    /// other tag at the outer position is malformed and must not parse.
+    #[test]
+    fn test_certificate_from_der_wrong_outer_tag() {
+        // type=SET (0x31), length=0
+        assert!(Certificate::from_der(&[0x31, 0x00]).is_err());
+        // type=OCTET STRING (0x04), length=2, value=ab
+        assert!(Certificate::from_der(&[0x04, 0x02, 0xAB, 0xCD]).is_err());
+        // type=INTEGER (0x02)
+        assert!(Certificate::from_der(&[0x02, 0x01, 0x05]).is_err());
+    }
+
+    /// Empty SEQUENCE must reject — a Certificate has at minimum a TBSCertificate
+    /// (itself a non-empty SEQUENCE), an AlgorithmIdentifier, and a signatureValue
+    /// BIT STRING. An empty outer SEQUENCE has none of these.
+    #[test]
+    fn test_certificate_from_der_empty_outer_sequence_rejected() {
+        // SEQUENCE of length 0 (well-formed ASN.1 but missing required body).
+        assert!(Certificate::from_der(&[0x30, 0x00]).is_err());
+    }
+
+    /// Length-prefix that overruns the buffer must reject without panicking.
+    /// Defends against indefinite-length / oversized-length attacks where the
+    /// outer length-prefix lies about the body size.
+    #[test]
+    fn test_certificate_from_der_length_overrun_rejected() {
+        // SEQUENCE claiming 100 bytes but only providing 3.
+        let buf = [0x30, 0x64, 0x01, 0x02, 0x03];
+        assert!(Certificate::from_der(&buf).is_err());
+    }
+
+    /// PEM with the right BEGIN/END marker but base64 garbage inside must
+    /// reject at parse time, not silently succeed with empty fields.
+    #[test]
+    fn test_certificate_from_pem_garbage_body_rejected() {
+        let bad = "-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n";
+        assert!(Certificate::from_pem(bad).is_err());
+    }
+
+    /// PEM input with no PEM blocks at all (just plain text) must reject —
+    /// not be interpreted as a 0-byte DER encoding.
+    #[test]
+    fn test_certificate_from_pem_no_blocks_rejected() {
+        assert!(Certificate::from_pem("").is_err());
+        assert!(Certificate::from_pem("not a pem file at all").is_err());
+    }
+
+    /// Parser must accept a well-formed certificate at every roundtrip
+    /// boundary: parse → re-emit raw DER → re-parse → equal serial / DN /
+    /// validity. This pins the round-trip closure used by signature verify
+    /// (`tbs_raw` and `signature_value` must round-trip exactly).
+    #[test]
+    fn test_certificate_round_trip_byte_equality() {
+        use super::super::builder::CertificateBuilder;
+        use super::super::signing::SigningKey;
+
+        let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+        let sk = SigningKey::Ed25519(kp);
+        let dn = DistinguishedName {
+            entries: vec![("CN".into(), "Roundtrip Test".into())],
+        };
+        let cert = CertificateBuilder::self_signed(dn, &sk, 1_700_000_000, 1_800_000_000).unwrap();
+        let der = cert.to_der();
+
+        let cert2 = Certificate::from_der(&der).unwrap();
+        // Parsed twice from the same bytes must produce structurally
+        // identical view. We compare the public-API observable fields.
+        assert_eq!(cert.serial_number, cert2.serial_number);
+        assert_eq!(cert.issuer, cert2.issuer);
+        assert_eq!(cert.subject, cert2.subject);
+        assert_eq!(cert.not_before, cert2.not_before);
+        assert_eq!(cert.not_after, cert2.not_after);
+        assert_eq!(cert.signature_algorithm, cert2.signature_algorithm);
+        assert_eq!(cert.signature_value, cert2.signature_value);
+        // tbs_raw exact byte equality is critical: signature verification
+        // re-hashes this slice. Drift here silently breaks chain validation.
+        assert_eq!(cert.tbs_raw, cert2.tbs_raw);
+    }
+
     #[test]
     fn test_certificate_verify_signature_self_signed_ed25519() {
         use super::super::builder::CertificateBuilder;
