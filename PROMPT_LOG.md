@@ -4434,3 +4434,26 @@ This consolidation closes the T82–T86 five-phase quality run that started with
 - T86: D34 false-positive close + 3 poison-tolerance regression tests
 
 Tests: 4172 → 4175 (+3). hitls-tls 1507→1510. Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 285: P94 — SHA256-MB 4-way batch API
+
+> 做 P94
+
+**Result**: Closed the last item explicitly deferred from I91 (openHiTLS C v0.3.2 `SHA256-MB`, commit `17f4aebf`). The C source is 381 lines of hand-written ARMv8 NEON assembly targeting cores **without** SHA-2 hardware extensions. P94 ships the Rust public API (1:1 with the C reference) but takes a different implementation strategy honest about modern hardware:
+
+- **API**: `sha256_mb4(inputs: [&[u8]; 4]) -> [[u8; 32]; 4]` one-shot + `Sha256Mb4` streaming with `update_each` (one chunk per lane) and `update_lane` (single-lane feed). Zeroises on drop.
+- **HW fast path** (Apple Silicon / Graviton / SHA-NI): delegate to 4× single-buffer `Sha256::digest`. The dedicated `sha256h` instructions beat any SIMD multi-buffer scheme on these cores; software MB would actively slow throughput. The MB API on this hardware is a convenience wrapper.
+- **Software MB path**: `Sha256Mb4::compress_software_block_4way` is a `#[doc(hidden)]` interleaved-scalar 4-way compress. Inner loops have no cross-lane dependencies, so LLVM auto-vectorises them to NEON / SSE2 — the path that pays off on Cortex-A53/A55 etc.
+
+7 unit tests pin: every-lane vs single-buffer parity, all-empty lanes, mixed-size streaming via `update_each`, per-lane streaming via `update_lane`, mixed block-boundary lanes (sub-block + exact-block + multi-block per lane), OOB lane index rejection, and software 4-way compress equivalence with the dispatcher's compress.
+
+Bench on Apple Silicon (has SHA-2 hardware):
+- 1 KB inputs: mb4-oneshot 2.53 GiB/s vs 4x-sequential 2.36 GiB/s (~7% from per-call setup amortisation)
+- 8 KB / 16 KB inputs: both paths converge to ~2.62 GiB/s (SHA-2 HW ceiling)
+- mb4-software-blocks: 565 MiB/s (HW bypassed; LLVM auto-vec baseline)
+
+What was NOT done: the 381-line ARMv8 NEON-without-SHA-2 hand-written assembly. Two reasons documented in DEV_LOG: (a) the use case is narrow (only embedded ARMv8 cores without SHA-2 ext), and (b) a correct + Miri-clean port would be substantially more work than the deferred note in I91 implied. If a target ever needs it, the body of `compress_software_block_4way` is the swap point.
+
+The openHiTLS C v0.3.2 backport queue is now functionally and behaviourally complete in Rust.
+
+Tests: 4175 → 4183 (+7 unit + 1 ignored adjustment). hitls-crypto 1487→1494. Clippy on Rust 1.95: 0 warnings. Fmt clean.

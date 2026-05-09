@@ -214,6 +214,74 @@ fn bench_sha2(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase P94: SHA-256 multi-buffer (4-way) — compare batch API vs four
+// sequential single-buffer calls. The batch API delegates to the same
+// hardware-accelerated single-buffer path on platforms with SHA-2
+// extensions (Apple Silicon, Graviton, post-Goldmont x86); on platforms
+// without those extensions the explicit 4-way software-multibuffer
+// compress is exposed for comparison.
+// ---------------------------------------------------------------------------
+
+fn bench_sha256_mb(c: &mut Criterion) {
+    use hitls_crypto::sha2::{sha256_mb4, Sha256, Sha256Mb4};
+
+    let mut group = c.benchmark_group("sha256-mb");
+
+    for size in [1024usize, 8192, 16384] {
+        // Throughput accounts for all 4 lanes — the batch processes 4×size
+        // bytes per iteration. Comparing to "4× single" at the same total
+        // throughput tells you how much (if anything) batching is winning.
+        group.throughput(Throughput::Bytes((size * 4) as u64));
+        let data = vec![0u8; size];
+
+        group.bench_with_input(BenchmarkId::new("mb4-oneshot", size), &size, |b, _| {
+            b.iter(|| {
+                let inputs = [data.as_slice(); 4];
+                sha256_mb4(inputs).unwrap()
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("4x-sequential", size), &size, |b, _| {
+            b.iter(|| {
+                let mut outs = [[0u8; 32]; 4];
+                for o in outs.iter_mut() {
+                    *o = Sha256::digest(&data).unwrap();
+                }
+                outs
+            });
+        });
+
+        // Software-only 4-way compress on a single 64-byte block × N blocks.
+        // Useful for measuring the LLVM auto-vectorisation pay-off independent
+        // of the dispatcher's HW fast-path.
+        let blocks_per_lane = size / 64;
+        group.bench_with_input(
+            BenchmarkId::new("mb4-software-blocks", size),
+            &blocks_per_lane,
+            |b, &n| {
+                use hitls_crypto::sha2::SHA256_MB_LANES;
+                // SHA-256 initial hash values per FIPS 180-4 §5.3.3.
+                const H256: [u32; 8] = [
+                    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
+                    0x1f83d9ab, 0x5be0cd19,
+                ];
+                b.iter(|| {
+                    let mut states = [H256; SHA256_MB_LANES];
+                    let block = [0xA5u8; 64];
+                    let blocks = [block; SHA256_MB_LANES];
+                    for _ in 0..n {
+                        Sha256Mb4::compress_software_block_4way(&mut states, &blocks);
+                    }
+                    states
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
 // SM3 benchmarks
 // ---------------------------------------------------------------------------
 
@@ -1927,6 +1995,7 @@ criterion_group!(
     // Hash functions
     bench_sha1,
     bench_sha2,
+    bench_sha256_mb,
     bench_sha3,
     bench_sm3,
     bench_md5,

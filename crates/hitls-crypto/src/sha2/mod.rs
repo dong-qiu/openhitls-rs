@@ -14,6 +14,9 @@ mod sha512_arm;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod sha256_x86;
 
+pub mod sha256_mb;
+pub use sha256_mb::{sha256_mb4, Sha256Mb4, SHA256_MB_LANES};
+
 // ===== SHA-256 constants =====
 
 /// SHA-256 round constants (first 32 bits of fractional parts of cube roots of first 64 primes).
