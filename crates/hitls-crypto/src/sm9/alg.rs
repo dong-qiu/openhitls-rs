@@ -2,6 +2,7 @@
 
 use hitls_bignum::BigNum;
 use hitls_types::CryptoError;
+use subtle::ConstantTimeEq;
 
 use super::curve;
 use super::ecp::EcPointG1;
@@ -318,7 +319,12 @@ pub(crate) fn decrypt(
         h.finish()?
     };
 
-    if c3 != c3_check.as_slice() {
+    // Constant-time tag comparison (RFC-style AEAD-decrypt pattern). A naive
+    // `!=` here leaks per-byte timing about how far into the tag a forgery
+    // matches, which is a standard tag-forgery oracle. Length must also be
+    // length-checked first because `ct_eq` only constant-time-compares
+    // equal-length slices.
+    if c3.len() != c3_check.len() || !bool::from(c3.ct_eq(c3_check.as_slice())) {
         return Err(CryptoError::Sm9VerifyFail);
     }
 
@@ -541,5 +547,40 @@ mod tests {
         assert!(ct.len() >= 96, "ciphertext must be at least 96 bytes");
         let pt = decrypt(&ct, &user_key, user_id).unwrap();
         assert_eq!(pt, message, "decrypted plaintext must match original");
+    }
+
+    /// Phase T83 regression test: SM9 decryption MUST reject a tampered C3 tag.
+    ///
+    /// Prior to T83, the C3 verification used `c3 != c3_check.as_slice()` which
+    /// is a non-constant-time byte-by-byte comparison and forms a tag-forgery
+    /// timing oracle. The fix uses `subtle::ConstantTimeEq` instead. This test
+    /// also pins the functional-rejection contract: any single-bit flip in the
+    /// 32-byte SM3 tag must produce `Err(Sm9VerifyFail)`.
+    #[test]
+    fn test_decrypt_rejects_tampered_c3_tag() {
+        let (ke, ppub) = master_keygen(Sm9KeyType::Encrypt).unwrap();
+        let user_id = b"Bob";
+        let user_key = extract_user_key(&ke, user_id, Sm9KeyType::Encrypt).unwrap();
+        let message = b"hello SM9 encryption";
+        let ct = encrypt(message, user_id, &ppub).unwrap();
+
+        // SM9 ciphertext layout (per GM/T 0044): C1 (64 bytes G1 point) ||
+        // C3 (32 bytes SM3 tag) || C2 (klen bytes XOR keystream output).
+        // We flip the first byte of C3.
+        let mut tampered = ct.clone();
+        let c3_offset = 64;
+        tampered[c3_offset] ^= 0x01;
+        match decrypt(&tampered, &user_key, user_id) {
+            Err(CryptoError::Sm9VerifyFail) => {}
+            other => panic!("tampered C3 must yield Sm9VerifyFail, got {other:?}"),
+        }
+
+        // Also flip the last C3 byte (covers the high-end of the tag span).
+        let mut tampered_end = ct.clone();
+        tampered_end[c3_offset + 31] ^= 0x80;
+        match decrypt(&tampered_end, &user_key, user_id) {
+            Err(CryptoError::Sm9VerifyFail) => {}
+            other => panic!("tampered C3 high-end must yield Sm9VerifyFail, got {other:?}"),
+        }
     }
 }

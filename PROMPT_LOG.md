@@ -4332,3 +4332,31 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
   - +2 NST regression tests (`test_new_session_ticket_updates_transcript`, `test_new_session_ticket_truncated_header_rejected`) lock in the fix without depending on `openssl` being installed.
   - `tests/interop/tests/openssl_interop.rs::test_openssl_s_server_tls12` is still `#[ignore]`-gated on the external `openssl` binary, but the "Known issue" comment is replaced with a T82 fix note. The test now passes against OpenSSL 3.6.2.
 - Tests: 4148 total / 4106 passing / 42 ignored (+19 passing from I91 baseline). hitls-tls: 1488 → 1507. Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 280: T83 — Quality Hardening (D35 audit + Proptest seed recovery)
+
+> 请看看接下来干什么
+
+> 做 T83
+
+**Result**:
+- Surveyed remaining QUALITY_REPORT OPEN items: D28 (test density, big scope), D34 (~48 Mutex `.lock().unwrap()`), D35 (2 alleged production `panic!()`). Plus discovered 3 untracked `proptest-regressions/{ed25519,ed448,x448}/mod.txt` shrunk seeds in `worktrees/perf-enhanced/` whose remote branch is already gone.
+- Recommended (and user approved) Phase T83 scope: D35 + proptest seed recovery only. D28 and D34 deferred.
+- **D35 — false-positive close**: `git blame` + `cfg(test)` boundary check showed both flagged sites are in test fixtures (`slh_dsa/params.rs:262` inside `test_security_category_mapping` from line 213's `#[cfg(test)]`; `dh/mod.rs:320` inside `test_all_groups_prime_sizes` from line 252's `#[cfg(test)]`). Both were test-only since commit `bbb61e4` (Phase T129). `panic!()` in test code is semantically `assert!`. Workspace production-code panic count is **0**. Updated QUALITY_REPORT.md to flip D35 from OPEN to CLOSED with rationale; updated §3.2 production-panic count, §3.3 risk row, §3.4 score (8.5→9 for "panic-free"), and the T74 phase residual list.
+- **Proptest seed recovery**: Each recovered file is a single shrunk failure case for the corresponding crate's proptest block — ed25519 sign/verify (32-byte seed, 1-byte msg `[204]`), ed448 sign/verify roundtrip and different-key rejection (45-byte msg), x448 DH commutativity (32-byte seed). Seeds copied to `crates/hitls-crypto/proptest-regressions/{ed25519,ed448,x448}/mod.txt` on `main`. Worktree sources removed. Each module's `proptest::tests` re-run confirms seeds load and pass.
+- Tests: 4148 total / 4106 passing / 42 ignored (unchanged from T82 — proptest regression files inject deterministic seeds into existing blocks rather than adding new test cases). Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 281: AI-Review Demo (a + b + c + d) — surfaced SM9 timing oracle
+
+> 在代码提交之前我想引入 AI Review 来检视代码，有什么好的建议
+
+> (a) + (b) + (c) + (d)
+
+**Result**: Ran a four-pass pre-commit review of the staged T83 work. The exercise served two ends — demonstrating the project's existing AI-review tooling, and (unexpectedly) catching a real HIGH-severity timing-side-channel bug.
+
+- **(a) `/review` skill**: confirmed Markdown style, phase numbering, file-quad sync, and PROMPT_LOG verbatim quoting. Surfaced one minor — the DEV_LOG `unreachable!()` enumeration was incomplete.
+- **(b) `/security-review` skill**: scanned all 285 Rust files. 16 categories passed (zeroize-on-drop on 28+ secret structs, ct-eq elsewhere in GCM/RSA, unsafe-scope confined to bignum/crypto, getrandom not rand, feature-gate compliance, …). **One HIGH finding**: `crates/hitls-crypto/src/sm9/alg.rs:321` used `c3 != c3_check.as_slice()` — an early-exit byte-compare — to verify the C3 SM3 MAC tag during SM9 decryption. Classic tag-forgery timing oracle. Fix imports `subtle::ConstantTimeEq` (already in `Cargo.toml`), length-checks first, then uses `c3.ct_eq(c3_check.as_slice())`. Added `test_decrypt_rejects_tampered_c3_tag` regression test that flips bits at both ends of the 32-byte C3 span and asserts `Err(Sm9VerifyFail)`. Bug was pre-existing; the fix folds into Phase T83.
+- **(c) Focused factual-audit subagent (`general-purpose`)**: independently re-verified the D35 chain. Confirmed both panic sites are inside `#[cfg(test)]` (lines 213 / 252); confirmed `git blame bbb61e4`; **swept all 153 workspace `panic!()` occurrences and confirmed every one is inside a `cfg(test)` boundary**, broadening the "0 production panics" claim from anecdotal to exhaustive. Found that the original DEV_LOG draft's `unreachable!()` enumeration was wrong — `curve25519/edwards.rs` has 2 (not 1), and 6 occurrences in `hitls-cli` and `hitls-utils/asn1/tag.rs` were entirely missing. Corrected DEV_LOG and QUALITY_REPORT before commit.
+- **(d) Pre-commit hook**: `.claude/hooks/pre-commit-review-reminder.sh` registered under `PreToolUse`/`Bash` in `.claude/settings.json`. Inspects `git diff --cached --name-only` when Claude tries to run `git commit`; if any staged path matches `crates/hitls-(crypto|tls|bignum|pki|auth)/.+\.rs$`, emits a `{continue: true, systemMessage: "🔒 Crypto-sensitive commit … recommend /security-review"}` reminder. Does not block — purely informational. Tested in both branches (crypto staged → reminder; non-commit Bash → continue silently).
+
+The SM9 fix grew T83's test count by +1 (4148 → 4149 total). All other AI-review findings either confirmed existing correctness or corrected documentation accuracy. The hook is the persistent piece: future commits touching crypto-sensitive files will receive the same reminder automatically.

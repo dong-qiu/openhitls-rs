@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I91 (91 phases)
-- Testing: T1–T82 (81 phases, T64 skipped)
+- Testing: T1–T83 (82 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
 
@@ -281,6 +281,7 @@ Category summary:
 | 269 | I90 | Impl | ASN.1 Charset Expansion + DSA/DH PKCS#8 Codec | 2026-05-07 |
 | 270 | I91 | Impl | ISO/IEC 9796-2:1997 Scheme 1 RSA Signature Padding | 2026-05-07 |
 | 271 | T82 | Test | TLS 1.3 PSK Coverage + RFC 5077 NewSessionTicket Transcript Fix | 2026-05-09 |
+| 272 | T83 | Test | Quality Hardening: SM9 Constant-Time MAC + D35 False-Positive Audit + Proptest Seeds Recovery | 2026-05-09 |
 
 ---
 
@@ -14379,3 +14380,99 @@ A unit test `test_new_session_ticket_updates_transcript` in `client12.rs` rebuil
 - `cargo test -p hitls-integration-tests --test openssl_interop test_openssl_s_server_tls12 -- --ignored`: passes (was failing pre-T82)
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase T83 — Quality Hardening: SM9 Constant-Time MAC + D35 False-Positive Audit + Proptest Seeds Recovery (2026-05-09)
+
+### Summary
+
+Three narrow quality-hardening actions, only the first behaviourally significant. The first (SM9 constant-time MAC) was surfaced by running the project's `/security-review` skill against the T83 review pass and is unrelated to the original T83 scope — included here because skipping a known timing-side-channel bug in a library named "hitls" was not an option once it was on the table.
+
+1. **SM9 decryption — constant-time C3 MAC tag verification.** `crates/hitls-crypto/src/sm9/alg.rs:321` previously compared the received C3 tag against the locally-recomputed SM3 tag with a plain `c3 != c3_check.as_slice()`. The slice `!=` lowers to a memcmp-style early-exit comparison that leaks per-byte timing about how far into the tag a candidate forgery matches — a textbook tag-forgery oracle. The fix imports `subtle::ConstantTimeEq` (the dependency was already in `hitls-crypto/Cargo.toml`), length-checks first (since `ct_eq` only constant-time-compares equal-length slices), then uses `c3.ct_eq(c3_check.as_slice())`. This brings SM9 into line with the existing AEAD/RSA verifier patterns in the same crate and with CLAUDE.md's "constant-time comparisons: use `subtle::ConstantTimeEq` for cryptographic comparisons, never `==`" rule. A new regression test `test_decrypt_rejects_tampered_c3_tag` asserts that a 1-bit flip at either end of the 32-byte C3 span produces `Err(Sm9VerifyFail)` (and exercises the new ct branch).
+2. **D35 audit / close as false positive.** `QUALITY_REPORT.md` had carried D35 ("`panic!()` in library code (SLH-DSA params)") as OPEN since the Phase T74 deep audit, citing two production-code panics. Re-audit shows both flagged sites are inside `#[cfg(test)] mod tests`:
+   - `crates/hitls-crypto/src/slh_dsa/params.rs:262` — inside `test_security_category_mapping` (cfg(test) starts at line 213).
+   - `crates/hitls-crypto/src/dh/mod.rs:320` — inside `test_all_groups_prime_sizes` (cfg(test) starts at line 252).
+   `git blame` confirms the SLH-DSA site has been test-only since commit `bbb61e4` (Phase T129); the DH site is similarly inside `mod tests`. The "never panic in library code" rule does not apply to test fixtures (panic in a test is semantically identical to `assert!`). A wider sweep across all 153 `panic!()` occurrences in the workspace (every crate's `crates/*/src/`) confirms each one is inside a `#[cfg(test)]` boundary — production-code `panic!()` count is **0**. `unreachable!()` count is 12 across the workspace (3 in `hybridkem/mod.rs`, 2 in `curve25519/edwards.rs`, 1 in `curve448/edwards.rs`, 5 across `hitls-cli`, 1 in `hitls-utils/asn1/tag.rs`); all are exhaustive-match completeness markers or known-length array conversions, not runtime panic risks.
+3. **Recover proptest regression seeds.** `worktrees/perf-enhanced` carried three shrunk failure seeds in `crates/hitls-crypto/proptest-regressions/{ed25519,ed448,x448}/mod.txt` that had never been promoted to `main`. The `perf` branch's remote was already gone, so absent intervention the seeds would be lost on the next worktree cleanup. Each `mod.txt` is one shrunk regression case for the corresponding crate's `proptest!` block (ed25519 sign/verify, ed448 sign/verify + different-key rejection, x448 DH commutativity). Per the file header, "It is recommended to check this file in to source control so that everyone who runs the test benefits from these saved cases." Seeds copied into `main`'s tree; running each module's `proptest::tests` confirms the seeds are auto-replayed before novel cases.
+
+### AI Review
+
+Phase T83 ran through three AI-review passes before commit, surfacing both real and false-positive findings:
+
+- `/review` — confirmed conventions, file-quad sync, and PROMPT_LOG verbatim quoting.
+- `/security-review` — surfaced the SM9 C3 timing-oracle (above; HIGH severity, real bug, fixed in this phase). All other zeroize-on-drop, ct-eq, unsafe-scope, getrandom, and feature-gate checks passed clean.
+- A focused `general-purpose` audit agent — verified the D35 factual chain (cfg(test) boundaries, git blame, 153-panic full-workspace sweep, proptest seed format, test name existence). Caught the original DEV_LOG draft's `unreachable!()` count being short by 7 — corrected here.
+
+This phase is therefore both a validation of the project's own AI-review tooling and the first commit to materially benefit from running it pre-merge.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/sm9/alg.rs` | Modified | Add `use subtle::ConstantTimeEq`; replace plain `c3 != c3_check.as_slice()` with length-check + `ct_eq`; add `test_decrypt_rejects_tampered_c3_tag` regression test (flips both ends of the 32-byte C3 tag and asserts `Sm9VerifyFail`) |
+| `QUALITY_REPORT.md` | Modified | D35 row in summary table flipped OPEN → CLOSED; §2.35 rewritten with rationale + accurate workspace-wide `panic!`/`unreachable!` counts; §3.2 production-panic count updated (~~2~~ → 0); §3.3 risk row + §3.4 score row updated; T74 phase summary residual list trimmed to D28/D34 |
+| `crates/hitls-crypto/proptest-regressions/ed25519/mod.txt` | Created | 1 shrunk seed for ed25519 `prop_ed25519_sign_verify` (32-byte seed + 1-byte msg `[204]`) |
+| `crates/hitls-crypto/proptest-regressions/ed448/mod.txt` | Created | 1 shrunk seed for ed448 `prop_ed448_sign_verify_roundtrip` / `prop_ed448_different_key_rejects` (45-byte msg) |
+| `crates/hitls-crypto/proptest-regressions/x448/mod.txt` | Created | 1 shrunk seed for x448 `prop_x448_dh_commutativity` (32-byte seed) |
+| `.claude/hooks/pre-commit-review-reminder.sh` | Created | Hook script that intercepts `git commit` via `PreToolUse`/`Bash`, inspects the staged diff, and emits a `systemMessage` reminder when crypto-sensitive files (`crates/hitls-{crypto,tls,bignum,pki,auth}/.*\.rs`) are staged. Does not block. **Opt-in**: `.claude/settings.json` is gitignored per-user, so contributors using Claude Code who want this reminder must add the registration snippet manually (see *How to enable* below). |
+| `worktrees/perf-enhanced/crates/hitls-crypto/proptest-regressions/{ed25519,ed448,x448}/` | Deleted | Sources removed after promotion to `main` (the perf branch's upstream is gone) |
+
+### Test Count (Post T83)
+
+| Crate | Count | Δ |
+|-------|------:|--:|
+| hitls-types | 26 | — |
+| hitls-utils | 78 | — |
+| hitls-bignum | 95 (1 ignored) | — |
+| hitls-crypto | 1486 (24 ignored) | +1 |
+| hitls-tls | 1507 | — |
+| hitls-pki | 442 | — |
+| hitls-auth | 47 | — |
+| hitls-cli | 165 (5 ignored) | — |
+| hitls-integration-tests | 261 (12 ignored) | — |
+| **Total** | **4149 (42 ignored)** | **+1** |
+
+Proptest regression files do not add new test cases (they inject deterministic seeds into existing `proptest!` blocks at startup). The +1 is the new SM9 tampered-C3 test.
+
+| Crate | Count | Δ |
+|-------|------:|--:|
+| hitls-types | 26 | — |
+| hitls-utils | 78 | — |
+| hitls-bignum | 95 (1 ignored) | — |
+| hitls-crypto | 1485 (24 ignored) | — |
+| hitls-tls | 1507 | — |
+| hitls-pki | 442 | — |
+| hitls-auth | 47 | — |
+| hitls-cli | 165 (5 ignored) | — |
+| hitls-integration-tests | 261 (12 ignored) | — |
+| **Total** | **4148 (42 ignored)** | — |
+
+### Build Status (Post T83)
+- `cargo test --workspace --all-features`: 4,107 passed, 0 failed, 42 ignored (4,149 total)
+- `cargo test -p hitls-crypto --all-features --lib sm9::alg::tests::test_decrypt_rejects_tampered_c3_tag`: passes
+- `cargo test -p hitls-crypto --all-features --lib ed25519::tests` / `ed448::tests` / `x448::tests`: all proptest blocks pass with the recovered seeds replayed
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+### How to enable the AI-review pre-commit hook (opt-in)
+
+The hook script ships in-tree. To activate it for your local Claude Code session, add the following to your `.claude/settings.json` (which is per-user and gitignored):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-review-reminder.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook is a single shell script using only POSIX tools and `python3` (for JSON encode/decode), no external deps. It only emits a reminder when the staged diff touches `crates/hitls-{crypto,tls,bignum,pki,auth}/.*\.rs`; for any other commit it returns `{"continue": true}` silently.

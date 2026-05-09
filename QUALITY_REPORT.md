@@ -161,7 +161,7 @@ CLOSED           D31  Proptest +6 modules (Phase T69)              DH/DSA/Ed448/
 CLOSED           D32  No semver-checks CI (Phase T74-B)            cargo-semver-checks on 7 library crates (PR-only)
 CLOSED           D33  No mutation testing (Phase T74-E)            Weekly cargo-mutants on hitls-bignum + hitls-utils
 OPEN             D34  Mutex .lock().unwrap() in TLS production     ~48 occurrences; poisoned mutex → panic risk
-OPEN             D35  panic!() in library code (SLH-DSA params)    2 occurrences in hitls-crypto production code
+CLOSED           D35  panic!() in library code (Phase T83)        False positive — both occurrences in #[cfg(test)] mod tests
 ```
 
 ### 2.2 D1 — 0-RTT Replay Protection ~~(Critical)~~ — **CLOSED** (Phase T9)
@@ -652,18 +652,16 @@ Benchmarks exist for:
 
 **Proposed fix**: Replace `.lock().unwrap()` with `.lock().unwrap_or_else(|e| e.into_inner())` (ignore poisoning) or propagate as `Result`. Priority: session/cert_verify paths first.
 
-### 2.35 D35 — `panic!()` in Library Code (SLH-DSA params) — **OPEN**
+### 2.35 D35 — ~~`panic!()` in Library Code (SLH-DSA params)~~ — **CLOSED** (Phase T83, false positive)
 
-**Deep testing audit finding**: 2 `panic!()` occurrences in hitls-crypto production code:
+**Resolved**: Phase T83 audit showed both flagged occurrences are inside `#[cfg(test)] mod tests` blocks, not in production code. The "never panic in library code" convention does not apply to test fixtures (panic in a test is semantically identical to `assert!`):
 
-| File | Location | Context |
+| File | Location | Verdict |
 |------|----------|---------|
-| `slh_dsa/params.rs` | Line ~262 | Unreachable parameter branch in match arm |
-| `dh/mod.rs` | 1 occurrence | Error path |
+| `slh_dsa/params.rs:262` | inside `test_security_category_mapping` (test fixture) | False positive — `cfg(test)` starts at line 213 |
+| `dh/mod.rs:320` | inside `test_all_groups_prime_sizes` (test fixture) | False positive — `cfg(test)` starts at line 252 |
 
-**Risk**: Violates the project convention "never panic in library code; use `Result` instead". While the SLH-DSA branch is theoretically unreachable (all valid parameter sets are covered), a future addition could trigger it without compiler warning.
-
-**Proposed fix**: Replace `panic!()` with `return Err(CryptoError::InvalidArg("unsupported SLH-DSA parameter set"))`.
+`git blame` confirms the SLH-DSA panic site has been test-only since commit `bbb61e4` (Phase T129); the DH site is similarly inside `mod tests`. Production-code `panic!()` count across the entire workspace is **0** (153 total `panic!` occurrences, every single one inside a `#[cfg(test)]` boundary, verified file-by-file in Phase T83). The workspace's `unreachable!()` calls — 3 in `hybridkem/mod.rs`, 2 in `curve25519/edwards.rs`, 1 in `curve448/edwards.rs`, 5 across `hitls-cli` (`s_server.rs`, `s_client.rs`, `pkeyutl.rs`, `enc.rs`), and 1 in `hitls-utils/asn1/tag.rs` — are exhaustive-match completeness markers and known-length array conversions, accepted Rust idioms for compile-time unreachable code, not runtime panic risks.
 
 ---
 
@@ -699,7 +697,7 @@ Benchmarks exist for:
 | hitls-auth | 0 | Clean |
 | hitls-types | 0 | Clean |
 
-**Production `panic!()` in library code**: 2 occurrences (hitls-crypto: `slh_dsa/params.rs`, `dh/mod.rs`)
+**Production `panic!()` in library code**: ~~2 occurrences~~ **0 occurrences** — re-audit in Phase T83 confirmed both flagged sites (`slh_dsa/params.rs:262`, `dh/mod.rs:320`) are inside `#[cfg(test)] mod tests` blocks. See §2.35.
 
 ### 3.3 Risk Assessment Summary
 
@@ -709,7 +707,7 @@ Benchmarks exist for:
 | Clippy/fmt/doc clean | — | Green | Maintain |
 | Feature isolation all pass | — | Green | Maintain |
 | 48 Mutex `.lock().unwrap()` in TLS | Medium | D34 Open | Replace with poison-tolerant pattern |
-| 2 `panic!()` in crypto library | Low | D35 Open | Replace with `Result::Err` |
+| ~~2 `panic!()` in crypto library~~ 0 prod panics | — | D35 Closed (T83, false positive) | None — both in test fixtures |
 | ~112 `unwrap()` in hitls-crypto | Low | Accepted | Most are safe (fixed-size conversions) |
 
 ### 3.4 Overall Quality Score
@@ -723,7 +721,7 @@ Benchmarks exist for:
 | CI/CD automation | 9.5/10 | 29 jobs, nextest, semver, bench, careful, mutants |
 | Standard vectors | 10/10 | Wycheproof + RFC + FIPS + GB/T |
 | Side-channel defense | 9/10 | 16 timing tests, subtle ConstantTimeEq, ct_verify |
-| Code quality (panic-free) | 8.5/10 | 2 library panic!, ~48 Mutex unwrap |
+| Code quality (panic-free) | 9/10 | 0 production panic! (T83 audit), ~48 Mutex unwrap (D34) |
 | **Overall** | **~9.5/10** | **Production-grade quality posture** |
 
 ---
@@ -813,7 +811,7 @@ Phase T74-G       +3 test  —            dudect-style ct_verify tests (CCM/ChaC
 Phase T74-H       CI       —            Dependabot fuzz dir + open-pull-requests-limit      ✅
 ```
 
-**Result**: 2,585 → 3,990 tests (+1,405), 65 fuzz targets (429 corpus), ~87 proptest blocks. All planned deficiencies addressed. D26/D32/D33 closed. Residual: D28 (low test density), D34 (Mutex unwrap), D35 (SLH-DSA panic). Defense model rating: **A**.
+**Result**: 2,585 → 3,990 tests (+1,405), 65 fuzz targets (429 corpus), ~87 proptest blocks. All planned deficiencies addressed. D26/D32/D33 closed; D35 closed in Phase T83 as false positive. Residual: D28 (low test density), D34 (Mutex unwrap). Defense model rating: **A**.
 
 ### 4.2 Phase T9 — 0-RTT Early Data + Replay Protection (~8 tests) ✅
 

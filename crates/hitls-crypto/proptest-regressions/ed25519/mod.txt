@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc af9ee489cf6f7df9a355c041afccf6b07c413e9ec4210a0b3c68896fee3e94f8 # shrinks to seed = [3, 8, 24, 40, 41, 80, 109, 32, 88, 9, 1, 15, 15, 85, 0, 25, 77, 28, 21, 92, 1, 0, 0, 0, 52, 7, 47, 2, 13, 53, 0, 35], msg = [204]
