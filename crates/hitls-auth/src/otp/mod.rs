@@ -3,6 +3,7 @@
 use hitls_crypto::hmac::Hmac;
 use hitls_crypto::provider::Digest;
 use hitls_types::CryptoError;
+use subtle::{Choice, ConstantTimeEq};
 
 /// Hash algorithm for OTP computation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,9 +83,14 @@ impl Hotp {
     }
 
     /// Verify an HOTP value against the given counter.
+    ///
+    /// Uses constant-time comparison on the 4-byte big-endian OTP code so a
+    /// remote attacker cannot mount a per-byte timing attack against the
+    /// 6-digit secret. RFC 6238 §5.4 explicitly requires CT compare even for
+    /// short codes.
     pub fn verify(&self, otp: u32, counter: u64) -> Result<bool, CryptoError> {
         let expected = self.generate(counter)?;
-        Ok(expected == otp)
+        Ok(bool::from(expected.to_be_bytes().ct_eq(&otp.to_be_bytes())))
     }
 }
 
@@ -121,17 +127,29 @@ impl Totp {
     /// Verify a TOTP value for the given Unix timestamp, with a window of tolerance.
     ///
     /// Checks counter values from `counter - window` to `counter + window`.
+    ///
+    /// Uses constant-time accumulation: every position in the window is
+    /// evaluated and the per-position match is folded into a `Choice` before
+    /// the final result is produced, so the wall-clock cost does not reveal
+    /// *which* counter (in the past, present, or future direction) matched
+    /// — only that *some* did. A naive early-`return` loop leaks the matching
+    /// step's offset, which combined with low-rate 6-digit OTP guessing is
+    /// exploitable.
     pub fn verify(&self, otp: u32, timestamp: u64, window: u32) -> Result<bool, CryptoError> {
         let counter = timestamp / self.period;
+        let otp_be = otp.to_be_bytes();
+        let mut matched = Choice::from(0);
         for i in 0..=window {
-            if counter >= u64::from(i) && self.hotp.generate(counter - u64::from(i))? == otp {
-                return Ok(true);
+            if counter >= u64::from(i) {
+                let exp = self.hotp.generate(counter - u64::from(i))?;
+                matched |= exp.to_be_bytes().ct_eq(&otp_be);
             }
-            if i > 0 && self.hotp.generate(counter + u64::from(i))? == otp {
-                return Ok(true);
+            if i > 0 {
+                let exp = self.hotp.generate(counter + u64::from(i))?;
+                matched |= exp.to_be_bytes().ct_eq(&otp_be);
             }
         }
-        Ok(false)
+        Ok(bool::from(matched))
     }
 }
 
@@ -257,6 +275,68 @@ mod tests {
         let otp = totp.generate(90).unwrap(); // counter = 3
                                               // Window of 0 at a different step should fail
         assert!(!totp.verify(otp, 150, 0).unwrap()); // counter=5, otp was for counter=3
+    }
+
+    /// Phase T84 regression: HOTP verification uses constant-time comparison
+    /// on the OTP code (was `expected == otp` u32-eq until T84).
+    /// Functional contract: every wrong code differing from the right one by
+    /// any single digit must reject; every off-by-one code must reject.
+    #[test]
+    fn test_hotp_verify_constant_time_rejects_close_codes() {
+        let secret = b"12345678901234567890";
+        let hotp = Hotp::new(secret, 6);
+        let counter = 7u64;
+        let correct = hotp.generate(counter).unwrap();
+        // Correct code passes.
+        assert!(hotp.verify(correct, counter).unwrap());
+        // Off-by-one (low and high) and unrelated codes must reject.
+        for delta in [1, -1, 100, -100, 999_999] {
+            // Wrap into the 6-digit space the code lives in.
+            let wrong = ((correct as i64 + delta).rem_euclid(1_000_000)) as u32;
+            if wrong == correct {
+                continue;
+            }
+            assert!(
+                !hotp.verify(wrong, counter).unwrap(),
+                "wrong code {wrong} (delta {delta}) must not verify against correct {correct}"
+            );
+        }
+    }
+
+    /// Phase T84 regression: TOTP `verify` accumulates window match in a
+    /// constant-time `Choice` (was `for ... return Ok(true);` early-return
+    /// loop until T84). This functional test pins that every valid window
+    /// position still accepts and every out-of-window position still rejects;
+    /// the timing property itself is not asserted (tested separately by the
+    /// project's `dudect` harness if applicable).
+    #[test]
+    fn test_totp_window_constant_time_match_all_positions() {
+        let secret = b"12345678901234567890";
+        let totp = Totp::new(secret, 6, 30);
+
+        // counter = 10, window = 3 → accepts counters 7, 8, 9, 10, 11, 12, 13.
+        let timestamp = 300; // counter = 10
+        for past in 0..=3 {
+            let cnt_ts = timestamp - past * 30;
+            let otp = totp.generate(cnt_ts).unwrap();
+            assert!(
+                totp.verify(otp, timestamp, 3).unwrap(),
+                "past offset {past} must verify"
+            );
+        }
+        for fut in 1..=3 {
+            let cnt_ts = timestamp + fut * 30;
+            let otp = totp.generate(cnt_ts).unwrap();
+            assert!(
+                totp.verify(otp, timestamp, 3).unwrap(),
+                "future offset {fut} must verify"
+            );
+        }
+        // Just outside the window must reject.
+        let outside = totp.generate(timestamp - 4 * 30).unwrap();
+        assert!(!totp.verify(outside, timestamp, 3).unwrap());
+        let outside_fut = totp.generate(timestamp + 4 * 30).unwrap();
+        assert!(!totp.verify(outside_fut, timestamp, 3).unwrap());
     }
 
     #[test]

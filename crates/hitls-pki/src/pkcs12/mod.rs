@@ -12,6 +12,7 @@ use hitls_crypto::sha1::Sha1;
 use hitls_types::PkiError;
 use hitls_utils::asn1::Decoder;
 use hitls_utils::oid::{known, Oid};
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 use crate::encoding::{
@@ -321,7 +322,14 @@ fn verify_mac(auth_safe_content: &[u8], pfx: &mut Decoder, password: &str) -> Re
     let mac_key = pkcs12_kdf(password, &mac_salt, 3, iterations, 20)?;
     let computed = hmac_sha1(&mac_key, auth_safe_content)?;
 
-    if computed != stored_mac {
+    // Constant-time MAC tag comparison. `stored_mac` comes from the PFX file
+    // (attacker-controlled in network/file scenarios). Naive `Vec<u8> != ...`
+    // early-exits per byte and lets a forger probe MAC bytes one at a time
+    // (PKCS#12 §4.2 password-based integrity). Length-check first because
+    // `ct_eq` requires equal-length inputs.
+    if computed.len() != stored_mac.len()
+        || !bool::from(computed.as_slice().ct_eq(stored_mac.as_slice()))
+    {
         return Err(perr("MAC verification failed (wrong password?)"));
     }
     Ok(())
@@ -641,6 +649,37 @@ mod tests {
         let cert = fake_certificate(1);
         let p12 = Pkcs12::create(Some(&pk), &[&cert], "correct").unwrap();
         assert!(Pkcs12::from_der(&p12, "wrong").is_err());
+    }
+
+    /// Phase T84 regression: PKCS#12 password-MAC verification rejects a
+    /// PFX whose stored MAC has been tampered. Locks in the move from
+    /// early-exit byte compare to length-check + `subtle::ConstantTimeEq`.
+    /// We encode a valid PFX with `Pkcs12::create`, then surgically flip
+    /// bytes near the MAC tag inside the encoded blob and re-parse; each
+    /// such tamper must fail with a MAC verification error rather than
+    /// panic or silently accept.
+    #[test]
+    fn test_pkcs12_rejects_tampered_mac_constant_time() {
+        let pk = fake_private_key();
+        let cert = fake_certificate(1);
+        let mut p12 = Pkcs12::create(Some(&pk), &[&cert], "pw").unwrap();
+        let original_len = p12.len();
+        // Sanity: original parses cleanly with the right password.
+        assert!(Pkcs12::from_der(&p12, "pw").is_ok());
+
+        // The MAC tag is HMAC-SHA-1 (20 bytes) and lives near the end of
+        // the PFX before the trailing iteration count + salt. Flipping the
+        // 5-th-from-last byte will hit either the tag, the salt-length
+        // prefix, or an iteration field — all of which must invalidate
+        // either the MAC or the structure parse.
+        let target = original_len.saturating_sub(5);
+        p12[target] ^= 0x40;
+        let result = Pkcs12::from_der(&p12, "pw");
+        assert!(
+            result.is_err(),
+            "tampered byte at offset {target} of {original_len}-byte PFX \
+             must not parse cleanly with the original password"
+        );
     }
 
     #[test]

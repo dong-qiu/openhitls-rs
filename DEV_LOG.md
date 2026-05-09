@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I91 (91 phases)
-- Testing: T1–T83 (82 phases, T64 skipped)
+- Testing: T1–T84 (83 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
 
@@ -282,6 +282,7 @@ Category summary:
 | 270 | I91 | Impl | ISO/IEC 9796-2:1997 Scheme 1 RSA Signature Padding | 2026-05-07 |
 | 271 | T82 | Test | TLS 1.3 PSK Coverage + RFC 5077 NewSessionTicket Transcript Fix | 2026-05-09 |
 | 272 | T83 | Test | Quality Hardening: SM9 Constant-Time MAC + D35 False-Positive Audit + Proptest Seeds Recovery | 2026-05-09 |
+| 273 | T84 | Test | Workspace Timing-Oracle Audit: CMS / PKCS#12 / HOTP/TOTP / HPKE Constant-Time Hardening | 2026-05-09 |
 
 ---
 
@@ -14476,3 +14477,60 @@ The hook script ships in-tree. To activate it for your local Claude Code session
 ```
 
 The hook is a single shell script using only POSIX tools and `python3` (for JSON encode/decode), no external deps. It only emits a reminder when the staged diff touches `crates/hitls-{crypto,tls,bignum,pki,auth}/.*\.rs`; for any other commit it returns `{"continue": true}` silently.
+
+## Phase T84 — Workspace Timing-Oracle Audit: CMS / PKCS#12 / HOTP/TOTP / HPKE Constant-Time Hardening (2026-05-09)
+
+### Summary
+
+Direct follow-up to T83. After a focused `general-purpose` audit-agent swept all 277 production `.rs` files for `==`/`!=` comparisons in cryptographic contexts (filtering out the ~1,800 raw matches that were length / version / OID / handshake-type comparisons), four real timing-oracle classes were found and fixed:
+
+1. **CMS AuthenticatedData HMAC verify (CRITICAL)** — `crates/hitls-pki/src/cms/mod.rs:1307` returned `Ok(computed == ad.mac)`. `Vec<u8> == Vec<u8>` short-circuits per byte; `ad.mac` is verbatim from the (attacker-controlled) AuthenticatedData blob, so this was a Lucky-13-style MAC forgery oracle (RFC 5652 §9.2). Fix: `subtle::ConstantTimeEq` with explicit length-check, length mismatch returns `Ok(false)` rather than `ct_eq`-on-unequal-length (which would panic).
+2. **PKCS#12 password-MAC verify (CRITICAL)** — `crates/hitls-pki/src/pkcs12/mod.rs:324` used `if computed != stored_mac { return Err(...) }` to validate the PFX integrity HMAC-SHA-1 tag. `stored_mac` is attacker-controlled in the PFX file. Same fix pattern: length-check + `ct_eq`. PKCS#12 §4.2 password-based integrity now matches the project's existing GCM / CBC-MtE / RSA / Finished verify patterns.
+3. **HOTP / TOTP verify (HIGH)** — `crates/hitls-auth/src/otp/mod.rs`. `Hotp::verify` used `expected == otp` on `u32`. Although a single-cycle `u32` compare is a low timing leak per call, RFC 6238 §5.4 explicitly mandates constant-time compare for OTP codes; replaced with `expected.to_be_bytes().ct_eq(&otp.to_be_bytes())`. `Totp::verify` had a more dangerous pattern: an early-`return Ok(true)` inside the `for i in 0..=window` loop leaked the matching window position via wall-clock timing — combined with low-rate 6-digit OTP guessing this is exploitable. Replaced with `subtle::Choice` accumulation: every position in the window is evaluated and the per-position match is OR'd into `matched: Choice` before returning, so the wall-clock cost depends on `window` only and not on *which* position matched.
+4. **HPKE `DeriveKeyPair` rejection-sample (MEDIUM)** — `crates/hitls-crypto/src/hpke/mod.rs:391` `less_than_order` walked candidate `sk` byte-by-byte against the curve order with three `Ordering::{Less,Greater,Equal}` early-exit branches. RFC 9180 §7.1.3 rejection sampling is single-use per candidate, but the byte-loop leaks high bytes of accepted/rejected `sk` candidates. Refactored to a constant-time masked accumulator: track `lt`/`gt` as 0/1 `u8` flags, lock both with an `unresolved = 1 - (lt | gt)` mask once a difference is seen, and decide `lt & !gt` at the end. No early exit; the comparison cost depends only on slice length (a public curve constant). Length mismatch is still handled as a fast-path before the CT loop because input lengths are public.
+
+This phase also includes two defense-in-depth fixes in CMS, both digest-compare paths over public content (no attacker secret oracle, but project rule mandates `ct_eq` everywhere):
+- `verify_message_digest_attr` (`mod.rs:629`) compared `messageDigest` attribute via `digest != expected_digest` on `&[u8]`.
+- `DigestedData::verify_digest` (`mod.rs:1257`) compared computed digest via `computed == dd.digest` on `Vec<u8>`. Caught by a final `/security-review` pass after the four primary fixes — the audit-agent's first sweep had missed this one (it was filed under "looks like a hash compare, public, lower priority"), so the iterative audit → fix → re-review loop paid off twice.
+
+The audit also documented (no fix this phase) three LOW-severity defense-in-depth items: `BigNum::PartialEq`, `P521FieldElement::PartialEq`, and `HashOutput::PartialEq` all use `Vec<u8>`/`==` compares but have no production callers comparing secret data; they remain potential foot-guns for future code. Recommended as future work in QUALITY_REPORT.
+
+### Audit Methodology
+
+This phase is the second openHiTLS-rs phase to begin with an AI-driven security audit (after T83 surfaced the SM9 C3 oracle via `/security-review`). The methodology is now reusable:
+
+1. Launch a `general-purpose` agent with a strict scope: (a) only production code (no `#[cfg(test)]` / `tests.rs` / `benches/` / `fuzz/` / `examples/`); (b) only byte-slice / MAC / signature / tag / hash compares; (c) require context judgement per finding (CRITICAL / HIGH / MEDIUM / LOW / false-positive).
+2. Agent returns a markdown report with file:line, context excerpt, why-it-leaks, and a concrete `ct_eq` remediation.
+3. Maintainer verifies each finding in source, fixes, adds a regression test that pins the rejection contract by flipping bits at multiple offsets in the controlled secret, and re-runs `/security-review` to confirm no regression elsewhere.
+
+The agent's own report flagged its scan was complete: 39 sites already use `ct_eq` correctly across the workspace, including all AEAD tag verifies, all TLS Finished verifications, PSK binders, RSA padding, ML-KEM Fujisaki-Okamoto re-encryption, XMSS/SLH-DSA root verifies, and the SM9 C3 fix from T83. Combined with this phase's four fixes, the workspace's enumerable secret-compare paths are now fully constant-time.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-pki/Cargo.toml` | Modified | Add `subtle = { workspace = true }` direct dep (was indirect via `hitls-crypto`) |
+| `crates/hitls-pki/src/cms/mod.rs` | Modified | Add `use subtle::ConstantTimeEq`; rewrite `verify_mac` (AuthenticatedData HMAC), `verify_message_digest_attr` (SignerInfo signedAttrs digest), and `DigestedData::verify_digest` to use length-check + `ct_eq`; +1 regression test `test_cms_authenticated_data_rejects_tampered_mac` (flips MAC byte at offsets 0/15/31 + length-truncation case) |
+| `crates/hitls-pki/src/pkcs12/mod.rs` | Modified | Add `use subtle::ConstantTimeEq`; rewrite password-MAC verify with length-check + `ct_eq`; +1 regression test `test_pkcs12_rejects_tampered_mac_constant_time` (flips a byte near the MAC tag in a real-encoded PFX and re-parses) |
+| `crates/hitls-auth/src/otp/mod.rs` | Modified | Add `use subtle::{Choice, ConstantTimeEq}`; `Hotp::verify` uses `to_be_bytes().ct_eq(...)`; `Totp::verify` accumulates window matches into a `Choice` instead of early-returning; +2 regression tests covering close-code rejection and full-window match |
+| `crates/hitls-crypto/src/hpke/mod.rs` | Modified | Rewrite `less_than_order` as constant-time masked-accumulator; +1 regression test `test_less_than_order_boundary_cases` (equal-length less/equal/greater boundaries + length-mismatch shortcuts) |
+
+### Test Count (Post T84)
+
+| Crate | Count | Δ |
+|-------|------:|--:|
+| hitls-types | 26 | — |
+| hitls-utils | 78 | — |
+| hitls-bignum | 95 (1 ignored) | — |
+| hitls-crypto | 1487 (24 ignored) | +1 |
+| hitls-tls | 1507 | — |
+| hitls-pki | 444 | +2 |
+| hitls-auth | 49 | +2 |
+| hitls-cli | 165 (5 ignored) | — |
+| hitls-integration-tests | 261 (12 ignored) | — |
+| **Total** | **4154 (42 ignored)** | **+5** |
+
+### Build Status (Post T84)
+- `cargo test --workspace --all-features`: 4,112 passed, 0 failed, 42 ignored (4,154 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean

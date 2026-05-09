@@ -452,6 +452,7 @@ dependencies = [
  "hitls-types",
  "hitls-utils",
  "proptest",
+ "subtle",
  "zeroize",
 ]
 

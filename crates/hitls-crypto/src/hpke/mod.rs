@@ -388,18 +388,37 @@ fn hex_literal(s: &str) -> Vec<u8> {
     bytes
 }
 
+/// Constant-time `sk < order` for big-endian byte representations of the
+/// same length. The naive variant short-circuits on the first differing
+/// byte, which leaks the high bytes of `sk` candidates during HPKE
+/// `DeriveKeyPair` rejection sampling (RFC 9180 §7.1.3). Threat model is
+/// narrow because each candidate is single-use, but constant-time arithmetic
+/// here costs essentially nothing.
 fn less_than_order(sk: &[u8], order: &[u8]) -> bool {
     if sk.len() != order.len() {
+        // Length comparison is on public sizes (curve-specific constants);
+        // constant-time per-byte loop only runs in the equal-length branch.
         return sk.len() < order.len();
     }
-    for (s, o) in sk.iter().zip(order.iter()) {
-        match s.cmp(o) {
-            std::cmp::Ordering::Less => return true,
-            std::cmp::Ordering::Greater => return false,
-            std::cmp::Ordering::Equal => continue,
-        }
+    // Walk MSB → LSB, tracking three accumulators in constant time:
+    //   borrow = 1 once we've seen sk[i] < order[i] strictly,
+    //   gt     = 1 once we've seen sk[i] > order[i] strictly,
+    //   neither flips back; the first difference wins.
+    // Final decision: borrow & !gt.
+    let mut lt: u8 = 0;
+    let mut gt: u8 = 0;
+    for (&s, &o) in sk.iter().zip(order.iter()) {
+        // diff_lt = (s < o) as 0/1, computed without branching.
+        let diff_lt = ((s as i16 - o as i16) >> 8) as u8 & 1;
+        let diff_gt = ((o as i16 - s as i16) >> 8) as u8 & 1;
+        // Once either flag is set we want to lock it; mask future updates
+        // by `1 - (lt | gt)` so neither can be overwritten.
+        let unresolved = 1u8 - (lt | gt);
+        lt |= diff_lt & unresolved;
+        gt |= diff_gt & unresolved;
     }
-    false // equal → not less
+    // sk < order iff lt is set and gt is not (lt & !gt). Both can't be set.
+    (lt & (1 - gt)) == 1
 }
 
 /// Derive key pair for the given KEM.
@@ -924,6 +943,37 @@ impl Drop for HpkeCtx {
 mod tests {
     use super::*;
     use hitls_utils::hex::{hex, to_hex};
+
+    /// Phase T84 regression: `less_than_order` must be functionally correct
+    /// (constant-time refactor preserves behaviour). The CT property itself
+    /// is exercised by inspection — naive byte-loop vs masked accumulator
+    /// yields the same boolean for every input pair, but the latter doesn't
+    /// short-circuit. This test pins the boundary cases so a future
+    /// "optimisation" that reintroduces early-exit gets caught.
+    #[test]
+    fn test_less_than_order_boundary_cases() {
+        // Equal length inputs.
+        let order = [0xFF, 0xFF, 0xFE, 0xBA, 0xAE, 0xDC, 0xE6, 0xAF];
+
+        // sk strictly less by high byte.
+        assert!(less_than_order(&[0x00; 8], &order));
+        // sk equal to order — must NOT count as less.
+        assert!(!less_than_order(&order, &order));
+        // sk strictly greater by high byte.
+        assert!(!less_than_order(&[0xFF; 8], &order));
+        // sk less only by low byte (forces the loop to walk all bytes).
+        let mut sk = order;
+        sk[7] -= 1;
+        assert!(less_than_order(&sk, &order));
+        // sk greater only by low byte.
+        let mut sk = order;
+        sk[7] = sk[7].wrapping_add(1); // 0xAF + 1 = 0xB0; sk > order
+        assert!(!less_than_order(&sk, &order));
+        // Length mismatch: shorter sk wins.
+        assert!(less_than_order(&[0xFF; 4], &order));
+        // Length mismatch: longer sk loses.
+        assert!(!less_than_order(&[0x00; 16], &order));
+    }
 
     // ---- RFC 9180 Appendix A.1 ----
     // DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-128-GCM

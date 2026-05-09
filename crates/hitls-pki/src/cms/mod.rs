@@ -6,6 +6,7 @@ pub mod enveloped;
 use hitls_types::PkiError;
 use hitls_utils::asn1::{tags, Decoder, Encoder};
 use hitls_utils::oid::{known, Oid};
+use subtle::ConstantTimeEq;
 
 use crate::encoding::{
     bytes_to_u32, enc_explicit_ctx, enc_int, enc_octet, enc_oid, enc_seq, enc_set, enc_tlv,
@@ -625,7 +626,10 @@ fn verify_message_digest_attr(
             let digest = vals
                 .read_octet_string()
                 .map_err(|e| cerr(&format!("md val: {e}")))?;
-            if digest != expected_digest {
+            // messageDigest is a hash of public content (the EncapContentInfo)
+            // so the comparison is not a true secret oracle, but use ct_eq for
+            // hygiene + alignment with the project-wide rule.
+            if digest.len() != expected_digest.len() || !bool::from(digest.ct_eq(expected_digest)) {
                 return Err(cerr("messageDigest mismatch"));
             }
             return Ok(());
@@ -1250,7 +1254,14 @@ impl CmsMessage {
         let alg = oid_to_digest_alg(&dd.digest_algorithm.oid)?;
         let computed = compute_digest(content, alg)?;
 
-        Ok(computed == dd.digest)
+        // The digest is over public content (EncapContentInfo) so this is
+        // not a real secret-compare oracle, but use ct_eq for hygiene and
+        // alignment with the project-wide rule that all crypto byte
+        // comparisons go through `subtle::ConstantTimeEq`.
+        if computed.len() != dd.digest.len() {
+            return Ok(false);
+        }
+        Ok(bool::from(computed.as_slice().ct_eq(dd.digest.as_slice())))
     }
 
     /// Create a CMS AuthenticatedData message (RFC 5652 §9).
@@ -1304,7 +1315,15 @@ impl CmsMessage {
         let alg = oid_to_hmac_digest_alg(&ad.mac_algorithm.oid)?;
         let computed = compute_hmac(content, key, alg)?;
 
-        Ok(computed == ad.mac)
+        // Constant-time HMAC tag comparison. `ad.mac` is taken verbatim from
+        // the (attacker-controlled) AuthenticatedData blob; a naive `==` on
+        // `Vec<u8>` short-circuits per byte and forms a Lucky-13-style MAC
+        // forgery oracle (RFC 5652 §9.2). Length must be checked first since
+        // `ct_eq` only constant-time-compares equal-length slices.
+        if computed.len() != ad.mac.len() {
+            return Ok(false);
+        }
+        Ok(bool::from(computed.as_slice().ct_eq(ad.mac.as_slice())))
     }
 }
 
@@ -2390,6 +2409,36 @@ mod tests {
         let wrong_key = vec![0xCD; 32];
         let ok = cms.verify_mac(&wrong_key).unwrap();
         assert!(!ok);
+    }
+
+    /// Phase T84 regression: CMS AuthenticatedData MAC verification rejects a
+    /// tampered MAC tag in constant time (was `Vec<u8> == Vec<u8>` until T84).
+    /// Flips a byte at the start, middle, and end of the tag so a future
+    /// regression to early-exit byte compare would be caught regardless of
+    /// where the divergence is.
+    #[test]
+    fn test_cms_authenticated_data_rejects_tampered_mac() {
+        let data = b"Phase T84 regression payload";
+        let key = vec![0x77; 32];
+
+        for offset in [0_usize, 15, 31] {
+            let mut cms = CmsMessage::authenticate(data, &key, CmsDigestAlg::Sha256).unwrap();
+            assert_eq!(
+                cms.authenticated_data.as_ref().unwrap().mac.len(),
+                32,
+                "HMAC-SHA-256 produces a 32-byte tag"
+            );
+            cms.authenticated_data.as_mut().unwrap().mac[offset] ^= 0x80;
+            let ok = cms.verify_mac(&key).unwrap();
+            assert!(!ok, "tampered MAC at byte {offset} must fail verification");
+        }
+
+        // Length mismatch (truncated MAC) must also reject — the explicit
+        // length-check guard precedes `ct_eq` and shields the latter from a
+        // panic on unequal lengths.
+        let mut truncated = CmsMessage::authenticate(data, &key, CmsDigestAlg::Sha256).unwrap();
+        truncated.authenticated_data.as_mut().unwrap().mac.pop();
+        assert!(!truncated.verify_mac(&key).unwrap());
     }
 
     #[test]

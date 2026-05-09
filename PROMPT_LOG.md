@@ -4360,3 +4360,28 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
 - **(d) Pre-commit hook**: `.claude/hooks/pre-commit-review-reminder.sh` registered under `PreToolUse`/`Bash` in `.claude/settings.json`. Inspects `git diff --cached --name-only` when Claude tries to run `git commit`; if any staged path matches `crates/hitls-(crypto|tls|bignum|pki|auth)/.+\.rs$`, emits a `{continue: true, systemMessage: "🔒 Crypto-sensitive commit … recommend /security-review"}` reminder. Does not block — purely informational. Tested in both branches (crypto staged → reminder; non-commit Bash → continue silently).
 
 The SM9 fix grew T83's test count by +1 (4148 → 4149 total). All other AI-review findings either confirmed existing correctness or corrected documentation accuracy. The hook is the persistent piece: future commits touching crypto-sensitive files will receive the same reminder automatically.
+
+### Prompt 282: T84 — Workspace Timing-Oracle Audit (audit + fix)
+
+> 接下来需要干什么？
+
+> 做 T84，选 (C)
+
+**Result**: Direct follow-up to T83. Launched a focused `general-purpose` audit-agent (option C) to sweep the entire workspace for timing-oracle patterns — same template as T83's audit agent, but with stricter scope (production-only, byte-slice cryptographic compares, severity-classified per finding). Agent ran 5m56s, scanned 277 production `.rs` files, narrowed ~1,808 raw `==`/`!=` matches down to ~25 cryptographically-relevant candidates, and reported **2 CRITICAL + 1 HIGH + 2 MEDIUM + 3 LOW (defense-in-depth)** findings, plus 39 sites already-correct via `ct_eq`.
+
+The four primary fixes (CRITICAL + HIGH + the larger MEDIUM):
+
+1. **CMS AuthenticatedData HMAC verify** (`hitls-pki/src/cms/mod.rs:1307`): `Vec<u8> == Vec<u8>` was a Lucky-13-style MAC forgery oracle (RFC 5652 §9.2). Fix: length-check + `ct_eq`. Required adding `subtle = { workspace = true }` to `hitls-pki/Cargo.toml` (was indirect via `hitls-crypto`).
+2. **PKCS#12 password-MAC verify** (`hitls-pki/src/pkcs12/mod.rs:324`): `Vec<u8> != Vec<u8>` against attacker-controlled `stored_mac` from the PFX file. Same fix pattern (PKCS#12 §4.2).
+3. **HOTP/TOTP verify** (`hitls-auth/src/otp/mod.rs:87, 127, 130`): `Hotp::verify` used `expected == otp` on `u32`; `Totp::verify` early-returned inside the window loop, leaking matching position. RFC 6238 §5.4 explicitly mandates CT compare. Fixed `Hotp::verify` with `to_be_bytes().ct_eq(...)`. Rewrote `Totp::verify` to accumulate matches into a `subtle::Choice` so the wall-clock cost depends on `window` only and not on which position matched.
+4. **HPKE `DeriveKeyPair` rejection-sample** (`hitls-crypto/src/hpke/mod.rs:391`): `less_than_order` walked candidate `sk` byte-by-byte against the curve order with three `Ordering` early-exit branches — leaks high bytes of accepted/rejected `sk` candidates. Refactored to a constant-time masked accumulator (track `lt`/`gt` flags, lock both with `unresolved = 1 - (lt | gt)` mask once a difference is seen, decide `lt & !gt` at the end).
+
+Plus one defense-in-depth fix: CMS `verify_message_digest_attr` (`mod.rs:629`) hardened to `ct_eq` even though `messageDigest` is a hash of public content.
+
+Each fix has a dedicated regression test: `test_cms_authenticated_data_rejects_tampered_mac`, `test_pkcs12_rejects_tampered_mac_constant_time`, `test_hotp_verify_constant_time_rejects_close_codes`, `test_totp_window_constant_time_match_all_positions`, `test_less_than_order_boundary_cases`. Tests pin functional rejection at multiple offsets (start / middle / end of tag, length-truncation, off-by-one OTP codes, all window positions, equal/less/greater length-mismatch cases).
+
+3 LOW-severity defense-in-depth items deferred (no production callers compare secret data via these): `BigNum::PartialEq`, `P521FieldElement`/`SM9` field PartialEq, `HashOutput::PartialEq`.
+
+This is the first openHiTLS-rs phase to be **purely AI-driven**: a sub-agent identified all four real bugs. T84's pattern (audit → triage → fix → regression test → /security-review re-validate) is now a reusable security-hardening playbook.
+
+Tests: 4149 → 4154 (+5). Per-crate: hitls-crypto 1486→1487, hitls-pki 442→444, hitls-auth 47→49. Clippy on Rust 1.95: 0 warnings. Fmt clean.
