@@ -4401,3 +4401,36 @@ What remained were three concrete file-level gaps the audit had explicitly liste
 Async TLS files (`connection12_async.rs` etc.) still range 0.65–1.29 tests/100L on the `(tokio::)?test` denominator. They are covered indirectly by per-crate integration tests + the `tests/interop` end-to-end suite, so risk is bounded; full per-message-type unit testing against mocked async streams logged as future work.
 
 Tests: 4154 → 4172 (+18). Per-crate: hitls-pki 444→455 (+11), hitls-auth 49→56 (+7). Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 284: D34 — Mutex poison hardening (T86)
+
+> 请继续 D34
+
+**Result**: D34 is the second consecutive QUALITY_REPORT finding to close as a false positive (after D35 in T83). Both stem from the same systematic flaw in the Phase T74 audit — it grepped `.lock().unwrap()` workspace-wide without filtering `#[cfg(test)]` boundaries, so it counted test fixtures as production code. Phase T86 verified file-by-file:
+
+- 57 `.lock().unwrap()` occurrences in the workspace today.
+- 50 inside `#[cfg(test)] mod tests` blocks within library files (cfg(test) start lines noted in QUALITY_REPORT §2.34 table).
+- 7 inside dedicated `tests.rs` files (`connection/tests.rs`, `connection12/tests.rs`) whose entire content is gated by `#[cfg(test)] mod tests;` declared in the parent module.
+- **0 production occurrences.**
+
+Production code is already poison-tolerant via the silent-skip pattern at 11 sites:
+
+```rust
+if let Ok(mut cache) = cache_mutex.lock() { cache.put(...); }
+// On poison: skip the cache update; connection continues.
+```
+
+`git log -S "if let Ok(mut c) = cache.lock()"` shows this pattern was introduced in Phases I74 / I76 — well before the T74 audit. The audit fired on a flawed grep, not a real gap.
+
+While D34 itself is a false positive, the poison-tolerance contract is real. Phase T86 adds 3 regression tests in `session/mod.rs::tests` that pin the contract regardless of which file uses which pattern: (a) production `if let Ok(...)` after deliberate worker-thread panic must take the no-op branch, (b) the alternative `.unwrap_or_else(|e| e.into_inner())` recovery pattern used by T84's CMS / OTP fixes must not panic and must yield the underlying data, (c) the poison flag is sticky across multiple lock attempts (production sites must remain stable no-ops rather than flaky panics). Helper `poison_mutex` deliberately does NOT swap the panic hook because it's process-global; the deliberate panic produces stderr noise only under `--nocapture`.
+
+QUALITY_REPORT updates: D34 OPEN → CLOSED with per-file `cfg(test)` line-number table; §3.3 risk row + §3.4 panic-free score (9 → 10) updated; T74 phase summary residual list now empty (no remaining audit findings beyond LOW defense-in-depth items).
+
+This consolidation closes the T82–T86 five-phase quality run that started with the OpenSSL TLS 1.2 interop fix:
+- T82: RFC 5077 transcript fix (real bug)
+- T83: SM9 ct-MAC fix (real bug, from /security-review) + D35 false-positive close
+- T84: CMS / PKCS12 / HOTP/TOTP / HPKE ct hardening (4 real bugs, from audit-agent + /security-review)
+- T85: D28 measurement-bug fix + SPAKE2+/cert/builder edge case coverage (+18 tests)
+- T86: D34 false-positive close + 3 poison-tolerance regression tests
+
+Tests: 4172 → 4175 (+3). hitls-tls 1507→1510. Clippy on Rust 1.95: 0 warnings. Fmt clean.

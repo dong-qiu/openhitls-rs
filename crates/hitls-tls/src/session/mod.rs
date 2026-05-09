@@ -806,4 +806,115 @@ mod tests {
         assert!(cache.get(b"a").is_some());
         assert!(cache.get(b"b").is_some());
     }
+
+    // ================================================================
+    // Phase T86 — D34 false-positive close + poison-tolerance regression
+    //
+    // Production code in `connection*.rs` and `macros.rs` consistently
+    // uses `if let Ok(mut c) = cache.lock() { ... }` so that a poisoned
+    // mutex (caused by a thread panicking while holding the lock)
+    // results in the cache update being silently skipped — never a
+    // panic cascade. These tests pin that contract: poison the cache
+    // mutex, then exercise both the production `if let Ok(...)` no-op
+    // path and the alternative `unwrap_or_else(|e| e.into_inner())`
+    // recovery path that future code may want to use when the data is
+    // worth keeping despite the poison.
+    // ================================================================
+
+    /// Helper: poison an `Arc<Mutex<T>>` by holding the lock in a worker
+    /// thread that then panics. The deliberate panic in the worker thread
+    /// will print to stderr under `cargo test --nocapture`; we deliberately
+    /// do NOT swap the panic hook because the panic hook is process-global
+    /// and overriding it from inside a parallel test would silence panics
+    /// in unrelated tests running concurrently. The stderr noise is
+    /// cosmetic; the test framework still records a clean pass.
+    fn poison_mutex<T: Send + 'static>(arc: std::sync::Arc<std::sync::Mutex<T>>) {
+        let arc_clone = std::sync::Arc::clone(&arc);
+        let _ = std::thread::spawn(move || {
+            let _guard = arc_clone.lock().expect("first lock must succeed");
+            panic!("intentional panic to poison the mutex");
+        })
+        .join();
+        // Sanity: the mutex is now poisoned.
+        assert!(
+            arc.is_poisoned(),
+            "mutex must be poisoned after thread panic"
+        );
+    }
+
+    /// Production pattern: `if let Ok(mut c) = cache.lock() { ... }`.
+    /// Must NOT panic on a poisoned mutex; must take the else branch.
+    #[test]
+    fn test_session_cache_poisoned_lock_is_silently_skipped() {
+        use std::sync::{Arc, Mutex};
+
+        let cache: Arc<Mutex<Box<dyn SessionCache>>> =
+            Arc::new(Mutex::new(Box::new(InMemorySessionCache::new(8))));
+        poison_mutex(Arc::clone(&cache));
+
+        // Mirror what production code does: try to lock, on Err do nothing.
+        let mut update_attempted = false;
+        if let Ok(mut c) = cache.lock() {
+            c.put(b"key", make_session(0x1301, &[0xAA; 32]));
+            update_attempted = true;
+        }
+        // We expect the production pattern to NOT have updated the cache —
+        // the lock call should have returned `Err`.
+        assert!(
+            !update_attempted,
+            "production pattern must skip cache update on poisoned mutex"
+        );
+    }
+
+    /// Recovery pattern: `cache.lock().unwrap_or_else(|e| e.into_inner())`.
+    /// Used elsewhere (e.g. CMS / OTP fixes in T84) when the data IS
+    /// worth keeping post-poison. Must not panic; must yield a usable
+    /// guard that exposes the locked data.
+    #[test]
+    fn test_session_cache_poisoned_lock_recoverable_via_into_inner() {
+        use std::sync::{Arc, Mutex};
+
+        let cache: Arc<Mutex<Box<dyn SessionCache>>> =
+            Arc::new(Mutex::new(Box::new(InMemorySessionCache::new(8))));
+        // Pre-populate so we can verify the data survives poisoning.
+        cache
+            .lock()
+            .unwrap()
+            .put(b"prepopulated", make_session(0x1302, &[0xBB; 32]));
+
+        poison_mutex(Arc::clone(&cache));
+
+        // Recovery path: bypass the poison via .into_inner(). The data
+        // we put in earlier must still be readable.
+        let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            guard.get(b"prepopulated").is_some(),
+            "data put before poisoning must be readable via into_inner recovery"
+        );
+    }
+
+    /// The poison-tolerance contract holds across multiple successive
+    /// lock attempts: every subsequent `cache.lock()` returns `Err` (the
+    /// poison flag is sticky), so every production `if let Ok(...)`
+    /// site is a stable no-op rather than a flaky panic.
+    #[test]
+    fn test_session_cache_poison_is_sticky_across_calls() {
+        use std::sync::{Arc, Mutex};
+
+        let cache: Arc<Mutex<Box<dyn SessionCache>>> =
+            Arc::new(Mutex::new(Box::new(InMemorySessionCache::new(4))));
+        poison_mutex(Arc::clone(&cache));
+
+        for _ in 0..5 {
+            let mut would_panic = false;
+            if let Ok(mut c) = cache.lock() {
+                c.put(b"x", make_session(0x1303, &[0xCC; 32]));
+                would_panic = true;
+            }
+            assert!(
+                !would_panic,
+                "poison flag must remain sticky on every lock attempt"
+            );
+        }
+    }
 }

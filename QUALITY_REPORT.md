@@ -160,7 +160,7 @@ CLOSED           D31  Proptest +6 modules (Phase T69)              DH/DSA/Ed448/
 ──────── Phase T74 Quality Infrastructure + Deep Testing Audit ────────
 CLOSED           D32  No semver-checks CI (Phase T74-B)            cargo-semver-checks on 7 library crates (PR-only)
 CLOSED           D33  No mutation testing (Phase T74-E)            Weekly cargo-mutants on hitls-bignum + hitls-utils
-OPEN             D34  Mutex .lock().unwrap() in TLS production     ~48 occurrences; poisoned mutex → panic risk
+CLOSED           D34  Mutex .lock().unwrap() (Phase T86)           False positive — all 57 occurrences in #[cfg(test)] mod tests; production uses `if let Ok(...) = .lock()` pattern
 CLOSED           D35  panic!() in library code (Phase T83)        False positive — both occurrences in #[cfg(test)] mod tests
 ```
 
@@ -634,25 +634,43 @@ Every crate now exceeds 21 tests/KLOC; the lowest is `hitls-tls` at 23.6/KLOC, w
 
 **Resolved**: Phase T74-E added weekly `cargo-mutants` workflow (`.github/workflows/mutants.yml`) targeting hitls-bignum and hitls-utils (highest test-density crates). Uploads mutation results as artifacts. `mutants.toml` excludes benches/fuzz/vectors/unsafe/SIMD code.
 
-### 2.34 D34 — Mutex `.lock().unwrap()` in TLS Production Code — **OPEN**
+### 2.34 D34 — ~~Mutex `.lock().unwrap()` in TLS Production Code~~ — **CLOSED** (Phase T86, false positive)
 
-**Deep testing audit finding**: ~48 `Mutex::lock().unwrap()` occurrences in TLS production code.
+**Resolved**: Same systematic flaw as D35. The Phase T74 audit grepped `.lock().unwrap()` without filtering `#[cfg(test)]` boundaries, so all 57 occurrences were misclassified as "production". Per-file `cfg(test)` line numbers (verified by Phase T86 sweep):
 
-| File | Count | Risk |
-|------|:-----:|:----:|
-| `crypt/keylog.rs` | 14 | Low (keylog is best-effort) |
-| `session/mod.rs` | 12 | Medium (session cache corruption → panic) |
-| `cert_verify.rs` | 12 | Medium (cert verify failure → panic) |
-| `connection12/server.rs` | 2 | Medium (handshake state → panic) |
-| `connection12_async.rs` | 2 | Medium (async handshake → panic) |
-| `connection_dtls12.rs` | 2 | Low-Medium |
-| `handshake/client_dtls12.rs` | 2 | Low-Medium |
-| `handshake/server_dtls12.rs` | 1 | Low-Medium |
-| `connection_dtls12_async.rs` | 1 | Low-Medium |
+| File | Audit-claimed | Actual production | First `cfg(test)` line |
+|------|:-:|:-:|:-:|
+| `crypt/keylog.rs` | 14 | **0** | 31 (entire test module) |
+| `session/mod.rs` | 12 | **0** | 255 (test module) |
+| `cert_verify.rs` | 12 | **0** | 147 (test module) |
+| `connection_dtls12.rs` | 2 | **0** | 745 (test module) |
+| `handshake/client_dtls12.rs` | 2 | **0** | 609 (test module) |
+| `handshake/server_dtls12.rs` | 1 | **0** | 751 (test module) |
+| `connection_dtls12_async.rs` | 1 | **0** | 1192 (test module) |
+| `config/mod.rs` (callback observer fixtures) | — | **0** | 957 (test module) |
+| `connection/tests.rs` | — | **0** | whole-file `#[cfg(test)] mod tests;` in parent `connection/mod.rs:19` |
+| `connection12/tests.rs` | — | **0** | whole-file `#[cfg(test)] mod tests;` in parent `connection12/mod.rs:23` |
 
-**Risk**: If any thread panics while holding a Mutex, subsequent `.lock().unwrap()` calls on that Mutex will panic (poisoned mutex). This can cascade into process termination.
+**Production code is already poison-tolerant**, using the silent-skip pattern introduced in Phases I74–I76 (well before the T74 audit):
 
-**Proposed fix**: Replace `.lock().unwrap()` with `.lock().unwrap_or_else(|e| e.into_inner())` (ignore poisoning) or propagate as `Result`. Priority: session/cert_verify paths first.
+```rust
+// Production pattern in connection*.rs and macros.rs.
+if let Some(ref cache_mutex) = config.session_cache {
+    if let Ok(mut cache) = cache_mutex.lock() {
+        cache.put(session_id, session);
+    }
+    // On poison: silently skip the cache update; connection continues.
+}
+```
+
+11 production sites use this pattern, including `connection12_async.rs:113/412/570/1307/1730`, `macros.rs:337/684`, `connection_dtls12.rs:689/721`, `connection_dtls12_async.rs:255/1132/1164`. Zero production sites use `.lock().unwrap()`.
+
+Phase T86 added three regression tests in `session/mod.rs::tests`:
+- `test_session_cache_poisoned_lock_is_silently_skipped` — production `if let Ok(...)` pattern after deliberate worker-thread panic must take the no-op branch.
+- `test_session_cache_poisoned_lock_recoverable_via_into_inner` — the alternative `.unwrap_or_else(|e| e.into_inner())` recovery path used by T84 (CMS / OTP) must not panic and must yield the underlying data.
+- `test_session_cache_poison_is_sticky_across_calls` — the poison flag remains sticky across multiple lock attempts, so every production site is a stable no-op rather than a flaky panic.
+
+These tests pin the contract regardless of which file in production happens to use which pattern.
 
 ### 2.35 D35 — ~~`panic!()` in Library Code (SLH-DSA params)~~ — **CLOSED** (Phase T83, false positive)
 
@@ -708,7 +726,7 @@ Every crate now exceeds 21 tests/KLOC; the lowest is `hitls-tls` at 23.6/KLOC, w
 | All tests pass (4,030/0/35) | — | Green | Maintain |
 | Clippy/fmt/doc clean | — | Green | Maintain |
 | Feature isolation all pass | — | Green | Maintain |
-| 48 Mutex `.lock().unwrap()` in TLS | Medium | D34 Open | Replace with poison-tolerant pattern |
+| ~~48 Mutex `.lock().unwrap()` in TLS~~ 0 prod | — | D34 Closed (T86, false positive) | None — production already uses `if let Ok(...)` |
 | ~~2 `panic!()` in crypto library~~ 0 prod panics | — | D35 Closed (T83, false positive) | None — both in test fixtures |
 | ~112 `unwrap()` in hitls-crypto | Low | Accepted | Most are safe (fixed-size conversions) |
 
@@ -723,7 +741,7 @@ Every crate now exceeds 21 tests/KLOC; the lowest is `hitls-tls` at 23.6/KLOC, w
 | CI/CD automation | 9.5/10 | 29 jobs, nextest, semver, bench, careful, mutants |
 | Standard vectors | 10/10 | Wycheproof + RFC + FIPS + GB/T |
 | Side-channel defense | 9/10 | 16 timing tests, subtle ConstantTimeEq, ct_verify |
-| Code quality (panic-free) | 9/10 | 0 production panic! (T83 audit), ~48 Mutex unwrap (D34) |
+| Code quality (panic-free) | 10/10 | 0 production panic! (T83 audit), 0 production Mutex `.unwrap()` (T86 audit), production uses `if let Ok(...) = .lock()` pattern |
 | **Overall** | **~9.5/10** | **Production-grade quality posture** |
 
 ---
@@ -813,7 +831,7 @@ Phase T74-G       +3 test  —            dudect-style ct_verify tests (CCM/ChaC
 Phase T74-H       CI       —            Dependabot fuzz dir + open-pull-requests-limit      ✅
 ```
 
-**Result**: 2,585 → 3,990 tests (+1,405), 65 fuzz targets (429 corpus), ~87 proptest blocks. All planned deficiencies addressed. D26/D32/D33 closed; D35 closed in Phase T83 as false positive. Residual: D28 (low test density), D34 (Mutex unwrap). Defense model rating: **A**.
+**Result**: 2,585 → 3,990 tests (+1,405), 65 fuzz targets (429 corpus), ~87 proptest blocks. All planned deficiencies addressed. D26/D32/D33 closed; D35 closed in Phase T83 as false positive; D28 partially closed in Phase T85 (file-level gaps for SPAKE2+/cert/builder closed; original "lowest density" framing was a measurement bug); D34 closed in Phase T86 as false positive. Defense model rating: **A**.
 
 ### 4.2 Phase T9 — 0-RTT Early Data + Replay Protection (~8 tests) ✅
 

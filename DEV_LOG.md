@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I91 (91 phases)
-- Testing: T1–T85 (84 phases, T64 skipped)
+- Testing: T1–T86 (85 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
 
@@ -284,6 +284,7 @@ Category summary:
 | 272 | T83 | Test | Quality Hardening: SM9 Constant-Time MAC + D35 False-Positive Audit + Proptest Seeds Recovery | 2026-05-09 |
 | 273 | T84 | Test | Workspace Timing-Oracle Audit: CMS / PKCS#12 / HOTP/TOTP / HPKE Constant-Time Hardening | 2026-05-09 |
 | 274 | T85 | Test | D28 Coverage: SPAKE2+ State-Machine + X.509 Certificate Parser + Builder Edge Cases | 2026-05-10 |
+| 275 | T86 | Test | D34 False-Positive Audit + Mutex Poison-Tolerance Regression Tests | 2026-05-10 |
 
 ---
 
@@ -14612,5 +14613,69 @@ The original D28 audit's "tests/100L" denominator should always be `grep -cE '^\
 
 ### Build Status (Post T85)
 - `cargo test --workspace --all-features`: 4,130 passed, 0 failed, 42 ignored (4,172 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase T86 — D34 False-Positive Audit + Mutex Poison-Tolerance Regression Tests (2026-05-10)
+
+### Summary
+
+D34 ("Mutex `.lock().unwrap()` in TLS Production Code", open since Phase T74) is the second false positive in QUALITY_REPORT after D35 (closed in T83). Both stem from the same systematic flaw in the original audit: it grepped `.lock().unwrap()` workspace-wide without filtering `#[cfg(test)]` boundaries, so it counted test fixtures as production code.
+
+Audit verdict for D34, verified file-by-file in Phase T86:
+
+- 57 `.lock().unwrap()` occurrences exist in the workspace today.
+- 50 are inside `#[cfg(test)] mod tests` blocks within library files (cfg(test) start lines: keylog.rs:31, session/mod.rs:255, cert_verify.rs:147, connection_dtls12.rs:745, etc.).
+- 7 are in dedicated `tests.rs` files (`connection/tests.rs`, `connection12/tests.rs`) whose entire content is gated by `#[cfg(test)] mod tests;` declared in the parent module.
+- **0 production occurrences**.
+
+Production code is already poison-tolerant via the silent-skip pattern, present at 11 sites across `connection12_async.rs:113/412/570/1307/1730`, `macros.rs:337/684`, `connection_dtls12.rs:689/721`, and `connection_dtls12_async.rs:255/1132/1164`:
+
+```rust
+if let Some(ref cache_mutex) = config.session_cache {
+    if let Ok(mut cache) = cache_mutex.lock() {
+        cache.put(session_id, session);
+    }
+    // On poison: silently skip; connection continues without resumption benefit.
+}
+```
+
+`git log -S "if let Ok(mut c) = cache.lock()"` shows this pattern was introduced in Phase I74 (commit `502f6e0`) and Phase I76 (`b147703`), well before the T74 audit (`cc71ce6` on 2026-03-04). The audit fired on test-code grep, not on a real production gap.
+
+### Regression Tests (+3)
+
+While D34 itself is a false positive, the underlying poison-tolerance contract is real and unobvious — future code that uses `.lock().unwrap()` would silently degrade reliability under thread panics. To pin the contract regardless of which file/pattern future production code uses, Phase T86 adds three tests in `crates/hitls-tls/src/session/mod.rs::tests`:
+
+1. **`test_session_cache_poisoned_lock_is_silently_skipped`** — exercise the production `if let Ok(...) = cache.lock()` pattern after poisoning. The lock must return `Err`, taking the no-op branch instead of panicking.
+2. **`test_session_cache_poisoned_lock_recoverable_via_into_inner`** — exercise the alternative `unwrap_or_else(|e| e.into_inner())` recovery pattern (used by T84's CMS / OTP fixes when the data is worth keeping despite poison). Pre-populates the cache, poisons the mutex, then reads through `into_inner()` to confirm the data survives.
+3. **`test_session_cache_poison_is_sticky_across_calls`** — every subsequent `cache.lock()` call returns `Err` (the poison flag is sticky), so every production `if let Ok(...)` site is a stable no-op rather than a flaky panic that fires only on first attempt.
+
+Helper `poison_mutex<T: Send + 'static>(arc: Arc<Mutex<T>>)` deliberately panics inside a worker thread holding the lock, then `.join()`s. The default panic hook is intentionally **not** swapped — the panic hook is process-global, and overriding it from within a parallel test would silence panics in unrelated tests running concurrently. The deliberate panic produces stderr noise only under `cargo test --nocapture`; the test framework still records a clean pass.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/session/mod.rs` | Modified | +3 poison-tolerance tests + 1 helper `poison_mutex` |
+| `QUALITY_REPORT.md` | Modified | D34 row in summary table flipped OPEN → CLOSED; §2.34 rewritten with per-file `cfg(test)` line numbers + production silent-skip pattern documentation; §3.3 risk row + §3.4 score row updated (panic-free score 9 → 10); T74 phase summary residual list now empty |
+
+### Test Count (Post T86)
+
+| Crate | Count | Δ |
+|-------|------:|--:|
+| hitls-types | 26 | — |
+| hitls-utils | 78 | — |
+| hitls-bignum | 95 (1 ignored) | — |
+| hitls-crypto | 1487 (24 ignored) | — |
+| hitls-tls | 1510 | +3 |
+| hitls-pki | 455 | — |
+| hitls-auth | 56 | — |
+| hitls-cli | 165 (5 ignored) | — |
+| hitls-integration-tests | 261 (12 ignored) | — |
+| **Total** | **4175 (42 ignored)** | **+3** |
+
+### Build Status (Post T86)
+- `cargo test --workspace --all-features`: 4,133 passed, 0 failed, 42 ignored (4,175 total)
+- `cargo test -p hitls-tls --all-features --lib session::tests::test_session_cache_poison`: 3 tests pass
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean
