@@ -334,8 +334,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
                     // May be a NewSessionTicket (plaintext, before CCS)
                     let (hs_type, _, total) = parse_handshake_header(&data)?;
                     if hs_type == HandshakeType::NewSessionTicket {
-                        let body = &data[4..total];
-                        hs.process_new_session_ticket(body)?;
+                        // Pass full message — NST is part of the transcript hash
+                        // used by server Finished (RFC 5077 §3.5).
+                        let raw_msg = &data[..total];
+                        hs.process_new_session_ticket(raw_msg)?;
                     } else {
                         return Err(TlsError::HandshakeFailed(format!(
                             "expected NewSessionTicket or CCS, got {hs_type:?}"
@@ -451,8 +453,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
                 ContentType::Handshake => {
                     let (hs_type, _, total) = parse_handshake_header(&data)?;
                     if hs_type == HandshakeType::NewSessionTicket {
-                        let body = &data[4..total];
-                        hs.process_new_session_ticket(body)?;
+                        // Pass full message — NST is part of the transcript hash
+                        // used by server Finished (RFC 5077 §3.5).
+                        let raw_msg = &data[..total];
+                        hs.process_new_session_ticket(raw_msg)?;
                     } else {
                         return Err(TlsError::HandshakeFailed(format!(
                             "expected NewSessionTicket or CCS, got {hs_type:?}"
@@ -811,8 +815,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
                 ContentType::Handshake => {
                     let (hs_type, _, total) = parse_handshake_header(&data)?;
                     if hs_type == HandshakeType::NewSessionTicket {
-                        let body = &data[4..total];
-                        hs.process_new_session_ticket(body)?;
+                        // Pass full message — NST is part of the transcript hash
+                        // used by server Finished (RFC 5077 §3.5).
+                        let raw_msg = &data[..total];
+                        hs.process_new_session_ticket(raw_msg)?;
                     } else {
                         return Err(TlsError::HandshakeFailed(format!(
                             "expected NewSessionTicket or CCS, got {hs_type:?}"
@@ -1243,11 +1249,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
         }
         let server_fin = hs.process_finished(&fin_data)?;
 
-        // 14. Send NewSessionTicket (plaintext, before CCS) if ticket_key configured
-        if let Some(nst_msg) = hs.build_new_session_ticket(suite, 3600)? {
+        // 14. Send NewSessionTicket (plaintext, before CCS) — already folded
+        // into the server's transcript inside `process_finished` (RFC 5077 §3.5).
+        if let Some(ref nst_msg) = server_fin.new_session_ticket {
             let nst_record = self
                 .record_layer
-                .seal_record(ContentType::Handshake, &nst_msg)?;
+                .seal_record(ContentType::Handshake, nst_msg)?;
             self.stream
                 .write_all(&nst_record)
                 .await
@@ -1354,11 +1361,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
             .await
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
-        // 2. Send NewSessionTicket (plaintext) if ticket_key configured
-        if let Some(nst_msg) = hs.build_new_session_ticket(suite, 3600)? {
+        // 2. Send NewSessionTicket (plaintext) — already folded into the
+        // server's transcript inside `do_abbreviated` (RFC 5077 §3.5).
+        if let Some(ref nst_msg) = abbr.new_session_ticket {
             let nst_record = self
                 .record_layer
-                .seal_record(ContentType::Handshake, &nst_msg)?;
+                .seal_record(ContentType::Handshake, nst_msg)?;
             self.stream
                 .write_all(&nst_record)
                 .await
@@ -1663,6 +1671,18 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
             )));
         }
         let server_fin = hs.process_finished(&fin_data)?;
+
+        // Send NewSessionTicket (if any) — already folded into the transcript
+        // inside `process_finished` (RFC 5077 §3.5).
+        if let Some(ref nst_msg) = server_fin.new_session_ticket {
+            let nst_record = self
+                .record_layer
+                .seal_record(ContentType::Handshake, nst_msg)?;
+            self.stream
+                .write_all(&nst_record)
+                .await
+                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+        }
 
         // Send ChangeCipherSpec
         let ccs_record = self

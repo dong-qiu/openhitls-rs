@@ -1235,6 +1235,69 @@ mod tests {
         assert!(body.is_empty());
     }
 
+    // ===================================================================
+    // Phase T82 — EndOfEarlyData codec roundtrip + error paths (RFC 8446 §4.5)
+    //
+    // EOED has the canonical empty-body encoding: type(1)=5 || length(3)=0.
+    // ===================================================================
+
+    #[test]
+    fn test_end_of_early_data_exact_wire_bytes() {
+        // RFC 8446 §4.5: struct {} EndOfEarlyData; encoded as type=5, length=0.
+        let encoded = encode_end_of_early_data();
+        assert_eq!(
+            encoded,
+            vec![0x05, 0x00, 0x00, 0x00],
+            "EOED on the wire must be exactly type(5) || length(0,0,0)"
+        );
+    }
+
+    #[test]
+    fn test_end_of_early_data_roundtrip_idempotent() {
+        // Two encode calls produce identical bytes (no nondeterminism).
+        assert_eq!(encode_end_of_early_data(), encode_end_of_early_data());
+    }
+
+    #[test]
+    fn test_end_of_early_data_parse_truncated_header_rejected() {
+        // Less than 4 bytes → parser must reject (incomplete header).
+        for len in 0..4 {
+            let truncated = vec![0x05; len];
+            assert!(
+                parse_handshake_header(&truncated).is_err(),
+                "{len}-byte buffer must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_end_of_early_data_parse_with_following_bytes_consumes_only_header() {
+        // EOED is 4 bytes; if the input buffer is longer, the parser must
+        // report total=4 and leave the trailing bytes for the caller. This is
+        // critical because real handshakes coalesce multiple messages into
+        // one record — the next message starts at offset `total`.
+        let mut buf = encode_end_of_early_data();
+        buf.extend_from_slice(&[0xFF, 0xFE, 0xFD]); // junk that would belong to the next message
+        let (msg_type, body, total) = parse_handshake_header(&buf).unwrap();
+        assert_eq!(msg_type, HandshakeType::EndOfEarlyData);
+        assert_eq!(total, 4);
+        assert!(body.is_empty(), "EOED body slice must be empty");
+        // Caller would advance by `total` and parse the rest separately.
+        assert_eq!(&buf[total..], &[0xFF, 0xFE, 0xFD]);
+    }
+
+    #[test]
+    fn test_end_of_early_data_type_byte_round_trip() {
+        // The msg_type byte must round-trip through HandshakeType::from.
+        let encoded = encode_end_of_early_data();
+        assert_eq!(encoded[0], 5);
+        assert_eq!(encoded[0], HandshakeType::EndOfEarlyData as u8);
+
+        // And parsing must yield the same enum value.
+        let (msg_type, _, _) = parse_handshake_header(&encoded).unwrap();
+        assert_eq!(msg_type, HandshakeType::EndOfEarlyData);
+    }
+
     #[test]
     fn test_new_session_ticket_codec_roundtrip() {
         let nst = NewSessionTicketMsg {

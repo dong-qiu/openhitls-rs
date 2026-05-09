@@ -119,10 +119,11 @@ fn test_openssl_s_client_tls13() {
 // ============================================================
 // Test 2: hitls-rs TLS 1.2 client → OpenSSL s_server
 //
-// Known issue: TLS 1.2 handshake with OpenSSL s_server fails with
-// "server Finished verify_data mismatch", indicating a difference in
-// handshake transcript computation. This test captures the interop gap
-// for future investigation.
+// Phase T82 fix: NewSessionTicket (RFC 5077) is now folded into the
+// handshake transcript on the client, matching server-side hashing.
+// Prior to T82 this test failed with "server Finished verify_data
+// mismatch" because OpenSSL hashes the NST it sends but the hitls-rs
+// client did not.
 // ============================================================
 
 #[test]

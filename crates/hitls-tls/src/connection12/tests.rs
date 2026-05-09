@@ -1621,13 +1621,13 @@ fn run_full_handshake_with_ticket(suite: CipherSuite, ticket_key: Vec<u8>) -> Tl
     let server_fin = server_hs.process_finished(&fin_plain[..fin_total]).unwrap();
 
     // 6. Server → NewSessionTicket + CCS + Finished
-    let nst_msg = server_hs
-        .build_new_session_ticket(suite_neg, 3600)
-        .unwrap()
+    let nst_msg = server_fin
+        .new_session_ticket
+        .as_ref()
         .expect("should produce a ticket");
     s2c.extend_from_slice(
         &server_rl
-            .seal_record(ContentType::Handshake, &nst_msg)
+            .seal_record(ContentType::Handshake, nst_msg)
             .unwrap(),
     );
     s2c.extend_from_slice(
@@ -1656,7 +1656,9 @@ fn run_full_handshake_with_ticket(suite: CipherSuite, ticket_key: Vec<u8>) -> Tl
     assert_eq!(hs_type, HandshakeType::NewSessionTicket);
     let nst_body = &nst_plain[4..nst_total];
     let (lifetime, ticket_data) = decode_new_session_ticket12(nst_body).unwrap();
-    client_hs.process_new_session_ticket(nst_body).unwrap();
+    client_hs
+        .process_new_session_ticket(&nst_plain[..nst_total])
+        .unwrap();
 
     let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
     s2c.drain(..consumed);
@@ -1756,9 +1758,9 @@ fn run_ticket_abbreviated_handshake(
                 &server_rl.seal_record(ContentType::Handshake, &abbr.server_hello)?,
             );
 
-            // Optionally send NST (new ticket for the new session)
-            if let Some(nst_msg) = server_hs.build_new_session_ticket(abbr.suite, 3600)? {
-                s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, &nst_msg)?);
+            // Send NST built inside `do_abbreviated` (already in transcript).
+            if let Some(ref nst_msg) = abbr.new_session_ticket {
+                s2c.extend_from_slice(&server_rl.seal_record(ContentType::Handshake, nst_msg)?);
             }
 
             s2c.extend_from_slice(&server_rl.seal_record(ContentType::ChangeCipherSpec, &[0x01])?);
@@ -1787,8 +1789,8 @@ fn run_ticket_abbreviated_handshake(
                     ContentType::Handshake => {
                         let (hs_type, _, total) = parse_handshake_header(&data)?;
                         if hs_type == HandshakeType::NewSessionTicket {
-                            let body = &data[4..total];
-                            client_hs.process_new_session_ticket(body)?;
+                            let raw_msg = &data[..total];
+                            client_hs.process_new_session_ticket(raw_msg)?;
                         } else {
                             return Err(TlsError::HandshakeFailed(format!(
                                 "unexpected {hs_type:?}"

@@ -381,8 +381,10 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                     // May be a NewSessionTicket (plaintext, before CCS)
                     let (hs_type, _, total) = parse_handshake_header(&data)?;
                     if hs_type == HandshakeType::NewSessionTicket {
-                        let body = &data[4..total];
-                        hs.process_new_session_ticket(body)?;
+                        // Pass full message — NST is part of the transcript hash
+                        // used by server Finished (RFC 5077 §3.5).
+                        let raw_msg = &data[..total];
+                        hs.process_new_session_ticket(raw_msg)?;
                     } else {
                         return Err(TlsError::HandshakeFailed(format!(
                             "expected NewSessionTicket or CCS, got {hs_type:?}"
@@ -506,8 +508,10 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 ContentType::Handshake => {
                     let (hs_type, _, total) = parse_handshake_header(&data)?;
                     if hs_type == HandshakeType::NewSessionTicket {
-                        let body = &data[4..total];
-                        hs.process_new_session_ticket(body)?;
+                        // Pass full message — NST is part of the transcript hash
+                        // used by server Finished (RFC 5077 §3.5).
+                        let raw_msg = &data[..total];
+                        hs.process_new_session_ticket(raw_msg)?;
                     } else {
                         return Err(TlsError::HandshakeFailed(format!(
                             "expected NewSessionTicket or CCS, got {hs_type:?}"
@@ -869,8 +873,10 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                 ContentType::Handshake => {
                     let (hs_type, _, total) = parse_handshake_header(&data)?;
                     if hs_type == HandshakeType::NewSessionTicket {
-                        let body = &data[4..total];
-                        hs.process_new_session_ticket(body)?;
+                        // Pass full message — NST is part of the transcript hash
+                        // used by server Finished (RFC 5077 §3.5).
+                        let raw_msg = &data[..total];
+                        hs.process_new_session_ticket(raw_msg)?;
                     } else {
                         return Err(TlsError::HandshakeFailed(format!(
                             "expected NewSessionTicket or CCS, got {hs_type:?}"

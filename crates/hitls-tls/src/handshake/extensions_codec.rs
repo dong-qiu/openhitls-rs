@@ -2535,4 +2535,120 @@ mod tests {
         assert_eq!(exts[0].extension_type, ExtensionType::PADDING);
         assert!(exts[0].data.is_empty(), "zero-length extension data");
     }
+
+    // ===================================================================
+    // Phase T82 — PSK obfuscated_ticket_age coverage (RFC 8446 §4.2.11)
+    // ===================================================================
+
+    /// Build a `pre_shared_key` extension and parse it back, verifying
+    /// the obfuscated_ticket_age round-trips byte-for-byte.
+    #[test]
+    fn test_psk_obfuscated_age_roundtrip_typical() {
+        let ticket = vec![0xAA; 64];
+        let age = 0x1234_5678_u32;
+        let binder = vec![0x55; 32];
+
+        let ext = build_pre_shared_key_ch(
+            std::slice::from_ref(&(ticket.clone(), age)),
+            std::slice::from_ref(&binder),
+        );
+        let (identities, binders) = parse_pre_shared_key_ch(&ext.data).unwrap();
+
+        assert_eq!(identities.len(), 1);
+        assert_eq!(identities[0].0, ticket);
+        assert_eq!(identities[0].1, age);
+        assert_eq!(binders.len(), 1);
+        assert_eq!(binders[0], binder);
+    }
+
+    /// obfuscated_ticket_age is encoded big-endian per RFC 8446 §4.2.11.
+    #[test]
+    fn test_psk_obfuscated_age_wire_byte_order_big_endian() {
+        let ticket = vec![0x01, 0x02];
+        let age = 0xDEAD_BEEF_u32;
+        let binder = vec![0xBB; 32];
+
+        let ext = build_pre_shared_key_ch(&[(ticket, age)], &[binder]);
+        // Wire layout (extension data):
+        //   identities_len(2) || id_len(2) || id || age(4) || binders_len(2) || binder_len(1) || binder
+        // identities_len = 2 (id_len) + 2 (id) + 4 (age) = 8.
+        // age starts at offset 2 + 2 + 2 = 6.
+        let age_bytes = &ext.data[6..10];
+        assert_eq!(
+            age_bytes,
+            &[0xDE, 0xAD, 0xBE, 0xEF],
+            "age must be big-endian"
+        );
+    }
+
+    /// Boundary values: age=0 and age=u32::MAX must both survive the round-trip.
+    #[test]
+    fn test_psk_obfuscated_age_boundary_values() {
+        for age in [0_u32, 1, u32::MAX - 1, u32::MAX] {
+            let ext = build_pre_shared_key_ch(&[(vec![0xCC; 16], age)], &[vec![0x00; 32]]);
+            let (identities, _) = parse_pre_shared_key_ch(&ext.data).unwrap();
+            assert_eq!(identities[0].1, age, "age {age} round-trip failed");
+        }
+    }
+
+    /// Compute obfuscated_age = (real_age_ms + ticket_age_add) mod 2^32 and
+    /// check the wrapping_add semantics match RFC 8446 §4.2.11.1.
+    ///
+    /// The formula in `client.rs` is:
+    ///   obfuscated_age = (real_age_ms as u32).wrapping_add(age_add)
+    /// We do not test the wall-clock path; we test the wrapping arithmetic
+    /// invariant that any u32 + u32 is well-defined modulo 2^32.
+    #[test]
+    fn test_psk_obfuscated_age_wrapping_add_semantics() {
+        // Case 1: no overflow.
+        assert_eq!(1000_u32.wrapping_add(500), 1500);
+
+        // Case 2: overflow by 1 → wraps to 0.
+        assert_eq!(u32::MAX.wrapping_add(1), 0);
+
+        // Case 3: overflow with a large age_add value (real-world: server
+        // picks a random age_add to obfuscate the ticket lifetime).
+        let real_age_ms: u32 = 30_000; // 30 seconds since session start
+        let age_add: u32 = u32::MAX - 10_000;
+        assert_eq!(real_age_ms.wrapping_add(age_add), 19_999);
+
+        // Case 4: zero age_add (degenerate: server did not randomise).
+        assert_eq!(real_age_ms.wrapping_add(0), real_age_ms);
+    }
+
+    /// Multiple PSK identities — each with its own (ticket, age) pair —
+    /// must all round-trip without cross-contamination.
+    #[test]
+    fn test_psk_obfuscated_age_multiple_identities() {
+        let ids = vec![
+            (vec![0x11; 8], 100_u32),
+            (vec![0x22; 16], 200_000_u32),
+            (vec![0x33; 32], u32::MAX),
+        ];
+        let binders = vec![vec![0xAA; 32], vec![0xBB; 32], vec![0xCC; 32]];
+
+        let ext = build_pre_shared_key_ch(&ids, &binders);
+        let (parsed_ids, parsed_binders) = parse_pre_shared_key_ch(&ext.data).unwrap();
+
+        assert_eq!(parsed_ids.len(), 3);
+        for (i, (id, age)) in ids.iter().enumerate() {
+            assert_eq!(&parsed_ids[i].0, id, "identity #{i} mismatch");
+            assert_eq!(parsed_ids[i].1, *age, "age #{i} mismatch");
+        }
+        assert_eq!(parsed_binders, binders);
+    }
+
+    /// Truncated obfuscated_ticket_age (only 3 of 4 bytes present) must
+    /// produce a parse error rather than silently zero-padding.
+    #[test]
+    fn test_psk_obfuscated_age_truncated_rejected() {
+        // identities_len = 2 + 2 + 3 = 7 (id_len + id + only-3-of-4 age bytes)
+        let data = [
+            0x00, 0x07, // identities list length = 7
+            0x00, 0x02, // identity length = 2
+            0x41, 0x42, // identity "AB"
+            0x00, 0x00, 0x00, // age: only 3 bytes (need 4)
+        ];
+        assert!(parse_pre_shared_key_ch(&data).is_err());
+    }
 }

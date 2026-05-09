@@ -269,8 +269,21 @@ impl Tls12ClientHandshake {
 
     /// Process a NewSessionTicket message from the server (RFC 5077).
     ///
-    /// `body` is the handshake message body (after 4-byte header).
-    pub fn process_new_session_ticket(&mut self, body: &[u8]) -> Result<(), TlsError> {
+    /// `raw_msg` is the full handshake message including the 4-byte header.
+    /// The message is added to the handshake transcript (RFC 5077 §3.5: NST
+    /// participates in the transcript hash used to compute server Finished),
+    /// then the body is decoded for the ticket value.
+    pub fn process_new_session_ticket(&mut self, raw_msg: &[u8]) -> Result<(), TlsError> {
+        if raw_msg.len() < 4 {
+            return Err(TlsError::HandshakeFailed(
+                "NewSessionTicket message too short".into(),
+            ));
+        }
+        // Per RFC 5077 §3.5, NST is hashed into the transcript regardless of
+        // whether the client decides to keep the ticket. Update first so the
+        // transcript stays consistent with the server even if decode fails.
+        self.transcript.update(raw_msg)?;
+        let body = &raw_msg[4..];
         let (lifetime, ticket) = decode_new_session_ticket12(body)?;
         self.received_ticket = Some(ticket);
         self.received_ticket_lifetime = lifetime;
@@ -2085,6 +2098,18 @@ mod tests {
         assert_eq!(hs.state(), Tls12ClientState::WaitCertificate);
     }
 
+    /// Wrap an NST body in the 4-byte handshake header for `process_new_session_ticket`.
+    fn wrap_nst(body: &[u8]) -> Vec<u8> {
+        let mut msg = Vec::with_capacity(4 + body.len());
+        msg.push(4u8); // HandshakeType::NewSessionTicket
+        let len = body.len() as u32;
+        msg.push(((len >> 16) & 0xFF) as u8);
+        msg.push(((len >> 8) & 0xFF) as u8);
+        msg.push((len & 0xFF) as u8);
+        msg.extend_from_slice(body);
+        msg
+    }
+
     #[test]
     fn test_new_session_ticket_processed() {
         let config = TlsConfig::builder().build();
@@ -2099,7 +2124,7 @@ mod tests {
         body.extend_from_slice(&(ticket_data.len() as u16).to_be_bytes());
         body.extend_from_slice(&ticket_data);
 
-        hs.process_new_session_ticket(&body).unwrap();
+        hs.process_new_session_ticket(&wrap_nst(&body)).unwrap();
 
         assert_eq!(hs.received_ticket(), Some(ticket_data.as_slice()));
         assert_eq!(hs.received_ticket_lifetime(), 3600);
@@ -2154,6 +2179,54 @@ mod tests {
             .is_err());
     }
 
+    /// RFC 5077 §3.5: NewSessionTicket is hashed into the handshake transcript
+    /// used to compute server Finished. A regression where the client decoded
+    /// NST but failed to add it to the transcript caused server Finished
+    /// verification to fail against OpenSSL s_server (Phase T82).
+    #[test]
+    fn test_new_session_ticket_updates_transcript() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Tls12ClientHandshake::new(config);
+
+        let before = hs.transcript.current_hash().unwrap();
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&3600u32.to_be_bytes());
+        body.extend_from_slice(&4u16.to_be_bytes());
+        body.extend_from_slice(&[0xCA, 0xFE, 0xBA, 0xBE]);
+        hs.process_new_session_ticket(&wrap_nst(&body)).unwrap();
+
+        let after = hs.transcript.current_hash().unwrap();
+        assert_ne!(
+            before, after,
+            "transcript hash must advance when NST is processed"
+        );
+
+        // Re-hashing CH..nothing → NST must reproduce the post-NST hash. We
+        // hash the full message (header + body) directly into a fresh
+        // transcript and compare.
+        let mut reference = crate::crypt::transcript::TranscriptHash::new(HashAlgId::Sha256);
+        reference.update(&wrap_nst(&body)).unwrap();
+        assert_eq!(
+            after,
+            reference.current_hash().unwrap(),
+            "transcript must equal Hash(NST) for a fresh handshake"
+        );
+    }
+
+    #[test]
+    fn test_new_session_ticket_truncated_header_rejected() {
+        let config = TlsConfig::builder().build();
+        let mut hs = Tls12ClientHandshake::new(config);
+        // Less than 4 bytes — no valid handshake header.
+        for len in 0..4 {
+            assert!(
+                hs.process_new_session_ticket(&vec![0u8; len]).is_err(),
+                "{len}-byte NST must be rejected"
+            );
+        }
+    }
+
     #[test]
     fn test_client12_new_session_ticket_lifetime_zero() {
         let config = TlsConfig::builder().build();
@@ -2165,7 +2238,7 @@ mod tests {
         body.extend_from_slice(&4u16.to_be_bytes()); // ticket_len = 4
         body.extend_from_slice(&[0xEE, 0xFF, 0x11, 0x22]); // ticket
 
-        hs.process_new_session_ticket(&body).unwrap();
+        hs.process_new_session_ticket(&wrap_nst(&body)).unwrap();
         assert_eq!(hs.received_ticket_lifetime(), 0);
         assert_eq!(hs.received_ticket(), Some(&[0xEE, 0xFF, 0x11, 0x22][..]));
     }

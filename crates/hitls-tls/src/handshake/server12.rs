@@ -80,6 +80,10 @@ pub struct ServerFlightResult {
 pub struct AbbreviatedServerResult {
     /// ServerHello handshake message.
     pub server_hello: Vec<u8>,
+    /// Optional NewSessionTicket message (RFC 5077). When `Some`, the server
+    /// must send this **before** ChangeCipherSpec and the server Finished —
+    /// the message has already been folded into the handshake transcript.
+    pub new_session_ticket: Option<Vec<u8>>,
     /// Server Finished message (to be sent after CCS, before reading client flight).
     pub finished: Vec<u8>,
     /// Negotiated cipher suite.
@@ -162,6 +166,10 @@ impl Drop for Tls12DerivedKeys {
 
 /// Server finished result.
 pub struct ServerFinishedResult {
+    /// Optional NewSessionTicket message (RFC 5077). When `Some`, the server
+    /// must send this **before** ChangeCipherSpec and the server Finished —
+    /// the message has already been folded into the handshake transcript.
+    pub new_session_ticket: Option<Vec<u8>>,
     /// Server Finished message.
     pub finished: Vec<u8>,
 }
@@ -394,19 +402,23 @@ impl Tls12ServerHandshake {
         crate::handshake::codec::encode_hello_request()
     }
 
-    /// Build an encrypted NewSessionTicket message for the current session.
+    /// Build an encrypted NewSessionTicket message and fold it into the
+    /// handshake transcript (RFC 5077 §3.5: NST is hashed into the transcript
+    /// used to compute server Finished).
     ///
-    /// Must be called after the master secret is available (full handshake completed).
-    /// Returns the wrapped handshake message, or None if ticket_key not configured.
-    pub fn build_new_session_ticket(
-        &self,
+    /// Returns the wrapped handshake message, or `None` if `ticket_key` is
+    /// not configured. Call this **before** computing server Finished.
+    fn build_and_record_new_session_ticket(
+        &mut self,
         suite: CipherSuite,
+        master_secret: &[u8],
+        use_ems: bool,
         lifetime: u32,
     ) -> Result<Option<Vec<u8>>, TlsError> {
         let Some(ticket_key) = self.config.ticket_key.as_ref() else {
             return Ok(None);
         };
-        if self.master_secret.is_empty() {
+        if master_secret.is_empty() {
             return Err(TlsError::HandshakeFailed(
                 "master_secret not available for ticket".into(),
             ));
@@ -414,7 +426,7 @@ impl Tls12ServerHandshake {
         let session = TlsSession {
             id: Vec::new(),
             cipher_suite: suite,
-            master_secret: self.master_secret.clone(),
+            master_secret: master_secret.to_vec(),
             alpn_protocol: self.negotiated_alpn.clone(),
             ticket: None,
             ticket_lifetime: lifetime,
@@ -426,10 +438,11 @@ impl Tls12ServerHandshake {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             psk: Vec::new(),
-            extended_master_secret: self.use_extended_master_secret,
+            extended_master_secret: use_ems,
         };
         let ticket = encrypt_session_ticket(ticket_key, &session)?;
         let msg = encode_new_session_ticket12(lifetime, &ticket);
+        self.transcript.update(&msg)?;
         Ok(Some(msg))
     }
 
@@ -1084,7 +1097,17 @@ impl Tls12ServerHandshake {
             &params,
         )?;
 
-        // Compute server Finished: PRF(ms, "server finished", Hash(CH + SH))
+        // Build NewSessionTicket BEFORE computing server Finished (RFC 5077 §3.5):
+        // the abbreviated flow sends [NST]?, CCS, SFin, so SFin's transcript
+        // covers CH + SH + (optional NST).
+        let new_session_ticket = self.build_and_record_new_session_ticket(
+            suite,
+            cached_master_secret,
+            cached_ems,
+            3600,
+        )?;
+
+        // Compute server Finished: PRF(ms, "server finished", Hash(CH + SH [+ NST]))
         let transcript_hash = self.transcript.current_hash()?;
         let server_verify_data = compute_verify_data(
             alg,
@@ -1109,6 +1132,7 @@ impl Tls12ServerHandshake {
 
         let result = AbbreviatedServerResult {
             server_hello: sh_msg,
+            new_session_ticket,
             finished: finished_msg,
             suite,
             session_id,
@@ -1500,7 +1524,17 @@ impl Tls12ServerHandshake {
         // Add client Finished to transcript
         self.transcript.update(msg_data)?;
 
-        // Compute server Finished
+        // Build NewSessionTicket BEFORE computing server Finished. RFC 5077 §3.5
+        // requires NST to be in the transcript hashed for server Finished. The
+        // helper updates `self.transcript` internally; cloning master_secret
+        // satisfies the borrow checker.
+        let suite = params.suite;
+        let master_secret = self.master_secret.clone();
+        let use_ems = self.use_extended_master_secret;
+        let new_session_ticket =
+            self.build_and_record_new_session_ticket(suite, &master_secret, use_ems, 3600)?;
+
+        // Compute server Finished over the (possibly NST-extended) transcript.
         let transcript_hash = self.transcript.current_hash()?;
         let server_verify_data = compute_verify_data(
             alg,
@@ -1514,6 +1548,7 @@ impl Tls12ServerHandshake {
         self.state = Tls12ServerState::Connected;
 
         Ok(ServerFinishedResult {
+            new_session_ticket,
             finished: finished_msg,
         })
     }
@@ -2631,10 +2666,15 @@ mod tests {
     #[test]
     fn test_server12_build_new_session_ticket_no_key() {
         let config = make_server_config();
-        let hs = Tls12ServerHandshake::new(config);
-        // No ticket_key configured → returns Ok(None)
+        let mut hs = Tls12ServerHandshake::new(config);
+        // No ticket_key configured → returns Ok(None) regardless of master_secret.
         let result = hs
-            .build_new_session_ticket(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 3600)
+            .build_and_record_new_session_ticket(
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                &[0xAB; 48],
+                false,
+                3600,
+            )
             .unwrap();
         assert!(result.is_none());
     }
@@ -2648,10 +2688,14 @@ mod tests {
             .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
             .ticket_key(vec![0xAA; 48])
             .build();
-        let hs = Tls12ServerHandshake::new(config);
-        // ticket_key configured but no master_secret → error
-        let result =
-            hs.build_new_session_ticket(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, 3600);
+        let mut hs = Tls12ServerHandshake::new(config);
+        // ticket_key configured but caller passed empty master_secret → error
+        let result = hs.build_and_record_new_session_ticket(
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            &[],
+            false,
+            3600,
+        );
         assert!(result.is_err());
     }
 

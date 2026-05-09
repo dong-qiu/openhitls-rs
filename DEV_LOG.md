@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I91 (91 phases)
-- Testing: T1–T81 (80 phases, T64 skipped)
+- Testing: T1–T82 (81 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P93 (87 phases, P86–P88/P90–P92 skipped)
 
@@ -280,6 +280,7 @@ Category summary:
 | 268 | T81 | Test | CI Wall-Clock Optimisation: ct-Verification Gate + Miri Fan-Out + Coverage Per-Crate Matrix | 2026-05-06 |
 | 269 | I90 | Impl | ASN.1 Charset Expansion + DSA/DH PKCS#8 Codec | 2026-05-07 |
 | 270 | I91 | Impl | ISO/IEC 9796-2:1997 Scheme 1 RSA Signature Padding | 2026-05-07 |
+| 271 | T82 | Test | TLS 1.3 PSK Coverage + RFC 5077 NewSessionTicket Transcript Fix | 2026-05-09 |
 
 ---
 
@@ -14309,5 +14310,72 @@ Scheme 1 is deterministic — signing the same digest with the same private key 
 
 ### Build Status (Post I91)
 - `cargo test --workspace --all-features`: 4,058 passed, 0 failed, 35 ignored (4,093 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase T82 — TLS 1.3 PSK Coverage + RFC 5077 NewSessionTicket Transcript Fix (2026-05-09)
+
+### Summary
+
+Closes the four "Remaining uncovered areas" flagged in `QUALITY_REPORT.md` §2.2 / §2.9:
+
+1. **PSK `obfuscated_ticket_age`** — added six tests covering wire roundtrip, big-endian byte order, boundary values (0, 1, `u32::MAX-1`, `u32::MAX`), wrapping-add semantics for `(real_age_ms + ticket_age_add) mod 2^32`, multi-identity isolation, and rejection of a 3-of-4-byte truncated age field.
+2. **PSK binder verification** — added six negative tests against the server's `verify_binder` helper: a tampered binder, a wrong PSK, a SHA-256/SHA-384 hash-length mismatch, a CH shorter than the binder tail, and a flipped byte inside the truncated CH.
+3. **EndOfEarlyData codec** — extended the existing encode-only test with five additional roundtrip checks: exact wire bytes (`05 00 00 00`), encode determinism, rejection of buffers shorter than the 4-byte header, partial consumption when extra bytes follow (next-message handoff), and `HandshakeType::EndOfEarlyData` byte round-trip.
+4. **TLS 1.2 verify_data interop with OpenSSL `s_server`** — root-caused and fixed. The `test_openssl_s_server_tls12` interop test (previously `#[ignore]`-flagged with "Known issue") now passes.
+
+### Root Cause Analysis: TLS 1.2 `verify_data` Mismatch
+
+OpenSSL's `s_server` accepted our client `Finished`, then sent its own `Finished` over a transcript hash that did not match what the hitls-rs client was computing. Capturing both sides via `openssl s_server -trace -debug` and `eprintln!`-instrumented `client12.rs` showed:
+
+| Phase | hitls-rs client transcript | OpenSSL server transcript |
+|---|---|---|
+| Master-secret derivation (EMS session_hash) | `df7e9b…` | `df7e9b…` ✓ |
+| Client Finished (`verify_data`) | `e3e09853…` ✓ accepted by OpenSSL | matches |
+| Server Finished | `29e4ba…` (CH..CKE..CFin) | _different_ |
+
+OpenSSL was sending a 186-byte `NewSessionTicket` between the client `Finished` and its own `Finished`. RFC 5077 §3.5 mandates that `NST` participates in the handshake transcript hash used to compute server `Finished`. The hitls-rs client decoded the NST body (recording the ticket and lifetime) but **never folded the message into `self.transcript`**, so its transcript at server-Finished verification time was missing the NST bytes, producing a divergent hash and a mismatched `verify_data`.
+
+### Fix
+
+`Tls12ClientHandshake::process_new_session_ticket` now takes the **full** handshake message (4-byte header + body) and updates the transcript before decoding the ticket. Symmetrically on the server: the public `build_new_session_ticket(&self, …)` was replaced by a private `&mut self` helper `build_and_record_new_session_ticket` that updates the transcript, and the server's `process_finished` and `do_abbreviated` methods now build the NST themselves *before* computing server `Finished`, so the transcript at that point includes CH..CFin..NST (full handshake) or CH..SH..NST (abbreviated). `ServerFinishedResult` and `AbbreviatedServerResult` now carry an `Option<Vec<u8>> new_session_ticket` field, and the four connection-layer call sites (sync + async; full + renegotiation full; abbreviated × 2) consume it instead of calling `build_new_session_ticket` separately. The renegotiation-full path on both sync and async server connections additionally now sends the NST (it was previously missing entirely on that path — covered by `test_renegotiation_no_session_resumption`).
+
+### Regression Lock-In
+
+A unit test `test_new_session_ticket_updates_transcript` in `client12.rs` rebuilds an NST message, calls `process_new_session_ticket`, and asserts the transcript hash advances to exactly `Hash(NST_bytes)`. A second test `test_new_session_ticket_truncated_header_rejected` confirms that a sub-4-byte buffer is rejected. These two tests fail loudly without the fix, so a future refactor that drops the transcript update on either side gets caught without depending on `openssl` being installed in CI.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Modified | +6 obfuscated_ticket_age tests |
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | +6 PSK binder negative tests |
+| `crates/hitls-tls/src/handshake/codec.rs` | Modified | +5 EOED codec tests |
+| `crates/hitls-tls/src/handshake/client12.rs` | Modified | `process_new_session_ticket` now takes raw_msg, updates transcript; +2 regression tests; updated 2 existing tests to pass full message |
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | NST built and transcript-recorded inside `process_finished` and `do_abbreviated`; result structs gain `new_session_ticket` field; 2 unit tests updated to new API |
+| `crates/hitls-tls/src/connection12_async.rs` | Modified | 3 client-side NST call sites pass `&data[..total]`; 3 server-side paths consume `new_session_ticket` from result (incl. renegotiation full path now sending NST) |
+| `crates/hitls-tls/src/connection12/client.rs` | Modified | 3 client-side NST call sites pass `&data[..total]` |
+| `crates/hitls-tls/src/connection12/server.rs` | Modified | Server NST consumed from result; renegotiation full path now sends NST |
+| `crates/hitls-tls/src/connection12/tests.rs` | Modified | 2 test sites updated to new NST API |
+| `tests/interop/tests/openssl_interop.rs` | Modified | `test_openssl_s_server_tls12` documentation updated; "Known issue" comment replaced with T82 fix note |
+
+### Test Count (Post T82)
+
+| Crate | Count | Δ |
+|-------|------:|--:|
+| hitls-types | 26 | — |
+| hitls-utils | 78 | — |
+| hitls-bignum | 95 (1 ignored) | — |
+| hitls-crypto | 1485 (24 ignored) | — |
+| hitls-tls | 1507 | +19 |
+| hitls-pki | 442 | — |
+| hitls-auth | 47 | — |
+| hitls-cli | 165 (5 ignored) | — |
+| hitls-integration-tests | 261 (12 ignored) | — |
+| **Total** | **4148 (42 ignored)** | **+19 (passing)** |
+
+### Build Status (Post T82)
+- `cargo test --workspace --all-features`: 4,106 passed, 0 failed, 42 ignored (4,148 total)
+- `cargo test -p hitls-integration-tests --test openssl_interop test_openssl_s_server_tls12 -- --ignored`: passes (was failing pre-T82)
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean

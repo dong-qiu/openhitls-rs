@@ -4316,3 +4316,19 @@ Targeted coverage gaps in connection_info, handshake enums, lib.rs constants, co
   - `RsaPadding::Iso9796_2` enum variant; `RsaPrivateKey::sign` and `RsaPublicKey::verify` dispatch arms.
   - +8 unit tests (encode boundary / header / trailer / wrong-hash / short-EM) and +2 RSA-1024 end-to-end tests (sign+verify+tamper, determinism property).
 - Tests: 4093 total (+10 from I90 baseline). Clippy on Rust 1.95: 0 warnings. Fmt clean. With this and the deferral of SHA256-MB, the openHiTLS C v0.3.2 backport queue is **functionally complete** in Rust.
+
+### Prompt 279: Analyze Next Work + Close TLS 1.3 PSK Gaps + OpenSSL Interop (T82)
+
+> 请分析接下来要干什么？
+
+> 优先做#2
+
+**Result**:
+- Surveyed project state: Phases I91/T81/R12/P93 complete (4093 tests); upstream openHiTLS C HEAD still at `3d295814 v0.3.2`, no new backports needed.
+- Recommended (and user approved) closing the four "Remaining uncovered areas" in QUALITY_REPORT §2.2 (PSK obfuscated_ticket_age, binder negative tests, EOED codec roundtrip) and §2.9 (TLS 1.2 `verify_data` interop with OpenSSL `s_server`) over a perf-only SHA256-MB P-phase.
+- Phase T82 implemented in two stages:
+  - **Stage A — coverage**: +6 obfuscated_ticket_age tests, +6 PSK binder negative tests against `verify_binder` (tampered binder, wrong PSK, wrong hash length, truncated CH, modified truncated CH), +5 EndOfEarlyData codec roundtrip tests (exact wire bytes, idempotence, truncated header rejection, partial-consumption with trailing bytes, type byte round-trip).
+  - **Stage B — interop fix**: Identified the OpenSSL TLS 1.2 mismatch by capturing `openssl s_server -trace -debug` and instrumenting `client12.rs`. Root cause: `process_new_session_ticket` decoded the NST body without folding the message into the handshake transcript, violating RFC 5077 §3.5. OpenSSL hashes the NST it sends; hitls-rs did not. Fixed both client and server: client `process_new_session_ticket` now takes the full handshake message and updates transcript before decoding; server `process_finished` and `do_abbreviated` build the NST internally via a new `build_and_record_new_session_ticket` helper *before* computing server `Finished`, so the transcript order matches. `ServerFinishedResult` and `AbbreviatedServerResult` now carry an `Option<Vec<u8>> new_session_ticket` field consumed by all 4 connection-layer call sites (sync + async × full + abbreviated) and by the renegotiation full path (which previously never sent NST at all).
+  - +2 NST regression tests (`test_new_session_ticket_updates_transcript`, `test_new_session_ticket_truncated_header_rejected`) lock in the fix without depending on `openssl` being installed.
+  - `tests/interop/tests/openssl_interop.rs::test_openssl_s_server_tls12` is still `#[ignore]`-gated on the external `openssl` binary, but the "Known issue" comment is replaced with a T82 fix note. The test now passes against OpenSSL 3.6.2.
+- Tests: 4148 total / 4106 passing / 42 ignored (+19 passing from I91 baseline). hitls-tls: 1488 → 1507. Clippy on Rust 1.95: 0 warnings. Fmt clean.

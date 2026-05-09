@@ -1937,4 +1937,137 @@ mod tests {
         // Should fail since client didn't fix the group
         assert!(result2.is_err());
     }
+
+    // ===================================================================
+    // Phase T82 — PSK binder verification negative tests (RFC 8446 §4.2.11.2)
+    //
+    // verify_binder rejects tampered binders, wrong PSK, mismatched hash
+    // length, and truncated ClientHello messages. These tests exercise
+    // each rejection path directly against verify_binder.
+    // ===================================================================
+
+    /// Construct a synthetic ClientHello-shaped byte stream and the matching
+    /// binder for a given PSK + cipher suite, returning (ch_msg, binder).
+    ///
+    /// `ch_msg` ends with the canonical binders tail
+    /// (2 binders_len || 1 binder_entry_len || hash_len binder bytes), so
+    /// `verify_binder` will strip exactly the same bytes when truncating.
+    fn forge_ch_with_binder(
+        psk: &[u8],
+        suite: CipherSuite,
+        ch_prefix: &[u8],
+    ) -> (Vec<u8>, Vec<u8>) {
+        let params = CipherSuiteParams::from_suite(suite).unwrap();
+        let hash_len = params.hash_len;
+
+        // Compute binder = HMAC(finished_key, Hash(truncated_CH))
+        let mut ks = KeySchedule::new(params.clone());
+        ks.derive_early_secret(Some(psk)).unwrap();
+        let binder_key = ks.derive_binder_key(false).unwrap();
+        let finished_key = ks.derive_finished_key(&binder_key).unwrap();
+
+        let mut hasher = crate::crypt::DigestVariant::new(params.hash_alg_id());
+        hasher.update(ch_prefix).unwrap();
+        let mut hash = [0u8; 64];
+        hasher.finish(&mut hash[..hash_len]).unwrap();
+        let binder = ks
+            .compute_finished_verify_data(&finished_key, &hash[..hash_len])
+            .unwrap();
+
+        // Append binders tail: binders_list_len(2) || binder_len(1) || binder
+        let binders_list_len = 1 + hash_len;
+        let mut ch_msg = ch_prefix.to_vec();
+        ch_msg.extend_from_slice(&(binders_list_len as u16).to_be_bytes());
+        ch_msg.push(hash_len as u8);
+        ch_msg.extend_from_slice(&binder);
+
+        (ch_msg, binder)
+    }
+
+    #[test]
+    fn test_verify_binder_accepts_correct_binder() {
+        let psk = vec![0x42; 32];
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let (ch_msg, binder) = forge_ch_with_binder(&psk, suite, b"truncated CH bytes");
+        let params = CipherSuiteParams::from_suite(suite).unwrap();
+
+        assert!(verify_binder(&params, &psk, &ch_msg, &binder).unwrap());
+    }
+
+    #[test]
+    fn test_verify_binder_rejects_tampered_binder() {
+        let psk = vec![0x42; 32];
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let (ch_msg, mut binder) = forge_ch_with_binder(&psk, suite, b"truncated CH bytes");
+        let params = CipherSuiteParams::from_suite(suite).unwrap();
+
+        // Flip one bit in the binder — must be rejected (replay-protection core).
+        binder[0] ^= 0x01;
+        assert!(!verify_binder(&params, &psk, &ch_msg, &binder).unwrap());
+    }
+
+    #[test]
+    fn test_verify_binder_rejects_wrong_psk() {
+        let psk_real = vec![0x42; 32];
+        let psk_attacker = vec![0xAA; 32];
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let (ch_msg, binder) = forge_ch_with_binder(&psk_real, suite, b"truncated CH bytes");
+        let params = CipherSuiteParams::from_suite(suite).unwrap();
+
+        // Same CH, but verifier uses a different PSK → finished_key differs → mismatch.
+        assert!(!verify_binder(&params, &psk_attacker, &ch_msg, &binder).unwrap());
+    }
+
+    #[test]
+    fn test_verify_binder_rejects_wrong_hash_len() {
+        // Forge with SHA-256 (32-byte binder), verify with SHA-384 params (48-byte expected).
+        let psk = vec![0x42; 32];
+        let (ch_msg, binder) = forge_ch_with_binder(
+            &psk,
+            CipherSuite::TLS_AES_128_GCM_SHA256,
+            b"x".repeat(80).as_slice(),
+        );
+        let params_wrong =
+            CipherSuiteParams::from_suite(CipherSuite::TLS_AES_256_GCM_SHA384).unwrap();
+
+        // verify_binder will strip 2 + 1 + 48 = 51 bytes from CH and compute
+        // SHA-384 over the resulting prefix. Even ignoring the binder length
+        // mismatch, the hash domain differs → must reject.
+        let result = verify_binder(&params_wrong, &psk, &ch_msg, &binder).unwrap();
+        assert!(!result, "SHA-384 verifier must not accept SHA-256 binder");
+    }
+
+    #[test]
+    fn test_verify_binder_rejects_truncated_ch() {
+        let psk = vec![0x42; 32];
+        let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+        // binder_tail_size = 2 + 1 + 32 = 35. ch_msg of exactly 35 bytes leaves
+        // an empty truncated_CH, which the implementation rejects with Ok(false).
+        let ch_msg = vec![0u8; 35];
+        let binder = vec![0u8; 32];
+        assert!(!verify_binder(&params, &psk, &ch_msg, &binder).unwrap());
+
+        // Strictly shorter than the tail → also Ok(false).
+        let short_ch = vec![0u8; 10];
+        assert!(!verify_binder(&params, &psk, &short_ch, &binder).unwrap());
+    }
+
+    #[test]
+    fn test_verify_binder_rejects_modified_truncated_ch() {
+        // Forge a binder over CH prefix `original`, then call verify_binder
+        // with a tampered prefix. Since the binder is HMAC-bound to the
+        // truncated CH bytes, any modification must propagate to a mismatch.
+        let psk = vec![0x42; 32];
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let prefix = b"original CH prefix bytes used in transcript".to_vec();
+        let (mut ch_msg, binder) = forge_ch_with_binder(&psk, suite, &prefix);
+        let params = CipherSuiteParams::from_suite(suite).unwrap();
+
+        // Sanity: unmodified accepts.
+        assert!(verify_binder(&params, &psk, &ch_msg, &binder).unwrap());
+
+        // Flip one byte inside the truncated portion — must reject.
+        ch_msg[5] ^= 0x80;
+        assert!(!verify_binder(&params, &psk, &ch_msg, &binder).unwrap());
+    }
 }
