@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T92 (91 phases, T64 skipped)
+- Testing: T1–T93 (92 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -297,6 +297,7 @@ Category summary:
 | 285 | T90 | Test | TLS 1.2 tlsfuzzer integration + alert-on-error generalisation to TLS 1.2 server + per-script extra-args plumbing | 2026-05-10 |
 | 286 | T91 | Test | TLS 1.3 Finished framing fix (RFC 8446 §4.4.4 strict verify_data length) + zero-body handshake message handling | 2026-05-10 |
 | 287 | T92 | Test | tlsfuzzer TLS 1.3 curated set expansion 6 → 17 scripts (HRR / KeyUpdate / sig_algs / record limits / EdDSA / RSA-PSS / etc.) | 2026-05-10 |
+| 288 | T93 | Test | tlsfuzzer cert-matrix — ECDSA P-256 + Ed25519 server cert variants + per-cert XFAIL dirs | 2026-05-10 |
 
 ---
 
@@ -15695,6 +15696,109 @@ No Rust code changes — purely test-infrastructure / XFAIL bookkeeping. Project
 - `cargo fmt --all -- --check`: clean (no Rust changes)
 - tlsfuzzer aggregate (26 curated scripts, CI-style sampling): **1790 PASS / 244 XFAIL / 0 FAIL / 0 XPASS** in ~80 s
 - tlsfuzzer aggregate (26 curated scripts, `-n 9999` full sweep): **11789 PASS / 320 XFAIL / 0 FAIL / 0 XPASS** across 12109 conversations
+
+## Phase T93 — tlsfuzzer Cert-Matrix: ECDSA P-256 + Ed25519 Server Cert Variants + Per-Cert XFAIL Dirs (2026-05-10)
+
+### Summary
+
+Pre-T93, the entire tlsfuzzer baseline ran against a single RSA 2048 server cert. That left two cert paths un-exercised: ECDSA-key-exchange + ECDSA `CertificateVerify` (a different sig path through `handshake/signing.rs::sign_certificate_verify`) and Ed25519 sign/verify. Test conversations like `ed25519 only` and `ecdsa_secp256r1_sha256 only` always hit RSA-cert mismatch and got XFAIL'd defensively — neither cert path was actually validated.
+
+T93 adds an ECDSA P-256 and Ed25519 server cert to the test fixtures, brings up two more `s-server` instances (4446 + 4447), and runs a small cert-specific script set against each. The Ed25519 case immediately validates a previously-unexercised path: `test-tls13-eddsa.py` `ed25519 only` flips from RSA-cert XFAIL to **PASS**, proving the Ed25519 sign-side is functioning end-to-end.
+
+### Methodology
+
+The `xfail-list-per-cert-type` problem: same script (e.g. `test-tls13-eddsa.py`) has different XFAIL contents depending on which cert serves the run. With the RSA cert, `ed25519 only` and `ed448 only` both fail (RSA can't sign with Ed*); with the Ed25519 cert, `ed25519 only` passes but `ed448 only` still fails (we don't have an Ed448 cert).
+
+Solution: leverage `run.sh`'s pre-existing `XFAIL_DIR` env var (introduced in T89). Different cert type → different `XFAIL_DIR`:
+
+- `tests/tlsfuzzer/xfail/` — RSA cert (default; pre-T93 layout unchanged)
+- `tests/tlsfuzzer/xfail-ecdsa/` — ECDSA P-256 cert
+- `tests/tlsfuzzer/xfail-ed25519/` — Ed25519 cert
+
+The CI workflow's per-cert script loop sets `XFAIL_DIR=…` before invoking `run.sh`. No `run.sh` changes needed.
+
+### Cert-matrix script selection
+
+For each non-RSA cert, picked a small set covering "happy path" + "cert-type-specific" coverage:
+
+**ECDSA P-256 (port 4446)**:
+
+| Script | TOTAL | PASS | XFAIL | Notes |
+|--------|------:|-----:|------:|-------|
+| `test-tls13-conversation.py` | 3 | 3 | 0 | Sanity — proves basic ECDSA P-256 handshake works. |
+| `test-tls13-ecdsa-support.py` | 10 | 5 | 5 | XFAIL: 3 brainpool curves (we don't advertise them) + 2 wrong-curve-cert mismatches (P-384, P-521 sig-alg constraints can't be satisfied by our P-256 cert). |
+
+**Ed25519 (port 4447)**:
+
+| Script | TOTAL | PASS | XFAIL | Notes |
+|--------|------:|-----:|------:|-------|
+| `test-tls13-conversation.py` | 3 | 3 | 0 | Sanity — proves basic Ed25519 handshake works. |
+| `test-tls13-eddsa.py` | 9 | 8 | 1 | **Δ vs RSA cert: +1 PASS.** `ed25519 only` now passes; only `ed448 only` still XFAIL'd (we don't have an Ed448 server cert). |
+
+**Cert-matrix sub-aggregate**: 19 PASS / 6 XFAIL / 0 FAIL across 4 runs.
+
+### What was probed but NOT added
+
+Most cert-agnostic-looking TLS 1.3 scripts (e.g. `test-tls13-ccs.py`, `test-tls13-record-padding.py`, `test-tls13-finished.py`) actually hardcode `signature_algorithms = [rsa_pss_rsae_sha256, ...]` in their helpers, so they fail wholesale against ECDSA / Ed25519 certs (server can't satisfy → handshake_failure). Adding them to the cert-matrix runs would just produce mass XFAILs with no real signal. Stayed with the cert-specific scripts where the failures are diagnostic.
+
+`test-tls13-ecdsa-in-certificate-verify.py` and `test-tls13-eddsa-in-certificate-verify.py` were probed but require client-cert + key (mTLS) which our `s-server` doesn't currently advertise. Scheduled if/when CLI gains mTLS support.
+
+### CI workflow changes
+
+`.github/workflows/tlsfuzzer.yml`:
+
+- Added `HITLS_PORT_ECDSA=4446` and `HITLS_PORT_ED25519=4447` env vars.
+- Cert-generation step generates 3 cert/key pairs (RSA 2048 + ECDSA P-256 + Ed25519, all PKCS#8). Each via `openssl` per its appropriate key-type pipeline.
+- Server-start step now spins up 4 `s-server` instances (RSA-1.3, RSA-1.2, ECDSA-1.3, Ed25519-1.3); waits on all 4 listeners.
+- Two new script loops (`scripts_ecdsa[]` + `scripts_ed25519[]`) with explicit `XFAIL_DIR=tests/tlsfuzzer/xfail-{ecdsa,ed25519}` injection per loop.
+- Stop step kills all 4 PIDs; artifact upload includes `server-{rsa-1.3,rsa-1.2,ecdsa-1.3,ed25519-1.3}.log`.
+
+### Tlsfuzzer baseline (post-T93)
+
+| Phase | Scripts | TOTAL | PASS | XFAIL | FAIL |
+|-------|--------:|------:|-----:|------:|-----:|
+| Post-T92 (CI sampling) | 26 | 2034 | 1790 | 244 | 0 |
+| **Post-T93 (CI sampling)** | **30** | **2059** | **1808** (+18) | **251** (+7) | **0** |
+| Post-T93 (full sweep `-n 9999`) | 30 | 12134 | 11808 | 326 | 0 |
+
+(Numbers vary slightly run-to-run for sampled scripts; the gating signal `FAIL=0 / XPASS=0` is invariant.)
+
+### XFAIL files added (T93)
+
+2 new files, in two new directories:
+
+| File | Entries | Category |
+|------|--------:|----------|
+| `tests/tlsfuzzer/xfail-ecdsa/test-tls13-ecdsa-support.txt` | 5 | Brainpool (won't fix) + P-384/P-521 (need multi-cert s_server) |
+| `tests/tlsfuzzer/xfail-ed25519/test-tls13-eddsa.txt` | 1 | `ed448 only` needs Ed448 server cert |
+
+Each leads with a self-documenting comment block per the T89 convention.
+
+### Documentation
+
+`docs/tlsfuzzer.md`: phase reference list extended with T93 (cert-matrix + per-cert XFAIL dirs); the XFAIL-bookkeeping section already covered the `XFAIL_DIR` hook so no separate "how to use cert-matrix" section was needed.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | Modified | +2 env vars; 3-cert generation; 4 server instances; 2 new script loops with explicit XFAIL_DIR; 4-PID cleanup; per-cert log artifacts. |
+| `tests/tlsfuzzer/xfail-ecdsa/test-tls13-ecdsa-support.txt` | Added | 5 entries covering brainpool + P-384/P-521 cert mismatches. |
+| `tests/tlsfuzzer/xfail-ed25519/test-tls13-eddsa.txt` | Added | 1 entry (`ed448 only`). |
+| `docs/tlsfuzzer.md` | Modified | Phase reference list extended with T93. |
+
+### Test Count Delta (T93)
+
+No Rust code changes — purely test-fixture / CI / XFAIL bookkeeping. Project-tracked test counts unchanged at 4208.
+
+### Build Status (Post T93)
+
+- `cargo test --workspace --all-features --release`: 4208 passed, 0 failed, 43 ignored (no Rust changes)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings (no Rust changes)
+- `cargo fmt --all -- --check`: clean (no Rust changes)
+- tlsfuzzer cert-matrix sub-aggregate (4 runs: 2 ECDSA + 2 Ed25519): **19 PASS / 6 XFAIL / 0 FAIL / 0 XPASS**, all exit 0
+- tlsfuzzer combined aggregate (30 curated scripts: 17 RSA-1.3 + 9 RSA-1.2 + 2 ECDSA-1.3 + 2 Ed25519-1.3, CI sampling): **1808 PASS / 251 XFAIL / 0 FAIL / 0 XPASS**, total wall-clock ~80 s
+
 
 
 

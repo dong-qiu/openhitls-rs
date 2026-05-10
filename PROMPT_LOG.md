@@ -4676,3 +4676,35 @@ Tests: 4207 → 4208 (+1). hitls-tls 1530 → 1531. All three build configuratio
 **No Rust code changes** — pure test-infrastructure / XFAIL bookkeeping / CI workflow. Test counts unchanged at 4208.
 
 Tests: 4208 → 4208 (no change). All three build configurations clean. Clippy: 0 warnings. Fmt clean.
+
+### Prompt 297: T93 — tlsfuzzer cert-matrix (ECDSA P-256 + Ed25519 server certs)
+
+> 继续 T93
+
+**Result**: Pre-T93, the entire tlsfuzzer baseline ran against a single RSA 2048 server cert. That left two cert paths un-exercised: ECDSA-key-exchange + ECDSA `CertificateVerify` and Ed25519 sign/verify. T93 adds an ECDSA P-256 and Ed25519 server cert, brings up two more `s-server` instances (4446 + 4447), and runs cert-specific scripts against each.
+
+**Solved the per-cert XFAIL contention** (same script, different XFAIL contents per cert) by leveraging `run.sh`'s pre-existing `XFAIL_DIR` env var (introduced in T89). Three XFAIL dirs:
+- `tests/tlsfuzzer/xfail/` (RSA, default — pre-T93 layout unchanged)
+- `tests/tlsfuzzer/xfail-ecdsa/` (ECDSA P-256)
+- `tests/tlsfuzzer/xfail-ed25519/` (Ed25519)
+
+CI workflow's per-cert script loop sets `XFAIL_DIR=…` before invoking `run.sh`. No `run.sh` changes needed — the env-var hook was already there.
+
+**4 cert-matrix runs** (2 per non-RSA cert):
+- ECDSA: `test-tls13-conversation` (3/3 PASS — proves basic ECDSA P-256 handshake) + `test-tls13-ecdsa-support` (5/10 PASS / 5 XFAIL: 3 brainpool + 2 wrong-curve cert mismatches)
+- Ed25519: `test-tls13-conversation` (3/3 PASS) + `test-tls13-eddsa` (8/9 PASS / 1 XFAIL)
+
+**Notable improvement**: `test-tls13-eddsa.py` `'ed25519 only'` flips RSA-cert XFAIL → Ed25519-cert PASS. That validates Ed25519 sign-side end-to-end (the path was previously XFAIL'd "RSA can't satisfy" defensively, never actually exercised).
+
+**Probed-but-not-added scripts**: most cert-agnostic-looking TLS 1.3 scripts (test-tls13-ccs, test-tls13-record-padding, test-tls13-finished, etc.) hardcode `[rsa_pss_rsae_sha256, ...]` in their helpers, so they fail wholesale against ECDSA/Ed25519 (server can't satisfy → handshake_failure). Adding them to the cert-matrix would just produce mass XFAILs with no real signal. The `*-in-certificate-verify.py` scripts need client cert (mTLS) which our s_server doesn't currently advertise — scheduled if/when CLI gains mTLS.
+
+**CI workflow changes**:
+- 2 new env vars (`HITLS_PORT_ECDSA=4446`, `HITLS_PORT_ED25519=4447`)
+- Cert-generation step now produces 3 cert/key pairs (RSA + ECDSA P-256 + Ed25519, all PKCS#8) via openssl
+- Server-start step spins 4 instances; waits on all 4 listeners
+- 2 new script loops with explicit `XFAIL_DIR=tests/tlsfuzzer/xfail-{ecdsa,ed25519}` injection
+- 4-PID cleanup; per-cert log artifacts
+
+**Tlsfuzzer aggregate** (30 curated scripts: 17 RSA-1.3 + 9 RSA-1.2 + 2 ECDSA-1.3 + 2 Ed25519-1.3, CI sampling): **1808 PASS / 251 XFAIL / 0 FAIL / 0 XPASS** in ~80 s. Cert-matrix sub-aggregate: 19 PASS / 6 XFAIL / 0 FAIL across 4 runs.
+
+**No Rust code changes** — pure test-fixture / CI / XFAIL bookkeeping. Test counts unchanged at 4208. Clippy 0; fmt clean.

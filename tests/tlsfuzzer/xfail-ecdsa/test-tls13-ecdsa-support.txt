@@ -1,0 +1,27 @@
+# Phase T93 — `test-tls13-ecdsa-support.py` XFAILs against the
+# ECDSA P-256 server cert (5 entries).
+#
+# All 5 failing conversations are cert-or-curve mismatches, not
+# protocol gaps:
+#
+# - `ecdsa_secp384r1_sha384` / `ecdsa_secp521r1_sha512`: tlsfuzzer
+#   constrains the client `signature_algorithms` to the larger ECDSA
+#   curve. Our server cert is ECDSA P-256, so we can't sign with
+#   secp384r1 or secp521r1 keys — server replies handshake_failure,
+#   which is RFC-correct. To close these we'd need to load a
+#   matching server cert per CH (multi-cert s_server), out of scope
+#   for T93.
+# - `ecdsa_brainpoolP{256,384,512}r1tls13_sha{256,384,512}`: we don't
+#   advertise brainpool curves by default (RFC 8734 / RFC 4492
+#   appendix; not in widespread use, not part of NSA Suite B). Real
+#   "won't fix" unless interop demand surfaces.
+#
+# Without the matching cert / brainpool support, these failures are
+# the spec-correct outcome. XFAIL'd here so the rest of the script
+# (5 PASS) gates cleanly against the ECDSA P-256 cert.
+
+Test with ecdsa_brainpoolP256r1tls13_sha256
+Test with ecdsa_brainpoolP384r1tls13_sha384
+Test with ecdsa_brainpoolP512r1tls13_sha512
+Test with ecdsa_secp384r1_sha384
+Test with ecdsa_secp521r1_sha512

@@ -1,0 +1,14 @@
+# Phase T93 — `test-tls13-eddsa.py` XFAIL against the Ed25519
+# server cert (1 entry; RSA-cert variant has 2).
+#
+# `ed25519 only` now PASSES against the Ed25519 cert (was XFAIL'd
+# against the RSA cert because RSA can't satisfy the ed25519-only
+# signature_algorithms constraint).
+#
+# `ed448 only` still fails: tlsfuzzer constrains sig_algs to
+# ed448 only, but our test Ed25519 cert can't sign with Ed448. To
+# close this we'd need to also load an Ed448 server cert and
+# pick the matching cert per CH (multi-cert s_server). Scheduled
+# only if real interop demand surfaces.
+
+ed448 only

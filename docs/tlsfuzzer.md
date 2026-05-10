@@ -292,3 +292,20 @@ To run it manually: GitHub Actions → tlsfuzzer → "Run workflow".
   Combined post-T92 baseline: **1790 PASS / 244 XFAIL / 0 FAIL**
   (CI sampling) across 26 scripts; **11789 PASS / 320 XFAIL / 0
   FAIL** with `-n 9999` full sweep across 12109 conversations.
+
+- T93 — added **cert-matrix** coverage. Pre-T93 the entire suite
+  ran against a single RSA 2048 server cert; ECDSA-key-exchange
+  and Ed25519 sign/verify paths were never actually exercised
+  (test conversations like `ed25519 only` were XFAIL'd
+  defensively because RSA-cert can't satisfy them). T93 generates
+  ECDSA P-256 and Ed25519 server certs in CI, brings up two more
+  `s-server` instances on ports 4446 / 4447, and runs cert-
+  specific scripts against each. Per-cert XFAIL dirs
+  (`tests/tlsfuzzer/xfail-ecdsa/`, `tests/tlsfuzzer/xfail-ed25519/`)
+  use `run.sh`'s pre-existing `XFAIL_DIR` env-var hook — same
+  script can have different XFAIL contents per cert without code
+  changes. Notable: `test-tls13-eddsa.py` `'ed25519 only'`
+  flips RSA-cert XFAIL → Ed25519-cert PASS, validating the
+  Ed25519 sign-side end-to-end. Cert-matrix sub-aggregate: 19
+  PASS / 6 XFAIL / 0 FAIL across 4 runs. Combined post-T93
+  baseline: **1808 PASS / 251 XFAIL / 0 FAIL** across 30 scripts.
