@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T95 (94 phases, T64 skipped)
+- Testing: T1–T96 (95 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -300,6 +300,7 @@ Category summary:
 | 288 | T93 | Test | tlsfuzzer cert-matrix — ECDSA P-256 + Ed25519 server cert variants + per-cert XFAIL dirs | 2026-05-10 |
 | 289 | T94 | Test | tlsfuzzer NewSessionTicket emission count + 0-RTT-garbage edge cases (PSK/mTLS/DTLS deferred) | 2026-05-10 |
 | 290 | T95 | Test | RSA-PSS SHA-384/512 sign+verify generalisation (P0) + CVE-2020-25648 multi-CCS hardening (P1) | 2026-05-10 |
+| 291 | T96 | Test | s_server CLI Tier-1 flags (`--cipher-suites`, `--require-client-cert`, `--max-early-data-size`, `--ticket-key`, `--no-middlebox-compat`) + TLS 1.2 default cipher widening | 2026-05-11 |
 
 ---
 
@@ -16017,6 +16018,129 @@ Per-script delta:
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - tlsfuzzer aggregate (32 curated scripts, CI sampling): **1819 PASS / 254 XFAIL / 0 FAIL / 0 XPASS**, all exit 0, ~80 s
+
+## Phase T96 — s_server CLI Tier-1 Flags (Infrastructure for Tlsfuzzer Coverage Expansion) (2026-05-11)
+
+### Summary
+
+Per the post-T95 "max tlsfuzzer coverage" analysis, the next-step ROI cluster was a set of 5–6 `s_server` CLI flags that the underlying TLS code already supported but the CLI didn't expose. T96 plumbs them.
+
+**Honest framing**: T96 delivers the **CLI infrastructure** but not the projected tlsfuzzer PASS gains. Each per-script integration (mTLS / 0-RTT / PSK / KeyUpdate-on-trigger) is more complex than just "wire the flag" — it needs script-specific scaffolding (test client cert + CA layout, server-side stray-early-data alert path, ticket-key warm-up via prior connection, HTTP-aware s_server for per-request KU). Those integrations are queued as follow-up phases. T96 unblocks them without committing to any single one.
+
+### Why this is still worth shipping standalone
+
+1. The flags are useful outside tlsfuzzer (e.g. local interop testing against openssl s_client / browsers).
+2. Wiring them all in one phase keeps the CLI surface coherent (single review of clap struct + argument routing).
+3. The `--cipher-suites` parser unlocks ad-hoc tlsfuzzer probing without recompile.
+4. The TLS 1.2 default-cipher widening is a small but real interop improvement (legacy peers expecting CBC-SHA now get a useful response instead of `handshake_failure`).
+
+### Flags added
+
+| Flag | Type | Underlying config |
+|------|------|-------------------|
+| `--cipher-suites <list>` | comma-separated names or `0xNNNN` hex | overrides per-version default; parsed by new `parse_cipher_suite_list()` helper |
+| `--require-client-cert <ca-pem>` | path | `verify_client_cert(true)` + `require_client_cert(true)` + each PEM cert as `trusted_cert(...)` |
+| `--max-early-data-size <N>` | u32 | `max_early_data_size(N)` (default 0 = no 0-RTT) |
+| `--ticket-key <hex>` | 64-hex 32-byte | `ticket_key(bytes)` (deterministic NST encryption key for resumption) |
+| `--no-middlebox-compat` | bool flag | `middlebox_compat(false)` |
+
+### Flag dropped during implementation
+
+`--key-update-server` was drafted, then removed: auto-firing post-handshake KeyUpdate breaks tlsfuzzer's sanity test (which expects a normal handshake without KU). The right semantic is per-request trigger (HTTP path-based, like `nginx` or OpenSSL's `s_server -keyupdate` interactive mode). That needs an HTTP-aware s_server, which is out of scope; XFAIL on `test-tls13-keyupdate-from-server.py` stays.
+
+### TLS 1.2 default cipher list
+
+Pre-T96 default for `--tls 1.2`:
+
+```
+TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+```
+
+Post-T96 — adds 6 ECDHE-CBC-SHA / SHA256 / SHA384 suites:
+
+```
+TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA          (0xC013)
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA          (0xC014)
+TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA        (0xC009)
+TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA        (0xC00A)
+TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256       (0xC027)
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384       (0xC028)
+```
+
+These are all PFS suites (ECDHE) so the no-RSA-static security stance is preserved. The protocol code already supports CBC-SHA via `connection12` (TLS 1.2 explicit-IV CBC), this just exposes more of it.
+
+`TLS_RSA_*` (RSA static key exchange, no PFS) **not** added — security regression we don't want to take on, and a meaningful chunk of tlsfuzzer scripts that want it can't be satisfied without that. Stays as-is.
+
+### What this didn't unlock (probed honestly)
+
+After installing the new defaults, I re-probed several previously-empty TLS 1.2 scripts:
+
+| Script | Result | Why not added to curated set |
+|--------|--------|------------------------------|
+| `test-fuzzed-finished.py` | 0/10 | Hardcodes `TLS_RSA_WITH_AES_128_CBC_SHA`, no `-C` accept |
+| `test-fuzzed-MAC.py` | 0/32 | Same |
+| `test-fuzzed-padding.py` | 0/13 | Same |
+| `test-fuzzed-plaintext.py` | 0/52 | Same |
+| `test-record-layer-fragmentation.py` | 1/24 | Same |
+| `test-encrypt-then-mac.py` | 0/3 | Hardcodes RSA-static |
+| `test-extensions.py` | 215/292 | 77 fail — server has limit on number of extensions in CH (real parser gap, deferred) |
+
+`test-tls13-certificate-request.py` and `test-tls13-certificate-verify.py` accept the `--require-client-cert` server but tlsfuzzer's "sanity" check expects a non-mTLS handshake to succeed first; the script-level integration needs more work than just plumbing the flag. Deferred.
+
+`test-tls13-keyupdate-from-server.py`: see "Flag dropped" above — needs HTTP-trigger semantic.
+
+### Tests
+
+**+6 unit tests** for `parse_cipher_suite_list` covering: named-only, hex-only, mixed names+hex, unknown name → error, empty list → error, bad hex → error.
+
+Also updated 3 pre-existing `run(...)` test calls to use the new 10-arg signature.
+
+### Tlsfuzzer baseline (post-T96)
+
+| Phase | PASS | XFAIL | FAIL | exit 0? |
+|-------|-----:|------:|-----:|:-------:|
+| Post-T95 | 1819 | 254 | 0 | yes |
+| **Post-T96 (32 curated, regression check)** | **1819** | **254** | **0** | **yes** |
+
+Identical — T96's CLI changes don't touch any curated-script execution path because all existing scripts go through `run.sh` with their own per-script args. The `--cipher-suites` widening is silent unless the script omits `-C` and tlsfuzzer happens to negotiate a CBC suite (none of the curated set).
+
+### Next steps for actual coverage gains
+
+The flags T96 adds unblock these follow-up phases (each ~half-day to full day):
+
+1. **mTLS scripts** (`test-tls13-certificate-{request,verify,verify-malformed,malformed}.py`, `test-clienthello-md5.py`) — need to author the right tlsfuzzer invocation pattern (which sanity tests to skip / how to sequence the cert flow).
+2. **0-RTT** — need server-side alert-on-stray-early-data (RFC 8446 §4.2.10) before tlsfuzzer's early-data-then-rejection scripts pass.
+3. **PSK / session resumption** — need a "warm-up" connection that issues a NST and a way to feed it back into tlsfuzzer's PSK extension.
+
+Each of those is its own T-phase; T96 is the necessary CLI groundwork that was missing.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-cli/src/main.rs` | Modified | `SServer` clap struct extended with 5 new flags (and one drafted-then-dropped); routing into `s_server::run` updated. |
+| `crates/hitls-cli/src/s_server.rs` | Modified | `run()` signature 5 args → 10 args; new logic for cipher-suite list parsing, mTLS CA loading + `verify/require_client_cert`, `max_early_data_size`, `ticket_key`, `middlebox_compat(false)`. TLS 1.2 default cipher list expanded with 6 ECDHE-CBC suites. +6 parser unit tests. |
+
+### Test Count Delta (T96)
+
+| Crate | Pre-T96 | Post-T96 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-cli | 165 | 171 | +6 |
+| **Total** | **4210** | **4216** | **+6** |
+
+### Build Status (Post T96)
+
+- `cargo test --workspace --all-features --release`: 4173 measured (project-tracked aggregate 4216, +6 over post-T95)
+- `cargo test -p hitls-cli --release --bin hitls s_server`: 16 passed (incl. 6 new parser tests)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- tlsfuzzer aggregate (32 curated scripts via `tests/tlsfuzzer/run.sh`): **1819 PASS / 254 XFAIL / 0 FAIL / 0 XPASS** (unchanged from T95) — confirms CLI changes don't regress existing curated set
+
 
 
 

@@ -164,6 +164,42 @@ enum Commands {
         /// Quiet mode: suppress connection info.
         #[arg(long, short)]
         quiet: bool,
+        // ----- Phase T96 (Tier-1 tlsfuzzer-coverage) flags -----
+        /// Comma-separated cipher suite names or hex codepoints
+        /// (e.g. `TLS_RSA_WITH_AES_128_CBC_SHA,0xC02F`). Falls back
+        /// to per-version defaults when omitted. Used to drive
+        /// tlsfuzzer scripts that hard-code legacy CBC-SHA suites.
+        #[arg(long = "cipher-suites")]
+        cipher_suites: Option<String>,
+        /// Require + verify a client certificate (mTLS). The argument
+        /// is a path to a CA bundle (PEM) used to validate the
+        /// client cert chain. Implies `verify_client_cert=true` AND
+        /// `require_client_cert=true`.
+        #[arg(long = "require-client-cert")]
+        require_client_cert: Option<String>,
+        /// Maximum size (bytes) the server advertises for TLS 1.3
+        /// `early_data` in NewSessionTicket. Default 0 (no 0-RTT).
+        /// Set to e.g. 16384 to accept 0-RTT data.
+        #[arg(long = "max-early-data-size", default_value = "0")]
+        max_early_data_size: u32,
+        /// 32-byte hex resumption ticket key (TLS 1.3 NST encryption).
+        /// When set, deterministic key enables session resumption
+        /// across processes; when omitted a fresh random key is used.
+        #[arg(long = "ticket-key")]
+        ticket_key: Option<String>,
+        // (Phase T96 — removed `--key-update-server` flag draft.
+        // Auto-firing KU right after the handshake breaks tlsfuzzer's
+        // sanity tests in `test-tls13-keyupdate-from-server.py`,
+        // which expect the server to KU only in response to a
+        // specific HTTP request path. Wiring that semantic needs an
+        // actual HTTP-aware s_server, not the current echo loop.
+        // The XFAIL entry stays.)
+        /// Disable RFC 8446 §D.4 middlebox-compat dummy CCS. By
+        /// default the server emits the fake CCS after ServerHello /
+        /// HelloRetryRequest; with this flag set we skip it (and
+        /// reject any CCS the peer sends).
+        #[arg(long = "no-middlebox-compat")]
+        no_middlebox_compat: bool,
     },
     /// List supported algorithms and cipher suites.
     List {
@@ -364,7 +400,23 @@ fn main() {
             key,
             tls_version,
             quiet,
-        } => s_server::run(*port, cert, key, tls_version, *quiet),
+            cipher_suites,
+            require_client_cert,
+            max_early_data_size,
+            ticket_key,
+            no_middlebox_compat,
+        } => s_server::run(
+            *port,
+            cert,
+            key,
+            tls_version,
+            *quiet,
+            cipher_suites.as_deref(),
+            require_client_cert.as_deref(),
+            *max_early_data_size,
+            ticket_key.as_deref(),
+            *no_middlebox_compat,
+        ),
         Commands::List { filter } => list::run(filter),
         Commands::Rand { num, format } => rand_cmd::run(*num, format),
         Commands::Pkeyutl {

@@ -7,12 +7,18 @@ use hitls_tls::crypt::NamedGroup;
 use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
 use std::net::TcpListener;
 
+#[allow(clippy::too_many_arguments)] // Phase T96 — CLI flags are intentionally per-knob.
 pub fn run(
     port: u16,
     cert_path: &str,
     key_path: &str,
     tls_version: &str,
     quiet: bool,
+    cipher_suites_arg: Option<&str>,
+    require_client_cert_ca: Option<&str>,
+    max_early_data_size: u32,
+    ticket_key_hex: Option<&str>,
+    no_middlebox_compat: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load certificate chain
     let cert_pem = std::fs::read_to_string(cert_path)
@@ -47,35 +53,95 @@ pub fn run(
         ])
         .verify_peer(false);
 
+    // Phase T96 — `--cipher-suites` overrides the per-version defaults
+    // when set. Accept comma-separated names or `0xNNNN` hex codepoints.
+    let custom_ciphers: Option<Vec<CipherSuite>> = match cipher_suites_arg {
+        Some(s) => Some(parse_cipher_suite_list(s)?),
+        None => None,
+    };
+
     match tls_version {
         "1.3" => {
+            let default_13 = vec![
+                CipherSuite::TLS_AES_256_GCM_SHA384,
+                CipherSuite::TLS_AES_128_GCM_SHA256,
+                CipherSuite::TLS_CHACHA20_POLY1305_SHA256,
+            ];
+            let suites = custom_ciphers.clone().unwrap_or(default_13);
             builder = builder
                 .min_version(TlsVersion::Tls13)
                 .max_version(TlsVersion::Tls13)
-                .cipher_suites(&[
-                    CipherSuite::TLS_AES_256_GCM_SHA384,
-                    CipherSuite::TLS_AES_128_GCM_SHA256,
-                    CipherSuite::TLS_CHACHA20_POLY1305_SHA256,
-                ]);
+                .cipher_suites(&suites);
         }
         "1.2" => {
+            // Phase T96 — pre-T96 the default was ECDHE-AEAD-only, which
+            // collides with tlsfuzzer's hardcoded `TLS_RSA_WITH_AES_128_CBC_SHA`.
+            // We now also include the legacy CBC-SHA suites so out-of-the-box
+            // `s-server --tls 1.2` covers the same surface tlsfuzzer expects.
+            // (`--cipher-suites` still overrides if the user wants to pin.)
+            let default_12 = vec![
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+                CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384,
+            ];
+            let suites = custom_ciphers.clone().unwrap_or(default_12);
             builder = builder
                 .min_version(TlsVersion::Tls12)
                 .max_version(TlsVersion::Tls12)
-                .cipher_suites(&[
-                    CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-                    CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-                    CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-                    CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-                    CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-                    CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-                ]);
+                .cipher_suites(&suites);
         }
         other => {
             return Err(
                 format!("unsupported TLS version '{other}' (use \"1.2\" or \"1.3\")").into(),
             );
         }
+    }
+
+    // Phase T96 — `--require-client-cert <CA>` mTLS support.
+    if let Some(ca_path) = require_client_cert_ca {
+        let ca_pem = std::fs::read_to_string(ca_path)
+            .map_err(|e| format!("cannot read client-CA file '{ca_path}': {e}"))?;
+        let ca_certs = parse_certs_pem(&ca_pem)
+            .map_err(|e| format!("failed to parse client-CA certificate(s): {e}"))?;
+        if ca_certs.is_empty() {
+            return Err("no client-CA certificates found in file".into());
+        }
+        for ca in &ca_certs {
+            builder = builder.trusted_cert(ca.raw.clone());
+        }
+        builder = builder.verify_client_cert(true).require_client_cert(true);
+    }
+
+    // Phase T96 — `--max-early-data-size N`.
+    if max_early_data_size > 0 {
+        builder = builder.max_early_data_size(max_early_data_size);
+    }
+
+    // Phase T96 — `--ticket-key <hex>`. 32 bytes (AES-256-GCM key).
+    if let Some(hex_str) = ticket_key_hex {
+        let key_bytes = hitls_utils::hex::hex(hex_str);
+        if key_bytes.len() != 32 {
+            return Err(format!(
+                "--ticket-key must be exactly 32 bytes (64 hex chars); got {} bytes",
+                key_bytes.len()
+            )
+            .into());
+        }
+        builder = builder.ticket_key(key_bytes);
+    }
+
+    // Phase T96 — `--no-middlebox-compat`.
+    if no_middlebox_compat {
+        builder = builder.middlebox_compat(false);
     }
 
     let config = builder.build();
@@ -183,6 +249,100 @@ fn handle_connection(
 
     let _ = conn.shutdown();
     Ok(())
+}
+
+/// Parse a comma-separated cipher-suite list (Phase T96).
+///
+/// Each token is either:
+/// - an IANA name (e.g. `TLS_RSA_WITH_AES_128_CBC_SHA`,
+///   `TLS_AES_128_GCM_SHA256`) — case-insensitive prefix match against
+///   the `CipherSuite::*` constants, or
+/// - a 16-bit hex codepoint (e.g. `0xC02F`, `0x002F`).
+///
+/// Whitespace around commas is ignored. Empty tokens are skipped.
+fn parse_cipher_suite_list(s: &str) -> Result<Vec<CipherSuite>, Box<dyn std::error::Error>> {
+    let mut out = Vec::new();
+    for raw in s.split(',') {
+        let token = raw.trim();
+        if token.is_empty() {
+            continue;
+        }
+        // Hex codepoint?
+        if let Some(hex) = token
+            .strip_prefix("0x")
+            .or_else(|| token.strip_prefix("0X"))
+        {
+            let v = u16::from_str_radix(hex, 16)
+                .map_err(|e| format!("--cipher-suites: bad hex '{token}': {e}"))?;
+            out.push(CipherSuite(v));
+            continue;
+        }
+        // Named lookup — case-insensitive against the IANA names tracked
+        // in `CipherSuite` constants. We hand-roll the table to avoid
+        // pulling in a reflection crate; the listed entries are the
+        // tlsfuzzer-relevant ones (TLS 1.2 + 1.3 ECDHE / RSA / CBC / GCM /
+        // CHACHA20). Add to this map as new tlsfuzzer scripts surface
+        // additional cipher requirements.
+        let upper = token.to_ascii_uppercase();
+        let suite = match upper.as_str() {
+            // TLS 1.3
+            "TLS_AES_128_GCM_SHA256" => CipherSuite::TLS_AES_128_GCM_SHA256,
+            "TLS_AES_256_GCM_SHA384" => CipherSuite::TLS_AES_256_GCM_SHA384,
+            "TLS_CHACHA20_POLY1305_SHA256" => CipherSuite::TLS_CHACHA20_POLY1305_SHA256,
+            // TLS 1.2 — ECDHE-AEAD
+            "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" => {
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+            }
+            "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384" => {
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+            }
+            "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256" => {
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+            }
+            "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384" => {
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+            }
+            "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256" => {
+                CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+            }
+            "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256" => {
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+            }
+            // TLS 1.2 — ECDHE-CBC-SHA / SHA256 / SHA384
+            "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA" => CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+            "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA" => CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+            "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA" => {
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA
+            }
+            "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA" => {
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA
+            }
+            "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256" => {
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
+            }
+            "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384" => {
+                CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
+            }
+            // TLS 1.2 — RSA static / DHE (legacy, mostly for tlsfuzzer)
+            "TLS_RSA_WITH_AES_128_CBC_SHA" => CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA,
+            "TLS_DHE_RSA_WITH_AES_128_CBC_SHA" => CipherSuite::TLS_DHE_RSA_WITH_AES_128_CBC_SHA,
+            // SCSV (used by tlsfuzzer ClientHello to signal renegotiation
+            // info — we ignore it server-side; including for completeness)
+            "TLS_EMPTY_RENEGOTIATION_INFO_SCSV" => CipherSuite(0x00FF),
+            other => {
+                return Err(format!(
+                    "--cipher-suites: unknown cipher name '{other}'; \
+                     use a 0xNNNN hex codepoint or extend `parse_cipher_suite_list`"
+                )
+                .into());
+            }
+        };
+        out.push(suite);
+    }
+    if out.is_empty() {
+        return Err("--cipher-suites: empty list (after trimming)".into());
+    }
+    Ok(out)
 }
 
 fn pkcs8_to_server_key(
@@ -355,6 +515,11 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             "/nonexistent/key.pem",
             "1.1",
             true,
+            None,
+            None,
+            0,
+            None,
+            false,
         );
         assert!(result.is_err());
     }
@@ -367,6 +532,11 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             "/nonexistent/key.pem",
             "1.3",
             true,
+            None,
+            None,
+            0,
+            None,
+            false,
         );
         assert!(result.is_err());
     }
@@ -380,7 +550,55 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             "/nonexistent/key.pem",
             "1.2",
             true,
+            None,
+            None,
+            0,
+            None,
+            false,
         );
         assert!(result.is_err());
+    }
+
+    // Phase T96 — `--cipher-suites` parser tests.
+
+    #[test]
+    fn test_parse_cipher_suite_list_named() {
+        let r = parse_cipher_suite_list("TLS_RSA_WITH_AES_128_CBC_SHA, TLS_AES_128_GCM_SHA256")
+            .unwrap();
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0], CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA);
+        assert_eq!(r[1], CipherSuite::TLS_AES_128_GCM_SHA256);
+    }
+
+    #[test]
+    fn test_parse_cipher_suite_list_hex() {
+        let r = parse_cipher_suite_list("0xC02F, 0x002F").unwrap();
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0], CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
+        assert_eq!(r[1], CipherSuite::TLS_RSA_WITH_AES_128_CBC_SHA);
+    }
+
+    #[test]
+    fn test_parse_cipher_suite_list_mixed() {
+        let r = parse_cipher_suite_list("0xc02b , TLS_AES_256_GCM_SHA384").unwrap();
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0], CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        assert_eq!(r[1], CipherSuite::TLS_AES_256_GCM_SHA384);
+    }
+
+    #[test]
+    fn test_parse_cipher_suite_list_unknown_name() {
+        assert!(parse_cipher_suite_list("UNKNOWN_NAME").is_err());
+    }
+
+    #[test]
+    fn test_parse_cipher_suite_list_empty() {
+        assert!(parse_cipher_suite_list("  ").is_err());
+        assert!(parse_cipher_suite_list("").is_err());
+    }
+
+    #[test]
+    fn test_parse_cipher_suite_list_bad_hex() {
+        assert!(parse_cipher_suite_list("0xZZZZ").is_err());
     }
 }

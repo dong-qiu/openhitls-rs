@@ -4763,3 +4763,43 @@ Effect: `test-tls13-multiple-ccs-messages.py` 4/7 → **7/7 PASS**. XFAIL file d
 **Tlsfuzzer aggregate**: 1815 PASS / 258 XFAIL → **1819 PASS / 254 XFAIL / 0 FAIL** (+4/-4; the math is +5/-5 closed but version-negotiation's random sampling shifts ~1 between runs).
 
 Tests: 4208 → 4210 (+2). hitls-crypto 1494 → 1495; hitls-integration-tests 267 → 268. All build configs clean. Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 300: T96 — s_server CLI Tier-1 flags (groundwork for tlsfuzzer coverage expansion)
+
+> 做 T96
+
+**Result**: Per the post-T95 "max tlsfuzzer coverage" analysis, T96 plumbed 5 `s_server` CLI flags whose underlying TLS code already existed but the CLI didn't expose:
+
+- `--cipher-suites <list>` — comma-sep names or `0xNNNN` hex; overrides per-version default
+- `--require-client-cert <ca-pem>` — mTLS: `verify_client_cert(true)` + `require_client_cert(true)` + load CA bundle as `trusted_cert`s
+- `--max-early-data-size <N>` — TLS 1.3 0-RTT NST size advertisement
+- `--ticket-key <hex>` — 32-byte deterministic NST encryption key for session resumption
+- `--no-middlebox-compat` — disable RFC 8446 §D.4 dummy CCS
+
+Plus TLS 1.2 default cipher list expanded with 6 ECDHE-CBC-SHA / SHA256 / SHA384 suites (PFS preserved; no RSA-static).
+
+**Honest framing**: T96 delivers the **CLI infrastructure** but not the projected tlsfuzzer PASS gains. Each per-script integration (mTLS / 0-RTT / PSK) is more complex than just "wire the flag":
+- mTLS scripts have specific handshake sequencing expectations (sanity-then-mTLS), need scaffolding
+- 0-RTT needs server-side stray-early-data alert path (RFC 8446 §4.2.10), not just CLI flag
+- PSK needs a warm-up connection to issue NST + tlsfuzzer-side ticket replay
+
+Those integrations are queued as follow-up phases. T96 unblocks them without committing to any single one.
+
+**Drafted-then-dropped**: `--key-update-server` flag — auto-firing post-handshake KeyUpdate breaks tlsfuzzer's sanity test (which expects normal handshake). Right semantic is HTTP-path-trigger (like `nginx` / openssl `s_server -keyupdate` interactive mode) — out of scope. XFAIL on `test-tls13-keyupdate-from-server.py` stays.
+
+**Probed-but-not-added**: re-probed previously-empty TLS 1.2 scripts after the cipher widening:
+- `test-fuzzed-finished` / `MAC` / `padding` / `plaintext` (0/N): hardcode RSA-static, not satisfiable with our ECDHE-CBC list
+- `test-extensions.py` (215/292): 77 fail — server has CH-extensions-count limit (real parser gap, deferred)
+- `test-record-layer-fragmentation.py` (1/24), `test-encrypt-then-mac.py` (0/3): same RSA-static issue
+
+**+6 unit tests** for `parse_cipher_suite_list` covering: named-only, hex-only, mixed, unknown name → err, empty → err, bad hex → err.
+
+**Why this is still worth shipping standalone**:
+1. Flags useful outside tlsfuzzer (interop with openssl s_client / browsers)
+2. Cipher-list parser unlocks ad-hoc tlsfuzzer probing without recompile
+3. TLS 1.2 default-cipher widening is a small interop improvement (legacy peers expecting CBC-SHA now get useful response instead of `handshake_failure`)
+4. Wiring all flags in one phase keeps CLI surface coherent
+
+**Tlsfuzzer baseline** unchanged: 32 curated scripts still 1819 PASS / 254 XFAIL / 0 FAIL — T96's CLI changes don't touch any curated-script execution path because all existing scripts go through `run.sh` with their own per-script args.
+
+Tests: 4210 → 4216 (+6). hitls-cli 165 → 171. clippy 0; fmt clean. All build configs clean.
