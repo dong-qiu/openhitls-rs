@@ -40,6 +40,29 @@ pub fn verify_certificate_verify(
     transcript_hash: &[u8],
     is_server: bool,
 ) -> Result<(), TlsError> {
+    // Phase T98 — RFC 8446 §4.4.3: in TLS 1.3 CertificateVerify, the
+    // following signature scheme codepoints are reserved for cert
+    // chain signatures (`signature_algorithms_cert`) only and MUST
+    // NOT appear here. tlsfuzzer's `test-tls13-certificate-verify.py`
+    // probes a long list of forbidden codepoints expecting an
+    // `illegal_parameter` alert.
+    //
+    // - rsa_pkcs1_*  (PKCS#1 v1.5 — RFC 8446 §4.4.3 explicitly
+    //   forbids this in CV; only allowed for cert-chain sigs.)
+    // - any *_sha1 / *_sha224 hash variant (SHA-1 / SHA-224
+    //   deprecated — RFC 8446 §4.2.3 / §B.3.1.3.)
+    //
+    // Reason string contains the literal `"illegal_parameter"` so
+    // `alert::tls_error_to_alert` routes it to the matching alert.
+    if is_pkcs1_or_legacy_hash(scheme) {
+        return Err(TlsError::HandshakeFailed(format!(
+            "CertificateVerify: signature scheme 0x{:04x} is not allowed \
+             for in-handshake CertificateVerify (RFC 8446 §4.4.3 / §4.2.3 — \
+             alert: illegal_parameter)",
+            scheme.0
+        )));
+    }
+
     let content = build_verify_content(transcript_hash, is_server);
     let spki = &cert.public_key;
 
@@ -131,6 +154,33 @@ fn compute_sha384(data: &[u8]) -> Result<Vec<u8>, TlsError> {
 
 fn compute_sha512(data: &[u8]) -> Result<Vec<u8>, TlsError> {
     compute_hash(hitls_crypto::sha2::Sha512::new(), data)
+}
+
+/// Phase T98 — true if `scheme` is one of the codepoints reserved for
+/// cert-chain signatures only (RFC 8446 §4.4.3) or uses a deprecated
+/// hash (SHA-1 / SHA-224 per RFC 8446 §4.2.3 / §B.3.1.3).
+///
+/// The list mirrors the IANA SignatureScheme registry segments:
+///   - `rsa_pkcs1_*` (0x0401..=0x0601, plus the legacy SHA-1/MD5
+///     codepoints 0x0101 / 0x0201) — allowed in cert chain, NOT in CV.
+///   - any *_sha1 codepoint (0x0203 ecdsa_sha1, 0x0201 rsa_pkcs1_sha1,
+///     0x0202 dsa_sha1) — deprecated hash.
+///   - SHA-224 variants (0x0303 / 0x0301 / 0x0302) — never widely
+///     deployed and dropped from RFC 8446's recommended list.
+fn is_pkcs1_or_legacy_hash(scheme: SignatureScheme) -> bool {
+    matches!(
+        scheme.0,
+        // rsa_pkcs1_sha256 / sha384 / sha512 — explicit RFC 8446 §4.4.3 ban for CV.
+        0x0401 | 0x0501 | 0x0601
+        // *_sha1 family
+        | 0x0201 // rsa_pkcs1_sha1
+        | 0x0202 // dsa_sha1 (non-IANA; some impls)
+        | 0x0203 // ecdsa_sha1
+        // SHA-224 family
+        | 0x0301 | 0x0302 | 0x0303
+        // MD5
+        | 0x0101
+    )
 }
 
 // ---------------------------------------------------------------------------

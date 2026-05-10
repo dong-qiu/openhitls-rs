@@ -88,6 +88,16 @@ pub struct FinishedActions {
     /// EndOfEarlyData message to send (if 0-RTT was accepted).
     /// Must be sent encrypted with 0-RTT write key before switching to HS write key.
     pub end_of_early_data_msg: Option<Vec<u8>>,
+    /// Encoded client Certificate to send when the server requested in-handshake
+    /// client authentication (RFC 8446 §4.3.2). Must be sent before the client
+    /// Finished and after EndOfEarlyData (if any). `Some(empty Cert message)`
+    /// when CR was received but no `client_certificate_chain` is configured —
+    /// the message itself is never empty since it carries the request context.
+    pub client_certificate_msg: Option<Vec<u8>>,
+    /// Encoded client CertificateVerify. `Some` iff `client_certificate_chain`
+    /// was non-empty AND `client_private_key` was set; the helper signs over
+    /// the transcript hash through the just-emitted client Certificate.
+    pub client_certificate_verify_msg: Option<Vec<u8>>,
 }
 
 /// Client handshake state machine.
@@ -134,6 +144,12 @@ pub struct ClientHandshake {
     negotiated_group: Option<NamedGroup>,
     /// Early exporter master secret (RFC 8446 §7.5, derived when PSK is offered).
     early_exporter_master_secret: Vec<u8>,
+    /// Server requested in-handshake client authentication (RFC 8446 §4.3.2).
+    in_handshake_cr_received: bool,
+    /// `certificate_request_context` echoed back in the client Certificate.
+    in_handshake_cr_context: Vec<u8>,
+    /// Server's offered signature algorithms from the in-handshake CR.
+    in_handshake_cr_sig_algs: Vec<crate::crypt::SignatureScheme>,
 }
 
 impl Drop for ClientHandshake {
@@ -180,6 +196,9 @@ impl ClientHandshake {
             negotiated_alpn: None,
             negotiated_group: None,
             early_exporter_master_secret: Vec::new(),
+            in_handshake_cr_received: false,
+            in_handshake_cr_context: Vec::new(),
+            in_handshake_cr_sig_algs: Vec::new(),
         }
     }
 
@@ -1201,15 +1220,15 @@ impl ClientHandshake {
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher suite params".into()))?
             .clone();
-        let ks = self
-            .key_schedule
-            .as_mut()
-            .ok_or_else(|| TlsError::HandshakeFailed("no key schedule".into()))?;
 
         let body = get_body(msg_data)?;
         let fin = decode_finished(body, params.hash_len)?;
 
         // Verify server Finished
+        let ks = self
+            .key_schedule
+            .as_mut()
+            .ok_or_else(|| TlsError::HandshakeFailed("no key schedule".into()))?;
         let server_finished_key = ks.derive_finished_key(&self.server_hs_secret)?;
         let transcript_hash = self.transcript.current_hash()?;
         let expected = ks.compute_finished_verify_data(&server_finished_key, &transcript_hash)?;
@@ -1269,7 +1288,21 @@ impl ClientHandshake {
             None
         };
 
-        // Build client Finished from Hash(CH..server Finished [.. EOED])
+        // RFC 8446 §4.3.2 — if the server requested in-handshake client
+        // authentication, send Certificate (and CertificateVerify when we
+        // hold the matching private key) before the client Finished. The
+        // helper folds both messages into the transcript so the Finished
+        // MAC covers them. Drop the `ks` borrow over the helper call
+        // (which itself takes `&mut self`), then re-acquire it.
+        let _ = ks;
+        let (client_certificate_msg, client_certificate_verify_msg) =
+            self.build_in_handshake_client_auth_messages()?;
+        let ks = self
+            .key_schedule
+            .as_mut()
+            .ok_or_else(|| TlsError::HandshakeFailed("no key schedule".into()))?;
+
+        // Build client Finished from Hash(CH..server Finished [.. EOED] [.. Cert .. CV])
         let transcript_hash_for_cfin = self.transcript.current_hash()?;
         let client_finished_key = ks.derive_finished_key(&self.client_hs_secret)?;
         let client_verify_data =
@@ -1297,7 +1330,138 @@ impl ClientHandshake {
             exporter_master_secret,
             early_exporter_master_secret: std::mem::take(&mut self.early_exporter_master_secret),
             end_of_early_data_msg: eoed_msg,
+            client_certificate_msg,
+            client_certificate_verify_msg,
         })
+    }
+
+    /// Build the Certificate (and optional CertificateVerify) emitted in
+    /// response to an in-handshake CertificateRequest (RFC 8446 §4.3.2).
+    ///
+    /// Returns `(None, None)` when no CR was received. When a CR arrived but
+    /// we have no certificate configured, we still send an *empty* Certificate
+    /// (no entries) per §4.4.2 and skip CertificateVerify; the server will
+    /// then decide whether to abort with `certificate_required`.
+    ///
+    /// Both produced messages are folded into `self.transcript` so the
+    /// subsequent client Finished MAC covers them.
+    #[allow(clippy::type_complexity)]
+    fn build_in_handshake_client_auth_messages(
+        &mut self,
+    ) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>), TlsError> {
+        if !self.in_handshake_cr_received {
+            return Ok((None, None));
+        }
+        use super::codec::{
+            encode_certificate, encode_certificate_verify, CertificateEntry, CertificateMsg,
+            CertificateVerifyMsg,
+        };
+        use super::signing::{select_signature_scheme, sign_certificate_verify};
+
+        let cert_msg = if self.config.client_certificate_chain.is_empty() {
+            CertificateMsg {
+                certificate_request_context: self.in_handshake_cr_context.clone(),
+                certificate_list: vec![],
+            }
+        } else {
+            CertificateMsg {
+                certificate_request_context: self.in_handshake_cr_context.clone(),
+                certificate_list: self
+                    .config
+                    .client_certificate_chain
+                    .iter()
+                    .map(|cert_der| CertificateEntry {
+                        cert_data: cert_der.clone(),
+                        extensions: vec![],
+                    })
+                    .collect(),
+            }
+        };
+        let cert_encoded = encode_certificate(&cert_msg);
+        self.transcript.update(&cert_encoded)?;
+
+        let cv_encoded = if self.config.client_certificate_chain.is_empty() {
+            None
+        } else if let Some(ref client_key) = self.config.client_private_key {
+            let scheme = select_signature_scheme(client_key, &self.in_handshake_cr_sig_algs)?;
+            // Transcript now spans CH..server Finished [..EOED] .. client Cert,
+            // which is exactly the prefix CertificateVerify must sign over.
+            let cv_hash = self.transcript.current_hash()?;
+            let signature = sign_certificate_verify(client_key, scheme, &cv_hash, false)?;
+            let cv_msg = CertificateVerifyMsg {
+                algorithm: scheme,
+                signature,
+            };
+            let encoded = encode_certificate_verify(&cv_msg);
+            self.transcript.update(&encoded)?;
+            Some(encoded)
+        } else {
+            None
+        };
+
+        Ok((Some(cert_encoded), cv_encoded))
+    }
+
+    /// Process an in-handshake CertificateRequest (RFC 8446 §4.3.2).
+    ///
+    /// The server sends this between EncryptedExtensions and Certificate to
+    /// request client authentication. We update the transcript, parse the
+    /// signature_algorithms extension to know which schemes the server will
+    /// accept, then stay in `WaitCertCertReq` waiting for the server's own
+    /// Certificate message.
+    pub fn process_in_handshake_certificate_request(
+        &mut self,
+        msg_data: &[u8],
+    ) -> Result<(), TlsError> {
+        use super::codec::decode_certificate_request;
+        use super::extensions_codec::parse_signature_algorithms_ch;
+
+        if self.state != HandshakeState::WaitCertCertReq {
+            return Err(TlsError::HandshakeFailed(
+                "process_in_handshake_certificate_request: wrong state".into(),
+            ));
+        }
+        if self.psk_mode {
+            return Err(TlsError::HandshakeFailed(
+                "CertificateRequest forbidden in PSK-only handshake (RFC 8446 §4.3.2)".into(),
+            ));
+        }
+        if self.in_handshake_cr_received {
+            return Err(TlsError::HandshakeFailed(
+                "duplicate CertificateRequest in single handshake".into(),
+            ));
+        }
+
+        let body = get_body(msg_data)?;
+        let cr = decode_certificate_request(body)?;
+
+        // RFC 8446 §4.3.2 MUST: in-handshake CR's certificate_request_context
+        // is zero-length; non-empty contexts are reserved for post-handshake
+        // CR (RFC 8446 §4.6.2). illegal_parameter on violation.
+        if !cr.certificate_request_context.is_empty() {
+            return Err(TlsError::HandshakeFailed(
+                "in-handshake CertificateRequest has non-empty context (RFC 8446 §4.3.2 \
+                 — alert: illegal_parameter)"
+                    .into(),
+            ));
+        }
+
+        let sig_algs_ext = cr
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::SIGNATURE_ALGORITHMS)
+            .ok_or_else(|| {
+                TlsError::HandshakeFailed(
+                    "in-handshake CertificateRequest missing signature_algorithms".into(),
+                )
+            })?;
+        self.in_handshake_cr_sig_algs = parse_signature_algorithms_ch(&sig_algs_ext.data)?;
+        self.in_handshake_cr_context = cr.certificate_request_context;
+        self.in_handshake_cr_received = true;
+
+        self.transcript.update(msg_data)?;
+        // Stay in WaitCertCertReq — the server's Certificate is next.
+        Ok(())
     }
 
     /// Process a NewSessionTicket message received post-handshake.

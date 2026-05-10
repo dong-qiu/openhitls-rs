@@ -177,6 +177,14 @@ enum Commands {
         /// `require_client_cert=true`.
         #[arg(long = "require-client-cert")]
         require_client_cert: Option<String>,
+        /// Verify a client certificate **only when offered** (optional
+        /// mTLS). Same CA-bundle argument as `--require-client-cert`,
+        /// but the server still accepts handshakes from peers that
+        /// reply with an empty Certificate. Used by tlsfuzzer scripts
+        /// that exercise both the present-cert and no-cert paths
+        /// (e.g. `test-tls13-certificate-request.py` sanity).
+        #[arg(long = "verify-client-cert")]
+        verify_client_cert: Option<String>,
         /// Maximum size (bytes) the server advertises for TLS 1.3
         /// `early_data` in NewSessionTicket. Default 0 (no 0-RTT).
         /// Set to e.g. 16384 to accept 0-RTT data.
@@ -402,6 +410,7 @@ fn main() {
             quiet,
             cipher_suites,
             require_client_cert,
+            verify_client_cert,
             max_early_data_size,
             ticket_key,
             no_middlebox_compat,
@@ -413,6 +422,7 @@ fn main() {
             *quiet,
             cipher_suites.as_deref(),
             require_client_cert.as_deref(),
+            verify_client_cert.as_deref(),
             *max_early_data_size,
             ticket_key.as_deref(),
             *no_middlebox_compat,

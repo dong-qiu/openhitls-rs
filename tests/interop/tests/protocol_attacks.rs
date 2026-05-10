@@ -1053,3 +1053,136 @@ fn test_tls13_server_rejects_second_ccs_during_handshake() {
         "expected second-CCS rejection message, got: {msg}"
     );
 }
+
+// ============================================================================
+// Phase T97 — TLS 1.3 in-handshake mTLS (RFC 8446 §4.3.2 + §4.4.2-3).
+//
+// Pre-T97 the TLS 1.3 server only handled post-handshake CertificateRequest
+// (RFC 8446 §4.6.2). T97 added in-handshake CR emission + Client Certificate
+// + Client CertificateVerify reading + cert-chain validation against
+// `trusted_certs`. The follow-up to T97 added the client side of in-handshake
+// mTLS: `TlsClientConnection` now recognises CertificateRequest between
+// EncryptedExtensions and (server) Certificate, and emits Client Certificate
+// + Client CertificateVerify before the client Finished. The two tests
+// below pin both the happy path (full mutual authentication completes) and
+// the negative path (server demanded a cert but the client has none).
+// ============================================================================
+
+#[test]
+fn test_tls13_in_handshake_mtls_happy_path() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+    use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::Duration;
+
+    let (server_chain, server_key) = make_ed25519_server_identity();
+    let (client_chain, client_key) = make_ed25519_server_identity();
+    let server_trust_anchor = client_chain[0].clone();
+    let client_trust_anchor = server_chain[0].clone();
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .certificate_chain(server_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .verify_client_cert(true)
+        .require_client_cert(true)
+        .trusted_cert(server_trust_anchor)
+        .build();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server_handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+        let mut conn = TlsServerConnection::new(stream, server_config);
+        conn.handshake()
+    });
+
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .verify_peer(false)
+        .trusted_cert(client_trust_anchor)
+        .client_certificate_chain(client_chain)
+        .client_private_key(client_key)
+        .build();
+
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+    let mut conn = TlsClientConnection::new(stream, client_config);
+    conn.handshake().expect("client handshake must succeed");
+
+    server_handle
+        .join()
+        .unwrap()
+        .expect("server handshake must succeed");
+}
+
+#[test]
+fn test_tls13_server_with_require_client_cert_aborts_when_client_has_no_cert() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection::{TlsClientConnection, TlsServerConnection};
+    use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::Duration;
+
+    let (server_chain, server_key) = make_ed25519_server_identity();
+    let (ca_chain, _) = make_ed25519_server_identity();
+    let client_trust_anchor = server_chain[0].clone();
+
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .certificate_chain(server_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .verify_client_cert(true)
+        .require_client_cert(true)
+        .trusted_cert(ca_chain[0].clone())
+        .build();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server_handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+        let mut conn = TlsServerConnection::new(stream, server_config);
+        conn.handshake()
+    });
+
+    // Client now understands in-handshake CR (post-T97), but has no
+    // certificate configured — it answers with an empty Certificate,
+    // which a server with `require_client_cert = true` must reject.
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .verify_peer(false)
+        .trusted_cert(client_trust_anchor)
+        .build();
+
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+    let mut conn = TlsClientConnection::new(stream, client_config);
+    let _ = conn.handshake();
+
+    let result = server_handle.join().unwrap();
+    assert!(
+        result.is_err(),
+        "server must abort handshake when client supplies no certificate"
+    );
+}

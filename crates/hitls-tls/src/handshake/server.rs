@@ -22,10 +22,11 @@ use super::codec::{
     compress_certificate_body, encode_compressed_certificate, CompressedCertificateMsg,
 };
 use super::codec::{
-    decode_client_hello, decode_finished, encode_certificate, encode_certificate_verify,
-    encode_encrypted_extensions, encode_finished, encode_new_session_ticket, encode_server_hello,
-    CertCompressionAlgorithm, CertificateEntry, CertificateMsg, CertificateVerifyMsg,
-    EncryptedExtensions, NewSessionTicketMsg, ServerHello, HELLO_RETRY_REQUEST_RANDOM,
+    decode_client_hello, decode_finished, encode_certificate, encode_certificate_request,
+    encode_certificate_verify, encode_encrypted_extensions, encode_finished,
+    encode_new_session_ticket, encode_server_hello, CertCompressionAlgorithm, CertificateEntry,
+    CertificateMsg, CertificateRequestMsg, CertificateVerifyMsg, EncryptedExtensions,
+    NewSessionTicketMsg, ServerHello, HELLO_RETRY_REQUEST_RANDOM,
 };
 use super::extensions_codec::{
     build_alpn_selected, build_early_data_ee, build_early_data_nst, build_key_share_hrr,
@@ -46,6 +47,11 @@ pub struct ClientHelloActions {
     pub server_hello_msg: Vec<u8>,
     /// Raw EncryptedExtensions handshake message bytes.
     pub encrypted_extensions_msg: Vec<u8>,
+    /// Raw CertificateRequest handshake message bytes (Phase T97).
+    /// Empty when mTLS is not enabled (`config.verify_client_cert == false`)
+    /// or in PSK mode. When non-empty it is sent immediately after
+    /// EncryptedExtensions per RFC 8446 §4.3.2.
+    pub certificate_request_msg: Vec<u8>,
     /// Raw Certificate handshake message bytes.
     pub certificate_msg: Vec<u8>,
     /// Raw CertificateVerify handshake message bytes.
@@ -268,6 +274,12 @@ pub struct ServerHandshake {
     /// server unwraps it the same way.
     #[cfg(feature = "ech")]
     ech_accepted_on_initial: bool,
+    /// Phase T97: in-handshake mTLS flag — `true` when the server
+    /// emitted a CertificateRequest in the EE-flight and is waiting
+    /// for the client's Certificate / CertificateVerify before the
+    /// client Finished. Used by the do-handshake macro to know
+    /// whether to read those messages.
+    pub expecting_client_cert: bool,
 }
 
 struct ServerFlightParams<'a> {
@@ -314,6 +326,7 @@ impl ServerHandshake {
             client_certificate_authorities: Vec::new(),
             #[cfg(feature = "ech")]
             ech_accepted_on_initial: false,
+            expecting_client_cert: false,
         }
     }
 
@@ -959,6 +972,30 @@ impl ServerHandshake {
         let encrypted_extensions_msg = encode_encrypted_extensions(&ee);
         self.transcript.update(&encrypted_extensions_msg)?;
 
+        // Phase T97 — CertificateRequest for in-handshake mTLS
+        // (RFC 8446 §4.3.2). Skipped in PSK mode (no cert auth) and
+        // when the server config doesn't ask for client cert.
+        let certificate_request_msg = if !psk_mode && self.config.verify_client_cert {
+            // Empty context for in-handshake CR (post-handshake CR
+            // uses a non-empty random context — that path is
+            // separate, see `tls13_client_handle_post_hs_cert_request_body!`).
+            let cr_extensions = vec![
+                crate::handshake::extensions_codec::build_signature_algorithms(
+                    &self.config.signature_algorithms,
+                ),
+            ];
+            let cr = CertificateRequestMsg {
+                certificate_request_context: vec![],
+                extensions: cr_extensions,
+            };
+            let cr_msg = encode_certificate_request(&cr);
+            self.transcript.update(&cr_msg)?;
+            self.expecting_client_cert = true;
+            cr_msg
+        } else {
+            Vec::new()
+        };
+
         // Certificate + CertificateVerify (skip in PSK mode)
         let mut certificate_msg = Vec::new();
         let mut certificate_verify_msg = Vec::new();
@@ -1086,6 +1123,7 @@ impl ServerHandshake {
         Ok(ClientHelloActions {
             server_hello_msg,
             encrypted_extensions_msg,
+            certificate_request_msg,
             certificate_msg,
             certificate_verify_msg,
             server_finished_msg,
@@ -1108,6 +1146,94 @@ impl ServerHandshake {
     /// Process an EndOfEarlyData message (adds to transcript).
     ///
     /// `msg_data` is the full handshake message including the 4-byte header.
+    /// Phase T97 — process the client's in-handshake Certificate message
+    /// (RFC 8446 §4.4.2). Updates the transcript and stores the parsed
+    /// chain in `client_certs` for subsequent CertificateVerify
+    /// signature checking.
+    pub fn process_client_certificate(&mut self, msg_data: &[u8]) -> Result<(), TlsError> {
+        if !self.expecting_client_cert {
+            return Err(TlsError::HandshakeFailed(
+                "process_client_certificate: not expecting client cert".into(),
+            ));
+        }
+        // Add to transcript before parsing — transcript hashes the wire bytes.
+        self.transcript.update(msg_data)?;
+        let body = get_body(msg_data)?;
+        let cert_msg = crate::handshake::codec::decode_certificate(body)?;
+        // Empty client cert chain is permitted by RFC 8446 §4.4.2 (client
+        // signals "no cert"); the macro handles `require_client_cert`.
+        self.client_certs = cert_msg
+            .certificate_list
+            .into_iter()
+            .map(|e| e.cert_data)
+            .collect();
+        Ok(())
+    }
+
+    /// Phase T97 — was the most recent `process_client_certificate`
+    /// call a non-empty Certificate? Used to decide whether to also
+    /// expect a CertificateVerify.
+    pub fn client_sent_certificates(&self) -> bool {
+        !self.client_certs.is_empty()
+    }
+
+    /// Phase T97 — process the client's in-handshake CertificateVerify
+    /// message (RFC 8446 §4.4.3). Verifies the signature against the
+    /// leaf cert from the previously-processed Certificate message,
+    /// over the transcript hash up to (but not including) this CV.
+    /// Then optionally validates the cert chain against
+    /// `config.trusted_certs` if `verify_client_cert == true`.
+    pub fn process_client_certificate_verify(&mut self, msg_data: &[u8]) -> Result<(), TlsError> {
+        if self.client_certs.is_empty() {
+            return Err(TlsError::HandshakeFailed(
+                "process_client_certificate_verify: no client cert to verify against".into(),
+            ));
+        }
+        // Snapshot transcript BEFORE adding CV to it (signature is over
+        // the transcript up to and INCLUDING the client Certificate but
+        // NOT the CertificateVerify, per RFC 8446 §4.4.3).
+        let transcript_hash = self.transcript.current_hash()?;
+
+        let body = get_body(msg_data)?;
+        let cv = crate::handshake::codec::decode_certificate_verify(body)?;
+
+        // Parse the leaf cert and verify the signature using the same
+        // helper TLS 1.3 client uses for server CertificateVerify.
+        let leaf = hitls_pki::x509::Certificate::from_der(&self.client_certs[0])
+            .map_err(|e| TlsError::HandshakeFailed(format!("client leaf cert parse: {e}")))?;
+        crate::handshake::verify::verify_certificate_verify(
+            &leaf,
+            cv.algorithm,
+            &cv.signature,
+            &transcript_hash,
+            false, // is_server == false for client CertificateVerify
+        )?;
+
+        // After signature OK, add CV to transcript.
+        self.transcript.update(msg_data)?;
+
+        // Optional chain validation against trusted_certs.
+        if self.config.verify_client_cert && !self.config.trusted_certs.is_empty() {
+            let intermediates: Vec<hitls_pki::x509::Certificate> = self
+                .client_certs
+                .iter()
+                .skip(1) // leaf is `cert` arg below
+                .map(|der| hitls_pki::x509::Certificate::from_der(der))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| TlsError::HandshakeFailed(format!("client chain parse: {e}")))?;
+            let mut verifier = hitls_pki::x509::verify::CertificateVerifier::new();
+            for ta_der in &self.config.trusted_certs {
+                let ta = hitls_pki::x509::Certificate::from_der(ta_der)
+                    .map_err(|e| TlsError::HandshakeFailed(format!("trust anchor parse: {e}")))?;
+                verifier.add_trusted_cert(ta);
+            }
+            verifier.verify_cert(&leaf, &intermediates).map_err(|e| {
+                TlsError::HandshakeFailed(format!("client cert chain verify failed: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
     pub fn process_end_of_early_data(&mut self, msg_data: &[u8]) -> Result<(), TlsError> {
         self.transcript.update(msg_data)?;
         Ok(())

@@ -16,6 +16,7 @@ pub fn run(
     quiet: bool,
     cipher_suites_arg: Option<&str>,
     require_client_cert_ca: Option<&str>,
+    verify_client_cert_ca: Option<&str>,
     max_early_data_size: u32,
     ticket_key_hex: Option<&str>,
     no_middlebox_compat: bool,
@@ -119,6 +120,28 @@ pub fn run(
             builder = builder.trusted_cert(ca.raw.clone());
         }
         builder = builder.verify_client_cert(true).require_client_cert(true);
+    }
+
+    // Phase T98 — `--verify-client-cert <CA>` (optional mTLS, no require).
+    // Mutually exclusive with `--require-client-cert`; sending CR is the
+    // same, but the server still accepts an empty client Certificate.
+    if let Some(ca_path) = verify_client_cert_ca {
+        if require_client_cert_ca.is_some() {
+            return Err(
+                "--verify-client-cert and --require-client-cert are mutually exclusive".into(),
+            );
+        }
+        let ca_pem = std::fs::read_to_string(ca_path)
+            .map_err(|e| format!("cannot read client-CA file '{ca_path}': {e}"))?;
+        let ca_certs = parse_certs_pem(&ca_pem)
+            .map_err(|e| format!("failed to parse client-CA certificate(s): {e}"))?;
+        if ca_certs.is_empty() {
+            return Err("no client-CA certificates found in file".into());
+        }
+        for ca in &ca_certs {
+            builder = builder.trusted_cert(ca.raw.clone());
+        }
+        builder = builder.verify_client_cert(true);
     }
 
     // Phase T96 — `--max-early-data-size N`.
@@ -517,6 +540,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             true,
             None,
             None,
+            None,
             0,
             None,
             false,
@@ -532,6 +556,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             "/nonexistent/key.pem",
             "1.3",
             true,
+            None,
             None,
             None,
             0,
@@ -550,6 +575,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             "/nonexistent/key.pem",
             "1.2",
             true,
+            None,
             None,
             None,
             0,

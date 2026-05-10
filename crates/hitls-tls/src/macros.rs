@@ -647,16 +647,25 @@ macro_rules! tls13_client_process_encrypted_flight_body {
                         }
                     }
                     HandshakeState::WaitCertCertReq => {
-                        #[cfg(feature = "cert-compression")]
+                        // RFC 8446 §4.3.2: server may insert CertificateRequest
+                        // before its own Certificate to ask for client auth.
+                        // We stay in WaitCertCertReq after consuming it.
                         if !msg_data.is_empty()
-                            && msg_data[0] == HandshakeType::CompressedCertificate as u8
+                            && msg_data[0] == HandshakeType::CertificateRequest as u8
                         {
-                            $hs.process_compressed_certificate(&msg_data)?;
+                            $hs.process_in_handshake_certificate_request(&msg_data)?;
                         } else {
+                            #[cfg(feature = "cert-compression")]
+                            if !msg_data.is_empty()
+                                && msg_data[0] == HandshakeType::CompressedCertificate as u8
+                            {
+                                $hs.process_compressed_certificate(&msg_data)?;
+                            } else {
+                                $hs.process_certificate(&msg_data)?;
+                            }
+                            #[cfg(not(feature = "cert-compression"))]
                             $hs.process_certificate(&msg_data)?;
                         }
-                        #[cfg(not(feature = "cert-compression"))]
-                        $hs.process_certificate(&msg_data)?;
                     }
                     HandshakeState::WaitCertVerify => {
                         $hs.process_certificate_verify(&msg_data)?;
@@ -677,6 +686,26 @@ macro_rules! tls13_client_process_encrypted_flight_body {
                             $self
                                 .record_layer
                                 .activate_write_encryption($hs_write_suite, $hs_write_keys)?;
+                        }
+
+                        // RFC 8446 §4.3.2 — emit client Certificate (and
+                        // CertificateVerify, when we hold the matching key)
+                        // before the client Finished. The transcript was
+                        // already advanced inside `process_finished` so the
+                        // Finished MAC commits to both messages.
+                        if let Some(ref cert_msg) = fin_actions.client_certificate_msg {
+                            let cert_record = $self
+                                .record_layer
+                                .seal_record(ContentType::Handshake, cert_msg)?;
+                            maybe_await!($mode, $self.stream.write_all(&cert_record))
+                                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+                        }
+                        if let Some(ref cv_msg) = fin_actions.client_certificate_verify_msg {
+                            let cv_record = $self
+                                .record_layer
+                                .seal_record(ContentType::Handshake, cv_msg)?;
+                            maybe_await!($mode, $self.stream.write_all(&cv_record))
+                                .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
                         }
 
                         let fin_record = $self.record_layer.seal_record(
@@ -1182,6 +1211,16 @@ macro_rules! tls13_server_do_handshake_body {
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
         if !actions.psk_mode {
+            // Phase T97 — emit CertificateRequest before our Certificate
+            // when in-handshake mTLS is configured. `certificate_request_msg`
+            // is empty when mTLS is off (see `process_client_hello`).
+            if !actions.certificate_request_msg.is_empty() {
+                let cr_record = $self
+                    .record_layer
+                    .seal_record(ContentType::Handshake, &actions.certificate_request_msg)?;
+                maybe_await!($mode, $self.stream.write_all(&cr_record))
+                    .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
+            }
             for msg in &[&actions.certificate_msg, &actions.certificate_verify_msg] {
                 let record = $self
                     .record_layer
@@ -1235,6 +1274,54 @@ macro_rules! tls13_server_do_handshake_body {
             $self
                 .record_layer
                 .activate_read_decryption(actions.suite, &actions.client_hs_keys)?;
+        }
+
+        // Phase T97 — Step 5c: when mTLS is in-handshake, read the
+        // client's Certificate and CertificateVerify before Finished.
+        // The transcript includes them; client Finished's MAC is over
+        // the resulting transcript hash.
+        if hs.expecting_client_cert {
+            let (ct, c_data) = maybe_await!($mode, $self.read_record())?;
+            if ct != ContentType::Handshake {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected Handshake for client Certificate, got {ct:?}"
+                )));
+            }
+            let (hs_type, _, c_total) = parse_handshake_header(&c_data)?;
+            if hs_type != HandshakeType::Certificate {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected client Certificate, got {hs_type:?}"
+                )));
+            }
+            hs.process_client_certificate(&c_data[..c_total])?;
+
+            // CertificateVerify is required when the client sent at
+            // least one certificate; if the client sent an empty
+            // Certificate (no chain), it skips CV and we proceed
+            // straight to Finished.
+            if hs.client_sent_certificates() {
+                let (ct, cv_data) = maybe_await!($mode, $self.read_record())?;
+                if ct != ContentType::Handshake {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "expected Handshake for client CertificateVerify, got {ct:?}"
+                    )));
+                }
+                let (hs_type, _, cv_total) = parse_handshake_header(&cv_data)?;
+                if hs_type != HandshakeType::CertificateVerify {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "expected client CertificateVerify, got {hs_type:?}"
+                    )));
+                }
+                hs.process_client_certificate_verify(&cv_data[..cv_total])?;
+            } else if $self.config.require_client_cert {
+                // Client sent an empty Certificate but server REQUIRES
+                // a cert → reject (RFC 8446 §4.4.2).
+                return Err(TlsError::HandshakeFailed(
+                    "client sent empty Certificate but server requires \
+                     client cert (alert: certificate_required)"
+                        .into(),
+                ));
+            }
         }
 
         // Step 6: Read client Finished

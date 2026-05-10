@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T96 (95 phases, T64 skipped)
+- Testing: T1–T98 (97 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -301,6 +301,8 @@ Category summary:
 | 289 | T94 | Test | tlsfuzzer NewSessionTicket emission count + 0-RTT-garbage edge cases (PSK/mTLS/DTLS deferred) | 2026-05-10 |
 | 290 | T95 | Test | RSA-PSS SHA-384/512 sign+verify generalisation (P0) + CVE-2020-25648 multi-CCS hardening (P1) | 2026-05-10 |
 | 291 | T96 | Test | s_server CLI Tier-1 flags (`--cipher-suites`, `--require-client-cert`, `--max-early-data-size`, `--ticket-key`, `--no-middlebox-compat`) + TLS 1.2 default cipher widening | 2026-05-11 |
+| 292 | T97 | Test | TLS 1.3 server-side in-handshake mTLS (RFC 8446 §4.3.2 + §4.4.2-3): CertificateRequest emission + client cert/CV read + chain validation | 2026-05-11 |
+| 293 | T98 | Test | Closing T97 leftovers: client-side in-handshake mTLS + RFC 8446 §4.4.3 sig-alg vetting + tlsfuzzer mTLS in CI (`--verify-client-cert` flag) | 2026-05-11 |
 
 ---
 
@@ -16141,7 +16143,215 @@ Each of those is its own T-phase; T96 is the necessary CLI groundwork that was m
 - `cargo fmt --all -- --check`: clean
 - tlsfuzzer aggregate (32 curated scripts via `tests/tlsfuzzer/run.sh`): **1819 PASS / 254 XFAIL / 0 FAIL / 0 XPASS** (unchanged from T95) — confirms CLI changes don't regress existing curated set
 
+## Phase T97 — TLS 1.3 Server-Side In-Handshake mTLS (RFC 8446 §4.3.2 + §4.4.2-3) (2026-05-11)
 
+### Summary
+
+T96 plumbed the `--require-client-cert` CLI flag but the underlying TLS code didn't actually do in-handshake mTLS — only post-handshake auth (RFC 8446 §4.6.2) was implemented. T97 closes the gap: the TLS 1.3 server now emits a CertificateRequest in the EE flight when `verify_client_cert=true`, reads the client's Certificate + CertificateVerify before the client Finished, verifies the CV signature against the leaf cert, and validates the cert chain against `config.trusted_certs`.
+
+**End-to-end interop verified against `openssl s_client -cert ... -key ...`** — full TLS 1.3 mTLS handshake completes against our server (CN=localhost cert with self-signed-CA trust, AES_256_GCM_SHA384, RSA-PSS-SHA256 sig). That's the real success signal; the in-tree integration test is structural (proves the path doesn't panic when the peer can't satisfy CR).
+
+### What's NOT in T97
+
+- **Client-side in-handshake mTLS**. Our `TlsClientConnection` doesn't yet recognise an in-handshake CertificateRequest — when our T97 server sends one, our own client aborts with an alert. That's why the integration test is structural (server aborts cleanly when peer can't satisfy CR), not a happy-path roundtrip. Closing client-side mTLS is its own follow-up phase (see "Next steps" below).
+- **tlsfuzzer mTLS scripts in CI**. They need a client cert+key generated in CI and `-k`/`-c` passed to the script. The `args/` plumbing handles fixed flags but not paths that vary by environment. Documenting the local invocation in `docs/tlsfuzzer.md` is sufficient for now.
+- **Strict CertificateVerify sig-alg vetting** (RFC 8446 §4.4.3 forbids `rsa_pkcs1_*` for in-handshake CV). The 26 tlsfuzzer `test-tls13-certificate-verify.py` "rsa_pkcs1_* refused" conversations would need this. Deferred — security-correct behaviour, just not yet enforced at the layer tlsfuzzer probes.
+
+### Code changes
+
+**`crates/hitls-tls/src/handshake/server.rs`** (~80 lines added):
+
+- `ClientHelloActions` gets a new `certificate_request_msg: Vec<u8>` field — empty when mTLS is not enabled.
+- `ServerHandshake` gets `expecting_client_cert: bool` field — set when the server emitted a CR in EE flight; read by the do-handshake macro.
+- `process_client_hello` builds the CR message between EE and Certificate when `verify_client_cert == true && !psk_mode`. Uses `signature_algorithms` from config for the `signature_algorithms` extension (RFC 8446 §4.3.2 mandatory).
+- New `process_client_certificate(msg_data)` — updates transcript, parses `CertificateMsg`, stores DER chain in `self.client_certs`. Empty chain is permitted at this layer; the macro decides what to do based on `require_client_cert`.
+- New `client_sent_certificates()` accessor (returns `!self.client_certs.is_empty()`).
+- New `process_client_certificate_verify(msg_data)`:
+  - snapshots transcript hash BEFORE adding CV (signature is over CH..ClientCertificate inclusive),
+  - parses the CV message,
+  - verifies the signature using the same `verify_certificate_verify` helper the client uses for server CV (`is_server=false` for client CV),
+  - then adds CV to transcript,
+  - if `verify_client_cert && !trusted_certs.is_empty()`, builds `CertificateVerifier` and runs `verify_cert(leaf, &intermediates)` to validate the chain.
+
+**`crates/hitls-tls/src/macros.rs`** — `tls13_server_do_handshake_body!`:
+
+- Step 5 (send EE → Cert flight) now emits CR before Certificate when `actions.certificate_request_msg` is non-empty.
+- New "Step 5c" between server Finished send and client Finished read: when `hs.expecting_client_cert`, read the client Certificate, then (if non-empty) read CertificateVerify. If the client sent an empty Certificate but the server has `require_client_cert=true`, abort with the `certificate_required` alert message.
+
+### Tests
+
+**+1 integration test** `test_tls13_server_with_require_client_cert_aborts_handshake_against_non_mtls_client` — wires a `TlsConfig::builder().verify_client_cert(true).require_client_cert(true).trusted_cert(...)` server against our own (mTLS-unaware) client. Asserts the handshake aborts with `Err(_)` instead of panicking. Robust against future client-side improvements (doesn't pin the specific error variant).
+
+**Manual interop test** (documented for future regression — not in CI):
+
+```
+hitls s-server -p 14449 \
+    --cert server-rsa.pem --key server-rsa-pkcs8.pem \
+    --require-client-cert client-cert-rsa.pem -q &
+echo "GET /" | openssl s_client -connect localhost:14449 -tls1_3 \
+    -cert client-cert-rsa.pem -key client-key-rsa-pkcs8.pem \
+    -no_ign_eof -brief
+# → CONNECTION ESTABLISHED, Protocol TLSv1.3, Ciphersuite TLS_AES_256_GCM_SHA384,
+#   "Requested Signature Algorithms: RSA-PSS+SHA256:..." (server's CR is parsed),
+#   server logs successful echo loop.
+```
+
+### Tlsfuzzer baseline (post-T97)
+
+The 32-script CI suite is **unchanged** at 1819 PASS / 254 XFAIL / 0 FAIL — none of those scripts exercise mTLS, and our default config keeps `verify_client_cert=false`, so the new code path is dormant.
+
+Probed tlsfuzzer mTLS scripts manually (one-off, not in CI):
+
+| Script | Result | Notes |
+|--------|--------|-------|
+| `test-tls13-certificate-request.py` | 1/5 PASS, 4 fail | "with certificate" passes ✓; 2 sanity-without-mTLS fail (script design assumes server only does mTLS optionally); 2 sigalgs/ext-verify fail (tlsfuzzer expects exhaustive sig_algs list) |
+| `test-tls13-certificate-verify.py` | 5/31 PASS | Most failures are "check rsa_pkcs1_*/sha1 signature is refused" — RFC 8446 §4.4.3 says rsa_pkcs1_* must be refused for in-handshake CV; we don't currently enforce that |
+
+Adding these to the CI curated set requires:
+1. Generate client cert+key in CI workflow (similar to existing server certs)
+2. Wire `-k`/`-c` paths through `args/` (or add env-var substitution to `run.sh`)
+3. XFAIL the script-design-mismatch conversations + the rsa_pkcs1 enforcement gap
+
+That's a follow-up phase (T98+); T97 is the underlying server work.
+
+### Next steps to close more tlsfuzzer mTLS scripts
+
+1. **Client-side in-handshake mTLS** — extend `tls13_client_do_handshake_body!` to peek at handshake type in `WaitCertCertReq`, dispatch CR vs Cert; build + send Client Certificate + CertificateVerify before sending Client Finished. Estimate: 1 day.
+2. **rsa_pkcs1_* refusal in CV** — enforce RFC 8446 §4.4.3 sig-alg list in `verify_certificate_verify`. Estimate: 0.5 day.
+3. **CI workflow integration** — generate client cert pair in CI, start a 5th `s-server` instance with `--require-client-cert`, run the curated mTLS scripts via `run.sh`. Estimate: 0.5 day.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | +80 lines: `ClientHelloActions.certificate_request_msg` field, `ServerHandshake.expecting_client_cert` field, CR message build in `process_client_hello`, new `process_client_certificate` / `client_sent_certificates` / `process_client_certificate_verify` methods (transcript, sig verify, chain verify). |
+| `crates/hitls-tls/src/macros.rs` | Modified | `tls13_server_do_handshake_body!` Step 5 sends CR before Cert; new Step 5c reads client Cert + CV between server Finished and client Finished, with `require_client_cert` enforcement on empty Cert. |
+| `tests/interop/tests/protocol_attacks.rs` | Modified | +1 structural integration test (`test_tls13_server_with_require_client_cert_aborts_handshake_against_non_mtls_client`). |
+
+### Test Count Delta (T97)
+
+| Crate | Pre-T97 | Post-T97 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-integration-tests | 268 | 269 | +1 |
+| **Total** | **4216** | **4217** | **+1** |
+
+### Build Status (Post T97)
+
+- `cargo test --workspace --all-features --release`: 4174 (was 4173 pre-T97; project-tracked aggregate 4217, +1 over post-T96)
+- `cargo test -p hitls-tls --release --lib --all-features`: 1531 passed
+- `cargo test -p hitls-integration-tests --release --test protocol_attacks`: 22 passed (incl. T88-T97 alert/CCS/mTLS tests)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- tlsfuzzer 32-script regression: **all exit 0**, 1819 PASS / 254 XFAIL unchanged
+- openssl interop: TLS 1.3 + mTLS handshake completes end-to-end (manual)
+
+## Phase T98 — Closing T97's Three mTLS Leftovers: Client-Side In-Handshake mTLS, RFC 8446 §4.4.3 Sig-Alg Vetting, and tlsfuzzer mTLS in CI (2026-05-11)
+
+### Summary
+
+T97 delivered TLS 1.3 server-side in-handshake mTLS but explicitly deferred three follow-ups: (1) client-side recognition of in-handshake CertificateRequest, (2) RFC 8446 §4.4.3 strict sig-alg vetting in CertificateVerify, and (3) wiring tlsfuzzer mTLS scripts into CI. T98 closes all three:
+
+- **#1 client-side mTLS**: `TlsClientConnection` now recognises in-handshake CR between EncryptedExtensions and (server) Certificate, parses sig_algs, and emits Client Certificate + Client CertificateVerify before the client Finished. The transcript ordering for Finished is `Hash(CH..server Finished [..EOED] [..Client Cert .. Client CV])` per RFC 8446 §4.4.4.
+- **#2 RFC 8446 §4.4.3 sig-alg vetting**: `verify_certificate_verify` now rejects `rsa_pkcs1_*`, SHA-1-anywhere, SHA-224-anywhere, and MD5 schemes with a `HandshakeFailed` carrying an `illegal_parameter`-mappable message. Closes 6 conversations in `test-tls13-certificate-verify.py` (5/31 PASS → **11/31 PASS**).
+- **#3 tlsfuzzer mTLS in CI**: added `--verify-client-cert <CA>` flag (verify-only, no `require_client_cert`), generated client cert+CA in CI workflow, spun up a 5th `s-server` instance on port 4448, curated `test-tls13-certificate-request.py` (3 PASS / 2 XFAIL / 0 FAIL → exit 0). `test-tls13-certificate-verify.py` is intentionally NOT in the curated mTLS set — its FAIL conversations include random-position fuzzed-signature names that change every run, making a stable XFAIL list impossible without an upstream-script seed flag.
+
+### Code changes
+
+**`crates/hitls-tls/src/handshake/client.rs`** (~110 lines added):
+
+- `ClientHandshake` gets three fields: `in_handshake_cr_received: bool`, `in_handshake_cr_context: Vec<u8>` (echoed back in client Cert), `in_handshake_cr_sig_algs: Vec<SignatureScheme>`.
+- `FinishedActions` gets two optional emit-buffers: `client_certificate_msg: Option<Vec<u8>>` and `client_certificate_verify_msg: Option<Vec<u8>>`.
+- New `process_in_handshake_certificate_request(msg_data)` — rejects in PSK mode, rejects duplicate CR, parses CR, extracts `signature_algorithms`, stores context+sig_algs+received-flag, updates transcript, stays in `WaitCertCertReq` (server's Cert is next).
+- New `build_in_handshake_client_auth_messages()` helper — when CR was received, builds the response Certificate (empty list if no chain configured, else echo `client_certificate_chain`), folds into transcript, then if a `client_private_key` is set picks a sig scheme via `select_signature_scheme(client_key, &cr_sig_algs)`, signs the current-transcript-hash via `sign_certificate_verify(..., is_server=false)`, encodes the CV, folds into transcript. Returns both encoded messages for the caller to wire-emit.
+- `process_finished` calls the helper between EOED and the client Finished derivation, so the Finished MAC commits to both messages. Held `&mut self.key_schedule` is dropped over the helper call (which itself takes `&mut self`) and re-acquired afterward.
+
+**`crates/hitls-tls/src/handshake/verify.rs`** (~25 lines added):
+
+- New `is_pkcs1_or_legacy_hash(scheme)` helper matches `rsa_pkcs1_*` (0x0401/0501/0601), all `*_sha1` (0x0201-0203), all SHA-224 family (0x0301-0303), and MD5 (0x0101).
+- `verify_certificate_verify` rejects pre-match with a `HandshakeFailed("CertificateVerify: signature scheme 0x{:04x} is not allowed for in-handshake CertificateVerify (RFC 8446 §4.4.3 / §4.2.3 — alert: illegal_parameter)")`. The substring `"illegal_parameter"` flows through `tls_error_to_alert` to the right wire-level alert.
+
+**`crates/hitls-tls/src/macros.rs`**:
+
+- `tls13_client_process_encrypted_flight_body!` `WaitCertCertReq` branch peeks at `msg_data[0]`: if `HandshakeType::CertificateRequest` (0x0D), dispatches to the new `process_in_handshake_certificate_request`; otherwise the existing CertificateMsg / CompressedCertificate dispatch runs unchanged.
+- Same macro's `WaitFinished` branch, after EOED handling and (if 0-RTT was offered) write-encryption activation: emits `fin_actions.client_certificate_msg` then `fin_actions.client_certificate_verify_msg` (both `Option<Vec<u8>>`) before the client Finished. Order matches RFC 8446 §4.3.2 Figure 1.
+
+**`crates/hitls-cli/src/main.rs`** + **`crates/hitls-cli/src/s_server.rs`** (~30 lines added):
+
+- New `--verify-client-cert <CA>` flag on `s-server`. Parses the same CA-bundle format as `--require-client-cert`, calls `verify_client_cert(true).trusted_cert(...)`, but does NOT call `require_client_cert(true)`. Mutually exclusive with `--require-client-cert` (returns an error if both are set). Used by tlsfuzzer scripts whose sanity step deliberately sends an empty Certificate within the same run that later presents a real client cert.
+- Three existing `s_server::run` test sites updated for the new arg.
+
+**`.github/workflows/tlsfuzzer.yml`**:
+
+- New `HITLS_PORT_MTLS=4448` env var.
+- Cert-generation step now also generates a client CA + client cert+key (RSA 2048, signed by the test CA, PKCS#8 PEM key).
+- New `s-server` instance: `--cert <RSA server cert> --key <RSA server PKCS#8> --verify-client-cert <client CA>`.
+- New `scripts_mtls=(test-tls13-certificate-request.py)` loop. Passes `-k <client PKCS#8> -c <client cert>` directly on the `run.sh` command line (paths only known at CI runtime). Uses `XFAIL_DIR=tests/tlsfuzzer/xfail-mtls`.
+- Listener-wait loop and the kill-PIDs cleanup loop both extended for the 5th instance. Artifact-upload list adds `server-mtls-1.3.log`.
+
+**`tests/tlsfuzzer/xfail-mtls/test-tls13-certificate-request.txt`** (new file):
+
+- 2 entries: `check sigalgs in cert request` and `verify extensions in CertificateRequest` — both real protocol-conformance gaps in our CR emission (extra sig_algs offered, missing `certificate_authorities` / `oid_filters` extensions). Documented categories + the no-`:: reason` rationale (avoids tlsfuzzer's `-X` substring tightening turning XFAILs into XPASS surprises).
+
+**`tests/interop/tests/protocol_attacks.rs`**:
+
+- Replaced the T97 single structural test with two tests:
+  - `test_tls13_in_handshake_mtls_happy_path` — full mutual-auth handshake with Ed25519 client+server identities, asserts both sides reach `Connected`.
+  - `test_tls13_server_with_require_client_cert_aborts_when_client_has_no_cert` — pins the negative path: the post-T98 client now understands the CR and replies with an empty Certificate, but a server with `require_client_cert=true` must still reject it.
+
+### Tests
+
+- `+1` integration test net (T97's 1 test → T98's 2 tests).
+- `protocol_attacks.rs` end-to-end: 9/9 PASS.
+- `hitls-tls --lib --all-features`: 1531 passed (no regressions).
+
+### Tlsfuzzer baseline (post-T98)
+
+| Suite | Pre-T98 | Post-T98 | Δ |
+|-------|--------:|---------:|--:|
+| TLS 1.3 (17 scripts) | 1819 PASS / 254 XFAIL | unchanged | — |
+| TLS 1.2 (9 scripts) | unchanged | unchanged | — |
+| Cert-matrix ECDSA + Ed25519 (4 scripts) | unchanged | unchanged | — |
+| **mTLS (1 new script)** | n/a | **3 PASS / 2 XFAIL** | +5 cv |
+| **Manual `test-tls13-certificate-verify.py` (probe, not in CI)** | 5/31 PASS | **11/31 PASS** | +6 cv |
+
+The certificate-verify improvement (+6 conversations closed by the §4.4.3 vetting) is real but doesn't show in CI because the script isn't curated — its random fuzz subset names defeat XFAIL pinning. The remaining 20 FAIL conversations are documented categories: PSS hash/MGF1 cross-check, PSS salt-length validation, `rsa_pss_pss_*` for `rsa` cert envelope refusal, and the `decrypt_error` vs `handshake_failure` alert mismatch on fuzzed-signature paths. Each is queued for a focused future phase.
+
+### Why a single phase, not three
+
+Three deferred items, three commits would have been cleaner narrative — but the items share macros.rs / client.rs touch points and the documentation overhead would have been triplicated. T97's entry already spelled out the three deferred items; this entry references that and reports closure for each.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/client.rs` | Modified | +110 lines: 3 fields, 2 FinishedActions fields, `process_in_handshake_certificate_request`, `build_in_handshake_client_auth_messages`, transcript wiring in `process_finished`. |
+| `crates/hitls-tls/src/handshake/verify.rs` | Modified | +25 lines: `is_pkcs1_or_legacy_hash` + pre-match refusal in `verify_certificate_verify`. |
+| `crates/hitls-tls/src/macros.rs` | Modified | `WaitCertCertReq` peek-byte dispatch; `WaitFinished` cert/CV emission. |
+| `crates/hitls-cli/src/main.rs` | Modified | New `--verify-client-cert` CLI arg + threading. |
+| `crates/hitls-cli/src/s_server.rs` | Modified | New `verify_client_cert_ca` parameter + handler block; 3 test-call-site updates. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | mTLS env var, cert+CA gen step, 5th s-server, mTLS scripts loop, artifact additions. |
+| `tests/tlsfuzzer/xfail-mtls/test-tls13-certificate-request.txt` | Added | 2-entry XFAIL list with category rationale. |
+| `tests/interop/tests/protocol_attacks.rs` | Modified | T97 1 test → T98 2 tests (happy path + abort). |
+| `DEV_LOG.md` | Modified | This entry. |
+| `PROMPT_LOG.md` | Modified | T98 prompt + result entry. |
+| `CLAUDE.md` | Modified | Status line, phase ranges, test counts. |
+| `README.md` | Modified | Test counts. |
+
+### Test Count Delta (T98)
+
+| Crate | Pre-T98 | Post-T98 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-integration-tests | 269 | 270 | +1 |
+| **Total** | **4217** | **4218** | **+1** |
+
+### Build Status (Post T98)
+
+- `cargo test --workspace --all-features --release`: 4175 passed / 0 failed / 43 ignored (project-tracked aggregate 4218, +1 over post-T97)
+- `cargo test -p hitls-tls --lib --all-features`: 1531 passed
+- `cargo test -p hitls-integration-tests --test protocol_attacks`: 9 passed (incl. new `test_tls13_in_handshake_mtls_happy_path`)
+- `cargo test -p hitls-cli --bins --all-features`: 167 passed
+- `RUSTFLAGS="-D warnings" cargo clippy -p hitls-cli -p hitls-tls -p hitls-integration-tests --all-features --all-targets`: 0 warnings
+- tlsfuzzer mTLS subset (local): `test-tls13-certificate-request.py` 3 PASS / 2 XFAIL / 0 FAIL → exit 0
 
 
 
