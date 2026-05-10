@@ -107,7 +107,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
     }
 
     fn read_record(&mut self) -> Result<(ContentType, Vec<u8>), TlsError> {
-        read_record_body!(sync, self, true)
+        read_record_body_tls13!(sync, self)
     }
 
     /// Initiate a key update (RFC 8446 §4.6.3).

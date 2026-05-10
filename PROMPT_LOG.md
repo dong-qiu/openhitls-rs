@@ -4554,3 +4554,33 @@ Transcript continuity falls out automatically: I93 already arranged for `try_unw
 - `test_ech_hrr_downgrade_after_accept_rejected`: build CH2 normally, then surgically strip the encrypted_client_hello extension from the wire bytes (simulating an on-path attacker dropping ECH); server must hard-error rather than silently process the stripped outer. The downgrade-protection guarantee.
 
 Tests: 4201 → 4203 (+2). hitls-tls 1528 → 1530. All three build configurations clean. Clippy on Rust 1.95: 0 warnings. Fmt clean. Remaining ECH future work (I96+): outer_extensions reference compression, ech_retry_configs in EE, ECH-aware GREASE-PSK rules.
+
+### Prompt 291: tlsfuzzer integration — explore the harness and surface real conformance gaps
+
+> 我想使用tlsfuzzer来测试当前rust版本的openhitls，该如何处理
+
+**Result**: Stood up [tlsfuzzer](https://github.com/tlsfuzzer/tlsfuzzer) against `hitls s-server`. Setup gotchas worth knowing before trying this fresh: tlsfuzzer is not on PyPI (must clone from GitHub, run with `PYTHONPATH=.`); `tlslite-ng` PyPI release lags HEAD on `SignatureScheme` constants and breaks script imports (`pip install git+https://github.com/tlsfuzzer/tlslite-ng`); `s-server` only loads PKCS#8 PEM keys (PKCS#1/SEC1 fail); ECDSA-only certs trip `no common signature scheme` against tlsfuzzer's RSA-PSS-preferring defaults; `s-server`'s X25519-only group default trips `no common named group` HRR against tlsfuzzer's P-256 default; `s-server` uses long-only flags (no `-cert`/`-accept`).
+
+After getting `test-tls13-conversation.py` clean (3/3 PASS), `test-tls13-ccs.py` reported 3/5 PASS / 2/5 FAIL on `'CCS message after Finished message'` and `'two byte long CCS'` — Phase T88 (next prompt) closes both.
+
+### Prompt 292: T88 + tlsfuzzer CI workflow + walkthrough doc
+
+> 请依次完成c, d, e
+
+**Result**: Closed all three:
+
+**C — Phase T88**: Two TLS 1.3 ChangeCipherSpec rule gaps fixed in the read path, with a server-side write-key timing fix dragged in along the way:
+
+- Split the shared `read_record_body!` macro into two — TLS 1.2/TLCP/DTLS keep the existing pass-through (CCS is a real protocol message there); TLS 1.3 gets a new `read_record_body_tls13!` that enforces RFC 8446 §5 / §D.4: after handshake → reject; non-`[0x01]` payload → reject; `middlebox_compat=false` → reject; otherwise silently drop. Each rejection sends a fatal `unexpected_message` alert (10) before erroring (best-effort: if seal/write fails because the peer is gone, we still return the error so the caller closes).
+- Single-macro version with cfg-time conditional was tried first but won't compile because each connection type has its own `ConnectionState` and a single absolute path can't reference all of them.
+- After the macro split, `test-tls13-ccs.py` went 3/5 → 4/5 — `'two byte long CCS'` still failed with tlslite reporting `TLSBadRecordMAC`, not the expected fatal alert.
+- Root cause: our TLS 1.3 server activated `server_application_traffic_secret` for **writes** only after processing client Finished. RFC 8446 §A.1 / §4.6.1 require the switch right after sending Finished. Our alert (sent between server-Finished and client-Finished) was sealed under `server_handshake_traffic_secret` but the peer had already moved its read key to application — hence bad-MAC. Hoisted `activate_write_encryption(server_app_keys)` from step 8 to step 5+1 in `tls13_server_do_handshake_body!`. Step 8 now activates only `read_decryption(client_app_keys)`. NewSessionTicket emission unaffected.
+- Broadened `s-server`'s default `supported_groups` from X25519-only to `[X25519, secp256r1, secp384r1, secp521r1]` so external test tools don't immediately wedge on HRR.
+- +2 integration tests (`test_tls13_server_rejects_two_byte_ccs_during_handshake`, `test_tls13_server_rejects_ccs_when_middlebox_compat_off`) in `tests/interop/tests/protocol_attacks.rs` pin the rejection contract end-to-end against a real `TlsServerConnection` over loopback TCP.
+- Result: `test-tls13-ccs.py` 5/5 PASS, `test-tls13-conversation.py` 3/3 PASS regression check, all 1530 hitls-tls tests still pass.
+
+**D — `.github/workflows/tlsfuzzer.yml`**: New opt-in CI workflow. Triggers: `workflow_dispatch` + weekly cron (Mon 06:00 UTC). Builds release `hitls-cli`, generates RSA 2048 PKCS#8 cert via `openssl`, starts `s-server` on port 4444, runs a curated TLS 1.3 script set (`test-tls13-conversation.py`, `test-tls13-ccs.py`, `test-tls13-multiple-ccs-messages.py`, `test-tls13-finished.py`, `test-tls13-keyshare-omitted.py`, `test-tls13-version-negotiation.py`) with `continue-on-error: true` per script so one regression doesn't mask the rest, uploads per-script logs as the `tlsfuzzer-logs` artifact for triage. Top-of-file comment block explains why this is intentionally **not** in the required PR check set (tlsfuzzer + tlslite-ng evolve fast and are git-pinned; some scripts probe spec ambiguities and would be noisy gates).
+
+**E — `docs/tlsfuzzer.md`**: New contributor walkthrough documenting the local setup one-liner, the gotchas from Prompt 291, recommended starter script set + what each one covers, how to read the `PASS/FAIL/XFAIL/XPASS` output, how to run a single failing conversation by name, the CI hookup, and a phase reference back to T88.
+
+Tests: 4203 → 4205 (+2). hitls-integration-tests 263 → 265. tlsfuzzer `test-tls13-ccs.py` against release `s-server`: 3/5 → 5/5. All three build configurations clean. Clippy: 0 warnings. Fmt clean.

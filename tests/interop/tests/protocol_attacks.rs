@@ -679,3 +679,116 @@ fn test_renegotiation_config_propagation() {
         "renegotiation should be enabled when configured"
     );
 }
+
+// ============================================================================
+// Phase T88: TLS 1.3 ChangeCipherSpec compatibility-rule conformance.
+//
+// RFC 8446 §5 / §D.4: in TLS 1.3 the only legitimate ChangeCipherSpec record
+// is a single 0x01 byte sent during the handshake for middlebox traversal.
+// Anything else MUST be rejected with an `unexpected_message` alert. These
+// tests pin that rejection contract end-to-end (paired sockets, real
+// `TlsServerConnection`) so the validation in the read path cannot be
+// silently dropped by a future refactor.
+//
+// The matching tlsfuzzer suite is `scripts/test-tls13-ccs.py` — see
+// `docs/tlsfuzzer.md` for the harness setup and CI hookup.
+// ============================================================================
+
+/// A two-byte CCS record (`0x01 0x01`) sent during the handshake must be
+/// rejected — RFC 8446 §5: only a single `0x01` byte is allowed.
+#[test]
+fn test_tls13_server_rejects_two_byte_ccs_during_handshake() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection::TlsServerConnection;
+    use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+    use std::io::Write;
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::Duration;
+
+    let (cert_chain, server_key) = make_ed25519_server_identity();
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server_handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+        let mut conn = TlsServerConnection::new(stream, server_config);
+        conn.handshake()
+    });
+
+    let mut raw = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+    raw.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    raw.set_write_timeout(Some(Duration::from_secs(5))).ok();
+    // Malformed CCS: type=0x14, version=0x0303, length=2, payload=[0x01, 0x01].
+    raw.write_all(&[0x14, 0x03, 0x03, 0x00, 0x02, 0x01, 0x01])
+        .unwrap();
+
+    let result = server_handle.join().unwrap();
+    let err = result.expect_err("server must reject malformed CCS during handshake");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("malformed ChangeCipherSpec") || msg.contains("single 0x01 byte"),
+        "expected CCS-length rejection message, got: {msg}"
+    );
+}
+
+/// When `middlebox_compat=false`, even a well-formed single-byte CCS must
+/// be rejected (RFC 8446 §D.4 carve-out does not apply).
+#[test]
+fn test_tls13_server_rejects_ccs_when_middlebox_compat_off() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection::TlsServerConnection;
+    use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+    use std::io::Write;
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::Duration;
+
+    let (cert_chain, server_key) = make_ed25519_server_identity();
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .middlebox_compat(false)
+        .build();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server_handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+        let mut conn = TlsServerConnection::new(stream, server_config);
+        conn.handshake()
+    });
+
+    let mut raw = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+    raw.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    raw.set_write_timeout(Some(Duration::from_secs(5))).ok();
+    // Well-formed CCS but middlebox_compat is off — must still be rejected.
+    raw.write_all(&[0x14, 0x03, 0x03, 0x00, 0x01, 0x01])
+        .unwrap();
+
+    let result = server_handle.join().unwrap();
+    let err = result.expect_err("server must reject CCS with middlebox_compat=false");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("middlebox_compat is off"),
+        "expected middlebox_compat rejection message, got: {msg}"
+    );
+}

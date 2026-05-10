@@ -44,26 +44,84 @@ macro_rules! fill_buf_body {
 }
 
 /// Body for `read_record`: read a single TLS record from the stream.
-/// When `$filter_ccs` is `true`, automatically skips fake CCS records for
-/// middlebox compatibility (RFC 8446 §D.4). Only TLS 1.3 connections should
-/// pass `true`; TLS 1.2 and TLCP connections use CCS as a real protocol message.
+///
+/// **TLS 1.2 / TLCP / DTLS variant.** CCS is a real protocol message in
+/// these versions, so no filtering or compliance enforcement is applied
+/// here. The TLS 1.3 path uses [`read_record_body_tls13`] instead, which
+/// enforces RFC 8446 §5 CCS rules.
 macro_rules! read_record_body {
-    ($mode:ident, $self:ident) => {
-        read_record_body!($mode, $self, false)
-    };
-    ($mode:ident, $self:ident, $filter_ccs:expr) => {{
+    ($mode:ident, $self:ident) => {{
         loop {
             maybe_await!($mode, $self.fill_buf(5))?;
             let length = u16::from_be_bytes([$self.read_buf[3], $self.read_buf[4]]) as usize;
             maybe_await!($mode, $self.fill_buf(5 + length))?;
             let (ct, plaintext, consumed) = $self.record_layer.open_record(&$self.read_buf)?;
             $self.read_buf.drain(..consumed);
-            // RFC 8446 §D.4: silently ignore CCS during TLS 1.3 handshake
-            if $filter_ccs
-                && ct == ContentType::ChangeCipherSpec
-                && $self.config.middlebox_compat
-                && plaintext == [0x01]
-            {
+            break Ok((ct, plaintext));
+        }
+    }};
+}
+
+/// Body for `read_record` (TLS 1.3 only). Enforces RFC 8446 §5 / §D.4
+/// ChangeCipherSpec compatibility rules (Phase T88):
+///
+/// - During the handshake (`state == Handshaking`), a CCS that is exactly
+///   the single byte `0x01` is silently dropped (standard middlebox-
+///   compatibility allowance).
+/// - During the handshake, a CCS with **any other payload** (zero-byte,
+///   multi-byte, anything but `0x01`) is rejected as an unexpected
+///   message — "An implementation which receives any other
+///   change_cipher_spec message MUST abort the handshake with an
+///   `unexpected_message` alert."
+/// - **After** the handshake (`state != Handshaking`), any CCS is
+///   rejected — the spec only permits CCS before the peer's Finished.
+/// - When the connection has `middlebox_compat == false`, the CCS
+///   compatibility carve-out does not apply and any CCS is unexpected.
+macro_rules! read_record_body_tls13 {
+    ($mode:ident, $self:ident) => {{
+        loop {
+            maybe_await!($mode, $self.fill_buf(5))?;
+            let length = u16::from_be_bytes([$self.read_buf[3], $self.read_buf[4]]) as usize;
+            maybe_await!($mode, $self.fill_buf(5 + length))?;
+            let (ct, plaintext, consumed) = $self.record_layer.open_record(&$self.read_buf)?;
+            $self.read_buf.drain(..consumed);
+            if ct == ContentType::ChangeCipherSpec {
+                let bad_ccs_reason: Option<String> = if $self.state != ConnectionState::Handshaking
+                {
+                    Some(
+                        "unexpected ChangeCipherSpec after handshake completion \
+                         (RFC 8446 §5: alert unexpected_message)"
+                            .to_string(),
+                    )
+                } else if plaintext.len() != 1 || plaintext[0] != 0x01 {
+                    Some(format!(
+                        "malformed ChangeCipherSpec — TLS 1.3 only accepts a \
+                         single 0x01 byte during the handshake (got {} bytes), \
+                         RFC 8446 §5: alert unexpected_message",
+                        plaintext.len()
+                    ))
+                } else if !$self.config.middlebox_compat {
+                    Some(
+                        "ChangeCipherSpec received but middlebox_compat is off \
+                         — RFC 8446 §D.4: alert unexpected_message"
+                            .to_string(),
+                    )
+                } else {
+                    None
+                };
+                if let Some(reason) = bad_ccs_reason {
+                    // RFC 8446 §6 — abort with `unexpected_message` alert (10).
+                    // Best-effort: if seal/write fails (e.g., peer already gone)
+                    // we still return the error so the caller closes.
+                    let alert_data = [2u8, 10u8];
+                    if let Ok(record) = $self
+                        .record_layer
+                        .seal_record(ContentType::Alert, &alert_data)
+                    {
+                        let _ = maybe_await!($mode, $self.stream.write_all(&record));
+                    }
+                    return Err(TlsError::HandshakeFailed(reason));
+                }
                 continue;
             }
             break Ok((ct, plaintext));
@@ -1037,6 +1095,15 @@ macro_rules! tls13_server_do_handshake_body {
         maybe_await!($mode, $self.stream.write_all(&sfin_record))
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
+        // RFC 8446 §A.1 / §4.6.1: after sending its Finished, the server's
+        // *write* keys switch to `server_application_traffic_secret_0`.
+        // This must happen before any subsequent server write (including
+        // alerts sent in response to a malformed client message arriving
+        // before client Finished), or the peer will fail to decrypt them.
+        $self
+            .record_layer
+            .activate_write_encryption(actions.suite, &actions.server_app_keys)?;
+
         // Step 5b: If 0-RTT accepted, read early data + EndOfEarlyData
         if actions.early_data_accepted {
             loop {
@@ -1095,13 +1162,12 @@ macro_rules! tls13_server_do_handshake_body {
         // Step 7: Verify client Finished
         let fin_actions = hs.process_client_finished(fin_msg)?;
 
-        // Step 8: Activate application keys
+        // Step 8: Activate application read key.
+        // (Write was already switched to server_app_keys right after sending
+        // Finished, per RFC 8446 §A.1 — see Step 5 above.)
         $self
             .record_layer
             .activate_read_decryption(actions.suite, &actions.client_app_keys)?;
-        $self
-            .record_layer
-            .activate_write_encryption(actions.suite, &actions.server_app_keys)?;
         // Wire record padding callback (TLS 1.3)
         if let Some(ref cb) = $self.config.record_padding_callback {
             $self.record_layer.set_record_padding_callback(cb.clone());

@@ -3,6 +3,7 @@
 use hitls_pki::pkcs8::{parse_pkcs8_pem, Pkcs8PrivateKey};
 use hitls_pki::x509::verify::parse_certs_pem;
 use hitls_tls::config::{ServerPrivateKey, TlsConfig};
+use hitls_tls::crypt::NamedGroup;
 use hitls_tls::{CipherSuite, TlsConnection, TlsRole, TlsVersion};
 use std::net::TcpListener;
 
@@ -30,11 +31,20 @@ pub fn run(
         parse_pkcs8_pem(&key_pem).map_err(|e| format!("failed to parse private key: {e}"))?;
     let server_key = pkcs8_to_server_key(pkcs8_key)?;
 
-    // Build TLS config
+    // Build TLS config. Accept the four interop-relevant groups (X25519,
+    // P-256, P-384, P-521) by default so external test tools (openssl
+    // s_client, tlsfuzzer scripts, browsers, …) don't trigger HRR-on-no-
+    // common-group when their first key_share happens to be P-256 / P-384.
     let mut builder = TlsConfig::builder()
         .role(TlsRole::Server)
         .certificate_chain(cert_chain)
         .private_key(server_key)
+        .supported_groups(&[
+            NamedGroup::X25519,
+            NamedGroup::SECP256R1,
+            NamedGroup::SECP384R1,
+            NamedGroup::SECP521R1,
+        ])
         .verify_peer(false);
 
     match tls_version {

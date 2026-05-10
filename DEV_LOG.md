@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T87 (86 phases, T64 skipped)
+- Testing: T1–T88 (87 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -292,6 +292,7 @@ Category summary:
 | 280 | I93 | Impl | ECH Split-CH End-to-End (real ECHConfig + cover SNI + HPKE encrypt/decrypt) | 2026-05-10 |
 | 281 | I94 | Impl | ECH Proper ClientHelloOuterAAD (draft-compliant AEAD binding) | 2026-05-10 |
 | 282 | I95 | Impl | ECH HRR Continuation (retried CH unwrap + downgrade-protection) | 2026-05-10 |
+| 283 | T88 | Test | tlsfuzzer integration: TLS 1.3 CCS conformance + RFC 8446 §A.1 server write-key timing fix + CI workflow + docs | 2026-05-10 |
 
 ---
 
@@ -15087,3 +15088,109 @@ I95 leaves three ECH items for future I96+:
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean
 - All previous ECH e2e tests (4 from I93+I94: real split-CH happy path, config_id mismatch GREASE fallback, decrypt failure rejection, outer CH tampering) still pass.
+
+## Phase T88 — tlsfuzzer Integration: TLS 1.3 CCS Conformance + RFC 8446 §A.1 Server Write-Key Timing Fix + CI Workflow + Walkthrough Docs (2026-05-10)
+
+### Summary
+
+Wired up the [tlsfuzzer](https://github.com/tlsfuzzer/tlsfuzzer) protocol-level conformance harness against `hitls s-server`. The harness immediately surfaced two TLS 1.3 ChangeCipherSpec rule gaps (`scripts/test-tls13-ccs.py`: `'CCS message after Finished message'` and `'two byte long CCS'`) that made the score 3/5 instead of 5/5. While fixing them, the deeper finding was that **our TLS 1.3 server was activating the application write key one round-trip too late** — RFC 8446 §A.1 specifies the switch happens immediately after sending Finished, but our code delayed it until after receiving client Finished. That meant any alert sent between those two messages (including the new CCS-rejection alerts) was encrypted with `server_handshake_traffic_secret` but the peer was already reading with `server_application_traffic_secret`, so the alert decrypted as bad-MAC and was discarded.
+
+T88 fixes all three issues, pins them in-tree with two new integration tests, ships an opt-in CI workflow + a contributor walkthrough, and broadens `s-server`'s default supported groups so external test tools don't immediately wedge on `no common named group` HRR.
+
+### Findings
+
+| # | Surface | Issue | Spec citation |
+|---|---------|-------|---------------|
+| 1 | TLS 1.3 read path | A non-`0x01` ChangeCipherSpec body during handshake was silently treated like a normal CCS — no alert, no abort. | RFC 8446 §5: "An implementation which receives any other change_cipher_spec message MUST abort the handshake with an `unexpected_message` alert." |
+| 2 | TLS 1.3 read path | A ChangeCipherSpec arriving *after* the handshake completed was silently looped over. | RFC 8446 §5: CCS is only meaningful before the peer's Finished. |
+| 3 | TLS 1.3 server state machine | Server activated `server_application_traffic_secret` for **writes** only after processing client Finished. | RFC 8446 §A.1 + §4.6.1: server's write keys MUST switch right after the server emits Finished. |
+| 4 | `s-server` CLI | Default `supported_groups` was X25519-only. Test tools that offer P-256 only (tlsfuzzer's default) immediately tripped a `no common named group` HRR. | UX, not spec — but it was the first thing tlsfuzzer surfaced. |
+
+### What changed
+
+**Macro split (`crates/hitls-tls/src/macros.rs`):**
+
+The shared `read_record_body!` macro served all four protocol variants (TLS 1.2 / TLCP / DTLS / TLS 1.3). TLS 1.2 / TLCP / DTLS treat ChangeCipherSpec as a real protocol message and must NOT enforce the 1.3 carve-outs, so the cleanest fix was to split the macro:
+
+- `read_record_body!` — used by TLS 1.2 / TLCP / DTLS. Identical to the previous behaviour: returns whatever record came off the wire.
+- `read_record_body_tls13!` — used by TLS 1.3 only. After parsing, if the record is `ChangeCipherSpec`:
+  - If state ≠ `Handshaking`: send fatal `unexpected_message` alert (10), return `Err`.
+  - Else if payload ≠ `[0x01]`: send fatal `unexpected_message`, return `Err`.
+  - Else if `middlebox_compat == false`: send fatal `unexpected_message`, return `Err`.
+  - Otherwise: silently drop the CCS and `continue` the read loop.
+
+Alert sends are best-effort — if the peer has already gone away the seal/write may fail, but we still return the error so the caller closes.
+
+A single-macro version with a cfg-time conditional was tried first but won't compile because each connection type (TLS 1.3 client / TLS 1.3 server / TLS 1.2 / DTLS / TLCP) has its own `ConnectionState` type and a single absolute path can't reference all of them.
+
+The four TLS 1.3 call sites in `connection/client.rs`, `connection/server.rs`, and `connection_async.rs` were retargeted to the new macro name.
+
+**Server write-key timing (`crates/hitls-tls/src/macros.rs`, `tls13_server_do_handshake_body!`):**
+
+Moved `record_layer.activate_write_encryption(suite, &actions.server_app_keys)` from after step 8 (post client-Finished processing) to immediately after step 5 (post-Finished send). Step 8 now activates only `read_decryption` for `client_app_keys`. NewSessionTicket emission at step 9 is unaffected — it was already running after the activation that's now hoisted.
+
+This lines up with RFC 8446 §A.1 server state machine: after sending Finished the server is in `WAIT_FLIGHT2` and its writes use application traffic. Without this, alerts emitted between server-Finished and client-Finished were sealed under a key the peer no longer used for reads, and tlsfuzzer reported `TLSBadRecordMAC: Invalid tag, decryption failure` instead of the expected fatal alert.
+
+**CLI default groups (`crates/hitls-cli/src/s_server.rs`):**
+
+`s-server` now advertises `[X25519, secp256r1, secp384r1, secp521r1]` instead of the X25519-only default. This matches what mainstream peers expect and avoids forcing an HRR against any test tool that offers a P-curve key share. No protocol behaviour change — the negotiation still picks whatever the client offers.
+
+**Tests (`tests/interop/tests/protocol_attacks.rs`):**
+
+Two new integration tests pin the rejection contract end-to-end against a real `TlsServerConnection` over loopback TCP:
+
+| Test | Pins |
+|------|------|
+| `test_tls13_server_rejects_two_byte_ccs_during_handshake` | A 2-byte CCS payload (`0x01 0x01`) sent as the first record must produce a `HandshakeFailed` error containing either `"malformed ChangeCipherSpec"` or `"single 0x01 byte"`. |
+| `test_tls13_server_rejects_ccs_when_middlebox_compat_off` | With `middlebox_compat(false)`, even a well-formed single-byte CCS must be rejected with the `"middlebox_compat is off"` reason. |
+
+These complement the protocol-level assertion via tlsfuzzer; they exist so a future refactor of the read loop can't silently drop the validation block.
+
+**CI workflow (`.github/workflows/tlsfuzzer.yml`):**
+
+New optional, opt-in workflow that builds release `hitls-cli`, generates an RSA 2048 PKCS#8 cert via `openssl`, starts `s-server`, and runs a curated set of TLS 1.3 conformance scripts (`test-tls13-conversation.py`, `test-tls13-ccs.py`, `test-tls13-multiple-ccs-messages.py`, `test-tls13-finished.py`, `test-tls13-keyshare-omitted.py`, `test-tls13-version-negotiation.py`). Triggers: `workflow_dispatch` + weekly `cron`. Each script runs with `continue-on-error: true` so one regression doesn't mask the rest, and the per-script logs are uploaded as the `tlsfuzzer-logs` artifact for triage. Deliberately out of the required PR check set — see the comment block at the top of the workflow file for rationale.
+
+**Walkthrough docs (`docs/tlsfuzzer.md`):**
+
+New contributor doc covering: the gotchas (tlsfuzzer not on PyPI, tlslite-ng PyPI lag, PKCS#8 requirement, RSA-vs-ECDSA cert preference, `s-server`'s long-only flag style), the recommended starter set, how to read `PASS/FAIL/XFAIL/XPASS`, the runner one-liner, and a phase reference back to T88.
+
+### Tlsfuzzer baseline (post-T88)
+
+| Script | Before | After |
+|--------|-------:|------:|
+| `test-tls13-conversation.py` | 3/3 PASS | 3/3 PASS |
+| `test-tls13-ccs.py` | 3/5 PASS, 2/5 FAIL | **5/5 PASS** |
+
+The remaining `test-tls13-multiple-ccs-messages.py` failures (3/7) and `test-tls13-finished.py` deep-mutation failures are out of scope for T88 — they're queued for a future T-phase that triages each conversation against the spec.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/macros.rs` | Modified | Split `read_record_body!` into two macros (TLS 1.2/TLCP/DTLS variant + TLS 1.3 variant). New TLS 1.3 macro enforces RFC 8446 §5 / §D.4 CCS rules and sends `unexpected_message` alert before erroring. Server `do_handshake` macro: hoisted `activate_write_encryption(server_app_keys)` from post-client-Finished to post-server-Finished (RFC 8446 §A.1). |
+| `crates/hitls-tls/src/connection/client.rs` | Modified | Retargeted 1 read-record call site to `read_record_body_tls13!`. |
+| `crates/hitls-tls/src/connection/server.rs` | Modified | Retargeted 1 read-record call site to `read_record_body_tls13!`. |
+| `crates/hitls-tls/src/connection_async.rs` | Modified | Retargeted 2 read-record call sites to `read_record_body_tls13!`. |
+| `crates/hitls-cli/src/s_server.rs` | Modified | Added `NamedGroup` import + 4-group default `supported_groups` so external test tools don't immediately HRR. |
+| `tests/interop/tests/protocol_attacks.rs` | Modified | +2 integration tests pinning the CCS rejection contract end-to-end (T88 section header + 113 LoC). |
+| `.github/workflows/tlsfuzzer.yml` | Added | New opt-in CI workflow (workflow_dispatch + weekly cron) that runs a curated tlsfuzzer suite against release `s-server` and uploads per-script logs as artifacts. |
+| `docs/tlsfuzzer.md` | Added | New contributor walkthrough — local setup, the gotchas (PyPI gap, tlslite-ng PyPI lag, PKCS#8 requirement, RSA cert preference), recommended scripts, output interpretation, CI hookup, T88 phase reference. |
+
+### Test Count Delta (T88)
+
+| Crate | Pre-T88 | Post-T88 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-integration-tests | 263 | 265 | +2 |
+| **Total** | **4203** | **4205** | **+2** |
+
+(Counts above are from the project's tracked `cargo test --workspace --all-features` aggregate — same methodology as T87 / R13 / I95.)
+
+### Build Status (Post T88)
+
+- `cargo test --workspace --all-features`: 4,162 passed, 0 failed, 43 ignored (4,205 total)
+- `cargo test -p hitls-tls --all-features --release --lib`: 1530 passed, 0 failed
+- `cargo test -p hitls-integration-tests --test protocol_attacks`: 18 passed, 0 failed (incl. the 2 new T88 tests)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- tlsfuzzer `scripts/test-tls13-ccs.py` against release `s-server`: **5/5 PASS** (was 3/5)
+- tlsfuzzer `scripts/test-tls13-conversation.py`: 3/3 PASS (regression check)

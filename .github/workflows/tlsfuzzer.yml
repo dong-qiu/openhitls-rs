@@ -1,0 +1,156 @@
+name: tlsfuzzer
+
+# Optional, opt-in protocol-conformance harness. Drives the openhitls-rs
+# `s-server` against a curated subset of tlsfuzzer scripts (all TLS 1.3).
+#
+# - workflow_dispatch: run on demand from the Actions tab.
+# - schedule: weekly run so regressions surface even if nobody triggers it.
+#
+# We deliberately keep this OUT of the required PR check set:
+#   * tlsfuzzer + tlslite-ng evolve quickly and are pinned by `git+`,
+#     so they can break unrelated PRs.
+#   * the harness exercises edge-case mutations that legitimately probe
+#     spec ambiguities — surfacing those is valuable but should not
+#     gate merges.
+# Each script is run with `continue-on-error: true` and the per-script
+# logs are uploaded as an artifact so reviewers can triage failures
+# without re-running locally.
+#
+# Setup story for humans wanting to reproduce a failure: see
+# docs/tlsfuzzer.md.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 06:00 UTC
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  HITLS_PORT: 4444
+  HITLS_HOST: 127.0.0.1
+  TLSFUZZER_REF: master
+  TLSLITE_NG_REF: master
+
+concurrency:
+  group: tlsfuzzer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tlsfuzzer:
+    name: tlsfuzzer (TLS 1.3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release hitls CLI
+        run: cargo build --release -p hitls-cli
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install tlsfuzzer + tlslite-ng (HEAD)
+        # tlsfuzzer is not on PyPI; tlslite-ng on PyPI lags the
+        # SignatureScheme additions tlsfuzzer references, so install
+        # both from git.
+        run: |
+          python -m pip install --upgrade pip
+          pip install ecdsa
+          pip install "git+https://github.com/tlsfuzzer/tlslite-ng@${TLSLITE_NG_REF}"
+          git clone --depth 1 --branch "${TLSFUZZER_REF}" \
+            https://github.com/tlsfuzzer/tlsfuzzer "${RUNNER_TEMP}/tlsfuzzer"
+
+      - name: Generate RSA test certificate (PKCS#8)
+        # hitls s-server only loads PKCS#8 PEM keys; tlsfuzzer's default
+        # signature_algorithms list is RSA-PSS-heavy, so we serve an RSA
+        # cert. ECDSA P-256 also works but RSA matches more scripts'
+        # default expectations.
+        run: |
+          mkdir -p "${RUNNER_TEMP}/certs"
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "${RUNNER_TEMP}/certs/key-rsa.pem" \
+            -out    "${RUNNER_TEMP}/certs/cert-rsa.pem" \
+            -subj   "/CN=localhost" -days 1
+          openssl pkcs8 -topk8 -nocrypt \
+            -in  "${RUNNER_TEMP}/certs/key-rsa.pem" \
+            -out "${RUNNER_TEMP}/certs/key-rsa-pkcs8.pem"
+
+      - name: Start hitls s-server
+        run: |
+          ./target/release/hitls s-server \
+            -p "${HITLS_PORT}" \
+            --cert "${RUNNER_TEMP}/certs/cert-rsa.pem" \
+            --key  "${RUNNER_TEMP}/certs/key-rsa-pkcs8.pem" \
+            -q > "${RUNNER_TEMP}/server.log" 2>&1 &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          # Wait for the listener.
+          for _ in $(seq 1 30); do
+            if ss -ltn "( sport = :${HITLS_PORT} )" | grep -q ":${HITLS_PORT}"; then
+              echo "server up"
+              break
+            fi
+            sleep 0.5
+          done
+
+      - name: Run curated tlsfuzzer TLS 1.3 scripts
+        # `continue-on-error` so one flaky script doesn't mask the
+        # signal from the rest. The summary step below aggregates.
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p "${RUNNER_TEMP}/tlsfuzzer-logs"
+          # Conservative starter set — protocol conformance, not fuzz
+          # mutations. Add scripts here as they're reviewed and triaged.
+          scripts=(
+            test-tls13-conversation.py
+            test-tls13-ccs.py
+            test-tls13-multiple-ccs-messages.py
+            test-tls13-finished.py
+            test-tls13-keyshare-omitted.py
+            test-tls13-version-negotiation.py
+          )
+          fail=0
+          for s in "${scripts[@]}"; do
+            log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}.log"
+            echo "=== $s ==="
+            (
+              cd "${RUNNER_TEMP}/tlsfuzzer"
+              PYTHONPATH=. python "scripts/${s}" \
+                -h "${HITLS_HOST}" -p "${HITLS_PORT}"
+            ) | tee "${log}"
+            tail -n 12 "${log}" | grep -E '^(TOTAL|PASS|FAIL|SKIP):' \
+              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt" || true
+            echo "--- $s ---" \
+              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+          done
+          exit 0
+
+      - name: Print summary
+        if: always()
+        run: |
+          echo "=== tlsfuzzer aggregate ==="
+          cat "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt" 2>/dev/null \
+            || echo "(no summary)"
+
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -n "${SERVER_PID:-}" ]; then
+            kill "${SERVER_PID}" 2>/dev/null || true
+          fi
+
+      - name: Upload server + tlsfuzzer logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tlsfuzzer-logs
+          path: |
+            ${{ runner.temp }}/server.log
+            ${{ runner.temp }}/tlsfuzzer-logs/
+          retention-days: 14
