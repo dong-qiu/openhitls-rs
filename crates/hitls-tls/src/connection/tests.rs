@@ -6120,3 +6120,78 @@ fn test_ech_decrypt_failure_with_matching_config_id_rejects() {
         "matching config_id with wrong sk must hard-error (not fall back to outer)"
     );
 }
+
+/// Phase I94 — proper `ClientHelloOuterAAD` regression: tampering with
+/// any byte of the outer ClientHello (outside the ECH ext payload) MUST
+/// cause the server's HPKE-Open to fail. This is the AEAD-binding
+/// property that I93's empty-AAD did NOT provide and that I94 now
+/// delivers.
+///
+/// We flip a byte inside the outer's `key_share` extension (a non-ECH
+/// extension) and confirm the server rejects rather than silently
+/// processing the tampered outer.
+#[cfg(feature = "ech")]
+#[test]
+fn test_ech_outer_ch_tampering_breaks_aad_binding() {
+    use crate::config::ServerPrivateKey;
+    use crate::extensions::ExtensionType;
+
+    let (config_list, single_config, sk, _) = make_ech_test_keypair(0x42);
+    let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+    let client_config = TlsConfig::builder()
+        .server_name("inner.real.example")
+        .ech_config_list(config_list)
+        .verify_peer(false)
+        .build();
+
+    // TlsConfig is Clone so we can probe with a baseline copy first.
+    let server_config = TlsConfig::builder()
+        .role(crate::TlsRole::Server)
+        .certificate_chain(vec![fake_cert])
+        .private_key(ServerPrivateKey::Ed25519(seed))
+        .ech_keypairs(vec![(single_config, sk)])
+        .verify_peer(false)
+        .build();
+
+    let mut client_hs = ClientHandshake::new(client_config);
+    let mut outer_msg = client_hs.build_client_hello().unwrap();
+
+    // Sanity: untampered outer accepts (proves the test fixture works).
+    {
+        let mut probe_server = ServerHandshake::new(server_config.clone());
+        match probe_server.process_client_hello(&outer_msg) {
+            Ok(ClientHelloResult::Actions(_)) => {}
+            Ok(ClientHelloResult::HelloRetryRequest(_)) => panic!("baseline expected Actions"),
+            Err(e) => panic!("baseline must succeed before tampering: {e}"),
+        }
+    }
+
+    // Find the key_share extension data position in the wire bytes by
+    // matching its (type, length) header.
+    let (_, body, _) = parse_handshake_header(&outer_msg).unwrap();
+    let outer_decoded = crate::handshake::codec::decode_client_hello(body).unwrap();
+    let key_share_ext = outer_decoded
+        .extensions
+        .iter()
+        .find(|e| e.extension_type == ExtensionType::KEY_SHARE)
+        .expect("client must offer key_share");
+    let ext_type_be = ExtensionType::KEY_SHARE.0.to_be_bytes();
+    let ext_len_be = (key_share_ext.data.len() as u16).to_be_bytes();
+    let needle = [ext_type_be[0], ext_type_be[1], ext_len_be[0], ext_len_be[1]];
+    let pos = outer_msg
+        .windows(4)
+        .position(|w| w == needle)
+        .expect("key_share ext header must appear in wire");
+    let data_start = pos + 4;
+    // Flip the last byte of the key_share data.
+    outer_msg[data_start + key_share_ext.data.len() - 1] ^= 0x01;
+
+    let mut server_hs = ServerHandshake::new(server_config);
+    let result = server_hs.process_client_hello(&outer_msg);
+    assert!(
+        result.is_err(),
+        "tampering a non-ECH byte of the outer CH must break the AAD \
+         binding and cause HPKE-Open to fail (no silent fallback to outer)"
+    );
+}

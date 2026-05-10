@@ -363,6 +363,67 @@ fn resolve_aead(aead_id: u16) -> Result<HpkeAead, TlsError> {
     }
 }
 
+/// AEAD tag length in bytes for the given HPKE AEAD identifier (Phase I94).
+/// All three currently-defined HPKE AEADs (AES-128-GCM / AES-256-GCM /
+/// ChaCha20-Poly1305) use a 16-byte authentication tag.
+pub fn ech_aead_tag_len(aead_id: u16) -> Result<usize, TlsError> {
+    match aead_id {
+        0x0001..=0x0003 => Ok(16),
+        _ => Err(TlsError::HandshakeFailed(format!(
+            "ECH: unsupported AEAD 0x{aead_id:04X}"
+        ))),
+    }
+}
+
+/// Phase I94: low-level HPKE sender setup for ECH. Used by the client to
+/// obtain the encapsulated key (`enc`) **before** computing
+/// `ClientHelloOuterAAD`, so the AAD can encode the real `enc` while the
+/// payload region is still a placeholder of zeros.
+///
+/// Returns `(ctx, enc, cipher_suite_used)`. The caller then builds the
+/// outer CH with a placeholder payload of length `inner.len() +
+/// ech_aead_tag_len(cipher_suite.aead_id)`, encodes it as AAD, and calls
+/// `ctx.seal(aad, inner)` to get the real ciphertext.
+pub fn ech_setup_sender(
+    config: &EchConfig,
+) -> Result<(HpkeCtx, Vec<u8>, EchCipherSuite), TlsError> {
+    let cs = *config
+        .cipher_suites
+        .first()
+        .ok_or_else(|| TlsError::HandshakeFailed("ECH: no cipher suites in config".into()))?;
+    let kem = resolve_kem(config.kem_id)?;
+    let kdf = resolve_kdf(cs.kdf_id)?;
+    let aead = resolve_aead(cs.aead_id)?;
+
+    let hpke_suite = HpkeCipherSuite { kem, kdf, aead };
+    let info = build_ech_info(config);
+
+    let (ctx, enc) = HpkeCtx::setup_sender_with_suite(hpke_suite, &config.public_key, &info)
+        .map_err(|e| TlsError::HandshakeFailed(format!("ECH HPKE setup: {e}")))?;
+    Ok((ctx, enc, cs))
+}
+
+/// Phase I94: low-level HPKE recipient setup for ECH. Used by the server
+/// to construct an HPKE context bound to a specific `(config, enc)` pair
+/// so it can later call `ctx.open(aad, ciphertext)` with a separately-
+/// computed `ClientHelloOuterAAD`.
+pub fn ech_setup_recipient(
+    config: &EchConfig,
+    cipher_suite: EchCipherSuite,
+    enc: &[u8],
+    sk_r: &[u8],
+) -> Result<HpkeCtx, TlsError> {
+    let kem = resolve_kem(config.kem_id)?;
+    let kdf = resolve_kdf(cipher_suite.kdf_id)?;
+    let aead = resolve_aead(cipher_suite.aead_id)?;
+
+    let hpke_suite = HpkeCipherSuite { kem, kdf, aead };
+    let info = build_ech_info(config);
+
+    HpkeCtx::setup_recipient_with_suite(hpke_suite, sk_r, enc, &info)
+        .map_err(|e| TlsError::HandshakeFailed(format!("ECH HPKE setup: {e}")))
+}
+
 /// Build the HPKE info string for ECH (RFC 9578 §6.1).
 ///
 /// `info = "tls ech" || 0x00 || ECHConfig`

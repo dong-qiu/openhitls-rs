@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I93 (93 phases)
+- Implementation: I1–I94 (94 phases)
 - Testing: T1–T87 (86 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -290,6 +290,7 @@ Category summary:
 | 278 | T87 | Test | DTLS 1.3 Deep Test Coverage (state machine + parser robustness) | 2026-05-10 |
 | 279 | R13 | Refactor | getrandom 0.2 → 0.3 Workspace Migration | 2026-05-10 |
 | 280 | I93 | Impl | ECH Split-CH End-to-End (real ECHConfig + cover SNI + HPKE encrypt/decrypt) | 2026-05-10 |
+| 281 | I94 | Impl | ECH Proper ClientHelloOuterAAD (draft-compliant AEAD binding) | 2026-05-10 |
 
 ---
 
@@ -14950,3 +14951,77 @@ Setting both `ech_config_list` and `enable_ech_grease(true)` on the same client 
 - `cd fuzz && cargo build --bins`: clean
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase I94 — ECH Proper ClientHelloOuterAAD (draft-compliant AEAD binding) (2026-05-10)
+
+### Summary
+
+Closes the most security-significant gap from Phase I93: replacing the empty HPKE AAD (`b""`) with the draft-ietf-tls-esni `ClientHelloOuterAAD` construction. The privacy property (cover SNI hides real SNI) was already correct in I93; what was missing was the **integrity binding** between the encrypted inner CH and the outer CH structure. With empty AAD, an attacker who flipped any byte of the outer ClientHello — including a non-ECH extension like `key_share` — would not invalidate the HPKE-Open: the server would silently process the tampered outer (forced into the cover-SNI flow) without detecting that the wire bytes had been manipulated. After I94, any byte change outside the ECH ext's `payload` region breaks the AEAD authentication tag and the server hard-rejects.
+
+### What changed
+
+The construction is the standard ECH AAD scheme:
+
+1. Client sets up the HPKE sender → real `enc` + sender context.
+2. Client builds the outer extensions list with a **placeholder** ECH ext that has the real `enc` but a `payload` of `vec![0u8; ciphertext_len]` (where `ciphertext_len = inner_ch.len() + AEAD_tag_len`).
+3. Client serializes the outer ClientHello with the placeholder ECH ext → these bytes are the AAD.
+4. Client calls `ctx.seal(aad, inner_ch)` → real ciphertext (length must equal placeholder length, asserted via `debug_assert_eq!`).
+5. Client replaces the placeholder ECH ext with one carrying the real ciphertext, then re-serializes for the wire.
+
+Server reverses:
+
+1. Parse outer ClientHello and the ECH ext (real `enc`, real `payload`).
+2. Look up `config_id` in `ech_keypairs` to find the matching `(EchConfig, sk)`.
+3. Construct a placeholder ECH ext with the same `enc` but `payload` of `vec![0u8; real_payload.len()]`.
+4. Replace the real ECH ext data in the parsed outer with the placeholder, re-encode → reconstructed AAD.
+5. Set up the HPKE recipient with `(sk, suite, enc, info)` and call `ctx.open(aad, real_ciphertext)`.
+
+The two AAD computations (client-side from-scratch, server-side via reconstruction) produce byte-identical outputs because:
+- Both use the same `encode_client_hello` for the outer.
+- The placeholder ECH ext data has the same total length as the real one (only the `payload` bytes differ — `enc` is real on both sides).
+- All other extension positions, types, lengths, and bodies are identical.
+
+### New API surface
+
+Three new public functions in `crates/hitls-tls/src/ech.rs`:
+
+| Function | Purpose |
+|---|---|
+| `ech_aead_tag_len(aead_id) -> Result<usize>` | AEAD tag length lookup (16 for all currently-defined HPKE AEADs). |
+| `ech_setup_sender(config) -> Result<(HpkeCtx, Vec<u8>, EchCipherSuite)>` | Low-level sender setup that exposes `enc` independently of sealing. |
+| `ech_setup_recipient(config, suite, enc, sk) -> Result<HpkeCtx>` | Low-level recipient setup that takes `enc` as input. |
+
+The existing high-level `encrypt_inner_client_hello` / `decrypt_inner_client_hello` helpers stay in place for users who don't need AAD control (e.g. the existing `ech::tests` module).
+
+### Out-of-scope items still deferred
+
+I93's deferral list is unchanged except that **proper AAD** is now closed. Remaining future work, in rough order of impact:
+
+- **HRR-with-ECH cookie protection** — when the server replies HelloRetryRequest, the inner-CH state must be preserved across the round trip via a server-issued cookie wrapping the inner-CH transcript hash. Currently `try_unwrap_ech` only runs in the initial CH path.
+- **Outer extensions reference compression** (draft §5.1 `outer_extensions`) — wire-size optimization where the inner CH references duplicated extensions in the outer instead of carrying full copies.
+- **`ech_retry_configs` in EncryptedExtensions** — server publishes fresh ECHConfig in EE when client used outdated config so the client can retry.
+- **ECH-aware GREASE-PSK rules** — draft has rules for how PSK extensions interact with ECH GREASE / real ECH.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/ech.rs` | Modified | +3 public functions: `ech_aead_tag_len`, `ech_setup_sender`, `ech_setup_recipient`. The existing high-level helpers stay; the new ones expose the building blocks for AAD-aware callers. |
+| `crates/hitls-tls/src/handshake/client.rs` | Modified | `maybe_wrap_in_ech_outer` rewritten for proper AAD: HPKE.SetupBaseS first → real `enc`; build outer with placeholder ECH ext (real `enc`, zero payload); encode outer → AAD; `ctx.seal(aad, inner)` with `debug_assert_eq!` on ciphertext length; replace placeholder with real → wire. ~80 LoC of new flow. |
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | `try_unwrap_ech` rewritten for proper AAD: parse outer + ECH ext; reconstruct placeholder ECH ext (same `enc`, zero payload of same length as real); replace ECH ext data with placeholder in `outer_decoded.extensions`; re-encode outer → AAD; `ech_setup_recipient` + `ctx.open(aad, real_ciphertext)`. |
+| `crates/hitls-tls/src/connection/tests.rs` | Modified | +1 test `test_ech_outer_ch_tampering_breaks_aad_binding` that flips one byte of the outer CH's `key_share` extension (a non-ECH extension) and asserts the server rejects. The test first runs a baseline against the un-tampered wire to prove the fixture is sound. |
+
+### Test Count Delta (I94)
+
+| Crate | Pre-I94 | Post-I94 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-tls | 1527 | 1528 | +1 |
+| **Total** | **4200** | **4201** | **+1** |
+
+### Build Status (Post I94)
+
+- `cargo test --workspace --all-features`: 4,158 passed, 0 failed, 43 ignored (4,201 total)
+- `cargo build -p hitls-tls` (default features only — no `ech`): clean (verifies the new ECH internals stay feature-gated)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+- All three previous I93 e2e tests (real split-CH happy path, config_id mismatch GREASE fallback, decrypt failure rejection) still pass — proves the AAD reconstruction agrees byte-for-byte between client and server.

@@ -4509,3 +4509,26 @@ Tests unchanged at 4197 (no new tests in a rename-only phase). All three build c
 Setting both `enable_ech_grease(true)` AND `ech_config_list(...)` is benign by design: real ECH wins, GREASE ext is filtered out of the inner before being copied to the outer.
 
 Tests: 4197 → 4200 (+3 e2e). hitls-tls 1524 → 1527. All three build configurations clean: `-p hitls-tls` (default features only — verifies the `#[cfg(feature = "ech")]` gating doesn't regress), `--workspace --all-features`, and `cd fuzz && cargo build --bins`. Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 289: I94 — proper ClientHelloOuterAAD (close I93's most security-significant gap)
+
+> 请继续完成I94
+
+**Result**: Closed the most security-significant gap from I93 — replacing the empty HPKE AAD with the draft-ietf-tls-esni `ClientHelloOuterAAD`. Privacy property (cover SNI hides real SNI) was already correct in I93; what was missing was integrity binding between the encrypted inner CH and the outer CH structure. With empty AAD, an attacker who flipped any byte of the outer CH (including a non-ECH extension like `key_share`) would not invalidate HPKE-Open: the server would silently process the tampered outer in the cover-SNI flow without detecting wire-byte tampering. After I94, any byte change outside the ECH ext's `payload` region breaks the AEAD authentication tag and the server hard-rejects.
+
+**New API surface in `ech.rs`** (3 functions):
+- `ech_aead_tag_len(aead_id) -> Result<usize>` (16 for all currently-defined HPKE AEADs)
+- `ech_setup_sender(config) -> Result<(HpkeCtx, Vec<u8>, EchCipherSuite)>` — exposes `enc` independently of sealing so the client can compute AAD with the real `enc` BEFORE the ciphertext exists
+- `ech_setup_recipient(config, suite, enc, sk) -> Result<HpkeCtx>` — takes `enc` as input so the server can compute AAD before opening
+
+**Client `maybe_wrap_in_ech_outer` rewrite**: HPKE.SetupBaseS first → real `enc`; build outer with placeholder ECH ext (real `enc`, zero payload of length `inner.len() + tag_len`); encode → AAD; `ctx.seal(aad, inner)` with `debug_assert_eq!` on ciphertext length matching placeholder; replace placeholder with real → wire bytes.
+
+**Server `try_unwrap_ech` rewrite**: parse outer + ECH ext; reconstruct placeholder ECH ext (same `enc`, zero payload of same length as real); replace real ECH ext data with placeholder in extensions; re-encode outer → AAD; `ech_setup_recipient` + `ctx.open(aad, real_ciphertext)`.
+
+The two AAD computations (client from-scratch, server via reconstruction) produce byte-identical outputs because both use the same `encode_client_hello` for the outer, the placeholder ECH ext data has the same total length as the real one (only the `payload` bytes differ; `enc` is real on both sides), and all other extension positions/types/lengths/bodies are identical.
+
+**+1 regression test** `test_ech_outer_ch_tampering_breaks_aad_binding` flips one byte of the outer CH's `key_share` extension and asserts the server rejects. First runs a baseline against the un-tampered wire to prove the fixture is sound. All 3 previous I93 e2e tests still pass — proves AAD reconstruction agrees byte-for-byte between client and server.
+
+Out-of-scope (still I95+ future work, list trimmed by removing AAD): HRR-with-ECH cookies; outer_extensions reference compression; ech_retry_configs; ECH-aware GREASE-PSK rules.
+
+Tests: 4200 → 4201 (+1). hitls-tls 1527 → 1528. All three build configurations clean. Clippy on Rust 1.95: 0 warnings. Fmt clean.

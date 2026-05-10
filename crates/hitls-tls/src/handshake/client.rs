@@ -593,18 +593,33 @@ impl ClientHandshake {
         Ok(wire)
     }
 
-    /// Phase I93: build the outer ClientHello that wraps the just-built
-    /// inner CH inside an `encrypted_client_hello` extension. Returns the
-    /// inner unchanged when no `ech_config_list` is configured.
+    /// Phase I93/I94: build the outer ClientHello that wraps the inner CH
+    /// inside an `encrypted_client_hello` extension. Returns the inner
+    /// unchanged when no `ech_config_list` is configured.
     ///
-    /// **AAD note**: this implementation uses an empty HPKE AAD instead of
-    /// the draft-ietf-tls-esni `ClientHelloOuterAAD` (= the outer CH with
-    /// the ECH ext's payload zeroed). Empty AAD weakens the binding
-    /// between ciphertext and outer CH context — a network observer can
-    /// in principle move a captured ECH blob into a different outer CH.
-    /// Damage is limited because the inner CH carries its own
-    /// `key_share`, so an attacker who replays a blob still cannot
-    /// derive shared keys. Documented as Phase I94 future work.
+    /// **AAD (Phase I94)**: this implementation uses the draft-ietf-tls-esni
+    /// `ClientHelloOuterAAD` — the serialized outer CH with the ECH
+    /// extension's `payload` field set to a placeholder of zeros (same
+    /// length as the eventual ciphertext). The `enc` field stays as the
+    /// real HPKE encapsulated key, per the draft. This binds the
+    /// ciphertext to the entire outer CH structure: an attacker who
+    /// modifies any byte of the outer CH (or who copies the ECH blob
+    /// into a different outer CH) breaks AEAD authentication and the
+    /// server's HPKE-Open fails.
+    ///
+    /// The construction sequence is:
+    /// 1. HPKE.SetupBaseS → real `enc` + sender context.
+    /// 2. Build outer extensions (SNI swapped to public_name, GREASE ECH
+    ///    stripped, real ECH ext appended **with placeholder payload**).
+    /// 3. Serialize outer with placeholder → AAD bytes.
+    /// 4. ctx.seal(aad, inner) → real ciphertext (length must equal the
+    ///    placeholder payload length).
+    /// 5. Replace the placeholder payload with the real ciphertext in
+    ///    the outer extensions, then serialize again → wire bytes.
+    ///
+    /// Steps 3 and 5 must produce byte-identical outer encodings except
+    /// in the `payload` byte range, so the server's reconstructed AAD
+    /// matches the client's AAD exactly.
     #[cfg(feature = "ech")]
     fn maybe_wrap_in_ech_outer(&self, inner_ch_msg: Vec<u8>) -> Result<Vec<u8>, TlsError> {
         let Some(ref ech_config_list_bytes) = self.config.ech_config_list else {
@@ -616,13 +631,21 @@ impl ClientHandshake {
             .first()
             .ok_or_else(|| TlsError::HandshakeFailed("ECH: empty ECHConfigList".into()))?;
 
-        // Parse the just-built inner CH so we can inherit its layout
-        // (random / sid / suites / extensions) for the outer.
+        // Parse the inner CH so we can inherit sid + suites for the outer.
         let inner_decoded = crate::handshake::codec::decode_client_hello(&inner_ch_msg[4..])?;
 
+        // Set up HPKE sender. We need `enc` *before* computing AAD so the
+        // AAD can encode the real `enc` (per draft-ietf-tls-esni).
+        let (mut sender_ctx, enc, cipher_suite) = crate::ech::ech_setup_sender(config)?;
+
+        // Compute the eventual ciphertext length so the placeholder payload
+        // has the right byte count.
+        let aead_tag_len = crate::ech::ech_aead_tag_len(cipher_suite.aead_id)?;
+        let ciphertext_len = inner_ch_msg.len() + aead_tag_len;
+
         // Build outer extensions: clone inner, swap SNI to public_name,
-        // strip any pre-existing ECH ext (e.g. GREASE — real ECH wins),
-        // append the real encrypted_client_hello extension.
+        // strip any pre-existing ECH ext (real ECH wins over GREASE),
+        // append the placeholder ECH ext.
         let public_name = std::str::from_utf8(&config.public_name)
             .map_err(|_| TlsError::HandshakeFailed("ECH: public_name not valid UTF-8".into()))?;
         let mut outer_ext: Vec<crate::extensions::Extension> = inner_decoded
@@ -640,13 +663,17 @@ impl ClientHandshake {
             })
             .collect();
 
-        // HPKE-encrypt the inner CH bytes (full handshake message including
-        // 4-byte header — the server reverses this same way).
-        let ech_hello = crate::ech::encrypt_inner_client_hello(config, &inner_ch_msg, b"")?;
-
+        let placeholder_ech = crate::ech::EchClientHello {
+            ech_type: 0, // outer
+            cipher_suite,
+            config_id: config.config_id,
+            enc: enc.clone(),
+            payload: vec![0u8; ciphertext_len], // placeholder for AAD computation
+        };
+        let ech_ext_idx = outer_ext.len();
         outer_ext.push(crate::extensions::Extension {
             extension_type: crate::extensions::ExtensionType::ENCRYPTED_CLIENT_HELLO,
-            data: crate::ech::encode_ech_client_hello(&ech_hello),
+            data: crate::ech::encode_ech_client_hello(&placeholder_ech),
         });
 
         // Outer random is freshly generated — outer.random must NOT equal
@@ -656,13 +683,45 @@ impl ClientHandshake {
         getrandom::fill(&mut outer_random)
             .map_err(|_| TlsError::HandshakeFailed("ECH: outer random gen failed".into()))?;
 
-        let outer_ch = crate::handshake::codec::ClientHello {
+        // Step 3: encode outer with placeholder → AAD.
+        let outer_ch_placeholder = crate::handshake::codec::ClientHello {
+            random: outer_random,
+            legacy_session_id: inner_decoded.legacy_session_id.clone(),
+            cipher_suites: inner_decoded.cipher_suites.clone(),
+            extensions: outer_ext.clone(),
+        };
+        let aad = crate::handshake::codec::encode_client_hello(&outer_ch_placeholder);
+
+        // Step 4: HPKE.Seal with the AAD.
+        let real_ciphertext = sender_ctx
+            .seal(&aad, &inner_ch_msg)
+            .map_err(|e| TlsError::HandshakeFailed(format!("ECH HPKE seal: {e}")))?;
+        debug_assert_eq!(
+            real_ciphertext.len(),
+            ciphertext_len,
+            "AEAD ciphertext length must equal placeholder length \
+             (= plaintext + tag); otherwise AAD will not match server-side"
+        );
+
+        // Step 5: replace placeholder payload with real ciphertext.
+        let real_ech = crate::ech::EchClientHello {
+            ech_type: 0,
+            cipher_suite,
+            config_id: config.config_id,
+            enc,
+            payload: real_ciphertext,
+        };
+        outer_ext[ech_ext_idx] = crate::extensions::Extension {
+            extension_type: crate::extensions::ExtensionType::ENCRYPTED_CLIENT_HELLO,
+            data: crate::ech::encode_ech_client_hello(&real_ech),
+        };
+        let outer_ch_real = crate::handshake::codec::ClientHello {
             random: outer_random,
             legacy_session_id: inner_decoded.legacy_session_id,
             cipher_suites: inner_decoded.cipher_suites,
             extensions: outer_ext,
         };
-        Ok(crate::handshake::codec::encode_client_hello(&outer_ch))
+        Ok(crate::handshake::codec::encode_client_hello(&outer_ch_real))
     }
 
     /// Process a ServerHello message (or HelloRetryRequest).

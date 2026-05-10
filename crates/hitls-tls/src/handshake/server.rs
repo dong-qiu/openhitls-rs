@@ -1170,7 +1170,7 @@ impl ServerHandshake {
         &self.client_random
     }
 
-    /// Phase I93 helper. Inspect an outer ClientHello message for an
+    /// Phase I93/I94 helper. Inspect an outer ClientHello message for an
     /// `encrypted_client_hello` extension. If present and its `config_id`
     /// matches one of `keypairs`, attempt HPKE-decryption to recover the
     /// inner CH bytes (full handshake message). Return values:
@@ -1178,14 +1178,22 @@ impl ServerHandshake {
     /// - `Ok(None)`: no ECH ext at all, OR config_id mismatch (treated as
     ///   GREASE — the caller falls back to processing the outer CH).
     /// - `Ok(Some(inner))`: ECH accepted; caller should process `inner`.
-    /// - `Err(...)`: config_id matched but HPKE-decryption failed. This
-    ///   is a hard handshake error; the caller MUST NOT silently fall
-    ///   back, otherwise an attacker could inject garbage in the ECH
-    ///   payload and force outer-CH processing (defeating ECH's privacy).
+    /// - `Err(...)`: config_id matched but HPKE-decryption failed (wrong
+    ///   sk, AAD mismatch from outer-CH tampering, AEAD tag failure, …).
+    ///   This is a hard handshake error; the caller MUST NOT silently
+    ///   fall back, otherwise an attacker who flips one byte of the
+    ///   outer CH could force outer-CH processing and defeat ECH's
+    ///   privacy.
     ///
-    /// AAD compliance gap: this implementation uses an empty HPKE AAD
-    /// instead of the draft `ClientHelloOuterAAD`. Documented in Phase
-    /// I93 narrative; tracked as Phase I94 future work.
+    /// **AAD (Phase I94)**: this implementation uses the draft-ietf-tls-esni
+    /// `ClientHelloOuterAAD` — the outer CH bytes with the ECH ext's
+    /// `payload` (=ciphertext) replaced by zeros of the same length.
+    /// `enc` is left as the real value. Reconstructed by replacing the
+    /// real ECH ext data with a placeholder version (zeroed payload),
+    /// then re-encoding the outer CH. The encoding must be byte-
+    /// identical to the client's AAD; this works because both sides
+    /// use the same `encode_client_hello` and the placeholder ECH ext
+    /// has the same total length as the real one.
     #[cfg(feature = "ech")]
     fn try_unwrap_ech(
         outer_msg: &[u8],
@@ -1194,15 +1202,15 @@ impl ServerHandshake {
         let body = get_body(outer_msg)?;
         let outer_decoded = decode_client_hello(body)?;
 
-        let Some(ech_ext) = outer_decoded
+        let ech_ext_idx = outer_decoded
             .extensions
             .iter()
-            .find(|e| e.extension_type == ExtensionType::ENCRYPTED_CLIENT_HELLO)
-        else {
+            .position(|e| e.extension_type == ExtensionType::ENCRYPTED_CLIENT_HELLO);
+        let Some(ech_ext_idx) = ech_ext_idx else {
             return Ok(None); // no ECH offered
         };
-
-        let ech_hello = crate::ech::parse_ech_client_hello(&ech_ext.data)?;
+        let ech_hello =
+            crate::ech::parse_ech_client_hello(&outer_decoded.extensions[ech_ext_idx].data)?;
 
         // Find the keypair whose ECHConfig parses to a matching config_id.
         // We re-parse on every CH to keep the config field free of ech-feature
@@ -1227,8 +1235,36 @@ impl ServerHandshake {
             return Ok(None);
         };
 
-        // Real ECH attempt — decrypt or fail loud.
-        let inner = crate::ech::decrypt_inner_client_hello(&config, &ech_hello, &sk, b"")?;
+        // Reconstruct ClientHelloOuterAAD: replace the real ECH ext data
+        // with a placeholder where the payload (ciphertext) is zeroed,
+        // keeping enc as the real value. Then re-encode.
+        let mut placeholder_extensions = outer_decoded.extensions.clone();
+        let placeholder_ech = crate::ech::EchClientHello {
+            ech_type: ech_hello.ech_type,
+            cipher_suite: ech_hello.cipher_suite,
+            config_id: ech_hello.config_id,
+            enc: ech_hello.enc.clone(),
+            payload: vec![0u8; ech_hello.payload.len()],
+        };
+        placeholder_extensions[ech_ext_idx] = crate::extensions::Extension {
+            extension_type: ExtensionType::ENCRYPTED_CLIENT_HELLO,
+            data: crate::ech::encode_ech_client_hello(&placeholder_ech),
+        };
+        let placeholder_outer = crate::handshake::codec::ClientHello {
+            random: outer_decoded.random,
+            legacy_session_id: outer_decoded.legacy_session_id.clone(),
+            cipher_suites: outer_decoded.cipher_suites.clone(),
+            extensions: placeholder_extensions,
+        };
+        let aad = crate::handshake::codec::encode_client_hello(&placeholder_outer);
+
+        // Real ECH attempt — decrypt or fail loud. AAD mismatch (outer
+        // CH tampering) propagates as an HPKE-Open AEAD-tag failure.
+        let mut ctx =
+            crate::ech::ech_setup_recipient(&config, ech_hello.cipher_suite, &ech_hello.enc, &sk)?;
+        let inner = ctx
+            .open(&aad, &ech_hello.payload)
+            .map_err(|e| TlsError::HandshakeFailed(format!("ECH HPKE open: {e}")))?;
         Ok(Some(inner))
     }
 }
