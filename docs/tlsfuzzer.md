@@ -174,6 +174,12 @@ We track them as **XFAIL**:
   `FAIL > 0` or `XPASS > 0`), so CI fails on a NEW regression OR on
   a previously-XFAIL'd case suddenly passing.
 
+For scripts that need a fixed extra flag every run (e.g. TLS 1.2
+scripts need `-C 49199` so they negotiate our ECDHE-AES-128-GCM
+cipher instead of their default RSA-static-key-exchange + AES-CBC),
+drop a sibling file at `tests/tlsfuzzer/args/<script-stem>.txt`,
+one arg per line. The runner appends those before the XFAIL chain.
+
 Workflow:
 
 ```bash
@@ -238,3 +244,21 @@ To run it manually: GitHub Actions → tlsfuzzer → "Run workflow".
   spec gaps or upstream-test idiosyncrasies (341 XFAILs total). CI
   workflow now uses `run.sh` and gates on real exit codes instead
   of `continue-on-error`.
+
+- T90 — extended the same alert-on-error discipline to the TLS 1.2
+  server (handshake-trait wrapper + post-handshake `read()` loop in
+  `connection12/server.rs`), and curated 9 TLS 1.2 tlsfuzzer scripts
+  driven against a second `s-server --tls 1.2` instance on a
+  separate port. Added per-script "extra args" plumbing
+  (`tests/tlsfuzzer/args/<script-stem>.txt`) so each TLS 1.2 script
+  picks up `-C 49199` automatically — needed because tlsfuzzer's
+  default cipher (`TLS_RSA_WITH_AES_128_CBC_SHA`) collides with our
+  modern ECDHE-only TLS 1.2 defaults. Tlsfuzzer baseline added by
+  this phase: 501/517 PASS / 16 XFAIL / 0 FAIL across 9 scripts.
+  Notable per-script results:
+    - `test-fuzzed-ciphertext.py`: **2/338 → 338/338 PASS** (the
+      AEAD-MAC-failure class that T89 fixed for 1.3, now also fixed
+      for 1.2 once the mapper learned the `"bad record MAC"` /
+      `"MAC"` / `"BadRecordMac"` substrings).
+    - `test-connection-abort.py`: 150/150 PASS.
+    - `test-invalid-content-type.py`, `test-conversation.py`: clean.

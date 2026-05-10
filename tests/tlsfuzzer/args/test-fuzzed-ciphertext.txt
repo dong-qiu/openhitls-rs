@@ -1,0 +1,5 @@
+# Phase T90 — TLS 1.2 cipher selection.
+# Tells tlsfuzzer to negotiate our supported AES-128-GCM-SHA256 (0xC02F) instead of
+# its default RSA-static-key-exchange + AES-CBC-SHA (which we don't support).
+-C
+49199

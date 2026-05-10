@@ -1,0 +1,12 @@
+# Phase T90 — TLS 1.2 invalid-compression-methods XFAIL.
+#
+# CRIME (CVE-2012-4929) killed TLS-level compression in 2012, and
+# RFC 8446 / RFC 7568 forbid it entirely. We don't advertise or
+# accept any compression method other than `null` (0). tlsfuzzer's
+# script expects the server to either negotiate `deflate` (1) or
+# reject with a specific alert; we close without negotiating, which
+# tlsfuzzer flags as a missing-alert-format issue. Won't fix —
+# CRIME-safe behaviour is intentional.
+
+invalid compression methods
+only deflate compression method

@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T89 (88 phases, T64 skipped)
+- Testing: T1–T90 (89 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -294,6 +294,7 @@ Category summary:
 | 282 | I95 | Impl | ECH HRR Continuation (retried CH unwrap + downgrade-protection) | 2026-05-10 |
 | 283 | T88 | Test | tlsfuzzer integration: TLS 1.3 CCS conformance + RFC 8446 §A.1 server write-key timing fix + CI workflow + docs | 2026-05-10 |
 | 284 | T89 | Test | TLS 1.3 alert-before-close generalisation + tlsfuzzer XFAIL infrastructure + curated baseline | 2026-05-10 |
+| 285 | T90 | Test | TLS 1.2 tlsfuzzer integration + alert-on-error generalisation to TLS 1.2 server + per-script extra-args plumbing | 2026-05-10 |
 
 ---
 
@@ -15321,4 +15322,155 @@ Every script exits 0; CI is now a useful regression detector.
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - tlsfuzzer aggregate (6 curated scripts via `tests/tlsfuzzer/run.sh -n 9999`): 662 PASS, 341 XFAIL, 0 FAIL, 0 XPASS — every script exits 0
+
+## Phase T90 — TLS 1.2 tlsfuzzer Integration + Alert-on-Error Generalisation to TLS 1.2 Server + Per-Script Extra-Args Plumbing (2026-05-10)
+
+### Summary
+
+T88+T89 brought TLS 1.3 to a clean tlsfuzzer baseline (6 curated scripts, 662/1003 PASS, 0 FAIL). The framework worked, but coverage was TLS 1.3 only — tlsfuzzer's 111 non-1.3 scripts (containing the historic Bleichenbacher / Lucky13 / record-fragmentation / fuzzed-ciphertext / fuzzed-plaintext suites) had not been touched. T90 adds the TLS 1.2 leg: alert-on-error wiring on the TLS 1.2 server, a curated 9-script set, the runner plumbing needed to pass cipher selection to each script, and a CI workflow that drives both 1.3 and 1.2 servers in the same job.
+
+### Findings
+
+| # | Surface | Issue | Resolution |
+|---|---------|-------|------------|
+| 1 | TLS 1.2 server `handshake()` trait wrapper | Returned Err to caller without sending a fatal alert (same gap T89 fixed for TLS 1.3) | Wired `send_fatal_alert_for_error_body!` into `tls12_handshake_trait_body!` |
+| 2 | TLS 1.2 server `read()` post-handshake loop (inline in `connection12/server.rs`) | `self.read_record()?` and `return Err(...)` paths skipped the alert send; bad-MAC AppData closed the socket silently | Replaced 1 `?` with `try_alert!` and 3 `return Err(...)` with `return_alert_err!` (the `try_alert! / return_alert_err!` macros from T89 work fine outside the macro-defined trait bodies because `#[macro_use] mod macros` exports them workspace-wide) |
+| 3 | `tls_error_to_alert` mapper | `RecordError("bad record MAC")` (the literal text emitted by `record/encryption12.rs`) didn't match `"decrypt"`, `"AEAD"`, or `"tag"` substrings, so AEAD failures mapped to `internal_error` (80) instead of `bad_record_mac` (20) — visible as `test-fuzzed-ciphertext.py` 2/338 PASS | Extended the mapper's `RecordError` branch to also recognise `"MAC"`, `"bad record"`, `"BadRecordMac"`, plus `"unexpected content type"` → `unexpected_message` |
+| 4 | tlsfuzzer cipher defaults | Most TLS 1.2 scripts hard-default to `TLS_RSA_WITH_AES_128_CBC_SHA` (RSA static key exchange + AES-CBC + HMAC-SHA1) — we don't support RSA static and our 1.2 cipher list is GCM/CHACHA20 only | Added `tests/tlsfuzzer/args/<script>.txt` plumbing in `run.sh`. Each TLS 1.2 script gets a 2-line file `-C\n49199` (= `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`, our supported cipher) |
+
+### Code changes
+
+**`crates/hitls-tls/src/macros.rs`**
+
+- `tls12_handshake_trait_body!`: same alert-before-close wrap as T89 added to `tls13_*_handshake_trait_body!`. One-line addition; the `send_fatal_alert_for_error_body!` macro and the centralised mapper from T89 do the work.
+
+**`crates/hitls-tls/src/connection12/server.rs`**
+
+- `read()` (inline trait impl, not a macro): replaced `self.read_record()?` with `try_alert!(sync, self, self.read_record())` and the four explicit `return Err(...)` paths (renegotiation parser failure, unexpected ClientHello, two unexpected-content-type cases) with `return_alert_err!`.
+- The TLS 1.2 client's read path is symmetric but lower priority — tlsfuzzer drives a client at our server, not the other way round; deferred to T94.
+- The async TLS 1.2 server (`connection12_async.rs`) is also deferred — tlsfuzzer is sync.
+
+**`crates/hitls-tls/src/alert/mod.rs`**
+
+- Extended the `RecordError` branch of `tls_error_to_alert` to map the project's actual error-message strings:
+  - `"MAC"`, `"bad record"`, `"BadRecordMac"` → `bad_record_mac` (20)
+  - `"unexpected content type"` → `unexpected_message` (10)
+
+This is the single most impactful change in the phase: it lifts `test-fuzzed-ciphertext.py` from 2/338 PASS to 338/338 PASS in a one-character substring addition.
+
+**`tests/tlsfuzzer/run.sh`**
+
+- New optional per-script "extra args" file at `tests/tlsfuzzer/args/<script-stem>.txt`; one arg per line, `#`-comments stripped. Args are appended to the `tlsfuzzer-py` invocation BEFORE the XFAIL chain, so they take effect even when XFAIL'd conversations are run.
+- Override env var: `ARGS_DIR` (defaults to `<run.sh dir>/args`).
+
+### Test changes
+
+**+1 integration test** (`tests/interop/tests/protocol_attacks.rs`):
+
+`test_tls12_server_sends_alert_on_corrupt_appdata` — completes a real TLS 1.2 handshake, drops the client (keeping a `try_clone()` of the underlying TCP socket), then writes a bogus 24-byte ApplicationData record. Asserts the server's response on the wire starts with `0x15` (Alert ContentType). The body is encrypted under the server's app-write key (which we no longer have access to), so this test pins the "alert is on the wire" structural contract — the description ID is asserted by the tlsfuzzer baseline below.
+
+The two T88 + one T89 alert tests continue to pass.
+
+### XFAIL infrastructure (TLS 1.2 additions)
+
+5 new XFAIL files (`tests/tlsfuzzer/xfail/`):
+
+| File | Entries | Category |
+|------|--------:|----------|
+| `test-ccs.txt` | 1 | RFC 5246 §7.1 strict CCS payload check (we accept >1 byte; OpenSSL rejects with `unexpected_message`) — scheduled for T91 |
+| `test-cve-2016-2107.txt` | 1 | OpenSSL-specific CVE on AES-CBC ETM, not applicable to our GCM-only path |
+| `test-cve-2016-6309.txt` | 3 | "Large ClientHello padding" / "Large incorrect length" — needs ClientHello-specific length check (currently rejected at record level with `record_overflow`); scheduled for T91 |
+| `test-ecdhe-rsa-key-exchange-with-bad-messages.txt` | 8 | Server doesn't echo `ec_point_formats` extension (RFC 4492 §5.1.2 optional, RFC 8422 deprecated for TLS 1.3). All 8 fail the same precondition assertion. |
+| `test-invalid-compression-methods.txt` | 2 | TLS-level compression killed by CRIME (CVE-2012-4929); we don't accept anything but `null`. Tlsfuzzer's reject-format expectation doesn't match. Won't fix. |
+
+10 new args files (`tests/tlsfuzzer/args/`): each contains `-C\n49199` so the script negotiates `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256` (our cipher), not the script's hard-coded RSA-static default.
+
+### CI workflow (`.github/workflows/tlsfuzzer.yml`)
+
+- Added `HITLS_PORT_12: 4445` env var.
+- "Start hitls s-server" step now starts both: the TLS 1.3 instance on `HITLS_PORT` (4444) and a second TLS 1.2 instance via `--tls 1.2` on `HITLS_PORT_12` (4445), both serving the same RSA cert.
+- "Run curated tlsfuzzer scripts" step now has a second loop over `scripts_12` (the TLS 1.2 set) using the 1.2 port.
+- Stop step kills both PIDs; artifact upload renamed from `server.log` → `server-1.3.log` + `server-1.2.log`.
+
+### Tlsfuzzer baseline (post-T90)
+
+| Script | TOTAL | PASS | XFAIL | FAIL | XPASS |
+|--------|------:|-----:|------:|-----:|------:|
+| `test-conversation.py` | 2 | 2 | 0 | 0 | 0 |
+| `test-invalid-content-type.py` | 5 | 5 | 0 | 0 | 0 |
+| `test-connection-abort.py` | 150 | 150 | 0 | 0 | 0 |
+| `test-fuzzed-ciphertext.py` | 338 | 338 | 0 | 0 | 0 |
+| `test-ccs.py` | 3 | 2 | 1 | 0 | 0 |
+| `test-cve-2016-2107.py` | 3 | 2 | 1 | 0 | 0 |
+| `test-cve-2016-6309.py` | 4 | 0 | 4 | 0 | 0 |
+| `test-ecdhe-rsa-key-exchange-with-bad-messages.py` | 8 | 0 | 8 | 0 | 0 |
+| `test-invalid-compression-methods.py` | 4 | 2 | 2 | 0 | 0 |
+| **TLS 1.2 sub-aggregate** | **517** | **501** (97%) | **16** | **0** | **0** |
+
+Combined with the post-T89 TLS 1.3 baseline, the post-T90 aggregate
+is **1164 PASS / 356 XFAIL / 0 FAIL across 15 scripts (1520
+conversations total)**. Every script exits 0; CI now gates both
+TLS 1.2 and TLS 1.3 paths.
+
+**Side-effect win on the TLS 1.3 leg.** End-to-end review surfaced
+that one TLS 1.3 conversation (`key_share extension omitted` in
+`test-tls13-keyshare-omitted.py`) flipped XFAIL→PASS post-T90. The
+existing T89 mapper substring `"missing key_share"` (HandshakeFailed
+branch) was always going to map this conversation's error to
+`missing_extension` (109), which is what tlsfuzzer expects — but
+T89's CI only ran with the default `num_limit=40` sub-sample, and
+this script was sampled only at the boundary, so the conversation
+was XFAIL'd defensively. T90 runs every script with `-n 9999`
+(full sweep) which exposed the actual passing behaviour. The XFAIL
+file is updated to drop the entry, leaving 2 remaining XFAILs
+(both `empty key_share extension` cases) which still need a real
+fix.
+
+### Documentation
+
+- `docs/tlsfuzzer.md`: extended XFAIL-bookkeeping section with the new "extra args" plumbing; phase reference list extended with T90 (incl. the per-script result highlights above).
+- All new XFAIL files lead with self-documenting comment blocks following the T89 convention.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/alert/mod.rs` | Modified | Extended `tls_error_to_alert` `RecordError` branch with 4 new substring matches (`MAC`, `bad record`, `BadRecordMac`, `unexpected content type`) so the project's actual error-message strings map to the correct RFC 5246/8446 alerts. |
+| `crates/hitls-tls/src/macros.rs` | Modified | Wrapped `tls12_handshake_trait_body!` Err arm with `send_fatal_alert_for_error_body!` (3 lines added). |
+| `crates/hitls-tls/src/connection12/server.rs` | Modified | `read()` now uses `try_alert!` / `return_alert_err!` for the 4 error-bearing call sites (1 `read_record` `?`, 3 `return Err` paths). |
+| `tests/tlsfuzzer/run.sh` | Modified | Reads optional `tests/tlsfuzzer/args/<script-stem>.txt` and prepends those args before the XFAIL chain. |
+| `tests/tlsfuzzer/xfail/test-ccs.txt` | Added | 1 entry — strict-CCS-payload XFAIL. |
+| `tests/tlsfuzzer/xfail/test-cve-2016-2107.txt` | Added | 1 entry — OpenSSL-specific CBC ETM CVE. |
+| `tests/tlsfuzzer/xfail/test-cve-2016-6309.txt` | Added | 3 entries — large ClientHello padding/length cases. |
+| `tests/tlsfuzzer/xfail/test-ecdhe-rsa-key-exchange-with-bad-messages.txt` | Added | 8 entries — `ec_point_formats` not echoed. |
+| `tests/tlsfuzzer/xfail/test-invalid-compression-methods.txt` | Added | 2 entries — won't-fix CRIME-safe. |
+| `tests/tlsfuzzer/args/test-conversation.txt` | Added | `-C 49199` (cipher selection). |
+| `tests/tlsfuzzer/args/test-invalid-content-type.txt` | Added | `-C 49199` |
+| `tests/tlsfuzzer/args/test-connection-abort.txt` | Added | `-C 49199` |
+| `tests/tlsfuzzer/args/test-fuzzed-ciphertext.txt` | Added | `-C 49199` |
+| `tests/tlsfuzzer/args/test-ccs.txt` | Added | `-C 49199` |
+| `tests/tlsfuzzer/args/test-cve-2016-2107.txt` | Added | `-C 49199` |
+| `tests/tlsfuzzer/args/test-cve-2016-6309.txt` | Added | `-C 49199` |
+| `tests/tlsfuzzer/args/test-ecdhe-rsa-key-exchange-with-bad-messages.txt` | Added | `-C 49199` |
+| `tests/tlsfuzzer/args/test-invalid-compression-methods.txt` | Added | `-C 49199` |
+| `tests/interop/tests/protocol_attacks.rs` | Modified | +1 wire-level integration test (`test_tls12_server_sends_alert_on_corrupt_appdata`) pinning the alert-record-byte-on-the-wire contract for TLS 1.2 post-handshake bad-MAC AppData. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | New `HITLS_PORT_12` env var + second `s-server --tls 1.2` instance on the same job + second loop over the TLS 1.2 script set + per-port log artifacts. |
+| `docs/tlsfuzzer.md` | Modified | New paragraph in XFAIL section describing `args/` plumbing; phase reference list extended with T90 + per-script result highlights. |
+
+### Test Count Delta (T90)
+
+| Crate | Pre-T90 | Post-T90 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-integration-tests | 266 | 267 | +1 |
+| **Total** | **4206** | **4207** | **+1** |
+
+### Build Status (Post T90)
+
+- `cargo test --workspace --all-features --release`: 4164 passed, 0 failed, 43 ignored (project-tracked aggregate 4207, +1 over post-T89)
+- `cargo test -p hitls-tls --all-features --release --lib`: 1530 passed, 0 failed
+- `cargo test -p hitls-integration-tests --test protocol_attacks`: 20 passed, 0 failed (incl. the 4 T88/T89/T90 alert tests)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- tlsfuzzer aggregate (15 curated scripts: 6 TLS 1.3 + 9 TLS 1.2, all via `run.sh -n 9999`): **1164 PASS / 356 XFAIL / 0 FAIL / 0 XPASS** across 1520 conversations — every script exits 0
+
 

@@ -860,7 +860,12 @@ impl<S: Read + Write> TlsConnection for Tls12ServerConnection<S> {
                 return Ok(n);
             }
 
-            let (ct, plaintext) = self.read_record()?;
+            // Phase T90 — alert-before-close on the post-handshake read
+            // path. Mirrors the T89 wiring on the TLS 1.3 side. The
+            // typical failure modes here are bad-MAC AppData (mapped to
+            // `bad_record_mac`) or unexpected content-type from a
+            // confused peer (mapped to `unexpected_message`).
+            let (ct, plaintext) = try_alert!(sync, self, self.read_record());
             match ct {
                 ContentType::ApplicationData => {
                     if self.state == ConnectionState::Renegotiating {
@@ -896,24 +901,33 @@ impl<S: Read + Write> TlsConnection for Tls12ServerConnection<S> {
                 ContentType::Handshake => {
                     if self.state == ConnectionState::Renegotiating {
                         // Expecting ClientHello during renegotiation
-                        let (hs_type, _, total) = parse_handshake_header(&plaintext)?;
+                        let (hs_type, _, total) =
+                            try_alert!(sync, self, parse_handshake_header(&plaintext));
                         if hs_type == HandshakeType::ClientHello {
                             let ch_data = plaintext[..total].to_vec();
-                            self.do_server_renegotiation(&ch_data)?;
+                            try_alert!(sync, self, self.do_server_renegotiation(&ch_data));
                             continue;
                         }
-                        return Err(TlsError::HandshakeFailed(format!(
-                            "expected ClientHello during renegotiation, got {hs_type:?}"
-                        )));
+                        return_alert_err!(
+                            sync,
+                            self,
+                            TlsError::HandshakeFailed(format!(
+                                "expected ClientHello during renegotiation, got {hs_type:?}"
+                            ))
+                        );
                     }
-                    return Err(TlsError::RecordError(format!(
-                        "unexpected content type: {ct:?}"
-                    )));
+                    return_alert_err!(
+                        sync,
+                        self,
+                        TlsError::RecordError(format!("unexpected content type: {ct:?}"))
+                    );
                 }
                 _ => {
-                    return Err(TlsError::RecordError(format!(
-                        "unexpected content type: {ct:?}"
-                    )));
+                    return_alert_err!(
+                        sync,
+                        self,
+                        TlsError::RecordError(format!("unexpected content type: {ct:?}"))
+                    );
                 }
             }
         }

@@ -1501,6 +1501,10 @@ macro_rules! tls12_handshake_trait_body {
         match maybe_await!($mode, $self.do_handshake()) {
             Ok(()) => Ok(()),
             Err(e) => {
+                // Phase T90 — same alert-before-close discipline as T89's
+                // TLS 1.3 path. Best-effort: peer sees a wire-level fatal
+                // alert (mapped from `e`) before the close.
+                send_fatal_alert_for_error_body!($mode, $self, &e);
                 $self.state = ConnectionState::Error;
                 Err(e)
             }

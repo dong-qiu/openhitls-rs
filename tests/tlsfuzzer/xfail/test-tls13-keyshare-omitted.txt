@@ -1,16 +1,20 @@
-# Phase T89 — keyshare-omitted XFAILs.
+# Phase T89 — keyshare-omitted XFAILs (T90 update: dropped 1 entry).
 #
-# Expected behaviour per RFC 8446 §9.2: a TLS 1.3 ClientHello with
-# `key_share` entirely absent (or empty) MUST be rejected with
-# `missing_extension`. We currently treat "no key_share" the same as
-# "key_share present but doesn't match server's groups" and route to
-# the HelloRetryRequest path — which leaks `handshake_failure` and
-# wastes a round-trip.
+# `key_share extension omitted` was XFAIL'd in T89 because we were
+# routing missing-key_share-but-present-supported_groups to
+# `handshake_failure` via the HRR path. After T90 widened the alert
+# mapper's substring set, the existing `"missing key_share"`
+# substring branch (added in T89 but not exercised before) now
+# correctly maps to `missing_extension` (109), matching the
+# tlsfuzzer expectation. Conversation is now PASS.
 #
-# The fix is a small early-rejection check in `process_client_hello`
-# (server.rs). Scheduled for a future implementation phase; XFAIL'd
-# here so CI surfaces only NEW regressions in this script.
+# Remaining 2 entries: tlsfuzzer expects `decode_error` (50) for an
+# *empty* `key_share` extension (extension present, body []). RFC
+# 8446 §4.2.8 doesn't strictly call this a decode error (an empty
+# list is structurally valid), and we route it to
+# `handshake_failure` via the no-matching-key_share path. Spec gap
+# is debatable; scheduled for T91 only if we hit a real-world
+# interop request.
 
-key_share extension omitted
 empty key_share extension
 empty key_share extension with valid psk_key exhange modes

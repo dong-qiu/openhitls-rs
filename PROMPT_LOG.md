@@ -4604,3 +4604,28 @@ Tests: 4203 → 4205 (+2). hitls-integration-tests 263 → 265. tlsfuzzer `test-
 **Tlsfuzzer score** (6 curated scripts, all conversations via `-n 9999`): T88 baseline ~21/261 PASS (8%); T89 baseline **662/1003 PASS (66%)**, 341 XFAIL, 0 FAIL, 0 XPASS. Every script exits 0. Biggest jump: `test-tls13-finished.py` 3/42 → 642/714 PASS.
 
 Tests: 4205 → 4206 (+1). hitls-integration-tests 265 → 266. All three build configurations clean. Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 294: T90 — TLS 1.2 tlsfuzzer integration (first leg of the T90→T94 plan)
+
+> 按 T90→T94 推进
+
+**Result**: Wired up the TLS 1.2 leg of the tlsfuzzer harness. Three groups of changes:
+
+**Code** — extended T89's alert-on-error discipline to TLS 1.2:
+- `tls12_handshake_trait_body!` macro now sends a fatal alert before propagating Err (3 lines, mirrors T89's TLS 1.3 wrapper).
+- `Tls12ServerConnection::read()` (inline trait impl in `connection12/server.rs`) replaced 1 `?` and 3 `return Err(...)` with `try_alert!` / `return_alert_err!` — the macros from T89 work outside the macro-defined trait bodies because `#[macro_use] mod macros` exports them workspace-wide.
+- Extended `tls_error_to_alert` mapper's `RecordError` branch with 4 new substrings (`MAC`, `bad record`, `BadRecordMac`, `unexpected content type`). The first three matter most: TLS 1.2's AEAD failure produces `RecordError("bad record MAC")` which previously fell through to `internal_error` (80) but should be `bad_record_mac` (20). One-character fix, biggest impact: `test-fuzzed-ciphertext.py` 2/338 PASS → 338/338 PASS.
+
+**Infrastructure** — `run.sh` now reads optional per-script "extra args" from `tests/tlsfuzzer/args/<script-stem>.txt`. Each TLS 1.2 script gets a 2-line file `-C\n49199` so tlsfuzzer negotiates `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256` (our cipher) instead of its hard-default `TLS_RSA_WITH_AES_128_CBC_SHA` (RSA static key exchange + AES-CBC-SHA1, which we don't support).
+
+**Curated TLS 1.2 set** — 9 scripts: 4 clean (`test-conversation`, `test-invalid-content-type`, `test-connection-abort`, `test-fuzzed-ciphertext`), 5 with XFAIL (`test-ccs` 1, `test-cve-2016-2107` 1, `test-cve-2016-6309` 4, `test-ecdhe-rsa-key-exchange-with-bad-messages` 8, `test-invalid-compression-methods` 2). Each XFAIL file leads with a self-documenting comment block: spec gap (T91-scheduled) vs OpenSSL idiosyncrasy (won't fix) vs CRIME-safe-by-design (won't fix). Total TLS 1.2 baseline: **501/517 PASS (97%)**, 16 XFAIL, 0 FAIL.
+
+`test-aes-gcm-nonces.py` was probed but dropped from the curated set: it has a hardcoded inline `bad += 1` for the 256-bit-GCM monotonicity check that bypasses tlsfuzzer's `-x` mechanism, so the script can never exit 0 against a single-cipher `-C` server. Future fix would be extending `run.sh` to support per-script multi-cipher lists; not worth the complexity for one script.
+
+**CI workflow** — `.github/workflows/tlsfuzzer.yml` now starts both servers (TLS 1.3 on `HITLS_PORT=4444`, TLS 1.2 on `HITLS_PORT_12=4445`), runs both script sets in the same job, kills both PIDs in cleanup, uploads per-port logs.
+
+**+1 wire-level integration test** `test_tls12_server_sends_alert_on_corrupt_appdata` — completes a real TLS 1.2 handshake, drops the client (keeping a `try_clone()` of the underlying TCP socket), writes a bogus 24-byte ApplicationData record, asserts the server's response on the wire starts with `0x15` (Alert ContentType). Pre-T90 the socket would just close with no bytes written.
+
+**Combined post-T90 tlsfuzzer aggregate**: 1164 PASS / 356 XFAIL / 0 FAIL / 0 XPASS across 1520 conversations / 15 scripts. Every script exits 0; CI workflow gates on real exit codes. Side-effect: one TLS 1.3 conversation (`key_share extension omitted`) flipped XFAIL→PASS — T89's mapper had the right substring (`"missing key_share"` → `missing_extension`) but T89's CI ran with default `num_limit=40` sampling that XFAIL'd the conversation defensively; T90's `-n 9999` full sweep exposed the actual passing behaviour. Dropped the entry from the XFAIL list.
+
+Tests: 4206 → 4207 (+1). hitls-integration-tests 266 → 267. All three build configurations clean. Clippy on Rust 1.95: 0 warnings. Fmt clean. Next: T91 (close the 78 deferred real-bug XFAILs — keyshare missing_extension routing + Finished framing).

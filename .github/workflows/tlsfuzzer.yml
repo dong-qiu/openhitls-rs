@@ -28,6 +28,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   HITLS_PORT: 4444
+  HITLS_PORT_12: 4445
   HITLS_HOST: 127.0.0.1
   TLSFUZZER_REF: master
   TLSLITE_NG_REF: master
@@ -38,7 +39,7 @@ concurrency:
 
 jobs:
   tlsfuzzer:
-    name: tlsfuzzer (TLS 1.3)
+    name: tlsfuzzer (TLS 1.3 + TLS 1.2)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -81,21 +82,30 @@ jobs:
             -in  "${RUNNER_TEMP}/certs/key-rsa.pem" \
             -out "${RUNNER_TEMP}/certs/key-rsa-pkcs8.pem"
 
-      - name: Start hitls s-server
+      - name: Start hitls s-server (TLS 1.3 + TLS 1.2 on separate ports)
         run: |
           ./target/release/hitls s-server \
             -p "${HITLS_PORT}" \
             --cert "${RUNNER_TEMP}/certs/cert-rsa.pem" \
             --key  "${RUNNER_TEMP}/certs/key-rsa-pkcs8.pem" \
-            -q > "${RUNNER_TEMP}/server.log" 2>&1 &
+            -q > "${RUNNER_TEMP}/server-1.3.log" 2>&1 &
           echo "SERVER_PID=$!" >> "$GITHUB_ENV"
-          # Wait for the listener.
-          for _ in $(seq 1 30); do
-            if ss -ltn "( sport = :${HITLS_PORT} )" | grep -q ":${HITLS_PORT}"; then
-              echo "server up"
-              break
-            fi
-            sleep 0.5
+          # Phase T90 — second instance for TLS 1.2 scripts.
+          ./target/release/hitls s-server \
+            -p "${HITLS_PORT_12}" --tls 1.2 \
+            --cert "${RUNNER_TEMP}/certs/cert-rsa.pem" \
+            --key  "${RUNNER_TEMP}/certs/key-rsa-pkcs8.pem" \
+            -q > "${RUNNER_TEMP}/server-1.2.log" 2>&1 &
+          echo "SERVER_PID_12=$!" >> "$GITHUB_ENV"
+          # Wait for both listeners.
+          for port in "${HITLS_PORT}" "${HITLS_PORT_12}"; do
+            for _ in $(seq 1 30); do
+              if ss -ltn "( sport = :${port} )" | grep -q ":${port}"; then
+                echo "server on port ${port} up"
+                break
+              fi
+              sleep 0.5
+            done
           done
 
       - name: Run curated tlsfuzzer TLS 1.3 scripts
@@ -121,17 +131,48 @@ jobs:
             test-tls13-keyshare-omitted.py
             test-tls13-version-negotiation.py
           )
+          # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
+          # on $HITLS_PORT_12. The cipher arg `-C 49199` lives in
+          # tests/tlsfuzzer/args/<script>.txt and is auto-applied
+          # by run.sh — nothing special needed here.
+          scripts_12=(
+            test-conversation.py
+            test-invalid-content-type.py
+            test-connection-abort.py
+            test-fuzzed-ciphertext.py
+            test-ccs.py
+            test-cve-2016-2107.py
+            test-cve-2016-6309.py
+            test-ecdhe-rsa-key-exchange-with-bad-messages.py
+            test-invalid-compression-methods.py
+          )
           aggregate_exit=0
           : > "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
           for s in "${scripts[@]}"; do
             log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}.log"
-            echo "=== $s ==="
+            echo "=== TLS 1.3: $s ==="
             ./tests/tlsfuzzer/run.sh "$s" \
               -h "${HITLS_HOST}" -p "${HITLS_PORT}" -n 9999 2>&1 | tee "${log}"
             rc=${PIPESTATUS[0]}
             grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
               | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
-            echo "${s} → exit=${rc}" >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo "${s} (TLS 1.3) → exit=${rc}" \
+              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            if [ "$rc" -ne 0 ]; then
+              aggregate_exit=1
+            fi
+          done
+          for s in "${scripts_12[@]}"; do
+            log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}-1.2.log"
+            echo "=== TLS 1.2: $s ==="
+            ./tests/tlsfuzzer/run.sh "$s" \
+              -h "${HITLS_HOST}" -p "${HITLS_PORT_12}" -n 9999 2>&1 | tee "${log}"
+            rc=${PIPESTATUS[0]}
+            grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
+              | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo "${s} (TLS 1.2) → exit=${rc}" \
+              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
             echo >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
             if [ "$rc" -ne 0 ]; then
               aggregate_exit=1
@@ -149,9 +190,11 @@ jobs:
       - name: Stop server
         if: always()
         run: |
-          if [ -n "${SERVER_PID:-}" ]; then
-            kill "${SERVER_PID}" 2>/dev/null || true
-          fi
+          for pid in "${SERVER_PID:-}" "${SERVER_PID_12:-}"; do
+            if [ -n "${pid}" ]; then
+              kill "${pid}" 2>/dev/null || true
+            fi
+          done
 
       - name: Upload server + tlsfuzzer logs
         if: always()
@@ -159,6 +202,7 @@ jobs:
         with:
           name: tlsfuzzer-logs
           path: |
-            ${{ runner.temp }}/server.log
+            ${{ runner.temp }}/server-1.3.log
+            ${{ runner.temp }}/server-1.2.log
             ${{ runner.temp }}/tlsfuzzer-logs/
           retention-days: 14

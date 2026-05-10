@@ -79,8 +79,26 @@ fi
 
 echo "[run.sh] script=${script_name} xfail_entries=${xfail_count}" >&2
 
+# Optional per-script "extra args" file (Phase T90). Useful when a
+# script needs a fixed extra flag every run (e.g. TLS 1.2 scripts
+# need `-C 49199` to negotiate our ECDHE-AES-128-GCM cipher). One
+# arg per line; blank lines and `#` comments stripped.
+args_dir="${ARGS_DIR:-${here}/args}"
+args_file="${args_dir}/${script_name%.py}.txt"
+extra_script_args=()
+if [ -f "${args_file}" ]; then
+    while IFS= read -r line || [ -n "${line}" ]; do
+        line="${line%%#*}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [ -z "${line}" ] && continue
+        extra_script_args+=("${line}")
+    done < "${args_file}"
+fi
+
 cd "${tlsfuzzer_dir}"
 # Bash <4.4 chokes on `${arr[@]}` when arr is empty under `set -u`;
 # expand with the +-substitution form to side-step that.
 PYTHONPATH=. exec "${tlsfuzzer_py}" "scripts/${script_name}" \
-    ${xfail_args[@]+"${xfail_args[@]}"} "$@"
+    ${extra_script_args[@]+"${extra_script_args[@]}"} \
+    ${xfail_args[@]+"${xfail_args[@]}"} \
+    "$@"

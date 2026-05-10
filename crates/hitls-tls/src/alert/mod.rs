@@ -150,12 +150,20 @@ pub fn tls_error_to_alert(err: &hitls_types::TlsError) -> AlertDescription {
         }
         TlsError::RecordError(msg) => {
             let m = msg.as_str();
-            if m.contains("decrypt") || m.contains("AEAD") || m.contains("tag") {
+            if m.contains("decrypt")
+                || m.contains("AEAD")
+                || m.contains("tag")
+                || m.contains("MAC")
+                || m.contains("bad record")
+                || m.contains("BadRecordMac")
+            {
                 AlertDescription::BadRecordMac
             } else if m.contains("overflow") || m.contains("too large") {
                 AlertDescription::RecordOverflow
             } else if m.contains("decode") || m.contains("incomplete") || m.contains("malformed") {
                 AlertDescription::DecodeError
+            } else if m.contains("unexpected content type") {
+                AlertDescription::UnexpectedMessage
             } else {
                 AlertDescription::InternalError
             }
