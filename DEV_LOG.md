@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T90 (89 phases, T64 skipped)
+- Testing: T1–T91 (90 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -295,6 +295,7 @@ Category summary:
 | 283 | T88 | Test | tlsfuzzer integration: TLS 1.3 CCS conformance + RFC 8446 §A.1 server write-key timing fix + CI workflow + docs | 2026-05-10 |
 | 284 | T89 | Test | TLS 1.3 alert-before-close generalisation + tlsfuzzer XFAIL infrastructure + curated baseline | 2026-05-10 |
 | 285 | T90 | Test | TLS 1.2 tlsfuzzer integration + alert-on-error generalisation to TLS 1.2 server + per-script extra-args plumbing | 2026-05-10 |
+| 286 | T91 | Test | TLS 1.3 Finished framing fix (RFC 8446 §4.4.4 strict verify_data length) + zero-body handshake message handling | 2026-05-10 |
 
 ---
 
@@ -15472,5 +15473,100 @@ fix.
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - tlsfuzzer aggregate (15 curated scripts: 6 TLS 1.3 + 9 TLS 1.2, all via `run.sh -n 9999`): **1164 PASS / 356 XFAIL / 0 FAIL / 0 XPASS** across 1520 conversations — every script exits 0
+
+## Phase T91 — TLS 1.3 Finished Framing Fix (RFC 8446 §4.4.4 Strict verify_data Length) + Zero-Body Handshake Message Handling (2026-05-10)
+
+### Summary
+
+T89/T90 set up the tlsfuzzer harness; the largest single XFAIL bucket left over was `test-tls13-finished.py`'s 72 conversations of empty / truncated / padded Finished messages. Investigation surfaced **two real protocol bugs** masquerading as XFAILs:
+
+1. **`decode_finished` was silently truncating** — when the Finished body was longer than `Hash.length`, the decoder took only the first `hash_len` bytes for MAC comparison and discarded the rest. Padded Finished messages (`pad_right N`) thus sometimes verified successfully (the first `hash_len` bytes were the real verify_data) and the server proceeded into post-handshake state with stale bytes left in the read buffer. This is a soft spec violation (RFC 8446 §4.4.4: "verify_data: ... `Hash.length` bytes") and a real correctness gap.
+
+2. **`get_body` rejected zero-body handshake messages** — `if msg_data.len() <= 4` folded "header-only" into "too short", emitting `HandshakeFailed("handshake message too short")` which fell through the alert mapper to `handshake_failure`. tlsfuzzer expected `decode_error`. The fix lets the per-message decoder enforce its own length contract, which both produces the correct error for invalid bodies AND allows legitimate zero-length-body messages (EndOfEarlyData, ServerHelloDone in 1.2).
+
+Together these two fixes closed **66 of 72 Finished-mutation XFAILs** without any record-layer or read-loop refactoring. The remaining 6 are large-padding cases (`pad_right >= 131072`) that need cross-record handshake-message reassembly — a non-trivial separate change deferred to a future phase.
+
+### Code changes
+
+**`crates/hitls-tls/src/handshake/codec.rs` — `decode_finished`:**
+
+```rust
+// Before:
+if data.len() < hash_len {                  // accepts longer
+    return Err(...);                         // bodies and silently
+}                                            // truncates to hash_len
+Ok(FinishedMsg { verify_data: data[..hash_len].to_vec() })
+
+// After (T91):
+if data.len() != hash_len {                  // exact length required
+    return Err(TlsError::HandshakeFailed(format!(
+        "Finished: verify_data wrong length (decode_error — \
+         expected {} bytes, got {})",
+        hash_len, data.len()
+    )));
+}
+Ok(FinishedMsg { verify_data: data.to_vec() })
+```
+
+The error message intentionally contains `"decode_error"` so `alert::tls_error_to_alert` routes it via the existing `m.contains("decode")` branch to `AlertDescription::DecodeError` (50). No mapper change needed.
+
+**`crates/hitls-tls/src/handshake/{server,client,server12}.rs` — `get_body`:**
+
+Three identical helpers (TLS 1.3 server, TLS 1.3 client, TLS 1.2 server). Each had the same `if msg_data.len() <= 4` check; relaxed to `< 4` and the error message updated to include `"decode_error"`. The per-message decoder downstream (e.g. `decode_finished`) now sees zero-length bodies and produces the correct decode-error mapping.
+
+### Tests
+
+**+1 unit test** (`handshake::codec::tests::test_decode_finished_strict_length`): pins the exact-length contract — accepts 32 / 48 byte verify_data (SHA-256 / SHA-384), rejects empty / 31 / 33 / 1024 byte bodies, and asserts the error message contains `"decode_error"` or `"wrong length"` so the alert mapping doesn't silently regress.
+
+The existing `test_decode_finished` (which checks "too short") continues to pass because empty < hash_len is still an error — it just routes through a different code path now.
+
+### Tlsfuzzer baseline (post-T91)
+
+| Script | T90 PASS / XFAIL | T91 PASS / XFAIL | Δ PASS |
+|--------|------------------|------------------|-------:|
+| `test-tls13-finished.py` | 642 / 72 | **708 / 6** | **+66** |
+| (all other 14 scripts) | unchanged | unchanged | 0 |
+
+| Aggregate | PASS | XFAIL | FAIL | XPASS |
+|-----------|-----:|------:|-----:|------:|
+| Post-T90  | 1164 | 356 | 0 | 0 |
+| **Post-T91** | **1230** (+66) | **290** (-66) | **0** | **0** |
+
+15 curated scripts / 1520 total conversations. Every script still exits 0; CI gating unchanged.
+
+### What didn't get fixed (and why)
+
+| Conversation | Status | Reason |
+|--------------|--------|--------|
+| `padding ... pad_right 131072 / 196608 / 16777167-83` (6 entries) | Still XFAIL | Need cross-record handshake reassembly per RFC 8446 §5.1; non-trivial read-loop refactor — deferred. |
+| `empty key_share extension` ×2 (in `test-tls13-keyshare-omitted.py`) | Still XFAIL | Different code path (`process_client_hello` HRR routing); tlsfuzzer wants `decode_error` for an empty (but structurally valid) key_share list — debatable per RFC 8446 §4.2.8. Deferred. |
+| `Large ClientHello padding / length` ×3 (in `test-cve-2016-6309.py`) | Still XFAIL | Need ClientHello-specific length check (currently rejected at record level with `record_overflow`); deferred. |
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/codec.rs` | Modified | `decode_finished` — strict-length check (`!=` instead of `<`); error message contains `"decode_error"` for alert mapping. +1 unit test pinning the exact-length contract. |
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | `get_body` accepts zero-length bodies (`< 4` instead of `<= 4`); error message contains `"decode_error"`. |
+| `crates/hitls-tls/src/handshake/client.rs` | Modified | Same `get_body` fix for TLS 1.3 client. |
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | Same `get_body` fix for TLS 1.2 server. |
+| `tests/tlsfuzzer/xfail/test-tls13-finished.txt` | Modified | Trimmed from 72 entries to 6 (only the huge-padding cases remain); narrative comment block rewritten. |
+
+### Test Count Delta (T91)
+
+| Crate | Pre-T91 | Post-T91 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-tls | 1530 | 1531 | +1 |
+| **Total** | **4207** | **4208** | **+1** |
+
+### Build Status (Post T91)
+
+- `cargo test --workspace --all-features --release`: 4165 passed, 0 failed, 43 ignored (project-tracked aggregate 4208, +1 over post-T90)
+- `cargo test -p hitls-tls --all-features --release --lib`: 1531 passed, 0 failed
+- `cargo test -p hitls-integration-tests --test protocol_attacks`: 20 passed, 0 failed
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- tlsfuzzer aggregate (15 curated scripts via `tests/tlsfuzzer/run.sh -n 9999`): **1230 PASS / 290 XFAIL / 0 FAIL / 0 XPASS** across 1520 conversations — every script exits 0
+
 
 

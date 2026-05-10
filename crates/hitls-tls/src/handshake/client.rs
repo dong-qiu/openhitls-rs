@@ -1362,9 +1362,10 @@ impl ClientHandshake {
 
 /// Extract handshake body from message data (skip 4-byte header).
 fn get_body(msg_data: &[u8]) -> Result<&[u8], TlsError> {
-    if msg_data.len() <= 4 {
+    // Phase T91 — see server.rs `get_body` for rationale.
+    if msg_data.len() < 4 {
         return Err(TlsError::HandshakeFailed(
-            "handshake message too short".into(),
+            "handshake message too short (decode_error)".into(),
         ));
     }
     Ok(&msg_data[4..])

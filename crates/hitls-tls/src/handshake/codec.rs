@@ -407,14 +407,25 @@ pub fn decode_certificate_verify(data: &[u8]) -> Result<CertificateVerifyMsg, Tl
 // ---------------------------------------------------------------------------
 
 /// Decode a Finished message from handshake body bytes.
+///
+/// Phase T91 — RFC 8446 §4.4.4: "verify_data: ... The value
+/// `Hash.length` bytes of verify_data". The body length must be
+/// **exactly** `hash_len`; any deviation (truncation, padding,
+/// trailing bytes) is a decode error and the peer must be told via
+/// `decode_error` (50). The error message intentionally contains
+/// the substring `"decode"` so `alert::tls_error_to_alert` routes
+/// it to `AlertDescription::DecodeError`.
 pub fn decode_finished(data: &[u8], hash_len: usize) -> Result<FinishedMsg, TlsError> {
-    if data.len() < hash_len {
-        return Err(TlsError::HandshakeFailed(
-            "Finished: verify_data too short".into(),
-        ));
+    if data.len() != hash_len {
+        return Err(TlsError::HandshakeFailed(format!(
+            "Finished: verify_data wrong length (decode_error — \
+             expected {} bytes, got {})",
+            hash_len,
+            data.len()
+        )));
     }
     Ok(FinishedMsg {
-        verify_data: data[..hash_len].to_vec(),
+        verify_data: data.to_vec(),
     })
 }
 
@@ -1087,6 +1098,29 @@ mod tests {
 
         // Too short
         assert!(decode_finished(&[0x00; 16], 32).is_err());
+    }
+
+    /// Phase T91 — RFC 8446 §4.4.4: verify_data MUST be exactly
+    /// `Hash.length` bytes. Any deviation must be a decode error
+    /// (not silent truncation as the pre-T91 code did).
+    #[test]
+    fn test_decode_finished_strict_length() {
+        // Exact length OK.
+        assert!(decode_finished(&[0xAA; 32], 32).is_ok());
+        assert!(decode_finished(&[0xBB; 48], 48).is_ok());
+        // Empty body — must be rejected.
+        assert!(decode_finished(&[], 32).is_err());
+        // 1 byte short.
+        assert!(decode_finished(&[0xCC; 31], 32).is_err());
+        // 1 byte long — pre-T91 silently truncated to 32; post-T91 rejects.
+        let err = decode_finished(&[0xDD; 33], 32).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("decode_error") || msg.contains("wrong length"),
+            "error must signal decode_error, got: {msg}"
+        );
+        // Way too long.
+        assert!(decode_finished(&[0xEE; 1024], 32).is_err());
     }
 
     #[test]

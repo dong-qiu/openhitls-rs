@@ -1363,9 +1363,16 @@ fn verify_binder(
 
 /// Extract handshake body from message data (skip 4-byte header).
 fn get_body(msg_data: &[u8]) -> Result<&[u8], TlsError> {
-    if msg_data.len() <= 4 {
+    // Phase T91 — must be at least the 4-byte header. Zero-length
+    // bodies are valid for some message types (EndOfEarlyData,
+    // ServerHelloDone in 1.2) so the per-message decoder enforces
+    // its own length contract from here. This used to be `<= 4`,
+    // which folded "header-only" into "too short" and produced a
+    // generic `handshake_failure` for malformed Finished etc.
+    // instead of the more specific `decode_error`.
+    if msg_data.len() < 4 {
         return Err(TlsError::HandshakeFailed(
-            "handshake message too short".into(),
+            "handshake message too short (decode_error)".into(),
         ));
     }
     Ok(&msg_data[4..])
