@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T93 (92 phases, T64 skipped)
+- Testing: T1–T94 (93 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -298,6 +298,7 @@ Category summary:
 | 286 | T91 | Test | TLS 1.3 Finished framing fix (RFC 8446 §4.4.4 strict verify_data length) + zero-body handshake message handling | 2026-05-10 |
 | 287 | T92 | Test | tlsfuzzer TLS 1.3 curated set expansion 6 → 17 scripts (HRR / KeyUpdate / sig_algs / record limits / EdDSA / RSA-PSS / etc.) | 2026-05-10 |
 | 288 | T93 | Test | tlsfuzzer cert-matrix — ECDSA P-256 + Ed25519 server cert variants + per-cert XFAIL dirs | 2026-05-10 |
+| 289 | T94 | Test | tlsfuzzer NewSessionTicket emission count + 0-RTT-garbage edge cases (PSK/mTLS/DTLS deferred) | 2026-05-10 |
 
 ---
 
@@ -15798,6 +15799,91 @@ No Rust code changes — purely test-fixture / CI / XFAIL bookkeeping. Project-t
 - `cargo fmt --all -- --check`: clean (no Rust changes)
 - tlsfuzzer cert-matrix sub-aggregate (4 runs: 2 ECDSA + 2 Ed25519): **19 PASS / 6 XFAIL / 0 FAIL / 0 XPASS**, all exit 0
 - tlsfuzzer combined aggregate (30 curated scripts: 17 RSA-1.3 + 9 RSA-1.2 + 2 ECDSA-1.3 + 2 Ed25519-1.3, CI sampling): **1808 PASS / 251 XFAIL / 0 FAIL / 0 XPASS**, total wall-clock ~80 s
+
+## Phase T94 — tlsfuzzer NewSessionTicket Emission Count + 0-RTT-Garbage Edge Cases (PSK / mTLS / DTLS Deferred) (2026-05-10)
+
+### Summary
+
+T94 was originally scoped (in the T90→T94 rolling plan) as "PSK / 0-RTT / mTLS / DTLS / client-side harness". After probing the candidate scripts honestly, only the no-CLI-work subset is closeable in this phase:
+
+- **NewSessionTicket emission count** (`test-tls13-count-tickets.py`) — **3/3 PASS clean**. Validates that our TLS 1.3 server emits the expected number of NSTs after handshake completion. (Previously not in the curated set; cheap win.)
+- **0-RTT garbage edge cases** (`test-tls13-0rtt-garbage.py`) — 4/11 PASS, 7 XFAIL. The 4 PASSing cases exercise the no-early-data branch (CH that doesn't try to send 0-RTT data), which our server handles correctly. The 7 XFAIL'd cases all involve actual early-data sending which our `s-server` CLI doesn't currently advertise (no `--max-early-data-size` flag).
+
+The bigger items in the original scope — PSK (`test-tls13-psk_ke.py`, `psk_dhe_ke.py`, `session-resumption.py`), mTLS (`test-tls13-certificate-request.py`, `certificate-verify.py`, `post-handshake-auth.py`), DTLS (no DTLS server CLI mode), and client-side harness — all need either CLI flag work, server feature work, or a different test framework (tlsfuzzer is server-driven by design). Each is queued as its own future T- or I-phase with concrete next steps.
+
+### Methodology — what was probed
+
+Quick-fire probe against the RSA TLS 1.3 server (no XFAIL applied yet) of all PSK / 0-RTT / mTLS / session-resumption candidates:
+
+| Script | Score | Disposition |
+|--------|------:|-------------|
+| `test-tls13-count-tickets.py` | 3/3 | **Add to curated set, no XFAIL.** |
+| `test-tls13-0rtt-garbage.py` | 4/11 | **Add to curated set with 7-entry XFAIL** (early-data scenarios). |
+| `test-tls13-session-resumption.py` | 0/7 | Defer — even sanity fails (echo-server-vs-protocol-abort mismatch + lack of PSK ticket flow). Requires session-ticket round-trip support in the test harness. |
+| `test-tls13-psk_ke.py` | 0/2 | Defer — needs server-side PSK setup. |
+| `test-tls13-psk_dhe_ke.py` | 0/4 | Defer — same. |
+| `test-tls13-post-handshake-auth.py` | (script error) | Defer — script needs client-cert + key arguments. |
+| `test-tls13-certificate-request.py` | (script error) | Defer — same. |
+| `test-tls13-certificate-verify.py` | (script error) | Defer — same. |
+
+### Code changes
+
+None. T94 is pure test-fixture and CI workflow work.
+
+### XFAIL file added (T94)
+
+| File | Entries | Category |
+|------|--------:|----------|
+| `tests/tlsfuzzer/xfail/test-tls13-0rtt-garbage.txt` | 7 | All early-data-sending scenarios. Server doesn't advertise `early_data` in NSTs (CLI flag missing) → client's 0-RTT records hit the no-early-data path which currently closes without `unexpected_message` alert. Two-part fix scheduled: (a) `--max-early-data-size N` CLI flag; (b) server read-loop alert-on-unexpected-early-data. Underlying TLS 1.3 0-RTT code already exists (Phase I21). |
+
+### CI workflow change
+
+`.github/workflows/tlsfuzzer.yml` — TLS 1.3 `scripts=()` array extended from 17 to 19 entries (adds `test-tls13-count-tickets.py` and `test-tls13-0rtt-garbage.py`). No other workflow changes — the existing 4-server / 3-cert layout is unchanged; the cert-matrix and TLS 1.2 lists are unchanged.
+
+### Tlsfuzzer baseline (post-T94)
+
+| Phase | Scripts | TOTAL | PASS | XFAIL | FAIL |
+|-------|--------:|------:|-----:|------:|-----:|
+| Post-T93 (CI sampling) | 30 | 2059 | 1808 | 251 | 0 |
+| **Post-T94 (CI sampling)** | **32** | **2073** (+14) | **1815** (+7) | **258** (+7) | **0** |
+
+Wall-clock unchanged at ~80 s. All 32 scripts exit 0; CI gating unchanged.
+
+### What's left from the T90→T94 plan
+
+The deferred items, with concrete next-step pointers:
+
+| Area | Blocker | Concrete next step |
+|------|---------|-------------------|
+| **PSK / session resumption** | tlsfuzzer's PSK scripts need a session-ticket round-trip + PSK negotiation hooks; `s_server` doesn't expose ticket-key configuration via CLI | Add `--ticket-key <hex>` / `--psk-identity <id> --psk-key <hex>` CLI flags; underlying code exists since I17/I21 |
+| **0-RTT acceptance** | `s-server` defaults to `max_early_data_size = 0` (no `early_data` advertised in NSTs) | Add `--max-early-data-size <N>` CLI flag + `unexpected_message` alert on stray early_data records |
+| **mTLS** | `s-server` doesn't advertise `CertificateRequest`; `verify_client_cert` config field exists but no CLI flag | Add `--require-client-cert` + `--ca-cert <path>` CLI flags |
+| **DTLS scripts** | No DTLS mode in `s-server` (UDP, sequence numbers, cookies, anti-replay are all separate connection types in `connection_dtls{12,13}`) | Add `--dtls 1.{2,3}` CLI flag that switches to UDP socket + DTLS connection type; tlsfuzzer has dtls/* scripts to drive it |
+| **Client-side hostile-server harness** | tlsfuzzer is server-driven; no upstream alternative covers our `s-client` from a hostile-server angle | Either build a small custom hostile-server harness, or use tls-attacker (Java) which supports both directions |
+
+### Documentation
+
+`docs/tlsfuzzer.md`: phase reference list extended with T94 (script count 30→32) + a "What T94 didn't close" section pointing readers at the deferred areas with concrete next-step CLI flag names.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | Modified | TLS 1.3 `scripts=()` 17 → 19 entries (+2 T94 scripts). |
+| `tests/tlsfuzzer/xfail/test-tls13-0rtt-garbage.txt` | Added | 7 entries with concrete two-part fix path documented. |
+| `docs/tlsfuzzer.md` | Modified | Phase reference list extended with T94 + deferred-areas next-step pointers. |
+
+### Test Count Delta (T94)
+
+No Rust code changes. Project-tracked test counts unchanged at 4208.
+
+### Build Status (Post T94)
+
+- `cargo test --workspace --all-features --release`: 4208 passed, 0 failed, 43 ignored (no Rust changes)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings (no Rust changes)
+- `cargo fmt --all -- --check`: clean (no Rust changes)
+- tlsfuzzer combined aggregate (32 curated scripts: 19 RSA-1.3 + 9 RSA-1.2 + 2 ECDSA-1.3 + 2 Ed25519-1.3, CI sampling): **1815 PASS / 258 XFAIL / 0 FAIL / 0 XPASS**, all exit 0, total wall-clock ~80 s
+
 
 
 

@@ -309,3 +309,30 @@ To run it manually: GitHub Actions → tlsfuzzer → "Run workflow".
   Ed25519 sign-side end-to-end. Cert-matrix sub-aggregate: 19
   PASS / 6 XFAIL / 0 FAIL across 4 runs. Combined post-T93
   baseline: **1808 PASS / 251 XFAIL / 0 FAIL** across 30 scripts.
+
+- T94 — added **NewSessionTicket emission count** coverage
+  (`test-tls13-count-tickets.py`, 3/3 PASS clean) and
+  **0-RTT-garbage edge cases** (`test-tls13-0rtt-garbage.py`,
+  4/11 PASS / 7 XFAIL — the XFAIL'd cases all involve actual
+  early-data sending; our `s-server` doesn't have a
+  `--max-early-data-size` CLI flag yet so 0-RTT-accepting paths
+  can't be exercised). Combined post-T94 baseline: **1815 PASS
+  / 258 XFAIL / 0 FAIL** across 32 scripts.
+
+  **Deferred from T94's original scope**, with concrete blockers:
+    - **PSK / session resumption** (test-tls13-psk_*, session-
+      resumption.py) — needs `--ticket-key` / `--psk-identity` /
+      `--psk-key` CLI flags on `s-server`. Underlying TLS 1.3
+      PSK code exists since I17/I21.
+    - **0-RTT acceptance** — needs `--max-early-data-size <N>`
+      CLI flag + server read-loop alert-on-stray-early-data.
+    - **mTLS** (test-tls13-certificate-request, certificate-verify,
+      post-handshake-auth) — needs `--require-client-cert` +
+      `--ca-cert <path>` CLI flags. `verify_client_cert` config
+      field exists.
+    - **DTLS** scripts — no DTLS mode in `s-server`; would need
+      `--dtls 1.{2,3}` CLI flag + UDP socket switch.
+    - **Client-side hostile-server harness** — tlsfuzzer is
+      server-driven by design; either build a small custom
+      harness or switch to tls-attacker (Java) which supports
+      both directions.

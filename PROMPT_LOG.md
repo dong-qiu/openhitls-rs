@@ -4708,3 +4708,28 @@ CI workflow's per-cert script loop sets `XFAIL_DIR=…` before invoking `run.sh`
 **Tlsfuzzer aggregate** (30 curated scripts: 17 RSA-1.3 + 9 RSA-1.2 + 2 ECDSA-1.3 + 2 Ed25519-1.3, CI sampling): **1808 PASS / 251 XFAIL / 0 FAIL / 0 XPASS** in ~80 s. Cert-matrix sub-aggregate: 19 PASS / 6 XFAIL / 0 FAIL across 4 runs.
 
 **No Rust code changes** — pure test-fixture / CI / XFAIL bookkeeping. Test counts unchanged at 4208. Clippy 0; fmt clean.
+
+### Prompt 298: T94 — PSK / 0-RTT / mTLS / DTLS subset (the no-CLI-work parts)
+
+> 继续T94
+
+**Result**: T94 was scoped broadly in the T90→T94 plan as "PSK / 0-RTT / mTLS / DTLS / client-side harness". After probing each candidate honestly, only the no-CLI-work subset is closeable in this phase:
+
+- **`test-tls13-count-tickets.py`** — **3/3 PASS clean**. Validates TLS 1.3 server's NewSessionTicket emission count.
+- **`test-tls13-0rtt-garbage.py`** — 4/11 PASS, 7 XFAIL. The 4 PASSing cases exercise the no-early-data branch which works correctly. The 7 XFAIL'd cases all involve actual early-data sending — our `s-server` doesn't have a `--max-early-data-size` CLI flag (the underlying TLS 1.3 0-RTT code from I21 exists, just not wired through the CLI), so client's 0-RTT records hit the no-early-data path which currently closes without `unexpected_message` alert.
+
+**Probed-but-deferred** with concrete blockers:
+- PSK / session resumption (`test-tls13-psk_ke.py` 0/2, `psk_dhe_ke.py` 0/4, `session-resumption.py` 0/7) — needs `--ticket-key` / `--psk-identity --psk-key` CLI flags; underlying code exists since I17/I21
+- mTLS (`test-tls13-certificate-request.py` / `certificate-verify.py` / `post-handshake-auth.py` — script-level errors because they need client cert+key) — needs `--require-client-cert` / `--ca-cert` CLI flags
+- DTLS — no DTLS mode in `s-server` (UDP, sequence numbers, cookies are separate connection types)
+- Client-side hostile-server harness — tlsfuzzer is server-driven by design; would need custom harness or switch to tls-attacker (Java)
+
+Each is queued as its own future T- or I- phase with concrete next-step CLI flag names documented in DEV_LOG.
+
+**+1 XFAIL file** `tests/tlsfuzzer/xfail/test-tls13-0rtt-garbage.txt` (7 entries) with two-part fix path documented (CLI flag + alert-on-unexpected-early-data).
+
+**CI workflow** — TLS 1.3 `scripts=()` 17 → 19 entries. No other workflow changes — 4-server / 3-cert layout unchanged.
+
+**Tlsfuzzer aggregate** (32 curated scripts: 19 RSA-1.3 + 9 RSA-1.2 + 2 ECDSA + 2 Ed25519, CI sampling): **1815 PASS / 258 XFAIL / 0 FAIL / 0 XPASS** in ~80 s.
+
+**No Rust code changes** — pure test-fixture / CI / XFAIL bookkeeping. Test counts unchanged at 4208. Clippy 0; fmt clean.

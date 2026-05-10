@@ -183,6 +183,14 @@ jobs:
             test-tls13-keyupdate-from-server.py
             test-tls13-eddsa.py
             test-tls13-finished-plaintext.py
+            # T94 additions (2):
+            # NewSessionTicket emission count + 0-RTT-garbage edge
+            # cases (the 0-RTT-accepting paths themselves are XFAIL'd
+            # — `s-server` doesn't have a `--max-early-data-size`
+            # flag yet, so we can only exercise the no-early-data
+            # branch here).
+            test-tls13-count-tickets.py
+            test-tls13-0rtt-garbage.py
           )
           # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
           # on $HITLS_PORT_12. The cipher arg `-C 49199` lives in
