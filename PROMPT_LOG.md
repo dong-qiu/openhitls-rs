@@ -4733,3 +4733,33 @@ Each is queued as its own future T- or I- phase with concrete next-step CLI flag
 **Tlsfuzzer aggregate** (32 curated scripts: 19 RSA-1.3 + 9 RSA-1.2 + 2 ECDSA + 2 Ed25519, CI sampling): **1815 PASS / 258 XFAIL / 0 FAIL / 0 XPASS** in ~80 s.
 
 **No Rust code changes** — pure test-fixture / CI / XFAIL bookkeeping. Test counts unchanged at 4208. Clippy 0; fmt clean.
+
+### Prompt 299: T95 — close the 2 highest-ROI XFAIL clusters (P0 RSA-PSS sha384/512 + P1 CVE-2020-25648 multi-CCS)
+
+> 做 T95
+
+**Result**: Two real production bugs surfaced by the post-T94 XFAIL audit, both closed in this phase:
+
+**P0 — RSA-PSS hardcoded to SHA-256.** Root cause: `rsa::pss` had `H_LEN = 32` baked in everywhere — `pss_sign_pad` / `pss_verify_unpad` rejected any digest != 32 bytes; `pss_encode` used `Sha256::new()` for the inner H computation; MGF was hardcoded to SHA-256. `sign(RsaPadding::Pss, ...)` with a SHA-384/512 digest returned `CryptoError::InvalidArg("")`, surfacing through TLS 1.3 as `internal_error` (80). Real interop blocker.
+
+Fix: rewrote `rsa::pss` to thread `RsaHashAlg` through M' and MGF1; legacy SHA-256 functions kept as thin wrappers (no other callers broken). +`mgf1_with_hash`, +`RsaPrivateKey::sign_pss(digest, alg)`, +`RsaPublicKey::verify_pss(digest, sig, alg)`. Existing `RsaPadding::Pss` enum stays SHA-256-only. TLS handshake `signing.rs` + `verify.rs` thread the right `RsaHashAlg` based on chosen `SignatureScheme`. Default `signature_algorithms` extended to advertise PSS-SHA-384/512 + ECDSA-SECP384R1-SHA384.
+
+Effect: `test-tls13-rsa-signatures.py` 6/8 → **8/8 PASS**. XFAIL file deleted.
+
+**P1 — CVE-2020-25648 multi-CCS hardening missing.** Root cause: TLS 1.3 read loop accepted any number of well-formed CCS records during handshake (silently dropping each per RFC 8446 §D.4 carve-out). Mainstream impls accept exactly one per handshake "round".
+
+Fix: +`pub(super) ccs_seen_in_handshake: bool` field on all 4 TLS 1.3 connection types. `read_record_body_tls13!` macro: if a well-formed `[0x01]` CCS arrives during handshake AND the flag is already true → reject with `unexpected_message`; otherwise silently drop + set flag.
+
+**Crucial subtlety caught by an integration-test regression**: legitimate HRR flow has the server sending CCS twice (post-HRR + post-SH at the next round). Initial implementation over-rejected. Fix: reset `ccs_seen_in_handshake` whenever a non-CCS handshake record arrives — same-round duplicate CCS (the actual CVE attack pattern) still rejected, HRR-then-SH double CCS at *different* rounds accepted. `test_tls13_group_mismatch_triggers_hrr` regression test green again, T95 unit test still green.
+
+Effect: `test-tls13-multiple-ccs-messages.py` 4/7 → **7/7 PASS**. XFAIL file deleted.
+
+**+2 unit/integration tests**:
+- `test_rsa_pss_sign_verify_all_hashes` (rsa/mod.rs) — sign+verify roundtrip across SHA-256/384/512.
+- `test_tls13_server_rejects_second_ccs_during_handshake` (protocol_attacks.rs) — wire-level second-CCS rejection.
+
+**Probed-adjacent (not closed)**: `test-tls13-rsapss-signatures.py` (0/8) needs a server cert with the RSASSA-PSS SPKI OID (1.2.840.113549.1.1.10) instead of standard rsaEncryption — separate cert-matrix gap.
+
+**Tlsfuzzer aggregate**: 1815 PASS / 258 XFAIL → **1819 PASS / 254 XFAIL / 0 FAIL** (+4/-4; the math is +5/-5 closed but version-negotiation's random sampling shifts ~1 between runs).
+
+Tests: 4208 → 4210 (+2). hitls-crypto 1494 → 1495; hitls-integration-tests 267 → 268. All build configs clean. Clippy on Rust 1.95: 0 warnings. Fmt clean.

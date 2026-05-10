@@ -46,15 +46,33 @@ pub fn verify_certificate_verify(
     let ok = match scheme {
         SignatureScheme::RSA_PSS_RSAE_SHA256 => {
             let digest = compute_sha256(&content)?;
-            verify_rsa_pss(spki, &digest, signature)?
+            verify_rsa_pss(
+                spki,
+                &digest,
+                signature,
+                hitls_crypto::rsa::RsaHashAlg::Sha256,
+            )?
         }
         SignatureScheme::RSA_PSS_RSAE_SHA384 => {
+            // Phase T95 — pair the digest with the matching PSS hash.
+            // Pre-T95 verify_rsa_pss called `RsaPadding::Pss` (SHA-256
+            // only) which would reject the 48-byte digest.
             let digest = compute_sha384(&content)?;
-            verify_rsa_pss(spki, &digest, signature)?
+            verify_rsa_pss(
+                spki,
+                &digest,
+                signature,
+                hitls_crypto::rsa::RsaHashAlg::Sha384,
+            )?
         }
         SignatureScheme::RSA_PSS_RSAE_SHA512 => {
             let digest = compute_sha512(&content)?;
-            verify_rsa_pss(spki, &digest, signature)?
+            verify_rsa_pss(
+                spki,
+                &digest,
+                signature,
+                hitls_crypto::rsa::RsaHashAlg::Sha512,
+            )?
         }
         SignatureScheme::ECDSA_SECP256R1_SHA256 => {
             let digest = compute_sha256(&content)?;
@@ -123,6 +141,7 @@ fn verify_rsa_pss(
     spki: &SubjectPublicKeyInfo,
     digest: &[u8],
     signature: &[u8],
+    alg: hitls_crypto::rsa::RsaHashAlg,
 ) -> Result<bool, TlsError> {
     // RSA SPKI public_key is DER: SEQUENCE { modulus INTEGER, exponent INTEGER }
     let mut key_dec = Decoder::new(&spki.public_key);
@@ -137,8 +156,10 @@ fn verify_rsa_pss(
         .map_err(|e| TlsError::HandshakeFailed(format!("RSA exponent parse: {e}")))?;
 
     let rsa_pub = hitls_crypto::rsa::RsaPublicKey::new(n, e).map_err(TlsError::CryptoError)?;
+    // Phase T95 — verify_pss threads the hash algorithm through M' /
+    // MGF1; the legacy `verify(RsaPadding::Pss, ...)` path is SHA-256 only.
     rsa_pub
-        .verify(hitls_crypto::rsa::RsaPadding::Pss, digest, signature)
+        .verify_pss(digest, signature, alg)
         .map_err(TlsError::CryptoError)
 }
 

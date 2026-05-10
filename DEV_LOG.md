@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T94 (93 phases, T64 skipped)
+- Testing: T1–T95 (94 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -299,6 +299,7 @@ Category summary:
 | 287 | T92 | Test | tlsfuzzer TLS 1.3 curated set expansion 6 → 17 scripts (HRR / KeyUpdate / sig_algs / record limits / EdDSA / RSA-PSS / etc.) | 2026-05-10 |
 | 288 | T93 | Test | tlsfuzzer cert-matrix — ECDSA P-256 + Ed25519 server cert variants + per-cert XFAIL dirs | 2026-05-10 |
 | 289 | T94 | Test | tlsfuzzer NewSessionTicket emission count + 0-RTT-garbage edge cases (PSK/mTLS/DTLS deferred) | 2026-05-10 |
+| 290 | T95 | Test | RSA-PSS SHA-384/512 sign+verify generalisation (P0) + CVE-2020-25648 multi-CCS hardening (P1) | 2026-05-10 |
 
 ---
 
@@ -15883,6 +15884,140 @@ No Rust code changes. Project-tracked test counts unchanged at 4208.
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings (no Rust changes)
 - `cargo fmt --all -- --check`: clean (no Rust changes)
 - tlsfuzzer combined aggregate (32 curated scripts: 19 RSA-1.3 + 9 RSA-1.2 + 2 ECDSA-1.3 + 2 Ed25519-1.3, CI sampling): **1815 PASS / 258 XFAIL / 0 FAIL / 0 XPASS**, all exit 0, total wall-clock ~80 s
+
+## Phase T95 — RSA-PSS SHA-384/512 Sign+Verify Generalisation (P0) + CVE-2020-25648 Multi-CCS Hardening (P1) (2026-05-10)
+
+### Summary
+
+Two real production bugs surfaced by the post-T94 XFAIL audit, both closed in this phase:
+
+**P0 — RSA-PSS hardcoded to SHA-256.** Our `rsa::pss` module had `H_LEN = 32` baked in everywhere: `pss_sign_pad` / `pss_verify_unpad` rejected any digest != 32 bytes; `pss_encode` used `Sha256::new()` for the inner H computation; MGF was hardcoded to SHA-256. Net effect: `sign(RsaPadding::Pss, ...)` with a SHA-384 (48 bytes) or SHA-512 (64 bytes) digest returned `CryptoError::InvalidArg("")`, which surfaced through TLS 1.3 as `internal_error` (80) when the peer constrained `signature_algorithms` to `rsa_pss_rsae_sha384` or `rsa_pss_rsae_sha512`. Real interop blocker, not just a tlsfuzzer expectation mismatch.
+
+**P1 — CVE-2020-25648 multi-CCS hardening missing.** Our TLS 1.3 read loop accepted *any* number of well-formed CCS records during the handshake (silently dropping each per RFC 8446 §D.4 middlebox-compat). RFC 8446 §5 *permits* multiple CCS but doesn't require accepting them; mainstream implementations (OpenSSL/BoringSSL/NSS post-CVE-2020-25648) accept exactly one CCS per handshake "round" to shrink the state-machine attack surface.
+
+### P0 — RSA-PSS hash generalisation
+
+**`crates/hitls-crypto/src/rsa/pss.rs`** rewritten to thread `RsaHashAlg` through:
+
+| Old (SHA-256 only) | New (parameterised) |
+|--------------------|---------------------|
+| `pss_sign_pad(digest, em_bits)` | + `pss_sign_pad_alg(digest, em_bits, alg)` |
+| `pss_sign_pad_with_salt(digest, em_bits, sl)` | + `pss_sign_pad_with_salt_alg(...)` |
+| `pss_verify_unpad(em, digest, em_bits)` | + `pss_verify_unpad_alg(em, digest, em_bits, alg)` |
+| `pss_verify_unpad_with_salt(...)` | + `pss_verify_unpad_with_salt_alg(...)` |
+| `pss_encode(...)` (used by tests) | refactored to call `pss_encode_alg(...)` |
+
+The legacy SHA-256 functions are kept as thin wrappers that call the `_alg` variants with `RsaHashAlg::Sha256` → all pre-existing callers (`hitls-pki`, TLS 1.2 verify paths, Wycheproof harness, benches) keep working without change.
+
+**`crates/hitls-crypto/src/rsa/mod.rs`** — generalised MGF1:
+
+| Old | New |
+|-----|-----|
+| `mgf1_sha256(seed, mask_len)` | + `mgf1_with_hash(seed, mask_len, alg)` |
+
+Plus 2 new public methods on the RSA key types:
+
+```rust
+impl RsaPrivateKey {
+    pub fn sign_pss(&self, digest: &[u8], alg: RsaHashAlg) -> Result<Vec<u8>, CryptoError>;
+}
+impl RsaPublicKey {
+    pub fn verify_pss(&self, digest: &[u8], signature: &[u8], alg: RsaHashAlg)
+        -> Result<bool, CryptoError>;
+}
+```
+
+`sign(RsaPadding::Pss, digest)` and `verify(RsaPadding::Pss, ...)` continue to work as SHA-256-only (backward compat).
+
+**`crates/hitls-tls/src/handshake/signing.rs`** — RSA branch in `sign_certificate_verify` now selects the correct hash + uses `sign_pss(digest, alg)` instead of `sign(RsaPadding::Pss, digest)`.
+
+**`crates/hitls-tls/src/handshake/verify.rs`** — `verify_rsa_pss` now takes an `alg: RsaHashAlg` parameter and dispatches to `verify_pss(...)`. The 3 `RSA_PSS_RSAE_*` arms in `verify_certificate_verify` thread the matching `RsaHashAlg` through.
+
+**`crates/hitls-tls/src/config/mod.rs`** — default `signature_algorithms` extended from `[RSA_PSS_RSAE_SHA256, ECDSA_SECP256R1_SHA256, ED25519]` to also include `RSA_PSS_RSAE_SHA384`, `RSA_PSS_RSAE_SHA512`, `ECDSA_SECP384R1_SHA384` so the server actually advertises the schemes the new PSS code can satisfy.
+
+### P1 — CVE-2020-25648 multi-CCS hardening
+
+**`crates/hitls-tls/src/connection/{client,server}.rs`** + **`connection_async.rs`** — added `pub(super) ccs_seen_in_handshake: bool` field to all 4 TLS 1.3 connection types (sync + async × client + server). Initialised to `false` in each constructor.
+
+**`crates/hitls-tls/src/macros.rs::read_record_body_tls13!`** — when a well-formed `[0x01]` CCS arrives during handshake:
+
+1. If `ccs_seen_in_handshake` is already true → reject with `unexpected_message` (CVE-2020-25648 hardening).
+2. Otherwise → silently drop, set `ccs_seen_in_handshake = true`, continue.
+
+**Crucial subtlety**: in legitimate HelloRetryRequest flow the server sends CCS twice (once after HRR, once after the SH for the retried CH2). Both are RFC-legitimate. To preserve that: when a non-CCS `Handshake` record arrives (next handshake "round"), `ccs_seen_in_handshake` resets to false. So:
+
+- Same-round duplicate CCS (the actual CVE-2020-25648 attack pattern) → rejected.
+- HRR-then-SH double CCS at different rounds → accepted (interleaved with handshake messages).
+
+Caught by an integration-test regression on first attempt — `test_tls13_group_mismatch_triggers_hrr` failed because the over-strict initial implementation rejected the legitimate post-SH CCS. Reset-on-handshake-msg fixed it without weakening the CVE-relevant rejection (verified by re-running both the HRR test and the new T95 unit test).
+
+### Tests
+
+**+1 unit test** `crates/hitls-crypto/src/rsa/mod.rs::test_rsa_pss_sign_verify_all_hashes` — generates a 2048-bit RSA key (large enough for PSS-SHA-512: emLen ≥ hLen + sLen + 2 = 64 + 64 + 2 = 130 bytes, requires modBits ≥ 1041), runs sign+verify roundtrips for SHA-256 / 384 / 512, asserts wrong-hash-alg verification fails (different M' / MGF1) and tampered-digest verification fails.
+
+**+1 wire-level integration test** `tests/interop/tests/protocol_attacks.rs::test_tls13_server_rejects_second_ccs_during_handshake` — sends two well-formed CCS records back-to-back to a real TLS 1.3 server. First is silently dropped; second must trigger `HandshakeFailed("second ChangeCipherSpec ... CVE-2020-25648 ...")`.
+
+### XFAIL files closed
+
+| File | Status | Why |
+|------|--------|-----|
+| `tests/tlsfuzzer/xfail/test-tls13-rsa-signatures.txt` | **Deleted** | P0 closed both entries (`rsa_pss_rsae_sha384`, `rsa_pss_rsae_sha512`); `test-tls13-rsa-signatures.py` now 8/8 PASS clean. |
+| `tests/tlsfuzzer/xfail/test-tls13-multiple-ccs-messages.txt` | **Deleted** | P1 closed all 3 entries; `test-tls13-multiple-ccs-messages.py` now 7/7 PASS clean. |
+
+### Tlsfuzzer baseline (post-T95)
+
+| Phase | PASS | XFAIL | FAIL |
+|-------|-----:|------:|-----:|
+| Post-T94 | 1815 | 258 | 0 |
+| **Post-T95** | **1819** (+4) | **254** (-4) | **0** |
+
+(Net delta is +4/-4 instead of +5/-5 because version-negotiation's random sampling picks a slightly different XFAIL count between runs — gating signal `FAIL=0 / XPASS=0` is invariant.)
+
+Per-script delta:
+- `test-tls13-rsa-signatures.py`: 6/8 PASS / 2 XFAIL → **8/8 PASS / 0 XFAIL**
+- `test-tls13-multiple-ccs-messages.py`: 4/7 PASS / 3 XFAIL → **7/7 PASS / 0 XFAIL**
+- `test-tls13-ccs.py`: 5/5 PASS sustained (regression check ✓)
+
+### Probed-adjacent (not closed in T95)
+
+`test-tls13-rsapss-signatures.py` (0/8 PASS) is NOT closed by T95. Its failures are from constraining `signature_algorithms` to `rsa_pss_pss_sha*` (RSASSA-PSS SPKI OID 1.2.840.113549.1.1.10) which requires a server cert with the PSS-only OID, not the standard `rsaEncryption` OID we use. Separate cert-matrix gap, deferred.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/rsa/pss.rs` | Modified | Generalised PSS to all 3 SHA-2 hash sizes; legacy SHA-256 wrappers preserved for backward compat. |
+| `crates/hitls-crypto/src/rsa/mod.rs` | Modified | +`mgf1_with_hash` (parameterised MGF1); +`sign_pss(digest, alg)` and `verify_pss(digest, sig, alg)` public methods; +1 unit test pinning sign+verify roundtrip across SHA-256/384/512. |
+| `crates/hitls-tls/src/handshake/signing.rs` | Modified | RSA branch dispatches to `sign_pss(digest, alg)` based on chosen `SignatureScheme`. |
+| `crates/hitls-tls/src/handshake/verify.rs` | Modified | `verify_rsa_pss` takes an `alg` parameter; 3 `RSA_PSS_RSAE_*` arms thread the right hash through. |
+| `crates/hitls-tls/src/config/mod.rs` | Modified | Default `signature_algorithms` extended with PSS-SHA-384/512 + ECDSA-SECP384R1-SHA384. |
+| `crates/hitls-tls/src/connection/client.rs` | Modified | +`ccs_seen_in_handshake: bool` field + initialiser. |
+| `crates/hitls-tls/src/connection/server.rs` | Modified | Same. |
+| `crates/hitls-tls/src/connection_async.rs` | Modified | Same for sync-async client + server. |
+| `crates/hitls-tls/src/macros.rs` | Modified | `read_record_body_tls13!` rejects second CCS within the same handshake round; resets the flag on next non-CCS handshake message. |
+| `tests/interop/tests/protocol_attacks.rs` | Modified | +1 wire-level test pinning second-CCS rejection. |
+| `tests/tlsfuzzer/xfail/test-tls13-rsa-signatures.txt` | **Deleted** | P0 closed. |
+| `tests/tlsfuzzer/xfail/test-tls13-multiple-ccs-messages.txt` | **Deleted** | P1 closed. |
+
+### Test Count Delta (T95)
+
+| Crate | Pre-T95 | Post-T95 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-crypto | 1494 | 1495 | +1 |
+| hitls-tls | 1531 | 1531 | — |
+| hitls-integration-tests | 267 | 268 | +1 |
+| **Total** | **4208** | **4210** | **+2** |
+
+### Build Status (Post T95)
+
+- `cargo test --workspace --all-features --release`: 4167 passed, 0 failed, 43 ignored (project-tracked aggregate 4210, +2 over post-T94)
+- `cargo test -p hitls-crypto --release --lib --all-features test_rsa_pss_sign_verify_all_hashes`: 1 passed (new T95 unit test)
+- `cargo test -p hitls-integration-tests --release --test protocol_attacks test_tls13_server_rejects_second_ccs_during_handshake`: 1 passed
+- `cargo test -p hitls-integration-tests --release test_tls13_group_mismatch_triggers_hrr`: 1 passed (HRR regression check after multi-CCS reset-on-handshake fix)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- tlsfuzzer aggregate (32 curated scripts, CI sampling): **1819 PASS / 254 XFAIL / 0 FAIL / 0 XPASS**, all exit 0, ~80 s
+
 
 
 

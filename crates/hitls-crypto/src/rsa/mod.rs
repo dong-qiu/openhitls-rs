@@ -132,6 +132,23 @@ impl RsaPublicKey {
         }
     }
 
+    /// Verify a PSS signature with an explicit hash algorithm (Phase T95).
+    /// Use this when the PSS hash is not SHA-256 (the default
+    /// `verify(RsaPadding::Pss, ...)` is SHA-256 only). `digest.len()`
+    /// must equal the output size of `alg`.
+    pub fn verify_pss(
+        &self,
+        digest: &[u8],
+        signature: &[u8],
+        alg: RsaHashAlg,
+    ) -> Result<bool, CryptoError> {
+        if signature.len() != self.k {
+            return Err(CryptoError::RsaVerifyFail);
+        }
+        let em = self.raw_encrypt(signature)?;
+        pss::pss_verify_unpad_alg(&em, digest, self.bits - 1, alg)
+    }
+
     /// Return the key size in bits.
     pub fn bits(&self) -> usize {
         self.bits
@@ -356,6 +373,15 @@ impl RsaPrivateKey {
         }
     }
 
+    /// Sign with PSS using an explicit hash algorithm (Phase T95).
+    /// Use this when the PSS hash is not SHA-256 (the default
+    /// `sign(RsaPadding::Pss, ...)` is SHA-256 only). `digest.len()`
+    /// must equal the output size of `alg`.
+    pub fn sign_pss(&self, digest: &[u8], alg: RsaHashAlg) -> Result<Vec<u8>, CryptoError> {
+        let em = pss::pss_sign_pad_alg(digest, self.bits - 1, alg)?;
+        self.raw_decrypt(&em)
+    }
+
     /// Extract the corresponding public key.
     pub fn public_key(&self) -> RsaPublicKey {
         RsaPublicKey {
@@ -463,21 +489,53 @@ fn generate_rsa_prime(bits: usize, e: &BigNum) -> Result<BigNum, CryptoError> {
     Err(CryptoError::BnPrimeGenFail)
 }
 
-/// MGF1 mask generation function (RFC 8017 B.2.1).
-/// Uses SHA-256 as the hash function.
+/// MGF1 mask generation function (RFC 8017 B.2.1) using SHA-256.
+/// Kept as a thin wrapper for backward compat; new code should use
+/// `mgf1_with_hash` with an explicit hash.
 pub(crate) fn mgf1_sha256(seed: &[u8], mask_len: usize) -> Result<Vec<u8>, CryptoError> {
-    use crate::sha2::Sha256;
+    mgf1_with_hash(seed, mask_len, RsaHashAlg::Sha256)
+}
 
-    let h_len = 32; // SHA-256 output size
+/// MGF1 mask generation function parameterised by hash algorithm
+/// (Phase T95). Output length is `mask_len` bytes.
+pub(crate) fn mgf1_with_hash(
+    seed: &[u8],
+    mask_len: usize,
+    alg: RsaHashAlg,
+) -> Result<Vec<u8>, CryptoError> {
+    use crate::sha2::{Sha256, Sha384, Sha512};
+
+    let h_len = match alg {
+        RsaHashAlg::Sha1 => return Err(CryptoError::InvalidArg("SHA-1 not supported in MGF1")),
+        RsaHashAlg::Sha256 => 32,
+        RsaHashAlg::Sha384 => 48,
+        RsaHashAlg::Sha512 => 64,
+    };
     let iterations = mask_len.div_ceil(h_len);
     let mut t = Vec::with_capacity(iterations * h_len);
 
     for counter in 0..iterations {
-        let mut hasher = Sha256::new();
-        hasher.update(seed)?;
-        hasher.update(&(counter as u32).to_be_bytes())?;
-        let hash = hasher.finish()?;
-        t.extend_from_slice(&hash);
+        match alg {
+            RsaHashAlg::Sha256 => {
+                let mut hasher = Sha256::new();
+                hasher.update(seed)?;
+                hasher.update(&(counter as u32).to_be_bytes())?;
+                t.extend_from_slice(&hasher.finish()?);
+            }
+            RsaHashAlg::Sha384 => {
+                let mut hasher = Sha384::new();
+                hasher.update(seed)?;
+                hasher.update(&(counter as u32).to_be_bytes())?;
+                t.extend_from_slice(&hasher.finish()?);
+            }
+            RsaHashAlg::Sha512 => {
+                let mut hasher = Sha512::new();
+                hasher.update(seed)?;
+                hasher.update(&(counter as u32).to_be_bytes())?;
+                t.extend_from_slice(&hasher.finish()?);
+            }
+            RsaHashAlg::Sha1 => unreachable!(),
+        }
     }
 
     t.truncate(mask_len);
@@ -685,6 +743,64 @@ mod tests {
         bad_digest[0] ^= 0x01;
         let invalid = pub_key.verify(RsaPadding::Pss, &bad_digest, &sig).unwrap();
         assert!(!invalid);
+    }
+
+    /// Phase T95 — PSS sign+verify roundtrip across SHA-256 / SHA-384 /
+    /// SHA-512. Pre-T95, `sign(RsaPadding::Pss, digest)` only accepted
+    /// 32-byte SHA-256 digests; SHA-384 / SHA-512 returned `InvalidArg`.
+    /// The new `sign_pss(digest, alg)` / `verify_pss(digest, sig, alg)`
+    /// API thread the hash through M' and MGF1 properly.
+    #[test]
+    fn test_rsa_pss_sign_verify_all_hashes() {
+        // 2048-bit RSA key — needed because PSS-SHA-512 with sLen=64
+        // requires modBits-1 large enough for emLen >= hLen + sLen + 2
+        // = 64 + 64 + 2 = 130 bytes; 1024-bit (128 bytes) is too small.
+        let priv_key = RsaPrivateKey::generate(2048).unwrap();
+        let pub_key = priv_key.public_key();
+
+        let msg = b"phase t95 verifies pss across hash sizes";
+
+        // SHA-256
+        let mut h256 = crate::sha2::Sha256::new();
+        h256.update(msg).unwrap();
+        let d256 = h256.finish().unwrap().to_vec();
+        let sig256 = priv_key.sign_pss(&d256, RsaHashAlg::Sha256).unwrap();
+        assert!(pub_key
+            .verify_pss(&d256, &sig256, RsaHashAlg::Sha256)
+            .unwrap());
+        // Wrong-hash digest length → InvalidArg from PSS.
+        assert!(pub_key
+            .verify_pss(&d256, &sig256, RsaHashAlg::Sha384)
+            .is_err());
+
+        // SHA-384
+        let mut h384 = crate::sha2::Sha384::new();
+        h384.update(msg).unwrap();
+        let d384 = h384.finish().unwrap().to_vec();
+        let sig384 = priv_key.sign_pss(&d384, RsaHashAlg::Sha384).unwrap();
+        assert!(pub_key
+            .verify_pss(&d384, &sig384, RsaHashAlg::Sha384)
+            .unwrap());
+        // Wrong digest length under SHA-384 → InvalidArg.
+        assert!(pub_key
+            .verify_pss(&d256, &sig384, RsaHashAlg::Sha384)
+            .is_err());
+
+        // SHA-512
+        let mut h512 = crate::sha2::Sha512::new();
+        h512.update(msg).unwrap();
+        let d512 = h512.finish().unwrap().to_vec();
+        let sig512 = priv_key.sign_pss(&d512, RsaHashAlg::Sha512).unwrap();
+        assert!(pub_key
+            .verify_pss(&d512, &sig512, RsaHashAlg::Sha512)
+            .unwrap());
+
+        // Tampered digest fails verification.
+        let mut bad = d384.clone();
+        bad[0] ^= 0x01;
+        assert!(!pub_key
+            .verify_pss(&bad, &sig384, RsaHashAlg::Sha384)
+            .unwrap());
     }
 
     #[test]

@@ -55,6 +55,8 @@ pub struct TlsServerConnection<S: Read + Write> {
     received_close_notify: bool,
     /// Counter for consecutive KeyUpdate messages without application data.
     pub(super) key_update_recv_count: u32,
+    /// Phase T95 (CVE-2020-25648 hardening) — see TlsClientConnection.
+    pub(super) ccs_seen_in_handshake: bool,
 }
 
 impl<S: Read + Write> Drop for TlsServerConnection<S> {
@@ -99,6 +101,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             sent_close_notify: false,
             received_close_notify: false,
             key_update_recv_count: 0,
+            ccs_seen_in_handshake: false,
         }
     }
 

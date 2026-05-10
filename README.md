@@ -2,7 +2,7 @@
 
 A production-grade cryptographic and TLS library in pure Rust, rewritten from [openHiTLS](https://gitee.com/openhitls/openhitls) (C implementation).
 
-> **100% C→Rust feature parity achieved** — 4208 tests, 68 fuzz targets, 5000+ Wycheproof vectors
+> **100% C→Rust feature parity achieved** — 4210 tests, 68 fuzz targets, 5000+ Wycheproof vectors
 
 ## Feature Highlights
 
@@ -23,7 +23,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | CLI Tools | ~8K | ~2.5K | **100%** | 18 commands (dgst, genpkey, x509, s-client, s-server, prime, kdf, etc.) |
 | FIPS/CMVP | ~5K | ~0.6K | **95%** | State machine, 7 KATs, 3 PCTs, integrity check; remaining 5% is C EAL provider wrappers replaced by Rust traits |
 | Base Support | ~12K | ~2K | **95%** | ASN.1, Base64, PEM, OID, error types |
-| Test Infrastructure | ~20K | ~3.5K | **95%** | 4208 tests + Wycheproof + 68 fuzz targets (447 corpus) + OpenSSL TLS interop + security audit |
+| Test Infrastructure | ~20K | ~3.5K | **95%** | 4210 tests + Wycheproof + 68 fuzz targets (447 corpus) + OpenSSL TLS interop + security audit |
 | **Total** | **~460K** | **~55K** | **~100%** | 8.4× code reduction via Rust idioms |
 
 ### Not Migrated (by design)
@@ -260,19 +260,19 @@ openhitls-rs/
 # Build
 cargo build --workspace --all-features
 
-# Run all tests (4208 tests, 43 ignored)
+# Run all tests (4210 tests, 43 ignored)
 # (tlsfuzzer protocol-conformance harness runs via `tests/tlsfuzzer/run.sh` — see docs/tlsfuzzer.md)
 cargo test --workspace --all-features
 
 # Run tests for a specific crate
-cargo test -p hitls-crypto --all-features   # 1494 tests (24 ignored)
+cargo test -p hitls-crypto --all-features   # 1495 tests (24 ignored)
 cargo test -p hitls-tls --all-features      # 1531 tests
 cargo test -p hitls-pki --all-features      # 455 tests
 cargo test -p hitls-bignum                  # 95 tests (1 ignored)
 cargo test -p hitls-utils                   # 78 tests
 cargo test -p hitls-auth --all-features     # 56 tests
 cargo test -p hitls-cli --all-features      # 165 tests (5 ignored)
-cargo test -p hitls-integration-tests       # 267 tests (12 ignored)
+cargo test -p hitls-integration-tests       # 268 tests (12 ignored)
 
 # Lint (zero warnings required)
 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets

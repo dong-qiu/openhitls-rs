@@ -990,3 +990,66 @@ fn test_tls12_server_sends_alert_on_corrupt_appdata() {
 
     server_handle.join().unwrap();
 }
+
+// ============================================================================
+// Phase T95 — TLS 1.3 multi-CCS hardening (CVE-2020-25648).
+//
+// RFC 8446 §5 *permits* multiple ChangeCipherSpec records during the
+// handshake but does not require accepting them. CVE-2020-25648
+// (NSS, fixed in 3.55) showed that lenient acceptance of repeated CCS
+// can be combined with other gaps to confuse state-machine
+// transitions. T95 (matching OpenSSL/BoringSSL/NSS post-fix) accepts
+// exactly one silent CCS during handshake and rejects subsequent
+// CCSes with `unexpected_message`. This test pins the rejection
+// contract end-to-end against a real `TlsServerConnection`.
+// ============================================================================
+
+#[test]
+fn test_tls13_server_rejects_second_ccs_during_handshake() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection::TlsServerConnection;
+    use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+    use std::io::Write;
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::Duration;
+
+    let (cert_chain, server_key) = make_ed25519_server_identity();
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server_handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+        let mut conn = TlsServerConnection::new(stream, server_config);
+        conn.handshake()
+    });
+
+    let mut raw = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+    raw.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    raw.set_write_timeout(Some(Duration::from_secs(5))).ok();
+    // Two well-formed CCS records back-to-back. The first is silently
+    // dropped (RFC 8446 §D.4 middlebox-compat carve-out); the second
+    // must trigger `unexpected_message`.
+    let one_ccs = [0x14, 0x03, 0x03, 0x00, 0x01, 0x01];
+    raw.write_all(&one_ccs).unwrap();
+    raw.write_all(&one_ccs).unwrap();
+
+    let result = server_handle.join().unwrap();
+    let err = result.expect_err("server must reject second CCS during handshake");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("second ChangeCipherSpec") || msg.contains("CVE-2020-25648"),
+        "expected second-CCS rejection message, got: {msg}"
+    );
+}

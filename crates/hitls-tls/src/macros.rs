@@ -106,6 +106,16 @@ macro_rules! read_record_body_tls13 {
                          — RFC 8446 §D.4: alert unexpected_message"
                             .to_string(),
                     )
+                } else if $self.ccs_seen_in_handshake {
+                    // Phase T95 / CVE-2020-25648 hardening — RFC 8446 §5
+                    // *permits* multiple CCS during handshake but we
+                    // accept exactly one (matches OpenSSL/BoringSSL/NSS).
+                    Some(
+                        "second ChangeCipherSpec during handshake \
+                         (CVE-2020-25648 hardening) — RFC 8446 §5: \
+                         alert unexpected_message"
+                            .to_string(),
+                    )
                 } else {
                     None
                 };
@@ -119,7 +129,21 @@ macro_rules! read_record_body_tls13 {
                     // maps it to `AlertDescription::UnexpectedMessage`.
                     return Err(TlsError::HandshakeFailed(reason));
                 }
+                // First (and only) CCS at this handshake round — silently
+                // drop, mark seen, continue the read loop. The flag is
+                // cleared below when a real handshake message arrives,
+                // so the legitimate HRR flow (server sends CCS after
+                // HRR AND after SH at the next round) still works.
+                $self.ccs_seen_in_handshake = true;
                 continue;
+            }
+            // Non-CCS record received → next handshake "round" begins.
+            // Reset the multi-CCS tripwire so a subsequent legitimate
+            // CCS at the new round is accepted (HRR-then-SH case).
+            // Any back-to-back CCSes WITHIN the same round still get
+            // caught (the relevant CVE-2020-25648 attack surface).
+            if ct == ContentType::Handshake {
+                $self.ccs_seen_in_handshake = false;
             }
             break Ok((ct, plaintext));
         }

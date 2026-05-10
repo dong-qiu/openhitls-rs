@@ -96,16 +96,31 @@ pub fn sign_certificate_verify(
             kp.sign(&digest).map_err(TlsError::CryptoError)
         }
         ServerPrivateKey::Rsa { n, d, e, p, q } => {
-            let digest = match scheme {
-                SignatureScheme::RSA_PSS_RSAE_SHA256 => compute_sha256(&content)?,
-                SignatureScheme::RSA_PSS_RSAE_SHA384 => compute_sha384(&content)?,
-                SignatureScheme::RSA_PSS_RSAE_SHA512 => compute_sha512(&content)?,
+            // Phase T95 — pair the digest with the matching PSS hash.
+            // Pre-T95 we always called `sign(RsaPadding::Pss, ...)` which
+            // is SHA-256-only and rejected SHA-384/SHA-512 digests with
+            // `InvalidArg`. The new `sign_pss(digest, alg)` API (added
+            // in the same phase) thread the hash all the way through
+            // M' and MGF1.
+            let (digest, alg) = match scheme {
+                SignatureScheme::RSA_PSS_RSAE_SHA256 => (
+                    compute_sha256(&content)?,
+                    hitls_crypto::rsa::RsaHashAlg::Sha256,
+                ),
+                SignatureScheme::RSA_PSS_RSAE_SHA384 => (
+                    compute_sha384(&content)?,
+                    hitls_crypto::rsa::RsaHashAlg::Sha384,
+                ),
+                SignatureScheme::RSA_PSS_RSAE_SHA512 => (
+                    compute_sha512(&content)?,
+                    hitls_crypto::rsa::RsaHashAlg::Sha512,
+                ),
                 _ => return Err(TlsError::HandshakeFailed("RSA scheme mismatch".into())),
             };
             let rsa_key = hitls_crypto::rsa::RsaPrivateKey::new(n, d, e, p, q)
                 .map_err(TlsError::CryptoError)?;
             rsa_key
-                .sign(hitls_crypto::rsa::RsaPadding::Pss, &digest)
+                .sign_pss(&digest, alg)
                 .map_err(TlsError::CryptoError)
         }
         ServerPrivateKey::Dsa { .. } => Err(TlsError::HandshakeFailed(

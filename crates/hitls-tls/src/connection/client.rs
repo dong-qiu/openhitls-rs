@@ -67,6 +67,12 @@ pub struct TlsClientConnection<S: Read + Write> {
     received_close_notify: bool,
     /// Counter for consecutive KeyUpdate messages without application data.
     pub(super) key_update_recv_count: u32,
+    /// Phase T95 (CVE-2020-25648 hardening) — set on the first
+    /// silent-drop CCS during handshake; subsequent CCSes during the
+    /// same handshake are rejected as `unexpected_message`. RFC 8446
+    /// §5 *permits* multiple CCS but does not require accepting them;
+    /// the stricter behaviour matches OpenSSL/BoringSSL/NSS.
+    pub(super) ccs_seen_in_handshake: bool,
 }
 
 impl<S: Read + Write> Drop for TlsClientConnection<S> {
@@ -112,6 +118,7 @@ impl<S: Read + Write> TlsClientConnection<S> {
             sent_close_notify: false,
             received_close_notify: false,
             key_update_recv_count: 0,
+            ccs_seen_in_handshake: false,
         }
     }
 

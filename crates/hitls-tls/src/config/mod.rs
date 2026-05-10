@@ -437,8 +437,16 @@ impl Default for TlsConfigBuilder {
             alpn_protocols: Vec::new(),
             server_name: None,
             signature_algorithms: vec![
+                // Phase T95 — advertise PSS-SHA-256/384/512 so peers can
+                // pick any of the standard TLS 1.3 RSA-PSS schemes. Pre-T95
+                // only SHA-256 was offered (and SHA-384/512 wouldn't have
+                // worked anyway because the PSS code was hardcoded to
+                // SHA-256 — fixed in this same phase).
                 SignatureScheme::RSA_PSS_RSAE_SHA256,
+                SignatureScheme::RSA_PSS_RSAE_SHA384,
+                SignatureScheme::RSA_PSS_RSAE_SHA512,
                 SignatureScheme::ECDSA_SECP256R1_SHA256,
+                SignatureScheme::ECDSA_SECP384R1_SHA384,
                 SignatureScheme::ED25519,
             ],
             supported_groups: vec![NamedGroup::X25519],

@@ -336,3 +336,26 @@ To run it manually: GitHub Actions → tlsfuzzer → "Run workflow".
       server-driven by design; either build a small custom
       harness or switch to tls-attacker (Java) which supports
       both directions.
+
+- T95 — closed two real production bugs surfaced by the post-T94
+  XFAIL audit:
+  - **P0**: `rsa::pss` was hardcoded to SHA-256, returning
+    `internal_error` for `rsa_pss_rsae_sha384` / `rsa_pss_rsae_sha512`.
+    Generalised PSS to thread `RsaHashAlg` through M' and MGF1
+    (`mgf1_with_hash` + `sign_pss(digest, alg)` /
+    `verify_pss(digest, sig, alg)` API; legacy SHA-256 paths
+    preserved for backward compat). Default `signature_algorithms`
+    extended to advertise PSS-SHA-384/512 + ECDSA-SECP384R1-SHA384.
+    Closed `test-tls13-rsa-signatures.py` (6/8 → **8/8 PASS**).
+  - **P1**: CVE-2020-25648 multi-CCS hardening missing.
+    `read_record_body_tls13!` now tracks `ccs_seen_in_handshake`
+    per connection and rejects same-round duplicate CCS with
+    `unexpected_message`. Reset-on-handshake-msg preserves the
+    legitimate HRR-then-SH double-CCS flow. Closed
+    `test-tls13-multiple-ccs-messages.py` (4/7 → **7/7 PASS**).
+  - +1 unit test (`test_rsa_pss_sign_verify_all_hashes`) and +1
+    wire-level integration test
+    (`test_tls13_server_rejects_second_ccs_during_handshake`).
+  - Combined post-T95 baseline: **1819 PASS / 254 XFAIL / 0 FAIL**
+    (+4/-4 vs T94; the math is +5/-5 closed but
+    version-negotiation's random sampling shifts ~1 between runs).
