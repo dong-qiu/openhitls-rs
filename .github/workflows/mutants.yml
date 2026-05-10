@@ -69,7 +69,7 @@ jobs:
           fi
       - name: Upload mutation results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutants-${{ matrix.crate }}-${{ strategy.job-index }}
           path: mutants.out/
