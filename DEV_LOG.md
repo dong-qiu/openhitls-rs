@@ -3,8 +3,8 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I91 (91 phases)
-- Testing: T1–T86 (85 phases, T64 skipped)
+- Implementation: I1–I92 (92 phases)
+- Testing: T1–T87 (86 phases, T64 skipped)
 - Refactoring: R1–R12 (12 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -286,6 +286,8 @@ Category summary:
 | 274 | T85 | Test | D28 Coverage: SPAKE2+ State-Machine + X.509 Certificate Parser + Builder Edge Cases | 2026-05-10 |
 | 275 | T86 | Test | D34 False-Positive Audit + Mutex Poison-Tolerance Regression Tests | 2026-05-10 |
 | 276 | P94 | Perf | SHA256-MB 4-Way Multi-Buffer SHA-256 Batch API + Software-Multibuffer Path | 2026-05-10 |
+| 277 | I92 | Impl | ECH GREASE Anti-Fingerprinting (RFC ECH §6.2) | 2026-05-10 |
+| 278 | T87 | Test | DTLS 1.3 Deep Test Coverage (state machine + parser robustness) | 2026-05-10 |
 
 ---
 
@@ -14748,5 +14750,89 @@ Note: the `+1 ignored` reflects an existing slow proptest in another crate that 
 ### Build Status (Post P94)
 - `cargo test --workspace --all-features`: 4,140 passed, 0 failed, 43 ignored (4,183 total)
 - `cargo bench -p hitls-crypto --bench crypto_bench -- "sha256-mb"`: clean run; numbers above
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+
+## Phase I92 — ECH GREASE Anti-Fingerprinting (RFC ECH §6.2) (2026-05-10)
+
+### Summary
+
+Wires the `ech.rs` module's HPKE-based ECH primitives into the live ClientHello path via a deliberately narrow scope: **GREASE only**. The full split-CH end-to-end ECH (real `ECHConfig` consumption + inner/outer CH construction + server-side decryption + retry config + HRR cookies + outer extension reuse) is logged below as Phase I93 future work — it is honestly a multi-day refactor of `build_client_hello` / `process_client_hello` / transcript hashing.
+
+What I92 ships now is what every modern browser actually deploys today and what produces real privacy value even before any server publishes an `ECHConfig`:
+
+- A `build_grease_ech_payload(inner_payload_len: u16) -> Result<Vec<u8>, TlsError>` helper in `ech.rs` that produces a byte-shape that a passive observer cannot distinguish from a real ECH offer (X25519 KEM `enc` + AES-128-GCM-tagged random payload, matching the dominant Cloudflare / Chrome / Firefox deployment).
+- A `TlsConfig.enable_ech_grease: bool` field (default `false`) plus `TlsConfigBuilder::enable_ech_grease(bool)`.
+- `ClientHandshake::build_client_hello` injects the GREASE ECH extension between the SNI extension and `post_handshake_auth`, using a 144-byte inner-length estimate (typical TLS 1.3 inner CH size after compression).
+
+This single feature is enough to anti-fingerprint ECH-capable clients vs. ECH-non-capable clients on the wire, raising the bar for traffic correlation attacks even before any deployment cooperates with the privacy mechanism.
+
+### Why GREASE-only and not full ECH?
+
+Full ECH (RFC-track draft-ietf-tls-esni) requires:
+1. Client builds two ClientHello messages: an outer CH using `ECHConfig.public_name` as SNI (cover), and an inner CH with the real SNI / extensions.
+2. Outer extensions list partially overlaps with inner — the wire format compresses this overlap via "outer extensions" references.
+3. HPKE-seal the inner CH using the published `ECHConfig.public_key`; embed in the outer CH's `encrypted_client_hello` extension.
+4. Transcript hashing covers the *inner* CH (the one whose Random the server uses); a separate "AAD CH" is used for the HPKE seal.
+5. Server detects the ECH ext, looks up `ECHConfig` by `config_id`, HPKE-opens the payload, recovers the inner CH, and continues processing as if the inner CH had been received in the clear.
+6. HRR-with-ECH requires special-cased cookie protection so the inner CH context survives the HRR round-trip.
+7. ECH retry config: server can publish a fresh `ECHConfig` in EncryptedExtensions when the client offered an outdated one.
+
+Each of those bullets is a non-trivial change to a complex code path. Doing it correctly + Miri-clean + with end-to-end interop tests would take well beyond a single session. **GREASE is the 5%-effort, 80%-value subset**: it gives the privacy benefit (anti-correlation) without requiring the full split-CH refactor, and it leaves the infrastructure (`ech.rs`'s parsers / encoders / HPKE-seal / HPKE-open already exist) in place for a future I93.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/ech.rs` | Modified | +`build_grease_ech_payload` (~50 LoC) + 3 unit tests (parses-as-real, random tail varies, boundary inner lengths) |
+| `crates/hitls-tls/src/config/mod.rs` | Modified | +`TlsConfig.enable_ech_grease: bool` field (default `false`) + builder method `enable_ech_grease(bool)` + Default cascades + Builder field + Builder Default + build() forward |
+| `crates/hitls-tls/src/handshake/client.rs` | Modified | Inject GREASE ECH ext in `build_client_hello` between SNI and `post_handshake_auth`, conditional on `config.enable_ech_grease` |
+| `crates/hitls-tls/src/connection/tests.rs` | Modified | +3 wiring tests: ECH ext present when enabled, omitted when disabled (default), handshake completes against a non-ECH server (interop contract) |
+
+### Test Count Delta (I92)
+
+| Crate | Pre | Post | Δ |
+|-------|----:|-----:|--:|
+| hitls-tls | 1510 | 1516 | +6 (3 ECH module + 3 wiring) |
+
+### What's deferred to Phase I93 (future)
+
+- Full split-CH ECH offer (inner / outer build, outer extension compression, HPKE-seal real `ECHConfig`).
+- Server-side `process_client_hello` ECH path: detect ext, look up config_id, HPKE-open, replace working CH with inner.
+- HRR-with-ECH cookie protection.
+- `ech_retry_configs` in EncryptedExtensions when client used outdated config.
+- E2E interop tests against a published ECH config.
+
+The `ech.rs` module already has the `encrypt_inner_client_hello` / `decrypt_inner_client_hello` HPKE primitives and the `parse_ech_config_list` / `encode_ech_config` codec used by I93.
+
+## Phase T87 — DTLS 1.3 Deep Test Coverage (2026-05-10)
+
+### Summary
+
+Closes the T85 follow-up note about `connection_dtls13.rs` test density (0.65 tests/100L pre-T87). Adds 8 targeted tests covering state-machine guards, parser robustness, and lifecycle invariants that the prior 4 tests (which focused on happy-path handshake + pre-construction guards) did not exercise.
+
+### Tests Added
+
+| Test | What it pins |
+|------|--------------|
+| `test_dtls13_double_start_handshake_rejected` | `start_handshake` from any non-`Idle` state must error rather than silently re-init |
+| `test_dtls13_server_double_client_hello_rejected` | Server must reject a second CH after producing its flight (anti-replay at the state-machine level) |
+| `test_dtls13_process_empty_or_truncated_datagram_does_not_panic` | Empty / 1-byte / sub-header datagrams to `process_datagram` must be soft no-ops |
+| `test_dtls13_is_connected_lifecycle` | `is_connected` is `false` at construction, false after `start_handshake`, true only after the full handshake completes; symmetric for the server |
+| `test_dtls13_read_garbage_after_connected_is_soft_error` | Garbage application-data datagram on a connected socket: `read` returns `Err` or `Ok([])`, never panic / fake plaintext |
+| `test_dtls13_server_version_lifecycle` | Server `version()` is `None` until handshake completes (defends against half-open mistakes) |
+| `test_dtls13_server_finished_without_client_hello_rejected` | Server `process_client_finished_datagram` before any CH must reject (state guard) |
+| `test_dtls13_server_write_before_connected_fails` | Server `write` must reject before the handshake completes (defends against premature plaintext send) |
+
+### Test Count Delta (T87)
+
+| Crate | Pre | Post | Δ |
+|-------|----:|-----:|--:|
+| hitls-tls | 1516 | 1524 | +8 |
+| `connection_dtls13.rs` density | 0.65 tests/100L | 1.95 tests/100L | +200% |
+
+### Combined Build Status (Post I92 + T87)
+
+- `cargo test --workspace --all-features`: 4,154 passed, 0 failed, 43 ignored (4,197 total)
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean

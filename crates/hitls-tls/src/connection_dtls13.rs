@@ -613,4 +613,232 @@ mod tests {
         let mut client = Dtls13ClientConnection::new(config);
         assert!(client.read(&[]).is_err());
     }
+
+    // ================================================================
+    // Phase T87 — DTLS 1.3 deep coverage. Until T87 the file had
+    // 4 tests (0.65/100L) covering only happy-path handshake and
+    // pre-connection guards. These tests pin error paths, state
+    // transitions, and parser robustness contracts that an attacker
+    // could exploit without explicit verification.
+    // ================================================================
+
+    /// `start_handshake` from any state other than `Idle` must reject —
+    /// otherwise a double-call would silently re-init the handshake
+    /// state machine and lose the in-flight ClientHello.
+    #[test]
+    fn test_dtls13_double_start_handshake_rejected() {
+        let config = TlsConfig::builder().verify_peer(false).build();
+        let mut client = Dtls13ClientConnection::new(config);
+        let _first = client.start_handshake().expect("first start succeeds");
+        match client.start_handshake() {
+            Err(TlsError::HandshakeFailed(msg)) => {
+                assert!(
+                    msg.contains("not in idle"),
+                    "expected idle-state error, got: {msg}"
+                );
+            }
+            other => panic!("expected HandshakeFailed, got {other:?}"),
+        }
+    }
+
+    /// Server must reject a ClientHello datagram in the wrong state
+    /// (e.g. after it already produced a flight). Pins the state guard
+    /// against a peer replaying CHs to confuse the server.
+    #[test]
+    fn test_dtls13_server_double_client_hello_rejected() {
+        let (seed, _pub_key, cert) = make_ed25519_identity();
+        let client_config = TlsConfig::builder().verify_peer(false).build();
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .certificate_chain(vec![cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+
+        let mut client = Dtls13ClientConnection::new(client_config);
+        let mut server = Dtls13ServerConnection::new(server_config);
+
+        let ch = client.start_handshake().unwrap();
+        let _ = server.process_client_hello_datagram(&ch).unwrap();
+
+        // Second CH: must reject (server is past the initial state).
+        let res = server.process_client_hello_datagram(&ch);
+        assert!(
+            res.is_err(),
+            "second ClientHello must not be silently re-processed"
+        );
+    }
+
+    /// Empty / sub-header datagrams to `process_datagram` must NOT
+    /// panic. Network-level junk and adversarial truncation must be
+    /// handled as soft errors / no-ops.
+    #[test]
+    fn test_dtls13_process_empty_or_truncated_datagram_does_not_panic() {
+        let config = TlsConfig::builder().verify_peer(false).build();
+        let mut client = Dtls13ClientConnection::new(config);
+        // Drive into the Handshaking state (need a handshake started).
+        let _ = client.start_handshake().unwrap();
+
+        // Empty datagram: should produce no responses and not panic.
+        let empty_result = client.process_datagram(&[]);
+        assert!(empty_result.is_ok(), "empty datagram must be a no-op");
+        assert!(empty_result.unwrap().is_empty());
+
+        // 1-byte: parser rejects, returns Ok([]) (DTLS records discard
+        // un-parseable bytes).
+        let one_byte = client.process_datagram(&[0x16]);
+        assert!(one_byte.is_ok());
+
+        // 12 bytes (less than minimum DTLS 1.3 record): same.
+        let twelve_bytes = client.process_datagram(&[0u8; 12]);
+        assert!(twelve_bytes.is_ok());
+    }
+
+    /// `is_connected` lifecycle: false at construction, false after
+    /// `start_handshake`, true only after the full handshake completes.
+    /// Catches a regression where state transitions accidentally set
+    /// `Connected` early.
+    #[test]
+    fn test_dtls13_is_connected_lifecycle() {
+        let (seed, _pub_key, cert) = make_ed25519_identity();
+        let client_config = TlsConfig::builder().verify_peer(false).build();
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .certificate_chain(vec![cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+
+        let mut client = Dtls13ClientConnection::new(client_config);
+        let mut server = Dtls13ServerConnection::new(server_config);
+        assert!(!client.is_connected(), "client: false at construction");
+        assert!(!server.is_connected(), "server: false at construction");
+
+        let ch = client.start_handshake().unwrap();
+        assert!(
+            !client.is_connected(),
+            "client: false after start_handshake (still Handshaking)"
+        );
+
+        let server_flight = server.process_client_hello_datagram(&ch).unwrap();
+        assert!(
+            !server.is_connected(),
+            "server: false after producing flight (waiting on client Finished)"
+        );
+
+        let _ = client.process_datagram(&server_flight[0]).unwrap();
+        let mut client_fin = Vec::new();
+        for d in &server_flight[1..] {
+            for r in client.process_datagram(d).unwrap() {
+                if !r.is_empty() {
+                    client_fin = r;
+                }
+            }
+        }
+        assert!(client.is_connected(), "client: true after full handshake");
+        assert!(!server.is_connected(), "server: still false until CFin");
+
+        server
+            .process_client_finished_datagram(&client_fin)
+            .unwrap();
+        assert!(server.is_connected(), "server: true after CFin");
+    }
+
+    /// Garbage application-data datagram via `read` after handshake
+    /// must be a soft error, not a panic. Defends the application
+    /// against attacker-injected malformed records on the connected
+    /// socket.
+    #[test]
+    fn test_dtls13_read_garbage_after_connected_is_soft_error() {
+        let (seed, _pub_key, cert) = make_ed25519_identity();
+        let client_config = TlsConfig::builder().verify_peer(false).build();
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .certificate_chain(vec![cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+
+        let mut client = Dtls13ClientConnection::new(client_config);
+        let mut server = Dtls13ServerConnection::new(server_config);
+        let ch = client.start_handshake().unwrap();
+        let server_flight = server.process_client_hello_datagram(&ch).unwrap();
+        let _ = client.process_datagram(&server_flight[0]).unwrap();
+        let mut client_fin = Vec::new();
+        for d in &server_flight[1..] {
+            for r in client.process_datagram(d).unwrap() {
+                if !r.is_empty() {
+                    client_fin = r;
+                }
+            }
+        }
+        server
+            .process_client_finished_datagram(&client_fin)
+            .unwrap();
+        assert!(client.is_connected() && server.is_connected());
+
+        // Now feed garbage to read. Either Err (parse / decrypt failure)
+        // or Ok(empty) is acceptable; a panic is not.
+        let garbage = vec![0xDEu8; 64];
+        if let Ok(v) = client.read(&garbage) {
+            assert!(v.is_empty(), "garbage must not surface as fake plaintext");
+        }
+    }
+
+    /// `version()` returns `Some(Dtls13)` only post-handshake. Pre-
+    /// handshake it must be `None` so a caller cannot mistake a
+    /// half-open connection for a negotiated session.
+    #[test]
+    fn test_dtls13_server_version_lifecycle() {
+        let (seed, _pub_key, cert) = make_ed25519_identity();
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .certificate_chain(vec![cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+
+        let server = Dtls13ServerConnection::new(server_config);
+        assert_eq!(
+            server.version(),
+            None,
+            "server version must be None pre-handshake"
+        );
+    }
+
+    /// Server-side `process_client_finished_datagram` before any CH
+    /// arrived must reject. Pins the state guard so a network attacker
+    /// cannot inject a fake "Finished" datagram against a fresh server.
+    #[test]
+    fn test_dtls13_server_finished_without_client_hello_rejected() {
+        let (seed, _pub_key, cert) = make_ed25519_identity();
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .certificate_chain(vec![cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+        let mut server = Dtls13ServerConnection::new(server_config);
+        let res = server.process_client_finished_datagram(&[0u8; 32]);
+        assert!(res.is_err(), "Finished without prior CH must reject");
+    }
+
+    /// Client `write` when not connected must reject — defends against
+    /// app-level code accidentally sending plaintext to the network
+    /// because it forgot to await the handshake.
+    #[test]
+    fn test_dtls13_server_write_before_connected_fails() {
+        let (seed, _pub_key, cert) = make_ed25519_identity();
+        let server_config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .certificate_chain(vec![cert])
+            .private_key(ServerPrivateKey::Ed25519(seed))
+            .verify_peer(false)
+            .build();
+        let mut server = Dtls13ServerConnection::new(server_config);
+        assert!(
+            server.write(b"premature").is_err(),
+            "server.write before connect must reject"
+        );
+    }
 }

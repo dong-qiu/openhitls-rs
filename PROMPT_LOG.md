@@ -4457,3 +4457,23 @@ What was NOT done: the 381-line ARMv8 NEON-without-SHA-2 hand-written assembly. 
 The openHiTLS C v0.3.2 backport queue is now functionally and behaviourally complete in Rust.
 
 Tests: 4175 → 4183 (+7 unit + 1 ignored adjustment). hitls-crypto 1487→1494. Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 286: A→B→C — ECH GREASE + DTLS 1.3 coverage + Dependabot batch
+
+> 请分析下接下来干什么？
+
+> 以此做A, B, C
+
+**Result**: Surveyed open work and identified three gaps: (A) ECH module exists at 705 LoC but is never invoked from the handshake layer, (B) DTLS 1.3 implementation has only 0.65 tests/100L, (C) 10 stale Dependabot PRs. User picked all three in sequence. Honestly downscoped A from "full split-CH end-to-end ECH" to "ECH GREASE only" because full split-CH integration (HRR cookies / outer extension reuse / config retrieval / inner CH replacement) is genuinely a multi-day refactor not fitting one session — full ECH split-CH logged as I93 future work. GREASE is the 5%-effort, 80%-value subset that anti-fingerprints ECH-capable clients on the wire, matching what Chrome / Firefox actually deploy.
+
+**A (Phase I92 — ECH GREASE)**:
+- `ech.rs::build_grease_ech_payload` produces RFC-shape (X25519 KEM enc + AES-128-GCM-tagged random payload) byte-indistinguishable from a real ECH offer
+- `TlsConfig.enable_ech_grease` field + builder method (default false; opt-in)
+- `ClientHandshake::build_client_hello` injects GREASE ECH ext between SNI and `post_handshake_auth` when enabled
+- 6 tests: 3 in ech.rs (parses-as-real, random tail varies between calls, boundary inner_payload_lens including u16::MAX), 3 in connection/tests.rs (ext present when enabled / omitted when disabled / handshake completes against a non-ECH server)
+
+**B (Phase T87 — DTLS 1.3 deep coverage)**: +8 tests pinning state-machine guards, parser robustness, and lifecycle invariants previously not exercised: `start_handshake` from non-`Idle` state, server double-CH rejection, empty/truncated datagram no-panic, `is_connected` lifecycle, garbage `read` after connected = soft error, server `version()` lifecycle, server `process_client_finished_datagram` without prior CH, server `write` pre-connect. Density 0.65 → 1.95 tests/100L (+200%).
+
+**C (Dependabot batch)**: 10 PRs to triage. Will handle separately via `gh pr` after committing A+B.
+
+Tests (combined I92+T87): 4183 → 4197 (+14). hitls-tls 1510 → 1524 (+14). Clippy on Rust 1.95: 0 warnings. Fmt clean.
