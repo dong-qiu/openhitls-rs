@@ -574,11 +574,95 @@ impl ClientHandshake {
             let _ = old_msg_len; // suppress unused warning
         }
 
+        // Inner CH bytes (for transcript hash). When ECH is offered, the
+        // wire bytes will be the outer CH instead, but the transcript still
+        // uses the inner — per draft-ietf-tls-esni "ECH-accepted" handshake.
         self.client_hello_msg = msg.clone();
         self.key_exchange = Some(kx);
         self.state = HandshakeState::WaitServerHello;
 
-        Ok(msg)
+        // Phase I93: ECH split-CH wrap. When `ech_config_list` is set, replace
+        // the wire bytes with an outer ClientHello that has cover SNI and
+        // carries the HPKE-encrypted inner in the encrypted_client_hello
+        // extension. The transcript above is unchanged (it still uses inner).
+        #[cfg(feature = "ech")]
+        let wire = self.maybe_wrap_in_ech_outer(msg)?;
+        #[cfg(not(feature = "ech"))]
+        let wire = msg;
+
+        Ok(wire)
+    }
+
+    /// Phase I93: build the outer ClientHello that wraps the just-built
+    /// inner CH inside an `encrypted_client_hello` extension. Returns the
+    /// inner unchanged when no `ech_config_list` is configured.
+    ///
+    /// **AAD note**: this implementation uses an empty HPKE AAD instead of
+    /// the draft-ietf-tls-esni `ClientHelloOuterAAD` (= the outer CH with
+    /// the ECH ext's payload zeroed). Empty AAD weakens the binding
+    /// between ciphertext and outer CH context — a network observer can
+    /// in principle move a captured ECH blob into a different outer CH.
+    /// Damage is limited because the inner CH carries its own
+    /// `key_share`, so an attacker who replays a blob still cannot
+    /// derive shared keys. Documented as Phase I94 future work.
+    #[cfg(feature = "ech")]
+    fn maybe_wrap_in_ech_outer(&self, inner_ch_msg: Vec<u8>) -> Result<Vec<u8>, TlsError> {
+        let Some(ref ech_config_list_bytes) = self.config.ech_config_list else {
+            return Ok(inner_ch_msg);
+        };
+
+        let configs = crate::ech::parse_ech_config_list(ech_config_list_bytes)?;
+        let config = configs
+            .first()
+            .ok_or_else(|| TlsError::HandshakeFailed("ECH: empty ECHConfigList".into()))?;
+
+        // Parse the just-built inner CH so we can inherit its layout
+        // (random / sid / suites / extensions) for the outer.
+        let inner_decoded = crate::handshake::codec::decode_client_hello(&inner_ch_msg[4..])?;
+
+        // Build outer extensions: clone inner, swap SNI to public_name,
+        // strip any pre-existing ECH ext (e.g. GREASE — real ECH wins),
+        // append the real encrypted_client_hello extension.
+        let public_name = std::str::from_utf8(&config.public_name)
+            .map_err(|_| TlsError::HandshakeFailed("ECH: public_name not valid UTF-8".into()))?;
+        let mut outer_ext: Vec<crate::extensions::Extension> = inner_decoded
+            .extensions
+            .iter()
+            .filter(|e| {
+                e.extension_type != crate::extensions::ExtensionType::ENCRYPTED_CLIENT_HELLO
+            })
+            .map(|e| {
+                if e.extension_type == crate::extensions::ExtensionType::SERVER_NAME {
+                    crate::handshake::extensions_codec::build_server_name(public_name)
+                } else {
+                    e.clone()
+                }
+            })
+            .collect();
+
+        // HPKE-encrypt the inner CH bytes (full handshake message including
+        // 4-byte header — the server reverses this same way).
+        let ech_hello = crate::ech::encrypt_inner_client_hello(config, &inner_ch_msg, b"")?;
+
+        outer_ext.push(crate::extensions::Extension {
+            extension_type: crate::extensions::ExtensionType::ENCRYPTED_CLIENT_HELLO,
+            data: crate::ech::encode_ech_client_hello(&ech_hello),
+        });
+
+        // Outer random is freshly generated — outer.random must NOT equal
+        // inner.random or the cover would be trivially defeated by random
+        // correlation.
+        let mut outer_random = [0u8; 32];
+        getrandom::fill(&mut outer_random)
+            .map_err(|_| TlsError::HandshakeFailed("ECH: outer random gen failed".into()))?;
+
+        let outer_ch = crate::handshake::codec::ClientHello {
+            random: outer_random,
+            legacy_session_id: inner_decoded.legacy_session_id,
+            cipher_suites: inner_decoded.cipher_suites,
+            extensions: outer_ext,
+        };
+        Ok(crate::handshake::codec::encode_client_hello(&outer_ch))
     }
 
     /// Process a ServerHello message (or HelloRetryRequest).

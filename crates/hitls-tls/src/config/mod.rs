@@ -185,6 +185,29 @@ pub struct TlsConfig {
     /// ECH-capable from ECH-non-capable clients. Default: `false`.
     /// See `crate::ech::build_grease_ech_payload`.
     pub enable_ech_grease: bool,
+    /// Client-side: serialized `ECHConfigList` (the wire format from a
+    /// DNS HTTPS / SVCB record's `ech` parameter). When present and
+    /// the `ech` Cargo feature is enabled, the client's ClientHello is
+    /// built in **split-CH** mode (Phase I93): the inner CH carries
+    /// the real `server_name` + sensitive extensions; the outer CH
+    /// advertises `ECHConfig.public_name` as SNI and embeds the
+    /// HPKE-encrypted inner CH in the `encrypted_client_hello`
+    /// extension. Empty (default) ⇒ ECH not offered (the optional
+    /// GREASE ECH ext is still emitted if `enable_ech_grease` is set).
+    pub ech_config_list: Option<Vec<u8>>,
+    /// Server-side: published ECH configurations and their HPKE private
+    /// keys, stored as `(serialized_ECHConfig, hpke_private_key_bytes)`
+    /// pairs. When the server receives a ClientHello with an
+    /// `encrypted_client_hello` extension whose `config_id` matches an
+    /// entry's parsed config_id, the server attempts HPKE-decryption
+    /// to recover the inner CH and processes that for the rest of the
+    /// handshake. `config_id` mismatch is treated as GREASE and the
+    /// outer CH is processed as-is; `config_id` match with a
+    /// decryption failure is a hard handshake error (does NOT fall
+    /// back — that would defeat the privacy purpose of ECH). Empty
+    /// (default) ⇒ server does not support ECH. Active only with the
+    /// `ech` Cargo feature enabled.
+    pub ech_keypairs: Vec<(Vec<u8>, Vec<u8>)>,
     /// Trusted CA keys for ClientHello (RFC 6066 §6).
     /// Empty = not sent.
     pub trusted_ca_keys: Vec<TrustedAuthority>,
@@ -377,6 +400,8 @@ pub struct TlsConfigBuilder {
     heartbeat_mode: u8,
     grease: bool,
     enable_ech_grease: bool,
+    ech_config_list: Option<Vec<u8>>,
+    ech_keypairs: Vec<(Vec<u8>, Vec<u8>)>,
     trusted_ca_keys: Vec<TrustedAuthority>,
     srtp_profiles: Vec<u16>,
     enable_ocsp_multi_stapling: bool,
@@ -466,6 +491,8 @@ impl Default for TlsConfigBuilder {
             heartbeat_mode: 0,
             grease: false,
             enable_ech_grease: false,
+            ech_config_list: None,
+            ech_keypairs: Vec::new(),
             trusted_ca_keys: Vec::new(),
             srtp_profiles: Vec::new(),
             enable_ocsp_multi_stapling: false,
@@ -801,6 +828,27 @@ impl TlsConfigBuilder {
         self
     }
 
+    /// Configure client-side real ECH offer (Phase I93). The argument is the
+    /// raw `ECHConfigList` wire bytes (typically obtained from a DNS HTTPS /
+    /// SVCB record's `ech` parameter). When set, the next ClientHello is
+    /// built in split-CH mode: cover SNI in the outer CH, real SNI in the
+    /// HPKE-encrypted inner CH carried via `encrypted_client_hello`. Active
+    /// only with the `ech` Cargo feature.
+    pub fn ech_config_list(mut self, config_list: Vec<u8>) -> Self {
+        self.ech_config_list = Some(config_list);
+        self
+    }
+
+    /// Configure server-side ECH support (Phase I93). Each entry is
+    /// `(serialized_ECHConfig, hpke_private_key_bytes)`. The server tries
+    /// each config_id in order to match an incoming
+    /// `encrypted_client_hello` extension. Active only with the `ech` Cargo
+    /// feature.
+    pub fn ech_keypairs(mut self, keypairs: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
+        self.ech_keypairs = keypairs;
+        self
+    }
+
     pub fn trusted_ca_keys(mut self, authorities: Vec<TrustedAuthority>) -> Self {
         self.trusted_ca_keys = authorities;
         self
@@ -952,6 +1000,8 @@ impl TlsConfigBuilder {
             heartbeat_mode: self.heartbeat_mode,
             grease: self.grease,
             enable_ech_grease: self.enable_ech_grease,
+            ech_config_list: self.ech_config_list,
+            ech_keypairs: self.ech_keypairs,
             trusted_ca_keys: self.trusted_ca_keys,
             srtp_profiles: self.srtp_profiles,
             enable_ocsp_multi_stapling: self.enable_ocsp_multi_stapling,

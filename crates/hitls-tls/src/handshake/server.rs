@@ -362,6 +362,28 @@ impl ServerHandshake {
             ));
         }
 
+        // Phase I93: ECH split-CH unwrap. If `ech_keypairs` is configured
+        // and the outer CH carries an `encrypted_client_hello` extension
+        // whose `config_id` matches one of our published configs, decrypt
+        // to recover the inner CH and process THAT instead. config_id
+        // mismatch is treated as GREASE (process outer); config_id match
+        // with decrypt failure is a hard error (does NOT silently fall
+        // back — that would defeat the privacy purpose of ECH).
+        #[cfg(feature = "ech")]
+        let _inner_storage;
+        #[cfg(feature = "ech")]
+        let msg_data: &[u8] = if !self.config.ech_keypairs.is_empty() {
+            match Self::try_unwrap_ech(msg_data, &self.config.ech_keypairs)? {
+                Some(inner) => {
+                    _inner_storage = inner;
+                    &_inner_storage[..]
+                }
+                None => msg_data,
+            }
+        } else {
+            msg_data
+        };
+
         let body = get_body(msg_data)?;
         let ch = decode_client_hello(body)?;
         self.client_random = ch.random;
@@ -1138,6 +1160,76 @@ impl ServerHandshake {
             new_session_ticket_msgs,
             resumption_master_secret,
         })
+    }
+
+    /// Test-only accessor (Phase I93 e2e tests verify that the recovered
+    /// inner CH's random — not the outer wire random — landed in the
+    /// handshake context).
+    #[cfg(test)]
+    pub(crate) fn client_random_for_test(&self) -> &[u8; 32] {
+        &self.client_random
+    }
+
+    /// Phase I93 helper. Inspect an outer ClientHello message for an
+    /// `encrypted_client_hello` extension. If present and its `config_id`
+    /// matches one of `keypairs`, attempt HPKE-decryption to recover the
+    /// inner CH bytes (full handshake message). Return values:
+    ///
+    /// - `Ok(None)`: no ECH ext at all, OR config_id mismatch (treated as
+    ///   GREASE — the caller falls back to processing the outer CH).
+    /// - `Ok(Some(inner))`: ECH accepted; caller should process `inner`.
+    /// - `Err(...)`: config_id matched but HPKE-decryption failed. This
+    ///   is a hard handshake error; the caller MUST NOT silently fall
+    ///   back, otherwise an attacker could inject garbage in the ECH
+    ///   payload and force outer-CH processing (defeating ECH's privacy).
+    ///
+    /// AAD compliance gap: this implementation uses an empty HPKE AAD
+    /// instead of the draft `ClientHelloOuterAAD`. Documented in Phase
+    /// I93 narrative; tracked as Phase I94 future work.
+    #[cfg(feature = "ech")]
+    fn try_unwrap_ech(
+        outer_msg: &[u8],
+        keypairs: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<Option<Vec<u8>>, TlsError> {
+        let body = get_body(outer_msg)?;
+        let outer_decoded = decode_client_hello(body)?;
+
+        let Some(ech_ext) = outer_decoded
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::ENCRYPTED_CLIENT_HELLO)
+        else {
+            return Ok(None); // no ECH offered
+        };
+
+        let ech_hello = crate::ech::parse_ech_client_hello(&ech_ext.data)?;
+
+        // Find the keypair whose ECHConfig parses to a matching config_id.
+        // We re-parse on every CH to keep the config field free of ech-feature
+        // dependencies; for production servers with many configs a parse
+        // cache could be added in a future P-phase.
+        let matching = keypairs.iter().find_map(|(cfg_bytes, sk_bytes)| {
+            let mut wire = Vec::with_capacity(2 + cfg_bytes.len());
+            wire.extend_from_slice(&(cfg_bytes.len() as u16).to_be_bytes());
+            wire.extend_from_slice(cfg_bytes);
+            crate::ech::parse_ech_config_list(&wire)
+                .ok()
+                .and_then(|cfgs| {
+                    cfgs.into_iter()
+                        .find(|c| c.config_id == ech_hello.config_id)
+                        .map(|c| (c, sk_bytes.clone()))
+                })
+        });
+
+        let Some((config, sk)) = matching else {
+            // config_id is unknown — treat as GREASE (RFC: "the server
+            // SHOULD ignore the extension if config_id does not match").
+            return Ok(None);
+        };
+
+        // Real ECH attempt — decrypt or fail loud.
+        let inner = crate::ech::decrypt_inner_client_hello(&config, &ech_hello, &sk, b"")?;
+        Ok(Some(inner))
     }
 }
 

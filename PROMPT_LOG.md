@@ -4493,3 +4493,19 @@ Mechanics:
 Side-fix surfaced by the migration sweep: I92's `enable_ech_grease` injection in `build_client_hello` unconditionally called `crate::ech::build_grease_ech_payload`, but `crate::ech` is gated behind the `ech` Cargo feature. Default-features build (and the `fuzz` crate which doesn't enable `ech`) was broken — the sweep across `cd fuzz && cargo build --bins` exposed the regression. Fix: wrap the GREASE injection in `#[cfg(feature = "ech")]` and document the silent no-op without the feature.
 
 Tests unchanged at 4197 (no new tests in a rename-only phase). All three build configurations pass: `-p hitls-tls` (default features), `--workspace --all-features`, and `cd fuzz && cargo build --bins`. Clippy on Rust 1.95: 0 warnings. Fmt clean. Dependabot PR #31 to be closed with a pointer to this phase narrative.
+
+### Prompt 288: I93 — full ECH split-CH end-to-end
+
+> 选择1
+
+> 请继续之前的工作
+
+**Result**: Built on the I92 GREASE scaffold to ship the **real** ECH split-CH path: client packs the inner CH (with the user's actual SNI + sensitive extensions) into an HPKE-encrypted blob, sends an outer CH with the published `ECHConfig.public_name` as cover SNI; server detects the encrypted blob, decrypts, switches handshake processing to the inner CH.
+
+**In scope**: `TlsConfig.ech_config_list` (client-side raw `ECHConfigList` wire bytes) + `TlsConfig.ech_keypairs` (server-side `(serialized_ECHConfig, sk_bytes)` pairs); private helpers `ClientHandshake::maybe_wrap_in_ech_outer` (called at end of `build_client_hello`, swaps SNI to public_name + appends real ECH ext containing HPKE-sealed inner + generates fresh outer random) and `ServerHandshake::try_unwrap_ech` (called at top of `process_client_hello`, looks up `config_id`, HPKE-decrypts with hard-error semantics — no silent fallback to outer); 3 e2e tests + 1 helper `make_ech_test_keypair` covering happy path (recovered server `client_random` equals inner's, real SNI doesn't leak into outer), config_id mismatch GREASE-fallback, decrypt-failure rejection.
+
+**Out of scope (logged as I94 future work)**: proper `ClientHelloOuterAAD` (currently uses empty AAD, weakens binding but functional); HRR-with-ECH cookie protection; `outer_extensions` reference compression; `ech_retry_configs` in EE; ECH-aware GREASE-PSK rules. The privacy property (cover SNI hides real SNI) holds even without the AAD work — the AAD only affects whether an attacker can copy ECH blobs across CHs without re-encrypting.
+
+Setting both `enable_ech_grease(true)` AND `ech_config_list(...)` is benign by design: real ECH wins, GREASE ext is filtered out of the inner before being copied to the outer.
+
+Tests: 4197 → 4200 (+3 e2e). hitls-tls 1524 → 1527. All three build configurations clean: `-p hitls-tls` (default features only — verifies the `#[cfg(feature = "ech")]` gating doesn't regress), `--workspace --all-features`, and `cd fuzz && cargo build --bins`. Clippy on Rust 1.95: 0 warnings. Fmt clean.

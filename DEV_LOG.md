@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I92 (92 phases)
+- Implementation: I1–I93 (93 phases)
 - Testing: T1–T87 (86 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -289,6 +289,7 @@ Category summary:
 | 277 | I92 | Impl | ECH GREASE Anti-Fingerprinting (RFC ECH §6.2) | 2026-05-10 |
 | 278 | T87 | Test | DTLS 1.3 Deep Test Coverage (state machine + parser robustness) | 2026-05-10 |
 | 279 | R13 | Refactor | getrandom 0.2 → 0.3 Workspace Migration | 2026-05-10 |
+| 280 | I93 | Impl | ECH Split-CH End-to-End (real ECHConfig + cover SNI + HPKE encrypt/decrypt) | 2026-05-10 |
 
 ---
 
@@ -14894,3 +14895,58 @@ Unchanged from I92+T87 — this is a pure dependency / call-site rename phase wi
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean
 - Dependabot PR #31 closed with a comment pointing to this phase
+
+## Phase I93 — ECH Split-CH End-to-End (real ECHConfig + cover SNI + HPKE encrypt/decrypt) (2026-05-10)
+
+### Summary
+
+Builds on the I92 GREASE scaffold to ship the **real** ECH split-ClientHello path: client packs the inner CH (with the user's actual SNI + sensitive extensions) into an HPKE-encrypted blob, sends an outer CH with the published `ECHConfig.public_name` as cover SNI; server detects the encrypted blob, decrypts it, and switches handshake processing to the inner CH.
+
+This is the privacy mechanism a user actually wants — what GREASE in I92 only mimics. With I93, an off-path observer who can read the wire sees only the cover SNI; the real destination hostname and any inner extensions (e.g. ALPN, key shares the user is willing to commit to) are HPKE-sealed.
+
+### Scope decisions (what's IN, what's OUT)
+
+I93 deliberately ships a **functional** split-CH but skips several spec features the draft requires for full RFC compliance. Each is logged below as a separate future I-phase.
+
+**In scope (this phase)**
+- `TlsConfig.ech_config_list: Option<Vec<u8>>` — client passes the raw `ECHConfigList` wire bytes (typically taken from a DNS HTTPS / SVCB record's `ech` parameter).
+- `TlsConfig.ech_keypairs: Vec<(Vec<u8>, Vec<u8>)>` — server publishes one or more `(serialized_ECHConfig, hpke_private_key_bytes)` pairs. Multi-config rotation is supported by id lookup.
+- `TlsConfigBuilder::ech_config_list(...)` and `::ech_keypairs(...)` builder methods.
+- Client `ClientHandshake::maybe_wrap_in_ech_outer` (private) — runs at the end of `build_client_hello` after the inner has been built. Parses the inner via `decode_client_hello`, swaps the SNI to `public_name`, strips any pre-existing ECH ext (real ECH wins over GREASE), HPKE-seals the inner, appends the real `encrypted_client_hello` ext to outer, generates a fresh outer random.
+- Server `ServerHandshake::try_unwrap_ech` (private associated fn) — runs at the top of `process_client_hello`. Detects the ECH ext, looks up `config_id` in `ech_keypairs` (re-parsing `ECHConfig` lazily), and either returns `Some(inner_ch_bytes)` (success), `Ok(None)` (no ECH ext or `config_id` mismatch — the latter treated as GREASE per RFC), or `Err(...)` (matched config_id but HPKE-decrypt failed — hard error, no fallback to outer).
+- 3 e2e tests in `connection/tests.rs`: happy-path real split-CH (verifies recovered server-side `client_random` equals the inner's, not the outer's wire random); config_id mismatch fallback; decrypt failure rejection.
+
+**Out of scope — Phase I94 future work**
+- **Proper `ClientHelloOuterAAD`**. Draft-ietf-tls-esni mandates that HPKE AAD = the outer CH bytes with the ECH ext's `payload` (= the ciphertext) zeroed out. I93 uses an **empty AAD (`b""`)** instead. The privacy property (cover SNI hides real SNI) holds; the AAD-binding property (preventing an attacker from copying a captured ECH blob into a different outer CH) is weakened. Damage is limited because the inner CH carries its own `key_share` so an attacker who replays a blob still cannot derive shared keys with the legitimate server. Implementing the proper AAD requires byte-offset surgery on the outer CH bytes (find the ECH ext payload region, zero the ciphertext sub-range, encrypt with that as AAD) — non-trivial but bounded; logged as **I94**.
+- **HRR-with-ECH cookie protection**. If the server replies HelloRetryRequest, the inner CH state must be preserved across the round-trip via a server-issued cookie that wraps the inner-CH transcript. Not implemented; `try_unwrap_ech` only runs in the initial CH path.
+- **Outer extensions compression** (draft §5.1 `outer_extensions` references). Currently the inner CH is fully self-contained; the outer CH duplicates many extensions. Compression would reduce wire size at the cost of more decode complexity.
+- **`ech_retry_configs` in EncryptedExtensions**. When the client presents an outdated `ECHConfig`, the server can publish fresh configs in EE so the client can retry; not implemented.
+- **ECH-aware GREASE-PSK rules**. Draft has rules for how PSK extensions interact with ECH GREASE / real ECH; not currently enforced.
+
+### Compatibility note
+
+Setting both `ech_config_list` and `enable_ech_grease(true)` on the same client config is benign: the real ECH wrap always happens after the GREASE injection in `build_client_hello`, and `maybe_wrap_in_ech_outer` filters out any pre-existing `encrypted_client_hello` ext from the inner before appending the real one to the outer. Real ECH always wins.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/config/mod.rs` | Modified | +`TlsConfig.ech_config_list: Option<Vec<u8>>` and `+TlsConfig.ech_keypairs: Vec<(Vec<u8>, Vec<u8>)>` fields; mirror in `TlsConfigBuilder` + Default + build() forwarding; +2 builder methods `ech_config_list(...)` / `ech_keypairs(...)`. Field types are raw bytes (parsed lazily) to avoid forcing the config layer to depend on the feature-gated `ech` module. |
+| `crates/hitls-tls/src/handshake/client.rs` | Modified | Save inner CH to `client_hello_msg` (transcript), then call new private `maybe_wrap_in_ech_outer` — gated on `feature = "ech"` — that builds the outer CH with cover SNI + `encrypted_client_hello` ext containing the HPKE-sealed inner. Returns the outer for the wire. |
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | At the top of `process_client_hello`, gate-call `Self::try_unwrap_ech(msg_data, &self.config.ech_keypairs)`; on `Some(inner)`, swap `msg_data` to the inner bytes for the rest of the function. Helper `try_unwrap_ech` parses the outer, finds the ECH ext, looks up `config_id` in `ech_keypairs` (re-parsing each entry's `ECHConfig` lazily), and HPKE-decrypts; treats `config_id` mismatch as GREASE (returns `Ok(None)`), and decrypt failure with matching id as hard error. +1 test-only accessor `client_random_for_test`. |
+| `crates/hitls-tls/src/connection/tests.rs` | Modified | +3 e2e tests + 1 helper `make_ech_test_keypair`. Tests: real split-CH happy path (recovered server `client_random` equals inner's, real SNI does NOT leak into outer); config_id mismatch falls back to outer (handshake completes against cover SNI); decrypt failure with matching config_id rejects (no silent fallback). |
+
+### Test Count (Post I93)
+
+| Crate | Pre-I93 | Post-I93 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-tls | 1524 | 1527 | +3 e2e |
+| **Total** | **4197** | **4200** | **+3** |
+
+### Build Status (Post I93)
+
+- `cargo test --workspace --all-features`: 4,157 passed, 0 failed, 43 ignored (4,200 total)
+- `cargo build -p hitls-tls` (default features only — no `ech`): clean (verifies feature gating)
+- `cd fuzz && cargo build --bins`: clean
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean

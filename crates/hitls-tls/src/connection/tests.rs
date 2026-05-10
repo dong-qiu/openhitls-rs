@@ -5935,3 +5935,188 @@ fn test_ech_grease_handshake_succeeds_against_non_ech_server() {
         Err(e) => panic!("server must process GREASE-ECH ClientHello without error: {e}"),
     }
 }
+
+// ====================================================================
+// Phase I93 — ECH split-CH end-to-end wiring tests
+// ====================================================================
+
+/// Build an ECHConfig + matching X25519 HPKE keypair for tests.
+/// Returns (encoded_config_list, encoded_single_config, sk_bytes,
+/// public_name).
+#[cfg(feature = "ech")]
+fn make_ech_test_keypair(config_id: u8) -> (Vec<u8>, Vec<u8>, Vec<u8>, &'static str) {
+    use crate::ech::{EchCipherSuite, EchConfig};
+    let sk = hitls_crypto::x25519::X25519PrivateKey::generate().unwrap();
+    let pk = sk.public_key();
+    let public_name = "public.cover.example";
+    let config = EchConfig {
+        config_id,
+        kem_id: 0x0020, // X25519 / HKDF-SHA256 KEM
+        public_key: pk.as_bytes().to_vec(),
+        cipher_suites: vec![EchCipherSuite {
+            kdf_id: 0x0001,  // HKDF-SHA256
+            aead_id: 0x0001, // AES-128-GCM
+        }],
+        max_name_len: 64,
+        public_name: public_name.as_bytes().to_vec(),
+    };
+    (
+        crate::ech::encode_ech_config_list(std::slice::from_ref(&config)),
+        crate::ech::encode_ech_config(&config),
+        sk.to_bytes().to_vec(),
+        public_name,
+    )
+}
+
+/// Happy path: client with `ech_config_list` set offers real ECH; server
+/// with matching `ech_keypairs` decrypts the inner CH and uses it for
+/// the handshake. The recovered server-side `client_random` MUST equal
+/// the inner CH's random (not the outer's), proving the swap landed.
+#[cfg(feature = "ech")]
+#[test]
+fn test_ech_real_split_ch_end_to_end() {
+    use crate::config::ServerPrivateKey;
+
+    let (config_list, single_config, sk, _public_name) = make_ech_test_keypair(0x42);
+    let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+    let client_config = TlsConfig::builder()
+        .server_name("inner.real.example")
+        .ech_config_list(config_list)
+        .verify_peer(false)
+        .build();
+
+    let server_config = TlsConfig::builder()
+        .role(crate::TlsRole::Server)
+        .certificate_chain(vec![fake_cert])
+        .private_key(ServerPrivateKey::Ed25519(seed))
+        .ech_keypairs(vec![(single_config, sk)])
+        .verify_peer(false)
+        .build();
+
+    let mut client_hs = ClientHandshake::new(client_config);
+    let outer_msg = client_hs.build_client_hello().unwrap();
+
+    // The wire bytes are the OUTER CH; the client's transcript copy must
+    // be the INNER CH (different random + different SNI).
+    let (_, outer_body, _) = parse_handshake_header(&outer_msg).unwrap();
+    let outer_ch = crate::handshake::codec::decode_client_hello(outer_body).unwrap();
+
+    // Inner SNI must NOT appear in outer.
+    let outer_sni = outer_ch
+        .extensions
+        .iter()
+        .find(|e| e.extension_type == crate::extensions::ExtensionType::SERVER_NAME)
+        .expect("outer must carry cover SNI");
+    assert!(
+        !outer_sni
+            .data
+            .windows(b"inner.real.example".len())
+            .any(|w| w == b"inner.real.example"),
+        "real SNI must not leak into the outer CH"
+    );
+
+    let mut server_hs = ServerHandshake::new(server_config);
+    match server_hs.process_client_hello(&outer_msg) {
+        Ok(ClientHelloResult::Actions(_)) => {}
+        Ok(ClientHelloResult::HelloRetryRequest(_)) => {
+            panic!("expected Actions for ECH-accepted CH, got HRR");
+        }
+        Err(e) => panic!("server must accept real ECH offer: {e}"),
+    }
+
+    // Server's reported client_random MUST equal the INNER CH random
+    // (recovered via HPKE-decrypt), not the outer wire random. This
+    // proves the inner CH switched into the handshake context.
+    assert_ne!(
+        server_hs.client_random_for_test(),
+        &outer_ch.random,
+        "server should NOT use outer random; it must come from inner"
+    );
+}
+
+/// Mismatched config_id: server's published configs do not include the
+/// one the client used. Per RFC, the server treats this as GREASE and
+/// processes the outer CH. The handshake should still complete (the
+/// outer CH advertises a real cover SNI which the test server accepts).
+#[cfg(feature = "ech")]
+#[test]
+fn test_ech_config_id_mismatch_falls_back_to_outer() {
+    use crate::config::ServerPrivateKey;
+
+    // Client publishes config with id=0x42; server publishes id=0x99.
+    let (client_config_list, _, _, _) = make_ech_test_keypair(0x42);
+    let (_, server_single_config, server_sk, _) = make_ech_test_keypair(0x99);
+    let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+    let client_config = TlsConfig::builder()
+        .server_name("inner.real.example")
+        .ech_config_list(client_config_list)
+        .verify_peer(false)
+        .build();
+
+    let server_config = TlsConfig::builder()
+        .role(crate::TlsRole::Server)
+        .certificate_chain(vec![fake_cert])
+        .private_key(ServerPrivateKey::Ed25519(seed))
+        .ech_keypairs(vec![(server_single_config, server_sk)])
+        .verify_peer(false)
+        .build();
+
+    let mut client_hs = ClientHandshake::new(client_config);
+    let outer_msg = client_hs.build_client_hello().unwrap();
+
+    let mut server_hs = ServerHandshake::new(server_config);
+    match server_hs.process_client_hello(&outer_msg) {
+        Ok(ClientHelloResult::Actions(_)) => {}
+        Ok(ClientHelloResult::HelloRetryRequest(_)) => {
+            panic!("expected Actions for ECH-as-GREASE fallback, got HRR")
+        }
+        Err(e) => panic!("config_id mismatch must be treated as GREASE → outer CH processed: {e}"),
+    }
+}
+
+/// Matching config_id but server's stored sk is wrong (corrupted /
+/// rotated mid-flight). Per RFC the server MUST hard-error rather than
+/// silently fall back to the outer CH — falling back would let an
+/// attacker who flips one byte of the ECH ciphertext force the server
+/// to expose the cover SNI's flow.
+#[cfg(feature = "ech")]
+#[test]
+fn test_ech_decrypt_failure_with_matching_config_id_rejects() {
+    use crate::config::ServerPrivateKey;
+
+    let (config_list, single_config, _real_sk, _) = make_ech_test_keypair(0x42);
+    // Construct a *different* sk for the same config_id, simulating
+    // key-rotation or corruption: the bound public_key in the config
+    // does not correspond to this private key.
+    let wrong_sk = hitls_crypto::x25519::X25519PrivateKey::generate()
+        .unwrap()
+        .to_bytes()
+        .to_vec();
+    let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+    let client_config = TlsConfig::builder()
+        .server_name("inner.real.example")
+        .ech_config_list(config_list)
+        .verify_peer(false)
+        .build();
+
+    let server_config = TlsConfig::builder()
+        .role(crate::TlsRole::Server)
+        .certificate_chain(vec![fake_cert])
+        .private_key(ServerPrivateKey::Ed25519(seed))
+        .ech_keypairs(vec![(single_config, wrong_sk)])
+        .verify_peer(false)
+        .build();
+
+    let mut client_hs = ClientHandshake::new(client_config);
+    let outer_msg = client_hs.build_client_hello().unwrap();
+
+    let mut server_hs = ServerHandshake::new(server_config);
+    let result = server_hs.process_client_hello(&outer_msg);
+    assert!(
+        result.is_err(),
+        "matching config_id with wrong sk must hard-error (not fall back to outer)"
+    );
+}
