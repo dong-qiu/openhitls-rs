@@ -178,7 +178,7 @@ impl RecordEncryptor12Cbc {
 
         // Generate random explicit IV
         let mut iv = [0u8; AES_BLOCK_SIZE];
-        getrandom::getrandom(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
+        getrandom::fill(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
 
         // Encrypt in-place
         aes_cbc_encrypt_with(&self.cipher, &iv, &mut encrypt_data)?;
@@ -384,7 +384,7 @@ impl RecordEncryptor12EtM {
 
         // Generate random explicit IV
         let mut iv = [0u8; AES_BLOCK_SIZE];
-        getrandom::getrandom(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
+        getrandom::fill(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
 
         // Encrypt in-place
         aes_cbc_encrypt_with(&self.cipher, &iv, &mut encrypt_data)?;

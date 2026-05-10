@@ -79,9 +79,9 @@ pub fn encrypt_pkcs8_der_with(
 ) -> Result<Vec<u8>, CryptoError> {
     // Generate random salt and IV
     let mut salt = vec![0u8; 16];
-    getrandom::getrandom(&mut salt).map_err(|_| CryptoError::DrbgEntropyFail)?;
+    getrandom::fill(&mut salt).map_err(|_| CryptoError::DrbgEntropyFail)?;
     let mut iv = vec![0u8; 16];
-    getrandom::getrandom(&mut iv).map_err(|_| CryptoError::DrbgEntropyFail)?;
+    getrandom::fill(&mut iv).map_err(|_| CryptoError::DrbgEntropyFail)?;
 
     // Derive key using PBKDF2-HMAC-SHA256
     let key = pbkdf2::pbkdf2(password.as_bytes(), &salt, iterations, key_len)?;

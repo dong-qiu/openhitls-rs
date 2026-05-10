@@ -40,7 +40,7 @@ impl Ed25519KeyPair {
     /// Generate a new random Ed25519 key pair.
     pub fn generate() -> Result<Self, CryptoError> {
         let mut seed = [0u8; 32];
-        getrandom::getrandom(&mut seed).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut seed).map_err(|_| CryptoError::BnRandGenFail)?;
         Self::from_seed(&seed)
     }
 

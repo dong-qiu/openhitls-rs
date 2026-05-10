@@ -125,7 +125,7 @@ impl Drop for DtlcpServerHandshake {
 impl DtlcpServerHandshake {
     pub fn new(config: TlsConfig, enable_cookie: bool) -> Self {
         let mut cookie_secret = vec![0u8; 32];
-        let _ = getrandom::getrandom(&mut cookie_secret);
+        let _ = getrandom::fill(&mut cookie_secret);
 
         Self {
             config,
@@ -236,12 +236,12 @@ impl DtlcpServerHandshake {
         self.transcript.update(&tls_ch)?;
 
         // Generate server random
-        getrandom::getrandom(&mut self.server_random)
+        getrandom::fill(&mut self.server_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         // Build ServerHello (TLS format, then convert to DTLS)
         let mut session_id = vec![0u8; 32];
-        getrandom::getrandom(&mut session_id)
+        getrandom::fill(&mut session_id)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         let sh = ServerHello {

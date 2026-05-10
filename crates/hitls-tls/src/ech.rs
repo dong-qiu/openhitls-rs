@@ -429,7 +429,7 @@ pub fn build_grease_ech_payload(inner_payload_len: u16) -> Result<Vec<u8>, TlsEr
 
     // config_id, enc, payload: all random.
     let mut random_tail = vec![0u8; 1 + (enc_len as usize) + (payload_len as usize)];
-    getrandom::getrandom(&mut random_tail)
+    getrandom::fill(&mut random_tail)
         .map_err(|e| TlsError::HandshakeFailed(format!("ECH GREASE random: {e}")))?;
     let (config_id_byte, rest) = random_tail.split_at(1);
     let (enc_bytes, payload_bytes) = rest.split_at(enc_len as usize);

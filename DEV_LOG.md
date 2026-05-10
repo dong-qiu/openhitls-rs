@@ -5,7 +5,7 @@
 Category summary:
 - Implementation: I1–I92 (92 phases)
 - Testing: T1–T87 (86 phases, T64 skipped)
-- Refactoring: R1–R12 (12 phases)
+- Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
 | # | Phase | Type | Title | Date |
@@ -288,6 +288,7 @@ Category summary:
 | 276 | P94 | Perf | SHA256-MB 4-Way Multi-Buffer SHA-256 Batch API + Software-Multibuffer Path | 2026-05-10 |
 | 277 | I92 | Impl | ECH GREASE Anti-Fingerprinting (RFC ECH §6.2) | 2026-05-10 |
 | 278 | T87 | Test | DTLS 1.3 Deep Test Coverage (state machine + parser robustness) | 2026-05-10 |
+| 279 | R13 | Refactor | getrandom 0.2 → 0.3 Workspace Migration | 2026-05-10 |
 
 ---
 
@@ -14836,3 +14837,60 @@ Closes the T85 follow-up note about `connection_dtls13.rs` test density (0.65 te
 - `cargo test --workspace --all-features`: 4,154 passed, 0 failed, 43 ignored (4,197 total)
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean
+
+## Phase R13 — getrandom 0.2 → 0.3 Workspace Migration (2026-05-10)
+
+### Summary
+
+Closes the long-stale Dependabot PR #31 (open since 2026-03-03) that proposed bumping `getrandom = "0.2"` → `"0.3"` across all production crates' `Cargo.toml`. The naïve PR did not update any call site, so it would have broken the build — `getrandom` 0.3.0 renamed the top-level function from `getrandom::getrandom(&mut buf)` to `getrandom::fill(&mut buf)` (signature otherwise identical: `Result<(), Error>`). Phase R13 does the coordinated workspace migration: bump deps, rename 121 call sites, verify all builds + tests + lint, then close PR #31 with a pointer to this phase.
+
+### Migration mechanics
+
+| Item | Detail |
+|------|--------|
+| `Cargo.toml` versions bumped | 6 (workspace + `hitls-bignum` / `hitls-cli` / `hitls-auth` / `hitls-crypto` / `hitls-pki` / `hitls-tls`) |
+| `Cargo.lock` updates | `Cargo.lock` and `fuzz/Cargo.lock` both refresh to `getrandom = "0.3.4"` |
+| Production call sites renamed | 121 (`getrandom::getrandom` → `getrandom::fill`) via `find … -exec sed` |
+| Per-crate breakdown | hitls-crypto 43 / hitls-tls 56 / hitls-pki 10 / hitls-cli 7 / hitls-bignum 3 / hitls-auth 2 |
+| Error-handling closures touched | None — `getrandom::Error` retained the same type contract, so existing `.map_err(|_| CryptoError::BnRandGenFail)` patterns continue to work |
+| Behavioural delta vs 0.2 | `getrandom::fill` blocks on `getentropy(2)` / `getrandom(2)` syscalls the same way; semantics unchanged on Linux / macOS / Windows. The only WASM change is the `wasm_js` backend default, which we don't hit (we don't enable that feature). |
+
+### Side-fix: `enable_ech_grease` injection feature gate
+
+The migration sweep surfaced an existing regression introduced by Phase I92 (committed earlier today): `ClientHandshake::build_client_hello` unconditionally called `crate::ech::build_grease_ech_payload`, but `crate::ech` is gated behind the `ech` Cargo feature. The hitls-tls crate built with default features alone failed (and so did the `fuzz` crate, which exposed the bug). R13 wraps the GREASE injection in `#[cfg(feature = "ech")]` and documents that `enable_ech_grease(true)` is a silent no-op without the `ech` feature — the same pattern used elsewhere in the file.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `Cargo.toml` (workspace) + `crates/{hitls-bignum,hitls-cli,hitls-auth,hitls-crypto,hitls-pki,hitls-tls}/Cargo.toml` | Modified | `getrandom = "0.2"` → `"0.3"` |
+| `Cargo.lock` + `fuzz/Cargo.lock` | Modified | Refresh to `getrandom 0.3.4` |
+| 39 source files in production crates | Modified | 121 `getrandom::getrandom(...)` → `getrandom::fill(...)` |
+| `crates/hitls-tls/src/handshake/client.rs` | Modified | `#[cfg(feature = "ech")]` gate on the GREASE injection block (fixes I92 regression visible only outside `--all-features`) |
+
+### Test Count (Post R13)
+
+Unchanged from I92+T87 — this is a pure dependency / call-site rename phase with no new tests. The existing 4,197 tests cover all `fill`-using paths.
+
+| Crate | Count | Δ |
+|-------|------:|--:|
+| hitls-types | 26 | — |
+| hitls-utils | 78 | — |
+| hitls-bignum | 95 (1 ignored) | — |
+| hitls-crypto | 1494 (24 ignored) | — |
+| hitls-tls | 1524 | — |
+| hitls-pki | 455 | — |
+| hitls-auth | 56 | — |
+| hitls-cli | 165 (5 ignored) | — |
+| hitls-integration-tests | 261 (12 ignored) | — |
+| **Total** | **4197 (43 ignored)** | — |
+
+### Build Status (Post R13)
+
+- `cargo build -p hitls-tls`: clean (default features only — exercises the I92 GREASE-gate fix)
+- `cargo build --workspace --all-features`: clean
+- `cd fuzz && cargo build --bins`: clean
+- `cargo test --workspace --all-features`: 4,154 passed, 0 failed, 43 ignored (4,197 total)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+- Dependabot PR #31 closed with a comment pointing to this phase

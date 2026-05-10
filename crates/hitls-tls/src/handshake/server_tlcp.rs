@@ -119,12 +119,12 @@ impl TlcpServerHandshake {
         self.params = Some(params);
 
         // Generate server_random
-        getrandom::getrandom(&mut self.server_random)
+        getrandom::fill(&mut self.server_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         // Build ServerHello
         let mut session_id = vec![0u8; 32];
-        getrandom::getrandom(&mut session_id)
+        getrandom::fill(&mut session_id)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         let sh = ServerHello {

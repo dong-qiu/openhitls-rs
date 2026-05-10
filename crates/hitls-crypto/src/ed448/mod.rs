@@ -32,7 +32,7 @@ impl Ed448KeyPair {
     /// Generate a new random Ed448 key pair.
     pub fn generate() -> Result<Self, CryptoError> {
         let mut seed = [0u8; ED448_KEY_SIZE];
-        getrandom::getrandom(&mut seed).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut seed).map_err(|_| CryptoError::BnRandGenFail)?;
         Self::from_seed(&seed)
     }
 

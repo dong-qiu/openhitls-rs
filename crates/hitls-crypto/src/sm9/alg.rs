@@ -338,7 +338,7 @@ fn random_in_range(max: &BigNum) -> Result<BigNum, CryptoError> {
     let bytes_len = max.to_bytes_be().len();
     loop {
         let mut buf = vec![0u8; bytes_len];
-        getrandom::getrandom(&mut buf).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut buf).map_err(|_| CryptoError::BnRandGenFail)?;
         let val = BigNum::from_bytes_be(&buf);
         if !val.is_zero() && val <= *max {
             return Ok(val);

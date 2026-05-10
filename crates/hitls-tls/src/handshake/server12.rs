@@ -601,12 +601,12 @@ impl Tls12ServerHandshake {
         self.transcript.update(msg_data)?;
 
         // Generate server random
-        getrandom::getrandom(&mut self.server_random)
+        getrandom::fill(&mut self.server_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         // Generate server-assigned session_id (32 bytes) for session caching
         let mut session_id = vec![0u8; 32];
-        getrandom::getrandom(&mut session_id)
+        getrandom::fill(&mut session_id)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
         self.session_id = session_id;
 
@@ -1050,7 +1050,7 @@ impl Tls12ServerHandshake {
         self.client_random = ch.random;
 
         // Generate server random
-        getrandom::getrandom(&mut self.server_random)
+        getrandom::fill(&mut self.server_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         // Add full ClientHello to transcript
@@ -1261,7 +1261,7 @@ impl Tls12ServerHandshake {
                 // Bleichenbacher protection: generate random PMS first, then
                 // overwrite only if decryption succeeds and version bytes match.
                 let mut random_pms = vec![0u8; 48];
-                getrandom::getrandom(&mut random_pms)
+                getrandom::fill(&mut random_pms)
                     .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
                 // Set version bytes for the random fallback PMS (TLS 1.2 = 0x0303)
                 random_pms[0] = 0x03;
@@ -1343,7 +1343,7 @@ impl Tls12ServerHandshake {
                 let mut fallback_pms = vec![0u8; 48];
                 fallback_pms[0] = 0x03;
                 fallback_pms[1] = 0x03;
-                getrandom::getrandom(&mut fallback_pms[2..])
+                getrandom::fill(&mut fallback_pms[2..])
                     .map_err(|e| TlsError::HandshakeFailed(format!("getrandom: {e}")))?;
                 let rsa_pms = match rsa_key.decrypt(RsaPadding::Pkcs1v15Encrypt, &cke.encrypted_pms)
                 {
@@ -2000,7 +2000,7 @@ mod tests {
         use crate::handshake::extensions_codec::*;
 
         let mut random = [0u8; 32];
-        getrandom::getrandom(&mut random).unwrap();
+        getrandom::fill(&mut random).unwrap();
 
         let extensions = vec![
             build_signature_algorithms(&[
@@ -2348,7 +2348,7 @@ mod tests {
         use crate::handshake::extensions_codec::*;
 
         let mut random = [0u8; 32];
-        getrandom::getrandom(&mut random).unwrap();
+        getrandom::fill(&mut random).unwrap();
 
         let extensions = vec![
             build_signature_algorithms(&[
@@ -2381,7 +2381,7 @@ mod tests {
         use crate::handshake::extensions_codec::*;
 
         let mut random = [0u8; 32];
-        getrandom::getrandom(&mut random).unwrap();
+        getrandom::fill(&mut random).unwrap();
 
         let mut extensions = vec![
             build_signature_algorithms(&[

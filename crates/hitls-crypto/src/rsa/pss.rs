@@ -41,12 +41,12 @@ pub(crate) fn pss_sign_pad_with_salt(
     if salt_len <= 64 {
         let mut salt = [0u8; 64];
         if salt_len > 0 {
-            getrandom::getrandom(&mut salt[..salt_len]).map_err(|_| CryptoError::BnRandGenFail)?;
+            getrandom::fill(&mut salt[..salt_len]).map_err(|_| CryptoError::BnRandGenFail)?;
         }
         pss_encode(digest, em_bits, &salt[..salt_len])
     } else {
         let mut salt = vec![0u8; salt_len];
-        getrandom::getrandom(&mut salt).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut salt).map_err(|_| CryptoError::BnRandGenFail)?;
         pss_encode(digest, em_bits, &salt)
     }
 }

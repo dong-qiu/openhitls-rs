@@ -132,7 +132,7 @@ pub(crate) fn encrypt_ticket(
 
     // Generate random nonce
     let mut nonce = [0u8; 12];
-    getrandom::getrandom(&mut nonce)
+    getrandom::fill(&mut nonce)
         .map_err(|_| TlsError::HandshakeFailed("ticket nonce gen failed".into()))?;
 
     // Derive key stream
@@ -816,7 +816,7 @@ impl ServerHandshake {
 
         // Build ServerHello
         let mut random = [0u8; 32];
-        getrandom::getrandom(&mut random)
+        getrandom::fill(&mut random)
             .map_err(|_| TlsError::HandshakeFailed("random generation failed".into()))?;
 
         let mut sh_extensions = vec![
@@ -1092,10 +1092,10 @@ impl ServerHandshake {
         if let Some(ref ticket_key) = self.config.ticket_key {
             // Generate ticket nonce and age_add
             let mut nonce_bytes = [0u8; 8];
-            getrandom::getrandom(&mut nonce_bytes)
+            getrandom::fill(&mut nonce_bytes)
                 .map_err(|_| TlsError::HandshakeFailed("nonce gen failed".into()))?;
             let mut age_add_bytes = [0u8; 4];
-            getrandom::getrandom(&mut age_add_bytes)
+            getrandom::fill(&mut age_add_bytes)
                 .map_err(|_| TlsError::HandshakeFailed("age_add gen failed".into()))?;
             let age_add = u32::from_be_bytes(age_add_bytes);
 

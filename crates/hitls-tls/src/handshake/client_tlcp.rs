@@ -98,7 +98,7 @@ impl TlcpClientHandshake {
 
     /// Build the ClientHello message (version=0x0101, TLCP suites).
     pub fn build_client_hello(&mut self) -> Result<Vec<u8>, TlsError> {
-        getrandom::getrandom(&mut self.client_random)
+        getrandom::fill(&mut self.client_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         let mut extensions = Vec::new();
@@ -128,7 +128,7 @@ impl TlcpClientHandshake {
         }
 
         let mut session_id = vec![0u8; 32];
-        getrandom::getrandom(&mut session_id)
+        getrandom::fill(&mut session_id)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         let ch = ClientHello {
@@ -252,7 +252,7 @@ impl TlcpClientHandshake {
             // PMS format: version(2) || random(46), version = 0x0101
             pms[0] = 0x01;
             pms[1] = 0x01;
-            getrandom::getrandom(&mut pms[2..])
+            getrandom::fill(&mut pms[2..])
                 .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
             let cert = hitls_pki::x509::Certificate::from_der(&self.server_enc_cert)

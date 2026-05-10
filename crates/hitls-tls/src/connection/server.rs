@@ -146,7 +146,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
 
         // Generate random context for this request
         let mut context = vec![0u8; 8];
-        getrandom::getrandom(&mut context)
+        getrandom::fill(&mut context)
             .map_err(|e| TlsError::HandshakeFailed(format!("random error: {e}")))?;
 
         // Build CertificateRequest with signature_algorithms extension

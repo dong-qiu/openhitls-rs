@@ -259,7 +259,7 @@ impl ClientHandshake {
 
         // Generate random
         let mut random = [0u8; 32];
-        getrandom::getrandom(&mut random)
+        getrandom::fill(&mut random)
             .map_err(|_| TlsError::HandshakeFailed("random generation failed".into()))?;
         self.client_random = random;
 
@@ -301,7 +301,11 @@ impl ClientHandshake {
         // so passive observers cannot distinguish ECH-capable clients
         // from ECH-non-capable ones. Sized to match Cloudflare/Chrome
         // production deployment (X25519 KEM + AES-128-GCM, ~144 bytes
-        // for a typical inner CH).
+        // for a typical inner CH). The injection is gated on the `ech`
+        // Cargo feature because the helper lives in the same module
+        // that pulls HPKE for full ECH; without the feature,
+        // `enable_ech_grease(true)` is a documented silent no-op.
+        #[cfg(feature = "ech")]
         if self.config.enable_ech_grease {
             let inner_len_estimate: u16 = 144;
             let payload = crate::ech::build_grease_ech_payload(inner_len_estimate)?;
@@ -415,7 +419,7 @@ impl ClientHandshake {
         // RFC 8446 §D.4: middlebox compat mode sends a 32-byte random session ID
         let legacy_session_id = if self.config.middlebox_compat {
             let mut sid = vec![0u8; 32];
-            getrandom::getrandom(&mut sid)
+            getrandom::fill(&mut sid)
                 .map_err(|_| TlsError::HandshakeFailed("session_id random failed".into()))?;
             sid
         } else {
@@ -797,7 +801,7 @@ impl ClientHandshake {
         let kx = KeyExchange::generate(retry.selected_group)?;
 
         let mut random = [0u8; 32];
-        getrandom::getrandom(&mut random)
+        getrandom::fill(&mut random)
             .map_err(|_| TlsError::HandshakeFailed("random generation failed".into()))?;
 
         let mut extensions = vec![

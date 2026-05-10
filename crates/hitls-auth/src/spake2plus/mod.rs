@@ -444,7 +444,7 @@ fn random_scalar(n: &BigNum) -> Result<BigNum, CryptoError> {
     let byte_len = n_bytes.len();
     let mut buf = vec![0u8; byte_len];
     loop {
-        getrandom::getrandom(&mut buf).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut buf).map_err(|_| CryptoError::BnRandGenFail)?;
         let k = BigNum::from_bytes_be(&buf);
         if k > BigNum::zero() && k < *n {
             buf.zeroize();

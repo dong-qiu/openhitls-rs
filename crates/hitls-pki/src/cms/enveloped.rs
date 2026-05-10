@@ -126,11 +126,11 @@ impl CmsMessage {
         // Generate random CEK
         let key_len = alg.key_len();
         let mut cek = vec![0u8; key_len];
-        getrandom::getrandom(&mut cek).map_err(|e| cerr(&format!("getrandom CEK: {e}")))?;
+        getrandom::fill(&mut cek).map_err(|e| cerr(&format!("getrandom CEK: {e}")))?;
 
         // Generate random nonce (12 bytes for GCM)
         let mut nonce = [0u8; 12];
-        getrandom::getrandom(&mut nonce).map_err(|e| cerr(&format!("getrandom nonce: {e}")))?;
+        getrandom::fill(&mut nonce).map_err(|e| cerr(&format!("getrandom nonce: {e}")))?;
 
         // Encrypt content with AES-GCM (returns ciphertext || tag)
         let encrypted_content = hitls_crypto::modes::gcm::gcm_encrypt(&cek, &nonce, &[], data)
@@ -204,11 +204,11 @@ impl CmsMessage {
         // Generate random CEK
         let key_len = alg.key_len();
         let mut cek = vec![0u8; key_len];
-        getrandom::getrandom(&mut cek).map_err(|e| cerr(&format!("getrandom CEK: {e}")))?;
+        getrandom::fill(&mut cek).map_err(|e| cerr(&format!("getrandom CEK: {e}")))?;
 
         // Generate random nonce (12 bytes for GCM)
         let mut nonce = [0u8; 12];
-        getrandom::getrandom(&mut nonce).map_err(|e| cerr(&format!("getrandom nonce: {e}")))?;
+        getrandom::fill(&mut nonce).map_err(|e| cerr(&format!("getrandom nonce: {e}")))?;
 
         // Encrypt content with AES-GCM
         let encrypted_content = hitls_crypto::modes::gcm::gcm_encrypt(&cek, &nonce, &[], data)

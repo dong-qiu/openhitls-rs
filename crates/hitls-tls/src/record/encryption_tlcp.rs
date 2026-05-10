@@ -170,7 +170,7 @@ impl RecordEncryptorTlcpCbc {
 
         // Generate random explicit IV
         let mut iv = [0u8; SM4_BLOCK_SIZE];
-        getrandom::getrandom(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
+        getrandom::fill(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
 
         // Encrypt in-place
         sm4_cbc_encrypt_raw(&self.enc_key, &iv, &mut encrypt_data)?;

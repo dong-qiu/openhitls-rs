@@ -260,7 +260,7 @@ fn decode_sig(sig: &[u8], params: &MlDsaParams) -> Option<(Vec<u8>, Vec<Poly>, V
 fn mldsa_keygen(params: &MlDsaParams) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
     // ξ ← random 32 bytes
     let mut xi = [0u8; 32];
-    getrandom::getrandom(&mut xi).map_err(|_| CryptoError::BnRandGenFail)?;
+    getrandom::fill(&mut xi).map_err(|_| CryptoError::BnRandGenFail)?;
 
     // (ρ, ρ', K) = H(ξ || k || l, 128)
     let mut seed_input = Vec::with_capacity(34);

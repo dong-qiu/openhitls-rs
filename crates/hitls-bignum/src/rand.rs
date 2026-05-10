@@ -15,7 +15,7 @@ impl BigNum {
 
         let num_bytes = bits.div_ceil(8);
         let mut buf = vec![0u8; num_bytes];
-        getrandom::getrandom(&mut buf).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut buf).map_err(|_| CryptoError::BnRandGenFail)?;
 
         // Mask excess bits in the most significant byte
         let excess = num_bytes * 8 - bits;
@@ -52,7 +52,7 @@ impl BigNum {
         loop {
             let num_bytes = bits.div_ceil(8);
             let mut buf = vec![0u8; num_bytes];
-            getrandom::getrandom(&mut buf).map_err(|_| CryptoError::BnRandGenFail)?;
+            getrandom::fill(&mut buf).map_err(|_| CryptoError::BnRandGenFail)?;
 
             // Mask excess bits
             let excess = num_bytes * 8 - bits;
@@ -80,7 +80,7 @@ impl BigNum {
         loop {
             let num_bytes = bits.div_ceil(8);
             let mut buf = vec![0u8; num_bytes];
-            getrandom::getrandom(&mut buf).map_err(|_| CryptoError::BnRandGenFail)?;
+            getrandom::fill(&mut buf).map_err(|_| CryptoError::BnRandGenFail)?;
 
             let excess = num_bytes * 8 - bits;
             if excess > 0 {

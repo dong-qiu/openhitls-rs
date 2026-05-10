@@ -6,7 +6,7 @@ pub fn run(num: usize, format: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut buf = vec![0u8; num];
-    getrandom::getrandom(&mut buf).map_err(|e| format!("getrandom failed: {e}"))?;
+    getrandom::fill(&mut buf).map_err(|e| format!("getrandom failed: {e}"))?;
 
     match format {
         "hex" => {

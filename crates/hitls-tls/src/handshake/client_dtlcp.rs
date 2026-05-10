@@ -123,7 +123,7 @@ impl DtlcpClientHandshake {
     fn build_client_hello_with_cookie(&mut self, cookie: &[u8]) -> Result<Vec<u8>, TlsError> {
         // Generate client_random (only on first call)
         if self.state == DtlcpClientState::Idle {
-            getrandom::getrandom(&mut self.client_random)
+            getrandom::fill(&mut self.client_random)
                 .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
         }
 
@@ -153,7 +153,7 @@ impl DtlcpClientHandshake {
         }
 
         let mut session_id = vec![0u8; 32];
-        getrandom::getrandom(&mut session_id)
+        getrandom::fill(&mut session_id)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         let ch = crate::handshake::codec::ClientHello {
@@ -336,7 +336,7 @@ impl DtlcpClientHandshake {
             // PMS format: version(2) || random(46), version = 0x0101
             pms[0] = 0x01;
             pms[1] = 0x01;
-            getrandom::getrandom(&mut pms[2..])
+            getrandom::fill(&mut pms[2..])
                 .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
             let cert = hitls_pki::x509::Certificate::from_der(&self.server_enc_cert)

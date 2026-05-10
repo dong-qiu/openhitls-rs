@@ -545,7 +545,7 @@ impl CertificateBuilder {
         let spki = signing_key.public_key_info()?;
         // Generate a random serial number
         let mut serial = [0u8; 16];
-        getrandom::getrandom(&mut serial)
+        getrandom::fill(&mut serial)
             .map_err(|_| PkiError::InvalidCert("failed to generate random serial".into()))?;
         serial[0] &= 0x7F; // Ensure positive
 

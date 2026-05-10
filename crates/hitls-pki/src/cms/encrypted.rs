@@ -52,7 +52,7 @@ impl CmsMessage {
 
         // Generate random 12-byte nonce for GCM
         let mut nonce = [0u8; 12];
-        getrandom::getrandom(&mut nonce).map_err(|e| cerr(&format!("getrandom: {e}")))?;
+        getrandom::fill(&mut nonce).map_err(|e| cerr(&format!("getrandom: {e}")))?;
 
         // Encrypt content with AES-GCM
         let ciphertext = hitls_crypto::modes::gcm::gcm_encrypt(key, &nonce, &[], data)

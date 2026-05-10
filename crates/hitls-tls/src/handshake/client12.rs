@@ -425,7 +425,7 @@ impl Tls12ClientHandshake {
     /// message bytes (for the transcript hash).
     pub fn build_client_hello(&mut self) -> Result<Vec<u8>, TlsError> {
         // Generate client_random
-        getrandom::getrandom(&mut self.client_random)
+        getrandom::fill(&mut self.client_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         // Build extensions for TLS 1.2
@@ -587,7 +587,7 @@ impl Tls12ClientHandshake {
                 if session.id.is_empty() && session.ticket.is_some() {
                     // Ticket-based resumption: generate random session_id
                     let mut sid = vec![0u8; 32];
-                    getrandom::getrandom(&mut sid)
+                    getrandom::fill(&mut sid)
                         .map_err(|e| TlsError::HandshakeFailed(format!("random gen: {e}")))?;
                     self.cached_session_id = sid.clone();
                     sid
@@ -597,13 +597,13 @@ impl Tls12ClientHandshake {
                 }
             } else {
                 let mut sid = vec![0u8; 32];
-                getrandom::getrandom(&mut sid)
+                getrandom::fill(&mut sid)
                     .map_err(|e| TlsError::HandshakeFailed(format!("random gen: {e}")))?;
                 sid
             }
         } else {
             let mut sid = vec![0u8; 32];
-            getrandom::getrandom(&mut sid)
+            getrandom::fill(&mut sid)
                 .map_err(|e| TlsError::HandshakeFailed(format!("random gen: {e}")))?;
             sid
         };
@@ -1067,7 +1067,7 @@ impl Tls12ClientHandshake {
                 let mut pms = vec![0u8; 48];
                 pms[0] = 0x03;
                 pms[1] = 0x03;
-                getrandom::getrandom(&mut pms[2..])
+                getrandom::fill(&mut pms[2..])
                     .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
                 // Encrypt PMS with server's RSA public key
                 let rsa_pub = parse_rsa_public_key_from_cert(&self.server_cert_der)?;
@@ -1178,7 +1178,7 @@ impl Tls12ClientHandshake {
                 let mut rsa_pms = vec![0u8; 48];
                 rsa_pms[0] = 0x03;
                 rsa_pms[1] = 0x03;
-                getrandom::getrandom(&mut rsa_pms[2..])
+                getrandom::fill(&mut rsa_pms[2..])
                     .map_err(|e| TlsError::HandshakeFailed(format!("getrandom failed: {e}")))?;
                 let rsa_pub = parse_rsa_public_key_from_cert(&self.server_cert_der)?;
                 let encrypted = rsa_pub
@@ -1813,7 +1813,7 @@ mod tests {
 
         // Server echoes back the cached session_id → abbreviated
         let mut server_random = [0u8; 32];
-        getrandom::getrandom(&mut server_random).unwrap();
+        getrandom::fill(&mut server_random).unwrap();
         let sh = ServerHello {
             random: server_random,
             legacy_session_id: session_id,
@@ -1874,7 +1874,7 @@ mod tests {
 
         // Server responds with a DIFFERENT session_id → full handshake
         let mut server_random = [0u8; 32];
-        getrandom::getrandom(&mut server_random).unwrap();
+        getrandom::fill(&mut server_random).unwrap();
         let sh = ServerHello {
             random: server_random,
             legacy_session_id: vec![0xCC; 32], // different from cached
@@ -1929,7 +1929,7 @@ mod tests {
         hs1.build_client_hello().unwrap();
 
         let mut sr1 = [0u8; 32];
-        getrandom::getrandom(&mut sr1).unwrap();
+        getrandom::fill(&mut sr1).unwrap();
         let sh1 = ServerHello {
             random: sr1,
             legacy_session_id: session_id.clone(),
@@ -1953,7 +1953,7 @@ mod tests {
         hs2.build_client_hello().unwrap();
 
         let mut sr2 = [0u8; 32];
-        getrandom::getrandom(&mut sr2).unwrap();
+        getrandom::fill(&mut sr2).unwrap();
         let sh2 = ServerHello {
             random: sr2,
             legacy_session_id: session_id,
@@ -1996,7 +1996,7 @@ mod tests {
 
         // Server responds with a suite we didn't offer
         let mut server_random = [0u8; 32];
-        getrandom::getrandom(&mut server_random).unwrap();
+        getrandom::fill(&mut server_random).unwrap();
         let sh = ServerHello {
             random: server_random,
             legacy_session_id: vec![0u8; 32],
@@ -2056,7 +2056,7 @@ mod tests {
         hs.build_client_hello().unwrap();
 
         let mut server_random = [0u8; 32];
-        getrandom::getrandom(&mut server_random).unwrap();
+        getrandom::fill(&mut server_random).unwrap();
         let sh = ServerHello {
             random: server_random,
             legacy_session_id: vec![0u8; 32],
@@ -2084,7 +2084,7 @@ mod tests {
         hs.build_client_hello().unwrap();
 
         let mut server_random = [0u8; 32];
-        getrandom::getrandom(&mut server_random).unwrap();
+        getrandom::fill(&mut server_random).unwrap();
         let sh = ServerHello {
             random: server_random,
             legacy_session_id: vec![0u8; 32],

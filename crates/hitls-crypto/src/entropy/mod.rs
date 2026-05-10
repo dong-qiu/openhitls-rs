@@ -61,7 +61,7 @@ impl NoiseSource for SystemNoiseSource {
     }
 
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, CryptoError> {
-        getrandom::getrandom(buf).map_err(|_| CryptoError::DrbgEntropyFail)?;
+        getrandom::fill(buf).map_err(|_| CryptoError::DrbgEntropyFail)?;
         Ok(buf.len())
     }
 }

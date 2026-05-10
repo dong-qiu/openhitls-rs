@@ -164,7 +164,7 @@ impl Drop for Dtls12ServerHandshake {
 impl Dtls12ServerHandshake {
     pub fn new(config: TlsConfig, enable_cookie: bool) -> Self {
         let mut cookie_secret = vec![0u8; 32];
-        let _ = getrandom::getrandom(&mut cookie_secret);
+        let _ = getrandom::fill(&mut cookie_secret);
 
         Self {
             config,
@@ -340,7 +340,7 @@ impl Dtls12ServerHandshake {
         self.transcript.update(&tls_ch)?;
 
         // Generate server random
-        getrandom::getrandom(&mut self.server_random)
+        getrandom::fill(&mut self.server_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         // Build ServerHello echoing the cached session_id
@@ -473,7 +473,7 @@ impl Dtls12ServerHandshake {
         self.transcript.update(&tls_ch)?;
 
         // Generate server random
-        getrandom::getrandom(&mut self.server_random)
+        getrandom::fill(&mut self.server_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
         // Negotiate group
@@ -481,7 +481,7 @@ impl Dtls12ServerHandshake {
 
         // Build ServerHello with new session_id (full handshake generates fresh one)
         let mut new_session_id = vec![0u8; 32];
-        getrandom::getrandom(&mut new_session_id)
+        getrandom::fill(&mut new_session_id)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
         let sh = ServerHello {
             random: self.server_random,
@@ -783,7 +783,7 @@ mod tests {
 
     fn build_dtls_client_hello(suites: &[CipherSuite], cookie: &[u8]) -> Vec<u8> {
         let mut random = [0u8; 32];
-        getrandom::getrandom(&mut random).unwrap();
+        getrandom::fill(&mut random).unwrap();
 
         let extensions = vec![
             crate::handshake::extensions_codec::build_signature_algorithms(&[
@@ -1020,7 +1020,7 @@ mod tests {
 
         // Build a ClientHello with the cached session_id
         let mut random = [0u8; 32];
-        getrandom::getrandom(&mut random).unwrap();
+        getrandom::fill(&mut random).unwrap();
         let extensions = vec![
             crate::handshake::extensions_codec::build_signature_algorithms(&[
                 SignatureScheme::ED25519,

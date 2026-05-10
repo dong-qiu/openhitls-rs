@@ -133,7 +133,7 @@ fn hmac_sha1(key: &[u8], data: &[u8]) -> Result<Vec<u8>, PkiError> {
 
 fn generate_random(len: usize) -> Result<Vec<u8>, PkiError> {
     let mut buf = vec![0u8; len];
-    getrandom::getrandom(&mut buf)
+    getrandom::fill(&mut buf)
         .map_err(|_| PkiError::Pkcs12Error("random generation failed".into()))?;
     Ok(buf)
 }

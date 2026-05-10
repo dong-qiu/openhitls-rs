@@ -37,7 +37,7 @@ impl X448PrivateKey {
     /// Generate a new random X448 private key.
     pub fn generate() -> Result<Self, CryptoError> {
         let mut key = [0u8; 56];
-        getrandom::getrandom(&mut key).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut key).map_err(|_| CryptoError::BnRandGenFail)?;
         clamp_scalar(&mut key);
         Ok(X448PrivateKey { key })
     }

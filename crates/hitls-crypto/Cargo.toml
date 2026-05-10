@@ -15,7 +15,7 @@ hitls-bignum = { path = "../hitls-bignum", optional = true }
 hitls-utils = { path = "../hitls-utils", optional = true }
 zeroize = { version = "1.8", features = ["derive"] }
 subtle = "2.6"
-getrandom = "0.2"
+getrandom = "0.3"
 
 [features]
 default = ["aes", "sha2", "rsa", "ecdsa", "hmac"]

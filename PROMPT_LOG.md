@@ -4477,3 +4477,19 @@ Tests: 4175 → 4183 (+7 unit + 1 ignored adjustment). hitls-crypto 1487→1494.
 **C (Dependabot batch)**: 10 PRs to triage. Will handle separately via `gh pr` after committing A+B.
 
 Tests (combined I92+T87): 4183 → 4197 (+14). hitls-tls 1510 → 1524 (+14). Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 287: R13 — getrandom 0.2 → 0.3 workspace migration
+
+> 请继续
+
+**Result**: Picked the bounded next step from the candidate list (vs full ECH split-CH which is multi-day). Closes the long-stale Dependabot PR #31 (open since 2026-03-03) that proposed bumping the version but did NOT update any call site, so the naïve PR would have broken the build.
+
+Mechanics:
+- 6 `Cargo.toml` files (workspace + 5 crates with `getrandom` direct dep) bumped 0.2 → 0.3.
+- 121 production call sites renamed via sed: `getrandom::getrandom(&mut buf)` → `getrandom::fill(&mut buf)`. Per-crate breakdown: hitls-crypto 43, hitls-tls 56, hitls-pki 10, hitls-cli 7, hitls-bignum 3, hitls-auth 2.
+- Both `Cargo.lock` and `fuzz/Cargo.lock` refresh to `getrandom 0.3.4`.
+- No error-handling closures touched: `getrandom::Error` retained the same type contract, so existing `.map_err(|_| CryptoError::BnRandGenFail)` etc. continue to work.
+
+Side-fix surfaced by the migration sweep: I92's `enable_ech_grease` injection in `build_client_hello` unconditionally called `crate::ech::build_grease_ech_payload`, but `crate::ech` is gated behind the `ech` Cargo feature. Default-features build (and the `fuzz` crate which doesn't enable `ech`) was broken — the sweep across `cd fuzz && cargo build --bins` exposed the regression. Fix: wrap the GREASE injection in `#[cfg(feature = "ech")]` and document the silent no-op without the feature.
+
+Tests unchanged at 4197 (no new tests in a rename-only phase). All three build configurations pass: `-p hitls-tls` (default features), `--workspace --all-features`, and `cd fuzz && cargo build --bins`. Clippy on Rust 1.95: 0 warnings. Fmt clean. Dependabot PR #31 to be closed with a pointer to this phase narrative.

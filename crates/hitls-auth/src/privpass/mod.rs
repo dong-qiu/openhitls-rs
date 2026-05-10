@@ -212,7 +212,7 @@ impl Client {
     ) -> Result<(TokenRequest, BlindState), CryptoError> {
         // Step 1: Generate random nonce
         let mut nonce = [0u8; 32];
-        getrandom::getrandom(&mut nonce).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut nonce).map_err(|_| CryptoError::BnRandGenFail)?;
 
         // Step 2: Compute challenge_digest = SHA-256(challenge)
         let challenge_digest = Sha256::digest(challenge)?;

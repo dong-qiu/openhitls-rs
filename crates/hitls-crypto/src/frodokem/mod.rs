@@ -39,7 +39,7 @@ impl FrodoKemKeyPair {
         // Generate random bytes: s(ss_len) || seed_se(seed_se_len) || z(16)
         let rnd_len = p.ss_len + p.seed_se_len + 16;
         let mut rnd = vec![0u8; rnd_len];
-        getrandom::getrandom(&mut rnd).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut rnd).map_err(|_| CryptoError::BnRandGenFail)?;
 
         let s = &rnd[..p.ss_len];
         let seed_se = &rnd[p.ss_len..p.ss_len + p.seed_se_len];
@@ -94,12 +94,12 @@ impl FrodoKemKeyPair {
 
         // Generate random mu
         let mut mu = vec![0u8; p.mu_len];
-        getrandom::getrandom(&mut mu).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut mu).map_err(|_| CryptoError::BnRandGenFail)?;
 
         // Generate salt (if applicable)
         let mut salt = vec![0u8; p.salt_len];
         if p.salt_len > 0 {
-            getrandom::getrandom(&mut salt).map_err(|_| CryptoError::BnRandGenFail)?;
+            getrandom::fill(&mut salt).map_err(|_| CryptoError::BnRandGenFail)?;
         }
 
         // seed_se || k = SHAKE(pk_hash || mu || salt, seed_se_len + ss_len)

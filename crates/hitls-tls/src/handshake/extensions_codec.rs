@@ -1406,7 +1406,7 @@ pub fn is_grease_value(v: u16) -> bool {
 /// Pick a random GREASE value from the 16 defined values.
 pub fn grease_value() -> u16 {
     let mut buf = [0u8; 1];
-    let _ = getrandom::getrandom(&mut buf);
+    let _ = getrandom::fill(&mut buf);
     GREASE_VALUES[(buf[0] & 0x0F) as usize]
 }
 

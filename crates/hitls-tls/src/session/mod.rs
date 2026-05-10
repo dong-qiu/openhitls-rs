@@ -226,7 +226,7 @@ pub fn encrypt_session_ticket(
     }
     let plaintext = encode_session_state(session);
     let mut nonce = [0u8; 12];
-    getrandom::getrandom(&mut nonce)
+    getrandom::fill(&mut nonce)
         .map_err(|e| TlsError::HandshakeFailed(format!("getrandom: {e}")))?;
 
     let ct_tag = hitls_crypto::modes::gcm::gcm_encrypt(ticket_key, &nonce, &[], &plaintext)

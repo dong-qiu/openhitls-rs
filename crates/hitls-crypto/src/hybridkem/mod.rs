@@ -199,7 +199,7 @@ impl HybridKemKeyPair {
         let classic = match params.classic_type {
             ClassicType::X25519 => {
                 let mut sk_bytes = [0u8; X25519_KEY_SIZE];
-                getrandom::getrandom(&mut sk_bytes).map_err(|_| CryptoError::BnRandGenFail)?;
+                getrandom::fill(&mut sk_bytes).map_err(|_| CryptoError::BnRandGenFail)?;
                 let sk = X25519PrivateKey::new(&sk_bytes)?;
                 let pk = sk.public_key();
                 ClassicDh::X25519 {

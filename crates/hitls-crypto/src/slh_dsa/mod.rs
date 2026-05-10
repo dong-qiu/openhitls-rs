@@ -73,9 +73,9 @@ impl SlhDsaKeyPair {
         let mut sk_seed = vec![0u8; n];
         let mut sk_prf = vec![0u8; n];
         let mut pk_seed = vec![0u8; n];
-        getrandom::getrandom(&mut sk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
-        getrandom::getrandom(&mut sk_prf).map_err(|_| CryptoError::BnRandGenFail)?;
-        getrandom::getrandom(&mut pk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut sk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut sk_prf).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut pk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
 
         // Compute public root: top layer (d-1) tree root
         let placeholder_root = vec![0u8; n]; // zero root used only to initialize hasher
@@ -124,7 +124,7 @@ impl SlhDsaKeyPair {
 
         // Step 1: Generate randomizer R
         let mut opt_rand = vec![0u8; n];
-        getrandom::getrandom(&mut opt_rand).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut opt_rand).map_err(|_| CryptoError::BnRandGenFail)?;
         let r = hasher.prf_msg(sk_prf, &opt_rand, message)?;
 
         // Step 2: Compute message digest

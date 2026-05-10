@@ -288,7 +288,7 @@ impl DtlcpRecordEncryptorCbc {
         encrypt_data.extend_from_slice(&padding[..padding_len]);
 
         let mut iv = [0u8; SM4_BLOCK_SIZE];
-        getrandom::getrandom(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
+        getrandom::fill(&mut iv).map_err(|_| TlsError::RecordError("RNG failed".into()))?;
         sm4_cbc_encrypt_raw(&self.enc_key, &iv, &mut encrypt_data)?;
 
         let mut fragment = Vec::with_capacity(SM4_BLOCK_SIZE + encrypt_data.len());

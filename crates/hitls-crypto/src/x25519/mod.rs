@@ -35,7 +35,7 @@ impl X25519PrivateKey {
     /// Generate a new random X25519 private key.
     pub fn generate() -> Result<Self, CryptoError> {
         let mut key = [0u8; 32];
-        getrandom::getrandom(&mut key).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut key).map_err(|_| CryptoError::BnRandGenFail)?;
         clamp_scalar(&mut key);
         Ok(X25519PrivateKey { key })
     }

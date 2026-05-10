@@ -292,11 +292,11 @@ impl MlKemKeyPair {
 
         // d ← random 32 bytes
         let mut d = [0u8; 32];
-        getrandom::getrandom(&mut d).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut d).map_err(|_| CryptoError::BnRandGenFail)?;
 
         // z ← random 32 bytes (for implicit rejection)
         let mut z = [0u8; 32];
-        getrandom::getrandom(&mut z).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut z).map_err(|_| CryptoError::BnRandGenFail)?;
 
         let (ek_pke, dk_pke) = kpke_keygen(&d, &params)?;
 
@@ -336,7 +336,7 @@ impl MlKemKeyPair {
 
         // m ← random 32 bytes
         let mut m = [0u8; 32];
-        getrandom::getrandom(&mut m).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut m).map_err(|_| CryptoError::BnRandGenFail)?;
 
         // (K, r) = G(m || H(ek))
         let h_ek = hash_h(&self.encapsulation_key);

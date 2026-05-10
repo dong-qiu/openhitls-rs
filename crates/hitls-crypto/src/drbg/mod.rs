@@ -24,7 +24,7 @@ pub(crate) fn get_system_entropy(buf: &mut [u8]) -> Result<(), CryptoError> {
     }
     #[cfg(not(feature = "entropy"))]
     {
-        getrandom::getrandom(buf).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(buf).map_err(|_| CryptoError::BnRandGenFail)?;
     }
     Ok(())
 }

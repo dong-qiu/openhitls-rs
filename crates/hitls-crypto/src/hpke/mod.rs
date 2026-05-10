@@ -1112,7 +1112,7 @@ mod tests {
     #[test]
     fn test_hpke_tampered_ciphertext_open() {
         let mut sk_bytes = [0u8; 32];
-        getrandom::getrandom(&mut sk_bytes).unwrap();
+        getrandom::fill(&mut sk_bytes).unwrap();
         let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
         let pk_r = sk_r.public_key();
 
@@ -1128,7 +1128,7 @@ mod tests {
     #[test]
     fn test_hpke_wrong_aad_open() {
         let mut sk_bytes = [0u8; 32];
-        getrandom::getrandom(&mut sk_bytes).unwrap();
+        getrandom::fill(&mut sk_bytes).unwrap();
         let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
         let pk_r = sk_r.public_key();
 
@@ -1142,7 +1142,7 @@ mod tests {
     #[test]
     fn test_hpke_psk_mode_roundtrip() {
         let mut sk_bytes = [0u8; 32];
-        getrandom::getrandom(&mut sk_bytes).unwrap();
+        getrandom::fill(&mut sk_bytes).unwrap();
         let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
         let pk_r = sk_r.public_key();
 
@@ -1162,7 +1162,7 @@ mod tests {
     #[test]
     fn test_hpke_psk_empty_psk_rejected() {
         let mut sk_bytes = [0u8; 32];
-        getrandom::getrandom(&mut sk_bytes).unwrap();
+        getrandom::fill(&mut sk_bytes).unwrap();
         let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
         let pk_r = sk_r.public_key();
 
@@ -1175,7 +1175,7 @@ mod tests {
     #[test]
     fn test_roundtrip_random() {
         let mut sk_bytes = [0u8; 32];
-        getrandom::getrandom(&mut sk_bytes).unwrap();
+        getrandom::fill(&mut sk_bytes).unwrap();
         let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
         let pk_r = sk_r.public_key();
 
@@ -1202,7 +1202,7 @@ mod tests {
             aead: HpkeAead::Aes256Gcm,
         };
         let mut sk_bytes = [0u8; 32];
-        getrandom::getrandom(&mut sk_bytes).unwrap();
+        getrandom::fill(&mut sk_bytes).unwrap();
         let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
         let pk_r = sk_r.public_key();
 
@@ -1224,7 +1224,7 @@ mod tests {
             aead: HpkeAead::ChaCha20Poly1305,
         };
         let mut sk_bytes = [0u8; 32];
-        getrandom::getrandom(&mut sk_bytes).unwrap();
+        getrandom::fill(&mut sk_bytes).unwrap();
         let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
         let pk_r = sk_r.public_key();
 
@@ -1246,7 +1246,7 @@ mod tests {
             aead: HpkeAead::ExportOnly,
         };
         let mut sk_bytes = [0u8; 32];
-        getrandom::getrandom(&mut sk_bytes).unwrap();
+        getrandom::fill(&mut sk_bytes).unwrap();
         let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
         let pk_r = sk_r.public_key();
 
@@ -1513,7 +1513,7 @@ mod tests {
             aead: HpkeAead::ChaCha20Poly1305,
         };
         let mut sk_bytes = [0u8; 32];
-        getrandom::getrandom(&mut sk_bytes).unwrap();
+        getrandom::fill(&mut sk_bytes).unwrap();
         let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
         let pk_r = sk_r.public_key();
 
@@ -1538,7 +1538,7 @@ mod tests {
             aead: HpkeAead::ExportOnly,
         };
         let mut sk_bytes = [0u8; 32];
-        getrandom::getrandom(&mut sk_bytes).unwrap();
+        getrandom::fill(&mut sk_bytes).unwrap();
         let sk_r = X25519PrivateKey::new(&sk_bytes).unwrap();
         let pk_r = sk_r.public_key();
 
@@ -1568,7 +1568,7 @@ mod tests {
             ) {
                 let suite = DEFAULT_SUITE;
                 let mut sk_bytes = [0u8; 32];
-                getrandom::getrandom(&mut sk_bytes).unwrap();
+                getrandom::fill(&mut sk_bytes).unwrap();
                 let sk = X25519PrivateKey::new(&sk_bytes).unwrap();
                 let pk = sk.public_key();
 
@@ -1590,7 +1590,7 @@ mod tests {
             ) {
                 let suite = DEFAULT_SUITE;
                 let mut sk_bytes = [0u8; 32];
-                getrandom::getrandom(&mut sk_bytes).unwrap();
+                getrandom::fill(&mut sk_bytes).unwrap();
                 let sk = X25519PrivateKey::new(&sk_bytes).unwrap();
                 let pk = sk.public_key();
 

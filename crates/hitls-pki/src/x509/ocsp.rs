@@ -156,7 +156,7 @@ impl OcspRequest {
     /// Generate and set a random 16-byte nonce.
     pub fn generate_nonce(&mut self) -> Result<&mut Self, PkiError> {
         let mut buf = [0u8; 16];
-        getrandom::getrandom(&mut buf).map_err(|_| {
+        getrandom::fill(&mut buf).map_err(|_| {
             PkiError::CryptoError(hitls_types::CryptoError::InvalidArg(
                 "getrandom failed for OCSP nonce",
             ))

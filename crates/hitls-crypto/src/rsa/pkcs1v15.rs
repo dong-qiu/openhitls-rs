@@ -148,7 +148,7 @@ fn fill_nonzero_random(buf: &mut [u8]) -> Result<(), CryptoError> {
     for slot in buf.iter_mut() {
         // Rejection-sample until non-zero
         loop {
-            getrandom::getrandom(&mut byte).map_err(|_| CryptoError::BnRandGenFail)?;
+            getrandom::fill(&mut byte).map_err(|_| CryptoError::BnRandGenFail)?;
             if byte[0] != 0 {
                 *slot = byte[0];
                 break;

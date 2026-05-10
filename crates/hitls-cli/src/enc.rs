@@ -117,8 +117,8 @@ fn aead_encrypt(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut key = vec![0u8; params.key_len];
     let mut nonce = vec![0u8; params.nonce_len];
-    getrandom::getrandom(&mut key).map_err(|e| format!("random failed: {e}"))?;
-    getrandom::getrandom(&mut nonce).map_err(|e| format!("random failed: {e}"))?;
+    getrandom::fill(&mut key).map_err(|e| format!("random failed: {e}"))?;
+    getrandom::fill(&mut nonce).map_err(|e| format!("random failed: {e}"))?;
 
     let ct_with_tag = aead_encrypt_raw(&key, &nonce, data, params.name)?;
 
@@ -190,8 +190,8 @@ mod tests {
         // Encrypt
         let mut key = vec![0u8; params.key_len];
         let mut nonce = vec![0u8; params.nonce_len];
-        getrandom::getrandom(&mut key).unwrap();
-        getrandom::getrandom(&mut nonce).unwrap();
+        getrandom::fill(&mut key).unwrap();
+        getrandom::fill(&mut nonce).unwrap();
 
         let ct = aead_encrypt_raw(&key, &nonce, plaintext, params.name).unwrap();
 
@@ -243,8 +243,8 @@ mod tests {
 
         let mut key = vec![0u8; params.key_len];
         let mut nonce = vec![0u8; params.nonce_len];
-        getrandom::getrandom(&mut key).unwrap();
-        getrandom::getrandom(&mut nonce).unwrap();
+        getrandom::fill(&mut key).unwrap();
+        getrandom::fill(&mut nonce).unwrap();
 
         let ct = aead_encrypt_raw(&key, &nonce, &data, params.name).unwrap();
         let mut out = Vec::with_capacity(12 + ct.len());

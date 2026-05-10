@@ -145,7 +145,7 @@ impl Dtls12ClientHandshake {
     fn build_client_hello_with_cookie(&mut self, cookie: &[u8]) -> Result<Vec<u8>, TlsError> {
         // Generate client_random (only on first call)
         if self.state == Dtls12ClientState::Idle {
-            getrandom::getrandom(&mut self.client_random)
+            getrandom::fill(&mut self.client_random)
                 .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
             // Check session cache for resumption
@@ -199,7 +199,7 @@ impl Dtls12ClientHandshake {
             self.cached_session_id.clone()
         } else {
             let mut sid = vec![0u8; 32];
-            getrandom::getrandom(&mut sid)
+            getrandom::fill(&mut sid)
                 .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
             sid
         };

@@ -54,9 +54,9 @@ impl XmssKeyPair {
         let mut sk_seed = vec![0u8; n];
         let mut sk_prf = vec![0u8; n];
         let mut pk_seed = vec![0u8; n];
-        getrandom::getrandom(&mut sk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
-        getrandom::getrandom(&mut sk_prf).map_err(|_| CryptoError::BnRandGenFail)?;
-        getrandom::getrandom(&mut pk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut sk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut sk_prf).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut pk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
 
         let hasher = XmssHasher {
             n,
@@ -229,9 +229,9 @@ impl XmssMtKeyPair {
         let mut sk_seed = vec![0u8; n];
         let mut sk_prf = vec![0u8; n];
         let mut pk_seed = vec![0u8; n];
-        getrandom::getrandom(&mut sk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
-        getrandom::getrandom(&mut sk_prf).map_err(|_| CryptoError::BnRandGenFail)?;
-        getrandom::getrandom(&mut pk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut sk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut sk_prf).map_err(|_| CryptoError::BnRandGenFail)?;
+        getrandom::fill(&mut pk_seed).map_err(|_| CryptoError::BnRandGenFail)?;
 
         let hasher = XmssHasher {
             n,

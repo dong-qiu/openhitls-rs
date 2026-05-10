@@ -38,7 +38,7 @@ impl McElieceKeyPair {
 
         // Generate random seed delta
         let mut delta = vec![0u8; L_BYTES];
-        getrandom::getrandom(&mut delta).map_err(|_| CryptoError::McElieceKeygenFail)?;
+        getrandom::fill(&mut delta).map_err(|_| CryptoError::McElieceKeygenFail)?;
 
         let kp = keygen::seeded_keygen(&delta, &p)?;
 
