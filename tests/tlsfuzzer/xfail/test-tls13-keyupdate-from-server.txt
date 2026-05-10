@@ -1,0 +1,10 @@
+# Phase T92 — `test-tls13-keyupdate-from-server.py` XFAIL (1 entry).
+#
+# `post-handshake KeyUpdate msg from server`: tlsfuzzer drives the
+# client side and expects the server to initiate a KeyUpdate. Our
+# s_server CLI doesn't currently expose a server-initiated
+# KeyUpdate trigger, so the script's expectation never fires. The
+# protocol code (`tls13_server_key_update_body!`) exists; it just
+# isn't called by the CLI. Scheduled — small CLI flag addition.
+
+post-handshake KeyUpdate msg from server

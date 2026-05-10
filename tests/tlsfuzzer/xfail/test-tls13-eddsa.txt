@@ -1,0 +1,13 @@
+# Phase T92 — `test-tls13-eddsa.py` XFAILs (2 entries).
+#
+# `ed25519 only` / `ed448 only`: tlsfuzzer constrains the client
+# `signature_algorithms` to a single Edwards curve scheme. Our
+# server is configured with an RSA cert, can't satisfy
+# Ed-only-signature requests, and replies with `handshake_failure`
+# — which is correct per RFC 8446. tlsfuzzer's expectation here is
+# tied to Ed-cert serving. Won't fix from the server side; would
+# need a CLI capability to load Ed25519/Ed448 server certs and
+# pick the matching cert per-CH. Scheduled if real interop demand.
+
+ed25519 only
+ed448 only

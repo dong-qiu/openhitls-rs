@@ -1,0 +1,12 @@
+# Phase T92 — `test-tls13-connection-abort.py` XFAIL (1 unique
+# conversation, runs 10× across cipher / sig-alg combinations).
+#
+# `After NewSessionTicket`: tlsfuzzer expects the server to abort
+# (or at least NOT echo back) the application data after sending
+# NewSessionTicket. Our s_server is an echo server — it sends the
+# 18-byte HTTP request `b"GET / HTTP/1.0\r\n\r\n"` straight back,
+# which tlsfuzzer flags as "Unexpected message: ApplicationData".
+# This is a tlsfuzzer-vs-test-server expectation mismatch, not a
+# TLS protocol bug. Won't fix.
+
+After NewSessionTicket

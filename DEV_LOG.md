@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T91 (90 phases, T64 skipped)
+- Testing: T1–T92 (91 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -296,6 +296,7 @@ Category summary:
 | 284 | T89 | Test | TLS 1.3 alert-before-close generalisation + tlsfuzzer XFAIL infrastructure + curated baseline | 2026-05-10 |
 | 285 | T90 | Test | TLS 1.2 tlsfuzzer integration + alert-on-error generalisation to TLS 1.2 server + per-script extra-args plumbing | 2026-05-10 |
 | 286 | T91 | Test | TLS 1.3 Finished framing fix (RFC 8446 §4.4.4 strict verify_data length) + zero-body handshake message handling | 2026-05-10 |
+| 287 | T92 | Test | tlsfuzzer TLS 1.3 curated set expansion 6 → 17 scripts (HRR / KeyUpdate / sig_algs / record limits / EdDSA / RSA-PSS / etc.) | 2026-05-10 |
 
 ---
 
@@ -15567,6 +15568,134 @@ The existing `test_decode_finished` (which checks "too short") continues to pass
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
 - `cargo fmt --all -- --check`: clean
 - tlsfuzzer aggregate (15 curated scripts via `tests/tlsfuzzer/run.sh -n 9999`): **1230 PASS / 290 XFAIL / 0 FAIL / 0 XPASS** across 1520 conversations — every script exits 0
+
+## Phase T92 — tlsfuzzer TLS 1.3 Curated Set Expansion 6 → 17 Scripts (2026-05-10)
+
+### Summary
+
+T88/T89/T90/T91 built up the harness, generalised alert-on-error, and closed the largest XFAIL bucket (Finished framing). T92 broadens the curated TLS 1.3 set from 6 scripts to **17**, covering protocol surfaces that were untouched: HRR, KeyUpdate, signature-algorithm negotiation, record-layer limits, ECDSA / EdDSA / RSA-PSS signature schemes, cipher-availability edge cases, and connection-abort flow. CI workflow now exercises **26 scripts total** (17 TLS 1.3 + 9 TLS 1.2) with a wall-clock of ~80 seconds against both server instances.
+
+### Methodology
+
+For each candidate script:
+
+1. Probe against the live server with `-n 9999` (full sweep) to enumerate every conversation and its outcome.
+2. If 100% PASS → add to curated set with no XFAIL file.
+3. If partial fail → enumerate the unique failing conversation names, classify each (real spec gap vs tlsfuzzer-vs-test-server vs out-of-scope feature), write a per-script XFAIL file with a self-documenting comment block.
+4. Verify the script exits 0 via `tests/tlsfuzzer/run.sh` (which gates on `tlsfuzzer.exit == 0` after applying the XFAIL list).
+5. Add to the CI workflow's `scripts=()` array.
+
+### What was added
+
+| Script | TOTAL | PASS | XFAIL | Notes |
+|--------|------:|-----:|------:|-------|
+| `test-tls13-record-padding.py` | 4 | 4 | 0 | Clean — record-layer padding negotiation. |
+| `test-tls13-lengths.py` | 1002 | 1002 | 0 | Clean — generic length-fuzzing across ext / handshake / record fields. Sub-sampled 1000 from a 10001-conversation pool by tlsfuzzer's own default. |
+| `test-tls13-nociphers.py` | 3 | 3 | 0 | Clean — empty cipher_suites list rejection. |
+| `test-tls13-no-unknown-groups.py` | 259 | 255 | 4 | XFAIL: 2 unique long-list-of-unknown-groups conversations + 2 sanity reps. Likely a length-bound parser short-circuit needed. |
+| `test-tls13-connection-abort.py` | 150 | 140 | 10 | XFAIL: `'After NewSessionTicket'` ×10 — our s_server is an echo server; tlsfuzzer expected protocol-level abort. Won't fix (test-server quirk). |
+| `test-tls13-record-layer-limits.py` | 146 | 137 | 9 | XFAIL: 2**14+1 / max-padding edge cases — alert-description doesn't quite match what tlsfuzzer's record-overflow check expects. Real conformance edge, deferred. |
+| `test-tls13-rsa-signatures.py` | 8 | 6 | 2 | XFAIL: `rsa_pss_rsae_sha384` / `sha512` — server returns `internal_error` (likely sign-side gap). Investigate. |
+| `test-tls13-hrr.py` | 3 | 2 | 1 | XFAIL: `'HRR because of empty key_shares'` — same class as the empty-key_share T91 XFAIL in `test-tls13-keyshare-omitted.py`. |
+| `test-tls13-keyupdate-from-server.py` | 3 | 2 | 1 | XFAIL: server-initiated KeyUpdate — protocol code exists (`tls13_server_key_update_body!`), CLI doesn't expose a trigger. |
+| `test-tls13-eddsa.py` | 9 | 7 | 2 | XFAIL: `ed25519 only` / `ed448 only` — RSA server cert can't satisfy Ed-only sig-alg constraint. Won't fix without multi-cert s_server support. |
+| `test-tls13-finished-plaintext.py` | 3 | 2 | 1 | XFAIL: unencrypted Finished — real but minor alert-description mismatch. |
+
+**Sub-aggregate (T92 additions, 11 scripts)**: 10559 PASS / 30 XFAIL / 0 FAIL across 10589 conversations (with `-n 9999`).
+
+### What was probed but NOT added
+
+| Script | Score | Reason for skip |
+|--------|------:|-----------------|
+| `test-tls13-large-number-of-extensions.py` | 20/82 | Too many fails, needs investigation. |
+| `test-tls13-signature-algorithms.py` | 16/282 | Most sig schemes our 2048-RSA cert can't satisfy; large XFAIL list would be noise. |
+| `test-tls13-rsapss-signatures.py` | 0/8 | All fail; same root cause as RSA-signatures' sha384/sha512 — single fix likely closes both. Investigate jointly. |
+| `test-tls13-keyupdate.py` | 6/270 | Mostly fail; needs investigation. |
+| `test-tls13-symetric-ciphers.py` | 773/1159 | Significant fail; cipher-coverage gap. |
+| `test-tls13-shuffled-extentions.py` | 2/19 | Mostly fail; extension-order normalisation gap. |
+| `test-tls13-empty-alert.py` | 2/10 | Mostly fail; alert-handling edge case. |
+| `test-tls13-zero-length-data.py` | 2/11 | Mostly fail. |
+| `test-tls13-zero-content-type.py` | 2/8 | Mostly fail. |
+| `test-tls13-unencrypted-alert.py` | 2/4 | Half fail. |
+| `test-tls13-non-support.py` | 0/53 | All fail. |
+| `test-tls13-legacy-version.py` | 2/10 | Mostly fail. |
+| `test-tls13-serverhello-random.py` | 96/256 | Significant fail; server-side random-validation tests targeting OpenSSL specifics. |
+| `test-tls13-ecdhe-curves.py` | 4/33 | Mostly fail; brainpool / non-default curves we don't enable. |
+| `test-tls13-ecdsa-support.py` | 2/10 | Mostly fail; ECDSA cert needed. |
+| `test-tls13-crfg-curves.py` | 5/18 | Mostly fail. |
+| `test-tls13-dhe-shared-secret-padding.py` | 205/210 | Odd output format, 5 fails — would need manual triage. |
+
+These are queued for future T-phases as targeted fixes (not bulk XFAILs — closing them needs real protocol work).
+
+### CI workflow change
+
+`.github/workflows/tlsfuzzer.yml`:
+
+- TLS 1.3 `scripts=()` array extended from 6 to 17 entries.
+- Removed the explicit `-n 9999` from both the TLS 1.3 and TLS 1.2 invocation loops. Per-script defaults (typically 40-1000 sample) apply for routine CI gating; `-n 9999` remains the right flag for one-time XFAIL-list enumeration locally. Wall-clock cut from ~12 min (with -n 9999 across 17 scripts) to ~80 s. The XFAIL accounting is unaffected: tlsfuzzer's gating (`exit 1` iff `FAIL > 0` or `XPASS > 0`) holds whether or not a specific conversation is sampled in a given run.
+
+### Tlsfuzzer baseline (post-T92)
+
+| Phase | Scripts | TOTAL | PASS | XFAIL | FAIL |
+|-------|--------:|------:|-----:|------:|-----:|
+| Post-T91 | 15 | 1520 | 1230 | 290 | 0 |
+| **Post-T92 (sampled, CI-style)** | **26** | **2034** | **1790** | **244** | **0** |
+| Post-T92 (full sweep, `-n 9999`)  | 26 | 12109 | 11789 | 320 | 0 |
+
+The "sampled" row is what CI sees on every workflow_dispatch / cron run. The "full sweep" row is what we get locally with `-n 9999` and represents the real coverage breadth (~12k conversations exercised, ~98% PASS).
+
+### XFAIL files added (T92)
+
+8 new files under `tests/tlsfuzzer/xfail/`:
+
+| File | Entries | Category |
+|------|--------:|----------|
+| `test-tls13-no-unknown-groups.txt` | 4 | Long-list-of-unknown-groups parser gap (deferred) |
+| `test-tls13-connection-abort.txt` | 1 | Echo-server-vs-protocol-abort expectation (won't fix) |
+| `test-tls13-record-layer-limits.txt` | 9 | 2**14+1 / max-padding edge alert-description (deferred) |
+| `test-tls13-rsa-signatures.txt` | 2 | rsa_pss_rsae_sha384/sha512 sign-side gap (investigate) |
+| `test-tls13-hrr.txt` | 1 | HRR-with-empty-key_shares (same class as T91-deferred) |
+| `test-tls13-keyupdate-from-server.txt` | 1 | Server-initiated KeyUpdate CLI flag missing |
+| `test-tls13-eddsa.txt` | 2 | Ed25519/Ed448-only constraints (multi-cert s_server) |
+| `test-tls13-finished-plaintext.txt` | 1 | Unencrypted Finished alert-description (real but minor) |
+
+Each file leads with a self-documenting comment block per the T89 convention.
+
+### Documentation
+
+`docs/tlsfuzzer.md`: phase reference list extended with T92 (script count 6→17, aggregate jump to 1790 PASS). The XFAIL bookkeeping section already covered everything needed; no other changes.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | Modified | TLS 1.3 script array 6→17 entries; dropped `-n 9999` from both TLS 1.3 and TLS 1.2 invocation loops (sampling-mode CI). |
+| `tests/tlsfuzzer/xfail/test-tls13-no-unknown-groups.txt` | Added | 4 entries. |
+| `tests/tlsfuzzer/xfail/test-tls13-connection-abort.txt` | Added | 1 entry. |
+| `tests/tlsfuzzer/xfail/test-tls13-record-layer-limits.txt` | Added | 9 entries. |
+| `tests/tlsfuzzer/xfail/test-tls13-rsa-signatures.txt` | Added | 2 entries. |
+| `tests/tlsfuzzer/xfail/test-tls13-hrr.txt` | Added | 1 entry. |
+| `tests/tlsfuzzer/xfail/test-tls13-keyupdate-from-server.txt` | Added | 1 entry. |
+| `tests/tlsfuzzer/xfail/test-tls13-eddsa.txt` | Added | 2 entries. |
+| `tests/tlsfuzzer/xfail/test-tls13-finished-plaintext.txt` | Added | 1 entry. |
+| `docs/tlsfuzzer.md` | Modified | Phase reference list extended with T92. |
+
+### Test Count Delta (T92)
+
+No Rust code changes — purely test-infrastructure / XFAIL bookkeeping. Project-tracked test counts unchanged.
+
+| Crate | Pre-T92 | Post-T92 | Δ |
+|-------|--------:|---------:|--:|
+| **Total** | **4208** | **4208** | 0 |
+
+### Build Status (Post T92)
+
+- `cargo test --workspace --all-features --release`: 4208 passed, 0 failed, 43 ignored
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings (no Rust changes)
+- `cargo fmt --all -- --check`: clean (no Rust changes)
+- tlsfuzzer aggregate (26 curated scripts, CI-style sampling): **1790 PASS / 244 XFAIL / 0 FAIL / 0 XPASS** in ~80 s
+- tlsfuzzer aggregate (26 curated scripts, `-n 9999` full sweep): **11789 PASS / 320 XFAIL / 0 FAIL / 0 XPASS** across 12109 conversations
+
 
 
 

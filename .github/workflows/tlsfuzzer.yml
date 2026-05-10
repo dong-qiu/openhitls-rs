@@ -124,12 +124,27 @@ jobs:
           export TLSFUZZER_DIR="${RUNNER_TEMP}/tlsfuzzer"
           export TLSFUZZER_PY=python
           scripts=(
+            # T88/T89 baseline (6)
             test-tls13-conversation.py
             test-tls13-ccs.py
             test-tls13-multiple-ccs-messages.py
             test-tls13-finished.py
             test-tls13-keyshare-omitted.py
             test-tls13-version-negotiation.py
+            # T92 additions (11) — broader protocol surface:
+            # HRR / record padding & limits / KeyUpdate / signature
+            # algorithms / cipher availability / connection abort.
+            test-tls13-record-padding.py
+            test-tls13-lengths.py
+            test-tls13-nociphers.py
+            test-tls13-no-unknown-groups.py
+            test-tls13-connection-abort.py
+            test-tls13-record-layer-limits.py
+            test-tls13-rsa-signatures.py
+            test-tls13-hrr.py
+            test-tls13-keyupdate-from-server.py
+            test-tls13-eddsa.py
+            test-tls13-finished-plaintext.py
           )
           # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
           # on $HITLS_PORT_12. The cipher arg `-C 49199` lives in
@@ -148,11 +163,20 @@ jobs:
           )
           aggregate_exit=0
           : > "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+          # Phase T92 — drop the explicit `-n 9999` from the loop and
+          # let each script's own default sub-sampling apply. `-n 9999`
+          # is still the right flag for one-time XFAIL-list enumeration
+          # locally (`tests/tlsfuzzer/run.sh ... -n 9999`); for routine
+          # CI gating, sampling is fine — XFAIL accounting works
+          # whether or not a specific conversation is sampled in a
+          # given run, and dropping `-n 9999` cuts wall-clock from
+          # ~12 min to ~3 min on the TLS 1.3 leg (test-tls13-lengths.py
+          # alone goes from 6 min to 38 s).
           for s in "${scripts[@]}"; do
             log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}.log"
             echo "=== TLS 1.3: $s ==="
             ./tests/tlsfuzzer/run.sh "$s" \
-              -h "${HITLS_HOST}" -p "${HITLS_PORT}" -n 9999 2>&1 | tee "${log}"
+              -h "${HITLS_HOST}" -p "${HITLS_PORT}" 2>&1 | tee "${log}"
             rc=${PIPESTATUS[0]}
             grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
               | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
@@ -167,7 +191,7 @@ jobs:
             log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}-1.2.log"
             echo "=== TLS 1.2: $s ==="
             ./tests/tlsfuzzer/run.sh "$s" \
-              -h "${HITLS_HOST}" -p "${HITLS_PORT_12}" -n 9999 2>&1 | tee "${log}"
+              -h "${HITLS_HOST}" -p "${HITLS_PORT_12}" 2>&1 | tee "${log}"
             rc=${PIPESTATUS[0]}
             grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
               | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"

@@ -1,0 +1,12 @@
+# Phase T92 — `test-tls13-hrr.py` XFAIL (1 entry).
+#
+# `HRR because of empty key_shares`: tlsfuzzer sends a CH with an
+# empty key_share extension list, expecting the server to reply
+# with HelloRetryRequest and then accept the second CH that adds a
+# real key_share. We currently route this through the `no
+# matching key_share` HRR fallback path, but the second CH
+# processing or downstream HRR-state handling has a gap. Same
+# class as the `empty key_share extension` cases in
+# `test-tls13-keyshare-omitted.py` (T91-deferred). Scheduled.
+
+HRR because of empty key_shares

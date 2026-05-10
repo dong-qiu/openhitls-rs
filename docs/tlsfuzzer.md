@@ -262,3 +262,33 @@ To run it manually: GitHub Actions → tlsfuzzer → "Run workflow".
       `"MAC"` / `"BadRecordMac"` substrings).
     - `test-connection-abort.py`: 150/150 PASS.
     - `test-invalid-content-type.py`, `test-conversation.py`: clean.
+
+- T91 — closed 66 of the 72 `test-tls13-finished.py` XFAILs by
+  fixing two real bugs: (1) `decode_finished` was silently
+  truncating Finished bodies longer than `Hash.length` (RFC 8446
+  §4.4.4 says exactly `Hash.length` — strict `!=` now), allowing
+  padded Finished messages to verify and leaving stale bytes in
+  the read buffer; (2) `get_body` rejected zero-body handshake
+  messages with `if msg_data.len() <= 4`, folding "header-only"
+  into "too short" and emitting `handshake_failure` instead of
+  the `decode_error` tlsfuzzer (and RFC 8446) expects. Three
+  callers of `get_body` (TLS 1.3 server / client + TLS 1.2 server)
+  relaxed to `< 4`. Effect: `test-tls13-finished.py` 642/72 →
+  **708/6**; remaining 6 are huge-padding cases needing
+  cross-record handshake reassembly, deferred.
+
+- T92 — broadened the curated TLS 1.3 set from 6 to **17 scripts**
+  by probing 28 candidates and triaging into clean (3) /
+  partial-XFAIL (8) / mass-fail (17, deferred). Added: HRR, record
+  padding, record-layer limits, length fuzzing, `nociphers`,
+  unknown-groups, connection-abort, RSA signatures, EdDSA,
+  KeyUpdate-from-server, finished-plaintext. CI workflow's
+  `scripts=()` array updated; `-n 9999` dropped from the loop so
+  per-script defaults apply (typically 40-1000 sample) — wall-clock
+  cut from ~12 min to ~80 s for all 26 scripts. The deferred 17
+  mass-fail scripts (signature-algorithms, rsapss-signatures,
+  keyupdate, symetric-ciphers, etc.) need real protocol fixes,
+  not bulk XFAILs; queued for future targeted T- or I- phases.
+  Combined post-T92 baseline: **1790 PASS / 244 XFAIL / 0 FAIL**
+  (CI sampling) across 26 scripts; **11789 PASS / 320 XFAIL / 0
+  FAIL** with `-n 9999` full sweep across 12109 conversations.

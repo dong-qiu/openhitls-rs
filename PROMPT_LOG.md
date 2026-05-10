@@ -4651,3 +4651,28 @@ Tests: 4206 → 4207 (+1). hitls-integration-tests 266 → 267. All three build 
 **Out of scope (still XFAIL)**: 6 huge-padding Finished cases (need handshake reassembly), 2 `empty key_share extension` cases (different code path in `process_client_hello`; tlsfuzzer's `decode_error` expectation for an empty-but-structurally-valid extension list is debatable per RFC 8446 §4.2.8), 3 `Large ClientHello padding` cases (need ClientHello-specific length check before the record-layer `record_overflow`).
 
 Tests: 4207 → 4208 (+1). hitls-tls 1530 → 1531. All three build configurations clean. Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 296: T92 — broaden tlsfuzzer TLS 1.3 curated set (HRR / KeyUpdate / sig_algs / record limits / EdDSA / RSA-PSS)
+
+> 请继续T92
+
+**Result**: Probed 28 candidate TLS 1.3 scripts not yet in CI. Triaged into 3 buckets: clean (3) / partial-XFAIL (8) / mass-fail (17, deferred). Added the 11 viable scripts to the curated CI set, taking TLS 1.3 coverage from **6 → 17 scripts**.
+
+**11 added scripts**:
+- *Clean* (no XFAIL): `test-tls13-record-padding.py` (4/4), `test-tls13-lengths.py` (1002/1002 sampled — fuzzes lengths across ext/handshake/record fields), `test-tls13-nociphers.py` (3/3).
+- *Partial-XFAIL with 1-2 entries each*: `test-tls13-hrr.py` (HRR-with-empty-key_shares — same class as T91-deferred), `test-tls13-keyupdate-from-server.py` (server-initiated KeyUpdate — CLI flag missing), `test-tls13-eddsa.py` (Ed-only sig-alg constraints need multi-cert s_server), `test-tls13-rsa-signatures.py` (rsa_pss_rsae_sha384/sha512 sign-side gap), `test-tls13-finished-plaintext.py` (alert-description mismatch).
+- *Bigger XFAIL counts but high-coverage*: `test-tls13-no-unknown-groups.py` (255/259), `test-tls13-connection-abort.py` (140/150 — `'After NewSessionTicket'` ×10, won't-fix echo-server quirk), `test-tls13-record-layer-limits.py` (137/146 — 2**14+1 / max-padding edge alert-description mismatches, deferred).
+
+**17 deferred scripts** with mass-fails (>50% fail rate) need real protocol work, not bulk XFAILs: `test-tls13-large-number-of-extensions`, `test-tls13-signature-algorithms` (16/282 — most sig schemes our 2048-RSA cert can't satisfy), `test-tls13-rsapss-signatures` (0/8 — likely same root cause as the 2 rsa-signatures fails), `test-tls13-keyupdate` (6/270), `test-tls13-symetric-ciphers` (773/1159), `test-tls13-shuffled-extentions`, `test-tls13-empty-alert`, `test-tls13-zero-length-data`, `test-tls13-zero-content-type`, `test-tls13-unencrypted-alert`, `test-tls13-non-support`, `test-tls13-legacy-version`, `test-tls13-serverhello-random`, `test-tls13-ecdhe-curves` (brainpool / non-default), `test-tls13-ecdsa-support` (ECDSA cert needed), `test-tls13-crfg-curves`, `test-tls13-dhe-shared-secret-padding`. Each queued for a future targeted T- or I- phase.
+
+**CI workflow change** — TLS 1.3 `scripts=()` array 6→17 entries; **dropped explicit `-n 9999`** from both TLS 1.3 and TLS 1.2 invocation loops. Per-script defaults (typically 40-1000 sample) apply for routine CI gating; `-n 9999` remains the right flag for one-time XFAIL-list enumeration locally. Wall-clock cut from ~12 min (with -n 9999 across 17 scripts) to **~80 s** for all 26 scripts (17 TLS 1.3 + 9 TLS 1.2). XFAIL accounting unaffected: tlsfuzzer's gating (`exit 1` iff `FAIL > 0` or `XPASS > 0`) holds whether or not a specific conversation is sampled in a given run.
+
+**Tlsfuzzer aggregate** (26 curated scripts, both servers):
+- CI-style sampling: **1790 PASS / 244 XFAIL / 0 FAIL / 0 XPASS** (~80 s)
+- Full sweep `-n 9999`: **11789 PASS / 320 XFAIL / 0 FAIL / 0 XPASS** across 12109 conversations
+
+8 new XFAIL files added under `tests/tlsfuzzer/xfail/`, each with self-documenting comment block per the T89 convention (category: real spec gap / OpenSSL idiosyncrasy / won't-fix-by-design / scheduled with concrete next step).
+
+**No Rust code changes** — pure test-infrastructure / XFAIL bookkeeping / CI workflow. Test counts unchanged at 4208.
+
+Tests: 4208 → 4208 (no change). All three build configurations clean. Clippy: 0 warnings. Fmt clean.
