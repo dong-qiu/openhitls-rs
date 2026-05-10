@@ -4532,3 +4532,25 @@ The two AAD computations (client from-scratch, server via reconstruction) produc
 Out-of-scope (still I95+ future work, list trimmed by removing AAD): HRR-with-ECH cookies; outer_extensions reference compression; ech_retry_configs; ECH-aware GREASE-PSK rules.
 
 Tests: 4200 → 4201 (+1). hitls-tls 1527 → 1528. All three build configurations clean. Clippy on Rust 1.95: 0 warnings. Fmt clean.
+
+### Prompt 290: I95 — ECH HRR continuation (close I93/I94's HRR-with-ECH gap)
+
+> 继续 I95
+
+**Result**: Closed the next-most-impactful gap from I93/I94's deferred list. Before I95, an ECH-accepted CH1 that triggered HRR (e.g. group mismatch on the inner key_share) would land in `process_client_hello_retry` which had no ECH plumbing — so CH2 was always processed as outer (cover SNI), defeating ECH entirely whenever HRR fired. Worse: an on-path attacker observing CH1's cover SNI and then stripping the ECH ext from CH2 would force the server into the cover-SNI flow.
+
+**Server changes**:
+- New private field `ech_accepted_on_initial: bool` on `ServerHandshake` (cfg-gated on `feature = "ech"`).
+- `process_client_hello`: set the flag on successful `try_unwrap_ech`.
+- `process_client_hello_retry`: at entry, run the same `try_unwrap_ech`. Three outcomes — Some(inner) → swap msg_data and proceed; None + flag set → hard-error "ECH downgrade after HRR"; None + no keypairs configured + flag set → hard-error "ECH state lost between initial CH and retry"; otherwise unchanged.
+
+**Client changes**:
+- `build_client_hello_retry` calls the existing `maybe_wrap_in_ech_outer` after computing inner CH2 bytes — CH2 now follows the same ECH discipline as CH1 with proper `ClientHelloOuterAAD` from I94.
+
+Transcript continuity falls out automatically: I93 already arranged for `try_unwrap_ech` to swap to inner BEFORE any transcript work in the initial path. The HRR cookie binds the CH1 inner-transcript hash, and CH2's transcript update (already operating on inner bytes before wrap) matches what the server reconstructs.
+
+**+2 tests**:
+- `test_ech_hrr_e2e_with_group_mismatch`: client offers SECP256R1 (server prefers X25519) → CH1 ECH-accepted → HRR → CH2 with X25519 + ECH wrap → server unwraps → handshake actions returned. Verifies cipher suite consistency through HRR.
+- `test_ech_hrr_downgrade_after_accept_rejected`: build CH2 normally, then surgically strip the encrypted_client_hello extension from the wire bytes (simulating an on-path attacker dropping ECH); server must hard-error rather than silently process the stripped outer. The downgrade-protection guarantee.
+
+Tests: 4201 → 4203 (+2). hitls-tls 1528 → 1530. All three build configurations clean. Clippy on Rust 1.95: 0 warnings. Fmt clean. Remaining ECH future work (I96+): outer_extensions reference compression, ech_retry_configs in EE, ECH-aware GREASE-PSK rules.

@@ -262,6 +262,12 @@ pub struct ServerHandshake {
     client_sig_algs_cert: Vec<SignatureScheme>,
     /// Certificate authorities received from client (RFC 8446 §4.2.4).
     client_certificate_authorities: Vec<Vec<u8>>,
+    /// Phase I95: ECH-accept state across HRR. `true` once `try_unwrap_ech`
+    /// has successfully recovered an inner CH on the initial CH; the
+    /// retried CH MUST also offer ECH (downgrade-protection) and the
+    /// server unwraps it the same way.
+    #[cfg(feature = "ech")]
+    ech_accepted_on_initial: bool,
 }
 
 struct ServerFlightParams<'a> {
@@ -306,6 +312,8 @@ impl ServerHandshake {
             client_certs: Vec::new(),
             client_sig_algs_cert: Vec::new(),
             client_certificate_authorities: Vec::new(),
+            #[cfg(feature = "ech")]
+            ech_accepted_on_initial: false,
         }
     }
 
@@ -362,13 +370,15 @@ impl ServerHandshake {
             ));
         }
 
-        // Phase I93: ECH split-CH unwrap. If `ech_keypairs` is configured
-        // and the outer CH carries an `encrypted_client_hello` extension
-        // whose `config_id` matches one of our published configs, decrypt
-        // to recover the inner CH and process THAT instead. config_id
-        // mismatch is treated as GREASE (process outer); config_id match
-        // with decrypt failure is a hard error (does NOT silently fall
-        // back — that would defeat the privacy purpose of ECH).
+        // Phase I93/I94/I95: ECH split-CH unwrap. If `ech_keypairs` is
+        // configured and the outer CH carries an `encrypted_client_hello`
+        // extension whose `config_id` matches one of our published
+        // configs, decrypt to recover the inner CH and process THAT
+        // instead. config_id mismatch is treated as GREASE (process
+        // outer); config_id match with decrypt failure is a hard error.
+        // On ECH accept, set `ech_accepted_on_initial = true` so a
+        // subsequent retried CH (after HRR) can enforce continuity
+        // (Phase I95: downgrade-protection).
         #[cfg(feature = "ech")]
         let _inner_storage;
         #[cfg(feature = "ech")]
@@ -376,6 +386,7 @@ impl ServerHandshake {
             match Self::try_unwrap_ech(msg_data, &self.config.ech_keypairs)? {
                 Some(inner) => {
                     _inner_storage = inner;
+                    self.ech_accepted_on_initial = true;
                     &_inner_storage[..]
                 }
                 None => msg_data,
@@ -709,6 +720,49 @@ impl ServerHandshake {
                 "process_client_hello_retry: wrong state".into(),
             ));
         }
+
+        // Phase I95: HRR-with-ECH unwrap. The retried CH must follow the
+        // same ECH discipline as the initial CH:
+        //   - If ECH was accepted on the initial CH (ech_accepted_on_initial
+        //     == true), the retried CH MUST also offer ECH and decrypt
+        //     successfully — otherwise an attacker could downgrade the
+        //     handshake by stripping the ECH ext on CH2.
+        //   - If ECH was NOT accepted on initial (config_id mismatch /
+        //     no ECH), the retried CH is processed as outer (no special
+        //     enforcement on CH2).
+        // The cookie carried in HRR.cookie already binds CH2 to the inner
+        // CH1 transcript, so swapping msg_data → inner here lets the
+        // existing transcript machinery do the right thing.
+        #[cfg(feature = "ech")]
+        let _inner_storage;
+        #[cfg(feature = "ech")]
+        let msg_data: &[u8] = if !self.config.ech_keypairs.is_empty() {
+            match Self::try_unwrap_ech(msg_data, &self.config.ech_keypairs)? {
+                Some(inner) => {
+                    _inner_storage = inner;
+                    &_inner_storage[..]
+                }
+                None => {
+                    if self.ech_accepted_on_initial {
+                        return Err(TlsError::HandshakeFailed(
+                            "ECH downgrade after HRR: initial CH was \
+                             ECH-accepted but retried CH carries no \
+                             matching ECH offer"
+                                .into(),
+                        ));
+                    }
+                    msg_data
+                }
+            }
+        } else if self.ech_accepted_on_initial {
+            return Err(TlsError::HandshakeFailed(
+                "ECH state lost between initial CH and retry — \
+                 server config no longer has ech_keypairs"
+                    .into(),
+            ));
+        } else {
+            msg_data
+        };
 
         let body = get_body(msg_data)?;
         let ch = decode_client_hello(body)?;

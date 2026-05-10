@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I94 (94 phases)
+- Implementation: I1–I95 (95 phases)
 - Testing: T1–T87 (86 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -291,6 +291,7 @@ Category summary:
 | 279 | R13 | Refactor | getrandom 0.2 → 0.3 Workspace Migration | 2026-05-10 |
 | 280 | I93 | Impl | ECH Split-CH End-to-End (real ECHConfig + cover SNI + HPKE encrypt/decrypt) | 2026-05-10 |
 | 281 | I94 | Impl | ECH Proper ClientHelloOuterAAD (draft-compliant AEAD binding) | 2026-05-10 |
+| 282 | I95 | Impl | ECH HRR Continuation (retried CH unwrap + downgrade-protection) | 2026-05-10 |
 
 ---
 
@@ -15025,3 +15026,64 @@ I93's deferral list is unchanged except that **proper AAD** is now closed. Remai
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
 - `cargo fmt --all -- --check`: clean
 - All three previous I93 e2e tests (real split-CH happy path, config_id mismatch GREASE fallback, decrypt failure rejection) still pass — proves the AAD reconstruction agrees byte-for-byte between client and server.
+
+## Phase I95 — ECH HRR Continuation (retried CH unwrap + downgrade-protection) (2026-05-10)
+
+### Summary
+
+Closes the next-most-impactful gap from I93/I94's deferred list: ECH continuation across HelloRetryRequest. Before I95, an ECH-accepted CH1 that triggered HRR (e.g. group mismatch on the inner key_share) would land in `process_client_hello_retry`, which had no ECH plumbing — so CH2 was always processed as outer (cover SNI), defeating ECH entirely whenever HRR fired. Worse: an on-path attacker who observed CH1's cover SNI and then stripped the ECH ext from CH2 would force the server into the cover-SNI flow, leaking the real destination through the mismatch between HRR and CH2.
+
+I95 adds the symmetric ECH unwrap to `process_client_hello_retry` and enforces ECH-continuity downgrade-protection: if CH1 was ECH-accepted, CH2 MUST also offer ECH and decrypt successfully — otherwise the server hard-rejects.
+
+The client side is symmetric: `build_client_hello_retry` now calls the same `maybe_wrap_in_ech_outer` that the initial `build_client_hello` uses, so CH2 carries cover SNI + HPKE-encrypted inner with the proper `ClientHelloOuterAAD` from I94.
+
+### What changed
+
+**Server (`crates/hitls-tls/src/handshake/server.rs`):**
+- New private field `ech_accepted_on_initial: bool` on `ServerHandshake` (gated on `feature = "ech"`).
+- `process_client_hello`: on successful `try_unwrap_ech`, set `ech_accepted_on_initial = true`.
+- `process_client_hello_retry`: at entry, run the same ECH unwrap. Three outcomes:
+  - **Success** (Some(inner)): swap `msg_data` → inner CH2 bytes; rest of retry path unchanged.
+  - **No ECH offered** (None) AND `ech_accepted_on_initial == true`: hard error
+    `"ECH downgrade after HRR: initial CH was ECH-accepted but retried CH carries no matching ECH offer"`.
+  - **No ECH configured server-side** AND `ech_accepted_on_initial == true`: hard error
+    `"ECH state lost between initial CH and retry — server config no longer has ech_keypairs"`
+    (defends against config rotation mid-handshake leaking inner state).
+  - Otherwise (no ECH offered AND CH1 was outer): proceed as before.
+
+**Client (`crates/hitls-tls/src/handshake/client.rs`):**
+- `build_client_hello_retry`: after computing inner CH bytes (same as before — transcript update uses inner), call the existing `maybe_wrap_in_ech_outer` to produce wire bytes. Gated on `feature = "ech"`.
+
+The transcript continuity falls out automatically: I93 already arranged for `try_unwrap_ech` to swap to inner BEFORE any transcript work in `process_client_hello`. The HRR cookie binds the CH1 transcript hash, and CH2's transcript update sees inner CH2 (because the client transcripts inner before wrapping). Client and server transcripts match without further ceremony.
+
+### What's still out of scope
+
+I95 leaves three ECH items for future I96+:
+
+- **`outer_extensions` reference compression** (draft §5.1). Inner CH currently duplicates many extensions from outer; compression would reference them by type. Wire-size optimization, no security impact.
+- **`ech_retry_configs` in EncryptedExtensions**. When the client presents an outdated `ECHConfig`, the server can publish fresh configs in EE so the client can retry against a new key. Not implemented — currently a stale config means hard error.
+- **ECH-aware GREASE-PSK rules**. Draft has rules for how PSK extensions interact with ECH GREASE / real ECH; not currently enforced.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | +`ech_accepted_on_initial: bool` field on `ServerHandshake` (cfg-gated); `process_client_hello` sets the flag on ECH-accept; `process_client_hello_retry` runs `try_unwrap_ech` symmetric to the initial path with downgrade-protection rules. |
+| `crates/hitls-tls/src/handshake/client.rs` | Modified | `build_client_hello_retry` calls `maybe_wrap_in_ech_outer` after computing inner bytes — CH2 now follows the same ECH discipline as CH1. |
+| `crates/hitls-tls/src/connection/tests.rs` | Modified | +2 e2e tests: `test_ech_hrr_e2e_with_group_mismatch` (client offers SECP256R1, server prefers X25519, HRR loops back through ECH unwrap on CH2, full handshake completes); `test_ech_hrr_downgrade_after_accept_rejected` (surgically strip the ECH ext from CH2 wire bytes after a successful CH1 ECH-accept; server must hard-error). |
+
+### Test Count Delta (I95)
+
+| Crate | Pre-I95 | Post-I95 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-tls | 1528 | 1530 | +2 |
+| **Total** | **4201** | **4203** | **+2** |
+
+### Build Status (Post I95)
+
+- `cargo test --workspace --all-features`: 4,160 passed, 0 failed, 43 ignored (4,203 total)
+- `cargo build -p hitls-tls` (default features only — no `ech`): clean (verifies `ech_accepted_on_initial` field stays cfg-gated)
+- `cd fuzz && cargo build --bins`: clean
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets` (Rust 1.95): 0 warnings
+- `cargo fmt --all -- --check`: clean
+- All previous ECH e2e tests (4 from I93+I94: real split-CH happy path, config_id mismatch GREASE fallback, decrypt failure rejection, outer CH tampering) still pass.

@@ -990,11 +990,23 @@ impl ClientHandshake {
         };
 
         let msg = encode_client_hello(&ch);
+        // Inner CH bytes feed the transcript regardless of ECH wrap state.
         self.transcript.update(&msg)?;
         self.key_exchange = Some(kx);
         self.state = HandshakeState::WaitServerHello;
 
-        Ok(msg)
+        // Phase I95: HRR-with-ECH wrap. The retried CH must follow the same
+        // ECH discipline as the initial CH — if `ech_config_list` is set,
+        // wrap CH2 with cover SNI + HPKE-encrypted inner exactly like CH1
+        // (Phase I93/I94). Skipping this would let an attacker observing
+        // the wire correlate CH1 (cover SNI) with CH2 (real SNI), defeating
+        // the privacy purpose of ECH.
+        #[cfg(feature = "ech")]
+        let wire = self.maybe_wrap_in_ech_outer(msg)?;
+        #[cfg(not(feature = "ech"))]
+        let wire = msg;
+
+        Ok(wire)
     }
 
     /// Process an EncryptedExtensions message.

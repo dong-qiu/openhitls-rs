@@ -6195,3 +6195,145 @@ fn test_ech_outer_ch_tampering_breaks_aad_binding() {
          binding and cause HPKE-Open to fail (no silent fallback to outer)"
     );
 }
+
+/// Phase I95 — HRR-with-ECH end-to-end. Client offers SECP256R1 first
+/// (server prefers X25519), so server emits HRR. Client rebuilds CH2 with
+/// X25519 + the same ECH config; server unwraps CH2's ECH ext and
+/// continues the handshake. The retried CH must follow the same ECH
+/// discipline as the initial CH — otherwise an attacker could drop the
+/// ECH ext on CH2 and force the server into the cover-SNI flow.
+#[cfg(feature = "ech")]
+#[test]
+fn test_ech_hrr_e2e_with_group_mismatch() {
+    use crate::config::ServerPrivateKey;
+    use crate::crypt::NamedGroup;
+
+    let (config_list, single_config, sk, _public_name) = make_ech_test_keypair(0x42);
+    let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+    // Client first-offers SECP256R1, supports X25519 too.
+    let client_config = TlsConfig::builder()
+        .server_name("inner.real.example")
+        .ech_config_list(config_list)
+        .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
+        .verify_peer(false)
+        .build();
+
+    // Server prefers X25519 only — forces HRR.
+    let server_config = TlsConfig::builder()
+        .role(crate::TlsRole::Server)
+        .supported_groups(&[NamedGroup::X25519])
+        .certificate_chain(vec![fake_cert])
+        .private_key(ServerPrivateKey::Ed25519(seed))
+        .ech_keypairs(vec![(single_config, sk)])
+        .verify_peer(false)
+        .build();
+
+    let mut client_hs = ClientHandshake::new(client_config);
+    let mut server_hs = ServerHandshake::new(server_config);
+
+    // CH1 → ECH-accepted → HRR (group mismatch on inner CH1).
+    let ch1_outer = client_hs.build_client_hello().unwrap();
+    let r1 = server_hs.process_client_hello(&ch1_outer).unwrap();
+    let hrr = match r1 {
+        ClientHelloResult::HelloRetryRequest(a) => a,
+        _ => panic!("expected HRR after ECH-accepted CH1 with mismatched group"),
+    };
+
+    // Client receives HRR, switches to X25519, rebuilds CH2 with ECH wrap.
+    let sh_result = client_hs.process_server_hello(&hrr.hrr_msg).unwrap();
+    let retry = match sh_result {
+        ServerHelloResult::RetryNeeded(r) => r,
+        _ => panic!("expected RetryNeeded"),
+    };
+    assert_eq!(retry.selected_group, NamedGroup::X25519);
+
+    let ch2_outer = client_hs.build_client_hello_retry(&retry).unwrap();
+
+    // Server processes CH2 outer → ECH-unwrap → inner CH2 → handshake actions.
+    let actions = server_hs
+        .process_client_hello_retry(&ch2_outer)
+        .expect("server must accept ECH-wrapped retried CH");
+    assert_eq!(actions.suite, hrr.suite);
+}
+
+/// Phase I95 — ECH downgrade after HRR is rejected. If the initial CH
+/// was ECH-accepted, the server MUST require ECH on the retried CH too.
+/// Stripping the ECH ext on CH2 would let an on-path attacker observing
+/// CH1's cover SNI then suppress the ECH ext on CH2 and force the
+/// server into the outer-SNI flow.
+///
+/// Setup: server has ech_keypairs configured, client legitimately
+/// completes CH1 ECH-accept, gets HRR. We build CH2 normally (with
+/// ECH wrap) and then **surgically strip** the encrypted_client_hello
+/// extension from the wire bytes before handing CH2 to the server.
+/// The server must hard-error rather than process the stripped outer.
+#[cfg(feature = "ech")]
+#[test]
+fn test_ech_hrr_downgrade_after_accept_rejected() {
+    use crate::config::ServerPrivateKey;
+    use crate::crypt::NamedGroup;
+    use crate::extensions::ExtensionType;
+    use crate::handshake::codec::{decode_client_hello, encode_client_hello};
+
+    let (config_list, single_config, sk, _) = make_ech_test_keypair(0x42);
+    let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+    let client_config = TlsConfig::builder()
+        .server_name("inner.real.example")
+        .ech_config_list(config_list)
+        .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
+        .verify_peer(false)
+        .build();
+
+    let server_config = TlsConfig::builder()
+        .role(crate::TlsRole::Server)
+        .supported_groups(&[NamedGroup::X25519])
+        .certificate_chain(vec![fake_cert])
+        .private_key(ServerPrivateKey::Ed25519(seed))
+        .ech_keypairs(vec![(single_config, sk)])
+        .verify_peer(false)
+        .build();
+
+    let mut client_hs = ClientHandshake::new(client_config);
+    let mut server_hs = ServerHandshake::new(server_config);
+
+    // CH1 → ECH-accepted → HRR.
+    let ch1_outer = client_hs.build_client_hello().unwrap();
+    let r1 = server_hs.process_client_hello(&ch1_outer).unwrap();
+    let hrr = match r1 {
+        ClientHelloResult::HelloRetryRequest(a) => a,
+        _ => panic!("expected HRR after ECH-accepted CH1 with mismatched group"),
+    };
+
+    let sh_result = client_hs.process_server_hello(&hrr.hrr_msg).unwrap();
+    let retry = match sh_result {
+        ServerHelloResult::RetryNeeded(r) => r,
+        _ => panic!("expected RetryNeeded"),
+    };
+
+    // Build CH2 normally (with ECH wrap), then surgically strip the
+    // encrypted_client_hello extension from the wire bytes before
+    // handing CH2 to the server. This simulates an on-path attacker
+    // dropping the ECH ext to force the server into the outer-SNI flow.
+    let ch2_outer_with_ech = client_hs.build_client_hello_retry(&retry).unwrap();
+    let (_, body, _) = parse_handshake_header(&ch2_outer_with_ech).unwrap();
+    let mut decoded = decode_client_hello(body).unwrap();
+    let before = decoded.extensions.len();
+    decoded
+        .extensions
+        .retain(|e| e.extension_type != ExtensionType::ENCRYPTED_CLIENT_HELLO);
+    assert_eq!(
+        decoded.extensions.len(),
+        before - 1,
+        "test fixture must strip exactly the ECH ext"
+    );
+    let stripped_ch2 = encode_client_hello(&decoded);
+
+    let result = server_hs.process_client_hello_retry(&stripped_ch2);
+    assert!(
+        result.is_err(),
+        "ECH-accepted CH1 + stripped ECH ext on CH2 must be a hard \
+         downgrade error, not silent fallback to the outer flow"
+    );
+}
