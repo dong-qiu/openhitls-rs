@@ -1,0 +1,28 @@
+# Phase T99 — XFAIL list for tlsfuzzer test-tls13-certificate-verify.py
+# when run against the openhitls-rs s-server with --verify-client-cert.
+#
+# Status snapshot (T99 baseline): TOTAL 31 / PASS 30 / FAIL 1 / XPASS 0.
+#
+# T99 closed 19 of 20 conversations that were FAILing pre-T99:
+#   * §4.4.3 sig-alg vetting (T98) already refused rsa_pkcs1_* / SHA-1 /
+#     SHA-224 / MD5 — closed 6 conversations.
+#   * T99 changed the wire alert mapping for CV signature-verify
+#     failures to `decrypt_error` (RFC 8446 §6.2) instead of the
+#     fall-through `handshake_failure` — closed all the random
+#     fuzzed-signature conversations + the PSS hash/MGF1 mismatch
+#     + the salt-length-{0,31,33} conversations (10+ closed in one go).
+#   * T99 explicitly recognized rsa_pss_pss_* (0x0809-0x080b) and
+#     refused them with `illegal_parameter` (RFC 8446 §4.2.3) instead
+#     of the catch-all `handshake_failure` — closed 3 conversations.
+#
+# Single remaining FAIL — same root cause as the cert-request XFAIL:
+#
+# * `check sigalgs in cert request`: tlsfuzzer asserts that the
+#   server's CertificateRequest only advertises a specific
+#   signature_algorithms subset. Our CR sends the full
+#   `config.signature_algorithms` list (RSA-PSS-RSAE / ECDSA / Ed*).
+#   Tightening the CR sigalgs to match the server cert key type is
+#   permitted by RFC 8446 §4.3.2 but not required, queued as a
+#   follow-up phase.
+
+check sigalgs in cert request

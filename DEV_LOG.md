@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T98 (97 phases, T64 skipped)
+- Testing: T1–T99 (98 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -303,6 +303,7 @@ Category summary:
 | 291 | T96 | Test | s_server CLI Tier-1 flags (`--cipher-suites`, `--require-client-cert`, `--max-early-data-size`, `--ticket-key`, `--no-middlebox-compat`) + TLS 1.2 default cipher widening | 2026-05-11 |
 | 292 | T97 | Test | TLS 1.3 server-side in-handshake mTLS (RFC 8446 §4.3.2 + §4.4.2-3): CertificateRequest emission + client cert/CV read + chain validation | 2026-05-11 |
 | 293 | T98 | Test | Closing T97 leftovers: client-side in-handshake mTLS + RFC 8446 §4.4.3 sig-alg vetting + tlsfuzzer mTLS in CI (`--verify-client-cert` flag) | 2026-05-11 |
+| 294 | T99 | Test | CertificateVerify alert mapping (RFC 8446 §6.2 `decrypt_error`) + `rsa_pss_pss_*` refusal — `test-tls13-certificate-verify.py` 11/31 → 30/31 PASS, added to CI mTLS suite | 2026-05-11 |
 
 ---
 
@@ -16352,6 +16353,83 @@ Three deferred items, three commits would have been cleaner narrative — but th
 - `cargo test -p hitls-cli --bins --all-features`: 167 passed
 - `RUSTFLAGS="-D warnings" cargo clippy -p hitls-cli -p hitls-tls -p hitls-integration-tests --all-features --all-targets`: 0 warnings
 - tlsfuzzer mTLS subset (local): `test-tls13-certificate-request.py` 3 PASS / 2 XFAIL / 0 FAIL → exit 0
+
+## Phase T99 — CertificateVerify Alert-Mapping Fix + `rsa_pss_pss_*` Refusal: tlsfuzzer `test-tls13-certificate-verify.py` 11/31 → 30/31 PASS (2026-05-11)
+
+### Summary
+
+T98 closed 6 of 26 `test-tls13-certificate-verify.py` FAIL conversations via §4.4.3 sig-alg vetting (5/31 → 11/31 PASS). The remaining 20 FAILs were dominated by a single root cause — our `verify_certificate_verify` returned a generic "signature verification failed" string that fell through to `handshake_failure` in the alert mapper, but RFC 8446 §6.2 mandates `decrypt_error` for *any* CV signature verify failure. Tlsfuzzer pinned this specific alert across PSS hash/MGF1 mismatch, salt-length validation, and ~10 random fuzzed-signature mutations.
+
+T99 adds three small but high-leverage changes — together they take cert-verify from 11/31 → **30/31 PASS** (+19 conversations closed) and let the script enter CI properly:
+
+- **(1) Map CV signature failures to `decrypt_error` (RFC 8446 §6.2)**: tightened the failure message in `verify_certificate_verify` to contain the substring `"decrypt_error"`, which `tls_error_to_alert` already routes to `AlertDescription::DecryptError`. Closes ~16 conversations: all random fuzz positions, the 3 PSS mismatch checks, and the salt-length-{0,31,33} checks (each was already being rejected — only the alert was wrong).
+- **(2) Recognise & refuse `rsa_pss_pss_*` codepoints**: added 0x0809 / 0x080a / 0x080b to `SignatureScheme` and a guard in `verify_certificate_verify` that rejects them with `illegal_parameter` (RFC 8446 §4.2.3 — they require a cert with the `id-RSASSA-PSS` SPKI OID, which we never issue). Closes 3 conversations.
+- **(3) Tighten the catch-all unsupported-scheme alert to `illegal_parameter`**: schemes the peer never advertised in our `signature_algorithms` are protocol violations per RFC 8446 §4.4.3; previously surfaced as `handshake_failure`. No tlsfuzzer conversation directly relied on this, but it keeps the mapping consistent across the file.
+
+Single remaining FAIL — `check sigalgs in cert request` — is the same conversation already XFAIL'd in `test-tls13-certificate-request.txt`: tlsfuzzer wants the server to advertise a sigalgs subset matched to the server cert key type, while we send the full configured list. Tightening it is RFC 8446 §4.3.2-permitted, queued.
+
+### Code changes
+
+**`crates/hitls-tls/src/crypt/mod.rs`** (3 lines):
+
+- Added `RSA_PSS_PSS_SHA256/384/512` constants (0x0809–0x080b). We don't issue or accept PSS-OID certs today; the constants exist purely so we can refuse the schemes with the right wire alert.
+
+**`crates/hitls-tls/src/handshake/verify.rs`** (~25 lines):
+
+- New early-exit in `verify_certificate_verify` for `rsa_pss_pss_*` schemes — rejects with `illegal_parameter`-mappable message (RFC 5756 / RFC 8446 §4.2.3).
+- Tightened CV-signature-fail message to embed `"decrypt_error"` so the alert mapper routes it correctly (RFC 8446 §6.2).
+- Tightened catch-all `_ => unsupported scheme` to embed `"illegal_parameter"` (RFC 8446 §4.4.3).
+
+**`tests/tlsfuzzer/xfail-mtls/test-tls13-certificate-verify.txt`** (new file):
+
+- Single-entry XFAIL list (`check sigalgs in cert request`) + category rationale documenting which conversation classes T99 closed.
+
+**`.github/workflows/tlsfuzzer.yml`**:
+
+- `scripts_mtls=()` array now includes `test-tls13-certificate-verify.py` alongside `test-tls13-certificate-request.py`. Same `-k`/`-c` plumbing, same XFAIL_DIR.
+
+### Tlsfuzzer baseline (post-T99)
+
+| Script | Pre-T99 | Post-T99 |
+|--------|---------|----------|
+| `test-tls13-certificate-verify.py` (probe / new in CI) | 11 PASS / 20 FAIL | **30 PASS / 1 XFAIL / 0 FAIL → exit 0** |
+| `test-tls13-certificate-request.py` (CI mTLS) | 3 PASS / 2 XFAIL / 0 FAIL | unchanged |
+| `test-tls13-rsa-signatures.py` (regression check) | 8/8 PASS | 8/8 PASS (no regression) |
+| `test-tls13-conversation.py` (regression check) | 3/3 PASS | 3/3 PASS |
+| `test-tls13-eddsa.py` (regression check) | 7 PASS / 2 XFAIL | unchanged |
+
+CI mTLS aggregate (after T99):
+- `test-tls13-certificate-request.py`: 3 PASS / 2 XFAIL / 0 FAIL → exit 0
+- `test-tls13-certificate-verify.py`: 30 PASS / 1 XFAIL / 0 FAIL → exit 0
+
+### Why these gains came so cheap
+
+T98's audit of the 20 remaining FAIL conversations grouped them into "PSS hash/MGF1 cross-check", "PSS salt-length validation", "rsa_pss_pss_* envelope refusal", and "wrong alert on fuzzed sigs" — but the FIRST THREE were all already failing the verify step today (PSS unpad rejects mismatched hash/MGF1; verify_pss uses fixed `salt_len = h_len(alg)` so non-standard salts fail; `rsa_pss_pss_*` hit the catch-all unsupported arm). Only the wire-alert was wrong. T99 confirms the hunch: fixing one substring routing closes 13 conversations, recognising 3 new codepoints closes 3 more, with no actual crypto-layer changes. The "real" gaps (e.g. PSS-OID cert support, true PSS hash/MGF1 cross-binding inside a malformed-but-structurally-valid signature) are still there — they'd need a PSS-OID cert path to surface.
+
+### Tests (post-T99)
+
+- `cargo test --workspace --all-features`: unchanged (4218 passed / 0 failed / 43 ignored)
+- No new in-tree tests — T99 is purely a wire-alert + sig-scheme-refusal change; correctness is verified end-to-end by the tlsfuzzer probe.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/crypt/mod.rs` | Modified | +3 const for `RSA_PSS_PSS_SHA{256,384,512}`. |
+| `crates/hitls-tls/src/handshake/verify.rs` | Modified | New `rsa_pss_pss_*` reject branch; CV-fail message now contains `"decrypt_error"`; catch-all message now contains `"illegal_parameter"`. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | `scripts_mtls=()` adds `test-tls13-certificate-verify.py`; comment updated. |
+| `tests/tlsfuzzer/xfail-mtls/test-tls13-certificate-verify.txt` | Added | 1-entry XFAIL list (only `check sigalgs in cert request` remains). |
+| `DEV_LOG.md` | Modified | This entry. |
+| `PROMPT_LOG.md` | Modified | T99 prompt + result entry. |
+| `CLAUDE.md` | Modified | Status line + phase ranges (T1-T99). |
+
+### Build Status (Post T99)
+
+- `cargo test -p hitls-tls -p hitls-integration-tests --all-features --release`: 1531 + 9 + others passed / 0 failed
+- `cargo build --release -p hitls-cli`: clean
+- tlsfuzzer mTLS suite: 33 PASS / 3 XFAIL / 0 FAIL across 2 scripts → both exit 0
+- No regressions in spot-checked existing scripts (`rsa-signatures`, `conversation`, `eddsa`)
+
 
 
 

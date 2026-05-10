@@ -264,6 +264,15 @@ impl SignatureScheme {
     pub const RSA_PSS_RSAE_SHA512: Self = Self(0x0806);
     pub const ED25519: Self = Self(0x0807);
     pub const ED448: Self = Self(0x0808);
+    // rsa_pss_pss_*: PSS sigs that REQUIRE a cert with the
+    // id-RSASSA-PSS SPKI OID (1.2.840.113549.1.1.10) per
+    // RFC 8446 §4.2.3 / RFC 5756. We don't accept PSS-OID certs
+    // today, so these schemes are always rejected — the constants
+    // exist only so we can refuse them with `illegal_parameter`
+    // instead of `handshake_failure`.
+    pub const RSA_PSS_PSS_SHA256: Self = Self(0x0809);
+    pub const RSA_PSS_PSS_SHA384: Self = Self(0x080a);
+    pub const RSA_PSS_PSS_SHA512: Self = Self(0x080b);
     pub const SM2_SM3: Self = Self(0x0708);
     pub const DSA_SHA256: Self = Self(0x0402);
     pub const DSA_SHA384: Self = Self(0x0502);

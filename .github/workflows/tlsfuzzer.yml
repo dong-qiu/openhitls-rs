@@ -258,18 +258,19 @@ jobs:
             test-tls13-conversation.py
             test-tls13-eddsa.py
           )
-          # Phase T98 — mTLS scripts. We pass the client identity
+          # Phase T98/T99 — mTLS scripts. We pass the client identity
           # (`-k`/`-c`) on the command line because RUNNER_TEMP isn't
-          # known when args/<script>.txt is written. test-tls13-
-          # certificate-verify.py is intentionally NOT in this list:
-          # its FAIL conversations include random-position fuzzed-
-          # signature names (`xor 0xN at M`) that change every run,
-          # which makes a stable XFAIL list impossible. Closing
-          # those gaps will need either a script-side seed flag
-          # (upstream) or fixing the underlying decrypt_error vs
-          # handshake_failure mismatch in our verify path.
+          # known when args/<script>.txt is written.
+          #
+          # T99 closed the random fuzzed-signature names problem on
+          # `test-tls13-certificate-verify.py` by mapping CV signature-
+          # verify failures to `decrypt_error` (RFC 8446 §6.2). With
+          # the right alert all of those random conversations now PASS
+          # without needing per-name XFAILs — only `check sigalgs in
+          # cert request` remains and is XFAIL'd.
           scripts_mtls=(
             test-tls13-certificate-request.py
+            test-tls13-certificate-verify.py
           )
           aggregate_exit=0
           : > "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"

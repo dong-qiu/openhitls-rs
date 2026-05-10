@@ -62,6 +62,24 @@ pub fn verify_certificate_verify(
             scheme.0
         )));
     }
+    // Phase T99 — rsa_pss_pss_* requires a cert with the id-RSASSA-PSS
+    // SPKI OID (RFC 5756 / RFC 8446 §4.2.3). We don't accept PSS-OID
+    // certs today, so any peer offering these schemes against our RSA
+    // (id-rsaEncryption) cert is using a scheme/cert pairing the spec
+    // forbids — alert is `illegal_parameter`.
+    if matches!(
+        scheme,
+        SignatureScheme::RSA_PSS_PSS_SHA256
+            | SignatureScheme::RSA_PSS_PSS_SHA384
+            | SignatureScheme::RSA_PSS_PSS_SHA512
+    ) {
+        return Err(TlsError::HandshakeFailed(format!(
+            "CertificateVerify: rsa_pss_pss_* (0x{:04x}) requires id-RSASSA-PSS \
+             cert SPKI OID; we do not issue or accept PSS-only RSA certs \
+             (RFC 8446 §4.2.3 — alert: illegal_parameter)",
+            scheme.0
+        )));
+    }
 
     let content = build_verify_content(transcript_hash, is_server);
     let spki = &cert.public_key;
@@ -114,18 +132,31 @@ pub fn verify_certificate_verify(
             verify_ed448(spki, &content, signature)?
         }
         _ => {
+            // Phase T99 — schemes outside our supported set are a
+            // protocol violation per RFC 8446 §4.4.3 (the peer signed
+            // with a scheme we never advertised in `signature_algorithms`).
+            // alert: illegal_parameter.
             return Err(TlsError::HandshakeFailed(format!(
-                "unsupported signature scheme: 0x{:04x}",
+                "CertificateVerify: unsupported signature scheme 0x{:04x} \
+                 (not advertised in our signature_algorithms — \
+                 RFC 8446 §4.4.3 — alert: illegal_parameter)",
                 scheme.0
-            )))
+            )));
         }
     };
 
     if ok {
         Ok(())
     } else {
+        // Phase T99 — RFC 8446 §6.2: "decrypt_error: A handshake (not
+        // record layer) cryptographic operation failed, including being
+        // unable to correctly verify a signature ...". The reason text
+        // contains the substring `"decrypt_error"` so `tls_error_to_alert`
+        // routes it to the matching wire alert.
         Err(TlsError::HandshakeFailed(
-            "CertificateVerify signature verification failed".into(),
+            "CertificateVerify signature verification failed \
+             (RFC 8446 §6.2 — alert: decrypt_error)"
+                .into(),
         ))
     }
 }
