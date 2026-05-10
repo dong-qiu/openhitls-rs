@@ -296,6 +296,20 @@ impl ClientHandshake {
         if let Some(ref name) = self.config.server_name {
             extensions.push(build_server_name(name));
         }
+        // ECH GREASE (Phase I92): emit a random ECH-shaped payload when
+        // the user has opted in but no real `ECHConfig` is configured,
+        // so passive observers cannot distinguish ECH-capable clients
+        // from ECH-non-capable ones. Sized to match Cloudflare/Chrome
+        // production deployment (X25519 KEM + AES-128-GCM, ~144 bytes
+        // for a typical inner CH).
+        if self.config.enable_ech_grease {
+            let inner_len_estimate: u16 = 144;
+            let payload = crate::ech::build_grease_ech_payload(inner_len_estimate)?;
+            extensions.push(crate::extensions::Extension {
+                extension_type: crate::extensions::ExtensionType::ENCRYPTED_CLIENT_HELLO,
+                data: payload,
+            });
+        }
         if self.config.post_handshake_auth {
             extensions.push(build_post_handshake_auth());
         }

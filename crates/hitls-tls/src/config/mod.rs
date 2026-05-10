@@ -177,6 +177,14 @@ pub struct TlsConfig {
     /// When true, injects random GREASE values into cipher suites, extensions,
     /// supported_versions, supported_groups, signature_algorithms, key_share.
     pub grease: bool,
+    /// When true, the client emits a GREASE `encrypted_client_hello`
+    /// extension (RFC ECH §6.2) on every ClientHello regardless of
+    /// whether real ECH is configured. The payload is byte-shaped to
+    /// match a real ECH offer (X25519 KEM enc + AES-128-GCM-tagged
+    /// random payload) so passive observers cannot distinguish
+    /// ECH-capable from ECH-non-capable clients. Default: `false`.
+    /// See `crate::ech::build_grease_ech_payload`.
+    pub enable_ech_grease: bool,
     /// Trusted CA keys for ClientHello (RFC 6066 §6).
     /// Empty = not sent.
     pub trusted_ca_keys: Vec<TrustedAuthority>,
@@ -368,6 +376,7 @@ pub struct TlsConfigBuilder {
     oid_filters: Vec<(Vec<u8>, Vec<u8>)>,
     heartbeat_mode: u8,
     grease: bool,
+    enable_ech_grease: bool,
     trusted_ca_keys: Vec<TrustedAuthority>,
     srtp_profiles: Vec<u16>,
     enable_ocsp_multi_stapling: bool,
@@ -456,6 +465,7 @@ impl Default for TlsConfigBuilder {
             oid_filters: Vec::new(),
             heartbeat_mode: 0,
             grease: false,
+            enable_ech_grease: false,
             trusted_ca_keys: Vec::new(),
             srtp_profiles: Vec::new(),
             enable_ocsp_multi_stapling: false,
@@ -782,6 +792,15 @@ impl TlsConfigBuilder {
         self
     }
 
+    /// Enable GREASE for the `encrypted_client_hello` extension (Phase I92).
+    /// When enabled, every ClientHello carries a random ECH-shaped payload
+    /// even without a real `ECHConfig` published by the server. See
+    /// [`crate::ech::build_grease_ech_payload`].
+    pub fn enable_ech_grease(mut self, enabled: bool) -> Self {
+        self.enable_ech_grease = enabled;
+        self
+    }
+
     pub fn trusted_ca_keys(mut self, authorities: Vec<TrustedAuthority>) -> Self {
         self.trusted_ca_keys = authorities;
         self
@@ -932,6 +951,7 @@ impl TlsConfigBuilder {
             oid_filters: self.oid_filters,
             heartbeat_mode: self.heartbeat_mode,
             grease: self.grease,
+            enable_ech_grease: self.enable_ech_grease,
             trusted_ca_keys: self.trusted_ca_keys,
             srtp_profiles: self.srtp_profiles,
             enable_ocsp_multi_stapling: self.enable_ocsp_multi_stapling,

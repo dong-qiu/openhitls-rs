@@ -5826,3 +5826,112 @@ fn test_server_write_before_handshake_errors() {
         "unexpected error: {err_msg}"
     );
 }
+
+// ====================================================================
+// Phase I92 — ECH GREASE end-to-end wiring tests
+// ====================================================================
+
+/// Enabling `enable_ech_grease(true)` must inject an
+/// `encrypted_client_hello` extension into every ClientHello, with a
+/// payload byte-shape that matches a real ECH offer
+/// (X25519 KEM enc + AES-128-GCM-tagged random payload). A passive
+/// observer must not be able to distinguish this from a real ECH client.
+#[test]
+fn test_ech_grease_extension_present_in_client_hello() {
+    use crate::extensions::ExtensionType;
+    use crate::handshake::codec::decode_client_hello;
+
+    let config = TlsConfig::builder()
+        .server_name("real.example.com")
+        .enable_ech_grease(true)
+        .verify_peer(false)
+        .build();
+
+    let mut hs = ClientHandshake::new(config);
+    let ch_msg = hs.build_client_hello().unwrap();
+
+    // Parse the handshake header and decode ClientHello body.
+    let (hs_type, body, _) = parse_handshake_header(&ch_msg).unwrap();
+    assert_eq!(hs_type, HandshakeType::ClientHello);
+    let ch = decode_client_hello(body).unwrap();
+
+    // Find the ECH extension.
+    let ech_ext = ch
+        .extensions
+        .iter()
+        .find(|e| e.extension_type == ExtensionType::ENCRYPTED_CLIENT_HELLO)
+        .expect("ECH GREASE must inject encrypted_client_hello extension");
+
+    // Validate wire shape matches a real ECH offer.
+    let parsed =
+        crate::ech::parse_ech_client_hello(&ech_ext.data).expect("GREASE must parse as ECH");
+    assert_eq!(parsed.ech_type, 0, "outer type");
+    assert_eq!(parsed.cipher_suite.kdf_id, 0x0001, "HKDF-SHA256");
+    assert_eq!(parsed.cipher_suite.aead_id, 0x0001, "AES-128-GCM");
+    assert_eq!(parsed.enc.len(), 32, "X25519 KEM enc");
+    // Inner-len-estimate(144) + AEAD-tag(16) = 160.
+    assert_eq!(parsed.payload.len(), 160);
+}
+
+/// When `enable_ech_grease(false)` (default), no ECH extension is sent —
+/// don't accidentally enable the feature when the user did not opt in.
+#[test]
+fn test_ech_grease_disabled_omits_extension() {
+    use crate::extensions::ExtensionType;
+    use crate::handshake::codec::decode_client_hello;
+
+    let config = TlsConfig::builder()
+        .server_name("example.com")
+        .verify_peer(false)
+        .build();
+
+    let mut hs = ClientHandshake::new(config);
+    let ch_msg = hs.build_client_hello().unwrap();
+    let (_, body, _) = parse_handshake_header(&ch_msg).unwrap();
+    let ch = decode_client_hello(body).unwrap();
+
+    let has_ech = ch
+        .extensions
+        .iter()
+        .any(|e| e.extension_type == ExtensionType::ENCRYPTED_CLIENT_HELLO);
+    assert!(!has_ech, "ECH ext must not appear when GREASE is off");
+}
+
+/// A server receiving a GREASE ECH ClientHello must complete the
+/// handshake normally (silently ignore the unknown ECH offer). This
+/// pins the contract that GREASE doesn't break interoperability with
+/// servers that don't know what to do with the extension — the entire
+/// purpose of GREASE.
+#[test]
+fn test_ech_grease_handshake_succeeds_against_non_ech_server() {
+    use crate::config::ServerPrivateKey;
+
+    let (seed, _pub_key, fake_cert) = make_ed25519_server_identity();
+
+    let client_config = TlsConfig::builder()
+        .server_name("test.example.com")
+        .enable_ech_grease(true)
+        .verify_peer(false)
+        .build();
+
+    let server_config = TlsConfig::builder()
+        .role(crate::TlsRole::Server)
+        .certificate_chain(vec![fake_cert])
+        .private_key(ServerPrivateKey::Ed25519(seed))
+        .verify_peer(false)
+        .build();
+
+    // --- Client builds CH (with GREASE ECH) ---
+    let mut client_hs = ClientHandshake::new(client_config);
+    let ch_msg = client_hs.build_client_hello().unwrap();
+
+    // --- Server processes CH and produces a flight without errors ---
+    let mut server_hs = ServerHandshake::new(server_config);
+    match server_hs.process_client_hello(&ch_msg) {
+        Ok(ClientHelloResult::Actions(_)) => {}
+        Ok(ClientHelloResult::HelloRetryRequest(_)) => {
+            panic!("expected Actions for GREASE-ECH CH, got HRR");
+        }
+        Err(e) => panic!("server must process GREASE-ECH ClientHello without error: {e}"),
+    }
+}

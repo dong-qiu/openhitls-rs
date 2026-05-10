@@ -374,6 +374,75 @@ fn build_ech_info(config: &EchConfig) -> Vec<u8> {
     info
 }
 
+/// Build a GREASE ECH client hello extension payload (Phase I92).
+///
+/// Per draft-ietf-tls-esni §6.2, a client that does not have an `ECHConfig`
+/// SHOULD send a GREASE ECH extension that is byte-indistinguishable from
+/// a real ECH offer. This anti-fingerprinting deployment pattern (used
+/// by Chrome / Firefox in production) prevents network observers from
+/// distinguishing ECH-capable clients from ECH-non-capable ones, raising
+/// the bar for traffic correlation attacks even before any real
+/// `ECHConfig` is published.
+///
+/// # Wire format
+///
+/// The returned bytes are the **payload** of the
+/// `encrypted_client_hello` extension (the caller wraps them in the
+/// usual `extension_type(2) || extension_length(2) || data` envelope):
+///
+/// ```text
+/// type=0 (outer) || cipher_suite(4) || config_id(1) || enc_len(2) ||
+///   enc(=randomly-generated KEM-shape ephemeral pubkey) ||
+///   payload_len(2) || payload(random bytes sized to look like an
+///   AEAD-sealed inner ClientHello of `inner_payload_len` plaintext)
+/// ```
+///
+/// `enc_len` and `payload_len` are RFC-realistic so a passive observer
+/// cannot trivially distinguish GREASE from a real ECH offer:
+///
+/// - `enc_len = 32` (X25519 / DHKEM(X25519, HKDF-SHA256) public key
+///   length, the dominant deployment).
+/// - `payload_len = inner_payload_len + 16` (AES-128-GCM tag overhead).
+///
+/// All bytes after the first 5 (type + suite + config_id) are uniformly
+/// random.
+///
+/// # Errors
+///
+/// Returns `TlsError::HandshakeFailed` only if `getrandom` itself fails.
+pub fn build_grease_ech_payload(inner_payload_len: u16) -> Result<Vec<u8>, TlsError> {
+    // Standard "looks like the dominant deployment" suite: HKDF-SHA256 +
+    // AES-128-GCM. KEM is implicit (encoded into `enc_len`); we choose
+    // X25519 (32-byte enc) so the byte budget matches Cloudflare /
+    // Chrome production deployments.
+    let kdf_id: u16 = 0x0001;
+    let aead_id: u16 = 0x0001;
+    let enc_len: u16 = 32; // X25519 KEM
+    let aead_tag_len: u16 = 16; // AES-128-GCM tag
+    let payload_len = inner_payload_len.saturating_add(aead_tag_len);
+
+    let total = 1 + 2 + 2 + 1 + 2 + (enc_len as usize) + 2 + (payload_len as usize);
+    let mut buf = Vec::with_capacity(total);
+    buf.push(ECH_TYPE_OUTER);
+    buf.extend_from_slice(&kdf_id.to_be_bytes());
+    buf.extend_from_slice(&aead_id.to_be_bytes());
+
+    // config_id, enc, payload: all random.
+    let mut random_tail = vec![0u8; 1 + (enc_len as usize) + (payload_len as usize)];
+    getrandom::getrandom(&mut random_tail)
+        .map_err(|e| TlsError::HandshakeFailed(format!("ECH GREASE random: {e}")))?;
+    let (config_id_byte, rest) = random_tail.split_at(1);
+    let (enc_bytes, payload_bytes) = rest.split_at(enc_len as usize);
+
+    buf.push(config_id_byte[0]);
+    buf.extend_from_slice(&enc_len.to_be_bytes());
+    buf.extend_from_slice(enc_bytes);
+    buf.extend_from_slice(&payload_len.to_be_bytes());
+    buf.extend_from_slice(payload_bytes);
+    debug_assert_eq!(buf.len(), total);
+    Ok(buf)
+}
+
 /// Encrypt the inner ClientHello using HPKE (client-side).
 ///
 /// Returns an `EchClientHello` containing the encrypted payload and HPKE `enc`.
@@ -701,5 +770,68 @@ mod tests {
         let parsed = parse_ech_client_hello(&wire).unwrap();
         let decrypted = decrypt_inner_client_hello(&config, &parsed, &sk.to_bytes(), aad).unwrap();
         assert_eq!(decrypted, inner);
+    }
+
+    // ================================================================
+    // Phase I92 — ECH GREASE anti-fingerprinting tests
+    // ================================================================
+
+    /// GREASE ECH payload must parse as a valid `EchClientHello` so a
+    /// network observer cannot trivially distinguish it from a real
+    /// offer at the wire-shape level.
+    #[test]
+    fn test_grease_ech_parses_as_client_hello() {
+        let payload = build_grease_ech_payload(200).unwrap();
+        let parsed = parse_ech_client_hello(&payload).expect("must parse as ECH client hello");
+        assert_eq!(parsed.ech_type, ECH_TYPE_OUTER, "GREASE = outer type");
+        assert_eq!(parsed.cipher_suite.kdf_id, 0x0001, "HKDF-SHA256");
+        assert_eq!(parsed.cipher_suite.aead_id, 0x0001, "AES-128-GCM");
+        assert_eq!(
+            parsed.enc.len(),
+            32,
+            "X25519 KEM enc len = 32 (matches Cloudflare/Chrome deployment)"
+        );
+        assert_eq!(
+            parsed.payload.len(),
+            200 + 16,
+            "payload = inner + AES-128-GCM tag overhead"
+        );
+    }
+
+    /// Two consecutive GREASE payloads must be byte-different in the
+    /// random tail (config_id, enc, payload). The static prefix is
+    /// constant by design.
+    #[test]
+    fn test_grease_ech_random_tail_varies_between_calls() {
+        let a = build_grease_ech_payload(100).unwrap();
+        let b = build_grease_ech_payload(100).unwrap();
+        // Same length is fine; the static prefix bytes 0..5 (type + suite)
+        // are deliberately constant so an active observer cannot
+        // distinguish *that* from real ECH either.
+        assert_eq!(a.len(), b.len(), "same inner_len → same total len");
+        assert_eq!(&a[..5], &b[..5], "static prefix invariant");
+        // Random tail must vary across calls (probability of collision
+        // is negligible; each call draws ~250 bytes from getrandom).
+        assert_ne!(&a[5..], &b[5..], "GREASE random tail must differ");
+    }
+
+    /// Edge cases on `inner_payload_len`.
+    #[test]
+    fn test_grease_ech_boundary_inner_lengths() {
+        // Zero inner length: payload is just the AEAD tag.
+        let p0 = build_grease_ech_payload(0).unwrap();
+        let parsed0 = parse_ech_client_hello(&p0).unwrap();
+        assert_eq!(parsed0.payload.len(), 16);
+
+        // Max u16 inner length: must not panic, must produce a parseable
+        // payload (memory permitting).
+        let pmax = build_grease_ech_payload(u16::MAX - 16).unwrap();
+        let parsed_max = parse_ech_client_hello(&pmax).unwrap();
+        assert_eq!(parsed_max.payload.len(), u16::MAX as usize);
+
+        // Saturating add: u16::MAX + anything still fits in u16.
+        let psat = build_grease_ech_payload(u16::MAX).unwrap();
+        let parsed_sat = parse_ech_client_hello(&psat).unwrap();
+        assert_eq!(parsed_sat.payload.len(), u16::MAX as usize);
     }
 }
