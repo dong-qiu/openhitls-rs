@@ -72,6 +72,105 @@ impl AlertLevel {
     }
 }
 
+/// Map an internal `TlsError` to the wire alert description that should
+/// be sent to the peer before closing (Phase T89).
+///
+/// Most TLS 1.3 paths just need a sensible default — the only invariant
+/// we guarantee is that the peer receives **something** in the
+/// `unexpected_message` / `decrypt_error` / `handshake_failure` /
+/// `decode_error` / `internal_error` family rather than a bare TCP
+/// close. The mapping uses the error variant first; for `HandshakeFailed`
+/// and `RecordError` we additionally substring-match the human-readable
+/// reason because most of our handshake errors are typed as
+/// `HandshakeFailed(String)` with a free-form message.
+///
+/// Substring matches are case-sensitive and conservative: when in doubt
+/// we fall through to `handshake_failure` (40) for handshake-stage
+/// errors and `internal_error` (80) for everything else. Keep the
+/// substrings in sync with the error site producing them — see the
+/// covering tests in `tests/interop/tests/protocol_attacks.rs`.
+pub fn tls_error_to_alert(err: &hitls_types::TlsError) -> AlertDescription {
+    use hitls_types::TlsError;
+    match err {
+        TlsError::HandshakeFailed(msg) => {
+            let m = msg.as_str();
+            if m.contains("verify_data mismatch")
+                || m.contains("MAC verification")
+                || m.contains("decrypt")
+                || m.contains("AEAD")
+                || m.contains("tag mismatch")
+                || m.contains("BadRecordMac")
+            {
+                AlertDescription::DecryptError
+            } else if m.contains("missing extension")
+                || m.contains("missing_extension")
+                || m.contains("missing required extension")
+                // RFC 8446 §9.2: a TLS 1.3 ClientHello missing
+                // key_share / supported_versions / signature_algorithms
+                // (etc.) MUST be aborted with missing_extension.
+                || m.contains("missing key_share")
+                || m.contains("missing supported_versions")
+                || m.contains("missing signature_algorithms")
+                || m.contains("missing supported_groups")
+                || m.contains("missing pre_shared_key")
+                || m.contains("missing psk_key_exchange_modes")
+            {
+                AlertDescription::MissingExtension
+            } else if m.contains("unexpected_message")
+                || m.contains("unexpected ChangeCipherSpec")
+                || m.contains("unexpected post-handshake")
+                || m.contains("unexpected content type")
+            {
+                AlertDescription::UnexpectedMessage
+            } else if m.contains("illegal_parameter")
+                || m.contains("illegal parameter")
+                || m.contains("invalid key_share")
+                || m.contains("empty key_share")
+                || m.contains("invalid extension")
+            {
+                AlertDescription::IllegalParameter
+            } else if m.contains("decode")
+                || m.contains("malformed")
+                || m.contains("parse")
+                || m.contains("truncated")
+                || m.contains("incomplete")
+            {
+                AlertDescription::DecodeError
+            } else if m.contains("unsupported version")
+                || m.contains("ProtocolVersion")
+                || m.contains("protocol version")
+            {
+                AlertDescription::ProtocolVersion
+            } else {
+                // `no shared` / `no common` / `no acceptable` and any
+                // unmatched handshake-stage error all fall through to
+                // generic `handshake_failure` (40).
+                AlertDescription::HandshakeFailure
+            }
+        }
+        TlsError::RecordError(msg) => {
+            let m = msg.as_str();
+            if m.contains("decrypt") || m.contains("AEAD") || m.contains("tag") {
+                AlertDescription::BadRecordMac
+            } else if m.contains("overflow") || m.contains("too large") {
+                AlertDescription::RecordOverflow
+            } else if m.contains("decode") || m.contains("incomplete") || m.contains("malformed") {
+                AlertDescription::DecodeError
+            } else {
+                AlertDescription::InternalError
+            }
+        }
+        TlsError::UnsupportedVersion => AlertDescription::ProtocolVersion,
+        TlsError::NoSharedCipherSuite => AlertDescription::HandshakeFailure,
+        TlsError::CertVerifyFailed(_) => AlertDescription::BadCertificate,
+        TlsError::AlertReceived(_) | TlsError::ConnectionClosed | TlsError::SessionExpired => {
+            // Symmetric paths — peer already knows; nothing useful to say.
+            AlertDescription::CloseNotify
+        }
+        TlsError::IoError(_) | TlsError::CryptoError(_) => AlertDescription::InternalError,
+    }
+}
+
 impl AlertDescription {
     /// Convert from u8 to AlertDescription.
     pub fn from_u8(v: u8) -> Result<Self, u8> {

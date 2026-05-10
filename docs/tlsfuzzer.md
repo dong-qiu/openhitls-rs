@@ -155,15 +155,60 @@ versus what `s-server` actually sent (typically an `Alert` of the
 wrong description, or a `TLSBadRecordMAC` if a key transition is
 mistimed).
 
+## XFAIL bookkeeping
+
+Some failures are real, scheduled gaps (e.g. RFC 8446 §9.2's
+`missing_extension` requirement for omitted `key_share`) and others
+are tlsfuzzer encoding OpenSSL-flavoured choices that we deliberately
+don't share (e.g. the 263 "fallback from TLS 1.3-draft<N>" cases).
+Either way, leaving them in the FAIL column means CI signal is
+indistinguishable from noise the moment the file lands.
+
+We track them as **XFAIL**:
+
+- one file per script under `tests/tlsfuzzer/xfail/<script-stem>.txt`,
+  one conversation name per line, optional `<name> :: <reason>`;
+- `tests/tlsfuzzer/run.sh <script>` reads the file, attaches the
+  appropriate `-x ... -X ...` flags, then execs the script;
+- tlsfuzzer's own exit code becomes the gating signal (`exit 1` on
+  `FAIL > 0` or `XPASS > 0`), so CI fails on a NEW regression OR on
+  a previously-XFAIL'd case suddenly passing.
+
+Workflow:
+
+```bash
+# Run a single script through the runner:
+TLSFUZZER_DIR=/tmp/tlsfuzzer \
+TLSFUZZER_PY=/tmp/tlsfuzzer-venv/bin/python \
+  ./tests/tlsfuzzer/run.sh test-tls13-ccs.py -p 4444 -h localhost
+```
+
+To regenerate an XFAIL list (e.g. after upstream tlsfuzzer adds new
+conversations or after fixing a class of bugs and wanting to
+re-baseline), pipe FAILED through sed and overwrite the file:
+
+```bash
+PYTHONPATH=. python scripts/test-tls13-finished.py -h $H -p $P -n 9999 \
+  2>&1 | sed -n '/FAILED:/,/^=/p' | grep "^\s\+'" \
+  | sed "s/^[[:space:]]*'\(.*\)'/\1/" \
+  > tests/tlsfuzzer/xfail/test-tls13-finished.txt
+# then prepend the file's existing rationale comment block by hand
+```
+
+When you fix a conformance gap, **delete the corresponding XFAIL
+entries**. CI's next run reports them as XPASS and fails — this is
+the desired signal that the XFAIL list is now stale.
+
 ## CI hookup
 
-`.github/workflows/tlsfuzzer.yml` runs the recommended scripts above
-on `workflow_dispatch` and on a weekly schedule (Mon 06:00 UTC). It
-is **not** part of the required PR check set — see the comment at
-the top of that file for the rationale. Each script is run with
-`continue-on-error`, so a single regression doesn't mask the rest,
-and the per-script logs are uploaded as the `tlsfuzzer-logs`
-artifact for triage.
+`.github/workflows/tlsfuzzer.yml` runs the curated scripts on
+`workflow_dispatch` and on a weekly schedule (Mon 06:00 UTC). It is
+**not** part of the required PR check set — see the comment at the
+top of that file for the rationale. Each script is invoked through
+`tests/tlsfuzzer/run.sh`, so the workflow's exit code reflects only
+NEW regressions and NEW XPASSes; pre-existing XFAILs are filed via
+the per-script files and produce no noise. Per-script logs are
+uploaded as the `tlsfuzzer-logs` artifact for triage.
 
 To run it manually: GitHub Actions → tlsfuzzer → "Run workflow".
 
@@ -177,3 +222,19 @@ To run it manually: GitHub Actions → tlsfuzzer → "Run workflow".
   sending Finished, not after receiving client Finished) so that
   alerts emitted between the two Finished messages decrypt under
   the key the peer is actually using.
+
+- T89 — generalised the alert-before-close behaviour to the entire
+  TLS 1.3 read/handshake path. Introduced a centralised
+  `tls_error_to_alert(err) -> AlertDescription` mapping in
+  `crates/hitls-tls/src/alert/mod.rs` and a `try_alert! /
+  return_alert_err! / send_fatal_alert_for_error_body!` macro family
+  in `crates/hitls-tls/src/macros.rs` that wraps every error path in
+  the TLS 1.3 client/server handshake and read trait bodies with a
+  best-effort fatal alert send. Effect on the curated tlsfuzzer
+  suite: `test-tls13-finished.py` 3/42 PASS → 642/714 PASS;
+  `test-tls13-ccs.py` 5/5 PASS sustained. Built the XFAIL
+  bookkeeping infrastructure described above and curated XFAIL
+  lists for the 4 scripts whose remaining failures are pre-existing
+  spec gaps or upstream-test idiosyncrasies (341 XFAILs total). CI
+  workflow now uses `run.sh` and gates on real exit codes instead
+  of `continue-on-error`.

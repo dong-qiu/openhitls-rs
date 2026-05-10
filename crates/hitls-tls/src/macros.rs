@@ -111,21 +111,78 @@ macro_rules! read_record_body_tls13 {
                 };
                 if let Some(reason) = bad_ccs_reason {
                     // RFC 8446 §6 — abort with `unexpected_message` alert (10).
-                    // Best-effort: if seal/write fails (e.g., peer already gone)
-                    // we still return the error so the caller closes.
-                    let alert_data = [2u8, 10u8];
-                    if let Ok(record) = $self
-                        .record_layer
-                        .seal_record(ContentType::Alert, &alert_data)
-                    {
-                        let _ = maybe_await!($mode, $self.stream.write_all(&record));
-                    }
+                    // The fatal alert send is now centralised in
+                    // `send_fatal_alert_for_error_body!` (Phase T89) which
+                    // is invoked by the handshake-trait wrapper. Each
+                    // `reason` above contains the literal substring
+                    // `"unexpected_message"` so `tls_error_to_alert`
+                    // maps it to `AlertDescription::UnexpectedMessage`.
                     return Err(TlsError::HandshakeFailed(reason));
                 }
                 continue;
             }
             break Ok((ct, plaintext));
         }
+    }};
+}
+
+/// Send a fatal alert derived from an internal `TlsError` (Phase T89).
+///
+/// Best-effort: if the record layer can't seal the alert (e.g. write
+/// encryption isn't installed yet) or the stream write fails (peer
+/// already gone), we silently swallow — the caller is about to return
+/// the original error and close anyway. The point is that under normal
+/// circumstances the peer sees a wire-level fatal alert with the
+/// description that maps to the failure, instead of a bare TCP close.
+///
+/// `$err` is taken by reference (`&TlsError`) so the caller can still
+/// move/return the original error after we run.
+macro_rules! send_fatal_alert_for_error_body {
+    ($mode:ident, $self:ident, $err:expr) => {{
+        let desc = $crate::alert::tls_error_to_alert($err);
+        // Suppress the alert for `CloseNotify` mappings — those are
+        // symmetric paths where the peer already closed; sending an
+        // alert back is at best redundant, at worst will hit a closed
+        // socket.
+        if !matches!(desc, $crate::alert::AlertDescription::CloseNotify) {
+            let alert_data = [2u8, desc as u8];
+            if let Ok(record) = $self
+                .record_layer
+                .seal_record(ContentType::Alert, &alert_data)
+            {
+                let _ = maybe_await!($mode, $self.stream.write_all(&record));
+            }
+        }
+    }};
+}
+
+/// `?`-like operator that, on `Err`, runs `send_fatal_alert_for_error_body!`
+/// before propagating the error (Phase T89). Use this instead of `?` at
+/// every read-path call site where the failure mode is one the peer
+/// should be told about (record-layer errors, unexpected content type,
+/// rejected post-handshake message). For pure plumbing failures (lock
+/// poisoning, internal invariant breaks) plain `?` is fine.
+macro_rules! try_alert {
+    ($mode:ident, $self:ident, $expr:expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(e) => {
+                send_fatal_alert_for_error_body!($mode, $self, &e);
+                $self.state = ConnectionState::Error;
+                return Err(e);
+            }
+        }
+    };
+}
+
+/// `return Err(e)` with a fatal-alert side effect first. Used for paths
+/// that detect an error themselves (no upstream `Result` to propagate).
+macro_rules! return_alert_err {
+    ($mode:ident, $self:ident, $err:expr) => {{
+        let e = $err;
+        send_fatal_alert_for_error_body!($mode, $self, &e);
+        $self.state = ConnectionState::Error;
+        return Err(e);
     }};
 }
 
@@ -685,6 +742,11 @@ macro_rules! tls13_client_handshake_trait_body {
         match maybe_await!($mode, $self.do_handshake()) {
             Ok(()) => Ok(()),
             Err(e) => {
+                // Phase T89 — RFC 8446 §6: send a fatal alert before
+                // closing so the peer learns *why* (not just that the
+                // socket dropped). Best-effort: if the seal/write fails
+                // the original error still propagates.
+                send_fatal_alert_for_error_body!($mode, $self, &e);
                 $self.state = ConnectionState::Error;
                 Err(e)
             }
@@ -709,7 +771,8 @@ macro_rules! tls13_client_read_trait_body {
         }
 
         loop {
-            let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+            let (ct, plaintext) =
+                try_alert!($mode, $self, maybe_await!($mode, $self.read_record()));
             match ct {
                 ContentType::ApplicationData => {
                     $self.key_update_recv_count = 0;
@@ -721,12 +784,17 @@ macro_rules! tls13_client_read_trait_body {
                     return Ok(n);
                 }
                 ContentType::Handshake => {
-                    let (hs_type, body, total) = parse_handshake_header(&plaintext)?;
+                    let (hs_type, body, total) =
+                        try_alert!($mode, $self, parse_handshake_header(&plaintext));
                     match hs_type {
                         HandshakeType::KeyUpdate => {
                             // Own body to avoid borrow issues across await
                             let body_owned = body.to_vec();
-                            maybe_await!($mode, $self.handle_key_update(&body_owned))?;
+                            try_alert!(
+                                $mode,
+                                $self,
+                                maybe_await!($mode, $self.handle_key_update(&body_owned))
+                            );
                             continue;
                         }
                         HandshakeType::NewSessionTicket => {
@@ -751,16 +819,24 @@ macro_rules! tls13_client_read_trait_body {
                         HandshakeType::CertificateRequest => {
                             let body_owned = body.to_vec();
                             let full_msg_owned = plaintext[..total].to_vec();
-                            maybe_await!(
+                            try_alert!(
                                 $mode,
-                                $self.handle_post_hs_cert_request(&body_owned, &full_msg_owned)
-                            )?;
+                                $self,
+                                maybe_await!(
+                                    $mode,
+                                    $self.handle_post_hs_cert_request(&body_owned, &full_msg_owned)
+                                )
+                            );
                             continue;
                         }
                         _ => {
-                            return Err(TlsError::HandshakeFailed(format!(
-                                "unexpected post-handshake message: {hs_type:?}"
-                            )));
+                            return_alert_err!(
+                                $mode,
+                                $self,
+                                TlsError::HandshakeFailed(format!(
+                                    "unexpected post-handshake message: {hs_type:?}"
+                                ))
+                            );
                         }
                     }
                 }
@@ -772,9 +848,11 @@ macro_rules! tls13_client_read_trait_body {
                     return Ok(0);
                 }
                 _ => {
-                    return Err(TlsError::RecordError(format!(
-                        "unexpected content type: {ct:?}"
-                    )));
+                    return_alert_err!(
+                        $mode,
+                        $self,
+                        TlsError::RecordError(format!("unexpected content type: {ct:?}"))
+                    );
                 }
             }
         }
@@ -1214,6 +1292,9 @@ macro_rules! tls13_server_handshake_trait_body {
         match maybe_await!($mode, $self.do_handshake()) {
             Ok(()) => Ok(()),
             Err(e) => {
+                // Phase T89 — see `tls13_client_handshake_trait_body!`
+                // for the rationale.
+                send_fatal_alert_for_error_body!($mode, $self, &e);
                 $self.state = ConnectionState::Error;
                 Err(e)
             }
@@ -1238,7 +1319,8 @@ macro_rules! tls13_server_read_trait_body {
         }
 
         loop {
-            let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+            let (ct, plaintext) =
+                try_alert!($mode, $self, maybe_await!($mode, $self.read_record()));
             match ct {
                 ContentType::ApplicationData => {
                     $self.key_update_recv_count = 0;
@@ -1250,17 +1332,26 @@ macro_rules! tls13_server_read_trait_body {
                     return Ok(n);
                 }
                 ContentType::Handshake => {
-                    let (hs_type, body, _) = parse_handshake_header(&plaintext)?;
+                    let (hs_type, body, _) =
+                        try_alert!($mode, $self, parse_handshake_header(&plaintext));
                     match hs_type {
                         HandshakeType::KeyUpdate => {
                             let body_owned = body.to_vec();
-                            maybe_await!($mode, $self.handle_key_update(&body_owned))?;
+                            try_alert!(
+                                $mode,
+                                $self,
+                                maybe_await!($mode, $self.handle_key_update(&body_owned))
+                            );
                             continue;
                         }
                         _ => {
-                            return Err(TlsError::HandshakeFailed(format!(
-                                "unexpected post-handshake message: {hs_type:?}"
-                            )));
+                            return_alert_err!(
+                                $mode,
+                                $self,
+                                TlsError::HandshakeFailed(format!(
+                                    "unexpected post-handshake message: {hs_type:?}"
+                                ))
+                            );
                         }
                     }
                 }
@@ -1272,9 +1363,11 @@ macro_rules! tls13_server_read_trait_body {
                     return Ok(0);
                 }
                 _ => {
-                    return Err(TlsError::RecordError(format!(
-                        "unexpected content type: {ct:?}"
-                    )));
+                    return_alert_err!(
+                        $mode,
+                        $self,
+                        TlsError::RecordError(format!("unexpected content type: {ct:?}"))
+                    );
                 }
             }
         }

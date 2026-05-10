@@ -99,14 +99,20 @@ jobs:
           done
 
       - name: Run curated tlsfuzzer TLS 1.3 scripts
-        # `continue-on-error` so one flaky script doesn't mask the
-        # signal from the rest. The summary step below aggregates.
-        continue-on-error: true
+        # Phase T89 — runs each script via `tests/tlsfuzzer/run.sh`,
+        # which attaches the per-script XFAIL list at
+        # `tests/tlsfuzzer/xfail/*.txt` so tlsfuzzer's own exit code
+        # tells us "no NEW regressions and no XPASS". A failure here
+        # means either:
+        #   - a known-bad conversation now PASSes (XPASS) → drop it
+        #     from the xfail list, or
+        #   - a previously-PASSing conversation now FAILs (regression)
+        #     → bisect or add to xfail with a written reason.
         run: |
           set +e
           mkdir -p "${RUNNER_TEMP}/tlsfuzzer-logs"
-          # Conservative starter set — protocol conformance, not fuzz
-          # mutations. Add scripts here as they're reviewed and triaged.
+          export TLSFUZZER_DIR="${RUNNER_TEMP}/tlsfuzzer"
+          export TLSFUZZER_PY=python
           scripts=(
             test-tls13-conversation.py
             test-tls13-ccs.py
@@ -115,21 +121,23 @@ jobs:
             test-tls13-keyshare-omitted.py
             test-tls13-version-negotiation.py
           )
-          fail=0
+          aggregate_exit=0
+          : > "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
           for s in "${scripts[@]}"; do
             log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}.log"
             echo "=== $s ==="
-            (
-              cd "${RUNNER_TEMP}/tlsfuzzer"
-              PYTHONPATH=. python "scripts/${s}" \
-                -h "${HITLS_HOST}" -p "${HITLS_PORT}"
-            ) | tee "${log}"
-            tail -n 12 "${log}" | grep -E '^(TOTAL|PASS|FAIL|SKIP):' \
-              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt" || true
-            echo "--- $s ---" \
-              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            ./tests/tlsfuzzer/run.sh "$s" \
+              -h "${HITLS_HOST}" -p "${HITLS_PORT}" -n 9999 2>&1 | tee "${log}"
+            rc=${PIPESTATUS[0]}
+            grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
+              | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo "${s} → exit=${rc}" >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            if [ "$rc" -ne 0 ]; then
+              aggregate_exit=1
+            fi
           done
-          exit 0
+          exit "$aggregate_exit"
 
       - name: Print summary
         if: always()

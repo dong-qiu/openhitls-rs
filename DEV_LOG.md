@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T88 (87 phases, T64 skipped)
+- Testing: T1–T89 (88 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -293,6 +293,7 @@ Category summary:
 | 281 | I94 | Impl | ECH Proper ClientHelloOuterAAD (draft-compliant AEAD binding) | 2026-05-10 |
 | 282 | I95 | Impl | ECH HRR Continuation (retried CH unwrap + downgrade-protection) | 2026-05-10 |
 | 283 | T88 | Test | tlsfuzzer integration: TLS 1.3 CCS conformance + RFC 8446 §A.1 server write-key timing fix + CI workflow + docs | 2026-05-10 |
+| 284 | T89 | Test | TLS 1.3 alert-before-close generalisation + tlsfuzzer XFAIL infrastructure + curated baseline | 2026-05-10 |
 
 ---
 
@@ -15194,3 +15195,130 @@ The remaining `test-tls13-multiple-ccs-messages.py` failures (3/7) and `test-tls
 - `cargo fmt --all -- --check`: clean
 - tlsfuzzer `scripts/test-tls13-ccs.py` against release `s-server`: **5/5 PASS** (was 3/5)
 - tlsfuzzer `scripts/test-tls13-conversation.py`: 3/3 PASS (regression check)
+
+## Phase T89 — TLS 1.3 Alert-Before-Close Generalisation + tlsfuzzer XFAIL Infrastructure + Curated Baseline (2026-05-10)
+
+### Summary
+
+T88 wired up tlsfuzzer and patched the immediate CCS conformance gaps it surfaced. Re-running the curated CI script set against the T88 binary then exposed two structural problems:
+
+1. **Most "failures" were actually correct rejections without an alert.** When `do_handshake()` (or the post-handshake `read()` loop) returned `Err`, our trait wrappers set `state = Error` and dropped the socket — the peer saw `TLSAbruptCloseError` / "Unexpected closure", not a wire-level fatal alert. tlsfuzzer's assertions hinge on receiving the alert, so e.g. `test-tls13-finished.py` reported only 3/42 PASS even though every one of the 39 "failures" was the server doing the right thing (rejecting a fuzzed Finished MAC) silently. The same pattern explained the keyshare-omitted, multi-CCS, and post-handshake CCS rejections in `test-tls13-ccs.py`.
+
+2. **CI had no signal-vs-noise baseline.** The T88 workflow ran every script with `continue-on-error: true`, so 263 unrelated tlsfuzzer-OpenSSL idiosyncrasies (e.g. "fallback from TLS 1.3-draft<N> to 1.2") would forever sit alongside any real regression in the artifact log. That made the workflow useless for detecting new issues.
+
+T89 fixes both. It generalises T88's CCS-specific alert-on-error to cover **every** TLS 1.3 client/server handshake and read-trait-body error path, and ships a per-script XFAIL infrastructure so CI's exit code can be a real signal again.
+
+### Code changes
+
+**Centralised error → alert mapping (`crates/hitls-tls/src/alert/mod.rs`):**
+
+New `tls_error_to_alert(&TlsError) -> AlertDescription` that maps an internal error to the on-the-wire alert description per RFC 8446 §6:
+
+| Error category | Substring match (HandshakeFailed/RecordError reason) | Alert description |
+|----------------|------------------------------------------------------|-------------------|
+| Bad MAC, AEAD failure, bad verify_data | `decrypt`, `AEAD`, `tag`, `verify_data mismatch`, `MAC verification`, `BadRecordMac` | `decrypt_error` (51) |
+| Missing extension (key_share / supported_versions / signature_algorithms / supported_groups / pre_shared_key / psk_key_exchange_modes / generic) | `missing key_share`, `missing supported_versions`, …, `missing extension`, `missing_extension` | `missing_extension` (109) |
+| Unexpected message | `unexpected_message`, `unexpected ChangeCipherSpec`, `unexpected post-handshake`, `unexpected content type` | `unexpected_message` (10) |
+| Illegal parameter | `illegal_parameter`, `invalid key_share`, `empty key_share`, `invalid extension` | `illegal_parameter` (47) |
+| Decode / parse / truncation | `decode`, `malformed`, `parse`, `truncated`, `incomplete` | `decode_error` (50) |
+| Protocol version | `unsupported version`, `protocol version`, `ProtocolVersion` | `protocol_version` (70) |
+| Record overflow | `overflow`, `too large` | `record_overflow` (22) |
+| Cert verification | `TlsError::CertVerifyFailed(_)` | `bad_certificate` (42) |
+| No shared / no common / fallthrough handshake-stage | (default) | `handshake_failure` (40) |
+| `IoError` / `CryptoError` | (variant match) | `internal_error` (80) |
+| `AlertReceived` / `ConnectionClosed` / `SessionExpired` | (symmetric — peer already knows) | `close_notify` (0) — alert send is suppressed |
+
+The substring approach is pragmatic, not principled — `TlsError::HandshakeFailed(String)` is the canonical handshake error variant in this codebase and switching to enum-typed variants would touch hundreds of call sites. Substrings stay close to the error sites (search-and-replace risk is low) and the integration test pins the wire-level mapping for the most security-relevant case.
+
+**Macro family (`crates/hitls-tls/src/macros.rs`):**
+
+| Macro | Purpose |
+|-------|---------|
+| `send_fatal_alert_for_error_body!($mode, $self, &err)` | Maps `&err`, seals an Alert record (best-effort), and writes it to the stream. Suppresses the send if the mapping is `CloseNotify`. |
+| `try_alert!($mode, $self, expr)` | Drop-in replacement for `?` at error-bearing call sites where the peer should be told before close. On `Err(e)`: send alert, set `state = Error`, return `Err(e)`. |
+| `return_alert_err!($mode, $self, err)` | Drop-in replacement for `return Err(...)` paths that detect errors themselves. Same alert + state + return chain. |
+
+**Wired into the four TLS 1.3 trait body macros:**
+
+- `tls13_client_handshake_trait_body!` and `tls13_server_handshake_trait_body!`: wrap the `do_handshake()` Err arm with `send_fatal_alert_for_error_body!` before propagating.
+- `tls13_client_read_trait_body!` and `tls13_server_read_trait_body!`: replace each `read_record()?`, `parse_handshake_header(&plaintext)?`, `handle_key_update(...)?`, `handle_post_hs_cert_request(...)?` with `try_alert!`, and each explicit `return Err(...)` for unexpected-content-type and unexpected-post-handshake-message with `return_alert_err!`.
+
+**Removed the inline alert send from `read_record_body_tls13!`** (T88 added it). The T88 reason strings already contain the literal substring `"unexpected_message"`, so the new wrapper produces the same on-the-wire `UnexpectedMessage` alert via the centralised mapper. Keeping both would double-send and `test-tls13-ccs.py`'s `'two byte long CCS'` case actually regressed mid-development for exactly that reason.
+
+**No TLS 1.2 / DTLS / TLCP changes.** Those connection types have their own sets of trait-body macros and their own already-working alert paths; touching them is out of scope for T89.
+
+### Test changes
+
+**+1 integration test** (`tests/interop/tests/protocol_attacks.rs`):
+
+`test_tls13_server_sends_unexpected_message_alert_on_bad_ccs` — connects a raw TCP stream to a real `TlsServerConnection`, sends a malformed CCS, then reads the wire bytes back. Asserts that the first response is a `Content-Type=Alert (0x15)` record whose payload is exactly `{Fatal=2, UnexpectedMessage=10}`. Pre-T89 this socket would have closed with no bytes written; post-T89 the alert record is on the wire before the close. The test reads bytes directly (not via `tlslite-ng`) so the wire-level contract is pinned independently of any protocol library.
+
+The two T88 CCS tests (`test_tls13_server_rejects_two_byte_ccs_during_handshake`, `test_tls13_server_rejects_ccs_when_middlebox_compat_off`) continue to pass — they assert on the error message text returned to the local caller, which is unchanged; the new wrapper's wire-side alert send is purely additive.
+
+### XFAIL infrastructure (new)
+
+**Runner (`tests/tlsfuzzer/run.sh`):** thin bash wrapper that reads `tests/tlsfuzzer/xfail/<script-stem>.txt`, builds a `-x "name" -X "reason"` flag chain, then `exec`s the tlsfuzzer script. Tlsfuzzer's own exit code (`1` iff `FAIL > 0` or `XPASS > 0`) becomes the gating signal — CI fails on a NEW regression OR on a previously-XFAIL'd case starting to pass.
+
+**Per-script XFAIL files (`tests/tlsfuzzer/xfail/`):**
+
+| File | Entries | Category |
+|------|--------:|----------|
+| `test-tls13-keyshare-omitted.txt` | 3 | RFC 8446 §9.2 missing-extension routing — real spec gap, scheduled for follow-up |
+| `test-tls13-multiple-ccs-messages.txt` | 3 | CVE-2020-25648 multi-CCS hardening — opt-in stricter behaviour, not yet implemented |
+| `test-tls13-finished.txt` | 72 | Pre-existing handshake-message-framing bugs (empty/padding/truncation Finished mutations) — scheduled for follow-up |
+| `test-tls13-version-negotiation.txt` | 263 | tlsfuzzer-OpenSSL-isms (TLS 1.3 draft codepoint fallback, bogus version field handling) — won't fix, not real spec gaps |
+
+Each file leads with a multi-line `#`-comment block explaining the category and the expected resolution path, followed by the conversation-name list. The auto-enumeration command is documented in the comments so re-baselining after a fix is mechanical.
+
+**CI workflow (`.github/workflows/tlsfuzzer.yml`):** swapped the per-script `continue-on-error: true` runners for `./tests/tlsfuzzer/run.sh <script>`, with `-n 9999` so all conversations run (tlsfuzzer's default `num_limit=40` was sub-sampling). Aggregate exit code becomes the workflow exit code; per-script logs continue to upload as artifacts for triage.
+
+### Tlsfuzzer baseline (post-T89)
+
+| Script | T88 baseline | T89 baseline | XFAIL |
+|--------|--------------|--------------|------:|
+| `test-tls13-conversation.py` | 3/3 PASS | 3/3 PASS | 0 |
+| `test-tls13-ccs.py` | 5/5 PASS | 5/5 PASS | 0 |
+| `test-tls13-multiple-ccs-messages.py` | 4/7 PASS, 3 FAIL | 4 PASS, 3 XFAIL, 0 FAIL | 3 |
+| `test-tls13-finished.py` | 3/42 PASS, 39 FAIL (sampled) | **642/714 PASS, 72 XFAIL, 0 FAIL** | 72 |
+| `test-tls13-keyshare-omitted.py` | 2/5 PASS, 3 FAIL | 2 PASS, 3 XFAIL, 0 FAIL | 3 |
+| `test-tls13-version-negotiation.py` | 4/202 PASS, 198 FAIL (sampled) | 6/269 PASS, 263 XFAIL, 0 FAIL | 263 |
+| **Aggregate** | ~21/261 PASS (8%) | **662/1003 PASS (66%), 341 XFAIL, 0 FAIL** | 341 |
+
+Every script exits 0; CI is now a useful regression detector.
+
+### Documentation
+
+- `docs/tlsfuzzer.md` — added two new sections: **XFAIL bookkeeping** (file format, runner usage, regeneration recipe, philosophy of "delete the entry when you fix the bug") and an updated **CI hookup** (now describes `run.sh` exit-code gating instead of the old `continue-on-error` model). Phase reference list extended with T89.
+- `tests/tlsfuzzer/xfail/*.txt` — every file leads with a self-documenting comment block: what category of failure, why it's XFAIL'd, what's needed to remove the entry.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/alert/mod.rs` | Modified | +`tls_error_to_alert(&TlsError) -> AlertDescription` mapping function (~85 LoC) covering 9 error categories per RFC 8446 §6. |
+| `crates/hitls-tls/src/macros.rs` | Modified | +3 helper macros (`send_fatal_alert_for_error_body!`, `try_alert!`, `return_alert_err!`); both TLS 1.3 handshake-trait bodies and both TLS 1.3 read-trait bodies wrapped with the new alert-on-error semantics; removed redundant inline alert send from `read_record_body_tls13!`. |
+| `tests/interop/tests/protocol_attacks.rs` | Modified | +1 wire-level integration test (`test_tls13_server_sends_unexpected_message_alert_on_bad_ccs`) reading raw TCP bytes after a CCS rejection. |
+| `tests/tlsfuzzer/run.sh` | Added | Bash runner that attaches per-script XFAIL list and execs tlsfuzzer scripts. |
+| `tests/tlsfuzzer/xfail/test-tls13-keyshare-omitted.txt` | Added | 3 entries — RFC 8446 §9.2 missing-extension gap, scheduled. |
+| `tests/tlsfuzzer/xfail/test-tls13-multiple-ccs-messages.txt` | Added | 3 entries — CVE-2020-25648 hardening, scheduled. |
+| `tests/tlsfuzzer/xfail/test-tls13-finished.txt` | Added | 72 entries — pre-existing handshake-message-framing bugs, scheduled. |
+| `tests/tlsfuzzer/xfail/test-tls13-version-negotiation.txt` | Added | 263 entries — won't-fix tlsfuzzer-OpenSSL idiosyncrasies. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | Switched per-script invocation from raw script + `continue-on-error: true` to `tests/tlsfuzzer/run.sh <script> -n 9999`; aggregate exit code becomes workflow exit code. |
+| `docs/tlsfuzzer.md` | Modified | New "XFAIL bookkeeping" section + updated CI-hookup section + T89 phase reference. |
+
+### Test Count Delta (T89)
+
+| Crate | Pre-T89 | Post-T89 | Δ |
+|-------|--------:|---------:|--:|
+| hitls-integration-tests | 265 | 266 | +1 |
+| **Total** | **4205** | **4206** | **+1** |
+
+### Build Status (Post T89)
+
+- `cargo test --workspace --all-features`: 4,163 passed, 0 failed, 43 ignored (4,206 total — the test-runner's `tee` summary above clips to ~4163; the 4206 figure follows the project's tracked aggregate methodology, +1 over post-T88)
+- `cargo test -p hitls-tls --all-features --release --lib`: 1530 passed, 0 failed
+- `cargo test -p hitls-integration-tests --test protocol_attacks`: 19 passed, 0 failed (incl. the 3 T88 + T89 alert tests)
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings
+- `cargo fmt --all -- --check`: clean
+- tlsfuzzer aggregate (6 curated scripts via `tests/tlsfuzzer/run.sh -n 9999`): 662 PASS, 341 XFAIL, 0 FAIL, 0 XPASS — every script exits 0
+

@@ -4584,3 +4584,23 @@ After getting `test-tls13-conversation.py` clean (3/3 PASS), `test-tls13-ccs.py`
 **E — `docs/tlsfuzzer.md`**: New contributor walkthrough documenting the local setup one-liner, the gotchas from Prompt 291, recommended starter script set + what each one covers, how to read the `PASS/FAIL/XFAIL/XPASS` output, how to run a single failing conversation by name, the CI hookup, and a phase reference back to T88.
 
 Tests: 4203 → 4205 (+2). hitls-integration-tests 263 → 265. tlsfuzzer `test-tls13-ccs.py` against release `s-server`: 3/5 → 5/5. All three build configurations clean. Clippy: 0 warnings. Fmt clean.
+
+### Prompt 293: T89 — generalise alert-on-error + XFAIL plumbing for the curated tlsfuzzer suite
+
+> 做 T89
+
+**Result**: Investigation showed almost every "failure" surfaced by re-running the T88 CI script set was actually our server doing the right protocol thing (rejecting bad input — bad Finished MAC, malformed CCS, missing extension) but failing to send a fatal alert before close. tlsfuzzer's assertions hinge on receiving the alert, so e.g. `test-tls13-finished.py` reported only 3/42 PASS even though all 39 "failures" were correct rejections without the alert. Same root cause as T88's CCS gap, just unfixed everywhere else.
+
+**Centralised mapper** in `crates/hitls-tls/src/alert/mod.rs`: new `tls_error_to_alert(&TlsError) -> AlertDescription` covering 9 error categories per RFC 8446 §6 (decrypt_error / missing_extension / unexpected_message / illegal_parameter / decode_error / protocol_version / record_overflow / bad_certificate / handshake_failure / internal_error / close_notify-suppressed). The mapping uses substring matching against the human-readable reason inside `HandshakeFailed(String)` and `RecordError(String)` — pragmatic since switching to enum-typed variants would touch hundreds of call sites.
+
+**3 new helper macros** in `crates/hitls-tls/src/macros.rs`: `send_fatal_alert_for_error_body!` (best-effort seal+write), `try_alert!` (drop-in `?` replacement that sends an alert on Err), `return_alert_err!` (drop-in `return Err(...)` replacement). Wired into all 4 TLS 1.3 trait body macros (sync/async × client/server × handshake/read trait bodies). Removed the redundant inline alert send from T88's `read_record_body_tls13!` since the wrapper now handles it (T88's reason strings already contain the literal `"unexpected_message"` substring so the mapper produces the same alert).
+
+**Wire-level integration test** `test_tls13_server_sends_unexpected_message_alert_on_bad_ccs` reads raw TCP bytes after a CCS rejection and asserts the response is exactly an Alert record carrying `{Fatal=2, UnexpectedMessage=10}`. Pre-T89 the socket would close with no bytes; post-T89 the alert is on the wire before close.
+
+**XFAIL infrastructure**: `tests/tlsfuzzer/run.sh` reads per-script `tests/tlsfuzzer/xfail/<script-stem>.txt`, builds `-x ... -X ...` chain, execs the script. Tlsfuzzer's exit code (`1` iff `FAIL > 0` or `XPASS > 0`) becomes the gating signal. Curated XFAIL files for 4 scripts: keyshare-omitted (3 entries — RFC 8446 §9.2 missing-extension routing gap, scheduled), multi-CCS (3 entries — CVE-2020-25648 hardening, scheduled), Finished (72 entries — pre-existing handshake-message-framing gaps, scheduled), version-negotiation (263 entries — won't-fix tlsfuzzer-OpenSSL-isms). Each file leads with a self-documenting comment block explaining the category and resolution path.
+
+**CI workflow** swapped from per-script `continue-on-error: true` to `./tests/tlsfuzzer/run.sh <script> -n 9999`; aggregate exit code becomes workflow exit code. Workflow now actually fails on regressions instead of being noise. `docs/tlsfuzzer.md` extended with an "XFAIL bookkeeping" section + updated CI-hookup section + T89 phase reference.
+
+**Tlsfuzzer score** (6 curated scripts, all conversations via `-n 9999`): T88 baseline ~21/261 PASS (8%); T89 baseline **662/1003 PASS (66%)**, 341 XFAIL, 0 FAIL, 0 XPASS. Every script exits 0. Biggest jump: `test-tls13-finished.py` 3/42 → 642/714 PASS.
+
+Tests: 4205 → 4206 (+1). hitls-integration-tests 265 → 266. All three build configurations clean. Clippy on Rust 1.95: 0 warnings. Fmt clean.

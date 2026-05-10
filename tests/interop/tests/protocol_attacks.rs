@@ -792,3 +792,90 @@ fn test_tls13_server_rejects_ccs_when_middlebox_compat_off() {
         "expected middlebox_compat rejection message, got: {msg}"
     );
 }
+
+// ============================================================================
+// Phase T89 — TLS 1.3 alert-on-error wire contract.
+//
+// T88 enforced the CCS rejection rules; T89 generalised the
+// alert-before-close behaviour to the entire TLS 1.3 read/handshake
+// path (see `send_fatal_alert_for_error_body!` in `macros.rs`). This
+// test pins the wire-level guarantee: when the server rejects a
+// malformed CCS, what arrives on the peer socket is a TLS Alert
+// record carrying `{Fatal, UnexpectedMessage}` (`0x15 ?? ?? ?? len
+// 02 0a` after possible CCS-length framing), NOT a bare TCP close.
+//
+// We deliberately read raw TCP bytes here rather than going through
+// `tlslite-ng` so the test pins the byte-level contract independently
+// of any protocol-library decoding. The matching protocol-level check
+// is in tlsfuzzer's `scripts/test-tls13-ccs.py` (5/5 PASS).
+// ============================================================================
+
+#[test]
+fn test_tls13_server_sends_unexpected_message_alert_on_bad_ccs() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection::TlsServerConnection;
+    use hitls_tls::{TlsConnection, TlsRole, TlsVersion};
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::Duration;
+
+    let (cert_chain, server_key) = make_ed25519_server_identity();
+    let server_config = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .certificate_chain(cert_chain)
+        .private_key(server_key)
+        .verify_peer(false)
+        .build();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server_handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+        let mut conn = TlsServerConnection::new(stream, server_config);
+        let _ = conn.handshake();
+    });
+
+    let mut raw = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+    raw.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    raw.set_write_timeout(Some(Duration::from_secs(5))).ok();
+    // Malformed CCS: type=0x14, version=0x0303, length=2, payload=[0x01, 0x01].
+    raw.write_all(&[0x14, 0x03, 0x03, 0x00, 0x02, 0x01, 0x01])
+        .unwrap();
+
+    // Read whatever the server sends back. Pre-T89 this returned 0
+    // (immediate FIN, no alert). Post-T89 it must be a TLS record
+    // header (5 bytes) with content_type == 0x15 (Alert) followed by
+    // the 2-byte alert payload `{Fatal=2, UnexpectedMessage=10}`.
+    let mut buf = [0u8; 16];
+    let n = raw.read(&mut buf).unwrap();
+    assert!(
+        n >= 7,
+        "expected at least one alert record (>=7 bytes), got {n} bytes: {:02x?}",
+        &buf[..n]
+    );
+    assert_eq!(
+        buf[0], 0x15,
+        "first byte must be ContentType::Alert (0x15), got {:02x}",
+        buf[0]
+    );
+    // Per RFC 8446 the alert in the handshake-pre-keys phase is
+    // plaintext; payload is exactly `{level, description}`.
+    assert_eq!(
+        buf[5], 0x02,
+        "alert level must be Fatal (2), got {}",
+        buf[5]
+    );
+    assert_eq!(
+        buf[6], 0x0a,
+        "alert description must be UnexpectedMessage (10), got {}",
+        buf[6]
+    );
+
+    server_handle.join().unwrap();
+}

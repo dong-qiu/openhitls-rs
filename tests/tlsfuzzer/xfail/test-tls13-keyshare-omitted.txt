@@ -1,0 +1,16 @@
+# Phase T89 — keyshare-omitted XFAILs.
+#
+# Expected behaviour per RFC 8446 §9.2: a TLS 1.3 ClientHello with
+# `key_share` entirely absent (or empty) MUST be rejected with
+# `missing_extension`. We currently treat "no key_share" the same as
+# "key_share present but doesn't match server's groups" and route to
+# the HelloRetryRequest path — which leaks `handshake_failure` and
+# wastes a round-trip.
+#
+# The fix is a small early-rejection check in `process_client_hello`
+# (server.rs). Scheduled for a future implementation phase; XFAIL'd
+# here so CI surfaces only NEW regressions in this script.
+
+key_share extension omitted
+empty key_share extension
+empty key_share extension with valid psk_key exhange modes
