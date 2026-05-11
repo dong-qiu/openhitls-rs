@@ -5207,6 +5207,27 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean. 9 spot-checked CI scripts all `rc=0` (no regressions, no XPASS). All in-tree tests pass (including the 0-RTT-accept integration test).
 
+---
+
+## Phase T110 — TLS 1.2 Codec Strict Body-Length Checks (2026-05-11)
+
+> B
+
+**Result**: did option B from the post-T109 menu. Investigated the T108-deferred `test-certificate-malformed.py` 22-FAIL cluster ("server sends CCS while tlsfuzzer expects alert"). **Root cause was different from what I expected** — not a packed-flight state-machine bug but a parser leniency issue. Our `decode_certificate12` and `decode_certificate_verify12` silently ignored trailing bytes past the declared inner length field. Tlsfuzzer's `pad_handshake + fuzz_message(substitutions)` builds Certificate12 messages with the HS-header length correctly set but the inner `cert_list_length` field intentionally mismatched (e.g. declares 4 bytes of certs in a body that has 0 bytes after the length prefix). We accepted it as "empty cert list", completed the handshake normally → server sent CCS+Finished → tlsfuzzer's runner saw the CCS first.
+
+**Two-line fix at the codec layer** (RFC 5246 §7.4.2 / §7.4.8): change `body.len() < expected` to `body.len() != expected`, plus reject `cert_len == 0` entries in the cert chain (RFC 5246 §7.4.2: each entry MUST be non-empty DER).
+
+**Tlsfuzzer impact**:
+- `test-certificate-malformed.py`: 973/29 FAIL → **1000 PASS / 2 XFAIL / 0 FAIL** (+27 closed; new in CI).
+- `test-certificate-verify-malformed.py`: 266/1 → **267/0 PASS** (the `pad CertificateVerify` XFAIL also closed by the CV body-length fix).
+- CI suite size: 43 → **44 scripts**.
+
+**The 2 remaining cert-malformed XFAILs** ("fuzz empty certificate - overall 7, certs 4, cert 1" + "overall 8, certs 5, cert 2") send a 1-byte cert entry. The codec accepts it (cert_len > 0); the malformed-cert detection happens later in X.509 chain validation, after the handshake state boundary tlsfuzzer pins. Closing them needs DER-shape validation at `process_client_certificate` time. Queued.
+
+**Re-framing**: T108 documented the FAIL as "real state-machine subtlety around packed-flight reads" and deferred. T110 found it was much simpler — pure parser strictness, two `<` → `!=` operator changes + one empty-entry guard. **Half the projected time, +28 conversations.**
+
+**Tests**: cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean. test-certificate-malformed.py under run.sh: 1000 PASS / 2 XFAIL / 0 FAIL → exit 0. No regressions in spot-checked existing scripts.
+
 
 
 

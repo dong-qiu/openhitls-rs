@@ -1,18 +1,9 @@
-# Phase T108 — `test-certificate-verify-malformed.py` XFAILs (1 entry).
+# Phase T108 / T110 — `test-certificate-verify-malformed.py` XFAILs (empty).
 #
-# Pre-T108 baseline: 262/5 FAIL. T108's CV-verify alert-mapping fix
-# (`verify_cv12_signature` now maps crypto-layer errors AND
-# verify-returned-false to `decrypt_error` per RFC 5246 §7.2.2)
-# closed 4 of 5 FAILs.
-# Post-T108: 266 PASS / 1 XFAIL / 0 FAIL.
-#
-# `pad CertificateVerify`: tlsfuzzer sends a CertificateVerify with
-# padding after the signature; expects `decode_error` alert; our
-# server's response sequence races with tlsfuzzer's runner state
-# machine and the test observes the server's CCS arrive when it
-# expected the alert. Real TLS state-machine subtlety related to
-# the packed-flight read path; queued as a separate phase. The
-# server DOES detect and abort on the bad CV — it's a timing /
-# ordering mismatch, not silent acceptance.
-
-pad CertificateVerify
+# T108 (pre-T110): 266/1 — 1 FAIL was `pad CertificateVerify` which
+#       padded the CV body past the declared signature length.
+# T110: tightened `decode_certificate_verify12` with a strict body
+#       length check (RFC 5246 §7.4.8: body is exactly
+#       `SignatureAndHashAlgorithm (2) + signature_length (2) +
+#       signature`; trailing bytes are decode_error). All 267
+#       conversations now PASS without any active XFAIL.

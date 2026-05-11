@@ -1,0 +1,30 @@
+# Phase T110 — `test-certificate-malformed.py` XFAILs (2 entries).
+#
+# Pre-T110 baseline (post-T108): 973 PASS / 29 FAIL — server accepted
+# malformed Certificate12 messages that had structurally-valid framing
+# but invalid content (trailing pad bytes, empty cert entries, etc.).
+# Server then completed the handshake and tlsfuzzer's runner observed
+# the server's CCS+Finished sequence when it expected a fatal alert.
+#
+# T110 closed 27 of 29 FAILs by tightening `decode_certificate12`:
+#   * Strict body length check (RFC 5246 §7.4.2: body is exactly
+#     `cert_list_length (3) + cert_list_length bytes`; trailing
+#     bytes are decode_error). Pre-T110 we silently truncated.
+#   * Empty cert entry rejection (each cert in the list MUST be a
+#     non-empty DER-encoded X.509 certificate). Pre-T110 we pushed
+#     an empty `Vec<u8>` and let later validation handle it (which
+#     produced the wrong alert family).
+#
+# Post-T110: 1000 PASS / 2 XFAIL / 0 FAIL.
+#
+# The 2 remaining XFAILs send a "1-byte cert" packed in an otherwise-
+# structurally-valid certificate_list. Our decoder accepts the entry
+# (cert_length > 0); the malformed-cert detection happens later when
+# the X.509 verifier tries to parse the 1-byte cert bytes. That
+# defers the alert past the handshake state boundary the test pins,
+# resulting in a different sequencing. Closing these needs DER-shape
+# validation at `process_client_certificate` time (currently deferred
+# to chain validation). Queued.
+
+fuzz empty certificate - overall 7, certs 4, cert 1
+fuzz empty certificate - overall 8, certs 5, cert 2

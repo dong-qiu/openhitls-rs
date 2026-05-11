@@ -364,12 +364,18 @@ jobs:
           # `${HITLS_PORT_MTLS_12}`. Per-script `-C 49199` is needed
           # for tlsfuzzer's default ECDHE-RSA-AES-128-GCM cipher
           # choice (already plumbed via tests/tlsfuzzer/args/*.txt).
-          # All three scripts are PASS-dominant: aggregate
-          # 275 PASS / 2 XFAIL / 0 FAIL.
+          # All four scripts are PASS-dominant: aggregate
+          # 1276 PASS / 3 XFAIL / 0 FAIL post-T110.
+          # T110 addition: test-certificate-malformed.py (1000/2 XFAIL)
+          # after the strict-body-length + empty-cert-entry checks
+          # in `decode_certificate12` and the same body-length tighten
+          # in `decode_certificate_verify12` (also cleared the last 1
+          # FAIL in test-certificate-verify-malformed.py).
           scripts_mtls_12=(
             test-certificate-request.py
             test-certificate-verify.py
             test-certificate-verify-malformed.py
+            test-certificate-malformed.py
           )
           aggregate_exit=0
           : > "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"

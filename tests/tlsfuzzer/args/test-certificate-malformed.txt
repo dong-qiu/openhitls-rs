@@ -1,0 +1,4 @@
+# Phase T110 — same `-C 49199` cipher pin as the other TLS 1.2 mTLS
+# scripts (see test-certificate-request.txt for the long rationale).
+-C
+49199

@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T109 (108 phases, T64 skipped)
+- Testing: T1–T110 (109 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -314,6 +314,7 @@ Category summary:
 | 302 | T107 | Test | PSS-OID server cert support (`id-RSASSA-PSS` 1.2.840.113549.1.1.10 SPKI) — PKCS#8 parser `Pkcs8PrivateKey::RsaPss` variant + `TlsConfig::server_cert_is_rsa_pss` + cert-aware `select_signature_scheme_for_cert` advertising `rsa_pss_pss_*`; closes 8 conversations in `test-tls13-rsapss-signatures.py` (0/8 → 8/8 PASS) | 2026-05-11 |
 | 303 | T108 | Test | TLS 1.2 mTLS scripts in CI + CV alert mapping (RFC 5246 §7.2.2 `decrypt_error` instead of `internal_error` on crypto-layer / verify-false errors) — 3 new tlsfuzzer scripts in CI: `test-certificate-request.py` (4/1), `test-certificate-verify.py` (5/0), `test-certificate-verify-malformed.py` (266/1 from 262/5) | 2026-05-11 |
 | 304 | T109 | Test | 0-RTT acceptance verification (already implemented in I21, verified by existing `test_tls13_early_data_max_size_negotiation` integration test) + deferred `signature_algorithms` extension presence check (RFC 8446 §4.2.3 — required for cert auth, optional for PSK-only) | 2026-05-11 |
+| 305 | T110 | Test | TLS 1.2 handshake-codec strict body-length checks (`decode_certificate12` + `decode_certificate_verify12`) per RFC 5246 §7.4.2 / §7.4.8 + empty-cert-entry rejection — closes 28 conversations across `test-certificate-malformed.py` (973/29 → 1000/2 XFAIL) and `test-certificate-verify-malformed.py` (266/1 → 267/0); cert-malformed.py joins CI | 2026-05-11 |
 
 ---
 
@@ -17272,6 +17273,91 @@ The remaining tlsfuzzer FAILs in `0rtt-garbage` are all state-machine ordering e
 - `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
 - `cargo fmt --all -- --check`: clean.
 - 43 curated CI scripts: unchanged (no XPASS, no FAIL).
+
+## Phase T110 — TLS 1.2 Handshake-Codec Strict Body-Length Checks: Closes the "packed-flight CCS" Bug (2026-05-11)
+
+### Summary
+
+Investigated the T108-deferred `test-certificate-malformed.py` 22-FAIL cluster (the "server sends CCS while tlsfuzzer expects alert" pattern). The actual root cause was NOT a packed-flight state-machine bug as initially suspected — it was that `decode_certificate12` and `decode_certificate_verify12` silently ignored trailing bytes past the declared message body length. Tlsfuzzer's `pad_handshake(msg, k)` + `fuzz_message(substitutions={6:4})` builds a Certificate12 message with the handshake-header length correctly set but the inner `cert_list_length` field intentionally wrong (e.g. declares 4 bytes of certs in a 4-byte body that has only 0 bytes after the length prefix); we read the structurally-valid handshake-header length, parsed the inner length, IGNORED the mismatch, treated the message as "empty cert list", and continued the handshake. tlsfuzzer's runner observed our subsequent server CCS+Finished when it expected a fatal alert.
+
+T110 tightens both codecs with strict equality checks (RFC 5246 §7.4.2 / §7.4.8: handshake message body MUST be exactly the declared length, no trailing bytes), plus adds the empty-cert-entry rejection per §7.4.2 (each entry in `certificate_list` MUST be non-empty DER).
+
+### Code changes
+
+**`crates/hitls-tls/src/handshake/codec12.rs`** (`decode_certificate12`, ~25 lines):
+
+- Replaced `if body.len() < 3 + total_len` with `if body.len() != 3 + total_len` (strict equality — trailing bytes are now decode_error).
+- Added `if cert_len == 0` guard inside the cert-entry-parse loop — RFC 5246 §7.4.2: each cert entry MUST be non-empty.
+
+**`crates/hitls-tls/src/handshake/codec12.rs`** (`decode_certificate_verify12`, ~10 lines):
+
+- Replaced `if body.len() < 4 + sig_len` with `if body.len() != 4 + sig_len`. RFC 5246 §7.4.8: CV body is exactly `SignatureAndHashAlgorithm(2) || signature_length(2) || signature` with no trailer.
+
+### Tlsfuzzer impact
+
+| Script | Pre-T110 | Post-T110 |
+|--------|---------|-----------|
+| `test-certificate-malformed.py` (new in CI) | 973 PASS / 29 FAIL (probed, not in CI) | **1000 PASS / 2 XFAIL / 0 FAIL** |
+| `test-certificate-verify-malformed.py` | 266 PASS / 1 XFAIL / 0 FAIL | **267 PASS / 0 XFAIL / 0 FAIL** |
+| `test-certificate-request.py` | 4 PASS / 1 XFAIL / 0 FAIL | unchanged |
+| `test-certificate-verify.py` | 5 PASS / 0 XFAIL / 0 FAIL | unchanged |
+
+**+27 conversations closed in cert-malformed + 1 in cert-verify-malformed = +28 total**. CI suite size: 43 → **44 scripts** (added `test-certificate-malformed.py`).
+
+### Why "packed-flight CCS bug" was the WRONG framing
+
+T108 documented the failure as "server sends CCS while tlsfuzzer expects alert under packed-flight reads" and deferred as a "real state-machine subtlety". Re-investigation showed the actual sequence was:
+
+1. tlsfuzzer sends a Certificate12 message with intentionally inconsistent inner length field.
+2. Our decoder silently ignored the inconsistency, returned an empty-cert-list `Certificate12`.
+3. Server treated this as "client sent no certificate" (legal in our `require_client_cert=false` mode).
+4. Handshake completed normally → server sent CCS + Finished.
+5. tlsfuzzer's runner saw the CCS first, flagged it as unexpected.
+
+The CCS in question was the **legitimate server CCS at the end of a successfully-completed handshake**, not a misplaced or stray CCS. The fix was at the *parser strictness* layer, not the state machine. Good outcome: simpler fix than projected, +28 conversations, and the cert-malformed script now joins the curated CI suite.
+
+### The 2 remaining XFAILs
+
+Both are "fuzz empty certificate - overall N, certs K, cert M" variants where the fuzzed cert entry has a non-zero declared length (e.g. cert_len=1) pointing at 1 byte of garbage data. Our codec accepts the structurally-valid entry; the malformed-cert detection happens later when the X.509 verifier tries to parse the 1-byte cert. That defers the alert past the handshake state boundary tlsfuzzer pins. Closing these needs DER-shape validation at `process_client_certificate` time (currently deferred to chain validation). Queued as a separate phase.
+
+### Tests (post-T110)
+
+- `cargo test --workspace --all-features --release`: 4175 PASS / 0 FAIL / 43 ignored (no in-tree tests added — the codec changes are covered by the tlsfuzzer probe).
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all -- --check`: clean.
+- 4 TLS 1.2 mTLS scripts under `run.sh`: all `rc=0`, 1276 PASS / 3 XFAIL / 0 FAIL aggregate.
+
+### Combined CI baseline post-T110
+
+| Suite | Pre-T110 (scripts) | Post-T110 (scripts) | Notes |
+|-------|-----:|-----:|-------|
+| TLS 1.3 | 24 | 24 | unchanged |
+| TLS 1.2 | 9 | 9 | unchanged |
+| Cert-matrix | 4 | 4 | unchanged |
+| mTLS (TLS 1.3) | 2 | 2 | unchanged |
+| PSS-OID | 1 | 1 | unchanged |
+| mTLS (TLS 1.2) | 3 | 4 | **+1 cert-malformed** (1000/2 XFAIL) |
+| **Total** | **43** | **44** | **+1 script, +1027 PASS conversations** |
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/codec12.rs` | Modified | `decode_certificate12` strict body-length + empty-cert-entry rejection; `decode_certificate_verify12` strict body-length. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | `scripts_mtls_12=()` adds `test-certificate-malformed.py`. |
+| `tests/tlsfuzzer/args/test-certificate-malformed.txt` | Added | `-C 49199` cipher pin. |
+| `tests/tlsfuzzer/xfail-mtls-12/test-certificate-malformed.txt` | Added | 2 stable XFAILs (1-byte cert entries — deferred to DER-shape validation phase). |
+| `tests/tlsfuzzer/xfail-mtls-12/test-certificate-verify-malformed.txt` | Modified | `pad CertificateVerify` entry dropped (T110 closed it). |
+| `DEV_LOG.md` | Modified | This entry. |
+| `PROMPT_LOG.md` | Modified | T110 prompt + result entry. |
+| `CLAUDE.md` | Modified | Phase ranges T1-T110. |
+
+### Build Status (Post T110)
+
+- `cargo test --workspace --all-features --release`: 4175 PASS / 0 FAIL / 43 ignored.
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all -- --check`: clean.
+- Curated CI sweep: 43 → **44 scripts**.
 
 
 

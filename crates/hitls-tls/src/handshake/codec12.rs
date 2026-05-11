@@ -412,10 +412,22 @@ pub fn decode_certificate12(body: &[u8]) -> Result<Certificate12, TlsError> {
     }
 
     let total_len = read_u24(body) as usize;
-    if body.len() < 3 + total_len {
-        return Err(TlsError::HandshakeFailed(
-            "Certificate12 body truncated".into(),
-        ));
+    // Phase T110 — strict body length check. RFC 5246 §7.4.2: the
+    // Certificate handshake message body is exactly the 3-byte
+    // certificate_list length prefix + that many bytes of certs;
+    // trailing bytes (e.g. the `pad_handshake` padding tlsfuzzer
+    // appends in test-certificate-malformed.py) are a malformed
+    // message and MUST be rejected with `decode_error`. Pre-T110
+    // we tolerated trailing data, silently accepting fuzzed
+    // packets with extra bytes past the certificate_list.
+    if body.len() != 3 + total_len {
+        return Err(TlsError::HandshakeFailed(format!(
+            "Certificate12 body length mismatch: declared {} (3 + cert_list_len {}), \
+             got {} bytes (decode_error)",
+            3 + total_len,
+            total_len,
+            body.len()
+        )));
     }
 
     let mut certs = Vec::new();
@@ -430,6 +442,20 @@ pub fn decode_certificate12(body: &[u8]) -> Result<Certificate12, TlsError> {
         }
         let cert_len = read_u24(&body[offset..]) as usize;
         offset += 3;
+        // Phase T110 — RFC 5246 §7.4.2: each entry in the
+        // certificate_list MUST be a non-empty ASN.1 Certificate.
+        // Empty cert entries are malformed (decode_error); pre-T110
+        // we silently pushed an empty Vec which made bogus chains
+        // (e.g. "real cert + empty trailer") slip past the parser
+        // into chain validation, where they typically fail with a
+        // less-specific error.
+        if cert_len == 0 {
+            return Err(TlsError::HandshakeFailed(
+                "Certificate12 contains an empty certificate entry \
+                 (RFC 5246 §7.4.2 — decode_error)"
+                    .into(),
+            ));
+        }
         if offset + cert_len > end {
             return Err(TlsError::HandshakeFailed(
                 "Certificate12 cert data truncated".into(),
@@ -625,10 +651,19 @@ pub fn decode_certificate_verify12(body: &[u8]) -> Result<CertificateVerify12, T
     }
     let sig_alg = u16::from_be_bytes([body[0], body[1]]);
     let sig_len = u16::from_be_bytes([body[2], body[3]]) as usize;
-    if body.len() < 4 + sig_len {
-        return Err(TlsError::HandshakeFailed(
-            "CertificateVerify12 signature truncated".into(),
-        ));
+    // Phase T110 — strict body length check. RFC 5246 §7.4.8: the
+    // CertificateVerify body is exactly `SignatureAndHashAlgorithm
+    // (2) || signature_length (2) || signature`. Trailing bytes are
+    // malformed (tlsfuzzer's `pad CertificateVerify` test pads the
+    // body and expects `decode_error`).
+    if body.len() != 4 + sig_len {
+        return Err(TlsError::HandshakeFailed(format!(
+            "CertificateVerify12 body length mismatch: declared {} (4 + sig_len {}), \
+             got {} bytes (decode_error)",
+            4 + sig_len,
+            sig_len,
+            body.len()
+        )));
     }
     Ok(CertificateVerify12 {
         sig_algorithm: SignatureScheme(sig_alg),
