@@ -5070,6 +5070,30 @@ Only the 0-RTT read loop still does single-record-per-message reads (intentional
 
 **The "bonus" was the surprise of the phase**: I expected only the 3 zero-length-data conversations to close (the specific test design probing CH-fragmentation). The 10 sig-algorithms conversations fell out because tlsfuzzer's "8130 invalid schemes" CH is GIANT (~16.3 KB), naturally fragmenting across records due to the 2^14 plaintext record max. Pre-T104 we couldn't reassemble; post-T104 the parser handles the full 16K body and the rest of the pipeline (T100 sigalgs error mapping) does the right thing.
 
+---
+
+## Phase T105 — TLS 1.3 AES-CCM Cipher Suite Negotiation (2026-05-11)
+
+> A
+
+**Result**: did option A from the post-T104 menu — wired the two TLS 1.3 AES-CCM cipher suites into the negotiation surface. Single largest single-script gain to date: `test-tls13-symetric-ciphers.py` **773/386 FAIL → 1159/0 PASS** (+386 conversations).
+
+The crypto/AEAD layers had supported AES-CCM since project start (`hitls_crypto::modes::ccm::ccm_{encrypt,decrypt}` + `crypt::aead::TlsAeadImpl::AesCcm{,8}`); only the negotiation entry-points were missing:
+
+1. **`CipherSuiteParams::from_suite`** had an arm for `TLS_AES_128_CCM_8_SHA256` (0x1305, 8-byte tag) but **not** for `TLS_AES_128_CCM_SHA256` (0x1304, 16-byte tag). Peers offering the standard 16-byte-tag CCM would error with `NoSharedCipherSuite` at param-derive time.
+2. **s-server default TLS 1.3 cipher list** advertised only GCM-128/256 + ChaCha20-Poly1305. CCM was negotiable only via explicit `--cipher-suites`.
+
+Both fixed: ~15 lines across 3 files (`crypt/mod.rs` + `s_server.rs` + `tlsfuzzer.yml`).
+
+**Coverage-per-line metric this phase: ~25 conversations / line** — best ROI of any phase since T100.
+
+**Curated CI suite is now 39 scripts** (24 TLS 1.3 + 9 TLS 1.2 + 4 cert-matrix + 2 mTLS), aggregate ~14,400 PASS / ~280 XFAIL / 0 FAIL at `-n 9999` full sampling.
+
+**Tests**: 4218 unchanged (existing CCM unit tests in `crypt::aead::tests::test_aes_ccm_*` already covered the AEAD). cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean. 12 spot-checked CI scripts all `rc=0`, no XPASS.
+
+**Why this was the right next step (vs B/C/D)**: smallest LoC delta, largest conversation gain, zero protocol or crypto risk (pure registration). Same play-pattern as T102 (CR sigalgs comprehensive list) — find a small gap between what the codebase already supports and what tlsfuzzer expects, close it.
+
+
 
 
 

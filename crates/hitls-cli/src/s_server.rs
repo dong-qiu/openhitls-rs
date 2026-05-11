@@ -67,6 +67,17 @@ pub fn run(
                 CipherSuite::TLS_AES_256_GCM_SHA384,
                 CipherSuite::TLS_AES_128_GCM_SHA256,
                 CipherSuite::TLS_CHACHA20_POLY1305_SHA256,
+                // Phase T105 — register the two AES-CCM TLS 1.3
+                // suites in the default list. The crypto layer
+                // (`hitls_crypto::modes::ccm`) and AEAD plumbing
+                // (`crypt::aead::TlsAeadImpl::AesCcm[8]`) have
+                // supported these since project start; only the
+                // server's default-cipher list and the CCM-16
+                // entry in `CipherSuiteParams::from_suite` were
+                // missing pre-T105. Closes 386 conversations in
+                // `test-tls13-symetric-ciphers.py`.
+                CipherSuite::TLS_AES_128_CCM_SHA256,
+                CipherSuite::TLS_AES_128_CCM_8_SHA256,
             ];
             let suites = custom_ciphers.clone().unwrap_or(default_13);
             builder = builder

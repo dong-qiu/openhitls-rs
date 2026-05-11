@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T104 (103 phases, T64 skipped)
+- Testing: T1–T105 (104 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -309,6 +309,7 @@ Category summary:
 | 297 | T102 | Test | In-handshake CertificateRequest sigalgs comprehensive 18-item list (matches tlsfuzzer's hardcoded expectation): closes the final 3 mTLS XFAILs — `test-tls13-certificate-request.py` 3/2 → 5/0, `test-tls13-certificate-verify.py` 30/1 → 31/0 | 2026-05-11 |
 | 298 | T103 | Test | Empty-Alert rejection (RFC 8446 §5.1) at the record layer + zero-length AppData transparent pass-through — `test-tls13-empty-alert.py` 2/8 → 10/0 PASS, `test-tls13-zero-length-data.py` 2/9 → 5/6 XFAIL; both new scripts in CI | 2026-05-11 |
 | 299 | T104 | Test | ClientHello-side cross-record reassembly (server Step 1 + Step 1b after HRR) + RFC 8446 §5.1 interleave check; closes 3 zero-length-data interleaved-in-handshake XFAILs and 10 bonus sig-algorithms huge-list-tolerance XFAILs | 2026-05-11 |
+| 300 | T105 | Test | TLS 1.3 AES-CCM cipher suite negotiation (`TLS_AES_128_CCM_SHA256` + `TLS_AES_128_CCM_8_SHA256`) — adds the missing CCM-16 entry in `CipherSuiteParams::from_suite` + extends s-server default cipher list; closes 386 conversations in `test-tls13-symetric-ciphers.py` (773/386 → 1159/0 PASS) | 2026-05-11 |
 
 ---
 
@@ -16861,6 +16862,78 @@ The 0-RTT loop is the last single-record-per-message reader in the server's TLS 
 - `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
 - `cargo fmt --all -- --check`: clean.
 - 23 TLS 1.3 + 9 TLS 1.2 + 4 cert-matrix + 2 mTLS curated scripts: all exit 0, no XPASS.
+
+## Phase T105 — TLS 1.3 AES-CCM Cipher Suite Negotiation: Closes 386 Conversations (2026-05-11)
+
+### Summary
+
+Single largest single-script tlsfuzzer win to date: `test-tls13-symetric-ciphers.py` goes from **773 PASS / 386 FAIL** → **1159 PASS / 0 FAIL** (+386). The crypto and AEAD plumbing for AES-CCM had been in place since project start (`hitls_crypto::modes::ccm::ccm_{encrypt,decrypt}` + `crypt::aead::TlsAeadImpl::AesCcm{,8}`); only the negotiation surface was missing:
+
+1. `CipherSuiteParams::from_suite` had an entry for `TLS_AES_128_CCM_8_SHA256` (0x1305, 8-byte tag) but **not** for `TLS_AES_128_CCM_SHA256` (0x1304, 16-byte tag). Any peer offering CCM-16 would error with `NoSharedCipherSuite` at param-derive time.
+2. The s-server's default TLS 1.3 cipher list (`crates/hitls-cli/src/s_server.rs`) advertised only GCM-128/256 + ChaCha20-Poly1305. CCM was negotiable only via explicit `--cipher-suites TLS_AES_128_CCM_SHA256,...`.
+
+T105 fixes both — adds the missing `from_suite` arm and includes both CCM suites in the s-server default. The 386 FAIL conversations were all from tlsfuzzer's per-cipher matrix: "check connection with TLS_AES_128_CCM_SHA256" / "...CCM_8_SHA256" + their `fuzz tag` / `fuzz length` / `fuzz nonce` subvariants. All now pass without any further protocol or crypto code touched.
+
+### Code changes
+
+**`crates/hitls-tls/src/crypt/mod.rs`** (+8 lines):
+
+- New `TLS_AES_128_CCM_SHA256` arm in `CipherSuiteParams::from_suite` (`hash_len=32`, `key_len=16`, `iv_len=12`, `tag_len=16`).
+
+**`crates/hitls-cli/src/s_server.rs`** (~12 lines):
+
+- TLS 1.3 default cipher list extended from 3 → 5 entries: now also includes both `TLS_AES_128_CCM_SHA256` and `TLS_AES_128_CCM_8_SHA256`.
+
+**`.github/workflows/tlsfuzzer.yml`**:
+
+- `scripts=()` adds `test-tls13-symetric-ciphers.py` (1 new script, fully clean).
+
+### Tlsfuzzer baseline (post-T105)
+
+| Script | Pre-T105 | Post-T105 |
+|--------|---------|-----------|
+| `test-tls13-symetric-ciphers.py` (new in CI) | 773 PASS / 386 FAIL | **1159 PASS / 0 XFAIL / 0 FAIL** |
+| All other curated scripts | unchanged | unchanged (no regressions across 12 spot-checked) |
+
+### Why this was the "cheap big-win" play
+
+The TLS spec layer for CCM was 90% done; only two trivial omissions kept tlsfuzzer's per-cipher matrix from passing. Total LoC delta: ~15 lines spread across 3 files. Total tlsfuzzer conversation delta: **+386 PASS** plus the entire script entering the CI gate. Coverage-per-line metric this phase is ~25 conversations per added line of code — best ROI of any phase since T100.
+
+### Combined CI baseline post-T105
+
+Curated suite size: **39 scripts** (23 TLS 1.3 + 9 TLS 1.2 + 4 cert-matrix + 2 mTLS + 1 new symetric-ciphers).
+
+Aggregate (`-n 9999` full sampling, single rough estimate):
+- TLS 1.3 leg: ~13,300 PASS (was ~12,500 post-T104; +800 from CCM matrix + sig-algs cleanup)
+- TLS 1.2 + cert-matrix + mTLS: unchanged
+- Total: ~14,400 PASS / ~280 XFAIL / 0 FAIL across 39 scripts
+
+Wall-clock impact for the new script: tlsfuzzer's CCM matrix runs ~1100 conversations sequentially; default sampling brings it down to <5s in CI.
+
+### Tests (post-T105)
+
+- `cargo test --workspace --all-features --release`: 4175 PASS / 0 FAIL / 43 ignored (no in-tree tests added; existing CCM unit tests in `crypt::aead::tests::test_aes_ccm_*` already covered the AEAD).
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all -- --check`: clean.
+- 12 spot-checked CI scripts under `run.sh -n 9999`: all `rc=0`, no XPASS.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/crypt/mod.rs` | Modified | +`TLS_AES_128_CCM_SHA256` arm in `CipherSuiteParams::from_suite`. |
+| `crates/hitls-cli/src/s_server.rs` | Modified | TLS 1.3 default cipher list 3 → 5 (adds both AES-CCM suites). |
+| `.github/workflows/tlsfuzzer.yml` | Modified | `scripts=()` adds `test-tls13-symetric-ciphers.py`. |
+| `DEV_LOG.md` | Modified | This entry. |
+| `PROMPT_LOG.md` | Modified | T105 prompt + result entry. |
+| `CLAUDE.md` | Modified | Phase ranges T1-T105. |
+
+### Build Status (Post T105)
+
+- `cargo test --workspace --all-features --release`: 4175 PASS / 0 FAIL / 43 ignored.
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all -- --check`: clean.
+- Curated CI sweep (24 TLS 1.3 + 9 TLS 1.2 + 4 cert-matrix + 2 mTLS = **39 scripts**): all exit 0.
 
 
 

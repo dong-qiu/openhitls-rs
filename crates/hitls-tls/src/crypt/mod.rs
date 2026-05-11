@@ -170,6 +170,14 @@ impl CipherSuiteParams {
                 iv_len: 12,
                 tag_len: 16,
             }),
+            // Phase T105 — TLS_AES_128_CCM_SHA256 (regular 16-byte tag, RFC 8446).
+            CipherSuite::TLS_AES_128_CCM_SHA256 => Ok(Self {
+                suite,
+                hash_len: 32,
+                key_len: 16,
+                iv_len: 12,
+                tag_len: 16,
+            }),
             CipherSuite::TLS_AES_128_CCM_8_SHA256 => Ok(Self {
                 suite,
                 hash_len: 32,
