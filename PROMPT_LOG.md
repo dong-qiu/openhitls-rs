@@ -5183,6 +5183,29 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: 4218 unchanged. cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean.
 
+---
+
+## Phase T109 — 0-RTT Acceptance Verification + Deferred `signature_algorithms` Check (2026-05-11)
+
+> A
+
+**Result**: did option A from the post-T108 menu. Scope landed smaller than projected after investigation:
+
+1. **0-RTT acceptance was already implemented in I21** and exercised end-to-end by `test_tls13_early_data_max_size_negotiation` (ext_negotiation.rs:1076). Verified by running the test — passes cleanly. Sets up TWO TLS connections: first captures NST; second presents the ticket as PSK with `early_data` extension, queues 0-RTT payload, asserts `early_data_accepted == true && is_session_resumed == true`. The full code path including early traffic keys derivation, step 5b 0-RTT read loop, and EndOfEarlyData handling all work.
+
+2. **No happy-path 0-RTT script exists in tlsfuzzer** — only `test-tls13-0rtt-garbage.py` (negative cases, already curated by T106 at 7 PASS / 4 XFAIL).
+
+3. **PSK / session-resumption scripts probed but blocked on unrelated issues**:
+   - `test-tls13-psk_dhe_ke.py` / `test-tls13-psk_ke.py`: test raw PSK (pre-shared static key, not session-ticket PSK). Our server only implements ticket-PSK. Adding raw PSK would be a separate ~1 day feature.
+   - `test-tls13-session-resumption.py`: same s-server echo-loop chunking issue we've hit before (T101 keyupdate `app data split`, T103 zero-length-data). Server echoes the 18-byte `GET /` immediately; tlsfuzzer expects NewSessionTicket cycle first. Not TLS-layer.
+
+**Code deliverable**: deferred `signature_algorithms` extension presence check. Pre-T109 we required the extension UNCONDITIONALLY at CH-parse time. RFC 8446 §4.2.3: required only for cert-based auth; PSK-only handshakes MAY omit it. Probing tlsfuzzer's PSK scripts confirmed the pre-T109 strictness was blocking them before they could even reach the PSK path.
+
+**Code change** (`crates/hitls-tls/src/handshake/server.rs`, ~25 lines): sig_algs extraction now uses `Option` chaining (returns `Vec::new()` if absent). Inside `build_server_flight`'s non-PSK cert branch, just before `select_signature_scheme_for_cert`, checks `p.client_sig_algs.is_empty()` and errors with a `missing_extension`-mapped message. The PSK-only build path doesn't reach the check.
+
+**Honest scope re-framing**: original plan was "wire 0-RTT accept end-to-end + curate happy-path 0-RTT scripts into CI". Reality: (1) was already done; (2) no script exists to curate. So T109 became "verify what's working + the small RFC-correctness fix surfaced during probing". Real but smaller than projected. T106 + T109 together close the TLS 1.3 server-side 0-RTT story for the curated CI surface.
+
+**Tests**: cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean. 9 spot-checked CI scripts all `rc=0` (no regressions, no XPASS). All in-tree tests pass (including the 0-RTT-accept integration test).
 
 
 

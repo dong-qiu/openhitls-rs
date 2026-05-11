@@ -450,15 +450,20 @@ impl ServerHandshake {
             ));
         }
 
-        // signature_algorithms
-        let sig_alg_ext = ch
+        // signature_algorithms — RFC 8446 §4.2.3: required for cert-based
+        // authentication; MAY be omitted for PSK-only resumption (the
+        // PSK binder + chosen ticket suite supply the auth). Phase T109
+        // makes the extraction tolerant; the non-PSK build path below
+        // re-checks that client_sig_algs is non-empty before invoking
+        // `select_signature_scheme_for_cert`.
+        let client_sig_algs = match ch
             .extensions
             .iter()
             .find(|e| e.extension_type == ExtensionType::SIGNATURE_ALGORITHMS)
-            .ok_or_else(|| {
-                TlsError::HandshakeFailed("missing signature_algorithms in ClientHello".into())
-            })?;
-        let client_sig_algs = parse_signature_algorithms_ch(&sig_alg_ext.data)?;
+        {
+            Some(ext) => parse_signature_algorithms_ch(&ext.data)?,
+            None => Vec::new(),
+        };
 
         // signature_algorithms_cert (RFC 8446 §4.2.3) — optional
         if let Some(sac_ext) = ch
@@ -1119,6 +1124,19 @@ impl ServerHandshake {
             let private_key = self.config.private_key.as_ref().ok_or_else(|| {
                 TlsError::HandshakeFailed("no server private key configured".into())
             })?;
+            // Phase T109 — cert-based auth requires the client's
+            // `signature_algorithms`. PSK-only handshakes can omit it
+            // (the binder + suite supply auth), but if we reach this
+            // branch we're about to sign CertificateVerify, so the
+            // extension MUST be present (RFC 8446 §4.2.3).
+            if p.client_sig_algs.is_empty() {
+                return Err(TlsError::HandshakeFailed(
+                    "missing signature_algorithms in ClientHello \
+                     (required for certificate-based authentication, \
+                     RFC 8446 §4.2.3 — alert: missing_extension)"
+                        .into(),
+                ));
+            }
             // Phase T107 — when our cert uses the `id-RSASSA-PSS`
             // SPKI OID, advertise `rsa_pss_pss_*` instead of
             // `rsa_pss_rsae_*` per RFC 5756 / RFC 8446 §4.2.3.
