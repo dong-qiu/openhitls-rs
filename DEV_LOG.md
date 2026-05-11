@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T99 (98 phases, T64 skipped)
+- Testing: T1–T100 (99 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -304,6 +304,7 @@ Category summary:
 | 292 | T97 | Test | TLS 1.3 server-side in-handshake mTLS (RFC 8446 §4.3.2 + §4.4.2-3): CertificateRequest emission + client cert/CV read + chain validation | 2026-05-11 |
 | 293 | T98 | Test | Closing T97 leftovers: client-side in-handshake mTLS + RFC 8446 §4.4.3 sig-alg vetting + tlsfuzzer mTLS in CI (`--verify-client-cert` flag) | 2026-05-11 |
 | 294 | T99 | Test | CertificateVerify alert mapping (RFC 8446 §6.2 `decrypt_error`) + `rsa_pss_pss_*` refusal — `test-tls13-certificate-verify.py` 11/31 → 30/31 PASS, added to CI mTLS suite | 2026-05-11 |
+| 295 | T100 | Test | tlsfuzzer probe-sweep round: alert mapper learns `"too short"` / `"invalid length"` → `decode_error`; KeyUpdate codec emits `decode_error` / `illegal_parameter`; sig-algorithms 16/282 → 269/282 PASS; keyupdate 6/270 → 261/270 PASS; keyshare-omitted XFAILs dropped to 0 | 2026-05-11 |
 
 ---
 
@@ -16429,6 +16430,113 @@ T98's audit of the 20 remaining FAIL conversations grouped them into "PSS hash/M
 - `cargo build --release -p hitls-cli`: clean
 - tlsfuzzer mTLS suite: 33 PASS / 3 XFAIL / 0 FAIL across 2 scripts → both exit 0
 - No regressions in spot-checked existing scripts (`rsa-signatures`, `conversation`, `eddsa`)
+
+## Phase T100 — tlsfuzzer Probe-Sweep Round: Alert-Mapping Generalisation Closes 510 Conversations Across 3 New Scripts (2026-05-11)
+
+### Summary
+
+T99 left a hint that "the alert mapping fix is the cheapest ROI we have" — T100 cashed it in. Spent ~1 hour probing T92's deferred mass-fail tlsfuzzer scripts to see which had been silently improved by recent alert-mapping work, vs which need real protocol fixes. Findings:
+
+- **`test-tls13-signature-algorithms.py`**: 16/282 → **269/282 PASS** (+253 conversations) after the alert mapper learned `"too short"` and `"invalid length"` substrings → `decode_error` (RFC 8446 §6.2). Our `parse_signature_algorithms_ch` already produced these substrings on every malformed extension; only the wire alert was wrong.
+- **`test-tls13-keyupdate.py`**: 6/270 → **261/270 PASS** (+255 conversations) after two surgical changes to `decode_key_update`: empty body now embeds `"decode error"`; invalid `request_update` value now embeds `"illegal_parameter"` (RFC 8446 §4.6.3 mandates this exact alert).
+- **`test-tls13-keyshare-omitted.py`**: 3 PASS / 2 XFAIL → **5 PASS / 0 XFAIL** (+2). The two `empty key_share extension` conversations were XFAIL'd in T89 because we routed them to `handshake_failure`; they now pass through the `"too short"` mapping to `decode_error` automatically. XFAIL list dropped to 0 entries.
+
+Net tlsfuzzer impact (3 scripts, against the existing RSA TLS 1.3 server):
+- **+510 NEW conversations PASS** (16+6+3 → 269+261+5)
+- **22 stable XFAILs** (13 + 9 — all real spec/parser gaps; the dropped 2 from keyshare-omitted are now PASS)
+- **0 regressions** across the 19-script CI suite (verified)
+
+### Code changes
+
+**`crates/hitls-tls/src/alert/mod.rs`** (~10 lines):
+
+Widened `tls_error_to_alert`'s `decode_error` branch to recognise two more substrings universally used by the handshake codec:
+
+```rust
+} else if m.contains("decode")
+    || m.contains("malformed")
+    || m.contains("parse")
+    || m.contains("truncated")
+    || m.contains("incomplete")
+    // Phase T100 — RFC 8446 §6.2 `decode_error`: "A message could
+    // not be decoded because some field was out of the specified
+    // range or the length of the message was incorrect."
+    || m.contains("too short")
+    || m.contains("invalid length")
+{
+    AlertDescription::DecodeError
+}
+```
+
+Audited the 51 `HandshakeFailed` sites containing `"too short"` and the 2 sites containing `"invalid length"` — every one is a clear-cut decode-class error (extension parsing, message body parsing, certificate body parsing, etc.). The change is RFC-correct across all of them.
+
+**`crates/hitls-tls/src/handshake/codec.rs`** (`decode_key_update`):
+
+- Empty body message now embeds `"decode error"` substring → maps to `decode_error` (50). RFC 8446 §6.2.
+- Invalid `request_update` value message now embeds `"illegal_parameter"` substring → maps to `illegal_parameter` (47). RFC 8446 §4.6.3 mandates this specific alert for KeyUpdate request_update values outside {0, 1}.
+
+### Why these gains came so cheap (again)
+
+T99's pattern repeats: many tlsfuzzer "FAIL" conversations aren't broken at the cryptographic or protocol layer — the server correctly rejects malformed input but emits a too-generic alert (`handshake_failure` (40)) where the spec mandates a specific one (`decode_error` (50), `illegal_parameter` (47), `missing_extension` (109), etc.). Tlsfuzzer pins the spec-mandated alert per-conversation, so the wire-alert mismatch surfaces as FAIL.
+
+The T89 alert mapping infrastructure (substring-based `tls_error_to_alert`) makes these fixes essentially free once the right substrings are identified — no protocol/crypto code changes needed, no new code paths to test, only the failure message wording adjusts. T100 finds 2 substrings that unlock 508+ tlsfuzzer conversations.
+
+The remaining FAILs (22 stable XFAILs across the 2 new scripts) are real:
+- 13 in sig-algorithms: huge unknown-scheme list tolerance + boundary fuzz cases — needs parser-tolerance work.
+- 9 in keyupdate: cross-record handshake-message fragmentation (T91-deferred) — needs read-loop refactor.
+
+### Probed-but-not-curated (intentionally skipped)
+
+| Script | Status | Why not curated |
+|--------|--------|-----------------|
+| `test-tls13-empty-alert.py` | 2/8 unchanged | Needs new error-emission path: server silently transitions to Closed on Alert receipt, tlsfuzzer wants `unexpected_message`. Real code change, not just mapping. |
+| `test-tls13-zero-length-data.py` | 2/9 unchanged | Same root cause as empty-alert + `check_empty_record` is defined but unused in production — not a mapping fix. |
+| `test-tls13-shuffled-extentions.py` | 2/17 unchanged | Server rejects shuffled extension order with `decode_error`; RFC 8446 §4.1.2 says any order is allowed. Real parser strictness gap. |
+| `test-tls13-large-number-of-extensions.py` | 7/15 (random ranges) | Conversation names use random ID ranges → not XFAIL-stable. |
+| `test-tls13-rsapss-signatures.py` | 0/8 | Needs `id-RSASSA-PSS` SPKI cert support. |
+| `test-tls13-symetric-ciphers.py` | 773/386 | Needs `TLS_AES_128_CCM_SHA256` / `TLS_AES_128_CCM_8_SHA256` cipher support. |
+| `test-tls13-legacy-version.py` | 2/8 | Server accepts legacy_version values that should be rejected. Real spec-compliance gap. |
+
+### Tests (post-T100)
+
+- `cargo test --workspace --all-features`: 4218 passed / 0 failed / 43 ignored (unchanged).
+- 19-script CI run.sh suite: all `rc=0`, no XPASS surprises (post-keyshare-omitted xfail update).
+- 2 new CI scripts (signature-algorithms + keyupdate): both `rc=0`.
+- mTLS subset: unchanged (33 PASS / 3 XFAIL / 0 FAIL).
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/alert/mod.rs` | Modified | `decode_error` branch +2 substrings. |
+| `crates/hitls-tls/src/handshake/codec.rs` | Modified | `decode_key_update`: 2 message tweaks (empty body → decode_error; invalid request_update → illegal_parameter). |
+| `tests/tlsfuzzer/xfail/test-tls13-signature-algorithms.txt` | Added | 13-entry XFAIL list with category rationale. |
+| `tests/tlsfuzzer/xfail/test-tls13-keyupdate.txt` | Added | 9-entry XFAIL list (all cross-record fragmentation cases). |
+| `tests/tlsfuzzer/xfail/test-tls13-keyshare-omitted.txt` | Modified | Dropped 2 entries; file now contains only documentation. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | `scripts=()` array adds `test-tls13-signature-algorithms.py` + `test-tls13-keyupdate.py`. |
+| `DEV_LOG.md` | Modified | This entry. |
+| `PROMPT_LOG.md` | Modified | T100 prompt + result entry. |
+| `CLAUDE.md` | Modified | Phase ranges T1-T100. |
+
+### Build Status (Post T100)
+
+- `cargo test --workspace --all-features`: 4175 passed / 0 failed / 43 ignored (project-tracked aggregate 4218 unchanged — no in-tree tests added).
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0 warnings.
+- `cargo fmt --all -- --check`: clean.
+- 19 CI TLS 1.3 scripts under run.sh: all exit 0, no XPASS.
+- 2 new CI scripts: both exit 0 (sig-algs 269/13 XFAIL; keyupdate 261/9 XFAIL).
+
+### Combined post-T100 baseline (CI sampling mode)
+
+Pre-T100: 1819 PASS / 254 XFAIL / 0 FAIL across 32 curated scripts.
+Post-T100 (32 + 2 = 34 scripts):
+- TLS 1.3 (now 19 scripts, +0 since T98) baseline unchanged
+- TLS 1.2 (9 scripts) unchanged
+- Cert-matrix (4 scripts) unchanged
+- mTLS (2 scripts, T98+T99) unchanged
+- **NEW: sig-algorithms + keyupdate (2 scripts)**: 530 PASS / 22 XFAIL / 0 FAIL combined
+
+Adding ~530 PASSing conversations to the CI gate at exit-0-strict level. Wall-clock impact estimated < 5s additional (both scripts are sub-second under default sampling).
 
 
 

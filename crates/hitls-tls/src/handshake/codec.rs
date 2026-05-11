@@ -450,15 +450,23 @@ pub fn encode_key_update(ku: &KeyUpdateMsg) -> Vec<u8> {
 /// Decode a KeyUpdate message from handshake body bytes.
 pub fn decode_key_update(data: &[u8]) -> Result<KeyUpdateMsg, TlsError> {
     if data.is_empty() {
-        return Err(TlsError::HandshakeFailed("KeyUpdate: empty body".into()));
+        // Phase T100 — empty body is a decode-class error per
+        // RFC 8446 §6.2 (`decode_error`).
+        return Err(TlsError::HandshakeFailed(
+            "KeyUpdate: empty body — decode error".into(),
+        ));
     }
     let request_update = match data[0] {
         0 => KeyUpdateRequest::UpdateNotRequested,
         1 => KeyUpdateRequest::UpdateRequested,
         v => {
+            // Phase T100 — RFC 8446 §4.6.3: "Implementations that
+            // receive any other value MUST terminate the connection
+            // with an `illegal_parameter` alert."
             return Err(TlsError::HandshakeFailed(format!(
-                "KeyUpdate: invalid request_update: {v}"
-            )))
+                "KeyUpdate: invalid request_update {v} \
+                 (RFC 8446 §4.6.3 — alert: illegal_parameter)"
+            )));
         }
     };
     Ok(KeyUpdateMsg { request_update })

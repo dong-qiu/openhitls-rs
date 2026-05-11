@@ -1,20 +1,12 @@
-# Phase T89 — keyshare-omitted XFAILs (T90 update: dropped 1 entry).
+# Phase T89/T90/T100 — keyshare-omitted XFAILs (now empty).
 #
-# `key_share extension omitted` was XFAIL'd in T89 because we were
-# routing missing-key_share-but-present-supported_groups to
-# `handshake_failure` via the HRR path. After T90 widened the alert
-# mapper's substring set, the existing `"missing key_share"`
-# substring branch (added in T89 but not exercised before) now
-# correctly maps to `missing_extension` (109), matching the
-# tlsfuzzer expectation. Conversation is now PASS.
-#
-# Remaining 2 entries: tlsfuzzer expects `decode_error` (50) for an
-# *empty* `key_share` extension (extension present, body []). RFC
-# 8446 §4.2.8 doesn't strictly call this a decode error (an empty
-# list is structurally valid), and we route it to
-# `handshake_failure` via the no-matching-key_share path. Spec gap
-# is debatable; scheduled for T91 only if we hit a real-world
-# interop request.
-
-empty key_share extension
-empty key_share extension with valid psk_key exhange modes
+# T89: 3 entries.
+# T90: dropped 1 entry (`key_share extension omitted`) after the
+#      mapper widened to route `"missing key_share"` substring to
+#      `missing_extension` (109).
+# T100: dropped the remaining 2 entries (`empty key_share extension`,
+#      `empty key_share extension with valid psk_key exhange modes`)
+#      after the alert mapper learned `"too short"` / `"invalid length"`
+#      → `decode_error` (50). Our `parse_key_share_ch` already returned
+#      `"key_share CH: too short"` for these inputs; only the wire alert
+#      was wrong. All 5 conversations now PASS without any XFAIL.

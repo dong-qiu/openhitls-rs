@@ -134,6 +134,16 @@ pub fn tls_error_to_alert(err: &hitls_types::TlsError) -> AlertDescription {
                 || m.contains("parse")
                 || m.contains("truncated")
                 || m.contains("incomplete")
+                // Phase T100 — RFC 8446 §6.2 `decode_error`: "A message
+                // could not be decoded because some field was out of the
+                // specified range or the length of the message was
+                // incorrect." Cover the common parser substrings used
+                // throughout the handshake codec — pre-T100 these all
+                // fell through to handshake_failure, breaking
+                // tlsfuzzer's per-conversation alert pinning on
+                // `test-tls13-signature-algorithms.py` and similar.
+                || m.contains("too short")
+                || m.contains("invalid length")
             {
                 AlertDescription::DecodeError
             } else if m.contains("unsupported version")

@@ -229,6 +229,15 @@ jobs:
             # branch here).
             test-tls13-count-tickets.py
             test-tls13-0rtt-garbage.py
+            # T100 additions (2): T100's wire-alert mapping fix
+            # ("too short" / "invalid length" → decode_error;
+            # KeyUpdate "invalid request_update" → illegal_parameter)
+            # closed 92 + 254 conversations across these two scripts
+            # without any crypto-layer change. Stable XFAIL lists
+            # cover the residual 13 + 9 conversations (cross-record
+            # handshake fragmentation + extension-tolerance gaps).
+            test-tls13-signature-algorithms.py
+            test-tls13-keyupdate.py
           )
           # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
           # on $HITLS_PORT_12. The cipher arg `-C 49199` lives in

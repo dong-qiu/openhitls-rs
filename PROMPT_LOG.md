@@ -4900,3 +4900,42 @@ Tests: 4218 → 4218 (no in-tree tests added; correctness verified end-to-end by
 
 **`scripts_mtls` aggregate (post-T99)**: 33 PASS / 3 XFAIL / 0 FAIL across 2 scripts → both exit 0.
 
+---
+
+## Phase T100 — tlsfuzzer Probe-Sweep Round (2026-05-11)
+
+> 直接跑A
+
+**Result**: ran option A from the post-T99 menu — probed T92's deferred mass-fail tlsfuzzer scripts to find which were silently improved by recent alert-mapping work. Two huge wins fell out, both unlocked by tiny substring changes (no crypto / protocol code touched):
+
+**1. `test-tls13-signature-algorithms.py`: 16/282 → 269/282 PASS (+253)**
+
+Cause: 91 of 96 FAIL conversations expected `decode_error` for malformed `signature_algorithms` extension lengths. Our `parse_signature_algorithms_ch` already returned messages like `"signature_algorithms CH: too short"` / `"invalid length"` — the alert mapper just didn't recognise those substrings, so they fell through to `handshake_failure`.
+
+Fix: added `"too short"` and `"invalid length"` to the `decode_error` substring branch in `tls_error_to_alert`. Audited the 53 source sites containing these substrings — all are clear-cut decode-class errors per RFC 8446 §6.2.
+
+**2. `test-tls13-keyupdate.py`: 6/270 → 261/270 PASS (+255)**
+
+Cause: 254 conversations FAIL'd on the same alert-mapping issue + KeyUpdate-specific spec gap.
+
+Fix: two message tweaks in `decode_key_update`:
+- Empty body: now embeds `"decode error"` → `decode_error` (50). RFC 8446 §6.2.
+- Invalid `request_update` value: now embeds `"illegal_parameter"` → `illegal_parameter` (47). RFC 8446 §4.6.3 mandates this exact alert.
+
+**3. Bonus: `test-tls13-keyshare-omitted.py` XFAILs dropped to 0**
+
+The two `empty key_share extension` conversations were XFAIL'd in T89 (routed to `handshake_failure`); the T100 mapper widening picks them up via `parse_key_share_ch`'s existing `"too short"` message → now PASS. XFAIL file is now docs-only.
+
+**CI suite update**:
+- `scripts=()` array adds `test-tls13-signature-algorithms.py` + `test-tls13-keyupdate.py` (with stable XFAIL lists for the residual 13 + 9 conversations — real spec gaps documented per-entry).
+- `xfail/test-tls13-keyshare-omitted.txt` cleaned up (0 active entries).
+
+**Net tlsfuzzer impact**: +510 PASS conversations across 3 scripts. **Combined post-T100 baseline (CI sampling): 1819 → ~2349 PASS / 254 → ~276 XFAIL / 0 FAIL across 34 curated scripts** (was 32). Wall-clock impact < 5s.
+
+**Probed-but-skipped** (real protocol/code gaps, not alert mapping): test-tls13-empty-alert.py, test-tls13-zero-length-data.py (need server-side empty-record rejection path); test-tls13-shuffled-extentions.py (extension-order strictness); test-tls13-large-number-of-extensions.py (random conversation names defeat XFAIL); test-tls13-rsapss-signatures.py (needs PSS-OID cert support); test-tls13-symetric-ciphers.py (needs CCM cipher support); test-tls13-legacy-version.py (legacy version validation gap).
+
+**Why so cheap (third time in a row)**: T89's substring-based `tls_error_to_alert` infrastructure makes alert-mapping fixes essentially free once the right substrings are identified. T99 did one (CV signature failures). T100 did two more (`too short` / `invalid length` for decode_error; KeyUpdate-specific). Each finds 100s of conversations. The "real protocol gaps" line keeps moving forward.
+
+Tests: 4218 unchanged (no in-tree tests added). cargo workspace tests 4175 PASS / 0 FAIL / 43 ignored. cargo clippy `-D warnings` 0. cargo fmt clean.
+
+
