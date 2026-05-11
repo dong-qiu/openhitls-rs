@@ -1,4 +1,4 @@
-# Phase T110 — `test-certificate-malformed.py` XFAILs (2 entries).
+# Phase T110 → T117 — `test-certificate-malformed.py` XFAILs.
 #
 # Pre-T110 baseline (post-T108): 973 PASS / 29 FAIL — server accepted
 # malformed Certificate12 messages that had structurally-valid framing
@@ -15,16 +15,25 @@
 #     an empty `Vec<u8>` and let later validation handle it (which
 #     produced the wrong alert family).
 #
-# Post-T110: 1000 PASS / 2 XFAIL / 0 FAIL.
+# Post-T110: 1000 PASS / 2 XFAIL / 0 FAIL — the last two ('overall 7,
+# certs 4, cert 1' and 'overall 8, certs 5, cert 2') sent a 1-byte
+# "cert" entry that the codec accepted (cert_length > 0); the X.509
+# verifier later rejected it but emitted an alert from outside the
+# message-parse path, which tlsfuzzer pinned to `bad_certificate (42)`
+# only.
 #
-# The 2 remaining XFAILs send a "1-byte cert" packed in an otherwise-
-# structurally-valid certificate_list. Our decoder accepts the entry
-# (cert_length > 0); the malformed-cert detection happens later when
-# the X.509 verifier tries to parse the 1-byte cert bytes. That
-# defers the alert past the handshake state boundary the test pins,
-# resulting in a different sequencing. Closing these needs DER-shape
-# validation at `process_client_certificate` time (currently deferred
-# to chain validation). Queued.
-
-fuzz empty certificate - overall 7, certs 4, cert 1
-fuzz empty certificate - overall 8, certs 5, cert 2
+# T117 closed both remaining XFAILs by adding a minimal DER-shape
+# check on each Certificate12 entry inside `decode_certificate12`:
+#   * The first byte must be 0x30 (DER SEQUENCE tag).
+#   * The inner DER length must exactly equal the cert-entry length
+#     wrapper. Trailing or short DER is rejected with `bad_certificate`
+#     (per RFC 5246 §7.2.2 — "a certificate was corrupt").
+# A new substring-routing branch was added to `tls_error_to_alert`
+# BEFORE the `decode_error` branch so error strings carrying parser
+# phrases like "malformed DER length" or "length mismatch" still map
+# to `bad_certificate` — both alerts are RFC-permitted for this
+# class of failure, but tlsfuzzer pins the former.
+#
+# Post-T117: 1002 PASS / 0 XFAIL / 0 FAIL (full coverage 1650/1648/0).
+#
+# No remaining XFAILs.

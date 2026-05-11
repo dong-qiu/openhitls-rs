@@ -129,6 +129,17 @@ pub fn tls_error_to_alert(err: &hitls_types::TlsError) -> AlertDescription {
                 || m.contains("invalid extension")
             {
                 AlertDescription::IllegalParameter
+            } else if m.contains("bad_certificate") {
+                // Phase T117 — RFC 5246 §7.2.2 `bad_certificate` (42):
+                // "A certificate was corrupt, contained signatures
+                // that did not verify correctly, etc." Cert-content
+                // problems detected at codec time (DER-shape check
+                // on each entry) belong here. Routed BEFORE the
+                // decode_error branch because some of our error
+                // strings necessarily include parser-style words
+                // like "malformed DER length" or "length mismatch"
+                // that would otherwise grab the decode_error mapping.
+                AlertDescription::BadCertificate
             } else if m.contains("decode")
                 || m.contains("malformed")
                 || m.contains("parse")

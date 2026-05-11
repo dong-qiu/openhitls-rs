@@ -461,13 +461,106 @@ pub fn decode_certificate12(body: &[u8]) -> Result<Certificate12, TlsError> {
                 "Certificate12 cert data truncated".into(),
             ));
         }
-        certs.push(body[offset..offset + cert_len].to_vec());
+        // Phase T117 — minimal DER-shape sanity check on each cert
+        // entry. An X.509 v3 certificate is encoded as a top-level
+        // ASN.1 SEQUENCE (`30 ... `), and real-world certs are large
+        // enough to use the long-form length encoding (tag `30`
+        // followed by `82 LL LL`). Pre-T117 we accepted any non-
+        // empty byte sequence (including 1-byte "0x00" entries
+        // tlsfuzzer's `test-certificate-malformed.py` constructs);
+        // the malformed bytes then slipped past the codec and only
+        // surfaced as a less-specific error during chain validation,
+        // landing on the wrong wire alert at the wrong handshake
+        // state.
+        //
+        // Alert mapping is `bad_certificate` (42) per RFC 5246
+        // §7.2.2 — the outer Certificate12 framing IS valid (the
+        // certificate_list length + per-entry length tags all
+        // agree); only the CERT CONTENT is malformed. RFC defines:
+        //   * `decode_error` — message structure malformed,
+        //   * `bad_certificate` — cert was corrupt, signatures did
+        //     not verify, etc.
+        // Tlsfuzzer's `test-certificate-malformed.py` pins
+        // `bad_certificate` for the consistent-framing-but-bad-cert
+        // family of fuzz cases.
+        let cert_bytes = &body[offset..offset + cert_len];
+        if cert_bytes[0] != 0x30 {
+            return Err(TlsError::HandshakeFailed(format!(
+                "Certificate12 cert entry is not a DER SEQUENCE \
+                 (first byte 0x{:02x}, expected 0x30 — RFC 5246 §7.4.2 \
+                 / X.690 §8.9 — bad_certificate)",
+                cert_bytes[0]
+            )));
+        }
+        let inner_total = inner_der_sequence_total_len(cert_bytes).ok_or_else(|| {
+            TlsError::HandshakeFailed(
+                "Certificate12 cert entry has malformed DER length \
+                 (RFC 5246 §7.4.2 / X.690 §8.1.3 — bad_certificate)"
+                    .into(),
+            )
+        })?;
+        if inner_total != cert_len {
+            return Err(TlsError::HandshakeFailed(format!(
+                "Certificate12 cert entry length mismatch: outer \
+                 wrapper says {cert_len} bytes, inner DER says \
+                 {inner_total} bytes (RFC 5246 §7.4.2 — bad_certificate)"
+            )));
+        }
+        certs.push(cert_bytes.to_vec());
         offset += cert_len;
     }
 
     Ok(Certificate12 {
         certificate_list: certs,
     })
+}
+
+/// Phase T117 — given the bytes of an ASN.1 SEQUENCE-tagged value
+/// (X.690 §8.9), return the TOTAL length including tag + length-of-
+/// length + content bytes. Returns `None` if the length encoding is
+/// malformed or the declared length runs past `bytes.len()`.
+///
+/// Only handles the cases X.509 v3 certificates can hit:
+///   * tag byte `bytes[0]` must already be checked to be `0x30` by
+///     the caller.
+///   * length: short-form (1 byte, value 0x00–0x7f) OR long-form
+///     with 1–4 length octets (`0x81 LL`, `0x82 LL LL`, `0x83 LL LL LL`,
+///     `0x84 LL LL LL LL`). Real-world certs use `0x82` (2 bytes).
+fn inner_der_sequence_total_len(bytes: &[u8]) -> Option<usize> {
+    if bytes.len() < 2 {
+        return None;
+    }
+    let len_byte = bytes[1];
+    if len_byte & 0x80 == 0 {
+        // Short form.
+        let content_len = len_byte as usize;
+        let total = 2 + content_len;
+        if total <= bytes.len() {
+            Some(total)
+        } else {
+            None
+        }
+    } else {
+        // Long form: 0x80 | nbytes.
+        let n = (len_byte & 0x7f) as usize;
+        if n == 0 || n > 4 {
+            // Indefinite (n=0) and >4-byte lengths aren't used by X.509.
+            return None;
+        }
+        if 2 + n > bytes.len() {
+            return None;
+        }
+        let mut content_len: usize = 0;
+        for &b in &bytes[2..2 + n] {
+            content_len = (content_len << 8) | b as usize;
+        }
+        let total = 2 + n + content_len;
+        if total <= bytes.len() {
+            Some(total)
+        } else {
+            None
+        }
+    }
 }
 
 /// Encode a TLS 1.2 Finished message (12-byte verify_data).
@@ -1262,8 +1355,16 @@ mod tests {
 
     #[test]
     fn test_encode_decode_certificate12_roundtrip() {
+        // Phase T117 — entries must be DER-shaped (outer SEQUENCE with
+        // length matching the entry size). Use a minimal valid DER
+        // SEQUENCE of 2 NULL TLVs: `30 04 05 00 05 00`, plus a longer
+        // 6-NULL variant: `30 0C 05 00 ... 05 00`.
+        let cert1: Vec<u8> = vec![0x30, 0x04, 0x05, 0x00, 0x05, 0x00];
+        let cert2: Vec<u8> = vec![
+            0x30, 0x0C, 0x05, 0x00, 0x05, 0x00, 0x05, 0x00, 0x05, 0x00, 0x05, 0x00, 0x05, 0x00,
+        ];
         let cert = Certificate12 {
-            certificate_list: vec![vec![0x30, 0x82, 0x01, 0x00], vec![0x30, 0x82, 0x02, 0x00]],
+            certificate_list: vec![cert1.clone(), cert2.clone()],
         };
 
         let encoded = encode_certificate12(&cert);
@@ -1273,8 +1374,42 @@ mod tests {
 
         let decoded = decode_certificate12(body).unwrap();
         assert_eq!(decoded.certificate_list.len(), 2);
-        assert_eq!(decoded.certificate_list[0], vec![0x30, 0x82, 0x01, 0x00]);
-        assert_eq!(decoded.certificate_list[1], vec![0x30, 0x82, 0x02, 0x00]);
+        assert_eq!(decoded.certificate_list[0], cert1);
+        assert_eq!(decoded.certificate_list[1], cert2);
+    }
+
+    #[test]
+    fn test_decode_certificate12_rejects_non_der_entry() {
+        // Phase T117 — a cert entry whose first byte is not 0x30
+        // (SEQUENCE) is rejected with a `decode_error`-mapping
+        // message. Tlsfuzzer's `fuzz empty certificate - overall N,
+        // certs K, cert 1` tests embed a 1-byte 0x00 entry that
+        // pre-T117 slipped through to the chain validator with the
+        // wrong wire alert.
+        // Body: cert_list_len(3) = 4, then 1-byte-entry (cert_len(3)=1, data=[0]).
+        let body = [0x00, 0x00, 0x04, 0x00, 0x00, 0x01, 0x00];
+        let err = decode_certificate12(&body).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("not a DER SEQUENCE") && msg.contains("bad_certificate"),
+            "got {msg}"
+        );
+    }
+
+    #[test]
+    fn test_decode_certificate12_rejects_inner_length_mismatch() {
+        // Phase T117 — a cert entry whose outer wrapper length doesn't
+        // match the inner DER SEQUENCE length is rejected.
+        // Outer wrapper says 6 bytes; inner DER `30 02 05 00` says 4 total.
+        let body = [
+            0x00, 0x00, 0x09, // cert_list_len = 9
+            0x00, 0x00, 0x06, // cert_len = 6
+            0x30, 0x02, 0x05, 0x00, 0x00,
+            0x00, // inner DER (4 bytes valid) + 2 trailing zeros
+        ];
+        let err = decode_certificate12(&body).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("length mismatch"), "got {msg}");
     }
 
     #[test]

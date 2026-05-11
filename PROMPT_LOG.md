@@ -5228,6 +5228,33 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean. test-certificate-malformed.py under run.sh: 1000 PASS / 2 XFAIL / 0 FAIL → exit 0. No regressions in spot-checked existing scripts.
 
+---
+
+## Phase T117 — TLS 1.2 Certificate12 DER-Shape Validation (2026-05-12)
+
+> 按这个计划开始 T111
+
+**Numbering note**: the prompt referred to "T111" from my own post-T110 work plan, but the migration plan `docs/c-test-migration-plan.md` (commit `90a4466`) reserves T111–T116 for the upcoming C-test migration Phase A–F work. To keep DEV_LOG numbering monotonic and avoid clashing with reserved IDs, this entry lands as **T117**. Treat all "T111" mentions in earlier session context as referring to this T117 work.
+
+**Result**: started T117 from the post-T110 work plan. Closed the 2 stable XFAILs T110 deferred in `test-certificate-malformed.py` ("fuzz empty certificate - overall 7, certs 4, cert 1" and "overall 8, certs 5, cert 2") — both send a 1-byte "cert" entry that's structurally consistent at codec framing (cert_len > 0) but trivially invalid X.509. Pre-T117 the codec pushed the entry through and rejection only happened later in chain validation, which deferred the alert past the handshake-state boundary tlsfuzzer pins.
+
+**The fix is at the codec layer, not the verifier layer**:
+
+1. `decode_certificate12` — for each cert entry inside the existing while-loop, validate two minimal DER properties:
+   - First byte MUST be `0x30` (DER SEQUENCE tag, X.690 §8.9).
+   - The inner DER length MUST exactly equal the cert-entry length wrapper. New helper `inner_der_sequence_total_len` parses both short and long form (`0x81..=0x84`).
+   - Both failure modes emit `TlsError::HandshakeFailed(...bad_certificate)` strings.
+2. `tls_error_to_alert` — new `m.contains("bad_certificate")` branch routed **before** `decode_error`. T117's error strings necessarily mention parser phrases like `"malformed DER length"` / `"length mismatch"` that would otherwise grab the `decode_error` mapping; ordering preserves the RFC 5246 §7.2.2 `bad_certificate` (42) alert that tlsfuzzer's `ExpectAlert` pins for this class.
+
+**Tlsfuzzer impact**:
+- `test-certificate-malformed.py` (sampled): 1000 PASS / 2 XFAIL / 0 FAIL → **1002 PASS / 0 XFAIL / 0 FAIL**.
+- Full-coverage probe (`-n 99999`): 1648 PASS / 2 XFAIL → 1650 PASS / 0 XFAIL with both previously-XFAIL'd conversations explicitly emitting `XPASS` (then dropped from the XFAIL list).
+- Curated CI suite unchanged at 44 scripts; mTLS-1.2 subset now 0 XFAIL on this script.
+
+**Code volume**: ~50 lines in codec12 (3 inline checks + 18-line DER length parser helper + 2 negative tests + roundtrip fixture refresh) + ~15 lines in alert/mod.rs (new branch). Net: small, well-isolated.
+
+**Tests**: `cargo test -p hitls-tls --all-features --lib codec12` 40/0 (was 38/0; +2). `cargo test -p hitls-tls --all-features --lib alert` 18/0. `cargo clippy --workspace --all-features --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean. Workspace total: 4175 → 4177.
+
 
 
 

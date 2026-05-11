@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T110 (109 phases, T64 skipped)
+- Testing: T1–T117 (110 phases, T64 skipped + T111–T116 reserved for the `docs/c-test-migration-plan.md` Phase A–F work)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -315,6 +315,7 @@ Category summary:
 | 303 | T108 | Test | TLS 1.2 mTLS scripts in CI + CV alert mapping (RFC 5246 §7.2.2 `decrypt_error` instead of `internal_error` on crypto-layer / verify-false errors) — 3 new tlsfuzzer scripts in CI: `test-certificate-request.py` (4/1), `test-certificate-verify.py` (5/0), `test-certificate-verify-malformed.py` (266/1 from 262/5) | 2026-05-11 |
 | 304 | T109 | Test | 0-RTT acceptance verification (already implemented in I21, verified by existing `test_tls13_early_data_max_size_negotiation` integration test) + deferred `signature_algorithms` extension presence check (RFC 8446 §4.2.3 — required for cert auth, optional for PSK-only) | 2026-05-11 |
 | 305 | T110 | Test | TLS 1.2 handshake-codec strict body-length checks (`decode_certificate12` + `decode_certificate_verify12`) per RFC 5246 §7.4.2 / §7.4.8 + empty-cert-entry rejection — closes 28 conversations across `test-certificate-malformed.py` (973/29 → 1000/2 XFAIL) and `test-certificate-verify-malformed.py` (266/1 → 267/0); cert-malformed.py joins CI | 2026-05-11 |
+| 306 | T117 | Test | TLS 1.2 Certificate12 DER-shape validation in `decode_certificate12` (entry first byte must be 0x30, inner DER length must equal outer wrapper length) + `bad_certificate` substring routing in `tls_error_to_alert` per RFC 5246 §7.2.2 — closes the last 2 XFAILs in `test-certificate-malformed.py` (1000/2 → 1002/0); curated mTLS-1.2 set now has 0 XFAIL on this script (T111–T116 reserved for C-test migration plan) | 2026-05-12 |
 
 ---
 
@@ -17358,6 +17359,96 @@ Both are "fuzz empty certificate - overall N, certs K, cert M" variants where th
 - `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
 - `cargo fmt --all -- --check`: clean.
 - Curated CI sweep: 43 → **44 scripts**.
+
+---
+
+## Phase T117 — TLS 1.2 Certificate12 DER-Shape Validation: Closes the Last 2 Cert-Malformed XFAILs (2026-05-12)
+
+> Numbering note: T111–T116 are reserved by `docs/c-test-migration-plan.md` (commit `90a4466`) for the upcoming C-test migration Phase A–F work, which is sequenced before this small follow-up but is bigger in scope. T117 picks up the next free testing-category slot to keep DEV_LOG numbering monotonic.
+
+### Summary
+
+T110 left 2 stable XFAILs in `test-certificate-malformed.py`: both `fuzz empty certificate - overall 7, certs 4, cert 1` and `... overall 8, certs 5, cert 2`. Tlsfuzzer constructs these by packing a single 1-byte "cert" entry inside an otherwise-structurally-valid `certificate_list`. T110's codec accepted the entry (cert_length > 0 ≠ 0) and pushed the 1-byte bytes onto `certs`; rejection only happened later when the X.509 verifier tried to parse 1 byte of garbage. That deferred the alert past the handshake-state boundary tlsfuzzer pins.
+
+T117 adds a minimal DER-shape sanity check on each cert entry at codec time (`decode_certificate12`):
+
+1. First byte MUST be `0x30` (ASN.1 DER SEQUENCE tag, X.690 §8.9).
+2. The inner DER length MUST exactly equal the cert-entry length wrapper (X.690 §8.1.3 short/long form). Trailing or short DER is rejected.
+
+Both failure modes raise `TlsError::HandshakeFailed` with an error string whose suffix is `bad_certificate` so the centralised `tls_error_to_alert` mapper (T89 infrastructure) routes them to `AlertDescription::BadCertificate` (42), the alert pinned by tlsfuzzer's `ExpectAlert(...,(AlertDescription.bad_certificate))` lines in `test_certificate_malformed.py`. RFC 5246 §7.2.2 explicitly authorises `bad_certificate` for "a certificate was corrupt" — including the codec-time DER-shape failure modes T117 catches.
+
+### Code changes
+
+**`crates/hitls-tls/src/handshake/codec12.rs`** (~50 lines, all inside `decode_certificate12`):
+
+- After reading `cert_len` for each entry inside the existing `while offset < end` loop, slice the entry as `cert_bytes`, then:
+  - Reject if `cert_bytes[0] != 0x30` (`bad_certificate`).
+  - Compute `inner_der_sequence_total_len(cert_bytes)` (new helper — parses the short/long-form length and returns `2 + n + content_len`).
+  - Reject if `inner_total != cert_len` (`bad_certificate`).
+- New private helper `inner_der_sequence_total_len(bytes: &[u8]) -> Option<usize>` — minimal DER length parser supporting short form (`<0x80`) and long form (`0x81..=0x84`). Returns `None` on any malformed shape (length-of-length 0, length-of-length > 4, truncated buffer, content overflow).
+- 2 new unit tests:
+  - `test_decode_certificate12_rejects_non_der_entry` — sends a 1-byte entry of `0x00`; asserts error message contains both `"not a DER SEQUENCE"` and `"bad_certificate"`.
+  - `test_decode_certificate12_rejects_inner_length_mismatch` — sends a 6-byte wrapper around `30 02 05 00 00 00` (inner says 4, outer says 6); asserts error message contains `"length mismatch"`.
+- Updated `test_encode_decode_certificate12_roundtrip` fixture data — old test data used non-DER-shaped placeholders (`[0x30, 0x82, 0x01, 0x00]` claims 256 content bytes in a 4-byte sequence), which fails the new strict check. Replaced with minimal valid DER `SEQUENCE { NULL, NULL }` payloads (`30 04 05 00 05 00` and a 12-byte variant).
+
+**`crates/hitls-tls/src/alert/mod.rs`** (~15 lines, inside `tls_error_to_alert`):
+
+- Added a new `else if m.contains("bad_certificate")` branch **before** the existing `decode_error` branch. The branch order matters: T117 error strings necessarily mention parser-style phrases like `"malformed DER length"` and `"length mismatch"` (because the failure is detected during DER parsing), which would otherwise grab the `decode_error` mapping via the existing `m.contains("decode")` / `m.contains("malformed")` substrings. Routing `bad_certificate` first preserves the RFC-correct alert for cert-content failures while keeping the broader `decode_error` mapping for everything else.
+
+### Tlsfuzzer impact
+
+| Script | Pre-T117 (post-T110) | Post-T117 |
+|--------|---------------------|-----------|
+| `test-certificate-malformed.py` (sampled, `n≈100`) | 1000 PASS / 2 XFAIL / 0 FAIL | **1002 PASS / 0 XFAIL / 0 FAIL** |
+| `test-certificate-malformed.py` (full, `-n 99999`) | (not run in CI; ~1648/2) | **1650 PASS / 0 XFAIL / 0 FAIL via run.sh; XPASS=2 observed before XFAIL drop** |
+
+**+2 conversations closed** — every cert-malformed XFAIL in the curated mTLS-1.2 set is now PASS. CI suite size unchanged at **44 scripts**.
+
+### Verification
+
+Local probe driven by `tests/tlsfuzzer/run.sh` (same wrapper CI uses, with `-C 49199` cipher pin from `args/test-certificate-malformed.txt`):
+
+```
+[run.sh] script=test-certificate-malformed.py xfail_entries=2
+TOTAL: 1002  PASS: 1002  XFAIL: 0  FAIL: 0  XPASS: 0
+```
+
+Then with `-n 99999` to defeat tlsfuzzer's default sub-sampling (so both newly-fixed conversations are guaranteed to run):
+
+```
+[run.sh] script=test-certificate-malformed.py xfail_entries=2
+TOTAL: 1650  PASS: 1648  XFAIL: 0  FAIL: 0  XPASS: 2
+XPASSED:
+  'fuzz empty certificate - overall 7, certs 4, cert 1'
+  'fuzz empty certificate - overall 8, certs 5, cert 2'
+```
+
+After dropping both names from `xfail-mtls-12/test-certificate-malformed.txt`, the next CI sample run shows 0 XPASS / 0 FAIL.
+
+### Tests (post-T117)
+
+- `cargo test -p hitls-tls --all-features --lib codec12`: 40 PASS (was 38; +2 from T117).
+- `cargo test -p hitls-tls --all-features --lib alert`: 18 PASS, unchanged.
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all -- --check`: clean (after `cargo fmt --all` applied codec12 formatting).
+- Workspace test count: 4175 → **4177** (+2 codec12 negative tests).
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/codec12.rs` | Modified | DER-shape check on each cert entry inside `decode_certificate12` + new `inner_der_sequence_total_len` helper + 2 new negative tests + roundtrip fixture data refreshed to DER-shaped placeholders. |
+| `crates/hitls-tls/src/alert/mod.rs` | Modified | New `bad_certificate` substring branch routed **before** `decode_error` in `tls_error_to_alert`. |
+| `tests/tlsfuzzer/xfail-mtls-12/test-certificate-malformed.txt` | Modified | Both XFAIL entries dropped (now docs-only). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index update. |
+| `PROMPT_LOG.md` | Modified | T117 prompt + result entry. |
+| `CLAUDE.md` | Modified | Status line `T1–T110` → `T1–T117` + test count `4218` → `4220`. |
+
+### Build Status (Post T117)
+
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all -- --check`: clean.
+- Curated CI sweep: **44 scripts**, **0 FAIL / 0 XPASS** post-XFAIL-drop.
 
 
 
