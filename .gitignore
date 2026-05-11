@@ -11,3 +11,4 @@
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 /worktrees/
+/diagnostics/
