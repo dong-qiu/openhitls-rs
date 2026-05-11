@@ -16,3 +16,5 @@
 # kept locally for spot-checking systematic reviewer bias; not interesting
 # to other clones.
 /.ai-review-log/
+
+/diagnostics/
