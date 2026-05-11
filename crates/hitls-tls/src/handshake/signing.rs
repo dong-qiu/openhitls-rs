@@ -11,6 +11,32 @@ pub fn select_signature_scheme(
     key: &ServerPrivateKey,
     client_schemes: &[SignatureScheme],
 ) -> Result<SignatureScheme, TlsError> {
+    // Phase T107 — RSA defaults to `rsa_pss_rsae_*` (paired with the
+    // standard `id-rsaEncryption` SPKI). For PSS-OID certs the caller
+    // must use [`select_signature_scheme_for_cert`] which threads the
+    // `is_rsa_pss_cert` flag through. Kept as a thin wrapper for
+    // backward compatibility (client-side post-handshake CR path).
+    select_signature_scheme_for_cert(key, client_schemes, false)
+}
+
+/// Phase T107 — same as [`select_signature_scheme`] but routes RSA
+/// keys to `rsa_pss_pss_*` instead of `rsa_pss_rsae_*` when
+/// `is_rsa_pss_cert` is true (RFC 5756 / RFC 8446 §4.2.3).
+pub fn select_signature_scheme_for_cert(
+    key: &ServerPrivateKey,
+    client_schemes: &[SignatureScheme],
+    is_rsa_pss_cert: bool,
+) -> Result<SignatureScheme, TlsError> {
+    const RSA_PSS_RSAE: &[SignatureScheme] = &[
+        SignatureScheme::RSA_PSS_RSAE_SHA256,
+        SignatureScheme::RSA_PSS_RSAE_SHA384,
+        SignatureScheme::RSA_PSS_RSAE_SHA512,
+    ];
+    const RSA_PSS_PSS: &[SignatureScheme] = &[
+        SignatureScheme::RSA_PSS_PSS_SHA256,
+        SignatureScheme::RSA_PSS_PSS_SHA384,
+        SignatureScheme::RSA_PSS_PSS_SHA512,
+    ];
     let candidates: &[SignatureScheme] = match key {
         ServerPrivateKey::Ed25519(_) => &[SignatureScheme::ED25519],
         ServerPrivateKey::Ed448(_) => &[SignatureScheme::ED448],
@@ -23,11 +49,13 @@ pub fn select_signature_scheme(
                 ))
             }
         },
-        ServerPrivateKey::Rsa { .. } => &[
-            SignatureScheme::RSA_PSS_RSAE_SHA256,
-            SignatureScheme::RSA_PSS_RSAE_SHA384,
-            SignatureScheme::RSA_PSS_RSAE_SHA512,
-        ],
+        ServerPrivateKey::Rsa { .. } => {
+            if is_rsa_pss_cert {
+                RSA_PSS_PSS
+            } else {
+                RSA_PSS_RSAE
+            }
+        }
         ServerPrivateKey::Dsa { .. } => {
             return Err(TlsError::HandshakeFailed(
                 "DSA not supported in TLS 1.3".into(),
@@ -102,16 +130,22 @@ pub fn sign_certificate_verify(
             // `InvalidArg`. The new `sign_pss(digest, alg)` API (added
             // in the same phase) thread the hash all the way through
             // M' and MGF1.
+            // Phase T107 — accept both `rsa_pss_rsae_*` and
+            // `rsa_pss_pss_*` schemes. The signing math is identical;
+            // the SPKI-OID difference (which the caller decides via
+            // `select_signature_scheme_for_cert`) only affects which
+            // codepoint is advertised on the wire (RFC 5756 /
+            // RFC 8446 §4.2.3).
             let (digest, alg) = match scheme {
-                SignatureScheme::RSA_PSS_RSAE_SHA256 => (
+                SignatureScheme::RSA_PSS_RSAE_SHA256 | SignatureScheme::RSA_PSS_PSS_SHA256 => (
                     compute_sha256(&content)?,
                     hitls_crypto::rsa::RsaHashAlg::Sha256,
                 ),
-                SignatureScheme::RSA_PSS_RSAE_SHA384 => (
+                SignatureScheme::RSA_PSS_RSAE_SHA384 | SignatureScheme::RSA_PSS_PSS_SHA384 => (
                     compute_sha384(&content)?,
                     hitls_crypto::rsa::RsaHashAlg::Sha384,
                 ),
-                SignatureScheme::RSA_PSS_RSAE_SHA512 => (
+                SignatureScheme::RSA_PSS_RSAE_SHA512 | SignatureScheme::RSA_PSS_PSS_SHA512 => (
                     compute_sha512(&content)?,
                     hitls_crypto::rsa::RsaHashAlg::Sha512,
                 ),

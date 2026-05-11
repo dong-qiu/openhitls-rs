@@ -36,6 +36,10 @@ pub fn run(
         .map_err(|e| format!("cannot read key file '{key_path}': {e}"))?;
     let pkcs8_key =
         parse_pkcs8_pem(&key_pem).map_err(|e| format!("failed to parse private key: {e}"))?;
+    // Phase T107 — capture the PSS-OID flag before we convert the
+    // PKCS#8 key into the wire-shaped `ServerPrivateKey` (which
+    // doesn't carry the OID itself).
+    let is_pss_oid = matches!(pkcs8_key, Pkcs8PrivateKey::RsaPss(_));
     let server_key = pkcs8_to_server_key(pkcs8_key)?;
 
     // Build TLS config. Accept the four interop-relevant groups (X25519,
@@ -46,6 +50,7 @@ pub fn run(
         .role(TlsRole::Server)
         .certificate_chain(cert_chain)
         .private_key(server_key)
+        .server_cert_is_rsa_pss(is_pss_oid)
         .supported_groups(&[
             NamedGroup::X25519,
             NamedGroup::SECP256R1,
@@ -383,13 +388,20 @@ fn pkcs8_to_server_key(
     key: Pkcs8PrivateKey,
 ) -> Result<ServerPrivateKey, Box<dyn std::error::Error>> {
     match key {
-        Pkcs8PrivateKey::Rsa(rsa) => Ok(ServerPrivateKey::Rsa {
-            n: rsa.n_bytes(),
-            d: rsa.d_bytes(),
-            e: rsa.e_bytes(),
-            p: rsa.p_bytes(),
-            q: rsa.q_bytes(),
-        }),
+        Pkcs8PrivateKey::Rsa(rsa) | Pkcs8PrivateKey::RsaPss(rsa) => {
+            // Phase T107 — both PSS-OID and rsaEncryption-OID PKCS#8
+            // RSA keys map to the same `ServerPrivateKey::Rsa` wire
+            // representation. The OID difference is captured
+            // separately on `TlsConfig::server_cert_is_rsa_pss` so
+            // the handshake layer can pick the right sig-alg family.
+            Ok(ServerPrivateKey::Rsa {
+                n: rsa.n_bytes(),
+                d: rsa.d_bytes(),
+                e: rsa.e_bytes(),
+                p: rsa.p_bytes(),
+                q: rsa.q_bytes(),
+            })
+        }
         Pkcs8PrivateKey::Ec { curve_id, key_pair } => Ok(ServerPrivateKey::Ecdsa {
             curve_id,
             private_key: key_pair.private_key_bytes(),

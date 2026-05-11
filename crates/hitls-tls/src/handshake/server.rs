@@ -38,7 +38,7 @@ use super::extensions_codec::{
     parse_status_request_ch, parse_supported_groups_ch, parse_supported_versions_ch,
 };
 use super::key_exchange::KeyExchange;
-use super::signing::{select_signature_scheme, sign_certificate_verify};
+use super::signing::sign_certificate_verify;
 use super::HandshakeState;
 
 /// Result from processing ClientHello.
@@ -1119,7 +1119,14 @@ impl ServerHandshake {
             let private_key = self.config.private_key.as_ref().ok_or_else(|| {
                 TlsError::HandshakeFailed("no server private key configured".into())
             })?;
-            let sig_scheme = select_signature_scheme(private_key, p.client_sig_algs)?;
+            // Phase T107 — when our cert uses the `id-RSASSA-PSS`
+            // SPKI OID, advertise `rsa_pss_pss_*` instead of
+            // `rsa_pss_rsae_*` per RFC 5756 / RFC 8446 §4.2.3.
+            let sig_scheme = super::signing::select_signature_scheme_for_cert(
+                private_key,
+                p.client_sig_algs,
+                self.config.server_cert_is_rsa_pss,
+            )?;
             let cv_transcript_hash = self.transcript.current_hash()?;
             let signature =
                 sign_certificate_verify(private_key, sig_scheme, &cv_transcript_hash, true)?;

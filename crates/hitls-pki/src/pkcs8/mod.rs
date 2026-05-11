@@ -32,6 +32,12 @@ use crate::oid_mapping;
 pub enum Pkcs8PrivateKey {
     /// RSA private key (PKCS#1).
     Rsa(RsaPrivateKey),
+    /// RSA private key paired with an `id-RSASSA-PSS` (PSS-OID,
+    /// 1.2.840.113549.1.1.10) SPKI/algorithm OID. The key bytes are
+    /// identical to the `Rsa` variant; only the OID differs. RFC 5756
+    /// / RFC 8446 §4.2.3: such certs must sign CV with `rsa_pss_pss_*`
+    /// schemes (NOT `rsa_pss_rsae_*`).
+    RsaPss(RsaPrivateKey),
     /// ECDSA private key with curve identifier.
     Ec {
         curve_id: EccCurveId,
@@ -110,6 +116,16 @@ pub fn parse_pkcs8_der(der: &[u8]) -> Result<Pkcs8PrivateKey, CryptoError> {
     // Dispatch on algorithm OID
     if algorithm_oid == known::rsa_encryption() {
         parse_rsa_private_key(private_key_bytes)
+    } else if algorithm_oid == known::rsassa_pss() {
+        // Phase T107 — PKCS#8 with `id-RSASSA-PSS` (1.2.840.113549.1.1.10).
+        // The inner key is identical to PKCS#1 RSAPrivateKey; the OID
+        // difference signals that paired certs use the PSS-only SPKI
+        // and CV must be signed with `rsa_pss_pss_*` schemes
+        // (RFC 5756 / RFC 8446 §4.2.3).
+        match parse_rsa_private_key(private_key_bytes)? {
+            Pkcs8PrivateKey::Rsa(key) => Ok(Pkcs8PrivateKey::RsaPss(key)),
+            other => Ok(other),
+        }
     } else if algorithm_oid == known::ec_public_key() {
         // SM2 keys may use the generic ecPublicKey alg OID with the SM2 curve
         // OID in algorithm parameters — detect that and route to SM2.

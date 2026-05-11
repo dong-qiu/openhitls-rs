@@ -85,6 +85,14 @@ pub struct TlsConfig {
     pub verify_client_cert: bool,
     /// Server: reject handshake if client provides no certificate (requires verify_client_cert).
     pub require_client_cert: bool,
+    /// Phase T107 — server's certificate uses the `id-RSASSA-PSS`
+    /// (1.2.840.113549.1.1.10) SPKI OID instead of `id-rsaEncryption`
+    /// (1.2.840.113549.1.1.1). RFC 5756 / RFC 8446 §4.2.3 mandates
+    /// that a PSS-OID cert sign CertificateVerify with `rsa_pss_pss_*`
+    /// schemes; an `rsaEncryption` cert uses `rsa_pss_rsae_*`. Set
+    /// by the s-server CLI when the PKCS#8 key carries the PSS-OID;
+    /// drives `select_signature_scheme` to advertise the right family.
+    pub server_cert_is_rsa_pss: bool,
     /// Enable Extended Master Secret extension (RFC 7627). Default: true.
     ///
     /// Note: prefer the more expressive [`ems_mode`] field — this boolean is a
@@ -365,6 +373,7 @@ pub struct TlsConfigBuilder {
     post_handshake_auth: bool,
     verify_client_cert: bool,
     require_client_cert: bool,
+    server_cert_is_rsa_pss: bool,
     ems_mode: EmsMode,
     enable_encrypt_then_mac: bool,
     cert_compression_algos: Vec<CertCompressionAlgorithm>,
@@ -464,6 +473,7 @@ impl Default for TlsConfigBuilder {
             post_handshake_auth: false,
             verify_client_cert: false,
             require_client_cert: false,
+            server_cert_is_rsa_pss: false,
             ems_mode: EmsMode::Prefer,
             enable_encrypt_then_mac: true,
             cert_compression_algos: Vec::new(),
@@ -647,6 +657,15 @@ impl TlsConfigBuilder {
 
     pub fn require_client_cert(mut self, required: bool) -> Self {
         self.require_client_cert = required;
+        self
+    }
+
+    /// Phase T107 — mark the server certificate as using the
+    /// `id-RSASSA-PSS` SPKI OID. Drives sig-alg selection to use
+    /// `rsa_pss_pss_*` for CertificateVerify (RFC 5756 /
+    /// RFC 8446 §4.2.3).
+    pub fn server_cert_is_rsa_pss(mut self, is_pss: bool) -> Self {
+        self.server_cert_is_rsa_pss = is_pss;
         self
     }
 
@@ -972,6 +991,7 @@ impl TlsConfigBuilder {
             post_handshake_auth: self.post_handshake_auth,
             verify_client_cert: self.verify_client_cert,
             require_client_cert: self.require_client_cert,
+            server_cert_is_rsa_pss: self.server_cert_is_rsa_pss,
             enable_extended_master_secret: self.ems_mode != EmsMode::Forbid,
             ems_mode: self.ems_mode,
             enable_encrypt_then_mac: self.enable_encrypt_then_mac,

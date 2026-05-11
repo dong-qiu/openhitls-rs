@@ -5122,6 +5122,40 @@ XFAIL file refreshed: 4 entries dropped (the `invalid 0-RTT` family that T106 cl
 
 **Tests**: 4218 unchanged (no in-tree tests — wire-level tolerance covered by tlsfuzzer probe). cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean. 12 spot-checked CI scripts all `rc=0`, no XPASS surprises.
 
+---
+
+## Phase T107 — PSS-OID Server Certificate Support (2026-05-11)
+
+> C
+
+**Result**: did option C from the post-T106 menu. Closes `test-tls13-rsapss-signatures.py` **0/8 → 8/8 PASS** by adding support for servers configured with an `id-RSASSA-PSS` SPKI/algorithm OID (1.2.840.113549.1.1.10) instead of the standard `id-rsaEncryption` (1.2.840.113549.1.1.1). RFC 5756 / RFC 8446 §4.2.3: a PSS-OID cert MUST sign CertificateVerify with `rsa_pss_pss_*` schemes (not `rsa_pss_rsae_*`).
+
+**Five-file change**:
+
+1. **`pkcs8/mod.rs`**: new `Pkcs8PrivateKey::RsaPss` variant; parser dispatches `known::rsassa_pss()` to the same RSA inner-key parser, wrapping as `RsaPss`.
+2. **`config/mod.rs`**: new `server_cert_is_rsa_pss: bool` field + builder setter.
+3. **`signing.rs`**: new `select_signature_scheme_for_cert(key, schemes, is_rsa_pss_cert)` — extends the existing `select_signature_scheme` with a cert-OID-aware RSA branch. `sign_certificate_verify` now accepts both `RSA_PSS_RSAE_*` and `RSA_PSS_PSS_*` schemes (signing math is identical).
+4. **`server.rs`**: `process_client_hello` uses the new cert-aware selector.
+5. **`s_server.rs`**: detects `Pkcs8PrivateKey::RsaPss(_)`, threads flag into TlsConfig; `pkcs8_to_server_key` maps both Rsa and RsaPss to the same wire `ServerPrivateKey::Rsa`.
+
+**Plus CI plumbing**: workflow generates an RSA-PSS cert via `openssl genpkey -algorithm RSA-PSS ...`, spins up a 6th s-server instance (`HITLS_PORT_PSS=4449`), and runs `test-tls13-rsapss-signatures.py` against it.
+
+**Design decision: separate config flag, not enum field**
+
+First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would have required touching ~19 construction/pattern sites across hitls-tls + hitls-cli (TLS 1.2 server, TLS 1.3 client, config tests, etc.). Reverted to a `TlsConfig::server_cert_is_rsa_pss` flag — touches only the CLI, config, and 1 call site in `process_client_hello`. The OID information naturally belongs with the cert (config-side), not the key bytes — they're identical between rsaEncryption and PSS-OID keys.
+
+**T99 CV-side `rsa_pss_pss_*` refusal stays**: T99 (in `verify_certificate_verify`) refuses `rsa_pss_pss_*` schemes when validating an incoming CV. The right correctness fix would be to allow them ONLY when the validating cert is PSS-OID — but our X.509 chain validator doesn't surface this distinction up to verify time. Deferred — no curated tlsfuzzer scripts probe this path.
+
+**Tlsfuzzer impact**:
+- `test-tls13-rsapss-signatures.py`: 0/8 FAIL → **8/8 PASS** (in dedicated PSS-OID s-server instance).
+- Regression sweep on 9 existing CI scripts: all `rc=0`, no XPASS surprises.
+- CI suite size: 39 → **40 scripts**.
+
+**Tests**: 4218 unchanged. cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean.
+
+**Why this was the right next step (vs deferred 0-RTT-accept / TLS 1.2 mTLS)**: pure additive feature — no protocol risk, no impact on existing paths. Same play-pattern as T105 (CCM) / T102 (CR sigalgs) — find a gap the codebase 90%-supports, fill the last 10%. The full PSS-OID cert path including cert-builder support is still TBD (CI uses openssl to generate the test cert); our cert verifier already accepted PSS-OID signature algorithm IDs (since x509 mod test).
+
+
 
 
 
