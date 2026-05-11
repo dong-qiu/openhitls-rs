@@ -16,7 +16,7 @@
 | 待迁 TC | ~10 200（其中 🟢 机械 3 650 + 🟡 半机械 5 030 + 🟠 重写 1 220 + 🔴 N/A 320） |
 | 工时估算 | ~10 周（1 主力 + 0.5 协作） |
 | 产出 | 6 个阶段交付物 + 1 套自动化迁移工具 + 8–10 个新 GitHub issue |
-| DEV_LOG 命名 | 接续 T97 → T106 |
+| DEV_LOG 命名 | 接续 T111 → T116 |
 
 > **背景**：本计划基于 [#42 审计报告](https://github.com/dong-qiu/openhitls-rs/issues/42) 中识别的"完全缺失 + 部分缺失"测试用例。审计结论是 **未发现恶意篡改**；问题集中在功能性不完整。
 
@@ -88,7 +88,7 @@ xtask/
 
 - [ ] `xtask` 提交并入 main
 - [ ] 9 个 `tests/migrated/*.rs` 全部 CI 绿
-- [ ] DEV_LOG 新增 phase **T97**
+- [ ] DEV_LOG 新增 phase **T111**
 - [ ] N/A 用例清单文档化（`docs/c-test-na-list.md`）
 - [ ] 失败用例（非 N/A）逐个开 issue
 
@@ -113,7 +113,7 @@ xtask/
 ### 3.1 验收
 
 - [ ] #43、#44、#45、#47、#57 + 4 个新 sub-issue 全部关闭或转 close-with-followup
-- [ ] DEV_LOG **T98** 条目
+- [ ] DEV_LOG **T112** 条目
 
 ---
 
@@ -151,7 +151,7 @@ fn parse_negative(#[case] file: &str, #[case] expected: PkiError) {
 - [ ] `c-asn1-fixtures/` 目录 + MANIFEST.sha256
 - [ ] CI license 检查通过（MulanPSL-2.0 兼容）
 - [ ] 至少 ~2 800 个负面用例覆盖（cert + cms + p12 + crl）
-- [ ] DEV_LOG **T99**
+- [ ] DEV_LOG **T113**
 
 ---
 
@@ -201,7 +201,7 @@ C `.data` 中的 modified 用例分 5 类：
 - [ ] hitls-tls 加 `test-hooks` feature
 - [ ] ≥ 500 个 `MODIFIED_*_TC` 通过
 - [ ] 每个测试断言具体 `Alert::*` variant
-- [ ] DEV_LOG **T100**
+- [ ] DEV_LOG **T114**
 
 ---
 
@@ -226,7 +226,7 @@ C `.data` 中的 modified 用例分 5 类：
 
 - [ ] 行为类覆盖率 ≥ 95 %
 - [ ] API 形态类语义对应表 in `docs/tlcp-test-mapping.md`
-- [ ] DEV_LOG **T101**
+- [ ] DEV_LOG **T115**
 
 ---
 
@@ -247,7 +247,7 @@ C `.data` 中的 modified 用例分 5 类：
 
 - [ ] 总测试数从当前 4 216 → ≥ 13 000
 - [ ] CI 总耗时 ≤ 25 min（防止爆炸）
-- [ ] DEV_LOG **T102** 终结条目
+- [ ] DEV_LOG **T116** 终结条目
 
 ---
 
@@ -325,15 +325,15 @@ C → Rust 迁移进度
 | 周 | 阶段 | 关键里程碑 |
 |---|---|---|
 | 1 | A.1 + A.2 | 工具骨架 + SHA-2 pilot 通过 |
-| 2 | A.3 + A.4 | 9 算法批量迁完，T97 |
-| 3 | B.1 + B.2 + B.3 + B.6 | enc / CSR / CRL / fixtures，T98 |
+| 2 | A.3 + A.4 | 9 算法批量迁完，T111 |
+| 3 | B.1 + B.2 + B.3 + B.6 | enc / CSR / CRL / fixtures，T112 |
 | 4 | B.4 + B.5 | 4 个新 TLS issue + CLI 5 子命令实现 |
-| 5 | C | PKI fixture 镜像 + 加载器，T99 |
+| 5 | C | PKI fixture 镜像 + 加载器，T113 |
 | 6 | D.1 | transcript 钩子 + 单元验证 |
-| 7 | D.2 + D.3 | MODIFIED_* 高价值 ≥ 500 项 + tlsfuzzer 协同，T100 |
-| 8 | E | interface_tlcp trait 化，T101 |
+| 7 | D.2 + D.3 | MODIFIED_* 高价值 ≥ 500 项 + tlsfuzzer 协同，T114 |
+| 8 | E | interface_tlcp trait 化，T115 |
 | 9 | F | tlcp/dtls 残余 + 全面回归 |
-| 10 | 收尾 | DEV_LOG / README / PROMPT_LOG 同步，T102 |
+| 10 | 收尾 | DEV_LOG / README / PROMPT_LOG 同步，T116 |
 
 ---
 
