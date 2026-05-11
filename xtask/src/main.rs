@@ -72,8 +72,15 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_hmac.rs"),
             mac::emit_hmac_kat,
         ),
+        "cmac" => (
+            c_root.join("crypto/cmac/test_suite_sdv_eal_mac_cmac.data"),
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_cmac.rs"),
+            mac::emit_cmac_kat,
+        ),
         other => {
-            return Err(format!("algo '{other}' not yet supported. Available: sha2, hmac").into());
+            return Err(
+                format!("algo '{other}' not yet supported. Available: sha2, hmac, cmac").into(),
+            );
         }
     };
 
@@ -92,13 +99,17 @@ fn migrate(
     );
 
     let target = out.map(PathBuf::from).unwrap_or(default_out);
+    // Apply rustfmt for both --check and write paths so drift detection
+    // matches what gets committed (committed files always go through
+    // rustfmt; comparing un-formatted `source` would false-positive).
+    let formatted = rustfmt_pass(&source).unwrap_or(source);
 
     if check {
         if !target.exists() {
             return Err(format!("--check: target does not exist: {}", target.display()).into());
         }
         let current = fs::read_to_string(&target)?;
-        if current == source {
+        if current == formatted {
             eprintln!("up-to-date: {}", target.display());
             Ok(())
         } else {
@@ -112,7 +123,6 @@ fn migrate(
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
         }
-        let formatted = rustfmt_pass(&source).unwrap_or(source);
         fs::write(&target, &formatted)?;
         eprintln!("Wrote {}", target.display());
         Ok(())
