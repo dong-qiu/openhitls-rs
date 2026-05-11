@@ -5279,6 +5279,23 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: `cargo test -p hitls-tls --all-features --lib server12::tests` 32/0 (was 31/0; +1). `cargo clippy --workspace --all-features --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean. Workspace total: 4177 → 4178.
 
+## Phase T111 — C→Rust Test Migration Tool: xtask + SHA-2 / HMAC / CMAC Pilots (2026-05-12)
+
+> 从 1+2 开始
+
+**Result**: first instalment of `docs/c-test-migration-plan.md` Phase A. The earlier `bab74fd` commit shipped the `xtask` scaffold with SHA-2 + HMAC pilots; this entry consolidates that work with two additions: (1) `--check` rustfmt parity bug fix, (2) CMAC pilot.
+
+**Combined deliverables**:
+
+- **`xtask/` developer task runner**: `cargo xtask migrate-c-tests --algo <name> [--check]`. Generic `.data` parser (6 unit tests) + per-algorithm template emitters in `digest.rs` (SHA-2) and `mac.rs` (HMAC + CMAC). Automatic `rustfmt` post-processing so emitted files satisfy `cargo fmt --check` out of the box.
+- **3 generated test files** under `crates/hitls-crypto/tests/`: `migrated_sha2.rs` (28 tests, 70 TC rows), `migrated_hmac.rs` (43 tests, 205 TC rows, MD5/SHA-1/SHA-2/SM3), `migrated_cmac.rs` (12 tests, 91 TC rows, AES-128/192/256). **83 migrated tests total, all passing.** Skipped reasons documented in the per-file footer comment (API-surface lifecycle = 271 rows, unsupported-alg = 8 rows split into SHA-3-HMAC and SM4-CMAC).
+- **`--check` drift detection fix** (`xtask/src/main.rs`): hoisted `rustfmt_pass` out of the write branch so `--check` compares the rustfmt-formatted generator output against the committed file. Pre-fix, the comparison was raw `source` vs. rustfmt'd committed file — guaranteed drift even when up-to-date. Post-fix: all 3 algos report `up-to-date`.
+- **CMAC-specific notes**: AES-only (`crates/hitls-crypto/src/cmac/mod.rs` is hardcoded to `AesKey`). The 4 `CRYPT_MAC_CMAC_SM4` rows go to `skipped_unsupported_alg` until a future I-phase generalises `Cmac` over `BlockCipher`. FUN_TC006 repeat-count workflows (4 rows with `:100` literal) go to `skipped_unknown`.
+
+**T111 is not closed**: plan §2.4 lists 9 algorithms; we're at 3/9 (SHA-2, HMAC, CMAC). Remaining 6 (AES, DSA, SM2, SM4, DH, curve25519, plus PKI CRL) will land in follow-up commits under the same phase number. `docs/c-test-na-list.md` also still pending.
+
+**Tests**: `cargo test -p xtask` 6/6. `cargo test -p hitls-crypto --test migrated_cmac --features cmac` 12/12. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac} --check` all `up-to-date`. `cargo clippy --workspace --all-features --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
