@@ -5155,6 +5155,35 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Why this was the right next step (vs deferred 0-RTT-accept / TLS 1.2 mTLS)**: pure additive feature — no protocol risk, no impact on existing paths. Same play-pattern as T105 (CCM) / T102 (CR sigalgs) — find a gap the codebase 90%-supports, fill the last 10%. The full PSS-OID cert path including cert-builder support is still TBD (CI uses openssl to generate the test cert); our cert verifier already accepted PSS-OID signature algorithm IDs (since x509 mod test).
 
+---
+
+## Phase T108 — TLS 1.2 mTLS Scripts in CI + CV Alert Mapping Fix (2026-05-11)
+
+> D
+
+**Result**: did option D from the post-T107 menu. The TLS 1.2 server-side mTLS code was already implemented from earlier phases (CertificateRequest emission, client Certificate / CertificateVerify reading, chain validation against `trusted_certs`). T108 brings it into curated CI:
+
+1. **3 new tlsfuzzer TLS 1.2 mTLS scripts added** — `test-certificate-request.py` (4/1), `test-certificate-verify.py` (5/0), `test-certificate-verify-malformed.py` (266/1). Run against a new `--tls 1.2 --verify-client-cert` server on port 4450 (`HITLS_PORT_MTLS_12`).
+
+2. **CV signature-verify alert mapping** in `verify_cv12_signature` — pre-T108 short/malformed signatures bubbled up `CryptoError(_)` from the underlying RSA / ECDSA / DSA verify, mapping to `internal_error`. RFC 5246 §7.2.2 mandates `decrypt_error` for CV failures. Added a local `map_verify_err` closure that coerces crypto-layer errors to `HandshakeFailed("...decrypt_error...")`. Same play as T99 (TLS 1.3 CV) but for the 1.2 path. Closed 4 of 5 FAILs in cert-verify-malformed.
+
+**Tlsfuzzer impact**:
+- `test-certificate-request.py` (new in CI): 4 PASS / 1 XFAIL / 0 FAIL.
+- `test-certificate-verify.py` (new in CI): 5 PASS / 0 XFAIL / 0 FAIL.
+- `test-certificate-verify-malformed.py` (new in CI): 262/5 FAIL → **266 PASS / 1 XFAIL / 0 FAIL**.
+- **CI suite size: 40 → 43 scripts**, +275 PASS conversations.
+
+**Probed but not curated**:
+- `test-certificate-malformed.py` (980 PASS / 22 FAIL): real "server sends CCS while tlsfuzzer expects alert" sequencing bug under packed-flight reads + non-deterministic fuzz conversation names. Both block CI inclusion. Queued.
+- `test-rsa-pss-sigs-on-certificate-verify.py`, `test-rsa-sigs-on-certificate-verify.py`: tlsfuzzer's CH parameters don't match our s-server's TLS 1.2 default groups. Would need per-script cipher/group tweaks. Deferred.
+
+**Iteration**: my first thought was the TLS 1.2 mTLS path needed full implementation. After grep'ing turned up `process_client_certificate12` + `process_client_certificate_verify` + `CertificateRequest12` emission, switched to "wire what's there into CI + fix small alert gap." 1 hour of work instead of half a day.
+
+**Why this was the right next step**: largest single-pass conversation gain available without new feature work — TLS 1.2 mTLS surface was sitting unused. Closing it now also reveals the few remaining real bugs (the packed-flight CCS ordering, the CR sigalgs subset) for future targeted phases.
+
+**Tests**: 4218 unchanged. cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean.
+
+
 
 
 

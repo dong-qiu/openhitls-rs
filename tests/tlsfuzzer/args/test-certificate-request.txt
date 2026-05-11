@@ -1,0 +1,7 @@
+# Phase T108 — force ECDHE-RSA-AES-128-GCM-SHA256 (0xC02F = 49199).
+# Without `-C`, tlsfuzzer's certificate-request.py defaults to
+# `TLS_RSA_WITH_AES_128_CBC_SHA` which our s-server doesn't include
+# in the default 1.2 cipher list. The same `-C 49199` pinning applies
+# to the rest of the TLS 1.2 leg (see other args/*.txt files).
+-C
+49199

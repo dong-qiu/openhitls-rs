@@ -1,0 +1,4 @@
+# Phase T108 — `test-certificate-verify.py` (TLS 1.2) XFAILs (empty).
+#
+# Post-T108 baseline: 5 PASS / 0 XFAIL / 0 FAIL. All conversations
+# pass against the `--verify-client-cert` s-server-1.2 instance.

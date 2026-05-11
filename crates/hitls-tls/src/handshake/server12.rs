@@ -1876,43 +1876,66 @@ fn verify_cv12_signature(
         .map_err(|e| TlsError::HandshakeFailed(format!("client cert parse: {e}")))?;
     let spki = &cert.public_key;
 
+    // Phase T108 — RFC 5246 §7.2.2 / RFC 8446 §6.2: crypto-layer
+    // errors during CV signature verification (malformed / too-short
+    // signature bytes, RSA decryption math errors, etc.) are
+    // `decrypt_error` (50) per spec, not the catch-all `internal_error`.
+    // Coerce here so the alert mapper routes correctly without
+    // needing per-call-site wording in the underlying primitive.
+    let map_verify_err = |e: TlsError| -> TlsError {
+        match e {
+            TlsError::CryptoError(_) => TlsError::HandshakeFailed(
+                "client CertificateVerify signature verification failed \
+                 (crypto-layer error — RFC 5246 §7.2.2: decrypt_error)"
+                    .into(),
+            ),
+            other => other,
+        }
+    };
+
     let ok = match scheme {
         SignatureScheme::RSA_PKCS1_SHA256 | SignatureScheme::RSA_PKCS1_SHA384 => verify_cv_rsa(
             spki,
             hitls_crypto::rsa::RsaPadding::Pkcs1v15Sign,
             transcript_hash,
             signature,
-        )?,
+        )
+        .map_err(map_verify_err)?,
         SignatureScheme::RSA_PSS_RSAE_SHA256 | SignatureScheme::RSA_PSS_RSAE_SHA384 => {
             verify_cv_rsa(
                 spki,
                 hitls_crypto::rsa::RsaPadding::Pss,
                 transcript_hash,
                 signature,
-            )?
+            )
+            .map_err(map_verify_err)?
         }
         SignatureScheme::ECDSA_SECP256R1_SHA256 => {
             let verifier = hitls_crypto::ecdsa::EcdsaKeyPair::from_public_key(
                 hitls_types::EccCurveId::NistP256,
                 &spki.public_key,
             )
-            .map_err(TlsError::CryptoError)?;
+            .map_err(TlsError::CryptoError)
+            .map_err(map_verify_err)?;
             verifier
                 .verify(transcript_hash, signature)
-                .map_err(TlsError::CryptoError)?
+                .map_err(TlsError::CryptoError)
+                .map_err(map_verify_err)?
         }
         SignatureScheme::ECDSA_SECP384R1_SHA384 => {
             let verifier = hitls_crypto::ecdsa::EcdsaKeyPair::from_public_key(
                 hitls_types::EccCurveId::NistP384,
                 &spki.public_key,
             )
-            .map_err(TlsError::CryptoError)?;
+            .map_err(TlsError::CryptoError)
+            .map_err(map_verify_err)?;
             verifier
                 .verify(transcript_hash, signature)
-                .map_err(TlsError::CryptoError)?
+                .map_err(TlsError::CryptoError)
+                .map_err(map_verify_err)?
         }
         SignatureScheme::DSA_SHA256 | SignatureScheme::DSA_SHA384 => {
-            verify_dsa_from_spki(spki, transcript_hash, signature)?
+            verify_dsa_from_spki(spki, transcript_hash, signature).map_err(map_verify_err)?
         }
         _ => {
             return Err(TlsError::HandshakeFailed(format!(
@@ -1925,8 +1948,15 @@ fn verify_cv12_signature(
     if ok {
         Ok(())
     } else {
+        // Phase T108 — RFC 5246 §7.2.2 / RFC 8446 §6.2: a CertificateVerify
+        // signature failure is a `decrypt_error` (50), not the catch-all
+        // `internal_error`. Embed the substring so `tls_error_to_alert`
+        // maps it correctly (same fix pattern as T99 for the TLS 1.3
+        // verify path).
         Err(TlsError::HandshakeFailed(
-            "client CertificateVerify signature verification failed".into(),
+            "client CertificateVerify signature verification failed \
+             (RFC 5246 §7.2.2 — alert: decrypt_error)"
+                .into(),
         ))
     }
 }

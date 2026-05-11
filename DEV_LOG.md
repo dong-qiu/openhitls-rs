@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T107 (106 phases, T64 skipped)
+- Testing: T1–T108 (107 phases, T64 skipped)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -312,6 +312,7 @@ Category summary:
 | 300 | T105 | Test | TLS 1.3 AES-CCM cipher suite negotiation (`TLS_AES_128_CCM_SHA256` + `TLS_AES_128_CCM_8_SHA256`) — adds the missing CCM-16 entry in `CipherSuiteParams::from_suite` + extends s-server default cipher list; closes 386 conversations in `test-tls13-symetric-ciphers.py` (773/386 → 1159/0 PASS) | 2026-05-11 |
 | 301 | T106 | Test | RFC 8446 §4.2.10 rejected-0-RTT tolerance — server now silently skips fake early-data records when CH offered `early_data` but we rejected (invalid PSK or `max_early_data_size = 0`); closes 4 XFAILs in `test-tls13-0rtt-garbage.py` (4/7 → 7/4) | 2026-05-11 |
 | 302 | T107 | Test | PSS-OID server cert support (`id-RSASSA-PSS` 1.2.840.113549.1.1.10 SPKI) — PKCS#8 parser `Pkcs8PrivateKey::RsaPss` variant + `TlsConfig::server_cert_is_rsa_pss` + cert-aware `select_signature_scheme_for_cert` advertising `rsa_pss_pss_*`; closes 8 conversations in `test-tls13-rsapss-signatures.py` (0/8 → 8/8 PASS) | 2026-05-11 |
+| 303 | T108 | Test | TLS 1.2 mTLS scripts in CI + CV alert mapping (RFC 5246 §7.2.2 `decrypt_error` instead of `internal_error` on crypto-layer / verify-false errors) — 3 new tlsfuzzer scripts in CI: `test-certificate-request.py` (4/1), `test-certificate-verify.py` (5/0), `test-certificate-verify-malformed.py` (266/1 from 262/5) | 2026-05-11 |
 
 ---
 
@@ -17100,6 +17101,98 @@ T99 (in `verify_certificate_verify`) refuses `rsa_pss_pss_*` schemes when valida
 - `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
 - `cargo fmt --all -- --check`: clean.
 - Curated CI sweep: 39 → **40 scripts** (added `test-tls13-rsapss-signatures.py` against the PSS-OID instance).
+
+## Phase T108 — TLS 1.2 mTLS Scripts in CI + CertificateVerify Alert Mapping (2026-05-11)
+
+### Summary
+
+The TLS 1.2 server-side mTLS code (CertificateRequest emission, client Certificate / CertificateVerify reading, chain validation against `trusted_certs`) was already implemented from earlier project phases (Phase I lineage). T108 brings it into the curated CI suite by:
+
+1. **Wiring 3 stable tlsfuzzer TLS 1.2 mTLS scripts into CI**: `test-certificate-request.py`, `test-certificate-verify.py`, `test-certificate-verify-malformed.py`. Run against a new `--tls 1.2 --verify-client-cert` server instance (port 4450, `HITLS_PORT_MTLS_12`).
+2. **Tightening CV signature-verify alert mapping in `verify_cv12_signature`**: pre-T108 the function returned `RecordError(...)` / `CryptoError(...)` on short/malformed signatures, which the alert mapper routed to `internal_error` instead of the spec-mandated `decrypt_error` (RFC 5246 §7.2.2). T108 wraps the verify call sites with `map_verify_err` that coerces crypto-layer errors AND returned-false-from-verify into a `HandshakeFailed` whose message contains the literal `"decrypt_error"` substring — letting our existing `tls_error_to_alert` (T100) route correctly.
+
+### Tlsfuzzer impact
+
+| Script | Pre-T108 | Post-T108 |
+|--------|---------|-----------|
+| `test-certificate-request.py` (new in CI) | n/a | **4 PASS / 1 XFAIL / 0 FAIL** |
+| `test-certificate-verify.py` (new in CI) | n/a | **5 PASS / 0 XFAIL / 0 FAIL** |
+| `test-certificate-verify-malformed.py` (new in CI) | 262 PASS / 5 FAIL | **266 PASS / 1 XFAIL / 0 FAIL** (+4 from alert fix) |
+
+CI suite size: 40 → **43 scripts**.
+
+### Code changes
+
+**`crates/hitls-tls/src/handshake/server12.rs`** (~30 lines):
+
+- `verify_cv12_signature` now wraps each verify call site with a local `map_verify_err` closure that converts `TlsError::CryptoError(_)` (raised by RSA / ECDSA / DSA verify on malformed input) into `HandshakeFailed("...decrypt_error...")`, so the alert mapper picks `AlertDescription::DecryptError` instead of `InternalError`.
+- The final "verify returned false" branch's error message also tightened to include `"decrypt_error"` substring.
+
+**`.github/workflows/tlsfuzzer.yml`** (~40 lines):
+
+- New `HITLS_PORT_MTLS_12=4450` env var.
+- New 7th s-server instance: `--tls 1.2 --verify-client-cert <CA>`.
+- New `scripts_mtls_12=()` loop runs against the TLS 1.2 mTLS instance with `-k`/`-c` client identity.
+- Per-script args files (`tests/tlsfuzzer/args/test-certificate-{request,verify,verify-malformed}.txt`) pin `-C 49199` (TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) since tlsfuzzer's TLS 1.2 default cipher list doesn't intersect our s-server's modern default.
+- Per-script XFAIL files under `tests/tlsfuzzer/xfail-mtls-12/`.
+- Stop-server loop + artifact-upload list extended for the 7th instance.
+
+**`tests/tlsfuzzer/args/test-certificate-{request,verify,verify-malformed}.txt`** (3 new files):
+
+- Each pins `-C 49199` for the TLS 1.2 leg.
+
+**`tests/tlsfuzzer/xfail-mtls-12/*.txt`** (3 new files):
+
+- `test-certificate-request.txt`: 1 entry — `check sigalgs in cert request` (same root cause as the TLS 1.3 mTLS XFAIL closed by T102; the TLS 1.2 CR construction site is separate and would need the same comprehensive-list treatment; deferred).
+- `test-certificate-verify.txt`: docs-only (no FAILs).
+- `test-certificate-verify-malformed.txt`: 1 entry — `pad CertificateVerify` (real TLS state-machine subtlety around packed-flight read; server detects + aborts but timing races with tlsfuzzer's runner state; queued).
+
+### Probed but not curated
+
+- **`test-certificate-malformed.py`**: 980 PASS / 22 FAIL, but the fuzz-conversation names are non-deterministic across runs ("fuzz empty certificate - overall N, certs K, cert M" with N/K/M varying by sampling). Plus a real "server sends CCS while tlsfuzzer expects alert" sequencing bug surfaces under packed-flight reads. Both issues block CI inclusion; queued as targeted follow-up.
+- **`test-rsa-pss-sigs-on-certificate-verify.py`**, **`test-rsa-sigs-on-certificate-verify.py`**: tlsfuzzer uses CH parameters (specific groups, KEX) that don't match our s-server's TLS 1.2 default; would need cipher-suite/groups tweaks per script. Deferred.
+
+### Tests (post-T108)
+
+- `cargo test --workspace --all-features --release`: 4175 PASS / 0 FAIL / 43 ignored.
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all -- --check`: clean.
+- 3 new TLS 1.2 mTLS scripts: all exit 0, no XPASS.
+
+### Combined CI baseline post-T108
+
+| Suite | Pre-T108 (scripts) | Post-T108 (scripts) | New conversations |
+|-------|-----:|-----:|-----:|
+| TLS 1.3 | 24 | 24 | unchanged |
+| TLS 1.2 | 9 | 9 | unchanged |
+| Cert-matrix | 4 | 4 | unchanged |
+| mTLS (TLS 1.3) | 2 | 2 | unchanged |
+| PSS-OID | 1 | 1 | unchanged |
+| **mTLS (TLS 1.2, NEW)** | n/a | **3** | **275 PASS / 2 XFAIL / 0 FAIL** |
+| **Total** | **40** | **43** | +275 PASS |
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | CV verify alert mapping: crypto errors + verify-returned-false → `decrypt_error` per RFC 5246 §7.2.2. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | New `HITLS_PORT_MTLS_12=4450` + 7th s-server instance + `scripts_mtls_12=()` loop + cleanup/artifact additions. |
+| `tests/tlsfuzzer/args/test-certificate-request.txt` | Added | `-C 49199` cipher pin. |
+| `tests/tlsfuzzer/args/test-certificate-verify.txt` | Added | `-C 49199` cipher pin. |
+| `tests/tlsfuzzer/args/test-certificate-verify-malformed.txt` | Added | `-C 49199` cipher pin. |
+| `tests/tlsfuzzer/xfail-mtls-12/test-certificate-request.txt` | Added | 1-entry XFAIL list (CR sigalgs). |
+| `tests/tlsfuzzer/xfail-mtls-12/test-certificate-verify.txt` | Added | docs-only. |
+| `tests/tlsfuzzer/xfail-mtls-12/test-certificate-verify-malformed.txt` | Added | 1-entry XFAIL list (pad CertificateVerify). |
+| `DEV_LOG.md` | Modified | This entry. |
+| `PROMPT_LOG.md` | Modified | T108 prompt + result entry. |
+| `CLAUDE.md` | Modified | Phase ranges T1-T108. |
+
+### Build Status (Post T108)
+
+- `cargo test --workspace --all-features --release`: 4175 PASS / 0 FAIL / 43 ignored.
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all -- --check`: clean.
+- Curated CI sweep: 40 → **43 scripts**.
 
 
 
