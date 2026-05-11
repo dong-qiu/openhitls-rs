@@ -1213,9 +1213,18 @@ macro_rules! tls13_server_do_handshake_body {
                 // RFC 8446 §D.4: server sends fake CCS after HRR
                 send_fake_ccs_body!($mode, $self);
 
-                // Phase T104 — Step 1b: same buffer-and-drain for
-                // the retried ClientHello (CH2) after HRR.
+                // Phase T104/T106 — Step 1b: buffer-and-drain for the
+                // retried ClientHello (CH2) after HRR. If CH1 offered
+                // the `early_data` extension, RFC 8446 §4.2.10 says
+                // the server SHOULD ignore (drop) up to
+                // `max_early_data_size` of fake early-data records
+                // between CH1 and CH2 — they're plaintext records of
+                // any content type the client mistakenly sent thinking
+                // we accepted 0-RTT. We tolerate up to 16 such drops
+                // (the realistic ceiling for fake-early-data garbage).
+                let early_data_skip = hs.client_offered_early_data;
                 let mut ch2_buf: Vec<u8> = Vec::new();
+                let mut ch2_skip_remaining: u32 = if early_data_skip { 16 } else { 0 };
                 let ch2_msg_bytes: Vec<u8> = loop {
                     if ch2_buf.len() >= 4 {
                         let body_len = ((ch2_buf[1] as usize) << 16)
@@ -1228,6 +1237,13 @@ macro_rules! tls13_server_do_handshake_body {
                     }
                     let (ct2, plaintext) = maybe_await!($mode, $self.read_record())?;
                     if ct2 != ContentType::Handshake {
+                        if ch2_skip_remaining > 0 {
+                            // RFC 8446 §4.2.10 — rejected 0-RTT: drop
+                            // the fake early-data record silently and
+                            // continue waiting for CH2.
+                            ch2_skip_remaining -= 1;
+                            continue;
+                        }
                         return Err(TlsError::HandshakeFailed(format!(
                             "expected Handshake after HRR, got {ct2:?} \
                              (alert: unexpected_message)"
@@ -1454,6 +1470,18 @@ macro_rules! tls13_server_do_handshake_body {
         // contain the bytes if the client packed Finished into the
         // Cert+CV record (RFC 8446 §5.1 allows this; tlsfuzzer's
         // padded-Finished tests rely on the fragmentation direction).
+        //
+        // Phase T106 — RFC 8446 §4.2.10 rejected-0-RTT tolerance:
+        // when CH1 offered the `early_data` extension and we did
+        // NOT accept (e.g. invalid PSK or `max_early_data_size = 0`),
+        // the client may have already sent some fake early-data
+        // records before learning we rejected. Silently drop AEAD-
+        // decrypt failures and non-Handshake records up to a
+        // bounded count, then expect the real Finished. The cap
+        // mirrors a typical `max_early_data_size` envelope at the
+        // record granularity.
+        let early_data_skip_fin = hs.client_offered_early_data && !actions.early_data_accepted;
+        let mut fin_skip_remaining: u32 = if early_data_skip_fin { 16 } else { 0 };
         let fin_msg = loop {
             if hs_buffer.len() >= 4 {
                 let body_len = ((hs_buffer[1] as usize) << 16)
@@ -1464,8 +1492,38 @@ macro_rules! tls13_server_do_handshake_body {
                     break hs_buffer.drain(..total).collect::<Vec<u8>>();
                 }
             }
-            let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+            let read_result = maybe_await!($mode, $self.read_record());
+            let (ct, plaintext) = match read_result {
+                Ok(v) => v,
+                Err(TlsError::RecordError(ref msg))
+                    if fin_skip_remaining > 0
+                        && (msg.contains("MAC")
+                            || msg.contains("decrypt")
+                            || msg.contains("BadRecordMac")) =>
+                {
+                    // The AEAD-failed record's bytes are still in
+                    // `read_buf` because `open_record` errored
+                    // before the drain in `read_record_body_tls13!`.
+                    // Drain them manually so the next iteration
+                    // reads the NEXT record (RFC 8446 §4.2.10).
+                    if $self.read_buf.len() >= 5 {
+                        let body_len =
+                            u16::from_be_bytes([$self.read_buf[3], $self.read_buf[4]]) as usize;
+                        let total = 5 + body_len;
+                        if $self.read_buf.len() >= total {
+                            $self.read_buf.drain(..total);
+                        }
+                    }
+                    fin_skip_remaining -= 1;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             if ct != ContentType::Handshake {
+                if fin_skip_remaining > 0 {
+                    fin_skip_remaining -= 1;
+                    continue;
+                }
                 return Err(TlsError::HandshakeFailed(format!(
                     "expected Handshake for client Finished, got {ct:?} \
                      (alert: unexpected_message)"

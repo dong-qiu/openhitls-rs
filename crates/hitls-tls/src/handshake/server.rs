@@ -280,6 +280,16 @@ pub struct ServerHandshake {
     /// client Finished. Used by the do-handshake macro to know
     /// whether to read those messages.
     pub expecting_client_cert: bool,
+    /// Phase T106 — client's ClientHello carried the `early_data`
+    /// extension. Used by the do-handshake macro to enter "skip
+    /// rejected early data" mode in two places (per RFC 8446
+    /// §4.2.10): tolerating non-Handshake records between CH1 and
+    /// CH2 after HRR, and tolerating AEAD-decrypt failures between
+    /// server Finished and client Finished. The flag is set
+    /// regardless of whether we actually accept early data
+    /// (`early_data_accepted` covers the accept side; this flag
+    /// covers the reject-but-tolerate side).
+    pub client_offered_early_data: bool,
 }
 
 struct ServerFlightParams<'a> {
@@ -327,6 +337,7 @@ impl ServerHandshake {
             #[cfg(feature = "ech")]
             ech_accepted_on_initial: false,
             expecting_client_cert: false,
+            client_offered_early_data: false,
         }
     }
 
@@ -411,6 +422,16 @@ impl ServerHandshake {
         let body = get_body(msg_data)?;
         let ch = decode_client_hello(body)?;
         self.client_random = ch.random;
+
+        // Phase T106 — surface the offered-but-not-necessarily-accepted
+        // early_data state on the handshake EARLY (before HRR vs
+        // full-flight branching) so the do-handshake macro can enter
+        // "skip rejected early data" mode in both code paths
+        // (RFC 8446 §4.2.10).
+        self.client_offered_early_data = ch
+            .extensions
+            .iter()
+            .any(|e| e.extension_type == ExtensionType::EARLY_DATA);
 
         // --- Parse extensions ---
 
