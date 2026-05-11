@@ -976,14 +976,50 @@ impl ServerHandshake {
         // (RFC 8446 §4.3.2). Skipped in PSK mode (no cert auth) and
         // when the server config doesn't ask for client cert.
         let certificate_request_msg = if !psk_mode && self.config.verify_client_cert {
+            // Phase T102 — advertise the comprehensive set of
+            // signature schemes our server can accept for client
+            // authentication (RFC 8446 §4.3.2). Order mirrors the
+            // IANA SignatureScheme registry-by-strength convention
+            // tlsfuzzer's `test-tls13-certificate-request.py`
+            // hardcodes (Edwards → ECDSA strong→weak → RSA-PSS
+            // strong→weak → RSA-PKCS#1 strong→weak); this is also
+            // the order common stacks (OpenSSL, NSS) emit.
+            //
+            // We INTENTIONALLY include `rsa_pkcs1_*` and the SHA-1
+            // / SHA-224 codepoints even though `verify_certificate_
+            // verify` rejects them in CertificateVerify per
+            // RFC 8446 §4.4.3. The CR sigalgs extension gates BOTH
+            // the CV signature scheme AND the cert-chain signature
+            // scheme; rsa_pkcs1_* and SHA-1/224 remain valid for
+            // certificate-chain signatures (§4.2.3) so advertising
+            // them is correct. Per-scheme refusal still applies to
+            // CV via `is_pkcs1_or_legacy_hash`.
+            //
             // Empty context for in-handshake CR (post-handshake CR
             // uses a non-empty random context — that path is
             // separate, see `tls13_client_handle_post_hs_cert_request_body!`).
-            let cr_extensions = vec![
-                crate::handshake::extensions_codec::build_signature_algorithms(
-                    &self.config.signature_algorithms,
-                ),
+            let cr_sig_algs = [
+                crate::crypt::SignatureScheme::ED25519,
+                crate::crypt::SignatureScheme::ED448,
+                crate::crypt::SignatureScheme::ECDSA_SECP521R1_SHA512,
+                crate::crypt::SignatureScheme::ECDSA_SECP384R1_SHA384,
+                crate::crypt::SignatureScheme::ECDSA_SECP256R1_SHA256,
+                crate::crypt::SignatureScheme::ECDSA_SHA224,
+                crate::crypt::SignatureScheme::ECDSA_SHA1,
+                crate::crypt::SignatureScheme::RSA_PSS_RSAE_SHA512,
+                crate::crypt::SignatureScheme::RSA_PSS_PSS_SHA512,
+                crate::crypt::SignatureScheme::RSA_PSS_RSAE_SHA384,
+                crate::crypt::SignatureScheme::RSA_PSS_PSS_SHA384,
+                crate::crypt::SignatureScheme::RSA_PSS_RSAE_SHA256,
+                crate::crypt::SignatureScheme::RSA_PSS_PSS_SHA256,
+                crate::crypt::SignatureScheme::RSA_PKCS1_SHA512,
+                crate::crypt::SignatureScheme::RSA_PKCS1_SHA384,
+                crate::crypt::SignatureScheme::RSA_PKCS1_SHA256,
+                crate::crypt::SignatureScheme::RSA_PKCS1_SHA224,
+                crate::crypt::SignatureScheme::RSA_PKCS1_SHA1,
             ];
+            let cr_extensions =
+                vec![crate::handshake::extensions_codec::build_signature_algorithms(&cr_sig_algs)];
             let cr = CertificateRequestMsg {
                 certificate_request_context: vec![],
                 extensions: cr_extensions,

@@ -276,6 +276,16 @@ impl SignatureScheme {
     pub const SM2_SM3: Self = Self(0x0708);
     pub const DSA_SHA256: Self = Self(0x0402);
     pub const DSA_SHA384: Self = Self(0x0502);
+    // Phase T102 — legacy hash sigalgs. Named so the in-handshake
+    // CertificateRequest can advertise them in the comprehensive
+    // sigalgs list (tlsfuzzer pins this list verbatim). Per
+    // RFC 8446 §4.4.3 / §B.3.1.3 these schemes are refused at
+    // CertificateVerify time — `is_pkcs1_or_legacy_hash` in
+    // `handshake/verify.rs` enforces that separately.
+    pub const RSA_PKCS1_SHA1: Self = Self(0x0201);
+    pub const ECDSA_SHA1: Self = Self(0x0203);
+    pub const RSA_PKCS1_SHA224: Self = Self(0x0301);
+    pub const ECDSA_SHA224: Self = Self(0x0303);
 }
 
 /// TLS 1.2 / TLCP key exchange algorithm.

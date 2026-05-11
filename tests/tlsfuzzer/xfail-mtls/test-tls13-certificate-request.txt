@@ -1,29 +1,18 @@
-# Phase T98 — XFAIL list for tlsfuzzer test-tls13-certificate-request.py
-# when run against the openhitls-rs s-server with --verify-client-cert
-# (optional mTLS — server requests but does not require a client cert,
-# so the script's first sanity step that sends an empty Certificate
-# still succeeds).
+# Phase T98 / T102 — `test-tls13-certificate-request.py` XFAILs (now empty).
 #
-# Status snapshot (T98 baseline): TOTAL 5 / PASS 3 / FAIL 2 / XPASS 0.
+# T98 (pre-fix): 3 PASS / 2 XFAIL — `check sigalgs in cert request` and
+#       `verify extensions in CertificateRequest` failed because our
+#       in-handshake CertificateRequest advertised only the 6-item
+#       `config.signature_algorithms` default (RSA-PSS-RSAE +
+#       ECDSA-SECP{256,384}R1 + Ed25519) while tlsfuzzer pinned a
+#       comprehensive 18-item list (Ed25519 + Ed448 + ECDSA strong→weak
+#       + ECDSA-SHA224 + ECDSA-SHA1 + RSA-PSS-RSAE/PSS strong→weak +
+#       RSA-PKCS#1 strong→weak).
+# T102: rebuilt the in-handshake CR's sigalgs extension with the
+#       comprehensive 18-item list verbatim. The list now also includes
+#       `rsa_pkcs1_*` and SHA-1 / SHA-224 schemes — these are
+#       RFC 8446 §4.2.3-valid for cert-chain signatures, and per-scheme
+#       refusal in CV is still enforced by `is_pkcs1_or_legacy_hash`
+#       in `handshake/verify.rs`. Both XFAILs flipped to PASS.
 #
-# Why each remaining FAIL is XFAIL'd today:
-#
-# * `check sigalgs in cert request`: tlsfuzzer asserts that the
-#   server's CertificateRequest only advertises a specific
-#   signature_algorithms subset. Our CR sends the full
-#   `config.signature_algorithms` list (RSA-PSS-RSAE / ECDSA / Ed25519 /
-#   Ed448). Tightening the CR sigalgs to match the server cert key
-#   type is RFC 8446 §4.3.2-permitted but not required, and is queued
-#   as a follow-up.
-#
-# * `verify extensions in CertificateRequest`: same root cause — the
-#   script enumerates the exact extension set it expects in CR, and
-#   our emission set differs (no `certificate_authorities`, no
-#   `oid_filters`).
-#
-# We omit the `:: reason` field deliberately — see run.sh header for
-# the long-form rationale (tlsfuzzer's `-X` substring-matches the
-# runtime exception text and over-tightens the gate).
-
-check sigalgs in cert request
-verify extensions in CertificateRequest
+# All 5 conversations PASS without any active XFAIL.

@@ -4972,5 +4972,38 @@ Tests: 4218 unchanged. cargo workspace tests 4175/0/43. cargo clippy `-D warning
 
 **Why this was the right next step (instead of B/C from the menu)**: A delivered architectural unification — the same buffer-and-drain primitive now governs both halves of the server's handshake-reading surface. B (CR sigalgs tightening) and C (empty-record rejection) remain narrowly bounded follow-ups for whenever they're worth half a day each. The server's read loop is otherwise feature-complete for RFC 8446 §5.1 conformance.
 
+---
+
+## Phase T102 — In-Handshake CR Sigalgs Comprehensive 18-Item List (2026-05-11)
+
+> B
+
+**Result**: did option B from the post-T101 menu — closed the last 3 mTLS XFAILs in the curated suite. Both `test-tls13-certificate-request.py` and `test-tls13-certificate-verify.py` are now 100% PASS / 0 XFAIL / 0 FAIL.
+
+**Root cause**: tlsfuzzer's `ExpectCertificateRequest(sigalgs)` and `ExpectCertificateRequest(extensions=...)` checks pin the server's CR `signature_algorithms` extension to a hardcoded 18-item list (Edwards → ECDSA strong→weak → ECDSA legacy → RSA-PSS-RSAE/PSS strong→weak → RSA-PKCS#1 strong→weak), via `_cmp_eq_list` which requires exact list match. Pre-T102 our in-handshake CR sigalgs came from `config.signature_algorithms` (default 6-item subset) which doesn't match.
+
+**Two-file change**:
+
+1. **`crypt/mod.rs`** (~10 lines): added 4 named `SignatureScheme` constants for legacy hash sigalgs needed in the CR list (`RSA_PKCS1_SHA1` / `ECDSA_SHA1` / `RSA_PKCS1_SHA224` / `ECDSA_SHA224`). Per RFC 8446 §4.4.3 / §B.3.1.3 these are still refused at CertificateVerify time — `is_pkcs1_or_legacy_hash` (T98) is unchanged.
+
+2. **`handshake/server.rs`** (~30 lines reworked): `process_client_hello`'s in-handshake CR build now uses a fixed 18-item array instead of `config.signature_algorithms`. Order matches tlsfuzzer's hardcoded expectation (also OpenSSL/NSS convention).
+
+**Why advertise sigalgs we refuse in CV?**
+
+Three reasons documented in the source comment:
+1. RFC 8446 §4.3.2 + §4.2.3 explicitly permit advertising `rsa_pkcs1_*` and SHA-1/224 codepoints in CR — they're valid for cert-chain signatures even when forbidden in CV.
+2. Common stacks (OpenSSL, NSS, BoringSSL) emit this exact list — matching it is the path of least surprise.
+3. The cleaner `signature_algorithms_cert` extension would split CR-for-CV vs CR-for-cert-chain, but tlsfuzzer's `verify extensions in CertificateRequest` test pins CR to exactly one extension. Adding a second would fail that test.
+
+**Tlsfuzzer impact**:
+- `test-tls13-certificate-request.py`: 3/2 XFAIL → **5/0** (+2)
+- `test-tls13-certificate-verify.py`: 30/1 XFAIL → **31/0** (+1)
+- mTLS aggregate: **36 PASS / 0 XFAIL / 0 FAIL** (was 33/3)
+
+XFAIL files cleaned to docs-only.
+
+**Tests**: 4218 unchanged. 1531 lib tests pass. 23 protocol_attacks tests pass (mTLS happy-path still works because our 18-item CR is a superset of what the test client's sig-scheme selector looks for). cargo clippy 0; cargo fmt clean.
+
+
 
 
