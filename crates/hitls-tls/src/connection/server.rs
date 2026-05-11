@@ -57,6 +57,12 @@ pub struct TlsServerConnection<S: Read + Write> {
     pub(super) key_update_recv_count: u32,
     /// Phase T95 (CVE-2020-25648 hardening) — see TlsClientConnection.
     pub(super) ccs_seen_in_handshake: bool,
+    /// Phase T101 — post-handshake handshake-message reassembly buffer
+    /// (RFC 8446 §5.1). Accumulates plaintext bytes from `Handshake`
+    /// content-type records so that messages spanning multiple records
+    /// — and multiple messages packed into a single record — are
+    /// processed correctly.
+    pub(super) post_hs_buffer: Vec<u8>,
 }
 
 impl<S: Read + Write> Drop for TlsServerConnection<S> {
@@ -102,6 +108,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             received_close_notify: false,
             key_update_recv_count: 0,
             ccs_seen_in_handshake: false,
+            post_hs_buffer: Vec::new(),
         }
     }
 

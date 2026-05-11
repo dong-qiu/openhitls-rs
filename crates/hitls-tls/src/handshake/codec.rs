@@ -449,12 +449,14 @@ pub fn encode_key_update(ku: &KeyUpdateMsg) -> Vec<u8> {
 
 /// Decode a KeyUpdate message from handshake body bytes.
 pub fn decode_key_update(data: &[u8]) -> Result<KeyUpdateMsg, TlsError> {
-    if data.is_empty() {
-        // Phase T100 — empty body is a decode-class error per
-        // RFC 8446 §6.2 (`decode_error`).
-        return Err(TlsError::HandshakeFailed(
-            "KeyUpdate: empty body — decode error".into(),
-        ));
+    // Phase T101 — RFC 8446 §4.6.3: KeyUpdate body is exactly
+    // `KeyUpdateRequest` (one byte). Any other length is a decode
+    // error.
+    if data.len() != 1 {
+        return Err(TlsError::HandshakeFailed(format!(
+            "KeyUpdate: body length must be exactly 1 byte, got {} (decode error)",
+            data.len()
+        )));
     }
     let request_update = match data[0] {
         0 => KeyUpdateRequest::UpdateNotRequested,

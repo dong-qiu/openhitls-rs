@@ -222,6 +222,9 @@ pub struct AsyncTlsServerConnection<S: AsyncRead + AsyncWrite + Unpin> {
     key_update_recv_count: u32,
     /// Phase T95 (CVE-2020-25648 hardening) — see TlsClientConnection.
     ccs_seen_in_handshake: bool,
+    /// Phase T101 — post-handshake handshake-message reassembly buffer
+    /// (RFC 8446 §5.1). See `TlsServerConnection::post_hs_buffer`.
+    post_hs_buffer: Vec<u8>,
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> Drop for AsyncTlsServerConnection<S> {
@@ -267,6 +270,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
             received_close_notify: false,
             key_update_recv_count: 0,
             ccs_seen_in_handshake: false,
+            post_hs_buffer: Vec::new(),
         }
     }
 

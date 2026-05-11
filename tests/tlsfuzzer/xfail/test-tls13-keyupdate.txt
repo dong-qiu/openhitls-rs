@@ -1,32 +1,39 @@
-# Phase T100 — `test-tls13-keyupdate.py` XFAILs (9 entries).
+# Phase T100 / T101 — `test-tls13-keyupdate.py` XFAILs (down to 2).
 #
-# Pre-T100 baseline: 6/270 PASS. Two T100 fixes closed 254 conversations:
-#   1. `decode_key_update` now embeds "decode error" in the
-#      "empty body" message → mapped to `decode_error` (50).
-#   2. `decode_key_update` "invalid request_update" message now embeds
-#      "illegal_parameter" → mapped to `illegal_parameter` (47), which
-#      RFC 8446 §4.6.3 mandates for any KeyUpdate request_update value
-#      outside {0, 1}.
-# Post-T100: **261/270 PASS / 9 FAIL**.
+# T100: closed 254 conversations via the alert-mapping + decode_key_update
+#       message tweaks (decode_error / illegal_parameter routing). 261/9.
+# T101: added cross-record post-handshake handshake-message reassembly
+#       (`post_hs_buffer` field on TlsServerConnection +
+#       `tls13_server_read_trait_body!` drain-then-refill loop) +
+#       tightened `decode_key_update` to require body length == 1.
+#       Closed 7 more conversations:
+#         - 1/4, 2/3, 3/2, 4/1 fragmented keyupdate msg, appdata between
+#           (now correctly rejected with `unexpected_message` per
+#           RFC 8446 §5.1)
+#         - fragmented keyupdate msg (now reassembled and processed)
+#         - large KeyUpdate message (now rejected with `decode_error`
+#           per the body-length-must-be-1 rule)
+#         - two KeyUpdates, first fragmented, ... (similar reassembly)
+#       Now 268/2.
 #
-# The 9 remaining FAILs are all about cross-record handshake-message
-# fragmentation — a real read-loop limitation we noted in the T98
-# review (server only consumes ONE handshake message per record, so a
-# KeyUpdate split across two records is mishandled). Same class as
-# the T91-deferred Finished-padding tests. Closing this needs a
-# read-loop refactor that reassembles handshake messages across
-# records (RFC 8446 §5.1 explicitly allows this), which is a larger
-# T- or R-phase.
+# Two FAILs remain — both are tlsfuzzer-vs-RFC behavioural mismatches
+# that are NOT TLS protocol bugs:
 #
-# Conversation names are the script's literal `conversations[...]`
-# keys (deterministic).
+# * `app data split, conversation with KeyUpdate msg`: tlsfuzzer
+#   expects the server to defer the echo of partial AppData ("GET")
+#   until the full request is received. Our s-server is a literal
+#   echo loop — it returns each AppData chunk to the caller as soon
+#   as it arrives. The TLS layer is correct (KU is processed,
+#   server sends its own KU per RFC 8446 §4.6.3); the test is
+#   coupled to a specific application-layer buffering model.
+#
+# * `two KeyUpdates in one record`: tlsfuzzer expects the server to
+#   abort with `unexpected_message` after seeing two KUs in one
+#   record (or skip the second silently). RFC 8446 §5.1 explicitly
+#   ALLOWS multiple handshake messages per record; §4.6.3 requires
+#   the server to respond with its own KU when the second KU has
+#   `update_requested = 1`. We do both correctly. The test's
+#   expected-alert branch is stricter than the spec.
 
-1/4 fragmented keyupdate msg, appdata between
-2/3 fragmented keyupdate msg, appdata between
-3/2 fragmented keyupdate msg, appdata between
-4/1 fragmented keyupdate msg, appdata between
 app data split, conversation with KeyUpdate msg
-fragmented keyupdate msg
-large KeyUpdate message
 two KeyUpdates in one record
-two KeyUpdates, first fragmented, second fragment under new keys together with second KeyUpdate

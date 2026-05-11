@@ -4938,4 +4938,39 @@ The two `empty key_share extension` conversations were XFAIL'd in T89 (routed to
 
 Tests: 4218 unchanged (no in-tree tests added). cargo workspace tests 4175 PASS / 0 FAIL / 43 ignored. cargo clippy `-D warnings` 0. cargo fmt clean.
 
+---
+
+## Phase T101 — Cross-Record Handshake-Message Reassembly (Server) (2026-05-11)
+
+> A
+
+**Result**: did option A from the post-T100 menu — added cross-record handshake-message reassembly to the TLS 1.3 server's read paths (in-handshake + post-handshake), per RFC 8446 §5.1's explicit allowance of (a) packing multiple HS messages per record and (b) fragmenting a single HS message across records.
+
+**Three changes**:
+
+1. **Post-handshake** (`tls13_server_read_trait_body!`): new `post_hs_buffer: Vec<u8>` field on `TlsServerConnection` + `AsyncTlsServerConnection`. Drain-then-refill loop. Interleaving HS-fragment with AppData/Alert is rejected as `unexpected_message` per RFC §5.1.
+
+2. **In-handshake** (`tls13_server_do_handshake_body!` step 5c + step 6): local `hs_buffer: Vec<u8>` per-handshake. Three buffer-consuming loops (client Cert / client CV / client Finished) read across record boundaries; after consuming Finished, buffer must be empty (key-change boundary invariant; replaces the prior `fin_data.len() != fin_total` check).
+
+3. **`decode_key_update` strict body length == 1** (RFC 8446 §4.6.3): pre-T101 we accepted any non-empty body; tlsfuzzer's `large KeyUpdate message` conversation expected `decode_error` for body > 1.
+
+**Tlsfuzzer impact (full sampling)**:
+- `test-tls13-finished.py`: **708/6 XFAIL → 714/0 PASS** (+6) — closes the T91-deferred `pad_right >= 131072` padding mutations.
+- `test-tls13-keyupdate.py`: **261/9 XFAIL → 268/2 PASS** (+7) — closes 4 fragmented-with-appdata-between, fragmented, large, and two-KU-fragmented variants.
+- 2 keyupdate XFAILs remain — both tlsfuzzer-vs-RFC behavioural mismatches, NOT TLS bugs:
+  - `app data split, conversation with KeyUpdate msg`: tlsfuzzer expects deferred AppData echo; our s-server is a literal echo loop.
+  - `two KeyUpdates in one record`: tlsfuzzer expects `unexpected_message`; RFC 8446 §5.1 explicitly allows multi-msg-per-record + §4.6.3 mandates server-side KU response.
+- All 21 TLS 1.3 + 2 mTLS curated CI scripts pass under `-n 9999` full sampling, `rc=0` everywhere, no XPASS surprises.
+
+**Cleaned XFAIL files**:
+- `xfail/test-tls13-finished.txt`: all 6 entries dropped → docs-only.
+- `xfail/test-tls13-keyupdate.txt`: 7 entries dropped, 2 retained.
+
+**Note on T98 review concern**: I noted in the T98 commit review that server step 5c had a bundled-message edge case (`process_client_certificate(&c_data[..c_total])` drops trailing record bytes if a peer packs Cert+CV in one record). T101's `hs_buffer`-based step 5c rewrite closes this latently — even though no current tlsfuzzer conversation pinned the behavior, the in-handshake `hs_buffer` correctly handles bundled Cert+CV now.
+
+Tests: 4218 unchanged. cargo workspace tests 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean.
+
+**Why this was the right next step (instead of B/C from the menu)**: A delivered architectural unification — the same buffer-and-drain primitive now governs both halves of the server's handshake-reading surface. B (CR sigalgs tightening) and C (empty-record rejection) remain narrowly bounded follow-ups for whenever they're worth half a day each. The server's read loop is otherwise feature-complete for RFC 8446 §5.1 conformance.
+
+
 

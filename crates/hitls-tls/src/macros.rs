@@ -1276,43 +1276,81 @@ macro_rules! tls13_server_do_handshake_body {
                 .activate_read_decryption(actions.suite, &actions.client_hs_keys)?;
         }
 
+        // Phase T101 — accumulate plaintext from `Handshake` content-type
+        // records into a single buffer, then carve out one complete
+        // handshake message at a time. RFC 8446 §5.1 explicitly allows
+        // (a) packing multiple handshake messages into one record and
+        // (b) fragmenting a single handshake message across multiple
+        // records — both must work even though our server-side flight
+        // is fixed-shape (Cert / CV / Finished). The drain loop is
+        // inlined per-step rather than pulled into a helper macro
+        // because closures can't compose with `maybe_await!` in our
+        // sync+async-shared macro body.
+        let mut hs_buffer: Vec<u8> = Vec::new();
+
         // Phase T97 — Step 5c: when mTLS is in-handshake, read the
         // client's Certificate and CertificateVerify before Finished.
         // The transcript includes them; client Finished's MAC is over
         // the resulting transcript hash.
         if hs.expecting_client_cert {
-            let (ct, c_data) = maybe_await!($mode, $self.read_record())?;
-            if ct != ContentType::Handshake {
-                return Err(TlsError::HandshakeFailed(format!(
-                    "expected Handshake for client Certificate, got {ct:?}"
-                )));
-            }
-            let (hs_type, _, c_total) = parse_handshake_header(&c_data)?;
+            // Drain or refill until a complete client Certificate is
+            // available (≥4 bytes header → header.body_len bytes body).
+            let c_msg = loop {
+                if hs_buffer.len() >= 4 {
+                    let body_len = ((hs_buffer[1] as usize) << 16)
+                        | ((hs_buffer[2] as usize) << 8)
+                        | (hs_buffer[3] as usize);
+                    let total = 4 + body_len;
+                    if hs_buffer.len() >= total {
+                        break hs_buffer.drain(..total).collect::<Vec<u8>>();
+                    }
+                }
+                let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+                if ct != ContentType::Handshake {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "expected Handshake for client Certificate, got {ct:?}"
+                    )));
+                }
+                hs_buffer.extend_from_slice(&plaintext);
+            };
+            let (hs_type, _, _) = parse_handshake_header(&c_msg)?;
             if hs_type != HandshakeType::Certificate {
                 return Err(TlsError::HandshakeFailed(format!(
                     "expected client Certificate, got {hs_type:?}"
                 )));
             }
-            hs.process_client_certificate(&c_data[..c_total])?;
+            hs.process_client_certificate(&c_msg)?;
 
             // CertificateVerify is required when the client sent at
             // least one certificate; if the client sent an empty
             // Certificate (no chain), it skips CV and we proceed
             // straight to Finished.
             if hs.client_sent_certificates() {
-                let (ct, cv_data) = maybe_await!($mode, $self.read_record())?;
-                if ct != ContentType::Handshake {
-                    return Err(TlsError::HandshakeFailed(format!(
-                        "expected Handshake for client CertificateVerify, got {ct:?}"
-                    )));
-                }
-                let (hs_type, _, cv_total) = parse_handshake_header(&cv_data)?;
+                let cv_msg = loop {
+                    if hs_buffer.len() >= 4 {
+                        let body_len = ((hs_buffer[1] as usize) << 16)
+                            | ((hs_buffer[2] as usize) << 8)
+                            | (hs_buffer[3] as usize);
+                        let total = 4 + body_len;
+                        if hs_buffer.len() >= total {
+                            break hs_buffer.drain(..total).collect::<Vec<u8>>();
+                        }
+                    }
+                    let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+                    if ct != ContentType::Handshake {
+                        return Err(TlsError::HandshakeFailed(format!(
+                            "expected Handshake for client CertificateVerify, got {ct:?}"
+                        )));
+                    }
+                    hs_buffer.extend_from_slice(&plaintext);
+                };
+                let (hs_type, _, _) = parse_handshake_header(&cv_msg)?;
                 if hs_type != HandshakeType::CertificateVerify {
                     return Err(TlsError::HandshakeFailed(format!(
                         "expected client CertificateVerify, got {hs_type:?}"
                     )));
                 }
-                hs.process_client_certificate_verify(&cv_data[..cv_total])?;
+                hs.process_client_certificate_verify(&cv_msg)?;
             } else if $self.config.require_client_cert {
                 // Client sent an empty Certificate but server REQUIRES
                 // a cert → reject (RFC 8446 §4.4.2).
@@ -1324,29 +1362,44 @@ macro_rules! tls13_server_do_handshake_body {
             }
         }
 
-        // Step 6: Read client Finished
-        let (ct, fin_data) = maybe_await!($mode, $self.read_record())?;
-        if ct != ContentType::Handshake {
-            return Err(TlsError::HandshakeFailed(format!(
-                "expected Handshake for client Finished, got {ct:?}"
-            )));
-        }
-
-        let (hs_type, _, fin_total) = parse_handshake_header(&fin_data)?;
+        // Step 6: Read client Finished — same buffer, may already
+        // contain the bytes if the client packed Finished into the
+        // Cert+CV record (RFC 8446 §5.1 allows this; tlsfuzzer's
+        // padded-Finished tests rely on the fragmentation direction).
+        let fin_msg = loop {
+            if hs_buffer.len() >= 4 {
+                let body_len = ((hs_buffer[1] as usize) << 16)
+                    | ((hs_buffer[2] as usize) << 8)
+                    | (hs_buffer[3] as usize);
+                let total = 4 + body_len;
+                if hs_buffer.len() >= total {
+                    break hs_buffer.drain(..total).collect::<Vec<u8>>();
+                }
+            }
+            let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+            if ct != ContentType::Handshake {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected Handshake for client Finished, got {ct:?}"
+                )));
+            }
+            hs_buffer.extend_from_slice(&plaintext);
+        };
+        let (hs_type, _, _) = parse_handshake_header(&fin_msg)?;
         if hs_type != HandshakeType::Finished {
             return Err(TlsError::HandshakeFailed(format!(
                 "expected Finished, got {hs_type:?}"
             )));
         }
         // RFC 8446 §5.1: handshake messages MUST NOT span a key change.
-        // The Finished record must not contain trailing bytes that would
-        // belong to the next (application) key epoch.
-        if fin_data.len() != fin_total {
+        // After consuming Finished the buffer must be empty; any
+        // leftover bytes would belong to the next (application) read
+        // key epoch.
+        if !hs_buffer.is_empty() {
             return Err(TlsError::RecordError(
                 "TLS 1.3 read key change not on record boundary".into(),
             ));
         }
-        let fin_msg = &fin_data[..fin_total];
+        let fin_msg = fin_msg.as_slice();
 
         // Step 7: Verify client Finished
         let fin_actions = hs.process_client_finished(fin_msg)?;
@@ -1430,10 +1483,65 @@ macro_rules! tls13_server_read_trait_body {
         }
 
         loop {
+            // Phase T101 — drain any complete handshake messages that
+            // are already buffered. This handles two RFC 8446 §5.1
+            // cases that pre-T101 silently dropped post-handshake data:
+            //   * multiple handshake messages packed into a single
+            //     record's plaintext (e.g. two back-to-back KeyUpdates),
+            //   * a single handshake message split across multiple
+            //     records (e.g. fragmented KeyUpdate).
+            while $self.post_hs_buffer.len() >= 4 {
+                let body_len = ((($self.post_hs_buffer[1] as usize) << 16)
+                    | (($self.post_hs_buffer[2] as usize) << 8)
+                    | ($self.post_hs_buffer[3] as usize));
+                let total = 4 + body_len;
+                if $self.post_hs_buffer.len() < total {
+                    break; // wait for more bytes
+                }
+                let msg_bytes: Vec<u8> = $self.post_hs_buffer.drain(..total).collect();
+                let (hs_type, body, _) =
+                    try_alert!($mode, $self, parse_handshake_header(&msg_bytes));
+                match hs_type {
+                    HandshakeType::KeyUpdate => {
+                        let body_owned = body.to_vec();
+                        try_alert!(
+                            $mode,
+                            $self,
+                            maybe_await!($mode, $self.handle_key_update(&body_owned))
+                        );
+                    }
+                    _ => {
+                        return_alert_err!(
+                            $mode,
+                            $self,
+                            TlsError::HandshakeFailed(format!(
+                                "unexpected post-handshake message: {hs_type:?}"
+                            ))
+                        );
+                    }
+                }
+            }
+
             let (ct, plaintext) =
                 try_alert!($mode, $self, maybe_await!($mode, $self.read_record()));
             match ct {
                 ContentType::ApplicationData => {
+                    // RFC 8446 §5.1 — handshake messages MUST NOT be
+                    // interleaved with other record types. If we are
+                    // still mid-message in the post-handshake buffer
+                    // when AppData arrives, that's a protocol violation.
+                    if !$self.post_hs_buffer.is_empty() {
+                        return_alert_err!(
+                            $mode,
+                            $self,
+                            TlsError::HandshakeFailed(
+                                "unexpected_message: AppData interleaved with \
+                                 fragmented post-handshake handshake message \
+                                 (RFC 8446 §5.1)"
+                                    .into(),
+                            )
+                        );
+                    }
                     $self.key_update_recv_count = 0;
                     let n = std::cmp::min($buf.len(), plaintext.len());
                     $buf[..n].copy_from_slice(&plaintext[..n]);
@@ -1443,30 +1551,22 @@ macro_rules! tls13_server_read_trait_body {
                     return Ok(n);
                 }
                 ContentType::Handshake => {
-                    let (hs_type, body, _) =
-                        try_alert!($mode, $self, parse_handshake_header(&plaintext));
-                    match hs_type {
-                        HandshakeType::KeyUpdate => {
-                            let body_owned = body.to_vec();
-                            try_alert!(
-                                $mode,
-                                $self,
-                                maybe_await!($mode, $self.handle_key_update(&body_owned))
-                            );
-                            continue;
-                        }
-                        _ => {
-                            return_alert_err!(
-                                $mode,
-                                $self,
-                                TlsError::HandshakeFailed(format!(
-                                    "unexpected post-handshake message: {hs_type:?}"
-                                ))
-                            );
-                        }
-                    }
+                    $self.post_hs_buffer.extend_from_slice(&plaintext);
+                    // Loop back to drain the buffer.
                 }
                 ContentType::Alert => {
+                    if !$self.post_hs_buffer.is_empty() {
+                        return_alert_err!(
+                            $mode,
+                            $self,
+                            TlsError::HandshakeFailed(
+                                "unexpected_message: Alert interleaved with \
+                                 fragmented post-handshake handshake message \
+                                 (RFC 8446 §5.1)"
+                                    .into(),
+                            )
+                        );
+                    }
                     if plaintext.len() >= 2 && plaintext[1] == 0 {
                         $self.received_close_notify = true;
                     }
