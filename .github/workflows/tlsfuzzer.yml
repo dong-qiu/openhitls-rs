@@ -238,6 +238,15 @@ jobs:
             # handshake fragmentation + extension-tolerance gaps).
             test-tls13-signature-algorithms.py
             test-tls13-keyupdate.py
+            # T103 additions (2): empty-Alert rejection at the
+            # record layer (RFC 8446 §5.1) + zero-length AppData
+            # transparent pass-through. empty-alert is fully clean
+            # (10/10 PASS); zero-length-data has 6 stable XFAILs
+            # split across CH-fragmentation + s_server echo-loop
+            # behaviour (see xfail/test-tls13-zero-length-data.txt
+            # for the per-entry rationale).
+            test-tls13-empty-alert.py
+            test-tls13-zero-length-data.py
           )
           # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
           # on $HITLS_PORT_12. The cipher arg `-C 49199` lives in

@@ -145,6 +145,31 @@ macro_rules! read_record_body_tls13 {
             if ct == ContentType::Handshake {
                 $self.ccs_seen_in_handshake = false;
             }
+            // Phase T103 — RFC 8446 §5.1: "Implementations MUST NOT
+            // send zero-length fragments of Handshake or Alert types,
+            // even if those fragments contain padding." We refuse
+            // empty Alert records here (tlsfuzzer's
+            // `test-tls13-empty-alert.py` pins this).
+            //
+            // Zero-length ApplicationData is explicitly *allowed* by
+            // §5.1 ("MAY be sent ... potentially useful as a traffic
+            // analysis countermeasure") — the call-site decides
+            // whether AppData is acceptable in the current state
+            // (e.g. step 5c/6 of the server handshake reject ANY
+            // AppData with `unexpected_message`).
+            //
+            // Empty Handshake fragments are also forbidden by §5.1
+            // but legacy peers occasionally emit them during back-
+            // to-back fragmentation; we fall through to the existing
+            // handshake reassembly path so the upstream parser can
+            // decide.
+            if plaintext.is_empty() && ct == ContentType::Alert {
+                break Err(TlsError::HandshakeFailed(
+                    "zero-length Alert record fragment is forbidden by \
+                     RFC 8446 §5.1 — alert: unexpected_message"
+                        .into(),
+                ));
+            }
             break Ok((ct, plaintext));
         }
     }};
@@ -1307,8 +1332,12 @@ macro_rules! tls13_server_do_handshake_body {
                 }
                 let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
                 if ct != ContentType::Handshake {
+                    // RFC 8446 §5.1 — non-Handshake record interleaved
+                    // with a fragmented handshake message. Alert:
+                    // unexpected_message.
                     return Err(TlsError::HandshakeFailed(format!(
-                        "expected Handshake for client Certificate, got {ct:?}"
+                        "expected Handshake for client Certificate, got {ct:?} \
+                         (alert: unexpected_message)"
                     )));
                 }
                 hs_buffer.extend_from_slice(&plaintext);
@@ -1339,7 +1368,8 @@ macro_rules! tls13_server_do_handshake_body {
                     let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
                     if ct != ContentType::Handshake {
                         return Err(TlsError::HandshakeFailed(format!(
-                            "expected Handshake for client CertificateVerify, got {ct:?}"
+                            "expected Handshake for client CertificateVerify, \
+                             got {ct:?} (alert: unexpected_message)"
                         )));
                     }
                     hs_buffer.extend_from_slice(&plaintext);
@@ -1379,7 +1409,8 @@ macro_rules! tls13_server_do_handshake_body {
             let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
             if ct != ContentType::Handshake {
                 return Err(TlsError::HandshakeFailed(format!(
-                    "expected Handshake for client Finished, got {ct:?}"
+                    "expected Handshake for client Finished, got {ct:?} \
+                     (alert: unexpected_message)"
                 )));
             }
             hs_buffer.extend_from_slice(&plaintext);
@@ -1543,6 +1574,15 @@ macro_rules! tls13_server_read_trait_body {
                         );
                     }
                     $self.key_update_recv_count = 0;
+                    // Phase T103 — RFC 8446 §5.1 explicitly permits
+                    // zero-length AppData fragments ("MAY be sent ...
+                    // potentially useful as a traffic analysis
+                    // countermeasure"). Surface them as "no data, keep
+                    // reading" rather than as `read() == 0` (which the
+                    // caller would interpret as EOF and close).
+                    if plaintext.is_empty() {
+                        continue;
+                    }
                     let n = std::cmp::min($buf.len(), plaintext.len());
                     $buf[..n].copy_from_slice(&plaintext[..n]);
                     if plaintext.len() > n {

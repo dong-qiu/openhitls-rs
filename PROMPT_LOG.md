@@ -5004,6 +5004,37 @@ XFAIL files cleaned to docs-only.
 
 **Tests**: 4218 unchanged. 1531 lib tests pass. 23 protocol_attacks tests pass (mTLS happy-path still works because our 18-item CR is a superset of what the test client's sig-scheme selector looks for). cargo clippy 0; cargo fmt clean.
 
+---
+
+## Phase T103 — Empty-Record Rejection + Zero-Length AppData Pass-Through (2026-05-11)
+
+> C
+
+**Result**: did option C from the post-T102 menu. Two narrowly-scoped record-layer changes close empty-Alert / zero-length-data tlsfuzzer scripts:
+
+1. **Empty Alert refusal** (`read_record_body_tls13!`): RFC 8446 §5.1 forbids zero-length Handshake/Alert fragments. Pre-T103 our post-handshake read silently treated empty Alerts as close_notify. Now refused at the record layer with `unexpected_message`-mappable error.
+
+2. **Zero-length AppData transparent pass-through** (`tls13_server_read_trait_body!`): RFC 8446 §5.1 *permits* zero-length AppData ("MAY be sent ... traffic analysis countermeasure"). Pre-T103 we returned `Ok(0)` to the caller, who'd interpret it as EOF and close. Now we `continue` the read loop transparently. Aligns with what every mainstream stack does.
+
+3. **Bonus: in-handshake hs_buffer error string tighten**: the three "expected Handshake for client X, got {ct:?}" messages in step 5c+6 now embed `(alert: unexpected_message)` so the alert mapper routes them per RFC 8446 §5.1.
+
+**Tlsfuzzer impact**:
+- `test-tls13-empty-alert.py`: 2/8 FAIL → **10/0 PASS** (+8) — fully clean.
+- `test-tls13-zero-length-data.py`: 2/9 FAIL → **5/6 XFAIL / 0 FAIL** (+3 PASS, 6 stable XFAIL).
+
+Both scripts added to CI (now 23 TLS 1.3 curated scripts).
+
+**Why 6 XFAILs remain in zero-length-data**:
+- 3 "interleaved in handshake": tlsfuzzer fragments the unencrypted ClientHello across two records and slips an empty AppData record between fragments. Server's Step 1 reads CH with a single `read_record()` + `parse_handshake_header` (no buffer-and-drain). Closing this needs the same hs_buffer pattern at Step 1 + the §5.1 interleave check. Real refactor; deferred.
+- 3 "with padding" / plain: tlsfuzzer expects the server to echo back ONE assembled 18-byte AppData; our s_server is a literal echo loop that returns each chunk's worth of plaintext immediately. TLS layer is correct (zero-length records flow through transparently); test is coupled to a specific application-layer buffering model. Same class as the T101 keyupdate XFAIL `app data split`. Won't fix from s_server side.
+
+**Why the AppData change matters even with the s_server XFAILs**: mainstream apps layer-on top of TLS read() expecting non-zero = "more data" and Ok(0) = "connection closed". Pre-T103 we'd surface zero-length AppData as Ok(0) which ANY app layer (not just our s_server) would interpret as EOF. T103 makes us match what every mainstream TLS stack does — receive zero-length records transparently. The s_server XFAILs are cosmetic test-design issues; the underlying TLS-layer fix is real.
+
+**Tests**: 4218 unchanged (no in-tree tests added). cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean. 21 (now 23) curated CI scripts all rc=0, no XPASS.
+
+**Iteration note**: my first attempt also rejected empty AppData universally → broke the 3 "after handshake" zero-length tests that expect AppData to flow. Refined to only reject empty Alert (always forbidden) and let empty AppData pass through (RFC §5.1 explicitly permits). Then tightened the in-handshake hs_buffer error strings to map "expected Handshake, got AppData" to `unexpected_message` instead of falling through to `handshake_failure`.
+
+
 
 
 

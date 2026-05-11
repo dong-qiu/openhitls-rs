@@ -1,0 +1,8 @@
+# Phase T103 — `test-tls13-empty-alert.py` XFAILs (empty).
+#
+# Pre-T103 baseline: 2/10 PASS — empty Alert records were silently
+# treated as close_notify by `tls13_server_read_trait_body!`. T103
+# added a check in `read_record_body_tls13!` that refuses zero-length
+# Alert record fragments with `unexpected_message` per RFC 8446 §5.1
+# ("Implementations MUST NOT send zero-length fragments of Handshake
+# or Alert types"). All 10 conversations now PASS.
