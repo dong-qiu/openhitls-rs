@@ -1,13 +1,17 @@
-# Phase T108 — `test-certificate-request.py` (TLS 1.2) XFAILs (1 entry).
+# Phase T108 → T118 — `test-certificate-request.py` (TLS 1.2) XFAILs.
 #
 # Post-T108 baseline: 4 PASS / 1 XFAIL / 0 FAIL.
+# Post-T118 baseline: 5 PASS / 0 XFAIL / 0 FAIL.
 #
-# `check sigalgs in cert request`: tlsfuzzer pins the server's CR
-# `signature_algorithms` extension to a hardcoded 18-item list. Our
-# TLS 1.2 CR sends `config.signature_algorithms` (default 6-item
-# subset). Same root cause as the TLS 1.3 mTLS XFAIL closed by T102
-# — but the TLS 1.2 CR construction site is separate and would need
-# the same comprehensive-list treatment. Deferred (low priority,
-# real-world clients don't depend on a specific server CR list).
-
-check sigalgs in cert request
+# T118 closed the remaining XFAIL (`check sigalgs in cert request`)
+# by mirroring T102's TLS 1.3 fix: the TLS 1.2 server CR now
+# advertises the comprehensive 18-item signature_algorithms list
+# instead of `config.signature_algorithms` (the client-side offer
+# list). The fix also extended `verify_cv12_signature` to actually
+# verify the broader scheme set (RSA-PSS SHA-384/512, ECDSA P-521,
+# Ed25519, RSA-PKCS1 SHA-1/512) plus scheme-specific transcript
+# hashing — pre-T118 the verifier reused the PRF hash which only
+# worked when the CV scheme's hash happened to match the cipher
+# suite's PRF.
+#
+# No remaining XFAILs.

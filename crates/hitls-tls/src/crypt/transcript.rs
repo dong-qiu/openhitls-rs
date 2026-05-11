@@ -111,6 +111,14 @@ impl TranscriptHash {
         self.hash_len
     }
 
+    /// Raw buffered handshake message bytes. Used by the TLS 1.2
+    /// CertificateVerify path to re-hash the transcript with the
+    /// CV-scheme's hash algorithm (which may differ from the PRF
+    /// hash this transcript is configured with) — RFC 5246 §7.4.8.
+    pub fn message_bytes(&self) -> &[u8] {
+        &self.message_buffer
+    }
+
     /// Replace the transcript with a synthetic `message_hash` construct (RFC 8446 §4.4.1).
     ///
     /// Used when processing HelloRetryRequest: the transcript up to this point

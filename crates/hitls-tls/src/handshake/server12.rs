@@ -881,9 +881,51 @@ impl Tls12ServerHandshake {
         // Build CertificateRequest (if mTLS is enabled and KX requires certificates)
         let certificate_request =
             if self.config.verify_client_cert && params.kx_alg.requires_certificate() {
+                // Phase T118 — advertise the comprehensive 18-item set of
+                // signature schemes our TLS 1.2 server can accept for
+                // client authentication (RFC 5246 §7.4.4 — `supported_
+                // signature_algorithms`). Mirrors the T102 TLS 1.3 CR
+                // list exactly: Edwards → ECDSA strong→weak → RSA-PSS
+                // strong→weak → RSA-PKCS#1 strong→weak. This matches
+                // tlsfuzzer's `test-certificate-request.py` 18-item
+                // `sigalgs` expectation (closes the last mTLS-12 XFAIL
+                // `check sigalgs in cert request`).
+                //
+                // We INTENTIONALLY include `rsa_pkcs1_*` (legacy) and
+                // SHA-1 / SHA-224 codepoints even though CV-side
+                // refusal still applies — the CR sigalgs extension
+                // legitimately gates both the CV signature scheme AND
+                // the cert-chain signature scheme; PKCS#1 / SHA-1 /
+                // SHA-224 remain valid for cert-chain signatures.
+                //
+                // We do NOT use `self.config.signature_algorithms` here
+                // because that field is the CLIENT-side offer-list
+                // (what we'll sign with as a client); the SERVER's CR
+                // list is what we'll ACCEPT from the client and is
+                // intentionally broader.
+                let cr_sig_algs = vec![
+                    SignatureScheme::ED25519,
+                    SignatureScheme::ED448,
+                    SignatureScheme::ECDSA_SECP521R1_SHA512,
+                    SignatureScheme::ECDSA_SECP384R1_SHA384,
+                    SignatureScheme::ECDSA_SECP256R1_SHA256,
+                    SignatureScheme::ECDSA_SHA224,
+                    SignatureScheme::ECDSA_SHA1,
+                    SignatureScheme::RSA_PSS_RSAE_SHA512,
+                    SignatureScheme::RSA_PSS_PSS_SHA512,
+                    SignatureScheme::RSA_PSS_RSAE_SHA384,
+                    SignatureScheme::RSA_PSS_PSS_SHA384,
+                    SignatureScheme::RSA_PSS_RSAE_SHA256,
+                    SignatureScheme::RSA_PSS_PSS_SHA256,
+                    SignatureScheme::RSA_PKCS1_SHA512,
+                    SignatureScheme::RSA_PKCS1_SHA384,
+                    SignatureScheme::RSA_PKCS1_SHA256,
+                    SignatureScheme::RSA_PKCS1_SHA224,
+                    SignatureScheme::RSA_PKCS1_SHA1,
+                ];
                 let cr = CertificateRequest12 {
                     cert_types: vec![1, 64], // rsa_sign, ecdsa_sign
-                    sig_hash_algs: self.config.signature_algorithms.clone(),
+                    sig_hash_algs: cr_sig_algs,
                     ca_names: vec![],
                 };
                 let cr_msg = encode_certificate_request12(&cr);
@@ -1449,9 +1491,6 @@ impl Tls12ServerHandshake {
             ));
         }
 
-        // Compute transcript hash BEFORE adding CertificateVerify to transcript
-        let transcript_hash = self.transcript.current_hash()?;
-
         let body = get_body(msg_data)?;
         let cv = decode_certificate_verify12(body)?;
 
@@ -1460,6 +1499,17 @@ impl Tls12ServerHandshake {
                 "no client certificate for CertificateVerify".into(),
             ));
         }
+
+        // Phase T118 — compute the CV transcript digest using the
+        // scheme-specific hash (RFC 5246 §7.4.8: the CV hash MUST be
+        // the one named in `SignatureAndHashAlgorithm`, not the PRF
+        // hash). Pre-T118 we always used `transcript.current_hash()`
+        // which is the PRF hash — only worked when CV hash == PRF hash.
+        // Now that the CR list advertises 18 schemes (T118), the
+        // client may pick rsa_pss_rsae_sha512 etc. and we MUST hash
+        // with SHA-512 even when the PRF is SHA-256.
+        let transcript_msgs = self.transcript.message_bytes();
+        let transcript_hash = cv_transcript_digest(cv.sig_algorithm, transcript_msgs)?;
 
         verify_cv12_signature(
             &self.client_certs[0],
@@ -1862,10 +1912,87 @@ pub(crate) fn verify_dsa_from_spki(
     kp.verify(digest, signature).map_err(TlsError::CryptoError)
 }
 
+/// Phase T118 — hash the TLS 1.2 transcript bytes using the hash
+/// algorithm dictated by the CV `SignatureAndHashAlgorithm` (RFC 5246
+/// §7.4.8). This is required because the CV hash is independent of
+/// the PRF hash: e.g. a `rsa_pss_rsae_sha512` CV needs a SHA-512
+/// digest even when the cipher suite's PRF is SHA-256.
+///
+/// For ED25519 / ED448 — Edwards signatures bind the raw message, not
+/// a digest, so we return the message bytes unchanged and let the
+/// caller pass them through to the EdDSA verifier.
+fn cv_transcript_digest(
+    scheme: SignatureScheme,
+    transcript_msgs: &[u8],
+) -> Result<Vec<u8>, TlsError> {
+    use hitls_crypto::sha1::Sha1;
+    use hitls_crypto::sha2::{Sha256, Sha384, Sha512};
+
+    // Edwards: no pre-hash, pass raw transcript bytes through.
+    if scheme == SignatureScheme::ED25519 || scheme == SignatureScheme::ED448 {
+        return Ok(transcript_msgs.to_vec());
+    }
+
+    // Decode hash byte from the SignatureAndHashAlgorithm wire form
+    // (high byte = hash, low byte = signature). RFC 5246 §7.4.1.4.1
+    // HashAlgorithm enum:
+    //   0 = none, 1 = md5, 2 = sha1, 3 = sha224, 4 = sha256,
+    //   5 = sha384, 6 = sha512, 8 = Intrinsic (RFC 8422).
+    //
+    // The PSS schemes 0x0804..=0x0806 encode the hash via the high
+    // byte too (0x08 = "Intrinsic"-style namespace; the LOW byte
+    // 0x04/0x05/0x06 maps to sha256/sha384/sha512).
+    let hash_byte = ((scheme.0 >> 8) & 0xff) as u8;
+    let sig_byte = (scheme.0 & 0xff) as u8;
+
+    match (hash_byte, sig_byte) {
+        (0x08, 0x04) => {
+            let mut h = Sha256::new();
+            h.update(transcript_msgs).map_err(TlsError::CryptoError)?;
+            Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+        }
+        (0x08, 0x05) => {
+            let mut h = Sha384::new();
+            h.update(transcript_msgs).map_err(TlsError::CryptoError)?;
+            Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+        }
+        (0x08, 0x06) => {
+            let mut h = Sha512::new();
+            h.update(transcript_msgs).map_err(TlsError::CryptoError)?;
+            Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+        }
+        (2, _) => {
+            let mut h = Sha1::new();
+            h.update(transcript_msgs).map_err(TlsError::CryptoError)?;
+            Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+        }
+        (4, _) => {
+            let mut h = Sha256::new();
+            h.update(transcript_msgs).map_err(TlsError::CryptoError)?;
+            Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+        }
+        (5, _) => {
+            let mut h = Sha384::new();
+            h.update(transcript_msgs).map_err(TlsError::CryptoError)?;
+            Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+        }
+        (6, _) => {
+            let mut h = Sha512::new();
+            h.update(transcript_msgs).map_err(TlsError::CryptoError)?;
+            Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+        }
+        _ => Err(TlsError::HandshakeFailed(format!(
+            "unsupported CV hash algorithm in scheme 0x{:04x}",
+            scheme.0
+        ))),
+    }
+}
+
 /// Verify a TLS 1.2 CertificateVerify signature.
 ///
-/// Unlike SKE verification, `transcript_hash` is already a hash digest —
-/// it is NOT re-hashed before verification.
+/// `transcript_hash` is already a hash digest computed by
+/// `cv_transcript_digest` using the hash algorithm dictated by the
+/// CV scheme — it is NOT re-hashed before verification.
 fn verify_cv12_signature(
     cert_der: &[u8],
     scheme: SignatureScheme,
@@ -1894,22 +2021,44 @@ fn verify_cv12_signature(
     };
 
     let ok = match scheme {
-        SignatureScheme::RSA_PKCS1_SHA256 | SignatureScheme::RSA_PKCS1_SHA384 => verify_cv_rsa(
+        // Phase T118 — RSA-PKCS#1v1.5 across SHA-1/256/384/512.
+        // verify(Pkcs1v15Sign, digest, sig) auto-detects the inner
+        // DigestInfo hash OID against `digest`'s length, so a single
+        // arm covers all four lengths.
+        SignatureScheme::RSA_PKCS1_SHA1
+        | SignatureScheme::RSA_PKCS1_SHA256
+        | SignatureScheme::RSA_PKCS1_SHA384
+        | SignatureScheme::RSA_PKCS1_SHA512 => verify_cv_rsa(
             spki,
             hitls_crypto::rsa::RsaPadding::Pkcs1v15Sign,
             transcript_hash,
             signature,
         )
         .map_err(map_verify_err)?,
-        SignatureScheme::RSA_PSS_RSAE_SHA256 | SignatureScheme::RSA_PSS_RSAE_SHA384 => {
-            verify_cv_rsa(
-                spki,
-                hitls_crypto::rsa::RsaPadding::Pss,
-                transcript_hash,
-                signature,
-            )
-            .map_err(map_verify_err)?
-        }
+        // Phase T118 — RSA-PSS SHA-256/384/512. Use the explicit-hash
+        // `verify_pss(digest, sig, alg)` entry point (the legacy
+        // `verify(Pss, ...)` API is SHA-256 only).
+        SignatureScheme::RSA_PSS_RSAE_SHA256 => verify_cv_rsa_pss(
+            spki,
+            transcript_hash,
+            signature,
+            hitls_crypto::rsa::RsaHashAlg::Sha256,
+        )
+        .map_err(map_verify_err)?,
+        SignatureScheme::RSA_PSS_RSAE_SHA384 => verify_cv_rsa_pss(
+            spki,
+            transcript_hash,
+            signature,
+            hitls_crypto::rsa::RsaHashAlg::Sha384,
+        )
+        .map_err(map_verify_err)?,
+        SignatureScheme::RSA_PSS_RSAE_SHA512 => verify_cv_rsa_pss(
+            spki,
+            transcript_hash,
+            signature,
+            hitls_crypto::rsa::RsaHashAlg::Sha512,
+        )
+        .map_err(map_verify_err)?,
         SignatureScheme::ECDSA_SECP256R1_SHA256 => {
             let verifier = hitls_crypto::ecdsa::EcdsaKeyPair::from_public_key(
                 hitls_types::EccCurveId::NistP256,
@@ -1934,8 +2083,36 @@ fn verify_cv12_signature(
                 .map_err(TlsError::CryptoError)
                 .map_err(map_verify_err)?
         }
+        // Phase T118 — ECDSA P-521 with SHA-512. Same call shape as
+        // P-256 / P-384; the SPKI parser figures out the curve from
+        // the AlgorithmIdentifier OID.
+        SignatureScheme::ECDSA_SECP521R1_SHA512 => {
+            let verifier = hitls_crypto::ecdsa::EcdsaKeyPair::from_public_key(
+                hitls_types::EccCurveId::NistP521,
+                &spki.public_key,
+            )
+            .map_err(TlsError::CryptoError)
+            .map_err(map_verify_err)?;
+            verifier
+                .verify(transcript_hash, signature)
+                .map_err(TlsError::CryptoError)
+                .map_err(map_verify_err)?
+        }
         SignatureScheme::DSA_SHA256 | SignatureScheme::DSA_SHA384 => {
             verify_dsa_from_spki(spki, transcript_hash, signature).map_err(map_verify_err)?
+        }
+        // Phase T118 — Ed25519: signature is over the raw message,
+        // not a digest. `cv_transcript_digest` returns the buffer
+        // unchanged for Edwards schemes, so `transcript_hash` here
+        // is actually the raw transcript bytes.
+        SignatureScheme::ED25519 => {
+            let verifier = hitls_crypto::ed25519::Ed25519KeyPair::from_public_key(&spki.public_key)
+                .map_err(TlsError::CryptoError)
+                .map_err(map_verify_err)?;
+            verifier
+                .verify(transcript_hash, signature)
+                .map_err(TlsError::CryptoError)
+                .map_err(map_verify_err)?
         }
         _ => {
             return Err(TlsError::HandshakeFailed(format!(
@@ -1982,6 +2159,34 @@ fn verify_cv_rsa(
     let rsa_pub = hitls_crypto::rsa::RsaPublicKey::new(n, e).map_err(TlsError::CryptoError)?;
     rsa_pub
         .verify(padding, digest, signature)
+        .map_err(TlsError::CryptoError)
+}
+
+/// Phase T118 — RSA-PSS verify with an explicit hash algorithm.
+/// The legacy `RsaPublicKey::verify(Pss, ...)` API is SHA-256 only;
+/// for SHA-384/SHA-512 PSS variants the caller must use
+/// `verify_pss(digest, sig, alg)` instead.
+fn verify_cv_rsa_pss(
+    spki: &hitls_pki::x509::SubjectPublicKeyInfo,
+    digest: &[u8],
+    signature: &[u8],
+    alg: hitls_crypto::rsa::RsaHashAlg,
+) -> Result<bool, TlsError> {
+    use hitls_utils::asn1::Decoder;
+    let mut key_dec = Decoder::new(&spki.public_key);
+    let mut seq = key_dec
+        .read_sequence()
+        .map_err(|e| TlsError::HandshakeFailed(format!("RSA key parse: {e}")))?;
+    let n = seq
+        .read_integer()
+        .map_err(|e| TlsError::HandshakeFailed(format!("RSA modulus parse: {e}")))?;
+    let e = seq
+        .read_integer()
+        .map_err(|e| TlsError::HandshakeFailed(format!("RSA exponent parse: {e}")))?;
+
+    let rsa_pub = hitls_crypto::rsa::RsaPublicKey::new(n, e).map_err(TlsError::CryptoError)?;
+    rsa_pub
+        .verify_pss(digest, signature, alg)
         .map_err(TlsError::CryptoError)
 }
 
@@ -2183,6 +2388,50 @@ mod tests {
         let (ht, _, _) = parse_handshake_header(&cr_data).unwrap();
         assert_eq!(ht, HandshakeType::CertificateRequest);
         assert_eq!(hs.state(), Tls12ServerState::WaitClientCertificate);
+    }
+
+    #[test]
+    fn test_server_cert_request_advertises_comprehensive_sigalgs() {
+        // Phase T118 — RFC 5246 §7.4.4 + RFC 8446 §4.2.3 / §4.3.2:
+        // the TLS 1.2 server CertificateRequest's `supported_
+        // signature_algorithms` MUST list every scheme we will
+        // accept from the client (CV + cert-chain signatures).
+        // tlsfuzzer's `test-certificate-request.py` (conversation
+        // `check sigalgs in cert request`) hardcodes the canonical
+        // 18-item list — assert exact match.
+        let mut config = make_server_config();
+        config.verify_client_cert = true;
+
+        let mut hs = Tls12ServerHandshake::new(config);
+        let ch_msg = build_test_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]);
+        let result = hs.process_client_hello(&ch_msg).unwrap();
+
+        let cr_data = result.certificate_request.expect("CR present");
+        let (_ht, cr_body, _total) = parse_handshake_header(&cr_data).unwrap();
+        let cr = crate::handshake::codec12::decode_certificate_request12(cr_body).unwrap();
+
+        let expected = vec![
+            SignatureScheme::ED25519,
+            SignatureScheme::ED448,
+            SignatureScheme::ECDSA_SECP521R1_SHA512,
+            SignatureScheme::ECDSA_SECP384R1_SHA384,
+            SignatureScheme::ECDSA_SECP256R1_SHA256,
+            SignatureScheme::ECDSA_SHA224,
+            SignatureScheme::ECDSA_SHA1,
+            SignatureScheme::RSA_PSS_RSAE_SHA512,
+            SignatureScheme::RSA_PSS_PSS_SHA512,
+            SignatureScheme::RSA_PSS_RSAE_SHA384,
+            SignatureScheme::RSA_PSS_PSS_SHA384,
+            SignatureScheme::RSA_PSS_RSAE_SHA256,
+            SignatureScheme::RSA_PSS_PSS_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA224,
+            SignatureScheme::RSA_PKCS1_SHA1,
+        ];
+        assert_eq!(cr.sig_hash_algs, expected);
+        assert_eq!(cr.cert_types, vec![1, 64]);
     }
 
     #[test]

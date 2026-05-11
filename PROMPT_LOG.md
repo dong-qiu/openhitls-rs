@@ -5255,6 +5255,30 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: `cargo test -p hitls-tls --all-features --lib codec12` 40/0 (was 38/0; +2). `cargo test -p hitls-tls --all-features --lib alert` 18/0. `cargo clippy --workspace --all-features --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean. Workspace total: 4175 → 4177.
 
+---
+
+## Phase T118 — TLS 1.2 CR Sigalgs Comprehensive List + Scheme-Specific CV Hashing (2026-05-12)
+
+> 先完成A
+
+**Result**: closed the last XFAIL in the curated mTLS-12 set (`test-certificate-request.py` → `check sigalgs in cert request`). The textbook fix was the obvious half: mirror T102's TLS 1.3 CR comprehensive 18-item sigalgs list for the TLS 1.2 server CR. The non-obvious half was that wiring the broader list immediately broke a previously-passing test (`with certificate`) — because `verify_cv12_signature` was quietly assuming `CV hash == PRF hash`, an RFC-incorrect shortcut that only worked by accident with the pre-T118 narrow CR list.
+
+**Two-part fix**:
+
+1. **CR list**: hardcoded 18-item `cr_sig_algs` in `build_server_flight` (Edwards → ECDSA strong→weak → RSA-PSS strong→weak → RSA-PKCS#1 strong→weak). `config.signature_algorithms` keeps its CLIENT-side offer-list role.
+
+2. **CV scheme-aware hashing**: new `pub fn message_bytes` on `TranscriptHash` exposes the raw buffer. New `cv_transcript_digest(scheme, msgs)` hashes the transcript with the scheme's actual hash (RFC 5246 §7.4.8 — independent of PRF). Edwards schemes bypass pre-hashing (RFC 8032 signs the message). `verify_cv12_signature` match arms widened: RSA-PKCS#1 SHA-1/512, RSA-PSS-RSAE SHA-384/512 (via new `verify_cv_rsa_pss` using explicit `verify_pss(digest, sig, alg)` — legacy `verify(Pss, …)` was SHA-256 only), ECDSA P-521, Ed25519.
+
+**Tlsfuzzer impact**:
+- `test-certificate-request.py`: 4/1 XFAIL → **5/0 PASS / 0 XFAIL / 0 FAIL** (+1 closed).
+- mTLS-12 curated set (4 scripts) aggregate: **1279 PASS / 0 XFAIL / 0 FAIL** — completely clean.
+
+**Numbering note**: T111–T116 are reserved by `docs/c-test-migration-plan.md` for the C-test migration Phase A–F work, so this entry lands as **T118**, sequential with T117. Keeps DEV_LOG monotonic.
+
+**Why it's a real bug, not just XFAIL bookkeeping**: pre-T118, an OpenSSL `s_client -sigalgs RSA+SHA512` against our TLS 1.2 server would have failed with `unsupported CV scheme: 0x0601` (rsa_pkcs1_sha512) because we computed the wrong-length digest. T118 unblocks the whole class of legitimate handshakes where the peer picks a CV hash distinct from the cipher suite's PRF hash. The XFAIL closure was the symptom; the missing scheme-aware hashing was the disease.
+
+**Tests**: `cargo test -p hitls-tls --all-features --lib server12::tests` 32/0 (was 31/0; +1). `cargo clippy --workspace --all-features --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean. Workspace total: 4177 → 4178.
+
 
 
 

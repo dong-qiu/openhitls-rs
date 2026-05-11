@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T117 (110 phases, T64 skipped + T111–T116 reserved for the `docs/c-test-migration-plan.md` Phase A–F work)
+- Testing: T1–T118 (111 phases, T64 skipped + T111–T116 reserved for the `docs/c-test-migration-plan.md` Phase A–F work)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -316,6 +316,7 @@ Category summary:
 | 304 | T109 | Test | 0-RTT acceptance verification (already implemented in I21, verified by existing `test_tls13_early_data_max_size_negotiation` integration test) + deferred `signature_algorithms` extension presence check (RFC 8446 §4.2.3 — required for cert auth, optional for PSK-only) | 2026-05-11 |
 | 305 | T110 | Test | TLS 1.2 handshake-codec strict body-length checks (`decode_certificate12` + `decode_certificate_verify12`) per RFC 5246 §7.4.2 / §7.4.8 + empty-cert-entry rejection — closes 28 conversations across `test-certificate-malformed.py` (973/29 → 1000/2 XFAIL) and `test-certificate-verify-malformed.py` (266/1 → 267/0); cert-malformed.py joins CI | 2026-05-11 |
 | 306 | T117 | Test | TLS 1.2 Certificate12 DER-shape validation in `decode_certificate12` (entry first byte must be 0x30, inner DER length must equal outer wrapper length) + `bad_certificate` substring routing in `tls_error_to_alert` per RFC 5246 §7.2.2 — closes the last 2 XFAILs in `test-certificate-malformed.py` (1000/2 → 1002/0); curated mTLS-1.2 set now has 0 XFAIL on this script (T111–T116 reserved for C-test migration plan) | 2026-05-12 |
+| 307 | T118 | Test | TLS 1.2 CertificateRequest comprehensive 18-item sigalgs list (mirrors T102 TLS 1.3 fix) + `verify_cv12_signature` scheme-aware transcript hashing (RFC 5246 §7.4.8 — CV hash MUST be the scheme's hash, not the PRF hash) + verifier coverage expanded (RSA-PSS-RSAE SHA-384/512, ECDSA P-521, Ed25519, RSA-PKCS#1 SHA-1/512) — closes the last XFAIL in `test-certificate-request.py` (4/1 → 5/0); curated mTLS-12 subset (4 scripts) now 1279/0/0 — completely clean | 2026-05-12 |
 
 ---
 
@@ -17449,6 +17450,97 @@ After dropping both names from `xfail-mtls-12/test-certificate-malformed.txt`, t
 - `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
 - `cargo fmt --all -- --check`: clean.
 - Curated CI sweep: **44 scripts**, **0 FAIL / 0 XPASS** post-XFAIL-drop.
+
+---
+
+## Phase T118 — TLS 1.2 CR Sigalgs Comprehensive List + Scheme-Specific CV Hashing (2026-05-12)
+
+### Summary
+
+T108 left 1 stable XFAIL in `test-certificate-request.py` (TLS 1.2 mTLS): `check sigalgs in cert request`. tlsfuzzer's `ExpectCertificateRequest(sigalgs=…)` pins an exact-order 18-item signature_algorithms list; we were advertising `config.signature_algorithms` (default 6 entries) which is the CLIENT-side offer list — wrong purpose, wrong size.
+
+Mirroring T102's TLS 1.3 fix in `server.rs` was the obvious half of T118 — but it surfaced a hidden, deeper bug: `verify_cv12_signature` only supported 8 schemes (RSA-PKCS1 SHA-256/384, RSA-PSS-RSAE SHA-256/384, ECDSA P-256/P-384 SHA-256/384, DSA SHA-256/384), and the digest passed in was always `transcript.current_hash()` — the **PRF hash**, not the **CV scheme's hash**. Pre-T118 this only worked when CV-hash happened to match PRF-hash. Once we advertised more schemes, tlsfuzzer's client picked the first compatible one (rsa_pss_rsae_sha512 for the RSA client cert) and our verifier:
+
+1. Computed a SHA-256 digest (PRF) instead of SHA-512 (CV scheme).
+2. Then bailed out via the catch-all `_ => unsupported CV scheme 0x0806` arm.
+
+T118 fixes both:
+
+* **CR emission**: replace `self.config.signature_algorithms.clone()` with the same 18-item comprehensive list T102 uses for TLS 1.3 (Edwards → ECDSA strong→weak → RSA-PSS-RSAE+PSS strong→weak → RSA-PKCS#1 strong→weak). The list is hardcoded; `config.signature_algorithms` retains its CLIENT-side offer-list role.
+* **Scheme-aware transcript digest**: new private fn `cv_transcript_digest(scheme, msgs)` parses the SignatureAndHashAlgorithm wire bytes (high = hash, low = sig) and hashes the raw transcript with the right algorithm. Edwards schemes (0x0807/0x0808) bypass pre-hashing entirely (RFC 8032 signs the message itself). New helper requires raw-buffer access: added `pub fn message_bytes(&self) -> &[u8]` to `TranscriptHash`.
+* **Verifier coverage**: extended `verify_cv12_signature` match arms — RSA-PKCS#1 SHA-1/256/384/512 (auto-detects DigestInfo); RSA-PSS-RSAE SHA-256/384/512 via new `verify_cv_rsa_pss` (uses explicit-hash `RsaPublicKey::verify_pss`, the legacy `verify(Pss, …)` is SHA-256 only); ECDSA P-256/P-384/P-521; Ed25519 (calls `Ed25519KeyPair::from_public_key(&spki.public_key).verify(msg, sig)`).
+
+Not yet implemented (advertised in CR but verifier returns `unsupported CV scheme` if a client actually picks one): rsa_pss_pss_* (needs PSS-OID cert key parse), ED448, ECDSA SHA-224/SHA-1, RSA-PKCS1 SHA-224. None of these are exercised by the curated tlsfuzzer suite — real-world clients pick from the prefix of the CR list.
+
+### Code changes
+
+**`crates/hitls-tls/src/handshake/server12.rs`** (~150 lines net):
+
+- `build_server_flight` CR construction (~50 lines): inline the 18-item `cr_sig_algs` vec; replace `sig_hash_algs: self.config.signature_algorithms.clone()` with `sig_hash_algs: cr_sig_algs`. Big block comment explaining why we don't reuse `config.signature_algorithms` (client-side offer list, intentionally narrower).
+- `process_client_certificate_verify` (~5 lines diff): replace `let transcript_hash = self.transcript.current_hash()?` with `let transcript_msgs = self.transcript.message_bytes(); let transcript_hash = cv_transcript_digest(cv.sig_algorithm, transcript_msgs)?;`.
+- New private fn `cv_transcript_digest(scheme, transcript_msgs) -> Result<Vec<u8>, TlsError>` (~60 lines) — Edwards pass-through + RFC 5246 §7.4.1.4.1 HashAlgorithm dispatch (SHA-1 / SHA-256 / SHA-384 / SHA-512 from both classic codepoints and the 0x08xx PSS namespace).
+- `verify_cv12_signature` match arms widened: RSA_PKCS1_SHA1 + RSA_PKCS1_SHA512 added (auto-detect arm), RSA_PSS_RSAE_SHA{256,384,512} now use the new `verify_cv_rsa_pss` helper with explicit hash, ECDSA_SECP521R1_SHA512 + ED25519 arms added.
+- New private fn `verify_cv_rsa_pss(spki, digest, sig, alg)` (~22 lines) — wraps `RsaPublicKey::verify_pss(digest, sig, alg)`.
+- 1 new unit test `test_server_cert_request_advertises_comprehensive_sigalgs` (~45 lines): drives the server through CH/SH/CR and asserts `cr.sig_hash_algs == expected 18-item list` AND `cr.cert_types == [1, 64]`.
+
+**`crates/hitls-tls/src/crypt/transcript.rs`** (~10 lines):
+
+- New `pub fn message_bytes(&self) -> &[u8]` returning `&self.message_buffer`, with doc comment pointing at RFC 5246 §7.4.8 and the CV-hash-differs-from-PRF-hash rationale.
+
+**`tests/tlsfuzzer/xfail-mtls-12/test-certificate-request.txt`**:
+
+- Drop the `check sigalgs in cert request` XFAIL entry (now docs-only describing the T108 → T118 progression).
+
+### Tlsfuzzer impact
+
+| Script | Pre-T118 | Post-T118 |
+|--------|---------|-----------|
+| `test-certificate-request.py` | 4 PASS / 1 XFAIL / 0 FAIL | **5 PASS / 0 XFAIL / 0 FAIL** |
+| `test-certificate-verify.py` | 5/0/0 | unchanged 5/0/0 |
+| `test-certificate-verify-malformed.py` | 267/0/0 | unchanged 267/0/0 |
+| `test-certificate-malformed.py` | 1002/0/0 (post-T117) | unchanged 1002/0/0 |
+
+**mTLS-12 aggregate: 1279 PASS / 0 XFAIL / 0 FAIL across 4 scripts** — the curated TLS 1.2 mTLS surface is now completely clean. Curated CI suite size unchanged at 44 scripts.
+
+### Verification
+
+Local probe via `tests/tlsfuzzer/run.sh test-certificate-request.py`:
+
+```
+[run.sh] script=test-certificate-request.py xfail_entries=0
+TOTAL: 5  PASS: 5  XFAIL: 0  FAIL: 0  XPASS: 0
+```
+
+Sweep across the rest of the mTLS-12 set confirms no regression on the previously-passing scripts.
+
+### Tests (post-T118)
+
+- `cargo test -p hitls-tls --all-features --lib server12::tests`: 32 PASS (was 31; +1 from T118).
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all`: applied (then `--check` clean).
+- Workspace test count: 4177 → **4178** (+1 server12 unit test).
+
+### Why this matters
+
+The TLS 1.2 CV verifier's pre-T118 design quietly assumed `CV hash == PRF hash`. That assumption is RFC-incorrect: the CV `SignatureAndHashAlgorithm` field exists precisely BECAUSE the two are independent (RFC 5246 §7.4.8). Real-world peers (OpenSSL `s_client -sigalgs RSA+SHA512`, etc.) can — and do — pick a CV scheme whose hash differs from the cipher suite's PRF hash. Pre-T118 we would have silently failed those connections with the same `unsupported CV scheme` alert. T118 unblocks that whole class of legitimate handshakes alongside the tlsfuzzer XFAIL closure.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | CR comprehensive 18-item sigalgs list; new `cv_transcript_digest` + `verify_cv_rsa_pss` helpers; verifier match-arm widening; new unit test. |
+| `crates/hitls-tls/src/crypt/transcript.rs` | Modified | New `pub fn message_bytes` for CV-scheme-aware re-hashing. |
+| `tests/tlsfuzzer/xfail-mtls-12/test-certificate-request.txt` | Modified | XFAIL entry dropped (now docs-only). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index update. |
+| `PROMPT_LOG.md` | Modified | T118 prompt + result entry. |
+| `CLAUDE.md` | Modified | Status line `T1–T117` → `T1–T118` + test count `4220` → `4221`. |
+| `README.md` | Modified | Test count `4220` → `4221`. |
+
+### Build Status (Post T118)
+
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all -- --check`: clean.
+- Curated CI sweep: 44 scripts; **mTLS-12 subset 1279/0/0 — completely clean**.
 
 
 
