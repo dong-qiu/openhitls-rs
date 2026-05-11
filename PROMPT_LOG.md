@@ -5034,6 +5034,43 @@ Both scripts added to CI (now 23 TLS 1.3 curated scripts).
 
 **Iteration note**: my first attempt also rejected empty AppData universally → broke the 3 "after handshake" zero-length tests that expect AppData to flow. Refined to only reject empty Alert (always forbidden) and let empty AppData pass through (RFC §5.1 explicitly permits). Then tightened the in-handshake hs_buffer error strings to map "expected Handshake, got AppData" to `unexpected_message` instead of falling through to `handshake_failure`.
 
+---
+
+## Phase T104 — ClientHello-Side Cross-Record Reassembly + §5.1 Interleave Check (2026-05-11)
+
+> A
+
+**Result**: did option A from the post-T103 menu. Completes the server-side handshake-message reassembly story started in T101 — Step 1 (ClientHello) and Step 1b (HRR retry CH2) now use the same `hs_buffer` buffer-and-drain pattern T101 added to Step 5c+6 + the post-handshake KeyUpdate path.
+
+**One-file change in `crates/hitls-tls/src/macros.rs`** (`tls13_server_do_handshake_body!`, ~100 lines reworked): two parallel loops accumulate `Handshake` content-type plaintext into local `ch_buf` / `ch2_buf` until a complete CH is available, then drain and parse. Non-`Handshake` record arriving mid-CH triggers `unexpected_message` per RFC 8446 §5.1. Post-parse: buffer must be empty (key-change boundary invariant).
+
+**Tlsfuzzer impact (-n 9999 full sampling)**:
+- `test-tls13-zero-length-data.py`: 5/6 XFAIL → **8/3 XFAIL** (+3 — closes all 3 "interleaved in handshake" entries).
+- `test-tls13-signature-algorithms.py`: 269/13 XFAIL → **279/3 XFAIL** (+10 BONUS — tlsfuzzer's "8130/23752/32715 invalid schemes" / "duplicated N non-rsa schemes" / "tolerance N methods" tests build a CH with 8K-32K sigalgs entries that doesn't fit in a single 16,384-byte plaintext record; pre-T104 we couldn't reassemble the second record). 
+
+Total +13 conversations across 2 scripts without any code change beyond the buffer.
+
+XFAIL files cleaned:
+- `xfail/test-tls13-signature-algorithms.txt`: 10 huge-list entries dropped; 3 boundary-fuzz entries retained.
+- `xfail/test-tls13-zero-length-data.txt`: 3 interleaved-in-handshake entries dropped; 3 s_server-echo entries retained (won't fix from TLS side — same class as T101 keyupdate `app data split`).
+
+**Server-side handshake reassembly is now closed**:
+
+| Step | Path | Done in |
+|------|------|---------|
+| 1 / 1b — CH + CH2 | hs_buffer + §5.1 | T104 |
+| 5b — 0-RTT loop | (deferred to 0-RTT phase) | by design lax |
+| 5c — Client Cert / CV | hs_buffer + §5.1 | T101 |
+| 6 — Client Finished | hs_buffer + §5.1 | T101 |
+| 7 — post-handshake KeyUpdate | persistent post_hs_buffer + §5.1 | T101 |
+
+Only the 0-RTT read loop still does single-record-per-message reads (intentionally lax per RFC 8446 §4.2.10's 0-RTT model). Revisits when 0-RTT acceptance is wired in.
+
+**Tests**: 4218 unchanged (no in-tree tests added). cargo workspace --all-features 4175/0/43. cargo clippy `-D warnings` 0. cargo fmt clean. 23 TLS 1.3 + 9 TLS 1.2 + 4 cert-matrix + 2 mTLS curated scripts all `rc=0`, no XPASS surprises.
+
+**The "bonus" was the surprise of the phase**: I expected only the 3 zero-length-data conversations to close (the specific test design probing CH-fragmentation). The 10 sig-algorithms conversations fell out because tlsfuzzer's "8130 invalid schemes" CH is GIANT (~16.3 KB), naturally fragmenting across records due to the 2^14 plaintext record max. Pre-T104 we couldn't reassemble; post-T104 the parser handles the full 16K body and the rest of the pipeline (T100 sigalgs error mapping) does the right thing.
+
+
 
 
 

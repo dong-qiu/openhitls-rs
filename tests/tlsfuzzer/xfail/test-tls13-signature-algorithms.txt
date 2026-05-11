@@ -1,51 +1,25 @@
-# Phase T100 — `test-tls13-signature-algorithms.py` XFAILs (13 entries).
+# Phase T100 / T104 — `test-tls13-signature-algorithms.py` XFAILs (3 entries).
 #
-# Pre-T100 baseline against our s-server: 16/282 PASS — most failures
-# were tlsfuzzer expecting `decode_error` for malformed `signature_algorithms`
-# extension lengths, while our `parse_signature_algorithms_ch` returned
-# "too short" / "invalid length" messages that the alert mapper routed
-# to `handshake_failure`. T100 widened the mapper to recognise those
-# substrings → `decode_error`, closing 92 conversations in one pass:
-# **post-T100: 269/282 PASS / 13 FAIL**.
+# T100: alert-mapper widening closed 253 of 266 FAILs (16/282 → 269/282).
+#       Remaining 13 entries were either fragmented-CH-tolerance gaps
+#       or empty/boundary fuzz cases.
+# T104: CH-side buffer-and-drain (server Step 1) automatically closed
+#       all 10 "huge unknown sig-alg list" XFAILs — tlsfuzzer fragments
+#       the giant 65K+ byte sigalgs extension across multiple records,
+#       and pre-T104 we couldn't reassemble. Post-T104: 279/282 PASS.
 #
-# The 13 remaining FAILs are real protocol-conformance gaps that need
-# targeted code work, not alert-mapping fixes:
-#
-# * `N invalid schemes` / `tolerance N methods` (N ∈ {8130, 23752, 32715}):
-#   tlsfuzzer sends a HUGE list of unknown signature schemes (8K-32K
-#   entries) and expects the server to gracefully handle it (drop
-#   unknowns, find a common scheme via the legitimate one buried in
-#   the noise). We currently bail out earlier in the pipeline,
-#   probably hitting a per-extension size cap or extension list
-#   parsing limit. Real parser-tolerance work, queued.
-#
-# * `duplicated N non-rsa schemes`: same root cause + duplicate-scheme
-#   tolerance.
+# 3 remaining FAILs are boundary fuzz cases not addressed by CH
+# reassembly:
 #
 # * `empty list of signature methods`: `signature_algorithms` extension
-#   present with body of just the 2-byte zero length. We reject as
-#   "too short", tlsfuzzer expects... actually unclear. Likely related
-#   to whether we treat an empty list as "no acceptable schemes" vs
-#   "malformed".
+#   present with body of just the 2-byte zero length. We reject with
+#   "too short", tlsfuzzer expects different alert behaviour.
 #
 # * `fuzz length inside extension to {0,2}`: boundary cases of the
 #   inner length field, distinct from the larger fuzz cases that
-#   T100's mapper change closed. These reach a different code path.
-#
-# Conversation names below match the script's `conversations[...]`
-# dict keys exactly (deterministic; the script does not randomise
-# these).
+#   T100's mapper change closed. These reach a different code path
+#   and need a per-extension sentinel-length carve-out.
 
-8130 invalid schemes
-23752 invalid schemes
-32715 invalid schemes
-duplicated 8130 non-rsa schemes
-duplicated 23752 non-rsa schemes
-duplicated 32715 non-rsa schemes
 empty list of signature methods
 fuzz length inside extension to 0
 fuzz length inside extension to 2
-tolerance 8130 methods
-tolerance 23752 methods
-tolerance 32715 methods
-tolerance 32715 methods with sig_alg_cert

@@ -1149,21 +1149,56 @@ macro_rules! tls13_server_do_handshake_body {
     ($mode:ident, $self:ident) => {{
         let mut hs = ServerHandshake::new($self.config.clone());
 
-        // Step 1: Read ClientHello
-        let (ct, ch_data) = maybe_await!($mode, $self.read_record())?;
-        if ct != ContentType::Handshake {
-            return Err(TlsError::HandshakeFailed(format!(
-                "expected Handshake, got {ct:?}"
-            )));
-        }
-
-        let (hs_type, _, ch_total) = parse_handshake_header(&ch_data)?;
+        // Phase T104 — Step 1: read ClientHello via buffer-and-drain
+        // (RFC 8446 §5.1: a single handshake message MAY span multiple
+        // records; non-Handshake records MUST NOT be interleaved with
+        // it). Pre-T104 we read one record and bailed if the CH didn't
+        // fit; tlsfuzzer's `test-tls13-zero-length-data.py` fragments
+        // the CH into 2 records and slips an empty AppData record in
+        // between to probe the interleave check.
+        let mut ch_buf: Vec<u8> = Vec::new();
+        let ch_msg_bytes: Vec<u8> = loop {
+            if ch_buf.len() >= 4 {
+                let body_len = ((ch_buf[1] as usize) << 16)
+                    | ((ch_buf[2] as usize) << 8)
+                    | (ch_buf[3] as usize);
+                let total = 4 + body_len;
+                if ch_buf.len() >= total {
+                    break ch_buf.drain(..total).collect();
+                }
+            }
+            let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+            if ct != ContentType::Handshake {
+                // RFC 8446 §5.1 — interleave violation. Alert:
+                // unexpected_message (when CH read is mid-message)
+                // or whatever the alert mapper picks for the
+                // got-content-type wording when buffer is empty.
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected Handshake for ClientHello, got {ct:?} \
+                     (alert: unexpected_message)"
+                )));
+            }
+            ch_buf.extend_from_slice(&plaintext);
+        };
+        let (hs_type, _, _) = parse_handshake_header(&ch_msg_bytes)?;
         if hs_type != HandshakeType::ClientHello {
             return Err(TlsError::HandshakeFailed(format!(
                 "expected ClientHello, got {hs_type:?}"
             )));
         }
-        let ch_msg = &ch_data[..ch_total];
+        // RFC 8446 §5.1 — handshake messages must end on a record
+        // boundary at key-change points; CH is the first message of
+        // the handshake, so any trailing bytes after the CH would
+        // belong to a subsequent message — possible but the existing
+        // server flight is fixed-shape so we don't expect this here.
+        if !ch_buf.is_empty() {
+            return Err(TlsError::HandshakeFailed(
+                "trailing bytes after ClientHello (RFC 8446 §5.1 — \
+                 alert: unexpected_message)"
+                    .into(),
+            ));
+        }
+        let ch_msg = ch_msg_bytes.as_slice();
 
         // Step 2: Process ClientHello (may result in HRR)
         let actions = match hs.process_client_hello(ch_msg)? {
@@ -1178,19 +1213,42 @@ macro_rules! tls13_server_do_handshake_body {
                 // RFC 8446 §D.4: server sends fake CCS after HRR
                 send_fake_ccs_body!($mode, $self);
 
-                let (ct2, ch2_data) = maybe_await!($mode, $self.read_record())?;
-                if ct2 != ContentType::Handshake {
-                    return Err(TlsError::HandshakeFailed(format!(
-                        "expected Handshake after HRR, got {ct2:?}"
-                    )));
-                }
-                let (hs_type2, _, ch2_total) = parse_handshake_header(&ch2_data)?;
+                // Phase T104 — Step 1b: same buffer-and-drain for
+                // the retried ClientHello (CH2) after HRR.
+                let mut ch2_buf: Vec<u8> = Vec::new();
+                let ch2_msg_bytes: Vec<u8> = loop {
+                    if ch2_buf.len() >= 4 {
+                        let body_len = ((ch2_buf[1] as usize) << 16)
+                            | ((ch2_buf[2] as usize) << 8)
+                            | (ch2_buf[3] as usize);
+                        let total = 4 + body_len;
+                        if ch2_buf.len() >= total {
+                            break ch2_buf.drain(..total).collect();
+                        }
+                    }
+                    let (ct2, plaintext) = maybe_await!($mode, $self.read_record())?;
+                    if ct2 != ContentType::Handshake {
+                        return Err(TlsError::HandshakeFailed(format!(
+                            "expected Handshake after HRR, got {ct2:?} \
+                             (alert: unexpected_message)"
+                        )));
+                    }
+                    ch2_buf.extend_from_slice(&plaintext);
+                };
+                let (hs_type2, _, _) = parse_handshake_header(&ch2_msg_bytes)?;
                 if hs_type2 != HandshakeType::ClientHello {
                     return Err(TlsError::HandshakeFailed(format!(
                         "expected ClientHello after HRR, got {hs_type2:?}"
                     )));
                 }
-                let ch2_msg = &ch2_data[..ch2_total];
+                if !ch2_buf.is_empty() {
+                    return Err(TlsError::HandshakeFailed(
+                        "trailing bytes after retried ClientHello \
+                         (RFC 8446 §5.1 — alert: unexpected_message)"
+                            .into(),
+                    ));
+                }
+                let ch2_msg = ch2_msg_bytes.as_slice();
                 hs.process_client_hello_retry(ch2_msg)?
             }
         };

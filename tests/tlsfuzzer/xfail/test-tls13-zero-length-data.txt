@@ -1,39 +1,17 @@
-# Phase T103 — `test-tls13-zero-length-data.py` XFAILs (6 entries).
+# Phase T103 / T104 — `test-tls13-zero-length-data.py` XFAILs (3 entries).
 #
-# Pre-T103 baseline: 2/11 PASS. T103 closed 3 conversations:
-#   * `tls13_server_read_trait_body!` now `continue`s on zero-length
-#     ApplicationData records instead of returning `Ok(0)` to the
-#     caller (which would be misinterpreted as EOF). RFC 8446 §5.1
-#     explicitly permits zero-length AppData fragments ("MAY be
-#     sent ... potentially useful as a traffic analysis
-#     countermeasure"). The peer's interleaved empty AppData chunks
-#     now flow through transparently.
-#   * The in-handshake server's hs_buffer reader now embeds
-#     `unexpected_message` in the "expected Handshake, got
-#     ApplicationData" error string so the alert mapper routes it
-#     correctly (RFC 8446 §5.1 — handshake messages MUST NOT be
-#     interleaved with other record types).
+# T103: empty-Alert refusal + zero-length AppData pass-through closed
+#       3 of 9 FAILs. Remaining 6 split into two categories.
+# T104: applied buffer-and-drain + RFC 8446 §5.1 interleave check to
+#       the server's Step 1 (ClientHello) and Step 1b (HRR retry CH2)
+#       read paths. Closed the 3 "interleaved in handshake" entries:
+#       * `zero-length app data interleaved in handshake`
+#       * `zero-len app data with padding interleaved in handshake`
+#       * `zero-len app data with large padding interleaved in handshake`
 #
-# Post-T103: 5/11 PASS / 6 FAIL — two distinct categories remain:
+# Post-T104: 8/11 PASS / 3 FAIL.
 #
-# === Category 1: ClientHello-fragmentation interleave (3 entries) ===
-#
-# These tests fragment the *plaintext* ClientHello across two records
-# and slip an empty AppData record between them:
-#
-#   * `zero-length app data interleaved in handshake`
-#   * `zero-len app data with padding interleaved in handshake`
-#   * `zero-len app data with large padding interleaved in handshake`
-#
-# Our `tls13_server_do_handshake_body!` Step 1 reads the ClientHello
-# with a single `read_record()` + `parse_handshake_header` and
-# doesn't yet buffer-and-drain across records (Step 5c/6 do, since
-# T101 — but Step 1 is on the unencrypted CH path). Closing this
-# needs the same hs_buffer pattern at Step 1, plus the §5.1
-# interleave check (any non-Handshake record between fragments →
-# unexpected_message). Real refactor; deferred to a future phase.
-#
-# === Category 2: s_server echo-loop chunking (3 entries) ===
+# === Remaining: s_server echo-loop chunking (3 entries) ===
 #
 # These tests interleave 5 zero-length AppData records with 3 short
 # non-empty ones forming "GET / HTTP/1.0\r\n\r\n", then expect the
@@ -54,8 +32,5 @@
 # fix from the s_server side.
 
 zero-length app data
-zero-length app data interleaved in handshake
 zero-length app data with padding
 zero-length app data with large padding
-zero-len app data with padding interleaved in handshake
-zero-len app data with large padding interleaved in handshake
