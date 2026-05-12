@@ -11,3 +11,8 @@
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 /worktrees/
+
+# AI review audit log (created by .githooks/pre-push). Per-clone state
+# kept locally for spot-checking systematic reviewer bias; not interesting
+# to other clones.
+/.ai-review-log/

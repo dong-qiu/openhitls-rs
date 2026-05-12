@@ -78,17 +78,38 @@ cargo fmt --all -- --check
 - Push command: always `git push origin main`
 
 ### AI Review (Pre-Push Gate)
-Because the remote has only `main` (no PRs), the `.githooks/pre-push` hook runs an AI review against the diff being pushed and aborts on critical findings. This is the project's structured external review path.
+Because the remote has only `main` (no PRs), the `.githooks/pre-push` hook runs an AI review against the diff being pushed and aborts on critical findings or on signs the reviewer didn't actually engage. This is the project's structured external-review path.
 
 - **Install once per clone (covers all worktrees via shared config)**:
   ```bash
   git config core.hooksPath .githooks
   ```
-- **What it does**: classifies the diff by path, then invokes `claude --print` with the right review prompt — *security mode* for `hitls-crypto / hitls-bignum / hitls-tls / hitls-pki / hitls-auth`, *general mode* for other Rust code. Docs-only / xfail-only diffs are skipped silently.
-- **Blocking rules**: any **CRITICAL** finding (variable-time secret comparison, missing `Zeroize`, `unsafe` outside the allowed crates, `panic!`/`unwrap()` in library code, removal of constant-time / zeroize paths) aborts the push. HIGH findings are surfaced but don't block.
-- **Fail-open by design**: if `claude` is missing from PATH, exits with an error, or returns no `VERDICT:` line, the push is allowed and a warning is printed. The hook is a guardrail, not a chokepoint.
-- **Bypass**: `SKIP_AI_REVIEW=1 git push …` or `git push --no-verify …`.
-- **Budget**: capped at `$0.50` per invocation via `--max-budget-usd` so a runaway review can't burn tokens.
+- **What it does**: classifies the diff by path, then invokes `claude --print --model sonnet` (and `--bare` when `ANTHROPIC_API_KEY` is set) with a review prompt framed as an *independent external auditor* — *security mode* for `hitls-crypto / hitls-bignum / hitls-tls / hitls-pki / hitls-auth`, *general mode* for other Rust code. Docs-only diffs are skipped silently.
+
+- **Objectivity-by-construction**:
+  - `--bare` (when `ANTHROPIC_API_KEY` is exported) disables CLAUDE.md / DEV_LOG.md / skill / memory auto-load so the reviewer cannot be steered by the project's own narrative. Without an API key the hook falls back to a non-bare run (subscription-billed); auto-context loads, but the prompt-level defenses (adversarial framing, evidence requirement, fail-close, cross-model) still apply, and the isolation mode is recorded in the audit log. Set `ANTHROPIC_API_KEY` and re-push for full isolation.
+  - `--model sonnet` runs the review under a different model than the one most likely authoring the change (Opus on this machine). Cross-model review breaks single-model blind spots.
+  - The prompt frames the reviewer as having no stake in shipping, and instructs it to distrust the diff's own narrative (commit messages, code comments asserting "this is safe" are not evidence).
+  - Every CRITICAL / HIGH finding MUST cite `[file:line]`; uncited findings are dropped.
+  - The reviewer MUST prove it read the diff by emitting a `DIFF-SUMMARY:` line containing verbatim `git diff --shortstat` output. Missing → block.
+  - Every review (input metadata + full model output) is appended to `.ai-review-log/` (gitignored) for spot-checking systematic bias.
+
+- **Blocking matrix**:
+  | Condition | Result |
+  |---|---|
+  | `VERDICT: block` | abort push |
+  | No `VERDICT:` line in output | **abort push** (fail-CLOSE — silence is not safety) |
+  | No `DIFF-SUMMARY:` line | **abort push** (reviewer didn't read the diff) |
+  | `VERDICT: pass` | allow push (HIGH findings surfaced but don't block) |
+  | `claude` CLI error / network failure | allow push, warning logged (tool failure ≠ safety signal) |
+  | `claude` not in PATH | allow push, warning logged |
+  | Docs-only diff | skip silently |
+
+- **CRITICAL rules that block** (security mode): variable-time comparison of secret material, missing `Zeroize` / `#[zeroize(drop)]`, `unsafe` outside the allowed crates, `panic!` / `unwrap()` / `expect()` on attacker-controlled input in library code, `rand` crate for randomness, removal of an existing constant-time path, new public API that can panic on adversarial input, removal of a security test without replacement.
+
+- **Bypass**: `SKIP_AI_REVIEW=1 git push …` (logged) or `git push --no-verify …` (git-native, not logged).
+- **Budget**: capped at `$0.50` per invocation via `--max-budget-usd`.
+- **Audit**: `.ai-review-log/<UTC-timestamp>-<base10>-<head10>-<mode>.txt` per review. Sample these periodically to catch systematic reviewer drift (e.g. always-pass, never-finds-X).
 
 ### Error Handling
 - Use `hitls_types::CryptoError` for all crypto errors (thiserror-based)
