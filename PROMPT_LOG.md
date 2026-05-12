@@ -5296,6 +5296,29 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: `cargo test -p xtask` 6/6. `cargo test -p hitls-crypto --test migrated_cmac --features cmac` 12/12. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac} --check` all `up-to-date`. `cargo clippy --workspace --all-features --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T111 (continued) — AES Pilot (2026-05-12)
+
+> 做AES
+
+**Result**: 4th pilot of `docs/c-test-migration-plan.md` Phase A. New `xtask/src/cipher.rs` template emits 30 AES KAT tests (24 ECB + 6 CTR across AES-128/192/256), all PASS. T111 progress: 3/9 → **4/9 algorithms**.
+
+**AES `.data` is messier than digest/MAC**:
+
+- **Two row shapes** — TC001 has a leading provider-flag arg (`0` or `1` for default-vs-alternate impl in C), TC002+ omits it. The emitter auto-detects by scanning for the `CRYPT_CIPHER_` symbol position, computing the arg offset, then extracting `key / iv / input / output / direction-bool`.
+- **Direction-aware** — each row's trailing `true`/`false` selects encrypt vs decrypt; both directions emit separate tests with `_encrypt` / `_decrypt` suffixes for traceability.
+- **Only TC001 is mechanical** — TC002-TC009 are MCT / reinit / multi-update / padding / overlap workflow tests. They route to `ApiSurface`.
+
+**3 modes split by Rust API shape**:
+
+- **ECB** (24/24 rows): `ecb_encrypt/decrypt` are no-padding (require block-aligned input), match NIST raw KAT. Direct emit.
+- **CTR** (6/6 rows): `ctr_crypt(key, iv, &mut buf)` is symmetric (same fn for encrypt+decrypt). Direct emit.
+- **CBC** (12 rows): SKIPPED as `skipped_unsupported_alg` — `cbc_encrypt/decrypt` hardcode PKCS#7 padding, would emit 32B output for a 16B block-aligned input. Unblocking requires a Rust-side `cbc_encrypt_raw`/`_decrypt_raw` no-padding helper (future I-phase).
+- **CFB / OFB**: not in TC001 — they live in TC005/TC006 multi-update sets, deferred along with the rest of the workflow rows.
+
+**T111 progress**: 4/9. Remaining: DSA, SM2, SM4, DH, curve25519, PKI CRL. Next step is probably DSA (~764 TC, biggest remaining algo) or curve25519 (~184 TC, simplest API shape).
+
+**Tests**: `cargo test -p hitls-crypto --test migrated_aes --features aes,modes` 30/30 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
