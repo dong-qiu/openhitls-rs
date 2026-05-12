@@ -318,7 +318,7 @@ Category summary:
 | 306 | T117 | Test | TLS 1.2 Certificate12 DER-shape validation in `decode_certificate12` (entry first byte must be 0x30, inner DER length must equal outer wrapper length) + `bad_certificate` substring routing in `tls_error_to_alert` per RFC 5246 §7.2.2 — closes the last 2 XFAILs in `test-certificate-malformed.py` (1000/2 → 1002/0); curated mTLS-1.2 set now has 0 XFAIL on this script (T111–T116 reserved for C-test migration plan) | 2026-05-12 |
 | 307 | T118 | Test | TLS 1.2 CertificateRequest comprehensive 18-item sigalgs list (mirrors T102 TLS 1.3 fix) + `verify_cv12_signature` scheme-aware transcript hashing (RFC 5246 §7.4.8 — CV hash MUST be the scheme's hash, not the PRF hash) + verifier coverage expanded (RSA-PSS-RSAE SHA-384/512, ECDSA P-521, Ed25519, RSA-PKCS#1 SHA-1/512) — closes the last XFAIL in `test-certificate-request.py` (4/1 → 5/0); curated mTLS-12 subset (4 scripts) now 1279/0/0 — completely clean | 2026-05-12 |
 | 308 | T119 | Test | TLS 1.3 external-PSK server-side support (RFC 8446 §4.2.11 out-of-band PSK auth via new `--psk` / `--psk-identity` CLI flags + `verify_binder` external-label parameter) + 2 new tlsfuzzer scripts in CI on a dedicated `--psk` + `--ticket-key` listener: `test-tls13-psk_dhe_ke.py` (3/1 XFAIL) and `test-tls13-session-resumption.py` (4/3 XFAIL) — closes 7 new conversations; `psk_ke` mode (no DHE) queued for T120 | 2026-05-12 |
-| 309 | T111 | Test | C→Rust test migration tool — `xtask/` scaffold + per-algorithm template emitters consuming openHiTLS C SDV `.data` files. Phase A.1–A.3 pilots: SHA-2 (28 KAT tests from 70 TC rows), HMAC (43 KAT tests, MD5/SHA-1/SHA-2/SM3), CMAC (12 KAT tests, AES-128/192/256; SM4 unsupported by current Rust port). `--check` mode for CI drift detection (rustfmt-aware comparison, fixes false-positive bug where committed file went through rustfmt but `--check` compared raw generator output). 83 migrated tests total; 5/9 algorithms remain (AES, DSA, SM2, SM4, DH, curve25519, plus PKI CRL); plan §2.4 acceptance criteria still open (`docs/c-test-na-list.md` + per-failure issues) | 2026-05-12 |
+| 309 | T111 | Test | C→Rust test migration tool — `xtask/` scaffold + per-algorithm template emitters consuming openHiTLS C SDV `.data` files. Phase A pilots: SHA-2 (28 tests, 70 TC rows), HMAC (43 tests, MD5/SHA-1/SHA-2/SM3), CMAC (12 tests, AES-128/192/256; SM4 unsupported), AES (30 tests, ECB + CTR across 3 key sizes; CBC rows blocked on a future `cbc_encrypt_raw` no-padding helper, multi-update rows deferred). `--check` mode for CI drift detection (rustfmt-aware comparison, fixes false-positive bug where committed file went through rustfmt but `--check` compared raw generator output). 113 migrated tests total; 5/9 algorithms remain (DSA, SM2, SM4, DH, curve25519, plus PKI CRL); plan §2.4 acceptance criteria still open (`docs/c-test-na-list.md` + per-failure issues) | 2026-05-12 |
 
 ---
 
@@ -17641,13 +17641,13 @@ Pre-T119 the project had RFC-8446-conformant PSK code on the wire (encode/parse 
 The same `--ticket-key` flag (which existed since T96 but had no curated tlsfuzzer coverage) now also gates `test-tls13-session-resumption.py` in CI — 4 PASS conversations covering NST emission + resumption-on-second-handshake + PSK_WITH_DHE round-trip — making the resumption story finally observable in CI alongside the existing `test-tls13-count-tickets.py` (which only probes the no-NST path).
 ---
 
-## Phase T111 — C→Rust Test Migration Tool: xtask + SHA-2 / HMAC / CMAC Pilots (2026-05-12)
+## Phase T111 — C→Rust Test Migration Tool: xtask + SHA-2 / HMAC / CMAC / AES Pilots (2026-05-12)
 
 ### Summary
 
-First instalment of `docs/c-test-migration-plan.md` **Phase A** (~3 500 mechanical-migration TCs over 9 algorithms). This phase delivers (a) the generic migration tooling, (b) three pilot generators validating that the template approach works across two different `.data`-row shapes, and (c) a CI drift-detection mode so generated files stay in sync with their C source.
+First instalment of `docs/c-test-migration-plan.md` **Phase A** (~3 500 mechanical-migration TCs over 9 algorithms). This phase delivers (a) the generic migration tooling, (b) four pilot generators validating that the template approach works across multiple `.data`-row shapes (3-arg digest, 4-arg MAC, variable-length cipher with optional provider flag), and (c) a CI drift-detection mode so generated files stay in sync with their C source.
 
-T111 is intentionally **not closed** here — the plan §2.4 acceptance criteria list 9 `tests/migrated/*.rs` targets and a `docs/c-test-na-list.md` writeup. We are 3/9 (SHA-2, HMAC, CMAC). The remaining 6 (AES, DSA, SM2, SM4, DH, curve25519, and PKI CRL) will follow in subsequent commits under the same phase number per the no-sub-phase rule.
+T111 is intentionally **not closed** here — the plan §2.4 acceptance criteria list 9 `tests/migrated/*.rs` targets and a `docs/c-test-na-list.md` writeup. We are 4/9 (SHA-2, HMAC, CMAC, AES). The remaining 5 (DSA, SM2, SM4, DH, curve25519, plus PKI CRL) will follow in subsequent commits under the same phase number per the no-sub-phase rule.
 
 ### Component breakdown
 
@@ -17660,6 +17660,7 @@ T111 is intentionally **not closed** here — the plan §2.4 acceptance criteria
 | `xtask/src/parser.rs` | Generic `.data` parser: `TC_NAME:arg:arg:expected` with quoted hex literals; description lines (SDV_-prefixed but whitespace-separated) are absorbed into the next TC's doc comment. 6 unit tests covering line splitting, hex parsing, edge cases. |
 | `xtask/src/digest.rs` | SHA-2 KAT template. Classifies `FUNC_TC002` (init+final empty), `FUNC_TC003` (one-shot), `FUNC_TC004` (multi-block split). Routes `MultiBuffer`/`COPY_CTX`/`DEFAULT_PROVIDER`/`API_TC` to `ApiSurface` (N/A in Rust). |
 | `xtask/src/mac.rs` | HMAC + CMAC templates. HMAC uses the `Hmac::mac(factory, key, msg)` one-shot path with per-hash dynamic feature-cfg generation. CMAC uses `Cmac::new(key) + update + finish(&mut buf)` (Rust port is AES-only, so `CRYPT_MAC_CMAC_SM4` falls through to `skipped_unsupported_alg`). |
+| `xtask/src/cipher.rs` | AES KAT template. Auto-detects two row shapes (with or without leading provider-flag arg) by locating the `CRYPT_CIPHER_` symbol; dispatches per mode. ECB uses `ecb_encrypt/decrypt` (no padding, matches NIST raw KAT). CTR uses `ctr_crypt(key, iv, &mut buf)` (symmetric — same fn for encrypt+decrypt). CBC rows are routed to `skipped_unsupported_alg` because the Rust `cbc_encrypt/decrypt` hardcode PKCS#7 padding — raw KAT support needs a future `cbc_encrypt_raw` helper. TC002–TC009 (MCT / reinit / multi-update / padding-mode / overlap workflows) route to `ApiSurface`. |
 
 **Generated test files** (committed under `crates/hitls-crypto/tests/`):
 
@@ -17668,7 +17669,8 @@ T111 is intentionally **not closed** here — the plan §2.4 acceptance criteria
 | `migrated_sha2.rs` | 70 | 28 | 42 | 0 | yes |
 | `migrated_hmac.rs` | 205 | 43 | 158 | 4 (SHA-3 not yet `Digest`) | yes |
 | `migrated_cmac.rs` | 91 | 12 | 71 | 4 (SM4) | yes |
-| **Total** | 366 | **83** | 271 | 8 | yes |
+| `migrated_aes.rs` | 315 | 30 | 273 | 12 (CBC-no-raw-API) | yes |
+| **Total** | 681 | **113** | 544 | 20 | yes |
 
 ### `--check` drift detection: bug + fix
 
@@ -17686,17 +17688,33 @@ CMAC `.data` rows have the same 4-arg KAT shape as HMAC (`alg : key : msg : expe
 
 CMAC classifier rejects more than HMAC because CMAC has more lifecycle-test patterns (`STUB_TC`, `ADDR_NOT_ALIGN_`, additional `FUN_TC001/002/003/005/006` workflows). Only `FUN_TC004` carries a real 4-arg KAT. Rows like `FUN_TC006:...:100` (repeat-count workflows) parse but `as_hex()` on the trailing `100` returns `None` → routed to `skipped_unknown` (4 rows, one per AES variant + SM4).
 
+### AES pilot details
+
+AES `.data` rows are messier than digest/MAC:
+
+1. **Two row shapes**: TC001 rows have a leading provider-flag arg (`0` for default, `1` for alternate); TC002+ rows omit it. `emit_one_shot` auto-detects by scanning for the `CRYPT_CIPHER_` symbol and computing the arg offset.
+
+2. **Direction-aware**: each row ends with `true`/`false` (encrypt vs decrypt). Both directions get separate emitted tests with `_encrypt` / `_decrypt` suffixes so failures are traceable to the C row.
+
+3. **Only TC001 is mechanical KAT**: TC002 (MCT — Monte Carlo iteration), TC003 (reinit lifecycle), TC004/8/9 (padding-mode probes), TC005-6 (multi-update streaming), TC007 (same-address overlap) are all workflow tests without a 1:1 mapping to Rust's stateless one-shot helpers. They route to `ApiSurface`.
+
+4. **CBC limitation**: `cbc_encrypt`/`cbc_decrypt` hardcode PKCS#7 padding (would emit 32B output for a 16B block-aligned input — mismatch vs NIST raw KAT). The 12 TC001 CBC rows go to `skipped_unsupported_alg` until a future I-phase adds `cbc_encrypt_raw`/`_decrypt_raw` no-padding helpers. ECB (24 rows) + CTR (6 rows, symmetric `ctr_crypt`) = **30 emitted**, all PASS.
+
+5. **No SHAKE/CFB/OFB**: not present in TC001 — they appear in TC005/TC006 multi-update sets, deferred to a future cipher pilot.
+
 ### File-level `#![cfg]` gates
 
-Each generated file declares the features it depends on so the workspace build with `--no-default-features` and a custom feature subset doesn't break. CMAC test header: `#![cfg(all(feature = "cmac", feature = "aes"))]` (the `aes` half is implicit via `cmac = ["aes"]` in `Cargo.toml`, but explicit for grep-readability).
+Each generated file declares the features it depends on so the workspace build with `--no-default-features` and a custom feature subset doesn't break. CMAC test header: `#![cfg(all(feature = "cmac", feature = "aes"))]` (the `aes` half is implicit via `cmac = ["aes"]` in `Cargo.toml`, but explicit for grep-readability). AES test header: `#![cfg(all(feature = "aes", feature = "modes"))]`.
 
 ### Tests (post-T111)
 
 - `cargo test -p xtask`: 6/6 PASS (parser unit tests).
 - `cargo test -p hitls-crypto --test migrated_cmac --features cmac`: 12/12 PASS.
+- `cargo test -p hitls-crypto --test migrated_aes --features aes,modes`: 30/30 PASS.
 - `cargo run -p xtask -- migrate-c-tests --algo sha2 --check`: up-to-date.
 - `cargo run -p xtask -- migrate-c-tests --algo hmac --check`: up-to-date.
 - `cargo run -p xtask -- migrate-c-tests --algo cmac --check`: up-to-date.
+- `cargo run -p xtask -- migrate-c-tests --algo aes --check`: up-to-date.
 - `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
 - `cargo fmt --all -- --check`: clean.
 
@@ -17708,22 +17726,26 @@ The 9-algorithm Phase A batch represents ~3 500 mechanical-migration TCs — man
 
 | File | Status | Description |
 |------|--------|-------------|
-| `crates/hitls-tls/src/handshake/server.rs` | Modified | `verify_binder` gains `external: bool` param; PSK-lookup block refactored to add external-PSK fallback after ticket attempt; new `test_verify_binder_external_label`. |
-| `crates/hitls-cli/src/main.rs` | Modified | 2 new clap fields `psk` + `psk_identity` on `SServer`; threaded into `s_server::run(...)`. |
-| `crates/hitls-cli/src/s_server.rs` | Modified | `run(...)` signature +2 args; new plumbing block for `--psk` / `--psk-identity` (mutually-required pair); 3 existing tests updated for new arity. |
-| `.github/workflows/tlsfuzzer.yml` | Modified | New `HITLS_PORT_PSK` (4451) + `HITLS_PSK_IDEN` env; new `s-server --psk` instance; new `scripts_psk` array + runner loop; PID added to stop-server. |
-| `tests/tlsfuzzer/xfail/test-tls13-psk_dhe_ke.txt` | Added | 1 XFAIL (`ffdhe2048` — FFDHE-2048 group not in default `supported_groups`). |
-| `tests/tlsfuzzer/xfail/test-tls13-session-resumption.txt` | Added | 3 XFAILs (TLS 1.2 cross-version × 2, PSK_ONLY queued for T120). |
-| `DEV_LOG.md` | Modified | This entry + Phase Index row 308 + Phase-Index header bump T1–T118 → T1–T119. |
-| `PROMPT_LOG.md` | Modified | T119 prompt + result entry. |
-| `CLAUDE.md` | Modified | Status line `T1–T118` → `T1–T119`; test count 4221 → 4222. |
-| `README.md` | Modified | Test count bump. |
+| `xtask/src/main.rs` | Modified | `--check` mode now rustfmt-aware (compares formatted output, not raw source); `cmac` + `aes` branches in `--algo` dispatch. |
+| `xtask/src/mac.rs` | Modified | New `emit_cmac_kat` + helpers (`classify_cmac`, `cmac_alg_label`, `write_cmac_header`, `emit_cmac_one_shot`, `write_cmac_test_doc`). |
+| `xtask/src/cipher.rs` | Added | AES KAT template: row-shape auto-detection, per-mode dispatch (ECB + CTR), `aes_alg_label` resolver, header/footer/emit helpers. |
+| `crates/hitls-crypto/tests/migrated_cmac.rs` | Added | 12 generated CMAC AES-128/192/256 KAT tests (rustfmt-applied). |
+| `crates/hitls-crypto/tests/migrated_aes.rs` | Added | 30 generated AES KAT tests (24 ECB + 6 CTR across AES-128/192/256). |
+| `.gitignore` | Modified | Added `/diagnostics/` (local LSP snapshot dir). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index update + category summary update. |
+| `PROMPT_LOG.md` | Modified | T111 prompt + result entry. |
+| `CLAUDE.md` | Modified | Status: `T111–T116 reserved` → `T112–T116 reserved` (T111 in progress now); test count bumped. |
+| `README.md` | Modified | Test count bumped. |
 
-### Build Status (Post T119)
+### Build Status (Post T111)
 
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings.
 - `cargo fmt --all -- --check`: clean.
-- Curated CI sweep: **46 scripts** (44 → 46 from T119); the 2 new PSK scripts gate cleanly via run.sh XFAIL bookkeeping (3/1 + 4/3).
+- `cargo test --workspace --all-features`: see status line update.
+- Migration progress: **4 / 9 algorithms** complete (44% of Phase A by algorithm count; Phase B–F not started). AES pilot adds 30 tests (ECB + CTR); CBC + CFB + OFB rows still pending raw-API support and the multi-update emitters.
+
+
+
 
 
 

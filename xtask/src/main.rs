@@ -1,3 +1,4 @@
+mod cipher;
 mod digest;
 mod mac;
 mod parser;
@@ -77,10 +78,16 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_cmac.rs"),
             mac::emit_cmac_kat,
         ),
+        "aes" => (
+            c_root.join("crypto/aes/test_suite_sdv_eal_aes.data"),
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_aes.rs"),
+            cipher::emit_aes_kat,
+        ),
         other => {
-            return Err(
-                format!("algo '{other}' not yet supported. Available: sha2, hmac, cmac").into(),
-            );
+            return Err(format!(
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes"
+            )
+            .into());
         }
     };
 
