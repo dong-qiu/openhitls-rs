@@ -195,6 +195,16 @@ enum Commands {
         /// across processes; when omitted a fresh random key is used.
         #[arg(long = "ticket-key")]
         ticket_key: Option<String>,
+        /// External pre-shared key (hex), used with `--psk-identity`
+        /// for TLS 1.3 out-of-band PSK authentication (RFC 8446 §4.2.11,
+        /// Phase T119). Length MUST equal the negotiated suite's hash
+        /// output: 32 bytes for SHA-256 suites, 48 bytes for SHA-384.
+        #[arg(long = "psk")]
+        psk: Option<String>,
+        /// Identity string sent by the client in the `pre_shared_key`
+        /// extension. Matched literally against the configured `--psk`.
+        #[arg(long = "psk-identity")]
+        psk_identity: Option<String>,
         // (Phase T96 — removed `--key-update-server` flag draft.
         // Auto-firing KU right after the handshake breaks tlsfuzzer's
         // sanity tests in `test-tls13-keyupdate-from-server.py`,
@@ -413,6 +423,8 @@ fn main() {
             verify_client_cert,
             max_early_data_size,
             ticket_key,
+            psk,
+            psk_identity,
             no_middlebox_compat,
         } => s_server::run(
             *port,
@@ -425,6 +437,8 @@ fn main() {
             verify_client_cert.as_deref(),
             *max_early_data_size,
             ticket_key.as_deref(),
+            psk.as_deref(),
+            psk_identity.as_deref(),
             *no_middlebox_compat,
         ),
         Commands::List { filter } => list::run(filter),

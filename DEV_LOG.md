@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T118 (111 phases, T64 skipped + T111–T116 reserved for the `docs/c-test-migration-plan.md` Phase A–F work)
+- Testing: T1–T119 (112 phases, T64 skipped + T111–T116 reserved for the `docs/c-test-migration-plan.md` Phase A–F work)
 - Refactoring: R1–R13 (13 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -317,6 +317,7 @@ Category summary:
 | 305 | T110 | Test | TLS 1.2 handshake-codec strict body-length checks (`decode_certificate12` + `decode_certificate_verify12`) per RFC 5246 §7.4.2 / §7.4.8 + empty-cert-entry rejection — closes 28 conversations across `test-certificate-malformed.py` (973/29 → 1000/2 XFAIL) and `test-certificate-verify-malformed.py` (266/1 → 267/0); cert-malformed.py joins CI | 2026-05-11 |
 | 306 | T117 | Test | TLS 1.2 Certificate12 DER-shape validation in `decode_certificate12` (entry first byte must be 0x30, inner DER length must equal outer wrapper length) + `bad_certificate` substring routing in `tls_error_to_alert` per RFC 5246 §7.2.2 — closes the last 2 XFAILs in `test-certificate-malformed.py` (1000/2 → 1002/0); curated mTLS-1.2 set now has 0 XFAIL on this script (T111–T116 reserved for C-test migration plan) | 2026-05-12 |
 | 307 | T118 | Test | TLS 1.2 CertificateRequest comprehensive 18-item sigalgs list (mirrors T102 TLS 1.3 fix) + `verify_cv12_signature` scheme-aware transcript hashing (RFC 5246 §7.4.8 — CV hash MUST be the scheme's hash, not the PRF hash) + verifier coverage expanded (RSA-PSS-RSAE SHA-384/512, ECDSA P-521, Ed25519, RSA-PKCS#1 SHA-1/512) — closes the last XFAIL in `test-certificate-request.py` (4/1 → 5/0); curated mTLS-12 subset (4 scripts) now 1279/0/0 — completely clean | 2026-05-12 |
+| 308 | T119 | Test | TLS 1.3 external-PSK server-side support (RFC 8446 §4.2.11 out-of-band PSK auth via new `--psk` / `--psk-identity` CLI flags + `verify_binder` external-label parameter) + 2 new tlsfuzzer scripts in CI on a dedicated `--psk` + `--ticket-key` listener: `test-tls13-psk_dhe_ke.py` (3/1 XFAIL) and `test-tls13-session-resumption.py` (4/3 XFAIL) — closes 7 new conversations; `psk_ke` mode (no DHE) queued for T120 | 2026-05-12 |
 
 ---
 
@@ -17542,8 +17543,122 @@ The TLS 1.2 CV verifier's pre-T118 design quietly assumed `CV hash == PRF hash`.
 - `cargo fmt --all -- --check`: clean.
 - Curated CI sweep: 44 scripts; **mTLS-12 subset 1279/0/0 — completely clean**.
 
+## Phase T119 — TLS 1.3 External PSK + Session-Resumption Scripts in CI (2026-05-12)
 
+### Summary
 
+T119 closes the long-standing "PSK / session-resumption tlsfuzzer scripts deferred" item carried in the DEV_LOG since T94. The blocker was that our TLS 1.3 server only honoured **resumption** PSKs (decrypted from a NewSessionTicket); there was no path for **external** PSKs (out-of-band shared secret with a known identity), even though the `TlsConfig` builder has carried `psk` / `psk_identity` fields since I17.
+
+Two pieces of plumbing close the gap:
+
+1. **Server-side external PSK lookup** in `handshake/server.rs::process_client_hello`. After the existing ticket-decrypt attempt falls through, we now also try `config.psk_identity == ch_identity`; on a match we verify the binder against `config.psk` with the RFC 8446 §4.2.11.2 `"ext binder"` label and adopt the PSK.
+2. **`--psk <hex>` + `--psk-identity <id>` CLI flags** on `s-server` (sibling to the existing `--ticket-key` flag). The two flags must be set together; one without the other is a hard CLI error.
+
+`verify_binder` learned an `external: bool` parameter selecting the label, the parameter is plumbed through both code paths (resumption uses `false`, external uses `true`), and the existing 5 binder-rejection unit tests are joined by a new `test_verify_binder_external_label` that pins both directions (ext-binder forged → ext-binder verifies, res-binder verifier rejects).
+
+The `psk_ke` mode (RFC 8446 §4.2.9 mode 0x00 — PSK without DHE) is **out of scope** for T119 and queued for **T120**: closing it needs the server to (1) decline to send a `key_share` in its ServerHello and (2) feed zero-filled `(EC)DHE` material into the key-schedule's `derive_handshake_secret` step. That's a real flight-builder + key-schedule change distinct from the binder-lookup work T119 ships.
+
+### Code changes
+
+**`crates/hitls-tls/src/handshake/server.rs`** (~50 lines net):
+
+- `verify_binder` signature widened: `fn verify_binder(params, psk, ch_msg, binder, external: bool) -> Result<bool>`. Selects label `"res binder"` (`false`) vs `"ext binder"` (`true`) for `derive_binder_key`.
+- `process_client_hello` PSK-lookup block refactored from "try ticket → adopt or drop" to "parse identities ONCE → try ticket → if no match, try external PSK config → adopt or drop". External-PSK path additionally requires `cfg_psk.len() == params.hash_len` (RFC 8446 §4.2.11.1 binder uses HKDF-Extract output of the suite's hash; mismatched length is the most common config error).
+- 1 new unit test `test_verify_binder_external_label` covering "ext-binder forged → ext label verifies, res label rejects". 5 existing `verify_binder` tests updated to pass `false` (still resumption-flavour — `forge_ch_with_binder` uses `derive_binder_key(false)`).
+
+**`crates/hitls-cli/src/main.rs`** (~13 lines):
+
+- 2 new clap fields `psk` + `psk_identity` on the `SServer` subcommand. Threaded into the `s_server::run(...)` call.
+
+**`crates/hitls-cli/src/s_server.rs`** (~25 lines):
+
+- `run()` signature extended by `psk_hex: Option<&str>` + `psk_identity: Option<&str>`.
+- New plumbing block (after `--ticket-key`): mutually-required pair validation + hex-decode + builder calls (`.psk(...)` + `.psk_identity(...)`). Empty/invalid hex rejected explicitly; mismatched-pair errors (`--psk` without `--psk-identity`, etc.) are CLI-level errors.
+- All 3 existing unit tests of `run(...)` updated for the new arity (each grew 2 trailing `None` args).
+
+**`.github/workflows/tlsfuzzer.yml`** (~50 lines):
+
+- New env: `HITLS_PORT_PSK: 4451` and `HITLS_PSK_IDEN: hitls-test-psk` (identity is fixed; the matching `HITLS_PSK_HEX` value is generated at setup time via `openssl rand -hex 32` and exported into `$GITHUB_ENV`).
+- New server instance startup block (after the TLS 1.2 mTLS instance): `s-server --psk $PSK --psk-identity $IDEN --ticket-key $TICKET_KEY` on the new port; same RSA 2048 cert as the main 1.3 listener. The `--ticket-key` is generated freshly per run (deterministic across a run, fresh between runs).
+- Wait-for-listeners loop extended to 8 ports.
+- New `scripts_psk=()` array with the 2 T119 scripts.
+- New runner loop for `scripts_psk[@]` with per-script PSK-arg passing (`test-tls13-psk_dhe_ke.py` gets `--psk $HEX --psk-iden $IDEN`; `test-tls13-session-resumption.py` takes no PSK args, only needs the ticket-key on the server side).
+- Stop-server PID list extended with `SERVER_PID_PSK`.
+
+**`tests/tlsfuzzer/xfail/test-tls13-psk_dhe_ke.txt`** (added): 1 XFAIL — `ffdhe2048`. tlsfuzzer constrains the script's DHE group to FFDHE-2048 (RFC 7919) which our TLS 1.3 server doesn't advertise. Not a PSK gap — separate I-phase to add FFDHE support; XFAIL'd here so the 3 PASS gate cleanly.
+
+**`tests/tlsfuzzer/xfail/test-tls13-session-resumption.txt`** (added): 3 XFAILs with per-entry rationale —
+
+- `sanity - TLS 1.2`: server is 1.3-only; cross-version listener would need a new `--tls auto` (or `min_version=1.2 max_version=1.3`) CLI mode that doesn't currently exist.
+- `use TLS 1.2 ticket in TLS 1.3`: same TLS 1.2 dependency.
+- `session resumption - PSK_ONLY`: uses `psk_ke` mode (no DHE) — explicit T120 scope.
+
+### Tlsfuzzer impact
+
+| Script | Pre-T119 | Post-T119 (local probe, `-n` script default) |
+|--------|---------|--------------------------------------------|
+| `test-tls13-psk_dhe_ke.py` | not in CI (0/4 FAIL when probed pre-T119) | **3 PASS / 1 XFAIL / 0 FAIL** |
+| `test-tls13-session-resumption.py` | not in CI (sanity FAIL pre-T119 because no `--ticket-key`) | **4 PASS / 3 XFAIL / 0 FAIL** |
+
+**Aggregate delta**: 7 new conversation-PASS at CI-sampling defaults, 4 new stable XFAILs (each with a documented rationale + concrete next-step). Curated CI suite size: **44 → 46 scripts**.
+
+### Verification
+
+Local probes against a fresh `s-server` build:
+
+```
+$ ./target/release/hitls s-server -p 4456 \
+    --cert /tmp/hitls-tlsfuzzer/cert-rsa.pem \
+    --key  /tmp/hitls-tlsfuzzer/key-rsa-pkcs8.pem \
+    --psk $PSK_HEX --psk-identity hitls-test-psk -q &
+
+$ PYTHONPATH=. python scripts/test-tls13-psk_dhe_ke.py \
+    -h localhost -p 4456 --psk $PSK_HEX --psk-iden hitls-test-psk
+TOTAL: 4  PASS: 3  FAIL: 1  (ffdhe2048 — XFAIL'd)
+
+$ ./target/release/hitls s-server -p 4457 \
+    --cert .../cert-rsa.pem --key .../key-rsa-pkcs8.pem \
+    --ticket-key $TICKET_KEY -q &
+
+$ PYTHONPATH=. python scripts/test-tls13-session-resumption.py \
+    -h localhost -p 4457 -n 200
+TOTAL: 7  PASS: 4  FAIL: 3  (TLS 1.2 cross-version + PSK_ONLY — XFAIL'd)
+```
+
+### Tests (post-T119)
+
+- `cargo test -p hitls-tls --all-features --lib handshake::server::tests::test_verify_binder`: 7 PASS (+1 from T119 — `test_verify_binder_external_label`).
+- `cargo test -p hitls-cli --all-features --bins`: 16 PASS (unchanged; 3 existing s_server::run tests updated for new arity).
+- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+- `cargo fmt --all -- --check`: clean.
+- Workspace test count: 4178 → **4179** (+1 server binder unit test).
+
+### Why this matters
+
+Pre-T119 the project had RFC-8446-conformant PSK code on the wire (encode/parse for the `pre_shared_key` extension, binder verification, both `"res binder"` and `"ext binder"` HKDF labels), but no operator-facing path to the external-PSK side. The `TlsConfig` builder accepted `psk` / `psk_identity` since I17, but `process_client_hello` never consulted them. That left an unobservable feature gap: every internal piece worked in isolation, but no end-to-end PSK handshake could be driven without writing custom Rust glue. T119 closes the gap with one new lookup branch in the server and two CLI flags, then proves the closure with tlsfuzzer's `test-tls13-psk_dhe_ke.py` running PSK-DHE handshakes against the new server instance in CI.
+
+The same `--ticket-key` flag (which existed since T96 but had no curated tlsfuzzer coverage) now also gates `test-tls13-session-resumption.py` in CI — 4 PASS conversations covering NST emission + resumption-on-second-handshake + PSK_WITH_DHE round-trip — making the resumption story finally observable in CI alongside the existing `test-tls13-count-tickets.py` (which only probes the no-NST path).
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | `verify_binder` gains `external: bool` param; PSK-lookup block refactored to add external-PSK fallback after ticket attempt; new `test_verify_binder_external_label`. |
+| `crates/hitls-cli/src/main.rs` | Modified | 2 new clap fields `psk` + `psk_identity` on `SServer`; threaded into `s_server::run(...)`. |
+| `crates/hitls-cli/src/s_server.rs` | Modified | `run(...)` signature +2 args; new plumbing block for `--psk` / `--psk-identity` (mutually-required pair); 3 existing tests updated for new arity. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | New `HITLS_PORT_PSK` (4451) + `HITLS_PSK_IDEN` env; new `s-server --psk` instance; new `scripts_psk` array + runner loop; PID added to stop-server. |
+| `tests/tlsfuzzer/xfail/test-tls13-psk_dhe_ke.txt` | Added | 1 XFAIL (`ffdhe2048` — FFDHE-2048 group not in default `supported_groups`). |
+| `tests/tlsfuzzer/xfail/test-tls13-session-resumption.txt` | Added | 3 XFAILs (TLS 1.2 cross-version × 2, PSK_ONLY queued for T120). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 308 + Phase-Index header bump T1–T118 → T1–T119. |
+| `PROMPT_LOG.md` | Modified | T119 prompt + result entry. |
+| `CLAUDE.md` | Modified | Status line `T1–T118` → `T1–T119`; test count 4221 → 4222. |
+| `README.md` | Modified | Test count bump. |
+
+### Build Status (Post T119)
+
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --all-targets`: 0 warnings.
+- `cargo fmt --all -- --check`: clean.
+- Curated CI sweep: **46 scripts** (44 → 46 from T119); the 2 new PSK scripts gate cleanly via run.sh XFAIL bookkeeping (3/1 + 4/3).
 
 
 

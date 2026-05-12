@@ -19,6 +19,8 @@ pub fn run(
     verify_client_cert_ca: Option<&str>,
     max_early_data_size: u32,
     ticket_key_hex: Option<&str>,
+    psk_hex: Option<&str>,
+    psk_identity: Option<&str>,
     no_middlebox_compat: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load certificate chain
@@ -176,6 +178,24 @@ pub fn run(
             .into());
         }
         builder = builder.ticket_key(key_bytes);
+    }
+
+    // Phase T119 — `--psk <hex>` + `--psk-identity <id>` for TLS 1.3 external
+    // PSK (RFC 8446 §4.2.11). Both flags must be set together; identity is
+    // an opaque UTF-8 string matched literally against the wire bytes the
+    // client sends in `pre_shared_key`. Length validation is deferred to
+    // the handshake layer (must equal the negotiated suite's hash output).
+    match (psk_hex, psk_identity) {
+        (Some(hex_str), Some(id)) => {
+            let psk_bytes = hitls_utils::hex::hex(hex_str);
+            if psk_bytes.is_empty() {
+                return Err("--psk: empty / invalid hex value".into());
+            }
+            builder = builder.psk(psk_bytes).psk_identity(id.as_bytes().to_vec());
+        }
+        (Some(_), None) => return Err("--psk requires --psk-identity".into()),
+        (None, Some(_)) => return Err("--psk-identity requires --psk".into()),
+        (None, None) => {}
     }
 
     // Phase T96 — `--no-middlebox-compat`.
@@ -566,6 +586,8 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             0,
             None,
+            None,
+            None,
             false,
         );
         assert!(result.is_err());
@@ -583,6 +605,8 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             0,
+            None,
+            None,
             None,
             false,
         );
@@ -602,6 +626,8 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             0,
+            None,
+            None,
             None,
             false,
         );

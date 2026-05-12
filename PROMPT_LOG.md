@@ -5287,3 +5287,49 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 
 
+
+---
+
+## Phase T119 — TLS 1.3 External PSK + Session-Resumption Scripts in CI (2026-05-12)
+
+> A
+> ...
+> 方案 B（推荐）：外部 PSK + 接 CI，psk_ke 留 T120
+
+The user picked Scope B from a triage of the deferred PSK / session-resumption tlsfuzzer track. Probed the 3 candidate scripts against the existing server; mapped findings to a two-decision-point choice.
+
+**Probe findings (pre-T119)**:
+| Script | Result | Root cause |
+|---|---|---|
+| `test-tls13-session-resumption.py` | 0/7 → 4/3 once `--ticket-key` set | Server didn't emit NST without `--ticket-key`; default to no resumption |
+| `test-tls13-psk_dhe_ke.py` | 0/4 | No external-PSK path in `process_client_hello` — only ticket-decrypt was tried |
+| `test-tls13-psk_ke.py` | 0/2 | Same external-PSK gap + needs `psk_ke` mode (no DHE in flight) |
+
+**Scope decision**:
+- **A (full, 1-5)**: includes `psk_ke` mode → closes 3rd script but needs `build_server_flight` no-key-share path + zero-DHE key-schedule wiring.
+- **B (smaller, 1+2+4+5)**: external PSK only; closes 2 of 3 scripts. Picked.
+
+**Implementation**:
+
+1. **`verify_binder` gains `external: bool` param** (`handshake/server.rs`) — selects `derive_binder_key(true)` for `"ext binder"` HKDF label (RFC 8446 §4.2.11.2). 5 existing test sites updated to pass `false`; new `test_verify_binder_external_label` covers the new path (ext-binder verify ↔ res-binder reject).
+
+2. **External-PSK lookup** (`process_client_hello` PSK block refactored): identities/binders parsed once; ticket-decrypt tried first (existing); on no match, `config.psk_identity == ch_identity` + length-equals-hash check + external binder verify adopts `config.psk`.
+
+3. **CLI flags** (`s_server`): new `--psk <hex>` + `--psk-identity <id>` (mutually-required pair). Threaded from `main.rs` through `s_server::run(...)`. All 3 existing run-tests updated for new arity.
+
+4. **CI workflow** (`tlsfuzzer.yml`): new `HITLS_PORT_PSK: 4451` + `HITLS_PSK_IDEN: hitls-test-psk` env; `HITLS_PSK_HEX` generated per-run via `openssl rand -hex 32` + `$GITHUB_ENV` export. New `s-server --psk --psk-identity --ticket-key` instance, new `scripts_psk` array + runner loop. PID added to stop-server cleanup.
+
+5. **XFAILs**:
+   - `xfail/test-tls13-psk_dhe_ke.txt` — 1 entry (`ffdhe2048` — RFC 7919 FFDHE-2048 group not in default `supported_groups`).
+   - `xfail/test-tls13-session-resumption.txt` — 3 entries (TLS 1.2 cross-version × 2 not exposed by CLI; `PSK_ONLY` queued for T120 `psk_ke` mode).
+
+**Tlsfuzzer impact**: +7 conversation-PASS (3 in psk_dhe_ke, 4 in session-resumption) at CI sampling. +4 stable XFAIL with per-entry rationale + concrete next-step. Curated CI suite size **44 → 46 scripts**.
+
+**Tests**: `cargo test -p hitls-tls --all-features --lib handshake::server::tests::test_verify_binder` 7/0 (+1 from T119). `cargo test -p hitls-cli --all-features --bins` 16/0 (unchanged). `cargo clippy --workspace --all-features --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean. Workspace total: 4178 → 4179.
+
+**Why it's a real feature gap closure, not just script wiring**: pre-T119 the project had RFC-8446 PSK wire-format / binder / both HKDF labels on the books, but `process_client_hello` literally never consulted `config.psk` / `config.psk_identity`. Every internal piece worked; the operator-facing path didn't exist. T119 closes that with one new lookup branch (~30 lines) and two CLI flags, then proves the closure with tlsfuzzer running real PSK-DHE handshakes against the dedicated server instance in CI.
+
+**Next-step pointers** kept in DEV_LOG / xfail rationale:
+- **T120 — `psk_ke` mode**: server-side no-`key_share` SH + zero-DHE key-schedule wiring → closes `test-tls13-psk_ke.py` (0/2 → 2/0) + `session resumption - PSK_ONLY`.
+- **FFDHE support**: separate I-phase, would unblock the `ffdhe2048` XFAIL in psk_dhe_ke and any other FFDHE-using scripts.
+- **TLS 1.2 + 1.3 same-port listener**: would close the cross-version session-resumption XFAILs (`sanity - TLS 1.2`, `use TLS 1.2 ticket in TLS 1.3`).

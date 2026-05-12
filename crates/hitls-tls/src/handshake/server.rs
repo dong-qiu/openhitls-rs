@@ -648,24 +648,44 @@ impl ServerHandshake {
 
         let mut verified_psk: Option<Vec<u8>> = None;
         if let (Some(psk_e), Some(modes_e)) = (psk_ext, psk_modes_ext) {
-            // Verify client supports psk_dhe_ke mode (1)
+            // Verify client supports psk_dhe_ke mode (1). Phase T119 still
+            // requires DHE — psk_ke (0) is queued for T120.
             let modes = parse_psk_key_exchange_modes(&modes_e.data)?;
             if modes.contains(&0x01) {
-                if let Some(ref ticket_key) = self.config.ticket_key {
-                    let (identities, binders) = parse_pre_shared_key_ch(&psk_e.data)?;
-                    if let Some(((identity, _age), binder)) =
-                        identities.first().zip(binders.first())
-                    {
-                        // Try to decrypt ticket
+                let (identities, binders) = parse_pre_shared_key_ch(&psk_e.data)?;
+                if let Some(((identity, _age), binder)) = identities.first().zip(binders.first()) {
+                    // Path 1 — resumption: decrypt the ticket from
+                    // `identity` using the configured ticket_key.
+                    if let Some(ref ticket_key) = self.config.ticket_key {
                         if let Ok((psk, ticket_suite, _created_at, _age_add)) =
                             decrypt_ticket(params.hash_alg_id(), ticket_key, identity)
                         {
-                            // Verify the ticket's cipher suite matches
-                            if ticket_suite == suite {
-                                // Verify binder
-                                if verify_binder(&params, &psk, msg_data, binder)? {
-                                    verified_psk = Some(psk);
-                                }
+                            // RFC 8446 §4.2.11: the ticket binds the
+                            // PSK to a cipher suite; reject mismatches.
+                            if ticket_suite == suite
+                                && verify_binder(&params, &psk, msg_data, binder, false)?
+                            {
+                                verified_psk = Some(psk);
+                            }
+                        }
+                    }
+                    // Path 2 — external PSK (Phase T119): when no ticket
+                    // matched, fall back to the out-of-band PSK configured
+                    // on `TlsConfig` (`--psk` / `--psk-identity` on the
+                    // CLI). Per RFC 8446 §4.2.11.2 the binder uses the
+                    // `"ext binder"` label. The external PSK length must
+                    // equal the negotiated suite's hash output (§4.2.11);
+                    // otherwise the binder check fails and we silently
+                    // fall through to non-PSK handshake.
+                    if verified_psk.is_none() {
+                        if let (Some(ref cfg_id), Some(ref cfg_psk)) =
+                            (&self.config.psk_identity, &self.config.psk)
+                        {
+                            if identity == cfg_id
+                                && cfg_psk.len() == params.hash_len
+                                && verify_binder(&params, cfg_psk, msg_data, binder, true)?
+                            {
+                                verified_psk = Some(cfg_psk.clone());
                             }
                         }
                     }
@@ -1531,16 +1551,20 @@ impl ServerHandshake {
     }
 }
 
-/// Verify a PSK binder against the truncated ClientHello.
+/// Verify a PSK binder against the truncated ClientHello (RFC 8446 §4.2.11.2).
 ///
-/// The binder is computed as:
-///   binder = HMAC(finished_key, Hash(truncated_CH))
-/// where truncated_CH = full CH without the binder value(s).
+/// The binder is `HMAC(finished_key, Hash(truncated_CH))`, where
+/// `truncated_CH` is the full CH with the trailing binders list stripped.
+/// `external` selects the binder-key label: `"res binder"` for tickets
+/// (resumption) vs `"ext binder"` for out-of-band PSKs configured via
+/// `config.psk` / `config.psk_identity` (Phase T119). Both run the same
+/// HKDF chain off the early secret, only the label differs.
 fn verify_binder(
     params: &CipherSuiteParams,
     psk: &[u8],
     ch_msg: &[u8],
     binder: &[u8],
+    external: bool,
 ) -> Result<bool, TlsError> {
     // The binder size at the end of CH: 2 (binders list len) + 1 (binder entry len) + hash_len
     let binder_tail_size = 2 + 1 + params.hash_len;
@@ -1552,7 +1576,7 @@ fn verify_binder(
     // Set up temporary key schedule for binder verification
     let mut ks = KeySchedule::new(params.clone());
     ks.derive_early_secret(Some(psk))?;
-    let binder_key = ks.derive_binder_key(false)?; // resumption binder
+    let binder_key = ks.derive_binder_key(external)?;
     let finished_key = ks.derive_finished_key(&binder_key)?;
 
     // Hash the truncated CH
@@ -2388,7 +2412,7 @@ mod tests {
         let (ch_msg, binder) = forge_ch_with_binder(&psk, suite, b"truncated CH bytes");
         let params = CipherSuiteParams::from_suite(suite).unwrap();
 
-        assert!(verify_binder(&params, &psk, &ch_msg, &binder).unwrap());
+        assert!(verify_binder(&params, &psk, &ch_msg, &binder, false).unwrap());
     }
 
     #[test]
@@ -2400,7 +2424,7 @@ mod tests {
 
         // Flip one bit in the binder — must be rejected (replay-protection core).
         binder[0] ^= 0x01;
-        assert!(!verify_binder(&params, &psk, &ch_msg, &binder).unwrap());
+        assert!(!verify_binder(&params, &psk, &ch_msg, &binder, false).unwrap());
     }
 
     #[test]
@@ -2412,7 +2436,7 @@ mod tests {
         let params = CipherSuiteParams::from_suite(suite).unwrap();
 
         // Same CH, but verifier uses a different PSK → finished_key differs → mismatch.
-        assert!(!verify_binder(&params, &psk_attacker, &ch_msg, &binder).unwrap());
+        assert!(!verify_binder(&params, &psk_attacker, &ch_msg, &binder, false).unwrap());
     }
 
     #[test]
@@ -2430,7 +2454,7 @@ mod tests {
         // verify_binder will strip 2 + 1 + 48 = 51 bytes from CH and compute
         // SHA-384 over the resulting prefix. Even ignoring the binder length
         // mismatch, the hash domain differs → must reject.
-        let result = verify_binder(&params_wrong, &psk, &ch_msg, &binder).unwrap();
+        let result = verify_binder(&params_wrong, &psk, &ch_msg, &binder, false).unwrap();
         assert!(!result, "SHA-384 verifier must not accept SHA-256 binder");
     }
 
@@ -2442,11 +2466,11 @@ mod tests {
         // an empty truncated_CH, which the implementation rejects with Ok(false).
         let ch_msg = vec![0u8; 35];
         let binder = vec![0u8; 32];
-        assert!(!verify_binder(&params, &psk, &ch_msg, &binder).unwrap());
+        assert!(!verify_binder(&params, &psk, &ch_msg, &binder, false).unwrap());
 
         // Strictly shorter than the tail → also Ok(false).
         let short_ch = vec![0u8; 10];
-        assert!(!verify_binder(&params, &psk, &short_ch, &binder).unwrap());
+        assert!(!verify_binder(&params, &psk, &short_ch, &binder, false).unwrap());
     }
 
     #[test]
@@ -2461,10 +2485,46 @@ mod tests {
         let params = CipherSuiteParams::from_suite(suite).unwrap();
 
         // Sanity: unmodified accepts.
-        assert!(verify_binder(&params, &psk, &ch_msg, &binder).unwrap());
+        assert!(verify_binder(&params, &psk, &ch_msg, &binder, false).unwrap());
 
         // Flip one byte inside the truncated portion — must reject.
         ch_msg[5] ^= 0x80;
-        assert!(!verify_binder(&params, &psk, &ch_msg, &binder).unwrap());
+        assert!(!verify_binder(&params, &psk, &ch_msg, &binder, false).unwrap());
+    }
+
+    /// Phase T119 — external-PSK binder path (RFC 8446 §4.2.11.2 `"ext binder"`
+    /// label). Forge a binder using the external label, then verify with
+    /// `external=true` (accepts) and `external=false` (rejects, because the
+    /// labels differ).
+    #[test]
+    fn test_verify_binder_external_label() {
+        let psk = vec![0xCD; 32];
+        let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+        let params = CipherSuiteParams::from_suite(suite).unwrap();
+        let hash_len = params.hash_len;
+
+        // Forge a binder using the EXTERNAL label.
+        let prefix = b"external psk CH prefix";
+        let mut ks = KeySchedule::new(params.clone());
+        ks.derive_early_secret(Some(&psk)).unwrap();
+        let binder_key = ks.derive_binder_key(true).unwrap();
+        let finished_key = ks.derive_finished_key(&binder_key).unwrap();
+        let mut hasher = crate::crypt::DigestVariant::new(params.hash_alg_id());
+        hasher.update(prefix).unwrap();
+        let mut hash = [0u8; 64];
+        hasher.finish(&mut hash[..hash_len]).unwrap();
+        let binder = ks
+            .compute_finished_verify_data(&finished_key, &hash[..hash_len])
+            .unwrap();
+
+        let mut ch_msg = prefix.to_vec();
+        ch_msg.extend_from_slice(&((1 + hash_len) as u16).to_be_bytes());
+        ch_msg.push(hash_len as u8);
+        ch_msg.extend_from_slice(&binder);
+
+        // Correct label accepts; resumption label rejects (mixing the two
+        // would let a ticket binder be reused as an external-PSK binder).
+        assert!(verify_binder(&params, &psk, &ch_msg, &binder, true).unwrap());
+        assert!(!verify_binder(&params, &psk, &ch_msg, &binder, false).unwrap());
     }
 }
