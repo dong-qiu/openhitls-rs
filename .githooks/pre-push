@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+#
+# pre-push: AI review gate for openHiTLS-rs.
+#
+# Runs `claude -p` against the diff being pushed, classifies the change,
+# and aborts the push on a critical finding. Designed for the project's
+# trunk-based workflow (no PRs on the remote) where the pre-push hook
+# is the only natural place to land an external review.
+#
+# Install once per clone (works across all worktrees because
+# core.hooksPath is stored in the shared config):
+#
+#     git config core.hooksPath .githooks
+#
+# Skip a single push:
+#
+#     SKIP_AI_REVIEW=1 git push ...   # explicit env knob
+#     git push --no-verify ...        # git-native bypass
+#
+# Behaviour matrix:
+#
+#     diff is empty / docs-only ........ skip (silent)
+#     `claude` CLI not in PATH ......... skip (with warning)
+#     review returns VERDICT: pass ..... allow push
+#     review returns VERDICT: block .... abort push (exit 1)
+#     review returns no VERDICT ........ allow push (with warning)
+#     `claude` invocation errors ....... allow push (don't gate on tool failure)
+#
+# The hook deliberately fails-OPEN on tool/parse problems so it never
+# becomes a chokepoint for an honest user; the only blocking path is an
+# explicit "VERDICT: block" line in the model's output.
+
+set -uo pipefail
+
+if [ "${SKIP_AI_REVIEW:-}" = "1" ]; then
+    echo "[ai-review] SKIP_AI_REVIEW=1 set, skipping." >&2
+    exit 0
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+    echo "[ai-review] 'claude' CLI not in PATH, skipping." >&2
+    echo "[ai-review] Install: https://docs.claude.com/en/docs/claude-code/setup" >&2
+    exit 0
+fi
+
+# git feeds pre-push tuples on stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>
+local_sha=""
+remote_sha=""
+zero="0000000000000000000000000000000000000000"
+while read -r _local_ref ls _remote_ref rs; do
+    if [ "$ls" = "$zero" ]; then
+        # Branch deletion — nothing to review.
+        continue
+    fi
+    local_sha="$ls"
+    remote_sha="$rs"
+    break
+done
+
+if [ -z "$local_sha" ]; then
+    exit 0
+fi
+
+# New branch on the remote → diff against origin/main as the baseline.
+if [ "$remote_sha" = "$zero" ] || [ -z "$remote_sha" ]; then
+    git fetch --quiet origin main 2>/dev/null || true
+    if git rev-parse --verify --quiet origin/main >/dev/null; then
+        base="$(git rev-parse origin/main)"
+    else
+        base="$(git hash-object -t tree /dev/null)"
+    fi
+else
+    base="$remote_sha"
+fi
+
+changed="$(git diff --name-only "$base..$local_sha" 2>/dev/null || true)"
+if [ -z "$changed" ]; then
+    exit 0
+fi
+
+n_files="$(printf '%s\n' "$changed" | wc -l | tr -d ' ')"
+
+# Classify the diff by path against the literal crate directory layout
+# in CLAUDE.md. Update this when adding new crypto-sensitive crates.
+crypto_paths='^crates/(hitls-crypto|hitls-bignum|hitls-tls|hitls-pki|hitls-auth)/'
+docs_only_paths='(^docs/|^tests/tlsfuzzer/xfail|\.(md|txt|yml|yaml|toml|lock)$)'
+
+has_crypto=0
+has_other_code=0
+has_only_docs=1
+
+while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    if printf '%s\n' "$f" | grep -qE "$crypto_paths"; then
+        has_crypto=1
+        has_only_docs=0
+    elif printf '%s\n' "$f" | grep -qE '\.(rs|sh)$'; then
+        has_other_code=1
+        has_only_docs=0
+    elif ! printf '%s\n' "$f" | grep -qE "$docs_only_paths"; then
+        has_other_code=1
+        has_only_docs=0
+    fi
+done <<< "$changed"
+
+if [ "$has_only_docs" = "1" ]; then
+    echo "[ai-review] only docs/config changed ($n_files file(s)), skipping." >&2
+    exit 0
+fi
+
+if [ "$has_crypto" = "1" ]; then
+    mode="security"
+    IFS= read -r -d '' review_prompt <<'PROMPT' || true
+You are reviewing a code change to a production cryptographic library
+(openHiTLS-rs, Rust). The diff is between base SHA __BASE__ and head
+SHA __HEAD__. Run `git diff __BASE__..__HEAD__` and check for:
+
+CRITICAL (MUST block push):
+  - Variable-time secret-dependent comparison (use of `==` on secrets
+    instead of `subtle::ConstantTimeEq`)
+  - Secret material not zeroized on drop (missing `Zeroize` /
+    `#[zeroize(drop)]`)
+  - Use of `unsafe` outside `hitls-bignum` and `hitls-crypto`
+  - New `panic!` / `unwrap()` / `expect()` / array-indexing in library
+    code (production paths)
+  - Use of `rand` crate instead of `getrandom` for cryptographic
+    randomness
+  - Removal of an existing constant-time codepath or zeroize call
+
+HIGH (FLAG but allow with explanation):
+  - New public API without `Result<_, CryptoError>` return shape
+  - New dependency added to any Cargo.toml
+  - TLS / handshake state-machine change that might affect tlsfuzzer-
+    tested behaviour
+  - Crypto algorithm new or modified without an accompanying test vector
+
+INFO (just note):
+  - Style / minor concerns
+
+Output format (and ONLY this block, no extra commentary):
+
+=== AI REVIEW (security mode) ===
+CRITICAL:
+  - <one-line finding> [file:line]
+  (or "none")
+HIGH:
+  - <one-line finding> [file:line]
+  (or "none")
+INFO:
+  - ...
+  (or "none")
+VERDICT: pass
+=================================
+
+Set VERDICT to `block` if and only if at least one CRITICAL finding is
+present.
+PROMPT
+else
+    mode="general"
+    IFS= read -r -d '' review_prompt <<'PROMPT' || true
+Review the Rust code diff between __BASE__ and __HEAD__ for openHiTLS-rs.
+Run `git diff __BASE__..__HEAD__` and check for:
+
+CRITICAL:
+  - panic!/unwrap/expect in library code
+  - unsafe outside allowed crates
+  - Logic bugs that would cause test failures
+
+HIGH:
+  - Missing error handling
+  - API regressions
+  - Test deletions without justification
+
+Output (and ONLY this block):
+
+=== AI REVIEW (general mode) ===
+CRITICAL: ...
+HIGH: ...
+INFO: ...
+VERDICT: pass
+================================
+PROMPT
+fi
+
+# Substitute the real SHAs.
+review_prompt="${review_prompt//__BASE__/$base}"
+review_prompt="${review_prompt//__HEAD__/$local_sha}"
+
+echo "[ai-review] $mode mode, reviewing $n_files file(s) (base=${base:0:10} head=${local_sha:0:10})" >&2
+echo "[ai-review] (this can take 30-90s; set SKIP_AI_REVIEW=1 to bypass)" >&2
+
+# --print          : non-interactive
+# --permission-mode bypassPermissions : allow Bash(git) and Read without prompting
+# --max-budget-usd : hard cap to defang runaway reviews
+review_output="$(claude --print \
+    --permission-mode bypassPermissions \
+    --max-budget-usd 0.50 \
+    "$review_prompt" 2>&1)"
+rc=$?
+
+if [ "$rc" -ne 0 ]; then
+    echo "[ai-review] claude exited with $rc, allowing push:" >&2
+    printf '%s\n' "$review_output" | sed 's/^/[ai-review]   /' | head -20 >&2
+    exit 0
+fi
+
+# Echo the review verbatim to stderr so the user sees it.
+echo "" >&2
+printf '%s\n' "$review_output" >&2
+echo "" >&2
+
+# Parse the verdict.
+if printf '%s\n' "$review_output" | grep -qiE '^VERDICT:[[:space:]]*block'; then
+    echo "[ai-review] verdict: BLOCK. push aborted." >&2
+    echo "[ai-review] override: SKIP_AI_REVIEW=1 git push ... | git push --no-verify ..." >&2
+    exit 1
+fi
+
+if printf '%s\n' "$review_output" | grep -qiE '^VERDICT:[[:space:]]*pass'; then
+    echo "[ai-review] verdict: PASS." >&2
+    exit 0
+fi
+
+# Failed-open: no VERDICT line in output. Tell the user but don't block.
+echo "[ai-review] WARNING: no VERDICT line in review output. Allowing push." >&2
+exit 0

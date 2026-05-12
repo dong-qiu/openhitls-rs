@@ -77,6 +77,19 @@ cargo fmt --all -- --check
 - **Merge policy**: always `--ff-only` (fast-forward only) to keep linear history; if conflicts, rebase the worktree branch first
 - Push command: always `git push origin main`
 
+### AI Review (Pre-Push Gate)
+Because the remote has only `main` (no PRs), the `.githooks/pre-push` hook runs an AI review against the diff being pushed and aborts on critical findings. This is the project's structured external review path.
+
+- **Install once per clone (covers all worktrees via shared config)**:
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+- **What it does**: classifies the diff by path, then invokes `claude --print` with the right review prompt — *security mode* for `hitls-crypto / hitls-bignum / hitls-tls / hitls-pki / hitls-auth`, *general mode* for other Rust code. Docs-only / xfail-only diffs are skipped silently.
+- **Blocking rules**: any **CRITICAL** finding (variable-time secret comparison, missing `Zeroize`, `unsafe` outside the allowed crates, `panic!`/`unwrap()` in library code, removal of constant-time / zeroize paths) aborts the push. HIGH findings are surfaced but don't block.
+- **Fail-open by design**: if `claude` is missing from PATH, exits with an error, or returns no `VERDICT:` line, the push is allowed and a warning is printed. The hook is a guardrail, not a chokepoint.
+- **Bypass**: `SKIP_AI_REVIEW=1 git push …` or `git push --no-verify …`.
+- **Budget**: capped at `$0.50` per invocation via `--max-budget-usd` so a runaway review can't burn tokens.
+
 ### Error Handling
 - Use `hitls_types::CryptoError` for all crypto errors (thiserror-based)
 - Return `Result<T, CryptoError>` from all public APIs
