@@ -162,7 +162,11 @@ fn test_tls12_ecdhe_ecdsa_full_handshake() {
         0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
         0x1F, 0x20,
     ];
-    let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+    // Minimal but valid DER: SEQUENCE { NULL } (4 bytes). The test exercises
+    // the TLS 1.2 handshake protocol logic — both sides set `verify_peer(false)`
+    // so the cert just needs to satisfy T117's RFC 5246 §7.4.2 DER-shape check
+    // (first byte 0x30, inner length matches outer wrapper), not be a real cert.
+    let fake_cert = vec![0x30, 0x02, 0x05, 0x00];
 
     let client_config = TlsConfig::builder()
         .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])

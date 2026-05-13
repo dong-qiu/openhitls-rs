@@ -3,7 +3,7 @@
 # Phase T89 — Wrapper that runs a tlsfuzzer script with our XFAIL list
 # attached. Exits 0 iff the script's own exit logic agrees, i.e.:
 #   - all FAIL conversations are listed in the xfail file (becomes XFAIL),
-#   - and no XFAIL converations now PASS (XPASS).
+#   - and no XFAIL conversations now PASS (XPASS).
 #
 # tlsfuzzer's own main() exits 1 when (FAIL > 0 OR XPASS > 0), so we
 # just propagate the exit code.

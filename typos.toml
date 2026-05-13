@@ -32,6 +32,9 @@ Alo = "Alo"       # variable/abbreviation
 Iy = "Iy"         # variable name
 PASSWOR = "PASSWOR" # RFC 6070 PBKDF2 test vector password string
 Parms = "Parms"     # RFC 3279 ASN.1 type name (validationParms / ValidationParms)
+symetric = "symetric"     # upstream tlsfuzzer filename: test-tls13-symetric-ciphers.py
+extentions = "extentions" # upstream tlsfuzzer filename: test-tls13-shuffled-extentions.py
+exhange = "exhange"       # upstream tlsfuzzer error string (in test-tls13-keyshare-omitted)
 
 [type.markdown]
 extend-glob = ["*.md"]
