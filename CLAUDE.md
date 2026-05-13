@@ -63,19 +63,23 @@ cargo fmt --all -- --check
 - **Sync before task**: Before starting any implementation task, always sync the remote main branch first (`git fetch origin main && git rebase origin/main`) to ensure the local codebase is up to date
 
 ### Git Branching Model
-- **Trunk-based development**: The remote repository has **only one branch: `main`**. Never create or push branches to the remote
+- **Trunk-based development**: `main` is the **only long-lived branch** on the remote and the **only merge target**. Short-lived feature branches MAY be pushed to the remote temporarily for the CI gate + self-review (draft PR), then deleted once their commits land on `main` via fast-forward.
 - **Local worktrees for parallel development**: 4 persistent worktrees under `worktrees/`, each on a dedicated local branch:
   - `worktrees/perf-enhanced` → `perf` (performance optimization)
   - `worktrees/bug-fix` → `bug-fix` (defect fixes)
   - `worktrees/refactoring` → `refactoring` (code restructuring)
   - `worktrees/test-enhanced` → `testing` (test coverage improvement)
-- **Worktree workflow**:
-  1. Develop in worktree: `cd worktrees/perf-enhanced` → commit changes
-  2. Rebase onto main: `git rebase main` (in worktree branch)
-  3. Fast-forward merge: `cd <root>` → `git checkout main` → `git merge perf --ff-only`
-  4. Sync & push: `git fetch origin main && git rebase origin/main` → `git push origin main`
-- **Merge policy**: always `--ff-only` (fast-forward only) to keep linear history; if conflicts, rebase the worktree branch first
-- Push command: always `git push origin main`
+- **Worktree workflow (with remote draft-PR gate)**:
+  1. **Sync first** (always): `git fetch origin main && git rebase origin/main` in the worktree branch
+  2. Develop in worktree: `cd worktrees/<name>` → commit changes
+  3. **Push for CI gate**: `git push origin <branch>` (`-u` on first push)
+  4. **Open draft PR**: `gh pr create --draft --base main --title "<short>" --body "$(cat <<'EOF' ... EOF)"` — skip if a PR already tracks this branch (push updates it in place)
+  5. Wait for CI to pass; scan the PR diff as a self-review
+  6. **Fast-forward into main**: `cd <repo-root>` → `git checkout main` → `git fetch origin main && git rebase origin/main` → `git merge <branch> --ff-only` → `git push origin main` (this auto-closes the PR because all its commits are now in `main`)
+  7. **Clean up**: `git push origin --delete <branch>` (the local worktree branch stays for the next task)
+- **Merge policy**: always `--ff-only` (no merge commits, linear history); if `--ff-only` fails, rebase the worktree branch on the latest `origin/main` first
+- **Optional WIP backup** (when work spans days without a merge): `git push origin <branch>` periodically — solves "local disk dies" without going through the PR gate
+- **Direct push to `main` is forbidden** for code changes — always go through a feature-branch PR so CI runs before main is updated. Trivial doc-only / `.gitignore` / chore commits MAY bypass when CI cost outweighs benefit; the worktree owner makes the call.
 
 ### Error Handling
 - Use `hitls_types::CryptoError` for all crypto errors (thiserror-based)
