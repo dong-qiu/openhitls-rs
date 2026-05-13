@@ -763,7 +763,7 @@ mod tests {
         let _pub_key = kp.public_key().to_vec();
 
         // Minimal test cert (not real X.509)
-        let cert_der = vec![0x30, 0x82, 0x01, 0x00];
+        let cert_der = vec![0x30, 0x02, 0x05, 0x00];
 
         TlsConfig::builder()
             .cipher_suites(&[
@@ -1011,7 +1011,7 @@ mod tests {
                 SignatureScheme::ED25519,
                 SignatureScheme::ECDSA_SECP256R1_SHA256,
             ])
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
             .session_cache(cache)
             .build();

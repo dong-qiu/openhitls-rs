@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn test_encode_decode_tlcp_certificate_roundtrip() {
         let msg = TlcpCertificateMessage {
-            sign_chain: vec![vec![0x30, 0x82, 0x01, 0x00]],
+            sign_chain: vec![vec![0x30, 0x02, 0x05, 0x00]],
             enc_cert: vec![0x30, 0x82, 0x02, 0x00],
         };
 
@@ -239,7 +239,7 @@ mod tests {
 
         let decoded = decode_tlcp_certificate(body).unwrap();
         assert_eq!(decoded.sign_chain.len(), 1);
-        assert_eq!(decoded.sign_chain[0], vec![0x30, 0x82, 0x01, 0x00]);
+        assert_eq!(decoded.sign_chain[0], vec![0x30, 0x02, 0x05, 0x00]);
         assert_eq!(decoded.enc_cert, vec![0x30, 0x82, 0x02, 0x00]);
     }
 

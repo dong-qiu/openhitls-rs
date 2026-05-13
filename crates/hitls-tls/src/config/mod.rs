@@ -1079,7 +1079,7 @@ mod tests {
     fn test_config_builder_with_server_cert() {
         let config = TlsConfig::builder()
             .role(TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .build();
         assert_eq!(config.certificate_chain.len(), 1);
@@ -2292,7 +2292,7 @@ mod tests {
     #[test]
     fn test_server_private_key_dsa_variant() {
         let key = ServerPrivateKey::Dsa {
-            params_der: vec![0x30, 0x82, 0x01, 0x00],
+            params_der: vec![0x30, 0x02, 0x05, 0x00],
             private_key: vec![0xBB; 20],
         };
         match &key {

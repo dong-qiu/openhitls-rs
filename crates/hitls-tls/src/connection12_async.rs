@@ -1885,7 +1885,7 @@ mod tests {
     ];
 
     /// Minimal fake DER-encoded certificate stub for tests that skip verification.
-    const TEST_FAKE_CERT: [u8; 4] = [0x30, 0x82, 0x01, 0x00];
+    const TEST_FAKE_CERT: [u8; 4] = [0x30, 0x02, 0x05, 0x00];
 
     fn ecdsa_private_key() -> Vec<u8> {
         TEST_ECDSA_PRIVATE.to_vec()

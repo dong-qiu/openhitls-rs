@@ -1597,7 +1597,7 @@ mod tests {
     fn make_server_config() -> TlsConfig {
         TlsConfig::builder()
             .role(TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]]) // fake DER
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]]) // fake DER
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .verify_peer(false)
             .build()
@@ -1739,7 +1739,7 @@ mod tests {
         // Server only supports X25519, but client offers secp256r1
         let config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .verify_peer(false)
             .supported_groups(&[NamedGroup::X25519])
@@ -1776,7 +1776,7 @@ mod tests {
         };
         let config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .verify_peer(false)
             .supported_groups(&[NamedGroup::X25519])
@@ -1850,7 +1850,7 @@ mod tests {
     fn test_server_chacha20_suite() {
         let config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .cipher_suites(&[CipherSuite::TLS_CHACHA20_POLY1305_SHA256])
             .verify_peer(false)
@@ -1874,7 +1874,7 @@ mod tests {
     fn test_server_aes256_gcm_suite() {
         let config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .cipher_suites(&[CipherSuite::TLS_AES_256_GCM_SHA384])
             .verify_peer(false)
@@ -1899,7 +1899,7 @@ mod tests {
         // Server supports AES-256-GCM first, client wants AES-128-GCM first
         let config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .cipher_suites(&[
                 CipherSuite::TLS_AES_256_GCM_SHA384,
@@ -2029,7 +2029,7 @@ mod tests {
 
         let server_config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(crate::config::ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .verify_peer(false)
             .build();
@@ -2086,7 +2086,7 @@ mod tests {
 
         let server_config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(crate::config::ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .verify_peer(false)
             .build();
@@ -2133,7 +2133,7 @@ mod tests {
         // Test with SECP256R1 key share (65-byte uncompressed point)
         let config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .supported_groups(&[NamedGroup::SECP256R1])
             .verify_peer(false)
@@ -2165,7 +2165,7 @@ mod tests {
         // Server only supports AES-256, client only offers AES-128
         let config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .cipher_suites(&[CipherSuite::TLS_AES_256_GCM_SHA384])
             .verify_peer(false)
@@ -2185,7 +2185,7 @@ mod tests {
         // Default is server preference: server's first matching suite wins
         let config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .cipher_suites(&[
                 CipherSuite::TLS_AES_256_GCM_SHA384,
@@ -2293,7 +2293,7 @@ mod tests {
         // Server only supports X25519
         let config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
             .verify_peer(false)
             .supported_groups(&[NamedGroup::X25519])
