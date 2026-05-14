@@ -32,6 +32,10 @@ Alo = "Alo"       # variable/abbreviation
 Iy = "Iy"         # variable name
 PASSWOR = "PASSWOR" # RFC 6070 PBKDF2 test vector password string
 Parms = "Parms"     # RFC 3279 ASN.1 type name (validationParms / ValidationParms)
+# Upstream tlsfuzzer identifiers that contain typos but must be referenced verbatim
+symetric = "symetric"     # upstream script name: test-tls13-symetric-ciphers.py
+extentions = "extentions" # upstream script name: test-tls13-shuffled-extentions.py
+exhange = "exhange"       # upstream conversation name: "psk_key exhange modes"
 
 [type.markdown]
 extend-glob = ["*.md"]
