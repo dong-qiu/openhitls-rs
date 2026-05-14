@@ -315,4 +315,4 @@ Licensed under the [Mulan Permissive Software License, Version 2](http://license
 
 ## Acknowledgments
 
-This project is a Rust rewrite of [openHiTLS](https://gitee.com/openhitls/openhitls), an open-source cryptographic and TLS library originally written in C. See [DEV_LOG.md](DEV_LOG.md) for the detailed migration history (Phases I1–I87, T1–T79, R1–R12, P1–P93).
+This project is a Rust rewrite of [openHiTLS](https://gitee.com/openhitls/openhitls), an open-source cryptographic and TLS library originally written in C. See [DEV_LOG.md](DEV_LOG.md) for the detailed migration history (Phases I1–I95, T1–T119, R1–R13, P1–P94).
