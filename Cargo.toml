@@ -39,7 +39,8 @@ getrandom = "0.3"
 thiserror = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
-clap = { version = "4", features = ["derive"] }
+# Pin clap <4.6 for MSRV 1.75 compatibility (4.6+ pulls clap_derive requiring edition2024 / rustc 1.85)
+clap = { version = ">=4, <4.6", features = ["derive"] }
 criterion = "0.5"
 # Pin proptest <1.7 for MSRV 1.75 compatibility (1.10+ requires rustc 1.84)
 proptest = ">=1.5, <1.12"
