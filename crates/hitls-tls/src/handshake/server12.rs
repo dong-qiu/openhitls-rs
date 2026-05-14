@@ -2228,7 +2228,7 @@ mod tests {
     fn create_test_ed25519_cert(_seed: &[u8], _pub_key: &[u8]) -> Vec<u8> {
         // For unit tests, we just need some DER bytes.
         // The SKE signature verification tests use verify_peer=false.
-        vec![0x30, 0x82, 0x01, 0x00]
+        vec![0x30, 0x02, 0x05, 0x00]
     }
 
     fn build_test_client_hello(suites: &[CipherSuite]) -> Vec<u8> {
@@ -2701,7 +2701,7 @@ mod tests {
                 SignatureScheme::ECDSA_SECP256R1_SHA256,
                 SignatureScheme::RSA_PSS_RSAE_SHA256,
             ])
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
             .ocsp_staple(fake_ocsp_response.clone())
             .build();
@@ -2736,9 +2736,9 @@ mod tests {
                 SignatureScheme::ECDSA_SECP256R1_SHA256,
                 SignatureScheme::RSA_PSS_RSAE_SHA256,
             ])
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
-            .ocsp_staple(vec![0x30, 0x82, 0x01, 0x00])
+            .ocsp_staple(vec![0x30, 0x02, 0x05, 0x00])
             .build();
 
         let mut hs = Tls12ServerHandshake::new(config);
@@ -2764,7 +2764,7 @@ mod tests {
                 SignatureScheme::ECDSA_SECP256R1_SHA256,
                 SignatureScheme::RSA_PSS_RSAE_SHA256,
             ])
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
             // No ocsp_staple configured
             .build();
@@ -2793,7 +2793,7 @@ mod tests {
                 SignatureScheme::ECDSA_SECP256R1_SHA256,
                 SignatureScheme::RSA_PSS_RSAE_SHA256,
             ])
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
             .ocsp_staple(fake_ocsp)
             .build();
@@ -2963,7 +2963,7 @@ mod tests {
     fn test_server12_build_new_session_ticket_with_key_no_master_secret() {
         let config = TlsConfig::builder()
             .role(crate::TlsRole::Server)
-            .certificate_chain(vec![vec![0x30, 0x82, 0x01, 0x00]])
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
             .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
             .ticket_key(vec![0xAA; 48])

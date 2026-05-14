@@ -1204,8 +1204,10 @@ mod tests {
         0x1F, 0x20,
     ];
 
-    /// Minimal fake DER-encoded certificate stub for tests that skip verification.
-    const TEST_FAKE_CERT: [u8; 4] = [0x30, 0x82, 0x01, 0x00];
+    /// Minimal DER-valid SEQUENCE used as a cert placeholder for tests that skip
+    /// chain validation. Must be length-honest to clear the T117 codec12 DER-shape
+    /// check; pre-T117 the spoofing `30 82 01 00` was tolerated.
+    const TEST_FAKE_CERT: [u8; 4] = [0x30, 0x02, 0x05, 0x00];
 
     fn client_config() -> TlsConfig {
         TlsConfig::builder()

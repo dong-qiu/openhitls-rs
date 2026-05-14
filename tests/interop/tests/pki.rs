@@ -162,7 +162,11 @@ fn test_tls12_ecdhe_ecdsa_full_handshake() {
         0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
         0x1F, 0x20,
     ];
-    let fake_cert = vec![0x30, 0x82, 0x01, 0x00];
+    // Placeholder cert: DER-valid SEQUENCE (`30 02 05 00` = SEQUENCE / NULL).
+    // Pre-T117 a length-spoofing `30 82 01 00` slipped through the codec; with the
+    // T117 DER-shape check on Certificate12 entries, placeholder certs must declare
+    // their actual length truthfully. `verify_peer(false)` still skips chain validation.
+    let fake_cert = vec![0x30, 0x02, 0x05, 0x00];
 
     let client_config = TlsConfig::builder()
         .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])

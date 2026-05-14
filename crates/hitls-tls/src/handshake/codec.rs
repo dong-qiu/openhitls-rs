@@ -1061,7 +1061,7 @@ mod tests {
     #[test]
     fn test_decode_certificate() {
         // Build a Certificate message body
-        let cert_der = vec![0x30, 0x82, 0x01, 0x00]; // fake DER
+        let cert_der = vec![0x30, 0x02, 0x05, 0x00]; // fake DER
         let mut body = Vec::new();
         body.push(0); // certificate_request_context length = 0
 
@@ -1207,7 +1207,7 @@ mod tests {
             certificate_request_context: vec![],
             certificate_list: vec![
                 CertificateEntry {
-                    cert_data: vec![0x30, 0x82, 0x01, 0x00],
+                    cert_data: vec![0x30, 0x02, 0x05, 0x00],
                     extensions: vec![],
                 },
                 CertificateEntry {
@@ -1223,7 +1223,7 @@ mod tests {
         assert_eq!(decoded.certificate_list.len(), 2);
         assert_eq!(
             decoded.certificate_list[0].cert_data,
-            vec![0x30, 0x82, 0x01, 0x00]
+            vec![0x30, 0x02, 0x05, 0x00]
         );
         assert_eq!(decoded.certificate_list[1].cert_data.len(), 5);
     }
@@ -1418,7 +1418,7 @@ mod tests {
         // A sample Certificate message body (context_len=0, list with one small cert)
         let mut cert_body = Vec::new();
         cert_body.push(0); // empty context
-        let fake_cert = vec![0x30, 0x82, 0x01, 0x00]; // minimal DER
+        let fake_cert = vec![0x30, 0x02, 0x05, 0x00]; // minimal DER
         let mut list = Vec::new();
         // cert_data (3-byte len)
         list.push(0);

@@ -24,7 +24,7 @@ const TEST_ECDSA_PRIVATE: [u8; 32] = [
 ];
 
 /// Minimal fake DER-encoded certificate stub for tests that skip verification.
-const TEST_FAKE_CERT: [u8; 4] = [0x30, 0x82, 0x01, 0x00];
+const TEST_FAKE_CERT: [u8; 4] = [0x30, 0x02, 0x05, 0x00];
 
 #[test]
 fn test_tls12_client_connection_creation() {
@@ -3716,7 +3716,7 @@ fn test_tls12_connection_info_cipher_suite() {
 
     // Peer certificates: server sent one fake cert
     assert_eq!(conn.peer_certificates().len(), 1);
-    assert_eq!(conn.peer_certificates()[0], vec![0x30, 0x82, 0x01, 0x00]);
+    assert_eq!(conn.peer_certificates()[0], vec![0x30, 0x02, 0x05, 0x00]);
 
     // SNI
     assert_eq!(conn.server_name(), Some("test.example.com"));
@@ -5096,7 +5096,7 @@ fn test_tls12_client_certificate_before_server_hello() {
     let mut hs = make_test_client_hs();
     let _ = hs.build_client_hello().unwrap();
     assert_eq!(hs.state(), Tls12ClientState::WaitServerHello);
-    let cert_data = vec![0x30, 0x82, 0x01, 0x00];
+    let cert_data = vec![0x30, 0x02, 0x05, 0x00];
     let raw = vec![0x0b, 0x00, 0x00, 0x04, 0x30, 0x82, 0x01, 0x00];
     let result = hs.process_certificate(&raw, &[cert_data]);
     assert!(result.is_err());
