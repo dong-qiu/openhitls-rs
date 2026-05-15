@@ -5836,6 +5836,7 @@ fn test_server_write_before_handshake_errors() {
 /// payload byte-shape that matches a real ECH offer
 /// (X25519 KEM enc + AES-128-GCM-tagged random payload). A passive
 /// observer must not be able to distinguish this from a real ECH client.
+#[cfg(feature = "ech")]
 #[test]
 fn test_ech_grease_extension_present_in_client_hello() {
     use crate::extensions::ExtensionType;
@@ -5901,7 +5902,10 @@ fn test_ech_grease_disabled_omits_extension() {
 /// handshake normally (silently ignore the unknown ECH offer). This
 /// pins the contract that GREASE doesn't break interoperability with
 /// servers that don't know what to do with the extension — the entire
-/// purpose of GREASE.
+/// purpose of GREASE. Gated on `feature = "ech"` because without it
+/// `enable_ech_grease(true)` is a documented silent no-op and the
+/// test no longer exercises the GREASE injection path.
+#[cfg(feature = "ech")]
 #[test]
 fn test_ech_grease_handshake_succeeds_against_non_ech_server() {
     use crate::config::ServerPrivateKey;

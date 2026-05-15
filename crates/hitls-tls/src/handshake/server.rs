@@ -1446,8 +1446,11 @@ impl ServerHandshake {
 
     /// Test-only accessor (Phase I93 e2e tests verify that the recovered
     /// inner CH's random — not the outer wire random — landed in the
-    /// handshake context).
-    #[cfg(test)]
+    /// handshake context). Gated on `feature = "ech"` because the only
+    /// caller is the ECH split-CH end-to-end test, which itself only
+    /// compiles when ECH is enabled — without the gate, `--no-default-features`
+    /// flags this as dead code.
+    #[cfg(all(test, feature = "ech"))]
     pub(crate) fn client_random_for_test(&self) -> &[u8; 32] {
         &self.client_random
     }
