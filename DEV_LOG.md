@@ -5,7 +5,7 @@
 Category summary:
 - Implementation: I1–I95 (95 phases)
 - Testing: T1–T119 (113 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F; T111 in progress — Phase A is 3/9 algorithms migrated)
-- Refactoring: R1–R13 (13 phases)
+- Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
 | # | Phase | Type | Title | Date |
@@ -319,6 +319,7 @@ Category summary:
 | 307 | T118 | Test | TLS 1.2 CertificateRequest comprehensive 18-item sigalgs list (mirrors T102 TLS 1.3 fix) + `verify_cv12_signature` scheme-aware transcript hashing (RFC 5246 §7.4.8 — CV hash MUST be the scheme's hash, not the PRF hash) + verifier coverage expanded (RSA-PSS-RSAE SHA-384/512, ECDSA P-521, Ed25519, RSA-PKCS#1 SHA-1/512) — closes the last XFAIL in `test-certificate-request.py` (4/1 → 5/0); curated mTLS-12 subset (4 scripts) now 1279/0/0 — completely clean | 2026-05-12 |
 | 308 | T119 | Test | TLS 1.3 external-PSK server-side support (RFC 8446 §4.2.11 out-of-band PSK auth via new `--psk` / `--psk-identity` CLI flags + `verify_binder` external-label parameter) + 2 new tlsfuzzer scripts in CI on a dedicated `--psk` + `--ticket-key` listener: `test-tls13-psk_dhe_ke.py` (3/1 XFAIL) and `test-tls13-session-resumption.py` (4/3 XFAIL) — closes 7 new conversations; `psk_ke` mode (no DHE) queued for T120 | 2026-05-12 |
 | 309 | T111 | Test | C→Rust test migration tool — `xtask/` scaffold + per-algorithm template emitters consuming openHiTLS C SDV `.data` files. Phase A pilots: SHA-2 (28 tests, 70 TC rows), HMAC (43 tests, MD5/SHA-1/SHA-2/SM3), CMAC (12 tests, AES-128/192/256; SM4 unsupported), AES (30 tests, ECB + CTR across 3 key sizes; CBC rows blocked on a future `cbc_encrypt_raw` no-padding helper, multi-update rows deferred). `--check` mode for CI drift detection (rustfmt-aware comparison, fixes false-positive bug where committed file went through rustfmt but `--check` compared raw generator output). 113 migrated tests total; 5/9 algorithms remain (DSA, SM2, SM4, DH, curve25519, plus PKI CRL); plan §2.4 acceptance criteria still open (`docs/c-test-na-list.md` + per-failure issues) | 2026-05-12 |
+| 310 | R14 | Refactor | CI Overhaul — (A) efficiency: test-matrix split + trim, prebuilt-tool installs, 6-way fuzz-smoke shard → push-CI wall-clock 11m39s → 7m20s; (B) hardening: revived `fuzz-smoke` (a silent no-op for months), deleted decorative `valgrind-ct`, un-masked TSan / scheduled-fuzzing, pinned nightly + actions, miri/ASan weekly → daily, fmt/clippy pre-push presubmit; (C) post-hoc CI → PR-gated trunk: `ci-gate` aggregate job + branch protection + auto-merge (CI is now the merge gate; direct `git push origin main` rejected) | 2026-05-15 |
 
 ---
 
@@ -17743,6 +17744,86 @@ The 9-algorithm Phase A batch represents ~3 500 mechanical-migration TCs — man
 - `cargo fmt --all -- --check`: clean.
 - `cargo test --workspace --all-features`: see status line update.
 - Migration progress: **4 / 9 algorithms** complete (44% of Phase A by algorithm count; Phase B–F not started). AES pilot adds 30 tests (ECB + CTR); CBC + CFB + OFB rows still pending raw-API support and the multi-update emitters.
+
+
+
+
+## Phase R14 — CI Overhaul: Efficiency Optimization + Masked-Failure Hardening + Post-Hoc → PR-Gated Trunk Migration (2026-05-15)
+
+### Summary
+
+A three-part overhaul of the project CI: (A) cut the push-CI wall-clock roughly in half, (B) hardened CI against "fake green" — checks that look passing but verify nothing — and pinned the toolchain, and (C) migrated from post-hoc CI (runs *after* a commit is already on `main`) to a PR-gated trunk model where CI is the binding merge gate. No Rust source changed — the work lives entirely in `.github/workflows/`, `.githooks/pre-push`, `.cargo/config.toml`, and the build / supply-chain manifests.
+
+### Part A — CI efficiency optimization
+
+Push-CI wall-clock was **11m39s**, critical path `clippy → Test (windows-latest, stable) 9m22s`.
+
+| Change | Effect |
+|--------|--------|
+| The `test` matrix ran 3 compile cycles per cell (`nextest --all-features` + doc tests + `nextest --no-default-features`). Doc tests and the no-default smoke are OS-independent — split into one dedicated `test-extras` job. | Each matrix cell does 1 compile cycle; Windows-stable 9m22s → 5m36s |
+| `test` matrix trimmed: MSRV (1.75) breakage is compiler-version-specific, not OS-specific — dropped the macOS-1.75 + Windows-1.75 cells (6 → 4). | −2 slow cells |
+| 10 `cargo install <tool>` sites → `taiki-e/install-action` prebuilt binaries. | seconds instead of 1–3 min each |
+| `sbom` → push-to-main only; `unsafe-audit` → schedule-only. | fewer per-push jobs |
+| `fuzz-smoke` sharded 6 ways across parallel runners. | off the critical path |
+
+Result: **11m39s → 7m20s** (~37% faster); the new critical path is `Miri Smoke` (~6.5 min).
+
+### Part B — Hardening: eliminating "fake green"
+
+A green CI that does not actually verify is worse than no CI. Audit findings:
+
+- **`fuzz-smoke` had been a silent no-op for months.** Its `cargo install cargo-fuzz --locked || true` step actually *failed to compile* (cargo-fuzz 0.13.1's old `thiserror 1.0.50` no longer builds on current nightly); `|| true` swallowed the error, `cargo fuzz list` was a missing command, the loop iterated zero times, and the job "passed" in ~21s having fuzzed nothing. A prebuilt cargo-fuzz binary revived it — it now fuzzes all ~68 targets (sharded 6 ways) with a guard that fails loudly on an empty target list.
+- **`valgrind-ct` deleted** — `continue-on-error` + `--error-exitcode=0` + `|| true` made it structurally unable to fail, and despite its "Constant-Time Check" name it ran plain memcheck (memory errors, not constant-time), redundant with the ASan job.
+- **`ThreadSanitizer`** — dropped `continue-on-error`; a data race in a TLS library must fail the run.
+- **`Scheduled Fuzzing`** — a crash was swallowed by per-target `|| true`; now collects failures and fails the run.
+- Advisory-by-design jobs (timing tests, cargo-geiger) kept `continue-on-error` but were renamed with an explicit `[advisory]` suffix so "green" is never mistaken for "gated".
+
+**Toolchain / action pinning** (reproducibility): unpinned `dtolnay/rust-toolchain@nightly` (12 sites) pinned to `nightly-2026-05-14` via a workflow-level `NIGHTLY` env; `crate-ci/typos@master` → `@v1.46.1`; `actions/checkout@v4` → `@v6`; top-level `permissions: contents: read`.
+
+**Security cadence**: a second daily cron added — `miri-full` (14-way) and `AddressSanitizer` promoted from weekly to daily (crypto/bignum `unsafe`-code UB-detection latency 7 d → 1 d); exhaustive/noisy jobs stay weekly.
+
+**Gating consistency**: `needs: [fmt, clippy]` unified across the compile-heavy jobs; `cross-check` dropped its aarch64 target (`test-aarch64` runs natively on arm64); concurrency group is now per-commit so every trunk commit keeps its own verdict.
+
+**pre-push hook**: added a Stage-1 fast `cargo fmt --check` + `cargo clippy` local presubmit before the existing AI review — the hook had been AI-review-only, so a commit failing fmt/clippy could reach `main`.
+
+**Side-fixes surfaced by the hardening:**
+- A real **WASM-build regression** — R13's getrandom 0.2→0.3 migration broke `wasm32-unknown-unknown` (getrandom 0.3 needs an explicit backend opt-in). Fixed via a `.cargo/config.toml` `getrandom_backend="wasm_js"` target cfg + a target-specific `wasm_js` feature in `hitls-crypto`.
+- A **version-floor inconsistency** — `tests/interop` declared `zeroize = "1"` while the five library crates declare `"1.8"`; surfaced by `cargo minimal-versions --direct` and aligned to `"1.8"`.
+- `minimal-versions` switched to `--direct` (minimise only declared direct-dep floors), so the check no longer chases un-fixable transitive-floor breakage (`zeroize_derive`, `gcc`). `cargo-vet` exemptions for the new wasm transitive deps (js-sys / wasm-bindgen) refreshed to `safe-to-deploy`.
+
+### Part C — Post-hoc CI → PR-gated trunk migration
+
+The remote had no PRs; CI ran on `push` *after* a commit was already on `main` — detection, not prevention. With 4 parallel worktrees rebasing onto `main`, a broken commit had real blast radius. Migrated to a PR-gated trunk model in three sub-steps, each itself a dress rehearsal of the new flow:
+
+1. **CI workflow prep** (PR #66): new `ci-gate` aggregate job — `needs` all 23 hard-gate jobs, passes only if every one succeeded, so branch protection can require a single check; conditional `concurrency` (a PR cancels superseded runs, a push to `main` never cancels); `coverage` re-enabled on `pull_request`.
+2. **Branch protection** on `main`: required checks `CI Gate` + `Conventional Commits`, `strict` (up to date before merge), linear history, PR required (0 approvals — solo dev), `enforce_admins` off (trivial-doc bypass). Repo `allow_auto_merge` + `delete_branch_on_merge` enabled.
+3. **Doc alignment** (PR #67): CLAUDE.md "Git Branching Model" + "AI Review" sections rewritten for the new flow; the stale draft-PR doc PR #63 closed as superseded.
+
+PR #67 was the first change to land through the *enforced* gate — its CI hit a flaky macOS failure, `CI Gate` correctly went red, a `gh run rerun --failed` passed, and auto-merge squash-merged it. Direct `git push origin main` is now rejected; every change must pass `CI Gate` via a PR.
+
+### Changes
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/ci.yml` | Modified | test-matrix split + trim, prebuilt-tool installs, 6-way fuzz-smoke shard, masked-failure fixes, `valgrind-ct` removed, nightly/action pinning, daily cron, `needs` consistency, per-commit concurrency, `ci-gate` aggregate job, dead-PR-job rewiring |
+| `.github/workflows/commitlint.yml` | Modified | rewired `pull_request`-only → `push`; inline Conventional-Commits range check replaces the third-party action |
+| `.githooks/pre-push` | Modified | added Stage-1 fast fmt/clippy presubmit before the AI review |
+| `.cargo/config.toml` | Modified | `wasm32-unknown-unknown` `getrandom_backend="wasm_js"` rustflags |
+| `crates/hitls-crypto/Cargo.toml` | Modified | target-specific `getrandom` `wasm_js` feature for wasm32 |
+| `tests/interop/Cargo.toml` | Modified | `zeroize` floor `"1"` → `"1.8"` (workspace consistency) |
+| `supply-chain/config.toml` | Modified | `safe-to-deploy` exemptions for js-sys / wasm-bindgen wasm deps |
+| `CLAUDE.md` | Modified | "Git Branching Model" + "AI Review" rewritten for the PR-gated flow; status line `R1–R13` → `R1–R14` |
+
+### Test Count (Post R14)
+
+Unchanged at **4298 (43 ignored)** — a CI-infrastructure phase, no Rust source modified (the WASM and zeroize side-fixes touched only `Cargo.toml` / `.cargo/config.toml`).
+
+### Build Status (Post R14)
+
+- `actionlint` on `.github/workflows/`: 0 issues (it validates GitHub Actions schema + expression syntax — caught a `ci-gate` double-quote bug that a plain YAML parser missed).
+- CI run 25912647669 (pre-PR-gated baseline): 38 jobs green / 0 failed; wall-clock 7m20s.
+- PR #66 and PR #67 gated runs: `CI Gate` green; auto-merge fired.
+- `cargo fmt --all -- --check` + `cargo clippy --workspace --all-features --all-targets -D warnings` (run by the new pre-push presubmit): clean.
 
 
 
