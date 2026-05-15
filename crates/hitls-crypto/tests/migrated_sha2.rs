@@ -3,6 +3,8 @@
 //
 // Generator: docs/c-test-migration-plan.md Phase A (xtask).
 
+#![cfg(feature = "sha2")]
+
 use hitls_crypto::sha2::{Sha224, Sha256, Sha384, Sha512};
 
 /// MD Work Flow Test Init Final without Update SHA224

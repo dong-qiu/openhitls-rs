@@ -49,7 +49,7 @@ fn classify(tc_name: &str) -> CaseKind {
     // checked FIRST: `_MB_` (multi-buffer 4-way SHA-256, needs its
     // own template), `_COPY_CTX_` (context-clone tests), and
     // `_DEFAULT_PROVIDER_` (provider abstraction — N/A in Rust)
-    // all have substrings that would otherwise be mis-matched by
+    // all have substrings that would otherwise be mismatched by
     // the generic `_FUNC_TC0NN` rules below.
     if tc_name.contains("_MB_")
         || tc_name.contains("_COPY_CTX_")
@@ -97,6 +97,7 @@ fn write_header(out: &mut String) {
          // DO NOT EDIT BY HAND. Source: openhitls C SDV test_suite_sdv_eal_md_sha2.data\n\
          //\n\
          // Generator: docs/c-test-migration-plan.md Phase A (xtask).\n\n\
+         #![cfg(feature = \"sha2\")]\n\n\
          use hitls_crypto::sha2::{Sha224, Sha256, Sha384, Sha512};\n\n",
     );
 }
