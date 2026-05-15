@@ -20,20 +20,31 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Check pushed commit messages
+      - name: Check commit messages
+        env:
+          # For a PR, the reliable range is base..head — `github.event.before`
+          # is the *pre-force-push* head on a `synchronize` event, which a
+          # rebase orphans (`git log <orphan>..` → "Invalid revision range").
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
         run: |
-          # Validate every non-merge commit this push introduced against
+          # Validate every non-merge commit the change introduced against
           # the Conventional Commits prefix set.
-          BEFORE='${{ github.event.before }}'
-          case "$BEFORE" in
-            ''|0000000000000000000000000000000000000000)
-              # First push / unknown parent: check the tip commit only.
-              RANGE='-1' ;;
-            *)
-              RANGE="$BEFORE..${{ github.sha }}" ;;
-          esac
+          if [ -n "$PR_BASE" ]; then
+            RANGE="$PR_BASE..$PR_HEAD"
+          else
+            case "$PUSH_BEFORE" in
+              ''|0000000000000000000000000000000000000000)
+                # First push / unknown parent: check the tip commit only.
+                RANGE='-1' ;;
+              *)
+                RANGE="$PUSH_BEFORE..$PUSH_SHA" ;;
+            esac
+          fi
           PATTERN='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?: .+'
-          COMMITS=$(git log --no-merges --format='%H %s' $RANGE)
+          COMMITS=$(git log --no-merges --format='%H %s' "$RANGE")
           FAIL=0
           while IFS= read -r line; do
             [ -z "$line" ] && continue
