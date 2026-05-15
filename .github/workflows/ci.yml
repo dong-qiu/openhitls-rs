@@ -84,7 +84,14 @@ jobs:
       # Doc tests + the no-default-features smoke are OS-independent and run
       # once in the `test-extras` job. Keeping them out of this matrix means
       # each cell does a single compile cycle instead of three.
-      - run: cargo nextest run --workspace --all-features --profile ci
+      #
+      # `rustup run <toolchain>`: on the macOS runner image the bare `cargo`
+      # on PATH resolves to the rustup multi-call binary in `rustup-init`
+      # mode (it prints `Usage: rustup-init` and rejects the `nextest`
+      # subcommand). Dispatching through `rustup run` pins the invocation to
+      # the toolchain dtolnay just installed, so the correct `cargo` proxy is
+      # used. Harmless on Linux/Windows where the bare `cargo` already works.
+      - run: rustup run ${{ matrix.rust }} cargo nextest run --workspace --all-features --profile ci
 
   test-extras:
     name: Doc Tests + No-Default-Features
@@ -508,7 +515,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - name: Run tests on native aarch64
-        run: cargo nextest run --workspace --all-features --profile ci
+        # `rustup run stable`: dispatch through rustup for the same reason as
+        # the `test` job — pins the `cargo` proxy to the installed toolchain.
+        run: rustup run stable cargo nextest run --workspace --all-features --profile ci
 
   wasm-check:
     name: WASM Compilation Check
