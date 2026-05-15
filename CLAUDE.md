@@ -63,22 +63,24 @@ cargo fmt --all -- --check
 - **Sync before task**: Before starting any implementation task, always sync the remote main branch first (`git fetch origin main && git rebase origin/main`) to ensure the local codebase is up to date
 
 ### Git Branching Model
-- **Trunk-based development**: The remote repository has **only one branch: `main`**. Never create or push branches to the remote
+- **Trunk-based development with a PR merge gate**: One long-lived branch — `main`. Every code change lands via a short-lived feature-branch PR; CI is the merge gate. `main` is branch-protected — **direct `git push origin main` is rejected**.
 - **Local worktrees for parallel development**: 4 persistent worktrees under `worktrees/`, each on a dedicated local branch:
   - `worktrees/perf-enhanced` → `perf` (performance optimization)
   - `worktrees/bug-fix` → `bug-fix` (defect fixes)
   - `worktrees/refactoring` → `refactoring` (code restructuring)
   - `worktrees/test-enhanced` → `testing` (test coverage improvement)
-- **Worktree workflow**:
-  1. Develop in worktree: `cd worktrees/perf-enhanced` → commit changes
-  2. Rebase onto main: `git rebase main` (in worktree branch)
-  3. Fast-forward merge: `cd <root>` → `git checkout main` → `git merge perf --ff-only`
-  4. Sync & push: `git fetch origin main && git rebase origin/main` → `git push origin main`
-- **Merge policy**: always `--ff-only` (fast-forward only) to keep linear history; if conflicts, rebase the worktree branch first
-- Push command: always `git push origin main`
+- **Worktree → main workflow**:
+  1. Sync: `git fetch origin main && git rebase origin/main` (in the worktree branch)
+  2. Develop in the worktree → commit (Conventional Commits format required)
+  3. Push the branch: `git push origin <branch>` — the pre-push hook runs fmt/clippy + AI review locally
+  4. Open a PR: `gh pr create --fill`
+  5. Queue the merge: `gh pr merge --auto --squash` — GitHub merges automatically once the required checks pass
+  6. After merge: `git fetch origin main && git reset --hard origin/main` to realign the worktree branch onto the squashed commit
+- **Branch protection on `main`**: requires the `CI Gate` (aggregate of all hard CI gates) + `Conventional Commits` status checks, `strict` mode (branch must be up to date before merge), and linear history. `enforce_admins` is off — the repo admin may bypass for genuinely trivial doc-only commits at their discretion.
+- **Merge policy**: squash-merge (default, one commit per task) or rebase-merge — never a merge commit (linear history). If a PR conflicts, rebase the branch onto `origin/main` first.
 
 ### AI Review (Pre-Push Gate)
-Because the remote has only `main` (no PRs), the `.githooks/pre-push` hook runs an AI review against the diff being pushed and aborts on critical findings or on signs the reviewer didn't actually engage. This is the project's structured external-review path.
+The `.githooks/pre-push` hook runs two **local pre-flight stages** before a branch reaches the remote: (1) a fast `cargo fmt --check` + `cargo clippy` gate, and (2) an AI review against the diff being pushed, aborting on critical findings or on signs the reviewer didn't actually engage. This is a *local* pre-flight that keeps obviously-broken or unreviewed code from even reaching a PR — the **binding merge gate** is the `CI Gate` status check on the PR (see Git Branching Model).
 
 - **Install once per clone (covers all worktrees via shared config)**:
   ```bash
