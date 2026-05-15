@@ -5373,3 +5373,23 @@ The user picked Scope B from a triage of the deferred PSK / session-resumption t
 - **T120 — `psk_ke` mode**: server-side no-`key_share` SH + zero-DHE key-schedule wiring → closes `test-tls13-psk_ke.py` (0/2 → 2/0) + `session resumption - PSK_ONLY`.
 - **FFDHE support**: separate I-phase, would unblock the `ffdhe2048` XFAIL in psk_dhe_ke and any other FFDHE-using scripts.
 - **TLS 1.2 + 1.3 same-port listener**: would close the cross-version session-resumption XFAILs (`sanity - TLS 1.2`, `use TLS 1.2 ticket in TLS 1.3`).
+
+---
+
+## Phase R14 — CI Overhaul: Efficiency + Masked-Failure Hardening + PR-Gated Trunk Migration (2026-05-15)
+
+> 请针对当前的CI方案，给出优化方案，希望在兼顾质量要求的同时提高CI的效率
+> 请深度分析当前CI方案的合理性
+> 基于分析结果，结合业界的最佳实践，在保证CI质量看护质量和CI效率的基础上给出优化方案
+> 当前有四个worktree并行开发，参考业界直接实践，应该使用基于主干的开发模式，还是使用PR的模式？
+> 看一下 #63 的内容，给出迁移到 PR-gated 流程的落地方案
+
+A multi-prompt phase — CI optimization → deep rationality analysis → PR-gated migration — executed in stages via follow-up `执行阶段N` prompts. Full detail in DEV_LOG Phase R14.
+
+**Part A — efficiency.** Push-CI was 11m39s, critical path `clippy → Test (windows-stable) 9m22s`. The `test` matrix ran 3 compile cycles per cell — doc tests + the no-default-features smoke (both OS-independent) were split into a dedicated `test-extras` job (1 cycle/cell; Windows-stable 9m22s → 5m36s); the macOS-1.75 + Windows-1.75 cells were dropped (MSRV is compiler-, not OS-specific); 10 `cargo install <tool>` sites → `taiki-e/install-action` prebuilt binaries; `fuzz-smoke` sharded 6 ways; `sbom` / `unsafe-audit` scoped down. **Result: 11m39s → 7m20s (~37%).**
+
+**Part B — masked-failure hardening.** The deep analysis surfaced a systemic "fake green" problem. `fuzz-smoke` had been a silent no-op for months — `cargo install cargo-fuzz --locked || true` failed to compile (cargo-fuzz 0.13.1's old `thiserror`), `|| true` swallowed it, the target loop iterated zero times — revived via a prebuilt binary + empty-list guard. Deleted decorative `valgrind-ct` (`--error-exitcode=0` + `continue-on-error` + `|| true`, mislabeled "constant-time" while running plain memcheck); un-masked ThreadSanitizer + Scheduled Fuzzing; pinned nightly → `nightly-2026-05-14` and `crate-ci/typos` → `@v1.46.1`; promoted miri-full + ASan weekly → daily; added a fast `cargo fmt` + `cargo clippy` pre-push presubmit. Side-fixes surfaced: a real WASM-build regression (R13's getrandom 0.3 migration broke `wasm32-unknown-unknown`) and a `tests/interop` `zeroize` version-floor inconsistency (`"1"` vs the workspace `"1.8"`).
+
+**Part C — post-hoc CI → PR-gated trunk migration.** The analysis established the CI was post-hoc — it ran *after* a commit was already on `main` — with ~5 dead PR-only jobs. After the trunk-vs-PR discussion (verdict: trunk-based development *with* a PR merge gate — the two are not opposites), migrated in three stages: (1) a `ci-gate` aggregate job + conditional concurrency, merged via PR #66; (2) branch protection on `main` — required checks `CI Gate` + `Conventional Commits`, strict, linear history, PR-required; (3) CLAUDE.md "Git Branching Model" rewrite via PR #67, with the stale `#63` closed as superseded. Direct `git push origin main` is now rejected.
+
+**Result**: CI moved from a post-hoc canary to a binding merge gate; push-CI wall-clock −37%; every previously "fake green" check now either truly gates or is explicitly marked `[advisory]`. No Rust source changed — the work is in `.github/workflows/`, `.githooks/pre-push`, `.cargo/config.toml`, and the build / supply-chain manifests. Recorded as DEV_LOG Phase R14; landed via PRs #66 / #67 / #68.
