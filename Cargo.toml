@@ -40,7 +40,7 @@ thiserror = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 # Pin clap <4.6 for MSRV 1.75 compatibility (4.6+ pulls clap_derive requiring edition2024 / rustc 1.85)
-clap = { version = ">=4, <4.6", features = ["derive"] }
+clap = { version = ">=4, <4.7", features = ["derive"] }
 criterion = "0.5"
 # Pin proptest <1.9 for MSRV 1.75 compatibility (1.9+ requires rustc 1.82, 1.11+ requires rustc 1.85).
 # Last 1.74-compatible release is 1.8.x.
