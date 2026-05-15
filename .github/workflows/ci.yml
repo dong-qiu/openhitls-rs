@@ -8,7 +8,8 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 3 * * 1'  # Weekly Monday 03:00 UTC
+    - cron: '0 3 * * 1'  # Weekly Monday 03:00 UTC — full exhaustive suite
+    - cron: '0 3 * * *'  # Daily 03:00 UTC — security-critical UB/memory nets
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,8 +24,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Per-commit group: post-hoc CI on a trunk — every commit deserves its
+  # own independent verdict, so runs are never cancelled by a later push.
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   typos:
@@ -199,12 +202,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-hack
         uses: taiki-e/install-action@cargo-hack
-      # Depth 1 (single-feature) on PR/push — catches the common class of
-      # missing-feature-gate errors in <1 min. Depth 2 (every pair, ~10 min)
-      # runs nightly via the `schedule` trigger.
+      # Depth 1 (single-feature) on PR/push/daily — catches the common
+      # class of missing-feature-gate errors in <1 min. Depth 2 (every
+      # pair, ~10 min) runs only on the weekly cron.
       - name: Check feature combinations
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "${{ github.event.schedule }}" = "0 3 * * 1" ]; then
             cargo hack check -p hitls-crypto --feature-powerset --depth 2 --no-dev-deps
           else
             cargo hack check -p hitls-crypto --feature-powerset --depth 1 --no-dev-deps
@@ -212,6 +215,7 @@ jobs:
 
   minimal-versions:
     name: Minimal Dependency Versions
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -274,7 +278,8 @@ jobs:
     # Fan-out across all 14 miri targets in parallel — schedule-only because
     # the previous serial job was the wall-clock bottleneck (~80 min).
     # Parallel execution caps the critical path at the slowest single
-    # target (~15-25 min depending on input).
+    # target (~15-25 min depending on input). Runs daily (both crons) —
+    # UB in the crypto unsafe code should surface within 24h, not a week.
     if: github.event_name == 'schedule'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
@@ -315,6 +320,7 @@ jobs:
 
   fuzz-check:
     name: Fuzz Build Check
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -408,7 +414,7 @@ jobs:
     # Weekly measurement only. The trunk-based flow opens no PRs, so the
     # per-PR Codecov patch gate never fired; this job tracks the project
     # coverage trend on Codecov rather than gating individual commits.
-    if: github.event_name == 'schedule'
+    if: github.event.schedule == '0 3 * * 1'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     strategy:
@@ -476,10 +482,13 @@ jobs:
 
   cross-check:
     name: Cross-compile Check
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     strategy:
+      # aarch64 dropped: the `test-aarch64` job natively compiles AND runs
+      # on arm64, which strictly supersedes a cross `cargo check`.
       matrix:
-        target: [aarch64-unknown-linux-gnu, i686-unknown-linux-gnu, s390x-unknown-linux-gnu]
+        target: [i686-unknown-linux-gnu, s390x-unknown-linux-gnu]
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -502,6 +511,7 @@ jobs:
 
   wasm-check:
     name: WASM Compilation Check
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -514,6 +524,7 @@ jobs:
 
   doc:
     name: Documentation Check
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -560,7 +571,7 @@ jobs:
     # BoringSSL) is to run dudect on bare-metal benchmarking hosts, not on
     # cloud CI. We retain the test so nightly runs can flag genuine
     # regressions, but do not block PRs on noise.
-    if: github.event_name == 'schedule'
+    if: github.event.schedule == '0 3 * * 1'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -581,7 +592,7 @@ jobs:
 
   timing-tests-extended:
     name: Constant-Time Verification (Extended) [advisory]
-    if: github.event_name == 'schedule'
+    if: github.event.schedule == '0 3 * * 1'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -661,7 +672,7 @@ jobs:
     # `unsafe` policy is enforced by the pre-push AI review and the crate-list
     # in CLAUDE.md. Run weekly to track the unsafe-count trend rather than on
     # every push.
-    if: github.event_name == 'schedule'
+    if: github.event.schedule == '0 3 * * 1'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -715,7 +726,7 @@ jobs:
     # Weekly only: Criterion on shared CI runners is too noisy for
     # per-commit gating (same rationale as the advisory timing tests).
     # Compares the trunk tip against its parent; warning-only.
-    if: github.event_name == 'schedule'
+    if: github.event.schedule == '0 3 * * 1'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
@@ -765,7 +776,7 @@ jobs:
 
   reproducible-build:
     name: Reproducible Build Verification
-    if: github.event_name == 'schedule'
+    if: github.event.schedule == '0 3 * * 1'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -788,6 +799,7 @@ jobs:
 
   sanitizers-asan:
     name: AddressSanitizer
+    # Daily (both crons) — memory-safety net for crypto/bignum unsafe code.
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -807,7 +819,7 @@ jobs:
 
   sanitizers-tsan:
     name: ThreadSanitizer
-    if: github.event_name == 'schedule'
+    if: github.event.schedule == '0 3 * * 1'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -828,7 +840,7 @@ jobs:
 
   fuzz-run:
     name: Scheduled Fuzzing
-    if: github.event_name == 'schedule'
+    if: github.event.schedule == '0 3 * * 1'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
