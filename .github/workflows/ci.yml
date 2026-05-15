@@ -913,13 +913,11 @@ jobs:
       - careful
     runs-on: ubuntu-latest
     steps:
-      - name: Verify all required jobs succeeded
+      - name: Fail if any required job did not pass
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: |
-          results='${{ join(needs.*.result, " ") }}'
-          echo "required-job results: $results"
-          case "$results" in
-            *failure*|*cancelled*)
-              echo "::error::CI Gate: one or more required jobs did not pass"
-              exit 1 ;;
-          esac
-          echo "CI Gate: all required jobs passed"
+          echo "::error::CI Gate: a required job failed or was cancelled"
+          exit 1
+      - name: Confirm
+        run: |
+          echo "CI Gate - all required jobs passed"
