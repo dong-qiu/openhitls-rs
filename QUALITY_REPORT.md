@@ -1,5 +1,7 @@
 # openHiTLS-rs — Quality Assurance Report
 
+> ⚠️ **ARCHIVED SNAPSHOT** — content frozen circa **Phase T86** (4,046 tests / 35 ignored at the time of writing). Current canonical project state (per [DEV_LOG.md](DEV_LOG.md) / [CLAUDE.md](CLAUDE.md)): **I1–I95, T1–T119, R1–R13, P1–P94, 4222 tests / 43 ignored**. Subsequent quality work (T87 onward — workspace timing-oracle audit, tlsfuzzer harness, alert-before-close generalisation, mTLS / PSK / cert-matrix coverage, etc.) is logged in DEV_LOG.md but not reflected below. Re-baseline this report before treating it as a current QA dashboard.
+>
 > Quality safety net analysis and testing optimization roadmap.
 > Related docs: [DEV_LOG.md](DEV_LOG.md) | [README.md](README.md)
 

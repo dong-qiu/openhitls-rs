@@ -1,6 +1,8 @@
 # Performance Comparison: openHiTLS (C) vs openHiTLS-rs (Rust)
 
-> **Date**: 2026-03-05 (P1–P93, I83–I87, T74 complete) | **Platform**: Apple M4, macOS 15.4, 10 cores, 16 GB RAM
+> ⚠️ **ARCHIVED SNAPSHOT** — frozen at **2026-03-05** (P1–P93, I83–I87, T74 complete). Benchmark numbers, phase ranges, and prose reflect that date. Current canonical project state (per [DEV_LOG.md](DEV_LOG.md) / [CLAUDE.md](CLAUDE.md)): **I1–I95, T1–T119, R1–R13, P1–P94**. P94 (SHA256-MB 4-way batch API) is not benchmarked here. Re-run Criterion + refresh this report when adopting any P94+ optimisation in performance-sensitive code paths.
+>
+> **Platform**: Apple M4, macOS 15.4, 10 cores, 16 GB RAM
 > **Benchmark suite**: 307 test points across 63 algorithm groups
 
 ---
