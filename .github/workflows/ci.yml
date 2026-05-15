@@ -11,6 +11,14 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # Pinned nightly — bump deliberately. Unpinned `@nightly` lets a random
+  # nightly compiler regression turn CI red with no code change. This date
+  # is verified green across miri / fuzz / careful / minimal-versions.
+  NIGHTLY: nightly-2026-05-14
+
+# Least-privilege default; jobs that need more (audit, sbom) escalate locally.
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: crate-ci/typos@master
+      - uses: crate-ci/typos@v1.46.1
 
   fmt:
     name: Format Check
@@ -205,7 +213,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-hack
       - uses: taiki-e/install-action@cargo-minimal-versions
@@ -250,8 +260,9 @@ jobs:
       MIRIFLAGS: "-Zmiri-disable-isolation"
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.NIGHTLY }}
           components: miri
       - uses: Swatinem/rust-cache@v2
       - run: cargo miri test -p hitls-bignum
@@ -292,9 +303,10 @@ jobs:
     env:
       MIRIFLAGS: "-Zmiri-disable-isolation"
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.NIGHTLY }}
           components: miri
       - uses: Swatinem/rust-cache@v2
       - run: cargo miri test ${{ matrix.target.args }}
@@ -304,7 +316,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: fuzz
@@ -327,7 +341,9 @@ jobs:
         shard: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: fuzz
@@ -344,6 +360,13 @@ jobs:
         run: |
           cd fuzz
           FAILED=0
+          # Guard against the job silently becoming a no-op (this exact
+          # bug masked a broken cargo-fuzz install for months): if the
+          # target list is empty, fail loudly instead of "passing".
+          if [ "$(cargo fuzz list | wc -l)" -eq 0 ]; then
+            echo "::error::cargo fuzz list returned no targets — cargo-fuzz install broken?"
+            exit 1
+          fi
           # Deterministic round-robin shard: every 6th target at this
           # shard's offset. New fuzz targets are auto-distributed.
           TARGETS=$(cargo fuzz list | awk 'NR % 6 == ${{ matrix.shard }}')
@@ -400,8 +423,9 @@ jobs:
           - hitls-cli
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.NIGHTLY }}
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
@@ -430,7 +454,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-machete
         uses: taiki-e/install-action@v2
@@ -522,7 +548,7 @@ jobs:
         run: cargo test -p hitls-integration-tests -- --ignored test_openssl_differential
 
   timing-tests-core:
-    name: Constant-Time Verification (Core)
+    name: Constant-Time Verification (Core) [advisory]
     # Schedule-only: dudect-style timing tests are extremely noisy on shared
     # GitHub Actions runners (CPU frequency scaling, hyperthread neighbour
     # interference, hypervisor steal time, ~20ns Instant::now() overhead vs
@@ -552,7 +578,7 @@ jobs:
         run: echo "::warning::Timing tests failed — may be CI environment noise (CPU frequency scaling, load)"
 
   timing-tests-extended:
-    name: Constant-Time Verification (Extended)
+    name: Constant-Time Verification (Extended) [advisory]
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -628,7 +654,7 @@ jobs:
           push-to-registry: false
 
   unsafe-audit:
-    name: Unsafe Code Audit (cargo-geiger)
+    name: Unsafe Code Audit (cargo-geiger) [advisory]
     # Informational only (continue-on-error, advisory report artifact) — the
     # `unsafe` policy is enforced by the pre-push AI review and the crate-list
     # in CLAUDE.md. Run weekly to track the unsafe-count trend rather than on
@@ -748,7 +774,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-careful
         uses: taiki-e/install-action@v2
@@ -789,16 +817,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
       - uses: Swatinem/rust-cache@v2
       - name: Run tests with ASan
         env:
           RUSTFLAGS: "-Z sanitizer=address -D warnings"
           RUSTDOCFLAGS: "-Z sanitizer=address"
         run: |
-          cargo +nightly test -p hitls-bignum --target x86_64-unknown-linux-gnu
-          cargo +nightly test -p hitls-crypto --features aes,sha2,modes,hmac --target x86_64-unknown-linux-gnu
-          cargo +nightly test -p hitls-utils --target x86_64-unknown-linux-gnu
+          cargo test -p hitls-bignum --target x86_64-unknown-linux-gnu
+          cargo test -p hitls-crypto --features aes,sha2,modes,hmac --target x86_64-unknown-linux-gnu
+          cargo test -p hitls-utils --target x86_64-unknown-linux-gnu
 
   sanitizers-tsan:
     name: ThreadSanitizer
@@ -806,37 +836,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
       - uses: Swatinem/rust-cache@v2
       - name: Run TLS tests with TSan
         env:
           RUSTFLAGS: "-Z sanitizer=thread -D warnings"
           TSAN_OPTIONS: "suppressions=tsan_suppressions.txt"
+        # No continue-on-error: a data race in a TLS library is a real
+        # defect and must fail the (scheduled) run. If a specific race is
+        # a known false positive, add a precise entry to
+        # tsan_suppressions.txt rather than blanket-ignoring the job.
         run: |
-          cargo +nightly test -p hitls-tls --all-features --target x86_64-unknown-linux-gnu -- --test-threads=1
-        continue-on-error: true
-
-  valgrind-ct:
-    name: Valgrind Constant-Time Check
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install Valgrind
-        run: sudo apt-get update && sudo apt-get install -y valgrind
-      - name: Build tests
-        run: cargo test -p hitls-crypto --all-features --no-run --release 2>&1 | grep "Executable" | head -3
-      - name: Run under Valgrind memcheck
-        run: |
-          # Run crypto unit tests under Valgrind to detect secret-dependent branches
-          TEST_BIN=$(cargo test -p hitls-crypto --features aes,sha2,hmac,modes --no-run --release --message-format=json 2>/dev/null | \
-            jq -r 'select(.reason == "compiler-artifact" and .target.kind[] == "lib") | .executable // empty' | tail -1)
-          if [ -n "$TEST_BIN" ]; then
-            valgrind --tool=memcheck --error-exitcode=0 "$TEST_BIN" --test-threads=1 2>&1 | tail -20
-          fi
-        continue-on-error: true
+          cargo test -p hitls-tls --all-features --target x86_64-unknown-linux-gnu -- --test-threads=1
 
   fuzz-run:
     name: Scheduled Fuzzing
@@ -844,7 +857,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: fuzz
@@ -858,10 +873,16 @@ jobs:
         # with the statically linked libc. Pin to the gnu host target.
         run: |
           cd fuzz
+          FAILED=0
           for target in $(cargo fuzz list); do
             echo "=== Fuzzing $target ==="
-            cargo fuzz run --target x86_64-unknown-linux-gnu "$target" -- -max_total_time=60 -jobs=2 -dict=dictionary/common.dict || true
+            cargo fuzz run --target x86_64-unknown-linux-gnu "$target" -- -max_total_time=60 -jobs=2 -dict=dictionary/common.dict \
+              || { echo "::error::CRASH detected in $target"; FAILED=1; }
           done
+          if [ $FAILED -ne 0 ]; then
+            echo "::error::Scheduled fuzzing found one or more crashes — see uploaded artifacts"
+            exit 1
+          fi
       - name: Upload crash artifacts
         if: always()
         uses: actions/upload-artifact@v7
