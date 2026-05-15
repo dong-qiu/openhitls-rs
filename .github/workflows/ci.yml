@@ -24,10 +24,11 @@ permissions:
   contents: read
 
 concurrency:
-  # Per-commit group: post-hoc CI on a trunk — every commit deserves its
-  # own independent verdict, so runs are never cancelled by a later push.
-  group: ${{ github.workflow }}-${{ github.sha }}
-  cancel-in-progress: false
+  # On a PR: group by PR ref + cancel superseded runs (fast iteration).
+  # On a push to main: group by commit SHA + never cancel — every merged
+  # commit deserves its own independent post-merge verdict.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   typos:
@@ -411,10 +412,10 @@ jobs:
     # threshold rules in `.codecov.yml` (88% project / 70% patch) still
     # apply correctly to merged data.
     #
-    # Weekly measurement only. The trunk-based flow opens no PRs, so the
-    # per-PR Codecov patch gate never fired; this job tracks the project
-    # coverage trend on Codecov rather than gating individual commits.
-    if: github.event.schedule == '0 3 * * 1'
+    # Runs on PRs (Codecov patch coverage on the PR diff) and weekly (full
+    # project trend). Not on every push-to-main — the merged commit was
+    # already measured on its PR.
+    if: github.event_name == 'pull_request' || github.event.schedule == '0 3 * * 1'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     strategy:
@@ -877,3 +878,48 @@ jobs:
           name: fuzz-crashes
           path: fuzz/artifacts/
           if-no-files-found: ignore
+
+  ci-gate:
+    name: CI Gate
+    # Single aggregate status check for branch protection. Requiring this
+    # one job is equivalent to requiring every hard gate in its `needs`,
+    # and sidesteps the "a skipped required check blocks the merge" problem
+    # that arises when conditional jobs are required individually.
+    # `if: always()` so the gate still runs (and fails) when a need fails.
+    if: always()
+    needs:
+      - typos
+      - fmt
+      - clippy
+      - test
+      - test-extras
+      - test-features
+      - feature-powerset
+      - minimal-versions
+      - audit
+      - miri-smoke
+      - fuzz-check
+      - fuzz-smoke
+      - unused-deps
+      - deny
+      - cross-check
+      - test-aarch64
+      - wasm-check
+      - doc
+      - ignored-tests
+      - openssl-differential
+      - supply-chain
+      - bench
+      - careful
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all required jobs succeeded
+        run: |
+          results='${{ join(needs.*.result, " ") }}'
+          echo "required-job results: $results"
+          case "$results" in
+            *failure*|*cancelled*)
+              echo "::error::CI Gate: one or more required jobs did not pass"
+              exit 1 ;;
+          esac
+          echo "CI Gate: all required jobs passed"
