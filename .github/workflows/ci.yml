@@ -54,6 +54,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         rust: [stable, "1.75"]
+        # MSRV (1.75) breakage is compiler-version-specific, not OS-specific:
+        # a too-new stdlib/language feature fails identically on every OS.
+        # Verify MSRV on Linux only; keep full 3-OS coverage on stable.
+        exclude:
+          - { os: macos-latest, rust: "1.75" }
+          - { os: windows-latest, rust: "1.75" }
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@master
@@ -61,9 +67,28 @@ jobs:
           toolchain: ${{ matrix.rust }}
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
+      # Doc tests + the no-default-features smoke are OS-independent and run
+      # once in the `test-extras` job. Keeping them out of this matrix means
+      # each cell does a single compile cycle instead of three.
       - run: cargo nextest run --workspace --all-features --profile ci
-      - run: cargo test --doc --workspace --all-features
-      - run: cargo nextest run --workspace --no-default-features --profile ci
+
+  test-extras:
+    name: Doc Tests + No-Default-Features
+    # OS-independent test cycles split out of the `test` matrix so the
+    # (slow) Windows/macOS cells each compile once instead of three times.
+    # A doc-test failure or a missing `#[cfg(feature)]` gate manifests
+    # identically on every OS, so a single Linux run is sufficient coverage.
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - name: Doc tests (all features)
+        run: cargo test --doc --workspace --all-features
+      - name: No-default-features smoke
+        run: cargo nextest run --workspace --no-default-features --profile ci
 
   test-features:
     name: "Features: ${{ matrix.group }}"
@@ -286,7 +311,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: fuzz
-      - run: cargo install cargo-fuzz --locked || true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
       - run: cd fuzz && cargo check
 
   fuzz-smoke:
@@ -300,7 +327,9 @@ jobs:
         with:
           prefix-key: fuzz
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked || true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
       - name: Run fuzz targets (10s each)
         run: |
           cd fuzz
@@ -391,7 +420,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-machete
-        run: cargo install cargo-machete --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
       - name: Check for unused dependencies
         run: cargo machete
 
@@ -531,12 +562,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-vet
-        run: cargo install cargo-vet
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-vet
       - name: Run cargo-vet
         run: cargo vet
 
   sbom:
     name: SBOM Generation + Provenance
+    # SBOM + SLSA provenance are release artifacts, not correctness gates —
+    # only generate them for the canonical main-branch history, not on PRs.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     permissions:
@@ -548,7 +584,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-cyclonedx
-        run: cargo install cargo-cyclonedx
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
       - name: Generate CycloneDX SBOM
         run: cargo cyclonedx --all --format json
       - name: Upload SBOM artifact
@@ -578,6 +616,11 @@ jobs:
 
   unsafe-audit:
     name: Unsafe Code Audit (cargo-geiger)
+    # Informational only (continue-on-error, advisory report artifact) — the
+    # `unsafe` policy is enforced by the pre-push AI review and the crate-list
+    # in CLAUDE.md. Run weekly to track the unsafe-count trend rather than on
+    # every push.
+    if: github.event_name == 'schedule'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -586,7 +629,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-geiger
-        run: cargo install cargo-geiger
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-geiger
       - name: Run cargo-geiger report
         run: cargo geiger --all-features --output-format ascii 2>&1 | tee geiger-report.txt || true
       - name: Upload geiger report
@@ -628,7 +673,9 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
       - name: Install cargo-public-api
-        run: cargo install cargo-public-api --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api
       - name: Generate API surface reports
         run: |
           mkdir -p api-reports
@@ -669,9 +716,12 @@ jobs:
         run: |
           git checkout ${{ github.sha }}
           cargo bench --all-features --bench crypto_bench -- --save-baseline head
+      - name: Install critcmp
+        uses: taiki-e/install-action@v2
+        with:
+          tool: critcmp
       - name: Compare benchmarks
         run: |
-          cargo install critcmp --locked
           critcmp base head | tee bench-diff.txt
       - name: Check for regressions (>10% slowdown)
         run: |
@@ -688,7 +738,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-careful
-        run: cargo install cargo-careful --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-careful
       - run: cargo careful test -p hitls-bignum
       - run: cargo careful test -p hitls-crypto --features aes,sha2,modes,hmac
       - run: cargo careful test -p hitls-crypto --no-default-features --features rsa
@@ -784,7 +836,9 @@ jobs:
         with:
           prefix-key: fuzz
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
       - name: Run fuzz targets (60s each)
         run: |
           cd fuzz
