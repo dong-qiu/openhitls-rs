@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 #
-# pre-push: AI review gate for openHiTLS-rs.
+# pre-push: fast fmt/clippy gate + AI review for openHiTLS-rs.
 #
-# Runs an external-auditor-framed `claude -p` against the diff being
-# pushed and aborts on a critical finding or on signs the reviewer
-# didn't actually engage with the change. Designed for the project's
-# trunk-based workflow (no PRs on the remote) where the pre-push hook
-# is the only natural place to land an external review.
+# Two stages run before a push is allowed:
+#   1. Fast local presubmit — `cargo fmt --check` + `cargo clippy`. In a
+#      trunk-based workflow there is no PR to catch a broken build, so
+#      this gate keeps the trunk green by construction (~40s warm).
+#   2. AI review — an external-auditor-framed `claude -p` against the
+#      diff being pushed, aborting on a critical finding or on signs the
+#      reviewer didn't actually engage with the change.
+# The pre-push hook is the only natural place to land both in a
+# trunk-based workflow (no PRs on the remote).
 #
 # Install once per clone (covers all worktrees via shared config):
 #
@@ -14,8 +18,9 @@
 #
 # Skip a single push:
 #
-#     SKIP_AI_REVIEW=1 git push ...   # explicit env knob
-#     git push --no-verify ...        # git-native bypass
+#     SKIP_PRESUBMIT=1 git push ...   # skip the fmt/clippy gate only
+#     SKIP_AI_REVIEW=1 git push ...   # skip the AI review only
+#     git push --no-verify ...        # git-native bypass (skips both)
 #
 # Objectivity design (relative to "stock" Claude Code review):
 #
@@ -52,6 +57,8 @@
 # Behaviour matrix:
 #
 #     diff is empty / docs-only ........ skip (silent, exit 0)
+#     fmt/clippy gate fails ............ abort push (exit 1)
+#     `cargo` not in PATH .............. skip gate with warning, continue
 #     `claude` CLI not in PATH ......... skip with warning (exit 0)
 #     review returns VERDICT: pass ..... allow push (exit 0)
 #     review returns VERDICT: block .... abort push (exit 1)
@@ -139,6 +146,29 @@ if [ "$has_only_docs" = "1" ]; then
     exit 0
 fi
 
+# ── Stage 1: fast local presubmit (fmt + clippy) ──────────────────────
+# Trunk-based: no PR exists to catch a broken build, so a fmt/clippy
+# gate runs here before the (slower) AI review. Keeps the trunk green
+# by construction. Bypass with SKIP_PRESUBMIT=1.
+if [ "${SKIP_PRESUBMIT:-}" = "1" ]; then
+    echo "[presubmit] SKIP_PRESUBMIT=1 set, skipping fmt/clippy gate." >&2
+elif ! command -v cargo >/dev/null 2>&1; then
+    echo "[presubmit] 'cargo' not in PATH, skipping fmt/clippy gate." >&2
+else
+    echo "[presubmit] cargo fmt --all --check ..." >&2
+    if ! cargo fmt --all -- --check >&2; then
+        echo "[presubmit] BLOCK: code is not rustfmt-clean — run 'cargo fmt --all'." >&2
+        exit 1
+    fi
+    echo "[presubmit] cargo clippy --workspace --all-features --all-targets ..." >&2
+    if ! cargo clippy --workspace --all-features --all-targets -- -D warnings >&2; then
+        echo "[presubmit] BLOCK: clippy reported warnings/errors — fix before pushing." >&2
+        exit 1
+    fi
+    echo "[presubmit] fmt + clippy clean." >&2
+fi
+
+# ── Stage 2: AI review ────────────────────────────────────────────────
 # Capture the actual --shortstat as a ground truth the model has to
 # match (or at least produce something credibly equivalent).
 actual_shortstat="$(git diff --shortstat "$base..$local_sha" 2>/dev/null | sed 's/^[[:space:]]*//')"
