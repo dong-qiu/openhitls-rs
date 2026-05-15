@@ -2,9 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
+  # Kept for external contributor PRs (the team's own flow is trunk-based
+  # via local worktrees and never opens PRs).
   pull_request:
-    branches: [main, develop]
+    branches: [main]
   schedule:
     - cron: '0 3 * * 1'  # Weekly Monday 03:00 UTC
 
@@ -403,10 +405,10 @@ jobs:
     # threshold rules in `.codecov.yml` (88% project / 70% patch) still
     # apply correctly to merged data.
     #
-    # The previous inline `< 60%` Bash threshold check is dropped — it was
-    # redundant with `.codecov.yml` and only echoed warnings; the proper
-    # gate is the Codecov status check on the PR.
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+    # Weekly measurement only. The trunk-based flow opens no PRs, so the
+    # per-PR Codecov patch gate never fired; this job tracks the project
+    # coverage trend on Codecov rather than gating individual commits.
+    if: github.event_name == 'schedule'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     strategy:
@@ -692,7 +694,10 @@ jobs:
 
   semver:
     name: Semver Check
-    if: github.event_name == 'pull_request'
+    # Runs on every push (and weekly), comparing the new commit against its
+    # parent — the trunk-based equivalent of a PR semver gate. Advisory:
+    # pre-1.0, a 0.x minor bump is allowed to break by design.
+    needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -703,42 +708,14 @@ jobs:
         continue-on-error: true
         with:
           package: hitls-types,hitls-utils,hitls-bignum,hitls-crypto,hitls-tls,hitls-pki,hitls-auth
-
-  api-surface:
-    name: API Surface Report
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
-      - name: Install cargo-public-api
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-public-api
-      - name: Generate API surface reports
-        run: |
-          mkdir -p api-reports
-          for crate in hitls-types hitls-utils hitls-bignum hitls-crypto hitls-tls hitls-pki hitls-auth; do
-            cargo public-api -p "$crate" --all-features > "api-reports/${crate}.txt" 2>/dev/null || true
-          done
-          echo "## API Surface Summary" > api-reports/summary.txt
-          for f in api-reports/hitls-*.txt; do
-            crate=$(basename "$f" .txt)
-            count=$(wc -l < "$f" | tr -d ' ')
-            pub_fns=$(grep -c "^pub fn" "$f" || true)
-            pub_structs=$(grep -c "^pub struct" "$f" || true)
-            echo "$crate: $count items ($pub_fns functions, $pub_structs structs)" >> api-reports/summary.txt
-          done
-          cat api-reports/summary.txt
-      - name: Upload API reports
-        uses: actions/upload-artifact@v7
-        with:
-          name: api-surface-reports
-          path: api-reports/
+          baseline-rev: ${{ github.event.before || 'HEAD~1' }}
 
   bench-compare:
     name: Benchmark Comparison
-    if: github.event_name == 'pull_request'
+    # Weekly only: Criterion on shared CI runners is too noisy for
+    # per-commit gating (same rationale as the advisory timing tests).
+    # Compares the trunk tip against its parent; warning-only.
+    if: github.event_name == 'schedule'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
@@ -747,22 +724,20 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Bench base branch
+      - name: Benchmark parent vs current tip
         run: |
-          git checkout ${{ github.base_ref }}
+          HEAD_SHA=$(git rev-parse HEAD)
+          git checkout HEAD~1
           cargo bench --all-features --bench crypto_bench -- --save-baseline base
-      - name: Bench PR head
-        run: |
-          git checkout ${{ github.sha }}
+          git checkout "$HEAD_SHA"
           cargo bench --all-features --bench crypto_bench -- --save-baseline head
       - name: Install critcmp
         uses: taiki-e/install-action@v2
         with:
           tool: critcmp
       - name: Compare benchmarks
-        run: |
-          critcmp base head | tee bench-diff.txt
-      - name: Check for regressions (>10% slowdown)
+        run: critcmp base head | tee bench-diff.txt
+      - name: Flag regressions (>10% slowdown — advisory)
         run: |
           if critcmp base head --threshold 10 2>&1 | grep -q "regressed"; then
             echo "::warning::Performance regression detected (>10% slowdown)"
