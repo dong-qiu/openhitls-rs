@@ -5319,6 +5319,28 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: `cargo test -p hitls-crypto --test migrated_aes --features aes,modes` 30/30 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T111 (continued) — Curve25519 Pilot (2026-05-15)
+
+> 请分析接下来要干什么
+
+> 单 commit,追加到 T111
+
+> A  ← (pre-existing TLS-1.2 cert test failure introduced by T117 / `beacb46` — chose: proceed with curve25519 commit, leave T117 fallout for a separate phase)
+
+**Result**: 5th pilot of `docs/c-test-migration-plan.md` Phase A. New `xtask/src/curve25519.rs` template emits 19 KAT tests from `crypto/curve25519/test_suite_sdv_eal_curve25519.data` (174 TC rows total): 5 Ed25519 sign + 5 Ed25519 verify + 5 Ed25519 sign-verify combo + 4 X25519 ECDH (RFC 7748 §5.2 + §6.1). 119 routed to API-surface, 36 to unknown (repeat-count workflows), 0 unsupported. T111 progress: 4/9 → **5/9 algorithms**.
+
+**Bug caught during first iteration**: the initial emitter wrote `args[0] → prv, args[1] → pub` which failed 4 X25519 KATs (RFC 7748 §5.2/§6.1) — the implementation is known-correct (`crates/hitls-crypto/src/x25519/mod.rs::test_x25519_rfc7748_vector` passes). Reading `testcode/sdv/testcase/crypto/curve25519/test_suite_sdv_eal_curve25519.c:810` revealed the actual C signature is `SDV_CRYPTO_X25519_EXCH_FUNC_TC002(Hex *pubkey, Hex *prvkey, Hex *share, int isProvider)` — the C `.data` row layout is `pub : prv : expected : provider`, *not* `prv : pub : …` as the inline emitter comment guessed. Fixed by swapping the two `case.args[…].as_hex()` mappings; 15/19 → 19/19 PASS. The C signature is now inlined into the file-level doc comment so the next reader doesn't repeat the chase.
+
+**Four classifier kinds** (curve25519 has more public-API variants than digest/MAC, so the API-surface filter is broader): explicit substring routing for `_API_TC` / `_EXCH_FUNC_TC001` / `_CMP_FUNC_TC` / `_GET_KEY_BITS_FUNC_TC` / `_GET_SECURITY_BITS_FUNC_TC` / `_KEY_PAIR_CHECK_FUNC_TC` / `_PRV_KEY_CHECK_FUNC_TC` / `_DUP_CTX_API_TC` into `ApiSurface` so the unknown-bucket only contains real-but-unmapped shapes.
+
+**Two-feature gating**: `Ed25519KeyPair` is `feature = "ed25519"`, `X25519*` is `feature = "x25519"`. File-level gate `#![cfg(any(feature = "ed25519", feature = "x25519"))]`; per-symbol `use` is `#[cfg(feature = "...")]`-tagged based on a `BTreeSet<&'static str>` tracking which symbols the body uses. Builds with only one feature still compile cleanly.
+
+**Pre-existing TLS-1.2 integration failure noted, not addressed in this commit**: `test_tls12_ecdhe_ecdsa_full_handshake` (`tests/interop/tests/pki.rs:230`) panics with `Certificate12 cert entry has malformed DER length` — introduced by T117 (`beacb46`) which made `decode_certificate12` strict about per-entry DER shape. The cert builder used by this integration test emits an entry the strict check now rejects. Confirmed pre-existing on `origin/main` (verified by stashing curve25519 changes). Tracked for a future phase; curve25519 commit verified via `cargo test --workspace --exclude hitls-integration-tests`.
+
+**T111 progress**: 5/9. Remaining: DSA, SM2, SM4, DH, plus PKI CRL (CRL depends on Phase C ASN.1 fixtures).
+
+**Tests**: `cargo test -p hitls-crypto --test migrated_curve25519 --features ed25519,x25519` 19/19 PASS. `cargo run -p xtask -- migrate-c-tests --algo curve25519 --check` `up-to-date`. `cargo fmt --all -- --check` clean. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0.
+
 
 
 

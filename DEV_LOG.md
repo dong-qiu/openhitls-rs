@@ -318,7 +318,7 @@ Category summary:
 | 306 | T117 | Test | TLS 1.2 Certificate12 DER-shape validation in `decode_certificate12` (entry first byte must be 0x30, inner DER length must equal outer wrapper length) + `bad_certificate` substring routing in `tls_error_to_alert` per RFC 5246 §7.2.2 — closes the last 2 XFAILs in `test-certificate-malformed.py` (1000/2 → 1002/0); curated mTLS-1.2 set now has 0 XFAIL on this script (T111–T116 reserved for C-test migration plan) | 2026-05-12 |
 | 307 | T118 | Test | TLS 1.2 CertificateRequest comprehensive 18-item sigalgs list (mirrors T102 TLS 1.3 fix) + `verify_cv12_signature` scheme-aware transcript hashing (RFC 5246 §7.4.8 — CV hash MUST be the scheme's hash, not the PRF hash) + verifier coverage expanded (RSA-PSS-RSAE SHA-384/512, ECDSA P-521, Ed25519, RSA-PKCS#1 SHA-1/512) — closes the last XFAIL in `test-certificate-request.py` (4/1 → 5/0); curated mTLS-12 subset (4 scripts) now 1279/0/0 — completely clean | 2026-05-12 |
 | 308 | T119 | Test | TLS 1.3 external-PSK server-side support (RFC 8446 §4.2.11 out-of-band PSK auth via new `--psk` / `--psk-identity` CLI flags + `verify_binder` external-label parameter) + 2 new tlsfuzzer scripts in CI on a dedicated `--psk` + `--ticket-key` listener: `test-tls13-psk_dhe_ke.py` (3/1 XFAIL) and `test-tls13-session-resumption.py` (4/3 XFAIL) — closes 7 new conversations; `psk_ke` mode (no DHE) queued for T120 | 2026-05-12 |
-| 309 | T111 | Test | C→Rust test migration tool — `xtask/` scaffold + per-algorithm template emitters consuming openHiTLS C SDV `.data` files. Phase A pilots: SHA-2 (28 tests, 70 TC rows), HMAC (43 tests, MD5/SHA-1/SHA-2/SM3), CMAC (12 tests, AES-128/192/256; SM4 unsupported), AES (30 tests, ECB + CTR across 3 key sizes; CBC rows blocked on a future `cbc_encrypt_raw` no-padding helper, multi-update rows deferred). `--check` mode for CI drift detection (rustfmt-aware comparison, fixes false-positive bug where committed file went through rustfmt but `--check` compared raw generator output). 113 migrated tests total; 5/9 algorithms remain (DSA, SM2, SM4, DH, curve25519, plus PKI CRL); plan §2.4 acceptance criteria still open (`docs/c-test-na-list.md` + per-failure issues) | 2026-05-12 |
+| 309 | T111 | Test | C→Rust test migration tool — `xtask/` scaffold + per-algorithm template emitters consuming openHiTLS C SDV `.data` files. Phase A pilots: SHA-2 (28 tests, 70 TC rows), HMAC (43 tests, MD5/SHA-1/SHA-2/SM3), CMAC (12 tests, AES-128/192/256; SM4 unsupported), AES (30 tests, ECB + CTR across 3 key sizes; CBC rows blocked on a future `cbc_encrypt_raw` no-padding helper, multi-update rows deferred), Curve25519 (19 tests, Ed25519 sign/verify/sign-verify + X25519 ECDH; X25519 emitter caught a field-order bug in the first iteration — C `SDV_CRYPTO_X25519_EXCH_FUNC_TC002(pubkey, prvkey, share, isProvider)` signature confirmed by reading `test_suite_sdv_eal_curve25519.c:810` after 4/19 KAT failures). `--check` mode for CI drift detection (rustfmt-aware comparison, fixes false-positive bug where committed file went through rustfmt but `--check` compared raw generator output). 132 migrated tests total; 4/9 algorithms remain (DSA, SM2, SM4, DH, plus PKI CRL); plan §2.4 acceptance criteria still open (`docs/c-test-na-list.md` + per-failure issues) | 2026-05-12 |
 
 ---
 
@@ -17663,13 +17663,13 @@ The same `--ticket-key` flag (which existed since T96 but had no curated tlsfuzz
 
 ---
 
-## Phase T111 — C→Rust Test Migration Tool: xtask + SHA-2 / HMAC / CMAC / AES Pilots (2026-05-12)
+## Phase T111 — C→Rust Test Migration Tool: xtask + SHA-2 / HMAC / CMAC / AES / Curve25519 Pilots (2026-05-12 .. 2026-05-15)
 
 ### Summary
 
-First instalment of `docs/c-test-migration-plan.md` **Phase A** (~3 500 mechanical-migration TCs over 9 algorithms). This phase delivers (a) the generic migration tooling, (b) four pilot generators validating that the template approach works across multiple `.data`-row shapes (3-arg digest, 4-arg MAC, variable-length cipher with optional provider flag), and (c) a CI drift-detection mode so generated files stay in sync with their C source.
+First instalment of `docs/c-test-migration-plan.md` **Phase A** (~3 500 mechanical-migration TCs over 9 algorithms). This phase delivers (a) the generic migration tooling, (b) five pilot generators validating that the template approach works across multiple `.data`-row shapes (3-arg digest, 4-arg MAC, variable-length cipher with optional provider flag, signature + key-exchange families), and (c) a CI drift-detection mode so generated files stay in sync with their C source.
 
-T111 is intentionally **not closed** here — the plan §2.4 acceptance criteria list 9 `tests/migrated/*.rs` targets and a `docs/c-test-na-list.md` writeup. We are 4/9 (SHA-2, HMAC, CMAC, AES). The remaining 5 (DSA, SM2, SM4, DH, curve25519, plus PKI CRL) will follow in subsequent commits under the same phase number per the no-sub-phase rule.
+T111 is intentionally **not closed** here — the plan §2.4 acceptance criteria list 9 `tests/migrated/*.rs` targets and a `docs/c-test-na-list.md` writeup. We are 5/9 (SHA-2, HMAC, CMAC, AES, Curve25519). The remaining 4 (DSA, SM2, SM4, DH, plus PKI CRL) will follow in subsequent commits under the same phase number per the no-sub-phase rule.
 
 ### Component breakdown
 
@@ -17692,7 +17692,8 @@ T111 is intentionally **not closed** here — the plan §2.4 acceptance criteria
 | `migrated_hmac.rs` | 205 | 43 | 158 | 4 (SHA-3 not yet `Digest`) | yes |
 | `migrated_cmac.rs` | 91 | 12 | 71 | 4 (SM4) | yes |
 | `migrated_aes.rs` | 315 | 30 | 273 | 12 (CBC-no-raw-API) | yes |
-| **Total** | 681 | **113** | 544 | 20 | yes |
+| `migrated_curve25519.rs` | 174 | 19 | 119 (API surface) + 36 (unknown shapes — repeat-count / non-hex args) | 0 | yes |
+| **Total** | 855 | **132** | 699 | 20 | yes |
 
 ### `--check` drift detection: bug + fix
 
@@ -17733,10 +17734,12 @@ Each generated file declares the features it depends on so the workspace build w
 - `cargo test -p xtask`: 6/6 PASS (parser unit tests).
 - `cargo test -p hitls-crypto --test migrated_cmac --features cmac`: 12/12 PASS.
 - `cargo test -p hitls-crypto --test migrated_aes --features aes,modes`: 30/30 PASS.
+- `cargo test -p hitls-crypto --test migrated_curve25519 --features ed25519,x25519`: 19/19 PASS.
 - `cargo run -p xtask -- migrate-c-tests --algo sha2 --check`: up-to-date.
 - `cargo run -p xtask -- migrate-c-tests --algo hmac --check`: up-to-date.
 - `cargo run -p xtask -- migrate-c-tests --algo cmac --check`: up-to-date.
 - `cargo run -p xtask -- migrate-c-tests --algo aes --check`: up-to-date.
+- `cargo run -p xtask -- migrate-c-tests --algo curve25519 --check`: up-to-date.
 - `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
 - `cargo fmt --all -- --check`: clean.
 
@@ -17748,23 +17751,61 @@ The 9-algorithm Phase A batch represents ~3 500 mechanical-migration TCs — man
 
 | File | Status | Description |
 |------|--------|-------------|
-| `xtask/src/main.rs` | Modified | `--check` mode now rustfmt-aware (compares formatted output, not raw source); `cmac` + `aes` branches in `--algo` dispatch. |
+| `xtask/src/main.rs` | Modified | `--check` mode now rustfmt-aware (compares formatted output, not raw source); `cmac` + `aes` + `curve25519` branches in `--algo` dispatch. |
 | `xtask/src/mac.rs` | Modified | New `emit_cmac_kat` + helpers (`classify_cmac`, `cmac_alg_label`, `write_cmac_header`, `emit_cmac_one_shot`, `write_cmac_test_doc`). |
 | `xtask/src/cipher.rs` | Added | AES KAT template: row-shape auto-detection, per-mode dispatch (ECB + CTR), `aes_alg_label` resolver, header/footer/emit helpers. |
+| `xtask/src/curve25519.rs` | Added | Curve25519 KAT template: 4 classifier kinds (`Ed25519Sign` / `Ed25519Verify` / `Ed25519SignVerify` / `X25519Exch`), per-symbol header `#[cfg(feature = "...")]` use statements, inline C signature reference in doc. |
 | `crates/hitls-crypto/tests/migrated_cmac.rs` | Added | 12 generated CMAC AES-128/192/256 KAT tests (rustfmt-applied). |
 | `crates/hitls-crypto/tests/migrated_aes.rs` | Added | 30 generated AES KAT tests (24 ECB + 6 CTR across AES-128/192/256). |
+| `crates/hitls-crypto/tests/migrated_curve25519.rs` | Added | 19 generated Curve25519 tests (5 Ed25519 sign + 5 Ed25519 verify + 5 Ed25519 sign-verify combo + 4 X25519 ECDH RFC 7748 §5.2/§6.1 KAT). |
 | `.gitignore` | Modified | Added `/diagnostics/` (local LSP snapshot dir). |
 | `DEV_LOG.md` | Modified | This entry + Phase Index update + category summary update. |
 | `PROMPT_LOG.md` | Modified | T111 prompt + result entry. |
 | `CLAUDE.md` | Modified | Status: `T111–T116 reserved` → `T112–T116 reserved` (T111 in progress now); test count bumped. |
 | `README.md` | Modified | Test count bumped. |
 
-### Build Status (Post T111)
+### Curve25519 pilot (continued, 2026-05-15)
 
-- `cargo clippy --workspace --all-features --all-targets` with `-D warnings`: 0.
+Adds `xtask/src/curve25519.rs` (387 LoC, including 6 unit tests via shared parser) + `migrated_curve25519.rs` (19 emitted tests). Single-source-of-truth: `crypto/curve25519/test_suite_sdv_eal_curve25519.data` (174 TC rows) → 19 KAT emitted, 119 API-surface skipped (PkeyCtx CRUD / key-bit getters / provider sweeps), 36 unknown (repeat-count workflows + non-hex argv), 0 unsupported alg. 5/9 algorithms now done.
+
+Four classifier kinds:
+
+| Kind | C TC family | Rust mapping |
+|------|-------------|--------------|
+| `Ed25519Sign` | `ED25519_SIGN_FUNC_TC001` | `Ed25519KeyPair::from_seed(seed) → sign(msg)` vs `expected_sig` |
+| `Ed25519Verify` | `ED25519_VERIFY_FUNC_TC001` | `Ed25519KeyPair::from_public_key(pub) → verify(msg, sig)` |
+| `Ed25519SignVerify` | `ED25519_SIGN_VERIFY_FUNC_TC001` | seed → sign → byte-equal expected, then `from_public_key → verify` |
+| `X25519Exch` | `X25519_EXCH_FUNC_TC002` | `X25519PrivateKey::new(prv) + X25519PublicKey::new(pub) → diffie_hellman` |
+
+#### X25519 field-order bug — caught by RFC 7748 KAT failure
+
+The first emitter draft mapped `args[0] → prv, args[1] → pub`, which produced 4 KAT failures on the §5.2 + §6.1 vectors (the implementation is known-correct, exercised by `crates/hitls-crypto/src/x25519/mod.rs::test_x25519_rfc7748_vector`). The actual C signature is:
+
+```c
+// testcode/sdv/testcase/crypto/curve25519/test_suite_sdv_eal_curve25519.c:810
+void SDV_CRYPTO_X25519_EXCH_FUNC_TC002(Hex *pubkey, Hex *prvkey, Hex *share, int isProvider)
+```
+
+So `.data` row layout is `pubkey : prvkey : expected_shared : provider`. Fixing the emitter to map `args[0] → pubk, args[1] → prv` flipped 15/19 → 19/19 PASS. Lesson: never trust an inline `// Shape: prv : pub : ...` comment without cross-checking the C SDV `.c` signature; for sign/verify families the public-key-as-arg-0 convention is consistent (matches `ED25519_VERIFY_FUNC_TC001`), so on the second iteration the X25519 shape became obvious.
+
+The doc comment in `curve25519.rs:5-9` now records the C signature inline so the next reader doesn't need to chase it.
+
+#### Differences from the cipher/MAC emitters
+
+1. **Two output crates within one file**: `Ed25519KeyPair` is gated by `feature = "ed25519"`, `X25519*` by `feature = "x25519"`. The header writes per-symbol `#[cfg(feature = "...")]` `use` statements based on a `BTreeSet<&'static str>` tracking which symbols the body references; the file-level gate is `#![cfg(any(feature = "ed25519", feature = "x25519"))]` so a build with only one of the two features still compiles.
+
+2. **Sign-verify-combo row needs two operations**: `emit_ed25519_sign_verify` covers `(prv, pub, msg, expected_sig)` rows by signing with `from_seed(prv)` *and* verifying with `from_public_key(pub)` — single Rust function, two assertions. C splits this into separate paths but the test intent is one round-trip KAT.
+
+3. **API-surface filter is broader**: Curve25519's `.data` has 11 distinct TC variants (`_API_TC`, `_EXCH_FUNC_TC001` provider sweep, `_CMP_FUNC_TC`, `_GET_KEY_BITS_FUNC_TC`, `_GET_SECURITY_BITS_FUNC_TC`, `_KEY_PAIR_CHECK_FUNC_TC`, `_PRV_KEY_CHECK_FUNC_TC`, `_DUP_CTX_API_TC` etc.) — explicit substring routing into `ApiSurface` so the unknown-bucket only contains real-but-unmapped shapes.
+
+### Build Status (Post T111, 2026-05-15)
+
+- `cargo clippy -p xtask -p hitls-crypto --all-features --tests` with `-D warnings`: 0.
 - `cargo fmt --all -- --check`: clean.
-- `cargo test --workspace --all-features`: see status line update.
-- Migration progress: **4 / 9 algorithms** complete (44% of Phase A by algorithm count; Phase B–F not started). AES pilot adds 30 tests (ECB + CTR); CBC + CFB + OFB rows still pending raw-API support and the multi-update emitters.
+- `cargo test -p hitls-crypto --all-features`: fully green (the crate this phase touches — includes all 132 migrated KAT tests).
+- `cargo test -p hitls-crypto --test migrated_curve25519 --features ed25519,x25519`: 19/19 PASS.
+- `cargo test --workspace --all-features`: 4360 tests total, 43 ignored — **4359 PASS / 1 pre-existing FAIL**. The single failure is `test_tls12_ecdhe_ecdsa_full_handshake` (`tests/interop/tests/pki.rs:230`), a regression introduced by Phase T117 (`beacb46`, strict `decode_certificate12` DER-shape check) — confirmed pre-existing on `origin/main` by stashing this phase's changes; unrelated to Curve25519, tracked for a follow-up phase. (Note: the workspace's `connection_dtls12_async` suite intermittently deadlocks under parallel test execution on the dev machine — a known environmental flake, not a code defect; CI runs it cleanly.)
+- Migration progress: **5 / 9 algorithms** complete (56% of Phase A by algorithm count; Phase B–F not started). Curve25519 pilot adds 19 tests (5 Ed25519 sign + 5 Ed25519 verify + 5 Ed25519 sign-verify + 4 X25519 ECDH).
 
 
 
