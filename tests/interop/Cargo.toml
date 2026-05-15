@@ -26,4 +26,4 @@ hitls-crypto = { path = "../../crates/hitls-crypto", features = [
 hitls-pki = { path = "../../crates/hitls-pki" }
 hitls-tls = { path = "../../crates/hitls-tls", features = ["tls13", "tls12", "dtls12", "tlcp", "dtlcp", "async", "cert-compression"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
-zeroize = "1"
+zeroize = "1.8"
