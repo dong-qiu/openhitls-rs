@@ -185,8 +185,18 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
       - uses: taiki-e/install-action@cargo-minimal-versions
       - name: Check with minimal versions
+        # Under min-versions the resolver picks the floor `zeroize_derive`
+        # (>=1.3.0 from zeroize 1.8.1's loose `^1.3` requirement), and
+        # those old versions emit non-local `impl` blocks inside
+        # `const _: () = { ... }` — a nightly-only `non_local_definitions`
+        # lint that combined with our `-D warnings` policy fails the check.
+        # The pattern is an upstream proc-macro quirk we cannot fix from
+        # downstream; allow the lint here so the min-versions probe
+        # actually exercises dependency resolution rather than upstream
+        # macro hygiene. The `-D warnings` floor is preserved.
         run: cargo minimal-versions check --workspace --all-features
-        continue-on-error: true
+        env:
+          RUSTFLAGS: "-D warnings -A non_local_definitions"
 
   audit:
     name: Security Audit
@@ -429,7 +439,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check crypto crate compiles for wasm32
         run: cargo check -p hitls-crypto --all-features --target wasm32-unknown-unknown
-        continue-on-error: true
 
   doc:
     name: Documentation Check

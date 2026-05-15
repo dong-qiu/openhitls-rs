@@ -1,5 +1,15 @@
 [build]
 rustflags = ["-D", "warnings"]
 
+# getrandom 0.3 on wasm32-unknown-unknown requires the `wasm_js` backend cfg
+# (the target has no OS-level RNG, so the user must opt in to a JS-bridged
+# RNG via wasm-bindgen + js-sys). The matching `wasm_js` Cargo feature is
+# enabled in hitls-crypto's target-specific `[target.'cfg(...)'.dependencies]`.
+# Note: cargo *replaces* (not merges) `[build].rustflags` when this block
+# matches, so `-D warnings` is re-listed to preserve the warning-as-error
+# policy on the wasm32 target.
+[target.wasm32-unknown-unknown]
+rustflags = ["-D", "warnings", "--cfg", "getrandom_backend=\"wasm_js\""]
+
 [alias]
 xtask = "run --quiet --package xtask --"
