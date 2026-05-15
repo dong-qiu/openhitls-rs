@@ -314,9 +314,17 @@ jobs:
       - run: cd fuzz && cargo check
 
   fuzz-smoke:
-    name: Fuzz Smoke Test
+    name: "Fuzz Smoke (shard ${{ matrix.shard }})"
+    # Smoke-fuzz every target 10s. Sharded 6 ways across parallel runners:
+    # the full ~68-target set is ~15 min serially, which would dominate the
+    # whole CI wall-clock. Round-robin sharding caps each runner at ~1/6 of
+    # the targets and keeps this job off the critical path.
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
@@ -327,7 +335,7 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
-      - name: Run fuzz targets (10s each)
+      - name: Run fuzz targets (10s each, shard ${{ matrix.shard }}/6)
         # `--target` is explicit: the prebuilt cargo-fuzz binary from
         # install-action is musl-linked and otherwise defaults to building
         # fuzz targets for x86_64-unknown-linux-musl, where the sanitizer
@@ -336,7 +344,10 @@ jobs:
         run: |
           cd fuzz
           FAILED=0
-          for target in $(cargo fuzz list); do
+          # Deterministic round-robin shard: every 6th target at this
+          # shard's offset. New fuzz targets are auto-distributed.
+          TARGETS=$(cargo fuzz list | awk 'NR % 6 == ${{ matrix.shard }}')
+          for target in $TARGETS; do
             echo "=== Smoke-testing $target ==="
             timeout 30 cargo fuzz run --target x86_64-unknown-linux-gnu "$target" -- -max_total_time=10 -dict=dictionary/common.dict && continue
             EXIT_CODE=$?
@@ -354,7 +365,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: fuzz-smoke-crashes
+          name: fuzz-smoke-crashes-${{ matrix.shard }}
           path: fuzz/artifacts/
           if-no-files-found: ignore
 
