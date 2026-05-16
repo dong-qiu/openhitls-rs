@@ -22,7 +22,8 @@ name: tlsfuzzer
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * 1'  # Weekly Monday 06:00 UTC
+    - cron: '0 6 * * 1'  # Weekly  — Monday 06:00 UTC (sampled run)
+    - cron: '0 7 1 * *'  # Monthly — 1st 07:00 UTC (full `-n 9999` sweep)
 
 env:
   CARGO_TERM_COLOR: always
@@ -59,8 +60,15 @@ env:
   # job environment.
   HITLS_PSK_IDEN: hitls-test-psk
   HITLS_HOST: 127.0.0.1
-  TLSFUZZER_REF: master
-  TLSLITE_NG_REF: master
+  # Phase T124 — pinned to specific upstream commits, NOT `master`.
+  # tlsfuzzer / tlslite-ng evolve quickly; an unpinned `master` silently
+  # shifts the conversation set under our per-script XFAIL files, making
+  # CI signal indistinguishable from upstream drift. Bumping these is a
+  # deliberate, reviewed "upstream upgrade" step (re-baseline the XFAIL
+  # lists in the same PR). Keep in sync with the `tlsfuzzer-core` job in
+  # ci.yml.
+  TLSFUZZER_REF: bf7f579dc0e65498cfb21b60e9b152f6bd84a3bf
+  TLSLITE_NG_REF: 02d1506badb16473faf50ebc3a413c6d789fe31f
 
 concurrency:
   group: tlsfuzzer-${{ github.ref }}
@@ -70,7 +78,9 @@ jobs:
   tlsfuzzer:
     name: tlsfuzzer (TLS 1.3 + TLS 1.2)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 90 min covers the monthly full `-n 9999` sweep; the weekly sampled
+    # run finishes in ~2 min well under this cap.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
 
@@ -85,16 +95,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install tlsfuzzer + tlslite-ng (HEAD)
+      - name: Install tlsfuzzer + tlslite-ng (pinned commits)
         # tlsfuzzer is not on PyPI; tlslite-ng on PyPI lags the
         # SignatureScheme additions tlsfuzzer references, so install
-        # both from git.
+        # both from git — pinned to TLSFUZZER_REF / TLSLITE_NG_REF.
         run: |
           python -m pip install --upgrade pip
           pip install ecdsa
           pip install "git+https://github.com/tlsfuzzer/tlslite-ng@${TLSLITE_NG_REF}"
-          git clone --depth 1 --branch "${TLSFUZZER_REF}" \
-            https://github.com/tlsfuzzer/tlsfuzzer "${RUNNER_TEMP}/tlsfuzzer"
+          # `git clone --branch` only accepts branch/tag names, not
+          # commit SHAs — clone then check out the pinned commit.
+          git clone https://github.com/tlsfuzzer/tlsfuzzer \
+            "${RUNNER_TEMP}/tlsfuzzer"
+          git -C "${RUNNER_TEMP}/tlsfuzzer" checkout --quiet "${TLSFUZZER_REF}"
 
       - name: Generate test certificates (RSA + ECDSA P-256 + Ed25519, all PKCS#8)
         # hitls s-server only loads PKCS#8 PEM keys; the cert matrix
@@ -281,6 +294,14 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/tlsfuzzer-logs"
           export TLSFUZZER_DIR="${RUNNER_TEMP}/tlsfuzzer"
           export TLSFUZZER_PY=python
+          # Phase T124 — the monthly cron does a full `-n 9999` sweep
+          # so conversations that per-script sampling would skip still
+          # get exercised; the weekly cron + manual dispatch stay
+          # sampled. run.sh reads SWEEP_N and appends `-n` when set.
+          if [ "${{ github.event.schedule }}" = "0 7 1 * *" ]; then
+            export SWEEP_N=9999
+            echo "monthly full sweep enabled (SWEEP_N=9999)"
+          fi
           scripts=(
             # T88/T89 baseline (6)
             test-tls13-conversation.py
