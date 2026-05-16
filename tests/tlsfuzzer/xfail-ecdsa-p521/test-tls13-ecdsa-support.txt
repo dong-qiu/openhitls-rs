@@ -1,0 +1,29 @@
+# Phase T123 — `test-tls13-ecdsa-support.py` XFAILs against the
+# ECDSA P-521 server cert (5 entries).
+#
+# Same structure as the P-384 list: `test-tls13-ecdsa-support.py`
+# expects a six-cert server and picks one cert per ClientHello; our
+# s-server holds a single cert (P-521 here):
+#
+# - `ecdsa_secp256r1_sha256` / `ecdsa_secp384r1_sha384`: the client
+#   constrains `signature_algorithms` to a smaller curve. A P-521 key
+#   cannot sign with secp256r1 / secp384r1, so the server replies
+#   handshake_failure (RFC 8446 §4.4.3 — correct). Needs a multi-cert
+#   s-server to close.
+# - `ecdsa_brainpoolP{256,384,512}r1tls13_sha{256,384,512}`: brainpool
+#   curves are not advertised by default (RFC 8734). "Won't fix"
+#   absent interop demand.
+#
+# The 5 PASS conversations (sanity + `ecdsa_secp521r1_sha512` + the
+# SHA-1 / SHA-224 "verified to not work" negative steps) gate cleanly.
+#
+# Note: P-521 server-cert signing only works at all since Phase I96 —
+# pre-I96 every conversation here failed because the handshake aborted
+# with "unsupported ECDSA curve for signing" (the TLS layer wired only
+# P-256/P-384 into the CertificateVerify signature dispatch).
+
+Test with ecdsa_brainpoolP256r1tls13_sha256
+Test with ecdsa_brainpoolP384r1tls13_sha384
+Test with ecdsa_brainpoolP512r1tls13_sha512
+Test with ecdsa_secp256r1_sha256
+Test with ecdsa_secp384r1_sha384

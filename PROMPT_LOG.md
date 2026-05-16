@@ -5538,3 +5538,38 @@ completes a TLS 1.3 handshake (`openssl s_client`:
 single P-521 cert can't satisfy — identical shape to P-384). Recorded
 as DEV_LOG Phase I96. T123 (P-384 + P-521 tlsfuzzer cert matrix)
 follows next.
+
+---
+
+## Phase T123 — tlsfuzzer ECDSA Cert-Matrix Expansion: P-384 + P-521 (2026-05-16)
+
+> 现在开始T123
+> 按这个方案推进
+
+T123 is the Testing-phase half of the I96/T123 split (see I96 entry):
+the implementation gap I96 fixed was *found* while preparing T123, so
+I96 ran first, then T123 locks the P-521 (and P-384) coverage into CI.
+
+**Workflow + XFAIL files only — no Rust.** `.github/workflows/
+tlsfuzzer.yml` gains 2 env ports (4452/4453), P-384 (`secp384r1`) +
+P-521 (`secp521r1`) cert generation, 2 `s-server` instances, 2
+`scripts_ecdsa_p{384,521}` arrays + run loops, and extended
+wait/stop/upload lists. Each subset runs **only**
+`test-tls13-ecdsa-support.py` — `conversation.py` is excluded because
+its default `signature_algorithms` advertises only
+`ecdsa_secp256r1_sha256` and can't satisfy a P-384/P-521 cert. New
+per-cert XFAIL dirs `tests/tlsfuzzer/xfail-ecdsa-p384/` +
+`xfail-ecdsa-p521/` (5 entries each — the brainpool ×3 + the two
+non-matching NIST curves a single cert structurally can't sign).
+
+**Verification**: `run.sh` + `XFAIL_DIR` against locally-built
+P-384 / P-521 `s-server` instances — both **5 PASS / 5 XFAIL / 0 FAIL
+/ 0 XPASS** (gate green). P-521 was 2/8 FAIL pre-I96. `actionlint`
+clean (only pre-existing SC2129 style nits). Curated suite 46 → 48
+script-runs. Recorded as DEV_LOG Phase T123.
+
+This completes the first two items of the server-side tlsfuzzer plan
+(I96 + T123). Remaining: T121 0-RTT acceptance wiring · T122
+server-initiated KeyUpdate + PHA CLI triggers · T120 `psk_ke` ·
+T125 `--tls auto` · T126 mass-fail triage · T127 TLS 1.2 breadth ·
+T128 FFDHE · T129 `s-server` DTLS.
