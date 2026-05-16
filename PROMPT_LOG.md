@@ -5371,6 +5371,20 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: `cargo test -p hitls-crypto --test migrated_dh --all-features` 47/47 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa,dh} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T111 (continued) — SM4 Pilot (2026-05-16)
+
+> 请继续完成剩下3个算法测试用例的迁移
+
+(Mid-task scope decision — SM4's 8 cipher modes vs Rust API: user chose "migrate ECB/GCM/CCM, skip the rest" over "first add the missing mode APIs" or "skip SM4".)
+
+**Result**: 8th pilot of `docs/c-test-migration-plan.md` Phase A. New `xtask/src/sm4.rs` emits 9 SM4 KAT tests from `crypto/sm4/test_suite_sdv_eal_sm4.data` (283 TC rows): ECB encrypt/decrypt + GCM-encrypt. 237 API-surface, 0 unknown, 37 unsupported. T111 progress: 7/9 → **8/9**; migrated test total 779 → 788.
+
+**Lowest-yield pilot by design**: SM4's `.data` covers 8 cipher modes but the Rust surface only cleanly supports a subset. ECB → `Sm4Key::encrypt_block/decrypt_block` per 16-byte block. GCM-encrypt → `sm4_gcm_encrypt` (compare the ciphertext prefix — the `.data` carries no tag). CBC is blocked (`sm4_cbc_encrypt` hardcodes PKCS#7 padding, same as AES CBC); CTR/CFB/OFB/HCTR/XTS have no public SM4 entry; GCM-decrypt needs the absent tag. Those 37 rows route to `skipped_unsupported_alg`. Three KAT families (`SM4_ENCRYPT_FUNC_TC003` encrypt / `TC004` decrypt / `TC012` enc-flag) normalise into one `(mode, key, iv, input, output, encrypt)` row. Closing the mode-API gap is a future Implementation phase.
+
+**T111 progress**: 8/9. Remaining: SM2, plus PKI CRL.
+
+**Tests**: `cargo test -p hitls-crypto --test migrated_sm4 --all-features` 9/9 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa,dh,sm4} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 

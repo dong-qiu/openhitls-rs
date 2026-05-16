@@ -5,6 +5,7 @@ mod digest;
 mod dsa;
 mod mac;
 mod parser;
+mod sm4;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -101,9 +102,14 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_dh.rs"),
             dh::emit_dh_kat,
         ),
+        "sm4" => (
+            c_root.join("crypto/sm4/test_suite_sdv_eal_sm4.data"),
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_sm4.rs"),
+            sm4::emit_sm4_kat,
+        ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4"
             )
             .into());
         }
