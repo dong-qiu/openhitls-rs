@@ -5399,6 +5399,16 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: `cargo test -p hitls-crypto --test migrated_sm2 --all-features` 12/12 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa,dh,sm4,sm2} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T111 (continued) — N/A exemption list, Phase A §2.4 acceptance closed (2026-05-16)
+
+> 同意
+
+**Result**: Writes `docs/c-test-na-list.md` — the plan §2.4 "N/A 用例清单文档化" deliverable. Documents, per algorithm, why a C SDV case is not migrated: (1) **API-surface** — EAL ctx CRUD / getters / lifecycle-streaming workflows with no 1:1 Rust mapping, plus provider-flag duplicates; (2) **unsupported** — real KATs the Rust API cannot reproduce; (3) **unknown** — rows matching no emitter shape. Tally across the 9 generated files: 800 emitted / 1193 API-surface / 154 unknown / 74 unsupported / 2221 total C cases. The doc also lists the *structural gaps* (AES-CBC raw, SM4 CBC/CTR/CFB/OFB/HCTR/XTS + GCM-decrypt, SM2 key exchange, HMAC/CMAC SHA-3) as candidate future Implementation phases, and explains the DSA/SM2 sign-side reproducibility limit (no nonce-K hook).
+
+With this, plan §2.4 acceptance is met for **Phase A**: xtask on main; 9 `tests/migrated/*.rs` CI-green; DEV_LOG T111 entry; N/A list documented; 0 failing cases ⇒ 0 per-failure issues. `pki/crl_rfc5280` is not Phase A — deferred to Phase C (needs the ASN.1 fixture corpus).
+
+**Docs-only commit** — no test/code change; `migrated_*.rs` and `xtask/` untouched.
+
 
 
 
