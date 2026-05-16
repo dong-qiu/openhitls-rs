@@ -427,3 +427,14 @@ one reviewed PR.
   a per-cert XFAIL dir (`xfail-ecdsa-p384/`, `xfail-ecdsa-p521/`).
   Both gate at 5 PASS / 5 XFAIL (the XFAILs are conversations a single
   ECDSA cert structurally cannot satisfy). Suite size 46 → 48.
+
+- T122 — `s-server` gained a `--key-update` flag: a request whose
+  path contains `/keyupdate` triggers a server-initiated
+  post-handshake KeyUpdate (`update_requested`); a plain `GET /` is
+  echoed untouched. `test-tls13-keyupdate-from-server.py` moved off
+  the shared RSA listener onto a dedicated `--key-update` instance
+  (port 4454) and its last XFAIL closed — 2/1 → 3/0. Server-initiated
+  post-handshake client auth (PHA) is a separate, later phase: the
+  `request_client_auth()` post-handshake transcript needs a `hitls-tls`
+  fix first (RFC 8446 §4.4.1). Suite size unchanged at 48 (the
+  KeyUpdate script was relocated, not added).

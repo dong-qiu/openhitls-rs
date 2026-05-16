@@ -5611,3 +5611,50 @@ This completes the first two items of the server-side tlsfuzzer plan
 server-initiated KeyUpdate + PHA CLI triggers · T120 `psk_ke` ·
 T125 `--tls auto` · T126 mass-fail triage · T127 TLS 1.2 breadth ·
 T128 FFDHE · T129 `s-server` DTLS.
+
+---
+
+## Phase T122 — `s-server --key-update`: Server-Initiated Post-Handshake KeyUpdate (2026-05-16)
+
+> 继续做 T121
+
+The `继续做 T121` input opened a two-step re-scope, both resolved with
+the user before any code landed:
+
+1. **T121 (0-RTT acceptance) — investigated, found void.** Pinned
+   tlsfuzzer has one 0-RTT script (`test-tls13-0rtt-garbage.py`,
+   already in CI, tests *garbage* 0-RTT). A `--max-early-data-size`
+   instance was probed and gave byte-identical results (7/4) to a
+   0-RTT-disabled server — the script never sends valid 0-RTT. No
+   tlsfuzzer material; T121 slot left unused. User chose "skip T121,
+   do T122".
+
+2. **T122 — KeyUpdate done, PHA deferred.** The KeyUpdate half landed
+   cleanly. The PHA half's probe surfaced a real `hitls-tls` bug
+   (`request_client_auth()` post-handshake CertificateVerify
+   transcript omits the base handshake transcript, violating RFC 8446
+   §4.4.1). User chose "T122 = KeyUpdate-only, PHA fix as a separate
+   I-phase" — same split pattern as I96/T123.
+
+**T122 delivered** (KeyUpdate-only): `--key-update` flag on
+`s-server` — a request whose path contains `/keyupdate` triggers a
+server-initiated KeyUpdate (`update_requested`); `GET /` is echoed
+untouched so sanity steps pass. The discriminator is the request
+path, which is why Phase T96's removed `--key-update-server` draft
+(it feared needing a full HTTP server) was overcautious — a substring
+check suffices. New `--key-update` s-server instance (port 4454);
+`test-tls13-keyupdate-from-server.py` relocated off the shared
+listener onto it; its 1 XFAIL closed (2/1 → **3/0**). `handle_
+connection_tls13` added (concrete-typed handler — `key_update` is an
+inherent method); `print_established` / `contains` helpers extracted.
+
+**Verification**: `cargo test -p hitls-cli` 167/0; workspace clippy
+`-D warnings` 0; fmt clean; `actionlint` clean. End-to-end —
+`run.sh test-tls13-keyupdate-from-server.py` against a `--key-update`
+server: 3 PASS / 0 FAIL / 0 XFAIL, exit 0. Recorded as DEV_LOG
+Phase T122.
+
+**Next**: an I-phase to fix `request_client_auth()` (retain the
+post-handshake transcript), then a small T-phase to wire
+`test-tls13-post-handshake-auth.py`. Then T120 `psk_ke` and the
+remaining plan items (T125–T129).

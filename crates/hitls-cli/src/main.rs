@@ -205,13 +205,15 @@ enum Commands {
         /// extension. Matched literally against the configured `--psk`.
         #[arg(long = "psk-identity")]
         psk_identity: Option<String>,
-        // (Phase T96 — removed `--key-update-server` flag draft.
-        // Auto-firing KU right after the handshake breaks tlsfuzzer's
-        // sanity tests in `test-tls13-keyupdate-from-server.py`,
-        // which expect the server to KU only in response to a
-        // specific HTTP request path. Wiring that semantic needs an
-        // actual HTTP-aware s_server, not the current echo loop.
-        // The XFAIL entry stays.)
+        /// Phase T122 — server-initiated post-handshake KeyUpdate.
+        /// When set, a client request whose bytes contain the path
+        /// marker `/keyupdate` makes the server send a KeyUpdate
+        /// (`update_requested`) before echoing. A plain `GET /` is
+        /// echoed with no KeyUpdate, so tlsfuzzer sanity steps still
+        /// pass — the discriminator is the request path, not the
+        /// mere presence of application data. TLS 1.3 only.
+        #[arg(long = "key-update")]
+        key_update: bool,
         /// Disable RFC 8446 §D.4 middlebox-compat dummy CCS. By
         /// default the server emits the fake CCS after ServerHello /
         /// HelloRetryRequest; with this flag set we skip it (and
@@ -425,6 +427,7 @@ fn main() {
             ticket_key,
             psk,
             psk_identity,
+            key_update,
             no_middlebox_compat,
         } => s_server::run(
             *port,
@@ -439,6 +442,7 @@ fn main() {
             ticket_key.as_deref(),
             psk.as_deref(),
             psk_identity.as_deref(),
+            *key_update,
             *no_middlebox_compat,
         ),
         Commands::List { filter } => list::run(filter),

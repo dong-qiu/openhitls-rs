@@ -21,8 +21,15 @@ pub fn run(
     ticket_key_hex: Option<&str>,
     psk_hex: Option<&str>,
     psk_identity: Option<&str>,
+    key_update: bool,
     no_middlebox_compat: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Phase T122 — `--key-update` drives a TLS 1.3-only post-handshake
+    // message; reject it up front for a TLS 1.2 listener rather than
+    // silently ignoring.
+    if tls_version == "1.2" && key_update {
+        return Err("--key-update requires TLS 1.3".into());
+    }
     // Load certificate chain
     let cert_pem = std::fs::read_to_string(cert_path)
         .map_err(|e| format!("cannot read certificate file '{cert_path}': {e}"))?;
@@ -242,7 +249,7 @@ pub fn run(
             "1.3" => {
                 let mut conn =
                     hitls_tls::connection::TlsServerConnection::new(stream, config.clone());
-                handle_connection(&mut conn, quiet)
+                handle_connection_tls13(&mut conn, quiet, key_update)
             }
             "1.2" => {
                 let mut conn =
@@ -266,22 +273,34 @@ pub fn run(
     Ok(())
 }
 
+/// Print the negotiated protocol / cipher once the handshake completes.
+fn print_established(conn: &dyn TlsConnection, quiet: bool) {
+    if quiet {
+        return;
+    }
+    eprintln!("--- TLS connection established ---");
+    if let Some(version) = conn.version() {
+        eprintln!("  Protocol: {version:?}");
+    }
+    if let Some(cs) = conn.cipher_suite() {
+        eprintln!("  Cipher:   0x{:04X}", cs.0);
+    }
+    eprintln!("---------------------------------");
+}
+
+/// True if `needle` occurs anywhere in `haystack`.
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack.len() >= needle.len()
+        && haystack.windows(needle.len()).any(|w| w == needle)
+}
+
 fn handle_connection(
     conn: &mut dyn TlsConnection,
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     conn.handshake()?;
-
-    if !quiet {
-        eprintln!("--- TLS connection established ---");
-        if let Some(version) = conn.version() {
-            eprintln!("  Protocol: {version:?}");
-        }
-        if let Some(cs) = conn.cipher_suite() {
-            eprintln!("  Cipher:   0x{:04X}", cs.0);
-        }
-        eprintln!("---------------------------------");
-    }
+    print_established(conn, quiet);
 
     // Echo loop: read data from client, echo it back
     let mut buf = vec![0u8; 16384];
@@ -292,6 +311,55 @@ fn handle_connection(
                 if !quiet {
                     let text = String::from_utf8_lossy(&buf[..n]);
                     eprint!("< {text}");
+                }
+                conn.write(&buf[..n])?;
+            }
+            Err(hitls_types::TlsError::ConnectionClosed) => break,
+            Err(hitls_types::TlsError::AlertReceived(_)) => break,
+            Err(hitls_types::TlsError::IoError(ref e))
+                if e.kind() == std::io::ErrorKind::ConnectionReset =>
+            {
+                break;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    let _ = conn.shutdown();
+    Ok(())
+}
+
+/// TLS 1.3 connection handler with the Phase T122 post-handshake
+/// KeyUpdate trigger. Identical echo behaviour to [`handle_connection`],
+/// but before echoing a request it inspects the bytes for the path
+/// marker `/keyupdate` (when `key_update` is set) and, on a match,
+/// sends a post-handshake KeyUpdate (`update_requested`).
+///
+/// A plain `GET /` does not match the marker, so tlsfuzzer sanity
+/// steps — which send `GET / HTTP/1.0` — are echoed without any extra
+/// message; the discriminator is the request path, not the presence
+/// of application data.
+fn handle_connection_tls13(
+    conn: &mut hitls_tls::connection::TlsServerConnection<std::net::TcpStream>,
+    quiet: bool,
+    key_update: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    conn.handshake()?;
+    print_established(conn, quiet);
+
+    let mut buf = vec![0u8; 16384];
+    loop {
+        match conn.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                if !quiet {
+                    eprint!("< {}", String::from_utf8_lossy(&buf[..n]));
+                }
+                if key_update && contains(&buf[..n], b"/keyupdate") {
+                    if !quiet {
+                        eprintln!("[T122] /keyupdate -> post-handshake KeyUpdate");
+                    }
+                    conn.key_update(true)?;
                 }
                 conn.write(&buf[..n])?;
             }
@@ -589,6 +657,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             false,
+            false,
         );
         assert!(result.is_err());
     }
@@ -608,6 +677,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             None,
+            false,
             false,
         );
         assert!(result.is_err());
@@ -629,6 +699,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             None,
+            false,
             false,
         );
         assert!(result.is_err());

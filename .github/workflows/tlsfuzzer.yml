@@ -61,6 +61,11 @@ env:
   # exercised end-to-end (P-521 server-cert signing landed in I96).
   HITLS_PORT_ECDSA_P384: 4452
   HITLS_PORT_ECDSA_P521: 4453
+  # Phase T122 — dedicated `--key-update` server. The flag makes the
+  # server reply with a post-handshake KeyUpdate when the request path
+  # contains `/keyupdate`; kept on its own instance so it only affects
+  # `test-tls13-keyupdate-from-server.py` and not the shared listener.
+  HITLS_PORT_KEYUPDATE: 4454
   # External PSK identity advertised by the server. The matching value
   # `HITLS_PSK_HEX` is generated at setup time and exported into the
   # job environment.
@@ -303,12 +308,24 @@ jobs:
             --key  "${RUNNER_TEMP}/certs/key-ecdsa-p521-pkcs8.pem" \
             -q > "${RUNNER_TEMP}/server-ecdsa-p521-1.3.log" 2>&1 &
           echo "SERVER_PID_ECDSA_P521=$!" >> "$GITHUB_ENV"
-          # Wait for all 10 listeners.
+          # Phase T122 — `--key-update` instance. tlsfuzzer's
+          # `test-tls13-keyupdate-from-server.py` drives it: a request
+          # whose path contains `/keyupdate` triggers a server-initiated
+          # post-handshake KeyUpdate (`update_requested`).
+          ./target/release/hitls s-server \
+            -p "${HITLS_PORT_KEYUPDATE}" \
+            --cert "${RUNNER_TEMP}/certs/cert-rsa.pem" \
+            --key  "${RUNNER_TEMP}/certs/key-rsa-pkcs8.pem" \
+            --key-update \
+            -q > "${RUNNER_TEMP}/server-keyupdate-1.3.log" 2>&1 &
+          echo "SERVER_PID_KEYUPDATE=$!" >> "$GITHUB_ENV"
+          # Wait for all 11 listeners.
           for port in "${HITLS_PORT}" "${HITLS_PORT_12}" \
                       "${HITLS_PORT_ECDSA}" "${HITLS_PORT_ED25519}" \
                       "${HITLS_PORT_MTLS}" "${HITLS_PORT_PSS}" \
                       "${HITLS_PORT_MTLS_12}" "${HITLS_PORT_PSK}" \
-                      "${HITLS_PORT_ECDSA_P384}" "${HITLS_PORT_ECDSA_P521}"; do
+                      "${HITLS_PORT_ECDSA_P384}" "${HITLS_PORT_ECDSA_P521}" \
+                      "${HITLS_PORT_KEYUPDATE}"; do
             for _ in $(seq 1 30); do
               if ss -ltn "( sport = :${port} )" | grep -q ":${port}"; then
                 echo "server on port ${port} up"
@@ -360,7 +377,6 @@ jobs:
             test-tls13-record-layer-limits.py
             test-tls13-rsa-signatures.py
             test-tls13-hrr.py
-            test-tls13-keyupdate-from-server.py
             test-tls13-eddsa.py
             test-tls13-finished-plaintext.py
             # T94 additions (2):
@@ -434,6 +450,13 @@ jobs:
           )
           scripts_ecdsa_p521=(
             test-tls13-ecdsa-support.py
+          )
+          # Phase T122 — server-initiated KeyUpdate. Runs against the
+          # dedicated `--key-update` instance; previously this script
+          # lived in the main `scripts` array with 1 XFAIL because the
+          # shared listener had no server-KeyUpdate trigger.
+          scripts_keyupdate=(
+            test-tls13-keyupdate-from-server.py
           )
           scripts_ed25519=(
             test-tls13-conversation.py
@@ -582,6 +605,22 @@ jobs:
               aggregate_exit=1
             fi
           done
+          # Phase T122 — server-initiated KeyUpdate subset.
+          for s in "${scripts_keyupdate[@]}"; do
+            log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}.log"
+            echo "=== TLS 1.3 (--key-update): $s ==="
+            ./tests/tlsfuzzer/run.sh "$s" \
+              -h "${HITLS_HOST}" -p "${HITLS_PORT_KEYUPDATE}" 2>&1 | tee "${log}"
+            rc=${PIPESTATUS[0]}
+            grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
+              | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo "${s} (--key-update) → exit=${rc}" \
+              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            if [ "$rc" -ne 0 ]; then
+              aggregate_exit=1
+            fi
+          done
           # Phase T93 — Ed25519 cert-matrix.
           for s in "${scripts_ed25519[@]}"; do
             log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}-ed25519.log"
@@ -693,7 +732,8 @@ jobs:
                     "${SERVER_PID_ECDSA:-}" "${SERVER_PID_ED25519:-}" \
                     "${SERVER_PID_MTLS:-}" "${SERVER_PID_PSS:-}" \
                     "${SERVER_PID_MTLS_12:-}" "${SERVER_PID_PSK:-}" \
-                    "${SERVER_PID_ECDSA_P384:-}" "${SERVER_PID_ECDSA_P521:-}"; do
+                    "${SERVER_PID_ECDSA_P384:-}" "${SERVER_PID_ECDSA_P521:-}" \
+                    "${SERVER_PID_KEYUPDATE:-}"; do
             if [ -n "${pid}" ]; then
               kill "${pid}" 2>/dev/null || true
             fi
@@ -714,5 +754,6 @@ jobs:
             ${{ runner.temp }}/server-mtls-1.2.log
             ${{ runner.temp }}/server-ecdsa-p384-1.3.log
             ${{ runner.temp }}/server-ecdsa-p521-1.3.log
+            ${{ runner.temp }}/server-keyupdate-1.3.log
             ${{ runner.temp }}/tlsfuzzer-logs/
           retention-days: 14

@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I96 (96 phases)
-- Testing: T1–T124 (115 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T122 reserved for in-flight tlsfuzzer server-side phases; T111 in progress — Phase A is 9/9 algorithms migrated)
+- Testing: T1–T124 (116 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T121 reserved for in-flight tlsfuzzer server-side phases; T111 in progress — Phase A is 9/9 algorithms migrated)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -323,6 +323,7 @@ Category summary:
 | 311 | T124 | Test | tlsfuzzer two-tier CI — a 6-script `tlsfuzzer-core` gate in `ci.yml` wired into the required `CI Gate`, plus the full 46-script curated suite kept weekly/monthly in `tlsfuzzer.yml`; pinned `TLSFUZZER_REF` / `TLSLITE_NG_REF` from `master` to specific upstream commits (stops XFAIL drift); monthly full `-n 9999` sweep via the new `SWEEP_N` env hook in `run.sh`. Workflow + run.sh + docs only — no Rust source changed. T120–T123 reserved for the in-flight tlsfuzzer server-side phases (psk_ke / 0-RTT / CLI triggers / ECDSA matrix) | 2026-05-16 |
 | 312 | I96 | Impl | TLS ECDSA P-521 server-certificate signing — `hitls-tls` only wired P-256/P-384 into the CertificateVerify / ServerKeyExchange signature dispatch even though `hitls-crypto` fully supports P-521; a P-521 server cert hit `unsupported ECDSA curve for signing` and aborted the handshake. Added P-521 to `signing.rs` (TLS 1.3 sign), `verify.rs` (TLS 1.3 CV verify) and `server12.rs` (TLS 1.2 sign); verified end-to-end against tlsfuzzer `test-tls13-ecdsa-support.py` (2/8 → 5/5, mirrors P-384). Surfaced by the T123 ECDSA cert-matrix probe | 2026-05-16 |
 | 313 | T123 | Test | tlsfuzzer ECDSA cert-matrix expansion — added ECDSA P-384 + P-521 server-cert instances (ports 4452/4453) to `tlsfuzzer.yml`, each running `test-tls13-ecdsa-support.py` so the secp384r1 / secp521r1 CertificateVerify sign paths are exercised end-to-end; per-cert XFAIL dirs `xfail-ecdsa-p384/` + `xfail-ecdsa-p521/` (5 entries each — non-matching-curve + brainpool conversations a single cert structurally can't satisfy). Both gate at 5 PASS / 5 XFAIL / 0 FAIL. Workflow + XFAIL files only — no Rust change. Depends on I96 (P-521 sign support) | 2026-05-16 |
+| 314 | T122 | Test | `s-server --key-update` flag + tlsfuzzer wiring — a client request whose path contains `/keyupdate` triggers a server-initiated post-handshake KeyUpdate (`update_requested`); a plain `GET /` is echoed untouched so sanity steps still pass. New `--key-update` s-server instance (port 4454); `test-tls13-keyupdate-from-server.py` moved off the shared listener onto it and its 1 XFAIL closed (2/1 → 3/0). T121 (0-RTT acceptance) investigated and found void — pinned tlsfuzzer has no 0-RTT-acceptance script. PHA half deferred — probing surfaced a real `request_client_auth()` transcript bug, scoped as a follow-up I-phase | 2026-05-16 |
 
 ---
 
@@ -18272,6 +18273,123 @@ Curated CI suite size: **46 → 48 script-runs**.
 
 No Rust source changed — workflow + XFAIL files + docs only. Workspace
 build / test counts unchanged from I96.
+
+---
+
+## Phase T122 — `s-server --key-update`: Server-Initiated Post-Handshake KeyUpdate (2026-05-16)
+
+### Summary
+
+T122 adds a `--key-update` flag to `hitls s-server` and wires
+tlsfuzzer's `test-tls13-keyupdate-from-server.py` against it, closing
+the last XFAIL on that script (the `post-handshake KeyUpdate msg from
+server` conversation, XFAIL'd since T92).
+
+The connection-layer API for a server-initiated KeyUpdate
+(`TlsServerConnection::key_update`) has existed since the TLS 1.3
+implementation; the gap was purely operator-facing — the CLI never
+exposed a trigger. Phase T96 drafted a `--key-update-server` flag and
+**removed** it, on the belief that "auto-firing KU right after the
+handshake breaks tlsfuzzer's sanity tests ... wiring that semantic
+needs an actual HTTP-aware s_server". T122 shows that belief was
+overcautious: the discriminator tlsfuzzer actually uses is the request
+**path** (`sanity` sends `GET /`; the KeyUpdate conversation sends
+`GET /keyupdate`), and a plain substring check — not a real HTTP
+parser — is enough to tell them apart.
+
+### Design
+
+`--key-update` makes the TLS 1.3 echo loop, on each application-data
+record, check the bytes for the marker `/keyupdate`. On a match it
+calls `conn.key_update(true)` (`update_requested`) before echoing.
+`GET /` matches nothing → echoed untouched → sanity steps unaffected.
+The flag is TLS 1.3 only (rejected up front for a `--tls 1.2`
+listener).
+
+### Code changes
+
+**`crates/hitls-cli/src/main.rs`**: new `--key-update` bool flag on
+the `SServer` subcommand (replacing the stale T96 "removed flag"
+comment block); threaded into the `s_server::run(...)` call.
+
+**`crates/hitls-cli/src/s_server.rs`**:
+- `run()` gains a `key_update: bool` parameter + an up-front
+  TLS-1.2-rejection check.
+- `print_established` extracted; `contains(haystack, needle)` byte-
+  substring helper added.
+- New `handle_connection_tls13` — a TLS-1.3-specific handler taking
+  the concrete `TlsServerConnection` (needed because `key_update` is
+  an inherent method, not on the `TlsConnection` trait). Marker-aware
+  echo loop. `handle_connection` (generic, used by the TLS 1.2 path)
+  is unchanged apart from reusing `print_established`.
+- 3 existing `run()` unit tests updated for the new arity.
+
+**`.github/workflows/tlsfuzzer.yml`**: new `HITLS_PORT_KEYUPDATE: 4454`
++ a `--key-update` s-server instance; `test-tls13-keyupdate-from-
+server.py` removed from the shared `scripts` array and run instead via
+a new `scripts_keyupdate` loop against port 4454; wait/stop/upload
+lists extended.
+
+**`tests/tlsfuzzer/xfail/test-tls13-keyupdate-from-server.txt`**:
+deleted — the script is now 3/0 clean against the `--key-update`
+instance, so the XFAIL would XPASS.
+
+### Verification
+
+- `cargo test -p hitls-cli --all-features --bins`: 167 PASS / 0 FAIL
+  (3 `run()` tests updated for the new arity).
+- `cargo clippy --workspace --all-features --all-targets` with
+  `-D warnings`: 0; `cargo fmt`: clean.
+- End-to-end: `test-tls13-keyupdate-from-server.py` driven through
+  `tests/tlsfuzzer/run.sh` against a `--key-update` s-server —
+  **3 PASS / 0 FAIL / 0 XFAIL** (was 2 PASS / 1 XFAIL on the shared
+  listener); `run.sh` exit 0. `actionlint` clean (pre-existing SC2129
+  style nits only).
+
+### Scope — T121 skipped, PHA deferred
+
+T122's plan originally also covered post-handshake client auth (PHA)
+and was preceded by T121 (0-RTT acceptance). Both were investigated
+and re-scoped:
+
+- **T121 (0-RTT acceptance)** — investigated, found void. The pinned
+  tlsfuzzer (`bf7f579`) has exactly one 0-RTT script,
+  `test-tls13-0rtt-garbage.py`, which is already in CI and tests
+  *garbage/rejected* 0-RTT. Probing proved a `--max-early-data-size`
+  server instance yields byte-identical results (7 PASS / 4 XFAIL) to
+  a 0-RTT-disabled one — the script never sends valid 0-RTT, so the
+  accept path is not exercised regardless. There is no tlsfuzzer
+  material for a 0-RTT-acceptance phase; the accept path stays covered
+  by the I21/T109 integration test. The T121 slot is left unused.
+- **PHA** — deferred. Probing `test-tls13-post-handshake-auth.py`
+  surfaced a real bug: `request_client_auth()` computes the
+  post-handshake CertificateVerify transcript as
+  `Hash(CertificateRequest ‖ Certificate)` only, omitting the base
+  handshake transcript (RFC 8446 §4.4.1 requires the full transcript).
+  Fixing it needs `TlsServerConnection` to retain the handshake
+  transcript hasher — a `hitls-tls` change scoped as a follow-up
+  Implementation phase, after which a small Testing phase can wire
+  `test-tls13-post-handshake-auth.py`. The `--post-handshake-auth`
+  flag is intentionally **not** shipped in T122 (a flag that produces
+  a broken handshake is worse than no flag).
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-cli/src/main.rs` | Modified | `--key-update` flag; T96 stale-comment block removed. |
+| `crates/hitls-cli/src/s_server.rs` | Modified | `run()` `key_update` param + 1.2 reject; `handle_connection_tls13` marker-aware handler; `print_established` / `contains` helpers; 3 tests re-arity'd. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | `--key-update` instance (port 4454); `keyupdate-from-server.py` relocated to `scripts_keyupdate`; wait/stop/upload lists. |
+| `tests/tlsfuzzer/xfail/test-tls13-keyupdate-from-server.txt` | Deleted | Script now 3/0 clean against the `--key-update` instance. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 314 + Testing summary (115 → 116 phases, T120–T122 → T120–T121 reserved). |
+| `PROMPT_LOG.md` | Modified | T122 prompt + result entry. |
+| `docs/tlsfuzzer.md` | Modified | T122 phase reference. |
+
+### Build Status (Post T122)
+
+`hitls-cli` builds clean; `cargo test -p hitls-cli` 167/0. Curated
+tlsfuzzer suite size unchanged at 48 script-runs (the keyupdate script
+was relocated, not added).
 
 
 
