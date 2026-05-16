@@ -1716,6 +1716,7 @@ pub(crate) fn select_signature_scheme_tls12(
         ServerPrivateKey::Ecdsa { curve_id, .. } => match *curve_id {
             EccCurveId::NistP256 => &[SignatureScheme::ECDSA_SECP256R1_SHA256],
             EccCurveId::NistP384 => &[SignatureScheme::ECDSA_SECP384R1_SHA384],
+            EccCurveId::NistP521 => &[SignatureScheme::ECDSA_SECP521R1_SHA512],
             _ => {
                 return Err(TlsError::HandshakeFailed(
                     "unsupported ECDSA curve for signing".into(),
@@ -1775,6 +1776,7 @@ pub(crate) fn sign_ske_data(
             let digest = match scheme {
                 SignatureScheme::ECDSA_SECP256R1_SHA256 => compute_sha256(signed_data)?,
                 SignatureScheme::ECDSA_SECP384R1_SHA384 => compute_sha384(signed_data)?,
+                SignatureScheme::ECDSA_SECP521R1_SHA512 => compute_sha512(signed_data)?,
                 _ => return Err(TlsError::HandshakeFailed("ECDSA scheme mismatch".into())),
             };
             let kp = hitls_crypto::ecdsa::EcdsaKeyPair::from_private_key(*curve_id, private_key)
@@ -1845,6 +1847,12 @@ fn compute_sha256(data: &[u8]) -> Result<Vec<u8>, TlsError> {
 
 fn compute_sha384(data: &[u8]) -> Result<Vec<u8>, TlsError> {
     let mut h = hitls_crypto::sha2::Sha384::new();
+    h.update(data).map_err(TlsError::CryptoError)?;
+    Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
+}
+
+fn compute_sha512(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    let mut h = hitls_crypto::sha2::Sha512::new();
     h.update(data).map_err(TlsError::CryptoError)?;
     Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
 }

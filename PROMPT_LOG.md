@@ -5499,3 +5499,42 @@ server-initiated KeyUpdate + PHA CLI triggers · T120 `psk_ke` mode ·
 T125 `--tls auto` version range · T126 remaining mass-fail script
 triage · T127 TLS 1.2 script breadth · T128 FFDHE groups · T129
 `s-server` DTLS mode.
+
+---
+
+## Phase I96 — TLS ECDSA P-521 Server-Certificate Signing (2026-05-16)
+
+> 现在开始T123
+> 你的建议是什么？
+> 按这个方案推进
+
+Phase I96 was carved out mid-T123. While probing the planned T123
+ECDSA cert-matrix expansion locally (pinned tlsfuzzer @ bf7f579 +
+freshly built `s-server` + openssl-generated P-384/P-521 certs), the
+P-521 server instance failed every handshake — `s-server` logged
+`handshake failed: unsupported ECDSA curve for signing`. The probe had
+done exactly its job: surfaced a real gap. The recommendation (and the
+approved plan) was to fix the gap as its own Implementation phase
+*before* T123, so T123 stays a clean CI-only Testing phase and the
+`hitls-tls` change gets a focused security-mode review.
+
+**Root cause**: `hitls-crypto::ecdsa` supports P-521 sign+verify
+(`ecc::p521_scalar`), but the `hitls-tls` signature dispatch tables
+only wired P-256/P-384 — `signing.rs` (TLS 1.3 sign), `verify.rs`
+(TLS 1.3 CV verify) and `server12.rs` (TLS 1.2 sign). A unit test even
+pinned P-521-as-rejected, so the limitation was deliberate-but-stale.
+
+**Fix**: added the `ECDSA_SECP521R1_SHA512` / `NistP521` arms to all
+four dispatch sites, added a `compute_sha512` helper to `server12.rs`,
+retargeted the unsupported-curve test to `BrainpoolP256r1`, and added
+3 new P-521 unit tests (select / sign-roundtrip / CV-verify-roundtrip).
+
+**Verification**: `hitls-tls` lib tests 38/0 (+3); clippy `-D warnings`
+0; fmt clean. End-to-end — a release `s-server` with a P-521 cert now
+completes a TLS 1.3 handshake (`openssl s_client`:
+`ecdsa_secp521r1_sha512`, `TLS_AES_256_GCM_SHA384`); tlsfuzzer
+`test-tls13-ecdsa-support.py` against the P-521 instance went
+**2/8 → 5/5** (residual 5 FAIL are the cert-mismatch conversations a
+single P-521 cert can't satisfy — identical shape to P-384). Recorded
+as DEV_LOG Phase I96. T123 (P-384 + P-521 tlsfuzzer cert matrix)
+follows next.

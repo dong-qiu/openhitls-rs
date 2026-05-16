@@ -43,6 +43,10 @@ pub fn select_signature_scheme_for_cert(
         ServerPrivateKey::Ecdsa { curve_id, .. } => match *curve_id {
             EccCurveId::NistP256 => &[SignatureScheme::ECDSA_SECP256R1_SHA256],
             EccCurveId::NistP384 => &[SignatureScheme::ECDSA_SECP384R1_SHA384],
+            EccCurveId::NistP521 => &[SignatureScheme::ECDSA_SECP521R1_SHA512],
+            // P-192/P-224 (too weak for a TLS 1.3 signature curve),
+            // brainpool (not in our supported set) and SM2 (handled via
+            // the dedicated `Sm2` key variant) have no `ecdsa_*` scheme.
             _ => {
                 return Err(TlsError::HandshakeFailed(
                     "unsupported ECDSA curve for signing".into(),
@@ -112,6 +116,9 @@ pub fn sign_certificate_verify(
                 }
                 (SignatureScheme::ECDSA_SECP384R1_SHA384, EccCurveId::NistP384) => {
                     compute_sha384(&content)?
+                }
+                (SignatureScheme::ECDSA_SECP521R1_SHA512, EccCurveId::NistP521) => {
+                    compute_sha512(&content)?
                 }
                 _ => {
                     return Err(TlsError::HandshakeFailed(
@@ -247,10 +254,26 @@ mod tests {
     }
 
     #[test]
-    fn test_select_signature_scheme_ecdsa_unsupported_curve() {
+    fn test_select_signature_scheme_ecdsa_p521() {
         let key = ServerPrivateKey::Ecdsa {
             curve_id: EccCurveId::NistP521,
             private_key: vec![0x42; 66],
+        };
+        let client_schemes = vec![
+            SignatureScheme::ECDSA_SECP256R1_SHA256,
+            SignatureScheme::ECDSA_SECP521R1_SHA512,
+        ];
+        let scheme = select_signature_scheme(&key, &client_schemes).unwrap();
+        assert_eq!(scheme, SignatureScheme::ECDSA_SECP521R1_SHA512);
+    }
+
+    #[test]
+    fn test_select_signature_scheme_ecdsa_unsupported_curve() {
+        // brainpool is not in our supported curve set — still rejected
+        // after P-521 was wired up (NistP192/P224 likewise).
+        let key = ServerPrivateKey::Ecdsa {
+            curve_id: EccCurveId::BrainpoolP256r1,
+            private_key: vec![0x42; 32],
         };
         let client_schemes = vec![
             SignatureScheme::ECDSA_SECP256R1_SHA256,
@@ -345,6 +368,36 @@ mod tests {
         let digest = compute_sha256(&content).unwrap();
         let verifier =
             hitls_crypto::ecdsa::EcdsaKeyPair::from_public_key(EccCurveId::NistP256, &pub_bytes)
+                .unwrap();
+        let ok = verifier.verify(&digest, &signature).unwrap();
+        assert!(ok);
+    }
+
+    #[test]
+    fn test_sign_and_verify_ecdsa_p521_roundtrip() {
+        let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(EccCurveId::NistP521).unwrap();
+        let pub_bytes = kp.public_key_bytes().unwrap();
+        let priv_bytes = kp.private_key_bytes();
+
+        let server_key = ServerPrivateKey::Ecdsa {
+            curve_id: EccCurveId::NistP521,
+            private_key: priv_bytes,
+        };
+        let transcript_hash = vec![0xDD; 48];
+
+        let signature = sign_certificate_verify(
+            &server_key,
+            SignatureScheme::ECDSA_SECP521R1_SHA512,
+            &transcript_hash,
+            true,
+        )
+        .unwrap();
+
+        // Verify with a P-521 / SHA-512 digest (matches the sign side).
+        let content = build_verify_content(&transcript_hash, true);
+        let digest = compute_sha512(&content).unwrap();
+        let verifier =
+            hitls_crypto::ecdsa::EcdsaKeyPair::from_public_key(EccCurveId::NistP521, &pub_bytes)
                 .unwrap();
         let ok = verifier.verify(&digest, &signature).unwrap();
         assert!(ok);

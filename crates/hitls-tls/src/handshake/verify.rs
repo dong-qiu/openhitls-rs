@@ -123,6 +123,10 @@ pub fn verify_certificate_verify(
             let digest = compute_sha384(&content)?;
             verify_ecdsa(spki, EccCurveId::NistP384, &digest, signature)?
         }
+        SignatureScheme::ECDSA_SECP521R1_SHA512 => {
+            let digest = compute_sha512(&content)?;
+            verify_ecdsa(spki, EccCurveId::NistP521, &digest, signature)?
+        }
         SignatureScheme::ED25519 => {
             // Ed25519 signs the raw content, not a hash
             verify_ed25519(spki, &content, signature)?
@@ -503,6 +507,28 @@ mod tests {
         verify_certificate_verify(
             &cert,
             SignatureScheme::ECDSA_SECP384R1_SHA384,
+            &signature,
+            &transcript_hash,
+            true,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_verify_certificate_verify_ecdsa_p521_roundtrip() {
+        let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(EccCurveId::NistP521).unwrap();
+        let pub_key = kp.public_key_bytes().unwrap();
+
+        let transcript_hash = vec![0xCC; 48];
+        let content = build_verify_content(&transcript_hash, true);
+        let digest = compute_sha512(&content).unwrap();
+        let signature = kp.sign(&digest).unwrap();
+
+        let cert = make_cert_with_spki(vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], pub_key);
+
+        verify_certificate_verify(
+            &cert,
+            SignatureScheme::ECDSA_SECP521R1_SHA512,
             &signature,
             &transcript_hash,
             true,
