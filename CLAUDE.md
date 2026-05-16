@@ -64,18 +64,22 @@ cargo fmt --all -- --check
 
 ### Git Branching Model
 - **Trunk-based development with a PR merge gate**: One long-lived branch — `main`. Every code change lands via a short-lived feature-branch PR; CI is the merge gate. `main` is branch-protected — **direct `git push origin main` is rejected**.
-- **Local worktrees for parallel development**: 4 persistent worktrees under `worktrees/`, each on a dedicated local branch:
-  - `worktrees/perf-enhanced` → `perf` (performance optimization)
-  - `worktrees/bug-fix` → `bug-fix` (defect fixes)
-  - `worktrees/refactoring` → `refactoring` (code restructuring)
-  - `worktrees/test-enhanced` → `testing` (test coverage improvement)
-- **Worktree → main workflow**:
-  1. Sync: `git fetch origin main && git rebase origin/main` (in the worktree branch)
-  2. Develop in the worktree → commit (Conventional Commits format required)
-  3. Push the branch: `git push origin <branch>` — the pre-push hook runs fmt/clippy + AI review locally
+- **Worktree slots for parallel development**: 5 persistent worktree *directories* under `worktrees/` — stable "slots", one per kind of work. A slot is just a working directory (its own checkout + `target/`); the branch inside it is **per-task**, never a permanent category branch. Each slot has a conventional branch *prefix* (matching the Conventional Commits type):
+  - `worktrees/feature`       → `feat/<task>`     (new implementation)
+  - `worktrees/perf-enhanced` → `perf/<task>`     (performance optimization)
+  - `worktrees/bug-fix`       → `fix/<task>`      (defect fixes)
+  - `worktrees/refactoring`   → `refactor/<task>` (code restructuring)
+  - `worktrees/test-enhanced` → `test/<task>`     (test coverage improvement)
+- **Per-task branches**: every task gets its own short-lived branch named `<prefix>/<short-description>` (e.g. `perf/aes-4block`, `fix/commitlint-range`, `feat/curve448-pilot`). The prefix is the slot's; the suffix describes the task. Never reuse a branch across tasks — this keeps PR/branch names self-describing and lets independent tasks proceed in parallel.
+- **Worktree → main workflow** (all steps run inside the slot directory):
+  1. Start the task — branch fresh off the latest main:
+     `git fetch origin main && git checkout -B <prefix>/<task> origin/main`
+  2. Develop in the slot → commit (Conventional Commits format required)
+  3. Push the branch: `git push -u origin <prefix>/<task>` — the pre-push hook runs fmt/clippy + AI review locally
   4. Open a PR: `gh pr create --fill`
-  5. Queue the merge: `gh pr merge --auto --squash` — GitHub merges automatically once the required checks pass
-  6. After merge: `git fetch origin main && git reset --hard origin/main` to realign the worktree branch onto the squashed commit
+  5. Queue the merge: `gh pr merge --auto --squash` — GitHub merges once the required checks pass, then auto-deletes the remote branch
+  6. Next task — repeat from step 1 with a new branch name. Optionally `git branch -D <old-task-branch>` to tidy up the merged local branch.
+  - If an open PR falls behind `main` (`strict` mode), update it in the slot: `git fetch origin main && git rebase origin/main && git push --force-with-lease`.
 - **Branch protection on `main`**: requires the `CI Gate` (aggregate of all hard CI gates) + `Conventional Commits` status checks, `strict` mode (branch must be up to date before merge), and linear history. `enforce_admins` is off — the repo admin may bypass for genuinely trivial doc-only commits at their discretion.
 - **Merge policy**: squash-merge (default, one commit per task) or rebase-merge — never a merge commit (linear history). If a PR conflicts, rebase the branch onto `origin/main` first.
 
