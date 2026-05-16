@@ -1335,6 +1335,18 @@ impl ClientHandshake {
         })
     }
 
+    /// Phase I97 — snapshot the completed handshake transcript
+    /// (ClientHello … client Finished) for post-handshake use.
+    ///
+    /// RFC 8446 §4.4.1: a post-handshake CertificateVerify is computed
+    /// over the main-handshake transcript continued with the
+    /// post-handshake CertificateRequest + Certificate. `process_finished`
+    /// feeds the client Finished into `self.transcript`, so once the
+    /// handshake is `Connected` this clone is the correct baseline.
+    pub fn transcript_clone(&self) -> TranscriptHash {
+        self.transcript.clone()
+    }
+
     /// Build the Certificate (and optional CertificateVerify) emitted in
     /// response to an in-handshake CertificateRequest (RFC 8446 §4.3.2).
     ///

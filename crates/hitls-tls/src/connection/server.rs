@@ -5,7 +5,7 @@ use crate::config::TlsConfig;
 use crate::connection_info::ConnectionInfo;
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
-use crate::crypt::{CipherSuiteParams, DigestVariant, NamedGroup};
+use crate::crypt::{CipherSuiteParams, NamedGroup};
 use crate::handshake::codec::{
     decode_certificate, decode_certificate_verify, decode_finished, decode_key_update,
     encode_certificate_request, encode_key_update, parse_handshake_header, CertificateRequestMsg,
@@ -15,7 +15,6 @@ use crate::handshake::server::{ClientHelloResult, ServerHandshake};
 use crate::handshake::HandshakeType;
 use crate::record::{ContentType, RecordLayer};
 use crate::{CipherSuite, TlsConnection, TlsError, TlsVersion};
-use hitls_crypto::provider::Digest;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
@@ -63,6 +62,13 @@ pub struct TlsServerConnection<S: Read + Write> {
     /// — and multiple messages packed into a single record — are
     /// processed correctly.
     pub(super) post_hs_buffer: Vec<u8>,
+    /// Phase I97 — the completed handshake transcript (ClientHello …
+    /// client Finished), captured at the end of `do_handshake`. Post-
+    /// handshake CertificateVerify (RFC 8446 §4.4.1 / §4.6.2) must be
+    /// computed over this transcript continued with the post-handshake
+    /// CertificateRequest + Certificate, so `request_client_auth` clones
+    /// it as a baseline. `None` until the handshake completes.
+    pub(super) post_handshake_transcript: Option<crate::crypt::transcript::TranscriptHash>,
 }
 
 impl<S: Read + Write> Drop for TlsServerConnection<S> {
@@ -109,6 +115,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             key_update_recv_count: 0,
             ccs_seen_in_handshake: false,
             post_hs_buffer: Vec::new(),
+            post_handshake_transcript: None,
         }
     }
 
@@ -151,8 +158,22 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?
             .clone();
-        let alg = params.hash_alg_id();
         let ks = KeySchedule::new(params.clone());
+
+        // Phase I97 — RFC 8446 §4.4.1: a post-handshake CertificateVerify
+        // is signed over the full main-handshake transcript
+        // (ClientHello … client Finished) continued with *this* exchange's
+        // CertificateRequest + Certificate — not over CR+Certificate
+        // alone. Clone the retained baseline so repeated post-handshake
+        // authentications each restart from the main handshake and do not
+        // include one another.
+        let mut transcript = self
+            .post_handshake_transcript
+            .as_ref()
+            .ok_or_else(|| {
+                TlsError::HandshakeFailed("request_client_auth: no handshake transcript".into())
+            })?
+            .clone();
 
         // Generate random context for this request
         let mut context = vec![0u8; 8];
@@ -164,6 +185,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             SignatureScheme::ED25519,
             SignatureScheme::ECDSA_SECP256R1_SHA256,
             SignatureScheme::ECDSA_SECP384R1_SHA384,
+            SignatureScheme::ECDSA_SECP521R1_SHA512,
             SignatureScheme::RSA_PSS_RSAE_SHA256,
             SignatureScheme::RSA_PSS_RSAE_SHA384,
             SignatureScheme::RSA_PSS_RSAE_SHA512,
@@ -188,9 +210,9 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .write_all(&cr_record)
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
-        // Start transcript for this post-HS exchange (just the CertificateRequest)
-        let mut hasher = DigestVariant::new(alg);
-        hasher.update(&cr_msg).map_err(TlsError::CryptoError)?;
+        // Continue the retained handshake transcript with the
+        // CertificateRequest (Phase I97).
+        transcript.update(&cr_msg)?;
 
         // Read client Certificate
         let (ct, cert_data) = self.read_record()?;
@@ -221,23 +243,15 @@ impl<S: Read + Write> TlsServerConnection<S> {
             .map(|e| e.cert_data.clone())
             .collect();
 
-        // Update transcript with Certificate
-        hasher
-            .update(cert_msg_data)
-            .map_err(TlsError::CryptoError)?;
+        // Continue the transcript with the client Certificate.
+        transcript.update(cert_msg_data)?;
 
         if client_certs.is_empty() {
-            // Client sent empty Certificate — no CertificateVerify expected.
-            // Read Finished.
-            let mut fin_hash_buf = [0u8; 64];
-            let mut hasher_fin = DigestVariant::new(alg);
-            hasher_fin.update(&cr_msg).map_err(TlsError::CryptoError)?;
-            hasher_fin
-                .update(cert_msg_data)
-                .map_err(TlsError::CryptoError)?;
-            hasher_fin
-                .finish(&mut fin_hash_buf[..params.hash_len])
-                .map_err(TlsError::CryptoError)?;
+            // Client sent empty Certificate — no CertificateVerify expected
+            // (RFC 8446 §4.4.2). The client Finished MAC is over the
+            // transcript CH … client Finished ‖ CertificateRequest ‖
+            // Certificate.
+            let fin_hash = transcript.current_hash()?;
 
             let (ct3, fin_data) = self.read_record()?;
             if ct3 != ContentType::Handshake {
@@ -255,8 +269,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
 
             // Verify Finished
             let finished_key = ks.derive_finished_key(&self.client_app_secret)?;
-            let expected =
-                ks.compute_finished_verify_data(&finished_key, &fin_hash_buf[..params.hash_len])?;
+            let expected = ks.compute_finished_verify_data(&finished_key, &fin_hash)?;
             if !bool::from(fin_msg.verify_data.ct_eq(&expected)) {
                 return Err(TlsError::HandshakeFailed(
                     "post-HS client Finished verification failed".into(),
@@ -282,16 +295,9 @@ impl<S: Read + Write> TlsServerConnection<S> {
         let cv_msg_data = &cv_data[..cv_total];
         let cv_msg = decode_certificate_verify(cv_body)?;
 
-        // Verify CertificateVerify signature against transcript hash
-        let mut cv_hash = [0u8; 64];
-        let mut hasher_cv = DigestVariant::new(alg);
-        hasher_cv.update(&cr_msg).map_err(TlsError::CryptoError)?;
-        hasher_cv
-            .update(cert_msg_data)
-            .map_err(TlsError::CryptoError)?;
-        hasher_cv
-            .finish(&mut cv_hash[..params.hash_len])
-            .map_err(TlsError::CryptoError)?;
+        // The CertificateVerify signature covers the transcript through
+        // the client Certificate (CH … client Finished ‖ CR ‖ Cert).
+        let cv_hash = transcript.current_hash()?;
 
         // Parse the first client cert to verify the signature
         let client_cert = hitls_pki::x509::Certificate::from_der(&client_certs[0])
@@ -300,27 +306,14 @@ impl<S: Read + Write> TlsServerConnection<S> {
             &client_cert,
             cv_msg.algorithm,
             &cv_msg.signature,
-            &cv_hash[..params.hash_len],
+            &cv_hash,
             false, // client CertificateVerify
         )?;
 
-        // Update transcript with CertificateVerify, then compute hash for Finished
-        hasher
-            .update(cert_msg_data)
-            .map_err(TlsError::CryptoError)?;
-        // We need a fresh hasher for the Finished hash that includes CR+Cert+CV
-        let mut fin_hash_buf = [0u8; 64];
-        let mut hasher_fin = DigestVariant::new(alg);
-        hasher_fin.update(&cr_msg).map_err(TlsError::CryptoError)?;
-        hasher_fin
-            .update(cert_msg_data)
-            .map_err(TlsError::CryptoError)?;
-        hasher_fin
-            .update(cv_msg_data)
-            .map_err(TlsError::CryptoError)?;
-        hasher_fin
-            .finish(&mut fin_hash_buf[..params.hash_len])
-            .map_err(TlsError::CryptoError)?;
+        // Continue the transcript with CertificateVerify; the client
+        // Finished MAC is over CH … client Finished ‖ CR ‖ Cert ‖ CV.
+        transcript.update(cv_msg_data)?;
+        let fin_hash = transcript.current_hash()?;
 
         // Read Finished
         let (ct3, fin_data) = self.read_record()?;
@@ -339,8 +332,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
 
         // Verify Finished
         let finished_key = ks.derive_finished_key(&self.client_app_secret)?;
-        let expected =
-            ks.compute_finished_verify_data(&finished_key, &fin_hash_buf[..params.hash_len])?;
+        let expected = ks.compute_finished_verify_data(&finished_key, &fin_hash)?;
         if !bool::from(fin_msg.verify_data.ct_eq(&expected)) {
             return Err(TlsError::HandshakeFailed(
                 "post-HS client Finished verification failed".into(),

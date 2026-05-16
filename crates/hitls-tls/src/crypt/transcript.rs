@@ -55,6 +55,11 @@ impl PartialEq<[u8]> for HashOutput {
 /// Uses a message buffer + replay approach: `current_hash()` creates a fresh
 /// hasher, replays all buffered data, and finishes to get the intermediate hash.
 /// The live hasher is never finalized, so `update()` continues to work.
+///
+/// `Clone` (Phase I97) snapshots the buffered messages — used to retain the
+/// completed handshake transcript so post-handshake CertificateVerify
+/// (RFC 8446 §4.4.1 / §4.6.2) can continue it.
+#[derive(Clone)]
 pub struct TranscriptHash {
     alg: HashAlgId,
     message_buffer: Vec<u8>,
@@ -170,6 +175,37 @@ mod tests {
         // h3 should equal SHA-256("hello world")
         let expected = Sha256::digest(b"hello world").unwrap();
         assert_eq!(h3, expected.to_vec());
+    }
+
+    #[test]
+    fn test_transcript_clone_independence() {
+        // Phase I97 — `request_client_auth` clones the retained handshake
+        // transcript as a post-handshake baseline. The clone must (a)
+        // reproduce the baseline hash exactly and (b) be independent —
+        // updating one clone must not affect the original or siblings.
+        let mut base = TranscriptHash::new(HashAlgId::Sha256);
+        base.update(b"ClientHello..server..client-Finished")
+            .unwrap();
+        let baseline = base.current_hash().unwrap();
+
+        let mut clone_a = base.clone();
+        let mut clone_b = base.clone();
+        // (a) a fresh clone reproduces the baseline.
+        assert_eq!(clone_a.current_hash().unwrap(), baseline);
+
+        // (b) extending clone_a leaves base and clone_b untouched.
+        clone_a.update(b"CertificateRequest||Certificate").unwrap();
+        assert_ne!(clone_a.current_hash().unwrap(), baseline);
+        assert_eq!(base.current_hash().unwrap(), baseline);
+        assert_eq!(clone_b.current_hash().unwrap(), baseline);
+
+        // The same continuation on an independent clone yields the same
+        // hash — i.e. two post-handshake auths off one baseline agree.
+        clone_b.update(b"CertificateRequest||Certificate").unwrap();
+        assert_eq!(
+            clone_a.current_hash().unwrap(),
+            clone_b.current_hash().unwrap()
+        );
     }
 
     #[test]

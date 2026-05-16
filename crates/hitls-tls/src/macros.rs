@@ -375,15 +375,22 @@ macro_rules! tls13_client_handle_post_hs_cert_request_body {
             .as_ref()
             .ok_or_else(|| TlsError::HandshakeFailed("no cipher params".into()))?
             .clone();
-        let alg = params.hash_alg_id();
         let ks = KeySchedule::new(params.clone());
 
-        let mut hasher = DigestVariant::new(alg);
-        hasher.update($full_msg).map_err(TlsError::CryptoError)?;
-        let mut cr_hash = [0u8; 64];
-        hasher
-            .finish(&mut cr_hash[..params.hash_len])
-            .map_err(TlsError::CryptoError)?;
+        // Phase I97 — RFC 8446 §4.4.1: the post-handshake transcript
+        // continues the completed main-handshake transcript. Clone the
+        // retained client handshake transcript (ClientHello … client
+        // Finished) as the baseline, then append this CertificateRequest.
+        let mut transcript = $self
+            .client_hs
+            .as_ref()
+            .ok_or_else(|| {
+                TlsError::HandshakeFailed(
+                    "post-handshake CertificateRequest: no handshake state retained".into(),
+                )
+            })?
+            .transcript_clone();
+        transcript.update($full_msg)?;
 
         let cert_msg = if $self.config.client_certificate_chain.is_empty() {
             CertificateMsg {
@@ -406,11 +413,8 @@ macro_rules! tls13_client_handle_post_hs_cert_request_body {
         };
         let cert_encoded = encode_certificate(&cert_msg);
 
-        let mut hasher2 = DigestVariant::new(alg);
-        hasher2.update($full_msg).map_err(TlsError::CryptoError)?;
-        hasher2
-            .update(&cert_encoded)
-            .map_err(TlsError::CryptoError)?;
+        // Append the client Certificate to the transcript.
+        transcript.update(&cert_encoded)?;
 
         let cert_record = $self
             .record_layer
@@ -421,18 +425,10 @@ macro_rules! tls13_client_handle_post_hs_cert_request_body {
         if let Some(ref client_key) = $self.config.client_private_key {
             let scheme = select_signature_scheme(client_key, &server_sig_algs)?;
 
-            let mut cv_hash = [0u8; 64];
-            let mut hasher3 = DigestVariant::new(alg);
-            hasher3.update($full_msg).map_err(TlsError::CryptoError)?;
-            hasher3
-                .update(&cert_encoded)
-                .map_err(TlsError::CryptoError)?;
-            hasher3
-                .finish(&mut cv_hash[..params.hash_len])
-                .map_err(TlsError::CryptoError)?;
-
-            let signature =
-                sign_certificate_verify(client_key, scheme, &cv_hash[..params.hash_len], false)?;
+            // CertificateVerify signs the transcript through the client
+            // Certificate (CH … client Finished ‖ CR ‖ Certificate).
+            let cv_hash = transcript.current_hash()?;
+            let signature = sign_certificate_verify(client_key, scheme, &cv_hash, false)?;
             let cv_msg = encode_certificate_verify(&CertificateVerifyMsg {
                 algorithm: scheme,
                 signature,
@@ -444,21 +440,12 @@ macro_rules! tls13_client_handle_post_hs_cert_request_body {
             maybe_await!($mode, $self.stream.write_all(&cv_record))
                 .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
-            // Finished hash: Hash(CR || Certificate || CertificateVerify)
+            // The client Finished MAC is over the transcript
+            // CH … client Finished ‖ CR ‖ Cert ‖ CertificateVerify.
+            transcript.update(&cv_msg)?;
+            let fin_hash = transcript.current_hash()?;
             let finished_key = ks.derive_finished_key(&$self.client_app_secret)?;
-            let mut fin_hash = [0u8; 64];
-            let mut hasher4 = DigestVariant::new(alg);
-            hasher4.update($full_msg).map_err(TlsError::CryptoError)?;
-            hasher4
-                .update(&cert_encoded)
-                .map_err(TlsError::CryptoError)?;
-            hasher4.update(&cv_msg).map_err(TlsError::CryptoError)?;
-            hasher4
-                .finish(&mut fin_hash[..params.hash_len])
-                .map_err(TlsError::CryptoError)?;
-
-            let verify_data =
-                ks.compute_finished_verify_data(&finished_key, &fin_hash[..params.hash_len])?;
+            let verify_data = ks.compute_finished_verify_data(&finished_key, &fin_hash)?;
             let fin_msg = encode_finished(&verify_data);
 
             let fin_record = $self
@@ -467,16 +454,12 @@ macro_rules! tls13_client_handle_post_hs_cert_request_body {
             maybe_await!($mode, $self.stream.write_all(&fin_record))
                 .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
         } else {
-            // No private key: send Finished without CertificateVerify (RFC 8446 §4.4.2).
-            // Finished hash: Hash(CR || Certificate)
+            // No private key: send Finished without CertificateVerify
+            // (RFC 8446 §4.4.2). The MAC is over the transcript
+            // CH … client Finished ‖ CR ‖ Certificate.
+            let fin_hash = transcript.current_hash()?;
             let finished_key = ks.derive_finished_key(&$self.client_app_secret)?;
-            let mut fin_hash = [0u8; 64];
-            hasher2
-                .finish(&mut fin_hash[..params.hash_len])
-                .map_err(TlsError::CryptoError)?;
-
-            let verify_data =
-                ks.compute_finished_verify_data(&finished_key, &fin_hash[..params.hash_len])?;
+            let verify_data = ks.compute_finished_verify_data(&finished_key, &fin_hash)?;
             let fin_msg = encode_finished(&verify_data);
 
             let fin_record = $self
@@ -1586,6 +1569,10 @@ macro_rules! tls13_server_do_handshake_body {
         $self.negotiated_alpn = hs.negotiated_alpn().map(|a| a.to_vec());
         $self.client_server_name = hs.client_server_name().map(|s| s.to_string());
         $self.negotiated_group = hs.negotiated_group();
+        // Phase I97 — retain the completed handshake transcript
+        // (ClientHello … client Finished) so a post-handshake
+        // CertificateRequest can continue it (RFC 8446 §4.4.1).
+        $self.post_handshake_transcript = Some(hs.transcript_clone());
 
         $self.state = ConnectionState::Connected;
         Ok(())

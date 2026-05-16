@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I96 (96 phases)
+- Implementation: I1–I97 (97 phases)
 - Testing: T1–T124 (116 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T121 reserved for in-flight tlsfuzzer server-side phases; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -324,6 +324,7 @@ Category summary:
 | 312 | I96 | Impl | TLS ECDSA P-521 server-certificate signing — `hitls-tls` only wired P-256/P-384 into the CertificateVerify / ServerKeyExchange signature dispatch even though `hitls-crypto` fully supports P-521; a P-521 server cert hit `unsupported ECDSA curve for signing` and aborted the handshake. Added P-521 to `signing.rs` (TLS 1.3 sign), `verify.rs` (TLS 1.3 CV verify) and `server12.rs` (TLS 1.2 sign); verified end-to-end against tlsfuzzer `test-tls13-ecdsa-support.py` (2/8 → 5/5, mirrors P-384). Surfaced by the T123 ECDSA cert-matrix probe | 2026-05-16 |
 | 313 | T123 | Test | tlsfuzzer ECDSA cert-matrix expansion — added ECDSA P-384 + P-521 server-cert instances (ports 4452/4453) to `tlsfuzzer.yml`, each running `test-tls13-ecdsa-support.py` so the secp384r1 / secp521r1 CertificateVerify sign paths are exercised end-to-end; per-cert XFAIL dirs `xfail-ecdsa-p384/` + `xfail-ecdsa-p521/` (5 entries each — non-matching-curve + brainpool conversations a single cert structurally can't satisfy). Both gate at 5 PASS / 5 XFAIL / 0 FAIL. Workflow + XFAIL files only — no Rust change. Depends on I96 (P-521 sign support) | 2026-05-16 |
 | 314 | T122 | Test | `s-server --key-update` flag + tlsfuzzer wiring — a client request whose path contains `/keyupdate` triggers a server-initiated post-handshake KeyUpdate (`update_requested`); a plain `GET /` is echoed untouched so sanity steps still pass. New `--key-update` s-server instance (port 4454); `test-tls13-keyupdate-from-server.py` moved off the shared listener onto it and its 1 XFAIL closed (2/1 → 3/0). T121 (0-RTT acceptance) investigated and found void — pinned tlsfuzzer has no 0-RTT-acceptance script. PHA half deferred — probing surfaced a real `request_client_auth()` transcript bug, scoped as a follow-up I-phase | 2026-05-16 |
+| 315 | I97 | Impl | TLS 1.3 post-handshake-auth transcript fix — both sides computed the post-handshake CertificateVerify / Finished over `Hash(CertificateRequest ‖ Certificate[ ‖ CV])` instead of continuing the completed main-handshake transcript (RFC 8446 §4.4.1). The bug was symmetric (server `request_client_auth` + client post-HS CR handler) so they interoperated with each other but not with a conformant peer. `TranscriptHash` made `Clone`; `Server`/`ClientHandshake` retain the CH…client-Finished transcript; both sides now clone it as the post-handshake baseline. Verified: 1539 hitls-tls tests + tlsfuzzer `test-tls13-post-handshake-auth.py` 2/6 → 4/6 (residual 2 are unrelated: alert-on-failure + KeyUpdate-interleave). Surfaced by the T122 PHA probe | 2026-05-17 |
 
 ---
 
@@ -18390,6 +18391,112 @@ and re-scoped:
 `hitls-cli` builds clean; `cargo test -p hitls-cli` 167/0. Curated
 tlsfuzzer suite size unchanged at 48 script-runs (the keyupdate script
 was relocated, not added).
+
+---
+
+## Phase I97 — TLS 1.3 Post-Handshake-Auth CertificateVerify Transcript Fix (2026-05-17)
+
+### Summary
+
+I97 fixes a real RFC 8446 §4.4.1 violation in TLS 1.3 post-handshake
+client authentication, surfaced by the T122 PHA probe: both the server
+(`request_client_auth`) and the client (post-handshake
+CertificateRequest handler) computed the post-handshake
+CertificateVerify signature — and the post-handshake Finished MAC —
+over `Transcript-Hash(CertificateRequest ‖ Certificate [‖ CV])`
+**alone**, instead of continuing the completed main-handshake
+transcript.
+
+RFC 8446 §4.4.1: "the transcript hash is always taken from the
+following sequence of handshake messages, starting at the first
+ClientHello … Note, however, that subsequent post-handshake
+authentications do not include each other, just the messages through
+the end of the main handshake." So the correct post-handshake CV
+transcript is `Hash(ClientHello … client Finished ‖ CertificateRequest
+‖ Certificate)`.
+
+The bug was **symmetric** — the same mistake on both the request and
+response sides — so our server and our client interoperated with each
+other (the pre-existing `test_async_post_hs_auth_roundtrip` Rust test
+passed), but neither interoperated with a conformant peer. tlsfuzzer
+(`test-tls13-post-handshake-auth.py`, driven via a temporary local
+`--post-handshake-auth` s-server probe) failed every PHA conversation
+with `decrypt_error` until the fix.
+
+### Code changes (all `hitls-tls`)
+
+- **`crypt/transcript.rs`** — `TranscriptHash` derives `Clone`
+  (it is a message-buffer + replay design, so a clone is a cheap
+  snapshot). New unit test `test_transcript_clone_independence`.
+- **`handshake/server.rs`** — `ServerHandshake::transcript_clone()`
+  getter. `process_client_finished` already feeds the client Finished
+  into the transcript, so a clone taken after it is the
+  CH…client-Finished baseline.
+- **`handshake/client.rs`** — `ClientHandshake::transcript_clone()`
+  getter (`process_finished` feeds the client Finished in at line
+  ~1313).
+- **`connection/server.rs`** + **`connection_async.rs`** — new
+  `post_handshake_transcript: Option<TranscriptHash>` field on both
+  the sync and async server connections.
+- **`macros.rs`** — `tls13_server_do_handshake_body!` stores
+  `hs.transcript_clone()` into the connection at the end of the
+  handshake (covers sync + async — one macro).
+- **`connection/server.rs`** + **`connection_async.rs`** —
+  `request_client_auth` (sync + async) rewritten: clone the retained
+  baseline transcript, append CertificateRequest + Certificate for the
+  CV hash, append CertificateVerify for the Finished hash. Replaces the
+  four fresh `DigestVariant` hashers that omitted the base transcript.
+  Also added `ECDSA_SECP521R1_SHA512` to the advertised post-HS
+  CertificateRequest sig-algs (I96 made P-521 signable).
+- **`macros.rs`** — `tls13_client_handle_post_hs_cert_request_body!`
+  rewritten the same way: clone `client_hs`'s retained transcript as
+  the baseline instead of starting fresh from the CR message bytes
+  (covers the sync + async client — one macro).
+- Cloning the baseline (rather than mutating it) means repeated
+  post-handshake authentications each restart from the main handshake
+  and do not include one another, per §4.4.1.
+
+### Verification
+
+- `cargo test -p hitls-tls --all-features --lib`: **1539 PASS / 0 FAIL**
+  — including `test_async_post_hs_auth_roundtrip` /
+  `test_async_post_hs_auth_no_cert`, which now exercise the full
+  client↔server PHA roundtrip on the *correct* transcript (+1 new
+  `test_transcript_clone_independence`).
+- `cargo clippy -p hitls-tls --all-features` `-D warnings`: 0;
+  `cargo fmt`: clean.
+- End-to-end against tlsfuzzer (server probed with a temporary,
+  uncommitted local `--post-handshake-auth` s-server flag):
+  `test-tls13-post-handshake-auth.py` **2/6 → 4/6 PASS**. The fix
+  closes `post-handshake authentication` and `post-handshake
+  authentication with no client cert`. The residual 2 FAIL are
+  unrelated to the transcript: `malformed signature in PHA` needs the
+  server to send a fatal `decrypt_error` alert (rather than close
+  abruptly) on a bad post-HS CV, and `post-handshake authentication
+  with KeyUpdate` needs `request_client_auth` to tolerate a KeyUpdate
+  interleaved into the post-HS read loop — each a separate robustness
+  gap, queued for the follow-up.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/crypt/transcript.rs` | Modified | `TranscriptHash: Clone` + clone-independence test. |
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | `ServerHandshake::transcript_clone()`. |
+| `crates/hitls-tls/src/handshake/client.rs` | Modified | `ClientHandshake::transcript_clone()`. |
+| `crates/hitls-tls/src/connection/server.rs` | Modified | `post_handshake_transcript` field; `request_client_auth` transcript rewrite; import cleanup. |
+| `crates/hitls-tls/src/connection_async.rs` | Modified | Same as `connection/server.rs` for the async server; import cleanup for the async client. |
+| `crates/hitls-tls/src/connection/client.rs` | Modified | Import cleanup (post-HS CR macro no longer uses `DigestVariant`). |
+| `crates/hitls-tls/src/macros.rs` | Modified | Store transcript at end of server handshake; rewrite client post-HS CR handler transcript. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 315 + Implementation summary I1–I96 → I1–I97. |
+| `PROMPT_LOG.md` | Modified | I97 prompt + result entry. |
+
+### Build Status (Post I97)
+
+`hitls-tls` builds clean (`-D warnings`); lib tests 1539/0 (+1 from
+I97). Follow-up: a Testing phase wires `test-tls13-post-handshake-auth.py`
+into CI behind a `--post-handshake-auth` s-server flag; the 2 residual
+FAILs (alert-on-failure, KeyUpdate-interleave) are separate fixes.
 
 
 
