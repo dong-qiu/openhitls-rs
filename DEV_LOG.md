@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I95 (95 phases)
+- Implementation: I1–I96 (96 phases)
 - Testing: T1–T124 (114 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T123 reserved for in-flight tlsfuzzer server-side phases; T111 in progress — Phase A is 7/9 algorithms migrated)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -321,6 +321,7 @@ Category summary:
 | 309 | T111 | Test | C→Rust test migration tool — `xtask/` scaffold + per-algorithm template emitters consuming openHiTLS C SDV `.data` files. Phase A pilots: SHA-2 (28 tests, 70 TC rows), HMAC (43 tests, MD5/SHA-1/SHA-2/SM3), CMAC (12 tests, AES-128/192/256; SM4 unsupported), AES (30 tests, ECB + CTR across 3 key sizes; CBC rows blocked on a future `cbc_encrypt_raw` no-padding helper, multi-update rows deferred), Curve25519 (19 tests, Ed25519 sign/verify/sign-verify + X25519 ECDH; X25519 emitter caught a field-order bug — C `SDV_CRYPTO_X25519_EXCH_FUNC_TC002(pubkey, prvkey, share, isProvider)` signature confirmed by reading `test_suite_sdv_eal_curve25519.c:810` after 4/19 KAT failures), DSA (600 tests, NIST FIPS 186-4 verify-side KAT across SHA-1/224/256/384/512; sign side not reproducible — Rust `DsaKeyPair::sign` has no nonce-K injection hook, so the migrated test ports verify with a generation-time DER-encoded signature), DH (47 tests, key-exchange shared-secret KAT — positive + fail-vector; both exchange directions checked). `--check` mode for CI drift detection (rustfmt-aware comparison, fixes false-positive bug where committed file went through rustfmt but `--check` compared raw generator output). 779 migrated tests total; 2/9 algorithms remain (SM2, SM4, plus PKI CRL); plan §2.4 acceptance criteria still open (`docs/c-test-na-list.md` + per-failure issues) | 2026-05-12 |
 | 310 | R14 | Refactor | CI Overhaul — (A) efficiency: test-matrix split + trim, prebuilt-tool installs, 6-way fuzz-smoke shard → push-CI wall-clock 11m39s → 7m20s; (B) hardening: revived `fuzz-smoke` (a silent no-op for months), deleted decorative `valgrind-ct`, un-masked TSan / scheduled-fuzzing, pinned nightly + actions, miri/ASan weekly → daily, fmt/clippy pre-push presubmit; (C) post-hoc CI → PR-gated trunk: `ci-gate` aggregate job + branch protection + auto-merge (CI is now the merge gate; direct `git push origin main` rejected) | 2026-05-15 |
 | 311 | T124 | Test | tlsfuzzer two-tier CI — a 6-script `tlsfuzzer-core` gate in `ci.yml` wired into the required `CI Gate`, plus the full 46-script curated suite kept weekly/monthly in `tlsfuzzer.yml`; pinned `TLSFUZZER_REF` / `TLSLITE_NG_REF` from `master` to specific upstream commits (stops XFAIL drift); monthly full `-n 9999` sweep via the new `SWEEP_N` env hook in `run.sh`. Workflow + run.sh + docs only — no Rust source changed. T120–T123 reserved for the in-flight tlsfuzzer server-side phases (psk_ke / 0-RTT / CLI triggers / ECDSA matrix) | 2026-05-16 |
+| 312 | I96 | Impl | TLS ECDSA P-521 server-certificate signing — `hitls-tls` only wired P-256/P-384 into the CertificateVerify / ServerKeyExchange signature dispatch even though `hitls-crypto` fully supports P-521; a P-521 server cert hit `unsupported ECDSA curve for signing` and aborted the handshake. Added P-521 to `signing.rs` (TLS 1.3 sign), `verify.rs` (TLS 1.3 CV verify) and `server12.rs` (TLS 1.2 sign); verified end-to-end against tlsfuzzer `test-tls13-ecdsa-support.py` (2/8 → 5/5, mirrors P-384). Surfaced by the T123 ECDSA cert-matrix probe | 2026-05-16 |
 
 ---
 
@@ -18032,6 +18033,118 @@ gate now only moves when this repo's own PRs move it.
 
 No Rust source changed — workspace build / test counts unchanged from
 T111. Workflow + shell + docs only.
+
+---
+
+## Phase I96 — TLS ECDSA P-521 Server-Certificate Signing (2026-05-16)
+
+### Summary
+
+I96 closes a real implementation gap surfaced while probing the T123
+ECDSA cert-matrix work: an **ECDSA P-521 server certificate** cannot
+complete a TLS handshake. `hitls s-server` loaded the P-521 PKCS#8 key
+fine (it is recognised as `ServerPrivateKey::Ecdsa { curve_id:
+NistP521, .. }`), but the TLS handshake then aborted with
+`handshake_failure` and the internal error `unsupported ECDSA curve
+for signing`.
+
+The gap was entirely in the **`hitls-tls` signature dispatch tables** —
+`hitls-crypto::ecdsa` has supported P-521 sign + verify since project
+start (`ecc::p521_scalar`). The TLS layer simply never added the
+P-521 arms:
+
+- `handshake/signing.rs::select_signature_scheme_for_cert` matched
+  only `NistP256`/`NistP384`, falling through to an explicit
+  `Err("unsupported ECDSA curve for signing")`.
+- `handshake/signing.rs::sign_certificate_verify` ECDSA digest match
+  handled only the P-256/P-384 `(scheme, curve)` pairs.
+- `handshake/verify.rs` (TLS 1.3 CertificateVerify verification)
+  matched only `ECDSA_SECP256R1_SHA256` / `..384`.
+- `handshake/server12.rs::select_signature_scheme_tls12` +
+  `sign_ske_data` (TLS 1.2 ServerKeyExchange signing) had the same
+  P-256/P-384-only limitation.
+
+(TLS 1.2 *verify* — `server12.rs` ~line 2089 — already handled
+`ECDSA_SECP521R1_SHA512`, so only the sign side was missing there.)
+
+There was even a unit test, `test_select_signature_scheme_ecdsa_
+unsupported_curve`, that *pinned* P-521 as rejected — i.e. the
+limitation was deliberate at the time, not an oversight, but never
+revisited.
+
+### Code changes
+
+**`crates/hitls-tls/src/handshake/signing.rs`**:
+
+- `select_signature_scheme_for_cert`: new
+  `EccCurveId::NistP521 => &[SignatureScheme::ECDSA_SECP521R1_SHA512]`
+  arm. The `_ =>` rejection arm is kept (NistP192/P224 are too weak to
+  be TLS-1.3 signature curves, brainpool is not in our supported set,
+  SM2 has its own `Sm2` key variant) with a clarifying comment.
+- `sign_certificate_verify`: new
+  `(ECDSA_SECP521R1_SHA512, NistP521) => compute_sha512(&content)?`
+  arm in the digest match.
+- `test_select_signature_scheme_ecdsa_unsupported_curve` retargeted
+  from `NistP521` to `BrainpoolP256r1` (still genuinely unsupported,
+  so the `_ =>` arm stays covered).
+- 2 new tests: `test_select_signature_scheme_ecdsa_p521`,
+  `test_sign_and_verify_ecdsa_p521_roundtrip`.
+
+**`crates/hitls-tls/src/handshake/verify.rs`**:
+
+- New `ECDSA_SECP521R1_SHA512` arm in `verify_certificate_verify`
+  (`compute_sha512` already existed; `verify_ecdsa` is curve-generic).
+- 1 new test: `test_verify_certificate_verify_ecdsa_p521_roundtrip`.
+
+**`crates/hitls-tls/src/handshake/server12.rs`**:
+
+- `select_signature_scheme_tls12`: new `NistP521` arm.
+- `sign_ske_data`: new `ECDSA_SECP521R1_SHA512 => compute_sha512(...)`
+  arm in the ECDSA digest match.
+- New `compute_sha512` helper (the file already had `compute_sha256`
+  / `compute_sha384`).
+
+### Verification
+
+- `cargo test -p hitls-tls --all-features --lib -- handshake::signing::
+  handshake::verify::`: 38 PASS / 0 FAIL (+3 new P-521 tests).
+- `cargo clippy -p hitls-tls --all-features --all-targets` with
+  `-D warnings`: 0; `cargo fmt -p hitls-tls -- --check`: clean.
+- End-to-end: a release `hitls s-server` with an openssl-generated
+  P-521 cert + PKCS#8 key now completes a TLS 1.3 handshake —
+  `openssl s_client` reports `Peer signature type:
+  ecdsa_secp521r1_sha512`, `Cipher is TLS_AES_256_GCM_SHA384`.
+- tlsfuzzer `test-tls13-ecdsa-support.py` against a P-521 server:
+  **2 PASS / 8 FAIL → 5 PASS / 5 FAIL**. The 5 residual FAILs are the
+  conversations a single P-521 cert structurally cannot satisfy
+  (`ecdsa_secp256r1_sha256`, `ecdsa_secp384r1_sha384`, brainpool ×3) —
+  identical shape to the P-384 cert's 5/5, confirming P-521 server
+  certs now behave exactly like P-256/P-384.
+
+### Why this matters
+
+ECDSA P-521 server certificates are a legitimate, standards-compliant
+TLS configuration. Pre-I96 the project advertised `ecdsa_secp521r1_
+sha512` in its TLS 1.2 sigalgs list and could *verify* a P-521
+signature, but could not *serve* a P-521 cert at all — an asymmetric,
+silently-broken state. I96 makes the sign side match the verify side
+and the crypto layer's existing capability. It also unblocks the
+T123 ECDSA cert-matrix expansion (P-384 + P-521 tlsfuzzer instances).
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/signing.rs` | Modified | P-521 arms in `select_signature_scheme_for_cert` + `sign_certificate_verify`; retargeted unsupported-curve test; +2 P-521 tests. |
+| `crates/hitls-tls/src/handshake/verify.rs` | Modified | P-521 CertificateVerify arm; +1 P-521 roundtrip test. |
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | P-521 arms in `select_signature_scheme_tls12` + `sign_ske_data`; new `compute_sha512` helper. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 312 + Implementation category summary I1–I95 → I1–I96. |
+| `PROMPT_LOG.md` | Modified | I96 prompt + result entry. |
+
+### Build Status (Post I96)
+
+`hitls-tls` builds clean; targeted lib tests 38/0. Workspace test count
++3 (the new P-521 unit tests).
 
 
 
