@@ -81,6 +81,22 @@ jobs:
           toolchain: ${{ matrix.rust }}
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
+      # The macOS runner image intermittently leaves the installed toolchain's
+      # `rustc` shadowed by the rustup-init multi-call binary: `rustc -vV` then
+      # prints `rustup-init <ver>` instead of a `host:` line, which makes
+      # `cargo metadata` (and therefore nextest) abort. Detect that state and
+      # force-reinstall the toolchain to overwrite the bad binary. Cheap no-op
+      # when healthy; scoped to macOS since Linux/Windows are unaffected.
+      - name: Repair toolchain if rustc is shadowed by rustup-init
+        if: runner.os == 'macOS'
+        run: |
+          if rustup run ${{ matrix.rust }} rustc -vV | grep -q '^host:'; then
+            echo "toolchain rustc OK"
+          else
+            echo "::warning::rustc shadowed by rustup-init — force-reinstalling ${{ matrix.rust }}"
+            rustup toolchain install ${{ matrix.rust }} --force --profile minimal --no-self-update
+            rustup run ${{ matrix.rust }} rustc -vV
+          fi
       # Doc tests + the no-default-features smoke are OS-independent and run
       # once in the `test-extras` job. Keeping them out of this matrix means
       # each cell does a single compile cycle instead of three.
