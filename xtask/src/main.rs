@@ -5,6 +5,7 @@ mod digest;
 mod dsa;
 mod mac;
 mod parser;
+mod sm2;
 mod sm4;
 
 use std::fs;
@@ -66,61 +67,75 @@ fn migrate(
     out: Option<&Path>,
     check: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (data_file, default_out, generator): (PathBuf, PathBuf, GenFn) = match algo {
+    // An algorithm maps to one or more C `.data` files (SM2 splits its
+    // KAT across sign / crypt / exchange); all are parsed and concatenated
+    // into a single case list for the generator.
+    let (data_files, default_out, generator): (Vec<PathBuf>, PathBuf, GenFn) = match algo {
         "sha2" => (
-            c_root.join("crypto/sha2/test_suite_sdv_eal_md_sha2.data"),
+            vec![c_root.join("crypto/sha2/test_suite_sdv_eal_md_sha2.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_sha2.rs"),
             digest::emit_sha2_kat,
         ),
         "hmac" => (
-            c_root.join("crypto/hmac/test_suite_sdv_eal_mac_hmac.data"),
+            vec![c_root.join("crypto/hmac/test_suite_sdv_eal_mac_hmac.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_hmac.rs"),
             mac::emit_hmac_kat,
         ),
         "cmac" => (
-            c_root.join("crypto/cmac/test_suite_sdv_eal_mac_cmac.data"),
+            vec![c_root.join("crypto/cmac/test_suite_sdv_eal_mac_cmac.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_cmac.rs"),
             mac::emit_cmac_kat,
         ),
         "aes" => (
-            c_root.join("crypto/aes/test_suite_sdv_eal_aes.data"),
+            vec![c_root.join("crypto/aes/test_suite_sdv_eal_aes.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_aes.rs"),
             cipher::emit_aes_kat,
         ),
         "curve25519" => (
-            c_root.join("crypto/curve25519/test_suite_sdv_eal_curve25519.data"),
+            vec![c_root.join("crypto/curve25519/test_suite_sdv_eal_curve25519.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_curve25519.rs"),
             curve25519::emit_curve25519_kat,
         ),
         "dsa" => (
-            c_root.join("crypto/dsa/test_suite_sdv_eal_dsa.data"),
+            vec![c_root.join("crypto/dsa/test_suite_sdv_eal_dsa.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_dsa.rs"),
             dsa::emit_dsa_kat,
         ),
         "dh" => (
-            c_root.join("crypto/dh/test_suite_sdv_eal_dh.data"),
+            vec![c_root.join("crypto/dh/test_suite_sdv_eal_dh.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_dh.rs"),
             dh::emit_dh_kat,
         ),
         "sm4" => (
-            c_root.join("crypto/sm4/test_suite_sdv_eal_sm4.data"),
+            vec![c_root.join("crypto/sm4/test_suite_sdv_eal_sm4.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_sm4.rs"),
             sm4::emit_sm4_kat,
         ),
+        "sm2" => (
+            vec![
+                c_root.join("crypto/sm2/test_suite_sdv_eal_sm2_sign.data"),
+                c_root.join("crypto/sm2/test_suite_sdv_eal_sm2_crypt.data"),
+                c_root.join("crypto/sm2/test_suite_sdv_eal_sm2_exchange.data"),
+            ],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_sm2.rs"),
+            sm2::emit_sm2_kat,
+        ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2"
             )
             .into());
         }
     };
 
-    if !data_file.exists() {
-        return Err(format!("C data file not found: {}", data_file.display()).into());
+    let mut cases = Vec::new();
+    for data_file in &data_files {
+        if !data_file.exists() {
+            return Err(format!("C data file not found: {}", data_file.display()).into());
+        }
+        eprintln!("Parsing {}", data_file.display());
+        cases.extend(parse_data_file(data_file)?);
     }
-
-    eprintln!("Parsing {}", data_file.display());
-    let cases = parse_data_file(&data_file)?;
     eprintln!("  parsed {} TC rows", cases.len());
 
     let (source, stats) = generator(&cases);

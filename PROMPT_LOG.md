@@ -5385,6 +5385,20 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: `cargo test -p hitls-crypto --test migrated_sm4 --all-features` 9/9 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa,dh,sm4} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T111 (continued) — SM2 Pilot — Phase A 9/9 (2026-05-16)
+
+> 请继续完成剩下3个算法测试用例的迁移
+
+**Result**: 9th and final Phase A pilot of `docs/c-test-migration-plan.md`. New `xtask/src/sm2.rs` emits 12 SM2 KAT tests from the three SM2 C files (`sm2_sign` / `sm2_crypt` / `sm2_exchange`, 140 TC rows): verify positive (`SM2_VERIFY_FUNC_TC001/TC002`) + negative (`TC003`), decrypt positive (`SM2_DEC_FUNC_TC001`) + negative (`TC002`). 111 API-surface, 17 unsupported (key exchange), 0 unknown. T111: 8/9 → **9/9 algorithms — Phase A crypto-algorithm migration complete**; migrated test total 788 → 800.
+
+**xtask multi-file generalisation**: SM2 splits its SDV suite across 3 `.data` files. The `migrate` dispatch was generalised from one `PathBuf` to `Vec<PathBuf>` per algorithm — all files are parsed and concatenated into one case list, classified by TC name. SM2 emits a single `migrated_sm2.rs`.
+
+**Scope** (mirrors the DSA constraint): SM2 `sign`/`encrypt` pin the nonce `k` via a stubbed RNG; Rust's `Sm2KeyPair::sign`/`encrypt` draw `k` from the system RNG with no injection hook → those sides not reproducible → `ApiSurface`. SM2 key exchange has no public Rust API → `skipped_unsupported_alg`. The migratable subset is verify (the `sign` field is already DER, consumed directly by `verify_with_id`) + decrypt (deterministic). Negative families assert the corrupted vector does not verify / fails to decrypt.
+
+**T111 status**: 9/9 Phase A algorithms migrated (sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2 — 800 migrated tests). Remaining for full T111 closure: the `docs/c-test-na-list.md` exemption writeup; `pki/crl_rfc5280` is deferred to Phase C.
+
+**Tests**: `cargo test -p hitls-crypto --test migrated_sm2 --all-features` 12/12 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa,dh,sm4,sm2} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
