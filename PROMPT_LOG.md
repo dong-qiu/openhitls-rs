@@ -5429,3 +5429,57 @@ A multi-prompt phase — CI optimization → deep rationality analysis → PR-ga
 **Part C — post-hoc CI → PR-gated trunk migration.** The analysis established the CI was post-hoc — it ran *after* a commit was already on `main` — with ~5 dead PR-only jobs. After the trunk-vs-PR discussion (verdict: trunk-based development *with* a PR merge gate — the two are not opposites), migrated in three stages: (1) a `ci-gate` aggregate job + conditional concurrency, merged via PR #66; (2) branch protection on `main` — required checks `CI Gate` + `Conventional Commits`, strict, linear history, PR-required; (3) CLAUDE.md "Git Branching Model" rewrite via PR #67, with the stale `#63` closed as superseded. Direct `git push origin main` is now rejected.
 
 **Result**: CI moved from a post-hoc canary to a binding merge gate; push-CI wall-clock −37%; every previously "fake green" check now either truly gates or is explicitly marked `[advisory]`. No Rust source changed — the work is in `.github/workflows/`, `.githooks/pre-push`, `.cargo/config.toml`, and the build / supply-chain manifests. Recorded as DEV_LOG Phase R14; landed via PRs #66 / #67 / #68.
+
+---
+
+## Phase T124 — tlsfuzzer Two-Tier CI: Core PR Gate + Pinned Upstream + Monthly Full Sweep (2026-05-16)
+
+> 使用tlsfuzzer对Rust版的openhitls进行充分的测试和验证，还需要做哪些工作？
+> 先解决服务端的问题，针对服务端测试的不足，请给出详细的计划
+> 先从T124开始
+
+A question → plan → execute sequence. The question surveyed the
+tlsfuzzer integration's remaining gaps; the second prompt narrowed
+scope to server-side testing and asked for a detailed plan (10
+server-side phases, T120–T129, recommended execution order
+`T124 → T123 → T121 → T122 → T120 → …`); the third picked the
+infrastructure phase to execute first.
+
+**T124 — three changes, no Rust source touched:**
+
+1. **Two-tier model.** New `tlsfuzzer-core` job in `ci.yml` runs a
+   6-script, 0-XFAIL, deterministic subset (`test-tls13-conversation`,
+   `-ccs`, `-multiple-ccs-messages`, `-nociphers`, `-record-padding`,
+   `-count-tickets`) on every PR/push, wired into the `ci-gate`
+   aggregate → covered by the required `CI Gate` status check with no
+   branch-protection change. The full 46-script curated suite stays in
+   `tlsfuzzer.yml` as the non-gating Tier 2.
+
+2. **Pinned upstream.** `TLSFUZZER_REF` / `TLSLITE_NG_REF` `master` →
+   commit SHAs (`bf7f579d…` / `02d1506b…`), identical in both
+   workflows; stops upstream drift from shifting the conversation set
+   under the per-script XFAIL files. `git clone --branch` (rejects
+   SHAs) replaced with clone + `git checkout`.
+
+3. **Monthly full sweep.** Second cron `0 7 1 * *` runs Tier 2 with
+   `-n 9999` (every conversation). `run.sh` gained a `SWEEP_N` env hook
+   that turns into `-n <N>`; `tlsfuzzer.yml` exports `SWEEP_N=9999` on
+   the monthly cron only.
+
+**Files**: `.github/workflows/ci.yml` (+`tlsfuzzer-core` job, +`ci-gate`
+need), `.github/workflows/tlsfuzzer.yml` (monthly cron, pinned refs,
+clone fix, `SWEEP_N`, timeout 30→90), `tests/tlsfuzzer/run.sh`
+(`SWEEP_N` hook), `docs/tlsfuzzer.md` (two-tier hookup + sweep +
+pinning docs).
+
+**Verification**: `actionlint` clean on the changed regions (only
+pre-existing SC2129 style nits remain in untouched code); both
+workflows parse as YAML; `bash -n run.sh` OK. No Rust change → build /
+test counts unchanged. Recorded as DEV_LOG Phase T124.
+
+**Plan remainder (server-side, not yet executed)**: T123 ECDSA
+P-384/P-521 cert matrix · T121 0-RTT acceptance wiring · T122
+server-initiated KeyUpdate + PHA CLI triggers · T120 `psk_ke` mode ·
+T125 `--tls auto` version range · T126 remaining mass-fail script
+triage · T127 TLS 1.2 script breadth · T128 FFDHE groups · T129
+`s-server` DTLS mode.

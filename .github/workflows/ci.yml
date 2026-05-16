@@ -904,6 +904,96 @@ jobs:
           path: fuzz/artifacts/
           if-no-files-found: ignore
 
+  tlsfuzzer-core:
+    name: tlsfuzzer Core
+    # Phase T124 — a tiny, deterministic, 0-XFAIL subset of the
+    # tlsfuzzer protocol-conformance suite, run on every PR/push as a
+    # merge gate (wired into `ci-gate` below).
+    #
+    # The FULL curated suite (46 scripts, edge-case mutations) stays in
+    # the weekly/monthly `tlsfuzzer.yml` workflow — those probe spec
+    # ambiguities and OpenSSL-flavoured choices that should NOT gate
+    # merges. The 6 scripts here are basic handshake / record-layer /
+    # CCS correctness: none has an xfail file, every conversation is
+    # expected to PASS, so a failure is a real regression, not a
+    # spec-ambiguity finding. `run.sh` propagates tlsfuzzer's exit code.
+    needs: [fmt, clippy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Pinned upstream commits — keep in sync with tlsfuzzer.yml.
+      TLSFUZZER_REF: bf7f579dc0e65498cfb21b60e9b152f6bd84a3bf
+      TLSLITE_NG_REF: 02d1506badb16473faf50ebc3a413c6d789fe31f
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release hitls CLI
+        run: cargo build --release -p hitls-cli
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install tlsfuzzer + tlslite-ng (pinned commits)
+        run: |
+          python -m pip install --upgrade pip
+          pip install ecdsa
+          pip install "git+https://github.com/tlsfuzzer/tlslite-ng@${TLSLITE_NG_REF}"
+          git clone https://github.com/tlsfuzzer/tlsfuzzer \
+            "${RUNNER_TEMP}/tlsfuzzer"
+          git -C "${RUNNER_TEMP}/tlsfuzzer" checkout --quiet "${TLSFUZZER_REF}"
+      - name: Generate RSA server certificate (PKCS#8)
+        run: |
+          mkdir -p "${RUNNER_TEMP}/certs"
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "${RUNNER_TEMP}/certs/key-rsa.pem" \
+            -out    "${RUNNER_TEMP}/certs/cert-rsa.pem" \
+            -subj   "/CN=localhost" -days 1
+          openssl pkcs8 -topk8 -nocrypt \
+            -in  "${RUNNER_TEMP}/certs/key-rsa.pem" \
+            -out "${RUNNER_TEMP}/certs/key-rsa-pkcs8.pem"
+      - name: Start hitls s-server (RSA TLS 1.3)
+        run: |
+          ./target/release/hitls s-server -p 4444 \
+            --cert "${RUNNER_TEMP}/certs/cert-rsa.pem" \
+            --key  "${RUNNER_TEMP}/certs/key-rsa-pkcs8.pem" \
+            -q > "${RUNNER_TEMP}/server-core.log" 2>&1 &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 30); do
+            if ss -ltn '( sport = :4444 )' | grep -q ':4444'; then
+              echo "server up"; break
+            fi
+            sleep 0.5
+          done
+      - name: Run core tlsfuzzer scripts (gate)
+        run: |
+          set -e
+          export TLSFUZZER_DIR="${RUNNER_TEMP}/tlsfuzzer"
+          export TLSFUZZER_PY=python
+          for s in \
+            test-tls13-conversation.py \
+            test-tls13-ccs.py \
+            test-tls13-multiple-ccs-messages.py \
+            test-tls13-nociphers.py \
+            test-tls13-record-padding.py \
+            test-tls13-count-tickets.py; do
+            echo "=== $s ==="
+            ./tests/tlsfuzzer/run.sh "$s" -h 127.0.0.1 -p 4444
+          done
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -n "${SERVER_PID:-}" ]; then
+            kill "${SERVER_PID}" 2>/dev/null || true
+          fi
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tlsfuzzer-core-server-log
+          path: ${{ runner.temp }}/server-core.log
+          retention-days: 7
+
   ci-gate:
     name: CI Gate
     # Single aggregate status check for branch protection. Requiring this
@@ -933,6 +1023,7 @@ jobs:
       - doc
       - ignored-tests
       - openssl-differential
+      - tlsfuzzer-core
       - supply-chain
       - bench
       - careful

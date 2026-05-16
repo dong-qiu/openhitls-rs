@@ -46,8 +46,12 @@ if [ ! -d "${tlsfuzzer_dir}" ]; then
     echo "tlsfuzzer not found at ${tlsfuzzer_dir} — set TLSFUZZER_DIR" >&2
     exit 2
 fi
-if [ ! -x "${tlsfuzzer_py}" ]; then
-    echo "tlsfuzzer python not found at ${tlsfuzzer_py} — set TLSFUZZER_PY" >&2
+# `command -v` resolves both an absolute path (a local venv python) and
+# a bare command name (`python` on PATH, e.g. after CI's setup-python) —
+# a plain `[ -x ... ]` test only accepts the former and rejects the
+# latter, since `test -x` does no PATH lookup.
+if ! command -v "${tlsfuzzer_py}" >/dev/null 2>&1; then
+    echo "tlsfuzzer python not found: ${tlsfuzzer_py} — set TLSFUZZER_PY" >&2
     exit 2
 fi
 
@@ -95,10 +99,20 @@ if [ -f "${args_file}" ]; then
     done < "${args_file}"
 fi
 
+# Phase T124 — the monthly CI sweep exports SWEEP_N so every script
+# runs with `-n <N>` (the full conversation set instead of the script's
+# default sampling). Empty/unset → the script's own default applies.
+# Locally, passing `-n 9999` in "$@" still works and takes precedence.
+sweep_args=()
+if [ -n "${SWEEP_N:-}" ]; then
+    sweep_args=("-n" "${SWEEP_N}")
+fi
+
 cd "${tlsfuzzer_dir}"
 # Bash <4.4 chokes on `${arr[@]}` when arr is empty under `set -u`;
 # expand with the +-substitution form to side-step that.
 PYTHONPATH=. exec "${tlsfuzzer_py}" "scripts/${script_name}" \
     ${extra_script_args[@]+"${extra_script_args[@]}"} \
     ${xfail_args[@]+"${xfail_args[@]}"} \
+    ${sweep_args[@]+"${sweep_args[@]}"} \
     "$@"

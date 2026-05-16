@@ -207,16 +207,57 @@ the desired signal that the XFAIL list is now stale.
 
 ## CI hookup
 
-`.github/workflows/tlsfuzzer.yml` runs the curated scripts on
-`workflow_dispatch` and on a weekly schedule (Mon 06:00 UTC). It is
-**not** part of the required PR check set — see the comment at the
-top of that file for the rationale. Each script is invoked through
-`tests/tlsfuzzer/run.sh`, so the workflow's exit code reflects only
-NEW regressions and NEW XPASSes; pre-existing XFAILs are filed via
-the per-script files and produce no noise. Per-script logs are
-uploaded as the `tlsfuzzer-logs` artifact for triage.
+Since Phase T124 the harness runs in **two tiers**:
 
-To run it manually: GitHub Actions → tlsfuzzer → "Run workflow".
+**Tier 1 — `tlsfuzzer-core` job in `.github/workflows/ci.yml`.** A tiny,
+deterministic, 0-XFAIL subset (6 scripts: `conversation`, `ccs`,
+`multiple-ccs-messages`, `nociphers`, `record-padding`,
+`count-tickets`) runs on **every PR and push** and is wired into the
+`ci-gate` aggregate — so it is part of the required `CI Gate` status
+check. These scripts are basic handshake / record-layer / CCS
+correctness; a failure is a real regression, so it *should* block a
+merge. No branch-protection change was needed: requiring `CI Gate`
+already requires every job in its `needs:` list.
+
+**Tier 2 — the full curated suite in `.github/workflows/tlsfuzzer.yml`.**
+All 46 curated scripts run on `workflow_dispatch`, on a weekly
+schedule (Mon 06:00 UTC, sampled), and on a monthly schedule (1st
+07:00 UTC, full `-n 9999` sweep). This tier is **not** a required PR
+check — it exercises edge-case mutations that legitimately probe spec
+ambiguities, and surfacing those should not gate merges. Per-script
+logs are uploaded as the `tlsfuzzer-logs` artifact for triage.
+
+Either way each script is invoked through `tests/tlsfuzzer/run.sh`, so
+the exit code reflects only NEW regressions and NEW XPASSes;
+pre-existing XFAILs are filed via the per-script files and produce no
+noise.
+
+To run Tier 2 manually: GitHub Actions → tlsfuzzer → "Run workflow".
+
+### Sampled vs. full sweep
+
+tlsfuzzer scripts sub-sample their conversation pool by default (see
+`-n`). The weekly run keeps that sampling (≈2 min wall-clock); the
+monthly run exports `SWEEP_N=9999`, which `run.sh` turns into `-n 9999`
+so *every* conversation is exercised. Run a full sweep locally with:
+
+```bash
+SWEEP_N=9999 TLSFUZZER_DIR=/tmp/tlsfuzzer \
+TLSFUZZER_PY=/tmp/tlsfuzzer-venv/bin/python \
+  ./tests/tlsfuzzer/run.sh test-tls13-finished.py -p 4444 -h localhost
+```
+
+### Pinned upstream — how to bump
+
+`TLSFUZZER_REF` / `TLSLITE_NG_REF` are pinned to specific upstream
+commits in **both** workflow files (not `master`). An unpinned
+`master` silently shifts the conversation set under our per-script
+XFAIL files, making CI signal indistinguishable from upstream drift.
+
+To upgrade tlsfuzzer/tlslite-ng, treat it as a deliberate phase:
+bump the two SHAs in `ci.yml` *and* `tlsfuzzer.yml`, re-run the full
+sweep, re-baseline any XFAIL lists that drifted, and land it all in
+one reviewed PR.
 
 ## Phase reference
 
@@ -359,3 +400,20 @@ To run it manually: GitHub Actions → tlsfuzzer → "Run workflow".
   - Combined post-T95 baseline: **1819 PASS / 254 XFAIL / 0 FAIL**
     (+4/-4 vs T94; the math is +5/-5 closed but
     version-negotiation's random sampling shifts ~1 between runs).
+
+- T96–T119 — incrementally grew the curated suite to 46 scripts and
+  closed conformance gaps across mTLS (T98–T102, T108, T117–T118),
+  alert mapping (T99–T100), cross-record reassembly (T101, T104),
+  record-layer rules (T103), AES-CCM negotiation (T105), 0-RTT
+  tolerance (T106, T109), PSS-OID certs (T107), and external PSK
+  (T119). See the per-phase DEV_LOG entries for detail.
+
+- T124 — split the harness into two tiers (see "CI hookup" above):
+  a 6-script `tlsfuzzer-core` gate in `ci.yml` that runs on every
+  PR/push and is part of the required `CI Gate`, plus the full
+  46-script suite kept in the weekly/monthly `tlsfuzzer.yml`. Pinned
+  `TLSFUZZER_REF` / `TLSLITE_NG_REF` from `master` to specific upstream
+  commits so XFAIL lists stop drifting against upstream HEAD. Added a
+  monthly full `-n 9999` sweep (`run.sh` honours the `SWEEP_N` env var)
+  so conversations the weekly sampled run skips still get exercised.
+  No Rust source changed — workflow + `run.sh` + docs only.

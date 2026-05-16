@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T119 (113 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F; T111 in progress — Phase A is 6/9 algorithms migrated)
+- Testing: T1–T124 (114 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T123 reserved for in-flight tlsfuzzer server-side phases; T111 in progress — Phase A is 6/9 algorithms migrated)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -320,6 +320,7 @@ Category summary:
 | 308 | T119 | Test | TLS 1.3 external-PSK server-side support (RFC 8446 §4.2.11 out-of-band PSK auth via new `--psk` / `--psk-identity` CLI flags + `verify_binder` external-label parameter) + 2 new tlsfuzzer scripts in CI on a dedicated `--psk` + `--ticket-key` listener: `test-tls13-psk_dhe_ke.py` (3/1 XFAIL) and `test-tls13-session-resumption.py` (4/3 XFAIL) — closes 7 new conversations; `psk_ke` mode (no DHE) queued for T120 | 2026-05-12 |
 | 309 | T111 | Test | C→Rust test migration tool — `xtask/` scaffold + per-algorithm template emitters consuming openHiTLS C SDV `.data` files. Phase A pilots: SHA-2 (28 tests, 70 TC rows), HMAC (43 tests, MD5/SHA-1/SHA-2/SM3), CMAC (12 tests, AES-128/192/256; SM4 unsupported), AES (30 tests, ECB + CTR across 3 key sizes; CBC rows blocked on a future `cbc_encrypt_raw` no-padding helper, multi-update rows deferred), Curve25519 (19 tests, Ed25519 sign/verify/sign-verify + X25519 ECDH; X25519 emitter caught a field-order bug — C `SDV_CRYPTO_X25519_EXCH_FUNC_TC002(pubkey, prvkey, share, isProvider)` signature confirmed by reading `test_suite_sdv_eal_curve25519.c:810` after 4/19 KAT failures), DSA (600 tests, NIST FIPS 186-4 verify-side KAT across SHA-1/224/256/384/512; sign side not reproducible — Rust `DsaKeyPair::sign` has no nonce-K injection hook, so the migrated test ports verify with a generation-time DER-encoded signature). `--check` mode for CI drift detection (rustfmt-aware comparison, fixes false-positive bug where committed file went through rustfmt but `--check` compared raw generator output). 732 migrated tests total; 3/9 algorithms remain (SM2, SM4, DH, plus PKI CRL); plan §2.4 acceptance criteria still open (`docs/c-test-na-list.md` + per-failure issues) | 2026-05-12 |
 | 310 | R14 | Refactor | CI Overhaul — (A) efficiency: test-matrix split + trim, prebuilt-tool installs, 6-way fuzz-smoke shard → push-CI wall-clock 11m39s → 7m20s; (B) hardening: revived `fuzz-smoke` (a silent no-op for months), deleted decorative `valgrind-ct`, un-masked TSan / scheduled-fuzzing, pinned nightly + actions, miri/ASan weekly → daily, fmt/clippy pre-push presubmit; (C) post-hoc CI → PR-gated trunk: `ci-gate` aggregate job + branch protection + auto-merge (CI is now the merge gate; direct `git push origin main` rejected) | 2026-05-15 |
+| 311 | T124 | Test | tlsfuzzer two-tier CI — a 6-script `tlsfuzzer-core` gate in `ci.yml` wired into the required `CI Gate`, plus the full 46-script curated suite kept weekly/monthly in `tlsfuzzer.yml`; pinned `TLSFUZZER_REF` / `TLSLITE_NG_REF` from `master` to specific upstream commits (stops XFAIL drift); monthly full `-n 9999` sweep via the new `SWEEP_N` env hook in `run.sh`. Workflow + run.sh + docs only — no Rust source changed. T120–T123 reserved for the in-flight tlsfuzzer server-side phases (psk_ke / 0-RTT / CLI triggers / ECDSA matrix) | 2026-05-16 |
 
 ---
 
@@ -17885,6 +17886,134 @@ Unchanged at **4298 (43 ignored)** — a CI-infrastructure phase, no Rust source
 - CI run 25912647669 (pre-PR-gated baseline): 38 jobs green / 0 failed; wall-clock 7m20s.
 - PR #66 and PR #67 gated runs: `CI Gate` green; auto-merge fired.
 - `cargo fmt --all -- --check` + `cargo clippy --workspace --all-features --all-targets -D warnings` (run by the new pre-push presubmit): clean.
+
+---
+
+## Phase T124 — tlsfuzzer Two-Tier CI: Core PR Gate + Pinned Upstream + Monthly Full Sweep (2026-05-16)
+
+> Numbering note: this is the first of a planned run of tlsfuzzer
+> server-side testing phases. T120–T123 are reserved for the protocol
+> work queued ahead of it in the plan (T120 `psk_ke`, T121 0-RTT
+> acceptance wiring, T122 server-initiated KeyUpdate / PHA CLI
+> triggers, T123 ECDSA P-384/P-521 cert matrix); T124 — the pure
+> CI-infrastructure item — was executed first because it is
+> zero-risk and de-risks every later phase. The reservation mirrors
+> the existing T112–T116 pattern.
+
+### Summary
+
+T124 reworks how the tlsfuzzer protocol-conformance harness plugs into
+CI. Pre-T124 the entire suite lived in one opt-in workflow
+(`tlsfuzzer.yml`, `workflow_dispatch` + weekly) that was **not** a
+required check — so a TLS-server regression could sit on `main` for up
+to a week before the Monday run surfaced it. The harness also cloned
+tlsfuzzer / tlslite-ng from `master`, meaning an upstream commit could
+silently shift the conversation set under our per-script XFAIL files
+and turn CI red for reasons unrelated to this repo.
+
+Three changes, no Rust source touched:
+
+**1. Two-tier model.** A new `tlsfuzzer-core` job in `ci.yml` runs a
+tiny, deterministic, 0-XFAIL subset (6 scripts) on every PR and push,
+and is wired into the `ci-gate` aggregate — so it is now covered by
+the required `CI Gate` status check **without any branch-protection
+change** (requiring `CI Gate` already requires every job in its
+`needs:` list). The full 46-script curated suite stays in
+`tlsfuzzer.yml` as Tier 2 (weekly + monthly + manual): those scripts
+exercise edge-case mutations probing spec ambiguities and
+OpenSSL-flavoured choices, which are valuable to surface but must not
+gate merges.
+
+**2. Pinned upstream.** `TLSFUZZER_REF` / `TLSLITE_NG_REF` go from
+`master` to specific commit SHAs (`bf7f579d…` / `02d1506b…`), pinned
+identically in both workflow files. Bumping them is now a deliberate,
+reviewed step (documented in `docs/tlsfuzzer.md`).
+
+**3. Monthly full sweep.** A second cron (`0 7 1 * *`) runs the Tier-2
+suite with `-n 9999` — every conversation, not the per-script default
+sample — so conversations the weekly sampled run skips still get
+exercised monthly.
+
+### Code changes
+
+**`.github/workflows/ci.yml`** (+~75 lines):
+
+- New `tlsfuzzer-core` job: `needs: [fmt, clippy]`, builds the release
+  `hitls-cli`, sets up Python 3.11, installs pinned tlsfuzzer +
+  tlslite-ng, generates an RSA-2048 PKCS#8 server cert, starts one
+  `s-server` on port 4444, and runs 6 scripts through
+  `tests/tlsfuzzer/run.sh` under `set -e`. The 6 scripts —
+  `test-tls13-conversation`, `-ccs`, `-multiple-ccs-messages`,
+  `-nociphers`, `-record-padding`, `-count-tickets` — were chosen
+  because none has an XFAIL file: every conversation is expected to
+  PASS, so any non-zero exit is a real regression. Server log uploaded
+  as an artifact on failure only.
+- `tlsfuzzer-core` added to the `ci-gate` job's `needs:` list.
+
+**`.github/workflows/tlsfuzzer.yml`** (~20 lines net):
+
+- `on.schedule` gains the monthly `0 7 1 * *` cron alongside the
+  existing weekly `0 6 * * 1`.
+- `TLSFUZZER_REF` / `TLSLITE_NG_REF` pinned to commit SHAs (was
+  `master`), with a comment explaining the rationale.
+- `timeout-minutes` 30 → 90 (covers the monthly full sweep; the weekly
+  sampled run still finishes in ~2 min).
+- Install step: `git clone --depth 1 --branch <REF>` replaced with a
+  plain clone + `git checkout <REF>`, because `git clone --branch`
+  rejects commit SHAs. `pip install "git+…@<SHA>"` already accepts a
+  SHA, so the tlslite-ng line only changed its ref value.
+- "Run curated" step exports `SWEEP_N=9999` when the firing schedule
+  is the monthly cron.
+
+**`tests/tlsfuzzer/run.sh`** (+7 lines):
+
+- Reads the `SWEEP_N` env var; when set, appends `-n <SWEEP_N>` to the
+  tlsfuzzer invocation. Unset → the script's own default sampling
+  applies. Local `-n` in `"$@"` still works and takes precedence.
+
+**`docs/tlsfuzzer.md`**: "CI hookup" section rewritten for the
+two-tier model; new "Sampled vs. full sweep" and "Pinned upstream —
+how to bump" subsections; Phase reference gains a T96–T119 summary
+line and a T124 entry.
+
+### Why a *core* subset can gate when the *full* suite cannot
+
+`tlsfuzzer.yml`'s own header comment argues the suite "should not gate
+merges" — true for the **mutation** scripts (signature fuzzing, record
+length sweeps, version-fallback encodings) whose pass/fail encodes
+spec ambiguities or OpenSSL-specific expectations. It is **not** true
+for a 3/3 sanity handshake or the T88-pinned CCS rules: those are
+unambiguous correctness. T124 gates exactly the unambiguous subset and
+leaves the research-grade mutation scripts in the non-gating tier.
+Pinning the upstream refs (change 2) also removes the original
+"upstream evolves quickly and breaks unrelated PRs" objection — the
+gate now only moves when this repo's own PRs move it.
+
+### Verification
+
+- `actionlint` on `ci.yml` + `tlsfuzzer.yml`: no errors in the changed
+  regions; the only output is pre-existing SC2129 *style* nits in the
+  (untouched) multi-instance server-startup step.
+- `python3 -c "yaml.safe_load(...)"` on both workflows: parse OK.
+- `bash -n tests/tlsfuzzer/run.sh`: syntax OK.
+- End-to-end CI execution of the new `tlsfuzzer-core` gate will be
+  confirmed on this phase's own PR run.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/ci.yml` | Modified | New `tlsfuzzer-core` gate job; added to `ci-gate` `needs:`. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | Monthly cron; pinned refs; clone-by-SHA fix; `SWEEP_N` export; timeout 30→90. |
+| `tests/tlsfuzzer/run.sh` | Modified | `SWEEP_N` env hook → `-n` passthrough; python-interpreter guard `[ -x ]` → `command -v` (a bare `TLSFUZZER_PY=python` failed the path-only `-x` test — surfaced by the first `tlsfuzzer-core` CI run; also a latent bug in `tlsfuzzer.yml`). |
+| `docs/tlsfuzzer.md` | Modified | Two-tier CI hookup; sweep + pinning subsections; T124 phase reference. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 311 + category summary update. |
+| `PROMPT_LOG.md` | Modified | T124 prompt + result entry. |
+
+### Build Status (Post T124)
+
+No Rust source changed — workspace build / test counts unchanged from
+T111. Workflow + shell + docs only.
 
 
 
