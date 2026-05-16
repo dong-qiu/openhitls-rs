@@ -5668,3 +5668,49 @@ Phase T122.
 post-handshake transcript), then a small T-phase to wire
 `test-tls13-post-handshake-auth.py`. Then T120 `psk_ke` and the
 remaining plan items (T125–T129).
+
+---
+
+## Phase I97 — TLS 1.3 Post-Handshake-Auth CertificateVerify Transcript Fix (2026-05-17)
+
+> 继续PHA修复
+
+The PHA-fix I-phase queued at the end of T122. The bug T122's probe
+surfaced: TLS 1.3 post-handshake client authentication computed the
+post-handshake CertificateVerify / Finished hash over
+`Hash(CertificateRequest ‖ Certificate [‖ CV])` alone, omitting the
+main-handshake transcript that RFC 8446 §4.4.1 requires it to
+continue.
+
+The mid-investigation finding that shaped the phase: the bug is
+**symmetric** — the server (`request_client_auth`) and the client
+(post-HS CertificateRequest handler) made the *same* mistake — so the
+pre-existing `test_async_post_hs_auth_roundtrip` Rust test passed
+(our client and server agreed *with each other* on the wrong
+transcript). The fix had to touch both sides; the Rust roundtrip test
+caught it the moment only the server was fixed (server-correct vs
+client-still-wrong → `decrypt_error`). Classic self-consistency trap —
+which is exactly why I96/I97-style bugs need an external-peer check.
+
+**Fix**: `TranscriptHash` made `Clone`; `ServerHandshake` /
+`ClientHandshake` expose `transcript_clone()`; the server connection
+retains the CH…client-Finished transcript (new field, populated by the
+shared `tls13_server_do_handshake_body!` macro), the client already
+retains its handshake state (`client_hs`). `request_client_auth`
+(sync + async) and the client post-HS CR macro now clone that baseline
+and append CR/Cert/CV. Cloning (not mutating) means repeated
+post-handshake auths each restart from the main handshake — §4.4.1.
+
+**Verification**: 1539 hitls-tls lib tests pass (incl. the 2 PHA
+roundtrip tests, now on the correct transcript; +1 new clone test);
+clippy `-D warnings` 0; fmt clean. End-to-end — `test-tls13-post-
+handshake-auth.py` against a temporarily-`--post-handshake-auth`-probed
+s-server: **2/6 → 4/6 PASS**. Residual 2 (`malformed signature in PHA`,
+`with KeyUpdate`) are unrelated robustness gaps (alert-on-failure,
+KeyUpdate-interleave). Recorded as DEV_LOG Phase I97.
+
+**Next**: a Testing phase wires `test-tls13-post-handshake-auth.py`
+into CI behind a committed `--post-handshake-auth` s-server flag
+(the probe flag used here was temporary, not committed); it can fix
+or XFAIL the 2 residual conversations. Then T120 `psk_ke` + the rest
+of the server-side plan (T125–T129).

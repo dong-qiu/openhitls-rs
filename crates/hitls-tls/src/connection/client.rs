@@ -5,7 +5,7 @@ use crate::config::TlsConfig;
 use crate::connection_info::ConnectionInfo;
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
-use crate::crypt::{CipherSuiteParams, DigestVariant, NamedGroup};
+use crate::crypt::{CipherSuiteParams, NamedGroup};
 use crate::handshake::client::{ClientHandshake, ServerHelloResult};
 use crate::handshake::codec::{
     decode_certificate_request, decode_key_update, encode_certificate, encode_certificate_verify,
@@ -16,7 +16,6 @@ use crate::handshake::{HandshakeState, HandshakeType};
 use crate::record::{ContentType, RecordLayer};
 use crate::session::TlsSession;
 use crate::{CipherSuite, TlsConnection, TlsError, TlsVersion};
-use hitls_crypto::provider::Digest;
 use zeroize::Zeroize;
 
 /// A synchronous TLS 1.3 client connection.

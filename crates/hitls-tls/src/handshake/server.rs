@@ -1444,6 +1444,21 @@ impl ServerHandshake {
         })
     }
 
+    /// Phase I97 — snapshot the completed handshake transcript
+    /// (ClientHello … client Finished) for post-handshake use.
+    ///
+    /// RFC 8446 §4.4.1 requires a post-handshake CertificateVerify to be
+    /// computed over the main-handshake transcript continued with the
+    /// post-handshake CertificateRequest + Certificate. The connection
+    /// retains this clone so [`request_client_auth`] can seed its hash
+    /// from it. Call **after** `process_client_finished`, which feeds the
+    /// client Finished into the transcript.
+    ///
+    /// [`request_client_auth`]: crate::connection::TlsServerConnection::request_client_auth
+    pub fn transcript_clone(&self) -> TranscriptHash {
+        self.transcript.clone()
+    }
+
     /// Test-only accessor (Phase I93 e2e tests verify that the recovered
     /// inner CH's random — not the outer wire random — landed in the
     /// handshake context). Gated on `feature = "ech"` because the only
