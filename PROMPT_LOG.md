@@ -5319,6 +5319,24 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: `cargo test -p hitls-crypto --test migrated_aes --features aes,modes` 30/30 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T111 (continued) — Curve25519 Pilot (2026-05-16)
+
+> 请分析接下来要干什么
+
+> 单 commit,追加到 T111
+
+> 我刚才对CI进行了重构，请获取最新CI的配置，然后看该如何处理
+
+**Result**: 5th pilot of `docs/c-test-migration-plan.md` Phase A. New `xtask/src/curve25519.rs` emits 19 KAT tests from `crypto/curve25519/test_suite_sdv_eal_curve25519.data` (174 TC rows): 5 Ed25519 sign + 5 Ed25519 verify + 5 Ed25519 sign-verify combo + 4 X25519 ECDH (RFC 7748 §5.2/§6.1). 119 routed to API-surface, 36 to unknown, 0 unsupported. T111 progress: 4/9 → **5/9 algorithms**.
+
+**X25519 field-order bug, caught in iteration 1**: the first emitter draft mapped the `.data` row as `prv : pub : …` and failed 4/19 KATs (the implementation is known-correct). The actual C signature — `test_suite_sdv_eal_curve25519.c:810`, `SDV_CRYPTO_X25519_EXCH_FUNC_TC002(Hex *pubkey, Hex *prvkey, Hex *share, int isProvider)` — is `pub : prv : expected : provider`. Swapping `args[0]`/`args[1]` flipped 15/19 → 19/19 PASS. C signature now inlined into the module doc comment.
+
+**Mid-task rebase churn**: this work was first committed (`5e72b7f`) and pushed against an older `origin/main`, opening draft PR #65. Before the PR's CI ran, `main` was rewritten by the Phase R14 CI overhaul (PRs #66/#67/#68 — 23 new commits, T111 SHA-2/HMAC/CMAC/AES commits re-authored). PR #65 was abandoned (stale base), `testing` was reset to the new `origin/main`, and the Curve25519 work was re-applied cleanly: the 2 new files (`curve25519.rs`, `migrated_curve25519.rs`) carry over verbatim; only the 2-line `xtask/src/main.rs` registration + the 4 doc files were redone against the new baseline (4298 → 4317 tests). Two orphan docs commits (`4ee5c3a` draft-PR-gate workflow, superseded by PR #67's `10b4819`; `b50d435`) were preserved on a local `docs-draft-pr-gate` branch and dropped from this PR — the PR-gated trunk flow is now documented authoritatively on `main`.
+
+**T111 progress**: 5/9. Remaining: DSA, SM2, SM4, DH, plus PKI CRL.
+
+**Tests**: `cargo test -p hitls-crypto --test migrated_curve25519 --features ed25519,x25519` 19/19 PASS. `cargo run -p xtask -- migrate-c-tests --algo curve25519 --check` `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
