@@ -96,9 +96,15 @@ pub fn parse_data_file(path: &Path) -> Result<Vec<TestCase>, Box<dyn std::error:
 /// helper rejects those by checking whether whitespace appears before
 /// the first `:`.
 fn looks_like_tc_line(line: &str) -> bool {
-    for c in line.chars() {
+    let mut chars = line.chars();
+    for c in chars.by_ref() {
         if c == ':' {
-            return true;
+            // A real TC line packs its args against the colon
+            // (`SDV_X:"hex"` / `SDV_X:SYMBOL`). Some `.data` files also
+            // carry description lines in the form `SDV_X: human text` —
+            // a colon followed by whitespace — which must NOT be parsed
+            // as a TC line.
+            return !matches!(chars.next(), Some(n) if n.is_whitespace());
         }
         if c.is_whitespace() {
             return false;

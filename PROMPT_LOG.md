@@ -5355,6 +5355,22 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: `cargo test -p hitls-crypto --test migrated_dsa --all-features` 600/600 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T111 (continued) — DH Pilot (2026-05-16)
+
+> 请继续完成剩下3个算法测试用例的迁移
+
+**Result**: 7th pilot of `docs/c-test-migration-plan.md` Phase A (first of the final 3 — DH, then SM4, SM2). New `xtask/src/dh.rs` emits 47 DH key-exchange KAT tests from `crypto/dh/test_suite_sdv_eal_dh.data` (180 TC rows): `DH_FUNC_TC001` positive (35) + `DH_FUNC_TC006` fail-vector (12). 45 API-surface, 88 unknown, 0 unsupported. T111 progress: 6/9 → **7/9**; migrated test total 732 → 779.
+
+**Row shape** `p : g : q : prv1 : pub1 : prv2 : pub2 : share : provider`. Positive: both directions (`prv1×pub2`, `prv2×pub1`) reproduce `share`. The `q` subgroup order is unused — Rust `DhParams::new` takes only `(p, g)`.
+
+**Fail-vector both-direction fix**: a first single-direction draft of the negative emitter failed 12/47 — TC006 corrupts a key field that often only affects exchange direction 2 (`prv2`/`pub1`), so direction 1 still reproduces `share`. Fixed to check both directions and assert `!(ok1 && ok2)`, mirroring the C assert `ret1 != OK || cmp1 || ret2 != OK || cmp2`.
+
+**Parser hardening**: DH `.data` carries description lines as `SDV_X: prose` (colon + whitespace) — distinct from the `SDV_X word word` style already handled. `looks_like_tc_line` now treats `:`-then-whitespace as a description marker, so 59 DH lines stop parsing as bogus TC rows (unknown 147 → 88). curve25519/dsa each shed a few mis-counted rows — generation-summary footer only, no emitted test moved; both regenerated and included.
+
+**T111 progress**: 7/9. Remaining: SM4, SM2, plus PKI CRL.
+
+**Tests**: `cargo test -p hitls-crypto --test migrated_dh --all-features` 47/47 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa,dh} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
