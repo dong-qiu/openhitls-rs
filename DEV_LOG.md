@@ -17814,7 +17814,7 @@ The `q` subgroup order in the C row is unused: Rust's `DhParams::new` takes only
 
 #### Parser hardening — `SDV_X: prose` description lines
 
-DH `.data` files carry description lines as `SDV_CRYPTO_DH_FUNC_TC001: Nist, DH Compute Shared Key #1` — a colon-prefixed prose comment, distinct from the whitespace-separated `SDV_X word word` style the parser already handled. `looks_like_tc_line` now treats a `:` *followed by whitespace* as a description marker (not a TC line), so these 59 DH lines no longer parse as bogus 1-arg TC rows. Re-running the generator dropped DH's `unknown` count 147 → 88; curve25519 and dsa each shed a few mis-counted rows (their generation-summary footer is the only change — no emitted test moved).
+DH `.data` files carry description lines as `SDV_CRYPTO_DH_FUNC_TC001: Nist, DH Compute Shared Key #1` — a colon-prefixed prose comment, distinct from the whitespace-separated `SDV_X word word` style the parser already handled. `looks_like_tc_line` now treats a `:` *followed by whitespace* as a description marker (not a TC line), so these 59 DH lines no longer parse as bogus 1-arg TC rows. Re-running the generator dropped DH's `unknown` count 147 → 88; curve25519 and dsa each shed a few miscounted rows (their generation-summary footer is the only change — no emitted test moved).
 
 ### Build Status (Post T111, 2026-05-16)
 

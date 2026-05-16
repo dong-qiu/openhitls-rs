@@ -5365,7 +5365,7 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Fail-vector both-direction fix**: a first single-direction draft of the negative emitter failed 12/47 — TC006 corrupts a key field that often only affects exchange direction 2 (`prv2`/`pub1`), so direction 1 still reproduces `share`. Fixed to check both directions and assert `!(ok1 && ok2)`, mirroring the C assert `ret1 != OK || cmp1 || ret2 != OK || cmp2`.
 
-**Parser hardening**: DH `.data` carries description lines as `SDV_X: prose` (colon + whitespace) — distinct from the `SDV_X word word` style already handled. `looks_like_tc_line` now treats `:`-then-whitespace as a description marker, so 59 DH lines stop parsing as bogus TC rows (unknown 147 → 88). curve25519/dsa each shed a few mis-counted rows — generation-summary footer only, no emitted test moved; both regenerated and included.
+**Parser hardening**: DH `.data` carries description lines as `SDV_X: prose` (colon + whitespace) — distinct from the `SDV_X word word` style already handled. `looks_like_tc_line` now treats `:`-then-whitespace as a description marker, so 59 DH lines stop parsing as bogus TC rows (unknown 147 → 88). curve25519/dsa each shed a few miscounted rows — generation-summary footer only, no emitted test moved; both regenerated and included.
 
 **T111 progress**: 7/9. Remaining: SM4, SM2, plus PKI CRL.
 
