@@ -55,6 +55,12 @@ env:
   # separate so the broader curated suite running against the main RSA
   # 1.3 listener doesn't get unexpected NSTs.
   HITLS_PORT_PSK: 4451
+  # Phase T123 — ECDSA P-384 / P-521 server-cert instances. The
+  # cert-matrix runs `test-tls13-ecdsa-support.py` against each so the
+  # secp384r1 / secp521r1 CertificateVerify sign paths are actually
+  # exercised end-to-end (P-521 server-cert signing landed in I96).
+  HITLS_PORT_ECDSA_P384: 4452
+  HITLS_PORT_ECDSA_P521: 4453
   # External PSK identity advertised by the server. The matching value
   # `HITLS_PSK_HEX` is generated at setup time and exported into the
   # job environment.
@@ -134,6 +140,21 @@ jobs:
           openssl pkcs8 -topk8 -nocrypt \
             -in  "${RUNNER_TEMP}/certs/key-ecdsa-p256.pem" \
             -out "${RUNNER_TEMP}/certs/key-ecdsa-p256-pkcs8.pem"
+          # ECDSA P-384 + P-521 (Phase T123). secp521r1 server-cert
+          # signing landed in I96; the cert matrix now exercises all
+          # three NIST ECDSA curves.
+          for c in "p384:secp384r1" "p521:secp521r1"; do
+            name="${c%%:*}"; curve="${c##*:}"
+            openssl ecparam -genkey -name "${curve}" -noout \
+              -out "${RUNNER_TEMP}/certs/key-ecdsa-${name}.pem"
+            openssl req -x509 -new \
+              -key "${RUNNER_TEMP}/certs/key-ecdsa-${name}.pem" \
+              -out "${RUNNER_TEMP}/certs/cert-ecdsa-${name}.pem" \
+              -subj "/CN=localhost" -days 1
+            openssl pkcs8 -topk8 -nocrypt \
+              -in  "${RUNNER_TEMP}/certs/key-ecdsa-${name}.pem" \
+              -out "${RUNNER_TEMP}/certs/key-ecdsa-${name}-pkcs8.pem"
+          done
           # Ed25519 (Phase T93).
           openssl genpkey -algorithm Ed25519 \
             -out "${RUNNER_TEMP}/certs/key-ed25519-pkcs8.pem"
@@ -181,7 +202,7 @@ jobs:
             -in  "${RUNNER_TEMP}/certs/key-pss.pem" \
             -out "${RUNNER_TEMP}/certs/key-pss-pkcs8.pem"
 
-      - name: Start hitls s-server instances (6 ports — RSA-1.3, RSA-1.2, ECDSA-1.3, Ed25519-1.3, mTLS-RSA-1.3, PSS-1.3)
+      - name: Start hitls s-server instances (10 ports — RSA/ECDSA/Ed25519/mTLS/PSS/PSK)
         run: |
           # RSA TLS 1.3 — main instance, used by most tlsfuzzer
           # scripts (which default to RSA-PSS sig algs).
@@ -265,11 +286,29 @@ jobs:
             --ticket-key "${TICKET_KEY_HEX}" \
             -q > "${RUNNER_TEMP}/server-psk-1.3.log" 2>&1 &
           echo "SERVER_PID_PSK=$!" >> "$GITHUB_ENV"
-          # Wait for all 8 listeners.
+          # ECDSA P-384 + P-521 TLS 1.3 — Phase T123. Each runs
+          # `test-tls13-ecdsa-support.py` so the secp384r1 / secp521r1
+          # CertificateVerify sign paths are exercised against the
+          # matching server cert (P-521 server-cert signing landed
+          # in I96; before that a P-521 cert aborted the handshake).
+          ./target/release/hitls s-server \
+            -p "${HITLS_PORT_ECDSA_P384}" \
+            --cert "${RUNNER_TEMP}/certs/cert-ecdsa-p384.pem" \
+            --key  "${RUNNER_TEMP}/certs/key-ecdsa-p384-pkcs8.pem" \
+            -q > "${RUNNER_TEMP}/server-ecdsa-p384-1.3.log" 2>&1 &
+          echo "SERVER_PID_ECDSA_P384=$!" >> "$GITHUB_ENV"
+          ./target/release/hitls s-server \
+            -p "${HITLS_PORT_ECDSA_P521}" \
+            --cert "${RUNNER_TEMP}/certs/cert-ecdsa-p521.pem" \
+            --key  "${RUNNER_TEMP}/certs/key-ecdsa-p521-pkcs8.pem" \
+            -q > "${RUNNER_TEMP}/server-ecdsa-p521-1.3.log" 2>&1 &
+          echo "SERVER_PID_ECDSA_P521=$!" >> "$GITHUB_ENV"
+          # Wait for all 10 listeners.
           for port in "${HITLS_PORT}" "${HITLS_PORT_12}" \
                       "${HITLS_PORT_ECDSA}" "${HITLS_PORT_ED25519}" \
                       "${HITLS_PORT_MTLS}" "${HITLS_PORT_PSS}" \
-                      "${HITLS_PORT_MTLS_12}" "${HITLS_PORT_PSK}"; do
+                      "${HITLS_PORT_MTLS_12}" "${HITLS_PORT_PSK}" \
+                      "${HITLS_PORT_ECDSA_P384}" "${HITLS_PORT_ECDSA_P521}"; do
             for _ in $(seq 1 30); do
               if ss -ltn "( sport = :${port} )" | grep -q ":${port}"; then
                 echo "server on port ${port} up"
@@ -383,6 +422,19 @@ jobs:
             test-tls13-conversation.py
             test-tls13-ecdsa-support.py
           )
+          # Phase T123 — P-384 / P-521 cert subsets. Only
+          # `test-tls13-ecdsa-support.py` (NOT conversation.py): the
+          # latter's default `signature_algorithms` advertises only
+          # `ecdsa_secp256r1_sha256` among ECDSA schemes, so it can't
+          # satisfy a P-384/P-521 server cert and would fail every
+          # `sanity` conversation. `ecdsa-support.py` advertises each
+          # curve explicitly and carries its own sanity steps.
+          scripts_ecdsa_p384=(
+            test-tls13-ecdsa-support.py
+          )
+          scripts_ecdsa_p521=(
+            test-tls13-ecdsa-support.py
+          )
           scripts_ed25519=(
             test-tls13-conversation.py
             test-tls13-eddsa.py
@@ -490,6 +542,40 @@ jobs:
             grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
               | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
             echo "${s} (ECDSA cert) → exit=${rc}" \
+              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            if [ "$rc" -ne 0 ]; then
+              aggregate_exit=1
+            fi
+          done
+          # Phase T123 — ECDSA P-384 cert-matrix.
+          for s in "${scripts_ecdsa_p384[@]}"; do
+            log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}-ecdsa-p384.log"
+            echo "=== TLS 1.3 (ECDSA P-384 cert): $s ==="
+            XFAIL_DIR="${GITHUB_WORKSPACE}/tests/tlsfuzzer/xfail-ecdsa-p384" \
+              ./tests/tlsfuzzer/run.sh "$s" \
+              -h "${HITLS_HOST}" -p "${HITLS_PORT_ECDSA_P384}" 2>&1 | tee "${log}"
+            rc=${PIPESTATUS[0]}
+            grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
+              | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo "${s} (ECDSA P-384 cert) → exit=${rc}" \
+              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            if [ "$rc" -ne 0 ]; then
+              aggregate_exit=1
+            fi
+          done
+          # Phase T123 — ECDSA P-521 cert-matrix.
+          for s in "${scripts_ecdsa_p521[@]}"; do
+            log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}-ecdsa-p521.log"
+            echo "=== TLS 1.3 (ECDSA P-521 cert): $s ==="
+            XFAIL_DIR="${GITHUB_WORKSPACE}/tests/tlsfuzzer/xfail-ecdsa-p521" \
+              ./tests/tlsfuzzer/run.sh "$s" \
+              -h "${HITLS_HOST}" -p "${HITLS_PORT_ECDSA_P521}" 2>&1 | tee "${log}"
+            rc=${PIPESTATUS[0]}
+            grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
+              | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo "${s} (ECDSA P-521 cert) → exit=${rc}" \
               >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
             echo >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
             if [ "$rc" -ne 0 ]; then
@@ -606,7 +692,8 @@ jobs:
           for pid in "${SERVER_PID_RSA:-}" "${SERVER_PID_RSA_12:-}" \
                     "${SERVER_PID_ECDSA:-}" "${SERVER_PID_ED25519:-}" \
                     "${SERVER_PID_MTLS:-}" "${SERVER_PID_PSS:-}" \
-                    "${SERVER_PID_MTLS_12:-}" "${SERVER_PID_PSK:-}"; do
+                    "${SERVER_PID_MTLS_12:-}" "${SERVER_PID_PSK:-}" \
+                    "${SERVER_PID_ECDSA_P384:-}" "${SERVER_PID_ECDSA_P521:-}"; do
             if [ -n "${pid}" ]; then
               kill "${pid}" 2>/dev/null || true
             fi
@@ -625,5 +712,7 @@ jobs:
             ${{ runner.temp }}/server-mtls-1.3.log
             ${{ runner.temp }}/server-pss-1.3.log
             ${{ runner.temp }}/server-mtls-1.2.log
+            ${{ runner.temp }}/server-ecdsa-p384-1.3.log
+            ${{ runner.temp }}/server-ecdsa-p521-1.3.log
             ${{ runner.temp }}/tlsfuzzer-logs/
           retention-days: 14

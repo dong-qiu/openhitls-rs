@@ -1,0 +1,27 @@
+# Phase T123 — `test-tls13-ecdsa-support.py` XFAILs against the
+# ECDSA P-384 server cert (5 entries).
+#
+# All 5 failing conversations are cert-or-curve mismatches, not
+# protocol gaps. `test-tls13-ecdsa-support.py` is written for a
+# server that holds six certs at once (P-256/P-384/P-521 +
+# brainpool x3) and picks one per ClientHello; our s-server holds a
+# single cert (P-384 here):
+#
+# - `ecdsa_secp256r1_sha256` / `ecdsa_secp521r1_sha512`: the client
+#   constrains `signature_algorithms` to a different curve. A P-384
+#   key cannot sign with secp256r1 / secp521r1, so the server replies
+#   handshake_failure (RFC 8446 §4.4.3 — correct). Closing these
+#   needs a multi-cert s-server (per-CH cert selection), out of scope.
+# - `ecdsa_brainpoolP{256,384,512}r1tls13_sha{256,384,512}`: brainpool
+#   curves are not advertised by default (RFC 8734; not in NSA Suite B,
+#   not widely deployed). Real "won't fix" absent interop demand.
+#
+# The 5 PASS conversations (sanity + `ecdsa_secp384r1_sha384` + the
+# SHA-1 / SHA-224 "verified to not work" negative steps) gate cleanly
+# against this cert.
+
+Test with ecdsa_brainpoolP256r1tls13_sha256
+Test with ecdsa_brainpoolP384r1tls13_sha384
+Test with ecdsa_brainpoolP512r1tls13_sha512
+Test with ecdsa_secp256r1_sha256
+Test with ecdsa_secp521r1_sha512

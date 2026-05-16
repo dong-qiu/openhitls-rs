@@ -220,7 +220,7 @@ merge. No branch-protection change was needed: requiring `CI Gate`
 already requires every job in its `needs:` list.
 
 **Tier 2 — the full curated suite in `.github/workflows/tlsfuzzer.yml`.**
-All 46 curated scripts run on `workflow_dispatch`, on a weekly
+All 48 curated script-runs run on `workflow_dispatch`, on a weekly
 schedule (Mon 06:00 UTC, sampled), and on a monthly schedule (1st
 07:00 UTC, full `-n 9999` sweep). This tier is **not** a required PR
 check — it exercises edge-case mutations that legitimately probe spec
@@ -417,3 +417,13 @@ one reviewed PR.
   monthly full `-n 9999` sweep (`run.sh` honours the `SWEEP_N` env var)
   so conversations the weekly sampled run skips still get exercised.
   No Rust source changed — workflow + `run.sh` + docs only.
+
+- I96 / T123 — extended the cert matrix to ECDSA P-384 + P-521.
+  Probing the P-521 server cert surfaced that `hitls-tls` rejected
+  P-521 CertificateVerify signing outright (`unsupported ECDSA curve
+  for signing`); **I96** added P-521 to the TLS 1.3 + 1.2 signature
+  dispatch, then **T123** added P-384 / P-521 `s-server` instances
+  (ports 4452 / 4453) each running `test-tls13-ecdsa-support.py` with
+  a per-cert XFAIL dir (`xfail-ecdsa-p384/`, `xfail-ecdsa-p521/`).
+  Both gate at 5 PASS / 5 XFAIL (the XFAILs are conversations a single
+  ECDSA cert structurally cannot satisfy). Suite size 46 → 48.

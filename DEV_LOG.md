@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I96 (96 phases)
-- Testing: T1–T124 (114 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T123 reserved for in-flight tlsfuzzer server-side phases; T111 in progress — Phase A is 7/9 algorithms migrated)
+- Testing: T1–T124 (115 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T122 reserved for in-flight tlsfuzzer server-side phases; T111 in progress — Phase A is 7/9 algorithms migrated)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -322,6 +322,7 @@ Category summary:
 | 310 | R14 | Refactor | CI Overhaul — (A) efficiency: test-matrix split + trim, prebuilt-tool installs, 6-way fuzz-smoke shard → push-CI wall-clock 11m39s → 7m20s; (B) hardening: revived `fuzz-smoke` (a silent no-op for months), deleted decorative `valgrind-ct`, un-masked TSan / scheduled-fuzzing, pinned nightly + actions, miri/ASan weekly → daily, fmt/clippy pre-push presubmit; (C) post-hoc CI → PR-gated trunk: `ci-gate` aggregate job + branch protection + auto-merge (CI is now the merge gate; direct `git push origin main` rejected) | 2026-05-15 |
 | 311 | T124 | Test | tlsfuzzer two-tier CI — a 6-script `tlsfuzzer-core` gate in `ci.yml` wired into the required `CI Gate`, plus the full 46-script curated suite kept weekly/monthly in `tlsfuzzer.yml`; pinned `TLSFUZZER_REF` / `TLSLITE_NG_REF` from `master` to specific upstream commits (stops XFAIL drift); monthly full `-n 9999` sweep via the new `SWEEP_N` env hook in `run.sh`. Workflow + run.sh + docs only — no Rust source changed. T120–T123 reserved for the in-flight tlsfuzzer server-side phases (psk_ke / 0-RTT / CLI triggers / ECDSA matrix) | 2026-05-16 |
 | 312 | I96 | Impl | TLS ECDSA P-521 server-certificate signing — `hitls-tls` only wired P-256/P-384 into the CertificateVerify / ServerKeyExchange signature dispatch even though `hitls-crypto` fully supports P-521; a P-521 server cert hit `unsupported ECDSA curve for signing` and aborted the handshake. Added P-521 to `signing.rs` (TLS 1.3 sign), `verify.rs` (TLS 1.3 CV verify) and `server12.rs` (TLS 1.2 sign); verified end-to-end against tlsfuzzer `test-tls13-ecdsa-support.py` (2/8 → 5/5, mirrors P-384). Surfaced by the T123 ECDSA cert-matrix probe | 2026-05-16 |
+| 313 | T123 | Test | tlsfuzzer ECDSA cert-matrix expansion — added ECDSA P-384 + P-521 server-cert instances (ports 4452/4453) to `tlsfuzzer.yml`, each running `test-tls13-ecdsa-support.py` so the secp384r1 / secp521r1 CertificateVerify sign paths are exercised end-to-end; per-cert XFAIL dirs `xfail-ecdsa-p384/` + `xfail-ecdsa-p521/` (5 entries each — non-matching-curve + brainpool conversations a single cert structurally can't satisfy). Both gate at 5 PASS / 5 XFAIL / 0 FAIL. Workflow + XFAIL files only — no Rust change. Depends on I96 (P-521 sign support) | 2026-05-16 |
 
 ---
 
@@ -18145,6 +18146,93 @@ T123 ECDSA cert-matrix expansion (P-384 + P-521 tlsfuzzer instances).
 
 `hitls-tls` builds clean; targeted lib tests 38/0. Workspace test count
 +3 (the new P-521 unit tests).
+
+---
+
+## Phase T123 — tlsfuzzer ECDSA Cert-Matrix Expansion: P-384 + P-521 Server Instances (2026-05-16)
+
+### Summary
+
+T123 extends the tlsfuzzer cert-matrix (T93: RSA / ECDSA-P256 /
+Ed25519) with **ECDSA P-384 and P-521 server-certificate instances**.
+Each runs `test-tls13-ecdsa-support.py` so the `ecdsa_secp384r1_sha384`
+and `ecdsa_secp521r1_sha512` CertificateVerify sign paths are exercised
+end-to-end against a real tlsfuzzer client — not just by in-repo unit
+tests.
+
+T123 is the Testing-phase follow-up to **I96**: probing the P-521 cert
+during T123 prep surfaced that `hitls-tls` rejected P-521 server-cert
+signing entirely (`unsupported ECDSA curve for signing`). I96 closed
+that capability gap; T123 now locks it in as repeatable CI coverage.
+
+### Changes (workflow + XFAIL files only — no Rust)
+
+**`.github/workflows/tlsfuzzer.yml`**:
+
+- 2 new env ports: `HITLS_PORT_ECDSA_P384: 4452`,
+  `HITLS_PORT_ECDSA_P521: 4453`.
+- Cert-generation step: a `for` loop emits P-384 (`secp384r1`) and
+  P-521 (`secp521r1`) self-signed certs + PKCS#8 keys alongside the
+  existing P-256 cert.
+- 2 new `s-server` instances started on the new ports; wait-for-
+  listeners loop extended 8 → 10; step name corrected.
+- New `scripts_ecdsa_p384` / `scripts_ecdsa_p521` arrays — each holds
+  **only** `test-tls13-ecdsa-support.py`. `test-tls13-conversation.py`
+  is deliberately excluded: its default `signature_algorithms`
+  advertises only `ecdsa_secp256r1_sha256` among ECDSA schemes, so it
+  cannot satisfy a P-384/P-521 server cert and would fail every
+  `sanity` conversation. `ecdsa-support.py` advertises each curve
+  explicitly and carries its own sanity steps.
+- 2 new run loops driving the subsets through `run.sh` with
+  `XFAIL_DIR` pointed at the per-cert dirs.
+- Stop-server PID list + upload-artifact path list extended.
+
+**`tests/tlsfuzzer/xfail-ecdsa-p384/test-tls13-ecdsa-support.txt`**
+(new, 5 entries) and
+**`tests/tlsfuzzer/xfail-ecdsa-p521/test-tls13-ecdsa-support.txt`**
+(new, 5 entries): the conversations a single ECDSA cert structurally
+cannot satisfy — the three brainpool curves (not advertised by
+default, RFC 8734) plus the two non-matching NIST curves (a P-384 key
+can't sign `secp256r1`/`secp521r1`; a P-521 key can't sign
+`secp256r1`/`secp384r1` — handshake_failure is RFC 8446 §4.4.3
+correct). Same `XFAIL_DIR` mechanism T93 established for the P-256 /
+Ed25519 cert subsets.
+
+### Verification
+
+`test-tls13-ecdsa-support.py` (pinned tlsfuzzer bf7f579) driven
+through `run.sh` against locally-built `s-server` instances:
+
+| Cert | Result | Gate |
+|------|--------|------|
+| ECDSA P-384 | 5 PASS / 5 XFAIL / 0 FAIL / 0 XPASS | green |
+| ECDSA P-521 | 5 PASS / 5 XFAIL / 0 FAIL / 0 XPASS | green |
+
+(P-521 was 2 PASS / 8 FAIL before I96 — the handshake aborted before
+CertificateVerify. Post-I96 it matches the P-384 shape exactly.)
+
+`actionlint .github/workflows/tlsfuzzer.yml`: no errors (only the
+pre-existing SC2129 style nits in the server-startup step's
+`>> $GITHUB_ENV` redirects — the 2 new instances follow the same
+established pattern). YAML parses.
+
+Curated CI suite size: **46 → 48 script-runs**.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | Modified | P-384/P-521 ports, cert gen, 2 s-server instances, 2 script arrays + run loops, wait/stop/upload lists. |
+| `tests/tlsfuzzer/xfail-ecdsa-p384/test-tls13-ecdsa-support.txt` | Added | 5 XFAIL entries (cert-mismatch + brainpool). |
+| `tests/tlsfuzzer/xfail-ecdsa-p521/test-tls13-ecdsa-support.txt` | Added | 5 XFAIL entries (cert-mismatch + brainpool). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 313 + Testing category summary (T120–T123 → T120–T122 reserved, 114 → 115 phases). |
+| `PROMPT_LOG.md` | Modified | T123 prompt + result entry. |
+| `docs/tlsfuzzer.md` | Modified | Cert-matrix script count 46 → 48; T123 phase reference. |
+
+### Build Status (Post T123)
+
+No Rust source changed — workflow + XFAIL files + docs only. Workspace
+build / test counts unchanged from I96.
 
 
 
