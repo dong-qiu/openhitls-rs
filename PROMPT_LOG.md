@@ -5409,6 +5409,16 @@ With this, plan §2.4 acceptance is met for **Phase A**: xtask on main; 9 `tests
 
 **Docs-only commit** — no test/code change; `migrated_*.rs` and `xtask/` untouched.
 
+## Phase T111 (continued) — formally close T111 status (2026-05-17)
+
+> 正式关闭 T111 状态
+
+**Result**: Flips the live "T111 in progress" status markers to "complete" now that Phase A §2.4 acceptance is fully met (9/9 algorithms migrated, 800 KAT tests, `docs/c-test-na-list.md` written). Edits: `CLAUDE.md` status paragraph + the "Testing (…)" summary header + the T111 testing-summary fragment; `DEV_LOG.md` category-summary line. The one remaining "T111 in progress" string (`DEV_LOG.md` T111 Changes table) is left untouched — it is a historical record of what the original T111 commit did, not a live status.
+
+`pki/crl_rfc5280` is not part of T111 (it is Phase C, gated on the ASN.1 fixture corpus), so closing T111 does not depend on it.
+
+**Docs-only commit.**
+
 
 
 

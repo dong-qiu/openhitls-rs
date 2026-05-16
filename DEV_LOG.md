@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I96 (96 phases)
-- Testing: T1–T124 (116 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T121 reserved for in-flight tlsfuzzer server-side phases; T111 in progress — Phase A is 9/9 algorithms migrated)
+- Testing: T1–T124 (116 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T121 reserved for in-flight tlsfuzzer server-side phases; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
