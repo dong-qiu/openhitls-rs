@@ -65,7 +65,19 @@ pub fn parse_data_file(path: &Path) -> Result<Vec<TestCase>, Box<dyn std::error:
             continue;
         }
 
-        let (tc_name, args) = parse_tc_line(trimmed, line_no)?;
+        // Lenient: a row whose args fail to parse (e.g. odd-length hex in a
+        // non-KAT C case such as `DSA_GEN_G_FUNC_TC004`) is still recorded
+        // with its TC name and empty args, so the per-algorithm classifier
+        // routes it to `ApiSurface`/`Unknown` instead of aborting the whole
+        // file. A genuinely malformed KAT row would surface as a skipped
+        // case in the generation summary rather than silently vanishing.
+        let (tc_name, args) = match parse_tc_line(trimmed, line_no) {
+            Ok(v) => v,
+            Err(_) => (
+                trimmed.split(':').next().unwrap_or(trimmed).to_string(),
+                Vec::new(),
+            ),
+        };
         cases.push(TestCase {
             line: line_no,
             tc_name,

@@ -5337,6 +5337,24 @@ First attempt: add `is_pss_oid: bool` to `ServerPrivateKey::Rsa`. That would hav
 
 **Tests**: `cargo test -p hitls-crypto --test migrated_curve25519 --features ed25519,x25519` 19/19 PASS. `cargo run -p xtask -- migrate-c-tests --algo curve25519 --check` `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T111 (continued) — DSA Pilot (2026-05-16)
+
+> 针对测试用例迁移，请看看接下来该做什么
+
+> 开始做 dsa 的测试用例迁移
+
+**Result**: 6th pilot of `docs/c-test-migration-plan.md` Phase A. New `xtask/src/dsa.rs` emits 600 DSA verify-side KAT tests from `crypto/dsa/test_suite_sdv_eal_dsa.data` (769 TC rows): the two `SIGN_VERIFY` / `SIGN_VERIFY_DATA` families (685 rows, −85 provider-flag duplicates = 600) are NIST FIPS 186-4 vectors across SHA-1/224/256/384/512. 143 routed to API-surface, 26 unknown, 0 unsupported. T111 progress: 5/9 → **6/9 algorithms**; migrated test total 132 → 732.
+
+**Verify-only — the sign side is not reproducible**: the C test pins the signing nonce `K` via a stubbed RNG (`STUB_RandForSignature`) to byte-compare against the NIST `(R, S)`. Rust's `DsaKeyPair::sign` draws `K` from `BigNum::random_range(q)` with no injection hook, so the sign side cannot reproduce a specific `(R, S)`. The migrated test ports the verify side — `DsaParams::new(P,Q,G)` + `from_public_key(Y)` + hash `Msg` + `verify` accepts the NIST signature. `verify` is the path that consumes the known-good `(R, S)`, so it is a faithful KAT.
+
+**Generation-time DER encoding**: `DsaKeyPair::verify` consumes a DER `SEQUENCE { INTEGER r, INTEGER s }`, but the `.data` gives raw `R`/`S` integers. The emitter DER-encodes `(R, S)` at generation time (with the `0x00` sign-padding rule) and writes a ready `&[u8]` literal — the generated test stays a plain `verify` call, no runtime encoding helper.
+
+**Parser hardening**: `DSA_GEN_G_FUNC_TC004` rows carry odd-length hex that `parse_hex` rejects; `parse_data_file` previously aborted the whole file. Made lenient — an unparseable row is recorded with empty args and routed to `ApiSurface`/`Unknown` by the classifier. Verified no-op for the 5 prior algorithms (`--check` still `up-to-date` for all); no KAT row affected (NIST vectors use even-length hex).
+
+**T111 progress**: 6/9. Remaining: SM2, SM4, DH, plus PKI CRL.
+
+**Tests**: `cargo test -p hitls-crypto --test migrated_dsa --all-features` 600/600 PASS. `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa} --check` all `up-to-date`. `cargo clippy -p xtask -p hitls-crypto --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
