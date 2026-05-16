@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I95 (95 phases)
-- Testing: T1–T124 (114 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T123 reserved for in-flight tlsfuzzer server-side phases; T111 in progress — Phase A is 6/9 algorithms migrated)
+- Testing: T1–T124 (114 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T123 reserved for in-flight tlsfuzzer server-side phases; T111 in progress — Phase A is 7/9 algorithms migrated)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -318,7 +318,7 @@ Category summary:
 | 306 | T117 | Test | TLS 1.2 Certificate12 DER-shape validation in `decode_certificate12` (entry first byte must be 0x30, inner DER length must equal outer wrapper length) + `bad_certificate` substring routing in `tls_error_to_alert` per RFC 5246 §7.2.2 — closes the last 2 XFAILs in `test-certificate-malformed.py` (1000/2 → 1002/0); curated mTLS-1.2 set now has 0 XFAIL on this script (T111–T116 reserved for C-test migration plan) | 2026-05-12 |
 | 307 | T118 | Test | TLS 1.2 CertificateRequest comprehensive 18-item sigalgs list (mirrors T102 TLS 1.3 fix) + `verify_cv12_signature` scheme-aware transcript hashing (RFC 5246 §7.4.8 — CV hash MUST be the scheme's hash, not the PRF hash) + verifier coverage expanded (RSA-PSS-RSAE SHA-384/512, ECDSA P-521, Ed25519, RSA-PKCS#1 SHA-1/512) — closes the last XFAIL in `test-certificate-request.py` (4/1 → 5/0); curated mTLS-12 subset (4 scripts) now 1279/0/0 — completely clean | 2026-05-12 |
 | 308 | T119 | Test | TLS 1.3 external-PSK server-side support (RFC 8446 §4.2.11 out-of-band PSK auth via new `--psk` / `--psk-identity` CLI flags + `verify_binder` external-label parameter) + 2 new tlsfuzzer scripts in CI on a dedicated `--psk` + `--ticket-key` listener: `test-tls13-psk_dhe_ke.py` (3/1 XFAIL) and `test-tls13-session-resumption.py` (4/3 XFAIL) — closes 7 new conversations; `psk_ke` mode (no DHE) queued for T120 | 2026-05-12 |
-| 309 | T111 | Test | C→Rust test migration tool — `xtask/` scaffold + per-algorithm template emitters consuming openHiTLS C SDV `.data` files. Phase A pilots: SHA-2 (28 tests, 70 TC rows), HMAC (43 tests, MD5/SHA-1/SHA-2/SM3), CMAC (12 tests, AES-128/192/256; SM4 unsupported), AES (30 tests, ECB + CTR across 3 key sizes; CBC rows blocked on a future `cbc_encrypt_raw` no-padding helper, multi-update rows deferred), Curve25519 (19 tests, Ed25519 sign/verify/sign-verify + X25519 ECDH; X25519 emitter caught a field-order bug — C `SDV_CRYPTO_X25519_EXCH_FUNC_TC002(pubkey, prvkey, share, isProvider)` signature confirmed by reading `test_suite_sdv_eal_curve25519.c:810` after 4/19 KAT failures), DSA (600 tests, NIST FIPS 186-4 verify-side KAT across SHA-1/224/256/384/512; sign side not reproducible — Rust `DsaKeyPair::sign` has no nonce-K injection hook, so the migrated test ports verify with a generation-time DER-encoded signature). `--check` mode for CI drift detection (rustfmt-aware comparison, fixes false-positive bug where committed file went through rustfmt but `--check` compared raw generator output). 732 migrated tests total; 3/9 algorithms remain (SM2, SM4, DH, plus PKI CRL); plan §2.4 acceptance criteria still open (`docs/c-test-na-list.md` + per-failure issues) | 2026-05-12 |
+| 309 | T111 | Test | C→Rust test migration tool — `xtask/` scaffold + per-algorithm template emitters consuming openHiTLS C SDV `.data` files. Phase A pilots: SHA-2 (28 tests, 70 TC rows), HMAC (43 tests, MD5/SHA-1/SHA-2/SM3), CMAC (12 tests, AES-128/192/256; SM4 unsupported), AES (30 tests, ECB + CTR across 3 key sizes; CBC rows blocked on a future `cbc_encrypt_raw` no-padding helper, multi-update rows deferred), Curve25519 (19 tests, Ed25519 sign/verify/sign-verify + X25519 ECDH; X25519 emitter caught a field-order bug — C `SDV_CRYPTO_X25519_EXCH_FUNC_TC002(pubkey, prvkey, share, isProvider)` signature confirmed by reading `test_suite_sdv_eal_curve25519.c:810` after 4/19 KAT failures), DSA (600 tests, NIST FIPS 186-4 verify-side KAT across SHA-1/224/256/384/512; sign side not reproducible — Rust `DsaKeyPair::sign` has no nonce-K injection hook, so the migrated test ports verify with a generation-time DER-encoded signature), DH (47 tests, key-exchange shared-secret KAT — positive + fail-vector; both exchange directions checked). `--check` mode for CI drift detection (rustfmt-aware comparison, fixes false-positive bug where committed file went through rustfmt but `--check` compared raw generator output). 779 migrated tests total; 2/9 algorithms remain (SM2, SM4, plus PKI CRL); plan §2.4 acceptance criteria still open (`docs/c-test-na-list.md` + per-failure issues) | 2026-05-12 |
 | 310 | R14 | Refactor | CI Overhaul — (A) efficiency: test-matrix split + trim, prebuilt-tool installs, 6-way fuzz-smoke shard → push-CI wall-clock 11m39s → 7m20s; (B) hardening: revived `fuzz-smoke` (a silent no-op for months), deleted decorative `valgrind-ct`, un-masked TSan / scheduled-fuzzing, pinned nightly + actions, miri/ASan weekly → daily, fmt/clippy pre-push presubmit; (C) post-hoc CI → PR-gated trunk: `ci-gate` aggregate job + branch protection + auto-merge (CI is now the merge gate; direct `git push origin main` rejected) | 2026-05-15 |
 | 311 | T124 | Test | tlsfuzzer two-tier CI — a 6-script `tlsfuzzer-core` gate in `ci.yml` wired into the required `CI Gate`, plus the full 46-script curated suite kept weekly/monthly in `tlsfuzzer.yml`; pinned `TLSFUZZER_REF` / `TLSLITE_NG_REF` from `master` to specific upstream commits (stops XFAIL drift); monthly full `-n 9999` sweep via the new `SWEEP_N` env hook in `run.sh`. Workflow + run.sh + docs only — no Rust source changed. T120–T123 reserved for the in-flight tlsfuzzer server-side phases (psk_ke / 0-RTT / CLI triggers / ECDSA matrix) | 2026-05-16 |
 
@@ -17643,13 +17643,13 @@ Pre-T119 the project had RFC-8446-conformant PSK code on the wire (encode/parse 
 The same `--ticket-key` flag (which existed since T96 but had no curated tlsfuzzer coverage) now also gates `test-tls13-session-resumption.py` in CI — 4 PASS conversations covering NST emission + resumption-on-second-handshake + PSK_WITH_DHE round-trip — making the resumption story finally observable in CI alongside the existing `test-tls13-count-tickets.py` (which only probes the no-NST path).
 ---
 
-## Phase T111 — C→Rust Test Migration Tool: xtask + SHA-2 / HMAC / CMAC / AES / Curve25519 / DSA Pilots (2026-05-12 .. 2026-05-16)
+## Phase T111 — C→Rust Test Migration Tool: xtask + SHA-2 / HMAC / CMAC / AES / Curve25519 / DSA / DH Pilots (2026-05-12 .. 2026-05-16)
 
 ### Summary
 
-First instalment of `docs/c-test-migration-plan.md` **Phase A** (~3 500 mechanical-migration TCs over 9 algorithms). This phase delivers (a) the generic migration tooling, (b) six pilot generators validating that the template approach works across multiple `.data`-row shapes (3-arg digest, 4-arg MAC, variable-length cipher with optional provider flag, signature + key-exchange families), and (c) a CI drift-detection mode so generated files stay in sync with their C source.
+First instalment of `docs/c-test-migration-plan.md` **Phase A** (~3 500 mechanical-migration TCs over 9 algorithms). This phase delivers (a) the generic migration tooling, (b) seven pilot generators validating that the template approach works across multiple `.data`-row shapes (3-arg digest, 4-arg MAC, variable-length cipher with optional provider flag, signature + key-exchange families), and (c) a CI drift-detection mode so generated files stay in sync with their C source.
 
-T111 is intentionally **not closed** here — the plan §2.4 acceptance criteria list 9 `tests/migrated/*.rs` targets and a `docs/c-test-na-list.md` writeup. We are 6/9 (SHA-2, HMAC, CMAC, AES, Curve25519, DSA). The remaining 3 (SM2, SM4, DH, plus PKI CRL) will follow in subsequent commits under the same phase number per the no-sub-phase rule.
+T111 is intentionally **not closed** here — the plan §2.4 acceptance criteria list 9 `tests/migrated/*.rs` targets and a `docs/c-test-na-list.md` writeup. We are 7/9 (SHA-2, HMAC, CMAC, AES, Curve25519, DSA, DH). The remaining 2 (SM2, SM4, plus PKI CRL) will follow in subsequent commits under the same phase number per the no-sub-phase rule.
 
 ### Component breakdown
 
@@ -17672,9 +17672,10 @@ T111 is intentionally **not closed** here — the plan §2.4 acceptance criteria
 | `migrated_hmac.rs` | 205 | 43 | 158 | 4 (SHA-3 not yet `Digest`) | yes |
 | `migrated_cmac.rs` | 91 | 12 | 71 | 4 (SM4) | yes |
 | `migrated_aes.rs` | 315 | 30 | 273 | 12 (CBC-no-raw-API) | yes |
-| `migrated_curve25519.rs` | 174 | 19 | 119 (API surface) + 36 (unknown shapes — repeat-count / non-hex args) | 0 | yes |
-| `migrated_dsa.rs` | 769 | 600 | 143 (API surface) + 26 (unknown shapes) | 0 | yes |
-| **Total** | 1624 | **732** | 1023 | 20 | yes |
+| `migrated_curve25519.rs` | 170 | 19 | 115 (API surface) + 36 (unknown shapes — repeat-count / non-hex args) | 0 | yes |
+| `migrated_dsa.rs` | 767 | 600 | 141 (API surface) + 26 (unknown shapes) | 0 | yes |
+| `migrated_dh.rs` | 180 | 47 | 45 (API surface) + 88 (unknown — bare-name header lines) | 0 | yes |
+| **Total** | 1798 | **779** | 999 | 20 | yes |
 
 ### `--check` drift detection: bug + fix
 
@@ -17737,11 +17738,13 @@ The 9-algorithm Phase A batch represents ~3 500 mechanical-migration TCs — man
 | `xtask/src/cipher.rs` | Added | AES KAT template: row-shape auto-detection, per-mode dispatch (ECB + CTR), `aes_alg_label` resolver, header/footer/emit helpers. |
 | `xtask/src/curve25519.rs` | Added | Curve25519 KAT template: 4 classifier kinds (`Ed25519Sign` / `Ed25519Verify` / `Ed25519SignVerify` / `X25519Exch`), per-symbol header `#[cfg(feature = "...")]` use statements, inline C signature reference in doc. |
 | `xtask/src/dsa.rs` | Added | DSA verify-side KAT template: `SignVerify` classifier, `CRYPT_MD_*` → digest mapping, generation-time DER `SEQUENCE{INTEGER,INTEGER}` signature encoder. |
-| `xtask/src/parser.rs` | Modified | `parse_data_file` lenient row handling — an unparseable row (odd-length hex in non-KAT generation cases) is recorded with empty args instead of aborting the file. |
+| `xtask/src/dh.rs` | Added | DH key-exchange KAT template: positive (`TC001`) + fail-vector (`TC006`) emitters, both-direction shared-secret check. |
+| `xtask/src/parser.rs` | Modified | `parse_data_file` lenient row handling (unparseable row → empty args, no abort); `looks_like_tc_line` treats `SDV_X: prose` (colon + whitespace) as a description, not a TC line. |
 | `crates/hitls-crypto/tests/migrated_cmac.rs` | Added | 12 generated CMAC AES-128/192/256 KAT tests (rustfmt-applied). |
 | `crates/hitls-crypto/tests/migrated_aes.rs` | Added | 30 generated AES KAT tests (24 ECB + 6 CTR across AES-128/192/256). |
 | `crates/hitls-crypto/tests/migrated_curve25519.rs` | Added | 19 generated Curve25519 tests (5 Ed25519 sign + 5 Ed25519 verify + 5 Ed25519 sign-verify combo + 4 X25519 ECDH RFC 7748 §5.2/§6.1 KAT). |
 | `crates/hitls-crypto/tests/migrated_dsa.rs` | Added | 600 generated DSA verify-side KAT tests (NIST FIPS 186-4 vectors, SHA-1/224/256/384/512). |
+| `crates/hitls-crypto/tests/migrated_dh.rs` | Added | 47 generated DH key-exchange tests (35 positive shared-secret KAT + 12 fail-vector). |
 | `.gitignore` | Modified | Added `/diagnostics/` (local LSP snapshot dir). |
 | `DEV_LOG.md` | Modified | This entry + Phase Index update + category summary update. |
 | `PROMPT_LOG.md` | Modified | T111 prompt + result entry. |
@@ -17798,14 +17801,29 @@ The C test pins the signing nonce `K` via a stubbed RNG (`STUB_RandForSignature`
 
 `DSA_GEN_G_FUNC_TC004` rows carry odd-length hex (e.g. a 511-char field) that `parse_hex` rejects. The parser previously aborted the **entire file** on the first such row. `parse_data_file` is now lenient: a row whose args fail to parse is still recorded with its TC name and empty args, so the per-algorithm classifier routes it to `ApiSurface`/`Unknown` instead of aborting. Verified no-op for the five prior algorithms (`--check` still `up-to-date` for all). No KAT row is affected — NIST vectors use fixed-width even-length hex; only non-KAT generation-workflow rows carry the odd hex.
 
+### DH pilot (continued, 2026-05-16)
+
+Adds `xtask/src/dh.rs` (~210 LoC) + `migrated_dh.rs` (47 emitted tests). Source: `crypto/dh/test_suite_sdv_eal_dh.data` (180 TC rows) → 47 KAT emitted, 45 API-surface skipped, 88 unknown (bare-name header lines), 0 unsupported. 7/9 algorithms now done.
+
+Two KAT families, both with row shape `p : g : q : prv1 : pub1 : prv2 : pub2 : share : provider`:
+
+- **`DH_FUNC_TC001`** (positive) — both parties derive the shared secret (`prv1 × pub2` and `prv2 × pub1`); each equals `share`.
+- **`DH_FUNC_TC006`** (negative, "fail vector") — one key field is corrupted, so it is *not* the case that both directions cleanly reproduce `share`. The emitted test mirrors the C assert `ret1 != OK || cmp1 || ret2 != OK || cmp2` — i.e. `assert!(!(ok1 && ok2))`. A first single-direction draft failed 12/47: the corruption is often in `prv2`/`pub1` (direction 2 only), so direction 1 still reproduces `share` — both directions must be checked.
+
+The `q` subgroup order in the C row is unused: Rust's `DhParams::new` takes only `(p, g)`, which is all `compute_shared_secret` (a plain `g^x mod p`) needs. Key-generation / named-group / ctx-duplication families (`TC002`–`TC005`, `GET_KEY_BITS`, `DUP_CTX`) route to `ApiSurface` — Rust DH key generation draws the private exponent from the system RNG, so a generation KAT is not reproducible.
+
+#### Parser hardening — `SDV_X: prose` description lines
+
+DH `.data` files carry description lines as `SDV_CRYPTO_DH_FUNC_TC001: Nist, DH Compute Shared Key #1` — a colon-prefixed prose comment, distinct from the whitespace-separated `SDV_X word word` style the parser already handled. `looks_like_tc_line` now treats a `:` *followed by whitespace* as a description marker (not a TC line), so these 59 DH lines no longer parse as bogus 1-arg TC rows. Re-running the generator dropped DH's `unknown` count 147 → 88; curve25519 and dsa each shed a few miscounted rows (their generation-summary footer is the only change — no emitted test moved).
+
 ### Build Status (Post T111, 2026-05-16)
 
 - `RUSTFLAGS="-D warnings" cargo clippy -p xtask -p hitls-crypto --all-features --tests`: 0 warnings.
 - `cargo fmt --all -- --check`: clean.
+- `cargo test -p hitls-crypto --test migrated_dh --all-features`: 47/47 PASS (35 positive + 12 fail-vector).
 - `cargo test -p hitls-crypto --test migrated_dsa --all-features`: 600/600 PASS.
-- `cargo test -p hitls-crypto --test migrated_curve25519 --features ed25519,x25519`: 19/19 PASS.
-- `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa} --check`: all up-to-date.
-- Migration progress: **6 / 9 algorithms** complete (67% of Phase A by algorithm count; Phase B–F not started). DSA pilot adds 600 verify-side KAT tests; total migrated tests 132 → 732.
+- `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa,dh} --check`: all up-to-date.
+- Migration progress: **7 / 9 algorithms** complete (78% of Phase A by algorithm count; Phase B–F not started). DH pilot adds 47 key-exchange KAT tests; total migrated tests 732 → 779.
 
 
 

@@ -722,4 +722,4 @@ fn tc_line192_x25519_exchange() {
     assert_eq!(shared.as_slice(), expected);
 }
 
-// Generation summary: 19 emitted / 119 API-surface skipped / 36 unknown / 0 unsupported alg / 174 total C cases.
+// Generation summary: 19 emitted / 115 API-surface skipped / 36 unknown / 0 unsupported alg / 170 total C cases.
