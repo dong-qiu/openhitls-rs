@@ -1,6 +1,7 @@
 mod cipher;
 mod curve25519;
 mod digest;
+mod dsa;
 mod mac;
 mod parser;
 
@@ -89,9 +90,14 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_curve25519.rs"),
             curve25519::emit_curve25519_kat,
         ),
+        "dsa" => (
+            c_root.join("crypto/dsa/test_suite_sdv_eal_dsa.data"),
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_dsa.rs"),
+            dsa::emit_dsa_kat,
+        ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa"
             )
             .into());
         }
