@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I101 (101 phases)
-- Testing: T1–T127 (121 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
+- Testing: T1–T128 (122 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -334,6 +334,7 @@ Category summary:
 | 322 | T127 | Test | mass-fail tlsfuzzer triage batch 2 — CI wiring. `test-tls13-dhe-shared-secret-padding.py` joins the curated suite (513 PASS post-I99; 3 stable XFAILs — `ffdhe2048`/`ffdhe3072` pending the FFDHE phase, `x448` not in the default `supported_groups`). Completes the ① mass-fail-triage task: all ~10 T92-deferred scripts probed + triaged across T126 / I99 / T127 — 2 real bugs fixed (T126 zero-content-type alert, I99 secp384/521 ECDHE), 2 scripts added to CI; `legacy-version` won't-fix, `non-support`/`shuffled-extentions`/`serverhello-random`/`crfg-curves`/`large-number-of-extensions`/`unencrypted-alert` triaged + deferred (per-script disposition in the T127 entry) | 2026-05-17 |
 | 323 | I100 | Impl | `s-server --tls auto` version-range listener — a single port that peeks each pending ClientHello (`TcpStream::peek`, non-consuming) for the `supported_versions` extension (RFC 8446 §4.2.1) and dispatches the connection to the TLS 1.3 or TLS 1.2 handler accordingly. `s_server::run` refactored: per-version cipher/version selection pulled into a `make_config(want_tls13)` closure so `auto` holds one `TlsConfig` per version; `peek_client_wants_tls13` + the pure, bounds-checked `client_hello_offers_tls13(&[u8]) -> bool` parser (7 unit tests). `--tls` now accepts `1.2` / `1.3` / `auto`. Cross-impl verified: Rust s-client + `openssl s_client` both negotiate the correct protocol against one `auto` listener. Task ② of the server-side tlsfuzzer plan | 2026-05-17 |
 | 324 | I101 | Impl | TLS 1.2 server-conformance: `signature_algorithms`-absent default + `ec_point_formats` echo — two ServerHello/SKE gaps that blocked the bulk of TLS 1.2 tlsfuzzer scripts (probing measured 453/889 connections failing on "no common signature scheme"). **Part A**: `select_signature_scheme_tls12` rejected an empty client-scheme list (TLS 1.2 makes `signature_algorithms` OPTIONAL); now defaults to RFC 5246 §7.4.1.4.1's `{sha1,rsa}` / `{sha1,ecdsa}` (strictly enforced by tlslite-ng — SHA-256 is rejected as "invalid signature algorithm"), with SHA-1 SKE signing added to `sign_ske_data` for this legacy-only path. **Part B**: the ServerHello now echoes `ec_point_formats` (RFC 8422 §5.1.2) when the client offered it and an ECDHE suite is negotiated. Verified: `test-ecdhe-rsa-key-exchange` 0/3 → 2/3, `ecdhe-padded-shared-secret` 0/3 → 2/3, `test-ecdhe-rsa-key-exchange-with-bad-messages` 0/8-all-XFAIL → 3/8 PASS (xfail trimmed 7 → 5). Task ③ foundational fix | 2026-05-17 |
+| 325 | T128 | Test | TLS 1.2 tlsfuzzer curated-suite breadth (curate-and-bank) — task ③. With the I101 conformance fix unblocking the TLS 1.2 sanity handshake, re-probed the tlsfuzzer corpus and curated 5 new TLS 1.2 scripts into the CI `scripts_12` array (9 → 14): `test-aes-gcm-nonces` (6/6), `test-encrypt-then-mac` (3/3), `test-version-numbers` (8/9), `test-zero-length-data` (2/3), `test-ecdhe-rsa-key-exchange` (2/3) — full-conversation-set verified (`-n 9999`). 4 new `args/*.txt` (`-d` ECDHE selection) + 3 new `xfail/*.txt` (1 entry each: `very low version (0,0)`, `zero-length app data`, `ECDHE w/o extension`). `test-ecdhe-padded-shared-secret` deliberately not curated — 16 full-set failures, mostly TLS 1.0/1.1 + SSLv2-compat which the server intentionally does not support. Residual deeper TLS 1.2 conformance bugs documented as follow-ups | 2026-05-17 |
 
 ---
 
@@ -19197,8 +19198,97 @@ rather than rejected. Each is its own follow-up phase.
 
 `hitls-tls` builds clean (`-D warnings`); lib tests 1543/0. Task ③
 continues: with the sanity handshake unblocked, more TLS 1.2 scripts
-become curatable — next is the `illegal_parameter` alert mapping +
-padded-CKE rejection, then the curation T-phase.
+become curatable — next is the curate-and-bank T-phase (T128).
+
+---
+
+## Phase T128 — TLS 1.2 tlsfuzzer Curated-Suite Breadth (2026-05-17)
+
+### Summary
+
+T128 is the curate-and-bank step of task ③. With I101 unblocking the
+TLS 1.2 sanity handshake, the tlsfuzzer corpus was re-probed against
+a local `s-server --tls 1.2` and the scripts that now pass cleanly
+(or near-cleanly with a small, stable XFAIL set) were curated into
+the CI `scripts_12` array — **9 → 14 scripts**.
+
+This is a deliberately *bounded* phase: it banks the concrete,
+verified breadth gain rather than chasing every TLS 1.2 conformance
+bug. Scripts that need deeper fixes (large XFAIL sets) were left for
+documented follow-ups, mirroring the ① mass-fail triage discipline of
+not bulk-XFAIL'ing into the gate.
+
+### Scripts curated (5 new)
+
+| Script | Result | args | xfail |
+|--------|--------|------|-------|
+| `test-aes-gcm-nonces` | 6/6 | `-d` | — |
+| `test-encrypt-then-mac` | 3/3 | `-d` | — |
+| `test-version-numbers` | 8/9 | `-d` | 1 |
+| `test-zero-length-data` | 2/3 | `-d` | 1 |
+| `test-ecdhe-rsa-key-exchange` | 2/3 | — | 1 |
+
+All five were verified on the **full conversation set** (`-n 9999`),
+not just the default CI sample, so the monthly `SWEEP_N` run stays
+green. The `-d` args file makes a script negotiate ECDHE (rather than
+its default static-RSA key exchange, which `s-server` does not
+offer); `run.sh` auto-applies it.
+
+### XFAIL entries (3, one each — all stable, documented)
+
+- `test-version-numbers` → `very low version (0, 0)`: the server
+  does not reject a ClientHello whose `legacy_version` is below
+  SSLv3 (no version floor check).
+- `test-zero-length-data` → `zero-length app data`: the TLS 1.2 read
+  path answers a zero-length ApplicationData record with
+  `close_notify` instead of transparently skipping it (the TLS 1.3
+  path already passes it through — Phase T103).
+- `test-ecdhe-rsa-key-exchange` → `ECDHE w/o extension`: a
+  ClientHello offering ECDHE with no `supported_groups` gets
+  `handshake_failure` (no default-curve fallback).
+
+### Not curated
+
+`test-ecdhe-padded-shared-secret` — the full set has **16 failures**,
+almost all `Protocol (3, 0/1/2)` (SSLv3 / TLS 1.0 / TLS 1.1, which
+the server intentionally does not support — it is TLS 1.2+) or
+SSLv2-compatible ClientHellos / the un-advertised x448 group.
+XFAIL'ing 16 conversations would be bulk-suppression, not a clean
+win, so the script is left out.
+
+### Verification
+
+- All 5 curated scripts: `run.sh` exit 0 against a local
+  `s-server --tls 1.2` (0 FAIL / 0 XPASS).
+- Regression: the 9 pre-existing `scripts_12` entries unaffected.
+- `tlsfuzzer.yml` is workflow-only; CI runs no `actionlint`, and the
+  change adds only array elements + a comment.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | Modified | 5 scripts added to `scripts_12` (9 → 14). |
+| `tests/tlsfuzzer/args/test-aes-gcm-nonces.txt` | Added | `-d` (ECDHE). |
+| `tests/tlsfuzzer/args/test-encrypt-then-mac.txt` | Added | `-d`. |
+| `tests/tlsfuzzer/args/test-version-numbers.txt` | Added | `-d`. |
+| `tests/tlsfuzzer/args/test-zero-length-data.txt` | Added | `-d`. |
+| `tests/tlsfuzzer/xfail/test-version-numbers.txt` | Added | 1 XFAIL + rationale. |
+| `tests/tlsfuzzer/xfail/test-zero-length-data.txt` | Added | 1 XFAIL + rationale. |
+| `tests/tlsfuzzer/xfail/test-ecdhe-rsa-key-exchange.txt` | Added | 1 XFAIL + rationale. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 325 + Testing summary T1–T127 → T1–T128. |
+| `PROMPT_LOG.md` | Modified | T128 prompt + result entry. |
+| `docs/tlsfuzzer.md` | Modified | Curated-script count + T128 reference. |
+
+### Build Status (Post T128)
+
+No Rust source changed — workflow + args/xfail files + docs only.
+Curated TLS 1.2 suite 9 → 14 scripts. Task ③ (TLS 1.2 tlsfuzzer
+breadth) is banked at the curate-and-bank milestone; the residual
+deeper conformance gaps (`illegal_parameter` alert mapping,
+padded-CKE rejection, version-floor check, zero-length-data
+pass-through, no-`supported_groups` ECDHE fallback) are documented
+follow-ups. Next: task ④ (FFDHE groups, RFC 7919).
 
 
 

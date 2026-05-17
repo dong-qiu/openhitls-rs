@@ -220,7 +220,7 @@ merge. No branch-protection change was needed: requiring `CI Gate`
 already requires every job in its `needs:` list.
 
 **Tier 2 — the full curated suite in `.github/workflows/tlsfuzzer.yml`.**
-All 51 curated script-runs run on `workflow_dispatch`, on a weekly
+All 56 curated script-runs run on `workflow_dispatch`, on a weekly
 schedule (Mon 06:00 UTC, sampled), and on a monthly schedule (1st
 07:00 UTC, full `-n 9999` sweep). This tier is **not** a required PR
 check — it exercises edge-case mutations that legitimately probe spec
@@ -494,3 +494,19 @@ one reviewed PR.
   mass-fail-triage effort: all ~10 T92-deferred scripts probed; 2 real
   bugs fixed (T126, I99), 2 scripts added to CI, the rest triaged +
   deferred. Suite size 50 → 51.
+
+- I100 — `s-server --tls auto`: a single listener that peeks each
+  pending ClientHello (`TcpStream::peek`) for the `supported_versions`
+  extension and dispatches the connection to the TLS 1.3 or TLS 1.2
+  handler — so one port serves both versions.
+
+- I101 / T128 — TLS 1.2 curated-suite breadth. Probing the TLS 1.2
+  corpus measured 453/889 connections failing on "no common signature
+  scheme": **I101** fixed two TLS 1.2 server-conformance gaps — the
+  `signature_algorithms`-absent `{sha1,*}` default (RFC 5246
+  §7.4.1.4.1) and the `ec_point_formats` ServerHello echo (RFC 8422
+  §5.1.2) — unblocking the TLS 1.2 sanity handshake. **T128** then
+  curated 5 newly-passing TLS 1.2 scripts (`aes-gcm-nonces`,
+  `encrypt-then-mac`, `version-numbers`, `zero-length-data`,
+  `ecdhe-rsa-key-exchange`) into `scripts_12`, full-set verified
+  (`-n 9999`). Suite size 51 → 56.

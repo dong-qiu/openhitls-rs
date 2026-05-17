@@ -6065,3 +6065,35 @@ RFC-strict SHA-1 default was the only working option and was used.
 Task ③ continues — the unblocked sanity handshake surfaces further
 TLS 1.2 bad-message gaps (illegal_parameter alert mapping, padded-CKE
 rejection), each a follow-up phase before the curation T-phase.
+
+---
+
+## Phase T128 — TLS 1.2 tlsfuzzer Curated-Suite Breadth (2026-05-17)
+
+> 你的建议是？
+
+The curate-and-bank step of task ③ (recommended option). With I101
+unblocking the TLS 1.2 sanity handshake, the tlsfuzzer corpus was
+re-probed against a local `s-server --tls 1.2` and the scripts that
+now pass cleanly (or near-cleanly with a small stable XFAIL set) were
+curated into the CI `scripts_12` array — 9 → 14 scripts.
+
+5 new scripts: `test-aes-gcm-nonces` (6/6), `test-encrypt-then-mac`
+(3/3), `test-version-numbers` (8/9), `test-zero-length-data` (2/3),
+`test-ecdhe-rsa-key-exchange` (2/3) — all verified on the full
+conversation set (`-n 9999`), not just the CI sample. 4 new `args`
+files (`-d` ECDHE selection) + 3 new `xfail` files (1 stable entry
+each, each documented). `test-ecdhe-padded-shared-secret` deliberately
+NOT curated — 16 full-set failures, almost all SSLv3/TLS1.0/TLS1.1 +
+SSLv2-compat which the server intentionally does not support;
+bulk-XFAIL'ing them would not be a clean win.
+
+**Verification**: all 5 curated scripts `run.sh` exit 0; the 9
+pre-existing `scripts_12` entries unaffected; `tlsfuzzer.yml` is
+workflow-only. Recorded as DEV_LOG Phase T128.
+
+Task ③ is banked at the curate-and-bank milestone. Residual deeper
+TLS 1.2 conformance gaps (illegal_parameter alert mapping, padded-CKE
+rejection, ClientHello version-floor check, zero-length-data
+pass-through, no-supported_groups ECDHE fallback) are documented
+follow-ups. Next: task ④ (FFDHE groups, RFC 7919).

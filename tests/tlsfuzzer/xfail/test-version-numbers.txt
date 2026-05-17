@@ -1,0 +1,12 @@
+# Phase T128 — TLS 1.2 ClientHello version-field handling (1 entry).
+#
+# 8 of 9 conversations PASS. The residual:
+#
+# - `very low version (0, 0)`: the ClientHello carries a
+#   `legacy_version` of (0, 0) — below SSLv3. tlsfuzzer expects the
+#   server to abort; our server instead proceeds with a normal
+#   ServerHello (it negotiates via `supported_versions` / its own
+#   max, and does not validate `legacy_version` against a floor).
+#   A ClientHello-version-floor check is a small follow-up.
+
+very low version (0, 0) :: server_hello

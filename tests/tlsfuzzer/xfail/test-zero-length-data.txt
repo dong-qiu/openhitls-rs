@@ -1,0 +1,13 @@
+# Phase T128 — TLS 1.2 zero-length record handling (1 entry).
+#
+# 2 of 3 conversations PASS. The residual:
+#
+# - `zero-length app data`: after the handshake the client sends a
+#   zero-length ApplicationData record, then real data. tlsfuzzer
+#   expects the empty record to be transparently skipped and the
+#   following data echoed; our TLS 1.2 server instead responds with a
+#   `close_notify`. The TLS 1.3 read path already passes empty
+#   ApplicationData through (Phase T103); the TLS 1.2 path does not —
+#   a small follow-up to align them.
+
+zero-length app data :: close_notify
