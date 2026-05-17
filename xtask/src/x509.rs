@@ -35,13 +35,18 @@
 //!   migrated test asserts `Certificate::signature_algorithm` (the raw OID
 //!   value bytes); the `BSL_CID_*` token is mapped to OID arcs and DER-encoded
 //!   at generation time. The trailing PSS hash/MGF/salt args are not ported.
+//! * `X509_CERT_PARSE_ISSUERNAME_FUNC` / `SUBJECTNAME_FUNC` —
+//!   `path : 2N : (oid_hex, value_tag, value_hex) × N`. The migrated test
+//!   asserts `Certificate::issuer` / `subject` `.entries` (a `Vec<(name,
+//!   value)>`); each RDN triple's attribute OID is mapped to the parser's
+//!   DN short name and the value hex is decoded as UTF-8.
 //!
 //! For cert/CSR, `format` is a `BSL_FORMAT_*` token: `ASN1` → DER, `PEM` →
 //! PEM; the C `UNKNOWN` (auto-detect) format has no Rust equivalent and routes
-//! to `skipped_unknown`. The remaining cert field-check families (issuer /
-//! subject / pubkey), the `TBS_SIGNALG` family (the TBS inner
-//! AlgorithmIdentifier is not exposed by `Certificate`) and the malformed-DER
-//! negatives are future increments / API gaps and route to `ApiSurface`.
+//! to `skipped_unknown`. The remaining cert field-check family (`pubkey`),
+//! the `TBS_SIGNALG` family (the TBS inner AlgorithmIdentifier is not exposed
+//! by `Certificate`) and the malformed-DER negatives are future increments /
+//! API gaps and route to `ApiSurface`.
 
 use std::fmt::Write;
 
@@ -106,11 +111,15 @@ enum CertField {
     /// signature-algorithm OID is asserted; the trailing PSS hash/MGF/salt
     /// args are not ported (they live in `signature_params`, raw DER).
     SigAlg,
+    /// `X509_CERT_PARSE_ISSUERNAME_FUNC` — `path : 2N : (oid, tag, value)×N`.
+    Issuer,
+    /// `X509_CERT_PARSE_SUBJECTNAME_FUNC` — `path : 2N : (oid, tag, value)×N`.
+    Subject,
 }
 
 impl CertField {
     /// The emitted function-name suffix (`tc_lineN_x509_cert_<suffix>`) — also
-    /// the `Certificate` field name asserted.
+    /// the `Certificate` field name asserted (for the scalar fields).
     fn suffix(self) -> &'static str {
         match self {
             CertField::Version => "version",
@@ -119,8 +128,28 @@ impl CertField {
             CertField::NotBefore => "not_before",
             CertField::NotAfter => "not_after",
             CertField::SigAlg => "signature_algorithm",
+            CertField::Issuer => "issuer",
+            CertField::Subject => "subject",
         }
     }
+}
+
+/// Map a DN attribute-type OID (raw value bytes) to the short name that the
+/// PKI parser's `oid_to_dn_short_name` records into `DistinguishedName`.
+/// Covers every attribute OID in the cert SDV `ISSUERNAME` / `SUBJECTNAME`
+/// families; an unrecognised OID routes the row to `skipped_unknown`.
+fn dn_oid_short_name(oid_value: &[u8]) -> Option<&'static str> {
+    Some(match oid_value {
+        [0x55, 0x04, 0x03] => "CN",
+        [0x55, 0x04, 0x05] => "serialNumber",
+        [0x55, 0x04, 0x06] => "C",
+        [0x55, 0x04, 0x07] => "L",
+        [0x55, 0x04, 0x08] => "ST",
+        [0x55, 0x04, 0x0a] => "O",
+        [0x55, 0x04, 0x0b] => "OU",
+        [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x01] => "emailAddress",
+        _ => return None,
+    })
 }
 
 /// Map an openHiTLS `BSL_CID_*` signature-algorithm token to the OID arc
@@ -228,12 +257,18 @@ fn classify(tc: &str) -> Kind {
     if tc.contains("X509_CERT_PARSE_SIGNALG_FUNC") {
         return Kind::CertField(CertField::SigAlg);
     }
-    // The remaining cert field-check families (tbs-sig-alg / issuer / subject
-    // / pubkey), CSR field / expected-return families, the CRL field-check
-    // families (`TC004/005/009-013`), and the malformed-DER negatives are
-    // migrated in later Phase C increments. `TBS_SIGNALG_FUNC` is an API gap:
-    // the TBS inner AlgorithmIdentifier is parsed but not exposed by
-    // `Certificate` (RFC 5280 §4.1.1.2 mandates it equal the outer one).
+    if tc.contains("X509_CERT_PARSE_ISSUERNAME_FUNC") {
+        return Kind::CertField(CertField::Issuer);
+    }
+    if tc.contains("X509_CERT_PARSE_SUBJECTNAME_FUNC") {
+        return Kind::CertField(CertField::Subject);
+    }
+    // The remaining cert field-check families (tbs-sig-alg / pubkey), CSR
+    // field / expected-return families, the CRL field-check families
+    // (`TC004/005/009-013`), and the malformed-DER negatives are migrated in
+    // later Phase C increments. `TBS_SIGNALG_FUNC` is an API gap: the TBS
+    // inner AlgorithmIdentifier is parsed but not exposed by `Certificate`
+    // (RFC 5280 §4.1.1.2 mandates it equal the outer one).
     if tc.contains("X509_") || tc.contains("CERT_") {
         return Kind::ApiSurface;
     }
@@ -504,6 +539,53 @@ fn emit_cert_field(out: &mut String, case: &TestCase, stats: &mut EmitStats, fie
                 "    assert_eq!(cert.signature_algorithm.as_slice(), {}); // {cid}\n",
                 format_byte_slice(&oid_der_value(arcs))
             )
+        }
+        CertField::Issuer | CertField::Subject => {
+            // path : 2N : (oid_hex, value_tag, value_hex) × N — args[1] is the
+            // C row's element count; the RDN triples start at args[2].
+            let triples = &case.args[2..];
+            if triples.is_empty() || triples.len() % 3 != 0 {
+                stats.skipped_unknown += 1;
+                return;
+            }
+            let mut entries = Vec::new();
+            for triple in triples.chunks(3) {
+                let Some(name) = triple[0].as_hex().and_then(dn_oid_short_name) else {
+                    stats.skipped_unknown += 1;
+                    return;
+                };
+                let Some(tag) = triple[1].as_symbol().and_then(|s| s.parse::<u8>().ok()) else {
+                    stats.skipped_unknown += 1;
+                    return;
+                };
+                // Only the UTF-8-family ASN.1 string tags decode the same way
+                // the PKI parser's `read_string` does for these (= from_utf8).
+                if !matches!(tag, 0x0C | 0x12 | 0x13 | 0x16 | 0x1A) {
+                    stats.skipped_unknown += 1;
+                    return;
+                }
+                let Some(val) = triple[2]
+                    .as_hex()
+                    .and_then(|b| String::from_utf8(b.to_vec()).ok())
+                else {
+                    stats.skipped_unknown += 1;
+                    return;
+                };
+                entries.push((name, val));
+            }
+            let mut s = format!(
+                "    assert_eq!(\n        cert.{}.entries,\n        vec![\n",
+                field.suffix()
+            );
+            for (name, val) in &entries {
+                writeln!(
+                    s,
+                    "            ({name:?}.to_string(), {val:?}.to_string()),"
+                )
+                .unwrap();
+            }
+            s.push_str("        ],\n    );\n");
+            s
         }
     };
 

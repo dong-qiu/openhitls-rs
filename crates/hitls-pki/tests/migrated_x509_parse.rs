@@ -2984,6 +2984,1599 @@ fn tc_line895_x509_cert_serial_number() {
     assert_eq!(cert.serial_number.as_slice(), &[0x01,]);
 }
 
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecc p384 v3 ca cert
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1177, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1177_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/nist384ca.crt");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "CN".to_string()),
+            ("ST".to_string(), "open".to_string()),
+            ("L".to_string(), "xian".to_string()),
+            ("O".to_string(), "openhitls".to_string()),
+            ("OU".to_string(), "asn1".to_string()),
+            ("CN".to_string(), "ca.asn1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC002 parse rsa pss v3 ca cert, any is null
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC002 (line 1180, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1180_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa2048ssa-pss.crt");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![("CN".to_string(), "example.com".to_string()),],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sha256 rsa v1 ca, any is null
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1183, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1183_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sha256Rsaca.crt");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "CN".to_string()),
+            ("ST".to_string(), "Shaanxi".to_string()),
+            ("L".to_string(), "xian".to_string()),
+            ("O".to_string(), "openHiTLS".to_string()),
+            (
+                "emailAddress".to_string(),
+                "openHiTLS@email.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecdsa_ca
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1187, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1187_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecdsa_ca.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1190, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1190_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecdsa_ca.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1193, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1193_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecdsa_ca.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1196, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1196_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecdsa_ca.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1199, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1199_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecdsa_inter
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1202, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1202_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecdsa_inter.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1205, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1205_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecdsa_inter.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1208, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1208_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecdsa_inter.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1211, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1211_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse ecdsa_inter.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1214, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1214_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse ecdsa_end
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1217, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1217_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse ecdsa_end.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1220, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1220_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse ecdsa_end.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1223, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1223_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse ecdsa_end.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1226, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1226_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse ecdsa_end.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1229, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1229_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse ecdsa_end2.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1232, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1232_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end2.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse ecdsa_end3.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1235, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1235_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end3.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ca
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1239, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1239_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ca.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1242, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1242_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ca.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1245, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1245_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ca.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1248, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1248_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ca.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1251, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1251_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_inter
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1254, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1254_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_inter.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1257, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1257_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_inter.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1260, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1260_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_inter.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1263, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1263_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_inter.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1266, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1266_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_end
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1269, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1269_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_end.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1272, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1272_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_end.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1275, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1275_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_end.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1278, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1278_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_end.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1281, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1281_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_end2.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1284, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1284_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end2.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_end3.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1287, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1287_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end3.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ecc_ca
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1292, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1292_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ecc_ca.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1295, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1295_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ecc_ca.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1298, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1298_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ecc_ca.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1301, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1301_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ecc_ca.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1304, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1304_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ecc_inter
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1307, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1307_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ecc_inter.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1310, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1310_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ecc_inter.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1313, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1313_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ecc_inter.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1316, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1316_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_ecc_inter.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1319, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1319_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_ecc_end
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1322, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1322_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_ecc_end.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1325, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1325_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_ecc_end.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1328, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1328_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_ecc_end.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1331, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1331_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_ecc_end.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1334, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1334_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_ecc_end2.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1337, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1337_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end2.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_ecc_end3.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1340, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1340_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end3.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_pss_ca
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1344, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1344_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_pss_ca.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1347, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1347_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_pss_ca.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1350, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1350_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_pss_ca.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1353, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1353_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_pss_ca.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1356, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1356_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_pss_inter
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1359, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1359_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_pss_inter.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1362, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1362_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_pss_inter.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1365, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1365_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_pss_inter.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1368, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1368_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse rsa_pss_inter.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1371, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1371_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_pss_end
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1374, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1374_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_pss_end.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1377, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1377_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_pss_end.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1380, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1380_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_pss_end.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1383, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1383_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_pss_end.v1
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1386, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1386_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.v1.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_pss_end2.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1389, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1389_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end2.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse rsa_pss_end3.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1392, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1392_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end3.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse sm2_ca
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1396, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1396_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse sm2_ca.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1399, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1399_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse sm2_ca.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1402, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1402_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse sm2_ca.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1405, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1405_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse sm2_inter
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1408, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1408_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse sm2_inter.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1411, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1411_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse sm2_inter.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1414, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1414_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 parse sm2_inter.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC001 (line 1417, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1417_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_enc
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1420, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1420_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_enc.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1423, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1423_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_enc.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1426, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1426_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_enc.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1429, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1429_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_enc2.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1432, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1432_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc2.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_enc3.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1435, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1435_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc3.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_sign
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1438, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1438_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_sign.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1441, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1441_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_sign.noCRL
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1444, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1444_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.noCRL.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_sign.notCA
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1447, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1447_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.notCA.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_sign2.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1450, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1450_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign2.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 parse sm2_sign3.mul
+/// C source: SDV_X509_CERT_PARSE_ISSUERNAME_FUNC_TC003 (line 1453, X.509 cert issuer field KAT)
+#[test]
+fn tc_line1453_x509_cert_issuer() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign3.mul.der");
+    assert_eq!(
+        cert.issuer.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
 /// SDV_X509_CERT_PARSE_START_TIME_FUNC_TC001 parse ecc p384 v3 ca cert
 /// C source: SDV_X509_CERT_PARSE_START_TIME_FUNC_TC001 (line 1459, X.509 cert not_before field KAT)
 #[test]
@@ -4438,6 +6031,1617 @@ fn tc_line2011_x509_cert_not_after() {
 fn tc_line2014_x509_cert_not_after() {
     let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.notCA.der");
     assert_eq!(cert.not_after, 2028782824); // 2034-04-16T06:47:04Z
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse ecc p384 v3 ca cert
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2017, X.509 cert subject field KAT)
+#[test]
+fn tc_line2017_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/nist384ca.crt");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "CN".to_string()),
+            ("ST".to_string(), "open".to_string()),
+            ("L".to_string(), "xian".to_string()),
+            ("O".to_string(), "openhitls".to_string()),
+            ("OU".to_string(), "asn1".to_string()),
+            ("CN".to_string(), "ca.asn1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC002 parse rsa pss v3 ca cert, any is null
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC002 (line 2020, X.509 cert subject field KAT)
+#[test]
+fn tc_line2020_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa2048ssa-pss.crt");
+    assert_eq!(
+        cert.subject.entries,
+        vec![("CN".to_string(), "example.com".to_string()),],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sha256 rsa v1 ca, any is null
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2023, X.509 cert subject field KAT)
+#[test]
+fn tc_line2023_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sha256Rsaca.crt");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "CN".to_string()),
+            ("ST".to_string(), "Shaanxi".to_string()),
+            ("L".to_string(), "xian".to_string()),
+            ("O".to_string(), "openHiTLS".to_string()),
+            (
+                "emailAddress".to_string(),
+                "openHiTLS@email.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse ecdsa_ca
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2027, X.509 cert subject field KAT)
+#[test]
+fn tc_line2027_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse ecdsa_ca.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2030, X.509 cert subject field KAT)
+#[test]
+fn tc_line2030_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse ecdsa_ca.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2033, X.509 cert subject field KAT)
+#[test]
+fn tc_line2033_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse ecdsa_ca.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2036, X.509 cert subject field KAT)
+#[test]
+fn tc_line2036_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse ecdsa_ca.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2039, X.509 cert subject field KAT)
+#[test]
+fn tc_line2039_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_inter
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2042, X.509 cert subject field KAT)
+#[test]
+fn tc_line2042_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_inter.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2045, X.509 cert subject field KAT)
+#[test]
+fn tc_line2045_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_inter.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2048, X.509 cert subject field KAT)
+#[test]
+fn tc_line2048_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_inter.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2051, X.509 cert subject field KAT)
+#[test]
+fn tc_line2051_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_inter.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2054, X.509 cert subject field KAT)
+#[test]
+fn tc_line2054_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_end
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2057, X.509 cert subject field KAT)
+#[test]
+fn tc_line2057_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_end.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2060, X.509 cert subject field KAT)
+#[test]
+fn tc_line2060_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_end.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2063, X.509 cert subject field KAT)
+#[test]
+fn tc_line2063_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testend.noCRL.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_end.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2066, X.509 cert subject field KAT)
+#[test]
+fn tc_line2066_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testend.notCA.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_end.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2069, X.509 cert subject field KAT)
+#[test]
+fn tc_line2069_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_end2.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2072, X.509 cert subject field KAT)
+#[test]
+fn tc_line2072_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end2.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend2.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse ecdsa_end3.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2075, X.509 cert subject field KAT)
+#[test]
+fn tc_line2075_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end3.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend3.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_ca
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2079, X.509 cert subject field KAT)
+#[test]
+fn tc_line2079_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_ca.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2082, X.509 cert subject field KAT)
+#[test]
+fn tc_line2082_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_ca.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2085, X.509 cert subject field KAT)
+#[test]
+fn tc_line2085_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_ca.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2088, X.509 cert subject field KAT)
+#[test]
+fn tc_line2088_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_ca.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2091, X.509 cert subject field KAT)
+#[test]
+fn tc_line2091_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_inter
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2094, X.509 cert subject field KAT)
+#[test]
+fn tc_line2094_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_inter.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2097, X.509 cert subject field KAT)
+#[test]
+fn tc_line2097_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_inter.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2100, X.509 cert subject field KAT)
+#[test]
+fn tc_line2100_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_inter.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2103, X.509 cert subject field KAT)
+#[test]
+fn tc_line2103_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_inter.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2106, X.509 cert subject field KAT)
+#[test]
+fn tc_line2106_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_end
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2109, X.509 cert subject field KAT)
+#[test]
+fn tc_line2109_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_end.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2112, X.509 cert subject field KAT)
+#[test]
+fn tc_line2112_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_end.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2115, X.509 cert subject field KAT)
+#[test]
+fn tc_line2115_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testend.noCRL.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_end.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2118, X.509 cert subject field KAT)
+#[test]
+fn tc_line2118_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testend.notCA.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_end.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2121, X.509 cert subject field KAT)
+#[test]
+fn tc_line2121_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_end2.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2124, X.509 cert subject field KAT)
+#[test]
+fn tc_line2124_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end2.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend2.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_end3.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2127, X.509 cert subject field KAT)
+#[test]
+fn tc_line2127_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end3.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend3.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_ecc_ca
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2132, X.509 cert subject field KAT)
+#[test]
+fn tc_line2132_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_ecc_ca.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2135, X.509 cert subject field KAT)
+#[test]
+fn tc_line2135_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_ecc_ca.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2138, X.509 cert subject field KAT)
+#[test]
+fn tc_line2138_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_ecc_ca.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2141, X.509 cert subject field KAT)
+#[test]
+fn tc_line2141_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_ecc_ca.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2144, X.509 cert subject field KAT)
+#[test]
+fn tc_line2144_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_inter
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2147, X.509 cert subject field KAT)
+#[test]
+fn tc_line2147_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_inter.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2150, X.509 cert subject field KAT)
+#[test]
+fn tc_line2150_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_inter.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2153, X.509 cert subject field KAT)
+#[test]
+fn tc_line2153_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_inter.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2156, X.509 cert subject field KAT)
+#[test]
+fn tc_line2156_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_inter.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2159, X.509 cert subject field KAT)
+#[test]
+fn tc_line2159_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_end
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2162, X.509 cert subject field KAT)
+#[test]
+fn tc_line2162_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_end.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2165, X.509 cert subject field KAT)
+#[test]
+fn tc_line2165_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_end.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2168, X.509 cert subject field KAT)
+#[test]
+fn tc_line2168_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testend.noCRL.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_end.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2171, X.509 cert subject field KAT)
+#[test]
+fn tc_line2171_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testend.notCA.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_end.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2174, X.509 cert subject field KAT)
+#[test]
+fn tc_line2174_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_end2.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2177, X.509 cert subject field KAT)
+#[test]
+fn tc_line2177_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end2.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend2.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_ecc_end3.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2180, X.509 cert subject field KAT)
+#[test]
+fn tc_line2180_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end3.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend3.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_pss_ca
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2184, X.509 cert subject field KAT)
+#[test]
+fn tc_line2184_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_pss_ca.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2187, X.509 cert subject field KAT)
+#[test]
+fn tc_line2187_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_pss_ca.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2190, X.509 cert subject field KAT)
+#[test]
+fn tc_line2190_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_pss_ca.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2193, X.509 cert subject field KAT)
+#[test]
+fn tc_line2193_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse rsa_pss_ca.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2196, X.509 cert subject field KAT)
+#[test]
+fn tc_line2196_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_inter
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2199, X.509 cert subject field KAT)
+#[test]
+fn tc_line2199_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_inter.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2202, X.509 cert subject field KAT)
+#[test]
+fn tc_line2202_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_inter.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2205, X.509 cert subject field KAT)
+#[test]
+fn tc_line2205_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_inter.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2208, X.509 cert subject field KAT)
+#[test]
+fn tc_line2208_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_inter.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2211, X.509 cert subject field KAT)
+#[test]
+fn tc_line2211_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_end
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2214, X.509 cert subject field KAT)
+#[test]
+fn tc_line2214_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_end.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2217, X.509 cert subject field KAT)
+#[test]
+fn tc_line2217_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_end.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2220, X.509 cert subject field KAT)
+#[test]
+fn tc_line2220_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testend.noCRL.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_end.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2223, X.509 cert subject field KAT)
+#[test]
+fn tc_line2223_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testend.notCA.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_end.v1
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2226, X.509 cert subject field KAT)
+#[test]
+fn tc_line2226_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.v1.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend.v1.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_end2.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2229, X.509 cert subject field KAT)
+#[test]
+fn tc_line2229_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end2.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend2.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse rsa_pss_end3.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2232, X.509 cert subject field KAT)
+#[test]
+fn tc_line2232_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end3.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testend3.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse sm2_ca
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2236, X.509 cert subject field KAT)
+#[test]
+fn tc_line2236_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse sm2_ca.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2239, X.509 cert subject field KAT)
+#[test]
+fn tc_line2239_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse sm2_ca.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2242, X.509 cert subject field KAT)
+#[test]
+fn tc_line2242_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 parse sm2_ca.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC001 (line 2245, X.509 cert subject field KAT)
+#[test]
+fn tc_line2245_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("L".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testca".to_string()),
+            ("CN".to_string(), "certificate.testca.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_inter
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2248, X.509 cert subject field KAT)
+#[test]
+fn tc_line2248_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_inter.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2251, X.509 cert subject field KAT)
+#[test]
+fn tc_line2251_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_inter.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2254, X.509 cert subject field KAT)
+#[test]
+fn tc_line2254_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.noCRL.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_inter.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2257, X.509 cert subject field KAT)
+#[test]
+fn tc_line2257_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testin".to_string()),
+            ("CN".to_string(), "certificate.testin.notCA.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_enc
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2260, X.509 cert subject field KAT)
+#[test]
+fn tc_line2260_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testenc.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_enc.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2263, X.509 cert subject field KAT)
+#[test]
+fn tc_line2263_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testenc.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_enc.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2266, X.509 cert subject field KAT)
+#[test]
+fn tc_line2266_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testenc.noCRL.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_enc.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2269, X.509 cert subject field KAT)
+#[test]
+fn tc_line2269_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testenc.notCA.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_enc2.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2272, X.509 cert subject field KAT)
+#[test]
+fn tc_line2272_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc2.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testenc2.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_enc3.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2275, X.509 cert subject field KAT)
+#[test]
+fn tc_line2275_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc3.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testend".to_string()),
+            ("CN".to_string(), "certificate.testenc3.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_sign
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2278, X.509 cert subject field KAT)
+#[test]
+fn tc_line2278_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testsign".to_string()),
+            ("CN".to_string(), "certificate.testsign.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_sign.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2281, X.509 cert subject field KAT)
+#[test]
+fn tc_line2281_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testsign".to_string()),
+            ("CN".to_string(), "certificate.testsign.mul.com".to_string()),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_sign.noCRL
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2284, X.509 cert subject field KAT)
+#[test]
+fn tc_line2284_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.noCRL.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testsign".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testsign.noCRL.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_sign.notCA
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2287, X.509 cert subject field KAT)
+#[test]
+fn tc_line2287_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.notCA.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testsign".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testsign.notCA.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_sign2.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2290, X.509 cert subject field KAT)
+#[test]
+fn tc_line2290_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign2.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testsign".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testsign2.mul.com".to_string()
+            ),
+        ],
+    );
+}
+
+/// SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 parse sm2_sign3.mul
+/// C source: SDV_X509_CERT_PARSE_SUBJECTNAME_FUNC_TC003 (line 2293, X.509 cert subject field KAT)
+#[test]
+fn tc_line2293_x509_cert_subject() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign3.mul.der");
+    assert_eq!(
+        cert.subject.entries,
+        vec![
+            ("C".to_string(), "XX".to_string()),
+            ("ST".to_string(), "XX".to_string()),
+            ("O".to_string(), "certificate".to_string()),
+            ("OU".to_string(), "testsign".to_string()),
+            (
+                "CN".to_string(),
+                "certificate.testsign3.mul.com".to_string()
+            ),
+        ],
+    );
 }
 
 /// SDV_X509_CERT_PARSE_SIGNALG_FUNC_TC001 parse ed25519 v3 ca cert
@@ -42086,4 +45290,4 @@ fn tc_line50_x509_crl_parse_res() {
     assert!(CertificateRevocationList::from_pem(pem).is_ok());
 }
 
-// Generation summary: 729 emitted / 659 API-surface skipped / 22 unknown / 9 unsupported alg / 1419 total C cases.
+// Generation summary: 911 emitted / 477 API-surface skipped / 22 unknown / 9 unsupported alg / 1419 total C cases.

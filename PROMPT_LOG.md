@@ -5504,6 +5504,18 @@ This is Phase C §4.1 — fixture-corpus prep, the analogue of the T111 xtask sc
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 729/729 PASS (111 cert-parse + 20 CSR + 5 CRL + 593 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: cert issuer/subject DN families (2026-05-17)
+
+> 继续完成 ISSUERNAME/SUBJECTNAME 增量
+
+**Result**: extends `xtask/src/x509.rs` with the cert distinguished-name families — `X509_CERT_PARSE_ISSUERNAME_FUNC` (91) and `SUBJECTNAME_FUNC` (91). The `CertField` enum gains `Issuer` / `Subject` variants. The C row shape is `path : 2N : (oid_hex, value_tag, value_hex) × N`; `emit_cert_field` consumes the RDN triples, maps each attribute OID via a new `dn_oid_short_name` table (8 entries — CN/C/L/ST/O/OU/serialNumber/emailAddress, matching the parser's `oid_to_dn_short_name`), decodes each value hex as UTF-8, and asserts the reconstructed `Vec<(name, value)>` against `cert.issuer.entries` / `cert.subject.entries`. `migrated_x509_parse.rs` grows 729 → **911 tests** (+182).
+
+This completes the migratable cert field-check families. `PUBKEY` (the cert-pubkey-vs-pubkey-file comparison family) and the malformed-DER negatives remain; `TBS_SIGNALG` is an API gap (see prior entry).
+
+**T113 still open**: cert `PUBKEY` family, CSR field families, CRL field-check families (`TC004/005/009-013`), and the malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 911/911 PASS (111 cert-parse + 20 CSR + 5 CRL + 775 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
