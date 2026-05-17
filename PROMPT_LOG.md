@@ -5528,6 +5528,20 @@ This completes the migratable cert field-check families. **T113 still open**: CS
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1008/1008 PASS (111 cert-parse + 20 CSR + 5 CRL + 872 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: CRL revocation chain-verify (FILE_VERIFY TC001) (2026-05-17)
+
+> 继续
+
+**Context**: the user had asked to "continue" after a recommendation to migrate the CRL `FILE_VERIFY` family. Investigation showed `FILE_VERIFY` is not a simple verify — it is a full CRL-revocation chain-verification suite (StoreCtx, verify flags, six C result codes, multi-level chains). Surfaced via `AskUserQuestion`; the user chose **full migration**. This increment migrates `TC001` (the single-level layout); `TC002–005` follow.
+
+**Result**: extends `xtask/src/x509.rs` with `emit_crl_file_verify` (+ a new `Kind::CrlFileVerify`). `X509_CRL_FILE_VERIFY_FUNC_TC001` is `caPath : crlPath : certPath : flags : crlVerResult : expResult` — the migrated test loads CA + CRL + cert (new generated `load_crl_fixture` helper), asserts `crl.verify_signature(&ca)`, then runs a `CertificateVerifier` (`add_trusted_cert` + `add_crl` + `set_check_revocation`) and checks `verify_cert` against `expResult`. `migrated_x509_parse.rs` grows 1008 → **1015 tests** (+7).
+
+**Finding — Rust `CertificateVerifier` is less strict than C**: of TC001's 9 rows, 7 migrate (`HITLS_PKI_SUCCESS` → `Ok`; `HITLS_X509_ERR_VFY_CERT_REVOKED` → `Err`). 2 route to `skipped_unsupported_alg` — Rust's verifier does not reproduce `CRL_NOT_FOUND` (it soft-fails on a missing CRL), `PROCESS_CRITICALEXT` (no unhandled-critical-extension rejection) or `KU_NO_CRLSIGN` (no CRL-issuer keyUsage check). Each is a candidate verifier-hardening Implementation phase.
+
+**T113 still open**: CRL `FILE_VERIFY` TC002–005 (multi-level chains / SM2 user-id), CRL field-check families (`TC004/005/009-013`), CSR field families, malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1015/1015 PASS (111 cert-parse + 20 CSR + 5 CRL + 872 field-check + 7 CRL-verify). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
