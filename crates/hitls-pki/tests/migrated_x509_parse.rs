@@ -44965,6 +44965,879 @@ fn tc_line2941_x509_cert_signature() {
     );
 }
 
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecc p384 v3 ca cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2968, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2968_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/nist384ca.crt");
+    let issuer = load_cert_fixture("cert/asn1/nist384ca.crt");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa pss v3 ca cert, any is null
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2971, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2971_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa2048ssa-pss.crt");
+    let issuer = load_cert_fixture("cert/asn1/rsa2048ssa-pss.crt");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sha256 rsa v1 ca, any is null
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2974, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2974_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sha256Rsaca.crt");
+    let issuer = load_cert_fixture("cert/asn1/sha256Rsaca.crt");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ca cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2977, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2977_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ca.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2980, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2980_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/ca.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ca.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2983, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2983_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/ca.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ca.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2986, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2986_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/ca.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ca.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2989, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2989_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/ca.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/ca.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_end cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2992, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2992_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/inter.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_end.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2995, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2995_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_end.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 2998, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line2998_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/inter.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_end.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3001, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3001_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/inter.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_end.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3004, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3004_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/inter.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_end2.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3007, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3007_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end2.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_end3.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3010, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3010_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/end3.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_inter cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3013, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3013_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_inter.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3016, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3016_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/ca.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_inter.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3019, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3019_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/ca.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_inter.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3022, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3022_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/ca.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_inter.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3025, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3025_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_cert/inter.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_cert/ca.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_ca cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3029, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3029_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_ca.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3032, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3032_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_ca.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3035, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3035_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_ca.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3038, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3038_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_ca.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3041, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3041_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_end cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3044, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3044_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/inter.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_end.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3047, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3047_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_end.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3050, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3050_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/inter.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_end.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3053, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3053_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/inter.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_end.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3056, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3056_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/inter.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_end2.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3059, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3059_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end2.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_end3.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3062, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3062_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/end3.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_inter cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3065, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3065_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_inter.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3068, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3068_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_inter.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3071, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3071_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_inter.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3074, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3074_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecdsa_inter.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3077, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3077_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/inter.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_ca cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3081, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3081_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_ca.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3084, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3084_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_ca.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3087, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3087_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_ca.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3090, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3090_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_ca.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3093, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3093_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_end cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3096, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3096_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_end.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3099, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3099_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_end.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3102, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3102_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_end.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3105, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3105_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_end.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3108, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3108_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_end2.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3111, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3111_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end2.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_end3.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3114, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3114_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/end3.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_inter cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3117, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3117_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_inter.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3120, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3120_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_inter.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3123, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3123_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_inter.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3126, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3126_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_ecc_inter.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3129, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3129_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_ecc_cert/inter.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_ecc_cert/ca.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_ca cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3133, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3133_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_ca.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3136, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3136_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_ca.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3139, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3139_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_ca.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3142, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3142_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_ca.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3145, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3145_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_end cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3148, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3148_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_end.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3151, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3151_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_end.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3154, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3154_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_end.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3157, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3157_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_end.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3160, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3160_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_end2.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3163, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3163_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end2.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_end3.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3166, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3166_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/end3.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_inter cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3169, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3169_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_inter.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3172, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3172_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_inter.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3175, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3175_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_inter.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3178, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3178_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse rsa_pss_inter.v1 cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3181, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3181_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/rsa_pss_cert/inter.v1.der");
+    let issuer = load_cert_fixture("cert/asn1/rsa_pss_cert/ca.v1.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_ca cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3185, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3185_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_ca.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3188, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3188_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/ca.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_ca.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3191, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3191_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/ca.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_ca.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3194, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3194_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/ca.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/ca.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_enc cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3197, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3197_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_enc.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3200, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3200_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_enc.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3203, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3203_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_enc.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3206, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3206_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_enc2.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3209, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3209_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc2.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_enc3.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3212, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3212_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/enc3.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_sign cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3215, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3215_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_sign.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3218, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3218_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_sign.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3221, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3221_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_sign.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3224, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3224_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_sign2.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3227, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3227_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign2.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_sign3.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3230, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3230_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/sign3.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/inter.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_inter cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3233, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3233_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_inter.mul cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3236, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3236_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.mul.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/ca.mul.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_inter.noCRL cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3239, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3239_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.noCRL.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/ca.noCRL.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse sm2_inter.notCA cert
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3242, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3242_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/sm2_cert/inter.notCA.der");
+    let issuer = load_cert_fixture("cert/asn1/sm2_cert/ca.notCA.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecc p224
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3245, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3245_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca_p224.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca_p224.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecc p256
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3248, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3248_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca_p256.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca_p256.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecc p521
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3251, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3251_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca_p521.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca_p521.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecc bp256
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3254, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3254_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca_bp256.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca_bp256.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecc bp384
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3257, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3257_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca_bp384.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca_bp384.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
+/// SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 parse ecc bp512
+/// C source: SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001 (line 3260, X.509 cert pubkey field KAT)
+#[test]
+fn tc_line3260_x509_cert_pubkey() {
+    let cert = load_cert_fixture("cert/asn1/ecdsa_cert/ca_bp512.der");
+    let issuer = load_cert_fixture("cert/asn1/ecdsa_cert/ca_bp512.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+}
+
 /// SDV_X509_CSR_PARSE_FUNC_TC001 #ed25519 csr without attribute
 /// C source: SDV_X509_CSR_PARSE_FUNC_TC001 (line 14, X.509 csr parse KAT)
 #[test]
@@ -45290,4 +46163,4 @@ fn tc_line50_x509_crl_parse_res() {
     assert!(CertificateRevocationList::from_pem(pem).is_ok());
 }
 
-// Generation summary: 911 emitted / 477 API-surface skipped / 22 unknown / 9 unsupported alg / 1419 total C cases.
+// Generation summary: 1008 emitted / 380 API-surface skipped / 22 unknown / 9 unsupported alg / 1419 total C cases.

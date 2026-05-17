@@ -40,13 +40,18 @@
 //!   asserts `Certificate::issuer` / `subject` `.entries` (a `Vec<(name,
 //!   value)>`); each RDN triple's attribute OID is mapped to the parser's
 //!   DN short name and the value hex is decoded as UTF-8.
+//! * `X509_CERT_PARSE_PUBKEY_FUNC_TC001` — `path1 : path2`. The C test
+//!   verifies `path1`'s certificate signature with `path2`'s parsed public
+//!   key; the migrated test loads both fixtures and asserts
+//!   `Certificate::verify_signature` succeeds.
 //!
 //! For cert/CSR, `format` is a `BSL_FORMAT_*` token: `ASN1` → DER, `PEM` →
 //! PEM; the C `UNKNOWN` (auto-detect) format has no Rust equivalent and routes
-//! to `skipped_unknown`. The remaining cert field-check family (`pubkey`),
-//! the `TBS_SIGNALG` family (the TBS inner AlgorithmIdentifier is not exposed
-//! by `Certificate`) and the malformed-DER negatives are future increments /
-//! API gaps and route to `ApiSurface`.
+//! to `skipped_unknown`. Two cert families are deliberate API gaps and route
+//! to `ApiSurface`: `TBS_SIGNALG` (the TBS inner AlgorithmIdentifier is not
+//! exposed by `Certificate`) and `PUBKEY_FUNC_TC002` (XMSS public-key
+//! structure extraction has no Rust analogue). The malformed-DER negatives
+//! are a future increment.
 
 use std::fmt::Write;
 
@@ -115,6 +120,10 @@ enum CertField {
     Issuer,
     /// `X509_CERT_PARSE_SUBJECTNAME_FUNC` — `path : 2N : (oid, tag, value)×N`.
     Subject,
+    /// `X509_CERT_PARSE_PUBKEY_FUNC_TC001` — `path1 : path2`. The C test
+    /// verifies `path1`'s signature with `path2`'s parsed public key; the
+    /// migrated test does the same via `Certificate::verify_signature`.
+    PubKey,
 }
 
 impl CertField {
@@ -130,6 +139,7 @@ impl CertField {
             CertField::SigAlg => "signature_algorithm",
             CertField::Issuer => "issuer",
             CertField::Subject => "subject",
+            CertField::PubKey => "pubkey",
         }
     }
 }
@@ -263,12 +273,16 @@ fn classify(tc: &str) -> Kind {
     if tc.contains("X509_CERT_PARSE_SUBJECTNAME_FUNC") {
         return Kind::CertField(CertField::Subject);
     }
-    // The remaining cert field-check families (tbs-sig-alg / pubkey), CSR
-    // field / expected-return families, the CRL field-check families
+    if tc.contains("X509_CERT_PARSE_PUBKEY_FUNC_TC001") {
+        return Kind::CertField(CertField::PubKey);
+    }
+    // CSR field / expected-return families, the CRL field-check families
     // (`TC004/005/009-013`), and the malformed-DER negatives are migrated in
-    // later Phase C increments. `TBS_SIGNALG_FUNC` is an API gap: the TBS
-    // inner AlgorithmIdentifier is parsed but not exposed by `Certificate`
-    // (RFC 5280 §4.1.1.2 mandates it equal the outer one).
+    // later Phase C increments. Two cert families are deliberate API gaps:
+    // `TBS_SIGNALG_FUNC` (the TBS inner AlgorithmIdentifier is parsed but not
+    // exposed by `Certificate`; RFC 5280 §4.1.1.2 mandates it equal the outer
+    // one) and `PUBKEY_FUNC_TC002` (XMSS public-key structure extraction has
+    // no Rust analogue — `SubjectPublicKeyInfo` keeps the key as raw bytes).
     if tc.contains("X509_") || tc.contains("CERT_") {
         return Kind::ApiSurface;
     }
@@ -586,6 +600,19 @@ fn emit_cert_field(out: &mut String, case: &TestCase, stats: &mut EmitStats, fie
             }
             s.push_str("        ],\n    );\n");
             s
+        }
+        CertField::PubKey => {
+            // `path1 : path2` — verify path1's signature with path2's public
+            // key. The scaffold already loaded `cert` (= path1); load the
+            // issuer and assert `verify_signature` succeeds.
+            let Some(issuer_rel) = case.args[1].as_str().and_then(fixture_relpath) else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            format!(
+                "    let issuer = load_cert_fixture({issuer_rel:?});\n\
+                 \x20   assert!(cert.verify_signature(&issuer).unwrap());\n"
+            )
         }
     };
 

@@ -5516,6 +5516,18 @@ This completes the migratable cert field-check families. `PUBKEY` (the cert-pubk
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 911/911 PASS (111 cert-parse + 20 CSR + 5 CRL + 775 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: cert pubkey (verify-signature) family (2026-05-17)
+
+> 请继续PUBKEY
+
+**Result**: extends `xtask/src/x509.rs` with the cert `PUBKEY` family — `X509_CERT_PARSE_PUBKEY_FUNC_TC001` (97). The C test (`SDV_X509_CERT_PARSE_PUBKEY_FUNC_TC001(path1, path2)`) verifies `path1`'s certificate signature with `path2`'s parsed public key via `HITLS_X509_CheckSignature`. The `CertField` enum gains a `PubKey` variant; `emit_cert_field` loads both fixtures and asserts `cert.verify_signature(&issuer)` is `Ok(true)`. `migrated_x509_parse.rs` grows 911 → **1008 tests** (+97) — exercising the RSA-PKCS#1, ECDSA (P-224…P-521 + brainpool), RSA-PSS and SM2 verify paths; all pass on first generation.
+
+**API gap — `PUBKEY_FUNC_TC002`**: the one XMSS row extracts the XMSS `root`/`seed`/`xdr` sub-fields via the C EAL pkey API; `SubjectPublicKeyInfo` keeps the public key as raw bytes with no structured XMSS accessor, so it is routed to `ApiSurface` (joins `TBS_SIGNALG` as a documented cert API gap).
+
+This completes the migratable cert field-check families. **T113 still open**: CSR field families, CRL field-check families (`TC004/005/009-013`), and the malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1008/1008 PASS (111 cert-parse + 20 CSR + 5 CRL + 872 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
