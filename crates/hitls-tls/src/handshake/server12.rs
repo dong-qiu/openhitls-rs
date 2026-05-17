@@ -1313,7 +1313,15 @@ impl Tls12ServerHandshake {
                     .ephemeral_key
                     .take()
                     .ok_or_else(|| TlsError::HandshakeFailed("no ephemeral key".into()))?;
-                kx.compute_shared_secret(&cke.public_key)?
+                kx.compute_shared_secret(&cke.public_key).map_err(|_| {
+                    // RFC 4492 §5.4 / RFC 8422 — an invalid ECDHE client
+                    // public key (point not on the curve, identity, or
+                    // out of range) is an `illegal_parameter`, not an
+                    // internal error. The client controls the point.
+                    TlsError::HandshakeFailed(
+                        "illegal_parameter: invalid ECDHE client public key".into(),
+                    )
+                })?
             }
             KeyExchangeAlg::Rsa => {
                 let cke = decode_client_key_exchange_rsa(body)?;
@@ -1448,7 +1456,13 @@ impl Tls12ServerHandshake {
                 let kx = self.ephemeral_key.take().ok_or_else(|| {
                     TlsError::HandshakeFailed("no ECDHE key for ECDH_anon".into())
                 })?;
-                kx.compute_shared_secret(&cke.public_key)?
+                kx.compute_shared_secret(&cke.public_key).map_err(|_| {
+                    // RFC 4492 §5.4 — invalid ECDHE client point →
+                    // illegal_parameter (mirrors the `Ecdhe` arm above).
+                    TlsError::HandshakeFailed(
+                        "illegal_parameter: invalid ECDHE client public key".into(),
+                    )
+                })?
             }
             #[cfg(feature = "tlcp")]
             KeyExchangeAlg::Ecc => {

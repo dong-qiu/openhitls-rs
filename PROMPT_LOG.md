@@ -6193,3 +6193,31 @@ Curating the TLS 1.2 FFDHE scripts (`test-ffdhe-negotiation` etc.) is
 a separate follow-up — they exercise the `DHE_RSA` cipher suites,
 which the `s-server` TLS 1.2 default cipher list does not offer
 (ECDHE-only). Next: task ⑤ (`s-server` DTLS mode).
+
+---
+
+## Phase I103 — TLS 1.2 ClientKeyExchange Hardening (2026-05-17)
+
+> 先做那批 TLS 1.2 小一致性修复
+
+First of the post-④ TLS 1.2 conformance-fix batch. Closes both
+residual XFAILs of the curated
+`test-ecdhe-rsa-key-exchange-with-bad-messages.py`.
+
+**Part A** — an invalid ECDHE client public point in the
+ClientKeyExchange aborted with `internal_error`; RFC 4492 §5.4 /
+RFC 8422 require `illegal_parameter`. The `Ecdhe` / `EcdheAnon` arms
+of `process_client_key_exchange` now map the `compute_shared_secret`
+failure to an `illegal_parameter` error.
+
+**Part B** — `decode_client_key_exchange` accepted a
+ClientKeyExchange with trailing bytes after the length-prefixed ECDH
+point; it now requires the body consumed exactly (RFC 4492 §5.7) →
+`decode_error`.
+
+**Verification**: `hitls-tls` build + clippy `-D warnings` + fmt
+clean; lib tests 1548/0 (+2 codec tests). End-to-end:
+`test-ecdhe-rsa-key-exchange-with-bad-messages.py` 3/5-XFAIL → 8/8 on
+the full `-n 9999` set; xfail file removed. Recorded as DEV_LOG
+Phase I103. Next (I104): ClientHello version-floor + zero-length
+AppData pass-through + no-`supported_groups` ECDHE fallback.

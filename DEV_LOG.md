@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I102 (102 phases)
+- Implementation: I1–I103 (103 phases)
 - Testing: T1–T128 (122 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -336,6 +336,7 @@ Category summary:
 | 324 | I101 | Impl | TLS 1.2 server-conformance: `signature_algorithms`-absent default + `ec_point_formats` echo — two ServerHello/SKE gaps that blocked the bulk of TLS 1.2 tlsfuzzer scripts (probing measured 453/889 connections failing on "no common signature scheme"). **Part A**: `select_signature_scheme_tls12` rejected an empty client-scheme list (TLS 1.2 makes `signature_algorithms` OPTIONAL); now defaults to RFC 5246 §7.4.1.4.1's `{sha1,rsa}` / `{sha1,ecdsa}` (strictly enforced by tlslite-ng — SHA-256 is rejected as "invalid signature algorithm"), with SHA-1 SKE signing added to `sign_ske_data` for this legacy-only path. **Part B**: the ServerHello now echoes `ec_point_formats` (RFC 8422 §5.1.2) when the client offered it and an ECDHE suite is negotiated. Verified: `test-ecdhe-rsa-key-exchange` 0/3 → 2/3, `ecdhe-padded-shared-secret` 0/3 → 2/3, `test-ecdhe-rsa-key-exchange-with-bad-messages` 0/8-all-XFAIL → 3/8 PASS (xfail trimmed 7 → 5). Task ③ foundational fix | 2026-05-17 |
 | 325 | T128 | Test | TLS 1.2 tlsfuzzer curated-suite breadth (curate-and-bank) — task ③. With the I101 conformance fix unblocking the TLS 1.2 sanity handshake, re-probed the tlsfuzzer corpus and curated 5 new TLS 1.2 scripts into the CI `scripts_12` array (9 → 14): `test-aes-gcm-nonces` (6/6), `test-encrypt-then-mac` (3/3), `test-version-numbers` (8/9), `test-zero-length-data` (2/3), `test-ecdhe-rsa-key-exchange` (2/3) — full-conversation-set verified (`-n 9999`). 4 new `args/*.txt` (`-d` ECDHE selection) + 3 new `xfail/*.txt` (1 entry each: `very low version (0,0)`, `zero-length app data`, `ECDHE w/o extension`). `test-ecdhe-padded-shared-secret` deliberately not curated — 16 full-set failures, mostly TLS 1.0/1.1 + SSLv2-compat which the server intentionally does not support. Residual deeper TLS 1.2 conformance bugs documented as follow-ups | 2026-05-17 |
 | 326 | I102 | Impl | TLS 1.3 FFDHE (RFC 7919) key exchange — task ④. The TLS 1.3 `KeyExchange` (`handshake/key_exchange.rs`) had no finite-field-DHE variant, so a client offering only an `ffdhe*` group hit `unsupported named group`. Added a `Ffdhe` inner variant + `generate`/`compute_shared_secret` arms for all 5 RFC 7919 groups (ffdhe2048/3072/4096/6144/8192) — `hitls-crypto::dh` has had the DH primitive (params + keypair, with prime-length-padded output per RFC 8446 §7.4.1) since project start; only the TLS-layer wiring was missing (same pattern as I99). FFDHE is non-KEM, so it reuses the ECDHE generate/compute path. `s-server` default `supported_groups` extended with the 5 FFDHE groups (after the EC groups — lowest preference) + X448. Verified: `test-tls13-dhe-shared-secret-padding.py` 513/3-XFAIL → **2203/0** (ffdhe2048/3072 + x448 all pass), `test-tls13-psk_dhe_ke.py` 3/1-XFAIL → **4/4**; both xfail files removed (now fully clean) | 2026-05-17 |
+| 327 | I103 | Impl | TLS 1.2 ClientKeyExchange hardening — first of the post-④ TLS 1.2 conformance-fix batch. **Part A**: an invalid ECDHE client public point (not on the curve / identity / out of range) in the ClientKeyExchange aborted with `internal_error`; RFC 4492 §5.4 / RFC 8422 require `illegal_parameter` — the `Ecdhe` / `EcdheAnon` arms of `process_client_key_exchange` now map the `compute_shared_secret` failure accordingly. **Part B**: `decode_client_key_exchange` accepted a ClientKeyExchange with trailing bytes after the length-prefixed ECDH point (a padding-extended message); it now requires the body to be consumed exactly (`len != 1 + point_len` → `decode_error`, RFC 4492 §5.7). Closes all 5 XFAILs in `test-ecdhe-rsa-key-exchange-with-bad-messages.py` (3/5-XFAIL → **8/8**); xfail file removed. +2 codec unit tests | 2026-05-17 |
 
 ---
 
@@ -19381,6 +19382,71 @@ FFDHE scripts (`test-ffdhe-negotiation` / `test-ffdhe-expected-params`)
 is a separate follow-up — they exercise the `DHE_RSA` *cipher
 suites*, which the `s-server` default TLS 1.2 cipher list does not
 yet offer (it is ECDHE-only). Next: task ⑤ (`s-server` DTLS mode).
+
+---
+
+## Phase I103 — TLS 1.2 ClientKeyExchange Hardening (2026-05-17)
+
+### Summary
+
+I103 is the first of the post-④ TLS 1.2 conformance-fix batch — the
+small, well-scoped gaps documented as follow-ups in I101 / T128. It
+closes both residual XFAILs of the curated
+`test-ecdhe-rsa-key-exchange-with-bad-messages.py`, two distinct
+TLS 1.2 ClientKeyExchange-handling bugs.
+
+### Part A — invalid ECDHE point → `illegal_parameter`
+
+When a client's ClientKeyExchange carried an invalid ECDHE public
+point (not on the curve, the identity, or out of range),
+`process_client_key_exchange` propagated the `compute_shared_secret`
+failure as a bare `TlsError::CryptoError`, which `tls_error_to_alert`
+mapped to `internal_error`. RFC 4492 §5.4 / RFC 8422 require
+`illegal_parameter` — the client controls the point, so a bad one is
+a parameter error, not a server fault.
+
+The `Ecdhe` and `EcdheAnon` arms of `process_client_key_exchange` now
+`map_err` the `compute_shared_secret` failure to a `HandshakeFailed`
+message containing `illegal_parameter` (routed by `tls_error_to_alert`
+to `AlertDescription::IllegalParameter`).
+
+### Part B — reject padding-extended ClientKeyExchange
+
+`decode_client_key_exchange` checked `body.len() < 1 + point_len`
+(rejecting a *truncated* body) but not the over-long case, so a
+ClientKeyExchange with trailing bytes after the length-prefixed ECDH
+point was silently accepted and the handshake continued. RFC 4492
+§5.7: the body is exactly `{ecdh_Yc opaque<1..2^8-1>}`. The check is
+now `body.len() != 1 + point_len` → `decode_error`.
+
+### Verification
+
+- `cargo build` / `clippy -p hitls-tls` (`-D warnings`) clean; `fmt`
+  clean; `cargo test -p hitls-tls --lib` **1548 PASS / 0 FAIL** (+2
+  — `decode_client_key_exchange` trailing-bytes + truncated tests).
+- End-to-end (pinned tlsfuzzer, local `s-server --tls 1.2`):
+  `test-ecdhe-rsa-key-exchange-with-bad-messages.py` was
+  3 PASS / 5 XFAIL → **8 PASS / 0 FAIL** on the full `-n 9999` set
+  (the 4 `invalid point (...)` conversations now get
+  `illegal_parameter`; `padded Client Key Exchange` now gets
+  `decode_error`). XFAIL file removed — the script is fully clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/codec12.rs` | Modified | Part B: `decode_client_key_exchange` strict `len == 1 + point_len`; +2 unit tests. |
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | Part A: `Ecdhe` / `EcdheAnon` CKE arms map an invalid-point failure to `illegal_parameter`. |
+| `tests/tlsfuzzer/xfail/test-ecdhe-rsa-key-exchange-with-bad-messages.txt` | Removed | Script now fully clean (8/8). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 327 + Implementation summary I1–I102 → I1–I103. |
+| `PROMPT_LOG.md` | Modified | I103 prompt + result entry. |
+
+### Build Status (Post I103)
+
+`hitls-tls` builds clean (`-D warnings`); lib tests 1548/0. First of
+the TLS 1.2 conformance-fix batch done. Next (I104): ClientHello
+version-floor check + zero-length-AppData pass-through +
+no-`supported_groups` ECDHE default-curve fallback.
 
 
 
