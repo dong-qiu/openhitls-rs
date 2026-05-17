@@ -158,7 +158,8 @@ enum Commands {
         /// Private key file (PEM, PKCS#8).
         #[arg(long)]
         key: String,
-        /// TLS version: "1.2" or "1.3".
+        /// TLS version: "1.2", "1.3", or "auto" (peek each
+        /// ClientHello and negotiate 1.2 / 1.3 per connection).
         #[arg(long = "tls", default_value = "1.3")]
         tls_version: String,
         /// Quiet mode: suppress connection info.

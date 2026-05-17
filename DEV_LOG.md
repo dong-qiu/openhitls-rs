@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I99 (99 phases)
+- Implementation: I1–I100 (100 phases)
 - Testing: T1–T127 (121 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -332,6 +332,7 @@ Category summary:
 | 320 | T126 | Test | mass-fail tlsfuzzer triage batch 1 — `tls_error_to_alert` now maps the record-layer "inner plaintext has no content type" fault (a TLS 1.3 zero-content-type record, RFC 8446 §5.1/§5.2) to `unexpected_message` instead of the `internal_error` fall-through; `test-tls13-zero-content-type.py` 2/8 → 6/8 and joins CI (2 app-data-phase XFAILs). Triaged 3 more T92 mass-fail scripts: `legacy-version` won't-fix (server is RFC 8446 §4.2.1-correct — MUST ignore `legacy_version` when `supported_versions` present; tlsfuzzer expects non-RFC rejection), `non-support` + `unencrypted-alert` deferred to batch 2 | 2026-05-17 |
 | 321 | I99 | Impl | TLS 1.3 ECDHE for secp384r1 / secp521r1 — the TLS `KeyExchange` (`handshake/key_exchange.rs`) advertised these groups but `generate` only implemented X25519 / X448 / SECP256R1 / SM2 / X25519MLKEM768, so a client offering only secp384r1/secp521r1 hit `unsupported named group`. `hitls-crypto::ecdh` has had P-384/P-521 ECDH since project start (same crypto-has-it / TLS-layer-missing-it pattern as I96). Added `EcdhP384`/`EcdhP521` variants + `generate`/`compute_shared_secret` arms. Verified: tlsfuzzer `dhe-shared-secret-padding` 559/5 → 703/3, `ecdhe-curves` 4/33 → 6/33. Surfaced by the T126/batch-2 mass-fail triage | 2026-05-17 |
 | 322 | T127 | Test | mass-fail tlsfuzzer triage batch 2 — CI wiring. `test-tls13-dhe-shared-secret-padding.py` joins the curated suite (513 PASS post-I99; 3 stable XFAILs — `ffdhe2048`/`ffdhe3072` pending the FFDHE phase, `x448` not in the default `supported_groups`). Completes the ① mass-fail-triage task: all ~10 T92-deferred scripts probed + triaged across T126 / I99 / T127 — 2 real bugs fixed (T126 zero-content-type alert, I99 secp384/521 ECDHE), 2 scripts added to CI; `legacy-version` won't-fix, `non-support`/`shuffled-extentions`/`serverhello-random`/`crfg-curves`/`large-number-of-extensions`/`unencrypted-alert` triaged + deferred (per-script disposition in the T127 entry) | 2026-05-17 |
+| 323 | I100 | Impl | `s-server --tls auto` version-range listener — a single port that peeks each pending ClientHello (`TcpStream::peek`, non-consuming) for the `supported_versions` extension (RFC 8446 §4.2.1) and dispatches the connection to the TLS 1.3 or TLS 1.2 handler accordingly. `s_server::run` refactored: per-version cipher/version selection pulled into a `make_config(want_tls13)` closure so `auto` holds one `TlsConfig` per version; `peek_client_wants_tls13` + the pure, bounds-checked `client_hello_offers_tls13(&[u8]) -> bool` parser (7 unit tests). `--tls` now accepts `1.2` / `1.3` / `auto`. Cross-impl verified: Rust s-client + `openssl s_client` both negotiate the correct protocol against one `auto` listener. Task ② of the server-side tlsfuzzer plan | 2026-05-17 |
 
 ---
 
@@ -18991,6 +18992,108 @@ follow-ups rather than bulk-XFAIL'd into the gate.
 No Rust source changed — workflow + XFAIL file + docs only. Curated
 tlsfuzzer suite 50 → 51 script-runs. The ① mass-fail-triage task is
 complete; ② `--tls auto` version-range server follows.
+
+---
+
+## Phase I100 — `s-server --tls auto` Version-Range Listener (2026-05-17)
+
+### Summary
+
+I100 is task ② of the server-side tlsfuzzer plan. `s-server` could
+only listen as a single pinned protocol — `--tls 1.3` *or* `--tls
+1.2` — because the connection type is chosen up front
+(`TlsServerConnection` is TLS 1.3-only, `Tls12ServerConnection` is
+TLS 1.2-only). A test client speaking the other version got a
+handshake failure. That blocks any tlsfuzzer script that wants to
+exercise *both* versions on one endpoint (cross-version session
+resumption, downgrade-protection).
+
+`--tls auto` adds a third mode: one listener that decides the
+protocol **per connection** by peeking the pending ClientHello.
+
+### How it works
+
+The TLS version a client actually wants is carried in the
+`supported_versions` extension (RFC 8446 §4.2.1), not the legacy
+record/`ClientHello.legacy_version` field. So for each accepted TCP
+connection in `auto` mode the server:
+
+1. `TcpStream::peek`s the socket — a **non-consuming** read, so the
+   bytes stay in the kernel buffer for the real connection to read
+   normally. Retries a few times (8 × 20 ms) in case the first peek
+   catches a partial write.
+2. Walks the raw record + ClientHello far enough to find the
+   `supported_versions` extension and checks whether it lists
+   `0x0304` (TLS 1.3).
+3. Constructs `TlsServerConnection` (1.3) or `Tls12ServerConnection`
+   (1.2) accordingly — the connection then reads the un-consumed
+   ClientHello from byte 0 as usual.
+
+The parser (`client_hello_offers_tls13`) is pure (`&[u8] -> bool`)
+and every step is bounds-checked: a truncated / malformed / absent
+buffer returns `false`, so a wrong guess can only ever fall back to
+the TLS 1.2 handler — whose own record parser then rejects a genuine
+malformed handshake with a proper alert. No `panic!`, no silent
+state corruption.
+
+### Code changes (`crates/hitls-cli`)
+
+- `s_server.rs`:
+  - `--tls` value validation extended to `1.2` / `1.3` / `auto`
+    (with a clear error for anything else); the
+    `--key-update`/`--post-handshake-auth` 1.2-rejection check is
+    unchanged (still legal under `auto` — they only fire when a 1.3
+    client connects).
+  - `run()` refactored: the mTLS-CA bundle, ticket key, and PSK are
+    resolved once into locals up front (so a bad path still fails at
+    startup); per-version cipher-list + version selection is pulled
+    into a `make_config(want_tls13: bool) -> TlsConfig` closure.
+    `--tls auto` builds one config per version (`cfg_tls13` +
+    `cfg_tls12`); the pinned modes build only the one they need.
+  - New `default_tls13_suites()` / `default_tls12_suites()` helpers
+    (the T96/T105 default cipher lists, previously inline).
+  - New `peek_client_wants_tls13(&TcpStream)` (the peek loop) +
+    `client_hello_offers_tls13(&[u8])` (the pure parser).
+  - The accept loop computes `want_tls13` (constant for pinned
+    modes, peek for `auto`) and dispatches.
+- `main.rs`: `s-server --tls` doc comment now documents `auto`.
+
+### Tests
+
+7 new unit tests in `s_server.rs` driving `client_hello_offers_tls13`
+via a synthetic-ClientHello builder: TLS 1.3 listed → true; TLS 1.2
+only → false; no `supported_versions` extension → false;
+`supported_versions` found after an unrelated extension → true;
+truncated buffers at 5 offsets → false; non-Handshake record + empty
+buffer → false. Plus `test_s_server_auto_version_accepted` (the
+`auto` string passes version validation).
+
+### Verification
+
+- `cargo build -p hitls-cli --all-features` clean; `cargo test -p
+  hitls-cli` s_server module **23 PASS / 0 FAIL** (+7 I100 tests).
+- End-to-end smoke test against a live `s-server --tls auto`
+  listener with an RSA cert:
+  - Rust `s-client --tls 1.3` → negotiated **TLS 1.3** (0x1302).
+  - Rust `s-client --tls 1.2` → negotiated **TLS 1.2** (0xC02F).
+  - `openssl s_client -tls1_3` → `TLSv1.3, TLS_AES_256_GCM_SHA384`.
+  - `openssl s_client -tls1_2` → `TLSv1.2, ECDHE-RSA-AES128-GCM-SHA256`.
+  Both implementations, both versions, one port.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-cli/src/s_server.rs` | Modified | `--tls auto` mode: `make_config` closure, `peek_client_wants_tls13` + `client_hello_offers_tls13`, per-version config dispatch; +7 unit tests. |
+| `crates/hitls-cli/src/main.rs` | Modified | `s-server --tls` doc comment documents `auto`. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 323 + Implementation summary I1–I99 → I1–I100. |
+| `PROMPT_LOG.md` | Modified | I100 prompt + result entry. |
+
+### Build Status (Post I100)
+
+`hitls-cli` builds clean (`-D warnings`); s_server tests 23/0. The
+`--tls auto` listener is ready for cross-version tlsfuzzer coverage —
+task ③ (TLS 1.2 tlsfuzzer script breadth) can point scripts at it.
 
 
 
