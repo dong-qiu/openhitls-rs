@@ -5480,6 +5480,42 @@ This is Phase C §4.1 — fixture-corpus prep, the analogue of the T111 xtask sc
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 454/454 PASS (111 cert-parse + 20 CSR + 5 CRL + 318 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: cert validity-time families (2026-05-17)
+
+> 继续下一个 T113 增量
+
+**Result**: extends `xtask/src/x509.rs` with the cert validity-time families — `X509_CERT_PARSE_START_TIME_FUNC` (91) and `END_TIME_FUNC` (91). The `CertField` enum gains `NotBefore` / `NotAfter` variants; `emit_cert_field` handles their `path : year:month:day:hour:min:sec` shape. `migrated_x509_parse.rs` grows 454 → **636 tests** (+182).
+
+**Field semantics**: `Certificate::not_before` / `not_after` are `i64` Unix timestamps. The expected literal is computed at generation time by a new `civil_to_unix` helper — a copy of the ASN.1 decoder's own `datetime_to_unix` civil-date → epoch formula — and emitted with a `// YYYY-MM-DDThh:mm:ssZ` inline note. All 182 tests pass on first generation.
+
+**T113 still open**: remaining cert field-check families (sig-alg / issuer / subject / pubkey ~900 rows), CSR field families, CRL field-check families (`TC004/005/009-013`), and the malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 636/636 PASS (111 cert-parse + 20 CSR + 5 CRL + 500 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
+## Phase T113 (continued) — Phase C §4.2: cert signature-algorithm family (2026-05-17)
+
+> 继续完成剩余 T113 cert 字段族
+
+**Result**: extends `xtask/src/x509.rs` with the cert `SIGNALG` family — `X509_CERT_PARSE_SIGNALG_FUNC` (93). The `CertField` enum gains a `SigAlg` variant; `emit_cert_field` maps the row's `BSL_CID_*` token to OID arcs (`cid_to_oid_arcs`, 5 entries: ECDSA-SHA256 / Ed25519 / RSASSA-PSS / SHA256-RSA / SM2-SM3), DER-encodes them to raw OID value bytes (`oid_der_value`), and asserts against `Certificate::signature_algorithm`. `migrated_x509_parse.rs` grows 636 → **729 tests** (+93).
+
+**API gap — `TBS_SIGNALG`**: the companion `X509_CERT_PARSE_TBS_SIGNALG_FUNC` family (~92 rows) is **not** migrated — `from_der` parses the TBS inner AlgorithmIdentifier but discards it (`_inner_sig_oid`), so `Certificate` exposes no field for it. RFC 5280 §4.1.1.2 mandates it equal the outer `signatureAlgorithm`; routed to `ApiSurface`. Exposing a `tbs_signature_algorithm` field is a trivial future Implementation change that would unlock those rows.
+
+**T113 still open**: remaining cert field-check families (issuer / subject / pubkey ~470 rows), CSR field families, CRL field-check families (`TC004/005/009-013`), and the malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 729/729 PASS (111 cert-parse + 20 CSR + 5 CRL + 593 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
+## Phase T113 (continued) — Phase C §4.2: cert issuer/subject DN families (2026-05-17)
+
+> 继续完成 ISSUERNAME/SUBJECTNAME 增量
+
+**Result**: extends `xtask/src/x509.rs` with the cert distinguished-name families — `X509_CERT_PARSE_ISSUERNAME_FUNC` (91) and `SUBJECTNAME_FUNC` (91). The `CertField` enum gains `Issuer` / `Subject` variants. The C row shape is `path : 2N : (oid_hex, value_tag, value_hex) × N`; `emit_cert_field` consumes the RDN triples, maps each attribute OID via a new `dn_oid_short_name` table (8 entries — CN/C/L/ST/O/OU/serialNumber/emailAddress, matching the parser's `oid_to_dn_short_name`), decodes each value hex as UTF-8, and asserts the reconstructed `Vec<(name, value)>` against `cert.issuer.entries` / `cert.subject.entries`. `migrated_x509_parse.rs` grows 729 → **911 tests** (+182).
+
+This completes the migratable cert field-check families. `PUBKEY` (the cert-pubkey-vs-pubkey-file comparison family) and the malformed-DER negatives remain; `TBS_SIGNALG` is an API gap (see prior entry).
+
+**T113 still open**: cert `PUBKEY` family, CSR field families, CRL field-check families (`TC004/005/009-013`), and the malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 911/911 PASS (111 cert-parse + 20 CSR + 5 CRL + 775 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
