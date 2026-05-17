@@ -1,0 +1,27 @@
+# Phase T126 — `test-tls13-zero-content-type.py` XFAILs (2 entries).
+#
+# A "zero content type" record is a TLS 1.3 record whose decrypted
+# TLSInnerPlaintext contains no non-zero type octet (RFC 8446 §5.2).
+# RFC 8446 §5.1 / §5.4 require the connection to terminate with an
+# `unexpected_message` alert.
+#
+# T126 fixed the alert mapping: `tls_error_to_alert` now maps the
+# record-layer "inner plaintext has no content type" error to
+# `unexpected_message` (it previously fell through to
+# `internal_error`). That closed the 4 handshake-phase conversations
+# — 2/8 → 6/8.
+#
+# 2 conversations remain, both in the *application-data* phase:
+#
+#   - zero content type during application data
+#   - zero content type and padding during application data
+#
+# Here the server emits an ApplicationData record where the script's
+# state machine expects the alert / NewSessionTicket sequence — the
+# zero-content-type record is fed in mid-echo-loop rather than on the
+# handshake read path, so the failure mode is different from the 4
+# that T126 closed. Root cause is in the `s-server` echo loop vs the
+# record-layer reject ordering — a separate investigation, deferred.
+
+zero content type during application data
+zero content type and padding during application data

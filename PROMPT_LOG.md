@@ -5889,3 +5889,40 @@ The PSK story — resumption, external PSK (T119), `psk_dhe_ke`,
 `psk_ke` (T120) — is now complete. Server-side tlsfuzzer plan
 remaining: `--tls auto` version range, mass-fail-script triage,
 TLS 1.2 script breadth, FFDHE groups, `s-server` DTLS mode.
+
+---
+
+## Phase T126 — mass-fail tlsfuzzer Triage, Batch 1 (2026-05-17)
+
+> 请给出下一步计划的建议
+> 按照这个推荐的顺序依次执行
+> 按此推进 T126
+
+The user accepted the 5-item plan (① mass-fail triage → ② `--tls auto`
+→ ③ TLS 1.2 breadth → ④ FFDHE → ⑤ DTLS, each task merged before the
+next) and confirmed T126 as the first mass-fail-triage batch.
+
+Batch 1 probed 4 of the ~10 T92-deferred mass-fail scripts to a
+definitive root cause each:
+
+- **`zero-content-type` 2/8 — real bug, fixed.** A TLS 1.3 record with
+  no non-zero inner type octet (RFC 8446 §5.2) was rejected with
+  `internal_error`; §5.1/§5.4 require `unexpected_message`. Root
+  cause: `tls_error_to_alert`'s `RecordError` arm matched only
+  `"unexpected content type"`, not the record layer's actual string
+  `"inner plaintext has no content type"`. Fix: add that (+ the
+  `"unknown content type"` variants) to the `UnexpectedMessage`
+  condition. Script 2/8 → 6/8; joins CI with 2 app-data-phase XFAILs.
+- **`legacy-version` 2/10 — won't-fix.** Our server is RFC 8446
+  §4.2.1-correct (MUST ignore `legacy_version` when
+  `supported_versions` is present); tlsfuzzer expects non-RFC
+  rejection. Not added to CI; documented.
+- **`non-support` 0/53** (a TLS-1.2-fallback test) and
+  **`unencrypted-alert` 2/4** — deferred to batch 2.
+
+**Verification**: clippy `-D warnings` 0; fmt + actionlint clean;
+`hitls-tls` alert lib tests 15/0. End-to-end —
+`test-tls13-zero-content-type.py` through `run.sh`: 6 PASS / 2 XFAIL /
+0 FAIL, exit 0. Curated suite 49 → 50. Recorded as DEV_LOG Phase T126.
+
+Next: mass-fail batch 2, then through ②–⑤.
