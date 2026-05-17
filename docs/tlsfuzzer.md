@@ -510,3 +510,15 @@ one reviewed PR.
   `encrypt-then-mac`, `version-numbers`, `zero-length-data`,
   `ecdhe-rsa-key-exchange`) into `scripts_12`, full-set verified
   (`-n 9999`). Suite size 51 → 56.
+
+- I102 — TLS 1.3 FFDHE (RFC 7919) key exchange. The TLS 1.3
+  `KeyExchange` had no finite-field-DHE variant, so a client offering
+  only an `ffdhe*` group hit `unsupported named group`. Wired all 5
+  RFC 7919 groups (ffdhe2048…8192) into `KeyExchange` (the
+  `hitls-crypto::dh` primitive already existed); the `s-server`
+  default `supported_groups` gained the FFDHE groups + X448. Two
+  curated scripts went fully clean and lost their XFAIL files:
+  `test-tls13-dhe-shared-secret-padding.py` 513/3 → **2203/0** (full
+  `-n 9999` set) and `test-tls13-psk_dhe_ke.py` 3/1 → **4/4**. Suite
+  size unchanged at 56 (no scripts added — two existing ones became
+  0-XFAIL).

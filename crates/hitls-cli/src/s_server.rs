@@ -136,10 +136,13 @@ pub fn run(
     // per version and pick per-connection after peeking the ClientHello;
     // `--tls 1.2` / `--tls 1.3` call it exactly once.
     //
-    // Accepts the four interop-relevant groups (X25519, P-256, P-384,
+    // Accepts the interop-relevant EC groups (X25519, P-256, P-384,
     // P-521) by default so external test tools (openssl s_client,
     // tlsfuzzer, browsers) don't trigger HRR-on-no-common-group when
-    // their first key_share happens to be P-256 / P-384.
+    // their first key_share happens to be P-256 / P-384. Phase I102
+    // appends the RFC 7919 FFDHE groups *after* the EC ones — they stay
+    // negotiable (for finite-field-DHE clients) but lowest preference,
+    // so an ECDHE-capable client still gets the faster EC exchange.
     let make_config = |want_tls13: bool| -> TlsConfig {
         let mut builder = TlsConfig::builder()
             .role(TlsRole::Server)
@@ -148,9 +151,15 @@ pub fn run(
             .server_cert_is_rsa_pss(is_pss_oid)
             .supported_groups(&[
                 NamedGroup::X25519,
+                NamedGroup::X448,
                 NamedGroup::SECP256R1,
                 NamedGroup::SECP384R1,
                 NamedGroup::SECP521R1,
+                NamedGroup::FFDHE2048,
+                NamedGroup::FFDHE3072,
+                NamedGroup::FFDHE4096,
+                NamedGroup::FFDHE6144,
+                NamedGroup::FFDHE8192,
             ])
             .verify_peer(false);
 

@@ -1,12 +1,34 @@
 //! TLS 1.3 ephemeral key exchange (X25519, X448, SECP256R1, SECP384R1,
-//! SECP521R1, X25519MLKEM768).
+//! SECP521R1, the FFDHE groups of RFC 7919, and X25519MLKEM768).
 
 use crate::crypt::NamedGroup;
+use hitls_crypto::dh::{DhKeyPair, DhParams};
 use hitls_crypto::ecdh::EcdhKeyPair;
 use hitls_crypto::mlkem::MlKemKeyPair;
 use hitls_crypto::x25519::{X25519PrivateKey, X25519PublicKey};
 use hitls_crypto::x448::{X448PrivateKey, X448PublicKey};
-use hitls_types::TlsError;
+use hitls_types::{DhParamId, TlsError};
+
+/// Finite-field DHE key-exchange state (RFC 7919 groups). Boxed in
+/// `KeyExchangeInner` because `DhParams` carries the (large) group
+/// prime — keeping the enum's other variants small.
+struct FfdheState {
+    kp: DhKeyPair,
+    params: DhParams,
+}
+
+/// Map an FFDHE `NamedGroup` to its RFC 7919 `DhParamId`, or `None`
+/// for a non-FFDHE group.
+fn ffdhe_param_id(group: NamedGroup) -> Option<DhParamId> {
+    match group {
+        NamedGroup::FFDHE2048 => Some(DhParamId::Rfc7919_2048),
+        NamedGroup::FFDHE3072 => Some(DhParamId::Rfc7919_3072),
+        NamedGroup::FFDHE4096 => Some(DhParamId::Rfc7919_4096),
+        NamedGroup::FFDHE6144 => Some(DhParamId::Rfc7919_6144),
+        NamedGroup::FFDHE8192 => Some(DhParamId::Rfc7919_8192),
+        _ => None,
+    }
+}
 
 /// Inner key exchange state (variant per named group).
 enum KeyExchangeInner {
@@ -17,6 +39,7 @@ enum KeyExchangeInner {
     EcdhP521(Box<EcdhKeyPair>),
     #[cfg(feature = "tlcp")]
     EcdhSm2(Box<EcdhKeyPair>),
+    Ffdhe(Box<FfdheState>),
     HybridX25519MlKem768 {
         mlkem: MlKemKeyPair,
         x25519_sk: X25519PrivateKey,
@@ -33,9 +56,29 @@ pub struct KeyExchange {
 impl KeyExchange {
     /// Generate a new ephemeral keypair for the given named group.
     ///
-    /// Supports X25519, X448, SECP256R1, SECP384R1, SECP521R1 and the
-    /// X25519MLKEM768 hybrid.
+    /// Supports X25519, X448, SECP256R1, SECP384R1, SECP521R1, the
+    /// RFC 7919 FFDHE groups, and the X25519MLKEM768 hybrid.
     pub fn generate(group: NamedGroup) -> Result<Self, TlsError> {
+        // Phase I102 — RFC 7919 finite-field DHE groups. The
+        // `hitls-crypto::dh` primitive (params + keypair) has existed
+        // since project start; only the TLS-layer `KeyExchange` wiring
+        // was missing, so a client offering only an `ffdhe*` group hit
+        // `unsupported named group`. FFDHE is not a KEM, so it uses the
+        // same generate / compute_shared_secret path as ECDHE.
+        if let Some(param_id) = ffdhe_param_id(group) {
+            let params = DhParams::from_group(param_id).map_err(TlsError::CryptoError)?;
+            let kp = DhKeyPair::generate(&params).map_err(TlsError::CryptoError)?;
+            // RFC 8446 §4.2.8.1 — the key_share is the DH public value
+            // Y, big-endian, left-padded to the group prime's length.
+            let public_key_bytes = kp
+                .public_key_bytes(&params)
+                .map_err(TlsError::CryptoError)?;
+            return Ok(Self {
+                group,
+                inner: KeyExchangeInner::Ffdhe(Box::new(FfdheState { kp, params })),
+                public_key_bytes,
+            });
+        }
         match group {
             NamedGroup::X25519 => {
                 let private_key = X25519PrivateKey::generate().map_err(TlsError::CryptoError)?;
@@ -160,6 +203,13 @@ impl KeyExchange {
             #[cfg(feature = "tlcp")]
             KeyExchangeInner::EcdhSm2(kp) => kp
                 .compute_shared_secret(peer_public)
+                .map_err(TlsError::CryptoError),
+            // RFC 8446 §7.4.1 — Z = peer_Y^x mod p, big-endian and
+            // left-padded to the prime length (`compute_shared_secret`
+            // does the padding + peer-key range validation).
+            KeyExchangeInner::Ffdhe(state) => state
+                .kp
+                .compute_shared_secret(&state.params, peer_public)
                 .map_err(TlsError::CryptoError),
             KeyExchangeInner::HybridX25519MlKem768 { mlkem, x25519_sk } => {
                 // peer_public = mlkem_ct(1088) || x25519_eph_pk(32) = 1120 bytes
@@ -307,6 +357,45 @@ mod tests {
     #[test]
     fn test_unsupported_group() {
         assert!(KeyExchange::generate(NamedGroup(0x9999)).is_err());
+    }
+
+    #[test]
+    fn test_key_exchange_ffdhe2048() {
+        // Phase I102 — RFC 7919 FFDHE. The key_share / shared secret
+        // are both left-padded to the group prime length (256 bytes
+        // for ffdhe2048).
+        let kx = KeyExchange::generate(NamedGroup::FFDHE2048).unwrap();
+        assert_eq!(kx.group(), NamedGroup::FFDHE2048);
+        assert_eq!(kx.public_key_bytes().len(), 256);
+
+        let peer = KeyExchange::generate(NamedGroup::FFDHE2048).unwrap();
+        let shared1 = kx.compute_shared_secret(peer.public_key_bytes()).unwrap();
+        let shared2 = peer.compute_shared_secret(kx.public_key_bytes()).unwrap();
+        assert_eq!(shared1, shared2);
+        assert_eq!(shared1.len(), 256);
+    }
+
+    #[test]
+    fn test_key_exchange_ffdhe3072() {
+        let kx = KeyExchange::generate(NamedGroup::FFDHE3072).unwrap();
+        assert_eq!(kx.group(), NamedGroup::FFDHE3072);
+        assert_eq!(kx.public_key_bytes().len(), 384);
+
+        let peer = KeyExchange::generate(NamedGroup::FFDHE3072).unwrap();
+        let shared1 = kx.compute_shared_secret(peer.public_key_bytes()).unwrap();
+        let shared2 = peer.compute_shared_secret(kx.public_key_bytes()).unwrap();
+        assert_eq!(shared1, shared2);
+        assert_eq!(shared1.len(), 384);
+    }
+
+    #[test]
+    fn test_key_exchange_ffdhe_rejects_out_of_range_peer() {
+        // A peer public value of 1 is outside the valid range [2, p-2]
+        // and must be rejected (RFC 7919 §5).
+        let kx = KeyExchange::generate(NamedGroup::FFDHE2048).unwrap();
+        let mut bad = vec![0u8; 256];
+        bad[255] = 1;
+        assert!(kx.compute_shared_secret(&bad).is_err());
     }
 
     #[cfg(feature = "tlcp")]
