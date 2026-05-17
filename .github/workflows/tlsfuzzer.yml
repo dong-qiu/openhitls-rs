@@ -437,6 +437,12 @@ jobs:
             # app-data-phase cases (see xfail/test-tls13-zero-content-
             # type.txt).
             test-tls13-zero-content-type.py
+            # T127 addition (1): (EC)DHE shared-secret padding across
+            # curves. 513 PASS — incl. all secp256r1/384r1/521r1 (P-384/
+            # P-521 ECDHE wired in I99); 3 XFAILs (ffdhe2048/3072 pending
+            # the FFDHE phase, x448 not in the default supported_groups —
+            # see xfail/test-tls13-dhe-shared-secret-padding.txt).
+            test-tls13-dhe-shared-secret-padding.py
           )
           # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
           # on $HITLS_PORT_12. The cipher arg `-C 49199` lives in

@@ -220,7 +220,7 @@ merge. No branch-protection change was needed: requiring `CI Gate`
 already requires every job in its `needs:` list.
 
 **Tier 2 — the full curated suite in `.github/workflows/tlsfuzzer.yml`.**
-All 50 curated script-runs run on `workflow_dispatch`, on a weekly
+All 51 curated script-runs run on `workflow_dispatch`, on a weekly
 schedule (Mon 06:00 UTC, sampled), and on a monthly schedule (1st
 07:00 UTC, full `-n 9999` sweep). This tier is **not** a required PR
 check — it exercises edge-case mutations that legitimately probe spec
@@ -486,3 +486,11 @@ one reviewed PR.
   `handshake/key_exchange.rs` (the curves were already in
   `hitls-crypto::ecdh`). `dhe-shared-secret-padding` 559/5 → 703/3,
   `ecdhe-curves` 4/33 → 6/33.
+
+- T127 — mass-fail triage batch-2 CI wiring.
+  `test-tls13-dhe-shared-secret-padding.py` joins the curated suite
+  (513 PASS / 3 XFAIL — `ffdhe2048`/`ffdhe3072` pending the FFDHE
+  phase, `x448` not in the default `supported_groups`). Completes the
+  mass-fail-triage effort: all ~10 T92-deferred scripts probed; 2 real
+  bugs fixed (T126, I99), 2 scripts added to CI, the rest triaged +
+  deferred. Suite size 50 → 51.

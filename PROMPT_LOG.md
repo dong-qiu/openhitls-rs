@@ -5955,3 +5955,31 @@ X448, group-not-advertised), `test-tls13-ecdhe-curves.py` 4/33 → 6/33
 
 Next: the batch-2 CI-wiring T-phase (add `dhe-shared-secret-padding`
 etc. to the curated suite), then ②–⑤.
+
+---
+
+## Phase T127 — mass-fail tlsfuzzer Triage, Batch 2 CI Wiring (2026-05-17)
+
+> 按此推进
+
+The batch-2 CI-wiring T-phase — closes the ① mass-fail-triage task.
+`test-tls13-dhe-shared-secret-padding.py` joins the curated TLS 1.3
+suite (513 PASS post-I99; 3 stable XFAILs — `ffdhe2048`/`ffdhe3072`
+pending the FFDHE phase, `x448` not in the default `supported_groups`).
+`run.sh` exit 0; actionlint clean; suite 50 → 51. Workflow + XFAIL +
+docs only — no Rust.
+
+**① mass-fail triage — complete.** All ~10 T92-deferred scripts probed
+across T126 / I99 / T127: 2 real bugs found and fixed (T126
+zero-content-type alert mapping; I99 secp384r1/secp521r1 ECDHE), 2
+scripts added to CI (`zero-content-type`, `dhe-shared-secret-padding`),
+`legacy-version` ruled won't-fix (RFC 8446 §4.2.1-correct), and the
+remaining deep scripts (`non-support`, `crfg-curves`,
+`shuffled-extentions`, `serverhello-random`, `large-number-of-extensions`,
+`unencrypted-alert`) triaged with a documented per-script disposition
+and deferred (each needs real protocol work — brainpool support,
+extension-order handling, OpenSSL-ism analysis — rather than a
+bulk-XFAIL into the gate).
+
+Recorded as DEV_LOG Phase T127. Task ② (`--tls auto` version-range
+server) follows.
