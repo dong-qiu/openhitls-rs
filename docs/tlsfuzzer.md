@@ -453,3 +453,10 @@ one reviewed PR.
   abruptly) and `with KeyUpdate` (interleaved KeyUpdate not tolerated
   in the post-handshake read loop) — are robustness gaps queued for a
   follow-up. Suite size 48 → 49.
+
+- I98 — closed the 2 T125 PHA XFAILs: `request_client_auth` now sends
+  a fatal alert on failure (RFC 8446 §6.2 — a malformed post-handshake
+  CertificateVerify yields `decrypt_error`, not a bare close) and
+  transparently consumes a KeyUpdate interleaved into the
+  post-handshake exchange (RFC 8446 §4.6.3).
+  `test-tls13-post-handshake-auth.py` is now **6/6** with no XFAILs.

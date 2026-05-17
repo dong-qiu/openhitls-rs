@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I97 (97 phases)
+- Implementation: I1–I98 (98 phases)
 - Testing: T1–T125 (117 phases, T64 + T121 skipped, T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F, T120 reserved for `psk_ke`; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -326,6 +326,7 @@ Category summary:
 | 314 | T122 | Test | `s-server --key-update` flag + tlsfuzzer wiring — a client request whose path contains `/keyupdate` triggers a server-initiated post-handshake KeyUpdate (`update_requested`); a plain `GET /` is echoed untouched so sanity steps still pass. New `--key-update` s-server instance (port 4454); `test-tls13-keyupdate-from-server.py` moved off the shared listener onto it and its 1 XFAIL closed (2/1 → 3/0). T121 (0-RTT acceptance) investigated and found void — pinned tlsfuzzer has no 0-RTT-acceptance script. PHA half deferred — probing surfaced a real `request_client_auth()` transcript bug, scoped as a follow-up I-phase | 2026-05-16 |
 | 315 | I97 | Impl | TLS 1.3 post-handshake-auth transcript fix — both sides computed the post-handshake CertificateVerify / Finished over `Hash(CertificateRequest ‖ Certificate[ ‖ CV])` instead of continuing the completed main-handshake transcript (RFC 8446 §4.4.1). The bug was symmetric (server `request_client_auth` + client post-HS CR handler) so they interoperated with each other but not with a conformant peer. `TranscriptHash` made `Clone`; `Server`/`ClientHandshake` retain the CH…client-Finished transcript; both sides now clone it as the post-handshake baseline. Verified: 1539 hitls-tls tests + tlsfuzzer `test-tls13-post-handshake-auth.py` 2/6 → 4/6 (residual 2 are unrelated: alert-on-failure + KeyUpdate-interleave). Surfaced by the T122 PHA probe | 2026-05-17 |
 | 316 | T125 | Test | PHA tlsfuzzer wiring — commits the `--post-handshake-auth` `s-server` flag (a `/secret`-path request triggers a post-handshake CertificateRequest, mirroring T122's `--key-update`) + a dedicated instance (port 4455) running `test-tls13-post-handshake-auth.py` in CI. 4 PASS / 2 XFAIL (`malformed signature in PHA` needs an alert-on-failure; `with KeyUpdate` needs interleaved-KeyUpdate tolerance — both queued for a follow-up I-phase). Curated suite 48 → 49 script-runs | 2026-05-17 |
+| 317 | I98 | Impl | PHA robustness — closes the 2 `test-tls13-post-handshake-auth.py` XFAILs from T125. (1) `request_client_auth` (sync + async) now sends a fatal alert via the T89 `send_fatal_alert_for_error_body!` path before returning any error, so a malformed post-handshake CertificateVerify yields a `decrypt_error` alert (RFC 8446 §6.2) instead of a bare close. (2) new `read_post_hs_skipping_key_update` transparently consumes a KeyUpdate interleaved into the post-handshake exchange (RFC 8446 §4.6.3) — `handle_key_update` rekeys + responds. `test-tls13-post-handshake-auth.py` 4/6 → **6/6** clean; XFAIL file deleted | 2026-05-17 |
 
 ---
 
@@ -18586,6 +18587,86 @@ follow-up Implementation phase.
 `hitls-cli` builds clean; `cargo test -p hitls-cli` 167/0. Curated
 tlsfuzzer suite: 48 → 49 script-runs. The PHA work (T122 probe → I97
 fix → T125 CI wiring) is complete bar the 2 XFAIL'd robustness gaps.
+
+---
+
+## Phase I98 — Post-Handshake-Auth Robustness: Alert-on-Failure + Interleaved-KeyUpdate Tolerance (2026-05-17)
+
+### Summary
+
+I98 closes the two `test-tls13-post-handshake-auth.py` XFAILs left by
+T125 — the last gaps in the post-handshake client authentication
+(PHA) work line (T122 probe → I96/I97 fixes → T125 CI wiring → I98
+robustness). Both are `request_client_auth` defects, distinct from the
+I97 transcript bug:
+
+1. **No alert on failure.** When `request_client_auth` rejected a
+   malformed post-handshake CertificateVerify, it returned `Err` and
+   the `s-server` echo loop dropped the connection — the peer saw a
+   bare TCP close. RFC 8446 §6.2 requires a fatal `decrypt_error`
+   alert.
+
+2. **Interleaved KeyUpdate not tolerated.** RFC 8446 §4.6.3 allows a
+   KeyUpdate at any point post-handshake. `request_client_auth`'s read
+   loop expected exactly Certificate / CertificateVerify / Finished
+   and errored on a KeyUpdate slipped into the exchange.
+
+### Code changes (sync `connection/server.rs` + async `connection_async.rs`)
+
+- **Alert-on-failure**: `request_client_auth` is now a thin wrapper
+  around `request_client_auth_inner`; on any `Err` it runs the T89
+  `send_fatal_alert_for_error_body!` macro (the same
+  `tls_error_to_alert` mapping the main read/handshake paths use)
+  before returning the error. A malformed CertificateVerify →
+  `verify_certificate_verify` returns an error string containing
+  `"decrypt_error"` → the wrapper emits a fatal `decrypt_error` (51).
+  Best-effort: a seal/write failure is swallowed (the caller closes
+  anyway).
+- **Interleaved KeyUpdate**: new `read_post_hs_skipping_key_update`
+  helper — reads a record, and if it is a `KeyUpdate` handshake
+  message, routes it to `handle_key_update` (which rekeys the read
+  side and, for `update_requested`, sends the matching response) and
+  reads again. `request_client_auth_inner`'s four post-handshake
+  record reads (Certificate / empty-cert Finished / CertificateVerify
+  / Finished) all go through it, so a KeyUpdate may interleave
+  anywhere in the exchange. The KeyUpdate is consumed transparently
+  and never fed to the PHA transcript (RFC 8446 §4.4.1 — KeyUpdate is
+  not a transcript message).
+
+No new connection state; `read_post_hs_skipping_key_update` composes
+the existing `read_record` + `handle_key_update`.
+
+### Verification
+
+- `cargo test -p hitls-tls --all-features --lib`: **1539 PASS / 0 FAIL**
+  (unchanged — the PHA roundtrip tests still pass). `cargo clippy
+  -p hitls-tls --all-features` `-D warnings`: 0; `cargo fmt`: clean.
+- End-to-end: `test-tls13-post-handshake-auth.py` through
+  `tests/tlsfuzzer/run.sh` against a `--post-handshake-auth` s-server
+  — **4/6 → 6/6 PASS** (0 XFAIL / 0 FAIL), `run.sh` exit 0.
+  `malformed signature in PHA` now sees the fatal `decrypt_error`
+  alert it expects; `post-handshake authentication with KeyUpdate`
+  completes through the interleaved KeyUpdate.
+- `tests/tlsfuzzer/xfail/test-tls13-post-handshake-auth.txt` deleted —
+  with both conversations PASSing, a stale XFAIL list would XPASS and
+  fail the gate.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/connection/server.rs` | Modified | `request_client_auth` alert wrapper + `_inner`; `read_post_hs_skipping_key_update`; 4 reads routed through it. |
+| `crates/hitls-tls/src/connection_async.rs` | Modified | Same for the async server connection. |
+| `tests/tlsfuzzer/xfail/test-tls13-post-handshake-auth.txt` | Deleted | Both XFAILs closed — script now 6/6. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 317 + Implementation summary I1–I97 → I1–I98. |
+| `PROMPT_LOG.md` | Modified | I98 prompt + result entry. |
+| `docs/tlsfuzzer.md` | Modified | PHA phase reference updated to 6/6. |
+
+### Build Status (Post I98)
+
+`hitls-tls` builds clean (`-D warnings`); lib tests 1539/0. The PHA
+work line (T122 → I96 → I97 → T125 → I98) is now complete:
+`test-tls13-post-handshake-auth.py` is 6/6 in CI with no XFAILs.
 
 
 

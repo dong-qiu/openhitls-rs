@@ -5765,3 +5765,41 @@ T125 done; T121 (0-RTT) dropped (no tlsfuzzer material). Remaining:
 T120 `psk_ke`, `--tls auto` version range, mass-fail-script triage,
 TLS 1.2 breadth, FFDHE, `s-server` DTLS — plus the PHA alert /
 KeyUpdate-interleave follow-up I-phase.
+
+---
+
+## Phase I98 — Post-Handshake-Auth Robustness: Alert-on-Failure + Interleaved-KeyUpdate Tolerance (2026-05-17)
+
+> 接着做 PHA 收尾 I-phase
+
+The robustness follow-up that closes the 2
+`test-tls13-post-handshake-auth.py` XFAILs left by T125 — the last
+gaps in the PHA work line (T122 probe → I96/I97 fixes → T125 CI
+wiring → I98).
+
+**Two `request_client_auth` fixes (sync + async)**:
+
+1. **Alert-on-failure** — `request_client_auth` is now a thin wrapper
+   around `request_client_auth_inner`; on any `Err` it runs the T89
+   `send_fatal_alert_for_error_body!` macro before returning. A
+   malformed post-handshake CertificateVerify now yields a fatal
+   `decrypt_error` alert (RFC 8446 §6.2) instead of a bare connection
+   close.
+2. **Interleaved-KeyUpdate tolerance** — new
+   `read_post_hs_skipping_key_update` reads a record and, if it is a
+   KeyUpdate, routes it to `handle_key_update` (rekey + respond) and
+   reads again. All four post-handshake record reads go through it, so
+   a KeyUpdate may interleave anywhere in the exchange (RFC 8446
+   §4.6.3).
+
+**Verification**: 1539 hitls-tls lib tests pass; clippy `-D warnings`
+0; fmt clean. End-to-end — `test-tls13-post-handshake-auth.py` through
+`run.sh` against a `--post-handshake-auth` s-server: **4/6 → 6/6**,
+0 XFAIL / 0 FAIL, exit 0. The T125 XFAIL file is deleted (a stale
+XFAIL list would XPASS and fail the gate). Recorded as DEV_LOG
+Phase I98.
+
+**The PHA work line is now complete** — `test-tls13-post-handshake-
+auth.py` is 6/6 in CI with no XFAILs. Server-side tlsfuzzer plan
+remaining: T120 `psk_ke`, `--tls auto`, mass-fail triage, TLS 1.2
+breadth, FFDHE, `s-server` DTLS.
