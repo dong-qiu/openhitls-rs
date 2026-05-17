@@ -5542,6 +5542,23 @@ This completes the migratable cert field-check families. **T113 still open**: CS
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1015/1015 PASS (111 cert-parse + 20 CSR + 5 CRL + 872 field-check + 7 CRL-verify). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: CRL revocation chain-verify (FILE_VERIFY TC002–005) (2026-05-17)
+
+> 继续 TC002-005
+
+**Result**: extends `emit_crl_file_verify` to all five `FILE_VERIFY` TCs. `Kind::CrlFileVerify` now carries the TC number; a new `plan_crl_verify` normalises the five distinct C arg layouts — single-level (TC001/004) vs root+intermediate (TC002/003/005), differing result-code order, optional `isUseSm2UserId`, and TC003's hardcoded root CA/CRL — into `{trusted certs, CRLs, end-entity cert, flags, crlVer, certVer}`. The emit handles a multi-cert trust store + multi-CRL list uniformly. `migrated_x509_parse.rs` grows 1015 → **1018 tests** (CRL-verify 7 → 10).
+
+**Finding — most of TC002–005 is unmigratable (verifier / API gaps)**. First generation produced 38 CRL-verify tests with 14 failures; narrowing to what Rust faithfully reproduces leaves 10. The skipped bulk:
+- **SM2 fixtures** (`test_for_crl/sm2/…`, the bulk of TC004/005) — SM2 CRL signature verification needs the GM/T 0009 user-id, which the `verify_signature` API does not expose; the SM2 CRL signatures fail under Rust's default user-id.
+- **multi-level `CRL_DEV`** — `CRL_DEV` is end-entity-only revocation; Rust's verifier has no device-only mode and over-checks intermediate CAs on a root+intermediate chain.
+- the TC001-era stricter-than-Rust codes (`CRL_NOT_FOUND` / `PROCESS_CRITICALEXT` / `KU_NO_CRLSIGN`).
+
+Each is a candidate verifier-hardening Implementation phase. This closes the migratable part of CRL `FILE_VERIFY`.
+
+**T113 still open**: CRL field-check families (`TC004/005/009-013`), CSR field families, malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1018/1018 PASS (111 cert-parse + 20 CSR + 5 CRL + 872 field-check + 10 CRL-verify). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 

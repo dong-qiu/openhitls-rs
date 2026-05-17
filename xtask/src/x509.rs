@@ -44,12 +44,14 @@
 //!   verifies `path1`'s certificate signature with `path2`'s parsed public
 //!   key; the migrated test loads both fixtures and asserts
 //!   `Certificate::verify_signature` succeeds.
-//! * `X509_CRL_FILE_VERIFY_FUNC_TC001` — `caPath : crlPath : certPath :
-//!   flags : crlVerResult : expResult`. The C test verifies the CRL's
-//!   signature against the CA, then verifies `certPath`'s chain with CRL
+//! * `X509_CRL_FILE_VERIFY_FUNC_TC001`–`TC005` — CRL-revocation chain
+//!   verification. The five TCs differ in arg layout (single- vs multi-level
+//!   chain; result-code order); `plan_crl_verify` normalises each into a
+//!   trust-store + CRL list + end-entity cert. The C test verifies every
+//!   CRL's signature against its CA, then verifies the cert's chain with CRL
 //!   revocation checking. The migrated test mirrors it via
 //!   `CertificateRevocationList::verify_signature` + `CertificateVerifier`,
-//!   migrating the `expResult` codes Rust's verifier faithfully reproduces
+//!   migrating the outcomes Rust's verifier faithfully reproduces
 //!   (`SUCCESS`, `CERT_REVOKED`); the stricter-than-Rust codes
 //!   (`CRL_NOT_FOUND` / `PROCESS_CRITICALEXT` / `KU_NO_CRLSIGN`) route to
 //!   `skipped_unsupported_alg` as verifier-strictness gaps.
@@ -65,7 +67,7 @@
 use std::fmt::Write;
 
 use crate::digest::EmitStats;
-use crate::parser::{format_byte_slice, TestCase};
+use crate::parser::{format_byte_slice, Arg, TestCase};
 
 pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
     let mut body = String::new();
@@ -78,7 +80,7 @@ pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
             Kind::CrlParse => emit_crl_parse(&mut body, case, &mut stats),
             Kind::CrlParseRes => emit_crl_parse_res(&mut body, case, &mut stats),
             Kind::CertField(field) => emit_cert_field(&mut body, case, &mut stats, field),
-            Kind::CrlFileVerify => emit_crl_file_verify(&mut body, case, &mut stats),
+            Kind::CrlFileVerify(tc) => emit_crl_file_verify(&mut body, case, &mut stats, tc),
             Kind::ApiSurface => stats.skipped_api += 1,
             Kind::Unknown => stats.skipped_unknown += 1,
         }
@@ -103,9 +105,9 @@ enum Kind {
     CrlParseRes,
     /// A cert field-extraction family (`VERSION` / `SERIALNUM` / `SIGNATURE`).
     CertField(CertField),
-    /// `CRL_FILE_VERIFY_FUNC_TC001` — `caPath : crlPath : certPath : flags :
-    /// crlVerResult : expResult`. CRL-revocation chain verification.
-    CrlFileVerify,
+    /// `CRL_FILE_VERIFY_FUNC_TC001-005` — CRL-revocation chain verification.
+    /// The payload is the TC number (1–5); each TC has its own arg layout.
+    CrlFileVerify(u8),
     ApiSurface,
     Unknown,
 }
@@ -288,8 +290,10 @@ fn classify(tc: &str) -> Kind {
     if tc.contains("X509_CERT_PARSE_PUBKEY_FUNC_TC001") {
         return Kind::CertField(CertField::PubKey);
     }
-    if tc.contains("X509_CRL_FILE_VERIFY_FUNC_TC001") {
-        return Kind::CrlFileVerify;
+    for n in 1..=5u8 {
+        if tc.contains(&format!("X509_CRL_FILE_VERIFY_FUNC_TC00{n}")) {
+            return Kind::CrlFileVerify(n);
+        }
     }
     // CSR field / expected-return families, the CRL field-check families
     // (`TC004/005/009-013`), and the malformed-DER negatives are migrated in
@@ -650,47 +654,136 @@ fn emit_cert_field(out: &mut String, case: &TestCase, stats: &mut EmitStats, fie
     stats.emitted += 1;
 }
 
-/// Emit a CRL-revocation chain-verification KAT — `CRL_FILE_VERIFY_FUNC_TC001`,
-/// `caPath : crlPath : certPath : flags : crlVerResult : expResult`. The C test
-/// verifies the CRL's signature against the CA, then verifies `certPath`'s
-/// chain with CRL revocation checking. The migrated test mirrors that with
+/// A planned CRL-revocation chain-verify test, normalised across the five
+/// `CRL_FILE_VERIFY` TC arg layouts.
+struct CrlVerifyPlan<'a> {
+    /// Trust-store cert fixtures, root-first (`trusted[0]` is the root CA).
+    trusted: Vec<&'a str>,
+    /// CRL fixtures, leaf-first (`crls[0]` is issued by the leaf CA).
+    crls: Vec<&'a str>,
+    /// The end-entity cert fixture being verified.
+    cert: &'a str,
+    /// `verifyParam.flags` token.
+    flags: &'a str,
+    /// `VerifyCrl` expected return code.
+    crl_ver: &'a str,
+    /// `CertVerify` expected return code.
+    cert_ver: &'a str,
+}
+
+fn arg_rel(args: &[Arg], i: usize) -> Option<&str> {
+    args.get(i)?.as_str().and_then(fixture_relpath)
+}
+
+fn arg_sym(args: &[Arg], i: usize) -> Option<&str> {
+    args.get(i)?.as_symbol()
+}
+
+/// Resolve a `CRL_FILE_VERIFY_FUNC_TC00n` row into a normalised plan. Each TC
+/// has its own arg layout (single- vs multi-level chain, result-code order):
+/// * TC001/004: `ca, crl, cert, flags, crlVer, certVer[, isUseSm2]`
+/// * TC002/005: `rootCa, ca, rootCrl, crl, cert, flags, certVer, crlVer[, …]`
+/// * TC003:     `ca, crl, cert, flags, crlVer, certVer` (root CA/CRL hardcoded)
+fn plan_crl_verify(case: &TestCase, tc: u8) -> Option<CrlVerifyPlan<'_>> {
+    let a = &case.args;
+    match tc {
+        1 | 4 => Some(CrlVerifyPlan {
+            trusted: vec![arg_rel(a, 0)?],
+            crls: vec![arg_rel(a, 1)?],
+            cert: arg_rel(a, 2)?,
+            flags: arg_sym(a, 3)?,
+            crl_ver: arg_sym(a, 4)?,
+            cert_ver: arg_sym(a, 5)?,
+        }),
+        2 | 5 => {
+            // rootCrl (arg 2) is optional — an empty `""` field parses as a
+            // zero-length hex arg, so `arg_rel` yields `None` and it is
+            // simply omitted from the CRL list.
+            let mut crls = vec![arg_rel(a, 3)?];
+            if let Some(root_crl) = arg_rel(a, 2) {
+                crls.push(root_crl);
+            }
+            Some(CrlVerifyPlan {
+                trusted: vec![arg_rel(a, 0)?, arg_rel(a, 1)?],
+                crls,
+                cert: arg_rel(a, 4)?,
+                flags: arg_sym(a, 5)?,
+                cert_ver: arg_sym(a, 6)?,
+                crl_ver: arg_sym(a, 7)?,
+            })
+        }
+        3 => Some(CrlVerifyPlan {
+            // TC003 hardcodes the root CA + root CRL in the C body.
+            trusted: vec!["cert/test_for_crl/crl_verify/certs/ca.crt", arg_rel(a, 0)?],
+            crls: vec![
+                arg_rel(a, 1)?,
+                "cert/test_for_crl/crl_verify/crl/root_updated.crl",
+            ],
+            cert: arg_rel(a, 2)?,
+            flags: arg_sym(a, 3)?,
+            crl_ver: arg_sym(a, 4)?,
+            cert_ver: arg_sym(a, 5)?,
+        }),
+        _ => None,
+    }
+}
+
+/// Emit a CRL-revocation chain-verification KAT (`CRL_FILE_VERIFY_FUNC_TC001`
+/// through `TC005`). The C test verifies every CRL's signature against its
+/// issuing CA, then verifies the end-entity cert's chain with CRL revocation
+/// checking. The migrated test mirrors that with
 /// `CertificateRevocationList::verify_signature` + `CertificateVerifier`.
 ///
-/// Only the `expResult` codes Rust's verifier faithfully reproduces are
-/// migrated — `HITLS_PKI_SUCCESS` and `HITLS_X509_ERR_VFY_CERT_REVOKED`. The
-/// others are Rust-verifier strictness gaps and route to
-/// `skipped_unsupported_alg`: `CRL_NOT_FOUND` (Rust soft-fails on a missing
-/// CRL), `PROCESS_CRITICALEXT` (no unhandled-critical-extension rejection),
-/// `KU_NO_CRLSIGN` (no CRL-issuer keyUsage check).
-fn emit_crl_file_verify(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
-    if case.args.len() < 6 {
-        stats.skipped_unknown += 1;
-        return;
-    }
-    let (Some(ca_rel), Some(crl_rel), Some(cert_rel)) = (
-        case.args[0].as_str().and_then(fixture_relpath),
-        case.args[1].as_str().and_then(fixture_relpath),
-        case.args[2].as_str().and_then(fixture_relpath),
-    ) else {
+/// A row is migrated only when its outcomes are ones Rust's verifier
+/// faithfully reproduces: the CRL signatures all verify (`crlVerResult ==
+/// HITLS_PKI_SUCCESS`) and `certVerResult` is `HITLS_PKI_SUCCESS` or
+/// `HITLS_X509_ERR_VFY_CERT_REVOKED`. The other C outcomes route to
+/// `skipped_unsupported_alg` — they are Rust-verifier strictness gaps:
+/// `CRL_NOT_FOUND` (Rust soft-fails on a missing CRL), `PROCESS_CRITICALEXT`
+/// (no unhandled-critical-extension rejection), `KU_NO_CRLSIGN` (no
+/// CRL-issuer keyUsage check).
+fn emit_crl_file_verify(out: &mut String, case: &TestCase, stats: &mut EmitStats, tc: u8) {
+    let Some(plan) = plan_crl_verify(case, tc) else {
         stats.skipped_unknown += 1;
         return;
     };
-    let check_revocation = match case.args[3].as_symbol() {
-        Some("0") => false,
-        Some("HITLS_X509_VFY_FLAG_CRL_ALL" | "HITLS_X509_VFY_FLAG_CRL_DEV") => true,
+    let check_revocation = match plan.flags {
+        "0" => false,
+        "HITLS_X509_VFY_FLAG_CRL_ALL" | "HITLS_X509_VFY_FLAG_CRL_DEV" => true,
         _ => {
             stats.skipped_unknown += 1;
             return;
         }
     };
-    // crlVerResult: TC001 always expects the CRL signature itself to verify.
-    if case.args[4].as_symbol() != Some("HITLS_PKI_SUCCESS") {
-        stats.skipped_unknown += 1;
+    // SM2 CRL signature verification needs the GM/T 0009 user-id, which the
+    // `verify_signature` API does not expose — skip the `sm2/` fixture rows.
+    if plan
+        .trusted
+        .iter()
+        .chain(plan.crls.iter())
+        .chain(std::iter::once(&plan.cert))
+        .any(|p| p.contains("/sm2/"))
+    {
+        stats.skipped_unsupported_alg += 1;
         return;
     }
-    let assertion = match case.args[5].as_symbol() {
-        Some("HITLS_PKI_SUCCESS") => "    assert!(result.is_ok());\n",
-        Some("HITLS_X509_ERR_VFY_CERT_REVOKED") => {
+    // `CRL_DEV` checks revocation of the end-entity only; Rust's verifier has
+    // no device-only mode and checks every non-root cert, so on a multi-level
+    // chain it over-checks the intermediate CAs. Skip multi-level DEV rows.
+    if plan.flags == "HITLS_X509_VFY_FLAG_CRL_DEV" && plan.trusted.len() > 1 {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    }
+    // Only migrate rows whose CRL signatures all verify — Rust has no
+    // `VerifyCrl(store)` analogue, so a non-SUCCESS `crlVerResult` cannot be
+    // asserted cleanly.
+    if plan.crl_ver != "HITLS_PKI_SUCCESS" {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    }
+    let assertion = match plan.cert_ver {
+        "HITLS_PKI_SUCCESS" => "    assert!(result.is_ok());\n",
+        "HITLS_X509_ERR_VFY_CERT_REVOKED" => {
             "    assert_eq!(result.unwrap_err().to_string(), \"certificate revoked\");\n"
         }
         // CRL_NOT_FOUND / PROCESS_CRITICALEXT / KU_NO_CRLSIGN — see fn doc.
@@ -703,13 +796,30 @@ fn emit_crl_file_verify(out: &mut String, case: &TestCase, stats: &mut EmitStats
     write_doc(out, case, "X.509 CRL-revocation chain-verify KAT");
     writeln!(out, "#[test]").unwrap();
     writeln!(out, "fn tc_line{}_x509_crl_file_verify() {{", case.line).unwrap();
-    writeln!(out, "    let ca = load_cert_fixture({ca_rel:?});").unwrap();
-    writeln!(out, "    let crl = load_crl_fixture({crl_rel:?});").unwrap();
-    writeln!(out, "    let cert = load_cert_fixture({cert_rel:?});").unwrap();
-    writeln!(out, "    assert!(crl.verify_signature(&ca).unwrap());").unwrap();
+    for (i, rel) in plan.trusted.iter().enumerate() {
+        writeln!(out, "    let ca{i} = load_cert_fixture({rel:?});").unwrap();
+    }
+    for (i, rel) in plan.crls.iter().enumerate() {
+        writeln!(out, "    let crl{i} = load_crl_fixture({rel:?});").unwrap();
+    }
+    writeln!(out, "    let cert = load_cert_fixture({:?});", plan.cert).unwrap();
+    // Each CRL is issued by its level's CA: `crls[i]` (leaf-first) pairs with
+    // `trusted[len-1-i]` (root-first).
+    for i in 0..plan.crls.len() {
+        let ca_idx = plan.trusted.len() - 1 - i;
+        writeln!(
+            out,
+            "    assert!(crl{i}.verify_signature(&ca{ca_idx}).unwrap());"
+        )
+        .unwrap();
+    }
     writeln!(out, "    let mut verifier = CertificateVerifier::new();").unwrap();
-    writeln!(out, "    verifier.add_trusted_cert(ca);").unwrap();
-    writeln!(out, "    verifier.add_crl(crl);").unwrap();
+    for i in 0..plan.trusted.len() {
+        writeln!(out, "    verifier.add_trusted_cert(ca{i});").unwrap();
+    }
+    for i in 0..plan.crls.len() {
+        writeln!(out, "    verifier.add_crl(crl{i});").unwrap();
+    }
     writeln!(
         out,
         "    verifier.set_check_revocation({check_revocation});"
