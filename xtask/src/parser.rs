@@ -13,6 +13,9 @@ pub struct TestCase {
 #[derive(Debug, Clone)]
 pub enum Arg {
     Hex(Vec<u8>),
+    /// A quoted field whose body is not valid hex — e.g. a file path
+    /// (`"../testdata/cert/foo.der"`) in the PKI SDV `.data` files.
+    Str(String),
     Symbol(String),
 }
 
@@ -27,6 +30,14 @@ impl Arg {
     pub fn as_symbol(&self) -> Option<&str> {
         match self {
             Arg::Symbol(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// The text of a quoted non-hex field (`Arg::Str`).
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Arg::Str(s) => Some(s),
             _ => None,
         }
     }
@@ -157,12 +168,13 @@ fn parse_tc_line(line: &str, line_no: usize) -> Result<(String, Vec<Arg>), Parse
     for (i, raw) in fields.iter().enumerate() {
         let field = raw.trim();
         if field.starts_with('"') && field.ends_with('"') {
-            let hex_body = &field[1..field.len() - 1];
-            let bytes = parse_hex(hex_body).map_err(|m| ParseError {
-                line: line_no,
-                msg: format!("arg #{}: {m}", i + 1),
-            })?;
-            args.push(Arg::Hex(bytes));
+            let body = &field[1..field.len() - 1];
+            // A quoted field is hex if it decodes cleanly; otherwise it is
+            // a string literal (a file path, a format token in quotes, …).
+            match parse_hex(body) {
+                Ok(bytes) => args.push(Arg::Hex(bytes)),
+                Err(_) => args.push(Arg::Str(body.to_string())),
+            }
         } else if field.is_empty() {
             return Err(ParseError {
                 line: line_no,
@@ -255,9 +267,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_odd_hex_length() {
+    fn odd_hex_length_is_a_string_arg() {
+        // A quoted field that is not valid hex (here: odd length) is no
+        // longer a parse error — it parses as a string literal (`Arg::Str`),
+        // which is how PKI `.data` file-path arguments are carried.
         let line = r#"SDV_X:"abc""#;
-        assert!(parse_tc_line(line, 42).is_err());
+        let (_, args) = parse_tc_line(line, 42).unwrap();
+        assert_eq!(args[0].as_str(), Some("abc"));
+        assert_eq!(args[0].as_hex(), None);
+    }
+
+    #[test]
+    fn quoted_file_path_is_a_string_arg() {
+        let line = r#"SDV_X:BSL_FORMAT_PEM:"../testdata/cert/foo.pem""#;
+        let (_, args) = parse_tc_line(line, 1).unwrap();
+        assert_eq!(args[0].as_symbol(), Some("BSL_FORMAT_PEM"));
+        assert_eq!(args[1].as_str(), Some("../testdata/cert/foo.pem"));
     }
 
     #[test]
