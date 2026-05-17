@@ -5430,6 +5430,20 @@ With this, plan §2.4 acceptance is met for **Phase A**: xtask on main; 9 `tests
 
 This is Phase C §4.1 — fixture-corpus prep, the analogue of the T111 xtask scaffold. The formal **T113** DEV_LOG phase entry is written when the Phase C test migration (§4.2 parametrised loader + the negative-parse families) lands; this commit is data-only (no Rust source).
 
+## Phase T113 — Phase C §4.2: X.509 cert-parse KAT (first family) (2026-05-17)
+
+> 继续4.2
+
+**Result**: opens the formal **T113** phase. New `xtask/src/x509.rs` migrates `X509_CERT_PARSE_FUNC_TC001` (positive cert-parse) from `pki/cert/test_suite_sdv_x509_cert.data` — 111 tests into `crates/hitls-pki/tests/migrated_x509_parse.rs` (1162 TC rows: 111 emitted, 1047 API-surface, 4 unknown). Each test `std::fs::read`s the mirrored fixture (`tests/vectors/c-asn1-fixtures/`, from §4.1 / PR #88) and asserts `Certificate::from_der`/`from_pem` returns `Ok`.
+
+**Parser enhancement**: PKI `.data` rows quote *file paths* (`"../testdata/cert/foo.der"`), not hex. `parse_tc_line` now decodes a quoted field as hex when it can and falls back to a new `Arg::Str` variant otherwise — backward-compatible (every crypto algorithm's quoted fields are valid hex; all 9 `--check` still up-to-date).
+
+**xtask multi-output**: the migrate dispatch already maps each algorithm to its own output path — `x509-parse` writes into `crates/hitls-pki/tests/` (not `hitls-crypto/`), since cert parsing is `hitls-pki`'s `Certificate` API.
+
+**T113 not closed**: `x509_cert.data` has ≈1000 more rows in the signature / pubkey / sig-alg field-check families, plus CSR (`x509_csr.data`), CRL (`x509_crl_rfc5280.data`), and the malformed-DER negatives — subsequent T113 commits.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 111/111 PASS. `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date; all 9 crypto algos still up-to-date. `cargo clippy -p xtask -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 

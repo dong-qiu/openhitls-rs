@@ -7,6 +7,7 @@ mod mac;
 mod parser;
 mod sm2;
 mod sm4;
+mod x509;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -120,9 +121,14 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_sm2.rs"),
             sm2::emit_sm2_kat,
         ),
+        "x509-parse" => (
+            vec![c_root.join("pki/cert/test_suite_sdv_x509_cert.data")],
+            workspace_root()?.join("crates/hitls-pki/tests/migrated_x509_parse.rs"),
+            x509::emit_x509_kat,
+        ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, x509-parse"
             )
             .into());
         }
