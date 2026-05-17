@@ -5492,6 +5492,18 @@ This is Phase C §4.1 — fixture-corpus prep, the analogue of the T111 xtask sc
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 636/636 PASS (111 cert-parse + 20 CSR + 5 CRL + 500 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: cert signature-algorithm family (2026-05-17)
+
+> 继续完成剩余 T113 cert 字段族
+
+**Result**: extends `xtask/src/x509.rs` with the cert `SIGNALG` family — `X509_CERT_PARSE_SIGNALG_FUNC` (93). The `CertField` enum gains a `SigAlg` variant; `emit_cert_field` maps the row's `BSL_CID_*` token to OID arcs (`cid_to_oid_arcs`, 5 entries: ECDSA-SHA256 / Ed25519 / RSASSA-PSS / SHA256-RSA / SM2-SM3), DER-encodes them to raw OID value bytes (`oid_der_value`), and asserts against `Certificate::signature_algorithm`. `migrated_x509_parse.rs` grows 636 → **729 tests** (+93).
+
+**API gap — `TBS_SIGNALG`**: the companion `X509_CERT_PARSE_TBS_SIGNALG_FUNC` family (~92 rows) is **not** migrated — `from_der` parses the TBS inner AlgorithmIdentifier but discards it (`_inner_sig_oid`), so `Certificate` exposes no field for it. RFC 5280 §4.1.1.2 mandates it equal the outer `signatureAlgorithm`; routed to `ApiSurface`. Exposing a `tbs_signature_algorithm` field is a trivial future Implementation change that would unlock those rows.
+
+**T113 still open**: remaining cert field-check families (issuer / subject / pubkey ~470 rows), CSR field families, CRL field-check families (`TC004/005/009-013`), and the malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 729/729 PASS (111 cert-parse + 20 CSR + 5 CRL + 593 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 

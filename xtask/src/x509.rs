@@ -31,12 +31,17 @@
 //!   `Certificate::not_before` / `not_after` (an `i64` Unix timestamp); the
 //!   expected literal is computed at generation time by `civil_to_unix`, a
 //!   copy of the ASN.1 decoder's own civil-date → epoch formula.
+//! * `X509_CERT_PARSE_SIGNALG_FUNC` — `path : BSL_CID_sigalg : …`. The
+//!   migrated test asserts `Certificate::signature_algorithm` (the raw OID
+//!   value bytes); the `BSL_CID_*` token is mapped to OID arcs and DER-encoded
+//!   at generation time. The trailing PSS hash/MGF/salt args are not ported.
 //!
 //! For cert/CSR, `format` is a `BSL_FORMAT_*` token: `ASN1` → DER, `PEM` →
 //! PEM; the C `UNKNOWN` (auto-detect) format has no Rust equivalent and routes
-//! to `skipped_unknown`. The remaining cert field-check families (sig-alg /
-//! issuer / subject / pubkey) and the malformed-DER negatives are future
-//! increments and route to `ApiSurface` for now.
+//! to `skipped_unknown`. The remaining cert field-check families (issuer /
+//! subject / pubkey), the `TBS_SIGNALG` family (the TBS inner
+//! AlgorithmIdentifier is not exposed by `Certificate`) and the malformed-DER
+//! negatives are future increments / API gaps and route to `ApiSurface`.
 
 use std::fmt::Write;
 
@@ -97,6 +102,10 @@ enum CertField {
     NotBefore,
     /// `X509_CERT_PARSE_END_TIME_FUNC` — `path : year:month:day:hour:min:sec`.
     NotAfter,
+    /// `X509_CERT_PARSE_SIGNALG_FUNC` — `path : BSL_CID_sigalg : …`. Only the
+    /// signature-algorithm OID is asserted; the trailing PSS hash/MGF/salt
+    /// args are not ported (they live in `signature_params`, raw DER).
+    SigAlg,
 }
 
 impl CertField {
@@ -109,8 +118,40 @@ impl CertField {
             CertField::Signature => "signature",
             CertField::NotBefore => "not_before",
             CertField::NotAfter => "not_after",
+            CertField::SigAlg => "signature_algorithm",
         }
     }
+}
+
+/// Map an openHiTLS `BSL_CID_*` signature-algorithm token to the OID arc
+/// list. Covers every signature algorithm appearing in the SDV cert SDV
+/// `SIGNALG` family; an unrecognised CID routes to `skipped_unsupported_alg`.
+fn cid_to_oid_arcs(cid: &str) -> Option<&'static [u32]> {
+    Some(match cid {
+        "BSL_CID_ECDSAWITHSHA256" => &[1, 2, 840, 10045, 4, 3, 2],
+        "BSL_CID_ED25519" => &[1, 3, 101, 112],
+        "BSL_CID_RSASSAPSS" => &[1, 2, 840, 113549, 1, 1, 10],
+        "BSL_CID_SHA256WITHRSAENCRYPTION" => &[1, 2, 840, 113549, 1, 1, 11],
+        "BSL_CID_SM2DSAWITHSM3" => &[1, 2, 156, 10197, 1, 501],
+        _ => return None,
+    })
+}
+
+/// Encode an OID arc list to its DER *value* bytes (no tag/length) — matches
+/// what the ASN.1 decoder's `read_oid` returns into `signature_algorithm`.
+fn oid_der_value(arcs: &[u32]) -> Vec<u8> {
+    let mut out = vec![(arcs[0] * 40 + arcs[1]) as u8];
+    for &arc in &arcs[2..] {
+        let mut group = vec![(arc & 0x7f) as u8];
+        let mut v = arc >> 7;
+        while v > 0 {
+            group.push(((v & 0x7f) as u8) | 0x80);
+            v >>= 7;
+        }
+        group.reverse();
+        out.extend(group);
+    }
+    out
 }
 
 /// Civil date (UTC) → Unix epoch seconds — the exact formula used by the
@@ -184,10 +225,15 @@ fn classify(tc: &str) -> Kind {
     if tc.contains("X509_CERT_PARSE_END_TIME_FUNC") {
         return Kind::CertField(CertField::NotAfter);
     }
-    // The remaining cert field-check families (sig-alg / issuer / subject /
-    // pubkey), CSR field / expected-return families, the CRL field-check
+    if tc.contains("X509_CERT_PARSE_SIGNALG_FUNC") {
+        return Kind::CertField(CertField::SigAlg);
+    }
+    // The remaining cert field-check families (tbs-sig-alg / issuer / subject
+    // / pubkey), CSR field / expected-return families, the CRL field-check
     // families (`TC004/005/009-013`), and the malformed-DER negatives are
-    // migrated in later Phase C increments.
+    // migrated in later Phase C increments. `TBS_SIGNALG_FUNC` is an API gap:
+    // the TBS inner AlgorithmIdentifier is parsed but not exposed by
+    // `Certificate` (RFC 5280 §4.1.1.2 mandates it equal the outer one).
     if tc.contains("X509_") || tc.contains("CERT_") {
         return Kind::ApiSurface;
     }
@@ -443,6 +489,20 @@ fn emit_cert_field(out: &mut String, case: &TestCase, stats: &mut EmitStats, fie
                 d[3],
                 d[4],
                 d[5],
+            )
+        }
+        CertField::SigAlg => {
+            let Some(cid) = case.args[1].as_symbol() else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            let Some(arcs) = cid_to_oid_arcs(cid) else {
+                stats.skipped_unsupported_alg += 1;
+                return;
+            };
+            format!(
+                "    assert_eq!(cert.signature_algorithm.as_slice(), {}); // {cid}\n",
+                format_byte_slice(&oid_der_value(arcs))
             )
         }
     };
