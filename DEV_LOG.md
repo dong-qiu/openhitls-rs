@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I97 (97 phases)
-- Testing: T1–T124 (116 phases, T64 skipped + T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F + T120–T121 reserved for in-flight tlsfuzzer server-side phases; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms)
+- Testing: T1–T125 (117 phases, T64 + T121 skipped, T112–T116 reserved for `docs/c-test-migration-plan.md` Phase B–F, T120 reserved for `psk_ke`; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -325,6 +325,7 @@ Category summary:
 | 313 | T123 | Test | tlsfuzzer ECDSA cert-matrix expansion — added ECDSA P-384 + P-521 server-cert instances (ports 4452/4453) to `tlsfuzzer.yml`, each running `test-tls13-ecdsa-support.py` so the secp384r1 / secp521r1 CertificateVerify sign paths are exercised end-to-end; per-cert XFAIL dirs `xfail-ecdsa-p384/` + `xfail-ecdsa-p521/` (5 entries each — non-matching-curve + brainpool conversations a single cert structurally can't satisfy). Both gate at 5 PASS / 5 XFAIL / 0 FAIL. Workflow + XFAIL files only — no Rust change. Depends on I96 (P-521 sign support) | 2026-05-16 |
 | 314 | T122 | Test | `s-server --key-update` flag + tlsfuzzer wiring — a client request whose path contains `/keyupdate` triggers a server-initiated post-handshake KeyUpdate (`update_requested`); a plain `GET /` is echoed untouched so sanity steps still pass. New `--key-update` s-server instance (port 4454); `test-tls13-keyupdate-from-server.py` moved off the shared listener onto it and its 1 XFAIL closed (2/1 → 3/0). T121 (0-RTT acceptance) investigated and found void — pinned tlsfuzzer has no 0-RTT-acceptance script. PHA half deferred — probing surfaced a real `request_client_auth()` transcript bug, scoped as a follow-up I-phase | 2026-05-16 |
 | 315 | I97 | Impl | TLS 1.3 post-handshake-auth transcript fix — both sides computed the post-handshake CertificateVerify / Finished over `Hash(CertificateRequest ‖ Certificate[ ‖ CV])` instead of continuing the completed main-handshake transcript (RFC 8446 §4.4.1). The bug was symmetric (server `request_client_auth` + client post-HS CR handler) so they interoperated with each other but not with a conformant peer. `TranscriptHash` made `Clone`; `Server`/`ClientHandshake` retain the CH…client-Finished transcript; both sides now clone it as the post-handshake baseline. Verified: 1539 hitls-tls tests + tlsfuzzer `test-tls13-post-handshake-auth.py` 2/6 → 4/6 (residual 2 are unrelated: alert-on-failure + KeyUpdate-interleave). Surfaced by the T122 PHA probe | 2026-05-17 |
+| 316 | T125 | Test | PHA tlsfuzzer wiring — commits the `--post-handshake-auth` `s-server` flag (a `/secret`-path request triggers a post-handshake CertificateRequest, mirroring T122's `--key-update`) + a dedicated instance (port 4455) running `test-tls13-post-handshake-auth.py` in CI. 4 PASS / 2 XFAIL (`malformed signature in PHA` needs an alert-on-failure; `with KeyUpdate` needs interleaved-KeyUpdate tolerance — both queued for a follow-up I-phase). Curated suite 48 → 49 script-runs | 2026-05-17 |
 
 ---
 
@@ -18497,6 +18498,94 @@ with `decrypt_error` until the fix.
 I97). Follow-up: a Testing phase wires `test-tls13-post-handshake-auth.py`
 into CI behind a `--post-handshake-auth` s-server flag; the 2 residual
 FAILs (alert-on-failure, KeyUpdate-interleave) are separate fixes.
+
+---
+
+## Phase T125 — PHA tlsfuzzer Wiring: `--post-handshake-auth` s-server Flag + CI Coverage (2026-05-17)
+
+### Summary
+
+T125 is the Testing-phase wrap-up of the PHA work begun in T122 and
+fixed in I97. It commits the `--post-handshake-auth` `s-server` flag
+(used as a *temporary, uncommitted* probe during I97's verification)
+and wires tlsfuzzer's `test-tls13-post-handshake-auth.py` into the
+curated suite against a dedicated instance.
+
+Mirrors T122's `--key-update` structure exactly: the flag makes the
+TLS 1.3 echo loop watch for a request-path marker — `/secret` here —
+and on a match call `request_client_auth()` (the I97-fixed
+post-handshake CertificateRequest path). A plain `GET /` matches
+nothing, so sanity steps are unaffected; the discriminator is the
+request path, not the presence of application data. TLS 1.3 only
+(rejected up front for a `--tls 1.2` listener).
+
+### Code changes
+
+**`crates/hitls-cli/src/main.rs`** — new `--post-handshake-auth` bool
+flag on `SServer`, threaded into `s_server::run(...)`.
+
+**`crates/hitls-cli/src/s_server.rs`** — `run()` gains a
+`post_handshake_auth` parameter; the TLS-1.2-rejection check covers
+both `--key-update` and `--post-handshake-auth`; `handle_connection_tls13`
+gains the `/secret` → `conn.request_client_auth()` branch. 3 existing
+`run()` unit tests updated for the new arity.
+
+**`.github/workflows/tlsfuzzer.yml`** — new `HITLS_PORT_PHA: 4455` +
+a `--post-handshake-auth` s-server instance; new `scripts_pha` array +
+run loop passing the client identity (`-k`/`-c`, reusing the existing
+mTLS client cert); wait/stop/upload lists extended.
+
+**`tests/tlsfuzzer/args/test-tls13-post-handshake-auth.txt`** (added) —
+`--pha-as-reply`, so tlsfuzzer expects the CertificateRequest as a
+reply to its `GET /secret` query (matching the server's path-trigger
+model) rather than unsolicited after the handshake.
+
+**`tests/tlsfuzzer/xfail/test-tls13-post-handshake-auth.txt`** (added) —
+2 XFAILs with per-entry rationale + next-step:
+
+- `malformed signature in PHA` — `request_client_auth` correctly
+  rejects a bad CertificateVerify signature but returns `Err` and the
+  s-server drops the connection; tlsfuzzer expects a fatal
+  `decrypt_error` alert (RFC 8446 §6.2). Fix: extend the T89
+  alert-before-close discipline to the post-handshake path.
+- `post-handshake authentication with KeyUpdate` — the conversation
+  interleaves a KeyUpdate into the post-handshake exchange;
+  `request_client_auth`'s read loop expects exactly
+  Certificate/CertificateVerify/Finished and errors on it. Fix: the
+  post-handshake read loop must process an interleaved KeyUpdate.
+
+Both are distinct robustness gaps (not transcript bugs), queued for a
+follow-up Implementation phase.
+
+### Verification
+
+- `cargo build --release -p hitls-cli`: clean;
+  `cargo test -p hitls-cli --all-features --bins`: 167 PASS / 0 FAIL.
+- `cargo clippy --workspace --all-features --all-targets` with
+  `-D warnings`: 0; `cargo fmt`: clean; `actionlint`: no errors (only
+  the pre-existing SC2129 style nits in the server-startup step).
+- End-to-end: `test-tls13-post-handshake-auth.py` driven through
+  `tests/tlsfuzzer/run.sh` against a `--post-handshake-auth` s-server
+  — **4 PASS / 2 XFAIL / 0 FAIL / 0 XPASS**, `run.sh` exit 0.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-cli/src/main.rs` | Modified | `--post-handshake-auth` flag. |
+| `crates/hitls-cli/src/s_server.rs` | Modified | `run()` param + 1.2 reject; `/secret` branch in `handle_connection_tls13`; 3 tests re-arity'd. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | PHA instance (port 4455); `scripts_pha` array + run loop; wait/stop/upload lists. |
+| `tests/tlsfuzzer/args/test-tls13-post-handshake-auth.txt` | Added | `--pha-as-reply`. |
+| `tests/tlsfuzzer/xfail/test-tls13-post-handshake-auth.txt` | Added | 2 XFAILs (alert-on-failure, KeyUpdate-interleave). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 316 + Testing summary. |
+| `PROMPT_LOG.md` | Modified | T125 prompt + result entry. |
+| `docs/tlsfuzzer.md` | Modified | Suite count 48 → 49; T125 phase reference. |
+
+### Build Status (Post T125)
+
+`hitls-cli` builds clean; `cargo test -p hitls-cli` 167/0. Curated
+tlsfuzzer suite: 48 → 49 script-runs. The PHA work (T122 probe → I97
+fix → T125 CI wiring) is complete bar the 2 XFAIL'd robustness gaps.
 
 
 

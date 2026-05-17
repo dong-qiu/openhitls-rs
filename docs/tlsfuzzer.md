@@ -220,7 +220,7 @@ merge. No branch-protection change was needed: requiring `CI Gate`
 already requires every job in its `needs:` list.
 
 **Tier 2 — the full curated suite in `.github/workflows/tlsfuzzer.yml`.**
-All 48 curated script-runs run on `workflow_dispatch`, on a weekly
+All 49 curated script-runs run on `workflow_dispatch`, on a weekly
 schedule (Mon 06:00 UTC, sampled), and on a monthly schedule (1st
 07:00 UTC, full `-n 9999` sweep). This tier is **not** a required PR
 check — it exercises edge-case mutations that legitimately probe spec
@@ -438,3 +438,18 @@ one reviewed PR.
   `request_client_auth()` post-handshake transcript needs a `hitls-tls`
   fix first (RFC 8446 §4.4.1). Suite size unchanged at 48 (the
   KeyUpdate script was relocated, not added).
+
+- I97 / T125 — post-handshake client authentication (PHA). **I97**
+  fixed a real RFC 8446 §4.4.1 bug: the post-handshake
+  CertificateVerify was hashed over `CertificateRequest ‖ Certificate`
+  alone instead of continuing the main-handshake transcript — a
+  *symmetric* bug, so our client and server agreed with each other but
+  not with a conformant peer. **T125** then committed the
+  `--post-handshake-auth` `s-server` flag (a `/secret`-path request
+  triggers a post-handshake CertificateRequest) and wired
+  `test-tls13-post-handshake-auth.py` into CI on a dedicated instance
+  (port 4455): 4 PASS / 2 XFAIL. The 2 XFAILs — `malformed signature
+  in PHA` (server should send a fatal `decrypt_error` alert, not close
+  abruptly) and `with KeyUpdate` (interleaved KeyUpdate not tolerated
+  in the post-handshake read loop) — are robustness gaps queued for a
+  follow-up. Suite size 48 → 49.

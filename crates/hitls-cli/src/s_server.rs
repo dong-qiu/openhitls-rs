@@ -22,13 +22,14 @@ pub fn run(
     psk_hex: Option<&str>,
     psk_identity: Option<&str>,
     key_update: bool,
+    post_handshake_auth: bool,
     no_middlebox_compat: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Phase T122 — `--key-update` drives a TLS 1.3-only post-handshake
-    // message; reject it up front for a TLS 1.2 listener rather than
-    // silently ignoring.
-    if tls_version == "1.2" && key_update {
-        return Err("--key-update requires TLS 1.3".into());
+    // Phase T122/T125 — `--key-update` / `--post-handshake-auth` drive
+    // TLS 1.3-only post-handshake messages; reject them up front for a
+    // TLS 1.2 listener rather than silently ignoring.
+    if tls_version == "1.2" && (key_update || post_handshake_auth) {
+        return Err("--key-update / --post-handshake-auth require TLS 1.3".into());
     }
     // Load certificate chain
     let cert_pem = std::fs::read_to_string(cert_path)
@@ -249,7 +250,7 @@ pub fn run(
             "1.3" => {
                 let mut conn =
                     hitls_tls::connection::TlsServerConnection::new(stream, config.clone());
-                handle_connection_tls13(&mut conn, quiet, key_update)
+                handle_connection_tls13(&mut conn, quiet, key_update, post_handshake_auth)
             }
             "1.2" => {
                 let mut conn =
@@ -329,20 +330,24 @@ fn handle_connection(
     Ok(())
 }
 
-/// TLS 1.3 connection handler with the Phase T122 post-handshake
-/// KeyUpdate trigger. Identical echo behaviour to [`handle_connection`],
-/// but before echoing a request it inspects the bytes for the path
-/// marker `/keyupdate` (when `key_update` is set) and, on a match,
-/// sends a post-handshake KeyUpdate (`update_requested`).
+/// TLS 1.3 connection handler with the post-handshake triggers.
+/// Identical echo behaviour to [`handle_connection`], but before echoing
+/// a request it inspects the bytes for a path marker:
 ///
-/// A plain `GET /` does not match the marker, so tlsfuzzer sanity
-/// steps — which send `GET / HTTP/1.0` — are echoed without any extra
-/// message; the discriminator is the request path, not the presence
-/// of application data.
+/// - `/keyupdate` (when `key_update` is set, Phase T122) → send a
+///   post-handshake KeyUpdate (`update_requested`);
+/// - `/secret` (when `post_handshake_auth` is set, Phase T125) → send a
+///   post-handshake CertificateRequest and read the client's response.
+///
+/// A plain `GET /` matches neither marker, so tlsfuzzer sanity steps —
+/// which send `GET / HTTP/1.0` — are echoed without any extra message;
+/// the discriminator is the request path, not the presence of
+/// application data.
 fn handle_connection_tls13(
     conn: &mut hitls_tls::connection::TlsServerConnection<std::net::TcpStream>,
     quiet: bool,
     key_update: bool,
+    post_handshake_auth: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     conn.handshake()?;
     print_established(conn, quiet);
@@ -360,6 +365,12 @@ fn handle_connection_tls13(
                         eprintln!("[T122] /keyupdate -> post-handshake KeyUpdate");
                     }
                     conn.key_update(true)?;
+                }
+                if post_handshake_auth && contains(&buf[..n], b"/secret") {
+                    if !quiet {
+                        eprintln!("[T125] /secret -> post-handshake client auth");
+                    }
+                    conn.request_client_auth()?;
                 }
                 conn.write(&buf[..n])?;
             }
@@ -658,6 +669,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             false,
             false,
+            false,
         );
         assert!(result.is_err());
     }
@@ -677,6 +689,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             None,
+            false,
             false,
             false,
         );
@@ -699,6 +712,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             None,
+            false,
             false,
             false,
         );

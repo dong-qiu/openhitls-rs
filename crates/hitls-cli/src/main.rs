@@ -214,6 +214,15 @@ enum Commands {
         /// mere presence of application data. TLS 1.3 only.
         #[arg(long = "key-update")]
         key_update: bool,
+        /// Phase T125 — server-initiated post-handshake client
+        /// authentication (RFC 8446 §4.6.2). When set, a client request
+        /// whose bytes contain the path marker `/secret` makes the
+        /// server send a post-handshake CertificateRequest and read +
+        /// verify the client's Certificate / CertificateVerify /
+        /// Finished. A plain `GET /` is echoed untouched, so sanity
+        /// steps still pass. TLS 1.3 only.
+        #[arg(long = "post-handshake-auth")]
+        post_handshake_auth: bool,
         /// Disable RFC 8446 §D.4 middlebox-compat dummy CCS. By
         /// default the server emits the fake CCS after ServerHello /
         /// HelloRetryRequest; with this flag set we skip it (and
@@ -428,6 +437,7 @@ fn main() {
             psk,
             psk_identity,
             key_update,
+            post_handshake_auth,
             no_middlebox_compat,
         } => s_server::run(
             *port,
@@ -443,6 +453,7 @@ fn main() {
             psk.as_deref(),
             psk_identity.as_deref(),
             *key_update,
+            *post_handshake_auth,
             *no_middlebox_compat,
         ),
         Commands::List { filter } => list::run(filter),
