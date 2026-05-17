@@ -6238,3 +6238,38 @@ clean; lib tests 1548/0 (+2 codec tests). End-to-end:
 the full `-n 9999` set; xfail file removed. Recorded as DEV_LOG
 Phase I103. Next (I104): ClientHello version-floor + zero-length
 AppData pass-through + no-`supported_groups` ECDHE fallback.
+
+---
+
+## Phase I104 — TLS 1.2 ClientHello / Record-Layer Conformance (2026-05-18)
+
+> 先做那批 TLS 1.2 小一致性修复
+
+Second and final phase of the post-④ TLS 1.2 conformance-fix batch.
+Closes the last 3 XFAILs of the T128-curated TLS 1.2 scripts.
+
+**Part A** — `process_client_hello` never validated the ClientHello
+`legacy_version`; a `(0,0)` version was accepted. Now, when no
+`supported_versions` extension is present (RFC 8446 §4.2.1), a
+`legacy_version` below TLS 1.2 (0x0303) is aborted with
+`protocol_version` (RFC 5246 §E.1). Too-high versions still clamp
+down.
+
+**Part B** — a zero-length ApplicationData record made `read()`
+return `Ok(0)` (read as end-of-stream by the caller). All 4 TLS 1.2
+read paths (sync/async × server/client) now skip an empty record
+per RFC 5246 §6.2.1 (mirrors the TLS 1.3 T103 fix).
+
+**Part C** — `negotiate_group` aborted with `handshake_failure` when
+the client offered ECDHE suites without a `supported_groups`
+extension; per RFC 4492 §5.1 the server now picks freely (prefers
+secp256r1).
+
+**Verification**: `hitls-tls` build + clippy `-D warnings` + fmt
+clean; lib tests 1549/0 (+1). End-to-end (full `-n 9999`):
+`test-version-numbers` 8/9 → 9/9, `test-zero-length-data` 2/3 → 3/3,
+`test-ecdhe-rsa-key-exchange` 2/3 → 3/3 — 3 xfail files removed; all
+14 curated `scripts_12` still rc=0. Recorded as DEV_LOG Phase I104.
+
+The post-④ TLS 1.2 conformance-fix batch (I103 + I104) is complete —
+all 5 documented follow-up gaps closed.

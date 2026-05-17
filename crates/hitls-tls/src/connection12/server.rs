@@ -873,6 +873,14 @@ impl<S: Read + Write> TlsConnection for Tls12ServerConnection<S> {
                         self.app_data_buf.extend_from_slice(&plaintext);
                         continue;
                     }
+                    // Phase I104 — RFC 5246 §6.2.1: a zero-length
+                    // ApplicationData record is legal and carries no
+                    // data. It MUST NOT surface as `Ok(0)` (which the
+                    // caller reads as end-of-stream); skip it and read
+                    // the next record. Mirrors the TLS 1.3 fix (T103).
+                    if plaintext.is_empty() {
+                        continue;
+                    }
                     let n = std::cmp::min(buf.len(), plaintext.len());
                     buf[..n].copy_from_slice(&plaintext[..n]);
                     if plaintext.len() > n {
