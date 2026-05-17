@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I99 (99 phases)
-- Testing: T1–T126 (120 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
+- Testing: T1–T127 (121 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -331,6 +331,7 @@ Category summary:
 | 319 | T120 | Test | TLS 1.3 `psk_ke` server support (RFC 8446 §4.2.9 mode 0 — PSK resumption without (EC)DHE). The server now negotiates `psk_ke` when the client offers it without `psk_dhe_ke`: `build_server_flight` sends no `key_share` in the ServerHello and extracts the Handshake Secret over a Hash.length zero string instead of an ECDHE shared secret. Closes the `session resumption - PSK_ONLY` XFAIL in `test-tls13-session-resumption.py` (4/3 → 5/2; the 2 residual are TLS-1.2 cross-version, await `--tls auto`). Long-standing item — reserved for T120 since T119 | 2026-05-17 |
 | 320 | T126 | Test | mass-fail tlsfuzzer triage batch 1 — `tls_error_to_alert` now maps the record-layer "inner plaintext has no content type" fault (a TLS 1.3 zero-content-type record, RFC 8446 §5.1/§5.2) to `unexpected_message` instead of the `internal_error` fall-through; `test-tls13-zero-content-type.py` 2/8 → 6/8 and joins CI (2 app-data-phase XFAILs). Triaged 3 more T92 mass-fail scripts: `legacy-version` won't-fix (server is RFC 8446 §4.2.1-correct — MUST ignore `legacy_version` when `supported_versions` present; tlsfuzzer expects non-RFC rejection), `non-support` + `unencrypted-alert` deferred to batch 2 | 2026-05-17 |
 | 321 | I99 | Impl | TLS 1.3 ECDHE for secp384r1 / secp521r1 — the TLS `KeyExchange` (`handshake/key_exchange.rs`) advertised these groups but `generate` only implemented X25519 / X448 / SECP256R1 / SM2 / X25519MLKEM768, so a client offering only secp384r1/secp521r1 hit `unsupported named group`. `hitls-crypto::ecdh` has had P-384/P-521 ECDH since project start (same crypto-has-it / TLS-layer-missing-it pattern as I96). Added `EcdhP384`/`EcdhP521` variants + `generate`/`compute_shared_secret` arms. Verified: tlsfuzzer `dhe-shared-secret-padding` 559/5 → 703/3, `ecdhe-curves` 4/33 → 6/33. Surfaced by the T126/batch-2 mass-fail triage | 2026-05-17 |
+| 322 | T127 | Test | mass-fail tlsfuzzer triage batch 2 — CI wiring. `test-tls13-dhe-shared-secret-padding.py` joins the curated suite (513 PASS post-I99; 3 stable XFAILs — `ffdhe2048`/`ffdhe3072` pending the FFDHE phase, `x448` not in the default `supported_groups`). Completes the ① mass-fail-triage task: all ~10 T92-deferred scripts probed + triaged across T126 / I99 / T127 — 2 real bugs fixed (T126 zero-content-type alert, I99 secp384/521 ECDHE), 2 scripts added to CI; `legacy-version` won't-fix, `non-support`/`shuffled-extentions`/`serverhello-random`/`crfg-curves`/`large-number-of-extensions`/`unencrypted-alert` triaged + deferred (per-script disposition in the T127 entry) | 2026-05-17 |
 
 ---
 
@@ -18933,6 +18934,63 @@ connections, so the fix covers all of them.
 `hitls-tls` builds clean (`-D warnings`); lib tests 1541/0. The
 batch-2 mass-fail CI wiring (adding `dhe-shared-secret-padding` etc.
 to the curated suite) follows as the next Testing phase.
+
+---
+
+## Phase T127 — mass-fail tlsfuzzer Triage, Batch 2 CI Wiring (2026-05-17)
+
+### Summary
+
+T127 closes the ① mass-fail-triage task. It wires the batch-2 win
+into CI and records the per-script disposition for the remainder.
+
+`test-tls13-dhe-shared-secret-padding.py` joins the curated TLS 1.3
+suite. Post-I99 it is **513 PASS / 3 FAIL**; the 3 are XFAIL'd, each a
+structural "named group not advertised" gap (not a padding bug):
+
+- `TLS 1.3 with ffdhe2048` / `TLS 1.3 with ffdhe3072` — RFC 7919
+  FFDHE groups; the TLS layer does not negotiate FFDHE named groups
+  (the planned FFDHE phase).
+- `TLS 1.3 with x448` — X448 ECDHE works, but X448 is not in the
+  `s-server` default `supported_groups`.
+
+### mass-fail triage — final disposition (all ~10 T92-deferred scripts)
+
+| Script | Outcome |
+|--------|---------|
+| `zero-content-type` | **Fixed** (T126 — alert mapping) + in CI, 6/8. |
+| `dhe-shared-secret-padding` | **Fixed** (I99 — secp384/521 ECDHE) + in CI (T127), 513/3. |
+| `legacy-version` | Won't-fix — server is RFC 8446 §4.2.1-correct. |
+| `non-support` | Deferred — a TLS-1.2-fallback test; revisit with the `--tls auto` phase. |
+| `ecdhe-curves` | I99 took it 4/33 → 6/33; the residual 27 are brainpool curves (not supported — separate "won't-fix without brainpool" item). |
+| `crfg-curves` | Deferred — CFRG-curve (X25519/X448) edge cases; deeper investigation. |
+| `shuffled-extentions` | Deferred — ClientHello extension-order handling; deeper investigation. |
+| `serverhello-random` | Deferred — ServerHello.random validation, largely OpenSSL-specific expectations. |
+| `large-number-of-extensions` | Deferred — 81/1; the residual is a non-deterministic huge-extension-list parse-limit case, not a clean stable CI add. |
+| `unencrypted-alert` | Deferred — server emits an extra `unexpected_message` where a clean close is expected; alert-handling edge. |
+
+Two real protocol bugs were found and fixed by this triage (T126
+zero-content-type alert mapping, I99 secp384r1/secp521r1 ECDHE); two
+scripts (`zero-content-type`, `dhe-shared-secret-padding`) joined CI.
+The deferred scripts each need real protocol work (brainpool support,
+extension-order handling, OpenSSL-ism analysis) — left as documented
+follow-ups rather than bulk-XFAIL'd into the gate.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | Modified | `test-tls13-dhe-shared-secret-padding.py` added to the curated TLS 1.3 `scripts` array. |
+| `tests/tlsfuzzer/xfail/test-tls13-dhe-shared-secret-padding.txt` | Added | 3 XFAILs (ffdhe2048/3072, x448) with rationale. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 322 + Testing summary. |
+| `PROMPT_LOG.md` | Modified | T127 prompt + result entry. |
+| `docs/tlsfuzzer.md` | Modified | Suite count 50 → 51; T127 phase reference. |
+
+### Build Status (Post T127)
+
+No Rust source changed — workflow + XFAIL file + docs only. Curated
+tlsfuzzer suite 50 → 51 script-runs. The ① mass-fail-triage task is
+complete; ② `--tls auto` version-range server follows.
 
 
 
