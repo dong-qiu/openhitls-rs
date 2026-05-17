@@ -445,9 +445,15 @@ jobs:
             test-tls13-dhe-shared-secret-padding.py
           )
           # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
-          # on $HITLS_PORT_12. The cipher arg `-C 49199` lives in
-          # tests/tlsfuzzer/args/<script>.txt and is auto-applied
-          # by run.sh — nothing special needed here.
+          # on $HITLS_PORT_12. Per-script extra args (`-C 49199` cipher
+          # selection, or `-d` to negotiate ECDHE) live in
+          # tests/tlsfuzzer/args/<script>.txt and are auto-applied by
+          # run.sh — nothing special needed here.
+          #
+          # Phase T128 added the last 5 (aes-gcm-nonces …
+          # ecdhe-rsa-key-exchange): the TLS 1.2 server-conformance
+          # fix in I101 (signature_algorithms-absent default +
+          # ec_point_formats echo) unblocked their sanity handshakes.
           scripts_12=(
             test-conversation.py
             test-invalid-content-type.py
@@ -458,6 +464,11 @@ jobs:
             test-cve-2016-6309.py
             test-ecdhe-rsa-key-exchange-with-bad-messages.py
             test-invalid-compression-methods.py
+            test-aes-gcm-nonces.py
+            test-encrypt-then-mac.py
+            test-version-numbers.py
+            test-zero-length-data.py
+            test-ecdhe-rsa-key-exchange.py
           )
           # Phase T93 — cert-matrix scripts. Each cert type gets its
           # own XFAIL list under `tests/tlsfuzzer/xfail-<key-type>/`

@@ -1,0 +1,14 @@
+# Phase T128 — TLS 1.2 ECDHE-RSA key exchange (1 entry).
+#
+# 2 of 3 conversations PASS (the sanity handshake works since Phase
+# I101 — RFC 5246 §7.4.1.4.1 sig-algs default + ec_point_formats
+# echo). The residual:
+#
+# - `ECDHE w/o extension`: the ClientHello offers an ECDHE suite but
+#   carries no `supported_groups` / `ec_point_formats` extensions.
+#   tlsfuzzer expects the server to fall back to a default curve and
+#   complete the handshake; our server has no group to negotiate and
+#   aborts with `handshake_failure`. A no-supported_groups ECDHE
+#   default-curve fallback is a small follow-up.
+
+ECDHE w/o extension :: handshake_failure

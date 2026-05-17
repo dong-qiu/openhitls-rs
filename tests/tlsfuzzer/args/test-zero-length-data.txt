@@ -1,0 +1,4 @@
+# Phase T128 — `-d` makes the script negotiate an ECDHE (rather than
+# its default static-RSA) key exchange, which is what `s-server`
+# offers. run.sh auto-applies this file.
+-d
