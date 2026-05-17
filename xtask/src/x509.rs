@@ -1,18 +1,23 @@
-//! Emitter for the openHiTLS C `pki/cert` SDV file — X.509 certificate
-//! parse KAT (`docs/c-test-migration-plan.md` Phase C).
+//! Emitter for the openHiTLS C `pki/cert` + `pki/csr` SDV files — X.509
+//! certificate / CSR parse KAT (`docs/c-test-migration-plan.md` Phase C).
 //!
-//! First family migrated:
+//! Families migrated:
 //!
 //! * `X509_CERT_PARSE_FUNC_TC001` — `format : path`. The C test calls
-//!   `HITLS_X509_CertParseFile` and asserts `HITLS_PKI_SUCCESS`, i.e. the
-//!   referenced certificate file parses cleanly. The migrated test loads the
-//!   mirrored fixture (`tests/vectors/c-asn1-fixtures/…`) and asserts
-//!   `Certificate::from_der` / `from_pem` returns `Ok`.
+//!   `HITLS_X509_CertParseFile` and asserts `HITLS_PKI_SUCCESS`. The migrated
+//!   test loads the mirrored fixture (`tests/vectors/c-asn1-fixtures/…`) and
+//!   asserts `Certificate::from_der` / `from_pem` returns `Ok`.
+//! * `X509_CSR_PARSE_FUNC_TC001` / `TC002` / `TC003` — `format : path : …`.
+//!   The C test parses a PKCS#10 CSR and then checks fields; the migrated
+//!   test ports the parse-succeeds half via `CertificateRequest::from_der` /
+//!   `from_pem`. `CSR_PARSE_FUNC_TC004` carries an expected return code
+//!   (negative-capable) — routed to `ApiSurface` until a later increment
+//!   adds C-error → `PkiError` mapping.
 //!
 //! `format` is a `BSL_FORMAT_*` token: `ASN1` → DER, `PEM` → PEM. The C
 //! `UNKNOWN` (auto-detect) format has no Rust equivalent — those rows route
-//! to `skipped_unknown`. Other `X509_CERT_*` families (signature / pubkey /
-//! sig-alg field checks, malformed-DER negatives) are future increments and
+//! to `skipped_unknown`. The cert signature / pubkey / sig-alg field-check
+//! families (and the malformed-DER negatives) are future increments and
 //! route to `ApiSurface` for now.
 
 use std::fmt::Write;
@@ -26,7 +31,8 @@ pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
 
     for case in cases {
         match classify(&case.tc_name) {
-            Kind::CertParse => emit_cert_parse(&mut body, case, &mut stats),
+            Kind::CertParse => emit_parse(&mut body, case, &mut stats, Subject::Cert),
+            Kind::CsrParse => emit_parse(&mut body, case, &mut stats, Subject::Csr),
             Kind::ApiSurface => stats.skipped_api += 1,
             Kind::Unknown => stats.skipped_unknown += 1,
         }
@@ -42,17 +48,47 @@ pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
 #[derive(Debug, Clone, Copy)]
 enum Kind {
     CertParse,
+    CsrParse,
     ApiSurface,
     Unknown,
+}
+
+/// The X.509 object a parse-KAT row targets — selects the Rust parse type,
+/// the emitted function-name suffix, and the doc-comment wording.
+#[derive(Debug, Clone, Copy)]
+enum Subject {
+    Cert,
+    Csr,
+}
+
+impl Subject {
+    fn rust_type(self) -> &'static str {
+        match self {
+            Subject::Cert => "Certificate",
+            Subject::Csr => "CertificateRequest",
+        }
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Subject::Cert => "cert",
+            Subject::Csr => "csr",
+        }
+    }
 }
 
 fn classify(tc: &str) -> Kind {
     if tc.contains("X509_CERT_PARSE_FUNC_TC001") {
         return Kind::CertParse;
     }
-    // Other cert families (signature / pubkey / sig-alg field checks,
-    // version/subject checks, malformed-DER negatives) are migrated in
-    // later Phase C increments.
+    if tc.contains("X509_CSR_PARSE_FUNC_TC001")
+        || tc.contains("X509_CSR_PARSE_FUNC_TC002")
+        || tc.contains("X509_CSR_PARSE_FUNC_TC003")
+    {
+        return Kind::CsrParse;
+    }
+    // Cert signature / pubkey / sig-alg field-check families, CSR field /
+    // expected-return families, version/subject checks, malformed-DER
+    // negatives — migrated in later Phase C increments.
     if tc.contains("X509_") || tc.contains("CERT_") {
         return Kind::ApiSurface;
     }
@@ -71,8 +107,10 @@ fn fixture_relpath(c_path: &str) -> Option<&str> {
     }
 }
 
-fn emit_cert_parse(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
-    // Shape: format : path
+/// Emit a positive parse KAT — `format : path : …` rows where the C test
+/// asserts the file parses. Extra field-check args after `path` are ignored;
+/// the migrated test ports the parse-succeeds half.
+fn emit_parse(out: &mut String, case: &TestCase, stats: &mut EmitStats, subject: Subject) {
     if case.args.len() < 2 {
         stats.skipped_unknown += 1;
         return;
@@ -89,9 +127,9 @@ fn emit_cert_parse(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
         stats.skipped_unknown += 1;
         return;
     };
-    let parse = match format {
-        "BSL_FORMAT_ASN1" => "der",
-        "BSL_FORMAT_PEM" => "pem",
+    let der = match format {
+        "BSL_FORMAT_ASN1" => true,
+        "BSL_FORMAT_PEM" => false,
         // BSL_FORMAT_UNKNOWN is the C auto-detect format — no Rust analogue.
         _ => {
             stats.skipped_unknown += 1;
@@ -99,9 +137,16 @@ fn emit_cert_parse(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
         }
     };
 
-    write_doc(out, case, "X.509 cert parse KAT");
+    let ty = subject.rust_type();
+    write_doc(out, case, &format!("X.509 {} parse KAT", subject.name()));
     writeln!(out, "#[test]").unwrap();
-    writeln!(out, "fn tc_line{}_x509_cert_parse() {{", case.line).unwrap();
+    writeln!(
+        out,
+        "fn tc_line{}_x509_{}_parse() {{",
+        case.line,
+        subject.name()
+    )
+    .unwrap();
     writeln!(
         out,
         "    let bytes = std::fs::read(concat!(\n\
@@ -111,11 +156,11 @@ fn emit_cert_parse(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
          \x20   .unwrap();"
     )
     .unwrap();
-    if parse == "der" {
-        writeln!(out, "    assert!(Certificate::from_der(&bytes).is_ok());").unwrap();
+    if der {
+        writeln!(out, "    assert!({ty}::from_der(&bytes).is_ok());").unwrap();
     } else {
         writeln!(out, "    let pem = std::str::from_utf8(&bytes).unwrap();").unwrap();
-        writeln!(out, "    assert!(Certificate::from_pem(pem).is_ok());").unwrap();
+        writeln!(out, "    assert!({ty}::from_pem(pem).is_ok());").unwrap();
     }
     writeln!(out, "}}\n").unwrap();
     stats.emitted += 1;
@@ -124,13 +169,13 @@ fn emit_cert_parse(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
 fn write_header(out: &mut String) {
     out.push_str(
         "// This file is GENERATED by `cargo xtask migrate-c-tests --algo x509-parse`.\n\
-         // DO NOT EDIT BY HAND. Source: openhitls C SDV pki/cert/test_suite_sdv_x509_cert.data\n\
+         // DO NOT EDIT BY HAND. Source: openhitls C SDV pki/cert + pki/csr `.data`.\n\
          //\n\
          // Generator: docs/c-test-migration-plan.md Phase C (xtask).\n\
          // Fixtures: tests/vectors/c-asn1-fixtures/ (mirrored openHiTLS testdata).\n\n",
     );
     out.push_str("#![cfg(feature = \"x509\")]\n\n");
-    out.push_str("use hitls_pki::x509::Certificate;\n\n");
+    out.push_str("use hitls_pki::x509::{Certificate, CertificateRequest};\n\n");
 }
 
 fn write_footer(out: &mut String, stats: &EmitStats, total: usize) {
