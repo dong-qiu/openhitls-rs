@@ -5559,6 +5559,18 @@ Each is a candidate verifier-hardening Implementation phase. This closes the mig
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1018/1018 PASS (111 cert-parse + 20 CSR + 5 CRL + 872 field-check + 10 CRL-verify). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: CRL field-check families (2026-05-18)
+
+> 继续 CRL 字段校验族
+
+**Result**: new `emit_crl_field` (+ `Kind::CrlField` / a `CrlField` enum) migrates the CRL field-check families `X509_CRL_PARSE_FILE_FUNC_TC005` / `TC009`–`TC013`: thisUpdate/nextUpdate year (`TC005`), CRL-number extension (`TC009`), AKI-extension criticality (`TC010`), revoked-entry reason code (`TC011`), invalidity date (`TC012`), certificate-issuer extension presence (`TC013`). Year checks use a `civil_to_unix` range; the AKI/CRL-number criticality via an `extensions` lookup by OID; `TC011`'s `HITLS_X509_REVOKED_REASON_*` token maps through a new `reason_name_to_code`. `migrated_x509_parse.rs` grows 1018 → **1038 tests** (+20).
+
+**Skips**: of the 29 field-check rows, 20 migrate. Reason code 7 (RFC 5280 §5.3.1 unassigned, absent from Rust's `RevocationReason` enum) and the non-`SUCCESS`-`res` rows route to `skipped_unsupported_alg`. `TC013` negatives are a parser-leniency gap — Rust's parser populates `certificate_issuer` where C's `GET_REVOKED_CERTISSUER` getter fails. `TC004` (issuer-DN string) → `ApiSurface`: Rust's `DistinguishedName` Display joins RDNs with `", "` vs the C `","` — a format mismatch, not a coverage gap (the DN is already covered by the cert `ISSUERNAME` family).
+
+**T113 still open**: CSR field families, malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1038/1038 PASS (111 cert-parse + 20 CSR + 5 CRL + 872 field-check + 10 CRL-verify + 20 CRL field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
