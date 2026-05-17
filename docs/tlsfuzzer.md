@@ -460,3 +460,11 @@ one reviewed PR.
   transparently consumes a KeyUpdate interleaved into the
   post-handshake exchange (RFC 8446 §4.6.3).
   `test-tls13-post-handshake-auth.py` is now **6/6** with no XFAILs.
+
+- T120 — server-side `psk_ke` (RFC 8446 §4.2.9 mode 0 — PSK
+  resumption without (EC)DHE). The server negotiates `psk_ke` when the
+  client offers it without `psk_dhe_ke`: no `key_share` in the
+  ServerHello, Handshake Secret extracted over a Hash.length zero
+  string. Closes the `session resumption - PSK_ONLY` XFAIL in
+  `test-tls13-session-resumption.py` (4/3 → 5/2 — the 2 residual
+  XFAILs are the TLS-1.2 cross-version gap awaiting `--tls auto`).

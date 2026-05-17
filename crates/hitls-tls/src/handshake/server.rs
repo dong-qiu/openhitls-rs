@@ -301,6 +301,11 @@ struct ServerFlightParams<'a> {
     client_pub_key: &'a [u8],
     client_sig_algs: &'a [crate::crypt::SignatureScheme],
     verified_psk: Option<Vec<u8>>,
+    /// Phase T120 — `psk_ke` (RFC 8446 §4.2.9 mode 0): PSK resumption
+    /// without (EC)DHE. When true, no `key_share` is sent in the
+    /// ServerHello and the Handshake Secret is extracted over a
+    /// Hash.length zero string instead of an ECDHE shared secret.
+    psk_ke: bool,
 }
 
 impl Drop for ServerHandshake {
@@ -647,11 +652,15 @@ impl ServerHandshake {
             .find(|e| e.extension_type == ExtensionType::PSK_KEY_EXCHANGE_MODES);
 
         let mut verified_psk: Option<Vec<u8>> = None;
+        // Phase T120 — `psk_ke` (PSK without (EC)DHE); set below.
+        let mut psk_ke = false;
         if let (Some(psk_e), Some(modes_e)) = (psk_ext, psk_modes_ext) {
-            // Verify client supports psk_dhe_ke mode (1). Phase T119 still
-            // requires DHE — psk_ke (0) is queued for T120.
+            // RFC 8446 §4.2.9 — the client advertises its supported PSK
+            // key exchange modes. `psk_dhe_ke` (1) is preferred (forward
+            // secrecy); `psk_ke` (0) — PSK without (EC)DHE — is taken
+            // only when the client offers it alone (Phase T120).
             let modes = parse_psk_key_exchange_modes(&modes_e.data)?;
-            if modes.contains(&0x01) {
+            if modes.contains(&0x01) || modes.contains(&0x00) {
                 let (identities, binders) = parse_pre_shared_key_ch(&psk_e.data)?;
                 if let Some(((identity, _age), binder)) = identities.first().zip(binders.first()) {
                     // Path 1 — resumption: decrypt the ticket from
@@ -691,6 +700,11 @@ impl ServerHandshake {
                     }
                 }
             }
+            // Phase T120 — once a PSK is verified, fall to `psk_ke` when
+            // the client did not also offer `psk_dhe_ke`.
+            if verified_psk.is_some() && !modes.contains(&0x01) {
+                psk_ke = true;
+            }
         }
 
         // --- Find matching key_share ---
@@ -717,6 +731,7 @@ impl ServerHandshake {
                 client_pub_key: &client_pub_key,
                 client_sig_algs: &client_sig_algs,
                 verified_psk,
+                psk_ke,
             })
             .map(|a| ClientHelloResult::Actions(Box::new(a)))
         } else {
@@ -887,6 +902,7 @@ impl ServerHandshake {
             client_pub_key: &client_pub_key,
             client_sig_algs: &client_sig_algs,
             verified_psk: None, // No PSK on HRR retry
+            psk_ke: false,      // psk_ke needs a verified PSK
         })
     }
 
@@ -940,8 +956,12 @@ impl ServerHandshake {
             Vec::new()
         };
 
-        // Key exchange: KEM (encapsulate) or DH (generate + compute)
-        let (shared_secret, server_key_share_bytes) = if p.client_group.is_kem() {
+        // Key exchange. Phase T120 — `psk_ke` (PSK without (EC)DHE):
+        // no key_share is sent and the Handshake Secret is extracted
+        // over a Hash.length zero string (RFC 8446 §4.2.9 / §7.1).
+        let (shared_secret, server_key_share_bytes) = if p.psk_ke {
+            (vec![0u8; p.params.hash_len], Vec::new())
+        } else if p.client_group.is_kem() {
             KeyExchange::encapsulate(p.client_group, p.client_pub_key)?
         } else {
             let server_kx = KeyExchange::generate(p.client_group)?;
@@ -954,10 +974,11 @@ impl ServerHandshake {
         getrandom::fill(&mut random)
             .map_err(|_| TlsError::HandshakeFailed("random generation failed".into()))?;
 
-        let mut sh_extensions = vec![
-            build_supported_versions_sh(),
-            build_key_share_sh(p.client_group, &server_key_share_bytes),
-        ];
+        let mut sh_extensions = vec![build_supported_versions_sh()];
+        // psk_ke (RFC 8446 §4.2.9) sends no key_share.
+        if !p.psk_ke {
+            sh_extensions.push(build_key_share_sh(p.client_group, &server_key_share_bytes));
+        }
         if psk_mode {
             sh_extensions.push(build_pre_shared_key_sh(0));
         }

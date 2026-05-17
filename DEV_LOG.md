@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I98 (98 phases)
-- Testing: T1–T125 (118 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F, T120 reserved for `psk_ke`; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
+- Testing: T1–T125 (119 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -328,6 +328,7 @@ Category summary:
 | 316 | T125 | Test | PHA tlsfuzzer wiring — commits the `--post-handshake-auth` `s-server` flag (a `/secret`-path request triggers a post-handshake CertificateRequest, mirroring T122's `--key-update`) + a dedicated instance (port 4455) running `test-tls13-post-handshake-auth.py` in CI. 4 PASS / 2 XFAIL (`malformed signature in PHA` needs an alert-on-failure; `with KeyUpdate` needs interleaved-KeyUpdate tolerance — both queued for a follow-up I-phase). Curated suite 48 → 49 script-runs | 2026-05-17 |
 | 317 | I98 | Impl | PHA robustness — closes the 2 `test-tls13-post-handshake-auth.py` XFAILs from T125. (1) `request_client_auth` (sync + async) now sends a fatal alert via the T89 `send_fatal_alert_for_error_body!` path before returning any error, so a malformed post-handshake CertificateVerify yields a `decrypt_error` alert (RFC 8446 §6.2) instead of a bare close. (2) new `read_post_hs_skipping_key_update` transparently consumes a KeyUpdate interleaved into the post-handshake exchange (RFC 8446 §4.6.3) — `handle_key_update` rekeys + responds. `test-tls13-post-handshake-auth.py` 4/6 → **6/6** clean; XFAIL file deleted | 2026-05-17 |
 | 318 | T113 | Test | C→Rust test migration Phase C — opens PKI SDV migration. §4.1: mirrored the openHiTLS PKI fixture corpus (`testdata/{cert,certificate}/` → `tests/vectors/c-asn1-fixtures/`, 1298 files + `MANIFEST.sha256`, PR #88). §4.2 cert + CSR parse: `xtask/src/x509.rs` migrates `X509_CERT_PARSE_FUNC_TC001` + `X509_CSR_PARSE_FUNC_TC001-003` positive parse → 131 tests (111 cert + 20 CSR) in `crates/hitls-pki/tests/migrated_x509_parse.rs` (`Certificate`/`CertificateRequest` `from_der`/`from_pem` on the mirrored fixtures). Parser gains `Arg::Str` so quoted file-path fields parse (previously hex-only). Phase C not closed — cert signature/pubkey/sig-alg field-check families + CSR field families + CRL + malformed-DER negatives follow under T113 | 2026-05-17 |
+| 319 | T120 | Test | TLS 1.3 `psk_ke` server support (RFC 8446 §4.2.9 mode 0 — PSK resumption without (EC)DHE). The server now negotiates `psk_ke` when the client offers it without `psk_dhe_ke`: `build_server_flight` sends no `key_share` in the ServerHello and extracts the Handshake Secret over a Hash.length zero string instead of an ECDHE shared secret. Closes the `session resumption - PSK_ONLY` XFAIL in `test-tls13-session-resumption.py` (4/3 → 5/2; the 2 residual are TLS-1.2 cross-version, await `--tls auto`). Long-standing item — reserved for T120 since T119 | 2026-05-17 |
 
 ---
 
@@ -18705,6 +18706,80 @@ PKI `.data` rows quote *file paths* (`"../testdata/cert/foo.der"`), not hex. The
 - `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa,dh,sm4,sm2} --check`: all up-to-date (parser change is a no-op for the crypto algorithms).
 - `RUSTFLAGS="-D warnings" cargo clippy -p xtask -p hitls-pki --all-features --tests`: 0.
 - `cargo fmt --all -- --check`: clean.
+
+---
+
+## Phase T120 — TLS 1.3 `psk_ke`: PSK Resumption Without (EC)DHE (2026-05-17)
+
+### Summary
+
+T120 implements server-side `psk_ke` (RFC 8446 §4.2.9 mode 0 — PSK key
+establishment **without** an (EC)DHE exchange), the last long-standing
+PSK item: the DEV_LOG has carried "queued for T120" since T119.
+
+Pre-T120 the server's PSK path required the client to advertise
+`psk_dhe_ke` (mode 1) — a client offering `psk_ke` alone fell through
+to a full (non-PSK) handshake, so tlsfuzzer's `session resumption -
+PSK_ONLY` conversation (which resumes with `psk_key_exchange_modes:
+[psk_ke]`) was XFAIL'd.
+
+### Code changes (`crates/hitls-tls/src/handshake/server.rs`)
+
+`ServerHandshake::process_client_hello` + `build_server_flight` —
+shared by the sync and async server connections, so one change covers
+both:
+
+- **Negotiation**: the PSK block's guard widened from
+  `modes.contains(&0x01)` to `modes.contains(&0x01) || modes.contains(&0x00)`
+  so a `psk_ke`-only ClientHello reaches the binder-verification logic.
+  After a PSK verifies, `psk_ke` is set true when the client did *not*
+  also offer `psk_dhe_ke` (RFC 8446 §4.2.9 — `psk_dhe_ke` is preferred
+  for forward secrecy; `psk_ke` is taken only when offered alone).
+- **`ServerFlightParams`** gains a `psk_ke: bool`, threaded from
+  `process_client_hello` (the retried-CH path passes `false` — HRR
+  retry carries no PSK).
+- **`build_server_flight`**: when `psk_ke` is set, (1) the key-exchange
+  step is skipped — `shared_secret` is a `Hash.length` zero string,
+  `server_key_share_bytes` is empty; (2) the ServerHello carries no
+  `key_share` extension. `ks.derive_handshake_secret(&shared_secret)`
+  therefore extracts the Handshake Secret over zeros (RFC 8446 §7.1).
+  The PSK-mode cert skip (SH / EE / Finished, no Certificate /
+  CertificateVerify) is unchanged.
+
+The client still sends a `key_share` (for full-handshake fallback);
+the server simply ignores it under `psk_ke`. No client-side change —
+our own client offers `psk_dhe_ke`, so the existing `psk_dhe_ke` path
+is untouched.
+
+### Verification
+
+- `cargo build -p hitls-tls --all-features` (`-D warnings`): clean;
+  `cargo test -p hitls-tls --all-features --lib`: **1539 PASS / 0 FAIL**
+  (the `psk_dhe_ke` resumption tests are unaffected — `psk_ke` is a new
+  branch); `cargo clippy` + `cargo fmt`: clean.
+- End-to-end: `test-tls13-session-resumption.py` through
+  `tests/tlsfuzzer/run.sh` against a `--ticket-key` s-server —
+  `session resumption - PSK_ONLY` **FAIL → PASS**; script now
+  **5 PASS / 2 XFAIL / 0 FAIL** (`run.sh` exit 0). The 2 residual
+  XFAILs are `sanity - TLS 1.2` / `use TLS 1.2 ticket in TLS 1.3` —
+  the TLS-1.2 cross-version gap that awaits the `--tls auto` phase,
+  unrelated to `psk_ke`.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | `psk_ke` negotiation + `ServerFlightParams.psk_ke` + `build_server_flight` zero-DHE / no-key_share path. |
+| `tests/tlsfuzzer/xfail/test-tls13-session-resumption.txt` | Modified | `session resumption - PSK_ONLY` entry removed (now PASS); 2 TLS-1.2 XFAILs retained. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 319 + Testing summary (T120 no longer reserved). |
+| `PROMPT_LOG.md` | Modified | T120 prompt + result entry. |
+| `docs/tlsfuzzer.md` | Modified | T120 phase reference. |
+
+### Build Status (Post T120)
+
+`hitls-tls` builds clean (`-D warnings`); lib tests 1539/0.
+`test-tls13-session-resumption.py` is 5/2 in CI. The PSK story
+(resumption, external PSK, `psk_dhe_ke`, `psk_ke`) is now complete.
 
 
 

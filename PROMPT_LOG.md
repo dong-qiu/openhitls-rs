@@ -5829,3 +5829,39 @@ Phase I98.
 auth.py` is 6/6 in CI with no XFAILs. Server-side tlsfuzzer plan
 remaining: T120 `psk_ke`, `--tls auto`, mass-fail triage, TLS 1.2
 breadth, FFDHE, `s-server` DTLS.
+
+---
+
+## Phase T120 — TLS 1.3 `psk_ke`: PSK Resumption Without (EC)DHE (2026-05-17)
+
+> 请继续完成T120
+
+Implements server-side `psk_ke` (RFC 8446 §4.2.9 mode 0 — PSK key
+establishment without an (EC)DHE exchange) — the longest-standing PSK
+item, reserved as T120 since T119.
+
+**The gap**: the server's PSK path required the client to advertise
+`psk_dhe_ke` (mode 1); a `psk_ke`-only ClientHello fell through to a
+full handshake, so tlsfuzzer's `session resumption - PSK_ONLY`
+conversation was XFAIL'd.
+
+**Fix** (`handshake/server.rs`, shared by sync + async server
+connections): the PSK negotiation guard widened to accept `psk_ke`
+(mode 0); after a PSK verifies, `psk_ke` is chosen when the client did
+not also offer `psk_dhe_ke`. `ServerFlightParams` gains a `psk_ke`
+flag; `build_server_flight`, under `psk_ke`, skips the key exchange
+(Handshake Secret extracted over a `Hash.length` zero string, RFC 8446
+§7.1) and sends no `key_share` in the ServerHello.
+
+**Verification**: 1539 hitls-tls lib tests pass (the `psk_dhe_ke` path
+is untouched); clippy `-D warnings` 0; fmt clean. End-to-end —
+`test-tls13-session-resumption.py` through `run.sh` against a
+`--ticket-key` s-server: `session resumption - PSK_ONLY` FAIL → PASS,
+script now **5 PASS / 2 XFAIL / 0 FAIL**, exit 0. The 2 residual
+XFAILs are the TLS-1.2 cross-version gap (await `--tls auto`).
+Recorded as DEV_LOG Phase T120.
+
+The PSK story — resumption, external PSK (T119), `psk_dhe_ke`,
+`psk_ke` (T120) — is now complete. Server-side tlsfuzzer plan
+remaining: `--tls auto` version range, mass-fail-script triage,
+TLS 1.2 script breadth, FFDHE groups, `s-server` DTLS mode.
