@@ -470,6 +470,27 @@ impl Tls12ServerHandshake {
         let ch = decode_client_hello(body)?;
         self.client_random = ch.random;
 
+        // Phase I104 — ClientHello.legacy_version floor check. The
+        // first 2 body bytes are `legacy_version` (`decode_client_hello`
+        // succeeded, so they are present). When the client sends no
+        // `supported_versions` extension, `legacy_version` is the
+        // highest version it supports (RFC 5246 §E.1); a value below
+        // our minimum (TLS 1.2 = 0x0303) cannot be satisfied and is
+        // aborted with `protocol_version`. A *too-high* legacy_version
+        // is fine — it is clamped down to TLS 1.2. When
+        // `supported_versions` IS present, `legacy_version` MUST be
+        // ignored (RFC 8446 §4.2.1), so the check is skipped.
+        let legacy_version = u16::from_be_bytes([body[0], body[1]]);
+        let has_supported_versions = ch
+            .extensions
+            .iter()
+            .any(|e| e.extension_type == ExtensionType::SUPPORTED_VERSIONS);
+        if !has_supported_versions && legacy_version < 0x0303 {
+            return Err(TlsError::HandshakeFailed(
+                "protocol version too low in ClientHello".into(),
+            ));
+        }
+
         // Parse extensions
         let mut client_groups = Vec::new();
         let mut client_alpn_protocols = Vec::new();
@@ -1695,6 +1716,21 @@ pub(crate) fn negotiate_group(
     client_groups: &[NamedGroup],
     server_groups: &[NamedGroup],
 ) -> Result<NamedGroup, TlsError> {
+    // RFC 4492 §5.1 — a client proposing ECC cipher suites MAY omit the
+    // supported_groups (elliptic_curves) extension. When it does, the
+    // server is free to choose any EC curve it supports; aborting with
+    // `handshake_failure` is wrong. Prefer the universally interoperable
+    // secp256r1, else the highest-preference non-FFDHE server group.
+    if client_groups.is_empty() {
+        if server_groups.contains(&NamedGroup::SECP256R1) {
+            return Ok(NamedGroup::SECP256R1);
+        }
+        return server_groups
+            .iter()
+            .copied()
+            .find(|g| !is_ffdhe_group(*g))
+            .ok_or_else(|| TlsError::HandshakeFailed("no ECDHE group configured".into()));
+    }
     for sg in server_groups {
         if client_groups.contains(sg) {
             return Ok(*sg);
@@ -2390,6 +2426,29 @@ mod tests {
         let group = negotiate_group(&client, &server).unwrap();
         // Server preference: SECP256R1 first
         assert_eq!(group, NamedGroup::SECP256R1);
+    }
+
+    #[test]
+    fn test_negotiate_group_no_client_extension() {
+        // Phase I104 — RFC 4492 §5.1: a client offering ECDHE suites
+        // without the supported_groups extension (empty client list)
+        // must not abort; the server picks freely, preferring
+        // secp256r1.
+        let server = vec![
+            NamedGroup::X25519,
+            NamedGroup::SECP256R1,
+            NamedGroup::FFDHE2048,
+        ];
+        assert_eq!(
+            negotiate_group(&[], &server).unwrap(),
+            NamedGroup::SECP256R1
+        );
+        // Without secp256r1, fall back to the first non-FFDHE group.
+        let server_no_p256 = vec![NamedGroup::X25519, NamedGroup::FFDHE2048];
+        assert_eq!(
+            negotiate_group(&[], &server_no_p256).unwrap(),
+            NamedGroup::X25519
+        );
     }
 
     #[test]

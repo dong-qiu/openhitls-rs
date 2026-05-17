@@ -911,6 +911,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ClientC
             let (ct, plaintext) = self.read_record().await?;
             match ct {
                 ContentType::ApplicationData => {
+                    // Phase I104 — RFC 5246 §6.2.1: a zero-length
+                    // ApplicationData record carries no data and MUST
+                    // NOT surface as `Ok(0)` (end-of-stream); skip it.
+                    if plaintext.is_empty() {
+                        continue;
+                    }
                     let n = std::cmp::min(buf.len(), plaintext.len());
                     buf[..n].copy_from_slice(&plaintext[..n]);
                     if plaintext.len() > n {
@@ -1795,6 +1801,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsConnection for AsyncTls12ServerC
                     if self.state == ConnectionState::Renegotiating {
                         // Buffer app data during renegotiation
                         self.app_data_buf.extend_from_slice(&plaintext);
+                        continue;
+                    }
+                    // Phase I104 — RFC 5246 §6.2.1: a zero-length
+                    // ApplicationData record carries no data and MUST
+                    // NOT surface as `Ok(0)` (end-of-stream); skip it.
+                    if plaintext.is_empty() {
                         continue;
                     }
                     let n = std::cmp::min(buf.len(), plaintext.len());

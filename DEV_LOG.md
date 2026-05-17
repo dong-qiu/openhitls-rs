@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I103 (103 phases)
+- Implementation: I1–I104 (104 phases)
 - Testing: T1–T128 (122 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -337,6 +337,7 @@ Category summary:
 | 325 | T128 | Test | TLS 1.2 tlsfuzzer curated-suite breadth (curate-and-bank) — task ③. With the I101 conformance fix unblocking the TLS 1.2 sanity handshake, re-probed the tlsfuzzer corpus and curated 5 new TLS 1.2 scripts into the CI `scripts_12` array (9 → 14): `test-aes-gcm-nonces` (6/6), `test-encrypt-then-mac` (3/3), `test-version-numbers` (8/9), `test-zero-length-data` (2/3), `test-ecdhe-rsa-key-exchange` (2/3) — full-conversation-set verified (`-n 9999`). 4 new `args/*.txt` (`-d` ECDHE selection) + 3 new `xfail/*.txt` (1 entry each: `very low version (0,0)`, `zero-length app data`, `ECDHE w/o extension`). `test-ecdhe-padded-shared-secret` deliberately not curated — 16 full-set failures, mostly TLS 1.0/1.1 + SSLv2-compat which the server intentionally does not support. Residual deeper TLS 1.2 conformance bugs documented as follow-ups | 2026-05-17 |
 | 326 | I102 | Impl | TLS 1.3 FFDHE (RFC 7919) key exchange — task ④. The TLS 1.3 `KeyExchange` (`handshake/key_exchange.rs`) had no finite-field-DHE variant, so a client offering only an `ffdhe*` group hit `unsupported named group`. Added a `Ffdhe` inner variant + `generate`/`compute_shared_secret` arms for all 5 RFC 7919 groups (ffdhe2048/3072/4096/6144/8192) — `hitls-crypto::dh` has had the DH primitive (params + keypair, with prime-length-padded output per RFC 8446 §7.4.1) since project start; only the TLS-layer wiring was missing (same pattern as I99). FFDHE is non-KEM, so it reuses the ECDHE generate/compute path. `s-server` default `supported_groups` extended with the 5 FFDHE groups (after the EC groups — lowest preference) + X448. Verified: `test-tls13-dhe-shared-secret-padding.py` 513/3-XFAIL → **2203/0** (ffdhe2048/3072 + x448 all pass), `test-tls13-psk_dhe_ke.py` 3/1-XFAIL → **4/4**; both xfail files removed (now fully clean) | 2026-05-17 |
 | 327 | I103 | Impl | TLS 1.2 ClientKeyExchange hardening — first of the post-④ TLS 1.2 conformance-fix batch. **Part A**: an invalid ECDHE client public point (not on the curve / identity / out of range) in the ClientKeyExchange aborted with `internal_error`; RFC 4492 §5.4 / RFC 8422 require `illegal_parameter` — the `Ecdhe` / `EcdheAnon` arms of `process_client_key_exchange` now map the `compute_shared_secret` failure accordingly. **Part B**: `decode_client_key_exchange` accepted a ClientKeyExchange with trailing bytes after the length-prefixed ECDH point (a padding-extended message); it now requires the body to be consumed exactly (`len != 1 + point_len` → `decode_error`, RFC 4492 §5.7). Closes all 5 XFAILs in `test-ecdhe-rsa-key-exchange-with-bad-messages.py` (3/5-XFAIL → **8/8**); xfail file removed. +2 codec unit tests | 2026-05-17 |
+| 328 | I104 | Impl | TLS 1.2 ClientHello / record-layer conformance — second of the post-④ TLS 1.2 conformance-fix batch; closes the last 3 XFAILs of the T128-curated TLS 1.2 scripts. **Part A** (version floor): the ClientHello `legacy_version` was never validated, so a `(0,0)` version was accepted and a normal ServerHello sent; now, when no `supported_versions` extension is present (RFC 8446 §4.2.1), a `legacy_version` below TLS 1.2 (`0x0303`) is aborted with `protocol_version` — a too-high version is still clamped down. **Part B** (zero-length record): a zero-length ApplicationData record surfaced as `read()` → `Ok(0)`, which the caller reads as end-of-stream; all 4 TLS 1.2 read paths (sync/async × server/client) now skip an empty record per RFC 5246 §6.2.1 (mirrors the TLS 1.3 T103 fix). **Part C** (ECDHE without supported_groups): `negotiate_group` aborted with `handshake_failure` when the client offered ECDHE suites but no supported_groups extension; per RFC 4492 §5.1 the server now picks freely (prefers secp256r1). Verified: `test-version-numbers` 8/9 → **9/9**, `test-zero-length-data` 2/3 → **3/3**, `test-ecdhe-rsa-key-exchange` 2/3 → **3/3** (full `-n 9999`); 3 xfail files removed; all 14 curated `scripts_12` still rc=0. +1 unit test | 2026-05-18 |
 
 ---
 
@@ -19453,6 +19454,91 @@ now `body.len() != 1 + point_len` → `decode_error`.
 the TLS 1.2 conformance-fix batch done. Next (I104): ClientHello
 version-floor check + zero-length-AppData pass-through +
 no-`supported_groups` ECDHE default-curve fallback.
+
+---
+
+## Phase I104 — TLS 1.2 ClientHello / Record-Layer Conformance (2026-05-18)
+
+### Summary
+
+I104 is the second (and final) phase of the post-④ TLS 1.2
+conformance-fix batch. It closes the last 3 XFAILs of the
+T128-curated TLS 1.2 scripts — three independent small gaps.
+
+### Part A — ClientHello `legacy_version` floor (`test-version-numbers`)
+
+`process_client_hello` never validated the ClientHello's
+`legacy_version`: a `(0,0)` version was accepted and a normal
+ServerHello sent. RFC 5246 §E.1 — when the client sends no
+`supported_versions` extension, `legacy_version` is the highest
+version it supports; a value below the server minimum (TLS 1.2 =
+`0x0303`) cannot be satisfied. The handler now reads the first 2
+body bytes and, when `supported_versions` is absent (RFC 8446
+§4.2.1 — it MUST be ignored when the extension is present) and
+`legacy_version < 0x0303`, aborts with `protocol_version`. A
+*too-high* version is unaffected — still clamped down to TLS 1.2.
+
+### Part B — zero-length ApplicationData record (`test-zero-length-data`)
+
+A zero-length ApplicationData record made `read()` compute
+`n = min(buf.len(), 0) = 0` and `return Ok(0)` — which the caller
+reads as end-of-stream. RFC 5246 §6.2.1 permits empty records; they
+carry no data and must be skipped, not treated as close. All **4**
+TLS 1.2 read paths — sync/async × server/client
+(`connection12/{server,client}.rs`, `connection12_async.rs`) — now
+`continue` on an empty `ApplicationData` plaintext. Mirrors the
+TLS 1.3 fix (Phase T103).
+
+### Part C — ECDHE without `supported_groups` (`test-ecdhe-rsa-key-exchange`)
+
+`negotiate_group` aborted with `handshake_failure` when the client
+offered ECDHE cipher suites but **no** `supported_groups`
+(elliptic_curves) extension. RFC 4492 §5.1 — a client MAY omit it,
+and the server is then free to choose any curve it supports. The
+function now, on an empty client list, picks the universally
+interoperable `secp256r1` (else the highest-preference non-FFDHE
+server group).
+
+### Verification
+
+- `cargo build` / `clippy -p hitls-tls` (`-D warnings`) clean; `fmt`
+  clean; `cargo test -p hitls-tls --lib` **1549 PASS / 0 FAIL** (+1
+  — `negotiate_group` no-client-extension test).
+- End-to-end (pinned tlsfuzzer, local `s-server --tls 1.2`), full
+  `-n 9999` conversation set:
+  - `test-version-numbers.py` 8/9 → **9/9** (`very low version
+    (0, 0)` now gets `protocol_version`).
+  - `test-zero-length-data.py` 2/3 → **3/3** (`zero-length app
+    data` now skipped, not read as EOF).
+  - `test-ecdhe-rsa-key-exchange.py` 2/3 → **3/3** (`ECDHE w/o
+    extension` now negotiates secp256r1).
+- The 3 corresponding `xfail/*.txt` files removed — all 3 scripts
+  fully clean.
+- Regression: all **14** curated `scripts_12` still `run.sh` exit 0.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | Part A: `legacy_version` floor check in `process_client_hello`. Part C: `negotiate_group` empty-client-list fallback; +1 unit test. |
+| `crates/hitls-tls/src/connection12/server.rs` | Modified | Part B: skip zero-length ApplicationData (sync server). |
+| `crates/hitls-tls/src/connection12/client.rs` | Modified | Part B: skip zero-length ApplicationData (sync client). |
+| `crates/hitls-tls/src/connection12_async.rs` | Modified | Part B: skip zero-length ApplicationData (async server + client). |
+| `tests/tlsfuzzer/xfail/test-version-numbers.txt` | Removed | Script now fully clean (9/9). |
+| `tests/tlsfuzzer/xfail/test-zero-length-data.txt` | Removed | Script now fully clean (3/3). |
+| `tests/tlsfuzzer/xfail/test-ecdhe-rsa-key-exchange.txt` | Removed | Script now fully clean (3/3). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 328 + Implementation summary I1–I103 → I1–I104. |
+| `PROMPT_LOG.md` | Modified | I104 prompt + result entry. |
+
+### Build Status (Post I104)
+
+`hitls-tls` builds clean (`-D warnings`); lib tests 1549/0. The
+post-④ TLS 1.2 conformance-fix batch (I103 + I104) is complete — all
+5 documented follow-up gaps closed; the 5 TLS 1.2 scripts curated in
+T128 are now 0-XFAIL, plus `test-ecdhe-rsa-key-exchange-with-bad-
+messages` (I103). Residual TLS 1.2 work (`test-ffdhe-negotiation` —
+needs DHE_RSA cipher suites) and task ⑤ (DTLS s-server, scoped in
+`docs/dtls-s-server-plan.md`) remain as documented follow-ups.
 
 
 
