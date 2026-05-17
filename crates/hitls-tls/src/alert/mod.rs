@@ -183,7 +183,17 @@ pub fn tls_error_to_alert(err: &hitls_types::TlsError) -> AlertDescription {
                 AlertDescription::RecordOverflow
             } else if m.contains("decode") || m.contains("incomplete") || m.contains("malformed") {
                 AlertDescription::DecodeError
-            } else if m.contains("unexpected content type") {
+            } else if m.contains("unexpected content type")
+                // Phase T126 — RFC 8446 §5.1 / §5.2: an unknown record
+                // content type, or a TLS 1.3 inner plaintext with no
+                // non-zero type octet (a "zero content type" record),
+                // MUST terminate the connection with `unexpected_message`
+                // — previously these hit the `internal_error`
+                // fall-through below.
+                || m.contains("unknown content type")
+                || m.contains("unknown inner content type")
+                || m.contains("inner plaintext has no content type")
+            {
                 AlertDescription::UnexpectedMessage
             } else {
                 AlertDescription::InternalError

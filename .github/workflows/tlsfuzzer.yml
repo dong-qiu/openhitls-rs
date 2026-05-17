@@ -429,6 +429,14 @@ jobs:
             # project start; only the negotiation entry was missing.
             # Closes 386 conversations (1159/1159 PASS clean).
             test-tls13-symetric-ciphers.py
+            # T126 addition (1): zero-content-type record rejection.
+            # T126 fixed `tls_error_to_alert` to map the record-layer
+            # "inner plaintext has no content type" fault to
+            # `unexpected_message` (RFC 8446 §5.1/§5.2) instead of
+            # `internal_error` — 2/8 → 6/8; the 2 residual XFAILs are
+            # app-data-phase cases (see xfail/test-tls13-zero-content-
+            # type.txt).
+            test-tls13-zero-content-type.py
           )
           # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
           # on $HITLS_PORT_12. The cipher arg `-C 49199` lives in

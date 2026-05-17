@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I98 (98 phases)
-- Testing: T1–T125 (119 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
+- Testing: T1–T126 (120 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -329,6 +329,7 @@ Category summary:
 | 317 | I98 | Impl | PHA robustness — closes the 2 `test-tls13-post-handshake-auth.py` XFAILs from T125. (1) `request_client_auth` (sync + async) now sends a fatal alert via the T89 `send_fatal_alert_for_error_body!` path before returning any error, so a malformed post-handshake CertificateVerify yields a `decrypt_error` alert (RFC 8446 §6.2) instead of a bare close. (2) new `read_post_hs_skipping_key_update` transparently consumes a KeyUpdate interleaved into the post-handshake exchange (RFC 8446 §4.6.3) — `handle_key_update` rekeys + responds. `test-tls13-post-handshake-auth.py` 4/6 → **6/6** clean; XFAIL file deleted | 2026-05-17 |
 | 318 | T113 | Test | C→Rust test migration Phase C — opens PKI SDV migration. §4.1: mirrored the openHiTLS PKI fixture corpus (`testdata/{cert,certificate}/` → `tests/vectors/c-asn1-fixtures/`, 1298 files + `MANIFEST.sha256`, PR #88). §4.2: `xtask/src/x509.rs` migrates cert/CSR/CRL positive parse families + the cert `version`/`serial_number`/`signature` field-check families → 454 tests (111 cert-parse + 20 CSR + 5 CRL + 318 field-check) in `crates/hitls-pki/tests/migrated_x509_parse.rs`. Parser gains `Arg::Str` so quoted file-path fields parse (previously hex-only). Findings: 9 negative CRL-parse rows skipped — Rust `CertificateRevocationList::from_pem` is more lenient than the C parser (candidate hardening I-phase); `Certificate::version` is 1-indexed vs the C raw DER integer. Phase C not closed — remaining cert field-check families (sig-alg/issuer/subject/validity/pubkey) + CSR/CRL field families + malformed-DER negatives follow under T113 | 2026-05-17 |
 | 319 | T120 | Test | TLS 1.3 `psk_ke` server support (RFC 8446 §4.2.9 mode 0 — PSK resumption without (EC)DHE). The server now negotiates `psk_ke` when the client offers it without `psk_dhe_ke`: `build_server_flight` sends no `key_share` in the ServerHello and extracts the Handshake Secret over a Hash.length zero string instead of an ECDHE shared secret. Closes the `session resumption - PSK_ONLY` XFAIL in `test-tls13-session-resumption.py` (4/3 → 5/2; the 2 residual are TLS-1.2 cross-version, await `--tls auto`). Long-standing item — reserved for T120 since T119 | 2026-05-17 |
+| 320 | T126 | Test | mass-fail tlsfuzzer triage batch 1 — `tls_error_to_alert` now maps the record-layer "inner plaintext has no content type" fault (a TLS 1.3 zero-content-type record, RFC 8446 §5.1/§5.2) to `unexpected_message` instead of the `internal_error` fall-through; `test-tls13-zero-content-type.py` 2/8 → 6/8 and joins CI (2 app-data-phase XFAILs). Triaged 3 more T92 mass-fail scripts: `legacy-version` won't-fix (server is RFC 8446 §4.2.1-correct — MUST ignore `legacy_version` when `supported_versions` present; tlsfuzzer expects non-RFC rejection), `non-support` + `unencrypted-alert` deferred to batch 2 | 2026-05-17 |
 
 ---
 
@@ -18792,6 +18793,76 @@ is untouched.
 `hitls-tls` builds clean (`-D warnings`); lib tests 1539/0.
 `test-tls13-session-resumption.py` is 5/2 in CI. The PSK story
 (resumption, external PSK, `psk_dhe_ke`, `psk_ke`) is now complete.
+
+---
+
+## Phase T126 — mass-fail tlsfuzzer Triage, Batch 1 (2026-05-17)
+
+### Summary
+
+T126 is the first batch of the mass-fail-script triage — probing the
+~10 `test-tls13-*` scripts that T92 deferred as "mass-fail, need real
+protocol fixes". Batch 1 took 4 scripts; each was probed to a
+definitive root cause. One produced a real fix; the rest are
+documented dispositions.
+
+### Triage results (4 scripts)
+
+| Script | Probe | Root cause | Disposition |
+|--------|-------|-----------|-------------|
+| `test-tls13-zero-content-type` | 2/8 | **Real bug** — a TLS 1.3 record whose decrypted inner plaintext has no non-zero type octet ("zero content type", RFC 8446 §5.2) is rejected, but with `internal_error`; RFC 8446 §5.1/§5.4 require `unexpected_message`. | **Fixed** + added to CI. |
+| `test-tls13-legacy-version` | 2/10 | Our server is RFC 8446 §4.2.1-correct: with `supported_versions` present it MUST ignore `ClientHello.legacy_version`. tlsfuzzer expects the server to *reject* non-`0x0303` legacy_version values. | **Won't-fix** — not added to CI. |
+| `test-tls13-non-support` | 0/53 | A TLS-1.2-fallback test (`ExpectServerHello` v3.3 + ServerKeyExchange/ServerHelloDone). Misnamed `test-tls13-*`; still ~2/53 against the TLS 1.2 listener — a deeper version-fallback gap. | Deferred to batch 2. |
+| `test-tls13-unencrypted-alert` | 2/4 | The server emits an extra `unexpected_message` alert where the script expects a clean close — an alert-handling edge. | Deferred to batch 2. |
+
+### Code change
+
+**`crates/hitls-tls/src/alert/mod.rs`** — the `tls_error_to_alert`
+`RecordError` arm matched only `"unexpected content type"` for
+`UnexpectedMessage`; the record layer's actual zero-content-type
+error string is `"inner plaintext has no content type"` (and the
+unknown-type paths use `"unknown content type"` /
+`"unknown inner content type"`). All three are now in the
+`UnexpectedMessage` condition, so a zero-content-type record
+terminates with `unexpected_message` (RFC 8446 §5.1) rather than the
+`internal_error` fall-through.
+
+The fix closes the 4 handshake-phase conversations
+(`test-tls13-zero-content-type.py` 2/8 → 6/8). The 2 residual
+app-data-phase conversations (`zero content type [and padding]
+during application data`) are XFAIL'd with rationale — there the
+record reaches the `s-server` echo loop rather than the handshake
+read path and the server emits ApplicationData where the script
+expects the alert; a separate echo-loop-vs-record-reject ordering
+investigation, deferred.
+
+### Verification
+
+- `cargo clippy -p hitls-tls --all-features` `-D warnings`: 0;
+  `cargo fmt`: clean; `cargo test -p hitls-tls --lib -- alert::`:
+  15 PASS. `actionlint`: no new issues.
+- End-to-end: `test-tls13-zero-content-type.py` through
+  `tests/tlsfuzzer/run.sh` — **6 PASS / 2 XFAIL / 0 FAIL**,
+  `run.sh` exit 0.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/alert/mod.rs` | Modified | `tls_error_to_alert` `RecordError` arm: zero/unknown content-type → `unexpected_message`. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | `test-tls13-zero-content-type.py` added to the curated TLS 1.3 `scripts` array. |
+| `tests/tlsfuzzer/xfail/test-tls13-zero-content-type.txt` | Added | 2 app-data-phase XFAILs with rationale. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 320 + Testing summary. |
+| `PROMPT_LOG.md` | Modified | T126 prompt + result entry. |
+| `docs/tlsfuzzer.md` | Modified | Suite count 49 → 50; T126 phase reference. |
+
+### Build Status (Post T126)
+
+`hitls-tls` builds clean (`-D warnings`); alert lib tests 15/0.
+Curated tlsfuzzer suite 49 → 50 script-runs. Batch 2 of the mass-fail
+triage (`non-support`, `unencrypted-alert`, `shuffled-extentions`,
+`large-number-of-extensions`, `serverhello-random`, `ecdhe-curves`,
+`crfg-curves`, `dhe-shared-secret-padding`) follows.
 
 
 

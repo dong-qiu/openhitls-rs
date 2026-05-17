@@ -220,7 +220,7 @@ merge. No branch-protection change was needed: requiring `CI Gate`
 already requires every job in its `needs:` list.
 
 **Tier 2 — the full curated suite in `.github/workflows/tlsfuzzer.yml`.**
-All 49 curated script-runs run on `workflow_dispatch`, on a weekly
+All 50 curated script-runs run on `workflow_dispatch`, on a weekly
 schedule (Mon 06:00 UTC, sampled), and on a monthly schedule (1st
 07:00 UTC, full `-n 9999` sweep). This tier is **not** a required PR
 check — it exercises edge-case mutations that legitimately probe spec
@@ -468,3 +468,12 @@ one reviewed PR.
   string. Closes the `session resumption - PSK_ONLY` XFAIL in
   `test-tls13-session-resumption.py` (4/3 → 5/2 — the 2 residual
   XFAILs are the TLS-1.2 cross-version gap awaiting `--tls auto`).
+
+- T126 — mass-fail-script triage, batch 1. `tls_error_to_alert` now
+  maps a TLS 1.3 zero-content-type record (RFC 8446 §5.1/§5.2) to
+  `unexpected_message` instead of `internal_error`;
+  `test-tls13-zero-content-type.py` joins CI at 6/8 (2 app-data-phase
+  XFAILs). `test-tls13-legacy-version.py` triaged won't-fix (the
+  server is RFC 8446 §4.2.1-correct — it ignores `legacy_version`
+  when `supported_versions` is present); `non-support` /
+  `unencrypted-alert` deferred to batch 2. Suite size 49 → 50.
