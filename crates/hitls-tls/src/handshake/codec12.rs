@@ -149,6 +149,12 @@ pub fn encode_client_key_exchange(cke: &ClientKeyExchange) -> Vec<u8> {
 }
 
 /// Decode a ClientKeyExchange message body (ECDHE).
+///
+/// The body is `ClientECDiffieHellmanPublic` = `{ecdh_Yc opaque<1..2^8-1>}`
+/// (RFC 4492 §5.7) — a 1-byte length prefix followed by exactly that many
+/// point bytes. The body MUST be consumed exactly: trailing bytes after
+/// the point (a padding-extended ClientKeyExchange) are a malformed
+/// message and are rejected with `decode_error`.
 pub fn decode_client_key_exchange(body: &[u8]) -> Result<ClientKeyExchange, TlsError> {
     if body.is_empty() {
         return Err(TlsError::HandshakeFailed(
@@ -156,9 +162,9 @@ pub fn decode_client_key_exchange(body: &[u8]) -> Result<ClientKeyExchange, TlsE
         ));
     }
     let point_len = body[0] as usize;
-    if body.len() < 1 + point_len {
+    if body.len() != 1 + point_len {
         return Err(TlsError::HandshakeFailed(
-            "ClientKeyExchange body truncated".into(),
+            "ClientKeyExchange: invalid length — body is not exactly the ECDH point".into(),
         ));
     }
     Ok(ClientKeyExchange {
@@ -1342,6 +1348,30 @@ mod tests {
 
         let decoded = decode_client_key_exchange(body).unwrap();
         assert_eq!(decoded.public_key, vec![0x04; 65]);
+    }
+
+    #[test]
+    fn test_decode_client_key_exchange_rejects_trailing_bytes() {
+        // Phase I103 — a padding-extended ClientKeyExchange (RFC 4492
+        // §5.7: the body MUST be exactly the length-prefixed point) is
+        // malformed and must be rejected, not silently accepted.
+        let mut body = vec![65u8]; // point length
+        body.extend_from_slice(&[0x04; 65]); // the point
+        assert!(decode_client_key_exchange(&body).is_ok());
+
+        body.push(0x00); // one trailing pad byte
+        assert!(
+            decode_client_key_exchange(&body).is_err(),
+            "trailing bytes after the ECDH point must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_decode_client_key_exchange_rejects_truncated() {
+        // Body claims a 65-byte point but only carries 10.
+        let mut body = vec![65u8];
+        body.extend_from_slice(&[0x04; 10]);
+        assert!(decode_client_key_exchange(&body).is_err());
     }
 
     #[test]
