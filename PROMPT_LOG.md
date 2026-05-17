@@ -5468,6 +5468,18 @@ This is Phase C §4.1 — fixture-corpus prep, the analogue of the T111 xtask sc
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 136/136 PASS (111 cert + 20 CSR + 5 CRL). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: cert field-extraction families (2026-05-17)
+
+> 按建议开始做三个直接字段比较族
+
+**Result**: extends `xtask/src/x509.rs` with the three direct-field-compare cert families — `X509_CERT_PARSE_VERSION_FUNC` (91), `SERIALNUM_FUNC` (91), `SIGNATURE_FUNC` (136). New `emit_cert_field` (generic over a `CertField` enum) parses the fixture and asserts one public `Certificate` field; a generated `load_cert_fixture` helper auto-detects PEM vs DER by scanning for `-----BEGIN`. `migrated_x509_parse.rs` grows 136 → **454 tests** (+318).
+
+**Field semantics**: `version` — C `GET_VERSION` returns the raw DER integer (`v1=0/v2=1/v3=2`), Rust's `Certificate::version` is 1-indexed, so the emitted literal is the C value `+ 1` (inline `// C version field = N` note). `serial_number` / `signature_value` — compared as raw DER bytes; `read_integer` / `read_bit_string` return the TLV value verbatim, so the C `.data` hex matches byte-for-byte. All 318 tests pass on first generation — no leniency / off-by-one gaps (contrast the CRL finding).
+
+**T113 still open**: remaining cert field-check families (sig-alg / issuer / subject / validity / pubkey ~1100 rows), CSR field families, CRL field-check families (`TC004/005/009-013`), and the malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 454/454 PASS (111 cert-parse + 20 CSR + 5 CRL + 318 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 

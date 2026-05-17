@@ -20,17 +20,23 @@
 //!   any `HITLS_X509_ERR_*` → parse must fail). The C CRL test pins
 //!   `BSL_FORMAT_PEM`, so CRLs always load via `from_pem`. The CRL field-check
 //!   families (`TC004/005/009-013`) route to `ApiSurface`.
+//! * `X509_CERT_PARSE_VERSION_FUNC` / `SERIALNUM_FUNC` / `SIGNATURE_FUNC` —
+//!   `path : expected`. The C test parses the cert and checks one field; the
+//!   migrated test loads the fixture and asserts the matching public
+//!   `Certificate` field. `version` is 1-indexed in Rust (the C value is the
+//!   raw DER integer `v1=0/v2=1/v3=2`), so the emitted literal is the C value
+//!   plus one; `serial_number` / `signature_value` compare the raw DER bytes.
 //!
 //! For cert/CSR, `format` is a `BSL_FORMAT_*` token: `ASN1` → DER, `PEM` →
 //! PEM; the C `UNKNOWN` (auto-detect) format has no Rust equivalent and routes
-//! to `skipped_unknown`. The cert signature / pubkey / sig-alg field-check
-//! families (and the malformed-DER negatives) are future increments and
-//! route to `ApiSurface` for now.
+//! to `skipped_unknown`. The remaining cert field-check families (sig-alg /
+//! issuer / subject / validity / pubkey) and the malformed-DER negatives are
+//! future increments and route to `ApiSurface` for now.
 
 use std::fmt::Write;
 
 use crate::digest::EmitStats;
-use crate::parser::TestCase;
+use crate::parser::{format_byte_slice, TestCase};
 
 pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
     let mut body = String::new();
@@ -42,13 +48,15 @@ pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
             Kind::CsrParse => emit_parse(&mut body, case, &mut stats, Subject::Csr),
             Kind::CrlParse => emit_crl_parse(&mut body, case, &mut stats),
             Kind::CrlParseRes => emit_crl_parse_res(&mut body, case, &mut stats),
+            Kind::CertField(field) => emit_cert_field(&mut body, case, &mut stats, field),
             Kind::ApiSurface => stats.skipped_api += 1,
             Kind::Unknown => stats.skipped_unknown += 1,
         }
     }
 
+    let needs_cert_loader = body.contains("load_cert_fixture(");
     let mut out = String::new();
-    write_header(&mut out);
+    write_header(&mut out, needs_cert_loader);
     out.push_str(&body);
     write_footer(&mut out, &stats, cases.len());
     (out, stats)
@@ -64,8 +72,33 @@ enum Kind {
     /// `CRL_PARSE_FILE_FUNC_TC003/006/007/008` — `path : res`; `res` is the
     /// expected C return code (`HITLS_PKI_SUCCESS` or an error).
     CrlParseRes,
+    /// A cert field-extraction family (`VERSION` / `SERIALNUM` / `SIGNATURE`).
+    CertField(CertField),
     ApiSurface,
     Unknown,
+}
+
+/// A cert field-extraction KAT family — `path : expected`. The migrated test
+/// parses the certificate and asserts one public `Certificate` field.
+#[derive(Debug, Clone, Copy)]
+enum CertField {
+    /// `X509_CERT_PARSE_VERSION_FUNC` — `path : version` (raw DER integer).
+    Version,
+    /// `X509_CERT_PARSE_SERIALNUM_FUNC` — `path : "hex serial"`.
+    Serial,
+    /// `X509_CERT_PARSE_SIGNATURE_FUNC` — `path : "hex signature"`.
+    Signature,
+}
+
+impl CertField {
+    /// The emitted function-name suffix (`tc_lineN_x509_cert_<suffix>`).
+    fn suffix(self) -> &'static str {
+        match self {
+            CertField::Version => "version",
+            CertField::Serial => "serial_number",
+            CertField::Signature => "signature",
+        }
+    }
 }
 
 /// The X.509 object a parse-KAT row targets — selects the Rust parse type,
@@ -113,10 +146,19 @@ fn classify(tc: &str) -> Kind {
     {
         return Kind::CrlParseRes;
     }
-    // Cert signature / pubkey / sig-alg field-check families, CSR field /
-    // expected-return families, the CRL field-check families
-    // (`TC004/005/009-013`), version/subject checks, malformed-DER
-    // negatives — migrated in later Phase C increments.
+    if tc.contains("X509_CERT_PARSE_VERSION_FUNC") {
+        return Kind::CertField(CertField::Version);
+    }
+    if tc.contains("X509_CERT_PARSE_SERIALNUM_FUNC") {
+        return Kind::CertField(CertField::Serial);
+    }
+    if tc.contains("X509_CERT_PARSE_SIGNATURE_FUNC") {
+        return Kind::CertField(CertField::Signature);
+    }
+    // The remaining cert field-check families (sig-alg / issuer / subject /
+    // validity / pubkey), CSR field / expected-return families, the CRL
+    // field-check families (`TC004/005/009-013`), and the malformed-DER
+    // negatives are migrated in later Phase C increments.
     if tc.contains("X509_") || tc.contains("CERT_") {
         return Kind::ApiSurface;
     }
@@ -298,10 +340,81 @@ fn emit_crl_parse_res(out: &mut String, case: &TestCase, stats: &mut EmitStats) 
     stats.emitted += 1;
 }
 
-fn write_header(out: &mut String) {
+/// Emit a cert field-extraction KAT — `path : expected`. The migrated test
+/// loads the fixture via `load_cert_fixture` and asserts one public
+/// `Certificate` field against the C-expected value.
+fn emit_cert_field(out: &mut String, case: &TestCase, stats: &mut EmitStats, field: CertField) {
+    if case.args.len() < 2 {
+        stats.skipped_unknown += 1;
+        return;
+    }
+    let Some(path) = case.args[0].as_str() else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let Some(rel) = fixture_relpath(path) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+
+    let assertion = match field {
+        CertField::Version => {
+            let Some(v) = case.args[1].as_symbol().and_then(|s| s.parse::<u8>().ok()) else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            // C GET_VERSION yields the raw DER integer (v1=0/v2=1/v3=2);
+            // `Certificate::version` is 1-indexed, hence the C value + 1.
+            format!(
+                "    assert_eq!(cert.version, {}); // C version field = {v}\n",
+                v + 1
+            )
+        }
+        CertField::Serial => {
+            let Some(h) = case.args[1].as_hex() else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            format!(
+                "    assert_eq!(cert.serial_number.as_slice(), {});\n",
+                format_byte_slice(h)
+            )
+        }
+        CertField::Signature => {
+            let Some(h) = case.args[1].as_hex() else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            format!(
+                "    assert_eq!(cert.signature_value.as_slice(), {});\n",
+                format_byte_slice(h)
+            )
+        }
+    };
+
+    write_doc(
+        out,
+        case,
+        &format!("X.509 cert {} field KAT", field.suffix()),
+    );
+    writeln!(out, "#[test]").unwrap();
+    writeln!(
+        out,
+        "fn tc_line{}_x509_cert_{}() {{",
+        case.line,
+        field.suffix()
+    )
+    .unwrap();
+    writeln!(out, "    let cert = load_cert_fixture({rel:?});").unwrap();
+    out.push_str(&assertion);
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+fn write_header(out: &mut String, needs_cert_loader: bool) {
     out.push_str(
         "// This file is GENERATED by `cargo xtask migrate-c-tests --algo x509-parse`.\n\
-         // DO NOT EDIT BY HAND. Source: openhitls C SDV pki/cert + pki/csr `.data`.\n\
+         // DO NOT EDIT BY HAND. Source: openhitls C SDV pki/cert + pki/csr + pki/crl `.data`.\n\
          //\n\
          // Generator: docs/c-test-migration-plan.md Phase C (xtask).\n\
          // Fixtures: tests/vectors/c-asn1-fixtures/ (mirrored openHiTLS testdata).\n\n",
@@ -310,6 +423,23 @@ fn write_header(out: &mut String) {
     out.push_str(
         "use hitls_pki::x509::{Certificate, CertificateRequest, CertificateRevocationList};\n\n",
     );
+    if needs_cert_loader {
+        out.push_str(
+            "/// Load a mirrored cert fixture, auto-detecting PEM vs DER by content.\n\
+             fn load_cert_fixture(rel: &str) -> Certificate {\n\
+             \x20   let path = format!(\n\
+             \x20       \"{}/../../tests/vectors/c-asn1-fixtures/{}\",\n\
+             \x20       env!(\"CARGO_MANIFEST_DIR\"),\n\
+             \x20       rel\n\
+             \x20   );\n\
+             \x20   let bytes = std::fs::read(&path).unwrap();\n\
+             \x20   match std::str::from_utf8(&bytes) {\n\
+             \x20       Ok(s) if s.contains(\"-----BEGIN\") => Certificate::from_pem(s).unwrap(),\n\
+             \x20       _ => Certificate::from_der(&bytes).unwrap(),\n\
+             \x20   }\n\
+             }\n\n",
+        );
+    }
 }
 
 fn write_footer(out: &mut String, stats: &EmitStats, total: usize) {
