@@ -18,8 +18,14 @@
 //!   CRL; each must parse. `TC003/006/007/008` — `path : res`, where `res` is
 //!   the expected C return code (`HITLS_PKI_SUCCESS` → parse must succeed,
 //!   any `HITLS_X509_ERR_*` → parse must fail). The C CRL test pins
-//!   `BSL_FORMAT_PEM`, so CRLs always load via `from_pem`. The CRL field-check
-//!   families (`TC004/005/009-013`) route to `ApiSurface`.
+//!   `BSL_FORMAT_PEM`, so CRLs always load via `from_pem`.
+//! * `X509_CRL_PARSE_FILE_FUNC_TC005` / `TC009`–`TC013` — CRL field checks:
+//!   `TC005` thisUpdate/nextUpdate year, `TC009` CRL-number extension,
+//!   `TC010` AKI-extension criticality, `TC011` revoked-entry reason code,
+//!   `TC012` revoked-entry invalidity date, `TC013` revoked-entry
+//!   certificate-issuer extension presence. `TC004` (issuer-DN string) is
+//!   routed to `ApiSurface` — Rust's `DistinguishedName` Display joins with
+//!   `", "` where the C `GET_ISSUER_DN_STR` uses `","`.
 //! * `X509_CERT_PARSE_VERSION_FUNC` / `SERIALNUM_FUNC` / `SIGNATURE_FUNC` —
 //!   `path : expected`. The C test parses the cert and checks one field; the
 //!   migrated test loads the fixture and asserts the matching public
@@ -81,6 +87,7 @@ pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
             Kind::CrlParseRes => emit_crl_parse_res(&mut body, case, &mut stats),
             Kind::CertField(field) => emit_cert_field(&mut body, case, &mut stats, field),
             Kind::CrlFileVerify(tc) => emit_crl_file_verify(&mut body, case, &mut stats, tc),
+            Kind::CrlField(field) => emit_crl_field(&mut body, case, &mut stats, field),
             Kind::ApiSurface => stats.skipped_api += 1,
             Kind::Unknown => stats.skipped_unknown += 1,
         }
@@ -108,8 +115,27 @@ enum Kind {
     /// `CRL_FILE_VERIFY_FUNC_TC001-005` — CRL-revocation chain verification.
     /// The payload is the TC number (1–5); each TC has its own arg layout.
     CrlFileVerify(u8),
+    /// A CRL field-check family (`CRL_PARSE_FILE_FUNC_TC005/009-013`).
+    CrlField(CrlField),
     ApiSurface,
     Unknown,
+}
+
+/// A CRL field-check KAT family — parse a CRL, assert one parsed field.
+#[derive(Debug, Clone, Copy)]
+enum CrlField {
+    /// `CRL_PARSE_FILE_FUNC_TC005` — `path : beforeYear : afterYear`.
+    Time,
+    /// `CRL_PARSE_FILE_FUNC_TC009` — `path : critical : crlNumber : res`.
+    CrlNumber,
+    /// `CRL_PARSE_FILE_FUNC_TC010` — `path : critical` (AKI extension).
+    Aki,
+    /// `CRL_PARSE_FILE_FUNC_TC011` — `path : res : reasonCode`.
+    Reason,
+    /// `CRL_PARSE_FILE_FUNC_TC012` — `path : year : res` (invalidity date).
+    InvalidityDate,
+    /// `CRL_PARSE_FILE_FUNC_TC013` — `path : res1 : res2` (cert-issuer ext).
+    CertIssuer,
 }
 
 /// A cert field-extraction KAT family — `path : expected…`. The migrated test
@@ -294,6 +320,24 @@ fn classify(tc: &str) -> Kind {
         if tc.contains(&format!("X509_CRL_FILE_VERIFY_FUNC_TC00{n}")) {
             return Kind::CrlFileVerify(n);
         }
+    }
+    if tc.contains("X509_CRL_PARSE_FILE_FUNC_TC005") {
+        return Kind::CrlField(CrlField::Time);
+    }
+    if tc.contains("X509_CRL_PARSE_FILE_FUNC_TC009") {
+        return Kind::CrlField(CrlField::CrlNumber);
+    }
+    if tc.contains("X509_CRL_PARSE_FILE_FUNC_TC010") {
+        return Kind::CrlField(CrlField::Aki);
+    }
+    if tc.contains("X509_CRL_PARSE_FILE_FUNC_TC011") {
+        return Kind::CrlField(CrlField::Reason);
+    }
+    if tc.contains("X509_CRL_PARSE_FILE_FUNC_TC012") {
+        return Kind::CrlField(CrlField::InvalidityDate);
+    }
+    if tc.contains("X509_CRL_PARSE_FILE_FUNC_TC013") {
+        return Kind::CrlField(CrlField::CertIssuer);
     }
     // CSR field / expected-return families, the CRL field-check families
     // (`TC004/005/009-013`), and the malformed-DER negatives are migrated in
@@ -827,6 +871,178 @@ fn emit_crl_file_verify(out: &mut String, case: &TestCase, stats: &mut EmitStats
     .unwrap();
     writeln!(out, "    let result = verifier.verify_cert(&cert, &[]);").unwrap();
     out.push_str(assertion);
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// Emit an `assert!` line for a boolean expression — `assert!(expr)` when the
+/// expectation is true, `assert!(!expr)` when false (clippy rejects
+/// `assert_eq!(expr, <literal bool>)`).
+fn bool_assert(expr: &str, expected: bool) -> String {
+    if expected {
+        format!("    assert!({expr});\n")
+    } else {
+        format!("    assert!(!{expr});\n")
+    }
+}
+
+/// Map an openHiTLS `HITLS_X509_REVOKED_REASON_*` token to its RFC 5280
+/// §5.3.1 reason-code integer.
+fn reason_name_to_code(name: &str) -> Option<i32> {
+    Some(match name {
+        "HITLS_X509_REVOKED_REASON_UNSPECIFIED" => 0,
+        "HITLS_X509_REVOKED_REASON_KEY_COMPROMISE" => 1,
+        "HITLS_X509_REVOKED_REASON_CA_COMPROMISE" => 2,
+        "HITLS_X509_REVOKED_REASON_AFFILIATION_CHANGED" => 3,
+        "HITLS_X509_REVOKED_REASON_SUPERSEDED" => 4,
+        "HITLS_X509_REVOKED_REASON_CESSATION_OF_OPERATION" => 5,
+        "HITLS_X509_REVOKED_REASON_CERTIFICATE_HOLD" => 6,
+        "HITLS_X509_REVOKED_REASON_REMOVE_FROM_CRL" => 8,
+        "HITLS_X509_REVOKED_REASON_PRIVILEGE_WITHDRAWN" => 9,
+        "HITLS_X509_REVOKED_REASON_AA_COMPROMISE" => 10,
+        _ => return None,
+    })
+}
+
+/// Emit a CRL field-check KAT (`CRL_PARSE_FILE_FUNC_TC005` / `TC009`–`TC013`).
+/// Each TC parses a CRL and asserts one parsed field. Rows whose C `res` code
+/// is not `HITLS_PKI_SUCCESS` (parse / extension-lookup expected to fail) are
+/// skipped — the migrated test covers the positive outcomes. `TC004`
+/// (issuer-DN string) is not handled here: Rust's `DistinguishedName` Display
+/// joins with `", "` where the C `GET_ISSUER_DN_STR` uses `","`.
+fn emit_crl_field(out: &mut String, case: &TestCase, stats: &mut EmitStats, field: CrlField) {
+    let Some(rel) = arg_rel(&case.args, 0) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let year_bounds = |y: i64| {
+        (
+            civil_to_unix(y, 1, 1, 0, 0, 0),
+            civil_to_unix(y + 1, 1, 1, 0, 0, 0),
+        )
+    };
+    let body = match field {
+        CrlField::Time => {
+            let (Some(by), Some(ay)) = (
+                arg_sym(&case.args, 1).and_then(|s| s.parse::<i64>().ok()),
+                arg_sym(&case.args, 2).and_then(|s| s.parse::<i64>().ok()),
+            ) else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            let (b0, b1) = year_bounds(by);
+            let (a0, a1) = year_bounds(ay);
+            format!(
+                "    assert!(crl.this_update >= {b0} && crl.this_update < {b1}); // thisUpdate {by}\n\
+                 \x20   let next = crl.next_update.unwrap();\n\
+                 \x20   assert!(next >= {a0} && next < {a1}); // nextUpdate {ay}\n"
+            )
+        }
+        CrlField::CrlNumber => {
+            if arg_sym(&case.args, 3) != Some("HITLS_PKI_SUCCESS") {
+                stats.skipped_unsupported_alg += 1;
+                return;
+            }
+            let Some(num) = case.args.get(2).and_then(|a| a.as_hex()) else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            let Some(critical) = arg_sym(&case.args, 1).map(|s| s == "1") else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            format!(
+                "    assert_eq!(crl.crl_number().unwrap().as_slice(), {});\n\
+                 \x20   let critical = crl\n\
+                 \x20       .extensions\n\
+                 \x20       .iter()\n\
+                 \x20       .find(|e| e.oid == [0x55, 0x1d, 0x14])\n\
+                 \x20       .map(|e| e.critical)\n\
+                 \x20       .unwrap_or(false);\n\
+                 {}",
+                format_byte_slice(num),
+                bool_assert("critical", critical)
+            )
+        }
+        CrlField::Aki => {
+            let Some(critical) = arg_sym(&case.args, 1).map(|s| s == "1") else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            format!(
+                "    let critical = crl\n\
+                 \x20       .extensions\n\
+                 \x20       .iter()\n\
+                 \x20       .find(|e| e.oid == [0x55, 0x1d, 0x23])\n\
+                 \x20       .map(|e| e.critical)\n\
+                 \x20       .unwrap_or(false);\n\
+                 {}",
+                bool_assert("critical", critical)
+            )
+        }
+        CrlField::Reason => {
+            if arg_sym(&case.args, 1) != Some("HITLS_PKI_SUCCESS") {
+                stats.skipped_unsupported_alg += 1;
+                return;
+            }
+            // `reasonCode` is usually a `HITLS_X509_REVOKED_REASON_*` token,
+            // occasionally a bare integer.
+            let Some(raw) = arg_sym(&case.args, 2) else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            let Some(code) = raw.parse::<i32>().ok().or_else(|| reason_name_to_code(raw)) else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            // RFC 5280 §5.3.1 leaves reason code 7 unassigned; Rust's
+            // `RevocationReason` enum omits it, so `from_u8(7)` yields `None`
+            // and the row cannot be asserted. Skip any unmapped code.
+            if !matches!(code, 0..=6 | 8..=10) {
+                stats.skipped_unsupported_alg += 1;
+                return;
+            }
+            format!(
+                "    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);\n\
+                 \x20   assert_eq!(reason, Some({code}));\n"
+            )
+        }
+        CrlField::InvalidityDate => {
+            if arg_sym(&case.args, 2) != Some("HITLS_PKI_SUCCESS") {
+                stats.skipped_unsupported_alg += 1;
+                return;
+            }
+            let Some(year) = arg_sym(&case.args, 1).and_then(|s| s.parse::<i64>().ok()) else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            let (lo, hi) = year_bounds(year);
+            format!(
+                "    let d = crl.revoked_certs.first().unwrap().invalidity_date.unwrap();\n\
+                 \x20   assert!(d >= {lo} && d < {hi}); // invalidity date {year}\n"
+            )
+        }
+        CrlField::CertIssuer => {
+            // res1 = parse result, res2 = GET_REVOKED_CERTISSUER result. Only
+            // the both-SUCCESS rows migrate: where C's getter fails (`res2`
+            // an error) Rust's parser still populates `certificate_issuer`,
+            // so the negative rows cannot be asserted (parser-leniency gap).
+            if arg_sym(&case.args, 1) != Some("HITLS_PKI_SUCCESS")
+                || arg_sym(&case.args, 2) != Some("HITLS_PKI_SUCCESS")
+            {
+                stats.skipped_unsupported_alg += 1;
+                return;
+            }
+            "    assert!(crl.revoked_certs.first().unwrap().certificate_issuer.is_some());\n"
+                .to_string()
+        }
+    };
+
+    write_doc(out, case, "X.509 CRL field-check KAT");
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_x509_crl_field() {{", case.line).unwrap();
+    writeln!(out, "    let crl = load_crl_fixture({rel:?});").unwrap();
+    out.push_str(&body);
     writeln!(out, "}}\n").unwrap();
     stats.emitted += 1;
 }

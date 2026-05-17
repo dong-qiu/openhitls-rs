@@ -46154,6 +46154,15 @@ fn tc_line14_x509_crl_parse_res() {
     assert!(CertificateRevocationList::from_pem(pem).is_ok());
 }
 
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC005 (line 26, X.509 CRL field-check KAT)
+#[test]
+fn tc_line26_x509_crl_field() {
+    let crl = load_crl_fixture("cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_last2055.crl");
+    assert!(crl.this_update >= 1735689600 && crl.this_update < 1767225600); // thisUpdate 2025
+    let next = crl.next_update.unwrap();
+    assert!(next >= 2682374400 && next < 2713910400); // nextUpdate 2055
+}
+
 /// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC007 (line 47, X.509 CRL parse KAT)
 #[test]
 fn tc_line47_x509_crl_parse_res() {
@@ -46176,6 +46185,221 @@ fn tc_line50_x509_crl_parse_res() {
     .unwrap();
     let pem = std::str::from_utf8(&bytes).unwrap();
     assert!(CertificateRevocationList::from_pem(pem).is_ok());
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC009 (line 56, X.509 CRL field-check KAT)
+#[test]
+fn tc_line56_x509_crl_field() {
+    let crl =
+        load_crl_fixture("cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_test_crl_number.crl");
+    assert_eq!(crl.crl_number().unwrap().as_slice(), &[0x0c,]);
+    let critical = crl
+        .extensions
+        .iter()
+        .find(|e| e.oid == [0x55, 0x1d, 0x14])
+        .map(|e| e.critical)
+        .unwrap_or(false);
+    assert!(!critical);
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC009 (line 65, X.509 CRL field-check KAT)
+#[test]
+fn tc_line65_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_critical_crl_number.crl",
+    );
+    assert_eq!(crl.crl_number().unwrap().as_slice(), &[0x01,]);
+    let critical = crl
+        .extensions
+        .iter()
+        .find(|e| e.oid == [0x55, 0x1d, 0x14])
+        .map(|e| e.critical)
+        .unwrap_or(false);
+    assert!(critical);
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC010 (line 68, X.509 CRL field-check KAT)
+#[test]
+fn tc_line68_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_authority_key_is_normal.crl",
+    );
+    let critical = crl
+        .extensions
+        .iter()
+        .find(|e| e.oid == [0x55, 0x1d, 0x23])
+        .map(|e| e.critical)
+        .unwrap_or(false);
+    assert!(!critical);
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC010 (line 71, X.509 CRL field-check KAT)
+#[test]
+fn tc_line71_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_authority_key_is_null.crl",
+    );
+    let critical = crl
+        .extensions
+        .iter()
+        .find(|e| e.oid == [0x55, 0x1d, 0x23])
+        .map(|e| e.critical)
+        .unwrap_or(false);
+    assert!(!critical);
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC010 (line 74, X.509 CRL field-check KAT)
+#[test]
+fn tc_line74_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_authority_key_is_critical.crl",
+    );
+    let critical = crl
+        .extensions
+        .iter()
+        .find(|e| e.oid == [0x55, 0x1d, 0x23])
+        .map(|e| e.critical)
+        .unwrap_or(false);
+    assert!(critical);
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 77, X.509 CRL field-check KAT)
+#[test]
+fn tc_line77_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_critical_reason.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(1));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 80, X.509 CRL field-check KAT)
+#[test]
+fn tc_line80_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_0.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(0));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 83, X.509 CRL field-check KAT)
+#[test]
+fn tc_line83_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_1.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(1));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 86, X.509 CRL field-check KAT)
+#[test]
+fn tc_line86_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_2.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(2));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 89, X.509 CRL field-check KAT)
+#[test]
+fn tc_line89_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_3.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(3));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 92, X.509 CRL field-check KAT)
+#[test]
+fn tc_line92_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_4.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(4));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 95, X.509 CRL field-check KAT)
+#[test]
+fn tc_line95_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_5.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(5));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 98, X.509 CRL field-check KAT)
+#[test]
+fn tc_line98_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_6.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(6));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 104, X.509 CRL field-check KAT)
+#[test]
+fn tc_line104_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_8.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(8));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 107, X.509 CRL field-check KAT)
+#[test]
+fn tc_line107_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_9.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(9));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC011 (line 110, X.509 CRL field-check KAT)
+#[test]
+fn tc_line110_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/reason_code_test/demoCA_rsa2048_v2_reason_code_10.crl",
+    );
+    let reason = crl.revoked_certs.first().unwrap().reason.map(|r| r as i32);
+    assert_eq!(reason, Some(10));
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC012 (line 113, X.509 CRL field-check KAT)
+#[test]
+fn tc_line113_x509_crl_field() {
+    let crl =
+        load_crl_fixture("cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_InvalidityData.crl");
+    let d = crl.revoked_certs.first().unwrap().invalidity_date.unwrap();
+    assert!(d >= 1735689600 && d < 1767225600); // invalidity date 2025
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC012 (line 116, X.509 CRL field-check KAT)
+#[test]
+fn tc_line116_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_InvalidityData_UtcTime.crl",
+    );
+    let d = crl.revoked_certs.first().unwrap().invalidity_date.unwrap();
+    assert!(d >= 1735689600 && d < 1767225600); // invalidity date 2025
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC012 (line 119, X.509 CRL field-check KAT)
+#[test]
+fn tc_line119_x509_crl_field() {
+    let crl = load_crl_fixture(
+        "cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_InvalidityData_is_critical.crl",
+    );
+    let d = crl.revoked_certs.first().unwrap().invalidity_date.unwrap();
+    assert!(d >= 1735689600 && d < 1767225600); // invalidity date 2025
 }
 
 /// SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 #1 Test the unrevoked certificates
@@ -46353,4 +46577,4 @@ fn tc_line173_x509_crl_file_verify() {
     assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
 }
 
-// Generation summary: 1018 emitted / 317 API-surface skipped / 22 unknown / 62 unsupported alg / 1419 total C cases.
+// Generation summary: 1038 emitted / 265 API-surface skipped / 48 unknown / 68 unsupported alg / 1419 total C cases.
