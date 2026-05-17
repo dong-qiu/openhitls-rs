@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I100 (100 phases)
+- Implementation: I1–I101 (101 phases)
 - Testing: T1–T127 (121 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -333,6 +333,7 @@ Category summary:
 | 321 | I99 | Impl | TLS 1.3 ECDHE for secp384r1 / secp521r1 — the TLS `KeyExchange` (`handshake/key_exchange.rs`) advertised these groups but `generate` only implemented X25519 / X448 / SECP256R1 / SM2 / X25519MLKEM768, so a client offering only secp384r1/secp521r1 hit `unsupported named group`. `hitls-crypto::ecdh` has had P-384/P-521 ECDH since project start (same crypto-has-it / TLS-layer-missing-it pattern as I96). Added `EcdhP384`/`EcdhP521` variants + `generate`/`compute_shared_secret` arms. Verified: tlsfuzzer `dhe-shared-secret-padding` 559/5 → 703/3, `ecdhe-curves` 4/33 → 6/33. Surfaced by the T126/batch-2 mass-fail triage | 2026-05-17 |
 | 322 | T127 | Test | mass-fail tlsfuzzer triage batch 2 — CI wiring. `test-tls13-dhe-shared-secret-padding.py` joins the curated suite (513 PASS post-I99; 3 stable XFAILs — `ffdhe2048`/`ffdhe3072` pending the FFDHE phase, `x448` not in the default `supported_groups`). Completes the ① mass-fail-triage task: all ~10 T92-deferred scripts probed + triaged across T126 / I99 / T127 — 2 real bugs fixed (T126 zero-content-type alert, I99 secp384/521 ECDHE), 2 scripts added to CI; `legacy-version` won't-fix, `non-support`/`shuffled-extentions`/`serverhello-random`/`crfg-curves`/`large-number-of-extensions`/`unencrypted-alert` triaged + deferred (per-script disposition in the T127 entry) | 2026-05-17 |
 | 323 | I100 | Impl | `s-server --tls auto` version-range listener — a single port that peeks each pending ClientHello (`TcpStream::peek`, non-consuming) for the `supported_versions` extension (RFC 8446 §4.2.1) and dispatches the connection to the TLS 1.3 or TLS 1.2 handler accordingly. `s_server::run` refactored: per-version cipher/version selection pulled into a `make_config(want_tls13)` closure so `auto` holds one `TlsConfig` per version; `peek_client_wants_tls13` + the pure, bounds-checked `client_hello_offers_tls13(&[u8]) -> bool` parser (7 unit tests). `--tls` now accepts `1.2` / `1.3` / `auto`. Cross-impl verified: Rust s-client + `openssl s_client` both negotiate the correct protocol against one `auto` listener. Task ② of the server-side tlsfuzzer plan | 2026-05-17 |
+| 324 | I101 | Impl | TLS 1.2 server-conformance: `signature_algorithms`-absent default + `ec_point_formats` echo — two ServerHello/SKE gaps that blocked the bulk of TLS 1.2 tlsfuzzer scripts (probing measured 453/889 connections failing on "no common signature scheme"). **Part A**: `select_signature_scheme_tls12` rejected an empty client-scheme list (TLS 1.2 makes `signature_algorithms` OPTIONAL); now defaults to RFC 5246 §7.4.1.4.1's `{sha1,rsa}` / `{sha1,ecdsa}` (strictly enforced by tlslite-ng — SHA-256 is rejected as "invalid signature algorithm"), with SHA-1 SKE signing added to `sign_ske_data` for this legacy-only path. **Part B**: the ServerHello now echoes `ec_point_formats` (RFC 8422 §5.1.2) when the client offered it and an ECDHE suite is negotiated. Verified: `test-ecdhe-rsa-key-exchange` 0/3 → 2/3, `ecdhe-padded-shared-secret` 0/3 → 2/3, `test-ecdhe-rsa-key-exchange-with-bad-messages` 0/8-all-XFAIL → 3/8 PASS (xfail trimmed 7 → 5). Task ③ foundational fix | 2026-05-17 |
 
 ---
 
@@ -19094,6 +19095,110 @@ buffer → false. Plus `test_s_server_auto_version_accepted` (the
 `hitls-cli` builds clean (`-D warnings`); s_server tests 23/0. The
 `--tls auto` listener is ready for cross-version tlsfuzzer coverage —
 task ③ (TLS 1.2 tlsfuzzer script breadth) can point scripts at it.
+
+---
+
+## Phase I101 — TLS 1.2 Server-Conformance: `signature_algorithms`-Absent Default + `ec_point_formats` Echo (2026-05-17)
+
+### Summary
+
+I101 is the foundational fix of task ③ (TLS 1.2 tlsfuzzer script
+breadth). Probing the curated tlsfuzzer corpus against a local
+`s-server --tls 1.2` measured **453 of 889 connections** failing with
+`handshake failed: no common signature scheme`, plus a second gap
+behind it. Two TLS 1.2 ServerHello / ServerKeyExchange conformance
+bugs, fixed here as Part A + Part B.
+
+### Part A — `signature_algorithms`-absent default (RFC 5246 §7.4.1.4.1)
+
+The `signature_algorithms` extension is **OPTIONAL** in a TLS 1.2
+ClientHello. `select_signature_scheme_tls12` looped the server's key
+candidates against the client's advertised list and, on an empty
+list, fell through to `Err("no common signature scheme")` — so the
+server rejected every TLS 1.2 client that omitted the extension (a
+common tlsfuzzer pattern; the `sanity` conversation of most TLS 1.2
+scripts builds a minimal ClientHello without it).
+
+RFC 5246 §7.4.1.4.1 requires the server to "behave as if the client
+had sent the value `{sha1,rsa}`" (or `{sha1,ecdsa}` / `{sha1,dsa}`).
+This is **strictly enforced by peers**: tlsfuzzer's
+`ExpectServerKeyExchange` (`expect.py`) sets
+`valid_sig_algs = [(sha1, rsa)]` when the ClientHello carried no
+`signature_algorithms`, and tlslite-ng rejects anything else with
+`TLSIllegalParameterException: Server selected invalid signature
+algorithm`. A pragmatic SHA-256 fallback was tried first and
+empirically rejected by tlslite-ng — so the literal `{sha1,*}`
+default is the only interoperable option.
+
+- `select_signature_scheme_tls12`: an empty `client_schemes` now
+  returns `RSA_PKCS1_SHA1` (RSA) / `ECDSA_SHA1` (ECDSA); other key
+  types keep their single scheme (degenerate with no-`sigalgs`).
+- `sign_ske_data`: added the `RSA_PKCS1_SHA1` and `ECDSA_SHA1` arms
+  (+ a `compute_sha1` helper). SHA-1 in the SKE signature is confined
+  to this one legacy-compatibility path — reached only when a client
+  explicitly signals it supports nothing beyond the TLS 1.2
+  mandatory-to-implement floor — and signs ephemeral, handshake-fresh
+  data (`client_random || server_random || params`), never a
+  long-lived artifact. This is exactly what OpenSSL does.
+
+### Part B — `ec_point_formats` echo (RFC 8422 §5.1.2)
+
+When the client offers the `ec_point_formats` extension and the
+server selects an ECC (ECDHE) cipher suite, the ServerHello SHOULD
+carry `ec_point_formats` listing `uncompressed`. The TLS 1.2
+ServerHello builder never emitted it, so tlsfuzzer's ECC scripts
+(`ExpectServerHello` with a strict `ec_point_formats` entry) aborted
+the handshake at the client.
+
+- New `client_offered_ec_point_formats` flag (parsed from the
+  ClientHello, mirroring `client_offered_etm`).
+- The ServerHello echoes `build_ec_point_formats()` when the client
+  offered it and `params.kx_alg` is `Ecdhe` / `EcdhePsk` /
+  `EcdheAnon`. (`build_ec_point_formats` / `parse_ec_point_formats`
+  already existed in `extensions_codec`.)
+
+### Verification
+
+- `cargo build`/`clippy -p hitls-tls --all-features` (`-D warnings`):
+  clean; `fmt` clean; `cargo test -p hitls-tls --lib`:
+  **1543 PASS / 0 FAIL** (+2 I101 tests —
+  `select_signature_scheme_tls12_empty_{rsa,ecdsa}`).
+- End-to-end (pinned tlsfuzzer, local `s-server --tls 1.2`):
+  - `test-ecdhe-rsa-key-exchange.py`: 0/3 → **2/3 PASS**.
+  - `test-ecdhe-padded-shared-secret.py`: 0/3 → **2/3 PASS**.
+  - `test-ecdhe-rsa-key-exchange-with-bad-messages.py` (curated):
+    was 0/8 all-XFAIL (every conversation blocked on the missing
+    `ec_point_formats` echo) → now **3/8 PASS** (both `sanity` runs +
+    `truncated ecdh_Yc value`); the xfail list trimmed 7 → 5 entries.
+- Regression: all 9 curated TLS 1.2 scripts still `run.sh` exit 0;
+  the 4 mTLS-1.2 scripts use a lenient `ExpectServerHello(version=
+  (3,3))` (no extension-list check), so the new `ec_point_formats`
+  echo cannot break them.
+
+### Residual (next phase)
+
+With the handshake unblocked, `test-ecdhe-rsa-key-exchange-with-bad-
+messages.py` now reaches its actual checks and surfaces two further
+TLS 1.2 bad-`ClientKeyExchange` gaps (kept XFAIL): invalid ECDH
+points alert `internal_error` instead of `illegal_parameter`
+(RFC 4492 §5.4), and a padding-extended ClientKeyExchange is accepted
+rather than rejected. Each is its own follow-up phase.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | Part A: `select_signature_scheme_tls12` empty-list `{sha1,*}` default + `sign_ske_data` SHA-1 arms + `compute_sha1`. Part B: `client_offered_ec_point_formats` field + CH parse + ServerHello echo. +2 unit tests. |
+| `tests/tlsfuzzer/xfail/test-ecdhe-rsa-key-exchange-with-bad-messages.txt` | Modified | Trimmed 7 → 5 (the 3 now-passing conversations removed); comment rewritten. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 324 + Implementation summary I1–I100 → I1–I101. |
+| `PROMPT_LOG.md` | Modified | I101 prompt + result entry. |
+
+### Build Status (Post I101)
+
+`hitls-tls` builds clean (`-D warnings`); lib tests 1543/0. Task ③
+continues: with the sanity handshake unblocked, more TLS 1.2 scripts
+become curatable — next is the `illegal_parameter` alert mapping +
+padded-CKE rejection, then the curation T-phase.
 
 
 

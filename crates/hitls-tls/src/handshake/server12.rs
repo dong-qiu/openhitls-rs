@@ -27,9 +27,10 @@ use crate::handshake::codec12::{
     ServerKeyExchangeEcdheAnon, ServerKeyExchangeEcdhePsk, ServerKeyExchangePskHint,
 };
 use crate::handshake::extensions_codec::{
-    build_encrypt_then_mac, build_extended_master_secret, build_max_fragment_length,
-    build_record_size_limit, build_renegotiation_info, build_renegotiation_info_initial,
-    build_session_ticket_sh, parse_alpn_ch, parse_encrypt_then_mac, parse_extended_master_secret,
+    build_ec_point_formats, build_encrypt_then_mac, build_extended_master_secret,
+    build_max_fragment_length, build_record_size_limit, build_renegotiation_info,
+    build_renegotiation_info_initial, build_session_ticket_sh, parse_alpn_ch,
+    parse_ec_point_formats, parse_encrypt_then_mac, parse_extended_master_secret,
     parse_max_fragment_length, parse_record_size_limit, parse_renegotiation_info,
     parse_server_name, parse_session_ticket_ch, parse_signature_algorithms_ch,
     parse_supported_groups_ch,
@@ -210,6 +211,10 @@ pub struct Tls12ServerHandshake {
     client_offered_ems: bool,
     /// Whether the client offered ETM in ClientHello.
     client_offered_etm: bool,
+    /// Whether the client offered `ec_point_formats` in ClientHello
+    /// (RFC 4492 §5.1.2 / RFC 8422 §5.1.2 — echoed in ServerHello when
+    /// an ECC cipher suite is negotiated).
+    client_offered_ec_point_formats: bool,
     /// Client's record size limit from ClientHello (RFC 8449).
     client_record_size_limit: Option<u16>,
     /// Whether the client sent the status_request extension (OCSP stapling).
@@ -258,6 +263,7 @@ impl Tls12ServerHandshake {
             server_verify_data: Vec::new(),
             client_offered_ems: false,
             client_offered_etm: false,
+            client_offered_ec_point_formats: false,
             client_record_size_limit: None,
             client_wants_ocsp: false,
             client_wants_sct: false,
@@ -380,6 +386,7 @@ impl Tls12ServerHandshake {
         self.use_encrypt_then_mac = false;
         self.client_offered_ems = false;
         self.client_offered_etm = false;
+        self.client_offered_ec_point_formats = false;
         self.client_record_size_limit = None;
         self.client_wants_ocsp = false;
         self.client_wants_sct = false;
@@ -487,6 +494,13 @@ impl Tls12ServerHandshake {
                 ExtensionType::ENCRYPT_THEN_MAC => {
                     parse_encrypt_then_mac(&ext.data)?;
                     self.client_offered_etm = true;
+                }
+                ExtensionType::EC_POINT_FORMATS => {
+                    // RFC 8422 §5.1.2 — validate the list (it MUST
+                    // contain `uncompressed`); we only need the
+                    // offered/not-offered flag for the ServerHello echo.
+                    parse_ec_point_formats(&ext.data)?;
+                    self.client_offered_ec_point_formats = true;
                 }
                 ExtensionType::RENEGOTIATION_INFO => {
                     let ri_data = parse_renegotiation_info(&ext.data)?;
@@ -666,6 +680,20 @@ impl Tls12ServerHandshake {
         // Echo ETM extension
         if self.use_encrypt_then_mac {
             sh_extensions.push(build_encrypt_then_mac());
+        }
+        // Echo ec_point_formats (RFC 8422 §5.1.2): when the client
+        // offered it and an ECC (ECDHE) cipher suite is negotiated, the
+        // ServerHello carries `ec_point_formats` listing `uncompressed`.
+        // tlsfuzzer's ECC scripts (`ExpectServerHello` with
+        // `ec_point_formats`) require this; omitting it aborts the
+        // handshake at the client.
+        if self.client_offered_ec_point_formats
+            && matches!(
+                params.kx_alg,
+                KeyExchangeAlg::Ecdhe | KeyExchangeAlg::EcdhePsk | KeyExchangeAlg::EcdheAnon
+            )
+        {
+            sh_extensions.push(build_ec_point_formats());
         }
         // Echo Record Size Limit (RFC 8449) if client offered and config enables it
         if self.client_record_size_limit.is_some() && self.config.record_size_limit > 0 {
@@ -1734,6 +1762,32 @@ pub(crate) fn select_signature_scheme_tls12(
         ServerPrivateKey::Sm2 { .. } => &[SignatureScheme::SM2_SM3],
     };
 
+    // RFC 5246 §7.4.1.4.1 — the `signature_algorithms` extension is
+    // OPTIONAL in a TLS 1.2 ClientHello. When the client omits it, the
+    // RFC requires the server to "behave as if the client had sent the
+    // value {sha1,rsa}" (or {sha1,ecdsa} / {sha1,dsa} for those key
+    // exchanges). This is enforced strictly by peers: tlslite-ng /
+    // tlsfuzzer reject any other ServerKeyExchange signature algorithm
+    // with "Server selected invalid signature algorithm", so we must
+    // honour the literal `{sha1,*}` default — SHA-1 here is confined to
+    // this one legacy-compatibility path, reached only when a client
+    // explicitly signals it supports nothing beyond the TLS 1.2
+    // mandatory-to-implement floor. Without this the server rejects
+    // every such client with "no common signature scheme".
+    if client_schemes.is_empty() {
+        return Ok(match key {
+            ServerPrivateKey::Rsa { .. } => SignatureScheme::RSA_PKCS1_SHA1,
+            ServerPrivateKey::Ecdsa { .. } => SignatureScheme::ECDSA_SHA1,
+            // Ed25519 / Ed448 / DSA / SM2 keep their single scheme: a
+            // TLS-1.2 client that omits signature_algorithms predates
+            // EdDSA entirely, and our `s-server` advertises no DSA
+            // suites, so this combination is degenerate. The
+            // `candidates` match above already errored for an
+            // unsupported ECDSA curve, so this slice is non-empty.
+            _ => candidates[0],
+        });
+    }
+
     for candidate in candidates {
         if client_schemes.contains(candidate) {
             return Ok(*candidate);
@@ -1774,6 +1828,9 @@ pub(crate) fn sign_ske_data(
             private_key,
         } => {
             let digest = match scheme {
+                // ECDSA_SHA1: RFC 5246 §7.4.1.4.1 default when the
+                // client omits signature_algorithms (legacy path only).
+                SignatureScheme::ECDSA_SHA1 => compute_sha1(signed_data)?,
                 SignatureScheme::ECDSA_SECP256R1_SHA256 => compute_sha256(signed_data)?,
                 SignatureScheme::ECDSA_SECP384R1_SHA384 => compute_sha384(signed_data)?,
                 SignatureScheme::ECDSA_SECP521R1_SHA512 => compute_sha512(signed_data)?,
@@ -1785,6 +1842,9 @@ pub(crate) fn sign_ske_data(
         }
         ServerPrivateKey::Rsa { n, d, e, p, q } => {
             let digest = match scheme {
+                // RSA_PKCS1_SHA1: RFC 5246 §7.4.1.4.1 default when the
+                // client omits signature_algorithms (legacy path only).
+                SignatureScheme::RSA_PKCS1_SHA1 => compute_sha1(signed_data)?,
                 SignatureScheme::RSA_PKCS1_SHA256 | SignatureScheme::RSA_PSS_RSAE_SHA256 => {
                     compute_sha256(signed_data)?
                 }
@@ -1794,9 +1854,9 @@ pub(crate) fn sign_ske_data(
                 _ => return Err(TlsError::HandshakeFailed("RSA scheme mismatch".into())),
             };
             let padding = match scheme {
-                SignatureScheme::RSA_PKCS1_SHA256 | SignatureScheme::RSA_PKCS1_SHA384 => {
-                    hitls_crypto::rsa::RsaPadding::Pkcs1v15Sign
-                }
+                SignatureScheme::RSA_PKCS1_SHA1
+                | SignatureScheme::RSA_PKCS1_SHA256
+                | SignatureScheme::RSA_PKCS1_SHA384 => hitls_crypto::rsa::RsaPadding::Pkcs1v15Sign,
                 _ => hitls_crypto::rsa::RsaPadding::Pss,
             };
             let rsa_key = hitls_crypto::rsa::RsaPrivateKey::new(n, d, e, p, q)
@@ -1837,6 +1897,12 @@ fn get_body(msg_data: &[u8]) -> Result<&[u8], TlsError> {
         ));
     }
     Ok(&msg_data[4..])
+}
+
+fn compute_sha1(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    let mut h = hitls_crypto::sha1::Sha1::new();
+    h.update(data).map_err(TlsError::CryptoError)?;
+    Ok(h.finish().map_err(TlsError::CryptoError)?.to_vec())
 }
 
 fn compute_sha256(data: &[u8]) -> Result<Vec<u8>, TlsError> {
@@ -2342,6 +2408,41 @@ mod tests {
         let client_schemes = vec![SignatureScheme::RSA_PKCS1_SHA256];
         let scheme = select_signature_scheme_tls12(&key, &client_schemes).unwrap();
         assert_eq!(scheme, SignatureScheme::RSA_PKCS1_SHA256);
+    }
+
+    #[test]
+    fn test_select_signature_scheme_tls12_empty_rsa() {
+        // Phase I101 — RFC 5246 §7.4.1.4.1: an empty client-scheme list
+        // (no `signature_algorithms` extension) must NOT error; the RSA
+        // fallback is the literal `{sha1,rsa}` default the RFC mandates
+        // (and tlslite-ng / tlsfuzzer strictly enforce).
+        let key = ServerPrivateKey::Rsa {
+            n: vec![0x01],
+            d: vec![0x02],
+            e: vec![0x03],
+            p: vec![0x04],
+            q: vec![0x05],
+        };
+        let scheme = select_signature_scheme_tls12(&key, &[]).unwrap();
+        assert_eq!(scheme, SignatureScheme::RSA_PKCS1_SHA1);
+    }
+
+    #[test]
+    fn test_select_signature_scheme_tls12_empty_ecdsa() {
+        // Phase I101 — the ECDSA no-extension fallback is `{sha1,ecdsa}`
+        // for every curve (RFC 5246 §7.4.1.4.1).
+        for curve in [
+            EccCurveId::NistP256,
+            EccCurveId::NistP384,
+            EccCurveId::NistP521,
+        ] {
+            let key = ServerPrivateKey::Ecdsa {
+                curve_id: curve,
+                private_key: vec![0x01],
+            };
+            let scheme = select_signature_scheme_tls12(&key, &[]).unwrap();
+            assert_eq!(scheme, SignatureScheme::ECDSA_SHA1);
+        }
     }
 
     #[test]

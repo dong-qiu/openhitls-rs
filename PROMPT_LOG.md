@@ -6021,3 +6021,47 @@ Phase I100.
 
 Next: ③ TLS 1.2 tlsfuzzer script breadth — can point cross-version
 scripts at the new `auto` listener.
+
+---
+
+## Phase I101 — TLS 1.2 Server-Conformance: signature_algorithms-Absent Default + ec_point_formats Echo (2026-05-17)
+
+> 按照这个推荐的顺序依次执行
+
+Task ③'s foundational fix. Probing the curated tlsfuzzer corpus
+against a local `s-server --tls 1.2` measured 453/889 connections
+failing with "no common signature scheme" — two TLS 1.2 ServerHello /
+ServerKeyExchange conformance bugs blocking the bulk of TLS 1.2
+scripts.
+
+**Part A** — `select_signature_scheme_tls12` rejected an empty
+client-scheme list, but `signature_algorithms` is OPTIONAL in a
+TLS 1.2 ClientHello (RFC 5246 §7.4.1.4.1). The RFC requires defaulting
+to `{sha1,rsa}` / `{sha1,ecdsa}`; this is strictly enforced —
+tlsfuzzer's `ExpectServerKeyExchange` rejects any other algorithm with
+"Server selected invalid signature algorithm" (a SHA-256 fallback was
+tried and empirically rejected by tlslite-ng). Added the `{sha1,*}`
+default + SHA-1 SKE signing (`sign_ske_data` RSA/ECDSA SHA-1 arms +
+`compute_sha1`), confined to this legacy-only no-`sigalgs` path.
+
+**Part B** — the TLS 1.2 ServerHello now echoes `ec_point_formats`
+(RFC 8422 §5.1.2) when the client offered it and an ECDHE suite is
+negotiated.
+
+**Verification**: `hitls-tls` builds + clippy `-D warnings` clean;
+lib tests 1543/0 (+2). End-to-end: `test-ecdhe-rsa-key-exchange`
+0/3 → 2/3, `ecdhe-padded-shared-secret` 0/3 → 2/3,
+`test-ecdhe-rsa-key-exchange-with-bad-messages` (curated) 0/8-all-XFAIL
+→ 3/8 PASS (xfail trimmed 7 → 5). All 9 curated TLS 1.2 scripts still
+exit 0; the 4 mTLS-1.2 scripts use a lenient ExpectServerHello so the
+ec_point_formats echo cannot break them. Recorded as DEV_LOG Phase
+I101.
+
+Note on process: I had recommended a pragmatic SHA-256 default to keep
+SHA-1 out of the signing path; the empirical tlsfuzzer probe proved
+tlslite-ng strictly enforces RFC 5246's literal `{sha1,*}`, so the
+RFC-strict SHA-1 default was the only working option and was used.
+
+Task ③ continues — the unblocked sanity handshake surfaces further
+TLS 1.2 bad-message gaps (illegal_parameter alert mapping, padded-CKE
+rejection), each a follow-up phase before the curation T-phase.
