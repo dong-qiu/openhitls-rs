@@ -6097,3 +6097,37 @@ TLS 1.2 conformance gaps (illegal_parameter alert mapping, padded-CKE
 rejection, ClientHello version-floor check, zero-length-data
 pass-through, no-supported_groups ECDHE fallback) are documented
 follow-ups. Next: task ④ (FFDHE groups, RFC 7919).
+
+---
+
+## Phase I102 — TLS 1.3 FFDHE Key Exchange (RFC 7919) (2026-05-17)
+
+> 按照这个推荐的顺序依次执行
+
+Task ④ of the server-side tlsfuzzer plan. The TLS 1.3 ephemeral
+`KeyExchange` supported the EC groups + X25519MLKEM768 but had no
+finite-field-DHE variant, so a client offering only an `ffdhe*` group
+(RFC 7919) hit `unsupported named group` — the same
+crypto-has-it / TLS-layer-missing-it shape as I99 (`hitls-crypto::dh`
+has had the DH primitive since project start).
+
+Added a `Ffdhe` inner variant + `generate`/`compute_shared_secret`
+arms for all 5 RFC 7919 groups (ffdhe2048/3072/4096/6144/8192). FFDHE
+is non-KEM, so it reuses the ECDHE generate/compute path; the DH
+public value and shared secret are both left-padded to the group
+prime length (RFC 8446 §4.2.8.1 / §7.4.1), which
+`hitls-crypto::dh` already does. The `s-server` default
+`supported_groups` was extended with the 5 FFDHE groups (after the EC
+groups — lowest preference) plus X448.
+
+**Verification**: `hitls-tls` + `hitls-cli` build + clippy
+`-D warnings` clean; lib tests 1546/0 (+3). End-to-end:
+`test-tls13-dhe-shared-secret-padding.py` (curated) 513/3-XFAIL →
+2203/0 PASS on the full `-n 9999` set (ffdhe2048/3072 + x448 all
+pass); `test-tls13-psk_dhe_ke.py` (curated) 3/1-XFAIL → 4/4 — both
+xfail files removed. Recorded as DEV_LOG Phase I102.
+
+Curating the TLS 1.2 FFDHE scripts (`test-ffdhe-negotiation` etc.) is
+a separate follow-up — they exercise the `DHE_RSA` cipher suites,
+which the `s-server` TLS 1.2 default cipher list does not offer
+(ECDHE-only). Next: task ⑤ (`s-server` DTLS mode).
