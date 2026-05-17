@@ -69,6 +69,7 @@ migration tool emit the corresponding tests with no generator change.
 | SM4 CBC / CTR / CFB / OFB / HCTR / XTS + GCM-decrypt | SM4 | 37 | CBC hardcodes PKCS#7 padding; CTR/CFB/OFB/HCTR/XTS have no public SM4 entry point; GCM-decrypt needs the 16-byte tag absent from the `.data` | add SM4 raw-mode public functions; a CBC no-padding helper |
 | SM2 key exchange | SM2 | 17 | `Sm2KeyPair` exposes no key-exchange method | add an SM2 ECDH / key-exchange API |
 | HMAC/CMAC SHA-3 | HMAC, CMAC | 8 | SHA-3 is not yet wired into the `Digest` trait used by the MAC one-shot path; CMAC is also AES-only (`CRYPT_MAC_CMAC_SM4`) | implement the `Digest` impl for SHA-3; generalise `Cmac` over `BlockCipher` |
+| CRL parser leniency | X.509 CRL | 9 | Negative CRL-parse KATs (`res != HITLS_PKI_SUCCESS`) cannot be migrated: `CertificateRevocationList::from_pem` accepts structurally-malformed CRLs the C parser rejects, so `assert!(… .is_err())` does not hold. Only positive parse rows are emitted | tighten the Rust CRL DER decoder to reject the malformed inputs (version / signature-algorithm / tbs-shape checks) |
 
 ### Not a Rust-API gap — reproducibility limits
 
