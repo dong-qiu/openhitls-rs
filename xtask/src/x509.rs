@@ -26,12 +26,17 @@
 //!   `Certificate` field. `version` is 1-indexed in Rust (the C value is the
 //!   raw DER integer `v1=0/v2=1/v3=2`), so the emitted literal is the C value
 //!   plus one; `serial_number` / `signature_value` compare the raw DER bytes.
+//! * `X509_CERT_PARSE_START_TIME_FUNC` / `END_TIME_FUNC` —
+//!   `path : year:month:day:hour:min:sec`. The migrated test asserts
+//!   `Certificate::not_before` / `not_after` (an `i64` Unix timestamp); the
+//!   expected literal is computed at generation time by `civil_to_unix`, a
+//!   copy of the ASN.1 decoder's own civil-date → epoch formula.
 //!
 //! For cert/CSR, `format` is a `BSL_FORMAT_*` token: `ASN1` → DER, `PEM` →
 //! PEM; the C `UNKNOWN` (auto-detect) format has no Rust equivalent and routes
 //! to `skipped_unknown`. The remaining cert field-check families (sig-alg /
-//! issuer / subject / validity / pubkey) and the malformed-DER negatives are
-//! future increments and route to `ApiSurface` for now.
+//! issuer / subject / pubkey) and the malformed-DER negatives are future
+//! increments and route to `ApiSurface` for now.
 
 use std::fmt::Write;
 
@@ -78,7 +83,7 @@ enum Kind {
     Unknown,
 }
 
-/// A cert field-extraction KAT family — `path : expected`. The migrated test
+/// A cert field-extraction KAT family — `path : expected…`. The migrated test
 /// parses the certificate and asserts one public `Certificate` field.
 #[derive(Debug, Clone, Copy)]
 enum CertField {
@@ -88,17 +93,35 @@ enum CertField {
     Serial,
     /// `X509_CERT_PARSE_SIGNATURE_FUNC` — `path : "hex signature"`.
     Signature,
+    /// `X509_CERT_PARSE_START_TIME_FUNC` — `path : year:month:day:hour:min:sec`.
+    NotBefore,
+    /// `X509_CERT_PARSE_END_TIME_FUNC` — `path : year:month:day:hour:min:sec`.
+    NotAfter,
 }
 
 impl CertField {
-    /// The emitted function-name suffix (`tc_lineN_x509_cert_<suffix>`).
+    /// The emitted function-name suffix (`tc_lineN_x509_cert_<suffix>`) — also
+    /// the `Certificate` field name asserted.
     fn suffix(self) -> &'static str {
         match self {
             CertField::Version => "version",
             CertField::Serial => "serial_number",
             CertField::Signature => "signature",
+            CertField::NotBefore => "not_before",
+            CertField::NotAfter => "not_after",
         }
     }
+}
+
+/// Civil date (UTC) → Unix epoch seconds — the exact formula used by the
+/// ASN.1 decoder's `read_time` (`hitls-utils` `datetime_to_unix`), replicated
+/// so the migrated test asserts a literal `i64` against
+/// `Certificate::not_before` / `not_after`.
+fn civil_to_unix(year: i64, month: i64, day: i64, hour: i64, min: i64, sec: i64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let m = if month <= 2 { month + 9 } else { month - 3 };
+    let days = 365 * y + y / 4 - y / 100 + y / 400 + (m * 306 + 5) / 10 + (day - 1) - 719_468;
+    days * 86_400 + hour * 3_600 + min * 60 + sec
 }
 
 /// The X.509 object a parse-KAT row targets — selects the Rust parse type,
@@ -155,10 +178,16 @@ fn classify(tc: &str) -> Kind {
     if tc.contains("X509_CERT_PARSE_SIGNATURE_FUNC") {
         return Kind::CertField(CertField::Signature);
     }
+    if tc.contains("X509_CERT_PARSE_START_TIME_FUNC") {
+        return Kind::CertField(CertField::NotBefore);
+    }
+    if tc.contains("X509_CERT_PARSE_END_TIME_FUNC") {
+        return Kind::CertField(CertField::NotAfter);
+    }
     // The remaining cert field-check families (sig-alg / issuer / subject /
-    // validity / pubkey), CSR field / expected-return families, the CRL
-    // field-check families (`TC004/005/009-013`), and the malformed-DER
-    // negatives are migrated in later Phase C increments.
+    // pubkey), CSR field / expected-return families, the CRL field-check
+    // families (`TC004/005/009-013`), and the malformed-DER negatives are
+    // migrated in later Phase C increments.
     if tc.contains("X509_") || tc.contains("CERT_") {
         return Kind::ApiSurface;
     }
@@ -388,6 +417,32 @@ fn emit_cert_field(out: &mut String, case: &TestCase, stats: &mut EmitStats, fie
             format!(
                 "    assert_eq!(cert.signature_value.as_slice(), {});\n",
                 format_byte_slice(h)
+            )
+        }
+        CertField::NotBefore | CertField::NotAfter => {
+            // path : year : month : day : hour : min : sec
+            let parts: Option<Vec<i64>> = (1..7)
+                .map(|i| {
+                    case.args
+                        .get(i)
+                        .and_then(|a| a.as_symbol())
+                        .and_then(|s| s.parse::<i64>().ok())
+                })
+                .collect();
+            let Some(d) = parts else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            let ts = civil_to_unix(d[0], d[1], d[2], d[3], d[4], d[5]);
+            format!(
+                "    assert_eq!(cert.{}, {ts}); // {:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z\n",
+                field.suffix(),
+                d[0],
+                d[1],
+                d[2],
+                d[3],
+                d[4],
+                d[5],
             )
         }
     };

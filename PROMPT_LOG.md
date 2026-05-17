@@ -5480,6 +5480,18 @@ This is Phase C §4.1 — fixture-corpus prep, the analogue of the T111 xtask sc
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 454/454 PASS (111 cert-parse + 20 CSR + 5 CRL + 318 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: cert validity-time families (2026-05-17)
+
+> 继续下一个 T113 增量
+
+**Result**: extends `xtask/src/x509.rs` with the cert validity-time families — `X509_CERT_PARSE_START_TIME_FUNC` (91) and `END_TIME_FUNC` (91). The `CertField` enum gains `NotBefore` / `NotAfter` variants; `emit_cert_field` handles their `path : year:month:day:hour:min:sec` shape. `migrated_x509_parse.rs` grows 454 → **636 tests** (+182).
+
+**Field semantics**: `Certificate::not_before` / `not_after` are `i64` Unix timestamps. The expected literal is computed at generation time by a new `civil_to_unix` helper — a copy of the ASN.1 decoder's own `datetime_to_unix` civil-date → epoch formula — and emitted with a `// YYYY-MM-DDThh:mm:ssZ` inline note. All 182 tests pass on first generation.
+
+**T113 still open**: remaining cert field-check families (sig-alg / issuer / subject / pubkey ~900 rows), CSR field families, CRL field-check families (`TC004/005/009-013`), and the malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 636/636 PASS (111 cert-parse + 20 CSR + 5 CRL + 500 field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
