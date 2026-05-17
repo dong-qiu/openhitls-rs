@@ -267,9 +267,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_odd_hex_length() {
+    fn odd_hex_length_is_a_string_arg() {
+        // A quoted field that is not valid hex (here: odd length) is no
+        // longer a parse error — it parses as a string literal (`Arg::Str`),
+        // which is how PKI `.data` file-path arguments are carried.
         let line = r#"SDV_X:"abc""#;
-        assert!(parse_tc_line(line, 42).is_err());
+        let (_, args) = parse_tc_line(line, 42).unwrap();
+        assert_eq!(args[0].as_str(), Some("abc"));
+        assert_eq!(args[0].as_hex(), None);
+    }
+
+    #[test]
+    fn quoted_file_path_is_a_string_arg() {
+        let line = r#"SDV_X:BSL_FORMAT_PEM:"../testdata/cert/foo.pem""#;
+        let (_, args) = parse_tc_line(line, 1).unwrap();
+        assert_eq!(args[0].as_symbol(), Some("BSL_FORMAT_PEM"));
+        assert_eq!(args[1].as_str(), Some("../testdata/cert/foo.pem"));
     }
 
     #[test]
