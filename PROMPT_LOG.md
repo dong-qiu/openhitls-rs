@@ -6297,3 +6297,35 @@ clean; lib tests 1549/0 (+1). End-to-end (full `-n 9999`):
 
 The post-④ TLS 1.2 conformance-fix batch (I103 + I104) is complete —
 all 5 documented follow-up gaps closed.
+
+---
+
+## Phase T129 — TLS 1.2 DHE / FFDHE tlsfuzzer Curation (2026-05-18)
+
+> 开做这个 FFDHE/DHE-negotiation 收尾 phase
+
+Closing phase of the server-side tlsfuzzer effort. The `test-ffdhe-*`
+scripts hard-code `TLS_DHE_RSA_*` cipher suites, but the `s-server`
+TLS 1.2 default cipher list was ECDHE-only. Added 6 finite-field
+DHE_RSA suites to `default_tls12_suites()` (GCM + CBC-SHA/SHA256),
+listed last so ECDHE stays preferred — no handshake-code change
+(the TLS 1.2 server already implements `KeyExchangeAlg::Dhe` with
+RFC 7919 FFDHE params).
+
+Curated 2 scripts into `scripts_12` (14 → 16):
+`test-ffdhe-expected-params` (3/3 clean) and `test-ffdhe-negotiation`
+(38/41 — 3 XFAILs for one coherent gap: TLS 1.2 cipher-suite /
+named-group co-negotiation, where the server forces FFDHE2048 for a
+DHE_RSA suite instead of falling back when no FFDHE group is usable —
+a documented follow-up).
+
+**Verification**: build + clippy `--workspace --all-features
+--all-targets` (`-D warnings`) + fmt clean; both scripts `run.sh`
+exit 0 (full `-n 9999`); all 16 curated `scripts_12` rc=0, no
+regression. Recorded as DEV_LOG Phase T129.
+
+The server-side tlsfuzzer effort is at its closing milestone: plan
+tasks ①–④ delivered, post-④ TLS 1.2 conformance batch (I103/I104)
+done, FFDHE curation (T129) complete. Remaining: TLS 1.2 cipher/group
+co-negotiation (the 3 ffdhe-negotiation XFAILs) and task ⑤ (DTLS
+s-server) — both documented follow-ups.

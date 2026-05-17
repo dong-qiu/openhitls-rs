@@ -220,7 +220,7 @@ merge. No branch-protection change was needed: requiring `CI Gate`
 already requires every job in its `needs:` list.
 
 **Tier 2 — the full curated suite in `.github/workflows/tlsfuzzer.yml`.**
-All 56 curated script-runs run on `workflow_dispatch`, on a weekly
+All 58 curated script-runs run on `workflow_dispatch`, on a weekly
 schedule (Mon 06:00 UTC, sampled), and on a monthly schedule (1st
 07:00 UTC, full `-n 9999` sweep). This tier is **not** a required PR
 check — it exercises edge-case mutations that legitimately probe spec
@@ -522,3 +522,21 @@ one reviewed PR.
   `-n 9999` set) and `test-tls13-psk_dhe_ke.py` 3/1 → **4/4**. Suite
   size unchanged at 56 (no scripts added — two existing ones became
   0-XFAIL).
+
+- I103 / I104 — post-④ TLS 1.2 conformance-fix batch. Probing the
+  curated TLS 1.2 set surfaced five small server-conformance gaps;
+  **I103** hardened ClientKeyExchange handling (invalid ECDHE point →
+  `illegal_parameter`; reject padding-extended CKE), **I104** fixed
+  the ClientHello `legacy_version` floor, zero-length-ApplicationData
+  pass-through, and the no-`supported_groups` ECDHE default-curve
+  fallback. Four curated scripts went 0-XFAIL
+  (`test-ecdhe-rsa-key-exchange-with-bad-messages`,
+  `test-version-numbers`, `test-zero-length-data`,
+  `test-ecdhe-rsa-key-exchange`); their XFAIL files were removed.
+
+- T129 — TLS 1.2 DHE / FFDHE curation (closing phase). Added 6
+  DHE_RSA cipher suites to the `s-server` TLS 1.2 default list (last,
+  lowest preference) so the `test-ffdhe-*` scripts — which hard-code
+  `TLS_DHE_RSA_*` — can negotiate. Curated `test-ffdhe-expected-params`
+  (3/3) and `test-ffdhe-negotiation` (38/41 — 3 XFAILs for the TLS 1.2
+  cipher/group co-negotiation gap). Suite size 56 → 58.

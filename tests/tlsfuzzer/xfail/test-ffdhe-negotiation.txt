@@ -1,0 +1,29 @@
+# Phase T129 — TLS 1.2 FFDHE / DHE_RSA negotiation (3 entries).
+#
+# 38 of 41 conversations PASS — the DHE_RSA key exchange (RFC 7919
+# FFDHE groups) works across the negotiation matrix. The 3 residual
+# failures are one coherent gap: TLS 1.2 cipher-suite / named-group
+# *co-negotiation*.
+#
+# Our server selects a cipher suite first, then a group. When it has
+# picked a DHE_RSA suite but the client offered no usable FFDHE
+# group (or none at all), it falls back to FFDHE2048 unconditionally
+# instead of treating the DHE_RSA suite as unusable. tlsfuzzer
+# expects the server to instead step back and pick a non-DHE suite
+# (or abort when nothing else is common):
+#
+# - `fallback to non-ffdhe` / `... with secp256r1 advertised`: the
+#   client offers a DHE_RSA suite + a non-DHE suite but no FFDHE
+#   group; the server should fall back to the non-DHE suite
+#   (`Server selected unexpected ciphersuite. Expected: 47,
+#   received: 51`).
+# - `no overlap between groups`: client and server groups do not
+#   overlap; the server should abort, not send a ServerHello.
+#
+# Closing this needs cipher/group co-negotiation (and, for the
+# `fallback` cases, offering a static-RSA suite to fall back to) —
+# its own follow-up phase, not a curation item.
+
+fallback to non-ffdhe
+fallback to non-ffdhe with secp256r1 advertised
+no overlap between groups
