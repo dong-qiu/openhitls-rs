@@ -5983,3 +5983,41 @@ bulk-XFAIL into the gate).
 
 Recorded as DEV_LOG Phase T127. Task ② (`--tls auto` version-range
 server) follows.
+
+---
+
+## Phase I100 — `s-server --tls auto` Version-Range Listener (2026-05-17)
+
+> 按照这个推荐的顺序依次执行
+
+Task ② of the server-side tlsfuzzer plan. `s-server` could only
+listen as a single pinned protocol (`--tls 1.3` *or* `--tls 1.2`) —
+the connection type is chosen up front and each is version-only, so a
+client speaking the other version got a handshake failure. `--tls
+auto` adds a one-port listener that picks the protocol **per
+connection**.
+
+For each accepted connection it `TcpStream::peek`s the pending
+ClientHello (non-consuming — bytes stay buffered for the real
+connection), walks the raw record + ClientHello to find the
+`supported_versions` extension (RFC 8446 §4.2.1), and dispatches to
+the TLS 1.3 or TLS 1.2 handler accordingly. The parser
+(`client_hello_offers_tls13`) is pure and fully bounds-checked: any
+truncated / malformed / absent buffer returns `false`, so a wrong
+guess can only fall back to the 1.2 handler — never a panic or silent
+corruption. `run()` was refactored so per-version cipher/version
+selection lives in a `make_config(want_tls13)` closure; `auto` holds
+one `TlsConfig` per version.
+
+**Verification**: `hitls-cli` builds clean (`-D warnings`); s_server
+module tests **23/0** (+7 new — synthetic-ClientHello parser
+coverage: TLS 1.3 listed, 1.2-only, no extension, after-other-ext,
+truncated ×5, non-Handshake, empty). End-to-end against a live
+`--tls auto` listener: Rust `s-client --tls 1.3` → TLS 1.3 (0x1302),
+`--tls 1.2` → TLS 1.2 (0xC02F); `openssl s_client -tls1_3` →
+`TLS_AES_256_GCM_SHA384`, `-tls1_2` → `ECDHE-RSA-AES128-GCM-SHA256`.
+Both implementations, both versions, one port. Recorded as DEV_LOG
+Phase I100.
+
+Next: ③ TLS 1.2 tlsfuzzer script breadth — can point cross-version
+scripts at the new `auto` listener.
