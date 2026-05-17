@@ -6,7 +6,7 @@
 
 #![cfg(feature = "x509")]
 
-use hitls_pki::x509::{Certificate, CertificateRequest};
+use hitls_pki::x509::{Certificate, CertificateRequest, CertificateRevocationList};
 
 /// SDV_X509_CERT_PARSE_FUNC_TC001 parse xmss cert pem
 /// C source: SDV_X509_CERT_PARSE_FUNC_TC001 (line 5, X.509 cert parse KAT)
@@ -1607,4 +1607,74 @@ fn tc_line71_x509_csr_parse() {
     assert!(CertificateRequest::from_pem(pem).is_ok());
 }
 
-// Generation summary: 131 emitted / 1131 API-surface skipped / 8 unknown / 0 unsupported alg / 1270 total C cases.
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC001 (line 2, X.509 CRL parse KAT)
+#[test]
+fn tc_line2_x509_crl_parse() {
+    for rel in [
+        "cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2.crl",
+        "cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_change_cid.crl",
+    ] {
+        let path = format!(
+            "{}/../../tests/vectors/c-asn1-fixtures/{rel}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let bytes = std::fs::read(&path).unwrap();
+        let pem = std::str::from_utf8(&bytes).unwrap();
+        assert!(CertificateRevocationList::from_pem(pem).is_ok());
+    }
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC002 (line 5, X.509 CRL parse KAT)
+#[test]
+fn tc_line5_x509_crl_parse() {
+    for rel in [
+        "cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_change_ver_v1.crl",
+        "cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_change_ver_v5.crl",
+    ] {
+        let path = format!(
+            "{}/../../tests/vectors/c-asn1-fixtures/{rel}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let bytes = std::fs::read(&path).unwrap();
+        let pem = std::str::from_utf8(&bytes).unwrap();
+        assert!(CertificateRevocationList::from_pem(pem).is_ok());
+    }
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC003 (line 14, X.509 CRL parse KAT)
+#[test]
+fn tc_line14_x509_crl_parse_res() {
+    let bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/vectors/c-asn1-fixtures/cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_test_empty.crl"
+    ))
+    .unwrap();
+    let pem = std::str::from_utf8(&bytes).unwrap();
+    assert!(CertificateRevocationList::from_pem(pem).is_ok());
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC007 (line 47, X.509 CRL parse KAT)
+#[test]
+fn tc_line47_x509_crl_parse_res() {
+    let bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/vectors/c-asn1-fixtures/cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_endtime_before_curtime.crl"
+    ))
+    .unwrap();
+    let pem = std::str::from_utf8(&bytes).unwrap();
+    assert!(CertificateRevocationList::from_pem(pem).is_ok());
+}
+
+/// C source: SDV_X509_CRL_PARSE_FILE_FUNC_TC008 (line 50, X.509 CRL parse KAT)
+#[test]
+fn tc_line50_x509_crl_parse_res() {
+    let bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/vectors/c-asn1-fixtures/cert/test_for_crl/crl_parse/crl/demoCA_rsa2048_v2_empty_crl.crl"
+    ))
+    .unwrap();
+    let pem = std::str::from_utf8(&bytes).unwrap();
+    assert!(CertificateRevocationList::from_pem(pem).is_ok());
+}
+
+// Generation summary: 136 emitted / 1252 API-surface skipped / 22 unknown / 9 unsupported alg / 1419 total C cases.

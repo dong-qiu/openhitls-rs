@@ -5456,6 +5456,18 @@ This is Phase C §4.1 — fixture-corpus prep, the analogue of the T111 xtask sc
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 131/131 PASS (111 cert + 20 CSR). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: CRL parse KAT (2026-05-17)
+
+> 继续做 CRL 解析增量
+
+**Result**: extends `xtask/src/x509.rs` with the CRL positive-parse families. `X509_CRL_PARSE_FILE_FUNC_TC001/002` (parse-all-paths shape) emit a single loop test each; `TC003/006/007/008` carry a `path : res` expected-return code — only the `HITLS_PKI_SUCCESS` rows migrate as positive `CertificateRevocationList::from_pem`-`is_ok()` tests. `migrated_x509_parse.rs` grows 131 → **136 tests** (+5 CRL). The `x509-parse` algo is now tri-input (`pki/cert` + `pki/csr` + `pki/crl` `.data`).
+
+**Finding — Rust CRL parser more lenient than C**: the **9 negative CRL-parse rows** (`res` = `HITLS_X509_ERR_GET_ANY_TAG` / `…_PARSE_NO_ELEMENT`) are *not* migrated — `CertificateRevocationList::from_pem` accepts the structurally-malformed CRLs the C parser rejects, so `is_err()` would not hold. They route to `skipped_unsupported_alg` and are logged in `docs/c-test-na-list.md` as a candidate CRL-decoder hardening Implementation phase. From 1419 TC rows across the three files: 136 emitted, 1252 API-surface, 22 unknown, 9 unsupported.
+
+**T113 still open**: cert signature/pubkey/sig-alg field-check families (~1000 rows), CSR field families, CRL field-check families (`TC004/005/009-013`), and the malformed-DER negatives remain.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 136/136 PASS (111 cert + 20 CSR + 5 CRL). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
