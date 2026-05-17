@@ -5419,6 +5419,18 @@ With this, plan §2.4 acceptance is met for **Phase A**: xtask on main; 9 `tests
 
 **Docs-only commit.**
 
+## Phase C §4.1 (T113 prep) — mirror the openHiTLS PKI test-data corpus (2026-05-17)
+
+> 请继续Phase B
+> (a)
+
+**Context**: investigating Phase B found that its two largest pure-test sub-tasks — B.2 (CSR negatives) and B.3 (CRL RFC5280) — load external fixture files (`../testdata/cert/...`), so they are blocked on Phase C §4.1 ("mirror C testdata"). The plan's ROI order is A→B→C, but the real dependency is B.2/B.3 → C.1. The user chose option (a): do Phase C §4.1 first to unblock them.
+
+**Result**: mirrors `openhitls/testcode/testdata/{cert,certificate}/` → `tests/vectors/c-asn1-fixtures/` (1298 files, ~8.7 MB — DER/PEM/CRL/CRT/KEY/CSR/CMS/P12 artifacts). All PKI SDV `.data` files reference fixtures under `cert/` (CRL fixtures under `cert/test_for_crl/`, CSR under `cert/asn1/`), so the two mirrored subtrees cover the corpus. Adds `MANIFEST.sha256` (1298 SHA-256 entries, sorted) for drift detection and a `README.md` recording provenance + the MulanPSL-2.0 license-compatibility note (openHiTLS and openHiTLS-rs share the license).
+
+This is Phase C §4.1 — fixture-corpus prep, the analogue of the T111 xtask scaffold. The formal **T113** DEV_LOG phase entry is written when the Phase C test migration (§4.2 parametrised loader + the negative-parse families) lands; this commit is data-only (no Rust source).
+
+
 
 
 
