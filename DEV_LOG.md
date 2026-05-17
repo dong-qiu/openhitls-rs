@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I104 (104 phases)
-- Testing: T1–T128 (122 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
+- Testing: T1–T129 (123 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -338,6 +338,7 @@ Category summary:
 | 326 | I102 | Impl | TLS 1.3 FFDHE (RFC 7919) key exchange — task ④. The TLS 1.3 `KeyExchange` (`handshake/key_exchange.rs`) had no finite-field-DHE variant, so a client offering only an `ffdhe*` group hit `unsupported named group`. Added a `Ffdhe` inner variant + `generate`/`compute_shared_secret` arms for all 5 RFC 7919 groups (ffdhe2048/3072/4096/6144/8192) — `hitls-crypto::dh` has had the DH primitive (params + keypair, with prime-length-padded output per RFC 8446 §7.4.1) since project start; only the TLS-layer wiring was missing (same pattern as I99). FFDHE is non-KEM, so it reuses the ECDHE generate/compute path. `s-server` default `supported_groups` extended with the 5 FFDHE groups (after the EC groups — lowest preference) + X448. Verified: `test-tls13-dhe-shared-secret-padding.py` 513/3-XFAIL → **2203/0** (ffdhe2048/3072 + x448 all pass), `test-tls13-psk_dhe_ke.py` 3/1-XFAIL → **4/4**; both xfail files removed (now fully clean) | 2026-05-17 |
 | 327 | I103 | Impl | TLS 1.2 ClientKeyExchange hardening — first of the post-④ TLS 1.2 conformance-fix batch. **Part A**: an invalid ECDHE client public point (not on the curve / identity / out of range) in the ClientKeyExchange aborted with `internal_error`; RFC 4492 §5.4 / RFC 8422 require `illegal_parameter` — the `Ecdhe` / `EcdheAnon` arms of `process_client_key_exchange` now map the `compute_shared_secret` failure accordingly. **Part B**: `decode_client_key_exchange` accepted a ClientKeyExchange with trailing bytes after the length-prefixed ECDH point (a padding-extended message); it now requires the body to be consumed exactly (`len != 1 + point_len` → `decode_error`, RFC 4492 §5.7). Closes all 5 XFAILs in `test-ecdhe-rsa-key-exchange-with-bad-messages.py` (3/5-XFAIL → **8/8**); xfail file removed. +2 codec unit tests | 2026-05-17 |
 | 328 | I104 | Impl | TLS 1.2 ClientHello / record-layer conformance — second of the post-④ TLS 1.2 conformance-fix batch; closes the last 3 XFAILs of the T128-curated TLS 1.2 scripts. **Part A** (version floor): the ClientHello `legacy_version` was never validated, so a `(0,0)` version was accepted and a normal ServerHello sent; now, when no `supported_versions` extension is present (RFC 8446 §4.2.1), a `legacy_version` below TLS 1.2 (`0x0303`) is aborted with `protocol_version` — a too-high version is still clamped down. **Part B** (zero-length record): a zero-length ApplicationData record surfaced as `read()` → `Ok(0)`, which the caller reads as end-of-stream; all 4 TLS 1.2 read paths (sync/async × server/client) now skip an empty record per RFC 5246 §6.2.1 (mirrors the TLS 1.3 T103 fix). **Part C** (ECDHE without supported_groups): `negotiate_group` aborted with `handshake_failure` when the client offered ECDHE suites but no supported_groups extension; per RFC 4492 §5.1 the server now picks freely (prefers secp256r1). Verified: `test-version-numbers` 8/9 → **9/9**, `test-zero-length-data` 2/3 → **3/3**, `test-ecdhe-rsa-key-exchange` 2/3 → **3/3** (full `-n 9999`); 3 xfail files removed; all 14 curated `scripts_12` still rc=0. +1 unit test | 2026-05-18 |
+| 329 | T129 | Test | TLS 1.2 DHE / FFDHE tlsfuzzer curation — closing phase of the server-side tlsfuzzer effort. The `s-server` TLS 1.2 default cipher list was ECDHE-only; the `test-ffdhe-*` scripts hard-code `TLS_DHE_RSA_*`. Added 6 finite-field DHE_RSA suites (GCM + CBC-SHA/SHA256) to `default_tls12_suites()`, listed last so an ECDHE-capable client still negotiates the faster EC exchange (the TLS 1.2 server already implements `KeyExchangeAlg::Dhe` + RFC 7919 FFDHE params). Curated 2 scripts into `scripts_12` (14 → 16): `test-ffdhe-expected-params` (3/3 clean) and `test-ffdhe-negotiation` (38/41 — 3 XFAILs for one coherent gap: TLS 1.2 cipher-suite / named-group co-negotiation, where the server forces FFDHE2048 for a DHE_RSA suite instead of falling back when no FFDHE group is usable — a documented follow-up). Full-set verified (`-n 9999`); all 16 curated `scripts_12` rc=0, no regression | 2026-05-18 |
 
 ---
 
@@ -19554,6 +19555,81 @@ T128 are now 0-XFAIL, plus `test-ecdhe-rsa-key-exchange-with-bad-
 messages` (I103). Residual TLS 1.2 work (`test-ffdhe-negotiation` —
 needs DHE_RSA cipher suites) and task ⑤ (DTLS s-server, scoped in
 `docs/dtls-s-server-plan.md`) remain as documented follow-ups.
+
+---
+
+## Phase T129 — TLS 1.2 DHE / FFDHE tlsfuzzer Curation (2026-05-18)
+
+### Summary
+
+T129 is the closing phase of the server-side tlsfuzzer effort. It
+curates the two `test-ffdhe-*` scripts — the last on-mission,
+bounded coverage gain — completing the FFDHE story symmetrically
+with Phase I102 (which wired TLS 1.3 FFDHE).
+
+### Enabling change
+
+`test-ffdhe-negotiation` / `test-ffdhe-expected-params` hard-code
+`TLS_DHE_RSA_*` cipher suites (they verify finite-field DHE_RSA key
+exchange). The `s-server` TLS 1.2 default cipher list
+(`default_tls12_suites`) was ECDHE-only, so these scripts got
+`handshake_failure` at the sanity step.
+
+6 DHE_RSA suites were added — `TLS_DHE_RSA_WITH_AES_{128,256}_GCM_*`
+and `..._CBC_SHA` / `..._CBC_SHA256` — **listed last**, so an
+ECDHE-capable client still negotiates the faster EC exchange (server
+preference order). No handshake-code change was needed: the TLS 1.2
+server already implements `KeyExchangeAlg::Dhe` with RFC 7919 FFDHE
+params (`negotiate_ffdhe_group`, exercised by the existing
+`test_tls12_dhe_*_handshake` unit tests).
+
+### Scripts curated (2; `scripts_12` 14 → 16)
+
+- `test-ffdhe-expected-params` — **3/3**, no XFAIL.
+- `test-ffdhe-negotiation` — **38/41**. The 3 XFAILs are one
+  coherent gap: TLS 1.2 cipher-suite / named-group *co-negotiation*.
+  The server picks a cipher first, then a group; having picked a
+  DHE_RSA suite with no usable FFDHE group it forces FFDHE2048
+  instead of stepping back to a non-DHE suite (`fallback to
+  non-ffdhe` ×2) or aborting (`no overlap between groups`). Closing
+  it needs real co-negotiation logic (and a static-RSA fallback
+  suite) — a documented follow-up, not a curation item.
+
+Both verified on the full conversation set (`-n 9999`); neither
+needs an `args` file (the scripts default to `TLS_DHE_RSA_*`).
+
+### Verification
+
+- `cargo build` / `clippy --workspace --all-features --all-targets`
+  (`-D warnings`) clean; `fmt` clean.
+- `run.sh`: `test-ffdhe-expected-params` 3/3/0, `test-ffdhe-
+  negotiation` 38 PASS / 3 XFAIL / 0 FAIL — both exit 0.
+- Regression: all **16** curated `scripts_12` still `run.sh` exit 0
+  — the new DHE_RSA suites (lowest preference) do not change what
+  the existing ECDHE-oriented scripts negotiate.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-cli/src/s_server.rs` | Modified | `default_tls12_suites()` += 6 DHE_RSA suites (last). |
+| `.github/workflows/tlsfuzzer.yml` | Modified | 2 scripts added to `scripts_12` (14 → 16). |
+| `tests/tlsfuzzer/xfail/test-ffdhe-negotiation.txt` | Added | 3 XFAILs (cipher/group co-negotiation gap) + rationale. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 329 + Testing summary T1–T128 → T1–T129. |
+| `PROMPT_LOG.md` | Modified | T129 prompt + result entry. |
+| `docs/tlsfuzzer.md` | Modified | Curated-script count + T129 reference. |
+
+### Build Status (Post T129)
+
+No handshake code changed — a `s-server` cipher-list addition +
+workflow + xfail + docs. Curated TLS 1.2 suite 14 → 16; full curated
+suite 56 → 58 script-runs. **The server-side tlsfuzzer effort is at
+its closing milestone**: plan tasks ①–④ delivered, the post-④ TLS 1.2
+conformance batch (I103/I104) done, FFDHE curation (T129) complete.
+Remaining items are documented follow-ups: TLS 1.2 cipher/group
+co-negotiation (the 3 `ffdhe-negotiation` XFAILs) and task ⑤ (DTLS
+s-server — `docs/dtls-s-server-plan.md`; tlsfuzzer has no DTLS
+scripts, so it is an independent CLI-feature item).
 
 
 

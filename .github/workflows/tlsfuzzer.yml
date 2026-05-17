@@ -469,6 +469,8 @@ jobs:
             test-version-numbers.py
             test-zero-length-data.py
             test-ecdhe-rsa-key-exchange.py
+            test-ffdhe-negotiation.py
+            test-ffdhe-expected-params.py
           )
           # Phase T93 — cert-matrix scripts. Each cert type gets its
           # own XFAIL list under `tests/tlsfuzzer/xfail-<key-type>/`
