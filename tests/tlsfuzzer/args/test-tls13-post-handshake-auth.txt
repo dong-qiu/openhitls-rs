@@ -1,0 +1,8 @@
+# Phase T125 — `test-tls13-post-handshake-auth.py` extra args.
+#
+# `--pha-as-reply` makes the script expect the post-handshake
+# CertificateRequest as a reply to its `GET /secret` query, rather
+# than unsolicited right after the handshake. That matches the
+# `hitls s-server --post-handshake-auth` trigger model: the server
+# requests client auth when the request path contains `/secret`.
+--pha-as-reply

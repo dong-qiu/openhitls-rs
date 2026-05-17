@@ -5714,3 +5714,42 @@ into CI behind a committed `--post-handshake-auth` s-server flag
 (the probe flag used here was temporary, not committed); it can fix
 or XFAIL the 2 residual conversations. Then T120 `psk_ke` + the rest
 of the server-side plan (T125–T129).
+
+---
+
+## Phase T125 — PHA tlsfuzzer Wiring: `--post-handshake-auth` Flag + CI Coverage (2026-05-17)
+
+> 继续做 PHA 收尾 T-phase
+
+The Testing-phase wrap-up of the PHA work (T122 probe → I97 fix → T125
+CI wiring). Commits the `--post-handshake-auth` `s-server` flag — the
+one used as a temporary, uncommitted probe during I97's verification —
+and wires `test-tls13-post-handshake-auth.py` into the curated suite.
+
+**Delivered**: `--post-handshake-auth` flag mirrors T122's
+`--key-update` exactly — a request whose path contains `/secret`
+triggers `request_client_auth()` (the I97-fixed post-handshake
+CertificateRequest path); `GET /` is echoed untouched. New
+`tlsfuzzer.yml` instance (port 4455) + `scripts_pha` run loop passing
+the client identity; `--pha-as-reply` in `args/`; 2 XFAILs in `xfail/`
+with rationale.
+
+**Verification**: `cargo test -p hitls-cli` 167/0; workspace clippy
+`-D warnings` 0; fmt + actionlint clean. End-to-end —
+`run.sh test-tls13-post-handshake-auth.py` against a
+`--post-handshake-auth` s-server: **4 PASS / 2 XFAIL / 0 FAIL**,
+exit 0. Curated suite 48 → 49 script-runs. Recorded as DEV_LOG
+Phase T125.
+
+**2 XFAILs** (separate robustness gaps, queued for a follow-up
+I-phase): `malformed signature in PHA` — server drops the connection
+on a bad post-HS CV instead of sending a fatal `decrypt_error` alert;
+`post-handshake authentication with KeyUpdate` —
+`request_client_auth`'s read loop doesn't tolerate an interleaved
+KeyUpdate.
+
+**Server-side tlsfuzzer plan status**: T124 / I96 / T123 / T122 / I97 /
+T125 done; T121 (0-RTT) dropped (no tlsfuzzer material). Remaining:
+T120 `psk_ke`, `--tls auto` version range, mass-fail-script triage,
+TLS 1.2 breadth, FFDHE, `s-server` DTLS — plus the PHA alert /
+KeyUpdate-interleave follow-up I-phase.
