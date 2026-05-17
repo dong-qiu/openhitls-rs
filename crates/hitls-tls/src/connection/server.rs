@@ -136,13 +136,44 @@ impl<S: Read + Write> TlsServerConnection<S> {
         tls13_server_handle_key_update_body!(sync, self, body)
     }
 
+    /// Phase I98 — read the next post-handshake handshake-layer record,
+    /// transparently consuming any interleaved KeyUpdate (RFC 8446
+    /// §4.6.3 — a KeyUpdate may arrive at any point after the
+    /// handshake). `handle_key_update` rekeys the read side and, for an
+    /// `update_requested` KeyUpdate, sends the matching response.
+    fn read_post_hs_skipping_key_update(&mut self) -> Result<(ContentType, Vec<u8>), TlsError> {
+        loop {
+            let (ct, data) = self.read_record()?;
+            if ct == ContentType::Handshake {
+                if let Ok((HandshakeType::KeyUpdate, body, _)) = parse_handshake_header(&data) {
+                    self.handle_key_update(body)?;
+                    continue;
+                }
+            }
+            return Ok((ct, data));
+        }
+    }
+
     /// Request post-handshake client authentication (RFC 8446 §4.6.2).
     ///
     /// Sends a CertificateRequest message and reads the client's
     /// Certificate + CertificateVerify + Finished response.
     /// Returns the client's certificate chain (DER-encoded certs), which
     /// may be empty if the client has no certificate.
+    ///
+    /// Phase I98 — on any failure a fatal alert is sent before the
+    /// error is returned (RFC 8446 §6), so a peer that e.g. sends a
+    /// malformed CertificateVerify sees a `decrypt_error` alert rather
+    /// than a bare connection close.
     pub fn request_client_auth(&mut self) -> Result<Vec<Vec<u8>>, TlsError> {
+        let result = self.request_client_auth_inner();
+        if let Err(ref e) = result {
+            send_fatal_alert_for_error_body!(sync, self, e);
+        }
+        result
+    }
+
+    fn request_client_auth_inner(&mut self) -> Result<Vec<Vec<u8>>, TlsError> {
         use crate::crypt::SignatureScheme;
         use crate::handshake::extensions_codec::build_signature_algorithms;
         use crate::handshake::verify::verify_certificate_verify;
@@ -215,7 +246,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
         transcript.update(&cr_msg)?;
 
         // Read client Certificate
-        let (ct, cert_data) = self.read_record()?;
+        let (ct, cert_data) = self.read_post_hs_skipping_key_update()?;
         if ct != ContentType::Handshake {
             return Err(TlsError::HandshakeFailed(format!(
                 "expected Handshake (Certificate), got {ct:?}"
@@ -253,7 +284,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
             // Certificate.
             let fin_hash = transcript.current_hash()?;
 
-            let (ct3, fin_data) = self.read_record()?;
+            let (ct3, fin_data) = self.read_post_hs_skipping_key_update()?;
             if ct3 != ContentType::Handshake {
                 return Err(TlsError::HandshakeFailed(format!(
                     "expected Handshake (Finished), got {ct3:?}"
@@ -280,7 +311,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
         }
 
         // Read CertificateVerify
-        let (ct2, cv_data) = self.read_record()?;
+        let (ct2, cv_data) = self.read_post_hs_skipping_key_update()?;
         if ct2 != ContentType::Handshake {
             return Err(TlsError::HandshakeFailed(format!(
                 "expected Handshake (CertificateVerify), got {ct2:?}"
@@ -316,7 +347,7 @@ impl<S: Read + Write> TlsServerConnection<S> {
         let fin_hash = transcript.current_hash()?;
 
         // Read Finished
-        let (ct3, fin_data) = self.read_record()?;
+        let (ct3, fin_data) = self.read_post_hs_skipping_key_update()?;
         if ct3 != ContentType::Handshake {
             return Err(TlsError::HandshakeFailed(format!(
                 "expected Handshake (Finished), got {ct3:?}"
