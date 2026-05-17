@@ -44,6 +44,15 @@
 //!   verifies `path1`'s certificate signature with `path2`'s parsed public
 //!   key; the migrated test loads both fixtures and asserts
 //!   `Certificate::verify_signature` succeeds.
+//! * `X509_CRL_FILE_VERIFY_FUNC_TC001` — `caPath : crlPath : certPath :
+//!   flags : crlVerResult : expResult`. The C test verifies the CRL's
+//!   signature against the CA, then verifies `certPath`'s chain with CRL
+//!   revocation checking. The migrated test mirrors it via
+//!   `CertificateRevocationList::verify_signature` + `CertificateVerifier`,
+//!   migrating the `expResult` codes Rust's verifier faithfully reproduces
+//!   (`SUCCESS`, `CERT_REVOKED`); the stricter-than-Rust codes
+//!   (`CRL_NOT_FOUND` / `PROCESS_CRITICALEXT` / `KU_NO_CRLSIGN`) route to
+//!   `skipped_unsupported_alg` as verifier-strictness gaps.
 //!
 //! For cert/CSR, `format` is a `BSL_FORMAT_*` token: `ASN1` → DER, `PEM` →
 //! PEM; the C `UNKNOWN` (auto-detect) format has no Rust equivalent and routes
@@ -69,14 +78,14 @@ pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
             Kind::CrlParse => emit_crl_parse(&mut body, case, &mut stats),
             Kind::CrlParseRes => emit_crl_parse_res(&mut body, case, &mut stats),
             Kind::CertField(field) => emit_cert_field(&mut body, case, &mut stats, field),
+            Kind::CrlFileVerify => emit_crl_file_verify(&mut body, case, &mut stats),
             Kind::ApiSurface => stats.skipped_api += 1,
             Kind::Unknown => stats.skipped_unknown += 1,
         }
     }
 
-    let needs_cert_loader = body.contains("load_cert_fixture(");
     let mut out = String::new();
-    write_header(&mut out, needs_cert_loader);
+    write_header(&mut out, &body);
     out.push_str(&body);
     write_footer(&mut out, &stats, cases.len());
     (out, stats)
@@ -94,6 +103,9 @@ enum Kind {
     CrlParseRes,
     /// A cert field-extraction family (`VERSION` / `SERIALNUM` / `SIGNATURE`).
     CertField(CertField),
+    /// `CRL_FILE_VERIFY_FUNC_TC001` — `caPath : crlPath : certPath : flags :
+    /// crlVerResult : expResult`. CRL-revocation chain verification.
+    CrlFileVerify,
     ApiSurface,
     Unknown,
 }
@@ -275,6 +287,9 @@ fn classify(tc: &str) -> Kind {
     }
     if tc.contains("X509_CERT_PARSE_PUBKEY_FUNC_TC001") {
         return Kind::CertField(CertField::PubKey);
+    }
+    if tc.contains("X509_CRL_FILE_VERIFY_FUNC_TC001") {
+        return Kind::CrlFileVerify;
     }
     // CSR field / expected-return families, the CRL field-check families
     // (`TC004/005/009-013`), and the malformed-DER negatives are migrated in
@@ -635,7 +650,78 @@ fn emit_cert_field(out: &mut String, case: &TestCase, stats: &mut EmitStats, fie
     stats.emitted += 1;
 }
 
-fn write_header(out: &mut String, needs_cert_loader: bool) {
+/// Emit a CRL-revocation chain-verification KAT — `CRL_FILE_VERIFY_FUNC_TC001`,
+/// `caPath : crlPath : certPath : flags : crlVerResult : expResult`. The C test
+/// verifies the CRL's signature against the CA, then verifies `certPath`'s
+/// chain with CRL revocation checking. The migrated test mirrors that with
+/// `CertificateRevocationList::verify_signature` + `CertificateVerifier`.
+///
+/// Only the `expResult` codes Rust's verifier faithfully reproduces are
+/// migrated — `HITLS_PKI_SUCCESS` and `HITLS_X509_ERR_VFY_CERT_REVOKED`. The
+/// others are Rust-verifier strictness gaps and route to
+/// `skipped_unsupported_alg`: `CRL_NOT_FOUND` (Rust soft-fails on a missing
+/// CRL), `PROCESS_CRITICALEXT` (no unhandled-critical-extension rejection),
+/// `KU_NO_CRLSIGN` (no CRL-issuer keyUsage check).
+fn emit_crl_file_verify(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
+    if case.args.len() < 6 {
+        stats.skipped_unknown += 1;
+        return;
+    }
+    let (Some(ca_rel), Some(crl_rel), Some(cert_rel)) = (
+        case.args[0].as_str().and_then(fixture_relpath),
+        case.args[1].as_str().and_then(fixture_relpath),
+        case.args[2].as_str().and_then(fixture_relpath),
+    ) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let check_revocation = match case.args[3].as_symbol() {
+        Some("0") => false,
+        Some("HITLS_X509_VFY_FLAG_CRL_ALL" | "HITLS_X509_VFY_FLAG_CRL_DEV") => true,
+        _ => {
+            stats.skipped_unknown += 1;
+            return;
+        }
+    };
+    // crlVerResult: TC001 always expects the CRL signature itself to verify.
+    if case.args[4].as_symbol() != Some("HITLS_PKI_SUCCESS") {
+        stats.skipped_unknown += 1;
+        return;
+    }
+    let assertion = match case.args[5].as_symbol() {
+        Some("HITLS_PKI_SUCCESS") => "    assert!(result.is_ok());\n",
+        Some("HITLS_X509_ERR_VFY_CERT_REVOKED") => {
+            "    assert_eq!(result.unwrap_err().to_string(), \"certificate revoked\");\n"
+        }
+        // CRL_NOT_FOUND / PROCESS_CRITICALEXT / KU_NO_CRLSIGN — see fn doc.
+        _ => {
+            stats.skipped_unsupported_alg += 1;
+            return;
+        }
+    };
+
+    write_doc(out, case, "X.509 CRL-revocation chain-verify KAT");
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_x509_crl_file_verify() {{", case.line).unwrap();
+    writeln!(out, "    let ca = load_cert_fixture({ca_rel:?});").unwrap();
+    writeln!(out, "    let crl = load_crl_fixture({crl_rel:?});").unwrap();
+    writeln!(out, "    let cert = load_cert_fixture({cert_rel:?});").unwrap();
+    writeln!(out, "    assert!(crl.verify_signature(&ca).unwrap());").unwrap();
+    writeln!(out, "    let mut verifier = CertificateVerifier::new();").unwrap();
+    writeln!(out, "    verifier.add_trusted_cert(ca);").unwrap();
+    writeln!(out, "    verifier.add_crl(crl);").unwrap();
+    writeln!(
+        out,
+        "    verifier.set_check_revocation({check_revocation});"
+    )
+    .unwrap();
+    writeln!(out, "    let result = verifier.verify_cert(&cert, &[]);").unwrap();
+    out.push_str(assertion);
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+fn write_header(out: &mut String, body: &str) {
     out.push_str(
         "// This file is GENERATED by `cargo xtask migrate-c-tests --algo x509-parse`.\n\
          // DO NOT EDIT BY HAND. Source: openhitls C SDV pki/cert + pki/csr + pki/crl `.data`.\n\
@@ -645,9 +731,13 @@ fn write_header(out: &mut String, needs_cert_loader: bool) {
     );
     out.push_str("#![cfg(feature = \"x509\")]\n\n");
     out.push_str(
-        "use hitls_pki::x509::{Certificate, CertificateRequest, CertificateRevocationList};\n\n",
+        "use hitls_pki::x509::{Certificate, CertificateRequest, CertificateRevocationList};\n",
     );
-    if needs_cert_loader {
+    if body.contains("CertificateVerifier") {
+        out.push_str("use hitls_pki::x509::verify::CertificateVerifier;\n");
+    }
+    out.push('\n');
+    if body.contains("load_cert_fixture(") {
         out.push_str(
             "/// Load a mirrored cert fixture, auto-detecting PEM vs DER by content.\n\
              fn load_cert_fixture(rel: &str) -> Certificate {\n\
@@ -660,6 +750,25 @@ fn write_header(out: &mut String, needs_cert_loader: bool) {
              \x20   match std::str::from_utf8(&bytes) {\n\
              \x20       Ok(s) if s.contains(\"-----BEGIN\") => Certificate::from_pem(s).unwrap(),\n\
              \x20       _ => Certificate::from_der(&bytes).unwrap(),\n\
+             \x20   }\n\
+             }\n\n",
+        );
+    }
+    if body.contains("load_crl_fixture(") {
+        out.push_str(
+            "/// Load a mirrored CRL fixture, auto-detecting PEM vs DER by content.\n\
+             fn load_crl_fixture(rel: &str) -> CertificateRevocationList {\n\
+             \x20   let path = format!(\n\
+             \x20       \"{}/../../tests/vectors/c-asn1-fixtures/{}\",\n\
+             \x20       env!(\"CARGO_MANIFEST_DIR\"),\n\
+             \x20       rel\n\
+             \x20   );\n\
+             \x20   let bytes = std::fs::read(&path).unwrap();\n\
+             \x20   match std::str::from_utf8(&bytes) {\n\
+             \x20       Ok(s) if s.contains(\"-----BEGIN\") => {\n\
+             \x20           CertificateRevocationList::from_pem(s).unwrap()\n\
+             \x20       }\n\
+             \x20       _ => CertificateRevocationList::from_der(&bytes).unwrap(),\n\
              \x20   }\n\
              }\n\n",
         );

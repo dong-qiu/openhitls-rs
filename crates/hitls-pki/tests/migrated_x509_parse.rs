@@ -6,6 +6,7 @@
 
 #![cfg(feature = "x509")]
 
+use hitls_pki::x509::verify::CertificateVerifier;
 use hitls_pki::x509::{Certificate, CertificateRequest, CertificateRevocationList};
 
 /// Load a mirrored cert fixture, auto-detecting PEM vs DER by content.
@@ -19,6 +20,20 @@ fn load_cert_fixture(rel: &str) -> Certificate {
     match std::str::from_utf8(&bytes) {
         Ok(s) if s.contains("-----BEGIN") => Certificate::from_pem(s).unwrap(),
         _ => Certificate::from_der(&bytes).unwrap(),
+    }
+}
+
+/// Load a mirrored CRL fixture, auto-detecting PEM vs DER by content.
+fn load_crl_fixture(rel: &str) -> CertificateRevocationList {
+    let path = format!(
+        "{}/../../tests/vectors/c-asn1-fixtures/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        rel
+    );
+    let bytes = std::fs::read(&path).unwrap();
+    match std::str::from_utf8(&bytes) {
+        Ok(s) if s.contains("-----BEGIN") => CertificateRevocationList::from_pem(s).unwrap(),
+        _ => CertificateRevocationList::from_der(&bytes).unwrap(),
     }
 }
 
@@ -46163,4 +46178,116 @@ fn tc_line50_x509_crl_parse_res() {
     assert!(CertificateRevocationList::from_pem(pem).is_ok());
 }
 
-// Generation summary: 1008 emitted / 380 API-surface skipped / 22 unknown / 9 unsupported alg / 1419 total C cases.
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 #1 Test the unrevoked certificates
+/// C source: SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 (line 131, X.509 CRL-revocation chain-verify KAT)
+#[test]
+fn tc_line131_x509_crl_file_verify() {
+    let ca = load_cert_fixture("cert/test_for_crl/crl_verify/certs/ca.crt");
+    let crl = load_crl_fixture("cert/test_for_crl/crl_verify/crl/ca.crl");
+    let cert = load_cert_fixture("cert/test_for_crl/crl_verify/certs/server1.crt");
+    assert!(crl.verify_signature(&ca).unwrap());
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert!(result.is_ok());
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 #2 Test the revoked certificates, flags is CRL_ALL
+/// C source: SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 (line 134, X.509 CRL-revocation chain-verify KAT)
+#[test]
+fn tc_line134_x509_crl_file_verify() {
+    let ca = load_cert_fixture("cert/test_for_crl/crl_verify/certs/ca.crt");
+    let crl = load_crl_fixture("cert/test_for_crl/crl_verify/crl/ca.crl");
+    let cert = load_cert_fixture("cert/test_for_crl/crl_verify/certs/server2.crt");
+    assert!(crl.verify_signature(&ca).unwrap());
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 #3 Test the revoked certificates, flags is CRL_DEV
+/// C source: SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 (line 137, X.509 CRL-revocation chain-verify KAT)
+#[test]
+fn tc_line137_x509_crl_file_verify() {
+    let ca = load_cert_fixture("cert/test_for_crl/crl_verify/certs/ca.crt");
+    let crl = load_crl_fixture("cert/test_for_crl/crl_verify/crl/ca.crl");
+    let cert = load_cert_fixture("cert/test_for_crl/crl_verify/certs/server2.crt");
+    assert!(crl.verify_signature(&ca).unwrap());
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 #4 Test the revoked certificates, flags is 0
+/// C source: SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 (line 140, X.509 CRL-revocation chain-verify KAT)
+#[test]
+fn tc_line140_x509_crl_file_verify() {
+    let ca = load_cert_fixture("cert/test_for_crl/crl_verify/certs/ca.crt");
+    let crl = load_crl_fixture("cert/test_for_crl/crl_verify/crl/ca.crl");
+    let cert = load_cert_fixture("cert/test_for_crl/crl_verify/certs/server2.crt");
+    assert!(crl.verify_signature(&ca).unwrap());
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(false);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert!(result.is_ok());
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 #5 Verify revoked certificates with CRL extensions.
+/// C source: SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 (line 143, X.509 CRL-revocation chain-verify KAT)
+#[test]
+fn tc_line143_x509_crl_file_verify() {
+    let ca = load_cert_fixture("cert/test_for_crl/extension_crl/ca_cert.pem");
+    let crl = load_crl_fixture("cert/test_for_crl/extension_crl/test_crl.pem");
+    let cert = load_cert_fixture("cert/test_for_crl/extension_crl/user_cert.pem");
+    assert!(crl.verify_signature(&ca).unwrap());
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 #8 Verify certificates with expired CRL.
+/// C source: SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 (line 152, X.509 CRL-revocation chain-verify KAT)
+#[test]
+fn tc_line152_x509_crl_file_verify() {
+    let ca = load_cert_fixture("cert/test_for_crl/extension_crl/ca_cert.pem");
+    let crl = load_crl_fixture("cert/test_for_crl/extension_crl/test_crl_change_date1.pem");
+    let cert = load_cert_fixture("cert/test_for_crl/extension_crl/user_cert.pem");
+    assert!(crl.verify_signature(&ca).unwrap());
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 #9 Verify certificates with a CRL that is not yet valid.
+/// C source: SDV_X509_CRL_FILE_VERIFY_FUNC_TC001 (line 155, X.509 CRL-revocation chain-verify KAT)
+#[test]
+fn tc_line155_x509_crl_file_verify() {
+    let ca = load_cert_fixture("cert/test_for_crl/extension_crl/ca_cert.pem");
+    let crl = load_crl_fixture("cert/test_for_crl/extension_crl/test_crl_change_date2.pem");
+    let cert = load_cert_fixture("cert/test_for_crl/extension_crl/user_cert.pem");
+    assert!(crl.verify_signature(&ca).unwrap());
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
+}
+
+// Generation summary: 1015 emitted / 371 API-surface skipped / 22 unknown / 11 unsupported alg / 1419 total C cases.
