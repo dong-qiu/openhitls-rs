@@ -5571,6 +5571,18 @@ Each is a candidate verifier-hardening Implementation phase. This closes the mig
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1038/1038 PASS (111 cert-parse + 20 CSR + 5 CRL + 872 field-check + 10 CRL-verify + 20 CRL field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: CSR field-check families (2026-05-18)
+
+> 继续 CSR 字段族
+
+**Result**: the CSR `PARSE_FUNC_TC001/002/003` rows — previously migrated only as parse-succeeds (`CsrParse`) — are upgraded to field checks. New `emit_csr_field` (+ `Kind::CsrField` / a `CsrField` enum) loads the CSR via a generated `load_csr_fixture` helper and asserts `CertificateRequest` fields: `TC001` `version` / `raw.len()` (encode length) / `signature_value`; `TC002` the subject DN (`subject.entries`); `TC003` the attribute count. The now-dead `Kind::CsrParse` + the `Subject` enum are removed (`emit_parse` → cert-only `emit_cert_parse`). `migrated_x509_parse.rs` 1038 → **1035 tests** (the 20 CSR parse-succeeds tests are replaced by 17 richer field-check tests).
+
+**Skips**: of the 40 CSR field-check rows, 17 migrate. `TC001`'s `signAlg` sub-check is not ported — it would need a large `BSL_CID_*` → OID table (incl. ML-DSA); `version`/`raw.len()`/`signature` cover the rest. `TC002` rows whose DN attribute types fall outside the parser's 8-entry short-name set, or whose values parsed ambiguously as hex, are skipped. `TC003` rows with ≥1 attribute are skipped — Rust's `CertificateRequest::attributes` is the *flattened extension* list (the extensions pulled out of the `extensionRequest` attribute), so its count diverges from C's *attribute* count. `CSR_PARSE_FUNC_TC004` (negative) stays `ApiSurface`.
+
+**T113 still open**: the malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1035/1035 PASS (111 cert-parse + 5 CRL-parse + 872 cert field-check + 17 CSR field-check + 10 CRL-verify + 20 CRL field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 

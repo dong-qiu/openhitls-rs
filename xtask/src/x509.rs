@@ -8,12 +8,12 @@
 //!   `HITLS_X509_CertParseFile` and asserts `HITLS_PKI_SUCCESS`. The migrated
 //!   test loads the mirrored fixture (`tests/vectors/c-asn1-fixtures/…`) and
 //!   asserts `Certificate::from_der` / `from_pem` returns `Ok`.
-//! * `X509_CSR_PARSE_FUNC_TC001` / `TC002` / `TC003` — `format : path : …`.
-//!   The C test parses a PKCS#10 CSR and then checks fields; the migrated
-//!   test ports the parse-succeeds half via `CertificateRequest::from_der` /
-//!   `from_pem`. `CSR_PARSE_FUNC_TC004` carries an expected return code
-//!   (negative-capable) — routed to `ApiSurface` until a later increment
-//!   adds C-error → `PkiError` mapping.
+//! * `X509_CSR_PARSE_FUNC_TC001` / `TC002` / `TC003` — CSR field checks: the
+//!   C test parses a PKCS#10 CSR and asserts fields. The migrated test loads
+//!   the fixture (`load_csr_fixture`) and asserts public `CertificateRequest`
+//!   fields — `TC001` `version` / encode-length / signature, `TC002` the
+//!   subject DN, `TC003` the attribute count. `CSR_PARSE_FUNC_TC004`
+//!   (negative, expected-return code) routes to `ApiSurface`.
 //! * `X509_CRL_PARSE_FILE_FUNC_TC001` / `TC002` — every quoted arg is a valid
 //!   CRL; each must parse. `TC003/006/007/008` — `path : res`, where `res` is
 //!   the expected C return code (`HITLS_PKI_SUCCESS` → parse must succeed,
@@ -81,8 +81,8 @@ pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
 
     for case in cases {
         match classify(&case.tc_name) {
-            Kind::CertParse => emit_parse(&mut body, case, &mut stats, Subject::Cert),
-            Kind::CsrParse => emit_parse(&mut body, case, &mut stats, Subject::Csr),
+            Kind::CertParse => emit_cert_parse(&mut body, case, &mut stats),
+            Kind::CsrField(field) => emit_csr_field(&mut body, case, &mut stats, field),
             Kind::CrlParse => emit_crl_parse(&mut body, case, &mut stats),
             Kind::CrlParseRes => emit_crl_parse_res(&mut body, case, &mut stats),
             Kind::CertField(field) => emit_cert_field(&mut body, case, &mut stats, field),
@@ -103,7 +103,8 @@ pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
 #[derive(Debug, Clone, Copy)]
 enum Kind {
     CertParse,
-    CsrParse,
+    /// A CSR field-check family (`CSR_PARSE_FUNC_TC001/002/003`).
+    CsrField(CsrField),
     /// `CRL_PARSE_FILE_FUNC_TC001/TC002` — every quoted path is a valid CRL
     /// that must parse.
     CrlParse,
@@ -136,6 +137,17 @@ enum CrlField {
     InvalidityDate,
     /// `CRL_PARSE_FILE_FUNC_TC013` — `path : res1 : res2` (cert-issuer ext).
     CertIssuer,
+}
+
+/// A CSR field-check KAT family — parse a PKCS#10 CSR, assert parsed fields.
+#[derive(Debug, Clone, Copy)]
+enum CsrField {
+    /// `CSR_PARSE_FUNC_TC001` — `format : path : rawLen : signAlg : sign : …`.
+    Sign,
+    /// `CSR_PARSE_FUNC_TC002` — `format : path : count : (dnType, dnName)×N`.
+    Subject,
+    /// `CSR_PARSE_FUNC_TC003` — `format : path : attrNum : attrCid : attrValue`.
+    Attrs,
 }
 
 /// A cert field-extraction KAT family — `path : expected…`. The migrated test
@@ -244,38 +256,18 @@ fn civil_to_unix(year: i64, month: i64, day: i64, hour: i64, min: i64, sec: i64)
     days * 86_400 + hour * 3_600 + min * 60 + sec
 }
 
-/// The X.509 object a parse-KAT row targets — selects the Rust parse type,
-/// the emitted function-name suffix, and the doc-comment wording.
-#[derive(Debug, Clone, Copy)]
-enum Subject {
-    Cert,
-    Csr,
-}
-
-impl Subject {
-    fn rust_type(self) -> &'static str {
-        match self {
-            Subject::Cert => "Certificate",
-            Subject::Csr => "CertificateRequest",
-        }
-    }
-    fn name(self) -> &'static str {
-        match self {
-            Subject::Cert => "cert",
-            Subject::Csr => "csr",
-        }
-    }
-}
-
 fn classify(tc: &str) -> Kind {
     if tc.contains("X509_CERT_PARSE_FUNC_TC001") {
         return Kind::CertParse;
     }
-    if tc.contains("X509_CSR_PARSE_FUNC_TC001")
-        || tc.contains("X509_CSR_PARSE_FUNC_TC002")
-        || tc.contains("X509_CSR_PARSE_FUNC_TC003")
-    {
-        return Kind::CsrParse;
+    if tc.contains("X509_CSR_PARSE_FUNC_TC001") {
+        return Kind::CsrField(CsrField::Sign);
+    }
+    if tc.contains("X509_CSR_PARSE_FUNC_TC002") {
+        return Kind::CsrField(CsrField::Subject);
+    }
+    if tc.contains("X509_CSR_PARSE_FUNC_TC003") {
+        return Kind::CsrField(CsrField::Attrs);
     }
     if tc.contains("X509_CRL_PARSE_FILE_FUNC_TC001")
         || tc.contains("X509_CRL_PARSE_FILE_FUNC_TC002")
@@ -367,7 +359,7 @@ fn fixture_relpath(c_path: &str) -> Option<&str> {
 /// Emit a positive parse KAT — `format : path : …` rows where the C test
 /// asserts the file parses. Extra field-check args after `path` are ignored;
 /// the migrated test ports the parse-succeeds half.
-fn emit_parse(out: &mut String, case: &TestCase, stats: &mut EmitStats, subject: Subject) {
+fn emit_cert_parse(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
     if case.args.len() < 2 {
         stats.skipped_unknown += 1;
         return;
@@ -394,16 +386,9 @@ fn emit_parse(out: &mut String, case: &TestCase, stats: &mut EmitStats, subject:
         }
     };
 
-    let ty = subject.rust_type();
-    write_doc(out, case, &format!("X.509 {} parse KAT", subject.name()));
+    write_doc(out, case, "X.509 cert parse KAT");
     writeln!(out, "#[test]").unwrap();
-    writeln!(
-        out,
-        "fn tc_line{}_x509_{}_parse() {{",
-        case.line,
-        subject.name()
-    )
-    .unwrap();
+    writeln!(out, "fn tc_line{}_x509_cert_parse() {{", case.line).unwrap();
     writeln!(
         out,
         "    let bytes = std::fs::read(concat!(\n\
@@ -414,11 +399,104 @@ fn emit_parse(out: &mut String, case: &TestCase, stats: &mut EmitStats, subject:
     )
     .unwrap();
     if der {
-        writeln!(out, "    assert!({ty}::from_der(&bytes).is_ok());").unwrap();
+        writeln!(out, "    assert!(Certificate::from_der(&bytes).is_ok());").unwrap();
     } else {
         writeln!(out, "    let pem = std::str::from_utf8(&bytes).unwrap();").unwrap();
-        writeln!(out, "    assert!({ty}::from_pem(pem).is_ok());").unwrap();
+        writeln!(out, "    assert!(Certificate::from_pem(pem).is_ok());").unwrap();
     }
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// Emit a CSR field-check KAT (`CSR_PARSE_FUNC_TC001/002/003`). The C test
+/// parses a PKCS#10 CSR and checks fields; the migrated test loads the
+/// fixture via `load_csr_fixture` and asserts the corresponding public
+/// `CertificateRequest` fields.
+///
+/// `TC001` checks `version` / encode-length / signature; the C `signAlg`
+/// sub-check is not ported (it would need a large `BSL_CID_*` → OID table,
+/// including ML-DSA — deferred). `TC002` reconstructs the subject DN — rows
+/// whose RDN types fall outside the parser's DN short-name set, or whose
+/// values parsed ambiguously as hex, are skipped. `TC003` asserts the
+/// attribute count. `CSR_PARSE_FUNC_TC004` (negative) stays `ApiSurface`.
+fn emit_csr_field(out: &mut String, case: &TestCase, stats: &mut EmitStats, field: CsrField) {
+    let Some(rel) = arg_rel(&case.args, 1) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let body = match field {
+        CsrField::Sign => {
+            let Some(raw_len) = arg_sym(&case.args, 2).and_then(|s| s.parse::<usize>().ok()) else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            let Some(sign) = case.args.get(4).and_then(|a| a.as_hex()) else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            format!(
+                "    assert_eq!(csr.version, 0);\n\
+                 \x20   assert_eq!(csr.raw.len(), {raw_len});\n\
+                 \x20   assert_eq!(csr.signature_value.as_slice(), {});\n",
+                format_byte_slice(sign)
+            )
+        }
+        CsrField::Subject => {
+            let pairs = &case.args[3..];
+            if pairs.is_empty() || pairs.len() % 2 != 0 {
+                stats.skipped_unknown += 1;
+                return;
+            }
+            let mut entries = Vec::new();
+            for pair in pairs.chunks(2) {
+                // A DN value that happens to be even-length hex parses as
+                // `Arg::Hex`, losing the original string — skip such rows.
+                let (Some(ty), Some(name)) = (pair[0].as_str(), pair[1].as_str()) else {
+                    stats.skipped_unsupported_alg += 1;
+                    return;
+                };
+                // Only the DN attribute types the PKI parser records by short
+                // name; an unknown type is stored as a dotted OID instead.
+                if !matches!(
+                    ty,
+                    "C" | "ST" | "L" | "O" | "OU" | "CN" | "serialNumber" | "emailAddress"
+                ) {
+                    stats.skipped_unsupported_alg += 1;
+                    return;
+                }
+                entries.push((ty, name));
+            }
+            let mut s =
+                String::from("    assert_eq!(\n        csr.subject.entries,\n        vec![\n");
+            for (ty, name) in &entries {
+                writeln!(s, "            ({ty:?}.to_string(), {name:?}.to_string()),").unwrap();
+            }
+            s.push_str("        ],\n    );\n");
+            s
+        }
+        CsrField::Attrs => {
+            let Some(num) = arg_sym(&case.args, 2).and_then(|s| s.parse::<usize>().ok()) else {
+                stats.skipped_unknown += 1;
+                return;
+            };
+            // C `attrNum` counts CSR *attributes*; Rust's
+            // `CertificateRequest::attributes` is the flattened *extension*
+            // list pulled out of the `extensionRequest` attribute, so the
+            // counts diverge once an attribute is present. Only the
+            // zero-attribute rows migrate (both are then empty).
+            if num != 0 {
+                stats.skipped_unsupported_alg += 1;
+                return;
+            }
+            "    assert!(csr.attributes.is_empty());\n".to_string()
+        }
+    };
+
+    write_doc(out, case, "X.509 CSR field-check KAT");
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_x509_csr_field() {{", case.line).unwrap();
+    writeln!(out, "    let csr = load_csr_fixture({rel:?});").unwrap();
+    out.push_str(&body);
     writeln!(out, "}}\n").unwrap();
     stats.emitted += 1;
 }
@@ -1095,6 +1173,25 @@ fn write_header(out: &mut String, body: &str) {
              \x20           CertificateRevocationList::from_pem(s).unwrap()\n\
              \x20       }\n\
              \x20       _ => CertificateRevocationList::from_der(&bytes).unwrap(),\n\
+             \x20   }\n\
+             }\n\n",
+        );
+    }
+    if body.contains("load_csr_fixture(") {
+        out.push_str(
+            "/// Load a mirrored CSR fixture, auto-detecting PEM vs DER by content.\n\
+             fn load_csr_fixture(rel: &str) -> CertificateRequest {\n\
+             \x20   let path = format!(\n\
+             \x20       \"{}/../../tests/vectors/c-asn1-fixtures/{}\",\n\
+             \x20       env!(\"CARGO_MANIFEST_DIR\"),\n\
+             \x20       rel\n\
+             \x20   );\n\
+             \x20   let bytes = std::fs::read(&path).unwrap();\n\
+             \x20   match std::str::from_utf8(&bytes) {\n\
+             \x20       Ok(s) if s.contains(\"-----BEGIN\") => {\n\
+             \x20           CertificateRequest::from_pem(s).unwrap()\n\
+             \x20       }\n\
+             \x20       _ => CertificateRequest::from_der(&bytes).unwrap(),\n\
              \x20   }\n\
              }\n\n",
         );
