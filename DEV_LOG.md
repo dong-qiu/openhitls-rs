@@ -327,7 +327,7 @@ Category summary:
 | 315 | I97 | Impl | TLS 1.3 post-handshake-auth transcript fix — both sides computed the post-handshake CertificateVerify / Finished over `Hash(CertificateRequest ‖ Certificate[ ‖ CV])` instead of continuing the completed main-handshake transcript (RFC 8446 §4.4.1). The bug was symmetric (server `request_client_auth` + client post-HS CR handler) so they interoperated with each other but not with a conformant peer. `TranscriptHash` made `Clone`; `Server`/`ClientHandshake` retain the CH…client-Finished transcript; both sides now clone it as the post-handshake baseline. Verified: 1539 hitls-tls tests + tlsfuzzer `test-tls13-post-handshake-auth.py` 2/6 → 4/6 (residual 2 are unrelated: alert-on-failure + KeyUpdate-interleave). Surfaced by the T122 PHA probe | 2026-05-17 |
 | 316 | T125 | Test | PHA tlsfuzzer wiring — commits the `--post-handshake-auth` `s-server` flag (a `/secret`-path request triggers a post-handshake CertificateRequest, mirroring T122's `--key-update`) + a dedicated instance (port 4455) running `test-tls13-post-handshake-auth.py` in CI. 4 PASS / 2 XFAIL (`malformed signature in PHA` needs an alert-on-failure; `with KeyUpdate` needs interleaved-KeyUpdate tolerance — both queued for a follow-up I-phase). Curated suite 48 → 49 script-runs | 2026-05-17 |
 | 317 | I98 | Impl | PHA robustness — closes the 2 `test-tls13-post-handshake-auth.py` XFAILs from T125. (1) `request_client_auth` (sync + async) now sends a fatal alert via the T89 `send_fatal_alert_for_error_body!` path before returning any error, so a malformed post-handshake CertificateVerify yields a `decrypt_error` alert (RFC 8446 §6.2) instead of a bare close. (2) new `read_post_hs_skipping_key_update` transparently consumes a KeyUpdate interleaved into the post-handshake exchange (RFC 8446 §4.6.3) — `handle_key_update` rekeys + responds. `test-tls13-post-handshake-auth.py` 4/6 → **6/6** clean; XFAIL file deleted | 2026-05-17 |
-| 318 | T113 | Test | C→Rust test migration Phase C — opens PKI SDV migration. §4.1: mirrored the openHiTLS PKI fixture corpus (`testdata/{cert,certificate}/` → `tests/vectors/c-asn1-fixtures/`, 1298 files + `MANIFEST.sha256`, PR #88). §4.2 first family: `xtask/src/x509.rs` migrates `X509_CERT_PARSE_FUNC_TC001` positive cert-parse → 111 tests in `crates/hitls-pki/tests/migrated_x509_parse.rs` (`Certificate::from_der`/`from_pem` on the mirrored fixtures). Parser gains `Arg::Str` so quoted file-path fields parse (previously hex-only). Phase C not closed — signature/pubkey/sig-alg field-check families + CSR + CRL + malformed-DER negatives follow under T113 | 2026-05-17 |
+| 318 | T113 | Test | C→Rust test migration Phase C — opens PKI SDV migration. §4.1: mirrored the openHiTLS PKI fixture corpus (`testdata/{cert,certificate}/` → `tests/vectors/c-asn1-fixtures/`, 1298 files + `MANIFEST.sha256`, PR #88). §4.2 cert + CSR parse: `xtask/src/x509.rs` migrates `X509_CERT_PARSE_FUNC_TC001` + `X509_CSR_PARSE_FUNC_TC001-003` positive parse → 131 tests (111 cert + 20 CSR) in `crates/hitls-pki/tests/migrated_x509_parse.rs` (`Certificate`/`CertificateRequest` `from_der`/`from_pem` on the mirrored fixtures). Parser gains `Arg::Str` so quoted file-path fields parse (previously hex-only). Phase C not closed — cert signature/pubkey/sig-alg field-check families + CSR field families + CRL + malformed-DER negatives follow under T113 | 2026-05-17 |
 
 ---
 
@@ -18676,13 +18676,13 @@ work line (T122 → I96 → I97 → T125 → I98) is now complete:
 Opens `docs/c-test-migration-plan.md` **Phase C** — migrating the openHiTLS PKI SDV suite (X.509 / CSR / CRL parse tests), which load fixture *files* rather than carrying inline hex. Two parts so far:
 
 - **§4.1 fixture corpus** (committed in PR #88) — `rsync -a` of `openhitls/testcode/testdata/{cert,certificate}/` into `tests/vectors/c-asn1-fixtures/` (1298 files, ~8.7 MB) + `MANIFEST.sha256` + a provenance/licence `README.md`. Every PKI SDV `.data` file references fixtures under `cert/`, so this corpus is the shared base for Phase B's CSR/CRL sub-tasks and all of Phase C.
-- **§4.2 first family** (this commit) — `xtask/src/x509.rs` migrates `X509_CERT_PARSE_FUNC_TC001` (positive cert-parse KAT). 111 tests emitted into `crates/hitls-pki/tests/migrated_x509_parse.rs`.
+- **§4.2 cert + CSR parse** — `xtask/src/x509.rs` migrates the positive parse families `X509_CERT_PARSE_FUNC_TC001` (certificates) and `X509_CSR_PARSE_FUNC_TC001/002/003` (PKCS#10 CSRs). 131 tests in `crates/hitls-pki/tests/migrated_x509_parse.rs` (111 cert + 20 CSR).
 
-Phase C is **not closed** — `x509_cert.data` has further families (signature / pubkey / sig-alg field checks ≈ 1000 rows) plus the malformed-DER negatives, CSR (`x509_csr.data`) and CRL (`x509_crl_rfc5280.data`). Those land in subsequent T113 commits under the no-sub-phase rule.
+Phase C is **not closed** — `x509_cert.data` has further families (signature / pubkey / sig-alg field checks ≈ 1000 rows) plus the malformed-DER negatives, the CSR field-check / expected-return families, and CRL (`x509_crl_rfc5280.data`). Those land in subsequent T113 commits under the no-sub-phase rule.
 
-### X.509 cert-parse pilot
+### X.509 cert + CSR parse pilot
 
-`X509_CERT_PARSE_FUNC_TC001` rows are `format : path` — the C test runs `HITLS_X509_CertParseFile` and asserts `HITLS_PKI_SUCCESS` (the cert file parses). The migrated test loads the mirrored fixture via `std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/vectors/c-asn1-fixtures/<rel>"))` and asserts `Certificate::from_der` (`BSL_FORMAT_ASN1`) / `from_pem` (`BSL_FORMAT_PEM`) returns `Ok`. `BSL_FORMAT_UNKNOWN` (C auto-detect) has no Rust analogue → `skipped_unknown`. From 1162 TC rows: 111 emitted, 1047 API-surface (the other cert families, future increments), 4 unknown.
+`X509_CERT_PARSE_FUNC_TC001` / `X509_CSR_PARSE_FUNC_TC001-003` rows are `format : path : …` — the C test parses the file (and, for some, checks fields). The migrated test ports the parse-succeeds half: it loads the mirrored fixture via `std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/vectors/c-asn1-fixtures/<rel>"))` and asserts `Certificate` / `CertificateRequest` `::from_der` (`BSL_FORMAT_ASN1`) / `::from_pem` (`BSL_FORMAT_PEM`) returns `Ok`. `BSL_FORMAT_UNKNOWN` (C auto-detect) has no Rust analogue → `skipped_unknown`. A single generic `emit_parse` covers both subjects (a `Subject` enum picks the Rust type / fn-name suffix). `CSR_PARSE_FUNC_TC004` carries an expected-return code (negative-capable) and is deferred to a later increment. From 1270 TC rows across the two `.data` files: 131 emitted, 1131 API-surface, 8 unknown.
 
 ### Parser enhancement — `Arg::Str`
 
@@ -18693,14 +18693,14 @@ PKI `.data` rows quote *file paths* (`"../testdata/cert/foo.der"`), not hex. The
 | File | Status | Description |
 |------|--------|-------------|
 | `xtask/src/parser.rs` | Modified | New `Arg::Str` variant + `as_str()`; quoted non-hex fields parse as string literals instead of failing. |
-| `xtask/src/x509.rs` | Added | X.509 cert-parse KAT emitter (`X509_CERT_PARSE_FUNC_TC001`); C fixture-path → `c-asn1-fixtures/` rewrite. |
-| `xtask/src/main.rs` | Modified | `x509-parse` branch in the `--algo` dispatch (output to `crates/hitls-pki/tests/`). |
-| `crates/hitls-pki/tests/migrated_x509_parse.rs` | Added | 111 generated X.509 certificate-parse KAT tests. |
+| `xtask/src/x509.rs` | Added | X.509 cert + CSR parse-KAT emitter (`X509_CERT_PARSE_FUNC_TC001`, `X509_CSR_PARSE_FUNC_TC001-003`); generic `emit_parse` over a `Subject` enum; C fixture-path → `c-asn1-fixtures/` rewrite. |
+| `xtask/src/main.rs` | Modified | `x509-parse` branch in the `--algo` dispatch — multi-input (cert + csr `.data`), output to `crates/hitls-pki/tests/`. |
+| `crates/hitls-pki/tests/migrated_x509_parse.rs` | Added | 131 generated X.509 parse-KAT tests (111 certificate + 20 CSR). |
 | `tests/vectors/c-asn1-fixtures/` | Added (PR #88) | Mirrored openHiTLS PKI fixture corpus + `MANIFEST.sha256` + `README.md`. |
 
 ### Build Status
 
-- `cargo test -p hitls-pki --test migrated_x509_parse --all-features`: 111/111 PASS.
+- `cargo test -p hitls-pki --test migrated_x509_parse --all-features`: 131/131 PASS (111 cert + 20 CSR).
 - `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check`: up-to-date.
 - `cargo run -p xtask -- migrate-c-tests --algo {sha2,hmac,cmac,aes,curve25519,dsa,dh,sm4,sm2} --check`: all up-to-date (parser change is a no-op for the crypto algorithms).
 - `RUSTFLAGS="-D warnings" cargo clippy -p xtask -p hitls-pki --all-features --tests`: 0.

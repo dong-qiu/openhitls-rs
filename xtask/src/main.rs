@@ -122,7 +122,10 @@ fn migrate(
             sm2::emit_sm2_kat,
         ),
         "x509-parse" => (
-            vec![c_root.join("pki/cert/test_suite_sdv_x509_cert.data")],
+            vec![
+                c_root.join("pki/cert/test_suite_sdv_x509_cert.data"),
+                c_root.join("pki/csr/test_suite_sdv_x509_csr.data"),
+            ],
             workspace_root()?.join("crates/hitls-pki/tests/migrated_x509_parse.rs"),
             x509::emit_x509_kat,
         ),

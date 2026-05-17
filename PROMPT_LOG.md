@@ -5444,6 +5444,18 @@ This is Phase C §4.1 — fixture-corpus prep, the analogue of the T111 xtask sc
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 111/111 PASS. `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date; all 9 crypto algos still up-to-date. `cargo clippy -p xtask -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C §4.2: CSR parse KAT (2026-05-17)
+
+> 继续下一个T113 增量
+
+**Result**: extends `xtask/src/x509.rs` with the CSR positive-parse families `X509_CSR_PARSE_FUNC_TC001/002/003`. `migrated_x509_parse.rs` grows 111 → **131 tests** (+20 CSR). The `x509-parse` algo is now multi-input (`pki/cert` + `pki/csr` `.data`). `emit_cert_parse` was generalised to `emit_parse` over a `Subject` enum (`Cert` → `Certificate`, `Csr` → `CertificateRequest`) — both parse types share the `format : path` shape and the fixture-load + `from_der`/`from_pem`-`is_ok()` body; the `Subject` picks the Rust type, the `tc_line{N}_x509_{cert,csr}_parse` fn-name suffix, and the doc wording.
+
+`CSR_PARSE_FUNC_TC004` carries an expected-return code (negative-capable) → `ApiSurface`, deferred to a later increment that adds C-error → `PkiError` mapping. From 1270 TC rows across the two files: 131 emitted, 1131 API-surface, 8 unknown.
+
+**T113 still open**: cert signature/pubkey/sig-alg field-check families (~1000 rows), CSR field families, CRL (`x509_crl_rfc5280.data`), and the malformed-DER negatives remain.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 131/131 PASS (111 cert + 20 CSR). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
