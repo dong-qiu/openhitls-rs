@@ -5926,3 +5926,32 @@ definitive root cause each:
 0 FAIL, exit 0. Curated suite 49 → 50. Recorded as DEV_LOG Phase T126.
 
 Next: mass-fail batch 2, then through ②–⑤.
+
+---
+
+## Phase I99 — TLS 1.3 ECDHE for secp384r1 / secp521r1 (2026-05-17)
+
+> 按此推进
+
+Carved out of mass-fail batch 2: probing `dhe-shared-secret-padding`
+(559/5) and `ecdhe-curves` (4/33) surfaced a real bug — the secp384r1
+conversation failed with `unsupported named group: NamedGroup(24)`.
+Root cause: the TLS 1.3 `KeyExchange` (`handshake/key_exchange.rs`)
+advertised secp384r1/secp521r1 in `supported_groups` but `generate`
+only implemented X25519 / X448 / SECP256R1 / SM2 / X25519MLKEM768 —
+the same crypto-layer-has-it / TLS-layer-missing-it shape as I96.
+`hitls-crypto::ecdh` has had P-384/P-521 ECDH all along.
+
+**Fix**: added `EcdhP384` / `EcdhP521` variants to `KeyExchangeInner`
++ the matching `generate` / `compute_shared_secret` arms (mirrors the
+existing `EcdhP256`); 2 roundtrip unit tests.
+
+**Verification**: `hitls-tls` lib tests 1541/0 (+2); clippy
+`-D warnings` 0; fmt clean. End-to-end —
+`test-tls13-dhe-shared-secret-padding.py` **559/5 → 703/3**
+(secp384r1 + secp521r1 conversations fixed; residual 3 are FFDHE ×2 +
+X448, group-not-advertised), `test-tls13-ecdhe-curves.py` 4/33 → 6/33
+(the remaining 27 are brainpool curves). Recorded as DEV_LOG Phase I99.
+
+Next: the batch-2 CI-wiring T-phase (add `dhe-shared-secret-padding`
+etc. to the curated suite), then ②–⑤.

@@ -477,3 +477,12 @@ one reviewed PR.
   server is RFC 8446 §4.2.1-correct — it ignores `legacy_version`
   when `supported_versions` is present); `non-support` /
   `unencrypted-alert` deferred to batch 2. Suite size 49 → 50.
+
+- I99 — mass-fail batch-2 probing (`dhe-shared-secret-padding` /
+  `ecdhe-curves`) surfaced a real bug: the TLS 1.3 `KeyExchange`
+  advertised secp384r1/secp521r1 but `generate` only implemented
+  X25519/X448/SECP256R1 — a client offering only secp384r1 hit
+  `unsupported named group`. Wired P-384/P-521 ECDH into
+  `handshake/key_exchange.rs` (the curves were already in
+  `hitls-crypto::ecdh`). `dhe-shared-secret-padding` 559/5 → 703/3,
+  `ecdhe-curves` 4/33 → 6/33.
