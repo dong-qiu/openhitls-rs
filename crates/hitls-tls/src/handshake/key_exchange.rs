@@ -1,4 +1,5 @@
-//! TLS 1.3 ephemeral key exchange (X25519, X448, SECP256R1, X25519MLKEM768).
+//! TLS 1.3 ephemeral key exchange (X25519, X448, SECP256R1, SECP384R1,
+//! SECP521R1, X25519MLKEM768).
 
 use crate::crypt::NamedGroup;
 use hitls_crypto::ecdh::EcdhKeyPair;
@@ -12,6 +13,8 @@ enum KeyExchangeInner {
     X25519(X25519PrivateKey),
     X448(X448PrivateKey),
     EcdhP256(Box<EcdhKeyPair>),
+    EcdhP384(Box<EcdhKeyPair>),
+    EcdhP521(Box<EcdhKeyPair>),
     #[cfg(feature = "tlcp")]
     EcdhSm2(Box<EcdhKeyPair>),
     HybridX25519MlKem768 {
@@ -30,7 +33,8 @@ pub struct KeyExchange {
 impl KeyExchange {
     /// Generate a new ephemeral keypair for the given named group.
     ///
-    /// Supports X25519 and SECP256R1.
+    /// Supports X25519, X448, SECP256R1, SECP384R1, SECP521R1 and the
+    /// X25519MLKEM768 hybrid.
     pub fn generate(group: NamedGroup) -> Result<Self, TlsError> {
         match group {
             NamedGroup::X25519 => {
@@ -60,6 +64,31 @@ impl KeyExchange {
                 Ok(Self {
                     group,
                     inner: KeyExchangeInner::EcdhP256(Box::new(kp)),
+                    public_key_bytes,
+                })
+            }
+            // Phase I99 — SECP384R1 / SECP521R1 ECDHE. The TLS layer
+            // advertised these groups but `KeyExchange` only implemented
+            // P-256, so a client offering only secp384r1/secp521r1 hit
+            // `unsupported named group`. `hitls-crypto::ecdh` has had
+            // P-384/P-521 ECDH since project start.
+            NamedGroup::SECP384R1 => {
+                let kp = EcdhKeyPair::generate(hitls_types::EccCurveId::NistP384)
+                    .map_err(TlsError::CryptoError)?;
+                let public_key_bytes = kp.public_key_bytes().map_err(TlsError::CryptoError)?;
+                Ok(Self {
+                    group,
+                    inner: KeyExchangeInner::EcdhP384(Box::new(kp)),
+                    public_key_bytes,
+                })
+            }
+            NamedGroup::SECP521R1 => {
+                let kp = EcdhKeyPair::generate(hitls_types::EccCurveId::NistP521)
+                    .map_err(TlsError::CryptoError)?;
+                let public_key_bytes = kp.public_key_bytes().map_err(TlsError::CryptoError)?;
+                Ok(Self {
+                    group,
+                    inner: KeyExchangeInner::EcdhP521(Box::new(kp)),
                     public_key_bytes,
                 })
             }
@@ -120,6 +149,12 @@ impl KeyExchange {
                     .map_err(TlsError::CryptoError)
             }
             KeyExchangeInner::EcdhP256(kp) => kp
+                .compute_shared_secret(peer_public)
+                .map_err(TlsError::CryptoError),
+            KeyExchangeInner::EcdhP384(kp) => kp
+                .compute_shared_secret(peer_public)
+                .map_err(TlsError::CryptoError),
+            KeyExchangeInner::EcdhP521(kp) => kp
                 .compute_shared_secret(peer_public)
                 .map_err(TlsError::CryptoError),
             #[cfg(feature = "tlcp")]
@@ -226,6 +261,34 @@ mod tests {
         let shared2 = peer.compute_shared_secret(kx.public_key_bytes()).unwrap();
         assert_eq!(shared1, shared2);
         assert_eq!(shared1.len(), 32); // P-256 field size
+    }
+
+    #[test]
+    fn test_key_exchange_secp384r1() {
+        let kx = KeyExchange::generate(NamedGroup::SECP384R1).unwrap();
+        assert_eq!(kx.group(), NamedGroup::SECP384R1);
+        // P-384 uncompressed point: 0x04 || x(48) || y(48) = 97 bytes
+        assert_eq!(kx.public_key_bytes().len(), 97);
+
+        let peer = KeyExchange::generate(NamedGroup::SECP384R1).unwrap();
+        let shared1 = kx.compute_shared_secret(peer.public_key_bytes()).unwrap();
+        let shared2 = peer.compute_shared_secret(kx.public_key_bytes()).unwrap();
+        assert_eq!(shared1, shared2);
+        assert_eq!(shared1.len(), 48); // P-384 field size
+    }
+
+    #[test]
+    fn test_key_exchange_secp521r1() {
+        let kx = KeyExchange::generate(NamedGroup::SECP521R1).unwrap();
+        assert_eq!(kx.group(), NamedGroup::SECP521R1);
+        // P-521 uncompressed point: 0x04 || x(66) || y(66) = 133 bytes
+        assert_eq!(kx.public_key_bytes().len(), 133);
+
+        let peer = KeyExchange::generate(NamedGroup::SECP521R1).unwrap();
+        let shared1 = kx.compute_shared_secret(peer.public_key_bytes()).unwrap();
+        let shared2 = peer.compute_shared_secret(kx.public_key_bytes()).unwrap();
+        assert_eq!(shared1, shared2);
+        assert_eq!(shared1.len(), 66); // P-521 field size
     }
 
     #[test]
