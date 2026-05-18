@@ -5583,6 +5583,20 @@ Each is a candidate verifier-hardening Implementation phase. This closes the mig
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1035/1035 PASS (111 cert-parse + 5 CRL-parse + 872 cert field-check + 17 CSR field-check + 10 CRL-verify + 20 CRL field-check). `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C: open the `pki/verify` SDV suite — cert-chain build+verify (2026-05-18)
+
+> 继续
+
+**Context**: with the `pki/{cert,csr,crl}` parse + field families complete (1035 tests), the remaining T113 work was surveyed — 6 unmigrated PKI SDV `.data` files (`common/x509` 353, `cert/x509_check` 184, `verify/x509_vfy` 134, `crl/x509_crl` 116, `cms` 140, `pkcs12` 81). Via `AskUserQuestion` the user asked for a recommendation; `pki/verify` was chosen as the next suite (largest cohesive migratable body, reuses `CertificateVerifier`).
+
+**Result**: opens `pki/verify/test_suite_sdv_x509_vfy.data` (added to the `x509-parse` algo's input list). New `emit_build_cert_chain` (+ `Kind::BuildCertChain`) migrates `X509_BUILD_CERT_CHAIN_FUNC` — `rootPath : caPath : certPath : crlPath`; the C test builds + verifies a cert chain with the CRL flag cleared (revocation off). The migrated test loads the root (+ optional intermediate CA) into a `CertificateVerifier` and asserts `verify_cert` succeeds. `migrated_x509_parse.rs` 1035 → **1047 tests** (+12).
+
+**Skip**: ECDSA NIST P-192 chains route to `skipped_unsupported_alg` — P-192 is a legacy curve Rust's signature verifier does not support (a verifier-hardening candidate, alongside the earlier verifier gaps).
+
+**T113 still open**: the rest of `pki/verify` (`CERT_VERIFY_BY_PUBKEY`, charset families, etc.), the `common/x509` / `cert/x509_check` / `crl/x509_crl` suites, CMS/PKCS12, malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1047/1047 PASS. `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
