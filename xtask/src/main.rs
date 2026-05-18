@@ -126,6 +126,7 @@ fn migrate(
                 c_root.join("pki/cert/test_suite_sdv_x509_cert.data"),
                 c_root.join("pki/csr/test_suite_sdv_x509_csr.data"),
                 c_root.join("pki/crl/test_suite_sdv_x509_crl_rfc5280.data"),
+                c_root.join("pki/verify/test_suite_sdv_x509_vfy.data"),
             ],
             workspace_root()?.join("crates/hitls-pki/tests/migrated_x509_parse.rs"),
             x509::emit_x509_kat,
