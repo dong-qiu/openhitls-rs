@@ -230,6 +230,11 @@ enum Commands {
         /// reject any CCS the peer sends).
         #[arg(long = "no-middlebox-compat")]
         no_middlebox_compat: bool,
+        /// Listen as a DTLS 1.2 server over UDP instead of TLS over
+        /// TCP. The cert/key and cipher-suite flags apply unchanged;
+        /// `--tls` is ignored (DTLS 1.2 only).
+        #[arg(long)]
+        dtls: bool,
     },
     /// List supported algorithms and cipher suites.
     List {
@@ -440,6 +445,7 @@ fn main() {
             key_update,
             post_handshake_auth,
             no_middlebox_compat,
+            dtls,
         } => s_server::run(
             *port,
             cert,
@@ -456,6 +462,7 @@ fn main() {
             *key_update,
             *post_handshake_auth,
             *no_middlebox_compat,
+            *dtls,
         ),
         Commands::List { filter } => list::run(filter),
         Commands::Rand { num, format } => rand_cmd::run(*num, format),

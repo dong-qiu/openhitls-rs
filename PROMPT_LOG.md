@@ -6394,3 +6394,45 @@ The 2 residual XFAILs (`fallback to non-ffdhe` ×2) are WON'T-FIX —
 they require the server to offer a static-RSA (no-forward-secrecy)
 key-exchange suite, a security regression declined on merit. Item 1
 done; item 2 (DTLS s-server) next.
+
+---
+
+## Phase I106 — `s-server --dtls` DTLS 1.2 Listener (Task ⑤, D1) (2026-05-20)
+
+> A (DTLS s-server 收尾)
+
+Task ⑤ completed as a standalone CLI feature: `s-server --dtls`
+listens on UDP and drives DTLS 1.2. Verified end-to-end against
+`openssl s_client -dtls1_2`: handshake completes
+(DTLSv1.2 / ECDHE-RSA-AES128-GCM-SHA256), application data echoes.
+
+Required closing a **chain of 5 DTLS interop bugs** the in-memory
+`dtls12_handshake_in_memory` had hidden (it paired our own lenient
+client with our server, so symmetric bugs were invisible):
+
+1. ServerHello version 0x0303 → 0xFEFD (`encode_dtls_server_hello`).
+2. ServerHello missing `renegotiation_info` (+ `ec_point_formats`).
+3. Multi-record datagrams: `dtls_next_record` queue splits all
+   records per datagram (openssl batches CKE+CCS+Finished).
+4. AEAD `decrypt_record` recomputed the GCM nonce — fixed to use
+   the transmitted explicit nonce (RFC 5288 §3).
+5. Handshake transcript hashed the TLS 4-byte header — RFC 6347
+   §4.2.6 requires the DTLS 12-byte header (message_seq retained,
+   fragment_offset = 0, fragment_length = length). ~30 sites across
+   `server_dtls12.rs` + `client_dtls12.rs`.
+
+CLI side: new `--dtls` flag, `run_dtls` UDP loop, `dtls_echo_loop`,
+`hitls-tls dtls12` feature. Library side: new
+`dtls12_server_handshake` closure-driven driver in
+`connection_dtls12.rs`.
+
+**Verification**: `fmt` clean, `clippy --workspace --all-features
+--all-targets` (`-D warnings`) clean, lib tests **1550/0** (the 84
+in-memory DTLS tests stay PASS — proves every fix is symmetric
+across endpoints). End-to-end openssl s_client `-dtls1_2` handshake
++ echo round-trip. Recorded as DEV_LOG Phase I106.
+
+DTLCP (Chinese DTLS variant) transcript path left untouched —
+separate protocol, separate convention. Fragmented-message
+transcript reassembly is a future hardening item (no-op for openssl
+s_client over localhost — does not fragment).

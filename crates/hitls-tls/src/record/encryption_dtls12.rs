@@ -157,7 +157,16 @@ impl DtlsRecordDecryptor12 {
         let ciphertext_with_tag = &record.fragment[EXPLICIT_NONCE_LEN..];
         let plaintext_len = ciphertext_with_tag.len() - self.tag_len;
 
-        let nonce = build_nonce_dtls12(&self.fixed_iv, record.epoch, record.sequence_number);
+        // The GCM nonce is `fixed_iv(4) || explicit_nonce(8)`, where the
+        // explicit nonce is whatever the *sender* chose and transmitted
+        // in `fragment[0..8]`. The receiver MUST use that verbatim — a
+        // conformant peer (openssl) is free to pick any explicit-nonce
+        // scheme (RFC 5288 §3), so recomputing it from epoch/seq only
+        // works by accident when the peer happens to use the same
+        // formula we do.
+        let mut nonce = [0u8; 12];
+        nonce[..4].copy_from_slice(&self.fixed_iv);
+        nonce[4..12].copy_from_slice(&record.fragment[..EXPLICIT_NONCE_LEN]);
         let aad = build_aad_dtls12(
             record.epoch,
             record.sequence_number,

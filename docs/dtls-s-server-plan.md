@@ -133,6 +133,20 @@ follow-ons. None of it adds tlsfuzzer coverage.
 
 ---
 
+## Implementation findings — D1 (Phase I106, 2026-05-20)
+
+**STATUS: COMPLETE.** All 5 DTLS interop bugs fixed; `s-server --dtls`
+verified end-to-end against `openssl s_client -dtls1_2` (DTLSv1.2 /
+ECDHE-RSA-AES128-GCM-SHA256; application-data echo round-trips). The
+84 in-memory DTLS tests stay PASS — proving every fix is symmetric
+across both endpoints.
+
+The original "D1 attempt" notes below are preserved as the
+breadcrumb trail. Bug 5 — "**NOT fixed — the blocker**" in the
+original write-up — is now fixed and shipped in I106.
+
+---
+
 ## Implementation findings — D1 attempt, 2026-05-18 (branch `feat/s-server-dtls`)
 
 A D1 attempt was made: `s-server --dtls` (UDP listener) +

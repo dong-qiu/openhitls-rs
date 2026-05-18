@@ -24,7 +24,7 @@ hitls-crypto = { path = "../hitls-crypto", features = [
     "pbkdf2",
 ] }
 hitls-bignum = { path = "../hitls-bignum" }
-hitls-tls = { path = "../hitls-tls", features = ["tls13", "tls12"] }
+hitls-tls = { path = "../hitls-tls", features = ["tls13", "tls12", "dtls12"] }
 hitls-pki = { path = "../hitls-pki" }
 hitls-utils = { path = "../hitls-utils" }
 clap = { workspace = true }

@@ -219,10 +219,15 @@ impl Dtls12ClientHandshake {
         self.message_seq += 1;
         let dtls_msg = wrap_dtls_handshake_full(HandshakeType::ClientHello, &ch_body, seq);
 
-        // Convert to TLS format for transcript
-        let tls_msg = dtls_to_tls_handshake(&dtls_msg)?;
-        self.client_hello_tls_bytes = tls_msg.clone();
-        self.transcript.update(&tls_msg)?;
+        // RFC 6347 §4.2.6 — hash the DTLS handshake message in its
+        // 12-byte header form (message_seq + fragment_offset=0 +
+        // fragment_length=length). `wrap_dtls_handshake_full` sets
+        // those normalised fragment fields. Stash the bytes so a
+        // SHA-384 suite negotiation in `process_server_hello` can
+        // re-transcript under the new hash. (Field name is historical;
+        // it now holds DTLS-format bytes.)
+        self.client_hello_tls_bytes = dtls_msg.clone();
+        self.transcript.update(&dtls_msg)?;
 
         self.state = if cookie.is_empty() {
             Dtls12ClientState::WaitHelloVerifyRequest
@@ -286,9 +291,9 @@ impl Dtls12ClientHandshake {
 
         self.params = Some(params.clone());
 
-        // Add ServerHello to transcript in TLS format
-        let tls_msg = dtls_to_tls_handshake(raw_dtls_msg)?;
-        self.transcript.update(&tls_msg)?;
+        // RFC 6347 §4.2.6 — hash the DTLS handshake message in its
+        // 12-byte header form.
+        self.transcript.update(raw_dtls_msg)?;
 
         // Check for abbreviated handshake (session resumption)
         if !self.cached_session_id.is_empty()
@@ -376,8 +381,10 @@ impl Dtls12ClientHandshake {
             ));
         }
 
-        // Add server Finished to transcript
-        self.transcript.update(&tls_msg)?;
+        // Add server Finished to transcript (12-byte DTLS header —
+        // RFC 6347 §4.2.6). `tls_msg` above is only used to extract
+        // verify_data; the transcript hashes the raw DTLS message.
+        self.transcript.update(raw_dtls_msg)?;
 
         // Compute client Finished: PRF(ms, "client finished", Hash(CH + SH + SF))
         let transcript_hash = self.transcript.current_hash()?;
@@ -407,8 +414,8 @@ impl Dtls12ClientHandshake {
             return Err(TlsError::HandshakeFailed("empty certificate chain".into()));
         }
         self.server_certs = cert_list.to_vec();
-        let tls_msg = dtls_to_tls_handshake(raw_dtls_msg)?;
-        self.transcript.update(&tls_msg)?;
+        // RFC 6347 §4.2.6 — DTLS 12-byte header form.
+        self.transcript.update(raw_dtls_msg)?;
 
         crate::cert_verify::verify_server_certificate(&self.config, &self.server_certs)?;
 
@@ -442,8 +449,8 @@ impl Dtls12ClientHandshake {
 
         self.server_ecdh_public = ske.public_key.clone();
         self.server_named_curve = ske.named_curve;
-        let tls_msg = dtls_to_tls_handshake(raw_dtls_msg)?;
-        self.transcript.update(&tls_msg)?;
+        // RFC 6347 §4.2.6 — DTLS 12-byte header form.
+        self.transcript.update(raw_dtls_msg)?;
         self.state = Dtls12ClientState::WaitServerHelloDone;
         Ok(())
     }
@@ -459,8 +466,8 @@ impl Dtls12ClientHandshake {
             ));
         }
 
-        let tls_msg = dtls_to_tls_handshake(raw_dtls_msg)?;
-        self.transcript.update(&tls_msg)?;
+        // RFC 6347 §4.2.6 — DTLS 12-byte header form.
+        self.transcript.update(raw_dtls_msg)?;
 
         let params = self
             .params
@@ -493,8 +500,8 @@ impl Dtls12ClientHandshake {
         self.message_seq += 1;
         let cke_dtls_msg = crate::handshake::codec_dtls::tls_to_dtls_handshake(&cke_tls_msg, seq)?;
 
-        // Add CKE to transcript in TLS format
-        self.transcript.update(&cke_tls_msg)?;
+        // Add CKE to transcript (12-byte DTLS header — RFC 6347 §4.2.6).
+        self.transcript.update(&cke_dtls_msg)?;
 
         // Derive keys
         let alg = params.hash_alg_id();
@@ -519,12 +526,12 @@ impl Dtls12ClientHandshake {
         let verify_data =
             compute_verify_data(alg, &master_secret, "client finished", &transcript_hash)?;
         let finished_tls_msg = crate::handshake::codec12::encode_finished12(&verify_data);
-        self.transcript.update(&finished_tls_msg)?;
-
         let seq = self.message_seq;
         self.message_seq += 1;
         let finished_dtls_msg =
             crate::handshake::codec_dtls::tls_to_dtls_handshake(&finished_tls_msg, seq)?;
+        // Add client Finished to transcript (12-byte DTLS header).
+        self.transcript.update(&finished_dtls_msg)?;
 
         self.state = Dtls12ClientState::WaitChangeCipherSpec;
 
@@ -585,7 +592,9 @@ impl Dtls12ClientHandshake {
         )?;
 
         if received_verify_data.ct_eq(&expected).into() {
-            self.transcript.update(&tls_msg)?;
+            // RFC 6347 §4.2.6 — hash the DTLS 12-byte-header form.
+            // `tls_msg` above is only used to extract verify_data.
+            self.transcript.update(raw_dtls_msg)?;
             self.state = Dtls12ClientState::Connected;
             Ok(())
         } else {
