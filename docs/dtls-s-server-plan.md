@@ -130,3 +130,81 @@ D1 is ~1 focused phase (the server flight sequence is fully specced
 by `do_full_handshake`; the new work is the UDP loop + timeout/
 retransmit + exporting the record helpers). D2/D3 are independent
 follow-ons. None of it adds tlsfuzzer coverage.
+
+---
+
+## Implementation findings — D1 attempt, 2026-05-18 (branch `feat/s-server-dtls`)
+
+A D1 attempt was made: `s-server --dtls` (UDP listener) +
+`dtls12_server_handshake` (a closure-driven server handshake driver
+in `connection_dtls12.rs`) + the `dtls12` feature on `hitls-cli`.
+It is **not merged** — the work lives on branch `feat/s-server-dtls`.
+
+Driving the handshake against `openssl s_client -dtls1_2` exposed
+that the DTLS 1.2 server/client had **never been interop-tested
+against a conformant peer**: `dtls12_handshake_in_memory` only ever
+paired our own (lenient, identically-buggy) client with our server,
+so a chain of bugs went unnoticed. Five were found.
+
+**Bug 1 — ServerHello version (FIXED on branch).** `encode_server_hello`
+hardcodes the TLS 1.2 codepoint `0x0303`; the DTLS ServerHello must
+carry `0xFEFD`. openssl rejects `0x0303` with `unsupported protocol`.
+Fix: `encode_dtls_server_hello` in `server_dtls12.rs` rewrites bytes
+`[4..6]` to `0xFEFD`.
+
+**Bug 2 — missing `renegotiation_info` (FIXED on branch).** The DTLS
+ServerHello was built with `extensions: Vec::new()`; RFC 5746
+requires the (empty) `renegotiation_info` extension or openssl aborts
+with "unsafe legacy renegotiation disabled". Fix: the DTLS
+ServerHello now includes `renegotiation_info` (+ `ec_point_formats`).
+
+**Bug 3 — multi-record datagrams (FIXED on branch).** openssl packs
+ClientKeyExchange + ChangeCipherSpec + Finished into one UDP
+datagram; the in-memory model assumed one record per datagram and
+silently dropped trailing records. Fix: `dtls_next_record` splits
+every datagram into all of its DTLS records via `parse_dtls_record`'s
+`consumed` count and serves them from a queue.
+
+**Bug 4 — AEAD explicit-nonce recompute (FIXED on branch).**
+`DtlsRecordDecryptor12::decrypt_record` rebuilt the GCM nonce from
+`epoch || seq` instead of using the 8-byte explicit nonce the sender
+transmitted in `fragment[0..8]` (RFC 5288 §3 — the sender chooses it
+freely). A symmetric bug: our own client uses the same `epoch||seq`
+formula, so `dtls12_handshake_in_memory` passed, but openssl's
+explicit nonce differs → `bad record MAC`. Fix: `decrypt_record` now
+builds the nonce as `fixed_iv || fragment[0..8]`.
+
+**Bug 5 — handshake-transcript convention (NOT fixed — the blocker).**
+RFC 6347 §4.2.6: the DTLS handshake hash "include[s] entire
+handshake messages, including DTLS-specific fields: message_seq,
+fragment_offset, and fragment_length" (computed "as if each handshake
+message had been sent as a single fragment" → fragment_offset = 0,
+fragment_length = full length). Our code instead converts every
+message to the **TLS 4-byte header** via `dtls_to_tls_handshake`
+before hashing — dropping `message_seq` / `fragment_offset` /
+`fragment_length`. Another symmetric bug (both our client and server
+use the wrong convention, so the in-memory test agrees with itself),
+which surfaces against openssl as `client Finished verify_data
+mismatch`.
+
+The fix is a DTLS-wide transcript-convention rework: ~14 sites in
+`server_dtls12.rs` + ~18 in `client_dtls12.rs` must hash the
+**12-byte DTLS handshake header** (message_seq retained,
+fragment_offset = 0, fragment_length = length) rather than the
+4-byte TLS header. It is bounded (2 files) and verifiable (the 84
+in-memory DTLS tests must stay green — proving both sides changed
+consistently — *and* openssl must complete the handshake), but it is
+a security-critical change to the handshake transcript and warrants
+its own focused phase rather than a hasty end-of-session edit.
+
+### Status / next step
+
+With bugs 1–4 fixed, the DTLS handshake against `openssl s_client
+-dtls1_2` completes ClientHello → HelloVerifyRequest cookie exchange
+→ ServerHello flight → ClientKeyExchange / ChangeCipherSpec → and
+**decrypts** the client's encrypted Finished record — failing only
+at bug 5 (`verify_data` mismatch). A focused follow-up should: apply
+the bug-5 transcript fix, re-verify the 84 in-memory DTLS tests +
+`openssl s_client -dtls1_2` end-to-end (handshake + the echo loop),
+then land D1. The 84-test in-memory suite makes the transcript
+rework safe to do incrementally.
