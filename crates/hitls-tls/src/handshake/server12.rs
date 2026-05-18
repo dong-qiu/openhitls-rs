@@ -1682,18 +1682,73 @@ impl Tls12ServerHandshake {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Phase I105 — is a cipher suite's key exchange satisfiable given the
+/// groups the client advertised? A (EC)DHE suite can only be selected
+/// if the negotiated key exchange can actually produce a group: a
+/// `*DHE` suite needs a finite-field (FFDHE) group, an EC(DHE) suite
+/// needs an EC group. When the client sends no `supported_groups`
+/// extension at all it has expressed no constraint (RFC 4492 §5.1 /
+/// RFC 7919) — every suite stays satisfiable. Static-RSA / PSK suites
+/// negotiate no group and are always satisfiable.
+fn kx_group_satisfiable(
+    kx: KeyExchangeAlg,
+    client_groups: &[NamedGroup],
+    server_groups: &[NamedGroup],
+) -> bool {
+    if client_groups.is_empty() {
+        return true;
+    }
+    match kx {
+        KeyExchangeAlg::Dhe | KeyExchangeAlg::DhePsk | KeyExchangeAlg::DheAnon => client_groups
+            .iter()
+            .any(|g| is_ffdhe_group(*g) && server_groups.contains(g)),
+        KeyExchangeAlg::Ecdhe | KeyExchangeAlg::EcdhePsk | KeyExchangeAlg::EcdheAnon => {
+            client_groups
+                .iter()
+                .any(|g| !is_ffdhe_group(*g) && server_groups.contains(g))
+        }
+        _ => true,
+    }
+}
+
 /// Negotiate a TLS 1.2 cipher suite between client and server.
+///
+/// Phase I105 — a candidate suite is skipped if its key exchange
+/// cannot be honoured with the groups the client advertised
+/// (`kx_group_satisfiable`): e.g. a `DHE_RSA` suite offered alongside
+/// a `supported_groups` list with no usable FFDHE group is not
+/// selectable. This prevents the server from picking a cipher it
+/// cannot complete; when nothing is left, `NoSharedCipherSuite`
+/// (→ `handshake_failure`) is the correct outcome.
 pub(crate) fn negotiate_cipher_suite(
     ch: &ClientHello,
     config: &TlsConfig,
 ) -> Result<CipherSuite, TlsError> {
+    // The `supported_groups` extension was already validated by the
+    // ClientHello extension loop; re-parse it here purely to gate the
+    // key-exchange satisfiability check. Absent / unparsable → empty
+    // (no client constraint).
+    let client_groups: Vec<NamedGroup> = ch
+        .extensions
+        .iter()
+        .find(|e| e.extension_type == ExtensionType::SUPPORTED_GROUPS)
+        .and_then(|e| parse_supported_groups_ch(&e.data).ok())
+        .unwrap_or_default();
+    let satisfiable = |suite: CipherSuite| -> bool {
+        match Tls12CipherSuiteParams::from_suite(suite) {
+            Ok(params) => {
+                kx_group_satisfiable(params.kx_alg, &client_groups, &config.supported_groups)
+            }
+            Err(_) => false,
+        }
+    };
     if config.cipher_server_preference {
         // Server preference order (default)
         for server_suite in &config.cipher_suites {
             if !is_tls12_suite(*server_suite) {
                 continue;
             }
-            if ch.cipher_suites.contains(server_suite) {
+            if ch.cipher_suites.contains(server_suite) && satisfiable(*server_suite) {
                 return Ok(*server_suite);
             }
         }
@@ -1703,7 +1758,7 @@ pub(crate) fn negotiate_cipher_suite(
             if !is_tls12_suite(*client_suite) {
                 continue;
             }
-            if config.cipher_suites.contains(client_suite) {
+            if config.cipher_suites.contains(client_suite) && satisfiable(*client_suite) {
                 return Ok(*client_suite);
             }
         }
@@ -2417,6 +2472,45 @@ mod tests {
         };
         let config = make_server_config();
         assert!(negotiate_cipher_suite(&ch, &config).is_err());
+    }
+
+    #[test]
+    fn test_kx_group_satisfiable() {
+        // Phase I105 — cipher/group co-negotiation gating.
+        let server = vec![NamedGroup::SECP256R1, NamedGroup::FFDHE2048];
+        // No client supported_groups → no constraint, everything OK.
+        assert!(kx_group_satisfiable(KeyExchangeAlg::Dhe, &[], &server));
+        assert!(kx_group_satisfiable(KeyExchangeAlg::Ecdhe, &[], &server));
+        // DHE needs an FFDHE group the server also has.
+        assert!(kx_group_satisfiable(
+            KeyExchangeAlg::Dhe,
+            &[NamedGroup::FFDHE2048],
+            &server
+        ));
+        // A `supported_groups` list with no usable FFDHE group (511 is
+        // unassigned) makes a DHE suite unsatisfiable.
+        assert!(!kx_group_satisfiable(
+            KeyExchangeAlg::Dhe,
+            &[NamedGroup(511)],
+            &server
+        ));
+        // ECDHE needs an EC group — an FFDHE-only client list fails it.
+        assert!(!kx_group_satisfiable(
+            KeyExchangeAlg::Ecdhe,
+            &[NamedGroup::FFDHE2048],
+            &server
+        ));
+        assert!(kx_group_satisfiable(
+            KeyExchangeAlg::Ecdhe,
+            &[NamedGroup::SECP256R1],
+            &server
+        ));
+        // Static-RSA negotiates no group — always satisfiable.
+        assert!(kx_group_satisfiable(
+            KeyExchangeAlg::Rsa,
+            &[NamedGroup(511)],
+            &server
+        ));
     }
 
     #[test]

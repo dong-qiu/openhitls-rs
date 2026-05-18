@@ -1,0 +1,8 @@
+# Phase I105 — `--alert handshake_failure` sets the expected fatal
+# alert for the `no overlap between groups` conversation. tlsfuzzer
+# defaults to `insufficient_security`, but RFC 5246 §7.2.2 makes
+# `handshake_failure` the correct, standard alert for "no usable
+# cipher suite in common" — which is what the server emits once the
+# DHE suite is ruled out by the cipher/group co-negotiation check.
+--alert
+handshake_failure
