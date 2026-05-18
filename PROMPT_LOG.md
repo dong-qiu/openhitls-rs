@@ -6329,3 +6329,32 @@ tasks ①–④ delivered, post-④ TLS 1.2 conformance batch (I103/I104)
 done, FFDHE curation (T129) complete. Remaining: TLS 1.2 cipher/group
 co-negotiation (the 3 ffdhe-negotiation XFAILs) and task ⑤ (DTLS
 s-server) — both documented follow-ups.
+
+---
+
+## Phase I105 — TLS 1.2 Cipher-Suite / Named-Group Co-Negotiation (2026-05-18)
+
+> 继续推进1和2 / 开做这个 FFDHE/DHE-negotiation 收尾 phase
+
+Item 1 of the two T129 follow-ups. `negotiate_cipher_suite` selected
+a cipher suite without checking its key exchange could be honoured
+with the client's advertised `supported_groups` — so a `DHE_RSA`
+suite offered with a no-usable-FFDHE-group list was selected anyway
+(server then force-defaulted FFDHE2048).
+
+New `kx_group_satisfiable` gate: `*DHE` needs a common FFDHE group,
+`EC(DHE)` needs a common EC group, static-RSA/PSK need none; empty
+client list = unconstrained (RFC 4492 §5.1). Unsatisfiable candidates
+skipped → when none remain, `NoSharedCipherSuite` → `handshake_failure`
+(RFC 5246 §7.2.2-correct).
+
+**Verification**: `hitls-tls` build + clippy `-D warnings` + fmt
+clean; lib tests 1550/0 (+1). `test-ffdhe-negotiation.py` 38/3 → 39/2
+— `no overlap between groups` now PASSes (new `--alert
+handshake_failure` args file); all 16 curated `scripts_12` rc=0.
+Recorded as DEV_LOG Phase I105.
+
+The 2 residual XFAILs (`fallback to non-ffdhe` ×2) are WON'T-FIX —
+they require the server to offer a static-RSA (no-forward-secrecy)
+key-exchange suite, a security regression declined on merit. Item 1
+done; item 2 (DTLS s-server) next.
