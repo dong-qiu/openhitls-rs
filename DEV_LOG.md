@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I106 (106 phases)
-- Testing: T1–T129 (123 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
+- Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -341,6 +341,7 @@ Category summary:
 | 329 | T129 | Test | TLS 1.2 DHE / FFDHE tlsfuzzer curation — closing phase of the server-side tlsfuzzer effort. The `s-server` TLS 1.2 default cipher list was ECDHE-only; the `test-ffdhe-*` scripts hard-code `TLS_DHE_RSA_*`. Added 6 finite-field DHE_RSA suites (GCM + CBC-SHA/SHA256) to `default_tls12_suites()`, listed last so an ECDHE-capable client still negotiates the faster EC exchange (the TLS 1.2 server already implements `KeyExchangeAlg::Dhe` + RFC 7919 FFDHE params). Curated 2 scripts into `scripts_12` (14 → 16): `test-ffdhe-expected-params` (3/3 clean) and `test-ffdhe-negotiation` (38/41 — 3 XFAILs for one coherent gap: TLS 1.2 cipher-suite / named-group co-negotiation, where the server forces FFDHE2048 for a DHE_RSA suite instead of falling back when no FFDHE group is usable — a documented follow-up). Full-set verified (`-n 9999`); all 16 curated `scripts_12` rc=0, no regression | 2026-05-18 |
 | 330 | I105 | Impl | TLS 1.2 cipher-suite / named-group co-negotiation — `negotiate_cipher_suite` selected a cipher suite without checking that its key exchange could actually be honoured with the client's advertised `supported_groups`, so a `DHE_RSA` suite offered alongside a groups list with no usable FFDHE group was selected anyway (the server then force-defaulted FFDHE2048). New `kx_group_satisfiable` gate: a `*DHE` suite needs a common FFDHE group, an EC(DHE) suite needs a common EC group, static-RSA / PSK suites need none; an empty client list (no extension) is unconstrained (RFC 4492 §5.1). Unsatisfiable candidates are skipped — when none remain, `NoSharedCipherSuite` → `handshake_failure` is the correct outcome. Closes `no overlap between groups` in `test-ffdhe-negotiation.py` (38/3 → **39/2**; the script gains a `--alert handshake_failure` args file — RFC 5246 §7.2.2). The 2 residual XFAILs (`fallback to non-ffdhe` ×2) are WON'T-FIX: they require the server to offer a static-RSA (no-forward-secrecy) suite. +1 unit test; all 16 curated `scripts_12` rc=0 | 2026-05-18 |
 | 331 | I106 | Impl | `s-server --dtls` DTLS 1.2 listener (task ⑤ D1) — a UDP listener in `s-server` driving the DTLS 1.2 handshake against a real peer. Required closing a chain of **5 DTLS interop bugs** that the in-memory `dtls12_handshake_in_memory` (our-client-only) had hidden: (1) DTLS ServerHello version 0x0303→0xFEFD, (2) ServerHello missing RFC 5746 `renegotiation_info`, (3) multi-record-datagrams not split (openssl batches CKE+CCS+Finished — fixed by `dtls_next_record` queue), (4) AEAD decrypt recomputed the GCM nonce instead of using the transmitted explicit nonce (RFC 5288 §3 — symmetric I97-style bug, fixed by reading `fragment[0..8]`), (5) handshake transcript hashed the TLS 4-byte header, RFC 6347 §4.2.6 requires the DTLS 12-byte header (message_seq retained, fragment_offset=0, fragment_length=length) — fixed across `server_dtls12.rs` + `client_dtls12.rs` (~30 sites). New `dtls12_server_handshake` closure-driven driver in `connection_dtls12.rs` (DTLS flight sequence over caller-supplied `send`/`recv`); CLI `--dtls` + UDP loop + echo. Verified end-to-end against `openssl s_client -dtls1_2`: handshake completes (DTLSv1.2, ECDHE-RSA-AES128-GCM-SHA256) + application-data echo round-trips. 84 in-memory DTLS tests still PASS — proves the transcript rewrite is consistent across both sides. DTLCP transcript path left untouched (separate protocol) | 2026-05-20 |
+| 332 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -19826,6 +19827,70 @@ fix is consistent across both endpoints.
 verified. Fragmented-message transcript reassembly is a future
 hardening item (no-op for openssl s_client over localhost — it does
 not fragment).
+
+---
+
+## Phase T130 — openssl-DTLS Interop Regression Test (Task ⑤, D2) (2026-05-20)
+
+### Summary
+
+T130 closes task ⑤ D2 — the regression-protection complement to
+I106. The 5 DTLS interop bugs I106 fixed were all **symmetric**:
+they only surfaced when the peer was a conformant implementation
+(openssl). The 84 in-memory DTLS tests pair our own client with our
+server, so they cannot catch a regression in *any* of those code
+paths — exactly the trap that hid the 5 bugs in the first place.
+This phase makes openssl the conformance oracle on every
+ignored-gate CI run.
+
+### What landed
+
+`tests/interop/tests/openssl_interop.rs` gains
+`test_openssl_s_client_dtls12` (under the existing
+`#[ignore = "requires external openssl tool"]` gate that the rest of
+the openssl-interop file uses):
+
+1. Builds an RSA server config via the shared
+   `hitls_integration_tests::make_rsa_server_identity()` helper.
+2. Binds a `UdpSocket` on `127.0.0.1:0` so the test can learn a free
+   UDP port.
+3. Spawns a server thread that runs
+   `hitls_tls::connection_dtls12::dtls12_server_handshake` over
+   datagram-transport closures around that socket (cookie mode
+   enabled — exercises the HelloVerifyRequest exchange).
+4. Runs `openssl s_client -dtls1_2 -brief` against the port.
+5. Asserts on both sides — `Dtls12ServerConnection::is_connected()`
+   + `version() == Dtls12` on the server, openssl's exit-code +
+   `DTLSv1.2`/`DONE` string on the client.
+
+The post-handshake echo attempt is best-effort (openssl `-brief`
+with stdin=null typically closes right after the handshake). The
+handshake itself is the primary verification.
+
+### Verification
+
+- `cargo fmt` clean; `cargo clippy --workspace --all-features
+  --all-targets` (`-D warnings`) clean.
+- `cargo test -p hitls-integration-tests --test openssl_interop --
+  --ignored test_openssl_s_client_dtls12 --nocapture`: PASS (~0.8s).
+- No production-code change; test-only addition under the existing
+  `#[ignore]` external-openssl gate. The default `cargo test` run
+  is unaffected.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `tests/interop/tests/openssl_interop.rs` | Modified | New `test_openssl_s_client_dtls12` (~115 lines, `#[ignore]`). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 332 + Testing summary T1–T129 → T1–T130. |
+| `PROMPT_LOG.md` | Modified | T130 prompt + result entry. |
+| `docs/dtls-s-server-plan.md` | Modified | D2 marked complete. |
+
+### Build Status (Post T130)
+
+Test-only — no production code touched. Task ⑤ (D1 + D2) closes
+cleanly: feature shipped (I106) + regression-protected (T130). The
+original 5-task server-side tlsfuzzer plan is now fully delivered.
 
 
 

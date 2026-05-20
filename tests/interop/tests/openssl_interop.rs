@@ -685,3 +685,143 @@ fn test_openssl_differential_sm3() {
 
     assert_eq!(our_digest, openssl_digest.as_slice(), "SM3 mismatch");
 }
+
+// ============================================================
+// Phase T130 / D2 — OpenSSL s_client → hitls-rs DTLS 1.2 server
+//
+// Locks in the Phase I106 DTLS 1.2 interop work. The five DTLS bugs
+// I106 fixed (ServerHello version, missing `renegotiation_info`,
+// multi-record datagrams, AEAD explicit-nonce, handshake-transcript
+// convention) were all *symmetric* — they only surfaced when the
+// peer was a conformant implementation (openssl). The 84 in-memory
+// DTLS tests pair our own client with our server, so they cannot
+// catch any of those classes of regression. This test runs
+// `openssl s_client -dtls1_2` against the public
+// `dtls12_server_handshake` driver, so a future change that quietly
+// breaks any of those code paths fails CI on the ignored-gate run
+// instead of being hidden by the same symmetric-bug trap.
+// ============================================================
+
+#[test]
+#[ignore = "requires external openssl tool"]
+fn test_openssl_s_client_dtls12() {
+    use hitls_tls::config::TlsConfig;
+    use hitls_tls::connection_dtls12::dtls12_server_handshake;
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::{CipherSuite, TlsRole, TlsVersion};
+    use hitls_types::TlsError;
+    use std::cell::RefCell;
+    use std::net::UdpSocket;
+
+    if !openssl_available() {
+        eprintln!("openssl not found, skipping");
+        return;
+    }
+
+    let (cert_chain, server_key) = hitls_integration_tests::make_rsa_server_identity();
+
+    // Bind a UDP socket here so the parent thread can learn the port
+    // for the openssl s_client command. The socket is then moved into
+    // the server thread which drives the DTLS handshake on it.
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .unwrap();
+    let port = socket.local_addr().unwrap().port();
+
+    let server_handle = thread::spawn(move || {
+        let config = TlsConfig::builder()
+            .role(TlsRole::Server)
+            .min_version(TlsVersion::Tls12)
+            .max_version(TlsVersion::Tls12)
+            .certificate_chain(cert_chain)
+            .private_key(server_key)
+            .supported_groups(&[NamedGroup::X25519, NamedGroup::SECP256R1])
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .verify_peer(false)
+            .build();
+
+        // Wait for the first datagram (ClientHello) so we learn the
+        // peer's SocketAddr.
+        let mut first_buf = vec![0u8; 16384];
+        let (n, peer) = socket.recv_from(&mut first_buf).unwrap();
+        first_buf.truncate(n);
+
+        // Datagram-transport closures over the bound UdpSocket. Both
+        // closures share an immutable borrow of `socket` (its methods
+        // take `&self`); the recv closure stashes the already-read
+        // first datagram so the handshake driver sees it on its first
+        // `recv` call.
+        let first = RefCell::new(Some(first_buf));
+        let rbuf = RefCell::new(vec![0u8; 16384]);
+        let recv_fn = || -> Result<Vec<u8>, TlsError> {
+            if let Some(d) = first.borrow_mut().take() {
+                return Ok(d);
+            }
+            let mut rb = rbuf.borrow_mut();
+            let (n, _) = socket.recv_from(rb.as_mut_slice())?;
+            Ok(rb[..n].to_vec())
+        };
+        let send_fn = |dg: &[u8]| -> Result<(), TlsError> {
+            socket.send_to(dg, peer)?;
+            Ok(())
+        };
+
+        let mut conn =
+            dtls12_server_handshake(config, /*enable_cookie=*/ true, send_fn, recv_fn)
+                .expect("DTLS 1.2 handshake against openssl s_client should succeed");
+        assert!(
+            conn.is_connected(),
+            "Dtls12ServerConnection should be Connected after handshake"
+        );
+        assert_eq!(conn.version(), Some(TlsVersion::Dtls12));
+
+        // Handshake done — try one echo round. openssl `s_client -brief`
+        // with stdin=null typically closes right after the handshake,
+        // so a recv timeout / decrypt failure here is fine — the
+        // handshake itself is the primary verification.
+        let mut rb = vec![0u8; 16384];
+        if let Ok((n, from)) = socket.recv_from(&mut rb) {
+            if from == peer {
+                if let Ok(plain) = conn.open_app_data(&rb[..n]) {
+                    if !plain.is_empty() {
+                        if let Ok(sealed) = conn.seal_app_data(&plain) {
+                            let _ = socket.send_to(&sealed, peer);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Give the server thread a moment to call `recv_from`.
+    thread::sleep(Duration::from_millis(50));
+
+    let output = Command::new("openssl")
+        .args([
+            "s_client",
+            "-connect",
+            &format!("127.0.0.1:{port}"),
+            "-dtls1_2",
+            "-brief",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("Failed to run openssl s_client -dtls1_2");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+
+    assert!(
+        combined.contains("DTLSv1.2") || combined.contains("DONE") || output.status.success(),
+        "openssl s_client -dtls1_2 should complete the DTLS 1.2 handshake.\nstdout: {stdout}\nstderr: {stderr}\nexit: {}",
+        output.status,
+    );
+
+    // The server thread asserts `is_connected()` + `version() ==
+    // Dtls12`; surface its panic (if any) as a test failure.
+    server_handle.join().expect("server thread panicked");
+}

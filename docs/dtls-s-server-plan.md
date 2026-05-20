@@ -116,7 +116,7 @@ handle epoch-1 record protection.
   doesn't re-implement record framing.
 - Verify against `openssl s_client -dtls1_2 -connect …`.
 
-**Phase D2 (optional) — openssl DTLS interop test.**
+**Phase D2 (COMPLETE — Phase T130, 2026-05-20) — openssl DTLS interop test.**
 - A `tests/interop/` test that runs `s-server --dtls` against
   `openssl s_client -dtls1_2`, parallel to the existing TLS interop
   tests. This is the actual *new* coverage a listener buys.
