@@ -47929,4 +47929,87 @@ fn tc_line247_x509_vfy_noakid_cert_pass() {
     assert!(verifier.verify_cert(&leaf, &[inter]).is_ok());
 }
 
-// Generation summary: 1072 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
+// ============================================================
+// T113 (continued) — Phase C: `pki/verify` BasicConstraints
+// family (RFC 5280 §4.2.1.9 — BasicConstraints + pathLen
+// validation). 4 BC_* TCs migrated from openHiTLS C SDV
+// `test_suite_sdv_x509_vfy.c`. The 4 sibling PATHLEN_* TCs in
+// the same .data file are *not* migrated — each rewrites the
+// in-memory `BasicConstraints` / `KeyUsage` on a parsed root
+// after the fact (C-side test-only mutability), and the Rust
+// `Certificate` exposes no mut accessor that would let us
+// inject the same conditions. They are deliberate API-surface
+// skips, in the same bucket as DSA/SM2 sign-side (no
+// deterministic-k injection hook).
+// ============================================================
+
+/// SDV_X509_VFY_BC_MISSING_FAIL_TC001 intermediate missing BasicConstraints
+/// C source: SDV_X509_VFY_BC_MISSING_FAIL_TC001 (line 250, X.509 verify BC family)
+#[test]
+fn tc_line250_x509_vfy_bc_missing_fail() {
+    let root = load_cert_fixture("cert/chain/bcExt/bc_root_general.pem");
+    let inter = load_cert_fixture("cert/chain/bcExt/bc_inter_missing_bc.pem");
+    let leaf = load_cert_fixture("cert/chain/bcExt/bc_leaf_missing_bc.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    let err = verifier.verify_cert(&leaf, &[inter]).unwrap_err();
+    assert!(
+        err.to_string().starts_with("basic constraints violation"),
+        "expected BasicConstraintsViolation, got: {err}"
+    );
+}
+
+/// SDV_X509_VFY_BC_CA_FALSE_FAIL_TC002 intermediate BasicConstraints CA=false
+/// C source: SDV_X509_VFY_BC_CA_FALSE_FAIL_TC002 (line 253, X.509 verify BC family)
+#[test]
+fn tc_line253_x509_vfy_bc_ca_false_fail() {
+    let root = load_cert_fixture("cert/chain/bcExt/bc_root_general.pem");
+    let inter = load_cert_fixture("cert/chain/bcExt/bc_inter_ca_false.pem");
+    let leaf = load_cert_fixture("cert/chain/bcExt/bc_leaf_ca_false.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    let err = verifier.verify_cert(&leaf, &[inter]).unwrap_err();
+    assert!(
+        err.to_string().starts_with("basic constraints violation"),
+        "expected BasicConstraintsViolation, got: {err}"
+    );
+}
+
+/// SDV_X509_VFY_BC_PATHLEN_ROOT_LIMIT_FAIL_TC003 root pathLen=1, 2 intermediates → exceeded
+/// C source: SDV_X509_VFY_BC_PATHLEN_ROOT_LIMIT_FAIL_TC003 (line 256, X.509 verify BC family)
+#[test]
+fn tc_line256_x509_vfy_bc_pathlen_root_limit_fail() {
+    let root = load_cert_fixture("cert/chain/bcExt/pathlen_root_pl1.pem");
+    let inter1 = load_cert_fixture("cert/chain/bcExt/pathlen_inter_lvl1.pem");
+    let inter2 = load_cert_fixture("cert/chain/bcExt/pathlen_inter_lvl2.pem");
+    let leaf = load_cert_fixture("cert/chain/bcExt/pathlen_leaf_pl_exceed.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    let err = verifier.verify_cert(&leaf, &[inter1, inter2]).unwrap_err();
+    assert!(
+        err.to_string().starts_with("basic constraints violation"),
+        "expected BasicConstraintsViolation, got: {err}"
+    );
+}
+
+/// SDV_X509_VFY_BC_PATHLEN_MULTI_LIMIT_FAIL_TC004 multi-level pathLen exceeded mid-chain
+/// C source: SDV_X509_VFY_BC_PATHLEN_MULTI_LIMIT_FAIL_TC004 (line 259, X.509 verify BC family)
+#[test]
+fn tc_line259_x509_vfy_bc_pathlen_multi_limit_fail() {
+    let root = load_cert_fixture("cert/chain/bcExt/pathlen_multi_root.pem");
+    let inter1 = load_cert_fixture("cert/chain/bcExt/pathlen_multi_inter1.pem");
+    let inter2 = load_cert_fixture("cert/chain/bcExt/pathlen_multi_inter2.pem");
+    let inter3 = load_cert_fixture("cert/chain/bcExt/pathlen_multi_inter3.pem");
+    let leaf = load_cert_fixture("cert/chain/bcExt/pathlen_multi_leaf.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    let err = verifier
+        .verify_cert(&leaf, &[inter1, inter2, inter3])
+        .unwrap_err();
+    assert!(
+        err.to_string().starts_with("basic constraints violation"),
+        "expected BasicConstraintsViolation, got: {err}"
+    );
+}
+
+// Generation summary: 1076 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
