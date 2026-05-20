@@ -6470,3 +6470,36 @@ DEV_LOG Phase T130.
 Task ⑤ (D1 + D2) closes — feature shipped (I106) and regression-
 protected (T130). The original 5-task server-side tlsfuzzer plan is
 fully delivered.
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/verify` AKI/SKI keyId family (2026-05-21)
+
+> 继续T113
+
+Extends T113 Phase C with 8 more TCs from
+`pki/verify/test_suite_sdv_x509_vfy.c` — the `VFY_AKI_SKI_*`
+family + `VFY_NOAKID_CERT_PASS_TC009`. These exercise RFC 5280
+§4.2.1.1 (Authority Key Identifier) and §4.2.1.2 (Subject Key
+Identifier) chain-building semantics. Coverage delta: 1064 → 1072
+emitted; total Rust-side is now 1070 PASS + 2 `#[ignore]` on
+`crates/hitls-pki/tests/migrated_x509_parse.rs`.
+
+**Findings — 2 new verifier-hardening gaps surfaced.** Both
+`VFY_AKI_SKI_KEYID_FAIL_TC002` and `VFY_AKI_SKI_ISSUER_SERIAL_FAIL_TC006`
+fail because `CertificateVerifier::find_issuer` resolves the issuer
+purely by Subject DN match + signature verification — it does not
+consult the leaf's AKI extension at all. So two RFC 5280 §4.2.1.1
+conformance properties are silently relaxed: AKI.keyIdentifier ↔
+SKI.keyIdentifier strict matching, and AKI.authorityCertSerialNumber
+matching. Both are in the same category as the verifier-strictness
+gaps T113 already listed (missing-CRL / critical-ext /
+CRL-issuer-keyUsage / no `CRL_DEV` / SM2 GM/T user-id / ECDSA P-192)
+and are recorded inline as verifier-hardening I-phase candidates.
+
+**Verification**: `cargo test -p hitls-pki --test migrated_x509_parse`
+→ 1070 PASS / 0 FAIL / 2 ignored; `cargo fmt --check` clean;
+`RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+--all-targets` clean. No production-code change. Recorded as
+DEV_LOG `Phase T113 (continued)`. Phase C still ongoing — remaining
+`pki/verify` families + cms/pkcs12 suites follow.
