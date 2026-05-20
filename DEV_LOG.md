@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I105 (105 phases)
+- Implementation: I1–I106 (106 phases)
 - Testing: T1–T129 (123 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -340,6 +340,7 @@ Category summary:
 | 328 | I104 | Impl | TLS 1.2 ClientHello / record-layer conformance — second of the post-④ TLS 1.2 conformance-fix batch; closes the last 3 XFAILs of the T128-curated TLS 1.2 scripts. **Part A** (version floor): the ClientHello `legacy_version` was never validated, so a `(0,0)` version was accepted and a normal ServerHello sent; now, when no `supported_versions` extension is present (RFC 8446 §4.2.1), a `legacy_version` below TLS 1.2 (`0x0303`) is aborted with `protocol_version` — a too-high version is still clamped down. **Part B** (zero-length record): a zero-length ApplicationData record surfaced as `read()` → `Ok(0)`, which the caller reads as end-of-stream; all 4 TLS 1.2 read paths (sync/async × server/client) now skip an empty record per RFC 5246 §6.2.1 (mirrors the TLS 1.3 T103 fix). **Part C** (ECDHE without supported_groups): `negotiate_group` aborted with `handshake_failure` when the client offered ECDHE suites but no supported_groups extension; per RFC 4492 §5.1 the server now picks freely (prefers secp256r1). Verified: `test-version-numbers` 8/9 → **9/9**, `test-zero-length-data` 2/3 → **3/3**, `test-ecdhe-rsa-key-exchange` 2/3 → **3/3** (full `-n 9999`); 3 xfail files removed; all 14 curated `scripts_12` still rc=0. +1 unit test | 2026-05-18 |
 | 329 | T129 | Test | TLS 1.2 DHE / FFDHE tlsfuzzer curation — closing phase of the server-side tlsfuzzer effort. The `s-server` TLS 1.2 default cipher list was ECDHE-only; the `test-ffdhe-*` scripts hard-code `TLS_DHE_RSA_*`. Added 6 finite-field DHE_RSA suites (GCM + CBC-SHA/SHA256) to `default_tls12_suites()`, listed last so an ECDHE-capable client still negotiates the faster EC exchange (the TLS 1.2 server already implements `KeyExchangeAlg::Dhe` + RFC 7919 FFDHE params). Curated 2 scripts into `scripts_12` (14 → 16): `test-ffdhe-expected-params` (3/3 clean) and `test-ffdhe-negotiation` (38/41 — 3 XFAILs for one coherent gap: TLS 1.2 cipher-suite / named-group co-negotiation, where the server forces FFDHE2048 for a DHE_RSA suite instead of falling back when no FFDHE group is usable — a documented follow-up). Full-set verified (`-n 9999`); all 16 curated `scripts_12` rc=0, no regression | 2026-05-18 |
 | 330 | I105 | Impl | TLS 1.2 cipher-suite / named-group co-negotiation — `negotiate_cipher_suite` selected a cipher suite without checking that its key exchange could actually be honoured with the client's advertised `supported_groups`, so a `DHE_RSA` suite offered alongside a groups list with no usable FFDHE group was selected anyway (the server then force-defaulted FFDHE2048). New `kx_group_satisfiable` gate: a `*DHE` suite needs a common FFDHE group, an EC(DHE) suite needs a common EC group, static-RSA / PSK suites need none; an empty client list (no extension) is unconstrained (RFC 4492 §5.1). Unsatisfiable candidates are skipped — when none remain, `NoSharedCipherSuite` → `handshake_failure` is the correct outcome. Closes `no overlap between groups` in `test-ffdhe-negotiation.py` (38/3 → **39/2**; the script gains a `--alert handshake_failure` args file — RFC 5246 §7.2.2). The 2 residual XFAILs (`fallback to non-ffdhe` ×2) are WON'T-FIX: they require the server to offer a static-RSA (no-forward-secrecy) suite. +1 unit test; all 16 curated `scripts_12` rc=0 | 2026-05-18 |
+| 331 | I106 | Impl | `s-server --dtls` DTLS 1.2 listener (task ⑤ D1) — a UDP listener in `s-server` driving the DTLS 1.2 handshake against a real peer. Required closing a chain of **5 DTLS interop bugs** that the in-memory `dtls12_handshake_in_memory` (our-client-only) had hidden: (1) DTLS ServerHello version 0x0303→0xFEFD, (2) ServerHello missing RFC 5746 `renegotiation_info`, (3) multi-record-datagrams not split (openssl batches CKE+CCS+Finished — fixed by `dtls_next_record` queue), (4) AEAD decrypt recomputed the GCM nonce instead of using the transmitted explicit nonce (RFC 5288 §3 — symmetric I97-style bug, fixed by reading `fragment[0..8]`), (5) handshake transcript hashed the TLS 4-byte header, RFC 6347 §4.2.6 requires the DTLS 12-byte header (message_seq retained, fragment_offset=0, fragment_length=length) — fixed across `server_dtls12.rs` + `client_dtls12.rs` (~30 sites). New `dtls12_server_handshake` closure-driven driver in `connection_dtls12.rs` (DTLS flight sequence over caller-supplied `send`/`recv`); CLI `--dtls` + UDP loop + echo. Verified end-to-end against `openssl s_client -dtls1_2`: handshake completes (DTLSv1.2, ECDHE-RSA-AES128-GCM-SHA256) + application-data echo round-trips. 84 in-memory DTLS tests still PASS — proves the transcript rewrite is consistent across both sides. DTLCP transcript path left untouched (separate protocol) | 2026-05-20 |
 
 ---
 
@@ -19705,6 +19706,126 @@ in common for our configuration.
 `test-ffdhe-negotiation` 39/2 (the 2 residual are WON'T-FIX —
 static-RSA). The first T129 follow-up is closed; task ⑤ (DTLS
 s-server) is the remaining item.
+
+---
+
+## Phase I106 — `s-server --dtls` DTLS 1.2 Listener (Task ⑤, D1) (2026-05-20)
+
+### Summary
+
+I106 completes task ⑤ of the server-side tlsfuzzer plan as a
+standalone CLI feature: `s-server --dtls` listens on UDP and drives
+the DTLS 1.2 handshake. Verified end-to-end against
+`openssl s_client -dtls1_2`: handshake completes (DTLSv1.2,
+ECDHE-RSA-AES128-GCM-SHA256) and application data round-trips.
+
+Getting there required closing a **chain of 5 DTLS interop bugs** —
+the DTLS server/client had never been driven against a conformant
+peer (`dtls12_handshake_in_memory` paired our own lenient client
+with our server, so symmetric bugs were invisible). All 5 are fixed
+in this phase; the 84 in-memory DTLS tests stay PASS, proving every
+fix is consistent across both endpoints.
+
+### The 5 DTLS interop bugs (all FIXED)
+
+1. **ServerHello version** (`server_dtls12.rs`) — `encode_server_hello`
+   hardcodes the TLS codepoint `0x0303`; DTLS requires `0xFEFD`.
+   openssl aborts with `unsupported protocol`. New
+   `encode_dtls_server_hello` rewrites bytes `[4..6]`.
+2. **ServerHello missing `renegotiation_info`** (`server_dtls12.rs`) —
+   the ServerHello had `extensions: Vec::new()`; RFC 5746 requires
+   the (empty) extension or strict peers refuse with "unsafe legacy
+   renegotiation disabled". The ServerHello now carries
+   `renegotiation_info` (+ `ec_point_formats` for the ECDHE suite).
+3. **Multi-record datagrams** (`connection_dtls12.rs`) — openssl
+   batches `ClientKeyExchange + ChangeCipherSpec + Finished` into one
+   UDP datagram; the original driver assumed one record per datagram
+   and silently dropped trailing records. New `dtls_next_record`
+   splits each datagram into all of its records via
+   `parse_dtls_record`'s `consumed` count, then serves from a queue.
+4. **AEAD explicit-nonce recompute** (`record/encryption_dtls12.rs`) —
+   `DtlsRecordDecryptor12::decrypt_record` rebuilt the GCM nonce from
+   `epoch || seq` instead of using the 8-byte explicit nonce the
+   *sender* transmitted in `fragment[0..8]` (RFC 5288 §3 — the
+   sender's choice of explicit nonce is free). A symmetric I97-style
+   bug: our own client uses the same `epoch||seq` formula so the
+   in-memory test passed, but openssl's explicit nonce differs →
+   `bad record MAC`. The decryptor now builds the nonce as
+   `fixed_iv || fragment[0..8]`.
+5. **Handshake-transcript convention** (`server_dtls12.rs` +
+   `client_dtls12.rs`, ~30 sites) — RFC 6347 §4.2.6: the DTLS
+   handshake hash uses the **12-byte DTLS handshake header**
+   (`message_seq` retained, `fragment_offset = 0`,
+   `fragment_length = length`), not the TLS 4-byte header. Our code
+   was stripping to 4 bytes via `dtls_to_tls_handshake` before
+   updating the transcript — another symmetric bug, surfacing
+   against openssl as `client Finished verify_data mismatch`. Both
+   server and client now hash the raw DTLS message (12-byte header);
+   `dtls_to_tls_handshake` stays only for `verify_data` extraction.
+   Non-fragmented messages (the openssl-interop case) are naturally
+   normalised (`tls_to_dtls_handshake` sets `fragment_offset = 0`,
+   `fragment_length = length` on everything we send, and openssl
+   does not fragment small handshake messages). Fragmented-message
+   transcript reassembly is left as a future hardening item.
+
+### `s-server --dtls` (the CLI feature)
+
+- `hitls-cli/Cargo.toml`: `hitls-tls` gains the `dtls12` feature.
+- `main.rs`: new `--dtls` flag on `s-server` (mutually exclusive
+  with `--key-update` / `--post-handshake-auth`; `--tls` is ignored
+  in DTLS mode — DTLS 1.2 only).
+- `s_server.rs`: when `--dtls` set, `run()` dispatches to a new
+  `run_dtls(port, config, quiet)` UDP-loop instead of TCP. Single
+  peer at a time (`recv_from` keys the peer's `SocketAddr`); a
+  30-second read timeout bounds stalled handshakes and the outer
+  loop transparently retries on timeout. `dtls_echo_loop` runs after
+  the handshake via `Dtls12ServerConnection::open_app_data` /
+  `seal_app_data`.
+- `connection_dtls12.rs`: new public `dtls12_server_handshake<SendFn,
+  RecvFn>(config, enable_cookie, send, recv) -> Dtls12ServerConnection`
+  drives the full server flight (CH → optional HVR cookie exchange
+  → server flight → CKE/CCS/Finished → server CCS + Finished) over
+  caller-supplied datagram closures. `Dtls12ServerConnection`'s
+  internal fields are exposed within the module (same crate) so the
+  driver can install epoch keys + the encryptor/decryptor at the
+  right point.
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --all-features --all-targets` (`-D
+  warnings`) clean.
+- `cargo test -p hitls-tls --all-features --lib`: **1550 PASS / 0
+  FAIL** (the 84 in-memory DTLS tests stay green, proving the
+  transcript / nonce / extension changes are symmetric across both
+  endpoints).
+- End-to-end against `openssl s_client -dtls1_2`: handshake
+  completes — `Protocol : DTLSv1.2`, `Cipher : ECDHE-RSA-AES128-
+  GCM-SHA256`; server log emits `--- DTLS 1.2 connection established
+  ---` and echoes received application-data datagrams back.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server_dtls12.rs` | Modified | Bug 1 (`encode_dtls_server_hello`), bug 2 (ServerHello extensions), bug 5 (transcript convention — ~7 sites). |
+| `crates/hitls-tls/src/handshake/client_dtls12.rs` | Modified | Bug 5 client side (~10 sites). |
+| `crates/hitls-tls/src/connection_dtls12.rs` | Modified | New `dtls12_server_handshake` + `dtls_next_record` (bug 3). |
+| `crates/hitls-tls/src/record/encryption_dtls12.rs` | Modified | Bug 4 (`decrypt_record` uses the transmitted explicit nonce). |
+| `crates/hitls-cli/Cargo.toml` | Modified | `hitls-tls` gains `dtls12` feature. |
+| `crates/hitls-cli/src/main.rs` | Modified | `s-server --dtls` flag. |
+| `crates/hitls-cli/src/s_server.rs` | Modified | `run_dtls` + `dtls_echo_loop`; `--dtls` validation; `run()` param. |
+| `docs/dtls-s-server-plan.md` | Modified | Findings section updated to reflect D1 completion (all 5 bugs fixed). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 331 + Implementation summary I1–I105 → I1–I106. |
+| `PROMPT_LOG.md` | Modified | I106 prompt + result entry. |
+
+### Build Status (Post I106)
+
+`hitls-tls` + `hitls-cli` build clean (`-D warnings`); lib tests
+1550/0. Task ⑤ (`s-server --dtls`) complete and openssl-interop
+verified. Fragmented-message transcript reassembly is a future
+hardening item (no-op for openssl s_client over localhost — it does
+not fragment).
 
 
 

@@ -24,10 +24,20 @@ pub fn run(
     key_update: bool,
     post_handshake_auth: bool,
     no_middlebox_compat: bool,
+    dtls: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Phase I106 — `--dtls` selects a DTLS 1.2 listener over UDP.
+    // `--tls` is ignored in that mode; the TLS-1.3-only post-handshake
+    // flags make no sense for it.
+    if dtls && (key_update || post_handshake_auth) {
+        return Err(
+            "--key-update / --post-handshake-auth are TLS 1.3 only — not valid with --dtls".into(),
+        );
+    }
     // Phase I100 — accepted `--tls` values: pinned "1.2" / "1.3" or
     // "auto" (peek each ClientHello and dispatch per connection).
-    if !matches!(tls_version, "1.2" | "1.3" | "auto") {
+    // Skipped under `--dtls` (DTLS 1.2 only — `--tls` is ignored).
+    if !dtls && !matches!(tls_version, "1.2" | "1.3" | "auto") {
         return Err(format!(
             "unsupported TLS version '{tls_version}' (use \"1.2\", \"1.3\", or \"auto\")"
         )
@@ -204,6 +214,13 @@ pub fn run(
         builder.build()
     };
 
+    // Phase I106 — `--dtls`: a DTLS 1.2 listener over UDP. Uses the
+    // TLS 1.2-shaped config (same cert / key / cipher suites) and a
+    // dedicated accept loop; the TCP path below is not taken.
+    if dtls {
+        return run_dtls(port, make_config(false), quiet);
+    }
+
     // Phase I100 — `--tls auto` keeps one config per version and chooses
     // per connection; the pinned modes build only the one they need.
     let cfg_tls13: Option<TlsConfig> = (tls_version != "1.2").then(|| make_config(true));
@@ -280,6 +297,138 @@ pub fn run(
     }
 
     Ok(())
+}
+
+/// Phase I106 — DTLS 1.2 server loop. Binds a UDP socket and serves
+/// one DTLS handshake at a time (single-client model — adequate for a
+/// test server), echoing application data afterwards. The DTLS flight
+/// sequence is driven by `hitls_tls::connection_dtls12::dtls12_server_handshake`;
+/// this loop only owns the UDP socket and its peer addressing.
+fn run_dtls(port: u16, config: TlsConfig, quiet: bool) -> Result<(), Box<dyn std::error::Error>> {
+    use std::cell::RefCell;
+    use std::net::UdpSocket;
+
+    let bind_addr = format!("0.0.0.0:{port}");
+    let socket =
+        UdpSocket::bind(&bind_addr).map_err(|e| format!("cannot bind UDP '{bind_addr}': {e}"))?;
+    // A read timeout bounds a stalled / packet-lost handshake; the
+    // outer accept `recv_from` simply retries on timeout.
+    let _ = socket.set_read_timeout(Some(std::time::Duration::from_secs(30)));
+    if !quiet {
+        eprintln!("Listening on {bind_addr} (DTLS 1.2, UDP)");
+        eprintln!("Press Ctrl+C to stop.");
+    }
+
+    loop {
+        // Wait for the first datagram — it carries the ClientHello and
+        // identifies the peer for the rest of this connection.
+        let mut first_buf = vec![0u8; 16384];
+        let (n, peer) = match socket.recv_from(&mut first_buf) {
+            Ok(x) => x,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue;
+            }
+            Err(e) => {
+                if !quiet {
+                    eprintln!("UDP recv error: {e}");
+                }
+                continue;
+            }
+        };
+        first_buf.truncate(n);
+        if !quiet {
+            eprintln!("DTLS ClientHello from {peer}");
+        }
+
+        // Datagram transport for the handshake driver. `UdpSocket`'s
+        // `send_to` / `recv_from` take `&self`, so both closures share
+        // an immutable borrow of the socket.
+        let first = RefCell::new(Some(first_buf));
+        let rbuf = RefCell::new(vec![0u8; 16384]);
+        let recv_fn = || -> Result<Vec<u8>, hitls_types::TlsError> {
+            if let Some(d) = first.borrow_mut().take() {
+                return Ok(d);
+            }
+            let mut rb = rbuf.borrow_mut();
+            let (n, _) = socket.recv_from(rb.as_mut_slice())?;
+            Ok(rb[..n].to_vec())
+        };
+        let send_fn = |dg: &[u8]| -> Result<(), hitls_types::TlsError> {
+            socket.send_to(dg, peer)?;
+            Ok(())
+        };
+
+        match hitls_tls::connection_dtls12::dtls12_server_handshake(
+            config.clone(),
+            true, // HelloVerifyRequest cookie exchange (RFC 6347 §4.2.1)
+            send_fn,
+            recv_fn,
+        ) {
+            Ok(mut conn) => {
+                if !quiet {
+                    eprintln!("--- DTLS 1.2 connection established ---");
+                    if let Some(cs) = conn.cipher_suite() {
+                        eprintln!("  Cipher: 0x{:04X}", cs.0);
+                    }
+                    eprintln!("---------------------------------------");
+                }
+                dtls_echo_loop(&socket, peer, &mut conn, quiet);
+            }
+            Err(e) => {
+                if !quiet {
+                    eprintln!("DTLS handshake error: {e}");
+                }
+            }
+        }
+        if !quiet {
+            eprintln!("Connection closed.");
+        }
+    }
+}
+
+/// Echo application-data datagrams for an established DTLS connection.
+/// Returns when the peer goes away (alert, close, decrypt failure, or
+/// read timeout) — the caller then loops back for the next client.
+fn dtls_echo_loop(
+    socket: &std::net::UdpSocket,
+    peer: std::net::SocketAddr,
+    conn: &mut hitls_tls::connection_dtls12::Dtls12ServerConnection,
+    quiet: bool,
+) {
+    let mut buf = vec![0u8; 16384];
+    loop {
+        let (n, from) = match socket.recv_from(&mut buf) {
+            Ok(x) => x,
+            Err(_) => return,
+        };
+        // Single-client model: ignore datagrams from other peers.
+        if from != peer {
+            continue;
+        }
+        match conn.open_app_data(&buf[..n]) {
+            Ok(plain) => {
+                if plain.is_empty() {
+                    continue;
+                }
+                if !quiet {
+                    eprint!("< {}", String::from_utf8_lossy(&plain));
+                }
+                match conn.seal_app_data(&plain) {
+                    Ok(sealed) => {
+                        let _ = socket.send_to(&sealed, peer);
+                    }
+                    Err(_) => return,
+                }
+            }
+            // A decrypt failure / alert / close ends this connection.
+            Err(_) => return,
+        }
+    }
 }
 
 /// Print the negotiated protocol / cipher once the handshake completes.
@@ -820,6 +969,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             false,
             false,
             false,
+            false,
         );
         assert!(result.is_err());
     }
@@ -839,6 +989,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             None,
+            false,
             false,
             false,
             false,
@@ -862,6 +1013,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             None,
+            false,
             false,
             false,
             false,
@@ -1018,6 +1170,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             None,
+            false,
             false,
             false,
             false,

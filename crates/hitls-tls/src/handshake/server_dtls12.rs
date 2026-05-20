@@ -161,6 +161,26 @@ impl Drop for Dtls12ServerHandshake {
     }
 }
 
+/// Encode a ServerHello for DTLS, rewriting its `server_version`
+/// field to DTLS 1.2 (`0xFEFD`).
+///
+/// `encode_server_hello` hardcodes the TLS 1.2 codepoint (`0x0303`);
+/// a DTLS peer (`openssl s_client -dtls`, browsers) rejects a
+/// ServerHello carrying `0x0303` with `unsupported protocol` — the
+/// DTLS ServerHello MUST carry the DTLS version. The handshake
+/// message body starts after the 4-byte handshake header, so the
+/// 2-byte version sits at `[4..6]`. The server feeds this same byte
+/// string into its transcript, and the DTLS client's
+/// `decode_server_hello` ignores the version field, so both peers
+/// hash an identical ServerHello.
+fn encode_dtls_server_hello(sh: &ServerHello) -> Vec<u8> {
+    let mut msg = encode_server_hello(sh);
+    if msg.len() >= 6 {
+        msg[4..6].copy_from_slice(&DTLS12_VERSION.to_be_bytes());
+    }
+    msg
+}
+
 impl Dtls12ServerHandshake {
     pub fn new(config: TlsConfig, enable_cookie: bool) -> Self {
         let mut cookie_secret = vec![0u8; 32];
@@ -335,27 +355,38 @@ impl Dtls12ServerHandshake {
             self.transcript = TranscriptHash::new(HashAlgId::Sha384);
         }
 
-        // Add ClientHello to transcript in TLS format
-        let tls_ch = dtls_to_tls_handshake(raw_dtls_msg)?;
-        self.transcript.update(&tls_ch)?;
+        // RFC 6347 §4.2.6 — the DTLS handshake hash uses the 12-byte
+        // DTLS header (message_seq retained, fragment_offset = 0,
+        // fragment_length = length), NOT the TLS 4-byte header. For
+        // non-fragmented messages (the common case — openssl s_client
+        // does not fragment small handshake messages, and
+        // `tls_to_dtls_handshake` sets fragment_offset=0/
+        // fragment_length=length for everything we send), hashing the
+        // raw DTLS message in place is the correct serialization.
+        self.transcript.update(raw_dtls_msg)?;
 
         // Generate server random
         getrandom::fill(&mut self.server_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
-        // Build ServerHello echoing the cached session_id
+        // Build ServerHello echoing the cached session_id. RFC 5746 —
+        // a ServerHello MUST carry the (empty) `renegotiation_info`
+        // extension, else strict peers (openssl) abort with
+        // "unsafe legacy renegotiation disabled".
         let sh = ServerHello {
             random: self.server_random,
             legacy_session_id: ch.legacy_session_id.clone(),
             cipher_suite: suite,
-            extensions: Vec::new(),
+            extensions: vec![
+                crate::handshake::extensions_codec::build_renegotiation_info_initial(),
+            ],
         };
         self.session_id = sh.legacy_session_id.clone();
-        let sh_tls = encode_server_hello(&sh);
+        let sh_tls = encode_dtls_server_hello(&sh);
         let seq = self.message_seq;
         self.message_seq += 1;
         let sh_dtls = tls_to_dtls_handshake(&sh_tls, seq)?;
-        self.transcript.update(&sh_tls)?;
+        self.transcript.update(&sh_dtls)?;
 
         // Derive keys from cached master_secret + new randoms
         let alg = params.hash_alg_id();
@@ -376,11 +407,12 @@ impl Dtls12ServerHandshake {
             &transcript_hash,
         )?;
         let finished_tls = encode_finished12(&server_verify_data);
-        // Add server Finished to transcript (for client Finished computation)
-        self.transcript.update(&finished_tls)?;
         let seq = self.message_seq;
         self.message_seq += 1;
         let finished_dtls = tls_to_dtls_handshake(&finished_tls, seq)?;
+        // Add server Finished (12-byte DTLS header) to the transcript
+        // for the client-Finished hash computation.
+        self.transcript.update(&finished_dtls)?;
 
         self.master_secret = cached_master_secret.to_vec();
         self.params = Some(params);
@@ -468,9 +500,10 @@ impl Dtls12ServerHandshake {
             self.transcript = TranscriptHash::new(HashAlgId::Sha384);
         }
 
-        // Add ClientHello to transcript in TLS format
-        let tls_ch = dtls_to_tls_handshake(raw_dtls_msg)?;
-        self.transcript.update(&tls_ch)?;
+        // RFC 6347 §4.2.6 — hash the DTLS handshake message in its
+        // 12-byte header form (non-fragmented; openssl s_client does
+        // not fragment small messages).
+        self.transcript.update(raw_dtls_msg)?;
 
         // Generate server random
         getrandom::fill(&mut self.server_random)
@@ -483,18 +516,25 @@ impl Dtls12ServerHandshake {
         let mut new_session_id = vec![0u8; 32];
         getrandom::fill(&mut new_session_id)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
+        // RFC 5746 — the ServerHello MUST carry the (empty)
+        // `renegotiation_info` extension or strict peers (openssl)
+        // abort. RFC 8422 — echo `ec_point_formats` for the ECDHE
+        // suite negotiated here.
         let sh = ServerHello {
             random: self.server_random,
             legacy_session_id: new_session_id,
             cipher_suite: suite,
-            extensions: Vec::new(),
+            extensions: vec![
+                crate::handshake::extensions_codec::build_renegotiation_info_initial(),
+                crate::handshake::extensions_codec::build_ec_point_formats(),
+            ],
         };
         self.session_id = sh.legacy_session_id.clone();
-        let sh_tls = encode_server_hello(&sh);
+        let sh_tls = encode_dtls_server_hello(&sh);
         let seq = self.message_seq;
         self.message_seq += 1;
         let sh_dtls = tls_to_dtls_handshake(&sh_tls, seq)?;
-        self.transcript.update(&sh_tls)?;
+        self.transcript.update(&sh_dtls)?;
 
         // Build Certificate (TLS format, then convert to DTLS)
         let cert12 = Certificate12 {
@@ -504,7 +544,7 @@ impl Dtls12ServerHandshake {
         let seq = self.message_seq;
         self.message_seq += 1;
         let cert_dtls = tls_to_dtls_handshake(&cert_tls, seq)?;
-        self.transcript.update(&cert_tls)?;
+        self.transcript.update(&cert_dtls)?;
 
         // Generate ephemeral ECDH key
         let kx = KeyExchange::generate(group)?;
@@ -535,14 +575,14 @@ impl Dtls12ServerHandshake {
         let seq = self.message_seq;
         self.message_seq += 1;
         let ske_dtls = tls_to_dtls_handshake(&ske_tls, seq)?;
-        self.transcript.update(&ske_tls)?;
+        self.transcript.update(&ske_dtls)?;
 
         // Build ServerHelloDone
         let shd_tls = crate::handshake::codec12::encode_server_hello_done();
         let seq = self.message_seq;
         self.message_seq += 1;
         let shd_dtls = tls_to_dtls_handshake(&shd_tls, seq)?;
-        self.transcript.update(&shd_tls)?;
+        self.transcript.update(&shd_dtls)?;
 
         self.ephemeral_key = Some(kx);
         self.params = Some(params);
@@ -570,9 +610,9 @@ impl Dtls12ServerHandshake {
             ));
         }
 
-        // Add to transcript in TLS format
-        let tls_msg = dtls_to_tls_handshake(raw_dtls_msg)?;
-        self.transcript.update(&tls_msg)?;
+        // RFC 6347 §4.2.6 — hash the DTLS handshake message in its
+        // 12-byte header form.
+        self.transcript.update(raw_dtls_msg)?;
 
         // Decode CKE body (skip DTLS 12-byte header)
         let body = dtls_get_body(raw_dtls_msg)?;
@@ -668,8 +708,10 @@ impl Dtls12ServerHandshake {
             ));
         }
 
-        // Add client Finished to transcript
-        self.transcript.update(&tls_msg)?;
+        // Add client Finished to transcript (12-byte DTLS header —
+        // RFC 6347 §4.2.6). `tls_msg` above is only used to extract
+        // verify_data; the transcript hashes the raw DTLS message.
+        self.transcript.update(raw_dtls_msg)?;
 
         // Compute server Finished
         let transcript_hash = self.transcript.current_hash()?;

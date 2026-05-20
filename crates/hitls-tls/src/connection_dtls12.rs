@@ -336,6 +336,156 @@ pub fn dtls12_handshake_in_memory(
     Ok((client_conn, server_conn))
 }
 
+/// Phase I106 — drive a full DTLS 1.2 **server** handshake over a
+/// caller-supplied datagram transport, returning a connected
+/// [`Dtls12ServerConnection`] ready for `seal_app_data` /
+/// `open_app_data`.
+///
+/// `send` transmits one datagram; `recv` blocks for the next inbound
+/// datagram. This keeps the UDP socket (and its peer addressing,
+/// timeouts, retransmission policy) entirely in the caller — the
+/// library owns only the DTLS flight sequence: ClientHello →
+/// (optional HelloVerifyRequest cookie exchange) → ServerHello flight
+/// → ClientKeyExchange / ChangeCipherSpec / Finished → server
+/// ChangeCipherSpec + Finished.
+///
+/// Only the full handshake is supported; an abbreviated (resumption)
+/// ClientHello is rejected — the CLI `s-server` opens a fresh
+/// `Dtls12ServerHandshake` per datagram peer, so resumption never
+/// arises there.
+/// Pull the next DTLS record, refilling from `recv` when the record
+/// queue is empty. A single UDP datagram can carry several DTLS
+/// records (openssl batches ClientKeyExchange + ChangeCipherSpec +
+/// Finished into one datagram), so every datagram is split into all
+/// of its records up front — a naive one-record-per-datagram model
+/// silently drops the trailing records.
+fn dtls_next_record<RecvFn>(
+    queue: &mut std::collections::VecDeque<DtlsRecord>,
+    recv: &mut RecvFn,
+) -> Result<DtlsRecord, TlsError>
+where
+    RecvFn: FnMut() -> Result<Vec<u8>, TlsError>,
+{
+    loop {
+        if let Some(rec) = queue.pop_front() {
+            return Ok(rec);
+        }
+        let datagram = recv()?;
+        let mut off = 0;
+        while off < datagram.len() {
+            let (rec, consumed) = parse_dtls_record(&datagram[off..])?;
+            if consumed == 0 {
+                break;
+            }
+            queue.push_back(rec);
+            off += consumed;
+        }
+    }
+}
+
+pub fn dtls12_server_handshake<SendFn, RecvFn>(
+    config: TlsConfig,
+    enable_cookie: bool,
+    mut send: SendFn,
+    mut recv: RecvFn,
+) -> Result<Dtls12ServerConnection, TlsError>
+where
+    SendFn: FnMut(&[u8]) -> Result<(), TlsError>,
+    RecvFn: FnMut() -> Result<Vec<u8>, TlsError>,
+{
+    use std::collections::VecDeque;
+    let mut server_conn = Dtls12ServerConnection::new(config.clone(), enable_cookie);
+    let mut server_hs = Dtls12ServerHandshake::new(config, enable_cookie);
+    let mut rq: VecDeque<DtlsRecord> = VecDeque::new();
+
+    // Flight 1 — ClientHello. With cookie mode enabled the first
+    // ClientHello (no cookie) yields a HelloVerifyRequest; the client
+    // re-sends with the cookie (flight 3).
+    let ch_record = dtls_next_record(&mut rq, &mut recv)?;
+    let server_result = match server_hs.process_client_hello(&ch_record.fragment)? {
+        Ok(result) => result,
+        Err(hvr) => {
+            let hvr_dg =
+                wrap_handshake_record(&mut server_conn.write_epoch, &hvr.hello_verify_request)?;
+            send(&hvr_dg)?;
+            let ch2_record = dtls_next_record(&mut rq, &mut recv)?;
+            server_hs.process_client_hello_with_cookie(&ch2_record.fragment)?
+        }
+    };
+    let flight = match server_result {
+        DtlsServerHelloResult::Full(flight) => flight,
+        DtlsServerHelloResult::Abbreviated(_) => {
+            return Err(TlsError::HandshakeFailed(
+                "DTLS abbreviated (resumption) handshake not supported".into(),
+            ))
+        }
+    };
+    let suite = flight.suite;
+
+    // Flight 4 — ServerHello, Certificate, ServerKeyExchange,
+    // ServerHelloDone (epoch 0, one handshake message per datagram).
+    for msg in [
+        &flight.server_hello,
+        &flight.certificate,
+        &flight.server_key_exchange,
+        &flight.server_hello_done,
+    ] {
+        let dg = wrap_handshake_record(&mut server_conn.write_epoch, msg)?;
+        send(&dg)?;
+    }
+
+    // Flight 5 — ClientKeyExchange.
+    let cke_record = dtls_next_record(&mut rq, &mut recv)?;
+    let mut keys = server_hs.process_client_key_exchange(&cke_record.fragment)?;
+
+    // ChangeCipherSpec.
+    let ccs_record = dtls_next_record(&mut rq, &mut recv)?;
+    if ccs_record.content_type != ContentType::ChangeCipherSpec {
+        return Err(TlsError::HandshakeFailed(
+            "expected ChangeCipherSpec".into(),
+        ));
+    }
+    server_hs.process_change_cipher_spec()?;
+
+    // Client Finished — encrypted under epoch 1.
+    server_conn.read_epoch.next_epoch();
+    let mut server_dec =
+        DtlsRecordDecryptor12::new(suite, &keys.client_write_key, keys.client_write_iv.clone())?;
+    let fin_record = dtls_next_record(&mut rq, &mut recv)?;
+    let fin_plain = server_dec.decrypt_record(&fin_record)?;
+    let (fin_header, _, _) = parse_dtls_handshake_header(&fin_plain)?;
+    if fin_header.msg_type != HandshakeType::Finished {
+        return Err(TlsError::HandshakeFailed("expected Finished".into()));
+    }
+    let server_fin = server_hs.process_finished(&fin_plain)?;
+
+    // Server ChangeCipherSpec + Finished (Finished encrypted, epoch 1).
+    let ccs_out = wrap_ccs_record(&mut server_conn.write_epoch)?;
+    send(&ccs_out)?;
+    server_conn.write_epoch.next_epoch();
+    let mut server_enc =
+        DtlsRecordEncryptor12::new(suite, &keys.server_write_key, keys.server_write_iv.clone())?;
+    let sfin_dg = wrap_encrypted_handshake_record(
+        &mut server_conn.write_epoch,
+        &mut server_enc,
+        &server_fin.finished,
+    )?;
+    send(&sfin_dg)?;
+
+    // Install application-data keys.
+    server_conn.encryptor = Some(server_enc);
+    server_conn.decryptor = Some(server_dec);
+    server_conn.state = DtlsConnectionState::Connected;
+    server_conn.negotiated_suite = Some(suite);
+    store_server_session(&server_conn, &server_hs, suite, &keys.master_secret);
+
+    keys.master_secret.zeroize();
+    keys.client_write_key.zeroize();
+    keys.server_write_key.zeroize();
+
+    Ok(server_conn)
+}
+
 struct DtlsHandshakeContext<'a> {
     client_conn: &'a mut Dtls12ClientConnection,
     server_conn: &'a mut Dtls12ServerConnection,
