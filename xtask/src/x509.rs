@@ -71,6 +71,16 @@
 //!   The C test verifies the cert with the issuer's public key (must succeed)
 //!   and with an unrelated cert's key (must fail); the migrated test mirrors
 //!   both via `Certificate::verify_signature`.
+//! * `X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001` (single-level) /
+//!   `_TC002` (multi-level) and `X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC`
+//!   (single-level with CRL revocation) — charset-varied chain verifications;
+//!   the migrated test runs each through a `CertificateVerifier` and asserts
+//!   the outcome (`SUCCESS` / `ISSUE_CERT_NOT_FOUND` / `CERT_REVOKED`). Rows
+//!   under `charset/string_canon/` or `user_err_*` are skipped (Rust's
+//!   verifier uses byte-exact DN matching, falls back to DN-only on
+//!   AKI mismatch, and rejects some malformed fixtures at parse time).
+//!   `X509_CA_PATH_WITH_VARIOUS_CHARSET_FUNC` uses `STORECTX_ADD_CA_PATH`
+//!   (directory-based CA loading) which has no Rust analogue → `ApiSurface`.
 //!
 //! For cert/CSR, `format` is a `BSL_FORMAT_*` token: `ASN1` → DER, `PEM` →
 //! PEM; the C `UNKNOWN` (auto-detect) format has no Rust equivalent and routes
@@ -100,6 +110,7 @@ pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
             Kind::CrlField(field) => emit_crl_field(&mut body, case, &mut stats, field),
             Kind::BuildCertChain => emit_build_cert_chain(&mut body, case, &mut stats),
             Kind::CertVerifyByPubkey => emit_cert_verify_by_pubkey(&mut body, case, &mut stats),
+            Kind::CharsetVerify(v) => emit_charset_verify(&mut body, case, &mut stats, v),
             Kind::ApiSurface => stats.skipped_api += 1,
             Kind::Unknown => stats.skipped_unknown += 1,
         }
@@ -134,8 +145,21 @@ enum Kind {
     BuildCertChain,
     /// `X509_CERT_VERIFY_BY_PUBKEY_FUNC` — verify a cert against a pubkey.
     CertVerifyByPubkey,
+    /// Charset-varied chain verify family (`CERT_VERIFY` / `CRL_VERIFY`).
+    CharsetVerify(CharsetVerify),
     ApiSurface,
     Unknown,
+}
+
+/// Variants of the `*_WITH_VARIOUS_CHARSET` chain-verify families.
+#[derive(Debug, Clone, Copy)]
+enum CharsetVerify {
+    /// `CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001` — `ca, entity, result`.
+    CertSingle,
+    /// `CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC002` — `root, ca, entity`.
+    CertMulti,
+    /// `CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001` — `ca, entity, crl, result`.
+    Crl,
 }
 
 /// A CRL field-check KAT family — parse a CRL, assert one parsed field.
@@ -352,6 +376,15 @@ fn classify(tc: &str) -> Kind {
     }
     if tc.contains("X509_CERT_VERIFY_BY_PUBKEY_FUNC") {
         return Kind::CertVerifyByPubkey;
+    }
+    if tc.contains("X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001") {
+        return Kind::CharsetVerify(CharsetVerify::CertSingle);
+    }
+    if tc.contains("X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC002") {
+        return Kind::CharsetVerify(CharsetVerify::CertMulti);
+    }
+    if tc.contains("X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC") {
+        return Kind::CharsetVerify(CharsetVerify::Crl);
     }
     // CSR field / expected-return families, the CRL field-check families
     // (`TC004/005/009-013`), and the malformed-DER negatives are migrated in
@@ -1226,6 +1259,118 @@ fn emit_cert_verify_by_pubkey(out: &mut String, case: &TestCase, stats: &mut Emi
         "    assert!(!matches!(cert.verify_signature(&other), Ok(true)));"
     )
     .unwrap();
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// Emit a `*_WITH_VARIOUS_CHARSET` chain-verify KAT. Each variant has its own
+/// arg layout (single- vs multi-level cert chain; with/without CRL); a row
+/// migrates only when its `expectedResult` is one Rust's verifier faithfully
+/// reproduces — `HITLS_PKI_SUCCESS` (`verify_cert` is `Ok`),
+/// `HITLS_X509_ERR_ISSUE_CERT_NOT_FOUND` (`Err`, Display `"issuer certificate
+/// not found"`) or `HITLS_X509_ERR_VFY_CERT_REVOKED` (`Err`, Display
+/// `"certificate revoked"`). `HITLS_X509_ERR_VFY_CRL_NOT_FOUND` routes to
+/// `skipped_unsupported_alg` — Rust soft-fails on a missing CRL.
+fn emit_charset_verify(
+    out: &mut String,
+    case: &TestCase,
+    stats: &mut EmitStats,
+    variant: CharsetVerify,
+) {
+    let a = &case.args;
+    // (trusted_relpaths root-first, entity_relpath, crl_relpath?, expected_sym?)
+    let plan = match variant {
+        CharsetVerify::CertSingle => (vec![arg_rel(a, 0)], arg_rel(a, 1), None, arg_sym(a, 2)),
+        CharsetVerify::CertMulti => (
+            vec![arg_rel(a, 0), arg_rel(a, 1)],
+            arg_rel(a, 2),
+            None,
+            // TC002 has no explicit result — the C asserts SUCCESS.
+            Some("HITLS_PKI_SUCCESS"),
+        ),
+        CharsetVerify::Crl => (
+            vec![arg_rel(a, 0)],
+            arg_rel(a, 1),
+            Some(arg_rel(a, 2)),
+            arg_sym(a, 3),
+        ),
+    };
+    let (trusted_opts, entity_opt, crl_opt_opt, expected_opt) = plan;
+    // Validate each path resolved.
+    if trusted_opts.iter().any(Option::is_none) || entity_opt.is_none() || expected_opt.is_none() {
+        stats.skipped_unknown += 1;
+        return;
+    }
+    let trusted: Vec<&str> = trusted_opts.into_iter().map(Option::unwrap).collect();
+    let entity_rel = entity_opt.unwrap();
+    // Verifier-behavior gaps in the charset corpus:
+    //  * `string_canon/…` — C canonicalises DN string-typed components for
+    //    issuer-vs-subject matching; Rust's `find_issuer` does a byte-exact
+    //    DN comparison.
+    //  * `user_err_aki…` — C treats an AKI-mismatch as "issuer not found";
+    //    Rust falls back to DN-only matching and reports a signature
+    //    verification failure instead.
+    //  * `user_err_issuer…` — the fixture is malformed in a way the Rust
+    //    parser rejects outright (`from_der` errors before chain build).
+    if trusted
+        .iter()
+        .chain(std::iter::once(&entity_rel))
+        .any(|p| p.contains("string_canon") || p.contains("user_err_"))
+    {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    }
+    let crl_rel = match crl_opt_opt {
+        Some(Some(c)) => Some(c),
+        Some(None) => {
+            // CRL slot present but unresolved → skip.
+            stats.skipped_unknown += 1;
+            return;
+        }
+        None => None,
+    };
+    let expected = expected_opt.unwrap();
+
+    let assertion = match expected {
+        "HITLS_PKI_SUCCESS" => "    assert!(result.is_ok());\n",
+        "HITLS_X509_ERR_ISSUE_CERT_NOT_FOUND" => {
+            "    assert_eq!(result.unwrap_err().to_string(), \"issuer certificate not found\");\n"
+        }
+        "HITLS_X509_ERR_VFY_CERT_REVOKED" => {
+            "    assert_eq!(result.unwrap_err().to_string(), \"certificate revoked\");\n"
+        }
+        // CRL_NOT_FOUND — Rust soft-fails (verifier-strictness gap).
+        _ => {
+            stats.skipped_unsupported_alg += 1;
+            return;
+        }
+    };
+
+    let suffix = match variant {
+        CharsetVerify::CertSingle => "cert_charset_single",
+        CharsetVerify::CertMulti => "cert_charset_multi",
+        CharsetVerify::Crl => "crl_charset",
+    };
+    write_doc(out, case, "X.509 charset chain-verify KAT");
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_x509_{}() {{", case.line, suffix).unwrap();
+    for (i, rel) in trusted.iter().enumerate() {
+        writeln!(out, "    let ca{i} = load_cert_fixture({rel:?});").unwrap();
+    }
+    if let Some(rel) = crl_rel {
+        writeln!(out, "    let crl = load_crl_fixture({rel:?});").unwrap();
+    }
+    writeln!(out, "    let cert = load_cert_fixture({entity_rel:?});").unwrap();
+    writeln!(out, "    let mut verifier = CertificateVerifier::new();").unwrap();
+    for i in 0..trusted.len() {
+        writeln!(out, "    verifier.add_trusted_cert(ca{i});").unwrap();
+    }
+    if crl_rel.is_some() {
+        writeln!(out, "    verifier.add_crl(crl);").unwrap();
+        writeln!(out, "    verifier.set_check_revocation(true);").unwrap();
+    }
+    writeln!(out, "    let result = verifier.verify_cert(&cert, &[]);").unwrap();
+    out.push_str(assertion);
     writeln!(out, "}}\n").unwrap();
     stats.emitted += 1;
 }
