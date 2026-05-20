@@ -6503,3 +6503,44 @@ and are recorded inline as verifier-hardening I-phase candidates.
 --all-targets` clean. No production-code change. Recorded as
 DEV_LOG `Phase T113 (continued)`. Phase C still ongoing — remaining
 `pki/verify` families + cms/pkcs12 suites follow.
+
+## Phase T113 (continued) — Phase C: `pki/verify` BasicConstraints family (2026-05-21)
+
+> 继续
+
+Extends T113 Phase C with **4 more TCs** from
+`pki/verify/test_suite_sdv_x509_vfy.c` — the `VFY_BC_*` family
+covering RFC 5280 §4.2.1.9 BasicConstraints (`cA` flag) + the
+`pathLenConstraint` budget. Hand-appended after the AKI/SKI block
+on `crates/hitls-pki/tests/migrated_x509_parse.rs`. Coverage delta:
+1072 → **1076 emitted**; total Rust-side **1074 PASS + 2 `#[ignore]`**
+(no new ignores — Rust verifier handles every case cleanly).
+
+**What was *not* migrated and why.** The 4 sibling `VFY_PATHLEN_*`
+TCs in the same `.data` file rewrite the parsed root certificate
+**in memory** to inject test conditions (`ext->maxPathLen=N`,
+clearing `keyUsage.KEY_CERT_SIGN`). The Rust `Certificate` exposes
+no public mut accessor and the fixture corpus has no pre-built
+static fixture for these conditions, so they route to API-surface
+— the same bucket as DSA / SM2 sign-side rows (no deterministic-`k`
+injection hook). Recorded inline as a family-banner comment in
+`migrated_x509_parse.rs` so the rationale travels with the tests.
+
+**Verifier coverage check.** `validate_chain` in
+`crates/hitls-pki/src/x509/verify.rs:193` enforces all three RFC
+5280 §4.2.1.9 properties (`cA=true` on every CA, `keyCertSign` in
+present `KeyUsage`, and `(i-1) ≤ pathLen` for any CA above the
+end-entity). The 4 BC TCs each trip the appropriate guard and
+produce `PkiError::BasicConstraintsViolation`; the test bodies
+assert `to_string().starts_with("basic constraints violation")`
+to stay robust against minor wording changes.
+
+**Verification**: `cargo test -p hitls-pki --test migrated_x509_parse`
+→ 1074 PASS / 0 FAIL / 2 ignored; `cargo fmt --check` clean;
+`RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+--all-targets` clean. No production-code change. Recorded as
+DEV_LOG `Phase T113 (continued) — Phase C: pki/verify BasicConstraints
+family`. Phase C still ongoing — remaining `pki/verify` families
+(`VFY_TLS_*EKU_KU_*` / `VFY_CERT_TIME_*` / `VFY_EXT_*` / `VFY_CHAIN_*`
+/ `VFY_SIGALG_*` / `STORE_*` / `BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN_*`)
++ cms/pkcs12 suites follow.
