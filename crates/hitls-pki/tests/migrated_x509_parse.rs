@@ -47808,4 +47808,125 @@ fn tc_line380_x509_crl_charset() {
     assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
 }
 
-// Generation summary: 1064 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
+// ============================================================
+// T113 (continued) — Phase C: `pki/verify` AKI/SKI keyId family
+// (RFC 5280 §4.2.1.1 / §4.2.1.2 — chain-building via Subject Key
+// Identifier + Authority Key Identifier matching). 8 TCs migrated
+// from openHiTLS C SDV `test_suite_sdv_x509_vfy.c`.
+// ============================================================
+
+/// SDV_X509_VFY_AKI_SKI_KEYID_PASS_TC001 keyid match
+/// C source: SDV_X509_VFY_AKI_SKI_KEYID_PASS_TC001 (line 226, X.509 verify AKI/SKI family)
+#[test]
+fn tc_line226_x509_vfy_aki_ski_keyid_pass() {
+    let root = load_cert_fixture("cert/chain/akiski_suite/aki_root.pem");
+    let inter = load_cert_fixture("cert/chain/akiski_suite/aki_inter.pem");
+    let leaf = load_cert_fixture("cert/chain/akiski_suite/aki_leaf_keymatch.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    assert!(verifier.verify_cert(&leaf, &[inter]).is_ok());
+}
+
+/// SDV_X509_VFY_AKI_SKI_KEYID_FAIL_TC002 keyid mismatch
+/// C source: SDV_X509_VFY_AKI_SKI_KEYID_FAIL_TC002 (line 229, X.509 verify AKI/SKI family)
+///
+/// Rust verifier gap: `find_issuer` matches on Subject DN + signature only —
+/// it does not enforce that AKI.keyIdentifier (RFC 5280 §4.2.1.1) equals the
+/// candidate issuer's SKI.keyIdentifier (§4.2.1.2), so the C-side
+/// `ISSUE_CERT_NOT_FOUND` is masked by a successful DN-match. Listed as a
+/// verifier-hardening I-phase candidate (alongside the gaps already noted
+/// in DEV_LOG Phase T113).
+#[test]
+#[ignore = "verifier-hardening gap: Rust find_issuer does not enforce AKI/SKI keyIdentifier matching"]
+fn tc_line229_x509_vfy_aki_ski_keyid_fail() {
+    let root = load_cert_fixture("cert/chain/akiski_suite/aki_root.pem");
+    let inter = load_cert_fixture("cert/chain/akiski_suite/aki_inter.pem");
+    let leaf = load_cert_fixture("cert/chain/akiski_suite/aki_leaf_keymismatch.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    let err = verifier.verify_cert(&leaf, &[inter]).unwrap_err();
+    assert_eq!(err.to_string(), "issuer certificate not found");
+}
+
+/// SDV_X509_VFY_AKI_SKI_UPPER_SKI_MISSING_PASS_TC003 issuer missing SKI
+/// C source: SDV_X509_VFY_AKI_SKI_UPPER_SKI_MISSING_PASS_TC003 (line 232, X.509 verify AKI/SKI family)
+#[test]
+fn tc_line232_x509_vfy_aki_ski_upper_ski_missing_pass() {
+    let root = load_cert_fixture("cert/chain/akiski_suite/aki_root.pem");
+    let inter = load_cert_fixture("cert/chain/akiski_suite/aki_inter_noski.pem");
+    let leaf = load_cert_fixture("cert/chain/akiski_suite/aki_leaf_parent_noski_match.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    assert!(verifier.verify_cert(&leaf, &[inter]).is_ok());
+}
+
+/// SDV_X509_VFY_AKI_SKI_LOWER_AKI_MISSING_PASS_TC004 leaf missing AKI
+/// C source: SDV_X509_VFY_AKI_SKI_LOWER_AKI_MISSING_PASS_TC004 (line 235, X.509 verify AKI/SKI family)
+#[test]
+fn tc_line235_x509_vfy_aki_ski_lower_aki_missing_pass() {
+    let root = load_cert_fixture("cert/chain/akiski_suite/aki_root.pem");
+    let inter = load_cert_fixture("cert/chain/akiski_suite/aki_inter.pem");
+    let leaf = load_cert_fixture("cert/chain/akiski_suite/aki_leaf_noaki.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    assert!(verifier.verify_cert(&leaf, &[inter]).is_ok());
+}
+
+/// SDV_X509_VFY_AKI_SKI_ISSUER_SERIAL_FAIL_TC006 issuer serial mismatch
+/// C source: SDV_X509_VFY_AKI_SKI_ISSUER_SERIAL_FAIL_TC006 (line 238, X.509 verify AKI/SKI family)
+///
+/// Rust verifier gap: same root cause as TC002 — `find_issuer` ignores the
+/// AKI.authorityCertSerialNumber / authorityCertIssuer fields (RFC 5280
+/// §4.2.1.1), so a leaf that names a wrong issuer serial in its AKI still
+/// resolves the issuer by DN. Listed as a verifier-hardening I-phase
+/// candidate.
+#[test]
+#[ignore = "verifier-hardening gap: Rust find_issuer does not enforce AKI.authorityCertSerialNumber matching"]
+fn tc_line238_x509_vfy_aki_ski_issuer_serial_fail() {
+    let root = load_cert_fixture("cert/chain/akiski_suite/aki_root.pem");
+    let inter = load_cert_fixture("cert/chain/akiski_suite/aki_inter.pem");
+    let leaf = load_cert_fixture("cert/chain/akiski_suite/aki_leaf_issuer_serial_mismatch.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    let err = verifier.verify_cert(&leaf, &[inter]).unwrap_err();
+    assert_eq!(err.to_string(), "issuer certificate not found");
+}
+
+/// SDV_X509_VFY_AKI_SKI_CRITICAL_PASS_TC007 critical AKI SKI
+/// C source: SDV_X509_VFY_AKI_SKI_CRITICAL_PASS_TC007 (line 241, X.509 verify AKI/SKI family)
+#[test]
+fn tc_line241_x509_vfy_aki_ski_critical_pass() {
+    let root = load_cert_fixture("cert/chain/akiski_suite/aki_root.pem");
+    let inter = load_cert_fixture("cert/chain/akiski_suite/aki_inter.pem");
+    let leaf = load_cert_fixture("cert/chain/akiski_suite/aki_leaf_critical.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    assert!(verifier.verify_cert(&leaf, &[inter]).is_ok());
+}
+
+/// SDV_X509_VFY_AKI_SKI_MULTILEVEL_PASS_TC008 multilevel chain
+/// C source: SDV_X509_VFY_AKI_SKI_MULTILEVEL_PASS_TC008 (line 244, X.509 verify AKI/SKI family)
+#[test]
+fn tc_line244_x509_vfy_aki_ski_multilevel_pass() {
+    let root = load_cert_fixture("cert/chain/akiski_suite/aki_root.pem");
+    let inter = load_cert_fixture("cert/chain/akiski_suite/aki_inter.pem");
+    let subinter = load_cert_fixture("cert/chain/akiski_suite/aki_subinter.pem");
+    let leaf = load_cert_fixture("cert/chain/akiski_suite/aki_leaf_multilevel.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    assert!(verifier.verify_cert(&leaf, &[inter, subinter]).is_ok());
+}
+
+/// SDV_X509_VFY_NOAKID_CERT_PASS_TC009 intermediate missing AKID certchain verify succeeds
+/// C source: SDV_X509_VFY_NOAKID_CERT_PASS_TC009 (line 247, X.509 verify AKI/SKI family)
+#[test]
+fn tc_line247_x509_vfy_noakid_cert_pass() {
+    let root = load_cert_fixture("cert/chain/akiski_suite/root_cert.pem");
+    let inter = load_cert_fixture("cert/chain/akiski_suite/ca_cert.pem");
+    let leaf = load_cert_fixture("cert/chain/akiski_suite/device_cert.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    assert!(verifier.verify_cert(&leaf, &[inter]).is_ok());
+}
+
+// Generation summary: 1072 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
