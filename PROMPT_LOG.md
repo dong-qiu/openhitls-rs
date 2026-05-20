@@ -6544,3 +6544,60 @@ family`. Phase C still ongoing — remaining `pki/verify` families
 (`VFY_TLS_*EKU_KU_*` / `VFY_CERT_TIME_*` / `VFY_EXT_*` / `VFY_CHAIN_*`
 / `VFY_SIGALG_*` / `STORE_*` / `BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN_*`)
 + cms/pkcs12 suites follow.
+
+---
+
+## Phase I107 — TLS 1.3 Server-Side HRR Conformance (2026-05-21)
+
+> 做 A
+
+Selected the XFAIL-reduction track for tlsfuzzer (mode A of the
+prior recommendation). Started by ranking the 22 curated XFAIL files
+by entry count: the 263-entry `test-tls13-version-negotiation` is
+intentional spec-divergence (OpenSSL-flavour pre-RFC drafts; not a
+real gap), so dropped to the next candidate.
+
+Picked `test-tls13-no-unknown-groups` (3 conversations XFAIL'd, root
+cause noted in xfail header as `supported_groups` parser limit).
+Empirically the header's "appears to time out or reject" guess was
+wrong — the parser itself is O(n) and fine. Two genuine RFC 8446
+non-conformances surfaced instead:
+
+**Fix 1 — HRR `selected_group` must follow client preference (RFC
+8446 §4.2.7).** Server preference made us pick X25519 when the
+client offered `[secp256r1, secp384r1, x25519]`, breaking the
+script's `ExpectHelloRetryRequest(key_share=groups[0])` assertion.
+Flipped the iteration to match OpenSSL / BoringSSL / Go.
+
+**Fix 2 — middlebox-compat CCS MUST fire only after the server's
+*first* handshake message (RFC 8446 §D.4).** `tls13_server_do_handshake_body!`
+emitted CCS both after HRR *and* after the post-HRR ServerHello;
+tlsfuzzer's state machine reads the second CCS where it expects
+EncryptedExtensions and fails. New `sent_fake_ccs: bool` gates the
+post-ServerHello CCS site.
+
+**Fix 3 — `tests/tlsfuzzer/args/test-tls13-no-unknown-groups.txt`
+`--groups`.** tlsfuzzer's "unknown" codepoint enumeration subtracts
+only the groups it's told about; without `--groups` it defaults to
+the script's own short list and leaves `X448 / secp521r1 / FFDHE*`
+in the "unknown" range (those *are* in our s-server's
+`supported_groups`). Passing the full s-server set fixes the
+subtraction.
+
+**Net XFAIL reduction = 5.** `test-tls13-no-unknown-groups` 256/3 →
+**259/0 PASS** (xfail file removed); `test-tls13-hrr` 2/1 → **3/0
+PASS** (xfail file removed; fix 1+2 surfaced the conversation as
+XPASS); `test-tls13-0rtt-garbage` 7/4 → **8/3 PASS** (fix 2 also
+closed `'handshake with invalid 0-RTT and HRR'`).
+
+Verification: `cargo test -p hitls-tls --release --lib` 1108/0;
+`fmt` clean; `RUSTFLAGS="-D warnings" cargo clippy --workspace
+--all-features --all-targets` clean. 11 adjacent TLS 1.3 scripts
+(record-layer-limits / keyshare-omitted / eddsa / connection-abort /
+finished-plaintext / empty-alert / zero-length-data / zero-content-
+type / keyupdate / sig-algorithms / version-negotiation /
+session-resumption) checked for regression — none. Apparent
+`test-ffdhe-negotiation` 39-FAIL during sweep was a port misconfiguration
+(FFDHE script needs the TLS 1.2 listener; was pointed at TLS 1.3).
+
+Recorded as DEV_LOG Phase I107.

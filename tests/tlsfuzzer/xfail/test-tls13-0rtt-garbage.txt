@@ -1,4 +1,4 @@
-# Phase T94 / T106 — `test-tls13-0rtt-garbage.py` XFAILs (4 entries).
+# Phase T94 / T106 / T131 — `test-tls13-0rtt-garbage.py` XFAILs (3 entries).
 #
 # T94 (pre-T106): 7 XFAILs documenting that all failures involved
 #       sending TLS 1.3 early-data (0-RTT) records that our server
@@ -27,7 +27,14 @@
 #
 # Post-T106: 7 PASS / 4 XFAIL / 0 FAIL.
 #
-# The 4 remaining XFAILs all need work beyond the skip-bytes path:
+# T131 (this phase) — duplicate-CCS fix in `tls13_server_do_handshake_body!`
+# (HRR path no longer emits a second middlebox-compat CCS after the
+# post-HRR ServerHello, RFC 8446 §D.4) auto-closed
+# `handshake with invalid 0-RTT and HRR` — tlsfuzzer's state
+# machine no longer trips over the spurious second CCS during the
+# HRR+0-RTT-garbage sequence. Post-T131: 8 PASS / 3 XFAIL / 0 FAIL.
+#
+# The 3 remaining XFAILs all need work beyond the skip-bytes path:
 #
 # * `handshake with 0-RTT, HRR and early data after 2nd Client Hello`:
 #   client sends fake early data AFTER CH2 (after our HRR). Our
@@ -36,9 +43,6 @@
 #   compat fake CCS as `ChangeCipherSpec()` when it expected EE.
 #   This is a tlsfuzzer state-machine quirk + a server-side
 #   nice-to-have (be more tolerant of cross-flight ordering).
-#
-# * `handshake with invalid 0-RTT and HRR`: similar cross-flight
-#   ordering issue around HRR.
 #
 # * `handshake with invalid 0-RTT and unknown version (downgrade to
 #   TLS 1.2)`: legitimate downgrade scenario. We refuse with the
@@ -55,6 +59,5 @@
 #   investigation needed; queued.
 
 handshake with 0-RTT, HRR and early data after 2nd Client Hello
-handshake with invalid 0-RTT and HRR
 handshake with invalid 0-RTT and unknown version (downgrade to TLS 1.2)
 undecryptable record later in handshake together with early_data

@@ -1184,6 +1184,15 @@ macro_rules! tls13_server_do_handshake_body {
         let ch_msg = ch_msg_bytes.as_slice();
 
         // Step 2: Process ClientHello (may result in HRR)
+        // Track whether we already sent the middlebox-compat CCS: RFC 8446
+        // §D.4 says the server "MUST send a dummy ChangeCipherSpec record
+        // immediately after its first handshake message. This is either
+        // the ServerHello, or the HelloRetryRequest." — so on an HRR path
+        // the CCS is emitted right after HRR and MUST NOT be repeated
+        // after the post-HRR ServerHello (otherwise the peer receives
+        // two CCS records, which tlsfuzzer / OpenSSL flag as a protocol
+        // violation).
+        let mut sent_fake_ccs = false;
         let actions = match hs.process_client_hello(ch_msg)? {
             ClientHelloResult::Actions(actions) => *actions,
             ClientHelloResult::HelloRetryRequest(hrr_actions) => {
@@ -1195,6 +1204,7 @@ macro_rules! tls13_server_do_handshake_body {
 
                 // RFC 8446 §D.4: server sends fake CCS after HRR
                 send_fake_ccs_body!($mode, $self);
+                sent_fake_ccs = true;
 
                 // Phase T104/T106 — Step 1b: buffer-and-drain for the
                 // retried ClientHello (CH2) after HRR. If CH1 offered
@@ -1264,8 +1274,14 @@ macro_rules! tls13_server_do_handshake_body {
         maybe_await!($mode, $self.stream.write_all(&sh_record))
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
-        // RFC 8446 §D.4: server sends fake CCS after ServerHello, before encryption
-        send_fake_ccs_body!($mode, $self);
+        // RFC 8446 §D.4: server sends fake CCS after its first handshake
+        // message. On a fresh (non-HRR) handshake this is the ServerHello;
+        // on an HRR path the CCS was already sent after HRR (see the
+        // `sent_fake_ccs` flag set in Step 2), so we MUST NOT send a
+        // second CCS here.
+        if !sent_fake_ccs {
+            send_fake_ccs_body!($mode, $self);
+        }
 
         // Step 4: Activate handshake write encryption
         $self
