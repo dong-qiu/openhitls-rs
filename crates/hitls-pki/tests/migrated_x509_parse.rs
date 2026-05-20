@@ -47640,4 +47640,172 @@ fn tc_line317_x509_cert_verify_by_pubkey() {
     assert!(!matches!(cert.verify_signature(&other), Ok(true)));
 }
 
-// Generation summary: 1052 emitted / 408 API-surface skipped / 56 unknown / 72 unsupported alg / 1588 total C cases.
+/// SDV_X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 utf8 ca and user
+/// C source: SDV_X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 335, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line335_x509_cert_charset_single() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_utf8.crt");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_utf8.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert!(result.is_ok());
+}
+
+/// SDV_X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 mix charset ca and user
+/// C source: SDV_X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 338, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line338_x509_cert_charset_single() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_mix.crt");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_mix.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert!(result.is_ok());
+}
+
+/// SDV_X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 mix charset ca and utf8 user
+/// C source: SDV_X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 341, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line341_x509_cert_charset_single() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_mix.crt");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_utf8.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert!(result.is_ok());
+}
+
+/// SDV_X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 utf8 ca and mix charset user
+/// C source: SDV_X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 344, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line344_x509_cert_charset_single() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_utf8.crt");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_mix.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert!(result.is_ok());
+}
+
+/// SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 utf8 ca and mix charset user not in the revocation list
+/// C source: SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 359, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line359_x509_crl_charset() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_utf8.crt");
+    let crl = load_crl_fixture("cert/chain/charset/convert_to_utf8/crl_utf8.crl");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_mix.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert!(result.is_ok());
+}
+
+/// SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 mix charset ca and mix charset user not in the revocation list
+/// C source: SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 362, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line362_x509_crl_charset() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_mix.crt");
+    let crl = load_crl_fixture("cert/chain/charset/convert_to_utf8/crl_utf8.crl");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_mix.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert!(result.is_ok());
+}
+
+/// SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 utf8 ca and utf8 user not in the revocation list
+/// C source: SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 365, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line365_x509_crl_charset() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_utf8.crt");
+    let crl = load_crl_fixture("cert/chain/charset/convert_to_utf8/crl_mix.crl");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_utf8.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert!(result.is_ok());
+}
+
+/// SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 mix charset ca and utf8 user not in the revocation list
+/// C source: SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 368, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line368_x509_crl_charset() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_mix.crt");
+    let crl = load_crl_fixture("cert/chain/charset/convert_to_utf8/crl_mix.crl");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_utf8.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert!(result.is_ok());
+}
+
+/// SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 utf8 ca and mix charset user in the revocation list
+/// C source: SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 371, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line371_x509_crl_charset() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_utf8.crt");
+    let crl = load_crl_fixture("cert/chain/charset/convert_to_utf8/crl_mix.crl");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_mix.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
+}
+
+/// SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 mix charset ca and mix charset user in the revocation list
+/// C source: SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 374, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line374_x509_crl_charset() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_mix.crt");
+    let crl = load_crl_fixture("cert/chain/charset/convert_to_utf8/crl_mix.crl");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_mix.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
+}
+
+/// SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 utf8 ca and utf8 user in the revocation list
+/// C source: SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 377, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line377_x509_crl_charset() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_utf8.crt");
+    let crl = load_crl_fixture("cert/chain/charset/convert_to_utf8/crl_utf8.crl");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_utf8.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
+}
+
+/// SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 mix charset ca and utf8 user in the revocation list
+/// C source: SDV_X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001 (line 380, X.509 charset chain-verify KAT)
+#[test]
+fn tc_line380_x509_crl_charset() {
+    let ca0 = load_cert_fixture("cert/chain/charset/convert_to_utf8/ca_mix.crt");
+    let crl = load_crl_fixture("cert/chain/charset/convert_to_utf8/crl_utf8.crl");
+    let cert = load_cert_fixture("cert/chain/charset/convert_to_utf8/user_utf8.crt");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca0);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    let result = verifier.verify_cert(&cert, &[]);
+    assert_eq!(result.unwrap_err().to_string(), "certificate revoked");
+}
+
+// Generation summary: 1064 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.

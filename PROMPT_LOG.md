@@ -5607,6 +5607,18 @@ Each is a candidate verifier-hardening Implementation phase. This closes the mig
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1052/1052 PASS. `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C: `pki/verify` charset chain-verify families (2026-05-20)
+
+> 等合并后继续做继续做 charset 链验证族
+
+**Result**: new `emit_charset_verify` (`Kind::CharsetVerify(CharsetVerify)` with three variants — `CertSingle` / `CertMulti` / `Crl`) migrates `X509_CERT_VERIFY_WITH_VARIOUS_CHARSET_FUNC_TC001` (single-level chain), `_TC002` (multi-level), and `X509_CRL_VERIFY_WITH_VARIOUS_CHARSET_FUNC` (single-level with CRL revocation). Each row runs through a `CertificateVerifier` and asserts the C `expectedResult`: `HITLS_PKI_SUCCESS` → `is_ok`; `ISSUE_CERT_NOT_FOUND` / `CERT_REVOKED` → `Err` Display match. `migrated_x509_parse.rs` 1052 → **1064 tests** (+12).
+
+**Skips**: 4 fixtures route to `skipped_unsupported_alg` — `charset/string_canon/…` (Rust's verifier does byte-exact DN matching, not the C string canonicalisation) and `user_err_aki…` / `user_err_issuer…` (Rust falls back to DN-only matching on AKI mismatch, and rejects some malformed fixtures at parse time, so the C ISSUE_CERT_NOT_FOUND outcome isn't reproduced). `CRL_NOT_FOUND` rows are skipped (Rust soft-fails on a missing CRL — same gap as `FILE_VERIFY`). `X509_CA_PATH_WITH_VARIOUS_CHARSET_FUNC` uses `STORECTX_ADD_CA_PATH` (directory-based CA loading) which has no Rust analogue → `ApiSurface`.
+
+**T113 still open**: `PARTIAL_CERT_VFY`, ML-DSA/ML-KEM/SLH-DSA chains, `STORE_CTRL`, `BUILD_CERT_CHAIN_CBK/WITH_ROOT`, `SM2_CERT_USERID`; `common/x509` / `cert/x509_check` / `crl/x509_crl` suites; CMS/PKCS12; malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1064/1064 PASS. `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
