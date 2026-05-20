@@ -47585,4 +47585,59 @@ fn tc_line86_x509_build_cert_chain() {
     assert!(verifier.verify_cert(&cert, &[]).is_ok());
 }
 
-// Generation summary: 1047 emitted / 413 API-surface skipped / 56 unknown / 72 unsupported alg / 1588 total C cases.
+/// SDV_X509_CERT_VERIFY_BY_PUBKEY_FUNC_TC001 RSAPSS
+/// C source: SDV_X509_CERT_VERIFY_BY_PUBKEY_FUNC_TC001 (line 305, X.509 verify-by-pubkey KAT)
+#[test]
+fn tc_line305_x509_cert_verify_by_pubkey() {
+    let cert = load_cert_fixture("cert/chain/rsa-pss-v3/end.der");
+    let issuer = load_cert_fixture("cert/chain/rsa-pss-v3/inter.der");
+    let other = load_cert_fixture("cert/chain/rsa-pss-v3/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+    assert!(!matches!(cert.verify_signature(&other), Ok(true)));
+}
+
+/// SDV_X509_CERT_VERIFY_BY_PUBKEY_FUNC_TC001 ECDSA
+/// C source: SDV_X509_CERT_VERIFY_BY_PUBKEY_FUNC_TC001 (line 308, X.509 verify-by-pubkey KAT)
+#[test]
+fn tc_line308_x509_cert_verify_by_pubkey() {
+    let cert = load_cert_fixture("cert/chain/verify/ecdsa_cert_test.pem");
+    let issuer = load_cert_fixture("cert/chain/verify/ecdsa_cert_verify.pem");
+    let other = load_cert_fixture("cert/chain/rsa-pss-v3/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+    assert!(!matches!(cert.verify_signature(&other), Ok(true)));
+}
+
+/// SDV_X509_CERT_VERIFY_BY_PUBKEY_FUNC_TC001 SM2
+/// C source: SDV_X509_CERT_VERIFY_BY_PUBKEY_FUNC_TC001 (line 311, X.509 verify-by-pubkey KAT)
+#[test]
+fn tc_line311_x509_cert_verify_by_pubkey() {
+    let cert = load_cert_fixture("cert/chain/verify/sm2_cert_test.pem");
+    let issuer = load_cert_fixture("cert/chain/verify/sm2_cert_verify.pem");
+    let other = load_cert_fixture("cert/chain/rsa-pss-v3/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+    assert!(!matches!(cert.verify_signature(&other), Ok(true)));
+}
+
+/// SDV_X509_CERT_VERIFY_BY_PUBKEY_FUNC_TC001 ED25519
+/// C source: SDV_X509_CERT_VERIFY_BY_PUBKEY_FUNC_TC001 (line 314, X.509 verify-by-pubkey KAT)
+#[test]
+fn tc_line314_x509_cert_verify_by_pubkey() {
+    let cert = load_cert_fixture("cert/chain/verify/ed25519_cert_test.pem");
+    let issuer = load_cert_fixture("cert/chain/verify/ed25519_cert_verify.pem");
+    let other = load_cert_fixture("cert/chain/rsa-pss-v3/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+    assert!(!matches!(cert.verify_signature(&other), Ok(true)));
+}
+
+/// SDV_X509_CERT_VERIFY_BY_PUBKEY_FUNC_TC001 RSA
+/// C source: SDV_X509_CERT_VERIFY_BY_PUBKEY_FUNC_TC001 (line 317, X.509 verify-by-pubkey KAT)
+#[test]
+fn tc_line317_x509_cert_verify_by_pubkey() {
+    let cert = load_cert_fixture("cert/chain/verify/rsa_cert_test.pem");
+    let issuer = load_cert_fixture("cert/chain/verify/rsa_cert_verify.pem");
+    let other = load_cert_fixture("cert/chain/rsa-pss-v3/ca.der");
+    assert!(cert.verify_signature(&issuer).unwrap());
+    assert!(!matches!(cert.verify_signature(&other), Ok(true)));
+}
+
+// Generation summary: 1052 emitted / 408 API-surface skipped / 56 unknown / 72 unsupported alg / 1588 total C cases.

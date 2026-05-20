@@ -67,6 +67,10 @@
 //!   intermediate CA) into a `CertificateVerifier` and asserts `verify_cert`
 //!   succeeds. ECDSA NIST P-192 chains are skipped (legacy curve unsupported
 //!   by Rust's signature verifier).
+//! * `X509_CERT_VERIFY_BY_PUBKEY_FUNC` — `certPath : issuerPath : otherPath`.
+//!   The C test verifies the cert with the issuer's public key (must succeed)
+//!   and with an unrelated cert's key (must fail); the migrated test mirrors
+//!   both via `Certificate::verify_signature`.
 //!
 //! For cert/CSR, `format` is a `BSL_FORMAT_*` token: `ASN1` → DER, `PEM` →
 //! PEM; the C `UNKNOWN` (auto-detect) format has no Rust equivalent and routes
@@ -95,6 +99,7 @@ pub fn emit_x509_kat(cases: &[TestCase]) -> (String, EmitStats) {
             Kind::CrlFileVerify(tc) => emit_crl_file_verify(&mut body, case, &mut stats, tc),
             Kind::CrlField(field) => emit_crl_field(&mut body, case, &mut stats, field),
             Kind::BuildCertChain => emit_build_cert_chain(&mut body, case, &mut stats),
+            Kind::CertVerifyByPubkey => emit_cert_verify_by_pubkey(&mut body, case, &mut stats),
             Kind::ApiSurface => stats.skipped_api += 1,
             Kind::Unknown => stats.skipped_unknown += 1,
         }
@@ -127,6 +132,8 @@ enum Kind {
     CrlField(CrlField),
     /// `X509_BUILD_CERT_CHAIN_FUNC` — build + verify a cert chain.
     BuildCertChain,
+    /// `X509_CERT_VERIFY_BY_PUBKEY_FUNC` — verify a cert against a pubkey.
+    CertVerifyByPubkey,
     ApiSurface,
     Unknown,
 }
@@ -342,6 +349,9 @@ fn classify(tc: &str) -> Kind {
     }
     if tc.contains("X509_BUILD_CERT_CHAIN_FUNC") {
         return Kind::BuildCertChain;
+    }
+    if tc.contains("X509_CERT_VERIFY_BY_PUBKEY_FUNC") {
+        return Kind::CertVerifyByPubkey;
     }
     // CSR field / expected-return families, the CRL field-check families
     // (`TC004/005/009-013`), and the malformed-DER negatives are migrated in
@@ -1177,6 +1187,43 @@ fn emit_build_cert_chain(out: &mut String, case: &TestCase, stats: &mut EmitStat
     writeln!(
         out,
         "    assert!(verifier.verify_cert(&cert, &[]).is_ok());"
+    )
+    .unwrap();
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// Emit a verify-by-pubkey KAT (`X509_CERT_VERIFY_BY_PUBKEY_FUNC`). The C row
+/// is `certPath : issuerPath : otherPath`; the C test verifies the cert with
+/// the issuer's public key (must succeed) and with an unrelated cert's public
+/// key (must fail). The migrated test mirrors both via
+/// `Certificate::verify_signature`.
+fn emit_cert_verify_by_pubkey(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
+    let (Some(cert_rel), Some(issuer_rel), Some(other_rel)) = (
+        arg_rel(&case.args, 0),
+        arg_rel(&case.args, 1),
+        arg_rel(&case.args, 2),
+    ) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+
+    write_doc(out, case, "X.509 verify-by-pubkey KAT");
+    writeln!(out, "#[test]").unwrap();
+    writeln!(
+        out,
+        "fn tc_line{}_x509_cert_verify_by_pubkey() {{",
+        case.line
+    )
+    .unwrap();
+    writeln!(out, "    let cert = load_cert_fixture({cert_rel:?});").unwrap();
+    writeln!(out, "    let issuer = load_cert_fixture({issuer_rel:?});").unwrap();
+    writeln!(out, "    let other = load_cert_fixture({other_rel:?});").unwrap();
+    writeln!(out, "    assert!(cert.verify_signature(&issuer).unwrap());").unwrap();
+    // Verifying with an unrelated cert's key must NOT succeed (Ok(false) or Err).
+    writeln!(
+        out,
+        "    assert!(!matches!(cert.verify_signature(&other), Ok(true)));"
     )
     .unwrap();
     writeln!(out, "}}\n").unwrap();

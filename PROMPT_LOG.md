@@ -5597,6 +5597,16 @@ Each is a candidate verifier-hardening Implementation phase. This closes the mig
 
 **Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1047/1047 PASS. `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
 
+## Phase T113 (continued) — Phase C: `pki/verify` verify-by-pubkey family (2026-05-18)
+
+> 继续推进
+
+**Result**: new `emit_cert_verify_by_pubkey` (+ `Kind::CertVerifyByPubkey`) migrates `X509_CERT_VERIFY_BY_PUBKEY_FUNC` — `certPath : issuerPath : otherPath`. The C test verifies the cert against the issuer's public key (must succeed) and against an unrelated cert's key (must fail); the migrated test mirrors both with `Certificate::verify_signature` — `assert!(cert.verify_signature(&issuer).unwrap())` + `assert!(!matches!(cert.verify_signature(&other), Ok(true)))`. `migrated_x509_parse.rs` 1047 → **1052 tests** (+5); all pass on first generation.
+
+**T113 still open**: the rest of `pki/verify` (charset families, `PARTIAL_CERT_VFY`, ML-DSA/ML-KEM/SLH-DSA chains, `STORE_CTRL`), the `common/x509` / `cert/x509_check` / `crl/x509_crl` suites, CMS/PKCS12, malformed-DER negatives.
+
+**Tests**: `cargo test -p hitls-pki --test migrated_x509_parse --all-features` 1052/1052 PASS. `cargo run -p xtask -- migrate-c-tests --algo x509-parse --check` up-to-date. `cargo test -p xtask` 7/7. `cargo clippy -p xtask --all-targets / -p hitls-pki --all-features --tests -D warnings` 0. `cargo fmt --all -- --check` clean.
+
 
 
 
