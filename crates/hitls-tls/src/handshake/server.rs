@@ -743,11 +743,15 @@ impl ServerHandshake {
                 )
             })?;
 
-            let selected_group = self
-                .config
-                .supported_groups
+            // RFC 8446 §4.2.7: the client's `supported_groups` are ordered
+            // from most preferred to least preferred. For HRR we honour the
+            // client's order (matching OpenSSL / BoringSSL / Go behaviour),
+            // not our own — picking the first client-preferred group that we
+            // actually support. This is what tlsfuzzer / typical
+            // client-driven interop checks assume.
+            let selected_group = client_groups
                 .iter()
-                .find(|g| client_groups.contains(g))
+                .find(|g| self.config.supported_groups.contains(g))
                 .copied()
                 .ok_or_else(|| TlsError::HandshakeFailed("no common named group for HRR".into()))?;
 

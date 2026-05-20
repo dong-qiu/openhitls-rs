@@ -1,0 +1,17 @@
+# tlsfuzzer's `test-tls13-no-unknown-groups.py` builds an "unknown
+# group codepoints" list by enumerating low 16-bit codepoints and
+# subtracting whichever groups it was told the server advertises.
+# Without `--groups`, that subtraction uses the script's own default
+# `[secp256r1, secp384r1, x25519]` (+ MLKEM variants if available),
+# which leaves `X448 (30)` / `secp521r1 (25)` / `FFDHE2048..6144
+# (256..259)` in the "unknown" range — but our `s-server` actually
+# advertises *all* of those. The server then picks a match the
+# script considers impossible, so the "all unknown" conversation
+# sees an HRR instead of `handshake_failure`, and the
+# "plus a recognised group" conversation sees the wrong group in HRR.
+#
+# Pass the full list our s-server advertises (see
+# `crates/hitls-cli/src/s_server.rs::make_config`) so tlsfuzzer's
+# subtraction removes every codepoint we actually support.
+--groups
+x25519,x448,secp256r1,secp384r1,secp521r1,ffdhe2048,ffdhe3072,ffdhe4096,ffdhe6144,ffdhe8192

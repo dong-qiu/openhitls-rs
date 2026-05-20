@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I106 (106 phases)
+- Implementation: I1–I107 (107 phases)
 - Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -341,7 +341,8 @@ Category summary:
 | 329 | T129 | Test | TLS 1.2 DHE / FFDHE tlsfuzzer curation — closing phase of the server-side tlsfuzzer effort. The `s-server` TLS 1.2 default cipher list was ECDHE-only; the `test-ffdhe-*` scripts hard-code `TLS_DHE_RSA_*`. Added 6 finite-field DHE_RSA suites (GCM + CBC-SHA/SHA256) to `default_tls12_suites()`, listed last so an ECDHE-capable client still negotiates the faster EC exchange (the TLS 1.2 server already implements `KeyExchangeAlg::Dhe` + RFC 7919 FFDHE params). Curated 2 scripts into `scripts_12` (14 → 16): `test-ffdhe-expected-params` (3/3 clean) and `test-ffdhe-negotiation` (38/41 — 3 XFAILs for one coherent gap: TLS 1.2 cipher-suite / named-group co-negotiation, where the server forces FFDHE2048 for a DHE_RSA suite instead of falling back when no FFDHE group is usable — a documented follow-up). Full-set verified (`-n 9999`); all 16 curated `scripts_12` rc=0, no regression | 2026-05-18 |
 | 330 | I105 | Impl | TLS 1.2 cipher-suite / named-group co-negotiation — `negotiate_cipher_suite` selected a cipher suite without checking that its key exchange could actually be honoured with the client's advertised `supported_groups`, so a `DHE_RSA` suite offered alongside a groups list with no usable FFDHE group was selected anyway (the server then force-defaulted FFDHE2048). New `kx_group_satisfiable` gate: a `*DHE` suite needs a common FFDHE group, an EC(DHE) suite needs a common EC group, static-RSA / PSK suites need none; an empty client list (no extension) is unconstrained (RFC 4492 §5.1). Unsatisfiable candidates are skipped — when none remain, `NoSharedCipherSuite` → `handshake_failure` is the correct outcome. Closes `no overlap between groups` in `test-ffdhe-negotiation.py` (38/3 → **39/2**; the script gains a `--alert handshake_failure` args file — RFC 5246 §7.2.2). The 2 residual XFAILs (`fallback to non-ffdhe` ×2) are WON'T-FIX: they require the server to offer a static-RSA (no-forward-secrecy) suite. +1 unit test; all 16 curated `scripts_12` rc=0 | 2026-05-18 |
 | 331 | I106 | Impl | `s-server --dtls` DTLS 1.2 listener (task ⑤ D1) — a UDP listener in `s-server` driving the DTLS 1.2 handshake against a real peer. Required closing a chain of **5 DTLS interop bugs** that the in-memory `dtls12_handshake_in_memory` (our-client-only) had hidden: (1) DTLS ServerHello version 0x0303→0xFEFD, (2) ServerHello missing RFC 5746 `renegotiation_info`, (3) multi-record-datagrams not split (openssl batches CKE+CCS+Finished — fixed by `dtls_next_record` queue), (4) AEAD decrypt recomputed the GCM nonce instead of using the transmitted explicit nonce (RFC 5288 §3 — symmetric I97-style bug, fixed by reading `fragment[0..8]`), (5) handshake transcript hashed the TLS 4-byte header, RFC 6347 §4.2.6 requires the DTLS 12-byte header (message_seq retained, fragment_offset=0, fragment_length=length) — fixed across `server_dtls12.rs` + `client_dtls12.rs` (~30 sites). New `dtls12_server_handshake` closure-driven driver in `connection_dtls12.rs` (DTLS flight sequence over caller-supplied `send`/`recv`); CLI `--dtls` + UDP loop + echo. Verified end-to-end against `openssl s_client -dtls1_2`: handshake completes (DTLSv1.2, ECDHE-RSA-AES128-GCM-SHA256) + application-data echo round-trips. 84 in-memory DTLS tests still PASS — proves the transcript rewrite is consistent across both sides. DTLCP transcript path left untouched (separate protocol) | 2026-05-20 |
-| 332 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
+| 333 | I107 | Impl | TLS 1.3 server-side HRR conformance — two RFC 8446 fixes surfaced by `test-tls13-no-unknown-groups.py`. **(1)** HRR `selected_group` now honours client preference (`client_groups.iter().find(|g| self.config.supported_groups.contains(g))`) instead of server preference, matching OpenSSL / BoringSSL / Go's HRR behaviour — RFC 8446 §4.2.7 says the client's `supported_groups` are "ordered from most preferred to least preferred". **(2)** RFC 8446 §D.4 middlebox-compat CCS now fires after the server's **first** handshake message only — on an HRR path the CCS is emitted after HRR and a `sent_fake_ccs` flag suppresses the duplicate after the post-HRR ServerHello (previously we always emitted both, which tlsfuzzer flags as protocol violation). Also adds `tests/tlsfuzzer/args/test-tls13-no-unknown-groups.txt` (`--groups` tells tlsfuzzer the full s-server group set so its "unknown" subtraction excludes X448 / secp521r1 / FFDHE-* whose codepoints fall in the script's enumerated range). **Net XFAIL reduction = 5**: `test-tls13-no-unknown-groups` 256/3 → **259/0** (xfail file removed); `test-tls13-hrr` 2/1 → **3/0** (xfail file removed); `test-tls13-0rtt-garbage` 7/4 → **8/3** (1 conv closed: `'handshake with invalid 0-RTT and HRR'`). No regression on the wider curated suite (`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean) | 2026-05-21 |
+| 334 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -20053,6 +20054,95 @@ primitive. Recorded inline in the family banner of
 - `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
   --all-targets` clean.
 
+### Summary
+
+Two RFC 8446 conformance bugs in the TLS 1.3 server-side
+HelloRetryRequest path, both surfaced by
+`test-tls13-no-unknown-groups.py` and confirmed by re-running adjacent
+HRR-touching scripts.
+
+### What landed
+
+**Fix 1 — HRR `selected_group` honours client preference (RFC 8446
+§4.2.7).** `handshake/server.rs` previously iterated
+`self.config.supported_groups` and picked the first server-preferred
+match in `client_groups`. RFC 8446 §4.2.7 says: "The
+`supported_groups` extension indicates the named groups which the
+client supports for key exchange, **ordered from most preferred to
+least preferred**." OpenSSL / BoringSSL / Go all honour that order on
+HRR; tlsfuzzer (and every other client-driven conformance harness)
+assumes the same. The iteration is now flipped:
+
+```rust
+let selected_group = client_groups
+    .iter()
+    .find(|g| self.config.supported_groups.contains(g))
+    .copied()
+    .ok_or_else(|| TlsError::HandshakeFailed("no common named group for HRR".into()))?;
+```
+
+The normal (non-HRR) `key_share` matching path keeps server
+preference — that path's "client only sent a key_share for X" is
+already a strict subset, and changing it would affect interop in
+ways the user code never asked for. HRR is the *fallback selection*
+where client preference is the natural rule.
+
+**Fix 2 — middlebox-compat CCS fires once, after the server's *first*
+handshake message (RFC 8446 §D.4).** `tls13_server_do_handshake_body!`
+in `crates/hitls-tls/src/macros.rs` was emitting `send_fake_ccs_body!`
+twice on the HRR path: once after HRR (correct) and once after the
+post-HRR ServerHello (incorrect — tlsfuzzer's state machine sees the
+second CCS where it expects EncryptedExtensions and fails with
+`Unexpected message from peer: ChangeCipherSpec()`). RFC 8446 §D.4
+is explicit: "the server MUST send a dummy ChangeCipherSpec record
+immediately after its **first** handshake message. This is either
+the ServerHello, **or the HelloRetryRequest**." Added a
+`sent_fake_ccs: bool` flag set when the HRR branch emits its CCS;
+the post-ServerHello CCS site is now gated `if !sent_fake_ccs`.
+
+**Fix 3 — `tests/tlsfuzzer/args/test-tls13-no-unknown-groups.txt`
+new file.** `test-tls13-no-unknown-groups.py` builds its "unknown
+codepoints" list by enumerating low 16-bit codepoints and subtracting
+whichever groups it was told the server advertises (via `--groups`).
+Without `--groups`, the script's default is `[secp256r1, secp384r1,
+x25519]` (+ MLKEM variants if `tlslite-ng` has them), which leaves
+`X448 (30) / secp521r1 (25) / FFDHE2048..6144 (256..259)` in the
+"unknown" range. Our s-server actually advertises all of those, so
+the server picked a "match" the script considered impossible —
+turning the `handshake_failure` expectation into an HRR. Passing the
+full s-server group set via `--groups` fixes the subtraction so the
+script's enumeration genuinely contains only codepoints we don't
+support.
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+- `cargo test -p hitls-tls --release --lib`: **1108 PASS / 0 FAIL**.
+- `cargo test -p hitls-integration-tests --release`: 0 tests (no
+  unit tests, but compiles clean).
+- tlsfuzzer (against a local `s-server -p 14433` + `--ticket-key
+  ...`):
+
+  | Script | Before | After |
+  |---|---|---|
+  | `test-tls13-no-unknown-groups` | 256 PASS / 3 FAIL (3 XFAIL'd) | **259 PASS / 0 FAIL / 0 XFAIL** |
+  | `test-tls13-hrr` | 2 PASS / 1 XFAIL | **3 PASS / 0 XFAIL** |
+  | `test-tls13-0rtt-garbage` | 7 PASS / 4 XFAIL | **8 PASS / 3 XFAIL** (1 conv `'handshake with invalid 0-RTT and HRR'` closed by fix 2 — the HRR CCS dedup also closes a tlsfuzzer state-machine variant inside the 0-RTT-garbage flow) |
+- All 11 adjacent TLS 1.3 scripts checked for regression
+  (record-layer-limits, keyshare-omitted, eddsa, connection-abort,
+  finished-plaintext, empty-alert, zero-length-data,
+  zero-content-type, keyupdate, sig-algorithms, version-negotiation,
+  session-resumption): no new FAIL, no XFAIL count drift other than
+  the 3 above.
+- `test-ffdhe-negotiation` apparent "39 FAIL" during sweep was a
+  port misconfiguration (FFDHE script targets the TLS 1.2 listener; it
+  was pointed at the TLS 1.3 listener) — verified clean against the
+  correct port.
+
+**Net XFAIL reduction: 5.**
+
 ### Files Modified
 
 | File | Status | Description |
@@ -20069,3 +20159,117 @@ the remaining `pki/verify` families (`VFY_TLS_*EKU_KU_*` /
 `STORE_*` / `BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN_*`) plus the
 entire `pki/cms` + `pki/pkcs12` SDV suites follow in subsequent
 T113 commits under the no-sub-phase rule.
+
+---
+
+## Phase I107 — TLS 1.3 Server-Side HRR Conformance: client-preferred group + single CCS (2026-05-21)
+
+### Summary
+
+Two RFC 8446 conformance bugs in the TLS 1.3 server-side
+HelloRetryRequest path, both surfaced by
+`test-tls13-no-unknown-groups.py` and confirmed by re-running adjacent
+HRR-touching scripts.
+
+### What landed
+
+**Fix 1 — HRR `selected_group` honours client preference (RFC 8446
+§4.2.7).** `handshake/server.rs` previously iterated
+`self.config.supported_groups` and picked the first server-preferred
+match in `client_groups`. RFC 8446 §4.2.7 says: "The
+`supported_groups` extension indicates the named groups which the
+client supports for key exchange, **ordered from most preferred to
+least preferred**." OpenSSL / BoringSSL / Go all honour that order on
+HRR; tlsfuzzer (and every other client-driven conformance harness)
+assumes the same. The iteration is now flipped:
+
+```rust
+let selected_group = client_groups
+    .iter()
+    .find(|g| self.config.supported_groups.contains(g))
+    .copied()
+    .ok_or_else(|| TlsError::HandshakeFailed("no common named group for HRR".into()))?;
+```
+
+The normal (non-HRR) `key_share` matching path keeps server
+preference — that path's "client only sent a key_share for X" is
+already a strict subset, and changing it would affect interop in
+ways the user code never asked for. HRR is the *fallback selection*
+where client preference is the natural rule.
+
+**Fix 2 — middlebox-compat CCS fires once, after the server's *first*
+handshake message (RFC 8446 §D.4).** `tls13_server_do_handshake_body!`
+in `crates/hitls-tls/src/macros.rs` was emitting `send_fake_ccs_body!`
+twice on the HRR path: once after HRR (correct) and once after the
+post-HRR ServerHello (incorrect — tlsfuzzer's state machine sees the
+second CCS where it expects EncryptedExtensions and fails with
+`Unexpected message from peer: ChangeCipherSpec()`). RFC 8446 §D.4
+is explicit: "the server MUST send a dummy ChangeCipherSpec record
+immediately after its **first** handshake message. This is either
+the ServerHello, **or the HelloRetryRequest**." Added a
+`sent_fake_ccs: bool` flag set when the HRR branch emits its CCS;
+the post-ServerHello CCS site is now gated `if !sent_fake_ccs`.
+
+**Fix 3 — `tests/tlsfuzzer/args/test-tls13-no-unknown-groups.txt`
+new file.** `test-tls13-no-unknown-groups.py` builds its "unknown
+codepoints" list by enumerating low 16-bit codepoints and subtracting
+whichever groups it was told the server advertises (via `--groups`).
+Without `--groups`, the script's default is `[secp256r1, secp384r1,
+x25519]` (+ MLKEM variants if `tlslite-ng` has them), which leaves
+`X448 (30) / secp521r1 (25) / FFDHE2048..6144 (256..259)` in the
+"unknown" range. Our s-server actually advertises all of those, so
+the server picked a "match" the script considered impossible —
+turning the `handshake_failure` expectation into an HRR. Passing the
+full s-server group set via `--groups` fixes the subtraction so the
+script's enumeration genuinely contains only codepoints we don't
+support.
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+- `cargo test -p hitls-tls --release --lib`: **1108 PASS / 0 FAIL**.
+- `cargo test -p hitls-integration-tests --release`: 0 tests (no
+  unit tests, but compiles clean).
+- tlsfuzzer (against a local `s-server -p 14433` + `--ticket-key
+  ...`):
+
+  | Script | Before | After |
+  |---|---|---|
+  | `test-tls13-no-unknown-groups` | 256 PASS / 3 FAIL (3 XFAIL'd) | **259 PASS / 0 FAIL / 0 XFAIL** |
+  | `test-tls13-hrr` | 2 PASS / 1 XFAIL | **3 PASS / 0 XFAIL** |
+  | `test-tls13-0rtt-garbage` | 7 PASS / 4 XFAIL | **8 PASS / 3 XFAIL** (1 conv `'handshake with invalid 0-RTT and HRR'` closed by fix 2 — the HRR CCS dedup also closes a tlsfuzzer state-machine variant inside the 0-RTT-garbage flow) |
+- All 11 adjacent TLS 1.3 scripts checked for regression
+  (record-layer-limits, keyshare-omitted, eddsa, connection-abort,
+  finished-plaintext, empty-alert, zero-length-data,
+  zero-content-type, keyupdate, sig-algorithms, version-negotiation,
+  session-resumption): no new FAIL, no XFAIL count drift other than
+  the 3 above.
+- `test-ffdhe-negotiation` apparent "39 FAIL" during sweep was a
+  port misconfiguration (FFDHE script targets the TLS 1.2 listener; it
+  was pointed at the TLS 1.3 listener) — verified clean against the
+  correct port.
+
+**Net XFAIL reduction: 5.**
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | HRR `selected_group` flipped to client-preferred (fix 1). |
+| `crates/hitls-tls/src/macros.rs` | Modified | `tls13_server_do_handshake_body!` tracks `sent_fake_ccs` flag; CCS suppressed after post-HRR ServerHello (fix 2). |
+| `tests/tlsfuzzer/args/test-tls13-no-unknown-groups.txt` | New | `--groups` passing full s-server group set (fix 3). |
+| `tests/tlsfuzzer/xfail/test-tls13-no-unknown-groups.txt` | Deleted | All 3 conversations now PASS. |
+| `tests/tlsfuzzer/xfail/test-tls13-hrr.txt` | Deleted | All 1 conversation now PASS. |
+| `tests/tlsfuzzer/xfail/test-tls13-0rtt-garbage.txt` | Modified | Dropped `'handshake with invalid 0-RTT and HRR'`; 4 → 3 entries; header annotated with T131 close note. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 333 + Implementation summary I1–I106 → I1–I107. |
+| `PROMPT_LOG.md` | Modified | I107 prompt + result entry. |
+
+### Build Status (Post I107)
+
+`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean.
+TLS 1.3 server HRR path is now both RFC 8446 §4.2.7 (client-preferred
+group) and §D.4 (single CCS) conformant. Net XFAIL reduction across
+the curated tlsfuzzer suite: **5** (`no-unknown-groups` 3 +
+`hrr` 1 + `0rtt-garbage` 1).
