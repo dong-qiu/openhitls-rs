@@ -6436,3 +6436,37 @@ DTLCP (Chinese DTLS variant) transcript path left untouched —
 separate protocol, separate convention. Fragmented-message
 transcript reassembly is a future hardening item (no-op for openssl
 s_client over localhost — does not fragment).
+
+---
+
+## Phase T130 — openssl-DTLS Interop Regression Test (Task ⑤, D2) (2026-05-20)
+
+> 做D2
+
+Locks the I106 DTLS work in with CI regression protection. The 5
+DTLS bugs I106 fixed were all symmetric — they only surfaced when
+the peer was conformant (openssl). The 84 in-memory DTLS tests
+can't catch a regression in any of those code paths because they
+pair our own client with our server. This phase makes openssl the
+conformance oracle on every ignored-gate CI run.
+
+`tests/interop/tests/openssl_interop.rs` gains
+`test_openssl_s_client_dtls12` under the same
+`#[ignore = "requires external openssl tool"]` gate as the rest of
+that file: bind a `UdpSocket`, spawn a server thread driving
+`dtls12_server_handshake` over datagram closures (cookie mode on —
+exercises the HelloVerifyRequest exchange), run `openssl s_client
+-dtls1_2 -brief` against the port, assert both
+`Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on
+the server and openssl's exit/DTLSv1.2 string on the client. Echo
+attempt after the handshake is best-effort — handshake completion
+is the primary verification.
+
+**Verification**: `fmt` + `clippy --workspace --all-features
+--all-targets` (`-D warnings`) clean; running the new test under
+`--ignored` PASSes in ~0.8s. No production-code change. Recorded as
+DEV_LOG Phase T130.
+
+Task ⑤ (D1 + D2) closes — feature shipped (I106) and regression-
+protected (T130). The original 5-task server-side tlsfuzzer plan is
+fully delivered.
