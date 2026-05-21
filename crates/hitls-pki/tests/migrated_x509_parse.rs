@@ -48012,4 +48012,136 @@ fn tc_line259_x509_vfy_bc_pathlen_multi_limit_fail() {
     );
 }
 
-// Generation summary: 1076 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
+// ============================================================
+// T113 (continued) — Phase C: `pki/verify` certificate-time
+// family (RFC 5280 §4.1.2.5 — notBefore / notAfter validity).
+// 6 TCs migrated from openHiTLS C SDV `test_suite_sdv_x509_vfy.c`,
+// against the `cert/chain/time/` fixture corpus (3 `*_current.der`
+// + 3 `*_expired.der`). The C side uses
+// `BSL_SAL_DateToUtcTimeConvert(cert->tbs.validTime.{start,end}, …)`
+// to read the validity window — the Rust port reads
+// `cert.not_before` / `cert.not_after` directly off `Certificate`.
+// ============================================================
+
+/// Helper: build a fresh `CertificateVerifier` anchored on `root` with a
+/// fixed `verification_time`. Each CERT_TIME assertion makes a new verifier
+/// (mirrors the C side, which calls `STORECTX_SET_TIME` + `CertVerify` for
+/// every checkpoint in the TC body).
+fn cert_time_verifier_at(root: Certificate, t: i64) -> CertificateVerifier {
+    let mut v = CertificateVerifier::new();
+    v.add_trusted_cert(root);
+    v.set_verification_time(t);
+    v
+}
+
+/// SDV_X509_VFY_CERT_TIME_CURRENT_PASS_TC001 — current time within all-3-current chain → PASS
+/// C source: SDV_X509_VFY_CERT_TIME_CURRENT_PASS_TC001 (line 2362)
+#[test]
+fn tc_line2362_x509_vfy_cert_time_current_pass() {
+    let root = load_cert_fixture("cert/chain/time/root_current.der");
+    let inter = load_cert_fixture("cert/chain/time/inter_current.der");
+    let leaf = load_cert_fixture("cert/chain/time/leaf_current.der");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let v = cert_time_verifier_at(root, now);
+    assert!(v.verify_cert(&leaf, &[inter]).is_ok());
+}
+
+/// SDV_X509_VFY_CERT_TIME_HISTORY_PASS_TC001 — historical time within expired chain → PASS
+/// C source: SDV_X509_VFY_CERT_TIME_HISTORY_PASS_TC001 (line 2413)
+#[test]
+fn tc_line2413_x509_vfy_cert_time_history_pass() {
+    let root = load_cert_fixture("cert/chain/time/root_expired.der");
+    let inter = load_cert_fixture("cert/chain/time/inter_expired.der");
+    let leaf = load_cert_fixture("cert/chain/time/leaf_expired.der");
+    let history = leaf.not_before + (leaf.not_after - leaf.not_before) / 2;
+    let v = cert_time_verifier_at(root, history);
+    assert!(v.verify_cert(&leaf, &[inter]).is_ok());
+}
+
+/// SDV_X509_VFY_CERT_TIME_OUT_OF_RANGE_FAIL_TC001 — before notBefore + after notAfter both reject
+/// C source: SDV_X509_VFY_CERT_TIME_OUT_OF_RANGE_FAIL_TC001 (line 2470)
+#[test]
+fn tc_line2470_x509_vfy_cert_time_out_of_range_fail() {
+    let root = load_cert_fixture("cert/chain/time/root_expired.der");
+    let inter = load_cert_fixture("cert/chain/time/inter_expired.der");
+    let leaf = load_cert_fixture("cert/chain/time/leaf_expired.der");
+
+    // Step 1: time = leaf.not_before - 60s → NOT_YET_VALID (C: VFY_NOTBEFORE_IN_FUTURE)
+    let v = cert_time_verifier_at(root.clone(), leaf.not_before - 60);
+    let err = v
+        .verify_cert(&leaf, std::slice::from_ref(&inter))
+        .expect_err("must reject pre-notBefore time");
+    assert_eq!(err.to_string(), "certificate not yet valid");
+
+    // Step 2: time = leaf.not_after + 60s → EXPIRED (C: VFY_NOTAFTER_EXPIRED)
+    let v = cert_time_verifier_at(root, leaf.not_after + 60);
+    let err = v
+        .verify_cert(&leaf, std::slice::from_ref(&inter))
+        .expect_err("must reject post-notAfter time");
+    assert_eq!(err.to_string(), "certificate expired");
+}
+
+/// SDV_X509_VFY_CERT_TIME_BOUNDARY_PASS_TC001 — leaf boundary {start, end} inclusive → PASS
+/// C source: SDV_X509_VFY_CERT_TIME_BOUNDARY_PASS_TC001 (line 2567)
+#[test]
+fn tc_line2567_x509_vfy_cert_time_boundary_leaf_pass() {
+    let root = load_cert_fixture("cert/chain/time/root_expired.der");
+    let inter = load_cert_fixture("cert/chain/time/inter_expired.der");
+    let leaf = load_cert_fixture("cert/chain/time/leaf_expired.der");
+
+    let v = cert_time_verifier_at(root.clone(), leaf.not_before);
+    assert!(
+        v.verify_cert(&leaf, std::slice::from_ref(&inter)).is_ok(),
+        "leaf notBefore boundary must be inclusive"
+    );
+
+    let v = cert_time_verifier_at(root, leaf.not_after);
+    assert!(
+        v.verify_cert(&leaf, std::slice::from_ref(&inter)).is_ok(),
+        "leaf notAfter boundary must be inclusive"
+    );
+}
+
+/// SDV_X509_VFY_CERT_TIME_BOUNDARY_PASS_TC002 — intermediate boundary {start, end} → PASS
+/// C source: SDV_X509_VFY_CERT_TIME_BOUNDARY_PASS_TC002 (line 2622)
+#[test]
+fn tc_line2622_x509_vfy_cert_time_boundary_inter_pass() {
+    let root = load_cert_fixture("cert/chain/time/root_expired.der");
+    let inter = load_cert_fixture("cert/chain/time/inter_expired.der");
+
+    let v = cert_time_verifier_at(root.clone(), inter.not_before);
+    assert!(
+        v.verify_cert(&inter, &[]).is_ok(),
+        "inter notBefore boundary must be inclusive"
+    );
+
+    let v = cert_time_verifier_at(root, inter.not_after);
+    assert!(
+        v.verify_cert(&inter, &[]).is_ok(),
+        "inter notAfter boundary must be inclusive"
+    );
+}
+
+/// SDV_X509_VFY_CERT_TIME_BOUNDARY_PASS_TC003 — root boundary {start, end} → PASS
+/// C source: SDV_X509_VFY_CERT_TIME_BOUNDARY_PASS_TC003 (line 2692)
+#[test]
+fn tc_line2692_x509_vfy_cert_time_boundary_root_pass() {
+    let root = load_cert_fixture("cert/chain/time/root_expired.der");
+
+    let v = cert_time_verifier_at(root.clone(), root.not_before);
+    assert!(
+        v.verify_cert(&root, &[]).is_ok(),
+        "root notBefore boundary must be inclusive"
+    );
+
+    let v = cert_time_verifier_at(root.clone(), root.not_after);
+    assert!(
+        v.verify_cert(&root, &[]).is_ok(),
+        "root notAfter boundary must be inclusive"
+    );
+}
+
+// Generation summary: 1082 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
