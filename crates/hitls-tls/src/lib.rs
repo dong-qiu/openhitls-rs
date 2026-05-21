@@ -210,6 +210,12 @@ impl CipherSuite {
     // Signaling cipher suite values
     /// TLS Fallback SCSV (RFC 7507) — signals intentional version downgrade.
     pub const TLS_FALLBACK_SCSV: Self = Self(0x5600);
+    /// RFC 5746 §3.3 — Empty Renegotiation Info SCSV. A client that
+    /// supports secure renegotiation but does not want to add an
+    /// extension may include this signaling cipher suite in the
+    /// ClientHello. Servers MUST treat it as equivalent to receiving
+    /// the empty `renegotiation_info` extension (§3.6).
+    pub const TLS_EMPTY_RENEGOTIATION_INFO_SCSV: Self = Self(0x00FF);
 }
 
 /// The role of a TLS endpoint.

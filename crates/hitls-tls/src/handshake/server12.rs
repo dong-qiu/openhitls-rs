@@ -215,6 +215,15 @@ pub struct Tls12ServerHandshake {
     /// (RFC 4492 §5.1.2 / RFC 8422 §5.1.2 — echoed in ServerHello when
     /// an ECC cipher suite is negotiated).
     client_offered_ec_point_formats: bool,
+    /// Whether the client signalled secure-renegotiation support in
+    /// ClientHello — set when the CH carries either the
+    /// `renegotiation_info` extension (RFC 5746 §3.4) **or** the
+    /// `TLS_EMPTY_RENEGOTIATION_INFO_SCSV` signaling cipher suite
+    /// (§3.3). Per RFC 5746 §3.6, the server MUST include the
+    /// `renegotiation_info` extension in the ServerHello **only if**
+    /// the client signalled support; otherwise the extension MUST
+    /// NOT be sent.
+    client_signalled_secure_renego: bool,
     /// Client's record size limit from ClientHello (RFC 8449).
     client_record_size_limit: Option<u16>,
     /// Whether the client sent the status_request extension (OCSP stapling).
@@ -264,6 +273,7 @@ impl Tls12ServerHandshake {
             client_offered_ems: false,
             client_offered_etm: false,
             client_offered_ec_point_formats: false,
+            client_signalled_secure_renego: false,
             client_record_size_limit: None,
             client_wants_ocsp: false,
             client_wants_sct: false,
@@ -387,6 +397,7 @@ impl Tls12ServerHandshake {
         self.client_offered_ems = false;
         self.client_offered_etm = false;
         self.client_offered_ec_point_formats = false;
+        self.client_signalled_secure_renego = false;
         self.client_record_size_limit = None;
         self.client_wants_ocsp = false;
         self.client_wants_sct = false;
@@ -537,6 +548,9 @@ impl Tls12ServerHandshake {
                             "non-empty renegotiation_info in initial handshake".into(),
                         ));
                     }
+                    // RFC 5746 §3.6 — client signalled secure-renego support
+                    // via the extension; gate ServerHello echo on this flag.
+                    self.client_signalled_secure_renego = true;
                 }
                 ExtensionType::RECORD_SIZE_LIMIT => {
                     self.client_record_size_limit = Some(parse_record_size_limit(&ext.data)?);
@@ -601,6 +615,18 @@ impl Tls12ServerHandshake {
                     )));
                 }
             }
+        }
+
+        // RFC 5746 §3.3 — TLS_EMPTY_RENEGOTIATION_INFO_SCSV signals
+        // secure-renegotiation support equivalent to an empty
+        // `renegotiation_info` extension; merge into the single flag
+        // so the ServerHello build below only echoes when one of the
+        // two was actually presented.
+        if ch
+            .cipher_suites
+            .contains(&CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV)
+        {
+            self.client_signalled_secure_renego = true;
         }
 
         // Fallback SCSV (RFC 7507) detection
@@ -676,13 +702,21 @@ impl Tls12ServerHandshake {
 
         // Build ServerHello extensions
         let mut sh_extensions = Vec::new();
-        // Renegotiation info (RFC 5746): always include in ServerHello
+        // RFC 5746 §3.6 — `renegotiation_info` ServerHello echo:
+        //   * renegotiation handshake → always send (carries
+        //     client_verify_data ‖ server_verify_data, MUST per §3.7),
+        //   * initial handshake → send the EMPTY extension only if the
+        //     client signalled support (via the extension itself or
+        //     `TLS_EMPTY_RENEGOTIATION_INFO_SCSV`). Phase I113 — `test-cve-
+        //     2016-6309.py` sanity step uses neither and pins this:
+        //     pre-I113 we unconditionally echoed, which tlsfuzzer (and
+        //     OpenSSL / NSS / Go) flag as "unadvertised extension".
         if self.is_renegotiation {
             sh_extensions.push(build_renegotiation_info(
                 &self.prev_client_verify_data,
                 &self.prev_server_verify_data,
             ));
-        } else {
+        } else if self.client_signalled_secure_renego {
             sh_extensions.push(build_renegotiation_info_initial());
         }
         if let Some(ref alpn) = self.negotiated_alpn {
@@ -1149,13 +1183,14 @@ impl Tls12ServerHandshake {
 
         // Build ServerHello echoing the cached session_id
         let mut sh_extensions = Vec::new();
-        // Renegotiation info (RFC 5746)
+        // RFC 5746 §3.6 — same conditional emit rule as the fresh
+        // path above (Phase I113).
         if self.is_renegotiation {
             sh_extensions.push(build_renegotiation_info(
                 &self.prev_client_verify_data,
                 &self.prev_server_verify_data,
             ));
-        } else {
+        } else if self.client_signalled_secure_renego {
             sh_extensions.push(build_renegotiation_info_initial());
         }
         if self.config.ticket_key.is_some() {

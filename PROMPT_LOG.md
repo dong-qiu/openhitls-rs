@@ -6920,3 +6920,55 @@ overflow + 3 sig_algs + 1 record-plaintext + 2 session-resumption
 + 1 CCS-strict).
 
 Recorded as DEV_LOG Phase I112.
+
+---
+
+## Phase I113 — TLS 1.2 RFC 5746 Server-Side `renegotiation_info` Conditional Emit (2026-05-21)
+
+> 按照XFAIL reduction的目标依次执行
+
+Seventh iteration of the XFAIL-reduction track. After I112 the
+clearest remaining target was `test-cve-2016-6309` (3 XFAILs).
+Re-read of the xfail header + empirical run showed two completely
+independent root causes that the T90 author had lumped together:
+
+- `sanity` ×2: T90 guessed "add_handshake -C inconsistent", but the
+  actual failure (per tlsfuzzer's traceback) is
+  `_process_extensions("Server sent unadvertised extension of type
+  renegotiation_info")` — an RFC 5746 §3.6 violation. Per §3.6 the
+  server MUST include the empty `renegotiation_info` extension in
+  the ServerHello only if the ClientHello carried the extension
+  (§3.4) or the `TLS_EMPTY_RENEGOTIATION_INFO_SCSV` signaling
+  cipher suite (§3.3). hitls's TLS 1.2 server always echoed.
+- `Large ClientHello padding` + `Large incorrect ClientHello length`:
+  a 21,798-byte padded CH fragmented across multiple records. Needs
+  TLS 1.2 server-side cross-record CH reassembly (mirrors T104).
+
+The work naturally splits along these lines — I113 fixes the §3.6
+violation in isolation; the CH reassembly is queued as a follow-up.
+
+Implementation:
+1. `crates/hitls-tls/src/lib.rs`: add `CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV` (= 0x00FF).
+2. `crates/hitls-tls/src/handshake/server12.rs`: new
+   `client_signalled_secure_renego: bool` flag set when CH carries
+   the renegotiation_info extension OR the SCSV; both ServerHello-
+   build sites gate the `renegotiation_info_initial` push on it.
+
+Net XFAIL reduction = 1 (`sanity` is one unique conversation; tlsfuzzer
+counts it twice when it runs before+after the destructive tests).
+`test-cve-2016-6309` 0/3 XFAIL → **2 PASS / 2 XFAIL**; xfail file
+shrunk from 3 entries to 2 (`Large *` deferred).
+
+Verification: `cargo test -p hitls-tls --release --lib` 1108/0;
+`fmt` + `clippy -D warnings` clean. 9 adjacent TLS 1.2 + 3 TLS 1.3
+scripts regression-checked: no new FAIL, no XFAIL drift.
+
+Skipped this iteration: `test-cve-2016-2107` — documented in its
+xfail header as a real won't-fix (OpenSSL CBC-MtE-specific CVE; we
+don't offer CBC suites by default, the protocol-flow expectation
+doesn't apply to a GCM-only server).
+
+Cumulative XFAIL reduction across the tlsfuzzer track (I107 +
+I108 + I109 + I110 + I111 + I112 + I113): **22**.
+
+Recorded as DEV_LOG Phase I113.

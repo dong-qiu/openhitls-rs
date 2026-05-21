@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I112 (112 phases)
+- Implementation: I1–I113 (113 phases)
 - Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -347,7 +347,8 @@ Category summary:
 | 338 | I110 | Impl | TLS 1.3 record-layer plaintext-rejection conformance — RFC 8446 §5.1/§5.2: once read decryption is active, handshake and application_data records MUST be carried as `TLSCiphertext` (wire `content_type = application_data`, 23). `record::RecordLayer::open_record` previously fell through to "return as plaintext" for any non-`ApplicationData` wire content type in TLS 1.3 encrypted phase — so a plaintext Handshake record (e.g. tlsfuzzer's `ResetWriteConnectionState() + FinishedGenerator()`) bypassed AEAD entirely. The Finished `verify_data` happens to match across that bypass (it's computed over the transcript hash, not over record-layer cipher state), so the server entered Connected with no alert. New strict gate: in TLS 1.3 encrypted phase, only `ApplicationData` (decrypted), `Alert`, and `ChangeCipherSpec` (latter two explicitly allowed in plaintext for middlebox-compat / pre-encryption alerts) pass; any other plaintext wire content type returns `RecordError("unexpected content type …")` which alert mapper routes to `unexpected_message`. **Net XFAIL reduction = 1**: `test-tls13-finished-plaintext` 2/1 → **3/0** (xfail file removed). No regression on 11 adjacent TLS 1.3 scripts (`record-layer-limits` / `signature-algorithms` / `finished` / `no-unknown-groups` / `hrr` / `empty-alert` / `zero-content-type` / `zero-length-data` / `keyupdate` / `0rtt-garbage` / `rsa-signatures`). 1108 `hitls-tls` lib tests still PASS — no test depended on the lax pre-I110 behaviour | 2026-05-21 |
 | 340 | I111 | Impl | `s-server` cross-version PSK + session-resumption listener — `--tls auto` on the dedicated PSK + `--ticket-key` listener so it accepts both TLS 1.2 and TLS 1.3 ClientHellos on the same port (the cross-version corner `test-tls13-session-resumption.py` encodes). Paired CI workflow change (`.github/workflows/tlsfuzzer.yml`: PSK listener gains `--tls auto`) + new args file (`tests/tlsfuzzer/args/test-tls13-session-resumption.txt`: `-d` makes the script use ECDHE for its TLS 1.2 sanity step rather than its default static-RSA `[TLS_RSA_WITH_AES_128_CBC_SHA]` — hitls intentionally does not offer static-RSA suites, no FS). **Net XFAIL reduction = 2**: `test-tls13-session-resumption` 5/2 → **7/0** (xfail file removed; closes `sanity - TLS 1.2` + `use TLS 1.2 ticket in TLS 1.3` cross-version cases). No production-code change — only CI workflow + args + xfail housekeeping. No regression on 6 adjacent TLS 1.3 RSA scripts (record-layer-limits / signature-algorithms / finished / finished-plaintext / no-unknown-groups / hrr); `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
 | 342 | I112 | Impl | TLS 1.2 ChangeCipherSpec strict payload + cleartext send conformance — closes `test-ccs.py` `two bytes long CCS` XFAIL. RFC 5246 §7.1: the CCS message "consists of a single byte of value 1"; `process_change_cipher_spec` (TLS 1.2 server **and** client) now rejects any other payload with `unexpected_message` instead of silently accepting (the state machine previously only checked `state == WaitChangeCipherSpec`). Caller-sites updated to forward the CCS fragment (`connection12_async.rs` × 6 + `connection12/{client,server}.rs` × 6). Also fixes a paired send-side asymmetry surfaced by the in-memory renegotiation tests: `RecordLayer::seal_record` was AEAD-encrypting CCS in active-encryption phase (TLS 1.2 renegotiation), but `open_record` skips decryption of CCS — leaving an asymmetric record (RFC 5246 §7.1: CCS is cleartext). `seal_record` now short-circuits CCS to plaintext, matching the read path. **Net XFAIL reduction = 1**: `test-ccs` 2/1 → **3/0**. No regression on 17 adjacent TLS 1.2 + TLS 1.3 scripts; 1108 `hitls-tls` lib tests + integration tests still PASS (28 unit-test call-sites + 2 integration `tests/interop/tests/pki.rs` call-sites updated to the payload-aware signature) | 2026-05-21 |
-| 343 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
+| 344 | I113 | Impl | TLS 1.2 RFC 5746 server-side `renegotiation_info` conditional emit — RFC 5746 §3.6: the server MUST include the empty `renegotiation_info` extension in the ServerHello of an initial handshake **only if** the ClientHello carried either the extension itself (§3.4) or the `TLS_EMPTY_RENEGOTIATION_INFO_SCSV` signaling cipher suite (§3.3). Previously hitls's TLS 1.2 server **always** echoed the extension, which OpenSSL / NSS / Go / tlsfuzzer's `_process_extensions` flag as "unadvertised extension". New `client_signalled_secure_renego` state on `Tls12ServerHandshake` set when the CH carries the extension or the SCSV (`0x00FF` added as `CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV` in `lib.rs`); both `process_client_hello` + `process_client_hello_resumable` ServerHello-build sites gate the `build_renegotiation_info_initial()` push on the new flag. **Net XFAIL reduction = 1** (1 unique conversation `sanity` reported by tlsfuzzer as 2 entries when run before+after): `test-cve-2016-6309` 0 PASS / 3 XFAIL → **2 PASS / 2 XFAIL** (xfail file shrunk from 3 lines to 2). The 2 remaining XFAILs (`Large ClientHello padding` + `Large incorrect ClientHello length`) are a separate cross-record CH reassembly gap, deferred to a follow-up PR (mirrors the work T104 did for TLS 1.3 server-side, applied to `connection12*`). No regression on 9 adjacent TLS 1.2 + 3 TLS 1.3 scripts; `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
+| 345 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -20932,3 +20933,100 @@ DTLS record layer has its own path).
 Cumulative tlsfuzzer XFAIL reduction: **21** (5 HRR + 9
 record-layer overflow + 3 sig_algs + 1 record-plaintext +
 2 session-resumption + 1 CCS-strict).
+
+---
+
+## Phase I113 — TLS 1.2 RFC 5746 Server-Side `renegotiation_info` Conditional Emit (2026-05-21)
+
+### Summary
+
+Closes the `sanity` failures in `test-cve-2016-6309.py` (T90 had
+documented the wrong root cause — guessed "add_handshake -C", but
+the actual failure was an RFC 5746 §3.6 server-side violation
+surfaced by tlsfuzzer's `_process_extensions("unadvertised
+extension")` check).
+
+**Splitting the original 3-XFAIL `cve-2016-6309` file**: the
+`sanity` and `Large ClientHello *` failures have completely
+independent root causes (RFC 5746 emit logic vs cross-record CH
+reassembly). I113 fixes the former in isolation; the latter is
+queued as a follow-up that mirrors what T104 did for the TLS 1.3
+server-side read path.
+
+### What landed
+
+**RFC 5746 §3.6 conditional emit.** Before I113, both
+`Tls12ServerHandshake::process_client_hello` and the resumption
+sibling `process_client_hello_resumable` unconditionally pushed
+`build_renegotiation_info_initial()` into the ServerHello
+extension list for any initial handshake. RFC 5746 §3.6 is
+explicit: the server MUST send the extension only if the client
+signalled support, via either:
+
+- the `renegotiation_info` extension on the CH (RFC 5746 §3.4), OR
+- the `TLS_EMPTY_RENEGOTIATION_INFO_SCSV` signaling cipher suite
+  (RFC 5746 §3.3, value `0x00FF`).
+
+If neither is present, the server "proceeds without supporting
+secure renegotiation" — the extension MUST NOT be sent.
+
+Two implementation pieces:
+
+1. `crates/hitls-tls/src/lib.rs` — new `CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV` constant (`0x00FF`).
+2. `crates/hitls-tls/src/handshake/server12.rs`:
+   - New `client_signalled_secure_renego: bool` state field on
+     `Tls12ServerHandshake` (init + reset).
+   - Set to `true` when the ClientHello carries the
+     `renegotiation_info` extension (§3.4) or when its
+     `cipher_suites` list contains the SCSV (§3.3).
+   - Both ServerHello-build sites gate `build_renegotiation_info_initial()`
+     on the new flag.
+   - The renegotiation branch (`is_renegotiation == true`) is
+     unchanged — there the verify_data echo is mandatory per §3.7.
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+- `cargo test -p hitls-tls --release --lib`: **1108 PASS / 0 FAIL**.
+- tlsfuzzer (`s-server -p 14434 --tls 1.2 -C 49199`):
+
+  | Script | Before | After |
+  |---|---|---|
+  | `test-cve-2016-6309` | 0 PASS / 3 XFAIL | **2 PASS / 2 XFAIL** |
+
+  `sanity` (the same unique conversation tlsfuzzer counts as 2
+  entries, one pre + one post the destructive tests) now PASSes.
+  The 2 remaining XFAILs (`Large ClientHello padding` +
+  `Large incorrect ClientHello length`) hit the unrelated
+  cross-record CH reassembly gap.
+- 9 adjacent TLS 1.2 scripts (ccs, connection-abort, cve-2016-2107,
+  fuzzed-ciphertext, zero-length-data, aes-gcm-nonces,
+  encrypt-then-mac, invalid-compression-methods): no new FAIL, no
+  XFAIL count drift.
+- 3 adjacent TLS 1.3 scripts (record-layer-limits, finished,
+  no-unknown-groups) checked despite no TLS 1.3 change: no
+  regression.
+
+**Net XFAIL reduction: 1.** Cumulative across the tlsfuzzer track
+(I107 through I113): **22**.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/lib.rs` | Modified | Add `CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV = 0x00FF`. |
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | New `client_signalled_secure_renego` flag (set by RENEGOTIATION_INFO ext OR SCSV); both ServerHello-build sites now gate the `renegotiation_info_initial` push on it. |
+| `tests/tlsfuzzer/xfail/test-cve-2016-6309.txt` | Modified | Dropped `sanity` line (1→2 entries now); header re-annotated with the I113 context + a clear pointer at the remaining `Large *` reassembly gap. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 344 + Implementation summary I1–I112 → I1–I113. |
+| `PROMPT_LOG.md` | Modified | I113 prompt + result entry. |
+
+### Build Status (Post I113)
+
+`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean.
+Cumulative tlsfuzzer XFAIL reduction: **22** (5 HRR + 9
+record-layer overflow + 3 sig_algs + 1 record-plaintext +
+2 session-resumption + 1 CCS-strict + 1 RFC 5746 conditional
+emit). The remaining `cve-2016-6309` 2 entries are a known
+cross-record CH reassembly gap, queued.
