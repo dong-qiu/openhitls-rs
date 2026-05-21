@@ -6693,3 +6693,65 @@ Cumulative XFAIL reduction across I107 + I108: **14** (5 from
 HRR conformance + 9 from record-layer).
 
 Recorded as DEV_LOG Phase I108.
+
+---
+
+## Phase I109 — TLS 1.3 sig_algs Extension Parser Boundary Hardening (2026-05-21)
+
+> 按照XFAIL reduction的目标依次执行
+
+Third iteration of the XFAIL-reduction track. Next candidate after
+I108 was `test-tls13-ecdsa-support` (15 XFAILs across 3 cert
+variants) — but read-through revealed all 15 are documented
+won't-fix design decisions (T93 + T123 xfail headers: brainpool
+curves not advertised, single-cert s-server can only sign with one
+curve). Skipped.
+
+Picked `test-tls13-signature-algorithms` (3 XFAILs, T100 + T104
+already documented as needing "per-extension sentinel-length
+carve-out"). Empirical run confirmed two distinct sub-causes:
+
+**Cause 1 — empty list of signature schemes parsed as success.**
+`list_len == 0` passed our `data.len() < 2 + list_len` check
+trivially, so we returned `Vec::new()`. Downstream rejected with
+`"missing signature_algorithms in ClientHello"`, which alert mapper
+routed to `missing_extension`. Tlsfuzzer expects `decode_error`
+(RFC 8446 §4.2.3 + §6.2 — the extension's MUST carry at least one
+scheme that can auth the cert; "length of the message incorrect").
+Closes 2 conversations: `empty list of signature methods` +
+`fuzz length inside extension to 0`.
+
+**Cause 2 — trailing bytes after declared list silently dropped.**
+`data.len() < 2 + list_len` (strictly-less) accepted any tail. A
+fuzzed inner-length of 2 with 4 bytes of actual scheme data parsed
+exactly one scheme and let the handshake proceed. Closes 1
+conversation: `fuzz length inside extension to 2`.
+
+Single combined fix in `parse_signature_algorithms_ch`:
+
+```rust
+if list_len == 0 || list_len % 2 != 0 || data.len() != 2 + list_len {
+    return Err(TlsError::HandshakeFailed(
+        "signature_algorithms CH: decode error — invalid list length".into(),
+    ));
+}
+```
+
+Error message embeds `"decode error"` so alert mapper emits
+`decode_error` via the existing `"decode"` substring route.
+`parse_signature_algorithms_cert` is a thin delegator and inherits
+the strict check.
+
+**Net XFAIL reduction = 3.** `test-tls13-signature-algorithms`
+279/3 → **282/0 PASS** (xfail file removed).
+
+Verification: `cargo test -p hitls-tls --release --lib` 1108/0;
+`fmt` + `clippy -D warnings` clean; the existing
+`test_parse_signature_algorithms_ch_empty_data` unit test already
+required the empty / single-byte input to error and still holds
+under the new contract. 10 adjacent TLS 1.3 scripts regression-checked:
+no new FAIL, no XFAIL drift.
+
+Cumulative XFAIL reduction across I107 + I108 + I109: **17**.
+
+Recorded as DEV_LOG Phase I109.

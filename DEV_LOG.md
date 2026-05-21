@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I108 (108 phases)
+- Implementation: I1–I109 (109 phases)
 - Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -343,7 +343,8 @@ Category summary:
 | 331 | I106 | Impl | `s-server --dtls` DTLS 1.2 listener (task ⑤ D1) — a UDP listener in `s-server` driving the DTLS 1.2 handshake against a real peer. Required closing a chain of **5 DTLS interop bugs** that the in-memory `dtls12_handshake_in_memory` (our-client-only) had hidden: (1) DTLS ServerHello version 0x0303→0xFEFD, (2) ServerHello missing RFC 5746 `renegotiation_info`, (3) multi-record-datagrams not split (openssl batches CKE+CCS+Finished — fixed by `dtls_next_record` queue), (4) AEAD decrypt recomputed the GCM nonce instead of using the transmitted explicit nonce (RFC 5288 §3 — symmetric I97-style bug, fixed by reading `fragment[0..8]`), (5) handshake transcript hashed the TLS 4-byte header, RFC 6347 §4.2.6 requires the DTLS 12-byte header (message_seq retained, fragment_offset=0, fragment_length=length) — fixed across `server_dtls12.rs` + `client_dtls12.rs` (~30 sites). New `dtls12_server_handshake` closure-driven driver in `connection_dtls12.rs` (DTLS flight sequence over caller-supplied `send`/`recv`); CLI `--dtls` + UDP loop + echo. Verified end-to-end against `openssl s_client -dtls1_2`: handshake completes (DTLSv1.2, ECDHE-RSA-AES128-GCM-SHA256) + application-data echo round-trips. 84 in-memory DTLS tests still PASS — proves the transcript rewrite is consistent across both sides. DTLCP transcript path left untouched (separate protocol) | 2026-05-20 |
 | 333 | I107 | Impl | TLS 1.3 server-side HRR conformance — two RFC 8446 fixes surfaced by `test-tls13-no-unknown-groups.py`. **(1)** HRR `selected_group` now honours client preference (`client_groups.iter().find(|g| self.config.supported_groups.contains(g))`) instead of server preference, matching OpenSSL / BoringSSL / Go's HRR behaviour — RFC 8446 §4.2.7 says the client's `supported_groups` are "ordered from most preferred to least preferred". **(2)** RFC 8446 §D.4 middlebox-compat CCS now fires after the server's **first** handshake message only — on an HRR path the CCS is emitted after HRR and a `sent_fake_ccs` flag suppresses the duplicate after the post-HRR ServerHello (previously we always emitted both, which tlsfuzzer flags as protocol violation). Also adds `tests/tlsfuzzer/args/test-tls13-no-unknown-groups.txt` (`--groups` tells tlsfuzzer the full s-server group set so its "unknown" subtraction excludes X448 / secp521r1 / FFDHE-* whose codepoints fall in the script's enumerated range). **Net XFAIL reduction = 5**: `test-tls13-no-unknown-groups` 256/3 → **259/0** (xfail file removed); `test-tls13-hrr` 2/1 → **3/0** (xfail file removed); `test-tls13-0rtt-garbage` 7/4 → **8/3** (1 conv closed: `'handshake with invalid 0-RTT and HRR'`). No regression on the wider curated suite (`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean) | 2026-05-21 |
 | 334 | I108 | Impl | TLS 1.3 record-layer overflow conformance — three RFC 8446 §5 fixes surfaced by `test-tls13-record-layer-limits.py` (9 conversations XFAIL'd since T92). **(1)** `tls_error_to_alert` `RecordError` branch reordered — `"overflow"`/`"too large"`/`"exceed"` now route to `record_overflow` (RFC 8446 §6.2.1) BEFORE the AEAD branch, so error messages legitimately containing `"decrypt"` (e.g. `"decrypted plaintext exceeds maximum length"`) no longer get misclassified as `bad_record_mac`. **(2)** `Tls13RecordDecryptor::decrypt_record` now enforces RFC 8446 §5.4 properly: `TLSInnerPlaintext` as a whole (content + 1-byte ContentType + zero padding) must not exceed 2^14 + 1 octets, checked on the decrypt output BEFORE padding-strip (previously only the stripped content was checked vs 2^14, letting oversized records hide their excess in padding). **(3)** `RecordLayer::parse_record` discriminates by wire `content_type`: `ApplicationData` records get the `+256` TLSCiphertext budget (§5.2), every other type (Handshake / Alert / CCS = TLSPlaintext) is capped at `max_fragment_size` (§5.1) — previously a unified +256 cap let an oversized plaintext ClientHello slip past. Net XFAIL reduction = **9**: `test-tls13-record-layer-limits` 137/9 → **146/0** (xfail file removed). 1 unit test (`test_parse_record_size_limit_boundary`) updated to cover the new TLSPlaintext vs TLSCiphertext cap discrimination. No regression on adjacent scripts (zero-length-data, zero-content-type, finished, no-unknown-groups, hrr, empty-alert, keyupdate, finished-plaintext) | 2026-05-21 |
-| 335 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
+| 336 | I109 | Impl | TLS 1.3 sig_algs extension parser boundary hardening — closes 3 long-standing XFAILs in `test-tls13-signature-algorithms.py` (the residual boundary-fuzz cases T100 + T104 documented as needing "a per-extension sentinel-length carve-out"). `parse_signature_algorithms_ch` (and via thin wrapper `parse_signature_algorithms_cert`) now rejects two malformed shapes RFC 8446 §4.2.3 / §6.2 require treating as `decode_error`: **(1)** `list_length == 0` (an empty list of signature schemes is a parse error per §6.2 "out of the specified range" — previously parsed as empty Vec and bubbled up as `missing_extension` downstream, the wrong alert); **(2)** trailing bytes after the declared list (`ext.data.len() != 2 + list_len` — previously a `data.len() < 2 + list_len` check accepted any tail and silently dropped it, letting an oversized record with a fuzzed inner-length pass through to a normal handshake). Error message embeds `"decode error"` so the alert mapper emits `decode_error`. **Net XFAIL reduction = 3**: `test-tls13-signature-algorithms` 279/3 → **282/0** (xfail file removed). No regression on 10 adjacent TLS 1.3 scripts (`record-layer-limits`, `no-unknown-groups`, `hrr`, `finished`, `empty-alert`, `keyupdate`, `rsa-signatures`, `zero-length-data`, etc.). 1108 hitls-tls lib tests still PASS; the existing `test_parse_signature_algorithms_ch_empty_data` already covered the new tighter contract | 2026-05-21 |
+| 337 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -20531,3 +20532,113 @@ content type:
 TLS 1.3 record-layer is now strictly RFC 8446 §5.1 / §5.2 / §5.4 +
 §6.2.1 conformant on the receive path. Cumulative XFAIL reduction
 across the I107 + I108 tlsfuzzer track: **14**.
+
+---
+
+## Phase I109 — TLS 1.3 sig_algs Extension Parser Boundary Hardening (2026-05-21)
+
+### Summary
+
+Closes the 3 long-standing boundary-fuzz XFAILs in
+`test-tls13-signature-algorithms.py` (the residual cases that T100 +
+T104 documented as needing "a per-extension sentinel-length
+carve-out"). `parse_signature_algorithms_ch` now strictly rejects
+two malformed shapes RFC 8446 §4.2.3 / §6.2 require as
+`decode_error`.
+
+### What landed
+
+`crates/hitls-tls/src/handshake/extensions_codec.rs::parse_signature_algorithms_ch`
+was:
+
+```rust
+if data.len() < 2 + list_len || list_len % 2 != 0 {
+    return Err(...);
+}
+```
+
+Now:
+
+```rust
+if list_len == 0 || list_len % 2 != 0 || data.len() != 2 + list_len {
+    return Err(TlsError::HandshakeFailed(
+        "signature_algorithms CH: decode error — invalid list length".into(),
+    ));
+}
+```
+
+Two new strict rejections:
+
+1. **`list_length == 0`** — an empty list of signature schemes was
+   previously parsed as `Vec::new()` and bubbled up; downstream
+   `select_signature_scheme_for_cert` then emitted
+   `"missing signature_algorithms in ClientHello"`, which the alert
+   mapper routed to `missing_extension`. RFC 8446 §6.2 `decode_error`:
+   "the length of the message was incorrect" — an empty list IS the
+   length-field saying zero entries, which is out of the §4.2.3
+   specified range (the extension is mandatory and the list MUST
+   carry at least one scheme that can authenticate the certificate).
+   Closes tlsfuzzer `empty list of signature methods` +
+   `fuzz length inside extension to 0`.
+
+2. **trailing bytes** (`data.len() != 2 + list_len`) — previously
+   `data.len() < 2 + list_len` allowed any tail and silently dropped
+   it, so a fuzzed inner length (e.g. `list_len = 2` with 4 bytes of
+   actual scheme data) parsed exactly one scheme and let the
+   handshake proceed. Strict equality matches the wire structure
+   (`uint16 length || SignatureScheme[length / 2]`). Closes tlsfuzzer
+   `fuzz length inside extension to 2`.
+
+The error message embeds the substring `"decode error"` so
+`alert::tls_error_to_alert` routes it to `AlertDescription::DecodeError`
+(via the existing `"decode"` substring rule). `parse_signature_algorithms_cert`
+is a thin delegator and inherits the same strict check.
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+- `cargo test -p hitls-tls --release --lib`: **1108 PASS / 0 FAIL**
+  (the existing `test_parse_signature_algorithms_ch_empty_data` unit
+  test already required `parse_signature_algorithms_ch(&[])` and
+  `&[0]` to error; both still hold under the new contract).
+- tlsfuzzer (against `s-server -p 14433`):
+
+  | Script | Before | After |
+  |---|---|---|
+  | `test-tls13-signature-algorithms` | 279 PASS / 3 XFAIL | **282 PASS / 0 XFAIL** |
+- 10 adjacent TLS 1.3 scripts (record-layer-limits, no-unknown-groups,
+  hrr, finished, empty-alert, keyupdate, rsa-signatures,
+  zero-length-data, certificate-verify, certificate-request): no new
+  FAIL, no XFAIL count drift.
+
+**Net XFAIL reduction: 3.**
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/extensions_codec.rs` | Modified | `parse_signature_algorithms_ch` strict rejection of `list_len == 0` and trailing bytes; error message embeds `"decode error"`. |
+| `tests/tlsfuzzer/xfail/test-tls13-signature-algorithms.txt` | Deleted | All 3 conversations now PASS. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 336 + Implementation summary I1–I108 → I1–I109. |
+| `PROMPT_LOG.md` | Modified | I109 prompt + result entry. |
+
+### Build Status (Post I109)
+
+`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean.
+Cumulative XFAIL reduction across the I107 + I108 + I109 tlsfuzzer
+track: **17** (5 HRR + 9 record-layer + 3 sig_algs boundary). The
+remaining curated tlsfuzzer XFAILs are concentrated in: 3 ×
+`test-tls13-0rtt-garbage` (cross-flight state-machine ordering); 3 ×
+`test-tls13-zero-length-data` (early_data interleave); 2 each in
+`test-tls13-zero-content-type` / `test-tls13-eddsa` /
+`test-tls13-keyupdate` / `test-tls13-session-resumption` /
+`test-tls13-finished-plaintext` / `test-tls13-connection-abort`; the
+remaining 15 in `test-tls13-ecdsa-support` are documented "won't-fix"
+design decisions (brainpool curves + multi-cert s-server); the 263
+in `test-tls13-version-negotiation` are intentional
+RFC-final-vs-OpenSSL-draft spec divergence. Investigated and skipped
+`test-tls13-ecdsa-support` (15 XFAILs) this iteration — all
+documented as won't-fix design decisions per T93 / T123 xfail
+headers.
