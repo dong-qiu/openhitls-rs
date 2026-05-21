@@ -171,7 +171,15 @@ pub fn tls_error_to_alert(err: &hitls_types::TlsError) -> AlertDescription {
         }
         TlsError::RecordError(msg) => {
             let m = msg.as_str();
-            if m.contains("decrypt")
+            // RFC 8446 §6.2.1 `record_overflow`: routed FIRST so error
+            // messages like "decrypted plaintext exceeds maximum length"
+            // (which legitimately contain the substring `decrypt`) are
+            // not misclassified as `bad_record_mac` by the AEAD branch
+            // below. Phase I108: tlsfuzzer test-tls13-record-layer-limits
+            // pins this discrimination.
+            if m.contains("overflow") || m.contains("too large") || m.contains("exceed") {
+                AlertDescription::RecordOverflow
+            } else if m.contains("decrypt")
                 || m.contains("AEAD")
                 || m.contains("tag")
                 || m.contains("MAC")
@@ -179,8 +187,6 @@ pub fn tls_error_to_alert(err: &hitls_types::TlsError) -> AlertDescription {
                 || m.contains("BadRecordMac")
             {
                 AlertDescription::BadRecordMac
-            } else if m.contains("overflow") || m.contains("too large") {
-                AlertDescription::RecordOverflow
             } else if m.contains("decode") || m.contains("incomplete") || m.contains("malformed") {
                 AlertDescription::DecodeError
             } else if m.contains("unexpected content type")

@@ -362,8 +362,27 @@ impl RecordLayer {
         let version = u16::from_be_bytes([data[1], data[2]]);
         let length = u16::from_be_bytes([data[3], data[4]]) as usize;
 
-        if length > self.max_fragment_size + 256 {
-            return Err(TlsError::RecordError("record too large".into()));
+        // RFC 8446 §5.1: TLSPlaintext.length MUST NOT exceed 2^14.
+        // RFC 8446 §5.2: TLSCiphertext.length MUST NOT exceed 2^14 + 256.
+        // On the wire, encrypted records have `opaque_type = ApplicationData`
+        // (§5.2 says: "The outer opaque_type field of a TLSCiphertext
+        // record is always set to the value 23, application_data"), so we
+        // gate by the wire `content_type` rather than by whether the
+        // record will actually be decrypted — a still-handshaking peer
+        // that mislabels a Handshake record as ApplicationData would have
+        // already been rejected by `decrypt_record`'s content-type check.
+        // Phase I108 — tlsfuzzer test
+        // `too big ClientHello msg, with 16168 bytes of padding` pins this
+        // discrimination (an oversized *plaintext* ClientHello previously
+        // slipped past because we applied the +256 cipher overhead
+        // budget to every record type).
+        let max_length = if content_type == ContentType::ApplicationData {
+            self.max_fragment_size + 256
+        } else {
+            self.max_fragment_size
+        };
+        if length > max_length {
+            return Err(TlsError::RecordError("record overflow".into()));
         }
 
         if data.len() < 5 + length {
@@ -1061,20 +1080,42 @@ mod tests {
         let mut rl = RecordLayer::new();
         rl.max_fragment_size = 100;
 
-        // Exactly at limit: 100 + 256 = 356 bytes → should be accepted
-        let payload = vec![0xAA; 356];
-        let mut record = vec![22, 0x03, 0x03]; // Handshake, TLS 1.2
-        record.extend_from_slice(&(356u16).to_be_bytes());
-        record.extend_from_slice(&payload);
-        let result = rl.parse_record(&record);
-        assert!(result.is_ok());
+        // Phase I108 — `parse_record` now gates by wire content type:
+        //   * `ApplicationData` (the wire type that carries TLS 1.3
+        //     TLSCiphertext) → cap = max_fragment_size + 256 (§5.2),
+        //   * everything else (TLSPlaintext: Handshake / Alert / CCS)
+        //     → cap = max_fragment_size (§5.1).
 
-        // One byte over limit: 357 bytes → rejected
-        let payload2 = vec![0xBB; 357];
-        let mut record2 = vec![22, 0x03, 0x03];
-        record2.extend_from_slice(&(357u16).to_be_bytes());
-        record2.extend_from_slice(&payload2);
-        let err = rl.parse_record(&record2).unwrap_err();
-        assert!(err.to_string().contains("record too large"));
+        // ApplicationData exactly at +256 cap (356) is accepted.
+        let payload_ad = vec![0xAA; 356];
+        let mut record_ad = vec![23, 0x03, 0x03]; // ApplicationData
+        record_ad.extend_from_slice(&(356u16).to_be_bytes());
+        record_ad.extend_from_slice(&payload_ad);
+        assert!(rl.parse_record(&record_ad).is_ok());
+
+        // ApplicationData one over (+256+1 = 357) → record_overflow.
+        let payload_ad_over = vec![0xBB; 357];
+        let mut record_ad_over = vec![23, 0x03, 0x03];
+        record_ad_over.extend_from_slice(&(357u16).to_be_bytes());
+        record_ad_over.extend_from_slice(&payload_ad_over);
+        let err = rl.parse_record(&record_ad_over).unwrap_err();
+        assert!(err.to_string().contains("overflow"));
+
+        // Handshake exactly at cap (100) is accepted.
+        let payload_hs = vec![0xCC; 100];
+        let mut record_hs = vec![22, 0x03, 0x03]; // Handshake
+        record_hs.extend_from_slice(&(100u16).to_be_bytes());
+        record_hs.extend_from_slice(&payload_hs);
+        assert!(rl.parse_record(&record_hs).is_ok());
+
+        // Handshake one over (101) — would be accepted under the old
+        // unified +256 cap (101 < 356) but is now rejected because
+        // TLSPlaintext.length MUST NOT exceed 2^14 (here mocked at 100).
+        let payload_hs_over = vec![0xDD; 101];
+        let mut record_hs_over = vec![22, 0x03, 0x03];
+        record_hs_over.extend_from_slice(&(101u16).to_be_bytes());
+        record_hs_over.extend_from_slice(&payload_hs_over);
+        let err = rl.parse_record(&record_hs_over).unwrap_err();
+        assert!(err.to_string().contains("overflow"));
     }
 }

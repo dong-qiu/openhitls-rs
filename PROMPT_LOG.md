@@ -6641,3 +6641,55 @@ No production-code change. Recorded as DEV_LOG `Phase T113 (continued)
 ongoing — remaining `pki/verify` families (`VFY_TLS_*EKU_KU_*` /
 `VFY_EXT_*` / `VFY_CHAIN_*` / `VFY_SIGALG_*` / `STORE_*` /
 `BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN_*`) + cms/pkcs12 suites follow.
+
+---
+
+## Phase I108 — TLS 1.3 Record-Layer Overflow Conformance (2026-05-21)
+
+> 按照XFAIL reduction的目标依次执行
+
+Second iteration of the XFAIL-reduction track. Next-largest curated
+xfail file after the 263-entry intentional spec-divergence on
+`test-tls13-version-negotiation` is `test-tls13-record-layer-limits`
+at 9 entries. Empirically all 9 were variants of "oversized record
+should give `record_overflow`" but our server gave `bad_record_mac`
+/ accepted the record / silently dropped it. Three independent
+RFC 8446 §5 fixes:
+
+**Fix 1 — alert mapper substring order.** The `RecordError(msg)`
+branch checked `m.contains("decrypt")` before the overflow check,
+so error messages like `"decrypted plaintext exceeds maximum
+length"` (the past-participle "decrypted" matches the substring)
+routed (incorrectly) to `bad_record_mac`. Reordered so overflow / too large /
+exceed match FIRST.
+
+**Fix 2 — TLSInnerPlaintext whole-record cap.** RFC 8446 §5.4: the
+encoded TLSInnerPlaintext (content + ContentType + zero padding)
+MUST NOT exceed 2^14 + 1 octets. The old check only looked at
+stripped content vs 2^14 — letting an oversized record hide its
+excess in trailing zero padding (16376 content + 1 ct + 9 padding
+= 16386 inner, but 16376 < 16384 stripped). New pre-strip check
+in `Tls13RecordDecryptor::decrypt_record`.
+
+**Fix 3 — TLSPlaintext vs TLSCiphertext cap discrimination.** RFC
+8446 §5.1 caps TLSPlaintext at 2^14, §5.2 caps TLSCiphertext at
+2^14 + 256. `parse_record` applied +256 to every wire content type,
+which let an oversized *plaintext* ClientHello (16168 bytes padding,
+wire type Handshake) slip past. Now: ApplicationData → +256;
+everything else → +0 (TLSPlaintext bound).
+
+**Net XFAIL reduction = 9.** `test-tls13-record-layer-limits`
+137/9 → **146/0 PASS**; xfail file removed.
+
+Verification: `cargo test -p hitls-tls --release --lib`
+1108/0; `fmt` + `clippy -D warnings` clean; 1 unit test
+(`test_parse_record_size_limit_boundary`) updated to cover the
+new TLSPlaintext-vs-TLSCiphertext cap discrimination.
+
+Regression sweep on TLS 1.3 + TLS 1.2 listeners (18 adjacent
+scripts): no new FAIL, no XFAIL drift.
+
+Cumulative XFAIL reduction across I107 + I108: **14** (5 from
+HRR conformance + 9 from record-layer).
+
+Recorded as DEV_LOG Phase I108.

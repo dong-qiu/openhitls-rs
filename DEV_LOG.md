@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I107 (107 phases)
+- Implementation: I1–I108 (108 phases)
 - Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -342,7 +342,8 @@ Category summary:
 | 330 | I105 | Impl | TLS 1.2 cipher-suite / named-group co-negotiation — `negotiate_cipher_suite` selected a cipher suite without checking that its key exchange could actually be honoured with the client's advertised `supported_groups`, so a `DHE_RSA` suite offered alongside a groups list with no usable FFDHE group was selected anyway (the server then force-defaulted FFDHE2048). New `kx_group_satisfiable` gate: a `*DHE` suite needs a common FFDHE group, an EC(DHE) suite needs a common EC group, static-RSA / PSK suites need none; an empty client list (no extension) is unconstrained (RFC 4492 §5.1). Unsatisfiable candidates are skipped — when none remain, `NoSharedCipherSuite` → `handshake_failure` is the correct outcome. Closes `no overlap between groups` in `test-ffdhe-negotiation.py` (38/3 → **39/2**; the script gains a `--alert handshake_failure` args file — RFC 5246 §7.2.2). The 2 residual XFAILs (`fallback to non-ffdhe` ×2) are WON'T-FIX: they require the server to offer a static-RSA (no-forward-secrecy) suite. +1 unit test; all 16 curated `scripts_12` rc=0 | 2026-05-18 |
 | 331 | I106 | Impl | `s-server --dtls` DTLS 1.2 listener (task ⑤ D1) — a UDP listener in `s-server` driving the DTLS 1.2 handshake against a real peer. Required closing a chain of **5 DTLS interop bugs** that the in-memory `dtls12_handshake_in_memory` (our-client-only) had hidden: (1) DTLS ServerHello version 0x0303→0xFEFD, (2) ServerHello missing RFC 5746 `renegotiation_info`, (3) multi-record-datagrams not split (openssl batches CKE+CCS+Finished — fixed by `dtls_next_record` queue), (4) AEAD decrypt recomputed the GCM nonce instead of using the transmitted explicit nonce (RFC 5288 §3 — symmetric I97-style bug, fixed by reading `fragment[0..8]`), (5) handshake transcript hashed the TLS 4-byte header, RFC 6347 §4.2.6 requires the DTLS 12-byte header (message_seq retained, fragment_offset=0, fragment_length=length) — fixed across `server_dtls12.rs` + `client_dtls12.rs` (~30 sites). New `dtls12_server_handshake` closure-driven driver in `connection_dtls12.rs` (DTLS flight sequence over caller-supplied `send`/`recv`); CLI `--dtls` + UDP loop + echo. Verified end-to-end against `openssl s_client -dtls1_2`: handshake completes (DTLSv1.2, ECDHE-RSA-AES128-GCM-SHA256) + application-data echo round-trips. 84 in-memory DTLS tests still PASS — proves the transcript rewrite is consistent across both sides. DTLCP transcript path left untouched (separate protocol) | 2026-05-20 |
 | 333 | I107 | Impl | TLS 1.3 server-side HRR conformance — two RFC 8446 fixes surfaced by `test-tls13-no-unknown-groups.py`. **(1)** HRR `selected_group` now honours client preference (`client_groups.iter().find(|g| self.config.supported_groups.contains(g))`) instead of server preference, matching OpenSSL / BoringSSL / Go's HRR behaviour — RFC 8446 §4.2.7 says the client's `supported_groups` are "ordered from most preferred to least preferred". **(2)** RFC 8446 §D.4 middlebox-compat CCS now fires after the server's **first** handshake message only — on an HRR path the CCS is emitted after HRR and a `sent_fake_ccs` flag suppresses the duplicate after the post-HRR ServerHello (previously we always emitted both, which tlsfuzzer flags as protocol violation). Also adds `tests/tlsfuzzer/args/test-tls13-no-unknown-groups.txt` (`--groups` tells tlsfuzzer the full s-server group set so its "unknown" subtraction excludes X448 / secp521r1 / FFDHE-* whose codepoints fall in the script's enumerated range). **Net XFAIL reduction = 5**: `test-tls13-no-unknown-groups` 256/3 → **259/0** (xfail file removed); `test-tls13-hrr` 2/1 → **3/0** (xfail file removed); `test-tls13-0rtt-garbage` 7/4 → **8/3** (1 conv closed: `'handshake with invalid 0-RTT and HRR'`). No regression on the wider curated suite (`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean) | 2026-05-21 |
-| 334 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
+| 334 | I108 | Impl | TLS 1.3 record-layer overflow conformance — three RFC 8446 §5 fixes surfaced by `test-tls13-record-layer-limits.py` (9 conversations XFAIL'd since T92). **(1)** `tls_error_to_alert` `RecordError` branch reordered — `"overflow"`/`"too large"`/`"exceed"` now route to `record_overflow` (RFC 8446 §6.2.1) BEFORE the AEAD branch, so error messages legitimately containing `"decrypt"` (e.g. `"decrypted plaintext exceeds maximum length"`) no longer get misclassified as `bad_record_mac`. **(2)** `Tls13RecordDecryptor::decrypt_record` now enforces RFC 8446 §5.4 properly: `TLSInnerPlaintext` as a whole (content + 1-byte ContentType + zero padding) must not exceed 2^14 + 1 octets, checked on the decrypt output BEFORE padding-strip (previously only the stripped content was checked vs 2^14, letting oversized records hide their excess in padding). **(3)** `RecordLayer::parse_record` discriminates by wire `content_type`: `ApplicationData` records get the `+256` TLSCiphertext budget (§5.2), every other type (Handshake / Alert / CCS = TLSPlaintext) is capped at `max_fragment_size` (§5.1) — previously a unified +256 cap let an oversized plaintext ClientHello slip past. Net XFAIL reduction = **9**: `test-tls13-record-layer-limits` 137/9 → **146/0** (xfail file removed). 1 unit test (`test_parse_record_size_limit_boundary`) updated to cover the new TLSPlaintext vs TLSCiphertext cap discrimination. No regression on adjacent scripts (zero-length-data, zero-content-type, finished, no-unknown-groups, hrr, empty-alert, keyupdate, finished-plaintext) | 2026-05-21 |
+| 335 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -20336,6 +20337,84 @@ defensive `starts_with` used for the BC family.
   occurrences on `&[inter.clone()]` calls; replaced with
   `std::slice::from_ref(&inter)` — zero-copy and clippy-clean).
 
+### Summary
+
+Three RFC 8446 §5 record-layer conformance bugs, surfaced by
+`test-tls13-record-layer-limits.py` (9 conversations XFAIL'd since
+Phase T92). All three are in the receive path and combine to let
+oversized records either pick up the wrong alert (`bad_record_mac`
+instead of `record_overflow`) or slip past size checks entirely.
+
+### What landed
+
+**Fix 1 — alert mapper substring order (`crates/hitls-tls/src/alert/mod.rs`).**
+The `RecordError(msg)` branch checked `m.contains("decrypt")` BEFORE
+the overflow check. Error messages from the size guards
+(e.g. `"decrypted plaintext exceeds maximum length"`) legitimately
+contain `"decrypt"` (the past participle), so they matched the
+AEAD branch and emitted `bad_record_mac` instead of the
+RFC 8446 §6.2.1 `record_overflow` alert. Reordered: `overflow` /
+`too large` / `exceed` now route to `RecordOverflow` FIRST.
+
+**Fix 2 — TLSInnerPlaintext whole-record size check (`crates/hitls-tls/src/record/encryption.rs`).**
+RFC 8446 §5.4: the full encoded TLSInnerPlaintext (content + 1-byte
+ContentType + zero padding) MUST NOT exceed 2^14 + 1 octets.
+Previously `Tls13RecordDecryptor::decrypt_record` only checked the
+*stripped* content length against 2^14 — which silently allowed an
+oversized record so long as the excess lived in the trailing zero
+padding. tlsfuzzer's
+`too big plaintext, size: 2**14 - 8, with an additional 9 bytes of
+padding` exploit exactly this: 16376 bytes of content + 1 ct +
+9 zero-padding bytes = 16386 octets inner plaintext (over 16385) but
+16376 < 16384 stripped, so the old check passed it through. New
+check pre-strip:
+
+```rust
+if inner.len() > MAX_PLAINTEXT_LENGTH + 1 {
+    return Err(TlsError::RecordError(
+        "inner plaintext overflow: exceeds 2^14 + 1 octets".into(),
+    ));
+}
+```
+
+**Fix 3 — TLSPlaintext vs TLSCiphertext cap discrimination (`crates/hitls-tls/src/record/mod.rs`).**
+RFC 8446 §5.1: `TLSPlaintext.length` MUST NOT exceed 2^14. §5.2:
+`TLSCiphertext.length` MUST NOT exceed 2^14 + 256. The two limits
+were unified at `max_fragment_size + 256` (= 16640 with default
+config) on every wire `content_type`, which let a *plaintext*
+oversized ClientHello (16168 bytes of padding, on wire
+`content_type = Handshake`) slip past — handshake records are
+TLSPlaintext and capped at 16384. `parse_record` now gates by wire
+content type:
+
+| Wire `content_type` | Cap |
+|---|---|
+| `ApplicationData` (the wrapper TLS 1.3 uses for TLSCiphertext, §5.2) | `max_fragment_size + 256` |
+| Anything else (Handshake / Alert / CCS = TLSPlaintext, §5.1) | `max_fragment_size` |
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+- `cargo test -p hitls-tls --release --lib`: **1108 PASS / 0 FAIL**
+  (1 unit test — `record::tests::test_parse_record_size_limit_boundary`
+  — updated to cover the new TLSPlaintext-vs-TLSCiphertext cap
+  discrimination; +2 sub-cases inside it).
+- tlsfuzzer (against a local `s-server -p 14433`):
+
+  | Script | Before | After |
+  |---|---|---|
+  | `test-tls13-record-layer-limits` | 137 PASS / 9 XFAIL | **146 PASS / 0 XFAIL** |
+- Adjacent script regression sweep (TLS 1.3 RSA listener: zero-length-data,
+  zero-content-type, finished, no-unknown-groups, hrr, empty-alert,
+  keyupdate, finished-plaintext; TLS 1.2 RSA listener: ccs,
+  connection-abort, fuzzed-ciphertext, cve-2016-2107, cve-2016-6309,
+  zero-length-data, invalid-compression-methods, encrypt-then-mac,
+  aes-gcm-nonces, conversation): no new FAIL, no XFAIL count drift.
+
+**Net XFAIL reduction: 9.**
+
 ### Files Modified
 
 | File | Status | Description |
@@ -20352,3 +20431,103 @@ the remaining `pki/verify` families (`VFY_TLS_*EKU_KU_*` /
 `BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN_*`) plus the entire `pki/cms`
 + `pki/pkcs12` SDV suites follow in subsequent T113 commits under
 the no-sub-phase rule.
+
+---
+
+## Phase I108 — TLS 1.3 Record-Layer Overflow Conformance: alert mapping + inner plaintext check + plaintext/ciphertext cap discrimination (2026-05-21)
+
+### Summary
+
+Three RFC 8446 §5 record-layer conformance bugs, surfaced by
+`test-tls13-record-layer-limits.py` (9 conversations XFAIL'd since
+Phase T92). All three are in the receive path and combine to let
+oversized records either pick up the wrong alert (`bad_record_mac`
+instead of `record_overflow`) or slip past size checks entirely.
+
+### What landed
+
+**Fix 1 — alert mapper substring order (`crates/hitls-tls/src/alert/mod.rs`).**
+The `RecordError(msg)` branch checked `m.contains("decrypt")` BEFORE
+the overflow check. Error messages from the size guards
+(e.g. `"decrypted plaintext exceeds maximum length"`) legitimately
+contain `"decrypt"` (the past participle), so they matched the
+AEAD branch and emitted `bad_record_mac` instead of the
+RFC 8446 §6.2.1 `record_overflow` alert. Reordered: `overflow` /
+`too large` / `exceed` now route to `RecordOverflow` FIRST.
+
+**Fix 2 — TLSInnerPlaintext whole-record size check (`crates/hitls-tls/src/record/encryption.rs`).**
+RFC 8446 §5.4: the full encoded TLSInnerPlaintext (content + 1-byte
+ContentType + zero padding) MUST NOT exceed 2^14 + 1 octets.
+Previously `Tls13RecordDecryptor::decrypt_record` only checked the
+*stripped* content length against 2^14 — which silently allowed an
+oversized record so long as the excess lived in the trailing zero
+padding. tlsfuzzer's
+`too big plaintext, size: 2**14 - 8, with an additional 9 bytes of
+padding` exploit exactly this: 16376 bytes of content + 1 ct +
+9 zero-padding bytes = 16386 octets inner plaintext (over 16385) but
+16376 < 16384 stripped, so the old check passed it through. New
+check pre-strip:
+
+```rust
+if inner.len() > MAX_PLAINTEXT_LENGTH + 1 {
+    return Err(TlsError::RecordError(
+        "inner plaintext overflow: exceeds 2^14 + 1 octets".into(),
+    ));
+}
+```
+
+**Fix 3 — TLSPlaintext vs TLSCiphertext cap discrimination (`crates/hitls-tls/src/record/mod.rs`).**
+RFC 8446 §5.1: `TLSPlaintext.length` MUST NOT exceed 2^14. §5.2:
+`TLSCiphertext.length` MUST NOT exceed 2^14 + 256. The two limits
+were unified at `max_fragment_size + 256` (= 16640 with default
+config) on every wire `content_type`, which let a *plaintext*
+oversized ClientHello (16168 bytes of padding, on wire
+`content_type = Handshake`) slip past — handshake records are
+TLSPlaintext and capped at 16384. `parse_record` now gates by wire
+content type:
+
+| Wire `content_type` | Cap |
+|---|---|
+| `ApplicationData` (the wrapper TLS 1.3 uses for TLSCiphertext, §5.2) | `max_fragment_size + 256` |
+| Anything else (Handshake / Alert / CCS = TLSPlaintext, §5.1) | `max_fragment_size` |
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+- `cargo test -p hitls-tls --release --lib`: **1108 PASS / 0 FAIL**
+  (1 unit test — `record::tests::test_parse_record_size_limit_boundary`
+  — updated to cover the new TLSPlaintext-vs-TLSCiphertext cap
+  discrimination; +2 sub-cases inside it).
+- tlsfuzzer (against a local `s-server -p 14433`):
+
+  | Script | Before | After |
+  |---|---|---|
+  | `test-tls13-record-layer-limits` | 137 PASS / 9 XFAIL | **146 PASS / 0 XFAIL** |
+- Adjacent script regression sweep (TLS 1.3 RSA listener: zero-length-data,
+  zero-content-type, finished, no-unknown-groups, hrr, empty-alert,
+  keyupdate, finished-plaintext; TLS 1.2 RSA listener: ccs,
+  connection-abort, fuzzed-ciphertext, cve-2016-2107, cve-2016-6309,
+  zero-length-data, invalid-compression-methods, encrypt-then-mac,
+  aes-gcm-nonces, conversation): no new FAIL, no XFAIL count drift.
+
+**Net XFAIL reduction: 9.**
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/alert/mod.rs` | Modified | `RecordError` substring routing reordered (overflow first). |
+| `crates/hitls-tls/src/record/encryption.rs` | Modified | `Tls13RecordDecryptor::decrypt_record` adds RFC 8446 §5.4 inner plaintext cap (2^14 + 1) pre-strip; old post-strip check removed. |
+| `crates/hitls-tls/src/record/mod.rs` | Modified | `parse_record` gates cap by wire content type; unit test `test_parse_record_size_limit_boundary` updated with 2 new sub-cases for the discrimination. |
+| `tests/tlsfuzzer/xfail/test-tls13-record-layer-limits.txt` | Deleted | All 9 conversations now PASS. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 334 + Implementation summary I1–I107 → I1–I108. |
+| `PROMPT_LOG.md` | Modified | I108 prompt + result entry. |
+
+### Build Status (Post I108)
+
+`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean.
+TLS 1.3 record-layer is now strictly RFC 8446 §5.1 / §5.2 / §5.4 +
+§6.2.1 conformant on the receive path. Cumulative XFAIL reduction
+across the I107 + I108 tlsfuzzer track: **14**.
