@@ -278,13 +278,21 @@ impl RecordDecryptor {
             .decrypt(&nonce, &aad, &record.fragment)
             .map_err(|_| TlsError::RecordError("bad record MAC".into()))?;
 
-        let (ct, plaintext) = parse_inner_plaintext_owned(inner)?;
-
-        if plaintext.len() > MAX_PLAINTEXT_LENGTH {
+        // RFC 8446 §5.4: the full encoded TLSInnerPlaintext (content +
+        // 1-byte ContentType + zero padding) MUST NOT exceed 2^14 + 1
+        // octets. Phase I108 — this bound is on the inner plaintext as
+        // a whole, not on the stripped content; checking only the
+        // stripped length lets oversized records that hide their excess
+        // in record-layer padding slip past (tlsfuzzer test
+        // `too big plaintext, size: 2**14 - 8, with an additional 9
+        // bytes of padding`).
+        if inner.len() > MAX_PLAINTEXT_LENGTH + 1 {
             return Err(TlsError::RecordError(
-                "decrypted plaintext exceeds maximum length".into(),
+                "inner plaintext overflow: exceeds 2^14 + 1 octets".into(),
             ));
         }
+
+        let (ct, plaintext) = parse_inner_plaintext_owned(inner)?;
 
         if self.seq == u64::MAX {
             return Err(TlsError::RecordError("sequence number overflow".into()));
