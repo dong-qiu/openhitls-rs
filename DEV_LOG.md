@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I109 (109 phases)
+- Implementation: I1–I110 (110 phases)
 - Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -344,7 +344,8 @@ Category summary:
 | 333 | I107 | Impl | TLS 1.3 server-side HRR conformance — two RFC 8446 fixes surfaced by `test-tls13-no-unknown-groups.py`. **(1)** HRR `selected_group` now honours client preference (`client_groups.iter().find(|g| self.config.supported_groups.contains(g))`) instead of server preference, matching OpenSSL / BoringSSL / Go's HRR behaviour — RFC 8446 §4.2.7 says the client's `supported_groups` are "ordered from most preferred to least preferred". **(2)** RFC 8446 §D.4 middlebox-compat CCS now fires after the server's **first** handshake message only — on an HRR path the CCS is emitted after HRR and a `sent_fake_ccs` flag suppresses the duplicate after the post-HRR ServerHello (previously we always emitted both, which tlsfuzzer flags as protocol violation). Also adds `tests/tlsfuzzer/args/test-tls13-no-unknown-groups.txt` (`--groups` tells tlsfuzzer the full s-server group set so its "unknown" subtraction excludes X448 / secp521r1 / FFDHE-* whose codepoints fall in the script's enumerated range). **Net XFAIL reduction = 5**: `test-tls13-no-unknown-groups` 256/3 → **259/0** (xfail file removed); `test-tls13-hrr` 2/1 → **3/0** (xfail file removed); `test-tls13-0rtt-garbage` 7/4 → **8/3** (1 conv closed: `'handshake with invalid 0-RTT and HRR'`). No regression on the wider curated suite (`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean) | 2026-05-21 |
 | 334 | I108 | Impl | TLS 1.3 record-layer overflow conformance — three RFC 8446 §5 fixes surfaced by `test-tls13-record-layer-limits.py` (9 conversations XFAIL'd since T92). **(1)** `tls_error_to_alert` `RecordError` branch reordered — `"overflow"`/`"too large"`/`"exceed"` now route to `record_overflow` (RFC 8446 §6.2.1) BEFORE the AEAD branch, so error messages legitimately containing `"decrypt"` (e.g. `"decrypted plaintext exceeds maximum length"`) no longer get misclassified as `bad_record_mac`. **(2)** `Tls13RecordDecryptor::decrypt_record` now enforces RFC 8446 §5.4 properly: `TLSInnerPlaintext` as a whole (content + 1-byte ContentType + zero padding) must not exceed 2^14 + 1 octets, checked on the decrypt output BEFORE padding-strip (previously only the stripped content was checked vs 2^14, letting oversized records hide their excess in padding). **(3)** `RecordLayer::parse_record` discriminates by wire `content_type`: `ApplicationData` records get the `+256` TLSCiphertext budget (§5.2), every other type (Handshake / Alert / CCS = TLSPlaintext) is capped at `max_fragment_size` (§5.1) — previously a unified +256 cap let an oversized plaintext ClientHello slip past. Net XFAIL reduction = **9**: `test-tls13-record-layer-limits` 137/9 → **146/0** (xfail file removed). 1 unit test (`test_parse_record_size_limit_boundary`) updated to cover the new TLSPlaintext vs TLSCiphertext cap discrimination. No regression on adjacent scripts (zero-length-data, zero-content-type, finished, no-unknown-groups, hrr, empty-alert, keyupdate, finished-plaintext) | 2026-05-21 |
 | 336 | I109 | Impl | TLS 1.3 sig_algs extension parser boundary hardening — closes 3 long-standing XFAILs in `test-tls13-signature-algorithms.py` (the residual boundary-fuzz cases T100 + T104 documented as needing "a per-extension sentinel-length carve-out"). `parse_signature_algorithms_ch` (and via thin wrapper `parse_signature_algorithms_cert`) now rejects two malformed shapes RFC 8446 §4.2.3 / §6.2 require treating as `decode_error`: **(1)** `list_length == 0` (an empty list of signature schemes is a parse error per §6.2 "out of the specified range" — previously parsed as empty Vec and bubbled up as `missing_extension` downstream, the wrong alert); **(2)** trailing bytes after the declared list (`ext.data.len() != 2 + list_len` — previously a `data.len() < 2 + list_len` check accepted any tail and silently dropped it, letting an oversized record with a fuzzed inner-length pass through to a normal handshake). Error message embeds `"decode error"` so the alert mapper emits `decode_error`. **Net XFAIL reduction = 3**: `test-tls13-signature-algorithms` 279/3 → **282/0** (xfail file removed). No regression on 10 adjacent TLS 1.3 scripts (`record-layer-limits`, `no-unknown-groups`, `hrr`, `finished`, `empty-alert`, `keyupdate`, `rsa-signatures`, `zero-length-data`, etc.). 1108 hitls-tls lib tests still PASS; the existing `test_parse_signature_algorithms_ch_empty_data` already covered the new tighter contract | 2026-05-21 |
-| 337 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
+| 338 | I110 | Impl | TLS 1.3 record-layer plaintext-rejection conformance — RFC 8446 §5.1/§5.2: once read decryption is active, handshake and application_data records MUST be carried as `TLSCiphertext` (wire `content_type = application_data`, 23). `record::RecordLayer::open_record` previously fell through to "return as plaintext" for any non-`ApplicationData` wire content type in TLS 1.3 encrypted phase — so a plaintext Handshake record (e.g. tlsfuzzer's `ResetWriteConnectionState() + FinishedGenerator()`) bypassed AEAD entirely. The Finished `verify_data` happens to match across that bypass (it's computed over the transcript hash, not over record-layer cipher state), so the server entered Connected with no alert. New strict gate: in TLS 1.3 encrypted phase, only `ApplicationData` (decrypted), `Alert`, and `ChangeCipherSpec` (latter two explicitly allowed in plaintext for middlebox-compat / pre-encryption alerts) pass; any other plaintext wire content type returns `RecordError("unexpected content type …")` which alert mapper routes to `unexpected_message`. **Net XFAIL reduction = 1**: `test-tls13-finished-plaintext` 2/1 → **3/0** (xfail file removed). No regression on 11 adjacent TLS 1.3 scripts (`record-layer-limits` / `signature-algorithms` / `finished` / `no-unknown-groups` / `hrr` / `empty-alert` / `zero-content-type` / `zero-length-data` / `keyupdate` / `0rtt-garbage` / `rsa-signatures`). 1108 `hitls-tls` lib tests still PASS — no test depended on the lax pre-I110 behaviour | 2026-05-21 |
+| 339 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -20642,3 +20643,89 @@ RFC-final-vs-OpenSSL-draft spec divergence. Investigated and skipped
 `test-tls13-ecdsa-support` (15 XFAILs) this iteration — all
 documented as won't-fix design decisions per T93 / T123 xfail
 headers.
+
+---
+
+## Phase I110 — TLS 1.3 Record-Layer Plaintext-Rejection Conformance (2026-05-21)
+
+### Summary
+
+Closes the long-standing 1-conversation XFAIL on
+`test-tls13-finished-plaintext.py` — RFC 8446 §5.1 / §5.2 require
+that once read decryption is active, handshake and
+application_data records MUST be carried as `TLSCiphertext`
+(wire `content_type = application_data`, 23). A plaintext
+Handshake record in the encrypted phase is a §5.1 violation and
+MUST terminate the connection with `unexpected_message`.
+
+Empirical finding: tlsfuzzer's
+`ResetWriteConnectionState() + FinishedGenerator()` shows the
+plaintext-Finished record was being **silently accepted** by our
+server because `Tls13RecordDecryptor` is only invoked for
+ApplicationData records, and the Finished `verify_data` matches
+across the AEAD bypass (it's computed over the transcript hash —
+independent of record-layer encryption). The server then entered
+Connected, sent NST, and waited for app-data while the client
+timed out waiting for the expected alert.
+
+### What landed
+
+`crates/hitls-tls/src/record/mod.rs::RecordLayer::open_record`
+adds a strict TLS 1.3 encrypted-phase content-type gate:
+
+```rust
+if dec.is_tls13() {
+    match record.content_type {
+        ContentType::ApplicationData => decrypt as usual,
+        ContentType::Alert | ContentType::ChangeCipherSpec => fall through plaintext,
+        _ => return Err(RecordError("unexpected content type …")),
+    }
+}
+```
+
+The error message embeds `"unexpected content type"` so the alert
+mapper's existing route (`RecordError` branch → `UnexpectedMessage`)
+emits the right alert. Plaintext Alert and CCS are explicitly
+allowed in plaintext at any time per §D.4 (middlebox-compat CCS)
+and §6.1 (peer's pre-encryption fatal alert).
+
+The TLS 1.2 / TLCP branch keeps the old "decrypt everything except
+ChangeCipherSpec" behaviour (RFC 5246 §6.2.3.3).
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+- `cargo test -p hitls-tls --release --lib`: **1108 PASS / 0 FAIL**
+  — no test depended on the lax pre-I110 behaviour. All in-memory
+  pair-tests use the encrypted path correctly, so none triggered
+  the new strict gate.
+- tlsfuzzer (against `s-server -p 14433`):
+
+  | Script | Before | After |
+  |---|---|---|
+  | `test-tls13-finished-plaintext` | 2 PASS / 1 XFAIL | **3 PASS / 0 XFAIL** |
+- 11 adjacent TLS 1.3 scripts (record-layer-limits,
+  signature-algorithms, finished, no-unknown-groups, hrr,
+  empty-alert, zero-content-type, zero-length-data, keyupdate,
+  0rtt-garbage, rsa-signatures): no new FAIL, no XFAIL count
+  drift.
+
+**Net XFAIL reduction: 1.** Cumulative across I107 + I108 + I109 +
+I110: **18**.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/record/mod.rs` | Modified | `RecordLayer::open_record` enforces RFC 8446 §5.1/§5.2 — TLS 1.3 encrypted-phase plaintext Handshake / ApplicationData rejected with `unexpected_message`. |
+| `tests/tlsfuzzer/xfail/test-tls13-finished-plaintext.txt` | Deleted | The 1 conversation now PASS. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 338 + Implementation summary I1–I109 → I1–I110. |
+| `PROMPT_LOG.md` | Modified | I110 prompt + result entry. |
+
+### Build Status (Post I110)
+
+`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean.
+Cumulative XFAIL reduction across the tlsfuzzer track (I107–I110):
+**18** (5 HRR + 9 record-layer + 3 sig_algs + 1 record-plaintext).

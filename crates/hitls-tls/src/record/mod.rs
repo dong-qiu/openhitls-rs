@@ -330,16 +330,46 @@ impl RecordLayer {
     pub fn open_record(&mut self, data: &[u8]) -> Result<(ContentType, Vec<u8>, usize), TlsError> {
         let (record, consumed) = self.parse_record(data)?;
         if let Some(dec) = &mut self.decryptor {
-            // TLS 1.3: only decrypt ApplicationData (content type hiding).
-            // TLS 1.2/TLCP: decrypt everything except ChangeCipherSpec.
-            let should_decrypt = if dec.is_tls13() {
-                record.content_type == ContentType::ApplicationData
+            if dec.is_tls13() {
+                // RFC 8446 §5.1 + §5.2: once read decryption is active,
+                // handshake and application_data records MUST be carried
+                // as TLSCiphertext (wire content_type = application_data,
+                // 23). A plaintext Handshake or ApplicationData record in
+                // this phase is a §5.1 violation and MUST be terminated
+                // with `unexpected_message` (Phase I110 —
+                // `test-tls13-finished-plaintext.py` pins this:
+                // previously a plaintext Finished record bypassed the
+                // AEAD entirely and was accepted because the Finished
+                // verify_data is computed over the transcript, which is
+                // independent of record-layer encryption).
+                //
+                // `Alert` and `ChangeCipherSpec` are explicitly
+                // permitted in plaintext at any time (§D.4 middlebox-
+                // compat CCS, peer's pre-encryption alert).
+                match record.content_type {
+                    ContentType::ApplicationData => {
+                        let (ct, pt) = dec.decrypt_record(&record)?;
+                        return Ok((ct, pt, consumed));
+                    }
+                    ContentType::Alert | ContentType::ChangeCipherSpec => {
+                        // Fall through — return as plaintext.
+                    }
+                    _ => {
+                        return Err(TlsError::RecordError(format!(
+                            "unexpected content type {:?} in TLS 1.3 \
+                             encrypted phase (RFC 8446 §5.1: handshake / \
+                             application_data must be carried inside a \
+                             TLSCiphertext wrapper) — alert: unexpected_message",
+                            record.content_type
+                        )));
+                    }
+                }
             } else {
-                record.content_type != ContentType::ChangeCipherSpec
-            };
-            if should_decrypt {
-                let (ct, pt) = dec.decrypt_record(&record)?;
-                return Ok((ct, pt, consumed));
+                // TLS 1.2/TLCP: decrypt everything except ChangeCipherSpec.
+                if record.content_type != ContentType::ChangeCipherSpec {
+                    let (ct, pt) = dec.decrypt_record(&record)?;
+                    return Ok((ct, pt, consumed));
+                }
             }
         }
         Ok((record.content_type, record.fragment, consumed))
