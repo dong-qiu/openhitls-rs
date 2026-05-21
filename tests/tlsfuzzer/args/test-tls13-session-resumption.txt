@@ -1,0 +1,15 @@
+# Phase I111 — `-d` makes the script negotiate (EC)DHE for the
+# TLS 1.2 sanity step rather than its default static-RSA
+# `[TLS_RSA_WITH_AES_128_CBC_SHA]`. Our s-server intentionally
+# does not offer static-RSA cipher suites (no forward secrecy),
+# so without `-d` the TLS 1.2 sanity (and `use TLS 1.2 ticket in
+# TLS 1.3`) conversations are aborted with `handshake_failure` —
+# which is RFC 5246 §7.4.1.2 correct for "no usable suite in
+# common", but blocks the cross-version coverage these XFAILs
+# would otherwise enable.
+#
+# Paired with `--tls auto` on the PSK + session-resumption
+# listener (so it accepts both TLS 1.2 and TLS 1.3 ClientHellos
+# on the same port — the cross-version requirement these two
+# conversations encode).
+-d
