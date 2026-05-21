@@ -6601,3 +6601,43 @@ session-resumption) checked for regression — none. Apparent
 (FFDHE script needs the TLS 1.2 listener; was pointed at TLS 1.3).
 
 Recorded as DEV_LOG Phase I107.
+
+## Phase T113 (continued) — Phase C: `pki/verify` certificate-time family (2026-05-21)
+
+> 开始 CERT_TIME 增量
+
+Extends T113 Phase C with **6 more TCs** from
+`pki/verify/test_suite_sdv_x509_vfy.c` — the `VFY_CERT_TIME_*`
+family (RFC 5280 §4.1.2.5 `notBefore` / `notAfter` validity).
+Hand-appended after the BC block on
+`crates/hitls-pki/tests/migrated_x509_parse.rs`, anchored on
+the already-mirrored `cert/chain/time/` fixture corpus. Coverage:
+1076 → **1082 emitted**; total Rust-side **1080 PASS + 2 `#[ignore]`**
+(no new ignores — Rust verifier handles every case cleanly).
+
+**Scope.** `CURRENT_PASS_TC001` (now-time on current chain),
+`HISTORY_PASS_TC001` (historical mid-validity on expired chain),
+`OUT_OF_RANGE_FAIL_TC001` (double-step: `start-60s` →
+`CertNotYetValid` + `end+60s` → `CertExpired`), and three
+`BOUNDARY_PASS_TC{001,002,003}` (leaf / inter / root with verify-time
+== `not_before` and `not_after` — both endpoints inclusive).
+
+**Behaviour.** `validate_chain` uses non-strict comparisons
+(`time < not_before`, `time > not_after`) so the boundary
+inclusivity required by the C contract is RFC-conformant and free
+— no verifier change needed. The C side reads validity bounds via
+`BSL_SAL_DateToUtcTimeConvert(cert->tbs.validTime.{start,end}, ...)`;
+the Rust port reads `cert.not_before` / `cert.not_after` directly
+off the parsed `Certificate` (i64 UNIX). Each assertion makes a
+fresh verifier via a local `cert_time_verifier_at(root, t)` helper.
+
+**Verification**: `cargo test -p hitls-pki --test migrated_x509_parse`
+→ 1080 PASS / 0 FAIL / 2 ignored; `cargo fmt --check` clean;
+`RUSTFLAGS="-D warnings" cargo clippy -p hitls-pki --all-features
+--tests` clean (initial run flagged 2 `cloned_ref_to_slice_refs` on
+`&[inter.clone()]`; replaced with `std::slice::from_ref(&inter)`).
+No production-code change. Recorded as DEV_LOG `Phase T113 (continued)
+— Phase C: pki/verify certificate-time family`. Phase C still
+ongoing — remaining `pki/verify` families (`VFY_TLS_*EKU_KU_*` /
+`VFY_EXT_*` / `VFY_CHAIN_*` / `VFY_SIGALG_*` / `STORE_*` /
+`BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN_*`) + cms/pkcs12 suites follow.
