@@ -6972,3 +6972,51 @@ Cumulative XFAIL reduction across the tlsfuzzer track (I107 +
 I108 + I109 + I110 + I111 + I112 + I113): **22**.
 
 Recorded as DEV_LOG Phase I113.
+
+---
+
+## Phase I114 — TLS 1.2 Server-Side ClientHello Cross-Record Reassembly (2026-05-21)
+
+> 按照XFAIL reduction的目标依次执行
+
+Eighth iteration of the XFAIL-reduction track. I113 split
+`test-cve-2016-6309`'s 3-XFAIL bundle along its two independent
+root causes; I113 closed the RFC 5746 §3.6 sanity-side, and this
+phase closes the other half — cross-record ClientHello reassembly.
+
+RFC 5246 §6.2.1: a single handshake message MAY span multiple
+TLSPlaintext records. Pre-I114 the TLS 1.2 server's first read
+step expected the whole CH to fit in one record. tlsfuzzer
+fragments a CH with a 21,798-byte `client_hello_padding` extension
+across multiple records (each ≤ 2^14) to exercise the pre-CVE
+OpenSSL crash path; we rejected the over-large total with
+`record_overflow` instead of reassembling.
+
+T104 had already done exactly this for the TLS 1.3 server-side
+read path. I114 lifts the loop into a new shared macro
+`tls12_read_client_hello_body!` (same buffer-and-drain shape) and
+both sync (`connection12/server.rs`) + async (`connection12_async.rs`)
+`do_handshake` Step 1 use it. The legacy
+`tls12_read_handshake_msg_body!` is preserved for post-CH reads
+(ClientCert / CKE / Finished etc.) — those have always fit in one
+record in practice; the same pattern is available if a future probe
+fragments them.
+
+Net XFAIL reduction = 2. `test-cve-2016-6309` 2 PASS / 2 XFAIL
+→ **4 PASS / 0 XFAIL**; xfail file removed.
+
+Verification: `cargo test -p hitls-tls --release --lib` 1108/0;
+`fmt` + `clippy -D warnings` clean. 9 TLS 1.2 + 7 TLS 1.3 adjacent
+scripts regression-checked: no new FAIL, no XFAIL drift.
+
+Cumulative XFAIL reduction across the tlsfuzzer track (I107
+through I114): **24** (5 HRR + 9 record-layer overflow + 3 sig_algs
++ 1 record-plaintext + 2 session-resumption + 1 CCS-strict + 1
+RFC 5746 conditional emit + 2 TLS 1.2 CH reassembly).
+
+After this phase, the remaining curated XFAILs are all documented
+won't-fix design decisions or complex state-machine cases deferred
+for separate dedicated investigation. The XFAIL-reduction track is
+effectively done for this sprint.
+
+Recorded as DEV_LOG Phase I114.

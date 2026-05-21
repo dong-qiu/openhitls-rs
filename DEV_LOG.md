@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I113 (113 phases)
+- Implementation: I1–I114 (114 phases)
 - Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -348,7 +348,8 @@ Category summary:
 | 340 | I111 | Impl | `s-server` cross-version PSK + session-resumption listener — `--tls auto` on the dedicated PSK + `--ticket-key` listener so it accepts both TLS 1.2 and TLS 1.3 ClientHellos on the same port (the cross-version corner `test-tls13-session-resumption.py` encodes). Paired CI workflow change (`.github/workflows/tlsfuzzer.yml`: PSK listener gains `--tls auto`) + new args file (`tests/tlsfuzzer/args/test-tls13-session-resumption.txt`: `-d` makes the script use ECDHE for its TLS 1.2 sanity step rather than its default static-RSA `[TLS_RSA_WITH_AES_128_CBC_SHA]` — hitls intentionally does not offer static-RSA suites, no FS). **Net XFAIL reduction = 2**: `test-tls13-session-resumption` 5/2 → **7/0** (xfail file removed; closes `sanity - TLS 1.2` + `use TLS 1.2 ticket in TLS 1.3` cross-version cases). No production-code change — only CI workflow + args + xfail housekeeping. No regression on 6 adjacent TLS 1.3 RSA scripts (record-layer-limits / signature-algorithms / finished / finished-plaintext / no-unknown-groups / hrr); `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
 | 342 | I112 | Impl | TLS 1.2 ChangeCipherSpec strict payload + cleartext send conformance — closes `test-ccs.py` `two bytes long CCS` XFAIL. RFC 5246 §7.1: the CCS message "consists of a single byte of value 1"; `process_change_cipher_spec` (TLS 1.2 server **and** client) now rejects any other payload with `unexpected_message` instead of silently accepting (the state machine previously only checked `state == WaitChangeCipherSpec`). Caller-sites updated to forward the CCS fragment (`connection12_async.rs` × 6 + `connection12/{client,server}.rs` × 6). Also fixes a paired send-side asymmetry surfaced by the in-memory renegotiation tests: `RecordLayer::seal_record` was AEAD-encrypting CCS in active-encryption phase (TLS 1.2 renegotiation), but `open_record` skips decryption of CCS — leaving an asymmetric record (RFC 5246 §7.1: CCS is cleartext). `seal_record` now short-circuits CCS to plaintext, matching the read path. **Net XFAIL reduction = 1**: `test-ccs` 2/1 → **3/0**. No regression on 17 adjacent TLS 1.2 + TLS 1.3 scripts; 1108 `hitls-tls` lib tests + integration tests still PASS (28 unit-test call-sites + 2 integration `tests/interop/tests/pki.rs` call-sites updated to the payload-aware signature) | 2026-05-21 |
 | 344 | I113 | Impl | TLS 1.2 RFC 5746 server-side `renegotiation_info` conditional emit — RFC 5746 §3.6: the server MUST include the empty `renegotiation_info` extension in the ServerHello of an initial handshake **only if** the ClientHello carried either the extension itself (§3.4) or the `TLS_EMPTY_RENEGOTIATION_INFO_SCSV` signaling cipher suite (§3.3). Previously hitls's TLS 1.2 server **always** echoed the extension, which OpenSSL / NSS / Go / tlsfuzzer's `_process_extensions` flag as "unadvertised extension". New `client_signalled_secure_renego` state on `Tls12ServerHandshake` set when the CH carries the extension or the SCSV (`0x00FF` added as `CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV` in `lib.rs`); both `process_client_hello` + `process_client_hello_resumable` ServerHello-build sites gate the `build_renegotiation_info_initial()` push on the new flag. **Net XFAIL reduction = 1** (1 unique conversation `sanity` reported by tlsfuzzer as 2 entries when run before+after): `test-cve-2016-6309` 0 PASS / 3 XFAIL → **2 PASS / 2 XFAIL** (xfail file shrunk from 3 lines to 2). The 2 remaining XFAILs (`Large ClientHello padding` + `Large incorrect ClientHello length`) are a separate cross-record CH reassembly gap, deferred to a follow-up PR (mirrors the work T104 did for TLS 1.3 server-side, applied to `connection12*`). No regression on 9 adjacent TLS 1.2 + 3 TLS 1.3 scripts; `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
-| 345 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
+| 346 | I114 | Impl | TLS 1.2 server-side ClientHello cross-record reassembly — RFC 5246 §6.2.1: a single handshake message MAY span multiple TLSPlaintext records. Pre-I114 the TLS 1.2 server's first read step expected the entire ClientHello to fit in one record (`tls12_read_handshake_msg_body!` reads one record, parses one msg). tlsfuzzer's `test-cve-2016-6309.py` `Large ClientHello padding` fragments a CH carrying a 21,798-byte `client_hello_padding` extension across multiple records to exercise the pre-CVE OpenSSL crash path; we previously rejected the over-large total at parse time with `record_overflow`. New `tls12_read_client_hello_body!` macro (mirror of T104's TLS 1.3 server-side read loop) does cross-record buffer-and-drain: keeps reading Handshake records and concatenating fragments until the buffered prefix carries a complete handshake message (4-byte header + body_len body); rejects non-Handshake interleave with `unexpected_message`. Both sync (`connection12/server.rs`) and async (`connection12_async.rs`) `do_handshake` Step 1 now use the macro. **Net XFAIL reduction = 2**: `test-cve-2016-6309` 2 PASS / 2 XFAIL → **4 PASS / 0 XFAIL** (xfail file removed; closes both `Large ClientHello padding` + `Large incorrect ClientHello length`). No regression on 9 adjacent TLS 1.2 + 7 TLS 1.3 scripts; `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
+| 347 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -21030,3 +21031,108 @@ record-layer overflow + 3 sig_algs + 1 record-plaintext +
 2 session-resumption + 1 CCS-strict + 1 RFC 5746 conditional
 emit). The remaining `cve-2016-6309` 2 entries are a known
 cross-record CH reassembly gap, queued.
+
+---
+
+## Phase I114 — TLS 1.2 Server-Side ClientHello Cross-Record Reassembly (2026-05-21)
+
+### Summary
+
+Closes the 2 remaining XFAILs on `test-cve-2016-6309.py`
+(`Large ClientHello padding` + `Large incorrect ClientHello length`)
+by giving the TLS 1.2 server the same cross-record ClientHello
+reassembly that T104 added to the TLS 1.3 server. RFC 5246 §6.2.1:
+each TLSPlaintext record carries up to 2^14 bytes of payload;
+a single handshake message MAY span multiple records.
+
+### What landed
+
+**New macro `tls12_read_client_hello_body!`** in
+`crates/hitls-tls/src/macros.rs`, mirroring T104's TLS 1.3
+`tls13_server_do_handshake_body!` Step 1. The loop:
+
+```rust
+let mut ch_buf: Vec<u8> = Vec::new();
+let ch_msg_bytes: Vec<u8> = loop {
+    if ch_buf.len() >= 4 {
+        let body_len = ((ch_buf[1] as usize) << 16)
+            | ((ch_buf[2] as usize) << 8)
+            | (ch_buf[3] as usize);
+        let total = 4 + body_len;
+        if ch_buf.len() >= total {
+            break ch_buf.drain(..total).collect();
+        }
+    }
+    let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+    if ct != ContentType::Handshake {
+        return Err(...interleave violation...);
+    }
+    ch_buf.extend_from_slice(&plaintext);
+};
+// hs_type == ClientHello? trailing bytes empty?
+```
+
+Both sync (`connection12/server.rs`) and async
+(`connection12_async.rs`) `do_handshake` Step 1 replaced the
+old single-record `read_handshake_msg` call with the new macro:
+
+```rust
+// 1. Read ClientHello — Phase I114 — cross-record reassembly
+let ch_data: Vec<u8> = tls12_read_client_hello_body!(sync, self)?;
+// (or `is_async` for the async path)
+```
+
+The legacy `tls12_read_handshake_msg_body!` is preserved for the
+post-CH handshake-message reads (ClientCert / CKE / Finished etc.)
+— those have always fit in a single record in practice and don't
+need the reassembly loop. If a future tlsfuzzer probe exercises a
+fragmented post-CH message, the same pattern can be applied to the
+relevant read site.
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+- `cargo test -p hitls-tls --release --lib`: **1108 PASS / 0 FAIL**.
+- tlsfuzzer (`s-server -p 14434 --tls 1.2 -C 49199`):
+
+  | Script | Before | After |
+  |---|---|---|
+  | `test-cve-2016-6309` | 2 PASS / 2 XFAIL | **4 PASS / 0 XFAIL** |
+- 9 adjacent TLS 1.2 scripts (ccs, connection-abort,
+  cve-2016-2107, fuzzed-ciphertext, zero-length-data,
+  aes-gcm-nonces, encrypt-then-mac, invalid-compression-methods):
+  no new FAIL, no XFAIL count drift.
+- 7 adjacent TLS 1.3 scripts (record-layer-limits, finished,
+  no-unknown-groups, hrr, empty-alert, signature-algorithms,
+  finished-plaintext): no regression despite no TLS 1.3 change
+  (sanity check on the macro split).
+
+**Net XFAIL reduction: 2.** Cumulative across the tlsfuzzer track
+(I107 through I114): **24**.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/macros.rs` | Modified | New `tls12_read_client_hello_body!` macro (cross-record CH buffer-and-drain, mirror of T104's TLS 1.3 path). |
+| `crates/hitls-tls/src/connection12/server.rs` | Modified | Sync `do_handshake` Step 1 uses the new macro. |
+| `crates/hitls-tls/src/connection12_async.rs` | Modified | Async `do_handshake` Step 1 uses the new macro. |
+| `tests/tlsfuzzer/xfail/test-cve-2016-6309.txt` | Deleted | All 4 conversations now PASS. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 346 + Implementation summary I1–I113 → I1–I114. |
+| `PROMPT_LOG.md` | Modified | I114 prompt + result entry. |
+
+### Build Status (Post I114)
+
+`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean.
+Cumulative tlsfuzzer XFAIL reduction across the I107–I114 track:
+**24** (5 HRR + 9 record-layer overflow + 3 sig_algs + 1
+record-plaintext + 2 session-resumption + 1 CCS-strict + 1
+RFC 5746 conditional emit + 2 TLS 1.2 CH reassembly). After this
+phase, the remaining curated XFAILs are all documented won't-fix
+design decisions (echo-server vs abort, multi-cert s-server,
+brainpool curves, intentional spec divergence) or complex
+state-machine cases (0rtt-garbage cross-flight ordering,
+zero-length-data echo loop chunking, zero-content-type echo loop
+ordering) deferred for separate dedicated investigation.
