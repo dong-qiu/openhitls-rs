@@ -287,8 +287,20 @@ jobs:
           PSK_HEX=$(openssl rand -hex 32)
           echo "HITLS_PSK_HEX=${PSK_HEX}" >> "$GITHUB_ENV"
           TICKET_KEY_HEX=$(openssl rand -hex 32)
+          # Phase I111 — `--tls auto` lets this listener accept both
+          # TLS 1.2 and TLS 1.3 ClientHellos. Required by
+          # `test-tls13-session-resumption.py`'s `sanity - TLS 1.2`
+          # and `use TLS 1.2 ticket in TLS 1.3` conversations, which
+          # exercise the cross-version corner: a TLS 1.2 RFC 5077
+          # ticket flow on the same port that handles TLS 1.3
+          # resumption. PSK + ticket-key options apply equally to
+          # both negotiated versions (TLS 1.2 NST is a separate
+          # RFC 5077 ticket; TLS 1.3 NST is the §4.6.1 NewSessionTicket
+          # message). Args file pairs with this via `-d` so the
+          # script negotiates ECDHE rather than its default static-
+          # RSA cipher list (we don't offer static-RSA suites).
           ./target/release/hitls s-server \
-            -p "${HITLS_PORT_PSK}" \
+            -p "${HITLS_PORT_PSK}" --tls auto \
             --cert "${RUNNER_TEMP}/certs/cert-rsa.pem" \
             --key  "${RUNNER_TEMP}/certs/key-rsa-pkcs8.pem" \
             --psk "${PSK_HEX}" \

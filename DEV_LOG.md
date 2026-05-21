@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I110 (110 phases)
+- Implementation: I1–I111 (111 phases)
 - Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -345,7 +345,8 @@ Category summary:
 | 334 | I108 | Impl | TLS 1.3 record-layer overflow conformance — three RFC 8446 §5 fixes surfaced by `test-tls13-record-layer-limits.py` (9 conversations XFAIL'd since T92). **(1)** `tls_error_to_alert` `RecordError` branch reordered — `"overflow"`/`"too large"`/`"exceed"` now route to `record_overflow` (RFC 8446 §6.2.1) BEFORE the AEAD branch, so error messages legitimately containing `"decrypt"` (e.g. `"decrypted plaintext exceeds maximum length"`) no longer get misclassified as `bad_record_mac`. **(2)** `Tls13RecordDecryptor::decrypt_record` now enforces RFC 8446 §5.4 properly: `TLSInnerPlaintext` as a whole (content + 1-byte ContentType + zero padding) must not exceed 2^14 + 1 octets, checked on the decrypt output BEFORE padding-strip (previously only the stripped content was checked vs 2^14, letting oversized records hide their excess in padding). **(3)** `RecordLayer::parse_record` discriminates by wire `content_type`: `ApplicationData` records get the `+256` TLSCiphertext budget (§5.2), every other type (Handshake / Alert / CCS = TLSPlaintext) is capped at `max_fragment_size` (§5.1) — previously a unified +256 cap let an oversized plaintext ClientHello slip past. Net XFAIL reduction = **9**: `test-tls13-record-layer-limits` 137/9 → **146/0** (xfail file removed). 1 unit test (`test_parse_record_size_limit_boundary`) updated to cover the new TLSPlaintext vs TLSCiphertext cap discrimination. No regression on adjacent scripts (zero-length-data, zero-content-type, finished, no-unknown-groups, hrr, empty-alert, keyupdate, finished-plaintext) | 2026-05-21 |
 | 336 | I109 | Impl | TLS 1.3 sig_algs extension parser boundary hardening — closes 3 long-standing XFAILs in `test-tls13-signature-algorithms.py` (the residual boundary-fuzz cases T100 + T104 documented as needing "a per-extension sentinel-length carve-out"). `parse_signature_algorithms_ch` (and via thin wrapper `parse_signature_algorithms_cert`) now rejects two malformed shapes RFC 8446 §4.2.3 / §6.2 require treating as `decode_error`: **(1)** `list_length == 0` (an empty list of signature schemes is a parse error per §6.2 "out of the specified range" — previously parsed as empty Vec and bubbled up as `missing_extension` downstream, the wrong alert); **(2)** trailing bytes after the declared list (`ext.data.len() != 2 + list_len` — previously a `data.len() < 2 + list_len` check accepted any tail and silently dropped it, letting an oversized record with a fuzzed inner-length pass through to a normal handshake). Error message embeds `"decode error"` so the alert mapper emits `decode_error`. **Net XFAIL reduction = 3**: `test-tls13-signature-algorithms` 279/3 → **282/0** (xfail file removed). No regression on 10 adjacent TLS 1.3 scripts (`record-layer-limits`, `no-unknown-groups`, `hrr`, `finished`, `empty-alert`, `keyupdate`, `rsa-signatures`, `zero-length-data`, etc.). 1108 hitls-tls lib tests still PASS; the existing `test_parse_signature_algorithms_ch_empty_data` already covered the new tighter contract | 2026-05-21 |
 | 338 | I110 | Impl | TLS 1.3 record-layer plaintext-rejection conformance — RFC 8446 §5.1/§5.2: once read decryption is active, handshake and application_data records MUST be carried as `TLSCiphertext` (wire `content_type = application_data`, 23). `record::RecordLayer::open_record` previously fell through to "return as plaintext" for any non-`ApplicationData` wire content type in TLS 1.3 encrypted phase — so a plaintext Handshake record (e.g. tlsfuzzer's `ResetWriteConnectionState() + FinishedGenerator()`) bypassed AEAD entirely. The Finished `verify_data` happens to match across that bypass (it's computed over the transcript hash, not over record-layer cipher state), so the server entered Connected with no alert. New strict gate: in TLS 1.3 encrypted phase, only `ApplicationData` (decrypted), `Alert`, and `ChangeCipherSpec` (latter two explicitly allowed in plaintext for middlebox-compat / pre-encryption alerts) pass; any other plaintext wire content type returns `RecordError("unexpected content type …")` which alert mapper routes to `unexpected_message`. **Net XFAIL reduction = 1**: `test-tls13-finished-plaintext` 2/1 → **3/0** (xfail file removed). No regression on 11 adjacent TLS 1.3 scripts (`record-layer-limits` / `signature-algorithms` / `finished` / `no-unknown-groups` / `hrr` / `empty-alert` / `zero-content-type` / `zero-length-data` / `keyupdate` / `0rtt-garbage` / `rsa-signatures`). 1108 `hitls-tls` lib tests still PASS — no test depended on the lax pre-I110 behaviour | 2026-05-21 |
-| 339 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
+| 340 | I111 | Impl | `s-server` cross-version PSK + session-resumption listener — `--tls auto` on the dedicated PSK + `--ticket-key` listener so it accepts both TLS 1.2 and TLS 1.3 ClientHellos on the same port (the cross-version corner `test-tls13-session-resumption.py` encodes). Paired CI workflow change (`.github/workflows/tlsfuzzer.yml`: PSK listener gains `--tls auto`) + new args file (`tests/tlsfuzzer/args/test-tls13-session-resumption.txt`: `-d` makes the script use ECDHE for its TLS 1.2 sanity step rather than its default static-RSA `[TLS_RSA_WITH_AES_128_CBC_SHA]` — hitls intentionally does not offer static-RSA suites, no FS). **Net XFAIL reduction = 2**: `test-tls13-session-resumption` 5/2 → **7/0** (xfail file removed; closes `sanity - TLS 1.2` + `use TLS 1.2 ticket in TLS 1.3` cross-version cases). No production-code change — only CI workflow + args + xfail housekeeping. No regression on 6 adjacent TLS 1.3 RSA scripts (record-layer-limits / signature-algorithms / finished / finished-plaintext / no-unknown-groups / hrr); `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
+| 341 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -20729,3 +20730,101 @@ I110: **18**.
 `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean.
 Cumulative XFAIL reduction across the tlsfuzzer track (I107–I110):
 **18** (5 HRR + 9 record-layer + 3 sig_algs + 1 record-plaintext).
+
+---
+
+## Phase I111 — Cross-Version PSK + Session-Resumption Listener (2026-05-21)
+
+### Summary
+
+Closes the 2 cross-version XFAILs on
+`test-tls13-session-resumption.py` (`sanity - TLS 1.2` +
+`use TLS 1.2 ticket in TLS 1.3`) via CI workflow + args plumbing
+only — no production-code change. The existing `--tls auto` mode
+(Phase I100) already handles per-connection version negotiation;
+the PSK + ticket-key listener just wasn't using it.
+
+### What landed
+
+**`.github/workflows/tlsfuzzer.yml` — PSK listener gains `--tls auto`.**
+The dedicated PSK + `--ticket-key` instance (Phase T119) was started
+with the default `--tls 1.3` — so a TLS 1.2 ClientHello on the same
+port aborted with `protocol_version` alert. Adding `--tls auto`
+lets the same listener serve both TLS 1.2 (RFC 5077 NST resumption)
+and TLS 1.3 (RFC 8446 §4.6.1 NewSessionTicket resumption) on the
+same port, which is the cross-version corner the two XFAIL'd
+conversations encode.
+
+**`tests/tlsfuzzer/args/test-tls13-session-resumption.txt` — new
+file, `-d`.** Without `-d`, tlsfuzzer's TLS 1.2 sanity step defaults
+to `[TLS_RSA_WITH_AES_128_CBC_SHA]` (static-RSA key exchange).
+hitls intentionally does NOT offer static-RSA suites (no forward
+secrecy — would be a deliberate security regression), so the server
+correctly replied `handshake_failure` ("no usable cipher suite in
+common", RFC 5246 §7.4.1.2) and the conversation failed. `-d`
+makes the script negotiate ECDHE / DHE instead, matching what our
+TLS 1.2 listener actually offers.
+
+### Why this wasn't done earlier
+
+The Phase T120 xfail header noted this was the "planned `--tls auto`
+phase". I100 shipped `--tls auto` itself, but the PSK listener
+wasn't migrated at the time because nobody had verified the
+cross-version flow worked end-to-end. Empirical run with
+`s-server --tls auto --psk ... --ticket-key ...` confirms both
+XFAILs close cleanly, so the planned migration is now done.
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+- `cargo test -p hitls-tls --release --lib`: **1108 PASS / 0 FAIL**
+  (no production-code change — these are the same pre-existing
+  tests, sanity check).
+- tlsfuzzer (against `s-server -p 14433 --tls auto --psk ...
+  --psk-identity ... --ticket-key ...`):
+
+  | Script | Before | After |
+  |---|---|---|
+  | `test-tls13-session-resumption` | 5 PASS / 2 XFAIL | **7 PASS / 0 XFAIL** |
+
+  All 5 previously-passing conversations still PASS:
+  - `sanity` (TLS 1.3 baseline)
+  - `session resumption`
+  - `session resumption - PSK_WITH_DHE`
+  - `session resumption - PSK_ONLY` (T120 closure)
+  - `sanity` (variant — runs again after resumption to confirm the
+    listener stayed up)
+
+  The 2 newly-closed conversations:
+  - `sanity - TLS 1.2` — TLS 1.2 ECDHE-RSA full handshake +
+    RFC 5077 NST round-trip on the same listener.
+  - `use TLS 1.2 ticket in TLS 1.3` — issue a TLS 1.2 RFC 5077
+    ticket then present it in a TLS 1.3 ClientHello (cross-version
+    rejection is the expected RFC behaviour; server emits the
+    correct alert / fallback that the script accepts).
+- 6 adjacent TLS 1.3 RSA scripts on the main listener
+  (record-layer-limits, signature-algorithms, finished,
+  finished-plaintext, no-unknown-groups, hrr): no new FAIL, no
+  XFAIL count drift.
+
+**Net XFAIL reduction: 2.** Cumulative across the tlsfuzzer track
+(I107 + I108 + I109 + I110 + I111): **20**.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | Modified | PSK + session-resumption listener gains `--tls auto` flag. |
+| `tests/tlsfuzzer/args/test-tls13-session-resumption.txt` | New | Adds `-d` so the script's TLS 1.2 sanity step uses ECDHE. |
+| `tests/tlsfuzzer/xfail/test-tls13-session-resumption.txt` | Deleted | Both 2 cross-version conversations now PASS. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 340 + Implementation summary I1–I110 → I1–I111. |
+| `PROMPT_LOG.md` | Modified | I111 prompt + result entry. |
+
+### Build Status (Post I111)
+
+No production-code change in this phase. CI workflow + tlsfuzzer
+config-only. Cumulative XFAIL reduction across the tlsfuzzer
+track: **20** (5 HRR + 9 record-layer + 3 sig_algs + 1
+record-plaintext + 2 cross-version session-resumption).

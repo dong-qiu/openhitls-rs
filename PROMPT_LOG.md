@@ -6818,3 +6818,48 @@ checked: no new FAIL, no XFAIL drift.
 Cumulative XFAIL reduction across I107 + I108 + I109 + I110: **18**.
 
 Recorded as DEV_LOG Phase I110.
+
+---
+
+## Phase I111 — Cross-Version PSK + Session-Resumption Listener (2026-05-21)
+
+> 按照XFAIL reduction的目标依次执行
+
+Fifth iteration of the XFAIL-reduction track. After I110 the
+remaining candidate xfail files were mostly documented as
+won't-fix or s-server echo-loop design differences
+(connection-abort / eddsa / keyupdate / 0rtt-garbage /
+zero-length-data / zero-content-type). The 2-XFAIL
+`session-resumption` was the natural next pick: the T120 xfail
+header had already documented the cross-version gap as "needs
+`--tls auto` on the PSK listener" — i.e. CI plumbing.
+
+Empirical confirmation: starting the PSK + ticket-key listener
+with `--tls auto` and running the script with `-d` (use ECDHE,
+not the default static-RSA cipher list) closes both XFAILs
+without any production-code change. Two paired plumbing items:
+
+1. `.github/workflows/tlsfuzzer.yml`: PSK listener gains
+   `--tls auto`. The existing `--tls auto` mode (I100) already
+   handles per-connection version negotiation; the PSK listener
+   just wasn't migrated.
+2. `tests/tlsfuzzer/args/test-tls13-session-resumption.txt`: new
+   args file with `-d`. tlsfuzzer's TLS 1.2 sanity step defaults
+   to `[TLS_RSA_WITH_AES_128_CBC_SHA]` (static RSA), which we
+   intentionally don't offer (no FS — would be a deliberate
+   security regression). `-d` switches to ECDHE / DHE, which our
+   listener does offer.
+
+Net XFAIL reduction = 2. `test-tls13-session-resumption` 5/2 →
+**7/0 PASS** (xfail file removed; closes `sanity - TLS 1.2` +
+`use TLS 1.2 ticket in TLS 1.3` cross-version cases).
+
+Verification: `cargo test -p hitls-tls --release --lib` 1108/0
+(sanity — no prod change); `fmt` + `clippy -D warnings` clean.
+6 adjacent TLS 1.3 RSA scripts on the main listener checked: no
+new FAIL, no XFAIL drift.
+
+Cumulative XFAIL reduction across the tlsfuzzer track
+(I107 + I108 + I109 + I110 + I111): **20**.
+
+Recorded as DEV_LOG Phase I111.
