@@ -134,13 +134,9 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
     fn do_handshake(&mut self) -> Result<(), TlsError> {
         let mut hs = Tls12ServerHandshake::new(self.config.clone());
 
-        // 1. Read ClientHello
-        let (hs_type, ch_data) = self.read_handshake_msg()?;
-        if hs_type != HandshakeType::ClientHello {
-            return Err(TlsError::HandshakeFailed(format!(
-                "expected ClientHello, got {hs_type:?}"
-            )));
-        }
+        // 1. Read ClientHello — Phase I114 — cross-record reassembly
+        // mirror of T104's TLS 1.3 server-side read loop.
+        let ch_data: Vec<u8> = tls12_read_client_hello_body!(sync, self)?;
 
         // 2. Process ClientHello (with ticket support + session ID cache)
         let cache_ref = self

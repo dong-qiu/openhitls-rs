@@ -1860,6 +1860,68 @@ macro_rules! tls12_read_handshake_msg_body {
     }};
 }
 
+/// Read a TLS 1.2 ClientHello via cross-record buffer-and-drain
+/// (Phase I114 — mirror of T104's TLS 1.3 server-side read loop).
+///
+/// RFC 5246 §6.2.1: each TLSPlaintext record carries up to 2^14
+/// bytes of payload; a single handshake message MAY span multiple
+/// records ("the handshake message header ... may straddle the record
+/// boundary"). Pre-I114 we read one record and expected the entire
+/// ClientHello to fit inside it — but tlsfuzzer's
+/// `test-cve-2016-6309.py` fragments a CH carrying a 21,798-byte
+/// padding extension across multiple records to exercise the CVE
+/// path. The buffer-and-drain loop keeps reading Handshake records
+/// and concatenating fragments until the buffered prefix carries
+/// a complete handshake message (4-byte header + body_len body).
+///
+/// Returns `Ok((HandshakeType::ClientHello, msg_bytes))` on success
+/// (the bytes include the 4-byte handshake header) or `Err(...)` if
+/// either:
+///   * a non-Handshake record is interleaved while waiting for more
+///     CH fragments (interleave violation),
+///   * the first complete handshake message is not a ClientHello,
+///   * trailing bytes remain after the ClientHello in the buffered
+///     stream (a subsequent handshake message would belong here, but
+///     the CH-read step is the only one that walks this loop).
+macro_rules! tls12_read_client_hello_body {
+    ($mode:ident, $self:ident) => {{
+        let mut ch_buf: Vec<u8> = Vec::new();
+        let ch_msg_bytes: Vec<u8> = loop {
+            if ch_buf.len() >= 4 {
+                let body_len = ((ch_buf[1] as usize) << 16)
+                    | ((ch_buf[2] as usize) << 8)
+                    | (ch_buf[3] as usize);
+                let total = 4 + body_len;
+                if ch_buf.len() >= total {
+                    break ch_buf.drain(..total).collect();
+                }
+            }
+            let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+            if ct != ContentType::Handshake {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected Handshake for ClientHello, got {ct:?} \
+                     (alert: unexpected_message)"
+                )));
+            }
+            ch_buf.extend_from_slice(&plaintext);
+        };
+        let (hs_type, _, _) = parse_handshake_header(&ch_msg_bytes)?;
+        if hs_type != HandshakeType::ClientHello {
+            return Err(TlsError::HandshakeFailed(format!(
+                "expected ClientHello, got {hs_type:?}"
+            )));
+        }
+        if !ch_buf.is_empty() {
+            return Err(TlsError::HandshakeFailed(
+                "trailing bytes after ClientHello \
+                 (alert: unexpected_message)"
+                    .into(),
+            ));
+        }
+        Ok::<Vec<u8>, TlsError>(ch_msg_bytes)
+    }};
+}
+
 /// Body for TLS 1.2 `handshake` trait method.
 macro_rules! tls12_handshake_trait_body {
     ($mode:ident, $self:ident) => {{
