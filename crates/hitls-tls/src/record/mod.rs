@@ -309,6 +309,25 @@ impl RecordLayer {
                 "plaintext exceeds max fragment size".into(),
             ));
         }
+        // RFC 5246 §7.1: ChangeCipherSpec is sent as cleartext (the
+        // record-layer encryption only switches AFTER the CCS is on
+        // the wire). The symmetric `open_record` path already skips
+        // decryption on TLS 1.2 CCS records (`record/mod.rs::open_record`
+        // matches `content_type != ChangeCipherSpec`). Phase I112 — keep
+        // this matching by also skipping AEAD encryption on send:
+        // previously, a `seal_record(ChangeCipherSpec, &[0x01])` issued
+        // during renegotiation would emit an encrypted 25-byte payload
+        // (TLS 1.2 AES-GCM expansion of a 1-byte plaintext), which
+        // OpenSSL / NSS / the receiver-side `process_change_cipher_spec`
+        // payload-length check (Phase I112) all reject.
+        if content_type == ContentType::ChangeCipherSpec {
+            let record = Record {
+                content_type,
+                version: TLS13_LEGACY_VERSION,
+                fragment: plaintext.to_vec(),
+            };
+            return Ok(self.serialize_record(&record));
+        }
         let record = if let Some(enc) = &mut self.encryptor {
             enc.encrypt_record(content_type, plaintext)?
         } else {

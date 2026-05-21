@@ -1311,11 +1311,21 @@ impl Tls12ClientHandshake {
     }
 
     /// Process ChangeCipherSpec from server.
-    pub fn process_change_cipher_spec(&mut self) -> Result<(), TlsError> {
+    ///
+    /// RFC 5246 §7.1 strict payload check — see the matching note on
+    /// `Tls12Server::process_change_cipher_spec` (Phase I112).
+    pub fn process_change_cipher_spec(&mut self, payload: &[u8]) -> Result<(), TlsError> {
         if self.state != Tls12ClientState::WaitChangeCipherSpec {
             return Err(TlsError::HandshakeFailed(
                 "unexpected ChangeCipherSpec".into(),
             ));
+        }
+        if payload.len() != 1 || payload[0] != 1 {
+            return Err(TlsError::HandshakeFailed(format!(
+                "malformed ChangeCipherSpec: RFC 5246 §7.1 requires a \
+                 single 0x01 byte (got {} bytes) — alert: unexpected_message",
+                payload.len()
+            )));
         }
         // CCS is not a handshake message — not added to transcript
         self.state = Tls12ClientState::WaitFinished;
@@ -2135,7 +2145,7 @@ mod tests {
         let config = TlsConfig::builder().build();
         let mut hs = Tls12ClientHandshake::new(config);
         // CCS from Idle → error
-        assert!(hs.process_change_cipher_spec().is_err());
+        assert!(hs.process_change_cipher_spec(&[1u8]).is_err());
     }
 
     #[test]

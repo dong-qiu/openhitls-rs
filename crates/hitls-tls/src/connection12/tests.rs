@@ -198,7 +198,7 @@ fn test_tls12_connection_full_handshake() {
     let (ct, _, consumed) = server_rl.open_record(&client_to_server).unwrap();
     client_to_server.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec().unwrap();
+    server_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     // 9. Activate server read decryption
     server_rl
@@ -231,7 +231,7 @@ fn test_tls12_connection_full_handshake() {
     let (ct, _, consumed) = client_rl.open_record(&server_to_client).unwrap();
     server_to_client.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec().unwrap();
+    client_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     // Activate client read decryption
     client_rl
@@ -429,7 +429,7 @@ fn run_tls12_handshake(
     let (ct, _, consumed) = server_rl.open_record(&c2s).unwrap();
     c2s.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec().unwrap();
+    server_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     // Activate server read
     if keys.is_cbc {
@@ -488,7 +488,7 @@ fn run_tls12_handshake(
     let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
     s2c.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec().unwrap();
+    client_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     if cflight.is_cbc {
         client_rl
@@ -835,7 +835,7 @@ fn run_tls12_mtls_handshake(
     let (ct, _, consumed) = server_rl.open_record(&c2s)?;
     c2s.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec()?;
+    server_hs.process_change_cipher_spec(&[1u8])?;
 
     // Activate server read
     server_rl
@@ -867,7 +867,7 @@ fn run_tls12_mtls_handshake(
     let (ct, _, consumed) = client_rl.open_record(&s2c)?;
     s2c.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec()?;
+    client_hs.process_change_cipher_spec(&[1u8])?;
 
     client_rl
         .activate_read_decryption12(
@@ -1061,7 +1061,7 @@ fn run_full_handshake_get_session(suite: CipherSuite) -> TlsSession {
     let (ct, _, consumed) = server_rl.open_record(&c2s).unwrap();
     c2s.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec().unwrap();
+    server_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     if keys.is_cbc && server_hs.use_encrypt_then_mac() {
         server_rl
@@ -1123,7 +1123,7 @@ fn run_full_handshake_get_session(suite: CipherSuite) -> TlsSession {
     let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
     s2c.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec().unwrap();
+    client_hs.process_change_cipher_spec(&[1u8]).unwrap();
     let client_etm = client_hs.use_encrypt_then_mac();
 
     activate_read_cbc_or_etm(
@@ -1307,7 +1307,7 @@ fn run_abbreviated_handshake(
             let (ct, _, consumed) = client_rl.open_record(&s2c)?;
             s2c.drain(..consumed);
             assert_eq!(ct, ContentType::ChangeCipherSpec);
-            client_hs.process_change_cipher_spec()?;
+            client_hs.process_change_cipher_spec(&[1u8])?;
 
             // 9. Activate client read decryption (server write key)
             activate_read_cbc_or_etm(
@@ -1356,7 +1356,7 @@ fn run_abbreviated_handshake(
             let (ct, _, consumed) = server_rl.open_record(&c2s)?;
             c2s.drain(..consumed);
             assert_eq!(ct, ContentType::ChangeCipherSpec);
-            server_hs.process_change_cipher_spec()?;
+            server_hs.process_change_cipher_spec(&[1u8])?;
 
             // 15. Activate server read decryption (client write key)
             activate_read_cbc_or_etm(
@@ -1605,7 +1605,7 @@ fn run_full_handshake_with_ticket(suite: CipherSuite, ticket_key: Vec<u8>) -> Tl
     let (ct, _, consumed) = server_rl.open_record(&c2s).unwrap();
     c2s.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec().unwrap();
+    server_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     server_rl
         .activate_read_decryption12(
@@ -1663,7 +1663,7 @@ fn run_full_handshake_with_ticket(suite: CipherSuite, ticket_key: Vec<u8>) -> Tl
     let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
     s2c.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec().unwrap();
+    client_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     client_rl
         .activate_read_decryption12(
@@ -1798,7 +1798,7 @@ fn run_ticket_abbreviated_handshake(
                         }
                     }
                     ContentType::ChangeCipherSpec => {
-                        client_hs.process_change_cipher_spec()?;
+                        client_hs.process_change_cipher_spec(&[1u8])?;
                         break;
                     }
                     _ => {
@@ -1836,7 +1836,7 @@ fn run_ticket_abbreviated_handshake(
             let (ct, _, consumed) = server_rl.open_record(&c2s)?;
             c2s.drain(..consumed);
             assert_eq!(ct, ContentType::ChangeCipherSpec);
-            server_hs.process_change_cipher_spec()?;
+            server_hs.process_change_cipher_spec(&[1u8])?;
 
             server_rl.activate_read_decryption12(
                 abbr.suite,
@@ -2184,7 +2184,7 @@ fn run_ems_etm_handshake(
     let (ct, _, consumed) = server_rl.open_record(&c2s).unwrap();
     c2s.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec().unwrap();
+    server_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     // Server read decryption
     if keys.is_cbc && server_hs.use_encrypt_then_mac() {
@@ -2260,7 +2260,7 @@ fn run_ems_etm_handshake(
     let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
     s2c.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec().unwrap();
+    client_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     if cflight.is_cbc && client_hs.use_encrypt_then_mac() {
         client_rl
@@ -2593,7 +2593,7 @@ fn run_tls12_rsa_or_dhe_handshake(
     let (ct, _, consumed) = server_rl.open_record(&c2s).unwrap();
     c2s.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec().unwrap();
+    server_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     if keys.is_cbc {
         server_rl
@@ -2651,7 +2651,7 @@ fn run_tls12_rsa_or_dhe_handshake(
     let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
     s2c.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec().unwrap();
+    client_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     if cflight.is_cbc {
         client_rl
@@ -3023,7 +3023,7 @@ fn run_tls12_psk_handshake(
     let (ct, _, consumed) = server_rl.open_record(&c2s).unwrap();
     c2s.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec().unwrap();
+    server_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     if keys.is_cbc {
         server_rl
@@ -3081,7 +3081,7 @@ fn run_tls12_psk_handshake(
     let (ct, _, consumed) = client_rl.open_record(&s2c).unwrap();
     s2c.drain(..consumed);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec().unwrap();
+    client_hs.process_change_cipher_spec(&[1u8]).unwrap();
 
     if cflight.is_cbc {
         client_rl
@@ -5081,7 +5081,7 @@ fn test_tls12_client_change_cipher_spec_premature() {
     let mut hs = make_test_client_hs();
     let _ = hs.build_client_hello().unwrap();
     assert_eq!(hs.state(), Tls12ClientState::WaitServerHello);
-    let result = hs.process_change_cipher_spec();
+    let result = hs.process_change_cipher_spec(&[1u8]);
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
     assert!(
@@ -5181,7 +5181,7 @@ fn test_tls12_server_client_hello_incompatible_suites() {
 fn test_tls12_server_premature_change_cipher_spec() {
     let mut server_hs = make_test_server_hs();
     assert_eq!(server_hs.state(), Tls12ServerState::Idle);
-    let result = server_hs.process_change_cipher_spec();
+    let result = server_hs.process_change_cipher_spec(&[1u8]);
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
     assert!(

@@ -6863,3 +6863,60 @@ Cumulative XFAIL reduction across the tlsfuzzer track
 (I107 + I108 + I109 + I110 + I111): **20**.
 
 Recorded as DEV_LOG Phase I111.
+
+---
+
+## Phase I112 — TLS 1.2 CCS Strict Payload + Cleartext Send (2026-05-21)
+
+> 按照XFAIL reduction的目标依次执行
+
+Sixth iteration of the XFAIL-reduction track. After I111
+most remaining curated XFAILs are won't-fix design decisions
+(connection-abort echo expectation, eddsa needs multi-cert s-server,
+keyupdate echo-loop assumption) or complex state-machine cases
+(0rtt-garbage, zero-length-data interleave). The 2 clearest
+remaining candidates were `test-ccs` (TLS 1.2, 1 XFAIL,
+T90-documented as "real spec gap, scheduled") and
+`test-cve-2016-6309` (3 XFAILs, T90-documented as needing a
+ClientHello-length parser-side check, mixed with a sanity-side
+RFC 5746 issue). Picked `test-ccs` — cleaner single root cause.
+
+Empirical: tlsfuzzer's `two bytes long CCS` conversation sends a
+CCS record with a 2-byte payload. hitls's
+`process_change_cipher_spec` only state-gated; it never inspected
+the fragment. The state machine silently advanced and the handshake
+then stalled waiting for Finished while the client timed out.
+
+Fix 1 — both TLS 1.2 server + client `process_change_cipher_spec`
+now require `payload.len() == 1 && payload[0] == 1` per RFC 5246
+§7.1. Function signature gains `payload: &[u8]`; 6 production
+call-sites updated to forward the CCS fragment.
+
+Fix 2 (paired) — the in-memory renegotiation tests panicked once
+the read side got strict: the server was emitting a 25-byte
+"CCS" payload (AES-GCM expansion of the 1-byte plaintext) during
+renegotiation. `RecordLayer::seal_record` was AEAD-encrypting CCS
+in active-encryption phase, but `open_record` skips CCS decryption
+on TLS 1.2 — asymmetric. RFC 5246 §7.1 says CCS is cleartext.
+Added a short-circuit in `seal_record` for `ChangeCipherSpec`,
+matching the read path. This pair-bug was an externally-latent
+issue (peers tend to be lax on CCS) that the strict read check
+finally surfaced.
+
+Net XFAIL reduction = 1. `test-ccs` 2/1 → **3/0 PASS**; xfail
+file removed.
+
+Verification: `cargo test -p hitls-tls --release --lib` 1108/0
+(2 renegotiation tests that initially panicked on the 25-byte
+CCS now PASS once `seal_record` short-circuits CCS); `fmt` +
+`clippy -D warnings` clean. 17 adjacent TLS 1.2 + TLS 1.3 scripts
+regression-checked: no new FAIL, no XFAIL drift. 30 test
+call-sites (28 unit + 2 integration `tests/interop/tests/pki.rs`)
+updated to the payload-aware signature.
+
+Cumulative XFAIL reduction across the tlsfuzzer track (I107 +
+I108 + I109 + I110 + I111 + I112): **21** (5 HRR + 9 record-layer
+overflow + 3 sig_algs + 1 record-plaintext + 2 session-resumption
++ 1 CCS-strict).
+
+Recorded as DEV_LOG Phase I112.

@@ -3423,7 +3423,7 @@ fn test_tls12_full_handshake_ecdhe_ecdsa() {
     // === 13. Server receives CCS ===
     let (ct, _, _) = server_rl.open_record(&client_ccs_record).unwrap();
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec().unwrap();
+    server_hs.process_change_cipher_spec(&[1u8]).unwrap();
     assert_eq!(server_hs.state(), Tls12ServerState::WaitFinished);
 
     // === 14. Server activates read decryption ===
@@ -3466,7 +3466,7 @@ fn test_tls12_full_handshake_ecdhe_ecdsa() {
     // === 19. Client receives CCS ===
     let (ct, _, _) = client_rl.open_record(&server_ccs_record).unwrap();
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec().unwrap();
+    client_hs.process_change_cipher_spec(&[1u8]).unwrap();
     assert_eq!(client_hs.state(), Tls12ClientState::WaitFinished);
 
     // === 20. Client activates read decryption ===
@@ -3640,7 +3640,7 @@ fn test_tls12_full_handshake_x25519() {
     // Server ← CCS
     let (ct, _, _) = server_rl.open_record(&client_ccs_record).unwrap();
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec().unwrap();
+    server_hs.process_change_cipher_spec(&[1u8]).unwrap();
     server_rl
         .activate_read_decryption12(
             suite,
@@ -3675,7 +3675,7 @@ fn test_tls12_full_handshake_x25519() {
     // Client ← CCS + Finished
     let (ct, _, _) = client_rl.open_record(&server_ccs).unwrap();
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec().unwrap();
+    client_hs.process_change_cipher_spec(&[1u8]).unwrap();
     client_rl
         .activate_read_decryption12(
             suite,

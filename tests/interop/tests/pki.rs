@@ -281,10 +281,10 @@ fn test_tls12_ecdhe_ecdsa_full_handshake() {
         .process_client_key_exchange(&data[..total])
         .unwrap();
 
-    let (ct, _, c) = server_rl.open_record(&c2s).unwrap();
+    let (ct, fragment, c) = server_rl.open_record(&c2s).unwrap();
     c2s.drain(..c);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    server_hs.process_change_cipher_spec().unwrap();
+    server_hs.process_change_cipher_spec(&fragment).unwrap();
 
     server_rl
         .activate_read_decryption12(suite, &keys.client_write_key, keys.client_write_iv.clone())
@@ -311,10 +311,10 @@ fn test_tls12_ecdhe_ecdsa_full_handshake() {
     );
 
     // Client processes server CCS + Finished
-    let (ct, _, c) = client_rl.open_record(&s2c).unwrap();
+    let (ct, fragment, c) = client_rl.open_record(&s2c).unwrap();
     s2c.drain(..c);
     assert_eq!(ct, ContentType::ChangeCipherSpec);
-    client_hs.process_change_cipher_spec().unwrap();
+    client_hs.process_change_cipher_spec(&fragment).unwrap();
 
     client_rl
         .activate_read_decryption12(

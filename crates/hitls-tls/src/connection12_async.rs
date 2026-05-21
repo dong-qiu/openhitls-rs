@@ -345,7 +345,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
                     }
                 }
                 ContentType::ChangeCipherSpec => {
-                    hs.process_change_cipher_spec()?;
+                    hs.process_change_cipher_spec(&data)?;
                     break;
                 }
                 _ => {
@@ -464,7 +464,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
                     }
                 }
                 ContentType::ChangeCipherSpec => {
-                    hs.process_change_cipher_spec()?;
+                    hs.process_change_cipher_spec(&data)?;
                     break;
                 }
                 _ => {
@@ -826,7 +826,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
                     }
                 }
                 ContentType::ChangeCipherSpec => {
-                    hs.process_change_cipher_spec()?;
+                    hs.process_change_cipher_spec(&data)?;
                     break;
                 }
                 _ => {
@@ -1217,13 +1217,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
         }
 
         // 11. Read ChangeCipherSpec from client
-        let (ct, _ccs_data) = self.read_record().await?;
+        let (ct, ccs_data) = self.read_record().await?;
         if ct != ContentType::ChangeCipherSpec {
             return Err(TlsError::HandshakeFailed(format!(
                 "expected ChangeCipherSpec, got {ct:?}"
             )));
         }
-        hs.process_change_cipher_spec()?;
+        hs.process_change_cipher_spec(&ccs_data)?;
 
         // 12. Activate read decryption (client write key)
         if keys.is_cbc && hs.use_encrypt_then_mac() {
@@ -1419,13 +1419,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
             .map_err(|e| TlsError::RecordError(format!("write error: {e}")))?;
 
         // 6. Read client CCS
-        let (ct, _ccs_data) = self.read_record().await?;
+        let (ct, ccs_data) = self.read_record().await?;
         if ct != ContentType::ChangeCipherSpec {
             return Err(TlsError::HandshakeFailed(format!(
                 "expected ChangeCipherSpec, got {ct:?}"
             )));
         }
-        hs.process_change_cipher_spec()?;
+        hs.process_change_cipher_spec(&ccs_data)?;
 
         // 7. Activate read decryption (client write key)
         if abbr.is_cbc && hs.use_encrypt_then_mac() {
@@ -1640,13 +1640,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
         }
 
         // Read ChangeCipherSpec from client
-        let (ct, _ccs_data) = self.read_record().await?;
+        let (ct, ccs_data) = self.read_record().await?;
         if ct != ContentType::ChangeCipherSpec {
             return Err(TlsError::HandshakeFailed(format!(
                 "expected ChangeCipherSpec, got {ct:?}"
             )));
         }
-        hs.process_change_cipher_spec()?;
+        hs.process_change_cipher_spec(&ccs_data)?;
 
         // Activate read decryption (re-key with client write key)
         if keys.is_cbc && hs.use_encrypt_then_mac() {
