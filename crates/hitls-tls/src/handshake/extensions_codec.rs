@@ -349,6 +349,17 @@ pub fn parse_supported_groups_ch(data: &[u8]) -> Result<Vec<NamedGroup>, TlsErro
 
 /// Parse `signature_algorithms` from ClientHello.
 /// Format: list_length(2) || scheme(2)*
+///
+/// Phase I109 — strict boundary checks per RFC 8446 §4.2.3:
+/// * an empty list (`list_length == 0`) is malformed; closes
+///   tlsfuzzer `empty list of signature methods` /
+///   `fuzz length inside extension to 0`.
+/// * trailing bytes after the declared list (`data.len() != 2 + list_len`)
+///   are malformed; closes tlsfuzzer
+///   `fuzz length inside extension to 2`.
+///
+/// Both routes return errors carrying `"decode"` so the alert mapper
+/// emits `decode_error` (RFC 8446 §6.2).
 pub fn parse_signature_algorithms_ch(data: &[u8]) -> Result<Vec<SignatureScheme>, TlsError> {
     if data.len() < 2 {
         return Err(TlsError::HandshakeFailed(
@@ -356,9 +367,9 @@ pub fn parse_signature_algorithms_ch(data: &[u8]) -> Result<Vec<SignatureScheme>
         ));
     }
     let list_len = u16::from_be_bytes([data[0], data[1]]) as usize;
-    if data.len() < 2 + list_len || list_len % 2 != 0 {
+    if list_len == 0 || list_len % 2 != 0 || data.len() != 2 + list_len {
         return Err(TlsError::HandshakeFailed(
-            "signature_algorithms CH: invalid length".into(),
+            "signature_algorithms CH: decode error — invalid list length".into(),
         ));
     }
     let mut schemes = Vec::with_capacity(list_len / 2);
