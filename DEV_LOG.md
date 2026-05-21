@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I111 (111 phases)
+- Implementation: I1–I112 (112 phases)
 - Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -346,7 +346,8 @@ Category summary:
 | 336 | I109 | Impl | TLS 1.3 sig_algs extension parser boundary hardening — closes 3 long-standing XFAILs in `test-tls13-signature-algorithms.py` (the residual boundary-fuzz cases T100 + T104 documented as needing "a per-extension sentinel-length carve-out"). `parse_signature_algorithms_ch` (and via thin wrapper `parse_signature_algorithms_cert`) now rejects two malformed shapes RFC 8446 §4.2.3 / §6.2 require treating as `decode_error`: **(1)** `list_length == 0` (an empty list of signature schemes is a parse error per §6.2 "out of the specified range" — previously parsed as empty Vec and bubbled up as `missing_extension` downstream, the wrong alert); **(2)** trailing bytes after the declared list (`ext.data.len() != 2 + list_len` — previously a `data.len() < 2 + list_len` check accepted any tail and silently dropped it, letting an oversized record with a fuzzed inner-length pass through to a normal handshake). Error message embeds `"decode error"` so the alert mapper emits `decode_error`. **Net XFAIL reduction = 3**: `test-tls13-signature-algorithms` 279/3 → **282/0** (xfail file removed). No regression on 10 adjacent TLS 1.3 scripts (`record-layer-limits`, `no-unknown-groups`, `hrr`, `finished`, `empty-alert`, `keyupdate`, `rsa-signatures`, `zero-length-data`, etc.). 1108 hitls-tls lib tests still PASS; the existing `test_parse_signature_algorithms_ch_empty_data` already covered the new tighter contract | 2026-05-21 |
 | 338 | I110 | Impl | TLS 1.3 record-layer plaintext-rejection conformance — RFC 8446 §5.1/§5.2: once read decryption is active, handshake and application_data records MUST be carried as `TLSCiphertext` (wire `content_type = application_data`, 23). `record::RecordLayer::open_record` previously fell through to "return as plaintext" for any non-`ApplicationData` wire content type in TLS 1.3 encrypted phase — so a plaintext Handshake record (e.g. tlsfuzzer's `ResetWriteConnectionState() + FinishedGenerator()`) bypassed AEAD entirely. The Finished `verify_data` happens to match across that bypass (it's computed over the transcript hash, not over record-layer cipher state), so the server entered Connected with no alert. New strict gate: in TLS 1.3 encrypted phase, only `ApplicationData` (decrypted), `Alert`, and `ChangeCipherSpec` (latter two explicitly allowed in plaintext for middlebox-compat / pre-encryption alerts) pass; any other plaintext wire content type returns `RecordError("unexpected content type …")` which alert mapper routes to `unexpected_message`. **Net XFAIL reduction = 1**: `test-tls13-finished-plaintext` 2/1 → **3/0** (xfail file removed). No regression on 11 adjacent TLS 1.3 scripts (`record-layer-limits` / `signature-algorithms` / `finished` / `no-unknown-groups` / `hrr` / `empty-alert` / `zero-content-type` / `zero-length-data` / `keyupdate` / `0rtt-garbage` / `rsa-signatures`). 1108 `hitls-tls` lib tests still PASS — no test depended on the lax pre-I110 behaviour | 2026-05-21 |
 | 340 | I111 | Impl | `s-server` cross-version PSK + session-resumption listener — `--tls auto` on the dedicated PSK + `--ticket-key` listener so it accepts both TLS 1.2 and TLS 1.3 ClientHellos on the same port (the cross-version corner `test-tls13-session-resumption.py` encodes). Paired CI workflow change (`.github/workflows/tlsfuzzer.yml`: PSK listener gains `--tls auto`) + new args file (`tests/tlsfuzzer/args/test-tls13-session-resumption.txt`: `-d` makes the script use ECDHE for its TLS 1.2 sanity step rather than its default static-RSA `[TLS_RSA_WITH_AES_128_CBC_SHA]` — hitls intentionally does not offer static-RSA suites, no FS). **Net XFAIL reduction = 2**: `test-tls13-session-resumption` 5/2 → **7/0** (xfail file removed; closes `sanity - TLS 1.2` + `use TLS 1.2 ticket in TLS 1.3` cross-version cases). No production-code change — only CI workflow + args + xfail housekeeping. No regression on 6 adjacent TLS 1.3 RSA scripts (record-layer-limits / signature-algorithms / finished / finished-plaintext / no-unknown-groups / hrr); `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
-| 341 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
+| 342 | I112 | Impl | TLS 1.2 ChangeCipherSpec strict payload + cleartext send conformance — closes `test-ccs.py` `two bytes long CCS` XFAIL. RFC 5246 §7.1: the CCS message "consists of a single byte of value 1"; `process_change_cipher_spec` (TLS 1.2 server **and** client) now rejects any other payload with `unexpected_message` instead of silently accepting (the state machine previously only checked `state == WaitChangeCipherSpec`). Caller-sites updated to forward the CCS fragment (`connection12_async.rs` × 6 + `connection12/{client,server}.rs` × 6). Also fixes a paired send-side asymmetry surfaced by the in-memory renegotiation tests: `RecordLayer::seal_record` was AEAD-encrypting CCS in active-encryption phase (TLS 1.2 renegotiation), but `open_record` skips decryption of CCS — leaving an asymmetric record (RFC 5246 §7.1: CCS is cleartext). `seal_record` now short-circuits CCS to plaintext, matching the read path. **Net XFAIL reduction = 1**: `test-ccs` 2/1 → **3/0**. No regression on 17 adjacent TLS 1.2 + TLS 1.3 scripts; 1108 `hitls-tls` lib tests + integration tests still PASS (28 unit-test call-sites + 2 integration `tests/interop/tests/pki.rs` call-sites updated to the payload-aware signature) | 2026-05-21 |
+| 343 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -20828,3 +20829,106 @@ No production-code change in this phase. CI workflow + tlsfuzzer
 config-only. Cumulative XFAIL reduction across the tlsfuzzer
 track: **20** (5 HRR + 9 record-layer + 3 sig_algs + 1
 record-plaintext + 2 cross-version session-resumption).
+
+---
+
+## Phase I112 — TLS 1.2 CCS Strict Payload + Cleartext Send (2026-05-21)
+
+### Summary
+
+Closes the 1-conversation XFAIL on `test-ccs.py` (T90-era residual).
+RFC 5246 §7.1: the ChangeCipherSpec message "consists of a single
+byte of value 1." Two paired defects fell out of the investigation:
+
+1. **Read path (the XFAIL'd issue):** `process_change_cipher_spec`
+   only state-gated; it never inspected the CCS record fragment.
+   tlsfuzzer's `two bytes long CCS` sent a 2-byte CCS payload,
+   which the state machine silently accepted and advanced — the
+   handshake then stalled waiting for Finished while the client
+   timed out.
+
+2. **Send path (unsymmetric pair):** `RecordLayer::seal_record`
+   was AEAD-encrypting CCS in TLS 1.2 active-encryption phase
+   (renegotiation), but `RecordLayer::open_record` already skips
+   decryption of CCS records on the TLS 1.2 read path. This send
+   path bug never surfaced externally because real peers also tend
+   to be lax on CCS, but the in-memory `test_renegotiation_*` tests
+   trip on it the moment the read side gets strict (panic on the
+   25-byte AES-GCM-expanded "CCS" the server emits).
+
+### What landed
+
+**Fix 1 — `process_change_cipher_spec` payload check.** Both
+TLS 1.2 server (`handshake/server12.rs`) and client
+(`handshake/client12.rs`) now require `payload.len() == 1 &&
+payload[0] == 1`. Error message embeds `"unexpected_message"` so
+the alert mapper routes it correctly. Function signatures gain a
+`payload: &[u8]` argument; 6 production call-sites
+(`connection12_async.rs` × 6 + `connection12/{client,server}.rs`
+× 6) updated to forward the CCS fragment from `read_record`. 28
+unit-test call-sites + 2 integration test call-sites
+(`tests/interop/tests/pki.rs`) updated to use the valid `&[1u8]`
+payload.
+
+**Fix 2 — `RecordLayer::seal_record` plaintext CCS.** Added a
+short-circuit for `ContentType::ChangeCipherSpec`: regardless of
+whether an encryptor is active, the CCS record is serialised as
+plaintext (TLS 1.2 only — TLS 1.3 already sends CCS as plaintext
+through `send_fake_ccs_body!`'s direct stream write). This
+matches RFC 5246 §7.1 and the existing read-path behaviour in
+`open_record`.
+
+The DTLS / TLCP / DTLCP variants of `process_change_cipher_spec`
+were intentionally left at their 0-arg signature — they're a
+separate, RFC-different protocol family and not in the tlsfuzzer
+suite's coverage. Same for DTLS variants of `seal_record` (the
+DTLS record layer has its own path).
+
+### Verification
+
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+- `cargo test -p hitls-tls --release --lib`: **1108 PASS / 0 FAIL**
+  (the two `test_*renegotiation*` tests that initially panicked on
+  the 25-byte CCS now PASS once `seal_record` short-circuits CCS).
+- tlsfuzzer (against `s-server -p 14434 --tls 1.2 -C 49199`):
+
+  | Script | Before | After |
+  |---|---|---|
+  | `test-ccs` | 2 PASS / 1 XFAIL | **3 PASS / 0 XFAIL** |
+- 9 adjacent TLS 1.2 scripts (`connection-abort`, `cve-2016-2107`,
+  `cve-2016-6309`, `fuzzed-ciphertext`, `zero-length-data`,
+  `aes-gcm-nonces`, `encrypt-then-mac`, `invalid-compression-methods`):
+  no new FAIL, no XFAIL count drift.
+- 8 adjacent TLS 1.3 scripts (`record-layer-limits`, `finished`,
+  `finished-plaintext`, `no-unknown-groups`, `hrr`, `empty-alert`,
+  `signature-algorithms`, `keyupdate`): no new FAIL, no XFAIL count
+  drift.
+
+**Net XFAIL reduction: 1.** Cumulative across the tlsfuzzer track
+(I107 + I108 + I109 + I110 + I111 + I112): **21**.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | `process_change_cipher_spec(payload: &[u8])` adds RFC 5246 §7.1 strict payload check. |
+| `crates/hitls-tls/src/handshake/client12.rs` | Modified | Same strict payload check on client side. |
+| `crates/hitls-tls/src/connection12_async.rs` | Modified | 6 caller-sites pass the CCS fragment. |
+| `crates/hitls-tls/src/connection12/client.rs` | Modified | 3 caller-sites. |
+| `crates/hitls-tls/src/connection12/server.rs` | Modified | 3 caller-sites. |
+| `crates/hitls-tls/src/record/mod.rs` | Modified | `seal_record` short-circuits `ContentType::ChangeCipherSpec` to plaintext, matching `open_record`. |
+| `crates/hitls-tls/src/connection/tests.rs` | Modified | 4 unit-test call-sites updated. |
+| `crates/hitls-tls/src/connection12/tests.rs` | Modified | 22 unit-test call-sites updated. |
+| `tests/interop/tests/pki.rs` | Modified | 2 integration call-sites updated. |
+| `tests/tlsfuzzer/xfail/test-ccs.txt` | Deleted | The 1 conversation now PASS. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 342 + Implementation summary I1–I111 → I1–I112. |
+| `PROMPT_LOG.md` | Modified | I112 prompt + result entry. |
+
+### Build Status (Post I112)
+
+`hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean.
+Cumulative tlsfuzzer XFAIL reduction: **21** (5 HRR + 9
+record-layer overflow + 3 sig_algs + 1 record-plaintext +
+2 session-resumption + 1 CCS-strict).

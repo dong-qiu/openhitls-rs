@@ -392,7 +392,7 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                     }
                 }
                 ContentType::ChangeCipherSpec => {
-                    hs.process_change_cipher_spec()?;
+                    hs.process_change_cipher_spec(&data)?;
                     break;
                 }
                 _ => {
@@ -519,7 +519,7 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                     }
                 }
                 ContentType::ChangeCipherSpec => {
-                    hs.process_change_cipher_spec()?;
+                    hs.process_change_cipher_spec(&data)?;
                     break;
                 }
                 _ => {
@@ -884,7 +884,7 @@ impl<S: Read + Write> Tls12ClientConnection<S> {
                     }
                 }
                 ContentType::ChangeCipherSpec => {
-                    hs.process_change_cipher_spec()?;
+                    hs.process_change_cipher_spec(&data)?;
                     break;
                 }
                 _ => {

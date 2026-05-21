@@ -1587,11 +1587,27 @@ impl Tls12ServerHandshake {
     }
 
     /// Process ChangeCipherSpec from client.
-    pub fn process_change_cipher_spec(&mut self) -> Result<(), TlsError> {
+    ///
+    /// RFC 5246 §7.1: "The ChangeCipherSpec message ... consists of a
+    /// single byte of value 1." Phase I112 — tlsfuzzer's `test-ccs.py`
+    /// `two bytes long CCS` conversation pins this: a CCS record with
+    /// a 2-byte payload was previously accepted (we only state-gated,
+    /// never inspected the payload) and the handshake silently
+    /// continued; per RFC §7.2.2 a malformed CCS is a protocol error
+    /// that MUST be terminated with `unexpected_message` (OpenSSL /
+    /// BoringSSL / NSS all reject).
+    pub fn process_change_cipher_spec(&mut self, payload: &[u8]) -> Result<(), TlsError> {
         if self.state != Tls12ServerState::WaitChangeCipherSpec {
             return Err(TlsError::HandshakeFailed(
                 "unexpected ChangeCipherSpec".into(),
             ));
+        }
+        if payload.len() != 1 || payload[0] != 1 {
+            return Err(TlsError::HandshakeFailed(format!(
+                "malformed ChangeCipherSpec: RFC 5246 §7.1 requires a \
+                 single 0x01 byte (got {} bytes) — alert: unexpected_message",
+                payload.len()
+            )));
         }
         // CCS is not a handshake message — not added to transcript
         self.state = Tls12ServerState::WaitFinished;
@@ -3116,7 +3132,7 @@ mod tests {
         let config = make_server_config();
         let mut hs = Tls12ServerHandshake::new(config);
         // CCS from Idle → error
-        assert!(hs.process_change_cipher_spec().is_err());
+        assert!(hs.process_change_cipher_spec(&[1u8]).is_err());
     }
 
     #[test]
