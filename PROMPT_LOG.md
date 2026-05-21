@@ -6755,3 +6755,66 @@ no new FAIL, no XFAIL drift.
 Cumulative XFAIL reduction across I107 + I108 + I109: **17**.
 
 Recorded as DEV_LOG Phase I109.
+
+---
+
+## Phase I110 — TLS 1.3 Record-Layer Plaintext-Rejection Conformance (2026-05-21)
+
+> 按照XFAIL reduction的目标依次执行
+
+Fourth iteration of the XFAIL-reduction track. Read-through of 8
+remaining candidate xfail files: `connection-abort` (won't-fix,
+echo vs abort expectation), `zero-content-type` /
+`zero-length-data` / `keyupdate` (s-server echo loop design
+mismatches), `eddsa` (won't-fix, multi-cert s-server needed),
+`session-resumption` (CLI `--tls auto` plumbing for PSK listener,
+moderate work), `0rtt-garbage` (cross-flight state machine,
+complex). **`finished-plaintext` (1 XFAIL, alert mapping
+mismatch per T92 header) — lowest count but clearest path,
+matching the I108 alert-mapping fix pattern.**
+
+Empirical finding overturned the T92 documented root cause.
+Running `ResetWriteConnectionState() + FinishedGenerator()`
+against the server traced to a more fundamental gap: our
+`record::RecordLayer::open_record` only invokes
+`Tls13RecordDecryptor` for `ApplicationData` records — for any
+other wire content type it fell through to "return as plaintext",
+so a plaintext Handshake record entered the handshake parser
+unchallenged. The Finished `verify_data` matched across the AEAD
+bypass (computed over transcript hash, independent of record
+encryption), so the server entered Connected, sent NST, and
+waited for app-data. Client timed out waiting for the expected
+alert (T92 saw "wrong alert"; actually it was no alert).
+
+RFC 8446 §5.1 + §5.2 require strict separation: once read
+decryption is active, all handshake / application_data records
+MUST be carried as `TLSCiphertext` (wire `content_type =
+application_data`, 23). Plaintext `Alert` + `ChangeCipherSpec`
+remain legitimate (middlebox-compat CCS, pre-encryption alerts).
+
+Fix in `open_record`:
+
+```rust
+if dec.is_tls13() {
+    match record.content_type {
+        ContentType::ApplicationData => decrypt,
+        ContentType::Alert | ContentType::ChangeCipherSpec => plaintext OK,
+        _ => Err("unexpected content type ..."),
+    }
+}
+```
+
+Error message contains `"unexpected content type"` so alert mapper
+emits `unexpected_message` via the existing `RecordError` route.
+
+**Net XFAIL reduction = 1.** `test-tls13-finished-plaintext`
+2/1 → **3/0 PASS** (xfail file removed).
+
+Verification: `cargo test -p hitls-tls --release --lib` 1108/0;
+`fmt` + `clippy -D warnings` clean; no unit test depended on the
+lax pre-I110 behaviour. 11 adjacent TLS 1.3 scripts regression-
+checked: no new FAIL, no XFAIL drift.
+
+Cumulative XFAIL reduction across I107 + I108 + I109 + I110: **18**.
+
+Recorded as DEV_LOG Phase I110.
