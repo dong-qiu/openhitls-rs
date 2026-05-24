@@ -9,6 +9,7 @@ use hitls_crypto::modes::cbc;
 use hitls_crypto::pbkdf2;
 use hitls_crypto::provider::Digest;
 use hitls_crypto::sha1::Sha1;
+use hitls_crypto::sha2::{Sha224, Sha256, Sha384, Sha512};
 use hitls_types::PkiError;
 use hitls_utils::asn1::Decoder;
 use hitls_utils::oid::{known, Oid};
@@ -42,7 +43,82 @@ fn password_to_bmp(password: &str) -> Vec<u8> {
     bmp
 }
 
-/// PKCS#12 KDF using SHA-1 (RFC 7292 Appendix B).
+/// Hash family for the PKCS#12 KDF / MAC (RFC 7292 Appendix B + §4).
+///
+/// RFC 7292 fixed the KDF on SHA-1, but real-world PKCS#12 producers
+/// (including openHiTLS C) emit a SHA-2 MAC, in which case the KDF is run with
+/// the same SHA-2 hash. We therefore parameterise both over the hash.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum P12MacHash {
+    Sha1,
+    Sha224,
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl P12MacHash {
+    /// Map a digest-algorithm OID (from the MacData DigestInfo) to a hash.
+    fn from_oid(oid: &Oid) -> Result<Self, PkiError> {
+        // id-sha1 (1.3.14.3.2.26) and id-sha224 (2.16.840.1.101.3.4.2.4) have
+        // no `known::` helper, so match them by dotted form.
+        match oid.to_dot_string().as_str() {
+            "1.3.14.3.2.26" => Ok(Self::Sha1),
+            "2.16.840.1.101.3.4.2.4" => Ok(Self::Sha224),
+            _ if *oid == known::sha256() => Ok(Self::Sha256),
+            _ if *oid == known::sha384() => Ok(Self::Sha384),
+            _ if *oid == known::sha512() => Ok(Self::Sha512),
+            _ => Err(perr(&format!("unsupported PKCS#12 MAC hash OID: {oid}"))),
+        }
+    }
+
+    fn digest(self) -> Box<dyn Digest> {
+        match self {
+            Self::Sha1 => Box::new(Sha1::new()),
+            Self::Sha224 => Box::new(Sha224::new()),
+            Self::Sha256 => Box::new(Sha256::new()),
+            Self::Sha384 => Box::new(Sha384::new()),
+            Self::Sha512 => Box::new(Sha512::new()),
+        }
+    }
+
+    fn output_len(self) -> usize {
+        self.digest().output_size()
+    }
+
+    fn block_size(self) -> usize {
+        self.digest().block_size()
+    }
+
+    fn hash(self, data: &[u8]) -> Result<Vec<u8>, PkiError> {
+        let mut d = self.digest();
+        d.update(data)
+            .map_err(|e| PkiError::Pkcs12Error(e.to_string()))?;
+        let mut out = vec![0u8; d.output_size()];
+        d.finish(&mut out)
+            .map_err(|e| PkiError::Pkcs12Error(e.to_string()))?;
+        Ok(out)
+    }
+
+    fn hash_concat(self, a: &[u8], b: &[u8]) -> Result<Vec<u8>, PkiError> {
+        let mut d = self.digest();
+        d.update(a)
+            .map_err(|e| PkiError::Pkcs12Error(e.to_string()))?;
+        d.update(b)
+            .map_err(|e| PkiError::Pkcs12Error(e.to_string()))?;
+        let mut out = vec![0u8; d.output_size()];
+        d.finish(&mut out)
+            .map_err(|e| PkiError::Pkcs12Error(e.to_string()))?;
+        Ok(out)
+    }
+
+    fn hmac(self, key: &[u8], data: &[u8]) -> Result<Vec<u8>, PkiError> {
+        Hmac::mac(move || self.digest(), key, data)
+            .map_err(|e| PkiError::Pkcs12Error(format!("HMAC: {e}")))
+    }
+}
+
+/// PKCS#12 KDF (RFC 7292 Appendix B) over the given `hash`.
 /// id: 1 = encryption key, 2 = IV, 3 = MAC key
 fn pkcs12_kdf(
     password: &str,
@@ -50,9 +126,10 @@ fn pkcs12_kdf(
     id: u8,
     iterations: u32,
     dk_len: usize,
+    hash: P12MacHash,
 ) -> Result<Vec<u8>, PkiError> {
-    let hash_len: usize = 20;
-    let block_size: usize = 64;
+    let hash_len: usize = hash.output_len();
+    let block_size: usize = hash.block_size();
 
     let d = vec![id; block_size];
 
@@ -79,9 +156,9 @@ fn pkcs12_kdf(
     let mut dk = Vec::with_capacity(dk_len);
 
     for _ in 0..n {
-        let mut a = sha1_hash_concat(&d, &i_buf)?;
+        let mut a = hash.hash_concat(&d, &i_buf)?;
         for _ in 1..iterations {
-            a = sha1_hash(&a)?;
+            a = hash.hash(&a)?;
         }
 
         let take = (dk_len - dk.len()).min(hash_len);
@@ -104,31 +181,6 @@ fn pkcs12_kdf(
     }
 
     Ok(dk)
-}
-
-fn sha1_hash(data: &[u8]) -> Result<Vec<u8>, PkiError> {
-    let mut h = Sha1::new();
-    h.update(data)
-        .map_err(|e| PkiError::Pkcs12Error(e.to_string()))?;
-    Ok(h.finish()
-        .map_err(|e| PkiError::Pkcs12Error(e.to_string()))?
-        .to_vec())
-}
-
-fn sha1_hash_concat(a: &[u8], b: &[u8]) -> Result<Vec<u8>, PkiError> {
-    let mut h = Sha1::new();
-    h.update(a)
-        .map_err(|e| PkiError::Pkcs12Error(e.to_string()))?;
-    h.update(b)
-        .map_err(|e| PkiError::Pkcs12Error(e.to_string()))?;
-    Ok(h.finish()
-        .map_err(|e| PkiError::Pkcs12Error(e.to_string()))?
-        .to_vec())
-}
-
-fn hmac_sha1(key: &[u8], data: &[u8]) -> Result<Vec<u8>, PkiError> {
-    Hmac::mac(|| -> Box<dyn Digest> { Box::new(Sha1::new()) }, key, data)
-        .map_err(|e| PkiError::Pkcs12Error(format!("HMAC-SHA1: {e}")))
 }
 
 fn generate_random(len: usize) -> Result<Vec<u8>, PkiError> {
@@ -273,8 +325,17 @@ impl Pkcs12 {
         // MAC
         let salt = generate_random(16)?;
         let iterations: u32 = 2048;
-        let mac_key = pkcs12_kdf(password, &salt, 3, iterations, 20)?;
-        let mac_value = hmac_sha1(&mac_key, &auth_safe)?;
+        // Encode side emits a SHA-1 MAC (RFC 7292 baseline; widely interoperable).
+        let mac_hash = P12MacHash::Sha1;
+        let mac_key = pkcs12_kdf(
+            password,
+            &salt,
+            3,
+            iterations,
+            mac_hash.output_len(),
+            mac_hash,
+        )?;
+        let mac_value = mac_hash.hmac(&mac_key, &auth_safe)?;
         let mac_data = encode_mac_data(&mac_value, &salt, iterations);
 
         // PFX = SEQUENCE { version, authSafe, macData }
@@ -293,13 +354,20 @@ fn verify_mac(auth_safe_content: &[u8], pfx: &mut Decoder, password: &str) -> Re
         .read_sequence()
         .map_err(|e| perr(&format!("macData: {e}")))?;
 
-    // DigestInfo
+    // DigestInfo ::= SEQUENCE { digestAlgorithm AlgorithmIdentifier, digest OCTET STRING }
     let mut di = mac_dec
         .read_sequence()
         .map_err(|e| perr(&format!("DigestInfo: {e}")))?;
-    let _alg = di
+    let mut alg = di
         .read_sequence()
         .map_err(|e| perr(&format!("mac alg: {e}")))?;
+    let alg_oid_bytes = alg
+        .read_oid()
+        .map_err(|e| perr(&format!("mac alg OID: {e}")))?;
+    let alg_oid = Oid::from_der_value(alg_oid_bytes).map_err(|e| perr(&format!("mac OID: {e}")))?;
+    // RFC 7292 fixed SHA-1, but SHA-2 MACs are common in practice; pick the KDF
+    // hash from the declared MAC algorithm rather than assuming SHA-1.
+    let hash = P12MacHash::from_oid(&alg_oid)?;
     let stored_mac = di
         .read_octet_string()
         .map_err(|e| perr(&format!("mac digest: {e}")))?
@@ -319,8 +387,8 @@ fn verify_mac(auth_safe_content: &[u8], pfx: &mut Decoder, password: &str) -> Re
         1
     };
 
-    let mac_key = pkcs12_kdf(password, &mac_salt, 3, iterations, 20)?;
-    let computed = hmac_sha1(&mac_key, auth_safe_content)?;
+    let mac_key = pkcs12_kdf(password, &mac_salt, 3, iterations, hash.output_len(), hash)?;
+    let computed = hash.hmac(&mac_key, auth_safe_content)?;
 
     // Constant-time MAC tag comparison. `stored_mac` comes from the PFX file
     // (attacker-controlled in network/file scenarios). Naive `Vec<u8> != ...`
@@ -724,19 +792,32 @@ mod tests {
 
     #[test]
     fn test_pkcs12_kdf_produces_key() {
-        let key = pkcs12_kdf("password", &[0x01; 8], 3, 2048, 20).unwrap();
+        let key = pkcs12_kdf("password", &[0x01; 8], 3, 2048, 20, P12MacHash::Sha1).unwrap();
         assert_eq!(key.len(), 20);
-        let key2 = pkcs12_kdf("password", &[0x01; 8], 3, 2048, 20).unwrap();
+        let key2 = pkcs12_kdf("password", &[0x01; 8], 3, 2048, 20, P12MacHash::Sha1).unwrap();
         assert_eq!(key, key2);
     }
 
     #[test]
     fn test_pkcs12_kdf_different_ids() {
-        let k1 = pkcs12_kdf("pass", &[0x01; 8], 1, 1, 20).unwrap();
-        let k2 = pkcs12_kdf("pass", &[0x01; 8], 2, 1, 20).unwrap();
-        let k3 = pkcs12_kdf("pass", &[0x01; 8], 3, 1, 20).unwrap();
+        let k1 = pkcs12_kdf("pass", &[0x01; 8], 1, 1, 20, P12MacHash::Sha1).unwrap();
+        let k2 = pkcs12_kdf("pass", &[0x01; 8], 2, 1, 20, P12MacHash::Sha1).unwrap();
+        let k3 = pkcs12_kdf("pass", &[0x01; 8], 3, 1, 20, P12MacHash::Sha1).unwrap();
         assert_ne!(k1, k2);
         assert_ne!(k2, k3);
+    }
+
+    #[test]
+    fn test_pkcs12_kdf_sha256_lengths() {
+        // SHA-256 KDF must yield 32-byte blocks and differ from SHA-1.
+        let k_sha1 = pkcs12_kdf("pw", &[0x02; 8], 3, 100, 32, P12MacHash::Sha1).unwrap();
+        let k_sha256 = pkcs12_kdf("pw", &[0x02; 8], 3, 100, 32, P12MacHash::Sha256).unwrap();
+        assert_eq!(k_sha1.len(), 32);
+        assert_eq!(k_sha256.len(), 32);
+        assert_ne!(k_sha1, k_sha256);
+        assert_eq!(P12MacHash::Sha256.output_len(), 32);
+        assert_eq!(P12MacHash::Sha384.output_len(), 48);
+        assert_eq!(P12MacHash::Sha512.output_len(), 64);
     }
 
     #[test]

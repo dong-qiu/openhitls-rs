@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I116 (116 phases)
+- Implementation: I1–I117 (117 phases)
 - Testing: T1–T132 (125 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -353,6 +353,7 @@ Category summary:
 | 350 | I116 | Impl | X.509 verifier unrecognised-critical-extension rejection (RFC 5280 §6.1.4 (g) / §4.2) — `validate_chain` never walked each path cert's extension list, so a certificate carrying a **critical** extension the verifier does not process (e.g. critical `certificatePolicies` — we do no policy-tree processing — or any private/unknown OID) was silently accepted. Added a per-cert loop that rejects any `critical` extension whose OID is outside the recognised set (`is_recognised_critical_extension`: basicConstraints, keyUsage, extKeyUsage, nameConstraints, subjectAltName, SKI, AKI — exactly the extensions `validate_chain`/`find_issuer` consume) with `PkiError::UnsupportedExtension` (message `unsupported certificate extension: …`). Closes the last verifier-hardening `#[ignore]` from T113: `tc_line2811_x509_vfy_ext_unsupported_crit_fail` → **migrated_x509_parse 1085 PASS / 0 ignored** (all migration ignores cleared). No regression — hitls-pki 454 lib + 1085 migrated PASS, hitls-tls lib + all interop suites PASS (TLS handshake cert verification shares this verifier; no real-world cert in the fixtures carries an out-of-set critical extension), workspace `fmt` + `clippy -D warnings` clean | 2026-05-24 |
 | 351 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 | 352 | T132 | Test | tlsfuzzer coverage-expansion batch — added 3 clean-PASS TLS 1.3 conformance scripts to the curated CI suite after a local triage sweep of the uncurated tlsfuzzer corpus (170 scripts in repo, 52 curated pre-T132): `test-tls13-unrecognised-groups.py` (32/32 — unknown `supported_groups` entries ignored per RFC 8446 §4.2.7), `test-tls13-serverhello-random.py` (256/0 — no TLS 1.2/1.1 downgrade sentinel in ServerHello.random, well-distributed across handshakes), `test-tls13-invalid-ciphers.py` (52/52 — malformed/unknown cipher-suite entries handled per spec). All run against the shared RSA TLS 1.3 listener with no extra args and **0 XFAIL** (verified stable across repeated + back-to-back local runs vs the release `s-server`). Triage also produced a "what's next" map: (a) `test-tls13-non-support.py` not curated — it targets a TLS-1.3-*disabled* server (we support 1.3); all 51 non-sanity conversations fail on the close_notify-echo quirk of our 1.2 echo listener. (b) `test-tls13-unencrypted-alert.py` not curated — both real conversations fail because the TLS 1.3 server replies to a client abort-alert with `unexpected_message` instead of closing silently (RFC 8446 §6.2: a received fatal alert ⇒ close without responding); flagged as a read-path **I-phase** candidate. (c) `test-tls13-large-number-of-extensions.py` not curated — 22/22 standalone but 20/2 under back-to-back contention (2 large multi-record ClientHellos, ext ids ≤ 4119, intermittently draw `handshake_failure`/`decode_error`); flagged for a large-CH-reassembly robustness probe. (d) `ecdhe-curves` 7/26, `obsolete-curves` 8/163, `shuffled-extentions` 2/17 — heavy XFAIL / brainpool-curve gaps, deferred. Test-only — no production change | 2026-05-24 |
+| 353 | I117 | Impl | PKCS#12 SHA-2 MAC support (RFC 7292 §4 + Appendix B) — the `hitls-pki` PKCS#12 MAC path was hardcoded to SHA-1 (`pkcs12_kdf` ran SHA-1; `verify_mac` discarded the MacData `DigestInfo` algorithm OID and always derived a 20-byte SHA-1 HMAC key), so any PFX with a SHA-2 MAC — which openHiTLS C emits by default — failed integrity verification with "MAC verification failed (wrong password?)" even with the correct password. Added a `P12MacHash` enum (SHA-1/224/256/384/512) that maps the MacData digest OID → hash (id-sha1 `1.3.14.3.2.26` + id-sha224 `2.16.840.1.101.3.4.2.4` by dotted form, sha256/384/512 via `known::`), parameterised `pkcs12_kdf` over the hash (output/block size from the `Digest` trait), and made `verify_mac` read the declared algorithm and run the KDF + HMAC under it. Encode side still emits a SHA-1 MAC (RFC 7292 baseline, widely interoperable). Constant-time MAC compare + zeroize preserved. Verified against openHiTLS C `pki/pkcs12` `.p12` fixtures (SHA-256 + SHA-224 MAC now parse, entity-cert match); unblocks the T113 `pki/pkcs12` test migration. No regression — hitls-pki 455 lib (incl. new SHA-256 KDF test) + 1123 migrated + 1 doc PASS, workspace `fmt` + `clippy -D warnings` clean | 2026-05-24 |
 
 ---
 
@@ -21401,6 +21402,77 @@ extension gap from the T113 migration are closed. Remaining
 T113-noted verifier-strictness items (missing-CRL handling,
 CRL-issuer keyUsage, device-only `CRL_DEV` mode, SM2 GM/T user-id,
 ECDSA P-192) are independent follow-up candidates.
+
+---
+
+## Phase I117 — PKCS#12 SHA-2 MAC Support (RFC 7292 §4) (2026-05-24)
+
+### Summary
+
+The `hitls-pki` PKCS#12 (PFX) MAC integrity path was hardcoded to
+SHA-1. `pkcs12_kdf` ran the RFC 7292 Appendix B KDF with SHA-1, and
+`verify_mac` **discarded** the MacData `DigestInfo` algorithm OID
+(`let _alg = …`), always deriving a 20-byte SHA-1 HMAC key. As a
+result, any PFX carrying a **SHA-2 MAC** — which the openHiTLS C
+implementation emits by default — failed integrity verification with
+`MAC verification failed (wrong password?)` *even with the correct
+password*. This surfaced during the T113 `pki/pkcs12` test migration:
+every `SDV_PKCS12_PARSE_P12` fixture failed to parse.
+
+This phase generalises the MAC path over the hash while leaving the
+PBES2/PBKDF2 *encryption* path (already hash-agnostic) untouched.
+
+### What changed (`crates/hitls-pki/src/pkcs12/mod.rs`)
+
+- New `P12MacHash` enum (SHA-1 / SHA-224 / SHA-256 / SHA-384 /
+  SHA-512) with `from_oid` (id-sha1 `1.3.14.3.2.26` + id-sha224
+  `2.16.840.1.101.3.4.2.4` matched by dotted form — no `known::`
+  helper; sha256/384/512 via `known::`), and `digest()` / `hash()` /
+  `hash_concat()` / `hmac()` helpers built on the `Digest` trait
+  (`output_size()` / `block_size()` drive the KDF lengths).
+- `pkcs12_kdf` takes a `hash: P12MacHash` parameter; internal
+  `hash_len` / `block_size` come from the hash instead of the
+  hardcoded `20` / `64`.
+- `verify_mac` now **reads** the MacData `DigestInfo` algorithm OID,
+  maps it to a `P12MacHash`, and runs the KDF + HMAC under that hash.
+- Encode side (`to_der`) continues to emit a **SHA-1** MAC — the RFC
+  7292 baseline, widely interoperable; round-trip unaffected.
+- Removed the now-redundant standalone `sha1_hash` / `sha1_hash_concat`
+  / `hmac_sha1` helpers (folded into `P12MacHash`).
+
+Security properties preserved: the MAC tag comparison stays
+constant-time (`subtle::ConstantTimeEq` with a length pre-check), and
+the existing zeroize discipline is unchanged.
+
+### Verification
+
+- New unit test `test_pkcs12_kdf_sha256_lengths` (SHA-256 KDF yields
+  32-byte output and differs from SHA-1; SHA-384/512 output lengths).
+- De-risk against the openHiTLS C `pki/pkcs12` `.p12` fixtures
+  (`SDV_PKCS12_PARSE_P12_TC001`, password `123456`): all 5 rows now
+  parse — 3 SHA-256-MAC + 2 SHA-224-MAC — with the entity certificate
+  matching the expected DER (previously **0/5**, all MAC-verify
+  failures).
+- No regression: `hitls-pki` **455 lib** (incl. the new test) **+
+  1123 migrated + 1 doc** PASS; `cargo fmt --all -- --check` clean;
+  `RUSTFLAGS="-D warnings" cargo clippy -p hitls-pki --all-features
+  --all-targets` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-pki/src/pkcs12/mod.rs` | Modified | `P12MacHash` enum + hash-parameterised `pkcs12_kdf` + OID-aware `verify_mac`; SHA-1/224/256/384/512 MAC verification; SHA-256 KDF unit test. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 353 + Implementation summary I1–I116 → I1–I117. |
+| `PROMPT_LOG.md` | Modified | I117 prompt + result entry. |
+
+### Build Status (Post I117)
+
+Production-code change in `hitls-pki` only (PKCS#12 MAC path).
+Unblocks the T113 `pki/pkcs12` SDV migration (`PARSE_P12` /
+`PARSE_MACDATA` / `PARSE_AUTHSAFE` families that were failing MAC
+verification). Follow-up (test-enhanced slot): migrate the now-passing
+`pki/pkcs12` parse families.
 
 ---
 

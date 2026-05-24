@@ -7341,3 +7341,32 @@ Verification: 1123 PASS / 0 FAIL / 9 ignored; fmt clean; clippy
 `-D warnings` clean. No production-code change.
 
 Recorded as DEV_LOG `Phase T113 (continued) — pki/cms sign-side`.
+
+---
+
+## Phase I117 — PKCS#12 SHA-2 MAC Support (RFC 7292 §4) (2026-05-24)
+
+> 你的建议是什么？
+
+(Recommended + executed: PKCS#12 SHA-2 MAC is the highest-leverage
+unblock for the stalled T113 pki/pkcs12 migration.)
+
+The hitls-pki PKCS#12 MAC path was hardcoded to SHA-1 — `pkcs12_kdf`
+ran SHA-1 and `verify_mac` discarded the MacData DigestInfo algorithm
+OID, always deriving a 20-byte SHA-1 HMAC key. PFX files with a SHA-2
+MAC (openHiTLS C's default) failed integrity verification with the
+correct password, blocking every SDV_PKCS12_PARSE_P12 fixture.
+
+Added a P12MacHash enum (SHA-1/224/256/384/512), parameterised
+pkcs12_kdf over the hash, and made verify_mac read the declared MAC
+algorithm OID and run the KDF + HMAC under it. Encode side still emits
+a SHA-1 MAC (RFC 7292 baseline). Constant-time MAC compare + zeroize
+preserved.
+
+Verification: new SHA-256 KDF unit test; de-risk against the C
+pki/pkcs12 .p12 fixtures — 5/5 PARSE_P12 rows now parse (3 SHA-256 +
+2 SHA-224 MAC), entity-cert match (was 0/5). hitls-pki 455 lib + 1123
+migrated + 1 doc PASS; fmt + clippy -D warnings clean.
+
+Recorded as DEV_LOG Phase I117. Follow-up: migrate the now-unblocked
+pki/pkcs12 parse families (test-enhanced slot).
