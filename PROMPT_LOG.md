@@ -7487,3 +7487,33 @@ from the `feature` slot to avoid colliding with the concurrent
 T113 PKI-migration session in `test-enhanced`. Recorded as DEV_LOG
 `Phase T133`. Next: Phase 2 (`unencrypted-alert` §6.2 fix) +
 the load-degradation robustness probe.
+
+## Phase I119 — TLS 1.3 RFC 8446 §6.2 Close-on-Received-Alert (2026-05-25)
+
+> 开始阶段 2
+
+Phase 2 of the tlsfuzzer plan: the read-path conformance fix flagged
+by the T133 scan. When the TLS 1.3 server is awaiting a client
+handshake message (Certificate / CertificateVerify / Finished) and
+the client instead aborts with an Alert record, the server replied
+with its own `unexpected_message` alert. RFC 8446 §6.2 requires
+closing WITHOUT a responding alert on receipt of a (fatal) alert.
+
+Fix: in `tls13_server_do_handshake_body!` (`crates/hitls-tls/src/
+macros.rs`) the three in-handshake read loops now check
+`ct == ContentType::Alert` first and return `TlsError::AlertReceived`
+(which `tls_error_to_alert` maps to `CloseNotify` and
+`send_fatal_alert_for_error_body!` suppresses) → silent close. The
+record layer already passes plaintext alerts through, so both the
+encrypted and plaintext abort-alert variants are covered by the one
+change. Investigated with an Explore sub-agent that mapped the read
+loop, the `AlertReceived`→`CloseNotify` mapping, and the suppression
+macro — the correct machinery already existed but was never reached.
+
+Result: `test-tls13-unencrypted-alert.py` 2/2-fail → **4/4 PASS**,
+curated into CI (suite 59 → 60). No regression: `hitls-tls` lib
+1108/0; adjacent tlsfuzzer (conversation/finished/ccs/connection-abort/
+empty-alert/zero-content-type/keyupdate) all rc=0; `fmt` +
+`clippy -D warnings` clean. Ran in an isolated temp worktree
+(`feat/tls13-close-on-received-alert`) since the standard slots are
+occupied by parallel PKI/CMS sessions. Recorded as DEV_LOG `Phase I119`.

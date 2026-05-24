@@ -355,6 +355,7 @@ Category summary:
 | 352 | T132 | Test | tlsfuzzer coverage-expansion batch — added 3 clean-PASS TLS 1.3 conformance scripts to the curated CI suite after a local triage sweep of the uncurated tlsfuzzer corpus (170 scripts in repo, 52 curated pre-T132): `test-tls13-unrecognised-groups.py` (32/32 — unknown `supported_groups` entries ignored per RFC 8446 §4.2.7), `test-tls13-serverhello-random.py` (256/0 — no TLS 1.2/1.1 downgrade sentinel in ServerHello.random, well-distributed across handshakes), `test-tls13-invalid-ciphers.py` (52/52 — malformed/unknown cipher-suite entries handled per spec). All run against the shared RSA TLS 1.3 listener with no extra args and **0 XFAIL** (verified stable across repeated + back-to-back local runs vs the release `s-server`). Triage also produced a "what's next" map: (a) `test-tls13-non-support.py` not curated — it targets a TLS-1.3-*disabled* server (we support 1.3); all 51 non-sanity conversations fail on the close_notify-echo quirk of our 1.2 echo listener. (b) `test-tls13-unencrypted-alert.py` not curated — both real conversations fail because the TLS 1.3 server replies to a client abort-alert with `unexpected_message` instead of closing silently (RFC 8446 §6.2: a received fatal alert ⇒ close without responding); flagged as a read-path **I-phase** candidate. (c) `test-tls13-large-number-of-extensions.py` not curated — 22/22 standalone but 20/2 under back-to-back contention (2 large multi-record ClientHellos, ext ids ≤ 4119, intermittently draw `handshake_failure`/`decode_error`); flagged for a large-CH-reassembly robustness probe. (d) `ecdhe-curves` 7/26, `obsolete-curves` 8/163, `shuffled-extentions` 2/17 — heavy XFAIL / brainpool-curve gaps, deferred. Test-only — no production change | 2026-05-24 |
 | 353 | I117 | Impl | PKCS#12 SHA-2 MAC support (RFC 7292 §4 + Appendix B) — the `hitls-pki` PKCS#12 MAC path was hardcoded to SHA-1 (`pkcs12_kdf` ran SHA-1; `verify_mac` discarded the MacData `DigestInfo` algorithm OID and always derived a 20-byte SHA-1 HMAC key), so any PFX with a SHA-2 MAC — which openHiTLS C emits by default — failed integrity verification with "MAC verification failed (wrong password?)" even with the correct password. Added a `P12MacHash` enum (SHA-1/224/256/384/512) that maps the MacData digest OID → hash (id-sha1 `1.3.14.3.2.26` + id-sha224 `2.16.840.1.101.3.4.2.4` by dotted form, sha256/384/512 via `known::`), parameterised `pkcs12_kdf` over the hash (output/block size from the `Digest` trait), and made `verify_mac` read the declared algorithm and run the KDF + HMAC under it. Encode side still emits a SHA-1 MAC (RFC 7292 baseline, widely interoperable). Constant-time MAC compare + zeroize preserved. Verified against openHiTLS C `pki/pkcs12` `.p12` fixtures (SHA-256 + SHA-224 MAC now parse, entity-cert match); unblocks the T113 `pki/pkcs12` test migration. No regression — hitls-pki 455 lib (incl. new SHA-256 KDF test) + 1123 migrated + 1 doc PASS, workspace `fmt` + `clippy -D warnings` clean | 2026-05-24 |
 | 354 | T133 | Test | tlsfuzzer coverage-expansion batch 2 + full uncurated-corpus scan (Phase-1 of the tlsfuzzer plan). Ran all 99 server-testable uncurated scripts against a fresh release `s-server` (TLS 1.3 `:4444` / TLS 1.2 `:4445`) and bucketed the corpus into a durable backlog in `docs/tlsfuzzer.md`. Curated **4 new clean-PASS scripts** (0 XFAIL, no extra args, each re-verified stable on a fresh server): TLS 1.3 — `test-tls13-ffdhe-sanity.py` (7/7), `test-tls13-pkcs-signature.py` (8/8) → main `scripts` array; TLS 1.2 — `test-cve-2004-0079.py` (4/4, CVE-2004-0079 NULL-deref regression), `test-no-mlkem-in-old-tls.py` (12/12, ML-KEM groups rejected in 1.2) → `scripts_12` array. Curated suite 55 → **59 scripts**. Backlog findings: (a) **non-determinism, NOT a server leak** — `test-ecdhe-padded-shared-secret` varies run-to-run (2/1 ↔ 77/0 ↔ 238/0) and `test-tls13-large-number-of-extensions` is occasionally 20/2; a follow-up load probe (600 sequential openssl handshakes vs a fresh `s-server`) **disproved** the server-degradation hypothesis — server fd stayed flat at 8 across all 600 connections, no port exhaustion / accept errors, and `ecdhe-padded` gave the same 2/1 before and after load (load made zero difference). The variance is test-side random sampling of padding-length conversations (one intermittently fails); not curated, to avoid flaky CI. The intermittent fail is a separate script-level item, not a robustness/resource bug; (b) **small-XFAIL candidates**: `signature-algorithms` 275/1, `invalid-cipher-suites` 25/2, `bleichenbacher-workaround` 50/2, `x25519` 20/4; (c) **real-gap / big-XFAIL**: `obsolete-curves` 8/163, `ffdhe-groups` 7/55, `ecdhe-curves` 7/26, `crfg-curves`, `certificate-compression`, `extensions` 215/77, `export-ciphers-rejected` 76/78; (d) **§6.2 read-path I-phase**: `unencrypted-alert` 2/2-fail; (e) **needs cipher-args plumbing**: `chacha20` / `aesccm` / `extended-master-secret-extension` / `downgrade-protection`. Test-only — no production change | 2026-05-24 |
+| 355 | I119 | Impl | TLS 1.3 RFC 8446 §6.2 close-on-received-alert — the server's in-handshake read loops (awaiting client Certificate / CertificateVerify / Finished in `tls13_server_do_handshake_body!`, `crates/hitls-tls/src/macros.rs`) returned `HandshakeFailed("…unexpected_message")` when the client aborted by sending an Alert record (encrypted **or** plaintext) instead of the expected handshake message — so the server replied with its own `unexpected_message` alert. RFC 8446 §6.2 requires closing the connection WITHOUT a responding alert on receipt of a (fatal) alert. Each of the three loops now returns `TlsError::AlertReceived` on `ContentType::Alert`, which `tls_error_to_alert` already maps to `CloseNotify` and `send_fatal_alert_for_error_body!` already suppresses → silent close. The record layer already passes plaintext Alert records through during the encrypted phase, so both the encrypted- and plaintext-alert variants are covered. Closes `test-tls13-unencrypted-alert.py` (2/2-fail → **4/4 PASS**) and curates it into CI (suite 59 → 60). No regression: 1108 `hitls-tls` lib tests + adjacent tlsfuzzer scripts (conversation/finished/ccs/connection-abort/empty-alert/zero-content-type/keyupdate) all PASS; `fmt` + `clippy -D warnings` clean | 2026-05-25 |
 
 ---
 
@@ -22290,3 +22291,65 @@ Curated tlsfuzzer suite **59 scripts**, +31 PASS conversations,
 0 new XFAIL. No production code changed. Next per the plan: Phase 2
 (`unencrypted-alert` §6.2 read-path fix — an I-phase in the feature
 slot) and the robustness probe into the load-degradation signal.
+
+---
+
+## Phase I119 — TLS 1.3 RFC 8446 §6.2 Close-on-Received-Alert (2026-05-25)
+
+### Summary
+
+Phase 2 of the tlsfuzzer plan: closes the read-path conformance gap
+that the T133 corpus scan flagged. When the TLS 1.3 **server** is in
+the handshake awaiting a client message (Certificate / CertificateVerify
+/ Finished) and the client instead **aborts with an Alert record**, the
+server replied with its own `unexpected_message` alert. RFC 8446 §6.2:
+
+> Upon receipt of [a closure or error] alert, an implementation MUST
+> [close]; … an endpoint that receives a fatal alert … MUST NOT send
+> any further data.
+
+i.e. the correct behaviour is to close the connection **without** a
+responding alert.
+
+### Root cause + fix
+
+In `tls13_server_do_handshake_body!` (`crates/hitls-tls/src/macros.rs`)
+the three in-handshake read loops gated on `ct != ContentType::Handshake`
+and produced `TlsError::HandshakeFailed("…unexpected_message")`, which
+`tls_error_to_alert` maps to `UnexpectedMessage` → a sent alert. The
+machinery for the correct behaviour already existed but was never
+reached: `TlsError::AlertReceived` maps to `CloseNotify`, and
+`send_fatal_alert_for_error_body!` **suppresses** the send for
+`CloseNotify`. Each loop now checks `ct == ContentType::Alert` first
+and returns `TlsError::AlertReceived` → silent close. The record layer
+(`open_record`) already passes plaintext Alert records through during
+the encrypted phase, so both the **encrypted** and **plaintext**
+abort-alert variants are handled by the same change.
+
+### Verification
+
+- `test-tls13-unencrypted-alert.py`: **2/2-fail → 4/4 PASS** (both
+  `encrypted Alert` + `unencrypted Alert`); curated into the CI
+  workflow (suite 59 → 60).
+- No regression: `cargo test -p hitls-tls --lib` **1108/0**; adjacent
+  tlsfuzzer scripts via `run.sh` all rc=0 — `conversation` 3/0,
+  `finished` 42/0, `ccs` 5/0, `connection-abort` 140/10-XFAIL,
+  `empty-alert` 10/0, `zero-content-type` 6/2-XFAIL, `keyupdate` 62/0.
+- `cargo fmt --all -- --check` + `RUSTFLAGS="-D warnings" cargo clippy
+  -p hitls-tls --all-features` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/macros.rs` | Modified | 3 in-handshake read loops (client Certificate / CertificateVerify / Finished) return `AlertReceived` on `ContentType::Alert` → silent close per §6.2. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | Curate `test-tls13-unencrypted-alert.py` (4/4, 0 XFAIL). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 355 (I119). |
+| `PROMPT_LOG.md` | Modified | I119 prompt + result entry. |
+
+### Build Status (Post I119)
+
+`hitls-tls` lib 1108/0; curated tlsfuzzer suite **60 scripts**. The
+`unencrypted-alert` read-path gap from the T133 backlog is closed;
+remaining T133 backlog items (small-XFAIL candidates, curve/extension
+coverage, cipher-args plumbing) are unaffected.

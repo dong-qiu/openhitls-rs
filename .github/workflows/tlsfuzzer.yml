@@ -449,6 +449,12 @@ jobs:
             # app-data-phase cases (see xfail/test-tls13-zero-content-
             # type.txt).
             test-tls13-zero-content-type.py
+            # I119 addition (1): RFC 8446 §6.2 close-on-received-alert.
+            # The server now closes WITHOUT a responding alert when the
+            # client aborts mid-handshake with an alert (encrypted or
+            # plaintext) instead of sending its Finished — previously it
+            # replied `unexpected_message`. 2/2-fail → 4/4 PASS clean.
+            test-tls13-unencrypted-alert.py
             # T127 addition (1): (EC)DHE shared-secret padding across
             # curves. 513 PASS — incl. all secp256r1/384r1/521r1 (P-384/
             # P-521 ECDHE wired in I99); 3 XFAILs (ffdhe2048/3072 pending
