@@ -48144,4 +48144,81 @@ fn tc_line2692_x509_vfy_cert_time_boundary_root_pass() {
     );
 }
 
-// Generation summary: 1082 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
+// ============================================================
+// T113 (continued) — Phase C: `pki/verify` unknown-extension
+// family (RFC 5280 §4.2 — a certificate-using system MUST reject
+// a certificate carrying an unrecognised *critical* extension,
+// and MUST ignore an unrecognised *non-critical* one). 3 TCs
+// migrated from openHiTLS C SDV `test_suite_sdv_x509_vfy.c`
+// against the `cert/chain/ext/` fixture corpus.
+// ============================================================
+
+/// SDV_X509_VFY_EXT_UNSUPPORTED_NONCRIT_EXT_PASS_TC001 unknown non-critical ext is ignored → PASS
+/// C source: SDV_X509_VFY_EXT_UNSUPPORTED_NONCRIT_EXT_PASS_TC001 (line 2759)
+#[test]
+fn tc_line2759_x509_vfy_ext_unsupported_noncrit_pass() {
+    let root = load_cert_fixture("cert/chain/ext/root_ext.der");
+    let inter = load_cert_fixture("cert/chain/ext/inter_policy_noncrit.der");
+    let leaf = load_cert_fixture("cert/chain/ext/leaf_ext_via_noncrit.der");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    assert!(verifier.verify_cert(&leaf, &[inter]).is_ok());
+}
+
+/// SDV_X509_VFY_EXT_UNSUPPORTED_CRIT_EXT_FAIL_TC001 unknown critical ext must be rejected
+/// C source: SDV_X509_VFY_EXT_UNSUPPORTED_CRIT_EXT_FAIL_TC001 (line 2811)
+///
+/// Rust verifier gap: `validate_chain` (crates/hitls-pki/src/x509/verify.rs)
+/// never walks each cert's extension list to reject an *unrecognised
+/// critical* extension, so the RFC 5280 §4.2 MUST-reject rule
+/// (`HITLS_X509_ERR_PROCESS_CRITICALEXT` on the C side) is silently
+/// relaxed — the chain verifies. The `Extension { critical }` flag is
+/// parsed and available; only the enforcement loop is missing. Listed
+/// as a verifier-hardening I-phase candidate (same bucket as the
+/// AKI/SKI keyId gaps + the missing-CRL / CRL-issuer-keyUsage gaps
+/// already recorded in DEV_LOG Phase T113). When closed, this test
+/// unignores and asserts the `unsupported certificate extension`
+/// rejection below.
+#[test]
+#[ignore = "verifier-hardening gap: validate_chain does not reject unrecognised critical extensions (RFC 5280 §4.2)"]
+fn tc_line2811_x509_vfy_ext_unsupported_crit_fail() {
+    let root = load_cert_fixture("cert/chain/ext/root_ext.der");
+    let inter = load_cert_fixture("cert/chain/ext/inter_policy_critical.der");
+    let leaf = load_cert_fixture("cert/chain/ext/leaf_ext_via_critical.der");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    let err = verifier.verify_cert(&leaf, &[inter]).unwrap_err();
+    assert!(
+        err.to_string()
+            .starts_with("unsupported certificate extension"),
+        "expected unsupported-critical-extension rejection, got: {err}"
+    );
+}
+
+/// SDV_X509_VFY_EXT_SUPPORTED_EXT_PASS_TC001 recognised ext (crit or non-crit) → PASS
+/// C source: SDV_X509_VFY_EXT_SUPPORTED_EXT_PASS_TC001 (line 2864)
+///
+/// Two direct leaf→root verifications: a recognised extension is
+/// processed cleanly whether or not it is marked critical.
+#[test]
+fn tc_line2864_x509_vfy_ext_supported_pass() {
+    let root = load_cert_fixture("cert/chain/ext/root_ext.der");
+    let leaf_noncrit = load_cert_fixture("cert/chain/ext/leaf_support_noncrit.der");
+    let leaf_crit = load_cert_fixture("cert/chain/ext/leaf_support_critical.der");
+
+    let mut v1 = CertificateVerifier::new();
+    v1.add_trusted_cert(root.clone());
+    assert!(
+        v1.verify_cert(&leaf_noncrit, &[]).is_ok(),
+        "recognised non-critical ext must verify"
+    );
+
+    let mut v2 = CertificateVerifier::new();
+    v2.add_trusted_cert(root);
+    assert!(
+        v2.verify_cert(&leaf_crit, &[]).is_ok(),
+        "recognised critical ext must verify"
+    );
+}
+
+// Generation summary: 1085 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.

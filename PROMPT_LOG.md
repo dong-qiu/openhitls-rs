@@ -7020,3 +7020,45 @@ for separate dedicated investigation. The XFAIL-reduction track is
 effectively done for this sprint.
 
 Recorded as DEV_LOG Phase I114.
+
+## Phase T113 (continued) — Phase C: `pki/verify` unknown-extension family (2026-05-24)
+
+> 等合并后继续做下一个 verify 族
+
+Extends T113 Phase C with **3 more TCs** from
+`pki/verify/test_suite_sdv_x509_vfy.c` — the `VFY_EXT_*` family
+(RFC 5280 §4.2 unknown-extension handling). Hand-appended after
+the cert-time block on
+`crates/hitls-pki/tests/migrated_x509_parse.rs`, anchored on the
+already-mirrored `cert/chain/ext/` fixture corpus. Coverage:
+1082 → **1085 emitted**; total Rust-side **1082 PASS + 3 `#[ignore]`**
+(2 AKI/SKI + 1 new EXT critical-ext gap).
+
+**Scope.** `UNSUPPORTED_NONCRIT_EXT_PASS_TC001` (unknown
+non-critical ext ignored → PASS), `SUPPORTED_EXT_PASS_TC001` (two
+direct leaf→root verifies of a recognised ext, crit + non-crit →
+both PASS), and `UNSUPPORTED_CRIT_EXT_FAIL_TC001` (unknown
+critical ext MUST be rejected — `#[ignore]`).
+
+**Finding — critical-ext gap, now executable.** `validate_chain`
+(`crates/hitls-pki/src/x509/verify.rs`) never rejects an
+unrecognised *critical* extension, so the RFC 5280 §4.2 MUST-reject
+rule (C: `HITLS_X509_ERR_PROCESS_CRITICALEXT`) is silently relaxed.
+The `Extension { critical }` flag is parsed; only the enforcement
+loop is missing. This was already noted in prose in the original
+T113 row; this increment turns it into an executable acceptance
+test — `cargo test -- --ignored tc_line2811_…` currently panics at
+`unwrap_err()` (verifier returns `Ok`), confirming the gap is live.
+Tracked as a verifier-hardening I-phase candidate (same bucket as
+the AKI/SKI keyId gaps).
+
+**Verification**: `cargo test -p hitls-pki --test migrated_x509_parse`
+→ 1082 PASS / 0 FAIL / 3 ignored; `--ignored tc_line2811_…` panics
+as expected; `cargo fmt --check` + `RUSTFLAGS="-D warnings" cargo
+clippy -p hitls-pki --all-features --tests` clean. No production-code
+change. Recorded as DEV_LOG `Phase T113 (continued) — Phase C:
+pki/verify unknown-extension family`. Phase C still ongoing —
+remaining `pki/verify` families (`VFY_TLS_*EKU_KU_*` / `VFY_ANYEKU_*`
+/ `VFY_CHAIN_*` / `VFY_DEPTH_CHAINLEN_*` / `VFY_*CHAIN_BINDING_*` /
+`VFY_SIGALG_*` / `STORE_*` / `BUILD_*_CERT_CHAIN_*`) + cms/pkcs12
+suites follow.
