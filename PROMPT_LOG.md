@@ -7208,3 +7208,38 @@ Verification: `cargo test -p hitls-pki --test migrated_x509_parse`
 1094 PASS / 0 ignored; `fmt` clean; `clippy -D warnings` clean.
 
 Recorded as DEV_LOG `Phase T113 (continued) — chain signature-binding family`.
+
+---
+
+## Phase T132 — tlsfuzzer Coverage-Expansion Batch (workflow completion) (2026-05-24)
+
+> 本session优先聚焦在tlsfuzzer的测试上，先把当前session没有完成的工作完成，然后看看tlsfuzzer测试接下来需要干什么
+
+Pivoted this session from the T113 PKI migration to tlsfuzzer.
+With the XFAIL-reduction track wound down (I114 note: remaining
+curated XFAILs are documented won't-fix / deferred complex
+state-machine cases), did a **coverage-expansion** sweep of the
+uncurated tlsfuzzer corpus (170 scripts; 52 curated) against the
+release `s-server` and added **3 clean-PASS TLS 1.3 conformance
+scripts** to the curated CI suite (`.github/workflows/tlsfuzzer.yml`
+main `scripts` array, no extra args, **0 XFAIL**):
+`test-tls13-unrecognised-groups.py` (32/32), `serverhello-random`
+(256/0), `invalid-ciphers` (52/52). Verified stable across repeated
++ back-to-back local runs.
+
+**Triage map for what's next** (recorded in the DEV_LOG T132 body):
+`non-support` targets a 1.3-disabled server (n/a); `unencrypted-alert`
+surfaces a real RFC 8446 §6.2 read-path gap (server replies
+`unexpected_message` to a peer abort-alert instead of closing
+silently) → **I-phase candidate**; `large-number-of-extensions`
+is contention-flaky (large multi-record CH reassembly) → robustness
+probe; `ecdhe-curves`/`obsolete-curves`/`shuffled-extentions` need
+heavy XFAIL/brainpool work.
+
+Process note: the DEV_LOG T132 entry landed early — it was picked up
+as a staged change by a concurrent T113 chain-structure commit in the
+`test-enhanced` worktree (merged as PR #135) while the workflow change
+was stashed. This phase lands the workflow change from the `feature`
+slot to make the workflow match the already-merged DEV_LOG T132 entry.
+Verified vs `bf7f579`/`02d1506`-pinned tlsfuzzer + release `s-server`.
+>>>>>>> 45f382a (test(tlsfuzzer): T132 — add 3 clean TLS 1.3 coverage scripts to CI)
