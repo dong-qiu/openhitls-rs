@@ -7267,3 +7267,27 @@ Verification: `cargo test -p hitls-pki --test migrated_x509_parse`
 clean. No production-code change.
 
 Recorded as DEV_LOG `Phase T113 (continued) — EKU/purpose family`.
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/verify` SIGALG / signature-param family (2026-05-24)
+
+> 本session优先聚焦在测试用例的迁移上
+
+`VFY_SIGALG_*` family (4 C TCs). 1 migrated, 3 API-surface skips.
+Coverage 1100 → 1101 emitted = 1098 PASS + 3 `#[ignore]`.
+
+- `VFY_SIGALG_RSA_ROOT_PASS_TC001` → migrated (2-cert chain on
+  `sigParam/rsa_root.pem` + `rsa_leaf.pem`, `verify_cert` succeeds).
+- `TRUST_ANCHOR_ALG_MISMATCH_FAIL_TC002` + `RSA_PSS_PARAM_MISSING_FAIL_TC003`
+  → skip: both mutate a *parsed* trust anchor's `signAlgId` /
+  `rsaPssParam` in memory; the Rust `Certificate` is immutable
+  post-parse (no setter). Same reason `VFY_PATHLEN_*` was skipped.
+- `SM2_USERID_MISMATCH_FAIL_TC004` → skip: needs
+  `STORECTX_SET_VFY_SM2_USERID`; the verifier has no SM2 verify-userid
+  setter (recorded as a verifier API-surface candidate).
+
+Verification: 1098 PASS / 0 FAIL / 3 ignored; fmt clean; clippy
+`-D warnings` clean. No production-code change.
+
+Recorded as DEV_LOG `Phase T113 (continued) — SIGALG family`.
