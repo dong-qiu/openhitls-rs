@@ -1404,6 +1404,15 @@ macro_rules! tls13_server_do_handshake_body {
                     }
                 }
                 let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+                if ct == ContentType::Alert {
+                    // RFC 8446 §6.2 — client aborted with an alert
+                    // instead of its Certificate; close silently.
+                    return Err(TlsError::AlertReceived(format!(
+                        "peer alert (level {}, desc {}) while awaiting client Certificate",
+                        plaintext.first().copied().unwrap_or(0),
+                        plaintext.get(1).copied().unwrap_or(0)
+                    )));
+                }
                 if ct != ContentType::Handshake {
                     // RFC 8446 §5.1 — non-Handshake record interleaved
                     // with a fragmented handshake message. Alert:
@@ -1439,6 +1448,15 @@ macro_rules! tls13_server_do_handshake_body {
                         }
                     }
                     let (ct, plaintext) = maybe_await!($mode, $self.read_record())?;
+                    if ct == ContentType::Alert {
+                        // RFC 8446 §6.2 — client aborted with an alert
+                        // instead of its CertificateVerify; close silently.
+                        return Err(TlsError::AlertReceived(format!(
+                            "peer alert (level {}, desc {}) while awaiting client CertificateVerify",
+                            plaintext.first().copied().unwrap_or(0),
+                            plaintext.get(1).copied().unwrap_or(0)
+                        )));
+                    }
                     if ct != ContentType::Handshake {
                         return Err(TlsError::HandshakeFailed(format!(
                             "expected Handshake for client CertificateVerify, \
@@ -1518,6 +1536,17 @@ macro_rules! tls13_server_do_handshake_body {
                 }
                 Err(e) => return Err(e),
             };
+            if ct == ContentType::Alert {
+                // RFC 8446 §6.2 — the client aborted with an alert
+                // instead of sending Finished. Close WITHOUT a
+                // responding alert: AlertReceived maps to CloseNotify,
+                // which send_fatal_alert_for_error_body! suppresses.
+                return Err(TlsError::AlertReceived(format!(
+                    "peer alert (level {}, desc {}) while awaiting client Finished",
+                    plaintext.first().copied().unwrap_or(0),
+                    plaintext.get(1).copied().unwrap_or(0)
+                )));
+            }
             if ct != ContentType::Handshake {
                 if fin_skip_remaining > 0 {
                     fin_skip_remaining -= 1;
