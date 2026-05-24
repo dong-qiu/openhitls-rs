@@ -582,22 +582,27 @@ fn verify_signer_info(
     let digest_alg = oid_to_digest_alg(&si.digest_algorithm.oid)?;
     let content_digest = compute_digest(content_data, digest_alg)?;
 
-    let data_to_verify = if let Some(attrs_content) = &si.signed_attrs {
+    // The bytes actually covered by the signature: the DER SET re-encoding of
+    // signedAttrs when present, otherwise the raw content. Hash-then-sign
+    // algorithms (RSA / ECDSA) verify over its digest; algorithms that hash
+    // internally (ML-DSA) verify over the message itself.
+    let signed_message = if let Some(attrs_content) = &si.signed_attrs {
         // Verify messageDigest attribute matches content digest
         verify_message_digest_attr(attrs_content, &content_digest)?;
         // Re-encode signedAttrs as SET (tag 0x31) for signature verification
-        let set_encoded = enc_set(attrs_content);
-        compute_digest(&set_encoded, digest_alg)?
+        enc_set(attrs_content)
     } else {
-        content_digest
+        content_data.to_vec()
     };
+    let digest = compute_digest(&signed_message, digest_alg)?;
 
     // Find signer cert
     let signer_cert = find_signer_cert(&si.sid, certs)?;
 
     // Verify signature using cert's public key
     verify_signature_with_cert(
-        &data_to_verify,
+        &signed_message,
+        &digest,
         &si.signature,
         &si.signature_algorithm,
         signer_cert,
@@ -668,12 +673,19 @@ fn find_signer_cert<'a>(
 }
 
 fn verify_signature_with_cert(
+    signed_message: &[u8],
     digest: &[u8],
     signature: &[u8],
     sig_alg: &AlgorithmIdentifier,
     cert: &crate::x509::Certificate,
 ) -> Result<(), PkiError> {
     let sig_oid = Oid::from_der_value(&sig_alg.oid).map_err(|e| cerr(&format!("sig OID: {e}")))?;
+
+    // `signed_message` is only consumed by the ML-DSA path (hash-then-sign
+    // algorithms verify over `digest`); avoid an unused-variable warning when
+    // the `mldsa` feature is disabled.
+    #[cfg(not(feature = "mldsa"))]
+    let _ = signed_message;
 
     if sig_oid == known::sha256_with_rsa_encryption()
         || sig_oid == known::sha384_with_rsa_encryption()
@@ -788,9 +800,18 @@ fn verify_signature_with_cert(
             } else {
                 87
             };
+            // ML-DSA hashes internally → verify over the signed message, not
+            // its pre-computed digest. CMS uses *pure* ML-DSA (FIPS 204 §5.2)
+            // with an empty context, so the message fed to the internal verify
+            // is `0x00 || len(ctx)=0x00 || M`; `mldsa_verify` is the internal
+            // variant (μ = H(tr || M)), so prepend the domain separator here.
+            let mut domain_msg = Vec::with_capacity(2 + signed_message.len());
+            domain_msg.push(0x00);
+            domain_msg.push(0x00);
+            domain_msg.extend_from_slice(signed_message);
             let ok = hitls_crypto::mldsa::mldsa_verify(
                 &cert.public_key.public_key,
-                digest,
+                &domain_msg,
                 signature,
                 &hitls_crypto::mldsa::get_params(param_set)
                     .map_err(|e| cerr(&format!("ML-DSA params: {e}")))?,
@@ -1815,7 +1836,7 @@ mod tests {
             params: None,
         };
 
-        verify_signature_with_cert(message, &signature, &sig_alg, &cert).unwrap();
+        verify_signature_with_cert(message, message, &signature, &sig_alg, &cert).unwrap();
     }
 
     #[test]
@@ -1834,7 +1855,7 @@ mod tests {
             params: None,
         };
 
-        assert!(verify_signature_with_cert(message, &signature, &sig_alg, &cert).is_err());
+        assert!(verify_signature_with_cert(message, message, &signature, &sig_alg, &cert).is_err());
     }
 
     #[test]
@@ -1852,7 +1873,7 @@ mod tests {
             params: None,
         };
 
-        verify_signature_with_cert(message, &signature, &sig_alg, &cert).unwrap();
+        verify_signature_with_cert(message, message, &signature, &sig_alg, &cert).unwrap();
     }
 
     // -----------------------------------------------------------------------
