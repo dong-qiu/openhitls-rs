@@ -476,6 +476,17 @@ jobs:
             test-tls13-unrecognised-groups.py
             test-tls13-serverhello-random.py
             test-tls13-invalid-ciphers.py
+            # T133 coverage-expansion batch 2 (2 TLS 1.3) — clean-PASS,
+            # no extra args, 0 XFAIL (verified stable on a fresh
+            # release s-server):
+            #   * tls13-ffdhe-sanity   7/7  — basic FFDHE (ffdhe2048/3072)
+            #     key-exchange sanity in TLS 1.3 negotiates cleanly.
+            #   * tls13-pkcs-signature 8/8  — rsa_pkcs1_* sig schemes are
+            #     refused for CertificateVerify in TLS 1.3 (RFC 8446
+            #     §4.2.3) yet accepted in the legacy-compat spots the
+            #     script probes.
+            test-tls13-ffdhe-sanity.py
+            test-tls13-pkcs-signature.py
           )
           # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
           # on $HITLS_PORT_12. Per-script extra args (`-C 49199` cipher
@@ -504,6 +515,17 @@ jobs:
             test-ecdhe-rsa-key-exchange.py
             test-ffdhe-negotiation.py
             test-ffdhe-expected-params.py
+            # T133 coverage-expansion batch 2 (2 TLS 1.2) — clean-PASS,
+            # no extra args, 0 XFAIL (verified on a fresh release
+            # s-server `--tls 1.2`):
+            #   * cve-2004-0079      4/4  — CVE-2004-0079 (SSL/TLS NULL
+            #     deref via crafted handshake) regression: handled safely.
+            #   * no-mlkem-in-old-tls 12/12 — ML-KEM key-share / named
+            #     groups are correctly rejected/ignored in TLS 1.2 (they
+            #     are TLS-1.3-only); guards against a hybrid-PQC group
+            #     leaking into a 1.2 handshake.
+            test-cve-2004-0079.py
+            test-no-mlkem-in-old-tls.py
           )
           # Phase T93 — cert-matrix scripts. Each cert type gets its
           # own XFAIL list under `tests/tlsfuzzer/xfail-<key-type>/`

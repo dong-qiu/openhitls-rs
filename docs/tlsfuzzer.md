@@ -259,6 +259,68 @@ bump the two SHAs in `ci.yml` *and* `tlsfuzzer.yml`, re-run the full
 sweep, re-baseline any XFAIL lists that drifted, and land it all in
 one reviewed PR.
 
+## Uncurated-corpus scan backlog (T133)
+
+A systematic sweep (T133) ran all 99 server-testable uncurated
+scripts against a fresh release `s-server` (TLS 1.3 `:4444`, TLS 1.2
+fallback `:4445`). Buckets below are the working backlog for the
+remaining tlsfuzzer effort. Re-run the sweep with
+`/tmp/tlsfuzzer_scan.sh`-style harness after any conformance fix.
+
+**Curated in T133 (clean-PASS, 0 XFAIL)** — `tls13-ffdhe-sanity`
+(7/7), `tls13-pkcs-signature` (8/8), `cve-2004-0079` (4/4, 1.2),
+`no-mlkem-in-old-tls` (12/12, 1.2).
+
+**Mostly-PASS — small-XFAIL curation candidates** (triage the few
+fails, then curate with an XFAIL list):
+`test-signature-algorithms` (275/1, 1.2), `test-invalid-cipher-suites`
+(25/2, 1.3), `test-bleichenbacher-workaround` (50/2, 1.2),
+`test-x25519` (20/4, 1.2), `test-sig-algs` (13/5, 1.2),
+`test-point-extension` (7/2, 1.2).
+
+**Non-deterministic — do NOT curate (server is NOT at fault)**:
+`test-ecdhe-padded-shared-secret` (varies 2/1 ↔ 77/0 ↔ 238/0 run to
+run) and `test-tls13-large-number-of-extensions` (22/22 standalone,
+occasional 20/2). A dedicated load probe (T133: 600 sequential
+openssl handshakes against a fresh `s-server`) **disproved** the
+earlier "server degrades / leaks fds" hypothesis: server fd count
+stayed flat at 8 across all 600 connections, client TIME_WAIT stayed
+at 2, no accept errors, and `ecdhe-padded` returned the *same* 2/1
+both before and after the load — load made zero difference. The
+variance is **test-side non-determinism** (the script randomly
+samples padding-length conversations; one intermittently fails), not
+a server resource problem. Curating these would only add flaky CI
+signal. The intermittent 1-conversation failure in `ecdhe-padded` is
+worth a separate script-level look (which padding case; value- or
+timing-dependent) but is not a robustness/leak issue. `ecdhe-padded`
+was also T128-excluded for TLS 1.0/1.1/SSLv2-compat fails.
+
+**Real gap / big-XFAIL needed** (mostly curve / extension coverage):
+`test-tls13-obsolete-curves` (8/163), `test-tls13-ffdhe-groups`
+(7/55), `test-tls13-ecdhe-curves` (7/26), `test-tls13-crfg-curves`
+(8/10), `test-tls13-certificate-compression` (4/25), `test-extensions`
+(215/77, 1.2), `test-export-ciphers-rejected` (76/78, 1.2),
+`test-alpn-negotiation` (3/16, 1.2), `test-invalid-server-name-extension`
+(3/13, 1.2), `test-dhe-rsa-key-exchange-signatures` (4/8, 1.2),
+`test-ecdsa-sig-flexibility` (3/8, 1.2).
+
+**Read-path conformance — I-phase candidate**:
+`test-tls13-unencrypted-alert` (2/2 fail) — server replies
+`unexpected_message` to a peer abort-alert instead of closing
+silently (RFC 8446 §6.2). Fix unblocks curation.
+
+**Needs cipher-args plumbing** (sanity fails on the default cipher;
+add `tests/tlsfuzzer/args/<script>.txt` with `-d`/`-C`):
+`test-chacha20`, `test-aesccm`, `test-extended-master-secret-extension`,
+`test-downgrade-protection`, `test-dhe-rsa-key-exchange`,
+`test-record-size-limit`, `test-fuzzed-{finished,MAC,padding,plaintext}`,
+etc.
+
+**Not applicable** — client-side tests, renegotiation/resumption,
+SSLv2, PSK-server-only, and brainpool-curve scripts that need a
+dedicated server config or are out of scope for the current
+server build.
+
 ## Phase reference
 
 - T88 — fixed two TLS 1.3 CCS conformance gaps surfaced by
