@@ -7242,3 +7242,28 @@ as a staged change by a concurrent T113 chain-structure commit in the
 was stashed. This phase lands the workflow change from the `feature`
 slot to make the workflow match the already-merged DEV_LOG T132 entry.
 Verified vs `bf7f579`/`02d1506`-pinned tlsfuzzer + release `s-server`.
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/verify` EKU / purpose family (2026-05-24)
+
+> 确认 #138 合并 + 回到 EKU/KU 迁移
+
+6 TCs from `pki/verify` EKU/purpose family (RFC 5280 §4.2.1.12).
+Coverage 1094 → 1100 emitted = 1097 PASS + 3 `#[ignore]`.
+
+The C side uses STORECTX_SET_PURPOSE — a joint EKU + end-entity KU
+check. hitls's `set_required_eku` checks the EKU OID only (no
+end-entity KU inspection). So the 3 BOTH-MATCH/ANY PASS cases
+migrate cleanly (fixtures carry both EKU+KU), while the 3
+EKU-ONLY-KU-MISSING FAIL cases are `#[ignore]`d: hitls accepts the
+`*_badku` fixtures (EKU matches, KU not inspected) where C returns
+PURPOSE_UNMATCH. Recorded as a verifier-hardening candidate
+(purpose-based end-entity KU enforcement) — same shape as the
+AKI/SKI gaps I115/I116 closed.
+
+Verification: `cargo test -p hitls-pki --test migrated_x509_parse`
+1097 PASS / 0 FAIL / 3 ignored; `fmt` clean; `clippy -D warnings`
+clean. No production-code change.
+
+Recorded as DEV_LOG `Phase T113 (continued) — EKU/purpose family`.
