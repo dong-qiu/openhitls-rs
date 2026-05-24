@@ -7291,3 +7291,29 @@ Verification: 1098 PASS / 0 FAIL / 3 ignored; fmt clean; clippy
 `-D warnings` clean. No production-code change.
 
 Recorded as DEV_LOG `Phase T113 (continued) — SIGALG family`.
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/cms` SignedData-verify family (2026-05-24)
+
+> 迁移 pki/cms (推荐)
+
+Opens the pki/cms SDV suite with
+`SDV_CMS_PARSE_SIGNEDDATA_VERIFY_TEST_TC001` (parse CMS SignedData +
+verify signer infos, attached + detached). 29 cases: 23 active PASS,
+6 ML-DSA `#[ignore]`. Fixtures already mirrored.
+
+- Active (23): RSA-PKCS1, RSA-PSS, ECDSA P-256/384/521, multi-signer,
+  `noattr/` no-signed-attr variants, version3 — attached + detached.
+  Mapped to `CmsMessage::verify_signatures(detached, &[ca])`:
+  attached → `None`; detached → `Some(&msg)` + wrong-msg/None → Err.
+- `#[ignore]` (6): ML-DSA 44/65/87 — `unsupported sig alg
+  2.16.840.1.101.3.4.3.17/18/19`. CMS `verify_signer_info` lacks the
+  ML-DSA OID dispatch (primitive exists). Production-code gap →
+  Implementation-phase candidate (bug-fix slot), not this test PR.
+
+Coverage 1101 → 1130 emitted = 1121 PASS + 9 `#[ignore]`.
+Verification: 1121 PASS / 0 FAIL / 9 ignored; fmt clean; clippy
+`-D warnings` clean. No production-code change.
+
+Recorded as DEV_LOG `Phase T113 (continued) — pki/cms SignedData-verify`.

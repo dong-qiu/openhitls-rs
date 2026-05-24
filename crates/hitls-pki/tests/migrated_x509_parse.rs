@@ -48520,4 +48520,479 @@ fn tc_line3920_x509_vfy_sigalg_rsa_root_pass() {
     assert!(verifier.verify_cert(&leaf, &[]).is_ok());
 }
 
-// Generation summary: 1101 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
+/// CMS SignedData verify family — SDV_CMS_PARSE_SIGNEDDATA_VERIFY_TEST_TC001
+/// C source: pki/cms/test_suite_sdv_cms_sign.c (line 95).
+///
+/// Parse a CMS SignedData blob (`.cms`) and verify its signer infos against
+/// the embedded + supplied CA cert. Attached cases verify the embedded
+/// content; detached cases verify against the external `msg.txt` and reject
+/// both a mutated message and a missing one. Fixtures mirror
+/// `testdata/cert/asn1/cms/signeddata/`.
+///
+/// The in-memory `encapContentInfo.contentType` mutation negatives from the C
+/// case are not reproduced — `CmsMessage` is immutable after parse.
+#[cfg(feature = "cms")]
+mod cms_signeddata_verify {
+    use super::Certificate;
+    use hitls_pki::cms::CmsMessage;
+
+    fn cms_base(rel: &str) -> String {
+        format!(
+            "{}/../../tests/vectors/c-asn1-fixtures/cert/asn1/cms/signeddata/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            rel
+        )
+    }
+
+    fn cms_raw(rel: &str) -> Vec<u8> {
+        std::fs::read(cms_base(rel)).unwrap()
+    }
+
+    fn cms_ca(rel: &str) -> Certificate {
+        let bytes = cms_raw(rel);
+        match std::str::from_utf8(&bytes) {
+            Ok(s) if s.contains("-----BEGIN") => Certificate::from_pem(s).unwrap(),
+            _ => Certificate::from_der(&bytes).unwrap(),
+        }
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_p256_attached() {
+        let m = CmsMessage::from_der(&cms_raw("p256_attached.cms")).unwrap();
+        let ca = cms_ca("ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_p384_attached() {
+        let m = CmsMessage::from_der(&cms_raw("p384_attached.cms")).unwrap();
+        let ca = cms_ca("ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_p521_attached() {
+        let m = CmsMessage::from_der(&cms_raw("p521_attached.cms")).unwrap();
+        let ca = cms_ca("ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_rsa_pkcs1_attached() {
+        let m = CmsMessage::from_der(&cms_raw("rsa_pkcs1_attached.cms")).unwrap();
+        let ca = cms_ca("ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_rsa_pss_attached() {
+        let m = CmsMessage::from_der(&cms_raw("rsa_pss_attached.cms")).unwrap();
+        let ca = cms_ca("ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_multi_attached() {
+        let m = CmsMessage::from_der(&cms_raw("multi_attached.cms")).unwrap();
+        let ca = cms_ca("mul_ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_noattr_p256_attached() {
+        let m = CmsMessage::from_der(&cms_raw("noattr/p256_attached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_noattr_p384_attached() {
+        let m = CmsMessage::from_der(&cms_raw("noattr/p384_attached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_noattr_p521_attached() {
+        let m = CmsMessage::from_der(&cms_raw("noattr/p521_attached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_noattr_rsa_pkcs1_attached() {
+        let m = CmsMessage::from_der(&cms_raw("noattr/rsa_pkcs1_attached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_noattr_rsa_pss_attached() {
+        let m = CmsMessage::from_der(&cms_raw("noattr/rsa_pss_attached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_v3_attached() {
+        let m = CmsMessage::from_der(&cms_raw("v3attach.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_p256_detached() {
+        let m = CmsMessage::from_der(&cms_raw("p256_detached.cms")).unwrap();
+        let ca = cms_ca("ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_p384_detached() {
+        let m = CmsMessage::from_der(&cms_raw("p384_detached.cms")).unwrap();
+        let ca = cms_ca("ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_p521_detached() {
+        let m = CmsMessage::from_der(&cms_raw("p521_detached.cms")).unwrap();
+        let ca = cms_ca("ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_rsa_pkcs1_detached() {
+        let m = CmsMessage::from_der(&cms_raw("rsa_pkcs1_detached.cms")).unwrap();
+        let ca = cms_ca("ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_rsa_pss_detached() {
+        let m = CmsMessage::from_der(&cms_raw("rsa_pss_detached.cms")).unwrap();
+        let ca = cms_ca("ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_noattr_p256_detached() {
+        let m = CmsMessage::from_der(&cms_raw("noattr/p256_detached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_noattr_p384_detached() {
+        let m = CmsMessage::from_der(&cms_raw("noattr/p384_detached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_noattr_p521_detached() {
+        let m = CmsMessage::from_der(&cms_raw("noattr/p521_detached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_noattr_rsa_pkcs1_detached() {
+        let m = CmsMessage::from_der(&cms_raw("noattr/rsa_pkcs1_detached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_noattr_rsa_pss_detached() {
+        let m = CmsMessage::from_der(&cms_raw("noattr/rsa_pss_detached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    #[test]
+    fn tc_cms_sd_verify_v3_detached() {
+        let m = CmsMessage::from_der(&cms_raw("v3detached.cms")).unwrap();
+        let ca = cms_ca("noattr/ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    /// ML-DSA CMS SignedData verify (mldsa44). C verifies OK; hitls's
+    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
+    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
+    /// alg". Production-code gap (the crypto primitive exists); an Implementation
+    /// phase wiring the OID into the signer-info dispatch unignores this.
+    #[test]
+    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
+    fn tc_cms_sd_verify_mldsa44_attached() {
+        let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa44/mldsa44_attached.cms")).unwrap();
+        let ca = cms_ca("mldsa/mldsa44/ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    /// ML-DSA CMS SignedData verify (mldsa44). C verifies OK; hitls's
+    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
+    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
+    /// alg". Production-code gap (the crypto primitive exists); an Implementation
+    /// phase wiring the OID into the signer-info dispatch unignores this.
+    #[test]
+    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
+    fn tc_cms_sd_verify_mldsa44_detached() {
+        let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa44/mldsa44_detached.cms")).unwrap();
+        let ca = cms_ca("mldsa/mldsa44/ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    /// ML-DSA CMS SignedData verify (mldsa65). C verifies OK; hitls's
+    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
+    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
+    /// alg". Production-code gap (the crypto primitive exists); an Implementation
+    /// phase wiring the OID into the signer-info dispatch unignores this.
+    #[test]
+    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
+    fn tc_cms_sd_verify_mldsa65_attached() {
+        let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa65/mldsa65_attached.cms")).unwrap();
+        let ca = cms_ca("mldsa/mldsa65/ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    /// ML-DSA CMS SignedData verify (mldsa65). C verifies OK; hitls's
+    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
+    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
+    /// alg". Production-code gap (the crypto primitive exists); an Implementation
+    /// phase wiring the OID into the signer-info dispatch unignores this.
+    #[test]
+    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
+    fn tc_cms_sd_verify_mldsa65_detached() {
+        let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa65/mldsa65_detached.cms")).unwrap();
+        let ca = cms_ca("mldsa/mldsa65/ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+
+    /// ML-DSA CMS SignedData verify (mldsa87). C verifies OK; hitls's
+    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
+    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
+    /// alg". Production-code gap (the crypto primitive exists); an Implementation
+    /// phase wiring the OID into the signer-info dispatch unignores this.
+    #[test]
+    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
+    fn tc_cms_sd_verify_mldsa87_attached() {
+        let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa87/mldsa87_attached.cms")).unwrap();
+        let ca = cms_ca("mldsa/mldsa87/ca_cert.pem");
+        // attached: content is embedded, verifies without external data
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .unwrap());
+    }
+
+    /// ML-DSA CMS SignedData verify (mldsa87). C verifies OK; hitls's
+    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
+    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
+    /// alg". Production-code gap (the crypto primitive exists); an Implementation
+    /// phase wiring the OID into the signer-info dispatch unignores this.
+    #[test]
+    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
+    fn tc_cms_sd_verify_mldsa87_detached() {
+        let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa87/mldsa87_detached.cms")).unwrap();
+        let ca = cms_ca("mldsa/mldsa87/ca_cert.pem");
+        let msg = cms_raw("msg.txt");
+        assert!(m
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        // wrong external content → verification fails
+        assert!(m
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        // detached SignedData with no external content → error
+        assert!(m
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+}
+
+// Generation summary: 1130 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify: 23 active + 6 ML-DSA #[ignore]).
