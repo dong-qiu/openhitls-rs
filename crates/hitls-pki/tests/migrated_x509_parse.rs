@@ -48495,4 +48495,29 @@ fn tc_line2294_x509_vfy_anyeku_ku_missing_fail() {
     assert!(verifier.verify_cert(&leaf, &[ca]).is_err());
 }
 
-// Generation summary: 1100 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
+/// SDV_X509_VFY_SIGALG_RSA_ROOT_PASS_TC001 RSA trust-anchor signature-param path
+/// C source: SDV_X509_VFY_SIGALG_RSA_ROOT_PASS_TC001 (line 3920)
+///
+/// 2-cert chain on the `sigParam/` fixtures: `rsa_leaf` is signed by the
+/// RSA trust anchor `rsa_root`; verification succeeds with the default
+/// signature-algorithm handling. Pins the positive RSA trust-anchor path.
+///
+/// The 3 sibling SIGALG FAIL cases are NOT emitted (API-surface skips):
+/// - TRUST_ANCHOR_ALG_MISMATCH_FAIL_TC002 + RSA_PSS_PARAM_MISSING_FAIL_TC003
+///   both mutate the parsed root's `signAlgId` / `rsaPssParam` in memory
+///   to force a mismatch; the Rust `Certificate` is immutable after parse
+///   (no signAlgId setter), so the mutation cannot be reproduced.
+/// - SM2_USERID_MISMATCH_FAIL_TC004 needs `STORECTX_SET_VFY_SM2_USERID`
+///   to inject a mismatched SM2 user-id into the verify path; hitls's
+///   `CertificateVerifier` exposes no SM2 verify-userid setter (same gap
+///   the T113 SM2-CRL note recorded).
+#[test]
+fn tc_line3920_x509_vfy_sigalg_rsa_root_pass() {
+    let root = load_cert_fixture("cert/chain/sigParam/rsa_root.pem");
+    let leaf = load_cert_fixture("cert/chain/sigParam/rsa_leaf.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    assert!(verifier.verify_cert(&leaf, &[]).is_ok());
+}
+
+// Generation summary: 1101 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
