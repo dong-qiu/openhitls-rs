@@ -7397,3 +7397,27 @@ This migration locks I117 into CI as a cross-impl correctness oracle.
 Verification: 1134 PASS / 0 FAIL / 10 ignored; fmt + clippy clean.
 
 Recorded as DEV_LOG `Phase T113 (continued) — pki/pkcs12 PARSE_P12`.
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/pkcs12` CAL_KDF / CAL_MACDATA KAT (2026-05-24)
+
+> 当前什么状态？是否可以开展下一步
+
+Migrates pki/pkcs12 CAL_KDF + CAL_MACDATA KDF/MAC KATs. Because they
+exercise the crate-private pkcs12_kdf / P12MacHash, they land as
+hitls-pki module unit tests (src/pkcs12/mod.rs), not the integration
+file — doubling as the SHA-2 reference vectors the I117 review noted
+were missing.
+
+- test_pkcs12_cal_kdf_kat_sha256: SHA-256 PKCS#12 KDF KAT.
+- test_pkcs12_cal_macdata_kat: full MAC KAT, SHA-512 / 224 / 384.
+
+All match the openHiTLS C reference vectors → I117 SHA-2 KDF/MAC
+confirmed correct cross-implementation. migrated_x509_parse.rs emitted
+count unchanged (1144); pkcs12 lib tests 22 → 24.
+
+Verification: cargo test -p hitls-pki --lib pkcs12 24 PASS; fmt +
+clippy -D warnings clean.
+
+Recorded as DEV_LOG `Phase T113 (continued) — pkcs12 CAL KAT`.

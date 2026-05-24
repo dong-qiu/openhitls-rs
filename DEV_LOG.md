@@ -327,7 +327,7 @@ Category summary:
 | 315 | I97 | Impl | TLS 1.3 post-handshake-auth transcript fix — both sides computed the post-handshake CertificateVerify / Finished over `Hash(CertificateRequest ‖ Certificate[ ‖ CV])` instead of continuing the completed main-handshake transcript (RFC 8446 §4.4.1). The bug was symmetric (server `request_client_auth` + client post-HS CR handler) so they interoperated with each other but not with a conformant peer. `TranscriptHash` made `Clone`; `Server`/`ClientHandshake` retain the CH…client-Finished transcript; both sides now clone it as the post-handshake baseline. Verified: 1539 hitls-tls tests + tlsfuzzer `test-tls13-post-handshake-auth.py` 2/6 → 4/6 (residual 2 are unrelated: alert-on-failure + KeyUpdate-interleave). Surfaced by the T122 PHA probe | 2026-05-17 |
 | 316 | T125 | Test | PHA tlsfuzzer wiring — commits the `--post-handshake-auth` `s-server` flag (a `/secret`-path request triggers a post-handshake CertificateRequest, mirroring T122's `--key-update`) + a dedicated instance (port 4455) running `test-tls13-post-handshake-auth.py` in CI. 4 PASS / 2 XFAIL (`malformed signature in PHA` needs an alert-on-failure; `with KeyUpdate` needs interleaved-KeyUpdate tolerance — both queued for a follow-up I-phase). Curated suite 48 → 49 script-runs | 2026-05-17 |
 | 317 | I98 | Impl | PHA robustness — closes the 2 `test-tls13-post-handshake-auth.py` XFAILs from T125. (1) `request_client_auth` (sync + async) now sends a fatal alert via the T89 `send_fatal_alert_for_error_body!` path before returning any error, so a malformed post-handshake CertificateVerify yields a `decrypt_error` alert (RFC 8446 §6.2) instead of a bare close. (2) new `read_post_hs_skipping_key_update` transparently consumes a KeyUpdate interleaved into the post-handshake exchange (RFC 8446 §4.6.3) — `handle_key_update` rekeys + responds. `test-tls13-post-handshake-auth.py` 4/6 → **6/6** clean; XFAIL file deleted | 2026-05-17 |
-| 318 | T113 | Test | C→Rust test migration Phase C — opens PKI SDV migration. §4.1: mirrored the openHiTLS PKI fixture corpus (`testdata/{cert,certificate}/` → `tests/vectors/c-asn1-fixtures/`, 1298 files + `MANIFEST.sha256`, PR #88). §4.2: `xtask/src/x509.rs` migrates cert/CRL positive parse families + nine cert field-check families (`version`/`serial_number`/`signature`/`not_before`/`not_after`/`signature_algorithm`/`issuer`/`subject`/`pubkey`) + CSR field-check (`CSR_PARSE_TC001/002/003`) + CRL revocation chain-verify (`FILE_VERIFY_TC001-005`) + CRL field-check (`PARSE_FILE_TC005/009-013`) + cert-chain build-verify (`BUILD_CERT_CHAIN_FUNC`) + verify-by-pubkey (`CERT_VERIFY_BY_PUBKEY_FUNC`) + charset chain-verify (`*_WITH_VARIOUS_CHARSET_FUNC` cert/CRL) + verify AKI/SKI keyId chain-verify (`VFY_AKI_SKI_*` + `VFY_NOAKID_CERT_*`) + verify BasicConstraints + pathLen (`VFY_BC_*`; sibling `VFY_PATHLEN_*` skipped — in-memory cert mutation, API-surface) + verify cert-time (`VFY_CERT_TIME_{CURRENT,HISTORY,OUT_OF_RANGE,BOUNDARY}_*`, 6 TCs — current / historical / out-of-range + leaf/inter/root boundary inclusivity) + verify unknown-extension (`VFY_EXT_*`, 3 TCs — unknown non-crit ignored / supported-ext / unknown-crit-reject which `#[ignore]`s a critical-ext verifier gap) → 1144 emitted / 1134 PASS + 10 `#[ignore]` (111 cert-parse + 5 CRL-parse + 872 cert field-check + 17 CSR field-check + 10 CRL-verify + 20 CRL field-check + 12 chain-verify + 5 verify-by-pubkey + 12 charset chain-verify + 8 verify AKI/SKI + 4 verify BC + 6 verify cert-time + 3 verify EXT + 5 verify chain-structure + 4 verify chain-binding + 6 verify EKU/KU (3 active + 3 `#[ignore]` purpose-KU gap) + 1 verify SIGALG (RSA trust-anchor PASS; 3 siblings API-surface skips: in-memory signAlgId/rsaPssParam mutation ×2 + unexposed SM2 verify-userid) + 29 **pki/cms** SignedData-verify (pki/cms suite opened: 23 active RSA-PKCS1/RSA-PSS/ECDSA-P256/384/521/multi-signer/noattr/version3 attached+detached + 6 ML-DSA `#[ignore]` — CMS `verify_signer_info` lacks ML-DSA OID dispatch) + 2 **pki/cms** SignedData sign-side (GEN_ATTACH RSA-PKCS1 attach + adapted single-signer detached, sign→reparse→verify; ECDSA/RSA-PSS/no-attrs/multi-signer/ML-DSA rows skipped — `CmsMessage::sign` is minimal) + 12 **pki/pkcs12** PARSE_P12 (suite opened, unblocked by I117 SHA-2 MAC: 11 active TC001×5 parse+entity-cert + TC002 + WRONG-password + TC003 p12_2..5; 1 `#[ignore]` empty-password BMPString KDF gap); the 3 former AKI/SKI + EXT ignores were closed by verifier-hardening I115/I116) in `crates/hitls-pki/tests/migrated_x509_parse.rs`. Parser gains `Arg::Str` so quoted file-path fields parse (previously hex-only). Findings: 9 negative CRL-parse rows skipped — Rust `CertificateRevocationList::from_pem` is more lenient than the C parser; `Certificate::version` is 1-indexed vs the C raw DER integer; `TBS_SIGNALG` + `PUBKEY_TC002` (XMSS) families unmigratable — API gaps; Rust `CertificateVerifier` is less strict than C (missing-CRL / critical-ext / CRL-issuer-keyUsage / no device-only `CRL_DEV` mode) + SM2 CRL verify needs an unexposed GM/T user-id + ECDSA P-192 unsupported (verifier-hardening I-phase candidates). Phase C ongoing — `pki/verify` suite opened (`BUILD_CERT_CHAIN`); remaining verify families + CMS/PKCS12 suites follow under T113 | 2026-05-17 |
+| 318 | T113 | Test | C→Rust test migration Phase C — opens PKI SDV migration. §4.1: mirrored the openHiTLS PKI fixture corpus (`testdata/{cert,certificate}/` → `tests/vectors/c-asn1-fixtures/`, 1298 files + `MANIFEST.sha256`, PR #88). §4.2: `xtask/src/x509.rs` migrates cert/CRL positive parse families + nine cert field-check families (`version`/`serial_number`/`signature`/`not_before`/`not_after`/`signature_algorithm`/`issuer`/`subject`/`pubkey`) + CSR field-check (`CSR_PARSE_TC001/002/003`) + CRL revocation chain-verify (`FILE_VERIFY_TC001-005`) + CRL field-check (`PARSE_FILE_TC005/009-013`) + cert-chain build-verify (`BUILD_CERT_CHAIN_FUNC`) + verify-by-pubkey (`CERT_VERIFY_BY_PUBKEY_FUNC`) + charset chain-verify (`*_WITH_VARIOUS_CHARSET_FUNC` cert/CRL) + verify AKI/SKI keyId chain-verify (`VFY_AKI_SKI_*` + `VFY_NOAKID_CERT_*`) + verify BasicConstraints + pathLen (`VFY_BC_*`; sibling `VFY_PATHLEN_*` skipped — in-memory cert mutation, API-surface) + verify cert-time (`VFY_CERT_TIME_{CURRENT,HISTORY,OUT_OF_RANGE,BOUNDARY}_*`, 6 TCs — current / historical / out-of-range + leaf/inter/root boundary inclusivity) + verify unknown-extension (`VFY_EXT_*`, 3 TCs — unknown non-crit ignored / supported-ext / unknown-crit-reject which `#[ignore]`s a critical-ext verifier gap) → 1144 emitted / 1134 PASS + 10 `#[ignore]` (111 cert-parse + 5 CRL-parse + 872 cert field-check + 17 CSR field-check + 10 CRL-verify + 20 CRL field-check + 12 chain-verify + 5 verify-by-pubkey + 12 charset chain-verify + 8 verify AKI/SKI + 4 verify BC + 6 verify cert-time + 3 verify EXT + 5 verify chain-structure + 4 verify chain-binding + 6 verify EKU/KU (3 active + 3 `#[ignore]` purpose-KU gap) + 1 verify SIGALG (RSA trust-anchor PASS; 3 siblings API-surface skips: in-memory signAlgId/rsaPssParam mutation ×2 + unexposed SM2 verify-userid) + 29 **pki/cms** SignedData-verify (pki/cms suite opened: 23 active RSA-PKCS1/RSA-PSS/ECDSA-P256/384/521/multi-signer/noattr/version3 attached+detached + 6 ML-DSA `#[ignore]` — CMS `verify_signer_info` lacks ML-DSA OID dispatch) + 2 **pki/cms** SignedData sign-side (GEN_ATTACH RSA-PKCS1 attach + adapted single-signer detached, sign→reparse→verify; ECDSA/RSA-PSS/no-attrs/multi-signer/ML-DSA rows skipped — `CmsMessage::sign` is minimal) + 12 **pki/pkcs12** PARSE_P12 (suite opened, unblocked by I117 SHA-2 MAC: 11 active TC001×5 parse+entity-cert + TC002 + WRONG-password + TC003 p12_2..5; 1 `#[ignore]` empty-password BMPString KDF gap) + 2 pkcs12 CAL_KDF/CAL_MACDATA KAT migrated as `hitls-pki` module unit tests (private `pkcs12_kdf`/`P12MacHash`; validate I117 SHA-256 KDF + SHA-512/224/384 MAC vs C reference vectors); the 3 former AKI/SKI + EXT ignores were closed by verifier-hardening I115/I116) in `crates/hitls-pki/tests/migrated_x509_parse.rs`. Parser gains `Arg::Str` so quoted file-path fields parse (previously hex-only). Findings: 9 negative CRL-parse rows skipped — Rust `CertificateRevocationList::from_pem` is more lenient than the C parser; `Certificate::version` is 1-indexed vs the C raw DER integer; `TBS_SIGNALG` + `PUBKEY_TC002` (XMSS) families unmigratable — API gaps; Rust `CertificateVerifier` is less strict than C (missing-CRL / critical-ext / CRL-issuer-keyUsage / no device-only `CRL_DEV` mode) + SM2 CRL verify needs an unexposed GM/T user-id + ECDSA P-192 unsupported (verifier-hardening I-phase candidates). Phase C ongoing — `pki/verify` suite opened (`BUILD_CERT_CHAIN`); remaining verify families + CMS/PKCS12 suites follow under T113 | 2026-05-17 |
 | 319 | T120 | Test | TLS 1.3 `psk_ke` server support (RFC 8446 §4.2.9 mode 0 — PSK resumption without (EC)DHE). The server now negotiates `psk_ke` when the client offers it without `psk_dhe_ke`: `build_server_flight` sends no `key_share` in the ServerHello and extracts the Handshake Secret over a Hash.length zero string instead of an ECDHE shared secret. Closes the `session resumption - PSK_ONLY` XFAIL in `test-tls13-session-resumption.py` (4/3 → 5/2; the 2 residual are TLS-1.2 cross-version, await `--tls auto`). Long-standing item — reserved for T120 since T119 | 2026-05-17 |
 | 320 | T126 | Test | mass-fail tlsfuzzer triage batch 1 — `tls_error_to_alert` now maps the record-layer "inner plaintext has no content type" fault (a TLS 1.3 zero-content-type record, RFC 8446 §5.1/§5.2) to `unexpected_message` instead of the `internal_error` fall-through; `test-tls13-zero-content-type.py` 2/8 → 6/8 and joins CI (2 app-data-phase XFAILs). Triaged 3 more T92 mass-fail scripts: `legacy-version` won't-fix (server is RFC 8446 §4.2.1-correct — MUST ignore `legacy_version` when `supported_versions` present; tlsfuzzer expects non-RFC rejection), `non-support` + `unencrypted-alert` deferred to batch 2 | 2026-05-17 |
 | 321 | I99 | Impl | TLS 1.3 ECDHE for secp384r1 / secp521r1 — the TLS `KeyExchange` (`handshake/key_exchange.rs`) advertised these groups but `generate` only implemented X25519 / X448 / SECP256R1 / SM2 / X25519MLKEM768, so a client offering only secp384r1/secp521r1 hit `unsupported named group`. `hitls-crypto::ecdh` has had P-384/P-521 ECDH since project start (same crypto-has-it / TLS-layer-missing-it pattern as I96). Added `EcdhP384`/`EcdhP521` variants + `generate`/`compute_shared_secret` arms. Verified: tlsfuzzer `dhe-shared-secret-padding` 559/5 → 703/3, `ecdhe-curves` 4/33 → 6/33. Surfaced by the T126/batch-2 mass-fail triage | 2026-05-17 |
@@ -22064,3 +22064,66 @@ migrate under T113: `PARSE_AUTHSAFE` / `PARSE_MACDATA` /
 (KDF/MAC KAT), and the `pkcs12_util` families (bag enc/dec — likely
 API-surface skips). The empty-password KDF convention is recorded as a
 small Implementation-phase candidate.
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/pkcs12` CAL_KDF / CAL_MACDATA KAT (2026-05-24)
+
+### Summary
+
+Migrates the `pki/pkcs12` `SDV_PKCS12_CAL_KDF_TC001` +
+`SDV_PKCS12_CAL_MACDATA_TC001` families (KDF / MAC known-answer tests)
+from `pki/pkcs12/test_suite_sdv_pkcs12.c` (lines 377 / 348). These are
+pure value KATs for the PKCS#12 KDF and MAC computation.
+
+Because they exercise the **crate-private** `pkcs12_kdf` /
+`P12MacHash`, they are migrated as **`hitls-pki` module unit tests**
+(`crates/hitls-pki/src/pkcs12/mod.rs` `#[cfg(test)] mod tests`) rather
+than the integration-test file. They double as the SHA-2 reference
+vectors the I117 review noted were missing — directly closing that
+gap by cross-validating I117 against openHiTLS C.
+
+The integration-file `migrated_x509_parse.rs` emitted count is
+unchanged (1144); these add **2 module unit tests** (pkcs12 lib tests
+22 → 24).
+
+### What landed
+
+| Rust unit test | C source | Coverage |
+|---|---|---|
+| `test_pkcs12_cal_kdf_kat_sha256` | `CAL_KDF_TC001` | SHA-256 PKCS#12 KDF (RFC 7292 App. B): pwd "123456" / salt `ed47…5984` / id=3 / 2048 → `b08f3dad…2934f4b` |
+| `test_pkcs12_cal_macdata_kat` | `CAL_MACDATA_TC001` | full MAC (KDF id=3 + HMAC over AuthSafe content), **SHA-512 / SHA-224 / SHA-384** vectors |
+
+Mapping: C passes the BMP-encoded password to `HITLS_PKCS12_KDF`; the
+Rust `pkcs12_kdf` takes the `&str` "123456" and BMP-encodes internally
+(→ `00 31 00 32 … 00 36 00 00`, matching the C `pwd` input). MAC =
+`P12MacHash::hmac(pkcs12_kdf(pwd, salt, 3, iter, len, hash), init)`.
+
+The 3 SHA-256 `CAL_MACDATA` rows are not re-encoded here — SHA-256 MAC
+is already exercised end-to-end by the `PARSE_P12` SHA-256-MAC
+fixtures + the SHA-256 KDF KAT above; the module KAT focuses on the
+SHA-512 / 224 / 384 hashes not otherwise covered.
+
+### Verification
+
+- `cargo test -p hitls-pki --lib pkcs12`: **24 PASS** (22 prior + 2).
+  All KAT match the openHiTLS C reference vectors → I117 SHA-2 KDF/MAC
+  confirmed correct against an independent implementation.
+- `cargo fmt --all -- --check` clean; `RUSTFLAGS="-D warnings" cargo
+  clippy -p hitls-pki --all-features --all-targets` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-pki/src/pkcs12/mod.rs` | Modified | +2 KAT unit tests (`test_pkcs12_cal_kdf_kat_sha256`, `test_pkcs12_cal_macdata_kat`) in `mod tests`. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 318 family-list note. |
+| `PROMPT_LOG.md` | Modified | T113 接续 entry. |
+
+### Build Status (Post T113 — pkcs12 CAL KAT)
+
+Test-only (KAT unit tests). Retroactively supplies the SHA-2 KAT
+coverage flagged in the I117 (#144) review. Remaining pkcs12 families:
+`ENCODE_*` / `GEN_*` (encode/gen side), `PARSE_AUTHSAFE` /
+`PARSE_MACDATA` / `PARSE_SAFEBAGS_*` + the `pkcs12_util` bag families
+(need a Rust bag-level API check — likely API-surface skips).
