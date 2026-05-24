@@ -7186,3 +7186,25 @@ Verification: `cargo test -p hitls-pki --test migrated_x509_parse`
 production-code change.
 
 Recorded as DEV_LOG `Phase T113 (continued) — chain-structure family`.
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/verify` chain signature-binding family (2026-05-24)
+
+> 本session优先聚焦在测试用例的迁移上
+
+Next pure-migration family after chain-structure. 4 TCs from
+`pki/verify`: `VFY_CERT_CHAIN_BINDING_PASS/FAIL` +
+`VFY_CA_CHAIN_BINDING_PASS/FAIL` — RFC 5280 §6.1.3 (a)(3) signature
+binding. PASS cases verify clean; the `_tampered` fixtures
+(mutated signature) map C `VFY_CERT_SIGN_FAIL` to Rust
+`ChainVerifyFailed("signature verification failed")`.
+
+Coverage 1090 → **1094 emitted**; migrated suite 1094 PASS /
+0 ignored. Pure test migration, no production-code change (verifier
+already checks each link's signature).
+
+Verification: `cargo test -p hitls-pki --test migrated_x509_parse`
+1094 PASS / 0 ignored; `fmt` clean; `clippy -D warnings` clean.
+
+Recorded as DEV_LOG `Phase T113 (continued) — chain signature-binding family`.

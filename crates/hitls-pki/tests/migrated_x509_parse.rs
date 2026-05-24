@@ -48305,4 +48305,74 @@ fn tc_line4215_x509_vfy_chain_loop_depth_fail() {
     assert_eq!(err.to_string(), "max chain depth exceeded: 4");
 }
 
-// Generation summary: 1090 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
+// ============================================================
+// T113 (continued) — Phase C: `pki/verify` chain signature-binding
+// family (RFC 5280 §6.1.3 (a)(3): each certificate's signature must
+// verify under its issuer's public key). 4 TCs migrated from
+// openHiTLS C SDV `test_suite_sdv_x509_vfy.c`. The `_tampered`
+// fixtures have a mutated signature, so chain building fails with
+// `certificate chain verification failed: signature verification
+// failed` (C: `HITLS_X509_ERR_VFY_CERT_SIGN_FAIL`).
+// ============================================================
+
+/// SDV_X509_VFY_CERT_CHAIN_BINDING_PASS_TC001 leaf signature binds to issuer
+/// C source: SDV_X509_VFY_CERT_CHAIN_BINDING_PASS_TC001 (line 2935)
+#[test]
+fn tc_line2935_x509_vfy_cert_chain_binding_pass() {
+    let root = load_cert_fixture("cert/chain/certVer/certVer_root.pem");
+    let inter = load_cert_fixture("cert/chain/certVer/certVer_inter.pem");
+    let leaf = load_cert_fixture("cert/chain/certVer/certVer_leaf.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    assert!(verifier.verify_cert(&leaf, &[inter]).is_ok());
+}
+
+/// SDV_X509_VFY_CERT_CHAIN_BINDING_FAIL_TC001 tampered leaf signature is rejected
+/// C source: SDV_X509_VFY_CERT_CHAIN_BINDING_FAIL_TC001 (line 2993)
+#[test]
+fn tc_line2993_x509_vfy_cert_chain_binding_fail() {
+    let root = load_cert_fixture("cert/chain/certVer/certVer_root.pem");
+    let inter = load_cert_fixture("cert/chain/certVer/certVer_inter.pem");
+    let leaf_tampered = load_cert_fixture("cert/chain/certVer/certVer_leaf_tampered.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    let err = verifier.verify_cert(&leaf_tampered, &[inter]).unwrap_err();
+    assert!(
+        err.to_string()
+            .starts_with("certificate chain verification failed"),
+        "got {err}"
+    );
+}
+
+/// SDV_X509_VFY_CA_CHAIN_BINDING_PASS_TC001 intermediate-CA target binds to issuer
+/// C source: SDV_X509_VFY_CA_CHAIN_BINDING_PASS_TC001 (line 3051)
+#[test]
+fn tc_line3051_x509_vfy_ca_chain_binding_pass() {
+    let root = load_cert_fixture("cert/chain/certVer/certVer_root.pem");
+    let inter = load_cert_fixture("cert/chain/certVer/certVer_inter.pem");
+    let target_ca = load_cert_fixture("cert/chain/certVer/certVer_target_ca.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    assert!(verifier.verify_cert(&target_ca, &[inter]).is_ok());
+}
+
+/// SDV_X509_VFY_CA_CHAIN_BINDING_FAIL_TC001 tampered CA-target signature is rejected
+/// C source: SDV_X509_VFY_CA_CHAIN_BINDING_FAIL_TC001 (line 3109)
+#[test]
+fn tc_line3109_x509_vfy_ca_chain_binding_fail() {
+    let root = load_cert_fixture("cert/chain/certVer/certVer_root.pem");
+    let inter = load_cert_fixture("cert/chain/certVer/certVer_inter.pem");
+    let target_ca_tampered = load_cert_fixture("cert/chain/certVer/certVer_target_ca_tampered.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    let err = verifier
+        .verify_cert(&target_ca_tampered, &[inter])
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .starts_with("certificate chain verification failed"),
+        "got {err}"
+    );
+}
+
+// Generation summary: 1094 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
