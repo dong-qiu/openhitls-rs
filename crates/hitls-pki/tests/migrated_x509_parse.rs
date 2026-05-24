@@ -48874,13 +48874,10 @@ mod cms_signeddata_verify {
             .is_err());
     }
 
-    /// ML-DSA CMS SignedData verify (mldsa44). C verifies OK; hitls's
-    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
-    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
-    /// alg". Production-code gap (the crypto primitive exists); an Implementation
-    /// phase wiring the OID into the signer-info dispatch unignores this.
+    /// ML-DSA CMS SignedData verify (mldsa44). Pure ML-DSA (FIPS 204 §5.2) over the
+    /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
+    /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
-    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
     fn tc_cms_sd_verify_mldsa44_attached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa44/mldsa44_attached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa44/ca_cert.pem");
@@ -48890,13 +48887,10 @@ mod cms_signeddata_verify {
             .unwrap());
     }
 
-    /// ML-DSA CMS SignedData verify (mldsa44). C verifies OK; hitls's
-    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
-    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
-    /// alg". Production-code gap (the crypto primitive exists); an Implementation
-    /// phase wiring the OID into the signer-info dispatch unignores this.
+    /// ML-DSA CMS SignedData verify (mldsa44). Pure ML-DSA (FIPS 204 §5.2) over the
+    /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
+    /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
-    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
     fn tc_cms_sd_verify_mldsa44_detached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa44/mldsa44_detached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa44/ca_cert.pem");
@@ -48914,13 +48908,10 @@ mod cms_signeddata_verify {
             .is_err());
     }
 
-    /// ML-DSA CMS SignedData verify (mldsa65). C verifies OK; hitls's
-    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
-    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
-    /// alg". Production-code gap (the crypto primitive exists); an Implementation
-    /// phase wiring the OID into the signer-info dispatch unignores this.
+    /// ML-DSA CMS SignedData verify (mldsa65). Pure ML-DSA (FIPS 204 §5.2) over the
+    /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
+    /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
-    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
     fn tc_cms_sd_verify_mldsa65_attached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa65/mldsa65_attached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa65/ca_cert.pem");
@@ -48930,13 +48921,10 @@ mod cms_signeddata_verify {
             .unwrap());
     }
 
-    /// ML-DSA CMS SignedData verify (mldsa65). C verifies OK; hitls's
-    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
-    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
-    /// alg". Production-code gap (the crypto primitive exists); an Implementation
-    /// phase wiring the OID into the signer-info dispatch unignores this.
+    /// ML-DSA CMS SignedData verify (mldsa65). Pure ML-DSA (FIPS 204 §5.2) over the
+    /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
+    /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
-    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
     fn tc_cms_sd_verify_mldsa65_detached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa65/mldsa65_detached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa65/ca_cert.pem");
@@ -48954,13 +48942,10 @@ mod cms_signeddata_verify {
             .is_err());
     }
 
-    /// ML-DSA CMS SignedData verify (mldsa87). C verifies OK; hitls's
-    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
-    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
-    /// alg". Production-code gap (the crypto primitive exists); an Implementation
-    /// phase wiring the OID into the signer-info dispatch unignores this.
+    /// ML-DSA CMS SignedData verify (mldsa87). Pure ML-DSA (FIPS 204 §5.2) over the
+    /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
+    /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
-    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
     fn tc_cms_sd_verify_mldsa87_attached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa87/mldsa87_attached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa87/ca_cert.pem");
@@ -48970,13 +48955,10 @@ mod cms_signeddata_verify {
             .unwrap());
     }
 
-    /// ML-DSA CMS SignedData verify (mldsa87). C verifies OK; hitls's
-    /// CMS `verify_signer_info` has no ML-DSA signature-algorithm OID dispatch
-    /// (id-ml-dsa-44/65/87 = 2.16.840.1.101.3.4.3.17/18/19) → "unsupported sig
-    /// alg". Production-code gap (the crypto primitive exists); an Implementation
-    /// phase wiring the OID into the signer-info dispatch unignores this.
+    /// ML-DSA CMS SignedData verify (mldsa87). Pure ML-DSA (FIPS 204 §5.2) over the
+    /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
+    /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
-    #[ignore = "impl gap: CMS verify_signer_info lacks ML-DSA OID dispatch (id-ml-dsa-44/65/87)"]
     fn tc_cms_sd_verify_mldsa87_detached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa87/mldsa87_detached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa87/ca_cert.pem");
@@ -49334,4 +49316,4 @@ mod pkcs12_encode_p12 {
     }
 }
 
-// Generation summary: 1152 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12 unblocked by I117; +8 pki/pkcs12 ENCODE_P12 round-trip via Pkcs12::create).
+// Generation summary: 1152 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12 unblocked by I117; +8 pki/pkcs12 ENCODE_P12 round-trip via Pkcs12::create; 6 ML-DSA CMS-verify #[ignore] cleared by I118).
