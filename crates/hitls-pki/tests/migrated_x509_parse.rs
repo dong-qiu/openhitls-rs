@@ -48212,4 +48212,97 @@ fn tc_line2864_x509_vfy_ext_supported_pass() {
     );
 }
 
-// Generation summary: 1085 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
+// ============================================================
+// T113 (continued) — Phase C: `pki/verify` chain-structure family
+// (RFC 5280 §6.1 path-building bounds: depth limit, issuer-DN
+// continuity, trust-anchor presence, loop detection). 5 TCs
+// migrated from openHiTLS C SDV `test_suite_sdv_x509_vfy.c`.
+// ============================================================
+
+// Note on `max_depth` convention: the C side's `maxDepth` counts the
+// *total* certificates allowed in the path, while Rust's
+// `CertificateVerifier::set_max_depth` counts the *intermediate CA
+// links* followed during building (it errors when `chain.len()`
+// reaches the cap mid-build, before pushing the final root). So the C
+// `maxDepth = 3` that admits a 3-cert chain and rejects a 4-cert one
+// maps to Rust `set_max_depth(2)` — the same PASS/FAIL split over the
+// identical depth_suite fixtures, expressed in each side's units.
+
+/// SDV_X509_VFY_DEPTH_CHAINLEN_PASS_TC001 chain within depth limit
+/// C source: SDV_X509_VFY_DEPTH_CHAINLEN_PASS_TC001 (line 3729)
+#[test]
+fn tc_line3729_x509_vfy_depth_chainlen_pass() {
+    let root = load_cert_fixture("cert/chain/bcExt/depth_suite/depth_root.pem");
+    let inter1 = load_cert_fixture("cert/chain/bcExt/depth_suite/depth_inter1.pem");
+    let leaf = load_cert_fixture("cert/chain/bcExt/depth_suite/depth_leaf_lvl1.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    verifier.set_max_depth(2); // C maxDepth=3 (total certs) → Rust 2 (CA links)
+                               // chain [leaf, inter1, root]: 2 CA links ≤ 2 → OK
+    assert!(verifier.verify_cert(&leaf, &[inter1]).is_ok());
+}
+
+/// SDV_X509_VFY_DEPTH_CHAINLEN_FAIL_TC002 chain exceeds depth limit
+/// C source: SDV_X509_VFY_DEPTH_CHAINLEN_FAIL_TC002 (line 3866)
+#[test]
+fn tc_line3866_x509_vfy_depth_chainlen_fail() {
+    let root = load_cert_fixture("cert/chain/bcExt/depth_suite/depth_root.pem");
+    let inter1 = load_cert_fixture("cert/chain/bcExt/depth_suite/depth_inter1.pem");
+    let inter2 = load_cert_fixture("cert/chain/bcExt/depth_suite/depth_inter2.pem");
+    let leaf = load_cert_fixture("cert/chain/bcExt/depth_suite/depth_leaf_lvl2.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    verifier.set_max_depth(2); // C maxDepth=3 (total certs) → Rust 2 (CA links)
+                               // chain [leaf, inter1, inter2, root]: 3 CA links > 2 → MaxDepthExceeded
+    let err = verifier.verify_cert(&leaf, &[inter1, inter2]).unwrap_err();
+    assert_eq!(err.to_string(), "max chain depth exceeded: 2");
+}
+
+/// SDV_X509_VFY_CHAIN_SUBJECT_ISSUER_MISMATCH_FAIL_TC001 issuer DN does not match any candidate
+/// C source: SDV_X509_VFY_CHAIN_SUBJECT_ISSUER_MISMATCH_FAIL_TC001 (line 4116)
+#[test]
+fn tc_line4116_x509_vfy_chain_subject_issuer_mismatch_fail() {
+    let root = load_cert_fixture("cert/chain/certVer/certVer_name_mismatch_root.pem");
+    let wrong_inter = load_cert_fixture("cert/chain/certVer/certVer_name_mismatch_wrong_inter.pem");
+    let leaf = load_cert_fixture("cert/chain/certVer/certVer_name_mismatch_leaf.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    let err = verifier.verify_cert(&leaf, &[wrong_inter]).unwrap_err();
+    assert_eq!(err.to_string(), "issuer certificate not found");
+}
+
+/// SDV_X509_VFY_TRUST_ANCHOR_NOT_FOUND_FAIL_TC002 trusted anchor is not the chain's real root
+/// C source: SDV_X509_VFY_TRUST_ANCHOR_NOT_FOUND_FAIL_TC002 (line 4163)
+#[test]
+fn tc_line4163_x509_vfy_trust_anchor_not_found_fail() {
+    // Only a *fake* root is trusted; the chain's actual self-signed
+    // root is not in the trust store, so no trusted anchor is reached.
+    let fake_root = load_cert_fixture("cert/chain/certVer/certVer_wrong_anchor_fake_root.pem");
+    let real_root = load_cert_fixture("cert/chain/certVer/certVer_wrong_anchor_root.pem");
+    let inter = load_cert_fixture("cert/chain/certVer/certVer_wrong_anchor_inter.pem");
+    let leaf = load_cert_fixture("cert/chain/certVer/certVer_wrong_anchor_leaf.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(fake_root);
+    assert!(verifier.verify_cert(&leaf, &[inter, real_root]).is_err());
+}
+
+/// SDV_X509_VFY_CHAIN_LOOP_DEPTH_FAIL_TC001 cyclic issuer relationship hits the depth cap
+/// C source: SDV_X509_VFY_CHAIN_LOOP_DEPTH_FAIL_TC001 (line 4215)
+#[test]
+fn tc_line4215_x509_vfy_chain_loop_depth_fail() {
+    // certVer_cycle_a and certVer_cycle_b sign each other; following
+    // the issuer links never reaches a trusted self-signed root, so
+    // the chain grows until it trips the depth cap.
+    let loop_root = load_cert_fixture("cert/chain/certVer/certVer_cycle_a.pem");
+    let loop_issuer = load_cert_fixture("cert/chain/certVer/certVer_cycle_b.pem");
+    let loop_leaf = load_cert_fixture("cert/chain/certVer/certVer_cycle_a.pem");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(loop_root);
+    verifier.set_max_depth(4);
+    let err = verifier
+        .verify_cert(&loop_leaf, &[loop_issuer])
+        .unwrap_err();
+    assert_eq!(err.to_string(), "max chain depth exceeded: 4");
+}
+
+// Generation summary: 1090 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
