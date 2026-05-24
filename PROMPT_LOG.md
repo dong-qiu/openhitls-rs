@@ -7109,3 +7109,43 @@ TLS interop test (feature slot) or a C→Rust migration (test-enhanced
 slot).
 
 Recorded as DEV_LOG Phase I115.
+
+---
+
+## Phase I116 — X.509 Verifier Unrecognised-Critical-Extension Rejection (2026-05-24)
+
+> (continuation of verifier-hardening — close the VFY_EXT critical-ext gap)
+
+Second verifier-hardening I-phase, closing the last `#[ignore]`
+the T113 PKI migration left behind (`tc_line2811_x509_vfy_ext_
+unsupported_crit_fail`). RFC 5280 §6.1.4 (g): a critical extension
+the verifier cannot process MUST cause rejection. `validate_chain`
+never walked the extension list.
+
+Evaluated bounded-ness before committing (the user flagged the risk
+that existing chain-verify fixtures carrying critical
+basicConstraints/keyUsage could break). The recognised set is
+exactly what `validate_chain`/`find_issuer` consume — basicConstraints,
+keyUsage, extKeyUsage, nameConstraints, subjectAltName, SKI, AKI —
+so standard certs (which only mark BC/KU critical) are unaffected.
+certificatePolicies is deliberately excluded (no policy-tree
+processing → a critical policy ext must be rejected, which is
+exactly what the VFY_EXT fixture `inter_policy_critical` exercises).
+
+Implementation: per-cert loop in `validate_chain` rejecting any
+`critical` extension whose OID is outside the recognised set, via
+`PkiError::UnsupportedExtension` (message prefix `unsupported
+certificate extension:` matches the migrated test's assertion).
+New `is_recognised_critical_extension` helper.
+
+Result: `migrated_x509_parse` **1085 PASS / 0 ignored** — every
+migration ignore is now cleared. No regression: hitls-pki 454 lib +
+1085 migrated PASS, hitls-tls lib + all interop suites PASS (the TLS
+cert-verification path shares this verifier and no fixture cert
+carries an out-of-set critical extension), workspace `fmt` +
+`clippy -D warnings` clean.
+
+Ran in the bug-fix worktree (`fix/x509-critical-ext-rejection`) —
+same verifier-hardening category as I115.
+
+Recorded as DEV_LOG Phase I116.
