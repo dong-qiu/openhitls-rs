@@ -217,6 +217,24 @@ impl CertificateVerifier {
     /// Validate the built chain (time, BasicConstraints, KeyUsage, pathLen, revocation).
     fn validate_chain(&self, chain: &[Certificate]) -> Result<(), PkiError> {
         for (i, cert) in chain.iter().enumerate() {
+            // RFC 5280 §6.1.4 (g): a certificate-using system MUST reject
+            // the certificate if it encounters a critical extension it
+            // does not recognize or cannot process. We check every cert
+            // in the path against the set of extensions this verifier
+            // actually processes (`is_recognised_critical_extension`).
+            // A critical extension outside that set — e.g. a critical
+            // certificatePolicies (we do no policy processing) or any
+            // private/unknown OID — aborts the validation.
+            for ext in &cert.extensions {
+                if ext.critical && !is_recognised_critical_extension(&ext.oid) {
+                    return Err(PkiError::UnsupportedExtension(format!(
+                        "unrecognised critical extension at depth {} (OID {})",
+                        i,
+                        hitls_utils::hex::to_hex(&ext.oid)
+                    )));
+                }
+            }
+
             // Time validity check
             if let Some(time) = self.verification_time {
                 if time < cert.not_before {
@@ -349,6 +367,34 @@ impl CertificateVerifier {
 fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
     let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
     &bytes[start..]
+}
+
+/// Whether the verifier recognises (and is able to process) a
+/// certificate extension identified by `oid` when it is marked
+/// critical (RFC 5280 §6.1.4 (g) / §4.2). The set is exactly those
+/// extensions `validate_chain` / `find_issuer` actually consume:
+///
+/// * basicConstraints, keyUsage, extKeyUsage — chain / usage checks,
+/// * nameConstraints — subtree validation,
+/// * subjectAltName — identity (hostname / name-constraint inputs),
+/// * subjectKeyIdentifier, authorityKeyIdentifier — issuer binding.
+///
+/// Notably absent: certificatePolicies (we perform no policy-tree
+/// processing, so a *critical* policy extension MUST be rejected),
+/// and any private / unknown OID. Non-critical extensions are never
+/// gated by this — only the `critical` ones reach here.
+fn is_recognised_critical_extension(oid: &[u8]) -> bool {
+    [
+        known::basic_constraints(),
+        known::key_usage(),
+        known::ext_key_usage(),
+        known::name_constraints(),
+        known::subject_alt_name(),
+        known::subject_key_identifier(),
+        known::authority_key_identifier(),
+    ]
+    .iter()
+    .any(|known_oid| known_oid.to_der_value() == oid)
 }
 
 /// Validate a certificate against NameConstraints (RFC 5280 §4.2.1.10).

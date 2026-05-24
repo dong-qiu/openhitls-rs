@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I115 (115 phases)
+- Implementation: I1–I116 (116 phases)
 - Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -350,7 +350,8 @@ Category summary:
 | 344 | I113 | Impl | TLS 1.2 RFC 5746 server-side `renegotiation_info` conditional emit — RFC 5746 §3.6: the server MUST include the empty `renegotiation_info` extension in the ServerHello of an initial handshake **only if** the ClientHello carried either the extension itself (§3.4) or the `TLS_EMPTY_RENEGOTIATION_INFO_SCSV` signaling cipher suite (§3.3). Previously hitls's TLS 1.2 server **always** echoed the extension, which OpenSSL / NSS / Go / tlsfuzzer's `_process_extensions` flag as "unadvertised extension". New `client_signalled_secure_renego` state on `Tls12ServerHandshake` set when the CH carries the extension or the SCSV (`0x00FF` added as `CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV` in `lib.rs`); both `process_client_hello` + `process_client_hello_resumable` ServerHello-build sites gate the `build_renegotiation_info_initial()` push on the new flag. **Net XFAIL reduction = 1** (1 unique conversation `sanity` reported by tlsfuzzer as 2 entries when run before+after): `test-cve-2016-6309` 0 PASS / 3 XFAIL → **2 PASS / 2 XFAIL** (xfail file shrunk from 3 lines to 2). The 2 remaining XFAILs (`Large ClientHello padding` + `Large incorrect ClientHello length`) are a separate cross-record CH reassembly gap, deferred to a follow-up PR (mirrors the work T104 did for TLS 1.3 server-side, applied to `connection12*`). No regression on 9 adjacent TLS 1.2 + 3 TLS 1.3 scripts; `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
 | 346 | I114 | Impl | TLS 1.2 server-side ClientHello cross-record reassembly — RFC 5246 §6.2.1: a single handshake message MAY span multiple TLSPlaintext records. Pre-I114 the TLS 1.2 server's first read step expected the entire ClientHello to fit in one record (`tls12_read_handshake_msg_body!` reads one record, parses one msg). tlsfuzzer's `test-cve-2016-6309.py` `Large ClientHello padding` fragments a CH carrying a 21,798-byte `client_hello_padding` extension across multiple records to exercise the pre-CVE OpenSSL crash path; we previously rejected the over-large total at parse time with `record_overflow`. New `tls12_read_client_hello_body!` macro (mirror of T104's TLS 1.3 server-side read loop) does cross-record buffer-and-drain: keeps reading Handshake records and concatenating fragments until the buffered prefix carries a complete handshake message (4-byte header + body_len body); rejects non-Handshake interleave with `unexpected_message`. Both sync (`connection12/server.rs`) and async (`connection12_async.rs`) `do_handshake` Step 1 now use the macro. **Net XFAIL reduction = 2**: `test-cve-2016-6309` 2 PASS / 2 XFAIL → **4 PASS / 0 XFAIL** (xfail file removed; closes both `Large ClientHello padding` + `Large incorrect ClientHello length`). No regression on 9 adjacent TLS 1.2 + 7 TLS 1.3 scripts; `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
 | 348 | I115 | Impl | X.509 verifier AKI/SKI issuer-binding hardening (RFC 5280 §4.2.1.1) — `CertificateVerifier::find_issuer` previously used a two-pass "AKI/SKI-first, then DN-only fallback" scheme whose fallback accepted **any** DN-matching candidate even when the end-entity's AKI keyIdentifier was present and mismatched — letting a wrong-key issuer through (chain-confusion risk when two CAs share a Subject DN). Rewrote as a single-pass per-candidate filter: a DN-matching candidate is rejected when (a) the leaf's AKI.keyIdentifier is present AND the candidate publishes a differing SKI, or (b) the leaf's AKI.authorityCertSerialNumber is present AND differs from the candidate's serial (leading-zero normalised). AKI parser (`extensions.rs` + `crl.rs`) extended to decode `authorityCertSerialNumber [2]` (skipping `authorityCertIssuer [1]`); `AuthorityKeyIdentifier` struct gains the field. Closes the 2 verifier-hardening `#[ignore]`s from T113: `tc_line229_x509_vfy_aki_ski_keyid_fail` + `tc_line238_x509_vfy_aki_ski_issuer_serial_fail` (migrated_x509_parse now **1084 PASS / 1 ignored** — the 1 ignore is the rebased-in `VFY_EXT` critical-ext gap, separate follow-up); updated the lax `test_aki_mismatch_falls_to_dn` unit test → `test_aki_keyid_mismatch_rejected` asserting the correct reject. hitls-pki 453 lib + 1084 migrated tests PASS; workspace `fmt` + `clippy -D warnings` clean. No regression (the AKI/SKI-match path already existed for the positive cases; only the buggy fallback was removed) | 2026-05-24 |
-| 349 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
+| 350 | I116 | Impl | X.509 verifier unrecognised-critical-extension rejection (RFC 5280 §6.1.4 (g) / §4.2) — `validate_chain` never walked each path cert's extension list, so a certificate carrying a **critical** extension the verifier does not process (e.g. critical `certificatePolicies` — we do no policy-tree processing — or any private/unknown OID) was silently accepted. Added a per-cert loop that rejects any `critical` extension whose OID is outside the recognised set (`is_recognised_critical_extension`: basicConstraints, keyUsage, extKeyUsage, nameConstraints, subjectAltName, SKI, AKI — exactly the extensions `validate_chain`/`find_issuer` consume) with `PkiError::UnsupportedExtension` (message `unsupported certificate extension: …`). Closes the last verifier-hardening `#[ignore]` from T113: `tc_line2811_x509_vfy_ext_unsupported_crit_fail` → **migrated_x509_parse 1085 PASS / 0 ignored** (all migration ignores cleared). No regression — hitls-pki 454 lib + 1085 migrated PASS, hitls-tls lib + all interop suites PASS (TLS handshake cert verification shares this verifier; no real-world cert in the fixtures carries an out-of-set critical extension), workspace `fmt` + `clippy -D warnings` clean | 2026-05-24 |
+| 351 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -21304,3 +21305,98 @@ T113-noted verifier-strictness gaps — missing-CRL handling,
 critical-extension rejection, CRL-issuer keyUsage, device-only
 `CRL_DEV` mode, SM2 GM/T user-id, ECDSA P-192 — remain as separate
 follow-up candidates.)
+
+---
+
+## Phase I116 — X.509 Verifier Unrecognised-Critical-Extension Rejection (2026-05-24)
+
+### Summary
+
+Closes the last verifier-hardening `#[ignore]` from the T113 PKI
+test migration (`tc_line2811_x509_vfy_ext_unsupported_crit_fail`).
+RFC 5280 §6.1.4 (g): "If [a] certificate ... contains a critical
+extension that the application cannot process, then reject the
+certificate." hitls's `validate_chain` never inspected the
+extension list for this, so a critical extension outside the set
+the verifier actually processes was silently accepted.
+
+### What landed
+
+`validate_chain` (`crates/hitls-pki/src/x509/verify.rs`) gains a
+per-cert loop (run for every cert in the built path) that rejects
+any extension with the `critical` flag set whose OID is not in the
+recognised set:
+
+```rust
+for ext in &cert.extensions {
+    if ext.critical && !is_recognised_critical_extension(&ext.oid) {
+        return Err(PkiError::UnsupportedExtension(...));
+    }
+}
+```
+
+`is_recognised_critical_extension` is exactly the set of extensions
+`validate_chain` / `find_issuer` consume:
+
+| OID | Why recognised |
+|---|---|
+| basicConstraints | CA / pathLen checks |
+| keyUsage | keyCertSign check |
+| extKeyUsage | EKU enforcement |
+| nameConstraints | subtree validation |
+| subjectAltName | identity / name-constraint inputs |
+| subjectKeyIdentifier | issuer binding (`find_issuer`) |
+| authorityKeyIdentifier | issuer binding (`find_issuer`) |
+
+Deliberately **absent**: `certificatePolicies` (no policy-tree
+processing is implemented, so a *critical* policy extension MUST be
+rejected per §6.1.4 (g)), `authorityInfoAccess` / `crlDistributionPoints`
+(RFC requires these be non-critical anyway), and any private /
+unknown OID. Non-critical extensions are never gated — only
+`critical` ones reach the check.
+
+### Why this is bounded (no regression)
+
+The risk was that an existing chain-verify fixture might carry a
+critical extension outside the recognised set, which the new check
+would now reject. Empirically none do: the full hitls-pki suite
+(454 lib + 1085 migrated), the hitls-tls lib suite, and every
+interop suite (which drive real TLS handshakes whose certificate
+verification shares this verifier) all pass unchanged. Standard
+OpenSSL-generated certs mark only basicConstraints / keyUsage
+critical — both recognised.
+
+### Verification
+
+- `cargo test -p hitls-pki --test migrated_x509_parse`:
+  **1085 PASS / 0 FAIL / 0 ignored** (the migration's last ignore
+  is gone — `tc_line2759` non-crit-ignore + `tc_line2864`
+  recognised-crit-pass + `tc_line2811` unknown-crit-reject all
+  PASS).
+- `cargo test -p hitls-pki --all-features`: 454 lib + 1085 migrated
+  + 1 doctest PASS.
+- `cargo test -p hitls-tls --release --lib` + all interop suites:
+  PASS (no regression on the TLS cert-verification path).
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-pki/src/x509/verify.rs` | Modified | `validate_chain` per-cert critical-extension gate + `is_recognised_critical_extension` helper. |
+| `crates/hitls-pki/tests/migrated_x509_parse.rs` | Modified | `tc_line2811` un-ignored (now PASS); doc comment updated to reference I116. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 350 + Implementation summary I1–I115 → I1–I116. |
+| `PROMPT_LOG.md` | Modified | I116 prompt + result entry. |
+
+### Build Status (Post I116)
+
+hitls-pki 454 lib + 1085 migrated tests PASS (0 ignored — all
+migration `#[ignore]`s now cleared); hitls-tls + interop PASS;
+workspace `fmt` + `clippy -D warnings` clean. With I115 + I116 the
+two AKI/SKI issuer-binding gaps **and** the unrecognised-critical-
+extension gap from the T113 migration are closed. Remaining
+T113-noted verifier-strictness items (missing-CRL handling,
+CRL-issuer keyUsage, device-only `CRL_DEV` mode, SM2 GM/T user-id,
+ECDSA P-192) are independent follow-up candidates.

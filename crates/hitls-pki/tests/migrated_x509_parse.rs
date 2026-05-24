@@ -48164,19 +48164,14 @@ fn tc_line2759_x509_vfy_ext_unsupported_noncrit_pass() {
 /// SDV_X509_VFY_EXT_UNSUPPORTED_CRIT_EXT_FAIL_TC001 unknown critical ext must be rejected
 /// C source: SDV_X509_VFY_EXT_UNSUPPORTED_CRIT_EXT_FAIL_TC001 (line 2811)
 ///
-/// Rust verifier gap: `validate_chain` (crates/hitls-pki/src/x509/verify.rs)
-/// never walks each cert's extension list to reject an *unrecognised
-/// critical* extension, so the RFC 5280 §4.2 MUST-reject rule
-/// (`HITLS_X509_ERR_PROCESS_CRITICALEXT` on the C side) is silently
-/// relaxed — the chain verifies. The `Extension { critical }` flag is
-/// parsed and available; only the enforcement loop is missing. Listed
-/// as a verifier-hardening I-phase candidate (same bucket as the
-/// AKI/SKI keyId gaps + the missing-CRL / CRL-issuer-keyUsage gaps
-/// already recorded in DEV_LOG Phase T113). When closed, this test
-/// unignores and asserts the `unsupported certificate extension`
-/// rejection below.
+/// Closed by I116: `validate_chain` now walks each path cert's
+/// extension list and rejects any *critical* extension whose OID is
+/// not in the verifier's recognised set (RFC 5280 §6.1.4 (g)) —
+/// `HITLS_X509_ERR_PROCESS_CRITICALEXT` on the C side. Here the
+/// intermediate carries a critical certificatePolicies (we do no
+/// policy processing) and the leaf a critical private-OID extension,
+/// both outside the recognised set.
 #[test]
-#[ignore = "verifier-hardening gap: validate_chain does not reject unrecognised critical extensions (RFC 5280 §4.2)"]
 fn tc_line2811_x509_vfy_ext_unsupported_crit_fail() {
     let root = load_cert_fixture("cert/chain/ext/root_ext.der");
     let inter = load_cert_fixture("cert/chain/ext/inter_policy_critical.der");
