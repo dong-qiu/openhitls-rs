@@ -48995,4 +48995,100 @@ mod cms_signeddata_verify {
     }
 }
 
-// Generation summary: 1130 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify: 23 active + 6 ML-DSA #[ignore]).
+/// CMS SignedData sign-side family — SDV_CMS_GEN_ATTACH_SIGNEDDATA_TC001
+/// C source: pki/cms/test_suite_sdv_cms_sign.c (line 928).
+///
+/// Generate a CMS SignedData (sign), re-parse the produced DER, and verify it
+/// against the CA cert. Fixtures mirror `testdata/cert/asn1/cms/signeddata/`.
+///
+/// Only the RSA-PKCS#1 signer maps faithfully — `CmsMessage::sign` is a minimal
+/// API and cannot reproduce the rest of the C GEN matrix:
+/// - **no-signed-attrs** (`hasSignedAttrs=0`): `sign` always emits signedAttrs.
+/// - **ECDSA** (ecc-p256): the fixture key is SEC1 (`EC PRIVATE KEY`), but the
+///   ECDSA sign path's `parse_ec_private_key` expects a PKCS#8 wrapper.
+/// - **RSA-PSS**: `sign` derives the signature scheme from the signer cert's
+///   `signature_algorithm` (PKCS#1 here) and has no PSS sign path, so it cannot
+///   produce a PSS signature — migrating it would silently test PKCS#1 instead.
+/// - **ML-DSA**: no ML-DSA sign path (and no ML-DSA CMS verify dispatch — see
+///   the `#[ignore]`d ML-DSA verify cases).
+/// - **multi-signer / signerinfo-version-3**: `sign` is single-signer, version 1.
+/// - **GEN_*_INVALID_HASH** negatives: `sign` computes the digest internally,
+///   so there is no hook to inject a mismatched hash.
+#[cfg(feature = "cms")]
+mod cms_signeddata_gen {
+    use super::Certificate;
+    use hitls_pki::cms::{CmsDigestAlg, CmsMessage};
+
+    fn base(rel: &str) -> String {
+        format!(
+            "{}/../../tests/vectors/c-asn1-fixtures/cert/asn1/cms/signeddata/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            rel
+        )
+    }
+
+    fn raw(rel: &str) -> Vec<u8> {
+        std::fs::read(base(rel)).unwrap()
+    }
+
+    fn cert_der(rel: &str) -> Vec<u8> {
+        let pem = String::from_utf8(raw(rel)).unwrap();
+        Certificate::from_pem(&pem).unwrap().to_der()
+    }
+
+    fn key_der(rel: &str) -> Vec<u8> {
+        let pem = String::from_utf8(raw(rel)).unwrap();
+        hitls_utils::pem::parse(&pem).unwrap()[0].data.clone()
+    }
+
+    fn ca(rel: &str) -> Certificate {
+        let pem = String::from_utf8(raw(rel)).unwrap();
+        Certificate::from_pem(&pem).unwrap()
+    }
+
+    /// GEN_ATTACH RSA-PKCS#1 with signed attrs: sign attached, re-parse, verify.
+    #[test]
+    fn tc_cms_gen_attach_rsa_pkcs1_signed_attrs() {
+        let msg = raw("msg.txt");
+        let cms = CmsMessage::sign(
+            &msg,
+            &cert_der("rsa-pkcsv5/cert.pem"),
+            &key_der("rsa-pkcsv5/key.pem"),
+            CmsDigestAlg::Sha256,
+        )
+        .unwrap();
+        let parsed = CmsMessage::from_der(&cms.raw).unwrap();
+        assert!(parsed
+            .verify_signatures(None, &[ca("ca_cert.pem")])
+            .unwrap());
+    }
+
+    /// Single-signer detached RSA-PKCS#1 (adapted from the detached-signing path
+    /// the C GEN_DETACHED_*_MULTI_SIGNER family exercises): sign detached,
+    /// re-parse, verify against the external message; reject a mutated message
+    /// and a missing one.
+    #[test]
+    fn tc_cms_gen_detached_rsa_pkcs1_signed_attrs() {
+        let msg = raw("msg.txt");
+        let cms = CmsMessage::sign_detached(
+            &msg,
+            &cert_der("rsa-pkcsv5/cert.pem"),
+            &key_der("rsa-pkcsv5/key.pem"),
+            CmsDigestAlg::Sha256,
+        )
+        .unwrap();
+        let parsed = CmsMessage::from_der(&cms.raw).unwrap();
+        let ca = ca("ca_cert.pem");
+        assert!(parsed
+            .verify_signatures(Some(&msg), std::slice::from_ref(&ca))
+            .unwrap());
+        assert!(parsed
+            .verify_signatures(Some(&msg[1..]), std::slice::from_ref(&ca))
+            .is_err());
+        assert!(parsed
+            .verify_signatures(None, std::slice::from_ref(&ca))
+            .is_err());
+    }
+}
+
+// Generation summary: 1132 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify: 23 active + 6 ML-DSA #[ignore]; +2 pki/cms SignedData sign-side RSA-PKCS1 attach+detach).
