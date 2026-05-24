@@ -358,6 +358,7 @@ Category summary:
 | 355 | I119 | Impl | TLS 1.3 RFC 8446 §6.2 close-on-received-alert — the server's in-handshake read loops (awaiting client Certificate / CertificateVerify / Finished in `tls13_server_do_handshake_body!`, `crates/hitls-tls/src/macros.rs`) returned `HandshakeFailed("…unexpected_message")` when the client aborted by sending an Alert record (encrypted **or** plaintext) instead of the expected handshake message — so the server replied with its own `unexpected_message` alert. RFC 8446 §6.2 requires closing the connection WITHOUT a responding alert on receipt of a (fatal) alert. Each of the three loops now returns `TlsError::AlertReceived` on `ContentType::Alert`, which `tls_error_to_alert` already maps to `CloseNotify` and `send_fatal_alert_for_error_body!` already suppresses → silent close. The record layer already passes plaintext Alert records through during the encrypted phase, so both the encrypted- and plaintext-alert variants are covered. Closes `test-tls13-unencrypted-alert.py` (2/2-fail → **4/4 PASS**) and curates it into CI (suite 59 → 60). No regression: 1108 `hitls-tls` lib tests + adjacent tlsfuzzer scripts (conversation/finished/ccs/connection-abort/empty-alert/zero-content-type/keyupdate) all PASS; `fmt` + `clippy -D warnings` clean | 2026-05-25 |
 | 356 | I118 | Impl | CMS ML-DSA signer-info verification (FIPS 204 + NIST OIDs) — `pki/cms` SignerInfo verification rejected every ML-DSA signature with "unsupported sig alg" / failed verify, blocking 6 T113 `pki/cms` migration cases. Two defects fixed: **(1) OID** — `known::ml_dsa_44/65/87()` carried the obsolete IETF draft Dilithium arc (`1.3.6.1.4.1.2.267.12.*`) despite the "FIPS 204" doc-comment; retargeted to the NIST CSOR ids `2.16.840.1.101.3.4.3.{17,18,19}` that openHiTLS C (and the wider ecosystem) actually emit. **(2) Signed-message convention** — `verify_signature_with_cert` fed ML-DSA the pre-computed *digest* (correct for RSA/ECDSA hash-then-sign) instead of the message it hashes internally; reworked `verify_signer_info` to also carry the raw `signed_message` (the DER SET re-encoding of signedAttrs, or the content) and the ML-DSA branch now verifies over it. **(3)** CMS uses *pure* ML-DSA (FIPS 204 §5.2) with an empty context, so the bytes fed to the internal `mldsa_verify` (μ = H(tr‖M)) are prefixed with the `0x00 ‖ len(ctx)=0x00` domain separator. Validated against openHiTLS C `cms/signeddata/mldsa/{44,65,87}` fixtures: attached + detached now verify `Ok(true)`, wrong-message rejected. No regression — hitls-pki 457 lib + 1142 migrated + 1 doc PASS, hitls-utils 78 PASS (only `cms/mod.rs` consumes the ml_dsa OIDs), hitls-tls 1108 lib PASS, `fmt` + `clippy -D warnings` (incl. `--no-default-features` + `--all-features --all-targets`) clean | 2026-05-25 |
 | 357 | T134 | Test | tlsfuzzer small-XFAIL curation batch — triaged the 6 "mostly-PASS" backlog candidates from the T133 scan and curated **3** into CI with documented per-entry XFAIL lists (each failing conversation classified; none hiding a real bug): `test-signature-algorithms` (275/1 — SHA-1-only `signature_algorithms` refused, deprecated/won't-fix), `test-x25519` (20/4 — 2 ECDHE→DHE cross-key-exchange fallback per the I105 gap + 2 malformed-keyshare `decode_error` strictness), `test-point-extension` (7/2 — malformed/absent `ec_point_formats` leniency). +302 PASS, 7 XFAIL, 0 FAIL; all `run.sh` rc=0. The other 3 candidates were triaged **out** (deliberately NOT XFAIL'd): `test-invalid-cipher-suites` → sanity fails on both ports without a forced cipher (belongs to the cipher-args-plumbing bucket); `test-bleichenbacher-workaround` → N/A (sanity needs static-RSA `kRSA` key exchange, which we intentionally do not offer — Bleichenbacher/ROBOT-safe); `test-sig-algs` → **real TLS 1.2 gap surfaced** (`rsa_pss_rsae_sha384`-only → `internal_error`, `sha512`-only → `handshake_failure`: the TLS 1.2 server cannot sign CertificateVerify/ServerKeyExchange under RSA-PSS-rsae SHA-384/512 — the TLS-1.2 analogue of the TLS 1.3 RSA-PSS-SHA-384/512 fix), recorded as an I-phase candidate rather than masked behind an XFAIL. Curated suite 60 → 63. Test/CI-config only — no production change | 2026-05-25 |
+| 358 | I120 | Impl | TLS 1.2 server RSA-PSS-rsae SHA-384/512 ServerKeyExchange signing — the TLS 1.2 SKE signing path (`sign_ske_data` in `crates/hitls-tls/src/handshake/server12.rs`) was SHA-256/384-limited and, for PSS, routed through the SHA-256-only `RsaPrivateKey::sign(RsaPadding::Pss, …)` (which asserts a 32-byte digest). So a client offering only `rsa_pss_rsae_sha384` drew `internal_error` (selected, but signing aborted on the 48-byte digest) and `rsa_pss_rsae_sha512` drew `handshake_failure` (the scheme wasn't even in `select_signature_scheme_tls12`'s RSA candidate list). Surfaced by tlsfuzzer `test-sig-algs.py` (T134 triage). Fix mirrors the TLS 1.3 `sign_certificate_verify` path: added `RSA_PSS_RSAE_SHA512` + `RSA_PKCS1_SHA512` to the RSA candidate list, and rewrote the RSA branch to be hash-aware — PKCS#1 v1.5 via `sign(Pkcs1v15Sign, …)` (hash-agnostic) and RSA-PSS via the hash-aware `sign_pss(digest, RsaHashAlg::{Sha256,Sha384,Sha512})` (the crypto primitive already supported 384/512 since T95). Closes `test-sig-algs.py` (13/5 → **15/3 PASS**; the 3 residual `rsa_pss_pss_*-only` XFAILs are a cert-type mismatch — they need the `id-RSASSA-PSS` cert on :4449, not this rsae cert) and curates it into CI (suite 63 → 64). No regression: `hitls-tls` lib 1108/0; adjacent TLS 1.2 signing scripts (signature-algorithms 275/1, x25519 20/4, ecdhe-rsa-key-exchange 3/0, ffdhe-negotiation 38/3) unchanged; `fmt` + `clippy -D warnings` clean | 2026-05-25 |
 
 ---
 
@@ -22491,3 +22492,65 @@ Curated tlsfuzzer suite **63 scripts**. No production code changed.
 Surfaced one real I-phase candidate (TLS 1.2 RSA-PSS-rsae SHA-384/512
 signing) — the rest of the bucket is either curated or correctly
 deferred.
+
+---
+
+## Phase I120 — TLS 1.2 Server RSA-PSS-rsae SHA-384/512 SKE Signing (2026-05-25)
+
+### Summary
+
+Closes the real gap T134 surfaced: the TLS 1.2 server could not sign
+its ServerKeyExchange under `rsa_pss_rsae_sha384` (→ `internal_error`)
+or `rsa_pss_rsae_sha512` (→ `handshake_failure`), even though its
+RSA cert can produce those signatures. The TLS-1.2 analogue of the
+TLS-1.3 fix that generalised RSA-PSS to SHA-384/512.
+
+### Root cause + fix (`crates/hitls-tls/src/handshake/server12.rs`)
+
+Two defects in the SKE signing path:
+
+1. **`select_signature_scheme_tls12`** RSA candidate list omitted
+   `RSA_PSS_RSAE_SHA512` / `RSA_PKCS1_SHA512`, so an `sha512`-only
+   client got `handshake_failure` ("no common signature scheme").
+2. **`sign_ske_data`** computed the digest for SHA-256/384 only and,
+   for PSS, called the SHA-256-only `RsaPrivateKey::sign(RsaPadding::
+   Pss, …)` (which asserts a 32-byte digest) — so an `sha384`-only
+   client selected the scheme but the 48-byte digest aborted signing
+   with `CryptoError` → `internal_error`.
+
+Fix mirrors the TLS 1.3 `sign_certificate_verify` path: added the two
+SHA-512 schemes to the candidate list and rewrote the RSA branch to be
+hash-aware — PKCS#1 v1.5 via `sign(Pkcs1v15Sign, digest)` (hash-
+agnostic), RSA-PSS via the hash-aware `sign_pss(digest,
+RsaHashAlg::{Sha256,Sha384,Sha512})`. The crypto primitive already
+supported 384/512 (`sign_pss` / `pss_sign_pad_alg`, added in T95), so
+this is purely a TLS 1.2 caller fix — no crypto change.
+
+### Verification
+
+- `test-sig-algs.py`: **13/5 → 15/3 PASS** (the two `rsa_pss_rsae_
+  sha384/512`-only conversations now pass); the 3 residual XFAILs are
+  `rsa_pss_pss_*-only` cert-type mismatches (need the `id-RSASSA-PSS`
+  cert on :4449). Curated into CI (suite 63 → 64).
+- No regression: `cargo test -p hitls-tls --lib` **1108/0**; adjacent
+  TLS 1.2 signing scripts unchanged — `signature-algorithms` 275/1,
+  `x25519` 20/4, `ecdhe-rsa-key-exchange` 3/0, `ffdhe-negotiation`
+  38/3.
+- `cargo fmt --all -- --check` + `RUSTFLAGS="-D warnings" cargo clippy
+  -p hitls-tls --all-features` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server12.rs` | Modified | RSA candidate list +SHA-512; `sign_ske_data` RSA branch rewritten hash-aware (PSS → `sign_pss`). |
+| `.github/workflows/tlsfuzzer.yml` | Modified | Curate `test-sig-algs.py` (15/3). |
+| `tests/tlsfuzzer/xfail/test-sig-algs.txt` | Added | 3-entry XFAIL (`rsa_pss_pss_*` cert mismatch). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 358 (I120). |
+| `PROMPT_LOG.md` | Modified | I120 prompt + result entry. |
+
+### Build Status (Post I120)
+
+`hitls-tls` lib 1108/0; curated tlsfuzzer suite **64 scripts**. TLS 1.2
+RSA-PSS-rsae signing now covers SHA-256/384/512 (parity with TLS 1.3);
+the `test-sig-algs` real gap from the T134 backlog is closed.

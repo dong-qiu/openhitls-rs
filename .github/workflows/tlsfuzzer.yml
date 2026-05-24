@@ -544,6 +544,11 @@ jobs:
             test-signature-algorithms.py
             test-x25519.py
             test-point-extension.py
+            # I120 addition (1): TLS 1.2 RSA-PSS-rsae SHA-384/512 SKE
+            # signing. 15/3 — the 3 XFAILs are `rsa_pss_pss_*-only`
+            # (cert-type mismatch: needs the PSS-OID cert on :4449,
+            # not this rsae cert). See xfail/test-sig-algs.txt.
+            test-sig-algs.py
           )
           # Phase T93 — cert-matrix scripts. Each cert type gets its
           # own XFAIL list under `tests/tlsfuzzer/xfail-<key-type>/`

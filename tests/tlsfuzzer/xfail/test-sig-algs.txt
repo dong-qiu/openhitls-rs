@@ -1,0 +1,19 @@
+# I120 — `test-sig-algs.py` (TLS 1.2) XFAIL (3 entries).
+#
+# 15 PASS / 3 XFAIL. I120 fixed the two `rsa_pss_rsae_sha384/512`-only
+# fails (the TLS 1.2 server can now sign ServerKeyExchange under
+# RSA-PSS-rsae with SHA-384/512); the 3 residual XFAILs are a cert-type
+# mismatch, not a code gap:
+#
+# `rsa_pss_pss_sha256/384/512 only`: the client constrains
+# signature_algorithms to the `rsa_pss_pss_*` schemes, which require a
+# certificate carrying the `id-RSASSA-PSS` SPKI OID (RFC 5756). This
+# `s-server` instance serves a normal `rsaEncryption` (rsae) RSA cert,
+# which cannot produce `rsa_pss_pss_*` signatures, so the server
+# correctly fails with `handshake_failure` (no usable common scheme).
+# The PSS-OID server instance (CI port 4449, Phase T107) is the one
+# that satisfies `rsa_pss_pss_*`. Won't fix on the rsae cert.
+
+rsa_pss_pss_sha256 only
+rsa_pss_pss_sha384 only
+rsa_pss_pss_sha512 only

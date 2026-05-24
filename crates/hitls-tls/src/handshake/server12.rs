@@ -1912,6 +1912,8 @@ pub(crate) fn select_signature_scheme_tls12(
             SignatureScheme::RSA_PKCS1_SHA256,
             SignatureScheme::RSA_PSS_RSAE_SHA384,
             SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::RSA_PSS_RSAE_SHA512,
+            SignatureScheme::RSA_PKCS1_SHA512,
         ],
         ServerPrivateKey::Dsa { .. } => &[SignatureScheme::DSA_SHA256, SignatureScheme::DSA_SHA384],
         #[cfg(feature = "tlcp")]
@@ -1997,29 +1999,42 @@ pub(crate) fn sign_ske_data(
             kp.sign(&digest).map_err(TlsError::CryptoError)
         }
         ServerPrivateKey::Rsa { n, d, e, p, q } => {
-            let digest = match scheme {
-                // RSA_PKCS1_SHA1: RFC 5246 §7.4.1.4.1 default when the
-                // client omits signature_algorithms (legacy path only).
-                SignatureScheme::RSA_PKCS1_SHA1 => compute_sha1(signed_data)?,
-                SignatureScheme::RSA_PKCS1_SHA256 | SignatureScheme::RSA_PSS_RSAE_SHA256 => {
-                    compute_sha256(signed_data)?
-                }
-                SignatureScheme::RSA_PKCS1_SHA384 | SignatureScheme::RSA_PSS_RSAE_SHA384 => {
-                    compute_sha384(signed_data)?
-                }
-                _ => return Err(TlsError::HandshakeFailed("RSA scheme mismatch".into())),
-            };
-            let padding = match scheme {
-                SignatureScheme::RSA_PKCS1_SHA1
-                | SignatureScheme::RSA_PKCS1_SHA256
-                | SignatureScheme::RSA_PKCS1_SHA384 => hitls_crypto::rsa::RsaPadding::Pkcs1v15Sign,
-                _ => hitls_crypto::rsa::RsaPadding::Pss,
-            };
             let rsa_key = hitls_crypto::rsa::RsaPrivateKey::new(n, d, e, p, q)
                 .map_err(TlsError::CryptoError)?;
-            rsa_key
-                .sign(padding, &digest)
-                .map_err(TlsError::CryptoError)
+            use hitls_crypto::rsa::{RsaHashAlg, RsaPadding};
+            match scheme {
+                // RSA_PKCS1_SHA1: RFC 5246 §7.4.1.4.1 default when the
+                // client omits signature_algorithms (legacy path only).
+                // PKCS#1 v1.5 is hash-agnostic at the signing call (the
+                // DigestInfo prefix is applied internally).
+                SignatureScheme::RSA_PKCS1_SHA1 => rsa_key
+                    .sign(RsaPadding::Pkcs1v15Sign, &compute_sha1(signed_data)?)
+                    .map_err(TlsError::CryptoError),
+                SignatureScheme::RSA_PKCS1_SHA256 => rsa_key
+                    .sign(RsaPadding::Pkcs1v15Sign, &compute_sha256(signed_data)?)
+                    .map_err(TlsError::CryptoError),
+                SignatureScheme::RSA_PKCS1_SHA384 => rsa_key
+                    .sign(RsaPadding::Pkcs1v15Sign, &compute_sha384(signed_data)?)
+                    .map_err(TlsError::CryptoError),
+                SignatureScheme::RSA_PKCS1_SHA512 => rsa_key
+                    .sign(RsaPadding::Pkcs1v15Sign, &compute_sha512(signed_data)?)
+                    .map_err(TlsError::CryptoError),
+                // RSA-PSS (rsae): route through the hash-aware
+                // `sign_pss(digest, alg)` so SHA-384/512 work — the bare
+                // `sign(RsaPadding::Pss, …)` path is SHA-256-only (it
+                // asserts a 32-byte digest). Mirrors the TLS 1.3
+                // `sign_certificate_verify` path.
+                SignatureScheme::RSA_PSS_RSAE_SHA256 => rsa_key
+                    .sign_pss(&compute_sha256(signed_data)?, RsaHashAlg::Sha256)
+                    .map_err(TlsError::CryptoError),
+                SignatureScheme::RSA_PSS_RSAE_SHA384 => rsa_key
+                    .sign_pss(&compute_sha384(signed_data)?, RsaHashAlg::Sha384)
+                    .map_err(TlsError::CryptoError),
+                SignatureScheme::RSA_PSS_RSAE_SHA512 => rsa_key
+                    .sign_pss(&compute_sha512(signed_data)?, RsaHashAlg::Sha512)
+                    .map_err(TlsError::CryptoError),
+                _ => Err(TlsError::HandshakeFailed("RSA scheme mismatch".into())),
+            }
         }
         ServerPrivateKey::Dsa {
             params_der,
