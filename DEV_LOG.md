@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I116 (116 phases)
-- Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
+- Testing: T1–T132 (125 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -21538,3 +21538,78 @@ remaining `pki/verify` families (`VFY_ANYEKU_*` / `VFY_TLS_*EKU_KU_*`
 `BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN_*` / `VFY_MLKEM_KEYUSAGE`) plus
 the entire `pki/cms` + `pki/pkcs12` SDV suites follow in subsequent
 T113 commits under the no-sub-phase rule.
+
+---
+
+## Phase T132 — tlsfuzzer Coverage-Expansion Batch: 3 clean TLS 1.3 scripts (2026-05-24)
+
+### Summary
+
+With the tlsfuzzer XFAIL-reduction track wound down (I114 note:
+remaining curated XFAILs are documented won't-fix / deferred
+complex state-machine cases), this phase pivots from *reduction* to
+*coverage expansion*: the pinned tlsfuzzer repo carries ~170 scripts;
+the curated CI suite covered 52 pre-T132. A local triage sweep ran a
+slate of uncurated candidates against the release `s-server` to find
+clean-PASS additions and to map what the rest need.
+
+**3 clean-PASS TLS 1.3 scripts added** to the curated suite (main
+`scripts` array in `.github/workflows/tlsfuzzer.yml`, against the
+shared RSA TLS 1.3 listener, no extra args, **0 XFAIL**):
+
+| Script | Result | What it pins |
+|---|---|---|
+| `test-tls13-unrecognised-groups.py` | 32/32 | unknown `supported_groups` entries ignored (RFC 8446 §4.2.7) |
+| `test-tls13-serverhello-random.py` | 256/0 | no TLS 1.2/1.1 downgrade sentinel in `ServerHello.random`; well-distributed across repeated handshakes |
+| `test-tls13-invalid-ciphers.py` | 52/52 | malformed / unknown cipher-suite list entries handled per spec |
+
+(Re-verified at I-phase-completion time against the
+`bf7f579`/`02d1506`-pinned tlsfuzzer + release `s-server` with
+`-n 9999`: 32/32, 256/0, and 607/607 conversations respectively —
+all 0 XFAIL / 0 FAIL, stable across repeated + back-to-back runs.)
+
+### Triage map — what the remaining uncurated scripts need
+
+Recorded so a future coverage phase has a starting point:
+
+- `test-tls13-non-support.py` — **n/a**: targets a TLS-1.3-*disabled*
+  server; we support 1.3, so all 51 non-sanity conversations fail on
+  the close_notify-echo quirk of the 1.2 echo listener.
+- `test-tls13-unencrypted-alert.py` — **real gap, I-phase candidate**:
+  both conversations fail because the TLS 1.3 server replies to a
+  client abort-alert with `unexpected_message` instead of closing
+  silently (RFC 8446 §6.2: a received fatal alert ⇒ close without
+  responding). Read-path hardening candidate.
+- `test-tls13-large-number-of-extensions.py` — **robustness probe**:
+  22/22 standalone but 20/2 under back-to-back contention (2 large
+  multi-record ClientHellos, ext ids ≤ 4119, intermittently draw
+  `handshake_failure` / `decode_error`). Large-CH-reassembly
+  robustness follow-up.
+- `ecdhe-curves` 7/26, `obsolete-curves` 8/163, `shuffled-extentions`
+  2/17 — heavy XFAIL / brainpool-curve gaps, deferred.
+
+### Provenance note
+
+The T132 Phase Index row (350-block) + PROMPT_LOG entry landed
+slightly ahead of this detailed section: the DEV_LOG row was picked
+up as a staged change by a concurrent T113 chain-structure commit in
+the `test-enhanced` worktree (PR #135) while the workflow change was
+stashed; the workflow change (3 scripts in `tlsfuzzer.yml`) then
+landed from the `feature` slot as PR #137. This entry backfills the
+detailed section + the Testing-summary line (T1–T130 → T1–T132,
+T131 skipped) so the phase is documented to the post-task standard.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | (already merged, PR #137) | 3 clean-PASS TLS 1.3 scripts added to the curated `scripts` array. |
+| `DEV_LOG.md` | Modified | This detailed section + Testing-summary line updated T1–T130 → T1–T132 (T131 skipped). Phase Index row 352 (T132) already present. |
+| `PROMPT_LOG.md` | (already merged, PR #137) | T132 prompt + result entry. |
+
+### Build Status (Post T132)
+
+CI / tlsfuzzer-config only — no production-code change. Curated
+tlsfuzzer suite 52 → 55 TLS 1.3 scripts, all 0 XFAIL. This is an
+opt-in workflow (weekly / monthly schedule + workflow_dispatch), so
+the additions do not gate PR merges.
