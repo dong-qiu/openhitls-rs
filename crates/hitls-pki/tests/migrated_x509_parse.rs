@@ -47830,14 +47830,11 @@ fn tc_line226_x509_vfy_aki_ski_keyid_pass() {
 /// SDV_X509_VFY_AKI_SKI_KEYID_FAIL_TC002 keyid mismatch
 /// C source: SDV_X509_VFY_AKI_SKI_KEYID_FAIL_TC002 (line 229, X.509 verify AKI/SKI family)
 ///
-/// Rust verifier gap: `find_issuer` matches on Subject DN + signature only —
-/// it does not enforce that AKI.keyIdentifier (RFC 5280 §4.2.1.1) equals the
-/// candidate issuer's SKI.keyIdentifier (§4.2.1.2), so the C-side
-/// `ISSUE_CERT_NOT_FOUND` is masked by a successful DN-match. Listed as a
-/// verifier-hardening I-phase candidate (alongside the gaps already noted
-/// in DEV_LOG Phase T113).
+/// Closed by I115: `find_issuer` now enforces AKI.keyIdentifier
+/// (RFC 5280 §4.2.1.1) ↔ candidate SKI (§4.2.1.2) matching — a leaf
+/// whose AKI keyId differs from the only DN-matching issuer's SKI is
+/// correctly rejected with `IssuerNotFound`.
 #[test]
-#[ignore = "verifier-hardening gap: Rust find_issuer does not enforce AKI/SKI keyIdentifier matching"]
 fn tc_line229_x509_vfy_aki_ski_keyid_fail() {
     let root = load_cert_fixture("cert/chain/akiski_suite/aki_root.pem");
     let inter = load_cert_fixture("cert/chain/akiski_suite/aki_inter.pem");
@@ -47875,13 +47872,12 @@ fn tc_line235_x509_vfy_aki_ski_lower_aki_missing_pass() {
 /// SDV_X509_VFY_AKI_SKI_ISSUER_SERIAL_FAIL_TC006 issuer serial mismatch
 /// C source: SDV_X509_VFY_AKI_SKI_ISSUER_SERIAL_FAIL_TC006 (line 238, X.509 verify AKI/SKI family)
 ///
-/// Rust verifier gap: same root cause as TC002 — `find_issuer` ignores the
-/// AKI.authorityCertSerialNumber / authorityCertIssuer fields (RFC 5280
-/// §4.2.1.1), so a leaf that names a wrong issuer serial in its AKI still
-/// resolves the issuer by DN. Listed as a verifier-hardening I-phase
-/// candidate.
+/// Closed by I115: the AKI parser now decodes
+/// `authorityCertSerialNumber [2]` (RFC 5280 §4.2.1.1) and
+/// `find_issuer` requires it to equal the candidate issuer's serial
+/// (leading-zero normalised) — a leaf naming a wrong issuer serial is
+/// rejected with `IssuerNotFound`.
 #[test]
-#[ignore = "verifier-hardening gap: Rust find_issuer does not enforce AKI.authorityCertSerialNumber matching"]
 fn tc_line238_x509_vfy_aki_ski_issuer_serial_fail() {
     let root = load_cert_fixture("cert/chain/akiski_suite/aki_root.pem");
     let inter = load_cert_fixture("cert/chain/akiski_suite/aki_inter.pem");
