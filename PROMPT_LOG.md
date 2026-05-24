@@ -7317,3 +7317,27 @@ Verification: 1121 PASS / 0 FAIL / 9 ignored; fmt clean; clippy
 `-D warnings` clean. No production-code change.
 
 Recorded as DEV_LOG `Phase T113 (continued) — pki/cms SignedData-verify`.
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/cms` SignedData sign-side family (2026-05-24)
+
+> sign-side GEN 家族 (推荐)
+
+Extends pki/cms to the sign side with SDV_CMS_GEN_ATTACH_SIGNEDDATA_TC001
+(sign → reparse → verify). Only RSA-PKCS#1 maps faithfully (2 active:
+attached + adapted single-signer detached). Coverage 1130 → 1132 emitted
+= 1123 PASS + 9 `#[ignore]`.
+
+De-risk finding: `CmsMessage::sign` is minimal and cannot reproduce the
+rest of the C GEN matrix — no-signed-attrs (always adds attrs), ECDSA
+(fixture key is SEC1, parser wants PKCS#8), RSA-PSS (no PSS sign path;
+derives scheme from cert.signature_algorithm = PKCS#1 → would silently
+test PKCS#1), ML-DSA (no sign + no verify), multi-signer / version-3
+(single-signer v1 only), INVALID_HASH (no hash-injection hook). All
+documented as API-minimalism skips.
+
+Verification: 1123 PASS / 0 FAIL / 9 ignored; fmt clean; clippy
+`-D warnings` clean. No production-code change.
+
+Recorded as DEV_LOG `Phase T113 (continued) — pki/cms sign-side`.
