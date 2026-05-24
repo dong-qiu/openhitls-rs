@@ -49228,4 +49228,110 @@ mod pkcs12_parse_p12 {
     }
 }
 
-// Generation summary: 1144 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12: 11 active + 1 empty-pwd #[ignore], unblocked by I117).
+/// PKCS#12 ENCODE_P12 family — SDV_PKCS12_ENCODE_P12_TC001/TC002/TC003/TC004
+/// C source: pki/pkcs12/test_suite_sdv_pkcs12.c (lines 973 / 1066 / 1150 / 1274).
+///
+/// Exercise the PKCS#12 encode (gen) path. The C cases parse a PFX, re-encode
+/// it (`GenBuff`) and re-parse, asserting the entity cert survives; TC004 builds
+/// a PFX from a key + cert file. The Rust `Pkcs12::create` regenerates from the
+/// extracted (key, certs), so the migration is a **round-trip**: parse →
+/// `create` → re-parse → private key present + entity cert preserved.
+///
+/// The C exact-byte/length comparison (`output.dataLen == buff->len`) and the
+/// "no-MAC" encode toggle are not reproduced — `Pkcs12::create` emits its own
+/// (SHA-1-MAC, PBES2) encoding rather than re-serialising the parsed structure.
+#[cfg(feature = "pkcs12")]
+mod pkcs12_encode_p12 {
+    use hitls_pki::pkcs12::Pkcs12;
+
+    fn raw(rel: &str) -> Vec<u8> {
+        let path = format!(
+            "{}/../../tests/vectors/c-asn1-fixtures/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            rel
+        );
+        std::fs::read(&path).unwrap()
+    }
+
+    /// Parse `p12_rel`, regenerate via `create`, re-parse; assert a private key
+    /// and (when `cert_rel` is given) that the entity cert is preserved.
+    fn assert_roundtrip(p12_rel: &str, cert_rel: Option<&str>) {
+        let p12 = Pkcs12::from_der(&raw(p12_rel), "123456").unwrap();
+        let key = p12.private_key.clone();
+        let certs: Vec<&[u8]> = p12.certificates.iter().map(|c| c.as_slice()).collect();
+        let regenerated = Pkcs12::create(key.as_deref(), &certs, "123456").unwrap();
+        let reparsed = Pkcs12::from_der(&regenerated, "123456").unwrap();
+        assert!(reparsed.private_key.is_some());
+        if let Some(cert_rel) = cert_rel {
+            assert!(reparsed.certificates.contains(&raw(cert_rel)));
+        }
+    }
+
+    // ── TC001 ×5: round-trip + entity-cert preserved (reuses parse_p12 fixtures,
+    // which are byte-identical to the ENCODE_P12_TC001 inputs). ──
+    #[test]
+    fn tc_pkcs12_encode_p12_tc001_0() {
+        assert_roundtrip(
+            "cert/asn1/pkcs12/parse_p12/tc001_0.p12",
+            Some("cert/asn1/pkcs12/parse_p12/tc001_0_cert.der"),
+        );
+    }
+    #[test]
+    fn tc_pkcs12_encode_p12_tc001_1() {
+        assert_roundtrip(
+            "cert/asn1/pkcs12/parse_p12/tc001_1.p12",
+            Some("cert/asn1/pkcs12/parse_p12/tc001_1_cert.der"),
+        );
+    }
+    #[test]
+    fn tc_pkcs12_encode_p12_tc001_2() {
+        assert_roundtrip(
+            "cert/asn1/pkcs12/parse_p12/tc001_2.p12",
+            Some("cert/asn1/pkcs12/parse_p12/tc001_2_cert.der"),
+        );
+    }
+    #[test]
+    fn tc_pkcs12_encode_p12_tc001_3() {
+        assert_roundtrip(
+            "cert/asn1/pkcs12/parse_p12/tc001_3.p12",
+            Some("cert/asn1/pkcs12/parse_p12/tc001_3_cert.der"),
+        );
+    }
+    #[test]
+    fn tc_pkcs12_encode_p12_tc001_4() {
+        assert_roundtrip(
+            "cert/asn1/pkcs12/parse_p12/tc001_4.p12",
+            Some("cert/asn1/pkcs12/parse_p12/tc001_4_cert.der"),
+        );
+    }
+
+    // ── TC002: no-MAC encode variant — round-trip + entity-cert (the no-MAC
+    // toggle is N/A; `create` always emits a MAC). ──
+    #[test]
+    fn tc_pkcs12_encode_p12_tc002() {
+        assert_roundtrip(
+            "cert/asn1/pkcs12/encode_p12/tc002.p12",
+            Some("cert/asn1/pkcs12/encode_p12/tc002_cert.der"),
+        );
+    }
+
+    // ── TC003: round-trip (no entity-cert comparison in the C case). ──
+    #[test]
+    fn tc_pkcs12_encode_p12_tc003() {
+        assert_roundtrip("cert/asn1/pkcs12/encode_p12/tc003.p12", None);
+    }
+
+    // ── TC004: build a PFX from a PKCS#8 key file + cert file (direct
+    // `Pkcs12::create`), then re-parse and confirm key + cert. ──
+    #[test]
+    fn tc_pkcs12_encode_p12_tc004() {
+        let key = raw("cert/asn1/rsa2048key_pkcs8.der");
+        let cert = raw("cert/asn1/rsa_cert/end.der");
+        let p12 = Pkcs12::create(Some(&key), &[&cert], "123456").unwrap();
+        let reparsed = Pkcs12::from_der(&p12, "123456").unwrap();
+        assert!(reparsed.private_key.is_some());
+        assert!(reparsed.certificates.contains(&cert));
+    }
+}
+
+// Generation summary: 1152 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12 unblocked by I117; +8 pki/pkcs12 ENCODE_P12 round-trip via Pkcs12::create).
