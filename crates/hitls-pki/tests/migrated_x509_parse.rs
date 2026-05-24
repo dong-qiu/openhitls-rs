@@ -49091,4 +49091,141 @@ mod cms_signeddata_gen {
     }
 }
 
-// Generation summary: 1132 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify: 23 active + 6 ML-DSA #[ignore]; +2 pki/cms SignedData sign-side RSA-PKCS1 attach+detach).
+/// PKCS#12 PARSE_P12 family — SDV_PKCS12_PARSE_P12_TC001/TC002/TC003 +
+/// SDV_PKCS12_PARSE_P12_WRONG_CONDITIONS_TC001
+/// C source: pki/pkcs12/test_suite_sdv_pkcs12.c (lines 404 / 442 / 481 / 513).
+///
+/// Parse a PKCS#12 (PFX) container with a password and confirm the private key
+/// and entity certificate come out. Unblocked by I117 (PKCS#12 SHA-2 MAC): the
+/// openHiTLS C fixtures carry a SHA-256 / SHA-224 MacData that previously failed
+/// integrity verification under the SHA-1-only KDF.
+///
+/// TC001/TC002/WRONG `.p12` blobs were inline hex in the C `.data`, materialised
+/// into `cert/asn1/pkcs12/parse_p12/`; TC003 uses the mirrored `p12_{1..5}.p12`.
+#[cfg(feature = "pkcs12")]
+mod pkcs12_parse_p12 {
+    use hitls_pki::pkcs12::Pkcs12;
+
+    fn raw(rel: &str) -> Vec<u8> {
+        let path = format!(
+            "{}/../../tests/vectors/c-asn1-fixtures/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            rel
+        );
+        std::fs::read(&path).unwrap()
+    }
+
+    /// Parse `p12` with `pwd`; assert a private key + the expected entity cert.
+    fn assert_parse_with_cert(p12_rel: &str, cert_rel: &str, pwd: &str) {
+        let p12 = Pkcs12::from_der(&raw(p12_rel), pwd).unwrap();
+        assert!(p12.private_key.is_some());
+        let expected = raw(cert_rel);
+        assert!(
+            p12.certificates.contains(&expected),
+            "entity cert not found in parsed PKCS#12 ({p12_rel})"
+        );
+    }
+
+    /// Parse `p12` with `pwd`; assert a private key + at least one cert.
+    fn assert_parse_ok(p12_rel: &str, pwd: &str) {
+        let p12 = Pkcs12::from_der(&raw(p12_rel), pwd).unwrap();
+        assert!(p12.private_key.is_some());
+        assert!(!p12.certificates.is_empty());
+    }
+
+    // ── TC001: parse (with MAC) + entity-cert match (SHA-256 / SHA-224 MAC) ──
+    #[test]
+    fn tc_pkcs12_parse_p12_tc001_0() {
+        assert_parse_with_cert(
+            "cert/asn1/pkcs12/parse_p12/tc001_0.p12",
+            "cert/asn1/pkcs12/parse_p12/tc001_0_cert.der",
+            "123456",
+        );
+    }
+    #[test]
+    fn tc_pkcs12_parse_p12_tc001_1() {
+        assert_parse_with_cert(
+            "cert/asn1/pkcs12/parse_p12/tc001_1.p12",
+            "cert/asn1/pkcs12/parse_p12/tc001_1_cert.der",
+            "123456",
+        );
+    }
+    #[test]
+    fn tc_pkcs12_parse_p12_tc001_2() {
+        assert_parse_with_cert(
+            "cert/asn1/pkcs12/parse_p12/tc001_2.p12",
+            "cert/asn1/pkcs12/parse_p12/tc001_2_cert.der",
+            "123456",
+        );
+    }
+    #[test]
+    fn tc_pkcs12_parse_p12_tc001_3() {
+        assert_parse_with_cert(
+            "cert/asn1/pkcs12/parse_p12/tc001_3.p12",
+            "cert/asn1/pkcs12/parse_p12/tc001_3_cert.der",
+            "123456",
+        );
+    }
+    #[test]
+    fn tc_pkcs12_parse_p12_tc001_4() {
+        assert_parse_with_cert(
+            "cert/asn1/pkcs12/parse_p12/tc001_4.p12",
+            "cert/asn1/pkcs12/parse_p12/tc001_4_cert.der",
+            "123456",
+        );
+    }
+
+    // ── TC002: parse a PFX (the C case toggles MAC verification; the Rust
+    // `from_der` always verifies a present MacData, so we assert the positive
+    // parse — key + entity cert recovered). ──
+    #[test]
+    fn tc_pkcs12_parse_p12_tc002() {
+        assert_parse_with_cert(
+            "cert/asn1/pkcs12/parse_p12/tc002.p12",
+            "cert/asn1/pkcs12/parse_p12/tc002_cert.der",
+            "123456",
+        );
+    }
+
+    // ── WRONG_CONDITIONS: wrong password → MAC failure; correct password → ok. ──
+    #[test]
+    fn tc_pkcs12_parse_p12_wrong_password() {
+        let p12 = raw("cert/asn1/pkcs12/parse_p12/wrong.p12");
+        // Wrong password (C uses "1234567") → integrity (MAC) verification fails.
+        assert!(Pkcs12::from_der(&p12, "1234567").is_err());
+        // Correct password recovers the key.
+        let ok = Pkcs12::from_der(&p12, "123456").unwrap();
+        assert!(ok.private_key.is_some());
+    }
+
+    // ── TC003: parse from mirrored `.p12` files with assorted passwords. ──
+    #[test]
+    fn tc_pkcs12_parse_p12_tc003_p12_2() {
+        assert_parse_ok("cert/asn1/pkcs12/p12_2.p12", &"1".repeat(74));
+    }
+    #[test]
+    fn tc_pkcs12_parse_p12_tc003_p12_3() {
+        assert_parse_ok("cert/asn1/pkcs12/p12_3.p12", &"1".repeat(149));
+    }
+    #[test]
+    fn tc_pkcs12_parse_p12_tc003_p12_4() {
+        assert_parse_ok("cert/asn1/pkcs12/p12_4.p12", "1");
+    }
+    #[test]
+    fn tc_pkcs12_parse_p12_tc003_p12_5() {
+        assert_parse_ok("cert/asn1/pkcs12/p12_5.p12", r"@##\#%#\%\%.&&~%*\|sdfgfdsg");
+    }
+
+    /// TC003 p12_1 uses an **empty** password. The C parser accepts it, but the
+    /// Rust PKCS#12 KDF treats an empty BMPString (`len <= 2`, i.e. just the
+    /// 2-byte null terminator) as an empty diversifier, deriving a different MAC
+    /// key → MAC verification fails. Empty-password BMPString convention gap;
+    /// asserts the C-correct behaviour so a future KDF fix unignores it.
+    #[test]
+    #[ignore = "impl gap: empty-password PKCS#12 BMPString KDF convention (len<=2 short-circuit)"]
+    fn tc_pkcs12_parse_p12_tc003_p12_1_empty_pwd() {
+        assert_parse_ok("cert/asn1/pkcs12/p12_1.p12", "");
+    }
+}
+
+// Generation summary: 1144 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12: 11 active + 1 empty-pwd #[ignore], unblocked by I117).

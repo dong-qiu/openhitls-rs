@@ -7370,3 +7370,30 @@ migrated + 1 doc PASS; fmt + clippy -D warnings clean.
 
 Recorded as DEV_LOG Phase I117. Follow-up: migrate the now-unblocked
 pki/pkcs12 parse families (test-enhanced slot).
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/pkcs12` PARSE_P12 family (2026-05-24)
+
+> 你的建议是什么？
+
+Opens the pki/pkcs12 SDV suite with SDV_PKCS12_PARSE_P12 (TC001/TC002/
+TC003/WRONG), unblocked by the I117 PKCS#12 SHA-2 MAC implementation.
+11 active + 1 `#[ignore]`. Coverage 1132 → 1144 emitted = 1134 PASS +
+10 `#[ignore]`.
+
+- Active: TC001×5 (parse SHA-256/224-MAC PFX + entity-cert DER match),
+  TC002 (positive parse), WRONG (wrong pwd → MAC err, right pwd → ok),
+  TC003 p12_2..5 (file-based, assorted passwords). All via
+  Pkcs12::from_der(p12, pwd).
+- `#[ignore]`: TC003 p12_1 empty-password — Rust KDF's `bmp.len() <= 2`
+  short-circuit derives an empty diversifier, differing from C; MAC
+  fails. PKCS#12 empty-password BMPString convention gap.
+
+TC001/TC002/WRONG blobs were inline hex in the C .data, materialised to
+cert/asn1/pkcs12/parse_p12/ fixtures; TC003 uses mirrored p12_{1..5}.p12.
+
+This migration locks I117 into CI as a cross-impl correctness oracle.
+Verification: 1134 PASS / 0 FAIL / 10 ignored; fmt + clippy clean.
+
+Recorded as DEV_LOG `Phase T113 (continued) — pki/pkcs12 PARSE_P12`.
