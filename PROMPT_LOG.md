@@ -7149,3 +7149,40 @@ Ran in the bug-fix worktree (`fix/x509-critical-ext-rejection`) —
 same verifier-hardening category as I115.
 
 Recorded as DEV_LOG Phase I116.
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/verify` chain-structure family (2026-05-24)
+
+> 本session优先聚焦在测试用例的迁移上
+
+Resumed the C→Rust test migration (test-enhanced slot) after the
+verifier-hardening detour (I115/I116). Picked the chain-structure
+family from `pki/verify` — the family most likely to migrate as
+pure test work because the verifier already enforces the relevant
+RFC 5280 §6.1 path bounds.
+
+5 TCs migrated to `migrated_x509_parse.rs`:
+- `VFY_DEPTH_CHAINLEN_PASS/FAIL` — depth limit
+- `VFY_CHAIN_SUBJECT_ISSUER_MISMATCH` — issuer-DN continuity → IssuerNotFound
+- `VFY_TRUST_ANCHOR_NOT_FOUND` — fake root trusted, real root absent
+- `VFY_CHAIN_LOOP_DEPTH` — cyclic issuers trip the depth cap
+
+Coverage 1085 → **1090 emitted**; with I115/I116 having cleared the
+prior 3 ignores, the suite is now **1090 PASS / 0 ignored** — no
+remaining #[ignore] in the PKI migration.
+
+Finding (handled in-test): the C `maxDepth` counts total certs;
+Rust's `set_max_depth` counts intermediate CA links (errors when
+`chain.len()` reaches the cap mid-build). So C `maxDepth=3`
+(3-cert PASS / 4-cert FAIL) maps to Rust `set_max_depth(2)` over the
+identical depth_suite fixtures. Documented as a convention
+difference, not a bug — both are valid RFC 5280 §6.1 strategies.
+The loop case uses `set_max_depth(4)` directly since a cyclic chain
+trips any finite cap.
+
+Verification: `cargo test -p hitls-pki --test migrated_x509_parse`
+1090 PASS / 0 ignored; `fmt` clean; `clippy -D warnings` clean. No
+production-code change.
+
+Recorded as DEV_LOG `Phase T113 (continued) — chain-structure family`.
