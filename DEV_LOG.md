@@ -354,6 +354,7 @@ Category summary:
 | 351 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 | 352 | T132 | Test | tlsfuzzer coverage-expansion batch — added 3 clean-PASS TLS 1.3 conformance scripts to the curated CI suite after a local triage sweep of the uncurated tlsfuzzer corpus (170 scripts in repo, 52 curated pre-T132): `test-tls13-unrecognised-groups.py` (32/32 — unknown `supported_groups` entries ignored per RFC 8446 §4.2.7), `test-tls13-serverhello-random.py` (256/0 — no TLS 1.2/1.1 downgrade sentinel in ServerHello.random, well-distributed across handshakes), `test-tls13-invalid-ciphers.py` (52/52 — malformed/unknown cipher-suite entries handled per spec). All run against the shared RSA TLS 1.3 listener with no extra args and **0 XFAIL** (verified stable across repeated + back-to-back local runs vs the release `s-server`). Triage also produced a "what's next" map: (a) `test-tls13-non-support.py` not curated — it targets a TLS-1.3-*disabled* server (we support 1.3); all 51 non-sanity conversations fail on the close_notify-echo quirk of our 1.2 echo listener. (b) `test-tls13-unencrypted-alert.py` not curated — both real conversations fail because the TLS 1.3 server replies to a client abort-alert with `unexpected_message` instead of closing silently (RFC 8446 §6.2: a received fatal alert ⇒ close without responding); flagged as a read-path **I-phase** candidate. (c) `test-tls13-large-number-of-extensions.py` not curated — 22/22 standalone but 20/2 under back-to-back contention (2 large multi-record ClientHellos, ext ids ≤ 4119, intermittently draw `handshake_failure`/`decode_error`); flagged for a large-CH-reassembly robustness probe. (d) `ecdhe-curves` 7/26, `obsolete-curves` 8/163, `shuffled-extentions` 2/17 — heavy XFAIL / brainpool-curve gaps, deferred. Test-only — no production change | 2026-05-24 |
 | 353 | I117 | Impl | PKCS#12 SHA-2 MAC support (RFC 7292 §4 + Appendix B) — the `hitls-pki` PKCS#12 MAC path was hardcoded to SHA-1 (`pkcs12_kdf` ran SHA-1; `verify_mac` discarded the MacData `DigestInfo` algorithm OID and always derived a 20-byte SHA-1 HMAC key), so any PFX with a SHA-2 MAC — which openHiTLS C emits by default — failed integrity verification with "MAC verification failed (wrong password?)" even with the correct password. Added a `P12MacHash` enum (SHA-1/224/256/384/512) that maps the MacData digest OID → hash (id-sha1 `1.3.14.3.2.26` + id-sha224 `2.16.840.1.101.3.4.2.4` by dotted form, sha256/384/512 via `known::`), parameterised `pkcs12_kdf` over the hash (output/block size from the `Digest` trait), and made `verify_mac` read the declared algorithm and run the KDF + HMAC under it. Encode side still emits a SHA-1 MAC (RFC 7292 baseline, widely interoperable). Constant-time MAC compare + zeroize preserved. Verified against openHiTLS C `pki/pkcs12` `.p12` fixtures (SHA-256 + SHA-224 MAC now parse, entity-cert match); unblocks the T113 `pki/pkcs12` test migration. No regression — hitls-pki 455 lib (incl. new SHA-256 KDF test) + 1123 migrated + 1 doc PASS, workspace `fmt` + `clippy -D warnings` clean | 2026-05-24 |
+| 354 | T133 | Test | tlsfuzzer coverage-expansion batch 2 + full uncurated-corpus scan (Phase-1 of the tlsfuzzer plan). Ran all 99 server-testable uncurated scripts against a fresh release `s-server` (TLS 1.3 `:4444` / TLS 1.2 `:4445`) and bucketed the corpus into a durable backlog in `docs/tlsfuzzer.md`. Curated **4 new clean-PASS scripts** (0 XFAIL, no extra args, each re-verified stable on a fresh server): TLS 1.3 — `test-tls13-ffdhe-sanity.py` (7/7), `test-tls13-pkcs-signature.py` (8/8) → main `scripts` array; TLS 1.2 — `test-cve-2004-0079.py` (4/4, CVE-2004-0079 NULL-deref regression), `test-no-mlkem-in-old-tls.py` (12/12, ML-KEM groups rejected in 1.2) → `scripts_12` array. Curated suite 55 → **59 scripts**. Backlog findings: (a) **non-determinism, NOT a server leak** — `test-ecdhe-padded-shared-secret` varies run-to-run (2/1 ↔ 77/0 ↔ 238/0) and `test-tls13-large-number-of-extensions` is occasionally 20/2; a follow-up load probe (600 sequential openssl handshakes vs a fresh `s-server`) **disproved** the server-degradation hypothesis — server fd stayed flat at 8 across all 600 connections, no port exhaustion / accept errors, and `ecdhe-padded` gave the same 2/1 before and after load (load made zero difference). The variance is test-side random sampling of padding-length conversations (one intermittently fails); not curated, to avoid flaky CI. The intermittent fail is a separate script-level item, not a robustness/resource bug; (b) **small-XFAIL candidates**: `signature-algorithms` 275/1, `invalid-cipher-suites` 25/2, `bleichenbacher-workaround` 50/2, `x25519` 20/4; (c) **real-gap / big-XFAIL**: `obsolete-curves` 8/163, `ffdhe-groups` 7/55, `ecdhe-curves` 7/26, `crfg-curves`, `certificate-compression`, `extensions` 215/77, `export-ciphers-rejected` 76/78; (d) **§6.2 read-path I-phase**: `unencrypted-alert` 2/2-fail; (e) **needs cipher-args plumbing**: `chacha20` / `aesccm` / `extended-master-secret-extension` / `downgrade-protection`. Test-only — no production change | 2026-05-24 |
 
 ---
 
@@ -22198,3 +22199,94 @@ SafeBag / AuthenticatedSafe / MacData granularity, which the Rust
 `Pkcs12` API (`from_der` / `create`, key + cert vec) does not expose,
 so they are expected API-surface skips. `pki/pkcs12` clean migration is
 substantially complete.
+
+---
+
+## Phase T133 — tlsfuzzer Full Uncurated-Corpus Scan + Coverage Batch 2 (2026-05-24)
+
+### Summary
+
+Phase 1 of the post-T132 tlsfuzzer plan: stop guessing which
+scripts to add and **systematically scan the entire uncurated
+corpus**, then curate the clean-PASS results and write the rest
+up as a durable backlog.
+
+Ran all **99 server-testable uncurated scripts** (170 in repo −
+55 curated − client-side/generator/SSLv2) against a fresh release
+`s-server`: each tried against TLS 1.3 `:4444` first, falling back
+to TLS 1.2 `:4445` when sanity aborted, with a 90 s per-run
+watchdog. Bucketed results recorded in `docs/tlsfuzzer.md`
+(§"Uncurated-corpus scan backlog").
+
+### Curated (4 new clean-PASS scripts, 0 XFAIL)
+
+Each re-verified stable on a **fresh** server (the scan's
+single-run results were re-checked 2× because some scripts proved
+load-sensitive — see findings):
+
+| Script | Result | Listener | Pins |
+|---|---|---|---|
+| `test-tls13-ffdhe-sanity.py` | 7/7 | 1.3 `:4444` | FFDHE (ffdhe2048/3072) key-exchange sanity in TLS 1.3 |
+| `test-tls13-pkcs-signature.py` | 8/8 | 1.3 `:4444` | rsa_pkcs1_* CV refusal (RFC 8446 §4.2.3) + legacy-compat spots |
+| `test-cve-2004-0079.py` | 4/4 | 1.2 `:4445` | CVE-2004-0079 (SSL/TLS NULL-deref) regression |
+| `test-no-mlkem-in-old-tls.py` | 12/12 | 1.2 `:4445` | ML-KEM groups rejected/ignored in TLS 1.2 (1.3-only) |
+
+Curated suite **55 → 59 scripts** (2 added to the main TLS 1.3
+`scripts` array, 2 to `scripts_12`).
+
+### Backlog (recorded in docs/tlsfuzzer.md)
+
+- **Non-determinism, NOT a server leak (do not curate)**:
+  `test-ecdhe-padded-shared-secret` varies run-to-run (2/1 ↔ 77/0 ↔
+  238/0) and `test-tls13-large-number-of-extensions` is occasionally
+  20/2. A dedicated load probe (600 sequential openssl handshakes
+  against a fresh `s-server`) **disproved** the server-degradation
+  hypothesis: server fd count stayed flat at 8 across all 600
+  connections, client TIME_WAIT stayed at 2, no accept errors, and
+  `ecdhe-padded` returned the *same* 2/1 both before and after the
+  load — load made zero difference. The variance is test-side random
+  sampling of padding-length conversations (one intermittently
+  fails). Not curated, to avoid flaky CI. The intermittent
+  1-conversation fail is a separate script-level item (which padding
+  case; value/timing dependent), not a robustness/resource bug.
+  (`ecdhe-padded` was also T128-excluded for TLS 1.0/1.1/SSLv2-compat
+  fails.)
+- **Small-XFAIL curation candidates**: `signature-algorithms`
+  (275/1), `invalid-cipher-suites` (25/2), `bleichenbacher-
+  workaround` (50/2), `x25519` (20/4), `sig-algs` (13/5),
+  `point-extension` (7/2).
+- **Real gap / big-XFAIL (curve + extension coverage)**:
+  `obsolete-curves` (8/163), `ffdhe-groups` (7/55), `ecdhe-curves`
+  (7/26), `crfg-curves`, `certificate-compression`, `extensions`
+  (215/77), `export-ciphers-rejected` (76/78), `alpn-negotiation`,
+  `invalid-server-name-extension`.
+- **§6.2 read-path I-phase**: `unencrypted-alert` (2/2 fail —
+  server replies `unexpected_message` to a peer abort-alert instead
+  of closing silently). Phase 2 of the plan.
+- **Needs cipher-args plumbing**: `chacha20`, `aesccm`,
+  `extended-master-secret-extension`, `downgrade-protection`,
+  `dhe-rsa-key-exchange`, `record-size-limit`, `fuzzed-*`.
+
+### Verification
+
+- 4 curated scripts via `tests/tlsfuzzer/run.sh` (the CI wrapper):
+  exit 0, `7/0`, `8/0`, `4/0`, `12/0`; re-checked on fresh servers.
+- Local env: tlsfuzzer @ `bf7f579` + tlslite-ng @ `02d1506` vs
+  `cargo build --release -p hitls-cli`.
+- Workflow + docs only; no Rust code touched.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | Modified | +2 TLS 1.3 scripts (main `scripts`), +2 TLS 1.2 scripts (`scripts_12`), with batch comments. |
+| `docs/tlsfuzzer.md` | Modified | New "Uncurated-corpus scan backlog (T133)" section — bucketed backlog for the remaining tlsfuzzer effort. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 353 (T133). |
+| `PROMPT_LOG.md` | Modified | T133 prompt + result entry. |
+
+### Build Status (Post T133)
+
+Curated tlsfuzzer suite **59 scripts**, +31 PASS conversations,
+0 new XFAIL. No production code changed. Next per the plan: Phase 2
+(`unencrypted-alert` §6.2 read-path fix — an I-phase in the feature
+slot) and the robustness probe into the load-degradation signal.
