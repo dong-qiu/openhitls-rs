@@ -7421,3 +7421,31 @@ Verification: cargo test -p hitls-pki --lib pkcs12 24 PASS; fmt +
 clippy -D warnings clean.
 
 Recorded as DEV_LOG `Phase T113 (continued) — pkcs12 CAL KAT`.
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/pkcs12` ENCODE_P12 family (2026-05-24)
+
+> 按照1执行
+
+Migrates pki/pkcs12 ENCODE_P12 TC001..TC004 (the encode/gen path). 8
+active, no ignores. Coverage 1144 → 1152 emitted = 1142 PASS + 10
+`#[ignore]`.
+
+Rust Pkcs12::create regenerates from the extracted (key, certs), so the
+migration is a parse → create → re-parse round-trip asserting the
+private key + entity cert survive:
+- TC001 ×5: round-trip + entity-cert (reuses parse_p12/tc001_* fixtures,
+  byte-identical to the ENCODE inputs)
+- TC002: no-MAC variant round-trip (no-MAC toggle N/A)
+- TC003: round-trip (no cert compare)
+- TC004: build a PFX from a PKCS#8 key file + cert file via create
+
+The C exact-byte/length check + no-MAC toggle are not reproduced —
+create emits its own (SHA-1-MAC, PBES2) encoding, not a byte-for-byte
+re-serialisation. TC002/TC003 inputs materialised into encode_p12/;
+TC004 reuses mirrored key+cert.
+
+Verification: 1142 PASS / 0 FAIL / 10 ignored; fmt + clippy clean.
+
+Recorded as DEV_LOG `Phase T113 (continued) — pki/pkcs12 ENCODE_P12`.
