@@ -7449,3 +7449,41 @@ TC004 reuses mirrored key+cert.
 Verification: 1142 PASS / 0 FAIL / 10 ignored; fmt + clippy clean.
 
 Recorded as DEV_LOG `Phase T113 (continued) — pki/pkcs12 ENCODE_P12`.
+
+## Phase T133 — tlsfuzzer Full Uncurated-Corpus Scan + Coverage Batch 2 (2026-05-24)
+
+> 从阶段 1 的系统化扫描开始
+
+Phase 1 of the tlsfuzzer plan. Systematically scanned all 99
+server-testable uncurated scripts (170 in repo − 55 curated −
+client/generator/SSLv2) against a fresh release `s-server`
+(TLS 1.3 `:4444`, TLS 1.2 `:4445` fallback, 90 s watchdog), then
+curated the clean-PASS results and wrote the rest up as a durable
+backlog in `docs/tlsfuzzer.md`.
+
+**Curated 4 new clean-PASS scripts** (0 XFAIL, no extra args,
+each re-verified stable on a fresh server): TLS 1.3 —
+`test-tls13-ffdhe-sanity.py` (7/7) + `test-tls13-pkcs-signature.py`
+(8/8); TLS 1.2 — `test-cve-2004-0079.py` (4/4) +
+`test-no-mlkem-in-old-tls.py` (12/12). Suite 55 → **59 scripts**.
+
+**Key backlog findings**: (a) **non-determinism, NOT a server leak** —
+`test-ecdhe-padded-shared-secret` varies (2/1 ↔ 77/0 ↔ 238/0) and
+`large-number-of-extensions` is occasionally 20/2; a follow-up load
+probe (600 sequential openssl handshakes vs a fresh `s-server`)
+**disproved** server degradation — fd flat at 8 across all 600
+connections, same 2/1 before/after load. The variance is the script's
+random padding-conversation sampling (one intermittently fails), not
+a server resource bug; (b) small-XFAIL candidates
+(`signature-algorithms` 275/1, `invalid-cipher-suites` 25/2, …);
+(c) real curve/extension gaps (`obsolete-curves` 8/163,
+`ffdhe-groups` 7/55, `ecdhe-curves` 7/26, …); (d) the
+`unencrypted-alert` §6.2 read-path I-phase (Phase 2); (e) the
+cipher-args-plumbing set (`chacha20`/`aesccm`/EMS/…).
+
+Verified the 4 via `tests/tlsfuzzer/run.sh` (exit 0) + re-checked
+on fresh servers. Workflow + docs only, no production change. Ran
+from the `feature` slot to avoid colliding with the concurrent
+T113 PKI-migration session in `test-enhanced`. Recorded as DEV_LOG
+`Phase T133`. Next: Phase 2 (`unencrypted-alert` §6.2 fix) +
+the load-degradation robustness probe.
