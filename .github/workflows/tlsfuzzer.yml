@@ -532,6 +532,18 @@ jobs:
             #     leaking into a 1.2 handshake.
             test-cve-2004-0079.py
             test-no-mlkem-in-old-tls.py
+            # T134 small-XFAIL batch (3) — mostly-PASS TLS 1.2 scripts
+            # curated with documented per-entry XFAIL lists (see
+            # tests/tlsfuzzer/xfail/<script>.txt for rationale):
+            #   * signature-algorithms 275/1 — 1 XFAIL: SHA-1-only
+            #     sig_algs refused (deprecated; won't fix).
+            #   * x25519                20/4 — 2 ECDHE→DHE cross-kx
+            #     fallback (I105 gap) + 2 malformed-keyshare strictness.
+            #   * point-extension        7/2 — malformed/absent
+            #     ec_point_formats leniency (strictness follow-up).
+            test-signature-algorithms.py
+            test-x25519.py
+            test-point-extension.py
           )
           # Phase T93 — cert-matrix scripts. Each cert type gets its
           # own XFAIL list under `tests/tlsfuzzer/xfail-<key-type>/`

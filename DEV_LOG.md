@@ -357,6 +357,7 @@ Category summary:
 | 354 | T133 | Test | tlsfuzzer coverage-expansion batch 2 + full uncurated-corpus scan (Phase-1 of the tlsfuzzer plan). Ran all 99 server-testable uncurated scripts against a fresh release `s-server` (TLS 1.3 `:4444` / TLS 1.2 `:4445`) and bucketed the corpus into a durable backlog in `docs/tlsfuzzer.md`. Curated **4 new clean-PASS scripts** (0 XFAIL, no extra args, each re-verified stable on a fresh server): TLS 1.3 — `test-tls13-ffdhe-sanity.py` (7/7), `test-tls13-pkcs-signature.py` (8/8) → main `scripts` array; TLS 1.2 — `test-cve-2004-0079.py` (4/4, CVE-2004-0079 NULL-deref regression), `test-no-mlkem-in-old-tls.py` (12/12, ML-KEM groups rejected in 1.2) → `scripts_12` array. Curated suite 55 → **59 scripts**. Backlog findings: (a) **non-determinism, NOT a server leak** — `test-ecdhe-padded-shared-secret` varies run-to-run (2/1 ↔ 77/0 ↔ 238/0) and `test-tls13-large-number-of-extensions` is occasionally 20/2; a follow-up load probe (600 sequential openssl handshakes vs a fresh `s-server`) **disproved** the server-degradation hypothesis — server fd stayed flat at 8 across all 600 connections, no port exhaustion / accept errors, and `ecdhe-padded` gave the same 2/1 before and after load (load made zero difference). The variance is test-side random sampling of padding-length conversations (one intermittently fails); not curated, to avoid flaky CI. The intermittent fail is a separate script-level item, not a robustness/resource bug; (b) **small-XFAIL candidates**: `signature-algorithms` 275/1, `invalid-cipher-suites` 25/2, `bleichenbacher-workaround` 50/2, `x25519` 20/4; (c) **real-gap / big-XFAIL**: `obsolete-curves` 8/163, `ffdhe-groups` 7/55, `ecdhe-curves` 7/26, `crfg-curves`, `certificate-compression`, `extensions` 215/77, `export-ciphers-rejected` 76/78; (d) **§6.2 read-path I-phase**: `unencrypted-alert` 2/2-fail; (e) **needs cipher-args plumbing**: `chacha20` / `aesccm` / `extended-master-secret-extension` / `downgrade-protection`. Test-only — no production change | 2026-05-24 |
 | 355 | I119 | Impl | TLS 1.3 RFC 8446 §6.2 close-on-received-alert — the server's in-handshake read loops (awaiting client Certificate / CertificateVerify / Finished in `tls13_server_do_handshake_body!`, `crates/hitls-tls/src/macros.rs`) returned `HandshakeFailed("…unexpected_message")` when the client aborted by sending an Alert record (encrypted **or** plaintext) instead of the expected handshake message — so the server replied with its own `unexpected_message` alert. RFC 8446 §6.2 requires closing the connection WITHOUT a responding alert on receipt of a (fatal) alert. Each of the three loops now returns `TlsError::AlertReceived` on `ContentType::Alert`, which `tls_error_to_alert` already maps to `CloseNotify` and `send_fatal_alert_for_error_body!` already suppresses → silent close. The record layer already passes plaintext Alert records through during the encrypted phase, so both the encrypted- and plaintext-alert variants are covered. Closes `test-tls13-unencrypted-alert.py` (2/2-fail → **4/4 PASS**) and curates it into CI (suite 59 → 60). No regression: 1108 `hitls-tls` lib tests + adjacent tlsfuzzer scripts (conversation/finished/ccs/connection-abort/empty-alert/zero-content-type/keyupdate) all PASS; `fmt` + `clippy -D warnings` clean | 2026-05-25 |
 | 356 | I118 | Impl | CMS ML-DSA signer-info verification (FIPS 204 + NIST OIDs) — `pki/cms` SignerInfo verification rejected every ML-DSA signature with "unsupported sig alg" / failed verify, blocking 6 T113 `pki/cms` migration cases. Two defects fixed: **(1) OID** — `known::ml_dsa_44/65/87()` carried the obsolete IETF draft Dilithium arc (`1.3.6.1.4.1.2.267.12.*`) despite the "FIPS 204" doc-comment; retargeted to the NIST CSOR ids `2.16.840.1.101.3.4.3.{17,18,19}` that openHiTLS C (and the wider ecosystem) actually emit. **(2) Signed-message convention** — `verify_signature_with_cert` fed ML-DSA the pre-computed *digest* (correct for RSA/ECDSA hash-then-sign) instead of the message it hashes internally; reworked `verify_signer_info` to also carry the raw `signed_message` (the DER SET re-encoding of signedAttrs, or the content) and the ML-DSA branch now verifies over it. **(3)** CMS uses *pure* ML-DSA (FIPS 204 §5.2) with an empty context, so the bytes fed to the internal `mldsa_verify` (μ = H(tr‖M)) are prefixed with the `0x00 ‖ len(ctx)=0x00` domain separator. Validated against openHiTLS C `cms/signeddata/mldsa/{44,65,87}` fixtures: attached + detached now verify `Ok(true)`, wrong-message rejected. No regression — hitls-pki 457 lib + 1142 migrated + 1 doc PASS, hitls-utils 78 PASS (only `cms/mod.rs` consumes the ml_dsa OIDs), hitls-tls 1108 lib PASS, `fmt` + `clippy -D warnings` (incl. `--no-default-features` + `--all-features --all-targets`) clean | 2026-05-25 |
+| 357 | T134 | Test | tlsfuzzer small-XFAIL curation batch — triaged the 6 "mostly-PASS" backlog candidates from the T133 scan and curated **3** into CI with documented per-entry XFAIL lists (each failing conversation classified; none hiding a real bug): `test-signature-algorithms` (275/1 — SHA-1-only `signature_algorithms` refused, deprecated/won't-fix), `test-x25519` (20/4 — 2 ECDHE→DHE cross-key-exchange fallback per the I105 gap + 2 malformed-keyshare `decode_error` strictness), `test-point-extension` (7/2 — malformed/absent `ec_point_formats` leniency). +302 PASS, 7 XFAIL, 0 FAIL; all `run.sh` rc=0. The other 3 candidates were triaged **out** (deliberately NOT XFAIL'd): `test-invalid-cipher-suites` → sanity fails on both ports without a forced cipher (belongs to the cipher-args-plumbing bucket); `test-bleichenbacher-workaround` → N/A (sanity needs static-RSA `kRSA` key exchange, which we intentionally do not offer — Bleichenbacher/ROBOT-safe); `test-sig-algs` → **real TLS 1.2 gap surfaced** (`rsa_pss_rsae_sha384`-only → `internal_error`, `sha512`-only → `handshake_failure`: the TLS 1.2 server cannot sign CertificateVerify/ServerKeyExchange under RSA-PSS-rsae SHA-384/512 — the TLS-1.2 analogue of the TLS 1.3 RSA-PSS-SHA-384/512 fix), recorded as an I-phase candidate rather than masked behind an XFAIL. Curated suite 60 → 63. Test/CI-config only — no production change | 2026-05-25 |
 
 ---
 
@@ -22423,3 +22424,70 @@ abort-alert variants are handled by the same change.
 `unencrypted-alert` read-path gap from the T133 backlog is closed;
 remaining T133 backlog items (small-XFAIL candidates, curve/extension
 coverage, cipher-args plumbing) are unaffected.
+
+---
+
+## Phase T134 — tlsfuzzer small-XFAIL Curation Batch (2026-05-25)
+
+### Summary
+
+Worked the T133 backlog's "small-XFAIL candidates" bucket: 6 scripts
+that the scan showed as mostly-PASS with a few failures. Triaged each
+failing conversation (real bug vs won't-fix vs deferred-strictness)
+before writing any XFAIL — the point of XFAIL is a *documented*
+divergence, never a hidden bug.
+
+### Curated (3 scripts, per-entry XFAIL lists, sanity OK)
+
+All TLS 1.2 (`scripts_12`, `:4445`), each `run.sh` rc=0:
+
+| Script | Result | XFAIL rationale |
+|---|---|---|
+| `test-signature-algorithms.py` | 275 PASS / 1 XFAIL | `explicit SHA-1+RSA/ECDSA` — SHA-1-only `signature_algorithms`; we refuse (deprecated per RFC 9155 / SP 800-131A), tlsfuzzer expects a legacy SHA-1-accepting server. Won't fix. |
+| `test-x25519.py` | 20 PASS / 4 XFAIL | 2× ECDHE-offered→DHE cross-key-exchange fallback (the I105 co-negotiation gap, same as the `ffdhe-negotiation` XFAILs) + 2× malformed (empty) ECDHE keyshare where tlsfuzzer wants `decode_error` (we're lenient). |
+| `test-point-extension.py` | 7 PASS / 2 XFAIL | malformed/absent `ec_point_formats` (missing uncompressed → `illegal_parameter`; empty → `decode_error`); we only ever use uncompressed and tolerate the malformation. Strictness follow-up. |
+
++302 PASS conversations, 7 XFAIL, 0 FAIL. Curated suite **60 → 63**.
+
+### Triaged OUT (deliberately not curated — recorded in docs/tlsfuzzer.md)
+
+- `test-invalid-cipher-suites` — sanity fails on both ports without a
+  forced cipher → cipher-args-plumbing bucket, not small-XFAIL.
+- `test-bleichenbacher-workaround` — sanity needs static-RSA (`kRSA`)
+  key exchange, which we intentionally do not offer (Bleichenbacher/
+  ROBOT-safe). N/A: a script whose *sanity* fails cannot be curated.
+- `test-sig-algs` — **real gap, not XFAIL material**. The 3
+  `rsa_pss_pss_*-only` fails are a cert-type mismatch (legit), BUT
+  `rsa_pss_rsae_sha384`-only → `internal_error` and `sha512`-only →
+  `handshake_failure` show the TLS 1.2 server cannot sign
+  CertificateVerify/SKE under RSA-PSS-rsae SHA-384/512 — the TLS-1.2
+  analogue of the TLS 1.3 RSA-PSS-SHA-384/512 fix. Flagged as an
+  **I-phase candidate**; masking it behind an XFAIL would hide a real
+  conformance/interop gap.
+
+### Verification
+
+- `run.sh` (XFAIL lists attached) rc=0 for all 3: `signature-algorithms`
+  275/1, `x25519` 20/4, `point-extension` 7/2 — 0 FAIL / 0 XPASS.
+- Local env: tlsfuzzer @ `bf7f579` + tlslite-ng @ `02d1506` vs a fresh
+  release `s-server` (TLS 1.2 `:4445`).
+- Test/CI-config + docs only; no production code touched.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | Modified | +3 scripts in `scripts_12` with a batch comment. |
+| `tests/tlsfuzzer/xfail/test-signature-algorithms.txt` | Added | 1-entry XFAIL (SHA-1). |
+| `tests/tlsfuzzer/xfail/test-x25519.txt` | Added | 4-entry XFAIL (DHE-fallback + malformed keyshare). |
+| `tests/tlsfuzzer/xfail/test-point-extension.txt` | Added | 2-entry XFAIL (ec_point_formats strictness). |
+| `docs/tlsfuzzer.md` | Modified | Backlog updated with the T134 triage outcomes + the `sig-algs` I-phase finding. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 357 (T134). |
+| `PROMPT_LOG.md` | Modified | T134 prompt + result entry. |
+
+### Build Status (Post T134)
+
+Curated tlsfuzzer suite **63 scripts**. No production code changed.
+Surfaced one real I-phase candidate (TLS 1.2 RSA-PSS-rsae SHA-384/512
+signing) — the rest of the bucket is either curated or correctly
+deferred.

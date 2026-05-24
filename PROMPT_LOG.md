@@ -7550,3 +7550,29 @@ hitls-tls 1108 lib PASS; fmt + clippy (no-default + all-features) clean.
 
 Recorded as DEV_LOG Phase I118. Follow-up: un-#[ignore] the 6
 tc_cms_sd_verify_mldsa* tests (test-enhanced slot).
+## Phase T134 — tlsfuzzer small-XFAIL Curation Batch (2026-05-25)
+
+> 请继续small-XFAIL 候选族
+
+Worked the T133 backlog's "small-XFAIL candidates" — 6 mostly-PASS
+scripts. Triaged every failing conversation before writing any XFAIL
+(documented divergence, never a hidden bug).
+
+Curated **3** (TLS 1.2, per-entry XFAIL lists, sanity OK, run.sh rc=0):
+`test-signature-algorithms` (275/1 — SHA-1-only sig_algs refused,
+won't-fix), `test-x25519` (20/4 — 2 ECDHE→DHE cross-kx fallback [I105
+gap] + 2 malformed-keyshare decode strictness), `test-point-extension`
+(7/2 — malformed/absent ec_point_formats leniency). Suite 60 → 63.
+
+Triaged **out** (NOT XFAIL'd): `test-invalid-cipher-suites` (sanity
+fails w/o forced cipher → cipher-args bucket); `test-bleichenbacher-
+workaround` (N/A — needs static-RSA kRSA, intentionally unsupported);
+`test-sig-algs` (**real gap**: `rsa_pss_rsae_sha384`-only →
+internal_error, `sha512`-only → handshake_failure → the TLS 1.2 server
+can't sign CV/SKE under RSA-PSS-rsae SHA-384/512; the TLS-1.2 analogue
+of the TLS 1.3 PSS-SHA-384/512 fix — flagged as an I-phase candidate,
+not masked).
+
+Test/CI-config + docs only; no production change. Ran in an isolated
+temp worktree (`test/tlsfuzzer-small-xfail`). Recorded as DEV_LOG
+`Phase T134`.

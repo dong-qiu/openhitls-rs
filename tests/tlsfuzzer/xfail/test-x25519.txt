@@ -1,0 +1,28 @@
+# T134 — `test-x25519.py` (TLS 1.2) XFAIL (4 entries).
+#
+# 20 PASS / 4 XFAIL. Two distinct, documented divergences:
+#
+# 1. `only secp163k1 group - fallback to DHE` /
+#    `only unknown group - fallback to DHE`: the client offers an
+#    ECDHE suite but a `supported_groups` list with no group our
+#    server can use, and expects the server to fall back to a
+#    finite-field DHE_RSA suite. Per I105 (TLS 1.2 cipher-suite /
+#    named-group co-negotiation) we instead send a fatal
+#    `handshake_failure` when no usable group exists for the offered
+#    key exchange — the same documented gap as the two
+#    `test-ffdhe-negotiation.py` `fallback to non-ffdhe` XFAILs. The
+#    cross-key-exchange fallback (ECDHE-offered → static/DHE chosen)
+#    is a deliberate follow-up, not a regression.
+#
+# 2. `empty x25519 key share` / `empty x448 key share`: a malformed
+#    (zero-length) ECDHE key-exchange public value; tlsfuzzer expects
+#    a fatal `decode_error` (50). Our TLS 1.2 server is lenient on the
+#    malformed point and aborts with a different code / close. A
+#    strictness improvement (reject malformed ECDHE public with
+#    `decode_error`) is a candidate follow-up; the leniency is not a
+#    security issue (the handshake still fails).
+
+only secp163k1 group - fallback to DHE
+only unknown group - fallback to DHE
+empty x25519 key share
+empty x448 key share
