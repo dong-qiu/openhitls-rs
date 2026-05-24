@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I117 (117 phases)
+- Implementation: I1–I119 (119 phases)
 - Testing: T1–T132 (125 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -356,6 +356,7 @@ Category summary:
 | 353 | I117 | Impl | PKCS#12 SHA-2 MAC support (RFC 7292 §4 + Appendix B) — the `hitls-pki` PKCS#12 MAC path was hardcoded to SHA-1 (`pkcs12_kdf` ran SHA-1; `verify_mac` discarded the MacData `DigestInfo` algorithm OID and always derived a 20-byte SHA-1 HMAC key), so any PFX with a SHA-2 MAC — which openHiTLS C emits by default — failed integrity verification with "MAC verification failed (wrong password?)" even with the correct password. Added a `P12MacHash` enum (SHA-1/224/256/384/512) that maps the MacData digest OID → hash (id-sha1 `1.3.14.3.2.26` + id-sha224 `2.16.840.1.101.3.4.2.4` by dotted form, sha256/384/512 via `known::`), parameterised `pkcs12_kdf` over the hash (output/block size from the `Digest` trait), and made `verify_mac` read the declared algorithm and run the KDF + HMAC under it. Encode side still emits a SHA-1 MAC (RFC 7292 baseline, widely interoperable). Constant-time MAC compare + zeroize preserved. Verified against openHiTLS C `pki/pkcs12` `.p12` fixtures (SHA-256 + SHA-224 MAC now parse, entity-cert match); unblocks the T113 `pki/pkcs12` test migration. No regression — hitls-pki 455 lib (incl. new SHA-256 KDF test) + 1123 migrated + 1 doc PASS, workspace `fmt` + `clippy -D warnings` clean | 2026-05-24 |
 | 354 | T133 | Test | tlsfuzzer coverage-expansion batch 2 + full uncurated-corpus scan (Phase-1 of the tlsfuzzer plan). Ran all 99 server-testable uncurated scripts against a fresh release `s-server` (TLS 1.3 `:4444` / TLS 1.2 `:4445`) and bucketed the corpus into a durable backlog in `docs/tlsfuzzer.md`. Curated **4 new clean-PASS scripts** (0 XFAIL, no extra args, each re-verified stable on a fresh server): TLS 1.3 — `test-tls13-ffdhe-sanity.py` (7/7), `test-tls13-pkcs-signature.py` (8/8) → main `scripts` array; TLS 1.2 — `test-cve-2004-0079.py` (4/4, CVE-2004-0079 NULL-deref regression), `test-no-mlkem-in-old-tls.py` (12/12, ML-KEM groups rejected in 1.2) → `scripts_12` array. Curated suite 55 → **59 scripts**. Backlog findings: (a) **non-determinism, NOT a server leak** — `test-ecdhe-padded-shared-secret` varies run-to-run (2/1 ↔ 77/0 ↔ 238/0) and `test-tls13-large-number-of-extensions` is occasionally 20/2; a follow-up load probe (600 sequential openssl handshakes vs a fresh `s-server`) **disproved** the server-degradation hypothesis — server fd stayed flat at 8 across all 600 connections, no port exhaustion / accept errors, and `ecdhe-padded` gave the same 2/1 before and after load (load made zero difference). The variance is test-side random sampling of padding-length conversations (one intermittently fails); not curated, to avoid flaky CI. The intermittent fail is a separate script-level item, not a robustness/resource bug; (b) **small-XFAIL candidates**: `signature-algorithms` 275/1, `invalid-cipher-suites` 25/2, `bleichenbacher-workaround` 50/2, `x25519` 20/4; (c) **real-gap / big-XFAIL**: `obsolete-curves` 8/163, `ffdhe-groups` 7/55, `ecdhe-curves` 7/26, `crfg-curves`, `certificate-compression`, `extensions` 215/77, `export-ciphers-rejected` 76/78; (d) **§6.2 read-path I-phase**: `unencrypted-alert` 2/2-fail; (e) **needs cipher-args plumbing**: `chacha20` / `aesccm` / `extended-master-secret-extension` / `downgrade-protection`. Test-only — no production change | 2026-05-24 |
 | 355 | I119 | Impl | TLS 1.3 RFC 8446 §6.2 close-on-received-alert — the server's in-handshake read loops (awaiting client Certificate / CertificateVerify / Finished in `tls13_server_do_handshake_body!`, `crates/hitls-tls/src/macros.rs`) returned `HandshakeFailed("…unexpected_message")` when the client aborted by sending an Alert record (encrypted **or** plaintext) instead of the expected handshake message — so the server replied with its own `unexpected_message` alert. RFC 8446 §6.2 requires closing the connection WITHOUT a responding alert on receipt of a (fatal) alert. Each of the three loops now returns `TlsError::AlertReceived` on `ContentType::Alert`, which `tls_error_to_alert` already maps to `CloseNotify` and `send_fatal_alert_for_error_body!` already suppresses → silent close. The record layer already passes plaintext Alert records through during the encrypted phase, so both the encrypted- and plaintext-alert variants are covered. Closes `test-tls13-unencrypted-alert.py` (2/2-fail → **4/4 PASS**) and curates it into CI (suite 59 → 60). No regression: 1108 `hitls-tls` lib tests + adjacent tlsfuzzer scripts (conversation/finished/ccs/connection-abort/empty-alert/zero-content-type/keyupdate) all PASS; `fmt` + `clippy -D warnings` clean | 2026-05-25 |
+| 356 | I118 | Impl | CMS ML-DSA signer-info verification (FIPS 204 + NIST OIDs) — `pki/cms` SignerInfo verification rejected every ML-DSA signature with "unsupported sig alg" / failed verify, blocking 6 T113 `pki/cms` migration cases. Two defects fixed: **(1) OID** — `known::ml_dsa_44/65/87()` carried the obsolete IETF draft Dilithium arc (`1.3.6.1.4.1.2.267.12.*`) despite the "FIPS 204" doc-comment; retargeted to the NIST CSOR ids `2.16.840.1.101.3.4.3.{17,18,19}` that openHiTLS C (and the wider ecosystem) actually emit. **(2) Signed-message convention** — `verify_signature_with_cert` fed ML-DSA the pre-computed *digest* (correct for RSA/ECDSA hash-then-sign) instead of the message it hashes internally; reworked `verify_signer_info` to also carry the raw `signed_message` (the DER SET re-encoding of signedAttrs, or the content) and the ML-DSA branch now verifies over it. **(3)** CMS uses *pure* ML-DSA (FIPS 204 §5.2) with an empty context, so the bytes fed to the internal `mldsa_verify` (μ = H(tr‖M)) are prefixed with the `0x00 ‖ len(ctx)=0x00` domain separator. Validated against openHiTLS C `cms/signeddata/mldsa/{44,65,87}` fixtures: attached + detached now verify `Ok(true)`, wrong-message rejected. No regression — hitls-pki 457 lib + 1142 migrated + 1 doc PASS, hitls-utils 78 PASS (only `cms/mod.rs` consumes the ml_dsa OIDs), hitls-tls 1108 lib PASS, `fmt` + `clippy -D warnings` (incl. `--no-default-features` + `--all-features --all-targets`) clean | 2026-05-25 |
 
 ---
 
@@ -21475,6 +21476,75 @@ Unblocks the T113 `pki/pkcs12` SDV migration (`PARSE_P12` /
 `PARSE_MACDATA` / `PARSE_AUTHSAFE` families that were failing MAC
 verification). Follow-up (test-enhanced slot): migrate the now-passing
 `pki/pkcs12` parse families.
+
+---
+
+## Phase I118 — CMS ML-DSA SignerInfo Verification (FIPS 204) (2026-05-25)
+
+### Summary
+
+`pki/cms` SignerInfo verification could not verify any ML-DSA signature
+— the dispatch fell through to "unsupported sig alg", and once that was
+fixed the signature still failed to verify. This blocked the 6 T113
+`pki/cms` ML-DSA migration cases (`#[ignore]`d in the SignedData-verify
+phase). Three defects, fixed together:
+
+1. **Wrong OID.** `known::ml_dsa_44/65/87()` carried the obsolete IETF
+   draft Dilithium arc `1.3.6.1.4.1.2.267.12.*` despite the doc-comment
+   claiming FIPS 204. openHiTLS C (and the ecosystem) emit the NIST CSOR
+   ids `2.16.840.1.101.3.4.3.{17,18,19}` (id-ml-dsa-44/65/87).
+   Retargeted the three constants. They are consumed only by
+   `cms/mod.rs` (verify dispatch + one OID-distinctness test), so the
+   change is self-contained.
+
+2. **Wrong signed bytes.** `verify_signature_with_cert` fed ML-DSA the
+   pre-computed *digest* — correct for RSA/ECDSA (hash-then-sign), wrong
+   for ML-DSA, which hashes internally. `verify_signer_info` now also
+   threads the raw `signed_message` (the DER `SET` re-encoding of
+   signedAttrs, or the content when absent); the ML-DSA branch verifies
+   over the message, RSA/ECDSA/EdDSA still use the digest.
+
+3. **Pure-mode domain separator.** CMS uses *pure* ML-DSA (FIPS 204
+   §5.2) with an empty context. `hitls_crypto::mldsa::mldsa_verify` is
+   the *internal* variant (μ = H(tr ‖ M)), so the message handed to it
+   is prefixed with `0x00 ‖ len(ctx)=0x00` to form the pure-mode input.
+
+### Investigation (de-risk)
+
+Against the openHiTLS C `cms/signeddata/mldsa/mldsa44` fixture: the
+entity ML-DSA-44 pubkey parsed to the expected 1312 bytes and the
+signature to 2420 bytes, so key/sig extraction was correct. Trying the
+message candidates pinned the convention: bare `enc_set(attrs)` →
+`false`, but `0x00 ‖ 0x00 ‖ enc_set(attrs)` → `true`, confirming pure
+ML-DSA with empty context over the SET-re-encoded signedAttrs.
+
+### Verification
+
+- C-fixture interop (`feature = mldsa`): `mldsa44/65/87` attached +
+  detached SignedData all verify `Ok(true)`; a mutated detached message
+  is rejected.
+- No regression: hitls-pki **457 lib + 1142 migrated + 1 doc** PASS;
+  hitls-utils **78** PASS; hitls-tls **1108 lib** PASS.
+- `cargo fmt --all -- --check` clean; `clippy -D warnings` clean under
+  both `--no-default-features --features x509,cms` (the no-mldsa path
+  guards `signed_message` against unused-var) and `--all-features
+  --all-targets`.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-utils/src/oid/mod.rs` | Modified | `ml_dsa_44/65/87()` retargeted to NIST FIPS 204 CSOR OIDs. |
+| `crates/hitls-pki/src/cms/mod.rs` | Modified | `verify_signer_info` threads `signed_message`; `verify_signature_with_cert` gains the message param + ML-DSA pure-mode (`00 00` domain prefix) verify over the message; no-mldsa unused-var guard; 3 EdDSA unit-test call sites updated to the new arity. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 354 + Implementation summary I1–I117 → I1–I118. |
+| `PROMPT_LOG.md` | Modified | I118 prompt + result entry. |
+
+### Build Status (Post I118)
+
+Production-code change in `hitls-pki` + `hitls-utils` (CMS ML-DSA verify
+path + ML-DSA OIDs). Unblocks the 6 T113 `pki/cms` ML-DSA SignedData
+migration cases. Follow-up (test-enhanced slot): un-`#[ignore]` those 6
+`tc_cms_sd_verify_mldsa*` tests.
 
 ---
 

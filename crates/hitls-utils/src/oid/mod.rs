@@ -215,17 +215,17 @@ pub mod known {
         Oid::new(&[1, 3, 101, 111])
     }
 
-    /// OID for ML-DSA-44 (FIPS 204).
+    /// OID for ML-DSA-44 (NIST FIPS 204 / CSOR: id-ml-dsa-44 = 2.16.840.1.101.3.4.3.17).
     pub fn ml_dsa_44() -> Oid {
-        Oid::new(&[1, 3, 6, 1, 4, 1, 2, 267, 12, 4, 3])
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 17])
     }
-    /// OID for ML-DSA-65 (FIPS 204).
+    /// OID for ML-DSA-65 (NIST FIPS 204 / CSOR: id-ml-dsa-65 = 2.16.840.1.101.3.4.3.18).
     pub fn ml_dsa_65() -> Oid {
-        Oid::new(&[1, 3, 6, 1, 4, 1, 2, 267, 12, 6, 5])
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 18])
     }
-    /// OID for ML-DSA-87 (FIPS 204).
+    /// OID for ML-DSA-87 (NIST FIPS 204 / CSOR: id-ml-dsa-87 = 2.16.840.1.101.3.4.3.19).
     pub fn ml_dsa_87() -> Oid {
-        Oid::new(&[1, 3, 6, 1, 4, 1, 2, 267, 12, 8, 7])
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 19])
     }
 
     /// OID for AES-128-CBC encryption.

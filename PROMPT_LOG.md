@@ -7517,3 +7517,36 @@ empty-alert/zero-content-type/keyupdate) all rc=0; `fmt` +
 `clippy -D warnings` clean. Ran in an isolated temp worktree
 (`feat/tls13-close-on-received-alert`) since the standard slots are
 occupied by parallel PKI/CMS sessions. Recorded as DEV_LOG `Phase I119`.
+
+---
+
+## Phase I118 — CMS ML-DSA SignerInfo Verification (FIPS 204) (2026-05-25)
+
+> 请继续按照1 执行
+
+(Option 1 = close an implementation gap; chose CMS ML-DSA verify — the
+缺口 already fully recorded in #142, smallest focused unit, unblocks 6
+ignored migration tests.)
+
+pki/cms SignerInfo verification couldn't verify ML-DSA. Three defects
+fixed together:
+1. OID: known::ml_dsa_44/65/87 carried the obsolete draft Dilithium arc
+   (1.3.6.1.4.1.2.267.12.*) despite the "FIPS 204" doc; retargeted to
+   the NIST CSOR ids 2.16.840.1.101.3.4.3.{17,18,19}. Only cms/mod.rs
+   consumes them.
+2. Signed bytes: verify_signature_with_cert fed ML-DSA the digest (right
+   for RSA/ECDSA) instead of the message it hashes internally;
+   verify_signer_info now threads the raw signed_message (enc_set(attrs)
+   or content) and ML-DSA verifies over it.
+3. Pure-mode prefix: CMS uses pure ML-DSA (FIPS 204 §5.2) empty context;
+   mldsa_verify is the internal variant, so prepend 0x00 || 0x00.
+
+De-risk pinned the convention: bare enc_set(attrs) → false, but
+00||00||enc_set(attrs) → true (pubkey 1312B, sig 2420B both correct).
+
+Verification: C mldsa44/65/87 attached+detached verify Ok(true), wrong
+msg rejected; hitls-pki 457 lib + 1142 migrated + 1 doc, hitls-utils 78,
+hitls-tls 1108 lib PASS; fmt + clippy (no-default + all-features) clean.
+
+Recorded as DEV_LOG Phase I118. Follow-up: un-#[ignore] the 6
+tc_cms_sd_verify_mldsa* tests (test-enhanced slot).
