@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I114 (114 phases)
+- Implementation: I1–I115 (115 phases)
 - Testing: T1–T130 (124 phases, T64 + T121 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -349,7 +349,8 @@ Category summary:
 | 342 | I112 | Impl | TLS 1.2 ChangeCipherSpec strict payload + cleartext send conformance — closes `test-ccs.py` `two bytes long CCS` XFAIL. RFC 5246 §7.1: the CCS message "consists of a single byte of value 1"; `process_change_cipher_spec` (TLS 1.2 server **and** client) now rejects any other payload with `unexpected_message` instead of silently accepting (the state machine previously only checked `state == WaitChangeCipherSpec`). Caller-sites updated to forward the CCS fragment (`connection12_async.rs` × 6 + `connection12/{client,server}.rs` × 6). Also fixes a paired send-side asymmetry surfaced by the in-memory renegotiation tests: `RecordLayer::seal_record` was AEAD-encrypting CCS in active-encryption phase (TLS 1.2 renegotiation), but `open_record` skips decryption of CCS — leaving an asymmetric record (RFC 5246 §7.1: CCS is cleartext). `seal_record` now short-circuits CCS to plaintext, matching the read path. **Net XFAIL reduction = 1**: `test-ccs` 2/1 → **3/0**. No regression on 17 adjacent TLS 1.2 + TLS 1.3 scripts; 1108 `hitls-tls` lib tests + integration tests still PASS (28 unit-test call-sites + 2 integration `tests/interop/tests/pki.rs` call-sites updated to the payload-aware signature) | 2026-05-21 |
 | 344 | I113 | Impl | TLS 1.2 RFC 5746 server-side `renegotiation_info` conditional emit — RFC 5746 §3.6: the server MUST include the empty `renegotiation_info` extension in the ServerHello of an initial handshake **only if** the ClientHello carried either the extension itself (§3.4) or the `TLS_EMPTY_RENEGOTIATION_INFO_SCSV` signaling cipher suite (§3.3). Previously hitls's TLS 1.2 server **always** echoed the extension, which OpenSSL / NSS / Go / tlsfuzzer's `_process_extensions` flag as "unadvertised extension". New `client_signalled_secure_renego` state on `Tls12ServerHandshake` set when the CH carries the extension or the SCSV (`0x00FF` added as `CipherSuite::TLS_EMPTY_RENEGOTIATION_INFO_SCSV` in `lib.rs`); both `process_client_hello` + `process_client_hello_resumable` ServerHello-build sites gate the `build_renegotiation_info_initial()` push on the new flag. **Net XFAIL reduction = 1** (1 unique conversation `sanity` reported by tlsfuzzer as 2 entries when run before+after): `test-cve-2016-6309` 0 PASS / 3 XFAIL → **2 PASS / 2 XFAIL** (xfail file shrunk from 3 lines to 2). The 2 remaining XFAILs (`Large ClientHello padding` + `Large incorrect ClientHello length`) are a separate cross-record CH reassembly gap, deferred to a follow-up PR (mirrors the work T104 did for TLS 1.3 server-side, applied to `connection12*`). No regression on 9 adjacent TLS 1.2 + 3 TLS 1.3 scripts; `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
 | 346 | I114 | Impl | TLS 1.2 server-side ClientHello cross-record reassembly — RFC 5246 §6.2.1: a single handshake message MAY span multiple TLSPlaintext records. Pre-I114 the TLS 1.2 server's first read step expected the entire ClientHello to fit in one record (`tls12_read_handshake_msg_body!` reads one record, parses one msg). tlsfuzzer's `test-cve-2016-6309.py` `Large ClientHello padding` fragments a CH carrying a 21,798-byte `client_hello_padding` extension across multiple records to exercise the pre-CVE OpenSSL crash path; we previously rejected the over-large total at parse time with `record_overflow`. New `tls12_read_client_hello_body!` macro (mirror of T104's TLS 1.3 server-side read loop) does cross-record buffer-and-drain: keeps reading Handshake records and concatenating fragments until the buffered prefix carries a complete handshake message (4-byte header + body_len body); rejects non-Handshake interleave with `unexpected_message`. Both sync (`connection12/server.rs`) and async (`connection12_async.rs`) `do_handshake` Step 1 now use the macro. **Net XFAIL reduction = 2**: `test-cve-2016-6309` 2 PASS / 2 XFAIL → **4 PASS / 0 XFAIL** (xfail file removed; closes both `Large ClientHello padding` + `Large incorrect ClientHello length`). No regression on 9 adjacent TLS 1.2 + 7 TLS 1.3 scripts; `hitls-tls` lib tests 1108/0; `fmt` + `clippy -D warnings` clean | 2026-05-21 |
-| 347 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
+| 348 | I115 | Impl | X.509 verifier AKI/SKI issuer-binding hardening (RFC 5280 §4.2.1.1) — `CertificateVerifier::find_issuer` previously used a two-pass "AKI/SKI-first, then DN-only fallback" scheme whose fallback accepted **any** DN-matching candidate even when the end-entity's AKI keyIdentifier was present and mismatched — letting a wrong-key issuer through (chain-confusion risk when two CAs share a Subject DN). Rewrote as a single-pass per-candidate filter: a DN-matching candidate is rejected when (a) the leaf's AKI.keyIdentifier is present AND the candidate publishes a differing SKI, or (b) the leaf's AKI.authorityCertSerialNumber is present AND differs from the candidate's serial (leading-zero normalised). AKI parser (`extensions.rs` + `crl.rs`) extended to decode `authorityCertSerialNumber [2]` (skipping `authorityCertIssuer [1]`); `AuthorityKeyIdentifier` struct gains the field. Closes the 2 verifier-hardening `#[ignore]`s from T113: `tc_line229_x509_vfy_aki_ski_keyid_fail` + `tc_line238_x509_vfy_aki_ski_issuer_serial_fail` (migrated_x509_parse now **1084 PASS / 1 ignored** — the 1 ignore is the rebased-in `VFY_EXT` critical-ext gap, separate follow-up); updated the lax `test_aki_mismatch_falls_to_dn` unit test → `test_aki_keyid_mismatch_rejected` asserting the correct reject. hitls-pki 453 lib + 1084 migrated tests PASS; workspace `fmt` + `clippy -D warnings` clean. No regression (the AKI/SKI-match path already existed for the positive cases; only the buggy fallback was removed) | 2026-05-24 |
+| 349 | T130 | Test | openssl-DTLS interop regression test (task ⑤ D2) — locks in the I106 work with CI regression protection. `tests/interop/tests/openssl_interop.rs` gains `test_openssl_s_client_dtls12` (gated on the existing `#[ignore = "requires external openssl tool"]`): spawns the `dtls12_server_handshake` driver on a UDP socket, runs `openssl s_client -dtls1_2 -brief` against it, asserts both `Dtls12ServerConnection::is_connected()` + `version() == Dtls12` on the server side and openssl's exit-code/handshake-completion on the client side. The 84 in-memory DTLS tests pair our own client with our server, so they cannot catch a regression in any of the 5 *symmetric* DTLS bugs I106 fixed (ServerHello version, missing extensions, multi-record datagrams, AEAD explicit-nonce, handshake-transcript convention) — this test makes openssl the conformance oracle on every ignored-gate CI run | 2026-05-20 |
 
 ---
 
@@ -21209,3 +21210,97 @@ the remaining `pki/verify` families (`VFY_TLS_*EKU_KU_*` /
 `BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN_*`) plus the entire `pki/cms`
 + `pki/pkcs12` SDV suites follow in subsequent T113 commits under
 the no-sub-phase rule.
+
+---
+
+## Phase I115 — X.509 Verifier AKI/SKI Issuer-Binding Hardening (2026-05-24)
+
+### Summary
+
+Closes the 2 verifier-hardening `#[ignore]`s that T113 surfaced
+while migrating the `pki/verify` `VFY_AKI_SKI_*` family. RFC 5280
+§4.2.1.1: the Authority Key Identifier identifies the public key
+that signs the certificate; chain building MUST honour it as an
+issuer-selection constraint. hitls's `find_issuer` was too lax.
+
+### The bug
+
+`CertificateVerifier::find_issuer` used a two-pass scheme:
+
+1. **First pass** — if the leaf's AKI has a keyIdentifier, look for a
+   DN-matching candidate whose SKI equals it; return on match.
+2. **Fallback** — otherwise return *any* DN-matching candidate.
+
+The fallback fired even when the AKI keyId was present and the only
+DN-matching candidate's SKI *differed* — i.e. it accepted a
+wrong-key issuer. With two CAs sharing a Subject DN (a real CA
+rollover / cross-sign scenario), this picks the wrong one. The C
+SDV suite pins the correct behaviour with
+`VFY_AKI_SKI_KEYID_FAIL_TC002` (expects `ISSUE_CERT_NOT_FOUND`).
+
+### The fix
+
+Single-pass, per-candidate filter in `find_issuer`. A candidate
+must match the issuer DN, and then:
+
+* **AKI.keyIdentifier ↔ candidate SKI** — enforced only when *both*
+  are present (RFC 5280 §4.2.1.1 does not require the issuer to
+  publish an SKI; the `VFY_AKI_SKI_UPPER_SKI_MISSING_PASS` case
+  relies on the DN fallback when the candidate has no SKI).
+* **AKI.authorityCertSerialNumber ↔ candidate serial** — enforced
+  whenever the AKI carries it, compared after stripping DER
+  leading-zero padding on both sides.
+
+A candidate failing either binding is skipped (not accepted via a
+DN fallback). If no candidate satisfies the bindings → `IssuerNotFound`.
+
+Supporting changes:
+
+* `x509/extensions.rs`: `AuthorityKeyIdentifier` struct gains
+  `authority_cert_serial_number: Option<Vec<u8>>`; the parser now
+  decodes `[2] authorityCertSerialNumber` (consuming and discarding
+  the intervening `[1] authorityCertIssuer` GeneralNames, which we
+  don't need for serial-based binding).
+* `x509/crl.rs`: the CRL's inline AKI decoder mirrors the same
+  3-field parse so the shared struct is always fully populated.
+* `x509/verify.rs`: local `strip_leading_zeros` helper (serial
+  normalisation) added alongside the other module-level helpers.
+
+### Verification
+
+- `cargo test -p hitls-pki --test migrated_x509_parse`:
+  **1084 PASS / 0 FAIL / 1 ignored** (the 2 previously-ignored
+  `VFY_AKI_SKI_*_FAIL` cases now PASS; the 1 remaining ignore is the
+  `VFY_EXT` critical-extension gap introduced by the rebased-in
+  T113 unknown-extension family — a separate verifier-hardening
+  follow-up, not touched here).
+- `cargo test -p hitls-pki --all-features`: 453 lib + all
+  integration tests PASS. The lax `test_aki_mismatch_falls_to_dn`
+  unit test was updated to `test_aki_keyid_mismatch_rejected`
+  (asserts `IssuerNotFound` — the corrected behaviour).
+- `cargo fmt --all -- --check` clean.
+- `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features
+  --all-targets` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-pki/src/x509/verify.rs` | Modified | `find_issuer` single-pass per-candidate AKI/SKI keyId + serial binding; `strip_leading_zeros` helper; lax unit test reversed to assert reject. |
+| `crates/hitls-pki/src/x509/extensions.rs` | Modified | `AuthorityKeyIdentifier` gains `authority_cert_serial_number`; parser decodes `[1]`/`[2]`. |
+| `crates/hitls-pki/src/x509/crl.rs` | Modified | CRL AKI decoder mirrors the 3-field parse. |
+| `crates/hitls-pki/tests/migrated_x509_parse.rs` | Modified | 2 `#[ignore]`s removed (now PASS); doc comments updated to reference I115. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 348 + Implementation summary I1–I114 → I1–I115. |
+| `PROMPT_LOG.md` | Modified | I115 prompt + result entry. |
+
+### Build Status (Post I115)
+
+hitls-pki 453 lib + 1084 migrated tests PASS (1 ignored — the
+rebased-in `VFY_EXT` critical-ext gap); workspace `fmt` +
+`clippy -D warnings` clean. The X.509 chain builder now enforces
+RFC 5280 §4.2.1.1 AKI/SKI issuer binding, closing 2 of the
+verifier-hardening gaps from the T113 PKI test migration. (Other
+T113-noted verifier-strictness gaps — missing-CRL handling,
+critical-extension rejection, CRL-issuer keyUsage, device-only
+`CRL_DEV` mode, SM2 GM/T user-id, ECDSA P-192 — remain as separate
+follow-up candidates.)

@@ -156,9 +156,27 @@ impl CertificateVerifier {
         self.trusted_certs.iter().any(|t| t.raw == cert.raw)
     }
 
-    /// Find the issuer of `cert` by matching issuer DN and optionally AKI/SKI.
-    /// Prefers AKI/SKI match when available (stronger than DN-only).
-    /// Searches intermediates first, then the trust store.
+    /// Find the issuer of `cert` per RFC 5280 §4.2.1.1 / §6.1.
+    ///
+    /// A candidate must always match by issuer DN. When `cert` carries
+    /// an Authority Key Identifier, the AKI fields further constrain
+    /// which DN-matching candidate is acceptable:
+    ///
+    /// * `keyIdentifier` — if the AKI names a keyIdentifier **and** the
+    ///   candidate publishes a Subject Key Identifier, the two MUST be
+    ///   equal; a mismatch rejects that candidate. If the candidate has
+    ///   no SKI we cannot compare, so we fall back to the DN match
+    ///   (RFC 5280 does not require the issuer to publish an SKI).
+    /// * `authorityCertSerialNumber` — if present, it MUST equal the
+    ///   candidate's serial number (compared after stripping DER
+    ///   leading-zero padding).
+    ///
+    /// Previously this used a two-pass "AKI-first, then DN-only
+    /// fallback" scheme whose fallback accepted **any** DN match even
+    /// when the AKI keyId was present and mismatched — letting a
+    /// wrong-key / wrong-serial issuer through (the gap tlsfuzzer-style
+    /// `VFY_AKI_SKI_*_FAIL` cases exercise). The single-pass,
+    /// per-candidate filter below enforces the AKI binding correctly.
     fn find_issuer(
         &self,
         cert: &Certificate,
@@ -166,25 +184,32 @@ impl CertificateVerifier {
     ) -> Option<Certificate> {
         let aki = cert.authority_key_identifier();
         let aki_key_id = aki.as_ref().and_then(|a| a.key_identifier.as_ref());
+        let aki_serial = aki
+            .as_ref()
+            .and_then(|a| a.authority_cert_serial_number.as_ref());
 
-        // First pass: AKI/SKI match (if AKI has a keyIdentifier)
-        if let Some(key_id) = aki_key_id {
-            for candidate in intermediates.iter().chain(self.trusted_certs.iter()) {
-                if cert.issuer == candidate.subject {
-                    if let Some(ski) = candidate.subject_key_identifier() {
-                        if ski == *key_id {
-                            return Some(candidate.clone());
-                        }
+        for candidate in intermediates.iter().chain(self.trusted_certs.iter()) {
+            if cert.issuer != candidate.subject {
+                continue;
+            }
+            // AKI.keyIdentifier ↔ candidate SKI: enforce only when both
+            // sides are present (RFC 5280 §4.2.1.1).
+            if let Some(key_id) = aki_key_id {
+                if let Some(ski) = candidate.subject_key_identifier() {
+                    if ski != *key_id {
+                        continue;
                     }
                 }
             }
-        }
-
-        // Fallback: DN-only matching
-        for candidate in intermediates.iter().chain(self.trusted_certs.iter()) {
-            if cert.issuer == candidate.subject {
-                return Some(candidate.clone());
+            // AKI.authorityCertSerialNumber ↔ candidate serial: enforce
+            // whenever the AKI carries it. Compare normalised (strip
+            // DER leading-zero padding on both sides).
+            if let Some(serial) = aki_serial {
+                if strip_leading_zeros(serial) != strip_leading_zeros(&candidate.serial_number) {
+                    continue;
+                }
             }
+            return Some(candidate.clone());
         }
         None
     }
@@ -317,6 +342,13 @@ impl CertificateVerifier {
     fn find_crl_for_issuer(&self, issuer: &Certificate) -> Option<&CertificateRevocationList> {
         self.crls.iter().find(|crl| crl.issuer == issuer.subject)
     }
+}
+
+/// Strip DER INTEGER leading-zero padding so two serial numbers that
+/// differ only by a sign-padding `0x00` octet compare equal.
+fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
+    let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+    &bytes[start..]
 }
 
 /// Validate a certificate against NameConstraints (RFC 5280 §4.2.1.10).
@@ -1498,8 +1530,14 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         assert!(result.is_ok(), "DN-only matching should work: {result:?}");
     }
 
+    /// I115 — when the end-entity's AKI keyIdentifier is present AND the
+    /// only DN-matching candidate publishes a (differing) SKI, RFC 5280
+    /// §4.2.1.1 binds the issuer to the keyId: the candidate MUST be
+    /// rejected rather than accepted on a DN-only fallback. Pre-I115
+    /// this returned `Ok` (the lax fallback that masked wrong-key
+    /// issuers); now it is `IssuerNotFound`.
     #[test]
-    fn test_aki_mismatch_falls_to_dn() {
+    fn test_aki_keyid_mismatch_rejected() {
         let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
         let sk = SigningKey::Ed25519(kp);
         let spki = sk.public_key_info().unwrap();
@@ -1531,8 +1569,9 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         v.add_trusted_cert(ca);
         let result = v.verify_cert(&ee, &[]);
         assert!(
-            result.is_ok(),
-            "AKI mismatch should fall back to DN: {result:?}"
+            matches!(result, Err(PkiError::IssuerNotFound)),
+            "AKI keyId mismatch must reject the candidate (RFC 5280 \
+             §4.2.1.1), not fall back to DN: {result:?}"
         );
     }
 

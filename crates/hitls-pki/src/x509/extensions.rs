@@ -33,9 +33,22 @@ pub struct SubjectAltName {
 }
 
 /// Parsed Authority Key Identifier extension (RFC 5280 §4.2.1.1).
+///
+/// ```text
+/// AuthorityKeyIdentifier ::= SEQUENCE {
+///    keyIdentifier             [0] KeyIdentifier           OPTIONAL,
+///    authorityCertIssuer       [1] GeneralNames            OPTIONAL,
+///    authorityCertSerialNumber [2] CertificateSerialNumber OPTIONAL }
+/// ```
 #[derive(Debug, Clone)]
 pub struct AuthorityKeyIdentifier {
     pub key_identifier: Option<Vec<u8>>,
+    /// `authorityCertSerialNumber [2]` — the DER INTEGER content bytes
+    /// of the issuing certificate's serial number, when the AKI names
+    /// the issuer by (authorityCertIssuer, serial) rather than (or in
+    /// addition to) keyIdentifier. Used by chain building to bind the
+    /// candidate issuer's serial (RFC 5280 §4.2.1.1).
+    pub authority_cert_serial_number: Option<Vec<u8>>,
 }
 
 /// Parsed Authority Information Access extension (RFC 5280 §4.2.2.1).
@@ -308,16 +321,35 @@ fn parse_subject_alt_name(value: &[u8]) -> Result<SubjectAltName, PkiError> {
     Ok(san)
 }
 
-/// Parse AuthorityKeyIdentifier: `SEQUENCE { [0] keyIdentifier OPTIONAL, ... }`
+/// Parse AuthorityKeyIdentifier (RFC 5280 §4.2.1.1):
+/// `SEQUENCE { [0] keyIdentifier OPTIONAL, [1] authorityCertIssuer
+/// OPTIONAL, [2] authorityCertSerialNumber OPTIONAL }`. The three
+/// fields appear in tag order; each is optional, so we try them in
+/// sequence and skip any that are absent.
 fn parse_authority_key_identifier(value: &[u8]) -> Result<AuthorityKeyIdentifier, PkiError> {
     let mut dec = Decoder::new(value)
         .read_sequence()
         .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    // [0] keyIdentifier — primitive OCTET STRING content.
     let key_identifier = dec
         .try_read_context_specific(0, false)
         .map_err(|e| PkiError::Asn1Error(e.to_string()))?
         .map(|tlv| tlv.value.to_vec());
-    Ok(AuthorityKeyIdentifier { key_identifier })
+    // [1] authorityCertIssuer — constructed GeneralNames. We don't
+    // use it for matching (the serial below is sufficient to bind the
+    // issuer), but it must be consumed so [2] can be reached.
+    let _authority_cert_issuer = dec
+        .try_read_context_specific(1, true)
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?;
+    // [2] authorityCertSerialNumber — primitive INTEGER content.
+    let authority_cert_serial_number = dec
+        .try_read_context_specific(2, false)
+        .map_err(|e| PkiError::Asn1Error(e.to_string()))?
+        .map(|tlv| tlv.value.to_vec());
+    Ok(AuthorityKeyIdentifier {
+        key_identifier,
+        authority_cert_serial_number,
+    })
 }
 
 /// Parse SubjectKeyIdentifier: the extension value is `OCTET STRING`.

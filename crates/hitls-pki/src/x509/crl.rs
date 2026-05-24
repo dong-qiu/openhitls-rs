@@ -281,7 +281,15 @@ impl CertificateRevocationList {
                     .try_read_context_specific(0, false)
                     .ok()?
                     .map(|tlv| tlv.value.to_vec());
-                Some(AuthorityKeyIdentifier { key_identifier })
+                let _authority_cert_issuer = dec.try_read_context_specific(1, true).ok()?;
+                let authority_cert_serial_number = dec
+                    .try_read_context_specific(2, false)
+                    .ok()?
+                    .map(|tlv| tlv.value.to_vec());
+                Some(AuthorityKeyIdentifier {
+                    key_identifier,
+                    authority_cert_serial_number,
+                })
             })
     }
 

@@ -7062,3 +7062,50 @@ remaining `pki/verify` families (`VFY_TLS_*EKU_KU_*` / `VFY_ANYEKU_*`
 / `VFY_CHAIN_*` / `VFY_DEPTH_CHAINLEN_*` / `VFY_*CHAIN_BINDING_*` /
 `VFY_SIGALG_*` / `STORE_*` / `BUILD_*_CERT_CHAIN_*`) + cms/pkcs12
 suites follow.
+---
+
+## Phase I115 — X.509 Verifier AKI/SKI Issuer-Binding Hardening (2026-05-24)
+
+> 做verufuer-hardening
+
+Picked the verifier-hardening track after the XFAIL-reduction
+sprint (I107–I114) wrapped. T113's PKI test migration had left 2
+`#[ignore]`s documenting that `CertificateVerifier::find_issuer`
+ignored the RFC 5280 §4.2.1.1 AKI/SKI issuer binding.
+
+Root cause: `find_issuer` used a two-pass "AKI/SKI-first then
+DN-only fallback" scheme. The fallback accepted any DN-matching
+candidate even when the leaf's AKI keyId was present and mismatched
+— a wrong-key issuer slips through (chain-confusion when two CAs
+share a Subject DN). The C SDV suite pins the correct behaviour
+(`VFY_AKI_SKI_KEYID_FAIL_TC002` → `ISSUE_CERT_NOT_FOUND`).
+
+Fix: single-pass per-candidate filter. DN must match, then:
+- AKI.keyIdentifier ↔ candidate SKI enforced when both present
+  (the `UPPER_SKI_MISSING_PASS` case still works because a
+  candidate with no SKI can't be compared — DN fallback applies).
+- AKI.authorityCertSerialNumber ↔ candidate serial enforced when
+  the AKI carries it (leading-zero normalised).
+
+Supporting: `AuthorityKeyIdentifier` struct gains
+`authority_cert_serial_number`; the parser (`extensions.rs` +
+`crl.rs`) now decodes `[2] authorityCertSerialNumber` (skipping
+`[1] authorityCertIssuer`). Local `strip_leading_zeros` helper in
+verify.rs.
+
+Closed 2 ignored migrated tests (`tc_line229` keyid mismatch +
+`tc_line238` serial mismatch). `migrated_x509_parse` 1080 PASS / 2
+ignored → **1082 PASS / 0 ignored**. The lax
+`test_aki_mismatch_falls_to_dn` unit test was reversed to
+`test_aki_keyid_mismatch_rejected` (asserts `IssuerNotFound`).
+
+Verification: hitls-pki 453 lib + 1082 migrated PASS; workspace
+`fmt` + `clippy -D warnings` clean. AKI struct change touches only
+hitls-pki (2 construction sites, both updated).
+
+Slot note: ran in the bug-fix worktree (`fix/x509-aki-ski-keyid-
+matching`) — this is a verifier RFC-conformance defect fix, not a
+TLS interop test (feature slot) or a C→Rust migration (test-enhanced
+slot).
+
+Recorded as DEV_LOG Phase I115.
