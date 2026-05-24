@@ -48375,4 +48375,124 @@ fn tc_line3109_x509_vfy_ca_chain_binding_fail() {
     );
 }
 
-// Generation summary: 1094 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
+// ============================================================
+// T113 (continued) — Phase C: `pki/verify` EKU / purpose family
+// (RFC 5280 §4.2.1.12 ExtendedKeyUsage). 6 TCs migrated from
+// openHiTLS C SDV `test_suite_sdv_x509_vfy.c`.
+//
+// The C side uses STORECTX_SET_PURPOSE (TLS_CLIENT / TLS_SERVER /
+// ANY), which is a *joint* EKU + end-entity KeyUsage check: a leaf
+// must carry both the matching EKU purpose AND the matching KU bit
+// (e.g. digitalSignature). hitls's `CertificateVerifier` only has
+// `set_required_eku(oid)` — it checks the EKU OID on the end-entity
+// (or accepts anyExtendedKeyUsage) but does NOT check the
+// end-entity's KeyUsage. So:
+//   * the 3 BOTH-MATCH / ANY PASS cases migrate cleanly (the
+//     fixtures carry both EKU + KU, and the EKU check passes);
+//   * the 3 EKU-ONLY-KU-MISSING FAIL cases CANNOT be reproduced —
+//     hitls accepts them (EKU matches, KU is not inspected) where
+//     C returns PURPOSE_UNMATCH. They are `#[ignore]`d as a
+//     verifier-hardening candidate (add purpose-based end-entity KU
+//     enforcement), in the same bucket as the AKI/SKI gaps that
+//     I115/I116 later closed.
+// ============================================================
+
+/// SDV_X509_VFY_TLS_CLIENT_KU_EKU_BOTH_MATCH_PASS_TC01 clientAuth EKU + KU present
+/// C source: SDV_X509_VFY_TLS_CLIENT_KU_EKU_BOTH_MATCH_PASS_TC01 (line 1965)
+#[test]
+fn tc_line1965_x509_vfy_tls_client_ku_eku_both_match_pass() {
+    let root = load_cert_fixture("cert/chain/eku_suite/rootca.der");
+    let ca = load_cert_fixture("cert/chain/eku_suite/ca.der");
+    let leaf = load_cert_fixture("cert/chain/eku_suite/client_good.der");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    verifier.set_required_eku(hitls_utils::oid::known::kp_client_auth());
+    assert!(verifier.verify_cert(&leaf, &[ca]).is_ok());
+}
+
+/// SDV_X509_VFY_TLS_SERVER_KU_EKU_BOTH_MATCH_PASS_TC03 serverAuth EKU + KU present
+/// C source: SDV_X509_VFY_TLS_SERVER_KU_EKU_BOTH_MATCH_PASS_TC03 (line 2096)
+#[test]
+fn tc_line2096_x509_vfy_tls_server_ku_eku_both_match_pass() {
+    let root = load_cert_fixture("cert/chain/eku_suite/rootca.der");
+    let ca = load_cert_fixture("cert/chain/eku_suite/ca.der");
+    let leaf = load_cert_fixture("cert/chain/eku_suite/server_good.der");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    verifier.set_required_eku(hitls_utils::oid::known::kp_server_auth());
+    assert!(verifier.verify_cert(&leaf, &[ca]).is_ok());
+}
+
+/// SDV_X509_VFY_ANYEKU_EKU_ALLOW_KU_MATCH_PASS_TC05 anyExtendedKeyUsage accepted
+/// C source: SDV_X509_VFY_ANYEKU_EKU_ALLOW_KU_MATCH_PASS_TC05 (line 2228)
+#[test]
+fn tc_line2228_x509_vfy_anyeku_eku_allow_ku_match_pass() {
+    let root = load_cert_fixture("cert/chain/eku_suite/anyEKU/rootca.der");
+    let ca = load_cert_fixture("cert/chain/eku_suite/anyEKU/ca.der");
+    let leaf = load_cert_fixture("cert/chain/eku_suite/anyEKU/anyeku_good.der");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    // PURPOSE_ANY — impose no EKU restriction (RFC 5280 §4.2.1.12:
+    // anyExtendedKeyUsage means the cert is valid for any purpose).
+    assert!(verifier.verify_cert(&leaf, &[ca]).is_ok());
+}
+
+/// SDV_X509_VFY_TLS_CLIENT_EKU_ONLY_KU_MISSING_FAIL_TC02 clientAuth EKU but KU missing
+/// C source: SDV_X509_VFY_TLS_CLIENT_EKU_ONLY_KU_MISSING_FAIL_TC02 (line 2031)
+///
+/// Verifier-hardening gap: C's PURPOSE_TLS_CLIENT also requires the
+/// end-entity's KeyUsage to carry digitalSignature; `client_badku`
+/// has the clientAuth EKU but no digitalSignature KU, so C returns
+/// `PURPOSE_UNMATCH`. hitls's `set_required_eku` checks the EKU only
+/// (no end-entity KU inspection), so it accepts the cert. Needs
+/// purpose-based KU enforcement in `CertificateVerifier`.
+#[test]
+#[ignore = "verifier-hardening gap: no purpose-based end-entity KeyUsage check (EKU+KU joint)"]
+fn tc_line2031_x509_vfy_tls_client_eku_only_ku_missing_fail() {
+    let root = load_cert_fixture("cert/chain/eku_suite/rootca.der");
+    let ca = load_cert_fixture("cert/chain/eku_suite/ca.der");
+    let leaf = load_cert_fixture("cert/chain/eku_suite/client_badku.der");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    verifier.set_required_eku(hitls_utils::oid::known::kp_client_auth());
+    assert!(verifier.verify_cert(&leaf, &[ca]).is_err());
+}
+
+/// SDV_X509_VFY_TLS_SERVER_EKU_ONLY_KU_MISSING_FAIL_TC04 serverAuth EKU but KU missing
+/// C source: SDV_X509_VFY_TLS_SERVER_EKU_ONLY_KU_MISSING_FAIL_TC04 (line 2162)
+///
+/// Same verifier-hardening gap as TC02 (server purpose). `server_badku`
+/// has serverAuth EKU but the wrong / missing KU; C → `PURPOSE_UNMATCH`,
+/// hitls accepts (EKU-only check).
+#[test]
+#[ignore = "verifier-hardening gap: no purpose-based end-entity KeyUsage check (EKU+KU joint)"]
+fn tc_line2162_x509_vfy_tls_server_eku_only_ku_missing_fail() {
+    let root = load_cert_fixture("cert/chain/eku_suite/rootca.der");
+    let ca = load_cert_fixture("cert/chain/eku_suite/ca.der");
+    let leaf = load_cert_fixture("cert/chain/eku_suite/server_badku.der");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    verifier.set_required_eku(hitls_utils::oid::known::kp_server_auth());
+    assert!(verifier.verify_cert(&leaf, &[ca]).is_err());
+}
+
+/// SDV_X509_VFY_ANYEKU_KU_MISSING_FAIL_TC06 anyEKU present but KU missing under TLS_CLIENT purpose
+/// C source: SDV_X509_VFY_ANYEKU_KU_MISSING_FAIL_TC06 (line 2294)
+///
+/// Same verifier-hardening gap: under PURPOSE_TLS_CLIENT, `anyeku_badku`
+/// satisfies the EKU side (anyExtendedKeyUsage) but lacks the
+/// digitalSignature KU; C → `PURPOSE_UNMATCH`, hitls accepts (EKU
+/// matches via anyEKU, KU not inspected).
+#[test]
+#[ignore = "verifier-hardening gap: no purpose-based end-entity KeyUsage check (EKU+KU joint)"]
+fn tc_line2294_x509_vfy_anyeku_ku_missing_fail() {
+    let root = load_cert_fixture("cert/chain/eku_suite/anyEKU/rootca.der");
+    let ca = load_cert_fixture("cert/chain/eku_suite/anyEKU/ca.der");
+    let leaf = load_cert_fixture("cert/chain/eku_suite/anyEKU/anyeku_badku.der");
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root);
+    verifier.set_required_eku(hitls_utils::oid::known::kp_client_auth());
+    assert!(verifier.verify_cert(&leaf, &[ca]).is_err());
+}
+
+// Generation summary: 1100 emitted / 390 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases.
