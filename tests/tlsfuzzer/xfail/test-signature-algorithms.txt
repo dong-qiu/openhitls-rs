@@ -1,0 +1,14 @@
+# T134 — `test-signature-algorithms.py` (TLS 1.2) XFAIL (1 entry).
+#
+# 275 PASS / 1 XFAIL.
+#
+# `explicit SHA-1+RSA/ECDSA`: the client advertises only SHA-1-based
+# signature_algorithms (rsa_pkcs1_sha1 / ecdsa_sha1) and expects the
+# server to proceed (ExpectServerHello). We refuse with a fatal
+# `handshake_failure`: SHA-1 signatures are deprecated (RFC 9155 /
+# NIST SP 800-131A) and our TLS 1.2 server does not sign handshake
+# messages under SHA-1. Refusing is the intended, safe behaviour;
+# tlsfuzzer's expectation here is tied to legacy SHA-1-accepting
+# servers. Won't fix.
+
+explicit SHA-1+RSA/ECDSA

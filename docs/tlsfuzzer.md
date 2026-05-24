@@ -271,12 +271,28 @@ remaining tlsfuzzer effort. Re-run the sweep with
 (7/7), `tls13-pkcs-signature` (8/8), `cve-2004-0079` (4/4, 1.2),
 `no-mlkem-in-old-tls` (12/12, 1.2).
 
-**Mostly-PASS — small-XFAIL curation candidates** (triage the few
-fails, then curate with an XFAIL list):
-`test-signature-algorithms` (275/1, 1.2), `test-invalid-cipher-suites`
-(25/2, 1.3), `test-bleichenbacher-workaround` (50/2, 1.2),
-`test-x25519` (20/4, 1.2), `test-sig-algs` (13/5, 1.2),
-`test-point-extension` (7/2, 1.2).
+**Small-XFAIL candidates — triaged (T134).** Curated 3 with
+per-entry XFAIL lists (each failure classified, none hiding a real
+bug): `test-signature-algorithms` (275/1 — SHA-1-only sig_algs
+refused, won't fix), `test-x25519` (20/4 — 2 ECDHE→DHE cross-kx
+fallback per the I105 gap + 2 malformed-keyshare strictness),
+`test-point-extension` (7/2 — malformed/absent `ec_point_formats`
+leniency). The other 3 candidates are NOT XFAIL material:
+- `test-invalid-cipher-suites` — sanity fails on both ports without
+  a forced cipher; belongs to the cipher-args-plumbing bucket below,
+  not small-XFAIL.
+- `test-bleichenbacher-workaround` — sanity needs static-RSA key
+  exchange (kRSA), which we intentionally do not offer (Bleichenbacher
+  /ROBOT-safe). N/A — cannot be curated (sanity can't be XFAIL'd).
+- `test-sig-algs` (13/5) — **contains a real gap, do NOT XFAIL**: the
+  3 `rsa_pss_pss_*-only` fails are a legitimate cert-type mismatch
+  (our RSA-rsae cert can't satisfy `rsa_pss_pss_*`; the PSS-OID server
+  on :4449 can), BUT `rsa_pss_rsae_sha384 only` → `internal_error`
+  and `rsa_pss_rsae_sha512 only` → `handshake_failure` indicate the
+  **TLS 1.2** server cannot sign CertificateVerify/SKE under
+  `rsa_pss_rsae_sha384/512` — the TLS-1.2 analogue of the TLS 1.3
+  RSA-PSS-SHA-384/512 fix. **I-phase candidate** (TLS 1.2 RSA-PSS-rsae
+  SHA-384/512 signing).
 
 **Non-deterministic — do NOT curate (server is NOT at fault)**:
 `test-ecdhe-padded-shared-secret` (varies 2/1 ↔ 77/0 ↔ 238/0 run to

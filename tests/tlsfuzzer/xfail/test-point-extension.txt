@@ -1,0 +1,19 @@
+# T134 — `test-point-extension.py` (TLS 1.2) XFAIL (2 entries).
+#
+# 7 PASS / 2 XFAIL — `ec_point_formats` strictness.
+#
+# `Uncompressed code point missing in ec_point_formats`: the client
+# sends an `ec_point_formats` extension that omits the mandatory
+# `uncompressed` (0) format; tlsfuzzer expects `illegal_parameter`
+# (47). `Empty ec_point_formats extension`: a zero-length extension
+# body; tlsfuzzer expects `decode_error` (50).
+#
+# Our TLS 1.2 server is lenient: it only ever uses the uncompressed
+# point format, so it tolerates/ignores a malformed-or-absent
+# `ec_point_formats` rather than rejecting with the specific alert.
+# This is a strictness gap (candidate follow-up: validate
+# `ec_point_formats` and reject the two malformed shapes), not a
+# security issue — uncompressed is the only format in play.
+
+Uncompressed code point missing in ec_point_formats
+Empty ec_point_formats extension
