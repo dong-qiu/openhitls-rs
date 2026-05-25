@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I119 (119 phases)
+- Implementation: I1–I121 (121 phases)
 - Testing: T1–T132 (125 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -360,6 +360,7 @@ Category summary:
 | 357 | T134 | Test | tlsfuzzer small-XFAIL curation batch — triaged the 6 "mostly-PASS" backlog candidates from the T133 scan and curated **3** into CI with documented per-entry XFAIL lists (each failing conversation classified; none hiding a real bug): `test-signature-algorithms` (275/1 — SHA-1-only `signature_algorithms` refused, deprecated/won't-fix), `test-x25519` (20/4 — 2 ECDHE→DHE cross-key-exchange fallback per the I105 gap + 2 malformed-keyshare `decode_error` strictness), `test-point-extension` (7/2 — malformed/absent `ec_point_formats` leniency). +302 PASS, 7 XFAIL, 0 FAIL; all `run.sh` rc=0. The other 3 candidates were triaged **out** (deliberately NOT XFAIL'd): `test-invalid-cipher-suites` → sanity fails on both ports without a forced cipher (belongs to the cipher-args-plumbing bucket); `test-bleichenbacher-workaround` → N/A (sanity needs static-RSA `kRSA` key exchange, which we intentionally do not offer — Bleichenbacher/ROBOT-safe); `test-sig-algs` → **real TLS 1.2 gap surfaced** (`rsa_pss_rsae_sha384`-only → `internal_error`, `sha512`-only → `handshake_failure`: the TLS 1.2 server cannot sign CertificateVerify/ServerKeyExchange under RSA-PSS-rsae SHA-384/512 — the TLS-1.2 analogue of the TLS 1.3 RSA-PSS-SHA-384/512 fix), recorded as an I-phase candidate rather than masked behind an XFAIL. Curated suite 60 → 63. Test/CI-config only — no production change | 2026-05-25 |
 | 358 | I120 | Impl | TLS 1.2 server RSA-PSS-rsae SHA-384/512 ServerKeyExchange signing — the TLS 1.2 SKE signing path (`sign_ske_data` in `crates/hitls-tls/src/handshake/server12.rs`) was SHA-256/384-limited and, for PSS, routed through the SHA-256-only `RsaPrivateKey::sign(RsaPadding::Pss, …)` (which asserts a 32-byte digest). So a client offering only `rsa_pss_rsae_sha384` drew `internal_error` (selected, but signing aborted on the 48-byte digest) and `rsa_pss_rsae_sha512` drew `handshake_failure` (the scheme wasn't even in `select_signature_scheme_tls12`'s RSA candidate list). Surfaced by tlsfuzzer `test-sig-algs.py` (T134 triage). Fix mirrors the TLS 1.3 `sign_certificate_verify` path: added `RSA_PSS_RSAE_SHA512` + `RSA_PKCS1_SHA512` to the RSA candidate list, and rewrote the RSA branch to be hash-aware — PKCS#1 v1.5 via `sign(Pkcs1v15Sign, …)` (hash-agnostic) and RSA-PSS via the hash-aware `sign_pss(digest, RsaHashAlg::{Sha256,Sha384,Sha512})` (the crypto primitive already supported 384/512 since T95). Closes `test-sig-algs.py` (13/5 → **15/3 PASS**; the 3 residual `rsa_pss_pss_*-only` XFAILs are a cert-type mismatch — they need the `id-RSASSA-PSS` cert on :4449, not this rsae cert) and curates it into CI (suite 63 → 64). No regression: `hitls-tls` lib 1108/0; adjacent TLS 1.2 signing scripts (signature-algorithms 275/1, x25519 20/4, ecdhe-rsa-key-exchange 3/0, ffdhe-negotiation 38/3) unchanged; `fmt` + `clippy -D warnings` clean | 2026-05-25 |
 | 359 | T135 | Test | tlsfuzzer cipher-args plumbing batch — triaged the 4 "needs cipher-args" backlog candidates; only 1 was an args fix, and the triage surfaced a real bug. **Curated** `test-extended-master-secret-extension.py` with `-d` (ECDHE) + a 9-entry XFAIL list — **9/9** (the 9 PASS cover the RFC 7627 EMS three-state core; the 9 XFAILs are unsupported features: TLS 1.1 (1.2-only), renegotiation (unsupported), TLS 1.2 session resumption (no abbreviated handshake in `s-server`), + 1 malformed-ext `decode_error` strictness). Triaged **out**: `test-chacha20` → **real bug, NOT args** (sanity fails `Alert(fatal, bad_record_mac)` on the client's first encrypted record — our TLS 1.2 ChaCha20-Poly1305 record layer interoperates with itself but not with tlslite-ng, pointing at an RFC 7905 nonce/key-block deviation; recorded as a high-value I-phase candidate, not masked); `test-aesccm` → N/A (`default_tls12_suites()` offers no TLS 1.2 AES-CCM suite — a feature, not args); `test-downgrade-protection` → N/A/won't-fix (sanity fails even with `-d`, and its content checks the TLS 1.3 downgrade sentinel for `(3,1)`/`(3,2)` which we correctly reject with `protocol_version` as a TLS 1.2-only server). Curated suite 64 → 65. Test/CI-config + docs only — no production change | 2026-05-26 |
+| 360 | I121 | Impl | X.509 ML-DSA certificate signature verification (FIPS 204) — `Certificate::verify_signature` rejected ML-DSA-signed certs with "unsupported signature algorithm" (certificate.rs else branch), blocking the T113 PQC cert-chain migration (`BUILD_MLDSA/MLKEM_CERT_CHAIN`). Added an ML-DSA branch (gated `#[cfg(feature = "mldsa")]`) reusing the I118 CMS convention: dispatch on the NIST FIPS 204 OIDs `known::ml_dsa_44/65/87()` → `verify_mldsa_cert`, which verifies the issuer's raw SPKI ML-DSA public key over the TBSCertificate via `hitls_crypto::mldsa::mldsa_verify`, wrapping the message in the FIPS 204 §5.2 *pure*-mode empty-context prefix `0x00 ‖ 0x00 ‖ tbs` (mldsa_verify is the internal variant μ = H(tr‖M)). Validated against the openHiTLS C `cert/chain/mldsa-v3` chain (ML-DSA-65): root self-signed, inter-by-root, end-by-inter all verify `Ok(true)`, wrong-issuer `Ok(false)` — added as a gated unit test `test_mldsa_cert_chain_verify`. Unblocks the ML-DSA + ML-KEM cert-chain migration (ML-KEM leaves are ML-DSA-CA-signed). SLH-DSA cert verify is a separate follow-up (needs a hitls-crypto public-key-only verify entry). No regression — hitls-pki 458 lib (incl. new test) PASS; no-mldsa combos (`x509,pkcs8` / `x509,pkcs8,cms,pkcs12`) 454 PASS (ML-DSA branch cfg-excluded → OID still "unsupported" without the feature); `fmt` + `clippy -D warnings` (incl. `--all-features --all-targets`) clean | 2026-05-26 |
 
 ---
 
@@ -22555,6 +22556,66 @@ this is purely a TLS 1.2 caller fix — no crypto change.
 `hitls-tls` lib 1108/0; curated tlsfuzzer suite **64 scripts**. TLS 1.2
 RSA-PSS-rsae signing now covers SHA-256/384/512 (parity with TLS 1.3);
 the `test-sig-algs` real gap from the T134 backlog is closed.
+
+---
+
+## Phase I121 — X.509 ML-DSA Certificate Signature Verification (FIPS 204) (2026-05-26)
+
+### Summary
+
+`Certificate::verify_signature` could not verify ML-DSA-signed
+certificates — the OID fell through to "unsupported signature
+algorithm" (`certificate.rs` else branch). This blocked the T113 PQC
+cert-chain migration (`BUILD_MLDSA_CERT_CHAIN`, `BUILD_MLKEM_CERT_CHAIN`).
+First half of the "PQC X.509 verify" task; reuses the I118 CMS ML-DSA
+convention end-to-end.
+
+### What changed (`crates/hitls-pki/src/x509/certificate.rs`)
+
+- New branch (gated `#[cfg(feature = "mldsa")]`) in `verify_signature`
+  dispatching on the NIST FIPS 204 OIDs `known::ml_dsa_44/65/87()`
+  (fixed in I118) → `verify_mldsa_cert`.
+- `verify_mldsa_cert(sig_oid, tbs, signature, issuer_pubkey)`: picks the
+  param set from the OID, then `hitls_crypto::mldsa::mldsa_verify` over
+  the issuer's raw SPKI ML-DSA public key and the TBSCertificate. Since
+  `mldsa_verify` is the internal variant (μ = H(tr‖M)) and X.509 uses
+  *pure* ML-DSA (FIPS 204 §5.2) with an empty context, the message is
+  prefixed with `0x00 ‖ len(ctx)=0x00`.
+- The no-mldsa arm keeps the "unsupported" error so non-mldsa builds are
+  unaffected.
+
+This is verify-only (there is no ML-DSA cert *builder*); it feeds the
+chain verifier, since `validate_chain` calls `verify_signature` per link.
+
+### Verification
+
+- New gated unit test `test_mldsa_cert_chain_verify` against the
+  openHiTLS C `cert/chain/mldsa-v3` chain (ML-DSA-65): root self-signed,
+  inter-by-root, end-by-inter all `Ok(true)`; wrong issuer (end-by-root)
+  `Ok(false)`.
+- No regression: hitls-pki **458 lib** PASS (default); no-mldsa combos
+  `x509,pkcs8` and `x509,pkcs8,cms,pkcs12` **454** PASS (ML-DSA branch
+  cfg-excluded → the OID is still "unsupported" without the feature, as
+  before).
+- `fmt` clean; `clippy -D warnings` clean under `--all-features
+  --all-targets` and the no-mldsa `x509,pkcs8` combo.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-pki/src/x509/certificate.rs` | Modified | ML-DSA branch in `verify_signature` + `verify_mldsa_cert` helper (gated) + `test_mldsa_cert_chain_verify`. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 359 + Implementation summary I1–I119 → I1–I121 (I120 already merged via #155). |
+| `PROMPT_LOG.md` | Modified | I121 prompt + result entry. |
+
+### Build Status (Post I121)
+
+Production-code change in `hitls-pki` (X.509 ML-DSA verify). Unblocks
+the ML-DSA + ML-KEM cert-chain migration (ML-KEM leaves are
+ML-DSA-CA-signed). **SLH-DSA cert verify** is the planned follow-up
+(needs a hitls-crypto public-key-only SLH-DSA verify entry + SLH-DSA
+OIDs); then the test-enhanced migration of `BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN`
++ `VFY_MLKEM_KEYUSAGE`.
 
 ---
 

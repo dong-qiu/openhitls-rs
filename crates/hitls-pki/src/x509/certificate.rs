@@ -501,6 +501,27 @@ impl Certificate {
             verify_sm2(&self.tbs_raw, &self.signature_value, &issuer.public_key)
         } else if sig_oid == known::rsassa_pss() {
             verify_rsa_pss(&self.tbs_raw, &self.signature_value, &issuer.public_key)
+        } else if cfg!(feature = "mldsa")
+            && (sig_oid == known::ml_dsa_44()
+                || sig_oid == known::ml_dsa_65()
+                || sig_oid == known::ml_dsa_87())
+        {
+            #[cfg(feature = "mldsa")]
+            {
+                verify_mldsa_cert(
+                    &sig_oid,
+                    &self.tbs_raw,
+                    &self.signature_value,
+                    &issuer.public_key.public_key,
+                )
+            }
+            #[cfg(not(feature = "mldsa"))]
+            {
+                Err(PkiError::InvalidCert(format!(
+                    "unsupported signature algorithm: {}",
+                    sig_oid
+                )))
+            }
         } else {
             Err(PkiError::InvalidCert(format!(
                 "unsupported signature algorithm: {}",
@@ -677,6 +698,37 @@ fn parse_csr_attributes(data: &[u8]) -> Result<Vec<X509Extension>, PkiError> {
     Ok(extensions)
 }
 
+/// Verify an X.509 certificate signature made with pure ML-DSA (FIPS 204).
+///
+/// The signature covers the TBSCertificate. ML-DSA hashes internally, so we
+/// verify over the raw TBS — wrapped in the FIPS 204 §5.2 *pure*-mode prefix
+/// `0x00 || len(ctx)=0x00 || M` (empty context), since `mldsa_verify` is the
+/// internal variant (μ = H(tr || M)). `issuer_pubkey` is the issuer SPKI's raw
+/// ML-DSA public key. Mirrors the I118 CMS ML-DSA verify convention.
+#[cfg(feature = "mldsa")]
+fn verify_mldsa_cert(
+    sig_oid: &Oid,
+    tbs: &[u8],
+    signature: &[u8],
+    issuer_pubkey: &[u8],
+) -> Result<bool, PkiError> {
+    let param_set = if *sig_oid == known::ml_dsa_44() {
+        44u32
+    } else if *sig_oid == known::ml_dsa_65() {
+        65
+    } else {
+        87
+    };
+    let params = hitls_crypto::mldsa::get_params(param_set)
+        .map_err(|e| PkiError::InvalidCert(format!("ML-DSA params: {e}")))?;
+    let mut msg = Vec::with_capacity(2 + tbs.len());
+    msg.push(0x00);
+    msg.push(0x00);
+    msg.extend_from_slice(tbs);
+    hitls_crypto::mldsa::mldsa_verify(issuer_pubkey, &msg, signature, &params)
+        .map_err(|e| PkiError::InvalidCert(format!("ML-DSA verify: {e}")))
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -685,6 +737,35 @@ fn parse_csr_attributes(data: &[u8]) -> Result<Vec<X509Extension>, PkiError> {
 mod tests {
     use super::*;
     use hitls_utils::asn1::Encoder;
+
+    /// ML-DSA X.509 certificate-chain signature verification (FIPS 204).
+    /// Loads the openHiTLS C `mldsa-v3` chain (root self-signed → inter → end,
+    /// all ML-DSA-65) and verifies each issuer binding, plus a negative
+    /// (end signed by inter, not root). Exercises the `verify_mldsa_cert` path.
+    #[cfg(feature = "mldsa")]
+    #[test]
+    fn test_mldsa_cert_chain_verify() {
+        fn load(rel: &str) -> Certificate {
+            let path = format!(
+                "{}/../../tests/vectors/c-asn1-fixtures/cert/chain/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                rel
+            );
+            let bytes = std::fs::read(&path).unwrap();
+            match std::str::from_utf8(&bytes) {
+                Ok(s) if s.contains("-----BEGIN") => Certificate::from_pem(s).unwrap(),
+                _ => Certificate::from_der(&bytes).unwrap(),
+            }
+        }
+        let root = load("mldsa-v3/root.crt");
+        let inter = load("mldsa-v3/inter.crt");
+        let end = load("mldsa-v3/end.crt");
+        assert!(root.verify_signature(&root).unwrap(), "root self-signed");
+        assert!(inter.verify_signature(&root).unwrap(), "inter by root");
+        assert!(end.verify_signature(&inter).unwrap(), "end by inter");
+        // Wrong issuer → signature does not verify.
+        assert!(!end.verify_signature(&root).unwrap(), "end not by root");
+    }
 
     #[test]
     fn test_distinguished_name_display() {
