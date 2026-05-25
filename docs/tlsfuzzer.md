@@ -325,12 +325,31 @@ was also T128-excluded for TLS 1.0/1.1/SSLv2-compat fails.
 `unexpected_message` to a peer abort-alert instead of closing
 silently (RFC 8446 §6.2). Fix unblocks curation.
 
-**Needs cipher-args plumbing** (sanity fails on the default cipher;
-add `tests/tlsfuzzer/args/<script>.txt` with `-d`/`-C`):
-`test-chacha20`, `test-aesccm`, `test-extended-master-secret-extension`,
-`test-downgrade-protection`, `test-dhe-rsa-key-exchange`,
-`test-record-size-limit`, `test-fuzzed-{finished,MAC,padding,plaintext}`,
-etc.
+**Cipher-args plumbing — triaged (T135).** The four headline
+candidates turned out to be mostly NOT a simple args fix:
+- `test-extended-master-secret-extension` — **curated** with `-d`
+  (ECDHE). 9/9; the 9 XFAILs are unsupported features (TLS 1.1,
+  renegotiation, TLS 1.2 session resumption) + 1 malformed-ext
+  strictness. The 9 PASS give regression coverage on our EMS
+  three-state policy.
+- `test-chacha20` — **real bug, NOT args**: sanity fails with
+  `Alert(fatal, bad_record_mac)` on the client's first encrypted
+  record. Our TLS 1.2 ChaCha20-Poly1305 record layer interoperates
+  with itself (`test_tls12_dhe_chacha20_handshake` passes) but not
+  with tlslite-ng — strongly suggesting an RFC 7905 nonce-construction
+  (or key-block) deviation that is self-consistent but wrong on the
+  wire. **High-value I-phase candidate** (TLS 1.2 ChaCha20-Poly1305
+  RFC 7905 interop).
+- `test-aesccm` — **N/A**: `default_tls12_suites()` offers no TLS 1.2
+  AES-CCM suite (CCM is TLS 1.3-only here). Needs new TLS 1.2 CCM
+  cipher suites (a feature), not args.
+- `test-downgrade-protection` — **N/A / won't-fix**: sanity fails even
+  with `-d`, and its substantive conversations check the TLS 1.3
+  downgrade sentinel for `(3,1)`/`(3,2)` — we are TLS 1.2-only and
+  reject those with `protocol_version`, which is correct.
+
+Remaining un-probed cipher-args candidates: `test-dhe-rsa-key-exchange`,
+`test-record-size-limit`, `test-fuzzed-{finished,MAC,padding,plaintext}`.
 
 **Not applicable** — client-side tests, renegotiation/resumption,
 SSLv2, PSK-server-only, and brainpool-curve scripts that need a

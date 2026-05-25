@@ -549,6 +549,11 @@ jobs:
             # (cert-type mismatch: needs the PSS-OID cert on :4449,
             # not this rsae cert). See xfail/test-sig-algs.txt.
             test-sig-algs.py
+            # T135 cipher-args batch (1): EMS. `-d` (args/) negotiates
+            # ECDHE; 9/9 — the 9 XFAILs are unsupported features
+            # (TLS 1.1, renegotiation, TLS 1.2 session resumption) +
+            # 1 malformed-ext strictness. See xfail/.
+            test-extended-master-secret-extension.py
           )
           # Phase T93 — cert-matrix scripts. Each cert type gets its
           # own XFAIL list under `tests/tlsfuzzer/xfail-<key-type>/`

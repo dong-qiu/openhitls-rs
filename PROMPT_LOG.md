@@ -7623,3 +7623,31 @@ Verification: cargo test -p hitls-pki --test migrated_x509_parse 1148
 PASS / 0 FAIL / 4 ignored; fmt + clippy clean. No production change.
 
 Recorded as DEV_LOG Phase T113 (continued) — ML-DSA CMS verify CI-protected.
+
+## Phase T135 — tlsfuzzer Cipher-Args Plumbing Batch (2026-05-26)
+
+> 请继续 cipher-args铺路族（chacha20/aesccm/extended-master-secret/downgrade-protection）
+
+Worked the "needs cipher-args plumbing" bucket. Only 1 of the 4 was an
+args fix; triage surfaced a real bug. (Local note: `/tmp/hitls-certs`
+was again purged by macOS — first run was all-spurious
+ConnectionRefused until certs were regenerated.)
+
+Curated **1**: `test-extended-master-secret-extension.py` with
+`args/`=`-d` (ECDHE) + 9-entry XFAIL → 9 PASS / 9 XFAIL. The 9 PASS
+cover the RFC 7627 EMS three-state core; the 9 XFAILs are unsupported
+features (TLS 1.1, renegotiation, TLS 1.2 session resumption) + 1
+malformed-ext `decode_error` strictness — all verified legit. Suite
+64 → 65.
+
+Triaged **out**: `test-chacha20` → **real bug, not args** (sanity
+`bad_record_mac` on the client's first encrypted record; our TLS 1.2
+ChaCha20-Poly1305 interoperates with itself but not tlslite-ng → RFC
+7905 nonce/key-block deviation; high-value I-phase candidate, not
+masked); `test-aesccm` → N/A (no TLS 1.2 CCM suites — a feature);
+`test-downgrade-protection` → N/A/won't-fix (sanity fails w/ -d; its
+content checks TLS 1.0/1.1 downgrade we correctly reject).
+
+Test/CI-config + docs only; no production change. Ran in an isolated
+temp worktree (`test/tlsfuzzer-cipher-args`). Recorded as DEV_LOG
+`Phase T135`.
