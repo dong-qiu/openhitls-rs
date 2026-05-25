@@ -7604,3 +7604,22 @@ Result: `test-sig-algs.py` 13/5 → **15/3** (3 residual XFAILs are
 
 (a) of the request — PR #153 (T134) was admin-merged (non-production,
 rebased clean) at 2026-05-24T18:30:56Z before starting (b).
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/cms` ML-DSA verify `#[ignore]` cleared (I118 follow-up) (2026-05-25)
+
+> 请继续刚才被终止的任务
+
+Follow-up to I118: un-#[ignore] the 6 tc_cms_sd_verify_mldsa{44,65,87}_
+{attached,detached} cases that were ignored on the CMS ML-DSA verify gap
+I118 has now closed on main. Puts the I118 fix under CI as a
+cross-implementation correctness oracle.
+
+Coverage: 1152 emitted unchanged; 1142 → 1148 PASS, 10 → 4 #[ignore]
+(remaining 4: 3 EKU/KU purpose-KU + 1 pkcs12 empty-password KDF).
+
+Verification: cargo test -p hitls-pki --test migrated_x509_parse 1148
+PASS / 0 FAIL / 4 ignored; fmt + clippy clean. No production change.
+
+Recorded as DEV_LOG Phase T113 (continued) — ML-DSA CMS verify CI-protected.
