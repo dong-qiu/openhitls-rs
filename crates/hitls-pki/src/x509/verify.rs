@@ -305,6 +305,81 @@ impl CertificateVerifier {
             // If no EKU extension → no restriction per RFC 5280 §4.2.1.12
         }
 
+        // End-entity KeyUsage hardening (RFC 5280 §4.2.1.3 + algorithm/TLS
+        // profiles). Previously any leaf KeyUsage was accepted; enforce that
+        // the leaf's KeyUsage is consistent with its key type, and that a TLS
+        // client/server-auth purpose carries digitalSignature.
+        {
+            let ee = &chain[0];
+            let ee_ku = ee.key_usage();
+            let ee_alg = Oid::from_der_value(&ee.public_key.algorithm_oid).ok();
+
+            if let Some(ref alg) = ee_alg {
+                let is_mldsa = *alg == known::ml_dsa_44()
+                    || *alg == known::ml_dsa_65()
+                    || *alg == known::ml_dsa_87();
+                // ML-KEM (NIST CSOR id-alg-ml-kem-512/768/1024) has no `known::`
+                // helper; match by dotted form.
+                let is_mlkem = matches!(
+                    alg.to_dot_string().as_str(),
+                    "2.16.840.1.101.3.4.4.1" | "2.16.840.1.101.3.4.4.2" | "2.16.840.1.101.3.4.4.3"
+                );
+
+                if is_mldsa {
+                    // Signature-only key: must not assert key-establishment usages.
+                    if let Some(ku) = ee_ku {
+                        let establishment = KeyUsage::KEY_ENCIPHERMENT
+                            | KeyUsage::DATA_ENCIPHERMENT
+                            | KeyUsage::KEY_AGREEMENT;
+                        if ku.0 & establishment != 0 {
+                            return Err(PkiError::KeyUsageViolation(
+                                "ML-DSA end-entity asserts key-establishment KeyUsage bits".into(),
+                            ));
+                        }
+                    }
+                } else if is_mlkem {
+                    // Key-establishment-only key: must carry keyEncipherment/
+                    // keyAgreement and must not assert any signing usage.
+                    match ee_ku {
+                        None => {
+                            return Err(PkiError::KeyUsageViolation(
+                                "ML-KEM end-entity missing KeyUsage (keyEncipherment/keyAgreement required)"
+                                    .into(),
+                            ))
+                        }
+                        Some(ku) => {
+                            if ku.0 & (KeyUsage::KEY_ENCIPHERMENT | KeyUsage::KEY_AGREEMENT) == 0 {
+                                return Err(PkiError::KeyUsageViolation(
+                                    "ML-KEM end-entity lacks keyEncipherment/keyAgreement".into(),
+                                ));
+                            }
+                            if ku.0
+                                & (KeyUsage::DIGITAL_SIGNATURE
+                                    | KeyUsage::KEY_CERT_SIGN
+                                    | KeyUsage::CRL_SIGN)
+                                != 0
+                            {
+                                return Err(PkiError::KeyUsageViolation(
+                                    "ML-KEM end-entity asserts signing KeyUsage bits".into(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // TLS client/server authentication requires digitalSignature.
+            if let Some(ref required) = self.required_eku {
+                if (*required == known::kp_client_auth() || *required == known::kp_server_auth())
+                    && ee_ku.is_some_and(|ku| !ku.has(KeyUsage::DIGITAL_SIGNATURE))
+                {
+                    return Err(PkiError::KeyUsageViolation(
+                        "TLS client/server-auth end-entity lacks digitalSignature KeyUsage".into(),
+                    ));
+                }
+            }
+        }
+
         // Revocation checking (if enabled)
         if self.check_revocation {
             self.check_revocation_status(chain)?;

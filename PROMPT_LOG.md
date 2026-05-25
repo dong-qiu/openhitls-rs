@@ -7739,3 +7739,33 @@ Verification: 1150 PASS / 0 FAIL / 8 ignored; no-mldsa combo 1142/5;
 fmt + clippy (all-features + no-mldsa) clean. Test-only (rides on I121).
 
 Recorded as DEV_LOG Phase T113 (continued) — PQC cert-chains.
+
+---
+
+## Phase I123 — X.509 End-Entity KeyUsage Hardening (RFC 5280 §4.2.1.3) (2026-05-26)
+
+> 请依次完成(a)和(b)
+
+(a) of the request: end-entity KeyUsage-vs-keytype enforcement.
+validate_chain accepted any leaf KeyUsage, leaving 6 T113 #[ignore]s.
+
+Added a leaf-KeyUsage block in verify.rs validate_chain (3 rules):
+1. ML-DSA leaf (pubkey OID ml_dsa_44/65/87): signature-only → must not
+   assert keyEncipherment/dataEncipherment/keyAgreement.
+2. ML-KEM leaf (pubkey OID 2.16.840.1.101.3.4.4.{1,2,3}, by dotted
+   form): key-establishment-only → must carry keyEncipherment/
+   keyAgreement and must not assert any signing bit; missing KU rejected.
+3. TLS client/server auth (set_required_eku kp_client/server_auth):
+   leaf must carry digitalSignature.
+
+Rules 1-2 trigger only for PQC pubkey OIDs, rule 3 only when an auth EKU
+is required → no regression for non-PQC/no-purpose verification.
+
+Verified vs C fixtures (KU bits inspected): 5 valid leaves still verify
+(mldsa/mlkem/end, client/server/anyeku_good); 6 bad-KU leaves now reject
+(mldsa 0xb0, mlkem 0x80/none, client/server/anyeku_badku). No regression:
+hitls-pki 458 lib + 1150 migrated + 1 doc; clippy (all-features +
+no-mldsa) + fmt clean.
+
+Recorded as DEV_LOG Phase I123. Follow-up: un-#[ignore] the 6 KU tests
+(test-enhanced). Then (b): SLH-DSA primitive C-interop investigation.
