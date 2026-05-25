@@ -48878,6 +48878,7 @@ mod cms_signeddata_verify {
     /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
     /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
+    #[cfg(feature = "mldsa")]
     fn tc_cms_sd_verify_mldsa44_attached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa44/mldsa44_attached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa44/ca_cert.pem");
@@ -48891,6 +48892,7 @@ mod cms_signeddata_verify {
     /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
     /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
+    #[cfg(feature = "mldsa")]
     fn tc_cms_sd_verify_mldsa44_detached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa44/mldsa44_detached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa44/ca_cert.pem");
@@ -48912,6 +48914,7 @@ mod cms_signeddata_verify {
     /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
     /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
+    #[cfg(feature = "mldsa")]
     fn tc_cms_sd_verify_mldsa65_attached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa65/mldsa65_attached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa65/ca_cert.pem");
@@ -48925,6 +48928,7 @@ mod cms_signeddata_verify {
     /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
     /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
+    #[cfg(feature = "mldsa")]
     fn tc_cms_sd_verify_mldsa65_detached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa65/mldsa65_detached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa65/ca_cert.pem");
@@ -48946,6 +48950,7 @@ mod cms_signeddata_verify {
     /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
     /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
+    #[cfg(feature = "mldsa")]
     fn tc_cms_sd_verify_mldsa87_attached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa87/mldsa87_attached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa87/ca_cert.pem");
@@ -48959,6 +48964,7 @@ mod cms_signeddata_verify {
     /// signedAttrs; the CMS signer-info OID dispatch + empty-context domain
     /// separator landed in I118, so this verifies against the openHiTLS C fixture.
     #[test]
+    #[cfg(feature = "mldsa")]
     fn tc_cms_sd_verify_mldsa87_detached() {
         let m = CmsMessage::from_der(&cms_raw("mldsa/mldsa87/mldsa87_detached.cms")).unwrap();
         let ca = cms_ca("mldsa/mldsa87/ca_cert.pem");

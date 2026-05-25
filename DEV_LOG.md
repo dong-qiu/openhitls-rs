@@ -22576,6 +22576,11 @@ Coverage: 1152 emitted unchanged; **1142 → 1148 PASS, 10 → 4 `#[ignore]`**.
 - Removed the `#[ignore = "impl gap: CMS verify_signer_info lacks
   ML-DSA OID dispatch …"]` from all 6 `tc_cms_sd_verify_mldsa{44,65,87}_{attached,detached}`;
   the assertions (already written to expect verify-OK) now run.
+- Gated the 6 ML-DSA tests on `#[cfg(feature = "mldsa")]`: the I118 verify
+  dispatch is itself mldsa-gated, so without that feature (e.g. the CI
+  `pki-auth` `--no-default-features --features cms` combo) verification
+  returns "unsupported sig alg" — the gate confines these cases to builds
+  that can satisfy them (was masked while they were `#[ignore]`d).
 - Rewrote their doc-comments from "production-code gap" to record that
   pure ML-DSA (FIPS 204 §5.2) verification over the signedAttrs landed
   in I118.
