@@ -49322,4 +49322,102 @@ mod pkcs12_encode_p12 {
     }
 }
 
-// Generation summary: 1152 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12 unblocked by I117; +8 pki/pkcs12 ENCODE_P12 round-trip via Pkcs12::create; 6 ML-DSA CMS-verify #[ignore] cleared by I118).
+// PQC certificate-chain verification — SDV_X509_BUILD_MLDSA_CERT_CHAIN /
+// BUILD_MLKEM_CERT_CHAIN / VFY_MLKEM_KEYUSAGE / BUILD_SLHDSA_CERT_CHAIN
+// C source: pki/verify/test_suite_sdv_x509_vfy.c (lines 1439 / 1582 / 1635 / 1482).
+//
+// Verify a PQC certificate chain (root → inter → end) via the full
+// `CertificateVerifier`. ML-DSA / ML-KEM leaves are signed by an ML-DSA CA, so
+// these exercise the I121 X.509 ML-DSA `verify_signature` dispatch end-to-end.
+// Fixtures: mirrored `cert/chain/{mldsa-v3,mlkem,slhdsa/<variant>}`.
+//
+// The `mldsa`/`mlkem` cases are gated on `feature = "mldsa"` because the I121
+// verify dispatch is itself mldsa-gated (without it the ML-DSA OID is
+// "unsupported"); see the I118 follow-up CI lesson.
+
+/// BUILD_MLDSA_CERT_CHAIN positive: ML-DSA-65 root→inter→end verifies.
+#[cfg(feature = "mldsa")]
+#[test]
+fn tc_build_mldsa_cert_chain() {
+    let root = load_cert_fixture("cert/chain/mldsa-v3/root.crt");
+    let inter = load_cert_fixture("cert/chain/mldsa-v3/inter.crt");
+    let end = load_cert_fixture("cert/chain/mldsa-v3/end.crt");
+    let mut v = CertificateVerifier::new();
+    v.add_trusted_cert(root);
+    assert!(v.verify_cert(&end, &[inter]).is_ok());
+}
+
+/// BUILD_MLKEM_CERT_CHAIN + VFY_MLKEM_KEYUSAGE positive: ML-KEM leaf under an
+/// ML-DSA CA chain verifies (the chain signatures are ML-DSA).
+#[cfg(feature = "mldsa")]
+#[test]
+fn tc_build_mlkem_cert_chain() {
+    let root = load_cert_fixture("cert/chain/mlkem/root.crt");
+    let inter = load_cert_fixture("cert/chain/mlkem/inter.crt");
+    let end = load_cert_fixture("cert/chain/mlkem/end.crt");
+    let mut v = CertificateVerifier::new();
+    v.add_trusted_cert(root);
+    assert!(v.verify_cert(&end, &[inter]).is_ok());
+}
+
+/// BUILD_MLDSA_CERT_CHAIN invalid-KeyUsage leaf: C rejects (PURPOSE/KU), but
+/// hitls's verifier has no purpose-based end-entity KeyUsage-vs-keytype check
+/// (same gap as the EKU/KU family), so it accepts. Verifier-hardening candidate.
+#[cfg(feature = "mldsa")]
+#[test]
+#[ignore = "verifier-hardening gap: no end-entity KeyUsage-vs-keytype enforcement (ML-DSA leaf)"]
+fn tc_build_mldsa_cert_chain_invalid_ku() {
+    let root = load_cert_fixture("cert/chain/mldsa-v3/root.crt");
+    let inter = load_cert_fixture("cert/chain/mldsa-v3/inter.crt");
+    let end = load_cert_fixture("cert/chain/mldsa-v3/end_with_invalid_key_usage.crt");
+    let mut v = CertificateVerifier::new();
+    v.add_trusted_cert(root);
+    assert!(v.verify_cert(&end, &[inter]).is_err());
+}
+
+/// VFY_MLKEM_KEYUSAGE invalid-KU: ML-KEM leaf with a forbidden KU bit. Same
+/// end-entity KeyUsage gap — hitls accepts where C rejects.
+#[cfg(feature = "mldsa")]
+#[test]
+#[ignore = "verifier-hardening gap: no end-entity KeyUsage-vs-keytype enforcement (ML-KEM leaf)"]
+fn tc_vfy_mlkem_keyusage_invalid_ku() {
+    let root = load_cert_fixture("cert/chain/mlkem/root.crt");
+    let inter = load_cert_fixture("cert/chain/mlkem/inter.crt");
+    let end = load_cert_fixture("cert/chain/mlkem/end_invalid_ku.crt");
+    let mut v = CertificateVerifier::new();
+    v.add_trusted_cert(root);
+    assert!(v.verify_cert(&end, &[inter]).is_err());
+}
+
+/// VFY_MLKEM_KEYUSAGE missing-KU: ML-KEM leaf lacking the required KU bit. Same
+/// end-entity KeyUsage gap.
+#[cfg(feature = "mldsa")]
+#[test]
+#[ignore = "verifier-hardening gap: no end-entity KeyUsage-vs-keytype enforcement (ML-KEM leaf)"]
+fn tc_vfy_mlkem_keyusage_missing_ku() {
+    let root = load_cert_fixture("cert/chain/mlkem/root.crt");
+    let inter = load_cert_fixture("cert/chain/mlkem/inter.crt");
+    let end = load_cert_fixture("cert/chain/mlkem/end_missing_ku.crt");
+    let mut v = CertificateVerifier::new();
+    v.add_trusted_cert(root);
+    assert!(v.verify_cert(&end, &[inter]).is_err());
+}
+
+/// BUILD_SLHDSA_CERT_CHAIN (sha2-128s, representative): C verifies the SLH-DSA
+/// chain. hitls is blocked at the *primitive* level — `hitls-crypto`'s SLH-DSA
+/// verifies its own signatures but not openHiTLS C's (a FIPS 205 interop gap,
+/// confirmed by de-risk: self-roundtrip OK, C-signature `Ok(false)`), and
+/// X.509 `verify_signature` has no SLH-DSA dispatch yet. Unignore once the
+/// SLH-DSA primitive C-interop + cert dispatch land.
+#[test]
+#[ignore = "blocked: hitls-crypto SLH-DSA primitive does not interop with openHiTLS C signatures (FIPS 205) + no X.509 SLH-DSA verify dispatch"]
+fn tc_build_slhdsa_cert_chain_sha2_128s() {
+    let root = load_cert_fixture("cert/chain/slhdsa/sha2_128s/root.crt");
+    let inter = load_cert_fixture("cert/chain/slhdsa/sha2_128s/inter.crt");
+    let end = load_cert_fixture("cert/chain/slhdsa/sha2_128s/end.crt");
+    let mut v = CertificateVerifier::new();
+    v.add_trusted_cert(root);
+    assert!(v.verify_cert(&end, &[inter]).is_ok());
+}
+
+// Generation summary: 1158 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12 unblocked by I117; +8 pki/pkcs12 ENCODE_P12; 6 ML-DSA CMS-verify cleared by I118; +6 PQC cert-chains: 2 active ML-DSA/ML-KEM (I121) + 3 #[ignore] end-entity-KU gap + 1 #[ignore] SLH-DSA primitive gap).

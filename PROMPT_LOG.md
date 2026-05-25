@@ -7713,3 +7713,29 @@ separate read-path follow-up. Ran in isolated temp worktree
 
 (a) — PR #156 (T135) was admin-merged at 2026-05-25T17:00:09Z before
 starting (b).
+
+---
+
+## Phase T113 (continued) — Phase C: `pki/verify` PQC cert-chains (I121 follow-up) (2026-05-26)
+
+> #154 合并后,按你定的方向开始 ① ML-DSA X.509 证书链验签 / ② SLH-DSA cert 验签
+
+③ of the PQC X.509 plan: migrate the PQC cert-chain families. 6 tests:
+2 active + 4 #[ignore]. Coverage 1152 → 1158 emitted = 1150 PASS + 8
+#[ignore].
+
+- Active (gated #[cfg(feature="mldsa")]): tc_build_mldsa_cert_chain,
+  tc_build_mlkem_cert_chain — ML-DSA/ML-KEM root→inter→end verify via
+  CertificateVerifier, unblocked by I121.
+- #[ignore] end-entity-KU gap (3): mldsa/mlkem invalid-ku + mlkem
+  missing-ku — verifier has no leaf-KU-vs-keytype check (EKU/KU family).
+- #[ignore] SLH-DSA (1): blocked at the primitive — hitls-crypto SLH-DSA
+  verifies its own sigs but not C's (de-risk: self-roundtrip OK, C-sig
+  Ok(false); pk 32B / sig 7856B correct, neither bare nor 00||00 works).
+  ② SLH-DSA cert verify abandoned at the X.509 layer; the SLH-DSA
+  primitive C-interop is a separate deep investigation.
+
+Verification: 1150 PASS / 0 FAIL / 8 ignored; no-mldsa combo 1142/5;
+fmt + clippy (all-features + no-mldsa) clean. Test-only (rides on I121).
+
+Recorded as DEV_LOG Phase T113 (continued) — PQC cert-chains.
