@@ -359,6 +359,7 @@ Category summary:
 | 356 | I118 | Impl | CMS ML-DSA signer-info verification (FIPS 204 + NIST OIDs) — `pki/cms` SignerInfo verification rejected every ML-DSA signature with "unsupported sig alg" / failed verify, blocking 6 T113 `pki/cms` migration cases. Two defects fixed: **(1) OID** — `known::ml_dsa_44/65/87()` carried the obsolete IETF draft Dilithium arc (`1.3.6.1.4.1.2.267.12.*`) despite the "FIPS 204" doc-comment; retargeted to the NIST CSOR ids `2.16.840.1.101.3.4.3.{17,18,19}` that openHiTLS C (and the wider ecosystem) actually emit. **(2) Signed-message convention** — `verify_signature_with_cert` fed ML-DSA the pre-computed *digest* (correct for RSA/ECDSA hash-then-sign) instead of the message it hashes internally; reworked `verify_signer_info` to also carry the raw `signed_message` (the DER SET re-encoding of signedAttrs, or the content) and the ML-DSA branch now verifies over it. **(3)** CMS uses *pure* ML-DSA (FIPS 204 §5.2) with an empty context, so the bytes fed to the internal `mldsa_verify` (μ = H(tr‖M)) are prefixed with the `0x00 ‖ len(ctx)=0x00` domain separator. Validated against openHiTLS C `cms/signeddata/mldsa/{44,65,87}` fixtures: attached + detached now verify `Ok(true)`, wrong-message rejected. No regression — hitls-pki 457 lib + 1142 migrated + 1 doc PASS, hitls-utils 78 PASS (only `cms/mod.rs` consumes the ml_dsa OIDs), hitls-tls 1108 lib PASS, `fmt` + `clippy -D warnings` (incl. `--no-default-features` + `--all-features --all-targets`) clean | 2026-05-25 |
 | 357 | T134 | Test | tlsfuzzer small-XFAIL curation batch — triaged the 6 "mostly-PASS" backlog candidates from the T133 scan and curated **3** into CI with documented per-entry XFAIL lists (each failing conversation classified; none hiding a real bug): `test-signature-algorithms` (275/1 — SHA-1-only `signature_algorithms` refused, deprecated/won't-fix), `test-x25519` (20/4 — 2 ECDHE→DHE cross-key-exchange fallback per the I105 gap + 2 malformed-keyshare `decode_error` strictness), `test-point-extension` (7/2 — malformed/absent `ec_point_formats` leniency). +302 PASS, 7 XFAIL, 0 FAIL; all `run.sh` rc=0. The other 3 candidates were triaged **out** (deliberately NOT XFAIL'd): `test-invalid-cipher-suites` → sanity fails on both ports without a forced cipher (belongs to the cipher-args-plumbing bucket); `test-bleichenbacher-workaround` → N/A (sanity needs static-RSA `kRSA` key exchange, which we intentionally do not offer — Bleichenbacher/ROBOT-safe); `test-sig-algs` → **real TLS 1.2 gap surfaced** (`rsa_pss_rsae_sha384`-only → `internal_error`, `sha512`-only → `handshake_failure`: the TLS 1.2 server cannot sign CertificateVerify/ServerKeyExchange under RSA-PSS-rsae SHA-384/512 — the TLS-1.2 analogue of the TLS 1.3 RSA-PSS-SHA-384/512 fix), recorded as an I-phase candidate rather than masked behind an XFAIL. Curated suite 60 → 63. Test/CI-config only — no production change | 2026-05-25 |
 | 358 | I120 | Impl | TLS 1.2 server RSA-PSS-rsae SHA-384/512 ServerKeyExchange signing — the TLS 1.2 SKE signing path (`sign_ske_data` in `crates/hitls-tls/src/handshake/server12.rs`) was SHA-256/384-limited and, for PSS, routed through the SHA-256-only `RsaPrivateKey::sign(RsaPadding::Pss, …)` (which asserts a 32-byte digest). So a client offering only `rsa_pss_rsae_sha384` drew `internal_error` (selected, but signing aborted on the 48-byte digest) and `rsa_pss_rsae_sha512` drew `handshake_failure` (the scheme wasn't even in `select_signature_scheme_tls12`'s RSA candidate list). Surfaced by tlsfuzzer `test-sig-algs.py` (T134 triage). Fix mirrors the TLS 1.3 `sign_certificate_verify` path: added `RSA_PSS_RSAE_SHA512` + `RSA_PKCS1_SHA512` to the RSA candidate list, and rewrote the RSA branch to be hash-aware — PKCS#1 v1.5 via `sign(Pkcs1v15Sign, …)` (hash-agnostic) and RSA-PSS via the hash-aware `sign_pss(digest, RsaHashAlg::{Sha256,Sha384,Sha512})` (the crypto primitive already supported 384/512 since T95). Closes `test-sig-algs.py` (13/5 → **15/3 PASS**; the 3 residual `rsa_pss_pss_*-only` XFAILs are a cert-type mismatch — they need the `id-RSASSA-PSS` cert on :4449, not this rsae cert) and curates it into CI (suite 63 → 64). No regression: `hitls-tls` lib 1108/0; adjacent TLS 1.2 signing scripts (signature-algorithms 275/1, x25519 20/4, ecdhe-rsa-key-exchange 3/0, ffdhe-negotiation 38/3) unchanged; `fmt` + `clippy -D warnings` clean | 2026-05-25 |
+| 359 | T135 | Test | tlsfuzzer cipher-args plumbing batch — triaged the 4 "needs cipher-args" backlog candidates; only 1 was an args fix, and the triage surfaced a real bug. **Curated** `test-extended-master-secret-extension.py` with `-d` (ECDHE) + a 9-entry XFAIL list — **9/9** (the 9 PASS cover the RFC 7627 EMS three-state core; the 9 XFAILs are unsupported features: TLS 1.1 (1.2-only), renegotiation (unsupported), TLS 1.2 session resumption (no abbreviated handshake in `s-server`), + 1 malformed-ext `decode_error` strictness). Triaged **out**: `test-chacha20` → **real bug, NOT args** (sanity fails `Alert(fatal, bad_record_mac)` on the client's first encrypted record — our TLS 1.2 ChaCha20-Poly1305 record layer interoperates with itself but not with tlslite-ng, pointing at an RFC 7905 nonce/key-block deviation; recorded as a high-value I-phase candidate, not masked); `test-aesccm` → N/A (`default_tls12_suites()` offers no TLS 1.2 AES-CCM suite — a feature, not args); `test-downgrade-protection` → N/A/won't-fix (sanity fails even with `-d`, and its content checks the TLS 1.3 downgrade sentinel for `(3,1)`/`(3,2)` which we correctly reject with `protocol_version` as a TLS 1.2-only server). Curated suite 64 → 65. Test/CI-config + docs only — no production change | 2026-05-26 |
 
 ---
 
@@ -22608,3 +22609,79 @@ cases + 1 pkcs12 empty-password BMPString KDF case.
 
 Test-only — rides on the I118 production fix (already merged). The
 I118 ML-DSA CMS verify path is now exercised on every CI run.
+
+---
+
+## Phase T135 — tlsfuzzer Cipher-Args Plumbing Batch (2026-05-26)
+
+### Summary
+
+Worked the T133 backlog's "needs cipher-args plumbing" bucket
+(`chacha20` / `aesccm` / `extended-master-secret-extension` /
+`downgrade-protection`). Hypothesis was that these only fail sanity
+for lack of a forced cipher/`-d`. Triage showed only **1** was an
+args fix — and surfaced a real bug.
+
+(Aside — re-confirmed the local-env fragility: `/tmp/hitls-certs/`
+had again been purged by the macOS `/tmp` cleaner; the first run
+produced all-spurious `ConnectionRefused` "failures" until the certs
+were regenerated. Reinforces the T132 note to add a `make
+tlsfuzzer-setup` that regenerates certs into a gitignored in-repo dir.)
+
+### Curated (1)
+
+`test-extended-master-secret-extension.py` (TLS 1.2, `scripts_12`)
+with `args/` = `-d` (negotiate ECDHE) + a 9-entry XFAIL list:
+**9 PASS / 9 XFAIL / 0 FAIL**. The 9 PASS exercise the RFC 7627 EMS
+three-state core (offered / not-offered / present-in-1.2) — real
+regression coverage for our EMS policy. The 9 XFAILs are all
+unsupported features / deliberate divergences (verified, none a real
+EMS bug):
+- TLS 1.1 ×2 (we are TLS 1.2-only → `protocol_version`);
+- renegotiation ×3 (unsupported → `unexpected_message`);
+- TLS 1.2 session resumption ×3 (no abbreviated handshake in
+  `s-server` → full handshake instead of resumed ServerHello);
+- malformed-EMS-ext ×1 (RFC 7627: body MUST be empty; we are lenient
+  where tlsfuzzer wants `decode_error` — strictness follow-up).
+
+### Triaged OUT
+
+- **`test-chacha20` — real bug, NOT args.** Sanity fails with
+  `Alert(fatal, bad_record_mac)` on the client's *first encrypted
+  record*. Our TLS 1.2 ChaCha20-Poly1305 record layer interoperates
+  with itself (`test_tls12_dhe_chacha20_handshake` passes) but not
+  with tlslite-ng → an RFC 7905 nonce-construction (or key-block)
+  deviation that is self-consistent but wrong on the wire.
+  **High-value I-phase candidate** — flagged, not masked.
+- **`test-aesccm` — N/A.** `default_tls12_suites()` offers no TLS 1.2
+  AES-CCM suite (CCM is TLS 1.3-only here); needs new cipher suites
+  (a feature), not args.
+- **`test-downgrade-protection` — N/A / won't-fix.** Sanity fails even
+  with `-d`; its substantive conversations check the TLS 1.3 downgrade
+  sentinel for `(3,1)`/`(3,2)`, which a TLS 1.2-only server correctly
+  rejects with `protocol_version`.
+
+### Verification
+
+- `run.sh` (args + xfail) rc=0: EMS **9/9** (0 FAIL / 0 XPASS).
+- Local env: tlsfuzzer @ `bf7f579` + tlslite-ng @ `02d1506` vs a
+  fresh release `s-server` (TLS 1.2 `:4445`, regenerated certs).
+- Test/CI-config + docs only; no production code touched.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.github/workflows/tlsfuzzer.yml` | Modified | +1 script in `scripts_12`. |
+| `tests/tlsfuzzer/args/test-extended-master-secret-extension.txt` | Added | `-d`. |
+| `tests/tlsfuzzer/xfail/test-extended-master-secret-extension.txt` | Added | 9-entry XFAIL. |
+| `docs/tlsfuzzer.md` | Modified | Cipher-args bucket updated with the T135 triage outcomes + the chacha20 I-phase finding. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 359 (T135). |
+| `PROMPT_LOG.md` | Modified | T135 prompt + result entry. |
+
+### Build Status (Post T135)
+
+Curated tlsfuzzer suite **65 scripts**. No production code changed.
+Surfaced one high-value I-phase candidate (TLS 1.2 ChaCha20-Poly1305
+RFC 7905 interop bad_record_mac); `aesccm` (TLS 1.2 CCM suites) and
+`downgrade-protection` (TLS 1.0/1.1) correctly deferred.
