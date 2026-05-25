@@ -7576,3 +7576,31 @@ not masked).
 Test/CI-config + docs only; no production change. Ran in an isolated
 temp worktree (`test/tlsfuzzer-small-xfail`). Recorded as DEV_LOG
 `Phase T134`.
+
+## Phase I120 — TLS 1.2 Server RSA-PSS-rsae SHA-384/512 SKE Signing (2026-05-25)
+
+> 继续(a)，然后(b)
+
+(b) of the request: fix the real TLS 1.2 gap that T134's `sig-algs`
+triage surfaced. The server couldn't sign ServerKeyExchange under
+`rsa_pss_rsae_sha384` (→ internal_error: scheme selected but the
+SHA-256-only `sign(RsaPadding::Pss, …)` aborted on the 48-byte digest)
+or `rsa_pss_rsae_sha512` (→ handshake_failure: not in the RSA
+candidate list). Mapped with an Explore sub-agent (gap is purely in
+the TLS 1.2 caller — `sign_ske_data` + `select_signature_scheme_tls12`
+in `handshake/server12.rs`; the crypto `sign_pss(digest, alg)`
+primitive already does 384/512).
+
+Fix mirrors TLS 1.3 `sign_certificate_verify`: added
+`RSA_PSS_RSAE_SHA512`/`RSA_PKCS1_SHA512` to the candidate list +
+rewrote the RSA branch hash-aware (PKCS#1 via `sign(Pkcs1v15Sign,…)`,
+PSS via `sign_pss(digest, RsaHashAlg::{Sha256,Sha384,Sha512})`).
+Result: `test-sig-algs.py` 13/5 → **15/3** (3 residual XFAILs are
+`rsa_pss_pss_*-only` cert-type mismatch — need the PSS-OID cert on
+:4449); curated into CI (suite 63 → 64). No regression: hitls-tls lib
+1108/0; signature-algorithms/x25519/ecdhe-rsa/ffdhe unchanged; fmt +
+`clippy -D warnings` clean. Ran in isolated temp worktree
+(`feat/tls12-rsa-pss-sha384-512`). Recorded as DEV_LOG `Phase I120`.
+
+(a) of the request — PR #153 (T134) was admin-merged (non-production,
+rebased clean) at 2026-05-24T18:30:56Z before starting (b).
