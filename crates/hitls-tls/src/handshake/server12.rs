@@ -2001,7 +2001,9 @@ pub(crate) fn sign_ske_data(
         ServerPrivateKey::Rsa { n, d, e, p, q } => {
             let rsa_key = hitls_crypto::rsa::RsaPrivateKey::new(n, d, e, p, q)
                 .map_err(TlsError::CryptoError)?;
-            use hitls_crypto::rsa::{RsaHashAlg, RsaPadding};
+            // `RsaPadding` is already imported at file scope; only
+            // `RsaHashAlg` is new here.
+            use hitls_crypto::rsa::RsaHashAlg;
             match scheme {
                 // RSA_PKCS1_SHA1: RFC 5246 §7.4.1.4.1 default when the
                 // client omits signature_algorithms (legacy path only).
