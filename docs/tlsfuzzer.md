@@ -332,12 +332,12 @@ candidates turned out to be mostly NOT a simple args fix:
   renegotiation, TLS 1.2 session resumption) + 1 malformed-ext
   strictness. The 9 PASS give regression coverage on our EMS
   three-state policy.
-- `test-chacha20` — **FIXED in I121** (RFC 7905). The TLS 1.2 record
+- `test-chacha20` — **FIXED in I122** (RFC 7905). The TLS 1.2 record
   layer framed ChaCha20-Poly1305 like AES-GCM (4-byte salt + 8-byte
   explicit nonce) instead of RFC 7905's 12-byte write_iv + implicit
   `seq⊕iv` nonce, so the handshake interoperated with itself but not
   with tlslite-ng (`bad_record_mac` on the first encrypted record).
-  I121 fixed it: **0/52 → ~51/52** interop. **Not curated into CI**,
+  I122 fixed it: **0/52 → ~51/52** interop. **Not curated into CI**,
   though: two conversations (`Chacha20 in TLS1.1` and
   `1/n-1 record splitting`) are intermittently flaky (0–2 fails run
   to run) — the same non-deterministic record-timing signature as
