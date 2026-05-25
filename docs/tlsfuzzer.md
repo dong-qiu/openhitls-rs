@@ -337,14 +337,31 @@ candidates turned out to be mostly NOT a simple args fix:
   explicit nonce) instead of RFC 7905's 12-byte write_iv + implicit
   `seq⊕iv` nonce, so the handshake interoperated with itself but not
   with tlslite-ng (`bad_record_mac` on the first encrypted record).
-  I122 fixed it: **0/52 → ~51/52** interop. **Not curated into CI**,
-  though: two conversations (`Chacha20 in TLS1.1` and
-  `1/n-1 record splitting`) are intermittently flaky (0–2 fails run
-  to run) — the same non-deterministic record-timing signature as
-  `ecdhe-padded-shared-secret` / `large-number-of-extensions`. xfail
-  can't cover a flaky-*pass* conversation (it XPASSes). The residual
-  flakiness (a record-splitting / TLS-1.1-rejection read-path timing
-  issue, independent of the ChaCha20 nonce) is a separate follow-up.
+  I122 fixed it: **0/52 → ~51/52** interop. **Not curated into CI** —
+  the 2 residual conversations were investigated (run in isolation
+  they fail deterministically; in the full suite they look "flaky")
+  and are **not read-path bugs**:
+  - `1/n-1 record splitting` — the server returns `ApplicationData`
+    where the script expects `close_notify`. Our `s-server` is an
+    **echo server**: it echoes the client's HTTP request back as
+    application data, which *races* the connection-close sequence on
+    the wire — so the conversation deterministically fails in
+    isolation and intermittently fails in the suite. This is the same
+    "echo-server vs abort" expectation mismatch already documented
+    won't-fix for `test-tls13-connection-abort` / `test-tls13-non-
+    support` — not a record-reassembly or read-path timing bug (the
+    `fill_buf` read loop correctly reassembles split records).
+  - `Chacha20 in TLS1.1` — we reject the TLS 1.1 ClientHello with
+    `protocol_version` (correct: we are TLS 1.2-only); the script
+    expects `handshake_failure` (its "ChaCha20 not allowed in TLS 1.1"
+    semantics assume a 1.1-capable server). Deterministic won't-fix
+    (TLS 1.1), not flaky.
+
+  Net: the apparent flakiness is the echo-server's app-data echo
+  racing the close, plus a deterministic TLS-1.1 alert-code
+  divergence — neither warrants a code change, and xfail can't cover
+  an echo-race conversation that intermittently passes (XPASS). The
+  earlier "read-path timing" framing (T133/I122) was incorrect.
 - `test-aesccm` — **N/A**: `default_tls12_suites()` offers no TLS 1.2
   AES-CCM suite (CCM is TLS 1.3-only here). Needs new TLS 1.2 CCM
   cipher suites (a feature), not args.
