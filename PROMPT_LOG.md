@@ -7651,3 +7651,31 @@ content checks TLS 1.0/1.1 downgrade we correctly reject).
 Test/CI-config + docs only; no production change. Ran in an isolated
 temp worktree (`test/tlsfuzzer-cipher-args`). Recorded as DEV_LOG
 `Phase T135`.
+
+---
+
+## Phase I121 — X.509 ML-DSA Certificate Signature Verification (FIPS 204) (2026-05-26)
+
+> #154 合并后,按你定的方向开始 ① ML-DSA X.509 证书链验签
+
+Option ① of the PQC X.509 verify task. Certificate::verify_signature
+rejected ML-DSA-signed certs ("unsupported signature algorithm"),
+blocking the T113 PQC cert-chain migration.
+
+Added an ML-DSA branch (gated #[cfg(feature = "mldsa")]) reusing the
+I118 CMS convention: dispatch on NIST FIPS 204 OIDs ml_dsa_44/65/87 →
+verify_mldsa_cert, which runs mldsa_verify over the issuer's raw SPKI
+ML-DSA pubkey + the TBSCertificate, prefixed with the pure-mode empty-
+context domain separator 0x00||0x00 (mldsa_verify is the internal
+variant). Verify-only (no ML-DSA cert builder); feeds validate_chain.
+
+Verification: new gated unit test test_mldsa_cert_chain_verify against
+the C cert/chain/mldsa-v3 chain (ML-DSA-65) — root self-signed /
+inter-by-root / end-by-inter Ok(true), wrong issuer Ok(false). hitls-pki
+458 lib PASS (default); no-mldsa combos x509,pkcs8 + x509,pkcs8,cms,pkcs12
+454 PASS (branch cfg-excluded); fmt + clippy (all-features + no-mldsa)
+clean.
+
+Recorded as DEV_LOG Phase I121. Follow-up: SLH-DSA cert verify (needs
+hitls-crypto public-key-only verify + OIDs), then test-enhanced migration
+of BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN + VFY_MLKEM_KEYUSAGE.
