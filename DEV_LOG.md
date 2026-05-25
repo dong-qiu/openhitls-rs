@@ -361,6 +361,7 @@ Category summary:
 | 358 | I120 | Impl | TLS 1.2 server RSA-PSS-rsae SHA-384/512 ServerKeyExchange signing — the TLS 1.2 SKE signing path (`sign_ske_data` in `crates/hitls-tls/src/handshake/server12.rs`) was SHA-256/384-limited and, for PSS, routed through the SHA-256-only `RsaPrivateKey::sign(RsaPadding::Pss, …)` (which asserts a 32-byte digest). So a client offering only `rsa_pss_rsae_sha384` drew `internal_error` (selected, but signing aborted on the 48-byte digest) and `rsa_pss_rsae_sha512` drew `handshake_failure` (the scheme wasn't even in `select_signature_scheme_tls12`'s RSA candidate list). Surfaced by tlsfuzzer `test-sig-algs.py` (T134 triage). Fix mirrors the TLS 1.3 `sign_certificate_verify` path: added `RSA_PSS_RSAE_SHA512` + `RSA_PKCS1_SHA512` to the RSA candidate list, and rewrote the RSA branch to be hash-aware — PKCS#1 v1.5 via `sign(Pkcs1v15Sign, …)` (hash-agnostic) and RSA-PSS via the hash-aware `sign_pss(digest, RsaHashAlg::{Sha256,Sha384,Sha512})` (the crypto primitive already supported 384/512 since T95). Closes `test-sig-algs.py` (13/5 → **15/3 PASS**; the 3 residual `rsa_pss_pss_*-only` XFAILs are a cert-type mismatch — they need the `id-RSASSA-PSS` cert on :4449, not this rsae cert) and curates it into CI (suite 63 → 64). No regression: `hitls-tls` lib 1108/0; adjacent TLS 1.2 signing scripts (signature-algorithms 275/1, x25519 20/4, ecdhe-rsa-key-exchange 3/0, ffdhe-negotiation 38/3) unchanged; `fmt` + `clippy -D warnings` clean | 2026-05-25 |
 | 359 | T135 | Test | tlsfuzzer cipher-args plumbing batch — triaged the 4 "needs cipher-args" backlog candidates; only 1 was an args fix, and the triage surfaced a real bug. **Curated** `test-extended-master-secret-extension.py` with `-d` (ECDHE) + a 9-entry XFAIL list — **9/9** (the 9 PASS cover the RFC 7627 EMS three-state core; the 9 XFAILs are unsupported features: TLS 1.1 (1.2-only), renegotiation (unsupported), TLS 1.2 session resumption (no abbreviated handshake in `s-server`), + 1 malformed-ext `decode_error` strictness). Triaged **out**: `test-chacha20` → **real bug, NOT args** (sanity fails `Alert(fatal, bad_record_mac)` on the client's first encrypted record — our TLS 1.2 ChaCha20-Poly1305 record layer interoperates with itself but not with tlslite-ng, pointing at an RFC 7905 nonce/key-block deviation; recorded as a high-value I-phase candidate, not masked); `test-aesccm` → N/A (`default_tls12_suites()` offers no TLS 1.2 AES-CCM suite — a feature, not args); `test-downgrade-protection` → N/A/won't-fix (sanity fails even with `-d`, and its content checks the TLS 1.3 downgrade sentinel for `(3,1)`/`(3,2)` which we correctly reject with `protocol_version` as a TLS 1.2-only server). Curated suite 64 → 65. Test/CI-config + docs only — no production change | 2026-05-26 |
 | 360 | I121 | Impl | X.509 ML-DSA certificate signature verification (FIPS 204) — `Certificate::verify_signature` rejected ML-DSA-signed certs with "unsupported signature algorithm" (certificate.rs else branch), blocking the T113 PQC cert-chain migration (`BUILD_MLDSA/MLKEM_CERT_CHAIN`). Added an ML-DSA branch (gated `#[cfg(feature = "mldsa")]`) reusing the I118 CMS convention: dispatch on the NIST FIPS 204 OIDs `known::ml_dsa_44/65/87()` → `verify_mldsa_cert`, which verifies the issuer's raw SPKI ML-DSA public key over the TBSCertificate via `hitls_crypto::mldsa::mldsa_verify`, wrapping the message in the FIPS 204 §5.2 *pure*-mode empty-context prefix `0x00 ‖ 0x00 ‖ tbs` (mldsa_verify is the internal variant μ = H(tr‖M)). Validated against the openHiTLS C `cert/chain/mldsa-v3` chain (ML-DSA-65): root self-signed, inter-by-root, end-by-inter all verify `Ok(true)`, wrong-issuer `Ok(false)` — added as a gated unit test `test_mldsa_cert_chain_verify`. Unblocks the ML-DSA + ML-KEM cert-chain migration (ML-KEM leaves are ML-DSA-CA-signed). SLH-DSA cert verify is a separate follow-up (needs a hitls-crypto public-key-only verify entry). No regression — hitls-pki 458 lib (incl. new test) PASS; no-mldsa combos (`x509,pkcs8` / `x509,pkcs8,cms,pkcs12`) 454 PASS (ML-DSA branch cfg-excluded → OID still "unsupported" without the feature); `fmt` + `clippy -D warnings` (incl. `--all-features --all-targets`) clean | 2026-05-26 |
+| 361 | I122 | Impl | TLS 1.2 ChaCha20-Poly1305 RFC 7905 record nonce — the TLS 1.2 record layer (`record/encryption12.rs`) framed **all** AEAD suites like AES-GCM (4-byte salt `fixed_iv` + 8-byte explicit per-record nonce prepended to the wire), but RFC 7905 requires ChaCha20-Poly1305 to use a **12-byte** `write_iv` and an **implicit** nonce (`write_iv XOR left_pad(seq,12)`, like TLS 1.3) with **no** explicit nonce on the wire. The handshake therefore interoperated with itself (both sides equally wrong) but failed against any RFC-7905-correct peer (tlslite-ng/tlsfuzzer) with `bad_record_mac` on the first encrypted record — surfaced by the T135 `test-chacha20` triage. Fix: (1) `crypt/mod.rs` — all 7 TLS 1.2 ChaCha20 suite params `fixed_iv_len 4→12`, `record_iv_len 8→0`; (2) `encryption12.rs` — `RecordEncryptor12`/`RecordDecryptor12` carry a `Vec<u8>` IV + an `implicit_nonce` flag (set when the mapped AEAD suite is `TLS_CHACHA20_POLY1305_SHA256`), and `encrypt_record`/`decrypt_record` branch: GCM keeps explicit-nonce framing, ChaCha20 uses the new `build_nonce_chacha20_tls12` (XOR) with no wire prefix; (3) a too-short AEAD record now reports `bad_record_mac` (RFC 5246 §6.2.3.3) instead of the wrong `internal_error` (also removes a length-distinguishing oracle). The crypto primitive (`hitls-crypto` ChaCha20-Poly1305) was already RFC 8439-correct — purely a record-layer framing fix. Result: `test-chacha20.py` **0/52 (sanity fail) → ~51/52** interop. No regression: `hitls-tls` lib **1108/0** (incl. a new RFC 7905 nonce KAT + the self-interop handshakes) + GCM-path tlsfuzzer (`fuzzed-ciphertext` 338/0, `aes-gcm-nonces` 6/0, `conversation`/`ccs`/`encrypt-then-mac`) unchanged; `fmt` + `clippy -D warnings` clean. `test-chacha20.py` **not curated** into CI: 2 conversations (`Chacha20 in TLS1.1` + `1/n-1 record splitting`) are intermittently flaky (record-timing non-determinism, same signature as `ecdhe-padded`), a separate read-path follow-up | 2026-05-26 |
 
 ---
 
@@ -22608,7 +22609,7 @@ chain verifier, since `validate_chain` calls `verify_signature` per link.
 | `DEV_LOG.md` | Modified | This entry + Phase Index row 359 + Implementation summary I1–I119 → I1–I121 (I120 already merged via #155). |
 | `PROMPT_LOG.md` | Modified | I121 prompt + result entry. |
 
-### Build Status (Post I121)
+### Build Status (Post I122)
 
 Production-code change in `hitls-pki` (X.509 ML-DSA verify). Unblocks
 the ML-DSA + ML-KEM cert-chain migration (ML-KEM leaves are
@@ -22746,3 +22747,89 @@ Curated tlsfuzzer suite **65 scripts**. No production code changed.
 Surfaced one high-value I-phase candidate (TLS 1.2 ChaCha20-Poly1305
 RFC 7905 interop bad_record_mac); `aesccm` (TLS 1.2 CCM suites) and
 `downgrade-protection` (TLS 1.0/1.1) correctly deferred.
+
+---
+
+## Phase I122 — TLS 1.2 ChaCha20-Poly1305 RFC 7905 Record Nonce (2026-05-26)
+
+### Summary
+
+Fixes the high-value bug T135 surfaced: the TLS 1.2 server's
+ChaCha20-Poly1305 handshake interoperated with itself but failed
+against any RFC-7905-correct peer (tlslite-ng / tlsfuzzer) with
+`bad_record_mac` on the first encrypted record.
+
+### Root cause
+
+`record/encryption12.rs` framed **every** TLS 1.2 AEAD suite like
+AES-GCM (RFC 5288): a 4-byte salt `fixed_iv` plus an 8-byte explicit
+per-record nonce prepended to the wire, with nonce = `salt ‖
+explicit`. RFC 7905 instead requires ChaCha20-Poly1305 to use a
+**12-byte** `write_iv` and an **implicit** nonce — `write_iv XOR
+left_pad(seq, 12)`, exactly like TLS 1.3 — with **no** explicit nonce
+on the wire. Because both our endpoints made the same wrong choice,
+the self-interop test passed; a conformant peer computed a different
+nonce and read a malformed record → `bad_record_mac`.
+
+### Fix (3 parts; record-layer only — the crypto primitive was already RFC 8439-correct)
+
+1. `crypt/mod.rs`: all **7** TLS 1.2 ChaCha20-Poly1305 suite params
+   (ECDHE_RSA/ECDSA, DHE_RSA, PSK/DHE_PSK/RSA_PSK/ECDHE_PSK) changed
+   `fixed_iv_len 4→12`, `record_iv_len 8→0`. `derive_key_block`
+   already sizes the write_iv from `fixed_iv_len`, so a 12-byte IV
+   now flows through.
+2. `encryption12.rs`: `RecordEncryptor12`/`RecordDecryptor12` now hold
+   a `Vec<u8>` IV (4 = GCM salt, 12 = ChaCha20 write_iv) + an
+   `implicit_nonce` flag (set when the mapped AEAD suite is
+   `TLS_CHACHA20_POLY1305_SHA256`). `encrypt_record`/`decrypt_record`
+   branch: GCM keeps the explicit-nonce framing; ChaCha20 builds the
+   implicit nonce via the new `build_nonce_chacha20_tls12` (XOR) and
+   carries no explicit-nonce prefix. Constructors validate the IV
+   length (4 or 12) up front.
+3. A record too short to contain the AEAD tag now reports
+   `bad_record_mac` (RFC 5246 §6.2.3.3) instead of the previous
+   `internal_error` — correct for any AEAD and removes a
+   length-distinguishing oracle.
+
+### Verification
+
+- `test-chacha20.py` (tlsfuzzer, vs tlslite-ng): **0/52 (sanity fail)
+  → ~51/52** interop.
+- No regression: `cargo test -p hitls-tls --lib` **1108/0**, including
+  a new RFC 7905 nonce KAT (`test_chacha20_tls12_rfc7905_nonce`) + the
+  ChaCha20 self-interop handshake tests, and the updated param /
+  roundtrip tests (12-byte IV, no explicit nonce). GCM-path tlsfuzzer
+  via `run.sh` unchanged: `fuzzed-ciphertext` 338/0 (heavy
+  malformed-record coverage — confirms the too-short→bad_record_mac
+  change is safe), `aes-gcm-nonces` 6/0, `conversation` 2/0, `ccs`
+  3/0, `encrypt-then-mac` 3/0.
+- `fmt` + `clippy -D warnings` clean.
+
+### Not curated
+
+`test-chacha20.py` is **not** added to CI: two conversations
+(`Chacha20 in TLS1.1`, `1/n-1 record splitting`) are intermittently
+flaky (0–2 fails run-to-run) — a record-splitting / TLS-1.1-rejection
+read-path timing non-determinism (same signature as
+`ecdhe-padded-shared-secret` / `large-number-of-extensions`),
+independent of the ChaCha20 nonce. xfail can't cover a flaky-*pass*
+conversation (XPASS). The fix is locked in by the lib KAT + self-
+interop tests instead; the flakiness is a separate read-path
+follow-up recorded in `docs/tlsfuzzer.md`.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/crypt/mod.rs` | Modified | 7 ChaCha20 TLS 1.2 suite params → `fixed_iv_len 12`, `record_iv_len 0`; updated param test. |
+| `crates/hitls-tls/src/record/encryption12.rs` | Modified | RFC 7905 implicit-nonce branch (`build_nonce_chacha20_tls12`, `Vec<u8>` IV + `implicit_nonce` flag); too-short → `bad_record_mac`; new nonce KAT + updated roundtrip test. |
+| `docs/tlsfuzzer.md` | Modified | chacha20 backlog entry → FIXED + not-curated (flaky) rationale. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 361 (I122). |
+| `PROMPT_LOG.md` | Modified | I121 prompt + result entry. |
+
+### Build Status (Post I122)
+
+`hitls-tls` lib 1108/0. TLS 1.2 ChaCha20-Poly1305 is now RFC 7905
+wire-correct (interops with tlslite-ng); TLS 1.2 AEAD too-short
+records report `bad_record_mac`. Curated tlsfuzzer suite unchanged
+at 65 (chacha20 deliberately not added — flaky).

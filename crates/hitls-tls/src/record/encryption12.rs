@@ -1,8 +1,14 @@
-//! TLS 1.2 AEAD record encryption with explicit nonce (RFC 5246 §6.2.3.3).
+//! TLS 1.2 AEAD record encryption (RFC 5246 §6.2.3.3 + RFC 7905).
 //!
-//! For GCM cipher suites, the nonce is `fixed_iv(4) || explicit_nonce(8)`.
-//! The explicit nonce is sent with each record (prepended to ciphertext).
-//! AAD is 13 bytes: `seq_num(8) || type(1) || version(2) || plaintext_length(2)`.
+//! Two AEAD framings are supported:
+//! - **AES-GCM (RFC 5288)**: nonce = `fixed_iv(4) || explicit_nonce(8)`; the
+//!   8-byte explicit nonce is sent with each record (prepended to ciphertext).
+//! - **ChaCha20-Poly1305 (RFC 7905)**: nonce = `write_iv(12) XOR
+//!   left_pad(seq, 12)` (implicit, like TLS 1.3); NO explicit nonce on the
+//!   wire.
+//!
+//! AAD is 13 bytes for both: `seq_num(8) || type(1) || version(2) ||
+//! plaintext_length(2)`.
 
 use crate::crypt::aead::{create_aead, TlsAeadImpl};
 use crate::record::{ContentType, Record};
@@ -27,6 +33,19 @@ fn build_nonce_tls12(fixed_iv: &[u8], explicit_nonce: &[u8; EXPLICIT_NONCE_LEN])
     nonce
 }
 
+/// Build the TLS 1.2 ChaCha20-Poly1305 nonce per RFC 7905 §2: the 12-byte
+/// `write_iv` XOR the left-zero-padded record sequence number. No explicit
+/// nonce is carried on the wire (implicit, identical in spirit to TLS 1.3).
+#[inline]
+fn build_nonce_chacha20_tls12(write_iv: &[u8], seq: u64) -> [u8; 12] {
+    let mut nonce = [0u8; 12];
+    nonce[4..12].copy_from_slice(&seq.to_be_bytes());
+    for (n, iv) in nonce.iter_mut().zip(write_iv.iter()) {
+        *n ^= *iv;
+    }
+    nonce
+}
+
 /// Build the TLS 1.2 AAD (13 bytes):
 /// `seq_num(8) || content_type(1) || version(2) || plaintext_length(2)`
 #[inline]
@@ -48,7 +67,13 @@ fn build_aad_tls12(seq: u64, content_type: ContentType, plaintext_len: u16) -> [
 /// The record fragment format is: `explicit_nonce(8) || ciphertext || tag(16)`.
 pub struct RecordEncryptor12 {
     aead: TlsAeadImpl,
-    fixed_iv: [u8; 4],
+    /// Session-wide write IV: 4-byte salt for AES-GCM, 12-byte write_iv for
+    /// RFC 7905 ChaCha20-Poly1305.
+    fixed_iv: Vec<u8>,
+    /// RFC 7905 ChaCha20: implicit per-record nonce (`write_iv ⊕ seq`), no
+    /// explicit nonce prepended to the record. AES-GCM uses the explicit-
+    /// nonce framing instead.
+    implicit_nonce: bool,
     seq: u64,
 }
 
@@ -59,17 +84,25 @@ impl Drop for RecordEncryptor12 {
 }
 
 impl RecordEncryptor12 {
-    /// Create a new TLS 1.2 GCM encryptor.
+    /// Create a new TLS 1.2 AEAD encryptor.
     ///
-    /// `key` is the write key, `fixed_iv` is the 4-byte IV from the key block.
-    /// The cipher suite determines which AEAD algorithm to use.
+    /// `key` is the write key, `fixed_iv` the IV from the key block (4 bytes
+    /// for AES-GCM, 12 bytes for RFC 7905 ChaCha20-Poly1305). `suite` is the
+    /// mapped AEAD suite from `tls12_suite_to_aead_suite`.
     pub fn new(suite: CipherSuite, key: &[u8], fixed_iv: Vec<u8>) -> Result<Self, TlsError> {
         let aead = create_aead(suite, key)?;
-        let mut iv = [0u8; 4];
-        iv.copy_from_slice(&fixed_iv);
+        let implicit_nonce = matches!(suite, CipherSuite::TLS_CHACHA20_POLY1305_SHA256);
+        let expected_iv = if implicit_nonce { 12 } else { 4 };
+        if fixed_iv.len() != expected_iv {
+            return Err(TlsError::RecordError(format!(
+                "TLS 1.2 AEAD fixed_iv length {} != expected {expected_iv}",
+                fixed_iv.len()
+            )));
+        }
         Ok(Self {
             aead,
-            fixed_iv: iv,
+            fixed_iv,
+            implicit_nonce,
             seq: 0,
         })
     }
@@ -89,16 +122,27 @@ impl RecordEncryptor12 {
             ));
         }
 
-        // Use sequence number as explicit nonce
+        // GCM uses the sequence number as the 8-byte explicit nonce;
+        // ChaCha20 (RFC 7905) derives an implicit nonce and sends none.
         let explicit_nonce = self.seq.to_be_bytes();
-        let nonce = build_nonce_tls12(&self.fixed_iv, &explicit_nonce);
+        let nonce = if self.implicit_nonce {
+            build_nonce_chacha20_tls12(&self.fixed_iv, self.seq)
+        } else {
+            build_nonce_tls12(&self.fixed_iv, &explicit_nonce)
+        };
         let aad = build_aad_tls12(self.seq, content_type, plaintext.len() as u16);
 
         let ciphertext = self.aead.encrypt(&nonce, &aad, plaintext)?;
 
-        // Fragment = explicit_nonce || ciphertext (includes tag)
-        let mut fragment = Vec::with_capacity(EXPLICIT_NONCE_LEN + ciphertext.len());
-        fragment.extend_from_slice(&explicit_nonce);
+        // GCM fragment = explicit_nonce(8) || ciphertext || tag;
+        // ChaCha20 fragment = ciphertext || tag (no explicit nonce).
+        let mut fragment = if self.implicit_nonce {
+            Vec::with_capacity(ciphertext.len())
+        } else {
+            let mut f = Vec::with_capacity(EXPLICIT_NONCE_LEN + ciphertext.len());
+            f.extend_from_slice(&explicit_nonce);
+            f
+        };
         fragment.extend_from_slice(&ciphertext);
 
         if self.seq == u64::MAX {
@@ -122,7 +166,11 @@ impl RecordEncryptor12 {
 /// Decrypts TLS 1.2 GCM records.
 pub struct RecordDecryptor12 {
     aead: TlsAeadImpl,
-    fixed_iv: [u8; 4],
+    /// Session-wide read IV: 4-byte salt (AES-GCM) or 12-byte write_iv
+    /// (RFC 7905 ChaCha20-Poly1305).
+    fixed_iv: Vec<u8>,
+    /// RFC 7905 ChaCha20: implicit nonce, no explicit nonce on the wire.
+    implicit_nonce: bool,
     seq: u64,
     tag_len: usize,
 }
@@ -134,15 +182,23 @@ impl Drop for RecordDecryptor12 {
 }
 
 impl RecordDecryptor12 {
-    /// Create a new TLS 1.2 GCM decryptor.
+    /// Create a new TLS 1.2 AEAD decryptor. See `RecordEncryptor12::new`
+    /// for the `fixed_iv` length convention (4 = GCM, 12 = ChaCha20).
     pub fn new(suite: CipherSuite, key: &[u8], fixed_iv: Vec<u8>) -> Result<Self, TlsError> {
         let aead = create_aead(suite, key)?;
         let tag_len = aead.tag_size();
-        let mut iv = [0u8; 4];
-        iv.copy_from_slice(&fixed_iv);
+        let implicit_nonce = matches!(suite, CipherSuite::TLS_CHACHA20_POLY1305_SHA256);
+        let expected_iv = if implicit_nonce { 12 } else { 4 };
+        if fixed_iv.len() != expected_iv {
+            return Err(TlsError::RecordError(format!(
+                "TLS 1.2 AEAD fixed_iv length {} != expected {expected_iv}",
+                fixed_iv.len()
+            )));
+        }
         Ok(Self {
             aead,
-            fixed_iv: iv,
+            fixed_iv,
+            implicit_nonce,
             seq: 0,
             tag_len,
         })
@@ -153,21 +209,42 @@ impl RecordDecryptor12 {
     /// The fragment must contain: `explicit_nonce(8) || ciphertext || tag(16)`.
     /// Returns the plaintext. The content type comes from the record header.
     pub fn decrypt_record(&mut self, record: &Record) -> Result<Vec<u8>, TlsError> {
-        if record.fragment.len() < EXPLICIT_NONCE_LEN + self.tag_len {
-            return Err(TlsError::RecordError("encrypted record too short".into()));
+        let min_len = if self.implicit_nonce {
+            self.tag_len
+        } else {
+            EXPLICIT_NONCE_LEN + self.tag_len
+        };
+        if record.fragment.len() < min_len {
+            // A record too short to contain the AEAD tag cannot authenticate.
+            // RFC 5246 §6.2.3.3: report `bad_record_mac` — not
+            // `internal_error` (never correct for peer input) — matching the
+            // indistinguishable AEAD-failure path and avoiding a
+            // length-distinguishing oracle.
+            return Err(TlsError::RecordError("bad record MAC".into()));
         }
 
         if record.fragment.len() > MAX_CIPHERTEXT_LENGTH {
             return Err(TlsError::RecordError("record overflow".into()));
         }
 
-        // Extract explicit nonce and ciphertext+tag
-        let explicit_nonce: [u8; EXPLICIT_NONCE_LEN] =
-            record.fragment[..EXPLICIT_NONCE_LEN].try_into().unwrap();
-        let ciphertext_with_tag = &record.fragment[EXPLICIT_NONCE_LEN..];
+        // GCM: the first 8 bytes are the explicit nonce. ChaCha20 (RFC 7905):
+        // no explicit nonce — the whole fragment is ciphertext||tag and the
+        // nonce is derived implicitly from the sequence number.
+        let (nonce, ciphertext_with_tag) = if self.implicit_nonce {
+            (
+                build_nonce_chacha20_tls12(&self.fixed_iv, self.seq),
+                &record.fragment[..],
+            )
+        } else {
+            let explicit_nonce: [u8; EXPLICIT_NONCE_LEN] =
+                record.fragment[..EXPLICIT_NONCE_LEN].try_into().unwrap();
+            (
+                build_nonce_tls12(&self.fixed_iv, &explicit_nonce),
+                &record.fragment[EXPLICIT_NONCE_LEN..],
+            )
+        };
 
         let plaintext_len = ciphertext_with_tag.len() - self.tag_len;
-        let nonce = build_nonce_tls12(&self.fixed_iv, &explicit_nonce);
         let aad = build_aad_tls12(self.seq, record.content_type, plaintext_len as u16);
 
         let plaintext = self
@@ -432,7 +509,7 @@ mod tests {
     #[test]
     fn test_chacha20_tls12_encrypt_decrypt_roundtrip() {
         let key = vec![0x42u8; 32]; // ChaCha20 uses 256-bit key
-        let iv = vec![0xABu8; 4]; // 4-byte fixed IV
+        let iv = vec![0xABu8; 12]; // RFC 7905: 12-byte write_iv
         let aead_suite = CipherSuite::TLS_CHACHA20_POLY1305_SHA256;
         let mut enc = RecordEncryptor12::new(aead_suite, &key, iv.clone()).unwrap();
         let mut dec = RecordDecryptor12::new(aead_suite, &key, iv).unwrap();
@@ -444,11 +521,28 @@ mod tests {
 
         assert_eq!(record.content_type, ContentType::ApplicationData);
         assert_eq!(record.version, TLS12_VERSION);
-        // fragment = explicit_nonce(8) + plaintext(31) + tag(16) = 55
-        assert_eq!(record.fragment.len(), 8 + plaintext.len() + 16);
+        // RFC 7905: no explicit nonce on the wire — fragment = plaintext + tag(16)
+        assert_eq!(record.fragment.len(), plaintext.len() + 16);
 
         let decrypted = dec.decrypt_record(&record).unwrap();
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_chacha20_tls12_rfc7905_nonce() {
+        // RFC 7905 §2: nonce = write_iv(12) XOR left_pad(seq, 12).
+        // write_iv = 0x01..0x0c, seq = 0 → nonce == write_iv unchanged.
+        let iv: Vec<u8> = (1u8..=12).collect();
+        assert_eq!(build_nonce_chacha20_tls12(&iv, 0), iv.as_slice());
+        // seq = 1 → only the last byte flips (0x0c XOR 0x01 = 0x0d).
+        let mut expect = iv.clone();
+        expect[11] ^= 1;
+        assert_eq!(build_nonce_chacha20_tls12(&iv, 1), expect.as_slice());
+        // seq spread across the low 8 bytes is XORed into nonce[4..12].
+        let n = build_nonce_chacha20_tls12(&iv, 0x0102_0304_0506_0708);
+        assert_eq!(&n[0..4], &iv[0..4]); // high 4 bytes: write_iv unchanged
+        assert_eq!(n[4], iv[4] ^ 0x01);
+        assert_eq!(n[11], iv[11] ^ 0x08);
     }
 
     #[test]

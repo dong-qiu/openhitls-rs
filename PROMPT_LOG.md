@@ -7679,3 +7679,37 @@ clean.
 Recorded as DEV_LOG Phase I121. Follow-up: SLH-DSA cert verify (needs
 hitls-crypto public-key-only verify + OIDs), then test-enhanced migration
 of BUILD_MLDSA/MLKEM/SLHDSA_CERT_CHAIN + VFY_MLKEM_KEYUSAGE.
+## Phase I122 — TLS 1.2 ChaCha20-Poly1305 RFC 7905 Record Nonce (2026-05-26)
+
+> 先(a) 然后再 (b)
+
+(b) of the request: fix the ChaCha20 interop bug T135 surfaced.
+Mapped with an Explore sub-agent: `record/encryption12.rs` framed all
+TLS 1.2 AEAD suites like AES-GCM (4-byte salt + 8-byte explicit
+nonce), but RFC 7905 needs ChaCha20 to use a 12-byte write_iv +
+implicit `seq⊕iv` nonce with no explicit prefix (like TLS 1.3). Self-
+interop worked (both sides equally wrong); tlslite-ng got
+`bad_record_mac`.
+
+Fix (record-layer only; crypto primitive already RFC 8439-correct):
+(1) all 7 TLS 1.2 ChaCha20 suite params `fixed_iv_len 4→12`,
+`record_iv_len 8→0`; (2) `RecordEncryptor12`/`Decryptor12` carry a
+`Vec<u8>` IV + `implicit_nonce` flag, branching GCM (explicit) vs
+ChaCha20 (`build_nonce_chacha20_tls12` XOR, no prefix); (3) too-short
+AEAD record → `bad_record_mac` (was `internal_error`; RFC 5246
+§6.2.3.3, removes a length oracle).
+
+Result: `test-chacha20.py` 0/52 → ~51/52 interop. No regression:
+hitls-tls lib 1108/0 (new RFC 7905 nonce KAT + self-interop) +
+GCM-path tlsfuzzer unchanged (fuzzed-ciphertext 338/0 confirms the
+too-short change is safe). fmt + clippy clean.
+
+NOT curated: 2 chacha20 conversations (`Chacha20 in TLS1.1`,
+`1/n-1 record splitting`) are intermittently flaky (record-timing
+non-determinism, same signature as ecdhe-padded) — xfail can't cover
+flaky-pass (XPASS); locked in by the lib KAT instead, flakiness is a
+separate read-path follow-up. Ran in isolated temp worktree
+(`feat/tls12-chacha20-rfc7905`). Recorded as DEV_LOG `Phase I122`.
+
+(a) — PR #156 (T135) was admin-merged at 2026-05-25T17:00:09Z before
+starting (b).

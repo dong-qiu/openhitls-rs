@@ -606,8 +606,10 @@ impl Tls12CipherSuiteParams {
                 auth_alg: AuthAlg::Rsa,
                 hash_len: 32,
                 key_len: 32,
-                fixed_iv_len: 4,
-                record_iv_len: 8,
+                // RFC 7905: ChaCha20-Poly1305 uses a 12-byte write_iv and no
+                // explicit per-record nonce (implicit seq⊕IV), unlike AES-GCM.
+                fixed_iv_len: 12,
+                record_iv_len: 0,
                 tag_len: 16,
                 mac_key_len: 0,
                 mac_len: 0,
@@ -619,8 +621,9 @@ impl Tls12CipherSuiteParams {
                 auth_alg: AuthAlg::Ecdsa,
                 hash_len: 32,
                 key_len: 32,
-                fixed_iv_len: 4,
-                record_iv_len: 8,
+                // RFC 7905: 12-byte write_iv, no explicit per-record nonce.
+                fixed_iv_len: 12,
+                record_iv_len: 0,
                 tag_len: 16,
                 mac_key_len: 0,
                 mac_len: 0,
@@ -1090,8 +1093,9 @@ impl Tls12CipherSuiteParams {
                 auth_alg: AuthAlg::Rsa,
                 hash_len: 32,
                 key_len: 32,
-                fixed_iv_len: 4,
-                record_iv_len: 8,
+                // RFC 7905: 12-byte write_iv, no explicit per-record nonce.
+                fixed_iv_len: 12,
+                record_iv_len: 0,
                 tag_len: 16,
                 mac_key_len: 0,
                 mac_len: 0,
@@ -1185,8 +1189,9 @@ impl Tls12CipherSuiteParams {
                 auth_alg: AuthAlg::Psk,
                 hash_len: 32,
                 key_len: 32,
-                fixed_iv_len: 4,
-                record_iv_len: 8,
+                // RFC 7905: 12-byte write_iv, no explicit per-record nonce.
+                fixed_iv_len: 12,
+                record_iv_len: 0,
                 tag_len: 16,
                 mac_key_len: 0,
                 mac_len: 0,
@@ -1334,8 +1339,9 @@ impl Tls12CipherSuiteParams {
                 auth_alg: AuthAlg::Psk,
                 hash_len: 32,
                 key_len: 32,
-                fixed_iv_len: 4,
-                record_iv_len: 8,
+                // RFC 7905: 12-byte write_iv, no explicit per-record nonce.
+                fixed_iv_len: 12,
+                record_iv_len: 0,
                 tag_len: 16,
                 mac_key_len: 0,
                 mac_len: 0,
@@ -1483,8 +1489,9 @@ impl Tls12CipherSuiteParams {
                 auth_alg: AuthAlg::Rsa,
                 hash_len: 32,
                 key_len: 32,
-                fixed_iv_len: 4,
-                record_iv_len: 8,
+                // RFC 7905: 12-byte write_iv, no explicit per-record nonce.
+                fixed_iv_len: 12,
+                record_iv_len: 0,
                 tag_len: 16,
                 mac_key_len: 0,
                 mac_len: 0,
@@ -1577,8 +1584,9 @@ impl Tls12CipherSuiteParams {
                 auth_alg: AuthAlg::Psk,
                 hash_len: 32,
                 key_len: 32,
-                fixed_iv_len: 4,
-                record_iv_len: 8,
+                // RFC 7905: 12-byte write_iv, no explicit per-record nonce.
+                fixed_iv_len: 12,
+                record_iv_len: 0,
                 tag_len: 16,
                 mac_key_len: 0,
                 mac_len: 0,
@@ -2110,8 +2118,9 @@ mod tests_cipher_suite_params {
         .unwrap();
         assert!(!p.is_cbc);
         assert_eq!(p.key_len, 32);
-        assert_eq!(p.fixed_iv_len, 4);
-        assert_eq!(p.record_iv_len, 8);
+        // RFC 7905: 12-byte write_iv, no explicit per-record nonce.
+        assert_eq!(p.fixed_iv_len, 12);
+        assert_eq!(p.record_iv_len, 0);
         assert_eq!(p.tag_len, 16);
     }
 

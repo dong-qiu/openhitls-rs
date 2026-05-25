@@ -332,14 +332,19 @@ candidates turned out to be mostly NOT a simple args fix:
   renegotiation, TLS 1.2 session resumption) + 1 malformed-ext
   strictness. The 9 PASS give regression coverage on our EMS
   three-state policy.
-- `test-chacha20` — **real bug, NOT args**: sanity fails with
-  `Alert(fatal, bad_record_mac)` on the client's first encrypted
-  record. Our TLS 1.2 ChaCha20-Poly1305 record layer interoperates
-  with itself (`test_tls12_dhe_chacha20_handshake` passes) but not
-  with tlslite-ng — strongly suggesting an RFC 7905 nonce-construction
-  (or key-block) deviation that is self-consistent but wrong on the
-  wire. **High-value I-phase candidate** (TLS 1.2 ChaCha20-Poly1305
-  RFC 7905 interop).
+- `test-chacha20` — **FIXED in I122** (RFC 7905). The TLS 1.2 record
+  layer framed ChaCha20-Poly1305 like AES-GCM (4-byte salt + 8-byte
+  explicit nonce) instead of RFC 7905's 12-byte write_iv + implicit
+  `seq⊕iv` nonce, so the handshake interoperated with itself but not
+  with tlslite-ng (`bad_record_mac` on the first encrypted record).
+  I122 fixed it: **0/52 → ~51/52** interop. **Not curated into CI**,
+  though: two conversations (`Chacha20 in TLS1.1` and
+  `1/n-1 record splitting`) are intermittently flaky (0–2 fails run
+  to run) — the same non-deterministic record-timing signature as
+  `ecdhe-padded-shared-secret` / `large-number-of-extensions`. xfail
+  can't cover a flaky-*pass* conversation (it XPASSes). The residual
+  flakiness (a record-splitting / TLS-1.1-rejection read-path timing
+  issue, independent of the ChaCha20 nonce) is a separate follow-up.
 - `test-aesccm` — **N/A**: `default_tls12_suites()` offers no TLS 1.2
   AES-CCM suite (CCM is TLS 1.3-only here). Needs new TLS 1.2 CCM
   cipher suites (a feature), not args.
