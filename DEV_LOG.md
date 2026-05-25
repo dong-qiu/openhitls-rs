@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I121 (121 phases)
+- Implementation: I1–I123 (123 phases)
 - Testing: T1–T132 (125 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -362,6 +362,7 @@ Category summary:
 | 359 | T135 | Test | tlsfuzzer cipher-args plumbing batch — triaged the 4 "needs cipher-args" backlog candidates; only 1 was an args fix, and the triage surfaced a real bug. **Curated** `test-extended-master-secret-extension.py` with `-d` (ECDHE) + a 9-entry XFAIL list — **9/9** (the 9 PASS cover the RFC 7627 EMS three-state core; the 9 XFAILs are unsupported features: TLS 1.1 (1.2-only), renegotiation (unsupported), TLS 1.2 session resumption (no abbreviated handshake in `s-server`), + 1 malformed-ext `decode_error` strictness). Triaged **out**: `test-chacha20` → **real bug, NOT args** (sanity fails `Alert(fatal, bad_record_mac)` on the client's first encrypted record — our TLS 1.2 ChaCha20-Poly1305 record layer interoperates with itself but not with tlslite-ng, pointing at an RFC 7905 nonce/key-block deviation; recorded as a high-value I-phase candidate, not masked); `test-aesccm` → N/A (`default_tls12_suites()` offers no TLS 1.2 AES-CCM suite — a feature, not args); `test-downgrade-protection` → N/A/won't-fix (sanity fails even with `-d`, and its content checks the TLS 1.3 downgrade sentinel for `(3,1)`/`(3,2)` which we correctly reject with `protocol_version` as a TLS 1.2-only server). Curated suite 64 → 65. Test/CI-config + docs only — no production change | 2026-05-26 |
 | 360 | I121 | Impl | X.509 ML-DSA certificate signature verification (FIPS 204) — `Certificate::verify_signature` rejected ML-DSA-signed certs with "unsupported signature algorithm" (certificate.rs else branch), blocking the T113 PQC cert-chain migration (`BUILD_MLDSA/MLKEM_CERT_CHAIN`). Added an ML-DSA branch (gated `#[cfg(feature = "mldsa")]`) reusing the I118 CMS convention: dispatch on the NIST FIPS 204 OIDs `known::ml_dsa_44/65/87()` → `verify_mldsa_cert`, which verifies the issuer's raw SPKI ML-DSA public key over the TBSCertificate via `hitls_crypto::mldsa::mldsa_verify`, wrapping the message in the FIPS 204 §5.2 *pure*-mode empty-context prefix `0x00 ‖ 0x00 ‖ tbs` (mldsa_verify is the internal variant μ = H(tr‖M)). Validated against the openHiTLS C `cert/chain/mldsa-v3` chain (ML-DSA-65): root self-signed, inter-by-root, end-by-inter all verify `Ok(true)`, wrong-issuer `Ok(false)` — added as a gated unit test `test_mldsa_cert_chain_verify`. Unblocks the ML-DSA + ML-KEM cert-chain migration (ML-KEM leaves are ML-DSA-CA-signed). SLH-DSA cert verify is a separate follow-up (needs a hitls-crypto public-key-only verify entry). No regression — hitls-pki 458 lib (incl. new test) PASS; no-mldsa combos (`x509,pkcs8` / `x509,pkcs8,cms,pkcs12`) 454 PASS (ML-DSA branch cfg-excluded → OID still "unsupported" without the feature); `fmt` + `clippy -D warnings` (incl. `--all-features --all-targets`) clean | 2026-05-26 |
 | 361 | I122 | Impl | TLS 1.2 ChaCha20-Poly1305 RFC 7905 record nonce — the TLS 1.2 record layer (`record/encryption12.rs`) framed **all** AEAD suites like AES-GCM (4-byte salt `fixed_iv` + 8-byte explicit per-record nonce prepended to the wire), but RFC 7905 requires ChaCha20-Poly1305 to use a **12-byte** `write_iv` and an **implicit** nonce (`write_iv XOR left_pad(seq,12)`, like TLS 1.3) with **no** explicit nonce on the wire. The handshake therefore interoperated with itself (both sides equally wrong) but failed against any RFC-7905-correct peer (tlslite-ng/tlsfuzzer) with `bad_record_mac` on the first encrypted record — surfaced by the T135 `test-chacha20` triage. Fix: (1) `crypt/mod.rs` — all 7 TLS 1.2 ChaCha20 suite params `fixed_iv_len 4→12`, `record_iv_len 8→0`; (2) `encryption12.rs` — `RecordEncryptor12`/`RecordDecryptor12` carry a `Vec<u8>` IV + an `implicit_nonce` flag (set when the mapped AEAD suite is `TLS_CHACHA20_POLY1305_SHA256`), and `encrypt_record`/`decrypt_record` branch: GCM keeps explicit-nonce framing, ChaCha20 uses the new `build_nonce_chacha20_tls12` (XOR) with no wire prefix; (3) a too-short AEAD record now reports `bad_record_mac` (RFC 5246 §6.2.3.3) instead of the wrong `internal_error` (also removes a length-distinguishing oracle). The crypto primitive (`hitls-crypto` ChaCha20-Poly1305) was already RFC 8439-correct — purely a record-layer framing fix. Result: `test-chacha20.py` **0/52 (sanity fail) → ~51/52** interop. No regression: `hitls-tls` lib **1108/0** (incl. a new RFC 7905 nonce KAT + the self-interop handshakes) + GCM-path tlsfuzzer (`fuzzed-ciphertext` 338/0, `aes-gcm-nonces` 6/0, `conversation`/`ccs`/`encrypt-then-mac`) unchanged; `fmt` + `clippy -D warnings` clean. `test-chacha20.py` **not curated** into CI: 2 conversations (`Chacha20 in TLS1.1` + `1/n-1 record splitting`) are intermittently flaky (record-timing non-determinism, same signature as `ecdhe-padded`), a separate read-path follow-up | 2026-05-26 |
+| 362 | I123 | Impl | X.509 end-entity KeyUsage hardening (RFC 5280 §4.2.1.3 + ML-DSA/ML-KEM + TLS-auth profiles) — `validate_chain` accepted **any** end-entity KeyUsage, so the T113 PQC + EKU/KU migration left 6 `#[ignore]`d negatives. Added a leaf-KeyUsage check after the EKU block: **(1) ML-DSA leaf** (pubkey OID `ml_dsa_44/65/87`) is signature-only → must not assert key-establishment bits (keyEncipherment/dataEncipherment/keyAgreement); **(2) ML-KEM leaf** (pubkey OID `2.16.840.1.101.3.4.4.{1,2,3}`, matched by dotted form — no `known::` helper) is key-establishment-only → must carry keyEncipherment/keyAgreement **and** must not assert any signing bit (digitalSignature/keyCertSign/crlSign), and a missing KeyUsage is rejected; **(3) TLS client/server-auth** (`set_required_eku(kp_client_auth|kp_server_auth)`) → the leaf must carry digitalSignature. Verified against the C fixtures: all 5 valid leaves still verify (mldsa-v3/end 0x00c0, mlkem/end 0x0020, client/server/anyeku_good) and all 6 bad-KU leaves now reject (mldsa end_invalid_ku 0x00b0, mlkem end_invalid_ku 0x0080 / end_missing_ku none, client/server/anyeku_badku). No regression — hitls-pki 458 lib + 1150 migrated + 1 doc PASS; `clippy -D warnings` clean (`--all-features --all-targets` + no-mldsa `x509,pkcs8`); `fmt` clean. Unblocks the 6 T113 `#[ignore]`s (3 PQC KU + 3 EKU/KU) — un-ignored in the follow-up test-enhanced PR | 2026-05-26 |
 
 ---
 
@@ -22833,6 +22834,70 @@ follow-up recorded in `docs/tlsfuzzer.md`.
 wire-correct (interops with tlslite-ng); TLS 1.2 AEAD too-short
 records report `bad_record_mac`. Curated tlsfuzzer suite unchanged
 at 65 (chacha20 deliberately not added — flaky).
+
+---
+
+## Phase I123 — X.509 End-Entity KeyUsage Hardening (RFC 5280 §4.2.1.3) (2026-05-26)
+
+### Summary
+
+`CertificateVerifier::validate_chain` enforced KeyUsage only on CA
+certs (keyCertSign) — it accepted **any** end-entity KeyUsage. The
+T113 PQC + EKU/KU migration therefore had to `#[ignore]` 6 negative
+cases (the verifier accepted bad-KU leaves C rejects). This phase adds
+end-entity KeyUsage validation, the "(a)" of the post-PQC plan.
+
+### What changed (`crates/hitls-pki/src/x509/verify.rs`)
+
+A leaf-KeyUsage block after the EKU enforcement, three rules:
+
+1. **ML-DSA leaf** (pubkey OID `ml_dsa_44/65/87`) — signature-only:
+   must NOT assert key-establishment bits (keyEncipherment /
+   dataEncipherment / keyAgreement).
+2. **ML-KEM leaf** (pubkey OID `2.16.840.1.101.3.4.4.{1,2,3}`, matched
+   by dotted form — no `known::` helper) — key-establishment-only:
+   must carry keyEncipherment or keyAgreement **and** must NOT assert
+   any signing bit (digitalSignature / keyCertSign / crlSign); a
+   missing KeyUsage is rejected.
+3. **TLS client/server auth** (`set_required_eku(kp_client_auth |
+   kp_server_auth)`): the leaf must carry digitalSignature.
+
+Rules 1–2 only trigger for PQC pubkey OIDs and rule 3 only when an
+auth EKU is required, so non-PQC / no-purpose verification is
+unchanged (no regression to the existing corpus).
+
+### Verification
+
+Against the openHiTLS C fixtures (KU bits confirmed by inspection):
+
+| Leaf | KU | Result |
+|---|---|---|
+| mldsa-v3/end (valid) | 0x00c0 (digitalSig+nonRep) | verifies |
+| mlkem/end (valid) | 0x0020 (keyEnc) | verifies |
+| client/server/anyeku_good | digitalSig present | verify |
+| mldsa end_invalid_ku | 0x00b0 (+keyEnc+dataEnc) | **rejected** |
+| mlkem end_invalid_ku | 0x0080 (digitalSig) | **rejected** |
+| mlkem end_missing_ku | none | **rejected** |
+| client/server/anyeku_badku | no digitalSig | **rejected** |
+
+No regression: hitls-pki **458 lib + 1150 migrated + 1 doc** PASS;
+`clippy -D warnings` clean (`--all-features --all-targets` + no-mldsa
+`x509,pkcs8`); `fmt` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-pki/src/x509/verify.rs` | Modified | End-entity KeyUsage block in `validate_chain` (ML-DSA / ML-KEM keytype rules + TLS-auth digitalSignature). |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 362 + Implementation summary I1–I121 → I1–I123 (I122 merged via #158). |
+| `PROMPT_LOG.md` | Modified | I123 prompt + result entry. |
+
+### Build Status (Post I123)
+
+Production-code change in `hitls-pki` (verifier). Unblocks the 6 T113
+`#[ignore]`s — 3 PQC KU (mldsa/mlkem) + 3 EKU/KU purpose — un-ignored
+in the follow-up test-enhanced PR (which provides the CI coverage
+against the exact C fixtures).
 
 ---
 
