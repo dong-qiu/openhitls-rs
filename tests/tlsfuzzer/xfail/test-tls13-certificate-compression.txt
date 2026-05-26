@@ -1,0 +1,19 @@
+# I128 — `test-tls13-certificate-compression.py` (RFC 8879) XFAIL (1 entry).
+#
+# 28 PASS / 1 XFAIL against the dedicated `--cert-compression` listener
+# (advertises zlib). The compression-specific cases (smoke/zlib,
+# CompressedCertificate delivery, fall-back-to-zlib when an unsupported
+# algorithm is also offered) and the malformed-extension cases (empty
+# list / odd length / truncated / trailing padding → decode_error, I126)
+# all pass; the 10 "unreasonable algorithm alone" + "duplicated algos"
+# conversations now pass too, since the close_notify §6.1 reply fix in
+# this phase makes the server answer the peer's close_notify before
+# closing (those use the strict ExpectAlert→ExpectClose form).
+#
+# The one residual XFAIL sends a TLS-1.2 ClientHello carrying the
+# compress_certificate extension; this is a TLS-1.3-only listener, so it
+# is rejected by design (RFC 8879 cert compression is a TLS 1.3 feature).
+# Not a bug — it would pass against a TLS-1.2 listener, which this
+# dedicated instance is not.
+
+sending extension in TLS-1.2

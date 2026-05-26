@@ -7944,3 +7944,38 @@ un-ignored tc_pkcs12_parse_p12_tc003_p12_1_empty_pwd → migrated suite
 hitls-pki 24 pkcs12 lib PASS; fmt + clippy clean.
 
 Recorded as DEV_LOG Phase I127.
+
+---
+
+## Phase I128 — TLS close_notify Reply (RFC 8446 §6.1) + Curate cert-compression (2026-05-26)
+
+> 好的
+
+(Agreed to my recommendation to fix the close_notify §6.1 gap surfaced
+by the I126 cert-compression triage — the dominant lever, 10 of the 11
+residual failures.)
+
+Root cause: receiving the peer's close_notify set received_close_notify
+AND state=Closed; shutdown() (tls13_client_shutdown_trait_body!)
+early-returned on state==Closed before sending our own close_notify, so
+the server abrupt-closed instead of replying.
+
+Fix: bail early only when closed WITHOUT a clean peer close_notify
+(state==Closed && !received_close_notify — the §6.2 fatal-alert path,
+correct to close with no reply); otherwise send our close_notify (gated
+on sent_close_notify for idempotency). One macro → TLS 1.3 + 1.2,
+client + server, sync + async.
+
+Because this is general shutdown behaviour, ran the FULL curated suite
+(34 TLS 1.3 + 16 TLS 1.2 RSA-cert scripts via run.sh): 0 FAIL / 0 XPASS
+— the change only flips XFAIL→PASS. XFAIL scan confirmed no curated
+entry references close/alert (no hidden XPASS risk).
+
+cert-compression flipped 18/29 → 28/29 and is now CURATED into CI on a
+dedicated --cert-compression listener (HITLS_PORT_CERTCOMP 4456) with a
+1-entry XFAIL (the TLS-1.2 ClientHello the 1.3 listener rejects).
+
+Verification: hitls-tls lib 1553/0; fmt + clippy -D warnings clean;
+workflow YAML valid; run.sh cert-compression rc=0 (28/1/0/0). Ran in
+isolated temp worktree (`fix/close-notify-reply`). Recorded as DEV_LOG
+Phase I128.

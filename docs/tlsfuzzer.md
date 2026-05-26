@@ -333,17 +333,14 @@ Still genuine feature gaps (not curated):
   ServerHello/HRR, and 54 want `illegal_parameter` where we send
   `handshake_failure`. Reconciling these risks diverging from the RFC's
   ignore-unrecognized rule; deferred pending a careful per-case RFC read.
-- `test-tls13-certificate-compression` (18/29 after I126) — RFC 8879 IS
-  implemented in the library (encode/decode/compress/decompress, client
-  + server); I126 wired it into the CLI (`s-server --cert-compression`,
-  advertises zlib) and hardened `parse_compress_certificate` (reject
-  empty-list / odd-length / truncated / trailing-padding →
-  `decode_error`). The 4 compression-specific cases + 4 malformed-ext
-  cases now pass. Residual 11 are *not* compression bugs: 10 are the
-  close_notify §6.1 reply gap below (9 "unreasonable algo alone" +
-  "duplicated algos", all require the server's close_notify alert) and 1
-  is a TLS-1.2 conversation needing a 1.2 listener. Curate once §6.1 is
-  fixed (then ~28/1).
+- `test-tls13-certificate-compression` — **CURATED (I128), 28/1**. RFC
+  8879 is implemented in the library; I126 wired it into the CLI
+  (`s-server --cert-compression`, advertises zlib) + hardened
+  `parse_compress_certificate`; I128's close_notify §6.1 fix below
+  flipped the remaining 10 conversations. Runs against a dedicated
+  `--cert-compression` listener (`HITLS_PORT_CERTCOMP`); the single XFAIL
+  ("sending extension in TLS-1.2") is a TLS-1.2 ClientHello rejected by
+  this TLS-1.3-only listener (cert compression is TLS-1.3-only).
 - `test-extensions` (215/77, 1.2), `test-export-ciphers-rejected`
   (76/78, 1.2), `test-alpn-negotiation` (3/16, 1.2),
   `test-invalid-server-name-extension` (3/13, 1.2),
@@ -355,20 +352,23 @@ Still genuine feature gaps (not curated):
 `unexpected_message` to a peer abort-alert instead of closing
 silently (RFC 8446 §6.2). Fix unblocks curation.
 
-**close_notify reply — high-value I-phase candidate** (surfaced by the
-I126 cert-compression triage): on receiving the peer's `close_notify`,
-the server sets `state = Closed` (read path), then `shutdown()`
-(`tls13_client_shutdown_trait_body!`, macros.rs) early-returns on
-`state == Closed` **without sending its own `close_notify`** — so the
-server drops the TCP abruptly instead of replying (RFC 8446 §6.1: each
-party MUST send `close_notify` before closing its write side). Most
-curated scripts tolerate abrupt close (`ExpectAlert` with
-`next_sibling = ExpectClose()`), so this was invisible; the strict
+**close_notify reply — FIXED (I128).** On receiving the peer's
+`close_notify` the server set `state = Closed` (read path), and
+`shutdown()` (`tls13_client_shutdown_trait_body!`, macros.rs)
+early-returned on `state == Closed` **without sending its own
+`close_notify`** — dropping the TCP abruptly instead of replying (RFC
+8446 §6.1: each party MUST send `close_notify` before closing its write
+side). Most curated scripts tolerate abrupt close (`ExpectAlert` with
+`next_sibling = ExpectClose()`), so this was invisible until the strict
 `ExpectAlert` → `add_child(ExpectClose())` form in
-`test-tls13-certificate-compression` (10 conversations) catches it.
-General server-shutdown behaviour → its own PR + a full curated-suite
-regression run (sending close_notify is strictly more compliant and
-expected, so it should only flip XFAILs to PASS).
+`test-tls13-certificate-compression` (10 conversations) caught it. Fix:
+the shutdown macro now bails early only when closed *without* a clean
+peer close_notify (`state == Closed && !received_close_notify`, the RFC
+§6.2 fatal-alert path — close immediately, no reply); a clean peer
+close_notify is answered with our own (gated on `sent_close_notify` for
+idempotency). One macro covers TLS 1.3 + 1.2, client + server, sync +
+async. Full curated-suite regression: 0 FAIL / 0 XPASS (the change only
+flipped the 10 cert-compression conversations XFAIL→PASS).
 
 **Cipher-args plumbing — triaged (T135).** The four headline
 candidates turned out to be mostly NOT a simple args fix:

@@ -923,10 +923,20 @@ macro_rules! tls13_client_read_trait_body {
 /// Body for TLS 1.3 client `shutdown` trait method.
 macro_rules! tls13_client_shutdown_trait_body {
     ($mode:ident, $self:ident) => {{
-        if $self.state == ConnectionState::Closed {
+        // RFC 8446 §6.2: after a fatal alert the connection is closed
+        // immediately, with no close_notify. Receiving such an alert sets
+        // state=Closed but leaves received_close_notify false — in that case
+        // bail out without replying. A clean peer close_notify (which sets
+        // received_close_notify) must still be answered, so we do NOT bail
+        // on state==Closed alone.
+        if $self.state == ConnectionState::Closed && !$self.received_close_notify {
             return Ok(());
         }
 
+        // RFC 8446 §6.1: each party MUST send its own close_notify before
+        // closing the write side — including in reply to the peer's
+        // close_notify (which already moved us to Closed). Gate solely on
+        // sent_close_notify so this stays idempotent across repeated calls.
         if !$self.config.quiet_shutdown && !$self.sent_close_notify {
             let alert_data = [1u8, 0u8];
             let record = $self
