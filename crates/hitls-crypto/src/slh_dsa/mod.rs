@@ -109,6 +109,29 @@ impl SlhDsaKeyPair {
         })
     }
 
+    /// Construct a **verify-only** key pair from a raw SLH-DSA public key
+    /// (`PK.seed || PK.root`, `2*n` bytes). No private key is held, so only
+    /// [`Self::verify`] is usable. Intended for signature verification (X.509 /
+    /// CMS) where only the signer's public key is available.
+    pub fn from_public_key(
+        param_id: SlhDsaParamId,
+        public_key: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let p = get_params(param_id);
+        let expected = 2 * p.n;
+        if public_key.len() != expected {
+            return Err(CryptoError::InvalidKeyLength {
+                expected,
+                got: public_key.len(),
+            });
+        }
+        Ok(Self {
+            public_key: public_key.to_vec(),
+            private_key: Vec::new(),
+            param_id,
+        })
+    }
+
     /// Sign a message. Returns signature bytes.
     pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let p = get_params(self.param_id);
@@ -229,6 +252,60 @@ impl SlhDsaKeyPair {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SLH-DSA VERIFY known-answer **characterization** test (openHiTLS C SDV
+    /// `SDV_CRYPTO_SLH_DSA_VERIFY_KAT_TC001`, SHA2-128F, a `CRYPT_SUCCESS`
+    /// vector) — pure SLH-DSA (FIPS 205 §10.2) with the message prefixed
+    /// `0x00 || len(ctx) || ctx || msg`.
+    ///
+    /// REGRESSION ANCHOR for a KNOWN BUG. This implementation verifies its own
+    /// signatures (see the round-trip tests) but does **not** interop with
+    /// openHiTLS C / NIST FIPS 205: it returns `Ok(false)` for this
+    /// authoritative SUCCESS vector, so the SLH-DSA primitive is
+    /// self-consistent but non-compliant (a divergence in some component —
+    /// h_msg / FORS / WOTS+ / hypertree / ADRS). Diagnosed during the PQC X.509
+    /// work; the fix is a dedicated FIPS-205 compliance effort.
+    ///
+    /// The test pins the *current* (wrong) result so it stays CI-green and is
+    /// **not** an `#[ignore]`d failing test (the CI `--ignored` job would run
+    /// it). When the primitive is corrected, `verify` will return `Ok(true)`,
+    /// this assertion FLIPS and FAILS, and the fixer must replace it with
+    /// `assert!(verified)`.
+    #[test]
+    fn test_slhdsa_verify_kat_sha2_128f_known_fips205_gap() {
+        let pk = include_bytes!("test_vectors/verify_kat_sha2_128f.pk");
+        let msg = include_bytes!("test_vectors/verify_kat_sha2_128f.msg");
+        let ctx = include_bytes!("test_vectors/verify_kat_sha2_128f.ctx");
+        let sig = include_bytes!("test_vectors/verify_kat_sha2_128f.sig");
+
+        let kp = SlhDsaKeyPair::from_public_key(SlhDsaParamId::Sha2128f, pk).unwrap();
+        // Pure-mode message: 0x00 || len(ctx) || ctx || msg.
+        let mut m = Vec::with_capacity(2 + ctx.len() + msg.len());
+        m.push(0x00);
+        m.push(ctx.len() as u8);
+        m.extend_from_slice(ctx);
+        m.extend_from_slice(msg);
+        // KNOWN GAP: this authoritative C/NIST SUCCESS vector MUST verify under
+        // a FIPS-205-compliant implementation. It currently does not.
+        let verified = kp.verify(&m, sig).unwrap();
+        assert!(
+            !verified,
+            "REGRESSION ANCHOR FLIPPED: SLH-DSA now verifies the openHiTLS C \
+             FIPS-205 VERIFY KAT — the primitive is fixed. Replace this \
+             characterization test with `assert!(verified)`."
+        );
+    }
+
+    #[test]
+    fn test_slhdsa_from_public_key_roundtrip() {
+        let kp = SlhDsaKeyPair::generate(SlhDsaParamId::Sha2128f).unwrap();
+        let sig = kp.sign(b"from_public_key roundtrip").unwrap();
+        let verifier =
+            SlhDsaKeyPair::from_public_key(SlhDsaParamId::Sha2128f, kp.public_key()).unwrap();
+        assert!(verifier.verify(b"from_public_key roundtrip", &sig).unwrap());
+        // Wrong public-key length is rejected.
+        assert!(SlhDsaKeyPair::from_public_key(SlhDsaParamId::Sha2128f, &[0u8; 10]).is_err());
+    }
 
     #[test]
     fn test_slhdsa_shake_128f_roundtrip() {
