@@ -311,7 +311,7 @@ worth a separate script-level look (which padding case; value- or
 timing-dependent) but is not a robustness/leak issue. `ecdhe-padded`
 was also T128-excluded for TLS 1.0/1.1/SSLv2-compat fails.
 
-**mTLS CertVerify cert-matrix (I131) — bug FIXED, scripts NOT curated
+**mTLS CertVerify cert-matrix (I132) — bug FIXED, scripts NOT curated
 (flaky).** `test-tls13-ecdsa-in-certificate-verify` and
 `test-tls13-eddsa-in-certificate-verify` run against the mTLS listener
 (`HITLS_PORT_MTLS`, `--verify-client-cert`) with an ECDSA / Ed25519
@@ -320,7 +320,7 @@ malformed EC/EdDSA client CertificateVerify drew `internal_error`
 instead of `decrypt_error` (RFC 8446 §6.2), and a CV scheme whose curve
 mismatched the cert key (e.g. ecdsa_secp384r1_sha384 against a P-256
 cert) drew `internal_error` instead of `illegal_parameter` (§4.2.3).
-I131 fixed both in `handshake/verify.rs` (cert-key↔scheme compatibility
+I132 fixed both in `handshake/verify.rs` (cert-key↔scheme compatibility
 check → illegal_parameter; verify-`Err` treated as verification failure
 → decrypt_error). On a clean run both scripts are **132/132**. They are
 **not curated**: under 132 back-to-back mTLS handshakes the server
