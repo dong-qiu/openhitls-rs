@@ -523,6 +523,13 @@ jobs:
             test-tls13-crfg-curves.py
             test-tls13-ecdhe-curves.py
             test-tls13-ffdhe-groups.py
+            # I130 — obsolete-curves 117/54. Run with `--relaxed` (args/) to
+            # match RFC 8446 §4.2.7 ignore-unrecognized; the §4.2.8 key_share
+            # ⊄ supported_groups → illegal_parameter check closes the 27
+            # "inconsistent extensions" cases. The 54 XFAILs are all the
+            # no-common-group → handshake_failure (§4.1.1) vs illegal_parameter
+            # alert-convention difference (see xfail/).
+            test-tls13-obsolete-curves.py
           )
           # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
           # on $HITLS_PORT_12. Per-script extra args (`-C 49199` cipher

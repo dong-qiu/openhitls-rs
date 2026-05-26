@@ -504,6 +504,22 @@ impl ServerHandshake {
             .map(|e| parse_supported_groups_ch(&e.data))
             .transpose()?;
 
+        // RFC 8446 §4.2.8: "Each KeyShareEntry value ... MUST correspond to a
+        // group offered in the 'supported_groups' extension ... Clients MUST
+        // NOT offer any KeyShareEntry values for groups not listed ... Servers
+        // MAY check for violations ... and abort with an 'illegal_parameter'
+        // alert." We do: a key_share for a group absent from supported_groups
+        // (e.g. an obsolete curve in key_share while supported_groups carries
+        // only secp256r1) is rejected here rather than drawing a HelloRetry.
+        if let Some(ref groups) = client_groups {
+            if let Some((bad, _)) = client_key_shares.iter().find(|(g, _)| !groups.contains(g)) {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "illegal_parameter: key_share group {:#06x} not in supported_groups",
+                    bad.0
+                )));
+            }
+        }
+
         // compress_certificate (RFC 8879)
         let client_cert_compression = ch
             .extensions
@@ -1841,6 +1857,45 @@ mod tests {
                 assert_eq!(hrr.suite, CipherSuite::TLS_AES_128_GCM_SHA256);
             }
             _other => panic!("expected HRR"),
+        }
+    }
+
+    #[test]
+    fn test_server_rejects_key_share_not_in_supported_groups() {
+        use crate::handshake::extensions_codec::{
+            build_key_share_ch, build_signature_algorithms, build_supported_groups,
+            build_supported_versions_ch,
+        };
+        // RFC 8446 §4.2.8: a key_share for a group absent from supported_groups
+        // is illegal_parameter — NOT a HelloRetryRequest. Here the client lists
+        // only X25519 in supported_groups but sends a secp256r1 key_share.
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .verify_peer(false)
+            .supported_groups(&[NamedGroup::X25519])
+            .build();
+        let mut hs = ServerHandshake::new(config);
+
+        let ch = super::super::codec::ClientHello {
+            random: [0xCC; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                build_supported_versions_ch(),
+                build_supported_groups(&[NamedGroup::X25519]),
+                build_signature_algorithms(&[crate::crypt::SignatureScheme::ED25519]),
+                build_key_share_ch(NamedGroup::SECP256R1, &[0x04; 65]),
+            ],
+        };
+        let msg = super::super::codec::encode_client_hello(&ch);
+        match hs.process_client_hello(&msg) {
+            Err(TlsError::HandshakeFailed(m)) => {
+                assert!(m.contains("illegal_parameter"), "unexpected error: {m}");
+            }
+            Err(e) => panic!("expected HandshakeFailed(illegal_parameter), got {e:?}"),
+            Ok(_) => panic!("expected illegal_parameter, got Ok"),
         }
     }
 
