@@ -311,6 +311,25 @@ worth a separate script-level look (which padding case; value- or
 timing-dependent) but is not a robustness/leak issue. `ecdhe-padded`
 was also T128-excluded for TLS 1.0/1.1/SSLv2-compat fails.
 
+**mTLS CertVerify cert-matrix (I131) — bug FIXED, scripts NOT curated
+(flaky).** `test-tls13-ecdsa-in-certificate-verify` and
+`test-tls13-eddsa-in-certificate-verify` run against the mTLS listener
+(`HITLS_PORT_MTLS`, `--verify-client-cert`) with an ECDSA / Ed25519
+client identity (`-k`/`-c`). Triaging them surfaced a real bug: a
+malformed EC/EdDSA client CertificateVerify drew `internal_error`
+instead of `decrypt_error` (RFC 8446 §6.2), and a CV scheme whose curve
+mismatched the cert key (e.g. ecdsa_secp384r1_sha384 against a P-256
+cert) drew `internal_error` instead of `illegal_parameter` (§4.2.3).
+I131 fixed both in `handshake/verify.rs` (cert-key↔scheme compatibility
+check → illegal_parameter; verify-`Err` treated as verification failure
+→ decrypt_error). On a clean run both scripts are **132/132**. They are
+**not curated**: under 132 back-to-back mTLS handshakes the server
+intermittently misses tlsfuzzer's per-message deadline ("Timeout when
+waiting for peer message"), failing 1–4 *different* conversations each
+run — the same test-side-timing flakiness class as `ecdhe-padded`,
+which can't be stably XFAIL'd (the failing set varies). Re-evaluate
+curation if the per-connection response-timing flakiness is addressed.
+
 **Curve family — triaged (I124).** The heavy "fail" counts were
 dominated by a **real bug**: a malformed peer key_share for a
 *supported* group drew `internal_error` instead of `illegal_parameter`
