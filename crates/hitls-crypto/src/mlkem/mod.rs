@@ -330,6 +330,24 @@ impl MlKemKeyPair {
         })
     }
 
+    /// Construct an ML-KEM key pair from a raw decapsulation (private) key
+    /// (`dk_pke || ek || H(ek) || z`, FIPS 203 §7.1). The embedded `ek` is
+    /// recovered so the pair can both encapsulate and decapsulate. Intended for
+    /// loading a stored private key (and for decapsulation KAT vectors).
+    pub fn from_decapsulation_key(parameter_set: u32, dk: &[u8]) -> Result<Self, CryptoError> {
+        let params = get_params(parameter_set)?;
+        if dk.len() != params.dk_len {
+            return Err(CryptoError::InvalidArg(""));
+        }
+        let dk_pke_len = params.k * 384;
+        let ek = dk[dk_pke_len..dk_pke_len + params.ek_len].to_vec();
+        Ok(Self {
+            encapsulation_key: ek,
+            decapsulation_key: dk.to_vec(),
+            parameter_set,
+        })
+    }
+
     /// Encapsulate: produce a shared secret and ciphertext.
     pub fn encapsulate(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
         let params = get_params(self.parameter_set)?;
@@ -465,6 +483,21 @@ mod tests {
             shared_secret, recovered,
             "ML-KEM-512 shared secrets must match"
         );
+    }
+
+    #[test]
+    fn test_mlkem_from_decapsulation_key_roundtrip() {
+        // A key pair reconstructed from the raw decap key bytes must decapsulate
+        // identically to the original (used by the migrated decaps KAT path).
+        for bits in [512u32, 768, 1024] {
+            let kp = MlKemKeyPair::generate(bits).unwrap();
+            let (shared_secret, ciphertext) = kp.encapsulate().unwrap();
+            let loaded = MlKemKeyPair::from_decapsulation_key(bits, &kp.decapsulation_key).unwrap();
+            assert_eq!(loaded.decapsulate(&ciphertext).unwrap(), shared_secret);
+            assert_eq!(loaded.encapsulation_key(), kp.encapsulation_key());
+        }
+        // Wrong decap-key length is rejected.
+        assert!(MlKemKeyPair::from_decapsulation_key(512, &[0u8; 10]).is_err());
     }
 
     #[test]
