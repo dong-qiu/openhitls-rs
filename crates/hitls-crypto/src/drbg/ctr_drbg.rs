@@ -282,8 +282,13 @@ fn block_cipher_df(input: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoErr
         let mut iv = [0u8; BLOCK_LEN];
         iv[..4].copy_from_slice(&counter.to_be_bytes());
 
-        // BCC: chain through all blocks of S
+        // BCC(K, IV || S) is CBC-MAC with the chaining value starting at
+        // 0^outlen (SP 800-90A §10.3.3). The counter IV is therefore the
+        // *first* data block — encrypt it (chaining = E(0 XOR IV) = E(IV))
+        // before folding in the blocks of S, rather than seeding the chain
+        // with IV directly.
         let mut chaining = iv;
+        df_cipher.encrypt_block(&mut chaining)?;
         for chunk in s.chunks(BLOCK_LEN) {
             let mut block = [0u8; BLOCK_LEN];
             for i in 0..BLOCK_LEN {
@@ -413,23 +418,15 @@ mod tests {
         assert_eq!(output, output2);
     }
 
-    /// DIVERGENCE ANCHOR for a KNOWN GAP in `with_df` (CTR-DRBG-df).
-    ///
-    /// openHiTLS C SDV `SDV_PRIMARY_DRBG_VECTOR_FUN_TC001` for
-    /// `BSL_CID_RAND_AES256_CTR_DF` instantiates CTR-DRBG-AES-256 *with* the
-    /// Block_Cipher_df from entropy = 1000×0xff, nonce = 20×0xff,
-    /// personalization = {00,01,02,03,04,05}, then generates 32 bytes equal to
-    /// the vector below. Our `with_df` produces a *different* result, even
-    /// though the Hash/HMAC/CTR-no-df NIST vectors all match (migrated in
-    /// `tests/migrated_drbg.rs`) — and CTR-no-df shares the same AES core and
-    /// `update` as CTR-df. That isolates the divergence to `block_cipher_df`:
-    /// a likely SP 800-90A §10.3.2 non-compliance, to be fixed in a dedicated
-    /// effort. This test pins the *current* (divergent) behaviour so it stays
-    /// CI-green; when `block_cipher_df` is corrected the `assert_ne!` FLIPS and
-    /// FAILS, and the fixer must replace it with `assert_eq!` (and migrate the
-    /// vector via `xtask --algo drbg`).
+    /// CTR-DRBG-AES-256-df NIST vector (openHiTLS C SDV
+    /// `SDV_PRIMARY_DRBG_VECTOR_FUN_TC001` / `BSL_CID_RAND_AES256_CTR_DF`):
+    /// instantiate CTR-DRBG-AES-256 *with* Block_Cipher_df from
+    /// entropy = 1000×0xff, nonce = 20×0xff, personalization = {00..05}, then
+    /// generate 32 bytes. Regression guard for the `block_cipher_df` BCC fix
+    /// (the IV counter block must be CBC-MAC'd from a 0 chaining value, i.e.
+    /// `chaining = E(IV)` before S is folded in — SP 800-90A §10.3.3).
     #[test]
-    fn test_ctr_drbg_aes256_df_nist_vector_divergence_anchor() {
+    fn test_ctr_drbg_aes256_df_nist_vector() {
         let entropy = vec![0xffu8; 1000];
         let nonce = [0xffu8; 20];
         let pers = [0x00u8, 0x01, 0x02, 0x03, 0x04, 0x05];
@@ -440,13 +437,7 @@ mod tests {
             0xbf, 0x32, 0xe0, 0x05, 0x6b, 0x9a, 0xd9, 0x27, 0x22, 0x92, 0x53, 0xe4, 0x15, 0xe6,
             0xe9, 0x6b, 0x2b, 0x94,
         ];
-        assert_ne!(
-            output.as_slice(),
-            &c_vector[..],
-            "DIVERGENCE ANCHOR FLIPPED: CTR-DRBG-df now matches the openHiTLS C \
-             NIST vector — block_cipher_df is fixed. Replace with `assert_eq!` \
-             and migrate the AES256_CTR_DF vector via xtask."
-        );
+        assert_eq!(output.as_slice(), &c_vector[..]);
     }
 
     #[test]

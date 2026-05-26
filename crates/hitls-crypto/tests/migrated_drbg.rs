@@ -100,4 +100,21 @@ fn tc_line643_bsl_cid_rand_aes256_ctr_vector() {
     assert_eq!(&got[..], expected);
 }
 
-// Generation summary: 5 emitted / 272 API-surface skipped / 0 unknown / 13 unsupported alg / 290 total C cases.
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 aes256-ctr-df
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 652, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line652_bsl_cid_rand_aes256_ctr_df_vector() {
+    let expected: &[u8] = &[
+        0xa0, 0x1d, 0xb1, 0xcf, 0x47, 0x33, 0xac, 0xf9, 0xbf, 0x26, 0x84, 0x1d, 0x93, 0x45, 0xbf,
+        0x32, 0xe0, 0x05, 0x6b, 0x9a, 0xd9, 0x27, 0x22, 0x92, 0x53, 0xe4, 0x15, 0xe6, 0xe9, 0x6b,
+        0x2b, 0x94,
+    ];
+    let entropy = vec![0xffu8; 1000];
+    let nonce = [0xffu8; 20];
+    let mut d = CtrDrbg::with_df(&entropy, &nonce, &PERS).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+// Generation summary: 6 emitted / 272 API-surface skipped / 0 unknown / 12 unsupported alg / 290 total C cases.

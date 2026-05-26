@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I130 (130 phases)
+- Implementation: I1–I131 (131 phases)
 - Testing: T1–T139 (132 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -374,6 +374,7 @@ Category summary:
 | 371 | T137 | Test | C→Rust PQC KAT migration (Phase A continued — ML-DSA + ML-KEM) — extends the `xtask migrate-c-tests` generator to two post-quantum families, taking the migrated crypto-algorithm count 9 → 11. **ML-DSA** (`migrated_mldsa.rs`, 45 tests): the pure-verify family `MLDSA_FUNC_VERIFYDATA_TC001` (`type:pubKey:msg:sign:res`, 15 each × ML-DSA-44/65/87). The C case sets `ENCODE_FLAG=0` + no context and verifies the *raw* message under the FIPS 204 *internal* interface (μ = H(tr‖M)) — exactly Rust `mldsa::mldsa_verify`, so no §5.2 `0x00‖len(ctx)‖ctx‖M` prefix is applied (that is the pure interface used by X.509/CMS). `res==1`→expect `Ok(true)`; else assert not-`Ok(true)`. **ML-KEM** (`migrated_mlkem.rs`, 150 tests): the decapsulation side of `MLKEM_ENCAPS_DECAPS_FUNC_TC001` (`bits:m:EK:DK:CT:SK`), deterministic DK+CT→SK across ML-KEM-512/768/1024. Needed a new safe public constructor `MlKemKeyPair::from_decapsulation_key(bits, dk)` (mirrors `from_encapsulation_key`; recovers the embedded `ek`, length-checked, zeroize-on-drop) + a focused unit test. Sign / encaps / keygen halves stay API-surface (injected-randomness reproducibility limit, same call as DSA/SM2). **No bug found** — both families are FIPS-compliant out of the box (unlike the SLH-DSA primitive that T136/I129 fixed): 45 + 150 = 195 KATs all green first run. xtask `--check` drift gate passes for both; `docs/c-test-na-list.md` tally updated (995 emitted / 3427 total C cases); workspace `fmt` + `clippy -D warnings --all-targets` clean | 2026-05-26 |
 | 372 | T138 | Test | tlsfuzzer TLS 1.2 robustness curation batch — survey of the uncurated corpus (168 scripts total, 71 curated pre-T138) found the tlsfuzzer "clean real-bug" seam exhausted (remaining TLS 1.3 scripts are env-deps / mTLS-plumbing / unsupported-features / low-pass policy families), but a batch of clean-PASS TLS 1.2 robustness scripts remained uncurated. Added **5** to `scripts_12`, each with a `-d` args file (they default to static-RSA `kRSA` which we don't offer, so `-d` negotiates ECDHE), **0 XFAIL**: `test-fuzzed-MAC` (32/0, record-MAC mutations → `bad_record_mac`), `test-fuzzed-padding` (13/0, CBC padding mutations), `test-large-hello` (52/0, oversized ClientHello variants), `test-no-heartbeat` (7/0, RFC 6520 heartbeat ext absent/rejected), `test-hello-request-by-client` (3/0, client-sent HelloRequest handled). Pure regression coverage, no production change. Triaged **out** (recorded in `docs/tlsfuzzer.md` so they aren't re-investigated): the static-RSA-only cluster (`fuzzed-finished` / `invalid-version` / `invalid-session-id` / `empty-extensions` / `message-duplication` / `invalid-client-hello` / `invalid-cipher-suites` / `dhe-rsa-key-exchange*` / `*-key-share-random`) — no `-d` switch, sanity needs `kRSA` we deliberately don't implement (Bleichenbacher/ROBOT-safe), same class as `bleichenbacher-workaround`; timing scripts (`bleichenbacher-timing-*` / `lucky13` / `minerva`) excluded as flaky; `test-tls13-mlkem` needs the `kyber-py` lib. Deferred partials (Phase-3 triage, not curated): `fuzzed-plaintext` 45/7, `record-layer-fragmentation` 19/5, `atypical-padding` 8/4, `message-skipping` 2/9. Each new script verified via `run.sh` rc=0 on a fresh release `s-server --tls 1.2`. Curated suite 71 → 76 scripts | 2026-05-27 |
 | 373 | T139 | Test | C→Rust SHA-3/SHAKE + DRBG KAT migration (Phase A continued) — takes the migrated crypto-algorithm count 11 → 13. **SHA-3** (`migrated_sha3.rs`, 46 tests): `SHA3_FUNC_TC003` (fixed-length SHA3-224/256/384/512 hash) + `TC005`/`TC006` (SHAKE128/256 default- and variable-length XOF squeeze) + `SHA3_COPY_CTX` (hash); all map cleanly onto `Sha3_*::digest` / `Shake*::{new,update,squeeze}`. **DRBG** (`migrated_drbg.rs`, 5 tests): `SDV_PRIMARY_DRBG_VECTOR_FUN_TC001` — the C harness fixes the seed in code (entropy = `entropyLen`×`0xff`, nonce = 20×`0xff`, pers = `00..05`), instantiates, generates 32 bytes vs `result`. Reading the C `getEntropy` (returns the *full* configured buffer) confirmed `seed_material = entropy‖nonce‖pers`, which `HashDrbg::new` (`Hash_df`) / `HmacDrbg::new` (HMAC `Update`) consume exactly; CTR-no-df uses `entropy XOR pers`. Migrated the variants with a matching deterministic Rust constructor: **Hash-DRBG SHA-256/384/512, HMAC-DRBG SHA-256, CTR-DRBG AES-256 (no df)** — all reproduce the NIST vectors byte-for-byte. **Finding:** CTR-DRBG **AES-256-df** does *not* reproduce — and since Hash/HMAC/CTR-no-df all match (and CTR-no-df shares the AES core + `update`), the divergence is isolated to `block_cipher_df` (SP 800-90A §10.3.2); no input construction (entropy 1000/48/32 × {e‖n‖p, e‖p, e‖n}) matches. Pinned by a CI-green divergence anchor `test_ctr_drbg_aes256_df_nist_vector_divergence_anchor` in `ctr_drbg.rs` (flips when df is fixed — a dedicated effort). 13 DRBG variants are Rust-API gaps (Hash SHA-1/224/SM3; HMAC SHA-1/224/384/512; CTR AES-128/192 ±df; SM4-df) — documented in `c-test-na-list.md`. xtask `--check` drift gate passes for both; na-list tally → 1046 emitted / 3815 total C cases / 13 algorithms; workspace `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
+| 374 | I131 | Impl | CTR-DRBG `block_cipher_df` BCC fix (SP 800-90A §10.3.3) — closes the T139-surfaced CTR-DRBG-AES-256-df divergence. The Block_Cipher_df derivation function builds its key/X material with BCC (CBC-MAC). Per SP 800-90A, `BCC(K, IV ‖ S)` runs CBC-MAC with the chaining value starting at `0^outlen`, so the counter `IV` is the **first data block** → `chaining = E(0 XOR IV) = E(IV)` before the blocks of `S` are folded in. `block_cipher_df` (`crates/hitls-crypto/src/drbg/ctr_drbg.rs`) instead seeded the chain *with* `IV` (`chaining = iv`) and XOR-folded `IV` into the first `S` block, skipping the standalone `E(IV)` step — so every df-derived seed diverged from NIST. One-line fix: encrypt the IV block first (`chaining = E(iv)`), then chain `S`. Confirmed against the openHiTLS C `DRBG_CtrBCCInit` ("BCC is CBC-MAC + IV(0)"). This only affects CTR-DRBG **with df**; CTR-no-df, Hash-DRBG, HMAC-DRBG are untouched (they never call `block_cipher_df`) and stay green. Flipped the T139 CTR-df divergence anchor to a positive KAT (`test_ctr_drbg_aes256_df_nist_vector`, `assert_eq!`) and migrated the now-passing `BSL_CID_RAND_AES256_CTR_DF` vector via the xtask `drbg` emitter (`CtrDrbg::with_df`) → `migrated_drbg.rs` 5 → **6** tests, DRBG unsupported 13 → 12. No regression — hitls-crypto 40 drbg lib (incl. the existing `test_block_cipher_df` + `test_ctr_drbg_with_df`) + 6 migrated DRBG; `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
 
 ---
 
@@ -23505,3 +23506,71 @@ no-df-only), plus the CTR-AES-256-df divergence above.
 suite. SHA-3 interops cleanly; DRBG Hash/HMAC/CTR-no-df interop cleanly,
 with the CTR-AES-256-df `block_cipher_df` divergence pinned by a CI
 anchor for a future fix.
+
+## Phase I131 — CTR-DRBG block_cipher_df BCC Fix (SP 800-90A §10.3.3) (2026-05-27)
+
+### Summary
+
+Fixed a NIST SP 800-90A non-compliance in CTR-DRBG's `Block_Cipher_df`
+derivation function, surfaced by the T139 DRBG KAT migration. CTR-DRBG
+instantiated/reseeded *with* the df produced seeds that diverged from the
+openHiTLS C / NIST vectors, even though Hash-DRBG, HMAC-DRBG and
+CTR-DRBG-no-df all matched — which isolated the bug to `block_cipher_df`.
+
+### Root cause (`crates/hitls-crypto/src/drbg/ctr_drbg.rs`)
+
+`Block_Cipher_df` derives its key+X material with BCC (a CBC-MAC over
+`IV ‖ S`). Per SP 800-90A §10.3.3, BCC starts the chaining value at
+`0^outlen`, so the counter `IV` is processed as the **first data block**:
+`chaining = Block_Encrypt(0 XOR IV) = E(IV)`, and only then are the blocks
+of `S` folded in (`chaining = E(chaining XOR S_i)`).
+
+The Rust code seeded the chain *with* the IV (`let mut chaining = iv;`)
+and immediately XOR-folded the first `S` block, i.e. it computed
+`E(IV XOR S_0)` where the standard wants `E(E(IV) XOR S_0)`. The
+standalone `E(IV)` step was missing, so every df-derived seed was wrong.
+
+### Fix
+
+One line — encrypt the IV block before chaining `S`:
+
+```rust
+let mut chaining = iv;
+df_cipher.encrypt_block(&mut chaining)?; // chaining = E(0 XOR IV) = E(IV)
+for chunk in s.chunks(BLOCK_LEN) { /* chaining = E(chaining XOR chunk) */ }
+```
+
+Confirmed against the openHiTLS C reference `DRBG_CtrBCCInit` /
+`DRBG_CtrBCCUpdateBlock` (commented "BCC is CBC-MAC: CBC encryption +
+IV(0)"). Only CTR-DRBG **with df** is affected; CTR-no-df, Hash-DRBG and
+HMAC-DRBG never call `block_cipher_df`.
+
+### Verification
+
+- The T139 CTR-df divergence anchor flipped (now `assert_eq!`): renamed
+  `test_ctr_drbg_aes256_df_nist_vector`, the C `BSL_CID_RAND_AES256_CTR_DF`
+  vector now reproduces byte-for-byte.
+- Migrated the now-passing vector via the xtask `drbg` emitter
+  (`CtrDrbg::with_df`): `migrated_drbg.rs` 5 → **6** tests; DRBG
+  unsupported 13 → 12; `c-test-na-list.md` tally → 1047 emitted.
+- No regression: hitls-crypto **40 drbg lib** PASS (incl. the pre-existing
+  `test_block_cipher_df` and `test_ctr_drbg_with_df`) + **6 migrated
+  DRBG**; xtask `--check` drift gate passes; workspace `fmt` + `clippy -D
+  warnings --all-features --all-targets` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/drbg/ctr_drbg.rs` | Modified | BCC IV-first fix in `block_cipher_df`; T139 anchor → positive KAT. |
+| `xtask/src/drbg.rs` | Modified | Emit `BSL_CID_RAND_AES256_CTR_DF` via `CtrDrbg::with_df` (`Drbg::CtrDf`). |
+| `crates/hitls-crypto/tests/migrated_drbg.rs` | Modified | Regenerated — +1 CTR-AES-256-df KAT (6 total). |
+| `docs/c-test-na-list.md` | Modified | DRBG tally 5→6 / unsupported 13→12; divergence note → resolved-by-I131. |
+| `DEV_LOG.md` / `PROMPT_LOG.md` | Modified | This entry + Phase Index row 374 + Implementation summary I1–I131. |
+
+### Build Status (Post I131)
+
+CTR-DRBG is now SP 800-90A-compliant for both df and no-df instantiate;
+all migrated DRBG NIST vectors (6) pass. A security-relevant primitive
+fix found by the C→Rust KAT migration discipline (cf. the SLH-DSA
+FIPS-205 fix in I129).

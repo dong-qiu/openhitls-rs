@@ -8157,3 +8157,35 @@ Verification: migrated_sha3 46/0, migrated_drbg 5/0, anchor green; xtask
 fmt + clippy -D warnings --all-features clean.
 
 Recorded as DEV_LOG Phase T139.
+
+---
+
+## Phase I131 — CTR-DRBG block_cipher_df BCC Fix (SP 800-90A §10.3.3) (2026-05-27)
+
+> 修 block_cipher_df 偏差 (推荐)
+
+Fixed the T139-surfaced CTR-DRBG-AES-256-df divergence. CTR-DRBG with df
+produced seeds diverging from the C/NIST vectors while Hash/HMAC/CTR-no-df
+all matched — isolating the bug to block_cipher_df.
+
+Root cause (ctr_drbg.rs): Block_Cipher_df's BCC (CBC-MAC over IV‖S) must
+start the chaining value at 0^outlen, so the counter IV is the FIRST data
+block → chaining = E(IV) before S is folded in (SP 800-90A §10.3.3). The
+code seeded the chain WITH the IV (chaining = iv) and XOR-folded the first
+S block, computing E(IV XOR S0) instead of E(E(IV) XOR S0) — the E(IV)
+step was missing. One-line fix: encrypt the IV block first, then chain S.
+Confirmed against C DRBG_CtrBCCInit ("BCC is CBC-MAC + IV(0)").
+
+Only CTR-DRBG with df affected; CTR-no-df / Hash / HMAC never call
+block_cipher_df, stay green.
+
+Flipped the T139 divergence anchor → positive KAT
+(test_ctr_drbg_aes256_df_nist_vector, assert_eq) and migrated the now-
+passing AES256_CTR_DF vector via the xtask drbg emitter (CtrDrbg::with_df)
+→ migrated_drbg.rs 5 → 6; DRBG unsupported 13 → 12.
+
+Verification: hitls-crypto 40 drbg lib (incl. test_block_cipher_df +
+test_ctr_drbg_with_df) + 6 migrated DRBG; xtask --check drift gate; fmt +
+clippy -D warnings --all-features clean.
+
+Recorded as DEV_LOG Phase I131.
