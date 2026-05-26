@@ -49203,13 +49203,11 @@ mod pkcs12_parse_p12 {
         assert_parse_ok("cert/asn1/pkcs12/p12_5.p12", r"@##\#%#\%\%.&&~%*\|sdfgfdsg");
     }
 
-    /// TC003 p12_1 uses an **empty** password. The C parser accepts it, but the
-    /// Rust PKCS#12 KDF treats an empty BMPString (`len <= 2`, i.e. just the
-    /// 2-byte null terminator) as an empty diversifier, deriving a different MAC
-    /// key → MAC verification fails. Empty-password BMPString convention gap;
-    /// asserts the C-correct behaviour so a future KDF fix unignores it.
+    /// TC003 p12_1 uses an **empty** password. Per RFC 7292 Appendix B.2 an
+    /// empty password is the 2-byte BMP null, so the KDF diversifier P is built
+    /// from `[0x00, 0x00]` (matching openHiTLS C / OpenSSL). The verifier-side
+    /// KDF empty-password handling was corrected so this PFX now parses.
     #[test]
-    #[ignore = "impl gap: empty-password PKCS#12 BMPString KDF convention (len<=2 short-circuit)"]
     fn tc_pkcs12_parse_p12_tc003_p12_1_empty_pwd() {
         assert_parse_ok("cert/asn1/pkcs12/p12_1.p12", "");
     }
@@ -49416,4 +49414,4 @@ fn tc_build_slhdsa_cert_chain_sha2_128s() {
     assert!(v.verify_cert(&end, &[inter]).is_ok());
 }
 
-// Generation summary: 1158 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12 unblocked by I117; +8 pki/pkcs12 ENCODE_P12; 6 ML-DSA CMS-verify cleared by I118; +6 PQC cert-chains: 2 active ML-DSA/ML-KEM (I121) + 3 #[ignore] end-entity-KU gap + 1 #[ignore] SLH-DSA primitive gap).
+// Generation summary: 1158 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12 unblocked by I117; +8 pki/pkcs12 ENCODE_P12; 6 ML-DSA CMS-verify cleared by I118; +6 PQC cert-chains: 2 active ML-DSA/ML-KEM (I121) + 3 #[ignore] end-entity-KU gap + 1 #[ignore] SLH-DSA primitive gap; pkcs12 empty-password KDF gap closed by I127 → p12_1 un-ignored).

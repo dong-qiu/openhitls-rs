@@ -7921,3 +7921,26 @@ Verification: hitls-tls lib 1553/0 (new malformed-rejection unit test)
 + hitls-cli 174/0; workspace clippy -D warnings + fmt clean. Ran in
 isolated temp worktree (`test/cert-compression-cli`). Recorded as
 DEV_LOG Phase I126.
+
+---
+
+## Phase I127 — PKCS#12 Empty-Password KDF (RFC 7292 Appendix B.2) (2026-05-26)
+
+> 做 pkcs12 空口令 KDF 修复
+
+pkcs12_kdf short-circuited the password diversifier P to empty for an
+empty password (bmp == [0,0], len 2 → the `<= 2` branch). RFC 7292
+App. B.2 / openHiTLS C / OpenSSL treat an empty password as the 2-byte
+BMP null and build P from [0,0] (a block of zeros). Mismatch → empty-
+password PFX MAC failed vs C, leaving p12_1 #[ignore]d.
+
+Fix: drop the `<= 2` short-circuit; P always built from the BMPString
+(>= [0,0]). Non-empty passwords byte-identical (zero regression); only
+empty-password P changes (empty → block of zeros).
+
+Verification: C p12_1.p12 (empty pwd) now parses (key + cert);
+un-ignored tc_pkcs12_parse_p12_tc003_p12_1_empty_pwd → migrated suite
+1156→1157 PASS, 2→1 ignored (only the SLH-DSA T136 anchor remains).
+hitls-pki 24 pkcs12 lib PASS; fmt + clippy clean.
+
+Recorded as DEV_LOG Phase I127.
