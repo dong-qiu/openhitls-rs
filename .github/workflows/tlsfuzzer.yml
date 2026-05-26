@@ -591,6 +591,20 @@ jobs:
             # (TLS 1.1, renegotiation, TLS 1.2 session resumption) +
             # 1 malformed-ext strictness. See xfail/.
             test-extended-master-secret-extension.py
+            # T138 TLS 1.2 robustness batch — clean-PASS, `-d` (args/)
+            # negotiates ECDHE (these scripts default to static-RSA kx,
+            # which we don't offer), 0 XFAIL. Lock in correct handling of
+            # malformed/oversized input + heartbeat-absence:
+            #   * fuzzed-MAC              32/0 — record MAC mutations → bad_record_mac
+            #   * fuzzed-padding          13/0 — CBC padding mutations
+            #   * large-hello             52/0 — oversized ClientHello variants
+            #   * no-heartbeat             7/0 — heartbeat ext absent / rejected (RFC 6520 not offered)
+            #   * hello-request-by-client  3/0 — client-sent HelloRequest handled
+            test-fuzzed-MAC.py
+            test-fuzzed-padding.py
+            test-large-hello.py
+            test-no-heartbeat.py
+            test-hello-request-by-client.py
           )
           # Phase T93 — cert-matrix scripts. Each cert type gets its
           # own XFAIL list under `tests/tlsfuzzer/xfail-<key-type>/`

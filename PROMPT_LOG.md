@@ -8088,3 +8088,37 @@ xtask --check drift gate passes both; na-list tally → 995 emitted / 3427
 total; workspace fmt + clippy -D warnings clean.
 
 Recorded as DEV_LOG Phase T137.
+
+---
+
+## Phase T138 — tlsfuzzer TLS 1.2 Robustness Curation Batch (2026-05-27)
+
+> 先做Phase 1
+
+(I'd proposed a 3-phase plan after a corpus survey; user picked Phase 1 —
+the clean TLS 1.2 robustness curation batch.)
+
+Survey: 168 scripts total, 71 curated. The tlsfuzzer "clean real-bug"
+seam is exhausted — remaining TLS 1.3 are env-deps (mlkem→kyber-py),
+mTLS-plumbing (*-in-certificate-verify), unsupported features (brainpool/
+PSK_ONLY/renegotiation), or low-pass policy families. But 5 clean-PASS
+TLS 1.2 robustness scripts remained uncurated.
+
+Curated (scripts_12, each with a `-d` args file — they default to
+static-RSA kRSA we don't offer, so `-d` → ECDHE), 0 XFAIL:
+fuzzed-MAC 32/0, fuzzed-padding 13/0, large-hello 52/0, no-heartbeat 7/0,
+hello-request-by-client 3/0. Pure regression coverage, no code change.
+
+Triaged out (recorded in docs so not re-investigated): the static-RSA-
+only cluster (fuzzed-finished / invalid-version / invalid-session-id /
+empty-extensions / message-duplication / invalid-client-hello /
+invalid-cipher-suites / dhe-rsa-key-exchange* / *-key-share-random) —
+no -d switch, sanity needs kRSA we deliberately don't implement
+(Bleichenbacher/ROBOT-safe); timing scripts (bleichenbacher-timing-*/
+lucky13/minerva) flaky; mlkem needs kyber-py. Deferred partials (Phase 3,
+not curated): fuzzed-plaintext 45/7, record-layer-fragmentation 19/5,
+atypical-padding 8/4, message-skipping 2/9.
+
+Verification: each new script run.sh rc=0 on a fresh release
+s-server --tls 1.2; YAML valid. Curated suite 71 → 76. Ran in isolated
+temp worktree (`test/tlsfuzzer-survey`). Recorded as DEV_LOG Phase T138.
