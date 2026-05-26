@@ -393,7 +393,7 @@ pub fn parse_key_share_ch(data: &[u8]) -> Result<Vec<(NamedGroup, Vec<u8>)>, Tls
         return Err(TlsError::HandshakeFailed("key_share CH: truncated".into()));
     }
 
-    let mut entries = Vec::new();
+    let mut entries: Vec<(NamedGroup, Vec<u8>)> = Vec::new();
     let mut pos = 2;
     let end = 2 + shares_len;
     while pos + 4 <= end {
@@ -404,6 +404,26 @@ pub fn parse_key_share_ch(data: &[u8]) -> Result<Vec<(NamedGroup, Vec<u8>)>, Tls
             return Err(TlsError::HandshakeFailed(
                 "key_share CH: entry truncated".into(),
             ));
+        }
+        // RFC 8446 §4.2.8: clients MUST NOT offer multiple KeyShareEntry
+        // values for the same group; servers MAY abort with illegal_parameter.
+        if entries.iter().any(|(g, _)| *g == group) {
+            return Err(TlsError::HandshakeFailed(
+                "invalid key_share: duplicate group".into(),
+            ));
+        }
+        // RFC 8446 §4.2.8.1 / RFC 7919: an FFDHE key_exchange is the DH public
+        // value padded to the size of the group prime `p`. A short, over-long,
+        // or wrong-group-sized value is malformed framing — reject early with
+        // illegal_parameter rather than feeding it to the DH compute (which
+        // would otherwise silently derive a mismatched secret and fail at
+        // Finished). EC point-length/validity is enforced separately downstream.
+        if let Some(expected) = group.ffdhe_key_exchange_len() {
+            if key_len != expected {
+                return Err(TlsError::HandshakeFailed(
+                    "invalid key_share: FFDHE length mismatch".into(),
+                ));
+            }
         }
         entries.push((group, data[pos..pos + key_len].to_vec()));
         pos += key_len;
@@ -1625,6 +1645,44 @@ mod tests {
         assert_eq!(entries[0].1, key1);
         assert_eq!(entries[1].0, NamedGroup::SECP256R1);
         assert_eq!(entries[1].1, key2);
+    }
+
+    #[test]
+    fn test_parse_key_share_ch_ffdhe_framing_validation() {
+        // Build a single-entry CH key_share for `group` carrying `key`.
+        fn one(group: u16, key: &[u8]) -> Vec<u8> {
+            let mut entry = Vec::new();
+            entry.extend_from_slice(&group.to_be_bytes());
+            entry.extend_from_slice(&(key.len() as u16).to_be_bytes());
+            entry.extend_from_slice(key);
+            let mut data = (entry.len() as u16).to_be_bytes().to_vec();
+            data.extend_from_slice(&entry);
+            data
+        }
+
+        // Valid ffdhe2048 share (Y padded to |p| = 256 bytes) parses.
+        let ok = one(0x0100, &[0x01; 256]);
+        let entries = parse_key_share_ch(&ok).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, NamedGroup::FFDHE2048);
+
+        // right-truncated: ffdhe2048 with 255 bytes → illegal_parameter.
+        let err = parse_key_share_ch(&one(0x0100, &[0x01; 255])).unwrap_err();
+        assert!(format!("{err}").contains("invalid key_share"), "{err}");
+
+        // key share from other group: ffdhe3072 named but 256-byte (ffdhe2048-sized) data.
+        let err = parse_key_share_ch(&one(0x0101, &[0x01; 256])).unwrap_err();
+        assert!(format!("{err}").contains("invalid key_share"), "{err}");
+
+        // duplicated key share entry: two ffdhe2048 entries → illegal_parameter.
+        let mut dup = one(0x0100, &[0x01; 256]);
+        let extra = one(0x0100, &[0x02; 256]);
+        // splice the second entry into the list, fixing the outer length prefix.
+        let new_len = (dup.len() - 2 + (extra.len() - 2)) as u16;
+        dup[0..2].copy_from_slice(&new_len.to_be_bytes());
+        dup.extend_from_slice(&extra[2..]);
+        let err = parse_key_share_ch(&dup).unwrap_err();
+        assert!(format!("{err}").contains("duplicate group"), "{err}");
     }
 
     #[test]

@@ -499,10 +499,10 @@ jobs:
             #     now rejected with illegal_parameter (was internal_error).
             #   * ecdhe-curves  33/0  — malformed P-256/384/521 key shares
             #     (point at infinity / off-curve / wrong length) ditto.
-            #   * ffdhe-groups  48/14 — malformed FFDHE key-share *values*
-            #     fixed; the 14 XFAILs are a separate FFDHE key-share
-            #     framing-validation gap (truncated / wrong-group /
-            #     duplicated) — see xfail/test-tls13-ffdhe-groups.txt.
+            #   * ffdhe-groups  62/0  — malformed FFDHE key-share *values*
+            #     (I124) plus the framing-validation gap (right-truncated /
+            #     wrong-group-sized / duplicated entries) now both rejected
+            #     with illegal_parameter at parse time; 0 XFAIL.
             test-tls13-crfg-curves.py
             test-tls13-ecdhe-curves.py
             test-tls13-ffdhe-groups.py
