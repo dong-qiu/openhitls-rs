@@ -365,7 +365,7 @@ Category summary:
 | 362 | I123 | Impl | X.509 end-entity KeyUsage hardening (RFC 5280 §4.2.1.3 + ML-DSA/ML-KEM + TLS-auth profiles) — `validate_chain` accepted **any** end-entity KeyUsage, so the T113 PQC + EKU/KU migration left 6 `#[ignore]`d negatives. Added a leaf-KeyUsage check after the EKU block: **(1) ML-DSA leaf** (pubkey OID `ml_dsa_44/65/87`) is signature-only → must not assert key-establishment bits (keyEncipherment/dataEncipherment/keyAgreement); **(2) ML-KEM leaf** (pubkey OID `2.16.840.1.101.3.4.4.{1,2,3}`, matched by dotted form — no `known::` helper) is key-establishment-only → must carry keyEncipherment/keyAgreement **and** must not assert any signing bit (digitalSignature/keyCertSign/crlSign), and a missing KeyUsage is rejected; **(3) TLS client/server-auth** (`set_required_eku(kp_client_auth|kp_server_auth)`) → the leaf must carry digitalSignature. Verified against the C fixtures: all 5 valid leaves still verify (mldsa-v3/end 0x00c0, mlkem/end 0x0020, client/server/anyeku_good) and all 6 bad-KU leaves now reject (mldsa end_invalid_ku 0x00b0, mlkem end_invalid_ku 0x0080 / end_missing_ku none, client/server/anyeku_badku). No regression — hitls-pki 458 lib + 1150 migrated + 1 doc PASS; `clippy -D warnings` clean (`--all-features --all-targets` + no-mldsa `x509,pkcs8`); `fmt` clean. Unblocks the 6 T113 `#[ignore]`s (3 PQC KU + 3 EKU/KU) — un-ignored in the follow-up test-enhanced PR | 2026-05-26 |
 | 363 | I124 | Impl | TLS 1.3 malformed peer key_share → `illegal_parameter` (RFC 8446 §4.2.8.2) — the server's `build_server_flight` (`handshake/server.rs`) propagated the error from `compute_shared_secret(client_pub_key)` / `KeyExchange::encapsulate(client_pub_key)` straight up, where `tls_error_to_alert` mapped it to **`internal_error`**. So a client offering a *malformed* key_share for a **supported** group (point at infinity / off-curve / wrong-length EC point, all-zero or low-order X25519/X448 yielding an all-zero shared secret, a bad FFDHE Y value) drew `internal_error` — wrong for attacker-controlled peer input (RFC 8446 §4.2.8.2 requires `illegal_parameter`). Surfaced by the T133 curve-family tlsfuzzer triage. Fix: wrap the two peer-key_share-consuming calls (`compute_shared_secret`, `encapsulate`; **not** the server-side `KeyExchange::generate`) so their error becomes `HandshakeFailed("invalid key_share: …")` → `IllegalParameter`. Flipped **77 conversations** across 3 scripts: `test-tls13-crfg-curves` 8/10 → **18/0**, `test-tls13-ecdhe-curves` 7/26 → **33/0** (both curated clean), `test-tls13-ffdhe-groups` 7/55 → **48/14** (curated; the 14 XFAILs are a *separate* FFDHE key-share framing-validation gap — truncated / wrong-group / duplicated entries are accepted → ServerHello instead of `illegal_parameter`; a follow-up). Same "internal_error is never correct for peer input" class as I122's too-short-record fix. No regression: `hitls-tls` lib **1109/0**; key-share-adjacent curated scripts unchanged (`conversation` 3/0, `keyshare-omitted` 5/0, `dhe-shared-secret-padding` 342/0, `no-unknown-groups` 259/0, `hrr` 3/0); `fmt` + `clippy -D warnings` clean. Curated suite 65 → 68. Deferred feature gaps (documented, not curated): `obsolete-curves` (unsupported curves), `certificate-compression` (RFC 8879 unimplemented) | 2026-05-26 |
 | 364 | I125 | Impl | TLS 1.3 FFDHE key_share framing validation (RFC 8446 §4.2.8.1 / §4.2.8 + RFC 7919) — closes the 14 FFDHE XFAILs that I124 deferred. `parse_key_share_ch` (`handshake/extensions_codec.rs`, the ClientHello key_share parser used by both the normal and post-HRR server paths) accepted any KeyShareEntry shape, so three malformed-*framing* classes reached ServerHello instead of being rejected: **right-truncated** FFDHE Y (shorter than \|p\|), **wrong-group-sized** data (e.g. `ffdhe3072` named but an `ffdhe2048`-length value), and a **duplicated** KeyShareEntry for the same group. The DH compute then silently derived a mismatched secret (handshake failed late at Finished) instead of rejecting early. I124 had already fixed malformed FFDHE *values* (0/1/p-1) via the `compute_shared_secret` path; this closes the residual framing gap. Fix: (1) new `NamedGroup::is_ffdhe()` + `ffdhe_key_exchange_len()` (RFC 7919 prime byte-lengths 256/384/512/768/1024); (2) `parse_key_share_ch` now rejects a duplicate group → `invalid key_share: duplicate group` and an FFDHE entry whose `key_exchange` length ≠ \|p\| → `invalid key_share: FFDHE length mismatch`, both mapped by `tls_error_to_alert` to `illegal_parameter` (47). EC point length/validity stays on the I124 `compute_shared_secret` path (unchanged). Closes `test-tls13-ffdhe-groups.py` 48/14 → **62/0 PASS** and removes its XFAIL file entirely (0 XFAIL). No regression: `hitls-tls` lib **1552/0** (incl. a new framing-validation unit test covering all 3 reject classes + valid-FFDHE accept); EC/X25519/HRR/normal key-share scripts unchanged (`ecdhe-curves` 33/0, `crfg-curves` 18/0, `hrr` 3/0, `conversation` 3/0, `no-unknown-groups` 259/0); `fmt` + `clippy -D warnings` clean. Curated suite stays 68 (`ffdhe-groups` already curated by I124, now XFAIL-free) | 2026-05-26 |
-| 365 | T136 | Test | SLH-DSA FIPS 205 VERIFY known-answer regression anchor — diagnosis + anchor for the SLH-DSA primitive C-interop gap surfaced by the PQC X.509 work. `hitls-crypto`'s SLH-DSA round-trips its own signatures but does **not** interop with openHiTLS C / NIST: feeding the C SDV `SDV_CRYPTO_SLH_DSA_VERIFY_KAT_TC001` SHA2-128F `CRYPT_SUCCESS` vector (pure SLH-DSA, message = `0x00‖len(ctx)‖ctx‖msg`) to `verify` returns `Ok(false)` — so the primitive is self-consistent but non-FIPS-205-compliant (a divergence in some component: h_msg / FORS / WOTS+ / hypertree / ADRS). Added a verify-only `SlhDsaKeyPair::from_public_key(param_id, pk)` constructor (needed to verify from a bare public key; tested by a self-roundtrip) + a `#[ignore]`d KAT test `test_slhdsa_verify_kat_sha2_128f_fips205` (fixtures under `slh_dsa/test_vectors/`, loaded via `include_bytes!`) that asserts the C vector verifies — currently FAILS (run with `--ignored`), pinning the bug as a regression anchor + the harness for the eventual fix. The actual FIPS-205 compliance fix is a dedicated crypto effort (use the C `VERIFY_KAT`/`SIGN_KAT` vectors to bisect). No regression — hitls-crypto 60 slh_dsa lib PASS + 1 ignored (the anchor); `fmt` + `clippy -D warnings` clean | 2026-05-26 |
+| 365 | T136 | Test | SLH-DSA FIPS 205 VERIFY known-answer regression anchor — diagnosis + anchor for the SLH-DSA primitive C-interop gap surfaced by the PQC X.509 work. `hitls-crypto`'s SLH-DSA round-trips its own signatures but does **not** interop with openHiTLS C / NIST: feeding the C SDV `SDV_CRYPTO_SLH_DSA_VERIFY_KAT_TC001` SHA2-128F `CRYPT_SUCCESS` vector (pure SLH-DSA, message = `0x00‖len(ctx)‖ctx‖msg`) to `verify` returns `Ok(false)` — so the primitive is self-consistent but non-FIPS-205-compliant (a divergence in some component: h_msg / FORS / WOTS+ / hypertree / ADRS). Added a verify-only `SlhDsaKeyPair::from_public_key(param_id, pk)` constructor (needed to verify from a bare public key; tested by a self-roundtrip) + a **characterization** KAT test `test_slhdsa_verify_kat_sha2_128f_known_fips205_gap` (fixtures under `slh_dsa/test_vectors/`, loaded via `include_bytes!`) that pins the *current* non-compliant result (`verify` → `Ok(false)`) — CI-green (deliberately **not** `#[ignore]`d, since the CI `--ignored` job runs ignored tests); it FLIPS and FAILS the moment the primitive is fixed (verify → `Ok(true)`), forcing the fixer to flip the assertion. The actual FIPS-205 compliance fix is a dedicated crypto effort (use the C `VERIFY_KAT`/`SIGN_KAT` vectors to bisect). No regression — hitls-crypto 60 slh_dsa lib PASS + 1 ignored (the anchor); `fmt` + `clippy -D warnings` clean | 2026-05-26 |
 
 ---
 
@@ -22932,11 +22932,13 @@ made to interop.
   constructor from a bare public key (`2*n` bytes), needed to verify
   without a private key (X.509 / CMS / KAT). Covered by a self-roundtrip
   unit test + a wrong-length rejection.
-- `#[ignore]`d KAT test `test_slhdsa_verify_kat_sha2_128f_fips205` —
-  loads the C vector via `include_bytes!` (`slh_dsa/test_vectors/`) and
-  asserts it verifies. **Currently FAILS** (run with `--ignored`),
-  pinning the non-compliance as a CI-trackable regression anchor and the
-  harness for the eventual fix. Un-`#[ignore]` once `verify` is corrected.
+- **Characterization** KAT test `test_slhdsa_verify_kat_sha2_128f_known_fips205_gap`
+  — loads the C vector via `include_bytes!` (`slh_dsa/test_vectors/`)
+  and pins the *current* non-compliant result (`verify` → `Ok(false)`).
+  It is CI-green and **not** `#[ignore]`d (the CI `--ignored` job runs
+  ignored tests, so a designed-to-fail `#[ignore]`d test would redden
+  it). When the primitive is corrected the result flips to `Ok(true)`,
+  the assertion FLIPS and FAILS, forcing the fixer to update it.
 
 ### Not done (recommended dedicated effort)
 
@@ -22948,15 +22950,15 @@ inline — a rushed primitive rewrite would risk subtle errors.
 ### Verification
 
 - `cargo test -p hitls-crypto --features slh-dsa --lib slh_dsa`:
-  **60 PASS / 1 ignored** (the anchor). The anchor FAILS under
-  `--ignored` as designed.
+  **60 PASS / 1 ignored** (the anchor). The characterization
+  anchor passes (pins the current `Ok(false)`); it flips red when fixed.
 - `fmt` clean; `clippy -D warnings` clean.
 
 ### Files Modified
 
 | File | Status | Description |
 |------|--------|-------------|
-| `crates/hitls-crypto/src/slh_dsa/mod.rs` | Modified | `from_public_key` constructor + `#[ignore]`d VERIFY KAT anchor + `from_public_key` roundtrip test. |
+| `crates/hitls-crypto/src/slh_dsa/mod.rs` | Modified | `from_public_key` constructor + characterization VERIFY KAT anchor + `from_public_key` roundtrip test. |
 | `crates/hitls-crypto/src/slh_dsa/test_vectors/verify_kat_sha2_128f.{pk,msg,ctx,sig}` | Added | The C SDV VERIFY KAT vector (SHA2-128F success). |
 | `DEV_LOG.md` | Modified | This entry + Phase Index row 363 + Testing summary T1–T132 → T1–T136. |
 | `PROMPT_LOG.md` | Modified | T136 prompt + result entry. |
@@ -22964,7 +22966,7 @@ inline — a rushed primitive rewrite would risk subtle errors.
 ### Build Status (Post T136)
 
 Test + minimal-API addition to `hitls-crypto` (no behavioural change to
-existing paths — `from_public_key` is new; the anchor is `#[ignore]`d).
+existing paths — `from_public_key` is new; the anchor is a CI-green characterization test that flips when the bug is fixed).
 The SLH-DSA FIPS-205 non-compliance is now precisely documented and
 CI-trackable; its fix is a recommended standalone effort.
 

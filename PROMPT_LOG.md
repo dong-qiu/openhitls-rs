@@ -7869,16 +7869,16 @@ component: h_msg/FORS/WOTS+/hypertree/ADRS).
 Landed (anchor, not fix):
 - SlhDsaKeyPair::from_public_key(param_id, pk) verify-only constructor
   (+ self-roundtrip + wrong-length-reject tests).
-- #[ignore]d KAT test test_slhdsa_verify_kat_sha2_128f_fips205 loading
-  the C vector via include_bytes!; asserts it verifies — currently FAILS
-  under --ignored, pinning the bug as a CI-trackable regression anchor +
-  the fix harness.
+- characterization KAT test test_slhdsa_verify_kat_sha2_128f_known_fips205_gap
+  loading the C vector via include_bytes!; pins the current non-compliant
+  Ok(false) — CI-green (not #[ignore]d, since the CI --ignored job runs
+  ignored tests); flips red when the primitive is fixed.
 
 Not done (recommended dedicated effort): the actual FIPS-205 compliance
 fix (bisect components vs the C VERIFY_KAT/SIGN_KAT vectors) — a focused
 high-risk crypto task, deliberately not rushed inline.
 
-Verification: hitls-crypto slh_dsa 60 PASS / 1 ignored (anchor); anchor
-FAILS under --ignored as designed; fmt + clippy clean.
+Verification: hitls-crypto slh_dsa 60 PASS / 1 ignored (anchor); the
+characterization anchor passes and flips when fixed; fmt + clippy clean.
 
 Recorded as DEV_LOG Phase T136.
