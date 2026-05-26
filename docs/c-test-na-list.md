@@ -57,7 +57,9 @@ Counts are the `Generation summary` footer of each generated file
 | SM2 | 12 | 111 | 0 | 17 | 140 |
 | ML-DSA | 45 | 731 | 3 | 0 | 779 |
 | ML-KEM | 150 | 196 | 81 | 0 | 427 |
-| **Total** | **995** | **2120** | **238** | **74** | **3427** |
+| SHA-3 | 46 | 50 | 0 | 2 | 98 |
+| DRBG | 5 | 272 | 0 | 13 | 290 |
+| **Total** | **1046** | **2442** | **238** | **89** | **3815** |
 
 ML-DSA migrates the **verify** side (`MLDSA_FUNC_VERIFYDATA_TC001`, internal
 interface, μ = H(tr ‖ M)). ML-KEM migrates the **decapsulation** side
@@ -67,6 +69,16 @@ routed to *API-surface* for the same reproducibility reason as DSA/SM2 (see
 below): they consume injected randomness (ML-DSA sign nonce; ML-KEM `m` for
 encaps and `(z,d)` for keygen) that the public Rust API does not expose a hook
 for.
+
+SHA-3 migrates `SHA3_FUNC_TC003` (fixed-length SHA3-224/256/384/512 hash),
+`TC005`/`TC006` (SHAKE128/256 default- and variable-length XOF squeeze), and
+`SHA3_COPY_CTX` (hash); the 2 unsupported are SHAKE ctx-copy mid-stream rows
+with no one-shot mapping. DRBG migrates `SDV_PRIMARY_DRBG_VECTOR_FUN_TC001`
+(NIST instantiate from `0xff` entropy/nonce + `pers=00..05`, then generate 32)
+for the variants with a matching deterministic Rust constructor: Hash-DRBG
+SHA-256/384/512, HMAC-DRBG SHA-256, CTR-DRBG AES-256 (no df). The 13
+unsupported DRBG rows are listed in *Structural gaps*; notably CTR-AES-256-**df**
+is a behavioural divergence (not an API gap) — see the anchor note.
 
 ## Structural gaps (unsupported — candidate future work)
 
@@ -81,6 +93,23 @@ migration tool emit the corresponding tests with no generator change.
 | SM2 key exchange | SM2 | 17 | `Sm2KeyPair` exposes no key-exchange method | add an SM2 ECDH / key-exchange API |
 | HMAC/CMAC SHA-3 | HMAC, CMAC | 8 | SHA-3 is not yet wired into the `Digest` trait used by the MAC one-shot path; CMAC is also AES-only (`CRYPT_MAC_CMAC_SM4`) | implement the `Digest` impl for SHA-3; generalise `Cmac` over `BlockCipher` |
 | CRL parser leniency | X.509 CRL | 9 | Negative CRL-parse KATs (`res != HITLS_PKI_SUCCESS`) cannot be migrated: `CertificateRevocationList::from_pem` accepts structurally-malformed CRLs the C parser rejects, so `assert!(… .is_err())` does not hold. Only positive parse rows are emitted | tighten the Rust CRL DER decoder to reject the malformed inputs (version / signature-algorithm / tbs-shape checks) |
+| Hash-DRBG SHA-1 / SHA-224 / SM3 | DRBG | 3 | `HashDrbgType` is SHA-256/384/512 only | add SHA-1 / SHA-224 / SM3 variants to `HashDrbgType` |
+| HMAC-DRBG SHA-1 / 224 / 384 / 512 | DRBG | 4 | `HmacDrbg` is hardcoded to HMAC-SHA-256 | generalise `HmacDrbg` over the digest |
+| CTR-DRBG AES-128 / 192 (±df) | DRBG | 4 | `CtrDrbg` is AES-256 only | generalise `CtrDrbg` over the AES key length |
+| SM4-CTR-DRBG-df | DRBG | 1 | `Sm4CtrDrbg` has only the no-df constructor | add `Sm4CtrDrbg::with_df` |
+
+### A behavioural divergence — not an API gap
+
+The CTR-DRBG **AES-256-df** NIST vector (`BSL_CID_RAND_AES256_CTR_DF`) is **not**
+reproduced by `CtrDrbg::with_df(entropy ‖ nonce ‖ pers)` — counted in DRBG's 13
+unsupported. This is *not* a missing API: the Hash-DRBG, HMAC-DRBG and
+CTR-DRBG-**no-df** NIST vectors from the same C source all match (migrated), and
+CTR-no-df shares the AES core and `update` with CTR-df, isolating the divergence
+to `block_cipher_df` (SP 800-90A §10.3.2). No input construction (entropy length
+1000/48/32 × {e‖n‖p, e‖p, e‖n}) reproduces it. Pinned by the CI-green divergence
+anchor `test_ctr_drbg_aes256_df_nist_vector_divergence_anchor` in
+`crates/hitls-crypto/src/drbg/ctr_drbg.rs`; fixing `block_cipher_df` (a dedicated
+effort) will flip the anchor and unblock the vector.
 
 ### Not a Rust-API gap — reproducibility limits
 

@@ -2,11 +2,13 @@ mod cipher;
 mod curve25519;
 mod dh;
 mod digest;
+mod drbg;
 mod dsa;
 mod mac;
 mod mldsa;
 mod mlkem;
 mod parser;
+mod sha3;
 mod sm2;
 mod sm4;
 mod x509;
@@ -133,6 +135,16 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_mlkem.rs"),
             mlkem::emit_mlkem_kat,
         ),
+        "sha3" => (
+            vec![c_root.join("crypto/sha3/test_suite_sdv_eal_md_sha3.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_sha3.rs"),
+            sha3::emit_sha3_kat,
+        ),
+        "drbg" => (
+            vec![c_root.join("crypto/drbg/test_suite_sdv_drbg.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_drbg.rs"),
+            drbg::emit_drbg_kat,
+        ),
         "x509-parse" => (
             vec![
                 c_root.join("pki/cert/test_suite_sdv_x509_cert.data"),
@@ -145,7 +157,7 @@ fn migrate(
         ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, x509-parse"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, drbg, x509-parse"
             )
             .into());
         }

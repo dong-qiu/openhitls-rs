@@ -413,6 +413,42 @@ mod tests {
         assert_eq!(output, output2);
     }
 
+    /// DIVERGENCE ANCHOR for a KNOWN GAP in `with_df` (CTR-DRBG-df).
+    ///
+    /// openHiTLS C SDV `SDV_PRIMARY_DRBG_VECTOR_FUN_TC001` for
+    /// `BSL_CID_RAND_AES256_CTR_DF` instantiates CTR-DRBG-AES-256 *with* the
+    /// Block_Cipher_df from entropy = 1000×0xff, nonce = 20×0xff,
+    /// personalization = {00,01,02,03,04,05}, then generates 32 bytes equal to
+    /// the vector below. Our `with_df` produces a *different* result, even
+    /// though the Hash/HMAC/CTR-no-df NIST vectors all match (migrated in
+    /// `tests/migrated_drbg.rs`) — and CTR-no-df shares the same AES core and
+    /// `update` as CTR-df. That isolates the divergence to `block_cipher_df`:
+    /// a likely SP 800-90A §10.3.2 non-compliance, to be fixed in a dedicated
+    /// effort. This test pins the *current* (divergent) behaviour so it stays
+    /// CI-green; when `block_cipher_df` is corrected the `assert_ne!` FLIPS and
+    /// FAILS, and the fixer must replace it with `assert_eq!` (and migrate the
+    /// vector via `xtask --algo drbg`).
+    #[test]
+    fn test_ctr_drbg_aes256_df_nist_vector_divergence_anchor() {
+        let entropy = vec![0xffu8; 1000];
+        let nonce = [0xffu8; 20];
+        let pers = [0x00u8, 0x01, 0x02, 0x03, 0x04, 0x05];
+        let mut drbg = CtrDrbg::with_df(&entropy, &nonce, &pers).unwrap();
+        let output = drbg.generate_bytes(32).unwrap();
+        let c_vector: [u8; 32] = [
+            0xa0, 0x1d, 0xb1, 0xcf, 0x47, 0x33, 0xac, 0xf9, 0xbf, 0x26, 0x84, 0x1d, 0x93, 0x45,
+            0xbf, 0x32, 0xe0, 0x05, 0x6b, 0x9a, 0xd9, 0x27, 0x22, 0x92, 0x53, 0xe4, 0x15, 0xe6,
+            0xe9, 0x6b, 0x2b, 0x94,
+        ];
+        assert_ne!(
+            output.as_slice(),
+            &c_vector[..],
+            "DIVERGENCE ANCHOR FLIPPED: CTR-DRBG-df now matches the openHiTLS C \
+             NIST vector — block_cipher_df is fixed. Replace with `assert_eq!` \
+             and migrate the AES256_CTR_DF vector via xtask."
+        );
+    }
+
     #[test]
     fn test_ctr_drbg_nist_vector() {
         // NIST SP 800-90A CTR_DRBG AES-256 use df=false
