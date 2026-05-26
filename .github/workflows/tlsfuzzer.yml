@@ -71,6 +71,11 @@ env:
   # request path contains `/secret`; kept on its own instance so it
   # only affects `test-tls13-post-handshake-auth.py`.
   HITLS_PORT_PHA: 4455
+  # Phase I128 — dedicated `--cert-compression` server (RFC 8879). The
+  # flag makes the server advertise zlib and send a CompressedCertificate
+  # when the client offers `compress_certificate`; kept on its own
+  # instance so it only affects `test-tls13-certificate-compression.py`.
+  HITLS_PORT_CERTCOMP: 4456
   # External PSK identity advertised by the server. The matching value
   # `HITLS_PSK_HEX` is generated at setup time and exported into the
   # job environment.
@@ -347,13 +352,25 @@ jobs:
             --post-handshake-auth \
             -q > "${RUNNER_TEMP}/server-pha-1.3.log" 2>&1 &
           echo "SERVER_PID_PHA=$!" >> "$GITHUB_ENV"
-          # Wait for all 12 listeners.
+          # Phase I128 — `--cert-compression` instance (RFC 8879). Advertises
+          # zlib so the server sends a CompressedCertificate when the client
+          # offers `compress_certificate`; isolated so it only affects
+          # `test-tls13-certificate-compression.py`.
+          ./target/release/hitls s-server \
+            -p "${HITLS_PORT_CERTCOMP}" \
+            --cert "${RUNNER_TEMP}/certs/cert-rsa.pem" \
+            --key  "${RUNNER_TEMP}/certs/key-rsa-pkcs8.pem" \
+            --cert-compression \
+            -q > "${RUNNER_TEMP}/server-certcomp-1.3.log" 2>&1 &
+          echo "SERVER_PID_CERTCOMP=$!" >> "$GITHUB_ENV"
+          # Wait for all 13 listeners.
           for port in "${HITLS_PORT}" "${HITLS_PORT_12}" \
                       "${HITLS_PORT_ECDSA}" "${HITLS_PORT_ED25519}" \
                       "${HITLS_PORT_MTLS}" "${HITLS_PORT_PSS}" \
                       "${HITLS_PORT_MTLS_12}" "${HITLS_PORT_PSK}" \
                       "${HITLS_PORT_ECDSA_P384}" "${HITLS_PORT_ECDSA_P521}" \
-                      "${HITLS_PORT_KEYUPDATE}" "${HITLS_PORT_PHA}"; do
+                      "${HITLS_PORT_KEYUPDATE}" "${HITLS_PORT_PHA}" \
+                      "${HITLS_PORT_CERTCOMP}"; do
             for _ in $(seq 1 30); do
               if ss -ltn "( sport = :${port} )" | grep -q ":${port}"; then
                 echo "server on port ${port} up"
@@ -659,6 +676,13 @@ jobs:
             test-tls13-psk_dhe_ke.py
             test-tls13-session-resumption.py
           )
+          # Phase I128 — RFC 8879 certificate compression. Run against the
+          # dedicated `--cert-compression` instance on ${HITLS_PORT_CERTCOMP}.
+          # 28/1: the single XFAIL ("sending extension in TLS-1.2") sends a
+          # TLS-1.2 ClientHello that this TLS-1.3 listener rejects by design.
+          scripts_certcomp=(
+            test-tls13-certificate-compression.py
+          )
           aggregate_exit=0
           : > "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
           # Phase T92 — drop the explicit `-n 9999` from the loop and
@@ -880,6 +904,22 @@ jobs:
               aggregate_exit=1
             fi
           done
+          # Phase I128 — RFC 8879 certificate compression subset.
+          for s in "${scripts_certcomp[@]}"; do
+            log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}-certcomp.log"
+            echo "=== TLS 1.3 (--cert-compression): $s ==="
+            ./tests/tlsfuzzer/run.sh "$s" \
+              -h "${HITLS_HOST}" -p "${HITLS_PORT_CERTCOMP}" 2>&1 | tee "${log}"
+            rc=${PIPESTATUS[0]}
+            grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
+              | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo "${s} (--cert-compression) → exit=${rc}" \
+              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            if [ "$rc" -ne 0 ]; then
+              aggregate_exit=1
+            fi
+          done
           exit "$aggregate_exit"
 
       - name: Print summary
@@ -897,7 +937,8 @@ jobs:
                     "${SERVER_PID_MTLS:-}" "${SERVER_PID_PSS:-}" \
                     "${SERVER_PID_MTLS_12:-}" "${SERVER_PID_PSK:-}" \
                     "${SERVER_PID_ECDSA_P384:-}" "${SERVER_PID_ECDSA_P521:-}" \
-                    "${SERVER_PID_KEYUPDATE:-}" "${SERVER_PID_PHA:-}"; do
+                    "${SERVER_PID_KEYUPDATE:-}" "${SERVER_PID_PHA:-}" \
+                    "${SERVER_PID_CERTCOMP:-}"; do
             if [ -n "${pid}" ]; then
               kill "${pid}" 2>/dev/null || true
             fi
