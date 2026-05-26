@@ -352,6 +352,27 @@ Still genuine feature gaps (not curated):
   `test-dhe-rsa-key-exchange-signatures` (4/8, 1.2),
   `test-ecdsa-sig-flexibility` (3/8, 1.2).
 
+**TLS 1.2 robustness batch — CURATED (T138).** Five clean-PASS TLS 1.2
+scripts added to `scripts_12`, each with a `-d` args file (they default
+to static-RSA kx, which we don't offer, so `-d` switches them to ECDHE):
+`test-fuzzed-MAC` (32/0), `test-fuzzed-padding` (13/0), `test-large-hello`
+(52/0), `test-no-heartbeat` (7/0), `test-hello-request-by-client` (3/0).
+0 XFAIL — pure regression coverage for malformed/oversized-input + the
+heartbeat-absence + client-HelloRequest paths.
+
+**N/A — static-RSA-only scripts (do not re-triage).** A cluster of TLS
+1.2 scripts hard-codes the static-RSA (`kRSA`) key exchange and offers no
+`-d`/ECDHE switch: `test-fuzzed-finished`, `test-invalid-version`,
+`test-invalid-session-id`, `test-empty-extensions`,
+`test-message-duplication`, `test-invalid-client-hello`,
+`test-invalid-cipher-suites`, `test-dhe-rsa-key-exchange*`,
+`test-{dhe,ecdhe-rsa}-key-share-random`. Their sanity step needs `kRSA`,
+which we deliberately do **not** implement (Bleichenbacher/ROBOT-safe),
+so they sanity-fail and are not curatable — same class as
+`test-bleichenbacher-workaround`. Timing scripts
+(`bleichenbacher-timing-*`, `lucky13`, `minerva`) are excluded as
+flaky; `test-tls13-mlkem` needs the `kyber-py` Python lib (not in CI).
+
 **Read-path conformance — I-phase candidate**:
 `test-tls13-unencrypted-alert` (2/2 fail) — server replies
 `unexpected_message` to a peer abort-alert instead of closing
