@@ -522,6 +522,23 @@ impl Certificate {
                     sig_oid
                 )))
             }
+        } else if cfg!(feature = "slhdsa") && slhdsa_param_for_oid(&sig_oid).is_some() {
+            #[cfg(feature = "slhdsa")]
+            {
+                verify_slhdsa_cert(
+                    &sig_oid,
+                    &self.tbs_raw,
+                    &self.signature_value,
+                    &issuer.public_key.public_key,
+                )
+            }
+            #[cfg(not(feature = "slhdsa"))]
+            {
+                Err(PkiError::InvalidCert(format!(
+                    "unsupported signature algorithm: {}",
+                    sig_oid
+                )))
+            }
         } else {
             Err(PkiError::InvalidCert(format!(
                 "unsupported signature algorithm: {}",
@@ -727,6 +744,57 @@ fn verify_mldsa_cert(
     msg.extend_from_slice(tbs);
     hitls_crypto::mldsa::mldsa_verify(issuer_pubkey, &msg, signature, &params)
         .map_err(|e| PkiError::InvalidCert(format!("ML-DSA verify: {e}")))
+}
+
+/// Map an X.509 signature-algorithm OID to its SLH-DSA parameter set (NIST FIPS
+/// 205 / CSOR `id-slh-dsa-*` = 2.16.840.1.101.3.4.3.{20..31}), or `None` if the
+/// OID is not an SLH-DSA algorithm. Defined unconditionally so the dispatch's
+/// `cfg!(feature = "slhdsa")` guard can reference it without the crypto feature.
+fn slhdsa_param_for_oid(sig_oid: &Oid) -> Option<hitls_types::SlhDsaParamId> {
+    use hitls_types::SlhDsaParamId as P;
+    let m = [
+        (known::slh_dsa_sha2_128s(), P::Sha2128s),
+        (known::slh_dsa_sha2_128f(), P::Sha2128f),
+        (known::slh_dsa_sha2_192s(), P::Sha2192s),
+        (known::slh_dsa_sha2_192f(), P::Sha2192f),
+        (known::slh_dsa_sha2_256s(), P::Sha2256s),
+        (known::slh_dsa_sha2_256f(), P::Sha2256f),
+        (known::slh_dsa_shake_128s(), P::Shake128s),
+        (known::slh_dsa_shake_128f(), P::Shake128f),
+        (known::slh_dsa_shake_192s(), P::Shake192s),
+        (known::slh_dsa_shake_192f(), P::Shake192f),
+        (known::slh_dsa_shake_256s(), P::Shake256s),
+        (known::slh_dsa_shake_256f(), P::Shake256f),
+    ];
+    m.into_iter()
+        .find(|(oid, _)| oid == sig_oid)
+        .map(|(_, p)| p)
+}
+
+/// Verify an X.509 certificate signature made with pure SLH-DSA (FIPS 205).
+///
+/// SLH-DSA hashes the message internally, so we verify over the raw TBS wrapped
+/// in the FIPS 205 §10.2 *pure*-mode prefix `0x00 || len(ctx)=0x00 || M` (empty
+/// context — X.509 carries no SLH-DSA context). `issuer_pubkey` is the issuer
+/// SPKI's raw SLH-DSA public key (`PK.seed || PK.root`). Mirrors the
+/// [`verify_mldsa_cert`] convention.
+#[cfg(feature = "slhdsa")]
+fn verify_slhdsa_cert(
+    sig_oid: &Oid,
+    tbs: &[u8],
+    signature: &[u8],
+    issuer_pubkey: &[u8],
+) -> Result<bool, PkiError> {
+    let param = slhdsa_param_for_oid(sig_oid)
+        .ok_or_else(|| PkiError::InvalidCert(format!("not an SLH-DSA OID: {sig_oid}")))?;
+    let kp = hitls_crypto::slh_dsa::SlhDsaKeyPair::from_public_key(param, issuer_pubkey)
+        .map_err(|e| PkiError::InvalidCert(format!("SLH-DSA pubkey: {e}")))?;
+    let mut msg = Vec::with_capacity(2 + tbs.len());
+    msg.push(0x00);
+    msg.push(0x00);
+    msg.extend_from_slice(tbs);
+    kp.verify(&msg, signature)
+        .map_err(|e| PkiError::InvalidCert(format!("SLH-DSA verify: {e}")))
 }
 
 // ---------------------------------------------------------------------------

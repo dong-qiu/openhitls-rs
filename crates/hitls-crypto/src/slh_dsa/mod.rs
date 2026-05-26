@@ -135,6 +135,18 @@ impl SlhDsaKeyPair {
     /// Sign a message. Returns signature bytes.
     pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let p = get_params(self.param_id);
+        // FIPS 205 §10.2.1: the default randomizer is PK.seed, but a random
+        // `opt_rand` is permitted. We use a fresh random value (hedged mode).
+        let mut opt_rand = vec![0u8; p.n];
+        getrandom::fill(&mut opt_rand).map_err(|_| CryptoError::BnRandGenFail)?;
+        self.sign_internal(message, &opt_rand)
+    }
+
+    /// SLH-DSA signing with an explicit `opt_rand` randomizer (FIPS 205
+    /// `slh_sign_internal`). Deterministic given `opt_rand`; used by [`Self::sign`]
+    /// with a random value and by KAT tests with the vector's fixed randomizer.
+    fn sign_internal(&self, message: &[u8], opt_rand: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let p = get_params(self.param_id);
         let n = p.n;
 
         let sk_seed = &self.private_key[..n];
@@ -145,10 +157,8 @@ impl SlhDsaKeyPair {
         let hasher = make_hasher(p, pk_seed, pk_root);
         let compressed = p.is_sha2;
 
-        // Step 1: Generate randomizer R
-        let mut opt_rand = vec![0u8; n];
-        getrandom::fill(&mut opt_rand).map_err(|_| CryptoError::BnRandGenFail)?;
-        let r = hasher.prf_msg(sk_prf, &opt_rand, message)?;
+        // Step 1: Compute randomizer R = PRF_msg(SK.prf, opt_rand, M)
+        let r = hasher.prf_msg(sk_prf, opt_rand, message)?;
 
         // Step 2: Compute message digest
         let digest = hasher.h_msg(&r, message)?;
@@ -253,26 +263,17 @@ impl SlhDsaKeyPair {
 mod tests {
     use super::*;
 
-    /// SLH-DSA VERIFY known-answer **characterization** test (openHiTLS C SDV
+    /// SLH-DSA VERIFY known-answer test (openHiTLS C SDV
     /// `SDV_CRYPTO_SLH_DSA_VERIFY_KAT_TC001`, SHA2-128F, a `CRYPT_SUCCESS`
     /// vector) — pure SLH-DSA (FIPS 205 §10.2) with the message prefixed
     /// `0x00 || len(ctx) || ctx || msg`.
     ///
-    /// REGRESSION ANCHOR for a KNOWN BUG. This implementation verifies its own
-    /// signatures (see the round-trip tests) but does **not** interop with
-    /// openHiTLS C / NIST FIPS 205: it returns `Ok(false)` for this
-    /// authoritative SUCCESS vector, so the SLH-DSA primitive is
-    /// self-consistent but non-compliant (a divergence in some component —
-    /// h_msg / FORS / WOTS+ / hypertree / ADRS). Diagnosed during the PQC X.509
-    /// work; the fix is a dedicated FIPS-205 compliance effort.
-    ///
-    /// The test pins the *current* (wrong) result so it stays CI-green and is
-    /// **not** an `#[ignore]`d failing test (the CI `--ignored` job would run
-    /// it). When the primitive is corrected, `verify` will return `Ok(true)`,
-    /// this assertion FLIPS and FAILS, and the fixer must replace it with
-    /// `assert!(verified)`.
+    /// This is a cross-implementation interop anchor: the signature was
+    /// produced by openHiTLS C / NIST FIPS 205 and MUST verify here. It pins
+    /// the FIPS-205 `H_msg` MGF1-seed fix (the MGF1 seed prefix is the *raw*
+    /// `R ‖ PK.seed`, not `SHA-256(R ‖ PK.seed)`).
     #[test]
-    fn test_slhdsa_verify_kat_sha2_128f_known_fips205_gap() {
+    fn test_slhdsa_verify_kat_sha2_128f() {
         let pk = include_bytes!("test_vectors/verify_kat_sha2_128f.pk");
         let msg = include_bytes!("test_vectors/verify_kat_sha2_128f.msg");
         let ctx = include_bytes!("test_vectors/verify_kat_sha2_128f.ctx");
@@ -285,14 +286,88 @@ mod tests {
         m.push(ctx.len() as u8);
         m.extend_from_slice(ctx);
         m.extend_from_slice(msg);
-        // KNOWN GAP: this authoritative C/NIST SUCCESS vector MUST verify under
-        // a FIPS-205-compliant implementation. It currently does not.
-        let verified = kp.verify(&m, sig).unwrap();
         assert!(
-            !verified,
-            "REGRESSION ANCHOR FLIPPED: SLH-DSA now verifies the openHiTLS C \
-             FIPS-205 VERIFY KAT — the primitive is fixed. Replace this \
-             characterization test with `assert!(verified)`."
+            kp.verify(&m, sig).unwrap(),
+            "SLH-DSA must verify the openHiTLS C FIPS-205 SHA2-128F VERIFY KAT"
+        );
+    }
+
+    /// Cross-implementation VERIFY KAT helper for openHiTLS C SDV vectors
+    /// (`SDV_CRYPTO_SLH_DSA_VERIFY_KAT_TC001`). `pk`/`msg`/`ctx`/`sig` come from
+    /// the same C SUCCESS entry; the pure-mode message is `0x00 ‖ len(ctx) ‖
+    /// ctx ‖ msg`.
+    fn assert_verify_kat(param: SlhDsaParamId, pk: &[u8], msg: &[u8], ctx: &[u8], sig: &[u8]) {
+        let kp = SlhDsaKeyPair::from_public_key(param, pk).unwrap();
+        let mut m = Vec::with_capacity(2 + ctx.len() + msg.len());
+        m.push(0x00);
+        m.push(ctx.len() as u8);
+        m.extend_from_slice(ctx);
+        m.extend_from_slice(msg);
+        assert!(
+            kp.verify(&m, sig).unwrap(),
+            "SLH-DSA must verify the openHiTLS C FIPS-205 {param:?} VERIFY KAT"
+        );
+    }
+
+    /// SHAKE-128F C VERIFY KAT — exercises the full SHAKE hash chain
+    /// (`H_msg`/`PRF`/`F`/`H`/`T_l` all SHAKE256) end-to-end against C.
+    #[test]
+    fn test_slhdsa_verify_kat_shake_128f() {
+        assert_verify_kat(
+            SlhDsaParamId::Shake128f,
+            include_bytes!("test_vectors/verify_kat_shake_128f.pk"),
+            include_bytes!("test_vectors/verify_kat_shake_128f.msg"),
+            include_bytes!("test_vectors/verify_kat_shake_128f.ctx"),
+            include_bytes!("test_vectors/verify_kat_shake_128f.sig"),
+        );
+    }
+
+    /// SHA2-192F C VERIFY KAT (security category 3) — exercises the SHA-512
+    /// branch of `H_msg` (MGF1-SHA-512) plus the SHA-512 `H`/`T_l` and the
+    /// 128-byte padded prefix.
+    #[test]
+    fn test_slhdsa_verify_kat_sha2_192f() {
+        assert_verify_kat(
+            SlhDsaParamId::Sha2192f,
+            include_bytes!("test_vectors/verify_kat_sha2_192f.pk"),
+            include_bytes!("test_vectors/verify_kat_sha2_192f.msg"),
+            include_bytes!("test_vectors/verify_kat_sha2_192f.ctx"),
+            include_bytes!("test_vectors/verify_kat_sha2_192f.sig"),
+        );
+    }
+
+    /// SHA2-128F C SIGN KAT (openHiTLS `SDV_CRYPTO_SLH_DSA_SIGN_KAT_TC001`,
+    /// deterministic mode) — proves the sign path is byte-for-byte identical to
+    /// the C / FIPS-205 reference, not merely self-consistent with our verify.
+    /// Deterministic SLH-DSA uses `opt_rand = PK.seed`; pure-mode message is
+    /// `0x00 ‖ len(ctx) ‖ ctx ‖ msg`.
+    #[test]
+    fn test_slhdsa_sign_kat_sha2_128f_deterministic() {
+        let key = include_bytes!("test_vectors/sign_kat_sha2_128f.key");
+        let msg = include_bytes!("test_vectors/sign_kat_sha2_128f.msg");
+        let ctx = include_bytes!("test_vectors/sign_kat_sha2_128f.ctx");
+        let expected = include_bytes!("test_vectors/sign_kat_sha2_128f.sig");
+
+        let p = get_params(SlhDsaParamId::Sha2128f);
+        let n = p.n;
+        let kp = SlhDsaKeyPair {
+            public_key: key[2 * n..4 * n].to_vec(),
+            private_key: key.to_vec(),
+            param_id: SlhDsaParamId::Sha2128f,
+        };
+        // Deterministic mode: opt_rand = PK.seed (= key[2n..3n]).
+        let opt_rand = &key[2 * n..3 * n];
+        let mut m = Vec::with_capacity(2 + ctx.len() + msg.len());
+        m.push(0x00);
+        m.push(ctx.len() as u8);
+        m.extend_from_slice(ctx);
+        m.extend_from_slice(msg);
+
+        let sig = kp.sign_internal(&m, opt_rand).unwrap();
+        assert_eq!(
+            sig.as_slice(),
+            expected.as_slice(),
+            "SLH-DSA sign must match the openHiTLS C FIPS-205 SHA2-128F SIGN KAT"
         );
     }
 

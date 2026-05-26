@@ -49398,13 +49398,12 @@ fn tc_vfy_mlkem_keyusage_missing_ku() {
 }
 
 /// BUILD_SLHDSA_CERT_CHAIN (sha2-128s, representative): C verifies the SLH-DSA
-/// chain. hitls is blocked at the *primitive* level — `hitls-crypto`'s SLH-DSA
-/// verifies its own signatures but not openHiTLS C's (a FIPS 205 interop gap,
-/// confirmed by de-risk: self-roundtrip OK, C-signature `Ok(false)`), and
-/// X.509 `verify_signature` has no SLH-DSA dispatch yet. Unignore once the
-/// SLH-DSA primitive C-interop + cert dispatch land.
+/// chain (root self-signed → inter by root → end by inter). Unblocked by the
+/// FIPS-205 primitive fix (`H_msg` MGF1-seed + SHA-2 cat-3/5 block-size, anchored
+/// by the cross-impl VERIFY/SIGN KATs in `hitls-crypto`) plus the X.509 SLH-DSA
+/// `verify_signature` dispatch (`slhdsa` feature).
+#[cfg(feature = "slhdsa")]
 #[test]
-#[ignore = "blocked: hitls-crypto SLH-DSA primitive does not interop with openHiTLS C signatures (FIPS 205) + no X.509 SLH-DSA verify dispatch"]
 fn tc_build_slhdsa_cert_chain_sha2_128s() {
     let root = load_cert_fixture("cert/chain/slhdsa/sha2_128s/root.crt");
     let inter = load_cert_fixture("cert/chain/slhdsa/sha2_128s/inter.crt");
@@ -49414,4 +49413,4 @@ fn tc_build_slhdsa_cert_chain_sha2_128s() {
     assert!(v.verify_cert(&end, &[inter]).is_ok());
 }
 
-// Generation summary: 1158 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12 unblocked by I117; +8 pki/pkcs12 ENCODE_P12; 6 ML-DSA CMS-verify cleared by I118; +6 PQC cert-chains: 2 active ML-DSA/ML-KEM (I121) + 3 #[ignore] end-entity-KU gap + 1 #[ignore] SLH-DSA primitive gap; pkcs12 empty-password KDF gap closed by I127 → p12_1 un-ignored).
+// Generation summary: 1158 emitted / 393 API-surface skipped / 56 unknown / 78 unsupported alg / 1588 total C cases (+29 pki/cms SignedData-verify; +2 pki/cms SignedData sign-side; +12 pki/pkcs12 PARSE_P12 unblocked by I117; +8 pki/pkcs12 ENCODE_P12; 6 ML-DSA CMS-verify cleared by I118; +6 PQC cert-chains: 3 active ML-DSA/ML-KEM/SLH-DSA + 3 #[ignore] end-entity-KU gap; pkcs12 empty-password KDF gap closed by I127 → p12_1 un-ignored; SLH-DSA cert chain unblocked by the FIPS-205 primitive fix + X.509 dispatch → all migrated tests now active, 0 #[ignore]).

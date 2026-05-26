@@ -315,9 +315,25 @@ impl CertificateVerifier {
             let ee_alg = Oid::from_der_value(&ee.public_key.algorithm_oid).ok();
 
             if let Some(ref alg) = ee_alg {
-                let is_mldsa = *alg == known::ml_dsa_44()
+                // ML-DSA and SLH-DSA are both signature-only key types.
+                let is_sig_only_pq = *alg == known::ml_dsa_44()
                     || *alg == known::ml_dsa_65()
-                    || *alg == known::ml_dsa_87();
+                    || *alg == known::ml_dsa_87()
+                    || matches!(
+                        alg.to_dot_string().as_str(),
+                        "2.16.840.1.101.3.4.3.20"
+                            | "2.16.840.1.101.3.4.3.21"
+                            | "2.16.840.1.101.3.4.3.22"
+                            | "2.16.840.1.101.3.4.3.23"
+                            | "2.16.840.1.101.3.4.3.24"
+                            | "2.16.840.1.101.3.4.3.25"
+                            | "2.16.840.1.101.3.4.3.26"
+                            | "2.16.840.1.101.3.4.3.27"
+                            | "2.16.840.1.101.3.4.3.28"
+                            | "2.16.840.1.101.3.4.3.29"
+                            | "2.16.840.1.101.3.4.3.30"
+                            | "2.16.840.1.101.3.4.3.31"
+                    );
                 // ML-KEM (NIST CSOR id-alg-ml-kem-512/768/1024) has no `known::`
                 // helper; match by dotted form.
                 let is_mlkem = matches!(
@@ -325,7 +341,7 @@ impl CertificateVerifier {
                     "2.16.840.1.101.3.4.4.1" | "2.16.840.1.101.3.4.4.2" | "2.16.840.1.101.3.4.4.3"
                 );
 
-                if is_mldsa {
+                if is_sig_only_pq {
                     // Signature-only key: must not assert key-establishment usages.
                     if let Some(ku) = ee_ku {
                         let establishment = KeyUsage::KEY_ENCIPHERMENT

@@ -21,9 +21,10 @@ getrandom = "0.3"
 proptest = { workspace = true }
 
 [features]
-default = ["x509", "pkcs12", "cms", "pkcs8", "mldsa"]
+default = ["x509", "pkcs12", "cms", "pkcs8", "mldsa", "slhdsa"]
 x509 = []
 pkcs12 = ["x509", "pkcs8"]
 cms = ["x509", "pkcs8"]
 pkcs8 = []
 mldsa = ["hitls-crypto/mldsa"]
+slhdsa = ["hitls-crypto/slh-dsa"]
