@@ -12,16 +12,15 @@
 //! `seed_material = entropy XOR pers` (no df, no nonce; entropy = seedlen).
 //!
 //! Migrated variants (the Rust port has a matching deterministic constructor):
-//! Hash-DRBG SHA-256/384/512, HMAC-DRBG SHA-256, CTR-DRBG AES-256 (no df).
+//! Hash-DRBG SHA-256/384/512, HMAC-DRBG SHA-256, CTR-DRBG AES-256 (no df and
+//! with df). CTR-DRBG-df uses `seed_material = Block_Cipher_df(entropy ‖ nonce
+//! ‖ pers)`.
 //!
 //! Not migrated (routed to `unsupported`):
 //! * Hash SHA-1/SHA-224/SM3, HMAC SHA-1/224/384/512 — no such Rust variant
 //!   (`HashDrbgType` is 256/384/512; `HmacDrbg` is SHA-256-only).
 //! * CTR AES-128/192 (±df), SM4-CTR-df — `CtrDrbg`/`Sm4CtrDrbg` are AES-256 /
 //!   no-df only.
-//! * CTR AES-256-df — `CtrDrbg::with_df` output diverges from the NIST vector
-//!   (the Hash/HMAC/CTR-no-df cores all match, isolating the gap to
-//!   `block_cipher_df`); tracked by the divergence anchor in `ctr_drbg.rs`.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -35,6 +34,7 @@ enum Drbg {
     Hash(&'static str),
     Hmac,
     CtrNoDf,
+    CtrDf,
 }
 
 fn migratable(alg: &str) -> Option<Drbg> {
@@ -44,6 +44,7 @@ fn migratable(alg: &str) -> Option<Drbg> {
         "BSL_CID_RAND_SHA512" => Some(Drbg::Hash("Sha512")),
         "BSL_CID_RAND_HMAC_SHA256" => Some(Drbg::Hmac),
         "BSL_CID_RAND_AES256_CTR" => Some(Drbg::CtrNoDf),
+        "BSL_CID_RAND_AES256_CTR_DF" => Some(Drbg::CtrDf),
         _ => None,
     }
 }
@@ -135,6 +136,17 @@ fn emit_vector(
             writeln!(out, "        seed[i] ^= *p;").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(out, "    let mut d = CtrDrbg::new(&seed).unwrap();").unwrap();
+        }
+        Drbg::CtrDf => {
+            used.insert("ctr");
+            // With df: Block_Cipher_df(entropy(ent_len) ‖ nonce(20) ‖ pers).
+            writeln!(out, "    let entropy = vec![0xffu8; {}];", ent_len).unwrap();
+            writeln!(out, "    let nonce = [0xffu8; 20];").unwrap();
+            writeln!(
+                out,
+                "    let mut d = CtrDrbg::with_df(&entropy, &nonce, &PERS).unwrap();"
+            )
+            .unwrap();
         }
     }
     writeln!(out, "    let mut got = [0u8; 32];").unwrap();
