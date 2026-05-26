@@ -326,13 +326,18 @@ dominated by a **real bug**: a malformed peer key_share for a
   validate FFDHE key-share length/group/duplicate at parse time.
 
 Still genuine feature gaps (not curated):
-- `test-tls13-obsolete-curves` (8/163) — triaged (I126 sweep): the 163
-  failures are *not* a clean feature gap but a policy/conformance call —
-  109 expect `illegal_parameter`/rejection where we (per RFC 8446 §4.2.7
-  "ignore unrecognized") proceed with a supported group + send
-  ServerHello/HRR, and 54 want `illegal_parameter` where we send
-  `handshake_failure`. Reconciling these risks diverging from the RFC's
-  ignore-unrecognized rule; deferred pending a careful per-case RFC read.
+- `test-tls13-obsolete-curves` — **CURATED (I130), 117/54**. The 8/163
+  default-strict run was misleading: the script has a `--relaxed` flag
+  whose semantics ("ignore an unsupported group when a valid one is also
+  offered") are exactly our RFC 8446 §4.2.7 behaviour — running with it
+  (args/) gives 8 → 90 PASS. The I130 §4.2.8 consistency check (a
+  key_share for a group absent from supported_groups → `illegal_parameter`
+  rather than a HelloRetry) closed the 27 "inconsistent extensions" cases
+  (90 → 117). The 54 XFAILs are all one case: client offers ONLY an
+  obsolete group (no valid group) → we abort with `handshake_failure`
+  (RFC 8446 §4.1.1, the correct alert for *no overlap*); the script wants
+  `illegal_parameter`. A defensible alert-convention difference — we keep
+  the §4.1.1 alert rather than bend to the test.
 - `test-tls13-certificate-compression` — **CURATED (I128), 28/1**. RFC
   8879 is implemented in the library; I126 wired it into the CLI
   (`s-server --cert-compression`, advertises zlib) + hardened

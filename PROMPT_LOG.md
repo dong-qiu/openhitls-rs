@@ -8015,3 +8015,40 @@ slh_dsa + hitls-pki 458 lib + hitls-utils 8 oid PASS; ±mldsa/±slhdsa
 combos compile clean; workspace fmt + clippy -D warnings clean.
 
 Recorded as DEV_LOG Phase I129.
+
+---
+
+## Phase I130 — TLS 1.3 RFC 8446 §4.2.8 key_share Consistency + Curate obsolete-curves (2026-05-26)
+
+> (A)
+
+(Chose option (A) — the obsolete-curves "clean subset" — after I offered
+A/B/C and asked to verify the 54 first.)
+
+Verified breakdown: obsolete-curves 8/163 was misleading. The script has
+a --relaxed flag whose "ignore an unsupported group when a valid one is
+also offered" semantics = our RFC 8446 §4.2.7 behaviour → 8→90 PASS with
+just that arg. Of the remaining 81: 27 are "inconsistent extensions"
+(key_share for a group not in supported_groups) and 54 are "only an
+obsolete group offered".
+
+Clean fix (the 27): RFC 8446 §4.2.8 — a key_share for a group absent
+from supported_groups → illegal_parameter ("servers MAY check ... abort
+illegal_parameter"), instead of our HelloRetry. Added the check before
+group selection in process_client_hello, so a legit key_share for a
+group that IS in supported_groups still HRRs (hrr/keyshare-omitted/
+no-unknown-groups unchanged). Same family as I124/I125. 90→117.
+
+The 54 ("only obsolete group"): no common group → we send
+handshake_failure (RFC 8446 §4.1.1, correct for no-overlap); the script
+wants illegal_parameter. Defensible alert-convention difference — kept
+§4.1.1, XFAIL'd (not bent to the test).
+
+Curated obsolete-curves into CI (117/54) on the main RSA 1.3 listener
+(--relaxed arg + 54-entry XFAIL). Verification: hitls-tls lib 1554/0
+(new test_server_rejects_key_share_not_in_supported_groups); 9 adjacent
+key_share scripts 0 FAIL/0 XPASS; fmt + clippy clean; run.sh rc=0
+(117/54/0/0). Hit an I-number collision (#169 SLH-DSA took I129 — that
+was my option C, now done by a parallel session) → renumbered to I130.
+Ran in isolated temp worktree (`fix/obsolete-curves-alert`). Recorded as
+DEV_LOG Phase I130.

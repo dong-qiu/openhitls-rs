@@ -1,0 +1,77 @@
+# I130 — `test-tls13-obsolete-curves.py` (TLS 1.3) XFAIL (54 entries).
+#
+# 117 PASS / 54 XFAIL, run with `--relaxed` (see args/). The script's
+# default (strict) mode expects `illegal_parameter` for ANY obsolete
+# curve; `--relaxed` instead allows the server to ignore an unsupported
+# group and proceed when a valid one is also offered — which is exactly
+# RFC 8446 §4.2.7's "ignore unrecognized values" behaviour (8 → 90 PASS).
+#
+# The I130 §4.2.8 consistency check (a key_share for a group absent from
+# supported_groups → `illegal_parameter`) closed the 27 "inconsistent
+# extensions" conversations (90 → 117).
+#
+# The 54 residual XFAILs are all the SAME case: the client offers ONLY an
+# obsolete group (in supported_groups, with or without a matching
+# key_share) and no valid group at all. We abort with `handshake_failure`
+# (RFC 8446 §4.1.1: "If the server cannot select ... it MUST abort ...
+# with a handshake_failure or insufficient_security alert" — the correct
+# alert for *no overlap* in supported_groups); the script wants
+# `illegal_parameter`. This is a defensible alert-convention difference,
+# not a bug — we deliberately keep the §4.1.1 alert rather than bend to
+# the test. (`-a handshake_failure` is not used because it would also
+# flip the genuinely-illegal_parameter conversations.)
+
+brainpoolP256r1 in supported_groups and empty key_share
+brainpoolP256r1 in supported_groups and key_share
+brainpoolP384r1 in supported_groups and empty key_share
+brainpoolP384r1 in supported_groups and key_share
+brainpoolP512r1 in supported_groups and empty key_share
+brainpoolP512r1 in supported_groups and key_share
+secp160k1 in supported_groups and empty key_share
+secp160k1 in supported_groups and key_share
+secp160r1 in supported_groups and empty key_share
+secp160r1 in supported_groups and key_share
+secp160r2 in supported_groups and empty key_share
+secp160r2 in supported_groups and key_share
+secp192k1 in supported_groups and empty key_share
+secp192k1 in supported_groups and key_share
+secp192r1 in supported_groups and empty key_share
+secp192r1 in supported_groups and key_share
+secp224k1 in supported_groups and empty key_share
+secp224k1 in supported_groups and key_share
+secp224r1 in supported_groups and empty key_share
+secp224r1 in supported_groups and key_share
+secp256k1 in supported_groups and empty key_share
+secp256k1 in supported_groups and key_share
+sect163k1 in supported_groups and empty key_share
+sect163k1 in supported_groups and key_share
+sect163r1 in supported_groups and empty key_share
+sect163r1 in supported_groups and key_share
+sect163r2 in supported_groups and empty key_share
+sect163r2 in supported_groups and key_share
+sect193r1 in supported_groups and empty key_share
+sect193r1 in supported_groups and key_share
+sect193r2 in supported_groups and empty key_share
+sect193r2 in supported_groups and key_share
+sect233k1 in supported_groups and empty key_share
+sect233k1 in supported_groups and key_share
+sect233r1 in supported_groups and empty key_share
+sect233r1 in supported_groups and key_share
+sect239k1 in supported_groups and empty key_share
+sect239k1 in supported_groups and key_share
+sect283k1 in supported_groups and empty key_share
+sect283k1 in supported_groups and key_share
+sect283r1 in supported_groups and empty key_share
+sect283r1 in supported_groups and key_share
+sect409k1 in supported_groups and empty key_share
+sect409k1 in supported_groups and key_share
+sect409r1 in supported_groups and empty key_share
+sect409r1 in supported_groups and key_share
+sect571k1 in supported_groups and empty key_share
+sect571k1 in supported_groups and key_share
+sect571r1 in supported_groups and empty key_share
+sect571r1 in supported_groups and key_share
+unknown (65281) in supported_groups and empty key_share
+unknown (65281) in supported_groups and key_share
+unknown (65282) in supported_groups and empty key_share
+unknown (65282) in supported_groups and key_share
