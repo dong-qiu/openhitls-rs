@@ -140,13 +140,16 @@ fn pkcs12_kdf(
         (0..s_len).map(|i| salt[i % salt.len()]).collect()
     };
 
+    // RFC 7292 Appendix B.2: P is the BMPString password (UTF-16BE + a 2-byte
+    // null terminator) repeated to fill a whole number of blocks. An *empty*
+    // password is the 2-byte BMP null, so P is built from `[0x00, 0x00]`
+    // (a block of zeros) — NOT an empty diversifier. (Previously the
+    // `bmp.len() <= 2` short-circuit emptied P for the empty password, which
+    // matched a NULL-password convention and diverged from openHiTLS C /
+    // OpenSSL, breaking MAC verification of empty-password PFX files.)
     let bmp = password_to_bmp(password);
-    let p = if bmp.len() <= 2 {
-        Vec::new()
-    } else {
-        let p_len = bmp.len().div_ceil(block_size) * block_size;
-        (0..p_len).map(|i| bmp[i % bmp.len()]).collect()
-    };
+    let p_len = bmp.len().div_ceil(block_size) * block_size;
+    let p: Vec<u8> = (0..p_len).map(|i| bmp[i % bmp.len()]).collect();
 
     let mut i_buf = Vec::with_capacity(s.len() + p.len());
     i_buf.extend_from_slice(&s);
