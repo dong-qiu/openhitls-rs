@@ -3,8 +3,8 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I129 (129 phases)
-- Testing: T1–T136 (129 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI)
+- Implementation: I1–I130 (130 phases)
+- Testing: T1–T137 (130 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -371,6 +371,8 @@ Category summary:
 | 368 | I128 | Impl | TLS close_notify reply on peer-initiated close (RFC 8446 §6.1) + curate `test-tls13-certificate-compression` — surfaced by the I126 cert-compression triage. On receiving the peer's `close_notify`, the read path (`macros.rs`) set `received_close_notify=true` **and** `state=Closed`; then `shutdown()` (`tls13_client_shutdown_trait_body!`) early-returned on `state==Closed` **before** sending our own `close_notify`, so the server dropped the TCP abruptly instead of replying. RFC 8446 §6.1 requires each party to send `close_notify` before closing its write side — including in reply to the peer's. Fix: the shutdown macro now bails early only when closed *without* a clean peer close_notify (`state==Closed && !received_close_notify` — the §6.2 fatal-alert path, where closing immediately with no reply is correct); a clean peer close_notify is answered with our own close_notify (still gated on `sent_close_notify` for idempotency). One macro covers TLS 1.3 **and** 1.2, client **and** server, sync **and** async. Surfaced because most curated scripts tolerate an abrupt close (`ExpectAlert` with `next_sibling=ExpectClose()`); the strict `ExpectAlert→add_child(ExpectClose())` form in `test-tls13-certificate-compression` (10 conversations: 9 "unreasonable algo alone" + "duplicated algos") required the reply. Result: that script **18/29 → 28/29** (1 residual XFAIL = a TLS-1.2 ClientHello rejected by the TLS-1.3-only listener), now **curated** into CI on a dedicated `--cert-compression` listener (`HITLS_PORT_CERTCOMP` 4456). Full curated-suite regression (all 34 TLS 1.3 + 16 TLS 1.2 RSA-cert scripts, sampled): **0 FAIL / 0 XPASS** — the change only flips XFAIL→PASS (sending close_notify is strictly more compliant). No XFAIL entry across the 18 curated lists references close/alert, so no hidden XPASS. No regression: `hitls-tls` lib **1553/0**; `fmt` + `clippy -D warnings --all-targets` clean. Curated suite +1 (cert-compression) | 2026-05-26 |
 | 369 | I129 | Impl | SLH-DSA FIPS-205 compliance fix + X.509 SLH-DSA cert-verify dispatch — closes the T136-anchored primitive gap (SLH-DSA round-tripped its own signatures but rejected openHiTLS C / NIST vectors). Component-bisecting the C SDV `VERIFY_KAT`/`SIGN_KAT` vectors against the C reference (`crypto/slh_dsa/src/slh_dsa_hash.c`) found **two** `hitls-crypto/src/slh_dsa/hash.rs` divergences: **(1) `H_msg` MGF1 seed** — FIPS 205 §11.2 is `MGF1-SHA-x(R ‖ PK.seed ‖ SHA-x(R‖PK.seed‖PK.root‖M), m)` but the code used `SHA-x(R‖PK.seed)` (an extra hash) as the MGF1-seed prefix; **(2) SHA-2 cat-3/5 block size** — `padded_prefix` keyed the zero-pad length on the security *category* (64 for cat 1, else 128), but per FIPS 205 the pad tracks the *hash function's* block size, so the cat-3/5 SHA-256-based `F`/`PRF` (which use SHA-256, 64-byte block) were wrongly padded to 128. Both bugs lived in *both* sign and verify → self-consistent but non-FIPS. Fix tracks the hash, not the category; `H_msg` uses the raw `R‖PK.seed` prefix. Anchored by 4 cross-impl C KATs (`hitls-crypto`): VERIFY SHA2-128F (cat 1) / SHAKE-128F (full SHAKE path) / SHA2-192F (cat 3 SHA-512 branch) + a deterministic SIGN SHA2-128F (byte-exact, via a new private `sign_internal(msg, opt_rand)`); T136 anchor flipped `!verified`→`verified`. X.509: 12 SLH-DSA OIDs added (`hitls-utils` CSOR 2.16.840.1.101.3.4.3.{20..31}), `verify_slhdsa_cert` + `slhdsa_param_for_oid` dispatch in `certificate.rs` (pure-mode `0x00‖0x00‖tbs`), new `hitls-pki` `slhdsa` feature → `hitls-crypto/slh-dsa`, and the end-entity-KeyUsage hardening extended to treat SLH-DSA as signature-only. Un-ignored `tc_build_slhdsa_cert_chain_sha2_128s` → **migrated PKI suite 1158 PASS / 0 ignored** (last `#[ignore]` gone). No regression — hitls-crypto 64 slh_dsa lib + hitls-pki 458 lib + hitls-utils 8 oid; feature combos (±mldsa/±slhdsa) compile clean; workspace `fmt` + `clippy -D warnings --all-targets` clean | 2026-05-26 |
 | 370 | I130 | Impl | TLS 1.3 RFC 8446 §4.2.8 key_share/supported_groups consistency check + curate `test-tls13-obsolete-curves` — surfaced by the obsolete-curves triage. §4.2.8: "Each KeyShareEntry value ... MUST correspond to a group offered in the 'supported_groups' extension ... Servers MAY check ... and abort with an 'illegal_parameter' alert." `process_client_hello` (`handshake/server.rs`) didn't, so a client offering a key_share for a group **absent** from its own supported_groups (e.g. an obsolete `secp160k1` key_share alongside `supported_groups=[secp256r1]`) drew a HelloRetryRequest instead. Fix: right after parsing `client_key_shares` + `client_groups`, reject any key_share whose group ∉ supported_groups → `HandshakeFailed("illegal_parameter: …")` → `IllegalParameter`. Runs before group selection, so a legitimate key_share for a group that *is* in supported_groups still triggers HRR as before (`test-tls13-hrr` / `keyshare-omitted` / `no-unknown-groups` unchanged). **GREASE codepoints (0x?A?A) are exempt** (RFC 8701: a client may send a GREASE key_share whose matching supported_groups GREASE value differs, and servers MUST tolerate — not reject — it; caught by the `tls13_callbacks` GREASE integration tests). Same "validate peer key_share" family as I124/I125. Curates `test-tls13-obsolete-curves.py` into CI (**117/54**) on the main RSA TLS 1.3 listener with a new `--relaxed` arg (matches our RFC 8446 §4.2.7 ignore-unrecognized: 8 → 90) + the §4.2.8 check (90 → 117). The 54 XFAILs are all one case: the client offers **only** an obsolete group → we abort with `handshake_failure` (RFC 8446 §4.1.1, the correct alert for *no overlap* in supported_groups) where the script wants `illegal_parameter` — a defensible alert-convention difference, deliberately kept (not bent to the test). No regression: `hitls-tls` lib **1554/0** (incl. a new `test_server_rejects_key_share_not_in_supported_groups` unit test); 9 adjacent key_share scripts (`conversation`/`hrr`/`keyshare-omitted`/`no-unknown-groups`/`unrecognised-groups`/`ecdhe-curves`/`crfg-curves`/`ffdhe-groups`/`dhe-shared-secret-padding`) 0 FAIL / 0 XPASS; `fmt` + `clippy -D warnings --all-targets` clean. Curated suite +1 (obsolete-curves) | 2026-05-26 |
+| 371 | T137 | Test | C→Rust PQC KAT migration (Phase A continued — ML-DSA + ML-KEM) — extends the `xtask migrate-c-tests` generator to two post-quantum families, taking the migrated crypto-algorithm count 9 → 11. **ML-DSA** (`migrated_mldsa.rs`, 45 tests): the pure-verify family `MLDSA_FUNC_VERIFYDATA_TC001` (`type:pubKey:msg:sign:res`, 15 each × ML-DSA-44/65/87). The C case sets `ENCODE_FLAG=0` + no context and verifies the *raw* message under the FIPS 204 *internal* interface (μ = H(tr‖M)) — exactly Rust `mldsa::mldsa_verify`, so no §5.2 `0x00‖len(ctx)‖ctx‖M` prefix is applied (that is the pure interface used by X.509/CMS). `res==1`→expect `Ok(true)`; else assert not-`Ok(true)`. **ML-KEM** (`migrated_mlkem.rs`, 150 tests): the decapsulation side of `MLKEM_ENCAPS_DECAPS_FUNC_TC001` (`bits:m:EK:DK:CT:SK`), deterministic DK+CT→SK across ML-KEM-512/768/1024. Needed a new safe public constructor `MlKemKeyPair::from_decapsulation_key(bits, dk)` (mirrors `from_encapsulation_key`; recovers the embedded `ek`, length-checked, zeroize-on-drop) + a focused unit test. Sign / encaps / keygen halves stay API-surface (injected-randomness reproducibility limit, same call as DSA/SM2). **No bug found** — both families are FIPS-compliant out of the box (unlike the SLH-DSA primitive that T136/I129 fixed): 45 + 150 = 195 KATs all green first run. xtask `--check` drift gate passes for both; `docs/c-test-na-list.md` tally updated (995 emitted / 3427 total C cases); workspace `fmt` + `clippy -D warnings --all-targets` clean | 2026-05-26 |
+
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -23328,3 +23330,86 @@ T136's characterization test (`assert!(!verified)`) is now a positive KAT
 SLH-DSA primitive is FIPS-205-compliant for verify (SHA-256 / SHA-512 /
 SHAKE) and sign (deterministic byte-exact), anchored by C cross-impl
 KATs.
+
+## Phase T137 — C→Rust PQC KAT Migration: ML-DSA + ML-KEM (Phase A continued) (2026-05-26)
+
+### Summary
+
+Extended the `xtask migrate-c-tests` generator to the two remaining
+mainline post-quantum families, taking the mechanically-migrated crypto
+algorithm count from 9 (Phase A / T111) to **11**. Both families are
+deterministic KATs and a direct analogue of the SLH-DSA cross-impl KAT
+that found two real FIPS bugs in T136/I129 — but **neither ML-DSA verify
+nor ML-KEM decaps revealed any divergence**; all 195 vectors passed on
+the first run, confirming the two primitives interop with openHiTLS C /
+NIST out of the box.
+
+### ML-DSA (`crates/hitls-crypto/tests/migrated_mldsa.rs`, 45 tests)
+
+Migrates `MLDSA_FUNC_VERIFYDATA_TC001` (`type : pubKey : msg : sign :
+res`; 15 vectors each for ML-DSA-44/65/87). The C case sets
+`CRYPT_CTRL_SET_MLDSA_ENCODE_FLAG = 0` and no context, then
+`CRYPT_EAL_PkeyVerify(ctx, CRYPT_MD_MAX, msg, …)` — i.e. it verifies the
+*raw* message under the FIPS 204 **internal** interface (μ = H(tr ‖ M)).
+Rust `mldsa::mldsa_verify(pk, message, sig, params)` is exactly that
+internal variant, so the message is passed through unmodified (the §5.2
+`0x00‖len(ctx)‖ctx‖M` *pure*-mode prefix is **not** applied here — that
+is the X.509/CMS interface, not this KAT). `res == 1` → assert
+`Ok(true)`; otherwise assert the verify did not return `Ok(true)` (`Err`
+or `Ok(false)` both satisfy the C `ASSERT_NE`).
+
+### ML-KEM (`crates/hitls-crypto/tests/migrated_mlkem.rs`, 150 tests)
+
+Migrates the **decapsulation** side of `MLKEM_ENCAPS_DECAPS_FUNC_TC001`
+(`bits : m : EK : DK : CT : SK`; 50 each for ML-KEM-512/768/1024).
+Decapsulation is deterministic (DK + CT → SK), so it maps onto
+`MlKemKeyPair::from_decapsulation_key(bits, DK).decapsulate(CT)` checked
+byte-for-byte against SK. This required a new **public** constructor
+`MlKemKeyPair::from_decapsulation_key` (`crates/hitls-crypto/src/mlkem/mod.rs`)
+— it mirrors the existing `from_encapsulation_key`, length-checks against
+`dk_len`, recovers the embedded `ek` (FIPS 203 `dk = dk_pke ‖ ek ‖ H(ek)
+‖ z`), and inherits the struct's zeroize-on-drop. A focused unit test
+covers the generate→reload→decapsulate round-trip + wrong-length
+rejection.
+
+### What is *not* migrated (and why)
+
+The sign / encaps / keygen halves are routed to *API-surface*, not
+emitted: they consume injected randomness (ML-DSA sign nonce; ML-KEM `m`
+for encaps and `(z,d)` for keygen) that the C test pins via a stubbed
+RNG. The Rust port draws these from the system RNG and the deterministic
+hooks (`generate_from_seed`, `encapsulate_deterministic`) are
+crate-private — deliberately, to avoid a public misuse-of-randomness
+footgun — so those vectors are not reproducible from an external
+integration test. Same reproducibility limit as DSA/SM2 (documented in
+`docs/c-test-na-list.md`).
+
+### Verification
+
+- `migrated_mldsa` **45/0**, `migrated_mlkem` **150/0**; mlkem lib
+  **46/0** (incl. the new constructor test).
+- `xtask migrate-c-tests --algo {mldsa,mlkem} --check` drift gate passes
+  (committed files match generator output).
+- `docs/c-test-na-list.md` tally updated: 995 emitted / 3427 total C
+  cases across 11 algorithms.
+- Workspace `fmt` + `clippy -D warnings --all-features --all-targets`
+  clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `xtask/src/mldsa.rs` | Added | ML-DSA verify-KAT emitter. |
+| `xtask/src/mlkem.rs` | Added | ML-KEM decaps-KAT emitter. |
+| `xtask/src/main.rs` | Modified | `mldsa` + `mlkem` dispatch arms + module decls + help string. |
+| `crates/hitls-crypto/src/mlkem/mod.rs` | Modified | `pub fn from_decapsulation_key` + unit test. |
+| `crates/hitls-crypto/tests/migrated_mldsa.rs` | Added | 45 generated ML-DSA verify KATs. |
+| `crates/hitls-crypto/tests/migrated_mlkem.rs` | Added | 150 generated ML-KEM decaps KATs. |
+| `docs/c-test-na-list.md` | Modified | ML-DSA + ML-KEM tally rows + totals + reproducibility note. |
+| `DEV_LOG.md` / `PROMPT_LOG.md` | Modified | This entry + Phase Index row 371 + Testing summary T1–T137. |
+
+### Build Status (Post T137)
+
+11 of the crypto algorithm families now have a generated C→Rust KAT
+suite. ML-DSA verify and ML-KEM decaps both interop with openHiTLS C
+with zero divergence (no bug surfaced).

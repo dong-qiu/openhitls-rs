@@ -8052,3 +8052,39 @@ key_share scripts 0 FAIL/0 XPASS; fmt + clippy clean; run.sh rc=0
 was my option C, now done by a parallel session) → renumbered to I130.
 Ran in isolated temp worktree (`fix/obsolete-curves-alert`). Recorded as
 DEV_LOG Phase I130.
+
+---
+
+## Phase T137 — C→Rust PQC KAT Migration: ML-DSA + ML-KEM (2026-05-26)
+
+> 可继续推进其它算法族的 C→Rust测试迁移，有什么好的建议
+
+(Recommended applying the SLH-DSA cross-impl KAT approach to the two
+remaining PQC families — highest bug-finding ROI; user picked "ML-DSA +
+ML-KEM KAT".)
+
+Extended the xtask generator to ML-DSA + ML-KEM, taking migrated crypto
+algos 9 → 11.
+
+ML-DSA (migrated_mldsa.rs, 45 tests): MLDSA_FUNC_VERIFYDATA_TC001
+(type:pubKey:msg:sign:res, 15 each × 44/65/87). C sets ENCODE_FLAG=0 + no
+ctx → verifies the raw msg under the FIPS 204 internal interface
+(μ=H(tr‖M)) = Rust mldsa_verify, so NO §5.2 pure-mode prefix here. res==1
+→ Ok(true); else not-Ok(true).
+
+ML-KEM (migrated_mlkem.rs, 150 tests): decaps side of
+MLKEM_ENCAPS_DECAPS_FUNC_TC001 (bits:m:EK:DK:CT:SK), deterministic
+DK+CT→SK across 512/768/1024. Added a safe public constructor
+MlKemKeyPair::from_decapsulation_key (mirrors from_encapsulation_key,
+length-checked, recovers embedded ek) + unit test.
+
+Sign/encaps/keygen stay API-surface (injected-randomness reproducibility
+limit, same as DSA/SM2). NO bug found — both FIPS-compliant out of the
+box; 195 KATs green first run (unlike the SLH-DSA primitive T136/I129
+fixed).
+
+Verification: migrated_mldsa 45/0, migrated_mlkem 150/0, mlkem lib 46/0;
+xtask --check drift gate passes both; na-list tally → 995 emitted / 3427
+total; workspace fmt + clippy -D warnings clean.
+
+Recorded as DEV_LOG Phase T137.

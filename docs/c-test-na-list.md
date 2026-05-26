@@ -42,7 +42,7 @@ failing cases, so no issues are filed.
 ## Per-algorithm tally
 
 Counts are the `Generation summary` footer of each generated file
-(2026-05-16, post-SM2).
+(2026-05-26, post-ML-KEM).
 
 | Algorithm | Emitted | API-surface | Unknown | Unsupported | Total C cases |
 |-----------|--------:|------------:|--------:|------------:|--------------:|
@@ -55,7 +55,18 @@ Counts are the `Generation summary` footer of each generated file
 | DH | 47 | 45 | 88 | 0 | 180 |
 | SM4 | 9 | 237 | 0 | 37 | 283 |
 | SM2 | 12 | 111 | 0 | 17 | 140 |
-| **Total** | **800** | **1193** | **154** | **74** | **2221** |
+| ML-DSA | 45 | 731 | 3 | 0 | 779 |
+| ML-KEM | 150 | 196 | 81 | 0 | 427 |
+| **Total** | **995** | **2120** | **238** | **74** | **3427** |
+
+ML-DSA migrates the **verify** side (`MLDSA_FUNC_VERIFYDATA_TC001`, internal
+interface, μ = H(tr ‖ M)). ML-KEM migrates the **decapsulation** side
+(`MLKEM_ENCAPS_DECAPS_FUNC_TC001`, deterministic DK + CT → SK, via the new
+`MlKemKeyPair::from_decapsulation_key`). The sign / encaps / keygen halves are
+routed to *API-surface* for the same reproducibility reason as DSA/SM2 (see
+below): they consume injected randomness (ML-DSA sign nonce; ML-KEM `m` for
+encaps and `(z,d)` for keygen) that the public Rust API does not expose a hook
+for.
 
 ## Structural gaps (unsupported — candidate future work)
 
