@@ -7769,3 +7769,20 @@ no-mldsa) + fmt clean.
 
 Recorded as DEV_LOG Phase I123. Follow-up: un-#[ignore] the 6 KU tests
 (test-enhanced). Then (b): SLH-DSA primitive C-interop investigation.
+
+---
+
+## Phase T113 (continued) — Phase C: end-entity KeyUsage `#[ignore]`s cleared (I123 follow-up) (2026-05-26)
+
+> 请依次完成(a)和(b)
+
+(a) follow-up: un-#[ignore] the 6 KeyUsage negatives I123 unblocked —
+3 EKU/KU purpose (tc_line2031/2162/2294) + 3 PQC KU-vs-keytype
+(mldsa invalid-ku, mlkem invalid-ku, mlkem missing-ku). All now assert
+the C-correct rejection and pass. Coverage 1150 → 1156 PASS, 8 → 2
+#[ignore] (remaining: pkcs12 empty-pwd + SLH-DSA primitive).
+
+Verification: 1156 PASS / 0 FAIL / 2 ignored; fmt + clippy clean.
+Test-only (rides on merged I123).
+
+Recorded as DEV_LOG Phase T113 (continued) — KeyUsage CI-protected.

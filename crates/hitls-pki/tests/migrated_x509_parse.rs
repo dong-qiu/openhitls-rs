@@ -48445,9 +48445,10 @@ fn tc_line2228_x509_vfy_anyeku_eku_allow_ku_match_pass() {
 /// has the clientAuth EKU but no digitalSignature KU, so C returns
 /// `PURPOSE_UNMATCH`. hitls's `set_required_eku` checks the EKU only
 /// (no end-entity KU inspection), so it accepts the cert. Needs
-/// purpose-based KU enforcement in `CertificateVerifier`.
+/// purpose-based KU enforcement; closed by I123 (end-entity KeyUsage
+/// hardening): the verifier now requires digitalSignature for TLS
+/// client/server-auth purposes, so this correctly rejects.
 #[test]
-#[ignore = "verifier-hardening gap: no purpose-based end-entity KeyUsage check (EKU+KU joint)"]
 fn tc_line2031_x509_vfy_tls_client_eku_only_ku_missing_fail() {
     let root = load_cert_fixture("cert/chain/eku_suite/rootca.der");
     let ca = load_cert_fixture("cert/chain/eku_suite/ca.der");
@@ -48465,7 +48466,6 @@ fn tc_line2031_x509_vfy_tls_client_eku_only_ku_missing_fail() {
 /// has serverAuth EKU but the wrong / missing KU; C → `PURPOSE_UNMATCH`,
 /// hitls accepts (EKU-only check).
 #[test]
-#[ignore = "verifier-hardening gap: no purpose-based end-entity KeyUsage check (EKU+KU joint)"]
 fn tc_line2162_x509_vfy_tls_server_eku_only_ku_missing_fail() {
     let root = load_cert_fixture("cert/chain/eku_suite/rootca.der");
     let ca = load_cert_fixture("cert/chain/eku_suite/ca.der");
@@ -48484,7 +48484,6 @@ fn tc_line2162_x509_vfy_tls_server_eku_only_ku_missing_fail() {
 /// digitalSignature KU; C → `PURPOSE_UNMATCH`, hitls accepts (EKU
 /// matches via anyEKU, KU not inspected).
 #[test]
-#[ignore = "verifier-hardening gap: no purpose-based end-entity KeyUsage check (EKU+KU joint)"]
 fn tc_line2294_x509_vfy_anyeku_ku_missing_fail() {
     let root = load_cert_fixture("cert/chain/eku_suite/anyEKU/rootca.der");
     let ca = load_cert_fixture("cert/chain/eku_suite/anyEKU/ca.der");
@@ -49365,7 +49364,6 @@ fn tc_build_mlkem_cert_chain() {
 /// (same gap as the EKU/KU family), so it accepts. Verifier-hardening candidate.
 #[cfg(feature = "mldsa")]
 #[test]
-#[ignore = "verifier-hardening gap: no end-entity KeyUsage-vs-keytype enforcement (ML-DSA leaf)"]
 fn tc_build_mldsa_cert_chain_invalid_ku() {
     let root = load_cert_fixture("cert/chain/mldsa-v3/root.crt");
     let inter = load_cert_fixture("cert/chain/mldsa-v3/inter.crt");
@@ -49379,7 +49377,6 @@ fn tc_build_mldsa_cert_chain_invalid_ku() {
 /// end-entity KeyUsage gap — hitls accepts where C rejects.
 #[cfg(feature = "mldsa")]
 #[test]
-#[ignore = "verifier-hardening gap: no end-entity KeyUsage-vs-keytype enforcement (ML-KEM leaf)"]
 fn tc_vfy_mlkem_keyusage_invalid_ku() {
     let root = load_cert_fixture("cert/chain/mlkem/root.crt");
     let inter = load_cert_fixture("cert/chain/mlkem/inter.crt");
@@ -49393,7 +49390,6 @@ fn tc_vfy_mlkem_keyusage_invalid_ku() {
 /// end-entity KeyUsage gap.
 #[cfg(feature = "mldsa")]
 #[test]
-#[ignore = "verifier-hardening gap: no end-entity KeyUsage-vs-keytype enforcement (ML-KEM leaf)"]
 fn tc_vfy_mlkem_keyusage_missing_ku() {
     let root = load_cert_fixture("cert/chain/mlkem/root.crt");
     let inter = load_cert_fixture("cert/chain/mlkem/inter.crt");
