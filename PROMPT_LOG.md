@@ -7820,3 +7820,33 @@ suite 65 → 68. Renumbered I123→I124 (#157 took I123 / a parallel
 session's X.509 end-entity KeyUsage phase also took I123 on main). Ran
 in isolated temp worktree (`test/tlsfuzzer-curve-family`). Recorded as
 DEV_LOG `Phase I124`.
+
+---
+
+## Phase I125 — TLS 1.3 FFDHE key_share Framing Validation (2026-05-26)
+
+> 继续下一个backlog
+
+Picked the FFDHE key-share framing gap — it closes the 14 XFAILs I124
+deferred (cleaning up my own tail) and sits in the same key_share area.
+
+The 14 ffdhe XFAILs were 3 *framing* classes: right-truncated FFDHE Y
+(< |p|), wrong-group-sized data (e.g. ffdhe3072 named but ffdhe2048
+length), and duplicated KeyShareEntry for one group. `parse_key_share_ch`
+accepted any shape, so they reached ServerHello and only failed late at
+Finished on a mismatched secret. I124 had fixed bad FFDHE *values*; this
+is the framing follow-up.
+
+Fix: new `NamedGroup::is_ffdhe()` + `ffdhe_key_exchange_len()` (RFC 7919
+prime byte-lengths), and `parse_key_share_ch` now rejects duplicate
+groups + FFDHE length ≠ |p| with `invalid key_share: …` → mapped to
+`illegal_parameter`. EC validity unchanged (stays on I124's
+compute_shared_secret path).
+
+Result: `test-tls13-ffdhe-groups.py` 48/14 → **62/0 PASS**; XFAIL file
+removed (0 XFAIL). No regression: hitls-tls lib 1552/0 (new unit test
+covers all 3 reject classes + valid-FFDHE accept); ecdhe-curves 33/0,
+crfg-curves 18/0, hrr 3/0, conversation 3/0, no-unknown-groups 259/0
+unchanged; fmt + clippy clean. Curated suite stays 68 (ffdhe-groups
+already curated by I124, now XFAIL-free). Ran in isolated temp worktree
+(`test/ffdhe-keyshare-framing`). Recorded as DEV_LOG `Phase I125`.

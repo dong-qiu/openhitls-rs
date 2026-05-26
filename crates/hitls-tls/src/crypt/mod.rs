@@ -254,6 +254,33 @@ impl NamedGroup {
     pub fn is_kem(&self) -> bool {
         matches!(*self, NamedGroup::X25519_MLKEM768)
     }
+
+    /// Returns true for an RFC 7919 finite-field DH group.
+    pub fn is_ffdhe(&self) -> bool {
+        matches!(
+            *self,
+            NamedGroup::FFDHE2048
+                | NamedGroup::FFDHE3072
+                | NamedGroup::FFDHE4096
+                | NamedGroup::FFDHE6144
+                | NamedGroup::FFDHE8192
+        )
+    }
+
+    /// For an FFDHE group, the exact `key_exchange` byte length a peer's
+    /// KeyShareEntry must carry: the DH public value Y padded to the size of
+    /// the group prime `p` (RFC 8446 §4.2.8.1 / RFC 7919). `None` for
+    /// non-FFDHE groups.
+    pub fn ffdhe_key_exchange_len(&self) -> Option<usize> {
+        match *self {
+            NamedGroup::FFDHE2048 => Some(256),
+            NamedGroup::FFDHE3072 => Some(384),
+            NamedGroup::FFDHE4096 => Some(512),
+            NamedGroup::FFDHE6144 => Some(768),
+            NamedGroup::FFDHE8192 => Some(1024),
+            _ => None,
+        }
+    }
 }
 
 /// TLS signature scheme identifiers.
