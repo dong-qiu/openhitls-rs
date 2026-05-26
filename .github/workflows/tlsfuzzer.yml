@@ -493,6 +493,19 @@ jobs:
             #     script probes.
             test-tls13-ffdhe-sanity.py
             test-tls13-pkcs-signature.py
+            # I124 curve-family batch (3) — unblocked by the malformed
+            # key_share → illegal_parameter fix (RFC 8446 §4.2.8.2):
+            #   * crfg-curves   18/0  — malformed X25519/X448 key shares
+            #     now rejected with illegal_parameter (was internal_error).
+            #   * ecdhe-curves  33/0  — malformed P-256/384/521 key shares
+            #     (point at infinity / off-curve / wrong length) ditto.
+            #   * ffdhe-groups  48/14 — malformed FFDHE key-share *values*
+            #     fixed; the 14 XFAILs are a separate FFDHE key-share
+            #     framing-validation gap (truncated / wrong-group /
+            #     duplicated) — see xfail/test-tls13-ffdhe-groups.txt.
+            test-tls13-crfg-curves.py
+            test-tls13-ecdhe-curves.py
+            test-tls13-ffdhe-groups.py
           )
           # TLS 1.2 scripts (Phase T90) run against the 1.2 listener
           # on $HITLS_PORT_12. Per-script extra args (`-C 49199` cipher

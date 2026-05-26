@@ -966,10 +966,21 @@ impl ServerHandshake {
         let (shared_secret, server_key_share_bytes) = if p.psk_ke {
             (vec![0u8; p.params.hash_len], Vec::new())
         } else if p.client_group.is_kem() {
-            KeyExchange::encapsulate(p.client_group, p.client_pub_key)?
+            // The peer's KEM key_share is attacker-controlled input; a
+            // malformed/invalid encapsulation value is `illegal_parameter`
+            // (RFC 8446 §4.2.8.2), not `internal_error`.
+            KeyExchange::encapsulate(p.client_group, p.client_pub_key)
+                .map_err(|e| TlsError::HandshakeFailed(format!("invalid key_share: {e}")))?
         } else {
             let server_kx = KeyExchange::generate(p.client_group)?;
-            let ss = server_kx.compute_shared_secret(p.client_pub_key)?;
+            // `compute_shared_secret` consumes the client's key_share. A
+            // malformed peer public value (wrong length, point not on the
+            // curve, point at infinity, low-order / all-zero X25519/X448
+            // result, …) is a peer-input error → `illegal_parameter`
+            // (RFC 8446 §4.2.8.2), never `internal_error`.
+            let ss = server_kx
+                .compute_shared_secret(p.client_pub_key)
+                .map_err(|e| TlsError::HandshakeFailed(format!("invalid key_share: {e}")))?;
             (ss, server_kx.public_key_bytes().to_vec())
         };
 
