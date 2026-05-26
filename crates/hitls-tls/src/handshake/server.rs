@@ -511,8 +511,18 @@ impl ServerHandshake {
         // alert." We do: a key_share for a group absent from supported_groups
         // (e.g. an obsolete curve in key_share while supported_groups carries
         // only secp256r1) is rejected here rather than drawing a HelloRetry.
+        //
+        // GREASE (RFC 8701) is exempt: a conformant client may place a GREASE
+        // codepoint (0x?A?A) in key_share whose matching supported_groups
+        // GREASE value differs, and servers MUST tolerate — not reject —
+        // unknown GREASE values. GREASE never names a real group, so skipping
+        // it here doesn't weaken the consistency check for real curves.
+        let is_grease_group = |v: u16| (v >> 8) == (v & 0x00ff) && (v & 0x000f) == 0x000a;
         if let Some(ref groups) = client_groups {
-            if let Some((bad, _)) = client_key_shares.iter().find(|(g, _)| !groups.contains(g)) {
+            if let Some((bad, _)) = client_key_shares
+                .iter()
+                .find(|(g, _)| !is_grease_group(g.0) && !groups.contains(g))
+            {
                 return Err(TlsError::HandshakeFailed(format!(
                     "illegal_parameter: key_share group {:#06x} not in supported_groups",
                     bad.0
@@ -1896,6 +1906,47 @@ mod tests {
             }
             Err(e) => panic!("expected HandshakeFailed(illegal_parameter), got {e:?}"),
             Ok(_) => panic!("expected illegal_parameter, got Ok"),
+        }
+    }
+
+    #[test]
+    fn test_server_tolerates_grease_key_share() {
+        use crate::handshake::extensions_codec::{
+            build_key_share_ch, build_signature_algorithms, build_supported_groups,
+            build_supported_versions_ch,
+        };
+        // RFC 8701: a GREASE key_share codepoint (0x?A?A) absent from
+        // supported_groups MUST be tolerated, not rejected by the §4.2.8
+        // check. Here the only key_share is GREASE (0x1a1a); the server
+        // ignores it and falls back to a HelloRetryRequest for X25519 (which
+        // it supports and the client listed) — NOT illegal_parameter.
+        let config = TlsConfig::builder()
+            .role(crate::TlsRole::Server)
+            .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
+            .private_key(ServerPrivateKey::Ed25519(vec![0x42; 32]))
+            .verify_peer(false)
+            .supported_groups(&[NamedGroup::X25519])
+            .build();
+        let mut hs = ServerHandshake::new(config);
+
+        let ch = super::super::codec::ClientHello {
+            random: [0x1A; 32],
+            legacy_session_id: vec![],
+            cipher_suites: vec![CipherSuite::TLS_AES_128_GCM_SHA256],
+            extensions: vec![
+                build_supported_versions_ch(),
+                build_supported_groups(&[NamedGroup::X25519]),
+                build_signature_algorithms(&[crate::crypt::SignatureScheme::ED25519]),
+                build_key_share_ch(NamedGroup(0x1a1a), &[0xAB; 32]),
+            ],
+        };
+        let msg = super::super::codec::encode_client_hello(&ch);
+        match hs.process_client_hello(&msg) {
+            Ok(ClientHelloResult::HelloRetryRequest(_)) => {}
+            Err(TlsError::HandshakeFailed(m)) => {
+                panic!("GREASE key_share must not be rejected, got: {m}")
+            }
+            _ => panic!("expected HelloRetryRequest for GREASE-only key_share"),
         }
     }
 
