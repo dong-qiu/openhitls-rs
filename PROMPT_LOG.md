@@ -7850,3 +7850,35 @@ crfg-curves 18/0, hrr 3/0, conversation 3/0, no-unknown-groups 259/0
 unchanged; fmt + clippy clean. Curated suite stays 68 (ffdhe-groups
 already curated by I124, now XFAIL-free). Ran in isolated temp worktree
 (`test/ffdhe-keyshare-framing`). Recorded as DEV_LOG `Phase I125`.
+
+---
+
+## Phase T136 — SLH-DSA FIPS 205 VERIFY KAT Regression Anchor (2026-05-26)
+
+> 请依次完成(a)和(b)  ... 落地 KAT 回归锚点(推荐)
+
+(b) deliverable (per the chosen "KAT regression anchor" option): pin the
+SLH-DSA primitive C-interop gap diagnosed during the PQC X.509 work.
+
+Decisive diagnosis: hitls-crypto SLH-DSA round-trips its own signatures
+but fails the openHiTLS C SDV VERIFY_KAT SHA2-128F SUCCESS vector
+(pure SLH-DSA, 0x00||len(ctx)||ctx||msg) → Ok(false). So it is
+self-consistent but not FIPS-205-compliant (divergence in some
+component: h_msg/FORS/WOTS+/hypertree/ADRS).
+
+Landed (anchor, not fix):
+- SlhDsaKeyPair::from_public_key(param_id, pk) verify-only constructor
+  (+ self-roundtrip + wrong-length-reject tests).
+- #[ignore]d KAT test test_slhdsa_verify_kat_sha2_128f_fips205 loading
+  the C vector via include_bytes!; asserts it verifies — currently FAILS
+  under --ignored, pinning the bug as a CI-trackable regression anchor +
+  the fix harness.
+
+Not done (recommended dedicated effort): the actual FIPS-205 compliance
+fix (bisect components vs the C VERIFY_KAT/SIGN_KAT vectors) — a focused
+high-risk crypto task, deliberately not rushed inline.
+
+Verification: hitls-crypto slh_dsa 60 PASS / 1 ignored (anchor); anchor
+FAILS under --ignored as designed; fmt + clippy clean.
+
+Recorded as DEV_LOG Phase T136.
