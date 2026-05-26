@@ -25,6 +25,7 @@ pub fn run(
     post_handshake_auth: bool,
     no_middlebox_compat: bool,
     dtls: bool,
+    cert_compression: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Phase I106 — `--dtls` selects a DTLS 1.2 listener over UDP.
     // `--tls` is ignored in that mode; the TLS-1.3-only post-handshake
@@ -210,6 +211,11 @@ pub fn run(
         }
         if no_middlebox_compat {
             builder = builder.middlebox_compat(false);
+        }
+        if cert_compression {
+            builder = builder.cert_compression(vec![
+                hitls_tls::handshake::codec::CertCompressionAlgorithm::ZLIB,
+            ]);
         }
         builder.build()
     };
@@ -970,6 +976,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             false,
             false,
             false,
+            false,
         );
         assert!(result.is_err());
     }
@@ -989,6 +996,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             None,
+            false,
             false,
             false,
             false,
@@ -1013,6 +1021,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             None,
+            false,
             false,
             false,
             false,
@@ -1170,6 +1179,7 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
             None,
             None,
             None,
+            false,
             false,
             false,
             false,

@@ -235,6 +235,11 @@ enum Commands {
         /// `--tls` is ignored (DTLS 1.2 only).
         #[arg(long)]
         dtls: bool,
+        /// Advertise TLS Certificate Compression (RFC 8879, zlib). When
+        /// set, if the client offers `compress_certificate` with zlib the
+        /// server sends a CompressedCertificate instead of Certificate.
+        #[arg(long = "cert-compression")]
+        cert_compression: bool,
     },
     /// List supported algorithms and cipher suites.
     List {
@@ -446,6 +451,7 @@ fn main() {
             post_handshake_auth,
             no_middlebox_compat,
             dtls,
+            cert_compression,
         } => s_server::run(
             *port,
             cert,
@@ -463,6 +469,7 @@ fn main() {
             *post_handshake_auth,
             *no_middlebox_compat,
             *dtls,
+            *cert_compression,
         ),
         Commands::List { filter } => list::run(filter),
         Commands::Rand { num, format } => rand_cmd::run(*num, format),

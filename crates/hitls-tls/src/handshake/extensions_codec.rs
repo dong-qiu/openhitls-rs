@@ -555,13 +555,19 @@ pub fn build_compress_certificate(algos: &[CertCompressionAlgorithm]) -> Extensi
 
 /// Parse compress_certificate extension from ClientHello.
 pub fn parse_compress_certificate(data: &[u8]) -> Result<Vec<CertCompressionAlgorithm>, TlsError> {
+    // RFC 8879 §3: struct { CertificateCompressionAlgorithm algorithms<2..2^8-2>; }
+    // — a 1-byte length prefix followed by 2-byte algorithm IDs. The list MUST
+    // be non-empty, even in length, and consume the whole extension body
+    // exactly (no truncation, no trailing padding). A violation is a malformed
+    // extension → decode_error (the "too short" / "invalid length" wording is
+    // what `tls_error_to_alert` maps to that alert).
     if data.is_empty() {
         return Err(TlsError::HandshakeFailed(
-            "compress_certificate: empty".into(),
+            "compress_certificate: too short".into(),
         ));
     }
     let list_len = data[0] as usize;
-    if list_len % 2 != 0 || data.len() < 1 + list_len {
+    if list_len == 0 || list_len % 2 != 0 || data.len() != 1 + list_len {
         return Err(TlsError::HandshakeFailed(
             "compress_certificate: invalid length".into(),
         ));
@@ -1789,6 +1795,29 @@ mod tests {
         let ext = build_compress_certificate(&algos);
         let parsed = parse_compress_certificate(&ext.data).unwrap();
         assert_eq!(parsed, vec![CertCompressionAlgorithm::ZLIB]);
+    }
+
+    #[test]
+    fn test_parse_compress_certificate_malformed_rejected() {
+        // RFC 8879 §3: algorithms<2..2^8-2> — reject malformed framing so the
+        // server aborts with decode_error instead of proceeding. Mirrors the
+        // tlsfuzzer `test-tls13-certificate-compression.py` empty-list /
+        // odd-length / zero-len / padded cases.
+        // empty extension body
+        assert!(parse_compress_certificate(&[]).is_err());
+        // empty algorithm list (list_len == 0)
+        assert!(parse_compress_certificate(&[0x00]).is_err());
+        // odd list length (not a whole number of 2-byte algorithm IDs)
+        assert!(parse_compress_certificate(&[0x01, 0x00]).is_err());
+        // truncated: list_len claims 2 bytes but only 1 present
+        assert!(parse_compress_certificate(&[0x02, 0x00]).is_err());
+        // trailing padding: 1 algo (2 bytes) declared, but an extra byte follows
+        assert!(parse_compress_certificate(&[0x02, 0x00, 0x01, 0xFF]).is_err());
+        // well-formed single-algo list still parses
+        assert_eq!(
+            parse_compress_certificate(&[0x02, 0x00, 0x01]).unwrap(),
+            vec![CertCompressionAlgorithm::ZLIB]
+        );
     }
 
     #[test]

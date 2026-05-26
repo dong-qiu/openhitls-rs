@@ -7882,3 +7882,42 @@ Verification: hitls-crypto slh_dsa 60 PASS / 1 ignored (anchor); the
 characterization anchor passes and flips when fixed; fmt + clippy clean.
 
 Recorded as DEV_LOG Phase T136.
+
+---
+
+## Phase I126 — TLS Certificate Compression (RFC 8879) CLI Wiring + Parse Hardening (2026-05-26)
+
+> 继续真实feature缺口
+
+Picked cert-compression over obsolete-curves: obsolete-curves (8/163)
+turned out to be a debatable RFC 8446 §4.2.7 policy call (ignore vs
+reject), not a clean feature. cert-compression was the clean one.
+
+Surprise on triage: RFC 8879 was ALREADY implemented in the library
+(codec encode/decode + zlib, client decompress, server compress) and
+even had in-process tests — but the CLI never turned it on. Two gaps:
+(1) hitls-cli depended on hitls-tls without the `cert-compression`
+feature, so the server compress branch was cfg'd out; (2) the s-server
+config never advertised an algorithm. So s-server always sent plain
+Certificate.
+
+Fix: add `cert-compression` to the CLI's hitls-tls features + a new
+`s-server --cert-compression` flag (advertises zlib) + harden
+`parse_compress_certificate` (RFC 8879 §3: reject empty/odd/truncated/
+trailing-padding → decode_error; previously accepted empty list +
+ignored trailing bytes).
+
+Result: test-tls13-certificate-compression.py 4/29 → 18/29. The
+compression-specific + malformed-ext cases pass. Residual 11 are NOT
+compression bugs: 10 are a general close_notify §6.1 reply gap
+(shutdown() early-returns without sending close_notify once the peer's
+close_notify set state=Closed; only strict ExpectAlert→ExpectClose
+scripts catch it), 1 is a TLS-1.2 listener case. Recorded the §6.1 gap
+in docs/tlsfuzzer.md as the next high-value I-phase (general server
+behaviour → own PR + full-suite regression), after which the script
+curates ~28/1.
+
+Verification: hitls-tls lib 1553/0 (new malformed-rejection unit test)
++ hitls-cli 174/0; workspace clippy -D warnings + fmt clean. Ran in
+isolated temp worktree (`test/cert-compression-cli`). Recorded as
+DEV_LOG Phase I126.
