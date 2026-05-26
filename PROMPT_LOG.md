@@ -7979,3 +7979,39 @@ Verification: hitls-tls lib 1553/0; fmt + clippy -D warnings clean;
 workflow YAML valid; run.sh cert-compression rc=0 (28/1/0/0). Ran in
 isolated temp worktree (`fix/close-notify-reply`). Recorded as DEV_LOG
 Phase I128.
+
+---
+
+## Phase I129 — SLH-DSA FIPS-205 Compliance Fix + X.509 SLH-DSA Cert-Verify (2026-05-26)
+
+> 开 SLH-DSA FIPS-205 合规专项(用 C 的 VERIFY_KAT/SIGN_KAT 向量逐组件二分定位偏差)
+
+Closed the migrated PKI suite's last #[ignore] (the SLH-DSA cert chain)
+by fixing the FIPS-205 primitive non-compliance anchored by T136, then
+wiring X.509 SLH-DSA verify dispatch.
+
+Component-bisecting the C SDV VERIFY_KAT/SIGN_KAT vectors against the C
+reference (crypto/slh_dsa/src/slh_dsa_hash.c) found two SHA-2-path bugs
+in hash.rs (both in code shared by sign+verify → self-consistent but
+non-FIPS): (1) H_msg used SHA-x(R‖PK.seed) as the MGF1-seed prefix
+instead of the raw R‖PK.seed (FIPS 205 §11.2); (2) padded_prefix keyed
+the zero-pad on the security category, but cat-3/5 F/PRF use SHA-256
+(64-byte block) — only H/T_l/H_msg use SHA-512 (128). Fix tracks the
+hash function, not the category.
+
+Anchored by 4 cross-impl C KATs: VERIFY SHA2-128F (cat 1) + SHAKE-128F
+(full SHAKE) + SHA2-192F (cat 3 SHA-512 branch) + deterministic SIGN
+SHA2-128F (byte-exact, via new private sign_internal(msg, opt_rand)).
+T136 anchor flipped !verified→verified.
+
+X.509: 12 SLH-DSA CSOR OIDs (hitls-utils); verify_slhdsa_cert +
+slhdsa_param_for_oid dispatch (certificate.rs, pure-mode 0x00‖0x00‖tbs);
+new hitls-pki `slhdsa` feature → hitls-crypto/slh-dsa; SLH-DSA leaves
+treated as signature-only in end-entity-KU hardening.
+
+Verification: un-ignored tc_build_slhdsa_cert_chain_sha2_128s → migrated
+PKI suite 1158 PASS / 0 ignored (last #[ignore] gone). hitls-crypto 64
+slh_dsa + hitls-pki 458 lib + hitls-utils 8 oid PASS; ±mldsa/±slhdsa
+combos compile clean; workspace fmt + clippy -D warnings clean.
+
+Recorded as DEV_LOG Phase I129.

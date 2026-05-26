@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I127 (127 phases)
+- Implementation: I1–I129 (129 phases)
 - Testing: T1–T136 (129 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 in progress — Phase C PKI test migration; T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -369,6 +369,7 @@ Category summary:
 | 366 | I126 | Impl | TLS Certificate Compression (RFC 8879) wired into the CLI + `compress_certificate` parse hardening — the library already implemented RFC 8879 end-to-end (`handshake/codec.rs` encode/decode + zlib `compress`/`decompress`; client decompress path; server compress path in `build_server_flight`, all gated on the `cert-compression` feature), and in-process `connection::tests` exercised it — but the **CLI never enabled the feature** (`hitls-cli` depended on `hitls-tls` with `["tls13","tls12","dtls12"]`, *not* `cert-compression`, so the server compress branch was `#[cfg]`'d out) **nor advertised any algorithm** (`config.cert_compression_algos` defaults empty and `s-server` never set it). Net: `s-server` always sent a plain Certificate even when the client offered `compress_certificate`. Fix: (1) add `cert-compression` to the `hitls-cli → hitls-tls` feature list; (2) new `s-server --cert-compression` flag → advertises zlib (`TlsConfig::cert_compression(vec![ZLIB])`); (3) harden `parse_compress_certificate` (`handshake/extensions_codec.rs`) per RFC 8879 §3 (`algorithms<2..2^8-2>`): reject empty body / empty list / odd length / truncated / **trailing padding** with a `decode_error`-mapped error (was: accepted empty list + ignored trailing bytes → proceeded). Result: `test-tls13-certificate-compression.py` **4/29 → 18/29** (the compression-specific cases — smoke/zlib, compressed-cert delivery, fall-back-to-zlib negotiation — plus the 4 malformed-extension cases now pass). The residual **11 are not compression bugs** (documented in `docs/tlsfuzzer.md`): **10** are a general close_notify §6.1 reply gap (server sets `state=Closed` on the peer's close_notify, then `shutdown()` early-returns without sending its own close_notify — the strict `ExpectAlert→ExpectClose` form in 9 "unreasonable algo alone" + "duplicated algos" catches it; a separate I-phase needing a full-suite regression) and **1** is a TLS-1.2 conversation needing a 1.2 listener. Script **not yet curated** into CI — deferred until the close_notify §6.1 fix lands (then ~28/1, curate clean on a dedicated `--cert-compression` listener). No regression: `hitls-tls` lib **1553/0** (incl. a new `parse_compress_certificate` malformed-rejection unit test) + `hitls-cli` **174/0**; workspace `fmt` + `clippy -D warnings --all-targets` clean. Also triaged `obsolete-curves` (8/163): a debatable policy/conformance call (RFC 8446 §4.2.7 ignore-unrecognized vs reject), deferred | 2026-05-26 |
 | 367 | I127 | Impl | PKCS#12 empty-password KDF (RFC 7292 App. B.2) — `pkcs12_kdf` short-circuited the password diversifier `P` to empty whenever the BMPString was `<= 2` bytes, i.e. for an **empty** password (`password_to_bmp("") == [0x00,0x00]`). That matches a *NULL*-password convention; RFC 7292 / openHiTLS C / OpenSSL instead treat an empty password as the 2-byte BMP null and build `P` from `[0x00,0x00]` (a block of zeros). So MAC/KDF derivation for empty-password PFX files diverged from C, leaving the T113 `PARSE_P12` `p12_1` (empty-password) `#[ignore]`d. Fix: drop the `bmp.len() <= 2` short-circuit — `P` is always built from the BMPString (≥ `[0,0]`). Non-empty passwords are byte-identical (`bmp.len() > 2` already took the same branch) → zero regression for them; only the empty-password case changes (P-empty → block of zeros). Closes the migration's last non-SLH-DSA `#[ignore]`: `tc_pkcs12_parse_p12_tc003_p12_1_empty_pwd` un-ignored (`p12_1.p12` now parses: key + entity cert). No regression — hitls-pki 24 pkcs12 lib + **1157 migrated PASS / 1 ignored** (only the SLH-DSA anchor left); `fmt` + `clippy -D warnings` clean | 2026-05-26 |
 | 368 | I128 | Impl | TLS close_notify reply on peer-initiated close (RFC 8446 §6.1) + curate `test-tls13-certificate-compression` — surfaced by the I126 cert-compression triage. On receiving the peer's `close_notify`, the read path (`macros.rs`) set `received_close_notify=true` **and** `state=Closed`; then `shutdown()` (`tls13_client_shutdown_trait_body!`) early-returned on `state==Closed` **before** sending our own `close_notify`, so the server dropped the TCP abruptly instead of replying. RFC 8446 §6.1 requires each party to send `close_notify` before closing its write side — including in reply to the peer's. Fix: the shutdown macro now bails early only when closed *without* a clean peer close_notify (`state==Closed && !received_close_notify` — the §6.2 fatal-alert path, where closing immediately with no reply is correct); a clean peer close_notify is answered with our own close_notify (still gated on `sent_close_notify` for idempotency). One macro covers TLS 1.3 **and** 1.2, client **and** server, sync **and** async. Surfaced because most curated scripts tolerate an abrupt close (`ExpectAlert` with `next_sibling=ExpectClose()`); the strict `ExpectAlert→add_child(ExpectClose())` form in `test-tls13-certificate-compression` (10 conversations: 9 "unreasonable algo alone" + "duplicated algos") required the reply. Result: that script **18/29 → 28/29** (1 residual XFAIL = a TLS-1.2 ClientHello rejected by the TLS-1.3-only listener), now **curated** into CI on a dedicated `--cert-compression` listener (`HITLS_PORT_CERTCOMP` 4456). Full curated-suite regression (all 34 TLS 1.3 + 16 TLS 1.2 RSA-cert scripts, sampled): **0 FAIL / 0 XPASS** — the change only flips XFAIL→PASS (sending close_notify is strictly more compliant). No XFAIL entry across the 18 curated lists references close/alert, so no hidden XPASS. No regression: `hitls-tls` lib **1553/0**; `fmt` + `clippy -D warnings --all-targets` clean. Curated suite +1 (cert-compression) | 2026-05-26 |
+| 369 | I129 | Impl | SLH-DSA FIPS-205 compliance fix + X.509 SLH-DSA cert-verify dispatch — closes the T136-anchored primitive gap (SLH-DSA round-tripped its own signatures but rejected openHiTLS C / NIST vectors). Component-bisecting the C SDV `VERIFY_KAT`/`SIGN_KAT` vectors against the C reference (`crypto/slh_dsa/src/slh_dsa_hash.c`) found **two** `hitls-crypto/src/slh_dsa/hash.rs` divergences: **(1) `H_msg` MGF1 seed** — FIPS 205 §11.2 is `MGF1-SHA-x(R ‖ PK.seed ‖ SHA-x(R‖PK.seed‖PK.root‖M), m)` but the code used `SHA-x(R‖PK.seed)` (an extra hash) as the MGF1-seed prefix; **(2) SHA-2 cat-3/5 block size** — `padded_prefix` keyed the zero-pad length on the security *category* (64 for cat 1, else 128), but per FIPS 205 the pad tracks the *hash function's* block size, so the cat-3/5 SHA-256-based `F`/`PRF` (which use SHA-256, 64-byte block) were wrongly padded to 128. Both bugs lived in *both* sign and verify → self-consistent but non-FIPS. Fix tracks the hash, not the category; `H_msg` uses the raw `R‖PK.seed` prefix. Anchored by 4 cross-impl C KATs (`hitls-crypto`): VERIFY SHA2-128F (cat 1) / SHAKE-128F (full SHAKE path) / SHA2-192F (cat 3 SHA-512 branch) + a deterministic SIGN SHA2-128F (byte-exact, via a new private `sign_internal(msg, opt_rand)`); T136 anchor flipped `!verified`→`verified`. X.509: 12 SLH-DSA OIDs added (`hitls-utils` CSOR 2.16.840.1.101.3.4.3.{20..31}), `verify_slhdsa_cert` + `slhdsa_param_for_oid` dispatch in `certificate.rs` (pure-mode `0x00‖0x00‖tbs`), new `hitls-pki` `slhdsa` feature → `hitls-crypto/slh-dsa`, and the end-entity-KeyUsage hardening extended to treat SLH-DSA as signature-only. Un-ignored `tc_build_slhdsa_cert_chain_sha2_128s` → **migrated PKI suite 1158 PASS / 0 ignored** (last `#[ignore]` gone). No regression — hitls-crypto 64 slh_dsa lib + hitls-pki 458 lib + hitls-utils 8 oid; feature combos (±mldsa/±slhdsa) compile clean; workspace `fmt` + `clippy -D warnings --all-targets` clean | 2026-05-26 |
 
 ---
 
@@ -23218,3 +23219,112 @@ Production-code change in `hitls-pki` (PKCS#12 KDF empty-password
 handling). The migrated PKI suite is down to a single `#[ignore]` (the
 SLH-DSA FIPS-205 primitive anchor); all other T113 PKI migration
 families are active.
+
+## Phase I129 — SLH-DSA FIPS-205 Compliance Fix + X.509 SLH-DSA Cert-Verify (2026-05-26)
+
+### Summary
+
+Closed the last `#[ignore]` in the T113 migrated PKI suite — the SLH-DSA
+cert-chain test — by fixing the underlying **FIPS-205 primitive
+non-compliance** (anchored by T136) and wiring **X.509 SLH-DSA signature
+verification**. The SLH-DSA primitive round-tripped its own signatures
+but rejected openHiTLS C / NIST FIPS-205 vectors, i.e. it was internally
+self-consistent but wrong against the standard — the classic signature of
+a bug that sits in code shared by *both* sign and verify.
+
+### Root-cause (component bisection vs the C reference)
+
+Bisecting the C SDV `VERIFY_KAT`/`SIGN_KAT` vectors against the C
+reference (`/Users/dongqiu/Dev/code/openhitls/crypto/slh_dsa/src/slh_dsa_hash.c`)
+located **two** divergences in `crates/hitls-crypto/src/slh_dsa/hash.rs`,
+both in the SHA-2 hash family (the SHAKE path was already correct):
+
+1. **`H_msg` MGF1 seed prefix.** FIPS 205 §11.2.{1,2} defines
+   `H_msg(R, PK.seed, PK.root, M) = MGF1-SHA-x(R ‖ PK.seed ‖
+   SHA-x(R ‖ PK.seed ‖ PK.root ‖ M), m)`. The code used
+   `SHA-x(R ‖ PK.seed)` (an *extra* hash) as the MGF1-seed prefix
+   instead of the raw `R ‖ PK.seed`. Confirmed against C `HmsgSha`
+   (`tmpSeed = R ‖ seed`, then the digest appended, then `Mgf1`).
+2. **SHA-2 cat-3/5 padding block size.** `padded_prefix` keyed the
+   zero-pad length on the security *category* (64 bytes for cat 1, else
+   128). But per FIPS 205 the pad length is `block_size − n` where
+   `block_size` is the **hash function's** block size — and for cat 3/5
+   `F`/`PRF` use **SHA-256** (64-byte block), only `H`/`T_l`/`H_msg` use
+   SHA-512 (128). So cat-3/5 `F`/`PRF` were padded to 128 instead of 64.
+   Confirmed against C `g_slhDsaSha512Funcs` (`f = FSha256` →
+   `SHA256_PADDING_LEN`, `h = HSha512` → `SHA512_PADDING_LEN`).
+
+Both bugs are exercised identically by sign and verify, which is why
+self-round-trip passed while C-interop failed (cat 1 hit only bug 1;
+cat 3/5 hit both; SHAKE hit neither).
+
+### Fix
+
+- `hash.rs`: `H_msg` now uses the raw `R ‖ PK.seed` MGF1-seed prefix;
+  `padded_prefix(adrs, block_size)` takes an explicit block size,
+  `sha256_fh`/`prf` pass 64 and `sha512_fh` passes 128.
+- `mod.rs`: factored signing into a private deterministic
+  `sign_internal(message, opt_rand)` (public `sign` generates a random
+  `opt_rand` and delegates) so a fixed-randomizer SIGN KAT is testable.
+
+### Cross-implementation KAT anchors (`hitls-crypto`)
+
+Extracted from C SDV `test_suite_sdv_eal_slh_dsa*.data` (`CRYPT_SUCCESS`
+vectors; pure-mode `0x00 ‖ len(ctx) ‖ ctx ‖ msg`; public key =
+`key[2n..4n]`):
+
+- VERIFY **SHA2-128F** (cat 1, SHA-256 `H_msg`) — flips the T136 anchor.
+- VERIFY **SHAKE-128F** — full SHAKE hash chain end-to-end.
+- VERIFY **SHA2-192F** (cat 3) — the SHA-512 `H_msg` + SHA-512 `H`/`T_l`
+  + 128-byte padded-prefix branch.
+- SIGN **SHA2-128F** deterministic (`opt_rand = PK.seed`) — byte-exact
+  signature match, proving the sign path is FIPS-correct, not merely
+  self-consistent with our verify.
+
+T136's characterization test (`assert!(!verified)`) is now a positive KAT
+(`assert!(verified)`), renamed `test_slhdsa_verify_kat_sha2_128f`.
+
+### X.509 SLH-DSA verify dispatch
+
+- `hitls-utils`: 12 SLH-DSA signature OIDs (`known::slh_dsa_*`, NIST CSOR
+  `id-slh-dsa-*` = 2.16.840.1.101.3.4.3.{20..31}).
+- `hitls-pki` `certificate.rs`: `slhdsa_param_for_oid` (OID → param set,
+  defined unconditionally so the dispatch guard can reference it) +
+  `verify_slhdsa_cert` (feature-gated) — pure-mode `0x00 ‖ 0x00 ‖ tbs`,
+  issuer SPKI raw key = `PK.seed ‖ PK.root`. Mirrors the I121
+  `verify_mldsa_cert` convention.
+- New `hitls-pki` `slhdsa` feature → `hitls-crypto/slh-dsa` (added to
+  `default`).
+- `verify.rs`: end-entity-KeyUsage hardening now treats SLH-DSA leaves as
+  signature-only (same class as ML-DSA — must not assert
+  key-establishment usages).
+
+### Verification
+
+- `tc_build_slhdsa_cert_chain_sha2_128s` un-ignored → migrated PKI suite
+  **1158 PASS / 0 ignored** (the suite's final `#[ignore]` is gone).
+- No regression: hitls-crypto **64 slh_dsa lib** (incl. 4 KATs) +
+  hitls-pki **458 lib** + hitls-utils **8 oid** PASS; feature combos
+  (`±mldsa` / `±slhdsa`) compile clean; workspace `fmt` +
+  `clippy -D warnings --all-targets` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/slh_dsa/hash.rs` | Modified | `H_msg` MGF1-seed prefix fix + `padded_prefix` block-size-by-hash fix. |
+| `crates/hitls-crypto/src/slh_dsa/mod.rs` | Modified | `sign`→`sign_internal(opt_rand)`; T136 anchor → positive KAT; +3 VERIFY KATs + 1 SIGN KAT. |
+| `crates/hitls-crypto/src/slh_dsa/test_vectors/*` | Added | C SDV fixtures: verify SHAKE-128F + SHA2-192F (.pk/.msg/.ctx/.sig) + sign SHA2-128F (.key/.msg/.ctx/.sig). |
+| `crates/hitls-utils/src/oid/mod.rs` | Modified | 12 SLH-DSA CSOR OIDs (`slh_dsa_{sha2,shake}_{128,192,256}{s,f}`). |
+| `crates/hitls-pki/src/x509/certificate.rs` | Modified | `slhdsa_param_for_oid` + `verify_slhdsa_cert` + dispatch branch. |
+| `crates/hitls-pki/src/x509/verify.rs` | Modified | SLH-DSA leaves are signature-only in end-entity-KU hardening. |
+| `crates/hitls-pki/Cargo.toml` | Modified | new `slhdsa` feature → `hitls-crypto/slh-dsa` (in `default`). |
+| `crates/hitls-pki/tests/migrated_x509_parse.rs` | Modified | un-`#[ignore]` SLH-DSA chain test (feature-gated); generation summary → 0 ignored. |
+| `DEV_LOG.md` / `PROMPT_LOG.md` | Modified | This entry + Phase Index row 369 + Implementation summary I1–I129. |
+
+### Build Status (Post I129)
+
+100% of the T113 migrated PKI suite is now active (0 `#[ignore]`). The
+SLH-DSA primitive is FIPS-205-compliant for verify (SHA-256 / SHA-512 /
+SHAKE) and sign (deterministic byte-exact), anchored by C cross-impl
+KATs.

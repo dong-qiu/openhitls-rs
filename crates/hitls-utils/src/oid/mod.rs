@@ -228,6 +228,57 @@ pub mod known {
         Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 19])
     }
 
+    // SLH-DSA signature algorithms (NIST FIPS 205 / CSOR id-slh-dsa-* =
+    // 2.16.840.1.101.3.4.3.{20..31}).
+    /// OID for SLH-DSA-SHA2-128s (CSOR .20).
+    pub fn slh_dsa_sha2_128s() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 20])
+    }
+    /// OID for SLH-DSA-SHA2-128f (CSOR .21).
+    pub fn slh_dsa_sha2_128f() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 21])
+    }
+    /// OID for SLH-DSA-SHA2-192s (CSOR .22).
+    pub fn slh_dsa_sha2_192s() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 22])
+    }
+    /// OID for SLH-DSA-SHA2-192f (CSOR .23).
+    pub fn slh_dsa_sha2_192f() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 23])
+    }
+    /// OID for SLH-DSA-SHA2-256s (CSOR .24).
+    pub fn slh_dsa_sha2_256s() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 24])
+    }
+    /// OID for SLH-DSA-SHA2-256f (CSOR .25).
+    pub fn slh_dsa_sha2_256f() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 25])
+    }
+    /// OID for SLH-DSA-SHAKE-128s (CSOR .26).
+    pub fn slh_dsa_shake_128s() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 26])
+    }
+    /// OID for SLH-DSA-SHAKE-128f (CSOR .27).
+    pub fn slh_dsa_shake_128f() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 27])
+    }
+    /// OID for SLH-DSA-SHAKE-192s (CSOR .28).
+    pub fn slh_dsa_shake_192s() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 28])
+    }
+    /// OID for SLH-DSA-SHAKE-192f (CSOR .29).
+    pub fn slh_dsa_shake_192f() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 29])
+    }
+    /// OID for SLH-DSA-SHAKE-256s (CSOR .30).
+    pub fn slh_dsa_shake_256s() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 30])
+    }
+    /// OID for SLH-DSA-SHAKE-256f (CSOR .31).
+    pub fn slh_dsa_shake_256f() -> Oid {
+        Oid::new(&[2, 16, 840, 1, 101, 3, 4, 3, 31])
+    }
+
     /// OID for AES-128-CBC encryption.
     pub fn aes128_cbc() -> Oid {
         Oid::new(&[2, 16, 840, 1, 101, 3, 4, 1, 2])

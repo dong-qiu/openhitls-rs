@@ -141,35 +141,38 @@ fn mgf1_sha512(seed: &[u8], mask_len: usize) -> Result<Vec<u8>, CryptoError> {
 }
 
 impl Sha2Hasher {
-    /// Build the padded prefix: PK.seed || zeros-to-block-size || compressed-ADRS
-    fn padded_prefix(&self, adrs: &Adrs) -> Vec<u8> {
-        let block_size = if self.sec_category == 1 { 64 } else { 128 };
+    /// Build the padded prefix `PK.seed ‖ toByte(0, block_size − n) ‖ ADRS_c`.
+    ///
+    /// FIPS 205 §11.2: the zero-padding length tracks the *hash function's*
+    /// block size, not the security category. SHA-256-based functions (F, PRF,
+    /// and H/T_l at cat 1) pad to 64 bytes; SHA-512-based functions (H/T_l at
+    /// cat 3/5) pad to 128 bytes.
+    fn padded_prefix(&self, adrs: &Adrs, block_size: usize) -> Vec<u8> {
         let mut buf = Vec::with_capacity(block_size + 22);
         buf.extend_from_slice(&self.pk_seed);
-        // Pad to block_size
         let pad_len = block_size - self.n;
         buf.extend(std::iter::repeat(0u8).take(pad_len));
         buf.extend_from_slice(adrs.as_bytes());
         buf
     }
 
-    /// F/H for sec_category 1: SHA-256(padded_prefix || msg), truncated to n
+    /// SHA-256(PK.seed ‖ toByte(0, 64−n) ‖ ADRS_c ‖ msg), truncated to n.
     fn sha256_fh(&self, adrs: &Adrs, msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        let prefix = self.padded_prefix(adrs);
+        let prefix = self.padded_prefix(adrs, 64);
         sha256_hash(&[&prefix, msg], self.n)
     }
 
-    /// H for sec_category 3,5: SHA-512(padded_prefix || msg), truncated to n
+    /// SHA-512(PK.seed ‖ toByte(0, 128−n) ‖ ADRS_c ‖ msg), truncated to n.
     fn sha512_fh(&self, adrs: &Adrs, msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        let prefix = self.padded_prefix(adrs);
+        let prefix = self.padded_prefix(adrs, 128);
         sha512_hash(&[&prefix, msg], self.n)
     }
 }
 
 impl SlhHashFunctions for Sha2Hasher {
     fn prf(&self, adrs: &Adrs, sk_seed: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        // PRF always uses SHA-256 regardless of security category
-        let prefix = self.padded_prefix(adrs);
+        // PRF always uses SHA-256 (64-byte block padding) for every category.
+        let prefix = self.padded_prefix(adrs, 64);
         sha256_hash(&[&prefix, sk_seed], self.n)
     }
 
@@ -195,26 +198,19 @@ impl SlhHashFunctions for Sha2Hasher {
     }
 
     fn h_msg(&self, r: &[u8], msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        // H_msg = MGF1(SHA-x(R || PK.seed) || SHA-x(R || PK.seed || PK.root || msg), m)
-        // First compute SHA(R || PK.seed) as seed prefix
-        let mut seed_buf = Vec::new();
+        // FIPS 205 §11.2.{1,2}: H_msg(R, PK.seed, PK.root, M) =
+        //   MGF1-SHA-x(R ‖ PK.seed ‖ SHA-x(R ‖ PK.seed ‖ PK.root ‖ M), m)
+        // The MGF1 seed prefix is the *raw* R ‖ PK.seed — not SHA-x(R ‖ PK.seed).
+        let mut mgf_seed = Vec::with_capacity(r.len() + self.pk_seed.len() + 64);
+        mgf_seed.extend_from_slice(r);
+        mgf_seed.extend_from_slice(&self.pk_seed);
         if self.sec_category == 1 {
-            // SHA-256
-            let hash1 = sha256_hash(&[r, &self.pk_seed], 32)?;
-            seed_buf.extend_from_slice(r);
-            seed_buf.extend_from_slice(&self.pk_seed);
-            let hash2 = sha256_hash(&[&seed_buf, &self.pk_root, msg], 32)?;
-            let mut mgf_seed = hash1;
-            mgf_seed.extend_from_slice(&hash2);
+            let inner = sha256_hash(&[r, &self.pk_seed, &self.pk_root, msg], 32)?;
+            mgf_seed.extend_from_slice(&inner);
             mgf1_sha256(&mgf_seed, self.m)
         } else {
-            // SHA-512
-            let hash1 = sha512_hash(&[r, &self.pk_seed], 64)?;
-            seed_buf.extend_from_slice(r);
-            seed_buf.extend_from_slice(&self.pk_seed);
-            let hash2 = sha512_hash(&[&seed_buf, &self.pk_root, msg], 64)?;
-            let mut mgf_seed = hash1;
-            mgf_seed.extend_from_slice(&hash2);
+            let inner = sha512_hash(&[r, &self.pk_seed, &self.pk_root, msg], 64)?;
+            mgf_seed.extend_from_slice(&inner);
             mgf1_sha512(&mgf_seed, self.m)
         }
     }
