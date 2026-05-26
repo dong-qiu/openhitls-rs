@@ -326,10 +326,24 @@ dominated by a **real bug**: a malformed peer key_share for a
   validate FFDHE key-share length/group/duplicate at parse time.
 
 Still genuine feature gaps (not curated):
-- `test-tls13-obsolete-curves` (8/163) — obsolete curves (sect/secp192/
-  …) we don't implement; needs the curves or a 163-entry XFAIL.
-- `test-tls13-certificate-compression` (4/25) — RFC 8879 certificate
-  compression is unimplemented; a feature, not a triage item.
+- `test-tls13-obsolete-curves` (8/163) — triaged (I126 sweep): the 163
+  failures are *not* a clean feature gap but a policy/conformance call —
+  109 expect `illegal_parameter`/rejection where we (per RFC 8446 §4.2.7
+  "ignore unrecognized") proceed with a supported group + send
+  ServerHello/HRR, and 54 want `illegal_parameter` where we send
+  `handshake_failure`. Reconciling these risks diverging from the RFC's
+  ignore-unrecognized rule; deferred pending a careful per-case RFC read.
+- `test-tls13-certificate-compression` (18/29 after I126) — RFC 8879 IS
+  implemented in the library (encode/decode/compress/decompress, client
+  + server); I126 wired it into the CLI (`s-server --cert-compression`,
+  advertises zlib) and hardened `parse_compress_certificate` (reject
+  empty-list / odd-length / truncated / trailing-padding →
+  `decode_error`). The 4 compression-specific cases + 4 malformed-ext
+  cases now pass. Residual 11 are *not* compression bugs: 10 are the
+  close_notify §6.1 reply gap below (9 "unreasonable algo alone" +
+  "duplicated algos", all require the server's close_notify alert) and 1
+  is a TLS-1.2 conversation needing a 1.2 listener. Curate once §6.1 is
+  fixed (then ~28/1).
 - `test-extensions` (215/77, 1.2), `test-export-ciphers-rejected`
   (76/78, 1.2), `test-alpn-negotiation` (3/16, 1.2),
   `test-invalid-server-name-extension` (3/13, 1.2),
@@ -340,6 +354,21 @@ Still genuine feature gaps (not curated):
 `test-tls13-unencrypted-alert` (2/2 fail) — server replies
 `unexpected_message` to a peer abort-alert instead of closing
 silently (RFC 8446 §6.2). Fix unblocks curation.
+
+**close_notify reply — high-value I-phase candidate** (surfaced by the
+I126 cert-compression triage): on receiving the peer's `close_notify`,
+the server sets `state = Closed` (read path), then `shutdown()`
+(`tls13_client_shutdown_trait_body!`, macros.rs) early-returns on
+`state == Closed` **without sending its own `close_notify`** — so the
+server drops the TCP abruptly instead of replying (RFC 8446 §6.1: each
+party MUST send `close_notify` before closing its write side). Most
+curated scripts tolerate abrupt close (`ExpectAlert` with
+`next_sibling = ExpectClose()`), so this was invisible; the strict
+`ExpectAlert` → `add_child(ExpectClose())` form in
+`test-tls13-certificate-compression` (10 conversations) catches it.
+General server-shutdown behaviour → its own PR + a full curated-suite
+regression run (sending close_notify is strictly more compliant and
+expected, so it should only flip XFAILs to PASS).
 
 **Cipher-args plumbing — triaged (T135).** The four headline
 candidates turned out to be mostly NOT a simple args fix:
