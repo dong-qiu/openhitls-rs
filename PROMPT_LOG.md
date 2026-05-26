@@ -7786,3 +7786,37 @@ Verification: 1156 PASS / 0 FAIL / 2 ignored; fmt + clippy clean.
 Test-only (rides on merged I123).
 
 Recorded as DEV_LOG Phase T113 (continued) — KeyUsage CI-protected.
+
+---
+
+## Phase I124 — TLS 1.3 Malformed Peer key_share → illegal_parameter (2026-05-26)
+
+> 请继续大XFAIL/曲线族
+
+Worked the big-XFAIL/curve family. The heavy fail counts were
+dominated by a **real bug**: a malformed peer key_share for a
+*supported* group drew `internal_error` instead of `illegal_parameter`
+(RFC 8446 §4.2.8.2). Mapped with an Explore-style read of
+`build_server_flight` — the `compute_shared_secret(client_pub_key)` /
+`encapsulate(client_pub_key)` errors (off-curve / point-at-infinity /
+wrong-length EC, all-zero/low-order X25519/X448, bad FFDHE Y) flowed
+to `internal_error`.
+
+Fix: wrap those two peer-input calls (not server-side `generate`) →
+`HandshakeFailed("invalid key_share: …")` → `IllegalParameter`. Same
+"internal_error is never correct for peer input" class as I122.
+
+Flipped **77 conversations**: `crfg-curves` 8/10→18/0,
+`ecdhe-curves` 7/26→33/0 (both curated clean), `ffdhe-groups`
+7/55→48/14 (curated; 14 XFAILs = a separate FFDHE key-share
+framing-validation gap — truncated/wrong-group/duplicated → follow-up).
+Deferred feature gaps (documented, not curated): obsolete-curves
+(unsupported curves), certificate-compression (RFC 8879).
+
+No regression: hitls-tls lib 1109/0; key-share-adjacent curated
+scripts unchanged (conversation/keyshare-omitted/dhe-shared-secret-
+padding 342/0/no-unknown-groups 259/0/hrr). fmt + clippy clean. Curated
+suite 65 → 68. Renumbered I123→I124 (#157 took I123 / a parallel
+session's X.509 end-entity KeyUsage phase also took I123 on main). Ran
+in isolated temp worktree (`test/tlsfuzzer-curve-family`). Recorded as
+DEV_LOG `Phase I124`.

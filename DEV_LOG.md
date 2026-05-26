@@ -363,6 +363,7 @@ Category summary:
 | 360 | I121 | Impl | X.509 ML-DSA certificate signature verification (FIPS 204) — `Certificate::verify_signature` rejected ML-DSA-signed certs with "unsupported signature algorithm" (certificate.rs else branch), blocking the T113 PQC cert-chain migration (`BUILD_MLDSA/MLKEM_CERT_CHAIN`). Added an ML-DSA branch (gated `#[cfg(feature = "mldsa")]`) reusing the I118 CMS convention: dispatch on the NIST FIPS 204 OIDs `known::ml_dsa_44/65/87()` → `verify_mldsa_cert`, which verifies the issuer's raw SPKI ML-DSA public key over the TBSCertificate via `hitls_crypto::mldsa::mldsa_verify`, wrapping the message in the FIPS 204 §5.2 *pure*-mode empty-context prefix `0x00 ‖ 0x00 ‖ tbs` (mldsa_verify is the internal variant μ = H(tr‖M)). Validated against the openHiTLS C `cert/chain/mldsa-v3` chain (ML-DSA-65): root self-signed, inter-by-root, end-by-inter all verify `Ok(true)`, wrong-issuer `Ok(false)` — added as a gated unit test `test_mldsa_cert_chain_verify`. Unblocks the ML-DSA + ML-KEM cert-chain migration (ML-KEM leaves are ML-DSA-CA-signed). SLH-DSA cert verify is a separate follow-up (needs a hitls-crypto public-key-only verify entry). No regression — hitls-pki 458 lib (incl. new test) PASS; no-mldsa combos (`x509,pkcs8` / `x509,pkcs8,cms,pkcs12`) 454 PASS (ML-DSA branch cfg-excluded → OID still "unsupported" without the feature); `fmt` + `clippy -D warnings` (incl. `--all-features --all-targets`) clean | 2026-05-26 |
 | 361 | I122 | Impl | TLS 1.2 ChaCha20-Poly1305 RFC 7905 record nonce — the TLS 1.2 record layer (`record/encryption12.rs`) framed **all** AEAD suites like AES-GCM (4-byte salt `fixed_iv` + 8-byte explicit per-record nonce prepended to the wire), but RFC 7905 requires ChaCha20-Poly1305 to use a **12-byte** `write_iv` and an **implicit** nonce (`write_iv XOR left_pad(seq,12)`, like TLS 1.3) with **no** explicit nonce on the wire. The handshake therefore interoperated with itself (both sides equally wrong) but failed against any RFC-7905-correct peer (tlslite-ng/tlsfuzzer) with `bad_record_mac` on the first encrypted record — surfaced by the T135 `test-chacha20` triage. Fix: (1) `crypt/mod.rs` — all 7 TLS 1.2 ChaCha20 suite params `fixed_iv_len 4→12`, `record_iv_len 8→0`; (2) `encryption12.rs` — `RecordEncryptor12`/`RecordDecryptor12` carry a `Vec<u8>` IV + an `implicit_nonce` flag (set when the mapped AEAD suite is `TLS_CHACHA20_POLY1305_SHA256`), and `encrypt_record`/`decrypt_record` branch: GCM keeps explicit-nonce framing, ChaCha20 uses the new `build_nonce_chacha20_tls12` (XOR) with no wire prefix; (3) a too-short AEAD record now reports `bad_record_mac` (RFC 5246 §6.2.3.3) instead of the wrong `internal_error` (also removes a length-distinguishing oracle). The crypto primitive (`hitls-crypto` ChaCha20-Poly1305) was already RFC 8439-correct — purely a record-layer framing fix. Result: `test-chacha20.py` **0/52 (sanity fail) → ~51/52** interop. No regression: `hitls-tls` lib **1108/0** (incl. a new RFC 7905 nonce KAT + the self-interop handshakes) + GCM-path tlsfuzzer (`fuzzed-ciphertext` 338/0, `aes-gcm-nonces` 6/0, `conversation`/`ccs`/`encrypt-then-mac`) unchanged; `fmt` + `clippy -D warnings` clean. `test-chacha20.py` **not curated** into CI: 2 conversations (`Chacha20 in TLS1.1` + `1/n-1 record splitting`) are intermittently flaky (record-timing non-determinism, same signature as `ecdhe-padded`), a separate read-path follow-up | 2026-05-26 |
 | 362 | I123 | Impl | X.509 end-entity KeyUsage hardening (RFC 5280 §4.2.1.3 + ML-DSA/ML-KEM + TLS-auth profiles) — `validate_chain` accepted **any** end-entity KeyUsage, so the T113 PQC + EKU/KU migration left 6 `#[ignore]`d negatives. Added a leaf-KeyUsage check after the EKU block: **(1) ML-DSA leaf** (pubkey OID `ml_dsa_44/65/87`) is signature-only → must not assert key-establishment bits (keyEncipherment/dataEncipherment/keyAgreement); **(2) ML-KEM leaf** (pubkey OID `2.16.840.1.101.3.4.4.{1,2,3}`, matched by dotted form — no `known::` helper) is key-establishment-only → must carry keyEncipherment/keyAgreement **and** must not assert any signing bit (digitalSignature/keyCertSign/crlSign), and a missing KeyUsage is rejected; **(3) TLS client/server-auth** (`set_required_eku(kp_client_auth|kp_server_auth)`) → the leaf must carry digitalSignature. Verified against the C fixtures: all 5 valid leaves still verify (mldsa-v3/end 0x00c0, mlkem/end 0x0020, client/server/anyeku_good) and all 6 bad-KU leaves now reject (mldsa end_invalid_ku 0x00b0, mlkem end_invalid_ku 0x0080 / end_missing_ku none, client/server/anyeku_badku). No regression — hitls-pki 458 lib + 1150 migrated + 1 doc PASS; `clippy -D warnings` clean (`--all-features --all-targets` + no-mldsa `x509,pkcs8`); `fmt` clean. Unblocks the 6 T113 `#[ignore]`s (3 PQC KU + 3 EKU/KU) — un-ignored in the follow-up test-enhanced PR | 2026-05-26 |
+| 363 | I124 | Impl | TLS 1.3 malformed peer key_share → `illegal_parameter` (RFC 8446 §4.2.8.2) — the server's `build_server_flight` (`handshake/server.rs`) propagated the error from `compute_shared_secret(client_pub_key)` / `KeyExchange::encapsulate(client_pub_key)` straight up, where `tls_error_to_alert` mapped it to **`internal_error`**. So a client offering a *malformed* key_share for a **supported** group (point at infinity / off-curve / wrong-length EC point, all-zero or low-order X25519/X448 yielding an all-zero shared secret, a bad FFDHE Y value) drew `internal_error` — wrong for attacker-controlled peer input (RFC 8446 §4.2.8.2 requires `illegal_parameter`). Surfaced by the T133 curve-family tlsfuzzer triage. Fix: wrap the two peer-key_share-consuming calls (`compute_shared_secret`, `encapsulate`; **not** the server-side `KeyExchange::generate`) so their error becomes `HandshakeFailed("invalid key_share: …")` → `IllegalParameter`. Flipped **77 conversations** across 3 scripts: `test-tls13-crfg-curves` 8/10 → **18/0**, `test-tls13-ecdhe-curves` 7/26 → **33/0** (both curated clean), `test-tls13-ffdhe-groups` 7/55 → **48/14** (curated; the 14 XFAILs are a *separate* FFDHE key-share framing-validation gap — truncated / wrong-group / duplicated entries are accepted → ServerHello instead of `illegal_parameter`; a follow-up). Same "internal_error is never correct for peer input" class as I122's too-short-record fix. No regression: `hitls-tls` lib **1109/0**; key-share-adjacent curated scripts unchanged (`conversation` 3/0, `keyshare-omitted` 5/0, `dhe-shared-secret-padding` 342/0, `no-unknown-groups` 259/0, `hrr` 3/0); `fmt` + `clippy -D warnings` clean. Curated suite 65 → 68. Deferred feature gaps (documented, not curated): `obsolete-curves` (unsupported curves), `certificate-compression` (RFC 8879 unimplemented) | 2026-05-26 |
 
 ---
 
@@ -23021,3 +23022,72 @@ Test-only — rides on the merged I123. The X.509 end-entity KeyUsage
 hardening is now exercised on every CI run. Migrated-suite `#[ignore]`s
 down to 2 (pkcs12 empty-password KDF + SLH-DSA primitive C-interop —
 the latter the subject of a separate KAT regression anchor).
+
+---
+
+## Phase I124 — TLS 1.3 Malformed Peer key_share → illegal_parameter (2026-05-26)
+
+### Summary
+
+Fixes the high-value bug the T133 curve-family tlsfuzzer triage
+surfaced: a TLS 1.3 client offering a **malformed key_share for a
+supported group** drew `internal_error` instead of the RFC 8446
+§4.2.8.2-required `illegal_parameter`.
+
+### Root cause + fix (`crates/hitls-tls/src/handshake/server.rs`)
+
+`build_server_flight` propagated the error from
+`compute_shared_secret(client_pub_key)` (and `KeyExchange::encapsulate`
+for the KEM hybrid) straight up; `tls_error_to_alert` mapped it to
+`internal_error`. Those calls consume **attacker-controlled** peer
+input — a malformed public value (EC point at infinity / off-curve /
+wrong length, all-zero or low-order X25519/X448 producing an all-zero
+shared secret, a bad FFDHE Y) is a peer-input error, which RFC 8446
+§4.2.8.2 says MUST be `illegal_parameter`, never `internal_error`.
+Fix: wrap exactly those two peer-key_share-consuming calls (NOT the
+server-side `KeyExchange::generate`) so the error becomes
+`HandshakeFailed("invalid key_share: …")`, which the alert mapper
+already routes to `IllegalParameter`. Same "internal_error is never
+correct for peer input" class as I122's too-short-record →
+`bad_record_mac` fix.
+
+### Verification
+
+Flipped **77 conversations** across 3 tlsfuzzer scripts:
+- `test-tls13-crfg-curves` 8/10 → **18/0** (malformed X25519/X448) — curated clean.
+- `test-tls13-ecdhe-curves` 7/26 → **33/0** (malformed P-256/384/521) — curated clean.
+- `test-tls13-ffdhe-groups` 7/55 → **48/14** — curated; the 14 XFAILs
+  are a *separate* FFDHE key-share framing-validation gap (truncated /
+  wrong-group / duplicated entries accepted → ServerHello instead of
+  `illegal_parameter`; would fail later at Finished on a mismatched
+  secret). Follow-up: validate FFDHE key-share length/group/duplicate
+  at parse time.
+
+No regression: `cargo test -p hitls-tls --lib` **1109/0**; key-share-
+adjacent curated scripts unchanged via `run.sh` — `conversation` 3/0,
+`keyshare-omitted` 5/0, `dhe-shared-secret-padding` 342/0,
+`no-unknown-groups` 259/0, `hrr` 3/0. `fmt` + `clippy -D warnings`
+clean.
+
+### Deferred (documented in docs/tlsfuzzer.md, not curated)
+
+`test-tls13-obsolete-curves` (8/163 — obsolete sect/secp curves we
+don't implement) and `test-tls13-certificate-compression` (4/25 —
+RFC 8879 unimplemented) are genuine feature gaps, not triage items.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-tls/src/handshake/server.rs` | Modified | malformed peer key_share (`compute_shared_secret` / `encapsulate`) → `illegal_parameter`. |
+| `.github/workflows/tlsfuzzer.yml` | Modified | curate crfg-curves / ecdhe-curves / ffdhe-groups (TLS 1.3 `scripts`). |
+| `tests/tlsfuzzer/xfail/test-tls13-ffdhe-groups.txt` | Added | 14-entry XFAIL (FFDHE key-share framing-validation gap). |
+| `docs/tlsfuzzer.md` | Modified | curve-family triage outcomes + obsolete-curves / cert-compression feature gaps. |
+| `DEV_LOG.md` | Modified | This entry + Phase Index row 363 (I124). |
+| `PROMPT_LOG.md` | Modified | I124 prompt + result entry. |
+
+### Build Status (Post I124)
+
+`hitls-tls` lib 1109/0. TLS 1.3 malformed key_share now reports
+`illegal_parameter` per RFC 8446 §4.2.8.2 (EC + X25519/X448 + FFDHE
+key-share *values*). Curated tlsfuzzer suite **68 scripts**.

@@ -311,14 +311,30 @@ worth a separate script-level look (which padding case; value- or
 timing-dependent) but is not a robustness/leak issue. `ecdhe-padded`
 was also T128-excluded for TLS 1.0/1.1/SSLv2-compat fails.
 
-**Real gap / big-XFAIL needed** (mostly curve / extension coverage):
-`test-tls13-obsolete-curves` (8/163), `test-tls13-ffdhe-groups`
-(7/55), `test-tls13-ecdhe-curves` (7/26), `test-tls13-crfg-curves`
-(8/10), `test-tls13-certificate-compression` (4/25), `test-extensions`
-(215/77, 1.2), `test-export-ciphers-rejected` (76/78, 1.2),
-`test-alpn-negotiation` (3/16, 1.2), `test-invalid-server-name-extension`
-(3/13, 1.2), `test-dhe-rsa-key-exchange-signatures` (4/8, 1.2),
-`test-ecdsa-sig-flexibility` (3/8, 1.2).
+**Curve family — triaged (I124).** The heavy "fail" counts were
+dominated by a **real bug**: a malformed peer key_share for a
+*supported* group drew `internal_error` instead of `illegal_parameter`
+(RFC 8446 §4.2.8.2). I124 fixed it (`build_server_flight` maps the
+`compute_shared_secret` / `encapsulate` peer-input error to
+`illegal_parameter`), flipping 77 conversations:
+- `test-tls13-crfg-curves` 8/10 → **18/0** — curated, clean.
+- `test-tls13-ecdhe-curves` 7/26 → **33/0** — curated, clean.
+- `test-tls13-ffdhe-groups` 7/55 → **48/14** — curated; the 14 XFAILs
+  are a *separate* FFDHE key-share framing-validation gap (truncated /
+  wrong-group / duplicated accepted → ServerHello instead of
+  `illegal_parameter`; would fail later at Finished). Follow-up:
+  validate FFDHE key-share length/group/duplicate at parse time.
+
+Still genuine feature gaps (not curated):
+- `test-tls13-obsolete-curves` (8/163) — obsolete curves (sect/secp192/
+  …) we don't implement; needs the curves or a 163-entry XFAIL.
+- `test-tls13-certificate-compression` (4/25) — RFC 8879 certificate
+  compression is unimplemented; a feature, not a triage item.
+- `test-extensions` (215/77, 1.2), `test-export-ciphers-rejected`
+  (76/78, 1.2), `test-alpn-negotiation` (3/16, 1.2),
+  `test-invalid-server-name-extension` (3/13, 1.2),
+  `test-dhe-rsa-key-exchange-signatures` (4/8, 1.2),
+  `test-ecdsa-sig-flexibility` (3/8, 1.2).
 
 **Read-path conformance — I-phase candidate**:
 `test-tls13-unencrypted-alert` (2/2 fail) — server replies
