@@ -8122,3 +8122,38 @@ atypical-padding 8/4, message-skipping 2/9.
 Verification: each new script run.sh rc=0 on a fresh release
 s-server --tls 1.2; YAML valid. Curated suite 71 → 76. Ran in isolated
 temp worktree (`test/tlsfuzzer-survey`). Recorded as DEV_LOG Phase T138.
+
+---
+
+## Phase T139 — C→Rust SHA-3/SHAKE + DRBG KAT Migration (2026-05-27)
+
+> 继续 SHA-3 / DRBG 纯确定性 KAT
+
+Extended the xtask generator to SHA-3/SHAKE + DRBG, migrated crypto algos
+11 → 13.
+
+SHA-3 (migrated_sha3.rs, 46 tests): FUNC_TC003 (fixed-len SHA3-224/256/
+384/512 hash) + TC005/TC006 (SHAKE128/256 default/variable-len XOF) +
+SHA3_COPY_CTX (hash) → Sha3_*::digest / Shake*::{new,update,squeeze}.
+Clean.
+
+DRBG (migrated_drbg.rs, 5 tests): SDV_PRIMARY_DRBG_VECTOR_FUN_TC001
+(algId:entropyLen:result). C fixes seed in code: entropy=entropyLen×0xff,
+nonce=20×0xff, pers=00..05; instantiate + generate(32) vs result. Read C
+getEntropy (returns full buffer) → seed_material = entropy‖nonce‖pers,
+which HashDrbg::new (Hash_df) / HmacDrbg::new (HMAC Update) consume
+exactly; CTR-no-df = entropy XOR pers. Migrated Hash-DRBG SHA-256/384/512
++ HMAC-DRBG SHA-256 + CTR-DRBG AES-256-no-df — all byte-exact.
+
+Finding: CTR-DRBG AES-256-DF does NOT reproduce. Hash/HMAC/CTR-no-df all
+match (CTR-no-df shares the AES core + update), so the divergence is
+isolated to block_cipher_df (SP 800-90A §10.3.2); a 9-way input sweep
+matched none. Pinned by a CI-green divergence anchor in ctr_drbg.rs
+(flips when fixed). 13 DRBG variants are Rust-API gaps (Hash SHA1/224/
+SM3, HMAC SHA1/224/384/512, CTR AES128/192 ±df, SM4-df) — in na-list.
+
+Verification: migrated_sha3 46/0, migrated_drbg 5/0, anchor green; xtask
+--check drift gate both; na-list → 1046 emitted / 3815 total / 13 algos;
+fmt + clippy -D warnings --all-features clean.
+
+Recorded as DEV_LOG Phase T139.
