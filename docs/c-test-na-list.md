@@ -60,8 +60,8 @@ Counts are the `Generation summary` footer of each generated file
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 6 | 272 | 0 | 12 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
-| RSA | 44 | 120 | 0 | 6 | 170 |
-| **Total** | **1814** | **3165** | **238** | **94** | **4632** |
+| RSA | 48 | 120 | 0 | 2 | 170 |
+| **Total** | **1818** | **3165** | **238** | **90** | **4632** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -80,17 +80,20 @@ needed — but the C vectors publish only `(n, d)` (no CRT params), so a test-on
 plain-`d` private path is not side-channel-hardened") + a plain-`d`
 `raw_decrypt` branch (`c^d mod n` when CRT params are absent, itself
 `kat-nonce`-gated) were added. RSA **PKCS#1 v1.5 decrypt** is now migrated
-(I140) from `test_suite_sdv_eal_rsa_encrypt_decrypt.data`:
+(I140/I141) from `test_suite_sdv_eal_rsa_encrypt_decrypt.data`:
 `CRYPT_FUNC_TC001` emits `from_nd(n, d).decrypt(Pkcs1v15Encrypt, ct) == pt`
-(Emitted 38 → 44, +6; decrypt is deterministic). Of the 26 encrypt/decrypt
-rows, the **6 OAEP** rows are unsupported — the Rust OAEP is hardcoded to
-SHA-256 + empty label (`rsa::oaep`), but every C OAEP vector uses SHA-1, so
-they cannot round-trip (4 unsupported after isProvider dedup; the other 2
-unsupported remain PSS-SHA-224); raw `NO_PAD` rows route to API-surface
-(plain `c^d mod n`, already exercised by the sign KATs + the existing
-`decrypt(None, …)` unit test). RSA **PSS sign** (needs a salt hook),
-**encrypt** (randomised padding — needs an encrypt nonce hook), and
-**OAEP decrypt** (needs a configurable-hash OAEP API) stay API-surface.
+(PKCS#1 v1.5, I140) and `from_nd(n, d).decrypt_oaep(ct, RsaHashAlg::Sha1) ==
+pt` (OAEP, I141). Decrypt is deterministic. **I141 added a configurable-hash
+OAEP API** (`rsa::oaep` was hardcoded to SHA-256 + empty label): SHA-1 was
+added to `mgf1_with_hash` (gated on the `sha1` feature), the OAEP pad/unpad
+are now parameterised by `RsaHashAlg`, and `RsaPublicKey::encrypt_oaep` /
+`RsaPrivateKey::decrypt_oaep(.., alg)` were exposed — closing the 6 OAEP-SHA1
+decrypt vectors (Emitted 38 → 44 → 48). Raw `NO_PAD` rows route to
+API-surface (plain `c^d mod n`, already exercised by the sign KATs + the
+existing `decrypt(None, …)` unit test); the 2 remaining `unsupported` are
+PSS-SHA-224 (no `RsaHashAlg::Sha224`). RSA **encrypt** (randomised padding —
+needs an encrypt nonce hook) and **PSS sign** (random salt) stay
+API-surface.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
