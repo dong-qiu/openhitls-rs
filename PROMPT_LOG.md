@@ -8269,3 +8269,32 @@ hitls-crypto 2549+1, hitls-pki 1617 (DER-heaviest, unaffected), hitls-tls
 tests (decoder rejects non-universal INTEGER/SEQUENCE tags; ECDSA
 decode_der_signature rejects class-flipped tags). Ran in isolated temp
 worktree (`fix/ecdsa-cv-no-alert`). Recorded as DEV_LOG Phase I133.
+
+---
+
+## Phase T140 — C→Rust ECC KAT Migration: ECDSA-verify + ECDH (2026-05-27)
+
+> 请继续终止的工作 / (proceeded with ECC — the recommended next migration)
+
+Extended the xtask generator to ECC, migrated crypto algos 13 → 14.
+migrated_ecc.rs: 17 ECDSA-verify + 27 ECDH = 44 tests, across NIST
+P-192/224/256/384/521, Brainpool P-256/384/512r1, SM2 prime.
+
+ECDSA SIGN_VERIFY_FUNC_TC001 (eccId:mdId:prv:msg:R:S:rand:pubX:pubY:fmt:
+prov): C signs with injected nonce then verifies; sign not reproducible
+(same as DSA/SM2), so verify side migrated — build pubkey 0x04‖X‖Y from
+(pubX,pubY), DER(R,S), EcdsaKeyPair::from_public_key.verify(MD(msg),sig).
+
+ECDH EXCH_FUNC_TC001 (eccId:prv:pubX:pubY:fmt:share:prov): deterministic
+EcdhKeyPair::from_private_key(prv).compute_shared_secret(0x04‖X‖Y)==share.
+
+No bug found — both interop out of the box (44/44 first run). Both Rust
+APIs already existed (from_public_key/from_private_key/verify/
+compute_shared_secret), no API change. ECDSA sign + keygen/checks + point
+mul/add + ctx CRUD stay API-surface.
+
+Verification: migrated_ecc 44/0; xtask --check drift gate; na-list →
+1091 emitted / 4462 total / 14 algos; fmt + clippy -D warnings
+--all-features clean.
+
+Recorded as DEV_LOG Phase T140.

@@ -3,8 +3,8 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I131 (131 phases)
-- Testing: T1–T139 (132 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor)
+- Implementation: I1–I133 (133 phases)
+- Testing: T1–T140 (133 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -377,6 +377,7 @@ Category summary:
 | 374 | I131 | Impl | CTR-DRBG `block_cipher_df` BCC fix (SP 800-90A §10.3.3) — closes the T139-surfaced CTR-DRBG-AES-256-df divergence. The Block_Cipher_df derivation function builds its key/X material with BCC (CBC-MAC). Per SP 800-90A, `BCC(K, IV ‖ S)` runs CBC-MAC with the chaining value starting at `0^outlen`, so the counter `IV` is the **first data block** → `chaining = E(0 XOR IV) = E(IV)` before the blocks of `S` are folded in. `block_cipher_df` (`crates/hitls-crypto/src/drbg/ctr_drbg.rs`) instead seeded the chain *with* `IV` (`chaining = iv`) and XOR-folded `IV` into the first `S` block, skipping the standalone `E(IV)` step — so every df-derived seed diverged from NIST. One-line fix: encrypt the IV block first (`chaining = E(iv)`), then chain `S`. Confirmed against the openHiTLS C `DRBG_CtrBCCInit` ("BCC is CBC-MAC + IV(0)"). This only affects CTR-DRBG **with df**; CTR-no-df, Hash-DRBG, HMAC-DRBG are untouched (they never call `block_cipher_df`) and stay green. Flipped the T139 CTR-df divergence anchor to a positive KAT (`test_ctr_drbg_aes256_df_nist_vector`, `assert_eq!`) and migrated the now-passing `BSL_CID_RAND_AES256_CTR_DF` vector via the xtask `drbg` emitter (`CtrDrbg::with_df`) → `migrated_drbg.rs` 5 → **6** tests, DRBG unsupported 13 → 12. No regression — hitls-crypto 40 drbg lib (incl. the existing `test_block_cipher_df` + `test_ctr_drbg_with_df`) + 6 migrated DRBG; `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
 | 375 | I132 | Impl | TLS CertificateVerify EC/EdDSA alert mapping (RFC 8446 §4.2.3 + §6.2) — surfaced by the Phase-2 mTLS cert-matrix triage (`test-tls13-{ecdsa,eddsa}-in-certificate-verify` against `--verify-client-cert` with an ECDSA/Ed25519 client identity). When verifying a peer's CertificateVerify backed by an EC/EdDSA cert, two wrong alerts: **(1)** a *malformed* ECDSA/EdDSA signature made `verify_ecdsa`/`verify_ed25519`/`verify_ed448` return `Err` (DER/length parse failure), which propagated via `?` as `internal_error` instead of `decrypt_error` (RFC 8446 §6.2: "unable to correctly verify a signature"); **(2)** a CV scheme whose curve mismatched the cert key (e.g. `ecdsa_secp384r1_sha384` against a P-256 cert, or any ECDSA scheme against an Ed25519 cert) hit the matching verify arm with an incompatible SPKI → `Err` → `internal_error` instead of `illegal_parameter` (RFC 8446 §4.2.3). Fix in `handshake/verify.rs`: **(a)** a cert-key↔scheme compatibility check (SPKI `algorithm_oid` + EC curve `algorithm_params` vs the scheme's expected key family, via `hitls_utils::oid::known`) → `illegal_parameter` before any signature math; **(b)** the EC/EdDSA verify calls now treat `Err` as a verification *failure* (`.unwrap_or(false)` → the existing `decrypt_error` path) — the scheme/curve is already confirmed compatible, so the signature is the only variable. Shared by client + server CV verification; RSA path unchanged (it already returns `Ok(false)` on a bad sig). Result: `test-tls13-{ecdsa,eddsa}-in-certificate-verify` 122/10 + 128/4 → **132/0** on clean runs. Same "internal_error is never correct for peer input" class as I122/I124. Scripts **not curated** — flaky under 132 back-to-back mTLS handshakes ("Timeout when waiting for peer message", varies run-to-run; same test-side-timing class as `ecdhe-padded`, can't be stably XFAIL'd — documented in `docs/tlsfuzzer.md`). No regression: `hitls-tls` lib **1556/0** (incl. a new scheme/cert-mismatch unit test + the 3 EC roundtrip tests updated to carry the curve `algorithm_params` real certs always have); RSA mTLS `test-tls13-certificate-{verify,request}` 31/0 + 5/0 unchanged; full `hitls-integration-tests` green; `fmt` + `clippy -D warnings --all-targets` clean | 2026-05-27 |
 | 376 | I133 | Impl | ASN.1 DER decoder INTEGER/SEQUENCE tag-class strictness — fixes an **ECDSA signature-malleability / signature-acceptance bug** in `hitls-utils` that I132 had misattributed to "back-to-back mTLS timing flakiness". An independent audit of the I132 "not curated, flaky" claim disproved the flaky theory (the failure reproduces in *isolation*, survives a **30 s** tlsfuzzer timeout, and the EdDSA/RSA twin scripts are rock-stable at identical handshake volume) and pinned a real bug. Root cause: `Decoder::read_integer` / `read_sequence` (`crates/hitls-utils/src/asn1/decoder.rs`) validated only the tag *number* (`number == 0x02` / `0x10 && constructed`), **not the tag class**. `Tag::from_bytes` derives `number` from the low 5 bits, so a context-specific tag `0x82` (a single-bit flip of the universal INTEGER tag `0x02`) yields `number == 2` and was accepted as an INTEGER; likewise `0x70`/`0xB0` for SEQUENCE. tlsfuzzer's `test-tls13-ecdsa-in-certificate-verify` mutation `xor 0x80 at <s-INTEGER-tag>` / `xor at 0 <SEQUENCE-tag>` flips exactly those class bits, leaving the (r, s) values intact → `EcdsaKeyPair::verify` decoded the original valid signature and returned **`Ok(true)`** (verified) for the malformed-DER signature ~⅓ of runs (depending on the random per-run signature's byte layout). The server thus **accepted a forged client CertificateVerify**, completed auth, and deadlocked awaiting the client Finished — which tlsfuzzer observed as the "Timeout when waiting for peer message" that looked flaky. Fix: `read_integer` + `read_sequence` now require `tag.class == Universal` (and primitive/constructed as appropriate). Confirmed via instrumented `verify_ecdsa` logging (`Ok(true)`→reject on the mutated sig) and 5×/3× stable `132/0` runs of the ecdsa/eddsa scripts. **Now curates both `test-tls13-{ecdsa,eddsa}-in-certificate-verify` into CI** (workflow generates ECDSA P-256 + Ed25519 client certs signed by the mTLS client CA; run against `HITLS_PORT_MTLS`, 0 XFAIL). Shared decoder change ⇒ full-workspace regression: `hitls-utils` 78 + 2 new, `hitls-crypto` 2549 + 1 new (ECDSA malformed-tag rejection), `hitls-pki` **1617** (DER-heaviest — X.509/PKCS#8/CMS unaffected; real DER always uses universal class), `hitls-tls` 1556, `hitls-integration-tests` 268 — **all 0 failed**; `fmt` + `clippy -D warnings --all-targets` clean. Lesson (recorded in `docs/tlsfuzzer.md`): a "flaky/timeout" on an attacker-controlled-input rejection path warrants real root-causing — here it masked a signature-acceptance flaw | 2026-05-27 |
+| 377 | T140 | Test | C→Rust ECC KAT migration (Phase A continued — ECDSA verify + ECDH) — takes the migrated crypto-algorithm count 13 → 14. Extends the xtask generator to `crypto/ecc/test_suite_sdv_eal_ecdsa.data` + `test_suite_sdv_eal_ecdh.data` (`migrated_ecc.rs`, **44 tests**: 17 ECDSA-verify + 27 ECDH) across NIST P-192/224/256/384/521, Brainpool P-256/384/512r1 and the SM2 prime curve. **ECDSA** `SIGN_VERIFY_FUNC_TC001` (`eccId:mdId:prv:msg:R:S:rand:pubX:pubY:fmt:isProvider`): the C signs with an injected nonce then verifies — sign is not reproducible without a nonce hook (same as DSA/SM2), so the *verify* side is migrated by building the public key from the row's `(pubX,pubY)` as uncompressed `0x04‖X‖Y`, DER-encoding `(R,S)`, and `EcdsaKeyPair::from_public_key(curve, …).verify(MD(msg), sig)`. **ECDH** `EXCH_FUNC_TC001` (`eccId:prv:pubX:pubY:fmt:share:isProvider`): deterministic `EcdhKeyPair::from_private_key(curve, prv).compute_shared_secret(0x04‖X‖Y) == share`. **No bug found** — both interop with openHiTLS C out of the box (44/44 first run). Both Rust APIs already existed (`from_public_key`/`from_private_key`/`verify`/`compute_shared_secret`), no API change. ECDSA sign-side + key-gen/checks + ECC point mul/add + ctx CRUD stay API-surface. xtask `--check` drift gate passes; na-list tally → 1091 emitted / 4462 total C cases / 14 algorithms; workspace `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -23575,3 +23576,68 @@ CTR-DRBG is now SP 800-90A-compliant for both df and no-df instantiate;
 all migrated DRBG NIST vectors (6) pass. A security-relevant primitive
 fix found by the C→Rust KAT migration discipline (cf. the SLH-DSA
 FIPS-205 fix in I129).
+
+## Phase T140 — C→Rust ECC KAT Migration: ECDSA-verify + ECDH (Phase A continued) (2026-05-27)
+
+### Summary
+
+Extended the `xtask migrate-c-tests` generator to the ECC families,
+taking the mechanically-migrated crypto algorithm count from 13 (T139)
+to **14**. Two deterministic families across NIST P-192/224/256/384/521,
+Brainpool P-256/384/512r1 and the SM2 prime curve. Both interop with
+openHiTLS C with **zero divergence** — 44/44 first run.
+
+### ECDSA verify (`migrated_ecc.rs`, 17 tests)
+
+`SDV_CRYPTO_ECDSA_SIGN_VERIFY_FUNC_TC001`
+(`eccId : mdId : prvKey : msg : signR : signS : rand : pubKeyX : pubKeyY
+: pointFormat : isProvider`). The C signs with an injected nonce to match
+the published `(R,S)`, then verifies — the sign side is not reproducible
+without a nonce hook (same reproducibility limit as DSA/SM2). The
+**verify** side is migrated: build the public key from the row's
+`(pubKeyX, pubKeyY)` as uncompressed `0x04 ‖ X ‖ Y`, DER-encode `(R,S)`
+as `SEQUENCE { INTEGER r, INTEGER s }`, and check
+`EcdsaKeyPair::from_public_key(curve, pk).verify(MD(msg), sig)`. `MD` is
+the row's `mdId` (SHA-1/224/256/384/512).
+
+### ECDH key exchange (`migrated_ecc.rs`, 27 tests)
+
+`SDV_CRYPTO_ECDH_EXCH_FUNC_TC001`
+(`eccId : prvKey : pubKeyX : pubKeyY : pointFormat : shareKey :
+isProvider`). Deterministic — local private key × peer public point →
+shared secret:
+`EcdhKeyPair::from_private_key(curve, prv).compute_shared_secret(0x04 ‖ X
+‖ Y) == shareKey`.
+
+### Not migrated (API-surface)
+
+ECDSA sign-side (`SIGN_VERIFY_FUNC_TC002` + the sign halves), ECC key-gen
+/ key-pair & private-key checks, ECC point mul/add property tests, and
+all `_API_` / ctx-CRUD rows. No new Rust-API gaps (the verify/ECDH
+constructors already existed); the ECDSA sign-side is the usual
+injected-nonce reproducibility limit, documented in `c-test-na-list.md`.
+
+### Verification
+
+- `migrated_ecc` **44/0** (17 ECDSA-verify + 27 ECDH).
+- `xtask migrate-c-tests --algo ecc --check` drift gate passes.
+- `docs/c-test-na-list.md` tally → 1091 emitted / 4462 total C cases
+  across 14 algorithms.
+- Workspace `fmt` + `clippy -D warnings --all-features --all-targets`
+  clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `xtask/src/ecc.rs` | Added | ECDSA-verify + ECDH KAT emitter. |
+| `xtask/src/main.rs` | Modified | `ecc` dispatch arm (2 data files) + module decl + help string. |
+| `crates/hitls-crypto/tests/migrated_ecc.rs` | Added | 44 generated ECC KATs. |
+| `docs/c-test-na-list.md` | Modified | ECC tally row + totals + note. |
+| `DEV_LOG.md` / `PROMPT_LOG.md` | Modified | This entry + Phase Index row 377 + Testing summary T1–T140. |
+
+### Build Status (Post T140)
+
+14 of the crypto algorithm families now have a generated C→Rust KAT
+suite. ECDSA verify and ECDH interop with openHiTLS C with zero
+divergence (no bug surfaced).
