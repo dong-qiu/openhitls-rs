@@ -1,6 +1,6 @@
 //! Emitter for the openHiTLS C RSA SDV vectors —
 //! `test_suite_sdv_eal_rsa_sign_verify.data` (sign + verify) and
-//! `test_suite_sdv_eal_rsa_encrypt_decrypt.data` (decrypt).
+//! `test_suite_sdv_eal_rsa_encrypt_decrypt.data` (encrypt + decrypt).
 //!
 //! * `RSA_VERIFY_PKCSV15_FUNC_TC001` (`mdId : n : e : msg : sign : expect :
 //!   isProvider`) — PKCS#1 v1.5 verify: `RsaPublicKey::new(n, e).verify(
@@ -12,17 +12,20 @@
 //!   deterministic PKCS#1 v1.5 sign: `from_nd(n, d).sign(Pkcs1v15Sign,
 //!   MD(msg)) == sign` (`kat-nonce`-gated, since `from_nd` is).
 //! * `RSA_CRYPT_FUNC_TC001` (`keyLen : padMode : hashId : n : e : d :
-//!   plaintext : ciphertext : isProvider`) — deterministic decrypt:
-//!   `from_nd(n, d).decrypt(Pkcs1v15Encrypt, ciphertext) == plaintext`
-//!   (PKCS#1 v1.5 only; see below).
+//!   plaintext : ciphertext : isProvider`) — encrypt + decrypt, both
+//!   directions per row (see `emit_crypt`): PKCS#1 v1.5 + OAEP (decrypt
+//!   byte-exact, encrypt length + round-trip) and raw `NO_PAD` (both
+//!   byte-exact).
 //!
 //! `expect == 0` (CRYPT_SUCCESS) means the signature must verify; any other
 //! value means it must not. PSS is limited to SHA-256/384/512 (the Rust
-//! `verify_pss` / MGF1 hashes); PSS-SHA-1/224 rows are `unsupported`. Decrypt
-//! migrates PKCS#1 v1.5 only — the Rust OAEP is hardcoded to SHA-256 + empty
-//! label, but every C OAEP vector uses SHA-1, so OAEP rows are `unsupported`;
-//! raw `NO_PAD` rows route to `ApiSurface`. RSA *encrypt* (randomised padding)
-//! and PSS *sign* (random salt) stay `ApiSurface` pending nonce hooks.
+//! `verify_pss` / MGF1 hashes); PSS-SHA-1/224 rows are `unsupported`. OAEP
+//! decrypt uses the I141 configurable-hash API (`decrypt_oaep`, SHA-1 needs
+//! the `sha1` feature). Padded *encrypt* is randomised (PS / OAEP seed), so —
+//! like the C test (which only checks `ctLen == ciphertext->len` then
+//! round-trips) — those encrypt tests are length + round-trip, not byte-exact;
+//! a deterministic-randomness hook would not help (there is no matching
+//! fixed-randomness vector). PSS *sign* (random salt) stays `ApiSurface`.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -43,7 +46,7 @@ pub fn emit_rsa_kat(cases: &[TestCase]) -> (String, EmitStats) {
         } else if case.tc_name.contains("RSA_SIGN_PKCSV15_FUNC_TC002") {
             emit_sign_pkcs15(&mut body, case, &mut stats, &mut used);
         } else if case.tc_name.contains("RSA_CRYPT_FUNC_TC001") {
-            emit_decrypt(&mut body, case, &mut stats, &mut used);
+            emit_crypt(&mut body, case, &mut stats, &mut used);
         } else {
             stats.skipped_api += 1;
         }
@@ -221,17 +224,22 @@ fn emit_sign_pkcs15(
     stats.emitted += 1;
 }
 
-/// Deterministic RSA **decrypt** KAT (`RSA_CRYPT_FUNC_TC001`:
+/// RSA encrypt/decrypt KAT (`RSA_CRYPT_FUNC_TC001`:
 /// `keyLen : padMode : hashId : n : e : d : plaintext : ciphertext :
-/// isProvider`). Decryption is deterministic, so `decrypt(padding,
-/// ciphertext) == plaintext`. Two padding modes are migrated, both using the
-/// test-only `RsaPrivateKey::from_nd` (the C vectors publish only `(n, d)`):
-/// **PKCS#1 v1.5** (`decrypt(Pkcs1v15Encrypt, ct)`, no hash) and **OAEP**
-/// (`decrypt_oaep(ct, RsaHashAlg::{hash})`, hash from the row's `hashId` —
-/// every C OAEP vector is SHA-1). Raw `NO_PAD` rows route to API-surface
-/// (plain `c^d mod n`, already exercised by the sign KATs + the existing
-/// `decrypt(None, …)` unit test).
-fn emit_decrypt(
+/// isProvider`). Emits **both directions** per row (decrypt + encrypt),
+/// using the test-only `RsaPrivateKey::from_nd` (the C vectors publish only
+/// `(n, d)`):
+///
+/// * **PKCS#1 v1.5 / OAEP** — decrypt is deterministic, so a byte-exact KAT:
+///   `decrypt(Pkcs1v15Encrypt, ct) == pt` / `decrypt_oaep(ct, alg) == pt`
+///   (OAEP hash from `hashId`; every C OAEP vector is SHA-1). Encrypt is
+///   randomised (PS / OAEP seed), so — mirroring the C test, which only
+///   checks `ctLen == ciphertext->len` then round-trips — the encrypt test
+///   is `encrypt(pt)` length-check + decrypt round-trip (not byte-exact).
+/// * **Raw `NO_PAD`** — deterministic both ways, so both directions are
+///   byte-exact: `encrypt(None, pt) == ct` (public key only, no `kat-nonce`)
+///   and `decrypt(None, ct) == pt`.
+fn emit_crypt(
     out: &mut String,
     case: &TestCase,
     stats: &mut EmitStats,
@@ -250,8 +258,9 @@ fn emit_decrypt(
         stats.skipped_unknown += 1;
         return;
     };
-    let (Some(n), Some(d), Some(pt), Some(ct)) = (
+    let (Some(n), Some(e), Some(d), Some(pt), Some(ct)) = (
         case.args[3].as_hex(),
+        case.args[4].as_hex(),
         case.args[5].as_hex(),
         case.args[6].as_hex(),
         case.args[7].as_hex(),
@@ -259,42 +268,143 @@ fn emit_decrypt(
         stats.skipped_unknown += 1;
         return;
     };
+    let line = case.line;
+    let ct_len = ct.len();
 
-    // Decrypt expression + a short fn-name suffix, by padding mode.
-    let (decrypt_expr, suffix) = match pad_mode {
-        "CRYPT_CTRL_SET_RSA_RSAES_PKCSV15" => (
-            "sk.decrypt(RsaPadding::Pkcs1v15Encrypt, ct)".to_string(),
-            "pkcs15",
-        ),
+    match pad_mode {
+        "CRYPT_CTRL_SET_RSA_RSAES_PKCSV15" => {
+            used.insert("privkey");
+            write_test(
+                out,
+                case,
+                &format!("tc_line{line}_rsa_pkcs15_decrypt"),
+                "RSA PKCS#1 v1.5 byte-exact decrypt",
+                true,
+                &[("n", n), ("d", d), ("ct", ct), ("expected", pt)],
+                &[
+                    "let sk = RsaPrivateKey::from_nd(n, d).unwrap();".into(),
+                    "assert_eq!(sk.decrypt(RsaPadding::Pkcs1v15Encrypt, ct).unwrap(), expected);"
+                        .into(),
+                ],
+            );
+            write_test(
+                out,
+                case,
+                &format!("tc_line{line}_rsa_pkcs15_encrypt"),
+                "RSA PKCS#1 v1.5 encrypt length + round-trip",
+                true,
+                &[("n", n), ("e", e), ("d", d), ("pt", pt)],
+                &[
+                    "let pk = RsaPublicKey::new(n, e).unwrap();".into(),
+                    "let ct = pk.encrypt(RsaPadding::Pkcs1v15Encrypt, pt).unwrap();".into(),
+                    format!("assert_eq!(ct.len(), {ct_len});"),
+                    "let sk = RsaPrivateKey::from_nd(n, d).unwrap();".into(),
+                    "assert_eq!(sk.decrypt(RsaPadding::Pkcs1v15Encrypt, &ct).unwrap(), pt);".into(),
+                ],
+            );
+            stats.emitted += 2;
+        }
         "CRYPT_CTRL_SET_RSA_RSAES_OAEP" => {
             let Some(alg) = case.args[2].as_symbol().and_then(md_to_oaep_alg) else {
                 stats.skipped_unsupported_alg += 1;
                 return;
             };
+            used.insert("privkey");
             used.insert("oaep");
-            (format!("sk.decrypt_oaep(ct, RsaHashAlg::{alg})"), "oaep")
+            write_test(
+                out,
+                case,
+                &format!("tc_line{line}_rsa_oaep_decrypt"),
+                "RSA OAEP byte-exact decrypt",
+                true,
+                &[("n", n), ("d", d), ("ct", ct), ("expected", pt)],
+                &[
+                    "let sk = RsaPrivateKey::from_nd(n, d).unwrap();".into(),
+                    format!(
+                        "assert_eq!(sk.decrypt_oaep(ct, RsaHashAlg::{alg}).unwrap(), expected);"
+                    ),
+                ],
+            );
+            write_test(
+                out,
+                case,
+                &format!("tc_line{line}_rsa_oaep_encrypt"),
+                "RSA OAEP encrypt length + round-trip",
+                true,
+                &[("n", n), ("e", e), ("d", d), ("pt", pt)],
+                &[
+                    "let pk = RsaPublicKey::new(n, e).unwrap();".into(),
+                    format!("let ct = pk.encrypt_oaep(pt, RsaHashAlg::{alg}).unwrap();"),
+                    format!("assert_eq!(ct.len(), {ct_len});"),
+                    "let sk = RsaPrivateKey::from_nd(n, d).unwrap();".into(),
+                    format!("assert_eq!(sk.decrypt_oaep(&ct, RsaHashAlg::{alg}).unwrap(), pt);"),
+                ],
+            );
+            stats.emitted += 2;
         }
-        // Raw NO_PAD (and any other ctrl) → API-surface.
+        "CRYPT_CTRL_SET_RSA_PADDING" => {
+            // Raw RSA (no padding) — deterministic both ways → byte-exact.
+            used.insert("privkey");
+            write_test(
+                out,
+                case,
+                &format!("tc_line{line}_rsa_nopad_encrypt"),
+                "RSA raw (NO_PAD) byte-exact encrypt",
+                false,
+                &[("n", n), ("e", e), ("pt", pt), ("expected", ct)],
+                &[
+                    "let pk = RsaPublicKey::new(n, e).unwrap();".into(),
+                    "assert_eq!(pk.encrypt(RsaPadding::None, pt).unwrap(), expected);".into(),
+                ],
+            );
+            write_test(
+                out,
+                case,
+                &format!("tc_line{line}_rsa_nopad_decrypt"),
+                "RSA raw (NO_PAD) byte-exact decrypt",
+                true,
+                &[("n", n), ("d", d), ("ct", ct), ("expected", pt)],
+                &[
+                    "let sk = RsaPrivateKey::from_nd(n, d).unwrap();".into(),
+                    "assert_eq!(sk.decrypt(RsaPadding::None, ct).unwrap(), expected);".into(),
+                ],
+            );
+            stats.emitted += 2;
+        }
+        // Any other ctrl → API-surface.
         _ => {
             stats.skipped_api += 1;
-            return;
         }
-    };
-    used.insert("privkey");
+    }
+}
 
-    write_doc(out, case, "RSA deterministic decrypt");
-    writeln!(out, "#[cfg(feature = \"kat-nonce\")]").unwrap();
-    writeln!(out, "#[allow(deprecated)]").unwrap();
+/// Write one generated `#[test]` fn: a `write_doc` banner, optional
+/// `kat-nonce` + `#[allow(deprecated)]` gating, the `let <name>: &[u8] = …`
+/// byte-slice declarations, then the body statement lines (each already
+/// terminated, indented by this helper).
+fn write_test(
+    out: &mut String,
+    case: &TestCase,
+    fn_name: &str,
+    doc_kind: &str,
+    gated: bool,
+    decls: &[(&str, &[u8])],
+    body: &[String],
+) {
+    write_doc(out, case, doc_kind);
+    if gated {
+        writeln!(out, "#[cfg(feature = \"kat-nonce\")]").unwrap();
+        writeln!(out, "#[allow(deprecated)]").unwrap();
+    }
     writeln!(out, "#[test]").unwrap();
-    writeln!(out, "fn tc_line{}_rsa_{suffix}_decrypt() {{", case.line).unwrap();
-    writeln!(out, "    let n: &[u8] = {};", format_byte_slice(n)).unwrap();
-    writeln!(out, "    let d: &[u8] = {};", format_byte_slice(d)).unwrap();
-    writeln!(out, "    let ct: &[u8] = {};", format_byte_slice(ct)).unwrap();
-    writeln!(out, "    let expected: &[u8] = {};", format_byte_slice(pt)).unwrap();
-    writeln!(out, "    let sk = RsaPrivateKey::from_nd(n, d).unwrap();").unwrap();
-    writeln!(out, "    assert_eq!({decrypt_expr}.unwrap(), expected);").unwrap();
+    writeln!(out, "fn {fn_name}() {{").unwrap();
+    for (name, bytes) in decls {
+        writeln!(out, "    let {name}: &[u8] = {};", format_byte_slice(bytes)).unwrap();
+    }
+    for stmt in body {
+        writeln!(out, "    {stmt}").unwrap();
+    }
     writeln!(out, "}}\n").unwrap();
-    stats.emitted += 1;
 }
 
 fn emit_verify_pss(

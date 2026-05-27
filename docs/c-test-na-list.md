@@ -60,8 +60,8 @@ Counts are the `Generation summary` footer of each generated file
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 6 | 272 | 0 | 12 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
-| RSA | 48 | 120 | 0 | 2 | 170 |
-| **Total** | **1818** | **3165** | **238** | **90** | **4632** |
+| RSA | 66 | 116 | 0 | 2 | 170 |
+| **Total** | **1836** | **3161** | **238** | **90** | **4632** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -88,12 +88,18 @@ OAEP API** (`rsa::oaep` was hardcoded to SHA-256 + empty label): SHA-1 was
 added to `mgf1_with_hash` (gated on the `sha1` feature), the OAEP pad/unpad
 are now parameterised by `RsaHashAlg`, and `RsaPublicKey::encrypt_oaep` /
 `RsaPrivateKey::decrypt_oaep(.., alg)` were exposed — closing the 6 OAEP-SHA1
-decrypt vectors (Emitted 38 → 44 → 48). Raw `NO_PAD` rows route to
-API-surface (plain `c^d mod n`, already exercised by the sign KATs + the
-existing `decrypt(None, …)` unit test); the 2 remaining `unsupported` are
-PSS-SHA-224 (no `RsaHashAlg::Sha224`). RSA **encrypt** (randomised padding —
-needs an encrypt nonce hook) and **PSS sign** (random salt) stay
-API-surface.
+decrypt vectors (Emitted 38 → 44 → 48). RSA **encrypt** is now migrated too
+(I142): `emit_crypt` emits **both directions** per `CRYPT_FUNC_TC001` row.
+Padded encryption (PKCS#1 v1.5 / OAEP) is randomised, and the C test itself
+only checks `ctLen == ciphertext->len` then round-trips (it never byte-compares
+the encrypt output — it uses libc `rand()` for the PS / OAEP seed), so a
+deterministic-randomness hook is **not** applicable (no fixed-randomness
+vector to match); those encrypt tests mirror the C semantics — `encrypt(pt)`
+length-check + decrypt round-trip. Raw `NO_PAD` is deterministic both ways,
+so both directions are byte-exact KATs (`encrypt(None, pt) == ct`, public-key
+only / not `kat-nonce`-gated; `decrypt(None, ct) == pt`). Emitted 48 → 66.
+The 2 remaining `unsupported` are PSS-SHA-224 (no `RsaHashAlg::Sha224`). RSA
+**PSS sign** (random salt) stays API-surface.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
