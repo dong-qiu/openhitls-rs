@@ -101,6 +101,31 @@ pub(crate) fn pss_sign_pad_with_salt_alg(
     }
 }
 
+/// EMSA-PSS encoding with a **caller-provided salt** (no RNG). Used only by
+/// the `kat-nonce` deterministic-sign hook to reproduce fixed-salt PSS sign
+/// KAT vectors; production signing uses `pss_sign_pad_with_salt_alg`, which
+/// generates a random salt. Validates `digest.len()` and the
+/// `emLen >= hLen + sLen + 2` bound (checked arithmetic, so a huge caller
+/// `salt.len()` cannot wrap) before encoding.
+#[cfg(feature = "kat-nonce")]
+pub(crate) fn pss_sign_pad_with_salt_bytes_alg(
+    digest: &[u8],
+    em_bits: usize,
+    salt: &[u8],
+    alg: RsaHashAlg,
+) -> Result<Vec<u8>, CryptoError> {
+    let hl = h_len(alg);
+    if digest.len() != hl {
+        return Err(CryptoError::InvalidArg(""));
+    }
+    let em_len = em_bits.div_ceil(8);
+    match hl.checked_add(salt.len()).and_then(|x| x.checked_add(2)) {
+        Some(need) if need <= em_len => {}
+        _ => return Err(CryptoError::RsaInvalidPadding),
+    }
+    pss_encode_alg(digest, em_bits, salt, alg)
+}
+
 /// Core PSS encoding with a provided salt (used by tests for determinism).
 /// SHA-256 wrapper kept for the existing test surface.
 #[cfg(test)]

@@ -11,6 +11,10 @@
 //! * `RSA_SIGN_PKCSV15_FUNC_TC002` (`mdId : n : d : msg : sign : isProvider`) —
 //!   deterministic PKCS#1 v1.5 sign: `from_nd(n, d).sign(Pkcs1v15Sign,
 //!   MD(msg)) == sign` (`kat-nonce`-gated, since `from_nd` is).
+//! * `RSA_SIGN_PSS_FUNC_TC001` (`mdId : n : d : msg : sign : salt :
+//!   isProvider`) — PSS sign with the published fixed salt:
+//!   `from_nd(n, d).sign_pss_with_salt(MD(msg), alg, salt) == sign`
+//!   (`kat-nonce`-gated; SHA-256/384/512 only — SHA-1/224 `unsupported`).
 //! * `RSA_CRYPT_FUNC_TC001` (`keyLen : padMode : hashId : n : e : d :
 //!   plaintext : ciphertext : isProvider`) — encrypt + decrypt, both
 //!   directions per row (see `emit_crypt`): PKCS#1 v1.5 + OAEP (decrypt
@@ -45,6 +49,8 @@ pub fn emit_rsa_kat(cases: &[TestCase]) -> (String, EmitStats) {
             emit_verify_pss(&mut body, case, &mut stats, &mut used);
         } else if case.tc_name.contains("RSA_SIGN_PKCSV15_FUNC_TC002") {
             emit_sign_pkcs15(&mut body, case, &mut stats, &mut used);
+        } else if case.tc_name.contains("RSA_SIGN_PSS_FUNC_TC001") {
+            emit_sign_pss(&mut body, case, &mut stats, &mut used);
         } else if case.tc_name.contains("RSA_CRYPT_FUNC_TC001") {
             emit_crypt(&mut body, case, &mut stats, &mut used);
         } else {
@@ -221,6 +227,73 @@ fn emit_sign_pkcs15(
     )
     .unwrap();
     writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// Deterministic RSA-PSS **sign** KAT with a fixed salt
+/// (`RSA_SIGN_PSS_FUNC_TC001`: `mdId : n : d : msg : sign : salt :
+/// isProvider`). PSS signing is randomised by the salt, but this vector
+/// publishes the exact salt the C test injects via `CRYPT_CTRL_SET_RSA_SALT`,
+/// so the signature is byte-exact: `from_nd(n, d).sign_pss_with_salt(MD(msg),
+/// alg, salt) == sign` (both `from_nd` and `sign_pss_with_salt` are
+/// `kat-nonce`-gated). PSS in the Rust API supports SHA-256/384/512 only, so
+/// SHA-1 / SHA-224 rows are `unsupported`.
+fn emit_sign_pss(
+    out: &mut String,
+    case: &TestCase,
+    stats: &mut EmitStats,
+    used: &mut BTreeSet<&'static str>,
+) {
+    if skip_if_provider_dup(case) {
+        stats.skipped_api += 1;
+        return;
+    }
+    // mdId : n : d : msg : sign : salt : isProvider
+    if case.args.len() < 6 {
+        stats.skipped_unknown += 1;
+        return;
+    }
+    // `md_to_pss_alg` is the RsaHashAlg variant *and* the digest type name
+    // (Sha256/384/512); it returns None for SHA-1/224 → unsupported.
+    let Some(alg) = case.args[0].as_symbol().and_then(md_to_pss_alg) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let (Some(n), Some(d), Some(msg), Some(sign), Some(salt)) = (
+        case.args[1].as_hex(),
+        case.args[2].as_hex(),
+        case.args[3].as_hex(),
+        case.args[4].as_hex(),
+        case.args[5].as_hex(),
+    ) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    used.insert(alg);
+    used.insert("pss");
+    used.insert("privkey");
+
+    write_test(
+        out,
+        case,
+        &format!("tc_line{}_rsa_pss_sign", case.line),
+        "RSA-PSS deterministic sign (fixed salt)",
+        true,
+        &[
+            ("n", n),
+            ("d", d),
+            ("msg", msg),
+            ("salt", salt),
+            ("expected", sign),
+        ],
+        &[
+            format!("let digest = {alg}::digest(msg).unwrap();"),
+            "let sk = RsaPrivateKey::from_nd(n, d).unwrap();".into(),
+            format!(
+                "assert_eq!(sk.sign_pss_with_salt(&digest, RsaHashAlg::{alg}, salt).unwrap(), expected);"
+            ),
+        ],
+    );
     stats.emitted += 1;
 }
 

@@ -60,8 +60,8 @@ Counts are the `Generation summary` footer of each generated file
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 6 | 272 | 0 | 12 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
-| RSA | 66 | 116 | 0 | 2 | 170 |
-| **Total** | **1836** | **3161** | **238** | **90** | **4632** |
+| RSA | 72 | 108 | 0 | 4 | 170 |
+| **Total** | **1842** | **3153** | **238** | **92** | **4632** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -98,8 +98,16 @@ vector to match); those encrypt tests mirror the C semantics — `encrypt(pt)`
 length-check + decrypt round-trip. Raw `NO_PAD` is deterministic both ways,
 so both directions are byte-exact KATs (`encrypt(None, pt) == ct`, public-key
 only / not `kat-nonce`-gated; `decrypt(None, ct) == pt`). Emitted 48 → 66.
-The 2 remaining `unsupported` are PSS-SHA-224 (no `RsaHashAlg::Sha224`). RSA
-**PSS sign** (random salt) stays API-surface.
+RSA **PSS sign** is now migrated too (I143): `SIGN_PSS_FUNC_TC001` publishes
+the exact salt the C test injects (`CRYPT_CTRL_SET_RSA_SALT`), so the
+signature is byte-exact — `from_nd(n, d).sign_pss_with_salt(MD(msg), alg,
+salt) == sign` (new `kat-nonce`-gated `RsaPrivateKey::sign_pss_with_salt`
+backed by `pss::pss_sign_pad_with_salt_bytes_alg`). Emitted 66 → 72 (SHA-256/
+384/512). `SIGN_PSS_FUNC_TC002` (random salt of a given length — C only
+checks sign succeeds, no byte-compare) and `TC003` (saltLen 0/-1/-2 error
+paths) stay API-surface. The 4 `unsupported` are PSS-SHA-224 (2 verify + 2
+sign — no `RsaHashAlg::Sha224`). **All deterministic RSA sign/verify/
+encrypt/decrypt families are now migrated.**
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,

@@ -462,6 +462,29 @@ impl RsaPrivateKey {
         self.raw_decrypt(&em)
     }
 
+    /// **KAT / testing only.** PSS sign with a caller-provided fixed `salt`
+    /// (the normal [`Self::sign_pss`] generates a random salt of length
+    /// `h_len(alg)`). PSS does not require salt secrecy and salt reuse does
+    /// not leak the private key (unlike an ECDSA/DSA nonce), but a fixed salt
+    /// removes the scheme's randomisation, so this is gated behind the
+    /// non-default `kat-nonce` feature and marked `#[deprecated]` as a danger
+    /// sentinel. It exists only to reproduce fixed-salt PSS sign KAT vectors.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test/KAT only: a fixed PSS salt removes the scheme's randomisation — \
+                production code must use sign_pss (random salt)"
+    )]
+    pub fn sign_pss_with_salt(
+        &self,
+        digest: &[u8],
+        alg: RsaHashAlg,
+        salt: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let em = pss::pss_sign_pad_with_salt_bytes_alg(digest, self.bits - 1, salt, alg)?;
+        self.raw_decrypt(&em)
+    }
+
     /// Extract the corresponding public key.
     pub fn public_key(&self) -> RsaPublicKey {
         RsaPublicKey {
