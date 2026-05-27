@@ -312,6 +312,46 @@ impl RsaPrivateKey {
         })
     }
 
+    /// **KAT / testing only.** Build a private key from just `(n, d)` — no CRT
+    /// parameters. `sign` / `decrypt` then use the plain `m = c^d mod n` path,
+    /// which is **not** side-channel-hardened (production keys go through
+    /// [`Self::new`] with `p, q` and use the CRT path). This exists only to
+    /// reproduce sign / decrypt KAT vectors that publish only `(n, d)`; it is
+    /// gated behind the non-default `kat-nonce` feature and marked
+    /// `#[deprecated]` as a danger sentinel.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test/KAT only: builds a non-CRT (n,d) key whose plain-d private \
+                path is not side-channel-hardened — never use in production"
+    )]
+    pub fn from_nd(n: &[u8], d: &[u8]) -> Result<Self, CryptoError> {
+        let n_bn = BigNum::from_bytes_be(n);
+        let d_bn = BigNum::from_bytes_be(d);
+        if n_bn.is_zero() || d_bn.is_zero() {
+            return Err(CryptoError::InvalidKey);
+        }
+        let bits = n_bn.bit_len();
+        let k = bits.div_ceil(8);
+        Ok(RsaPrivateKey {
+            n: n_bn,
+            d: d_bn,
+            // No e / CRT params: a zero `p` selects the plain-d path in
+            // `raw_decrypt`.
+            e: BigNum::from_u64(0),
+            p: BigNum::from_u64(0),
+            q: BigNum::from_u64(0),
+            dp: BigNum::from_u64(0),
+            dq: BigNum::from_u64(0),
+            qinv: BigNum::from_u64(0),
+            bits,
+            k,
+            mont_p: None,
+            mont_q: None,
+            qinv_mont: None,
+        })
+    }
+
     /// Create an RSA private key from its components (big-endian bytes).
     pub fn new(n: &[u8], d: &[u8], e: &[u8], p: &[u8], q: &[u8]) -> Result<Self, CryptoError> {
         let n_bn = BigNum::from_bytes_be(n);
@@ -442,6 +482,14 @@ impl RsaPrivateKey {
         let c = BigNum::from_bytes_be(data);
         if c >= self.n {
             return Err(CryptoError::InvalidArg(""));
+        }
+
+        // Non-CRT key (built via the test-only `from_nd`, which leaves `p`
+        // zero): plain m = c^d mod n. Not reachable for production keys, which
+        // always carry CRT params from `new`.
+        if self.p.is_zero() {
+            let m = c.mod_exp(&self.d, &self.n)?;
+            return m.to_bytes_be_padded(self.k);
         }
 
         // CRT with cached Montgomery contexts (skip R² recomputation per call)
