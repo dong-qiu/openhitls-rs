@@ -11,7 +11,7 @@ use hitls_types::TlsError;
 use subtle::{ConstantTimeEq, ConstantTimeGreater};
 use zeroize::Zeroize;
 
-use super::encryption::{MAX_CIPHERTEXT_LENGTH, MAX_PLAINTEXT_LENGTH};
+use super::encryption::{MAX_CIPHERTEXT_LENGTH_TLS12, MAX_PLAINTEXT_LENGTH};
 
 /// TLS 1.2 record version (0x0303).
 const TLS12_VERSION: u16 = 0x0303;
@@ -239,7 +239,7 @@ impl RecordDecryptor12Cbc {
         if fragment.len() < AES_BLOCK_SIZE + min_encrypted_len {
             return Err(TlsError::RecordError("CBC record too short".into()));
         }
-        if fragment.len() > MAX_CIPHERTEXT_LENGTH {
+        if fragment.len() > MAX_CIPHERTEXT_LENGTH_TLS12 {
             return Err(TlsError::RecordError("record overflow".into()));
         }
 
@@ -466,7 +466,7 @@ impl RecordDecryptor12EtM {
         if fragment.len() < min_len {
             return Err(TlsError::RecordError("ETM record too short".into()));
         }
-        if fragment.len() > MAX_CIPHERTEXT_LENGTH {
+        if fragment.len() > MAX_CIPHERTEXT_LENGTH_TLS12 {
             return Err(TlsError::RecordError("record overflow".into()));
         }
 
@@ -896,11 +896,11 @@ mod tests {
         let mac_key = vec![0xABu8; 32];
         let mut dec = RecordDecryptor12Cbc::new(&enc_key, &mac_key, 32).unwrap();
 
-        // Fragment exceeding MAX_CIPHERTEXT_LENGTH
+        // Fragment exceeding MAX_CIPHERTEXT_LENGTH_TLS12
         let record = Record {
             content_type: ContentType::ApplicationData,
             version: TLS12_VERSION,
-            fragment: vec![0xCC; MAX_CIPHERTEXT_LENGTH + 1],
+            fragment: vec![0xCC; MAX_CIPHERTEXT_LENGTH_TLS12 + 1],
         };
         let err = dec.decrypt_record(&record).unwrap_err();
         assert!(
@@ -960,7 +960,7 @@ mod tests {
         let record = Record {
             content_type: ContentType::ApplicationData,
             version: TLS12_VERSION,
-            fragment: vec![0xCC; MAX_CIPHERTEXT_LENGTH + 1],
+            fragment: vec![0xCC; MAX_CIPHERTEXT_LENGTH_TLS12 + 1],
         };
         let err = dec.decrypt_record(&record).unwrap_err();
         assert!(

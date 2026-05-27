@@ -243,7 +243,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             let (hs_type, cert_data) = self.read_handshake_msg()?;
             if hs_type != HandshakeType::Certificate {
                 return Err(TlsError::HandshakeFailed(format!(
-                    "expected client Certificate, got {hs_type:?}"
+                    "expected client Certificate, got {hs_type:?} (alert: unexpected_message)"
                 )));
             }
             hs.process_client_certificate(&cert_data)?;
@@ -253,7 +253,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         let (hs_type, cke_data) = self.read_handshake_msg()?;
         if hs_type != HandshakeType::ClientKeyExchange {
             return Err(TlsError::HandshakeFailed(format!(
-                "expected ClientKeyExchange, got {hs_type:?}"
+                "expected ClientKeyExchange, got {hs_type:?} (alert: unexpected_message)"
             )));
         }
         let mut keys = hs.process_client_key_exchange(&cke_data)?;
@@ -263,7 +263,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             let (hs_type, cv_data) = self.read_handshake_msg()?;
             if hs_type != HandshakeType::CertificateVerify {
                 return Err(TlsError::HandshakeFailed(format!(
-                    "expected CertificateVerify, got {hs_type:?}"
+                    "expected CertificateVerify, got {hs_type:?} (alert: unexpected_message)"
                 )));
             }
             hs.process_client_certificate_verify(&cv_data)?;
@@ -273,7 +273,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         let (ct, ccs_data) = self.read_record()?;
         if ct != ContentType::ChangeCipherSpec {
             return Err(TlsError::HandshakeFailed(format!(
-                "expected ChangeCipherSpec, got {ct:?}"
+                "expected ChangeCipherSpec, got {ct:?} (alert: unexpected_message)"
             )));
         }
         hs.process_change_cipher_spec(&ccs_data)?;
@@ -303,7 +303,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         let (hs_type, fin_data) = self.read_handshake_msg()?;
         if hs_type != HandshakeType::Finished {
             return Err(TlsError::HandshakeFailed(format!(
-                "expected Finished, got {hs_type:?}"
+                "expected Finished, got {hs_type:?} (alert: unexpected_message)"
             )));
         }
         let server_fin = hs.process_finished(&fin_data)?;
@@ -478,7 +478,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         let (ct, ccs_data) = self.read_record()?;
         if ct != ContentType::ChangeCipherSpec {
             return Err(TlsError::HandshakeFailed(format!(
-                "expected ChangeCipherSpec, got {ct:?}"
+                "expected ChangeCipherSpec, got {ct:?} (alert: unexpected_message)"
             )));
         }
         hs.process_change_cipher_spec(&ccs_data)?;
@@ -508,7 +508,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         let (hs_type, fin_data) = self.read_handshake_msg()?;
         if hs_type != HandshakeType::Finished {
             return Err(TlsError::HandshakeFailed(format!(
-                "expected Finished, got {hs_type:?}"
+                "expected Finished, got {hs_type:?} (alert: unexpected_message)"
             )));
         }
         hs.process_abbreviated_finished(&fin_data)?;
@@ -668,7 +668,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             let (hs_type, cert_data) = self.read_handshake_msg()?;
             if hs_type != HandshakeType::Certificate {
                 return Err(TlsError::HandshakeFailed(format!(
-                    "expected client Certificate, got {hs_type:?}"
+                    "expected client Certificate, got {hs_type:?} (alert: unexpected_message)"
                 )));
             }
             hs.process_client_certificate(&cert_data)?;
@@ -678,7 +678,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         let (hs_type, cke_data) = self.read_handshake_msg()?;
         if hs_type != HandshakeType::ClientKeyExchange {
             return Err(TlsError::HandshakeFailed(format!(
-                "expected ClientKeyExchange, got {hs_type:?}"
+                "expected ClientKeyExchange, got {hs_type:?} (alert: unexpected_message)"
             )));
         }
         let mut keys = hs.process_client_key_exchange(&cke_data)?;
@@ -688,7 +688,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
             let (hs_type, cv_data) = self.read_handshake_msg()?;
             if hs_type != HandshakeType::CertificateVerify {
                 return Err(TlsError::HandshakeFailed(format!(
-                    "expected CertificateVerify, got {hs_type:?}"
+                    "expected CertificateVerify, got {hs_type:?} (alert: unexpected_message)"
                 )));
             }
             hs.process_client_certificate_verify(&cv_data)?;
@@ -698,7 +698,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         let (ct, ccs_data) = self.read_record()?;
         if ct != ContentType::ChangeCipherSpec {
             return Err(TlsError::HandshakeFailed(format!(
-                "expected ChangeCipherSpec, got {ct:?}"
+                "expected ChangeCipherSpec, got {ct:?} (alert: unexpected_message)"
             )));
         }
         hs.process_change_cipher_spec(&ccs_data)?;
@@ -728,7 +728,7 @@ impl<S: Read + Write> Tls12ServerConnection<S> {
         let (hs_type, fin_data) = self.read_handshake_msg()?;
         if hs_type != HandshakeType::Finished {
             return Err(TlsError::HandshakeFailed(format!(
-                "expected Finished, got {hs_type:?}"
+                "expected Finished, got {hs_type:?} (alert: unexpected_message)"
             )));
         }
         let server_fin = hs.process_finished(&fin_data)?;

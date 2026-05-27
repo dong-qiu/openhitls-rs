@@ -1,0 +1,22 @@
+# I135 — `test-record-layer-fragmentation.py` (TLS 1.2) XFAIL (2 entries).
+#
+# 22 PASS / 2 XFAIL with `-d` (ECDHE). The I135 fix added cross-record
+# handshake-message reassembly to the TLS 1.2 server read path
+# (`tls12_read_handshake_msg_body!`, RFC 5246 §6.2.1) — closing the
+# 20-fragment / "needs fragmentation" cases where a ClientKeyExchange
+# split across records previously dropped the connection.
+#
+# The 2 residual XFAILs are the `maximum fragmentation: 1 fragment`
+# (1 byte per record) cases. The handshake itself reassembles and
+# completes fine; the failure is purely the echo server's behaviour:
+# when the client sends the post-handshake `GET / HTTP/1.0` application
+# data fragmented to 1 byte per record, `conn.read()` returns one byte
+# at a time and the echo loop writes each back as its own 1-byte
+# AppData record. tlsfuzzer's single `ExpectApplicationData` consumes
+# only the first, so the remaining 1-byte echoes collide with the
+# trailing `ExpectAlert` ("Unexpected message: ApplicationData(len=1)").
+# A test-harness / echo-server interaction under extreme fragmentation,
+# not a TLS conformance bug (same class as `ecdhe-padded`).
+
+medium, maximum fragmentation: 1 fragment - 1024B extension
+small, maximum fragmentation: 1 fragment - 20B extension
