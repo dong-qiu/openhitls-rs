@@ -59,7 +59,17 @@ Counts are the `Generation summary` footer of each generated file
 | ML-KEM | 150 | 196 | 81 | 0 | 427 |
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 6 | 272 | 0 | 12 | 290 |
-| **Total** | **1047** | **2442** | **238** | **88** | **3815** |
+| ECC | 44 | 603 | 0 | 0 | 647 |
+| **Total** | **1091** | **3045** | **238** | **88** | **4462** |
+
+ECC migrates two deterministic families across NIST P-192/224/256/384/521,
+Brainpool P-256/384/512r1 and the SM2 prime curve: `ECDSA_SIGN_VERIFY_FUNC_TC001`
+**verify** side (build the public key from the row's `(pubKeyX, pubKeyY)`,
+DER-encode `(R,S)`, `EcdsaKeyPair::from_public_key(...).verify(MD(msg), sig)`) and
+`ECDH_EXCH_FUNC_TC001` (local private key × peer public point → shared secret).
+The ECDSA **sign** side stays API-surface for the same nonce-reproducibility
+reason as DSA/SM2; ECC key-gen / key-checks / point mul-add property tests / ctx
+CRUD are API-surface.
 
 ML-DSA migrates the **verify** side (`MLDSA_FUNC_VERIFYDATA_TC001`, internal
 interface, μ = H(tr ‖ M)). ML-KEM migrates the **decapsulation** side
