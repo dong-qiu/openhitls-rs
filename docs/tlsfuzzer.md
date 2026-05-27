@@ -247,6 +247,18 @@ TLSFUZZER_PY=/tmp/tlsfuzzer-venv/bin/python \
   ./tests/tlsfuzzer/run.sh test-tls13-finished.py -p 4444 -h localhost
 ```
 
+**T141 — first end-to-end full sweep, verified clean.** R15 made the
+workflow parseable but the monthly full path (`SWEEP_N=9999`, every
+conversation) had never been run end-to-end. T141 replicated it locally
+(all 13 listeners × the full curated set = 86 script runs at full
+counts): **0 FAIL / 0 XPASS** on the product. It surfaced one
+test-harness defect — `run.sh` injected `-n` into *every* script, but
+`test-tls13-certificate-request.py` defines no `-n` option, so getopt
+aborted instantly before any conversation. `run.sh` now detects that
+specific failure (`option -n not recognized`) and transparently retries
+without the sweep cap (free — the abort is at arg-parse). The monthly
+full sweep is now confirmed clean and robust to `-n`-incompatible scripts.
+
 ### Pinned upstream — how to bump
 
 `TLSFUZZER_REF` / `TLSLITE_NG_REF` are pinned to specific upstream
@@ -260,6 +272,22 @@ sweep, re-baseline any XFAIL lists that drifted, and land it all in
 one reviewed PR.
 
 ## Uncurated-corpus scan backlog (T133)
+
+> **Line status (as of T141): wrapped up.** Every real
+> conformance/security bug this backlog surfaced has been fixed and the
+> corresponding script curated into CI; the full `-n 9999` monthly sweep
+> is verified clean end-to-end (0 FAIL / 0 XPASS). The two items the
+> backlog once flagged as open "I-phase candidates" — `test-sig-algs`
+> (TLS 1.2 RSA-PSS-rsae signing) and `test-tls13-unencrypted-alert`
+> (§6.2) — were both **already closed by I120 / I119** and curated; the
+> entries below have been updated to say so. What remains in this
+> section is, by design, *not* product work: cert-type / kx-config
+> mismatches (single-cert server vs. scripts needing two certs or
+> static-RSA), test-side non-determinism (echo-server races,
+> random-sampling flakiness), and deliberate alert-convention or
+> protocol-scope (TLS 1.1/SSLv2, kRSA) won't-fixes. Pursuing any of
+> those would be a *new* feature (e.g. multi-cert server), not closing a
+> bug. The section is retained as the historical triage record.
 
 A systematic sweep (T133) ran all 99 server-testable uncurated
 scripts against a fresh release `s-server` (TLS 1.3 `:4444`, TLS 1.2
@@ -284,15 +312,18 @@ leniency). The other 3 candidates are NOT XFAIL material:
 - `test-bleichenbacher-workaround` — sanity needs static-RSA key
   exchange (kRSA), which we intentionally do not offer (Bleichenbacher
   /ROBOT-safe). N/A — cannot be curated (sanity can't be XFAIL'd).
-- `test-sig-algs` (13/5) — **contains a real gap, do NOT XFAIL**: the
-  3 `rsa_pss_pss_*-only` fails are a legitimate cert-type mismatch
-  (our RSA-rsae cert can't satisfy `rsa_pss_pss_*`; the PSS-OID server
-  on :4449 can), BUT `rsa_pss_rsae_sha384 only` → `internal_error`
-  and `rsa_pss_rsae_sha512 only` → `handshake_failure` indicate the
-  **TLS 1.2** server cannot sign CertificateVerify/SKE under
-  `rsa_pss_rsae_sha384/512` — the TLS-1.2 analogue of the TLS 1.3
-  RSA-PSS-SHA-384/512 fix. **I-phase candidate** (TLS 1.2 RSA-PSS-rsae
-  SHA-384/512 signing).
+- `test-sig-algs` — **CLOSED (I120), 15/3, curated.** The original
+  triage flagged a real gap: `rsa_pss_rsae_sha384 only` → `internal_error`
+  and `rsa_pss_rsae_sha512 only` → `handshake_failure`, i.e. the TLS 1.2
+  server couldn't sign ServerKeyExchange under `rsa_pss_rsae_sha384/512`
+  (the TLS-1.2 analogue of the TLS 1.3 RSA-PSS-384/512 fix). I120 fixed
+  the signing path — those conversations now PASS (verified: `rsa_pss_rsae_sha256/384/512 only` all green). The 3 residual XFAILs are
+  the `rsa_pss_pss_*-only` cert-type mismatch (our rsaEncryption cert
+  can't satisfy `rsa_pss_pss_*` — the server correctly returns
+  `handshake_failure`; the PSS-OID instance on :4449 is the one that
+  satisfies them). The script's own docstring says to mark these as
+  expected failures on a single-cert server, so XFAIL is correct here,
+  not a hidden bug. See `xfail/test-sig-algs.txt`.
 
 **Non-deterministic — do NOT curate (server is NOT at fault)**:
 `test-ecdhe-padded-shared-secret` (varies 2/1 ↔ 77/0 ↔ 238/0 run to
@@ -400,10 +431,13 @@ so they sanity-fail and are not curatable — same class as
 (`bleichenbacher-timing-*`, `lucky13`, `minerva`) are excluded as
 flaky; `test-tls13-mlkem` needs the `kyber-py` Python lib (not in CI).
 
-**Read-path conformance — I-phase candidate**:
-`test-tls13-unencrypted-alert` (2/2 fail) — server replies
-`unexpected_message` to a peer abort-alert instead of closing
-silently (RFC 8446 §6.2). Fix unblocks curation.
+**Read-path conformance — CLOSED (I119), 4/4, curated.**
+`test-tls13-unencrypted-alert` originally failed 2/2: the server
+replied `unexpected_message` to a peer abort-alert instead of closing
+silently (RFC 8446 §6.2). I119 made the read path close WITHOUT a
+responding alert when the client aborts mid-handshake with an alert
+(encrypted or plaintext) instead of sending its Finished — 2/2-fail →
+4/4 PASS clean (verified stable). Curated in the workflow TLS 1.3 set.
 
 **close_notify reply — FIXED (I128).** On receiving the peer's
 `close_notify` the server set `state = Closed` (read path), and
