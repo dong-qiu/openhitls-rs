@@ -3,18 +3,22 @@
 //!
 //! * `SDV_CRYPTO_ECDSA_SIGN_VERIFY_FUNC_TC001`
 //!   (`eccId : mdId : prvKey : msg : signR : signS : rand : pubKeyX : pubKeyY :
-//!   pointFormat : isProvider`) — the C signs (with an injected nonce to match
-//!   the published `(R,S)`) then verifies. Sign is not reproducible without a
-//!   nonce hook, so the *verify* side is migrated: build the public key from
-//!   the row's `(pubKeyX, pubKeyY)`, DER-encode `(R,S)`, and check
-//!   `EcdsaKeyPair::from_public_key(curve, 0x04‖X‖Y).verify(MD(msg), sig)`.
+//!   pointFormat : isProvider`) — the C signs (with the injected nonce
+//!   `randVector` to match the published `(R,S)`) then verifies. Two tests are
+//!   emitted per row: a **verify** test (build the public key from
+//!   `(pubKeyX, pubKeyY)`, `EcdsaKeyPair::from_public_key(curve,
+//!   0x04‖X‖Y).verify(MD(msg), DER(R,S))`) and a **deterministic sign** test
+//!   (`EcdsaKeyPair::sign_with_nonce(MD(msg), randVector) == DER(R,S)`). The
+//!   sign test is gated behind the non-default `kat-nonce` feature, since
+//!   `sign_with_nonce` is a test-only entry point (a caller-chosen ECDSA nonce
+//!   leaks the private key).
 //! * `SDV_CRYPTO_ECDH_EXCH_FUNC_TC001`
 //!   (`eccId : prvKey : pubKeyX : pubKeyY : pointFormat : shareKey :
 //!   isProvider`) — deterministic key exchange: local private key × peer
 //!   public point → shared secret, checked against `shareKey`.
 //!
 //! Everything else (key-pair / pub / prv generation + checks, ctx CRUD, point
-//! mul/add property tests, ECDSA sign-side, the `_API_` rows) is API-surface.
+//! mul/add property tests, the `_API_` rows) is API-surface.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -30,6 +34,7 @@ pub fn emit_ecc_kat(cases: &[TestCase]) -> (String, EmitStats) {
     for case in cases {
         if case.tc_name.contains("ECDSA_SIGN_VERIFY_FUNC_TC001") {
             emit_ecdsa_verify(&mut body, case, &mut stats, &mut used);
+            emit_ecdsa_sign(&mut body, case, &mut stats, &mut used);
         } else if case.tc_name.contains("ECDH_EXCH_FUNC_TC001") {
             emit_ecdh(&mut body, case, &mut stats, &mut used);
         } else {
@@ -149,6 +154,81 @@ fn emit_ecdsa_verify(
     .unwrap();
     writeln!(out, "    let digest = {hash}::digest(msg).unwrap();").unwrap();
     writeln!(out, "    assert!(kp.verify(&digest, sig).unwrap());").unwrap();
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// Deterministic ECDSA **sign** KAT from the same `SIGN_VERIFY_FUNC_TC001` row:
+/// sign `MD(msg)` with the row's nonce `randVector` and check the DER `(r, s)`
+/// matches `(signR, signS)`. Gated behind the `kat-nonce` feature (the test
+/// needs `EcdsaKeyPair::sign_with_nonce`, a test-only entry point).
+fn emit_ecdsa_sign(
+    out: &mut String,
+    case: &TestCase,
+    stats: &mut EmitStats,
+    used: &mut BTreeSet<&'static str>,
+) {
+    if skip_if_provider_dup(case) || case.args.len() < 9 {
+        return;
+    }
+    let (Some(curve_ty), Some(md)) = (
+        case.args[0].as_symbol().and_then(curve),
+        case.args[1].as_symbol(),
+    ) else {
+        return;
+    };
+    let Some(hash) = md_to_hash(md) else {
+        return;
+    };
+    // prv : msg : R : S : rand
+    let (Some(prv), Some(msg), Some(r), Some(s), Some(rand)) = (
+        case.args[2].as_hex(),
+        case.args[3].as_hex(),
+        case.args[4].as_hex(),
+        case.args[5].as_hex(),
+        case.args[6].as_hex(),
+    ) else {
+        return;
+    };
+    if prv.is_empty() || rand.is_empty() {
+        return;
+    }
+    let sig = der_encode_sig(r, s);
+    used.insert("ecdsa");
+    used.insert(hash);
+
+    let fn_name = format!(
+        "tc_line{}_ecdsa_{}_sign",
+        case.line,
+        curve_ty.to_lowercase()
+    );
+    write_doc(out, case, "ECDSA deterministic sign");
+    writeln!(out, "#[cfg(feature = \"kat-nonce\")]").unwrap();
+    // `sign_with_nonce` is a `#[deprecated]` danger sentinel; a sanctioned KAT
+    // opts in explicitly.
+    writeln!(out, "#[allow(deprecated)]").unwrap();
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn {fn_name}() {{").unwrap();
+    writeln!(out, "    let prv: &[u8] = {};", format_byte_slice(prv)).unwrap();
+    writeln!(out, "    let msg: &[u8] = {};", format_byte_slice(msg)).unwrap();
+    writeln!(out, "    let k: &[u8] = {};", format_byte_slice(rand)).unwrap();
+    writeln!(
+        out,
+        "    let expected: &[u8] = {};",
+        format_byte_slice(&sig)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let kp = EcdsaKeyPair::from_private_key(EccCurveId::{curve_ty}, prv).unwrap();"
+    )
+    .unwrap();
+    writeln!(out, "    let digest = {hash}::digest(msg).unwrap();").unwrap();
+    writeln!(
+        out,
+        "    assert_eq!(kp.sign_with_nonce(&digest, k).unwrap(), expected);"
+    )
+    .unwrap();
     writeln!(out, "}}\n").unwrap();
     stats.emitted += 1;
 }

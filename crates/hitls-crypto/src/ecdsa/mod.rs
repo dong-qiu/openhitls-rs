@@ -89,10 +89,8 @@ impl EcdsaKeyPair {
         }
 
         let n = self.group.order();
-        let n_bits = n.bit_len();
-
         // Convert digest to integer, truncated to bit length of n
-        let e = truncate_digest(digest, n_bits);
+        let e = truncate_digest(digest, n.bit_len());
 
         // Retry loop for generating valid (r, s)
         for _ in 0..100 {
@@ -101,70 +99,118 @@ impl EcdsaKeyPair {
             if k.is_zero() {
                 continue;
             }
-
-            // (x1, _) = k * G
-            let kg = self.group.scalar_mul_base(&k)?;
-            if kg.is_infinity() {
-                continue;
+            if let Some(der) = self.sign_with_k(&e, &k)? {
+                return Ok(der);
             }
-
-            // r = x1 mod n
-            let r = kg.x().mod_reduce(n)?;
-            if r.is_zero() {
-                continue;
-            }
-
-            // s = k^(-1) * (e + d*r) mod n
-            let s = if self.group.curve_id() == EccCurveId::NistP256 {
-                // Fast path: 4×u64 Montgomery scalar field
-                use crate::ecc::p256_scalar::P256ScalarElement;
-                let k_se = P256ScalarElement::from_bignum(&k);
-                let r_se = P256ScalarElement::from_bignum(&r);
-                let d_se = P256ScalarElement::from_bignum(&self.private_key);
-                let e_se = P256ScalarElement::from_bignum(&e);
-                let k_inv = k_se.inv();
-                let dr = d_se.mul(&r_se);
-                let e_dr = e_se.add(&dr);
-                let s_se = k_inv.mul(&e_dr);
-                s_se.to_bignum()
-            } else if self.group.curve_id() == EccCurveId::NistP384 {
-                // Fast path: 6×u64 Montgomery scalar field
-                use crate::ecc::p384_scalar::P384ScalarElement;
-                let k_se = P384ScalarElement::from_bignum(&k);
-                let r_se = P384ScalarElement::from_bignum(&r);
-                let d_se = P384ScalarElement::from_bignum(&self.private_key);
-                let e_se = P384ScalarElement::from_bignum(&e);
-                let k_inv = k_se.inv();
-                let dr = d_se.mul(&r_se);
-                let e_dr = e_se.add(&dr);
-                let s_se = k_inv.mul(&e_dr);
-                s_se.to_bignum()
-            } else if self.group.curve_id() == EccCurveId::NistP521 {
-                // Fast path: 9×u64 Montgomery scalar field
-                use crate::ecc::p521_scalar::P521ScalarElement;
-                let k_se = P521ScalarElement::from_bignum(&k);
-                let r_se = P521ScalarElement::from_bignum(&r);
-                let d_se = P521ScalarElement::from_bignum(&self.private_key);
-                let e_se = P521ScalarElement::from_bignum(&e);
-                let k_inv = k_se.inv();
-                let dr = d_se.mul(&r_se);
-                let e_dr = e_se.add(&dr);
-                let s_se = k_inv.mul(&e_dr);
-                s_se.to_bignum()
-            } else {
-                let k_inv = k.mod_inv(n)?;
-                let dr = self.private_key.mod_mul(&r, n)?;
-                let e_plus_dr = e.mod_add(&dr, n)?;
-                k_inv.mod_mul(&e_plus_dr, n)?
-            };
-            if s.is_zero() {
-                continue;
-            }
-
-            return encode_der_signature(&r, &s);
         }
 
         Err(CryptoError::BnRandGenFail)
+    }
+
+    /// Compute the ECDSA signature for the digest-integer `e` with a specific
+    /// nonce `k`, returning the DER-encoded `(r, s)`. Yields `Ok(None)` when
+    /// this `k` produces `kG == ∞`, `r == 0`, or `s == 0` — the random-`k`
+    /// retry loop in [`Self::sign`] then tries another nonce.
+    fn sign_with_k(&self, e: &BigNum, k: &BigNum) -> Result<Option<Vec<u8>>, CryptoError> {
+        let n = self.group.order();
+
+        // (x1, _) = k * G
+        let kg = self.group.scalar_mul_base(k)?;
+        if kg.is_infinity() {
+            return Ok(None);
+        }
+
+        // r = x1 mod n
+        let r = kg.x().mod_reduce(n)?;
+        if r.is_zero() {
+            return Ok(None);
+        }
+
+        // s = k^(-1) * (e + d*r) mod n
+        let s = if self.group.curve_id() == EccCurveId::NistP256 {
+            // Fast path: 4×u64 Montgomery scalar field
+            use crate::ecc::p256_scalar::P256ScalarElement;
+            let k_se = P256ScalarElement::from_bignum(k);
+            let r_se = P256ScalarElement::from_bignum(&r);
+            let d_se = P256ScalarElement::from_bignum(&self.private_key);
+            let e_se = P256ScalarElement::from_bignum(e);
+            let k_inv = k_se.inv();
+            let dr = d_se.mul(&r_se);
+            let e_dr = e_se.add(&dr);
+            let s_se = k_inv.mul(&e_dr);
+            s_se.to_bignum()
+        } else if self.group.curve_id() == EccCurveId::NistP384 {
+            // Fast path: 6×u64 Montgomery scalar field
+            use crate::ecc::p384_scalar::P384ScalarElement;
+            let k_se = P384ScalarElement::from_bignum(k);
+            let r_se = P384ScalarElement::from_bignum(&r);
+            let d_se = P384ScalarElement::from_bignum(&self.private_key);
+            let e_se = P384ScalarElement::from_bignum(e);
+            let k_inv = k_se.inv();
+            let dr = d_se.mul(&r_se);
+            let e_dr = e_se.add(&dr);
+            let s_se = k_inv.mul(&e_dr);
+            s_se.to_bignum()
+        } else if self.group.curve_id() == EccCurveId::NistP521 {
+            // Fast path: 9×u64 Montgomery scalar field
+            use crate::ecc::p521_scalar::P521ScalarElement;
+            let k_se = P521ScalarElement::from_bignum(k);
+            let r_se = P521ScalarElement::from_bignum(&r);
+            let d_se = P521ScalarElement::from_bignum(&self.private_key);
+            let e_se = P521ScalarElement::from_bignum(e);
+            let k_inv = k_se.inv();
+            let dr = d_se.mul(&r_se);
+            let e_dr = e_se.add(&dr);
+            let s_se = k_inv.mul(&e_dr);
+            s_se.to_bignum()
+        } else {
+            let k_inv = k.mod_inv(n)?;
+            let dr = self.private_key.mod_mul(&r, n)?;
+            let e_plus_dr = e.mod_add(&dr, n)?;
+            k_inv.mod_mul(&e_plus_dr, n)?
+        };
+        if s.is_zero() {
+            return Ok(None);
+        }
+
+        Ok(Some(encode_der_signature(&r, &s)?))
+    }
+
+    /// **KAT / testing only — never use in production.** Sign `digest` with a
+    /// caller-supplied big-endian nonce `k` instead of a fresh random one.
+    ///
+    /// # Security
+    /// ECDSA security depends on `k` being secret, unique per signature, and
+    /// uniformly random. Reusing `k` across two signatures, or choosing it
+    /// non-uniformly, leaks the private key. This exists only to reproduce
+    /// published deterministic sign known-answer test vectors, and is gated
+    /// behind the non-default `kat-nonce` feature so it cannot reach a
+    /// production build.
+    ///
+    /// Marked `#[deprecated]` as a danger sentinel (not because it is going
+    /// away): any caller that is not a sanctioned KAT — which opts in with
+    /// `#[allow(deprecated)]` — gets a build-breaking deprecation warning under
+    /// the workspace's `-D warnings`, so enabling `kat-nonce` cannot silently
+    /// promote a key-leaking entry point into a downstream's stable surface.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test/KAT only: signing with a caller-chosen nonce leaks the ECDSA \
+                private key — never use in production"
+    )]
+    pub fn sign_with_nonce(&self, digest: &[u8], k: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        if self.private_key.is_zero() {
+            return Err(CryptoError::EccInvalidPrivateKey);
+        }
+        let n = self.group.order();
+        let e = truncate_digest(digest, n.bit_len());
+        let k = BigNum::from_bytes_be(k);
+        if k.is_zero() || k >= *n {
+            return Err(CryptoError::EccInvalidPrivateKey);
+        }
+        // A KAT vector's nonce always yields a valid (r, s); `None` would mean
+        // a degenerate vector, which is a hard error here (no retry).
+        self.sign_with_k(&e, &k)?.ok_or(CryptoError::BnRandGenFail)
     }
 
     /// Verify a DER-encoded signature against a message digest.

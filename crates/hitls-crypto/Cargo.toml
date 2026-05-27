@@ -26,6 +26,12 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 [features]
 default = ["aes", "sha2", "rsa", "ecdsa", "hmac"]
 
+# TEST/KAT ONLY — never enable in production. Exposes deterministic
+# signing entry points that take a caller-supplied nonce `k`, used solely to
+# reproduce published sign known-answer-test vectors (a caller-chosen ECDSA/DSA
+# nonce leaks the private key). Not referenced by any other feature.
+kat-nonce = []
+
 # Symmetric ciphers
 aes = []
 sm4 = []
