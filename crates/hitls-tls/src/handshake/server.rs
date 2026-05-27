@@ -308,6 +308,18 @@ struct ServerFlightParams<'a> {
     psk_ke: bool,
 }
 
+/// Parsed ClientHello extension values returned by
+/// [`ServerHandshake::parse_client_hello_extensions`] for the negotiation that
+/// follows. Per-extension flags/lists with no later use (SNI, ALPN selection,
+/// OCSP/SCT/record-size requests, cert-compression algos, …) are recorded
+/// directly on `self` and are not part of this struct.
+struct ParsedClientHello {
+    versions: Vec<u16>,
+    client_sig_algs: Vec<crate::crypt::SignatureScheme>,
+    client_key_shares: Vec<(NamedGroup, Vec<u8>)>,
+    client_groups: Option<Vec<NamedGroup>>,
+}
+
 impl Drop for ServerHandshake {
     fn drop(&mut self) {
         self.client_hs_secret.zeroize();
@@ -438,161 +450,15 @@ impl ServerHandshake {
             .iter()
             .any(|e| e.extension_type == ExtensionType::EARLY_DATA);
 
-        // --- Parse extensions ---
-
-        // supported_versions: verify client offers TLS 1.3
-        let versions_ext = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::SUPPORTED_VERSIONS)
-            .ok_or_else(|| {
-                TlsError::HandshakeFailed("missing supported_versions in ClientHello".into())
-            })?;
-        let versions = parse_supported_versions_ch(&versions_ext.data)?;
-        if !versions.contains(&0x0304) {
-            return Err(TlsError::HandshakeFailed(
-                "client does not support TLS 1.3".into(),
-            ));
-        }
-
-        // signature_algorithms — RFC 8446 §4.2.3: required for cert-based
-        // authentication; MAY be omitted for PSK-only resumption (the
-        // PSK binder + chosen ticket suite supply the auth). Phase T109
-        // makes the extraction tolerant; the non-PSK build path below
-        // re-checks that client_sig_algs is non-empty before invoking
-        // `select_signature_scheme_for_cert`.
-        let client_sig_algs = match ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::SIGNATURE_ALGORITHMS)
-        {
-            Some(ext) => parse_signature_algorithms_ch(&ext.data)?,
-            None => Vec::new(),
-        };
-
-        // signature_algorithms_cert (RFC 8446 §4.2.3) — optional
-        if let Some(sac_ext) = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::SIGNATURE_ALGORITHMS_CERT)
-        {
-            self.client_sig_algs_cert = parse_signature_algorithms_cert(&sac_ext.data)?;
-        }
-
-        // certificate_authorities (RFC 8446 §4.2.4) — optional
-        if let Some(ca_ext) = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::CERTIFICATE_AUTHORITIES)
-        {
-            self.client_certificate_authorities = parse_certificate_authorities(&ca_ext.data)?;
-        }
-
-        // key_share
-        let ks_ext = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::KEY_SHARE)
-            .ok_or_else(|| TlsError::HandshakeFailed("missing key_share in ClientHello".into()))?;
-        let client_key_shares = parse_key_share_ch(&ks_ext.data)?;
-
-        // supported_groups (optional for normal path, required for HRR)
-        let client_groups = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::SUPPORTED_GROUPS)
-            .map(|e| parse_supported_groups_ch(&e.data))
-            .transpose()?;
-
-        // RFC 8446 §4.2.8: "Each KeyShareEntry value ... MUST correspond to a
-        // group offered in the 'supported_groups' extension ... Clients MUST
-        // NOT offer any KeyShareEntry values for groups not listed ... Servers
-        // MAY check for violations ... and abort with an 'illegal_parameter'
-        // alert." We do: a key_share for a group absent from supported_groups
-        // (e.g. an obsolete curve in key_share while supported_groups carries
-        // only secp256r1) is rejected here rather than drawing a HelloRetry.
-        //
-        // GREASE (RFC 8701) is exempt: a conformant client may place a GREASE
-        // codepoint (0x?A?A) in key_share whose matching supported_groups
-        // GREASE value differs, and servers MUST tolerate — not reject —
-        // unknown GREASE values. GREASE never names a real group, so skipping
-        // it here doesn't weaken the consistency check for real curves.
-        let is_grease_group = |v: u16| (v >> 8) == (v & 0x00ff) && (v & 0x000f) == 0x000a;
-        if let Some(ref groups) = client_groups {
-            if let Some((bad, _)) = client_key_shares
-                .iter()
-                .find(|(g, _)| !is_grease_group(g.0) && !groups.contains(g))
-            {
-                return Err(TlsError::HandshakeFailed(format!(
-                    "illegal_parameter: key_share group {:#06x} not in supported_groups",
-                    bad.0
-                )));
-            }
-        }
-
-        // compress_certificate (RFC 8879)
-        let client_cert_compression = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::COMPRESS_CERTIFICATE)
-            .map(|e| parse_compress_certificate(&e.data))
-            .transpose()?
-            .unwrap_or_default();
-        self.client_cert_compression_algos = client_cert_compression;
-
-        // record_size_limit (RFC 8449)
-        if let Some(rsl_ext) = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::RECORD_SIZE_LIMIT)
-        {
-            self.client_record_size_limit = Some(parse_record_size_limit(&rsl_ext.data)?);
-        }
-
-        // status_request (OCSP stapling, RFC 6066)
-        if let Some(sr_ext) = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::STATUS_REQUEST)
-        {
-            if parse_status_request_ch(&sr_ext.data).unwrap_or(false) {
-                self.client_wants_ocsp = true;
-            }
-        }
-
-        // signed_certificate_timestamp (SCT, RFC 6962)
-        if ch
-            .extensions
-            .iter()
-            .any(|e| e.extension_type == ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP)
-        {
-            self.client_wants_sct = true;
-        }
-
-        // ALPN (RFC 7301)
-        if let Some(alpn_ext) = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION)
-        {
-            let client_alpn_protocols = parse_alpn_ch(&alpn_ext.data)?;
-            // Server preference order
-            for server_proto in &self.config.alpn_protocols {
-                if client_alpn_protocols.contains(server_proto) {
-                    self.negotiated_alpn = Some(server_proto.clone());
-                    break;
-                }
-            }
-        }
-
-        // SNI (RFC 6066)
-        if let Some(sni_ext) = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::SERVER_NAME)
-        {
-            self.client_server_name = Some(parse_server_name(&sni_ext.data)?);
-        }
+        // --- Parse extensions (records per-extension server state; returns the
+        // offered versions / signature_algorithms / key_shares / supported_groups
+        // needed for negotiation below) ---
+        let ParsedClientHello {
+            versions,
+            client_sig_algs,
+            client_key_shares,
+            client_groups,
+        } = self.parse_client_hello_extensions(&ch)?;
 
         // Parse custom extensions from ClientHello
         crate::extensions::parse_custom_extensions(
@@ -667,71 +533,8 @@ impl ServerHandshake {
             self.transcript = TranscriptHash::new(HashAlgId::Sha384);
         }
 
-        // --- Check for PSK ---
-        let psk_ext = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::PRE_SHARED_KEY);
-        let psk_modes_ext = ch
-            .extensions
-            .iter()
-            .find(|e| e.extension_type == ExtensionType::PSK_KEY_EXCHANGE_MODES);
-
-        let mut verified_psk: Option<Vec<u8>> = None;
-        // Phase T120 — `psk_ke` (PSK without (EC)DHE); set below.
-        let mut psk_ke = false;
-        if let (Some(psk_e), Some(modes_e)) = (psk_ext, psk_modes_ext) {
-            // RFC 8446 §4.2.9 — the client advertises its supported PSK
-            // key exchange modes. `psk_dhe_ke` (1) is preferred (forward
-            // secrecy); `psk_ke` (0) — PSK without (EC)DHE — is taken
-            // only when the client offers it alone (Phase T120).
-            let modes = parse_psk_key_exchange_modes(&modes_e.data)?;
-            if modes.contains(&0x01) || modes.contains(&0x00) {
-                let (identities, binders) = parse_pre_shared_key_ch(&psk_e.data)?;
-                if let Some(((identity, _age), binder)) = identities.first().zip(binders.first()) {
-                    // Path 1 — resumption: decrypt the ticket from
-                    // `identity` using the configured ticket_key.
-                    if let Some(ref ticket_key) = self.config.ticket_key {
-                        if let Ok((psk, ticket_suite, _created_at, _age_add)) =
-                            decrypt_ticket(params.hash_alg_id(), ticket_key, identity)
-                        {
-                            // RFC 8446 §4.2.11: the ticket binds the
-                            // PSK to a cipher suite; reject mismatches.
-                            if ticket_suite == suite
-                                && verify_binder(&params, &psk, msg_data, binder, false)?
-                            {
-                                verified_psk = Some(psk);
-                            }
-                        }
-                    }
-                    // Path 2 — external PSK (Phase T119): when no ticket
-                    // matched, fall back to the out-of-band PSK configured
-                    // on `TlsConfig` (`--psk` / `--psk-identity` on the
-                    // CLI). Per RFC 8446 §4.2.11.2 the binder uses the
-                    // `"ext binder"` label. The external PSK length must
-                    // equal the negotiated suite's hash output (§4.2.11);
-                    // otherwise the binder check fails and we silently
-                    // fall through to non-PSK handshake.
-                    if verified_psk.is_none() {
-                        if let (Some(ref cfg_id), Some(ref cfg_psk)) =
-                            (&self.config.psk_identity, &self.config.psk)
-                        {
-                            if identity == cfg_id
-                                && cfg_psk.len() == params.hash_len
-                                && verify_binder(&params, cfg_psk, msg_data, binder, true)?
-                            {
-                                verified_psk = Some(cfg_psk.clone());
-                            }
-                        }
-                    }
-                }
-            }
-            // Phase T120 — once a PSK is verified, fall to `psk_ke` when
-            // the client did not also offer `psk_dhe_ke`.
-            if verified_psk.is_some() && !modes.contains(&0x01) {
-                psk_ke = true;
-            }
-        }
+        // --- Check for PSK (resumption ticket or external PSK) ---
+        let (verified_psk, psk_ke) = self.resolve_psk(&ch, &params, suite, msg_data)?;
 
         // --- Find matching key_share ---
         // Try each of the server's preferred groups against client key_shares
@@ -936,6 +739,431 @@ impl ServerHandshake {
         })
     }
 
+    /// Parse the ClientHello extensions: validate `supported_versions` (TLS 1.3
+    /// required) and `key_share`, record optional per-extension server state
+    /// (signature_algorithms_cert, certificate_authorities, cert-compression,
+    /// record_size_limit, OCSP/SCT requests, ALPN selection, SNI) directly on
+    /// `self`, and enforce the RFC 8446 §4.2.8 key_share ⊆ supported_groups
+    /// consistency check. Returns the values still needed by the caller.
+    fn parse_client_hello_extensions(
+        &mut self,
+        ch: &super::codec::ClientHello,
+    ) -> Result<ParsedClientHello, TlsError> {
+        // supported_versions: verify client offers TLS 1.3
+        let versions_ext = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::SUPPORTED_VERSIONS)
+            .ok_or_else(|| {
+                TlsError::HandshakeFailed("missing supported_versions in ClientHello".into())
+            })?;
+        let versions = parse_supported_versions_ch(&versions_ext.data)?;
+        if !versions.contains(&0x0304) {
+            return Err(TlsError::HandshakeFailed(
+                "client does not support TLS 1.3".into(),
+            ));
+        }
+
+        // signature_algorithms — RFC 8446 §4.2.3: required for cert-based
+        // authentication; MAY be omitted for PSK-only resumption (the
+        // PSK binder + chosen ticket suite supply the auth). Phase T109
+        // makes the extraction tolerant; the non-PSK build path below
+        // re-checks that client_sig_algs is non-empty before invoking
+        // `select_signature_scheme_for_cert`.
+        let client_sig_algs = match ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::SIGNATURE_ALGORITHMS)
+        {
+            Some(ext) => parse_signature_algorithms_ch(&ext.data)?,
+            None => Vec::new(),
+        };
+
+        // signature_algorithms_cert (RFC 8446 §4.2.3) — optional
+        if let Some(sac_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::SIGNATURE_ALGORITHMS_CERT)
+        {
+            self.client_sig_algs_cert = parse_signature_algorithms_cert(&sac_ext.data)?;
+        }
+
+        // certificate_authorities (RFC 8446 §4.2.4) — optional
+        if let Some(ca_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::CERTIFICATE_AUTHORITIES)
+        {
+            self.client_certificate_authorities = parse_certificate_authorities(&ca_ext.data)?;
+        }
+
+        // key_share
+        let ks_ext = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::KEY_SHARE)
+            .ok_or_else(|| TlsError::HandshakeFailed("missing key_share in ClientHello".into()))?;
+        let client_key_shares = parse_key_share_ch(&ks_ext.data)?;
+
+        // supported_groups (optional for normal path, required for HRR)
+        let client_groups = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::SUPPORTED_GROUPS)
+            .map(|e| parse_supported_groups_ch(&e.data))
+            .transpose()?;
+
+        // RFC 8446 §4.2.8: "Each KeyShareEntry value ... MUST correspond to a
+        // group offered in the 'supported_groups' extension ... Clients MUST
+        // NOT offer any KeyShareEntry values for groups not listed ... Servers
+        // MAY check for violations ... and abort with an 'illegal_parameter'
+        // alert." We do: a key_share for a group absent from supported_groups
+        // (e.g. an obsolete curve in key_share while supported_groups carries
+        // only secp256r1) is rejected here rather than drawing a HelloRetry.
+        //
+        // GREASE (RFC 8701) is exempt: a conformant client may place a GREASE
+        // codepoint (0x?A?A) in key_share whose matching supported_groups
+        // GREASE value differs, and servers MUST tolerate — not reject —
+        // unknown GREASE values. GREASE never names a real group, so skipping
+        // it here doesn't weaken the consistency check for real curves.
+        let is_grease_group = |v: u16| (v >> 8) == (v & 0x00ff) && (v & 0x000f) == 0x000a;
+        if let Some(ref groups) = client_groups {
+            if let Some((bad, _)) = client_key_shares
+                .iter()
+                .find(|(g, _)| !is_grease_group(g.0) && !groups.contains(g))
+            {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "illegal_parameter: key_share group {:#06x} not in supported_groups",
+                    bad.0
+                )));
+            }
+        }
+
+        // compress_certificate (RFC 8879)
+        let client_cert_compression = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::COMPRESS_CERTIFICATE)
+            .map(|e| parse_compress_certificate(&e.data))
+            .transpose()?
+            .unwrap_or_default();
+        self.client_cert_compression_algos = client_cert_compression;
+
+        // record_size_limit (RFC 8449)
+        if let Some(rsl_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::RECORD_SIZE_LIMIT)
+        {
+            self.client_record_size_limit = Some(parse_record_size_limit(&rsl_ext.data)?);
+        }
+
+        // status_request (OCSP stapling, RFC 6066)
+        if let Some(sr_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::STATUS_REQUEST)
+        {
+            if parse_status_request_ch(&sr_ext.data).unwrap_or(false) {
+                self.client_wants_ocsp = true;
+            }
+        }
+
+        // signed_certificate_timestamp (SCT, RFC 6962)
+        if ch
+            .extensions
+            .iter()
+            .any(|e| e.extension_type == ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP)
+        {
+            self.client_wants_sct = true;
+        }
+
+        // ALPN (RFC 7301)
+        if let Some(alpn_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION)
+        {
+            let client_alpn_protocols = parse_alpn_ch(&alpn_ext.data)?;
+            // Server preference order
+            for server_proto in &self.config.alpn_protocols {
+                if client_alpn_protocols.contains(server_proto) {
+                    self.negotiated_alpn = Some(server_proto.clone());
+                    break;
+                }
+            }
+        }
+
+        // SNI (RFC 6066)
+        if let Some(sni_ext) = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::SERVER_NAME)
+        {
+            self.client_server_name = Some(parse_server_name(&sni_ext.data)?);
+        }
+
+        Ok(ParsedClientHello {
+            versions,
+            client_sig_algs,
+            client_key_shares,
+            client_groups,
+        })
+    }
+
+    /// Resolve a pre-shared key from the ClientHello: first a resumption ticket
+    /// (decrypted with the configured `ticket_key`), then a configured external
+    /// PSK (RFC 8446 §4.2.11). Returns the verified PSK (if any) and whether
+    /// `psk_ke` — PSK without (EC)DHE (Phase T120) — was selected.
+    fn resolve_psk(
+        &self,
+        ch: &super::codec::ClientHello,
+        params: &CipherSuiteParams,
+        suite: CipherSuite,
+        msg_data: &[u8],
+    ) -> Result<(Option<Vec<u8>>, bool), TlsError> {
+        let psk_ext = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::PRE_SHARED_KEY);
+        let psk_modes_ext = ch
+            .extensions
+            .iter()
+            .find(|e| e.extension_type == ExtensionType::PSK_KEY_EXCHANGE_MODES);
+
+        let mut verified_psk: Option<Vec<u8>> = None;
+        // Phase T120 — `psk_ke` (PSK without (EC)DHE); set below.
+        let mut psk_ke = false;
+        if let (Some(psk_e), Some(modes_e)) = (psk_ext, psk_modes_ext) {
+            // RFC 8446 §4.2.9 — the client advertises its supported PSK
+            // key exchange modes. `psk_dhe_ke` (1) is preferred (forward
+            // secrecy); `psk_ke` (0) — PSK without (EC)DHE — is taken
+            // only when the client offers it alone (Phase T120).
+            let modes = parse_psk_key_exchange_modes(&modes_e.data)?;
+            if modes.contains(&0x01) || modes.contains(&0x00) {
+                let (identities, binders) = parse_pre_shared_key_ch(&psk_e.data)?;
+                if let Some(((identity, _age), binder)) = identities.first().zip(binders.first()) {
+                    // Path 1 — resumption: decrypt the ticket from
+                    // `identity` using the configured ticket_key.
+                    if let Some(ref ticket_key) = self.config.ticket_key {
+                        if let Ok((psk, ticket_suite, _created_at, _age_add)) =
+                            decrypt_ticket(params.hash_alg_id(), ticket_key, identity)
+                        {
+                            // RFC 8446 §4.2.11: the ticket binds the
+                            // PSK to a cipher suite; reject mismatches.
+                            if ticket_suite == suite
+                                && verify_binder(params, &psk, msg_data, binder, false)?
+                            {
+                                verified_psk = Some(psk);
+                            }
+                        }
+                    }
+                    // Path 2 — external PSK (Phase T119): when no ticket
+                    // matched, fall back to the out-of-band PSK configured
+                    // on `TlsConfig` (`--psk` / `--psk-identity` on the
+                    // CLI). Per RFC 8446 §4.2.11.2 the binder uses the
+                    // `"ext binder"` label. The external PSK length must
+                    // equal the negotiated suite's hash output (§4.2.11);
+                    // otherwise the binder check fails and we silently
+                    // fall through to non-PSK handshake.
+                    if verified_psk.is_none() {
+                        if let (Some(ref cfg_id), Some(ref cfg_psk)) =
+                            (&self.config.psk_identity, &self.config.psk)
+                        {
+                            if identity == cfg_id
+                                && cfg_psk.len() == params.hash_len
+                                && verify_binder(params, cfg_psk, msg_data, binder, true)?
+                            {
+                                verified_psk = Some(cfg_psk.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            // Phase T120 — once a PSK is verified, fall to `psk_ke` when
+            // the client did not also offer `psk_dhe_ke`.
+            if verified_psk.is_some() && !modes.contains(&0x01) {
+                psk_ke = true;
+            }
+        }
+
+        Ok((verified_psk, psk_ke))
+    }
+
+    /// Build the in-handshake CertificateRequest message (RFC 8446 §4.3.2) when
+    /// the server is configured for client-certificate auth and not in PSK mode.
+    /// Returns an empty `Vec` when no CertificateRequest is sent; updates the
+    /// transcript and sets `expecting_client_cert`.
+    fn build_certificate_request13(&mut self, psk_mode: bool) -> Result<Vec<u8>, TlsError> {
+        let certificate_request_msg = if !psk_mode && self.config.verify_client_cert {
+            // Phase T102 — advertise the comprehensive set of
+            // signature schemes our server can accept for client
+            // authentication (RFC 8446 §4.3.2). Order mirrors the
+            // IANA SignatureScheme registry-by-strength convention
+            // tlsfuzzer's `test-tls13-certificate-request.py`
+            // hardcodes (Edwards → ECDSA strong→weak → RSA-PSS
+            // strong→weak → RSA-PKCS#1 strong→weak); this is also
+            // the order common stacks (OpenSSL, NSS) emit.
+            //
+            // We INTENTIONALLY include `rsa_pkcs1_*` and the SHA-1
+            // / SHA-224 codepoints even though `verify_certificate_
+            // verify` rejects them in CertificateVerify per
+            // RFC 8446 §4.4.3. The CR sigalgs extension gates BOTH
+            // the CV signature scheme AND the cert-chain signature
+            // scheme; rsa_pkcs1_* and SHA-1/224 remain valid for
+            // certificate-chain signatures (§4.2.3) so advertising
+            // them is correct. Per-scheme refusal still applies to
+            // CV via `is_pkcs1_or_legacy_hash`.
+            //
+            // Empty context for in-handshake CR (post-handshake CR
+            // uses a non-empty random context — that path is
+            // separate, see `tls13_client_handle_post_hs_cert_request_body!`).
+            let cr_sig_algs = [
+                crate::crypt::SignatureScheme::ED25519,
+                crate::crypt::SignatureScheme::ED448,
+                crate::crypt::SignatureScheme::ECDSA_SECP521R1_SHA512,
+                crate::crypt::SignatureScheme::ECDSA_SECP384R1_SHA384,
+                crate::crypt::SignatureScheme::ECDSA_SECP256R1_SHA256,
+                crate::crypt::SignatureScheme::ECDSA_SHA224,
+                crate::crypt::SignatureScheme::ECDSA_SHA1,
+                crate::crypt::SignatureScheme::RSA_PSS_RSAE_SHA512,
+                crate::crypt::SignatureScheme::RSA_PSS_PSS_SHA512,
+                crate::crypt::SignatureScheme::RSA_PSS_RSAE_SHA384,
+                crate::crypt::SignatureScheme::RSA_PSS_PSS_SHA384,
+                crate::crypt::SignatureScheme::RSA_PSS_RSAE_SHA256,
+                crate::crypt::SignatureScheme::RSA_PSS_PSS_SHA256,
+                crate::crypt::SignatureScheme::RSA_PKCS1_SHA512,
+                crate::crypt::SignatureScheme::RSA_PKCS1_SHA384,
+                crate::crypt::SignatureScheme::RSA_PKCS1_SHA256,
+                crate::crypt::SignatureScheme::RSA_PKCS1_SHA224,
+                crate::crypt::SignatureScheme::RSA_PKCS1_SHA1,
+            ];
+            let cr_extensions =
+                vec![crate::handshake::extensions_codec::build_signature_algorithms(&cr_sig_algs)];
+            let cr = CertificateRequestMsg {
+                certificate_request_context: vec![],
+                extensions: cr_extensions,
+            };
+            let cr_msg = encode_certificate_request(&cr);
+            self.transcript.update(&cr_msg)?;
+            self.expecting_client_cert = true;
+            cr_msg
+        } else {
+            Vec::new()
+        };
+        Ok(certificate_request_msg)
+    }
+
+    /// Build the Certificate + CertificateVerify messages (skipped in PSK mode).
+    /// Adds OCSP/SCT extensions to the leaf entry, applies certificate
+    /// compression when negotiated, signs the transcript per RFC 8446 §4.4.3,
+    /// and updates the transcript. Returns `(certificate_msg,
+    /// certificate_verify_msg)`; both are empty in PSK mode.
+    fn build_certificate_and_verify(
+        &mut self,
+        psk_mode: bool,
+        client_sig_algs: &[crate::crypt::SignatureScheme],
+    ) -> Result<(Vec<u8>, Vec<u8>), TlsError> {
+        let mut certificate_msg = Vec::new();
+        let mut certificate_verify_msg = Vec::new();
+        if !psk_mode {
+            let cert_msg = CertificateMsg {
+                certificate_request_context: vec![],
+                certificate_list: self
+                    .config
+                    .certificate_chain
+                    .iter()
+                    .enumerate()
+                    .map(|(i, cert_der)| {
+                        let mut cert_extensions = Vec::new();
+                        if i == 0 {
+                            // Leaf certificate: add OCSP/SCT extensions
+                            if self.client_wants_ocsp {
+                                if let Some(ref ocsp) = self.config.ocsp_staple {
+                                    cert_extensions.push(build_status_request_cert_entry(ocsp));
+                                }
+                            }
+                            if self.client_wants_sct {
+                                if let Some(ref sct) = self.config.sct_list {
+                                    cert_extensions.push(build_sct_cert_entry(sct));
+                                }
+                            }
+                        }
+                        CertificateEntry {
+                            cert_data: cert_der.clone(),
+                            extensions: cert_extensions,
+                        }
+                    })
+                    .collect(),
+            };
+            // Try certificate compression if both sides support it
+            #[cfg(feature = "cert-compression")]
+            {
+                let negotiated_algo = self
+                    .config
+                    .cert_compression_algos
+                    .iter()
+                    .find(|a| self.client_cert_compression_algos.contains(a))
+                    .copied();
+                if let Some(algo) = negotiated_algo {
+                    // Encode the uncompressed Certificate body (without handshake header)
+                    let uncompressed = encode_certificate(&cert_msg);
+                    let cert_body = &uncompressed[4..]; // skip 4-byte handshake header
+                    let compressed_data = compress_certificate_body(cert_body)?;
+                    let compressed_msg = CompressedCertificateMsg {
+                        algorithm: algo,
+                        uncompressed_length: cert_body.len() as u32,
+                        compressed_data,
+                    };
+                    certificate_msg = encode_compressed_certificate(&compressed_msg);
+                } else {
+                    certificate_msg = encode_certificate(&cert_msg);
+                }
+            }
+            #[cfg(not(feature = "cert-compression"))]
+            {
+                certificate_msg = encode_certificate(&cert_msg);
+            }
+            self.transcript.update(&certificate_msg)?;
+
+            let private_key = self.config.private_key.as_ref().ok_or_else(|| {
+                TlsError::HandshakeFailed("no server private key configured".into())
+            })?;
+            // Phase T109 — cert-based auth requires the client's
+            // `signature_algorithms`. PSK-only handshakes can omit it
+            // (the binder + suite supply auth), but if we reach this
+            // branch we're about to sign CertificateVerify, so the
+            // extension MUST be present (RFC 8446 §4.2.3).
+            if client_sig_algs.is_empty() {
+                return Err(TlsError::HandshakeFailed(
+                    "missing signature_algorithms in ClientHello \
+                     (required for certificate-based authentication, \
+                     RFC 8446 §4.2.3 — alert: missing_extension)"
+                        .into(),
+                ));
+            }
+            // Phase T107 — when our cert uses the `id-RSASSA-PSS`
+            // SPKI OID, advertise `rsa_pss_pss_*` instead of
+            // `rsa_pss_rsae_*` per RFC 5756 / RFC 8446 §4.2.3.
+            let sig_scheme = super::signing::select_signature_scheme_for_cert(
+                private_key,
+                client_sig_algs,
+                self.config.server_cert_is_rsa_pss,
+            )?;
+            let cv_transcript_hash = self.transcript.current_hash()?;
+            let signature =
+                sign_certificate_verify(private_key, sig_scheme, &cv_transcript_hash, true)?;
+
+            let cv = CertificateVerifyMsg {
+                algorithm: sig_scheme,
+                signature,
+            };
+            certificate_verify_msg = encode_certificate_verify(&cv);
+            self.transcript.update(&certificate_verify_msg)?;
+        }
+        Ok((certificate_msg, certificate_verify_msg))
+    }
+
     /// Build the server flight (SH + EE + [Cert + CV] + Finished) and derive all keys.
     ///
     /// Used by both normal and HRR paths after a matching key_share is found.
@@ -1080,164 +1308,12 @@ impl ServerHandshake {
         let encrypted_extensions_msg = encode_encrypted_extensions(&ee);
         self.transcript.update(&encrypted_extensions_msg)?;
 
-        // Phase T97 — CertificateRequest for in-handshake mTLS
-        // (RFC 8446 §4.3.2). Skipped in PSK mode (no cert auth) and
-        // when the server config doesn't ask for client cert.
-        let certificate_request_msg = if !psk_mode && self.config.verify_client_cert {
-            // Phase T102 — advertise the comprehensive set of
-            // signature schemes our server can accept for client
-            // authentication (RFC 8446 §4.3.2). Order mirrors the
-            // IANA SignatureScheme registry-by-strength convention
-            // tlsfuzzer's `test-tls13-certificate-request.py`
-            // hardcodes (Edwards → ECDSA strong→weak → RSA-PSS
-            // strong→weak → RSA-PKCS#1 strong→weak); this is also
-            // the order common stacks (OpenSSL, NSS) emit.
-            //
-            // We INTENTIONALLY include `rsa_pkcs1_*` and the SHA-1
-            // / SHA-224 codepoints even though `verify_certificate_
-            // verify` rejects them in CertificateVerify per
-            // RFC 8446 §4.4.3. The CR sigalgs extension gates BOTH
-            // the CV signature scheme AND the cert-chain signature
-            // scheme; rsa_pkcs1_* and SHA-1/224 remain valid for
-            // certificate-chain signatures (§4.2.3) so advertising
-            // them is correct. Per-scheme refusal still applies to
-            // CV via `is_pkcs1_or_legacy_hash`.
-            //
-            // Empty context for in-handshake CR (post-handshake CR
-            // uses a non-empty random context — that path is
-            // separate, see `tls13_client_handle_post_hs_cert_request_body!`).
-            let cr_sig_algs = [
-                crate::crypt::SignatureScheme::ED25519,
-                crate::crypt::SignatureScheme::ED448,
-                crate::crypt::SignatureScheme::ECDSA_SECP521R1_SHA512,
-                crate::crypt::SignatureScheme::ECDSA_SECP384R1_SHA384,
-                crate::crypt::SignatureScheme::ECDSA_SECP256R1_SHA256,
-                crate::crypt::SignatureScheme::ECDSA_SHA224,
-                crate::crypt::SignatureScheme::ECDSA_SHA1,
-                crate::crypt::SignatureScheme::RSA_PSS_RSAE_SHA512,
-                crate::crypt::SignatureScheme::RSA_PSS_PSS_SHA512,
-                crate::crypt::SignatureScheme::RSA_PSS_RSAE_SHA384,
-                crate::crypt::SignatureScheme::RSA_PSS_PSS_SHA384,
-                crate::crypt::SignatureScheme::RSA_PSS_RSAE_SHA256,
-                crate::crypt::SignatureScheme::RSA_PSS_PSS_SHA256,
-                crate::crypt::SignatureScheme::RSA_PKCS1_SHA512,
-                crate::crypt::SignatureScheme::RSA_PKCS1_SHA384,
-                crate::crypt::SignatureScheme::RSA_PKCS1_SHA256,
-                crate::crypt::SignatureScheme::RSA_PKCS1_SHA224,
-                crate::crypt::SignatureScheme::RSA_PKCS1_SHA1,
-            ];
-            let cr_extensions =
-                vec![crate::handshake::extensions_codec::build_signature_algorithms(&cr_sig_algs)];
-            let cr = CertificateRequestMsg {
-                certificate_request_context: vec![],
-                extensions: cr_extensions,
-            };
-            let cr_msg = encode_certificate_request(&cr);
-            self.transcript.update(&cr_msg)?;
-            self.expecting_client_cert = true;
-            cr_msg
-        } else {
-            Vec::new()
-        };
+        // CertificateRequest for in-handshake mTLS (RFC 8446 §4.3.2).
+        let certificate_request_msg = self.build_certificate_request13(psk_mode)?;
 
-        // Certificate + CertificateVerify (skip in PSK mode)
-        let mut certificate_msg = Vec::new();
-        let mut certificate_verify_msg = Vec::new();
-        if !psk_mode {
-            let cert_msg = CertificateMsg {
-                certificate_request_context: vec![],
-                certificate_list: self
-                    .config
-                    .certificate_chain
-                    .iter()
-                    .enumerate()
-                    .map(|(i, cert_der)| {
-                        let mut cert_extensions = Vec::new();
-                        if i == 0 {
-                            // Leaf certificate: add OCSP/SCT extensions
-                            if self.client_wants_ocsp {
-                                if let Some(ref ocsp) = self.config.ocsp_staple {
-                                    cert_extensions.push(build_status_request_cert_entry(ocsp));
-                                }
-                            }
-                            if self.client_wants_sct {
-                                if let Some(ref sct) = self.config.sct_list {
-                                    cert_extensions.push(build_sct_cert_entry(sct));
-                                }
-                            }
-                        }
-                        CertificateEntry {
-                            cert_data: cert_der.clone(),
-                            extensions: cert_extensions,
-                        }
-                    })
-                    .collect(),
-            };
-            // Try certificate compression if both sides support it
-            #[cfg(feature = "cert-compression")]
-            {
-                let negotiated_algo = self
-                    .config
-                    .cert_compression_algos
-                    .iter()
-                    .find(|a| self.client_cert_compression_algos.contains(a))
-                    .copied();
-                if let Some(algo) = negotiated_algo {
-                    // Encode the uncompressed Certificate body (without handshake header)
-                    let uncompressed = encode_certificate(&cert_msg);
-                    let cert_body = &uncompressed[4..]; // skip 4-byte handshake header
-                    let compressed_data = compress_certificate_body(cert_body)?;
-                    let compressed_msg = CompressedCertificateMsg {
-                        algorithm: algo,
-                        uncompressed_length: cert_body.len() as u32,
-                        compressed_data,
-                    };
-                    certificate_msg = encode_compressed_certificate(&compressed_msg);
-                } else {
-                    certificate_msg = encode_certificate(&cert_msg);
-                }
-            }
-            #[cfg(not(feature = "cert-compression"))]
-            {
-                certificate_msg = encode_certificate(&cert_msg);
-            }
-            self.transcript.update(&certificate_msg)?;
-
-            let private_key = self.config.private_key.as_ref().ok_or_else(|| {
-                TlsError::HandshakeFailed("no server private key configured".into())
-            })?;
-            // Phase T109 — cert-based auth requires the client's
-            // `signature_algorithms`. PSK-only handshakes can omit it
-            // (the binder + suite supply auth), but if we reach this
-            // branch we're about to sign CertificateVerify, so the
-            // extension MUST be present (RFC 8446 §4.2.3).
-            if p.client_sig_algs.is_empty() {
-                return Err(TlsError::HandshakeFailed(
-                    "missing signature_algorithms in ClientHello \
-                     (required for certificate-based authentication, \
-                     RFC 8446 §4.2.3 — alert: missing_extension)"
-                        .into(),
-                ));
-            }
-            // Phase T107 — when our cert uses the `id-RSASSA-PSS`
-            // SPKI OID, advertise `rsa_pss_pss_*` instead of
-            // `rsa_pss_rsae_*` per RFC 5756 / RFC 8446 §4.2.3.
-            let sig_scheme = super::signing::select_signature_scheme_for_cert(
-                private_key,
-                p.client_sig_algs,
-                self.config.server_cert_is_rsa_pss,
-            )?;
-            let cv_transcript_hash = self.transcript.current_hash()?;
-            let signature =
-                sign_certificate_verify(private_key, sig_scheme, &cv_transcript_hash, true)?;
-
-            let cv = CertificateVerifyMsg {
-                algorithm: sig_scheme,
-                signature,
-            };
-            certificate_verify_msg = encode_certificate_verify(&cv);
-            self.transcript.update(&certificate_verify_msg)?;
-        }
+        // Certificate + CertificateVerify (skip in PSK mode).
+        let (certificate_msg, certificate_verify_msg) =
+            self.build_certificate_and_verify(psk_mode, p.client_sig_algs)?;
 
         // Build server Finished
         let server_finished_key = ks.derive_finished_key(&server_hs_secret)?;

@@ -8652,3 +8652,32 @@ kat-nonce); builds clean with sha1+kat-nonce off; drift gate passes; na-list
 clippy clean. All deterministic RSA families now migrated.
 
 Recorded as DEV_LOG Phase I143.
+## Phase R16 — Decompose Oversized TLS Server-Handshake Functions (2026-05-28)
+
+> 请分析代码仓的质量，是否需要重构？
+> 请执行相应的计划
+
+Analysed the repo quality first: clippy 0-warning, 0 TODO/FIXME, production
+panic≈0, unsafe confined to bignum/crypto, healthy test ratio. The only
+hotspot was a few oversized server-handshake functions. User chose
+"只要分析，先不动手", then "请执行相应的计划" — so I executed the targeted P1
+plan: behavior-preserving decomposition of those functions.
+
+Extracted 8 private helpers (no protocol/state-machine/wire change):
+- server12.rs process_client_hello 553 → 236: parse_client_hello_extensions,
+  build_server_hello_extensions, build_server_key_exchange12,
+  build_client_certificate_request.
+- server.rs process_client_hello 393 → 209: parse_client_hello_extensions
+  (+ ParsedClientHello return struct), resolve_psk.
+- server.rs build_server_flight 363 → 214: build_certificate_request13,
+  build_certificate_and_verify.
+
+Each helper is a contiguous block moved verbatim into a method taking the
+same self/locals and returning what the caller still needs; only `&x`→`x`
+borrow adjustments + `Ok(...)` wrappers differ.
+
+Verification: hitls-tls 1556/0 (= pre-refactor baseline), integration 268/0
+(handshake/interop intact), fmt + clippy -D warnings --all-features
+--all-targets clean.
+
+Recorded as DEV_LOG Phase R16.
