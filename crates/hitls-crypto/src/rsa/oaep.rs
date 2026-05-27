@@ -7,6 +7,7 @@
 
 use hitls_types::CryptoError;
 use subtle::ConstantTimeEq;
+use zeroize::Zeroizing;
 
 use super::pss::h_len;
 use super::{mgf1_with_hash, RsaHashAlg};
@@ -72,9 +73,10 @@ pub(crate) fn oaep_encrypt_pad_alg(
 
     let lhash = l_hash(alg)?;
 
-    // DB = lHash || PS || 0x01 || M
+    // DB = lHash || PS || 0x01 || M. `db` carries the plaintext, so it is
+    // zeroized on drop (covers every return path, incl. errors).
     let db_len = k - hlen - 1;
-    let mut db = Vec::with_capacity(db_len);
+    let mut db = Zeroizing::new(Vec::with_capacity(db_len));
     db.extend_from_slice(&lhash);
     // PS = zero padding
     let ps_len = db_len - hlen - 1 - msg.len();
@@ -83,12 +85,12 @@ pub(crate) fn oaep_encrypt_pad_alg(
     db.extend_from_slice(msg);
     debug_assert_eq!(db.len(), db_len);
 
-    // Generate random seed
-    let mut seed = vec![0u8; hlen];
-    getrandom::fill(&mut seed).map_err(|_| CryptoError::BnRandGenFail)?;
+    // Generate random seed (secret; zeroized on drop)
+    let mut seed = Zeroizing::new(vec![0u8; hlen]);
+    getrandom::fill(&mut seed[..]).map_err(|_| CryptoError::BnRandGenFail)?;
 
     // dbMask = MGF1(seed, k - hLen - 1)
-    let db_mask = mgf1_with_hash(&seed, db_len, alg)?;
+    let db_mask = Zeroizing::new(mgf1_with_hash(&seed, db_len, alg)?);
 
     // maskedDB = DB XOR dbMask (in-place on db)
     for (d, m) in db.iter_mut().zip(db_mask.iter()) {
@@ -96,14 +98,14 @@ pub(crate) fn oaep_encrypt_pad_alg(
     }
 
     // seedMask = MGF1(maskedDB, hLen)
-    let seed_mask = mgf1_with_hash(&db, hlen, alg)?;
+    let seed_mask = Zeroizing::new(mgf1_with_hash(&db, hlen, alg)?);
 
     // maskedSeed = seed XOR seedMask (in-place on seed)
     for (s, m) in seed.iter_mut().zip(seed_mask.iter()) {
         *s ^= m;
     }
 
-    // EM = 0x00 || maskedSeed || maskedDB
+    // EM = 0x00 || maskedSeed || maskedDB (ciphertext-bound, not secret)
     let mut em = Vec::with_capacity(k);
     em.push(0x00);
     em.extend_from_slice(&seed);
@@ -130,19 +132,20 @@ pub(crate) fn oaep_decrypt_unpad_alg(em: &[u8], alg: RsaHashAlg) -> Result<Vec<u
     let db_len = masked_db.len();
 
     // seedMask = MGF1(maskedDB, hLen)
-    let seed_mask = mgf1_with_hash(masked_db, hlen, alg)?;
+    let seed_mask = Zeroizing::new(mgf1_with_hash(masked_db, hlen, alg)?);
 
-    // seed = maskedSeed XOR seedMask (in-place on copy)
-    let mut seed = masked_seed.to_vec();
+    // seed = maskedSeed XOR seedMask (secret; zeroized on drop)
+    let mut seed = Zeroizing::new(masked_seed.to_vec());
     for (s, m) in seed.iter_mut().zip(seed_mask.iter()) {
         *s ^= m;
     }
 
     // dbMask = MGF1(seed, k - hLen - 1)
-    let db_mask = mgf1_with_hash(&seed, db_len, alg)?;
+    let db_mask = Zeroizing::new(mgf1_with_hash(&seed, db_len, alg)?);
 
-    // DB = maskedDB XOR dbMask (in-place on copy)
-    let mut db = masked_db.to_vec();
+    // DB = maskedDB XOR dbMask. `db` carries the recovered plaintext, so it
+    // is zeroized on drop (covers every return path, incl. padding errors).
+    let mut db = Zeroizing::new(masked_db.to_vec());
     for (d, m) in db.iter_mut().zip(db_mask.iter()) {
         *d ^= m;
     }

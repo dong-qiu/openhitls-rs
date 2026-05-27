@@ -24193,6 +24193,12 @@ hoisted) — the SHA-256/384/512 arms are functionally byte-identical, so PSS
   preserved verbatim, now indexed by `hlen`.
 - `oaep_encrypt_pad(msg, k)` / `oaep_decrypt_unpad(em)` retained as SHA-256
   wrappers, so `RsaPadding::Oaep` in `encrypt`/`decrypt` is byte-unchanged.
+- The secret-bearing intermediates (`seed`, `db` = padded/recovered
+  plaintext, and the MGF1 masks) are wrapped in `zeroize::Zeroizing` so they
+  are wiped on every return path — closing an AI-review HIGH (the
+  hash-generalisation moved `seed` from a stack array to the heap, and the
+  original `db` plaintext buffer was never zeroized either; both encrypt and
+  decrypt are now hardened).
 
 ### Part C — public API (`mod.rs`)
 
