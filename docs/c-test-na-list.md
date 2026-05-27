@@ -61,7 +61,8 @@ Counts are the `Generation summary` footer of each generated file
 | DRBG | 6 | 272 | 0 | 12 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
 | RSA | 72 | 108 | 0 | 4 | 170 |
-| **Total** | **1842** | **3153** | **238** | **92** | **4632** |
+| BigNum | 230 | 130 | 2 | 0 | 362 |
+| **Total** | **2072** | **3283** | **240** | **92** | **4994** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -108,6 +109,23 @@ checks sign succeeds, no byte-compare) and `TC003` (saltLen 0/-1/-2 error
 paths) stay API-surface. The 4 `unsupported` are PSS-SHA-224 (2 verify + 2
 sign — no `RsaHashAlg::Sha224`). **All deterministic RSA sign/verify/
 encrypt/decrypt families are now migrated.**
+
+BigNum (T142) migrates the deterministic `*_FUNC_TC*` arithmetic families
+from `test_suite_sdv_bn.data` against `hitls_bignum::BigNum`: `RSHIFT` (101,
+`shr`), `MOD` (54, `mod_reduce`), `SUB` (22, `sub`), `MODINV` (19, `mod_inv`;
+empty result ⇒ `is_err`), `GCD`/`PRIME_CHECK` (10 each; `gcd` /
+`is_probably_prime`), `ADD` (5, `add`), `DIV` (4, `div_rem`), `MODEXP` (3,
+`mod_exp`), `SQR` (2, `sqr`) — 230 byte-exact tests, no new production code.
+BigNum is signed and derives no `PartialEq`, so the generated tests compare
+via `to_bytes_be()` + `is_negative()` (the `eq_signed` prelude). Some rows
+are deliberately skipped because Rust and C **diverge on sign conventions**:
+negative-modulus `MOD` and negative-dividend `DIV` (Rust `mod_reduce` /
+`div_rem` give a different sign than C's truncated convention — verified by
+probe). `CMP` (no signed-compare API — only `cmp_abs`), `U64`/`UINT`
+(length-driven, not hex KATs), the single-limb families (`ADDLIMB` /
+`SUB_LIMB` / `MULLIMB` / `DIVLIMB`), and all `*_API_TC*` (input-check / RNG)
+stay API-surface. The 2 `unknown` are `DIV` error-path rows that omit the
+quotient/remainder fields.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,

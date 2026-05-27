@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I143 (143 phases)
-- Testing: T1–T141 (134 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`))
+- Testing: T1–T142 (135 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code)
 - Refactoring: R1–R17 (17 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -392,6 +392,7 @@ Category summary:
 | 392 | I143 | Impl | RSA-PSS **sign**-side KAT migration via a fixed-salt injection hook — closes the last deterministic RSA family. Unlike the encrypt side (I142), PSS sign **is** byte-exact reproducible: `RSA_SIGN_PSS_FUNC_TC001` (`mdId : n : d : msg : sign : salt : isProvider`) publishes the exact salt the C test injects (`CRYPT_CTRL_SET_RSA_SALT`) and then `ASSERT_COMPARE`s the signature. Added a `kat-nonce`-gated salt-injection path: `pss::pss_sign_pad_with_salt_bytes_alg(digest, em_bits, salt, alg)` (the private `pss_encode_alg` already accepted salt bytes; this wrapper adds the digest-length + `emLen >= hLen + sLen + 2` checked-arithmetic validation that the random-salt `pss_sign_pad_with_salt_alg` does) + `RsaPrivateKey::sign_pss_with_salt(digest, alg, salt)` (`#[doc(hidden)]` + `#[cfg(feature="kat-nonce")]` + `#[deprecated]`: a fixed PSS salt removes the scheme's randomisation — note says "test-only", *not* "leaks key", since PSS salt reuse does not leak the private key, unlike an ECDSA/DSA nonce). The xtask `emit_sign_pss` migrates TC001 → `from_nd(n, d).sign_pss_with_salt(MD(msg), RsaHashAlg::{alg}, salt) == sign` (the `md_to_pss_alg` symbol doubles as the digest type name and the `RsaHashAlg` variant). `migrated_rsa.rs` **66 → 72** (+6 PSS sign KATs, SHA-256/384/512), all byte-exact vs openHiTLS C first run. PSS supports SHA-256/384/512 only, so the SHA-224 TC001 rows are `unsupported` (RSA unsupported 2 → 4: 2 verify + 2 sign PSS-SHA-224); `SIGN_PSS_FUNC_TC002` (random salt — C only checks sign succeeds) + `TC003` (saltLen 0/-1/-2 error paths) stay API-surface. No regression — hitls-crypto rsa lib **64/0**, `migrated_rsa` 72/0 (`--all-features` / `kat-nonce`) and 34/0 (no `kat-nonce`, PSS-sign gated out); builds clean with `sha1` + `kat-nonce` off; xtask `--check` drift gate passes; na-list tally → 1842 emitted (RSA 66 → 72); `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** additive `kat-nonce`-only API (`sign_pss_with_salt` + the salt-bytes encode wrapper are not compiled into production builds). **All deterministic RSA sign/verify/encrypt/decrypt families are now migrated** (only genuinely non-reproducible cases remain: random-salt PSS sign + randomised encrypt, both length/round-trip only by construction) | 2026-05-28 |
 | 393 | R16 | Refactor | Decompose 3 oversized TLS server-handshake functions (behavior-preserving code motion) — extracted 8 focused private helpers so no single handshake function exceeds ~240 lines. TLS 1.2 `handshake/server12.rs::process_client_hello` **553 → 236** via `parse_client_hello_extensions` / `build_server_hello_extensions` / `build_server_key_exchange12` / `build_client_certificate_request`. TLS 1.3 `handshake/server.rs::process_client_hello` **393 → 209** via `parse_client_hello_extensions` (+ a small `ParsedClientHello` return struct) / `resolve_psk`, and `build_server_flight` **363 → 214** via `build_certificate_request13` / `build_certificate_and_verify`. Pure extraction — no protocol/state-machine/wire/behavior change; each helper is independently readable + testable. Motivated by the repo quality review (the handshake layer was the only flagged hotspot; clippy was already 0-warning, 0 TODO/FIXME, production-panic≈0). Verified: hitls-tls **1556/0** (= pre-refactor baseline), integration **268/0**, `cargo fmt --all -- --check` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-28 |
 | 394 | R17 | Refactor | Decompose 3 oversized TLS **client**-handshake functions (symmetric follow-up to R16; behavior-preserving code motion) — extracted 3 focused private helpers. TLS 1.3 `handshake/client.rs::build_client_hello` **379 → ~80** via `build_client_hello_extensions` (the full CH extension assembly incl. GREASE/ECH-GREASE/PSK-modes/early-data) + `append_psk_binder` (the pre_shared_key extension append + binder computation + early-secret derivation, moved by value so the body is byte-identical). TLS 1.2 `handshake/client12.rs::process_server_hello_done` **304 → 110** via `compute_premaster_and_cke` (the 9-arm key-exchange premaster/CKE dispatch `match`), and `build_client_hello` **196 → ~75** via `build_client_hello_extensions`. NOTE: the originally-scoped `process_finished` was a measurement artifact (actually 42 lines — an `awk` heuristic counted to the test module past the file's free fns); substituted the genuine 3rd-largest client fn. Pure extraction — no protocol/state-machine/wire/control-flow change. Verified: hitls-tls **1556/0** (= baseline), integration **268/0**, `cargo fmt --all -- --check` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-28 |
+| 395 | T142 | Test | BigNum arithmetic KAT migration — first non-`hitls-crypto` C→Rust migration target (`test_suite_sdv_bn.data` → `crates/hitls-bignum/tests/migrated_bn.rs`, new `xtask/src/bn.rs` emitter). Migrates the deterministic `*_FUNC_TC*` families against `hitls_bignum::BigNum`: **RSHIFT** 101 (`shr`), **MOD** 54 (`mod_reduce`), **SUB** 22 (`sub`), **MODINV** 19 (`mod_inv`; empty result row ⇒ no inverse ⇒ `is_err`), **GCD** 10 (`gcd`), **PRIME_CHECK** 10 (`is_probably_prime(64)`), **ADD** 5 (`add`), **DIV** 4 (`div_rem`), **MODEXP** 3 (`mod_exp`), **SQR** 2 (`sqr`) = **230** byte-exact tests, **no production code change** (all ops were already public). BigNum is signed and derives no `PartialEq`, so the generated tests compare via `to_bytes_be()` (magnitude) + `is_negative()` (sign) — emitted as an `eq_signed` prelude helper + a `bn(bytes, neg)` constructor (the file uses `from_bytes_be`, since `hitls-bignum` has no `hitls-utils` dep). Sign-convention divergences between Rust and C — found via a pre-emit probe — are skipped: **negative-modulus MOD** (`mod_reduce` differs) and **negative-dividend DIV** (`div_rem` returns a non-negative remainder vs C's truncated/signed one); these route to API-surface. Also skipped: **CMP** (no signed-compare API — only `cmp_abs`), **U64/UINT** (length-driven, not hex KATs), the single-limb families (**ADDLIMB/SUB_LIMB/MULLIMB/DIVLIMB**), all **`*_API_TC*`** (input-check / RNG). 130 API-surface + 2 unknown (DIV error-path rows omitting q/r) + 0 unsupported. No regression — hitls-bignum lib **95/0** (1 pre-existing ignored) + `migrated_bn` **230/0**; xtask `--check` drift gate passes; na-list tally → 2072 emitted (new BigNum row 230/130/2/0/362; total C cases 4632 → 4994); `fmt` + `clippy -D warnings --all-targets` clean. This is the largest single migrated family after DSA (1200) / ML-KEM (150) | 2026-05-28 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -24348,6 +24349,7 @@ sign). `cargo fmt --all -- --check` + `clippy -D warnings --all-features
 families are now migrated**; the only RSA rows left as API-surface are
 genuinely non-reproducible by construction (random-salt PSS sign, randomised
 padded encrypt — length/round-trip only).
+
 ## Phase R16 — Decompose Oversized TLS Server-Handshake Functions (2026-05-28)
 
 ### Motivation
@@ -24500,3 +24502,62 @@ inside the `if let Some(session)` arm where `has_psk` is always true.
 No regression. Behavior-preserving; the only artifacts are the 3 new private
 helpers. The three target functions drop from 379/304/196 to ~80/110/~75
 lines. No public API change.
+
+## Phase T142 — BigNum Arithmetic KAT Migration (2026-05-28)
+
+### Summary
+
+First C→Rust SDV migration target outside `hitls-crypto`:
+`test_suite_sdv_bn.data` → `crates/hitls-bignum/tests/migrated_bn.rs` via a
+new `xtask/src/bn.rs` emitter. **230 byte-exact tests, no production code
+change** — every BigNum op exercised is already public.
+
+### Families migrated (deterministic `*_FUNC_TC*`)
+
+| Family | n | Maps to |
+|--------|--:|---------|
+| RSHIFT | 101 | `shr(n)` |
+| MOD | 54 | `mod_reduce` (positive modulus) |
+| SUB | 22 | `sub` (signed) |
+| MODINV | 19 | `mod_inv` (empty result ⇒ `is_err`) |
+| GCD | 10 | `gcd` |
+| PRIME_CHECK | 10 | `is_probably_prime(64)` |
+| ADD | 5 | `add` (`CRYPT_SUCCESS` rows only) |
+| DIV | 4 | `div_rem` (positive operands) |
+| MODEXP | 3 | `mod_exp` |
+| SQR | 2 | `sqr` |
+
+### Signed comparison
+
+`BigNum` is signed but derives only `Clone, Zeroize` (no `PartialEq`/`Ord`),
+so the generated file carries a small prelude: a `bn(bytes, neg)` constructor
+(`from_bytes_be` + `set_negative` when non-zero) and `eq_signed(got, bytes,
+neg)` which compares `to_bytes_be()` (magnitude) **and** `is_negative()`
+(sign). `hitls-bignum` has no `hitls-utils` dependency, so operands are
+emitted as `&[u8]` literals (via `format_byte_slice`) rather than hex strings.
+
+### Skipped — verified sign-convention divergences + no-API families
+
+A pre-emit probe compared Rust vs the C vectors and found two real
+divergences, which are routed to API-surface rather than emitted wrong:
+
+- **Negative-modulus MOD** — `mod_reduce` with a negative modulus differs
+  from C (positive-modulus rows, incl. negative *inputs*, match exactly).
+- **Negative-dividend DIV** — `div_rem` returns a non-negative remainder,
+  whereas C uses a truncated/signed remainder (`-1 / 2 ⇒ r = -1` in C).
+  Positive-operand DIV matches.
+
+Also skipped (→ API-surface): **CMP** (no signed-compare API — only
+`cmp_abs`), **U64/UINT** (length-driven, not hex KATs), the single-limb
+families (**ADDLIMB / SUB_LIMB / MULLIMB / DIVLIMB**), and all **`*_API_TC*`**
+(input-check / RNG-dependent). 2 `unknown` = DIV error-path rows that omit
+the quotient/remainder fields.
+
+### Build Status (Post T142)
+
+No regression. hitls-bignum lib **95/0** (1 pre-existing ignored) +
+`migrated_bn` **230/0**. xtask `--check` drift gate passes; na-list tally →
+2072 emitted (new BigNum row 230 / 130 API-surface / 2 unknown / 0
+unsupported / 362 total; workspace total C cases 4632 → 4994). `cargo fmt
+--all -- --check` + `clippy -D warnings --all-targets` clean. BigNum is the
+largest single migrated family after DSA (1200) and ML-KEM (150).
