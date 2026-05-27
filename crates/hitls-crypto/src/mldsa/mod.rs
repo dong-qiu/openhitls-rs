@@ -334,8 +334,22 @@ fn mldsa_keygen(params: &MlDsaParams) -> Result<(Vec<u8>, Vec<u8>), CryptoError>
     Ok((pk, sk))
 }
 
-/// ML-DSA Sign (Algorithm 2 of FIPS 204).
+/// ML-DSA deterministic Sign (FIPS 204 §6.2 with `rnd = 0^256`).
 fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>, CryptoError> {
+    mldsa_sign_internal(sk, message, &[0u8; 32], params)
+}
+
+/// ML-DSA.Sign_internal (FIPS 204 Algorithm 7): sign `message` with the signing
+/// randomness `rnd` (32 bytes). `rnd = 0^256` gives the deterministic variant;
+/// a random `rnd` gives the hedged variant. The private-random mask seed is
+/// `ρ' = H(K ‖ rnd ‖ μ, 64)` — the `rnd` must not be omitted (omitting it, i.e.
+/// `H(K ‖ μ)`, is not FIPS-204-conformant).
+fn mldsa_sign_internal(
+    sk: &[u8],
+    message: &[u8],
+    rnd: &[u8],
+    params: &MlDsaParams,
+) -> Result<Vec<u8>, CryptoError> {
     let (rho, key, tr, mut s1_hat, mut s2_hat, mut t0_hat) = decode_sk(sk, params);
 
     // A = ExpandA(ρ)
@@ -356,9 +370,9 @@ fn mldsa_sign(sk: &[u8], message: &[u8], params: &MlDsaParams) -> Result<Vec<u8>
     let mut mu = [0u8; 64];
     hash_h2_into(&tr, message, &mut mu);
 
-    // ρ' = H(K || μ, 64)  (deterministic signing)
+    // ρ' = H(K || rnd || μ, 64)  (FIPS 204 §6.2; rnd = 0^256 → deterministic)
     let mut rho_prime = [0u8; 64];
-    hash_h2_into(&key, &mu, &mut rho_prime);
+    hash_h3_into(&key, rnd, &mu, &mut rho_prime);
 
     // Pre-allocate hash_input buffer: μ (64 bytes) + k × w1_bytes
     let w1_bytes = if params.gamma2 == (Q - 1) / 88 {
@@ -644,10 +658,44 @@ impl MlDsaKeyPair {
         })
     }
 
+    /// Construct a **sign-only** key pair from a raw ML-DSA secret key (`sk`,
+    /// FIPS 204 §6.4 encoding). No public key is held — the signing path needs
+    /// only `sk` (it embeds `tr = H(pk)`) — so [`Self::verify`] is unavailable.
+    /// Intended for loading a stored signing key (and sign KAT vectors).
+    pub fn from_private_key(parameter_set: u32, sk: &[u8]) -> Result<Self, CryptoError> {
+        let params = get_params(parameter_set)?;
+        if sk.len() != params.sk_len {
+            return Err(CryptoError::InvalidKeyLength {
+                expected: params.sk_len,
+                got: sk.len(),
+            });
+        }
+        Ok(MlDsaKeyPair {
+            public_key: Vec::new(),
+            private_key: sk.to_vec(),
+            parameter_set,
+        })
+    }
+
     /// Sign a message, returning the signature bytes.
     pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let params = get_params(self.parameter_set)?;
         mldsa_sign(&self.private_key, message, &params)
+    }
+
+    /// **KAT / testing only.** Sign `message` with a caller-supplied 32-byte
+    /// hedging randomness `rnd` (FIPS 204 ML-DSA.Sign_internal). Unlike an
+    /// ECDSA/DSA nonce, the ML-DSA `rnd` is *not* key-leaking (deterministic
+    /// `rnd = 0` is a sanctioned FIPS mode), but this entry point exists only
+    /// to reproduce published sign KATs, so it is gated behind the non-default
+    /// `kat-nonce` feature and marked `#[deprecated]` as a danger sentinel
+    /// (a non-`#[allow(deprecated)]` caller fails to build under `-D warnings`).
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(note = "test/KAT only: controls ML-DSA signing randomness; not for production")]
+    pub fn sign_with_rnd(&self, message: &[u8], rnd: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let params = get_params(self.parameter_set)?;
+        mldsa_sign_internal(&self.private_key, message, rnd, &params)
     }
 
     /// Verify a signature against a message.
@@ -996,9 +1044,11 @@ mod tests {
             "52bf3751f1e31760c51f8eb35565686fc7efdfa6c48572968e71b8eacbd5da2e"
         );
         let sig = kp.sign(msg).unwrap();
+        // FIPS 204 §6.2 deterministic ρ' = H(K ‖ 0^256 ‖ μ) (corrected in I137;
+        // the prior value reflected the non-conformant ρ' = H(K ‖ μ)).
         assert_eq!(
             sha256_hex(&sig),
-            "b025b4161adb08045ace0ac263b2b04dcb4ffe7c37dd844440144d240265086c"
+            "413685ef9cb5e54f6e38a6c4a4c9ca724d1c6f8dec2f51c4c1577ca58f76fb1d"
         );
         assert!(kp.verify(msg, &sig).unwrap());
     }
@@ -1017,9 +1067,10 @@ mod tests {
             "4743c4ddd533f143b9e35b80aede8f8c6c8f54c5226d85a52d6ee18a5028ac5b"
         );
         let sig = kp.sign(msg).unwrap();
+        // FIPS 204 §6.2 deterministic ρ' = H(K ‖ 0^256 ‖ μ) (corrected in I137).
         assert_eq!(
             sha256_hex(&sig),
-            "9e92de5d4d6c437ab6f3f9673f918808c7a9de30539eda1292d9968e9d983bfc"
+            "569d8ece1c99894ec148c257fba6af1e4e4ace15db6af00ebbda2a4e18266529"
         );
         assert!(kp.verify(msg, &sig).unwrap());
     }
@@ -1038,9 +1089,10 @@ mod tests {
             "7891dbe82542c5ce723819fb56acdfdd3f503a9b9c56b36f96ab08aa0f68e8af"
         );
         let sig = kp.sign(msg).unwrap();
+        // FIPS 204 §6.2 deterministic ρ' = H(K ‖ 0^256 ‖ μ) (corrected in I137).
         assert_eq!(
             sha256_hex(&sig),
-            "ec8c31b00e0cc0d137828b9afcc4b5c3cbafab11de97c2fc602e7fb3193b0b3a"
+            "f89b0720c28005ce16e21f79cb63be659e86a0d533152172bfc7976841fc8260"
         );
         assert!(kp.verify(msg, &sig).unwrap());
     }

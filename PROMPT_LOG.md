@@ -8424,3 +8424,33 @@ the first-ever successful tlsfuzzer run (workflow_dispatch, sampled full
 suite, all 13 listeners). YAML valid; actionlint clean. Config-only.
 Ran in isolated temp worktree (`fix/tlsfuzzer-workflow-parse`). Recorded
 as DEV_LOG Phase R15.
+
+---
+
+## Phase I137 — ML-DSA Sign KAT + FIPS-204 ρ' Non-Compliance Fix (2026-05-27)
+
+> 做 ML-DSA sign
+
+Migrated ML-DSA SIGNDATA_TC001 — surfaced + fixed a real FIPS-204 bug (4th
+via the migration discipline). Bug: mldsa_sign computed ρ'=H(K||μ), but
+FIPS 204 §6.2 is ρ'=H(K||rnd||μ) (rnd=32B, 0^256 deterministic) — rnd was
+omitted entirely → every ML-DSA sig diverged (invisible to verify/
+roundtrip which never recompute ρ').
+
+Fix: hash_h3_into (poly.rs); mldsa_sign → mldsa_sign_internal(sk,msg,rnd)
+with ρ'=H(K||rnd||μ); public sign uses rnd=0^32. Confirmed by reproducing
+the C SIGNDATA vector (rnd=seed) byte-for-byte (throwaway probe).
+
+Hook: MlDsaKeyPair::sign_with_rnd(msg,rnd) (#[cfg(kat-nonce)] +
+#[doc(hidden)] + #[deprecated] "test-only" — ML-DSA rnd reuse does NOT
+leak the key, unlike ECDSA/DSA) + from_private_key(type,sk). emitter emits
+SIGNDATA_TC001 → sign_with_rnd(msg,seed)==sign; migrated_mldsa 45→105
+(+60 sign KATs, all byte-exact). The 3 *_golden_value_kat sig fingerprints
+regenerated to corrected FIPS-204 values (keygen fingerprints unchanged).
+
+Verification: migrated_mldsa 105/0 (--all-features) / 45/0 (no kat-nonce);
+mldsa lib 47/0; pki ML-DSA verify 31/0 (unaffected); drift gate passes;
+na-list → 1770 emitted; fmt + clippy clean. Production ML-DSA signing now
+FIPS-204-conformant.
+
+Recorded as DEV_LOG Phase I137.

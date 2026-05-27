@@ -3,9 +3,9 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I136 (136 phases)
+- Implementation: I1–I137 (137 phases)
 - Testing: T1–T140 (133 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated)
-- Refactoring: R1–R14 (14 phases)
+- Refactoring: R1–R15 (15 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
 | # | Phase | Type | Title | Date |
@@ -382,6 +382,7 @@ Category summary:
 | 379 | I135 | Impl | TLS 1.2 record/handshake conformance batch (RFC 5246 §6.2.1 + §7.2.2) — three fixes from the post-audit "remaining optional" tlsfuzzer sweep, each curated into `scripts_12`. **(1) Cross-record handshake reassembly (§6.2.1):** `tls12_read_handshake_msg_body!` (macros.rs) read a single record then sliced `data[..total]`, so a handshake message (e.g. ClientKeyExchange) fragmented across records made `total > data.len()` → the connection dropped (BrokenPipe). Now buffers across records until the full 4-byte-header + body is present (mirrors the I114 ClientHello reassembly; trailing coalesced bytes dropped as before). `test-record-layer-fragmentation` 19/5 → **22/2** (the 2 residual XFAILs are the `maximum fragmentation: 1 fragment` = 1-byte/record cases where the *echo* server mirrors the client's 1-byte app-data fragmentation as many 1-byte records and tlsfuzzer's single `ExpectApplicationData` doesn't drain them — a test-harness/echo quirk, not a protocol bug). **(2) unexpected_message for out-of-sequence handshake messages (§7.2.2):** the TLS 1.2 server's `expected X, got Y` sequencing errors (ClientHello / Certificate / ClientKeyExchange / CertificateVerify / ChangeCipherSpec / Finished, in `connection12/server.rs` + the ClientHello-reassembly + handshake-msg-read macros) carried no alert hint → `tls_error_to_alert` defaulted to `handshake_failure`; appended `(alert: unexpected_message)` so they map to `unexpected_message`. `test-message-skipping` 2/9 → **11/0**. **(3) TLS 1.2 TLSCiphertext length limit (§6.2.1 = 2^14 + 2048, not TLS 1.3's 2^14 + 256):** a legal 2^14-byte-plaintext CBC record with up to 256 bytes of padding + IV + MAC exceeds +256 and was rejected with `record_overflow` at two gates — `RecordLayer::parse_record` (now uses a version-aware `max_ciphertext_overhead()`: 256 for a TLS 1.3 decryptor, 2048 for TLS 1.2/TLCP) and the CBC/EtM `decrypt_record` (now `MAX_CIPHERTEXT_LENGTH_TLS12` = 2^14 + 2048). `test-atypical-padding` 8/4 → **12/0**. No regression: `hitls-tls` lib **1556/0** (incl. the updated CBC/EtM `record_overflow` tests at the new limit), `hitls-integration-tests` 0 failed, all **28 `scripts_12`** + TLS 1.3 record-path sanity (`record-layer-limits`/`lengths`/`record-padding`/`conversation`) 0 FAIL / 0 XPASS (the §5.2 +256 TLS 1.3 budget is unchanged); `fmt` + `clippy -D warnings --all-targets` clean. Curated suite +3 | 2026-05-27 |
 | 380 | I136 | Impl | Extend the `kat-nonce` deterministic-sign hook to DSA + SM2 (after the ECDSA pilot I134) — unblocks two more sign-side KAT families. `DsaKeyPair::sign_with_nonce(digest, k)` and `Sm2KeyPair::sign_with_id_nonce(user_id, msg, k)`, both `#[doc(hidden)]` + `#[cfg(feature="kat-nonce")]` + `#[deprecated]` danger sentinels (a chosen DSA/SM2 nonce leaks the private key). Each refactors its `sign` retry-loop body into a private `sign_with_k(e, k) -> Option<DER>` shared by the random-`k` `sign` (byte-identical production behaviour) and the fixed-`k` test entry point; SM2 also factors out `sign_digest` (`e = SM3(Z_A‖M)`). The xtask `dsa`/`sm2` emitters now emit a deterministic-sign test per sign-vector row (per-test `#[cfg(feature="kat-nonce")]` + `#[allow(deprecated)]`): DSA `SIGN_VERIFY_*` → `sign_with_nonce(MD(Msg), K) == DER(R,S)` (migrated_dsa **600 → 1200**, +600 NIST FIPS 186-4 sign KATs); SM2 `SIGN_FUNC_TC001/TC002` → `sign_with_id_nonce(userId, msg, k) == sign` (migrated_sm2 **12 → 14**, +2 GB/T 32918.5 sign KATs). All byte-exact vs openHiTLS C first run. ML-DSA sign deferred (it injects a 32-byte hedging `rnd` and the Rust deterministic `ρ' = H(K‖μ)` needs separate FIPS-204 study). No regression — hitls-crypto dsa lib 15/0 + sm2 lib 15/0 (production `sign` unchanged); migrated_dsa 1200/0 + migrated_sm2 14/0 (`--all-features`); narrow feature combos cfg the sign tests out; CI main job `--workspace --all-features` runs them; xtask `--check` drift gate passes; na-list tally → 1710 emitted; `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
 | 381 | R15 | Refactor | Make the tlsfuzzer CI workflow parseable — the curated suite had **never actually run in CI**. GitHub template-processes a `run:` block as a *single* expression whenever it contains any `${{ }}`, and is subject to a 21000-char per-expression limit. The "Run curated tlsfuzzer scripts" step's run block (the ~80-script arrays + per-script rationale comments + the run loops, ~40 KB) embedded `${{ github.event.schedule }}` (the monthly-sweep `SWEEP_N` switch), so the whole block was one >21000-char expression → the workflow failed to parse: `workflow_dispatch` → **HTTP 422 "Exceeded max expression length 21000"**, every push logged a 0 s validation failure (the long-ignored "tlsfuzzer.yml push 0s failure"), and the weekly/monthly `schedule` crons silently never fired. Discovered when a manual full-suite dispatch (requested as a post-change validation) was rejected; the run history confirmed **every** tlsfuzzer.yml entry was `push / failure` — zero successful runs ever. Fix: hoist the expression into a step-level `env: SCHEDULE: ${{ github.event.schedule }}` and reference `$SCHEDULE` in the shell, leaving the run block a pure literal (no `${{ }}` → no template processing → no length limit). Verified: `gh workflow run tlsfuzzer.yml --ref <branch>` is now **accepted** (was 422) and produced the first-ever successful tlsfuzzer run (workflow_dispatch, sampled full suite across all 13 listeners). YAML valid; `actionlint` clean (only pre-existing SC2129 shellcheck style nits). Config-only — no production or test-logic change | 2026-05-27 |
+| 382 | I137 | Impl | ML-DSA sign-side KAT + **FIPS-204 `ρ'` non-compliance fix** (the deferred I136 item) — migrating the C `SIGNDATA_TC001` vectors surfaced a real primitive bug (4th found via the migration discipline, cf. SLH-DSA/I129, CTR-DRBG-df/I131, ASN.1/I133). **Bug:** `mldsa_sign` (`crates/hitls-crypto/src/mldsa/mod.rs`) computed the private mask seed as `ρ' = H(K ‖ μ)`, but FIPS 204 §6.2 (ML-DSA.Sign_internal) is `ρ' = H(K ‖ rnd ‖ μ)` with a 32-byte `rnd` (`0^256` for the deterministic variant) — the `rnd` was omitted entirely, so every ML-DSA signature diverged from FIPS-204 (invisible to verify + round-trip, which never recompute `ρ'`). **Fix:** new `hash_h3_into` (poly.rs); `mldsa_sign` → `mldsa_sign_internal(sk, msg, rnd, params)` with `ρ' = H(K ‖ rnd ‖ μ)`; public deterministic `sign` passes `rnd = 0^32`. Confirmed by reproducing the C `BSL_..._SIGNDATA` vector (`rnd = seed`) byte-for-byte. **Hook:** `MlDsaKeyPair::sign_with_rnd(msg, rnd)` + `from_private_key(type, sk)` — `sign_with_rnd` is `#[doc(hidden)]` + `#[cfg(feature="kat-nonce")]` + `#[deprecated]` (test-only; note: ML-DSA `rnd` reuse is *not* key-leaking, unlike ECDSA/DSA, so the sentinel says "test-only", not "leaks key"). The xtask `mldsa` emitter emits `SIGNDATA_TC001` → `from_private_key(type, prvKey).sign_with_rnd(msg, seed) == sign` (per-test `#[cfg(feature="kat-nonce")]` + `#[allow(deprecated)]`); `migrated_mldsa.rs` **45 → 105** (+60 sign KATs, all 3 param sets). The 3 self-snapshot `*_golden_value_kat` deterministic-sig fingerprints were regenerated to the corrected (FIPS-204) values (keygen fingerprints unchanged). No regression — hitls-crypto mldsa lib 47/0 (incl. the determinism test + corrected golden values), `migrated_mldsa` 105/0 (`--all-features`) / 45/0 (no `kat-nonce`); hitls-pki ML-DSA verify (X.509/CMS) 31/0 unaffected; workspace `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** ML-DSA signatures (e.g. X.509 cert signing) now match FIPS-204; verification of others' signatures is unaffected. ML-DSA sign side now covered → ECDSA/DSA/SM2/ML-DSA all migrated | 2026-05-27 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -23787,3 +23788,86 @@ The `kat-nonce` deterministic-sign hook now covers ECDSA (I134) + DSA +
 SM2; their sign-side KATs reproduce openHiTLS C byte-for-byte. ML-DSA
 sign is the remaining sign-side family (needs a rnd hook + FIPS-204 ρ'
 study).
+
+## Phase I137 — ML-DSA Sign KAT + FIPS-204 ρ' Non-Compliance Fix (2026-05-27)
+
+### Summary
+
+Completed the sign-side hook rollout (after ECDSA/I134, DSA+SM2/I136) by
+migrating ML-DSA's `SIGNDATA_TC001` KATs — which surfaced and fixed a real
+**FIPS 204 non-compliance** in `mldsa_sign`. This is the 4th primitive bug
+found by the C→Rust migration discipline (cf. SLH-DSA/I129,
+CTR-DRBG-df/I131, ASN.1 ECDSA malleability/I133).
+
+### The bug
+
+FIPS 204 §6.2 (ML-DSA.Sign_internal) derives the private mask seed as
+`ρ' = H(K ‖ rnd ‖ μ, 64)`, where `rnd` is 32 bytes (`0^256` for the
+deterministic variant, random for the hedged variant). The Rust
+`mldsa_sign` computed `ρ' = H(K ‖ μ)` — the `rnd` was **omitted entirely**
+(not even the deterministic `0^256`). Every ML-DSA signature therefore
+diverged from FIPS-204. It was invisible to verification and sign→verify
+round-trips, which never recompute `ρ'` (they only check the signature
+equation), so the existing tests all passed.
+
+### The fix (`crates/hitls-crypto/src/mldsa/`)
+
+- `poly.rs`: new `hash_h3_into(a, b, c, out)` (SHAKE256 of `a‖b‖c`).
+- `mod.rs`: `mldsa_sign` → `mldsa_sign_internal(sk, msg, rnd, params)` with
+  `ρ' = H(K ‖ rnd ‖ μ)`; the public deterministic `sign` calls it with
+  `rnd = 0^32` (FIPS-204 deterministic ML-DSA).
+
+Confirmed correct by reproducing the openHiTLS C `SIGNDATA_TC001`
+(`BSL_..._MLDSA_44`) vector byte-for-byte with `rnd = seed` before wiring
+anything (a throwaway probe).
+
+### The hook + KATs
+
+- `MlDsaKeyPair::sign_with_rnd(message, rnd)` — `#[doc(hidden)]` +
+  `#[cfg(feature="kat-nonce")]` + `#[deprecated]`. Note: unlike an
+  ECDSA/DSA nonce, ML-DSA `rnd` reuse does **not** leak the key (`rnd = 0`
+  is a sanctioned FIPS deterministic mode), so the sentinel note is
+  "test-only", not "leaks the key".
+- `MlDsaKeyPair::from_private_key(type, sk)` — sign-only constructor
+  (signing needs only `sk`, which embeds `tr = H(pk)`).
+- The `mldsa` emitter emits `SIGNDATA_TC001` → `from_private_key(type,
+  prvKey).sign_with_rnd(msg, seed) == sign` (C `ENCODE_FLAG=0` ⇒ internal
+  interface, raw msg). `migrated_mldsa.rs` **45 → 105** (+60 sign KATs
+  across ML-DSA-44/65/87), all byte-exact.
+
+### Verification
+
+- `migrated_mldsa` **105/0** (`--all-features`, `-D warnings`) / **45/0**
+  (no `kat-nonce`, sign cfg'd out).
+- hitls-crypto mldsa lib **47/0** — incl. the `test_mldsa_*_deterministic*`
+  determinism check (still deterministic) and the 3 `*_golden_value_kat`
+  self-snapshots, whose **signature** fingerprints were regenerated to the
+  corrected FIPS-204 values (the keygen pk/sk fingerprints are unchanged).
+- hitls-pki ML-DSA verify (X.509/CMS) **31/0** — verification is
+  unaffected by the `ρ'` change.
+- xtask `--check` drift gate passes; na-list tally → 1770 emitted; `fmt` +
+  `clippy -D warnings --all-features --all-targets` clean.
+
+### Production impact
+
+ML-DSA signatures produced by this library (e.g. X.509 certificate
+signing) now conform to FIPS-204. Verification of externally-produced
+signatures was already correct and is unchanged.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/mldsa/poly.rs` | Modified | `hash_h3_into`. |
+| `crates/hitls-crypto/src/mldsa/mod.rs` | Modified | `ρ'` fix (`mldsa_sign_internal` + rnd) + `from_private_key` + `sign_with_rnd` + corrected golden values. |
+| `xtask/src/mldsa.rs` | Modified | `SignData` kind + `emit_sign`. |
+| `crates/hitls-crypto/tests/migrated_mldsa.rs` | Modified | +60 ML-DSA sign KATs. |
+| `docs/c-test-na-list.md` | Modified | ML-DSA 45→105 + hook/fix note. |
+| `DEV_LOG.md` / `PROMPT_LOG.md` | Modified | This entry + Phase Index row 382 + Implementation summary I1–I137. |
+
+### Build Status (Post I137)
+
+The `kat-nonce` deterministic-sign hook now covers all four classic/PQC
+signature families (ECDSA / DSA / SM2 / ML-DSA); their sign-side KATs
+reproduce openHiTLS C byte-for-byte, and ML-DSA signing is now
+FIPS-204-conformant.

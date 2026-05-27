@@ -55,12 +55,22 @@ Counts are the `Generation summary` footer of each generated file
 | DH | 47 | 45 | 88 | 0 | 180 |
 | SM4 | 9 | 237 | 0 | 37 | 283 |
 | SM2 | 14 | 111 | 0 | 17 | 140 |
-| ML-DSA | 45 | 731 | 3 | 0 | 779 |
+| ML-DSA | 105 | 731 | 3 | 0 | 779 |
 | ML-KEM | 150 | 196 | 81 | 0 | 427 |
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 6 | 272 | 0 | 12 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
-| **Total** | **1710** | **3045** | **238** | **88** | **4462** |
+| **Total** | **1770** | **3045** | **238** | **88** | **4462** |
+
+The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
+emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
++60 sign KATs). The C injects the row's `seed` as the FIPS 204 hedging `rnd`
+(`ρ' = H(K ‖ rnd ‖ μ)`); migrating it surfaced and fixed a real FIPS-204
+non-compliance — the Rust `mldsa_sign` had used `ρ' = H(K ‖ μ)` (rnd omitted) —
+see I137. Unlike ECDSA/DSA/SM2, ML-DSA `rnd` is hedging randomness (reuse does
+not leak the key; `rnd = 0` is a sanctioned deterministic mode), so
+`sign_with_rnd` is still `kat-nonce`-gated for test discipline but its
+`#[deprecated]` note is "test-only", not "leaks the key".
 
 The `kat-nonce` deterministic-sign hook (introduced for ECDSA in I134) now also
 covers **DSA** and **SM2**: each DSA `SIGN_VERIFY` row emits a verify *and* a

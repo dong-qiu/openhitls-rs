@@ -524,6 +524,15 @@ pub(crate) fn hash_h2_into(a: &[u8], b: &[u8], output: &mut [u8]) {
     xof.squeeze_into(output);
 }
 
+/// H with three inputs concatenated, squeezed into caller-provided buffer.
+pub(crate) fn hash_h3_into(a: &[u8], b: &[u8], c: &[u8], output: &mut [u8]) {
+    let mut xof = Shake256::new();
+    xof.update(a).expect("hash update");
+    xof.update(b).expect("hash update");
+    xof.update(c).expect("hash update");
+    xof.squeeze_into(output);
+}
+
 // ─── Vector/Matrix operations ───────────────────────────────────
 
 /// Matrix-vector product in NTT domain: r = A * s.
