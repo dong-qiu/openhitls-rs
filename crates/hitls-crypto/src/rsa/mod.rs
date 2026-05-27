@@ -485,8 +485,12 @@ impl RsaPrivateKey {
         }
 
         // Non-CRT key (built via the test-only `from_nd`, which leaves `p`
-        // zero): plain m = c^d mod n. Not reachable for production keys, which
-        // always carry CRT params from `new`.
+        // zero): plain m = c^d mod n. Gated behind `kat-nonce` so this
+        // unhardened path is NOT compiled into production builds — the only
+        // way to reach a zero-`p` key is `from_nd`, which is itself
+        // `kat-nonce`-only, so production keys (always built via `new`, which
+        // requires non-zero CRT primes) never see this branch.
+        #[cfg(feature = "kat-nonce")]
         if self.p.is_zero() {
             let m = c.mod_exp(&self.d, &self.n)?;
             return m.to_bytes_be_padded(self.k);

@@ -8529,7 +8529,9 @@ Added two test-only paths behind the kat-nonce feature:
   stores n, d, zeros all CRT fields.
 - A plain-d branch at the top of raw_decrypt (m = c^d mod n via mod_exp),
   taken only when self.p.is_zero() — true ONLY for from_nd keys, so the
-  production CRT path is byte-unchanged.
+  production CRT path is byte-unchanged. The branch is itself #[cfg(kat-
+  nonce)]-gated (AI-review HIGH follow-up) so the unhardened plain-d path is
+  not compiled into production builds at all.
 
 Emitter: RSA_SIGN_PKCSV15_FUNC_TC002 → from_nd(n,d).sign(Pkcs1v15Sign,
 MD(msg)) == sign (per-test kat-nonce + allow(deprecated); the RsaPrivateKey
