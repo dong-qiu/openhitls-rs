@@ -1176,7 +1176,7 @@ macro_rules! tls13_server_do_handshake_body {
         let (hs_type, _, _) = parse_handshake_header(&ch_msg_bytes)?;
         if hs_type != HandshakeType::ClientHello {
             return Err(TlsError::HandshakeFailed(format!(
-                "expected ClientHello, got {hs_type:?}"
+                "expected ClientHello, got {hs_type:?} (alert: unexpected_message)"
             )));
         }
         // RFC 8446 §5.1 — handshake messages must end on a record
@@ -1888,14 +1888,37 @@ macro_rules! impl_tls13_server_accessors {
 /// Body for TLS 1.2 `read_handshake_msg`.
 macro_rules! tls12_read_handshake_msg_body {
     ($mode:ident, $self:ident) => {{
-        let (ct, data) = maybe_await!($mode, $self.read_record())?;
-        if ct != ContentType::Handshake {
-            return Err(TlsError::HandshakeFailed(format!(
-                "expected Handshake, got {ct:?}"
-            )));
+        // RFC 5246 §6.2.1: a handshake message MAY be fragmented across
+        // several records (and tlsfuzzer's record-layer-fragmentation tests
+        // split one down to 1 byte per record). Reassemble across records
+        // until the full message (4-byte header + body) is buffered, instead
+        // of assuming one message fits in one record (which previously made
+        // `data[..total]` slice out of bounds → the connection dropped).
+        // Mirrors the I114 ClientHello reassembly. Trailing bytes after the
+        // message (a coalesced next message) are dropped, matching the
+        // prior single-record behaviour — TLS 1.2 sends CKE/CV/Finished in
+        // their own records here.
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            if buf.len() >= 4 {
+                let total =
+                    4 + (((buf[1] as usize) << 16) | ((buf[2] as usize) << 8) | (buf[3] as usize));
+                if buf.len() >= total {
+                    let (hs_type, _, _) = parse_handshake_header(&buf)?;
+                    break Ok::<(HandshakeType, Vec<u8>), TlsError>((
+                        hs_type,
+                        buf[..total].to_vec(),
+                    ));
+                }
+            }
+            let (ct, data) = maybe_await!($mode, $self.read_record())?;
+            if ct != ContentType::Handshake {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "expected Handshake, got {ct:?} (alert: unexpected_message)"
+                )));
+            }
+            buf.extend_from_slice(&data);
         }
-        let (hs_type, _, total) = parse_handshake_header(&data)?;
-        Ok((hs_type, data[..total].to_vec()))
     }};
 }
 
@@ -1947,7 +1970,7 @@ macro_rules! tls12_read_client_hello_body {
         let (hs_type, _, _) = parse_handshake_header(&ch_msg_bytes)?;
         if hs_type != HandshakeType::ClientHello {
             return Err(TlsError::HandshakeFailed(format!(
-                "expected ClientHello, got {hs_type:?}"
+                "expected ClientHello, got {hs_type:?} (alert: unexpected_message)"
             )));
         }
         if !ch_buf.is_empty() {

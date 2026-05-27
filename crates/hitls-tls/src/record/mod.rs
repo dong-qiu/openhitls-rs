@@ -141,6 +141,19 @@ impl RecordLayer {
         }
     }
 
+    /// Maximum ciphertext expansion over the plaintext fragment limit for an
+    /// incoming encrypted record, per the active read protocol: TLS 1.3 caps
+    /// TLSCiphertext at 2^14 + 256 (RFC 8446 §5.2, small AEAD tag), whereas
+    /// TLS 1.2 / TLCP allow 2^14 + 2048 (RFC 5246 §6.2.1, explicit IV +
+    /// padding + MAC). Defaults to the stricter 256 when no decryptor is yet
+    /// active.
+    fn max_ciphertext_overhead(&self) -> usize {
+        match self.decryptor {
+            Some(RecordDecryptorVariant::Tls13(_)) | None => 256,
+            Some(_) => 2048,
+        }
+    }
+
     /// Returns true if write encryption is active (TLS 1.2, 1.3, or TLCP).
     pub fn is_encrypting(&self) -> bool {
         self.encryptor.is_some()
@@ -425,8 +438,16 @@ impl RecordLayer {
         // discrimination (an oversized *plaintext* ClientHello previously
         // slipped past because we applied the +256 cipher overhead
         // budget to every record type).
+        // The ciphertext-length budget over the plaintext limit is
+        // version-dependent: RFC 8446 §5.2 caps TLSCiphertext at 2^14 + 256
+        // (small AEAD expansion), but RFC 5246 §6.2.1 caps it at 2^14 + 2048
+        // — TLS 1.2 CBC adds an explicit IV, up to 256 bytes of padding, and
+        // the MAC, which can push a legal 2^14-plaintext record well past
+        // +256. Keying the budget on the active decryptor's protocol (rather
+        // than a flat +256) stops us from rejecting valid TLS 1.2 CBC records
+        // with `record_overflow`.
         let max_length = if content_type == ContentType::ApplicationData {
-            self.max_fragment_size + 256
+            self.max_fragment_size + self.max_ciphertext_overhead()
         } else {
             self.max_fragment_size
         };

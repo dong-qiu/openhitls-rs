@@ -20,6 +20,12 @@ pub const MAX_CIPHERTEXT_OVERHEAD: usize = 256;
 /// Maximum TLS 1.3 ciphertext fragment size.
 pub const MAX_CIPHERTEXT_LENGTH: usize = MAX_PLAINTEXT_LENGTH + MAX_CIPHERTEXT_OVERHEAD;
 
+/// Maximum TLS 1.2 ciphertext fragment size. RFC 5246 §6.2.1 caps
+/// TLSCiphertext at 2^14 + 2048 — far larger than TLS 1.3's +256 budget
+/// because CBC adds an explicit IV, up to 256 bytes of padding, and the MAC.
+/// A legal 2^14-byte-plaintext CBC record can exceed +256.
+pub const MAX_CIPHERTEXT_LENGTH_TLS12: usize = MAX_PLAINTEXT_LENGTH + 2048;
+
 /// TLS record header size: content_type(1) + version(2) + length(2).
 pub const RECORD_HEADER_LEN: usize = 5;
 

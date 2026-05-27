@@ -8330,3 +8330,39 @@ before wiring. Verification: migrated_ecc 61/0 (all-features) / 44/0
 Pilot for the same hook on DSA/SM2/ML-DSA sign sides.
 
 Recorded as DEV_LOG Phase I134.
+
+---
+
+## Phase I135 — TLS 1.2 Record/Handshake Conformance Batch (RFC 5246 §6.2.1 + §7.2.2) (2026-05-27)
+
+> 请按照剩余可选依次完成
+
+(The 3 "remaining optional" items the independent audit listed. Did them
+in order; each turned out to be a real RFC 5246 conformance fix, not an
+XFAIL.)
+
+1. record-layer-fragmentation (19/5 → 22/2): tls12_read_handshake_msg
+   read ONE record then data[..total] — a ClientKeyExchange fragmented
+   across records made total > data.len() → connection dropped. Added
+   cross-record reassembly (mirrors I114 ClientHello). 2 residual XFAILs
+   are the 1-byte/record case where the echo server mirrors the client's
+   1-byte app-data as many 1-byte records, which tlsfuzzer's single
+   ExpectApplicationData doesn't drain — echo quirk, not a bug.
+
+2. message-skipping (2/9 → 11/0): out-of-sequence handshake messages gave
+   handshake_failure; RFC 5246 §7.2.2 wants unexpected_message. Appended
+   "(alert: unexpected_message)" to the "expected X, got Y" sequencing
+   errors so tls_error_to_alert maps them right.
+
+3. atypical-padding (8/4 → 12/0): a legal 2^14-plaintext CBC record with
+   large padding exceeds the TLS 1.3 +256 ciphertext budget but is fine
+   under RFC 5246 §6.2.1 (2^14+2048). Two gates fixed: parse_record now
+   uses a version-aware max_ciphertext_overhead() (256 for 1.3, 2048 for
+   1.2/TLCP), and CBC/EtM decrypt uses MAX_CIPHERTEXT_LENGTH_TLS12.
+
+Curated all 3 into scripts_12. No regression: hitls-tls lib 1556/0
+(updated CBC/EtM overflow tests), integration 0 failed, all 28
+scripts_12 + TLS 1.3 record-path sanity 0 FAIL/0 XPASS. Hit a 1-commit
+rebase + I-number collision (parallel I134 kat-nonce) → renumbered I135.
+Ran in isolated temp worktree (`fix/tls12-record-handshake-conformance`).
+Recorded as DEV_LOG Phase I135.
