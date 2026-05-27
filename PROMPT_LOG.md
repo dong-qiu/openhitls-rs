@@ -8569,3 +8569,32 @@ emitted (RSA 38 → 44, total C cases 144 → 170); fmt + clippy clean.
 Encrypt / PSS sign / OAEP decrypt remain API-surface follow-ups.
 
 Recorded as DEV_LOG Phase I140.
+
+## Phase I141 — Configurable-Hash OAEP API + OAEP-SHA1 Decrypt KATs (2026-05-28)
+
+> 做可配置哈希的 OAEP API
+
+Implemented a hash-parameterised RSAES-OAEP path to unlock the 6 C OAEP
+decrypt vectors (all SHA-1) that I140 had routed to unsupported (rsa::oaep
+was SHA-256 + empty-label only). Clean implementation task — no randomness
+injection.
+
+- mgf1_with_hash: added a real SHA-1 arm, gated #[cfg(feature="sha1")] (fails
+  closed when off; PSS only uses SHA-256/384/512, so unaffected).
+- rsa/oaep.rs: parameterised by RsaHashAlg — oaep_encrypt_pad_alg /
+  oaep_decrypt_unpad_alg + l_hash(alg); SHA-256 wrappers retained so
+  RsaPadding::Oaep is byte-unchanged. Constant-time DB scan preserved.
+- Public API: RsaPublicKey::encrypt_oaep(pt, alg) +
+  RsaPrivateKey::decrypt_oaep(ct, alg) (SHA-1 needs the sha1 feature).
+- xtask emit_decrypt: OAEP rows → from_nd(n,d).decrypt_oaep(ct,
+  RsaHashAlg::{hash}) == pt. migrated_rsa 44 → 48 (+4 after dedup), byte-exact
+  vs C first run.
+
+Verification: rsa lib 64/0 (incl. 2 new SHA-1 OAEP tests; PSS all-hashes
+intact); migrated_rsa 48/0 (kat-nonce) / 30/0 (no kat-nonce); builds clean
+with sha1 OFF (cfg gating verified); drift gate passes; na-list → 1818
+emitted (RSA 44 → 48; 2 remaining unsupported = PSS-SHA-224); fmt + clippy
+clean. Encrypt (randomised padding) + PSS sign (random salt) remain
+API-surface.
+
+Recorded as DEV_LOG Phase I141.

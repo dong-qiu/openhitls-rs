@@ -84,6 +84,18 @@ fn md_to_pss_alg(symbol: &str) -> Option<&'static str> {
     }
 }
 
+/// Map a `CRYPT_MD_*` symbol to the `RsaHashAlg` variant accepted by
+/// `decrypt_oaep` (SHA-1/256/384/512 — there is no SHA-224 variant).
+fn md_to_oaep_alg(symbol: &str) -> Option<&'static str> {
+    match symbol {
+        "CRYPT_MD_SHA1" => Some("Sha1"),
+        "CRYPT_MD_SHA256" => Some("Sha256"),
+        "CRYPT_MD_SHA384" => Some("Sha384"),
+        "CRYPT_MD_SHA512" => Some("Sha512"),
+        _ => None,
+    }
+}
+
 /// `expect == 0` (CRYPT_SUCCESS) → the signature must verify.
 fn expect_pass(case: &TestCase, idx: usize) -> Option<bool> {
     case.args
@@ -212,13 +224,13 @@ fn emit_sign_pkcs15(
 /// Deterministic RSA **decrypt** KAT (`RSA_CRYPT_FUNC_TC001`:
 /// `keyLen : padMode : hashId : n : e : d : plaintext : ciphertext :
 /// isProvider`). Decryption is deterministic, so `decrypt(padding,
-/// ciphertext) == plaintext`. Only the **PKCS#1 v1.5** padding mode is
-/// migrated here: it uses the test-only `RsaPrivateKey::from_nd` (the C
-/// vectors publish only `(n, d)`) and needs no hash. OAEP rows are
-/// `unsupported` — the Rust OAEP is hardcoded to SHA-256 + empty label, but
-/// every C OAEP vector uses SHA-1, so they cannot round-trip; raw `NO_PAD`
-/// rows route to API-surface (plain `c^d mod n`, already exercised by the
-/// sign KATs + the existing `decrypt(None, …)` unit test).
+/// ciphertext) == plaintext`. Two padding modes are migrated, both using the
+/// test-only `RsaPrivateKey::from_nd` (the C vectors publish only `(n, d)`):
+/// **PKCS#1 v1.5** (`decrypt(Pkcs1v15Encrypt, ct)`, no hash) and **OAEP**
+/// (`decrypt_oaep(ct, RsaHashAlg::{hash})`, hash from the row's `hashId` —
+/// every C OAEP vector is SHA-1). Raw `NO_PAD` rows route to API-surface
+/// (plain `c^d mod n`, already exercised by the sign KATs + the existing
+/// `decrypt(None, …)` unit test).
 fn emit_decrypt(
     out: &mut String,
     case: &TestCase,
@@ -238,15 +250,6 @@ fn emit_decrypt(
         stats.skipped_unknown += 1;
         return;
     };
-    // Only PKCS#1 v1.5 is reproducible with the current Rust API.
-    if pad_mode != "CRYPT_CTRL_SET_RSA_RSAES_PKCSV15" {
-        if pad_mode == "CRYPT_CTRL_SET_RSA_RSAES_OAEP" {
-            stats.skipped_unsupported_alg += 1;
-        } else {
-            stats.skipped_api += 1;
-        }
-        return;
-    }
     let (Some(n), Some(d), Some(pt), Some(ct)) = (
         case.args[3].as_hex(),
         case.args[5].as_hex(),
@@ -256,23 +259,40 @@ fn emit_decrypt(
         stats.skipped_unknown += 1;
         return;
     };
+
+    // Decrypt expression + a short fn-name suffix, by padding mode.
+    let (decrypt_expr, suffix) = match pad_mode {
+        "CRYPT_CTRL_SET_RSA_RSAES_PKCSV15" => (
+            "sk.decrypt(RsaPadding::Pkcs1v15Encrypt, ct)".to_string(),
+            "pkcs15",
+        ),
+        "CRYPT_CTRL_SET_RSA_RSAES_OAEP" => {
+            let Some(alg) = case.args[2].as_symbol().and_then(md_to_oaep_alg) else {
+                stats.skipped_unsupported_alg += 1;
+                return;
+            };
+            used.insert("oaep");
+            (format!("sk.decrypt_oaep(ct, RsaHashAlg::{alg})"), "oaep")
+        }
+        // Raw NO_PAD (and any other ctrl) → API-surface.
+        _ => {
+            stats.skipped_api += 1;
+            return;
+        }
+    };
     used.insert("privkey");
 
-    write_doc(out, case, "RSA PKCS#1 v1.5 deterministic decrypt");
+    write_doc(out, case, "RSA deterministic decrypt");
     writeln!(out, "#[cfg(feature = \"kat-nonce\")]").unwrap();
     writeln!(out, "#[allow(deprecated)]").unwrap();
     writeln!(out, "#[test]").unwrap();
-    writeln!(out, "fn tc_line{}_rsa_pkcs15_decrypt() {{", case.line).unwrap();
+    writeln!(out, "fn tc_line{}_rsa_{suffix}_decrypt() {{", case.line).unwrap();
     writeln!(out, "    let n: &[u8] = {};", format_byte_slice(n)).unwrap();
     writeln!(out, "    let d: &[u8] = {};", format_byte_slice(d)).unwrap();
     writeln!(out, "    let ct: &[u8] = {};", format_byte_slice(ct)).unwrap();
     writeln!(out, "    let expected: &[u8] = {};", format_byte_slice(pt)).unwrap();
     writeln!(out, "    let sk = RsaPrivateKey::from_nd(n, d).unwrap();").unwrap();
-    writeln!(
-        out,
-        "    assert_eq!(sk.decrypt(RsaPadding::Pkcs1v15Encrypt, ct).unwrap(), expected);"
-    )
-    .unwrap();
+    writeln!(out, "    assert_eq!({decrypt_expr}.unwrap(), expected);").unwrap();
     writeln!(out, "}}\n").unwrap();
     stats.emitted += 1;
 }
@@ -354,7 +374,7 @@ fn write_header(out: &mut String, used: &BTreeSet<&'static str>) {
          // Generator: docs/c-test-migration-plan.md Phase A (xtask).\n\n",
     );
     out.push_str("#![cfg(all(feature = \"rsa\", feature = \"sha1\", feature = \"sha2\"))]\n\n");
-    if used.contains("pss") {
+    if used.contains("pss") || used.contains("oaep") {
         out.push_str("use hitls_crypto::rsa::{RsaHashAlg, RsaPadding, RsaPublicKey};\n");
     } else {
         out.push_str("use hitls_crypto::rsa::{RsaPadding, RsaPublicKey};\n");

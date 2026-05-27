@@ -111,6 +111,15 @@ impl RsaPublicKey {
         }
     }
 
+    /// OAEP-encrypt with an explicit hash function (MGF1 uses the same hash;
+    /// empty label). `RsaPadding::Oaep` in [`Self::encrypt`] is the SHA-256
+    /// case; this exposes SHA-1/384/512 for interop. SHA-1 requires the
+    /// `sha1` feature.
+    pub fn encrypt_oaep(&self, plaintext: &[u8], alg: RsaHashAlg) -> Result<Vec<u8>, CryptoError> {
+        let em = oaep::oaep_encrypt_pad_alg(plaintext, self.k, alg)?;
+        self.raw_encrypt(&em)
+    }
+
     /// Verify a signature against a message digest.
     pub fn verify(
         &self,
@@ -412,6 +421,18 @@ impl RsaPrivateKey {
         }
     }
 
+    /// OAEP-decrypt with an explicit hash function (MGF1 uses the same hash;
+    /// empty label). `RsaPadding::Oaep` in [`Self::decrypt`] is the SHA-256
+    /// case; this exposes SHA-1/384/512 for interop. SHA-1 requires the
+    /// `sha1` feature.
+    pub fn decrypt_oaep(&self, ciphertext: &[u8], alg: RsaHashAlg) -> Result<Vec<u8>, CryptoError> {
+        if ciphertext.len() != self.k {
+            return Err(CryptoError::InvalidArg(""));
+        }
+        let em = self.raw_decrypt(ciphertext)?;
+        oaep::oaep_decrypt_unpad_alg(&em, alg)
+    }
+
     /// Sign a message digest using this private key.
     pub fn sign(&self, padding: RsaPadding, digest: &[u8]) -> Result<Vec<u8>, CryptoError> {
         match padding {
@@ -576,8 +597,11 @@ pub(crate) fn mgf1_with_hash(
 ) -> Result<Vec<u8>, CryptoError> {
     use crate::sha2::{Sha256, Sha384, Sha512};
 
+    // SHA-1 MGF1 is only available with the `sha1` feature (used by OAEP-SHA-1
+    // for interop; PSS never uses SHA-1). h_len is harmless to compute even
+    // without the feature — the per-iteration match below fails closed.
     let h_len = match alg {
-        RsaHashAlg::Sha1 => return Err(CryptoError::InvalidArg("SHA-1 not supported in MGF1")),
+        RsaHashAlg::Sha1 => 20,
         RsaHashAlg::Sha256 => 32,
         RsaHashAlg::Sha384 => 48,
         RsaHashAlg::Sha512 => 64,
@@ -586,26 +610,39 @@ pub(crate) fn mgf1_with_hash(
     let mut t = Vec::with_capacity(iterations * h_len);
 
     for counter in 0..iterations {
+        let c = (counter as u32).to_be_bytes();
         match alg {
+            RsaHashAlg::Sha1 => {
+                #[cfg(feature = "sha1")]
+                {
+                    let mut hasher = crate::sha1::Sha1::new();
+                    hasher.update(seed)?;
+                    hasher.update(&c)?;
+                    t.extend_from_slice(&hasher.finish()?);
+                }
+                #[cfg(not(feature = "sha1"))]
+                return Err(CryptoError::InvalidArg(
+                    "SHA-1 MGF1 requires the sha1 feature",
+                ));
+            }
             RsaHashAlg::Sha256 => {
                 let mut hasher = Sha256::new();
                 hasher.update(seed)?;
-                hasher.update(&(counter as u32).to_be_bytes())?;
+                hasher.update(&c)?;
                 t.extend_from_slice(&hasher.finish()?);
             }
             RsaHashAlg::Sha384 => {
                 let mut hasher = Sha384::new();
                 hasher.update(seed)?;
-                hasher.update(&(counter as u32).to_be_bytes())?;
+                hasher.update(&c)?;
                 t.extend_from_slice(&hasher.finish()?);
             }
             RsaHashAlg::Sha512 => {
                 let mut hasher = Sha512::new();
                 hasher.update(seed)?;
-                hasher.update(&(counter as u32).to_be_bytes())?;
+                hasher.update(&c)?;
                 t.extend_from_slice(&hasher.finish()?);
             }
-            RsaHashAlg::Sha1 => unreachable!(),
         }
     }
 

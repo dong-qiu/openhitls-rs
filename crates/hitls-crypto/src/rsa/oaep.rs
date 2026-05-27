@@ -1,52 +1,96 @@
 //! RSAES-OAEP encryption padding (RFC 8017 §7.1).
 //!
-//! Uses SHA-256 as the hash function and MGF1 as the mask generation function.
+//! Parameterised by hash function (SHA-1/256/384/512); MGF1 uses the same
+//! hash. The label is the empty string. SHA-1 OAEP requires the `sha1`
+//! feature (kept for interop with legacy peers); the SHA-256 wrappers
+//! (`oaep_encrypt_pad` / `oaep_decrypt_unpad`) preserve the original API.
 
 use hitls_types::CryptoError;
 use subtle::ConstantTimeEq;
+use zeroize::Zeroizing;
 
-use crate::sha2::Sha256;
+use super::pss::h_len;
+use super::{mgf1_with_hash, RsaHashAlg};
 
-use super::mgf1_sha256;
-
-/// SHA-256 output length in bytes.
+/// SHA-256 output length in bytes (the back-compat default).
 const H_LEN: usize = 32;
 
-/// Compute lHash = SHA-256("") for the default empty label.
-fn l_hash() -> Result<[u8; H_LEN], CryptoError> {
-    let mut hasher = Sha256::new();
-    hasher.finish()
+/// Compute lHash = Hash("") for the default empty label, under `alg`.
+fn l_hash(alg: RsaHashAlg) -> Result<Vec<u8>, CryptoError> {
+    match alg {
+        RsaHashAlg::Sha1 => {
+            #[cfg(feature = "sha1")]
+            {
+                let mut hasher = crate::sha1::Sha1::new();
+                Ok(hasher.finish()?.to_vec())
+            }
+            #[cfg(not(feature = "sha1"))]
+            {
+                Err(CryptoError::InvalidArg(
+                    "SHA-1 OAEP requires the sha1 feature",
+                ))
+            }
+        }
+        RsaHashAlg::Sha256 => {
+            let mut hasher = crate::sha2::Sha256::new();
+            Ok(hasher.finish()?.to_vec())
+        }
+        RsaHashAlg::Sha384 => {
+            let mut hasher = crate::sha2::Sha384::new();
+            Ok(hasher.finish()?.to_vec())
+        }
+        RsaHashAlg::Sha512 => {
+            let mut hasher = crate::sha2::Sha512::new();
+            Ok(hasher.finish()?.to_vec())
+        }
+    }
 }
 
-/// EME-OAEP encoding (RFC 8017 §7.1.1 step 2).
+/// EME-OAEP encoding (RFC 8017 §7.1.1 step 2) — SHA-256 wrapper.
+pub(crate) fn oaep_encrypt_pad(msg: &[u8], k: usize) -> Result<Vec<u8>, CryptoError> {
+    oaep_encrypt_pad_alg(msg, k, RsaHashAlg::Sha256)
+}
+
+/// EME-OAEP decoding (RFC 8017 §7.1.2 step 3) — SHA-256 wrapper.
+pub(crate) fn oaep_decrypt_unpad(em: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    oaep_decrypt_unpad_alg(em, RsaHashAlg::Sha256)
+}
+
+/// EME-OAEP encoding parameterised by hash algorithm.
 ///
 /// EM = 0x00 || maskedSeed || maskedDB
-pub(crate) fn oaep_encrypt_pad(msg: &[u8], k: usize) -> Result<Vec<u8>, CryptoError> {
+pub(crate) fn oaep_encrypt_pad_alg(
+    msg: &[u8],
+    k: usize,
+    alg: RsaHashAlg,
+) -> Result<Vec<u8>, CryptoError> {
+    let hlen = h_len(alg);
     // mLen <= k - 2*hLen - 2
-    let max_msg_len = k.saturating_sub(2 * H_LEN + 2);
+    let max_msg_len = k.saturating_sub(2 * hlen + 2);
     if msg.len() > max_msg_len {
         return Err(CryptoError::InputOverflow);
     }
 
-    let lhash = l_hash()?;
+    let lhash = l_hash(alg)?;
 
-    // DB = lHash || PS || 0x01 || M
-    let db_len = k - H_LEN - 1;
-    let mut db = Vec::with_capacity(db_len);
+    // DB = lHash || PS || 0x01 || M. `db` carries the plaintext, so it is
+    // zeroized on drop (covers every return path, incl. errors).
+    let db_len = k - hlen - 1;
+    let mut db = Zeroizing::new(Vec::with_capacity(db_len));
     db.extend_from_slice(&lhash);
     // PS = zero padding
-    let ps_len = db_len - H_LEN - 1 - msg.len();
+    let ps_len = db_len - hlen - 1 - msg.len();
     db.extend(std::iter::repeat(0x00).take(ps_len));
     db.push(0x01);
     db.extend_from_slice(msg);
     debug_assert_eq!(db.len(), db_len);
 
-    // Generate random seed
-    let mut seed = [0u8; H_LEN];
-    getrandom::fill(&mut seed).map_err(|_| CryptoError::BnRandGenFail)?;
+    // Generate random seed (secret; zeroized on drop)
+    let mut seed = Zeroizing::new(vec![0u8; hlen]);
+    getrandom::fill(&mut seed[..]).map_err(|_| CryptoError::BnRandGenFail)?;
 
     // dbMask = MGF1(seed, k - hLen - 1)
-    let db_mask = mgf1_sha256(&seed, db_len)?;
+    let db_mask = Zeroizing::new(mgf1_with_hash(&seed, db_len, alg)?);
 
     // maskedDB = DB XOR dbMask (in-place on db)
     for (d, m) in db.iter_mut().zip(db_mask.iter()) {
@@ -54,14 +98,14 @@ pub(crate) fn oaep_encrypt_pad(msg: &[u8], k: usize) -> Result<Vec<u8>, CryptoEr
     }
 
     // seedMask = MGF1(maskedDB, hLen)
-    let seed_mask = mgf1_sha256(&db, H_LEN)?;
+    let seed_mask = Zeroizing::new(mgf1_with_hash(&db, hlen, alg)?);
 
     // maskedSeed = seed XOR seedMask (in-place on seed)
     for (s, m) in seed.iter_mut().zip(seed_mask.iter()) {
         *s ^= m;
     }
 
-    // EM = 0x00 || maskedSeed || maskedDB
+    // EM = 0x00 || maskedSeed || maskedDB (ciphertext-bound, not secret)
     let mut em = Vec::with_capacity(k);
     em.push(0x00);
     em.extend_from_slice(&seed);
@@ -71,53 +115,54 @@ pub(crate) fn oaep_encrypt_pad(msg: &[u8], k: usize) -> Result<Vec<u8>, CryptoEr
     Ok(em)
 }
 
-/// EME-OAEP decoding (RFC 8017 §7.1.2 step 3).
+/// EME-OAEP decoding parameterised by hash algorithm.
 ///
 /// Parses EM = 0x00 || maskedSeed || maskedDB and returns the original message.
-pub(crate) fn oaep_decrypt_unpad(em: &[u8]) -> Result<Vec<u8>, CryptoError> {
+pub(crate) fn oaep_decrypt_unpad_alg(em: &[u8], alg: RsaHashAlg) -> Result<Vec<u8>, CryptoError> {
+    let hlen = h_len(alg);
     let k = em.len();
-    if k < 2 * H_LEN + 2 {
+    if k < 2 * hlen + 2 {
         return Err(CryptoError::RsaInvalidPadding);
     }
 
     // Split EM
     let y = em[0];
-    let masked_seed = &em[1..1 + H_LEN];
-    let masked_db = &em[1 + H_LEN..];
+    let masked_seed = &em[1..1 + hlen];
+    let masked_db = &em[1 + hlen..];
     let db_len = masked_db.len();
 
     // seedMask = MGF1(maskedDB, hLen)
-    let seed_mask = mgf1_sha256(masked_db, H_LEN)?;
+    let seed_mask = Zeroizing::new(mgf1_with_hash(masked_db, hlen, alg)?);
 
-    // seed = maskedSeed XOR seedMask (in-place on stack copy)
-    let mut seed = [0u8; H_LEN];
-    seed.copy_from_slice(masked_seed);
+    // seed = maskedSeed XOR seedMask (secret; zeroized on drop)
+    let mut seed = Zeroizing::new(masked_seed.to_vec());
     for (s, m) in seed.iter_mut().zip(seed_mask.iter()) {
         *s ^= m;
     }
 
     // dbMask = MGF1(seed, k - hLen - 1)
-    let db_mask = mgf1_sha256(&seed, db_len)?;
+    let db_mask = Zeroizing::new(mgf1_with_hash(&seed, db_len, alg)?);
 
-    // DB = maskedDB XOR dbMask (in-place on copy)
-    let mut db = masked_db.to_vec();
+    // DB = maskedDB XOR dbMask. `db` carries the recovered plaintext, so it
+    // is zeroized on drop (covers every return path, incl. padding errors).
+    let mut db = Zeroizing::new(masked_db.to_vec());
     for (d, m) in db.iter_mut().zip(db_mask.iter()) {
         *d ^= m;
     }
 
     // Verify: y must be 0x00
     // DB = lHash' || PS || 0x01 || M
-    let lhash = l_hash()?;
+    let lhash = l_hash(alg)?;
 
     // Check lHash matches (constant-time)
-    let lhash_valid = db[..H_LEN].ct_eq(&lhash).unwrap_u8();
+    let lhash_valid = db[..hlen].ct_eq(&lhash[..]).unwrap_u8();
 
     // Constant-time separator scan: always iterate the entire PS||0x01||M region.
     // Accumulate flags with bitwise ops to avoid secret-dependent branches.
     let mut found_one = 0u8;
     let mut invalid = 0u8;
     let mut msg_start = 0usize;
-    for (i, &byte) in db.iter().enumerate().take(db_len).skip(H_LEN) {
+    for (i, &byte) in db.iter().enumerate().take(db_len).skip(hlen) {
         let is_zero = byte.ct_eq(&0x00).unwrap_u8();
         let is_one = byte.ct_eq(&0x01).unwrap_u8();
         let is_first_one = is_one & !found_one;
@@ -150,7 +195,7 @@ mod tests {
             0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
             0x78, 0x52, 0xb8, 0x55,
         ];
-        assert_eq!(l_hash().unwrap(), expected);
+        assert_eq!(l_hash(RsaHashAlg::Sha256).unwrap(), expected);
     }
 
     #[test]
@@ -231,7 +276,7 @@ mod tests {
 
         // Now tamper: flip a byte in the DB region (after unmasking) by corrupting maskedDB.
         // The simplest approach: construct EM manually with bad PS byte.
-        let lhash = l_hash().unwrap();
+        let lhash = l_hash(RsaHashAlg::Sha256).unwrap();
         let db_len = k - H_LEN - 1;
         let mut db = Vec::with_capacity(db_len);
         db.extend_from_slice(&lhash);
@@ -249,9 +294,9 @@ mod tests {
 
         // Use a fixed seed so the result is deterministic
         let seed = vec![0xAAu8; H_LEN];
-        let db_mask = mgf1_sha256(&seed, db_len).unwrap();
+        let db_mask = mgf1_with_hash(&seed, db_len, RsaHashAlg::Sha256).unwrap();
         let masked_db: Vec<u8> = db.iter().zip(db_mask.iter()).map(|(a, b)| a ^ b).collect();
-        let seed_mask = mgf1_sha256(&masked_db, H_LEN).unwrap();
+        let seed_mask = mgf1_with_hash(&masked_db, H_LEN, RsaHashAlg::Sha256).unwrap();
         let masked_seed: Vec<u8> = seed
             .iter()
             .zip(seed_mask.iter())
@@ -283,5 +328,32 @@ mod tests {
         let r2 = oaep_decrypt_unpad(&em2).unwrap();
         assert_eq!(r1, msg);
         assert_eq!(r2, msg);
+    }
+
+    #[cfg(feature = "sha1")]
+    #[test]
+    fn test_oaep_sha1_roundtrip() {
+        // OAEP-SHA-1 (hLen = 20): pad/unpad must round-trip independently of the
+        // SHA-256 default path.
+        let msg = b"sha1 oaep interop";
+        let k = 128;
+        let em = oaep_encrypt_pad_alg(msg, k, RsaHashAlg::Sha1).unwrap();
+        assert_eq!(em.len(), k);
+        assert_eq!(em[0], 0x00);
+        let recovered = oaep_decrypt_unpad_alg(&em, RsaHashAlg::Sha1).unwrap();
+        assert_eq!(recovered, msg);
+        // Cross-hash must NOT decode (different lHash + MGF1).
+        assert!(oaep_decrypt_unpad_alg(&em, RsaHashAlg::Sha256).is_err());
+    }
+
+    #[cfg(feature = "sha1")]
+    #[test]
+    fn test_oaep_l_hash_sha1_empty() {
+        // SHA-1("") = da39a3ee5e6b4b0d3255bfef95601890afd80709
+        let expected: [u8; 20] = [
+            0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d, 0x32, 0x55, 0xbf, 0xef, 0x95, 0x60,
+            0x18, 0x90, 0xaf, 0xd8, 0x07, 0x09,
+        ];
+        assert_eq!(l_hash(RsaHashAlg::Sha1).unwrap(), expected);
     }
 }
