@@ -362,6 +362,37 @@ mod tests {
         assert_eq!(s, s2);
     }
 
+    #[test]
+    fn test_ecdsa_der_rejects_malformed_tags() {
+        // A valid signature whose SEQUENCE tag (byte 0) or inner INTEGER tag
+        // is class-flipped must be rejected, not silently decoded to the
+        // original (r, s). Otherwise a malformed-DER encoding of a valid
+        // signature verifies — signature malleability (tlsfuzzer
+        // test-tls13-ecdsa-in-certificate-verify "xor at 0" / "xor at <s-tag>").
+        let r = BigNum::from_bytes_be(&hex(
+            "d73cd3722bae6cc0b39065bb4003d8ece1ef2f7a8a55bfd677234b0b3b902650",
+        ));
+        let s = BigNum::from_bytes_be(&hex(
+            "8d5e4e04b9a95a4029e55cf8fd7c93d77abe41beab1a4c55dd23b3e06eeaf5e3",
+        ));
+        let der = encode_der_signature(&r, &s).unwrap();
+        assert!(decode_der_signature(&der).is_ok());
+
+        // Flip the SEQUENCE tag (byte 0) from Universal (0x30) to a non-
+        // universal class (0x70 = Application): read_sequence must reject it.
+        let mut bad_seq = der.clone();
+        bad_seq[0] ^= 0x40;
+        assert!(decode_der_signature(&bad_seq).is_err());
+
+        // Flip the first INTEGER tag (byte 2, the r component, 0x02 -> 0x82 =
+        // context-specific): read_integer must reject it. (Flipping r's or s's
+        // tag is equivalent for this test — both must fail.)
+        let int_tag_pos = 2;
+        let mut bad_int = der.clone();
+        bad_int[int_tag_pos] ^= 0x80;
+        assert!(decode_der_signature(&bad_int).is_err());
+    }
+
     use hitls_utils::hex::hex;
 
     #[test]

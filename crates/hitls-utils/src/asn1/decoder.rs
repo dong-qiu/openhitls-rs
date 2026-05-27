@@ -1,6 +1,6 @@
 //! ASN.1 DER decoder.
 
-use super::{Tag, Tlv};
+use super::{Tag, TagClass, Tlv};
 use hitls_types::CryptoError;
 
 /// A streaming ASN.1 DER decoder.
@@ -73,7 +73,13 @@ impl<'a> Decoder<'a> {
     /// Read an INTEGER and return its bytes (big-endian, may include leading zero).
     pub fn read_integer(&mut self) -> Result<&'a [u8], CryptoError> {
         let tlv = self.read_tlv()?;
-        if tlv.tag.number != 0x02 {
+        // A DER INTEGER is the universal, primitive tag 0x02. Checking only
+        // `number == 2` would also accept e.g. a context-specific 0x82 tag
+        // (the low 5 bits are still 2): a single-bit flip of the 0x02 tag
+        // byte. For an ECDSA signature that lets a malformed-DER encoding of
+        // an otherwise-valid (r, s) verify — a signature-malleability /
+        // DER-strictness flaw. Require the full universal-primitive INTEGER.
+        if tlv.tag.class != TagClass::Universal || tlv.tag.constructed || tlv.tag.number != 0x02 {
             return Err(CryptoError::DecodeAsn1Fail);
         }
         Ok(tlv.value)
@@ -109,7 +115,12 @@ impl<'a> Decoder<'a> {
     /// Read a SEQUENCE, returning a sub-decoder over its contents.
     pub fn read_sequence(&mut self) -> Result<Decoder<'a>, CryptoError> {
         let tlv = self.read_tlv()?;
-        if tlv.tag.number != 0x10 || !tlv.tag.constructed {
+        // A DER SEQUENCE is the universal, constructed tag 0x30. As with
+        // `read_integer`, checking only number+constructed would accept a
+        // bit-flipped class (e.g. 0x70 / 0xB0) — the outer tag of an ECDSA
+        // signature — letting a malformed-DER encoding verify. Require the
+        // universal class too.
+        if tlv.tag.class != TagClass::Universal || tlv.tag.number != 0x10 || !tlv.tag.constructed {
             return Err(CryptoError::DecodeAsn1Fail);
         }
         Ok(Decoder::new(tlv.value))
@@ -312,6 +323,37 @@ fn datetime_to_unix(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_read_integer_rejects_non_universal_tag() {
+        // 0x02 is a universal-primitive INTEGER. A single-bit flip of the tag
+        // byte (e.g. 0x82 = context-specific, number 2) must NOT be accepted
+        // as an INTEGER — otherwise a malformed-DER ECDSA signature with valid
+        // (r, s) verifies (signature malleability). Only the tag byte differs.
+        assert_eq!(
+            Decoder::new(&[0x02, 0x01, 0x2A]).read_integer().unwrap(),
+            &[0x2A]
+        );
+        assert!(Decoder::new(&[0x82, 0x01, 0x2A]).read_integer().is_err()); // context-specific
+        assert!(Decoder::new(&[0x22, 0x01, 0x2A]).read_integer().is_err()); // constructed
+        assert!(Decoder::new(&[0x42, 0x01, 0x2A]).read_integer().is_err()); // application
+    }
+
+    #[test]
+    fn test_read_sequence_rejects_non_universal_tag() {
+        // 0x30 is a universal-constructed SEQUENCE. A class-bit flip of the
+        // tag (0x70 / 0xB0) must be rejected (it is the outer tag of an ECDSA
+        // signature — same malleability concern as INTEGER above).
+        assert!(Decoder::new(&[0x30, 0x03, 0x02, 0x01, 0x2A])
+            .read_sequence()
+            .is_ok());
+        assert!(Decoder::new(&[0x70, 0x03, 0x02, 0x01, 0x2A])
+            .read_sequence()
+            .is_err()); // application
+        assert!(Decoder::new(&[0xB0, 0x03, 0x02, 0x01, 0x2A])
+            .read_sequence()
+            .is_err()); // context-specific
+    }
 
     #[test]
     fn test_read_set() {
