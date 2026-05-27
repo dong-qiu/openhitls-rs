@@ -8598,3 +8598,32 @@ clean. Encrypt (randomised padding) + PSS sign (random salt) remain
 API-surface.
 
 Recorded as DEV_LOG Phase I141.
+
+## Phase I142 — RSA Encrypt-Side KAT Migration (both directions) (2026-05-28)
+
+> 等合并完成后继续 encrypt 侧
+
+Migrated the encrypt direction of RSA_CRYPT_FUNC_TC001. Key finding: padded
+RSA encrypt is randomised and the C test only checks ctLen == ciphertext->len
+then round-trips (libc rand() for PS/OAEP seed, never byte-compares the
+encrypt output) — so a deterministic-randomness hook is NOT applicable (no
+fixed-randomness vector to match). No hook built.
+
+emit_decrypt generalised to emit_crypt (both directions per row, like DSA
+verify+sign) via a new generic write_test helper:
+- PKCS#1 v1.5 / OAEP: decrypt byte-exact (unchanged) + encrypt length +
+  round-trip (encrypt(pt) -> ct.len()==k -> decrypt(ct)==pt; real randomness,
+  kat-nonce-gated via from_nd).
+- Raw NO_PAD (was API-surface): both directions byte-exact. encrypt(None,pt)
+  ==ct uses only the public key, so NOT kat-nonce-gated (runs in default
+  build); decrypt(None,ct)==pt gated.
+
+migrated_rsa 48 -> 66 (+18). No production source change (emitter + generated
+tests only).
+
+Verification: migrated_rsa 66/0 (kat-nonce) and 34/0 without kat-nonce (30
+verify + 4 NO_PAD byte-exact encrypt — new public-key coverage); drift gate
+passes; na-list -> 1836 emitted (RSA 48 -> 66); fmt + clippy clean. PSS sign
+(random salt) is the last API-surface RSA family.
+
+Recorded as DEV_LOG Phase I142.
