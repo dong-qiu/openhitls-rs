@@ -60,8 +60,8 @@ Counts are the `Generation summary` footer of each generated file
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 6 | 272 | 0 | 12 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
-| RSA | 38 | 104 | 0 | 2 | 144 |
-| **Total** | **1808** | **3149** | **238** | **90** | **4606** |
+| RSA | 44 | 120 | 0 | 6 | 170 |
+| **Total** | **1814** | **3165** | **238** | **94** | **4632** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -78,10 +78,19 @@ EMSA-PSS-VERIFY `sLen`). The 2 unsupported are PSS-SHA-224 (no `RsaHashAlg::Sha2
 needed — but the C vectors publish only `(n, d)` (no CRT params), so a test-only
 `RsaPrivateKey::from_nd` constructor (behind `kat-nonce`, `#[deprecated]` "the
 plain-`d` private path is not side-channel-hardened") + a plain-`d`
-`raw_decrypt` branch (`c^d mod n` when CRT params are absent) were added. RSA
-**PSS sign** (needs a salt hook), **encrypt** (needs an encrypt nonce hook), and
-**decrypt** (`CRYPT_FUNC_TC001`, OAEP/v1.5 — `from_nd` now unblocks the key, but
-the decrypt-side emitter is a follow-up) stay API-surface.
+`raw_decrypt` branch (`c^d mod n` when CRT params are absent, itself
+`kat-nonce`-gated) were added. RSA **PKCS#1 v1.5 decrypt** is now migrated
+(I140) from `test_suite_sdv_eal_rsa_encrypt_decrypt.data`:
+`CRYPT_FUNC_TC001` emits `from_nd(n, d).decrypt(Pkcs1v15Encrypt, ct) == pt`
+(Emitted 38 → 44, +6; decrypt is deterministic). Of the 26 encrypt/decrypt
+rows, the **6 OAEP** rows are unsupported — the Rust OAEP is hardcoded to
+SHA-256 + empty label (`rsa::oaep`), but every C OAEP vector uses SHA-1, so
+they cannot round-trip (4 unsupported after isProvider dedup; the other 2
+unsupported remain PSS-SHA-224); raw `NO_PAD` rows route to API-surface
+(plain `c^d mod n`, already exercised by the sign KATs + the existing
+`decrypt(None, …)` unit test). RSA **PSS sign** (needs a salt hook),
+**encrypt** (randomised padding — needs an encrypt nonce hook), and
+**OAEP decrypt** (needs a configurable-hash OAEP API) stay API-surface.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,

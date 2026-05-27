@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I139 (139 phases)
+- Implementation: I1–I140 (140 phases)
 - Testing: T1–T141 (134 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`))
 - Refactoring: R1–R15 (15 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -386,6 +386,7 @@ Category summary:
 | 387 | T141 | Test | First local full `-n 9999` tlsfuzzer sweep + `run.sh` SWEEP_N `-n` fallback fix — ran the entire curated suite (**86 scripts × 13 listeners**) at full conversation counts locally (the monthly-cron path, previously never exercised end-to-end; R15 had only ever run it sampled). **Product result: 0 FAIL / 0 XPASS** across all per-script logs. Surfaced one test-harness defect: `run.sh` injects `-n <SWEEP_N>` into *every* script, but `test-tls13-certificate-request.py` defines no `-n` option, so getopt aborts instantly (`option -n not recognized`) **before any conversation runs** → the monthly full-sweep CI job would fail every month on that one script. Fix: `run.sh` now detects that specific getopt failure and transparently retries without the sweep cap (the script's fixed conversation set is then the complete run; the probe is free because the abort is at arg-parse, zero-conversation cost). Verified: cert-request + `-n 9999` → retry → **PASS 4/0/0/0 rc=0**; `-n`-supporting scripts (session-resumption **7/0/0/0**) and the no-SWEEP path byte-unchanged. The other sweep `exit=1` (`test-tls13-session-resumption.py`) was a one-off PSK-listener startup transient — re-ran **7×** clean via run.sh, not a product bug. `bash -n` + shellcheck clean on the new code (the lone SC2164 is pre-existing on the unchanged `cd`). Config/test-infra only — no production or test-logic change | 2026-05-27 |
 | 383 | I138 | Impl | RSA signature-**verify** KAT migration + **two real RSA gap fixes** — migrating `test_suite_sdv_eal_rsa_sign_verify.data` verify families surfaced two genuine Rust RSA defects. **(1) PKCS#1 v1.5 missing SHA-224:** `pkcs1v15::digest_info_prefix` (keyed by digest length) had no entry for 28 bytes, so RSA-SHA-224 PKCS#1 v1.5 verify *and* sign returned `InvalidArg` — every SHA-224 RSA signature operation was broken. Added the SHA-224 `DigestInfo` prefix (OID 2.16.840.1.101.3.4.2.4). **(2) PSS verify hardcoded `saltLen = hashLen`:** the public `verify_pss` always used `h_len(alg)`, but the NIST FIPS 186 PSS vectors use a fixed 20-byte salt, so SHA-384/512 PSS verify failed. Added `RsaPublicKey::verify_pss_with_salt(digest, sig, alg, salt_len)` (RFC 8017 EMSA-PSS-VERIFY `sLen`; the internal `pss_verify_unpad_with_salt_alg` already existed). Migrated `migrated_rsa.rs` **30 tests**: `VERIFY_PKCSV15_FUNC_TC001` (PKCS#1 v1.5, SHA-1/224/256/384/512; `RsaPublicKey::new(n,e).verify(Pkcs1v15Sign, MD(msg), sign)`) + `VERIFY_PSS_FUNC_TC001` (PSS SHA-256/384/512 via `verify_pss_with_salt`, salt_len = the row's salt length). `expect == 0` (CRYPT_SUCCESS) → must verify, else must not. 2 unsupported = PSS-SHA-224 (no `RsaHashAlg::Sha224`). RSA sign / encrypt / decrypt deferred (need a `(n,d)`-only private-key constructor; the C vectors omit the CRT params). No regression — hitls-crypto rsa lib 61/0 (incl. an updated unsupported-digest-length test now using 16 B, since 28 B is valid) + 30 migrated RSA verify; xtask `--check` drift gate passes; na-list tally → 1800 emitted; `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** RSA-SHA-224 PKCS#1 v1.5 sign/verify now works; non-`hLen`-salt PSS verify is now possible | 2026-05-27 |
 | 388 | I139 | Impl | RSA PKCS#1 v1.5 **sign**-side KAT migration + test-only `RsaPrivateKey::from_nd` `(n, d)` constructor — extends the I138 RSA migration to the deterministic sign side. The C `SIGN_PKCSV15_FUNC_TC002` vectors publish a private key as just `(n, d)` (no CRT params `p`/`q`/`dp`/`dq`/`qinv`), which `RsaPrivateKey::new` requires, so two test-only paths were added behind the `kat-nonce` feature: (1) `RsaPrivateKey::from_nd(n, d)` — `#[doc(hidden)]` + `#[cfg(feature="kat-nonce")]` + `#[deprecated]` (the plain-`d` private path is **not** side-channel-hardened — never use in production; it zeros all CRT fields); (2) a plain-`d` branch in `raw_decrypt` (`m = c^d mod n` via `mod_exp`) taken only when `self.p.is_zero()`, i.e. only for `from_nd` keys — itself `#[cfg(feature="kat-nonce")]`-gated so this unhardened path is **not compiled into production builds** at all (closing an AI-review HIGH); the production CRT path is byte-unchanged. PKCS#1 v1.5 signing is fully deterministic (no nonce), so no nonce hook is needed: the xtask `rsa` emitter emits `SIGN_PKCSV15_FUNC_TC002` → `from_nd(n, d).sign(Pkcs1v15Sign, MD(msg)) == sign` (per-test `#[cfg(feature="kat-nonce")]` + `#[allow(deprecated)]`; the `RsaPrivateKey` import is itself `kat-nonce`-gated so the no-feature build has no unused import). `migrated_rsa.rs` **30 → 38** (+8 PKCS#1 v1.5 sign KATs, SHA-1/256/384/512). All byte-exact vs openHiTLS C first run. No regression — hitls-crypto rsa lib 62/0 (CRT path unaffected — `p.is_zero()` is only true for `from_nd` keys), `migrated_rsa` 38/0 (`--all-features` / `kat-nonce`) and 30/0 (no `kat-nonce`, gated import clean under `-D warnings`); xtask `--check` drift gate passes; na-list tally → 1808 emitted (RSA 30 → 38); `fmt` + `clippy -D warnings --all-features --all-targets` clean. RSA PSS sign (needs a salt hook), encrypt (needs an encrypt nonce hook), and decrypt (OAEP/v1.5 — `from_nd` now unblocks the key) remain API-surface follow-ups | 2026-05-27 |
+| 389 | I140 | Impl | RSA PKCS#1 v1.5 **decrypt**-side KAT migration — extends the I138/I139 RSA migration to the deterministic decrypt direction, consuming the second C SDV file `test_suite_sdv_eal_rsa_encrypt_decrypt.data` (wired as a second RSA input in the xtask dispatch). `RSA_CRYPT_FUNC_TC001` (`keyLen : padMode : hashId : n : e : d : plaintext : ciphertext : isProvider`) is a decrypt KAT — decryption is deterministic, so the test is `decrypt(padding, ciphertext) == plaintext`. The xtask `rsa` emitter's new `emit_decrypt` migrates the **PKCS#1 v1.5** rows → `from_nd(n, d).decrypt(Pkcs1v15Encrypt, ct) == pt` (per-test `#[cfg(feature="kat-nonce")]` + `#[allow(deprecated)]`, reusing the I139 `from_nd` + the now-`kat-nonce`-gated plain-`d` `raw_decrypt` branch; no hash needed for PKCS#1 v1.5 padding). `migrated_rsa.rs` **38 → 44** (+6 decrypt KATs), all byte-exact vs openHiTLS C first run. Of the 26 encrypt/decrypt rows, the **6 OAEP** rows are `unsupported` — the Rust `rsa::oaep` is hardcoded to SHA-256 + empty label, but every C OAEP vector uses SHA-1, so they cannot round-trip (4 unsupported after isProvider dedup); raw `NO_PAD` rows route to API-surface (plain `c^d mod n`, already exercised by the sign KATs + the existing `decrypt(None, …)` unit test). No regression — `migrated_rsa` 44/0 (`--all-features` / `kat-nonce`) and 30/0 (no `kat-nonce`, decrypt tests gated out, clean under `-D warnings`); xtask `--check` drift gate passes; na-list tally → 1814 emitted (RSA 38 → 44, total C cases 144 → 170 with the decrypt file); `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** none — `from_nd` + the plain-`d` path are `kat-nonce`-only. RSA **encrypt** (randomised padding — needs an encrypt nonce hook), **PSS sign** (random salt), and **OAEP decrypt** (needs a configurable-hash OAEP API) remain API-surface follow-ups | 2026-05-28 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -24097,3 +24098,67 @@ plain-`d` path are `kat-nonce`-only and never compiled into a production
 build. RSA **PSS sign** (needs a salt hook), **encrypt** (needs an encrypt
 nonce hook), and **decrypt** (OAEP/v1.5 — `from_nd` now unblocks the key,
 the decrypt-side emitter is a follow-up) remain API-surface.
+
+## Phase I140 — RSA PKCS#1 v1.5 Decrypt KAT Migration (2026-05-28)
+
+### Summary
+
+Extended the RSA migration to the **decrypt** direction, completing the
+deterministic half of the I139 "RSA sign/encrypt/decrypt" directive
+(encrypt + PSS-sign stay blocked on randomness injection). Decryption has
+no per-operation randomness, so the KAT is a direct `decrypt(padding,
+ciphertext) == plaintext` — and it reuses the I139 `from_nd(n, d)`
+constructor (the C vectors again publish only `(n, d)`).
+
+### Source + dispatch
+
+Added the second C SDV file
+`crypto/rsa/test_suite_sdv_eal_rsa_encrypt_decrypt.data` to the xtask `rsa`
+input list (the parser concatenates cases across both files).
+`RSA_CRYPT_FUNC_TC001` row shape:
+`keyLen : padMode : hashId : n : e : d : plaintext : ciphertext : isProvider`.
+
+### Emitter (`emit_decrypt`)
+
+Only the **PKCS#1 v1.5** padding mode is migratable with the current Rust
+API; the emitter emits (per-test `#[cfg(feature = "kat-nonce")]` +
+`#[allow(deprecated)]`):
+
+```rust
+let sk = RsaPrivateKey::from_nd(n, d).unwrap();
+assert_eq!(sk.decrypt(RsaPadding::Pkcs1v15Encrypt, ct).unwrap(), expected);
+```
+
+PKCS#1 v1.5 encryption padding uses no hash, so `hashId` is ignored. The
+plain-`d` `raw_decrypt` path (gated behind `kat-nonce` in I139) is what
+actually performs `c^d mod n` for these `from_nd` keys.
+
+### Skipped rows (of the 26 encrypt/decrypt rows)
+
+- **OAEP (6 rows) → `unsupported`.** The Rust `rsa::oaep` is hardcoded to
+  SHA-256 + empty label, but every C OAEP vector uses SHA-1 (MD = MGF1 =
+  `CRYPT_MD_SHA1`), so they cannot round-trip. Migrating these needs a
+  configurable-hash OAEP API (a future implementation phase). (4 reach the
+  unsupported bucket after isProvider dedup; combined with the 2 PSS-SHA-224
+  rows the RSA `unsupported` tally is 6.)
+- **Raw `NO_PAD` → `ApiSurface`.** `decrypt(None, ct)` is plain `c^d mod n`,
+  already exercised by the sign KATs and the existing `decrypt(None, …)`
+  unit test — not re-migrated to keep the PR focused.
+- **`CRYPT_FUNC_TC002/003/004`** (negative / label / fixed-bits cases) →
+  `ApiSurface`.
+
+`migrated_rsa.rs` **38 → 44** (+6 PKCS#1 v1.5 decrypt KATs), all byte-exact
+against openHiTLS C on the first run.
+
+### Build Status (Post I140)
+
+No regression. `migrated_rsa` **44/0** with
+`--features rsa,sha1,sha2,kat-nonce` and **30/0** without `kat-nonce`
+(decrypt tests gated out, clean under `RUSTFLAGS="-D warnings"`). xtask
+`--check` drift gate passes; na-list tally → 1814 emitted (RSA 38 → 44,
+total C cases 144 → 170 with the decrypt file added). `cargo fmt --all --
+--check` + `clippy -D warnings --all-features --all-targets` clean.
+**Production impact:** none — `from_nd` + the plain-`d` path are
+`kat-nonce`-only. RSA **encrypt** (randomised padding — needs an encrypt
+nonce hook), **PSS sign** (random salt), and **OAEP decrypt** (needs a
+configurable-hash OAEP API) remain API-surface follow-ups.

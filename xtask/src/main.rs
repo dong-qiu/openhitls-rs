@@ -156,7 +156,10 @@ fn migrate(
             ecc::emit_ecc_kat,
         ),
         "rsa" => (
-            vec![c_root.join("crypto/rsa/test_suite_sdv_eal_rsa_sign_verify.data")],
+            vec![
+                c_root.join("crypto/rsa/test_suite_sdv_eal_rsa_sign_verify.data"),
+                c_root.join("crypto/rsa/test_suite_sdv_eal_rsa_encrypt_decrypt.data"),
+            ],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_rsa.rs"),
             rsa::emit_rsa_kat,
         ),
