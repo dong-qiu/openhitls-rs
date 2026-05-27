@@ -8298,3 +8298,35 @@ Verification: migrated_ecc 44/0; xtask --check drift gate; na-list →
 --all-features clean.
 
 Recorded as DEV_LOG Phase T140.
+
+---
+
+## Phase I134 — Deterministic-Nonce Sign Hook (kat-nonce) + ECDSA Sign KAT (2026-05-27)
+
+> 做 deterministic-nonce hook 解锁 sign 侧
+
+Unblocks the sign-side KAT reproducibility limit (C pins the nonce k so
+(R,S) is reproducible; Rust's public sign draws k randomly). ECDSA pilot.
+
+Hook: new non-default hitls-crypto feature `kat-nonce` (TEST/KAT-only, not
+pulled by any other feature). EcdsaKeyPair::sign_with_nonce(digest, k) —
+#[doc(hidden)], #[cfg(feature="kat-nonce")], validates 1<=k<n. Refactored
+sign's retry-loop body into private sign_with_k(e,k)->Option<DER>; sign
+(random k) and sign_with_nonce (fixed k) share it → production sign
+byte-identical.
+
+xtask ecc emitter now emits a 2nd deterministic-sign test per
+ECDSA_SIGN_VERIFY_FUNC_TC001 row (sign_with_nonce(MD(msg), randVector) ==
+DER(R,S)), per-test #[cfg(feature="kat-nonce")]. migrated_ecc 44→61 under
+--all-features: 17 ECDSA sign KATs (NIST P-192..521 + Brainpool + SM2),
+all byte-exact vs C first run.
+
+Probe confirmed sign_with_nonce reproduces FIPS-186-4 P-256/SHA256 vector
+before wiring. Verification: migrated_ecc 61/0 (all-features) / 44/0
+(no kat-nonce); ecdsa lib 21/0 (sign unchanged); CI main job runs
+--workspace --all-features (kat-nonce on → sign KATs run); narrow combos
++ cargo-careful cfg the file out; drift gate passes; fmt + clippy clean.
+
+Pilot for the same hook on DSA/SM2/ML-DSA sign sides.
+
+Recorded as DEV_LOG Phase I134.

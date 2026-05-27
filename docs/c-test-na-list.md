@@ -59,17 +59,30 @@ Counts are the `Generation summary` footer of each generated file
 | ML-KEM | 150 | 196 | 81 | 0 | 427 |
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 6 | 272 | 0 | 12 | 290 |
-| ECC | 44 | 603 | 0 | 0 | 647 |
-| **Total** | **1091** | **3045** | **238** | **88** | **4462** |
+| ECC | 61 | 603 | 0 | 0 | 647 |
+| **Total** | **1108** | **3045** | **238** | **88** | **4462** |
 
-ECC migrates two deterministic families across NIST P-192/224/256/384/521,
-Brainpool P-256/384/512r1 and the SM2 prime curve: `ECDSA_SIGN_VERIFY_FUNC_TC001`
-**verify** side (build the public key from the row's `(pubKeyX, pubKeyY)`,
-DER-encode `(R,S)`, `EcdsaKeyPair::from_public_key(...).verify(MD(msg), sig)`) and
-`ECDH_EXCH_FUNC_TC001` (local private key × peer public point → shared secret).
-The ECDSA **sign** side stays API-surface for the same nonce-reproducibility
-reason as DSA/SM2; ECC key-gen / key-checks / point mul-add property tests / ctx
-CRUD are API-surface.
+ECC migrates families across NIST P-192/224/256/384/521, Brainpool
+P-256/384/512r1 and the SM2 prime curve. Each `ECDSA_SIGN_VERIFY_FUNC_TC001`
+success row emits **two** tests — a **verify** (build the public key from
+`(pubKeyX, pubKeyY)`, `EcdsaKeyPair::from_public_key(...).verify(MD(msg),
+DER(R,S))`) and a **deterministic sign** (`sign_with_nonce(MD(msg), randVector)
+== DER(R,S)`, gated behind the non-default `kat-nonce` feature — see below) —
+so the Emitted count (61) exceeds the row count. `ECDH_EXCH_FUNC_TC001` is a
+key-exchange KAT (local private key × peer public point → shared secret). ECC
+key-gen / key-checks / point mul-add property tests / ctx CRUD are API-surface.
+
+### Deterministic-nonce sign hook (`kat-nonce` feature)
+
+The C sign KATs pin the per-signature nonce `k` via a stubbed RNG so the
+published `(R, S)` is reproducible. The Rust port's public `sign` draws `k`
+randomly (correct for production); a caller-chosen `k` would leak the ECDSA
+private key, so the deterministic entry point `EcdsaKeyPair::sign_with_nonce`
+is `#[doc(hidden)]` and gated behind the **non-default `kat-nonce` feature**
+(`hitls-crypto`), which no other feature pulls in. The migrated sign tests are
+per-test `#[cfg(feature = "kat-nonce")]`; CI exercises them via
+`--all-features`. This unblocks the DSA/SM2 (and ML-DSA) sign-side
+reproducibility limits noted below as those algorithms adopt the same hook.
 
 ML-DSA migrates the **verify** side (`MLDSA_FUNC_VERIFYDATA_TC001`, internal
 interface, μ = H(tr ‖ M)). ML-KEM migrates the **decapsulation** side

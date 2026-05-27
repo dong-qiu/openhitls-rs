@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I133 (133 phases)
+- Implementation: I1–I134 (134 phases)
 - Testing: T1–T140 (133 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -378,6 +378,7 @@ Category summary:
 | 375 | I132 | Impl | TLS CertificateVerify EC/EdDSA alert mapping (RFC 8446 §4.2.3 + §6.2) — surfaced by the Phase-2 mTLS cert-matrix triage (`test-tls13-{ecdsa,eddsa}-in-certificate-verify` against `--verify-client-cert` with an ECDSA/Ed25519 client identity). When verifying a peer's CertificateVerify backed by an EC/EdDSA cert, two wrong alerts: **(1)** a *malformed* ECDSA/EdDSA signature made `verify_ecdsa`/`verify_ed25519`/`verify_ed448` return `Err` (DER/length parse failure), which propagated via `?` as `internal_error` instead of `decrypt_error` (RFC 8446 §6.2: "unable to correctly verify a signature"); **(2)** a CV scheme whose curve mismatched the cert key (e.g. `ecdsa_secp384r1_sha384` against a P-256 cert, or any ECDSA scheme against an Ed25519 cert) hit the matching verify arm with an incompatible SPKI → `Err` → `internal_error` instead of `illegal_parameter` (RFC 8446 §4.2.3). Fix in `handshake/verify.rs`: **(a)** a cert-key↔scheme compatibility check (SPKI `algorithm_oid` + EC curve `algorithm_params` vs the scheme's expected key family, via `hitls_utils::oid::known`) → `illegal_parameter` before any signature math; **(b)** the EC/EdDSA verify calls now treat `Err` as a verification *failure* (`.unwrap_or(false)` → the existing `decrypt_error` path) — the scheme/curve is already confirmed compatible, so the signature is the only variable. Shared by client + server CV verification; RSA path unchanged (it already returns `Ok(false)` on a bad sig). Result: `test-tls13-{ecdsa,eddsa}-in-certificate-verify` 122/10 + 128/4 → **132/0** on clean runs. Same "internal_error is never correct for peer input" class as I122/I124. Scripts **not curated** — flaky under 132 back-to-back mTLS handshakes ("Timeout when waiting for peer message", varies run-to-run; same test-side-timing class as `ecdhe-padded`, can't be stably XFAIL'd — documented in `docs/tlsfuzzer.md`). No regression: `hitls-tls` lib **1556/0** (incl. a new scheme/cert-mismatch unit test + the 3 EC roundtrip tests updated to carry the curve `algorithm_params` real certs always have); RSA mTLS `test-tls13-certificate-{verify,request}` 31/0 + 5/0 unchanged; full `hitls-integration-tests` green; `fmt` + `clippy -D warnings --all-targets` clean | 2026-05-27 |
 | 376 | I133 | Impl | ASN.1 DER decoder INTEGER/SEQUENCE tag-class strictness — fixes an **ECDSA signature-malleability / signature-acceptance bug** in `hitls-utils` that I132 had misattributed to "back-to-back mTLS timing flakiness". An independent audit of the I132 "not curated, flaky" claim disproved the flaky theory (the failure reproduces in *isolation*, survives a **30 s** tlsfuzzer timeout, and the EdDSA/RSA twin scripts are rock-stable at identical handshake volume) and pinned a real bug. Root cause: `Decoder::read_integer` / `read_sequence` (`crates/hitls-utils/src/asn1/decoder.rs`) validated only the tag *number* (`number == 0x02` / `0x10 && constructed`), **not the tag class**. `Tag::from_bytes` derives `number` from the low 5 bits, so a context-specific tag `0x82` (a single-bit flip of the universal INTEGER tag `0x02`) yields `number == 2` and was accepted as an INTEGER; likewise `0x70`/`0xB0` for SEQUENCE. tlsfuzzer's `test-tls13-ecdsa-in-certificate-verify` mutation `xor 0x80 at <s-INTEGER-tag>` / `xor at 0 <SEQUENCE-tag>` flips exactly those class bits, leaving the (r, s) values intact → `EcdsaKeyPair::verify` decoded the original valid signature and returned **`Ok(true)`** (verified) for the malformed-DER signature ~⅓ of runs (depending on the random per-run signature's byte layout). The server thus **accepted a forged client CertificateVerify**, completed auth, and deadlocked awaiting the client Finished — which tlsfuzzer observed as the "Timeout when waiting for peer message" that looked flaky. Fix: `read_integer` + `read_sequence` now require `tag.class == Universal` (and primitive/constructed as appropriate). Confirmed via instrumented `verify_ecdsa` logging (`Ok(true)`→reject on the mutated sig) and 5×/3× stable `132/0` runs of the ecdsa/eddsa scripts. **Now curates both `test-tls13-{ecdsa,eddsa}-in-certificate-verify` into CI** (workflow generates ECDSA P-256 + Ed25519 client certs signed by the mTLS client CA; run against `HITLS_PORT_MTLS`, 0 XFAIL). Shared decoder change ⇒ full-workspace regression: `hitls-utils` 78 + 2 new, `hitls-crypto` 2549 + 1 new (ECDSA malformed-tag rejection), `hitls-pki` **1617** (DER-heaviest — X.509/PKCS#8/CMS unaffected; real DER always uses universal class), `hitls-tls` 1556, `hitls-integration-tests` 268 — **all 0 failed**; `fmt` + `clippy -D warnings --all-targets` clean. Lesson (recorded in `docs/tlsfuzzer.md`): a "flaky/timeout" on an attacker-controlled-input rejection path warrants real root-causing — here it masked a signature-acceptance flaw | 2026-05-27 |
 | 377 | T140 | Test | C→Rust ECC KAT migration (Phase A continued — ECDSA verify + ECDH) — takes the migrated crypto-algorithm count 13 → 14. Extends the xtask generator to `crypto/ecc/test_suite_sdv_eal_ecdsa.data` + `test_suite_sdv_eal_ecdh.data` (`migrated_ecc.rs`, **44 tests**: 17 ECDSA-verify + 27 ECDH) across NIST P-192/224/256/384/521, Brainpool P-256/384/512r1 and the SM2 prime curve. **ECDSA** `SIGN_VERIFY_FUNC_TC001` (`eccId:mdId:prv:msg:R:S:rand:pubX:pubY:fmt:isProvider`): the C signs with an injected nonce then verifies — sign is not reproducible without a nonce hook (same as DSA/SM2), so the *verify* side is migrated by building the public key from the row's `(pubX,pubY)` as uncompressed `0x04‖X‖Y`, DER-encoding `(R,S)`, and `EcdsaKeyPair::from_public_key(curve, …).verify(MD(msg), sig)`. **ECDH** `EXCH_FUNC_TC001` (`eccId:prv:pubX:pubY:fmt:share:isProvider`): deterministic `EcdhKeyPair::from_private_key(curve, prv).compute_shared_secret(0x04‖X‖Y) == share`. **No bug found** — both interop with openHiTLS C out of the box (44/44 first run). Both Rust APIs already existed (`from_public_key`/`from_private_key`/`verify`/`compute_shared_secret`), no API change. ECDSA sign-side + key-gen/checks + ECC point mul/add + ctx CRUD stay API-surface. xtask `--check` drift gate passes; na-list tally → 1091 emitted / 4462 total C cases / 14 algorithms; workspace `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
+| 378 | I134 | Impl | Deterministic-nonce sign hook (`kat-nonce`) + ECDSA sign-side KAT — unblocks the C→Rust **sign**-side KAT reproducibility limit (the C sign KATs pin the per-signature nonce `k` so the published `(R,S)` is reproducible; Rust's public `sign` draws `k` randomly, as it must). New non-default `hitls-crypto` feature `kat-nonce` exposes `EcdsaKeyPair::sign_with_nonce(digest, k)` — `#[doc(hidden)]`, `#[cfg(feature="kat-nonce")]`, **never** pulled in by another feature (a caller-chosen ECDSA nonce leaks the private key). Refactor: `sign`'s retry-loop body extracted into a private `sign_with_k(e, k) -> Option<DER>` (`Ok(None)` ⇒ degenerate k ⇒ retry); `sign` (random k) and `sign_with_nonce` (fixed k, validated `1 ≤ k < n`) share it — production `sign` behaviour is byte-identical (the existing 21 ecdsa lib tests + roundtrips unchanged). The xtask `ecc` emitter now emits a second **deterministic-sign** test per `ECDSA_SIGN_VERIFY_FUNC_TC001` row (`sign_with_nonce(MD(msg), randVector) == DER(R,S)`), per-test `#[cfg(feature="kat-nonce")]`. `migrated_ecc.rs` **44 → 61** tests under `--all-features` (CI's main job runs `--workspace --all-features`, enabling `kat-nonce`); 17 ECDSA sign KATs across NIST P-192/224/256/384/521 + Brainpool + SM2, all byte-exact vs openHiTLS C first run. Pilot for the same hook on DSA/SM2/ML-DSA sign sides. No regression — hitls-crypto ecdsa lib 21/0; `migrated_ecc` 61/0 (`--all-features`) / 44/0 (no `kat-nonce`, sign cfg'd out); narrow feature combos still cfg the file out; xtask `--check` drift gate passes; `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -23641,3 +23642,75 @@ injected-nonce reproducibility limit, documented in `c-test-na-list.md`.
 14 of the crypto algorithm families now have a generated C→Rust KAT
 suite. ECDSA verify and ECDH interop with openHiTLS C with zero
 divergence (no bug surfaced).
+
+## Phase I134 — Deterministic-Nonce Sign Hook (`kat-nonce`) + ECDSA Sign KAT (2026-05-27)
+
+### Summary
+
+Unblocks the C→Rust **sign-side** KAT reproducibility limit. The C sign
+KATs pin the per-signature nonce `k` via a stubbed RNG so the published
+`(R, S)` is reproducible; the Rust port's public `sign` draws `k`
+randomly (as it must in production), so a vector's exact `(R, S)` was not
+reproducible — every sign-side family (ECDSA / DSA / SM2 / ML-DSA) was
+therefore routed to API-surface. This adds a guarded test-only nonce
+injection point and migrates the ECDSA sign side as the pilot.
+
+### The hook (`crates/hitls-crypto`)
+
+- New **non-default** cargo feature `kat-nonce`, documented TEST/KAT-ONLY
+  and **not pulled in by any other feature** (so it cannot reach a
+  production build).
+- `EcdsaKeyPair::sign_with_nonce(digest, k)` — `#[doc(hidden)]`,
+  `#[cfg(feature = "kat-nonce")]`, `#[deprecated]`. Validates `1 ≤ k < n`,
+  then signs with the caller's `k`. Doc comment spells out the footgun (a
+  chosen/reused ECDSA nonce leaks the private key). The `#[deprecated]`
+  danger sentinel means any caller that is not a sanctioned KAT (the
+  generated sign tests opt in with `#[allow(deprecated)]`) hits a
+  build-breaking deprecation warning under the workspace `-D warnings`, so
+  enabling `kat-nonce` downstream cannot silently surface a key-leaking
+  entry point (addresses the pre-merge AI-review HIGH on the `pub` symbol).
+- Refactor: the body of `sign`'s random-`k` retry loop is extracted into a
+  private `sign_with_k(e, k) -> Result<Option<Vec<u8>>>` (`Ok(None)` ⇒ this
+  `k` gives `kG==∞` / `r==0` / `s==0` ⇒ the loop retries). Both `sign`
+  (random `k`) and `sign_with_nonce` (fixed `k`) call it, so production
+  `sign` is byte-identical to before.
+
+### ECDSA sign KAT (`xtask` + `migrated_ecc.rs`)
+
+The `ecc` emitter now emits a **second** test per
+`ECDSA_SIGN_VERIFY_FUNC_TC001` row — `sign_with_nonce(MD(msg),
+randVector) == DER(signR, signS)` — each per-test `#[cfg(feature =
+"kat-nonce")]`. `migrated_ecc.rs` goes **44 → 61** tests under
+`--all-features`: 17 ECDSA deterministic-sign KATs (NIST
+P-192/224/256/384/521 + Brainpool P-256/384/512r1 + SM2 prime), all
+byte-exact against openHiTLS C on the first run. Without `kat-nonce` the
+sign tests are cfg'd out (44).
+
+### Verification
+
+- Probe confirmed `sign_with_nonce` reproduces the FIPS-186-4 P-256/SHA-256
+  vector byte-for-byte before wiring the emitter.
+- `migrated_ecc` **61/0** (`--all-features`) and **44/0** (no `kat-nonce`);
+  hitls-crypto ecdsa lib **21/0** (production `sign` unchanged).
+- CI's main job runs `cargo nextest run --workspace --all-features`, which
+  enables `kat-nonce` → the sign KATs run; narrow feature combos and the
+  cargo-careful steps cfg the file out (it needs ecdsa+ecdh+sha1+sha2).
+- xtask `--check` drift gate passes; `docs/c-test-na-list.md` tally → 1108
+  emitted; `fmt` + `clippy -D warnings --all-features --all-targets` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/Cargo.toml` | Modified | new non-default `kat-nonce` feature. |
+| `crates/hitls-crypto/src/ecdsa/mod.rs` | Modified | `sign_with_k` extraction + `sign_with_nonce` (kat-nonce). |
+| `xtask/src/ecc.rs` | Modified | emit a deterministic-sign test per ECDSA verify row. |
+| `crates/hitls-crypto/tests/migrated_ecc.rs` | Modified | +17 ECDSA sign KATs (kat-nonce-gated). |
+| `docs/c-test-na-list.md` | Modified | ECC emitted 44→61 + the `kat-nonce` hook section. |
+| `DEV_LOG.md` / `PROMPT_LOG.md` | Modified | This entry + Phase Index row 378 + Implementation summary I1–I134. |
+
+### Build Status (Post I134)
+
+The deterministic-nonce hook pattern is established and proven on ECDSA
+(17 sign KATs byte-exact vs C). DSA / SM2 / ML-DSA sign sides can adopt
+the same `kat-nonce`-gated `sign_with_nonce` to unblock their sign KATs.
