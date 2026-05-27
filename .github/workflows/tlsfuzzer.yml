@@ -415,6 +415,16 @@ jobs:
         #     from the xfail list, or
         #   - a previously-PASSing conversation now FAILs (regression)
         #     → bisect or add to xfail with a written reason.
+        env:
+          # Hoist the only `${{ }}` expression out of this (very large) run
+          # block. GitHub template-processes a `run` block as a SINGLE
+          # expression whenever it contains any `${{ }}`; with the curated
+          # script arrays this block exceeds the 21000-char expression limit,
+          # which made the entire workflow fail to parse (workflow_dispatch →
+          # HTTP 422 "Exceeded max expression length 21000"; push → 0 s
+          # validation failure; the weekly/monthly schedules never fired).
+          # Referencing the env var below keeps the run block a pure literal.
+          SCHEDULE: ${{ github.event.schedule }}
         run: |
           set +e
           mkdir -p "${RUNNER_TEMP}/tlsfuzzer-logs"
@@ -424,7 +434,7 @@ jobs:
           # so conversations that per-script sampling would skip still
           # get exercised; the weekly cron + manual dispatch stay
           # sampled. run.sh reads SWEEP_N and appends `-n` when set.
-          if [ "${{ github.event.schedule }}" = "0 7 1 * *" ]; then
+          if [ "${SCHEDULE}" = "0 7 1 * *" ]; then
             export SWEEP_N=9999
             echo "monthly full sweep enabled (SWEEP_N=9999)"
           fi
