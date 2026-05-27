@@ -166,10 +166,6 @@ impl DsaKeyPair {
         }
 
         let q = &self.params.q;
-        let p = &self.params.p;
-        let g = &self.params.g;
-        let x = &self.private_key;
-
         let e = digest_to_bignum(digest, q.bit_len());
 
         for _ in 0..100 {
@@ -178,27 +174,70 @@ impl DsaKeyPair {
             if k.is_zero() {
                 continue;
             }
-
-            // r = (g^k mod p) mod q
-            let g_k = g.mod_exp(&k, p)?;
-            let r = g_k.mod_reduce(q)?;
-            if r.is_zero() {
-                continue;
+            if let Some(der) = self.sign_with_k(&e, &k)? {
+                return Ok(der);
             }
-
-            // s = k^(-1) * (e + x*r) mod q
-            let k_inv = k.mod_inv(q)?;
-            let xr = x.mod_mul(&r, q)?;
-            let e_plus_xr = e.mod_add(&xr, q)?;
-            let s = k_inv.mod_mul(&e_plus_xr, q)?;
-            if s.is_zero() {
-                continue;
-            }
-
-            return encode_der_signature(&r, &s);
         }
 
         Err(CryptoError::BnRandGenFail)
+    }
+
+    /// Compute the DSA signature `(r, s)` for digest-integer `e` with a specific
+    /// nonce `k`, returning the DER encoding. Yields `Ok(None)` when this `k`
+    /// gives `r == 0` or `s == 0` — the random-`k` retry loop in [`Self::sign`]
+    /// then tries another nonce.
+    fn sign_with_k(&self, e: &BigNum, k: &BigNum) -> Result<Option<Vec<u8>>, CryptoError> {
+        let q = &self.params.q;
+        let p = &self.params.p;
+        let g = &self.params.g;
+        let x = &self.private_key;
+
+        // r = (g^k mod p) mod q
+        let g_k = g.mod_exp(k, p)?;
+        let r = g_k.mod_reduce(q)?;
+        if r.is_zero() {
+            return Ok(None);
+        }
+
+        // s = k^(-1) * (e + x*r) mod q
+        let k_inv = k.mod_inv(q)?;
+        let xr = x.mod_mul(&r, q)?;
+        let e_plus_xr = e.mod_add(&xr, q)?;
+        let s = k_inv.mod_mul(&e_plus_xr, q)?;
+        if s.is_zero() {
+            return Ok(None);
+        }
+
+        Ok(Some(encode_der_signature(&r, &s)?))
+    }
+
+    /// **KAT / testing only — never use in production.** Sign `digest` with a
+    /// caller-supplied big-endian nonce `k`.
+    ///
+    /// # Security
+    /// DSA security depends on `k` being secret, unique per signature, and
+    /// uniform. A reused or chosen `k` leaks the private key. This exists only
+    /// to reproduce published deterministic sign KATs; it is gated behind the
+    /// non-default `kat-nonce` feature and marked `#[deprecated]` as a danger
+    /// sentinel (a non-`#[allow(deprecated)]` caller fails to build under
+    /// `-D warnings`).
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test/KAT only: signing with a caller-chosen nonce leaks the DSA \
+                private key — never use in production"
+    )]
+    pub fn sign_with_nonce(&self, digest: &[u8], k: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        if self.private_key.is_zero() {
+            return Err(CryptoError::InvalidArg("DSA private key not set"));
+        }
+        let q = &self.params.q;
+        let e = digest_to_bignum(digest, q.bit_len());
+        let k = BigNum::from_bytes_be(k);
+        if k.is_zero() || k >= *q {
+            return Err(CryptoError::InvalidArg("DSA nonce out of range"));
+        }
+        self.sign_with_k(&e, &k)?.ok_or(CryptoError::BnRandGenFail)
     }
 
     /// Verify a DER-encoded signature against a message digest.

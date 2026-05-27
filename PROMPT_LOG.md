@@ -8366,3 +8366,31 @@ scripts_12 + TLS 1.3 record-path sanity 0 FAIL/0 XPASS. Hit a 1-commit
 rebase + I-number collision (parallel I134 kat-nonce) → renumbered I135.
 Ran in isolated temp worktree (`fix/tls12-record-handshake-conformance`).
 Recorded as DEV_LOG Phase I135.
+
+---
+
+## Phase I136 — kat-nonce Sign Hook Extended to DSA + SM2 (2026-05-27)
+
+> 推广 hook 到 DSA / SM2 / ML-DSA sign 侧
+
+Extended the I134 kat-nonce deterministic-sign hook to DSA + SM2 (ML-DSA
+deferred). Same triple guard (#[cfg(feature="kat-nonce")] + #[doc(hidden)]
++ #[deprecated]); each refactors its sign retry-loop body into a private
+sign_with_k(e,k) shared by random-k sign (unchanged) and fixed-k path.
+
+DSA: sign_with_nonce(digest,k); emitter emits sign_with_nonce(MD(Msg),K)
+== DER(R,S) per SIGN_VERIFY row → migrated_dsa 600→1200 (+600 NIST sign).
+SM2: sign_with_id_nonce(userId,msg,k) (+ sign_digest e=SM3(ZA||M));
+SignPos kind for SIGN_FUNC_TC001/TC002 → migrated_sm2 12→14 (+2 GB/T).
+All byte-exact vs C first run.
+
+ML-DSA deferred: C injects a 32-byte hedging rnd (ρ'=H(K||rnd||μ)) but
+Rust mldsa_sign is deterministic (ρ'=H(K||μ), no rnd slot — possibly
+non-FIPS-204); needs a rnd hook + study.
+
+Verification: migrated_dsa 1200/0 + migrated_sm2 14/0 (--all-features,
+-D warnings); dsa lib 15/0 + sm2 lib 15/0 (sign unchanged); narrow combos
+cfg sign out; drift gate passes; na-list → 1710 emitted; fmt + clippy
+clean.
+
+Recorded as DEV_LOG Phase I136.

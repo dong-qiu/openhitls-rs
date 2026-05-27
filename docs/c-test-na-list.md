@@ -51,16 +51,28 @@ Counts are the `Generation summary` footer of each generated file
 | CMAC | 12 | 71 | 4 | 4 | 91 |
 | AES | 30 | 273 | 0 | 12 | 315 |
 | Curve25519 | 19 | 115 | 36 | 0 | 170 |
-| DSA | 600 | 141 | 26 | 0 | 767 |
+| DSA | 1200 | 141 | 26 | 0 | 767 |
 | DH | 47 | 45 | 88 | 0 | 180 |
 | SM4 | 9 | 237 | 0 | 37 | 283 |
-| SM2 | 12 | 111 | 0 | 17 | 140 |
+| SM2 | 14 | 111 | 0 | 17 | 140 |
 | ML-DSA | 45 | 731 | 3 | 0 | 779 |
 | ML-KEM | 150 | 196 | 81 | 0 | 427 |
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 6 | 272 | 0 | 12 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
-| **Total** | **1108** | **3045** | **238** | **88** | **4462** |
+| **Total** | **1710** | **3045** | **238** | **88** | **4462** |
+
+The `kat-nonce` deterministic-sign hook (introduced for ECDSA in I134) now also
+covers **DSA** and **SM2**: each DSA `SIGN_VERIFY` row emits a verify *and* a
+`sign_with_nonce(MD(Msg), K) == DER(R,S)` test (DSA Emitted 600 → 1200), and SM2
+`SIGN_FUNC_TC001`/`TC002` emit `sign_with_id_nonce(userId, msg, k) == sign` (SM2
+12 → 14). These sign tests are per-test `#[cfg(feature = "kat-nonce")]` +
+`#[allow(deprecated)]`; CI exercises them via `--all-features`. (Emitted now
+exceeds the per-row count for DSA/ECC since a row yields verify + sign.) ML-DSA
+sign remains API-surface pending its own hook (it injects a 32-byte hedging
+`rnd`, and the Rust deterministic `ρ' = H(K‖μ)` construction needs separate
+FIPS-204 study); SM2/RSA *encrypt* sides stay API-surface (no encrypt nonce
+hook).
 
 ECC migrates families across NIST P-192/224/256/384/521, Brainpool
 P-256/384/512r1 and the SM2 prime curve. Each `ECDSA_SIGN_VERIFY_FUNC_TC001`
