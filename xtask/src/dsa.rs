@@ -9,11 +9,13 @@
 //! * `DSA_SIGN_VERIFY_DATA_FUNC_TC001` — C hashes first, then signs the digest
 //!
 //! The C test pins the signing nonce `K` via a stubbed RNG so it can byte-
-//! compare against the NIST `(R, S)`. Rust's `DsaKeyPair::sign` draws `K`
-//! from the system RNG with no injection hook, so the *sign* side cannot be
-//! reproduced. The migrated test therefore ports the *verify* side: the NIST
-//! `(R, S)` is DER-encoded (`SEQUENCE { INTEGER, INTEGER }`) at generation
-//! time and checked with `DsaKeyPair::verify`.
+//! compare against the NIST `(R, S)`. Two tests are emitted per row: a
+//! **verify** (the NIST `(R, S)` DER-encoded as `SEQUENCE { INTEGER, INTEGER }`
+//! at generation time, checked with `DsaKeyPair::verify`) and a
+//! **deterministic sign** (`DsaKeyPair::sign_with_nonce(MD(Msg), K) ==
+//! DER(R, S)`). The sign test is gated behind the non-default `kat-nonce`
+//! feature, since `sign_with_nonce` is a test-only entry point (a caller-chosen
+//! DSA nonce leaks the private key).
 //!
 //! Everything else (key-pair / P-Q / G generation, key-bit getters, ctx
 //! duplication, key-pair checks) is API-surface and routed to `ApiSurface`.
@@ -31,7 +33,10 @@ pub fn emit_dsa_kat(cases: &[TestCase]) -> (String, EmitStats) {
 
     for case in cases {
         match classify(&case.tc_name) {
-            Kind::SignVerify => emit_sign_verify(&mut body, case, &mut stats, &mut used),
+            Kind::SignVerify => {
+                emit_sign_verify(&mut body, case, &mut stats, &mut used);
+                emit_sign(&mut body, case, &mut stats, &mut used);
+            }
             Kind::ApiSurface => stats.skipped_api += 1,
             Kind::Unknown => stats.skipped_unknown += 1,
         }
@@ -146,6 +151,78 @@ fn emit_sign_verify(
     .unwrap();
     writeln!(out, "    let digest = {hash}::digest(msg).unwrap();").unwrap();
     writeln!(out, "    assert!(kp.verify(&digest, sig).unwrap());").unwrap();
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// Deterministic DSA **sign** KAT from the same row: sign `MD(Msg)` with the
+/// nonce `K` and check the DER `(r, s)` matches the vector's `(R, S)`. The C
+/// pins `K` via a stubbed RNG; the Rust port draws it randomly, so this uses
+/// the test-only `sign_with_nonce` (behind the `kat-nonce` feature).
+fn emit_sign(
+    out: &mut String,
+    case: &TestCase,
+    stats: &mut EmitStats,
+    used: &mut BTreeSet<&'static str>,
+) {
+    if skip_if_provider_dup(case) || case.args.len() < 11 {
+        return;
+    }
+    let Some(md) = case.args[0].as_symbol() else {
+        return;
+    };
+    let Some(hash) = md_to_hash(md) else {
+        return;
+    };
+    // md : P : Q : G : Msg : X : Y : K : R : S
+    let (Some(p), Some(q), Some(g), Some(msg), Some(x), Some(k), Some(r), Some(s)) = (
+        case.args[1].as_hex(),
+        case.args[2].as_hex(),
+        case.args[3].as_hex(),
+        case.args[4].as_hex(),
+        case.args[5].as_hex(),
+        case.args[7].as_hex(),
+        case.args[8].as_hex(),
+        case.args[9].as_hex(),
+    ) else {
+        return;
+    };
+    if x.is_empty() || k.is_empty() {
+        return;
+    }
+    let sig = der_encode_sig(r, s);
+    used.insert(hash);
+
+    let fn_name = format!("tc_line{}_dsa_sign", case.line);
+    write_doc(out, case);
+    writeln!(out, "#[cfg(feature = \"kat-nonce\")]").unwrap();
+    writeln!(out, "#[allow(deprecated)]").unwrap();
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn {fn_name}() {{").unwrap();
+    writeln!(out, "    let p: &[u8] = {};", format_byte_slice(p)).unwrap();
+    writeln!(out, "    let q: &[u8] = {};", format_byte_slice(q)).unwrap();
+    writeln!(out, "    let g: &[u8] = {};", format_byte_slice(g)).unwrap();
+    writeln!(out, "    let msg: &[u8] = {};", format_byte_slice(msg)).unwrap();
+    writeln!(out, "    let prv: &[u8] = {};", format_byte_slice(x)).unwrap();
+    writeln!(out, "    let k: &[u8] = {};", format_byte_slice(k)).unwrap();
+    writeln!(
+        out,
+        "    let expected: &[u8] = {};",
+        format_byte_slice(&sig)
+    )
+    .unwrap();
+    writeln!(out, "    let params = DsaParams::new(p, q, g).unwrap();").unwrap();
+    writeln!(
+        out,
+        "    let kp = DsaKeyPair::from_private_key(params, prv).unwrap();"
+    )
+    .unwrap();
+    writeln!(out, "    let digest = {hash}::digest(msg).unwrap();").unwrap();
+    writeln!(
+        out,
+        "    assert_eq!(kp.sign_with_nonce(&digest, k).unwrap(), expected);"
+    )
+    .unwrap();
     writeln!(out, "}}\n").unwrap();
     stats.emitted += 1;
 }

@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I134 (134 phases)
+- Implementation: I1–I136 (136 phases)
 - Testing: T1–T140 (133 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated)
 - Refactoring: R1–R14 (14 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -380,6 +380,7 @@ Category summary:
 | 377 | T140 | Test | C→Rust ECC KAT migration (Phase A continued — ECDSA verify + ECDH) — takes the migrated crypto-algorithm count 13 → 14. Extends the xtask generator to `crypto/ecc/test_suite_sdv_eal_ecdsa.data` + `test_suite_sdv_eal_ecdh.data` (`migrated_ecc.rs`, **44 tests**: 17 ECDSA-verify + 27 ECDH) across NIST P-192/224/256/384/521, Brainpool P-256/384/512r1 and the SM2 prime curve. **ECDSA** `SIGN_VERIFY_FUNC_TC001` (`eccId:mdId:prv:msg:R:S:rand:pubX:pubY:fmt:isProvider`): the C signs with an injected nonce then verifies — sign is not reproducible without a nonce hook (same as DSA/SM2), so the *verify* side is migrated by building the public key from the row's `(pubX,pubY)` as uncompressed `0x04‖X‖Y`, DER-encoding `(R,S)`, and `EcdsaKeyPair::from_public_key(curve, …).verify(MD(msg), sig)`. **ECDH** `EXCH_FUNC_TC001` (`eccId:prv:pubX:pubY:fmt:share:isProvider`): deterministic `EcdhKeyPair::from_private_key(curve, prv).compute_shared_secret(0x04‖X‖Y) == share`. **No bug found** — both interop with openHiTLS C out of the box (44/44 first run). Both Rust APIs already existed (`from_public_key`/`from_private_key`/`verify`/`compute_shared_secret`), no API change. ECDSA sign-side + key-gen/checks + ECC point mul/add + ctx CRUD stay API-surface. xtask `--check` drift gate passes; na-list tally → 1091 emitted / 4462 total C cases / 14 algorithms; workspace `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
 | 378 | I134 | Impl | Deterministic-nonce sign hook (`kat-nonce`) + ECDSA sign-side KAT — unblocks the C→Rust **sign**-side KAT reproducibility limit (the C sign KATs pin the per-signature nonce `k` so the published `(R,S)` is reproducible; Rust's public `sign` draws `k` randomly, as it must). New non-default `hitls-crypto` feature `kat-nonce` exposes `EcdsaKeyPair::sign_with_nonce(digest, k)` — `#[doc(hidden)]`, `#[cfg(feature="kat-nonce")]`, **never** pulled in by another feature (a caller-chosen ECDSA nonce leaks the private key). Refactor: `sign`'s retry-loop body extracted into a private `sign_with_k(e, k) -> Option<DER>` (`Ok(None)` ⇒ degenerate k ⇒ retry); `sign` (random k) and `sign_with_nonce` (fixed k, validated `1 ≤ k < n`) share it — production `sign` behaviour is byte-identical (the existing 21 ecdsa lib tests + roundtrips unchanged). The xtask `ecc` emitter now emits a second **deterministic-sign** test per `ECDSA_SIGN_VERIFY_FUNC_TC001` row (`sign_with_nonce(MD(msg), randVector) == DER(R,S)`), per-test `#[cfg(feature="kat-nonce")]`. `migrated_ecc.rs` **44 → 61** tests under `--all-features` (CI's main job runs `--workspace --all-features`, enabling `kat-nonce`); 17 ECDSA sign KATs across NIST P-192/224/256/384/521 + Brainpool + SM2, all byte-exact vs openHiTLS C first run. Pilot for the same hook on DSA/SM2/ML-DSA sign sides. No regression — hitls-crypto ecdsa lib 21/0; `migrated_ecc` 61/0 (`--all-features`) / 44/0 (no `kat-nonce`, sign cfg'd out); narrow feature combos still cfg the file out; xtask `--check` drift gate passes; `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
 | 379 | I135 | Impl | TLS 1.2 record/handshake conformance batch (RFC 5246 §6.2.1 + §7.2.2) — three fixes from the post-audit "remaining optional" tlsfuzzer sweep, each curated into `scripts_12`. **(1) Cross-record handshake reassembly (§6.2.1):** `tls12_read_handshake_msg_body!` (macros.rs) read a single record then sliced `data[..total]`, so a handshake message (e.g. ClientKeyExchange) fragmented across records made `total > data.len()` → the connection dropped (BrokenPipe). Now buffers across records until the full 4-byte-header + body is present (mirrors the I114 ClientHello reassembly; trailing coalesced bytes dropped as before). `test-record-layer-fragmentation` 19/5 → **22/2** (the 2 residual XFAILs are the `maximum fragmentation: 1 fragment` = 1-byte/record cases where the *echo* server mirrors the client's 1-byte app-data fragmentation as many 1-byte records and tlsfuzzer's single `ExpectApplicationData` doesn't drain them — a test-harness/echo quirk, not a protocol bug). **(2) unexpected_message for out-of-sequence handshake messages (§7.2.2):** the TLS 1.2 server's `expected X, got Y` sequencing errors (ClientHello / Certificate / ClientKeyExchange / CertificateVerify / ChangeCipherSpec / Finished, in `connection12/server.rs` + the ClientHello-reassembly + handshake-msg-read macros) carried no alert hint → `tls_error_to_alert` defaulted to `handshake_failure`; appended `(alert: unexpected_message)` so they map to `unexpected_message`. `test-message-skipping` 2/9 → **11/0**. **(3) TLS 1.2 TLSCiphertext length limit (§6.2.1 = 2^14 + 2048, not TLS 1.3's 2^14 + 256):** a legal 2^14-byte-plaintext CBC record with up to 256 bytes of padding + IV + MAC exceeds +256 and was rejected with `record_overflow` at two gates — `RecordLayer::parse_record` (now uses a version-aware `max_ciphertext_overhead()`: 256 for a TLS 1.3 decryptor, 2048 for TLS 1.2/TLCP) and the CBC/EtM `decrypt_record` (now `MAX_CIPHERTEXT_LENGTH_TLS12` = 2^14 + 2048). `test-atypical-padding` 8/4 → **12/0**. No regression: `hitls-tls` lib **1556/0** (incl. the updated CBC/EtM `record_overflow` tests at the new limit), `hitls-integration-tests` 0 failed, all **28 `scripts_12`** + TLS 1.3 record-path sanity (`record-layer-limits`/`lengths`/`record-padding`/`conversation`) 0 FAIL / 0 XPASS (the §5.2 +256 TLS 1.3 budget is unchanged); `fmt` + `clippy -D warnings --all-targets` clean. Curated suite +3 | 2026-05-27 |
+| 380 | I136 | Impl | Extend the `kat-nonce` deterministic-sign hook to DSA + SM2 (after the ECDSA pilot I134) — unblocks two more sign-side KAT families. `DsaKeyPair::sign_with_nonce(digest, k)` and `Sm2KeyPair::sign_with_id_nonce(user_id, msg, k)`, both `#[doc(hidden)]` + `#[cfg(feature="kat-nonce")]` + `#[deprecated]` danger sentinels (a chosen DSA/SM2 nonce leaks the private key). Each refactors its `sign` retry-loop body into a private `sign_with_k(e, k) -> Option<DER>` shared by the random-`k` `sign` (byte-identical production behaviour) and the fixed-`k` test entry point; SM2 also factors out `sign_digest` (`e = SM3(Z_A‖M)`). The xtask `dsa`/`sm2` emitters now emit a deterministic-sign test per sign-vector row (per-test `#[cfg(feature="kat-nonce")]` + `#[allow(deprecated)]`): DSA `SIGN_VERIFY_*` → `sign_with_nonce(MD(Msg), K) == DER(R,S)` (migrated_dsa **600 → 1200**, +600 NIST FIPS 186-4 sign KATs); SM2 `SIGN_FUNC_TC001/TC002` → `sign_with_id_nonce(userId, msg, k) == sign` (migrated_sm2 **12 → 14**, +2 GB/T 32918.5 sign KATs). All byte-exact vs openHiTLS C first run. ML-DSA sign deferred (it injects a 32-byte hedging `rnd` and the Rust deterministic `ρ' = H(K‖μ)` needs separate FIPS-204 study). No regression — hitls-crypto dsa lib 15/0 + sm2 lib 15/0 (production `sign` unchanged); migrated_dsa 1200/0 + migrated_sm2 14/0 (`--all-features`); narrow feature combos cfg the sign tests out; CI main job `--workspace --all-features` runs them; xtask `--check` drift gate passes; na-list tally → 1710 emitted; `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -23715,3 +23716,73 @@ sign tests are cfg'd out (44).
 The deterministic-nonce hook pattern is established and proven on ECDSA
 (17 sign KATs byte-exact vs C). DSA / SM2 / ML-DSA sign sides can adopt
 the same `kat-nonce`-gated `sign_with_nonce` to unblock their sign KATs.
+
+## Phase I136 — kat-nonce Sign Hook Extended to DSA + SM2 (2026-05-27)
+
+### Summary
+
+Extends the `kat-nonce` deterministic-sign hook (introduced for ECDSA in
+I134) to **DSA** and **SM2**, unblocking two more sign-side KAT families.
+The C sign KATs pin the nonce; the Rust public `sign` draws it randomly
+(correct for production), so the sign sides were API-surface. The same
+guarded test-only injection point now reproduces them byte-for-byte.
+
+### DSA (`crates/hitls-crypto/src/dsa/mod.rs` + `xtask/src/dsa.rs`)
+
+- `DsaKeyPair::sign_with_nonce(digest, k)` — `#[doc(hidden)]` +
+  `#[cfg(feature = "kat-nonce")]` + `#[deprecated]` danger sentinel;
+  validates `1 ≤ k < q`. The `sign` retry-loop body is extracted into a
+  private `sign_with_k(e, k) -> Result<Option<Vec<u8>>>` shared by `sign`
+  (random k) and `sign_with_nonce` (fixed k) → production `sign` unchanged.
+- The `dsa` emitter emits a deterministic-sign test per `SIGN_VERIFY_*`
+  row (`sign_with_nonce(MD(Msg), K) == DER(R, S)`). `migrated_dsa.rs`
+  **600 → 1200** tests (+600 NIST FIPS 186-4 sign KATs).
+
+### SM2 (`crates/hitls-crypto/src/sm2/mod.rs` + `xtask/src/sm2.rs`)
+
+- `Sm2KeyPair::sign_with_id_nonce(user_id, message, k)` — same triple
+  guard. Factored `sign_with_id` into `sign_digest` (`e = SM3(Z_A ‖ M)`) +
+  a private `sign_with_k(e, k)` (GB/T 32918.2 §6.1) shared with the
+  nonce path.
+- The `sm2` emitter gains a `SignPos` kind for `SM2_SIGN_FUNC_TC001/TC002`
+  (`TC002` prepends a `prvKeyTmp` like the verify TC002), emitting
+  `sign_with_id_nonce(userId, msg, k) == sign`. `migrated_sm2.rs`
+  **12 → 14** tests (+2 GB/T 32918.5 sign KATs).
+
+### ML-DSA — deferred
+
+ML-DSA `SIGNDATA_TC001` injects a 32-byte `seed` as the FIPS-204 hedging
+`rnd` (`ρ' = H(K ‖ rnd ‖ μ)`), but the Rust `mldsa_sign` is deterministic
+(`ρ' = H(K ‖ μ)`, no rnd slot — which may itself differ from FIPS-204's
+deterministic `H(K ‖ 0^32 ‖ μ)`). That needs its own investigation +
+possibly a `sign-with-rnd` hook, so it is left for a follow-up.
+
+### Verification
+
+- migrated_dsa **1200/0**, migrated_sm2 **14/0** (`--all-features`,
+  `-D warnings`); without `kat-nonce` the sign tests cfg out (600 / 12).
+- hitls-crypto dsa lib **15/0** + sm2 lib **15/0** (production `sign`
+  byte-identical).
+- xtask `--check` drift gate passes for both; `docs/c-test-na-list.md`
+  tally → 1710 emitted; `fmt` + `clippy -D warnings --all-features
+  --all-targets` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/dsa/mod.rs` | Modified | `sign_with_k` + `sign_with_nonce` (kat-nonce). |
+| `crates/hitls-crypto/src/sm2/mod.rs` | Modified | `sign_digest` + `sign_with_k` + `sign_with_id_nonce` (kat-nonce). |
+| `xtask/src/dsa.rs` | Modified | emit a deterministic-sign test per DSA row. |
+| `xtask/src/sm2.rs` | Modified | `SignPos` kind + `emit_sign`. |
+| `crates/hitls-crypto/tests/migrated_dsa.rs` | Modified | +600 DSA sign KATs. |
+| `crates/hitls-crypto/tests/migrated_sm2.rs` | Modified | +2 SM2 sign KATs. |
+| `docs/c-test-na-list.md` | Modified | DSA 600→1200, SM2 12→14 + hook note. |
+| `DEV_LOG.md` / `PROMPT_LOG.md` | Modified | This entry + Phase Index row 380 + Implementation summary I1–I136. |
+
+### Build Status (Post I136)
+
+The `kat-nonce` deterministic-sign hook now covers ECDSA (I134) + DSA +
+SM2; their sign-side KATs reproduce openHiTLS C byte-for-byte. ML-DSA
+sign is the remaining sign-side family (needs a rnd hook + FIPS-204 ρ'
+study).

@@ -13,11 +13,15 @@
 //! * `SM2_DEC_FUNC_TC002` — negative decrypt: `prvKey : cipher` (corrupted
 //!   ciphertext); decryption must fail.
 //!
-//! The *sign* and *encrypt* families pin the nonce `k` via a stubbed RNG;
-//! Rust's `Sm2KeyPair::sign` / `encrypt` draw `k` from the system RNG with
-//! no injection hook, so those sides are not reproducible — routed to
-//! `ApiSurface`. SM2 key exchange (`sm2_exchange`) has no public Rust API,
-//! so the whole file routes to `skipped_unsupported_alg`.
+//! * `SM2_SIGN_FUNC_TC001` / `TC002` — deterministic sign. Row shape
+//!   `prvKey : userId : k : msg : sign : provider` (`TC002` prepends a
+//!   `prvKeyTmp` the C overwrites). The C pins the nonce `k`; the migrated test
+//!   uses the test-only `Sm2KeyPair::sign_with_id_nonce` (behind the non-default
+//!   `kat-nonce` feature) and checks the DER `(r, s)` matches `sign`.
+//!
+//! The *encrypt* family pins `k` with no nonce hook (encrypt is not migrated —
+//! routed to `ApiSurface`). SM2 key exchange (`sm2_exchange`) has no public
+//! Rust API, so it routes to `skipped_unsupported_alg`.
 
 use std::fmt::Write;
 
@@ -32,6 +36,7 @@ pub fn emit_sm2_kat(cases: &[TestCase]) -> (String, EmitStats) {
         match classify(&case.tc_name) {
             Kind::VerifyPos => emit_verify(&mut body, case, &mut stats, false),
             Kind::VerifyNeg => emit_verify(&mut body, case, &mut stats, true),
+            Kind::SignPos => emit_sign(&mut body, case, &mut stats),
             Kind::DecryptPos => emit_decrypt(&mut body, case, &mut stats, false),
             Kind::DecryptNeg => emit_decrypt(&mut body, case, &mut stats, true),
             Kind::Unsupported => stats.skipped_unsupported_alg += 1,
@@ -51,6 +56,7 @@ pub fn emit_sm2_kat(cases: &[TestCase]) -> (String, EmitStats) {
 enum Kind {
     VerifyPos,
     VerifyNeg,
+    SignPos,
     DecryptPos,
     DecryptNeg,
     Unsupported,
@@ -65,6 +71,9 @@ fn classify(tc: &str) -> Kind {
     if tc.contains("SM2_VERIFY_FUNC_TC001") || tc.contains("SM2_VERIFY_FUNC_TC002") {
         return Kind::VerifyPos;
     }
+    if tc.contains("SM2_SIGN_FUNC_TC001") || tc.contains("SM2_SIGN_FUNC_TC002") {
+        return Kind::SignPos;
+    }
     if tc.contains("SM2_DEC_FUNC_TC002") {
         return Kind::DecryptNeg;
     }
@@ -75,8 +84,8 @@ fn classify(tc: &str) -> Kind {
     if tc.contains("SM2_EXCHANGE_FUNC") || tc.contains("SM2_EXCHANGE_CHECK") {
         return Kind::Unsupported;
     }
-    // Sign / encrypt families pin `k` (not reproducible in Rust), plus all
-    // the `_API_` / key-pair-check / compare / decode workflow families.
+    // Encrypt KATs pin `k` (encrypt has no nonce hook), plus all the `_API_` /
+    // key-pair-check / compare / decode workflow families.
     if tc.contains("SM2_") {
         return Kind::ApiSurface;
     }
@@ -151,6 +160,67 @@ fn emit_verify(out: &mut String, case: &TestCase, stats: &mut EmitStats, negativ
         )
         .unwrap();
     }
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// Deterministic SM2 **sign** KAT (`SM2_SIGN_FUNC_TC001`:
+/// `prvKey : userId : k : msg : sign : isProvider`). The C pins the nonce `k`;
+/// the Rust port draws it randomly, so this uses the test-only
+/// `sign_with_id_nonce` (behind the `kat-nonce` feature): `from_private_key(prv)
+/// .sign_with_id_nonce(userId, msg, k) == sign`.
+fn emit_sign(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
+    if skip_if_provider_dup(case) {
+        stats.skipped_api += 1;
+        return;
+    }
+    // TC002 prepends a `prvKeyTmp` arg the C overwrites; live fields start at
+    // index 1. TC001 starts at index 0.
+    let base = if case.tc_name.contains("TC002") { 1 } else { 0 };
+    if case.args.len() < base + 5 {
+        stats.skipped_unknown += 1;
+        return;
+    }
+    let (Some(prv), Some(userid), Some(k), Some(msg), Some(sign)) = (
+        case.args[base].as_hex(),
+        case.args[base + 1].as_hex(),
+        case.args[base + 2].as_hex(),
+        case.args[base + 3].as_hex(),
+        case.args[base + 4].as_hex(),
+    ) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    write_doc(out, case, "SM2 deterministic sign KAT");
+    writeln!(out, "#[cfg(feature = \"kat-nonce\")]").unwrap();
+    writeln!(out, "#[allow(deprecated)]").unwrap();
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_sm2_sign() {{", case.line).unwrap();
+    writeln!(out, "    let prv: &[u8] = {};", format_byte_slice(prv)).unwrap();
+    writeln!(
+        out,
+        "    let userid: &[u8] = {};",
+        format_byte_slice(userid)
+    )
+    .unwrap();
+    writeln!(out, "    let k: &[u8] = {};", format_byte_slice(k)).unwrap();
+    writeln!(out, "    let msg: &[u8] = {};", format_byte_slice(msg)).unwrap();
+    writeln!(
+        out,
+        "    let expected: &[u8] = {};",
+        format_byte_slice(sign)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let kp = Sm2KeyPair::from_private_key(prv).unwrap();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    assert_eq!(kp.sign_with_id_nonce(userid, msg, k).unwrap(), expected);"
+    )
+    .unwrap();
     writeln!(out, "}}\n").unwrap();
     stats.emitted += 1;
 }

@@ -94,56 +94,102 @@ impl Sm2KeyPair {
             return Err(CryptoError::EccInvalidPrivateKey);
         }
 
-        let za = compute_za(user_id, &self.public_key, &self.group)?;
-
-        // e = SM3(ZA || M)
-        let mut hasher = Sm3::new();
-        hasher.update(&za)?;
-        hasher.update(message)?;
-        let digest = hasher.finish()?;
-        let e = BigNum::from_bytes_be(&digest);
-
+        let e = self.sign_digest(user_id, message)?;
         let n = self.group.order();
-        let d = &self.private_key;
 
         for _ in 0..100 {
             let k = BigNum::random_range(n)?;
             if k.is_zero() {
                 continue;
             }
-
-            let kg = self.group.scalar_mul_base(&k)?;
-            if kg.is_infinity() {
-                continue;
+            if let Some(der) = self.sign_with_k(&e, &k)? {
+                return Ok(der);
             }
-
-            // r = (e + x1) mod n
-            let r = e.mod_add(kg.x(), n)?;
-            if r.is_zero() {
-                continue;
-            }
-
-            // Check r + k != n
-            let r_plus_k = r.add(&k);
-            if r_plus_k == *n {
-                continue;
-            }
-
-            // s = (1+d)^(-1) * (k - r*d) mod n
-            let d_plus_1 = d.mod_add(&BigNum::from_u64(1), n)?;
-            let d_plus_1_inv = d_plus_1.mod_inv(n)?;
-            let rd = r.mod_mul(d, n)?;
-            // k - r*d mod n: add n to avoid underflow
-            let k_minus_rd = k.mod_add(&n.sub(&rd), n)?;
-            let s = d_plus_1_inv.mod_mul(&k_minus_rd, n)?;
-            if s.is_zero() {
-                continue;
-            }
-
-            return encode_der_signature(&r, &s);
         }
 
         Err(CryptoError::BnRandGenFail)
+    }
+
+    /// Compute the SM2 sign digest integer `e = SM3(Z_A ‖ M)`.
+    fn sign_digest(&self, user_id: &[u8], message: &[u8]) -> Result<BigNum, CryptoError> {
+        let za = compute_za(user_id, &self.public_key, &self.group)?;
+        let mut hasher = Sm3::new();
+        hasher.update(&za)?;
+        hasher.update(message)?;
+        let digest = hasher.finish()?;
+        Ok(BigNum::from_bytes_be(&digest))
+    }
+
+    /// Compute the SM2 signature `(r, s)` for digest-integer `e` with a specific
+    /// nonce `k` (GB/T 32918.2 §6.1), returning the DER encoding. Yields
+    /// `Ok(None)` when this `k` gives `kG == ∞`, `r == 0`, or `r + k == n` /
+    /// `s == 0` — the random-`k` retry loop then tries another nonce.
+    fn sign_with_k(&self, e: &BigNum, k: &BigNum) -> Result<Option<Vec<u8>>, CryptoError> {
+        let n = self.group.order();
+        let d = &self.private_key;
+
+        let kg = self.group.scalar_mul_base(k)?;
+        if kg.is_infinity() {
+            return Ok(None);
+        }
+
+        // r = (e + x1) mod n
+        let r = e.mod_add(kg.x(), n)?;
+        if r.is_zero() {
+            return Ok(None);
+        }
+
+        // Check r + k != n
+        let r_plus_k = r.add(k);
+        if r_plus_k == *n {
+            return Ok(None);
+        }
+
+        // s = (1+d)^(-1) * (k - r*d) mod n
+        let d_plus_1 = d.mod_add(&BigNum::from_u64(1), n)?;
+        let d_plus_1_inv = d_plus_1.mod_inv(n)?;
+        let rd = r.mod_mul(d, n)?;
+        // k - r*d mod n: add n to avoid underflow
+        let k_minus_rd = k.mod_add(&n.sub(&rd), n)?;
+        let s = d_plus_1_inv.mod_mul(&k_minus_rd, n)?;
+        if s.is_zero() {
+            return Ok(None);
+        }
+
+        Ok(Some(encode_der_signature(&r, &s)?))
+    }
+
+    /// **KAT / testing only — never use in production.** SM2-sign `message`
+    /// under `user_id` with a caller-supplied big-endian nonce `k`.
+    ///
+    /// # Security
+    /// A reused or chosen SM2 nonce leaks the private key. This exists only to
+    /// reproduce published deterministic sign KATs; it is gated behind the
+    /// non-default `kat-nonce` feature and marked `#[deprecated]` as a danger
+    /// sentinel (a non-`#[allow(deprecated)]` caller fails to build under
+    /// `-D warnings`).
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test/KAT only: signing with a caller-chosen nonce leaks the SM2 \
+                private key — never use in production"
+    )]
+    pub fn sign_with_id_nonce(
+        &self,
+        user_id: &[u8],
+        message: &[u8],
+        k: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        if self.private_key.is_zero() {
+            return Err(CryptoError::EccInvalidPrivateKey);
+        }
+        let e = self.sign_digest(user_id, message)?;
+        let n = self.group.order();
+        let k = BigNum::from_bytes_be(k);
+        if k.is_zero() || k >= *n {
+            return Err(CryptoError::EccInvalidPrivateKey);
+        }
+        self.sign_with_k(&e, &k)?.ok_or(CryptoError::BnRandGenFail)
     }
 
     /// Verify a signature against a message using the default user ID.
