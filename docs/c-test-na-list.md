@@ -60,7 +60,21 @@ Counts are the `Generation summary` footer of each generated file
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 6 | 272 | 0 | 12 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
-| **Total** | **1770** | **3045** | **238** | **88** | **4462** |
+| RSA | 30 | 112 | 0 | 2 | 144 |
+| **Total** | **1800** | **3157** | **238** | **90** | **4606** |
+
+RSA migrates the signature **verify** families from
+`test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
+(PKCS#1 v1.5, SHA-1/224/256/384/512) and `VERIFY_PSS_FUNC_TC001` (PSS,
+SHA-256/384/512). Migrating them surfaced and fixed **two real Rust gaps**
+(I138): (1) `pkcs1v15` had **no SHA-224 DigestInfo prefix**, so RSA-SHA-224
+PKCS#1 v1.5 verify (and sign) silently failed — added OID 2.16.840.1.101.3.4.2.4;
+(2) `verify_pss` hardcoded `saltLen = hashLen`, but the NIST vectors use a
+20-byte salt — added `RsaPublicKey::verify_pss_with_salt(.., salt_len)` (RFC 8017
+EMSA-PSS-VERIFY `sLen`). The 2 unsupported are PSS-SHA-224 (no `RsaHashAlg::Sha224`
+/ MGF1-SHA-224). RSA **sign / encrypt / decrypt** need a private key built from
+just `(n, d)` (the C vectors omit the CRT params `RsaPrivateKey::new` requires);
+a `from_nd` constructor is a follow-up — routed to API-surface.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,

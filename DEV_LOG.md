@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I137 (137 phases)
+- Implementation: I1–I138 (138 phases)
 - Testing: T1–T140 (133 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated)
 - Refactoring: R1–R15 (15 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -383,6 +383,7 @@ Category summary:
 | 380 | I136 | Impl | Extend the `kat-nonce` deterministic-sign hook to DSA + SM2 (after the ECDSA pilot I134) — unblocks two more sign-side KAT families. `DsaKeyPair::sign_with_nonce(digest, k)` and `Sm2KeyPair::sign_with_id_nonce(user_id, msg, k)`, both `#[doc(hidden)]` + `#[cfg(feature="kat-nonce")]` + `#[deprecated]` danger sentinels (a chosen DSA/SM2 nonce leaks the private key). Each refactors its `sign` retry-loop body into a private `sign_with_k(e, k) -> Option<DER>` shared by the random-`k` `sign` (byte-identical production behaviour) and the fixed-`k` test entry point; SM2 also factors out `sign_digest` (`e = SM3(Z_A‖M)`). The xtask `dsa`/`sm2` emitters now emit a deterministic-sign test per sign-vector row (per-test `#[cfg(feature="kat-nonce")]` + `#[allow(deprecated)]`): DSA `SIGN_VERIFY_*` → `sign_with_nonce(MD(Msg), K) == DER(R,S)` (migrated_dsa **600 → 1200**, +600 NIST FIPS 186-4 sign KATs); SM2 `SIGN_FUNC_TC001/TC002` → `sign_with_id_nonce(userId, msg, k) == sign` (migrated_sm2 **12 → 14**, +2 GB/T 32918.5 sign KATs). All byte-exact vs openHiTLS C first run. ML-DSA sign deferred (it injects a 32-byte hedging `rnd` and the Rust deterministic `ρ' = H(K‖μ)` needs separate FIPS-204 study). No regression — hitls-crypto dsa lib 15/0 + sm2 lib 15/0 (production `sign` unchanged); migrated_dsa 1200/0 + migrated_sm2 14/0 (`--all-features`); narrow feature combos cfg the sign tests out; CI main job `--workspace --all-features` runs them; xtask `--check` drift gate passes; na-list tally → 1710 emitted; `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-27 |
 | 381 | R15 | Refactor | Make the tlsfuzzer CI workflow parseable — the curated suite had **never actually run in CI**. GitHub template-processes a `run:` block as a *single* expression whenever it contains any `${{ }}`, and is subject to a 21000-char per-expression limit. The "Run curated tlsfuzzer scripts" step's run block (the ~80-script arrays + per-script rationale comments + the run loops, ~40 KB) embedded `${{ github.event.schedule }}` (the monthly-sweep `SWEEP_N` switch), so the whole block was one >21000-char expression → the workflow failed to parse: `workflow_dispatch` → **HTTP 422 "Exceeded max expression length 21000"**, every push logged a 0 s validation failure (the long-ignored "tlsfuzzer.yml push 0s failure"), and the weekly/monthly `schedule` crons silently never fired. Discovered when a manual full-suite dispatch (requested as a post-change validation) was rejected; the run history confirmed **every** tlsfuzzer.yml entry was `push / failure` — zero successful runs ever. Fix: hoist the expression into a step-level `env: SCHEDULE: ${{ github.event.schedule }}` and reference `$SCHEDULE` in the shell, leaving the run block a pure literal (no `${{ }}` → no template processing → no length limit). Verified: `gh workflow run tlsfuzzer.yml --ref <branch>` is now **accepted** (was 422) and produced the first-ever successful tlsfuzzer run (workflow_dispatch, sampled full suite across all 13 listeners). YAML valid; `actionlint` clean (only pre-existing SC2129 shellcheck style nits). Config-only — no production or test-logic change | 2026-05-27 |
 | 382 | I137 | Impl | ML-DSA sign-side KAT + **FIPS-204 `ρ'` non-compliance fix** (the deferred I136 item) — migrating the C `SIGNDATA_TC001` vectors surfaced a real primitive bug (4th found via the migration discipline, cf. SLH-DSA/I129, CTR-DRBG-df/I131, ASN.1/I133). **Bug:** `mldsa_sign` (`crates/hitls-crypto/src/mldsa/mod.rs`) computed the private mask seed as `ρ' = H(K ‖ μ)`, but FIPS 204 §6.2 (ML-DSA.Sign_internal) is `ρ' = H(K ‖ rnd ‖ μ)` with a 32-byte `rnd` (`0^256` for the deterministic variant) — the `rnd` was omitted entirely, so every ML-DSA signature diverged from FIPS-204 (invisible to verify + round-trip, which never recompute `ρ'`). **Fix:** new `hash_h3_into` (poly.rs); `mldsa_sign` → `mldsa_sign_internal(sk, msg, rnd, params)` with `ρ' = H(K ‖ rnd ‖ μ)`; public deterministic `sign` passes `rnd = 0^32`. Confirmed by reproducing the C `BSL_..._SIGNDATA` vector (`rnd = seed`) byte-for-byte. **Hook:** `MlDsaKeyPair::sign_with_rnd(msg, rnd)` + `from_private_key(type, sk)` — `sign_with_rnd` is `#[doc(hidden)]` + `#[cfg(feature="kat-nonce")]` + `#[deprecated]` (test-only; note: ML-DSA `rnd` reuse is *not* key-leaking, unlike ECDSA/DSA, so the sentinel says "test-only", not "leaks key"). The xtask `mldsa` emitter emits `SIGNDATA_TC001` → `from_private_key(type, prvKey).sign_with_rnd(msg, seed) == sign` (per-test `#[cfg(feature="kat-nonce")]` + `#[allow(deprecated)]`); `migrated_mldsa.rs` **45 → 105** (+60 sign KATs, all 3 param sets). The 3 self-snapshot `*_golden_value_kat` deterministic-sig fingerprints were regenerated to the corrected (FIPS-204) values (keygen fingerprints unchanged). No regression — hitls-crypto mldsa lib 47/0 (incl. the determinism test + corrected golden values), `migrated_mldsa` 105/0 (`--all-features`) / 45/0 (no `kat-nonce`); hitls-pki ML-DSA verify (X.509/CMS) 31/0 unaffected; workspace `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** ML-DSA signatures (e.g. X.509 cert signing) now match FIPS-204; verification of others' signatures is unaffected. ML-DSA sign side now covered → ECDSA/DSA/SM2/ML-DSA all migrated | 2026-05-27 |
+| 383 | I138 | Impl | RSA signature-**verify** KAT migration + **two real RSA gap fixes** — migrating `test_suite_sdv_eal_rsa_sign_verify.data` verify families surfaced two genuine Rust RSA defects. **(1) PKCS#1 v1.5 missing SHA-224:** `pkcs1v15::digest_info_prefix` (keyed by digest length) had no entry for 28 bytes, so RSA-SHA-224 PKCS#1 v1.5 verify *and* sign returned `InvalidArg` — every SHA-224 RSA signature operation was broken. Added the SHA-224 `DigestInfo` prefix (OID 2.16.840.1.101.3.4.2.4). **(2) PSS verify hardcoded `saltLen = hashLen`:** the public `verify_pss` always used `h_len(alg)`, but the NIST FIPS 186 PSS vectors use a fixed 20-byte salt, so SHA-384/512 PSS verify failed. Added `RsaPublicKey::verify_pss_with_salt(digest, sig, alg, salt_len)` (RFC 8017 EMSA-PSS-VERIFY `sLen`; the internal `pss_verify_unpad_with_salt_alg` already existed). Migrated `migrated_rsa.rs` **30 tests**: `VERIFY_PKCSV15_FUNC_TC001` (PKCS#1 v1.5, SHA-1/224/256/384/512; `RsaPublicKey::new(n,e).verify(Pkcs1v15Sign, MD(msg), sign)`) + `VERIFY_PSS_FUNC_TC001` (PSS SHA-256/384/512 via `verify_pss_with_salt`, salt_len = the row's salt length). `expect == 0` (CRYPT_SUCCESS) → must verify, else must not. 2 unsupported = PSS-SHA-224 (no `RsaHashAlg::Sha224`). RSA sign / encrypt / decrypt deferred (need a `(n,d)`-only private-key constructor; the C vectors omit the CRT params). No regression — hitls-crypto rsa lib 61/0 (incl. an updated unsupported-digest-length test now using 16 B, since 28 B is valid) + 30 migrated RSA verify; xtask `--check` drift gate passes; na-list tally → 1800 emitted; `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** RSA-SHA-224 PKCS#1 v1.5 sign/verify now works; non-`hLen`-salt PSS verify is now possible | 2026-05-27 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -23871,3 +23872,73 @@ The `kat-nonce` deterministic-sign hook now covers all four classic/PQC
 signature families (ECDSA / DSA / SM2 / ML-DSA); their sign-side KATs
 reproduce openHiTLS C byte-for-byte, and ML-DSA signing is now
 FIPS-204-conformant.
+
+## Phase I138 — RSA Verify KAT Migration + Two RSA Gap Fixes (2026-05-27)
+
+### Summary
+
+Migrated the RSA signature-**verify** KAT families and, in doing so,
+found and fixed two genuine Rust RSA defects (continuing the pattern of
+the migration discipline surfacing real bugs).
+
+### Fix 1 — PKCS#1 v1.5 missing SHA-224
+
+`pkcs1v15::digest_info_prefix` selects the DigestInfo DER prefix by digest
+length and had entries only for SHA-1 (20) / SHA-256 (32) / SHA-384 (48) /
+SHA-512 (64). A 28-byte (SHA-224) digest hit the `_ => Err` arm, so
+**RSA-SHA-224 PKCS#1 v1.5 verify *and* sign returned `InvalidArg`** — the
+operation was simply broken for SHA-224. Added the standard SHA-224
+`DigestInfo` prefix (OID 2.16.840.1.101.3.4.2.4) + the `28 =>` arm. (The
+existing `test_sign_pad_unsupported_digest_length` used a 28-byte digest as
+its "unsupported" example; updated to 16 bytes, since 28 is now valid.)
+
+### Fix 2 — PSS verify hardcoded saltLen = hashLen
+
+The public `verify_pss` always passed `h_len(alg)` as the salt length, but
+the NIST FIPS 186 PSS test vectors use a fixed **20-byte** salt regardless
+of hash, so SHA-384/512 PSS verify failed. Added
+`RsaPublicKey::verify_pss_with_salt(digest, sig, alg, salt_len)` (RFC 8017
+EMSA-PSS-VERIFY `sLen`); the internal `pss_verify_unpad_with_salt_alg`
+already supported an explicit salt length, so this just exposes it. Because `salt_len` is now caller-controlled, hardened `pss_verify_unpad_with_salt_alg`'s `hLen+sLen+2 <= emLen` check to use checked arithmetic — a `salt_len` near `usize::MAX` previously wrapped and reached an out-of-bounds `db[..ps_len]` slice (an AI-review CRITICAL caught pre-merge); now it rejects cleanly (regression test `test_pss_verify_huge_salt_len_no_panic`).
+
+### Migrated KATs (`migrated_rsa.rs`, 30 tests)
+
+- `VERIFY_PKCSV15_FUNC_TC001` — PKCS#1 v1.5 verify, SHA-1/224/256/384/512:
+  `RsaPublicKey::new(n, e).verify(Pkcs1v15Sign, MD(msg), sign)`.
+- `VERIFY_PSS_FUNC_TC001` — PSS verify, SHA-256/384/512:
+  `verify_pss_with_salt(MD(msg), sign, alg, salt_len)` with `salt_len` =
+  the row's salt-field length.
+- `expect == 0` (CRYPT_SUCCESS) ⇒ must verify; otherwise must not.
+- 2 unsupported = PSS-SHA-224 (no `RsaHashAlg::Sha224` / MGF1-SHA-224).
+
+### Not migrated (deferred)
+
+RSA sign / encrypt / decrypt: the C vectors supply only `(n, d)` (no CRT
+`p, q, e`), but `RsaPrivateKey::new` requires them. A `from_nd` constructor
+(+ plain-`d` modexp path) is a follow-up.
+
+### Verification
+
+- `migrated_rsa` **30/0** (`-D warnings`); hitls-crypto rsa lib **61/0**.
+- xtask `--check` drift gate passes; na-list tally → 1800 emitted.
+- `fmt` + `clippy -D warnings --all-features --all-targets` clean.
+
+### Files Modified
+
+| File | Status | Description |
+|------|--------|-------------|
+| `crates/hitls-crypto/src/rsa/pkcs1v15.rs` | Modified | SHA-224 `DigestInfo` prefix + `28 =>` arm; updated unsupported-length test. |
+| `crates/hitls-crypto/src/rsa/mod.rs` | Modified | `RsaPublicKey::verify_pss_with_salt`. |
+| `crates/hitls-crypto/src/rsa/pss.rs` | Modified | checked-arithmetic `salt_len` bound + huge-salt regression test. |
+| `xtask/src/rsa.rs` | Added | RSA verify-KAT emitter (PKCSV15 + PSS). |
+| `xtask/src/main.rs` | Modified | `rsa` dispatch arm + module decl + help string. |
+| `crates/hitls-crypto/tests/migrated_rsa.rs` | Added | 30 generated RSA verify KATs. |
+| `docs/c-test-na-list.md` | Modified | RSA tally row + fix notes. |
+| `DEV_LOG.md` / `PROMPT_LOG.md` | Modified | This entry + Phase Index row 383 + Implementation summary I1–I138. |
+
+### Build Status (Post I138)
+
+RSA signature verification (PKCS#1 v1.5 + PSS) is KAT-covered against
+openHiTLS C, and two real RSA defects (SHA-224 PKCS#1 v1.5; non-`hLen`
+PSS salt) are fixed. RSA sign/encrypt/decrypt migration awaits an
+`(n,d)`-only private-key constructor.

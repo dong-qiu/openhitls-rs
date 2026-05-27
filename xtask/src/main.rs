@@ -9,6 +9,7 @@ mod mac;
 mod mldsa;
 mod mlkem;
 mod parser;
+mod rsa;
 mod sha3;
 mod sm2;
 mod sm4;
@@ -154,6 +155,11 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_ecc.rs"),
             ecc::emit_ecc_kat,
         ),
+        "rsa" => (
+            vec![c_root.join("crypto/rsa/test_suite_sdv_eal_rsa_sign_verify.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_rsa.rs"),
+            rsa::emit_rsa_kat,
+        ),
         "x509-parse" => (
             vec![
                 c_root.join("pki/cert/test_suite_sdv_x509_cert.data"),
@@ -166,7 +172,7 @@ fn migrate(
         ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, drbg, ecc, x509-parse"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, drbg, ecc, rsa, x509-parse"
             )
             .into());
         }

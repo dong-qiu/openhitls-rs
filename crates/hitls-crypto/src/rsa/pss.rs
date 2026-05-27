@@ -214,9 +214,13 @@ pub(crate) fn pss_verify_unpad_with_salt_alg(
     // Use the rightmost em_len bytes (in case em is padded with a leading zero)
     let em = &em[em.len() - em_len..];
 
-    // emLen must be >= hLen + sLen + 2
-    if em_len < hl + salt_len + 2 {
-        return Ok(false);
+    // emLen must be >= hLen + sLen + 2. Compute with checked arithmetic: with a
+    // caller-supplied `salt_len` (e.g. via `RsaPublicKey::verify_pss_with_salt`),
+    // `hl + salt_len + 2` must not wrap and let an oversized salt reach the
+    // `db[..ps_len]` slice below (`ps_len = db_len - salt_len - 1`).
+    match hl.checked_add(salt_len).and_then(|x| x.checked_add(2)) {
+        Some(need) if need <= em_len => {}
+        _ => return Ok(false),
     }
 
     // Check the rightmost octet is 0xbc
@@ -399,6 +403,18 @@ mod tests {
         // em shorter than em_len
         let em = vec![0u8; 10];
         let ok = pss_verify_unpad(&em, &digest, 1023).unwrap();
+        assert!(!ok);
+    }
+
+    #[test]
+    fn test_pss_verify_huge_salt_len_no_panic() {
+        // A caller-supplied salt_len near usize::MAX must not wrap the
+        // `hLen + salt_len + 2` length check (which would otherwise reach an
+        // out-of-bounds `db[..ps_len]` slice). It must reject cleanly.
+        let digest = sha256(b"x");
+        let em = vec![0u8; 256];
+        let ok = pss_verify_unpad_with_salt_alg(&em, &digest, 2047, usize::MAX, RsaHashAlg::Sha256)
+            .unwrap();
         assert!(!ok);
     }
 }
