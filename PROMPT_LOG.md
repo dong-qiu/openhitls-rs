@@ -8513,3 +8513,34 @@ session-resumption + -n 9999 → 7/0/0/0 (unchanged); cert-request no SWEEP →
 on the unchanged cd). Config/test-infra only.
 
 Recorded as DEV_LOG Phase T141.
+
+## Phase I139 — RSA PKCS#1 v1.5 Sign KAT + `from_nd` Constructor (2026-05-27)
+
+> RSA sign/encrypt/decrypt
+
+Extended the I138 RSA migration to the sign side, scoped this PR to the
+deterministic PKCS#1 v1.5 sign family (no nonce needed). The blocker was the
+key shape: the C SIGN_PKCSV15_FUNC_TC002 vectors publish a private key as
+just (n, d) — no CRT params — but RsaPrivateKey::new requires them.
+
+Added two test-only paths behind the kat-nonce feature:
+- RsaPrivateKey::from_nd(n, d) — #[doc(hidden)] + #[cfg(kat-nonce)] +
+  #[deprecated] ("not side-channel-hardened — never use in production");
+  stores n, d, zeros all CRT fields.
+- A plain-d branch at the top of raw_decrypt (m = c^d mod n via mod_exp),
+  taken only when self.p.is_zero() — true ONLY for from_nd keys, so the
+  production CRT path is byte-unchanged. The branch is itself #[cfg(kat-
+  nonce)]-gated (AI-review HIGH follow-up) so the unhardened plain-d path is
+  not compiled into production builds at all.
+
+Emitter: RSA_SIGN_PKCSV15_FUNC_TC002 → from_nd(n,d).sign(Pkcs1v15Sign,
+MD(msg)) == sign (per-test kat-nonce + allow(deprecated); the RsaPrivateKey
+import is itself kat-nonce-gated). migrated_rsa 30 → 38 (+8 sign KATs,
+SHA-1/256/384/512), all byte-exact vs C first run.
+
+Verification: rsa lib 62/0 (CRT path unaffected); migrated_rsa 38/0
+(kat-nonce) and 30/0 (no kat-nonce, gated import clean under -D warnings);
+drift gate passes; na-list → 1808 emitted (RSA 30 → 38); fmt + clippy clean.
+PSS sign / encrypt / decrypt remain API-surface follow-ups.
+
+Recorded as DEV_LOG Phase I139.

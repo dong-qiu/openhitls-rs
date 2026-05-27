@@ -31,6 +31,8 @@ pub fn emit_rsa_kat(cases: &[TestCase]) -> (String, EmitStats) {
             emit_verify_pkcs15(&mut body, case, &mut stats, &mut used);
         } else if case.tc_name.contains("RSA_VERIFY_PSS_FUNC_TC001") {
             emit_verify_pss(&mut body, case, &mut stats, &mut used);
+        } else if case.tc_name.contains("RSA_SIGN_PKCSV15_FUNC_TC002") {
+            emit_sign_pkcs15(&mut body, case, &mut stats, &mut used);
         } else {
             stats.skipped_api += 1;
         }
@@ -134,6 +136,68 @@ fn emit_verify_pkcs15(
     stats.emitted += 1;
 }
 
+/// Deterministic RSA PKCS#1 v1.5 **sign** KAT (`RSA_SIGN_PKCSV15_FUNC_TC002`:
+/// `mdId : n : d : msg : sign`). PKCS#1 v1.5 signing has no randomness, so the
+/// signature is fully determined by `(n, d, MD(msg))`. The C vector publishes
+/// only `(n, d)` (no CRT params), so the test uses the test-only
+/// `RsaPrivateKey::from_nd` (behind the `kat-nonce` feature): `from_nd(n, d)
+/// .sign(Pkcs1v15Sign, MD(msg)) == sign`.
+fn emit_sign_pkcs15(
+    out: &mut String,
+    case: &TestCase,
+    stats: &mut EmitStats,
+    used: &mut BTreeSet<&'static str>,
+) {
+    if skip_if_provider_dup(case) {
+        stats.skipped_api += 1;
+        return;
+    }
+    // mdId : n : d : msg : sign : isProvider
+    if case.args.len() < 5 {
+        stats.skipped_unknown += 1;
+        return;
+    }
+    let Some(hash) = case.args[0].as_symbol().and_then(md_to_hash) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let (Some(n), Some(d), Some(msg), Some(sign)) = (
+        case.args[1].as_hex(),
+        case.args[2].as_hex(),
+        case.args[3].as_hex(),
+        case.args[4].as_hex(),
+    ) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    used.insert(hash);
+    used.insert("privkey");
+
+    write_doc(out, case, "RSA PKCS#1 v1.5 deterministic sign");
+    writeln!(out, "#[cfg(feature = \"kat-nonce\")]").unwrap();
+    writeln!(out, "#[allow(deprecated)]").unwrap();
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_rsa_pkcs15_sign() {{", case.line).unwrap();
+    writeln!(out, "    let n: &[u8] = {};", format_byte_slice(n)).unwrap();
+    writeln!(out, "    let d: &[u8] = {};", format_byte_slice(d)).unwrap();
+    writeln!(out, "    let msg: &[u8] = {};", format_byte_slice(msg)).unwrap();
+    writeln!(
+        out,
+        "    let expected: &[u8] = {};",
+        format_byte_slice(sign)
+    )
+    .unwrap();
+    writeln!(out, "    let digest = {hash}::digest(msg).unwrap();").unwrap();
+    writeln!(out, "    let sk = RsaPrivateKey::from_nd(n, d).unwrap();").unwrap();
+    writeln!(
+        out,
+        "    assert_eq!(sk.sign(RsaPadding::Pkcs1v15Sign, &digest).unwrap(), expected);"
+    )
+    .unwrap();
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
 fn emit_verify_pss(
     out: &mut String,
     case: &TestCase,
@@ -215,6 +279,12 @@ fn write_header(out: &mut String, used: &BTreeSet<&'static str>) {
         out.push_str("use hitls_crypto::rsa::{RsaHashAlg, RsaPadding, RsaPublicKey};\n");
     } else {
         out.push_str("use hitls_crypto::rsa::{RsaPadding, RsaPublicKey};\n");
+    }
+    if used.contains("privkey") {
+        // `RsaPrivateKey` is used only by the kat-nonce sign tests; gate the
+        // import so a build without `kat-nonce` has no unused import.
+        out.push_str("#[cfg(feature = \"kat-nonce\")]\n");
+        out.push_str("use hitls_crypto::rsa::RsaPrivateKey;\n");
     }
     if used.contains("Sha1") {
         out.push_str("use hitls_crypto::sha1::Sha1;\n");

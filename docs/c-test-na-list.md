@@ -60,8 +60,8 @@ Counts are the `Generation summary` footer of each generated file
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 6 | 272 | 0 | 12 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
-| RSA | 30 | 112 | 0 | 2 | 144 |
-| **Total** | **1800** | **3157** | **238** | **90** | **4606** |
+| RSA | 38 | 104 | 0 | 2 | 144 |
+| **Total** | **1808** | **3149** | **238** | **90** | **4606** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -72,9 +72,16 @@ PKCS#1 v1.5 verify (and sign) silently failed — added OID 2.16.840.1.101.3.4.2
 (2) `verify_pss` hardcoded `saltLen = hashLen`, but the NIST vectors use a
 20-byte salt — added `RsaPublicKey::verify_pss_with_salt(.., salt_len)` (RFC 8017
 EMSA-PSS-VERIFY `sLen`). The 2 unsupported are PSS-SHA-224 (no `RsaHashAlg::Sha224`
-/ MGF1-SHA-224). RSA **sign / encrypt / decrypt** need a private key built from
-just `(n, d)` (the C vectors omit the CRT params `RsaPrivateKey::new` requires);
-a `from_nd` constructor is a follow-up — routed to API-surface.
+/ MGF1-SHA-224). RSA **PKCS#1 v1.5 sign** is now migrated (I139):
+`SIGN_PKCSV15_FUNC_TC002` emits `from_nd(n, d).sign(Pkcs1v15Sign, MD(msg)) == sign`
+(Emitted 30 → 38, +8). PKCS#1 v1.5 signing is deterministic, so no nonce hook is
+needed — but the C vectors publish only `(n, d)` (no CRT params), so a test-only
+`RsaPrivateKey::from_nd` constructor (behind `kat-nonce`, `#[deprecated]` "the
+plain-`d` private path is not side-channel-hardened") + a plain-`d`
+`raw_decrypt` branch (`c^d mod n` when CRT params are absent) were added. RSA
+**PSS sign** (needs a salt hook), **encrypt** (needs an encrypt nonce hook), and
+**decrypt** (`CRYPT_FUNC_TC001`, OAEP/v1.5 — `from_nd` now unblocks the key, but
+the decrypt-side emitter is a follow-up) stay API-surface.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
