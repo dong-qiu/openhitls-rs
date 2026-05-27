@@ -8627,3 +8627,28 @@ passes; na-list -> 1836 emitted (RSA 48 -> 66); fmt + clippy clean. PSS sign
 (random salt) is the last API-surface RSA family.
 
 Recorded as DEV_LOG Phase I142.
+
+## Phase I143 — RSA-PSS Sign-Side KAT Migration (fixed-salt hook) (2026-05-28)
+
+> 现在去确认 SIGN_PSS 向量、然后按结果推进
+
+Confirmed: SIGN_PSS vectors exist and TC001 is byte-exact reproducible.
+SDV_CRYPTO_RSA_SIGN_PSS_FUNC_TC001(mdId, n, d, msg, sign, salt) injects the
+exact salt (CRYPT_CTRL_SET_RSA_SALT) then ASSERT_COMPAREs the signature. So
+PSS sign IS a byte KAT (unlike randomised encrypt). TC002 (random salt) +
+TC003 (saltLen error paths) are not byte KATs -> API-surface.
+
+Hook (kat-nonce-gated): pss::pss_sign_pad_with_salt_bytes_alg (salt bytes, no
+RNG, with digest-len + emLen>=hLen+sLen+2 checked validation) +
+RsaPrivateKey::sign_pss_with_salt(digest, alg, salt) (doc-hidden + deprecated
+"test-only: fixed salt removes PSS randomisation" — NOT key-leaking, since
+PSS salt reuse doesn't leak the key). emit_sign_pss migrates TC001 ->
+from_nd(n,d).sign_pss_with_salt(MD(msg), RsaHashAlg::{alg}, salt) == sign.
+migrated_rsa 66 -> 72 (+6, SHA-256/384/512; SHA-224 unsupported).
+
+Verification: rsa lib 64/0; migrated_rsa 72/0 (kat-nonce) / 34/0 (no
+kat-nonce); builds clean with sha1+kat-nonce off; drift gate passes; na-list
+-> 1842 emitted (RSA 66 -> 72, unsupported 2 -> 4 = PSS-SHA-224); fmt +
+clippy clean. All deterministic RSA families now migrated.
+
+Recorded as DEV_LOG Phase I143.
