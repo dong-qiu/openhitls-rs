@@ -109,10 +109,38 @@ if [ -n "${SWEEP_N:-}" ]; then
 fi
 
 cd "${tlsfuzzer_dir}"
+
 # Bash <4.4 chokes on `${arr[@]}` when arr is empty under `set -u`;
 # expand with the +-substitution form to side-step that.
-PYTHONPATH=. exec "${tlsfuzzer_py}" "scripts/${script_name}" \
-    ${extra_script_args[@]+"${extra_script_args[@]}"} \
-    ${xfail_args[@]+"${xfail_args[@]}"} \
-    ${sweep_args[@]+"${sweep_args[@]}"} \
-    "$@"
+run_tlsfuzzer() {
+    PYTHONPATH=. "${tlsfuzzer_py}" "scripts/${script_name}" \
+        ${extra_script_args[@]+"${extra_script_args[@]}"} \
+        ${xfail_args[@]+"${xfail_args[@]}"} \
+        "$@"
+}
+
+# When the monthly sweep injects `-n <N>`, a few tlsfuzzer scripts don't
+# define a `-n` option at all (e.g. test-tls13-certificate-request.py) and
+# getopt aborts instantly — before any conversation runs — with
+# "option -n not recognized". Detect that one specific failure and retry
+# without the sweep cap: the script's fixed conversation set is then the
+# complete run. The probe is free because the abort happens at arg-parse.
+if [ ${#sweep_args[@]} -gt 0 ]; then
+    err_capture="$(mktemp)"
+    run_tlsfuzzer "${sweep_args[@]}" "$@" 2>"${err_capture}"
+    rc=$?
+    cat "${err_capture}" >&2
+    if [ "${rc}" -ne 0 ] && grep -q "option -n not recognized" "${err_capture}"; then
+        rm -f "${err_capture}"
+        echo "[run.sh] ${script_name}: '-n' unsupported; re-running without SWEEP_N cap" >&2
+        retry_rc=0
+        run_tlsfuzzer "$@" || retry_rc=$?
+        exit "${retry_rc}"
+    fi
+    rm -f "${err_capture}"
+    exit "${rc}"
+fi
+
+run_rc=0
+run_tlsfuzzer "$@" || run_rc=$?
+exit "${run_rc}"

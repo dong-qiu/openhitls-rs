@@ -8481,3 +8481,35 @@ emitted; fmt + clippy clean. Production: RSA-SHA-224 PKCS#1 now works;
 non-hLen-salt PSS verify now possible.
 
 Recorded as DEV_LOG Phase I138.
+
+## Phase T141 — First Local Full `-n 9999` tlsfuzzer Sweep + run.sh `-n` Fallback (2026-05-27)
+
+> 本地全量跑
+
+Replicated the monthly-cron full tlsfuzzer path locally: 13 s-server
+listeners (ports 4444–4456) + the entire curated suite at -n 9999 = 86
+script runs. Product side: 0 FAIL / 0 XPASS across all per-script logs.
+
+Two non-zero exits, both non-product:
+- test-tls13-certificate-request.py — real test-harness bug. run.sh injects
+  -n <SWEEP_N> into every script, but this one defines no -n option →
+  getopt aborts instantly ("option -n not recognized") before any
+  conversation. Invisible at sampled counts (no -n injected), but the
+  monthly full-sweep CI would fail on it every month.
+- test-tls13-session-resumption.py — one-off PSK-listener startup transient
+  (empty log). Re-ran 7× via run.sh at full counts → 7/0/0/0 each. Not a bug.
+
+Fix (tests/tlsfuzzer/run.sh): replaced the single `exec python …` with a
+run_tlsfuzzer() helper + guarded wrapper. When SWEEP_N is set, run with -n;
+if it fails and stderr has "option -n not recognized", retry without the
+sweep cap (the script's fixed conversation set is the full run). Free probe
+— the abort is at arg-parse, zero conversations — so -n-supporting scripts
+pay nothing. Source-grepping optstrings was rejected as unreliable (multi-
+line getopt made finished/keyupdate look -n-less though they run fine).
+
+Verification: cert-request + -n 9999 → retry → PASS 4/0/0/0 rc=0;
+session-resumption + -n 9999 → 7/0/0/0 (unchanged); cert-request no SWEEP →
+4/0/0/0 (unchanged). bash -n + shellcheck clean (lone SC2164 is pre-existing
+on the unchanged cd). Config/test-infra only.
+
+Recorded as DEV_LOG Phase T141.
