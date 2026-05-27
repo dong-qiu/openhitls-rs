@@ -3,6 +3,12 @@
 use hitls_types::CryptoError;
 use subtle::ConstantTimeEq;
 
+/// DigestInfo DER prefix for SHA-224 (OID 2.16.840.1.101.3.4.2.4).
+const DIGEST_INFO_SHA224: &[u8] = &[
+    0x30, 0x2d, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04, 0x05,
+    0x00, 0x04, 0x1c,
+];
+
 /// DigestInfo DER prefix for SHA-256 (OID 2.16.840.1.101.3.4.2.1).
 const DIGEST_INFO_SHA256: &[u8] = &[
     0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
@@ -27,10 +33,11 @@ const DIGEST_INFO_SHA1: &[u8] = &[
 ];
 
 /// Return the DigestInfo prefix for a given hash digest length.
-/// Supports SHA-1 (20), SHA-256 (32), SHA-384 (48), SHA-512 (64).
+/// Supports SHA-1 (20), SHA-224 (28), SHA-256 (32), SHA-384 (48), SHA-512 (64).
 fn digest_info_prefix(digest_len: usize) -> Result<&'static [u8], CryptoError> {
     match digest_len {
         20 => Ok(DIGEST_INFO_SHA1),
+        28 => Ok(DIGEST_INFO_SHA224),
         32 => Ok(DIGEST_INFO_SHA256),
         48 => Ok(DIGEST_INFO_SHA384),
         64 => Ok(DIGEST_INFO_SHA512),
@@ -222,7 +229,9 @@ mod tests {
 
     #[test]
     fn test_sign_pad_unsupported_digest_length() {
-        let digest = vec![0xEE; 28]; // SHA-224, not supported
+        // 16 bytes (e.g. MD5) has no DigestInfo prefix here; supported lengths
+        // are SHA-1 (20), SHA-224 (28), SHA-256 (32), SHA-384 (48), SHA-512 (64).
+        let digest = vec![0xEE; 16];
         assert!(pkcs1v15_sign_pad(&digest, 128).is_err());
     }
 

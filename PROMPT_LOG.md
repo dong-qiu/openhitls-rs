@@ -8454,3 +8454,30 @@ na-list → 1770 emitted; fmt + clippy clean. Production ML-DSA signing now
 FIPS-204-conformant.
 
 Recorded as DEV_LOG Phase I137.
+
+---
+
+## Phase I138 — RSA Verify KAT Migration + Two RSA Gap Fixes (2026-05-27)
+
+> RSA
+
+Migrated RSA verify KATs; surfaced + fixed two real Rust RSA defects.
+Fix 1: pkcs1v15 digest_info_prefix had no SHA-224 entry → RSA-SHA-224
+PKCS#1 v1.5 verify/sign returned InvalidArg (broken). Added SHA-224
+DigestInfo prefix (OID 2.16.840.1.101.3.4.2.4). Fix 2: verify_pss
+hardcoded saltLen=hashLen, but NIST PSS vectors use 20-byte salt → SHA-
+384/512 PSS verify failed. Added RsaPublicKey::verify_pss_with_salt (RFC
+8017 sLen; internal pss_verify_unpad_with_salt_alg already existed).
+
+migrated_rsa.rs 30 tests: VERIFY_PKCSV15 (SHA-1/224/256/384/512) +
+VERIFY_PSS (SHA-256/384/512, salt_len = row salt len). expect==0 → must
+verify. 2 unsupported = PSS-SHA-224 (no RsaHashAlg::Sha224). RSA sign/
+encrypt/decrypt deferred (need (n,d)-only constructor; vectors omit CRT
+params).
+
+Verification: migrated_rsa 30/0; rsa lib 61/0 (updated unsupported-length
+test to 16 B since 28 B now valid); drift gate passes; na-list → 1800
+emitted; fmt + clippy clean. Production: RSA-SHA-224 PKCS#1 now works;
+non-hLen-salt PSS verify now possible.
+
+Recorded as DEV_LOG Phase I138.

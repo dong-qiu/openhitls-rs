@@ -149,6 +149,25 @@ impl RsaPublicKey {
         pss::pss_verify_unpad_alg(&em, digest, self.bits - 1, alg)
     }
 
+    /// Verify a PSS signature with an explicit hash algorithm **and** salt
+    /// length (RFC 8017 EMSA-PSS-VERIFY `sLen`). Use this when the salt length
+    /// is not the hash output length (the [`Self::verify_pss`] default) — e.g.
+    /// NIST FIPS 186 PSS vectors often use a fixed 20-byte salt regardless of
+    /// the hash. `digest.len()` must equal the output size of `alg`.
+    pub fn verify_pss_with_salt(
+        &self,
+        digest: &[u8],
+        signature: &[u8],
+        alg: RsaHashAlg,
+        salt_len: usize,
+    ) -> Result<bool, CryptoError> {
+        if signature.len() != self.k {
+            return Err(CryptoError::RsaVerifyFail);
+        }
+        let em = self.raw_encrypt(signature)?;
+        pss::pss_verify_unpad_with_salt_alg(&em, digest, self.bits - 1, salt_len, alg)
+    }
+
     /// Return the key size in bits.
     pub fn bits(&self) -> usize {
         self.bits
