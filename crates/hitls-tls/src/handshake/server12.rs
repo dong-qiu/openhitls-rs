@@ -502,71 +502,9 @@ impl Tls12ServerHandshake {
             ));
         }
 
-        // Parse extensions
-        let mut client_groups = Vec::new();
-        let mut client_alpn_protocols = Vec::new();
-        for ext in &ch.extensions {
-            match ext.extension_type {
-                ExtensionType::SIGNATURE_ALGORITHMS => {
-                    self.client_sig_algs = parse_signature_algorithms_ch(&ext.data)?;
-                }
-                ExtensionType::SUPPORTED_GROUPS => {
-                    client_groups = parse_supported_groups_ch(&ext.data)?;
-                }
-                ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION => {
-                    client_alpn_protocols = parse_alpn_ch(&ext.data)?;
-                }
-                ExtensionType::SERVER_NAME => {
-                    self.client_server_name = Some(parse_server_name(&ext.data)?);
-                }
-                ExtensionType::EXTENDED_MASTER_SECRET => {
-                    parse_extended_master_secret(&ext.data)?;
-                    self.client_offered_ems = true;
-                }
-                ExtensionType::ENCRYPT_THEN_MAC => {
-                    parse_encrypt_then_mac(&ext.data)?;
-                    self.client_offered_etm = true;
-                }
-                ExtensionType::EC_POINT_FORMATS => {
-                    // RFC 8422 §5.1.2 — validate the list (it MUST
-                    // contain `uncompressed`); we only need the
-                    // offered/not-offered flag for the ServerHello echo.
-                    parse_ec_point_formats(&ext.data)?;
-                    self.client_offered_ec_point_formats = true;
-                }
-                ExtensionType::RENEGOTIATION_INFO => {
-                    let ri_data = parse_renegotiation_info(&ext.data)?;
-                    if self.is_renegotiation {
-                        // RFC 5746 §3.7: client must send client_verify_data
-                        if ri_data.ct_eq(&self.prev_client_verify_data).unwrap_u8() != 1 {
-                            return Err(TlsError::HandshakeFailed(
-                                "renegotiation_info verify_data mismatch".into(),
-                            ));
-                        }
-                    } else if !ri_data.is_empty() {
-                        return Err(TlsError::HandshakeFailed(
-                            "non-empty renegotiation_info in initial handshake".into(),
-                        ));
-                    }
-                    // RFC 5746 §3.6 — client signalled secure-renego support
-                    // via the extension; gate ServerHello echo on this flag.
-                    self.client_signalled_secure_renego = true;
-                }
-                ExtensionType::RECORD_SIZE_LIMIT => {
-                    self.client_record_size_limit = Some(parse_record_size_limit(&ext.data)?);
-                }
-                ExtensionType::STATUS_REQUEST => {
-                    self.client_wants_ocsp = true;
-                }
-                ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP => {
-                    self.client_wants_sct = true;
-                }
-                ExtensionType::MAX_FRAGMENT_LENGTH => {
-                    self.client_max_fragment_length = Some(parse_max_fragment_length(&ext.data)?);
-                }
-                _ => {} // ignore other extensions
-            }
-        }
+        // Parse extensions (records per-extension server state; returns the
+        // client's offered supported_groups + ALPN protocol list).
+        let (client_groups, client_alpn_protocols) = self.parse_client_hello_extensions(&ch)?;
 
         // Parse custom extensions from ClientHello
         crate::extensions::parse_custom_extensions(
@@ -700,7 +638,155 @@ impl Tls12ServerHandshake {
             self.use_encrypt_then_mac = true;
         }
 
-        // Build ServerHello extensions
+        // Build ServerHello extensions from the negotiated state.
+        let sh_extensions = self.build_server_hello_extensions(&params);
+
+        // Build ServerHello
+        let sh = ServerHello {
+            random: self.server_random,
+            legacy_session_id: self.session_id.clone(),
+            cipher_suite: suite,
+            extensions: sh_extensions,
+        };
+        let sh_msg = encode_server_hello(&sh);
+        self.transcript.update(&sh_msg)?;
+
+        // Build Certificate (only for non-PSK key exchanges that require certificates)
+        let cert_msg = if params.kx_alg.requires_certificate() {
+            let cert12 = Certificate12 {
+                certificate_list: self.config.certificate_chain.clone(),
+            };
+            let msg = encode_certificate12(&cert12);
+            self.transcript.update(&msg)?;
+            Some(msg)
+        } else {
+            None
+        };
+
+        // Build CertificateStatus (RFC 6066 — OCSP stapling)
+        let cert_status_msg = if self.client_wants_ocsp {
+            if let Some(ref ocsp_response) = self.config.ocsp_staple {
+                let msg = crate::handshake::codec12::encode_certificate_status12(ocsp_response);
+                self.transcript.update(&msg)?;
+                Some(msg)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Build ServerKeyExchange (depends on the negotiated key exchange algorithm).
+        let ske_msg_opt = self.build_server_key_exchange12(&params, &client_groups)?;
+
+        // Build CertificateRequest (if mTLS is enabled and KX requires certificates).
+        let certificate_request = self.build_client_certificate_request(&params)?;
+
+        // Build ServerHelloDone
+        let shd_msg = encode_server_hello_done();
+        self.transcript.update(&shd_msg)?;
+
+        self.params = Some(params);
+        self.state = if self.config.verify_client_cert && certificate_request.is_some() {
+            Tls12ServerState::WaitClientCertificate
+        } else {
+            Tls12ServerState::WaitClientKeyExchange
+        };
+
+        Ok(ServerFlightResult {
+            server_hello: sh_msg,
+            certificate: cert_msg,
+            certificate_status: cert_status_msg,
+            server_key_exchange: ske_msg_opt,
+            certificate_request,
+            server_hello_done: shd_msg,
+            suite,
+            session_id: self.session_id.clone(),
+        })
+    }
+
+    /// Parse the ClientHello extensions, recording per-extension server state
+    /// (signature algorithms, SNI, EMS/ETM/EC-point offers, secure-renegotiation
+    /// signalling, record-size-limit / max-fragment-length / OCSP / SCT requests)
+    /// and returning the client's offered (supported_groups, ALPN protocols).
+    fn parse_client_hello_extensions(
+        &mut self,
+        ch: &ClientHello,
+    ) -> Result<(Vec<NamedGroup>, Vec<Vec<u8>>), TlsError> {
+        let mut client_groups = Vec::new();
+        let mut client_alpn_protocols = Vec::new();
+        for ext in &ch.extensions {
+            match ext.extension_type {
+                ExtensionType::SIGNATURE_ALGORITHMS => {
+                    self.client_sig_algs = parse_signature_algorithms_ch(&ext.data)?;
+                }
+                ExtensionType::SUPPORTED_GROUPS => {
+                    client_groups = parse_supported_groups_ch(&ext.data)?;
+                }
+                ExtensionType::APPLICATION_LAYER_PROTOCOL_NEGOTIATION => {
+                    client_alpn_protocols = parse_alpn_ch(&ext.data)?;
+                }
+                ExtensionType::SERVER_NAME => {
+                    self.client_server_name = Some(parse_server_name(&ext.data)?);
+                }
+                ExtensionType::EXTENDED_MASTER_SECRET => {
+                    parse_extended_master_secret(&ext.data)?;
+                    self.client_offered_ems = true;
+                }
+                ExtensionType::ENCRYPT_THEN_MAC => {
+                    parse_encrypt_then_mac(&ext.data)?;
+                    self.client_offered_etm = true;
+                }
+                ExtensionType::EC_POINT_FORMATS => {
+                    // RFC 8422 §5.1.2 — validate the list (it MUST
+                    // contain `uncompressed`); we only need the
+                    // offered/not-offered flag for the ServerHello echo.
+                    parse_ec_point_formats(&ext.data)?;
+                    self.client_offered_ec_point_formats = true;
+                }
+                ExtensionType::RENEGOTIATION_INFO => {
+                    let ri_data = parse_renegotiation_info(&ext.data)?;
+                    if self.is_renegotiation {
+                        // RFC 5746 §3.7: client must send client_verify_data
+                        if ri_data.ct_eq(&self.prev_client_verify_data).unwrap_u8() != 1 {
+                            return Err(TlsError::HandshakeFailed(
+                                "renegotiation_info verify_data mismatch".into(),
+                            ));
+                        }
+                    } else if !ri_data.is_empty() {
+                        return Err(TlsError::HandshakeFailed(
+                            "non-empty renegotiation_info in initial handshake".into(),
+                        ));
+                    }
+                    // RFC 5746 §3.6 — client signalled secure-renego support
+                    // via the extension; gate ServerHello echo on this flag.
+                    self.client_signalled_secure_renego = true;
+                }
+                ExtensionType::RECORD_SIZE_LIMIT => {
+                    self.client_record_size_limit = Some(parse_record_size_limit(&ext.data)?);
+                }
+                ExtensionType::STATUS_REQUEST => {
+                    self.client_wants_ocsp = true;
+                }
+                ExtensionType::SIGNED_CERTIFICATE_TIMESTAMP => {
+                    self.client_wants_sct = true;
+                }
+                ExtensionType::MAX_FRAGMENT_LENGTH => {
+                    self.client_max_fragment_length = Some(parse_max_fragment_length(&ext.data)?);
+                }
+                _ => {} // ignore other extensions
+            }
+        }
+        Ok((client_groups, client_alpn_protocols))
+    }
+
+    /// Build the ServerHello extension list from the negotiated state
+    /// (renegotiation_info, ALPN, session ticket, EMS, ETM, ec_point_formats,
+    /// record_size_limit, max_fragment_length, and custom extensions).
+    fn build_server_hello_extensions(
+        &self,
+        params: &Tls12CipherSuiteParams,
+    ) -> Vec<crate::extensions::Extension> {
         let mut sh_extensions = Vec::new();
         // RFC 5746 §3.6 — `renegotiation_info` ServerHello echo:
         //   * renegotiation handshake → always send (carries
@@ -767,42 +853,20 @@ impl Tls12ServerHandshake {
             crate::extensions::ExtensionContext::SERVER_HELLO,
         ));
 
-        // Build ServerHello
-        let sh = ServerHello {
-            random: self.server_random,
-            legacy_session_id: self.session_id.clone(),
-            cipher_suite: suite,
-            extensions: sh_extensions,
-        };
-        let sh_msg = encode_server_hello(&sh);
-        self.transcript.update(&sh_msg)?;
+        sh_extensions
+    }
 
-        // Build Certificate (only for non-PSK key exchanges that require certificates)
-        let cert_msg = if params.kx_alg.requires_certificate() {
-            let cert12 = Certificate12 {
-                certificate_list: self.config.certificate_chain.clone(),
-            };
-            let msg = encode_certificate12(&cert12);
-            self.transcript.update(&msg)?;
-            Some(msg)
-        } else {
-            None
-        };
-
-        // Build CertificateStatus (RFC 6066 — OCSP stapling)
-        let cert_status_msg = if self.client_wants_ocsp {
-            if let Some(ref ocsp_response) = self.config.ocsp_staple {
-                let msg = crate::handshake::codec12::encode_certificate_status12(ocsp_response);
-                self.transcript.update(&msg)?;
-                Some(msg)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // Build ServerKeyExchange (depends on key exchange algorithm)
+    /// Build the ServerKeyExchange message for the negotiated key-exchange
+    /// algorithm, generating ephemeral DH/ECDHE key material and signing the
+    /// parameters where required. Returns `None` for KX algorithms that send no
+    /// ServerKeyExchange (static RSA, hint-less PSK). Records ephemeral state
+    /// (`dhe_params` / `dhe_key_pair` / `ephemeral_key`) and updates the
+    /// transcript with the emitted message.
+    fn build_server_key_exchange12(
+        &mut self,
+        params: &Tls12CipherSuiteParams,
+        client_groups: &[NamedGroup],
+    ) -> Result<Option<Vec<u8>>, TlsError> {
         let ske_msg_opt = match params.kx_alg {
             KeyExchangeAlg::Rsa => {
                 // RSA static key exchange: no ServerKeyExchange message
@@ -810,7 +874,7 @@ impl Tls12ServerHandshake {
             }
             KeyExchangeAlg::Dhe => {
                 // DHE key exchange: negotiate FFDHE group, generate DH key pair
-                let group = negotiate_ffdhe_group(&client_groups, &self.config.supported_groups)?;
+                let group = negotiate_ffdhe_group(client_groups, &self.config.supported_groups)?;
                 let dh_param_id = named_group_to_dh_param_id(group)?;
                 let dh_params = DhParams::from_group(dh_param_id).map_err(TlsError::CryptoError)?;
                 let dh_kp = DhKeyPair::generate(&dh_params).map_err(TlsError::CryptoError)?;
@@ -847,7 +911,7 @@ impl Tls12ServerHandshake {
             }
             KeyExchangeAlg::Ecdhe => {
                 // ECDHE key exchange: negotiate EC group, generate ephemeral key
-                let group = negotiate_group(&client_groups, &self.config.supported_groups)?;
+                let group = negotiate_group(client_groups, &self.config.supported_groups)?;
                 let kx = KeyExchange::generate(group)?;
                 let server_public = kx.public_key_bytes().to_vec();
 
@@ -888,7 +952,7 @@ impl Tls12ServerHandshake {
                 }
             }
             KeyExchangeAlg::DhePsk => {
-                let group = negotiate_ffdhe_group(&client_groups, &self.config.supported_groups)?;
+                let group = negotiate_ffdhe_group(client_groups, &self.config.supported_groups)?;
                 let dh_param_id = named_group_to_dh_param_id(group)?;
                 let dh_params = DhParams::from_group(dh_param_id).map_err(TlsError::CryptoError)?;
                 let dh_kp = DhKeyPair::generate(&dh_params).map_err(TlsError::CryptoError)?;
@@ -909,7 +973,7 @@ impl Tls12ServerHandshake {
                 Some(ske_msg)
             }
             KeyExchangeAlg::EcdhePsk => {
-                let group = negotiate_group(&client_groups, &self.config.supported_groups)?;
+                let group = negotiate_group(client_groups, &self.config.supported_groups)?;
                 let kx = KeyExchange::generate(group)?;
                 let hint = self.config.psk_identity_hint.clone().unwrap_or_default();
                 let ske = ServerKeyExchangeEcdhePsk {
@@ -923,7 +987,7 @@ impl Tls12ServerHandshake {
                 Some(ske_msg)
             }
             KeyExchangeAlg::DheAnon => {
-                let group = negotiate_ffdhe_group(&client_groups, &self.config.supported_groups)?;
+                let group = negotiate_ffdhe_group(client_groups, &self.config.supported_groups)?;
                 let dh_param_id = named_group_to_dh_param_id(group)?;
                 let dh_params = DhParams::from_group(dh_param_id).map_err(TlsError::CryptoError)?;
                 let dh_kp = DhKeyPair::generate(&dh_params).map_err(TlsError::CryptoError)?;
@@ -942,7 +1006,7 @@ impl Tls12ServerHandshake {
                 Some(ske_msg)
             }
             KeyExchangeAlg::EcdheAnon => {
-                let group = negotiate_group(&client_groups, &self.config.supported_groups)?;
+                let group = negotiate_group(client_groups, &self.config.supported_groups)?;
                 let kx = KeyExchange::generate(group)?;
                 let ske = ServerKeyExchangeEcdheAnon {
                     named_curve: group.0,
@@ -960,8 +1024,16 @@ impl Tls12ServerHandshake {
                 ));
             }
         };
+        Ok(ske_msg_opt)
+    }
 
-        // Build CertificateRequest (if mTLS is enabled and KX requires certificates)
+    /// Build the CertificateRequest message when mTLS is enabled and the
+    /// negotiated key exchange uses certificates. Returns `None` otherwise.
+    /// Updates the transcript with the emitted message.
+    fn build_client_certificate_request(
+        &mut self,
+        params: &Tls12CipherSuiteParams,
+    ) -> Result<Option<Vec<u8>>, TlsError> {
         let certificate_request =
             if self.config.verify_client_cert && params.kx_alg.requires_certificate() {
                 // Phase T118 — advertise the comprehensive 18-item set of
@@ -1017,28 +1089,7 @@ impl Tls12ServerHandshake {
             } else {
                 None
             };
-
-        // Build ServerHelloDone
-        let shd_msg = encode_server_hello_done();
-        self.transcript.update(&shd_msg)?;
-
-        self.params = Some(params);
-        self.state = if self.config.verify_client_cert && certificate_request.is_some() {
-            Tls12ServerState::WaitClientCertificate
-        } else {
-            Tls12ServerState::WaitClientKeyExchange
-        };
-
-        Ok(ServerFlightResult {
-            server_hello: sh_msg,
-            certificate: cert_msg,
-            certificate_status: cert_status_msg,
-            server_key_exchange: ske_msg_opt,
-            certificate_request,
-            server_hello_done: shd_msg,
-            suite,
-            session_id: self.session_id.clone(),
-        })
+        Ok(certificate_request)
     }
 
     /// Process ClientHello with optional session cache lookup and ticket support.
