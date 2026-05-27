@@ -84,6 +84,47 @@ pub fn verify_certificate_verify(
     let content = build_verify_content(transcript_hash, is_server);
     let spki = &cert.public_key;
 
+    // RFC 8446 §4.2.3 / §4.4.3: the CertificateVerify scheme MUST be
+    // compatible with the peer certificate's public key. A scheme whose
+    // algorithm / curve doesn't match the cert key (e.g. an
+    // ecdsa_secp384r1_sha384 signature against a P-256 cert, or any ECDSA
+    // scheme against an Ed25519 cert) is `illegal_parameter` — distinct from
+    // a well-formed-but-wrong signature, which is `decrypt_error` below.
+    {
+        use hitls_utils::oid::known;
+        let alg = spki.algorithm_oid.as_slice();
+        let params = spki.algorithm_params.as_deref();
+        let is_ec = alg == known::ec_public_key().to_der_value().as_slice();
+        let compatible = match scheme {
+            SignatureScheme::ECDSA_SECP256R1_SHA256 => {
+                is_ec && params == Some(known::prime256v1().to_der_value().as_slice())
+            }
+            SignatureScheme::ECDSA_SECP384R1_SHA384 => {
+                is_ec && params == Some(known::secp384r1().to_der_value().as_slice())
+            }
+            SignatureScheme::ECDSA_SECP521R1_SHA512 => {
+                is_ec && params == Some(known::secp521r1().to_der_value().as_slice())
+            }
+            SignatureScheme::ED25519 => alg == known::ed25519().to_der_value().as_slice(),
+            SignatureScheme::ED448 => alg == known::ed448().to_der_value().as_slice(),
+            SignatureScheme::RSA_PSS_RSAE_SHA256
+            | SignatureScheme::RSA_PSS_RSAE_SHA384
+            | SignatureScheme::RSA_PSS_RSAE_SHA512 => {
+                alg == known::rsa_encryption().to_der_value().as_slice()
+            }
+            // Any other scheme is handled (rejected) by the match below.
+            _ => true,
+        };
+        if !compatible {
+            return Err(TlsError::HandshakeFailed(format!(
+                "CertificateVerify: signature scheme 0x{:04x} is incompatible \
+                 with the certificate public key (RFC 8446 §4.2.3 — \
+                 alert: illegal_parameter)",
+                scheme.0
+            )));
+        }
+    }
+
     let ok = match scheme {
         SignatureScheme::RSA_PSS_RSAE_SHA256 => {
             let digest = compute_sha256(&content)?;
@@ -117,23 +158,27 @@ pub fn verify_certificate_verify(
         }
         SignatureScheme::ECDSA_SECP256R1_SHA256 => {
             let digest = compute_sha256(&content)?;
-            verify_ecdsa(spki, EccCurveId::NistP256, &digest, signature)?
+            // A malformed signature makes `verify_ecdsa` return `Err`; treat
+            // that as a verification failure (→ decrypt_error below), not an
+            // internal error. The scheme/curve was already confirmed to match
+            // the cert key above, so the only variable input is the signature.
+            verify_ecdsa(spki, EccCurveId::NistP256, &digest, signature).unwrap_or(false)
         }
         SignatureScheme::ECDSA_SECP384R1_SHA384 => {
             let digest = compute_sha384(&content)?;
-            verify_ecdsa(spki, EccCurveId::NistP384, &digest, signature)?
+            verify_ecdsa(spki, EccCurveId::NistP384, &digest, signature).unwrap_or(false)
         }
         SignatureScheme::ECDSA_SECP521R1_SHA512 => {
             let digest = compute_sha512(&content)?;
-            verify_ecdsa(spki, EccCurveId::NistP521, &digest, signature)?
+            verify_ecdsa(spki, EccCurveId::NistP521, &digest, signature).unwrap_or(false)
         }
         SignatureScheme::ED25519 => {
             // Ed25519 signs the raw content, not a hash
-            verify_ed25519(spki, &content, signature)?
+            verify_ed25519(spki, &content, signature).unwrap_or(false)
         }
         SignatureScheme::ED448 => {
             // Ed448 signs the raw content, not a hash
-            verify_ed448(spki, &content, signature)?
+            verify_ed448(spki, &content, signature).unwrap_or(false)
         }
         _ => {
             // Phase T99 — schemes outside our supported set are a
@@ -340,6 +385,17 @@ mod tests {
 
     /// Helper: build a minimal Certificate with only the public_key field populated.
     fn make_cert_with_spki(algorithm_oid: Vec<u8>, public_key: Vec<u8>) -> Certificate {
+        make_cert_with_spki_p(algorithm_oid, None, public_key)
+    }
+
+    // EC keys carry the named-curve OID in `algorithm_params`; the
+    // §4.2.3 scheme/key compatibility check requires it, so EC tests must
+    // populate it (real certs always do).
+    fn make_cert_with_spki_p(
+        algorithm_oid: Vec<u8>,
+        algorithm_params: Option<Vec<u8>>,
+        public_key: Vec<u8>,
+    ) -> Certificate {
         Certificate {
             raw: Vec::new(),
             version: 3,
@@ -356,7 +412,7 @@ mod tests {
             not_after: 0,
             public_key: SubjectPublicKeyInfo {
                 algorithm_oid,
-                algorithm_params: None,
+                algorithm_params,
                 public_key,
             },
             extensions: Vec::new(),
@@ -479,8 +535,12 @@ mod tests {
         let signature = kp.sign(&digest).unwrap();
 
         // ECDSA public key for SPKI: uncompressed point
-        // P-256 OID: 1.2.840.10045.2.1 (ecPublicKey)
-        let cert = make_cert_with_spki(vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], pub_key);
+        // P-256 OID: 1.2.840.10045.2.1 (ecPublicKey); curve prime256v1
+        let cert = make_cert_with_spki_p(
+            vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
+            Some(vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]),
+            pub_key,
+        );
 
         verify_certificate_verify(
             &cert,
@@ -493,6 +553,33 @@ mod tests {
     }
 
     #[test]
+    fn test_verify_certificate_verify_scheme_cert_mismatch_illegal_parameter() {
+        // RFC 8446 §4.2.3: a CV scheme whose curve doesn't match the cert key
+        // (a P-256 cert with an ecdsa_secp384r1_sha384 scheme) is rejected with
+        // illegal_parameter — before any signature math, so the signature bytes
+        // are irrelevant.
+        let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(EccCurveId::NistP256).unwrap();
+        let pub_key = kp.public_key_bytes().unwrap();
+        let cert = make_cert_with_spki_p(
+            vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
+            Some(vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]), // prime256v1
+            pub_key,
+        );
+        let err = verify_certificate_verify(
+            &cert,
+            SignatureScheme::ECDSA_SECP384R1_SHA384,
+            &[0u8; 72],
+            &[0xAA; 48],
+            true,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, TlsError::HandshakeFailed(m) if m.contains("illegal_parameter")),
+            "expected illegal_parameter, got {err:?}"
+        );
+    }
+
+    #[test]
     fn test_verify_certificate_verify_ecdsa_p384_roundtrip() {
         let kp = hitls_crypto::ecdsa::EcdsaKeyPair::generate(EccCurveId::NistP384).unwrap();
         let pub_key = kp.public_key_bytes().unwrap();
@@ -502,7 +589,11 @@ mod tests {
         let digest = compute_sha384(&content).unwrap();
         let signature = kp.sign(&digest).unwrap();
 
-        let cert = make_cert_with_spki(vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], pub_key);
+        let cert = make_cert_with_spki_p(
+            vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
+            Some(vec![0x2b, 0x81, 0x04, 0x00, 0x22]),
+            pub_key,
+        );
 
         verify_certificate_verify(
             &cert,
@@ -524,7 +615,11 @@ mod tests {
         let digest = compute_sha512(&content).unwrap();
         let signature = kp.sign(&digest).unwrap();
 
-        let cert = make_cert_with_spki(vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], pub_key);
+        let cert = make_cert_with_spki_p(
+            vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
+            Some(vec![0x2b, 0x81, 0x04, 0x00, 0x23]),
+            pub_key,
+        );
 
         verify_certificate_verify(
             &cert,
@@ -639,7 +734,11 @@ mod tests {
             *last ^= 0xFF;
         }
 
-        let cert = make_cert_with_spki(vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], pub_key);
+        let cert = make_cert_with_spki_p(
+            vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
+            Some(vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]),
+            pub_key,
+        );
 
         let result = verify_certificate_verify(
             &cert,

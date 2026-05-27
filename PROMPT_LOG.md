@@ -8189,3 +8189,42 @@ test_ctr_drbg_with_df) + 6 migrated DRBG; xtask --check drift gate; fmt +
 clippy -D warnings --all-features clean.
 
 Recorded as DEV_LOG Phase I131.
+
+---
+
+## Phase I132 — TLS CertificateVerify EC/EdDSA Alert Mapping (RFC 8446 §4.2.3/§6.2) (2026-05-27)
+
+> 请继续完成Phase 2
+
+(Phase 2 = mTLS CertVerify cert-matrix. Generated ECDSA + Ed25519 client
+certs signed by a CA, ran the two scripts against --verify-client-cert.
+They surfaced a real bug rather than being clean curation.)
+
+test-tls13-{ecdsa,eddsa}-in-certificate-verify came in 122/10 + 128/4.
+The failures: malformed EC/EdDSA client CV sig → internal_error (the
+crypto verify Err propagated via ?) instead of decrypt_error (§6.2); and
+a CV scheme whose curve mismatched the cert key (e.g. P-384 scheme vs
+P-256 cert) → internal_error instead of illegal_parameter (§4.2.3).
+
+Fix (handshake/verify.rs): (a) cert-key↔scheme compatibility check
+(SPKI algorithm_oid + EC curve params vs scheme family, via
+hitls_utils::oid::known) → illegal_parameter before signature math;
+(b) EC/EdDSA verify Err → treated as verify failure (.unwrap_or(false))
+→ the existing decrypt_error path. Shared by client+server CV; RSA path
+unchanged (already returns Ok(false) on bad sig). Both scripts → 132/0
+on clean runs.
+
+NOT curated: under 132 back-to-back mTLS handshakes the server
+intermittently misses tlsfuzzer's per-message deadline ("Timeout when
+waiting for peer message", 1–4 *different* convs each run) — same
+test-side-timing flakiness as ecdhe-padded, can't be stably XFAIL'd.
+Documented in docs/tlsfuzzer.md. Same "internal_error never correct for
+peer input" class as I122/I124.
+
+Verification: hitls-tls lib 1556/0 (new mismatch unit test + 3 EC
+roundtrip tests updated to carry the curve algorithm_params real certs
+always have); RSA mTLS certificate-verify 31/0 + certificate-request 5/0
+unchanged; full integration tests green; fmt + clippy clean. Hit a
+1-commit rebase (parallel T139 SHA-3/DRBG migration). Ran in isolated
+temp worktree (`fix/cv-ecdsa-eddsa-alert`). Recorded as DEV_LOG Phase
+I132.
