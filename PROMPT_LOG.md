@@ -8394,3 +8394,33 @@ cfg sign out; drift gate passes; na-list → 1710 emitted; fmt + clippy
 clean.
 
 Recorded as DEV_LOG Phase I136.
+
+---
+
+## Phase R15 — Make the tlsfuzzer CI Workflow Parseable (2026-05-27)
+
+> 是否有必要让tlsfuzzer完整的测试一次，看看有没有问题
+
+(Asked whether a full tlsfuzzer run was worthwhile. Recommended the
+sampled full-suite dispatch; trying to trigger it surfaced a bigger
+problem: the workflow had never run.)
+
+`gh workflow run tlsfuzzer.yml` → HTTP 422 "Exceeded max expression
+length 21000". Run history: EVERY tlsfuzzer.yml entry was push/failure —
+zero successful runs ever. So the curated suite had never actually run
+in CI (the long-ignored "tlsfuzzer.yml push 0s failure" was this).
+
+Root cause: GitHub template-processes a `run:` block as ONE expression
+when it contains any `${{ }}`, capped at 21000 chars. The "Run curated
+scripts" step's run block (~80-script arrays + comments + run loops,
+~40 KB) embedded `${{ github.event.schedule }}` (the monthly-sweep
+switch) → one >21000-char expression → unparseable.
+
+Fix: hoist it to a step-level `env: SCHEDULE: ${{ github.event.schedule }}`
+and use `$SCHEDULE` in the shell; the run block is now a pure literal.
+
+Verified: dispatch on the fix branch is ACCEPTED (was 422) and produced
+the first-ever successful tlsfuzzer run (workflow_dispatch, sampled full
+suite, all 13 listeners). YAML valid; actionlint clean. Config-only.
+Ran in isolated temp worktree (`fix/tlsfuzzer-workflow-parse`). Recorded
+as DEV_LOG Phase R15.
