@@ -311,24 +311,32 @@ worth a separate script-level look (which padding case; value- or
 timing-dependent) but is not a robustness/leak issue. `ecdhe-padded`
 was also T128-excluded for TLS 1.0/1.1/SSLv2-compat fails.
 
-**mTLS CertVerify cert-matrix (I132) — bug FIXED, scripts NOT curated
-(flaky).** `test-tls13-ecdsa-in-certificate-verify` and
+**mTLS CertVerify cert-matrix (I132 + I133) — CURATED, 132/0 each.**
+`test-tls13-ecdsa-in-certificate-verify` and
 `test-tls13-eddsa-in-certificate-verify` run against the mTLS listener
 (`HITLS_PORT_MTLS`, `--verify-client-cert`) with an ECDSA / Ed25519
-client identity (`-k`/`-c`). Triaging them surfaced a real bug: a
-malformed EC/EdDSA client CertificateVerify drew `internal_error`
-instead of `decrypt_error` (RFC 8446 §6.2), and a CV scheme whose curve
-mismatched the cert key (e.g. ecdsa_secp384r1_sha384 against a P-256
-cert) drew `internal_error` instead of `illegal_parameter` (§4.2.3).
-I132 fixed both in `handshake/verify.rs` (cert-key↔scheme compatibility
-check → illegal_parameter; verify-`Err` treated as verification failure
-→ decrypt_error). On a clean run both scripts are **132/132**. They are
-**not curated**: under 132 back-to-back mTLS handshakes the server
-intermittently misses tlsfuzzer's per-message deadline ("Timeout when
-waiting for peer message"), failing 1–4 *different* conversations each
-run — the same test-side-timing flakiness class as `ecdhe-padded`,
-which can't be stably XFAIL'd (the failing set varies). Re-evaluate
-curation if the per-connection response-timing flakiness is addressed.
+client identity (`-k`/`-c`; certs generated in the workflow's cert step).
+Triaging them surfaced **two** real bugs:
+- **I132** (`handshake/verify.rs`): a malformed EC/EdDSA client
+  CertificateVerify drew `internal_error` instead of `decrypt_error`
+  (RFC 8446 §6.2), and a CV scheme whose curve mismatched the cert key
+  drew `internal_error` instead of `illegal_parameter` (§4.2.3).
+- **I133** (`hitls-utils` ASN.1 decoder): the *real* cause of what was
+  first mislabelled "back-to-back mTLS timing flakiness". An independent
+  audit disproved the flaky theory (fails in isolation; survives a 30 s
+  timeout; EdDSA/RSA twins rock-stable). Root cause: `read_integer` /
+  `read_sequence` checked only the tag *number*, not the *class* — so a
+  context-specific tag like `0x82` (a single-bit flip of the INTEGER tag
+  `0x02`, exactly what tlsfuzzer's `xor 0x80 at <s-tag>` produces) was
+  accepted as an INTEGER. A malformed-DER ECDSA signature with an
+  otherwise-valid (r, s) therefore **verified** (`verify_ecdsa → Ok(true)`
+  ~⅓ of runs); the server accepted the forged signature and deadlocked
+  awaiting the client Finished, which the client saw as a timeout. Fix:
+  require the universal class for INTEGER + SEQUENCE. A signature-
+  malleability / DER-strictness flaw — not test-side flakiness.
+Both scripts are now stable **132/132** and curated (0 XFAIL). Lesson:
+"flaky / timeout" on attacker-controlled-input rejection paths deserves
+real root-causing — here it hid a signature-acceptance bug.
 
 **Curve family — triaged (I124).** The heavy "fail" counts were
 dominated by a **real bug**: a malformed peer key_share for a

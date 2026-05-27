@@ -198,6 +198,31 @@ jobs:
           openssl pkcs8 -topk8 -nocrypt \
             -in  "${RUNNER_TEMP}/certs/key-client.pem" \
             -out "${RUNNER_TEMP}/certs/key-client-pkcs8.pem"
+          # Phase I133 — ECDSA P-256 + Ed25519 client certs (signed by the
+          # same client CA) for the EC/EdDSA CertificateVerify cert-matrix
+          # scripts. tlsfuzzer signs the CV with the matching client key;
+          # the server validates the chain against cert-client-ca.pem and
+          # verifies the CV under the cert's EC/EdDSA key.
+          openssl ecparam -genkey -name prime256v1 -noout \
+            -out "${RUNNER_TEMP}/certs/key-client-ecdsa.pem"
+          openssl req -new -key "${RUNNER_TEMP}/certs/key-client-ecdsa.pem" \
+            -out "${RUNNER_TEMP}/certs/client-ecdsa.csr" \
+            -subj "/CN=hitls-test-client-ecdsa"
+          openssl x509 -req -in "${RUNNER_TEMP}/certs/client-ecdsa.csr" \
+            -CA  "${RUNNER_TEMP}/certs/cert-client-ca.pem" \
+            -CAkey "${RUNNER_TEMP}/certs/key-client-ca.pem" \
+            -CAcreateserial \
+            -out "${RUNNER_TEMP}/certs/cert-client-ecdsa.pem" -days 1
+          openssl genpkey -algorithm Ed25519 \
+            -out "${RUNNER_TEMP}/certs/key-client-ed25519.pem"
+          openssl req -new -key "${RUNNER_TEMP}/certs/key-client-ed25519.pem" \
+            -out "${RUNNER_TEMP}/certs/client-ed25519.csr" \
+            -subj "/CN=hitls-test-client-ed25519"
+          openssl x509 -req -in "${RUNNER_TEMP}/certs/client-ed25519.csr" \
+            -CA  "${RUNNER_TEMP}/certs/cert-client-ca.pem" \
+            -CAkey "${RUNNER_TEMP}/certs/key-client-ca.pem" \
+            -CAcreateserial \
+            -out "${RUNNER_TEMP}/certs/cert-client-ed25519.pem" -days 1
           # Phase T107 — RSA-PSS (`id-RSASSA-PSS` SPKI OID) cert + key.
           # Tlsfuzzer `test-tls13-rsapss-signatures.py` hardcodes
           # PSS-OID server-cert expectations. openssl emits the PSS
@@ -860,6 +885,31 @@ jobs:
             grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
               | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
             echo "${s} (mTLS) → exit=${rc}" \
+              >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            if [ "$rc" -ne 0 ]; then
+              aggregate_exit=1
+            fi
+          done
+          # Phase I133 — EC / EdDSA client-cert CertificateVerify cert-matrix.
+          # Each script presents a matching client identity (ECDSA P-256 /
+          # Ed25519) against the same `--verify-client-cert` mTLS listener.
+          # 132/0 each; stable since the I133 DER-strictness fix (a malformed-
+          # DER ECDSA signature with valid r/s no longer verifies).
+          for entry in \
+            "test-tls13-ecdsa-in-certificate-verify.py:key-client-ecdsa.pem:cert-client-ecdsa.pem" \
+            "test-tls13-eddsa-in-certificate-verify.py:key-client-ed25519.pem:cert-client-ed25519.pem"; do
+            s="${entry%%:*}"; rest="${entry#*:}"; k="${rest%%:*}"; c="${rest#*:}"
+            log="${RUNNER_TEMP}/tlsfuzzer-logs/${s%.py}-mtls.log"
+            echo "=== TLS 1.3 (mTLS EC/EdDSA CV): $s ==="
+            ./tests/tlsfuzzer/run.sh "$s" \
+              -h "${HITLS_HOST}" -p "${HITLS_PORT_MTLS}" \
+              -k "${RUNNER_TEMP}/certs/${k}" \
+              -c "${RUNNER_TEMP}/certs/${c}" 2>&1 | tee "${log}"
+            rc=${PIPESTATUS[0]}
+            grep -E '^(TOTAL|SKIP|PASS|XFAIL|FAIL|XPASS):' "${log}" \
+              | head -6 >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
+            echo "${s} (mTLS EC/EdDSA CV) → exit=${rc}" \
               >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
             echo >> "${RUNNER_TEMP}/tlsfuzzer-logs/SUMMARY.txt"
             if [ "$rc" -ne 0 ]; then

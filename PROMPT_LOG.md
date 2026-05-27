@@ -8228,3 +8228,44 @@ unchanged; full integration tests green; fmt + clippy clean. Hit a
 1-commit rebase (parallel T139 SHA-3/DRBG migration). Ran in isolated
 temp worktree (`fix/cv-ecdsa-eddsa-alert`). Recorded as DEV_LOG Phase
 I132.
+
+---
+
+## Phase I133 — ASN.1 DER INTEGER/SEQUENCE Tag-Class Strictness (ECDSA Signature Malleability) (2026-05-27)
+
+> 开始查这个Bug
+
+(An independent audit agent flagged that the I132 "not curated, flaky"
+claim might hide a real bug. It was right. User said: start investigating.)
+
+The audit disproved the "back-to-back mTLS timing flakiness" theory:
+the ecdsa-in-certificate-verify failure reproduces in ISOLATION (single
+conversation), survives a 30s tlsfuzzer timeout, and the EdDSA/RSA twins
+are rock-stable at identical handshake volume.
+
+Root-caused by instrumenting verify_ecdsa: on the failing (~⅓) runs it
+returned Ok(true) — i.e. the server ACCEPTED a malformed-DER ECDSA
+CertificateVerify (a forged client signature), then deadlocked awaiting
+the client Finished → client "Timeout". Not flaky; a signature-
+acceptance bug.
+
+Why: Decoder::read_integer / read_sequence (hitls-utils asn1) checked
+only the tag NUMBER, not the CLASS. Tag::from_bytes takes number from
+the low 5 bits, so 0x82 (context-specific, a 1-bit flip of the 0x02
+INTEGER tag — exactly tlsfuzzer's `xor 0x80 at <s-tag>`) parses as
+number==2 and was accepted; the (r,s) bytes were intact → the original
+valid signature verified. Same for 0x70/0xB0 vs SEQUENCE 0x30 (the
+`xor at 0` cases).
+
+Fix: require tag.class == Universal in read_integer + read_sequence.
+verify_ecdsa now returns Ok(false) for the mutated sig; ecdsa/eddsa
+scripts stable 132/0 across 5×/3× runs. Curated BOTH into CI (workflow
+generates ECDSA P-256 + Ed25519 client certs signed by the mTLS CA; run
+vs HITLS_PORT_MTLS, 0 XFAIL).
+
+Shared-decoder change → full-workspace regression: hitls-utils 78+2,
+hitls-crypto 2549+1, hitls-pki 1617 (DER-heaviest, unaffected), hitls-tls
+1556, integration 268 — all 0 failed; fmt + clippy clean. Added 3 unit
+tests (decoder rejects non-universal INTEGER/SEQUENCE tags; ECDSA
+decode_der_signature rejects class-flipped tags). Ran in isolated temp
+worktree (`fix/ecdsa-cv-no-alert`). Recorded as DEV_LOG Phase I133.
