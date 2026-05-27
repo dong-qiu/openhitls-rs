@@ -1,5 +1,6 @@
-//! Emitter for openHiTLS C `test_suite_sdv_eal_rsa_sign_verify.data` — RSA
-//! signature *verify* KATs (public-key only, so no private-key / nonce hook).
+//! Emitter for the openHiTLS C RSA SDV vectors —
+//! `test_suite_sdv_eal_rsa_sign_verify.data` (sign + verify) and
+//! `test_suite_sdv_eal_rsa_encrypt_decrypt.data` (decrypt).
 //!
 //! * `RSA_VERIFY_PKCSV15_FUNC_TC001` (`mdId : n : e : msg : sign : expect :
 //!   isProvider`) — PKCS#1 v1.5 verify: `RsaPublicKey::new(n, e).verify(
@@ -7,13 +8,21 @@
 //! * `RSA_VERIFY_PSS_FUNC_TC001` (`mdId : n : e : salt : msg : sign : expect :
 //!   isProvider`) — PSS verify (the `salt` is a sign-side input, unused here):
 //!   `RsaPublicKey::new(n, e).verify_pss(MD(msg), sign, alg)`.
+//! * `RSA_SIGN_PKCSV15_FUNC_TC002` (`mdId : n : d : msg : sign : isProvider`) —
+//!   deterministic PKCS#1 v1.5 sign: `from_nd(n, d).sign(Pkcs1v15Sign,
+//!   MD(msg)) == sign` (`kat-nonce`-gated, since `from_nd` is).
+//! * `RSA_CRYPT_FUNC_TC001` (`keyLen : padMode : hashId : n : e : d :
+//!   plaintext : ciphertext : isProvider`) — deterministic decrypt:
+//!   `from_nd(n, d).decrypt(Pkcs1v15Encrypt, ciphertext) == plaintext`
+//!   (PKCS#1 v1.5 only; see below).
 //!
 //! `expect == 0` (CRYPT_SUCCESS) means the signature must verify; any other
 //! value means it must not. PSS is limited to SHA-256/384/512 (the Rust
-//! `verify_pss` / MGF1 hashes); PSS-SHA-1/224 rows are `unsupported`. The
-//! sign / encrypt / decrypt families need a private key built from `(n, d)`
-//! (the Rust `RsaPrivateKey::new` wants CRT params the vectors omit) — a
-//! follow-up `from_nd` constructor; routed to `ApiSurface` here.
+//! `verify_pss` / MGF1 hashes); PSS-SHA-1/224 rows are `unsupported`. Decrypt
+//! migrates PKCS#1 v1.5 only — the Rust OAEP is hardcoded to SHA-256 + empty
+//! label, but every C OAEP vector uses SHA-1, so OAEP rows are `unsupported`;
+//! raw `NO_PAD` rows route to `ApiSurface`. RSA *encrypt* (randomised padding)
+//! and PSS *sign* (random salt) stay `ApiSurface` pending nonce hooks.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -33,6 +42,8 @@ pub fn emit_rsa_kat(cases: &[TestCase]) -> (String, EmitStats) {
             emit_verify_pss(&mut body, case, &mut stats, &mut used);
         } else if case.tc_name.contains("RSA_SIGN_PKCSV15_FUNC_TC002") {
             emit_sign_pkcs15(&mut body, case, &mut stats, &mut used);
+        } else if case.tc_name.contains("RSA_CRYPT_FUNC_TC001") {
+            emit_decrypt(&mut body, case, &mut stats, &mut used);
         } else {
             stats.skipped_api += 1;
         }
@@ -192,6 +203,74 @@ fn emit_sign_pkcs15(
     writeln!(
         out,
         "    assert_eq!(sk.sign(RsaPadding::Pkcs1v15Sign, &digest).unwrap(), expected);"
+    )
+    .unwrap();
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// Deterministic RSA **decrypt** KAT (`RSA_CRYPT_FUNC_TC001`:
+/// `keyLen : padMode : hashId : n : e : d : plaintext : ciphertext :
+/// isProvider`). Decryption is deterministic, so `decrypt(padding,
+/// ciphertext) == plaintext`. Only the **PKCS#1 v1.5** padding mode is
+/// migrated here: it uses the test-only `RsaPrivateKey::from_nd` (the C
+/// vectors publish only `(n, d)`) and needs no hash. OAEP rows are
+/// `unsupported` — the Rust OAEP is hardcoded to SHA-256 + empty label, but
+/// every C OAEP vector uses SHA-1, so they cannot round-trip; raw `NO_PAD`
+/// rows route to API-surface (plain `c^d mod n`, already exercised by the
+/// sign KATs + the existing `decrypt(None, …)` unit test).
+fn emit_decrypt(
+    out: &mut String,
+    case: &TestCase,
+    stats: &mut EmitStats,
+    used: &mut BTreeSet<&'static str>,
+) {
+    if skip_if_provider_dup(case) {
+        stats.skipped_api += 1;
+        return;
+    }
+    // keyLen : padMode : hashId : n : e : d : plaintext : ciphertext : isProvider
+    if case.args.len() < 8 {
+        stats.skipped_unknown += 1;
+        return;
+    }
+    let Some(pad_mode) = case.args[1].as_symbol() else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    // Only PKCS#1 v1.5 is reproducible with the current Rust API.
+    if pad_mode != "CRYPT_CTRL_SET_RSA_RSAES_PKCSV15" {
+        if pad_mode == "CRYPT_CTRL_SET_RSA_RSAES_OAEP" {
+            stats.skipped_unsupported_alg += 1;
+        } else {
+            stats.skipped_api += 1;
+        }
+        return;
+    }
+    let (Some(n), Some(d), Some(pt), Some(ct)) = (
+        case.args[3].as_hex(),
+        case.args[5].as_hex(),
+        case.args[6].as_hex(),
+        case.args[7].as_hex(),
+    ) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    used.insert("privkey");
+
+    write_doc(out, case, "RSA PKCS#1 v1.5 deterministic decrypt");
+    writeln!(out, "#[cfg(feature = \"kat-nonce\")]").unwrap();
+    writeln!(out, "#[allow(deprecated)]").unwrap();
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_rsa_pkcs15_decrypt() {{", case.line).unwrap();
+    writeln!(out, "    let n: &[u8] = {};", format_byte_slice(n)).unwrap();
+    writeln!(out, "    let d: &[u8] = {};", format_byte_slice(d)).unwrap();
+    writeln!(out, "    let ct: &[u8] = {};", format_byte_slice(ct)).unwrap();
+    writeln!(out, "    let expected: &[u8] = {};", format_byte_slice(pt)).unwrap();
+    writeln!(out, "    let sk = RsaPrivateKey::from_nd(n, d).unwrap();").unwrap();
+    writeln!(
+        out,
+        "    assert_eq!(sk.decrypt(RsaPadding::Pkcs1v15Encrypt, ct).unwrap(), expected);"
     )
     .unwrap();
     writeln!(out, "}}\n").unwrap();

@@ -8544,3 +8544,28 @@ drift gate passes; na-list → 1808 emitted (RSA 30 → 38); fmt + clippy clean.
 PSS sign / encrypt / decrypt remain API-surface follow-ups.
 
 Recorded as DEV_LOG Phase I139.
+
+## Phase I140 — RSA PKCS#1 v1.5 Decrypt KAT (2026-05-28)
+
+> RSA sign/encrypt/decrypt
+
+Continuation of the same directive — the deterministic decrypt slice. Wired
+the second C SDV file test_suite_sdv_eal_rsa_encrypt_decrypt.data into the
+xtask rsa input list and added emit_decrypt for RSA_CRYPT_FUNC_TC001
+(keyLen : padMode : hashId : n : e : d : plaintext : ciphertext :
+isProvider). Decrypt is deterministic, so the KAT is decrypt(padding, ct) ==
+pt, reusing the I139 from_nd + kat-nonce-gated plain-d raw_decrypt path.
+
+Only PKCS#1 v1.5 is migratable: from_nd(n,d).decrypt(Pkcs1v15Encrypt, ct) ==
+pt. Of the 26 encrypt/decrypt rows, the 6 OAEP rows are unsupported (Rust
+rsa::oaep is SHA-256 + empty-label only, but every C OAEP vector uses SHA-1
+— needs a configurable-hash OAEP API); raw NO_PAD → API-surface (plain c^d
+mod n, already covered); TC002/003/004 → API-surface. migrated_rsa 38 → 44
+(+6 decrypt KATs), byte-exact vs C first run.
+
+Verification: migrated_rsa 44/0 (kat-nonce) and 30/0 (no kat-nonce, decrypt
+gated out, clean under -D warnings); drift gate passes; na-list → 1814
+emitted (RSA 38 → 44, total C cases 144 → 170); fmt + clippy clean.
+Encrypt / PSS sign / OAEP decrypt remain API-surface follow-ups.
+
+Recorded as DEV_LOG Phase I140.
