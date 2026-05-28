@@ -5,7 +5,7 @@
 Category summary:
 - Implementation: I1–I143 (143 phases)
 - Testing: T1–T141 (134 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`))
-- Refactoring: R1–R16 (16 phases)
+- Refactoring: R1–R17 (17 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
 | # | Phase | Type | Title | Date |
@@ -391,6 +391,7 @@ Category summary:
 | 391 | I142 | Impl | RSA **encrypt**-side KAT migration (both directions of `RSA_CRYPT_FUNC_TC001`) — completes the encrypt/decrypt migration. **Key finding:** padded RSA encryption is randomised (PKCS#1 v1.5 PS / OAEP seed) and the C SDV test itself only asserts `ctLen == ciphertext->len` then round-trips — it uses libc `rand()` (`test_suite_sdv_eal_rsa.base.c` `RandFunc`) and never byte-compares the encrypt output — so a deterministic-randomness injection hook is **not applicable** (there is no fixed-randomness vector to reproduce). The xtask `emit_decrypt` was generalised to `emit_crypt`, emitting **both directions per row** (like the DSA verify+sign pattern) via a new generic `write_test` helper: **PKCS#1 v1.5 / OAEP** → decrypt byte-exact KAT (unchanged) + encrypt **length + round-trip** test (`encrypt(pt)` then `ct.len() == k` then `decrypt(ct) == pt`, faithfully mirroring the C assertion, using real randomness — no hook); **raw `NO_PAD`** (previously API-surface) → **both directions byte-exact** (`RsaPublicKey::new(n, e).encrypt(None, pt) == ct`, public-key only so **not** `kat-nonce`-gated — runs in the default build; `from_nd(n, d).decrypt(None, ct) == pt`). `migrated_rsa.rs` **48 → 66** (+18: encrypt for PKCS#1 v1.5 / OAEP + NO_PAD both ways), all byte-exact / round-trip-correct vs openHiTLS C first run. No production source change (emitter + generated tests only). No regression — `migrated_rsa` 66/0 (`--all-features` / `kat-nonce`) and **34/0** without `kat-nonce` (30 verify + 4 NO_PAD-encrypt byte-exact, the latter now giving public-key encrypt coverage in the default build); xtask `--check` drift gate passes; na-list tally → 1836 emitted (RSA 48 → 66); `fmt` + `clippy -D warnings --all-features --all-targets` clean. RSA **PSS sign** (random salt) is the last remaining API-surface RSA family | 2026-05-28 |
 | 392 | I143 | Impl | RSA-PSS **sign**-side KAT migration via a fixed-salt injection hook — closes the last deterministic RSA family. Unlike the encrypt side (I142), PSS sign **is** byte-exact reproducible: `RSA_SIGN_PSS_FUNC_TC001` (`mdId : n : d : msg : sign : salt : isProvider`) publishes the exact salt the C test injects (`CRYPT_CTRL_SET_RSA_SALT`) and then `ASSERT_COMPARE`s the signature. Added a `kat-nonce`-gated salt-injection path: `pss::pss_sign_pad_with_salt_bytes_alg(digest, em_bits, salt, alg)` (the private `pss_encode_alg` already accepted salt bytes; this wrapper adds the digest-length + `emLen >= hLen + sLen + 2` checked-arithmetic validation that the random-salt `pss_sign_pad_with_salt_alg` does) + `RsaPrivateKey::sign_pss_with_salt(digest, alg, salt)` (`#[doc(hidden)]` + `#[cfg(feature="kat-nonce")]` + `#[deprecated]`: a fixed PSS salt removes the scheme's randomisation — note says "test-only", *not* "leaks key", since PSS salt reuse does not leak the private key, unlike an ECDSA/DSA nonce). The xtask `emit_sign_pss` migrates TC001 → `from_nd(n, d).sign_pss_with_salt(MD(msg), RsaHashAlg::{alg}, salt) == sign` (the `md_to_pss_alg` symbol doubles as the digest type name and the `RsaHashAlg` variant). `migrated_rsa.rs` **66 → 72** (+6 PSS sign KATs, SHA-256/384/512), all byte-exact vs openHiTLS C first run. PSS supports SHA-256/384/512 only, so the SHA-224 TC001 rows are `unsupported` (RSA unsupported 2 → 4: 2 verify + 2 sign PSS-SHA-224); `SIGN_PSS_FUNC_TC002` (random salt — C only checks sign succeeds) + `TC003` (saltLen 0/-1/-2 error paths) stay API-surface. No regression — hitls-crypto rsa lib **64/0**, `migrated_rsa` 72/0 (`--all-features` / `kat-nonce`) and 34/0 (no `kat-nonce`, PSS-sign gated out); builds clean with `sha1` + `kat-nonce` off; xtask `--check` drift gate passes; na-list tally → 1842 emitted (RSA 66 → 72); `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** additive `kat-nonce`-only API (`sign_pss_with_salt` + the salt-bytes encode wrapper are not compiled into production builds). **All deterministic RSA sign/verify/encrypt/decrypt families are now migrated** (only genuinely non-reproducible cases remain: random-salt PSS sign + randomised encrypt, both length/round-trip only by construction) | 2026-05-28 |
 | 393 | R16 | Refactor | Decompose 3 oversized TLS server-handshake functions (behavior-preserving code motion) — extracted 8 focused private helpers so no single handshake function exceeds ~240 lines. TLS 1.2 `handshake/server12.rs::process_client_hello` **553 → 236** via `parse_client_hello_extensions` / `build_server_hello_extensions` / `build_server_key_exchange12` / `build_client_certificate_request`. TLS 1.3 `handshake/server.rs::process_client_hello` **393 → 209** via `parse_client_hello_extensions` (+ a small `ParsedClientHello` return struct) / `resolve_psk`, and `build_server_flight` **363 → 214** via `build_certificate_request13` / `build_certificate_and_verify`. Pure extraction — no protocol/state-machine/wire/behavior change; each helper is independently readable + testable. Motivated by the repo quality review (the handshake layer was the only flagged hotspot; clippy was already 0-warning, 0 TODO/FIXME, production-panic≈0). Verified: hitls-tls **1556/0** (= pre-refactor baseline), integration **268/0**, `cargo fmt --all -- --check` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-28 |
+| 394 | R17 | Refactor | Decompose 3 oversized TLS **client**-handshake functions (symmetric follow-up to R16; behavior-preserving code motion) — extracted 3 focused private helpers. TLS 1.3 `handshake/client.rs::build_client_hello` **379 → ~80** via `build_client_hello_extensions` (the full CH extension assembly incl. GREASE/ECH-GREASE/PSK-modes/early-data) + `append_psk_binder` (the pre_shared_key extension append + binder computation + early-secret derivation, moved by value so the body is byte-identical). TLS 1.2 `handshake/client12.rs::process_server_hello_done` **304 → 110** via `compute_premaster_and_cke` (the 9-arm key-exchange premaster/CKE dispatch `match`), and `build_client_hello` **196 → ~75** via `build_client_hello_extensions`. NOTE: the originally-scoped `process_finished` was a measurement artifact (actually 42 lines — an `awk` heuristic counted to the test module past the file's free fns); substituted the genuine 3rd-largest client fn. Pure extraction — no protocol/state-machine/wire/control-flow change. Verified: hitls-tls **1556/0** (= baseline), integration **268/0**, `cargo fmt --all -- --check` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-28 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -24421,3 +24422,81 @@ No regression. Behavior-preserving; the only artifacts are the 8 new private
 helpers + 1 private return struct (`ParsedClientHello`). The three target
 functions drop from 553/393/363 to 236/209/214 lines; total LOC rises
 slightly (helper signatures + doc comments) by design. No public API change.
+
+## Phase R17 — Decompose Oversized TLS Client-Handshake Functions (2026-05-28)
+
+### Motivation
+
+Symmetric follow-up to R16. R16 decomposed the oversized functions on the
+**server** side of the handshake; the same quality review flagged the
+**client** side as carrying the same shape of oversized functions. This
+phase applies the identical behavior-preserving extraction technique to the
+client state machines so the whole handshake layer is brought under control.
+
+### What changed
+
+Extracted 3 focused private helper methods.
+
+**TLS 1.3 — `crates/hitls-tls/src/handshake/client.rs`**
+- `build_client_hello`: **379 → ~80 lines**. Extracted:
+  - `build_client_hello_extensions(&mut self, group, kx_public_key) -> Result<Vec<Extension>, TlsError>`
+    — the full ClientHello extension assembly (base extensions + GREASE,
+    ECH-GREASE, SNI/ALPN/heartbeat/SRTP/OCSP/SCT/padding, PSK key-exchange
+    modes, early_data). Records offered cert-compression algos on `self`.
+  - `append_psk_binder(&mut self, msg: Vec<u8>) -> Result<Vec<u8>, TlsError>`
+    — the resumption `pre_shared_key` append (MUST-be-last extension) + binder
+    computation over the truncated transcript + early-secret/early-exporter/
+    0-RTT-traffic-secret derivation (RFC 8446 §4.2.11, §7.5). Takes the
+    encoded CH **by value and returns it** so the entire body is byte-identical
+    to the original (no `&mut Vec` deref changes); a no-op when no resumption
+    session is configured.
+
+**TLS 1.2 — `crates/hitls-tls/src/handshake/client12.rs`**
+- `process_server_hello_done`: **304 → 110 lines**. Extracted:
+  - `compute_premaster_and_cke(&self) -> Result<(Vec<u8>, Vec<u8>), TlsError>`
+    — the 9-arm `match self.kx_alg` that computes the premaster secret and the
+    matching ClientKeyExchange message (ECDHE / RSA / DHE / PSK / DHE-PSK /
+    ECDHE-PSK / RSA-PSK / DHE-anon / ECDHE-anon). A flat, low-complexity
+    dispatch — long because there are 9 algorithms, but single-purpose.
+- `build_client_hello`: **196 → ~75 lines**. Extracted:
+  - `build_client_hello_extensions(&self) -> Vec<Extension>` — the TLS 1.2 CH
+    extension assembly (SNI, sig-algs, supported groups, EC point formats,
+    renegotiation_info, ALPN, session-ticket, EMS, encrypt-then-MAC, record
+    size limit, OCSP/SCT, trusted-CA-keys, SRTP, custom). Returns the vector
+    directly — the block is infallible (no `?`), so no `Result` wrapper.
+
+### Note on scope
+
+The phase was originally scoped (from the quality-review measurement pass) as
+`build_client_hello` + `process_server_hello_done` + `process_finished`. On
+inspection `process_finished` is only **42 lines** — the 270-line figure was
+an `awk` heuristic artifact (it measured the gap to the next 4-space-indented
+`fn`, which is the in-file test module, skipping over the 0-indent free
+functions `verify_ske_signature` / `sign_certificate_verify12` / etc. that sit
+between). It was replaced with the genuine 3rd-largest client function,
+`client12.rs::build_client_hello`.
+
+### Why this is safe
+
+Every extraction is mechanical: a contiguous block moved into a method that
+takes the same `self`/locals it referenced and returns the locals the caller
+still needs. No `cfg`-gated branch, RFC comment, control-flow `return`, or
+message ordering was altered. The `append_psk_binder` early-data flag is
+recomputed locally from the resumption session (`session.max_early_data > 0`),
+which is identical to the original `has_psk && …` because the computation is
+inside the `if let Some(session)` arm where `has_psk` is always true.
+
+### Verification
+
+- `cargo test -p hitls-tls --all-features` → **1556 passed / 0 failed**,
+  identical to the pre-refactor baseline.
+- `cargo test -p hitls-integration-tests --all-features` → **268 passed /
+  0 failed** (13 ignored) — run per the handshake-change test policy.
+- `cargo fmt --all -- --check` clean; `RUSTFLAGS="-D warnings" cargo clippy
+  -p hitls-tls --all-features --all-targets` clean (0 warnings).
+
+### Build Status (Post R17)
+
+No regression. Behavior-preserving; the only artifacts are the 3 new private
+helpers. The three target functions drop from 379/304/196 to ~80/110/~75
+lines. No public API change.

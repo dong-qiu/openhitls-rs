@@ -8681,3 +8681,33 @@ Verification: hitls-tls 1556/0 (= pre-refactor baseline), integration 268/0
 --all-targets clean.
 
 Recorded as DEV_LOG Phase R16.
+
+## Phase R17 — Decompose Oversized TLS Client-Handshake Functions (2026-05-28)
+
+> 请分析接下来要干什么
+> (后续从菜单选择)R17 客户端握手拆分(推荐)
+
+After R16 merged (PR #191), analysed what to do next. The repo has parallel
+in-flight streams (T113 PKI test migration, tlsfuzzer coverage, RSA KAT), but
+in the `refactoring` slot the natural high-value follow-up was the **client**
+side of the handshake — R16 had only decomposed the server side, leaving the
+symmetric oversized client functions untouched. User chose R17.
+
+Extracted 3 private helpers (behavior-preserving; no protocol/state-machine/
+wire change):
+- client.rs build_client_hello 379 → ~80: build_client_hello_extensions +
+  append_psk_binder (the PSK/binder block, moved by value so the body is
+  byte-identical).
+- client12.rs process_server_hello_done 304 → 110: compute_premaster_and_cke
+  (9-arm key-exchange dispatch match).
+- client12.rs build_client_hello 196 → ~75: build_client_hello_extensions.
+
+Scope note: the originally-listed `process_finished` (270) was an `awk`
+heuristic artifact — it is actually 42 lines (the heuristic counted to the
+test module past the file's 0-indent free fns). Substituted the genuine
+3rd-largest client fn, client12.rs build_client_hello.
+
+Verification: hitls-tls 1556/0 (= baseline), integration 268/0, fmt + clippy
+-D warnings --all-features --all-targets clean.
+
+Recorded as DEV_LOG Phase R17.

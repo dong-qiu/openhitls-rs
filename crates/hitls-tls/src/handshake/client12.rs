@@ -428,6 +428,81 @@ impl Tls12ClientHandshake {
         getrandom::fill(&mut self.client_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
 
+        let extensions = self.build_client_hello_extensions();
+
+        // Cache the EMS flag from resumption session for later validation
+        if let Some(ref session) = self.config.resumption_session {
+            self.cached_session_ems = session.extended_master_secret;
+        }
+
+        // Filter cipher suites to TLS 1.2 ones only
+        let mut tls12_suites: Vec<CipherSuite> = self
+            .config
+            .cipher_suites
+            .iter()
+            .copied()
+            .filter(|s| crate::crypt::is_tls12_suite(*s))
+            .collect();
+
+        if tls12_suites.is_empty() {
+            return Err(TlsError::NoSharedCipherSuite);
+        }
+
+        // Fallback SCSV (RFC 7507)
+        if self.config.send_fallback_scsv {
+            tls12_suites.push(CipherSuite::TLS_FALLBACK_SCSV);
+        }
+
+        // Use cached session ID for resumption, or generate a random one.
+        // For ticket-based resumption: if session has a ticket but empty ID, generate
+        // a random session_id so the server can echo it back (RFC 5077 §3.4).
+        // During renegotiation, always use a fresh session ID (no resumption).
+        let session_id = if self.config.session_resumption && !self.is_renegotiation {
+            if let Some(ref session) = self.config.resumption_session {
+                self.cached_master_secret = session.master_secret.clone();
+                if session.id.is_empty() && session.ticket.is_some() {
+                    // Ticket-based resumption: generate random session_id
+                    let mut sid = vec![0u8; 32];
+                    getrandom::fill(&mut sid)
+                        .map_err(|e| TlsError::HandshakeFailed(format!("random gen: {e}")))?;
+                    self.cached_session_id = sid.clone();
+                    sid
+                } else {
+                    self.cached_session_id = session.id.clone();
+                    session.id.clone()
+                }
+            } else {
+                let mut sid = vec![0u8; 32];
+                getrandom::fill(&mut sid)
+                    .map_err(|e| TlsError::HandshakeFailed(format!("random gen: {e}")))?;
+                sid
+            }
+        } else {
+            let mut sid = vec![0u8; 32];
+            getrandom::fill(&mut sid)
+                .map_err(|e| TlsError::HandshakeFailed(format!("random gen: {e}")))?;
+            sid
+        };
+
+        let ch = ClientHello {
+            random: self.client_random,
+            legacy_session_id: session_id,
+            cipher_suites: tls12_suites,
+            extensions,
+        };
+
+        let msg = encode_client_hello(&ch);
+        self.client_hello_bytes = msg.clone();
+        self.transcript.update(&msg)?;
+        self.state = Tls12ClientState::WaitServerHello;
+        Ok(msg)
+    }
+
+    /// Build the TLS 1.2 ClientHello extension vector: SNI, signature
+    /// algorithms, supported groups / EC point formats, renegotiation_info,
+    /// ALPN, session-ticket, EMS, encrypt-then-MAC, and the remaining
+    /// config-gated extensions (record size limit, OCSP, SCT, SRTP, …).
+    fn build_client_hello_extensions(&self) -> Vec<crate::extensions::Extension> {
         // Build extensions for TLS 1.2
         let mut extensions = Vec::new();
 
@@ -554,72 +629,7 @@ impl Tls12ClientHandshake {
             crate::extensions::ExtensionContext::CLIENT_HELLO,
         ));
 
-        // Cache the EMS flag from resumption session for later validation
-        if let Some(ref session) = self.config.resumption_session {
-            self.cached_session_ems = session.extended_master_secret;
-        }
-
-        // Filter cipher suites to TLS 1.2 ones only
-        let mut tls12_suites: Vec<CipherSuite> = self
-            .config
-            .cipher_suites
-            .iter()
-            .copied()
-            .filter(|s| crate::crypt::is_tls12_suite(*s))
-            .collect();
-
-        if tls12_suites.is_empty() {
-            return Err(TlsError::NoSharedCipherSuite);
-        }
-
-        // Fallback SCSV (RFC 7507)
-        if self.config.send_fallback_scsv {
-            tls12_suites.push(CipherSuite::TLS_FALLBACK_SCSV);
-        }
-
-        // Use cached session ID for resumption, or generate a random one.
-        // For ticket-based resumption: if session has a ticket but empty ID, generate
-        // a random session_id so the server can echo it back (RFC 5077 §3.4).
-        // During renegotiation, always use a fresh session ID (no resumption).
-        let session_id = if self.config.session_resumption && !self.is_renegotiation {
-            if let Some(ref session) = self.config.resumption_session {
-                self.cached_master_secret = session.master_secret.clone();
-                if session.id.is_empty() && session.ticket.is_some() {
-                    // Ticket-based resumption: generate random session_id
-                    let mut sid = vec![0u8; 32];
-                    getrandom::fill(&mut sid)
-                        .map_err(|e| TlsError::HandshakeFailed(format!("random gen: {e}")))?;
-                    self.cached_session_id = sid.clone();
-                    sid
-                } else {
-                    self.cached_session_id = session.id.clone();
-                    session.id.clone()
-                }
-            } else {
-                let mut sid = vec![0u8; 32];
-                getrandom::fill(&mut sid)
-                    .map_err(|e| TlsError::HandshakeFailed(format!("random gen: {e}")))?;
-                sid
-            }
-        } else {
-            let mut sid = vec![0u8; 32];
-            getrandom::fill(&mut sid)
-                .map_err(|e| TlsError::HandshakeFailed(format!("random gen: {e}")))?;
-            sid
-        };
-
-        let ch = ClientHello {
-            random: self.client_random,
-            legacy_session_id: session_id,
-            cipher_suites: tls12_suites,
-            extensions,
-        };
-
-        let msg = encode_client_hello(&ch);
-        self.client_hello_bytes = msg.clone();
-        self.transcript.update(&msg)?;
-        self.state = Tls12ClientState::WaitServerHello;
-        Ok(msg)
+        extensions
     }
 
     /// Process a ServerHello message.
@@ -1040,7 +1050,89 @@ impl Tls12ClientHandshake {
         };
 
         // Generate premaster secret and CKE based on key exchange algorithm
-        let (pre_master_secret, cke_msg) = match self.kx_alg {
+        let (pre_master_secret, cke_msg) = self.compute_premaster_and_cke()?;
+        self.transcript.update(&cke_msg)?;
+
+        // Derive master secret (EMS uses transcript hash instead of randoms)
+        let alg = params.hash_alg_id();
+        let master_secret = if self.use_extended_master_secret {
+            let session_hash = self.transcript.current_hash()?;
+            derive_extended_master_secret(alg, &pre_master_secret, &session_hash)?
+        } else {
+            derive_master_secret(
+                alg,
+                &pre_master_secret,
+                &self.client_random,
+                &self.server_random,
+            )?
+        };
+        crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
+
+        // Derive key block
+        let key_block = derive_key_block(
+            alg,
+            &master_secret,
+            &self.server_random,
+            &self.client_random,
+            params,
+        )?;
+
+        // Build CertificateVerify (if client sent a non-empty certificate)
+        let certificate_verify = if self.cert_request_received
+            && !self.config.client_certificate_chain.is_empty()
+        {
+            if let Some(ref client_key) = self.config.client_private_key {
+                let transcript_hash = self.transcript.current_hash()?;
+                let scheme = select_signature_scheme_tls12(client_key, &self.requested_sig_algs)?;
+                let signature = sign_certificate_verify12(client_key, scheme, &transcript_hash)?;
+                let cv = CertificateVerify12 {
+                    sig_algorithm: scheme,
+                    signature,
+                };
+                let cv_msg = encode_certificate_verify12(&cv);
+                self.transcript.update(&cv_msg)?;
+                Some(cv_msg)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Compute client Finished
+        let transcript_hash = self.transcript.current_hash()?;
+        let verify_data =
+            compute_verify_data(alg, &master_secret, "client finished", &transcript_hash)?;
+        self.client_verify_data = verify_data.clone();
+        let finished_msg = encode_finished12(&verify_data);
+        // The Finished message itself is added to the transcript for verifying server Finished
+        self.transcript.update(&finished_msg)?;
+
+        self.state = Tls12ClientState::WaitChangeCipherSpec;
+
+        Ok(ClientFlightResult {
+            client_certificate,
+            client_key_exchange: cke_msg,
+            certificate_verify,
+            finished: finished_msg,
+            master_secret,
+            client_write_mac_key: key_block.client_write_mac_key.clone(),
+            server_write_mac_key: key_block.server_write_mac_key.clone(),
+            client_write_key: key_block.client_write_key.clone(),
+            server_write_key: key_block.server_write_key.clone(),
+            client_write_iv: key_block.client_write_iv.clone(),
+            server_write_iv: key_block.server_write_iv.clone(),
+            is_cbc: params.is_cbc,
+            mac_len: params.mac_len,
+        })
+    }
+
+    /// Generate the TLS 1.2 premaster secret and the matching
+    /// ClientKeyExchange message for the negotiated key-exchange algorithm.
+    /// Returns `(premaster_secret, client_key_exchange_msg)`.
+    fn compute_premaster_and_cke(&self) -> Result<(Vec<u8>, Vec<u8>), TlsError> {
+        // Generate premaster secret and CKE based on key exchange algorithm
+        Ok(match self.kx_alg {
             KeyExchangeAlg::Ecdhe => {
                 let group = match self.server_named_curve {
                     0x0017 => NamedGroup::SECP256R1,
@@ -1233,80 +1325,6 @@ impl Tls12ClientHandshake {
                     "unsupported key exchange algorithm".into(),
                 ))
             }
-        };
-        self.transcript.update(&cke_msg)?;
-
-        // Derive master secret (EMS uses transcript hash instead of randoms)
-        let alg = params.hash_alg_id();
-        let master_secret = if self.use_extended_master_secret {
-            let session_hash = self.transcript.current_hash()?;
-            derive_extended_master_secret(alg, &pre_master_secret, &session_hash)?
-        } else {
-            derive_master_secret(
-                alg,
-                &pre_master_secret,
-                &self.client_random,
-                &self.server_random,
-            )?
-        };
-        crate::crypt::keylog::log_master_secret(&self.config, &self.client_random, &master_secret);
-
-        // Derive key block
-        let key_block = derive_key_block(
-            alg,
-            &master_secret,
-            &self.server_random,
-            &self.client_random,
-            params,
-        )?;
-
-        // Build CertificateVerify (if client sent a non-empty certificate)
-        let certificate_verify = if self.cert_request_received
-            && !self.config.client_certificate_chain.is_empty()
-        {
-            if let Some(ref client_key) = self.config.client_private_key {
-                let transcript_hash = self.transcript.current_hash()?;
-                let scheme = select_signature_scheme_tls12(client_key, &self.requested_sig_algs)?;
-                let signature = sign_certificate_verify12(client_key, scheme, &transcript_hash)?;
-                let cv = CertificateVerify12 {
-                    sig_algorithm: scheme,
-                    signature,
-                };
-                let cv_msg = encode_certificate_verify12(&cv);
-                self.transcript.update(&cv_msg)?;
-                Some(cv_msg)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // Compute client Finished
-        let transcript_hash = self.transcript.current_hash()?;
-        let verify_data =
-            compute_verify_data(alg, &master_secret, "client finished", &transcript_hash)?;
-        self.client_verify_data = verify_data.clone();
-        let finished_msg = encode_finished12(&verify_data);
-        // The Finished message itself is added to the transcript for verifying server Finished
-        self.transcript.update(&finished_msg)?;
-
-        self.state = Tls12ClientState::WaitChangeCipherSpec;
-
-        Ok(ClientFlightResult {
-            client_certificate,
-            client_key_exchange: cke_msg,
-            certificate_verify,
-            finished: finished_msg,
-            master_secret,
-            client_write_mac_key: key_block.client_write_mac_key.clone(),
-            server_write_mac_key: key_block.server_write_mac_key.clone(),
-            client_write_key: key_block.client_write_key.clone(),
-            server_write_key: key_block.server_write_key.clone(),
-            client_write_iv: key_block.client_write_iv.clone(),
-            server_write_iv: key_block.server_write_iv.clone(),
-            is_cbc: params.is_cbc,
-            mac_len: params.mac_len,
         })
     }
 
