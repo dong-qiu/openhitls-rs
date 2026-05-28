@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I143 (143 phases)
-- Testing: T1–T142 (135 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code)
+- Testing: T1–T143 (136 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard)
 - Refactoring: R1–R17 (17 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -393,6 +393,7 @@ Category summary:
 | 393 | R16 | Refactor | Decompose 3 oversized TLS server-handshake functions (behavior-preserving code motion) — extracted 8 focused private helpers so no single handshake function exceeds ~240 lines. TLS 1.2 `handshake/server12.rs::process_client_hello` **553 → 236** via `parse_client_hello_extensions` / `build_server_hello_extensions` / `build_server_key_exchange12` / `build_client_certificate_request`. TLS 1.3 `handshake/server.rs::process_client_hello` **393 → 209** via `parse_client_hello_extensions` (+ a small `ParsedClientHello` return struct) / `resolve_psk`, and `build_server_flight` **363 → 214** via `build_certificate_request13` / `build_certificate_and_verify`. Pure extraction — no protocol/state-machine/wire/behavior change; each helper is independently readable + testable. Motivated by the repo quality review (the handshake layer was the only flagged hotspot; clippy was already 0-warning, 0 TODO/FIXME, production-panic≈0). Verified: hitls-tls **1556/0** (= pre-refactor baseline), integration **268/0**, `cargo fmt --all -- --check` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-28 |
 | 394 | R17 | Refactor | Decompose 3 oversized TLS **client**-handshake functions (symmetric follow-up to R16; behavior-preserving code motion) — extracted 3 focused private helpers. TLS 1.3 `handshake/client.rs::build_client_hello` **379 → ~80** via `build_client_hello_extensions` (the full CH extension assembly incl. GREASE/ECH-GREASE/PSK-modes/early-data) + `append_psk_binder` (the pre_shared_key extension append + binder computation + early-secret derivation, moved by value so the body is byte-identical). TLS 1.2 `handshake/client12.rs::process_server_hello_done` **304 → 110** via `compute_premaster_and_cke` (the 9-arm key-exchange premaster/CKE dispatch `match`), and `build_client_hello` **196 → ~75** via `build_client_hello_extensions`. NOTE: the originally-scoped `process_finished` was a measurement artifact (actually 42 lines — an `awk` heuristic counted to the test module past the file's free fns); substituted the genuine 3rd-largest client fn. Pure extraction — no protocol/state-machine/wire/control-flow change. Verified: hitls-tls **1556/0** (= baseline), integration **268/0**, `cargo fmt --all -- --check` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-28 |
 | 395 | T142 | Test | BigNum arithmetic KAT migration — first non-`hitls-crypto` C→Rust migration target (`test_suite_sdv_bn.data` → `crates/hitls-bignum/tests/migrated_bn.rs`, new `xtask/src/bn.rs` emitter). Migrates the deterministic `*_FUNC_TC*` families against `hitls_bignum::BigNum`: **RSHIFT** 101 (`shr`), **MOD** 54 (`mod_reduce`), **SUB** 22 (`sub`), **MODINV** 19 (`mod_inv`; empty result row ⇒ no inverse ⇒ `is_err`), **GCD** 10 (`gcd`), **PRIME_CHECK** 10 (`is_probably_prime(64)`), **ADD** 5 (`add`), **DIV** 4 (`div_rem`), **MODEXP** 3 (`mod_exp`), **SQR** 2 (`sqr`) = **230** byte-exact tests, **no production code change** (all ops were already public). BigNum is signed and derives no `PartialEq`, so the generated tests compare via `to_bytes_be()` (magnitude) + `is_negative()` (sign) — emitted as an `eq_signed` prelude helper + a `bn(bytes, neg)` constructor (the file uses `from_bytes_be`, since `hitls-bignum` has no `hitls-utils` dep). Sign-convention divergences between Rust and C — found via a pre-emit probe — are skipped: **negative-modulus MOD** (`mod_reduce` differs) and **negative-dividend DIV** (`div_rem` returns a non-negative remainder vs C's truncated/signed one); these route to API-surface. Also skipped: **CMP** (no signed-compare API — only `cmp_abs`), **U64/UINT** (length-driven, not hex KATs), the single-limb families (**ADDLIMB/SUB_LIMB/MULLIMB/DIVLIMB**), all **`*_API_TC*`** (input-check / RNG). 130 API-surface + 2 unknown (DIV error-path rows omitting q/r) + 0 unsupported. No regression — hitls-bignum lib **95/0** (1 pre-existing ignored) + `migrated_bn` **230/0**; xtask `--check` drift gate passes; na-list tally → 2072 emitted (new BigNum row 230/130/2/0/362; total C cases 4632 → 4994); `fmt` + `clippy -D warnings --all-targets` clean. This is the largest single migrated family after DSA (1200) / ML-KEM (150) | 2026-05-28 |
+| 396 | T143 | Test | MD5 / SHA-1 / SM3 digest KAT migration — completes the **hash category** alongside the already-migrated SHA-2 (T-era) and SHA-3 (T139). Three new `migrated_<algo>.rs` files in `hitls-crypto` (`md5` 9, `sha1` 8, `sm3` 6 = **23** byte-exact tests), all passing on first run. **No production code change** (the `Md5`/`Sha1`/`Sm3` public `digest` / `new`+`update`+`finish` APIs already existed). Unlike the SHA-2/SHA-3 EAL files, these `.data` files fix the algorithm per file: the primary KAT rows carry **no `CRYPT_MD_*` algid argument**, and the TC-number→family mapping is inconsistent across files (MD5/SM3 empty-input is `FUNC_TC001`, SHA-1's is a `FUN_TC001` row with empty input). So a new generic single-algorithm digest emitter (`emit_md_family` in `xtask/src/digest.rs`, parameterised by a `DigestCfg { feature, import, rust_ty, dlen }`) classifies by **argument shape + a digest-length guard on the expected output**, not by TC number: 1 hex arg (len == dlen) ⇒ empty-input; 2 hex args (arg[1] len == dlen) ⇒ one-shot; ≥3 hex args (last len == dlen) ⇒ split-update multi-block. Rows that DO carry an algid (`COPY_CTX` / `DEFAULT_PROVIDER` / EAL-with-algid) duplicate the no-algid vectors and route to API-surface; `_API_TC*` + no-data lifecycle rows likewise. The digest-length guard correctly rejects SHA-1's 4-hex-arg `API_TC003` row and SM3's input-only `FUNC_TC002` row (no expected) that would otherwise misclassify as multi-block / empty. 18 API-surface skipped, 0 unknown, 0 unsupported across the 3 files. No regression — `migrated_md5` 9/0 + `migrated_sha1` 8/0 + `migrated_sm3` 6/0 (under `--features md5,sha1,sm3` / `--all-features`); xtask `--check` drift gate passes for all three; na-list tally → 2095 emitted (new MD5 9/8/0/0/17, SHA-1 8/6/0/0/14, SM3 6/4/0/0/10 rows); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-28 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -24561,3 +24562,57 @@ No regression. hitls-bignum lib **95/0** (1 pre-existing ignored) +
 unsupported / 362 total; workspace total C cases 4632 → 4994). `cargo fmt
 --all -- --check` + `clippy -D warnings --all-targets` clean. BigNum is the
 largest single migrated family after DSA (1200) and ML-KEM (150).
+
+## Phase T143 — MD5 / SHA-1 / SM3 Digest KAT Migration (2026-05-28)
+
+### Summary
+
+Completes the **hash category** of the Phase A C→Rust KAT migration: MD5,
+SHA-1 and SM3 join the already-migrated SHA-2 and SHA-3 (T139). Three new
+generated files in `hitls-crypto` — `migrated_md5.rs` (9), `migrated_sha1.rs`
+(8), `migrated_sm3.rs` (6) = **23 byte-exact tests**, all passing first run.
+**No production code change** — the `Md5` / `Sha1` / `Sm3` public APIs
+(`digest`, `new` + `update` + `finish`) already existed.
+
+### Why a new emitter (not the SHA-2 one)
+
+The SHA-2 / SHA-3 EAL `.data` files tag every row with a `CRYPT_MD_*` algid
+argument, and the SHA-2 emitter keys its classifier off `_FUNC_TC002/003/004`.
+The MD5 / SHA-1 / SM3 files are shaped differently:
+
+- The algorithm is **fixed per file**, so the primary KAT rows carry **no
+  algid argument** at all.
+- The TC-number → family mapping is **inconsistent across files** (MD5/SM3
+  empty-input is `FUNC_TC001`; SHA-1's empty case is a `FUN_TC001` row whose
+  input happens to be `""`; multi-block is `FUNC_TC004` for MD5 but
+  `FUNC_TC003` for SM3 / `FUN_TC003` for SHA-1).
+
+So the new generic `emit_md_family` (`xtask/src/digest.rs`), parameterised by
+`DigestCfg { algo, feature, import, rust_ty, data_file, dlen }`, classifies by
+**argument shape plus a digest-length guard on the expected output**:
+
+| Shape (all hex) | Family |
+|---|---|
+| 1 arg, `len == dlen` | empty-input (`digest(&[])`) |
+| 2 args, `arg[1].len == dlen` | one-shot (`digest(input)`) |
+| ≥3 args, `last.len == dlen` | split-update multi-block (`new`+`update`*+`finish`) |
+
+### Skipped → API-surface
+
+Rows whose first arg is a `CRYPT_MD_*` symbol (`COPY_CTX` /
+`DEFAULT_PROVIDER` / EAL-with-algid) **duplicate** the no-algid KAT vectors —
+routed to API-surface to avoid redundancy. `_API_TC*` and no-data lifecycle
+rows likewise. The digest-length guard is load-bearing: it rejects SHA-1's
+4-hex-arg `API_TC003` row (which would otherwise look like a 3-part
+multi-block) and SM3's input-only `FUNC_TC002` row that omits the expected
+(which would otherwise look like a 64-byte "empty-input expected"). 18
+API-surface skipped, 0 unknown, 0 unsupported across the three files.
+
+### Build Status (Post T143)
+
+No regression. `migrated_md5` 9/0 + `migrated_sha1` 8/0 + `migrated_sm3` 6/0
+(under `--features md5,sha1,sm3` and `--all-features`). xtask `--check` drift
+gate passes for all three. na-list tally → 2095 emitted (MD5 row 9/8/0/0/17,
+SHA-1 row 8/6/0/0/14, SM3 row 6/4/0/0/10; workspace total C cases 4994 →
+5035). `cargo fmt --all -- --check` + `clippy -D warnings --all-features
+--all-targets` clean.

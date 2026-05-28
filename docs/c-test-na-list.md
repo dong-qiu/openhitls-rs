@@ -62,7 +62,10 @@ Counts are the `Generation summary` footer of each generated file
 | ECC | 61 | 603 | 0 | 0 | 647 |
 | RSA | 72 | 108 | 0 | 4 | 170 |
 | BigNum | 230 | 130 | 2 | 0 | 362 |
-| **Total** | **2072** | **3283** | **240** | **92** | **4994** |
+| MD5 | 9 | 8 | 0 | 0 | 17 |
+| SHA-1 | 8 | 6 | 0 | 0 | 14 |
+| SM3 | 6 | 4 | 0 | 0 | 10 |
+| **Total** | **2095** | **3301** | **240** | **92** | **5035** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -126,6 +129,19 @@ probe). `CMP` (no signed-compare API — only `cmp_abs`), `U64`/`UINT`
 `SUB_LIMB` / `MULLIMB` / `DIVLIMB`), and all `*_API_TC*` (input-check / RNG)
 stay API-surface. The 2 `unknown` are `DIV` error-path rows that omit the
 quotient/remainder fields.
+
+MD5 / SHA-1 / SM3 (T143) complete the hash category alongside SHA-2 / SHA-3.
+Their `.data` files fix the algorithm per file (no `CRYPT_MD_*` algid on the
+primary KAT rows) and use an inconsistent TC-number → family mapping, so the
+generic `emit_md_family` emitter classifies by **argument shape + a
+digest-length guard** on the expected output rather than by TC number: 1 hex
+arg (`len == dlen`) ⇒ empty-input; 2 hex args ⇒ one-shot; ≥3 hex args ⇒
+split-update multi-block (23 byte-exact tests, no new production code).
+Algid-prefixed rows (`COPY_CTX` / `DEFAULT_PROVIDER` / EAL-with-algid)
+duplicate the no-algid vectors and route to API-surface, as do `_API_TC*` and
+no-data lifecycle rows. The digest-length guard is load-bearing: it rejects
+SHA-1's 4-hex-arg `API_TC003` row and SM3's input-only `FUNC_TC002` row (no
+expected) that would otherwise misclassify. 0 unknown, 0 unsupported.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
