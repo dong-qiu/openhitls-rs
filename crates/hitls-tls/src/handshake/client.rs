@@ -282,6 +282,68 @@ impl ClientHandshake {
             .map_err(|_| TlsError::HandshakeFailed("random generation failed".into()))?;
         self.client_random = random;
 
+        let extensions = self.build_client_hello_extensions(group, kx.public_key_bytes())?;
+
+        // Build cipher suites (with optional GREASE prepend)
+        let mut cipher_suites = self.config.cipher_suites.clone();
+        if self.config.grease {
+            cipher_suites.insert(0, CipherSuite(grease_value()));
+        }
+
+        // RFC 8446 §D.4: middlebox compat mode sends a 32-byte random session ID
+        let legacy_session_id = if self.config.middlebox_compat {
+            let mut sid = vec![0u8; 32];
+            getrandom::fill(&mut sid)
+                .map_err(|_| TlsError::HandshakeFailed("session_id random failed".into()))?;
+            sid
+        } else {
+            vec![]
+        };
+
+        let ch = ClientHello {
+            random,
+            legacy_session_id,
+            cipher_suites,
+            extensions,
+        };
+
+        // If we have a resumption session, append a pre_shared_key extension
+        // with its binder (MUST be the last extension) and derive the
+        // early-secret key material; otherwise the encoded CH is returned
+        // unchanged.
+        let msg = self.append_psk_binder(encode_client_hello(&ch))?;
+
+        // Inner CH bytes (for transcript hash). When ECH is offered, the
+        // wire bytes will be the outer CH instead, but the transcript still
+        // uses the inner — per draft-ietf-tls-esni "ECH-accepted" handshake.
+        self.client_hello_msg = msg.clone();
+        self.key_exchange = Some(kx);
+        self.state = HandshakeState::WaitServerHello;
+
+        // Phase I93: ECH split-CH wrap. When `ech_config_list` is set, replace
+        // the wire bytes with an outer ClientHello that has cover SNI and
+        // carries the HPKE-encrypted inner in the encrypted_client_hello
+        // extension. The transcript above is unchanged (it still uses inner).
+        #[cfg(feature = "ech")]
+        let wire = self.maybe_wrap_in_ech_outer(msg)?;
+        #[cfg(not(feature = "ech"))]
+        let wire = msg;
+
+        Ok(wire)
+    }
+
+    /// Assemble the ClientHello extension vector (TLS 1.3): optional GREASE
+    /// injection, the four base extensions (supported_versions / groups /
+    /// signature_algorithms / key_share), and every config-gated extension
+    /// (SNI, ALPN, ECH-GREASE, PSK key-exchange modes, early_data, …).
+    ///
+    /// Side effect: records the offered cert-compression algorithms in
+    /// `self.cert_compression_algos` when that extension is emitted.
+    fn build_client_hello_extensions(
+        &mut self,
+        group: NamedGroup,
+        kx_public_key: &[u8],
+    ) -> Result<Vec<crate::extensions::Extension>, TlsError> {
         // Build extensions (with optional GREASE injection)
         let grease_enabled = self.config.grease;
         let mut extensions = if grease_enabled {
@@ -292,14 +354,14 @@ impl ClientHandshake {
                     &self.config.signature_algorithms,
                     grease_value(),
                 ),
-                build_key_share_ch_grease(group, kx.public_key_bytes(), grease_value()),
+                build_key_share_ch_grease(group, kx_public_key, grease_value()),
             ]
         } else {
             vec![
                 build_supported_versions_ch(),
                 build_supported_groups(&self.config.supported_groups),
                 build_signature_algorithms(&self.config.signature_algorithms),
-                build_key_share_ch(group, kx.public_key_bytes()),
+                build_key_share_ch(group, kx_public_key),
             ]
         };
         if !self.config.signature_algorithms_cert.is_empty() {
@@ -429,33 +491,19 @@ impl ClientHandshake {
             extensions.push(build_early_data_ch());
         }
 
-        // Build cipher suites (with optional GREASE prepend)
-        let mut cipher_suites = self.config.cipher_suites.clone();
-        if grease_enabled {
-            cipher_suites.insert(0, CipherSuite(grease_value()));
-        }
+        Ok(extensions)
+    }
 
-        // RFC 8446 §D.4: middlebox compat mode sends a 32-byte random session ID
-        let legacy_session_id = if self.config.middlebox_compat {
-            let mut sid = vec![0u8; 32];
-            getrandom::fill(&mut sid)
-                .map_err(|_| TlsError::HandshakeFailed("session_id random failed".into()))?;
-            sid
-        } else {
-            vec![]
-        };
-
-        let ch = ClientHello {
-            random,
-            legacy_session_id,
-            cipher_suites,
-            extensions,
-        };
-
-        let mut msg = encode_client_hello(&ch);
-
+    /// Append the `pre_shared_key` extension (which MUST be the last
+    /// extension, RFC 8446 §4.2.11) to an already-encoded ClientHello,
+    /// compute its binder over the truncated transcript, and derive the
+    /// early-secret key material (binder / early-exporter / 0-RTT traffic
+    /// secret). Returns the encoded CH unchanged when no resumption session
+    /// is configured.
+    fn append_psk_binder(&mut self, mut msg: Vec<u8>) -> Result<Vec<u8>, TlsError> {
         // If we have a resumption session, append PSK extension with binder
         if let Some(ref session) = self.config.resumption_session {
+            let offer_early_data = session.max_early_data > 0;
             let psk = session.psk.clone();
             let ticket = session.ticket.clone().unwrap_or_default();
             let age_add = session.ticket_age_add;
@@ -593,23 +641,7 @@ impl ClientHandshake {
             let _ = old_msg_len; // suppress unused warning
         }
 
-        // Inner CH bytes (for transcript hash). When ECH is offered, the
-        // wire bytes will be the outer CH instead, but the transcript still
-        // uses the inner — per draft-ietf-tls-esni "ECH-accepted" handshake.
-        self.client_hello_msg = msg.clone();
-        self.key_exchange = Some(kx);
-        self.state = HandshakeState::WaitServerHello;
-
-        // Phase I93: ECH split-CH wrap. When `ech_config_list` is set, replace
-        // the wire bytes with an outer ClientHello that has cover SNI and
-        // carries the HPKE-encrypted inner in the encrypted_client_hello
-        // extension. The transcript above is unchanged (it still uses inner).
-        #[cfg(feature = "ech")]
-        let wire = self.maybe_wrap_in_ech_outer(msg)?;
-        #[cfg(not(feature = "ech"))]
-        let wire = msg;
-
-        Ok(wire)
+        Ok(msg)
     }
 
     /// Phase I93/I94: build the outer ClientHello that wraps the inner CH
