@@ -141,7 +141,7 @@ Algid-prefixed rows (`COPY_CTX` / `DEFAULT_PROVIDER` / EAL-with-algid)
 duplicate the no-algid vectors and route to API-surface, as do `_API_TC*` and
 no-data lifecycle rows. The digest-length guard is load-bearing: it rejects
 SHA-1's 4-hex-arg `API_TC003` row and SM3's input-only `FUNC_TC002` row (no
-expected) that would otherwise mis-classify. 0 unknown, 0 unsupported.
+expected) that would otherwise misclassify. 0 unknown, 0 unsupported.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
