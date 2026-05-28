@@ -8740,3 +8740,30 @@ na-list -> 2072 emitted (new BigNum row 230/130/2/0/362; total 4632 -> 4994);
 fmt + clippy clean. Largest family after DSA (1200) / ML-KEM (150).
 
 Recorded as DEV_LOG Phase T142.
+
+## Phase T143 — MD5 / SHA-1 / SM3 Digest KAT Migration (2026-05-28)
+
+> 继续 Phase A 剩余 crypto 算法的 KAT 迁移
+
+Completed the hash category: MD5, SHA-1, SM3 join the migrated SHA-2 / SHA-3.
+Three new migrated_<algo>.rs in hitls-crypto (md5 9 + sha1 8 + sm3 6 = 23
+byte-exact tests), all passing first run. No production code change (the
+Md5/Sha1/Sm3 digest/new+update+finish APIs already existed).
+
+These .data files differ from the SHA-2/SHA-3 EAL ones: the algorithm is fixed
+per file (primary KAT rows carry NO CRYPT_MD_* algid), and the TC-number ->
+family mapping is inconsistent across files. So a new generic emitter
+(emit_md_family in xtask/src/digest.rs, parameterised by DigestCfg) classifies
+by argument shape + a digest-length guard on the expected: 1 arg(len==dlen) =>
+empty-input; 2 args(arg1==dlen) => one-shot; >=3 args(last==dlen) =>
+multi-block. Algid-prefixed rows (COPY_CTX/DEFAULT_PROVIDER/EAL-with-algid)
+duplicate the no-algid vectors -> API-surface; _API_TC* + no-data rows too. The
+dlen guard rejects SHA-1's 4-hex-arg API_TC003 and SM3's input-only FUNC_TC002
+(no expected). 18 API-surface, 0 unknown, 0 unsupported.
+
+Verification: migrated_md5 9/0 + migrated_sha1 8/0 + migrated_sm3 6/0
+(--features md5,sha1,sm3 / --all-features); drift gate passes x3; na-list ->
+2095 emitted (md5 9/8/0/0/17 + sha1 8/6/0/0/14 + sm3 6/4/0/0/10; total 4994 ->
+5035); fmt + clippy -D warnings --all-features --all-targets clean.
+
+Recorded as DEV_LOG Phase T143.

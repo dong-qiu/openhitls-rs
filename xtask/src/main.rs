@@ -143,6 +143,21 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_sha3.rs"),
             sha3::emit_sha3_kat,
         ),
+        "md5" => (
+            vec![c_root.join("crypto/md5/test_suite_sdv_eal_md5.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_md5.rs"),
+            digest::emit_md5_kat,
+        ),
+        "sha1" => (
+            vec![c_root.join("crypto/sha1/test_suite_sdv_eal_md_sha1.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_sha1.rs"),
+            digest::emit_sha1_kat,
+        ),
+        "sm3" => (
+            vec![c_root.join("crypto/sm3/test_suite_sdv_eal_sm3.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_sm3.rs"),
+            digest::emit_sm3_kat,
+        ),
         "drbg" => (
             vec![c_root.join("crypto/drbg/test_suite_sdv_drbg.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_drbg.rs"),
@@ -181,7 +196,7 @@ fn migrate(
         ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, drbg, ecc, rsa, bn, x509-parse"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, drbg, ecc, rsa, bn, x509-parse"
             )
             .into());
         }
