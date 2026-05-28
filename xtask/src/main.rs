@@ -1,3 +1,4 @@
+mod bn;
 mod cipher;
 mod curve25519;
 mod dh;
@@ -163,6 +164,11 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_rsa.rs"),
             rsa::emit_rsa_kat,
         ),
+        "bn" => (
+            vec![c_root.join("crypto/bn/test_suite_sdv_bn.data")],
+            workspace_root()?.join("crates/hitls-bignum/tests/migrated_bn.rs"),
+            bn::emit_bn_kat,
+        ),
         "x509-parse" => (
             vec![
                 c_root.join("pki/cert/test_suite_sdv_x509_cert.data"),
@@ -175,7 +181,7 @@ fn migrate(
         ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, drbg, ecc, rsa, x509-parse"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, drbg, ecc, rsa, bn, x509-parse"
             )
             .into());
         }

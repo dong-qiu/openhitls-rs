@@ -8652,6 +8652,7 @@ kat-nonce); builds clean with sha1+kat-nonce off; drift gate passes; na-list
 clippy clean. All deterministic RSA families now migrated.
 
 Recorded as DEV_LOG Phase I143.
+
 ## Phase R16 — Decompose Oversized TLS Server-Handshake Functions (2026-05-28)
 
 > 请分析代码仓的质量，是否需要重构？
@@ -8711,3 +8712,31 @@ Verification: hitls-tls 1556/0 (= baseline), integration 268/0, fmt + clippy
 -D warnings --all-features --all-targets clean.
 
 Recorded as DEV_LOG Phase R17.
+
+## Phase T142 — BigNum Arithmetic KAT Migration (2026-05-28)
+
+> 先去确认 bignum 的 SDV 向量规模、然后按 RSA 的同款套路推进
+
+Confirmed scale: test_suite_sdv_bn.data has 362 rows. First migration target
+outside hitls-crypto. New xtask/src/bn.rs emitter ->
+crates/hitls-bignum/tests/migrated_bn.rs. No production code change (all ops
+already public).
+
+Migrated deterministic *_FUNC_TC* families (230 byte-exact tests): RSHIFT 101
+(shr), MOD 54 (mod_reduce), SUB 22 (sub), MODINV 19 (mod_inv; empty result =>
+is_err), GCD 10, PRIME_CHECK 10 (is_probably_prime(64)), ADD 5 (add), DIV 4
+(div_rem), MODEXP 3, SQR 2.
+
+BigNum is signed + derives no PartialEq, so generated tests compare via
+to_bytes_be() + is_negative() (eq_signed prelude + bn(bytes,neg) ctor; uses
+from_bytes_be since hitls-bignum has no hitls-utils dep). A pre-emit probe
+found two Rust/C sign-convention divergences -> skipped: negative-modulus MOD
+and negative-dividend DIV. Also skipped (API-surface): CMP (no signed-cmp
+API), U64/UINT (len-driven), limb families, all *_API_TC*. 2 unknown = DIV
+error-path rows omitting q/r.
+
+Verification: hitls-bignum lib 95/0 + migrated_bn 230/0; drift gate passes;
+na-list -> 2072 emitted (new BigNum row 230/130/2/0/362; total 4632 -> 4994);
+fmt + clippy clean. Largest family after DSA (1200) / ML-KEM (150).
+
+Recorded as DEV_LOG Phase T142.
