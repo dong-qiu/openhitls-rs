@@ -8810,3 +8810,34 @@ Config-only (.github/workflows/ci.yml command + comment). ci.yml valid YAML;
 .codecov.yml thresholds untouched.
 
 Recorded as DEV_LOG Phase R19.
+
+## Phase T144 — KDF KAT Migration (HKDF / PBKDF2 / scrypt / TLS 1.2 PRF) (2026-05-29)
+
+> 先做 KDF（hkdf/pbkdf2/scrypt/kdf_tls12）
+
+Migrated the four KDF families of Phase A. New xtask/src/kdf.rs emitter (4
+per-KDF emit fns) -> 4 generated files: migrated_hkdf.rs (8) + migrated_pbkdf2.rs
+(7) + migrated_scrypt.rs (3) in hitls-crypto, migrated_kdf_tls12.rs (4) in
+hitls-tls = 22 byte-exact tests, all passing first run. No production code
+change (Hkdf::new_with_factory+expand, pbkdf2_with_hmac, scrypt,
+hitls_tls::crypt::prf::prf already existed). First migration target outside
+hitls-crypto/hitls-bignum (TLS 1.2 PRF lives in hitls-tls).
+
+Each .data layout confirmed against the C test-fn signature: HKDF (algId, ikm,
+salt, info, result); PBKDF2 (algId, pw, salt, iters, result); scrypt (pw, salt,
+N, r, p, result); TLS12-PRF (algId, secret, label, seed, result). Output len =
+expected len; integer params (iters/N/r/p) unquoted -> Arg::Symbol -> u32.
+
+TLS1.2 PRF: prf concatenates label||seed internally, so pass label="" and fold
+C label||seed into the seed arg (P_hash input identical, no UTF-8 label needed).
+HashAlgId has no Sha512 -> 2 SHA-512 PRF rows unsupported (only unsupported in
+batch); SHA-256/384 migrate. scrypt FUN_TC002 is param-validation -> API-surface.
+COPY_CTX/DEFAULT_PROVIDER/lifecycle -> API-surface.
+
+Verification: migrated_hkdf 8/0 + migrated_pbkdf2 7/0 + migrated_scrypt 3/0
+(-p hitls-crypto --all-features) + migrated_kdf_tls12 4/0 (-p hitls-tls); drift
+gate passes x4; na-list -> 2117 emitted (hkdf 8/26/0/0/34 + pbkdf2 7/15/0/0/22 +
+scrypt 3/17/0/0/20 + tls12 4/16/0/2/22; total 5035 -> 5133); fmt + clippy
+-D warnings --all-features --all-targets clean.
+
+Recorded as DEV_LOG Phase T144.

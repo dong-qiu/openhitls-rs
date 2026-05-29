@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I143 (143 phases)
-- Testing: T1–T143 (136 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard)
+- Testing: T1–T144 (137 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard); T144 — Phase A continued: KDF KAT (HKDF/PBKDF2/scrypt/TLS1.2-PRF, 22 byte-exact tests; first migration into `hitls-tls` — TLS1.2 PRF; no production code)
 - Refactoring: R1–R19 (19 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -396,6 +396,7 @@ Category summary:
 | 396 | T143 | Test | MD5 / SHA-1 / SM3 digest KAT migration — completes the **hash category** alongside the already-migrated SHA-2 (T-era) and SHA-3 (T139). Three new `migrated_<algo>.rs` files in `hitls-crypto` (`md5` 9, `sha1` 8, `sm3` 6 = **23** byte-exact tests), all passing on first run. **No production code change** (the `Md5`/`Sha1`/`Sm3` public `digest` / `new`+`update`+`finish` APIs already existed). Unlike the SHA-2/SHA-3 EAL files, these `.data` files fix the algorithm per file: the primary KAT rows carry **no `CRYPT_MD_*` algid argument**, and the TC-number→family mapping is inconsistent across files (MD5/SM3 empty-input is `FUNC_TC001`, SHA-1's is a `FUN_TC001` row with empty input). So a new generic single-algorithm digest emitter (`emit_md_family` in `xtask/src/digest.rs`, parameterised by a `DigestCfg { feature, import, rust_ty, dlen }`) classifies by **argument shape + a digest-length guard on the expected output**, not by TC number: 1 hex arg (len == dlen) ⇒ empty-input; 2 hex args (arg[1] len == dlen) ⇒ one-shot; ≥3 hex args (last len == dlen) ⇒ split-update multi-block. Rows that DO carry an algid (`COPY_CTX` / `DEFAULT_PROVIDER` / EAL-with-algid) duplicate the no-algid vectors and route to API-surface; `_API_TC*` + no-data lifecycle rows likewise. The digest-length guard correctly rejects SHA-1's 4-hex-arg `API_TC003` row and SM3's input-only `FUNC_TC002` row (no expected) that would otherwise misclassify as multi-block / empty. 18 API-surface skipped, 0 unknown, 0 unsupported across the 3 files. No regression — `migrated_md5` 9/0 + `migrated_sha1` 8/0 + `migrated_sm3` 6/0 (under `--features md5,sha1,sm3` / `--all-features`); xtask `--check` drift gate passes for all three; na-list tally → 2095 emitted (new MD5 9/8/0/0/17, SHA-1 8/6/0/0/14, SM3 6/4/0/0/10 rows); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-28 |
 | 397 | R18 | Refactor | Scope `miri-smoke` CI gate to `--lib` — fixes a merge-gate wall-clock regression introduced by T142. `miri-smoke` (`cargo miri test -p hitls-bignum`, a **required** `ci-gate` job) ran the whole crate's test suite under the Miri interpreter; T142 added `tests/migrated_bn.rs` (230 KATs incl. 10× `is_probably_prime(64)` + 3× `mod_exp`), which under interpretation are pathologically slow — the job went **~6.2 min → 31–101 min** (measured across runs), and since it gates `CI Gate` it set the whole PR merge time. Miri's value here is UB-detection on the **24 `unsafe` sites** in `src/` (CIOS Montgomery `get_unchecked` limb loops, etc.); the migrated KATs are pure-safe byte-exact equivalence checks (no `unsafe`) already validated natively by the `test` job, so re-running them under Miri adds zero UB coverage. `--lib` runs only the `src/` unit tests (95/0, including the unsafe-arithmetic tests) and excludes the sole `tests/` integration binary (`migrated_bn.rs`, no `unsafe`), restoring the ~6 min smoke time with no loss of UB coverage. Config-only change (`.github/workflows/ci.yml`); verified `cargo test -p hitls-bignum --lib` runs the 95 lib tests and excludes `migrated_bn`, ci.yml parses as valid YAML | 2026-05-29 |
 | 398 | R19 | Refactor | Drop `--branch` from the `coverage` CI jobs — efficiency win, no quality drop. The per-crate `cargo llvm-cov -p <crate> --all-features --branch` matrix had branch (MC/DC-style) instrumentation enabled; that roughly doubles the llvm-cov compile+run cost and was the bulk of the slowest coverage leg (`hitls-crypto` ~13.7 min). `.codecov.yml` gates on project 88% / patch 70%, which are **line/region** coverage figures — branch coverage was collected but never gated on. Removing `--branch` keeps line + region coverage (the gated metric) byte-identical while cutting the instrumentation cost. The `coverage` job is **not** in `ci-gate.needs`, so this does not change merge wall-clock — it is a pure runner-compute / report-latency saving (the longest single PR-run job drops substantially). Config-only (`.github/workflows/ci.yml` command + comment); ci.yml parses as valid YAML; `.codecov.yml` thresholds unchanged | 2026-05-29 |
+| 399 | T144 | Test | KDF KAT migration — HKDF / PBKDF2 / scrypt / TLS 1.2 PRF. New `xtask/src/kdf.rs` emitter (4 per-KDF emitters) + 4 generated files: `migrated_hkdf.rs` (8), `migrated_pbkdf2.rs` (7), `migrated_scrypt.rs` (3) in `hitls-crypto`, and `migrated_kdf_tls12.rs` (4) in **`hitls-tls`** (first migration target outside `hitls-crypto`/`hitls-bignum`) = **22 byte-exact tests**, all passing first run. **No production code change** (`Hkdf::new_with_factory` + `expand`, `pbkdf2_with_hmac`, `scrypt`, and `hitls_tls::crypt::prf::prf` already existed). Each `.data` layout was confirmed against the C test-function signature: HKDF `(macAlg, ikm, salt, info, expected)`; PBKDF2 `(macAlg, password, salt, iters, expected)`; scrypt `(password, salt, N, r, p, expected)` (no macAlg — fixed HMAC-SHA256, `FUN_TC002` param-validation rows → API-surface); TLS1.2-PRF `(macAlg, secret, label, seed, expected)`. Output length is taken from the expected vector; integer params (iters/N/r/p) are unquoted → parsed as `Arg::Symbol`. The TLS1.2 PRF folds `label ‖ seed` into the `seed` arg with `label=""` (the Rust `prf` concatenates them internally, so the P_hash input is identical without needing a UTF-8 label). `HashAlgId` has no SHA-512 variant → the 2 SHA-512 TLS1.2-PRF rows are unsupported (the only unsupported in this batch); SHA-256/384 migrated. COPY_CTX / DEFAULT_PROVIDER / lifecycle rows → API-surface. No regression — `migrated_hkdf` 8/0 + `migrated_pbkdf2` 7/0 + `migrated_scrypt` 3/0 (`-p hitls-crypto --all-features`) + `migrated_kdf_tls12` 4/0 (`-p hitls-tls`); xtask `--check` drift gate passes for all four; na-list tally → 2117 emitted (HKDF 8/26/0/0/34, PBKDF2 7/15/0/0/22, scrypt 3/17/0/0/20, TLS1.2-PRF 4/16/0/2/22); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-29 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -24684,3 +24685,56 @@ coverage-report-latency saving.
 Config-only (`.github/workflows/ci.yml` — command + explanatory comment).
 `ci.yml` parses as valid YAML; `.codecov.yml` 88%/70% thresholds untouched.
 Quality impact: none on the gated (line/region) coverage figure.
+
+## Phase T144 — KDF KAT Migration (HKDF / PBKDF2 / scrypt / TLS 1.2 PRF) (2026-05-29)
+
+### Summary
+
+Migrates the four key-derivation-function families of the Phase A KAT set. A
+new `xtask/src/kdf.rs` emitter (one per-KDF emit function) produces four
+generated files — `migrated_hkdf.rs` (8), `migrated_pbkdf2.rs` (7),
+`migrated_scrypt.rs` (3) in `hitls-crypto`, and `migrated_kdf_tls12.rs` (4) in
+**`hitls-tls`** — = **22 byte-exact tests**, all passing first run. **No
+production code change**: `Hkdf::new_with_factory` + `expand`,
+`pbkdf2_with_hmac`, `scrypt`, and `hitls_tls::crypt::prf::prf` already existed.
+
+This is the first migration target **outside `hitls-crypto` / `hitls-bignum`**:
+the TLS 1.2 PRF lives in `hitls-tls`, so `migrated_kdf_tls12.rs` is emitted
+into `crates/hitls-tls/tests/`.
+
+### Per-KDF argument layout (confirmed against the C test-function signatures)
+
+| KDF | C signature | Rust call |
+|-----|-------------|-----------|
+| HKDF | `(algId, ikm, salt, info, result)` | `Hkdf::new_with_factory(salt, ikm, factory, hlen).expand(info, result.len())` |
+| PBKDF2 | `(algId, password, salt, iters, result)` | `pbkdf2_with_hmac(factory, password, salt, iters, result.len())` |
+| scrypt | `(password, salt, N, r, p, result)` | `scrypt(password, salt, N, r, p, result.len())` |
+| TLS1.2 PRF | `(algId, secret, label, seed, result)` | `prf(HashAlgId, secret, "", label‖seed, result.len())` |
+
+Output length is taken from the expected vector. Integer params (iters / N /
+r / p) are unquoted in the `.data` file, so the parser surfaces them as
+`Arg::Symbol` and the emitter parses them to `u32`.
+
+### Notes
+
+- **TLS 1.2 PRF label/seed:** `prf(alg, secret, label, seed, len)` concatenates
+  `label ‖ seed` internally before `P_hash`. The C `label` field is arbitrary
+  bytes (not necessarily UTF-8), so rather than force it through the `&str`
+  parameter the emitter passes `label=""` and folds the C `label ‖ seed` into
+  the `seed` argument — the `P_hash` input is byte-identical.
+- **No SHA-512 PRF:** `HashAlgId` has only `Sha256` / `Sha384` / `Sha1` (+ Sm3),
+  so the 2 SHA-512 TLS1.2-PRF rows are `unsupported` (the only unsupported in
+  this batch). SHA-256 / SHA-384 rows migrate cleanly.
+- **scrypt `FUN_TC002`** is a parameter-validation test `(N, r, p)` exercising
+  error paths (no expected output) → routed to API-surface.
+- COPY_CTX / DEFAULT_PROVIDER / lifecycle rows → API-surface (C-only context
+  APIs / duplicate vectors).
+
+### Build Status (Post T144)
+
+No regression. `migrated_hkdf` 8/0 + `migrated_pbkdf2` 7/0 + `migrated_scrypt`
+3/0 (`-p hitls-crypto --all-features`) + `migrated_kdf_tls12` 4/0
+(`-p hitls-tls`). xtask `--check` drift gate passes for all four. na-list tally
+→ 2117 emitted (HKDF 8/26/0/0/34, PBKDF2 7/15/0/0/22, scrypt 3/17/0/0/20,
+TLS1.2-PRF 4/16/0/2/22; workspace total C cases 5035 → 5133). `cargo fmt --all
+-- --check` + `clippy -D warnings --all-features --all-targets` clean.
