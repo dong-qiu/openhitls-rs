@@ -6,6 +6,7 @@ mod digest;
 mod drbg;
 mod dsa;
 mod ecc;
+mod kdf;
 mod mac;
 mod mldsa;
 mod mlkem;
@@ -158,6 +159,26 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_sm3.rs"),
             digest::emit_sm3_kat,
         ),
+        "hkdf" => (
+            vec![c_root.join("crypto/hkdf/test_suite_sdv_eal_kdf_hkdf.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_hkdf.rs"),
+            kdf::emit_hkdf_kat,
+        ),
+        "pbkdf2" => (
+            vec![c_root.join("crypto/pbkdf2/test_suite_sdv_eal_kdf_pbkdf2.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_pbkdf2.rs"),
+            kdf::emit_pbkdf2_kat,
+        ),
+        "scrypt" => (
+            vec![c_root.join("crypto/scrypt/test_suite_sdv_eal_kdf_scrypt.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_scrypt.rs"),
+            kdf::emit_scrypt_kat,
+        ),
+        "kdf-tls12" => (
+            vec![c_root.join("crypto/kdf_tls12/test_suite_sdv_eal_kdf_tls12.data")],
+            workspace_root()?.join("crates/hitls-tls/tests/migrated_kdf_tls12.rs"),
+            kdf::emit_kdf_tls12_kat,
+        ),
         "drbg" => (
             vec![c_root.join("crypto/drbg/test_suite_sdv_drbg.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_drbg.rs"),
@@ -196,7 +217,7 @@ fn migrate(
         ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, drbg, ecc, rsa, bn, x509-parse"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, drbg, ecc, rsa, bn, x509-parse"
             )
             .into());
         }

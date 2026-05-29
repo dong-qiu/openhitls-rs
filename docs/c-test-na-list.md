@@ -65,7 +65,11 @@ Counts are the `Generation summary` footer of each generated file
 | MD5 | 9 | 8 | 0 | 0 | 17 |
 | SHA-1 | 8 | 6 | 0 | 0 | 14 |
 | SM3 | 6 | 4 | 0 | 0 | 10 |
-| **Total** | **2095** | **3301** | **240** | **92** | **5035** |
+| HKDF | 8 | 26 | 0 | 0 | 34 |
+| PBKDF2 | 7 | 15 | 0 | 0 | 22 |
+| scrypt | 3 | 17 | 0 | 0 | 20 |
+| TLS1.2-PRF | 4 | 16 | 0 | 2 | 22 |
+| **Total** | **2117** | **3375** | **240** | **94** | **5133** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -142,6 +146,23 @@ duplicate the no-algid vectors and route to API-surface, as do `_API_TC*` and
 no-data lifecycle rows. The digest-length guard is load-bearing: it rejects
 SHA-1's 4-hex-arg `API_TC003` row and SM3's input-only `FUNC_TC002` row (no
 expected) that would otherwise misclassify. 0 unknown, 0 unsupported.
+
+HKDF / PBKDF2 / scrypt / TLS1.2-PRF (T144) migrate the four KDF families via
+`xtask/src/kdf.rs` (no new production code — the Rust APIs already existed).
+Each `.data` layout was confirmed against the C test-function signature: HKDF
+`(macAlg, ikm, salt, info, expected)` → `Hkdf::new_with_factory(...).expand(...)`;
+PBKDF2 `(macAlg, password, salt, iters, expected)` → `pbkdf2_with_hmac(...)`;
+scrypt `(password, salt, N, r, p, expected)` → `scrypt(...)`; TLS1.2-PRF
+`(macAlg, secret, label, seed, expected)` → `hitls_tls::crypt::prf::prf(...)`
+(the **first migration target outside `hitls-crypto` / `hitls-bignum`**).
+Output length is the expected vector's length; integer params (iters / N / r /
+p) are unquoted, so the parser yields `Arg::Symbol` which the emitter parses to
+`u32`. The TLS 1.2 PRF concatenates `label ‖ seed` internally, so the emitter
+passes `label=""` and folds the C `label ‖ seed` into the `seed` argument —
+identical `P_hash` input without requiring a UTF-8 label. The only `unsupported`
+rows are the 2 SHA-512 TLS1.2-PRF vectors (`HashAlgId` has no `Sha512` variant);
+scrypt's `FUN_TC002` parameter-validation rows and the COPY_CTX /
+DEFAULT_PROVIDER / lifecycle rows route to API-surface.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
@@ -224,6 +245,7 @@ migration tool emit the corresponding tests with no generator change.
 | HMAC-DRBG SHA-1 / 224 / 384 / 512 | DRBG | 4 | `HmacDrbg` is hardcoded to HMAC-SHA-256 | generalise `HmacDrbg` over the digest |
 | CTR-DRBG AES-128 / 192 (±df) | DRBG | 4 | `CtrDrbg` is AES-256 only | generalise `CtrDrbg` over the AES key length |
 | SM4-CTR-DRBG-df | DRBG | 1 | `Sm4CtrDrbg` has only the no-df constructor | add `Sm4CtrDrbg::with_df` |
+| TLS 1.2 PRF SHA-512 | TLS1.2-PRF | 2 | `hitls_tls::crypt::HashAlgId` has only `Sha256` / `Sha384` / `Sha1` (+ Sm3) — no `Sha512` variant, so the SHA-512 PRF vectors cannot be expressed | add a `Sha512` variant to `HashAlgId` + its `DigestVariant` arm (TLS 1.2 itself never negotiates SHA-512 PRF, so this is migration-only) |
 
 ### Resolved divergence — CTR-DRBG-AES-256-df
 
