@@ -8792,3 +8792,21 @@ valid YAML. Done in worktrees/bug-fix off main, parallel to #194 (no file
 overlap).
 
 Recorded as DEV_LOG Phase R18.
+
+## Phase R19 — Drop --branch from Coverage CI Jobs (2026-05-29)
+
+> 做 Coverage 去掉 --branch
+
+Follow-up to the CI-efficiency analysis. The per-crate coverage matrix ran
+`cargo llvm-cov -p <crate> --all-features --branch`; branch (MC/DC-style)
+instrumentation ~doubles llvm-cov cost and was the bulk of the slowest leg
+(Coverage: hitls-crypto = 13.7 min, longest job in the PR run). .codecov.yml
+gates on project 88% / patch 70% — line/region figures, never branch. So
+dropped --branch: gated metric unchanged, instrumentation cost cut. coverage
+is not in ci-gate.needs, so this is a pure compute/report-latency saving, not
+a merge-speed change.
+
+Config-only (.github/workflows/ci.yml command + comment). ci.yml valid YAML;
+.codecov.yml thresholds untouched.
+
+Recorded as DEV_LOG Phase R19.
