@@ -24953,3 +24953,17 @@ The fix (realign the S^T convention in `generate` + `decapsulate`, re-verify all
 6 param sets + self round-trip + the C KAT vectors, then the McEliece
 equivalent) is a substantial, dedicated PQC change and remains a tracked
 follow-up. Recorded in the `docs/c-test-na-list.md` Structural-gaps table.
+
+**Further narrowing (2026-05-30) — simple S^T transpose ruled out.** Rebuilding
+`testDk` with the S^T region transposed (`rust_st[j*n+i] = ref[i*n_bar+j]`, the
+inverse of Rust's keygen transpose) and decapsulating *still* yields the
+implicit-rejection value, not `testSs`. So the divergence is **deeper than the
+S^T flat layout** — it is in the PKE pipeline itself: the matrix-multiply
+orientation (`mul_bs` / `mul_add_as_plus_e`), the ciphertext `c1`/`c2`
+pack/unpack, the `A`-matrix expansion order from `seedA`, and/or
+`encode`/`decode`. Notably C samples `S^T` directly (`FrodoCommonSampleNFromR`),
+whereas Rust samples `S` then transposes — so the two keygens already produce a
+different `B` for the same seed; the divergence is broader than a single field.
+The full fix is therefore a **step-by-step PKE-stage reconciliation** (compare
+each stage Rust↔C with intermediate-value checks), left as a dedicated deep-dive
+rather than a single targeted patch.
