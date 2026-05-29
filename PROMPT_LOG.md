@@ -8767,3 +8767,28 @@ Verification: migrated_md5 9/0 + migrated_sha1 8/0 + migrated_sm3 6/0
 5035); fmt + clippy -D warnings --all-features --all-targets clean.
 
 Recorded as DEV_LOG Phase T143.
+
+## Phase R18 — Scope miri-smoke CI Gate to --lib (2026-05-29)
+
+> 把 miri-smoke 限定到 --lib
+
+Analysis (prior turn): #194's CI wall-clock was dominated by a single required
+job, miri-smoke. It runs `cargo miri test -p hitls-bignum` and gates `CI Gate`.
+T142 added tests/migrated_bn.rs (230 KATs incl. 10x is_probably_prime(64) +
+3x mod_exp); under the Miri interpreter these are pathological, pushing the job
+from ~6.2 min (pre-T142) to 31-101 min (measured). Other CI jobs all finish
+<=7 min in parallel, so this one set the merge time.
+
+Fix: `cargo miri test -p hitls-bignum --lib` — only the src/ unit tests (95/0),
+which cover the 24 unsafe sites (CIOS Montgomery get_unchecked etc.). Miri's
+value is UB-detection on unsafe; the migrated KATs are pure-safe byte-exact
+equivalence checks already run natively by the `test` job, so --lib drops zero
+UB coverage and restores ~6 min. migrated_bn.rs is the only tests/ binary and
+has no unsafe.
+
+Config-only change (.github/workflows/ci.yml + comment). Verified: `cargo test
+-p hitls-bignum --lib` runs the 95 lib tests and excludes migrated_bn; ci.yml
+valid YAML. Done in worktrees/bug-fix off main, parallel to #194 (no file
+overlap).
+
+Recorded as DEV_LOG Phase R18.

@@ -283,6 +283,16 @@ jobs:
     # Fast UB-detection on the core BigNum arithmetic — the module most
     # likely to introduce miri-detectable UB. Full fan-out runs nightly
     # in `miri-full` below.
+    #
+    # Scoped to `--lib` (the `src/` unit tests that exercise the 24 `unsafe`
+    # sites — CIOS Montgomery `get_unchecked` limb loops etc.). The `tests/`
+    # integration binaries (notably the migrated `migrated_bn.rs` KATs added
+    # in T142) are pure-safe byte-exact equivalence checks that exercise no
+    # `unsafe`, so re-running them under the Miri interpreter adds zero
+    # UB-detection value while costing 25–95 min (the `is_probably_prime(64)`
+    # + `mod_exp` KATs are pathological under interpretation). Those KATs are
+    # already validated natively by the `test` job. `--lib` restores the
+    # ~6 min smoke time without losing any UB coverage.
     if: github.event_name != 'schedule'
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
@@ -295,7 +305,7 @@ jobs:
           toolchain: ${{ env.NIGHTLY }}
           components: miri
       - uses: Swatinem/rust-cache@v2
-      - run: cargo miri test -p hitls-bignum
+      - run: cargo miri test -p hitls-bignum --lib
 
   miri-full:
     name: "Miri: ${{ matrix.target.name }}"
