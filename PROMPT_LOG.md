@@ -8953,3 +8953,21 @@ isolated to the S^T secret-matrix interpretation or the PKE-decrypt math, not
 the gross sk layout. The fix (realign S^T convention + re-verify) is a tracked
 substantial PQC follow-up. Refined the DEV_LOG T146 detailed section + the
 na-list Structural-gaps row. Docs-only.
+
+### T146 follow-up (2) — simple S^T transpose ruled out
+
+> FrodoKEM S^T 修复
+> 1
+
+(User chose to attempt the FrodoKEM S^T fix, then chose to document the
+narrowing when the simple fix didn't crack it.) Empirically rebuilt testDk with
+the S^T region transposed (rust_st[j*n+i] = ref[i*n_bar+j]) and re-ran decaps:
+STILL the implicit-rejection value, not testSs. So the divergence is deeper than
+the S^T flat layout — it's in the PKE pipeline (mul orientation in mul_bs /
+mul_add_as_plus_e, c1/c2 pack/unpack, A-expansion from seedA, or encode/decode).
+C samples S^T directly while Rust samples S then transposes → the two keygens
+already differ for the same seed. Full fix = step-by-step PKE-stage
+reconciliation (a dedicated deep-dive), not a single patch. Updated the na-list
+gap row + DEV_LOG T146 follow-up. Docs-only; no code change shipped.
+
+Recorded as DEV_LOG Phase T146 (follow-up).
