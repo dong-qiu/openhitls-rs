@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I143 (143 phases)
-- Testing: T1–T144 (137 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard); T144 — Phase A continued: KDF KAT (HKDF/PBKDF2/scrypt/TLS1.2-PRF, 22 byte-exact tests; first migration into `hitls-tls` — TLS1.2 PRF; no production code)
+- Testing: T1–T145 (138 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard); T144 — Phase A continued: KDF KAT (HKDF/PBKDF2/scrypt/TLS1.2-PRF, 22 byte-exact tests; first migration into `hitls-tls` — TLS1.2 PRF; no production code); T145 — Phase A continued: AEAD/MAC KAT (AES-GCM/GMAC/ChaCha20-Poly1305/SipHash, 60 byte-exact tests, no production code; CBC-MAC deferred — Rust `CbcMacSm4` diverges from the C SM4 vectors, see na-list)
 - Refactoring: R1–R19 (19 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -397,6 +397,7 @@ Category summary:
 | 397 | R18 | Refactor | Scope `miri-smoke` CI gate to `--lib` — fixes a merge-gate wall-clock regression introduced by T142. `miri-smoke` (`cargo miri test -p hitls-bignum`, a **required** `ci-gate` job) ran the whole crate's test suite under the Miri interpreter; T142 added `tests/migrated_bn.rs` (230 KATs incl. 10× `is_probably_prime(64)` + 3× `mod_exp`), which under interpretation are pathologically slow — the job went **~6.2 min → 31–101 min** (measured across runs), and since it gates `CI Gate` it set the whole PR merge time. Miri's value here is UB-detection on the **24 `unsafe` sites** in `src/` (CIOS Montgomery `get_unchecked` limb loops, etc.); the migrated KATs are pure-safe byte-exact equivalence checks (no `unsafe`) already validated natively by the `test` job, so re-running them under Miri adds zero UB coverage. `--lib` runs only the `src/` unit tests (95/0, including the unsafe-arithmetic tests) and excludes the sole `tests/` integration binary (`migrated_bn.rs`, no `unsafe`), restoring the ~6 min smoke time with no loss of UB coverage. Config-only change (`.github/workflows/ci.yml`); verified `cargo test -p hitls-bignum --lib` runs the 95 lib tests and excludes `migrated_bn`, ci.yml parses as valid YAML | 2026-05-29 |
 | 398 | R19 | Refactor | Drop `--branch` from the `coverage` CI jobs — efficiency win, no quality drop. The per-crate `cargo llvm-cov -p <crate> --all-features --branch` matrix had branch (MC/DC-style) instrumentation enabled; that roughly doubles the llvm-cov compile+run cost and was the bulk of the slowest coverage leg (`hitls-crypto` ~13.7 min). `.codecov.yml` gates on project 88% / patch 70%, which are **line/region** coverage figures — branch coverage was collected but never gated on. Removing `--branch` keeps line + region coverage (the gated metric) byte-identical while cutting the instrumentation cost. The `coverage` job is **not** in `ci-gate.needs`, so this does not change merge wall-clock — it is a pure runner-compute / report-latency saving (the longest single PR-run job drops substantially). Config-only (`.github/workflows/ci.yml` command + comment); ci.yml parses as valid YAML; `.codecov.yml` thresholds unchanged | 2026-05-29 |
 | 399 | T144 | Test | KDF KAT migration — HKDF / PBKDF2 / scrypt / TLS 1.2 PRF. New `xtask/src/kdf.rs` emitter (4 per-KDF emitters) + 4 generated files: `migrated_hkdf.rs` (8), `migrated_pbkdf2.rs` (7), `migrated_scrypt.rs` (3) in `hitls-crypto`, and `migrated_kdf_tls12.rs` (4) in **`hitls-tls`** (first migration target outside `hitls-crypto`/`hitls-bignum`) = **22 byte-exact tests**, all passing first run. **No production code change** (`Hkdf::new_with_factory` + `expand`, `pbkdf2_with_hmac`, `scrypt`, and `hitls_tls::crypt::prf::prf` already existed). Each `.data` layout was confirmed against the C test-function signature: HKDF `(macAlg, ikm, salt, info, expected)`; PBKDF2 `(macAlg, password, salt, iters, expected)`; scrypt `(password, salt, N, r, p, expected)` (no macAlg — fixed HMAC-SHA256, `FUN_TC002` param-validation rows → API-surface); TLS1.2-PRF `(macAlg, secret, label, seed, expected)`. Output length is taken from the expected vector; integer params (iters/N/r/p) are unquoted → parsed as `Arg::Symbol`. The TLS1.2 PRF folds `label ‖ seed` into the `seed` arg with `label=""` (the Rust `prf` concatenates them internally, so the P_hash input is identical without needing a UTF-8 label). `HashAlgId` has no SHA-512 variant → the 2 SHA-512 TLS1.2-PRF rows are unsupported (the only unsupported in this batch); SHA-256/384 migrated. COPY_CTX / DEFAULT_PROVIDER / lifecycle rows → API-surface. No regression — `migrated_hkdf` 8/0 + `migrated_pbkdf2` 7/0 + `migrated_scrypt` 3/0 (`-p hitls-crypto --all-features`) + `migrated_kdf_tls12` 4/0 (`-p hitls-tls`); xtask `--check` drift gate passes for all four; na-list tally → 2117 emitted (HKDF 8/26/0/0/34, PBKDF2 7/15/0/0/22, scrypt 3/17/0/0/20, TLS1.2-PRF 4/16/0/2/22); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-29 |
+| 400 | T145 | Test | AEAD/MAC KAT migration — AES-GCM / GMAC / ChaCha20-Poly1305 / SipHash. New `xtask/src/aead.rs` emitter (4 emit fns) + 4 generated files in `hitls-crypto`: `migrated_gcm.rs` (12), `migrated_gmac.rs` (12), `migrated_chachapoly.rs` (34), `migrated_siphash.rs` (2) = **60 byte-exact tests**, all passing. **No production code change** (`gcm_encrypt`/`gcm_decrypt`, `Gmac`, `ChaCha20Poly1305::encrypt`/`decrypt`, `SipHash::hash` already existed). Layouts confirmed against the C signatures: GCM `(algId, key, iv, aad, pt, ct, tag)` → both directions (`gcm_encrypt(key,iv,aad,pt) == ct‖tag`, `gcm_decrypt == pt`; arbitrary IV length verified incl. a 1-byte IV); GMAC `(algId, key, iv, msg, mac)` → `Gmac::new(key,iv).update(msg).finish`; ChaCha20-Poly1305 `(key, iv, aad, data, cipher, tag)` → both directions, with the **TC005** AAD-only variant (`(key,iv,aad,tag)`, empty plaintext) and the **TC010** split-update variant (`(key,iv,aad,pt1,pt2,pt3,cipher,tag)` — the 3 chunks fold into one plaintext) both recovered; SipHash `(algId, key, data, mac)` → `SipHash::hash(key,data).to_le_bytes() == mac`. **Negative/edge families correctly routed to API-surface:** ChaCha **TC008** (round-trip consistency, no fixed vector) and **TC009** (tamper test — ciphertext correct but tag deliberately corrupted; the C asserts `memcmp(outTag, tag) != 0`, i.e. authenticated decrypt MUST reject — surfaced as 4 failing tests in the first emit pass, then reclassified). SipHash is 64-bit only (Rust `SipHash::hash → u64`), so the **39 SIPHASH128 rows are unsupported**; only 2 SIPHASH64 KAT rows carry a mac (the rest of the C suite is no-mac / memory-alignment tests). **CBC-MAC deferred**: a pre-emit probe showed Rust `CbcMacSm4` diverges from the C SM4 CBC-MAC vectors (neither the as-is single block nor an appended zero block matches) — routed to the na-list gaps table pending a focused investigation (possible bug or construction mismatch). No regression — all 4 suites green (`-p hitls-crypto --all-features`); xtask `--check` drift gate passes for all four; na-list tally → 2177 emitted (AES-GCM 12/36/0/0/42, GMAC 12/14/0/0/26, ChaCha20-Poly1305 34/21/0/0/38, SipHash 2/37/0/2/41); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-29 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -24738,3 +24739,59 @@ No regression. `migrated_hkdf` 8/0 + `migrated_pbkdf2` 7/0 + `migrated_scrypt`
 → 2117 emitted (HKDF 8/26/0/0/34, PBKDF2 7/15/0/0/22, scrypt 3/17/0/0/20,
 TLS1.2-PRF 4/16/0/2/22; workspace total C cases 5035 → 5133). `cargo fmt --all
 -- --check` + `clippy -D warnings --all-features --all-targets` clean.
+
+## Phase T145 — AEAD / MAC KAT Migration (AES-GCM / GMAC / ChaCha20-Poly1305 / SipHash) (2026-05-29)
+
+### Summary
+
+Migrates the symmetric AEAD/MAC families of Phase A. A new `xtask/src/aead.rs`
+emitter (4 emit functions) produces four generated files in `hitls-crypto` —
+`migrated_gcm.rs` (12), `migrated_gmac.rs` (12), `migrated_chachapoly.rs` (34),
+`migrated_siphash.rs` (2) — = **60 byte-exact tests**, all passing. **No
+production code change**: `modes::gcm::{gcm_encrypt, gcm_decrypt}`, `gmac::Gmac`,
+`chacha20::ChaCha20Poly1305::{encrypt, decrypt}`, and `siphash::SipHash::hash`
+already existed.
+
+### Per-algorithm layout (confirmed against the C signatures)
+
+| Algo | C signature | Rust call |
+|------|-------------|-----------|
+| AES-GCM | `(algId, key, iv, aad, pt, ct, tag)` | `gcm_encrypt(key,iv,aad,pt) == ct‖tag` + `gcm_decrypt == pt` |
+| GMAC | `(algId, key, iv, msg, mac)` | `Gmac::new(key,iv).update(msg).finish(out)` |
+| ChaCha20-Poly1305 | `(key, iv, aad, data, cipher, tag)` | `ChaCha20Poly1305::new(key).encrypt(iv,aad,pt) == ct‖tag` + `decrypt == pt` |
+| SipHash | `(algId, key, data, mac)` | `SipHash::hash(key,data).to_le_bytes() == mac` |
+
+GCM both directions (a pre-emit probe verified arbitrary IV length, incl. a
+1-byte IV). ChaCha emits both directions and recovers two non-standard shapes:
+**TC005** AAD-only (`(key,iv,aad,tag)`, empty plaintext) and **TC010**
+split-update (`(key,iv,aad,pt1,pt2,pt3,cipher,tag)` — the 3 plaintext chunks
+fold into one).
+
+### Negative / edge families → API-surface
+
+- **ChaCha TC009** (tamper): the ciphertext is correct but the tag is
+  deliberately corrupted (the C asserts `memcmp(outTag, tag) != 0` — an
+  authenticated decrypt MUST reject it). This surfaced as 4 failing tests in the
+  first emit pass (my emitter initially treated all 6-arg rows as positive
+  KATs), then was reclassified to API-surface by TC name.
+- **ChaCha TC008** (round-trip consistency, no fixed vector) → API-surface.
+- **SipHash** is 64-bit only (`SipHash::hash → u64`), so the **39 SIPHASH128
+  rows are unsupported**; only 2 SIPHASH64 KAT rows carry a mac (the rest of the
+  C SipHash suite is no-mac / memory-alignment tests).
+
+### CBC-MAC deferred
+
+A pre-emit probe showed Rust `CbcMacSm4` diverges from the C SM4 CBC-MAC
+vectors — neither the as-is single block nor an appended zero block matches the
+expected mac. This is not a padding quirk; it needs a focused investigation
+(possible bug or construction mismatch). Routed to the na-list gaps table; **not
+migrated** in this phase.
+
+### Build Status (Post T145)
+
+No regression. `migrated_gcm` 12/0 + `migrated_gmac` 12/0 +
+`migrated_chachapoly` 34/0 + `migrated_siphash` 2/0 (`-p hitls-crypto
+--all-features`). xtask `--check` drift gate passes for all four. na-list tally
+→ 2177 emitted (AES-GCM 12/36/0/0/42, GMAC 12/14/0/0/26, ChaCha20-Poly1305
+34/21/0/0/38, SipHash 2/37/0/2/41; workspace total C cases 5133 → 5280). `cargo
+fmt --all -- --check` + `clippy -D warnings --all-features --all-targets` clean.

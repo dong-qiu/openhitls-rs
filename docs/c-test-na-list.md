@@ -69,7 +69,11 @@ Counts are the `Generation summary` footer of each generated file
 | PBKDF2 | 7 | 15 | 0 | 0 | 22 |
 | scrypt | 3 | 17 | 0 | 0 | 20 |
 | TLS1.2-PRF | 4 | 16 | 0 | 2 | 22 |
-| **Total** | **2117** | **3375** | **240** | **94** | **5133** |
+| AES-GCM | 12 | 36 | 0 | 0 | 42 |
+| GMAC | 12 | 14 | 0 | 0 | 26 |
+| ChaCha20-Poly1305 | 34 | 21 | 0 | 0 | 38 |
+| SipHash | 2 | 37 | 0 | 2 | 41 |
+| **Total** | **2177** | **3483** | **240** | **96** | **5280** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -164,6 +168,25 @@ rows are the 2 SHA-512 TLS1.2-PRF vectors (`HashAlgId` has no `Sha512` variant);
 scrypt's `FUN_TC002` parameter-validation rows and the COPY_CTX /
 DEFAULT_PROVIDER / lifecycle rows route to API-surface.
 
+AES-GCM / GMAC / ChaCha20-Poly1305 / SipHash (T145) migrate the symmetric
+AEAD/MAC families via `xtask/src/aead.rs` (no new production code). GCM and
+ChaCha20-Poly1305 emit **both directions** (`encrypt → ct ‖ tag`, `decrypt →
+pt`); a pre-emit probe confirmed `gcm_encrypt`/`gcm_decrypt` handle an arbitrary
+IV length (incl. a 1-byte IV). ChaCha recovers two non-standard shapes: the
+`TC005` AAD-only variant (`(key, iv, aad, tag)`, empty plaintext) and the
+`TC010` split-update variant (`(key, iv, aad, pt1, pt2, pt3, cipher, tag)` — the
+three chunks fold into one plaintext). Two ChaCha families are routed to
+API-surface because they are **not** positive byte-exact KATs: `TC009` is a
+tamper test (ciphertext correct but tag deliberately corrupted — the C asserts
+`memcmp(outTag, tag) != 0`, i.e. authenticated decrypt MUST reject; this
+surfaced as 4 failing tests in the first emit pass before reclassification), and
+`TC008` is a round-trip consistency test with no fixed vector. SipHash migrates
+only the 64-bit vectors (`SipHash::hash → u64`, compared via `to_le_bytes`); the
+39 SIPHASH128 rows are `unsupported`, and only 2 SIPHASH64 rows carry a mac (the
+rest of the C SipHash suite is no-mac / memory-alignment tests). **CBC-MAC is
+not migrated** — see the gaps table: the Rust `CbcMacSm4` output diverges from
+the C SM4 CBC-MAC vectors and needs a dedicated investigation.
+
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
 +60 sign KATs). The C injects the row's `seed` as the FIPS 204 hedging `rnd`
@@ -246,6 +269,8 @@ migration tool emit the corresponding tests with no generator change.
 | CTR-DRBG AES-128 / 192 (±df) | DRBG | 4 | `CtrDrbg` is AES-256 only | generalise `CtrDrbg` over the AES key length |
 | SM4-CTR-DRBG-df | DRBG | 1 | `Sm4CtrDrbg` has only the no-df constructor | add `Sm4CtrDrbg::with_df` |
 | TLS 1.2 PRF SHA-512 | TLS1.2-PRF | 2 | `hitls_tls::crypt::HashAlgId` has only `Sha256` / `Sha384` / `Sha1` (+ Sm3) — no `Sha512` variant, so the SHA-512 PRF vectors cannot be expressed | add a `Sha512` variant to `HashAlgId` + its `DigestVariant` arm (TLS 1.2 itself never negotiates SHA-512 PRF, so this is migration-only) |
+| SipHash-128 | SipHash | 39 | Rust `SipHash::hash` returns a `u64` (SipHash-2-4-64 only); the 128-bit output variant is not implemented | add a 128-bit SipHash output path |
+| CBC-MAC (SM4) | cbc_mac | 14 | A pre-emit probe (T145) showed Rust `CbcMacSm4` output diverges from the C `CRYPT_MAC_CBC_MAC_SM4` + `CRYPT_PADDING_ZEROS` vectors — neither the as-is single block nor an appended zero block reproduces the expected mac. Not a padding quirk; needs investigation (possible Rust bug or a construction/IV/finalisation mismatch) before the 14 SM4+ZEROS KAT rows can be migrated | investigate `CbcMacSm4` vs the C SM4 CBC-MAC construction (IV, final-block handling, zero-padding semantics) and reconcile |
 
 ### Resolved divergence — CTR-DRBG-AES-256-df
 

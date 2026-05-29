@@ -1,3 +1,4 @@
+mod aead;
 mod bn;
 mod cipher;
 mod curve25519;
@@ -179,6 +180,26 @@ fn migrate(
             workspace_root()?.join("crates/hitls-tls/tests/migrated_kdf_tls12.rs"),
             kdf::emit_kdf_tls12_kat,
         ),
+        "gcm" => (
+            vec![c_root.join("crypto/gcm/test_suite_sdv_gcm.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_gcm.rs"),
+            aead::emit_gcm_kat,
+        ),
+        "gmac" => (
+            vec![c_root.join("crypto/gmac/test_suite_sdv_eal_gmac.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_gmac.rs"),
+            aead::emit_gmac_kat,
+        ),
+        "chacha-poly" => (
+            vec![c_root.join("crypto/chacha-poly/test_suite_sdv_eal_chachapoly.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_chachapoly.rs"),
+            aead::emit_chachapoly_kat,
+        ),
+        "siphash" => (
+            vec![c_root.join("crypto/siphash/test_suite_sdv_eal_mac_siphash.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_siphash.rs"),
+            aead::emit_siphash_kat,
+        ),
         "drbg" => (
             vec![c_root.join("crypto/drbg/test_suite_sdv_drbg.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_drbg.rs"),
@@ -217,7 +238,7 @@ fn migrate(
         ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, drbg, ecc, rsa, bn, x509-parse"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, gmac, chacha-poly, siphash, drbg, ecc, rsa, bn, x509-parse"
             )
             .into());
         }
