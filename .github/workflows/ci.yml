@@ -445,6 +445,12 @@ jobs:
     # threshold rules in `.codecov.yml` (88% project / 70% patch) still
     # apply correctly to merged data.
     #
+    # Line/region coverage only (no `--branch`): MC/DC-style branch
+    # instrumentation roughly doubles the llvm-cov compile+run cost (it was
+    # the bulk of the ~14 min `hitls-crypto` job) for a metric the Codecov
+    # thresholds do not gate on. Line + region coverage — the figure the
+    # 88%/70% rules actually measure — is unchanged.
+    #
     # Runs on PRs (Codecov patch coverage on the PR diff) and weekly (full
     # project trend). Not on every push-to-main — the merged commit was
     # already measured on its PR.
@@ -478,7 +484,7 @@ jobs:
       - name: Generate coverage for ${{ matrix.crate }}
         run: |
           mkdir -p coverage
-          cargo llvm-cov -p ${{ matrix.crate }} --all-features --branch \
+          cargo llvm-cov -p ${{ matrix.crate }} --all-features \
             --codecov --output-path coverage/codecov-${{ matrix.crate }}.json \
             --ignore-filename-regex "tests/vectors/"
       - name: Upload to Codecov
