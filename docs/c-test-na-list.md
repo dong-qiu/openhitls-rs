@@ -73,7 +73,8 @@ Counts are the `Generation summary` footer of each generated file
 | GMAC | 12 | 14 | 0 | 0 | 26 |
 | ChaCha20-Poly1305 | 34 | 21 | 0 | 0 | 38 |
 | SipHash | 2 | 37 | 0 | 2 | 41 |
-| **Total** | **2177** | **3483** | **240** | **96** | **5280** |
+| CBC-MAC (SM4) | 4 | 25 | 0 | 0 | 29 |
+| **Total** | **2181** | **3508** | **240** | **96** | **5309** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -183,9 +184,15 @@ surfaced as 4 failing tests in the first emit pass before reclassification), and
 `TC008` is a round-trip consistency test with no fixed vector. SipHash migrates
 only the 64-bit vectors (`SipHash::hash → u64`, compared via `to_le_bytes`); the
 39 SIPHASH128 rows are `unsupported`, and only 2 SIPHASH64 rows carry a mac (the
-rest of the C SipHash suite is no-mac / memory-alignment tests). **CBC-MAC is
-not migrated** — see the gaps table: the Rust `CbcMacSm4` output diverges from
-the C SM4 CBC-MAC vectors and needs a dedicated investigation.
+rest of the C SipHash suite is no-mac / memory-alignment tests).
+
+CBC-MAC (SM4) was deferred in T145 and is now migrated in **I144**: the
+divergence was a real bug — `CbcMacSm4::finish` double-encrypted the final block
+for block-aligned input (it unconditionally processed an extra zero block even
+when `update` had already absorbed the last full block). After the fix, the 4
+SM4 + `CRYPT_PADDING_ZEROS` `FUN_TC004` KAT rows pass byte-exact against the C
+vectors (`migrated_cbc_mac.rs`); the `FUN_TC006` update-count and
+ADDR_NOT_ALIGN / SAMEADDR families are C-only memory-layout tests → API-surface.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
@@ -270,7 +277,6 @@ migration tool emit the corresponding tests with no generator change.
 | SM4-CTR-DRBG-df | DRBG | 1 | `Sm4CtrDrbg` has only the no-df constructor | add `Sm4CtrDrbg::with_df` |
 | TLS 1.2 PRF SHA-512 | TLS1.2-PRF | 2 | `hitls_tls::crypt::HashAlgId` has only `Sha256` / `Sha384` / `Sha1` (+ Sm3) — no `Sha512` variant, so the SHA-512 PRF vectors cannot be expressed | add a `Sha512` variant to `HashAlgId` + its `DigestVariant` arm (TLS 1.2 itself never negotiates SHA-512 PRF, so this is migration-only) |
 | SipHash-128 | SipHash | 39 | Rust `SipHash::hash` returns a `u64` (SipHash-2-4-64 only); the 128-bit output variant is not implemented | add a 128-bit SipHash output path |
-| CBC-MAC (SM4) | cbc_mac | 14 | A pre-emit probe (T145) showed Rust `CbcMacSm4` output diverges from the C `CRYPT_MAC_CBC_MAC_SM4` + `CRYPT_PADDING_ZEROS` vectors — neither the as-is single block nor an appended zero block reproduces the expected mac. Not a padding quirk; needs investigation (possible Rust bug or a construction/IV/finalisation mismatch) before the 14 SM4+ZEROS KAT rows can be migrated | investigate `CbcMacSm4` vs the C SM4 CBC-MAC construction (IV, final-block handling, zero-padding semantics) and reconcile |
 
 ### Resolved divergence — CTR-DRBG-AES-256-df
 

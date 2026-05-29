@@ -19,6 +19,10 @@ pub struct CbcMacSm4 {
     buf: [u8; SM4_BLOCK_SIZE],
     /// Number of bytes in the buffer.
     buf_len: usize,
+    /// Whether at least one full block has been processed into `state`.
+    /// Distinguishes a block-aligned message (state already holds the MAC)
+    /// from an empty message (which still needs one zero block).
+    processed: bool,
     /// Whether the context is ready for use (false after finish).
     active: bool,
 }
@@ -40,6 +44,7 @@ impl CbcMacSm4 {
             state: [0u8; SM4_BLOCK_SIZE],
             buf: [0u8; SM4_BLOCK_SIZE],
             buf_len: 0,
+            processed: false,
             active: true,
         })
     }
@@ -99,15 +104,21 @@ impl CbcMacSm4 {
             });
         }
 
-        // Zero-pad the final incomplete block
-        if self.buf_len < SM4_BLOCK_SIZE {
+        // CBC-MAC with zero-padding (CRYPT_PADDING_ZEROS):
+        //  - buffered partial block  → zero-pad it and process one block;
+        //  - empty message           → process a single zero block (E_K(0));
+        //  - block-aligned message   → `state` already holds the MAC; the last
+        //    full block was processed during `update`, so do NOT process an
+        //    extra zero block (doing so double-encrypts the final block).
+        if self.buf_len > 0 {
             for i in self.buf_len..SM4_BLOCK_SIZE {
                 self.buf[i] = 0;
             }
+            self.process_block()?;
+        } else if !self.processed {
+            self.buf = [0u8; SM4_BLOCK_SIZE];
+            self.process_block()?;
         }
-
-        // Process the final (possibly padded) block
-        self.process_block()?;
 
         // Output the MAC
         out[..SM4_BLOCK_SIZE].copy_from_slice(&self.state);
@@ -121,6 +132,7 @@ impl CbcMacSm4 {
         self.state = [0u8; SM4_BLOCK_SIZE];
         self.buf = [0u8; SM4_BLOCK_SIZE];
         self.buf_len = 0;
+        self.processed = false;
         self.active = true;
     }
 
@@ -137,6 +149,7 @@ impl CbcMacSm4 {
         }
         // Encrypt state in-place
         self.cipher.encrypt_block(&mut self.state)?;
+        self.processed = true;
         Ok(())
     }
 }
@@ -156,18 +169,12 @@ mod tests {
         let mut out = [0u8; SM4_BLOCK_SIZE];
         mac.finish(&mut out).unwrap();
 
-        // Verify by computing E_K(data) directly
+        // A single full block (no padding) is plain CBC-MAC over one block:
+        // MAC = E_K(0 XOR block) = E_K(block). No extra zero block is added.
         let cipher = Sm4Key::new(&key).unwrap();
         let mut expected = data;
         cipher.encrypt_block(&mut expected).unwrap();
-        // For a single full block, the final pass pads an empty buffer with zeros
-        // and processes it: state = E_K(E_K(data) XOR 0) = E_K(E_K(data))
-        // Actually, after update processes the full block, buf_len=0.
-        // In finish, the final block is all-zeros (buf_len=0, zero-padded).
-        // So final = E_K(state XOR zeros) = E_K(state)
-        let mut expected2 = expected;
-        cipher.encrypt_block(&mut expected2).unwrap();
-        assert_eq!(out, expected2);
+        assert_eq!(out, expected);
     }
 
     #[test]
@@ -203,20 +210,15 @@ mod tests {
         let mut out = [0u8; SM4_BLOCK_SIZE];
         mac.finish(&mut out).unwrap();
 
-        // Manual computation:
-        // state0 = 0
-        // state1 = E_K(state0 XOR block1) = E_K(block1)
-        // state2 = E_K(state1 XOR block2)
-        // final pad block = zeros (buf_len=0)
-        // MAC = E_K(state2 XOR zeros) = E_K(state2)
+        // Two full blocks (no padding): plain CBC-MAC chain, no extra block.
+        //   state1 = E_K(0 XOR block1) = E_K(block1)
+        //   MAC    = E_K(state1 XOR block2)
         let cipher = Sm4Key::new(&key).unwrap();
         let mut state = block1;
         cipher.encrypt_block(&mut state).unwrap();
         for i in 0..SM4_BLOCK_SIZE {
             state[i] ^= block2[i];
         }
-        cipher.encrypt_block(&mut state).unwrap();
-        // final zero-padded block
         cipher.encrypt_block(&mut state).unwrap();
         assert_eq!(out, state);
     }

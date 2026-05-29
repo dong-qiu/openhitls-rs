@@ -8873,3 +8873,38 @@ na-list -> 2177 emitted (gcm 12/36/0/0/42 + gmac 12/14/0/0/26 + chachapoly
 -D warnings --all-features --all-targets clean.
 
 Recorded as DEV_LOG Phase T145.
+
+## Phase I144 — CBC-MAC-SM4 Double-Encryption Fix (2026-05-29)
+
+> 1
+
+(User chose option 1 from the post-T145 menu: investigate the CBC-MAC
+divergence.) Root-caused the T145-deferred CBC-MAC divergence to a real bug —
+the 5th found via the migration discipline (cf. I129/I131/I133/I137).
+
+Bug: crates/hitls-crypto/src/cbc_mac.rs. update() eagerly folds each full block
+into the chain state; finish() then unconditionally zero-padded + processed one
+MORE block. For a block-aligned message the last block was already absorbed, so
+finish double-encrypted it: E_K(E_K(m_n ^ c_{n-1})) instead of E_K(m_n ^ c_{n-1}).
+Probe: SM4-ECB(key, block) = 9bbd8793... == the C CBC-MAC vector exactly, while
+buggy CbcMacSm4 = 3e9e6958... = SM4(SM4(block)). SM4 primitive itself correct
+(GB/T 32907 std vector passes). Hid because the existing single_block/multi_block
+unit tests had baked the double-encryption into their expected values.
+
+Fix: finish() branches — buffered partial -> pad+1 block; empty -> one zero
+block E_K(0); block-aligned -> state already holds the MAC, no extra block (new
+`processed` flag). Corrected the 2 self-fulfilling unit tests.
+
+Regression: wired cbc-mac into the xtask aead emitter; migrated
+test_suite_sdv_eal_mac_cbc_mac.data -> migrated_cbc_mac.rs (4 SM4+ZEROS FUN_TC004
+KATs; FUN_TC006/ADDR_NOT_ALIGN/SAMEADDR -> API-surface). All 4 pass byte-exact
+vs C (would have failed before the fix).
+
+Production impact: hitls_crypto::cbc_mac::CbcMacSm4 (pub API; no internal/TLS
+consumer) now correct for block-aligned input.
+
+Verification: hitls-crypto lib 1479/0 (3 ignored) + migrated_cbc_mac 4/0; drift
+gate x5; na-list CBC-MAC moved from gaps to tally (4/25/0/0/29); fmt + clippy
+-D warnings --all-features --all-targets clean.
+
+Recorded as DEV_LOG Phase I144.
