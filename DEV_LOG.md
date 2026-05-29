@@ -24926,3 +24926,30 @@ a dedicated investigation to byte-align the FrodoKEM/McEliece secret-key (and
 ciphertext) serialization with the reference, or to confirm/fix an algorithmic
 divergence. That is larger than a localized fix and touches production PQC code,
 so it is left as a tracked follow-up rather than forced into this migration pass.
+
+### Follow-up diagnosis — confirmed reference-interoperability bug
+
+A focused follow-up pinned the FrodoKEM divergence precisely (FrodoKEM-640-SHAKE):
+
+1. **The secret-key layout's `s` / `pk` / `pkh` are reference-correct** —
+   byte-verified against the C vector: `testEk == testDk[16..16+9616]` (the
+   public key is embedded at offset 16, i.e. right after the 16-byte `s`), and
+   `testDk[-16:] == SHAKE128(testEk)[:16]` (the trailing pk-hash; FrodoKEM-640
+   correctly uses SHAKE128). So it is **not** a gross sk-format or size mismatch.
+
+2. **Rust decaps lands in the implicit-rejection branch.** Feeding the reference
+   `(testDk, testCt)` into `decapsulate`, the output equals `SHAKE(ct ‖ s)` (the
+   Fujisaki–Okamoto reject value, `s = testDk[..16]`) rather than the reference
+   `testSs`. So the PKE-decrypt + re-encrypt step fails to reconstruct the
+   reference ciphertext from a reference secret key.
+
+Conclusion: **FrodoKEM (and almost certainly Classic McEliece) in this port are
+not reference-interoperable** — a real correctness/interop bug, invisible to the
+existing self-round-trip tests. Since `s`/`pk`/`pkh` are byte-correct, the
+divergence is isolated to the **S^T secret-matrix interpretation** (Rust reads
+`testDk[9632..19872]` as row-major little-endian `u16`; the reference
+packing/transpose convention likely differs) **or the PKE-decrypt matrix math**.
+The fix (realign the S^T convention in `generate` + `decapsulate`, re-verify all
+6 param sets + self round-trip + the C KAT vectors, then the McEliece
+equivalent) is a substantial, dedicated PQC change and remains a tracked
+follow-up. Recorded in the `docs/c-test-na-list.md` Structural-gaps table.
