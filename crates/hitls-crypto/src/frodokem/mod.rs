@@ -107,6 +107,14 @@ impl FrodoKemKeyPair {
     pub fn encapsulate(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
         let p = get_params(self.param_id);
 
+        // A key pair reconstructed via `from_decapsulation_key` has no
+        // encapsulation key; reject rather than index an empty slice.
+        if self.encapsulation_key.is_empty() {
+            return Err(CryptoError::InvalidArg(
+                "encapsulation key absent (key pair built from a decapsulation key only)",
+            ));
+        }
+
         // Extract pk and pk_hash from sk
         let pk = &self.encapsulation_key;
         let pk_hash = &self.decapsulation_key[self.decapsulation_key.len() - p.pk_hash_len..];
@@ -240,6 +248,21 @@ mod tests {
         let (ct, ss1) = kp.encapsulate().unwrap();
         let ss2 = kp.decapsulate(&ct).unwrap();
         assert_eq!(ss1, ss2);
+    }
+
+    #[test]
+    fn test_from_decapsulation_key_encapsulate_errors_not_panics() {
+        // A decaps-only key pair has no encapsulation key; `encapsulate()`
+        // must return Err rather than indexing an empty slice (panic).
+        let kp = FrodoKemKeyPair::generate(FrodoKemParamId::FrodoKem640Shake).unwrap();
+        let dk = kp.decapsulation_key.clone();
+        let decaps_only =
+            FrodoKemKeyPair::from_decapsulation_key(FrodoKemParamId::FrodoKem640Shake, &dk)
+                .unwrap();
+        assert!(decaps_only.encapsulate().is_err());
+        // decaps still works on the reconstructed key.
+        let (ct, _) = kp.encapsulate().unwrap();
+        assert!(decaps_only.decapsulate(&ct).is_ok());
     }
 
     #[test]
