@@ -8937,3 +8937,19 @@ reference, or confirm/fix an algorithmic divergence — larger than a localized
 fix, touches production PQC code). Docs-only change.
 
 Recorded as DEV_LOG Phase T146.
+
+### T146 follow-up — confirmed reference-interop bug (diagnosis)
+
+> 1
+> (a)
+
+(User chose to do the PQC KEM validation investigation, then chose to document
+the diagnosis.) Pinned the FrodoKEM-640-SHAKE divergence: (1) sk layout
+s/pk/pkh are byte-reference-correct (testEk == testDk[16..16+9616]; testDk[-16:]
+== SHAKE128(testEk)[:16]); (2) Rust decaps of the reference (testDk,testCt)
+lands in implicit rejection — output == SHAKE(ct‖s), not testSs. So FrodoKEM
+(and almost certainly McEliece) is NOT reference-interoperable; divergence
+isolated to the S^T secret-matrix interpretation or the PKE-decrypt math, not
+the gross sk layout. The fix (realign S^T convention + re-verify) is a tracked
+substantial PQC follow-up. Refined the DEV_LOG T146 detailed section + the
+na-list Structural-gaps row. Docs-only.
