@@ -83,6 +83,25 @@ impl FrodoKemKeyPair {
         })
     }
 
+    /// Reconstruct a key pair from a raw decapsulation (secret) key, for the
+    /// decapsulation path only (`encapsulation_key` left empty). The byte
+    /// layout is the FrodoKEM secret key `s || pk || S^T || pk_hash`; `dk.len()`
+    /// must equal the parameter set's `sk_size`.
+    pub fn from_decapsulation_key(
+        param_id: FrodoKemParamId,
+        dk: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let p = get_params(param_id);
+        if dk.len() != p.sk_size {
+            return Err(CryptoError::InvalidArg(""));
+        }
+        Ok(Self {
+            encapsulation_key: Vec::new(),
+            decapsulation_key: dk.to_vec(),
+            param_id,
+        })
+    }
+
     /// Encapsulate: produce a ciphertext and shared secret.
     /// Returns (ciphertext, shared_secret).
     pub fn encapsulate(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {

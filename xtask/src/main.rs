@@ -8,6 +8,7 @@ mod drbg;
 mod dsa;
 mod ecc;
 mod kdf;
+mod kem;
 mod mac;
 mod mldsa;
 mod mlkem;
@@ -205,6 +206,11 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_cbc_mac.rs"),
             aead::emit_cbc_mac_kat,
         ),
+        "frodokem" => (
+            vec![c_root.join("crypto/frodokem/test_suite_sdv_frodokem.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_frodokem.rs"),
+            kem::emit_frodokem_kat,
+        ),
         "drbg" => (
             vec![c_root.join("crypto/drbg/test_suite_sdv_drbg.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_drbg.rs"),
@@ -243,7 +249,7 @@ fn migrate(
         ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, gmac, chacha-poly, siphash, cbc-mac, drbg, ecc, rsa, bn, x509-parse"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, gmac, chacha-poly, siphash, cbc-mac, frodokem, drbg, ecc, rsa, bn, x509-parse"
             )
             .into());
         }

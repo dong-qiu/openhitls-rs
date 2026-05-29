@@ -10,35 +10,38 @@ pub(crate) fn pack(input: &[u16], logq: u8) -> Vec<u8> {
     let out_len = (n * logq as usize).div_ceil(8);
     let mut out = vec![0u8; out_len];
 
+    // MSB-first / big-endian bit packing, matching the FrodoKEM reference
+    // (`FrodoCommonPack`). The earlier LSB-first packing was self-consistent
+    // with the old `unpack` but NOT reference-compatible — see I145.
     if logq == 16 {
-        // Simple case: 2 bytes per element (little-endian)
         for (i, &val) in input.iter().enumerate() {
-            out[2 * i] = val as u8;
-            out[2 * i + 1] = (val >> 8) as u8;
+            out[2 * i] = (val >> 8) as u8;
+            out[2 * i + 1] = (val & 0xFF) as u8;
         }
     } else if logq == 15 {
-        // Bit-pack 8 values into 15 bytes
+        // Pack 8 values (15 bits each) into 15 bytes.
         let chunks = n / 8;
-        for i in 0..chunks {
-            let base_in = i * 8;
-            let base_out = i * 15;
+        for c in 0..chunks {
+            let base_in = c * 8;
+            let base_out = c * 15;
             let v = &input[base_in..base_in + 8];
-
-            out[base_out] = (v[0]) as u8;
-            out[base_out + 1] = ((v[0] >> 8) | (v[1] << 7)) as u8;
-            out[base_out + 2] = (v[1] >> 1) as u8;
-            out[base_out + 3] = ((v[1] >> 9) | (v[2] << 6)) as u8;
-            out[base_out + 4] = (v[2] >> 2) as u8;
-            out[base_out + 5] = ((v[2] >> 10) | (v[3] << 5)) as u8;
-            out[base_out + 6] = (v[3] >> 3) as u8;
-            out[base_out + 7] = ((v[3] >> 11) | (v[4] << 4)) as u8;
-            out[base_out + 8] = (v[4] >> 4) as u8;
-            out[base_out + 9] = ((v[4] >> 12) | (v[5] << 3)) as u8;
-            out[base_out + 10] = (v[5] >> 5) as u8;
-            out[base_out + 11] = ((v[5] >> 13) | (v[6] << 2)) as u8;
-            out[base_out + 12] = (v[6] >> 6) as u8;
-            out[base_out + 13] = ((v[6] >> 14) | (v[7] << 1)) as u8;
-            out[base_out + 14] = (v[7] >> 7) as u8;
+            let mut a = [0u16; 8];
+            for k in 0..8 {
+                a[k] = v[k] & 0x7FFF;
+            }
+            let a7 = a[7];
+            a[0] = (a[0] << 1) | (a[1] >> 14);
+            a[1] = (a[1] << 2) | (a[2] >> 13);
+            a[2] = (a[2] << 3) | (a[3] >> 12);
+            a[3] = (a[3] << 4) | (a[4] >> 11);
+            a[4] = (a[4] << 5) | (a[5] >> 10);
+            a[5] = (a[5] << 6) | (a[6] >> 9);
+            a[6] = (a[6] << 7) | (a7 >> 8);
+            for k in 0..7 {
+                out[base_out + 2 * k] = (a[k] >> 8) as u8;
+                out[base_out + 2 * k + 1] = (a[k] & 0xFF) as u8;
+            }
+            out[base_out + 14] = (a7 & 0xFF) as u8;
         }
     }
     out
@@ -47,33 +50,28 @@ pub(crate) fn pack(input: &[u16], logq: u8) -> Vec<u8> {
 /// Unpack bytes into u16 values with `logq` bits per element.
 pub(crate) fn unpack(input: &[u8], count: usize, logq: u8) -> Vec<u16> {
     let mut out = vec![0u16; count];
-    let mask = ((1u32 << logq) - 1) as u16;
 
+    // MSB-first / big-endian bit unpacking, matching the FrodoKEM reference
+    // (`FrodoCommonUnpack`) — inverse of the `pack` above.
     if logq == 16 {
         for i in 0..count {
-            out[i] = u16::from_le_bytes([input[2 * i], input[2 * i + 1]]);
+            out[i] = (u16::from(input[2 * i]) << 8) | u16::from(input[2 * i + 1]);
         }
     } else if logq == 15 {
         let chunks = count / 8;
-        for i in 0..chunks {
-            let base_in = i * 15;
-            let base_out = i * 8;
-            let b = &input[base_in..base_in + 15];
-
-            out[base_out] = (u16::from(b[0]) | (u16::from(b[1]) << 8)) & mask;
-            out[base_out + 1] =
-                (u16::from(b[1]) >> 7 | (u16::from(b[2]) << 1) | (u16::from(b[3]) << 9)) & mask;
-            out[base_out + 2] =
-                (u16::from(b[3]) >> 6 | (u16::from(b[4]) << 2) | (u16::from(b[5]) << 10)) & mask;
-            out[base_out + 3] =
-                (u16::from(b[5]) >> 5 | (u16::from(b[6]) << 3) | (u16::from(b[7]) << 11)) & mask;
-            out[base_out + 4] =
-                (u16::from(b[7]) >> 4 | (u16::from(b[8]) << 4) | (u16::from(b[9]) << 12)) & mask;
-            out[base_out + 5] =
-                (u16::from(b[9]) >> 3 | (u16::from(b[10]) << 5) | (u16::from(b[11]) << 13)) & mask;
-            out[base_out + 6] =
-                (u16::from(b[11]) >> 2 | (u16::from(b[12]) << 6) | (u16::from(b[13]) << 14)) & mask;
-            out[base_out + 7] = (u16::from(b[13]) >> 1 | (u16::from(b[14]) << 7)) & mask;
+        for c in 0..chunks {
+            let bi = c * 15;
+            let bo = c * 8;
+            let b = &input[bi..bi + 15];
+            let u = |x: u8| u16::from(x);
+            out[bo] = (u(b[0]) << 7) | (u(b[1]) >> 1);
+            out[bo + 1] = ((u(b[1]) & 0x01) << 14) | (u(b[2]) << 6) | (u(b[3]) >> 2);
+            out[bo + 2] = ((u(b[3]) & 0x03) << 13) | (u(b[4]) << 5) | (u(b[5]) >> 3);
+            out[bo + 3] = ((u(b[5]) & 0x07) << 12) | (u(b[6]) << 4) | (u(b[7]) >> 4);
+            out[bo + 4] = ((u(b[7]) & 0x0F) << 11) | (u(b[8]) << 3) | (u(b[9]) >> 5);
+            out[bo + 5] = ((u(b[9]) & 0x1F) << 10) | (u(b[10]) << 2) | (u(b[11]) >> 6);
+            out[bo + 6] = ((u(b[11]) & 0x3F) << 9) | (u(b[12]) << 1) | (u(b[13]) >> 7);
+            out[bo + 7] = ((u(b[13]) & 0x7F) << 8) | u(b[14]);
         }
     }
     out
