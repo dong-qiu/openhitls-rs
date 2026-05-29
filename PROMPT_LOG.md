@@ -8841,3 +8841,35 @@ scrypt 3/17/0/0/20 + tls12 4/16/0/2/22; total 5035 -> 5133); fmt + clippy
 -D warnings --all-features --all-targets clean.
 
 Recorded as DEV_LOG Phase T144.
+
+## Phase T145 — AEAD/MAC KAT Migration (AES-GCM / GMAC / ChaCha20-Poly1305 / SipHash) (2026-05-29)
+
+> 请继续 AEAD/MAC
+
+Migrated the symmetric AEAD/MAC families. New xtask/src/aead.rs (4 emit fns) ->
+4 generated files in hitls-crypto: migrated_gcm.rs (12) + migrated_gmac.rs (12)
++ migrated_chachapoly.rs (34) + migrated_siphash.rs (2) = 60 byte-exact tests,
+all passing. No production code change.
+
+Layouts confirmed against the C signatures: GCM (algId,key,iv,aad,pt,ct,tag) ->
+both dirs (probe verified arbitrary IV incl. 1-byte); GMAC (algId,key,iv,msg,mac);
+ChaCha (key,iv,aad,data,cipher,tag) both dirs + recovered TC005 (aad-only, empty
+pt) and TC010 (split-update: pt1+pt2+pt3 fold into one pt); SipHash
+(algId,key,data,mac) -> hash(key,data).to_le_bytes()==mac.
+
+Negative/edge -> API-surface: ChaCha TC009 (tamper — ct correct, tag corrupted,
+authenticated decrypt MUST reject; C asserts memcmp(outTag,tag)!=0; surfaced as
+4 failing tests in first pass then reclassified) and TC008 (round-trip
+consistency, no fixed vector). SipHash 64-bit only -> 39 SIPHASH128 unsupported;
+only 2 SIPHASH64 rows carry a mac.
+
+CBC-MAC deferred: pre-emit probe showed Rust CbcMacSm4 diverges from the C SM4
+vectors (neither as-is nor zero-block-appended matches) — routed to na-list gaps
+pending investigation, not migrated.
+
+Verification: all 4 suites green (-p hitls-crypto --all-features); drift gate x4;
+na-list -> 2177 emitted (gcm 12/36/0/0/42 + gmac 12/14/0/0/26 + chachapoly
+34/21/0/0/38 + siphash 2/37/0/2/41; total 5133 -> 5280); fmt + clippy
+-D warnings --all-features --all-targets clean.
+
+Recorded as DEV_LOG Phase T145.
