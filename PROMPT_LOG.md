@@ -8908,3 +8908,32 @@ gate x5; na-list CBC-MAC moved from gaps to tally (4/25/0/0/29); fmt + clippy
 -D warnings --all-features --all-targets clean.
 
 Recorded as DEV_LOG Phase I144.
+
+## Phase T146 — PQC KEM Decaps KAT Migration Attempted + Blocked (2026-05-29)
+
+> 继续 PQC KEM
+> (then, after the blocker was found) 1
+
+(User chose to continue with PQC KEM, then chose option 1 — document the gap —
+when the migration turned out to be blocked.)
+
+Attempted FrodoKEM + McEliece decaps KAT migration (decapsulate(testDk, testCt)
+== testSs, deterministic, like ML-KEM T137). Prototyped from_decapsulation_key
+on both keypairs. All decaps KATs FAILED: FrodoKEM returns a different ss than
+the C testSs; McEliece errors inside decode. Lengths all match the spec
+(frodokem-640 dk=19888, mceliece-6688128 dk=13932, ct/ss correct) — so it's a
+secret-key byte-layout (and maybe algorithm) divergence from the reference, not
+a size issue.
+
+Root cause / finding: Rust frodokem/mceliece are validated ONLY by self
+round-trip (generate→encaps→decaps), never against reference/NIST KAT vectors —
+their sk/ct encoding was never proven reference-compatible. hybridkem has no
+fixed-vector KATs (round-trip only) → API-surface.
+
+Reverted the prototype (no failing tests shipped). Documented the gap in
+docs/c-test-na-list.md Structural-gaps table (28 decaps rows: frodokem 26 +
+mceliece 2) with the unblock path (byte-align sk/ct serialization with the
+reference, or confirm/fix an algorithmic divergence — larger than a localized
+fix, touches production PQC code). Docs-only change.
+
+Recorded as DEV_LOG Phase T146.
