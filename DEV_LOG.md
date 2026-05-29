@@ -3,8 +3,8 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I143 (143 phases)
-- Testing: T1–T145 (138 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard); T144 — Phase A continued: KDF KAT (HKDF/PBKDF2/scrypt/TLS1.2-PRF, 22 byte-exact tests; first migration into `hitls-tls` — TLS1.2 PRF; no production code); T145 — Phase A continued: AEAD/MAC KAT (AES-GCM/GMAC/ChaCha20-Poly1305/SipHash, 60 byte-exact tests, no production code; CBC-MAC deferred — Rust `CbcMacSm4` diverges from the C SM4 vectors, see na-list)
+- Implementation: I1–I144 (144 phases)
+- Testing: T1–T145 (138 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard); T144 — Phase A continued: KDF KAT (HKDF/PBKDF2/scrypt/TLS1.2-PRF, 22 byte-exact tests; first migration into `hitls-tls` — TLS1.2 PRF; no production code); T145 — Phase A continued: AEAD/MAC KAT (AES-GCM/GMAC/ChaCha20-Poly1305/SipHash, 60 byte-exact tests, no production code; CBC-MAC deferred — Rust `CbcMacSm4` diverges from the C SM4 vectors; root-caused + fixed in I144)
 - Refactoring: R1–R19 (19 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -398,6 +398,7 @@ Category summary:
 | 398 | R19 | Refactor | Drop `--branch` from the `coverage` CI jobs — efficiency win, no quality drop. The per-crate `cargo llvm-cov -p <crate> --all-features --branch` matrix had branch (MC/DC-style) instrumentation enabled; that roughly doubles the llvm-cov compile+run cost and was the bulk of the slowest coverage leg (`hitls-crypto` ~13.7 min). `.codecov.yml` gates on project 88% / patch 70%, which are **line/region** coverage figures — branch coverage was collected but never gated on. Removing `--branch` keeps line + region coverage (the gated metric) byte-identical while cutting the instrumentation cost. The `coverage` job is **not** in `ci-gate.needs`, so this does not change merge wall-clock — it is a pure runner-compute / report-latency saving (the longest single PR-run job drops substantially). Config-only (`.github/workflows/ci.yml` command + comment); ci.yml parses as valid YAML; `.codecov.yml` thresholds unchanged | 2026-05-29 |
 | 399 | T144 | Test | KDF KAT migration — HKDF / PBKDF2 / scrypt / TLS 1.2 PRF. New `xtask/src/kdf.rs` emitter (4 per-KDF emitters) + 4 generated files: `migrated_hkdf.rs` (8), `migrated_pbkdf2.rs` (7), `migrated_scrypt.rs` (3) in `hitls-crypto`, and `migrated_kdf_tls12.rs` (4) in **`hitls-tls`** (first migration target outside `hitls-crypto`/`hitls-bignum`) = **22 byte-exact tests**, all passing first run. **No production code change** (`Hkdf::new_with_factory` + `expand`, `pbkdf2_with_hmac`, `scrypt`, and `hitls_tls::crypt::prf::prf` already existed). Each `.data` layout was confirmed against the C test-function signature: HKDF `(macAlg, ikm, salt, info, expected)`; PBKDF2 `(macAlg, password, salt, iters, expected)`; scrypt `(password, salt, N, r, p, expected)` (no macAlg — fixed HMAC-SHA256, `FUN_TC002` param-validation rows → API-surface); TLS1.2-PRF `(macAlg, secret, label, seed, expected)`. Output length is taken from the expected vector; integer params (iters/N/r/p) are unquoted → parsed as `Arg::Symbol`. The TLS1.2 PRF folds `label ‖ seed` into the `seed` arg with `label=""` (the Rust `prf` concatenates them internally, so the P_hash input is identical without needing a UTF-8 label). `HashAlgId` has no SHA-512 variant → the 2 SHA-512 TLS1.2-PRF rows are unsupported (the only unsupported in this batch); SHA-256/384 migrated. COPY_CTX / DEFAULT_PROVIDER / lifecycle rows → API-surface. No regression — `migrated_hkdf` 8/0 + `migrated_pbkdf2` 7/0 + `migrated_scrypt` 3/0 (`-p hitls-crypto --all-features`) + `migrated_kdf_tls12` 4/0 (`-p hitls-tls`); xtask `--check` drift gate passes for all four; na-list tally → 2117 emitted (HKDF 8/26/0/0/34, PBKDF2 7/15/0/0/22, scrypt 3/17/0/0/20, TLS1.2-PRF 4/16/0/2/22); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-29 |
 | 400 | T145 | Test | AEAD/MAC KAT migration — AES-GCM / GMAC / ChaCha20-Poly1305 / SipHash. New `xtask/src/aead.rs` emitter (4 emit fns) + 4 generated files in `hitls-crypto`: `migrated_gcm.rs` (12), `migrated_gmac.rs` (12), `migrated_chachapoly.rs` (34), `migrated_siphash.rs` (2) = **60 byte-exact tests**, all passing. **No production code change** (`gcm_encrypt`/`gcm_decrypt`, `Gmac`, `ChaCha20Poly1305::encrypt`/`decrypt`, `SipHash::hash` already existed). Layouts confirmed against the C signatures: GCM `(algId, key, iv, aad, pt, ct, tag)` → both directions (`gcm_encrypt(key,iv,aad,pt) == ct‖tag`, `gcm_decrypt == pt`; arbitrary IV length verified incl. a 1-byte IV); GMAC `(algId, key, iv, msg, mac)` → `Gmac::new(key,iv).update(msg).finish`; ChaCha20-Poly1305 `(key, iv, aad, data, cipher, tag)` → both directions, with the **TC005** AAD-only variant (`(key,iv,aad,tag)`, empty plaintext) and the **TC010** split-update variant (`(key,iv,aad,pt1,pt2,pt3,cipher,tag)` — the 3 chunks fold into one plaintext) both recovered; SipHash `(algId, key, data, mac)` → `SipHash::hash(key,data).to_le_bytes() == mac`. **Negative/edge families correctly routed to API-surface:** ChaCha **TC008** (round-trip consistency, no fixed vector) and **TC009** (tamper test — ciphertext correct but tag deliberately corrupted; the C asserts `memcmp(outTag, tag) != 0`, i.e. authenticated decrypt MUST reject — surfaced as 4 failing tests in the first emit pass, then reclassified). SipHash is 64-bit only (Rust `SipHash::hash → u64`), so the **39 SIPHASH128 rows are unsupported**; only 2 SIPHASH64 KAT rows carry a mac (the rest of the C suite is no-mac / memory-alignment tests). **CBC-MAC deferred**: a pre-emit probe showed Rust `CbcMacSm4` diverges from the C SM4 CBC-MAC vectors (neither the as-is single block nor an appended zero block matches) — routed to the na-list gaps table pending a focused investigation (possible bug or construction mismatch). No regression — all 4 suites green (`-p hitls-crypto --all-features`); xtask `--check` drift gate passes for all four; na-list tally → 2177 emitted (AES-GCM 12/36/0/0/42, GMAC 12/14/0/0/26, ChaCha20-Poly1305 34/21/0/0/38, SipHash 2/37/0/2/41); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-29 |
+| 401 | I144 | Impl | **CBC-MAC-SM4 double-encryption fix** (5th bug found via the migration discipline, cf. SLH-DSA/I129, CTR-DRBG-df/I131, ASN.1/I133, ML-DSA/I137) — the T145-deferred CBC-MAC divergence root-caused to a real bug in `crates/hitls-crypto/src/cbc_mac.rs`. **Bug:** `CbcMacSm4::update` eagerly processes each full block into the CBC chain `state`, and `finish` then *unconditionally* zero-padded + processed one more block — so for a **block-aligned** message it computed `E_K(E_K(last_block) ⊕ 0)` (a spurious extra encryption) instead of stopping at the last real block. CBC-MAC of any whole-block-multiple message was wrong (`E_K(E_K(m_n ⊕ c_{n-1}))` instead of `E_K(m_n ⊕ c_{n-1})`). Confirmed by a probe: `SM4-ECB(key, block) == 9bbd8793…` exactly equals the C `CRYPT_MAC_CBC_MAC_SM4` vector, while the buggy `CbcMacSm4` returned `3e9e6958… = SM4(SM4(block))`. **Why it hid:** the existing `test_cbc_mac_sm4_single_block` / `_multi_block` unit tests had *baked the double-encryption into their expected values* (a self-fulfilling assertion). **Fix:** `finish` now branches — buffered partial block ⇒ zero-pad + one block; empty message ⇒ one zero block (`E_K(0)`); **block-aligned ⇒ `state` already holds the MAC, no extra block** (new `processed` flag distinguishes empty from block-aligned). The two self-fulfilling unit tests were corrected to the right values. **Regression:** wired the `cbc-mac` algo into the xtask `aead` emitter and migrated `test_suite_sdv_eal_mac_cbc_mac.data` → `migrated_cbc_mac.rs` (4 SM4 + `CRYPT_PADDING_ZEROS` `FUN_TC004` KATs; the `FUN_TC006` update-count + ADDR_NOT_ALIGN / SAMEADDR families → API-surface) — all 4 now pass byte-exact against C (they would have failed before the fix). **Production impact:** `hitls_crypto::cbc_mac::CbcMacSm4` (a `pub` API; no internal/TLS path consumes it) now produces correct CBC-MACs for block-aligned input. No regression — hitls-crypto lib **1479/0** (3 ignored) incl. the corrected cbc_mac unit tests + `migrated_cbc_mac` 4/0; xtask `--check` drift passes for all 5 aead algos; na-list CBC-MAC moved from the gaps table to the tally (4/25/0/0/29); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-29 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -24795,3 +24796,79 @@ No regression. `migrated_gcm` 12/0 + `migrated_gmac` 12/0 +
 → 2177 emitted (AES-GCM 12/36/0/0/42, GMAC 12/14/0/0/26, ChaCha20-Poly1305
 34/21/0/0/38, SipHash 2/37/0/2/41; workspace total C cases 5133 → 5280). `cargo
 fmt --all -- --check` + `clippy -D warnings --all-features --all-targets` clean.
+
+## Phase I144 — CBC-MAC-SM4 Double-Encryption Fix (2026-05-29)
+
+### How it was found
+
+The 5th real bug surfaced by the C→Rust migration discipline (cf. SLH-DSA /
+I129, CTR-DRBG-df / I131, ASN.1 / I133, ML-DSA / I137). T145 deferred CBC-MAC
+because a pre-emit probe showed Rust `CbcMacSm4` did not reproduce the C
+`CRYPT_MAC_CBC_MAC_SM4` vectors. This phase root-causes and fixes it.
+
+### The bug
+
+`crates/hitls-crypto/src/cbc_mac.rs`. `update` eagerly folds every full block
+into the CBC chain `state` (`state = E_K(state ⊕ block)`). `finish` then
+**unconditionally** zero-padded the (now-empty) buffer and processed one more
+block. For a **block-aligned** message the last real block was already absorbed
+by `update`, so the extra `finish` block computed `E_K(state ⊕ 0) =
+E_K(E_K(m_n ⊕ c_{n-1}))` — a spurious second encryption of the final state.
+Every whole-block-multiple CBC-MAC was therefore wrong.
+
+Diagnostic probe (key = `ff…ff`, one block `6033ab…`):
+
+```
+SM4-ECB(key, block)      = 9bbd8793ef2479ae2b8991d84497d8c2   (== C CBC-MAC vector ✓)
+buggy CbcMacSm4(block)   = 3e9e6958…  = SM4(SM4(block))        (double-encrypt ✗)
+```
+
+The SM4 primitive itself was correct (the standard GB/T 32907 vector
+`681edf34…` passes), confirming the defect was purely in the CBC-MAC
+finalisation.
+
+### Why it hid for so long
+
+The existing `test_cbc_mac_sm4_single_block` and `test_cbc_mac_sm4_multi_block`
+unit tests had **baked the double-encryption into their expected values** — the
+single-block test even comments "state = E_K(E_K(data))" and asserts that. A
+self-fulfilling test that encodes the bug as the expectation. (The `empty` and
+`partial` tests were already correct and stayed unchanged.)
+
+### The fix
+
+`finish` now selects exactly one of three paths:
+
+| Final state | Action |
+|---|---|
+| buffered partial block (`buf_len > 0`) | zero-pad it, process one block |
+| empty message (`buf_len == 0`, nothing processed) | process one zero block ⇒ `E_K(0)` |
+| block-aligned (`buf_len == 0`, ≥1 block processed) | **`state` already holds the MAC — no extra block** |
+
+A new `processed: bool` field distinguishes the empty case from the
+block-aligned case. The two self-fulfilling unit tests were corrected to the
+right (single-encryption) values.
+
+### Regression coverage
+
+Wired the `cbc-mac` algo into the xtask `aead` emitter and migrated
+`test_suite_sdv_eal_mac_cbc_mac.data` → `crates/hitls-crypto/tests/migrated_cbc_mac.rs`:
+the 4 SM4 + `CRYPT_PADDING_ZEROS` `FUN_TC004` rows (the `FUN_TC006`
+update-count + ADDR_NOT_ALIGN / SAMEADDR families are C-only → API-surface).
+All 4 now pass **byte-exact against the C vectors** — they would have failed
+before the fix, so they are a true regression guard.
+
+### Production impact
+
+`hitls_crypto::cbc_mac::CbcMacSm4` is a `pub` API but no internal / TLS / PKI
+path consumes it (only benches + a `MacAlgId` enum entry), so the blast radius
+is limited to direct callers. Those now get correct CBC-MACs for block-aligned
+messages.
+
+### Build Status (Post I144)
+
+No regression. hitls-crypto lib **1479/0** (3 ignored) incl. the corrected
+cbc_mac unit tests; `migrated_cbc_mac` 4/0. xtask `--check` drift gate passes
+for all 5 aead algos. na-list: CBC-MAC moved from the gaps table to the tally
+(4 / 25 / 0 / 0 / 29). `cargo fmt --all -- --check` + `clippy -D warnings
+--all-features --all-targets` clean.
