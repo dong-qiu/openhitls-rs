@@ -75,7 +75,8 @@ Counts are the `Generation summary` footer of each generated file
 | SipHash | 2 | 37 | 0 | 2 | 41 |
 | CBC-MAC (SM4) | 4 | 25 | 0 | 0 | 29 |
 | FrodoKEM | 8 | 90 | 0 | 5 | 103 |
-| **Total** | **2189** | **3598** | **240** | **101** | **5412** |
+| AES-CCM | 36 | 66 | 0 | 0 | 84 |
+| **Total** | **2225** | **3664** | **240** | **101** | **5496** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -194,6 +195,19 @@ when `update` had already absorbed the last full block). After the fix, the 4
 SM4 + `CRYPT_PADDING_ZEROS` `FUN_TC004` KAT rows pass byte-exact against the C
 vectors (`migrated_cbc_mac.rs`); the `FUN_TC006` update-count and
 ADDR_NOT_ALIGN / SAMEADDR families are C-only memory-layout tests → API-surface.
+
+AES-CCM (T147) closes the last AEAD KAT family via `emit_aes_ccm_kat` in
+`xtask/src/aead.rs`. The C `.data` has three byte-exact shapes:
+`UPDATE_FUNC_TC001:(isProvider, algId, key, iv, aad, pt, ct‖tag)` where
+`tagLen = len(ct‖tag) - len(pt)` (mirroring the C `tagLen = ciphertext->len -
+plaintext->len`); `UPDATE_FUNC_TC002:(algId, key, iv, aad, pt, ct, tag)` (ct
+and tag split); and `MULTI_THREAD_FUNC_TC001:(isProvider, algId, key, iv, aad,
+pt, ct, tag)`. Each unique row emits both directions (`ccm_encrypt(key, iv,
+aad, pt, tag_len) == ct‖tag` and `ccm_decrypt(key, iv, aad, ct‖tag, tag_len)
+== pt`) — 18 unique vectors × 2 directions = 36 byte-exact tests. The
+`isProvider == 1` duplicates (12 rows) and the CTRL_API / REINIT_API /
+UPDATE_API families (24 rows) route to API-surface; 0 unknown, 0 unsupported,
+no new production code.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
