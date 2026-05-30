@@ -9249,3 +9249,68 @@ na-list tally updated: HPKE 432/35/0/0/467 (was 216/251), Total
 2673/3717/240/109/6005 (was 2457/3933).
 
 Recorded as DEV_LOG Phase T151.
+
+## Phase T152 — HPKE KEM_TC001 KAT Migration (closes HPKE migration; 92.5% → 97.6%) (2026-05-31)
+
+> 请继续推进 T152
+
+Phase A continuation: migrates the last HPKE KAT family (KEM_TC001 — 24 rows
+of byte-exact KEM derive+encap+decap KATs).
+
+Production-side: four new kat-nonce-gated free functions in
+hitls_crypto::hpke (all #[doc(hidden)] + #[deprecated(note = "test-only:
+…")], not compiled into default builds):
+
+- kem_encap_kat(kem, pk_r, ikm_e) -> (shared_secret, enc): thin wrapper
+  around the existing private kem_encap_deterministic.
+- kem_decap_kat(kem, enc, sk_r) -> shared_secret: wraps kem_decap.
+- kem_auth_encap_kat(kem, pk_r, sk_s, ikm_e) -> (shared_secret, enc):
+  wraps kem_auth_encap_with_ikm_e.
+- kem_auth_decap_kat(kem, enc, sk_r, pk_s) -> shared_secret: wraps
+  kem_auth_decap.
+
+These take the KEM identifier explicitly (vs going through a CipherSuite)
+so the test side does not need to construct one — KEM_TC001 is bare-KEM,
+not full-HPKE.
+
+Generator: new int_mode / int_kem / int_kdf_tag / int_aead_tag mapper
+helpers in xtask/src/hpke.rs (KEM_TC001 rows use raw RFC 9180 IANA
+codepoints — 0..3 for mode, 16/17/18/32 for kemId, 1..3 for kdfId/aeadId —
+not the CRYPT_* symbolic macros). New emit_kem_tc001 23-arg row handler.
+Dispatcher routes KEM_TC001 before the existing AEAD/EXPORT/SHARED_SECRET
+arms.
+
+Per row the emitted test asserts:
+- derive_key_pair(kem, ikm_e) == (skEm, pkEm)
+- derive_key_pair(kem, ikm_r) == (skRm, pkRm)
+- For AUTH/AUTH_PSK: derive_key_pair(kem, ikm_s) == (skSm, pkSm)
+- Sender-side kem_(auth_)encap_kat(...) returns (sharedSecret, enc)
+  byte-exact
+- Recipient-side kem_(auth_)decap_kat(...) returns the same sharedSecret
+
+The 5 trailing fields (keyScheduleContext / secret / key / baseNonce /
+exporterSecret) are HPKE-key-schedule intermediates already covered by
+SHARED_SECRET_TC001/TC002 (T149/T150) end-to-end, so the KEM-focused test
+skips them.
+
+Data convention fix: 3 of 12 AUTH/AUTH_PSK rows publish a NIST P-256 /
+P-521 skSm with the leading 0x00 byte stripped (C SDV hex-encoder
+convention). derive_key_pair returns the full curve-byte-length scalar
+(32 / 48 / 66 bytes), so the emitter left-pads sk{E,R,S}m to
+kem_sk_len(kem) — no-op for X25519 secrets (always 32 bytes, no
+leading-zero semantics).
+
+Result: migrated_hpke.rs — 432 → 456 byte-exact tests (+24), all passing
+first run. HPKE coverage now 456/467 = 97.6%. Only 11 permanent
+API-surface rows remain (abnormal / randomly / generate-key-pair —
+EAL ctx CRUD only).
+
+Verification: migrated_hpke 456/0 (-p hitls-crypto --all-features); xtask
+--check drift gate passes; builds clean without kat-nonce (cfg gating
+verified); existing hitls-crypto HPKE lib tests 29/0 unchanged; fmt +
+clippy -D warnings --all-features --all-targets clean.
+
+na-list tally updated: HPKE 456/11/0/0/467 (was 432/35), Total
+2697/3693/240/109/6005 (was 2673/3717).
+
+Recorded as DEV_LOG Phase T152.

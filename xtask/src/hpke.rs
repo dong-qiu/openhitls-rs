@@ -70,6 +70,76 @@ fn aead_enum(sym: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
+// KEM_TC001 rows use raw RFC 9180 IANA codepoints (decimal integers in the
+// `.data` file) rather than the `CRYPT_*` macro names. Map each integer to
+// the Rust enum variant + short tag used in test names.
+
+fn int_mode(sym: &str) -> Option<(u8, &'static str)> {
+    match sym {
+        "0" => Some((0x00, "base")),
+        "1" => Some((0x01, "psk")),
+        "2" => Some((0x02, "auth")),
+        "3" => Some((0x03, "auth_psk")),
+        _ => None,
+    }
+}
+
+fn int_kem(sym: &str) -> Option<(&'static str, &'static str)> {
+    match sym {
+        "16" => Some(("DhkemP256HkdfSha256", "p256")),
+        "17" => Some(("DhkemP384HkdfSha384", "p384")),
+        "18" => Some(("DhkemP521HkdfSha512", "p521")),
+        "32" => Some(("DhkemX25519HkdfSha256", "x25519")),
+        _ => None,
+    }
+}
+
+fn int_kdf_tag(sym: &str) -> Option<&'static str> {
+    match sym {
+        "1" => Some("sha256"),
+        "2" => Some("sha384"),
+        "3" => Some("sha512"),
+        _ => None,
+    }
+}
+
+fn int_aead_tag(sym: &str) -> Option<&'static str> {
+    match sym {
+        "1" => Some("aes128gcm"),
+        "2" => Some("aes256gcm"),
+        "3" => Some("chacha20poly1305"),
+        _ => None,
+    }
+}
+
+/// Curve byte length of the secret key for each HPKE KEM. NIST P-256 / P-384 /
+/// P-521 are mod-N scalars; the C SDV `.data` file strips leading zeros in
+/// the hex encoding of `skEm` / `skRm` / `skSm` for a handful of rows (~3
+/// out of 24 in `KEM_TC001`), while `derive_key_pair` returns the
+/// full-length, zero-padded scalar. We left-pad the row's expected `sk_*`
+/// values up to the curve byte length so the byte-exact assertion succeeds.
+/// X25519 secret keys are always 32 bytes (no leading-zero semantics),
+/// so this is a no-op for `DhkemX25519HkdfSha256`.
+fn kem_sk_len(kem_id_sym: &str) -> Option<usize> {
+    match kem_id_sym {
+        "16" => Some(32), // DhkemP256HkdfSha256
+        "17" => Some(48), // DhkemP384HkdfSha384
+        "18" => Some(66), // DhkemP521HkdfSha512
+        "32" => Some(32), // DhkemX25519HkdfSha256
+        _ => None,
+    }
+}
+
+fn pad_left_to(bytes: &[u8], n: usize) -> Vec<u8> {
+    if bytes.len() >= n {
+        bytes.to_vec()
+    } else {
+        let mut out = vec![0u8; n - bytes.len()];
+        out.extend_from_slice(bytes);
+        out
+    }
+}
+
 fn write_doc(out: &mut String, case: &TestCase, kind: &str) {
     if let Some(desc) = &case.description {
         writeln!(out, "/// {desc}").unwrap();
@@ -484,6 +554,232 @@ fn emit_export_secret_tc001(body: &mut String, stats: &mut EmitStats, case: &Tes
     stats.emitted += 1;
 }
 
+// Per-row emitter for KEM_TC001. C test fn:
+//   void SDV_CRYPT_EAL_HPKE_KEM_TC001(int mode, int kemId, int kdfId, int aeadId,
+//       Hex *info, Hex *psk, Hex *pskId,
+//       Hex *ikmE, Hex *pkEm, Hex *skEm,
+//       Hex *ikmR, Hex *pkRm, Hex *skRm,
+//       Hex *ikmS, Hex *pkSm, Hex *skSm,
+//       Hex *enc, Hex *sharedSecret,
+//       Hex *keyScheduleContext, Hex *secret, Hex *key, Hex *baseNonce, Hex *exporterSecret);
+//
+// The row publishes BOTH the deterministic ephemeral / recipient / sender-auth
+// key pairs AND the resulting `(enc, sharedSecret)` from Encap/Decap. The
+// migration asserts:
+//   * DeriveKeyPair(ikm_e) -> (sk_e, pk_e) == (skEm, pkEm)
+//   * DeriveKeyPair(ikm_r) -> (sk_r, pk_r) == (skRm, pkRm)
+//   * For AUTH/AUTH_PSK: DeriveKeyPair(ikm_s) -> (sk_s, pk_s) == (skSm, pkSm)
+//   * Sender-side Encap (or AuthEncap) -> (shared_secret, enc) ==
+//     (sharedSecret, enc)
+//   * Recipient-side Decap (or AuthDecap) -> shared_secret == sharedSecret
+//
+// The 5 trailing intermediate values (keyScheduleContext / secret / key /
+// baseNonce / exporterSecret) come from the HPKE Key Schedule, not the KEM,
+// and are already implicitly verified by the SHARED_SECRET_TC001 / TC002
+// tests — we skip them here.
+#[allow(clippy::too_many_lines)]
+fn emit_kem_tc001(body: &mut String, stats: &mut EmitStats, case: &TestCase) {
+    let (
+        Some(mode_sym),
+        Some(kem_sym),
+        Some(kdf_sym),
+        Some(aead_sym),
+        Some(_info),
+        Some(_psk),
+        Some(_psk_id),
+        Some(ikm_e),
+        Some(pk_em),
+        Some(sk_em),
+        Some(ikm_r),
+        Some(pk_rm),
+        Some(sk_rm),
+        Some(ikm_s),
+        Some(pk_sm),
+        Some(sk_sm),
+        Some(enc),
+        Some(shared_secret),
+    ) = (
+        case.args.first().and_then(|a| a.as_symbol()),
+        case.args.get(1).and_then(|a| a.as_symbol()),
+        case.args.get(2).and_then(|a| a.as_symbol()),
+        case.args.get(3).and_then(|a| a.as_symbol()),
+        case.args.get(4).and_then(|a| a.as_hex()),
+        case.args.get(5).and_then(|a| a.as_hex()),
+        case.args.get(6).and_then(|a| a.as_hex()),
+        case.args.get(7).and_then(|a| a.as_hex()),
+        case.args.get(8).and_then(|a| a.as_hex()),
+        case.args.get(9).and_then(|a| a.as_hex()),
+        case.args.get(10).and_then(|a| a.as_hex()),
+        case.args.get(11).and_then(|a| a.as_hex()),
+        case.args.get(12).and_then(|a| a.as_hex()),
+        case.args.get(13).and_then(|a| a.as_hex()),
+        case.args.get(14).and_then(|a| a.as_hex()),
+        case.args.get(15).and_then(|a| a.as_hex()),
+        case.args.get(16).and_then(|a| a.as_hex()),
+        case.args.get(17).and_then(|a| a.as_hex()),
+    )
+    else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let Some((mode_b, m_tag)) = int_mode(mode_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let Some((kem_var, kem_tag)) = int_kem(kem_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let Some(kdf_tag) = int_kdf_tag(kdf_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let Some(aead_tag) = int_aead_tag(aead_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let Some(sk_len) = kem_sk_len(kem_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let is_auth = mode_b == 0x02 || mode_b == 0x03;
+    // C SDV `.data` strips leading zeros from `sk*m` hex (NIST P-256/P-384/P-521
+    // scalar with high bit clear); left-pad to the curve byte length to
+    // match the fixed-length output of `derive_key_pair`.
+    let sk_em_p = pad_left_to(sk_em, sk_len);
+    let sk_rm_p = pad_left_to(sk_rm, sk_len);
+    let sk_sm_p = if is_auth {
+        pad_left_to(sk_sm, sk_len)
+    } else {
+        Vec::new()
+    };
+
+    write_doc(body, case, "HPKE KEM derive+encap+decap KAT");
+    writeln!(body, "#[test]").unwrap();
+    writeln!(body, "#[allow(deprecated)]").unwrap();
+    writeln!(
+        body,
+        "fn tc_line{}_hpke_kem_{m_tag}_{kem_tag}_{kdf_tag}_{aead_tag}() {{",
+        case.line
+    )
+    .unwrap();
+    writeln!(body, "    let kem = HpkeKem::{kem_var};").unwrap();
+    writeln!(body, "    let ikm_e: &[u8] = {};", format_byte_slice(ikm_e)).unwrap();
+    writeln!(
+        body,
+        "    let expected_pk_e: &[u8] = {};",
+        format_byte_slice(pk_em)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let expected_sk_e: &[u8] = {};",
+        format_byte_slice(&sk_em_p)
+    )
+    .unwrap();
+    writeln!(body, "    let ikm_r: &[u8] = {};", format_byte_slice(ikm_r)).unwrap();
+    writeln!(
+        body,
+        "    let expected_pk_r: &[u8] = {};",
+        format_byte_slice(pk_rm)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let expected_sk_r: &[u8] = {};",
+        format_byte_slice(&sk_rm_p)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let expected_enc: &[u8] = {};",
+        format_byte_slice(enc)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let expected_shared_secret: &[u8] = {};",
+        format_byte_slice(shared_secret)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let (sk_e, pk_e) = derive_key_pair(kem, ikm_e).unwrap();"
+    )
+    .unwrap();
+    writeln!(body, "    assert_eq!(pk_e.as_slice(), expected_pk_e);").unwrap();
+    writeln!(body, "    assert_eq!(sk_e.as_slice(), expected_sk_e);").unwrap();
+    writeln!(
+        body,
+        "    let (sk_r, pk_r) = derive_key_pair(kem, ikm_r).unwrap();"
+    )
+    .unwrap();
+    writeln!(body, "    assert_eq!(pk_r.as_slice(), expected_pk_r);").unwrap();
+    writeln!(body, "    assert_eq!(sk_r.as_slice(), expected_sk_r);").unwrap();
+    if is_auth {
+        writeln!(body, "    let ikm_s: &[u8] = {};", format_byte_slice(ikm_s)).unwrap();
+        writeln!(
+            body,
+            "    let expected_pk_s: &[u8] = {};",
+            format_byte_slice(pk_sm)
+        )
+        .unwrap();
+        writeln!(
+            body,
+            "    let expected_sk_s: &[u8] = {};",
+            format_byte_slice(&sk_sm_p)
+        )
+        .unwrap();
+        writeln!(
+            body,
+            "    let (sk_s, pk_s) = derive_key_pair(kem, ikm_s).unwrap();"
+        )
+        .unwrap();
+        writeln!(body, "    assert_eq!(pk_s.as_slice(), expected_pk_s);").unwrap();
+        writeln!(body, "    assert_eq!(sk_s.as_slice(), expected_sk_s);").unwrap();
+        writeln!(
+            body,
+            "    let (shared_secret_s, enc) = kem_auth_encap_kat(kem, &pk_r, &sk_s, ikm_e).unwrap();"
+        )
+        .unwrap();
+        writeln!(body, "    assert_eq!(enc.as_slice(), expected_enc);").unwrap();
+        writeln!(
+            body,
+            "    assert_eq!(shared_secret_s.as_slice(), expected_shared_secret);"
+        )
+        .unwrap();
+        writeln!(
+            body,
+            "    let shared_secret_r = kem_auth_decap_kat(kem, &enc, &sk_r, &pk_s).unwrap();"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            body,
+            "    let (shared_secret_s, enc) = kem_encap_kat(kem, &pk_r, ikm_e).unwrap();"
+        )
+        .unwrap();
+        writeln!(body, "    assert_eq!(enc.as_slice(), expected_enc);").unwrap();
+        writeln!(
+            body,
+            "    assert_eq!(shared_secret_s.as_slice(), expected_shared_secret);"
+        )
+        .unwrap();
+        writeln!(
+            body,
+            "    let shared_secret_r = kem_decap_kat(kem, &enc, &sk_r).unwrap();"
+        )
+        .unwrap();
+    }
+    writeln!(
+        body,
+        "    assert_eq!(shared_secret_r.as_slice(), expected_shared_secret);"
+    )
+    .unwrap();
+    writeln!(body, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
 pub fn emit_hpke_kat(cases: &[TestCase]) -> (String, EmitStats) {
     let mut body = String::new();
     let mut stats = EmitStats::default();
@@ -497,6 +793,10 @@ pub fn emit_hpke_kat(cases: &[TestCase]) -> (String, EmitStats) {
         // Remaining (KEM_TC001 / ABNORMAL / RANDOMLY / GENERATE_KEY_PAIR /
         // SHARED_SECRET_RANDOMLY) route to API-surface — KEM_TC001 still
         // pending its own emitter shape (derive+encap+decap byte-exact).
+        if case.tc_name.contains("KEM_TC001") {
+            emit_kem_tc001(&mut body, &mut stats, case);
+            continue;
+        }
         if case.tc_name.contains("AEAD_TC001") {
             emit_aead_tc001(&mut body, &mut stats, case);
             continue;
@@ -636,7 +936,7 @@ pub fn emit_hpke_kat(cases: &[TestCase]) -> (String, EmitStats) {
          // Generator: docs/c-test-migration-plan.md Phase A (xtask).\n\
          #![cfg(all(feature = \"hpke\", feature = \"kat-nonce\"))]\n\n\
          #[allow(deprecated)]\n\
-         use hitls_crypto::hpke::{derive_key_pair, CipherSuite, HpkeAead, HpkeCtx, HpkeKdf, HpkeKem};\n\n",
+         use hitls_crypto::hpke::{derive_key_pair, kem_auth_decap_kat, kem_auth_encap_kat, kem_decap_kat, kem_encap_kat, CipherSuite, HpkeAead, HpkeCtx, HpkeKdf, HpkeKem};\n\n",
     );
     out.push_str(&body);
     write_footer(&mut out, &stats, cases.len());
