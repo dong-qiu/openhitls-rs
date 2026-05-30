@@ -9179,3 +9179,73 @@ na-list tally updated: HPKE 216/251/0/0/467 (was 144/323), Total
 2457/3933/240/109/6005 (was 2385/4005).
 
 Recorded as DEV_LOG Phase T150.
+
+## Phase T151 — HPKE AEAD_TC001 + EXPORT_SECRET_TC001 KAT Migration (closes HPKE ikmE-injection path) (2026-05-31)
+
+> 请继续 T151
+
+Phase A continuation: migrates the two remaining major HPKE KAT families
+(AEAD_TC001 seal/open + EXPORT_SECRET_TC001 export). Both publish ikmE /
+ikmR / ikmS instead of a pre-derived shared_secret, so the migration
+requires deterministic KEM Encap/Decap with seed injection.
+
+Production-side: three new kat-nonce-gated public APIs in
+hitls_crypto::hpke (all #[doc(hidden)] + #[deprecated(note = "test-only:
+…")], not compiled into default builds):
+
+- HpkeCtx::setup_sender_kat(suite, mode: u8, pk_r, sk_s, info, psk,
+  psk_id, ikm_e) -> Result<(Self, Vec<u8>), _> — unified KAT sender
+  constructor. Dispatches on mode: BASE/PSK → kem_encap_deterministic;
+  AUTH/AUTH_PSK → new private kem_auth_encap_with_ikm_e (mirrors
+  kem_auth_encap but uses kem_derive_key_pair for skE). Then key_schedule.
+- HpkeCtx::setup_recipient_kat(suite, mode, sk_r, pk_s, enc, info, psk,
+  psk_id) -> Result<Self, _> — symmetric recipient. BASE/PSK → kem_decap;
+  AUTH/AUTH_PSK → kem_auth_decap. Then key_schedule.
+- derive_key_pair(kem, ikm) -> Result<(Vec<u8>, Vec<u8>), _> — module-
+  level free fn wrapping the existing private kem_derive_key_pair.
+
+Internal: kem_encap_deterministic gate relaxed from #[cfg(test)] to
+#[cfg(any(test, feature = "kat-nonce"))]; added private
+kem_auth_encap_with_ikm_e under the same gate.
+
+Emitter: new emit_aead_tc001 + emit_export_secret_tc001 in
+xtask/src/hpke.rs, dispatched from emit_hpke_kat before the existing
+TC001/TC002 path. Shared helpers emit_kat_derive_block (writes suite +
+ikm fields + derive_key_pair calls) + emit_kat_setup_ctxs (writes
+setup_sender_kat / setup_recipient_kat with a mut_kw arg so AEAD tests
+get let mut ctx_* and EXPORT tests get plain let ctx_*).
+
+Row shapes:
+- AEAD_TC001 (14 args): (mode, kemId, kdfId, aeadId, info, psk, pskId,
+  ikmE, ikmR, ikmS, seq, pt, aad, ct) — each row emits one #[test]
+  tc_lineN_hpke_aead_<mode>_<kem>_<kdf>_<aead> asserting both
+  ctx_s.seal(aad, pt) == ct and ctx_r.open(aad, ct) == pt at the row's
+  seq.
+- EXPORT_SECRET_TC001 (13 args): (mode, kemId, kdfId, aeadId, info, psk,
+  pskId, ikmE, ikmR, ikmS, exporterContext, L, exportedValue) — each row
+  emits one #[test] tc_lineN_hpke_exp_<mode>_<kem>_<kdf>_<aead>
+  asserting ctx_s.export == ctx_r.export == expected.
+
+Result: migrated_hpke.rs — 216 → 432 byte-exact tests (+216: AEAD 144 +
+EXPORT 72), all passing first run. Full RFC 9180 matrix coverage across
+{seal/open, export} × 4 modes × 4 KEMs × 3 KDFs × 3 AEADs.
+
+The AEAD round-trip implicitly verifies the encapsulated key: if the
+sender's derived enc did not match what setup_recipient_kat computes from
+ikm_r, the AEAD tag would fail at open. So KEM encap/decap correctness is
+exercised in every AEAD test even though the row carries no explicit enc
+field.
+
+HPKE coverage now 432/467 (92.5%). Remaining: KEM_TC001 × 24 (separate
+emitter shape: standalone derive+encap+decap byte-exact, no AEAD attached
+— deferred to T152+) + 11 permanent API-surface rows.
+
+Verification: migrated_hpke 432/0 (-p hitls-crypto --all-features); xtask
+--check drift gate passes; builds clean without kat-nonce (cfg gating
+verified); existing hitls-crypto HPKE lib tests 29/0 unchanged; fmt +
+clippy -D warnings --all-features --all-targets clean.
+
+na-list tally updated: HPKE 432/35/0/0/467 (was 216/251), Total
+2673/3717/240/109/6005 (was 2457/3933).
+
+Recorded as DEV_LOG Phase T151.

@@ -572,7 +572,7 @@ fn kem_auth_decap(
 }
 
 /// Deterministic Encap (for testing) — uses DeriveKeyPair.
-#[cfg(test)]
+#[cfg(any(test, feature = "kat-nonce"))]
 fn kem_encap_deterministic(
     kem: HpkeKem,
     pk_r: &[u8],
@@ -587,6 +587,49 @@ fn kem_encap_deterministic(
 
     let shared_secret = kem_extract_and_expand(kem, &dh_val, &kem_context)?;
     Ok((shared_secret, pk_e))
+}
+
+/// Deterministic AuthEncap (for KAT testing) — same as `kem_auth_encap` but
+/// derives the ephemeral key pair from `ikm_e` instead of system randomness.
+/// Returns `(shared_secret, enc)`.
+#[cfg(any(test, feature = "kat-nonce"))]
+fn kem_auth_encap_with_ikm_e(
+    kem: HpkeKem,
+    pk_r: &[u8],
+    sk_s: &[u8],
+    ikm_e: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+    let (sk_e, pk_e) = kem_derive_key_pair(kem, ikm_e)?;
+    let dh1 = dh(kem, &sk_e, pk_r)?;
+    let dh2 = dh(kem, sk_s, pk_r)?;
+
+    let mut dh_combined = Vec::with_capacity(dh1.len() + dh2.len());
+    dh_combined.extend_from_slice(&dh1);
+    dh_combined.extend_from_slice(&dh2);
+
+    let pk_s = kem_public_key(kem, sk_s)?;
+    let mut kem_context = Vec::with_capacity(pk_e.len() + pk_r.len() + pk_s.len());
+    kem_context.extend_from_slice(&pk_e);
+    kem_context.extend_from_slice(pk_r);
+    kem_context.extend_from_slice(&pk_s);
+
+    let shared_secret = kem_extract_and_expand(kem, &dh_combined, &kem_context)?;
+    Ok((shared_secret, pk_e))
+}
+
+/// Derive a HPKE KEM `(sk, pk)` key pair from an input keying material `ikm`
+/// per RFC 9180 §7.1.3 DeriveKeyPair. This is the test-only public entry
+/// point that lets the C SDV `AEAD_TC001` / `EXPORT_SECRET_TC001` /
+/// `KEM_TC001` KATs inject deterministic `ikmE` / `ikmR` / `ikmS` seeds and
+/// reproduce the published `(skE, pkE)` / `(skR, pkR)` / `(skS, pkS)` byte
+/// streams.
+#[cfg(feature = "kat-nonce")]
+#[doc(hidden)]
+#[deprecated(
+    note = "test-only: deterministic key derivation; use setup_sender / setup_recipient in production"
+)]
+pub fn derive_key_pair(kem: HpkeKem, ikm: &[u8]) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+    kem_derive_key_pair(kem, ikm)
 }
 
 // --- HPKE Key Schedule (RFC 9180 §5.1) ---
@@ -969,6 +1012,88 @@ impl HpkeCtx {
     #[deprecated(note = "test-only: arbitrary seq reuse leaks AEAD nonce")]
     pub fn set_seq(&mut self, seq: u64) {
         self.seq = seq;
+    }
+
+    /// Unified KAT entry point that runs HPKE Encap with a deterministic
+    /// ephemeral seed `ikm_e` (rather than system randomness) and then the
+    /// key schedule. Dispatches on `mode`:
+    /// - `0x00` Base / `0x01` PSK → KEM Encap (`pk_r`, `ikm_e`);
+    /// - `0x02` Auth / `0x03` AuthPSK → KEM AuthEncap (`pk_r`, `sk_s`, `ikm_e`).
+    ///
+    /// `sk_s` is unused (empty) in Base / PSK modes; `psk` / `psk_id` are
+    /// unused (empty) in Base / Auth modes. Returns the constructed
+    /// `HpkeCtx` plus the encapsulated key `enc` (the sender's ephemeral
+    /// public key) for the recipient.
+    ///
+    /// This mirrors the C SDV `GenerateHpkeCtxSAndCtxR` helper that drives
+    /// the `AEAD_TC001` / `EXPORT_SECRET_TC001` / `KEM_TC001` KATs.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(note = "test-only: ikm_e injection bypasses KEM randomness")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn setup_sender_kat(
+        suite: CipherSuite,
+        mode: u8,
+        pk_r: &[u8],
+        sk_s: &[u8],
+        info: &[u8],
+        psk: &[u8],
+        psk_id: &[u8],
+        ikm_e: &[u8],
+    ) -> Result<(Self, Vec<u8>), CryptoError> {
+        let (shared_secret, enc) = if mode == MODE_AUTH || mode == MODE_AUTH_PSK {
+            kem_auth_encap_with_ikm_e(suite.kem, pk_r, sk_s, ikm_e)?
+        } else {
+            kem_encap_deterministic(suite.kem, pk_r, ikm_e)?
+        };
+        let (key, base_nonce, exporter_secret) =
+            key_schedule(&suite, mode, &shared_secret, info, psk, psk_id)?;
+        Ok((
+            Self {
+                key,
+                base_nonce,
+                exporter_secret,
+                seq: 0,
+                suite,
+            },
+            enc,
+        ))
+    }
+
+    /// Unified KAT recipient entry point. Dispatches on `mode`:
+    /// - `0x00` Base / `0x01` PSK → KEM Decap (`enc`, `sk_r`);
+    /// - `0x02` Auth / `0x03` AuthPSK → KEM AuthDecap (`enc`, `sk_r`, `pk_s`).
+    ///
+    /// `pk_s` is unused (empty) in Base / PSK modes; `psk` / `psk_id` are
+    /// unused (empty) in Base / Auth modes.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(note = "test-only: KAT helper companion to setup_sender_kat")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn setup_recipient_kat(
+        suite: CipherSuite,
+        mode: u8,
+        sk_r: &[u8],
+        pk_s: &[u8],
+        enc: &[u8],
+        info: &[u8],
+        psk: &[u8],
+        psk_id: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let shared_secret = if mode == MODE_AUTH || mode == MODE_AUTH_PSK {
+            kem_auth_decap(suite.kem, enc, sk_r, pk_s)?
+        } else {
+            kem_decap(suite.kem, enc, sk_r)?
+        };
+        let (key, base_nonce, exporter_secret) =
+            key_schedule(&suite, mode, &shared_secret, info, psk, psk_id)?;
+        Ok(Self {
+            key,
+            base_nonce,
+            exporter_secret,
+            seq: 0,
+            suite,
+        })
     }
 }
 

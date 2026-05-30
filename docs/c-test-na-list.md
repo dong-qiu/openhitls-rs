@@ -77,8 +77,8 @@ Counts are the `Generation summary` footer of each generated file
 | FrodoKEM | 8 | 90 | 0 | 5 | 103 |
 | AES-CCM | 36 | 66 | 0 | 0 | 84 |
 | AES-KW | 16 | 18 | 0 | 8 | 42 |
-| HPKE | 216 | 251 | 0 | 0 | 467 |
-| **Total** | **2457** | **3933** | **240** | **109** | **6005** |
+| HPKE | 432 | 35 | 0 | 0 | 467 |
+| **Total** | **2673** | **3717** | **240** | **109** | **6005** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -261,6 +261,36 @@ across 4 modes × 4 KEMs × 3 KDFs × 3 AEADs, sampled at varying
 `exporterContext` and output length `L`). **Zero new production code** —
 reuses the T149 `kat-nonce`-gated `HpkeCtx::from_shared_secret` plus the
 existing public `HpkeCtx::export`.
+
+T151 closes **AEAD_TC001** (seal/open) and **EXPORT_SECRET_TC001** (export)
+together: both have the same `(mode, kemId, kdfId, aeadId, info, psk, pskId,
+ikmE, ikmR, ikmS, …)` prefix and publish `ikmE`/`ikmR`/`ikmS` instead of a
+precomputed `shared_secret`, so they share a common KAT-style preamble
+(`derive_key_pair(suite.kem, ikm_r) → (sk_r, pk_r)` /
+`derive_key_pair(suite.kem, ikm_s) → (sk_s, pk_s)`) followed by
+`HpkeCtx::setup_sender_kat(suite, mode, pk_r, sk_s, info, psk, psk_id,
+ikm_e) → (HpkeCtx, enc)` and
+`HpkeCtx::setup_recipient_kat(suite, mode, sk_r, pk_s, &enc, info, psk,
+psk_id) → HpkeCtx`. Both new `setup_*_kat` constructors and the free
+`derive_key_pair` function are added to `hitls_crypto::hpke` under
+`#[cfg(feature = "kat-nonce")] + #[doc(hidden)] + #[deprecated(note =
+"test-only: …")]`; internally they reuse the existing private
+`kem_encap_deterministic` (gate relaxed from `#[cfg(test)]` to
+`#[cfg(any(test, feature = "kat-nonce"))]`) plus a new
+`kem_auth_encap_with_ikm_e` (same gate, mirroring `kem_auth_encap` but with
+`kem_derive_key_pair` for `skE`). Each AEAD row emits one test that asserts
+both `ctx_s.seal(aad, pt) == ct` and `ctx_r.open(aad, ct) == pt` at the
+row's `seq` (the seal/open round-trip is also an implicit assertion that
+the sender's `enc` matches what the recipient derives from `ikm_r`). Each
+EXPORT row emits one test that asserts both `ctx_s.export(exporter_context,
+L) == expected` and `ctx_r.export(...) == expected`. **Added 216 byte-exact
+tests** (`migrated_hpke.rs` 216 → **432**), full RFC 9180 matrix coverage:
+4 modes × 4 KEMs × 3 KDFs × 3 AEADs × {seal/open, export}. The remaining
+HPKE rows (35: KEM_TC001 × 24 + abnormal/randomly/generate-key-pair × 11)
+route to API-surface. **KEM_TC001 remains deferred** — it tests
+`(skE, pkE)` byte-exact derivation + standalone Encap/Decap with no AEAD
+attached, which needs its own emitter shape (not just a different
+constructor); listed in *Structural gaps* below.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
