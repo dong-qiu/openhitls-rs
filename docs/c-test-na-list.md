@@ -77,7 +77,8 @@ Counts are the `Generation summary` footer of each generated file
 | FrodoKEM | 8 | 90 | 0 | 5 | 103 |
 | AES-CCM | 36 | 66 | 0 | 0 | 84 |
 | AES-KW | 16 | 18 | 0 | 8 | 42 |
-| **Total** | **2241** | **3682** | **240** | **109** | **5538** |
+| HPKE | 144 | 323 | 0 | 0 | 467 |
+| **Total** | **2385** | **4005** | **240** | **109** | **6005** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -221,6 +222,32 @@ byte-exact tests across AES-128/192/256 NOPAD; the 8 `WRAP_PAD` rows
 NOPAD. The `FUNC_TC002` lifecycle rows (`isProvider, algId, KeyLen`), the
 `NOT_ALIGN` rows, and `(PAD_)API_TC001` route to API-surface. No new production
 code.
+
+HPKE (T149) migrates the **SHARED_SECRET_TC001** family from
+`test_suite_sdv_eal_hpke.data` via `emit_hpke_kat` in the new
+`xtask/src/hpke.rs`. The RFC 9180 KAT vectors publish a precomputed
+`shared_secret` per row, which lets the migration drive the **key schedule +
+AEAD seal/open** directly — bypassing the randomised KEM Encap. This is
+enabled by two new `kat-nonce`-gated public APIs on
+`hitls_crypto::hpke::HpkeCtx` (both `#[doc(hidden)] + #[deprecated]`,
+test-only): `from_shared_secret(suite, mode, shared_secret, info, psk, psk_id)`
+constructs an `HpkeCtx` directly from a shared secret (`mode` is the RFC 9180
+HPKE-mode byte `0x00`/`0x01`/`0x02`/`0x03`); `set_seq(seq)` pins the AEAD
+sequence counter (the C tests vary `seq` across `{0,1,2,4,255,256}` to
+exercise the per-call nonce derivation `base_nonce XOR seq_be64`). Row shape
+`(mode, kemId, kdfId, aeadId, info, psk, pskId, sharedSecret, seq, pt, aad,
+ct)`; each row emits one test that constructs sender + recipient ctxs from
+the same `shared_secret`, sets `seq`, then `seal(aad, pt) == ct` and
+`open(aad, ct) == pt`. **144 byte-exact tests**, all passing first run, full
+matrix coverage: 4 modes × 4 KEMs (X25519/P-256/P-384/P-521) × 3 KDFs
+(SHA-256/384/512) × 3 AEADs (AES-128/256-GCM + ChaCha20-Poly1305). The other
+TCs route to API-surface here and are deferred to T150+: AEAD_TC001 (144,
+needs `kem_encap_with_ikm_e` + `kem_derive_key_pair` sender-side hooks for
+ikmE injection), EXPORT_SECRET_TC001 (72, same hooks), KEM_TC001 (24, tests
+KEM derive-key-pair byte-exact), SHARED_SECRET_TC002 (72, export from
+shared_secret), and the abnormal / randomly / generate-key-pair API rows
+(`ABNORMAL_TC*`, `SHARED_SECRET_RANDOMLY_TC*`, `TEST_RANDOMLY_TC*`,
+`GENERATE_KEY_PAIR_TC001`) which exercise EAL ctx CRUD only.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
