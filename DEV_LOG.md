@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I145 (145 phases)
-- Testing: T1–T147 (140 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard); T144 — Phase A continued: KDF KAT (HKDF/PBKDF2/scrypt/TLS1.2-PRF, 22 byte-exact tests; first migration into `hitls-tls` — TLS1.2 PRF; no production code); T145 — Phase A continued: AEAD/MAC KAT (AES-GCM/GMAC/ChaCha20-Poly1305/SipHash, 60 byte-exact tests, no production code; CBC-MAC deferred — Rust `CbcMacSm4` diverges from the C SM4 vectors; root-caused + fixed in I144); T146 — PQC KEM (FrodoKEM/McEliece) decaps KAT migration attempted + **blocked**: the Rust impls are self-round-trip-validated only (never against reference KATs), and decapsulating a C-vector secret key yields the wrong shared secret (sk byte-layout / algorithm divergence from the reference) — documented as a na-list structural gap, no tests added; T147 — Phase A continued: AES-CCM KAT (36 byte-exact tests across UPDATE_FUNC_TC001 / TC002 / MULTI_THREAD_FUNC_TC001 row shapes, tagLen derived from `len(ct‖tag) - len(pt)`; closes the AEAD KAT category, no production code))
+- Testing: T1–T148 (141 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard); T144 — Phase A continued: KDF KAT (HKDF/PBKDF2/scrypt/TLS1.2-PRF, 22 byte-exact tests; first migration into `hitls-tls` — TLS1.2 PRF; no production code); T145 — Phase A continued: AEAD/MAC KAT (AES-GCM/GMAC/ChaCha20-Poly1305/SipHash, 60 byte-exact tests, no production code; CBC-MAC deferred — Rust `CbcMacSm4` diverges from the C SM4 vectors; root-caused + fixed in I144); T146 — PQC KEM (FrodoKEM/McEliece) decaps KAT migration attempted + **blocked**: the Rust impls are self-round-trip-validated only (never against reference KATs), and decapsulating a C-vector secret key yields the wrong shared secret (sk byte-layout / algorithm divergence from the reference) — documented as a na-list structural gap, no tests added; T147 — Phase A continued: AES-CCM KAT (36 byte-exact tests across UPDATE_FUNC_TC001 / TC002 / MULTI_THREAD_FUNC_TC001 row shapes, tagLen derived from `len(ct‖tag) - len(pt)`; closes the AEAD KAT category, no production code); T148 — Phase A continued: AES-KW (RFC 3394 NOPAD) KAT (16 byte-exact tests across AES-128/192/256, `(algId, key, iv, in, out, enc)` row shape, each row → one direction by `enc`; 8 RFC 5649 PAD rows recorded as a na-list Structural-gaps entry; no production code))
 - Refactoring: R1–R19 (19 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -402,6 +402,7 @@ Category summary:
 | 402 | T146 | Test | PQC KEM (FrodoKEM / Classic McEliece) decaps KAT migration **attempted + blocked** — documents a real reference-KAT validation gap (no tests added; docs only). The `ENCAPS_DECAPS_FUNC_TC001` decaps direction (`decapsulate(testDk, testCt) == testSs`) is deterministic and needs no randomness hook, so it looked migratable like ML-KEM (T137). A `from_decapsulation_key(param, dk)` constructor was prototyped for both keypairs (mirroring `MlKemKeyPair::from_decapsulation_key`) — but **every decaps KAT failed**: FrodoKEM decaps returns a *different* shared secret than the C `testSs`, and McEliece decaps errors inside `decode`/`deserialize_private_key`. The field **lengths all match the spec** (FrodoKEM-640 dk = 19888, McEliece-6688128 dk = 13932, ct/ss sizes correct), so the divergence is in the **secret-key byte layout** (and possibly the algorithm), not the sizes. Root cause: the Rust FrodoKEM/McEliece impls are validated **only by self round-trip** (`generate → encaps → decaps`, asserting `ss1 == ss2`), never against reference/NIST KAT vectors — their on-the-wire sk/ct encoding was never proven reference-compatible (a genuine validation-coverage hole that the migration discipline surfaced). hybridkem has no fixed-vector KATs (round-trip/consistency only) → API-surface. The prototype was reverted (no failing tests shipped); the gap is recorded in `docs/c-test-na-list.md` (28 decaps rows: frodokem 26 + mceliece 2) with the unblock path (byte-align the sk/ct serialization with the reference, or confirm/fix an algorithmic divergence — larger than a localized fix, touches production PQC code). Docs-only change | 2026-05-29 |
 | 403 | I145 | Impl | **FrodoKEM reference-interoperability fix** (resolves the T146-diagnosed bug; 6th bug found via the migration discipline) — `frodokem::util::pack` / `unpack` used **LSB-first (little-endian) bit ordering**, but the FrodoKEM reference (openHiTLS C `FrodoCommonPack`/`Unpack`) uses **MSB-first (big-endian)** for both `logq=15` and `logq=16`. The two were self-consistent (so self round-trip passed) but **not reference-compatible**: every packed value (the public key's `B`, the ciphertext's `c1`/`c2`) was bit-incompatible, so decapsulating a reference `(sk, ct)` recovered the wrong `mu'` → implicit rejection → wrong shared secret. **Diagnosis path** (T146 + here): byte-verified sk `s`/`pk`/`pkh` correct → ruled out a simple S^T transpose → confirmed `mul_bs` (`== C FrodoCommonMulBsUsingSt`) and `decode` (`== C FrodoCommonKeyDecode`) match → isolated the divergence to `pack`/`unpack` bit-endianness. **Fix:** rewrote `pack`/`unpack` MSB-first to mirror the C reference exactly; re-added `FrodoKemKeyPair::from_decapsulation_key(param, dk)`. **Verified:** all **8 FrodoKEM reference decaps KATs** now pass (`migrated_frodokem.rs`, via the new `xtask` `frodokem` emitter; the 5 eFrodoKEM rows are unsupported = no fixed vectors); self round-trip still passes for all 6 param sets; full hitls-crypto suite green; `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** FrodoKEM is now wire-interoperable with the reference/other implementations (previously a Rust-generated FrodoKEM key/ct could not be used by any standard implementation and vice-versa). **McEliece deferred** — its decaps still diverges (a separate code-based-scheme serialization issue: delta/c/g/s/controlbits + Benes network; 2 KAT rows) → remains a na-list gap | 2026-05-30 |
 | 404 | T147 | Test | C→Rust AES-CCM KAT migration (Phase A continued — closes the AEAD-KAT category). Extends `xtask/src/aead.rs` with `emit_aes_ccm_kat` + a new `aes-ccm` dispatch arm in `xtask/src/main.rs` pointing at `crypto/aes/test_suite_sdv_eal_aes_ccm.data`. Three byte-exact row shapes are recognised: `UPDATE_FUNC_TC001:(isProvider, algId, key, iv, aad, pt, ct‖tag)` — `tagLen = len(ct‖tag) - len(pt)` mirroring the C `tagLen = ciphertext->len - plaintext->len`; `UPDATE_FUNC_TC002:(algId, key, iv, aad, pt, ct, tag)` — ct/tag split; `MULTI_THREAD_FUNC_TC001:(isProvider, algId, key, iv, aad, pt, ct, tag)`. Each unique row emits **both directions** (`ccm_encrypt(key, iv, aad, pt, tag_len) == ct‖tag`, `ccm_decrypt(key, iv, aad, ct‖tag, tag_len) == pt`); 18 NIST vectors × 2 directions = **36 byte-exact tests**, all passing first run. `isProvider == 1` rows (12 total) duplicate the `0` rows → API-surface (consistent with the workspace-wide provider-dedup convention); CTRL_API_TC* / REINIT_API_TC* / UPDATE_API_TC001 (24 rows) → API-surface. **No production code change** (`ccm_encrypt`/`ccm_decrypt` already accept an explicit `tag_len` covering all M ∈ {4,6,8,10,12,14,16}, verified across the vectors — 6/11-byte IVs, 4/16-byte tags, AES-128/192/256). No regression — `migrated_aes_ccm` 36/0 (`-p hitls-crypto --all-features`); xtask `--check` drift gate passes; na-list tally → 2225 emitted (AES-CCM 36/66/0/0/84, Total 2225/3664/240/101/5496); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-30 |
+| 405 | T148 | Test | C→Rust AES Key Wrap (RFC 3394 NOPAD) KAT migration (Phase A continued). Extends `xtask/src/aead.rs` with `emit_aes_kw_kat` + an `aes-kw` dispatch arm in `xtask/src/main.rs` pointing at `crypto/aes/test_suite_sdv_eal_aes_wrap.data`. Row shape `(algId, key, iv, in, out, enc)` is shared between `FUNC_TC001` and `FUNC_TC003`; the empty `iv` field reflects the RFC 3394 fixed IV `0xA6A6A6A6A6A6A6A6` used internally by `hitls_crypto::modes::wrap::{key_wrap, key_unwrap}`. Each row maps to exactly one direction selected by `enc`: `enc=true` → `key_wrap(kek, input) == expected`; `enc=false` → `key_unwrap(kek, input) == expected`. Result: `migrated_aes_kw.rs` — **16 byte-exact tests** (8 wrap + 8 unwrap; 12 NOPAD vectors from TC001 + 4 NOPAD vectors from TC003 split half-and-half across AES-128/192/256), all passing first run. The 8 `WRAP_PAD` rows (RFC 5649 padded key wrap) are routed to `unsupported` — Rust only implements NOPAD — and added to the `docs/c-test-na-list.md` Structural-gaps table with an `Unblock: add key_wrap_pad / key_unwrap_pad helpers per RFC 5649`. The lifecycle `FUNC_TC002:(isProvider, algId, KeyLen)`, the `NOT_ALIGN_TC001`, `API_TC001` and `PAD_API_TC001` rows route to API-surface (no fixed vectors). **No production-code change.** No regression — `migrated_aes_kw` 16/0 (`-p hitls-crypto --all-features`); xtask `--check` drift gate passes; existing AEAD/MAC suites unchanged (GCM 12, CCM 36, GMAC 12, ChaCha20-Poly1305 34, SipHash 2, CBC-MAC 4); na-list tally → 2241 emitted (AES-KW 16/18/0/8/42, Total 2241/3682/240/109/5538); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-30 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -25134,3 +25135,93 @@ candidates per `docs/c-test-na-list.md` Structural-gaps + the C SDV file list:
 **AES key-wrap** (RFC 3394 deterministic), **HPKE** (RFC 9180), **SLH-DSA**
 (FIPS 205), **XMSS** (RFC 8391), **SM9** (sign / crypt / exchange), and the
 McEliece reference-interop investigation deferred from I145.
+
+---
+
+## Phase T148 — AES Key Wrap (RFC 3394 NOPAD) KAT Migration (2026-05-30)
+
+### Summary
+
+Phase A continuation: migrated the byte-exact KATs from
+`test_suite_sdv_eal_aes_wrap.data` against the Rust `hitls_crypto::modes::wrap::
+{key_wrap, key_unwrap}` (RFC 3394). 16 byte-exact tests (8 wrap + 8 unwrap)
+across AES-128/192/256, all passing first run. **No production-code change.**
+The 8 `WRAP_PAD` (RFC 5649 padded key wrap) rows are recorded as `unsupported`
+and added to the na-list Structural-gaps table — Rust only implements NOPAD.
+
+### Files changed
+
+- `xtask/src/aead.rs` — new `emit_aes_kw_kat`. Shares `aes_bits` /
+  `write_doc` / `write_footer` / `format_byte_slice` with the existing AEAD
+  emitters.
+- `xtask/src/main.rs` — `"aes-kw" => (vec![c_root.join("crypto/aes/
+  test_suite_sdv_eal_aes_wrap.data")], …migrated_aes_kw.rs, aead::
+  emit_aes_kw_kat)`; appended `aes-kw` to the supported-algos error string.
+- `crates/hitls-crypto/tests/migrated_aes_kw.rs` — **generated** (16 tests).
+- `docs/c-test-na-list.md` — added the AES-KW tally row (16/18/0/8/42),
+  bumped the Total to 2241/3682/240/109/5538, added a brief prose paragraph
+  alongside the AES-CCM T147 section, and added the RFC 5649 `WRAP_PAD` gap
+  to the Structural-gaps table.
+- `DEV_LOG.md` / `PROMPT_LOG.md` — this phase entry.
+
+### Implementation details — row-shape dispatch
+
+C test fn (`test_suite_sdv_eal_aes_wrap.c`):
+
+```c
+void SDV_CRYPTO_EAL_AES_WRAP_FUNC_TC001(int algId, Hex *key, Hex *iv,
+    Hex *in, Hex *out, int enc)
+void SDV_CRYPTO_EAL_AES_WRAP_FUNC_TC003(int algId, Hex *key, Hex *iv,
+    Hex *in, Hex *out, int enc)
+```
+
+Both shapes are identical: `(algId, key, iv, in, out, enc)`. The `iv` field
+is always empty in the data file — RFC 3394 uses the fixed IV
+`0xA6A6A6A6A6A6A6A6` internally, which `key_wrap`/`key_unwrap` apply via the
+`DEFAULT_IV` constant in `modes/wrap.rs`.
+
+Each row maps to exactly one direction:
+- `enc=true`  → `key_wrap(kek, input) == expected`
+- `enc=false` → `key_unwrap(kek, input) == expected`
+
+PAD vs NOPAD dispatch: a `_PAD` substring on the algid routes the row to
+`unsupported`. `FUNC_TC002:(isProvider, algId, KeyLen)` is a lifecycle test
+(no fixed vector) → API-surface; `NOT_ALIGN_TC001` / `API_TC001` /
+`PAD_API_TC001` likewise → API-surface.
+
+### Verification
+
+```bash
+cargo run -p xtask -- migrate-c-tests --algo aes-kw \
+    --c-root /Users/dongqiu/Dev/code/openhitls/testcode/sdv/testcase
+#   parsed 42 TC rows
+#   emitted 16 tests, skipped 18 API-surface, 0 unknown, 8 unsupported-alg
+
+cargo test -p hitls-crypto --all-features --test migrated_aes_kw
+#   test result: ok. 16 passed; 0 failed; 0 ignored
+
+cargo run -p xtask -- migrate-c-tests --algo aes-kw --check \
+    --c-root /Users/dongqiu/Dev/code/openhitls/testcode/sdv/testcase
+#   passes
+```
+
+`cargo fmt --all` + `RUSTFLAGS="-D warnings" cargo clippy --workspace
+--all-features --all-targets` clean. No regression in the existing AEAD/MAC
+migrated suites (GCM 12, CCM 36, GMAC 12, ChaCha20-Poly1305 34, SipHash 2,
+CBC-MAC 4).
+
+### Structural gap — RFC 5649 WRAP_PAD
+
+8 rows (4 from TC001, 4 from TC003) use
+`CRYPT_CIPHER_AES{128,192,256}_WRAP_PAD`, which is RFC 5649 padded key wrap
+(KW-padded, allows arbitrary input length including non-multiple-of-8 inputs
+by prepending a 4-byte AIV `A65959A6 ‖ MLI`). `hitls_crypto::modes::wrap`
+only implements the NOPAD path. Unblock: add `key_wrap_pad` / `key_unwrap_pad`
+helpers per RFC 5649 (the existing RFC 3394 wrap round can be reused; only
+the AIV format + length handling change).
+
+### Migration tally (post-T148)
+
+| Category | Emitted | API-surface | Unknown | Unsupported | Total |
+|----------|--------:|------------:|--------:|------------:|------:|
+| All algos (30 rows in tally) | **2241** | **3682** | **240** | **109** | **5538** |
