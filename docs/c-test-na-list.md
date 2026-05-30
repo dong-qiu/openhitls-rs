@@ -76,7 +76,8 @@ Counts are the `Generation summary` footer of each generated file
 | CBC-MAC (SM4) | 4 | 25 | 0 | 0 | 29 |
 | FrodoKEM | 8 | 90 | 0 | 5 | 103 |
 | AES-CCM | 36 | 66 | 0 | 0 | 84 |
-| **Total** | **2225** | **3664** | **240** | **101** | **5496** |
+| AES-KW | 16 | 18 | 0 | 8 | 42 |
+| **Total** | **2241** | **3682** | **240** | **109** | **5538** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -209,6 +210,18 @@ aad, pt, tag_len) == ct‖tag` and `ccm_decrypt(key, iv, aad, ct‖tag, tag_len)
 UPDATE_API families (24 rows) route to API-surface; 0 unknown, 0 unsupported,
 no new production code.
 
+AES key-wrap (T148) migrates RFC 3394 NOPAD KATs via `emit_aes_kw_kat` in
+`xtask/src/aead.rs`. The C row shape is the same for `FUNC_TC001` and `TC003`:
+`(algId, key, iv, in, out, enc)` (the `iv` field is always empty — RFC 3394
+uses the fixed IV `0xA6A6A6A6A6A6A6A6` internally). The `enc` bool selects the
+direction — each row maps to exactly one test: `enc=true` → `key_wrap(kek,
+input) == expected`; `enc=false` → `key_unwrap(kek, input) == expected`. 16
+byte-exact tests across AES-128/192/256 NOPAD; the 8 `WRAP_PAD` rows
+(RFC 5649 padded key wrap) are `unsupported` — the Rust port only implements
+NOPAD. The `FUNC_TC002` lifecycle rows (`isProvider, algId, KeyLen`), the
+`NOT_ALIGN` rows, and `(PAD_)API_TC001` route to API-surface. No new production
+code.
+
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
 +60 sign KATs). The C injects the row's `seed` as the FIPS 204 hedging `rnd`
@@ -282,6 +295,7 @@ migration tool emit the corresponding tests with no generator change.
 | Gap | Affected | Count | Reason | Unblock |
 |-----|----------|------:|--------|---------|
 | AES-CBC raw KAT | AES | 12 | `cbc_encrypt`/`cbc_decrypt` hardcode PKCS#7 padding — cannot reproduce a block-aligned raw KAT | add `cbc_encrypt_raw` / `cbc_decrypt_raw` no-padding helpers |
+| AES-KW PAD (RFC 5649) | AES-KW | 8 | `hitls_crypto::modes::wrap` only implements the RFC 3394 NOPAD path (`key_wrap` / `key_unwrap`); RFC 5649 padded key wrap (KW-padded, allows arbitrary input length) has no public Rust entry point | add `key_wrap_pad` / `key_unwrap_pad` helpers per RFC 5649 |
 | SM4 CBC / CTR / CFB / OFB / HCTR / XTS + GCM-decrypt | SM4 | 37 | CBC hardcodes PKCS#7 padding; CTR/CFB/OFB/HCTR/XTS have no public SM4 entry point; GCM-decrypt needs the 16-byte tag absent from the `.data` | add SM4 raw-mode public functions; a CBC no-padding helper |
 | SM2 key exchange | SM2 | 17 | `Sm2KeyPair` exposes no key-exchange method | add an SM2 ECDH / key-exchange API |
 | HMAC/CMAC SHA-3 | HMAC, CMAC | 8 | SHA-3 is not yet wired into the `Digest` trait used by the MAC one-shot path; CMAC is also AES-only (`CRYPT_MAC_CMAC_SM4`) | implement the `Digest` impl for SHA-3; generalise `Cmac` over `BlockCipher` |

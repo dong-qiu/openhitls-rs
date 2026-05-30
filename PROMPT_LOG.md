@@ -9044,3 +9044,43 @@ ChaCha20-Poly1305 34, SipHash 2, CBC-MAC 4); fmt + clippy -D warnings
 na-list tally updated: AES-CCM 36/66/0/0/84, Total 2225/3664/240/101/5496.
 
 Recorded as DEV_LOG Phase T147.
+
+## Phase T148 — AES Key Wrap (RFC 3394 NOPAD) KAT Migration (2026-05-30)
+
+> 继续
+
+Phase A continuation: migrated the byte-exact KATs from
+test_suite_sdv_eal_aes_wrap.data against the Rust
+hitls_crypto::modes::wrap::{key_wrap, key_unwrap} (RFC 3394).
+
+Extended xtask/src/aead.rs with emit_aes_kw_kat + an "aes-kw" dispatch arm in
+xtask/src/main.rs pointing at crypto/aes/test_suite_sdv_eal_aes_wrap.data.
+
+Row shape (cross-referenced against test_suite_sdv_eal_aes_wrap.c):
+FUNC_TC001 / FUNC_TC003 → (algId, key, iv, in, out, enc). The iv field is
+always empty — RFC 3394 uses the fixed IV 0xA6A6A6A6A6A6A6A6 internally via
+the DEFAULT_IV constant in modes/wrap.rs. Each row maps to exactly one
+direction selected by enc: enc=true → key_wrap(kek, input) == expected;
+enc=false → key_unwrap(kek, input) == expected.
+
+Result: migrated_aes_kw.rs — 16 byte-exact tests (8 wrap + 8 unwrap; 12
+NOPAD vectors from TC001 + 4 NOPAD vectors from TC003 split half-and-half
+across AES-128/192/256), all passing first run.
+
+The 8 WRAP_PAD rows (RFC 5649 padded key wrap; KW-padded with the
+AIV A65959A6 ‖ MLI) are unsupported — Rust only implements NOPAD. Added to
+the na-list Structural-gaps table with Unblock: "add key_wrap_pad /
+key_unwrap_pad helpers per RFC 5649". FUNC_TC002 lifecycle rows
+(isProvider, algId, KeyLen), NOT_ALIGN_TC001, API_TC001, PAD_API_TC001 →
+API-surface.
+
+No production-code change.
+
+Verification: migrated_aes_kw 16/0 (-p hitls-crypto --all-features); xtask
+--check drift gate passes; existing AEAD/MAC suites unchanged (GCM 12, CCM 36,
+GMAC 12, ChaCha20-Poly1305 34, SipHash 2, CBC-MAC 4); fmt + clippy -D warnings
+--all-features --all-targets clean.
+
+na-list tally updated: AES-KW 16/18/0/8/42, Total 2241/3682/240/109/5538.
+
+Recorded as DEV_LOG Phase T148.
