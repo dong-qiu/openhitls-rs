@@ -9137,3 +9137,45 @@ verified); fmt + clippy -D warnings --all-features --all-targets clean.
 na-list tally updated: HPKE 144/323/0/0/467, Total 2385/4005/240/109/6005.
 
 Recorded as DEV_LOG Phase T149.
+
+## Phase T150 — HPKE SHARED_SECRET_TC002 (Export) KAT Migration (2026-05-31)
+
+> 继续推进T150
+> 请继续刚才未完成的工作
+
+Phase A continuation: extends the T149 HPKE emitter to also migrate the
+SHARED_SECRET_TC002 family (the export-secret variant alongside the TC001
+seal/open path).
+
+Added emit_shared_secret_tc002 helper to xtask/src/hpke.rs; the main
+emit_hpke_kat dispatcher now routes SHARED_SECRET_TC002 rows to it before
+falling through to the TC001 path.
+
+Row shape (mode, kemId, kdfId, aeadId, info, psk, pskId, sharedSecret,
+exporterContext, L, exportedValue) — 11 fields. Same symbolic-prefix
+dispatch as TC001 (mode/kem/kdf/aead resolved via the existing lookup
+tables). L is an unquoted integer parsed via usize::parse.
+
+Each row emits one #[test] tc_lineN_hpke_export_<mode>_<kem>_<kdf>_<aead>
+that builds a single HpkeCtx via the T149 kat-nonce-gated
+HpkeCtx::from_shared_secret, then asserts ctx.export(exporter_context, L)
+== expected. The C body builds both a sender and recipient ctx and asserts
+both — but HpkeCtx::export is &self (read-only), so a single ctx is
+functionally identical; emitting one test per row avoids redundant
+assertions.
+
+Result: migrated_hpke.rs — 144 → 216 byte-exact tests (+72), all passing
+first run. Full RFC 9180 export-secret matrix coverage across 4 modes × 4
+KEMs × 3 KDFs × 3 AEADs at varying exporterContext and output length L.
+
+Zero new production code — reuses the T149 HpkeCtx::from_shared_secret
+hook + existing public HpkeCtx::export.
+
+Verification: migrated_hpke 216/0 (-p hitls-crypto --all-features); xtask
+--check drift gate passes; builds clean without kat-nonce; fmt + clippy
+-D warnings --all-features --all-targets clean.
+
+na-list tally updated: HPKE 216/251/0/0/467 (was 144/323), Total
+2457/3933/240/109/6005 (was 2385/4005).
+
+Recorded as DEV_LOG Phase T150.

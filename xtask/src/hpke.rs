@@ -102,17 +102,139 @@ fn write_footer(out: &mut String, stats: &EmitStats, total: usize) {
     .unwrap();
 }
 
+// Per-row emitter for SHARED_SECRET_TC002. C test fn:
+//   void SDV_CRYPT_EAL_HPKE_SHARED_SECRET_TC002(
+//       int mode, int kemId, int kdfId, int aeadId,
+//       Hex *info, Hex *psk, Hex *pskId, Hex *sharedSecret,
+//       Hex *exporterContext, int L, Hex *exportedValue);
+// The C body builds both sender + recipient ctxs from the shared_secret and
+// asserts `ExportSecret(ctx, exporterContext, L) == exportedValue` against
+// both. The Rust `HpkeCtx::export` is `&self` (read-only), so a single ctx
+// is functionally identical to two — we emit one ctx per row.
+fn emit_shared_secret_tc002(body: &mut String, stats: &mut EmitStats, case: &TestCase) {
+    let (
+        Some(mode_sym),
+        Some(kem_sym),
+        Some(kdf_sym),
+        Some(aead_sym),
+        Some(info),
+        Some(psk),
+        Some(psk_id),
+        Some(shared_secret),
+        Some(exporter_context),
+        Some(l),
+        Some(exported_value),
+    ) = (
+        case.args.first().and_then(|a| a.as_symbol()),
+        case.args.get(1).and_then(|a| a.as_symbol()),
+        case.args.get(2).and_then(|a| a.as_symbol()),
+        case.args.get(3).and_then(|a| a.as_symbol()),
+        case.args.get(4).and_then(|a| a.as_hex()),
+        case.args.get(5).and_then(|a| a.as_hex()),
+        case.args.get(6).and_then(|a| a.as_hex()),
+        case.args.get(7).and_then(|a| a.as_hex()),
+        case.args.get(8).and_then(|a| a.as_hex()),
+        case.args.get(9).and_then(|a| a.as_symbol()),
+        case.args.get(10).and_then(|a| a.as_hex()),
+    )
+    else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let Some(mode_b) = mode_byte(mode_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let Some((kem_var, kem_tag)) = kem_enum(kem_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let Some((kdf_var, kdf_tag)) = kdf_enum(kdf_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let Some((aead_var, aead_tag)) = aead_enum(aead_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let Ok(l_usize) = l.parse::<usize>() else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let m_tag = mode_tag(mode_sym);
+
+    write_doc(body, case, "HPKE shared-secret export KAT");
+    writeln!(body, "#[test]").unwrap();
+    writeln!(body, "#[allow(deprecated)]").unwrap();
+    writeln!(
+        body,
+        "fn tc_line{}_hpke_export_{m_tag}_{kem_tag}_{kdf_tag}_{aead_tag}() {{",
+        case.line
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let suite = CipherSuite {{ kem: HpkeKem::{kem_var}, kdf: HpkeKdf::{kdf_var}, aead: HpkeAead::{aead_var} }};"
+    )
+    .unwrap();
+    writeln!(body, "    let info: &[u8] = {};", format_byte_slice(info)).unwrap();
+    writeln!(body, "    let psk: &[u8] = {};", format_byte_slice(psk)).unwrap();
+    writeln!(
+        body,
+        "    let psk_id: &[u8] = {};",
+        format_byte_slice(psk_id)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let shared_secret: &[u8] = {};",
+        format_byte_slice(shared_secret)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let exporter_context: &[u8] = {};",
+        format_byte_slice(exporter_context)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let expected: &[u8] = {};",
+        format_byte_slice(exported_value)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let ctx = HpkeCtx::from_shared_secret(suite, 0x{:02x}, shared_secret, info, psk, psk_id).unwrap();",
+        mode_b
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let exported = ctx.export(exporter_context, {l_usize}).unwrap();"
+    )
+    .unwrap();
+    writeln!(body, "    assert_eq!(exported.as_slice(), expected);").unwrap();
+    writeln!(body, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
 pub fn emit_hpke_kat(cases: &[TestCase]) -> (String, EmitStats) {
     let mut body = String::new();
     let mut stats = EmitStats::default();
 
     for case in cases {
-        // Migration scope: SHARED_SECRET_TC001 (key schedule + AEAD seal/open
-        // from a pre-derived shared_secret). Everything else (AEAD_TC001 /
-        // EXPORT_SECRET_TC001 / KEM_TC001 / SHARED_SECRET_TC002 / API /
-        // RANDOMLY) routes to API-surface here; follow-up Phase A work in
-        // T150+ will add `kem_encap_with_ikm_e` / `kem_derive_key_pair`
-        // public hooks for those.
+        // Migration scope: SHARED_SECRET_TC001 (seal/open) + SHARED_SECRET_TC002
+        // (export). Both drive the key schedule from a pre-derived
+        // shared_secret via `HpkeCtx::from_shared_secret`. Everything else
+        // (AEAD_TC001 / EXPORT_SECRET_TC001 / KEM_TC001 / API / RANDOMLY)
+        // routes to API-surface here; follow-up Phase A work in T151+ will
+        // add `kem_encap_with_ikm_e` / `kem_derive_key_pair` public hooks
+        // for those.
+        if case.tc_name.contains("SHARED_SECRET_TC002") {
+            emit_shared_secret_tc002(&mut body, &mut stats, case);
+            continue;
+        }
         if !case.tc_name.contains("SHARED_SECRET_TC001") {
             stats.skipped_api += 1;
             continue;
