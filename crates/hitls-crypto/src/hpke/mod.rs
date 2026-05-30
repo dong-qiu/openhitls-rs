@@ -927,6 +927,49 @@ impl HpkeCtx {
         self.seq += 1;
         Ok(())
     }
+
+    /// Construct an `HpkeCtx` directly from a precomputed `shared_secret`,
+    /// bypassing the KEM Encap/Decap step. This is the canonical KAT hook for
+    /// HPKE: RFC 9180 publishes a `shared_secret` per vector and the C SDV
+    /// `SHARED_SECRET_TC*` tests drive the key schedule + AEAD from it.
+    ///
+    /// `mode` is the RFC 9180 HPKE mode byte:
+    /// - `0x00` Base, `0x01` PSK, `0x02` Auth, `0x03` AuthPSK.
+    ///
+    /// `psk` / `psk_id` are empty for Base / Auth modes.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test-only: bypasses KEM; use setup_sender / setup_recipient in production"
+    )]
+    pub fn from_shared_secret(
+        suite: CipherSuite,
+        mode: u8,
+        shared_secret: &[u8],
+        info: &[u8],
+        psk: &[u8],
+        psk_id: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let (key, base_nonce, exporter_secret) =
+            key_schedule(&suite, mode, shared_secret, info, psk, psk_id)?;
+        Ok(Self {
+            key,
+            base_nonce,
+            exporter_secret,
+            seq: 0,
+            suite,
+        })
+    }
+
+    /// Set the AEAD sequence counter for the next `seal`/`open`. The C SDV
+    /// `SHARED_SECRET_TC001` vectors pin a specific `seq` per row to verify
+    /// the per-call nonce derivation `base_nonce XOR seq_be64`.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(note = "test-only: arbitrary seq reuse leaks AEAD nonce")]
+    pub fn set_seq(&mut self, seq: u64) {
+        self.seq = seq;
+    }
 }
 
 impl Drop for HpkeCtx {

@@ -9084,3 +9084,56 @@ GMAC 12, ChaCha20-Poly1305 34, SipHash 2, CBC-MAC 4); fmt + clippy -D warnings
 na-list tally updated: AES-KW 16/18/0/8/42, Total 2241/3682/240/109/5538.
 
 Recorded as DEV_LOG Phase T148.
+
+## Phase T149 — HPKE SHARED_SECRET_TC001 KAT Migration (first HPKE migration) (2026-05-30)
+
+> 继续T149
+
+Phase A continuation: migrated the SHARED_SECRET_TC001 family of
+test_suite_sdv_eal_hpke.data against hitls_crypto::hpke::HpkeCtx, covering
+the full RFC 9180 matrix: 4 modes × 4 KEMs × 3 KDFs × 3 AEADs = 144 unique
+vectors.
+
+Production-side: two new kat-nonce-gated public APIs on HpkeCtx (both
+#[doc(hidden)] + #[deprecated(note = "test-only: ...")]):
+
+- HpkeCtx::from_shared_secret(suite, mode: u8, shared_secret, info, psk,
+  psk_id) — constructs an HpkeCtx directly from a precomputed shared_secret,
+  bypassing the KEM Encap/Decap. Mirrors the C SDV GenHpkeCtxWithSharedSecret
+  helper. mode is the RFC 9180 HPKE-mode byte (0x00 Base / 0x01 PSK /
+  0x02 Auth / 0x03 AuthPSK).
+- HpkeCtx::set_seq(seq: u64) — pins the AEAD sequence counter for the next
+  seal/open. The C rows vary seq across {0,1,2,4,255,256} to exercise the
+  per-call nonce derivation base_nonce XOR seq_be64 (incl. the byte-boundary
+  255→256 cases).
+
+Both are #[cfg(feature = "kat-nonce")] — not compiled into default builds.
+
+New emitter xtask/src/hpke.rs + an "hpke" dispatch arm in xtask/src/main.rs
+pointing at crypto/hpke/test_suite_sdv_eal_hpke.data. Row shape
+(mode, kemId, kdfId, aeadId, info, psk, pskId, sharedSecret, seq, pt, aad,
+ct) — first 4 args are symbolic CRYPT_* macros, resolved via small symbol →
+(enum variant, short tag) lookup tables.
+
+Each row emits one #[test] tc_lineN_hpke_ss_<mode>_<kem>_<kdf>_<aead> that
+constructs sender + recipient ctxs from the same shared_secret, sets seq,
+then asserts seal(aad, pt) == ct and open(aad, ct) == pt.
+
+Result: migrated_hpke.rs — 144 byte-exact tests, all passing first run.
+Full RFC 9180 KAT matrix covered.
+
+Deferred HPKE TCs (route to API-surface here, follow-up to T150+):
+- AEAD_TC001 (144): needs setup_sender_with_ikm_e for ikmE-derived shared_secret.
+- EXPORT_SECRET_TC001 (72): same ikmE/ikmR plumbing + export().
+- KEM_TC001 (24): byte-exact KEM derive-key-pair + encap/decap.
+- SHARED_SECRET_TC002 (72): export from shared_secret — sibling of TC001,
+  could go in T150.
+- API / RANDOMLY / GENERATE_KEY_PAIR rows (8): permanent API-surface.
+
+Verification: migrated_hpke 144/0 (-p hitls-crypto --all-features); xtask
+--check drift gate passes; builds clean without kat-nonce (cfg gating
+verified); fmt + clippy -D warnings --all-features --all-targets clean.
+
+na-list tally updated: HPKE 144/323/0/0/467, Total 2385/4005/240/109/6005.
+
+Recorded as DEV_LOG Phase T149.

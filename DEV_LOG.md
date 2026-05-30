@@ -4,7 +4,7 @@
 
 Category summary:
 - Implementation: I1–I145 (145 phases)
-- Testing: T1–T148 (141 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard); T144 — Phase A continued: KDF KAT (HKDF/PBKDF2/scrypt/TLS1.2-PRF, 22 byte-exact tests; first migration into `hitls-tls` — TLS1.2 PRF; no production code); T145 — Phase A continued: AEAD/MAC KAT (AES-GCM/GMAC/ChaCha20-Poly1305/SipHash, 60 byte-exact tests, no production code; CBC-MAC deferred — Rust `CbcMacSm4` diverges from the C SM4 vectors; root-caused + fixed in I144); T146 — PQC KEM (FrodoKEM/McEliece) decaps KAT migration attempted + **blocked**: the Rust impls are self-round-trip-validated only (never against reference KATs), and decapsulating a C-vector secret key yields the wrong shared secret (sk byte-layout / algorithm divergence from the reference) — documented as a na-list structural gap, no tests added; T147 — Phase A continued: AES-CCM KAT (36 byte-exact tests across UPDATE_FUNC_TC001 / TC002 / MULTI_THREAD_FUNC_TC001 row shapes, tagLen derived from `len(ct‖tag) - len(pt)`; closes the AEAD KAT category, no production code); T148 — Phase A continued: AES-KW (RFC 3394 NOPAD) KAT (16 byte-exact tests across AES-128/192/256, `(algId, key, iv, in, out, enc)` row shape, each row → one direction by `enc`; 8 RFC 5649 PAD rows recorded as a na-list Structural-gaps entry; no production code))
+- Testing: T1–T149 (142 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard); T144 — Phase A continued: KDF KAT (HKDF/PBKDF2/scrypt/TLS1.2-PRF, 22 byte-exact tests; first migration into `hitls-tls` — TLS1.2 PRF; no production code); T145 — Phase A continued: AEAD/MAC KAT (AES-GCM/GMAC/ChaCha20-Poly1305/SipHash, 60 byte-exact tests, no production code; CBC-MAC deferred — Rust `CbcMacSm4` diverges from the C SM4 vectors; root-caused + fixed in I144); T146 — PQC KEM (FrodoKEM/McEliece) decaps KAT migration attempted + **blocked**: the Rust impls are self-round-trip-validated only (never against reference KATs), and decapsulating a C-vector secret key yields the wrong shared secret (sk byte-layout / algorithm divergence from the reference) — documented as a na-list structural gap, no tests added; T147 — Phase A continued: AES-CCM KAT (36 byte-exact tests across UPDATE_FUNC_TC001 / TC002 / MULTI_THREAD_FUNC_TC001 row shapes, tagLen derived from `len(ct‖tag) - len(pt)`; closes the AEAD KAT category, no production code); T148 — Phase A continued: AES-KW (RFC 3394 NOPAD) KAT (16 byte-exact tests across AES-128/192/256, `(algId, key, iv, in, out, enc)` row shape, each row → one direction by `enc`; 8 RFC 5649 PAD rows recorded as a na-list Structural-gaps entry; no production code); T149 — Phase A continued: HPKE SHARED_SECRET_TC001 KAT (**144 byte-exact tests** covering the full RFC 9180 matrix: 4 modes × 4 KEMs × 3 KDFs × 3 AEADs; new `kat-nonce`-gated `HpkeCtx::from_shared_secret` + `set_seq` constructors expose the key-schedule + AEAD path without the randomised KEM Encap; other HPKE TCs deferred to T150+ pending `kem_encap_with_ikm_e` / `kem_derive_key_pair` hooks))
 - Refactoring: R1–R19 (19 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
 
@@ -403,6 +403,7 @@ Category summary:
 | 403 | I145 | Impl | **FrodoKEM reference-interoperability fix** (resolves the T146-diagnosed bug; 6th bug found via the migration discipline) — `frodokem::util::pack` / `unpack` used **LSB-first (little-endian) bit ordering**, but the FrodoKEM reference (openHiTLS C `FrodoCommonPack`/`Unpack`) uses **MSB-first (big-endian)** for both `logq=15` and `logq=16`. The two were self-consistent (so self round-trip passed) but **not reference-compatible**: every packed value (the public key's `B`, the ciphertext's `c1`/`c2`) was bit-incompatible, so decapsulating a reference `(sk, ct)` recovered the wrong `mu'` → implicit rejection → wrong shared secret. **Diagnosis path** (T146 + here): byte-verified sk `s`/`pk`/`pkh` correct → ruled out a simple S^T transpose → confirmed `mul_bs` (`== C FrodoCommonMulBsUsingSt`) and `decode` (`== C FrodoCommonKeyDecode`) match → isolated the divergence to `pack`/`unpack` bit-endianness. **Fix:** rewrote `pack`/`unpack` MSB-first to mirror the C reference exactly; re-added `FrodoKemKeyPair::from_decapsulation_key(param, dk)`. **Verified:** all **8 FrodoKEM reference decaps KATs** now pass (`migrated_frodokem.rs`, via the new `xtask` `frodokem` emitter; the 5 eFrodoKEM rows are unsupported = no fixed vectors); self round-trip still passes for all 6 param sets; full hitls-crypto suite green; `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** FrodoKEM is now wire-interoperable with the reference/other implementations (previously a Rust-generated FrodoKEM key/ct could not be used by any standard implementation and vice-versa). **McEliece deferred** — its decaps still diverges (a separate code-based-scheme serialization issue: delta/c/g/s/controlbits + Benes network; 2 KAT rows) → remains a na-list gap | 2026-05-30 |
 | 404 | T147 | Test | C→Rust AES-CCM KAT migration (Phase A continued — closes the AEAD-KAT category). Extends `xtask/src/aead.rs` with `emit_aes_ccm_kat` + a new `aes-ccm` dispatch arm in `xtask/src/main.rs` pointing at `crypto/aes/test_suite_sdv_eal_aes_ccm.data`. Three byte-exact row shapes are recognised: `UPDATE_FUNC_TC001:(isProvider, algId, key, iv, aad, pt, ct‖tag)` — `tagLen = len(ct‖tag) - len(pt)` mirroring the C `tagLen = ciphertext->len - plaintext->len`; `UPDATE_FUNC_TC002:(algId, key, iv, aad, pt, ct, tag)` — ct/tag split; `MULTI_THREAD_FUNC_TC001:(isProvider, algId, key, iv, aad, pt, ct, tag)`. Each unique row emits **both directions** (`ccm_encrypt(key, iv, aad, pt, tag_len) == ct‖tag`, `ccm_decrypt(key, iv, aad, ct‖tag, tag_len) == pt`); 18 NIST vectors × 2 directions = **36 byte-exact tests**, all passing first run. `isProvider == 1` rows (12 total) duplicate the `0` rows → API-surface (consistent with the workspace-wide provider-dedup convention); CTRL_API_TC* / REINIT_API_TC* / UPDATE_API_TC001 (24 rows) → API-surface. **No production code change** (`ccm_encrypt`/`ccm_decrypt` already accept an explicit `tag_len` covering all M ∈ {4,6,8,10,12,14,16}, verified across the vectors — 6/11-byte IVs, 4/16-byte tags, AES-128/192/256). No regression — `migrated_aes_ccm` 36/0 (`-p hitls-crypto --all-features`); xtask `--check` drift gate passes; na-list tally → 2225 emitted (AES-CCM 36/66/0/0/84, Total 2225/3664/240/101/5496); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-30 |
 | 405 | T148 | Test | C→Rust AES Key Wrap (RFC 3394 NOPAD) KAT migration (Phase A continued). Extends `xtask/src/aead.rs` with `emit_aes_kw_kat` + an `aes-kw` dispatch arm in `xtask/src/main.rs` pointing at `crypto/aes/test_suite_sdv_eal_aes_wrap.data`. Row shape `(algId, key, iv, in, out, enc)` is shared between `FUNC_TC001` and `FUNC_TC003`; the empty `iv` field reflects the RFC 3394 fixed IV `0xA6A6A6A6A6A6A6A6` used internally by `hitls_crypto::modes::wrap::{key_wrap, key_unwrap}`. Each row maps to exactly one direction selected by `enc`: `enc=true` → `key_wrap(kek, input) == expected`; `enc=false` → `key_unwrap(kek, input) == expected`. Result: `migrated_aes_kw.rs` — **16 byte-exact tests** (8 wrap + 8 unwrap; 12 NOPAD vectors from TC001 + 4 NOPAD vectors from TC003 split half-and-half across AES-128/192/256), all passing first run. The 8 `WRAP_PAD` rows (RFC 5649 padded key wrap) are routed to `unsupported` — Rust only implements NOPAD — and added to the `docs/c-test-na-list.md` Structural-gaps table with an `Unblock: add key_wrap_pad / key_unwrap_pad helpers per RFC 5649`. The lifecycle `FUNC_TC002:(isProvider, algId, KeyLen)`, the `NOT_ALIGN_TC001`, `API_TC001` and `PAD_API_TC001` rows route to API-surface (no fixed vectors). **No production-code change.** No regression — `migrated_aes_kw` 16/0 (`-p hitls-crypto --all-features`); xtask `--check` drift gate passes; existing AEAD/MAC suites unchanged (GCM 12, CCM 36, GMAC 12, ChaCha20-Poly1305 34, SipHash 2, CBC-MAC 4); na-list tally → 2241 emitted (AES-KW 16/18/0/8/42, Total 2241/3682/240/109/5538); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-30 |
+| 406 | T149 | Test | C→Rust HPKE SHARED_SECRET_TC001 KAT migration (Phase A continued — first HPKE migration). New `xtask/src/hpke.rs` emitter + an `hpke` dispatch arm in `xtask/src/main.rs` pointing at `crypto/hpke/test_suite_sdv_eal_hpke.data`. Production-side: two new `kat-nonce`-gated public APIs on `hitls_crypto::hpke::HpkeCtx` (both `#[doc(hidden)]` + `#[deprecated(note = "test-only: ...")]`): **`HpkeCtx::from_shared_secret(suite, mode: u8, shared_secret, info, psk, psk_id)`** — constructs an HpkeCtx directly from a precomputed shared_secret, bypassing the KEM Encap/Decap step (mirrors the C `GenHpkeCtxWithSharedSecret` helper); `mode` is the RFC 9180 HPKE-mode byte (0x00 Base / 0x01 PSK / 0x02 Auth / 0x03 AuthPSK). **`HpkeCtx::set_seq(seq: u64)`** — pins the AEAD sequence counter (the C SDV rows pin seq ∈ {0,1,2,4,255,256} to exercise the per-call nonce derivation `base_nonce XOR seq_be64`). Row shape `(mode, kemId, kdfId, aeadId, info, psk, pskId, sharedSecret, seq, pt, aad, ct)`; each row emits one test that constructs sender + recipient ctxs from the same `shared_secret`, sets `seq`, runs `seal(aad, pt) == ct` and `open(aad, ct) == pt`. Result: `migrated_hpke.rs` — **144 byte-exact tests**, all passing first run, full RFC 9180 matrix coverage: 4 modes × 4 KEMs (X25519/P-256/P-384/P-521) × 3 KDFs (HKDF SHA-256/384/512) × 3 AEADs (AES-128/256-GCM + ChaCha20-Poly1305). The remaining HPKE TCs route to API-surface here and are deferred to T150+: AEAD_TC001 (144 rows, needs `kem_encap_with_ikm_e` + `kem_derive_key_pair` sender-side hooks for ikmE injection), EXPORT_SECRET_TC001 (72), KEM_TC001 (24), SHARED_SECRET_TC002 (72, export-from-shared_secret), and the abnormal/randomly/generate-keypair API rows (8). **Production-impact:** additive `kat-nonce`-only API (not compiled into production builds). No regression — `migrated_hpke` 144/0 (`-p hitls-crypto --all-features`); xtask `--check` drift gate passes; builds clean without `kat-nonce` (cfg gating verified); `fmt` + `clippy -D warnings --all-features --all-targets` clean; na-list tally → 2385 emitted (HPKE 144/323/0/0/467, Total 2385/4005/240/109/6005) | 2026-05-30 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -25225,3 +25226,144 @@ the AIV format + length handling change).
 | Category | Emitted | API-surface | Unknown | Unsupported | Total |
 |----------|--------:|------------:|--------:|------------:|------:|
 | All algos (30 rows in tally) | **2241** | **3682** | **240** | **109** | **5538** |
+
+---
+
+## Phase T149 — HPKE SHARED_SECRET_TC001 KAT Migration (first HPKE migration) (2026-05-30)
+
+### Summary
+
+Phase A continuation: migrates the `SHARED_SECRET_TC001` family of
+`test_suite_sdv_eal_hpke.data` against the Rust `hitls_crypto::hpke::HpkeCtx`.
+**144 byte-exact tests, all passing first run**, covering the full RFC 9180
+matrix: 4 modes × 4 KEMs × 3 KDFs × 3 AEADs.
+
+Production-side: adds two `kat-nonce`-gated public APIs on `HpkeCtx`
+(`#[doc(hidden)]` + `#[deprecated]`, both test-only). Builds clean both with
+and without the `kat-nonce` feature.
+
+The other HPKE TCs (AEAD_TC001, EXPORT_SECRET_TC001, KEM_TC001,
+SHARED_SECRET_TC002, plus the API/abnormal/randomly families) route to
+API-surface here and are deferred to T150+ pending further `kat-nonce`-gated
+hooks (`kem_encap_with_ikm_e`, public `kem_derive_key_pair`).
+
+### Files changed
+
+- `crates/hitls-crypto/src/hpke/mod.rs` — new `HpkeCtx::from_shared_secret`
+  (`#[cfg(feature = "kat-nonce")]`, deprecated, test-only) and
+  `HpkeCtx::set_seq` (likewise gated and deprecated). Both at the end of the
+  existing `impl HpkeCtx { ... }` block.
+- `xtask/src/hpke.rs` — **new file**, `emit_hpke_kat` + symbol → enum
+  mappers + short tag helpers for stable per-test names.
+- `xtask/src/main.rs` — adds `mod hpke;`, the `"hpke"` dispatch arm pointing
+  at `crypto/hpke/test_suite_sdv_eal_hpke.data`, and appends `hpke` to the
+  supported-algos error string.
+- `crates/hitls-crypto/tests/migrated_hpke.rs` — **generated** (144 tests),
+  feature-gated `#![cfg(all(feature = "hpke", feature = "kat-nonce"))]`.
+- `docs/c-test-na-list.md` — adds the HPKE tally row (144/323/0/0/467),
+  bumps the Total to 2385/4005/240/109/6005, and adds a prose paragraph
+  describing the scope + the `kat-nonce` hooks.
+- `DEV_LOG.md` / `PROMPT_LOG.md` — this phase entry.
+
+### Implementation details — production hooks
+
+`HpkeCtx::from_shared_secret(suite, mode, shared_secret, info, psk, psk_id)`
+mirrors the C SDV `GenHpkeCtxWithSharedSecret` helper: it calls the internal
+`key_schedule(&suite, mode, shared_secret, info, psk, psk_id)` function and
+returns an `HpkeCtx` with `seq: 0`. `mode` is the RFC 9180 HPKE-mode byte
+(`0x00` Base / `0x01` PSK / `0x02` Auth / `0x03` AuthPSK); for Base / Auth
+modes `psk` and `psk_id` are empty. This is the canonical KAT hook: every
+RFC 9180 vector publishes a derived `shared_secret`, so the KEM Encap step
+(which is randomised over an `ikmE` seed) is not on the KAT critical path
+for these TCs — we drive the key schedule directly.
+
+`HpkeCtx::set_seq(seq)` pins the AEAD sequence counter for the next
+`seal`/`open`. The C SDV rows vary `seq` across `{0, 1, 2, 4, 255, 256}` to
+exercise the per-call nonce derivation `nonce = base_nonce XOR seq_be64` —
+including the byte-boundary cases at 255→256 where the big-endian encoding
+crosses bytes.
+
+Both hooks are `#[cfg(feature = "kat-nonce")] + #[doc(hidden)] +
+#[deprecated(note = "test-only: ...")]`. They are not compiled into the
+default build; CI exercises them via `--all-features`.
+
+### Implementation details — emitter
+
+Row shape (C test fn `SDV_CRYPT_EAL_HPKE_SHARED_SECRET_TC001`):
+
+```
+(mode, kemId, kdfId, aeadId, info, psk, pskId, sharedSecret,
+ seq, pt, aad, ct)
+```
+
+The first four args are symbolic in the `.data` file (e.g.
+`CRYPT_HPKE_MODE_BASE`, `CRYPT_KEM_DHKEM_X25519_HKDF_SHA256`); the emitter
+resolves them via small symbol → (enum variant, short tag) lookup tables.
+Unrecognised symbols → `skipped_unsupported_alg`. The `seq` arg is an
+unquoted integer → `Arg::Symbol`, parsed via `u64::parse`.
+
+Each row generates one `#[test]` named
+`tc_lineN_hpke_ss_<mode>_<kem>_<kdf>_<aead>` that:
+
+1. Constructs `suite: CipherSuite`.
+2. Builds `ctx_s = HpkeCtx::from_shared_secret(suite, mode_byte, ...)`,
+   `set_seq(seq)`, then asserts `ctx_s.seal(aad, pt) == expected_ct`.
+3. Builds a fresh `ctx_r` (same params, fresh seq), then asserts
+   `ctx_r.open(aad, expected_ct) == pt`.
+
+`CipherSuite` is `Copy`, so the emitter passes `suite` by value to both
+constructors without cloning.
+
+### Coverage notes
+
+The 144 rows cover the full RFC 9180 KAT matrix:
+
+| Axis | Variants | Notes |
+|------|---------:|-------|
+| HPKE mode | 4 | Base / PSK / Auth / AuthPSK |
+| KEM | 4 | DHKEM-X25519, DHKEM-P-256, -P-384, -P-521 |
+| KDF | 3 | HKDF-SHA256/384/512 |
+| AEAD | 3 | AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305 |
+| seq | 6 | 0 / 1 / 2 / 4 / 255 / 256 |
+
+### Verification
+
+```bash
+cargo run -p xtask -- migrate-c-tests --algo hpke \
+    --c-root /Users/dongqiu/Dev/code/openhitls/testcode/sdv/testcase
+#   parsed 467 TC rows
+#   emitted 144 tests, skipped 323 API-surface, 0 unknown, 0 unsupported-alg
+
+cargo test -p hitls-crypto --all-features --test migrated_hpke
+#   test result: ok. 144 passed; 0 failed; 0 ignored
+
+cargo run -p xtask -- migrate-c-tests --algo hpke --check \
+    --c-root /Users/dongqiu/Dev/code/openhitls/testcode/sdv/testcase
+#   passes
+
+cargo build -p hitls-crypto
+#   Finished `dev` profile [unoptimized + debuginfo] target(s)
+```
+
+`cargo fmt --all` + `RUSTFLAGS="-D warnings" cargo clippy --workspace
+--all-features --all-targets` clean.
+
+### Migration tally (post-T149)
+
+| Category | Emitted | API-surface | Unknown | Unsupported | Total |
+|----------|--------:|------------:|--------:|------------:|------:|
+| All algos (31 rows in tally) | **2385** | **4005** | **240** | **109** | **6005** |
+
+The remaining HPKE TCs (deferred to T150+):
+
+- **AEAD_TC001** (144 rows): row publishes `ikmE` / `ikmR` instead of
+  `shared_secret` — needs a `kat-nonce`-gated `setup_sender_with_ikm_e`.
+- **EXPORT_SECRET_TC001** (72): same `ikmE` / `ikmR` shape, plus
+  `export(L, ctx)` verification.
+- **KEM_TC001** (24): byte-exact KEM derive-key-pair + encap/decap KATs —
+  needs the `kem_derive_key_pair` helper made publicly accessible.
+- **SHARED_SECRET_TC002** (72): same `shared_secret` shape as TC001 but
+  tests `export()` from the schedule — could be added immediately as a
+  sibling emitter.
+- **API / RANDOMLY / GENERATE_KEY_PAIR** rows (8): EAL ctx CRUD only →
+  permanent API-surface.
