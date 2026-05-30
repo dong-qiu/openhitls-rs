@@ -77,8 +77,8 @@ Counts are the `Generation summary` footer of each generated file
 | FrodoKEM | 8 | 90 | 0 | 5 | 103 |
 | AES-CCM | 36 | 66 | 0 | 0 | 84 |
 | AES-KW | 16 | 18 | 0 | 8 | 42 |
-| HPKE | 144 | 323 | 0 | 0 | 467 |
-| **Total** | **2385** | **4005** | **240** | **109** | **6005** |
+| HPKE | 216 | 251 | 0 | 0 | 467 |
+| **Total** | **2457** | **3933** | **240** | **109** | **6005** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -241,13 +241,26 @@ the same `shared_secret`, sets `seq`, then `seal(aad, pt) == ct` and
 `open(aad, ct) == pt`. **144 byte-exact tests**, all passing first run, full
 matrix coverage: 4 modes × 4 KEMs (X25519/P-256/P-384/P-521) × 3 KDFs
 (SHA-256/384/512) × 3 AEADs (AES-128/256-GCM + ChaCha20-Poly1305). The other
-TCs route to API-surface here and are deferred to T150+: AEAD_TC001 (144,
+TCs route to API-surface here and are deferred to T151+: AEAD_TC001 (144,
 needs `kem_encap_with_ikm_e` + `kem_derive_key_pair` sender-side hooks for
 ikmE injection), EXPORT_SECRET_TC001 (72, same hooks), KEM_TC001 (24, tests
-KEM derive-key-pair byte-exact), SHARED_SECRET_TC002 (72, export from
-shared_secret), and the abnormal / randomly / generate-key-pair API rows
-(`ABNORMAL_TC*`, `SHARED_SECRET_RANDOMLY_TC*`, `TEST_RANDOMLY_TC*`,
-`GENERATE_KEY_PAIR_TC001`) which exercise EAL ctx CRUD only.
+KEM derive-key-pair byte-exact), and the abnormal / randomly /
+generate-key-pair API rows (`ABNORMAL_TC*`, `SHARED_SECRET_RANDOMLY_TC*`,
+`TEST_RANDOMLY_TC*`, `GENERATE_KEY_PAIR_TC001`) which exercise EAL ctx CRUD
+only.
+
+T150 extends the HPKE emitter to also handle **SHARED_SECRET_TC002** (export
+from a pre-derived `shared_secret`). Row shape `(mode, kemId, kdfId, aeadId,
+info, psk, pskId, sharedSecret, exporterContext, L, exportedValue)`; same
+symbolic-prefix dispatch as TC001. Each row emits one test that builds a
+ctx via `HpkeCtx::from_shared_secret`, then asserts `ctx.export(
+exporter_context, L) == expected`. `HpkeCtx::export` is `&self` (read-only)
+so a single ctx is functionally identical to the C body's sender + recipient
+duplicate. **72 byte-exact tests** added (full RFC 9180 export-secret matrix
+across 4 modes × 4 KEMs × 3 KDFs × 3 AEADs, sampled at varying
+`exporterContext` and output length `L`). **Zero new production code** —
+reuses the T149 `kat-nonce`-gated `HpkeCtx::from_shared_secret` plus the
+existing public `HpkeCtx::export`.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
