@@ -474,3 +474,191 @@ pub fn emit_cbc_mac_kat(cases: &[TestCase]) -> (String, EmitStats) {
     write_footer(&mut out, &stats, cases.len());
     (out, stats)
 }
+
+// ---------------------------------------------------------------------------
+// AES-CCM — three byte-exact KAT shapes in `test_suite_sdv_eal_aes_ccm.data`:
+//   UPDATE_FUNC_TC001       : (isProvider, algId, key, iv, aad, pt, ct‖tag)
+//                             tagLen = len(ct‖tag) - len(pt)
+//   UPDATE_FUNC_TC002       : (algId, key, iv, aad, pt, ct, tag)
+//   MULTI_THREAD_FUNC_TC001 : (isProvider, algId, key, iv, aad, pt, ct, tag)
+// `isProvider == 1` rows duplicate the `0` rows (EAL provider framework has
+// no Rust counterpart), so they route to API-surface. CTRL_API_TC* /
+// REINIT_API_TC* / UPDATE_API_TC001 exercise EAL ctx CRUD only and route to
+// API-surface as well.
+// ---------------------------------------------------------------------------
+
+struct CcmInputs<'a> {
+    key: &'a [u8],
+    iv: &'a [u8],
+    aad: &'a [u8],
+    pt: &'a [u8],
+    ct_tag: &'a [u8],
+}
+
+fn emit_aes_ccm_one(body: &mut String, case: &TestCase, bits: u32, ins: &CcmInputs<'_>) {
+    let CcmInputs {
+        key,
+        iv,
+        aad,
+        pt,
+        ct_tag,
+    } = *ins;
+    let tag_len = ct_tag.len() - pt.len();
+
+    write_doc(body, case, "AES-CCM encrypt KAT");
+    writeln!(body, "#[test]").unwrap();
+    writeln!(body, "fn tc_line{}_ccm_aes{bits}_encrypt() {{", case.line).unwrap();
+    writeln!(body, "    let key: &[u8] = {};", format_byte_slice(key)).unwrap();
+    writeln!(body, "    let iv: &[u8] = {};", format_byte_slice(iv)).unwrap();
+    writeln!(body, "    let aad: &[u8] = {};", format_byte_slice(aad)).unwrap();
+    writeln!(body, "    let pt: &[u8] = {};", format_byte_slice(pt)).unwrap();
+    writeln!(
+        body,
+        "    let ct_tag: &[u8] = {};",
+        format_byte_slice(ct_tag)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let actual = ccm_encrypt(key, iv, aad, pt, {tag_len}).unwrap();"
+    )
+    .unwrap();
+    writeln!(body, "    assert_eq!(actual.as_slice(), ct_tag);").unwrap();
+    writeln!(body, "}}\n").unwrap();
+
+    write_doc(body, case, "AES-CCM decrypt KAT");
+    writeln!(body, "#[test]").unwrap();
+    writeln!(body, "fn tc_line{}_ccm_aes{bits}_decrypt() {{", case.line).unwrap();
+    writeln!(body, "    let key: &[u8] = {};", format_byte_slice(key)).unwrap();
+    writeln!(body, "    let iv: &[u8] = {};", format_byte_slice(iv)).unwrap();
+    writeln!(body, "    let aad: &[u8] = {};", format_byte_slice(aad)).unwrap();
+    writeln!(body, "    let pt: &[u8] = {};", format_byte_slice(pt)).unwrap();
+    writeln!(
+        body,
+        "    let ct_tag: &[u8] = {};",
+        format_byte_slice(ct_tag)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let actual = ccm_decrypt(key, iv, aad, ct_tag, {tag_len}).unwrap();"
+    )
+    .unwrap();
+    writeln!(body, "    assert_eq!(actual.as_slice(), pt);").unwrap();
+    writeln!(body, "}}\n").unwrap();
+}
+
+pub fn emit_aes_ccm_kat(cases: &[TestCase]) -> (String, EmitStats) {
+    let mut body = String::new();
+    let mut stats = EmitStats::default();
+
+    for case in cases {
+        let name = &case.tc_name;
+        let with_prov_concat = name.contains("UPDATE_FUNC_TC001");
+        let no_prov_split = name.contains("UPDATE_FUNC_TC002");
+        let with_prov_split = name.contains("MULTI_THREAD_FUNC_TC001");
+        if !(with_prov_concat || no_prov_split || with_prov_split) {
+            stats.skipped_api += 1;
+            continue;
+        }
+
+        let (alg, key, iv, aad, pt, ct_tag) = if with_prov_concat {
+            let Some(is_prov) = case.args.first().and_then(|a| a.as_symbol()) else {
+                stats.skipped_unknown += 1;
+                continue;
+            };
+            if is_prov == "1" {
+                stats.skipped_api += 1;
+                continue;
+            }
+            let (Some(alg), Some(key), Some(iv), Some(aad), Some(pt), Some(ct_tag)) = (
+                case.args.get(1).and_then(|a| a.as_symbol()),
+                case.args.get(2).and_then(|a| a.as_hex()),
+                case.args.get(3).and_then(|a| a.as_hex()),
+                case.args.get(4).and_then(|a| a.as_hex()),
+                case.args.get(5).and_then(|a| a.as_hex()),
+                case.args.get(6).and_then(|a| a.as_hex()),
+            ) else {
+                stats.skipped_unknown += 1;
+                continue;
+            };
+            (alg, key, iv, aad, pt, ct_tag.to_vec())
+        } else if no_prov_split {
+            let (Some(alg), Some(key), Some(iv), Some(aad), Some(pt), Some(ct), Some(tag)) = (
+                case.args.first().and_then(|a| a.as_symbol()),
+                case.args.get(1).and_then(|a| a.as_hex()),
+                case.args.get(2).and_then(|a| a.as_hex()),
+                case.args.get(3).and_then(|a| a.as_hex()),
+                case.args.get(4).and_then(|a| a.as_hex()),
+                case.args.get(5).and_then(|a| a.as_hex()),
+                case.args.get(6).and_then(|a| a.as_hex()),
+            ) else {
+                stats.skipped_unknown += 1;
+                continue;
+            };
+            let mut ct_tag = ct.to_vec();
+            ct_tag.extend_from_slice(tag);
+            (alg, key, iv, aad, pt, ct_tag)
+        } else {
+            let Some(is_prov) = case.args.first().and_then(|a| a.as_symbol()) else {
+                stats.skipped_unknown += 1;
+                continue;
+            };
+            if is_prov == "1" {
+                stats.skipped_api += 1;
+                continue;
+            }
+            let (Some(alg), Some(key), Some(iv), Some(aad), Some(pt), Some(ct), Some(tag)) = (
+                case.args.get(1).and_then(|a| a.as_symbol()),
+                case.args.get(2).and_then(|a| a.as_hex()),
+                case.args.get(3).and_then(|a| a.as_hex()),
+                case.args.get(4).and_then(|a| a.as_hex()),
+                case.args.get(5).and_then(|a| a.as_hex()),
+                case.args.get(6).and_then(|a| a.as_hex()),
+                case.args.get(7).and_then(|a| a.as_hex()),
+            ) else {
+                stats.skipped_unknown += 1;
+                continue;
+            };
+            let mut ct_tag = ct.to_vec();
+            ct_tag.extend_from_slice(tag);
+            (alg, key, iv, aad, pt, ct_tag)
+        };
+
+        let Some(bits) = (if alg.contains("AES") {
+            aes_bits(key)
+        } else {
+            None
+        }) else {
+            stats.skipped_unsupported_alg += 1;
+            continue;
+        };
+
+        emit_aes_ccm_one(
+            &mut body,
+            case,
+            bits,
+            &CcmInputs {
+                key,
+                iv,
+                aad,
+                pt,
+                ct_tag: &ct_tag,
+            },
+        );
+        stats.emitted += 2;
+    }
+
+    let mut out = String::new();
+    out.push_str(
+        "// This file is GENERATED by `cargo xtask migrate-c-tests --algo aes-ccm`.\n\
+         // DO NOT EDIT BY HAND. Source: openhitls C SDV test_suite_sdv_eal_aes_ccm.data\n\
+         //\n\
+         // Generator: docs/c-test-migration-plan.md Phase A (xtask).\n\
+         #![cfg(all(feature = \"modes\", feature = \"aes\"))]\n\n\
+         use hitls_crypto::modes::ccm::{ccm_decrypt, ccm_encrypt};\n\n",
+    );
+    out.push_str(&body);
+    write_footer(&mut out, &stats, cases.len());
+    (out, stats)
+}

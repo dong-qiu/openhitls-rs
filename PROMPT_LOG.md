@@ -9000,3 +9000,47 @@ McEliece deferred — its decaps still diverges (separate code-based sk/controlb
 serialization issue, 2 rows) — kept as a na-list gap.
 
 Recorded as DEV_LOG Phase I145.
+
+## Phase T147 — AES-CCM KAT Migration (2026-05-30)
+
+> 请继续完成刚才未完成的工作
+
+Phase A continuation: migrated the AES-CCM byte-exact KATs from
+test_suite_sdv_eal_aes_ccm.data, closing the AEAD KAT category alongside the
+already-migrated GCM / ChaCha20-Poly1305 / GMAC / CBC-MAC suites.
+
+Extended xtask/src/aead.rs with emit_aes_ccm_kat (and a small CcmInputs<'a>
+struct so the per-row emit helper stays at ≤7 parameters per clippy
+too_many_arguments). Added an "aes-ccm" dispatch arm to xtask/src/main.rs
+pointing at crypto/aes/test_suite_sdv_eal_aes_ccm.data, with the file appended
+to the supported-algos error string.
+
+Row shapes (cross-referenced against test_suite_sdv_eal_aes_ccm.c):
+- UPDATE_FUNC_TC001       : (isProvider, algId, key, iv, aad, pt, ct‖tag) —
+                            tagLen = len(ct‖tag) - len(pt), matching the C
+                            tagLen = ciphertext->len - plaintext->len.
+- UPDATE_FUNC_TC002       : (algId, key, iv, aad, pt, ct, tag) — ct/tag split.
+- MULTI_THREAD_FUNC_TC001 : (isProvider, algId, key, iv, aad, pt, ct, tag).
+
+Each unique row emits both directions: ccm_encrypt(key, iv, aad, pt,
+tag_len) == ct‖tag and ccm_decrypt(key, iv, aad, ct‖tag, tag_len) == pt.
+isProvider == 1 rows duplicate the 0 rows (EAL provider framework, no Rust
+counterpart) → API-surface, per the workspace-wide provider-dedup convention;
+CTRL_API / REINIT_API / UPDATE_API rows → API-surface.
+
+Result: migrated_aes_ccm.rs — 36 byte-exact tests (18 vectors × 2 directions),
+all passing first run; 66 rows API-surface; 0 unknown; 0 unsupported.
+Coverage: AES-128/192/256; IV lengths 7/11/13 bytes; tag lengths 4 and 16;
+empty AAD / AAD-only / standard AAD+pt shapes.
+
+No production-code change — ccm_encrypt/ccm_decrypt already accept an
+explicit tag_len covering all CCM M ∈ {4,6,8,10,12,14,16}.
+
+Verification: migrated_aes_ccm 36/0 (-p hitls-crypto --all-features); xtask
+--check drift gate passes; existing AEAD/MAC suites unchanged (GCM 12, GMAC 12,
+ChaCha20-Poly1305 34, SipHash 2, CBC-MAC 4); fmt + clippy -D warnings
+--all-features --all-targets clean.
+
+na-list tally updated: AES-CCM 36/66/0/0/84, Total 2225/3664/240/101/5496.
+
+Recorded as DEV_LOG Phase T147.
