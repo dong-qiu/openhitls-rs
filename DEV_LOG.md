@@ -3,7 +3,7 @@
 ## Phase Index (Chronological)
 
 Category summary:
-- Implementation: I1–I144 (144 phases)
+- Implementation: I1–I145 (145 phases)
 - Testing: T1–T146 (139 phases, T64 + T121 + T131 skipped, T112 + T114–T116 reserved for `docs/c-test-migration-plan.md` Phase B / D–F; T111 complete — Phase A C→Rust test migration done, 9/9 algorithms; T113 complete — Phase C PKI test migration (last `#[ignore]` closed by I129, suite 100% active); T121 0-RTT-acceptance investigated and dropped — no tlsfuzzer material; T131 skipped — number never used, T132 tlsfuzzer coverage-expansion followed T130 directly; T132 complete — 3 clean-PASS TLS 1.3 scripts added to curated CI; T137 — Phase A continued: ML-DSA verify + ML-KEM decaps KAT, 11/11 crypto algos migrated; T138 — tlsfuzzer TLS 1.2 robustness curation batch (+5 scripts); T139 — Phase A continued: SHA-3/SHAKE + DRBG NIST-vector KAT, 13/13 crypto algos migrated, surfaced a CTR-DRBG-df divergence anchor (fixed in I131); T140 — Phase A continued: ECC ECDSA-verify + ECDH KAT, 14/14 crypto algos migrated; T141 — first local full `-n 9999` tlsfuzzer sweep (86 scripts × 13 listeners, **0 FAIL / 0 XPASS** on product) + `run.sh` SWEEP_N `-n` fallback for `-n`-incompatible scripts (the monthly full-sweep CI would otherwise crash on `test-tls13-certificate-request.py`)); T142 — Phase A continued: BigNum arithmetic KAT (230 byte-exact tests vs `test_suite_sdv_bn.data` — RSHIFT/MOD/SUB/MODINV/GCD/PRIME/ADD/DIV/MODEXP/SQR; first non-`hitls-crypto` migration target, no production code); T143 — Phase A continued: MD5/SHA-1/SM3 digest KAT (23 byte-exact tests; completes the hash category alongside SHA-2/SHA-3), generic single-algorithm digest emitter classified by argument shape + digest-length guard); T144 — Phase A continued: KDF KAT (HKDF/PBKDF2/scrypt/TLS1.2-PRF, 22 byte-exact tests; first migration into `hitls-tls` — TLS1.2 PRF; no production code); T145 — Phase A continued: AEAD/MAC KAT (AES-GCM/GMAC/ChaCha20-Poly1305/SipHash, 60 byte-exact tests, no production code; CBC-MAC deferred — Rust `CbcMacSm4` diverges from the C SM4 vectors; root-caused + fixed in I144); T146 — PQC KEM (FrodoKEM/McEliece) decaps KAT migration attempted + **blocked**: the Rust impls are self-round-trip-validated only (never against reference KATs), and decapsulating a C-vector secret key yields the wrong shared secret (sk byte-layout / algorithm divergence from the reference) — documented as a na-list structural gap, no tests added)
 - Refactoring: R1–R19 (19 phases)
 - Performance: P1–P94 (88 phases, P86–P88/P90–P92 skipped)
@@ -400,6 +400,7 @@ Category summary:
 | 400 | T145 | Test | AEAD/MAC KAT migration — AES-GCM / GMAC / ChaCha20-Poly1305 / SipHash. New `xtask/src/aead.rs` emitter (4 emit fns) + 4 generated files in `hitls-crypto`: `migrated_gcm.rs` (12), `migrated_gmac.rs` (12), `migrated_chachapoly.rs` (34), `migrated_siphash.rs` (2) = **60 byte-exact tests**, all passing. **No production code change** (`gcm_encrypt`/`gcm_decrypt`, `Gmac`, `ChaCha20Poly1305::encrypt`/`decrypt`, `SipHash::hash` already existed). Layouts confirmed against the C signatures: GCM `(algId, key, iv, aad, pt, ct, tag)` → both directions (`gcm_encrypt(key,iv,aad,pt) == ct‖tag`, `gcm_decrypt == pt`; arbitrary IV length verified incl. a 1-byte IV); GMAC `(algId, key, iv, msg, mac)` → `Gmac::new(key,iv).update(msg).finish`; ChaCha20-Poly1305 `(key, iv, aad, data, cipher, tag)` → both directions, with the **TC005** AAD-only variant (`(key,iv,aad,tag)`, empty plaintext) and the **TC010** split-update variant (`(key,iv,aad,pt1,pt2,pt3,cipher,tag)` — the 3 chunks fold into one plaintext) both recovered; SipHash `(algId, key, data, mac)` → `SipHash::hash(key,data).to_le_bytes() == mac`. **Negative/edge families correctly routed to API-surface:** ChaCha **TC008** (round-trip consistency, no fixed vector) and **TC009** (tamper test — ciphertext correct but tag deliberately corrupted; the C asserts `memcmp(outTag, tag) != 0`, i.e. authenticated decrypt MUST reject — surfaced as 4 failing tests in the first emit pass, then reclassified). SipHash is 64-bit only (Rust `SipHash::hash → u64`), so the **39 SIPHASH128 rows are unsupported**; only 2 SIPHASH64 KAT rows carry a mac (the rest of the C suite is no-mac / memory-alignment tests). **CBC-MAC deferred**: a pre-emit probe showed Rust `CbcMacSm4` diverges from the C SM4 CBC-MAC vectors (neither the as-is single block nor an appended zero block matches) — routed to the na-list gaps table pending a focused investigation (possible bug or construction mismatch). No regression — all 4 suites green (`-p hitls-crypto --all-features`); xtask `--check` drift gate passes for all four; na-list tally → 2177 emitted (AES-GCM 12/36/0/0/42, GMAC 12/14/0/0/26, ChaCha20-Poly1305 34/21/0/0/38, SipHash 2/37/0/2/41); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-29 |
 | 401 | I144 | Impl | **CBC-MAC-SM4 double-encryption fix** (5th bug found via the migration discipline, cf. SLH-DSA/I129, CTR-DRBG-df/I131, ASN.1/I133, ML-DSA/I137) — the T145-deferred CBC-MAC divergence root-caused to a real bug in `crates/hitls-crypto/src/cbc_mac.rs`. **Bug:** `CbcMacSm4::update` eagerly processes each full block into the CBC chain `state`, and `finish` then *unconditionally* zero-padded + processed one more block — so for a **block-aligned** message it computed `E_K(E_K(last_block) ⊕ 0)` (a spurious extra encryption) instead of stopping at the last real block. CBC-MAC of any whole-block-multiple message was wrong (`E_K(E_K(m_n ⊕ c_{n-1}))` instead of `E_K(m_n ⊕ c_{n-1})`). Confirmed by a probe: `SM4-ECB(key, block) == 9bbd8793…` exactly equals the C `CRYPT_MAC_CBC_MAC_SM4` vector, while the buggy `CbcMacSm4` returned `3e9e6958… = SM4(SM4(block))`. **Why it hid:** the existing `test_cbc_mac_sm4_single_block` / `_multi_block` unit tests had *baked the double-encryption into their expected values* (a self-fulfilling assertion). **Fix:** `finish` now branches — buffered partial block ⇒ zero-pad + one block; empty message ⇒ one zero block (`E_K(0)`); **block-aligned ⇒ `state` already holds the MAC, no extra block** (new `processed` flag distinguishes empty from block-aligned). The two self-fulfilling unit tests were corrected to the right values. **Regression:** wired the `cbc-mac` algo into the xtask `aead` emitter and migrated `test_suite_sdv_eal_mac_cbc_mac.data` → `migrated_cbc_mac.rs` (4 SM4 + `CRYPT_PADDING_ZEROS` `FUN_TC004` KATs; the `FUN_TC006` update-count + ADDR_NOT_ALIGN / SAMEADDR families → API-surface) — all 4 now pass byte-exact against C (they would have failed before the fix). **Production impact:** `hitls_crypto::cbc_mac::CbcMacSm4` (a `pub` API; no internal/TLS path consumes it) now produces correct CBC-MACs for block-aligned input. No regression — hitls-crypto lib **1479/0** (3 ignored) incl. the corrected cbc_mac unit tests + `migrated_cbc_mac` 4/0; xtask `--check` drift passes for all 5 aead algos; na-list CBC-MAC moved from the gaps table to the tally (4/25/0/0/29); `fmt` + `clippy -D warnings --all-features --all-targets` clean | 2026-05-29 |
 | 402 | T146 | Test | PQC KEM (FrodoKEM / Classic McEliece) decaps KAT migration **attempted + blocked** — documents a real reference-KAT validation gap (no tests added; docs only). The `ENCAPS_DECAPS_FUNC_TC001` decaps direction (`decapsulate(testDk, testCt) == testSs`) is deterministic and needs no randomness hook, so it looked migratable like ML-KEM (T137). A `from_decapsulation_key(param, dk)` constructor was prototyped for both keypairs (mirroring `MlKemKeyPair::from_decapsulation_key`) — but **every decaps KAT failed**: FrodoKEM decaps returns a *different* shared secret than the C `testSs`, and McEliece decaps errors inside `decode`/`deserialize_private_key`. The field **lengths all match the spec** (FrodoKEM-640 dk = 19888, McEliece-6688128 dk = 13932, ct/ss sizes correct), so the divergence is in the **secret-key byte layout** (and possibly the algorithm), not the sizes. Root cause: the Rust FrodoKEM/McEliece impls are validated **only by self round-trip** (`generate → encaps → decaps`, asserting `ss1 == ss2`), never against reference/NIST KAT vectors — their on-the-wire sk/ct encoding was never proven reference-compatible (a genuine validation-coverage hole that the migration discipline surfaced). hybridkem has no fixed-vector KATs (round-trip/consistency only) → API-surface. The prototype was reverted (no failing tests shipped); the gap is recorded in `docs/c-test-na-list.md` (28 decaps rows: frodokem 26 + mceliece 2) with the unblock path (byte-align the sk/ct serialization with the reference, or confirm/fix an algorithmic divergence — larger than a localized fix, touches production PQC code). Docs-only change | 2026-05-29 |
+| 403 | I145 | Impl | **FrodoKEM reference-interoperability fix** (resolves the T146-diagnosed bug; 6th bug found via the migration discipline) — `frodokem::util::pack` / `unpack` used **LSB-first (little-endian) bit ordering**, but the FrodoKEM reference (openHiTLS C `FrodoCommonPack`/`Unpack`) uses **MSB-first (big-endian)** for both `logq=15` and `logq=16`. The two were self-consistent (so self round-trip passed) but **not reference-compatible**: every packed value (the public key's `B`, the ciphertext's `c1`/`c2`) was bit-incompatible, so decapsulating a reference `(sk, ct)` recovered the wrong `mu'` → implicit rejection → wrong shared secret. **Diagnosis path** (T146 + here): byte-verified sk `s`/`pk`/`pkh` correct → ruled out a simple S^T transpose → confirmed `mul_bs` (`== C FrodoCommonMulBsUsingSt`) and `decode` (`== C FrodoCommonKeyDecode`) match → isolated the divergence to `pack`/`unpack` bit-endianness. **Fix:** rewrote `pack`/`unpack` MSB-first to mirror the C reference exactly; re-added `FrodoKemKeyPair::from_decapsulation_key(param, dk)`. **Verified:** all **8 FrodoKEM reference decaps KATs** now pass (`migrated_frodokem.rs`, via the new `xtask` `frodokem` emitter; the 5 eFrodoKEM rows are unsupported = no fixed vectors); self round-trip still passes for all 6 param sets; full hitls-crypto suite green; `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** FrodoKEM is now wire-interoperable with the reference/other implementations (previously a Rust-generated FrodoKEM key/ct could not be used by any standard implementation and vice-versa). **McEliece deferred** — its decaps still diverges (a separate code-based-scheme serialization issue: delta/c/g/s/controlbits + Benes network; 2 KAT rows) → remains a na-list gap | 2026-05-30 |
 ---
 
 ## Part I: Migration Roadmap Archive
@@ -24967,3 +24968,71 @@ different `B` for the same seed; the divergence is broader than a single field.
 The full fix is therefore a **step-by-step PKE-stage reconciliation** (compare
 each stage Rust↔C with intermediate-value checks), left as a dedicated deep-dive
 rather than a single targeted patch.
+
+## Phase I145 — FrodoKEM Reference-Interoperability Fix (pack/unpack bit-endianness) (2026-05-30)
+
+### Summary
+
+Resolves the T146-diagnosed FrodoKEM reference-interop bug — the 6th real bug
+surfaced by the C→Rust migration discipline (cf. SLH-DSA/I129, CTR-DRBG/I131,
+ASN.1/I133, ML-DSA/I137, CBC-MAC/I144). Root cause: `frodokem::util::pack` /
+`unpack` used **LSB-first (little-endian) bit ordering** while the FrodoKEM
+reference (openHiTLS C `FrodoCommonPack` / `FrodoCommonUnpack`) uses **MSB-first
+(big-endian)** — for both `logq=15` and `logq=16`.
+
+### The bug
+
+`pack` and `unpack` were mutually consistent (LSB-first both ways), so the
+self round-trip (`generate → encaps → decaps`) passed — but the **packed
+bytes** (the public key's matrix `B`, and the ciphertext's `c1` / `c2`) were
+bit-incompatible with every standard FrodoKEM implementation. Decapsulating a
+reference `(sk, ct)` therefore unpacked `c1`/`c2` into the wrong matrices →
+wrong `M = C2 − Bp·S` → wrong `mu'` → re-encrypt mismatch → implicit rejection
+→ wrong shared secret.
+
+### Diagnosis path (oracle-driven)
+
+1. (T146) byte-verified the sk `s` / `pk` / `pkh` layout is reference-correct,
+   and that decaps lands in implicit rejection.
+2. Ruled out a simple S^T transpose (rebuilding `testDk` transposed still
+   rejected).
+3. Confirmed `mul_bs` is byte-identical to C `FrodoCommonMulBsUsingSt`, and
+   `decode` to C `FrodoCommonKeyDecode`.
+4. A decrypt-half oracle (recover `mu'`, compute the success-path ss) isolated
+   the defect to the unpack of `c1`/`c2` → compared `FrodoCommonUnpack` /
+   `FrodoCommonPack` and found the MSB-first vs LSB-first mismatch.
+
+### The fix
+
+Rewrote `pack` / `unpack` MSB-first to mirror the C reference exactly (logq=16:
+`out[2i]=v>>8; out[2i+1]=v&0xFF`; logq=15: the reference's 8-value↔15-byte
+big-endian schedule). Re-added `FrodoKemKeyPair::from_decapsulation_key(param,
+dk)` (decaps-only, validates `dk.len() == sk_size`) for loading reference keys.
+The raw `S^T` sk region stays native-LE `u16` (it is not run through `pack`, and
+both C and Rust store it identically).
+
+### Verification
+
+- **All 8 FrodoKEM reference decaps KATs pass** (`migrated_frodokem.rs`, emitted
+  by the new `xtask` `frodokem` emitter; `from_decapsulation_key(param, testDk)
+  .decapsulate(testCt) == testSs`). The 5 eFrodoKEM rows are `unsupported`
+  (no fixed reference vectors); 90 API-surface (KEYCMP + provider dups).
+- Self round-trip still passes for all 6 FrodoKEM param sets (35 frodokem lib
+  tests). Full hitls-crypto suite green (the change is confined to
+  `frodokem/util.rs`). xtask `--check` drift passes; `fmt` + `clippy -D warnings
+  --all-features --all-targets` clean.
+
+### Production impact
+
+FrodoKEM is now **wire-interoperable** with the reference and other standard
+implementations — previously a Rust-generated FrodoKEM key/ciphertext could not
+be consumed by any conformant implementation (and vice-versa). The fix changes
+the externally-visible byte encoding of `B` / `c1` / `c2` to the standard form.
+
+### McEliece deferred
+
+Classic McEliece decaps still diverges (it errors inside `decode`) — a separate,
+deeper code-based-scheme serialization issue (the sk is `delta ‖ c ‖ g ‖ s ‖
+controlbits`, with a Benes-network control-bit encoding that is highly
+implementation-specific; 2 KAT rows). It remains a `docs/c-test-na-list.md`
+Structural-gaps entry as its own follow-up.

@@ -8971,3 +8971,32 @@ reconciliation (a dedicated deep-dive), not a single patch. Updated the na-list
 gap row + DEV_LOG T146 follow-up. Docs-only; no code change shipped.
 
 Recorded as DEV_LOG Phase T146 (follow-up).
+
+## Phase I145 — FrodoKEM Reference-Interoperability Fix (2026-05-30)
+
+> FrodoKEM/McEliece PKE 对齐修复
+
+Fixed the T146-diagnosed FrodoKEM reference-interop bug (6th migration-discipline
+bug). Root cause: frodokem::util pack/unpack used LSB-first (little-endian) bit
+ordering, but the FrodoKEM reference (C FrodoCommonPack/Unpack) uses MSB-first
+(big-endian), for both logq=15 and logq=16. Self-consistent (round-trip passed)
+but not reference-compatible — packed B/c1/c2 bit-incompatible → decaps of a
+reference (sk,ct) recovers wrong mu' → implicit rejection → wrong ss.
+
+Diagnosis (oracle-driven): sk s/pk/pkh byte-correct (T146) -> ruled out simple
+S^T transpose -> mul_bs == C MulBsUsingSt, decode == C KeyDecode -> decrypt-half
+oracle isolated it to unpack(c1/c2) -> found pack/unpack endianness mismatch.
+
+Fix: rewrote pack/unpack MSB-first to mirror C exactly; re-added
+FrodoKemKeyPair::from_decapsulation_key. Verified: all 8 FrodoKEM reference
+decaps KATs pass (migrated_frodokem.rs via new xtask frodokem emitter); self
+round-trip still passes (35 lib tests, all 6 param sets); full hitls-crypto
+green; drift + fmt + clippy -D warnings --all-features --all-targets clean.
+
+Production impact: FrodoKEM now wire-interoperable with the reference (the
+external byte encoding of B/c1/c2 changes to the standard form).
+
+McEliece deferred — its decaps still diverges (separate code-based sk/controlbits
+serialization issue, 2 rows) — kept as a na-list gap.
+
+Recorded as DEV_LOG Phase I145.
