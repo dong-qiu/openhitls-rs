@@ -76,12 +76,12 @@ Counts are the `Generation summary` footer of each generated file
 | CBC-MAC (SM4) | 4 | 25 | 0 | 0 | 29 |
 | FrodoKEM | 8 | 90 | 0 | 5 | 103 |
 | AES-CCM | 36 | 66 | 0 | 0 | 84 |
-| AES-KW | 16 | 18 | 0 | 8 | 42 |
+| AES-KW | 24 | 18 | 0 | 0 | 42 |
 | HPKE | 456 | 11 | 0 | 0 | 467 |
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 7 | 31 | 0 | 0 | 38 |
-| **Total** | **3105** | **3760** | **240** | **109** | **6480** |
+| **Total** | **3113** | **3760** | **240** | **101** | **6480** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -527,7 +527,7 @@ migration tool emit the corresponding tests with no generator change.
 | Gap | Affected | Count | Reason | Unblock |
 |-----|----------|------:|--------|---------|
 | AES-CBC raw KAT | AES | 12 | `cbc_encrypt`/`cbc_decrypt` hardcode PKCS#7 padding — cannot reproduce a block-aligned raw KAT | add `cbc_encrypt_raw` / `cbc_decrypt_raw` no-padding helpers |
-| AES-KW PAD (RFC 5649) | AES-KW | 8 | `hitls_crypto::modes::wrap` only implements the RFC 3394 NOPAD path (`key_wrap` / `key_unwrap`); RFC 5649 padded key wrap (KW-padded, allows arbitrary input length) has no public Rust entry point | add `key_wrap_pad` / `key_unwrap_pad` helpers per RFC 5649 |
+| ~~AES-KW PAD (RFC 5649)~~ | ~~AES-KW~~ | ~~8~~ | **Resolved in I147** (T148-follow-up). `hitls_crypto::modes::wrap` previously only implemented the RFC 3394 NOPAD path (`key_wrap` / `key_unwrap`). I147 added `pub fn key_wrap_pad` / `pub fn key_unwrap_pad` per RFC 5649: AIV = `0xA65959A6 ‖ MLI(BE u32)`, single-AES-block specialisation for `n == 1`, multi-block path delegating to the shared `wrap_inner` / `unwrap_inner` helpers, and constant-time AIV-prefix + zero-pad checks on unwrap. | Resolved by I147; AES-KW migrated 16 → 24 (+8). See DEV_LOG Phase I147. |
 | ~~XMSS reference-interop on keygen / sign~~ | ~~XMSS, XMSS-MT~~ | ~~42~~ | **Resolved in I146** (T156 diagnosis → root cause fix). Rust `xmss::hash::prf_keygen` used the RFC 8391 (original) `PRF` construction `H(toByte(3, plen) \|\| SK.seed \|\| ADRS)` instead of the **RFC 8702 / NIST SP 800-208 §6.4** `PRF_KEYGEN` construction `H(toByte(4, plen) \|\| SK.seed \|\| PK.seed \|\| ADRS)`. The missing `PK.seed` (multi-target hardening input) and the wrong domain-separation byte (4 vs 3) caused every WOTS+ secret key element to differ from C → every leaf differed → `compute_root` produced a different `PK.root`. Round-trip and the T155 VERIFY KAT survived because verify never calls `prf_keygen`. **Also fixed** `prf_msg`: removed a spurious `msg` parameter (C's `PrfmsgGeneric` is `H(toByte(3, plen) \|\| SK.prf \|\| toByte(idx, 32))` with no message dependency). | Resolved by I146; see DEV_LOG Phase I146 for the fix detail and the new `test_xmss_compute_root_kat_sha2_10_256` regression KAT pinned in `xmss/mod.rs`. The T156-deferred 42 SIGN+GENKEY rows can now be migrated as a follow-up phase (will land as `T157`). |
 | SM4 CBC / CTR / CFB / OFB / HCTR / XTS + GCM-decrypt | SM4 | 37 | CBC hardcodes PKCS#7 padding; CTR/CFB/OFB/HCTR/XTS have no public SM4 entry point; GCM-decrypt needs the 16-byte tag absent from the `.data` | add SM4 raw-mode public functions; a CBC no-padding helper |
 | SM2 key exchange | SM2 | 17 | `Sm2KeyPair` exposes no key-exchange method | add an SM2 ECDH / key-exchange API |

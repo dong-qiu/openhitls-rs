@@ -9674,3 +9674,54 @@ verified); existing sm9 lib tests unchanged; fmt + clippy -D warnings
 na-list tally: SM9 7/31/0/0/38 (new row), Total 3105/3760/240/109/6480.
 
 Recorded as DEV_LOG Phase T158.
+
+## Phase I147 — AES-KW PAD (RFC 5649) Implementation (resolves T148 Structural Gap) (2026-05-31)
+
+> 请继续A
+
+> 请继续刚才未完成的工作
+
+Closed the T148-deferred AES-KW PAD Structural Gap end-to-end. Previously
+`hitls_crypto::modes::wrap` only implemented the RFC 3394 NOPAD path
+(`key_wrap` / `key_unwrap` — block-aligned input only); 8 C-SDV
+`*_WRAP_PAD` rows were marked unsupported.
+
+Added two default-feature public APIs on `hitls_crypto::modes::wrap`
+implementing RFC 5649 Key Wrap with Padding:
+
+- `pub fn key_wrap_pad(kek: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>`
+- `pub fn key_unwrap_pad(kek: &[u8], wrapped: &[u8]) -> Result<Vec<u8>, CryptoError>`
+
+AIV = 0xA65959A6 ‖ MLI (big-endian byte length). Single-block
+specialisation when n == 1 (1..=8 byte plaintext): one AES-ECB block on
+AIV ‖ zero-padded_8B per RFC 5649 §4.1. Multi-block path delegates to a
+new shared `wrap_inner` / `unwrap_inner` (extracted from the existing
+RFC 3394 implementation as a pure refactor — same semantics, no
+behaviour change to NOPAD). Unwrap validation: constant-time AIV-prefix
+compare (`subtle::ConstantTimeEq`), MLI bounds 8*(n-1) < MLI ≤ 8*n,
+constant-time zero-pad OR-accumulator over `padded[MLI..8*n]`. Any
+failure -> `CryptoError::AeadTagVerifyFail`.
+
+Pinned the openHiTLS C SDV RFC 5649 §6 vectors as inline lib tests in
+`wrap.rs`: `test_wrap_pad_aes192_rfc5649_multi` (AES-192 KEK, 20-byte
+plaintext -> 32-byte ct) + `test_wrap_pad_aes192_rfc5649_single`
+(AES-192 KEK, 7-byte plaintext -> 16-byte ct), plus 3 negative tests
+(empty plaintext / bad AIV prefix / out-of-band MLI on single block).
+
+xtask `aead.rs` `emit_aes_kw_kat` updated to recognise `*_WRAP_PAD`
+algids and emit `key_wrap_pad` / `key_unwrap_pad` calls instead of the
+previous `skipped_unsupported_alg` branch.
+
+Result: `migrated_aes_kw.rs` 16 -> 24 byte-exact tests (+8 PAD rows =
+4 multi-block + 4 single-block, both wrap and unwrap directions). All
+pass first run.
+
+Verification: wrap.rs lib tests 12/0 (was 7/0); migrated_aes_kw 24/0
+(was 16/0); xtask `--check` drift gate passes; default-feature build
+clean (PAD APIs are unconditional, not `kat-nonce`-gated); fmt + clippy
+-D warnings --all-features --all-targets clean.
+
+na-list tally: AES-KW 16/18/0/8/42 -> 24/18/0/0/42; Total
+3105/3760/240/109/6480 -> 3113/3760/240/101/6480.
+
+Recorded as DEV_LOG Phase I147.
