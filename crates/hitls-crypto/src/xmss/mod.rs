@@ -196,6 +196,37 @@ impl XmssKeyPair {
     pub fn param_id(&self) -> XmssParamId {
         self.param_id
     }
+
+    /// Construct a **verify-only** XMSS key pair from a raw public key
+    /// `PK.seed || PK.root` (`2*n` bytes). The internal representation is
+    /// `OID(4) || PK.root(n) || PK.seed(n)`, so this constructor prepends
+    /// the RFC 8391 OID and reorders the two halves. No private key is held,
+    /// so only [`Self::verify`] is usable.
+    pub fn from_public_key(param_id: XmssParamId, public_key: &[u8]) -> Result<Self, CryptoError> {
+        let p = get_params(param_id);
+        let n = p.n;
+        let expected = 2 * n;
+        if public_key.len() != expected {
+            return Err(CryptoError::InvalidKeyLength {
+                expected,
+                got: public_key.len(),
+            });
+        }
+        let oid_val = params::oid(param_id);
+        let pk_seed = &public_key[..n];
+        let pk_root = &public_key[n..2 * n];
+        let mut full_public_key = Vec::with_capacity(4 + 2 * n);
+        full_public_key.extend_from_slice(&oid_val.to_be_bytes());
+        full_public_key.extend_from_slice(pk_root);
+        full_public_key.extend_from_slice(pk_seed);
+        Ok(Self {
+            public_key: full_public_key,
+            private_key: Vec::new(),
+            param_id,
+            leaf_idx: 0,
+            max_signatures: 0,
+        })
+    }
 }
 
 /// XMSS-MT multi-tree key pair for digital signatures (RFC 8391 Section 4.2).
@@ -374,6 +405,38 @@ impl XmssMtKeyPair {
     /// Return the parameter set identifier.
     pub fn param_id(&self) -> XmssMtParamId {
         self.param_id
+    }
+
+    /// Construct a **verify-only** XMSS-MT key pair from a raw public key
+    /// `PK.seed || PK.root` (`2*n` bytes). Mirror of
+    /// [`XmssKeyPair::from_public_key`] for the multi-tree variants.
+    pub fn from_public_key(
+        param_id: XmssMtParamId,
+        public_key: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let mt = get_mt_params(param_id);
+        let n = mt.n;
+        let expected = 2 * n;
+        if public_key.len() != expected {
+            return Err(CryptoError::InvalidKeyLength {
+                expected,
+                got: public_key.len(),
+            });
+        }
+        let oid_val = params::mt_oid(param_id);
+        let pk_seed = &public_key[..n];
+        let pk_root = &public_key[n..2 * n];
+        let mut full_public_key = Vec::with_capacity(4 + 2 * n);
+        full_public_key.extend_from_slice(&oid_val.to_be_bytes());
+        full_public_key.extend_from_slice(pk_root);
+        full_public_key.extend_from_slice(pk_seed);
+        Ok(Self {
+            public_key: full_public_key,
+            private_key: Vec::new(),
+            param_id,
+            leaf_idx: 0,
+            max_signatures: 0,
+        })
     }
 }
 

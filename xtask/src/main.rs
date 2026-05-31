@@ -20,6 +20,7 @@ mod slhdsa;
 mod sm2;
 mod sm4;
 mod x509;
+mod xmss;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -211,6 +212,11 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_slhdsa.rs"),
             slhdsa::emit_slhdsa_kat,
         ),
+        "xmss" => (
+            vec![c_root.join("crypto/xmss/test_suite_sdv_eal_xmss.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_xmss.rs"),
+            xmss::emit_xmss_kat,
+        ),
         "gmac" => (
             vec![c_root.join("crypto/gmac/test_suite_sdv_eal_gmac.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_gmac.rs"),
@@ -274,7 +280,7 @@ fn migrate(
         ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, aes-ccm, aes-kw, gmac, chacha-poly, siphash, cbc-mac, frodokem, drbg, ecc, rsa, bn, x509-parse, hpke, slhdsa"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, aes-ccm, aes-kw, gmac, chacha-poly, siphash, cbc-mac, frodokem, drbg, ecc, rsa, bn, x509-parse, hpke, slhdsa, xmss"
             )
             .into());
         }

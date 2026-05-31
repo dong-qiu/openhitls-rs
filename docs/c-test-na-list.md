@@ -79,7 +79,8 @@ Counts are the `Generation summary` footer of each generated file
 | AES-KW | 16 | 18 | 0 | 8 | 42 |
 | HPKE | 456 | 11 | 0 | 0 | 467 |
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
-| **Total** | **3014** | **3725** | **240** | **109** | **6354** |
+| XMSS | 42 | 46 | 0 | 0 | 88 |
+| **Total** | **3056** | **3771** | **240** | **109** | **6442** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -376,6 +377,32 @@ rows minus the 1 provider-flag duplicate). SLH-DSA coverage is now
 (needs a Rust pre-hash verify entry point), 1 SIGN_KAT provider-flag
 duplicate, 21 CHECK_KEYPAIR / CHECK_PRVKEY (API), and 9 API / GENKEY
 non-KAT / GETSET / NEW / CTRL rows (all permanent API-surface).
+
+XMSS / XMSS-MT (T155) migrates the **VERIFY_KAT_TC001** family (RFC
+8391) from `test_suite_sdv_eal_xmss.data` via the new `xtask/src/xmss.rs`
+emitter. 42 byte-exact tests across all 13 parameter sets covered by the
+C SDV: 6 single-tree XMSS variants
+(SHA2-{10_256,10_512,10_192} + SHAKE128_10_256 + SHAKE256_{10_256,10_192})
+and 7 multi-tree XMSS-MT variants
+(SHA2_20_2_{256,512,192} + SHAKE128_20_2_256 + SHAKE256_20_2_{512,256,192}).
+Row shape `(algId, key, msg, sig, result)`: `key` is the raw 2N public
+key `PK.seed || PK.root` (no OID prefix in the data file). The new
+public `XmssKeyPair::from_public_key(param, pk_2n)` and
+`XmssMtKeyPair::from_public_key(param, pk_2n)` constructors prepend the
+RFC 8391 OID and reorder to the internal `OID(4) || PK.root(N) ||
+PK.seed(N)` layout. The 14 positive (CRYPT_SUCCESS), 14 negative
+(MERKLETREE_ROOT_MISMATCH), and 14 length-error
+(INVALID_SIG_LEN) cases are handled with the same
+`assert!(matches!(result, Ok(true)))` / `assert!(!matches!(result,
+Ok(true)))` pattern as SLH-DSA T153. **Two new default-feature
+production APIs** added (not `kat-nonce`-gated since `from_public_key`
+is a natural verify-side entry point that already exists for
+SLH-DSA/ML-DSA): no other production code changes. The remaining 46
+rows are API-surface in T155: 28 SIGN_KAT_TC001 (stateful sign;
+deferred to T156 — needs `kat-nonce`-gated `from_private_key` +
+`sign_at_index` to inject `leaf_idx`), 14 GENKEY_KAT_TC001 (needs
+`from_seeds`), and 4 NEW / GETSET / GENKEY (non-KAT) API rows
+(permanent).
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
