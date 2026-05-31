@@ -9314,3 +9314,56 @@ na-list tally updated: HPKE 456/11/0/0/467 (was 432/35), Total
 2697/3693/240/109/6005 (was 2673/3717).
 
 Recorded as DEV_LOG Phase T152.
+
+## Phase T153 — SLH-DSA VERIFY_KAT_TC001 KAT Migration (2026-05-31)
+
+> A
+
+Phase A continuation: migrates the SLH-DSA verify-side KATs from
+test_suite_sdv_eal_slh_dsa1.data against hitls_crypto::slh_dsa. 168
+byte-exact tests, all passing first run, across all 12 FIPS 205 parameter
+sets (SHA-2/SHAKE × {128,192,256} × {f,s}).
+
+Outcome distribution: 24 positive (CRYPT_SUCCESS) + 144 negative
+(HYPERTREE_VERIFY_FAIL 96 + INVALID_SIG_LEN 48).
+
+Row shape (algId, key, addrand, msg, context, sig, expectedStatus):
+- key is the full secret key seed(N)|prf(N)|pk.seed(N)|pk.root(N); the
+  emitter takes pk = key[2N..4N].
+- addrand is sign-side hedging randomness — ignored for verify.
+- expectedStatus is CRYPT_SUCCESS or one of two negative error codes.
+
+Each row emits one #[test] tc_lineN_slhdsa_verify_<alg>_<ok|rej> that
+builds kp = SlhDsaKeyPair::from_public_key(SlhDsaParamId::<v>, pk),
+constructs the pure-mode message M' = 0x00 || OCTET_TO_INT(|ctx|, 1) ||
+ctx || msg per FIPS 205 §10.2.2, then asserts matches!(kp.verify(&M',
+sig), Ok(true)) for CRYPT_SUCCESS or !matches!(..., Ok(true)) for
+negative.
+
+The M' wrapping mirrors the existing assert_verify_kat helper in
+slh_dsa/mod.rs lib tests — Rust verify is the low-level FIPS 205 §10.2.1
+entry point without context wrapping.
+
+New file xtask/src/slhdsa.rs (emit_slhdsa_kat + 12-variant alg_enum). The
+xtask dispatcher routes "slhdsa" to **both** SLH-DSA .data files
+(slh_dsa.data sign/genkey/api + slh_dsa1.data verify) so total accounting
+is accurate; the sign/genkey rows route to API-surface here, pending T154+.
+
+Result: migrated_slhdsa.rs — 168 byte-exact tests, all passing first run.
+
+Zero new production code.
+
+Deferred to T154+:
+- SIGN_KAT_TC001 (62) — needs kat-nonce-gated sign_with_addrand.
+- GENKEY_KAT_TC001 (88) — needs keygen_with_seed.
+- VERIFY_PREHASHED_KAT_TC001 (1) — pre-hash entry point.
+- API/lifecycle rows — permanent API-surface.
+
+Verification: migrated_slhdsa 168/0 (-p hitls-crypto --all-features); xtask
+--check drift gate passes; existing slh_dsa lib tests 64/0 unchanged; fmt
++ clippy -D warnings --all-features --all-targets clean.
+
+na-list tally: SLH-DSA 168/181/0/0/349 (new row), Total
+2865/3874/240/109/6354.
+
+Recorded as DEV_LOG Phase T153.
