@@ -4,7 +4,7 @@
 // Generator: docs/c-test-migration-plan.md Phase A (xtask).
 #![cfg(feature = "siphash")]
 
-use hitls_crypto::siphash::SipHash;
+use hitls_crypto::siphash::{SipHash, SipHash128};
 
 /// in/out same address test CRYPT_MAC_SIPHASH64
 /// C source: SDV_CRYPT_EAL_SIPHASH_SAMEADDR_FUNC_TC001 (line 83, SipHash-64 KAT)
@@ -21,6 +21,26 @@ fn tc_line83_siphash64() {
     let expected: &[u8] = &[0xaa, 0x26, 0x85, 0x92, 0xa6, 0xc8, 0x7e, 0x5d];
     let mac = SipHash::hash(key, data).unwrap();
     assert_eq!(mac.to_le_bytes().as_slice(), expected);
+}
+
+/// in/out same address test CRYPT_MAC_SIPHASH128
+/// C source: SDV_CRYPT_EAL_SIPHASH_SAMEADDR_FUNC_TC001 (line 86, SipHash-128 KAT)
+#[test]
+fn tc_line86_siphash128() {
+    let key: &[u8] = &[
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff,
+    ];
+    let data: &[u8] = &[
+        0xc0, 0x38, 0x3b, 0x4d, 0x9c, 0x7f, 0x00, 0x00, 0xc0, 0xe9, 0xa2, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0xe0, 0x83, 0xf8, 0x35,
+    ];
+    let expected: &[u8] = &[
+        0x97, 0x13, 0x24, 0xc1, 0x0b, 0x6f, 0x31, 0x27, 0x1e, 0xb4, 0x2d, 0x5b, 0x12, 0xc9, 0xea,
+        0x62,
+    ];
+    let mac = SipHash128::hash(key, data).unwrap();
+    assert_eq!(mac.as_slice(), expected);
 }
 
 /// address misalignment test CRYPT_MAC_SIPHASH64
@@ -40,4 +60,24 @@ fn tc_line89_siphash64() {
     assert_eq!(mac.to_le_bytes().as_slice(), expected);
 }
 
-// Generation summary: 2 emitted / 37 API-surface skipped (N/A in Rust) / 0 unknown / 2 unsupported alg / 41 total C cases.
+/// address misalignment test CRYPT_MAC_SIPHASH128
+/// C source: SDV_CRYPT_EAL_SIPHASH_ADDR_NOT_ALIGN_FUNC_TC001 (line 92, SipHash-128 KAT)
+#[test]
+fn tc_line92_siphash128() {
+    let key: &[u8] = &[
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff,
+    ];
+    let data: &[u8] = &[
+        0xc0, 0x38, 0x3b, 0x4d, 0x9c, 0x7f, 0x00, 0x00, 0xc0, 0xe9, 0xa2, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0xe0, 0x83, 0xf8, 0x35,
+    ];
+    let expected: &[u8] = &[
+        0x97, 0x13, 0x24, 0xc1, 0x0b, 0x6f, 0x31, 0x27, 0x1e, 0xb4, 0x2d, 0x5b, 0x12, 0xc9, 0xea,
+        0x62,
+    ];
+    let mac = SipHash128::hash(key, data).unwrap();
+    assert_eq!(mac.as_slice(), expected);
+}
+
+// Generation summary: 4 emitted / 37 API-surface skipped (N/A in Rust) / 0 unknown / 0 unsupported alg / 41 total C cases.

@@ -9921,3 +9921,43 @@ na-list tally: AES 30/273/0/12/315 -> 42/273/0/0/315; Total
 3135/3760/240/79/6480 -> 3147/3760/240/67/6480.
 
 Recorded as DEV_LOG Phase I151.
+
+## Phase I152 — SipHash-2-4-128 (resolves SipHash-128 Structural Gap) (2026-06-01)
+
+> E
+
+Closes the SipHash-128 Structural Gap (2 rows: the
+ADDR_NOT_ALIGN + SAMEADDR SIPHASH128 KAT entries; the previous
+"39" affected-rows claim was incorrect — see DEV_LOG I152 note).
+
+Production additions (default-feature, additive, no ABI break):
+
+- Added a new SipHash128 struct to crates/hitls-crypto/src/siphash/mod.rs,
+  parallel to the existing 64-bit SipHash. Per Aumasson & Bernstein
+  the three deltas vs the 64-bit variant are: (1) init v1 ^= 0xee
+  in addition to k1 XOR; (2) finalization v2 ^= 0xee instead of
+  0xff; (3) after the standard 4 finalization rounds (first 8 bytes
+  = v0^v1^v2^v3), v1 ^= 0xdd and another 4 rounds produce the
+  second 8 output bytes. Message-processing core (sip_round,
+  process_word, 8-byte word-feed loop in update) is bit-identical
+  to the 64-bit variant.
+- Public API mirrors SipHash: SipHash128::new(key) / update / finish
+  -> [u8; 16] / reset / hash(key, data) one-shot.
+
+xtask emitter (xtask/src/aead.rs::emit_siphash_kat): now routes
+CRYPT_MAC_SIPHASH128 rows through SipHash128::hash. The generated
+test for 128-bit rows asserts mac.as_slice() == expected (already
+[u8; 16]); the 64-bit path keeps mac.to_le_bytes().as_slice().
+
+Verification: siphash lib tests 8/0 -> 14/0 (+6: 5 Aumasson
+vectors_sip128.h reference vectors covering input lengths 0..4,
+plus the openHiTLS C SDV vector, plus incremental-equivalence +
+reset + key-length validation + 64-vs-128 divergence smoke tests).
+migrated_siphash 2/0 -> 4/0 (+2). xtask --check drift gate clean.
+cargo test -p hitls-crypto --all-features green. fmt + clippy -D
+warnings --all-features --all-targets clean.
+
+na-list tally: SipHash 2/37/0/2/41 -> 4/37/0/0/41; Total
+3147/3760/240/67/6480 -> 3149/3760/240/65/6480.
+
+Recorded as DEV_LOG Phase I152.
