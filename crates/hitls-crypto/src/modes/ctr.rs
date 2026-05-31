@@ -64,6 +64,38 @@ pub fn ctr_crypt(key: &[u8], nonce: &[u8], data: &mut [u8]) -> Result<(), Crypto
     Ok(())
 }
 
+/// Encrypt or decrypt data using CTR mode with **SM4** (GM/T 0002-2012).
+///
+/// Mirrors [`ctr_crypt`] but with SM4 as the block cipher. SM4 has no
+/// 4-block ECB pipeline, so this uses a simple per-block loop. `nonce`
+/// must be 16 bytes (initial counter); the counter is incremented as a
+/// 128-bit big-endian integer per spec.
+#[cfg(feature = "sm4")]
+pub fn sm4_ctr_crypt(key: &[u8], nonce: &[u8], data: &mut [u8]) -> Result<(), CryptoError> {
+    if nonce.len() != AES_BLOCK_SIZE {
+        return Err(CryptoError::InvalidIvLength);
+    }
+    if data.is_empty() {
+        return Ok(());
+    }
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+    let mut counter = [0u8; AES_BLOCK_SIZE];
+    counter.copy_from_slice(nonce);
+
+    let mut offset = 0;
+    while offset < data.len() {
+        let mut keystream = counter;
+        cipher.encrypt_block(&mut keystream)?;
+        let remaining = (data.len() - offset).min(AES_BLOCK_SIZE);
+        for j in 0..remaining {
+            data[offset + j] ^= keystream[j];
+        }
+        increment_counter(&mut counter);
+        offset += remaining;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +231,27 @@ mod tests {
                 prop_assert_eq!(ct, pt);
             }
         }
+    }
+
+    /// openHiTLS SDV SM4-CTR vector (encrypt direction, key/iv/pt/ct
+    /// reused as a regression-quality KAT here so the migration emitter
+    /// can route it byte-exactly).
+    #[cfg(feature = "sm4")]
+    #[test]
+    fn test_sm4_ctr_openhitls_vector() {
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let nonce = hex("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
+        let pt = hex(
+            "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710",
+        );
+        let expected = "14ae4a72b97a93ce1216ccd998e371c160f7ef8b6344bd6da1992505e5fc219b0bf057f86c5d75103c0f46519c7fb2e7292805035adb9a90ecef145359d7cf0e";
+
+        let mut data = pt.clone();
+        sm4_ctr_crypt(&key, &nonce, &mut data).unwrap();
+        assert_eq!(to_hex(&data), expected);
+
+        // Decrypt = encrypt for CTR.
+        sm4_ctr_crypt(&key, &nonce, &mut data).unwrap();
+        assert_eq!(data, pt);
     }
 }

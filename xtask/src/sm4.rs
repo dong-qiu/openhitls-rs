@@ -11,40 +11,53 @@
 //!   chosen by the trailing `enc` flag.
 //!
 //! The `.data` covers eight cipher modes (ECB/CBC/CTR/CFB/OFB/GCM/HCTR/XTS).
-//! Only the subset with a clean, no-padding Rust API is migrated:
+//! The migrated subset (I153 adds CBC/CTR/CFB/OFB) is:
 //!
-//! * **ECB** — `Sm4Key::encrypt_block` / `decrypt_block`, applied per 16-byte
-//!   block (KAT vectors are block-aligned).
+//! * **ECB** — `Sm4Key::encrypt_block` / `decrypt_block`, per 16-byte block.
+//! * **CBC** — `sm4_cbc_encrypt_raw` / `sm4_cbc_decrypt_raw` (no padding;
+//!   I153 added these to `modes::cbc`).
+//! * **CTR** — `sm4_ctr_crypt` (added in I153).
+//! * **CFB** — `sm4_cfb_encrypt` / `sm4_cfb_decrypt` (added in I153).
+//! * **OFB** — `sm4_ofb_crypt` (added in I153).
 //! * **GCM (encrypt)** — `sm4_gcm_encrypt`; the `.data` cipher field carries
 //!   only the ciphertext (no tag), so the test compares the ciphertext
-//!   prefix and GCM *decrypt* is skipped (it needs the tag to authenticate).
+//!   prefix and GCM *decrypt* is still skipped (it needs the tag).
 //!
-//! CBC is skipped — `sm4_cbc_encrypt` hardcodes PKCS#7 padding, so it cannot
-//! reproduce a raw block-aligned KAT. CTR/CFB/OFB/HCTR/XTS have no public
-//! SM4 entry point. All of these route to `skipped_unsupported_alg`.
+//! HCTR / XTS still have no public SM4 entry point — they route to
+//! `skipped_unsupported_alg`.
 
 use std::fmt::Write;
 
 use crate::digest::EmitStats;
 use crate::parser::{format_byte_slice, TestCase};
 
+/// Tracks which `use` imports the generated file needs.
+#[derive(Default)]
+struct UsedModes {
+    gcm: bool,
+    cbc: bool,
+    ctr: bool,
+    cfb: bool,
+    ofb: bool,
+}
+
 pub fn emit_sm4_kat(cases: &[TestCase]) -> (String, EmitStats) {
     let mut body = String::new();
     let mut stats = EmitStats::default();
-    let mut used_gcm = false;
+    let mut used = UsedModes::default();
 
     for case in cases {
         match classify(&case.tc_name) {
-            Kind::Encrypt => emit_kat(&mut body, case, &mut stats, &mut used_gcm, Family::Tc003),
-            Kind::Decrypt => emit_kat(&mut body, case, &mut stats, &mut used_gcm, Family::Tc004),
-            Kind::EncFlag => emit_kat(&mut body, case, &mut stats, &mut used_gcm, Family::Tc012),
+            Kind::Encrypt => emit_kat(&mut body, case, &mut stats, &mut used, Family::Tc003),
+            Kind::Decrypt => emit_kat(&mut body, case, &mut stats, &mut used, Family::Tc004),
+            Kind::EncFlag => emit_kat(&mut body, case, &mut stats, &mut used, Family::Tc012),
             Kind::ApiSurface => stats.skipped_api += 1,
             Kind::Unknown => stats.skipped_unknown += 1,
         }
     }
 
     let mut out = String::new();
-    write_header(&mut out, used_gcm);
+    write_header(&mut out, &used);
     out.push_str(&body);
     write_footer(&mut out, &stats, cases.len());
     (out, stats)
@@ -163,7 +176,7 @@ fn emit_kat(
     out: &mut String,
     case: &TestCase,
     stats: &mut EmitStats,
-    used_gcm: &mut bool,
+    used: &mut UsedModes,
     family: Family,
 ) {
     if skip_if_provider_dup(case, family) {
@@ -177,13 +190,37 @@ fn emit_kat(
 
     match row.mode {
         "CRYPT_CIPHER_SM4_ECB" => {
-            // ECB processes whole 16-byte blocks; a non-aligned KAT input
-            // would be a padding/streaming case, not a raw block KAT.
             if row.input.is_empty() || row.input.len() % 16 != 0 {
                 stats.skipped_unknown += 1;
                 return;
             }
             emit_ecb(out, case, &row);
+            stats.emitted += 1;
+        }
+        "CRYPT_CIPHER_SM4_CBC" => {
+            // sm4_cbc_*_raw require block-aligned input. Standard SM4-CBC
+            // KAT vectors are 4-block (64-byte) NIST-style.
+            if row.input.is_empty() || row.input.len() % 16 != 0 {
+                stats.skipped_unknown += 1;
+                return;
+            }
+            emit_cbc(out, case, &row);
+            used.cbc = true;
+            stats.emitted += 1;
+        }
+        "CRYPT_CIPHER_SM4_CTR" => {
+            emit_ctr(out, case, &row);
+            used.ctr = true;
+            stats.emitted += 1;
+        }
+        "CRYPT_CIPHER_SM4_CFB" => {
+            emit_cfb(out, case, &row);
+            used.cfb = true;
+            stats.emitted += 1;
+        }
+        "CRYPT_CIPHER_SM4_OFB" => {
+            emit_ofb(out, case, &row);
+            used.ofb = true;
             stats.emitted += 1;
         }
         "CRYPT_CIPHER_SM4_GCM" if row.encrypt => {
@@ -194,11 +231,11 @@ fn emit_kat(
                 return;
             }
             emit_gcm_encrypt(out, case, &row);
-            *used_gcm = true;
+            used.gcm = true;
             stats.emitted += 1;
         }
-        // GCM decrypt needs the tag (absent from the `.data`); CBC hardcodes
-        // PKCS#7 padding; CTR/CFB/OFB/HCTR/XTS have no public SM4 entry.
+        // GCM decrypt needs the tag (absent from `.data`); HCTR / XTS have
+        // no public SM4 entry point yet.
         _ => stats.skipped_unsupported_alg += 1,
     }
 }
@@ -235,6 +272,115 @@ fn emit_ecb(out: &mut String, case: &TestCase, row: &Row) {
     writeln!(out, "}}\n").unwrap();
 }
 
+fn emit_cbc(out: &mut String, case: &TestCase, row: &Row) {
+    let dir = if row.encrypt { "encrypt" } else { "decrypt" };
+    let call = if row.encrypt {
+        "sm4_cbc_encrypt_raw(key, iv, input)"
+    } else {
+        "sm4_cbc_decrypt_raw(key, iv, input)"
+    };
+    write_doc(out, case, &format!("SM4-CBC raw {dir} KAT"));
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_sm4_cbc_{dir}() {{", case.line).unwrap();
+    writeln!(out, "    let key: &[u8] = {};", format_byte_slice(row.key)).unwrap();
+    writeln!(out, "    let iv: &[u8] = {};", format_byte_slice(row.iv)).unwrap();
+    writeln!(
+        out,
+        "    let input: &[u8] = {};",
+        format_byte_slice(row.input)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let expected: &[u8] = {};",
+        format_byte_slice(row.output)
+    )
+    .unwrap();
+    writeln!(out, "    let actual = {call}.unwrap();").unwrap();
+    writeln!(out, "    assert_eq!(actual.as_slice(), expected);").unwrap();
+    writeln!(out, "}}\n").unwrap();
+}
+
+fn emit_ctr(out: &mut String, case: &TestCase, row: &Row) {
+    let dir = if row.encrypt { "encrypt" } else { "decrypt" };
+    // CTR is symmetric — same call in either direction.
+    write_doc(out, case, &format!("SM4-CTR {dir} KAT"));
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_sm4_ctr_{dir}() {{", case.line).unwrap();
+    writeln!(out, "    let key: &[u8] = {};", format_byte_slice(row.key)).unwrap();
+    writeln!(out, "    let iv: &[u8] = {};", format_byte_slice(row.iv)).unwrap();
+    writeln!(
+        out,
+        "    let input: &[u8] = {};",
+        format_byte_slice(row.input)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let expected: &[u8] = {};",
+        format_byte_slice(row.output)
+    )
+    .unwrap();
+    writeln!(out, "    let mut actual = input.to_vec();").unwrap();
+    writeln!(out, "    sm4_ctr_crypt(key, iv, &mut actual).unwrap();").unwrap();
+    writeln!(out, "    assert_eq!(actual.as_slice(), expected);").unwrap();
+    writeln!(out, "}}\n").unwrap();
+}
+
+fn emit_cfb(out: &mut String, case: &TestCase, row: &Row) {
+    let dir = if row.encrypt { "encrypt" } else { "decrypt" };
+    let call = if row.encrypt {
+        "sm4_cfb_encrypt(key, iv, input)"
+    } else {
+        "sm4_cfb_decrypt(key, iv, input)"
+    };
+    write_doc(out, case, &format!("SM4-CFB {dir} KAT"));
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_sm4_cfb_{dir}() {{", case.line).unwrap();
+    writeln!(out, "    let key: &[u8] = {};", format_byte_slice(row.key)).unwrap();
+    writeln!(out, "    let iv: &[u8] = {};", format_byte_slice(row.iv)).unwrap();
+    writeln!(
+        out,
+        "    let input: &[u8] = {};",
+        format_byte_slice(row.input)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let expected: &[u8] = {};",
+        format_byte_slice(row.output)
+    )
+    .unwrap();
+    writeln!(out, "    let actual = {call}.unwrap();").unwrap();
+    writeln!(out, "    assert_eq!(actual.as_slice(), expected);").unwrap();
+    writeln!(out, "}}\n").unwrap();
+}
+
+fn emit_ofb(out: &mut String, case: &TestCase, row: &Row) {
+    let dir = if row.encrypt { "encrypt" } else { "decrypt" };
+    write_doc(out, case, &format!("SM4-OFB {dir} KAT"));
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_sm4_ofb_{dir}() {{", case.line).unwrap();
+    writeln!(out, "    let key: &[u8] = {};", format_byte_slice(row.key)).unwrap();
+    writeln!(out, "    let iv: &[u8] = {};", format_byte_slice(row.iv)).unwrap();
+    writeln!(
+        out,
+        "    let input: &[u8] = {};",
+        format_byte_slice(row.input)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let expected: &[u8] = {};",
+        format_byte_slice(row.output)
+    )
+    .unwrap();
+    writeln!(out, "    let mut actual = input.to_vec();").unwrap();
+    writeln!(out, "    sm4_ofb_crypt(key, iv, &mut actual).unwrap();").unwrap();
+    writeln!(out, "    assert_eq!(actual.as_slice(), expected);").unwrap();
+    writeln!(out, "}}\n").unwrap();
+}
+
 fn emit_gcm_encrypt(out: &mut String, case: &TestCase, row: &Row) {
     write_doc(out, case, "SM4-GCM encrypt KAT");
     writeln!(out, "#[test]").unwrap();
@@ -264,7 +410,7 @@ fn emit_gcm_encrypt(out: &mut String, case: &TestCase, row: &Row) {
     writeln!(out, "}}\n").unwrap();
 }
 
-fn write_header(out: &mut String, used_gcm: bool) {
+fn write_header(out: &mut String, used: &UsedModes) {
     out.push_str(
         "// This file is GENERATED by `cargo xtask migrate-c-tests --algo sm4`.\n\
          // DO NOT EDIT BY HAND. Source: openhitls C SDV test_suite_sdv_eal_sm4.data\n\
@@ -273,8 +419,20 @@ fn write_header(out: &mut String, used_gcm: bool) {
     );
     out.push_str("#![cfg(all(feature = \"sm4\", feature = \"modes\"))]\n\n");
     out.push_str("use hitls_crypto::sm4::Sm4Key;\n");
-    if used_gcm {
+    if used.gcm {
         out.push_str("use hitls_crypto::modes::gcm::sm4_gcm_encrypt;\n");
+    }
+    if used.cbc {
+        out.push_str("use hitls_crypto::modes::cbc::{sm4_cbc_decrypt_raw, sm4_cbc_encrypt_raw};\n");
+    }
+    if used.ctr {
+        out.push_str("use hitls_crypto::modes::ctr::sm4_ctr_crypt;\n");
+    }
+    if used.cfb {
+        out.push_str("use hitls_crypto::modes::cfb::{sm4_cfb_decrypt, sm4_cfb_encrypt};\n");
+    }
+    if used.ofb {
+        out.push_str("use hitls_crypto::modes::ofb::sm4_ofb_crypt;\n");
     }
     out.push('\n');
 }

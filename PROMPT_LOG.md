@@ -9961,3 +9961,60 @@ na-list tally: SipHash 2/37/0/2/41 -> 4/37/0/0/41; Total
 3147/3760/240/67/6480 -> 3149/3760/240/65/6480.
 
 Recorded as DEV_LOG Phase I152.
+
+## Phase I153 — SM4 raw modes (closes most of SM4 Structural Gap) (2026-06-01)
+
+> F
+
+Closes 26 of the 37 SM4-mode Structural-Gap rows. The T6-era SM4
+KAT migration emitted only 9 rows (ECB block + GCM-encrypt) because
+SM4 had no public CBC-raw / CTR / CFB / OFB entry points; the
+emitter routed CRYPT_CIPHER_SM4_{CBC,CTR,CFB,OFB} rows to
+skipped_unsupported_alg.
+
+Production additions (all default-feature, #[cfg(feature = "sm4")],
+additive — no ABI break on existing AES paths):
+
+- modes::cbc: sm4_cbc_encrypt_raw / sm4_cbc_decrypt_raw, 2-line
+  wrappers around the cbc_encrypt_raw_with<Sm4Key> /
+  cbc_decrypt_raw_with<Sm4Key> generics that I151 added.
+- modes::ctr: sm4_ctr_crypt — in-place, symmetric, ~30 LOC. SM4 has
+  no 4-block ECB pipeline (Sm4Key exposes only encrypt_block), so
+  a simple per-block loop instead of the AES encrypt_4_blocks
+  64-byte pipeline; 128-bit BE counter increment via the file's
+  shared increment_counter helper.
+- modes::cfb: sm4_cfb_encrypt / sm4_cfb_decrypt — mirror AES
+  CFB-128 with Sm4Key in place of AesKey, same partial-block
+  feedback handling.
+- modes::ofb: sm4_ofb_crypt — mirror AES OFB with Sm4Key,
+  symmetric.
+
+The 128-bit block + GM/T 0002-2012 SM4 round function plug
+unchanged into NIST SP 800-38A §6.2-6.5 mode constructions; math
+is identical to AES, only the cipher primitive changes.
+
+xtask emitter (xtask/src/sm4.rs): new UsedModes struct (gcm / cbc /
+ctr / cfb / ofb) replaces the single used_gcm flag; emit_kat
+learns 4 new CRYPT_CIPHER_SM4_{CBC,CTR,CFB,OFB} arms with
+corresponding emit_cbc / emit_ctr / emit_cfb / emit_ofb writers;
+write_header emits one `use` import per active mode; module
+doc-comment rewritten to enumerate now-supported vs still-skipped
+modes.
+
+Verification: modes lib tests 102/0 -> 109/0 (+7, includes 1 new
+openHiTLS SDV SM4-CTR KAT pinned in ctr.rs); migrated_sm4 9/0 ->
+35/0 (+26: 19 CBC + 4 CTR + 2 CFB + 1 OFB); xtask --check drift
+gate clean; cargo test -p hitls-crypto --all-features green (no
+regression on existing PKCS#7 sm4_cbc_encrypt / sm4_cbc_decrypt /
+sm4_gcm_encrypt); fmt + clippy -D warnings --all-features
+--all-targets clean.
+
+Remaining 11 SM4 unsupported rows split across HCTR (3, no public
+SM4 entry), XTS (4, no public SM4 entry + needs separate tweak
+key), GCM-decrypt (4, the .data cipher field lacks the 16-byte
+auth tag) — documented as a new narrower na-list gap row.
+
+na-list tally: SM4 9/237/0/37/283 -> 35/237/0/11/283; Total
+3149/3760/240/65/6480 -> 3175/3760/240/39/6480.
+
+Recorded as DEV_LOG Phase I153.
