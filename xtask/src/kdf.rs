@@ -363,16 +363,21 @@ pub fn emit_scrypt_kat(cases: &[TestCase]) -> (String, EmitStats) {
 // TLS 1.2 PRF — (macAlg, secret, label, seed, expected). Lives in hitls-tls.
 // `prf` concatenates label‖seed internally, so we pass label="" and seed =
 // (label ++ seed) to reproduce the identical P_hash input without needing
-// the label to be valid UTF-8. HashAlgId has no SHA-512 → those are
-// unsupported.
+// the label to be valid UTF-8.
+//
+// HashAlgId variants in `hitls_tls::crypt`: Sha1, Sha256, Sha384, Sha512
+// (the SHA-512 variant is migration-test-only — TLS 1.2 itself never
+// negotiates a SHA-512 PRF, the entry is added so the C SDV
+// `CRYPT_MAC_HMAC_SHA512` PRF vectors can be migrated byte-exactly).
 // ---------------------------------------------------------------------------
 
 fn mac_to_hashalgid(symbol: &str) -> Option<&'static str> {
     match symbol {
         "CRYPT_MAC_HMAC_SHA256" => Some("Sha256"),
         "CRYPT_MAC_HMAC_SHA384" => Some("Sha384"),
+        "CRYPT_MAC_HMAC_SHA512" => Some("Sha512"),
         "CRYPT_MAC_HMAC_SHA1" => Some("Sha1"),
-        _ => None, // SHA-512 / others: no HashAlgId variant
+        _ => None,
     }
 }
 

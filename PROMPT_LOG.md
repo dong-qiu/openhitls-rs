@@ -9783,3 +9783,45 @@ na-list tally: DRBG 6/272/0/12/290 -> 18/272/0/0/290; Total
 3113/3760/240/101/6480 -> 3125/3760/240/89/6480.
 
 Recorded as DEV_LOG Phase I148.
+
+## Phase I149 — TLS 1.2 PRF SHA-512 (resolves T144-deferred Structural Gap) (2026-05-31)
+
+> A
+
+Closes the T144-deferred TLS 1.2 PRF SHA-512 Structural Gap (2
+unsupported rows). `hitls_tls::crypt::HashAlgId` previously only
+carried Sha256 / Sha384 / Sha1 (+ Sm3 under tlcp/sm_tls13), so
+the 2 C SDV CRYPT_MAC_HMAC_SHA512 PRF rows had to be dropped at
+emission time.
+
+Production additions (default-feature, additive, no ABI break):
+
+- HashAlgId gains a Sha512 variant.
+- DigestVariant gains a Sha512(Sha512) arm; matching arms added in
+  DigestVariant::new, output_size_for, and the Digest impl
+  (output_size, block_size, update, finish, reset).
+- hitls_tls::crypt::mod imports hitls_crypto::sha2::Sha512.
+
+Notably: no production CALL SITE changes. TLS 1.2 itself never
+negotiates a SHA-512 PRF — no cipher suite in RFC 5246 / RFC 5288
+advertises it. The new variant is unreachable from
+CipherSuiteParams::from_suite or any handshake state machine; it
+exists purely so the C SDV CRYPT_MAC_HMAC_SHA512 PRF KAT rows can
+be expressed against the same `prf(HashAlgId::Sha512, ...)` entry
+point as the SHA-256/SHA-384 rows.
+
+xtask emitter (xtask/src/kdf.rs::mac_to_hashalgid): adds a
+CRYPT_MAC_HMAC_SHA512 -> "Sha512" row so SHA-512 PRF rows route
+through the new variant instead of skipped_unsupported_alg. Module
+doc reworded — SHA-512 variant is no longer "no HashAlgId" but
+"migration-only".
+
+Verification: hitls-tls --all-features lib tests 1556/0 unchanged
+(zero regression on TLS 1.2/1.3 negotiation); migrated_kdf_tls12
+4/0 -> 6/0 (+2); xtask --check drift gate passes; fmt + clippy -D
+warnings --all-features --all-targets clean.
+
+na-list tally: TLS1.2-PRF 4/16/0/2/22 -> 6/16/0/0/22; Total
+3125/3760/240/89/6480 -> 3127/3760/240/87/6480.
+
+Recorded as DEV_LOG Phase I149.

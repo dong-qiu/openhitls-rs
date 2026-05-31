@@ -15,7 +15,7 @@ pub mod transcript;
 use crate::CipherSuite;
 use hitls_crypto::provider::Digest;
 use hitls_crypto::sha1::Sha1;
-use hitls_crypto::sha2::{Sha256, Sha384};
+use hitls_crypto::sha2::{Sha256, Sha384, Sha512};
 #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
 use hitls_crypto::sm3::Sm3;
 use hitls_types::{CryptoError, TlsError};
@@ -28,6 +28,7 @@ use hitls_types::{CryptoError, TlsError};
 pub enum HashAlgId {
     Sha256,
     Sha384,
+    Sha512,
     Sha1,
     #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
     Sm3,
@@ -40,6 +41,7 @@ pub enum HashAlgId {
 pub enum DigestVariant {
     Sha256(Sha256),
     Sha384(Sha384),
+    Sha512(Sha512),
     Sha1(Sha1),
     #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
     Sm3(Sm3),
@@ -51,6 +53,7 @@ impl DigestVariant {
         match alg {
             HashAlgId::Sha256 => DigestVariant::Sha256(Sha256::new()),
             HashAlgId::Sha384 => DigestVariant::Sha384(Sha384::new()),
+            HashAlgId::Sha512 => DigestVariant::Sha512(Sha512::new()),
             HashAlgId::Sha1 => DigestVariant::Sha1(Sha1::new()),
             #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
             HashAlgId::Sm3 => DigestVariant::Sm3(Sm3::new()),
@@ -62,6 +65,7 @@ impl DigestVariant {
         match alg {
             HashAlgId::Sha256 => 32,
             HashAlgId::Sha384 => 48,
+            HashAlgId::Sha512 => 64,
             HashAlgId::Sha1 => 20,
             #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
             HashAlgId::Sm3 => 32,
@@ -74,6 +78,7 @@ impl Digest for DigestVariant {
         match self {
             DigestVariant::Sha256(h) => h.output_size(),
             DigestVariant::Sha384(h) => h.output_size(),
+            DigestVariant::Sha512(h) => h.output_size(),
             DigestVariant::Sha1(h) => h.output_size(),
             #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
             DigestVariant::Sm3(h) => h.output_size(),
@@ -84,6 +89,7 @@ impl Digest for DigestVariant {
         match self {
             DigestVariant::Sha256(h) => h.block_size(),
             DigestVariant::Sha384(h) => h.block_size(),
+            DigestVariant::Sha512(h) => h.block_size(),
             DigestVariant::Sha1(h) => h.block_size(),
             #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
             DigestVariant::Sm3(h) => h.block_size(),
@@ -94,6 +100,7 @@ impl Digest for DigestVariant {
         match self {
             DigestVariant::Sha256(h) => h.update(data),
             DigestVariant::Sha384(h) => h.update(data),
+            DigestVariant::Sha512(h) => h.update(data),
             DigestVariant::Sha1(h) => h.update(data),
             #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
             DigestVariant::Sm3(h) => h.update(data),
@@ -108,6 +115,11 @@ impl Digest for DigestVariant {
                 Ok(())
             }
             DigestVariant::Sha384(h) => {
+                let result = h.finish()?;
+                out[..result.len()].copy_from_slice(&result);
+                Ok(())
+            }
+            DigestVariant::Sha512(h) => {
                 let result = h.finish()?;
                 out[..result.len()].copy_from_slice(&result);
                 Ok(())
@@ -130,6 +142,7 @@ impl Digest for DigestVariant {
         match self {
             DigestVariant::Sha256(h) => h.reset(),
             DigestVariant::Sha384(h) => h.reset(),
+            DigestVariant::Sha512(h) => h.reset(),
             DigestVariant::Sha1(h) => h.reset(),
             #[cfg(any(feature = "tlcp", feature = "sm_tls13"))]
             DigestVariant::Sm3(h) => h.reset(),

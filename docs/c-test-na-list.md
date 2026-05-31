@@ -68,7 +68,7 @@ Counts are the `Generation summary` footer of each generated file
 | HKDF | 8 | 26 | 0 | 0 | 34 |
 | PBKDF2 | 7 | 15 | 0 | 0 | 22 |
 | scrypt | 3 | 17 | 0 | 0 | 20 |
-| TLS1.2-PRF | 4 | 16 | 0 | 2 | 22 |
+| TLS1.2-PRF | 6 | 16 | 0 | 0 | 22 |
 | AES-GCM | 12 | 36 | 0 | 0 | 42 |
 | GMAC | 12 | 14 | 0 | 0 | 26 |
 | ChaCha20-Poly1305 | 34 | 21 | 0 | 0 | 38 |
@@ -81,7 +81,7 @@ Counts are the `Generation summary` footer of each generated file
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 7 | 31 | 0 | 0 | 38 |
-| **Total** | **3125** | **3760** | **240** | **89** | **6480** |
+| **Total** | **3127** | **3760** | **240** | **87** | **6480** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -538,7 +538,7 @@ migration tool emit the corresponding tests with no generator change.
 | ~~HMAC-DRBG SHA-1 / 224 / 384 / 512~~ | ~~DRBG~~ | ~~4~~ | **Resolved in I148.** `HmacDrbg` generalised over the digest via a new `HmacDrbgType` enum (Sha1/Sha224/Sha256/Sha384/Sha512) + `HmacDrbg::with(ty, seed)` constructor. `HmacDrbg::new(seed)` retained as the SHA-256 default (no breaking change). | Resolved by I148. |
 | ~~CTR-DRBG AES-128 / 192 (±df)~~ | ~~DRBG~~ | ~~4~~ | **Resolved in I148.** `CtrDrbg` generalised over the AES key length via a new `CtrDrbgType` enum (Aes128/Aes192/Aes256) + `CtrDrbg::with(ty, seed)` / `CtrDrbg::with_df_typed(ty, entropy, nonce, pers)` constructors. `block_cipher_df` parameterised by `key_len`. `CtrDrbg::new` / `with_df` retained as AES-256 defaults. | Resolved by I148. |
 | ~~SM4-CTR-DRBG-df~~ | ~~DRBG~~ | ~~1~~ | **Resolved in I148.** Added `Sm4CtrDrbg::with_df(entropy, nonce, personalization)` mirroring the AES-CTR-DRBG `with_df` path, plus an SM4-CBC-MAC `block_cipher_df` helper. Note: openHiTLS C `DRBG_MAX_REQUEST_SM4 = 16` (vs AES's 65536) means a 32-byte `RandbytesEx` is chunked into two 16-byte generates by the EAL layer; the migration emitter mirrors this by calling `generate(..16)` twice. | Resolved by I148. |
-| TLS 1.2 PRF SHA-512 | TLS1.2-PRF | 2 | `hitls_tls::crypt::HashAlgId` has only `Sha256` / `Sha384` / `Sha1` (+ Sm3) — no `Sha512` variant, so the SHA-512 PRF vectors cannot be expressed | add a `Sha512` variant to `HashAlgId` + its `DigestVariant` arm (TLS 1.2 itself never negotiates SHA-512 PRF, so this is migration-only) |
+| ~~TLS 1.2 PRF SHA-512~~ | ~~TLS1.2-PRF~~ | ~~2~~ | **Resolved in I149.** Added `Sha512` to `hitls_tls::crypt::HashAlgId` + the matching `DigestVariant::Sha512(Sha512)` arm + dispatches in `output_size_for` / output_size / block_size / update / finish / reset. TLS 1.2 itself never negotiates a SHA-512 PRF (no cipher suite advertises it), so this is migration-only — but the unconditional enum variant is the cleanest way to express the C SDV `CRYPT_MAC_HMAC_SHA512` PRF rows byte-exactly. xtask `mac_to_hashalgid` recognises `CRYPT_MAC_HMAC_SHA512 → "Sha512"`. | Resolved by I149; TLS 1.2-PRF tally bumped 4 → 6 emitted. |
 | SipHash-128 | SipHash | 39 | Rust `SipHash::hash` returns a `u64` (SipHash-2-4-64 only); the 128-bit output variant is not implemented | add a 128-bit SipHash output path |
 | Classic McEliece decaps KAT | McEliece | 2 | **Reference-interoperability gap (FrodoKEM half RESOLVED in I145).** McEliece decapsulation of a *reference* `(sk, ct)` errors inside `decode` — its impl is validated only by self round-trip and was never proven reference-compatible. The McEliece secret key is `delta ‖ c ‖ g ‖ s ‖ controlbits`, where the Benes-network **control-bit** encoding is highly implementation-specific; reconciling it with the C reference is a separate, deeper code-based-scheme investigation. (The sibling FrodoKEM gap was root-caused to LSB-vs-MSB-first `pack`/`unpack` bit-endianness and **fixed in I145** — its 8 decaps KATs now pass; see the tally.) | dedicated investigation: compare the McEliece sk serialization (g-coeff endianness, control-bit / Benes layout) and the `decode` pipeline Rust↔C, realign, then verify the 2 reference KATs + self round-trip |
 
