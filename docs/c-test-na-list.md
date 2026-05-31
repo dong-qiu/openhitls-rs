@@ -72,7 +72,7 @@ Counts are the `Generation summary` footer of each generated file
 | AES-GCM | 12 | 36 | 0 | 0 | 42 |
 | GMAC | 12 | 14 | 0 | 0 | 26 |
 | ChaCha20-Poly1305 | 34 | 21 | 0 | 0 | 38 |
-| SipHash | 2 | 37 | 0 | 2 | 41 |
+| SipHash | 4 | 37 | 0 | 0 | 41 |
 | CBC-MAC (SM4) | 4 | 25 | 0 | 0 | 29 |
 | FrodoKEM | 8 | 90 | 0 | 5 | 103 |
 | AES-CCM | 36 | 66 | 0 | 0 | 84 |
@@ -81,7 +81,7 @@ Counts are the `Generation summary` footer of each generated file
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 7 | 31 | 0 | 0 | 38 |
-| **Total** | **3147** | **3760** | **240** | **67** | **6480** |
+| **Total** | **3149** | **3760** | **240** | **65** | **6480** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -539,7 +539,7 @@ migration tool emit the corresponding tests with no generator change.
 | ~~CTR-DRBG AES-128 / 192 (±df)~~ | ~~DRBG~~ | ~~4~~ | **Resolved in I148.** `CtrDrbg` generalised over the AES key length via a new `CtrDrbgType` enum (Aes128/Aes192/Aes256) + `CtrDrbg::with(ty, seed)` / `CtrDrbg::with_df_typed(ty, entropy, nonce, pers)` constructors. `block_cipher_df` parameterised by `key_len`. `CtrDrbg::new` / `with_df` retained as AES-256 defaults. | Resolved by I148. |
 | ~~SM4-CTR-DRBG-df~~ | ~~DRBG~~ | ~~1~~ | **Resolved in I148.** Added `Sm4CtrDrbg::with_df(entropy, nonce, personalization)` mirroring the AES-CTR-DRBG `with_df` path, plus an SM4-CBC-MAC `block_cipher_df` helper. Note: openHiTLS C `DRBG_MAX_REQUEST_SM4 = 16` (vs AES's 65536) means a 32-byte `RandbytesEx` is chunked into two 16-byte generates by the EAL layer; the migration emitter mirrors this by calling `generate(..16)` twice. | Resolved by I148. |
 | ~~TLS 1.2 PRF SHA-512~~ | ~~TLS1.2-PRF~~ | ~~2~~ | **Resolved in I149.** Added `Sha512` to `hitls_tls::crypt::HashAlgId` + the matching `DigestVariant::Sha512(Sha512)` arm + dispatches in `output_size_for` / output_size / block_size / update / finish / reset. TLS 1.2 itself never negotiates a SHA-512 PRF (no cipher suite advertises it), so this is migration-only — but the unconditional enum variant is the cleanest way to express the C SDV `CRYPT_MAC_HMAC_SHA512` PRF rows byte-exactly. xtask `mac_to_hashalgid` recognises `CRYPT_MAC_HMAC_SHA512 → "Sha512"`. | Resolved by I149; TLS 1.2-PRF tally bumped 4 → 6 emitted. |
-| SipHash-128 | SipHash | 39 | Rust `SipHash::hash` returns a `u64` (SipHash-2-4-64 only); the 128-bit output variant is not implemented | add a 128-bit SipHash output path |
+| ~~SipHash-128~~ | ~~SipHash~~ | ~~2~~ | **Resolved in I152.** Added a new `SipHash128` struct (parallel to the existing 64-bit `SipHash`) implementing SipHash-2-4-128 per Aumasson & Bernstein. Same core permutation (`sip_round`, `process_word`); the three deltas are (i) init `v1 ^= 0xee`, (ii) finalization `v2 ^= 0xee` instead of `0xff`, and (iii) after the standard 4 finalization rounds, `v1 ^= 0xdd` and another 4 rounds produce the second 8 output bytes. xtask `emit_siphash_kat` now routes `CRYPT_MAC_SIPHASH128` rows through `SipHash128::hash` (the previous `if !alg.contains("SIPHASH64")` skip branch is gone). First-5 Aumasson reference vectors + the openHiTLS C SDV row pinned as inline lib KAT. **Note:** the gap row's previous "39" count was incorrect — the C SDV only carries 2 SIPHASH128 KAT rows (the 4-arg ADDR_NOT_ALIGN / SAMEADDR variants); the other 39 SipHash rows are API-surface (init/reinit/deinit/copy_ctx etc.) which are unrelated to the 128-bit output gap. | Resolved by I152; SipHash tally 2/37/0/2/41 → 4/37/0/0/41. |
 | Classic McEliece decaps KAT | McEliece | 2 | **Reference-interoperability gap (FrodoKEM half RESOLVED in I145).** McEliece decapsulation of a *reference* `(sk, ct)` errors inside `decode` — its impl is validated only by self round-trip and was never proven reference-compatible. The McEliece secret key is `delta ‖ c ‖ g ‖ s ‖ controlbits`, where the Benes-network **control-bit** encoding is highly implementation-specific; reconciling it with the C reference is a separate, deeper code-based-scheme investigation. (The sibling FrodoKEM gap was root-caused to LSB-vs-MSB-first `pack`/`unpack` bit-endianness and **fixed in I145** — its 8 decaps KATs now pass; see the tally.) | dedicated investigation: compare the McEliece sk serialization (g-coeff endianness, control-bit / Benes layout) and the `decode` pipeline Rust↔C, realign, then verify the 2 reference KATs + self round-trip |
 
 ### Resolved divergence — CTR-DRBG-AES-256-df
