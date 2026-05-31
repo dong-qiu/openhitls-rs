@@ -78,8 +78,8 @@ Counts are the `Generation summary` footer of each generated file
 | AES-CCM | 36 | 66 | 0 | 0 | 84 |
 | AES-KW | 16 | 18 | 0 | 8 | 42 |
 | HPKE | 456 | 11 | 0 | 0 | 467 |
-| SLH-DSA | 168 | 181 | 0 | 0 | 349 |
-| **Total** | **2865** | **3874** | **240** | **109** | **6354** |
+| SLH-DSA | 317 | 32 | 0 | 0 | 349 |
+| **Total** | **3014** | **3725** | **240** | **109** | **6354** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -342,14 +342,40 @@ ctx || msg` (FIPS 205 §10.2.2), then asserts `kp.verify(&M', sig)` ==
 code** — `from_public_key` + `verify` already exist; the M' prefix
 wrapping mirrors the existing `assert_verify_kat` helper in the lib
 tests (the Rust `verify` is the low-level FIPS 205 §10.2.1 entry point,
-without context wrapping). The remaining 181 rows route to API-surface:
-all of `test_suite_sdv_eal_slh_dsa.data` (177 — GENKEY_KAT_TC001 88 +
-SIGN_KAT_TC001 62 + CHECK_KEYPAIR/PRVKEY 21 + API/GENKEY/GETSET 6) plus
-the single `VERIFY_PREHASHED_KAT_TC001` row (FIPS 205 §10.2.3 pre-hash —
-no Rust pre-hash verify entry point). SIGN_KAT (62) and GENKEY_KAT (88)
-are the natural T154+ follow-up; both need a `kat-nonce`-gated
-`sign_with_addrand` (or `sign_internal` made public + `deterministic`
-mode) and a `keygen_with_seed` constructor respectively.
+without context wrapping). The remaining 181 rows route to API-surface
+in T153; T154 (below) closes the bulk of those.
+
+T154 extends the SLH-DSA emitter to also migrate **SIGN_KAT_TC001** (62
+rows) and **GENKEY_KAT_TC001** (88 rows). SIGN_KAT row shape `(isProvider,
+algId, key, addrand, msg, context, sig)`: `key` is the full 4N secret
+key (same layout as VERIFY); `addrand` is empty for pure-deterministic
+mode (`opt_rand = PK.seed` per FIPS 205 §10.2.1) or non-empty for hedged
+mode with fixed hedge. The provider-flag duplicate row (`isProvider=1`)
+is dropped as API-surface, per the workspace-wide convention. Each row
+emits one test that builds `kp = SlhDsaKeyPair::from_private_key(param,
+key)`, wraps the message `M' = 0x00 || OCTET_TO_INT(|ctx|, 1) || ctx ||
+msg`, then asserts `kp.sign_with_addrand(&M', addrand) == sig`
+byte-exact. GENKEY_KAT row shape `(algId, key_3n, expected_pk_2n)`:
+`key` is the three 3N stub-randomness seeds `sk_seed | sk_prf | pk_seed`
+that the C `RandInjection` would have returned; expected is the computed
+`pk_seed | pk_root`. Each row emits one test that builds `kp =
+SlhDsaKeyPair::from_seeds(param, sk_seed, sk_prf, pk_seed)` and asserts
+`kp.public_key() == expected`. Three new `kat-nonce`-gated public APIs
+on `SlhDsaKeyPair` (all `#[doc(hidden)] + #[deprecated(note =
+"test-only: ...")]`): `from_private_key(param, full_key_4n)` skips the
+randomised keygen and trusts the row's pre-computed PK.root;
+`from_seeds(param, sk_seed, sk_prf, pk_seed)` mirrors `generate()`'s
+XMSS-top-tree-root computation but with injected seeds (the body is a
+copy of `generate()`'s post-randomness logic); `sign_with_addrand(msg,
+addrand)` wraps the existing private `sign_internal` and picks
+`opt_rand = PK.seed` when `addrand` is empty (matching the C
+`CRYPT_CTRL_SET_DETERMINISTIC_FLAG` semantics). **Added 149 byte-exact
+tests** (`migrated_slhdsa.rs` 168 → **317**; 88 genkey + 61 sign — 62
+rows minus the 1 provider-flag duplicate). SLH-DSA coverage is now
+**317/349 (90.8%)**. The remaining 32 rows are: 1 VERIFY_PREHASHED row
+(needs a Rust pre-hash verify entry point), 1 SIGN_KAT provider-flag
+duplicate, 21 CHECK_KEYPAIR / CHECK_PRVKEY (API), and 9 API / GENKEY
+non-KAT / GETSET / NEW / CTRL rows (all permanent API-surface).
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
