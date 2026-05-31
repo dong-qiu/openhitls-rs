@@ -1,25 +1,65 @@
 //! HMAC-DRBG (Deterministic Random Bit Generator) implementation.
 //!
 //! Provides cryptographic random number generation based on NIST SP 800-90A
-//! using HMAC-SHA-256 as the underlying primitive.
+//! Section 10.1.2. Supported HMAC families: SHA-1, SHA-224, SHA-256,
+//! SHA-384, SHA-512.
 
 use crate::hmac::Hmac;
 use crate::provider::Digest;
-use crate::sha2::Sha256;
+use crate::sha1::Sha1;
+use crate::sha2::{Sha224, Sha256, Sha384, Sha512};
 use hitls_types::CryptoError;
 use zeroize::Zeroize;
 
 use super::RESEED_INTERVAL;
 
-/// HMAC output size for SHA-256.
-const HMAC_SIZE: usize = 32;
+/// HMAC family selection for HMAC-DRBG.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HmacDrbgType {
+    /// HMAC-SHA-1 (output=20).
+    Sha1,
+    /// HMAC-SHA-224 (output=28).
+    Sha224,
+    /// HMAC-SHA-256 (output=32). Default.
+    Sha256,
+    /// HMAC-SHA-384 (output=48).
+    Sha384,
+    /// HMAC-SHA-512 (output=64).
+    Sha512,
+}
 
-/// HMAC-DRBG context using SHA-256 (NIST SP 800-90A Section 10.1.2).
+impl HmacDrbgType {
+    /// HMAC output size in bytes.
+    fn output_size(self) -> usize {
+        match self {
+            Self::Sha1 => 20,
+            Self::Sha224 => 28,
+            Self::Sha256 => 32,
+            Self::Sha384 => 48,
+            Self::Sha512 => 64,
+        }
+    }
+
+    /// HMAC digest factory.
+    fn new_hash(self) -> Box<dyn Digest> {
+        match self {
+            Self::Sha1 => Box::new(Sha1::new()),
+            Self::Sha224 => Box::new(Sha224::new()),
+            Self::Sha256 => Box::new(Sha256::new()),
+            Self::Sha384 => Box::new(Sha384::new()),
+            Self::Sha512 => Box::new(Sha512::new()),
+        }
+    }
+}
+
+/// HMAC-DRBG context (NIST SP 800-90A Section 10.1.2).
 pub struct HmacDrbg {
-    /// HMAC key K (32 bytes).
-    k: [u8; HMAC_SIZE],
-    /// HMAC value V (32 bytes).
-    v: [u8; HMAC_SIZE],
+    /// HMAC key K (output_size bytes).
+    k: Vec<u8>,
+    /// HMAC value V (output_size bytes).
+    v: Vec<u8>,
+    /// HMAC family.
+    ty: HmacDrbgType,
     /// Number of generate requests since last (re)seed.
     reseed_counter: u64,
 }
@@ -31,69 +71,82 @@ impl Drop for HmacDrbg {
     }
 }
 
-fn sha256_factory() -> Box<dyn Digest> {
-    Box::new(Sha256::new())
-}
-
-/// Compute HMAC-SHA-256(key, data) and return 32-byte result.
-fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<[u8; HMAC_SIZE], CryptoError> {
-    let mut out = [0u8; HMAC_SIZE];
-    let mut ctx = Hmac::new(sha256_factory, key)?;
+/// Compute HMAC-`ty`(key, data) into `out` (sized to `ty.output_size()`).
+fn hmac(ty: HmacDrbgType, key: &[u8], data: &[u8], out: &mut [u8]) -> Result<(), CryptoError> {
+    let factory: fn() -> Box<dyn Digest> = match ty {
+        HmacDrbgType::Sha1 => || Box::new(Sha1::new()) as Box<dyn Digest>,
+        HmacDrbgType::Sha224 => || Box::new(Sha224::new()) as Box<dyn Digest>,
+        HmacDrbgType::Sha256 => || Box::new(Sha256::new()) as Box<dyn Digest>,
+        HmacDrbgType::Sha384 => || Box::new(Sha384::new()) as Box<dyn Digest>,
+        HmacDrbgType::Sha512 => || Box::new(Sha512::new()) as Box<dyn Digest>,
+    };
+    let mut ctx = Hmac::new(factory, key)?;
     ctx.update(data)?;
-    ctx.finish(&mut out)?;
-    Ok(out)
+    ctx.finish(out)?;
+    Ok(())
 }
 
 impl HmacDrbg {
-    /// Instantiate a new HMAC-DRBG from seed material (entropy + nonce + personalization).
-    ///
-    /// The `seed_material` should contain at least 256 bits of entropy.
+    /// Instantiate HMAC-DRBG-SHA-256 (the historical default) from seed
+    /// material (entropy + nonce + personalization).
     pub fn new(seed_material: &[u8]) -> Result<Self, CryptoError> {
-        // K = 0x00...00
-        let k = [0x00u8; HMAC_SIZE];
-        // V = 0x01...01
-        let v = [0x01u8; HMAC_SIZE];
+        Self::with(HmacDrbgType::Sha256, seed_material)
+    }
 
+    /// Instantiate HMAC-DRBG of the given type from seed material.
+    pub fn with(ty: HmacDrbgType, seed_material: &[u8]) -> Result<Self, CryptoError> {
+        let out_size = ty.output_size();
+        // K = 0x00...00, V = 0x01...01 (NIST SP 800-90A §10.1.2.3 step 2).
         let mut drbg = HmacDrbg {
-            k,
-            v,
+            k: vec![0x00u8; out_size],
+            v: vec![0x01u8; out_size],
+            ty,
             reseed_counter: 0,
         };
-
         drbg.update(Some(seed_material))?;
         drbg.reseed_counter = 1;
-
         Ok(drbg)
     }
 
-    /// Instantiate from the system entropy source.
-    ///
-    /// When the `entropy` feature is enabled, raw bytes are health-tested
-    /// (NIST SP 800-90B RCT + APT) and conditioned before use.
-    /// Otherwise, `getrandom` is used directly.
+    /// Instantiate HMAC-DRBG-SHA-256 from the system entropy source.
     pub fn from_system_entropy(seed_len: usize) -> Result<Self, CryptoError> {
+        Self::from_system_entropy_with(HmacDrbgType::Sha256, seed_len)
+    }
+
+    /// Instantiate HMAC-DRBG of the given type from the system entropy
+    /// source.
+    pub fn from_system_entropy_with(
+        ty: HmacDrbgType,
+        seed_len: usize,
+    ) -> Result<Self, CryptoError> {
         let mut entropy = vec![0u8; seed_len];
         super::get_system_entropy(&mut entropy)?;
-        let result = Self::new(&entropy);
+        let result = Self::with(ty, &entropy);
         entropy.zeroize();
         result
     }
 
     /// HMAC-DRBG Update function (SP 800-90A Section 10.1.2.2).
     fn update(&mut self, provided_data: Option<&[u8]>) -> Result<(), CryptoError> {
+        let out_size = self.ty.output_size();
+        let mut k_new = vec![0u8; out_size];
+        let mut v_new = vec![0u8; out_size];
+
         // K = HMAC(K, V || 0x00 || provided_data)
-        let mut msg = Vec::with_capacity(HMAC_SIZE + 1 + provided_data.map_or(0, |d| d.len()));
+        let mut msg = Vec::with_capacity(out_size + 1 + provided_data.map_or(0, |d| d.len()));
         msg.extend_from_slice(&self.v);
         msg.push(0x00);
         if let Some(data) = provided_data {
             msg.extend_from_slice(data);
         }
-        self.k = hmac_sha256(&self.k, &msg)?;
+        hmac(self.ty, &self.k, &msg, &mut k_new)?;
+        self.k.copy_from_slice(&k_new);
 
         // V = HMAC(K, V)
-        self.v = hmac_sha256(&self.k, &self.v)?;
+        hmac(self.ty, &self.k, &self.v, &mut v_new)?;
+        self.v.copy_from_slice(&v_new);
 
-        // If provided_data is non-empty, do second round
+        // If provided_data is non-empty, do second round.
         if let Some(data) = provided_data {
             if !data.is_empty() {
                 // K = HMAC(K, V || 0x01 || provided_data)
@@ -101,13 +154,17 @@ impl HmacDrbg {
                 msg.extend_from_slice(&self.v);
                 msg.push(0x01);
                 msg.extend_from_slice(data);
-                self.k = hmac_sha256(&self.k, &msg)?;
+                hmac(self.ty, &self.k, &msg, &mut k_new)?;
+                self.k.copy_from_slice(&k_new);
 
                 // V = HMAC(K, V)
-                self.v = hmac_sha256(&self.k, &self.v)?;
+                hmac(self.ty, &self.k, &self.v, &mut v_new)?;
+                self.v.copy_from_slice(&v_new);
             }
         }
 
+        k_new.zeroize();
+        v_new.zeroize();
         Ok(())
     }
 
@@ -121,25 +178,26 @@ impl HmacDrbg {
             return Err(CryptoError::DrbgInvalidState);
         }
 
-        // Process additional input
         if let Some(data) = additional_input {
             if !data.is_empty() {
                 self.update(Some(data))?;
             }
         }
 
-        // Generate output blocks
+        let out_size = self.ty.output_size();
+        let mut v_new = vec![0u8; out_size];
         let mut offset = 0;
         while offset < output.len() {
-            self.v = hmac_sha256(&self.k, &self.v)?;
+            hmac(self.ty, &self.k, &self.v, &mut v_new)?;
+            self.v.copy_from_slice(&v_new);
 
             let remaining = output.len() - offset;
-            let copy_len = remaining.min(HMAC_SIZE);
+            let copy_len = remaining.min(out_size);
             output[offset..offset + copy_len].copy_from_slice(&self.v[..copy_len]);
             offset += copy_len;
         }
+        v_new.zeroize();
 
-        // Final update
         self.update(additional_input)?;
         self.reseed_counter += 1;
 
@@ -230,7 +288,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(output.len(), 64);
-        // Should not be all zeros
         assert!(output.iter().any(|&b| b != 0));
     }
 
@@ -252,7 +309,6 @@ mod tests {
         let seed = b"seed for large output test";
         let mut drbg = HmacDrbg::new(seed).unwrap();
 
-        // Request more than one HMAC block
         let output = drbg.generate_bytes(100).unwrap();
         assert_eq!(output.len(), 100);
     }
@@ -263,15 +319,12 @@ mod tests {
         let mut drbg1 = HmacDrbg::new(seed).unwrap();
         let mut drbg2 = HmacDrbg::new(seed).unwrap();
 
-        // Before reseed: identical outputs
         let out1a = drbg1.generate_bytes(32).unwrap();
         let out2a = drbg2.generate_bytes(32).unwrap();
         assert_eq!(out1a, out2a);
 
-        // Reseed only drbg1
         drbg1.reseed(b"new entropy for divergence", None).unwrap();
 
-        // After reseed: outputs must differ
         let out1b = drbg1.generate_bytes(32).unwrap();
         let out2b = drbg2.generate_bytes(32).unwrap();
         assert_ne!(out1b, out2b);
@@ -290,5 +343,15 @@ mod tests {
         drbg2.generate(&mut out2, None).unwrap();
 
         assert_ne!(out1, out2);
+    }
+
+    #[test]
+    fn test_hmac_drbg_sha1_variants_distinct() {
+        let seed = b"variant distinctness seed material with enough entropy";
+        let mut sha1 = HmacDrbg::with(HmacDrbgType::Sha1, seed).unwrap();
+        let mut sha512 = HmacDrbg::with(HmacDrbgType::Sha512, seed).unwrap();
+        let o1 = sha1.generate_bytes(20).unwrap();
+        let o2 = sha512.generate_bytes(20).unwrap();
+        assert_ne!(o1, o2);
     }
 }

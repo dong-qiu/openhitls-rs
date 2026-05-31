@@ -59,6 +59,22 @@ impl Sm4CtrDrbg {
         Ok(drbg)
     }
 
+    /// Instantiate SM4-CTR-DRBG with Block_Cipher_df derivation function
+    /// (SP 800-90A §10.2.1.4). Accepts arbitrary-length entropy, nonce, and
+    /// personalization string.
+    pub fn with_df(
+        entropy: &[u8],
+        nonce: &[u8],
+        personalization: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let mut input = Vec::with_capacity(entropy.len() + nonce.len() + personalization.len());
+        input.extend_from_slice(entropy);
+        input.extend_from_slice(nonce);
+        input.extend_from_slice(personalization);
+        let seed_material = block_cipher_df(&input, SEED_LEN)?;
+        Self::new(&seed_material)
+    }
+
     /// CTR-DRBG Update function (SP 800-90A §10.2.1.2).
     fn update(&mut self, provided_data: &[u8]) -> Result<(), CryptoError> {
         let mut temp = [0u8; SEED_LEN];
@@ -189,10 +205,87 @@ impl super::Drbg for Sm4CtrDrbg {
     }
 }
 
+/// Block_Cipher_df — Derivation function using SM4-CBC-MAC (SP 800-90A §10.3.2).
+///
+/// Mirrors the AES-CTR-DRBG `block_cipher_df` but with the SM4 block cipher
+/// (16-byte key, 16-byte block). The canonical K is `0x00..0x0F`.
+fn block_cipher_df(input: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoError> {
+    let l = input.len() as u32;
+    let n = output_len as u32;
+
+    let mut s = Vec::with_capacity(8 + input.len() + 1 + BLOCK_LEN);
+    s.extend_from_slice(&l.to_be_bytes());
+    s.extend_from_slice(&n.to_be_bytes());
+    s.extend_from_slice(input);
+    s.push(0x80);
+    while s.len() % BLOCK_LEN != 0 {
+        s.push(0x00);
+    }
+
+    let mut df_key = [0u8; KEY_LEN];
+    for (i, byte) in df_key.iter_mut().enumerate() {
+        *byte = i as u8;
+    }
+
+    let blocks_needed = (KEY_LEN + BLOCK_LEN).div_ceil(BLOCK_LEN);
+    let mut temp = Vec::with_capacity(blocks_needed * BLOCK_LEN);
+
+    let df_cipher = Sm4Key::new(&df_key)?;
+    for counter in 0..blocks_needed as u32 {
+        let mut iv = [0u8; BLOCK_LEN];
+        iv[..4].copy_from_slice(&counter.to_be_bytes());
+
+        // BCC(K, IV || S) is CBC-MAC starting from 0^outlen — encrypt the
+        // IV counter block first, then fold in the blocks of S.
+        let mut chaining = iv;
+        df_cipher.encrypt_block(&mut chaining)?;
+        for chunk in s.chunks(BLOCK_LEN) {
+            let mut block = [0u8; BLOCK_LEN];
+            for i in 0..BLOCK_LEN {
+                block[i] = chaining[i] ^ if i < chunk.len() { chunk[i] } else { 0 };
+            }
+            df_cipher.encrypt_block(&mut block)?;
+            chaining = block;
+        }
+        temp.extend_from_slice(&chaining);
+    }
+
+    let mut new_key = [0u8; KEY_LEN];
+    new_key.copy_from_slice(&temp[..KEY_LEN]);
+    let mut x = [0u8; BLOCK_LEN];
+    x.copy_from_slice(&temp[KEY_LEN..KEY_LEN + BLOCK_LEN]);
+
+    let new_cipher = Sm4Key::new(&new_key)?;
+    let mut result = Vec::with_capacity(output_len);
+    while result.len() < output_len {
+        new_cipher.encrypt_block(&mut x)?;
+        let remaining = output_len - result.len();
+        let copy_len = remaining.min(BLOCK_LEN);
+        result.extend_from_slice(&x[..copy_len]);
+    }
+
+    new_key.zeroize();
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::drbg::Drbg;
+
+    #[test]
+    fn test_sm4_ctr_drbg_with_df_smoke() {
+        let entropy = b"sm4 ctr drbg df entropy material - at least 32 bytes wide";
+        let nonce = b"sm4 nonce";
+        let pers = b"sm4 personalization";
+        let mut d = Sm4CtrDrbg::with_df(entropy, nonce, pers).unwrap();
+        let out = d.generate_bytes(32).unwrap();
+        assert!(out.iter().any(|&b| b != 0));
+        // Deterministic.
+        let mut d2 = Sm4CtrDrbg::with_df(entropy, nonce, pers).unwrap();
+        let out2 = d2.generate_bytes(32).unwrap();
+        assert_eq!(out, out2);
+    }
 
     #[test]
     fn test_sm4_ctr_drbg_generate() {

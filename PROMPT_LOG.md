@@ -9725,3 +9725,61 @@ na-list tally: AES-KW 16/18/0/8/42 -> 24/18/0/0/42; Total
 3105/3760/240/109/6480 -> 3113/3760/240/101/6480.
 
 Recorded as DEV_LOG Phase I147.
+
+## Phase I148 — DRBG Variants Expansion (resolves 4 T139-deferred Structural Gaps) (2026-05-31)
+
+> 继续 I148
+
+Closes all four T139-deferred DRBG Structural Gaps in one PR:
+Hash-DRBG SHA-1/SHA-224/SM3 (3 rows), HMAC-DRBG SHA-1/224/384/512
+(4 rows), CTR-DRBG AES-128/192 ±df (4 rows), SM4-CTR-DRBG-df (1 row).
+Total = 12 newly-migrated byte-exact KAT.
+
+Production additions (all default-feature, additive — no breaking
+ABI):
+
+- HashDrbgType gains Sha1 / Sha224 / Sm3 variants. NIST SP 800-90A
+  Table 2: SHA-1 / SHA-224 seedlen=55. SM3 mirrors SHA-256 seedlen=55
+  per GM/T 0105-2021 and the openHiTLS C reference
+  `DRBG_NewHashCtxBase` switch (mdSize 32 → seedLen 55).
+- HmacDrbgType (new enum) + HmacDrbg::with(ty, seed) +
+  HmacDrbg::from_system_entropy_with(ty, seed_len) generalise
+  HMAC-DRBG over the digest. State k/v migrate from [u8;32] to
+  Vec<u8> sized by ty.output_size(). HmacDrbg::new / from_system_entropy
+  retained as SHA-256 thin wrappers — all 8 existing callers (fips
+  KAT, benches, migrated_drbg, interop concurrency tests) keep
+  compiling unmodified.
+- CtrDrbgType (new enum) + CtrDrbg::with(ty, seed) +
+  CtrDrbg::with_df_typed(ty, entropy, nonce, pers) +
+  CtrDrbg::from_system_entropy_with(ty) generalise CTR-DRBG over the
+  AES key length. Storage kept as [u8; MAX_KEY_LEN=32] with active
+  length tracked via ty.key_len() — no Vec on the hot encrypt path.
+  block_cipher_df parameterised by key_len so the canonical seed K =
+  0x00..0x1F truncated to key_len matches the C reference dfKey[32]
+  table. CtrDrbg::new / with_df / from_system_entropy retained as
+  AES-256 wrappers.
+- Sm4CtrDrbg::with_df(entropy, nonce, personalization) mirroring the
+  AES-CTR-DRBG with_df path + an SM4-CBC-MAC block_cipher_df helper
+  (canonical K = 0x00..0x0F).
+- Cargo.toml: drbg feature gains sha1 + sm3 deps so HashDrbgType::Sha1
+  / Sm3 compile out-of-the-box.
+
+xtask emitter (xtask/src/drbg.rs): Drbg enum gains six variants;
+migratable() adds 12 algId rows. SM4-CTR-DRBG generate is chunked
+into two 16-byte calls to mirror the openHiTLS C
+`DRBG_MAX_REQUEST_SM4 = 16` (GM/T 0105-2021 quirk; AES uses 65536) —
+the C SDV invokes the EAL-chunked RandbytesEx(output, 32), which
+DRBG_GenerateBytes splits into spec'd single-generate calls of size
+maxRequest, each with its own post-Update step. Without this
+chunking the second 16 bytes of the SM4-DF KAT mismatch.
+
+Verification: drbg lib tests 51/0 -> 53/0; migrated_drbg 6/0 -> 18/0
+(+12); xtask --check drift gate passes; full
+`-p hitls-crypto --all-features` workspace test suite green;
+interop concurrency 10/0 (HmacDrbg::from_system_entropy unchanged
+ABI); fmt + clippy -D warnings --all-features --all-targets clean.
+
+na-list tally: DRBG 6/272/0/12/290 -> 18/272/0/0/290; Total
+3113/3760/240/101/6480 -> 3125/3760/240/89/6480.
+
+Recorded as DEV_LOG Phase I148.

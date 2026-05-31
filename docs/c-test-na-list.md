@@ -58,7 +58,7 @@ Counts are the `Generation summary` footer of each generated file
 | ML-DSA | 105 | 731 | 3 | 0 | 779 |
 | ML-KEM | 150 | 196 | 81 | 0 | 427 |
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
-| DRBG | 6 | 272 | 0 | 12 | 290 |
+| DRBG | 18 | 272 | 0 | 0 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
 | RSA | 72 | 108 | 0 | 4 | 170 |
 | BigNum | 230 | 130 | 2 | 0 | 362 |
@@ -81,7 +81,7 @@ Counts are the `Generation summary` footer of each generated file
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 7 | 31 | 0 | 0 | 38 |
-| **Total** | **3113** | **3760** | **240** | **101** | **6480** |
+| **Total** | **3125** | **3760** | **240** | **89** | **6480** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -534,10 +534,10 @@ migration tool emit the corresponding tests with no generator change.
 | SM9 key exchange | SM9 | 2 | `Sm9MasterKey` exposes no key-exchange method (the C SDV `KEYEX_API_TC001/TC002` rows exercise the identity-based key-exchange protocol; the Rust impl covers only sign+verify and encrypt+decrypt) | add an SM9 key-exchange API per GB/T 38635 §4.4 |
 | HMAC/CMAC SHA-3 | HMAC, CMAC | 8 | SHA-3 is not yet wired into the `Digest` trait used by the MAC one-shot path; CMAC is also AES-only (`CRYPT_MAC_CMAC_SM4`) | implement the `Digest` impl for SHA-3; generalise `Cmac` over `BlockCipher` |
 | CRL parser leniency | X.509 CRL | 9 | Negative CRL-parse KATs (`res != HITLS_PKI_SUCCESS`) cannot be migrated: `CertificateRevocationList::from_pem` accepts structurally-malformed CRLs the C parser rejects, so `assert!(… .is_err())` does not hold. Only positive parse rows are emitted | tighten the Rust CRL DER decoder to reject the malformed inputs (version / signature-algorithm / tbs-shape checks) |
-| Hash-DRBG SHA-1 / SHA-224 / SM3 | DRBG | 3 | `HashDrbgType` is SHA-256/384/512 only | add SHA-1 / SHA-224 / SM3 variants to `HashDrbgType` |
-| HMAC-DRBG SHA-1 / 224 / 384 / 512 | DRBG | 4 | `HmacDrbg` is hardcoded to HMAC-SHA-256 | generalise `HmacDrbg` over the digest |
-| CTR-DRBG AES-128 / 192 (±df) | DRBG | 4 | `CtrDrbg` is AES-256 only | generalise `CtrDrbg` over the AES key length |
-| SM4-CTR-DRBG-df | DRBG | 1 | `Sm4CtrDrbg` has only the no-df constructor | add `Sm4CtrDrbg::with_df` |
+| ~~Hash-DRBG SHA-1 / SHA-224 / SM3~~ | ~~DRBG~~ | ~~3~~ | **Resolved in I148.** `HashDrbgType` extended with `Sha1` / `Sha224` / `Sm3` variants (NIST SP 800-90A Table 2: SHA-1/SHA-224 seedlen=55; SM3 mirrors SHA-256 seedlen=55 per GM/T 0105-2021 / openHiTLS C reference). | Resolved by I148. |
+| ~~HMAC-DRBG SHA-1 / 224 / 384 / 512~~ | ~~DRBG~~ | ~~4~~ | **Resolved in I148.** `HmacDrbg` generalised over the digest via a new `HmacDrbgType` enum (Sha1/Sha224/Sha256/Sha384/Sha512) + `HmacDrbg::with(ty, seed)` constructor. `HmacDrbg::new(seed)` retained as the SHA-256 default (no breaking change). | Resolved by I148. |
+| ~~CTR-DRBG AES-128 / 192 (±df)~~ | ~~DRBG~~ | ~~4~~ | **Resolved in I148.** `CtrDrbg` generalised over the AES key length via a new `CtrDrbgType` enum (Aes128/Aes192/Aes256) + `CtrDrbg::with(ty, seed)` / `CtrDrbg::with_df_typed(ty, entropy, nonce, pers)` constructors. `block_cipher_df` parameterised by `key_len`. `CtrDrbg::new` / `with_df` retained as AES-256 defaults. | Resolved by I148. |
+| ~~SM4-CTR-DRBG-df~~ | ~~DRBG~~ | ~~1~~ | **Resolved in I148.** Added `Sm4CtrDrbg::with_df(entropy, nonce, personalization)` mirroring the AES-CTR-DRBG `with_df` path, plus an SM4-CBC-MAC `block_cipher_df` helper. Note: openHiTLS C `DRBG_MAX_REQUEST_SM4 = 16` (vs AES's 65536) means a 32-byte `RandbytesEx` is chunked into two 16-byte generates by the EAL layer; the migration emitter mirrors this by calling `generate(..16)` twice. | Resolved by I148. |
 | TLS 1.2 PRF SHA-512 | TLS1.2-PRF | 2 | `hitls_tls::crypt::HashAlgId` has only `Sha256` / `Sha384` / `Sha1` (+ Sm3) — no `Sha512` variant, so the SHA-512 PRF vectors cannot be expressed | add a `Sha512` variant to `HashAlgId` + its `DigestVariant` arm (TLS 1.2 itself never negotiates SHA-512 PRF, so this is migration-only) |
 | SipHash-128 | SipHash | 39 | Rust `SipHash::hash` returns a `u64` (SipHash-2-4-64 only); the 128-bit output variant is not implemented | add a 128-bit SipHash output path |
 | Classic McEliece decaps KAT | McEliece | 2 | **Reference-interoperability gap (FrodoKEM half RESOLVED in I145).** McEliece decapsulation of a *reference* `(sk, ct)` errors inside `decode` — its impl is validated only by self round-trip and was never proven reference-compatible. The McEliece secret key is `delta ‖ c ‖ g ‖ s ‖ controlbits`, where the Benes-network **control-bit** encoding is highly implementation-specific; reconciling it with the C reference is a separate, deeper code-based-scheme investigation. (The sibling FrodoKEM gap was root-caused to LSB-vs-MSB-first `pack`/`unpack` bit-endianness and **fixed in I145** — its 8 decaps KATs now pass; see the tally.) | dedicated investigation: compare the McEliece sk serialization (g-coeff endianness, control-bit / Benes layout) and the `decode` pipeline Rust↔C, realign, then verify the 2 reference KATs + self round-trip |

@@ -63,11 +63,11 @@ pub trait Drbg {
     }
 }
 
-mod hmac_drbg;
-pub use hmac_drbg::HmacDrbg;
+pub mod hmac_drbg;
+pub use hmac_drbg::{HmacDrbg, HmacDrbgType};
 
 pub mod ctr_drbg;
-pub use ctr_drbg::CtrDrbg;
+pub use ctr_drbg::{CtrDrbg, CtrDrbgType};
 
 #[cfg(feature = "sm4")]
 pub mod sm4_ctr_drbg;
@@ -75,7 +75,7 @@ pub mod sm4_ctr_drbg;
 pub use sm4_ctr_drbg::Sm4CtrDrbg;
 
 pub mod hash_drbg;
-pub use hash_drbg::HashDrbg;
+pub use hash_drbg::{HashDrbg, HashDrbgType};
 
 #[cfg(test)]
 mod tests {

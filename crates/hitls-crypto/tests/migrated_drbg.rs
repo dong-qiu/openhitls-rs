@@ -3,15 +3,49 @@
 //
 // Generator: docs/c-test-migration-plan.md Phase A (xtask).
 
-#![cfg(feature = "drbg")]
+#![cfg(all(feature = "drbg", feature = "sm4"))]
 
-use hitls_crypto::drbg::hash_drbg::HashDrbgType;
-use hitls_crypto::drbg::CtrDrbg;
-use hitls_crypto::drbg::HashDrbg;
-use hitls_crypto::drbg::HmacDrbg;
+use hitls_crypto::drbg::Sm4CtrDrbg;
+use hitls_crypto::drbg::{CtrDrbg, CtrDrbgType};
+use hitls_crypto::drbg::{HashDrbg, HashDrbgType};
+use hitls_crypto::drbg::{HmacDrbg, HmacDrbgType};
 
 /// Personalization string fixed by the C SDV harness.
 const PERS: [u8; 6] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05];
+
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 sha1
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 607, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line607_bsl_cid_rand_sha1_vector() {
+    let expected: &[u8] = &[
+        0xaf, 0xa3, 0x85, 0xb7, 0x9e, 0xee, 0xb2, 0x1f, 0x49, 0x5a, 0x53, 0x88, 0x12, 0x0d, 0x50,
+        0x04, 0x0c, 0x04, 0x15, 0xf7, 0x34, 0xf2, 0xff, 0x44, 0xdc, 0xad, 0x48, 0x35, 0xa5, 0xe1,
+        0x7f, 0x65,
+    ];
+    let mut seed = vec![0xffu8; 1000 + 20];
+    seed.extend_from_slice(&PERS);
+    let mut d = HashDrbg::new(HashDrbgType::Sha1, &seed).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 sha224
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 610, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line610_bsl_cid_rand_sha224_vector() {
+    let expected: &[u8] = &[
+        0x21, 0x72, 0x8c, 0x56, 0xaf, 0xe5, 0xe0, 0xea, 0x98, 0x6b, 0x58, 0x5b, 0xac, 0xe2, 0x81,
+        0x3e, 0x2a, 0xa0, 0xdb, 0x58, 0x55, 0x4c, 0x72, 0xdd, 0x98, 0x01, 0xa6, 0xe0, 0x35, 0x27,
+        0xd9, 0x45,
+    ];
+    let mut seed = vec![0xffu8; 1000 + 20];
+    seed.extend_from_slice(&PERS);
+    let mut d = HashDrbg::new(HashDrbgType::Sha224, &seed).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
 
 /// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 sah256
 /// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 613, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
@@ -64,6 +98,40 @@ fn tc_line619_bsl_cid_rand_sha512_vector() {
     assert_eq!(&got[..], expected);
 }
 
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 hmac-sha1
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 622, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line622_bsl_cid_rand_hmac_sha1_vector() {
+    let expected: &[u8] = &[
+        0x05, 0xcc, 0x2b, 0x93, 0xde, 0xd3, 0x3e, 0x34, 0x7b, 0x90, 0xc9, 0xec, 0xdd, 0xc8, 0x63,
+        0xed, 0xe5, 0xd4, 0x9c, 0x09, 0x8d, 0xa1, 0x39, 0xad, 0x00, 0xca, 0xc8, 0x1f, 0xee, 0x28,
+        0x37, 0xff,
+    ];
+    let mut seed = vec![0xffu8; 1000 + 20];
+    seed.extend_from_slice(&PERS);
+    let mut d = HmacDrbg::with(HmacDrbgType::Sha1, &seed).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 hmac-sha224
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 625, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line625_bsl_cid_rand_hmac_sha224_vector() {
+    let expected: &[u8] = &[
+        0x3a, 0x4b, 0xe4, 0x50, 0x22, 0x2d, 0x8f, 0x6b, 0xfc, 0x40, 0xc2, 0x11, 0xa8, 0x07, 0xab,
+        0x45, 0x29, 0x93, 0xec, 0x21, 0xa9, 0x76, 0x55, 0xa6, 0x40, 0x04, 0xae, 0x38, 0x2a, 0xf4,
+        0x06, 0xc8,
+    ];
+    let mut seed = vec![0xffu8; 1000 + 20];
+    seed.extend_from_slice(&PERS);
+    let mut d = HmacDrbg::with(HmacDrbgType::Sha224, &seed).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
 /// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 hmac-sha256
 /// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 628, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
 #[test]
@@ -75,7 +143,79 @@ fn tc_line628_bsl_cid_rand_hmac_sha256_vector() {
     ];
     let mut seed = vec![0xffu8; 1000 + 20];
     seed.extend_from_slice(&PERS);
-    let mut d = HmacDrbg::new(&seed).unwrap();
+    let mut d = HmacDrbg::with(HmacDrbgType::Sha256, &seed).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 hmac-sha384
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 631, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line631_bsl_cid_rand_hmac_sha384_vector() {
+    let expected: &[u8] = &[
+        0x1b, 0x17, 0x8c, 0xcd, 0x09, 0x3d, 0xbd, 0xfb, 0xfd, 0xcf, 0xcc, 0x77, 0xb8, 0x03, 0x93,
+        0x63, 0xb5, 0x50, 0xcb, 0x3f, 0x64, 0x51, 0x0c, 0xcf, 0x5f, 0x7d, 0xdc, 0x66, 0xac, 0x74,
+        0x4a, 0xce,
+    ];
+    let mut seed = vec![0xffu8; 1000 + 20];
+    seed.extend_from_slice(&PERS);
+    let mut d = HmacDrbg::with(HmacDrbgType::Sha384, &seed).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 hmac-sha512
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 634, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line634_bsl_cid_rand_hmac_sha512_vector() {
+    let expected: &[u8] = &[
+        0xea, 0x4f, 0xd5, 0xb1, 0x88, 0x5e, 0x27, 0xbd, 0xa5, 0x7d, 0x13, 0x51, 0xa8, 0x94, 0x36,
+        0x35, 0xc6, 0xb0, 0x9e, 0x78, 0xf8, 0x00, 0xc1, 0x7c, 0x8e, 0x0b, 0xe0, 0x03, 0xad, 0x6d,
+        0x7d, 0xc2,
+    ];
+    let mut seed = vec![0xffu8; 1000 + 20];
+    seed.extend_from_slice(&PERS);
+    let mut d = HmacDrbg::with(HmacDrbgType::Sha512, &seed).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 aes128-ctr
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 637, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line637_bsl_cid_rand_aes128_ctr_vector() {
+    let expected: &[u8] = &[
+        0xb9, 0x08, 0x3c, 0x04, 0xc3, 0xbd, 0xfe, 0xde, 0xa7, 0xb9, 0xa7, 0x23, 0xd1, 0xab, 0x00,
+        0x64, 0xb6, 0xe1, 0x73, 0x19, 0x53, 0x1a, 0xc5, 0x66, 0xca, 0xd6, 0x01, 0xc3, 0xb7, 0x81,
+        0x9e, 0x61,
+    ];
+    let mut seed = vec![0xffu8; 32];
+    for (i, p) in PERS.iter().enumerate() {
+        seed[i] ^= *p;
+    }
+    let mut d = CtrDrbg::with(CtrDrbgType::Aes128, &seed).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 aes192-ctr
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 640, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line640_bsl_cid_rand_aes192_ctr_vector() {
+    let expected: &[u8] = &[
+        0x82, 0xd6, 0xf3, 0x3d, 0xd8, 0x95, 0x98, 0x31, 0x2d, 0x3c, 0xac, 0x0c, 0x57, 0x82, 0x94,
+        0x98, 0x48, 0x94, 0x6d, 0x75, 0x57, 0xa3, 0x97, 0xd1, 0x92, 0x41, 0x66, 0x5f, 0x85, 0x3b,
+        0x21, 0x6c,
+    ];
+    let mut seed = vec![0xffu8; 40];
+    for (i, p) in PERS.iter().enumerate() {
+        seed[i] ^= *p;
+    }
+    let mut d = CtrDrbg::with(CtrDrbgType::Aes192, &seed).unwrap();
     let mut got = [0u8; 32];
     d.generate(&mut got, None).unwrap();
     assert_eq!(&got[..], expected);
@@ -94,7 +234,41 @@ fn tc_line643_bsl_cid_rand_aes256_ctr_vector() {
     for (i, p) in PERS.iter().enumerate() {
         seed[i] ^= *p;
     }
-    let mut d = CtrDrbg::new(&seed).unwrap();
+    let mut d = CtrDrbg::with(CtrDrbgType::Aes256, &seed).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 aes128-ctr-df
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 646, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line646_bsl_cid_rand_aes128_ctr_df_vector() {
+    let expected: &[u8] = &[
+        0x89, 0x1e, 0x90, 0x3e, 0x22, 0x4d, 0x19, 0x17, 0xe7, 0x5a, 0xb4, 0x34, 0xb0, 0x18, 0x38,
+        0x93, 0x51, 0xa0, 0xcd, 0x43, 0x4d, 0x0f, 0x52, 0x03, 0x42, 0xd7, 0x81, 0xe2, 0x02, 0x8a,
+        0x98, 0x62,
+    ];
+    let entropy = vec![0xffu8; 1000];
+    let nonce = [0xffu8; 20];
+    let mut d = CtrDrbg::with_df_typed(CtrDrbgType::Aes128, &entropy, &nonce, &PERS).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 aes192-ctr-df
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 649, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line649_bsl_cid_rand_aes192_ctr_df_vector() {
+    let expected: &[u8] = &[
+        0x87, 0x71, 0xfd, 0x7e, 0x73, 0x9d, 0xc8, 0x66, 0x61, 0xf2, 0x2a, 0xe1, 0x2d, 0x00, 0x83,
+        0x50, 0x4e, 0x5d, 0xf5, 0xaa, 0x6e, 0x94, 0xec, 0x91, 0xd2, 0xce, 0x83, 0xb2, 0x7f, 0xf7,
+        0x85, 0xda,
+    ];
+    let entropy = vec![0xffu8; 1000];
+    let nonce = [0xffu8; 20];
+    let mut d = CtrDrbg::with_df_typed(CtrDrbgType::Aes192, &entropy, &nonce, &PERS).unwrap();
     let mut got = [0u8; 32];
     d.generate(&mut got, None).unwrap();
     assert_eq!(&got[..], expected);
@@ -111,10 +285,45 @@ fn tc_line652_bsl_cid_rand_aes256_ctr_df_vector() {
     ];
     let entropy = vec![0xffu8; 1000];
     let nonce = [0xffu8; 20];
-    let mut d = CtrDrbg::with_df(&entropy, &nonce, &PERS).unwrap();
+    let mut d = CtrDrbg::with_df_typed(CtrDrbgType::Aes256, &entropy, &nonce, &PERS).unwrap();
     let mut got = [0u8; 32];
     d.generate(&mut got, None).unwrap();
     assert_eq!(&got[..], expected);
 }
 
-// Generation summary: 6 emitted / 272 API-surface skipped / 0 unknown / 12 unsupported alg / 290 total C cases.
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 sm3
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 655, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line655_bsl_cid_rand_sm3_vector() {
+    let expected: &[u8] = &[
+        0x9c, 0xaa, 0x4b, 0x0a, 0x79, 0x05, 0x00, 0x6e, 0x03, 0x07, 0xc5, 0x22, 0xfa, 0x8b, 0x83,
+        0xb8, 0xef, 0xb1, 0xe8, 0x01, 0xb8, 0x9c, 0x20, 0x40, 0xce, 0x2c, 0xb9, 0x77, 0x93, 0x85,
+        0xa2, 0x10,
+    ];
+    let mut seed = vec![0xffu8; 1000 + 20];
+    seed.extend_from_slice(&PERS);
+    let mut d = HashDrbg::new(HashDrbgType::Sm3, &seed).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got, None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+/// SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 sm4-ctr-df
+/// C source: SDV_PRIMARY_DRBG_VECTOR_FUN_TC001 (line 658, DRBG NIST vector: instantiate(0xff entropy/nonce, pers=00..05) + generate(32))
+#[test]
+fn tc_line658_bsl_cid_rand_sm4_ctr_df_vector() {
+    let expected: &[u8] = &[
+        0xf2, 0x3f, 0xa0, 0xea, 0x91, 0xe9, 0x68, 0x8a, 0xfa, 0x38, 0x8f, 0xe7, 0xa4, 0x80, 0x26,
+        0xf8, 0xe6, 0xc9, 0x8d, 0xd3, 0xd2, 0x50, 0xcf, 0xef, 0x64, 0x56, 0xeb, 0xaf, 0x1d, 0xe3,
+        0xea, 0xe8,
+    ];
+    let entropy = vec![0xffu8; 1000];
+    let nonce = [0xffu8; 20];
+    let mut d = Sm4CtrDrbg::with_df(&entropy, &nonce, &PERS).unwrap();
+    let mut got = [0u8; 32];
+    d.generate(&mut got[..16], None).unwrap();
+    d.generate(&mut got[16..], None).unwrap();
+    assert_eq!(&got[..], expected);
+}
+
+// Generation summary: 18 emitted / 272 API-surface skipped / 0 unknown / 0 unsupported alg / 290 total C cases.

@@ -1,10 +1,14 @@
 //! Hash-DRBG (Hash-based Deterministic Random Bit Generator).
 //!
-//! Implements NIST SP 800-90A Section 10.1.1 using SHA-256, SHA-384, or SHA-512
-//! as the underlying hash function.
+//! Implements NIST SP 800-90A Section 10.1.1. Supported underlying hashes:
+//! SHA-1, SHA-224, SHA-256, SHA-384, SHA-512, and SM3 (the Chinese
+//! standard, treated as a 32-byte digest matching SHA-256's seed length
+//! per the openHiTLS C reference / GM/T 0105-2021).
 
 use crate::provider::Digest;
-use crate::sha2::{Sha256, Sha384, Sha512};
+use crate::sha1::Sha1;
+use crate::sha2::{Sha224, Sha256, Sha384, Sha512};
+use crate::sm3::Sm3;
 use hitls_types::CryptoError;
 use zeroize::Zeroize;
 
@@ -13,19 +17,25 @@ use super::RESEED_INTERVAL;
 /// Hash algorithm selection for Hash-DRBG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashDrbgType {
+    /// SHA-1 (seedLen=55, output=20). SP 800-90A Table 2.
+    Sha1,
+    /// SHA-224 (seedLen=55, output=28).
+    Sha224,
     /// SHA-256 (seedLen=55, output=32).
     Sha256,
     /// SHA-384 (seedLen=111, output=48).
     Sha384,
     /// SHA-512 (seedLen=111, output=64).
     Sha512,
+    /// SM3 (seedLen=55, output=32). GM/T 0105-2021; mirrors SHA-256 seedlen.
+    Sm3,
 }
 
 impl HashDrbgType {
-    /// Seed length in bytes (SP 800-90A Table 2).
+    /// Seed length in bytes (SP 800-90A Table 2; SM3 mirrors SHA-256).
     fn seed_len(self) -> usize {
         match self {
-            Self::Sha256 => 55,
+            Self::Sha1 | Self::Sha224 | Self::Sha256 | Self::Sm3 => 55,
             Self::Sha384 | Self::Sha512 => 111,
         }
     }
@@ -33,7 +43,9 @@ impl HashDrbgType {
     /// Hash output size in bytes.
     fn output_size(self) -> usize {
         match self {
-            Self::Sha256 => 32,
+            Self::Sha1 => 20,
+            Self::Sha224 => 28,
+            Self::Sha256 | Self::Sm3 => 32,
             Self::Sha384 => 48,
             Self::Sha512 => 64,
         }
@@ -42,9 +54,12 @@ impl HashDrbgType {
     /// Create a new hash context.
     fn new_hash(self) -> Box<dyn Digest> {
         match self {
+            Self::Sha1 => Box::new(Sha1::new()),
+            Self::Sha224 => Box::new(Sha224::new()),
             Self::Sha256 => Box::new(Sha256::new()),
             Self::Sha384 => Box::new(Sha384::new()),
             Self::Sha512 => Box::new(Sha512::new()),
+            Self::Sm3 => Box::new(Sm3::new()),
         }
     }
 }

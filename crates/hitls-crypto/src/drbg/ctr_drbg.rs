@@ -1,8 +1,8 @@
 //! CTR-DRBG (Counter-mode Deterministic Random Bit Generator).
 //!
-//! Implements NIST SP 800-90A Section 10.2 using AES-256 as the block cipher.
-//! Supports both direct instantiation (without derivation function) and
-//! instantiation with Block_Cipher_df for arbitrary-length inputs.
+//! Implements NIST SP 800-90A Section 10.2 using AES as the block cipher.
+//! Supports AES-128 / AES-192 / AES-256, with or without Block_Cipher_df
+//! for arbitrary-length inputs.
 
 use crate::aes::AesKey;
 use hitls_types::CryptoError;
@@ -10,23 +10,56 @@ use zeroize::Zeroize;
 
 use super::RESEED_INTERVAL;
 
-/// AES-256 key length in bytes.
-const KEY_LEN: usize = 32;
 /// AES block size in bytes.
 const BLOCK_LEN: usize = 16;
-/// Seed length = key length + block length (48 bytes for AES-256).
-const SEED_LEN: usize = KEY_LEN + BLOCK_LEN;
+/// Maximum AES key length (AES-256). The runtime length is tracked via
+/// `CtrDrbgType` and `CtrDrbg::key_len`.
+const MAX_KEY_LEN: usize = 32;
+/// Maximum seed length = max key length + block length (48 bytes).
+const MAX_SEED_LEN: usize = MAX_KEY_LEN + BLOCK_LEN;
 
-/// CTR-DRBG context using AES-256 (NIST SP 800-90A Section 10.2).
+/// AES key length selection for CTR-DRBG.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CtrDrbgType {
+    /// AES-128 (keyLen=16, seedLen=32).
+    Aes128,
+    /// AES-192 (keyLen=24, seedLen=40).
+    Aes192,
+    /// AES-256 (keyLen=32, seedLen=48). Default.
+    Aes256,
+}
+
+impl CtrDrbgType {
+    /// AES key length in bytes.
+    pub const fn key_len(self) -> usize {
+        match self {
+            Self::Aes128 => 16,
+            Self::Aes192 => 24,
+            Self::Aes256 => 32,
+        }
+    }
+
+    /// Seed length = key length + block length.
+    pub const fn seed_len(self) -> usize {
+        self.key_len() + BLOCK_LEN
+    }
+}
+
+/// CTR-DRBG context (NIST SP 800-90A Section 10.2).
+///
+/// Storage is sized to the maximum AES key length; the active length is
+/// tracked in `ty`.
 pub struct CtrDrbg {
-    /// AES-256 key (32 bytes).
-    key: [u8; KEY_LEN],
+    /// AES key (active length = `ty.key_len()`).
+    key: [u8; MAX_KEY_LEN],
     /// Counter block V (16 bytes).
     v: [u8; BLOCK_LEN],
     /// Number of generate requests since last (re)seed.
     reseed_counter: u64,
-    /// Cached AES-256 expanded key (avoids re-expanding round keys per block).
+    /// Cached AES expanded key (avoids re-expanding round keys per block).
     cached_key: AesKey,
+    /// Active AES key length.
+    ty: CtrDrbgType,
 }
 
 impl Drop for CtrDrbg {
@@ -39,99 +72,114 @@ impl Drop for CtrDrbg {
 use super::increment_counter;
 
 impl CtrDrbg {
-    /// Instantiate CTR-DRBG without derivation function (SP 800-90A §10.2.1.3).
-    ///
-    /// `seed_material` must be exactly `SEED_LEN` (48) bytes — typically
-    /// `entropy_input || personalization_string` padded/truncated to 48 bytes.
+    /// Instantiate CTR-DRBG-AES-256 without derivation function (the
+    /// historical default). `seed_material` must be exactly 48 bytes.
     pub fn new(seed_material: &[u8]) -> Result<Self, CryptoError> {
-        if seed_material.len() != SEED_LEN {
+        Self::with(CtrDrbgType::Aes256, seed_material)
+    }
+
+    /// Instantiate CTR-DRBG of the given AES strength without derivation
+    /// function (SP 800-90A §10.2.1.3). `seed_material` must be exactly
+    /// `ty.seed_len()` bytes — typically `entropy_input ⊕ personalization`
+    /// padded/truncated.
+    pub fn with(ty: CtrDrbgType, seed_material: &[u8]) -> Result<Self, CryptoError> {
+        let seed_len = ty.seed_len();
+        if seed_material.len() != seed_len {
             return Err(CryptoError::InvalidArg(""));
         }
-
+        let key_len = ty.key_len();
+        let zero_key = vec![0u8; key_len];
         let mut drbg = CtrDrbg {
-            key: [0u8; KEY_LEN],
+            key: [0u8; MAX_KEY_LEN],
             v: [0u8; BLOCK_LEN],
             reseed_counter: 0,
-            cached_key: AesKey::new(&[0u8; KEY_LEN])?,
+            cached_key: AesKey::new(&zero_key)?,
+            ty,
         };
-
         drbg.update(seed_material)?;
         drbg.reseed_counter = 1;
-
         Ok(drbg)
     }
 
-    /// Instantiate CTR-DRBG with Block_Cipher_df derivation function (SP 800-90A §10.2.1.4).
-    ///
-    /// Accepts arbitrary-length entropy, nonce, and personalization string.
+    /// Instantiate CTR-DRBG-AES-256 with Block_Cipher_df.
     pub fn with_df(
         entropy: &[u8],
         nonce: &[u8],
         personalization: &[u8],
     ) -> Result<Self, CryptoError> {
-        // Concatenate all inputs
+        Self::with_df_typed(CtrDrbgType::Aes256, entropy, nonce, personalization)
+    }
+
+    /// Instantiate CTR-DRBG of the given AES strength with Block_Cipher_df
+    /// (SP 800-90A §10.2.1.4). Accepts arbitrary-length entropy, nonce, and
+    /// personalization string.
+    pub fn with_df_typed(
+        ty: CtrDrbgType,
+        entropy: &[u8],
+        nonce: &[u8],
+        personalization: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let seed_len = ty.seed_len();
         let mut input = Vec::with_capacity(entropy.len() + nonce.len() + personalization.len());
         input.extend_from_slice(entropy);
         input.extend_from_slice(nonce);
         input.extend_from_slice(personalization);
-
-        // Derive exactly SEED_LEN bytes
-        let seed_material = block_cipher_df(&input, SEED_LEN)?;
-
-        let mut drbg = CtrDrbg {
-            key: [0u8; KEY_LEN],
-            v: [0u8; BLOCK_LEN],
-            reseed_counter: 0,
-            cached_key: AesKey::new(&[0u8; KEY_LEN])?,
-        };
-
-        drbg.update(&seed_material)?;
-        drbg.reseed_counter = 1;
-
-        Ok(drbg)
+        let seed_material = block_cipher_df(&input, seed_len, ty.key_len())?;
+        Self::with(ty, &seed_material)
     }
 
-    /// Instantiate from the system entropy source.
-    ///
-    /// When the `entropy` feature is enabled, raw bytes are health-tested
-    /// (NIST SP 800-90B RCT + APT) and conditioned before use.
-    /// Otherwise, `getrandom` is used directly.
+    /// Instantiate CTR-DRBG-AES-256 from the system entropy source.
     pub fn from_system_entropy() -> Result<Self, CryptoError> {
-        let mut entropy = [0u8; SEED_LEN];
+        Self::from_system_entropy_with(CtrDrbgType::Aes256)
+    }
+
+    /// Instantiate CTR-DRBG of the given AES strength from the system entropy.
+    pub fn from_system_entropy_with(ty: CtrDrbgType) -> Result<Self, CryptoError> {
+        let seed_len = ty.seed_len();
+        let mut entropy = vec![0u8; seed_len];
         super::get_system_entropy(&mut entropy)?;
-        let result = Self::new(&entropy);
+        let result = Self::with(ty, &entropy);
         entropy.zeroize();
         result
     }
 
+    /// Active AES key length.
+    fn key_len(&self) -> usize {
+        self.ty.key_len()
+    }
+
+    /// Active seed length.
+    fn seed_len(&self) -> usize {
+        self.ty.seed_len()
+    }
+
     /// CTR-DRBG Update function (SP 800-90A §10.2.1.2).
     ///
-    /// `provided_data` must be exactly `SEED_LEN` bytes (or will be zero-padded).
+    /// `provided_data` must be exactly `seed_len()` bytes.
     fn update(&mut self, provided_data: &[u8]) -> Result<(), CryptoError> {
-        let mut temp = [0u8; SEED_LEN];
+        let seed_len = self.seed_len();
+        let key_len = self.key_len();
+        let mut temp = [0u8; MAX_SEED_LEN];
         let mut offset = 0;
 
-        // Generate SEED_LEN bytes of output by incrementing V and encrypting
-        while offset < SEED_LEN {
+        while offset < seed_len {
             increment_counter(&mut self.v);
             let mut block = self.v;
             self.cached_key.encrypt_block(&mut block)?;
 
-            let copy_len = (SEED_LEN - offset).min(BLOCK_LEN);
+            let copy_len = (seed_len - offset).min(BLOCK_LEN);
             temp[offset..offset + copy_len].copy_from_slice(&block[..copy_len]);
             offset += copy_len;
         }
 
-        // XOR with provided_data
-        let data_len = provided_data.len().min(SEED_LEN);
+        let data_len = provided_data.len().min(seed_len);
         for i in 0..data_len {
             temp[i] ^= provided_data[i];
         }
 
-        // Split into new Key and V
-        self.key.copy_from_slice(&temp[..KEY_LEN]);
-        self.v.copy_from_slice(&temp[KEY_LEN..SEED_LEN]);
-        self.cached_key = AesKey::new(&self.key)?;
+        self.key[..key_len].copy_from_slice(&temp[..key_len]);
+        self.v.copy_from_slice(&temp[key_len..seed_len]);
+        self.cached_key = AesKey::new(&self.key[..key_len])?;
 
         temp.zeroize();
         Ok(())
@@ -147,19 +195,18 @@ impl CtrDrbg {
             return Err(CryptoError::DrbgInvalidState);
         }
 
-        // Process additional input
+        let seed_len = self.seed_len();
+
         if let Some(data) = additional_input {
             if !data.is_empty() {
-                // Pad or truncate additional input to SEED_LEN
-                let mut adin = [0u8; SEED_LEN];
-                let copy_len = data.len().min(SEED_LEN);
+                let mut adin = [0u8; MAX_SEED_LEN];
+                let copy_len = data.len().min(seed_len);
                 adin[..copy_len].copy_from_slice(&data[..copy_len]);
-                self.update(&adin)?;
+                self.update(&adin[..seed_len])?;
                 adin.zeroize();
             }
         }
 
-        // Generate output blocks
         let mut offset = 0;
         while offset < output.len() {
             increment_counter(&mut self.v);
@@ -172,23 +219,17 @@ impl CtrDrbg {
             offset += copy_len;
         }
 
-        // Final update
-        let final_data = if let Some(data) = additional_input {
+        let mut final_data = [0u8; MAX_SEED_LEN];
+        if let Some(data) = additional_input {
             if !data.is_empty() {
-                let mut adin = [0u8; SEED_LEN];
-                let copy_len = data.len().min(SEED_LEN);
-                adin[..copy_len].copy_from_slice(&data[..copy_len]);
-                adin
-            } else {
-                [0u8; SEED_LEN]
+                let copy_len = data.len().min(seed_len);
+                final_data[..copy_len].copy_from_slice(&data[..copy_len]);
             }
-        } else {
-            [0u8; SEED_LEN]
-        };
+        }
+        self.update(&final_data[..seed_len])?;
+        final_data.zeroize();
 
-        self.update(&final_data)?;
         self.reseed_counter += 1;
-
         Ok(())
     }
 
@@ -198,30 +239,29 @@ impl CtrDrbg {
         entropy: &[u8],
         additional_input: Option<&[u8]>,
     ) -> Result<(), CryptoError> {
-        let mut seed_material = [0u8; SEED_LEN];
+        let seed_len = self.seed_len();
+        let mut seed_material = [0u8; MAX_SEED_LEN];
 
-        if entropy.len() == SEED_LEN {
-            seed_material.copy_from_slice(entropy);
-            // XOR additional input if present
+        if entropy.len() == seed_len {
+            seed_material[..seed_len].copy_from_slice(entropy);
             if let Some(data) = additional_input {
-                let copy_len = data.len().min(SEED_LEN);
+                let copy_len = data.len().min(seed_len);
                 for i in 0..copy_len {
                     seed_material[i] ^= data[i];
                 }
             }
         } else {
-            // Use DF to derive seed material
             let mut input =
                 Vec::with_capacity(entropy.len() + additional_input.map_or(0, |d| d.len()));
             input.extend_from_slice(entropy);
             if let Some(data) = additional_input {
                 input.extend_from_slice(data);
             }
-            let derived = block_cipher_df(&input, SEED_LEN)?;
-            seed_material.copy_from_slice(&derived);
+            let derived = block_cipher_df(&input, seed_len, self.key_len())?;
+            seed_material[..seed_len].copy_from_slice(&derived);
         }
 
-        self.update(&seed_material)?;
+        self.update(&seed_material[..seed_len])?;
         seed_material.zeroize();
         self.reseed_counter = 1;
 
@@ -247,11 +287,18 @@ impl super::Drbg for CtrDrbg {
     }
 }
 
-/// Block_Cipher_df — Derivation function using AES-256 CBC-MAC (SP 800-90A §10.3.2).
+/// Block_Cipher_df — Derivation function using AES-CBC-MAC (SP 800-90A §10.3.2).
 ///
-/// Derives `output_len` bytes from arbitrary-length input using BCC (Block Cipher Chaining).
-fn block_cipher_df(input: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoError> {
-    // Step 1: Build S = L(4) || N(4) || input || 0x80 || padding
+/// `key_len` selects AES-128 (16) / AES-192 (24) / AES-256 (32); the
+/// canonical seed K is `0x00,0x01,…,0x1F` truncated to `key_len`, matching
+/// the openHiTLS C reference `dfKey[32]` table truncated via the active
+/// `keyLen`.
+fn block_cipher_df(
+    input: &[u8],
+    output_len: usize,
+    key_len: usize,
+) -> Result<Vec<u8>, CryptoError> {
+    // Step 1: Build S = L(4) || N(4) || input || 0x80 || padding.
     let l = input.len() as u32;
     let n = output_len as u32;
 
@@ -260,33 +307,29 @@ fn block_cipher_df(input: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoErr
     s.extend_from_slice(&n.to_be_bytes());
     s.extend_from_slice(input);
     s.push(0x80);
-    // Pad to multiple of BLOCK_LEN
     while s.len() % BLOCK_LEN != 0 {
         s.push(0x00);
     }
 
-    // Step 2: Generate initial key K = 0x00010203...1F (32 bytes for AES-256)
-    let mut df_key = [0u8; KEY_LEN];
+    // Step 2: canonical K = 0x00,0x01,…,0x1F truncated to key_len.
+    let mut df_key = vec![0u8; key_len];
     for (i, byte) in df_key.iter_mut().enumerate() {
         *byte = i as u8;
     }
 
-    // Step 3: Use BCC to generate enough output
-    // We need ceil(output_len / BLOCK_LEN) * BLOCK_LEN bytes, plus BLOCK_LEN for the key
-    let blocks_needed = (KEY_LEN + BLOCK_LEN).div_ceil(BLOCK_LEN);
+    // Step 3: BCC produces (key_len + BLOCK_LEN) bytes of derivation material.
+    let blocks_needed = (key_len + BLOCK_LEN).div_ceil(BLOCK_LEN);
     let mut temp = Vec::with_capacity(blocks_needed * BLOCK_LEN);
 
     let df_cipher = AesKey::new(&df_key)?;
     for counter in 0..blocks_needed as u32 {
-        // IV = counter(4) || zeros(12) for each BCC call
         let mut iv = [0u8; BLOCK_LEN];
         iv[..4].copy_from_slice(&counter.to_be_bytes());
 
         // BCC(K, IV || S) is CBC-MAC with the chaining value starting at
         // 0^outlen (SP 800-90A §10.3.3). The counter IV is therefore the
         // *first* data block — encrypt it (chaining = E(0 XOR IV) = E(IV))
-        // before folding in the blocks of S, rather than seeding the chain
-        // with IV directly.
+        // before folding in the blocks of S.
         let mut chaining = iv;
         df_cipher.encrypt_block(&mut chaining)?;
         for chunk in s.chunks(BLOCK_LEN) {
@@ -300,13 +343,13 @@ fn block_cipher_df(input: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoErr
         temp.extend_from_slice(&chaining);
     }
 
-    // Step 4: Use the derived material as K' and X, then generate output
-    let mut new_key = [0u8; KEY_LEN];
-    new_key.copy_from_slice(&temp[..KEY_LEN]);
+    // Step 4: K' = temp[..key_len], X = temp[key_len..key_len+BLOCK_LEN];
+    // generate output_len bytes by repeatedly E(K', X).
+    let mut new_key = vec![0u8; key_len];
+    new_key.copy_from_slice(&temp[..key_len]);
     let mut x = [0u8; BLOCK_LEN];
-    x.copy_from_slice(&temp[KEY_LEN..KEY_LEN + BLOCK_LEN]);
+    x.copy_from_slice(&temp[key_len..key_len + BLOCK_LEN]);
 
-    // Generate output_len bytes using K' in ECB mode
     let new_cipher = AesKey::new(&new_key)?;
     let mut result = Vec::with_capacity(output_len);
     while result.len() < output_len {
@@ -325,6 +368,10 @@ mod tests {
     use super::*;
     use crate::drbg::Drbg;
 
+    /// Convenience: AES-256 seed length (for the legacy tests that
+    /// instantiated CtrDrbg with the historic default).
+    const SEED_LEN: usize = MAX_SEED_LEN; // 48
+
     #[test]
     fn test_ctr_drbg_instantiate() {
         let seed = [0x42u8; SEED_LEN];
@@ -334,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_ctr_drbg_instantiate_invalid_len() {
-        let seed = [0x42u8; 32]; // Too short
+        let seed = [0x42u8; 32]; // Too short for AES-256
         assert!(CtrDrbg::new(&seed).is_err());
     }
 
@@ -395,7 +442,6 @@ mod tests {
         let seed = [0x42u8; SEED_LEN];
         let mut drbg = CtrDrbg::new(&seed).unwrap();
 
-        // Request more than one AES block
         let output = drbg.generate_bytes(100).unwrap();
         assert_eq!(output.len(), 100);
     }
@@ -412,19 +458,11 @@ mod tests {
         assert_eq!(output.len(), 32);
         assert!(output.iter().any(|&b| b != 0));
 
-        // Deterministic with same inputs
         let mut drbg2 = CtrDrbg::with_df(entropy, nonce, personalization).unwrap();
         let output2 = drbg2.generate_bytes(32).unwrap();
         assert_eq!(output, output2);
     }
 
-    /// CTR-DRBG-AES-256-df NIST vector (openHiTLS C SDV
-    /// `SDV_PRIMARY_DRBG_VECTOR_FUN_TC001` / `BSL_CID_RAND_AES256_CTR_DF`):
-    /// instantiate CTR-DRBG-AES-256 *with* Block_Cipher_df from
-    /// entropy = 1000×0xff, nonce = 20×0xff, personalization = {00..05}, then
-    /// generate 32 bytes. Regression guard for the `block_cipher_df` BCC fix
-    /// (the IV counter block must be CBC-MAC'd from a 0 chaining value, i.e.
-    /// `chaining = E(IV)` before S is folded in — SP 800-90A §10.3.3).
     #[test]
     fn test_ctr_drbg_aes256_df_nist_vector() {
         let entropy = vec![0xffu8; 1000];
@@ -442,8 +480,6 @@ mod tests {
 
     #[test]
     fn test_ctr_drbg_nist_vector() {
-        // NIST SP 800-90A CTR_DRBG AES-256 use df=false
-        // Test vector: verify deterministic output from known seed
         let mut seed = [0u8; SEED_LEN];
         for (i, byte) in seed.iter_mut().enumerate() {
             *byte = (i & 0xFF) as u8;
@@ -453,12 +489,10 @@ mod tests {
         let out1 = drbg.generate_bytes(64).unwrap();
         let out2 = drbg.generate_bytes(64).unwrap();
 
-        // Verify output is non-zero and different between calls
         assert!(out1.iter().any(|&b| b != 0));
         assert!(out2.iter().any(|&b| b != 0));
         assert_ne!(out1, out2);
 
-        // Verify determinism
         let mut drbg2 = CtrDrbg::new(&seed).unwrap();
         let out1_verify = drbg2.generate_bytes(64).unwrap();
         assert_eq!(out1, out1_verify);
@@ -467,15 +501,13 @@ mod tests {
     #[test]
     fn test_block_cipher_df() {
         let input = b"test input for derivation function";
-        let output = block_cipher_df(input, 48).unwrap();
+        let output = block_cipher_df(input, 48, 32).unwrap();
         assert_eq!(output.len(), 48);
 
-        // Deterministic
-        let output2 = block_cipher_df(input, 48).unwrap();
+        let output2 = block_cipher_df(input, 48, 32).unwrap();
         assert_eq!(output, output2);
 
-        // Different input → different output
-        let output3 = block_cipher_df(b"different input", 48).unwrap();
+        let output3 = block_cipher_df(b"different input", 48, 32).unwrap();
         assert_ne!(output, output3);
     }
 
@@ -485,14 +517,12 @@ mod tests {
         increment_counter(&mut v);
         assert_eq!(v[BLOCK_LEN - 1], 1);
 
-        // Test overflow from 0xFF
         v = [0u8; BLOCK_LEN];
         v[BLOCK_LEN - 1] = 0xFF;
         increment_counter(&mut v);
         assert_eq!(v[BLOCK_LEN - 1], 0);
         assert_eq!(v[BLOCK_LEN - 2], 1);
 
-        // Test all 0xFF
         v = [0xFF; BLOCK_LEN];
         increment_counter(&mut v);
         assert_eq!(v, [0u8; BLOCK_LEN]);
@@ -504,18 +534,47 @@ mod tests {
         let mut drbg1 = CtrDrbg::new(&seed).unwrap();
         let mut drbg2 = CtrDrbg::new(&seed).unwrap();
 
-        // Before reseed: identical outputs
         let out1a = drbg1.generate_bytes(32).unwrap();
         let out2a = drbg2.generate_bytes(32).unwrap();
         assert_eq!(out1a, out2a);
 
-        // Reseed only drbg1
         let new_entropy = [0x99u8; SEED_LEN];
         drbg1.reseed(&new_entropy, None).unwrap();
 
-        // After reseed: outputs must differ
         let out1b = drbg1.generate_bytes(32).unwrap();
         let out2b = drbg2.generate_bytes(32).unwrap();
         assert_ne!(out1b, out2b);
+    }
+
+    #[test]
+    fn test_ctr_drbg_aes128_no_df_distinct_from_aes256() {
+        // AES-128 takes a 32-byte seed; AES-256 takes 48. They should
+        // run independently and produce non-empty output.
+        let seed128 = [0x37u8; 32];
+        let mut d128 = CtrDrbg::with(CtrDrbgType::Aes128, &seed128).unwrap();
+        let out128 = d128.generate_bytes(64).unwrap();
+        assert!(out128.iter().any(|&b| b != 0));
+
+        let seed192 = [0x37u8; 40];
+        let mut d192 = CtrDrbg::with(CtrDrbgType::Aes192, &seed192).unwrap();
+        let out192 = d192.generate_bytes(64).unwrap();
+        assert!(out192.iter().any(|&b| b != 0));
+
+        // Distinct seeds → distinct outputs.
+        assert_ne!(out128, out192);
+    }
+
+    #[test]
+    fn test_ctr_drbg_aes128_df_smoke() {
+        let entropy = b"AES-128 df smoke entropy material wide enough for the DF";
+        let nonce = b"AES-128 nonce";
+        let pers = b"AES-128 pers";
+        let mut d = CtrDrbg::with_df_typed(CtrDrbgType::Aes128, entropy, nonce, pers).unwrap();
+        let out = d.generate_bytes(32).unwrap();
+        assert!(out.iter().any(|&b| b != 0));
+        // Deterministic.
+        let mut d2 = CtrDrbg::with_df_typed(CtrDrbgType::Aes128, entropy, nonce, pers).unwrap();
+        let out2 = d2.generate_bytes(32).unwrap();
+        assert_eq!(out, out2);
     }
 }
