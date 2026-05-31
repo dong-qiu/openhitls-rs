@@ -197,6 +197,107 @@ impl XmssKeyPair {
         self.param_id
     }
 
+    /// Reconstruct an `XmssKeyPair` from a caller-supplied full secret key
+    /// `SK.seed || SK.prf || PK.seed || PK.root` (`4*n` bytes) and an
+    /// explicit `leaf_idx`. Skips the randomised keygen + trusts the row's
+    /// pre-computed `PK.root`. The openHiTLS C SDV `SIGN_KAT_TC001` rows
+    /// publish the full key and a fixed `index` per row, and assert
+    /// byte-exact signatures (when `index < 1 << h`) or
+    /// `CRYPT_XMSS_ERR_KEY_EXPIRED` (when `index == 1 << h`).
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test-only: caller-supplied secret key + leaf_idx bypasses randomised keygen and state tracking; use generate() in production"
+    )]
+    pub fn from_private_key(
+        param_id: XmssParamId,
+        full_key: &[u8],
+        leaf_idx: u64,
+    ) -> Result<Self, CryptoError> {
+        let p = get_params(param_id);
+        let n = p.n;
+        let expected = 4 * n;
+        if full_key.len() != expected {
+            return Err(CryptoError::InvalidKeyLength {
+                expected,
+                got: full_key.len(),
+            });
+        }
+        // Build internal public_key OID(4) || PK.root(n) || PK.seed(n)
+        // from the row's full secret key (PK.seed at offset 2n,
+        // PK.root at offset 3n).
+        let oid_val = params::oid(param_id);
+        let pk_seed = &full_key[2 * n..3 * n];
+        let pk_root = &full_key[3 * n..4 * n];
+        let mut public_key = Vec::with_capacity(4 + 2 * n);
+        public_key.extend_from_slice(&oid_val.to_be_bytes());
+        public_key.extend_from_slice(pk_root);
+        public_key.extend_from_slice(pk_seed);
+        Ok(Self {
+            public_key,
+            private_key: full_key.to_vec(),
+            param_id,
+            leaf_idx,
+            max_signatures: 1u64 << p.h,
+        })
+    }
+
+    /// Deterministic keygen: derive an `XmssKeyPair` from caller-supplied
+    /// seeds `(sk_seed, sk_prf, pk_seed)` (each `n` bytes). Mirrors
+    /// `generate()` but with injected randomness — the openHiTLS C SDV
+    /// `GENKEY_KAT_TC001` rows stub `RAND` with these three seeds and
+    /// assert the computed `(PK.seed, PK.root)` byte-exact.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test-only: caller-supplied randomness bypasses entropy source; use generate() in production"
+    )]
+    pub fn from_seeds(
+        param_id: XmssParamId,
+        sk_seed: &[u8],
+        sk_prf: &[u8],
+        pk_seed: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let p = get_params(param_id);
+        let n = p.n;
+        if sk_seed.len() != n || sk_prf.len() != n || pk_seed.len() != n {
+            return Err(CryptoError::InvalidKeyLength {
+                expected: n,
+                got: sk_seed.len(),
+            });
+        }
+        let mode = hash_mode(param_id);
+        let hasher = XmssHasher {
+            n,
+            padding_len: p.padding_len,
+            mode,
+            sk_seed: sk_seed.to_vec(),
+            pk_seed: pk_seed.to_vec(),
+        };
+        let mut adrs = XmssAdrs::new();
+        let root = tree::compute_root(&hasher, &mut adrs, &p)?;
+
+        let oid_val = params::oid(param_id);
+        let mut public_key = Vec::with_capacity(4 + 2 * n);
+        public_key.extend_from_slice(&oid_val.to_be_bytes());
+        public_key.extend_from_slice(&root);
+        public_key.extend_from_slice(pk_seed);
+
+        let mut private_key = Vec::with_capacity(4 * n);
+        private_key.extend_from_slice(sk_seed);
+        private_key.extend_from_slice(sk_prf);
+        private_key.extend_from_slice(pk_seed);
+        private_key.extend_from_slice(&root);
+
+        Ok(Self {
+            public_key,
+            private_key,
+            param_id,
+            leaf_idx: 0,
+            max_signatures: 1u64 << p.h,
+        })
+    }
+
     /// Construct a **verify-only** XMSS key pair from a raw public key
     /// `PK.seed || PK.root` (`2*n` bytes). The internal representation is
     /// `OID(4) || PK.root(n) || PK.seed(n)`, so this constructor prepends
@@ -405,6 +506,98 @@ impl XmssMtKeyPair {
     /// Return the parameter set identifier.
     pub fn param_id(&self) -> XmssMtParamId {
         self.param_id
+    }
+
+    /// Reconstruct an `XmssMtKeyPair` from a caller-supplied full secret
+    /// key + `leaf_idx`. Multi-tree counterpart of
+    /// [`XmssKeyPair::from_private_key`].
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(note = "test-only: KAT helper companion to XmssKeyPair::from_private_key")]
+    pub fn from_private_key(
+        param_id: XmssMtParamId,
+        full_key: &[u8],
+        leaf_idx: u64,
+    ) -> Result<Self, CryptoError> {
+        let mt = get_mt_params(param_id);
+        let n = mt.n;
+        let expected = 4 * n;
+        if full_key.len() != expected {
+            return Err(CryptoError::InvalidKeyLength {
+                expected,
+                got: full_key.len(),
+            });
+        }
+        let oid_val = params::mt_oid(param_id);
+        let pk_seed = &full_key[2 * n..3 * n];
+        let pk_root = &full_key[3 * n..4 * n];
+        let mut public_key = Vec::with_capacity(4 + 2 * n);
+        public_key.extend_from_slice(&oid_val.to_be_bytes());
+        public_key.extend_from_slice(pk_root);
+        public_key.extend_from_slice(pk_seed);
+        Ok(Self {
+            public_key,
+            private_key: full_key.to_vec(),
+            param_id,
+            leaf_idx,
+            max_signatures: 1u64 << mt.total_h,
+        })
+    }
+
+    /// Deterministic keygen for `XmssMtKeyPair` — multi-tree counterpart
+    /// of [`XmssKeyPair::from_seeds`]. Mirrors `XmssMtKeyPair::generate()`'s
+    /// body with caller-supplied seeds.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(note = "test-only: KAT helper companion to XmssKeyPair::from_seeds")]
+    pub fn from_seeds(
+        param_id: XmssMtParamId,
+        sk_seed: &[u8],
+        sk_prf: &[u8],
+        pk_seed: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let mt = get_mt_params(param_id);
+        let n = mt.n;
+        if sk_seed.len() != n || sk_prf.len() != n || pk_seed.len() != n {
+            return Err(CryptoError::InvalidKeyLength {
+                expected: n,
+                got: sk_seed.len(),
+            });
+        }
+        let mode = mt_hash_mode(param_id);
+        let hasher = XmssHasher {
+            n,
+            padding_len: mt.padding_len,
+            mode,
+            sk_seed: sk_seed.to_vec(),
+            pk_seed: pk_seed.to_vec(),
+        };
+        // Build top-layer tree (layer d-1) to get root.
+        let lp = tree::layer_params(&mt);
+        let mut adrs = XmssAdrs::new();
+        adrs.set_layer_addr((mt.d - 1) as u32);
+        adrs.set_tree_addr(0);
+        let root = tree::compute_root(&hasher, &mut adrs, &lp)?;
+
+        let oid_val = params::mt_oid(param_id);
+        let mut public_key = Vec::with_capacity(4 + 2 * n);
+        public_key.extend_from_slice(&oid_val.to_be_bytes());
+        public_key.extend_from_slice(&root);
+        public_key.extend_from_slice(pk_seed);
+
+        let mut private_key = Vec::with_capacity(4 * n);
+        private_key.extend_from_slice(sk_seed);
+        private_key.extend_from_slice(sk_prf);
+        private_key.extend_from_slice(pk_seed);
+        private_key.extend_from_slice(&root);
+
+        Ok(Self {
+            public_key,
+            private_key,
+            param_id,
+            leaf_idx: 0,
+            max_signatures: 1u64 << mt.total_h,
+        })
     }
 
     /// Construct a **verify-only** XMSS-MT key pair from a raw public key

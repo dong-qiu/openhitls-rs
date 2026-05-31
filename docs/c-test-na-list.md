@@ -79,8 +79,8 @@ Counts are the `Generation summary` footer of each generated file
 | AES-KW | 16 | 18 | 0 | 8 | 42 |
 | HPKE | 456 | 11 | 0 | 0 | 467 |
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
-| XMSS | 42 | 46 | 0 | 0 | 88 |
-| **Total** | **3056** | **3771** | **240** | **109** | **6442** |
+| XMSS | 84 | 4 | 0 | 0 | 88 |
+| **Total** | **3098** | **3729** | **240** | **109** | **6442** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -403,6 +403,28 @@ deferred to T156 — needs `kat-nonce`-gated `from_private_key` +
 `sign_at_index` to inject `leaf_idx`), 14 GENKEY_KAT_TC001 (needs
 `from_seeds`), and 4 NEW / GETSET / GENKEY (non-KAT) API rows
 (permanent).
+
+T157 closes **SIGN_KAT_TC001** (28) + **GENKEY_KAT_TC001** (14) —
+the families T156 attempted before the **I146** PRF_KEYGEN fix
+landed. Four new `kat-nonce`-gated public APIs on `XmssKeyPair` +
+`XmssMtKeyPair` (mirror the SLH-DSA T154 hooks):
+`from_private_key(param, full_key_4n, leaf_idx)` skips the randomised
+keygen and trusts the row's pre-computed `PK.root` (used for
+SIGN_KAT); `from_seeds(param, sk_seed, sk_prf, pk_seed)` mirrors
+`generate()`'s body with caller-supplied seeds (used for GENKEY_KAT).
+Emitter additions in `xtask/src/xmss.rs`: `emit_sign_kat` (6-arg row
+`(algId, index, key, msg, sig, result)`; CRYPT_SUCCESS rows assert
+`kp.sign(msg) == sig` byte-exact, CRYPT_XMSS_ERR_KEY_EXPIRED rows
+assert `kp.sign(msg).is_err()`); `emit_genkey_kat` (3-arg row
+`(algId, key_3n, expected_root_2n)`; asserts both `PK.seed` and
+`PK.root` halves of the row's expected output via
+`kp.public_key()[4 + n..]` and `[4..4 + n]`). The generated test
+file's cfg gate widens to `all(xmss, kat-nonce)` (same pattern as
+SLH-DSA / HPKE). **+42 byte-exact tests** added
+(`migrated_xmss.rs` 42 → **84**); the I146 fix is the load-bearing
+piece — without it, all 14 GENKEY rows + 14 SIGN-SUCCESS rows would
+have failed byte-exact (the 14 SIGN-rej KEY_EXPIRED rows pass with
+or without the fix because they exercise state-checking only).
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,

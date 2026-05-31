@@ -59,6 +59,24 @@ fn xmssmt_enum(sym: &str) -> Option<(&'static str, &'static str)> {
 // Shake128 family stops at 256-bit hash output per RFC 8391 §5.2), so we
 // map it to `XmssMtParamId::Shake256_20_2_512`.
 
+/// Security parameter `n` (bytes) per single-tree variant.
+fn xmss_n(sym: &str) -> usize {
+    match sym {
+        "CRYPT_XMSS_SHA2_10_512" => 64,
+        "CRYPT_XMSS_SHA2_10_192" | "CRYPT_XMSS_SHAKE256_10_192" => 24,
+        _ => 32,
+    }
+}
+
+/// Security parameter `n` (bytes) per multi-tree variant.
+fn xmssmt_n(sym: &str) -> usize {
+    match sym {
+        "CRYPT_XMSSMT_SHA2_20_2_512" | "CRYPT_XMSSMT_SHAKE_20_2_512" => 64,
+        "CRYPT_XMSSMT_SHA2_20_2_192" | "CRYPT_XMSSMT_SHAKE256_20_2_192" => 24,
+        _ => 32,
+    }
+}
+
 fn write_doc(out: &mut String, case: &TestCase, kind: &str) {
     if let Some(desc) = &case.description {
         writeln!(out, "/// {desc}").unwrap();
@@ -85,14 +103,171 @@ fn write_footer(out: &mut String, stats: &EmitStats, total: usize) {
     .unwrap();
 }
 
+/// Emit a SIGN_KAT_TC001 row. Shape: `(algId, index, key, msg, sig, result)`.
+/// `key` is the full `4*n` secret key; `index` pins the stateful counter.
+/// CRYPT_SUCCESS rows assert `sign(msg) == sig` byte-exact;
+/// CRYPT_XMSS_ERR_KEY_EXPIRED rows assert that sign returns `Err(_)` (the
+/// row's `index` is at `1 << h`).
+fn emit_sign_kat(body: &mut String, stats: &mut EmitStats, case: &TestCase) {
+    let (Some(alg_sym), Some(index_str), Some(key), Some(msg), Some(sig), Some(expected)) = (
+        case.args.first().and_then(|a| a.as_symbol()),
+        case.args.get(1).and_then(|a| a.as_symbol()),
+        case.args.get(2).and_then(|a| a.as_hex()),
+        case.args.get(3).and_then(|a| a.as_hex()),
+        case.args.get(4).and_then(|a| a.as_hex()),
+        case.args.get(5).and_then(|a| a.as_symbol()),
+    ) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let Ok(index) = index_str.parse::<u64>() else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let (kp_type, param_type, alg_var, alg_tag) = if let Some((v, t)) = xmss_enum(alg_sym) {
+        ("XmssKeyPair", "XmssParamId", v, t)
+    } else if let Some((v, t)) = xmssmt_enum(alg_sym) {
+        ("XmssMtKeyPair", "XmssMtParamId", v, t)
+    } else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    let expect_success = expected == "CRYPT_SUCCESS";
+    let kind_tag = if expect_success { "ok" } else { "rej" };
+
+    write_doc(body, case, "XMSS sign KAT (RFC 8391)");
+    writeln!(body, "#[test]").unwrap();
+    writeln!(body, "#[allow(deprecated)]").unwrap();
+    writeln!(
+        body,
+        "fn tc_line{}_xmss_sign_{alg_tag}_{kind_tag}() {{",
+        case.line
+    )
+    .unwrap();
+    writeln!(body, "    let key: &[u8] = {};", format_byte_slice(key)).unwrap();
+    writeln!(body, "    let msg: &[u8] = {};", format_byte_slice(msg)).unwrap();
+    writeln!(
+        body,
+        "    let mut kp = {kp_type}::from_private_key({param_type}::{alg_var}, key, {index}).unwrap();"
+    )
+    .unwrap();
+    if expect_success {
+        writeln!(
+            body,
+            "    let expected_sig: &[u8] = {};",
+            format_byte_slice(sig)
+        )
+        .unwrap();
+        writeln!(
+            body,
+            "    let sig = kp.sign(msg).expect(\"expected sign success\");"
+        )
+        .unwrap();
+        writeln!(body, "    assert_eq!(sig.as_slice(), expected_sig);").unwrap();
+    } else {
+        writeln!(
+            body,
+            "    assert!(kp.sign(msg).is_err(), \"expected sign failure ({expected}), got Ok\");"
+        )
+        .unwrap();
+    }
+    writeln!(body, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// Emit a GENKEY_KAT_TC001 row. Shape: `(algId, key_3n, expected_root_2n)`.
+/// `key` = `sk_seed(N) || sk_prf(N) || pk_seed(N)`; expected =
+/// `pk_seed(N) || pk_root(N)`. Asserts that `from_seeds(...)` reproduces
+/// `(PK.seed, PK.root)` byte-exact.
+fn emit_genkey_kat(body: &mut String, stats: &mut EmitStats, case: &TestCase) {
+    let (Some(alg_sym), Some(key), Some(expected_root)) = (
+        case.args.first().and_then(|a| a.as_symbol()),
+        case.args.get(1).and_then(|a| a.as_hex()),
+        case.args.get(2).and_then(|a| a.as_hex()),
+    ) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let (kp_type, param_type, alg_var, alg_tag, n) = if let Some((v, t)) = xmss_enum(alg_sym) {
+        ("XmssKeyPair", "XmssParamId", v, t, xmss_n(alg_sym))
+    } else if let Some((v, t)) = xmssmt_enum(alg_sym) {
+        ("XmssMtKeyPair", "XmssMtParamId", v, t, xmssmt_n(alg_sym))
+    } else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    if key.len() != 3 * n || expected_root.len() != 2 * n {
+        stats.skipped_unknown += 1;
+        return;
+    }
+
+    write_doc(body, case, "XMSS keygen KAT (deterministic seeds)");
+    writeln!(body, "#[test]").unwrap();
+    writeln!(body, "#[allow(deprecated)]").unwrap();
+    writeln!(body, "fn tc_line{}_xmss_genkey_{alg_tag}() {{", case.line).unwrap();
+    writeln!(
+        body,
+        "    let sk_seed: &[u8] = {};",
+        format_byte_slice(&key[..n])
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let sk_prf: &[u8] = {};",
+        format_byte_slice(&key[n..2 * n])
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let pk_seed: &[u8] = {};",
+        format_byte_slice(&key[2 * n..3 * n])
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let expected_pk_seed: &[u8] = {};",
+        format_byte_slice(&expected_root[..n])
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let expected_pk_root: &[u8] = {};",
+        format_byte_slice(&expected_root[n..2 * n])
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let kp = {kp_type}::from_seeds({param_type}::{alg_var}, sk_seed, sk_prf, pk_seed).unwrap();"
+    )
+    .unwrap();
+    // Internal public_key layout: OID(4) || PK.root(n) || PK.seed(n).
+    writeln!(body, "    let pk = kp.public_key();").unwrap();
+    writeln!(body, "    assert_eq!(&pk[4..4 + {n}], expected_pk_root);").unwrap();
+    writeln!(
+        body,
+        "    assert_eq!(&pk[4 + {n}..4 + 2 * {n}], expected_pk_seed);"
+    )
+    .unwrap();
+    writeln!(body, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
 pub fn emit_xmss_kat(cases: &[TestCase]) -> (String, EmitStats) {
     let mut body = String::new();
     let mut stats = EmitStats::default();
 
     for case in cases {
+        if case.tc_name.contains("SIGN_KAT_TC001") {
+            emit_sign_kat(&mut body, &mut stats, case);
+            continue;
+        }
+        if case.tc_name.contains("GENKEY_KAT_TC001") {
+            emit_genkey_kat(&mut body, &mut stats, case);
+            continue;
+        }
         if !case.tc_name.contains("VERIFY_KAT_TC001") {
-            // SIGN_KAT / GENKEY_KAT / API* / GETSET / NEW route to API-surface
-            // in T155; T156+ will add `kat-nonce`-gated hooks for them.
+            // API* / GETSET / NEW / GENKEY (non-KAT) route to API-surface
+            // (permanent — EAL ctx CRUD only).
             stats.skipped_api += 1;
             continue;
         }
@@ -161,7 +336,7 @@ pub fn emit_xmss_kat(cases: &[TestCase]) -> (String, EmitStats) {
          // DO NOT EDIT BY HAND. Source: openhitls C SDV test_suite_sdv_eal_xmss.data\n\
          //\n\
          // Generator: docs/c-test-migration-plan.md Phase A (xtask).\n\
-         #![cfg(feature = \"xmss\")]\n\n\
+         #![cfg(all(feature = \"xmss\", feature = \"kat-nonce\"))]\n\n\
          use hitls_crypto::xmss::{XmssKeyPair, XmssMtKeyPair};\n\
          use hitls_types::{XmssMtParamId, XmssParamId};\n\n",
     );
