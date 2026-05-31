@@ -922,3 +922,58 @@ mod tests {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// `provider::Digest` impls for the fixed-output SHA-3 variants.
+//
+// These wire SHA-3 into the generic MAC / KDF paths (HMAC, HKDF, ...) that
+// take a `Box<dyn Digest>` factory. The block size reported by `Digest` is
+// the Keccak rate (FIPS 202), which is also the HMAC inner/outer pad block
+// length:
+//
+// | Variant   | output | block / rate |
+// |-----------|-------:|-------------:|
+// | SHA3-224  |     28 |          144 |
+// | SHA3-256  |     32 |          136 |
+// | SHA3-384  |     48 |          104 |
+// | SHA3-512  |     64 |           72 |
+//
+// The XOF variants (SHAKE128 / SHAKE256) intentionally don't implement
+// `Digest` — their output length is caller-chosen.
+// ---------------------------------------------------------------------------
+
+macro_rules! impl_sha3_digest {
+    ($ty:ident, $out_size:expr, $block_size:expr) => {
+        impl crate::provider::Digest for $ty {
+            fn output_size(&self) -> usize {
+                $out_size
+            }
+
+            fn block_size(&self) -> usize {
+                $block_size
+            }
+
+            fn update(&mut self, data: &[u8]) -> Result<(), CryptoError> {
+                $ty::update(self, data)
+            }
+
+            fn finish(&mut self, out: &mut [u8]) -> Result<(), CryptoError> {
+                if out.len() < $out_size {
+                    return Err(CryptoError::InvalidArg(""));
+                }
+                let result = $ty::finish(self)?;
+                out[..$out_size].copy_from_slice(&result);
+                Ok(())
+            }
+
+            fn reset(&mut self) {
+                $ty::reset(self)
+            }
+        }
+    };
+}
+
+impl_sha3_digest!(Sha3_224, SHA3_224_OUTPUT_SIZE, 144);
+impl_sha3_digest!(Sha3_256, SHA3_256_OUTPUT_SIZE, 136);
+impl_sha3_digest!(Sha3_384, SHA3_384_OUTPUT_SIZE, 104);
+impl_sha3_digest!(Sha3_512, SHA3_512_OUTPUT_SIZE, 72);

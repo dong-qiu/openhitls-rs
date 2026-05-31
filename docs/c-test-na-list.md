@@ -47,8 +47,8 @@ Counts are the `Generation summary` footer of each generated file
 | Algorithm | Emitted | API-surface | Unknown | Unsupported | Total C cases |
 |-----------|--------:|------------:|--------:|------------:|--------------:|
 | SHA-2 | 28 | 42 | 0 | 0 | 70 |
-| HMAC | 43 | 158 | 0 | 4 | 205 |
-| CMAC | 12 | 71 | 4 | 4 | 91 |
+| HMAC | 47 | 158 | 0 | 0 | 205 |
+| CMAC | 16 | 71 | 4 | 0 | 91 |
 | AES | 30 | 273 | 0 | 12 | 315 |
 | Curve25519 | 19 | 115 | 36 | 0 | 170 |
 | DSA | 1200 | 141 | 26 | 0 | 767 |
@@ -81,7 +81,7 @@ Counts are the `Generation summary` footer of each generated file
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 7 | 31 | 0 | 0 | 38 |
-| **Total** | **3127** | **3760** | **240** | **87** | **6480** |
+| **Total** | **3135** | **3760** | **240** | **79** | **6480** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -532,7 +532,7 @@ migration tool emit the corresponding tests with no generator change.
 | SM4 CBC / CTR / CFB / OFB / HCTR / XTS + GCM-decrypt | SM4 | 37 | CBC hardcodes PKCS#7 padding; CTR/CFB/OFB/HCTR/XTS have no public SM4 entry point; GCM-decrypt needs the 16-byte tag absent from the `.data` | add SM4 raw-mode public functions; a CBC no-padding helper |
 | SM2 key exchange | SM2 | 17 | `Sm2KeyPair` exposes no key-exchange method | add an SM2 ECDH / key-exchange API |
 | SM9 key exchange | SM9 | 2 | `Sm9MasterKey` exposes no key-exchange method (the C SDV `KEYEX_API_TC001/TC002` rows exercise the identity-based key-exchange protocol; the Rust impl covers only sign+verify and encrypt+decrypt) | add an SM9 key-exchange API per GB/T 38635 §4.4 |
-| HMAC/CMAC SHA-3 | HMAC, CMAC | 8 | SHA-3 is not yet wired into the `Digest` trait used by the MAC one-shot path; CMAC is also AES-only (`CRYPT_MAC_CMAC_SM4`) | implement the `Digest` impl for SHA-3; generalise `Cmac` over `BlockCipher` |
+| ~~HMAC/CMAC SHA-3~~ | ~~HMAC, CMAC~~ | ~~8~~ | **Resolved in I150.** (1) `crate::provider::Digest` is now implemented for `Sha3_224 / Sha3_256 / Sha3_384 / Sha3_512` via a small `impl_sha3_digest!` macro (block sizes 144 / 136 / 104 / 72 = Keccak rate per FIPS 202 §6.1; output 28 / 32 / 48 / 64); SHA-3 now plugs into the generic `Hmac::mac(factory, key, msg)` one-shot path. (2) `Cmac` was refactored from an AES-hardcoded struct into a private `define_cmac!` macro that generates both `Cmac` (AES, unchanged public API) and a new feature-gated `CmacSm4` (SM4, sharing the same algorithm body — Rb = 0x87, K1/K2 = `dbl(E_K(0^n))`, 10*-pad for partial last block). Both 128-bit block ciphers, so the math is identical; only the cipher type differs. (3) `MAX_BLOCK_SIZE` in `hmac/mod.rs` raised 128 → 144 (SHA3-224 rate is the widest block among all wired digests; SHA-512 was 128, SHA3-256 = 136). | Resolved by I150; HMAC tally 43 → 47, CMAC tally 12 → 16. |
 | CRL parser leniency | X.509 CRL | 9 | Negative CRL-parse KATs (`res != HITLS_PKI_SUCCESS`) cannot be migrated: `CertificateRevocationList::from_pem` accepts structurally-malformed CRLs the C parser rejects, so `assert!(… .is_err())` does not hold. Only positive parse rows are emitted | tighten the Rust CRL DER decoder to reject the malformed inputs (version / signature-algorithm / tbs-shape checks) |
 | ~~Hash-DRBG SHA-1 / SHA-224 / SM3~~ | ~~DRBG~~ | ~~3~~ | **Resolved in I148.** `HashDrbgType` extended with `Sha1` / `Sha224` / `Sm3` variants (NIST SP 800-90A Table 2: SHA-1/SHA-224 seedlen=55; SM3 mirrors SHA-256 seedlen=55 per GM/T 0105-2021 / openHiTLS C reference). | Resolved by I148. |
 | ~~HMAC-DRBG SHA-1 / 224 / 384 / 512~~ | ~~DRBG~~ | ~~4~~ | **Resolved in I148.** `HmacDrbg` generalised over the digest via a new `HmacDrbgType` enum (Sha1/Sha224/Sha256/Sha384/Sha512) + `HmacDrbg::with(ty, seed)` constructor. `HmacDrbg::new(seed)` retained as the SHA-256 default (no breaking change). | Resolved by I148. |
