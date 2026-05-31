@@ -9524,3 +9524,55 @@ Verification: T155 baseline preserved — migrated_xmss 42/0, xmss lib
 (3056/3771/240/109/6442).
 
 Recorded as DEV_LOG Phase T156.
+
+## Phase I146 — XMSS PRF_KEYGEN + PRF_msg RFC 8702 Conformance Fix (2026-05-31)
+
+> A  (resolve the T156-diagnosed XMSS reference-interop divergence)
+
+Resolves the T156-diagnosed Rust XMSS divergence (7th bug found via the
+C→Rust migration discipline; same flavor as FrodoKEM I145 — internally
+self-consistent, externally non-interop).
+
+Two related bugs in crates/hitls-crypto/src/xmss/hash.rs:
+
+1. prf_keygen was the RFC 8391 §5.1 PRF construction
+   H(toByte(3, plen) || SK.seed || ADRS) instead of the RFC 8702 /
+   NIST SP 800-208 §6.4 PRF_KEYGEN construction
+   H(toByte(4, plen) || SK.seed || PK.seed || ADRS) — wrong
+   domain-separation byte AND missing PK.seed input.
+2. prf_msg XOR'd msg into the PRF input; the C PrfmsgGeneric is
+   H(toByte(3, plen) || SK.prf || toByte(idx, 32)) with no message
+   dependency — every Rust signature R differed from C.
+
+Why hidden: verify never calls prf_keygen — wots_pk_from_sig recovers
+chain values from the signature itself. So generate→sign→verify
+roundtrip succeeds (Rust keygen + Rust sign use same wrong prf_keygen,
+Rust verify uses the right code paths). T155 VERIFY KAT also succeeds —
+verifying a C signature against a C public key only uses
+wots_pk_from_sig + chain + parent-hash, none of which touch prf_keygen.
+The bug only surfaces when Rust *generates* and we compare against C.
+
+Diagnosis shortcut: rather than full T156 3-step unblock probe, opened
+openhitls C XPrfGeneric in xmss_hash.c — saw both bugs at once
+(byte 4 not 3; both seeds not just SK.seed). Wrote a one-row ignored
+probe to confirm Rust's compute_root matched expected PK.root after
+the fix, then promoted to a permanent KAT lib test
+(test_xmss_compute_root_kat_sha2_10_256).
+
+Verification:
+- xmss lib 63/0 (was 62/0; +1 new KAT)
+- migrated_xmss 42/0 unchanged (T155 VERIFY KAT was independent of bug)
+- fmt + clippy -D warnings --all-features --all-targets clean
+- drift gate passes
+
+Production impact: XMSS / XMSS-MT public keys (PK.root) and signatures
+(R + WOTS+ chains) are now RFC 8702 / openHiTLS C byte-compatible.
+Previously Rust-generated XMSS keys/sigs couldn't be used by any
+standard implementation (or vice-versa).
+
+Unblocks: T156-deferred 42 SIGN+GENKEY KAT rows can now land as T157.
+
+na-list: XMSS gap entry struck through with cross-reference to I146;
+gap counter for XMSS goes 42 → 0 (resolved).
+
+Recorded as DEV_LOG Phase I146.
