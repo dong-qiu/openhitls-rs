@@ -9428,3 +9428,50 @@ Remaining 32 SLH-DSA rows are all permanent API-surface:
 - 9 API/GENKEY non-KAT/GETSET/NEW/CTRL rows.
 
 Recorded as DEV_LOG Phase T154.
+
+## Phase T155 — XMSS / XMSS-MT VERIFY_KAT_TC001 KAT Migration (2026-05-31)
+
+> 请继续 XMSS sign/verify
+
+Scoped T155 to verify only (sign + genkey deferred to T156 — they need a
+`kat-nonce`-gated stateful-sign hook for XMSS's `leaf_idx` counter, which
+warrants its own focused change).
+
+Two new default-feature pub APIs added to hitls_crypto::xmss:
+- XmssKeyPair::from_public_key(param, public_key) — takes raw 2N
+  PK.seed || PK.root, prepends OID via params::oid, reorders to internal
+  OID(4) || PK.root(N) || PK.seed(N).
+- XmssMtKeyPair::from_public_key(param, public_key) — same, using
+  params::mt_oid and get_mt_params.
+
+Both are minimal verify-only constructors (private_key = Vec::new(),
+leaf_idx = 0, max_signatures = 0). Mirror existing SLH-DSA / ML-DSA
+from_public_key.
+
+New emitter xtask/src/xmss.rs + "xmss" dispatch arm in main.rs. Row
+shape (algId, key, msg, sig, result) — 5 fields. Dispatch on the algId
+prefix (CRYPT_XMSS_* → XmssKeyPair, CRYPT_XMSSMT_* → XmssMtKeyPair) via
+two small lookup tables (xmss_enum 6-entry + xmssmt_enum 7-entry). Each
+row emits one tc_lineN_xmss_verify_<algo>_<ok|rej> test.
+
+Algorithm-mapping quirk: CRYPT_XMSSMT_SHAKE_20_2_512 denotes the
+SHAKE256 variant (RFC 8391 §5.2 — SHAKE128 family stops at 256-bit hash
+output; no SHAKE128_20_2_512 parameter set exists). Mapped to
+XmssMtParamId::Shake256_20_2_512.
+
+Coverage: all 13 parameter sets in the C SDV (6 single-tree + 7
+multi-tree) × 3 rows each (1 success + 1 INVALID_SIG_LEN + 1
+MERKLETREE_ROOT_MISMATCH) = 42 byte-exact tests. All passing first run.
+
+Deferred to T156+:
+- SIGN_KAT_TC001 (28) — stateful sign with leaf_idx injection.
+- GENKEY_KAT_TC001 (14) — needs from_seeds.
+- 4 API/GETSET/GENKEY-non-KAT rows — permanent API-surface.
+
+Verification: migrated_xmss 42/0 (-p hitls-crypto --all-features); xtask
+--check drift gate passes; existing xmss lib tests 62/0 unchanged; fmt
++ clippy -D warnings --all-features --all-targets clean.
+
+na-list tally: XMSS 42/46/0/0/88 (new row), Total 3056/3771/240/109/6442.
+
+Recorded as DEV_LOG Phase T155.
