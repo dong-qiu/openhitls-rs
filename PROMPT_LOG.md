@@ -9367,3 +9367,64 @@ na-list tally: SLH-DSA 168/181/0/0/349 (new row), Total
 2865/3874/240/109/6354.
 
 Recorded as DEV_LOG Phase T153.
+
+## Phase T154 — SLH-DSA SIGN_KAT_TC001 + GENKEY_KAT_TC001 KAT Migration (2026-05-31)
+
+> 合并后继续 T154
+
+Phase A continuation: extends the T153 SLH-DSA emitter to migrate the
+two byte-exact KAT families (SIGN_KAT_TC001 + GENKEY_KAT_TC001) deferred
+in T153. 149 byte-exact tests added (168 → 317; +88 genkey + 61 sign;
+the 62 SIGN rows minus 1 provider-flag duplicate). All passing first
+run. SLH-DSA coverage now 317/349 = 90.8%.
+
+Production-side: three new kat-nonce-gated public APIs on
+SlhDsaKeyPair (all #[doc(hidden)] + #[deprecated(note = "test-only:
+…")], not compiled into default builds):
+
+- from_private_key(param, full_key_4n) — wraps the C row's pre-computed
+  full secret key SK.seed||SK.prf||PK.seed||PK.root, skipping randomised
+  keygen. Used by SIGN_KAT.
+- from_seeds(param, sk_seed, sk_prf, pk_seed) — mirrors generate()'s
+  body but with caller-supplied seeds; computes PK.root via
+  hypertree::xmss_compute_root at layer d-1 from sk_seed + pk_seed.
+  Used by GENKEY_KAT.
+- sign_with_addrand(message, addrand) — wraps the existing private
+  sign_internal. addrand.is_empty() → opt_rand = PK.seed
+  (FIPS 205 §10.2.1 deterministic mode, matches the C
+  CRYPT_CTRL_SET_DETERMINISTIC_FLAG); non-empty → opt_rand = addrand
+  (hedged mode with fixed hedge).
+
+Emitter: new emit_sign_kat (7-arg row, drops isProvider==1 duplicate;
+wraps M' = 0x00 || ctx_len || ctx || msg; asserts
+kp.sign_with_addrand(&M', addrand) == sig byte-exact) and
+emit_genkey_kat (3-arg row, splits key_3n into the three N-byte seeds;
+asserts kp.public_key() == expected_pk). Dispatcher routes both before
+falling through to the T153 verify path.
+
+The deterministic-mode dispatch (empty addrand → opt_rand = PK.seed) is
+the SLH-DSA analogue of the ML-DSA rnd = 0 deterministic mode added in
+I137. Similarly safe: SLH-DSA opt_rand is hedging-only randomness
+(FIPS 205 §10.2.1), reusing it across signatures of different messages
+does not leak the secret key.
+
+Result: migrated_slhdsa.rs — 168 → 317 byte-exact tests, all passing
+first run. File size 33MB → 46MB (SLH-DSA-256-F signatures are ~50KB
+each; SIGN_KAT publishes them inline).
+
+Verification: migrated_slhdsa 317/0 (-p hitls-crypto --all-features);
+xtask --check drift gate passes; builds clean without kat-nonce (cfg
+gating verified); existing slh_dsa lib tests 64/0 unchanged; fmt +
+clippy -D warnings --all-features --all-targets clean.
+
+na-list tally: SLH-DSA 317/32/0/0/349 (was 168/181), Total
+3014/3725/240/109/6354 (was 2865/3874).
+
+Remaining 32 SLH-DSA rows are all permanent API-surface:
+- 1 VERIFY_PREHASHED_KAT_TC001 (FIPS 205 §10.2.3 pre-hash entry point —
+  not yet exposed in Rust).
+- 1 SIGN_KAT_TC001 isProvider==1 duplicate.
+- 21 CHECK_KEYPAIR/CHECK_PRVKEY (EAL key-validity check API).
+- 9 API/GENKEY non-KAT/GETSET/NEW/CTRL rows.
+
+Recorded as DEV_LOG Phase T154.

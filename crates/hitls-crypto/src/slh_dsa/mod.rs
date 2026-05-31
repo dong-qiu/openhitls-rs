@@ -257,6 +257,108 @@ impl SlhDsaKeyPair {
     pub fn param_id(&self) -> SlhDsaParamId {
         self.param_id
     }
+
+    /// Reconstruct an `SlhDsaKeyPair` from a caller-supplied full secret key
+    /// `SK.seed || SK.prf || PK.seed || PK.root` (`4*n` bytes). Skips the
+    /// randomised keygen — the openHiTLS C SDV `SIGN_KAT_TC001` rows publish
+    /// the full key per row and assert byte-exact signatures against it.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test-only: caller-supplied secret key bypasses randomised keygen; use generate() in production"
+    )]
+    pub fn from_private_key(param_id: SlhDsaParamId, full_key: &[u8]) -> Result<Self, CryptoError> {
+        let p = get_params(param_id);
+        let expected = 4 * p.n;
+        if full_key.len() != expected {
+            return Err(CryptoError::InvalidKeyLength {
+                expected,
+                got: full_key.len(),
+            });
+        }
+        Ok(Self {
+            public_key: full_key[2 * p.n..4 * p.n].to_vec(),
+            private_key: full_key.to_vec(),
+            param_id,
+        })
+    }
+
+    /// Deterministic keygen: derive an `SlhDsaKeyPair` from caller-supplied
+    /// seeds `(sk_seed, sk_prf, pk_seed)` (each `n` bytes). Mirrors
+    /// `generate()` but with injected randomness — the openHiTLS C SDV
+    /// `GENKEY_KAT_TC001` rows stub `RAND` with these three seeds and assert
+    /// the computed `(PK.seed, PK.root)` byte-exact.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test-only: caller-supplied randomness bypasses entropy source; use generate() in production"
+    )]
+    pub fn from_seeds(
+        param_id: SlhDsaParamId,
+        sk_seed: &[u8],
+        sk_prf: &[u8],
+        pk_seed: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let p = get_params(param_id);
+        let n = p.n;
+        if sk_seed.len() != n || sk_prf.len() != n || pk_seed.len() != n {
+            return Err(CryptoError::InvalidKeyLength {
+                expected: n,
+                got: sk_seed.len(),
+            });
+        }
+        // Compute PK.root = top-layer XMSS tree root (same body as generate()).
+        let placeholder_root = vec![0u8; n];
+        let hasher = make_hasher(p, pk_seed, &placeholder_root);
+        let compressed = p.is_sha2;
+        let mut adrs = Adrs::new(compressed);
+        adrs.set_layer_addr((p.d - 1) as u32);
+        let pk_root = hypertree::xmss_compute_root(&*hasher, sk_seed, &mut adrs, p)?;
+
+        let mut private_key = Vec::with_capacity(4 * n);
+        private_key.extend_from_slice(sk_seed);
+        private_key.extend_from_slice(sk_prf);
+        private_key.extend_from_slice(pk_seed);
+        private_key.extend_from_slice(&pk_root);
+
+        let mut public_key = Vec::with_capacity(2 * n);
+        public_key.extend_from_slice(pk_seed);
+        public_key.extend_from_slice(&pk_root);
+
+        Ok(Self {
+            public_key,
+            private_key,
+            param_id,
+        })
+    }
+
+    /// Sign with caller-supplied `opt_rand` (FIPS 205 §10.2.1) — wraps the
+    /// private `sign_internal`. The openHiTLS C SDV `SIGN_KAT_TC001` rows
+    /// pin `opt_rand` for byte-exact signatures: empty `addrand` → "pure
+    /// deterministic" mode (`opt_rand = PK.seed`, derived inside this fn);
+    /// non-empty `addrand` → `opt_rand = addrand` (hedged mode with fixed
+    /// hedge value).
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test-only: caller-supplied opt_rand bypasses randomness; use sign() in production"
+    )]
+    pub fn sign_with_addrand(
+        &self,
+        message: &[u8],
+        addrand: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let p = get_params(self.param_id);
+        let n = p.n;
+        // SLH-DSA pure deterministic mode: opt_rand = PK.seed (= private_key[2n..3n]).
+        let deterministic_opt = &self.private_key[2 * n..3 * n];
+        let opt_rand: &[u8] = if addrand.is_empty() {
+            deterministic_opt
+        } else {
+            addrand
+        };
+        self.sign_internal(message, opt_rand)
+    }
 }
 
 #[cfg(test)]

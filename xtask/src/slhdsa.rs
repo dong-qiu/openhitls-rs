@@ -82,11 +82,157 @@ fn write_footer(out: &mut String, stats: &EmitStats, total: usize) {
     .unwrap();
 }
 
+fn emit_sign_kat(body: &mut String, stats: &mut EmitStats, case: &TestCase) {
+    // Row: (isProvider, algId, key, addrand, msg, context, sig) — 7 fields.
+    let (
+        Some(is_provider),
+        Some(alg_sym),
+        Some(key),
+        Some(addrand),
+        Some(msg),
+        Some(ctx),
+        Some(sig),
+    ) = (
+        case.args.first().and_then(|a| a.as_symbol()),
+        case.args.get(1).and_then(|a| a.as_symbol()),
+        case.args.get(2).and_then(|a| a.as_hex()),
+        case.args.get(3).and_then(|a| a.as_hex()),
+        case.args.get(4).and_then(|a| a.as_hex()),
+        case.args.get(5).and_then(|a| a.as_hex()),
+        case.args.get(6).and_then(|a| a.as_hex()),
+    )
+    else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    if is_provider == "1" {
+        // Provider-flag duplicate of the isProvider=0 row.
+        stats.skipped_api += 1;
+        return;
+    }
+    let Some((alg_var, alg_tag, n)) = alg_enum(alg_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    if key.len() != 4 * n {
+        stats.skipped_unknown += 1;
+        return;
+    }
+
+    write_doc(body, case, "SLH-DSA sign KAT (FIPS 205 §10.2 pure mode)");
+    writeln!(body, "#[test]").unwrap();
+    writeln!(body, "#[allow(deprecated)]").unwrap();
+    writeln!(body, "fn tc_line{}_slhdsa_sign_{alg_tag}() {{", case.line).unwrap();
+    writeln!(body, "    let key: &[u8] = {};", format_byte_slice(key)).unwrap();
+    writeln!(
+        body,
+        "    let addrand: &[u8] = {};",
+        format_byte_slice(addrand)
+    )
+    .unwrap();
+    writeln!(body, "    let msg: &[u8] = {};", format_byte_slice(msg)).unwrap();
+    writeln!(body, "    let ctx: &[u8] = {};", format_byte_slice(ctx)).unwrap();
+    writeln!(
+        body,
+        "    let expected_sig: &[u8] = {};",
+        format_byte_slice(sig)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let kp = SlhDsaKeyPair::from_private_key(SlhDsaParamId::{alg_var}, key).unwrap();"
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let mut m = Vec::with_capacity(2 + ctx.len() + msg.len());"
+    )
+    .unwrap();
+    writeln!(body, "    m.push(0x00);").unwrap();
+    writeln!(body, "    m.push(ctx.len() as u8);").unwrap();
+    writeln!(body, "    m.extend_from_slice(ctx);").unwrap();
+    writeln!(body, "    m.extend_from_slice(msg);").unwrap();
+    writeln!(
+        body,
+        "    let sig = kp.sign_with_addrand(&m, addrand).unwrap();"
+    )
+    .unwrap();
+    writeln!(body, "    assert_eq!(sig.as_slice(), expected_sig);").unwrap();
+    writeln!(body, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+fn emit_genkey_kat(body: &mut String, stats: &mut EmitStats, case: &TestCase) {
+    // Row: (algId, key_3n, expected_pk_2n) — 3 fields.
+    // key = sk_seed(N) || sk_prf(N) || pk_seed(N); expected = pk_seed(N) || pk_root(N).
+    let (Some(alg_sym), Some(key), Some(expected_pk)) = (
+        case.args.first().and_then(|a| a.as_symbol()),
+        case.args.get(1).and_then(|a| a.as_hex()),
+        case.args.get(2).and_then(|a| a.as_hex()),
+    ) else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    let Some((alg_var, alg_tag, n)) = alg_enum(alg_sym) else {
+        stats.skipped_unsupported_alg += 1;
+        return;
+    };
+    if key.len() != 3 * n || expected_pk.len() != 2 * n {
+        stats.skipped_unknown += 1;
+        return;
+    }
+
+    write_doc(body, case, "SLH-DSA keygen KAT (deterministic seeds)");
+    writeln!(body, "#[test]").unwrap();
+    writeln!(body, "#[allow(deprecated)]").unwrap();
+    writeln!(body, "fn tc_line{}_slhdsa_genkey_{alg_tag}() {{", case.line).unwrap();
+    writeln!(
+        body,
+        "    let sk_seed: &[u8] = {};",
+        format_byte_slice(&key[..n])
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let sk_prf: &[u8] = {};",
+        format_byte_slice(&key[n..2 * n])
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let pk_seed: &[u8] = {};",
+        format_byte_slice(&key[2 * n..3 * n])
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let expected_pk: &[u8] = {};",
+        format_byte_slice(expected_pk)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let kp = SlhDsaKeyPair::from_seeds(SlhDsaParamId::{alg_var}, sk_seed, sk_prf, pk_seed).unwrap();"
+    )
+    .unwrap();
+    writeln!(body, "    assert_eq!(kp.public_key(), expected_pk);").unwrap();
+    writeln!(body, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
 pub fn emit_slhdsa_kat(cases: &[TestCase]) -> (String, EmitStats) {
     let mut body = String::new();
     let mut stats = EmitStats::default();
 
     for case in cases {
+        if case.tc_name.contains("SIGN_KAT_TC001") {
+            emit_sign_kat(&mut body, &mut stats, case);
+            continue;
+        }
+        if case.tc_name.contains("GENKEY_KAT_TC001") {
+            emit_genkey_kat(&mut body, &mut stats, case);
+            continue;
+        }
         if !case.tc_name.contains("VERIFY_KAT_TC001") {
             stats.skipped_api += 1;
             continue;
@@ -182,7 +328,7 @@ pub fn emit_slhdsa_kat(cases: &[TestCase]) -> (String, EmitStats) {
          // DO NOT EDIT BY HAND. Source: openhitls C SDV test_suite_sdv_eal_slh_dsa1.data\n\
          //\n\
          // Generator: docs/c-test-migration-plan.md Phase A (xtask).\n\
-         #![cfg(feature = \"slh-dsa\")]\n\n\
+         #![cfg(all(feature = \"slh-dsa\", feature = \"kat-nonce\"))]\n\n\
          use hitls_crypto::slh_dsa::SlhDsaKeyPair;\n\
          use hitls_types::SlhDsaParamId;\n\n",
     );
