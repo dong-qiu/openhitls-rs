@@ -3,9 +3,9 @@
 //
 // Generator: docs/c-test-migration-plan.md Phase A (xtask).
 
-#![cfg(all(feature = "cmac", feature = "aes"))]
+#![cfg(all(feature = "cmac", feature = "aes", feature = "sm4"))]
 
-use hitls_crypto::cmac::Cmac;
+use hitls_crypto::cmac::{Cmac, CmacSm4};
 
 /// SDV_CRYPT_EAL_CMAC_FUN_TC004 CRYPT_MAC_CMAC_AES128 0xff data test
 /// C source: SDV_CRYPT_EAL_CMAC_FUN_TC004 (line 137, one-shot CMAC KAT)
@@ -72,6 +72,29 @@ fn tc_line143_cmac_aes256_one_shot() {
         0xb9,
     ];
     let mut cmac = Cmac::new(key).unwrap();
+    cmac.update(msg).unwrap();
+    let mut actual = [0u8; 16];
+    cmac.finish(&mut actual).unwrap();
+    assert_eq!(actual.as_slice(), expected);
+}
+
+/// SDV_CRYPT_EAL_CMAC_FUN_TC004 CRYPT_MAC_CMAC_SM4 0xff data test #self generate test data
+/// C source: SDV_CRYPT_EAL_CMAC_FUN_TC004 (line 146, one-shot CMAC KAT)
+#[test]
+fn tc_line146_cmac_sm4_one_shot() {
+    let key: &[u8] = &[
+        0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xd7, 0x1d, 0x5e, 0x00, 0x00, 0x00, 0x00,
+        0x00,
+    ];
+    let msg: &[u8] = &[
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff,
+    ];
+    let expected: &[u8] = &[
+        0xce, 0x83, 0x7f, 0xf9, 0x91, 0x36, 0x8d, 0x76, 0x9a, 0x3b, 0xef, 0xf3, 0x26, 0x0f, 0x32,
+        0xe6,
+    ];
+    let mut cmac = CmacSm4::new(key).unwrap();
     cmac.update(msg).unwrap();
     let mut actual = [0u8; 16];
     cmac.finish(&mut actual).unwrap();
@@ -149,6 +172,29 @@ fn tc_line155_cmac_aes256_one_shot() {
     assert_eq!(actual.as_slice(), expected);
 }
 
+/// MAC_FUN_TC004 CRYPT_MAC_CMAC_SM4 0x00 data test #self generate test data
+/// C source: SDV_CRYPT_EAL_CMAC_FUN_TC004 (line 158, one-shot CMAC KAT)
+#[test]
+fn tc_line158_cmac_sm4_one_shot() {
+    let key: &[u8] = &[
+        0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xd7, 0x1d, 0x5e, 0x00, 0x00, 0x00, 0x00,
+        0x00,
+    ];
+    let msg: &[u8] = &[
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00,
+    ];
+    let expected: &[u8] = &[
+        0xea, 0x93, 0x85, 0xc7, 0xd6, 0xd3, 0xa3, 0x20, 0x3a, 0x84, 0x94, 0x97, 0x76, 0x41, 0xc0,
+        0xae,
+    ];
+    let mut cmac = CmacSm4::new(key).unwrap();
+    cmac.update(msg).unwrap();
+    let mut actual = [0u8; 16];
+    cmac.finish(&mut actual).unwrap();
+    assert_eq!(actual.as_slice(), expected);
+}
+
 /// SDV_CRYPT_EAL_CMAC_FUN_TC004 CRYPT_MAC_CMAC_AES128 0xff key test
 /// C source: SDV_CRYPT_EAL_CMAC_FUN_TC004 (line 161, one-shot CMAC KAT)
 #[test]
@@ -214,6 +260,29 @@ fn tc_line167_cmac_aes256_one_shot() {
         0x25,
     ];
     let mut cmac = Cmac::new(key).unwrap();
+    cmac.update(msg).unwrap();
+    let mut actual = [0u8; 16];
+    cmac.finish(&mut actual).unwrap();
+    assert_eq!(actual.as_slice(), expected);
+}
+
+/// SDV_CRYPT_EAL_CMAC_FUN_TC004 CRYPT_MAC_CMAC_SM4 0xff key test #self generate test data
+/// C source: SDV_CRYPT_EAL_CMAC_FUN_TC004 (line 170, one-shot CMAC KAT)
+#[test]
+fn tc_line170_cmac_sm4_one_shot() {
+    let key: &[u8] = &[
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff,
+    ];
+    let msg: &[u8] = &[
+        0x60, 0x33, 0xab, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x0a, 0xe3, 0xfa, 0x93, 0x7f, 0x00,
+        0x00,
+    ];
+    let expected: &[u8] = &[
+        0x6d, 0x22, 0xcf, 0x71, 0x23, 0x15, 0xa6, 0x02, 0x7b, 0xc9, 0x56, 0x5e, 0xa5, 0xe6, 0xab,
+        0x1c,
+    ];
+    let mut cmac = CmacSm4::new(key).unwrap();
     cmac.update(msg).unwrap();
     let mut actual = [0u8; 16];
     cmac.finish(&mut actual).unwrap();
@@ -291,4 +360,27 @@ fn tc_line179_cmac_aes256_one_shot() {
     assert_eq!(actual.as_slice(), expected);
 }
 
-// Generation summary: 12 emitted / 71 API-surface skipped (N/A in Rust) / 4 unknown / 4 unsupported alg (e.g. SHA-3) / 91 total C cases.
+/// SDV_CRYPT_EAL_CMAC_FUN_TC004 CRYPT_MAC_CMAC_SM4 0x00 key test #self generate test data
+/// C source: SDV_CRYPT_EAL_CMAC_FUN_TC004 (line 182, one-shot CMAC KAT)
+#[test]
+fn tc_line182_cmac_sm4_one_shot() {
+    let key: &[u8] = &[
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00,
+    ];
+    let msg: &[u8] = &[
+        0x60, 0x43, 0x7d, 0x01, 0x00, 0x00, 0x00, 0x00, 0x64, 0xfa, 0xfe, 0xe5, 0x78, 0x7f, 0x00,
+        0x00,
+    ];
+    let expected: &[u8] = &[
+        0x62, 0x3e, 0x0d, 0xc2, 0x99, 0xd7, 0x2e, 0xda, 0xd9, 0x9e, 0xd0, 0xba, 0x20, 0xc1, 0x3f,
+        0x53,
+    ];
+    let mut cmac = CmacSm4::new(key).unwrap();
+    cmac.update(msg).unwrap();
+    let mut actual = [0u8; 16];
+    cmac.finish(&mut actual).unwrap();
+    assert_eq!(actual.as_slice(), expected);
+}
+
+// Generation summary: 16 emitted / 71 API-surface skipped (N/A in Rust) / 4 unknown / 0 unsupported alg (e.g. SHA-3) / 91 total C cases.

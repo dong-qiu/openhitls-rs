@@ -9825,3 +9825,55 @@ na-list tally: TLS1.2-PRF 4/16/0/2/22 -> 6/16/0/0/22; Total
 3125/3760/240/89/6480 -> 3127/3760/240/87/6480.
 
 Recorded as DEV_LOG Phase I149.
+
+## Phase I150 — HMAC SHA-3 + CMAC SM4 (resolves HMAC/CMAC SHA-3 Structural Gap) (2026-05-31)
+
+> B
+
+Closes the T6-era HMAC/CMAC SHA-3 Structural Gap (8 rows = 4 HMAC
+SHA-3 + 4 CMAC SM4).
+
+Production additions (all default-feature, additive, no ABI break):
+
+- `impl crate::provider::Digest for Sha3_{224,256,384,512}` in
+  `crates/hitls-crypto/src/sha3/mod.rs` via a new
+  `impl_sha3_digest!($ty, $out_size, $block_size)` macro. Block
+  sizes 144 / 136 / 104 / 72 = Keccak rate per FIPS 202 §6.1; output
+  28 / 32 / 48 / 64. SHA-3 now plugs into the generic
+  `Hmac::mac(factory, key, msg)` one-shot path. Shake128 / Shake256
+  intentionally don't get a Digest impl — their output length is
+  caller-chosen.
+- `Cmac` refactored from an AES-hardcoded struct (RFC 4493 / NIST
+  SP 800-38B) into a private `define_cmac!($name, $cipher)` macro
+  that generates both `Cmac` (over AesKey, unchanged public API,
+  all 9 existing AES lib tests pass byte-identically) and a new
+  feature-gated `CmacSm4` (over Sm4Key, `#[cfg(feature = "sm4")]`).
+  Both 128-bit block ciphers so the math is identical: same
+  Rb = 0x87, K1/K2 = dbl(E_K(0^n)), 10*-pad rule. Only the cipher
+  primitive plugged in differs.
+- `MAX_BLOCK_SIZE` in `hmac/mod.rs` raised 128 → 144 (SHA3-224 rate
+  is the widest block among all wired digests; SHA-512 was 128).
+  Root cause for the initial 2 failing tests during emission
+  verification — HMAC stores the ipad/opad-XOR-key in a stack
+  `[u8; MAX_BLOCK_SIZE]` buffer.
+
+xtask emitter (`xtask/src/mac.rs`): alg_to_rust learns
+CRYPT_MAC_HMAC_SHA3_{224,256,384,512} → ("Sha3_{N}", "sha3").
+feature_for / alg_lower / write_header gain SHA-3 entries.
+cmac_alg_label is renamed to cmac_alg and returns (label,
+CmacCipher); CmacCipher::Sm4 triggers `use hitls_crypto::cmac::CmacSm4`
+import + widens the file-level cfg gate to include feature = "sm4".
+
+Verification: sha3 lib tests unchanged; hmac lib 31/0 unchanged;
+cmac lib 9/0 unchanged (AES path RFC 4493 + NIST SP 800-38B D.3
+still byte-exact after the macro refactor); migrated_hmac 43/0 ->
+47/0 (+4 SHA-3 KAT); migrated_cmac 12/0 -> 16/0 (+4 SM4 KAT); xtask
+--check drift gates clean (both hmac + cmac); cargo test -p
+hitls-crypto --all-features green; fmt + clippy -D warnings
+--all-features --all-targets clean.
+
+na-list tally: HMAC 43/158/0/4/205 -> 47/158/0/0/205; CMAC
+12/71/4/4/91 -> 16/71/4/0/91; Total 3127/3760/240/87/6480 ->
+3135/3760/240/79/6480.
+
+Recorded as DEV_LOG Phase I150.

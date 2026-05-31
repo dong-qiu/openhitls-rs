@@ -11,8 +11,13 @@ use crate::provider::Digest;
 use hitls_types::CryptoError;
 use zeroize::Zeroize;
 
-/// Maximum block size of any supported hash (SHA-512 = 128 bytes).
-const MAX_BLOCK_SIZE: usize = 128;
+/// Maximum block size of any supported hash.
+///
+/// Sized for SHA3-224 (rate = 144 bytes per FIPS 202 §6.1) — the widest
+/// HMAC block among the digests this crate plugs in. Other rates:
+/// SHA-512 / SHA-384 = 128, SHA3-256 = 136, SHA3-384 = 104, SHA3-512 = 72,
+/// SHA-256 / SHA-224 / SM3 / SHA-1 / MD5 = 64.
+const MAX_BLOCK_SIZE: usize = 144;
 
 /// Maximum output size of any supported hash (SHA-512 = 64 bytes).
 const MAX_OUTPUT_SIZE: usize = 64;
