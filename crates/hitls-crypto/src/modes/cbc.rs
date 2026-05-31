@@ -170,6 +170,122 @@ pub fn sm4_cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u
     cbc_decrypt_with(&cipher, iv, ciphertext)
 }
 
+// ---------------------------------------------------------------------------
+// Raw (no-padding) CBC helpers.
+//
+// NIST SP 800-38A §6.2 defines CBC without prescribing a padding scheme.
+// Standard KAT vectors (NIST CAVP, FIPS 197 Annex C) publish block-aligned
+// plaintext / ciphertext directly, so the PKCS#7-wrapping `cbc_encrypt` /
+// `cbc_decrypt` cannot reproduce them: their output is always 16 bytes
+// longer than the input, and their decrypt path rejects the unpadded
+// ciphertext as having "invalid padding".
+//
+// The raw helpers below require `input.len() % block_size == 0` and skip
+// the PKCS#7 wrap/unwrap step entirely. They are the right entry point
+// for byte-exact NIST KAT reproduction; production code should keep using
+// the padded `cbc_encrypt` / `cbc_decrypt` (or higher-level AEAD modes)
+// unless the caller already guarantees alignment.
+// ---------------------------------------------------------------------------
+
+/// Encrypt block-aligned data using AES-CBC with **no padding**.
+///
+/// `plaintext.len()` must be a multiple of `AES_BLOCK_SIZE`. Returns the
+/// ciphertext of identical length. Use this for NIST CAVP / FIPS 197
+/// KAT reproduction; for everyday encryption prefer the PKCS#7-padded
+/// [`cbc_encrypt`].
+pub fn cbc_encrypt_raw(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    let cipher = AesKey::new(key)?;
+    cbc_encrypt_raw_with(&cipher, iv, plaintext)
+}
+
+/// Decrypt block-aligned data using AES-CBC with **no padding**.
+///
+/// `ciphertext.len()` must be a multiple of `AES_BLOCK_SIZE`. Returns
+/// the plaintext of identical length. Use this for NIST CAVP / FIPS 197
+/// KAT reproduction; for everyday decryption prefer the PKCS#7-padded
+/// [`cbc_decrypt`].
+pub fn cbc_decrypt_raw(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    let cipher = AesKey::new(key)?;
+    cbc_decrypt_raw_with(&cipher, iv, ciphertext)
+}
+
+/// Raw (no-padding) CBC encrypt over a generic block cipher.
+///
+/// Constrained to **128-bit (16-byte) block ciphers** — AES and SM4 today.
+/// Wider blocks would require a `Vec`-backed state buffer; rather than pay
+/// the allocation cost on every encrypted block (the hot path), the
+/// internal staging arrays are stack-sized to 16 bytes and the function
+/// rejects ciphers whose `block_size()` would index out of bounds.
+pub fn cbc_encrypt_raw_with<C: BlockCipher>(
+    cipher: &C,
+    iv: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let bs = cipher.block_size();
+    if bs != 16 {
+        return Err(CryptoError::InvalidArg(
+            "raw CBC requires a 128-bit block cipher",
+        ));
+    }
+    if iv.len() != bs {
+        return Err(CryptoError::InvalidIvLength);
+    }
+    if plaintext.is_empty() || plaintext.len() % bs != 0 {
+        return Err(CryptoError::InvalidArg("CBC input not block-aligned"));
+    }
+
+    let mut data = plaintext.to_vec();
+    let mut prev = [0u8; 16];
+    prev[..bs].copy_from_slice(iv);
+
+    for chunk in data.chunks_mut(bs) {
+        for i in 0..bs {
+            chunk[i] ^= prev[i];
+        }
+        cipher.encrypt_block(chunk)?;
+        prev[..bs].copy_from_slice(chunk);
+    }
+    Ok(data)
+}
+
+/// Raw (no-padding) CBC decrypt over a generic block cipher.
+///
+/// Constrained to **128-bit (16-byte) block ciphers** — see
+/// [`cbc_encrypt_raw_with`] for rationale.
+pub fn cbc_decrypt_raw_with<C: BlockCipher>(
+    cipher: &C,
+    iv: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let bs = cipher.block_size();
+    if bs != 16 {
+        return Err(CryptoError::InvalidArg(
+            "raw CBC requires a 128-bit block cipher",
+        ));
+    }
+    if iv.len() != bs {
+        return Err(CryptoError::InvalidIvLength);
+    }
+    if ciphertext.is_empty() || ciphertext.len() % bs != 0 {
+        return Err(CryptoError::InvalidArg("CBC input not block-aligned"));
+    }
+
+    let mut output = ciphertext.to_vec();
+    let mut prev = [0u8; 16];
+    prev[..bs].copy_from_slice(iv);
+
+    for chunk in output.chunks_mut(bs) {
+        let mut ct_copy = [0u8; 16];
+        ct_copy[..bs].copy_from_slice(chunk);
+        cipher.decrypt_block(chunk)?;
+        for i in 0..bs {
+            chunk[i] ^= prev[i];
+        }
+        prev = ct_copy;
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,8 +403,83 @@ mod tests {
         assert_eq!(to_hex(&ct[..64]), expected_ct);
     }
 
+    // NIST SP 800-38A F.2.1 / F.2.2 / F.2.3: AES-128/192/256 CBC, raw mode.
+    // Plaintext is block-aligned, so reproducing the published ciphertext
+    // requires the no-padding helper. The padded `cbc_encrypt` cannot
+    // reproduce these vectors — its output is always +16 bytes.
+    #[test]
+    fn test_cbc_encrypt_raw_aes128_nist_f_2_1() {
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
+        let pt = hex(
+            "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710",
+        );
+        let expected_ct = hex(
+            "7649abac8119b246cee98e9b12e9197d5086cb9b507219ee95db113a917678b273bed6b8e3c1743b7116e69e222295163ff1caa1681fac09120eca307586e1a7",
+        );
+        let ct = cbc_encrypt_raw(&key, &iv, &pt).unwrap();
+        assert_eq!(ct, expected_ct);
+        let pt2 = cbc_decrypt_raw(&key, &iv, &ct).unwrap();
+        assert_eq!(pt2, pt);
+    }
+
+    #[test]
+    fn test_cbc_encrypt_raw_rejects_unaligned() {
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
+        // 13 bytes — not block-aligned.
+        assert!(cbc_encrypt_raw(&key, &iv, b"Hello, World!").is_err());
+        assert!(cbc_encrypt_raw(&key, &iv, b"").is_err());
+    }
+
+    #[test]
+    fn test_cbc_decrypt_raw_rejects_unaligned() {
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
+        assert!(cbc_decrypt_raw(&key, &iv, &[0u8; 13]).is_err());
+        assert!(cbc_decrypt_raw(&key, &iv, &[]).is_err());
+    }
+
+    /// Defensive: a `BlockCipher` whose `block_size()` exceeds 16 must be
+    /// rejected — the raw helpers' internal staging arrays are stack-sized
+    /// to 16 bytes and would index out of bounds otherwise.
+    #[test]
+    fn test_cbc_raw_with_rejects_non_128bit_cipher() {
+        struct WideCipher;
+        impl crate::provider::BlockCipher for WideCipher {
+            fn block_size(&self) -> usize {
+                32
+            }
+            fn key_size(&self) -> usize {
+                32
+            }
+            fn set_encrypt_key(&mut self, _key: &[u8]) -> Result<(), CryptoError> {
+                Ok(())
+            }
+            fn set_decrypt_key(&mut self, _key: &[u8]) -> Result<(), CryptoError> {
+                Ok(())
+            }
+            fn encrypt_block(&self, _block: &mut [u8]) -> Result<(), CryptoError> {
+                unreachable!("should be rejected before encrypt_block runs")
+            }
+            fn decrypt_block(&self, _block: &mut [u8]) -> Result<(), CryptoError> {
+                unreachable!("should be rejected before decrypt_block runs")
+            }
+        }
+        let iv = [0u8; 32];
+        let pt = [0u8; 32];
+        assert!(matches!(
+            cbc_encrypt_raw_with(&WideCipher, &iv, &pt),
+            Err(CryptoError::InvalidArg(_))
+        ));
+        assert!(matches!(
+            cbc_decrypt_raw_with(&WideCipher, &iv, &pt),
+            Err(CryptoError::InvalidArg(_))
+        ));
+    }
+
     mod proptests {
-        use super::super::{cbc_decrypt, cbc_encrypt};
+        use super::super::{cbc_decrypt, cbc_decrypt_raw, cbc_encrypt, cbc_encrypt_raw};
         use proptest::prelude::*;
 
         proptest! {
@@ -302,6 +493,20 @@ mod tests {
             ) {
                 let ct = cbc_encrypt(&key, &iv, &pt).unwrap();
                 let recovered = cbc_decrypt(&key, &iv, &ct).unwrap();
+                prop_assert_eq!(recovered, pt);
+            }
+
+            /// Raw CBC roundtrip — block-aligned input only.
+            #[test]
+            fn prop_cbc_raw_encrypt_decrypt(
+                key in prop::array::uniform16(any::<u8>()),
+                iv in prop::array::uniform16(any::<u8>()),
+                blocks in 1usize..8,
+            ) {
+                let pt: Vec<u8> = (0..blocks * 16).map(|i| (i as u8).wrapping_mul(31)).collect();
+                let ct = cbc_encrypt_raw(&key, &iv, &pt).unwrap();
+                prop_assert_eq!(ct.len(), pt.len());
+                let recovered = cbc_decrypt_raw(&key, &iv, &ct).unwrap();
                 prop_assert_eq!(recovered, pt);
             }
         }

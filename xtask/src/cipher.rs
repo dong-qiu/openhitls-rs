@@ -78,8 +78,7 @@ fn classify_aes(tc_name: &str) -> AesKind {
 }
 
 /// Map a `CRYPT_CIPHER_AESxxx_<MODE>` symbol to (Rust mode tag, key size).
-/// Returns `None` for modes whose Rust API requires a no-padding variant
-/// we don't yet expose (CBC) or for unsupported variants.
+/// Returns `None` for modes whose Rust API has no matching entry point yet.
 fn aes_alg_label(symbol: &str) -> Option<(&'static str, usize)> {
     match symbol {
         "CRYPT_CIPHER_AES128_ECB" => Some(("ecb", 128)),
@@ -88,10 +87,13 @@ fn aes_alg_label(symbol: &str) -> Option<(&'static str, usize)> {
         "CRYPT_CIPHER_AES128_CTR" => Some(("ctr", 128)),
         "CRYPT_CIPHER_AES192_CTR" => Some(("ctr", 192)),
         "CRYPT_CIPHER_AES256_CTR" => Some(("ctr", 256)),
-        // CBC: cbc_encrypt/decrypt hardcode PKCS#7 padding; raw NIST KAT
-        // vectors are block-aligned with no padding. Skipped until the
-        // Rust port grows a `cbc_encrypt_raw` helper (future phase).
-        "CRYPT_CIPHER_AES128_CBC" | "CRYPT_CIPHER_AES192_CBC" | "CRYPT_CIPHER_AES256_CBC" => None,
+        // CBC: NIST KAT vectors are block-aligned with no padding. Route
+        // through the `cbc_encrypt_raw` / `cbc_decrypt_raw` no-padding
+        // helpers (I151); the PKCS#7-padded `cbc_encrypt` cannot
+        // reproduce them — its output is always +16 bytes.
+        "CRYPT_CIPHER_AES128_CBC" => Some(("cbc", 128)),
+        "CRYPT_CIPHER_AES192_CBC" => Some(("cbc", 192)),
+        "CRYPT_CIPHER_AES256_CBC" => Some(("cbc", 256)),
         // CFB / OFB: stream-style helpers exist (no padding) but the
         // TC001 rows are ECB+CBC+CTR only. CFB/OFB live in TC005/TC006
         // (multi-update) which are routed to ApiSurface above.
@@ -116,6 +118,9 @@ fn write_header(out: &mut String, used_modes: &BTreeSet<&'static str>) {
         match *mode {
             "ecb" => imports.push("use hitls_crypto::modes::ecb::{ecb_decrypt, ecb_encrypt};"),
             "ctr" => imports.push("use hitls_crypto::modes::ctr::ctr_crypt;"),
+            "cbc" => {
+                imports.push("use hitls_crypto::modes::cbc::{cbc_decrypt_raw, cbc_encrypt_raw};")
+            }
             _ => {}
         }
     }
@@ -216,11 +221,18 @@ fn emit_one_shot(
             stats.skipped_unknown += 1;
             return;
         }
-        "ctr" if iv.is_empty() => {
+        "ctr" | "cbc" if iv.is_empty() => {
             stats.skipped_unknown += 1;
             return;
         }
         _ => {}
+    }
+    // CBC raw helpers require block-aligned input. The C SDV `ENCRYPT_FUNC_TC001`
+    // rows are NIST CAVP vectors, all 16-byte multiples — but guard anyway so a
+    // future row with a padded variant doesn't silently get emitted as raw.
+    if mode_label == "cbc" && (input.len() % 16 != 0 || output.len() % 16 != 0) {
+        stats.skipped_unknown += 1;
+        return;
     }
     used_modes.insert(mode_label);
 
@@ -260,6 +272,22 @@ fn emit_one_shot(
             // back to the C row (which is direction-aware).
             writeln!(out, "    let mut actual = input.to_vec();").unwrap();
             writeln!(out, "    ctr_crypt(key, iv, &mut actual).unwrap();").unwrap();
+            writeln!(out, "    assert_eq!(actual.as_slice(), expected);").unwrap();
+        }
+        ("cbc", true) => {
+            writeln!(
+                out,
+                "    let actual = cbc_encrypt_raw(key, iv, input).unwrap();"
+            )
+            .unwrap();
+            writeln!(out, "    assert_eq!(actual.as_slice(), expected);").unwrap();
+        }
+        ("cbc", false) => {
+            writeln!(
+                out,
+                "    let actual = cbc_decrypt_raw(key, iv, input).unwrap();"
+            )
+            .unwrap();
             writeln!(out, "    assert_eq!(actual.as_slice(), expected);").unwrap();
         }
         _ => unreachable!("emit_one_shot dispatched on an unsupported mode label"),

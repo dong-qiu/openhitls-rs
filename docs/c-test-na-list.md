@@ -49,7 +49,7 @@ Counts are the `Generation summary` footer of each generated file
 | SHA-2 | 28 | 42 | 0 | 0 | 70 |
 | HMAC | 47 | 158 | 0 | 0 | 205 |
 | CMAC | 16 | 71 | 4 | 0 | 91 |
-| AES | 30 | 273 | 0 | 12 | 315 |
+| AES | 42 | 273 | 0 | 0 | 315 |
 | Curve25519 | 19 | 115 | 36 | 0 | 170 |
 | DSA | 1200 | 141 | 26 | 0 | 767 |
 | DH | 47 | 45 | 88 | 0 | 180 |
@@ -81,7 +81,7 @@ Counts are the `Generation summary` footer of each generated file
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 7 | 31 | 0 | 0 | 38 |
-| **Total** | **3135** | **3760** | **240** | **79** | **6480** |
+| **Total** | **3147** | **3760** | **240** | **67** | **6480** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -526,7 +526,7 @@ migration tool emit the corresponding tests with no generator change.
 
 | Gap | Affected | Count | Reason | Unblock |
 |-----|----------|------:|--------|---------|
-| AES-CBC raw KAT | AES | 12 | `cbc_encrypt`/`cbc_decrypt` hardcode PKCS#7 padding — cannot reproduce a block-aligned raw KAT | add `cbc_encrypt_raw` / `cbc_decrypt_raw` no-padding helpers |
+| ~~AES-CBC raw KAT~~ | ~~AES~~ | ~~12~~ | **Resolved in I151.** Added `cbc_encrypt_raw` / `cbc_decrypt_raw` (+ generic `_with<C: BlockCipher>` variants) to `hitls_crypto::modes::cbc`. NIST CAVP / FIPS 197 Annex C vectors are block-aligned with no padding; the existing PKCS#7-wrapping `cbc_encrypt` cannot reproduce them (output is always +16 bytes). The raw helpers require `input.len() % block_size == 0` and skip the wrap/unwrap step entirely. xtask `cipher.rs` `aes_alg_label` now routes `CRYPT_CIPHER_AES{128,192,256}_CBC → ("cbc", N)`; `migrated_aes.rs` 30 → 42. NIST SP 800-38A F.2.1 pinned as a lib KAT in `cbc.rs`. | Resolved by I151; AES tally 30/273/0/12/315 → 42/273/0/0/315. |
 | ~~AES-KW PAD (RFC 5649)~~ | ~~AES-KW~~ | ~~8~~ | **Resolved in I147** (T148-follow-up). `hitls_crypto::modes::wrap` previously only implemented the RFC 3394 NOPAD path (`key_wrap` / `key_unwrap`). I147 added `pub fn key_wrap_pad` / `pub fn key_unwrap_pad` per RFC 5649: AIV = `0xA65959A6 ‖ MLI(BE u32)`, single-AES-block specialisation for `n == 1`, multi-block path delegating to the shared `wrap_inner` / `unwrap_inner` helpers, and constant-time AIV-prefix + zero-pad checks on unwrap. | Resolved by I147; AES-KW migrated 16 → 24 (+8). See DEV_LOG Phase I147. |
 | ~~XMSS reference-interop on keygen / sign~~ | ~~XMSS, XMSS-MT~~ | ~~42~~ | **Resolved in I146** (T156 diagnosis → root cause fix). Rust `xmss::hash::prf_keygen` used the RFC 8391 (original) `PRF` construction `H(toByte(3, plen) \|\| SK.seed \|\| ADRS)` instead of the **RFC 8702 / NIST SP 800-208 §6.4** `PRF_KEYGEN` construction `H(toByte(4, plen) \|\| SK.seed \|\| PK.seed \|\| ADRS)`. The missing `PK.seed` (multi-target hardening input) and the wrong domain-separation byte (4 vs 3) caused every WOTS+ secret key element to differ from C → every leaf differed → `compute_root` produced a different `PK.root`. Round-trip and the T155 VERIFY KAT survived because verify never calls `prf_keygen`. **Also fixed** `prf_msg`: removed a spurious `msg` parameter (C's `PrfmsgGeneric` is `H(toByte(3, plen) \|\| SK.prf \|\| toByte(idx, 32))` with no message dependency). | Resolved by I146; see DEV_LOG Phase I146 for the fix detail and the new `test_xmss_compute_root_kat_sha2_10_256` regression KAT pinned in `xmss/mod.rs`. The T156-deferred 42 SIGN+GENKEY rows can now be migrated as a follow-up phase (will land as `T157`). |
 | SM4 CBC / CTR / CFB / OFB / HCTR / XTS + GCM-decrypt | SM4 | 37 | CBC hardcodes PKCS#7 padding; CTR/CFB/OFB/HCTR/XTS have no public SM4 entry point; GCM-decrypt needs the 16-byte tag absent from the `.data` | add SM4 raw-mode public functions; a CBC no-padding helper |
