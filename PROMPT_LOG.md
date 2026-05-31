@@ -9877,3 +9877,47 @@ na-list tally: HMAC 43/158/0/4/205 -> 47/158/0/0/205; CMAC
 3135/3760/240/79/6480.
 
 Recorded as DEV_LOG Phase I150.
+
+## Phase I151 — AES-CBC Raw KAT Helpers (resolves AES-CBC raw KAT Structural Gap) (2026-06-01)
+
+> C
+
+Closes the T6-era AES-CBC raw KAT Structural Gap (12 rows = AES-128
+/ 192 / 256 × encrypt + decrypt × 2 NIST vectors). The existing
+`cbc_encrypt` / `cbc_decrypt` hard-wired PKCS#7 padding and could
+not byte-reproduce the NIST CAVP / FIPS 197 Annex C vectors (output
+is always +16 bytes for encrypt; decrypt rejects the unpadded
+ciphertext as "invalid padding"). NIST SP 800-38A §6.2 defines CBC
+without prescribing a padding scheme — the raw helpers are
+spec-conformant.
+
+Production additions (default-feature, additive, no ABI break):
+
+- `cbc_encrypt_raw(key, iv, plaintext)` / `cbc_decrypt_raw(key, iv,
+  ciphertext)` for AES. Both require `input.len() > 0` and
+  `input.len() % AES_BLOCK_SIZE == 0`; otherwise return InvalidArg.
+  Output length = input length (no padding wrap/unwrap).
+- `cbc_encrypt_raw_with<C: BlockCipher>` / `cbc_decrypt_raw_with<C>`
+  generic variants over any 16-byte block cipher.
+
+xtask emitter (xtask/src/cipher.rs): aes_alg_label now routes
+CRYPT_CIPHER_AES{128,192,256}_CBC -> ("cbc", N) instead of None.
+emit_one_shot adds ("cbc", true) / ("cbc", false) arms emitting
+cbc_encrypt_raw / cbc_decrypt_raw calls. IV-shape check now treats
+CBC like CTR (non-empty IV); a defensive guard routes CBC rows with
+unaligned input/output to skipped_unknown. write_header adds the
+`use hitls_crypto::modes::cbc::{cbc_decrypt_raw, cbc_encrypt_raw};`
+import.
+
+Verification: cbc lib tests 7/0 -> 11/0 (+4 — NIST SP 800-38A F.2.1
+encrypt+decrypt roundtrip + 2 negative tests for unaligned + 1
+raw-roundtrip proptest); migrated_aes 30/0 -> 42/0 (+12); xtask
+--check drift gate clean; cargo test -p hitls-crypto --all-features
+green (no regression on existing padded cbc_encrypt / cbc_decrypt /
+SM4-CBC / AEAD / CCM / KW / etc.); fmt + clippy -D warnings
+--all-features --all-targets clean.
+
+na-list tally: AES 30/273/0/12/315 -> 42/273/0/0/315; Total
+3135/3760/240/79/6480 -> 3147/3760/240/67/6480.
+
+Recorded as DEV_LOG Phase I151.
