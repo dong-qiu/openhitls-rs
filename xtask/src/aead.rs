@@ -672,10 +672,9 @@ pub fn emit_aes_ccm_kat(cases: &[TestCase]) -> (String, EmitStats) {
 // Each row maps to exactly one direction; the iv field is empty for AES-KW
 // (RFC 3394 uses the fixed IV 0xA6A6A6A6A6A6A6A6 internally).
 //
-// PAD-mode algids (`CRYPT_CIPHER_AES{128,192,256}_WRAP_PAD`, RFC 5649) are
-// `unsupported` — the Rust port only implements NOPAD. The TC002 lifecycle
-// rows (`isProvider, algId, KeyLen`) and the NOT_ALIGN / API rows are
-// API-surface.
+// PAD-mode algids (`CRYPT_CIPHER_AES{128,192,256}_WRAP_PAD`, RFC 5649) route
+// through `key_wrap_pad` / `key_unwrap_pad`. The TC002 lifecycle rows
+// (`isProvider, algId, KeyLen`) and the NOT_ALIGN / API rows are API-surface.
 // ---------------------------------------------------------------------------
 
 pub fn emit_aes_kw_kat(cases: &[TestCase]) -> (String, EmitStats) {
@@ -699,27 +698,30 @@ pub fn emit_aes_kw_kat(cases: &[TestCase]) -> (String, EmitStats) {
             stats.skipped_unknown += 1;
             continue;
         };
-        if alg.contains("_PAD") {
-            // RFC 5649 padded key wrap — no Rust counterpart.
-            stats.skipped_unsupported_alg += 1;
-            continue;
-        }
+        let is_pad = alg.contains("_PAD");
         let Some(bits) = aes_bits(key) else {
             stats.skipped_unsupported_alg += 1;
             continue;
         };
         let is_wrap = enc == "true";
 
-        let kind = if is_wrap {
-            "AES-KW wrap KAT"
-        } else {
-            "AES-KW unwrap KAT"
+        let kind = match (is_pad, is_wrap) {
+            (false, true) => "AES-KW wrap KAT",
+            (false, false) => "AES-KW unwrap KAT",
+            (true, true) => "AES-KW (RFC 5649 PAD) wrap KAT",
+            (true, false) => "AES-KW (RFC 5649 PAD) unwrap KAT",
         };
-        let dir = if is_wrap { "wrap" } else { "unwrap" };
-        let call = if is_wrap {
-            "key_wrap(kek, input)"
-        } else {
-            "key_unwrap(kek, input)"
+        let dir = match (is_pad, is_wrap) {
+            (false, true) => "wrap",
+            (false, false) => "unwrap",
+            (true, true) => "wrap_pad",
+            (true, false) => "unwrap_pad",
+        };
+        let call = match (is_pad, is_wrap) {
+            (false, true) => "key_wrap(kek, input)",
+            (false, false) => "key_unwrap(kek, input)",
+            (true, true) => "key_wrap_pad(kek, input)",
+            (true, false) => "key_unwrap_pad(kek, input)",
         };
 
         write_doc(&mut body, case, kind);
@@ -746,7 +748,9 @@ pub fn emit_aes_kw_kat(cases: &[TestCase]) -> (String, EmitStats) {
          //\n\
          // Generator: docs/c-test-migration-plan.md Phase A (xtask).\n\
          #![cfg(all(feature = \"modes\", feature = \"aes\"))]\n\n\
-         use hitls_crypto::modes::wrap::{key_unwrap, key_wrap};\n\n",
+         use hitls_crypto::modes::wrap::{\n    \
+             key_unwrap, key_unwrap_pad, key_wrap, key_wrap_pad,\n\
+         };\n\n",
     );
     out.push_str(&body);
     write_footer(&mut out, &stats, cases.len());
