@@ -9576,3 +9576,53 @@ na-list: XMSS gap entry struck through with cross-reference to I146;
 gap counter for XMSS goes 42 → 0 (resolved).
 
 Recorded as DEV_LOG Phase I146.
+
+## Phase T157 — XMSS / XMSS-MT SIGN_KAT + GENKEY_KAT KAT Migration (XMSS 48% → 95.5%) (2026-05-31)
+
+> 继续 T157
+
+Re-lands the T156-prototype hooks + SIGN/GENKEY emitter additions now
+that the I146 PRF_KEYGEN fix has made Rust XMSS RFC 8702 byte-compatible
+with the C reference. Mirrors the SLH-DSA T154 pattern (verify → sign +
+genkey hook additions).
+
+Production-side: 4 new kat-nonce-gated public APIs (2 per keypair type,
+all #[doc(hidden)] + #[deprecated(note = "test-only: …")]):
+
+- XmssKeyPair::from_private_key(param, full_key_4n, leaf_idx) +
+  XmssMtKeyPair::from_private_key(param, full_key_4n, leaf_idx):
+  wraps the C row's pre-computed full secret key + explicit leaf-
+  counter. Skips randomised keygen + trusts the row's PK.root. Used
+  by SIGN_KAT.
+- XmssKeyPair::from_seeds(param, sk_seed, sk_prf, pk_seed) +
+  XmssMtKeyPair::from_seeds(param, sk_seed, sk_prf, pk_seed):
+  mirrors generate()'s body with caller-supplied seeds; computes
+  PK.root via the I146-fixed compute_root. Used by GENKEY_KAT.
+
+Emitter: new emit_sign_kat (6-arg row, dispatches on algId prefix;
+asserts kp.sign(msg) == sig for CRYPT_SUCCESS or kp.sign(msg).is_err()
+for CRYPT_XMSS_ERR_KEY_EXPIRED at index = 1 << h) + emit_genkey_kat
+(3-arg row, asserts both PK.root and PK.seed halves of the row's
+expected output). New xmss_n / xmssmt_n n-byte-length helpers. The
+generated file's cfg gate widens to all(xmss, kat-nonce).
+
+Result: migrated_xmss.rs — 42 → 84 byte-exact tests (+42 = 14 GENKEY +
+28 SIGN: 14 ok + 14 rej), all passing first run. The 14 SIGN-rej rows
+already worked in T156 (KEY_EXPIRED is state-check only, not tree-
+dependent). The 14 GENKEY + 14 SIGN-ok rows that all failed in T156
+now pass thanks to I146.
+
+XMSS coverage 42/88 (48%) → 84/88 (95.5%). Remaining 4 rows are
+permanent API-surface (API_NEW + GENKEY non-KAT + 2 GETSET_KEY rows —
+EAL ctx CRUD only, no Rust counterpart).
+
+Verification: migrated_xmss 84/0 (-p hitls-crypto --all-features);
+xtask --check drift gate passes; builds clean without kat-nonce (cfg
+gating verified); existing xmss lib tests 63/0 unchanged (I146's
+permanent KAT still pins compute_root output); fmt + clippy
+-D warnings --all-features --all-targets clean.
+
+na-list tally: XMSS 84/4/0/0/88 (was 42/46), Total
+3098/3729/240/109/6442 (was 3056/3771).
+
+Recorded as DEV_LOG Phase T157.
