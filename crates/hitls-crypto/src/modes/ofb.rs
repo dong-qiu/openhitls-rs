@@ -33,6 +33,29 @@ pub fn ofb_crypt(key: &[u8], iv: &[u8], data: &mut [u8]) -> Result<(), CryptoErr
     Ok(())
 }
 
+/// Encrypt or decrypt data using OFB mode with **SM4** (GM/T 0002-2012).
+///
+/// OFB is symmetric — both directions share this call.
+#[cfg(feature = "sm4")]
+pub fn sm4_ofb_crypt(key: &[u8], iv: &[u8], data: &mut [u8]) -> Result<(), CryptoError> {
+    if iv.len() != AES_BLOCK_SIZE {
+        return Err(CryptoError::InvalidIvLength);
+    }
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+
+    let mut feedback = [0u8; AES_BLOCK_SIZE];
+    feedback.copy_from_slice(iv);
+
+    for chunk in data.chunks_mut(AES_BLOCK_SIZE) {
+        cipher.encrypt_block(&mut feedback)?;
+        for (d, &k) in chunk.iter_mut().zip(feedback.iter()) {
+            *d ^= k;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

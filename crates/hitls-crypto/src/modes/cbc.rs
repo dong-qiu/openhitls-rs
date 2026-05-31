@@ -170,6 +170,34 @@ pub fn sm4_cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u
     cbc_decrypt_with(&cipher, iv, ciphertext)
 }
 
+/// Encrypt block-aligned data using SM4-CBC with **no padding**.
+///
+/// Mirrors [`cbc_encrypt_raw`] but with SM4 (GM/T 0002-2012) as the
+/// block cipher. `plaintext.len()` must be a multiple of 16 and > 0.
+#[cfg(feature = "sm4")]
+pub fn sm4_cbc_encrypt_raw(
+    key: &[u8],
+    iv: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+    cbc_encrypt_raw_with(&cipher, iv, plaintext)
+}
+
+/// Decrypt block-aligned data using SM4-CBC with **no padding**.
+///
+/// Mirrors [`cbc_decrypt_raw`] but with SM4 (GM/T 0002-2012) as the
+/// block cipher. `ciphertext.len()` must be a multiple of 16 and > 0.
+#[cfg(feature = "sm4")]
+pub fn sm4_cbc_decrypt_raw(
+    key: &[u8],
+    iv: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+    cbc_decrypt_raw_with(&cipher, iv, ciphertext)
+}
+
 // ---------------------------------------------------------------------------
 // Raw (no-padding) CBC helpers.
 //

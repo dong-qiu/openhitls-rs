@@ -72,6 +72,72 @@ pub fn cfb_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, 
     Ok(plaintext)
 }
 
+/// Encrypt data using CFB-128 mode with **SM4** (GM/T 0002-2012).
+///
+/// No padding needed — handles arbitrary-length plaintext.
+#[cfg(feature = "sm4")]
+pub fn sm4_cfb_encrypt(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    if iv.len() != AES_BLOCK_SIZE {
+        return Err(CryptoError::InvalidIvLength);
+    }
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+
+    let mut ciphertext = Vec::with_capacity(plaintext.len());
+    let mut feedback = [0u8; AES_BLOCK_SIZE];
+    feedback.copy_from_slice(iv);
+
+    for chunk in plaintext.chunks(AES_BLOCK_SIZE) {
+        let mut keystream = feedback;
+        cipher.encrypt_block(&mut keystream)?;
+
+        let mut ct_block = [0u8; AES_BLOCK_SIZE];
+        for (i, &p) in chunk.iter().enumerate() {
+            ct_block[i] = p ^ keystream[i];
+        }
+        ciphertext.extend_from_slice(&ct_block[..chunk.len()]);
+
+        if chunk.len() == AES_BLOCK_SIZE {
+            feedback.copy_from_slice(&ct_block);
+        } else {
+            feedback = [0u8; AES_BLOCK_SIZE];
+            feedback[..chunk.len()].copy_from_slice(&ct_block[..chunk.len()]);
+        }
+    }
+
+    Ok(ciphertext)
+}
+
+/// Decrypt data using CFB-128 mode with **SM4** (GM/T 0002-2012).
+#[cfg(feature = "sm4")]
+pub fn sm4_cfb_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    if iv.len() != AES_BLOCK_SIZE {
+        return Err(CryptoError::InvalidIvLength);
+    }
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+
+    let mut plaintext = Vec::with_capacity(ciphertext.len());
+    let mut feedback = [0u8; AES_BLOCK_SIZE];
+    feedback.copy_from_slice(iv);
+
+    for chunk in ciphertext.chunks(AES_BLOCK_SIZE) {
+        let mut keystream = feedback;
+        cipher.encrypt_block(&mut keystream)?;
+
+        for (i, &c) in chunk.iter().enumerate() {
+            plaintext.push(c ^ keystream[i]);
+        }
+
+        if chunk.len() == AES_BLOCK_SIZE {
+            feedback.copy_from_slice(chunk);
+        } else {
+            feedback = [0u8; AES_BLOCK_SIZE];
+            feedback[..chunk.len()].copy_from_slice(chunk);
+        }
+    }
+
+    Ok(plaintext)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
