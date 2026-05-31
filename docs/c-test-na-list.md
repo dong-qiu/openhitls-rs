@@ -77,8 +77,8 @@ Counts are the `Generation summary` footer of each generated file
 | FrodoKEM | 8 | 90 | 0 | 5 | 103 |
 | AES-CCM | 36 | 66 | 0 | 0 | 84 |
 | AES-KW | 16 | 18 | 0 | 8 | 42 |
-| HPKE | 432 | 35 | 0 | 0 | 467 |
-| **Total** | **2673** | **3717** | **240** | **109** | **6005** |
+| HPKE | 456 | 11 | 0 | 0 | 467 |
+| **Total** | **2697** | **3693** | **240** | **109** | **6005** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -285,12 +285,43 @@ the sender's `enc` matches what the recipient derives from `ikm_r`). Each
 EXPORT row emits one test that asserts both `ctx_s.export(exporter_context,
 L) == expected` and `ctx_r.export(...) == expected`. **Added 216 byte-exact
 tests** (`migrated_hpke.rs` 216 → **432**), full RFC 9180 matrix coverage:
-4 modes × 4 KEMs × 3 KDFs × 3 AEADs × {seal/open, export}. The remaining
-HPKE rows (35: KEM_TC001 × 24 + abnormal/randomly/generate-key-pair × 11)
-route to API-surface. **KEM_TC001 remains deferred** — it tests
-`(skE, pkE)` byte-exact derivation + standalone Encap/Decap with no AEAD
-attached, which needs its own emitter shape (not just a different
-constructor); listed in *Structural gaps* below.
+4 modes × 4 KEMs × 3 KDFs × 3 AEADs × {seal/open, export}.
+
+T152 closes **KEM_TC001** (24 byte-exact KEM derive+encap+decap KATs) — the
+last HPKE KAT family. Unlike TC001/TC002/AEAD/EXPORT (which use the
+`CRYPT_*` symbolic macros), KEM_TC001 rows use raw RFC 9180 IANA codepoints
+as decimal integers (mode 0..3; kemId 16/17/18/32; kdfId 1..3; aeadId
+1..3), parsed via new `int_mode` / `int_kem` / `int_kdf_tag` /
+`int_aead_tag` lookup tables in `xtask/src/hpke.rs`. Row shape `(mode,
+kemId, kdfId, aeadId, info, psk, pskId, ikmE, pkEm, skEm, ikmR, pkRm,
+skRm, ikmS, pkSm, skSm, enc, sharedSecret, keyScheduleContext, secret,
+key, baseNonce, exporterSecret)` — 23 fields, every byte-exact value
+relevant to the KEM piece is published per row. Each row emits one test
+that asserts: `derive_key_pair(kem, ikm_e) == (skEm, pkEm)`;
+`derive_key_pair(kem, ikm_r) == (skRm, pkRm)`; for AUTH / AUTH_PSK rows,
+`derive_key_pair(kem, ikm_s) == (skSm, pkSm)`; sender-side KEM
+`(shared_secret, enc) == (sharedSecret, enc)` via the new
+`kat-nonce`-gated `kem_encap_kat` (BASE/PSK) or `kem_auth_encap_kat`
+(AUTH/AUTH_PSK); recipient-side KEM `shared_secret == sharedSecret` via
+`kem_decap_kat` / `kem_auth_decap_kat`. The 5 trailing fields
+(`keyScheduleContext` / `secret` / `key` / `baseNonce` /
+`exporterSecret`) are HPKE-key-schedule intermediates, not KEM outputs;
+they are skipped here (and are already covered indirectly by the
+SHARED_SECRET_TC001 / TC002 tests, which would fail if the key schedule
+produced wrong outputs). **Data convention fix:** 3 of 12 AUTH/AUTH_PSK
+rows publish a NIST P-256 / P-521 `skSm` with the leading `0x00` byte
+stripped (hex-encoder convention); `derive_key_pair` returns the full
+curve-byte-length scalar, so the emitter left-pads `sk{E,R,S}m` to the
+curve length (`kem_sk_len` helper). Production: four new `kat-nonce`-gated
+free functions in `hitls_crypto::hpke` (`kem_encap_kat`, `kem_decap_kat`,
+`kem_auth_encap_kat`, `kem_auth_decap_kat`), each `#[doc(hidden)] +
+#[deprecated]`, wrapping the existing private `kem_encap_deterministic` /
+`kem_decap` / `kem_auth_encap_with_ikm_e` / `kem_auth_decap`. **Added 24
+byte-exact tests** (`migrated_hpke.rs` 432 → **456**), HPKE coverage now
+**456/467 (97.6%)**. The remaining 11 rows (8 abnormal / randomly /
+generate-key-pair + 3 from `SHARED_SECRET_RANDOMLY_TC*`) are permanent
+API-surface — they exercise EAL ctx CRUD only and have no Rust
+counterpart.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,

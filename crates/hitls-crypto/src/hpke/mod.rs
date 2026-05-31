@@ -632,6 +632,58 @@ pub fn derive_key_pair(kem: HpkeKem, ikm: &[u8]) -> Result<(Vec<u8>, Vec<u8>), C
     kem_derive_key_pair(kem, ikm)
 }
 
+/// HPKE KEM Encap with deterministic ephemeral seed (`ikm_e`) — returns
+/// `(shared_secret, enc)` byte-exact for the BASE/PSK mode KEM path. The
+/// C SDV `KEM_TC001` rows publish both intermediate values and assert them
+/// against this output.
+#[cfg(feature = "kat-nonce")]
+#[doc(hidden)]
+#[deprecated(note = "test-only: ikm_e injection bypasses KEM randomness")]
+pub fn kem_encap_kat(
+    kem: HpkeKem,
+    pk_r: &[u8],
+    ikm_e: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+    kem_encap_deterministic(kem, pk_r, ikm_e)
+}
+
+/// HPKE KEM Decap — recipient-side counterpart to `kem_encap_kat`. Returns
+/// the byte-exact `shared_secret` recovered from `(sk_r, enc)`.
+#[cfg(feature = "kat-nonce")]
+#[doc(hidden)]
+#[deprecated(note = "test-only: KAT helper companion to kem_encap_kat")]
+pub fn kem_decap_kat(kem: HpkeKem, enc: &[u8], sk_r: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    kem_decap(kem, enc, sk_r)
+}
+
+/// HPKE KEM AuthEncap with deterministic ephemeral seed — AUTH / AUTH_PSK
+/// mode counterpart of `kem_encap_kat`. Returns `(shared_secret, enc)`.
+#[cfg(feature = "kat-nonce")]
+#[doc(hidden)]
+#[deprecated(note = "test-only: ikm_e injection bypasses KEM randomness")]
+pub fn kem_auth_encap_kat(
+    kem: HpkeKem,
+    pk_r: &[u8],
+    sk_s: &[u8],
+    ikm_e: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+    kem_auth_encap_with_ikm_e(kem, pk_r, sk_s, ikm_e)
+}
+
+/// HPKE KEM AuthDecap — AUTH / AUTH_PSK mode counterpart of
+/// `kem_decap_kat`. Returns the byte-exact `shared_secret`.
+#[cfg(feature = "kat-nonce")]
+#[doc(hidden)]
+#[deprecated(note = "test-only: KAT helper companion to kem_auth_encap_kat")]
+pub fn kem_auth_decap_kat(
+    kem: HpkeKem,
+    enc: &[u8],
+    sk_r: &[u8],
+    pk_s: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    kem_auth_decap(kem, enc, sk_r, pk_s)
+}
+
 // --- HPKE Key Schedule (RFC 9180 §5.1) ---
 
 type KsOutput = (Vec<u8>, Vec<u8>, Vec<u8>);
