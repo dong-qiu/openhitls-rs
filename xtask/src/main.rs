@@ -16,6 +16,7 @@ mod mlkem;
 mod parser;
 mod rsa;
 mod sha3;
+mod slhdsa;
 mod sm2;
 mod sm4;
 mod x509;
@@ -202,6 +203,14 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_hpke.rs"),
             hpke::emit_hpke_kat,
         ),
+        "slhdsa" => (
+            vec![
+                c_root.join("crypto/slh_dsa/test_suite_sdv_eal_slh_dsa.data"),
+                c_root.join("crypto/slh_dsa/test_suite_sdv_eal_slh_dsa1.data"),
+            ],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_slhdsa.rs"),
+            slhdsa::emit_slhdsa_kat,
+        ),
         "gmac" => (
             vec![c_root.join("crypto/gmac/test_suite_sdv_eal_gmac.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_gmac.rs"),
@@ -265,7 +274,7 @@ fn migrate(
         ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, aes-ccm, aes-kw, gmac, chacha-poly, siphash, cbc-mac, frodokem, drbg, ecc, rsa, bn, x509-parse, hpke"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, aes-ccm, aes-kw, gmac, chacha-poly, siphash, cbc-mac, frodokem, drbg, ecc, rsa, bn, x509-parse, hpke, slhdsa"
             )
             .into());
         }

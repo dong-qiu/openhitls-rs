@@ -78,7 +78,8 @@ Counts are the `Generation summary` footer of each generated file
 | AES-CCM | 36 | 66 | 0 | 0 | 84 |
 | AES-KW | 16 | 18 | 0 | 8 | 42 |
 | HPKE | 456 | 11 | 0 | 0 | 467 |
-| **Total** | **2697** | **3693** | **240** | **109** | **6005** |
+| SLH-DSA | 168 | 181 | 0 | 0 | 349 |
+| **Total** | **2865** | **3874** | **240** | **109** | **6354** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -322,6 +323,33 @@ byte-exact tests** (`migrated_hpke.rs` 432 → **456**), HPKE coverage now
 generate-key-pair + 3 from `SHARED_SECRET_RANDOMLY_TC*`) are permanent
 API-surface — they exercise EAL ctx CRUD only and have no Rust
 counterpart.
+
+SLH-DSA (T153) migrates the **VERIFY_KAT_TC001** family (FIPS 205
+§10.2 pure mode) from `test_suite_sdv_eal_slh_dsa1.data` via the new
+`xtask/src/slhdsa.rs` emitter — 168 byte-exact tests across all 12
+parameter sets (SHA-2 / SHAKE × {128, 192, 256} × {f, s}). Row shape
+`(algId, key, addrand, msg, context, sig, expectedStatus)`: `key` is the
+full secret key `seed(N) || prf(N) || pk.seed(N) || pk.root(N)`, the
+public key is the last `2N` bytes; `addrand` is sign-side hedging
+randomness and is ignored for verify; `expectedStatus` is `CRYPT_SUCCESS`
+(24 rows) or one of `CRYPT_SLHDSA_ERR_HYPERTREE_VERIFY_FAIL` (96 rows) /
+`CRYPT_SLHDSA_ERR_INVALID_SIG_LEN` (48 rows) — the latter two are
+negative KATs (corrupted-signature / wrong-length). Each row emits a test
+that builds `kp = SlhDsaKeyPair::from_public_key(SlhDsaParamId::<v>, pk)`,
+constructs the pure-mode message `M' = 0x00 || OCTET_TO_INT(|ctx|, 1) ||
+ctx || msg` (FIPS 205 §10.2.2), then asserts `kp.verify(&M', sig)` ==
+`Ok(true)` (CRYPT_SUCCESS) or `!Ok(true)` (errors). **Zero new production
+code** — `from_public_key` + `verify` already exist; the M' prefix
+wrapping mirrors the existing `assert_verify_kat` helper in the lib
+tests (the Rust `verify` is the low-level FIPS 205 §10.2.1 entry point,
+without context wrapping). The remaining 181 rows route to API-surface:
+all of `test_suite_sdv_eal_slh_dsa.data` (177 — GENKEY_KAT_TC001 88 +
+SIGN_KAT_TC001 62 + CHECK_KEYPAIR/PRVKEY 21 + API/GENKEY/GETSET 6) plus
+the single `VERIFY_PREHASHED_KAT_TC001` row (FIPS 205 §10.2.3 pre-hash —
+no Rust pre-hash verify entry point). SIGN_KAT (62) and GENKEY_KAT (88)
+are the natural T154+ follow-up; both need a `kat-nonce`-gated
+`sign_with_addrand` (or `sign_internal` made public + `deterministic`
+mode) and a `keygen_with_seed` constructor respectively.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
