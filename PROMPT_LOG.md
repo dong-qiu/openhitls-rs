@@ -9475,3 +9475,52 @@ Verification: migrated_xmss 42/0 (-p hitls-crypto --all-features); xtask
 na-list tally: XMSS 42/46/0/0/88 (new row), Total 3056/3771/240/109/6442.
 
 Recorded as DEV_LOG Phase T155.
+
+## Phase T156 — XMSS SIGN_KAT + GENKEY_KAT Migration Attempted + Blocked (2026-05-31)
+
+> 请继续 T156
+
+Phase A continuation attempt: extended the T155 XMSS emitter with
+SIGN_KAT (28) + GENKEY_KAT (14) emitters and the four kat-nonce-gated
+hooks needed (from_private_key + from_seeds on both XmssKeyPair and
+XmssMtKeyPair). All hooks compile clean.
+
+Trial run produced 28 byte-exact failures:
+- 14 GENKEY rows: Rust's computed PK.root ≠ C's PK.root (PK.seed half
+  asserts ok — it's stored as-is)
+- 14 SIGN-success rows: Rust's signature ≠ C's signature (consistent
+  with the divergent tree shape)
+- 14 SIGN-rej rows (KEY_EXPIRED at index = 1<<h): pass (state-check
+  only, independent of tree contents)
+
+Diagnosis: Rust's xmss::tree::compute_root produces a different PK.root
+from C / RFC 8391 given the same (SK.seed, SK.prf, PK.seed). Same
+flavor as FrodoKEM I145 — Rust XMSS impl is internally self-consistent
+(lib roundtrip 62/0, T155 VERIFY_KAT 42/42 pass because the auth-path
+climb is byte-compatible) but the full-tree-build path is not byte-
+compatible with the C reference.
+
+Why VERIFY passes but SIGN/GENKEY don't: VERIFY uses
+xmss_root_from_sig (recover leaf via wots_pk_from_sig → climb auth path
+with h.h(adrs, …)). GENKEY/SIGN use compute_root (wots_pk_gen × 2^h
+leaves → l_tree compress → parent hash up the tree). The two paths
+diverge — likely in one of wots_pk_gen / l_tree / parent-hash-ADRS
+sequencing.
+
+Production + emitter changes reverted. Only the na-list Structural Gap
+entry shipped:
+- title: "XMSS reference-interop on keygen / sign"
+- affected: XMSS, XMSS-MT (42 rows: 28 SIGN + 14 GENKEY)
+- unblock path: instrument wots_pk_gen / l_tree / compute_root vs C
+  XmssTree_ComputeNode for a fixed seed; once the off-by-one /
+  ADRS-encoding divergence is found and fixed, the T156 prototype
+  hooks + emitters can be re-landed.
+
+Same scope-cut pattern as T146 (FrodoKEM/McEliece decaps diagnosis
+before I145 fix).
+
+Verification: T155 baseline preserved — migrated_xmss 42/0, xmss lib
+62/0 (1 ignored). Docs-only change; na-list tally unchanged
+(3056/3771/240/109/6442).
+
+Recorded as DEV_LOG Phase T156.
