@@ -9626,3 +9626,51 @@ na-list tally: XMSS 84/4/0/0/88 (was 42/46), Total
 3098/3729/240/109/6442 (was 3056/3771).
 
 Recorded as DEV_LOG Phase T157.
+
+## Phase T158 — SM9 (GB/T 38635) Round-Trip KAT Migration (2026-05-31)
+
+> A
+
+Phase A continuation: opens the SM9 identity-based PKC family. The C SDV
+files are entirely API-test format (no byte-exact KATs), but the
+*_API_TC* and CHECK_*_FUNC_TC* families publish a fixed master secret +
+user ID + message per row and drive round-trip assertions from them. 7
+round-trip tests migrated, all passing first run.
+
+Production-side: one new kat-nonce-gated public API
+Sm9MasterKey::from_master_secret(key_type, master_secret_32) — wraps the
+row's fixed 32-byte ks scalar and recomputes master_public via the same
+ks * P2 (Sign) / ks * P1 (Encrypt) derivation as generate()'s
+post-randomness path.
+
+Emitter: new xtask/src/sm9.rs (5 per-family emitters + header-row
+filtering — rows where args.first().as_hex().is_none() route to
+API-surface). Routing:
+- SIGN_API_TC001/TC002 → sign+verify + wrong-message negative
+- CRYPT_API_TC001/TC002 → same-user encrypt+decrypt
+- CRYPT_API_TC003 → cross-user encrypt+decrypt + negative cross-decrypt
+- CHECK_KEYPAIR_FUNC_TC001 → dual-user extract + sign+verify both +
+  negative cross-identity verify
+- CHECK_PRVKEY_FUNC_TC001 → extract + sign+verify (validates derived
+  key is functional)
+
+Header rows (e.g. SDV_X:masterKey:userId:message) — bare identifiers,
+no quoted hex — and EAL ctx CRUD families (BUFFER_SIZE / NULL_PARAM /
+FREE / DUP / CMP / GET_* / SET_* / MULTI_OP / GEN_API) route to
+API-surface.
+
+KEYEX_API_TC001/TC002 added to na-list Structural Gaps — Rust
+Sm9MasterKey has no key-exchange method per GB/T 38635 §4.4.
+
+Result: migrated_sm9.rs — 7 round-trip tests (38 SDV rows total: 7
+migrated + 31 API-surface = 15 headers + 14 ctx-CRUD + 2 KEYEX). All
+passing first run.
+
+Verification: migrated_sm9 7/0 (-p hitls-crypto --all-features); xtask
+--check drift gate passes; builds clean without kat-nonce (cfg gating
+verified); existing sm9 lib tests unchanged; fmt + clippy -D warnings
+--all-features --all-targets clean.
+
+na-list tally: SM9 7/31/0/0/38 (new row), Total 3105/3760/240/109/6480.
+
+Recorded as DEV_LOG Phase T158.
