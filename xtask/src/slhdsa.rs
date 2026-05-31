@@ -328,7 +328,7 @@ pub fn emit_slhdsa_kat(cases: &[TestCase]) -> (String, EmitStats) {
          // DO NOT EDIT BY HAND. Source: openhitls C SDV test_suite_sdv_eal_slh_dsa1.data\n\
          //\n\
          // Generator: docs/c-test-migration-plan.md Phase A (xtask).\n\
-         #![cfg(feature = \"slh-dsa\")]\n\n\
+         #![cfg(all(feature = \"slh-dsa\", feature = \"kat-nonce\"))]\n\n\
          use hitls_crypto::slh_dsa::SlhDsaKeyPair;\n\
          use hitls_types::SlhDsaParamId;\n\n",
     );
