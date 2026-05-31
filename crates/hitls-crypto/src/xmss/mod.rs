@@ -692,4 +692,39 @@ mod tests {
             }
         }
     }
+
+    // T156 follow-up: a permanent KAT lib test that pins the RFC 8702 /
+    // NIST SP 800-208 PRF_KEYGEN construction. Mirrors the first
+    // `SDV_CRYPTO_XMSS_GENKEY_KAT_TC001` SHA2_10_256 vector and asserts
+    // `compute_root` byte-exact against the C reference root — guards
+    // against any future regression of the I-class fix that brought
+    // Rust XMSS into RFC 8702 conformance.
+    #[test]
+    fn test_xmss_compute_root_kat_sha2_10_256() {
+        use crate::xmss::address::XmssAdrs;
+        use crate::xmss::hash::XmssHasher;
+        use crate::xmss::params::{get_params, hash_mode};
+        use crate::xmss::tree;
+
+        fn hex(s: &str) -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        }
+        let sk_seed = hex("363D884B820BDEFFDAD9A2C4340C896DBD1C1AD04F223E099DDBB169604D18DF");
+        let pk_seed = hex("828EAB0BF76627CFC3E92E9F180EAAD6A51A3B8F5A562E101E11ABC662FFCEA5");
+        let expected_root = hex("82AA5CCFEF00350C525507D296007ACC96037AB1E0057ABD4F4A9989A9C8194E");
+        let p = get_params(XmssParamId::Sha2_10_256);
+        let hasher = XmssHasher {
+            n: p.n,
+            padding_len: p.padding_len,
+            mode: hash_mode(XmssParamId::Sha2_10_256),
+            sk_seed,
+            pk_seed,
+        };
+        let mut adrs = XmssAdrs::new();
+        let root = tree::compute_root(&hasher, &mut adrs, &p).unwrap();
+        assert_eq!(root, expected_root);
+    }
 }

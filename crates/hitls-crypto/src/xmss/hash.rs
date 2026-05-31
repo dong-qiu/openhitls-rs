@@ -66,9 +66,20 @@ impl XmssHasher {
         core_hash(self.mode, &input, self.n)
     }
 
-    /// PRF_keygen: Generate a WOTS+ secret key element.
+    /// PRF_keygen: Generate a WOTS+ secret key element per RFC 8702 / NIST
+    /// SP 800-208 §6.4: `H(toByte(4, padding_len) || SK.seed || PK.seed ||
+    /// ADRS)`. Distinct from `prf` (domain-separation byte 4 instead of 3,
+    /// and binds **both** seeds to prevent multi-target attacks on the
+    /// `SK.seed`-only construction).
     pub fn prf_keygen(&self, adrs: &XmssAdrs) -> Result<Vec<u8>, CryptoError> {
-        self.prf(&self.sk_seed, adrs)
+        let pad = to_byte(4, self.padding_len);
+        let mut input =
+            Vec::with_capacity(self.padding_len + self.sk_seed.len() + self.pk_seed.len() + 32);
+        input.extend_from_slice(&pad);
+        input.extend_from_slice(&self.sk_seed);
+        input.extend_from_slice(&self.pk_seed);
+        input.extend_from_slice(adrs.as_bytes());
+        core_hash(self.mode, &input, self.n)
     }
 
     /// F (ROBUST): F(KEY, M XOR BM)
@@ -157,22 +168,28 @@ impl XmssHasher {
         core_hash(self.mode, &input, n)
     }
 
-    /// PRF_msg: Generate randomness for signing.
-    pub fn prf_msg(&self, sk_prf: &[u8], idx: u64, msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    /// PRF_msg: Generate per-signature randomizer `R`.
+    ///
+    /// Per RFC 8391 §5.1: `R = PRF(SK.prf, toByte(idx, 32))`. The C
+    /// reference (openHiTLS `PrfmsgGeneric`) passes the 32-byte big-endian
+    /// `idx` directly (no message). An earlier version of this function
+    /// also XOR'd `msg` into the input, which made `R` message-dependent
+    /// and produced signatures incompatible with the openHiTLS C SDV
+    /// `SIGN_KAT_TC001` vectors; this construction now matches the
+    /// reference byte-exact.
+    ///
+    /// `msg` is kept in the signature so callers don't need to thread an
+    /// extra parameter through `sign`, but it is intentionally unused here.
+    pub fn prf_msg(&self, sk_prf: &[u8], idx: u64, _msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let n = self.n;
         let pad = to_byte(3, self.padding_len);
-        let idx_bytes = {
-            let mut buf = vec![0u8; 32];
-            let be = idx.to_be_bytes();
-            buf[24..32].copy_from_slice(&be);
-            buf
-        };
+        let mut idx_bytes = vec![0u8; 32];
+        idx_bytes[24..32].copy_from_slice(&idx.to_be_bytes());
 
-        let mut input = Vec::with_capacity(self.padding_len + 32 + sk_prf.len() + msg.len());
+        let mut input = Vec::with_capacity(self.padding_len + sk_prf.len() + 32);
         input.extend_from_slice(&pad);
         input.extend_from_slice(sk_prf);
         input.extend_from_slice(&idx_bytes);
-        input.extend_from_slice(msg);
         core_hash(self.mode, &input, n)
     }
 }
