@@ -62,6 +62,46 @@ impl Sm9MasterKey {
         })
     }
 
+    /// Construct an `Sm9MasterKey` from a caller-supplied 32-byte master
+    /// secret `ks`, mirroring `generate()` but with injected randomness.
+    /// The master public key is recomputed from `ks` via the same
+    /// `master_keygen` derivation (`ks * P2` for Sign / `ks * P1` for
+    /// Encrypt). The openHiTLS C SDV `SIGN_API_TC*` / `CRYPT_API_TC*` /
+    /// `CHECK_*_FUNC_TC*` tests publish a fixed `masterKey` per row and
+    /// drive their round-trip / structural assertions from it.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(
+        note = "test-only: caller-supplied master secret bypasses entropy source; use generate() in production"
+    )]
+    pub fn from_master_secret(
+        key_type: Sm9KeyType,
+        master_secret: &[u8],
+    ) -> Result<Self, CryptoError> {
+        if master_secret.len() != 32 {
+            return Err(CryptoError::InvalidKeyLength {
+                expected: 32,
+                got: master_secret.len(),
+            });
+        }
+        let ks = hitls_bignum::BigNum::from_bytes_be(master_secret);
+        let pub_key = match key_type {
+            Sm9KeyType::Sign => {
+                let p2 = ecp2::EcPointG2::generator();
+                p2.scalar_mul(&ks)?.to_bytes()?
+            }
+            Sm9KeyType::Encrypt => {
+                let p1 = ecp::EcPointG1::generator();
+                p1.scalar_mul(&ks)?.to_bytes()?
+            }
+        };
+        Ok(Self {
+            master_secret: master_secret.to_vec(),
+            master_public: pub_key,
+            key_type,
+        })
+    }
+
     /// Extract a user private key for the given identity.
     pub fn extract_user_key(&self, user_id: &[u8]) -> Result<Sm9UserKey, CryptoError> {
         let ks = hitls_bignum::BigNum::from_bytes_be(&self.master_secret);

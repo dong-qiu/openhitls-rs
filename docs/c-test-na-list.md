@@ -80,7 +80,8 @@ Counts are the `Generation summary` footer of each generated file
 | HPKE | 456 | 11 | 0 | 0 | 467 |
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
-| **Total** | **3098** | **3729** | **240** | **109** | **6442** |
+| SM9 | 7 | 31 | 0 | 0 | 38 |
+| **Total** | **3105** | **3760** | **240** | **109** | **6480** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -426,6 +427,33 @@ piece — without it, all 14 GENKEY rows + 14 SIGN-SUCCESS rows would
 have failed byte-exact (the 14 SIGN-rej KEY_EXPIRED rows pass with
 or without the fix because they exercise state-checking only).
 
+SM9 (T158) migrates the **round-trip** families from the three
+`test_suite_sdv_eal_sm9_*.data` files (no byte-exact KATs are
+present — the C SDV is almost entirely `*_API_TC*` ctx-CRUD and
+round-trip checks). Migrated families: **SIGN_API_TC001/TC002** (2
+sign+verify round-trips with negative wrong-message check),
+**CRYPT_API_TC001/TC002** (2 same-user encrypt+decrypt round-trips),
+**CRYPT_API_TC003** (cross-user encrypt to B + decrypt with B's
+key + negative cross-decrypt with A's key), **CHECK_KEYPAIR_FUNC_TC001**
+(derive two user keys from the same master + sign+verify both +
+negative cross-identity verify), **CHECK_PRVKEY_FUNC_TC001** (derive
+a single user key + sign+verify round-trip). 7 tests total; all
+passing first run. One new `kat-nonce`-gated public API added:
+`Sm9MasterKey::from_master_secret(key_type, master_secret_32)`
+reconstructs a master key from a fixed 32-byte `ks` (the SM9 C SDV
+publishes a fixed `masterKey` per row and drives all assertions from
+it), with the master public key recomputed via the same `ks * P2`
+(Sign) / `ks * P1` (Encrypt) derivation as `generate()`. SM9 row
+counts: the C SDV has a **header-row convention** (`SDV_X:argName1:
+argName2:...`) followed by a data row with quoted hex values; the
+emitter routes header rows (where `args.first().as_hex().is_none()`)
+to API-surface so they are counted but not migrated. The 31
+API-surface rows are: 15 header rows (one per TC family) + 14
+ctx-CRUD rows (`BUFFER_SIZE / NULL_PARAM / FREE / DUP / CMP / GET_* /
+SET_* / MULTI_OP / GEN_API / SIGN_API_TC001/TC002 isn't included here
+since it's migrated above`) + 2 `KEYEX_API` rows (`Sm9MasterKey` has
+no Rust key-exchange method — listed as a Structural Gap below).
+
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
 +60 sign KATs). The C injects the row's `seed` as the FIPS 204 hedging `rnd`
@@ -503,6 +531,7 @@ migration tool emit the corresponding tests with no generator change.
 | ~~XMSS reference-interop on keygen / sign~~ | ~~XMSS, XMSS-MT~~ | ~~42~~ | **Resolved in I146** (T156 diagnosis → root cause fix). Rust `xmss::hash::prf_keygen` used the RFC 8391 (original) `PRF` construction `H(toByte(3, plen) \|\| SK.seed \|\| ADRS)` instead of the **RFC 8702 / NIST SP 800-208 §6.4** `PRF_KEYGEN` construction `H(toByte(4, plen) \|\| SK.seed \|\| PK.seed \|\| ADRS)`. The missing `PK.seed` (multi-target hardening input) and the wrong domain-separation byte (4 vs 3) caused every WOTS+ secret key element to differ from C → every leaf differed → `compute_root` produced a different `PK.root`. Round-trip and the T155 VERIFY KAT survived because verify never calls `prf_keygen`. **Also fixed** `prf_msg`: removed a spurious `msg` parameter (C's `PrfmsgGeneric` is `H(toByte(3, plen) \|\| SK.prf \|\| toByte(idx, 32))` with no message dependency). | Resolved by I146; see DEV_LOG Phase I146 for the fix detail and the new `test_xmss_compute_root_kat_sha2_10_256` regression KAT pinned in `xmss/mod.rs`. The T156-deferred 42 SIGN+GENKEY rows can now be migrated as a follow-up phase (will land as `T157`). |
 | SM4 CBC / CTR / CFB / OFB / HCTR / XTS + GCM-decrypt | SM4 | 37 | CBC hardcodes PKCS#7 padding; CTR/CFB/OFB/HCTR/XTS have no public SM4 entry point; GCM-decrypt needs the 16-byte tag absent from the `.data` | add SM4 raw-mode public functions; a CBC no-padding helper |
 | SM2 key exchange | SM2 | 17 | `Sm2KeyPair` exposes no key-exchange method | add an SM2 ECDH / key-exchange API |
+| SM9 key exchange | SM9 | 2 | `Sm9MasterKey` exposes no key-exchange method (the C SDV `KEYEX_API_TC001/TC002` rows exercise the identity-based key-exchange protocol; the Rust impl covers only sign+verify and encrypt+decrypt) | add an SM9 key-exchange API per GB/T 38635 §4.4 |
 | HMAC/CMAC SHA-3 | HMAC, CMAC | 8 | SHA-3 is not yet wired into the `Digest` trait used by the MAC one-shot path; CMAC is also AES-only (`CRYPT_MAC_CMAC_SM4`) | implement the `Digest` impl for SHA-3; generalise `Cmac` over `BlockCipher` |
 | CRL parser leniency | X.509 CRL | 9 | Negative CRL-parse KATs (`res != HITLS_PKI_SUCCESS`) cannot be migrated: `CertificateRevocationList::from_pem` accepts structurally-malformed CRLs the C parser rejects, so `assert!(… .is_err())` does not hold. Only positive parse rows are emitted | tighten the Rust CRL DER decoder to reject the malformed inputs (version / signature-algorithm / tbs-shape checks) |
 | Hash-DRBG SHA-1 / SHA-224 / SM3 | DRBG | 3 | `HashDrbgType` is SHA-256/384/512 only | add SHA-1 / SHA-224 / SM3 variants to `HashDrbgType` |
