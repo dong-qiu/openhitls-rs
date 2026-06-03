@@ -10263,3 +10263,115 @@ SM4-HCTR (4 rows, unverified C SDV data) + SM4-GCM-decrypt
 3190/3760/240/9/6480.
 
 Recorded as DEV_LOG Phase I157.
+
+## I158 — SM9 key exchange (GB/T 38635 §4.4) (2026-06-04)
+
+> 请继续完成I158
+
+I158 adds the SM9 key-exchange algorithm in pure Rust, closing the
+T158-recorded SM9 Structural Gap (2 KEYEX_API_TC* SDV rows that
+previously had no Rust counterpart).
+
+GB/T 38635 §4.4 / GM/T 0044.3-2016 is a pairing-based two-party
+identity-based key agreement built on the SM9 encryption master
+key. The KGC publishes Ppub_enc on G1 and issues dA / dB on G2
+(same key layout as SM9 encryption, not signature). Both parties
+agree on a shared symmetric key of caller-chosen klen.
+
+Implementation — three private primitives in a new sub-module
+crates/hitls-crypto/src/sm9/key_exchange.rs:
+
+  key_exchange_init_a(peer_id, r_a, mpk) -> (BigNum, [u8; 64])
+    Computes Q_peer = H1(ID_peer || HID_enc)*P1 + Ppub on G1,
+    then RA = [rA]*Q_peer on G1. Returns the reduced scalar +
+    the 64-byte serialised G1 point.
+
+  key_exchange_init_b(peer_id, r_b, mpk) -> (BigNum, [u8; 64])
+    Symmetric: returns rB and RB = [rB]*QA.
+
+  key_exchange_confirm_a(IDA, IDB, rA, RA, RB, dA, mpk, klen)
+    g1 = e(Ppub, P2)^rA
+    g2 = e(RB, dA)
+    g3 = g2^rA
+    inner_hash = SM3(g2 || g3 || IDA || IDB || RA || RB)
+    SK = KDF(g1 || inner_hash, klen)
+    SA = SM3(0x82 || g1 || inner_hash)
+
+  key_exchange_confirm_b(IDA, IDB, rB, RA, RB, dB, mpk, klen)
+    g1 = e(RA, dB)
+    g2 = e(Ppub, P2)^rB
+    g3 = g1^rB
+    Same inner_hash and SK formulas (slot order is fixed regardless
+    of which side computes it). SB = SM3(0x83 || g1 || inner_hash).
+
+The shared finalise step is factored into a private confirm_finalise
+helper so the two roles can't drift.
+
+  verify_side_tag(g1_bytes, inner_hash, expected_tag, peer_s) -> bool
+    Constant-time check via subtle::ConstantTimeEq.
+
+The pairing identity e(Ppub_enc, P2) = e(QX, dX) = e(P1, P2)^ks
+makes A's and B's (g1, g2, g3) tuples identical, so SK_A == SK_B
+and the side tags cross-verify.
+
+One-shot helper — pub(crate) fn compute_share_key:
+
+  compute_share_key(self_id, self_user_key, peer_id, peer_user_key,
+                    mpk, klen) -> Result<Vec<u8>>
+
+Runs both halves locally with deterministic nonces seeded from the
+two user IDs:
+
+  rA = SM3(id_init || id_resp || 'A')
+  rB = SM3(id_init || id_resp || 'B')
+
+The initiator is whichever side has the lex-smaller ID. Refuses
+self-exchange (same ID) and klen == 0. Mirrors openHiTLS C's
+CRYPT_SM9_ComputeShareKey EAL wrapper — the exact shape the T158
+SDV row consumes (it asserts SK_A == SK_B by calling the wrapper
+from each side and comparing).
+
+Public API — one new Sm9MasterKey method:
+
+  pub fn compute_share_key(&self, self_user_key: &Sm9UserKey,
+                           peer_user_key: &Sm9UserKey,
+                           klen: usize) -> Result<Vec<u8>>
+
+Enforces key_type == Encrypt on all three keys (returns
+InvalidArg("") otherwise — SM9 key exchange is unrelated to the
+signing system) and delegates to key_exchange::compute_share_key.
+The lower-level 3-phase primitives are kept module-private for
+now; a follow-up phase can re-expose them when a real two-party
+network agreement is needed.
+
+Verification — 6 new lib tests in key_exchange::tests:
+
+  test_sm9_key_exchange_roundtrip_default_klen          (klen=32)
+  test_sm9_key_exchange_long_klen_crosses_sm3_boundary  (klen=63, SK_Long)
+  test_sm9_key_exchange_short_klen                      (klen=15, SK_Short)
+  test_sm9_key_exchange_self_rejected
+  test_sm9_key_exchange_zero_klen_rejected
+  test_sm9_key_exchange_three_phase_with_side_tags
+    — drives init_a/b + confirm_a/b directly with fixed nonces,
+      asserts SK_A == SK_B, re-derives (g1, inner_hash) from A's
+      view and runs verify_side_tag against both S_A and S_B,
+      then flips a byte and asserts the tampered tag is rejected.
+
+cargo test -p hitls-crypto --features sm9 key_exchange: 6/0.
+cargo test -p hitls-crypto --all-features: 4483/0 (no regression;
+prior 4477 + 6 new).
+cargo fmt --all --check clean.
+RUSTFLAGS="-D warnings" cargo clippy -p hitls-crypto --all-features
+--all-targets clean (initial pass needed doc_overindented_list_items
+indent fix + needless_question_mark + one doc_lazy_continuation
+indent in a test docstring).
+
+Production impact: additive default-feature public method on
+Sm9MasterKey + one new private sub-module. No ABI break.
+
+na-list / tally: production change only, migration tally unchanged
+at 3190/3760/240/9/6480. The 2 T158-recorded KEYEX_API_TC* SDV
+rows can be replayed through Sm9MasterKey::compute_share_key in
+a follow-up T-phase.
+
+Recorded as DEV_LOG Phase I158.
